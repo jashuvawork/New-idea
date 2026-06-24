@@ -26,6 +26,7 @@ async def deployment_status():
             "paperTrading": settings.paper_trading,
             "simpleProfitMode": settings.paper_simple_profit_mode,
             "dualStrategyEnabled": settings.paper_dual_strategy_enabled,
+            "explosionCaptureMode": settings.explosion_capture_mode,
             "enhancedMode": True,
             "shadowTradeAllSignals": settings.shadow_trade_all_signals,
             "backgroundMonitor": settings.background_market_monitor_enabled,
