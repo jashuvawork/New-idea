@@ -13,6 +13,7 @@ import { RiskEngine } from './components/RiskEngine';
 import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
 import { TradeJournal, NewsPanel } from './components/TradeJournal';
+import { StrategyMatrix } from './components/StrategyMatrix';
 
 const SYMBOLS = ['NIFTY', 'SENSEX', 'BANKNIFTY'] as const;
 
@@ -116,11 +117,12 @@ export default function App() {
             <div className="col-span-2"><RiskEngine auto={auto} /></div>
 
             {/* Row 3 — Depth */}
-            <div className="col-span-4"><OptionHeatmap snap={snap} /></div>
-            <div className="col-span-3"><TradeJournal data={data} /></div>
+            <div className="col-span-3"><OptionHeatmap snap={snap} /></div>
+            <div className="col-span-3"><StrategyMatrix snap={snap} /></div>
+            <div className="col-span-2"><TradeJournal data={data} /></div>
             <div className="col-span-2"><NewsPanel news={data.news} /></div>
-            <div className="col-span-1.5"><LiveTradingGate status={deployment} /></div>
-            <div className="col-span-1.5"><MorningChecklist /></div>
+            <div className="col-span-1"><LiveTradingGate status={deployment} /></div>
+            <div className="col-span-1"><MorningChecklist /></div>
           </div>
         )}
 

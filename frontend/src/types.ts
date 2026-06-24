@@ -27,6 +27,27 @@ export interface SymbolSnapshot {
   explosiveRunnerWatchlist: RunnerWatchItem[];
   suggestedTrades: SuggestedTrade[];
   optimizedProfile: OptimizedProfile;
+  strategyMatrix?: StrategyMatrixEntry[];
+  mlInsights?: MLInsights;
+  pcr?: number;
+  maxPain?: number;
+}
+
+export interface StrategyMatrixEntry {
+  id: string;
+  name: string;
+  status: string;
+  confidence: number;
+  mlProbability: number;
+  preferredSession?: string[];
+  sessionMatch?: boolean;
+}
+
+export interface MLInsights {
+  featureImportance?: Record<string, number>;
+  modelTrained?: boolean;
+  activeStrategies?: number;
+  topStrategy?: StrategyMatrixEntry;
 }
 
 export interface HeatmapStrike {

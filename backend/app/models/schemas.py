@@ -130,6 +130,10 @@ class SymbolSnapshot(BaseModel):
     explosiveRunnerWatchlist: list[dict[str, Any]] = []
     suggestedTrades: list[SuggestedTrade] = []
     optimizedProfile: OptimizedProfile = Field(default_factory=OptimizedProfile)
+    strategyMatrix: list[dict[str, Any]] = []
+    mlInsights: dict[str, Any] = {}
+    pcr: float = 1.0
+    maxPain: float = 0
 
 
 class PaperTrade(BaseModel):

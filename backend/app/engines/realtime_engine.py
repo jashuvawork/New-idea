@@ -28,6 +28,9 @@ from app.models.schemas import (
     SymbolSnapshot,
 )
 from app.engines.simple_profit import get_session_targets
+from app.engines.strategy_orchestrator import run_all_strategies, signals_to_suggested_trades
+from app.engines.strategies.base import compute_max_pain, compute_pcr
+from app.engines.ml_engine import get_ml_engine
 from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase, get_nearest_expiry
 
 logger = logging.getLogger(__name__)
@@ -323,7 +326,31 @@ async def build_symbol_snapshot(
         )
 
         session_profile = get_session_targets()
-        suggestions = _build_suggestions(symbol, spot, atm, tqs, runner, breadth, session_profile)
+        pcr = compute_pcr(chain)
+        max_pain = compute_max_pain(chain)
+
+        # Run all 10 AI/ML strategies
+        strategy_signals, strategy_matrix = run_all_strategies(
+            symbol, spot, atm, chain, orderflow, greeks, breadth,
+            profile, regime, heatmap, tqs,
+        )
+        ml_suggestions = signals_to_suggested_trades(strategy_signals, tqs)
+
+        # Merge with runner-based suggestions (dedupe by side+strike)
+        runner_suggestions = _build_suggestions(symbol, spot, atm, tqs, runner, breadth, session_profile)
+        seen = {(s.side, s.strike) for s in ml_suggestions}
+        for rs in runner_suggestions:
+            if (rs.side, rs.strike) not in seen:
+                ml_suggestions.append(rs)
+                seen.add((rs.side, rs.strike))
+
+        ml = get_ml_engine()
+        ml_insights = {
+            "featureImportance": ml.get_feature_importance(),
+            "modelTrained": ml._trained,
+            "activeStrategies": sum(1 for m in strategy_matrix if m.get("status") == "active"),
+            "topStrategy": strategy_matrix[0] if strategy_matrix else None,
+        }
 
         return SymbolSnapshot(
             symbol=symbol,
@@ -341,8 +368,12 @@ async def build_symbol_snapshot(
             breadth=breadth,
             explosiveRunner=runner,
             explosiveRunnerWatchlist=watchlist,
-            suggestedTrades=suggestions,
+            suggestedTrades=ml_suggestions[:5],
             optimizedProfile=session_profile,
+            strategyMatrix=strategy_matrix,
+            mlInsights=ml_insights,
+            pcr=round(pcr, 3),
+            maxPain=max_pain,
         )
 
     except UpstoxError as e:
