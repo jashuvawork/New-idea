@@ -1,0 +1,66 @@
+"""NexusQuant configuration — all settings from environment."""
+
+from functools import lru_cache
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # App
+    app_name: str = "NexusQuant"
+    environment: str = "development"
+    commit_sha: str = "dev"
+
+    # Upstox
+    upstox_api_key: str = ""
+    upstox_api_secret: str = ""
+    upstox_redirect_uri: str = "http://localhost:8000/api/upstox/callback"
+
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
+
+    # Postgres (optional)
+    postgres_url: str = ""
+
+    # News
+    news_provider: Literal["finnhub", "none"] = "finnhub"
+    finnhub_api_key: str = ""
+
+    # Safety
+    enable_live_trading: bool = False
+    paper_trading: bool = True
+    shadow_trade_all_signals: bool = True
+
+    # Data cadence
+    market_poll_seconds: int = 3
+    snapshot_cache_seconds: int = 3
+    background_market_monitor_enabled: bool = True
+
+    # Trading mode
+    paper_simple_profit_mode: bool = True
+    paper_dual_strategy_enabled: bool = False
+
+    # Enhanced scalping (more powerful than base spec)
+    enhanced_micro_target_points: float = 2.5  # faster micro lock vs 3.0 base
+    enhanced_velocity_threshold: float = 1.8  # lower bar for quick scalps
+    enhanced_tqs_entry: int = 68  # vs 72 base — more opportunities
+    adaptive_target_enabled: bool = True
+    tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
+
+    # Capital / risk defaults
+    default_capital_inr: float = 500_000
+    max_risk_per_trade_inr: float = 12_000
+    emergency_stop_inr: float = 18_000
+    simple_max_lots: int = 14
+    simple_target_lots: int = 10
+    simple_min_lots: int = 6
+
+    symbols: list[str] = ["NIFTY", "SENSEX", "BANKNIFTY"]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
