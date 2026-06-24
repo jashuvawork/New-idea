@@ -14,6 +14,7 @@ import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
 import { TradeJournal, NewsPanel } from './components/TradeJournal';
 import { StrategyMatrix } from './components/StrategyMatrix';
+import { ExplosionRadar } from './components/ExplosionRadar';
 
 const SYMBOLS = ['NIFTY', 'SENSEX', 'BANKNIFTY'] as const;
 
@@ -106,6 +107,7 @@ export default function App() {
             {/* Row 1 — Primary execution */}
             <div className="col-span-3"><ExecutionHUD snap={snap} auto={auto} /></div>
             <div className="col-span-3"><ExplosiveRunner snap={snap} /></div>
+            <div className="col-span-3"><ExplosionRadar snap={snap} /></div>
             <div className="col-span-3"><StrategyRouter snap={snap} /></div>
             <div className="col-span-3"><PaperTrading auto={auto} /></div>
 
@@ -129,7 +131,7 @@ export default function App() {
         {/* Footer status bar */}
         <footer className="mt-4 pt-3 border-t border-nexus-border flex justify-between text-[10px] text-nexus-muted">
           <span>
-            Poll: 3s · Mode: Enhanced Simple Profit · Micro lock: 2.5pt · TQS entry: 68 · Vel: 1.8%
+            Poll: 3s · Mode: Explosion Capture · Targets: 12–25pt · Trail from +5pt
           </span>
           <span>
             {data?.timestamp ? `Last update: ${new Date(data.timestamp).toLocaleTimeString('en-IN')}` : ''}

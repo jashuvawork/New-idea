@@ -16,6 +16,7 @@ from app.engines.strategies.max_pain import MaxPainMagnet
 from app.engines.strategies.oi_shift import OIShiftMomentum
 from app.engines.strategies.opening_drive import OpeningDriveScalp
 from app.engines.strategies.pcr_reversal import PCRReversalScalp
+from app.engines.strategies.premium_explosion import PremiumExplosion
 from app.engines.strategies.vwap_bounce import VwapBounceScalp
 from app.models.schemas import (
     Breadth,
@@ -31,7 +32,10 @@ from app.models.schemas import (
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 
+_premium_explosion = PremiumExplosion()
+
 ALL_STRATEGIES = [
+    _premium_explosion,  # #1 priority — daily chart moments
     OpeningDriveScalp(),
     VwapBounceScalp(),
     OIShiftMomentum(),
@@ -69,11 +73,16 @@ def run_all_strategies(
     regime: Regime,
     heatmap: list,
     tqs: float,
+    explosion_events: Optional[list] = None,
 ) -> tuple[list[StrategySignal], list[dict[str, Any]]]:
     """Evaluate all strategies, ML-rank, return top signals + strategy matrix."""
     session = _get_session()
     ml = get_ml_engine()
     pcr = compute_pcr(chain)
+
+    # Inject explosion events into premium explosion strategy
+    if explosion_events:
+        _premium_explosion.set_events(explosion_events)
 
     context = {
         "tqs": tqs,
@@ -109,10 +118,12 @@ def run_all_strategies(
                 features = ml.extract_features(signal, context)
                 ml_prob = ml.predict_win_probability(features)
                 signal.ml_score = ml_prob
-                # Combined score: strategy confidence + ML probability
                 combined = signal.confidence * 0.5 + ml_prob * 100 * 0.5
+                # Explosion strategy gets priority boost
+                if strategy.id == "premium_explosion":
+                    combined = min(99, combined + 15)
                 signal.confidence = min(99, combined)
-                if combined >= 55:
+                if combined >= 50:
                     signals.append(signal)
                 conf = signal.confidence
 

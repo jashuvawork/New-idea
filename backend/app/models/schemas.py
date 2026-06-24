@@ -134,6 +134,8 @@ class SymbolSnapshot(BaseModel):
     mlInsights: dict[str, Any] = {}
     pcr: float = 1.0
     maxPain: float = 0
+    explosionAlerts: list[dict[str, Any]] = []
+    topExplosion: Optional[dict[str, Any]] = None
 
 
 class PaperTrade(BaseModel):

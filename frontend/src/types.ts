@@ -31,6 +31,23 @@ export interface SymbolSnapshot {
   mlInsights?: MLInsights;
   pcr?: number;
   maxPain?: number;
+  explosionAlerts?: ExplosionAlert[];
+  topExplosion?: ExplosionAlert;
+}
+
+export interface ExplosionAlert {
+  symbol: string;
+  side: string;
+  strike: number;
+  premium: number;
+  velocity3s: number;
+  velocity9s: number;
+  velocity15s: number;
+  volumeSurge: number;
+  explosionScore: number;
+  tier: string;
+  reason: string;
+  tradeable: boolean;
 }
 
 export interface StrategyMatrixEntry {
