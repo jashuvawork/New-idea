@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { DeploymentStatus, MultiSnapshot } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+// Production: always use same-origin /api (Vercel rewrites → EC2 backend)
+// Dev: vite proxy handles /api → localhost:8000
+const API_BASE = import.meta.env.DEV
+  ? ''
+  : (import.meta.env.VITE_API_URL || '');
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 3000);
 
 export function useMarketStream() {
