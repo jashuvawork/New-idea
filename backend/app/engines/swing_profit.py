@@ -26,16 +26,20 @@ def check_swing_entry(
     return True, "passed"
 
 
-def compute_swing_lots(confidence: float) -> int:
+def compute_swing_lots(confidence: float, symbol: str = "NIFTY", premium: float = 50.0) -> int:
+    from app.engines.capital_allocator import compute_lots
+    from app.models.schemas import StrategyType
+
     settings = get_settings()
-    if confidence >= 82:
-        lots = settings.swing_target_lots
-    elif confidence >= 72:
-        lots = (settings.swing_min_lots + settings.swing_target_lots) // 2
-    else:
-        lots = settings.swing_min_lots
-    from app.engines.capital_allocator import clamp_lots
-    return clamp_lots(lots)
+    tqs_boost = 72.0 if confidence >= 72 else 65.0
+    return compute_lots(
+        symbol,
+        premium,
+        stop_points=8.0,
+        tqs=tqs_boost,
+        strategy_type=StrategyType.SWING,
+        confidence=confidence,
+    )
 
 
 def evaluate_swing_exit(

@@ -180,28 +180,54 @@ async def refresh_lot_sizes(client, force: bool = False) -> dict[str, int]:
     return get_lot_sizes()
 
 
-def clamp_lots(lots: int) -> int:
-    """Clamp lot count to configured analysis band (default 25–100)."""
+def _effective_capital_inr(available: float) -> float:
+    """Cap sizing book at configured max (e.g. ₹2L) for realistic live deployment."""
     settings = get_settings()
-    min_l = settings.min_lots_per_trade or settings.simple_min_lots
-    max_l = settings.max_lots_per_trade or settings.simple_max_lots
-    return max(min_l, min(lots, max_l))
+    cap = settings.max_sizing_capital_inr or settings.fallback_capital_inr
+    if cap > 0:
+        return min(available, cap)
+    return available
+
+
+def max_lots_for_capital(symbol: str, premium: float) -> int:
+    """Max lots affordably on 85% of sizing capital for this premium."""
+    cap = get_capital_snapshot()
+    settings = get_settings()
+    mult = lot_multiplier(symbol)
+    if premium <= 0 or mult <= 0:
+        return 1
+    budget = cap.perTradeCapitalInr
+    if budget <= 0:
+        budget = _effective_capital_inr(cap.availableMarginInr) * settings.per_trade_capital_pct
+    return max(1, int(budget / (premium * mult)))
+
+
+def clamp_lots(lots: int, symbol: str = "", premium: float = 0.0) -> int:
+    """Clamp to min lots and capital-derived max (optional hard ceiling)."""
+    settings = get_settings()
+    min_l = max(1, settings.min_lots_per_trade or settings.simple_min_lots or 1)
+    if symbol and premium > 0:
+        cap_max = max_lots_for_capital(symbol, premium)
+    elif settings.max_lots_per_trade > 0:
+        cap_max = settings.max_lots_per_trade
+    else:
+        cap_max = lots
+    hard = settings.max_lots_per_trade
+    if hard > 0:
+        cap_max = min(cap_max, hard)
+    return max(min_l, min(lots, cap_max))
 
 
 def _lot_tiers(capital_inr: float) -> tuple[int, int, int]:
-    """Lot bands for UI — scaled within 25–100 by available margin."""
+    """Lot bands for UI — derived from capital, not fixed 100-lot ceiling."""
     settings = get_settings()
-    min_l = settings.simple_min_lots
-    max_l = settings.simple_max_lots
-    if capital_inr >= 2_000_000:
-        tgt = min(max_l, 85)
-    elif capital_inr >= 1_000_000:
-        tgt = 75
-    elif capital_inr >= 500_000:
-        tgt = settings.simple_target_lots
-    else:
-        tgt = max(min_l, settings.simple_target_lots - 10)
-    return min_l, tgt, max_l
+    min_l = max(1, settings.simple_min_lots or 1)
+    ref_premium = 45.0
+    ref_mult = lot_multiplier("NIFTY")
+    budget = capital_inr * settings.per_trade_capital_pct
+    cap_max = max(1, int(budget / (ref_premium * ref_mult))) if ref_mult else 50
+    tgt = max(min_l, int(cap_max * 0.75))
+    return min_l, tgt, cap_max
 
 
 def _parse_upstox_funds(data: dict[str, Any]) -> tuple[float, float, float]:
@@ -237,10 +263,13 @@ async def refresh_capital_from_upstox(client) -> CapitalSnapshot:
             available = total - used
         if available <= 0:
             raise ValueError("zero margin from Upstox")
+        available = _effective_capital_inr(available)
+        total = min(total, available) if total > 0 else available
         source = "upstox"
     except Exception as e:
         logger.warning("Upstox capital fetch failed, using fallback: %s", e)
         available = settings.fallback_capital_inr
+        available = _effective_capital_inr(available)
         used = 0.0
         total = available
         source = "fallback"
@@ -300,7 +329,7 @@ def compute_session_pnl(state: AutoTraderState) -> float:
 
 
 def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
-    """₹2L target + ₹20K trail from session peak — blocks new entries when hit."""
+    """₹44K target + trail from session peak — blocks new entries when hit."""
     global _best_pnl, _session_date
     settings = get_settings()
     today = datetime.now(IST).strftime("%Y-%m-%d")
@@ -355,8 +384,8 @@ def compute_lots(
     tier: Optional[str] = None,
 ) -> int:
     """
-    Lots from 66% of Upstox margin, per-index contract size from Upstox lot_size.
-    lots = floor(trade_capital / (premium × lot_multiplier[symbol]))
+    Lots from 85% of sizing capital: floor(budget / (premium × lot_multiplier)).
+    No fixed 100-lot cap — max is whatever 85% margin affords.
     """
     cap = get_capital_snapshot()
     settings = get_settings()
@@ -367,7 +396,7 @@ def compute_lots(
 
     trade_budget = cap.perTradeCapitalInr
     if trade_budget <= 0:
-        trade_budget = cap.availableMarginInr * settings.per_trade_capital_pct
+        trade_budget = _effective_capital_inr(cap.availableMarginInr) * settings.per_trade_capital_pct
 
     margin_per_lot = premium * mult
     if margin_per_lot <= 0:
@@ -376,13 +405,12 @@ def compute_lots(
     lots = int(trade_budget / margin_per_lot)
 
     if settings.aggressive_lot_sizing:
-        return clamp_lots(max(1, lots))
+        return clamp_lots(max(1, lots), symbol, premium)
 
-    # Legacy conservative scaling (if aggressive disabled)
     risk_per_lot = stop_points * mult
     lots_by_risk = int(cap.perTradeRiskInr / risk_per_lot) if risk_per_lot > 0 else lots
-    lots = min(lots, lots_by_risk, cap.maxLots)
-    return clamp_lots(max(settings.simple_min_lots, lots))
+    lots = min(lots, lots_by_risk, max_lots_for_capital(symbol, premium))
+    return clamp_lots(max(settings.simple_min_lots, lots), symbol, premium)
 
 
 def tune_exit_plan_for_position(
@@ -391,7 +419,7 @@ def tune_exit_plan_for_position(
     premium: float,
     symbol: str,
 ) -> dict[str, Any]:
-    """Tune TP/SL for huge lot positions — INR risk caps on 66% trade capital."""
+    """Tune TP/SL for position — INR risk caps on 85% trade capital."""
     settings = get_settings()
     cap = get_capital_snapshot()
     mult = lot_multiplier(symbol)
