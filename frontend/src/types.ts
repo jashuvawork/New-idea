@@ -257,6 +257,7 @@ export interface CapitalAllocation {
   totalEquityInr: number;
   source: string;
   perTradeRiskInr: number;
+  perTradeCapitalInr: number;
   maxExposureInr: number;
   minLots: number;
   targetLots: number;

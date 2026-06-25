@@ -26,6 +26,7 @@ class CapitalSnapshot:
     totalEquityInr: float = 500_000.0
     source: str = "fallback"
     perTradeRiskInr: float = 12_000.0
+    perTradeCapitalInr: float = 250_000.0
     maxExposureInr: float = 175_000.0
     minLots: int = 6
     targetLots: int = 10
@@ -39,6 +40,7 @@ class CapitalSnapshot:
             "totalEquityInr": round(self.totalEquityInr, 2),
             "source": self.source,
             "perTradeRiskInr": round(self.perTradeRiskInr, 2),
+            "perTradeCapitalInr": round(self.perTradeCapitalInr, 2),
             "maxExposureInr": round(self.maxExposureInr, 2),
             "minLots": self.minLots,
             "targetLots": self.targetLots,
@@ -141,11 +143,9 @@ async def refresh_capital_from_upstox(client) -> CapitalSnapshot:
         source = "fallback"
 
     min_l, tgt_l, max_l = _lot_tiers(available)
-    per_trade = min(
-        settings.max_risk_per_trade_inr,
-        max(settings.min_per_trade_risk_inr, available * settings.per_trade_risk_pct),
-    )
-    max_exposure = available * settings.max_exposure_pct
+    per_trade_capital = available * settings.per_trade_capital_pct
+    per_trade = per_trade_capital
+    max_exposure = per_trade_capital
 
     snap = CapitalSnapshot(
         availableMarginInr=available,
@@ -153,6 +153,7 @@ async def refresh_capital_from_upstox(client) -> CapitalSnapshot:
         totalEquityInr=total or available,
         source=source,
         perTradeRiskInr=per_trade,
+        perTradeCapitalInr=per_trade_capital,
         maxExposureInr=max_exposure,
         minLots=min_l,
         targetLots=tgt_l,
@@ -174,8 +175,9 @@ def get_capital_snapshot() -> CapitalSnapshot:
         availableMarginInr=settings.fallback_capital_inr,
         totalEquityInr=settings.fallback_capital_inr,
         source="fallback",
-        perTradeRiskInr=settings.max_risk_per_trade_inr,
-        maxExposureInr=settings.fallback_capital_inr * settings.max_exposure_pct,
+        perTradeRiskInr=settings.fallback_capital_inr * settings.per_trade_capital_pct,
+        perTradeCapitalInr=settings.fallback_capital_inr * settings.per_trade_capital_pct,
+        maxExposureInr=settings.fallback_capital_inr * settings.per_trade_capital_pct,
         minLots=min_l,
         targetLots=tgt_l,
         maxLots=max_l,
@@ -249,52 +251,84 @@ def compute_lots(
     tier: Optional[str] = None,
 ) -> int:
     """
-    Realistic lots from Upstox margin:
-    - Risk budget = per_trade_risk_inr (2% of margin, capped)
-    - Margin cap = max_exposure / (premium × lot_multiplier)
-    - TQS / strategy tier scales within min/target/max band
+    Max lots from 50% of Upstox available margin per trade.
+    lots = floor(trade_capital / (premium × lot_multiplier))
     """
     cap = get_capital_snapshot()
     settings = get_settings()
     mult = lot_multiplier(symbol)
 
-    if premium <= 0 or stop_points <= 0:
-        return cap.minLots
+    if premium <= 0:
+        return 1
 
-    risk_per_lot = stop_points * mult
-    lots_by_risk = int(cap.perTradeRiskInr / risk_per_lot) if risk_per_lot > 0 else cap.minLots
+    trade_budget = cap.perTradeCapitalInr
+    if trade_budget <= 0:
+        trade_budget = cap.availableMarginInr * settings.per_trade_capital_pct
 
     margin_per_lot = premium * mult
-    lots_by_margin = int(cap.maxExposureInr / margin_per_lot) if margin_per_lot > 0 else cap.maxLots
+    if margin_per_lot <= 0:
+        return 1
 
-    base = min(lots_by_risk, lots_by_margin, cap.maxLots)
-    base = max(1, base)
+    lots = int(trade_budget / margin_per_lot)
+    lots = max(1, lots)
 
-    # Quality / strategy scaling within tier band
-    if strategy_type == StrategyType.SWING:
-        scale = 0.55 + (confidence / 100) * 0.25
-    elif strategy_type == StrategyType.EXPLOSIVE:
-        if tier == "ELITE":
-            scale = 1.0
-        elif tier == "EXPLODING":
-            scale = 0.88
-        else:
-            scale = 0.75
-    else:
-        if tqs >= 85:
-            scale = 1.0
-        elif tqs >= 75:
-            scale = 0.9
-        elif tqs >= 68:
-            scale = 0.8
-        else:
-            scale = 0.7
+    if settings.max_lots_per_trade > 0:
+        lots = min(lots, settings.max_lots_per_trade)
 
-    lots = int(base * scale)
-    lots = max(cap.minLots, min(cap.maxLots, lots))
+    if settings.aggressive_lot_sizing:
+        return lots
 
-    # Hard per-trade INR stop cap
-    max_by_stop = int(settings.max_risk_per_trade_inr / risk_per_lot)
-    lots = min(lots, max(1, max_by_stop))
-
+    # Legacy conservative scaling (if aggressive disabled)
+    risk_per_lot = stop_points * mult
+    lots_by_risk = int(cap.perTradeRiskInr / risk_per_lot) if risk_per_lot > 0 else lots
+    lots = min(lots, lots_by_risk, cap.maxLots)
     return max(1, lots)
+
+
+def tune_exit_plan_for_position(
+    plan_dict: dict[str, Any],
+    lots: int,
+    premium: float,
+    symbol: str,
+) -> dict[str, Any]:
+    """Tune TP/SL for huge lot positions — INR risk caps on 50% trade capital."""
+    settings = get_settings()
+    cap = get_capital_snapshot()
+    mult = lot_multiplier(symbol)
+    trade_budget = cap.perTradeCapitalInr or (cap.availableMarginInr * settings.per_trade_capital_pct)
+    units = lots * mult
+    if units <= 0 or premium <= 0:
+        return plan_dict
+
+    position_inr = premium * units
+    reasoning = list(plan_dict.get("reasoning") or [])
+
+    if plan_dict.get("targetPct"):
+        return plan_dict
+
+    max_sl_inr = trade_budget * settings.position_sl_cap_pct
+    sl_pts_cap = max_sl_inr / units
+    target_inr = trade_budget * settings.position_tp_target_pct
+    tp_pts_floor = target_inr / units
+
+    stop = min(float(plan_dict.get("stopPoints", 3.0)), max(1.5, sl_pts_cap))
+    target = max(float(plan_dict.get("targetPoints", 6.0)), min(30.0, tp_pts_floor))
+    micro = min(float(plan_dict.get("microTargetPoints", 2.5)), stop * 0.6)
+    trail_arm = max(float(plan_dict.get("trailArmPoints", 3.0)), target * 0.45)
+
+    reasoning.append(
+        f"Size tune: {lots} lots · ₹{position_inr:,.0f} notional · SL ≤₹{max_sl_inr:,.0f} ({stop:.1f}pt)"
+    )
+    reasoning.append(f"TP target ~₹{target_inr:,.0f} ({target:.1f}pt) on 50% capital")
+
+    return {
+        **plan_dict,
+        "stopPoints": round(stop, 2),
+        "targetPoints": round(target, 2),
+        "microTargetPoints": round(micro, 2),
+        "trailArmPoints": round(trail_arm, 2),
+        "lots": lots,
+        "positionInr": round(position_inr, 2),
+        "tradeBudgetInr": round(trade_budget, 2),
+        "reasoning": reasoning,
+    }

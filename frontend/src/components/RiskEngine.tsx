@@ -23,8 +23,8 @@ export function RiskEngine({ auto }: { auto: AutoTraderState }) {
           </span>
         </div>
         <div className="flex justify-between text-[9px] text-nexus-muted">
-          <span>Lots band {cap.minLots}–{cap.maxLots} · {cap.source}</span>
-          <span>Risk/trade ₹{(cap.perTradeRiskInr || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+          <span>50% cap/trade · ₹{((cap.perTradeCapitalInr as number) || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+          <span>Max lots from margin</span>
         </div>
       </div>
 

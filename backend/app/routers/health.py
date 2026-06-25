@@ -41,6 +41,8 @@ async def deployment_status():
             "dailyProfitTargetInr": settings.daily_profit_target_inr,
             "dailyProfitTrailInr": settings.daily_profit_trail_inr,
             "useUpstoxCapital": settings.use_upstox_capital_for_sizing,
+            "perTradeCapitalPct": settings.per_trade_capital_pct,
+            "aggressiveLotSizing": settings.aggressive_lot_sizing,
             "enhancedMode": True,
             "shadowTradeAllSignals": settings.shadow_trade_all_signals,
             "backgroundMonitor": settings.background_market_monitor_enabled,

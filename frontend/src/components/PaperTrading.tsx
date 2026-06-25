@@ -25,6 +25,7 @@ export function PaperTrading({ auto }: { auto: AutoTraderState }) {
         <div className="space-y-1.5 max-h-32 overflow-y-auto">
           {auto.openPaperTrades.map((t) => {
             const plan = t.entryContext?.exitPlan as Record<string, number> | undefined;
+            const selScore = t.entryContext?.selectionScore as number | undefined;
             const sl = plan?.stopPct
               ? `−${plan.stopPct}%`
               : plan?.stopPoints
@@ -45,17 +46,16 @@ export function PaperTrading({ auto }: { auto: AutoTraderState }) {
                     {t.pnlPoints >= 0 ? '+' : ''}{t.pnlPoints.toFixed(1)}pt / ₹{t.pnlInr.toFixed(0)}
                   </span>
                 </div>
-                {(sl || tp) && (
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[9px] text-nexus-muted font-mono">
-                    {sl && <span>SL {sl}</span>}
-                    {tp && <span>TP {tp}</span>}
-                    {plan?.trailArmPoints != null && (
-                      <span className="text-nexus-accent">
-                        Trail @{plan.trailArmPoints}pt / {((plan.trailKeepRatio ?? 0.55) * 100).toFixed(0)}%
-                      </span>
-                    )}
-                  </div>
-                )}
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[9px] text-nexus-muted font-mono">
+                  {selScore != null && <span>score {selScore.toFixed(0)}</span>}
+                  {sl && <span>SL {sl}</span>}
+                  {tp && <span>TP {tp}</span>}
+                  {plan?.trailArmPoints != null && (
+                    <span className="text-nexus-accent">
+                      Trail @{plan.trailArmPoints}pt / {((plan.trailKeepRatio ?? 0.55) * 100).toFixed(0)}%
+                    </span>
+                  )}
+                </div>
               </div>
             );
           })}

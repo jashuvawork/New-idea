@@ -9,16 +9,9 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.engines.daily_profit_strategy import DailyCalibration
 from app.engines.ai_learning import get_ai_learning
-from app.engines.dual_strategy import filter_dual_candidates
 from app.engines.risk_engine import RiskEngine
-from app.engines.explosion_profit import (
-    check_explosion_entry,
-    evaluate_explosion_exit,
-)
-from app.engines.swing_profit import (
-    check_swing_entry,
-    evaluate_swing_exit,
-)
+from app.engines.explosion_profit import evaluate_explosion_exit
+from app.engines.swing_profit import evaluate_swing_exit
 from app.engines.adaptive_exits import (
     AdaptiveExitPlan,
     compute_adaptive_exit_plan,
@@ -26,27 +19,25 @@ from app.engines.adaptive_exits import (
     evaluate_adaptive_scalp_exit,
     evaluate_adaptive_swing_exit,
 )
-from app.engines.swing_engine import SwingSetup
 from app.engines.capital_allocator import (
     compute_lots,
     compute_session_pnl,
     get_capital_snapshot,
     lot_multiplier,
     refresh_capital_from_upstox,
+    tune_exit_plan_for_position,
     update_daily_profit_gate,
 )
+from app.engines.trade_selector import EntryCandidate, find_best_entry
 from app.engines.simple_profit import (
-    check_entry_gate,
     evaluate_exit,
     get_session_targets,
 )
 from app.models.schemas import (
     AutoTraderState,
-    MultiSnapshot,
     PaperTrade,
     Side,
     StrategyType,
-    SuggestedTrade,
     SymbolSnapshot,
     TradeMastermind,
 )
@@ -75,7 +66,10 @@ async def refresh_trading_capital(client) -> None:
     from app.models.schemas import RiskProfile
     profile = _risk_engine.profile
     profile.maxExposureInr = snap.maxExposureInr
+    profile.maxOpenTrades = settings.aggressive_max_open_scalps if settings.aggressive_lot_sizing else profile.maxOpenTrades
     _risk_engine.set_profile(profile)
+
+
 _state_loaded: bool = False
 
 
@@ -144,6 +138,93 @@ def _attach_exit_plan(
         snap, strategy_type, psychology, profile, side=side, confidence=confidence, news=news,
     )
     return plan.to_dict()
+
+
+def _open_from_candidate(
+    candidate: EntryCandidate,
+    state: AutoTraderState,
+    news: Optional[list[dict]] = None,
+) -> tuple[bool, str]:
+    """Open one paper trade from best-ranked setup — max lots on 50% capital."""
+    symbol = candidate.symbol
+    snap = candidate.snap
+    profile = snap.optimizedProfile or get_session_targets()
+    stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
+
+    lots = compute_lots(
+        symbol, candidate.premium, stop_pts,
+        tqs=candidate.tqs,
+        strategy_type=candidate.strategy_type,
+        confidence=candidate.confidence,
+        tier=candidate.tier,
+    )
+    lot_mult = lot_multiplier(symbol)
+
+    ok, risk_reason = _risk_engine.check_new_entry(
+        state, symbol, candidate.side, lots, candidate.premium, lot_mult,
+        strategy_type=candidate.strategy_type,
+    )
+    if not ok:
+        return False, risk_reason
+
+    exit_plan = _attach_exit_plan(
+        snap, candidate.strategy_type, candidate.side.value,
+        candidate.confidence, news,
+    )
+    exit_plan = tune_exit_plan_for_position(exit_plan, lots, candidate.premium, symbol)
+
+    paper = PaperTrade(
+        id=str(uuid.uuid4())[:8],
+        symbol=symbol,
+        side=candidate.side,
+        strike=candidate.strike,
+        entryPremium=candidate.premium,
+        currentPremium=candidate.premium,
+        lots=lots,
+        openedAt=datetime.now(IST),
+        strategyType=candidate.strategy_type,
+        sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
+    )
+
+    ctx_extra: dict[str, Any] = {
+        "selectionScore": round(candidate.score, 2),
+        "selectionMode": candidate.mode,
+        "lots": lots,
+        "tradeBudgetInr": exit_plan.get("tradeBudgetInr"),
+        "exitPlan": exit_plan,
+    }
+    if candidate.mode == "explosion" and candidate.explosion_event:
+        ev = candidate.explosion_event
+        ctx_extra.update({
+            "explosionTier": ev.tier,
+            "velocity3s": ev.velocity_3s,
+            "explosionScore": ev.explosion_score,
+        })
+    elif candidate.mode == "scalp" and candidate.suggestion:
+        ctx_extra.update({
+            "tqs": candidate.suggestion.tqs,
+            "confidence": candidate.suggestion.confidence,
+        })
+    elif candidate.mode == "swing" and candidate.alert:
+        ctx_extra.update({
+            "swingType": candidate.alert.get("swingType"),
+            "confidence": candidate.confidence,
+            "targetPct": candidate.alert.get("targetPct"),
+            "stopPct": candidate.alert.get("stopPct"),
+            "maxHoldDays": candidate.alert.get("maxHoldDays"),
+            "reason": candidate.swing_setup.reason if candidate.swing_setup else "",
+        })
+
+    ctx = _build_context(snap, ctx_extra)
+    paper.entryContext = ctx
+    state.openPaperTrades.append(paper)
+    trade_store.record_trade_opened(paper, ctx)
+    logger.info(
+        "BEST %s trade: %s %s %s @ %.2f ×%d lots (score %.1f, 50%% cap)",
+        candidate.mode, symbol, candidate.side.value, candidate.strike,
+        candidate.premium, lots, candidate.score,
+    )
+    return True, "opened"
 
 
 def get_state() -> AutoTraderState:
@@ -294,251 +375,18 @@ def process(
             "message": profit_gate.message,
         })
 
-    # Try new entries — only during live session (not pre-open auction)
+    # Try new entries — best setup only, max lots on 50% Upstox margin
     if state.running and market_live and profit_gate.newEntriesAllowed:
-        for symbol, snap in snapshots.items():
-            if not snap.dataAvailable:
-                continue
-
-            entered = False
-
-            # EXPLOSION CAPTURE — primary mode for daily chart moments
-            if settings.explosion_capture_mode and snap.explosionAlerts:
-                for alert in snap.explosionAlerts:
-                    if not alert.get("tradeable"):
-                        continue
-
-                    from app.engines.explosion_detector import ExplosionEvent
-                    from app.models.schemas import Side as SideEnum
-
-                    event = ExplosionEvent(
-                        symbol=symbol,
-                        side=SideEnum(alert["side"]),
-                        strike=alert["strike"],
-                        premium=alert["premium"],
-                        velocity_3s=alert.get("velocity3s", 0),
-                        velocity_9s=alert.get("velocity9s", 0),
-                        velocity_15s=alert.get("velocity15s", 0),
-                        volume_surge=alert.get("volumeSurge", 1),
-                        explosion_score=alert.get("explosionScore", 0),
-                        tier=alert.get("tier", "WATCH"),
-                        reason=alert.get("reason", ""),
-                    )
-
-                    suggestion = SuggestedTrade(
-                        id=alert.get("id", str(uuid.uuid4())[:8]),
-                        symbol=symbol,
-                        side=event.side,
-                        strike=event.strike,
-                        lastPremium=event.premium,
-                        tqs=snap.tradeQualityScore,
-                        strategyType=StrategyType.EXPLOSIVE,
-                        confidence=event.explosion_score,
-                    )
-
-                    blocked = state.calibrationBlocks.get(event.side.value, False)
-                    passed, reason = check_explosion_entry(event, suggestion, snap.breadth, blocked)
-                    if not passed:
-                        skipped.append({"symbol": symbol, "reason": reason, "strike": event.strike})
-                        continue
-
-                    profile = snap.optimizedProfile or get_session_targets()
-                    stop_pts = profile.stopPoints
-                    lots = compute_lots(
-                        symbol, event.premium, stop_pts,
-                        tqs=snap.tradeQualityScore,
-                        strategy_type=StrategyType.EXPLOSIVE,
-                        confidence=event.explosion_score,
-                        tier=event.tier,
-                    )
-                    lot_mult = lot_multiplier(symbol)
-                    ok, risk_reason = _risk_engine.check_new_entry(
-                        state, symbol, event.side, lots, event.premium, lot_mult
-                    )
-                    if not ok:
-                        skipped.append({"symbol": symbol, "reason": risk_reason, "strike": event.strike})
-                        continue
-
-                    paper = PaperTrade(
-                        id=str(uuid.uuid4())[:8],
-                        symbol=symbol,
-                        side=event.side,
-                        strike=event.strike,
-                        entryPremium=event.premium,
-                        currentPremium=event.premium,
-                        lots=lots,
-                        openedAt=datetime.now(IST),
-                        strategyType=StrategyType.EXPLOSIVE,
-                        sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
-                    )
-                    ctx = _build_context(snap, {
-                        "explosionTier": event.tier,
-                        "velocity3s": event.velocity_3s,
-                        "explosionScore": event.explosion_score,
-                        "exitPlan": _attach_exit_plan(
-                            snap, StrategyType.EXPLOSIVE, event.side.value,
-                            event.explosion_score, news,
-                        ),
-                    })
-                    paper.entryContext = ctx
-                    state.openPaperTrades.append(paper)
-                    trade_store.record_trade_opened(paper, ctx)
-                    logger.info(
-                        "EXPLOSION trade opened: %s %s %s @ %.2f tier=%s vel=%.1f%%",
-                        symbol, event.side.value, event.strike, event.premium,
-                        event.tier, event.velocity_3s,
-                    )
-                    entered = True
-                    break
-
-            # Fallback: simple profit mode for non-explosion signals
-            if not entered and settings.paper_simple_profit_mode:
-                for suggestion in snap.suggestedTrades:
-                    if suggestion.strategyType == StrategyType.EXPLOSIVE:
-                        continue  # already handled above
-                    if not suggestion.lastPremium or suggestion.lastPremium <= 0:
-                        skipped.append({"symbol": symbol, "reason": "missing_premium", "trade": suggestion.id})
-                        continue
-
-                    blocked = state.calibrationBlocks.get(suggestion.side.value, False)
-                    momentum = (snap.orderflow.volumeAcceleration or 0) > 60
-                    override = snap.explosiveRunner.candidate and (snap.explosiveRunner.score or 0) >= 80
-
-                    passed, reason = check_entry_gate(
-                        suggestion,
-                        snap.breadth,
-                        snap.tradeQualityScore,
-                        suggestion.runnerSignal.premiumVelocityPct if suggestion.runnerSignal else 0,
-                        blocked,
-                        momentum_surge=momentum,
-                        alignment_override=override,
-                    )
-
-                    if not passed:
-                        skipped.append({"symbol": symbol, "reason": reason, "trade": suggestion.id})
-                        continue
-
-                    profile = snap.optimizedProfile or get_session_targets()
-                    lots = compute_lots(
-                        symbol, suggestion.lastPremium, profile.stopPoints,
-                        tqs=suggestion.tqs,
-                        strategy_type=suggestion.strategyType,
-                        confidence=suggestion.confidence,
-                    )
-                    lot_mult = lot_multiplier(symbol)
-                    ok, risk_reason = _risk_engine.check_new_entry(
-                        state, symbol, suggestion.side, lots, suggestion.lastPremium, lot_mult
-                    )
-                    if not ok:
-                        skipped.append({"symbol": symbol, "reason": risk_reason, "trade": suggestion.id})
-                        _risk_engine.record_rejection(risk_reason, {"symbol": symbol, "side": suggestion.side.value})
-                        continue
-
-                    paper = PaperTrade(
-                        id=str(uuid.uuid4())[:8],
-                        symbol=symbol,
-                        side=suggestion.side,
-                        strike=suggestion.strike,
-                        entryPremium=suggestion.lastPremium,
-                        currentPremium=suggestion.lastPremium,
-                        lots=lots,
-                        openedAt=datetime.now(IST),
-                        strategyType=suggestion.strategyType,
-                        sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
-                    )
-                    ctx = _build_context(snap, {
-                        "tqs": suggestion.tqs,
-                        "confidence": suggestion.confidence,
-                        "exitPlan": _attach_exit_plan(
-                            snap, suggestion.strategyType, suggestion.side.value,
-                            suggestion.confidence, news,
-                        ),
-                    })
-                    paper.entryContext = ctx
-                    state.openPaperTrades.append(paper)
-                    trade_store.record_trade_opened(paper, ctx)
-                    logger.info(
-                        "Paper trade opened: %s %s %s @ %.2f lots=%d",
-                        symbol, suggestion.side.value, suggestion.strike,
-                        suggestion.lastPremium, lots,
-                    )
-                    break
-
-            # SWING — multi-day paper holds (separate from scalp lane)
-            if settings.swing_trading_enabled and snap.swingAlerts:
-                swing_open_keys = {
-                    (t.symbol, t.side.value)
-                    for t in state.openPaperTrades
-                    if t.strategyType == StrategyType.SWING
-                }
-                for alert in snap.swingAlerts:
-                    if not alert.get("tradeable"):
-                        continue
-                    setup = SwingSetup(
-                        symbol=symbol,
-                        side=Side(alert["side"]),
-                        strike=alert["strike"],
-                        premium=alert["premium"],
-                        swingType=alert.get("swingType", "swing"),
-                        confidence=alert.get("confidence", 0),
-                        reason=alert.get("reason", ""),
-                        metadata=alert.get("metadata", {}),
-                    )
-                    blocked = state.calibrationBlocks.get(setup.side.value, False)
-                    passed, reason = check_swing_entry(setup, swing_open_keys, blocked)
-                    if not passed:
-                        skipped.append({"symbol": symbol, "reason": reason, "mode": "swing"})
-                        continue
-
-                    profile = snap.optimizedProfile or get_session_targets()
-                    lots = compute_lots(
-                        symbol, setup.premium, 8.0,
-                        strategy_type=StrategyType.SWING,
-                        confidence=setup.confidence,
-                    )
-                    lot_mult = lot_multiplier(symbol)
-                    ok, risk_reason = _risk_engine.check_new_entry(
-                        state, symbol, setup.side, lots, setup.premium, lot_mult,
-                        strategy_type=StrategyType.SWING,
-                    )
-                    if not ok:
-                        skipped.append({"symbol": symbol, "reason": risk_reason, "mode": "swing"})
-                        continue
-
-                    paper = PaperTrade(
-                        id=str(uuid.uuid4())[:8],
-                        symbol=symbol,
-                        side=setup.side,
-                        strike=setup.strike,
-                        entryPremium=setup.premium,
-                        currentPremium=setup.premium,
-                        lots=lots,
-                        openedAt=datetime.now(IST),
-                        strategyType=StrategyType.SWING,
-                        sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
-                    )
-                    ctx = _build_context(snap, {
-                        "swingType": setup.swingType,
-                        "confidence": setup.confidence,
-                        "targetPct": alert.get("targetPct"),
-                        "stopPct": alert.get("stopPct"),
-                        "maxHoldDays": alert.get("maxHoldDays"),
-                        "reason": setup.reason,
-                        "exitPlan": _attach_exit_plan(
-                            snap, StrategyType.SWING, setup.side.value,
-                            setup.confidence, news,
-                        ),
-                    })
-                    paper.entryContext = ctx
-                    state.openPaperTrades.append(paper)
-                    trade_store.record_trade_opened(paper, ctx)
-                    swing_open_keys.add((symbol, setup.side.value))
-                    logger.info(
-                        "SWING trade opened: %s %s %s @ %.2f type=%s hold≤%dd",
-                        symbol, setup.side.value, setup.strike, setup.premium,
-                        setup.swingType, alert.get("maxHoldDays", 5),
-                    )
-                    break
+        best = find_best_entry(snapshots, state)
+        if best:
+            opened, reason = _open_from_candidate(best, state, news)
+            if not opened:
+                skipped.append({
+                    "symbol": best.symbol,
+                    "reason": reason,
+                    "mode": best.mode,
+                    "score": best.score,
+                })
 
     state.skipped = skipped
     state.dailyReport = _calibration.build_report(state.closedPaperTrades)
