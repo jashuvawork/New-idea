@@ -66,11 +66,26 @@ class Settings(BaseSettings):
     simple_target_lots: int = 10
     simple_min_lots: int = 6
 
+    adaptive_exits_enabled: bool = True
+    ml_exit_tuning_enabled: bool = True
+
     symbols: list[str] = ["NIFTY", "SENSEX", "BANKNIFTY"]
 
     # Persistence
     trade_store_dir: str = "/tmp/nexusquant/trades"
     daily_token_once: bool = True
+
+    # Swing trading (multi-day paper holds)
+    swing_trading_enabled: bool = True
+    swing_max_hold_days: int = 5
+    swing_target_pct: float = 30.0
+    swing_stop_pct: float = 12.0
+    swing_trail_arm_pct: float = 20.0
+    swing_trail_keep: float = 0.70
+    swing_min_lots: int = 4
+    swing_target_lots: int = 8
+    swing_max_open: int = 2
+    swing_max_loss_inr: float = 25_000
 
 
 @lru_cache

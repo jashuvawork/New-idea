@@ -56,20 +56,22 @@ export function BiasBadge({ bias }: { bias: string }) {
   );
 }
 
-export function WaitingState({ reason }: { reason?: string }) {
+export function WaitingState({ reason, showConnect = true }: { reason?: string; showConnect?: boolean }) {
   return (
-    <div className="flex flex-col items-center justify-center h-64 text-center">
-      <div className="w-12 h-12 border-2 border-nexus-accent border-t-transparent rounded-full animate-spin mb-4" />
-      <p className="text-nexus-accent font-semibold text-lg">Waiting for real Upstox data</p>
-      <p className="text-nexus-muted text-sm mt-2 max-w-md">
-        {reason || 'No dummy prices — authenticate Upstox to begin'}
+    <div className="flex flex-col items-center justify-center h-56 text-center rounded-lg border border-nexus-border bg-nexus-panel/50">
+      <div className="w-10 h-10 border-2 border-nexus-accent border-t-transparent rounded-full animate-spin mb-4" />
+      <p className="text-white font-semibold text-base">Waiting for live market data</p>
+      <p className="text-nexus-muted text-sm mt-2 max-w-md px-4">
+        {reason || 'Connect Upstox once per day to load real prices'}
       </p>
-      <a
-        href="/api/upstox/login"
-        className="mt-4 px-4 py-2 bg-nexus-accent text-black font-bold rounded text-sm hover:opacity-90"
-      >
-        Connect Upstox
-      </a>
+      {showConnect && (
+        <a
+          href="/api/upstox/login"
+          className="mt-4 px-5 py-2.5 bg-nexus-accent text-black font-bold rounded text-sm hover:opacity-90"
+        >
+          Connect Upstox
+        </a>
+      )}
     </div>
   );
 }

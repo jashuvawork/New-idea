@@ -194,6 +194,14 @@ def get_all_closed_trades(limit: int = 200) -> list[dict[str, Any]]:
 
 
 def load_open_trades() -> list[dict[str, Any]]:
-    """Restore open trades from today's file after restart."""
-    data = _load_day(_today())
-    return [t for t in data.get("trades", []) if t.get("status") == "OPEN"]
+    """Restore open trades from all day files (supports multi-day swing holds)."""
+    open_by_id: dict[str, dict[str, Any]] = {}
+    for path in sorted(get_store_dir().glob("*.json")):
+        try:
+            data = json.loads(path.read_text())
+            for t in data.get("trades", []):
+                if t.get("status") == "OPEN":
+                    open_by_id[t["id"]] = t
+        except Exception:
+            continue
+    return list(open_by_id.values())

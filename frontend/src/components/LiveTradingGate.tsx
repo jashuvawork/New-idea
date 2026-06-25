@@ -5,17 +5,17 @@ export function LiveTradingGate({ status }: { status: DeploymentStatus | null })
   if (!status) return <Panel title="Live Trading Gate"><p className="text-xs text-nexus-muted">Loading...</p></Panel>;
 
   const checks = [
-    { label: 'Upstox Token', ok: status.upstox.hasToken },
-    { label: 'Valid Today', ok: status.upstox.validToday },
-    { label: 'Paper Trading', ok: status.flags.paperTrading as boolean },
-    { label: 'Live Trading', ok: status.flags.enableLiveTrading as boolean },
-    { label: 'Enhanced Mode', ok: status.flags.enhancedMode as boolean },
-    { label: 'Background Monitor', ok: status.flags.backgroundMonitor as boolean },
-    { label: 'Simple Profit', ok: status.flags.simpleProfitMode as boolean },
+    { label: 'Broker connected today', ok: status.upstox.validToday },
+    { label: 'Token stored', ok: status.upstox.hasToken },
+    { label: 'Paper mode', ok: status.flags.paperTrading as boolean },
+    { label: 'Live trading', ok: status.flags.enableLiveTrading as boolean },
+    { label: 'Enhanced mode', ok: status.flags.enhancedMode as boolean },
+    { label: 'Auto monitor', ok: status.flags.backgroundMonitor as boolean },
+    { label: 'Simple profit', ok: status.flags.simpleProfitMode as boolean },
   ];
 
   return (
-    <Panel title="Live Trading Gate">
+    <Panel title="System Status">
       <div className="space-y-1.5">
         {checks.map((c) => (
           <div key={c.label} className="flex justify-between text-[11px]">
@@ -44,27 +44,45 @@ export function LiveTradingGate({ status }: { status: DeploymentStatus | null })
   );
 }
 
-export function MorningChecklist() {
+export function MorningChecklist({
+  deployment,
+  dataReady,
+}: {
+  deployment?: import('../types').DeploymentStatus | null;
+  dataReady?: boolean;
+}) {
   const steps = [
-    'Authenticate Upstox once per IST trading day via /api/upstox/login',
-    'Verify /health returns status: ok',
-    'Confirm snapshots show real LTP (not waiting state)',
-    'Check TQS > 68 and breadth alignment',
-    'Set capital via POST /api/capital',
-    'Enable background monitor for unattended paper trades',
-    'Review calibration blocks before session',
+    { label: 'Connect Upstox (once per IST day)', done: deployment?.upstox.validToday },
+    { label: 'Server online', done: Boolean(deployment) },
+    { label: 'Live prices loading', done: Boolean(dataReady) },
+    { label: 'Paper trading active', done: deployment?.flags.paperTrading as boolean },
+    { label: 'Background monitor on', done: deployment?.flags.backgroundMonitor as boolean },
   ];
 
   return (
-    <Panel title="Morning Checklist">
-      <ol className="space-y-1.5">
-        {steps.map((s, i) => (
-          <li key={i} className="flex gap-2 text-[11px]">
-            <span className="text-nexus-accent font-bold">{i + 1}.</span>
-            <span className="text-gray-300">{s}</span>
+    <Panel title="Quick Start">
+      <ul className="space-y-2">
+        {steps.map((s) => (
+          <li key={s.label} className="flex items-center gap-2 text-[11px]">
+            <span
+              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
+                s.done ? 'bg-nexus-green text-black' : 'bg-gray-700 text-gray-400'
+              }`}
+            >
+              {s.done ? '✓' : '·'}
+            </span>
+            <span className={s.done ? 'text-gray-300' : 'text-nexus-muted'}>{s.label}</span>
           </li>
         ))}
-      </ol>
+      </ul>
+      {deployment && !deployment.upstox.validToday && (
+        <a
+          href="/api/upstox/login"
+          className="mt-3 block text-center rounded bg-nexus-accent/90 px-2 py-1.5 text-[10px] font-bold text-black hover:opacity-90"
+        >
+          Login to Upstox
+        </a>
+      )}
     </Panel>
   );
 }

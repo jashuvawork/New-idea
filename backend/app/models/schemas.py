@@ -30,6 +30,7 @@ class StrategyType(str, Enum):
     SCALP = "SCALP"
     EXPLOSIVE = "EXPLOSIVE"
     DUAL_SCALP = "DUAL_SCALP"
+    SWING = "SWING"
 
 
 class HeatmapStrike(BaseModel):
@@ -72,6 +73,35 @@ class Breadth(BaseModel):
     score: float = 50
     bias: str = "NEUTRAL"
     aligned: bool = False
+
+
+class ConstituentTile(BaseModel):
+    symbol: str
+    name: str
+    weight: float
+    ltp: float
+    changePct: float
+    open: float = 0
+    high: float = 0
+    low: float = 0
+    vwap: float = 0
+    volume: float = 0
+
+
+class ConstituentHeatmap(BaseModel):
+    symbol: str
+    indexLabel: str = ""
+    timestamp: Optional[datetime] = None
+    dataAvailable: bool = False
+    error: Optional[str] = None
+    stockCount: int = 0
+    advancing: int = 0
+    declining: int = 0
+    unchanged: int = 0
+    breadthPct: float = 50.0
+    bias: str = "NEUTRAL"
+    analysis: str = ""
+    tiles: list[ConstituentTile] = []
 
 
 class RunnerSignal(BaseModel):
@@ -136,6 +166,11 @@ class SymbolSnapshot(BaseModel):
     maxPain: float = 0
     explosionAlerts: list[dict[str, Any]] = []
     topExplosion: Optional[dict[str, Any]] = None
+    swingAlerts: list[dict[str, Any]] = []
+    topSwing: Optional[dict[str, Any]] = None
+    constituentHeatmap: Optional[ConstituentHeatmap] = None
+    psychology: dict[str, Any] = {}
+    adaptiveExitHint: dict[str, Any] = {}
 
 
 class PaperTrade(BaseModel):
@@ -171,6 +206,7 @@ class DailyReport(BaseModel):
 class TradeMastermind(BaseModel):
     simpleProfitMode: bool = True
     dualStrategyEnabled: bool = False
+    swingTradingEnabled: bool = True
     simpleMaxLots: int = 14
     simpleTargetLots: int = 10
     simpleMinLots: int = 6

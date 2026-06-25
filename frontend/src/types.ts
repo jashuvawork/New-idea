@@ -1,3 +1,12 @@
+export interface StreamMetrics {
+  lastLatencyMs: number;
+  avgLatencyMs: number;
+  lastUpdatedAt: Date | null;
+  stalenessMs: number;
+  pollIntervalMs: number;
+  connectionQuality: 'excellent' | 'good' | 'slow' | 'offline';
+}
+
 export interface MultiSnapshot {
   type: string;
   timestamp: string;
@@ -33,6 +42,55 @@ export interface SymbolSnapshot {
   maxPain?: number;
   explosionAlerts?: ExplosionAlert[];
   topExplosion?: ExplosionAlert;
+  swingAlerts?: SwingAlert[];
+  topSwing?: SwingAlert;
+  constituentHeatmap?: ConstituentHeatmap | null;
+  psychology?: Record<string, unknown>;
+  adaptiveExitHint?: Record<string, unknown>;
+}
+
+export interface ConstituentTile {
+  symbol: string;
+  name: string;
+  weight: number;
+  ltp: number;
+  changePct: number;
+  open: number;
+  high: number;
+  low: number;
+  vwap: number;
+  volume: number;
+}
+
+export interface ConstituentHeatmap {
+  symbol: string;
+  indexLabel: string;
+  timestamp?: string;
+  dataAvailable: boolean;
+  error?: string;
+  stockCount: number;
+  advancing: number;
+  declining: number;
+  unchanged: number;
+  breadthPct: number;
+  bias: string;
+  analysis: string;
+  tiles: ConstituentTile[];
+}
+
+export interface SwingAlert {
+  symbol: string;
+  side: string;
+  strike: number;
+  premium: number;
+  swingType: string;
+  confidence: number;
+  reason: string;
+  targetPct: number;
+  stopPct: number;
+  maxHoldDays: number;
+  tradeable: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ExplosionAlert {
@@ -234,6 +292,7 @@ export interface DailyReport {
 export interface TradeMastermind {
   simpleProfitMode: boolean;
   dualStrategyEnabled: boolean;
+  swingTradingEnabled?: boolean;
   simpleMaxLots: number;
   simpleTargetLots: number;
   simpleMinLots: number;

@@ -11,7 +11,10 @@ from fastapi import APIRouter
 from app.config import get_settings
 from app.engines.auto_trader import get_state, process
 from app.engines.realtime_engine import build_symbol_snapshot
-from app.models.schemas import MultiSnapshot
+from app.engines.psychology_engine import analyze_psychology, psychology_to_dict
+from app.engines.adaptive_exits import compute_adaptive_exit_plan
+from app.models.schemas import MultiSnapshot, StrategyType
+from app.services.finnhub import aggregate_sentiment
 from app.services.finnhub import fetch_market_news
 from app.services.redis_store import has_upstox_token
 from app.services.upstox import UpstoxClient
@@ -65,7 +68,19 @@ async def _build_multi_snapshot() -> MultiSnapshot:
         errors = [s.error for s in snapshots.values() if s.error]
         waiting_reason = errors[0] if errors else "Waiting for real Upstox data"
 
-    auto_state = process(snapshots) if data_ready else get_state()
+    news_sentiment_agg = aggregate_sentiment(news)
+    for sym, snap in snapshots.items():
+        if not snap.dataAvailable:
+            continue
+        ps = analyze_psychology(snap, news)
+        snap.psychology = psychology_to_dict(ps)
+        hint = compute_adaptive_exit_plan(
+            snap, StrategyType.SCALP, ps, snap.optimizedProfile, confidence=snap.tradeQualityScore, news=news,
+        )
+        snap.adaptiveExitHint = hint.to_dict()
+        snap.psychology["newsAggregate"] = news_sentiment_agg
+
+    auto_state = process(snapshots, news=news) if data_ready else get_state()
 
     return MultiSnapshot(
         timestamp=now,
@@ -92,3 +107,19 @@ async def get_snapshots():
     _cache = snapshot
     _cache_time = now
     return snapshot
+
+
+@router.get("/constituents/{symbol}")
+async def get_constituent_heatmap(symbol: str):
+    """NIFTY/SENSEX/BANKNIFTY constituent heatmap with breadth analysis."""
+    if not await has_upstox_token():
+        return {
+            "dataAvailable": False,
+            "error": "Upstox not authenticated",
+            "symbol": symbol.upper(),
+        }
+    from app.engines.constituent_engine import build_constituent_heatmap
+
+    client = UpstoxClient()
+    hm = await build_constituent_heatmap(symbol.upper(), client, force_refresh=True)
+    return hm.model_dump(mode="json")

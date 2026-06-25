@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse, HTMLResponse
 
+from app.config import get_settings
 from app.services.redis_store import store_upstox_token
 from app.services.token_manager import (
     can_generate_token_today,
@@ -81,3 +82,28 @@ async def upstox_status():
 async def daily_token_info():
     """Explicit daily token status endpoint."""
     return await get_daily_token_status()
+
+
+@router.get("/setup")
+async def upstox_setup():
+    """Exact values to register in Upstox Developer Console."""
+    settings = get_settings()
+    client = UpstoxClient()
+    return {
+        "portal": "https://account.upstox.com/developer/apps",
+        "clientId": settings.upstox_api_key,
+        "redirectUri": settings.upstox_redirect_uri,
+        "loginUrl": client.get_login_url(),
+        "instructions": [
+            "Open Upstox Developer Console → your app → Edit",
+            "Copy API Key — must match clientId above exactly",
+            "Set Redirect URI — must match redirectUri above exactly (no trailing slash)",
+            "Save app, then login via /api/upstox/login once per IST day",
+        ],
+        "commonMistakes": [
+            "Using api.jashuvatrade.xyz instead of www.jashuvatrade.xyz",
+            "Trailing slash: .../callback/ vs .../callback",
+            "http instead of https",
+            "Wrong API key from a different Upstox app",
+        ],
+    }

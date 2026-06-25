@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from app.config import get_settings
-from app.models.schemas import AutoTraderState, PaperTrade, RiskProfile, Side
+from app.models.schemas import AutoTraderState, PaperTrade, RiskProfile, Side, StrategyType
 
 
 class RiskEngine:
@@ -34,6 +34,7 @@ class RiskEngine:
         lots: int,
         premium: float,
         lot_multiplier: int = 25,
+        strategy_type: StrategyType = StrategyType.SCALP,
     ) -> tuple[bool, str]:
         settings = get_settings()
 
@@ -44,14 +45,20 @@ class RiskEngine:
             return False, "auto_trader_stopped"
 
         open_trades = state.openPaperTrades
-        if len(open_trades) >= self.profile.maxOpenTrades:
-            return False, "max_open_trades"
+        is_swing = strategy_type == StrategyType.SWING
 
-        # Calibration block
+        if is_swing:
+            swing_open = sum(1 for t in open_trades if t.strategyType == StrategyType.SWING)
+            if swing_open >= settings.swing_max_open:
+                return False, "swing_max_open"
+        else:
+            scalp_open = sum(1 for t in open_trades if t.strategyType != StrategyType.SWING)
+            if scalp_open >= self.profile.maxOpenTrades:
+                return False, "max_open_trades"
+
         if state.calibrationBlocks.get(side.value, False):
             return False, f"calibration_block_{side.value}"
 
-        # Exposure check
         exposure = sum(
             (t.currentPremium or t.entryPremium) * t.lots * lot_multiplier
             for t in open_trades
@@ -60,18 +67,18 @@ class RiskEngine:
         if exposure + new_exposure > self.profile.maxExposureInr:
             return False, "max_exposure_exceeded"
 
-        # Per-trade risk cap
-        max_loss = settings.max_risk_per_trade_inr
-        potential_loss = profile_stop_points(lots, lot_multiplier)
+        max_loss = settings.swing_max_loss_inr if is_swing else settings.max_risk_per_trade_inr
+        stop_pts = 8.0 if is_swing else 3.0
+        potential_loss = profile_stop_points(lots, lot_multiplier, stop_pts)
         if potential_loss > max_loss:
             return False, "per_trade_risk_exceeded"
 
-        # Explosive lane cap
-        explosive_open = sum(
-            1 for t in open_trades if t.strategyType.value == "EXPLOSIVE"
-        )
-        if explosive_open >= 1:
-            return False, "explosive_lane_cap"
+        if not is_swing:
+            explosive_open = sum(
+                1 for t in open_trades if t.strategyType == StrategyType.EXPLOSIVE
+            )
+            if explosive_open >= 1:
+                return False, "explosive_lane_cap"
 
         return True, "passed"
 
