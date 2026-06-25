@@ -28,7 +28,7 @@ from app.engines.capital_allocator import (
     tune_exit_plan_for_position,
     update_daily_profit_gate,
 )
-from app.engines.trade_selector import EntryCandidate, find_best_entry
+from app.engines.trade_selector import EntryCandidate, diagnose_missed_entries, find_best_entry
 from app.engines.simple_profit import (
     evaluate_exit,
     get_session_targets,
@@ -481,6 +481,8 @@ async def process(
                     "mode": best.mode,
                     "score": best.score,
                 })
+        else:
+            skipped.extend(diagnose_missed_entries(snapshots, state))
 
     state.skipped = skipped
     state.dailyReport = _calibration.build_report(state.closedPaperTrades)

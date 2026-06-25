@@ -71,8 +71,8 @@ class Settings(BaseSettings):
 
     # Enhanced scalping (more powerful than base spec)
     enhanced_micro_target_points: float = 2.5  # faster micro lock vs 3.0 base
-    enhanced_velocity_threshold: float = 1.8  # lower bar for quick scalps
-    enhanced_tqs_entry: int = 68  # vs 72 base — more opportunities
+    enhanced_velocity_threshold: float = 1.2  # allow strategy signals without runner history
+    enhanced_tqs_entry: int = 50  # aligned with paper analysis band
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
@@ -80,9 +80,9 @@ class Settings(BaseSettings):
     fallback_capital_inr: float = 500_000
     per_trade_capital_pct: float = 0.50
     aggressive_lot_sizing: bool = True
-    aggressive_min_tqs: int = 78
-    aggressive_min_explosion_score: int = 70
-    aggressive_min_swing_confidence: int = 72
+    aggressive_min_tqs: int = 50
+    aggressive_min_explosion_score: int = 45
+    aggressive_min_swing_confidence: int = 65
     aggressive_max_open_scalps: int = 1
     max_lots_per_trade: int = 100
     min_lots_per_trade: int = 25

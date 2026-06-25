@@ -71,23 +71,27 @@ def check_entry_gate(
     if not premium_in_band(trade.lastPremium):
         return False, premium_reject_reason(trade.lastPremium)
 
-    if velocity_pct < settings.enhanced_velocity_threshold:
+    min_score = settings.aggressive_min_tqs if settings.aggressive_lot_sizing else settings.enhanced_tqs_entry
+    trade_score = max(trade.tqs, trade.confidence or 0)
+
+    # Strategy signals may lack runner velocity — use confidence as fallback
+    effective_vel = velocity_pct
+    if effective_vel < settings.enhanced_velocity_threshold and trade_score >= min_score:
+        effective_vel = settings.enhanced_velocity_threshold
+
+    if effective_vel < settings.enhanced_velocity_threshold:
         return False, f"velocity_below_{settings.enhanced_velocity_threshold}pct"
 
-    min_score = settings.enhanced_tqs_entry
-    if trade.tqs < min_score and trade.runnerSignal and trade.runnerSignal.score < min_score:
-        return False, f"tqs_below_{min_score}"
+    if trade_score < min_score:
+        return False, f"score_below_{min_score}"
 
-    if tqs < min_score:
-        return False, f"tqs_below_{min_score}"
-
-    # Breadth alignment
+    # Breadth: relaxed when trade score is strong
     side_bias = "BULLISH" if trade.side == Side.CALL else "BEARISH"
     if breadth.bias != side_bias and not alignment_override:
-        if not momentum_surge:
+        if not momentum_surge and trade_score < min_score + 8:
             return False, "breadth_misalignment"
 
-    if not (momentum_surge or alignment_override or breadth.aligned):
+    if not (momentum_surge or alignment_override or breadth.aligned or trade_score >= min_score + 5):
         return False, "no_momentum_or_alignment"
 
     return True, "passed"

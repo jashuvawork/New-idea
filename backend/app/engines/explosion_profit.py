@@ -27,7 +27,8 @@ def check_explosion_entry(
     if event.tier == "ELITE":
         return True, "elite_explosion"
 
-    if event.tier == "EXPLODING" and event.explosion_score >= 55:
+    min_score = get_settings().aggressive_min_explosion_score
+    if event.tier == "EXPLODING" and event.explosion_score >= min_score:
         return True, "explosion_confirmed"
 
     # BUILDING with strong velocity — enter early
