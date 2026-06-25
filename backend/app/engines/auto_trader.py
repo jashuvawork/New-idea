@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.engines.daily_profit_strategy import DailyCalibration
+from app.engines.ai_learning import get_ai_learning
 from app.engines.dual_strategy import filter_dual_candidates
 from app.engines.risk_engine import RiskEngine
 from app.engines.explosion_profit import (
@@ -31,6 +32,7 @@ from app.models.schemas import (
     SymbolSnapshot,
     TradeMastermind,
 )
+from app.services import trade_store
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -40,6 +42,39 @@ _auto_trader_state: Optional[AutoTraderState] = None
 _risk_engine = RiskEngine()
 _calibration = DailyCalibration()
 _capital_inr: float = 500_000
+_state_loaded: bool = False
+
+
+def _ensure_state_loaded() -> None:
+    """Restore open paper trades from persistent store after restart."""
+    global _auto_trader_state, _state_loaded
+    if _state_loaded:
+        return
+    _state_loaded = True
+    saved = trade_store.load_open_trades()
+    if saved and _auto_trader_state:
+        for raw in saved:
+            try:
+                trade = PaperTrade(**raw)
+                if trade.status == "OPEN":
+                    _auto_trader_state.openPaperTrades.append(trade)
+            except Exception as e:
+                logger.warning("Failed to restore trade: %s", e)
+        if saved:
+            logger.info("Restored %d open paper trades from store", len(saved))
+
+
+def _build_context(snap: Optional[SymbolSnapshot], extra: Optional[dict] = None) -> dict:
+    ctx: dict = extra or {}
+    if snap:
+        ctx.update({
+            "tqs": snap.tradeQualityScore,
+            "regime": snap.regime.value if hasattr(snap.regime, "value") else snap.regime,
+            "breadth": snap.breadth.bias,
+            "spot": snap.spot,
+            "session": snap.optimizedProfile.sessionLabel if snap.optimizedProfile else "",
+        })
+    return ctx
 
 
 def get_state() -> AutoTraderState:
@@ -61,6 +96,7 @@ def get_state() -> AutoTraderState:
                 adaptiveTargets=settings.adaptive_target_enabled,
             ),
         )
+    _ensure_state_loaded()
     return _auto_trader_state
 
 
@@ -137,8 +173,14 @@ def process(
             trade.exitReason = exit_reason
             trade.pnlInr = pnl
             trade.pnlPoints = pnl / (trade.lots * lot_mult) if trade.lots else 0
+            trade.closedAt = datetime.now(IST)
+            trade.sessionDate = datetime.now(IST).strftime("%Y-%m-%d")
+            ctx = _build_context(snap, {"exitReason": exit_reason})
+            trade.entryContext = ctx
             state.closedPaperTrades.append(trade)
             _calibration.record_trade(trade)
+            trade_store.record_trade_closed(trade, ctx)
+            get_ai_learning().record_trade_close(trade)
             logger.info("Paper trade closed: %s reason=%s pnl=%.2f", trade.id, exit_reason, pnl)
 
     state.openPaperTrades = [t for t in state.openPaperTrades if t.status == "OPEN"]
@@ -209,8 +251,16 @@ def process(
                         lots=lots,
                         openedAt=datetime.now(IST),
                         strategyType=StrategyType.EXPLOSIVE,
+                        sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
                     )
+                    ctx = _build_context(snap, {
+                        "explosionTier": event.tier,
+                        "velocity3s": event.velocity_3s,
+                        "explosionScore": event.explosion_score,
+                    })
+                    paper.entryContext = ctx
                     state.openPaperTrades.append(paper)
+                    trade_store.record_trade_opened(paper, ctx)
                     logger.info(
                         "EXPLOSION trade opened: %s %s %s @ %.2f tier=%s vel=%.1f%%",
                         symbol, event.side.value, event.strike, event.premium,
@@ -265,8 +315,12 @@ def process(
                         lots=lots,
                         openedAt=datetime.now(IST),
                         strategyType=suggestion.strategyType,
+                        sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
                     )
+                    ctx = _build_context(snap, {"tqs": suggestion.tqs, "confidence": suggestion.confidence})
+                    paper.entryContext = ctx
                     state.openPaperTrades.append(paper)
+                    trade_store.record_trade_opened(paper, ctx)
                     logger.info(
                         "Paper trade opened: %s %s %s @ %.2f lots=%d",
                         symbol, suggestion.side.value, suggestion.strike,

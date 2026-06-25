@@ -68,6 +68,10 @@ class Settings(BaseSettings):
 
     symbols: list[str] = ["NIFTY", "SENSEX", "BANKNIFTY"]
 
+    # Persistence
+    trade_store_dir: str = "/tmp/nexusquant/trades"
+    daily_token_once: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

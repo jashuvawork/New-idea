@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { DeploymentStatus, MultiSnapshot } from '../types';
+import type { DeploymentStatus, MultiSnapshot, TradeHistoryResponse } from '../types';
 
 // Production: always use same-origin /api (Vercel rewrites → EC2 backend)
 // Dev: vite proxy handles /api → localhost:8000
@@ -39,14 +39,33 @@ export function useMarketStream() {
 export function useDeploymentStatus() {
   const [status, setStatus] = useState<DeploymentStatus | null>(null);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     fetch(`${API_BASE}/api/deployment/status`)
       .then((r) => r.json())
       .then(setStatus)
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 60_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
   return status;
+}
+
+export function useTradeHistory(days = 14) {
+  const [history, setHistory] = useState<TradeHistoryResponse | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/auto-trader/history?days=${days}`)
+      .then((r) => r.json())
+      .then(setHistory)
+      .catch(() => {});
+  }, [days]);
+
+  return history;
 }
 
 export async function stopTrading() {

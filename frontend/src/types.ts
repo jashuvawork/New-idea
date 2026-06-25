@@ -178,10 +178,37 @@ export interface PaperTrade {
   pnlInr: number;
   pnlPoints: number;
   openedAt: string;
+  closedAt?: string;
+  sessionDate?: string;
   status: string;
   exitReason?: string;
   strategyType: string;
   bestPnlPoints: number;
+  entryContext?: Record<string, unknown>;
+  context?: Record<string, unknown>;
+}
+
+export interface TradeDaySummary {
+  date: string;
+  summary: Partial<DailyReport>;
+  tradeCount: number;
+  eventCount: number;
+}
+
+export interface TradeHistoryResponse {
+  days: TradeDaySummary[];
+  storeDir: string;
+}
+
+export interface DailyTokenStatus {
+  hasToken: boolean;
+  validToday: boolean;
+  sessionDate?: string;
+  today: string;
+  generatedAt?: string;
+  oneTimePerDay: boolean;
+  canLogin: boolean;
+  message: string;
 }
 
 export interface DailyReport {
@@ -216,6 +243,6 @@ export interface DeploymentStatus {
   status: string;
   commit: string;
   environment: string;
-  upstox: { hasToken: boolean };
+  upstox: DailyTokenStatus;
   flags: Record<string, boolean | number>;
 }

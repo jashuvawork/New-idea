@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMarketStream, useDeploymentStatus, stopTrading, resumeTrading, resetSession } from './hooks/useMarketStream';
+import { useMarketStream, useDeploymentStatus, useTradeHistory, stopTrading, resumeTrading, resetSession } from './hooks/useMarketStream';
 import { WaitingState } from './components/Panel';
 import { ExecutionHUD } from './components/ExecutionHUD';
 import { ExplosiveRunner } from './components/ExplosiveRunner';
@@ -21,6 +21,7 @@ const SYMBOLS = ['NIFTY', 'SENSEX', 'BANKNIFTY'] as const;
 export default function App() {
   const { data, error, loading } = useMarketStream();
   const deployment = useDeploymentStatus();
+  const tradeHistory = useTradeHistory(14);
   const [activeSymbol, setActiveSymbol] = useState<string>('NIFTY');
 
   const snap = data?.snapshots?.[activeSymbol];
@@ -55,10 +56,21 @@ export default function App() {
 
           <div className="flex items-center gap-3">
             {deployment && (
-              <span className={`text-[10px] px-2 py-1 rounded ${
-                deployment.upstox.hasToken ? 'bg-nexus-green/20 text-nexus-green' : 'bg-nexus-red/20 text-nexus-red'
-              }`}>
-                {deployment.upstox.hasToken ? 'UPSTOX ✓' : 'UPSTOX ✗'}
+              <span
+                className={`text-[10px] px-2 py-1 rounded ${
+                  deployment.upstox.validToday
+                    ? 'bg-nexus-green/20 text-nexus-green'
+                    : deployment.upstox.hasToken
+                      ? 'bg-nexus-yellow/20 text-nexus-yellow'
+                      : 'bg-nexus-red/20 text-nexus-red'
+                }`}
+                title={deployment.upstox.message}
+              >
+                {deployment.upstox.validToday
+                  ? 'UPSTOX ✓ TODAY'
+                  : deployment.upstox.hasToken
+                    ? 'UPSTOX — RELOGIN'
+                    : 'UPSTOX ✗'}
               </span>
             )}
             {data?.dataReady && (
@@ -121,7 +133,7 @@ export default function App() {
             {/* Row 3 — Depth */}
             <div className="col-span-3"><OptionHeatmap snap={snap} /></div>
             <div className="col-span-3"><StrategyMatrix snap={snap} /></div>
-            <div className="col-span-2"><TradeJournal data={data} /></div>
+            <div className="col-span-2"><TradeJournal data={data} history={tradeHistory} /></div>
             <div className="col-span-2"><NewsPanel news={data.news} /></div>
             <div className="col-span-1"><LiveTradingGate status={deployment} /></div>
             <div className="col-span-1"><MorningChecklist /></div>
