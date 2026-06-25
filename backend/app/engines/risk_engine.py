@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from app.config import get_settings
+from app.engines.capital_allocator import get_capital_snapshot
 from app.models.schemas import AutoTraderState, PaperTrade, RiskProfile, Side, StrategyType
 
 
@@ -67,11 +68,15 @@ class RiskEngine:
         if exposure + new_exposure > self.profile.maxExposureInr:
             return False, "max_exposure_exceeded"
 
-        max_loss = settings.swing_max_loss_inr if is_swing else settings.max_risk_per_trade_inr
+        max_loss = settings.swing_max_loss_inr if is_swing else get_capital_snapshot().perTradeRiskInr
         stop_pts = 8.0 if is_swing else 3.0
         potential_loss = profile_stop_points(lots, lot_multiplier, stop_pts)
         if potential_loss > max_loss:
             return False, "per_trade_risk_exceeded"
+
+        cap = get_capital_snapshot()
+        if lots > cap.maxLots:
+            return False, "capital_max_lots_exceeded"
 
         if not is_swing:
             explosive_open = sum(

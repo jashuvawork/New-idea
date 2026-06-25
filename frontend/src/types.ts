@@ -245,8 +245,37 @@ export interface AutoTraderState {
   closedPaperTrades: PaperTrade[];
   dailyReport: DailyReport;
   tradeMastermind: TradeMastermind;
-  skipped: { symbol: string; reason: string; trade: string }[];
+  skipped: { symbol: string; reason: string; trade?: string; message?: string }[];
   calibrationBlocks: Record<string, boolean>;
+  capitalAllocation?: CapitalAllocation;
+  dailyProfitGate?: DailyProfitGate;
+}
+
+export interface CapitalAllocation {
+  availableMarginInr: number;
+  usedMarginInr: number;
+  totalEquityInr: number;
+  source: string;
+  perTradeRiskInr: number;
+  maxExposureInr: number;
+  minLots: number;
+  targetLots: number;
+  maxLots: number;
+  fetchedAt?: string;
+}
+
+export interface DailyProfitGate {
+  targetInr: number;
+  trailInr: number;
+  sessionPnlInr: number;
+  bestPnlInr: number;
+  trailFloorInr: number;
+  targetHit: boolean;
+  trailLocked: boolean;
+  newEntriesAllowed: boolean;
+  status: string;
+  message: string;
+  progressPct: number;
 }
 
 export interface PaperTrade {

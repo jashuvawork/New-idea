@@ -59,9 +59,18 @@ class Settings(BaseSettings):
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
     # Capital / risk defaults
-    default_capital_inr: float = 500_000
+    fallback_capital_inr: float = 500_000
     max_risk_per_trade_inr: float = 12_000
+    min_per_trade_risk_inr: float = 3_000
+    per_trade_risk_pct: float = 0.02
+    max_exposure_pct: float = 0.35
     emergency_stop_inr: float = 18_000
+
+    # Daily session targets (static)
+    daily_profit_target_inr: float = 200_000
+    daily_profit_trail_inr: float = 20_000
+    use_upstox_capital_for_sizing: bool = True
+
     simple_max_lots: int = 14
     simple_target_lots: int = 10
     simple_min_lots: int = 6

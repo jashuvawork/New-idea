@@ -249,6 +249,8 @@ class AutoTraderState(BaseModel):
     tradeMastermind: TradeMastermind = Field(default_factory=TradeMastermind)
     skipped: list[dict[str, Any]] = []
     calibrationBlocks: dict[str, bool] = {"CALL": False, "PUT": False}
+    capitalAllocation: dict[str, Any] = {}
+    dailyProfitGate: dict[str, Any] = {}
 
 
 class MultiSnapshot(BaseModel):

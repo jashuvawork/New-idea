@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter
 
 from app.config import get_settings
-from app.engines.auto_trader import get_state, process
+from app.engines.auto_trader import get_state, process, refresh_trading_capital
 from app.engines.realtime_engine import build_symbol_snapshot
 from app.engines.psychology_engine import analyze_psychology, psychology_to_dict
 from app.engines.adaptive_exits import compute_adaptive_exit_plan
@@ -52,6 +52,12 @@ async def _build_multi_snapshot() -> MultiSnapshot:
             news_sentiment = "BEARISH"
 
     client = UpstoxClient()
+    if settings.use_upstox_capital_for_sizing:
+        try:
+            await refresh_trading_capital(client)
+        except Exception as e:
+            logger.warning("Capital refresh failed: %s", e)
+
     snapshots = {}
     tasks = [build_symbol_snapshot(sym, client, news_sentiment) for sym in settings.symbols]
     results = await asyncio.gather(*tasks, return_exceptions=True)

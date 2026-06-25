@@ -89,13 +89,12 @@ def check_entry_gate(
     return True, "passed"
 
 
-def compute_lot_size(tqs: float) -> int:
-    settings = get_settings()
-    if tqs >= 85:
-        return settings.simple_max_lots
-    if tqs >= 75:
-        return settings.simple_target_lots
-    return settings.simple_min_lots
+def compute_lot_size(tqs: float, symbol: str = "NIFTY", premium: float = 100.0) -> int:
+    from app.engines.capital_allocator import compute_lots
+    from app.models.schemas import StrategyType
+
+    profile = get_session_targets()
+    return compute_lots(symbol, premium, profile.stopPoints, tqs=tqs, strategy_type=StrategyType.SCALP)
 
 
 def evaluate_exit(

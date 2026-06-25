@@ -13,12 +13,10 @@ from app.engines.dual_strategy import filter_dual_candidates
 from app.engines.risk_engine import RiskEngine
 from app.engines.explosion_profit import (
     check_explosion_entry,
-    compute_explosion_lots,
     evaluate_explosion_exit,
 )
 from app.engines.swing_profit import (
     check_swing_entry,
-    compute_swing_lots,
     evaluate_swing_exit,
 )
 from app.engines.adaptive_exits import (
@@ -29,9 +27,16 @@ from app.engines.adaptive_exits import (
     evaluate_adaptive_swing_exit,
 )
 from app.engines.swing_engine import SwingSetup
+from app.engines.capital_allocator import (
+    compute_lots,
+    compute_session_pnl,
+    get_capital_snapshot,
+    lot_multiplier,
+    refresh_capital_from_upstox,
+    update_daily_profit_gate,
+)
 from app.engines.simple_profit import (
     check_entry_gate,
-    compute_lot_size,
     evaluate_exit,
     get_session_targets,
 )
@@ -56,6 +61,21 @@ _auto_trader_state: Optional[AutoTraderState] = None
 _risk_engine = RiskEngine()
 _calibration = DailyCalibration()
 _capital_inr: float = 500_000
+
+
+async def refresh_trading_capital(client) -> None:
+    """Pull Upstox margin and sync risk engine exposure limits."""
+    settings = get_settings()
+    if settings.use_upstox_capital_for_sizing:
+        snap = await refresh_capital_from_upstox(client)
+    else:
+        snap = get_capital_snapshot()
+    global _capital_inr
+    _capital_inr = snap.availableMarginInr
+    from app.models.schemas import RiskProfile
+    profile = _risk_engine.profile
+    profile.maxExposureInr = snap.maxExposureInr
+    _risk_engine.set_profile(profile)
 _state_loaded: bool = False
 
 
@@ -195,10 +215,10 @@ def process(
     skipped: list[dict[str, Any]] = []
 
     state.calibrationBlocks = _calibration.get_blocks()
-    lot_mult = 25 if settings.symbols[0] != "SENSEX" else 10
 
     # Update open trades with current premiums
     for trade in state.openPaperTrades:
+        lot_mult = lot_multiplier(trade.symbol)
         snap = snapshots.get(trade.symbol)
         if not snap or not snap.dataAvailable:
             continue
@@ -262,9 +282,20 @@ def process(
     state.openPaperTrades = [t for t in state.openPaperTrades if t.status == "OPEN"]
 
     market_live = get_market_phase() == "LIVE_MARKET"
+    profit_gate = update_daily_profit_gate(state)
+    cap_snap = get_capital_snapshot()
+    state.capitalAllocation = cap_snap.to_dict()
+    state.dailyProfitGate = profit_gate.to_dict()
+
+    if not profit_gate.newEntriesAllowed:
+        skipped.append({
+            "symbol": "SESSION",
+            "reason": profit_gate.status,
+            "message": profit_gate.message,
+        })
 
     # Try new entries — only during live session (not pre-open auction)
-    if state.running and market_live:
+    if state.running and market_live and profit_gate.newEntriesAllowed:
         for symbol, snap in snapshots.items():
             if not snap.dataAvailable:
                 continue
@@ -311,7 +342,16 @@ def process(
                         skipped.append({"symbol": symbol, "reason": reason, "strike": event.strike})
                         continue
 
-                    lots = compute_explosion_lots(event, snap.tradeQualityScore)
+                    profile = snap.optimizedProfile or get_session_targets()
+                    stop_pts = profile.stopPoints
+                    lots = compute_lots(
+                        symbol, event.premium, stop_pts,
+                        tqs=snap.tradeQualityScore,
+                        strategy_type=StrategyType.EXPLOSIVE,
+                        confidence=event.explosion_score,
+                        tier=event.tier,
+                    )
+                    lot_mult = lot_multiplier(symbol)
                     ok, risk_reason = _risk_engine.check_new_entry(
                         state, symbol, event.side, lots, event.premium, lot_mult
                     )
@@ -378,7 +418,14 @@ def process(
                         skipped.append({"symbol": symbol, "reason": reason, "trade": suggestion.id})
                         continue
 
-                    lots = compute_lot_size(suggestion.tqs)
+                    profile = snap.optimizedProfile or get_session_targets()
+                    lots = compute_lots(
+                        symbol, suggestion.lastPremium, profile.stopPoints,
+                        tqs=suggestion.tqs,
+                        strategy_type=suggestion.strategyType,
+                        confidence=suggestion.confidence,
+                    )
+                    lot_mult = lot_multiplier(symbol)
                     ok, risk_reason = _risk_engine.check_new_entry(
                         state, symbol, suggestion.side, lots, suggestion.lastPremium, lot_mult
                     )
@@ -443,7 +490,13 @@ def process(
                         skipped.append({"symbol": symbol, "reason": reason, "mode": "swing"})
                         continue
 
-                    lots = compute_swing_lots(setup.confidence)
+                    profile = snap.optimizedProfile or get_session_targets()
+                    lots = compute_lots(
+                        symbol, setup.premium, 8.0,
+                        strategy_type=StrategyType.SWING,
+                        confidence=setup.confidence,
+                    )
+                    lot_mult = lot_multiplier(symbol)
                     ok, risk_reason = _risk_engine.check_new_entry(
                         state, symbol, setup.side, lots, setup.premium, lot_mult,
                         strategy_type=StrategyType.SWING,
@@ -489,7 +542,7 @@ def process(
 
     state.skipped = skipped
     state.dailyReport = _calibration.build_report(state.closedPaperTrades)
-    _risk_engine.update_daily_pnl(state.dailyReport.netPnlInr)
+    _risk_engine.update_daily_pnl(compute_session_pnl(state))
 
     return state
 
