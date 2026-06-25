@@ -52,7 +52,6 @@ class RiskEngine:
 
         open_trades = state.openPaperTrades
         is_swing = strategy_type == StrategyType.SWING
-
         max_scalps = settings.aggressive_max_open_scalps if settings.aggressive_lot_sizing else self.profile.maxOpenTrades
 
         if is_swing:
@@ -80,8 +79,16 @@ class RiskEngine:
         if exposure + new_exposure > cap.availableMarginInr * 0.98:
             return False, "total_margin_exceeded"
 
-        if not is_swing and settings.aggressive_lot_sizing:
-            explosive_open = sum(1 for t in open_trades if t.strategyType == StrategyType.EXPLOSIVE)
+        max_loss = settings.swing_max_loss_inr if is_swing else settings.max_risk_per_trade_inr
+        stop_pts = 8.0 if is_swing else 3.0
+        potential_loss = profile_stop_points(lots, lot_multiplier, stop_pts)
+        if potential_loss > max_loss:
+            return False, "per_trade_risk_exceeded"
+
+        if not is_swing:
+            explosive_open = sum(
+                1 for t in open_trades if t.strategyType == StrategyType.EXPLOSIVE
+            )
             if explosive_open >= 1 and strategy_type == StrategyType.EXPLOSIVE:
                 return False, "explosive_lane_cap"
 
