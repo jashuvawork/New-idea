@@ -13,6 +13,7 @@ from app.engines.ai_engine import (
     rank_runner,
     score_tqs,
 )
+from app.engines.premium_filter import premium_in_band
 from app.models.schemas import (
     ExplosiveRunner,
     Greeks,
@@ -188,6 +189,8 @@ def _scan_runners(
             prev = _premium_history[hist_key].get(strike if side == Side.CALL else -strike)
             score, vel = rank_runner(opt, side, prev)
             ltp = opt.get("ltp") or opt.get("last_price", 0)
+            if not premium_in_band(ltp):
+                continue
 
             entry = {
                 "strike": strike,

@@ -6,6 +6,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.engines.ml_engine import get_ml_engine
+from app.engines.premium_filter import premium_in_band
 from app.engines.strategies.atm_acceleration import ATMPremiumAcceleration
 from app.engines.strategies.base import StrategySignal, compute_pcr
 from app.engines.strategies.closing_sprint import ClosingMomentumSprint
@@ -159,6 +160,8 @@ def signals_to_suggested_trades(signals: list[StrategySignal], tqs: float) -> li
     import uuid
     trades = []
     for sig in signals:
+        if not premium_in_band(sig.premium):
+            continue
         trades.append(SuggestedTrade(
             id=str(uuid.uuid4())[:8],
             symbol=sig.symbol,

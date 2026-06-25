@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from app.config import get_settings
+from app.engines.premium_filter import premium_in_band
 from app.engines.strategies.base import compute_max_pain, compute_pcr
 from app.models.schemas import Breadth, MarketProfile, Orderflow, Regime, Side
 
@@ -61,7 +62,7 @@ def _trend_follow(
 
     opt = _get_option(chain, atm, side)
     premium = opt.get("ltp") or opt.get("last_price", 0)
-    if not premium or premium < 20:
+    if not premium_in_band(premium):
         return None
 
     conf = min(92, 58 + breadth.score * 0.25 + tqs * 0.15 + orderflow.breakoutVelocity * 0.1)
@@ -101,7 +102,7 @@ def _pcr_position(
 
     opt = _get_option(chain, atm, side)
     premium = opt.get("ltp") or opt.get("last_price", 0)
-    if not premium:
+    if not premium_in_band(premium):
         return None
 
     conf = min(88, 55 + abs(pcr - 1.0) * 25 + tqs * 0.12)
@@ -140,7 +141,7 @@ def _max_pain_swing(
     side = Side.CALL if dist > 0 else Side.PUT
     opt = _get_option(chain, atm, side)
     premium = opt.get("ltp") or opt.get("last_price", 0)
-    if not premium:
+    if not premium_in_band(premium):
         return None
 
     conf = min(85, 52 + min(abs(dist) / 10, 25) + tqs * 0.1)

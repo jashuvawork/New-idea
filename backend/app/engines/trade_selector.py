@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.config import get_settings
+from app.engines.premium_filter import premium_in_band
 from app.engines.explosion_profit import check_explosion_entry
 from app.engines.simple_profit import check_entry_gate
 from app.engines.swing_profit import check_swing_entry
@@ -45,6 +46,8 @@ def _explosion_candidates(
     out: list[EntryCandidate] = []
     for alert in snap.explosionAlerts or []:
         if not alert.get("tradeable"):
+            continue
+        if not premium_in_band(alert.get("premium")):
             continue
         if alert.get("tier") not in ("ELITE", "EXPLODING"):
             continue
@@ -117,6 +120,8 @@ def _scalp_candidates(
     for suggestion in snap.suggestedTrades or []:
         if suggestion.strategyType == StrategyType.EXPLOSIVE:
             continue
+        if not premium_in_band(suggestion.lastPremium):
+            continue
         if not suggestion.lastPremium or suggestion.lastPremium <= 0:
             continue
         if suggestion.tqs < settings.aggressive_min_tqs:
@@ -174,6 +179,8 @@ def _swing_candidates(
     }
     for alert in snap.swingAlerts or []:
         if not alert.get("tradeable"):
+            continue
+        if not premium_in_band(alert.get("premium")):
             continue
         if alert.get("confidence", 0) < settings.aggressive_min_swing_confidence:
             continue

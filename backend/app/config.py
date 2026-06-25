@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     explosion_target_elite: float = 25.0
     explosion_target_standard: float = 12.0
 
+    # Option premium (LTP) band for entries and scanners
+    min_option_premium_inr: float = 25.0
+    max_option_premium_inr: float = 100.0
+
     # Enhanced scalping (more powerful than base spec)
     enhanced_micro_target_points: float = 2.5  # faster micro lock vs 3.0 base
     enhanced_velocity_threshold: float = 1.8  # lower bar for quick scalps

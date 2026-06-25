@@ -44,6 +44,8 @@ async def deployment_status():
             "useUpstoxCapital": settings.use_upstox_capital_for_sizing,
             "perTradeCapitalPct": settings.per_trade_capital_pct,
             "aggressiveLotSizing": settings.aggressive_lot_sizing,
+            "minOptionPremiumInr": settings.min_option_premium_inr,
+            "maxOptionPremiumInr": settings.max_option_premium_inr,
             "enhancedMode": True,
             "shadowTradeAllSignals": settings.shadow_trade_all_signals,
             "backgroundMonitor": settings.background_market_monitor_enabled,

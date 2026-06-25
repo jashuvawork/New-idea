@@ -24,7 +24,7 @@ export function RiskEngine({ auto }: { auto: AutoTraderState }) {
         </div>
         <div className="flex justify-between text-[9px] text-nexus-muted">
           <span>50% cap/trade · ₹{((cap.perTradeCapitalInr as number) || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-          <span>Lots {cap.minLots ?? 25}–{cap.maxLots ?? 100}</span>
+          <span>Lots {cap.minLots ?? 25}–{cap.maxLots ?? 100} · Prem ₹25–100</span>
         </div>
       </div>
 

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
+from app.engines.premium_filter import premium_in_band
 from app.models.schemas import Side
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,7 @@ def scan_chain_explosions(
 
             premium = opt.get("ltp") or opt.get("last_price") or 0
             volume = opt.get("volume", 0) or 0
-            if not premium or premium < 5:
+            if not premium_in_band(premium):
                 continue
 
             _record(symbol, strike, side, premium, volume)

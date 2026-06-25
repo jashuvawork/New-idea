@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from app.config import get_settings
+from app.engines.premium_filter import premium_in_band, premium_reject_reason
 from app.models.schemas import (
     Breadth,
     OptimizedProfile,
@@ -66,6 +67,9 @@ def check_entry_gate(
 
     if calibration_blocked:
         return False, "daily_calibration_block"
+
+    if not premium_in_band(trade.lastPremium):
+        return False, premium_reject_reason(trade.lastPremium)
 
     if velocity_pct < settings.enhanced_velocity_threshold:
         return False, f"velocity_below_{settings.enhanced_velocity_threshold}pct"
