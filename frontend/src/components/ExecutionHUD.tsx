@@ -2,16 +2,17 @@ import { Panel, Metric, ScoreBar, BiasBadge } from './Panel';
 import type { SymbolSnapshot, AutoTraderState } from '../types';
 
 export function ExecutionHUD({ snap, auto }: { snap: SymbolSnapshot; auto: AutoTraderState }) {
-  const tqs = snap.tradeQualityScore;
+  const tqs = snap.tradeQualityScore ?? 0;
   const tqsColor = tqs >= 75 ? 'text-nexus-green' : tqs >= 60 ? 'text-nexus-yellow' : 'text-nexus-red';
   const pm = snap.premarket;
+  const profile = snap.optimizedProfile;
   const phaseBadge =
     snap.marketPhase === 'PREMARKET'
       ? 'bg-amber-500/80 text-black'
       : 'bg-nexus-accent/80';
 
   return (
-    <Panel title="Execution HUD" badge={snap.marketPhase} badgeColor={phaseBadge}>
+    <Panel title="Execution HUD" badge={snap.marketPhase ?? 'MARKET'} badgeColor={phaseBadge}>
       {pm && (
         <div className="mb-3 p-2 rounded border border-amber-500/30 bg-amber-500/5 text-[10px]">
           <div className="flex justify-between font-mono">
@@ -24,7 +25,7 @@ export function ExecutionHUD({ snap, auto }: { snap: SymbolSnapshot; auto: AutoT
       )}
       <div className="grid grid-cols-2 gap-3">
         <Metric label="TQS" value={tqs.toFixed(0)} color={tqsColor} />
-        <Metric label="Regime" value={snap.regime.replace(/_/g, ' ')} color="text-nexus-accent" />
+        <Metric label="Regime" value={(snap.regime ?? 'UNKNOWN').replace(/_/g, ' ')} color="text-nexus-accent" />
         <Metric label="Spot" value={snap.spot?.toFixed(2) ?? '—'} />
         <Metric label="ATM" value={snap.atmStrike?.toFixed(0) ?? '—'} />
       </div>
@@ -42,9 +43,13 @@ export function ExecutionHUD({ snap, auto }: { snap: SymbolSnapshot; auto: AutoT
         </span>
       </div>
       <div className="mt-2 text-[10px] text-nexus-muted">
-        Mode: {auto.tradeMastermind.enhancedMode ? 'Enhanced Simple Profit' : 'Simple Profit'}
-        {' · '}
-        Target {snap.optimizedProfile.targetPoints}pt · Micro {snap.optimizedProfile.microTargetPoints}pt
+        Mode: {auto.tradeMastermind?.enhancedMode ? 'Enhanced Simple Profit' : 'Simple Profit'}
+        {profile ? (
+          <>
+            {' · '}
+            Target {profile.targetPoints}pt · Micro {profile.microTargetPoints}pt
+          </>
+        ) : null}
       </div>
     </Panel>
   );

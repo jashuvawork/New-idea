@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, StreamMetrics, TradeHistoryResponse, TradeLogResponse } from '../types';
+import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, PerformanceMilestone, StreamMetrics, TradeHistoryResponse, TradeLogResponse } from '../types';
 
 // Production: always use same-origin /api (Vercel rewrites → EC2 backend)
 // Dev: vite proxy handles /api → localhost:8000
@@ -40,6 +40,9 @@ export function useMarketStream() {
       if (!res.ok) throw new Error(`API ${res.status}`);
 
       const json = (await res.json()) as MultiSnapshot;
+      if (!json || typeof json !== 'object' || !json.snapshots) {
+        throw new Error('Invalid API response');
+      }
       const now = new Date();
       lastSuccessAt.current = now;
 
@@ -163,6 +166,25 @@ export function useDeploymentReadiness() {
   }, [refresh]);
 
   return readiness;
+}
+
+export function usePerformanceMilestone() {
+  const [milestone, setMilestone] = useState<PerformanceMilestone | null>(null);
+
+  const refresh = useCallback(() => {
+    fetch(`${API_BASE}/api/auto-trader/milestone`)
+      .then((r) => r.json())
+      .then(setMilestone)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 30_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  return milestone;
 }
 
 export async function stopTrading() {
