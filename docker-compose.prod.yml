@@ -1,0 +1,23 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - /opt/nexusquant/env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - /opt/nexusquant/data/trades:/opt/nexusquant/data/trades
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  redis_data:

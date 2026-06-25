@@ -35,9 +35,13 @@ git checkout cursor/nexusquant-scalping-terminal-8564 2>/dev/null || git checkou
 cp deploy/env.production.template /opt/nexusquant/env
 cat >> /opt/nexusquant/env << 'EOF'
 REDIS_URL=redis://redis:6379/0
-UPSTOX_REDIRECT_URI=https://api.nexusquant.uk/api/upstox/callback
+UPSTOX_REDIRECT_URI=https://www.jashuvatrade.xyz/api/upstox/callback
 ENVIRONMENT=production
+TRADE_STORE_DIR=/opt/nexusquant/data/trades
+DAILY_TOKEN_ONCE=true
 EOF
+
+mkdir -p /opt/nexusquant/data/trades
 
 cat > docker-compose.prod.yml << 'COMPOSE'
 services:
@@ -54,6 +58,8 @@ services:
       - /opt/nexusquant/env
     environment:
       - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - /opt/nexusquant/data/trades:/opt/nexusquant/data/trades
     depends_on:
       - redis
     restart: unless-stopped
