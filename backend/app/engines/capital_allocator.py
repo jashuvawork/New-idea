@@ -372,8 +372,6 @@ def _stage_pcts_from_settings(settings) -> list[float]:
         return raw
     csv = getattr(settings, "daily_profit_stage_pcts_csv", "0.55,0.88,1.12")
     return [float(x.strip()) for x in str(csv).split(",") if x.strip()]
-    settings = get_settings()
-    return settings.max_sizing_capital_inr or settings.fallback_capital_inr
 
 
 def _build_profit_stages(capital_base: float, best_pnl: float, pcts: list[float]) -> list[ProfitStage]:

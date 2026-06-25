@@ -81,6 +81,36 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
       echo "  + ${key}"
     fi
   done < deploy/env.production.template
+
+  # Sync operational defaults from template (overwrites stale server values on deploy)
+  SYNC_ENV_KEYS=(
+    MIN_OPTION_PREMIUM_INR
+    MAX_OPTION_PREMIUM_INR
+    DAILY_PROFIT_STAGE_LOCKS_ENABLED
+    DAILY_PROFIT_STAGE_PCTS
+    UPSTOX_WS_ENABLED
+    TICK_SNAPSHOT_SECONDS
+    MARKET_POLL_SECONDS_WS
+    SSE_ENABLED
+    PAPER_LIVE_PARITY_ENABLED
+    PAPER_SIMULATE_BROKER_ORDERS
+  )
+  echo "Syncing template defaults for operational keys ..."
+  for key in "${SYNC_ENV_KEYS[@]}"; do
+    tpl_line="$(grep -E "^${key}=" deploy/env.production.template | tail -1 || true)"
+    [[ -z "$tpl_line" ]] && continue
+    tpl_val="${tpl_line#*=}"
+    if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+      cur_val="$(grep -E "^${key}=" "$ENV_FILE" | tail -1 | cut -d= -f2-)"
+      if [ "$cur_val" != "$tpl_val" ]; then
+        sed -i "s|^${key}=.*|${key}=${tpl_val}|" "$ENV_FILE"
+        echo "  ~ ${key}=${tpl_val} (was ${cur_val})"
+      fi
+    else
+      echo "${key}=${tpl_val}" >> "$ENV_FILE"
+      echo "  + ${key}=${tpl_val}"
+    fi
+  done
 fi
 
 # Required runtime keys (append only if missing)
