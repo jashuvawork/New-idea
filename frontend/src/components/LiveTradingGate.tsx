@@ -1,22 +1,30 @@
 import { Panel } from './Panel';
-import type { DeploymentStatus } from '../types';
+import type { DeploymentReadiness, DeploymentStatus } from '../types';
 
-export function LiveTradingGate({ status }: { status: DeploymentStatus | null }) {
+export function LiveTradingGate({
+  status,
+  readiness,
+}: {
+  status: DeploymentStatus | null;
+  readiness?: DeploymentReadiness | null;
+}) {
   if (!status) return <Panel title="Live Trading Gate"><p className="text-xs text-nexus-muted">Loading...</p></Panel>;
 
+  const log = status.tradeLog;
   const checks = [
     { label: 'Broker connected today', ok: status.upstox.validToday },
     { label: 'Token stored', ok: status.upstox.hasToken },
+    { label: 'Trade log writable', ok: log?.writable ?? false },
     { label: 'Auto trading', ok: status.flags.autoTradingEnabled as boolean },
     { label: 'Paper mode', ok: status.flags.paperTrading as boolean },
     { label: 'Live trading', ok: status.flags.enableLiveTrading as boolean },
-    { label: 'Enhanced mode', ok: status.flags.enhancedMode as boolean },
-    { label: 'Auto monitor', ok: status.flags.backgroundMonitor as boolean },
-    { label: 'Simple profit', ok: status.flags.simpleProfitMode as boolean },
+    { label: 'Risk engine', ok: readiness?.checks.riskEngineOk ?? true },
+    { label: 'Paper ready', ok: readiness?.readyForPaper ?? false },
+    { label: 'Live ready', ok: readiness?.readyForLive ?? false },
   ];
 
   return (
-    <Panel title="System Status">
+    <Panel title="System Status" badge={readiness?.executionMode ?? 'PAPER'}>
       <div className="space-y-1.5">
         {checks.map((c) => (
           <div key={c.label} className="flex justify-between text-[11px]">
@@ -27,6 +35,19 @@ export function LiveTradingGate({ status }: { status: DeploymentStatus | null })
           </div>
         ))}
       </div>
+
+      {log && (
+        <div className="mt-3 p-2 bg-gray-900/50 border border-nexus-border rounded text-[10px]">
+          <div className="text-nexus-muted mb-1">Trade log (paper + live)</div>
+          <div className="text-gray-300 font-mono truncate" title={log.logFile}>
+            {log.logFile.split('/').slice(-2).join('/')}
+          </div>
+          <div className="text-nexus-muted mt-1">
+            Today: {log.todayClosed} closed · {log.todayOpen} open · {(log.logSizeBytes / 1024).toFixed(1)} KB
+          </div>
+        </div>
+      )}
+
       <div className="mt-3 p-2 bg-gray-900/50 border border-nexus-border rounded text-[10px]">
         <div className="text-nexus-muted mb-1">Daily token (one login per IST day)</div>
         <div className={status.upstox.validToday ? 'text-nexus-green' : 'text-nexus-yellow'}>
@@ -38,9 +59,27 @@ export function LiveTradingGate({ status }: { status: DeploymentStatus | null })
           </div>
         )}
       </div>
-      <div className="mt-2 p-2 bg-nexus-red/10 border border-nexus-red/30 rounded text-[10px] text-nexus-red">
-        Live trading is OFF by default. Set ENABLE_LIVE_TRADING=true only after readiness checks pass.
-      </div>
+
+      {readiness && readiness.armLiveSteps.length > 0 && !readiness.readyForLive && (
+        <div className="mt-2 p-2 bg-nexus-yellow/10 border border-nexus-yellow/30 rounded text-[10px]">
+          <div className="text-nexus-yellow font-bold mb-1">To arm live trading:</div>
+          <ul className="list-disc list-inside text-gray-300 space-y-0.5">
+            {readiness.armLiveSteps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {readiness?.readyForLive ? (
+        <div className="mt-2 p-2 bg-nexus-green/10 border border-nexus-green/30 rounded text-[10px] text-nexus-green">
+          Live deployment checklist passed. Trades will log to the same audit file with executionMode=LIVE.
+        </div>
+      ) : (
+        <div className="mt-2 p-2 bg-nexus-red/10 border border-nexus-red/30 rounded text-[10px] text-nexus-red">
+          Live trading is OFF by default. Paper trades are logged to trades.log for review before going live.
+        </div>
+      )}
     </Panel>
   );
 }
@@ -56,6 +95,7 @@ export function MorningChecklist({
     { label: 'Connect Upstox (once per IST day)', done: deployment?.upstox.validToday },
     { label: 'Server online', done: Boolean(deployment) },
     { label: 'Live prices loading', done: Boolean(dataReady) },
+    { label: 'Trade log writable', done: deployment?.tradeLog?.writable },
     { label: 'Paper trading active', done: deployment?.flags.paperTrading as boolean },
     { label: 'Background monitor on', done: deployment?.flags.backgroundMonitor as boolean },
   ];

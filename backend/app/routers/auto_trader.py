@@ -13,7 +13,6 @@ from app.engines.auto_trader import (
 )
 from app.engines.risk_engine import RiskEngine
 from app.models.schemas import CapitalConfig, RiskProfile
-from app.routers.market import _build_multi_snapshot
 from app.services import trade_store
 
 router = APIRouter(prefix="/api/auto-trader", tags=["auto-trader"])
@@ -51,9 +50,21 @@ async def set_trading_capital(config: CapitalConfig):
 @router.get("/history")
 async def trade_history(days: int = 30):
     """Daily paper trade summaries for learning and review."""
+    store_health = trade_store.check_store_health()
     return {
         "days": trade_store.get_history(days=min(days, 90)),
-        "storeDir": str(trade_store.get_store_dir()),
+        "storeDir": store_health["storeDir"],
+        "logFile": store_health["logFile"],
+        "logSizeBytes": store_health["logSizeBytes"],
+    }
+
+
+@router.get("/log")
+async def trade_log_tail(limit: int = 50):
+    """Recent append-only trade log entries (paper + live)."""
+    return {
+        "logFile": str(trade_store.get_log_path()),
+        "entries": trade_store.get_recent_log_lines(limit=min(limit, 500)),
     }
 
 

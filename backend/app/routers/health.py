@@ -3,8 +3,11 @@
 from fastapi import APIRouter
 
 from app.config import get_settings
+from app.engines.capital_allocator import get_lot_sizes_meta
+from app.services import trade_store
 from app.services.redis_store import has_upstox_token
 from app.services.token_manager import get_daily_token_status
+from app.services.upstox import get_market_phase
 
 router = APIRouter(tags=["health"])
 
@@ -18,6 +21,8 @@ async def health():
 async def deployment_status():
     settings = get_settings()
     token_status = await get_daily_token_status()
+    store_health = trade_store.check_store_health()
+    today_counts = trade_store.count_today_trades()
     return {
         "status": "ok",
         "commit": settings.commit_sha,
@@ -44,6 +49,8 @@ async def deployment_status():
             "useUpstoxCapital": settings.use_upstox_capital_for_sizing,
             "perTradeCapitalPct": settings.per_trade_capital_pct,
             "aggressiveLotSizing": settings.aggressive_lot_sizing,
+            "minOptionPremiumInr": settings.min_option_premium_inr,
+            "maxOptionPremiumInr": settings.max_option_premium_inr,
             "enhancedMode": True,
             "shadowTradeAllSignals": settings.shadow_trade_all_signals,
             "backgroundMonitor": settings.background_market_monitor_enabled,
@@ -52,13 +59,110 @@ async def deployment_status():
             "marketPollSeconds": settings.market_poll_seconds,
             "snapshotCacheSeconds": settings.snapshot_cache_seconds,
         },
+        "tradeLog": {
+            "storeDir": store_health["storeDir"],
+            "logFile": store_health["logFile"],
+            "logSizeBytes": store_health["logSizeBytes"],
+            "writable": store_health["checks"]["healthy"],
+            "todayOpen": today_counts["open"],
+            "todayClosed": today_counts["closed"],
+        },
+        **get_lot_sizes_meta(),
+    }
+
+
+@router.get("/api/deployment/readiness")
+async def deployment_readiness():
+    """Live deployment checklist — paper log + broker + risk gates."""
+    from app.engines.auto_trader import get_state
+    from app.engines.risk_engine import RiskEngine
+    from app.routers.market import get_multi_snapshot
+
+    settings = get_settings()
+    token_status = await get_daily_token_status()
+    store_health = trade_store.check_store_health()
+    risk = RiskEngine()
+    state = get_state()
+
+    market_live = False
+    upstox_data = False
+    try:
+        snapshot = await get_multi_snapshot()
+        for sym in settings.symbols:
+            snap = snapshot.snapshots.get(sym)
+            if snap and snap.dataAvailable:
+                upstox_data = True
+            if snap and getattr(snap.marketPhase, "value", snap.marketPhase) == "LIVE_MARKET":
+                market_live = True
+    except Exception:
+        pass
+
+    if not market_live:
+        market_live = get_market_phase() == "LIVE_MARKET"
+
+    checks = {
+        "upstoxTokenValid": bool(token_status.get("validToday")),
+        "upstoxDataReady": upstox_data,
+        "marketLive": market_live,
+        "tradeStoreWritable": store_health["checks"]["healthy"],
+        "autoTradingEnabled": settings.auto_trading_enabled,
+        "riskEngineOk": not risk.safe_mode,
+        "calibrationClear": not any(state.calibrationBlocks.values()),
+        "liveTradingFlagSet": settings.enable_live_trading,
+        "paperTradingActive": settings.paper_trading,
+    }
+
+    paper_ready = all([
+        checks["upstoxTokenValid"],
+        checks["tradeStoreWritable"],
+        checks["autoTradingEnabled"],
+        checks["riskEngineOk"],
+    ])
+
+    live_ready = all([
+        checks["upstoxTokenValid"],
+        checks["upstoxDataReady"],
+        checks["tradeStoreWritable"],
+        checks["autoTradingEnabled"],
+        checks["riskEngineOk"],
+        checks["calibrationClear"],
+        settings.enable_live_trading,
+    ])
+
+    arm_live_steps = []
+    if not checks["upstoxTokenValid"]:
+        arm_live_steps.append("Login to Upstox (valid IST-day token required)")
+    if not checks["upstoxDataReady"]:
+        arm_live_steps.append("Wait for market data snapshots to load")
+    if not checks["tradeStoreWritable"]:
+        arm_live_steps.append(f"Fix trade store permissions at {store_health['storeDir']}")
+    if not checks["riskEngineOk"]:
+        arm_live_steps.append("Clear risk engine safe mode")
+    if not checks["calibrationClear"]:
+        arm_live_steps.append("Clear calibration blocks or reset session")
+    if not settings.enable_live_trading:
+        arm_live_steps.append("Set ENABLE_LIVE_TRADING=true in env and redeploy")
+
+    return {
+        "readyForPaper": paper_ready,
+        "readyForLive": live_ready,
+        "executionMode": "LIVE" if settings.enable_live_trading else "PAPER",
+        "checks": checks,
+        "tradeLog": {
+            "storeDir": store_health["storeDir"],
+            "logFile": store_health["logFile"],
+            "logSizeBytes": store_health["logSizeBytes"],
+            "todayCounts": trade_store.count_today_trades(),
+        },
+        "armLiveSteps": arm_live_steps,
+        "openTrades": len(state.openPaperTrades),
     }
 
 
 @router.get("/api/institutional/readiness/{symbol}")
 async def institutional_readiness(symbol: str):
     from app.engines.auto_trader import get_readiness
-    from app.routers.market import _build_multi_snapshot
+    from app.routers.market import get_multi_snapshot
 
-    snapshot = await _build_multi_snapshot()
+    snapshot = await get_multi_snapshot()
     return get_readiness(symbol.upper(), snapshot.snapshots)

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.config import get_settings
+from app.engines.premium_filter import premium_in_band
 from app.engines.explosion_profit import check_explosion_entry
 from app.engines.simple_profit import check_entry_gate
 from app.engines.swing_profit import check_swing_entry
@@ -46,12 +47,15 @@ def _explosion_candidates(
     for alert in snap.explosionAlerts or []:
         if not alert.get("tradeable"):
             continue
+        if not premium_in_band(alert.get("premium")):
+            continue
         if alert.get("tier") not in ("ELITE", "EXPLODING"):
             continue
         score_val = float(alert.get("explosionScore", 0))
         if score_val < settings.aggressive_min_explosion_score:
             continue
-        if snap.tradeQualityScore < settings.aggressive_min_tqs:
+        # Explosion score is primary quality — don't block on low symbol TQS alone
+        if snap.tradeQualityScore < 25 and score_val < settings.aggressive_min_explosion_score + 10:
             continue
 
         from app.engines.explosion_detector import ExplosionEvent
@@ -117,11 +121,12 @@ def _scalp_candidates(
     for suggestion in snap.suggestedTrades or []:
         if suggestion.strategyType == StrategyType.EXPLOSIVE:
             continue
+        if not premium_in_band(suggestion.lastPremium):
+            continue
         if not suggestion.lastPremium or suggestion.lastPremium <= 0:
             continue
-        if suggestion.tqs < settings.aggressive_min_tqs:
-            continue
-        if snap.tradeQualityScore < settings.aggressive_min_tqs:
+        trade_score = max(suggestion.tqs, suggestion.confidence or 0)
+        if trade_score < settings.aggressive_min_tqs:
             continue
 
         blocked = state.calibrationBlocks.get(suggestion.side.value, False)
@@ -130,7 +135,7 @@ def _scalp_candidates(
         vel = suggestion.runnerSignal.premiumVelocityPct if suggestion.runnerSignal else 0
 
         passed, _ = check_entry_gate(
-            suggestion, snap.breadth, snap.tradeQualityScore, vel,
+            suggestion, snap.breadth, max(snap.tradeQualityScore, trade_score), vel,
             blocked, momentum_surge=momentum, alignment_override=override,
         )
         if not passed:
@@ -174,6 +179,8 @@ def _swing_candidates(
     }
     for alert in snap.swingAlerts or []:
         if not alert.get("tradeable"):
+            continue
+        if not premium_in_band(alert.get("premium")):
             continue
         if alert.get("confidence", 0) < settings.aggressive_min_swing_confidence:
             continue
@@ -241,3 +248,64 @@ def find_best_entry(
         return c.score + bonus
 
     return max(candidates, key=sort_key)
+
+
+def diagnose_missed_entries(
+    snapshots: dict[str, SymbolSnapshot],
+    state: AutoTraderState,
+) -> list[dict[str, Any]]:
+    """Surface near-miss signals when no entry is taken — helps debug zero-trade sessions."""
+    settings = get_settings()
+    notes: list[dict[str, Any]] = []
+
+    for symbol, snap in snapshots.items():
+        if not snap.dataAvailable:
+            continue
+
+        for alert in snap.explosionAlerts or []:
+            if alert.get("tier") not in ("ELITE", "EXPLODING", "BUILDING"):
+                continue
+            score = float(alert.get("explosionScore", 0))
+            prem = alert.get("premium")
+            blockers: list[str] = []
+            if not premium_in_band(prem):
+                blockers.append("premium_out_of_band")
+            if score < settings.aggressive_min_explosion_score:
+                blockers.append(f"explosion_score<{settings.aggressive_min_explosion_score}")
+            if snap.tradeQualityScore < 25 and score < settings.aggressive_min_explosion_score + 10:
+                blockers.append("symbol_tqs_low")
+            if blockers:
+                notes.append({
+                    "symbol": symbol,
+                    "reason": "explosion_near_miss",
+                    "mode": "explosion",
+                    "message": ", ".join(blockers),
+                    "premium": prem,
+                    "score": score,
+                    "tier": alert.get("tier"),
+                })
+
+        for suggestion in snap.suggestedTrades or []:
+            if suggestion.strategyType == StrategyType.EXPLOSIVE:
+                continue
+            trade_score = max(suggestion.tqs, suggestion.confidence or 0)
+            vel = suggestion.runnerSignal.premiumVelocityPct if suggestion.runnerSignal else 0
+            blockers = []
+            if not premium_in_band(suggestion.lastPremium):
+                blockers.append("premium_out_of_band")
+            if trade_score < settings.aggressive_min_tqs:
+                blockers.append(f"trade_score<{settings.aggressive_min_tqs}")
+            if vel < settings.enhanced_velocity_threshold and trade_score < settings.aggressive_min_tqs + 5:
+                blockers.append(f"velocity<{settings.enhanced_velocity_threshold}")
+            if blockers:
+                notes.append({
+                    "symbol": symbol,
+                    "reason": "scalp_near_miss",
+                    "mode": "scalp",
+                    "message": ", ".join(blockers),
+                    "premium": suggestion.lastPremium,
+                    "score": trade_score,
+                    "side": suggestion.side.value,
+                })
+
+    return notes[:6]

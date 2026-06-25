@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DeploymentStatus, MultiSnapshot, StreamMetrics, TradeHistoryResponse } from '../types';
+import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, StreamMetrics, TradeHistoryResponse, TradeLogResponse } from '../types';
 
 // Production: always use same-origin /api (Vercel rewrites → EC2 backend)
 // Dev: vite proxy handles /api → localhost:8000
@@ -125,6 +125,44 @@ export function useTradeHistory(days = 14) {
   }, [days]);
 
   return history;
+}
+
+export function useTradeLog(limit = 30) {
+  const [log, setLog] = useState<TradeLogResponse | null>(null);
+
+  const refresh = useCallback(() => {
+    fetch(`${API_BASE}/api/auto-trader/log?limit=${limit}`)
+      .then((r) => r.json())
+      .then(setLog)
+      .catch(() => {});
+  }, [limit]);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 15_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  return log;
+}
+
+export function useDeploymentReadiness() {
+  const [readiness, setReadiness] = useState<DeploymentReadiness | null>(null);
+
+  const refresh = useCallback(() => {
+    fetch(`${API_BASE}/api/deployment/readiness`)
+      .then((r) => r.json())
+      .then(setReadiness)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 30_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  return readiness;
 }
 
 export async function stopTrading() {

@@ -13,6 +13,7 @@ from app.engines.ai_engine import (
     rank_runner,
     score_tqs,
 )
+from app.engines.premium_filter import premium_in_band
 from app.models.schemas import (
     ExplosiveRunner,
     Greeks,
@@ -188,6 +189,8 @@ def _scan_runners(
             prev = _premium_history[hist_key].get(strike if side == Side.CALL else -strike)
             score, vel = rank_runner(opt, side, prev)
             ltp = opt.get("ltp") or opt.get("last_price", 0)
+            if not premium_in_band(ltp):
+                continue
 
             entry = {
                 "strike": strike,
@@ -383,9 +386,13 @@ async def build_symbol_snapshot(
         profile = _build_profile(candles, spot)
         option_breadth = build_breadth(chain, spot)
 
-        constituent_hm = await build_constituent_heatmap(symbol, client)
-        stock_breadth = breadth_from_constituents(constituent_hm)
-        breadth = blend_breadth(option_breadth, stock_breadth)
+        constituent_hm = None
+        if get_settings().fetch_constituents_in_snapshot:
+            constituent_hm = await build_constituent_heatmap(symbol, client)
+            stock_breadth = breadth_from_constituents(constituent_hm)
+            breadth = blend_breadth(option_breadth, stock_breadth)
+        else:
+            breadth = option_breadth
 
         greeks = _build_greeks(chain, atm, spot)
         regime = _detect_regime(candles)
@@ -469,7 +476,7 @@ async def build_symbol_snapshot(
             topExplosion=top_explosion,
             swingAlerts=swing_alerts,
             topSwing=top_swing,
-            constituentHeatmap=constituent_hm if constituent_hm.dataAvailable else None,
+            constituentHeatmap=constituent_hm if constituent_hm and constituent_hm.dataAvailable else None,
         )
         await attach_premarket_to_snapshot(snap, client, news_sentiment)
         return snap

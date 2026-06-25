@@ -2,6 +2,7 @@
 
 from typing import Any, Optional
 
+from app.engines.premium_filter import premium_in_band
 from app.engines.strategies.base import BaseStrategy, StrategySignal
 from app.models.schemas import Breadth, Greeks, MarketProfile, Orderflow, Regime, Side
 
@@ -27,7 +28,7 @@ class ATMPremiumAcceleration(BaseStrategy):
 
         opt = self._get_option(chain, atm, side)
         premium = opt.get("ltp") or opt.get("last_price", 0)
-        if not premium or premium < 30:
+        if not premium_in_band(premium):
             return None
 
         conf = min(96, 60 + orderflow.tickMomentum * 0.3 + orderflow.volumeAcceleration * 0.15)

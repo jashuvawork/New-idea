@@ -3,7 +3,7 @@
 import logging
 from typing import Any, Optional
 
-from app.engines.capital_allocator import lot_multiplier
+from app.engines.capital_allocator import lot_multiplier, set_lot_size
 from app.models.schemas import PaperTrade, Side, SymbolSnapshot
 from app.services.upstox import INDEX_KEYS, UpstoxClient, UpstoxError
 
@@ -19,20 +19,28 @@ def _instrument_from_heatmap(snap: SymbolSnapshot, strike: float, side: Side) ->
     return None
 
 
+def _lot_from_contract(contract: dict[str, Any], symbol: str) -> int:
+    raw = contract.get("lot_size") or contract.get("minimum_lot")
+    lot = int(raw) if raw is not None else lot_multiplier(symbol)
+    if lot > 0:
+        set_lot_size(symbol, lot)
+    return lot
+
+
 async def resolve_instrument_key(
     client: UpstoxClient,
     snap: SymbolSnapshot,
     strike: float,
     side: Side,
-) -> tuple[str, str]:
-    """Resolve Upstox instrument key and expiry for an option leg."""
+) -> tuple[str, str, int]:
+    """Resolve Upstox instrument key, expiry, and lot_size for an option leg."""
     expiry = snap.optionExpiry
     if not expiry:
         raise UpstoxError(f"No option expiry on snapshot for {snap.symbol}")
 
     from_heatmap = _instrument_from_heatmap(snap, strike, side)
     if from_heatmap:
-        return from_heatmap, expiry
+        return from_heatmap, expiry, lot_multiplier(snap.symbol)
 
     return await _resolve_from_contracts(client, snap.symbol, strike, side, expiry)
 
@@ -43,7 +51,7 @@ async def _resolve_from_contracts(
     strike: float,
     side: Side,
     expiry: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, int]:
     index_key = INDEX_KEYS.get(symbol)
     if not index_key:
         raise UpstoxError(f"Unknown symbol: {symbol}")
@@ -66,7 +74,8 @@ async def _resolve_from_contracts(
             continue
         instrument_key = contract.get("instrument_key")
         if instrument_key:
-            return instrument_key, expiry
+            lot = _lot_from_contract(contract, symbol)
+            return instrument_key, expiry, lot
 
     raise UpstoxError(f"No {inst_type} contract for {symbol} {strike} exp {expiry}")
 
@@ -91,8 +100,8 @@ async def place_entry_order(
     tag: str = "nq_auto_entry",
 ) -> dict[str, Any]:
     """Place intraday BUY for an option leg."""
-    instrument_key, expiry = await resolve_instrument_key(client, snap, strike, side)
-    quantity = lots * lot_multiplier(snap.symbol)
+    instrument_key, expiry, lot_size = await resolve_instrument_key(client, snap, strike, side)
+    quantity = lots * lot_size
     if quantity <= 0:
         raise UpstoxError("Invalid order quantity")
 
@@ -111,14 +120,15 @@ async def place_entry_order(
     })
     order_id = _extract_order_id(result)
     logger.info(
-        "LIVE ENTRY %s %s %s ×%d qty=%d order=%s",
-        snap.symbol, side.value, strike, lots, quantity, order_id,
+        "LIVE ENTRY %s %s %s ×%d lots (size %d) qty=%d order=%s",
+        snap.symbol, side.value, strike, lots, lot_size, quantity, order_id,
     )
     return {
         "order_id": order_id,
         "instrument_key": instrument_key,
         "expiry": expiry,
         "quantity": quantity,
+        "lot_size": lot_size,
         "raw": result,
     }
 
@@ -134,7 +144,8 @@ async def place_exit_order(
     if not instrument_key:
         raise UpstoxError(f"Trade {trade.id} missing instrument key for exit")
 
-    quantity = ctx.get("brokerQuantity") or (trade.lots * lot_multiplier(trade.symbol))
+    lot_size = int(ctx.get("lotSize") or lot_multiplier(trade.symbol))
+    quantity = ctx.get("brokerQuantity") or (trade.lots * lot_size)
     if quantity <= 0:
         raise UpstoxError("Invalid exit quantity")
 
@@ -153,8 +164,8 @@ async def place_exit_order(
     })
     order_id = _extract_order_id(result)
     logger.info(
-        "LIVE EXIT %s %s %s ×%d qty=%d order=%s reason=%s",
-        trade.symbol, trade.side.value, trade.strike, trade.lots, quantity, order_id,
+        "LIVE EXIT %s %s %s ×%d lots (size %d) qty=%d order=%s reason=%s",
+        trade.symbol, trade.side.value, trade.strike, trade.lots, lot_size, quantity, order_id,
         trade.exitReason,
     )
     return {"order_id": order_id, "quantity": quantity, "raw": result}

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 
 _cache: dict[str, tuple[datetime, ConstituentHeatmap]] = {}
-CACHE_SECONDS = 45
+CACHE_SECONDS = 90
 
 
 def _parse_quote(quote: dict[str, Any], prev_close: float) -> dict[str, float]:

@@ -23,12 +23,13 @@ from app.engines.capital_allocator import (
     compute_lots,
     compute_session_pnl,
     get_capital_snapshot,
+    get_lot_sizes_meta,
     lot_multiplier,
     refresh_capital_from_upstox,
     tune_exit_plan_for_position,
     update_daily_profit_gate,
 )
-from app.engines.trade_selector import EntryCandidate, find_best_entry
+from app.engines.trade_selector import EntryCandidate, diagnose_missed_entries, find_best_entry
 from app.engines.simple_profit import (
     evaluate_exit,
     get_session_targets,
@@ -224,6 +225,7 @@ async def _open_from_candidate(
                 "instrumentKey": order["instrument_key"],
                 "brokerOrderId": order["order_id"],
                 "brokerQuantity": order["quantity"],
+                "lotSize": order.get("lot_size", lot_mult),
             })
             state.liveOrdersPlaced += 1
         except UpstoxError as e:
@@ -311,6 +313,8 @@ def resume_trading() -> None:
 
 def reset_session() -> None:
     global _auto_trader_state
+    closed_ids = trade_store.close_open_trades_on_reset()
+    trade_store.record_session_reset(open_trade_ids=closed_ids)
     _calibration.reset()
     settings = get_settings()
     _auto_trader_state = AutoTraderState(
@@ -454,7 +458,7 @@ async def process(
     market_live = get_market_phase() == "LIVE_MARKET"
     profit_gate = update_daily_profit_gate(state)
     cap_snap = get_capital_snapshot()
-    state.capitalAllocation = cap_snap.to_dict()
+    state.capitalAllocation = {**cap_snap.to_dict(), **get_lot_sizes_meta()}
     state.dailyProfitGate = profit_gate.to_dict()
 
     if not profit_gate.newEntriesAllowed:
@@ -481,6 +485,8 @@ async def process(
                     "mode": best.mode,
                     "score": best.score,
                 })
+        else:
+            skipped.extend(diagnose_missed_entries(snapshots, state))
 
     state.skipped = skipped
     state.dailyReport = _calibration.build_report(state.closedPaperTrades)

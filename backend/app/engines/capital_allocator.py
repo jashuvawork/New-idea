@@ -1,6 +1,7 @@
 """Capital allocation from Upstox funds + static daily profit target/trail."""
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -12,11 +13,17 @@ from app.models.schemas import AutoTraderState, StrategyType
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 
-LOT_MULTIPLIERS: dict[str, int] = {
+# Fallback only — refreshed from Upstox /option/contract lot_size
+FALLBACK_LOT_SIZES: dict[str, int] = {
     "NIFTY": 25,
     "BANKNIFTY": 25,
     "SENSEX": 10,
 }
+
+_lot_sizes: dict[str, int] = {}
+_lot_sizes_source: str = "fallback"
+_lot_sizes_fetched_at: Optional[str] = None
+_lot_sizes_last_mono: float = 0.0
 
 
 @dataclass
@@ -26,11 +33,11 @@ class CapitalSnapshot:
     totalEquityInr: float = 500_000.0
     source: str = "fallback"
     perTradeRiskInr: float = 12_000.0
-    perTradeCapitalInr: float = 250_000.0
-    maxExposureInr: float = 175_000.0
-    minLots: int = 6
-    targetLots: int = 10
-    maxLots: int = 14
+    perTradeCapitalInr: float = 330_000.0
+    maxExposureInr: float = 330_000.0
+    minLots: int = 25
+    targetLots: int = 60
+    maxLots: int = 100
     fetchedAt: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -85,22 +92,85 @@ _best_pnl: float = 0.0
 
 
 def lot_multiplier(symbol: str) -> int:
-    return LOT_MULTIPLIERS.get(symbol.upper(), 25)
+    """Units per lot — live value from Upstox, fallback if not yet fetched."""
+    sym = symbol.upper()
+    if sym in _lot_sizes:
+        return _lot_sizes[sym]
+    return FALLBACK_LOT_SIZES.get(sym, 25)
+
+
+def get_lot_sizes() -> dict[str, int]:
+    """Current lot sizes for all configured symbols."""
+    settings = get_settings()
+    return {sym: lot_multiplier(sym) for sym in settings.symbols}
+
+
+def get_lot_sizes_meta() -> dict[str, Any]:
+    return {
+        "lotSizes": get_lot_sizes(),
+        "lotSizesSource": _lot_sizes_source,
+        "lotSizesFetchedAt": _lot_sizes_fetched_at,
+    }
+
+
+def set_lot_size(symbol: str, lot_size: int) -> None:
+    """Update cached lot size (e.g. from a resolved option contract)."""
+    sym = symbol.upper()
+    lot = int(lot_size)
+    if lot <= 0:
+        return
+    if _lot_sizes.get(sym) != lot:
+        logger.info("Lot size updated %s: %s → %d", sym, _lot_sizes.get(sym), lot)
+    _lot_sizes[sym] = lot
+
+
+async def refresh_lot_sizes(client, force: bool = False) -> dict[str, int]:
+    """Pull lot_size from Upstox option contracts for each index."""
+    global _lot_sizes_source, _lot_sizes_fetched_at, _lot_sizes_last_mono
+    settings = get_settings()
+    ttl = settings.upstox_expiries_cache_seconds
+    if not force and _lot_sizes and (time.monotonic() - _lot_sizes_last_mono) < ttl:
+        return get_lot_sizes()
+
+    updated = 0
+    for sym in settings.symbols:
+        try:
+            lot = await client.get_lot_size(sym)
+            set_lot_size(sym, lot)
+            updated += 1
+        except Exception as e:
+            logger.warning("Upstox lot_size fetch failed for %s: %s", sym, e)
+
+    if updated:
+        _lot_sizes_source = "upstox"
+        _lot_sizes_fetched_at = datetime.now(IST).isoformat()
+        _lot_sizes_last_mono = time.monotonic()
+        logger.info("Lot sizes from Upstox: %s", get_lot_sizes())
+    return get_lot_sizes()
+
+
+def clamp_lots(lots: int) -> int:
+    """Clamp lot count to configured analysis band (default 25–100)."""
+    settings = get_settings()
+    min_l = settings.min_lots_per_trade or settings.simple_min_lots
+    max_l = settings.max_lots_per_trade or settings.simple_max_lots
+    return max(min_l, min(lots, max_l))
 
 
 def _lot_tiers(capital_inr: float) -> tuple[int, int, int]:
-    """Static realistic lot bands by Upstox available margin."""
-    if capital_inr < 100_000:
-        return 1, 2, 4
-    if capital_inr < 300_000:
-        return 2, 4, 6
-    if capital_inr < 700_000:
-        return 4, 6, 10
-    if capital_inr < 1_500_000:
-        return 6, 10, 14
-    if capital_inr < 3_000_000:
-        return 8, 12, 18
-    return 10, 14, 22
+    """Lot bands for UI — scaled within 25–100 by available margin."""
+    settings = get_settings()
+    min_l = settings.simple_min_lots
+    max_l = settings.simple_max_lots
+    if capital_inr >= 2_000_000:
+        tgt = min(max_l, 85)
+    elif capital_inr >= 1_000_000:
+        tgt = 75
+    elif capital_inr >= 500_000:
+        tgt = settings.simple_target_lots
+    else:
+        tgt = max(min_l, settings.simple_target_lots - 10)
+    return min_l, tgt, max_l
 
 
 def _parse_upstox_funds(data: dict[str, Any]) -> tuple[float, float, float]:
@@ -126,6 +196,8 @@ async def refresh_capital_from_upstox(client) -> CapitalSnapshot:
     settings = get_settings()
     now = datetime.now(IST).isoformat()
     min_l, tgt_l, max_l = _lot_tiers(settings.fallback_capital_inr)
+
+    await refresh_lot_sizes(client)
 
     try:
         funds = await client.get_funds()
@@ -171,13 +243,14 @@ def get_capital_snapshot() -> CapitalSnapshot:
         return _capital
     settings = get_settings()
     min_l, tgt_l, max_l = _lot_tiers(settings.fallback_capital_inr)
+    budget = settings.fallback_capital_inr * settings.per_trade_capital_pct
     return CapitalSnapshot(
         availableMarginInr=settings.fallback_capital_inr,
         totalEquityInr=settings.fallback_capital_inr,
         source="fallback",
-        perTradeRiskInr=settings.fallback_capital_inr * settings.per_trade_capital_pct,
-        perTradeCapitalInr=settings.fallback_capital_inr * settings.per_trade_capital_pct,
-        maxExposureInr=settings.fallback_capital_inr * settings.per_trade_capital_pct,
+        perTradeRiskInr=budget,
+        perTradeCapitalInr=budget,
+        maxExposureInr=budget,
         minLots=min_l,
         targetLots=tgt_l,
         maxLots=max_l,
@@ -251,8 +324,8 @@ def compute_lots(
     tier: Optional[str] = None,
 ) -> int:
     """
-    Max lots from 50% of Upstox available margin per trade.
-    lots = floor(trade_capital / (premium × lot_multiplier))
+    Lots from 66% of Upstox margin, per-index contract size from Upstox lot_size.
+    lots = floor(trade_capital / (premium × lot_multiplier[symbol]))
     """
     cap = get_capital_snapshot()
     settings = get_settings()
@@ -270,19 +343,15 @@ def compute_lots(
         return 1
 
     lots = int(trade_budget / margin_per_lot)
-    lots = max(1, lots)
-
-    if settings.max_lots_per_trade > 0:
-        lots = min(lots, settings.max_lots_per_trade)
 
     if settings.aggressive_lot_sizing:
-        return lots
+        return clamp_lots(max(1, lots))
 
     # Legacy conservative scaling (if aggressive disabled)
     risk_per_lot = stop_points * mult
     lots_by_risk = int(cap.perTradeRiskInr / risk_per_lot) if risk_per_lot > 0 else lots
     lots = min(lots, lots_by_risk, cap.maxLots)
-    return max(1, lots)
+    return clamp_lots(max(settings.simple_min_lots, lots))
 
 
 def tune_exit_plan_for_position(
@@ -291,7 +360,7 @@ def tune_exit_plan_for_position(
     premium: float,
     symbol: str,
 ) -> dict[str, Any]:
-    """Tune TP/SL for huge lot positions — INR risk caps on 50% trade capital."""
+    """Tune TP/SL for huge lot positions — INR risk caps on 66% trade capital."""
     settings = get_settings()
     cap = get_capital_snapshot()
     mult = lot_multiplier(symbol)
@@ -317,9 +386,9 @@ def tune_exit_plan_for_position(
     trail_arm = max(float(plan_dict.get("trailArmPoints", 3.0)), target * 0.45)
 
     reasoning.append(
-        f"Size tune: {lots} lots · ₹{position_inr:,.0f} notional · SL ≤₹{max_sl_inr:,.0f} ({stop:.1f}pt)"
+        f"Size tune: {lots} lots × {mult} units · ₹{position_inr:,.0f} notional · SL ≤₹{max_sl_inr:,.0f} ({stop:.1f}pt)"
     )
-    reasoning.append(f"TP target ~₹{target_inr:,.0f} ({target:.1f}pt) on 50% capital")
+    reasoning.append(f"TP target ~₹{target_inr:,.0f} ({target:.1f}pt) on {settings.per_trade_capital_pct:.0%} capital")
 
     return {
         **plan_dict,
@@ -328,6 +397,7 @@ def tune_exit_plan_for_position(
         "microTargetPoints": round(micro, 2),
         "trailArmPoints": round(trail_arm, 2),
         "lots": lots,
+        "lotMultiplier": mult,
         "positionInr": round(position_inr, 2),
         "tradeBudgetInr": round(trade_budget, 2),
         "reasoning": reasoning,

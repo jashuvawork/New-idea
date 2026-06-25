@@ -1,7 +1,8 @@
-"""Persistent paper trade storage — daily archives for learning and review."""
+"""Persistent trade storage — daily JSON archives + append-only trade log for paper and live."""
 
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 
 _store_dir: Optional[Path] = None
+_log_path: Optional[Path] = None
 
 
 def get_store_dir() -> Path:
@@ -25,8 +27,27 @@ def get_store_dir() -> Path:
     return _store_dir
 
 
+def get_log_path() -> Path:
+    """Append-only trade log — one JSON event per line (paper + live)."""
+    global _log_path
+    if _log_path is None:
+        from app.config import get_settings
+
+        settings = get_settings()
+        if settings.trade_log_file:
+            _log_path = Path(settings.trade_log_file)
+        else:
+            _log_path = get_store_dir() / "trades.log"
+        _log_path.parent.mkdir(parents=True, exist_ok=True)
+    return _log_path
+
+
+def _now() -> datetime:
+    return datetime.now(IST)
+
+
 def _today() -> str:
-    return datetime.now(IST).strftime("%Y-%m-%d")
+    return _now().strftime("%Y-%m-%d")
 
 
 def _day_file(date: str) -> Path:
@@ -49,11 +70,93 @@ def _save_day(date: str, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, default=str))
 
 
+def _enum_val(value: Any) -> Any:
+    return value.value if hasattr(value, "value") else value
+
+
+def _execution_mode(context: Optional[dict]) -> str:
+    if context and context.get("executionMode"):
+        return str(context["executionMode"])
+    return "PAPER"
+
+
+def _trade_payload(trade: PaperTrade, context: Optional[dict] = None) -> dict[str, Any]:
+    """Unified trade record for JSON archive and append-only log."""
+    payload = {
+        "id": trade.id,
+        "symbol": trade.symbol,
+        "side": _enum_val(trade.side),
+        "strike": trade.strike,
+        "entryPremium": trade.entryPremium,
+        "currentPremium": trade.currentPremium,
+        "lots": trade.lots,
+        "pnlInr": trade.pnlInr,
+        "pnlPoints": trade.pnlPoints,
+        "bestPnlPoints": trade.bestPnlPoints,
+        "status": trade.status,
+        "exitReason": trade.exitReason,
+        "strategyType": _enum_val(trade.strategyType),
+        "openedAt": trade.openedAt.isoformat() if trade.openedAt else None,
+        "closedAt": trade.closedAt.isoformat() if trade.closedAt else None,
+        "sessionDate": trade.sessionDate or _today(),
+        "executionMode": _execution_mode(context or trade.entryContext),
+    }
+    ctx = context or trade.entryContext or {}
+    for key in (
+        "instrumentKey",
+        "optionExpiry",
+        "brokerOrderId",
+        "brokerExitOrderId",
+        "brokerQuantity",
+        "selectionMode",
+        "selectionScore",
+        "exitPlan",
+    ):
+        if key in ctx:
+            payload[key] = ctx[key]
+    return payload
+
+
 def _trade_to_record(trade: PaperTrade, context: Optional[dict] = None) -> dict[str, Any]:
     record = trade.model_dump(mode="json")
     if context:
         record["context"] = context
+    record["executionMode"] = _execution_mode(context or trade.entryContext)
     return record
+
+
+def _append_log(event: str, payload: dict[str, Any]) -> None:
+    """Write one JSON line to trades.log (durable audit trail for paper + live)."""
+    entry = {
+        "ts": _now().isoformat(),
+        "event": event,
+        **payload,
+    }
+    line = json.dumps(entry, default=str, separators=(",", ":"))
+    try:
+        with open(get_log_path(), "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except Exception as e:
+        logger.error("Failed to append trade log: %s", e)
+
+
+def _human_log_line(event: str, trade: PaperTrade, context: Optional[dict] = None) -> str:
+    mode = _execution_mode(context or trade.entryContext)
+    side = _enum_val(trade.side)
+    base = (
+        f"{event} {mode} {trade.id} {trade.symbol} {side} {trade.strike:g} "
+        f"lots={trade.lots} entry={trade.entryPremium:.2f}"
+    )
+    if event == "TRADE_CLOSED":
+        return (
+            f"{base} exit={trade.exitReason} pnl_inr={trade.pnlInr:.2f} "
+            f"pnl_pts={trade.pnlPoints:.2f}"
+        )
+    ctx = context or {}
+    broker = ctx.get("brokerOrderId")
+    if broker:
+        return f"{base} broker_order={broker}"
+    return base
 
 
 def _update_summary(data: dict[str, Any]) -> None:
@@ -84,43 +187,61 @@ def _update_summary(data: dict[str, Any]) -> None:
     }
 
 
+def _hold_seconds(trade: PaperTrade) -> float:
+    try:
+        opened = trade.openedAt
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=IST)
+        end = trade.closedAt or _now()
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=IST)
+        return (end.astimezone(IST) - opened.astimezone(IST)).total_seconds()
+    except Exception:
+        return 0
+
+
 def record_trade_opened(trade: PaperTrade, context: Optional[dict] = None) -> None:
-    """Persist trade open event."""
+    """Persist trade open to daily archive and append-only log."""
     date = _today()
     data = _load_day(date)
     record = _trade_to_record(trade, context)
     record["sessionDate"] = date
 
-    # Update or add to trades list
     existing = {t["id"]: i for i, t in enumerate(data["trades"])}
     if trade.id in existing:
         data["trades"][existing[trade.id]] = record
     else:
         data["trades"].append(record)
 
+    event_ctx = context or {}
     data["events"].append({
-        "type": "PAPER_OPENED",
+        "type": "TRADE_OPENED",
         "tradeId": trade.id,
-        "timestamp": datetime.now(IST).isoformat(),
+        "timestamp": _now().isoformat(),
+        "executionMode": _execution_mode(event_ctx),
         "symbol": trade.symbol,
-        "side": trade.side.value if hasattr(trade.side, "value") else trade.side,
+        "side": _enum_val(trade.side),
         "strike": trade.strike,
         "premium": trade.entryPremium,
-        "strategy": trade.strategyType.value if hasattr(trade.strategyType, "value") else trade.strategyType,
-        "context": context or {},
+        "lots": trade.lots,
+        "strategy": _enum_val(trade.strategyType),
+        "context": event_ctx,
     })
     _update_summary(data)
     _save_day(date, data)
-    logger.info("Stored paper trade open: %s", trade.id)
+
+    trade_payload = _trade_payload(trade, context)
+    _append_log("TRADE_OPENED", {"trade": trade_payload, "context": event_ctx})
+    logger.info(_human_log_line("TRADE_OPENED", trade, context))
 
 
 def record_trade_closed(trade: PaperTrade, context: Optional[dict] = None) -> None:
-    """Persist trade close event with full outcome."""
+    """Persist trade close with full outcome to archive and log."""
     date = trade.openedAt.astimezone(IST).strftime("%Y-%m-%d") if trade.openedAt.tzinfo else _today()
     data = _load_day(date)
     record = _trade_to_record(trade, context)
     record["sessionDate"] = date
-    record["closedAt"] = datetime.now(IST).isoformat()
+    record["closedAt"] = (trade.closedAt or _now()).isoformat()
     record["status"] = "CLOSED"
 
     existing = {t["id"]: i for i, t in enumerate(data["trades"])}
@@ -129,30 +250,125 @@ def record_trade_closed(trade: PaperTrade, context: Optional[dict] = None) -> No
     else:
         data["trades"].append(record)
 
+    event_ctx = context or {}
     data["events"].append({
-        "type": "EXITED",
+        "type": "TRADE_CLOSED",
         "tradeId": trade.id,
-        "timestamp": datetime.now(IST).isoformat(),
+        "timestamp": _now().isoformat(),
+        "executionMode": _execution_mode(event_ctx),
         "exitReason": trade.exitReason,
         "pnlInr": trade.pnlInr,
         "pnlPoints": trade.pnlPoints,
         "bestPnlPoints": trade.bestPnlPoints,
         "holdSeconds": _hold_seconds(trade),
-        "context": context or {},
+        "context": event_ctx,
     })
     _update_summary(data)
     _save_day(date, data)
-    logger.info("Stored paper trade close: %s pnl=%.0f reason=%s", trade.id, trade.pnlInr, trade.exitReason)
+
+    trade_payload = _trade_payload(trade, context)
+    _append_log("TRADE_CLOSED", {
+        "trade": trade_payload,
+        "holdSeconds": _hold_seconds(trade),
+        "context": event_ctx,
+    })
+    logger.info(_human_log_line("TRADE_CLOSED", trade, context))
 
 
-def _hold_seconds(trade: PaperTrade) -> float:
+def record_session_reset(reason: str = "manual_reset", open_trade_ids: Optional[list[str]] = None) -> None:
+    """Log session reset — aligns in-memory state with persistent store audit trail."""
+    payload = {
+        "reason": reason,
+        "openTradeIds": open_trade_ids or [],
+        "sessionDate": _today(),
+    }
+    _append_log("SESSION_RESET", payload)
+    logger.info("SESSION_RESET reason=%s open_trades=%s", reason, len(open_trade_ids or []))
+
+
+def close_open_trades_on_reset(reason: str = "SESSION_RESET") -> list[str]:
+    """Mark all persisted open trades closed on session reset."""
+    closed_ids: list[str] = []
+    for path in sorted(get_store_dir().glob("*.json")):
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            continue
+        changed = False
+        for t in data.get("trades", []):
+            if t.get("status") != "OPEN":
+                continue
+            t["status"] = "CLOSED"
+            t["exitReason"] = reason
+            t["closedAt"] = _now().isoformat()
+            t["pnlInr"] = t.get("pnlInr", 0)
+            closed_ids.append(t["id"])
+            changed = True
+            data["events"].append({
+                "type": "TRADE_CLOSED",
+                "tradeId": t["id"],
+                "timestamp": _now().isoformat(),
+                "executionMode": t.get("executionMode", "PAPER"),
+                "exitReason": reason,
+                "pnlInr": t.get("pnlInr", 0),
+                "context": {"reset": True},
+            })
+            try:
+                trade = PaperTrade(**t)
+                _append_log("TRADE_CLOSED", {
+                    "trade": _trade_payload(trade, t.get("context")),
+                    "context": {"reset": True, "reason": reason},
+                })
+            except Exception:
+                _append_log("TRADE_CLOSED", {
+                    "trade": {"id": t.get("id"), "status": "CLOSED", "exitReason": reason},
+                    "context": {"reset": True},
+                })
+        if changed:
+            _update_summary(data)
+            _save_day(data.get("date", path.stem), data)
+    return closed_ids
+
+
+def check_store_health() -> dict[str, Any]:
+    """Verify trade store and log are writable — used for live deployment readiness."""
+    store_dir = get_store_dir()
+    log_path = get_log_path()
+    checks: dict[str, Any] = {
+        "storeDirExists": store_dir.is_dir(),
+        "storeDirWritable": os.access(store_dir, os.W_OK),
+        "logFileExists": log_path.exists(),
+        "logFileWritable": os.access(log_path.parent, os.W_OK),
+    }
+    checks["healthy"] = checks["storeDirWritable"] and checks["logFileWritable"]
+    return {
+        "storeDir": str(store_dir),
+        "logFile": str(log_path),
+        "logSizeBytes": log_path.stat().st_size if log_path.exists() else 0,
+        "checks": checks,
+    }
+
+
+def get_recent_log_lines(limit: int = 100) -> list[dict[str, Any]]:
+    """Return newest trade log entries (JSON lines), parsed."""
+    path = get_log_path()
+    if not path.exists():
+        return []
     try:
-        opened = trade.openedAt
-        if opened.tzinfo is None:
-            opened = opened.replace(tzinfo=IST)
-        return (datetime.now(IST) - opened.astimezone(IST)).total_seconds()
-    except Exception:
-        return 0
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception as e:
+        logger.warning("Failed to read trade log: %s", e)
+        return []
+    entries: list[dict[str, Any]] = []
+    for line in lines[-limit:]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return list(reversed(entries))
 
 
 def get_history(days: int = 30) -> list[dict[str, Any]]:
@@ -205,3 +421,14 @@ def load_open_trades() -> list[dict[str, Any]]:
         except Exception:
             continue
     return list(open_by_id.values())
+
+
+def count_today_trades() -> dict[str, int]:
+    """Quick counts for readiness dashboard."""
+    data = _load_day(_today())
+    trades = data.get("trades", [])
+    return {
+        "open": len([t for t in trades if t.get("status") == "OPEN"]),
+        "closed": len([t for t in trades if t.get("status") == "CLOSED"]),
+        "total": len(trades),
+    }

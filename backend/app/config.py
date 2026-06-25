@@ -35,10 +35,23 @@ class Settings(BaseSettings):
     auto_trading_enabled: bool = True
     shadow_trade_all_signals: bool = True
 
-    # Data cadence
-    market_poll_seconds: int = 3
-    snapshot_cache_seconds: int = 3
+    # Data cadence — conservative defaults to avoid Upstox 429 rate limits
+    market_poll_seconds: int = 5
+    snapshot_cache_seconds: int = 5
     background_market_monitor_enabled: bool = True
+
+    # Upstox rate limiting / caching
+    upstox_min_request_interval_ms: int = 250
+    upstox_request_retries: int = 4
+    upstox_rate_limit_cooldown_seconds: int = 45
+    upstox_chain_cache_seconds: int = 20
+    upstox_ltp_cache_seconds: int = 5
+    upstox_expiries_cache_seconds: int = 600
+    upstox_funds_cache_seconds: int = 90
+    upstox_candles_cache_seconds: int = 60
+    upstox_max_expiry_probes: int = 2
+    capital_refresh_seconds: int = 90
+    fetch_constituents_in_snapshot: bool = False
 
     # Trading mode
     paper_simple_profit_mode: bool = True
@@ -52,26 +65,31 @@ class Settings(BaseSettings):
     explosion_target_elite: float = 25.0
     explosion_target_standard: float = 12.0
 
+    # Option premium (LTP) band for entries and scanners
+    min_option_premium_inr: float = 25.0
+    max_option_premium_inr: float = 100.0
+
     # Enhanced scalping (more powerful than base spec)
     enhanced_micro_target_points: float = 2.5  # faster micro lock vs 3.0 base
-    enhanced_velocity_threshold: float = 1.8  # lower bar for quick scalps
-    enhanced_tqs_entry: int = 68  # vs 72 base — more opportunities
+    enhanced_velocity_threshold: float = 1.2  # allow strategy signals without runner history
+    enhanced_tqs_entry: int = 50  # aligned with paper analysis band
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
-    # Capital / risk — 50% margin per trade, max lots
+    # Capital / risk — 66% margin per trade; lots sized per index lot multiplier
     fallback_capital_inr: float = 500_000
-    per_trade_capital_pct: float = 0.50
+    per_trade_capital_pct: float = 0.66
     aggressive_lot_sizing: bool = True
-    aggressive_min_tqs: int = 78
-    aggressive_min_explosion_score: int = 70
-    aggressive_min_swing_confidence: int = 72
+    aggressive_min_tqs: int = 50
+    aggressive_min_explosion_score: int = 45
+    aggressive_min_swing_confidence: int = 65
     aggressive_max_open_scalps: int = 1
-    max_lots_per_trade: int = 0
+    max_lots_per_trade: int = 100
+    min_lots_per_trade: int = 25
     max_risk_per_trade_inr: float = 500_000
     min_per_trade_risk_inr: float = 3_000
-    per_trade_risk_pct: float = 0.50
-    max_exposure_pct: float = 0.50
+    per_trade_risk_pct: float = 0.66
+    max_exposure_pct: float = 0.66
     position_sl_cap_pct: float = 0.06
     position_tp_target_pct: float = 0.10
     emergency_stop_inr: float = 50_000
@@ -81,9 +99,9 @@ class Settings(BaseSettings):
     daily_profit_trail_inr: float = 20_000
     use_upstox_capital_for_sizing: bool = True
 
-    simple_max_lots: int = 14
-    simple_target_lots: int = 10
-    simple_min_lots: int = 6
+    simple_max_lots: int = 100
+    simple_target_lots: int = 60
+    simple_min_lots: int = 25
 
     adaptive_exits_enabled: bool = True
     ml_exit_tuning_enabled: bool = True
@@ -92,6 +110,7 @@ class Settings(BaseSettings):
 
     # Persistence
     trade_store_dir: str = "/tmp/nexusquant/trades"
+    trade_log_file: str = ""  # default: {trade_store_dir}/trades.log
     daily_token_once: bool = True
 
     # Swing trading (multi-day paper holds)
@@ -101,8 +120,8 @@ class Settings(BaseSettings):
     swing_stop_pct: float = 12.0
     swing_trail_arm_pct: float = 20.0
     swing_trail_keep: float = 0.70
-    swing_min_lots: int = 4
-    swing_target_lots: int = 8
+    swing_min_lots: int = 25
+    swing_target_lots: int = 75
     swing_max_open: int = 2
     swing_max_loss_inr: float = 25_000
 
