@@ -15,11 +15,15 @@ function CheckRow({ label, ok, detail }: { label: string; ok: boolean; detail: s
   );
 }
 
+function isMilestoneStats(stats: MilestoneStats | null): stats is MilestoneStats {
+  return Boolean(stats && typeof stats.tradeCount === 'number' && stats.checks);
+}
+
 export function PerformanceMilestone({ stats }: { stats: MilestoneStats | null }) {
-  if (!stats) {
+  if (!isMilestoneStats(stats)) {
     return (
       <Panel title="50-Trade Milestone">
-        <p className="text-xs text-nexus-muted text-center py-4">Loading track record…</p>
+        <p className="text-xs text-nexus-muted text-center py-4">Loading track record… (requires backend milestone API)</p>
       </Panel>
     );
   }

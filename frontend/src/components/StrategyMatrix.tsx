@@ -33,7 +33,7 @@ export function StrategyMatrix({ snap }: { snap: SymbolSnapshot }) {
             </div>
             {s.status === 'active' && (
               <div className="flex gap-3 mt-0.5 text-nexus-muted">
-                <span>ML: {(s.mlProbability * 100).toFixed(0)}%</span>
+                <span>ML: {((s.mlProbability ?? 0) * 100).toFixed(0)}%</span>
                 {s.sessionMatch && <span className="text-nexus-accent">Session ✓</span>}
               </div>
             )}

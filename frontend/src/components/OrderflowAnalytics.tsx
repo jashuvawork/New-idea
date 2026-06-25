@@ -2,13 +2,13 @@ import { Panel, ScoreBar } from './Panel';
 import type { SymbolSnapshot } from '../types';
 
 export function OrderflowAnalytics({ snap }: { snap: SymbolSnapshot }) {
-  const of = snap.orderflow;
+  const of = snap.orderflow ?? {};
   const metrics = [
-    { label: 'Delta Velocity', value: of.deltaVelocity },
-    { label: 'Volume Accel', value: of.volumeAcceleration },
-    { label: 'Breakout Vel', value: of.breakoutVelocity },
-    { label: 'Bid/Ask Imb', value: of.bidAskImbalance },
-    { label: 'Tick Momentum', value: of.tickMomentum },
+    { label: 'Delta Velocity', value: of.deltaVelocity ?? 0 },
+    { label: 'Volume Accel', value: of.volumeAcceleration ?? 0 },
+    { label: 'Breakout Vel', value: of.breakoutVelocity ?? 0 },
+    { label: 'Bid/Ask Imb', value: of.bidAskImbalance ?? 0 },
+    { label: 'Tick Momentum', value: of.tickMomentum ?? 0 },
   ];
 
   return (
