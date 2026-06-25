@@ -43,7 +43,9 @@ from app.engines.premarket_engine import (
     build_premarket_snapshot,
 )
 from app.engines.ml_engine import get_ml_engine
+from app.services.tick_store import overlay_chain_ltps, overlay_index_ltp
 from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase
+from app.services.upstox_ws import is_ws_active
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -379,6 +381,10 @@ async def build_symbol_snapshot(
 
         if not chain:
             raise UpstoxError("Empty option chain")
+
+        if is_ws_active():
+            chain = overlay_chain_ltps(chain)
+            spot = overlay_index_ltp(symbol, spot)
 
         atm = _atm_strike(spot, symbol)
         heatmap = build_heatmap(chain, spot, atm)

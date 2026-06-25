@@ -7,6 +7,7 @@ const API_BASE = import.meta.env.DEV
   ? ''
   : (import.meta.env.VITE_API_URL || '');
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 3000);
+const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   if (ms <= 0) return 'offline';
@@ -22,6 +23,7 @@ const EMPTY_METRICS: StreamMetrics = {
   stalenessMs: 0,
   pollIntervalMs: POLL_MS,
   connectionQuality: 'offline',
+  streamMode: SSE_ENABLED ? 'sse' : 'poll',
 };
 
 async function fetchJson<T>(url: string): Promise<T | null> {
@@ -34,6 +36,42 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   }
 }
 
+function applySnapshot(
+  json: MultiSnapshot,
+  started: number,
+  latencyHistory: React.MutableRefObject<number[]>,
+  lastSuccessAt: React.MutableRefObject<Date | null>,
+  streamMode: StreamMetrics['streamMode'],
+  pollIntervalMs: number,
+  setData: (d: MultiSnapshot) => void,
+  setError: (e: string | null) => void,
+  setMetrics: React.Dispatch<React.SetStateAction<StreamMetrics>>,
+) {
+  if (!json || typeof json !== 'object' || !json.snapshots) {
+    throw new Error('Invalid API response');
+  }
+  const now = new Date();
+  lastSuccessAt.current = now;
+  const elapsed = Math.round(performance.now() - started);
+
+  latencyHistory.current = [...latencyHistory.current.slice(-9), elapsed];
+  const avg = Math.round(
+    latencyHistory.current.reduce((a, b) => a + b, 0) / latencyHistory.current.length,
+  );
+
+  setMetrics({
+    lastLatencyMs: elapsed,
+    avgLatencyMs: avg,
+    lastUpdatedAt: now,
+    stalenessMs: 0,
+    pollIntervalMs,
+    connectionQuality: latencyQuality(elapsed),
+    streamMode,
+  });
+  setData(json);
+  setError(null);
+}
+
 export function useMarketStream() {
   const [data, setData] = useState<MultiSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +79,7 @@ export function useMarketStream() {
   const [metrics, setMetrics] = useState<StreamMetrics>(EMPTY_METRICS);
   const latencyHistory = useRef<number[]>([]);
   const lastSuccessAt = useRef<Date | null>(null);
+  const sseFailed = useRef(false);
 
   const fetchSnapshot = useCallback(async () => {
     const started = performance.now();
@@ -50,33 +89,25 @@ export function useMarketStream() {
       if (!res.ok) throw new Error(`API ${res.status}`);
 
       const json = (await res.json()) as MultiSnapshot;
-      if (!json || typeof json !== 'object' || !json.snapshots) {
-        throw new Error('Invalid API response');
-      }
-      const now = new Date();
-      lastSuccessAt.current = now;
-
-      latencyHistory.current = [...latencyHistory.current.slice(-9), elapsed];
-      const avg = Math.round(
-        latencyHistory.current.reduce((a, b) => a + b, 0) / latencyHistory.current.length,
+      applySnapshot(
+        json,
+        started,
+        latencyHistory,
+        lastSuccessAt,
+        'poll',
+        POLL_MS,
+        setData,
+        setError,
+        setMetrics,
       );
-
-      setMetrics({
-        lastLatencyMs: elapsed,
-        avgLatencyMs: avg,
-        lastUpdatedAt: now,
-        stalenessMs: 0,
-        pollIntervalMs: POLL_MS,
-        connectionQuality: latencyQuality(elapsed),
-      });
-      setData(json);
-      setError(null);
+      void elapsed;
     } catch (e) {
       const elapsed = Math.round(performance.now() - started);
       setMetrics((prev) => ({
         ...prev,
         lastLatencyMs: elapsed,
         connectionQuality: 'offline',
+        streamMode: 'poll',
         stalenessMs: lastSuccessAt.current
           ? Date.now() - lastSuccessAt.current.getTime()
           : prev.stalenessMs,
@@ -87,7 +118,7 @@ export function useMarketStream() {
     }
   }, []);
 
-  // Tick staleness between polls so UI shows aging data
+  // Tick staleness between updates
   useEffect(() => {
     const id = setInterval(() => {
       if (!lastSuccessAt.current) return;
@@ -100,9 +131,63 @@ export function useMarketStream() {
   }, []);
 
   useEffect(() => {
-    fetchSnapshot();
-    const id = setInterval(fetchSnapshot, POLL_MS);
-    return () => clearInterval(id);
+    if (!SSE_ENABLED || sseFailed.current) {
+      fetchSnapshot();
+      const id = setInterval(fetchSnapshot, POLL_MS);
+      return () => clearInterval(id);
+    }
+
+    const url = `${API_BASE}/api/market/stream`;
+    const es = new EventSource(url);
+    let opened = false;
+    let pollId: ReturnType<typeof setInterval> | null = null;
+
+    es.onopen = () => {
+      opened = true;
+      setLoading(false);
+      setMetrics((prev) => ({ ...prev, streamMode: 'sse', connectionQuality: 'good' }));
+    };
+
+    es.onmessage = (ev) => {
+      const started = performance.now();
+      try {
+        const json = JSON.parse(ev.data) as MultiSnapshot;
+        applySnapshot(
+          json,
+          started,
+          latencyHistory,
+          lastSuccessAt,
+          'sse',
+          1000,
+          setData,
+          setError,
+          setMetrics,
+        );
+        setLoading(false);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Invalid stream payload');
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      if (!opened) {
+        sseFailed.current = true;
+        setMetrics((prev) => ({ ...prev, streamMode: 'poll' }));
+        fetchSnapshot();
+        pollId = setInterval(fetchSnapshot, POLL_MS);
+        return;
+      }
+      setMetrics((prev) => ({
+        ...prev,
+        connectionQuality: prev.stalenessMs > 5000 ? 'offline' : prev.connectionQuality,
+      }));
+    };
+
+    return () => {
+      es.close();
+      if (pollId) clearInterval(pollId);
+    };
   }, [fetchSnapshot]);
 
   return { data, error, loading, metrics, refetch: fetchSnapshot };

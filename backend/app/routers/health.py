@@ -9,6 +9,7 @@ from app.services import trade_store
 from app.services.redis_store import has_upstox_token
 from app.services.token_manager import get_daily_token_status
 from app.services.upstox import get_market_phase
+from app.services.upstox_ws import ws_status
 
 router = APIRouter(tags=["health"])
 
@@ -51,6 +52,8 @@ async def deployment_status():
             "fallbackCapitalInr": settings.fallback_capital_inr,
             "maxSizingCapitalInr": settings.max_sizing_capital_inr,
             "aggressiveLotSizing": settings.aggressive_lot_sizing,
+            "maxLotsPerTrade": settings.max_lots_per_trade,
+            "useUpstoxCapital": settings.use_upstox_capital_for_sizing,
             "minOptionPremiumInr": settings.min_option_premium_inr,
             "maxOptionPremiumInr": settings.max_option_premium_inr,
             "enhancedMode": True,
@@ -62,7 +65,11 @@ async def deployment_status():
         "cadence": {
             "marketPollSeconds": settings.market_poll_seconds,
             "snapshotCacheSeconds": settings.snapshot_cache_seconds,
+            "tickSnapshotSeconds": settings.tick_snapshot_seconds,
+            "marketPollSecondsWs": settings.market_poll_seconds_ws,
+            "sseEnabled": settings.sse_enabled,
         },
+        "websocket": ws_status(),
         "tradeLog": {
             "storeDir": store_health["storeDir"],
             "logFile": store_health["logFile"],

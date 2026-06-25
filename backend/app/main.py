@@ -20,25 +20,36 @@ async def _background_monitor():
     """Poll market even without UI open."""
     settings = get_settings()
     while True:
+        poll = settings.market_poll_seconds
         try:
             if settings.background_market_monitor_enabled:
                 from app.routers.market import get_multi_snapshot
-                await get_multi_snapshot()
+                from app.services.upstox_ws import is_ws_active
+
+                await get_multi_snapshot(broadcast=True)
+                if is_ws_active():
+                    poll = settings.market_poll_seconds_ws
         except Exception as e:
             logger.warning("Background monitor error: %s", e)
-        await asyncio.sleep(settings.market_poll_seconds)
+        await asyncio.sleep(poll)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _background_task
     settings = get_settings()
+    from app.services.upstox_ws import start_upstox_ws, stop_upstox_ws
+
+    if settings.upstox_ws_enabled:
+        await start_upstox_ws()
+        logger.info("Upstox WebSocket feed enabled (mode=%s)", settings.upstox_ws_mode)
     if settings.background_market_monitor_enabled:
         _background_task = asyncio.create_task(_background_monitor())
         logger.info("Background market monitor started (poll=%ds)", settings.market_poll_seconds)
     yield
     if _background_task:
         _background_task.cancel()
+    await stop_upstox_ws()
 
 
 def create_app() -> FastAPI:

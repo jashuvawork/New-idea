@@ -10,3 +10,5 @@ orjson==3.10.12
 numpy==2.2.1
 scikit-learn==1.6.0
 joblib==1.4.2
+websockets==14.1
+protobuf>=6.33.5,<7.0.0
