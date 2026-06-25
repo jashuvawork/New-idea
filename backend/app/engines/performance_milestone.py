@@ -83,6 +83,12 @@ def compute_milestone_stats(limit: int = 500) -> dict[str, Any]:
         "checksTotal": len(checks),
         "readyForLiveMilestone": all(checks.values()),
         "message": _milestone_message(count, checks, profit_factor, win_rate, max_dd_pct),
+        "slippageAdjusted": get_settings().paper_slippage_enabled,
+        "slippageNote": (
+            "PnL includes paper slippage + brokerage on trades closed after this feature shipped"
+            if get_settings().paper_slippage_enabled
+            else "Raw LTP fills — enable PAPER_SLIPPAGE_ENABLED for live-like stats"
+        ),
     }
 
 

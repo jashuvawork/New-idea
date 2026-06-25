@@ -74,6 +74,11 @@ export function PerformanceMilestone({ stats }: { stats: MilestoneStats | null }
         <p className={`${stats.readyForLiveMilestone ? 'text-nexus-green' : 'text-nexus-yellow'}`}>
           {stats.message}
         </p>
+        {stats.slippageAdjusted ? (
+          <p className="text-nexus-muted mt-1.5 leading-relaxed">
+            Live-like paper fills: +entry / −exit slippage and round-trip fees applied to new trades.
+          </p>
+        ) : null}
       </div>
     </Panel>
   );

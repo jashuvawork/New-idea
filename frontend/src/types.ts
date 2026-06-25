@@ -440,6 +440,8 @@ export interface PerformanceMilestone {
   checksTotal: number;
   readyForLiveMilestone: boolean;
   message: string;
+  slippageAdjusted?: boolean;
+  slippageNote?: string;
 }
 
 export interface TradeMastermind {

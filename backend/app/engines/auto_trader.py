@@ -30,6 +30,13 @@ from app.engines.capital_allocator import (
     update_daily_profit_gate,
 )
 from app.engines.trade_selector import EntryCandidate, diagnose_missed_entries, find_best_entry
+from app.engines.paper_slippage import (
+    apply_entry_fill,
+    exit_premium_for_trade,
+    finalize_closed_pnl_inr,
+    mark_to_market,
+    should_simulate_slippage,
+)
 from app.engines.simple_profit import (
     evaluate_exit,
     get_session_targets,
@@ -161,8 +168,24 @@ async def _open_from_candidate(
     profile = snap.optimizedProfile or get_session_targets()
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
 
+    signal_premium = candidate.premium
+    use_slippage = settings.paper_slippage_enabled and not (
+        settings.enable_live_trading and settings.auto_trading_enabled
+    )
+    if use_slippage:
+        fill_premium, slip_meta = apply_entry_fill(
+            signal_premium, candidate.strategy_type, tier=candidate.tier,
+        )
+    else:
+        fill_premium = signal_premium
+        slip_meta = {
+            "enabled": False,
+            "signalPremium": round(signal_premium, 2),
+            "fillPremium": round(signal_premium, 2),
+        }
+
     lots = compute_lots(
-        symbol, candidate.premium, stop_pts,
+        symbol, fill_premium, stop_pts,
         tqs=candidate.tqs,
         strategy_type=candidate.strategy_type,
         confidence=candidate.confidence,
@@ -171,7 +194,7 @@ async def _open_from_candidate(
     lot_mult = lot_multiplier(symbol)
 
     ok, risk_reason = _risk_engine.check_new_entry(
-        state, symbol, candidate.side, lots, candidate.premium, lot_mult,
+        state, symbol, candidate.side, lots, fill_premium, lot_mult,
         strategy_type=candidate.strategy_type,
     )
     if not ok:
@@ -181,7 +204,7 @@ async def _open_from_candidate(
         snap, candidate.strategy_type, candidate.side.value,
         candidate.confidence, news,
     )
-    exit_plan = tune_exit_plan_for_position(exit_plan, lots, candidate.premium, symbol)
+    exit_plan = tune_exit_plan_for_position(exit_plan, lots, fill_premium, symbol)
 
     ctx_extra: dict[str, Any] = {
         "selectionScore": round(candidate.score, 2),
@@ -191,6 +214,8 @@ async def _open_from_candidate(
         "exitPlan": exit_plan,
         "executionMode": _execution_mode(settings),
         "optionExpiry": snap.optionExpiry,
+        "slippage": slip_meta,
+        "signalPremium": signal_premium,
     }
     if candidate.mode == "explosion" and candidate.explosion_event:
         ev = candidate.explosion_event
@@ -237,8 +262,8 @@ async def _open_from_candidate(
         symbol=symbol,
         side=candidate.side,
         strike=candidate.strike,
-        entryPremium=candidate.premium,
-        currentPremium=candidate.premium,
+        entryPremium=fill_premium,
+        currentPremium=fill_premium,
         lots=lots,
         openedAt=datetime.now(IST),
         strategyType=candidate.strategy_type,
@@ -271,9 +296,9 @@ async def _open_from_candidate(
         "at": datetime.now(IST).isoformat(),
     }
     logger.info(
-        "BEST %s trade [%s]: %s %s %s @ %.2f ×%d lots (score %.1f)",
+        "BEST %s trade [%s]: %s %s %s signal=%.2f fill=%.2f ×%d lots (score %.1f)",
         candidate.mode, ctx_extra["executionMode"], symbol, candidate.side.value,
-        candidate.strike, candidate.premium, lots, candidate.score,
+        candidate.strike, signal_premium, fill_premium, lots, candidate.score,
     )
     return True, "opened"
 
@@ -368,9 +393,19 @@ async def process(
             continue
 
         trade.currentPremium = current
-        trade.pnlPoints = current - trade.entryPremium
-        trade.pnlInr = trade.pnlPoints * trade.lots * lot_mult
-        trade.bestPnlPoints = max(trade.bestPnlPoints, trade.pnlPoints)
+        eval_premium = exit_premium_for_trade(trade, current)
+        if should_simulate_slippage(trade):
+            mtm_pts, mtm_inr = mark_to_market(
+                trade.entryPremium, eval_premium, trade.lots, lot_mult,
+            )
+            trade.pnlPoints = mtm_pts
+            trade.pnlInr = mtm_inr
+            trade.bestPnlPoints = max(trade.bestPnlPoints, mtm_pts)
+        else:
+            trade.pnlPoints = current - trade.entryPremium
+            trade.pnlInr = trade.pnlPoints * trade.lots * lot_mult
+            trade.bestPnlPoints = max(trade.bestPnlPoints, trade.pnlPoints)
+            eval_premium = current
 
         profile = snap.optimizedProfile or get_session_targets()
         is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
@@ -382,29 +417,31 @@ async def process(
         if is_swing and settings.swing_trading_enabled:
             if trade.entryContext is None:
                 trade.entryContext = {}
-            pct = ((current - trade.entryPremium) / trade.entryPremium * 100) if trade.entryPremium else 0
+            pct = ((eval_premium - trade.entryPremium) / trade.entryPremium * 100) if trade.entryPremium else 0
             trade.entryContext["bestPnlPct"] = max(trade.entryContext.get("bestPnlPct", 0), pct)
             if use_adaptive:
                 exit_reason, pnl = evaluate_adaptive_swing_exit(
-                    trade, current, AdaptiveExitPlan.from_dict(plan_dict), lot_mult,
+                    trade, eval_premium, AdaptiveExitPlan.from_dict(plan_dict), lot_mult,
                 )
             else:
-                exit_reason, pnl = evaluate_swing_exit(trade, current, lot_mult)
+                exit_reason, pnl = evaluate_swing_exit(trade, eval_premium, lot_mult)
         elif is_explosion and settings.explosion_capture_mode:
             tier = "ELITE" if (trade.bestPnlPoints or 0) >= 10 else "EXPLODING"
             if use_adaptive:
                 exit_reason, pnl = evaluate_adaptive_explosion_exit(
-                    trade, current, AdaptiveExitPlan.from_dict(plan_dict), tier, lot_mult,
+                    trade, eval_premium, AdaptiveExitPlan.from_dict(plan_dict), tier, lot_mult,
                 )
             else:
-                exit_reason, pnl = evaluate_explosion_exit(trade, current, tier, lot_mult)
+                exit_reason, pnl = evaluate_explosion_exit(trade, eval_premium, tier, lot_mult)
         elif use_adaptive:
             exit_reason, pnl = evaluate_adaptive_scalp_exit(
-                trade, current, AdaptiveExitPlan.from_dict(plan_dict), profile, lot_mult,
+                trade, eval_premium, AdaptiveExitPlan.from_dict(plan_dict), profile, lot_mult,
             )
         else:
-            exit_reason, pnl = evaluate_exit(trade, current, profile, lot_mult)
+            exit_reason, pnl = evaluate_exit(trade, eval_premium, profile, lot_mult)
         if exit_reason:
+            if should_simulate_slippage(trade):
+                pnl = finalize_closed_pnl_inr(pnl)
             broker_ctx = dict(trade.entryContext or {})
             if settings.enable_live_trading and settings.auto_trading_enabled and client:
                 if broker_ctx.get("instrumentKey") and not broker_ctx.get("brokerExitOrderId"):
