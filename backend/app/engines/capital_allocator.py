@@ -13,17 +13,34 @@ from app.models.schemas import AutoTraderState, StrategyType
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 
-# Fallback only — refreshed from Upstox /option/contract lot_size
+# Fallback — overridden by config LOT_SIZE_* (authoritative when USE_UPSTOX_LOT_SIZES=false)
 FALLBACK_LOT_SIZES: dict[str, int] = {
-    "NIFTY": 25,
-    "BANKNIFTY": 25,
-    "SENSEX": 10,
+    "NIFTY": 65,
+    "BANKNIFTY": 30,
+    "SENSEX": 20,
 }
 
 _lot_sizes: dict[str, int] = {}
-_lot_sizes_source: str = "fallback"
+_lot_sizes_source: str = "config"
 _lot_sizes_fetched_at: Optional[str] = None
 _lot_sizes_last_mono: float = 0.0
+
+
+def _configured_lot_sizes() -> dict[str, int]:
+    settings = get_settings()
+    return {
+        "NIFTY": settings.lot_size_nifty,
+        "BANKNIFTY": settings.lot_size_banknifty,
+        "SENSEX": settings.lot_size_sensex,
+    }
+
+
+def _seed_lot_sizes_from_config() -> None:
+    global _lot_sizes_source
+    configured = _configured_lot_sizes()
+    for sym, lot in configured.items():
+        _lot_sizes[sym] = lot
+    _lot_sizes_source = "config"
 
 
 @dataclass
@@ -92,17 +109,26 @@ _best_pnl: float = 0.0
 
 
 def lot_multiplier(symbol: str) -> int:
-    """Units per lot — live value from Upstox, fallback if not yet fetched."""
+    """Units per lot — from config (default) or Upstox when enabled."""
+    settings = get_settings()
     sym = symbol.upper()
+    configured = _configured_lot_sizes()
+
+    if not settings.use_upstox_lot_sizes:
+        return configured.get(sym, settings.lot_size_nifty)
+
     if sym in _lot_sizes:
         return _lot_sizes[sym]
-    return FALLBACK_LOT_SIZES.get(sym, 25)
+    return configured.get(sym, settings.lot_size_nifty)
 
 
 def get_lot_sizes() -> dict[str, int]:
     """Current lot sizes for all configured symbols."""
     settings = get_settings()
-    return {sym: lot_multiplier(sym) for sym in settings.symbols}
+    _seed_lot_sizes_from_config()
+    if settings.use_upstox_lot_sizes:
+        return {sym: lot_multiplier(sym) for sym in settings.symbols}
+    return _configured_lot_sizes()
 
 
 def get_lot_sizes_meta() -> dict[str, Any]:
@@ -125,9 +151,14 @@ def set_lot_size(symbol: str, lot_size: int) -> None:
 
 
 async def refresh_lot_sizes(client, force: bool = False) -> dict[str, int]:
-    """Pull lot_size from Upstox option contracts for each index."""
+    """Pull lot_size from Upstox when USE_UPSTOX_LOT_SIZES=true; else use config."""
     global _lot_sizes_source, _lot_sizes_fetched_at, _lot_sizes_last_mono
     settings = get_settings()
+    _seed_lot_sizes_from_config()
+
+    if not settings.use_upstox_lot_sizes:
+        return get_lot_sizes()
+
     ttl = settings.upstox_expiries_cache_seconds
     if not force and _lot_sizes and (time.monotonic() - _lot_sizes_last_mono) < ttl:
         return get_lot_sizes()

@@ -35,6 +35,14 @@ async def performance_analysis():
     return get_performance_analysis()
 
 
+@router.get("/milestone")
+async def performance_milestone():
+    """50-trade live readiness: PF 3+, WR 50%+, max DD 5%."""
+    from app.engines.performance_milestone import compute_milestone_stats
+
+    return compute_milestone_stats()
+
+
 @router.post("/reset")
 async def reset_paper_session():
     reset_session()

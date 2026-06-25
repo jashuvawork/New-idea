@@ -374,6 +374,7 @@ export interface DeploymentReadiness {
   };
   armLiveSteps: string[];
   openTrades: number;
+  milestone?: PerformanceMilestone;
 }
 
 export interface TradeLogStatus {
@@ -413,6 +414,32 @@ export interface DailyReport {
   netPnlInr: number;
   winRate: number;
   exitReasons: Record<string, number>;
+}
+
+export interface PerformanceMilestone {
+  tradeCount: number;
+  targetTrades: number;
+  tradeProgressPct: number;
+  wins: number;
+  losses: number;
+  scratches: number;
+  profitFactor: number;
+  targetProfitFactor: number;
+  winRate: number;
+  targetWinRate: number;
+  maxDrawdownPct: number;
+  maxDrawdownLimitPct: number;
+  netPnlInr: number;
+  checks: {
+    tradeCountMet: boolean;
+    profitFactorMet: boolean;
+    winRateMet: boolean;
+    drawdownMet: boolean;
+  };
+  checksPassed: number;
+  checksTotal: number;
+  readyForLiveMilestone: boolean;
+  message: string;
 }
 
 export interface TradeMastermind {

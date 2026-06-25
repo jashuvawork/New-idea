@@ -143,11 +143,18 @@ async def deployment_readiness():
     if not settings.enable_live_trading:
         arm_live_steps.append("Set ENABLE_LIVE_TRADING=true in env and redeploy")
 
+    from app.engines.performance_milestone import compute_milestone_stats
+    milestone = compute_milestone_stats()
+    checks["milestonePassed"] = milestone["readyForLiveMilestone"]
+    if not milestone["readyForLiveMilestone"]:
+        arm_live_steps.append(milestone["message"])
+
     return {
         "readyForPaper": paper_ready,
-        "readyForLive": live_ready,
+        "readyForLive": live_ready and milestone["readyForLiveMilestone"],
         "executionMode": "LIVE" if settings.enable_live_trading else "PAPER",
         "checks": checks,
+        "milestone": milestone,
         "tradeLog": {
             "storeDir": store_health["storeDir"],
             "logFile": store_health["logFile"],

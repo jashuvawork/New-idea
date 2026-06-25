@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     daily_profit_trail_inr: float = 20_000
     use_upstox_capital_for_sizing: bool = True
 
+    # Quantity per lot (units) — NSE/BSE contract sizes
+    lot_size_nifty: int = 65
+    lot_size_banknifty: int = 30
+    lot_size_sensex: int = 20
+    use_upstox_lot_sizes: bool = False  # when false, env values above are authoritative
+
     simple_max_lots: int = 100
     simple_target_lots: int = 60
     simple_min_lots: int = 25

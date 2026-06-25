@@ -5,6 +5,7 @@ import {
   useDeploymentReadiness,
   useTradeHistory,
   useTradeLog,
+  usePerformanceMilestone,
   stopTrading,
   resumeTrading,
   resetSession,
@@ -31,6 +32,7 @@ import { MarketHeatmap } from './components/MarketHeatmap';
 import { PsychologyPanel } from './components/PsychologyPanel';
 import { PremarketPanel } from './components/PremarketPanel';
 import { SwingTrading } from './components/SwingTrading';
+import { PerformanceMilestone } from './components/PerformanceMilestone';
 
 const SYMBOLS = ['NIFTY', 'SENSEX', 'BANKNIFTY'] as const;
 
@@ -40,11 +42,15 @@ export default function App() {
   const readiness = useDeploymentReadiness();
   const tradeHistory = useTradeHistory(14);
   const tradeLog = useTradeLog(20);
+  const milestone = usePerformanceMilestone();
   const [activeSymbol, setActiveSymbol] = useState<string>('NIFTY');
 
-  const snap = data?.snapshots?.[activeSymbol];
   const auto = data?.autoTrader;
+  const snap =
+    data?.snapshots?.[activeSymbol] ??
+    SYMBOLS.map((s) => data?.snapshots?.[s]).find((s) => s?.dataAvailable);
   const needsUpstox = deployment && !deployment.upstox.validToday;
+  const canShowDashboard = Boolean(data && auto && snap);
 
   const upstoxBadge = deployment
     ? deployment.upstox.validToday
@@ -55,7 +61,7 @@ export default function App() {
     : null;
 
   return (
-    <div className="min-h-screen bg-nexus-bg">
+    <div className="min-h-screen bg-nexus-bg text-gray-100">
       <header className="border-b border-nexus-border bg-nexus-panel/80 backdrop-blur sticky top-0 z-50">
         <div className="max-w-[1920px] mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4">
@@ -67,6 +73,7 @@ export default function App() {
               {SYMBOLS.map((s) => (
                 <button
                   key={s}
+                  type="button"
                   onClick={() => setActiveSymbol(s)}
                   className={`px-3 py-1.5 text-xs font-bold rounded transition-colors ${
                     activeSymbol === s
@@ -75,7 +82,7 @@ export default function App() {
                   }`}
                 >
                   {s}
-                  {data?.snapshots?.[s]?.spot ? (
+                  {data?.snapshots?.[s]?.spot != null ? (
                     <span className="ml-1 font-mono opacity-80">
                       {data.snapshots[s].spot!.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </span>
@@ -108,12 +115,13 @@ export default function App() {
 
             {data?.dataReady && snap && (
               <span className="text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-300">
-                {snap.marketPhase.replace('_', ' ')} · TQS {snap.tradeQualityScore.toFixed(0)}
+                {(snap.marketPhase ?? 'MARKET').replace('_', ' ')} · TQS {(snap.tradeQualityScore ?? 0).toFixed(0)}
               </span>
             )}
 
             <div className="flex gap-1 border-l border-nexus-border pl-2">
               <button
+                type="button"
                 onClick={() => stopTrading()}
                 className="px-2 py-1 text-[10px] bg-nexus-red/20 text-nexus-red rounded hover:bg-nexus-red/30"
                 title="Pause new paper trades"
@@ -121,6 +129,7 @@ export default function App() {
                 Pause
               </button>
               <button
+                type="button"
                 onClick={() => resumeTrading()}
                 className="px-2 py-1 text-[10px] bg-nexus-green/20 text-nexus-green rounded hover:bg-nexus-green/30"
                 title="Resume paper trading"
@@ -128,6 +137,7 @@ export default function App() {
                 Resume
               </button>
               <button
+                type="button"
                 onClick={() => resetSession()}
                 className="px-2 py-1 text-[10px] bg-gray-800 text-gray-400 rounded hover:text-white"
                 title="Clear today's paper session"
@@ -146,8 +156,12 @@ export default function App() {
           waitingReason={data?.waitingReason}
         />
 
+        <div className="mb-4 max-w-md">
+          <PerformanceMilestone stats={milestone} />
+        </div>
+
         {loading && !data && (
-          <WaitingState reason="Connecting to server..." />
+          <WaitingState reason="Connecting to server..." showConnect={false} />
         )}
 
         {error && !data && (
@@ -155,6 +169,7 @@ export default function App() {
             <p className="text-nexus-red font-bold text-lg">Cannot reach server</p>
             <p className="text-nexus-muted text-sm mt-2 max-w-md mx-auto">{error}</p>
             <button
+              type="button"
               onClick={() => refetch()}
               className="mt-4 px-4 py-2 bg-nexus-accent text-black font-bold rounded text-sm hover:opacity-90"
             >
@@ -163,11 +178,15 @@ export default function App() {
           </div>
         )}
 
-        {data && !data.dataReady && (
+        {data && !data.dataReady && !canShowDashboard && (
           <WaitingState reason={data.waitingReason} showConnect={Boolean(needsUpstox)} />
         )}
 
-        {data && snap && auto && (
+        {data && auto && !snap && (
+          <WaitingState reason={data.waitingReason || 'Loading symbol snapshots…'} showConnect={Boolean(needsUpstox)} />
+        )}
+
+        {canShowDashboard && snap && auto && (
           <div className="grid grid-cols-12 gap-3">
             <div className="col-span-3"><ExecutionHUD snap={snap} auto={auto} /></div>
             <div className="col-span-3"><PremarketPanel snap={snap} /></div>
@@ -188,7 +207,7 @@ export default function App() {
             <div className="col-span-3"><StrategyMatrix snap={snap} /></div>
             <div className="col-span-2"><TradeJournal data={data} history={tradeHistory} tradeLog={tradeLog} /></div>
             <div className="col-span-2"><PsychologyPanel snap={snap} /></div>
-            <div className="col-span-2"><NewsPanel news={data.news} /></div>
+            <div className="col-span-2"><NewsPanel news={data.news ?? []} /></div>
             <div className="col-span-1"><LiveTradingGate status={deployment} readiness={readiness} /></div>
             <div className="col-span-1"><MorningChecklist deployment={deployment} dataReady={data.dataReady} /></div>
           </div>
