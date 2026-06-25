@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     # Trading mode
     paper_simple_profit_mode: bool = True
     paper_dual_strategy_enabled: bool = False
+    explosion_capture_mode: bool = True  # PRIMARY — capture daily premium explosions
+
+    # Explosion capture tuning
+    explosion_min_velocity_3s: float = 2.0
+    explosion_min_velocity_9s: float = 3.0
+    explosion_scan_range: int = 800
+    explosion_target_elite: float = 25.0
+    explosion_target_standard: float = 12.0
 
     # Enhanced scalping (more powerful than base spec)
     enhanced_micro_target_points: float = 2.5  # faster micro lock vs 3.0 base
@@ -59,6 +67,10 @@ class Settings(BaseSettings):
     simple_min_lots: int = 6
 
     symbols: list[str] = ["NIFTY", "SENSEX", "BANKNIFTY"]
+
+    # Persistence
+    trade_store_dir: str = "/tmp/nexusquant/trades"
+    daily_token_once: bool = True
 
 
 @lru_cache

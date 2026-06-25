@@ -130,6 +130,12 @@ class SymbolSnapshot(BaseModel):
     explosiveRunnerWatchlist: list[dict[str, Any]] = []
     suggestedTrades: list[SuggestedTrade] = []
     optimizedProfile: OptimizedProfile = Field(default_factory=OptimizedProfile)
+    strategyMatrix: list[dict[str, Any]] = []
+    mlInsights: dict[str, Any] = {}
+    pcr: float = 1.0
+    maxPain: float = 0
+    explosionAlerts: list[dict[str, Any]] = []
+    topExplosion: Optional[dict[str, Any]] = None
 
 
 class PaperTrade(BaseModel):
@@ -147,6 +153,9 @@ class PaperTrade(BaseModel):
     exitReason: Optional[str] = None
     strategyType: StrategyType = StrategyType.SCALP
     bestPnlPoints: float = 0
+    closedAt: Optional[datetime] = None
+    sessionDate: Optional[str] = None
+    entryContext: dict[str, Any] = {}
 
 
 class DailyReport(BaseModel):

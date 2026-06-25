@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMarketStream, useDeploymentStatus, stopTrading, resumeTrading, resetSession } from './hooks/useMarketStream';
+import { useMarketStream, useDeploymentStatus, useTradeHistory, stopTrading, resumeTrading, resetSession } from './hooks/useMarketStream';
 import { WaitingState } from './components/Panel';
 import { ExecutionHUD } from './components/ExecutionHUD';
 import { ExplosiveRunner } from './components/ExplosiveRunner';
@@ -13,12 +13,15 @@ import { RiskEngine } from './components/RiskEngine';
 import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
 import { TradeJournal, NewsPanel } from './components/TradeJournal';
+import { StrategyMatrix } from './components/StrategyMatrix';
+import { ExplosionRadar } from './components/ExplosionRadar';
 
 const SYMBOLS = ['NIFTY', 'SENSEX', 'BANKNIFTY'] as const;
 
 export default function App() {
   const { data, error, loading } = useMarketStream();
   const deployment = useDeploymentStatus();
+  const tradeHistory = useTradeHistory(14);
   const [activeSymbol, setActiveSymbol] = useState<string>('NIFTY');
 
   const snap = data?.snapshots?.[activeSymbol];
@@ -53,10 +56,21 @@ export default function App() {
 
           <div className="flex items-center gap-3">
             {deployment && (
-              <span className={`text-[10px] px-2 py-1 rounded ${
-                deployment.upstox.hasToken ? 'bg-nexus-green/20 text-nexus-green' : 'bg-nexus-red/20 text-nexus-red'
-              }`}>
-                {deployment.upstox.hasToken ? 'UPSTOX ✓' : 'UPSTOX ✗'}
+              <span
+                className={`text-[10px] px-2 py-1 rounded ${
+                  deployment.upstox.validToday
+                    ? 'bg-nexus-green/20 text-nexus-green'
+                    : deployment.upstox.hasToken
+                      ? 'bg-nexus-yellow/20 text-nexus-yellow'
+                      : 'bg-nexus-red/20 text-nexus-red'
+                }`}
+                title={deployment.upstox.message}
+              >
+                {deployment.upstox.validToday
+                  ? 'UPSTOX ✓ TODAY'
+                  : deployment.upstox.hasToken
+                    ? 'UPSTOX — RELOGIN'
+                    : 'UPSTOX ✗'}
               </span>
             )}
             {data?.dataReady && (
@@ -105,6 +119,7 @@ export default function App() {
             {/* Row 1 — Primary execution */}
             <div className="col-span-3"><ExecutionHUD snap={snap} auto={auto} /></div>
             <div className="col-span-3"><ExplosiveRunner snap={snap} /></div>
+            <div className="col-span-3"><ExplosionRadar snap={snap} /></div>
             <div className="col-span-3"><StrategyRouter snap={snap} /></div>
             <div className="col-span-3"><PaperTrading auto={auto} /></div>
 
@@ -116,18 +131,19 @@ export default function App() {
             <div className="col-span-2"><RiskEngine auto={auto} /></div>
 
             {/* Row 3 — Depth */}
-            <div className="col-span-4"><OptionHeatmap snap={snap} /></div>
-            <div className="col-span-3"><TradeJournal data={data} /></div>
+            <div className="col-span-3"><OptionHeatmap snap={snap} /></div>
+            <div className="col-span-3"><StrategyMatrix snap={snap} /></div>
+            <div className="col-span-2"><TradeJournal data={data} history={tradeHistory} /></div>
             <div className="col-span-2"><NewsPanel news={data.news} /></div>
-            <div className="col-span-1.5"><LiveTradingGate status={deployment} /></div>
-            <div className="col-span-1.5"><MorningChecklist /></div>
+            <div className="col-span-1"><LiveTradingGate status={deployment} /></div>
+            <div className="col-span-1"><MorningChecklist /></div>
           </div>
         )}
 
         {/* Footer status bar */}
         <footer className="mt-4 pt-3 border-t border-nexus-border flex justify-between text-[10px] text-nexus-muted">
           <span>
-            Poll: 3s · Mode: Enhanced Simple Profit · Micro lock: 2.5pt · TQS entry: 68 · Vel: 1.8%
+            Poll: 3s · Mode: Explosion Capture · Targets: 12–25pt · Trail from +5pt
           </span>
           <span>
             {data?.timestamp ? `Last update: ${new Date(data.timestamp).toLocaleTimeString('en-IN')}` : ''}

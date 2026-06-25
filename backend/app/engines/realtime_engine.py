@@ -28,6 +28,10 @@ from app.models.schemas import (
     SymbolSnapshot,
 )
 from app.engines.simple_profit import get_session_targets
+from app.engines.strategy_orchestrator import run_all_strategies, signals_to_suggested_trades
+from app.engines.strategies.base import compute_max_pain, compute_pcr
+from app.engines.explosion_detector import event_to_dict, scan_chain_explosions
+from app.engines.ml_engine import get_ml_engine
 from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase, get_nearest_expiry
 
 logger = logging.getLogger(__name__)
@@ -164,7 +168,7 @@ def _scan_runners(
 
     for row in chain:
         strike = row.get("strike_price") or row.get("strike", 0)
-        if abs(strike - atm) > 300:
+        if abs(strike - atm) > 800:
             continue
 
         for side, key in [(Side.CALL, "call_options"), (Side.PUT, "put_options")]:
@@ -276,6 +280,41 @@ def _build_suggestions(
     return suggestions
 
 
+def _build_explosion_suggestions(
+    symbol: str,
+    events: list,
+    tqs: float,
+) -> list[SuggestedTrade]:
+    """Build trade suggestions from explosion events — highest priority."""
+    from app.engines.explosion_detector import ExplosionEvent
+    trades: list[SuggestedTrade] = []
+    for event in events:
+        if not isinstance(event, ExplosionEvent):
+            continue
+        if event.tier not in ("EXPLODING", "ELITE"):
+            continue
+        trades.append(SuggestedTrade(
+            id=str(uuid.uuid4())[:8],
+            symbol=symbol,
+            side=event.side,
+            strike=event.strike,
+            lastPremium=event.premium,
+            tqs=max(tqs, event.explosion_score),
+            strategyType=StrategyType.EXPLOSIVE,
+            confidence=event.explosion_score,
+            adaptiveTarget=25.0 if event.tier == "ELITE" else 12.0,
+            runnerSignal=RunnerSignal(
+                score=event.explosion_score,
+                premiumVelocityPct=event.velocity_3s,
+                volumeSurge=event.volume_surge * 50,
+                elite=event.tier == "ELITE",
+            ),
+        ))
+        if len(trades) >= 3:
+            break
+    return trades
+
+
 async def build_symbol_snapshot(
     symbol: str,
     client: Optional[UpstoxClient] = None,
@@ -323,7 +362,43 @@ async def build_symbol_snapshot(
         )
 
         session_profile = get_session_targets()
-        suggestions = _build_suggestions(symbol, spot, atm, tqs, runner, breadth, session_profile)
+        pcr = compute_pcr(chain)
+        max_pain = compute_max_pain(chain)
+
+        # Explosion scan — primary focus for daily chart moments
+        explosion_events = scan_chain_explosions(symbol, chain, spot, atm)
+        explosion_alerts = [event_to_dict(e) for e in explosion_events[:15]]
+        top_explosion = explosion_alerts[0] if explosion_alerts else None
+
+        # Run all strategies (explosion events injected)
+        strategy_signals, strategy_matrix = run_all_strategies(
+            symbol, spot, atm, chain, orderflow, greeks, breadth,
+            profile, regime, heatmap, tqs, explosion_events=explosion_events,
+        )
+        ml_suggestions = signals_to_suggested_trades(strategy_signals, tqs)
+
+        # Explosion trades get top priority in suggestions
+        explosion_suggestions = _build_explosion_suggestions(symbol, explosion_events, tqs)
+        seen = {(s.side, s.strike) for s in explosion_suggestions}
+        for s in ml_suggestions:
+            if (s.side, s.strike) not in seen:
+                explosion_suggestions.append(s)
+                seen.add((s.side, s.strike))
+
+        runner_suggestions = _build_suggestions(symbol, spot, atm, tqs, runner, breadth, session_profile)
+        for rs in runner_suggestions:
+            if (rs.side, rs.strike) not in seen:
+                explosion_suggestions.append(rs)
+                seen.add((rs.side, rs.strike))
+
+        ml = get_ml_engine()
+        ml_insights = {
+            "featureImportance": ml.get_feature_importance(),
+            "modelTrained": ml._trained,
+            "activeStrategies": sum(1 for m in strategy_matrix if m.get("status") == "active"),
+            "topStrategy": strategy_matrix[0] if strategy_matrix else None,
+            "explosionCount": len([e for e in explosion_events if e.tier in ("EXPLODING", "ELITE")]),
+        }
 
         return SymbolSnapshot(
             symbol=symbol,
@@ -341,8 +416,14 @@ async def build_symbol_snapshot(
             breadth=breadth,
             explosiveRunner=runner,
             explosiveRunnerWatchlist=watchlist,
-            suggestedTrades=suggestions,
+            suggestedTrades=explosion_suggestions[:5],
             optimizedProfile=session_profile,
+            strategyMatrix=strategy_matrix,
+            mlInsights=ml_insights,
+            pcr=round(pcr, 3),
+            maxPain=max_pain,
+            explosionAlerts=explosion_alerts,
+            topExplosion=top_explosion,
         )
 
     except UpstoxError as e:

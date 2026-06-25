@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.config import get_settings
 from app.services.redis_store import has_upstox_token
+from app.services.token_manager import get_daily_token_status
 
 router = APIRouter(tags=["health"])
 
@@ -16,16 +17,26 @@ async def health():
 @router.get("/api/deployment/status")
 async def deployment_status():
     settings = get_settings()
+    token_status = await get_daily_token_status()
     return {
         "status": "ok",
         "commit": settings.commit_sha,
         "environment": settings.environment,
-        "upstox": {"hasToken": await has_upstox_token()},
+        "upstox": {
+            "hasToken": await has_upstox_token(),
+            "validToday": token_status.get("validToday", False),
+            "canLogin": token_status.get("canLogin", True),
+            "sessionDate": token_status.get("sessionDate"),
+            "generatedAt": token_status.get("generatedAt"),
+            "oneTimePerDay": settings.daily_token_once,
+            "message": token_status.get("message", ""),
+        },
         "flags": {
             "enableLiveTrading": settings.enable_live_trading,
             "paperTrading": settings.paper_trading,
             "simpleProfitMode": settings.paper_simple_profit_mode,
             "dualStrategyEnabled": settings.paper_dual_strategy_enabled,
+            "explosionCaptureMode": settings.explosion_capture_mode,
             "enhancedMode": True,
             "shadowTradeAllSignals": settings.shadow_trade_all_signals,
             "backgroundMonitor": settings.background_market_monitor_enabled,

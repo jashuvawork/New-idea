@@ -27,6 +27,44 @@ export interface SymbolSnapshot {
   explosiveRunnerWatchlist: RunnerWatchItem[];
   suggestedTrades: SuggestedTrade[];
   optimizedProfile: OptimizedProfile;
+  strategyMatrix?: StrategyMatrixEntry[];
+  mlInsights?: MLInsights;
+  pcr?: number;
+  maxPain?: number;
+  explosionAlerts?: ExplosionAlert[];
+  topExplosion?: ExplosionAlert;
+}
+
+export interface ExplosionAlert {
+  symbol: string;
+  side: string;
+  strike: number;
+  premium: number;
+  velocity3s: number;
+  velocity9s: number;
+  velocity15s: number;
+  volumeSurge: number;
+  explosionScore: number;
+  tier: string;
+  reason: string;
+  tradeable: boolean;
+}
+
+export interface StrategyMatrixEntry {
+  id: string;
+  name: string;
+  status: string;
+  confidence: number;
+  mlProbability: number;
+  preferredSession?: string[];
+  sessionMatch?: boolean;
+}
+
+export interface MLInsights {
+  featureImportance?: Record<string, number>;
+  modelTrained?: boolean;
+  activeStrategies?: number;
+  topStrategy?: StrategyMatrixEntry;
 }
 
 export interface HeatmapStrike {
@@ -140,10 +178,47 @@ export interface PaperTrade {
   pnlInr: number;
   pnlPoints: number;
   openedAt: string;
+  closedAt?: string;
+  sessionDate?: string;
   status: string;
   exitReason?: string;
   strategyType: string;
   bestPnlPoints: number;
+  entryContext?: Record<string, unknown>;
+  context?: Record<string, unknown>;
+}
+
+export interface DayArchiveSummary {
+  totalTrades?: number;
+  wins?: number;
+  losses?: number;
+  scratches?: number;
+  netPnlInr?: number;
+  profitFactor?: number;
+  winRate?: number;
+}
+
+export interface TradeDaySummary {
+  date: string;
+  summary: DayArchiveSummary;
+  tradeCount: number;
+  eventCount: number;
+}
+
+export interface TradeHistoryResponse {
+  days: TradeDaySummary[];
+  storeDir: string;
+}
+
+export interface DailyTokenStatus {
+  hasToken: boolean;
+  validToday: boolean;
+  sessionDate?: string;
+  today: string;
+  generatedAt?: string;
+  oneTimePerDay: boolean;
+  canLogin: boolean;
+  message: string;
 }
 
 export interface DailyReport {
@@ -178,6 +253,6 @@ export interface DeploymentStatus {
   status: string;
   commit: string;
   environment: string;
-  upstox: { hasToken: boolean };
+  upstox: DailyTokenStatus;
   flags: Record<string, boolean | number>;
 }
