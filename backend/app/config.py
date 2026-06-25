@@ -124,9 +124,15 @@ class Settings(BaseSettings):
     position_tp_target_pct: float = 0.10
     emergency_stop_inr: float = 20_000
 
-    # Daily session targets
-    daily_profit_target_inr: float = 44_000
-    daily_profit_trail_inr: float = 5_000
+    # Daily session targets — ₹44K min milestone; staged locks at % of capital (no upside cap)
+    daily_profit_target_inr: float = 44_000  # minimum milestone only — does not stop entries
+    daily_profit_trail_inr: float = 5_000  # legacy; unused when stage locks enabled
+    daily_profit_stage_locks_enabled: bool = True
+    daily_profit_stage_pcts_csv: str = "0.55,0.88,1.12"  # env: DAILY_PROFIT_STAGE_PCTS
+
+    def daily_profit_stage_pcts(self) -> list[float]:
+        return [float(x.strip()) for x in self.daily_profit_stage_pcts_csv.split(",") if x.strip()]
+
     use_upstox_capital_for_sizing: bool = True  # paper parity uses real margin when token present
 
     # Quantity per lot (units) — NSE/BSE contract sizes

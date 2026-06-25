@@ -291,16 +291,29 @@ export interface CapitalAllocation {
 
 export interface DailyProfitGate {
   targetInr: number;
+  minTargetInr?: number;
   trailInr: number;
+  capitalBaseInr?: number;
   sessionPnlInr: number;
   bestPnlInr: number;
   trailFloorInr: number;
+  lockedFloorInr?: number;
+  currentStage?: number;
+  minTargetHit?: boolean;
   targetHit: boolean;
   trailLocked: boolean;
   newEntriesAllowed: boolean;
   status: string;
   message: string;
   progressPct: number;
+  stageLockMode?: boolean;
+  stages?: Array<{
+    stage: number;
+    pct: number;
+    thresholdInr: number;
+    reached: boolean;
+    label: string;
+  }>;
 }
 
 export interface PaperTrade {

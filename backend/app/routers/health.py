@@ -48,6 +48,8 @@ async def deployment_status():
             "swingTradingEnabled": settings.swing_trading_enabled,
             "dailyProfitTargetInr": settings.daily_profit_target_inr,
             "dailyProfitTrailInr": settings.daily_profit_trail_inr,
+            "dailyProfitStageLocksEnabled": settings.daily_profit_stage_locks_enabled,
+            "dailyProfitStagePcts": settings.daily_profit_stage_pcts(),
             "perTradeCapitalPct": settings.per_trade_capital_pct,
             "fallbackCapitalInr": settings.fallback_capital_inr,
             "maxSizingCapitalInr": settings.max_sizing_capital_inr,
