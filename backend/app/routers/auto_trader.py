@@ -13,7 +13,6 @@ from app.engines.auto_trader import (
 )
 from app.engines.risk_engine import RiskEngine
 from app.models.schemas import CapitalConfig, RiskProfile
-from app.routers.market import _build_multi_snapshot
 from app.services import trade_store
 
 router = APIRouter(prefix="/api/auto-trader", tags=["auto-trader"])

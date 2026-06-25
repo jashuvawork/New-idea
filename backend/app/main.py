@@ -22,8 +22,8 @@ async def _background_monitor():
     while True:
         try:
             if settings.background_market_monitor_enabled:
-                from app.routers.market import _build_multi_snapshot
-                await _build_multi_snapshot()
+                from app.routers.market import get_multi_snapshot
+                await get_multi_snapshot()
         except Exception as e:
             logger.warning("Background monitor error: %s", e)
         await asyncio.sleep(settings.market_poll_seconds)

@@ -24,10 +24,13 @@ router = APIRouter(prefix="/api/market", tags=["market"])
 
 _cache: Optional[MultiSnapshot] = None
 _cache_time: Optional[datetime] = None
+_build_lock = asyncio.Lock()
+_capital_refresh_at: Optional[datetime] = None
 IST = ZoneInfo("Asia/Kolkata")
 
 
 async def _build_multi_snapshot() -> MultiSnapshot:
+    global _capital_refresh_at
     settings = get_settings()
     now = datetime.now(IST)
 
@@ -53,20 +56,24 @@ async def _build_multi_snapshot() -> MultiSnapshot:
 
     client = UpstoxClient()
     if settings.use_upstox_capital_for_sizing:
-        try:
-            await refresh_trading_capital(client)
-        except Exception as e:
-            logger.warning("Capital refresh failed: %s", e)
+        refresh_due = (
+            _capital_refresh_at is None
+            or (now - _capital_refresh_at).total_seconds() >= settings.capital_refresh_seconds
+        )
+        if refresh_due:
+            try:
+                await refresh_trading_capital(client)
+                _capital_refresh_at = now
+            except Exception as e:
+                logger.warning("Capital refresh failed: %s", e)
 
     snapshots = {}
-    tasks = [build_symbol_snapshot(sym, client, news_sentiment) for sym in settings.symbols]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    for sym, result in zip(settings.symbols, results):
-        if isinstance(result, Exception):
-            logger.error("Snapshot failed for %s: %s", sym, result)
-            continue
-        snapshots[sym] = result
+    # Sequential symbol builds to reduce burst load on Upstox (throttle still applies per request)
+    for sym in settings.symbols:
+        try:
+            snapshots[sym] = await build_symbol_snapshot(sym, client, news_sentiment)
+        except Exception as e:
+            logger.error("Snapshot failed for %s: %s", sym, e)
 
     data_ready = any(s.dataAvailable for s in snapshots.values())
     waiting_reason = None
@@ -98,8 +105,8 @@ async def _build_multi_snapshot() -> MultiSnapshot:
     )
 
 
-@router.get("/snapshots")
-async def get_snapshots():
+async def get_multi_snapshot() -> MultiSnapshot:
+    """Cached snapshot with single-flight — UI + background monitor share one build."""
     global _cache, _cache_time
     settings = get_settings()
     now = datetime.now(IST)
@@ -109,10 +116,20 @@ async def get_snapshots():
         if age < settings.snapshot_cache_seconds:
             return _cache
 
-    snapshot = await _build_multi_snapshot()
-    _cache = snapshot
-    _cache_time = now
-    return snapshot
+    async with _build_lock:
+        if _cache and _cache_time:
+            age = (datetime.now(IST) - _cache_time).total_seconds()
+            if age < settings.snapshot_cache_seconds:
+                return _cache
+        snapshot = await _build_multi_snapshot()
+        _cache = snapshot
+        _cache_time = datetime.now(IST)
+        return snapshot
+
+
+@router.get("/snapshots")
+async def get_snapshots():
+    return await get_multi_snapshot()
 
 
 @router.get("/premarket/{symbol}")
@@ -145,5 +162,5 @@ async def get_constituent_heatmap(symbol: str):
     from app.engines.constituent_engine import build_constituent_heatmap
 
     client = UpstoxClient()
-    hm = await build_constituent_heatmap(symbol.upper(), client, force_refresh=True)
+    hm = await build_constituent_heatmap(symbol.upper(), client, force_refresh=False)
     return hm.model_dump(mode="json")

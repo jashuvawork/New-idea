@@ -1,6 +1,8 @@
 """Upstox API client — real data only, no dummy prices."""
 
+import asyncio
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
 from urllib.parse import quote
@@ -28,6 +30,39 @@ OPTION_SEGMENTS = {
     "BANKNIFTY": "NSE_FO",
     "SENSEX": "BSE_FO",
 }
+
+# Global throttle + response cache (shared across UpstoxClient instances)
+_throttle_lock = asyncio.Lock()
+_last_request_mono: float = 0.0
+_response_cache: dict[str, tuple[float, Any]] = {}
+_resolved_expiry: dict[str, str] = {}
+
+
+def _cache_get(key: str, ttl: float) -> Any | None:
+    entry = _response_cache.get(key)
+    if not entry:
+        return None
+    cached_at, value = entry
+    if time.monotonic() - cached_at > ttl:
+        return None
+    return value
+
+
+def _cache_set(key: str, value: Any) -> None:
+    _response_cache[key] = (time.monotonic(), value)
+
+
+async def _throttle() -> None:
+    """Serialize requests and enforce minimum spacing to avoid UDAPI10005 429s."""
+    global _last_request_mono
+    settings = get_settings()
+    min_interval = max(0.05, settings.upstox_min_request_interval_ms / 1000.0)
+    async with _throttle_lock:
+        now = time.monotonic()
+        wait = min_interval - (now - _last_request_mono)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_request_mono = time.monotonic()
 
 
 def resolve_quote_payload(data: dict[str, Any], instrument_key: str) -> dict[str, Any]:
@@ -125,18 +160,40 @@ class UpstoxClient:
         }
 
     async def _get(self, path: str, params: Optional[dict] = None) -> Any:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                f"{self.BASE_URL}{path}",
-                headers=await self._headers(),
-                params=params or {},
-            )
+        settings = get_settings()
+        last_error: Optional[str] = None
+
+        for attempt in range(settings.upstox_request_retries):
+            await _throttle()
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{self.BASE_URL}{path}",
+                    headers=await self._headers(),
+                    params=params or {},
+                )
             if resp.status_code == 401:
                 raise UpstoxError("Upstox token expired — re-authenticate")
+            if resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After")
+                backoff = 2 ** attempt + 1
+                if retry_after:
+                    try:
+                        backoff = max(backoff, float(retry_after))
+                    except ValueError:
+                        pass
+                last_error = resp.text[:200]
+                logger.warning(
+                    "Upstox 429 on %s — backing off %.1fs (attempt %d/%d)",
+                    path, backoff, attempt + 1, settings.upstox_request_retries,
+                )
+                await asyncio.sleep(backoff)
+                continue
             if resp.status_code >= 400:
                 raise UpstoxError(f"Upstox API error {resp.status_code}: {resp.text[:200]}")
             data = resp.json()
             return data.get("data", data)
+
+        raise UpstoxError(f"Upstox rate limited after retries: {last_error}")
 
     def get_login_url(self) -> str:
         key = self.settings.upstox_api_key
@@ -177,12 +234,24 @@ class UpstoxClient:
         for i in range(0, len(instrument_keys), chunk_size):
             chunk = instrument_keys[i : i + chunk_size]
             keys_param = ",".join(chunk)
+            cache_key = f"quotes:{keys_param[:120]}"
+            cached = _cache_get(cache_key, self.settings.upstox_ltp_cache_seconds)
+            if cached is not None:
+                results.update(cached)
+                continue
             data = await self._get("/market-quote/quotes", params={"instrument_key": keys_param})
             if isinstance(data, dict):
-                results.update(normalize_quotes_map(data))
+                normalized = normalize_quotes_map(data)
+                _cache_set(cache_key, normalized)
+                results.update(normalized)
         return results
 
     async def get_index_ltp(self, symbol: str) -> float:
+        cache_key = f"ltp:{symbol}"
+        cached = _cache_get(cache_key, self.settings.upstox_ltp_cache_seconds)
+        if cached is not None:
+            return float(cached)
+
         key = INDEX_KEYS.get(symbol)
         if not key:
             raise UpstoxError(f"Unknown symbol: {symbol}")
@@ -192,15 +261,20 @@ class UpstoxClient:
         quote = resolve_quote_payload(data, key)
         ltp = quote.get("last_price")
         if ltp is None:
-            # Fallback to full quote endpoint
             quote = await self.get_index_quote(symbol)
             ltp = quote.get("last_price")
         if ltp is None:
             raise UpstoxError(f"No LTP for {symbol}")
+        _cache_set(cache_key, ltp)
         return float(ltp)
 
     async def get_index_quote(self, symbol: str) -> dict[str, Any]:
         """Full index quote — prev close, OHLC, volume for premarket gap analysis."""
+        cache_key = f"quote:{symbol}"
+        cached = _cache_get(cache_key, self.settings.upstox_ltp_cache_seconds)
+        if cached is not None:
+            return cached
+
         key = INDEX_KEYS.get(symbol)
         if not key:
             raise UpstoxError(f"Unknown symbol: {symbol}")
@@ -210,10 +284,16 @@ class UpstoxClient:
         quote = resolve_quote_payload(data, key)
         if not quote:
             raise UpstoxError(f"No quote for {symbol}")
+        _cache_set(cache_key, quote)
         return quote
 
     async def get_option_expiries(self, symbol: str) -> list[str]:
         """Upcoming expiry dates for an index from /option/contract."""
+        cache_key = f"expiries:{symbol}"
+        cached = _cache_get(cache_key, self.settings.upstox_expiries_cache_seconds)
+        if cached is not None:
+            return cached
+
         key = INDEX_KEYS.get(symbol)
         if not key:
             raise UpstoxError(f"Unknown symbol: {symbol}")
@@ -224,10 +304,16 @@ class UpstoxClient:
         expiries = sorted(
             {str(c.get("expiry")) for c in data if isinstance(c, dict) and c.get("expiry") and str(c["expiry"]) >= today}
         )
+        _cache_set(cache_key, expiries)
         return expiries
 
     async def get_option_chain(self, symbol: str, expiry: str) -> list[dict[str, Any]]:
         """Fetch option chain for symbol and expiry date (YYYY-MM-DD)."""
+        cache_key = f"chain:{symbol}:{expiry}"
+        cached = _cache_get(cache_key, self.settings.upstox_chain_cache_seconds)
+        if cached is not None:
+            return cached
+
         key = INDEX_KEYS.get(symbol)
         if not key:
             raise UpstoxError(f"Unknown symbol: {symbol}")
@@ -235,19 +321,37 @@ class UpstoxClient:
             "/option/chain",
             params={"instrument_key": key, "expiry_date": expiry},
         )
-        if isinstance(data, list):
-            return normalize_option_chain(data)
-        return []
+        chain = normalize_option_chain(data) if isinstance(data, list) else []
+        _cache_set(cache_key, chain)
+        return chain
 
     async def get_option_chain_resolved(self, symbol: str) -> tuple[list[dict[str, Any]], str]:
-        """Fetch option chain, probing upcoming expiries until data is returned."""
-        expiries = await self.get_option_expiries(symbol)
-        if not expiries:
-            expiries = [get_nearest_expiry(symbol)]
+        """Fetch option chain with minimal expiry probes and short TTL cache."""
+        settings = self.settings
+        resolved_key = f"chain_resolved:{symbol}"
+        cached = _cache_get(resolved_key, settings.upstox_chain_cache_seconds)
+        if cached is not None:
+            return cached
 
+        candidates: list[str] = []
+        sticky = _resolved_expiry.get(symbol)
+        if sticky:
+            candidates.append(sticky)
+        candidates.append(get_nearest_expiry(symbol))
+
+        expiries = await self.get_option_expiries(symbol)
+        for exp in expiries[: settings.upstox_max_expiry_probes]:
+            if exp not in candidates:
+                candidates.append(exp)
+
+        seen: set[str] = set()
         best_chain: list[dict[str, Any]] = []
-        best_expiry = expiries[0]
-        for expiry in expiries[:6]:
+        best_expiry = candidates[0] if candidates else get_nearest_expiry(symbol)
+
+        for expiry in candidates:
+            if expiry in seen:
+                continue
+            seen.add(expiry)
             chain = await self.get_option_chain(symbol, expiry)
             if not chain:
                 continue
@@ -256,12 +360,23 @@ class UpstoxClient:
                 best_expiry = expiry
             if len(chain) >= 40:
                 break
+            if len(seen) >= settings.upstox_max_expiry_probes:
+                break
 
-        return best_chain, best_expiry
+        result = (best_chain, best_expiry)
+        if best_chain:
+            _resolved_expiry[symbol] = best_expiry
+            _cache_set(resolved_key, result)
+        return result
 
     async def get_candles(
         self, symbol: str, interval: str = "1minute", count: int = 60
     ) -> list[dict[str, Any]]:
+        cache_key = f"candles:{symbol}:{interval}:{count}"
+        cached = _cache_get(cache_key, self.settings.upstox_candles_cache_seconds)
+        if cached is not None:
+            return cached
+
         key = INDEX_KEYS.get(symbol)
         if not key:
             raise UpstoxError(f"Unknown symbol: {symbol}")
@@ -271,10 +386,18 @@ class UpstoxClient:
             f"/historical-candle/{key}/{interval}/{to_date}/{from_date}",
         )
         candles = data.get("candles", []) if isinstance(data, dict) else data
-        return candles[-count:] if candles else []
+        result = candles[-count:] if candles else []
+        _cache_set(cache_key, result)
+        return result
 
     async def get_funds(self) -> dict[str, Any]:
-        return await self._get("/user/get-funds-and-margin")
+        cache_key = "funds"
+        cached = _cache_get(cache_key, self.settings.upstox_funds_cache_seconds)
+        if cached is not None:
+            return cached
+        data = await self._get("/user/get-funds-and-margin")
+        _cache_set(cache_key, data)
+        return data
 
     async def get_positions(self) -> list[dict[str, Any]]:
         data = await self._get("/portfolio/short-term-positions")
@@ -283,12 +406,15 @@ class UpstoxClient:
     async def place_order(self, order_payload: dict[str, Any]) -> dict[str, Any]:
         if not self.settings.enable_live_trading:
             raise UpstoxError("Live trading disabled — ENABLE_LIVE_TRADING=false")
+        await _throttle()
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
                 f"{self.BASE_URL}/order/place",
                 headers=await self._headers(),
                 json=order_payload,
             )
+            if resp.status_code == 429:
+                raise UpstoxError("Upstox rate limited — order not placed, retry next tick")
             if resp.status_code >= 400:
                 raise UpstoxError(f"Order failed: {resp.status_code}: {resp.text[:300]}")
             body = resp.json()
@@ -298,7 +424,6 @@ class UpstoxClient:
 def get_nearest_expiry(symbol: str) -> str:
     """Return nearest weekly expiry (Thursday for NIFTY/BANKNIFTY, Friday for SENSEX)."""
     now = datetime.now(IST)
-    # NIFTY/BANKNIFTY expire Thursday (3), SENSEX Friday (4)
     target_dow = 4 if symbol == "SENSEX" else 3
     days_ahead = (target_dow - now.weekday()) % 7
     if days_ahead == 0 and now.hour >= 15:

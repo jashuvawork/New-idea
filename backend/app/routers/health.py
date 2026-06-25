@@ -58,7 +58,7 @@ async def deployment_status():
 @router.get("/api/institutional/readiness/{symbol}")
 async def institutional_readiness(symbol: str):
     from app.engines.auto_trader import get_readiness
-    from app.routers.market import _build_multi_snapshot
+    from app.routers.market import get_multi_snapshot
 
-    snapshot = await _build_multi_snapshot()
+    snapshot = await get_multi_snapshot()
     return get_readiness(symbol.upper(), snapshot.snapshots)

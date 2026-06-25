@@ -35,10 +35,21 @@ class Settings(BaseSettings):
     auto_trading_enabled: bool = True
     shadow_trade_all_signals: bool = True
 
-    # Data cadence
-    market_poll_seconds: int = 3
-    snapshot_cache_seconds: int = 3
+    # Data cadence — conservative defaults to avoid Upstox 429 rate limits
+    market_poll_seconds: int = 5
+    snapshot_cache_seconds: int = 5
     background_market_monitor_enabled: bool = True
+
+    # Upstox rate limiting / caching
+    upstox_min_request_interval_ms: int = 150
+    upstox_request_retries: int = 3
+    upstox_chain_cache_seconds: int = 15
+    upstox_ltp_cache_seconds: int = 4
+    upstox_expiries_cache_seconds: int = 300
+    upstox_funds_cache_seconds: int = 60
+    upstox_candles_cache_seconds: int = 45
+    upstox_max_expiry_probes: int = 2
+    capital_refresh_seconds: int = 60
 
     # Trading mode
     paper_simple_profit_mode: bool = True
