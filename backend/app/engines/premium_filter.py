@@ -4,7 +4,7 @@ from app.config import get_settings
 
 
 def premium_in_band(premium: float | None) -> bool:
-    """True when option LTP is within configured tradeable band (default ₹25–100)."""
+    """True when option LTP is within configured tradeable band (default ₹25–175)."""
     if premium is None or premium <= 0:
         return False
     settings = get_settings()
