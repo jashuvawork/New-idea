@@ -340,6 +340,55 @@ export interface TradeDaySummary {
 export interface TradeHistoryResponse {
   days: TradeDaySummary[];
   storeDir: string;
+  logFile?: string;
+  logSizeBytes?: number;
+}
+
+export interface TradeLogEntry {
+  ts: string;
+  event: string;
+  trade?: Record<string, unknown>;
+  context?: Record<string, unknown>;
+  reason?: string;
+  holdSeconds?: number;
+}
+
+export interface TradeLogResponse {
+  logFile: string;
+  entries: TradeLogEntry[];
+}
+
+export interface DeploymentReadiness {
+  readyForPaper: boolean;
+  readyForLive: boolean;
+  executionMode: string;
+  checks: Record<string, boolean>;
+  tradeLog: {
+    storeDir: string;
+    logFile: string;
+    logSizeBytes: number;
+    todayCounts: { open: number; closed: number; total: number };
+  };
+  armLiveSteps: string[];
+  openTrades: number;
+}
+
+export interface TradeLogStatus {
+  storeDir: string;
+  logFile: string;
+  logSizeBytes: number;
+  writable: boolean;
+  todayOpen: number;
+  todayClosed: number;
+}
+
+export interface DeploymentStatus {
+  status: string;
+  commit: string;
+  environment: string;
+  upstox: DailyTokenStatus;
+  flags: Record<string, boolean | number>;
+  tradeLog?: TradeLogStatus;
 }
 
 export interface DailyTokenStatus {

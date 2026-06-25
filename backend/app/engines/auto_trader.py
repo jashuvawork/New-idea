@@ -311,6 +311,8 @@ def resume_trading() -> None:
 
 def reset_session() -> None:
     global _auto_trader_state
+    closed_ids = trade_store.close_open_trades_on_reset()
+    trade_store.record_session_reset(open_trade_ids=closed_ids)
     _calibration.reset()
     settings = get_settings()
     _auto_trader_state = AutoTraderState(

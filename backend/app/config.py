@@ -110,6 +110,7 @@ class Settings(BaseSettings):
 
     # Persistence
     trade_store_dir: str = "/tmp/nexusquant/trades"
+    trade_log_file: str = ""  # default: {trade_store_dir}/trades.log
     daily_token_once: bool = True
 
     # Swing trading (multi-day paper holds)
