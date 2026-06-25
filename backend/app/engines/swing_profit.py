@@ -29,10 +29,13 @@ def check_swing_entry(
 def compute_swing_lots(confidence: float) -> int:
     settings = get_settings()
     if confidence >= 82:
-        return settings.swing_target_lots
-    if confidence >= 72:
-        return settings.swing_min_lots + 1
-    return settings.swing_min_lots
+        lots = settings.swing_target_lots
+    elif confidence >= 72:
+        lots = (settings.swing_min_lots + settings.swing_target_lots) // 2
+    else:
+        lots = settings.swing_min_lots
+    from app.engines.capital_allocator import clamp_lots
+    return clamp_lots(lots)
 
 
 def evaluate_swing_exit(

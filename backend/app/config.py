@@ -80,7 +80,8 @@ class Settings(BaseSettings):
     aggressive_min_explosion_score: int = 70
     aggressive_min_swing_confidence: int = 72
     aggressive_max_open_scalps: int = 1
-    max_lots_per_trade: int = 0
+    max_lots_per_trade: int = 100
+    min_lots_per_trade: int = 25
     max_risk_per_trade_inr: float = 500_000
     min_per_trade_risk_inr: float = 3_000
     per_trade_risk_pct: float = 0.50
@@ -94,9 +95,9 @@ class Settings(BaseSettings):
     daily_profit_trail_inr: float = 20_000
     use_upstox_capital_for_sizing: bool = True
 
-    simple_max_lots: int = 14
-    simple_target_lots: int = 10
-    simple_min_lots: int = 6
+    simple_max_lots: int = 100
+    simple_target_lots: int = 60
+    simple_min_lots: int = 25
 
     adaptive_exits_enabled: bool = True
     ml_exit_tuning_enabled: bool = True
@@ -114,8 +115,8 @@ class Settings(BaseSettings):
     swing_stop_pct: float = 12.0
     swing_trail_arm_pct: float = 20.0
     swing_trail_keep: float = 0.70
-    swing_min_lots: int = 4
-    swing_target_lots: int = 8
+    swing_min_lots: int = 25
+    swing_target_lots: int = 75
     swing_max_open: int = 2
     swing_max_loss_inr: float = 25_000
 

@@ -28,9 +28,9 @@ class CapitalSnapshot:
     perTradeRiskInr: float = 12_000.0
     perTradeCapitalInr: float = 250_000.0
     maxExposureInr: float = 175_000.0
-    minLots: int = 6
-    targetLots: int = 10
-    maxLots: int = 14
+    minLots: int = 25
+    targetLots: int = 60
+    maxLots: int = 100
     fetchedAt: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -88,19 +88,28 @@ def lot_multiplier(symbol: str) -> int:
     return LOT_MULTIPLIERS.get(symbol.upper(), 25)
 
 
+def clamp_lots(lots: int) -> int:
+    """Clamp lot count to configured analysis band (default 25–100)."""
+    settings = get_settings()
+    min_l = settings.min_lots_per_trade or settings.simple_min_lots
+    max_l = settings.max_lots_per_trade or settings.simple_max_lots
+    return max(min_l, min(lots, max_l))
+
+
 def _lot_tiers(capital_inr: float) -> tuple[int, int, int]:
-    """Static realistic lot bands by Upstox available margin."""
-    if capital_inr < 100_000:
-        return 1, 2, 4
-    if capital_inr < 300_000:
-        return 2, 4, 6
-    if capital_inr < 700_000:
-        return 4, 6, 10
-    if capital_inr < 1_500_000:
-        return 6, 10, 14
-    if capital_inr < 3_000_000:
-        return 8, 12, 18
-    return 10, 14, 22
+    """Lot bands for UI — scaled within 25–100 by available margin."""
+    settings = get_settings()
+    min_l = settings.simple_min_lots
+    max_l = settings.simple_max_lots
+    if capital_inr >= 2_000_000:
+        tgt = min(max_l, 85)
+    elif capital_inr >= 1_000_000:
+        tgt = 75
+    elif capital_inr >= 500_000:
+        tgt = settings.simple_target_lots
+    else:
+        tgt = max(min_l, settings.simple_target_lots - 10)
+    return min_l, tgt, max_l
 
 
 def _parse_upstox_funds(data: dict[str, Any]) -> tuple[float, float, float]:
@@ -270,19 +279,22 @@ def compute_lots(
         return 1
 
     lots = int(trade_budget / margin_per_lot)
-    lots = max(1, lots)
-
-    if settings.max_lots_per_trade > 0:
-        lots = min(lots, settings.max_lots_per_trade)
 
     if settings.aggressive_lot_sizing:
-        return lots
+        # Quality bias within 25–100 band for meaningful PnL analysis
+        if tier == "ELITE" or (tier == "EXPLODING" and confidence >= 80):
+            lots = max(lots, settings.simple_target_lots + 15)
+        elif confidence >= 75 or tqs >= 82:
+            lots = max(lots, settings.simple_target_lots)
+        else:
+            lots = max(lots, settings.simple_min_lots)
+        return clamp_lots(lots)
 
     # Legacy conservative scaling (if aggressive disabled)
     risk_per_lot = stop_points * mult
     lots_by_risk = int(cap.perTradeRiskInr / risk_per_lot) if risk_per_lot > 0 else lots
     lots = min(lots, lots_by_risk, cap.maxLots)
-    return max(1, lots)
+    return clamp_lots(max(settings.simple_min_lots, lots))
 
 
 def tune_exit_plan_for_position(
