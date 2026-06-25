@@ -13,7 +13,7 @@ from app.engines.auto_trader import get_state, process
 from app.engines.realtime_engine import build_symbol_snapshot
 from app.engines.psychology_engine import analyze_psychology, psychology_to_dict
 from app.engines.adaptive_exits import compute_adaptive_exit_plan
-from app.models.schemas import StrategyType
+from app.models.schemas import MultiSnapshot, StrategyType
 from app.services.finnhub import aggregate_sentiment
 from app.services.finnhub import fetch_market_news
 from app.services.redis_store import has_upstox_token
