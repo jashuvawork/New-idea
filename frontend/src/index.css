@@ -2,18 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  html {
+    font-size: 15px;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-nexus-bg text-gray-100 antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    letter-spacing: -0.011em;
+    line-height: 1.5;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(6, 182, 212, 0.08), transparent),
+      radial-gradient(ellipse 60% 40% at 100% 0%, rgba(16, 185, 129, 0.04), transparent);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: rgba(6, 182, 212, 0.35);
+    color: #fff;
+  }
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: #1f2937 #0a0e17;
+  scrollbar-color: #374151 #0a0e17;
 }
 
-body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  -webkit-font-smoothing: antialiased;
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-.font-mono, .font-mono * {
+*::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #0a0e17;
+}
+
+.font-mono,
+.font-mono * {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-feature-settings: normal;
+  letter-spacing: -0.02em;
 }
 
 .line-clamp-2 {
@@ -21,4 +59,30 @@ body {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+@layer components {
+  .panel-card {
+    @apply bg-nexus-panel/90 border border-nexus-border rounded-xl overflow-hidden shadow-panel backdrop-blur-sm transition-colors duration-200;
+  }
+
+  .panel-card:hover {
+    @apply border-nexus-border-light;
+  }
+
+  .stat-pill {
+    @apply inline-flex items-center gap-1.5 rounded-lg border border-nexus-border bg-black/25 px-2.5 py-1 text-[11px];
+  }
+
+  .symbol-tab {
+    @apply px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-150;
+  }
+
+  .symbol-tab-active {
+    @apply bg-nexus-accent text-black shadow-glow-accent;
+  }
+
+  .symbol-tab-idle {
+    @apply bg-nexus-panel text-gray-400 border border-nexus-border hover:text-white hover:border-nexus-border-light;
+  }
 }
