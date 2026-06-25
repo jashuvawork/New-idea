@@ -52,6 +52,8 @@ ALL_STRATEGIES = [
 def _get_session() -> str:
     now = datetime.now(IST)
     t = now.hour * 60 + now.minute
+    if 9 * 60 <= t < 9 * 60 + 15:
+        return "premarket"
     if 9 * 60 + 15 <= t < 10 * 60:
         return "open_drive"
     if 11 * 60 + 30 <= t < 13 * 60:

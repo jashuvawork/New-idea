@@ -7,6 +7,7 @@ export function LiveTradingGate({ status }: { status: DeploymentStatus | null })
   const checks = [
     { label: 'Broker connected today', ok: status.upstox.validToday },
     { label: 'Token stored', ok: status.upstox.hasToken },
+    { label: 'Auto trading', ok: status.flags.autoTradingEnabled as boolean },
     { label: 'Paper mode', ok: status.flags.paperTrading as boolean },
     { label: 'Live trading', ok: status.flags.enableLiveTrading as boolean },
     { label: 'Enhanced mode', ok: status.flags.enhancedMode as boolean },

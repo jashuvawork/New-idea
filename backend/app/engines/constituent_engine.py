@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from app.data.index_constituents import INDEX_LABELS, get_constituents, instrument_key
 from app.models.schemas import Breadth, ConstituentHeatmap, ConstituentTile
-from app.services.upstox import UpstoxClient, UpstoxError
+from app.services.upstox import UpstoxClient, UpstoxError, resolve_quote_payload
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -129,7 +129,7 @@ async def build_constituent_heatmap(
         quotes = await client.get_full_quotes(keys)
         for c in constituents:
             key = instrument_key(c)
-            q = quotes.get(key, {})
+            q = resolve_quote_payload(quotes, key)
             if not q:
                 continue
             parsed = _parse_quote(q, 0)

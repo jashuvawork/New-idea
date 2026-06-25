@@ -18,7 +18,7 @@ import { OrderflowAnalytics } from './components/OrderflowAnalytics';
 import { AIMatrix } from './components/AIMatrix';
 import { GreeksIV } from './components/GreeksIV';
 import { StrategyRouter } from './components/StrategyRouter';
-import { PaperTrading } from './components/PaperTrading';
+import { AutoTradingPanel } from './components/AutoTradingPanel';
 import { RiskEngine } from './components/RiskEngine';
 import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
@@ -27,6 +27,7 @@ import { StrategyMatrix } from './components/StrategyMatrix';
 import { ExplosionRadar } from './components/ExplosionRadar';
 import { MarketHeatmap } from './components/MarketHeatmap';
 import { PsychologyPanel } from './components/PsychologyPanel';
+import { PremarketPanel } from './components/PremarketPanel';
 import { SwingTrading } from './components/SwingTrading';
 
 const SYMBOLS = ['NIFTY', 'SENSEX', 'BANKNIFTY'] as const;
@@ -165,10 +166,11 @@ export default function App() {
         {data && snap && auto && (
           <div className="grid grid-cols-12 gap-3">
             <div className="col-span-3"><ExecutionHUD snap={snap} auto={auto} /></div>
+            <div className="col-span-3"><PremarketPanel snap={snap} /></div>
             <div className="col-span-3"><ExplosiveRunner snap={snap} /></div>
             <div className="col-span-3"><ExplosionRadar snap={snap} /></div>
             <div className="col-span-3"><StrategyRouter snap={snap} /></div>
-            <div className="col-span-3"><PaperTrading auto={auto} /></div>
+            <div className="col-span-3"><AutoTradingPanel auto={auto} /></div>
             <div className="col-span-3"><MarketHeatmap symbol={activeSymbol} embedded={snap.constituentHeatmap} /></div>
             <div className="col-span-3"><SwingTrading snap={snap} auto={auto} /></div>
 

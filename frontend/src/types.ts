@@ -47,6 +47,30 @@ export interface SymbolSnapshot {
   constituentHeatmap?: ConstituentHeatmap | null;
   psychology?: Record<string, unknown>;
   adaptiveExitHint?: Record<string, unknown>;
+  premarket?: PremarketAnalysis | null;
+}
+
+export interface PremarketAnalysis {
+  prevClose: number;
+  indicativeOpen: number;
+  gapPoints: number;
+  gapPct: number;
+  gapDirection: string;
+  gapSize: string;
+  preOpenHigh: number;
+  preOpenLow: number;
+  preOpenVolume: number;
+  constituentGapBreadth: number;
+  volumeSurgeScore: number;
+  auctionBias: string;
+  openPlay: string;
+  explosionRisk: string;
+  confidence: number;
+  minutesToOpen: number;
+  gapLeaders: string[];
+  gapLaggards: string[];
+  scenarios: string[];
+  analysis: string;
 }
 
 export interface ConstituentTile {
@@ -216,13 +240,63 @@ export interface OptimizedProfile {
 export interface AutoTraderState {
   paperTrading: boolean;
   liveTradingEnabled: boolean;
+  autoTradingEnabled: boolean;
   running: boolean;
   openPaperTrades: PaperTrade[];
   closedPaperTrades: PaperTrade[];
   dailyReport: DailyReport;
   tradeMastermind: TradeMastermind;
-  skipped: { symbol: string; reason: string; trade: string }[];
+  skipped: { symbol: string; reason: string; trade?: string; message?: string; mode?: string; score?: number; tradeId?: string }[];
   calibrationBlocks: Record<string, boolean>;
+  capitalAllocation?: CapitalAllocation;
+  dailyProfitGate?: DailyProfitGate;
+  lastEntry?: AutoTradeEvent | null;
+  lastExit?: AutoTradeEvent | null;
+  liveOrdersPlaced?: number;
+}
+
+export interface AutoTradeEvent {
+  tradeId?: string;
+  symbol?: string;
+  side?: string;
+  strike?: number;
+  lots?: number;
+  mode?: string;
+  score?: number;
+  reason?: string;
+  pnlInr?: number;
+  executionMode?: string;
+  brokerOrderId?: string;
+  brokerExitOrderId?: string;
+  at?: string;
+}
+
+export interface CapitalAllocation {
+  availableMarginInr: number;
+  usedMarginInr: number;
+  totalEquityInr: number;
+  source: string;
+  perTradeRiskInr: number;
+  perTradeCapitalInr: number;
+  maxExposureInr: number;
+  minLots: number;
+  targetLots: number;
+  maxLots: number;
+  fetchedAt?: string;
+}
+
+export interface DailyProfitGate {
+  targetInr: number;
+  trailInr: number;
+  sessionPnlInr: number;
+  bestPnlInr: number;
+  trailFloorInr: number;
+  targetHit: boolean;
+  trailLocked: boolean;
+  newEntriesAllowed: boolean;
+  status: string;
+  message: string;
+  progressPct: number;
 }
 
 export interface PaperTrade {

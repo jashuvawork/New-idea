@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter
 
 from app.config import get_settings
-from app.engines.auto_trader import get_state, process
+from app.engines.auto_trader import get_state, process, refresh_trading_capital
 from app.engines.realtime_engine import build_symbol_snapshot
 from app.engines.psychology_engine import analyze_psychology, psychology_to_dict
 from app.engines.adaptive_exits import compute_adaptive_exit_plan
@@ -52,6 +52,12 @@ async def _build_multi_snapshot() -> MultiSnapshot:
             news_sentiment = "BEARISH"
 
     client = UpstoxClient()
+    if settings.use_upstox_capital_for_sizing:
+        try:
+            await refresh_trading_capital(client)
+        except Exception as e:
+            logger.warning("Capital refresh failed: %s", e)
+
     snapshots = {}
     tasks = [build_symbol_snapshot(sym, client, news_sentiment) for sym in settings.symbols]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -80,7 +86,7 @@ async def _build_multi_snapshot() -> MultiSnapshot:
         snap.adaptiveExitHint = hint.to_dict()
         snap.psychology["newsAggregate"] = news_sentiment_agg
 
-    auto_state = process(snapshots, news=news) if data_ready else get_state()
+    auto_state = await process(snapshots, news=news, client=client) if data_ready else get_state()
 
     return MultiSnapshot(
         timestamp=now,
@@ -107,6 +113,24 @@ async def get_snapshots():
     _cache = snapshot
     _cache_time = now
     return snapshot
+
+
+@router.get("/premarket/{symbol}")
+async def get_premarket_analysis(symbol: str):
+    """Dedicated pre-open gap/volume analysis (9:00–9:15 IST and early open)."""
+    if not await has_upstox_token():
+        return {"dataAvailable": False, "error": "Upstox not authenticated", "symbol": symbol.upper()}
+    from app.engines.premarket_engine import build_premarket_analysis
+
+    client = UpstoxClient()
+    news = await fetch_market_news()
+    news_sentiment = aggregate_sentiment(news).get("bias", "NEUTRAL")
+    try:
+        analysis = await build_premarket_analysis(symbol.upper(), client, news_sentiment)
+        return {"dataAvailable": True, "symbol": symbol.upper(), "premarket": analysis.model_dump(mode="json")}
+    except Exception as e:
+        logger.warning("Premarket API error for %s: %s", symbol, e)
+        return {"dataAvailable": False, "error": str(e), "symbol": symbol.upper()}
 
 
 @router.get("/constituents/{symbol}")

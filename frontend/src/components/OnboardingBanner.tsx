@@ -14,6 +14,12 @@ export function OnboardingBanner({
 
   const upstoxOk = deployment?.upstox.validToday;
   const backendOk = Boolean(deployment);
+  const isPremarket = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
+  const premarketHours = (() => {
+    const [h, m] = isPremarket.split(':').map(Number);
+    const t = h * 60 + m;
+    return t >= 9 * 60 && t < 9 * 60 + 15;
+  })();
 
   const steps = [
     {
@@ -29,9 +35,11 @@ export function OnboardingBanner({
       actionLabel: 'Connect Upstox',
     },
     {
-      label: 'Live market data',
+      label: premarketHours ? 'Premarket analysis active' : 'Live market data',
       done: dataReady,
-      hint: waitingReason || 'Waiting for market hours and real prices',
+      hint: premarketHours
+        ? 'Gap, volume & constituent breadth — prepare for 9:15 open'
+        : waitingReason || 'Waiting for market hours and real prices',
     },
   ];
 

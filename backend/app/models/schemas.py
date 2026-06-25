@@ -39,6 +39,8 @@ class HeatmapStrike(BaseModel):
     putOi: int = 0
     callLtp: Optional[float] = None
     putLtp: Optional[float] = None
+    callInstrumentKey: Optional[str] = None
+    putInstrumentKey: Optional[str] = None
     gammaWall: bool = False
     liquidityScore: float = 0
     sweepRisk: float = 0
@@ -141,6 +143,29 @@ class OptimizedProfile(BaseModel):
     sessionLabel: str = "normal"
 
 
+class PremarketAnalysis(BaseModel):
+    prevClose: float = 0
+    indicativeOpen: float = 0
+    gapPoints: float = 0
+    gapPct: float = 0
+    gapDirection: str = "FLAT"  # GAP_UP | GAP_DOWN | FLAT
+    gapSize: str = "FLAT"  # FLAT | SMALL | MODERATE | LARGE | EXTREME
+    preOpenHigh: float = 0
+    preOpenLow: float = 0
+    preOpenVolume: float = 0
+    constituentGapBreadth: float = 50.0
+    volumeSurgeScore: float = 0.0
+    auctionBias: str = "NEUTRAL"
+    openPlay: str = "WAIT"
+    explosionRisk: str = "LOW"  # LOW | MEDIUM | HIGH
+    confidence: float = 0.0
+    minutesToOpen: int = 0
+    gapLeaders: list[str] = []
+    gapLaggards: list[str] = []
+    scenarios: list[str] = []
+    analysis: str = ""
+
+
 class SymbolSnapshot(BaseModel):
     symbol: str
     timestamp: datetime
@@ -151,6 +176,7 @@ class SymbolSnapshot(BaseModel):
     regime: Regime = Regime.RANGE_BOUND
     spot: Optional[float] = None
     atmStrike: Optional[float] = None
+    optionExpiry: Optional[str] = None
     heatmap: list[HeatmapStrike] = []
     orderflow: Orderflow = Field(default_factory=Orderflow)
     greeks: Greeks = Field(default_factory=Greeks)
@@ -171,6 +197,7 @@ class SymbolSnapshot(BaseModel):
     constituentHeatmap: Optional[ConstituentHeatmap] = None
     psychology: dict[str, Any] = {}
     adaptiveExitHint: dict[str, Any] = {}
+    premarket: Optional[PremarketAnalysis] = None
 
 
 class PaperTrade(BaseModel):
@@ -218,6 +245,7 @@ class TradeMastermind(BaseModel):
 class AutoTraderState(BaseModel):
     paperTrading: bool = True
     liveTradingEnabled: bool = False
+    autoTradingEnabled: bool = True
     running: bool = True
     openPaperTrades: list[PaperTrade] = []
     closedPaperTrades: list[PaperTrade] = []
@@ -225,6 +253,11 @@ class AutoTraderState(BaseModel):
     tradeMastermind: TradeMastermind = Field(default_factory=TradeMastermind)
     skipped: list[dict[str, Any]] = []
     calibrationBlocks: dict[str, bool] = {"CALL": False, "PUT": False}
+    capitalAllocation: dict[str, Any] = {}
+    dailyProfitGate: dict[str, Any] = {}
+    lastEntry: Optional[dict[str, Any]] = None
+    lastExit: Optional[dict[str, Any]] = None
+    liveOrdersPlaced: int = 0
 
 
 class MultiSnapshot(BaseModel):

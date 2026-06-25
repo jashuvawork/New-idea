@@ -37,8 +37,12 @@ from app.engines.strategy_orchestrator import run_all_strategies, signals_to_sug
 from app.engines.strategies.base import compute_max_pain, compute_pcr
 from app.engines.explosion_detector import event_to_dict, scan_chain_explosions
 from app.engines.swing_engine import scan_swing_setups, setup_to_dict
+from app.engines.premarket_engine import (
+    attach_premarket_to_snapshot,
+    build_premarket_snapshot,
+)
 from app.engines.ml_engine import get_ml_engine
-from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase, get_nearest_expiry
+from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -343,10 +347,31 @@ async def build_symbol_snapshot(
     if not client:
         client = UpstoxClient()
 
+    if phase == MarketPhase.PREMARKET:
+        try:
+            return await build_premarket_snapshot(symbol, client, news_sentiment)
+        except UpstoxError as e:
+            logger.warning("Premarket error for %s: %s", symbol, e)
+            return SymbolSnapshot(
+                symbol=symbol,
+                timestamp=now,
+                marketPhase=phase,
+                dataAvailable=False,
+                error=str(e),
+            )
+        except Exception as e:
+            logger.exception("Premarket snapshot error for %s", symbol)
+            return SymbolSnapshot(
+                symbol=symbol,
+                timestamp=now,
+                marketPhase=phase,
+                dataAvailable=False,
+                error=f"Premarket error: {e}",
+            )
+
     try:
         spot = await client.get_index_ltp(symbol)
-        expiry = get_nearest_expiry(symbol)
-        chain = await client.get_option_chain(symbol, expiry)
+        chain, expiry = await client.get_option_chain_resolved(symbol)
         candles = await client.get_candles(symbol)
 
         if not chain:
@@ -417,7 +442,7 @@ async def build_symbol_snapshot(
             "explosionCount": len([e for e in explosion_events if e.tier in ("EXPLODING", "ELITE")]),
         }
 
-        return SymbolSnapshot(
+        snap = SymbolSnapshot(
             symbol=symbol,
             timestamp=now,
             marketPhase=phase,
@@ -426,6 +451,7 @@ async def build_symbol_snapshot(
             regime=regime,
             spot=spot,
             atmStrike=atm,
+            optionExpiry=expiry,
             heatmap=heatmap,
             orderflow=orderflow,
             greeks=greeks,
@@ -445,6 +471,8 @@ async def build_symbol_snapshot(
             topSwing=top_swing,
             constituentHeatmap=constituent_hm if constituent_hm.dataAvailable else None,
         )
+        await attach_premarket_to_snapshot(snap, client, news_sentiment)
+        return snap
 
     except UpstoxError as e:
         logger.warning("Upstox error for %s: %s", symbol, e)
