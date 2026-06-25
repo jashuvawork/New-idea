@@ -2,7 +2,7 @@ import { Panel } from './Panel';
 import type { SymbolSnapshot } from '../types';
 
 export function ExplosiveRunner({ snap }: { snap: SymbolSnapshot }) {
-  const runner = snap.explosiveRunner;
+  const runner = snap.explosiveRunner ?? { candidate: false };
   const watchlist = snap.explosiveRunnerWatchlist || [];
 
   return (
@@ -42,7 +42,7 @@ export function ExplosiveRunner({ snap }: { snap: SymbolSnapshot }) {
                 <td className="py-1 font-mono">{w.strike}</td>
                 <td className={w.side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'}>{w.side}</td>
                 <td className="text-right font-mono">{w.score}</td>
-                <td className="text-right font-mono text-nexus-accent">{w.premiumVelocityPct.toFixed(1)}</td>
+                <td className="text-right font-mono text-nexus-accent">{(w.premiumVelocityPct ?? 0).toFixed(1)}</td>
               </tr>
             ))}
           </tbody>

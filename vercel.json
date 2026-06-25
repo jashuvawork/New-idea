@@ -14,20 +14,28 @@
       "destination": "http://65.1.137.232:8000/health"
     },
     {
-      "source": "/((?!api/).*)",
+      "source": "/((?!api/|assets/|health).*)",
       "destination": "/index.html"
     }
   ],
-  "experimentalServices": {
-    "frontend": {
-      "root": "frontend",
-      "routePrefix": "/",
-      "framework": "vite"
+  "headers": [
+    {
+      "source": "/",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
     },
-    "backend": {
-      "root": "backend",
-      "entrypoint": "app.main:app",
-      "routePrefix": "/_/backend"
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
     }
-  }
+  ]
 }

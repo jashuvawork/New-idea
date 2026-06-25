@@ -2,7 +2,7 @@ import { Panel } from './Panel';
 import type { SymbolSnapshot } from '../types';
 
 export function StrategyRouter({ snap }: { snap: SymbolSnapshot }) {
-  const trades = snap.suggestedTrades;
+  const trades = snap.suggestedTrades ?? [];
 
   return (
     <Panel title="Strategy Router" badge={`${trades.length} signals`}>
@@ -21,9 +21,9 @@ export function StrategyRouter({ snap }: { snap: SymbolSnapshot }) {
                 </span>
               </div>
               <div className="flex gap-3 mt-1 text-[11px] text-nexus-muted">
-                <span>Premium: <b className="text-white">₹{t.lastPremium.toFixed(2)}</b></span>
-                <span>TQS: <b className="text-nexus-accent">{t.tqs.toFixed(0)}</b></span>
-                <span>Conf: {t.confidence.toFixed(0)}%</span>
+                <span>Premium: <b className="text-white">₹{(t.lastPremium ?? 0).toFixed(2)}</b></span>
+                <span>TQS: <b className="text-nexus-accent">{(t.tqs ?? 0).toFixed(0)}</b></span>
+                <span>Conf: {(t.confidence ?? 0).toFixed(0)}%</span>
                 {t.adaptiveTarget && <span>Target: {t.adaptiveTarget}pt</span>}
               </div>
             </div>

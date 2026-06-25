@@ -24,6 +24,16 @@ const EMPTY_METRICS: StreamMetrics = {
   connectionQuality: 'offline',
 };
 
+async function fetchJson<T>(url: string): Promise<T | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 export function useMarketStream() {
   const [data, setData] = useState<MultiSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -102,10 +112,9 @@ export function useDeploymentStatus() {
   const [status, setStatus] = useState<DeploymentStatus | null>(null);
 
   const refresh = useCallback(() => {
-    fetch(`${API_BASE}/api/deployment/status`)
-      .then((r) => r.json())
-      .then(setStatus)
-      .catch(() => {});
+    fetchJson<DeploymentStatus>(`${API_BASE}/api/deployment/status`).then((json) => {
+      if (json) setStatus(json);
+    });
   }, []);
 
   useEffect(() => {
@@ -121,10 +130,9 @@ export function useTradeHistory(days = 14) {
   const [history, setHistory] = useState<TradeHistoryResponse | null>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/auto-trader/history?days=${days}`)
-      .then((r) => r.json())
-      .then(setHistory)
-      .catch(() => {});
+    fetchJson<TradeHistoryResponse>(`${API_BASE}/api/auto-trader/history?days=${days}`).then((json) => {
+      if (json) setHistory(json);
+    });
   }, [days]);
 
   return history;
@@ -134,10 +142,9 @@ export function useTradeLog(limit = 30) {
   const [log, setLog] = useState<TradeLogResponse | null>(null);
 
   const refresh = useCallback(() => {
-    fetch(`${API_BASE}/api/auto-trader/log?limit=${limit}`)
-      .then((r) => r.json())
-      .then(setLog)
-      .catch(() => {});
+    fetchJson<TradeLogResponse>(`${API_BASE}/api/auto-trader/log?limit=${limit}`).then((json) => {
+      if (json) setLog(json);
+    });
   }, [limit]);
 
   useEffect(() => {
@@ -153,10 +160,9 @@ export function useDeploymentReadiness() {
   const [readiness, setReadiness] = useState<DeploymentReadiness | null>(null);
 
   const refresh = useCallback(() => {
-    fetch(`${API_BASE}/api/deployment/readiness`)
-      .then((r) => r.json())
-      .then(setReadiness)
-      .catch(() => {});
+    fetchJson<DeploymentReadiness>(`${API_BASE}/api/deployment/readiness`).then((json) => {
+      if (json) setReadiness(json);
+    });
   }, []);
 
   useEffect(() => {
@@ -172,10 +178,9 @@ export function usePerformanceMilestone() {
   const [milestone, setMilestone] = useState<PerformanceMilestone | null>(null);
 
   const refresh = useCallback(() => {
-    fetch(`${API_BASE}/api/auto-trader/milestone`)
-      .then((r) => r.json())
-      .then(setMilestone)
-      .catch(() => {});
+    fetchJson<PerformanceMilestone>(`${API_BASE}/api/auto-trader/milestone`).then((json) => {
+      if (json && typeof json.tradeCount === 'number' && json.checks) setMilestone(json);
+    });
   }, []);
 
   useEffect(() => {

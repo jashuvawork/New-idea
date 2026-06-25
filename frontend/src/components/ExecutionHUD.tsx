@@ -37,7 +37,7 @@ export function ExecutionHUD({ snap, auto }: { snap: SymbolSnapshot; auto: AutoT
         <ScoreBar value={tqs} />
       </div>
       <div className="mt-3 flex items-center justify-between">
-        <BiasBadge bias={snap.breadth.bias} />
+        <BiasBadge bias={snap.breadth?.bias ?? 'NEUTRAL'} />
         <span className={`text-xs font-mono ${auto.running && auto.autoTradingEnabled ? 'text-nexus-green' : 'text-nexus-red'}`}>
           {auto.running && auto.autoTradingEnabled ? '● AUTO ON' : '○ AUTO STOPPED'}
         </span>

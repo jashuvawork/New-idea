@@ -31,8 +31,10 @@ export function MarketHeatmap({
     }
     const load = () => {
       fetch(`${API_BASE}/api/market/constituents/${symbol}`)
-        .then((r) => r.json())
-        .then(setData)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json) => {
+          if (json) setData(json);
+        })
         .catch(() => {});
     };
     load();
