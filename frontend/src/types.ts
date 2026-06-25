@@ -5,6 +5,7 @@ export interface StreamMetrics {
   stalenessMs: number;
   pollIntervalMs: number;
   connectionQuality: 'excellent' | 'good' | 'slow' | 'offline';
+  streamMode?: 'sse' | 'poll';
 }
 
 export interface MultiSnapshot {

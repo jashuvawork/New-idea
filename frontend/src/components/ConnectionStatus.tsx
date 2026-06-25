@@ -13,7 +13,10 @@ function qualityColor(quality: StreamMetrics['connectionQuality']) {
   }
 }
 
-function qualityLabel(quality: StreamMetrics['connectionQuality']) {
+function qualityLabel(quality: StreamMetrics['connectionQuality'], streamMode?: StreamMetrics['streamMode']) {
+  if (streamMode === 'sse' && quality !== 'offline') {
+    return 'Live';
+  }
   switch (quality) {
     case 'excellent':
       return 'Fast';
@@ -32,7 +35,7 @@ export function ConnectionStatus({ metrics }: { metrics: StreamMetrics }) {
   return (
     <div
       className={`flex items-center gap-2 text-[10px] px-2.5 py-1 rounded border ${qualityColor(metrics.connectionQuality)}`}
-      title={`Round-trip: ${metrics.lastLatencyMs}ms · Avg: ${metrics.avgLatencyMs}ms · Poll every ${metrics.pollIntervalMs / 1000}s`}
+      title={`${metrics.streamMode === 'sse' ? 'SSE stream' : 'HTTP poll'} · Round-trip: ${metrics.lastLatencyMs}ms · Avg: ${metrics.avgLatencyMs}ms · Refresh every ${metrics.pollIntervalMs / 1000}s`}
     >
       <span
         className={`w-1.5 h-1.5 rounded-full ${
@@ -43,7 +46,7 @@ export function ConnectionStatus({ metrics }: { metrics: StreamMetrics }) {
               : 'bg-nexus-green animate-pulse'
         }`}
       />
-      <span className="font-semibold">{qualityLabel(metrics.connectionQuality)}</span>
+      <span className="font-semibold">{qualityLabel(metrics.connectionQuality, metrics.streamMode)}</span>
       <span className="opacity-80">·</span>
       <span className="font-mono">{metrics.lastLatencyMs}ms</span>
       {metrics.lastUpdatedAt && (
@@ -62,6 +65,12 @@ export function LatencyFooter({ metrics }: { metrics: StreamMetrics }) {
       <span>
         Latency: <span className="font-mono text-gray-300">{metrics.lastLatencyMs}ms</span>
         {' '}(avg <span className="font-mono text-gray-300">{metrics.avgLatencyMs}ms</span>)
+      </span>
+      <span>
+        Mode:{' '}
+        <span className="font-mono text-gray-300">
+          {metrics.streamMode === 'sse' ? 'SSE live' : 'HTTP poll'}
+        </span>
       </span>
       <span>
         Refresh: every <span className="font-mono text-gray-300">{metrics.pollIntervalMs / 1000}s</span>

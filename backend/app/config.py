@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     snapshot_cache_seconds: int = 5
     background_market_monitor_enabled: bool = True
 
+    # Upstox WebSocket real-time feed + SSE push to UI
+    upstox_ws_enabled: bool = True
+    upstox_ws_mode: str = "ltpc"  # ltpc | full | full_d30 | option_greeks
+    upstox_ws_reconnect_seconds: int = 5
+    upstox_ws_resubscribe_seconds: int = 45
+    tick_snapshot_seconds: int = 1  # snapshot cache when WS feed is active
+    market_poll_seconds_ws: int = 1  # background monitor when WS active
+    sse_enabled: bool = True
+    sse_heartbeat_seconds: int = 15
+
     # Upstox rate limiting / caching
     upstox_min_request_interval_ms: int = 250
     upstox_request_retries: int = 4

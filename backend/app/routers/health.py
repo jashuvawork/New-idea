@@ -9,6 +9,7 @@ from app.services import trade_store
 from app.services.redis_store import has_upstox_token
 from app.services.token_manager import get_daily_token_status
 from app.services.upstox import get_market_phase
+from app.services.upstox_ws import ws_status
 
 router = APIRouter(tags=["health"])
 
@@ -64,7 +65,11 @@ async def deployment_status():
         "cadence": {
             "marketPollSeconds": settings.market_poll_seconds,
             "snapshotCacheSeconds": settings.snapshot_cache_seconds,
+            "tickSnapshotSeconds": settings.tick_snapshot_seconds,
+            "marketPollSecondsWs": settings.market_poll_seconds_ws,
+            "sseEnabled": settings.sse_enabled,
         },
+        "websocket": ws_status(),
         "tradeLog": {
             "storeDir": store_health["storeDir"],
             "logFile": store_health["logFile"],
