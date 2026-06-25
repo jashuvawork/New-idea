@@ -159,6 +159,81 @@ def normalize_option_chain(chain: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def resolve_quote_payload(data: dict[str, Any], instrument_key: str) -> dict[str, Any]:
+    """Resolve quote dict — Upstox responses use ':' keys, requests use '|'."""
+    if not isinstance(data, dict) or not instrument_key:
+        return {}
+    if instrument_key in data and data[instrument_key]:
+        return data[instrument_key]
+    colon_key = instrument_key.replace("|", ":")
+    if colon_key in data and data[colon_key]:
+        return data[colon_key]
+    pipe_key = instrument_key.replace(":", "|")
+    if pipe_key in data and data[pipe_key]:
+        return data[pipe_key]
+    tail = instrument_key.split("|")[-1].split(":")[-1]
+    for k, v in data.items():
+        if isinstance(v, dict) and tail in k:
+            return v
+    return {}
+
+
+def normalize_quotes_map(data: dict[str, Any]) -> dict[str, Any]:
+    """Index quotes under both pipe and colon keys for downstream lookups."""
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for k, v in data.items():
+        out[k] = v
+        out[k.replace(":", "|")] = v
+        out[k.replace("|", ":")] = v
+    return out
+
+
+def normalize_option_leg(leg: dict[str, Any]) -> dict[str, Any]:
+    """Flatten Upstox v2 nested call/put leg (market_data + option_greeks)."""
+    if not isinstance(leg, dict):
+        return {}
+    if "market_data" not in leg and ("ltp" in leg or "last_price" in leg):
+        return leg
+
+    md = leg.get("market_data") or {}
+    greeks_src = leg.get("option_greeks") or leg.get("greeks") or {}
+    ltp = md.get("ltp") or leg.get("ltp") or leg.get("last_price")
+    return {
+        "instrument_key": leg.get("instrument_key"),
+        "ltp": ltp,
+        "last_price": ltp,
+        "volume": md.get("volume") if md.get("volume") is not None else leg.get("volume", 0),
+        "oi": md.get("oi") if md.get("oi") is not None else leg.get("oi", 0),
+        "bid_price": md.get("bid_price") or leg.get("bid_price"),
+        "ask_price": md.get("ask_price") or leg.get("ask_price"),
+        "implied_volatility": greeks_src.get("iv") or leg.get("implied_volatility"),
+        "greeks": {
+            "delta": greeks_src.get("delta"),
+            "gamma": greeks_src.get("gamma"),
+            "theta": greeks_src.get("theta"),
+            "vega": greeks_src.get("vega"),
+            "iv": greeks_src.get("iv"),
+        },
+    }
+
+
+def normalize_option_chain(chain: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize each strike row for engines that expect flat call/put fields."""
+    out: list[dict[str, Any]] = []
+    for row in chain:
+        if not isinstance(row, dict):
+            continue
+        normalized = dict(row)
+        if row.get("call_options"):
+            normalized["call_options"] = normalize_option_leg(row["call_options"])
+        if row.get("put_options"):
+            normalized["put_options"] = normalize_option_leg(row["put_options"])
+        out.append(normalized)
+    return out
+
+
 class UpstoxError(Exception):
     pass
 

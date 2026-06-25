@@ -12,6 +12,7 @@ from app.models.schemas import AutoTraderState, StrategyType
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 
+# Contract units per lot — NIFTY/BANKNIFTY=25, SENSEX=10
 LOT_MULTIPLIERS: dict[str, int] = {
     "NIFTY": 25,
     "BANKNIFTY": 25,
@@ -26,8 +27,8 @@ class CapitalSnapshot:
     totalEquityInr: float = 500_000.0
     source: str = "fallback"
     perTradeRiskInr: float = 12_000.0
-    perTradeCapitalInr: float = 250_000.0
-    maxExposureInr: float = 175_000.0
+    perTradeCapitalInr: float = 330_000.0
+    maxExposureInr: float = 330_000.0
     minLots: int = 25
     targetLots: int = 60
     maxLots: int = 100
@@ -85,6 +86,7 @@ _best_pnl: float = 0.0
 
 
 def lot_multiplier(symbol: str) -> int:
+    """Units per lot for the index (NIFTY/BANKNIFTY=25, SENSEX=10)."""
     return LOT_MULTIPLIERS.get(symbol.upper(), 25)
 
 
@@ -180,13 +182,14 @@ def get_capital_snapshot() -> CapitalSnapshot:
         return _capital
     settings = get_settings()
     min_l, tgt_l, max_l = _lot_tiers(settings.fallback_capital_inr)
+    budget = settings.fallback_capital_inr * settings.per_trade_capital_pct
     return CapitalSnapshot(
         availableMarginInr=settings.fallback_capital_inr,
         totalEquityInr=settings.fallback_capital_inr,
         source="fallback",
-        perTradeRiskInr=settings.fallback_capital_inr * settings.per_trade_capital_pct,
-        perTradeCapitalInr=settings.fallback_capital_inr * settings.per_trade_capital_pct,
-        maxExposureInr=settings.fallback_capital_inr * settings.per_trade_capital_pct,
+        perTradeRiskInr=budget,
+        perTradeCapitalInr=budget,
+        maxExposureInr=budget,
         minLots=min_l,
         targetLots=tgt_l,
         maxLots=max_l,
@@ -260,8 +263,8 @@ def compute_lots(
     tier: Optional[str] = None,
 ) -> int:
     """
-    Max lots from 50% of Upstox available margin per trade.
-    lots = floor(trade_capital / (premium × lot_multiplier))
+    Lots from 66% of Upstox margin, per-index contract size.
+    lots = floor(trade_capital / (premium × lot_multiplier[symbol]))
     """
     cap = get_capital_snapshot()
     settings = get_settings()
@@ -281,14 +284,7 @@ def compute_lots(
     lots = int(trade_budget / margin_per_lot)
 
     if settings.aggressive_lot_sizing:
-        # Quality bias within 25–100 band for meaningful PnL analysis
-        if tier == "ELITE" or (tier == "EXPLODING" and confidence >= 80):
-            lots = max(lots, settings.simple_target_lots + 15)
-        elif confidence >= 75 or tqs >= 82:
-            lots = max(lots, settings.simple_target_lots)
-        else:
-            lots = max(lots, settings.simple_min_lots)
-        return clamp_lots(lots)
+        return clamp_lots(max(1, lots))
 
     # Legacy conservative scaling (if aggressive disabled)
     risk_per_lot = stop_points * mult
@@ -303,7 +299,7 @@ def tune_exit_plan_for_position(
     premium: float,
     symbol: str,
 ) -> dict[str, Any]:
-    """Tune TP/SL for huge lot positions — INR risk caps on 50% trade capital."""
+    """Tune TP/SL for huge lot positions — INR risk caps on 66% trade capital."""
     settings = get_settings()
     cap = get_capital_snapshot()
     mult = lot_multiplier(symbol)
@@ -329,9 +325,9 @@ def tune_exit_plan_for_position(
     trail_arm = max(float(plan_dict.get("trailArmPoints", 3.0)), target * 0.45)
 
     reasoning.append(
-        f"Size tune: {lots} lots · ₹{position_inr:,.0f} notional · SL ≤₹{max_sl_inr:,.0f} ({stop:.1f}pt)"
+        f"Size tune: {lots} lots × {mult} units · ₹{position_inr:,.0f} notional · SL ≤₹{max_sl_inr:,.0f} ({stop:.1f}pt)"
     )
-    reasoning.append(f"TP target ~₹{target_inr:,.0f} ({target:.1f}pt) on 50% capital")
+    reasoning.append(f"TP target ~₹{target_inr:,.0f} ({target:.1f}pt) on {settings.per_trade_capital_pct:.0%} capital")
 
     return {
         **plan_dict,
@@ -340,6 +336,7 @@ def tune_exit_plan_for_position(
         "microTargetPoints": round(micro, 2),
         "trailArmPoints": round(trail_arm, 2),
         "lots": lots,
+        "lotMultiplier": mult,
         "positionInr": round(position_inr, 2),
         "tradeBudgetInr": round(trade_budget, 2),
         "reasoning": reasoning,

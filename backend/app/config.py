@@ -76,9 +76,9 @@ class Settings(BaseSettings):
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
-    # Capital / risk — 50% margin per trade, max lots
+    # Capital / risk — 66% margin per trade; lots sized per index lot multiplier
     fallback_capital_inr: float = 500_000
-    per_trade_capital_pct: float = 0.50
+    per_trade_capital_pct: float = 0.66
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
     aggressive_min_explosion_score: int = 45
@@ -88,8 +88,8 @@ class Settings(BaseSettings):
     min_lots_per_trade: int = 25
     max_risk_per_trade_inr: float = 500_000
     min_per_trade_risk_inr: float = 3_000
-    per_trade_risk_pct: float = 0.50
-    max_exposure_pct: float = 0.50
+    per_trade_risk_pct: float = 0.66
+    max_exposure_pct: float = 0.66
     position_sl_cap_pct: float = 0.06
     position_tp_target_pct: float = 0.10
     emergency_stop_inr: float = 50_000
