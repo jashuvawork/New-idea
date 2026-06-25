@@ -41,15 +41,17 @@ class Settings(BaseSettings):
     background_market_monitor_enabled: bool = True
 
     # Upstox rate limiting / caching
-    upstox_min_request_interval_ms: int = 150
-    upstox_request_retries: int = 3
-    upstox_chain_cache_seconds: int = 15
-    upstox_ltp_cache_seconds: int = 4
-    upstox_expiries_cache_seconds: int = 300
-    upstox_funds_cache_seconds: int = 60
-    upstox_candles_cache_seconds: int = 45
+    upstox_min_request_interval_ms: int = 250
+    upstox_request_retries: int = 4
+    upstox_rate_limit_cooldown_seconds: int = 45
+    upstox_chain_cache_seconds: int = 20
+    upstox_ltp_cache_seconds: int = 5
+    upstox_expiries_cache_seconds: int = 600
+    upstox_funds_cache_seconds: int = 90
+    upstox_candles_cache_seconds: int = 60
     upstox_max_expiry_probes: int = 2
-    capital_refresh_seconds: int = 60
+    capital_refresh_seconds: int = 90
+    fetch_constituents_in_snapshot: bool = False
 
     # Trading mode
     paper_simple_profit_mode: bool = True

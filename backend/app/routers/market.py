@@ -74,6 +74,19 @@ async def _build_multi_snapshot() -> MultiSnapshot:
             snapshots[sym] = await build_symbol_snapshot(sym, client, news_sentiment)
         except Exception as e:
             logger.error("Snapshot failed for %s: %s", sym, e)
+            err_msg = str(e)
+            if _cache and sym in _cache.snapshots and _cache.snapshots[sym].dataAvailable:
+                logger.info("Reusing stale snapshot for %s", sym)
+                snapshots[sym] = _cache.snapshots[sym]
+            else:
+                from app.models.schemas import MarketPhase, SymbolSnapshot
+                snapshots[sym] = SymbolSnapshot(
+                    symbol=sym,
+                    timestamp=now,
+                    marketPhase=MarketPhase.LIVE_MARKET,
+                    dataAvailable=False,
+                    error=err_msg[:200],
+                )
 
     data_ready = any(s.dataAvailable for s in snapshots.values())
     waiting_reason = None
@@ -121,7 +134,15 @@ async def get_multi_snapshot() -> MultiSnapshot:
             age = (datetime.now(IST) - _cache_time).total_seconds()
             if age < settings.snapshot_cache_seconds:
                 return _cache
-        snapshot = await _build_multi_snapshot()
+        try:
+            snapshot = await _build_multi_snapshot()
+        except Exception as e:
+            if _cache:
+                logger.warning("Serving stale snapshot after build error: %s", e)
+                stale = _cache.model_copy(deep=True)
+                stale.waitingReason = f"Stale data — {e}"
+                return stale
+            raise
         _cache = snapshot
         _cache_time = datetime.now(IST)
         return snapshot
