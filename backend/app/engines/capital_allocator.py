@@ -13,14 +13,14 @@ from app.models.schemas import AutoTraderState, StrategyType
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 
-# Fallback only — refreshed from Upstox /option/contract lot_size
+# Fallback — refreshed from Upstox /option/contract; matches current NSE/BSE lot sizes
 FALLBACK_LOT_SIZES: dict[str, int] = {
-    "NIFTY": 25,
-    "BANKNIFTY": 25,
-    "SENSEX": 10,
+    "NIFTY": 65,
+    "BANKNIFTY": 30,
+    "SENSEX": 20,
 }
 
-_lot_sizes: dict[str, int] = {}
+_lot_sizes: dict[str, int] = dict(FALLBACK_LOT_SIZES)
 _lot_sizes_source: str = "fallback"
 _lot_sizes_fetched_at: Optional[str] = None
 _lot_sizes_last_mono: float = 0.0
@@ -96,7 +96,7 @@ def lot_multiplier(symbol: str) -> int:
     sym = symbol.upper()
     if sym in _lot_sizes:
         return _lot_sizes[sym]
-    return FALLBACK_LOT_SIZES.get(sym, 25)
+    return FALLBACK_LOT_SIZES.get(sym, 65)
 
 
 def get_lot_sizes() -> dict[str, int]:
