@@ -72,7 +72,7 @@ async def _build_multi_snapshot() -> MultiSnapshot:
     except Exception as e:
         logger.warning("Lot size refresh failed: %s", e)
 
-    if settings.use_upstox_capital_for_sizing:
+    if settings.use_upstox_capital_for_sizing or settings.paper_live_parity_enabled:
         refresh_due = (
             _capital_refresh_at is None
             or (now - _capital_refresh_at).total_seconds() >= settings.capital_refresh_seconds
