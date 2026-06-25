@@ -96,7 +96,7 @@ class Settings(BaseSettings):
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
-    max_option_premium_inr: float = 100.0
+    max_option_premium_inr: float = 175.0
 
     # Enhanced scalping (more powerful than base spec)
     enhanced_micro_target_points: float = 2.5  # faster micro lock vs 3.0 base
