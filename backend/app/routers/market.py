@@ -10,6 +10,7 @@ from fastapi import APIRouter
 
 from app.config import get_settings
 from app.engines.auto_trader import get_state, process, refresh_trading_capital
+from app.engines.capital_allocator import refresh_lot_sizes
 from app.engines.realtime_engine import build_symbol_snapshot
 from app.engines.psychology_engine import analyze_psychology, psychology_to_dict
 from app.engines.adaptive_exits import compute_adaptive_exit_plan
@@ -55,6 +56,11 @@ async def _build_multi_snapshot() -> MultiSnapshot:
             news_sentiment = "BEARISH"
 
     client = UpstoxClient()
+    try:
+        await refresh_lot_sizes(client)
+    except Exception as e:
+        logger.warning("Lot size refresh failed: %s", e)
+
     if settings.use_upstox_capital_for_sizing:
         refresh_due = (
             _capital_refresh_at is None

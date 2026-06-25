@@ -402,6 +402,36 @@ class UpstoxClient:
         _cache_set(cache_key, expiries)
         return expiries
 
+    async def get_lot_size(self, symbol: str) -> int:
+        """Units per lot for an index — from Upstox option contract metadata."""
+        sym = symbol.upper()
+        cache_key = f"lot_size:{sym}"
+        cached = _cache_get(cache_key, self.settings.upstox_expiries_cache_seconds)
+        if cached is not None:
+            return int(cached)
+
+        key = INDEX_KEYS.get(sym)
+        if not key:
+            raise UpstoxError(f"Unknown symbol: {sym}")
+
+        data = await self._get("/option/contract", params={"instrument_key": key})
+        if not isinstance(data, list) or not data:
+            raise UpstoxError(f"No option contracts for {sym}")
+
+        for contract in data:
+            if not isinstance(contract, dict):
+                continue
+            raw = contract.get("lot_size") or contract.get("minimum_lot")
+            if raw is None:
+                continue
+            lot = int(raw)
+            if lot > 0:
+                _cache_set(cache_key, lot)
+                logger.info("Upstox lot_size %s = %d", sym, lot)
+                return lot
+
+        raise UpstoxError(f"No lot_size in Upstox contracts for {sym}")
+
     async def get_option_chain(self, symbol: str, expiry: str) -> list[dict[str, Any]]:
         """Fetch option chain for symbol and expiry date (YYYY-MM-DD)."""
         cache_key = f"chain:{symbol}:{expiry}"

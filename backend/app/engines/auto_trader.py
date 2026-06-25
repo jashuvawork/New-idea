@@ -23,6 +23,7 @@ from app.engines.capital_allocator import (
     compute_lots,
     compute_session_pnl,
     get_capital_snapshot,
+    get_lot_sizes_meta,
     lot_multiplier,
     refresh_capital_from_upstox,
     tune_exit_plan_for_position,
@@ -224,6 +225,7 @@ async def _open_from_candidate(
                 "instrumentKey": order["instrument_key"],
                 "brokerOrderId": order["order_id"],
                 "brokerQuantity": order["quantity"],
+                "lotSize": order.get("lot_size", lot_mult),
             })
             state.liveOrdersPlaced += 1
         except UpstoxError as e:
@@ -456,7 +458,7 @@ async def process(
     market_live = get_market_phase() == "LIVE_MARKET"
     profit_gate = update_daily_profit_gate(state)
     cap_snap = get_capital_snapshot()
-    state.capitalAllocation = cap_snap.to_dict()
+    state.capitalAllocation = {**cap_snap.to_dict(), **get_lot_sizes_meta()}
     state.dailyProfitGate = profit_gate.to_dict()
 
     if not profit_gate.newEntriesAllowed:

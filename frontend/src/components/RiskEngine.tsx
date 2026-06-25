@@ -12,6 +12,11 @@ export function RiskEngine({ auto }: { auto: AutoTraderState }) {
   const targetInr = gate.targetInr ?? 200_000;
   const trailInr = gate.trailInr ?? 20_000;
   const gateOk = gate.newEntriesAllowed !== false;
+  const lotSizes = cap.lotSizes || {};
+  const lotShort: Record<string, string> = { NIFTY: 'N', BANKNIFTY: 'BN', SENSEX: 'SX' };
+  const lotLabel = Object.keys(lotSizes).length
+    ? Object.entries(lotSizes).map(([s, n]) => `${lotShort[s] || s}${n}`).join(' · ')
+    : 'Upstox pending';
 
   return (
     <Panel title="Capital & Daily Target" badge={gate.status || 'ACTIVE'}>
@@ -24,7 +29,7 @@ export function RiskEngine({ auto }: { auto: AutoTraderState }) {
         </div>
         <div className="flex justify-between text-[9px] text-nexus-muted">
           <span>66% cap/trade · ₹{((cap.perTradeCapitalInr as number) || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-          <span>Lots {cap.minLots ?? 25}–{cap.maxLots ?? 100} · N25/B25/SX10</span>
+          <span>Lots {cap.minLots ?? 25}–{cap.maxLots ?? 100} · {lotLabel}</span>
         </div>
       </div>
 

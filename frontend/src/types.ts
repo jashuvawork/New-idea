@@ -283,6 +283,9 @@ export interface CapitalAllocation {
   targetLots: number;
   maxLots: number;
   fetchedAt?: string;
+  lotSizes?: Record<string, number>;
+  lotSizesSource?: string;
+  lotSizesFetchedAt?: string;
 }
 
 export interface DailyProfitGate {

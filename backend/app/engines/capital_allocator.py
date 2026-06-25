@@ -1,6 +1,7 @@
 """Capital allocation from Upstox funds + static daily profit target/trail."""
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -12,12 +13,17 @@ from app.models.schemas import AutoTraderState, StrategyType
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 
-# Contract units per lot — NIFTY/BANKNIFTY=25, SENSEX=10
-LOT_MULTIPLIERS: dict[str, int] = {
+# Fallback only — refreshed from Upstox /option/contract lot_size
+FALLBACK_LOT_SIZES: dict[str, int] = {
     "NIFTY": 25,
     "BANKNIFTY": 25,
     "SENSEX": 10,
 }
+
+_lot_sizes: dict[str, int] = {}
+_lot_sizes_source: str = "fallback"
+_lot_sizes_fetched_at: Optional[str] = None
+_lot_sizes_last_mono: float = 0.0
 
 
 @dataclass
@@ -86,8 +92,61 @@ _best_pnl: float = 0.0
 
 
 def lot_multiplier(symbol: str) -> int:
-    """Units per lot for the index (NIFTY/BANKNIFTY=25, SENSEX=10)."""
-    return LOT_MULTIPLIERS.get(symbol.upper(), 25)
+    """Units per lot — live value from Upstox, fallback if not yet fetched."""
+    sym = symbol.upper()
+    if sym in _lot_sizes:
+        return _lot_sizes[sym]
+    return FALLBACK_LOT_SIZES.get(sym, 25)
+
+
+def get_lot_sizes() -> dict[str, int]:
+    """Current lot sizes for all configured symbols."""
+    settings = get_settings()
+    return {sym: lot_multiplier(sym) for sym in settings.symbols}
+
+
+def get_lot_sizes_meta() -> dict[str, Any]:
+    return {
+        "lotSizes": get_lot_sizes(),
+        "lotSizesSource": _lot_sizes_source,
+        "lotSizesFetchedAt": _lot_sizes_fetched_at,
+    }
+
+
+def set_lot_size(symbol: str, lot_size: int) -> None:
+    """Update cached lot size (e.g. from a resolved option contract)."""
+    sym = symbol.upper()
+    lot = int(lot_size)
+    if lot <= 0:
+        return
+    if _lot_sizes.get(sym) != lot:
+        logger.info("Lot size updated %s: %s → %d", sym, _lot_sizes.get(sym), lot)
+    _lot_sizes[sym] = lot
+
+
+async def refresh_lot_sizes(client, force: bool = False) -> dict[str, int]:
+    """Pull lot_size from Upstox option contracts for each index."""
+    global _lot_sizes_source, _lot_sizes_fetched_at, _lot_sizes_last_mono
+    settings = get_settings()
+    ttl = settings.upstox_expiries_cache_seconds
+    if not force and _lot_sizes and (time.monotonic() - _lot_sizes_last_mono) < ttl:
+        return get_lot_sizes()
+
+    updated = 0
+    for sym in settings.symbols:
+        try:
+            lot = await client.get_lot_size(sym)
+            set_lot_size(sym, lot)
+            updated += 1
+        except Exception as e:
+            logger.warning("Upstox lot_size fetch failed for %s: %s", sym, e)
+
+    if updated:
+        _lot_sizes_source = "upstox"
+        _lot_sizes_fetched_at = datetime.now(IST).isoformat()
+        _lot_sizes_last_mono = time.monotonic()
+        logger.info("Lot sizes from Upstox: %s", get_lot_sizes())
+    return get_lot_sizes()
 
 
 def clamp_lots(lots: int) -> int:
@@ -137,6 +196,8 @@ async def refresh_capital_from_upstox(client) -> CapitalSnapshot:
     settings = get_settings()
     now = datetime.now(IST).isoformat()
     min_l, tgt_l, max_l = _lot_tiers(settings.fallback_capital_inr)
+
+    await refresh_lot_sizes(client)
 
     try:
         funds = await client.get_funds()
@@ -263,7 +324,7 @@ def compute_lots(
     tier: Optional[str] = None,
 ) -> int:
     """
-    Lots from 66% of Upstox margin, per-index contract size.
+    Lots from 66% of Upstox margin, per-index contract size from Upstox lot_size.
     lots = floor(trade_capital / (premium × lot_multiplier[symbol]))
     """
     cap = get_capital_snapshot()
