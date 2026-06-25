@@ -93,6 +93,20 @@ class UpstoxClient:
                 "refresh_token": data.get("refresh_token", ""),
             }
 
+    async def get_full_quotes(self, instrument_keys: list[str]) -> dict[str, Any]:
+        """Full market quotes for up to 500 instruments (batch)."""
+        if not instrument_keys:
+            return {}
+        results: dict[str, Any] = {}
+        chunk_size = 50
+        for i in range(0, len(instrument_keys), chunk_size):
+            chunk = instrument_keys[i : i + chunk_size]
+            keys_param = ",".join(chunk)
+            data = await self._get("/market-quote/quotes", params={"instrument_key": keys_param})
+            if isinstance(data, dict):
+                results.update(data)
+        return results
+
     async def get_index_ltp(self, symbol: str) -> float:
         key = INDEX_KEYS.get(symbol)
         if not key:

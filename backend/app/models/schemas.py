@@ -75,6 +75,35 @@ class Breadth(BaseModel):
     aligned: bool = False
 
 
+class ConstituentTile(BaseModel):
+    symbol: str
+    name: str
+    weight: float
+    ltp: float
+    changePct: float
+    open: float = 0
+    high: float = 0
+    low: float = 0
+    vwap: float = 0
+    volume: float = 0
+
+
+class ConstituentHeatmap(BaseModel):
+    symbol: str
+    indexLabel: str = ""
+    timestamp: Optional[datetime] = None
+    dataAvailable: bool = False
+    error: Optional[str] = None
+    stockCount: int = 0
+    advancing: int = 0
+    declining: int = 0
+    unchanged: int = 0
+    breadthPct: float = 50.0
+    bias: str = "NEUTRAL"
+    analysis: str = ""
+    tiles: list[ConstituentTile] = []
+
+
 class RunnerSignal(BaseModel):
     score: float = 0
     premiumVelocityPct: float = 0
@@ -139,6 +168,7 @@ class SymbolSnapshot(BaseModel):
     topExplosion: Optional[dict[str, Any]] = None
     swingAlerts: list[dict[str, Any]] = []
     topSwing: Optional[dict[str, Any]] = None
+    constituentHeatmap: Optional[ConstituentHeatmap] = None
 
 
 class PaperTrade(BaseModel):

@@ -44,6 +44,36 @@ export interface SymbolSnapshot {
   topExplosion?: ExplosionAlert;
   swingAlerts?: SwingAlert[];
   topSwing?: SwingAlert;
+  constituentHeatmap?: ConstituentHeatmap | null;
+}
+
+export interface ConstituentTile {
+  symbol: string;
+  name: string;
+  weight: number;
+  ltp: number;
+  changePct: number;
+  open: number;
+  high: number;
+  low: number;
+  vwap: number;
+  volume: number;
+}
+
+export interface ConstituentHeatmap {
+  symbol: string;
+  indexLabel: string;
+  timestamp?: string;
+  dataAvailable: boolean;
+  error?: string;
+  stockCount: number;
+  advancing: number;
+  declining: number;
+  unchanged: number;
+  breadthPct: number;
+  bias: string;
+  analysis: string;
+  tiles: ConstituentTile[];
 }
 
 export interface SwingAlert {

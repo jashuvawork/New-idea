@@ -92,3 +92,19 @@ async def get_snapshots():
     _cache = snapshot
     _cache_time = now
     return snapshot
+
+
+@router.get("/constituents/{symbol}")
+async def get_constituent_heatmap(symbol: str):
+    """NIFTY/SENSEX/BANKNIFTY constituent heatmap with breadth analysis."""
+    if not await has_upstox_token():
+        return {
+            "dataAvailable": False,
+            "error": "Upstox not authenticated",
+            "symbol": symbol.upper(),
+        }
+    from app.engines.constituent_engine import build_constituent_heatmap
+
+    client = UpstoxClient()
+    hm = await build_constituent_heatmap(symbol.upper(), client, force_refresh=True)
+    return hm.model_dump(mode="json")

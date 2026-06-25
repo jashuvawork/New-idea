@@ -27,6 +27,11 @@ from app.models.schemas import (
     SuggestedTrade,
     SymbolSnapshot,
 )
+from app.engines.constituent_engine import (
+    blend_breadth,
+    build_constituent_heatmap,
+    breadth_from_constituents,
+)
 from app.engines.simple_profit import get_session_targets
 from app.engines.strategy_orchestrator import run_all_strategies, signals_to_suggested_trades
 from app.engines.strategies.base import compute_max_pain, compute_pcr
@@ -351,7 +356,12 @@ async def build_symbol_snapshot(
         heatmap = build_heatmap(chain, spot, atm)
         orderflow = _build_orderflow(candles, chain)
         profile = _build_profile(candles, spot)
-        breadth = build_breadth(chain, spot)
+        option_breadth = build_breadth(chain, spot)
+
+        constituent_hm = await build_constituent_heatmap(symbol, client)
+        stock_breadth = breadth_from_constituents(constituent_hm)
+        breadth = blend_breadth(option_breadth, stock_breadth)
+
         greeks = _build_greeks(chain, atm, spot)
         regime = _detect_regime(candles)
         runner, watchlist = _scan_runners(chain, spot, atm, symbol)
@@ -433,6 +443,7 @@ async def build_symbol_snapshot(
             topExplosion=top_explosion,
             swingAlerts=swing_alerts,
             topSwing=top_swing,
+            constituentHeatmap=constituent_hm if constituent_hm.dataAvailable else None,
         )
 
     except UpstoxError as e:

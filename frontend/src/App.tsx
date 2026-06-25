@@ -25,6 +25,7 @@ import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate'
 import { TradeJournal, NewsPanel } from './components/TradeJournal';
 import { StrategyMatrix } from './components/StrategyMatrix';
 import { ExplosionRadar } from './components/ExplosionRadar';
+import { MarketHeatmap } from './components/MarketHeatmap';
 import { SwingTrading } from './components/SwingTrading';
 
 const SYMBOLS = ['NIFTY', 'SENSEX', 'BANKNIFTY'] as const;
@@ -162,6 +163,7 @@ export default function App() {
             <div className="col-span-3"><ExplosionRadar snap={snap} /></div>
             <div className="col-span-3"><StrategyRouter snap={snap} /></div>
             <div className="col-span-3"><PaperTrading auto={auto} /></div>
+            <div className="col-span-3"><MarketHeatmap symbol={activeSymbol} embedded={snap.constituentHeatmap} /></div>
             <div className="col-span-3"><SwingTrading snap={snap} auto={auto} /></div>
 
             <div className="col-span-3"><OrderflowAnalytics snap={snap} /></div>
