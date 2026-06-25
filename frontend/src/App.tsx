@@ -41,6 +41,14 @@ export default function App() {
   const auto = data?.autoTrader;
   const needsUpstox = deployment && !deployment.upstox.validToday;
 
+  const upstoxBadge = deployment
+    ? deployment.upstox.validToday
+      ? { className: 'bg-nexus-green/20 text-nexus-green', label: 'Broker connected' }
+      : deployment.upstox.hasToken
+        ? { className: 'bg-nexus-yellow/20 text-nexus-yellow', label: 'Broker — relogin needed' }
+        : { className: 'bg-nexus-red/20 text-nexus-red', label: 'Broker not connected' }
+    : null;
+
   return (
     <div className="min-h-screen bg-nexus-bg">
       <header className="border-b border-nexus-border bg-nexus-panel/80 backdrop-blur sticky top-0 z-50">
@@ -75,15 +83,12 @@ export default function App() {
           <div className="flex flex-wrap items-center gap-2">
             <ConnectionStatus metrics={metrics} />
 
-            {deployment && (
+            {upstoxBadge && (
               <span
-                className={`text-[10px] px-2 py-1 rounded ${
-                  deployment.upstox.validToday
-                    ? 'bg-nexus-green/20 text-nexus-green'
-                    : 'bg-nexus-red/20 text-nexus-red'
-                }`}
+                className={`text-[10px] px-2 py-1 rounded ${upstoxBadge.className}`}
+                title={deployment?.upstox.message}
               >
-                {deployment.upstox.validToday ? 'Broker connected' : 'Broker not connected'}
+                {upstoxBadge.label}
               </span>
             )}
 
@@ -187,7 +192,8 @@ export default function App() {
           <LatencyFooter metrics={metrics} />
           <span className="text-[10px] text-nexus-muted">
             Explosion scalp + swing (2–5d) · Paper only
-            {deployment ? ` · ${deployment.environment}` : ''}
+            {data?.timestamp ? ` · Last update ${new Date(data.timestamp).toLocaleTimeString('en-IN')}` : ''}
+            {deployment ? ` · ${deployment.environment} · ${deployment.commit}` : ''}
           </span>
         </footer>
       </main>

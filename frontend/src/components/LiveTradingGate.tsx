@@ -5,11 +5,13 @@ export function LiveTradingGate({ status }: { status: DeploymentStatus | null })
   if (!status) return <Panel title="Live Trading Gate"><p className="text-xs text-nexus-muted">Loading...</p></Panel>;
 
   const checks = [
-    { label: 'Broker connected', ok: status.upstox.validToday },
+    { label: 'Broker connected today', ok: status.upstox.validToday },
     { label: 'Token stored', ok: status.upstox.hasToken },
     { label: 'Paper mode', ok: status.flags.paperTrading as boolean },
     { label: 'Live trading', ok: status.flags.enableLiveTrading as boolean },
+    { label: 'Enhanced mode', ok: status.flags.enhancedMode as boolean },
     { label: 'Auto monitor', ok: status.flags.backgroundMonitor as boolean },
+    { label: 'Simple profit', ok: status.flags.simpleProfitMode as boolean },
   ];
 
   return (
@@ -50,10 +52,11 @@ export function MorningChecklist({
   dataReady?: boolean;
 }) {
   const steps = [
-    { label: 'Connect Upstox (once per day)', done: deployment?.upstox.validToday },
+    { label: 'Connect Upstox (once per IST day)', done: deployment?.upstox.validToday },
     { label: 'Server online', done: Boolean(deployment) },
     { label: 'Live prices loading', done: Boolean(dataReady) },
     { label: 'Paper trading active', done: deployment?.flags.paperTrading as boolean },
+    { label: 'Background monitor on', done: deployment?.flags.backgroundMonitor as boolean },
   ];
 
   return (
