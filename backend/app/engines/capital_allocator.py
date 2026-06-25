@@ -364,6 +364,18 @@ def _capital_base_for_stages() -> float:
     return settings.max_sizing_capital_inr or settings.fallback_capital_inr
 
 
+def _stage_pcts_from_settings(settings) -> list[float]:
+    raw = getattr(settings, "daily_profit_stage_pcts", None)
+    if callable(raw):
+        return raw()
+    if isinstance(raw, list):
+        return raw
+    csv = getattr(settings, "daily_profit_stage_pcts_csv", "0.55,0.88,1.12")
+    return [float(x.strip()) for x in str(csv).split(",") if x.strip()]
+    settings = get_settings()
+    return settings.max_sizing_capital_inr or settings.fallback_capital_inr
+
+
 def _build_profit_stages(capital_base: float, best_pnl: float, pcts: list[float]) -> list[ProfitStage]:
     labels = ["55% lock", "88% lock", "112% lock"]
     stages: list[ProfitStage] = []
@@ -447,7 +459,7 @@ def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
     min_target = settings.daily_profit_target_inr
     min_hit = _best_pnl >= min_target
 
-    stage_pcts = settings.daily_profit_stage_pcts or [0.55, 0.88, 1.12]
+    stage_pcts = _stage_pcts_from_settings(settings) or [0.55, 0.88, 1.12]
     stages = _build_profit_stages(capital_base, _best_pnl, stage_pcts)
 
     if settings.daily_profit_stage_locks_enabled:
