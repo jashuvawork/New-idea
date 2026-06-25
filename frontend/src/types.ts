@@ -188,9 +188,19 @@ export interface PaperTrade {
   context?: Record<string, unknown>;
 }
 
+export interface DayArchiveSummary {
+  totalTrades?: number;
+  wins?: number;
+  losses?: number;
+  scratches?: number;
+  netPnlInr?: number;
+  profitFactor?: number;
+  winRate?: number;
+}
+
 export interface TradeDaySummary {
   date: string;
-  summary: Partial<DailyReport>;
+  summary: DayArchiveSummary;
   tradeCount: number;
   eventCount: number;
 }
