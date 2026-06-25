@@ -48,7 +48,12 @@ def should_simulate_slippage(trade: PaperTrade) -> bool:
     if not settings.paper_slippage_enabled:
         return False
     ctx = trade.entryContext or {}
-    if ctx.get("executionMode") == "LIVE" and ctx.get("brokerOrderId"):
+    # Real live broker fills skip journal slippage; paper-live-parity keeps slippage on simulated fills
+    if (
+        ctx.get("executionMode") == "LIVE"
+        and ctx.get("brokerOrderId")
+        and not ctx.get("brokerSimulated")
+    ):
         return False
     return True
 
@@ -114,6 +119,7 @@ def config_summary() -> dict[str, Any]:
     s = get_settings()
     return {
         "enabled": s.paper_slippage_enabled,
+        "paperLiveParity": s.paper_live_parity_enabled,
         "entryPoints": s.paper_slippage_entry_points,
         "exitPoints": s.paper_slippage_exit_points,
         "explosionMult": s.paper_slippage_explosion_mult,
@@ -123,5 +129,6 @@ def config_summary() -> dict[str, Any]:
             f"+{s.paper_slippage_entry_points}pt entry / "
             f"−{s.paper_slippage_exit_points}pt exit · "
             f"₹{s.paper_brokerage_round_trip_inr} fees"
+            + (" · live-parity broker sim" if s.paper_live_parity_enabled else "")
         ),
     }

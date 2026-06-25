@@ -60,6 +60,7 @@ async def deployment_status():
             "shadowTradeAllSignals": settings.shadow_trade_all_signals,
             "backgroundMonitor": settings.background_market_monitor_enabled,
             "paperSlippageEnabled": settings.paper_slippage_enabled,
+            "paperLiveParityEnabled": settings.paper_live_parity_enabled,
         },
         "paperSlippage": slippage_config_summary(),
         "cadence": {

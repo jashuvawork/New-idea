@@ -51,6 +51,7 @@ from app.models.schemas import (
 )
 from app.services import trade_store
 from app.services.order_executor import place_entry_order, place_exit_order
+from app.services.paper_broker import simulate_entry_order, simulate_exit_order
 from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase
 
 logger = logging.getLogger(__name__)
@@ -152,7 +153,18 @@ def _attach_exit_plan(
 def _execution_mode(settings) -> str:
     if settings.enable_live_trading and settings.auto_trading_enabled:
         return "LIVE"
+    if settings.paper_live_parity_enabled:
+        return "PAPER_LIVE_PARITY"
     return "PAPER"
+
+
+def _uses_paper_live_parity(settings) -> bool:
+    is_live = settings.enable_live_trading and settings.auto_trading_enabled
+    return (
+        settings.paper_live_parity_enabled
+        and settings.paper_simulate_broker_orders
+        and not is_live
+    )
 
 
 async def _open_from_candidate(
@@ -169,12 +181,16 @@ async def _open_from_candidate(
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
 
     signal_premium = candidate.premium
-    use_slippage = settings.paper_slippage_enabled and not (
-        settings.enable_live_trading and settings.auto_trading_enabled
-    )
-    if use_slippage:
+    is_live = settings.enable_live_trading and settings.auto_trading_enabled
+    use_parity = _uses_paper_live_parity(settings)
+    tier = candidate.tier if candidate.mode == "explosion" else None
+
+    # Entry fill: parity paper applies MARKET-entry slippage; legacy paper optional; live uses signal LTP
+    if use_parity or (
+        settings.paper_slippage_enabled and not is_live and not use_parity
+    ):
         fill_premium, slip_meta = apply_entry_fill(
-            signal_premium, candidate.strategy_type, tier=candidate.tier,
+            signal_premium, candidate.strategy_type, tier=tier,
         )
     else:
         fill_premium = signal_premium
@@ -216,6 +232,7 @@ async def _open_from_candidate(
         "optionExpiry": snap.optionExpiry,
         "slippage": slip_meta,
         "signalPremium": signal_premium,
+        "paperLiveParity": use_parity,
     }
     if candidate.mode == "explosion" and candidate.explosion_event:
         ev = candidate.explosion_event
@@ -239,23 +256,48 @@ async def _open_from_candidate(
             "reason": candidate.swing_setup.reason if candidate.swing_setup else "",
         })
 
-    if settings.enable_live_trading and settings.auto_trading_enabled:
+    if is_live or use_parity:
         if not client:
-            return False, "live trading enabled but no broker client"
+            return False, "broker client required for live / paper-live-parity"
         try:
-            order = await place_entry_order(
-                client, snap, candidate.strike, candidate.side, lots,
-            )
-            ctx_extra.update({
-                "instrumentKey": order["instrument_key"],
-                "brokerOrderId": order["order_id"],
-                "brokerQuantity": order["quantity"],
-                "lotSize": order.get("lot_size", lot_mult),
-            })
-            state.liveOrdersPlaced += 1
+            if is_live:
+                order = await place_entry_order(
+                    client, snap, candidate.strike, candidate.side, lots,
+                )
+                ctx_extra.update({
+                    "instrumentKey": order["instrument_key"],
+                    "brokerOrderId": order["order_id"],
+                    "brokerQuantity": order["quantity"],
+                    "lotSize": order.get("lot_size", lot_mult),
+                    "brokerSimulated": False,
+                })
+                state.liveOrdersPlaced += 1
+            else:
+                order = await simulate_entry_order(
+                    client,
+                    snap,
+                    candidate.strike,
+                    candidate.side,
+                    lots,
+                    signal_premium,
+                    candidate.strategy_type,
+                    tier=tier,
+                )
+                fill_premium = order["fill_premium"]
+                slip_meta = order.get("slippage", slip_meta)
+                ctx_extra["slippage"] = slip_meta
+                ctx_extra.update({
+                    "instrumentKey": order["instrument_key"],
+                    "brokerOrderId": order["order_id"],
+                    "brokerQuantity": order["quantity"],
+                    "lotSize": order.get("lot_size", lot_mult),
+                    "brokerSimulated": True,
+                    "orderType": order.get("order_type"),
+                    "product": order.get("product"),
+                })
         except UpstoxError as e:
-            logger.error("Live entry failed for %s: %s", symbol, e)
-            return False, f"live entry failed: {e}"
+            logger.error("Entry failed for %s (%s): %s", symbol, _execution_mode(settings), e)
+            return False, f"entry failed: {e}"
 
     paper = PaperTrade(
         id=str(uuid.uuid4())[:8],
@@ -440,26 +482,43 @@ async def process(
         else:
             exit_reason, pnl = evaluate_exit(trade, eval_premium, profile, lot_mult)
         if exit_reason:
-            if should_simulate_slippage(trade):
-                pnl = finalize_closed_pnl_inr(pnl)
             broker_ctx = dict(trade.entryContext or {})
-            if settings.enable_live_trading and settings.auto_trading_enabled and client:
-                if broker_ctx.get("instrumentKey") and not broker_ctx.get("brokerExitOrderId"):
-                    try:
-                        trade.exitReason = exit_reason
+            is_live = settings.enable_live_trading and settings.auto_trading_enabled
+            use_parity = _uses_paper_live_parity(settings)
+            needs_broker_exit = (is_live or use_parity) and broker_ctx.get("instrumentKey")
+
+            if needs_broker_exit and not broker_ctx.get("brokerExitOrderId"):
+                try:
+                    trade.exitReason = exit_reason
+                    if is_live:
                         exit_result = await place_exit_order(client, trade)
-                        broker_ctx["brokerExitOrderId"] = exit_result.get("order_id")
-                        trade.entryContext = broker_ctx
+                    else:
+                        exit_result = await simulate_exit_order(client, trade, current)
+                        sim_fill = exit_result.get("fill_premium", eval_premium)
+                        gross_pts, gross_inr = mark_to_market(
+                            trade.entryPremium, sim_fill, trade.lots, lot_mult,
+                        )
+                        pnl = finalize_closed_pnl_inr(gross_inr)
+                        eval_premium = sim_fill
+                    broker_ctx["brokerExitOrderId"] = exit_result.get("order_id")
+                    broker_ctx["brokerExitSimulated"] = use_parity
+                    trade.entryContext = broker_ctx
+                    if is_live:
                         state.liveOrdersPlaced += 1
-                    except UpstoxError as e:
-                        logger.error("Live exit failed for %s: %s — will retry", trade.id, e)
-                        skipped.append({
-                            "symbol": trade.symbol,
-                            "reason": "live_exit_pending",
-                            "message": str(e),
-                            "tradeId": trade.id,
-                        })
-                        continue
+                except UpstoxError as e:
+                    logger.error(
+                        "Exit failed for %s (%s): %s — will retry",
+                        trade.id, _execution_mode(settings), e,
+                    )
+                    skipped.append({
+                        "symbol": trade.symbol,
+                        "reason": "exit_pending",
+                        "message": str(e),
+                        "tradeId": trade.id,
+                    })
+                    continue
+            elif should_simulate_slippage(trade):
+                pnl = finalize_closed_pnl_inr(pnl)
 
             trade.status = "CLOSED"
             trade.exitReason = exit_reason

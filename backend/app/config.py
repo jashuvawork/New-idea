@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     paper_dual_strategy_enabled: bool = False
     explosion_capture_mode: bool = True  # PRIMARY — capture daily premium explosions
 
+    # Paper should mirror live execution (broker flow + slippage) before going live
+    paper_live_parity_enabled: bool = True
+    paper_simulate_broker_orders: bool = True  # resolve instrument + paper order ids in parity mode
+
     # Paper slippage — realistic fills for milestone / PnL (ignored on live broker fills)
     paper_slippage_enabled: bool = True
     paper_slippage_entry_points: float = 1.0
@@ -123,7 +127,7 @@ class Settings(BaseSettings):
     # Daily session targets
     daily_profit_target_inr: float = 44_000
     daily_profit_trail_inr: float = 5_000
-    use_upstox_capital_for_sizing: bool = False
+    use_upstox_capital_for_sizing: bool = True  # paper parity uses real margin when token present
 
     # Quantity per lot (units) — NSE/BSE contract sizes
     lot_size_nifty: int = 65
