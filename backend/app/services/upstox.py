@@ -30,6 +30,37 @@ OPTION_SEGMENTS = {
 }
 
 
+def resolve_quote_payload(data: dict[str, Any], instrument_key: str) -> dict[str, Any]:
+    """Resolve quote dict — Upstox responses use ':' keys, requests use '|'."""
+    if not isinstance(data, dict) or not instrument_key:
+        return {}
+    if instrument_key in data and data[instrument_key]:
+        return data[instrument_key]
+    colon_key = instrument_key.replace("|", ":")
+    if colon_key in data and data[colon_key]:
+        return data[colon_key]
+    pipe_key = instrument_key.replace(":", "|")
+    if pipe_key in data and data[pipe_key]:
+        return data[pipe_key]
+    tail = instrument_key.split("|")[-1].split(":")[-1]
+    for k, v in data.items():
+        if isinstance(v, dict) and tail in k:
+            return v
+    return {}
+
+
+def normalize_quotes_map(data: dict[str, Any]) -> dict[str, Any]:
+    """Index quotes under both pipe and colon keys for downstream lookups."""
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for k, v in data.items():
+        out[k] = v
+        out[k.replace(":", "|")] = v
+        out[k.replace("|", ":")] = v
+    return out
+
+
 class UpstoxError(Exception):
     pass
 
@@ -104,7 +135,7 @@ class UpstoxClient:
             keys_param = ",".join(chunk)
             data = await self._get("/market-quote/quotes", params={"instrument_key": keys_param})
             if isinstance(data, dict):
-                results.update(data)
+                results.update(normalize_quotes_map(data))
         return results
 
     async def get_index_ltp(self, symbol: str) -> float:
@@ -112,8 +143,14 @@ class UpstoxClient:
         if not key:
             raise UpstoxError(f"Unknown symbol: {symbol}")
         data = await self._get("/market-quote/ltp", params={"instrument_key": key})
-        quote = data.get(key, {})
+        if isinstance(data, dict):
+            data = normalize_quotes_map(data)
+        quote = resolve_quote_payload(data, key)
         ltp = quote.get("last_price")
+        if ltp is None:
+            # Fallback to full quote endpoint
+            quote = await self.get_index_quote(symbol)
+            ltp = quote.get("last_price")
         if ltp is None:
             raise UpstoxError(f"No LTP for {symbol}")
         return float(ltp)
@@ -124,7 +161,9 @@ class UpstoxClient:
         if not key:
             raise UpstoxError(f"Unknown symbol: {symbol}")
         data = await self._get("/market-quote/quotes", params={"instrument_key": key})
-        quote = data.get(key, {})
+        if isinstance(data, dict):
+            data = normalize_quotes_map(data)
+        quote = resolve_quote_payload(data, key)
         if not quote:
             raise UpstoxError(f"No quote for {symbol}")
         return quote
