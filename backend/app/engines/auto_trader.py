@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.engines.daily_profit_strategy import DailyCalibration
 from app.engines.ai_learning import get_ai_learning
 from app.engines.risk_engine import RiskEngine
-from app.engines.explosion_profit import evaluate_explosion_exit
+from app.engines.explosion_profit import evaluate_explosion_exit, record_explosion_stop
 from app.engines.swing_profit import evaluate_swing_exit
 from app.engines.adaptive_exits import (
     AdaptiveExitPlan,
@@ -467,6 +467,14 @@ async def process(
             trade.pnlPoints = pnl / (trade.lots * lot_mult) if trade.lots else 0
             trade.closedAt = datetime.now(IST)
             trade.sessionDate = datetime.now(IST).strftime("%Y-%m-%d")
+            if trade.strategyType == StrategyType.EXPLOSIVE and exit_reason in (
+                "explosion_stop_loss",
+                "explosion_emergency_stop",
+                "explosion_time_stop",
+                "explosion_trail_sl",
+                "adaptive_sl",
+            ) and pnl < 0:
+                record_explosion_stop(trade.symbol)
             ctx = _build_context(snap, {
                 "exitReason": exit_reason,
                 "instrumentKey": broker_ctx.get("instrumentKey"),
@@ -505,7 +513,7 @@ async def process(
             "message": profit_gate.message,
         })
 
-    # Try new entries — best setup only, max lots on 50% Upstox margin
+    # Try new entries — best setup only, max lots on 85% sizing capital
     if (
         state.running
         and settings.auto_trading_enabled

@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     explosion_scan_range: int = 800
     explosion_target_elite: float = 25.0
     explosion_target_standard: float = 12.0
+    explosion_trail_arm_points: float = 4.0
+    explosion_trail_keep_ratio: float = 0.65
+    explosion_trail_step_points: float = 3.5
+    explosion_trail_tight_arm: float = 12.0
+    explosion_trail_tight_points: float = 5.0
+    explosion_initial_stop_points: float = 4.0
+    explosion_reentry_cooldown_seconds: int = 120
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
@@ -84,28 +91,29 @@ class Settings(BaseSettings):
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
-    # Capital / risk — 66% margin per trade; lots sized per index lot multiplier
-    fallback_capital_inr: float = 500_000
-    per_trade_capital_pct: float = 0.66
+    # Capital / risk — ₹2L book, 85% per trade, lots derived from margin (no fixed 100-lot cap)
+    fallback_capital_inr: float = 200_000
+    max_sizing_capital_inr: float = 200_000
+    per_trade_capital_pct: float = 0.85
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
     aggressive_min_explosion_score: int = 45
     aggressive_min_swing_confidence: int = 65
     aggressive_max_open_scalps: int = 1
-    max_lots_per_trade: int = 100
-    min_lots_per_trade: int = 25
-    max_risk_per_trade_inr: float = 500_000
+    max_lots_per_trade: int = 0  # 0 = capital-derived max only
+    min_lots_per_trade: int = 1
+    max_risk_per_trade_inr: float = 200_000
     min_per_trade_risk_inr: float = 3_000
-    per_trade_risk_pct: float = 0.66
-    max_exposure_pct: float = 0.66
+    per_trade_risk_pct: float = 0.85
+    max_exposure_pct: float = 0.85
     position_sl_cap_pct: float = 0.06
     position_tp_target_pct: float = 0.10
-    emergency_stop_inr: float = 50_000
+    emergency_stop_inr: float = 20_000
 
-    # Daily session targets (static)
-    daily_profit_target_inr: float = 200_000
-    daily_profit_trail_inr: float = 20_000
-    use_upstox_capital_for_sizing: bool = True
+    # Daily session targets
+    daily_profit_target_inr: float = 44_000
+    daily_profit_trail_inr: float = 5_000
+    use_upstox_capital_for_sizing: bool = False
 
     # Quantity per lot (units) — NSE/BSE contract sizes
     lot_size_nifty: int = 65
@@ -113,9 +121,9 @@ class Settings(BaseSettings):
     lot_size_sensex: int = 20
     use_upstox_lot_sizes: bool = False  # when false, env values above are authoritative
 
-    simple_max_lots: int = 100
-    simple_target_lots: int = 60
-    simple_min_lots: int = 25
+    simple_max_lots: int = 0  # unused when max_lots_per_trade=0; sizing is capital-derived
+    simple_target_lots: int = 0
+    simple_min_lots: int = 1
 
     adaptive_exits_enabled: bool = True
     ml_exit_tuning_enabled: bool = True
