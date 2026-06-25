@@ -118,6 +118,17 @@ class UpstoxClient:
             raise UpstoxError(f"No LTP for {symbol}")
         return float(ltp)
 
+    async def get_index_quote(self, symbol: str) -> dict[str, Any]:
+        """Full index quote — prev close, OHLC, volume for premarket gap analysis."""
+        key = INDEX_KEYS.get(symbol)
+        if not key:
+            raise UpstoxError(f"Unknown symbol: {symbol}")
+        data = await self._get("/market-quote/quotes", params={"instrument_key": key})
+        quote = data.get(key, {})
+        if not quote:
+            raise UpstoxError(f"No quote for {symbol}")
+        return quote
+
     async def get_option_chain(self, symbol: str, expiry: str) -> list[dict[str, Any]]:
         """Fetch option chain for symbol and expiry date (YYYY-MM-DD)."""
         segment = OPTION_SEGMENTS.get(symbol, "NSE_FO")

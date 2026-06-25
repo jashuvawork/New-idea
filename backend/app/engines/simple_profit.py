@@ -23,7 +23,7 @@ def get_session_targets() -> OptimizedProfile:
     if phase == "PREMARKET":
         return OptimizedProfile(
             targetPoints=7.0, stopPoints=3.0, microTargetPoints=micro,
-            maxHoldSeconds=180, sessionLabel="open_drive",
+            maxHoldSeconds=180, sessionLabel="premarket",
         )
 
     now = datetime.now()

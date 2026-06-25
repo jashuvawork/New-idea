@@ -47,6 +47,30 @@ export interface SymbolSnapshot {
   constituentHeatmap?: ConstituentHeatmap | null;
   psychology?: Record<string, unknown>;
   adaptiveExitHint?: Record<string, unknown>;
+  premarket?: PremarketAnalysis | null;
+}
+
+export interface PremarketAnalysis {
+  prevClose: number;
+  indicativeOpen: number;
+  gapPoints: number;
+  gapPct: number;
+  gapDirection: string;
+  gapSize: string;
+  preOpenHigh: number;
+  preOpenLow: number;
+  preOpenVolume: number;
+  constituentGapBreadth: number;
+  volumeSurgeScore: number;
+  auctionBias: string;
+  openPlay: string;
+  explosionRisk: string;
+  confidence: number;
+  minutesToOpen: number;
+  gapLeaders: string[];
+  gapLaggards: string[];
+  scenarios: string[];
+  analysis: string;
 }
 
 export interface ConstituentTile {

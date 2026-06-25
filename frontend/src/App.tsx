@@ -27,6 +27,7 @@ import { StrategyMatrix } from './components/StrategyMatrix';
 import { ExplosionRadar } from './components/ExplosionRadar';
 import { MarketHeatmap } from './components/MarketHeatmap';
 import { PsychologyPanel } from './components/PsychologyPanel';
+import { PremarketPanel } from './components/PremarketPanel';
 import { SwingTrading } from './components/SwingTrading';
 
 const SYMBOLS = ['NIFTY', 'SENSEX', 'BANKNIFTY'] as const;
@@ -165,6 +166,7 @@ export default function App() {
         {data && snap && auto && (
           <div className="grid grid-cols-12 gap-3">
             <div className="col-span-3"><ExecutionHUD snap={snap} auto={auto} /></div>
+            <div className="col-span-3"><PremarketPanel snap={snap} /></div>
             <div className="col-span-3"><ExplosiveRunner snap={snap} /></div>
             <div className="col-span-3"><ExplosionRadar snap={snap} /></div>
             <div className="col-span-3"><StrategyRouter snap={snap} /></div>

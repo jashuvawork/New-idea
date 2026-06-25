@@ -141,6 +141,29 @@ class OptimizedProfile(BaseModel):
     sessionLabel: str = "normal"
 
 
+class PremarketAnalysis(BaseModel):
+    prevClose: float = 0
+    indicativeOpen: float = 0
+    gapPoints: float = 0
+    gapPct: float = 0
+    gapDirection: str = "FLAT"  # GAP_UP | GAP_DOWN | FLAT
+    gapSize: str = "FLAT"  # FLAT | SMALL | MODERATE | LARGE | EXTREME
+    preOpenHigh: float = 0
+    preOpenLow: float = 0
+    preOpenVolume: float = 0
+    constituentGapBreadth: float = 50.0
+    volumeSurgeScore: float = 0.0
+    auctionBias: str = "NEUTRAL"
+    openPlay: str = "WAIT"
+    explosionRisk: str = "LOW"  # LOW | MEDIUM | HIGH
+    confidence: float = 0.0
+    minutesToOpen: int = 0
+    gapLeaders: list[str] = []
+    gapLaggards: list[str] = []
+    scenarios: list[str] = []
+    analysis: str = ""
+
+
 class SymbolSnapshot(BaseModel):
     symbol: str
     timestamp: datetime
@@ -171,6 +194,7 @@ class SymbolSnapshot(BaseModel):
     constituentHeatmap: Optional[ConstituentHeatmap] = None
     psychology: dict[str, Any] = {}
     adaptiveExitHint: dict[str, Any] = {}
+    premarket: Optional[PremarketAnalysis] = None
 
 
 class PaperTrade(BaseModel):

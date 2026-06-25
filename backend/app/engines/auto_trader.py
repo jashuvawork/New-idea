@@ -46,6 +46,7 @@ from app.models.schemas import (
     TradeMastermind,
 )
 from app.services import trade_store
+from app.services.upstox import get_market_phase
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -260,8 +261,10 @@ def process(
 
     state.openPaperTrades = [t for t in state.openPaperTrades if t.status == "OPEN"]
 
-    # Try new entries — explosion mode takes priority
-    if state.running:
+    market_live = get_market_phase() == "LIVE_MARKET"
+
+    # Try new entries — only during live session (not pre-open auction)
+    if state.running and market_live:
         for symbol, snap in snapshots.items():
             if not snap.dataAvailable:
                 continue

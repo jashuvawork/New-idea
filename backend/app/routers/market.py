@@ -109,6 +109,24 @@ async def get_snapshots():
     return snapshot
 
 
+@router.get("/premarket/{symbol}")
+async def get_premarket_analysis(symbol: str):
+    """Dedicated pre-open gap/volume analysis (9:00–9:15 IST and early open)."""
+    if not await has_upstox_token():
+        return {"dataAvailable": False, "error": "Upstox not authenticated", "symbol": symbol.upper()}
+    from app.engines.premarket_engine import build_premarket_analysis
+
+    client = UpstoxClient()
+    news = await fetch_market_news()
+    news_sentiment = aggregate_sentiment(news).get("bias", "NEUTRAL")
+    try:
+        analysis = await build_premarket_analysis(symbol.upper(), client, news_sentiment)
+        return {"dataAvailable": True, "symbol": symbol.upper(), "premarket": analysis.model_dump(mode="json")}
+    except Exception as e:
+        logger.warning("Premarket API error for %s: %s", symbol, e)
+        return {"dataAvailable": False, "error": str(e), "symbol": symbol.upper()}
+
+
 @router.get("/constituents/{symbol}")
 async def get_constituent_heatmap(symbol: str):
     """NIFTY/SENSEX/BANKNIFTY constituent heatmap with breadth analysis."""
