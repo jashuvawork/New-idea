@@ -74,38 +74,69 @@ class CapitalSnapshot:
 
 
 @dataclass
+class ProfitStage:
+    stage: int
+    pct: float
+    thresholdInr: float
+    reached: bool
+    label: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stage": self.stage,
+            "pct": self.pct,
+            "thresholdInr": round(self.thresholdInr, 2),
+            "reached": self.reached,
+            "label": self.label,
+        }
+
+
+@dataclass
 class DailyProfitGate:
-    targetInr: float = 200_000.0
-    trailInr: float = 20_000.0
+    targetInr: float = 44_000.0
+    trailInr: float = 5_000.0
+    capitalBaseInr: float = 200_000.0
     sessionPnlInr: float = 0.0
     bestPnlInr: float = 0.0
     trailFloorInr: float = 0.0
+    lockedFloorInr: float = 0.0
+    currentStage: int = 0
+    minTargetHit: bool = False
     targetHit: bool = False
     trailLocked: bool = False
     newEntriesAllowed: bool = True
     status: str = "ACTIVE"
     message: str = ""
+    stages: Optional[list[ProfitStage]] = None
 
     def to_dict(self) -> dict[str, Any]:
         progress = min(100.0, (self.sessionPnlInr / self.targetInr * 100) if self.targetInr else 0)
         return {
             "targetInr": self.targetInr,
+            "minTargetInr": self.targetInr,
             "trailInr": self.trailInr,
+            "capitalBaseInr": self.capitalBaseInr,
             "sessionPnlInr": round(self.sessionPnlInr, 2),
             "bestPnlInr": round(self.bestPnlInr, 2),
             "trailFloorInr": round(self.trailFloorInr, 2),
-            "targetHit": self.targetHit,
+            "lockedFloorInr": round(self.lockedFloorInr, 2),
+            "currentStage": self.currentStage,
+            "minTargetHit": self.minTargetHit,
+            "targetHit": self.minTargetHit,
             "trailLocked": self.trailLocked,
             "newEntriesAllowed": self.newEntriesAllowed,
             "status": self.status,
             "message": self.message,
             "progressPct": round(progress, 1),
+            "stages": [s.to_dict() for s in (self.stages or [])],
+            "stageLockMode": True,
         }
 
 
 _capital: Optional[CapitalSnapshot] = None
 _session_date: str = ""
 _best_pnl: float = 0.0
+_highest_stage: int = 0
 
 
 def lot_multiplier(symbol: str) -> int:
@@ -328,48 +359,183 @@ def compute_session_pnl(state: AutoTraderState) -> float:
     return closed + open_pnl
 
 
+def _capital_base_for_stages() -> float:
+    settings = get_settings()
+    return settings.max_sizing_capital_inr or settings.fallback_capital_inr
+
+
+def _build_profit_stages(capital_base: float, best_pnl: float, pcts: list[float]) -> list[ProfitStage]:
+    labels = ["55% lock", "88% lock", "112% lock"]
+    stages: list[ProfitStage] = []
+    for i, pct in enumerate(pcts[:3]):
+        threshold = capital_base * pct
+        stages.append(
+            ProfitStage(
+                stage=i + 1,
+                pct=pct,
+                thresholdInr=threshold,
+                reached=best_pnl >= threshold,
+                label=labels[i] if i < len(labels) else f"{pct:.0%} lock",
+            )
+        )
+    if len(pcts) >= 3 and best_pnl > capital_base * pcts[2]:
+        stages.append(
+            ProfitStage(
+                stage=4,
+                pct=0.0,
+                thresholdInr=best_pnl,
+                reached=True,
+                label="Peak lock (max day)",
+            )
+        )
+    return stages
+
+
+def _compute_stage_lock(
+    session_pnl: float,
+    best_pnl: float,
+    highest_stage: int,
+    capital_base: float,
+    stage_pcts: list[float],
+) -> tuple[int, float, int]:
+    """
+    Returns (highest_stage, locked_floor_inr, current_stage_display).
+    Stage 1–3: floor = capital × pct when that stage is reached.
+    Stage 4: floor trails session peak once above 112% of capital.
+    """
+    thresholds = [capital_base * p for p in stage_pcts[:3]]
+    if len(thresholds) < 3:
+        thresholds.extend([0.0] * (3 - len(thresholds)))
+
+    if best_pnl >= thresholds[0]:
+        highest_stage = max(highest_stage, 1)
+    if best_pnl >= thresholds[1]:
+        highest_stage = max(highest_stage, 2)
+    if best_pnl >= thresholds[2]:
+        highest_stage = max(highest_stage, 3)
+
+    if highest_stage >= 3 and best_pnl > thresholds[2]:
+        return highest_stage, best_pnl, 4
+
+    if highest_stage >= 3:
+        return highest_stage, thresholds[2], 3
+    if highest_stage >= 2:
+        return highest_stage, thresholds[1], 2
+    if highest_stage >= 1:
+        return highest_stage, thresholds[0], 1
+    return highest_stage, 0.0, 0
+
+
 def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
-    """₹44K target + trail from session peak — blocks new entries when hit."""
-    global _best_pnl, _session_date
+    """
+    Staged profit locks on sizing capital (₹2L default):
+      Min ₹44K milestone (no stop) · Lock 1: 55% · Lock 2: 88% · Lock 3: 112% · Lock 4: peak of day
+    New entries pause if session PnL falls below the highest stage floor reached.
+    """
+    global _best_pnl, _session_date, _highest_stage
     settings = get_settings()
     today = datetime.now(IST).strftime("%Y-%m-%d")
 
     if _session_date != today:
         _session_date = today
         _best_pnl = 0.0
+        _highest_stage = 0
 
+    capital_base = _capital_base_for_stages()
     session_pnl = compute_session_pnl(state)
     _best_pnl = max(_best_pnl, session_pnl)
-    trail_floor = max(0.0, _best_pnl - settings.daily_profit_trail_inr)
+    min_target = settings.daily_profit_target_inr
+    min_hit = _best_pnl >= min_target
 
-    gate = DailyProfitGate(
-        targetInr=settings.daily_profit_target_inr,
-        trailInr=settings.daily_profit_trail_inr,
-        sessionPnlInr=session_pnl,
-        bestPnlInr=_best_pnl,
-        trailFloorInr=trail_floor,
-    )
+    stage_pcts = settings.daily_profit_stage_pcts or [0.55, 0.88, 1.12]
+    stages = _build_profit_stages(capital_base, _best_pnl, stage_pcts)
 
-    if session_pnl >= settings.daily_profit_target_inr:
-        gate.targetHit = True
-        gate.newEntriesAllowed = False
-        gate.status = "TARGET_HIT"
-        gate.message = f"Daily target ₹{settings.daily_profit_target_inr:,.0f} reached — paper entries paused."
-    elif _best_pnl >= settings.daily_profit_trail_inr and session_pnl <= trail_floor:
-        gate.trailLocked = True
-        gate.newEntriesAllowed = False
-        gate.status = "TRAIL_LOCK"
-        gate.message = (
-            f"Trail lock: session fell ₹{settings.daily_profit_trail_inr:,.0f} from peak "
-            f"₹{_best_pnl:,.0f} — protecting profits."
+    if settings.daily_profit_stage_locks_enabled:
+        _highest_stage, locked_floor, current_stage = _compute_stage_lock(
+            session_pnl, _best_pnl, _highest_stage, capital_base, stage_pcts,
         )
     else:
-        gate.newEntriesAllowed = True
-        gate.status = "ACTIVE"
-        if _best_pnl > 0:
-            gate.message = f"Peak ₹{_best_pnl:,.0f} · trail floor ₹{trail_floor:,.0f} · target ₹{settings.daily_profit_target_inr:,.0f}"
+        # Legacy single trail
+        locked_floor = max(0.0, _best_pnl - settings.daily_profit_trail_inr)
+        current_stage = 0
+        if _best_pnl >= settings.daily_profit_trail_inr and session_pnl <= locked_floor:
+            pass  # handled below
+
+    gate = DailyProfitGate(
+        targetInr=min_target,
+        trailInr=settings.daily_profit_trail_inr,
+        capitalBaseInr=capital_base,
+        sessionPnlInr=session_pnl,
+        bestPnlInr=_best_pnl,
+        trailFloorInr=locked_floor,
+        lockedFloorInr=locked_floor,
+        currentStage=current_stage,
+        minTargetHit=min_hit,
+        targetHit=min_hit,
+        stages=stages,
+    )
+
+    if settings.daily_profit_stage_locks_enabled:
+        if locked_floor > 0 and session_pnl < locked_floor:
+            gate.trailLocked = True
+            gate.newEntriesAllowed = False
+            gate.status = "STAGE_LOCK"
+            if current_stage >= 4:
+                gate.message = (
+                    f"Peak lock: session ₹{session_pnl:,.0f} below day high floor "
+                    f"₹{locked_floor:,.0f} — entries paused."
+                )
+            else:
+                pct_label = stage_pcts[current_stage - 1] if 0 < current_stage <= len(stage_pcts) else 0
+                gate.message = (
+                    f"Stage {current_stage} lock ({pct_label:.0%} of ₹{capital_base:,.0f}): "
+                    f"session ₹{session_pnl:,.0f} < floor ₹{locked_floor:,.0f} — protecting profits."
+                )
         else:
-            gate.message = f"Target ₹{settings.daily_profit_target_inr:,.0f} · trail ₹{settings.daily_profit_trail_inr:,.0f} from peak"
+            gate.newEntriesAllowed = True
+            gate.status = "ACTIVE"
+            if current_stage >= 4:
+                gate.message = (
+                    f"Peak mode · floor ₹{locked_floor:,.0f} · min ₹{min_target:,.0f} ✓ · "
+                    f"no upside cap"
+                )
+            elif current_stage >= 1:
+                next_idx = current_stage
+                if current_stage < 3:
+                    nxt = capital_base * stage_pcts[current_stage]
+                    gate.message = (
+                        f"Stage {current_stage} active · floor ₹{locked_floor:,.0f} · "
+                        f"next lock ₹{nxt:,.0f} · min ₹{min_target:,.0f}"
+                        + (" ✓" if min_hit else "")
+                    )
+                else:
+                    gate.message = (
+                        f"Stage 3 (112%) · floor ₹{locked_floor:,.0f} · "
+                        f"above → peak lock · min ₹{min_target:,.0f}" + (" ✓" if min_hit else "")
+                    )
+            else:
+                gate.message = (
+                    f"Min target ₹{min_target:,.0f}"
+                    + (" ✓" if min_hit else "")
+                    + f" · 1st lock at ₹{capital_base * stage_pcts[0]:,.0f} (55%)"
+                )
+    else:
+        # Legacy fallback
+        if session_pnl >= min_target:
+            gate.minTargetHit = True
+            gate.targetHit = True
+        trail_floor = max(0.0, _best_pnl - settings.daily_profit_trail_inr)
+        gate.trailFloorInr = trail_floor
+        gate.lockedFloorInr = trail_floor
+        if _best_pnl >= settings.daily_profit_trail_inr and session_pnl <= trail_floor:
+            gate.trailLocked = True
+            gate.newEntriesAllowed = False
+            gate.status = "TRAIL_LOCK"
+            gate.message = f"Trail lock: fell ₹{settings.daily_profit_trail_inr:,.0f} from peak ₹{_best_pnl:,.0f}"
+        else:
+            gate.newEntriesAllowed = True
+            gate.status = "ACTIVE"
+            gate.message = f"Peak ₹{_best_pnl:,.0f} · trail floor ₹{trail_floor:,.0f}"
 
     return gate
 

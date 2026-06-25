@@ -7,10 +7,10 @@ export function RiskEngine({ auto }: { auto: AutoTraderState }) {
   const cap = (auto.capitalAllocation || {}) as CapitalAllocation;
   const gate = (auto.dailyProfitGate || {}) as DailyProfitGate;
 
-  const progress = gate.progressPct ?? 0;
   const sessionPnl = gate.sessionPnlInr ?? auto.dailyReport.netPnlInr;
-  const targetInr = gate.targetInr ?? 200_000;
-  const trailInr = gate.trailInr ?? 20_000;
+  const minTarget = gate.minTargetInr ?? gate.targetInr ?? 44_000;
+  const capitalBase = gate.capitalBaseInr ?? 200_000;
+  const lockedFloor = gate.lockedFloorInr ?? gate.trailFloorInr ?? 0;
   const gateOk = gate.newEntriesAllowed !== false;
   const lotSizes = cap.lotSizes || {};
   const lotShort: Record<string, string> = { NIFTY: 'N', BANKNIFTY: 'BN', SENSEX: 'SX' };
@@ -18,8 +18,16 @@ export function RiskEngine({ auto }: { auto: AutoTraderState }) {
     ? Object.entries(lotSizes).map(([s, n]) => `${lotShort[s] || s}${n}`).join(' · ')
     : 'Upstox pending';
 
+  const stages = gate.stages || [
+    { stage: 1, pct: 0.55, thresholdInr: capitalBase * 0.55, reached: false, label: '55% lock' },
+    { stage: 2, pct: 0.88, thresholdInr: capitalBase * 0.88, reached: false, label: '88% lock' },
+    { stage: 3, pct: 1.12, thresholdInr: capitalBase * 1.12, reached: false, label: '112% lock' },
+  ];
+
+  const minProgress = Math.min(100, (sessionPnl / minTarget) * 100);
+
   return (
-    <Panel title="Capital & Daily Target" badge={gate.status || 'ACTIVE'}>
+    <Panel title="Capital & Stage Locks" badge={gate.status || 'ACTIVE'}>
       <div className="mb-3 p-2 rounded bg-black/30 border border-nexus-border text-[10px]">
         <div className="flex justify-between mb-1">
           <span className="text-nexus-muted">Upstox margin</span>
@@ -28,32 +36,56 @@ export function RiskEngine({ auto }: { auto: AutoTraderState }) {
           </span>
         </div>
         <div className="flex justify-between text-[9px] text-nexus-muted">
-          <span>66% cap/trade · ₹{((cap.perTradeCapitalInr as number) || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-          <span>Lots {cap.minLots ?? 25}–{cap.maxLots ?? 100} · {lotLabel}</span>
+          <span>85% cap/trade · ₹{((cap.perTradeCapitalInr as number) || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+          <span>Lots {cap.minLots ?? 1}–{cap.maxLots ?? '∞'} · {lotLabel}</span>
         </div>
       </div>
 
       <div className="mb-2">
         <div className="flex justify-between text-[10px] mb-1">
-          <span className="text-nexus-muted">Daily PnL → ₹{(targetInr / 100000).toFixed(0)}L target</span>
+          <span className="text-nexus-muted">
+            Session PnL · min ₹{(minTarget / 1000).toFixed(0)}K
+            {gate.minTargetHit ? ' ✓' : ''}
+          </span>
           <span className={`font-mono font-bold ${sessionPnl >= 0 ? 'text-nexus-green' : 'text-nexus-red'}`}>
             ₹{sessionPnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </span>
         </div>
-        <div className="h-1.5 bg-gray-800 rounded overflow-hidden">
+        <div className="h-1.5 bg-gray-800 rounded overflow-hidden mb-2">
           <div
-            className={`h-full transition-all ${progress >= 100 ? 'bg-nexus-green' : 'bg-nexus-accent'}`}
-            style={{ width: `${Math.min(100, progress)}%` }}
+            className={`h-full transition-all ${minProgress >= 100 ? 'bg-nexus-green' : 'bg-nexus-accent'}`}
+            style={{ width: `${Math.min(100, minProgress)}%` }}
           />
+        </div>
+        <div className="grid grid-cols-2 gap-1 text-[9px]">
+          {stages.slice(0, 3).map((s) => (
+            <div
+              key={s.stage}
+              className={`px-1.5 py-1 rounded border ${
+                s.reached ? 'border-nexus-green/40 bg-nexus-green/10 text-nexus-green' : 'border-nexus-border text-nexus-muted'
+              }`}
+            >
+              <span className="font-semibold">S{s.stage}</span> ₹{s.thresholdInr.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            </div>
+          ))}
+          <div
+            className={`px-1.5 py-1 rounded border ${
+              (gate.currentStage ?? 0) >= 4
+                ? 'border-nexus-green/40 bg-nexus-green/10 text-nexus-green'
+                : 'border-nexus-border text-nexus-muted'
+            }`}
+          >
+            <span className="font-semibold">S4</span> Peak ₹{(gate.bestPnlInr || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          </div>
         </div>
         <div className="flex justify-between text-[9px] text-nexus-muted mt-1">
           <span>Peak ₹{(gate.bestPnlInr || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-          <span>Trail floor ₹{(gate.trailFloorInr || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (−₹{(trailInr / 1000).toFixed(0)}K)</span>
+          <span>Floor ₹{lockedFloor.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
         </div>
       </div>
 
       <div className={`text-[10px] p-1.5 rounded mb-2 ${gateOk ? 'bg-nexus-green/10 text-nexus-green' : 'bg-nexus-red/10 text-nexus-red'}`}>
-        {gate.message || (gateOk ? 'Entries active' : 'New entries paused')}
+        {gate.message || (gateOk ? 'Entries active — no upside cap' : 'New entries paused')}
       </div>
 
       <div className="space-y-2 text-[11px]">

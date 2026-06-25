@@ -3,6 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -124,9 +125,18 @@ class Settings(BaseSettings):
     position_tp_target_pct: float = 0.10
     emergency_stop_inr: float = 20_000
 
-    # Daily session targets
-    daily_profit_target_inr: float = 44_000
-    daily_profit_trail_inr: float = 5_000
+    # Daily session targets — ₹44K min milestone; staged locks at % of capital (no upside cap)
+    daily_profit_target_inr: float = 44_000  # minimum milestone only — does not stop entries
+    daily_profit_trail_inr: float = 5_000  # legacy; unused when stage locks enabled
+    daily_profit_stage_locks_enabled: bool = True
+    daily_profit_stage_pcts: list[float] = [0.55, 0.88, 1.12]  # lock floors at 55%, 88%, 112% of capital
+
+    @field_validator("daily_profit_stage_pcts", mode="before")
+    @classmethod
+    def _parse_stage_pcts(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [float(x.strip()) for x in v.split(",") if x.strip()]
+        return v
     use_upstox_capital_for_sizing: bool = True  # paper parity uses real margin when token present
 
     # Quantity per lot (units) — NSE/BSE contract sizes
