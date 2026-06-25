@@ -1,3 +1,12 @@
+export interface StreamMetrics {
+  lastLatencyMs: number;
+  avgLatencyMs: number;
+  lastUpdatedAt: Date | null;
+  stalenessMs: number;
+  pollIntervalMs: number;
+  connectionQuality: 'excellent' | 'good' | 'slow' | 'offline';
+}
+
 export interface MultiSnapshot {
   type: string;
   timestamp: string;

@@ -1,0 +1,77 @@
+import type { StreamMetrics } from '../types';
+
+function qualityColor(quality: StreamMetrics['connectionQuality']) {
+  switch (quality) {
+    case 'excellent':
+      return 'text-nexus-green bg-nexus-green/15 border-nexus-green/30';
+    case 'good':
+      return 'text-nexus-accent bg-nexus-accent/10 border-nexus-accent/30';
+    case 'slow':
+      return 'text-nexus-yellow bg-nexus-yellow/10 border-nexus-yellow/30';
+    default:
+      return 'text-nexus-red bg-nexus-red/10 border-nexus-red/30';
+  }
+}
+
+function qualityLabel(quality: StreamMetrics['connectionQuality']) {
+  switch (quality) {
+    case 'excellent':
+      return 'Fast';
+    case 'good':
+      return 'OK';
+    case 'slow':
+      return 'Slow';
+    default:
+      return 'Offline';
+  }
+}
+
+export function ConnectionStatus({ metrics }: { metrics: StreamMetrics }) {
+  const ageSec = Math.round(metrics.stalenessMs / 1000);
+
+  return (
+    <div
+      className={`flex items-center gap-2 text-[10px] px-2.5 py-1 rounded border ${qualityColor(metrics.connectionQuality)}`}
+      title={`Round-trip: ${metrics.lastLatencyMs}ms · Avg: ${metrics.avgLatencyMs}ms · Poll every ${metrics.pollIntervalMs / 1000}s`}
+    >
+      <span
+        className={`w-1.5 h-1.5 rounded-full ${
+          metrics.connectionQuality === 'offline'
+            ? 'bg-nexus-red'
+            : metrics.connectionQuality === 'slow'
+              ? 'bg-nexus-yellow animate-pulse'
+              : 'bg-nexus-green animate-pulse'
+        }`}
+      />
+      <span className="font-semibold">{qualityLabel(metrics.connectionQuality)}</span>
+      <span className="opacity-80">·</span>
+      <span className="font-mono">{metrics.lastLatencyMs}ms</span>
+      {metrics.lastUpdatedAt && (
+        <>
+          <span className="opacity-80">·</span>
+          <span>{ageSec < 5 ? 'just now' : `${ageSec}s ago`}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function LatencyFooter({ metrics }: { metrics: StreamMetrics }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-nexus-muted">
+      <span>
+        Latency: <span className="font-mono text-gray-300">{metrics.lastLatencyMs}ms</span>
+        {' '}(avg <span className="font-mono text-gray-300">{metrics.avgLatencyMs}ms</span>)
+      </span>
+      <span>
+        Refresh: every <span className="font-mono text-gray-300">{metrics.pollIntervalMs / 1000}s</span>
+      </span>
+      <span>
+        Data age:{' '}
+        <span className="font-mono text-gray-300">
+          {metrics.stalenessMs < 5000 ? 'live' : `${Math.round(metrics.stalenessMs / 1000)}s`}
+        </span>
+      </span>
+    </div>
+  );
+}
