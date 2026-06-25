@@ -25,6 +25,7 @@ import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate'
 import { TradeJournal, NewsPanel } from './components/TradeJournal';
 import { StrategyMatrix } from './components/StrategyMatrix';
 import { ExplosionRadar } from './components/ExplosionRadar';
+import { SwingTrading } from './components/SwingTrading';
 
 const SYMBOLS = ['NIFTY', 'SENSEX', 'BANKNIFTY'] as const;
 
@@ -161,6 +162,7 @@ export default function App() {
             <div className="col-span-3"><ExplosionRadar snap={snap} /></div>
             <div className="col-span-3"><StrategyRouter snap={snap} /></div>
             <div className="col-span-3"><PaperTrading auto={auto} /></div>
+            <div className="col-span-3"><SwingTrading snap={snap} auto={auto} /></div>
 
             <div className="col-span-3"><OrderflowAnalytics snap={snap} /></div>
             <div className="col-span-3"><AIMatrix snap={snap} /></div>
@@ -180,7 +182,7 @@ export default function App() {
         <footer className="mt-4 pt-3 border-t border-nexus-border flex flex-wrap justify-between gap-2">
           <LatencyFooter metrics={metrics} />
           <span className="text-[10px] text-nexus-muted">
-            Explosion capture · 12–25pt targets · Paper only
+            Explosion scalp + swing (2–5d) · Paper only
             {deployment ? ` · ${deployment.environment}` : ''}
           </span>
         </footer>

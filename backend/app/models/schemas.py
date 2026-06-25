@@ -30,6 +30,7 @@ class StrategyType(str, Enum):
     SCALP = "SCALP"
     EXPLOSIVE = "EXPLOSIVE"
     DUAL_SCALP = "DUAL_SCALP"
+    SWING = "SWING"
 
 
 class HeatmapStrike(BaseModel):
@@ -136,6 +137,8 @@ class SymbolSnapshot(BaseModel):
     maxPain: float = 0
     explosionAlerts: list[dict[str, Any]] = []
     topExplosion: Optional[dict[str, Any]] = None
+    swingAlerts: list[dict[str, Any]] = []
+    topSwing: Optional[dict[str, Any]] = None
 
 
 class PaperTrade(BaseModel):
@@ -171,6 +174,7 @@ class DailyReport(BaseModel):
 class TradeMastermind(BaseModel):
     simpleProfitMode: bool = True
     dualStrategyEnabled: bool = False
+    swingTradingEnabled: bool = True
     simpleMaxLots: int = 14
     simpleTargetLots: int = 10
     simpleMinLots: int = 6

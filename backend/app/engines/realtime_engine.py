@@ -31,6 +31,7 @@ from app.engines.simple_profit import get_session_targets
 from app.engines.strategy_orchestrator import run_all_strategies, signals_to_suggested_trades
 from app.engines.strategies.base import compute_max_pain, compute_pcr
 from app.engines.explosion_detector import event_to_dict, scan_chain_explosions
+from app.engines.swing_engine import scan_swing_setups, setup_to_dict
 from app.engines.ml_engine import get_ml_engine
 from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase, get_nearest_expiry
 
@@ -370,6 +371,12 @@ async def build_symbol_snapshot(
         explosion_alerts = [event_to_dict(e) for e in explosion_events[:15]]
         top_explosion = explosion_alerts[0] if explosion_alerts else None
 
+        swing_setups = scan_swing_setups(
+            symbol, spot, atm, chain, orderflow, breadth, profile, regime, tqs,
+        )
+        swing_alerts = [setup_to_dict(s) for s in swing_setups]
+        top_swing = swing_alerts[0] if swing_alerts else None
+
         # Run all strategies (explosion events injected)
         strategy_signals, strategy_matrix = run_all_strategies(
             symbol, spot, atm, chain, orderflow, greeks, breadth,
@@ -424,6 +431,8 @@ async def build_symbol_snapshot(
             maxPain=max_pain,
             explosionAlerts=explosion_alerts,
             topExplosion=top_explosion,
+            swingAlerts=swing_alerts,
+            topSwing=top_swing,
         )
 
     except UpstoxError as e:

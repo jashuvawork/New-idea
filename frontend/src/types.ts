@@ -42,6 +42,23 @@ export interface SymbolSnapshot {
   maxPain?: number;
   explosionAlerts?: ExplosionAlert[];
   topExplosion?: ExplosionAlert;
+  swingAlerts?: SwingAlert[];
+  topSwing?: SwingAlert;
+}
+
+export interface SwingAlert {
+  symbol: string;
+  side: string;
+  strike: number;
+  premium: number;
+  swingType: string;
+  confidence: number;
+  reason: string;
+  targetPct: number;
+  stopPct: number;
+  maxHoldDays: number;
+  tradeable: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ExplosionAlert {
@@ -243,6 +260,7 @@ export interface DailyReport {
 export interface TradeMastermind {
   simpleProfitMode: boolean;
   dualStrategyEnabled: boolean;
+  swingTradingEnabled?: boolean;
   simpleMaxLots: number;
   simpleTargetLots: number;
   simpleMinLots: number;
