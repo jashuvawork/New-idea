@@ -33,6 +33,7 @@ async def deployment_status():
         },
         "flags": {
             "enableLiveTrading": settings.enable_live_trading,
+            "autoTradingEnabled": settings.auto_trading_enabled,
             "paperTrading": settings.paper_trading,
             "simpleProfitMode": settings.paper_simple_profit_mode,
             "dualStrategyEnabled": settings.paper_dual_strategy_enabled,

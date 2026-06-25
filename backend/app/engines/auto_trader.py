@@ -42,7 +42,8 @@ from app.models.schemas import (
     TradeMastermind,
 )
 from app.services import trade_store
-from app.services.upstox import get_market_phase
+from app.services.order_executor import place_entry_order, place_exit_order
+from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -140,12 +141,20 @@ def _attach_exit_plan(
     return plan.to_dict()
 
 
-def _open_from_candidate(
+def _execution_mode(settings) -> str:
+    if settings.enable_live_trading and settings.auto_trading_enabled:
+        return "LIVE"
+    return "PAPER"
+
+
+async def _open_from_candidate(
     candidate: EntryCandidate,
     state: AutoTraderState,
+    client: Optional[UpstoxClient] = None,
     news: Optional[list[dict]] = None,
 ) -> tuple[bool, str]:
-    """Open one paper trade from best-ranked setup — max lots on 50% capital."""
+    """Open one trade from best-ranked setup — paper journal + optional live broker order."""
+    settings = get_settings()
     symbol = candidate.symbol
     snap = candidate.snap
     profile = snap.optimizedProfile or get_session_targets()
@@ -173,25 +182,14 @@ def _open_from_candidate(
     )
     exit_plan = tune_exit_plan_for_position(exit_plan, lots, candidate.premium, symbol)
 
-    paper = PaperTrade(
-        id=str(uuid.uuid4())[:8],
-        symbol=symbol,
-        side=candidate.side,
-        strike=candidate.strike,
-        entryPremium=candidate.premium,
-        currentPremium=candidate.premium,
-        lots=lots,
-        openedAt=datetime.now(IST),
-        strategyType=candidate.strategy_type,
-        sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
-    )
-
     ctx_extra: dict[str, Any] = {
         "selectionScore": round(candidate.score, 2),
         "selectionMode": candidate.mode,
         "lots": lots,
         "tradeBudgetInr": exit_plan.get("tradeBudgetInr"),
         "exitPlan": exit_plan,
+        "executionMode": _execution_mode(settings),
+        "optionExpiry": snap.optionExpiry,
     }
     if candidate.mode == "explosion" and candidate.explosion_event:
         ev = candidate.explosion_event
@@ -215,14 +213,65 @@ def _open_from_candidate(
             "reason": candidate.swing_setup.reason if candidate.swing_setup else "",
         })
 
+    if settings.enable_live_trading and settings.auto_trading_enabled:
+        if not client:
+            return False, "live trading enabled but no broker client"
+        try:
+            order = await place_entry_order(
+                client, snap, candidate.strike, candidate.side, lots,
+            )
+            ctx_extra.update({
+                "instrumentKey": order["instrument_key"],
+                "brokerOrderId": order["order_id"],
+                "brokerQuantity": order["quantity"],
+            })
+            state.liveOrdersPlaced += 1
+        except UpstoxError as e:
+            logger.error("Live entry failed for %s: %s", symbol, e)
+            return False, f"live entry failed: {e}"
+
+    paper = PaperTrade(
+        id=str(uuid.uuid4())[:8],
+        symbol=symbol,
+        side=candidate.side,
+        strike=candidate.strike,
+        entryPremium=candidate.premium,
+        currentPremium=candidate.premium,
+        lots=lots,
+        openedAt=datetime.now(IST),
+        strategyType=candidate.strategy_type,
+        sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
+    )
+
     ctx = _build_context(snap, ctx_extra)
     paper.entryContext = ctx
     state.openPaperTrades.append(paper)
     trade_store.record_trade_opened(paper, ctx)
+    get_ai_learning().record_trade_open(
+        paper.id,
+        [
+            float(candidate.tqs or 0),
+            float(candidate.confidence or 0),
+            float(candidate.score or 0),
+        ],
+        candidate.strategy_type.value,
+    )
+    state.lastEntry = {
+        "tradeId": paper.id,
+        "symbol": symbol,
+        "side": candidate.side.value,
+        "strike": candidate.strike,
+        "lots": lots,
+        "mode": candidate.mode,
+        "score": round(candidate.score, 2),
+        "executionMode": ctx_extra["executionMode"],
+        "brokerOrderId": ctx_extra.get("brokerOrderId"),
+        "at": datetime.now(IST).isoformat(),
+    }
     logger.info(
-        "BEST %s trade: %s %s %s @ %.2f ×%d lots (score %.1f, 50%% cap)",
-        candidate.mode, symbol, candidate.side.value, candidate.strike,
-        candidate.premium, lots, candidate.score,
+        "BEST %s trade [%s]: %s %s %s @ %.2f ×%d lots (score %.1f)",
+        candidate.mode, ctx_extra["executionMode"], symbol, candidate.side.value,
+        candidate.strike, candidate.premium, lots, candidate.score,
     )
     return True, "opened"
 
@@ -234,6 +283,7 @@ def get_state() -> AutoTraderState:
         _auto_trader_state = AutoTraderState(
             paperTrading=settings.paper_trading,
             liveTradingEnabled=settings.enable_live_trading,
+            autoTradingEnabled=settings.auto_trading_enabled,
             running=True,
             tradeMastermind=TradeMastermind(
                 simpleProfitMode=settings.paper_simple_profit_mode,
@@ -266,6 +316,7 @@ def reset_session() -> None:
     _auto_trader_state = AutoTraderState(
         paperTrading=settings.paper_trading,
         liveTradingEnabled=settings.enable_live_trading,
+        autoTradingEnabled=settings.auto_trading_enabled,
         running=True,
         tradeMastermind=TradeMastermind(
             simpleProfitMode=settings.paper_simple_profit_mode,
@@ -286,19 +337,23 @@ def set_capital(amount: float) -> None:
     _capital_inr = amount
 
 
-def process(
+async def process(
     snapshots: dict[str, SymbolSnapshot],
     news: Optional[list[dict[str, Any]]] = None,
+    client: Optional[UpstoxClient] = None,
 ) -> AutoTraderState:
-    """Process open/update/close paper trades from snapshot candidates."""
+    """Process open/update/close trades from snapshot candidates."""
     state = get_state()
     settings = get_settings()
     skipped: list[dict[str, Any]] = []
 
     state.calibrationBlocks = _calibration.get_blocks()
+    state.autoTradingEnabled = settings.auto_trading_enabled
+    state.liveTradingEnabled = settings.enable_live_trading
+    state.paperTrading = settings.paper_trading
 
     # Update open trades with current premiums
-    for trade in state.openPaperTrades:
+    for trade in list(state.openPaperTrades):
         lot_mult = lot_multiplier(trade.symbol)
         snap = snapshots.get(trade.symbol)
         if not snap or not snap.dataAvailable:
@@ -346,19 +401,53 @@ def process(
         else:
             exit_reason, pnl = evaluate_exit(trade, current, profile, lot_mult)
         if exit_reason:
+            broker_ctx = dict(trade.entryContext or {})
+            if settings.enable_live_trading and settings.auto_trading_enabled and client:
+                if broker_ctx.get("instrumentKey") and not broker_ctx.get("brokerExitOrderId"):
+                    try:
+                        trade.exitReason = exit_reason
+                        exit_result = await place_exit_order(client, trade)
+                        broker_ctx["brokerExitOrderId"] = exit_result.get("order_id")
+                        trade.entryContext = broker_ctx
+                        state.liveOrdersPlaced += 1
+                    except UpstoxError as e:
+                        logger.error("Live exit failed for %s: %s — will retry", trade.id, e)
+                        skipped.append({
+                            "symbol": trade.symbol,
+                            "reason": "live_exit_pending",
+                            "message": str(e),
+                            "tradeId": trade.id,
+                        })
+                        continue
+
             trade.status = "CLOSED"
             trade.exitReason = exit_reason
             trade.pnlInr = pnl
             trade.pnlPoints = pnl / (trade.lots * lot_mult) if trade.lots else 0
             trade.closedAt = datetime.now(IST)
             trade.sessionDate = datetime.now(IST).strftime("%Y-%m-%d")
-            ctx = _build_context(snap, {"exitReason": exit_reason})
+            ctx = _build_context(snap, {
+                "exitReason": exit_reason,
+                "instrumentKey": broker_ctx.get("instrumentKey"),
+                "brokerOrderId": broker_ctx.get("brokerOrderId"),
+                "brokerExitOrderId": broker_ctx.get("brokerExitOrderId"),
+                "executionMode": broker_ctx.get("executionMode", _execution_mode(settings)),
+            })
             trade.entryContext = ctx
             state.closedPaperTrades.append(trade)
             _calibration.record_trade(trade)
             trade_store.record_trade_closed(trade, ctx)
             get_ai_learning().record_trade_close(trade)
-            logger.info("Paper trade closed: %s reason=%s pnl=%.2f", trade.id, exit_reason, pnl)
+            state.lastExit = {
+                "tradeId": trade.id,
+                "symbol": trade.symbol,
+                "reason": exit_reason,
+                "pnlInr": round(pnl, 2),
+                "executionMode": ctx.get("executionMode"),
+                "brokerExitOrderId": broker_ctx.get("brokerExitOrderId"),
+                "at": datetime.now(IST).isoformat(),
+            }
+            logger.info("Trade closed: %s reason=%s pnl=%.2f", trade.id, exit_reason, pnl)
 
     state.openPaperTrades = [t for t in state.openPaperTrades if t.status == "OPEN"]
 
@@ -376,10 +465,15 @@ def process(
         })
 
     # Try new entries — best setup only, max lots on 50% Upstox margin
-    if state.running and market_live and profit_gate.newEntriesAllowed:
+    if (
+        state.running
+        and settings.auto_trading_enabled
+        and market_live
+        and profit_gate.newEntriesAllowed
+    ):
         best = find_best_entry(snapshots, state)
         if best:
-            opened, reason = _open_from_candidate(best, state, news)
+            opened, reason = await _open_from_candidate(best, state, client, news)
             if not opened:
                 skipped.append({
                     "symbol": best.symbol,

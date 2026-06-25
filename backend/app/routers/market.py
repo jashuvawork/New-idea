@@ -86,7 +86,7 @@ async def _build_multi_snapshot() -> MultiSnapshot:
         snap.adaptiveExitHint = hint.to_dict()
         snap.psychology["newsAggregate"] = news_sentiment_agg
 
-    auto_state = process(snapshots, news=news) if data_ready else get_state()
+    auto_state = await process(snapshots, news=news, client=client) if data_ready else get_state()
 
     return MultiSnapshot(
         timestamp=now,

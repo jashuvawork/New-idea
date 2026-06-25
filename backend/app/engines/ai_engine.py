@@ -176,6 +176,8 @@ def build_heatmap(chain: list[dict[str, Any]], spot: float, atm: float) -> list:
                 putOi=put_oi,
                 callLtp=call_ltp,
                 putLtp=put_ltp,
+                callInstrumentKey=ce.get("instrument_key"),
+                putInstrumentKey=pe.get("instrument_key"),
                 gammaWall=gamma_wall,
                 liquidityScore=round(liq, 1),
                 sweepRisk=round(sweep_risk, 1),

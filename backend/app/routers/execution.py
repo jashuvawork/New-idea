@@ -4,8 +4,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.engines.auto_trader import resume_trading, stop_trading
+from app.engines.auto_trader import get_state, resume_trading, stop_trading
+from app.engines.realtime_engine import build_symbol_snapshot
 from app.models.schemas import Side
+from app.services.order_executor import place_entry_order
 from app.services.upstox import UpstoxClient, UpstoxError
 
 router = APIRouter(prefix="/api/execution", tags=["execution"])
@@ -31,6 +33,24 @@ async def resume_auto_trading():
     return {"status": "resumed", "message": "Auto-trading re-enabled"}
 
 
+@router.get("/status")
+async def execution_status():
+    state = get_state()
+    settings = get_settings()
+    return {
+        "running": state.running,
+        "autoTradingEnabled": settings.auto_trading_enabled,
+        "liveTradingEnabled": settings.enable_live_trading,
+        "paperTrading": settings.paper_trading,
+        "executionMode": "LIVE" if settings.enable_live_trading else "PAPER",
+        "openTrades": len(state.openPaperTrades),
+        "liveOrdersPlaced": state.liveOrdersPlaced,
+        "lastEntry": state.lastEntry,
+        "lastExit": state.lastExit,
+        "skipped": state.skipped[-5:],
+    }
+
+
 @router.post("/scalp-order")
 async def place_scalp_order(req: ScalpOrderRequest):
     settings = get_settings()
@@ -42,19 +62,12 @@ async def place_scalp_order(req: ScalpOrderRequest):
 
     client = UpstoxClient()
     try:
-        result = await client.place_order({
-            "quantity": req.lots,
-            "product": "I",
-            "validity": "DAY",
-            "price": 0,
-            "tag": "nexusquant_scalp",
-            "instrument_token": f"{req.symbol}_{req.strike}_{req.side.value}",
-            "order_type": req.order_type,
-            "transaction_type": "BUY",
-            "disclosed_quantity": 0,
-            "trigger_price": 0,
-            "is_amo": False,
-        })
+        snap = await build_symbol_snapshot(req.symbol.upper(), client)
+        if not snap.dataAvailable:
+            raise HTTPException(status_code=400, detail=snap.error or "Market data unavailable")
+        result = await place_entry_order(
+            client, snap, req.strike, req.side, req.lots, tag="nq_manual_scalp",
+        )
         return {"status": "placed", "result": result}
     except UpstoxError as e:
         raise HTTPException(status_code=400, detail=str(e))

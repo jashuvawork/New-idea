@@ -37,8 +37,8 @@ export function ExecutionHUD({ snap, auto }: { snap: SymbolSnapshot; auto: AutoT
       </div>
       <div className="mt-3 flex items-center justify-between">
         <BiasBadge bias={snap.breadth.bias} />
-        <span className={`text-xs font-mono ${auto.running ? 'text-nexus-green' : 'text-nexus-red'}`}>
-          {auto.running ? '● AUTO ON' : '○ AUTO STOPPED'}
+        <span className={`text-xs font-mono ${auto.running && auto.autoTradingEnabled ? 'text-nexus-green' : 'text-nexus-red'}`}>
+          {auto.running && auto.autoTradingEnabled ? '● AUTO ON' : '○ AUTO STOPPED'}
         </span>
       </div>
       <div className="mt-2 text-[10px] text-nexus-muted">

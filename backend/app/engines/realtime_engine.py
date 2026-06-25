@@ -451,6 +451,7 @@ async def build_symbol_snapshot(
             regime=regime,
             spot=spot,
             atmStrike=atm,
+            optionExpiry=expiry,
             heatmap=heatmap,
             orderflow=orderflow,
             greeks=greeks,

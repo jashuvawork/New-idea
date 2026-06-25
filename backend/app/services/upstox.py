@@ -290,8 +290,9 @@ class UpstoxClient:
                 json=order_payload,
             )
             if resp.status_code >= 400:
-                raise UpstoxError(f"Order failed: {resp.text[:200]}")
-            return resp.json()
+                raise UpstoxError(f"Order failed: {resp.status_code}: {resp.text[:300]}")
+            body = resp.json()
+            return body.get("data", body) if isinstance(body, dict) else body
 
 
 def get_nearest_expiry(symbol: str) -> str:

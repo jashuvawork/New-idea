@@ -240,15 +240,35 @@ export interface OptimizedProfile {
 export interface AutoTraderState {
   paperTrading: boolean;
   liveTradingEnabled: boolean;
+  autoTradingEnabled: boolean;
   running: boolean;
   openPaperTrades: PaperTrade[];
   closedPaperTrades: PaperTrade[];
   dailyReport: DailyReport;
   tradeMastermind: TradeMastermind;
-  skipped: { symbol: string; reason: string; trade?: string; message?: string }[];
+  skipped: { symbol: string; reason: string; trade?: string; message?: string; mode?: string; score?: number; tradeId?: string }[];
   calibrationBlocks: Record<string, boolean>;
   capitalAllocation?: CapitalAllocation;
   dailyProfitGate?: DailyProfitGate;
+  lastEntry?: AutoTradeEvent | null;
+  lastExit?: AutoTradeEvent | null;
+  liveOrdersPlaced?: number;
+}
+
+export interface AutoTradeEvent {
+  tradeId?: string;
+  symbol?: string;
+  side?: string;
+  strike?: number;
+  lots?: number;
+  mode?: string;
+  score?: number;
+  reason?: string;
+  pnlInr?: number;
+  executionMode?: string;
+  brokerOrderId?: string;
+  brokerExitOrderId?: string;
+  at?: string;
 }
 
 export interface CapitalAllocation {

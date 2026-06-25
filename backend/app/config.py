@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # Safety
     enable_live_trading: bool = False
     paper_trading: bool = True
+    auto_trading_enabled: bool = True
     shadow_trade_all_signals: bool = True
 
     # Data cadence

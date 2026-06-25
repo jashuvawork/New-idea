@@ -18,7 +18,7 @@ import { OrderflowAnalytics } from './components/OrderflowAnalytics';
 import { AIMatrix } from './components/AIMatrix';
 import { GreeksIV } from './components/GreeksIV';
 import { StrategyRouter } from './components/StrategyRouter';
-import { PaperTrading } from './components/PaperTrading';
+import { AutoTradingPanel } from './components/AutoTradingPanel';
 import { RiskEngine } from './components/RiskEngine';
 import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
@@ -170,7 +170,7 @@ export default function App() {
             <div className="col-span-3"><ExplosiveRunner snap={snap} /></div>
             <div className="col-span-3"><ExplosionRadar snap={snap} /></div>
             <div className="col-span-3"><StrategyRouter snap={snap} /></div>
-            <div className="col-span-3"><PaperTrading auto={auto} /></div>
+            <div className="col-span-3"><AutoTradingPanel auto={auto} /></div>
             <div className="col-span-3"><MarketHeatmap symbol={activeSymbol} embedded={snap.constituentHeatmap} /></div>
             <div className="col-span-3"><SwingTrading snap={snap} auto={auto} /></div>
 
