@@ -309,7 +309,9 @@ export interface PaperTrade {
   strike: number;
   entryPremium: number;
   currentPremium?: number;
+  exitPremium?: number;
   lots: number;
+  quantity?: number;
   pnlInr: number;
   pnlPoints: number;
   openedAt: string;

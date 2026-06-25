@@ -89,7 +89,9 @@ def _trade_payload(trade: PaperTrade, context: Optional[dict] = None) -> dict[st
         "strike": trade.strike,
         "entryPremium": trade.entryPremium,
         "currentPremium": trade.currentPremium,
+        "exitPremium": trade.exitPremium,
         "lots": trade.lots,
+        "quantity": trade.quantity or (trade.entryContext or {}).get("quantity"),
         "pnlInr": trade.pnlInr,
         "pnlPoints": trade.pnlPoints,
         "bestPnlPoints": trade.bestPnlPoints,
@@ -113,6 +115,9 @@ def _trade_payload(trade: PaperTrade, context: Optional[dict] = None) -> dict[st
         "exitPlan",
         "signalPremium",
         "slippage",
+        "quantity",
+        "lotSize",
+        "exitPremium",
     ):
         if key in ctx:
             payload[key] = ctx[key]
@@ -145,13 +150,16 @@ def _append_log(event: str, payload: dict[str, Any]) -> None:
 def _human_log_line(event: str, trade: PaperTrade, context: Optional[dict] = None) -> str:
     mode = _execution_mode(context or trade.entryContext)
     side = _enum_val(trade.side)
+    qty = trade.quantity or ctx.get("quantity") or ctx.get("brokerQuantity") or trade.lots
     base = (
         f"{event} {mode} {trade.id} {trade.symbol} {side} {trade.strike:g} "
-        f"lots={trade.lots} entry={trade.entryPremium:.2f}"
+        f"qty={qty} buy_ltp={trade.entryPremium:.2f}"
     )
     if event == "TRADE_CLOSED":
+        sold = trade.exitPremium if trade.exitPremium is not None else trade.currentPremium
+        sold_str = f"{sold:.2f}" if sold is not None else "—"
         return (
-            f"{base} exit={trade.exitReason} pnl_inr={trade.pnlInr:.2f} "
+            f"{base} sold_ltp={sold_str} exit={trade.exitReason} pnl_inr={trade.pnlInr:.2f} "
             f"pnl_pts={trade.pnlPoints:.2f}"
         )
     ctx = context or {}

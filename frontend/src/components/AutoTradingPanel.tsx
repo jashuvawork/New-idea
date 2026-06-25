@@ -1,5 +1,6 @@
 import { Panel, Metric } from './Panel';
 import type { AutoTraderState } from '../types';
+import { formatLtp, formatTradeTime, tradeBuyLtp, tradeQuantity, tradeSoldLtp } from '../utils/tradeFormat';
 
 export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
   const report = auto.dailyReport;
@@ -77,18 +78,25 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
             const brokerId = t.entryContext?.brokerOrderId as string | undefined;
             const sl = plan?.stopPct ? `−${plan.stopPct}%` : plan?.stopPoints ? `−${plan.stopPoints}pt` : null;
             const tp = plan?.targetPct ? `+${plan.targetPct}%` : plan?.targetPoints ? `+${plan.targetPoints}pt` : null;
+            const qty = tradeQuantity(t);
+            const buy = tradeBuyLtp(t);
+            const mtm = tradeSoldLtp(t, true);
             return (
               <div key={t.id} className="p-1.5 bg-black/30 rounded text-[11px]">
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-2">
                   <span className={t.side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'}>
-                    {t.symbol} {t.side} {t.strike} ×{t.lots}
+                    {t.symbol} {t.side} {t.strike}
                     {execMode === 'LIVE' && <span className="ml-1 text-[9px] text-nexus-red">LIVE</span>}
                   </span>
-                  <span className={`font-mono font-bold ${t.pnlInr >= 0 ? 'text-nexus-green' : 'text-nexus-red'}`}>
+                  <span className={`font-mono font-bold shrink-0 ${t.pnlInr >= 0 ? 'text-nexus-green' : 'text-nexus-red'}`}>
                     {t.pnlPoints >= 0 ? '+' : ''}{t.pnlPoints.toFixed(1)}pt / ₹{t.pnlInr.toFixed(0)}
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[9px] text-nexus-muted font-mono">
+                  <span>{formatTradeTime(t.openedAt)} IST</span>
+                  <span>qty {qty.toLocaleString('en-IN')}</span>
+                  <span>buy ₹{formatLtp(buy)}</span>
+                  <span>mtm ₹{formatLtp(mtm)}</span>
                   <span>{t.strategyType}</span>
                   {sl && <span>SL {sl}</span>}
                   {tp && <span>TP {tp}</span>}

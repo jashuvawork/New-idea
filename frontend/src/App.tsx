@@ -5,6 +5,7 @@ import {
   useDeploymentReadiness,
   useTradeHistory,
   useTradeLog,
+  useClosedTradesArchive,
   usePerformanceMilestone,
   stopTrading,
   resumeTrading,
@@ -69,6 +70,7 @@ export default function App() {
   const readiness = useDeploymentReadiness();
   const tradeHistory = useTradeHistory(14);
   const tradeLog = useTradeLog(20);
+  const archivedTrades = useClosedTradesArchive(40);
   const milestone = usePerformanceMilestone();
   const [activeSymbol, setActiveSymbol] = useState<string>('NIFTY');
 
@@ -270,7 +272,7 @@ export default function App() {
             <DashboardSection title="Depth & System" subtitle="Chain heatmap, strategies, journal, deployment gates">
               <div className="col-span-12 lg:col-span-3"><OptionHeatmap snap={snap} /></div>
               <div className="col-span-12 lg:col-span-3"><StrategyMatrix snap={snap} /></div>
-              <div className="col-span-12 md:col-span-6 xl:col-span-2"><TradeJournal data={data} history={tradeHistory} tradeLog={tradeLog} /></div>
+              <div className="col-span-12 md:col-span-6 xl:col-span-3"><TradeJournal data={data} history={tradeHistory} tradeLog={tradeLog} archivedTrades={archivedTrades} /></div>
               <div className="col-span-12 md:col-span-6 xl:col-span-2"><PsychologyPanel snap={snap} /></div>
               <div className="col-span-12 md:col-span-6 xl:col-span-1"><NewsPanel news={data.news ?? []} /></div>
               <div className="col-span-12 md:col-span-6 xl:col-span-1"><LiveTradingGate status={deployment} readiness={readiness} /></div>

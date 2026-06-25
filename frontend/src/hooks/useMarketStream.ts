@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, PerformanceMilestone, StreamMetrics, TradeHistoryResponse, TradeLogResponse } from '../types';
+import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, PaperTrade, PerformanceMilestone, StreamMetrics, TradeHistoryResponse, TradeLogResponse } from '../types';
 
 // Production: always use same-origin /api (Vercel rewrites → EC2 backend)
 // Dev: vite proxy handles /api → localhost:8000
@@ -154,6 +154,26 @@ export function useTradeLog(limit = 30) {
   }, [refresh]);
 
   return log;
+}
+
+export function useClosedTradesArchive(limit = 40) {
+  const [trades, setTrades] = useState<PaperTrade[]>([]);
+
+  const refresh = useCallback(() => {
+    fetchJson<{ trades: PaperTrade[] }>(`${API_BASE}/api/auto-trader/history/trades/closed?limit=${limit}`).then(
+      (json) => {
+        if (json?.trades) setTrades(json.trades);
+      },
+    );
+  }, [limit]);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 30_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  return trades;
 }
 
 export function useDeploymentReadiness() {

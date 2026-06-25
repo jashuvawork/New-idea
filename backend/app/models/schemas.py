@@ -207,7 +207,9 @@ class PaperTrade(BaseModel):
     strike: float
     entryPremium: float
     currentPremium: Optional[float] = None
+    exitPremium: Optional[float] = None
     lots: int
+    quantity: int = 0
     pnlInr: float = 0
     pnlPoints: float = 0
     openedAt: datetime

@@ -210,6 +210,8 @@ async def _open_from_candidate(
         "selectionScore": round(candidate.score, 2),
         "selectionMode": candidate.mode,
         "lots": lots,
+        "lotSize": lot_mult,
+        "quantity": lots * lot_mult,
         "tradeBudgetInr": exit_plan.get("tradeBudgetInr"),
         "exitPlan": exit_plan,
         "executionMode": _execution_mode(settings),
@@ -265,6 +267,7 @@ async def _open_from_candidate(
         entryPremium=fill_premium,
         currentPremium=fill_premium,
         lots=lots,
+        quantity=lots * lot_mult,
         openedAt=datetime.now(IST),
         strategyType=candidate.strategy_type,
         sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
@@ -463,12 +466,19 @@ async def process(
 
             trade.status = "CLOSED"
             trade.exitReason = exit_reason
+            trade.exitPremium = round(eval_premium, 2)
             trade.pnlInr = pnl
             trade.pnlPoints = pnl / (trade.lots * lot_mult) if trade.lots else 0
             trade.closedAt = datetime.now(IST)
             trade.sessionDate = datetime.now(IST).strftime("%Y-%m-%d")
+            if not trade.quantity:
+                trade.quantity = trade.lots * lot_mult
             ctx = _build_context(snap, {
                 "exitReason": exit_reason,
+                "exitPremium": trade.exitPremium,
+                "exitMarketLtp": round(current, 2),
+                "quantity": trade.quantity,
+                "lotSize": lot_mult,
                 "instrumentKey": broker_ctx.get("instrumentKey"),
                 "brokerOrderId": broker_ctx.get("brokerOrderId"),
                 "brokerExitOrderId": broker_ctx.get("brokerExitOrderId"),
@@ -479,15 +489,18 @@ async def process(
             _calibration.record_trade(trade)
             trade_store.record_trade_closed(trade, ctx)
             get_ai_learning().record_trade_close(trade)
-            state.lastExit = {
-                "tradeId": trade.id,
-                "symbol": trade.symbol,
-                "reason": exit_reason,
-                "pnlInr": round(pnl, 2),
-                "executionMode": ctx.get("executionMode"),
-                "brokerExitOrderId": broker_ctx.get("brokerExitOrderId"),
-                "at": datetime.now(IST).isoformat(),
-            }
+    state.lastExit = {
+        "tradeId": trade.id,
+        "symbol": trade.symbol,
+        "reason": exit_reason,
+        "pnlInr": round(pnl, 2),
+        "quantity": trade.quantity,
+        "buyLtp": trade.entryPremium,
+        "soldLtp": trade.exitPremium,
+        "executionMode": ctx.get("executionMode"),
+        "brokerExitOrderId": broker_ctx.get("brokerExitOrderId"),
+        "at": datetime.now(IST).isoformat(),
+    }
             logger.info("Trade closed: %s reason=%s pnl=%.2f", trade.id, exit_reason, pnl)
 
     state.openPaperTrades = [t for t in state.openPaperTrades if t.status == "OPEN"]
