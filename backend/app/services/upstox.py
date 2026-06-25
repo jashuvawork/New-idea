@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Optional
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -65,9 +66,10 @@ class UpstoxClient:
     def get_login_url(self) -> str:
         key = self.settings.upstox_api_key
         redirect = self.settings.upstox_redirect_uri
+        encoded_redirect = quote(redirect, safe="")
         return (
             f"https://api.upstox.com/v2/login/authorization/dialog"
-            f"?response_type=code&client_id={key}&redirect_uri={redirect}"
+            f"?response_type=code&client_id={key}&redirect_uri={encoded_redirect}"
         )
 
     async def exchange_code(self, code: str) -> dict[str, str]:
