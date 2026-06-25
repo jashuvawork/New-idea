@@ -51,6 +51,8 @@ async def deployment_status():
             "fallbackCapitalInr": settings.fallback_capital_inr,
             "maxSizingCapitalInr": settings.max_sizing_capital_inr,
             "aggressiveLotSizing": settings.aggressive_lot_sizing,
+            "maxLotsPerTrade": settings.max_lots_per_trade,
+            "useUpstoxCapital": settings.use_upstox_capital_for_sizing,
             "minOptionPremiumInr": settings.min_option_premium_inr,
             "maxOptionPremiumInr": settings.max_option_premium_inr,
             "enhancedMode": True,
