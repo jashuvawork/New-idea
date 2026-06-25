@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.config import get_settings
 from app.engines.capital_allocator import get_lot_sizes_meta
+from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.services import trade_store
 from app.services.redis_store import has_upstox_token
 from app.services.token_manager import get_daily_token_status
@@ -54,7 +55,9 @@ async def deployment_status():
             "enhancedMode": True,
             "shadowTradeAllSignals": settings.shadow_trade_all_signals,
             "backgroundMonitor": settings.background_market_monitor_enabled,
+            "paperSlippageEnabled": settings.paper_slippage_enabled,
         },
+        "paperSlippage": slippage_config_summary(),
         "cadence": {
             "marketPollSeconds": settings.market_poll_seconds,
             "snapshotCacheSeconds": settings.snapshot_cache_seconds,

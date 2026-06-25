@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     paper_dual_strategy_enabled: bool = False
     explosion_capture_mode: bool = True  # PRIMARY — capture daily premium explosions
 
+    # Paper slippage — realistic fills for milestone / PnL (ignored on live broker fills)
+    paper_slippage_enabled: bool = True
+    paper_slippage_entry_points: float = 1.0
+    paper_slippage_exit_points: float = 0.75
+    paper_slippage_explosion_mult: float = 1.5
+    paper_slippage_swing_mult: float = 0.85
+    paper_brokerage_round_trip_inr: float = 40.0
+
     # Explosion capture tuning
     explosion_min_velocity_3s: float = 2.0
     explosion_min_velocity_9s: float = 3.0

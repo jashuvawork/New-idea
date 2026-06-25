@@ -101,8 +101,8 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
       )}
 
       {!liveMode && (
-        <div className="mt-2 pt-2 border-t border-nexus-border text-[9px] text-nexus-muted">
-          Paper auto-trading is active. Set ENABLE_LIVE_TRADING=true on the server for broker execution.
+        <div className="mt-2 pt-2 border-t border-nexus-border text-[9px] text-nexus-muted leading-relaxed">
+          Paper auto-trading with slippage-adjusted fills. Set ENABLE_LIVE_TRADING=true on the server for broker execution.
         </div>
       )}
     </Panel>

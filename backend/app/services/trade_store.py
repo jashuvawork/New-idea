@@ -111,6 +111,8 @@ def _trade_payload(trade: PaperTrade, context: Optional[dict] = None) -> dict[st
         "selectionMode",
         "selectionScore",
         "exitPlan",
+        "signalPremium",
+        "slippage",
     ):
         if key in ctx:
             payload[key] = ctx[key]
