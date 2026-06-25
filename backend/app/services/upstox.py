@@ -61,6 +61,50 @@ def normalize_quotes_map(data: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def normalize_option_leg(leg: dict[str, Any]) -> dict[str, Any]:
+    """Flatten Upstox v2 nested call/put leg (market_data + option_greeks)."""
+    if not isinstance(leg, dict):
+        return {}
+    if "market_data" not in leg and ("ltp" in leg or "last_price" in leg):
+        return leg
+
+    md = leg.get("market_data") or {}
+    greeks_src = leg.get("option_greeks") or leg.get("greeks") or {}
+    ltp = md.get("ltp") or leg.get("ltp") or leg.get("last_price")
+    return {
+        "instrument_key": leg.get("instrument_key"),
+        "ltp": ltp,
+        "last_price": ltp,
+        "volume": md.get("volume") if md.get("volume") is not None else leg.get("volume", 0),
+        "oi": md.get("oi") if md.get("oi") is not None else leg.get("oi", 0),
+        "bid_price": md.get("bid_price") or leg.get("bid_price"),
+        "ask_price": md.get("ask_price") or leg.get("ask_price"),
+        "implied_volatility": greeks_src.get("iv") or leg.get("implied_volatility"),
+        "greeks": {
+            "delta": greeks_src.get("delta"),
+            "gamma": greeks_src.get("gamma"),
+            "theta": greeks_src.get("theta"),
+            "vega": greeks_src.get("vega"),
+            "iv": greeks_src.get("iv"),
+        },
+    }
+
+
+def normalize_option_chain(chain: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize each strike row for engines that expect flat call/put fields."""
+    out: list[dict[str, Any]] = []
+    for row in chain:
+        if not isinstance(row, dict):
+            continue
+        normalized = dict(row)
+        if row.get("call_options"):
+            normalized["call_options"] = normalize_option_leg(row["call_options"])
+        if row.get("put_options"):
+            normalized["put_options"] = normalize_option_leg(row["put_options"])
+        out.append(normalized)
+    return out
+
+
 class UpstoxError(Exception):
     pass
 
@@ -168,17 +212,52 @@ class UpstoxClient:
             raise UpstoxError(f"No quote for {symbol}")
         return quote
 
+    async def get_option_expiries(self, symbol: str) -> list[str]:
+        """Upcoming expiry dates for an index from /option/contract."""
+        key = INDEX_KEYS.get(symbol)
+        if not key:
+            raise UpstoxError(f"Unknown symbol: {symbol}")
+        data = await self._get("/option/contract", params={"instrument_key": key})
+        if not isinstance(data, list):
+            return []
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+        expiries = sorted(
+            {str(c.get("expiry")) for c in data if isinstance(c, dict) and c.get("expiry") and str(c["expiry"]) >= today}
+        )
+        return expiries
+
     async def get_option_chain(self, symbol: str, expiry: str) -> list[dict[str, Any]]:
         """Fetch option chain for symbol and expiry date (YYYY-MM-DD)."""
-        segment = OPTION_SEGMENTS.get(symbol, "NSE_FO")
-        instrument = f"{segment}|{symbol}"
+        key = INDEX_KEYS.get(symbol)
+        if not key:
+            raise UpstoxError(f"Unknown symbol: {symbol}")
         data = await self._get(
             "/option/chain",
-            params={"instrument_key": instrument, "expiry_date": expiry},
+            params={"instrument_key": key, "expiry_date": expiry},
         )
         if isinstance(data, list):
-            return data
-        return data if isinstance(data, list) else []
+            return normalize_option_chain(data)
+        return []
+
+    async def get_option_chain_resolved(self, symbol: str) -> tuple[list[dict[str, Any]], str]:
+        """Fetch option chain, probing upcoming expiries until data is returned."""
+        expiries = await self.get_option_expiries(symbol)
+        if not expiries:
+            expiries = [get_nearest_expiry(symbol)]
+
+        best_chain: list[dict[str, Any]] = []
+        best_expiry = expiries[0]
+        for expiry in expiries[:6]:
+            chain = await self.get_option_chain(symbol, expiry)
+            if not chain:
+                continue
+            if not best_chain or len(chain) > len(best_chain):
+                best_chain = chain
+                best_expiry = expiry
+            if len(chain) >= 40:
+                break
+
+        return best_chain, best_expiry
 
     async def get_candles(
         self, symbol: str, interval: str = "1minute", count: int = 60

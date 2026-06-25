@@ -42,7 +42,7 @@ from app.engines.premarket_engine import (
     build_premarket_snapshot,
 )
 from app.engines.ml_engine import get_ml_engine
-from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase, get_nearest_expiry
+from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -371,8 +371,7 @@ async def build_symbol_snapshot(
 
     try:
         spot = await client.get_index_ltp(symbol)
-        expiry = get_nearest_expiry(symbol)
-        chain = await client.get_option_chain(symbol, expiry)
+        chain, expiry = await client.get_option_chain_resolved(symbol)
         candles = await client.get_candles(symbol)
 
         if not chain:
