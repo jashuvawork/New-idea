@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     simple_target_lots: int = 10
     simple_min_lots: int = 6
 
+    adaptive_exits_enabled: bool = True
+    ml_exit_tuning_enabled: bool = True
+
     symbols: list[str] = ["NIFTY", "SENSEX", "BANKNIFTY"]
 
     # Persistence

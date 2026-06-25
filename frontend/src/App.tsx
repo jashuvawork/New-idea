@@ -26,6 +26,7 @@ import { TradeJournal, NewsPanel } from './components/TradeJournal';
 import { StrategyMatrix } from './components/StrategyMatrix';
 import { ExplosionRadar } from './components/ExplosionRadar';
 import { MarketHeatmap } from './components/MarketHeatmap';
+import { PsychologyPanel } from './components/PsychologyPanel';
 import { SwingTrading } from './components/SwingTrading';
 
 const SYMBOLS = ['NIFTY', 'SENSEX', 'BANKNIFTY'] as const;
@@ -175,6 +176,7 @@ export default function App() {
             <div className="col-span-3"><OptionHeatmap snap={snap} /></div>
             <div className="col-span-3"><StrategyMatrix snap={snap} /></div>
             <div className="col-span-2"><TradeJournal data={data} history={tradeHistory} /></div>
+            <div className="col-span-2"><PsychologyPanel snap={snap} /></div>
             <div className="col-span-2"><NewsPanel news={data.news} /></div>
             <div className="col-span-1"><LiveTradingGate status={deployment} /></div>
             <div className="col-span-1"><MorningChecklist deployment={deployment} dataReady={data.dataReady} /></div>

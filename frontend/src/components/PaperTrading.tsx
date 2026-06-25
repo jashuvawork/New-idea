@@ -23,16 +23,42 @@ export function PaperTrading({ auto }: { auto: AutoTraderState }) {
         <p className="text-xs text-nexus-muted py-2">No open positions</p>
       ) : (
         <div className="space-y-1.5 max-h-32 overflow-y-auto">
-          {auto.openPaperTrades.map((t) => (
-            <div key={t.id} className="flex justify-between text-[11px] p-1.5 bg-black/30 rounded">
-              <span className={t.side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'}>
-                {t.symbol} {t.side} {t.strike} ×{t.lots}
-              </span>
-              <span className={`font-mono font-bold ${t.pnlInr >= 0 ? 'text-nexus-green' : 'text-nexus-red'}`}>
-                {t.pnlPoints >= 0 ? '+' : ''}{t.pnlPoints.toFixed(1)}pt / ₹{t.pnlInr.toFixed(0)}
-              </span>
-            </div>
-          ))}
+          {auto.openPaperTrades.map((t) => {
+            const plan = t.entryContext?.exitPlan as Record<string, number> | undefined;
+            const sl = plan?.stopPct
+              ? `−${plan.stopPct}%`
+              : plan?.stopPoints
+                ? `−${plan.stopPoints}pt`
+                : null;
+            const tp = plan?.targetPct
+              ? `+${plan.targetPct}%`
+              : plan?.targetPoints
+                ? `+${plan.targetPoints}pt`
+                : null;
+            return (
+              <div key={t.id} className="p-1.5 bg-black/30 rounded text-[11px]">
+                <div className="flex justify-between">
+                  <span className={t.side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'}>
+                    {t.symbol} {t.side} {t.strike} ×{t.lots}
+                  </span>
+                  <span className={`font-mono font-bold ${t.pnlInr >= 0 ? 'text-nexus-green' : 'text-nexus-red'}`}>
+                    {t.pnlPoints >= 0 ? '+' : ''}{t.pnlPoints.toFixed(1)}pt / ₹{t.pnlInr.toFixed(0)}
+                  </span>
+                </div>
+                {(sl || tp) && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[9px] text-nexus-muted font-mono">
+                    {sl && <span>SL {sl}</span>}
+                    {tp && <span>TP {tp}</span>}
+                    {plan?.trailArmPoints != null && (
+                      <span className="text-nexus-accent">
+                        Trail @{plan.trailArmPoints}pt / {((plan.trailKeepRatio ?? 0.55) * 100).toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

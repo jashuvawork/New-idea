@@ -169,6 +169,8 @@ class SymbolSnapshot(BaseModel):
     swingAlerts: list[dict[str, Any]] = []
     topSwing: Optional[dict[str, Any]] = None
     constituentHeatmap: Optional[ConstituentHeatmap] = None
+    psychology: dict[str, Any] = {}
+    adaptiveExitHint: dict[str, Any] = {}
 
 
 class PaperTrade(BaseModel):

@@ -21,6 +21,13 @@ from app.engines.swing_profit import (
     compute_swing_lots,
     evaluate_swing_exit,
 )
+from app.engines.adaptive_exits import (
+    AdaptiveExitPlan,
+    compute_adaptive_exit_plan,
+    evaluate_adaptive_explosion_exit,
+    evaluate_adaptive_scalp_exit,
+    evaluate_adaptive_swing_exit,
+)
 from app.engines.swing_engine import SwingSetup
 from app.engines.simple_profit import (
     check_entry_gate,
@@ -80,7 +87,42 @@ def _build_context(snap: Optional[SymbolSnapshot], extra: Optional[dict] = None)
             "spot": snap.spot,
             "session": snap.optimizedProfile.sessionLabel if snap.optimizedProfile else "",
         })
+        if snap.psychology:
+            ctx["psychology"] = snap.psychology.get("label")
     return ctx
+
+
+def _attach_exit_plan(
+    snap: SymbolSnapshot,
+    strategy_type: StrategyType,
+    side: str,
+    confidence: float,
+    news: Optional[list[dict]] = None,
+) -> dict[str, Any]:
+    """Build ML + psychology adaptive SL/TP plan for a new trade."""
+    settings = get_settings()
+    if not settings.adaptive_exits_enabled:
+        return {}
+
+    from app.engines.psychology_engine import PsychologyState, analyze_psychology
+
+    ps_data = snap.psychology or {}
+    if ps_data:
+        psychology = PsychologyState(
+            score=ps_data.get("score", 0),
+            label=ps_data.get("label", "NEUTRAL"),
+            exit_bias=ps_data.get("exitBias", "BALANCED"),
+            news_bias=ps_data.get("newsBias", "NEUTRAL"),
+            breadth_bias=ps_data.get("breadthBias", "NEUTRAL"),
+        )
+    else:
+        psychology = analyze_psychology(snap, news)
+
+    profile = snap.optimizedProfile or get_session_targets()
+    plan = compute_adaptive_exit_plan(
+        snap, strategy_type, psychology, profile, side=side, confidence=confidence, news=news,
+    )
+    return plan.to_dict()
 
 
 def get_state() -> AutoTraderState:
@@ -144,6 +186,7 @@ def set_capital(amount: float) -> None:
 
 def process(
     snapshots: dict[str, SymbolSnapshot],
+    news: Optional[list[dict[str, Any]]] = None,
 ) -> AutoTraderState:
     """Process open/update/close paper trades from snapshot candidates."""
     state = get_state()
@@ -172,15 +215,32 @@ def process(
         is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
         is_swing = trade.strategyType == StrategyType.SWING
 
+        plan_dict = (trade.entryContext or {}).get("exitPlan")
+        use_adaptive = settings.adaptive_exits_enabled and plan_dict
+
         if is_swing and settings.swing_trading_enabled:
             if trade.entryContext is None:
                 trade.entryContext = {}
             pct = ((current - trade.entryPremium) / trade.entryPremium * 100) if trade.entryPremium else 0
             trade.entryContext["bestPnlPct"] = max(trade.entryContext.get("bestPnlPct", 0), pct)
-            exit_reason, pnl = evaluate_swing_exit(trade, current, lot_mult)
+            if use_adaptive:
+                exit_reason, pnl = evaluate_adaptive_swing_exit(
+                    trade, current, AdaptiveExitPlan.from_dict(plan_dict), lot_mult,
+                )
+            else:
+                exit_reason, pnl = evaluate_swing_exit(trade, current, lot_mult)
         elif is_explosion and settings.explosion_capture_mode:
             tier = "ELITE" if (trade.bestPnlPoints or 0) >= 10 else "EXPLODING"
-            exit_reason, pnl = evaluate_explosion_exit(trade, current, tier, lot_mult)
+            if use_adaptive:
+                exit_reason, pnl = evaluate_adaptive_explosion_exit(
+                    trade, current, AdaptiveExitPlan.from_dict(plan_dict), tier, lot_mult,
+                )
+            else:
+                exit_reason, pnl = evaluate_explosion_exit(trade, current, tier, lot_mult)
+        elif use_adaptive:
+            exit_reason, pnl = evaluate_adaptive_scalp_exit(
+                trade, current, AdaptiveExitPlan.from_dict(plan_dict), profile, lot_mult,
+            )
         else:
             exit_reason, pnl = evaluate_exit(trade, current, profile, lot_mult)
         if exit_reason:
@@ -272,6 +332,10 @@ def process(
                         "explosionTier": event.tier,
                         "velocity3s": event.velocity_3s,
                         "explosionScore": event.explosion_score,
+                        "exitPlan": _attach_exit_plan(
+                            snap, StrategyType.EXPLOSIVE, event.side.value,
+                            event.explosion_score, news,
+                        ),
                     })
                     paper.entryContext = ctx
                     state.openPaperTrades.append(paper)
@@ -332,7 +396,14 @@ def process(
                         strategyType=suggestion.strategyType,
                         sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
                     )
-                    ctx = _build_context(snap, {"tqs": suggestion.tqs, "confidence": suggestion.confidence})
+                    ctx = _build_context(snap, {
+                        "tqs": suggestion.tqs,
+                        "confidence": suggestion.confidence,
+                        "exitPlan": _attach_exit_plan(
+                            snap, suggestion.strategyType, suggestion.side.value,
+                            suggestion.confidence, news,
+                        ),
+                    })
                     paper.entryContext = ctx
                     state.openPaperTrades.append(paper)
                     trade_store.record_trade_opened(paper, ctx)
@@ -397,6 +468,10 @@ def process(
                         "stopPct": alert.get("stopPct"),
                         "maxHoldDays": alert.get("maxHoldDays"),
                         "reason": setup.reason,
+                        "exitPlan": _attach_exit_plan(
+                            snap, StrategyType.SWING, setup.side.value,
+                            setup.confidence, news,
+                        ),
                     })
                     paper.entryContext = ctx
                     state.openPaperTrades.append(paper)

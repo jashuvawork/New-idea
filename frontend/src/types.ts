@@ -45,6 +45,8 @@ export interface SymbolSnapshot {
   swingAlerts?: SwingAlert[];
   topSwing?: SwingAlert;
   constituentHeatmap?: ConstituentHeatmap | null;
+  psychology?: Record<string, unknown>;
+  adaptiveExitHint?: Record<string, unknown>;
 }
 
 export interface ConstituentTile {
