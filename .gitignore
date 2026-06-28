@@ -13,6 +13,7 @@ frontend/tsconfig.tsbuildinfo
 # Environment
 .env
 .env.local
+deploy/aws.env
 
 # IDE
 .idea/

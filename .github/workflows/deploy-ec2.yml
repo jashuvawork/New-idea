@@ -4,11 +4,6 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - "backend/**"
-      - "deploy/**"
-      - "docker-compose.prod.yml"
-      - ".github/workflows/deploy-ec2.yml"
 
 env:
   AWS_REGION: ap-south-1
