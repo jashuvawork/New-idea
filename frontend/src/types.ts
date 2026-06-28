@@ -412,6 +412,9 @@ export interface DeploymentStatus {
 export interface DailyTokenStatus {
   hasToken: boolean;
   validToday: boolean;
+  expired?: boolean;
+  expiresAt?: string;
+  recommendedLoginAfter?: string;
   sessionDate?: string;
   today: string;
   generatedAt?: string;
