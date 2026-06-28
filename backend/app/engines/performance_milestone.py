@@ -1,4 +1,4 @@
-"""50-trade live-readiness milestone — PF, win rate, max drawdown."""
+"""50-trade live-readiness milestone — rolling batches of 50 closed trades."""
 
 from typing import Any
 
@@ -15,11 +15,8 @@ def _parse_pnl(trade: dict[str, Any]) -> float:
     return float(trade.get("pnlInr") or 0)
 
 
-def compute_milestone_stats(limit: int = 500) -> dict[str, Any]:
-    """Lifetime paper stats from archived trades for live-deployment gate."""
-    trades = trade_store.get_all_closed_trades(limit=limit)
-    trades = sorted(trades, key=lambda t: t.get("closedAt") or t.get("openedAt") or "")
-
+def _stats_for_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """PF, win rate, drawdown for a trade list (chronological)."""
     count = len(trades)
     wins = losses = scratches = 0
     gross_profit = gross_loss = 0.0
@@ -62,48 +59,88 @@ def compute_milestone_stats(limit: int = 500) -> dict[str, Any]:
         "winRateMet": win_rate >= TARGET_WIN_RATE,
         "drawdownMet": max_dd_pct <= MAX_DRAWDOWN_PCT,
     }
-    passed = sum(1 for v in checks.values() if v)
 
     return {
         "tradeCount": count,
-        "targetTrades": TARGET_TRADES,
-        "tradeProgressPct": round(min(100.0, count / TARGET_TRADES * 100), 1),
         "wins": wins,
         "losses": losses,
         "scratches": scratches,
         "profitFactor": round(profit_factor, 2),
-        "targetProfitFactor": TARGET_PROFIT_FACTOR,
         "winRate": round(win_rate, 1),
-        "targetWinRate": TARGET_WIN_RATE,
         "maxDrawdownPct": round(max_dd_pct, 2),
-        "maxDrawdownLimitPct": MAX_DRAWDOWN_PCT,
         "netPnlInr": round(net_pnl, 2),
         "checks": checks,
-        "checksPassed": passed,
+        "checksPassed": sum(1 for v in checks.values() if v),
         "checksTotal": len(checks),
         "readyForLiveMilestone": all(checks.values()),
-        "message": _milestone_message(count, checks, profit_factor, win_rate, max_dd_pct),
-        "slippageAdjusted": get_settings().paper_slippage_enabled,
-        "slippageNote": (
-            "PnL includes paper slippage + brokerage on trades closed after this feature shipped"
-            if get_settings().paper_slippage_enabled
-            else "Raw LTP fills — enable PAPER_SLIPPAGE_ENABLED for live-like stats"
+    }
+
+
+def _current_batch_trades(all_trades: list[dict[str, Any]]) -> tuple[int, int, list[dict[str, Any]]]:
+    """
+    Rolling 50-trade windows. After batch N completes, batch N+1 starts at 0/50.
+    Returns (batch_number, completed_batches, trades_in_current_batch).
+    """
+    total = len(all_trades)
+    completed_batches = total // TARGET_TRADES
+    batch_number = completed_batches + 1
+    batch_start = completed_batches * TARGET_TRADES
+    return batch_number, completed_batches, all_trades[batch_start:]
+
+
+def compute_milestone_stats(limit: int = 500) -> dict[str, Any]:
+    """Live-readiness stats for the current 50-trade batch (rolls after each 50 closes)."""
+    all_trades = trade_store.get_all_closed_trades_chronological(limit=limit)
+    batch_number, completed_batches, batch_trades = _current_batch_trades(all_trades)
+    core = _stats_for_trades(batch_trades)
+    count = core["tradeCount"]
+    checks = core["checks"]
+
+    return {
+        **core,
+        "targetTrades": TARGET_TRADES,
+        "tradeProgressPct": round(min(100.0, count / TARGET_TRADES * 100), 1),
+        "targetProfitFactor": TARGET_PROFIT_FACTOR,
+        "targetWinRate": TARGET_WIN_RATE,
+        "maxDrawdownLimitPct": MAX_DRAWDOWN_PCT,
+        "batchNumber": batch_number,
+        "completedBatches": completed_batches,
+        "lifetimeTradeCount": len(all_trades),
+        "message": _milestone_message(
+            batch_number,
+            completed_batches,
+            len(all_trades),
+            count,
+            checks,
+            core["profitFactor"],
+            core["winRate"],
+            core["maxDrawdownPct"],
         ),
     }
 
 
 def _milestone_message(
-    count: int,
+    batch_number: int,
+    completed_batches: int,
+    lifetime_count: int,
+    batch_count: int,
     checks: dict[str, bool],
     pf: float,
     wr: float,
     dd: float,
 ) -> str:
-    if all(checks.values()):
-        return f"50-trade milestone passed — PF {pf:.1f}, WR {wr:.0f}%, DD {dd:.1f}%"
-    remaining = TARGET_TRADES - count
+    prefix = f"Batch {batch_number}"
+    if batch_count >= TARGET_TRADES and all(checks.values()):
+        return (
+            f"{prefix} passed — PF {pf:.1f}, WR {wr:.0f}%, DD {dd:.1f}% "
+            f"({lifetime_count} lifetime)"
+        )
+    remaining = TARGET_TRADES - batch_count
     if remaining > 0:
-        return f"{remaining} more closed trades needed for 50-trade review"
+        lifetime_note = f" · {lifetime_count} lifetime" if lifetime_count > 0 else ""
+        if completed_batches > 0:
+            return f"{prefix} · {batch_count}/{TARGET_TRADES} toward review ({completed_batches} batch(es) done){lifetime_note}"
+        return f"{remaining} more closed trades needed for batch 1 review"
     misses = []
     if not checks["profitFactorMet"]:
         misses.append(f"PF {pf:.1f} < {TARGET_PROFIT_FACTOR}")
@@ -111,4 +148,4 @@ def _milestone_message(
         misses.append(f"WR {wr:.0f}% < {TARGET_WIN_RATE}%")
     if not checks["drawdownMet"]:
         misses.append(f"DD {dd:.1f}% > {MAX_DRAWDOWN_PCT}%")
-    return " · ".join(misses) if misses else "Building track record"
+    return f"{prefix} · " + (" · ".join(misses) if misses else "Building track record")
