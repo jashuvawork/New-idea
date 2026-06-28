@@ -32,9 +32,12 @@ async def deployment_status():
         "upstox": {
             "hasToken": await has_upstox_token(),
             "validToday": token_status.get("validToday", False),
+            "expired": token_status.get("expired", False),
             "canLogin": token_status.get("canLogin", True),
             "sessionDate": token_status.get("sessionDate"),
             "generatedAt": token_status.get("generatedAt"),
+            "expiresAt": token_status.get("expiresAt"),
+            "recommendedLoginAfter": token_status.get("recommendedLoginAfter"),
             "oneTimePerDay": settings.daily_token_once,
             "message": token_status.get("message", ""),
         },

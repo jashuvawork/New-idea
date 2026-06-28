@@ -86,9 +86,11 @@ export default function App() {
   const upstoxBadge = deployment
     ? deployment.upstox.validToday
       ? { className: 'bg-nexus-green/15 text-nexus-green border-nexus-green/30', label: 'Broker connected' }
-      : deployment.upstox.hasToken
-        ? { className: 'bg-nexus-yellow/15 text-nexus-yellow border-nexus-yellow/30', label: 'Relogin needed' }
-        : { className: 'bg-nexus-red/15 text-nexus-red border-nexus-red/30', label: 'Not connected' }
+      : deployment.upstox.expired
+        ? { className: 'bg-nexus-red/15 text-nexus-red border-nexus-red/30', label: 'Token expired — relogin' }
+        : deployment.upstox.hasToken
+          ? { className: 'bg-nexus-yellow/15 text-nexus-yellow border-nexus-yellow/30', label: 'Relogin needed' }
+          : { className: 'bg-nexus-red/15 text-nexus-red border-nexus-red/30', label: 'Not connected' }
     : null;
 
   return (
