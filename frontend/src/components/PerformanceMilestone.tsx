@@ -28,22 +28,32 @@ export function PerformanceMilestone({ stats }: { stats: MilestoneStats | null }
     );
   }
 
-  const badge = stats.readyForLiveMilestone ? 'LIVE READY' : `${stats.tradeCount}/${stats.targetTrades}`;
+  const batchLabel = stats.batchNumber > 1 || stats.completedBatches > 0
+    ? `Batch ${stats.batchNumber}`
+    : '50-Trade Milestone';
+  const badge = stats.readyForLiveMilestone
+    ? 'LIVE READY'
+    : `${stats.tradeCount}/${stats.targetTrades}`;
   const badgeColor = stats.readyForLiveMilestone ? 'bg-nexus-green' : 'bg-nexus-accent/80';
 
   return (
-    <Panel title="50-Trade Milestone" badge={badge} badgeColor={badgeColor}>
+    <Panel title={batchLabel} badge={badge} badgeColor={badgeColor}>
       <div className="mb-3">
         <div className="flex justify-between text-[10px] text-nexus-muted mb-1">
-          <span>Closed trades toward live review</span>
-          <span className="font-mono">{stats.tradeCount} / {stats.targetTrades}</span>
+          <span>Current batch toward live review</span>
+          <span className="font-mono">
+            {stats.tradeCount} / {stats.targetTrades}
+            {stats.lifetimeTradeCount > stats.tradeCount && (
+              <span className="text-nexus-muted ml-1">({stats.lifetimeTradeCount} lifetime)</span>
+            )}
+          </span>
         </div>
         <ScoreBar value={stats.tradeProgressPct} max={100} />
       </div>
 
       <div className="space-y-2 mb-3">
         <CheckRow
-          label="50 trades"
+          label={`Batch ${stats.batchNumber} · 50 trades`}
           ok={stats.checks.tradeCountMet}
           detail={`${stats.tradeCount} closed`}
         />
@@ -66,7 +76,7 @@ export function PerformanceMilestone({ stats }: { stats: MilestoneStats | null }
 
       <div className="text-[10px] p-2 rounded bg-black/30 border border-nexus-border">
         <div className="flex justify-between mb-1">
-          <span className="text-nexus-muted">Net PnL (archived)</span>
+          <span className="text-nexus-muted">Net PnL (this batch)</span>
           <span className={`font-mono font-bold ${stats.netPnlInr >= 0 ? 'text-nexus-green' : 'text-nexus-red'}`}>
             ₹{stats.netPnlInr.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </span>

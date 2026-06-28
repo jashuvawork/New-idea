@@ -434,6 +434,9 @@ export interface PerformanceMilestone {
   tradeCount: number;
   targetTrades: number;
   tradeProgressPct: number;
+  batchNumber: number;
+  completedBatches: number;
+  lifetimeTradeCount: number;
   wins: number;
   losses: number;
   scratches: number;

@@ -37,10 +37,19 @@ async def performance_analysis():
 
 @router.get("/milestone")
 async def performance_milestone():
-    """50-trade live readiness: PF 3+, WR 50%+, max DD 5%."""
+    """50-trade live readiness per rolling batch: PF 3+, WR 50%+, max DD 5%."""
     from app.engines.performance_milestone import compute_milestone_stats
 
     return compute_milestone_stats()
+
+
+@router.get("/batches")
+async def milestone_batches(limit: int = 20):
+    """Archived 50-trade batch summaries (batch 1, 2, 3…)."""
+    return {
+        "batchSize": trade_store.MILESTONE_BATCH_SIZE,
+        "batches": trade_store.list_milestone_batches(limit=min(limit, 50)),
+    }
 
 
 @router.post("/reset")

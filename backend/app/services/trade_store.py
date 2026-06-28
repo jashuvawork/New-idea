@@ -275,6 +275,7 @@ def record_trade_closed(trade: PaperTrade, context: Optional[dict] = None) -> No
         "context": event_ctx,
     })
     logger.info(_human_log_line("TRADE_CLOSED", trade, context))
+    _maybe_archive_completed_batch()
 
 
 def record_session_reset(reason: str = "manual_reset", open_trade_ids: Optional[list[str]] = None) -> None:
@@ -398,8 +399,15 @@ def get_day_detail(date: str) -> dict[str, Any]:
 
 def get_all_closed_trades(limit: int = 200) -> list[dict[str, Any]]:
     """All closed trades across days, newest first."""
-    closed = []
-    for path in sorted(get_store_dir().glob("*.json"), reverse=True):
+    closed = get_all_closed_trades_chronological(limit=100_000)
+    closed.sort(key=lambda x: x.get("closedAt", x.get("openedAt", "")), reverse=True)
+    return closed[:limit]
+
+
+def get_all_closed_trades_chronological(limit: int = 500) -> list[dict[str, Any]]:
+    """All closed trades across days, oldest first (for milestone batches)."""
+    closed: list[dict[str, Any]] = []
+    for path in sorted(get_store_dir().glob("*.json")):
         try:
             data = json.loads(path.read_text())
             for t in data.get("trades", []):
@@ -407,8 +415,88 @@ def get_all_closed_trades(limit: int = 200) -> list[dict[str, Any]]:
                     closed.append(t)
         except Exception:
             continue
-    closed.sort(key=lambda x: x.get("closedAt", x.get("openedAt", "")), reverse=True)
+    closed.sort(key=lambda x: x.get("closedAt", x.get("openedAt", "")))
     return closed[:limit]
+
+
+def count_all_closed_trades() -> int:
+    return len(get_all_closed_trades_chronological(limit=100_000))
+
+
+MILESTONE_BATCH_SIZE = 50
+
+
+def _batches_dir() -> Path:
+    path = get_store_dir() / "batches"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def archive_milestone_batch(batch_number: int, trades: list[dict[str, Any]], summary: dict[str, Any]) -> Path:
+    """Persist a completed 50-trade batch for review and learning."""
+    payload = {
+        "batchNumber": batch_number,
+        "tradeCount": len(trades),
+        "completedAt": _now().isoformat(),
+        "summary": summary,
+        "trades": trades,
+    }
+    path = _batches_dir() / f"batch-{batch_number:03d}.json"
+    path.write_text(json.dumps(payload, indent=2, default=str))
+    _append_log("MILESTONE_BATCH_COMPLETE", {
+        "batchNumber": batch_number,
+        "tradeCount": len(trades),
+        "summary": summary,
+        "archiveFile": str(path),
+    })
+    logger.info(
+        "MILESTONE_BATCH_COMPLETE batch=%d trades=%d pf=%s wr=%s",
+        batch_number,
+        len(trades),
+        summary.get("profitFactor"),
+        summary.get("winRate"),
+    )
+    return path
+
+
+def _maybe_archive_completed_batch() -> None:
+    """When closed trade count hits 50, 100, 150… archive that batch."""
+    from app.engines.performance_milestone import TARGET_TRADES, _stats_for_trades
+
+    all_closed = get_all_closed_trades_chronological(limit=100_000)
+    total = len(all_closed)
+    if total == 0 or total % MILESTONE_BATCH_SIZE != 0:
+        return
+
+    batch_number = total // MILESTONE_BATCH_SIZE
+    batch_path = _batches_dir() / f"batch-{batch_number:03d}.json"
+    if batch_path.exists():
+        return
+
+    start = (batch_number - 1) * MILESTONE_BATCH_SIZE
+    batch_trades = all_closed[start:total]
+    summary = _stats_for_trades(batch_trades)
+    archive_milestone_batch(batch_number, batch_trades, summary)
+
+
+def list_milestone_batches(limit: int = 20) -> list[dict[str, Any]]:
+    """Summaries of archived 50-trade batches, newest first."""
+    results: list[dict[str, Any]] = []
+    for path in sorted(_batches_dir().glob("batch-*.json"), reverse=True):
+        try:
+            data = json.loads(path.read_text())
+            results.append({
+                "batchNumber": data.get("batchNumber"),
+                "tradeCount": data.get("tradeCount"),
+                "completedAt": data.get("completedAt"),
+                "summary": data.get("summary", {}),
+                "archiveFile": str(path),
+            })
+        except Exception:
+            continue
+        if len(results) >= limit:
+            break
+    return results
 
 
 def load_open_trades() -> list[dict[str, Any]]:
