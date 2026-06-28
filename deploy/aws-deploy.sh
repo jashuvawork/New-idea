@@ -1,110 +1,80 @@
-#!/bin/bash
-# NexusQuant AWS EC2 deployment script
+#!/usr/bin/env bash
+# Deploy NexusQuant to EC2 via AWS SSM (uses deploy/aws.env credentials).
+#
+# Setup once:
+#   cp deploy/aws.env.example deploy/aws.env
+#   # fill in AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+#
+# Deploy:
+#   ./deploy/aws-deploy.sh
+
 set -euo pipefail
 
-REGION="${AWS_REGION:-ap-south-1}"
-INSTANCE_TYPE="${INSTANCE_TYPE:-t3.small}"
-KEY_NAME="${KEY_NAME:-nexusquant-key}"
-SG_NAME="nexusquant-sg"
-INSTANCE_NAME="nexusquant-backend"
-AMI_ID=$(aws ec2 describe-images \
-  --owners amazon \
-  --filters "Name=name,Values=al2023-ami-2023*-x86_64" "Name=state,Values=available" \
-  --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
-  --output text --region "$REGION")
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/aws.env"
 
-echo "==> Using AMI: $AMI_ID in $REGION"
-
-# Security group
-SG_ID=$(aws ec2 describe-security-groups --group-names "$SG_NAME" --region "$REGION" \
-  --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "None")
-
-if [ "$SG_ID" = "None" ] || [ -z "$SG_ID" ]; then
-  SG_ID=$(aws ec2 create-security-group \
-    --group-name "$SG_NAME" \
-    --description "NexusQuant backend" \
-    --region "$REGION" \
-    --query 'GroupId' --output text)
-  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
-    --protocol tcp --port 22 --cidr 0.0.0.0/0
-  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
-    --protocol tcp --port 80 --cidr 0.0.0.0/0
-  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
-    --protocol tcp --port 443 --cidr 0.0.0.0/0
-  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
-    --protocol tcp --port 8000 --cidr 0.0.0.0/0
-  echo "==> Created security group: $SG_ID"
+if [ ! -f "$ENV_FILE" ]; then
+  echo "ERROR: missing $ENV_FILE — copy deploy/aws.env.example and add credentials"
+  exit 1
 fi
 
-# User data — install Docker and run NexusQuant
-USER_DATA=$(cat <<'UDATA'
-#!/bin/bash
-yum update -y
-yum install -y docker git
-systemctl start docker
-systemctl enable docker
-usermod -aG docker ec2-user
+# shellcheck disable=SC1090
+set -a
+source "$ENV_FILE"
+set +a
 
-mkdir -p /opt/nexusquant
-cd /opt/nexusquant
+: "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID required in deploy/aws.env}"
+: "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY required in deploy/aws.env}"
+export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-ap-south-1}"
+INSTANCE_ID="${EC2_INSTANCE_ID:-i-02b2962f02b61005f}"
 
-# Clone repo (will be overwritten by deploy step)
-cat > /opt/nexusquant/docker-compose.yml << 'COMPOSE'
-services:
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-  backend:
-    image: nexusquant-backend:latest
-    ports:
-      - "8000:8000"
-    env_file:
-      - /opt/nexusquant/env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-    depends_on:
-      - redis
-    restart: unless-stopped
-COMPOSE
+echo "==> Deploying to EC2 $INSTANCE_ID ($AWS_DEFAULT_REGION)"
 
-touch /opt/nexusquant/env
-echo "Deployed at $(date)" > /opt/nexusquant/deploy.log
-UDATA
-)
-
-ENCODED_USER_DATA=$(echo "$USER_DATA" | base64 -w 0)
-
-# Launch instance
-INSTANCE_ID=$(aws ec2 run-instances \
-  --image-id "$AMI_ID" \
-  --instance-type "$INSTANCE_TYPE" \
-  --key-name "$KEY_NAME" \
-  --security-group-ids "$SG_ID" \
-  --user-data "$USER_DATA" \
-  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME}]" \
-  --region "$REGION" \
-  --query 'Instances[0].InstanceId' \
-  --output text 2>/dev/null || \
-  aws ec2 run-instances \
-  --image-id "$AMI_ID" \
-  --instance-type "$INSTANCE_TYPE" \
-  --security-group-ids "$SG_ID" \
-  --user-data "$USER_DATA" \
-  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME}]" \
-  --region "$REGION" \
-  --query 'Instances[0].InstanceId' \
-  --output text)
-
-echo "==> Launched instance: $INSTANCE_ID"
-echo "==> Waiting for running state..."
-aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$REGION"
-
-PUBLIC_IP=$(aws ec2 describe-instances \
+CMD_ID=$(aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
-  --region "$REGION" \
-  --query 'Reservations[0].Instances[0].PublicIpAddress' \
+  --document-name "AWS-RunShellScript" \
+  --comment "aws-deploy.sh $(date -Iseconds)" \
+  --parameters "commands=[
+    \"set -euo pipefail\",
+    \"export HOME=/root\",
+    \"export GIT_CONFIG_GLOBAL=/root/.gitconfig\",
+    \"git config --global --add safe.directory /opt/nexusquant/New-idea\",
+    \"cd /opt/nexusquant/New-idea\",
+    \"git fetch origin main\",
+    \"git checkout main\",
+    \"git pull --ff-only origin main || git reset --hard origin/main\",
+    \"bash deploy/ec2-update.sh\"
+  ]" \
+  --query Command.CommandId \
   --output text)
 
-echo "==> Instance running at: $PUBLIC_IP"
-echo "==> API will be at: http://$PUBLIC_IP:8000"
-echo "$PUBLIC_IP" > /tmp/nexusquant-ec2-ip.txt
+echo "SSM command: $CMD_ID"
+for i in $(seq 1 40); do
+  STATUS=$(aws ssm get-command-invocation \
+    --command-id "$CMD_ID" \
+    --instance-id "$INSTANCE_ID" \
+    --query Status \
+    --output text 2>/dev/null || echo Pending)
+  echo "  $i: $STATUS"
+  if [ "$STATUS" = "Success" ]; then
+    aws ssm get-command-invocation \
+      --command-id "$CMD_ID" \
+      --instance-id "$INSTANCE_ID" \
+      --query StandardOutputContent \
+      --output text | tail -25
+    echo ""
+    echo "==> Verify: https://www.jashuvatrade.xyz/api/deployment/status"
+    exit 0
+  fi
+  if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+    aws ssm get-command-invocation \
+      --command-id "$CMD_ID" \
+      --instance-id "$INSTANCE_ID" \
+      --output json
+    exit 1
+  fi
+  sleep 15
+done
+
+echo "ERROR: deploy timed out"
+exit 1
