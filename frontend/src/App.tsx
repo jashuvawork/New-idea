@@ -35,7 +35,7 @@ import { PremarketPanel } from './components/PremarketPanel';
 import { SwingTrading } from './components/SwingTrading';
 import { PerformanceMilestone } from './components/PerformanceMilestone';
 
-const SYMBOLS = ['NIFTY', 'SENSEX', 'BANKNIFTY'] as const;
+const SYMBOLS = ['NIFTY', 'SENSEX'] as const;
 
 function QuickStat({
   label,
