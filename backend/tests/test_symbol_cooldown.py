@@ -30,7 +30,21 @@ def _trade(pnl: float, side: Side = Side.CALL) -> PaperTrade:
     )
 
 
-def test_symbol_cooldown_after_loss():
+def test_symbol_cooldown_disabled_when_zero():
+    reset_symbol_cooldowns()
+    record_symbol_result("NIFTY", -1000, "simple_emergency_inr_stop")
+    blocked, reason = symbol_in_cooldown("NIFTY")
+    assert not blocked
+    assert reason == "ok"
+
+
+@patch("app.engines.symbol_cooldown.get_settings")
+def test_symbol_cooldown_after_loss_when_enabled(mock_settings):
+    settings = mock_settings.return_value
+    settings.symbol_loss_cooldown_seconds = 180
+    settings.symbol_emergency_cooldown_seconds = 600
+    settings.symbol_streak_cooldown_seconds = 900
+    settings.reentry_score_penalty_per_loss = 0
     reset_symbol_cooldowns()
     record_symbol_result("NIFTY", -1000, "simple_emergency_inr_stop")
     blocked, reason = symbol_in_cooldown("NIFTY")
@@ -38,7 +52,13 @@ def test_symbol_cooldown_after_loss():
     assert "symbol_cooldown" in reason
 
 
-def test_score_penalty_after_loss_streak():
+@patch("app.engines.symbol_cooldown.get_settings")
+def test_score_penalty_after_loss_streak(mock_settings):
+    settings = mock_settings.return_value
+    settings.symbol_loss_cooldown_seconds = 0
+    settings.symbol_emergency_cooldown_seconds = 0
+    settings.symbol_streak_cooldown_seconds = 0
+    settings.reentry_score_penalty_per_loss = 6
     reset_symbol_cooldowns()
     record_symbol_result("NIFTY", -1000, "adaptive_sl")
     assert entry_score_penalty("NIFTY") >= 6
