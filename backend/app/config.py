@@ -81,8 +81,10 @@ class Settings(BaseSettings):
     paper_brokerage_round_trip_inr: float = 40.0
 
     # Explosion capture tuning
-    explosion_min_velocity_3s: float = 2.0
-    explosion_min_velocity_9s: float = 3.0
+    explosion_min_velocity_3s: float = 2.5
+    explosion_min_velocity_9s: float = 3.5
+    explosion_early_velocity_3s: float = 3.5
+    explosion_early_volume_surge: float = 1.8
     explosion_scan_range: int = 800
     explosion_target_elite: float = 25.0
     explosion_target_standard: float = 12.0
@@ -101,7 +103,7 @@ class Settings(BaseSettings):
     # Stricter explosion gates until this IST time (opening range forming)
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 30
-    open_caution_min_explosion_score: int = 55
+    open_caution_min_explosion_score: int = 58
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
@@ -109,8 +111,9 @@ class Settings(BaseSettings):
 
     # Enhanced scalping (more powerful than base spec)
     enhanced_micro_target_points: float = 2.5  # faster micro lock vs 3.0 base
-    enhanced_velocity_threshold: float = 1.2  # allow strategy signals without runner history
-    enhanced_tqs_entry: int = 50  # aligned with paper analysis band
+    enhanced_velocity_threshold: float = 1.5  # runner + scalp minimum premium velocity %
+    enhanced_tqs_entry: int = 55  # explosive runner candidate minimum score
+    runner_alignment_override_score: int = 85  # scalp breadth bypass when runner is strong
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
@@ -120,7 +123,7 @@ class Settings(BaseSettings):
     per_trade_capital_pct: float = 0.85
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
-    aggressive_min_explosion_score: int = 45
+    aggressive_min_explosion_score: int = 50
     aggressive_min_swing_confidence: int = 65
     aggressive_max_open_scalps: int = 1
     max_lots_per_trade: int = 60  # hard cap — 85% sizing derived, prevents 100+ lot blowups

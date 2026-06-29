@@ -51,6 +51,7 @@ def check_explosion_entry(
     calibration_blocked: bool,
 ) -> tuple[bool, str]:
     """Fast entry on explosion — minimal gates, speed is everything."""
+    settings = get_settings()
     if calibration_blocked:
         return False, "calibration_block"
 
@@ -60,7 +61,7 @@ def check_explosion_entry(
     if event.tier not in ("EXPLODING", "ELITE"):
         return False, f"tier_{event.tier}_not_tradeable"
 
-    if event.velocity_3s < 2.0 and event.velocity_9s < 3.0:
+    if event.velocity_3s < settings.explosion_min_velocity_3s and event.velocity_9s < settings.explosion_min_velocity_9s:
         return False, "velocity_too_low"
 
     if event.tier == "ELITE":
@@ -72,7 +73,7 @@ def check_explosion_entry(
     if event.tier == "EXPLODING" and event.explosion_score >= min_score:
         return True, "explosion_confirmed"
 
-    if event.velocity_3s >= 3.0 and event.volume_surge >= 1.5:
+    if event.velocity_3s >= settings.explosion_early_velocity_3s and event.volume_surge >= settings.explosion_early_volume_surge:
         return True, "early_explosion"
 
     return False, "not_confirmed"

@@ -38,7 +38,7 @@ def test_open_caution_window_925():
         with patch("app.engines.session_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 6, 30, 9, 25, 0, tzinfo=IST)
             assert in_open_caution_window()
-            assert min_explosion_score_now() >= 55
+            assert min_explosion_score_now() >= 58
 
 
 def test_after_caution_normal_score():
@@ -46,7 +46,7 @@ def test_after_caution_normal_score():
         with patch("app.engines.session_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 6, 30, 10, 0, 0, tzinfo=IST)
             assert not in_open_caution_window()
-            assert min_explosion_score_now() == 45
+            assert min_explosion_score_now() == 50
 
 
 def test_current_batch_rolls_after_fifty():
