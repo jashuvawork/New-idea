@@ -94,6 +94,8 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
     SSE_ENABLED
     PAPER_LIVE_PARITY_ENABLED
     PAPER_SIMULATE_BROKER_ORDERS
+    ENTRY_EARLIEST_HOUR
+    ENTRY_EARLIEST_MINUTE
   )
   echo "Syncing template defaults for operational keys ..."
   for key in "${SYNC_ENV_KEYS[@]}"; do

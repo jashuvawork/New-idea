@@ -49,6 +49,7 @@ from app.models.schemas import (
     SymbolSnapshot,
     TradeMastermind,
 )
+from app.engines.session_timing import entries_allowed_now, entry_window_label
 from app.services import trade_store
 from app.services.order_executor import place_entry_order, place_exit_order
 from app.services.paper_broker import simulate_entry_order, simulate_exit_order
@@ -573,11 +574,20 @@ async def process(
         })
 
     # Try new entries — best setup only, max lots on 85% sizing capital
+    entries_ok, entry_window_reason = entries_allowed_now()
+    if market_live and not entries_ok:
+        skipped.append({
+            "symbol": "SESSION",
+            "reason": entry_window_reason,
+            "message": f"Entries from {entry_window_label()} — skipping open auction minute",
+        })
+
     if (
         state.running
         and settings.auto_trading_enabled
         and market_live
         and profit_gate.newEntriesAllowed
+        and entries_ok
     ):
         best = find_best_entry(snapshots, state)
         if best:

@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     explosion_initial_stop_points: float = 4.0
     explosion_reentry_cooldown_seconds: int = 120
 
+    # Earliest new entries (IST) — skip first minute after 9:15 open
+    entry_earliest_hour: int = 9
+    entry_earliest_minute: int = 16
+
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
     max_option_premium_inr: float = 175.0
