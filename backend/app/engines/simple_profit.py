@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.config import get_settings
+from app.engines.bullish_hold import direction_aligned_with_breadth
 from app.engines.premium_filter import premium_in_band, premium_reject_reason
 from app.engines.session_timing import in_midday_chop_window
 from app.models.schemas import (
@@ -17,15 +18,18 @@ from app.services.upstox import get_market_phase
 
 
 def get_session_targets() -> OptimizedProfile:
-    """Session-adaptive targets — hold longer for profit certainty."""
+    """Session-adaptive targets — 50pt TP default; hold longer when bullish."""
     settings = get_settings()
     phase = get_market_phase()
     micro = settings.enhanced_micro_target_points
+    tp = settings.scalp_target_points
+    base_hold = 240
+    bull_hold = int(base_hold * settings.bullish_hold_max_hold_multiplier)
 
     if phase == "PREMARKET":
         return OptimizedProfile(
-            targetPoints=7.0, stopPoints=3.0, microTargetPoints=micro,
-            maxHoldSeconds=240, sessionLabel="premarket",
+            targetPoints=tp, stopPoints=3.0, microTargetPoints=micro,
+            maxHoldSeconds=bull_hold, sessionLabel="premarket",
         )
 
     now = datetime.now()
@@ -34,22 +38,22 @@ def get_session_targets() -> OptimizedProfile:
 
     if 9 * 60 + 15 <= t < 10 * 60:
         return OptimizedProfile(
-            targetPoints=7.0, stopPoints=3.0, microTargetPoints=micro,
-            maxHoldSeconds=240, sessionLabel="open_drive",
+            targetPoints=tp, stopPoints=3.0, microTargetPoints=micro,
+            maxHoldSeconds=bull_hold, sessionLabel="open_drive",
         )
     if 11 * 60 + 30 <= t < 13 * 60:
         return OptimizedProfile(
-            targetPoints=6.0, stopPoints=3.0, microTargetPoints=micro,
+            targetPoints=tp * 0.85, stopPoints=3.0, microTargetPoints=micro,
             maxHoldSeconds=210, sessionLabel="midday_chop",
         )
     if 14 * 60 + 30 <= t < 15 * 60 + 15:
         return OptimizedProfile(
-            targetPoints=6.5, stopPoints=3.0, microTargetPoints=micro,
-            maxHoldSeconds=240, sessionLabel="closing_momentum",
+            targetPoints=tp, stopPoints=3.0, microTargetPoints=micro,
+            maxHoldSeconds=bull_hold, sessionLabel="closing_momentum",
         )
     return OptimizedProfile(
-        targetPoints=6.5, stopPoints=3.0, microTargetPoints=micro,
-        maxHoldSeconds=240, sessionLabel="normal",
+        targetPoints=tp, stopPoints=3.0, microTargetPoints=micro,
+        maxHoldSeconds=bull_hold, sessionLabel="normal",
     )
 
 
@@ -140,6 +144,18 @@ def evaluate_exit(
 
     best = max(trade.bestPnlPoints, pnl_pts)
     min_hold = settings.scalp_stop_min_hold_seconds
+    bullish_hold = direction_aligned_with_breadth(trade)
+    trail_keep = (
+        settings.bullish_hold_trail_keep_ratio
+        if bullish_hold
+        else settings.scalp_trail_keep_ratio
+    )
+    micro_giveback = 3.5 if bullish_hold else 2.0
+    max_hold = int(
+        profile.maxHoldSeconds * settings.bullish_hold_max_hold_multiplier
+        if bullish_hold
+        else profile.maxHoldSeconds
+    )
 
     # Point stop before flat INR emergency — Jun 25 winning pattern
     if hold_seconds >= min_hold and pnl_pts <= -profile.stopPoints:
@@ -151,22 +167,27 @@ def evaluate_exit(
     if pnl_pts >= profile.targetPoints:
         return "simple_profit_target_hit", pnl_inr
 
-    # Micro lock only after meaningful giveback — let winners run
+    # Micro lock — wider giveback when bullish; skip if still trending to TP
     if pnl_pts >= profile.microTargetPoints:
-        if best - pnl_pts >= 2.0:
+        if bullish_hold and pnl_pts < profile.targetPoints * 0.85:
+            pass
+        elif best - pnl_pts >= micro_giveback:
             return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
-    if best >= 3.5 and pnl_pts < best * 0.60:
-        return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
+    trail_arm = 3.5 if bullish_hold else 3.0
+    if best >= trail_arm and pnl_pts < best * trail_keep:
+        if not bullish_hold or best >= profile.targetPoints * 0.25:
+            return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
-    # No scratch while green — hold for profit
     if hold_seconds >= settings.scalp_no_progress_seconds:
-        if best > 0 and pnl_pts > 0:
+        if bullish_hold and pnl_pts > 0:
+            pass
+        elif best > 0 and pnl_pts > 0:
             return "simple_time_profit_lock", pnl_inr
-        if best <= 0:
+        elif best <= 0:
             return "simple_no_progress_scratch", pnl_inr
 
-    if hold_seconds >= profile.maxHoldSeconds:
+    if hold_seconds >= max_hold:
         if pnl_pts > 0:
             return "simple_time_profit_lock", pnl_inr
         return "simple_time_stop", pnl_inr

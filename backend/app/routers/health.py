@@ -73,6 +73,8 @@ async def deployment_status():
             "explosionTrailArmPoints": settings.explosion_trail_arm_points,
             "explosionMaxLots": settings.explosion_max_lots,
             "scalpMaxLots": settings.scalp_max_lots,
+            "scalpTargetPoints": settings.scalp_target_points,
+            "bullishHoldEnabled": settings.bullish_hold_enabled,
             "sureShotModeEnabled": settings.sure_shot_mode_enabled,
             "rapidScalpModeEnabled": settings.rapid_scalp_mode_enabled,
             "sureShotMinSymbolTqs": settings.sure_shot_min_symbol_tqs,

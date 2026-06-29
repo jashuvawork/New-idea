@@ -92,8 +92,8 @@ class Settings(BaseSettings):
     explosion_early_velocity_3s: float = 3.0
     explosion_early_volume_surge: float = 1.5
     explosion_scan_range: int = 800
-    explosion_target_elite: float = 25.0
-    explosion_target_standard: float = 12.0
+    explosion_target_elite: float = 50.0
+    explosion_target_standard: float = 50.0
     explosion_micro_target_points: float = 3.0
     explosion_trail_arm_points: float = 4.0
     explosion_trail_keep_ratio: float = 0.65
@@ -137,7 +137,11 @@ class Settings(BaseSettings):
     sure_shot_min_symbol_tqs: int = 50
     sure_shot_min_rank_score: float = 58.0
     sure_shot_scalp_min_score: int = 58
-    scalp_max_lots: int = 0
+    scalp_max_lots: int = 30
+    scalp_target_points: float = 50.0
+    bullish_hold_enabled: bool = True
+    bullish_hold_trail_keep_ratio: float = 0.50
+    bullish_hold_max_hold_multiplier: float = 1.75
     midday_chop_block_scalps: bool = True
     midday_chop_start_hour: int = 11
     midday_chop_start_minute: int = 30
@@ -154,10 +158,10 @@ class Settings(BaseSettings):
     aggressive_min_tqs: int = 55
     aggressive_min_explosion_score: int = 55
     explosion_confirmed_min_score: int = 58
-    explosion_max_lots: int = 0
+    explosion_max_lots: int = 30
     aggressive_min_swing_confidence: int = 75
     aggressive_max_open_scalps: int = 1
-    max_lots_per_trade: int = 0
+    max_lots_per_trade: int = 30
     min_lots_per_trade: int = 1
     max_risk_per_trade_inr: float = 200_000
     min_per_trade_risk_inr: float = 3_000
