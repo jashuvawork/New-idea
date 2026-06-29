@@ -23,6 +23,7 @@ import { AIMatrix } from './components/AIMatrix';
 import { GreeksIV } from './components/GreeksIV';
 import { StrategyRouter } from './components/StrategyRouter';
 import { AutoTradingPanel } from './components/AutoTradingPanel';
+import { DayModePanel } from './components/DayModePanel';
 import { RiskEngine } from './components/RiskEngine';
 import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
@@ -258,7 +259,15 @@ export default function App() {
               <div className="col-span-12 lg:col-span-3"><ExplosionRadar snap={snap} /></div>
             </DashboardSection>
 
-            <DashboardSection title="Signals & Trades" subtitle="Router, auto-trader, heatmap, swing lane">
+            <DashboardSection title="Signals & Trades" subtitle="Day mode, router, auto-trader, heatmap, swing lane">
+              <div className="col-span-12 lg:col-span-3">
+                <DayModePanel
+                  auto={auto}
+                  snapshots={data.snapshots}
+                  symbols={SYMBOLS}
+                  chopEnabled={Boolean(deployment?.flags?.chopDayGuardsEnabled)}
+                />
+              </div>
               <div className="col-span-12 lg:col-span-3"><StrategyRouter snap={snap} /></div>
               <div className="col-span-12 lg:col-span-3"><AutoTradingPanel auto={auto} /></div>
               <div className="col-span-12 lg:col-span-3"><MarketHeatmap symbol={activeSymbol} embedded={snap.constituentHeatmap} /></div>
