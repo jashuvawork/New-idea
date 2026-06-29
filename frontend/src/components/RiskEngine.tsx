@@ -8,7 +8,7 @@ export function RiskEngine({ auto }: { auto: AutoTraderState }) {
   const gate = (auto.dailyProfitGate || {}) as DailyProfitGate;
 
   const sessionPnl = gate.sessionPnlInr ?? auto.dailyReport.netPnlInr;
-  const minTarget = gate.minTargetInr ?? gate.targetInr ?? 44_000;
+  const minTarget = gate.minTargetInr ?? gate.targetInr ?? 22_000;
   const capitalBase = gate.capitalBaseInr ?? 200_000;
   const lockedFloor = gate.lockedFloorInr ?? gate.trailFloorInr ?? 0;
   const gateOk = gate.newEntriesAllowed !== false;

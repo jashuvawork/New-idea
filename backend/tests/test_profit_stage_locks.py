@@ -52,7 +52,7 @@ class StageLockTests(unittest.TestCase):
             "S",
             (),
             {
-                "daily_profit_target_inr": 44_000,
+                "daily_profit_target_inr": 22_000,
                 "daily_profit_trail_inr": 5_000,
                 "daily_profit_stage_locks_enabled": True,
                 "daily_profit_stage_pcts": [0.55, 0.88, 1.12],
@@ -90,7 +90,7 @@ class StageLockTests(unittest.TestCase):
             "S",
             (),
             {
-                "daily_profit_target_inr": 44_000,
+                "daily_profit_target_inr": 22_000,
                 "daily_profit_trail_inr": 5_000,
                 "daily_profit_stage_locks_enabled": True,
                 "daily_profit_stage_pcts": [0.55, 0.88, 1.12],
