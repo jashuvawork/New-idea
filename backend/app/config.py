@@ -36,9 +36,9 @@ class Settings(BaseSettings):
     auto_trading_enabled: bool = True
     shadow_trade_all_signals: bool = True
 
-    # Data cadence — conservative defaults to avoid Upstox 429 rate limits
-    market_poll_seconds: int = 5
-    snapshot_cache_seconds: int = 5
+    # Data cadence — 1s poll for faster SL/exits; throttle via upstox_min_request_interval_ms
+    market_poll_seconds: int = 1
+    snapshot_cache_seconds: int = 1
     background_market_monitor_enabled: bool = True
 
     # Upstox WebSocket real-time feed + SSE push to UI
