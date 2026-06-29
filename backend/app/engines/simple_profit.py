@@ -142,8 +142,8 @@ def evaluate_exit(
             return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
         # Still in profit zone above micro — allow trail
 
-    # Trail profit lock: retain 55% of best gain after 3pt arm
-    if best >= 3.0 and pnl_pts < best * 0.55:
+    # Trail profit lock: retain 55% of best gain after 2.5pt arm
+    if best >= 2.5 and pnl_pts < best * 0.55:
         return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     # No-progress scratch: 90s never green

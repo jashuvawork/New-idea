@@ -29,6 +29,7 @@ from app.engines.capital_allocator import (
     tune_exit_plan_for_position,
     update_daily_profit_gate,
 )
+from app.engines.symbol_cooldown import record_symbol_result, reset_symbol_cooldowns
 from app.engines.trade_selector import EntryCandidate, diagnose_missed_entries, find_best_entry
 from app.engines.paper_slippage import (
     apply_entry_fill,
@@ -379,11 +380,17 @@ def resume_trading() -> None:
     get_state().running = True
 
 
+def reset_session_calibration() -> None:
+    """Clear side blocks and per-symbol loss streaks without wiping trade history."""
+    _calibration.reset()
+    reset_symbol_cooldowns()
+
+
 def reset_session() -> None:
     global _auto_trader_state
     closed_ids = trade_store.close_open_trades_on_reset()
     trade_store.record_session_reset(open_trade_ids=closed_ids)
-    _calibration.reset()
+    reset_session_calibration()
     settings = get_settings()
     _auto_trader_state = AutoTraderState(
         paperTrading=settings.paper_trading,
@@ -550,6 +557,7 @@ async def process(
             trade.entryContext = ctx
             state.closedPaperTrades.append(trade)
             _calibration.record_trade(trade)
+            record_symbol_result(trade.symbol, pnl, exit_reason or "")
             trade_store.record_trade_closed(trade, ctx)
             get_ai_learning().record_trade_close(trade)
             state.lastExit = {

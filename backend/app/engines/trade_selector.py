@@ -5,6 +5,12 @@ from typing import Any, Optional
 
 from app.config import get_settings
 from app.engines.session_timing import min_explosion_score_now
+from app.engines.symbol_cooldown import (
+    entry_score_penalty,
+    recent_win_rank_bonus,
+    requires_breadth_alignment,
+    symbol_in_cooldown,
+)
 from app.engines.premium_filter import premium_in_band
 from app.engines.explosion_profit import check_explosion_entry
 from app.engines.simple_profit import check_entry_gate
@@ -53,11 +59,13 @@ def _explosion_candidates(
         if alert.get("tier") not in ("ELITE", "EXPLODING"):
             continue
         score_val = float(alert.get("explosionScore", 0))
-        min_score = min_explosion_score_now()
+        min_score = min_explosion_score_now() + entry_score_penalty(symbol)
         if score_val < min_score:
             continue
         # Explosion score is primary quality — don't block on low symbol TQS alone
         if snap.tradeQualityScore < 25 and score_val < min_score + 10:
+            continue
+        if requires_breadth_alignment(symbol) and not snap.breadth.aligned:
             continue
 
         from app.engines.explosion_detector import ExplosionEvent
@@ -128,7 +136,11 @@ def _scalp_candidates(
         if not suggestion.lastPremium or suggestion.lastPremium <= 0:
             continue
         trade_score = max(suggestion.tqs, suggestion.confidence or 0)
-        if trade_score < settings.aggressive_min_tqs:
+        min_tqs = settings.aggressive_min_tqs + entry_score_penalty(symbol)
+        if trade_score < min_tqs:
+            continue
+
+        if requires_breadth_alignment(symbol) and not snap.breadth.aligned:
             continue
 
         blocked = state.calibrationBlocks.get(suggestion.side.value, False)
@@ -244,12 +256,22 @@ def find_best_entry(
     if not candidates:
         return None
 
-    # Explosion beats scalp at similar scores; then highest score wins
+    filtered: list[EntryCandidate] = []
+    for c in candidates:
+        cooling, reason = symbol_in_cooldown(c.symbol)
+        if cooling:
+            continue
+        c.score += recent_win_rank_bonus(c.symbol)
+        filtered.append(c)
+
+    if not filtered:
+        return None
+
     def sort_key(c: EntryCandidate) -> float:
         bonus = 20 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
         return c.score + bonus
 
-    return max(candidates, key=sort_key)
+    return max(filtered, key=sort_key)
 
 
 def diagnose_missed_entries(
