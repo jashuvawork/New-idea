@@ -64,10 +64,19 @@ def check_explosion_entry(
 
     score = max(event.explosion_score, trade.tqs or 0, trade.confidence or 0)
     blocked, nb_reason = neutral_breadth_blocks_entry(
-        breadth.bias, score, event.velocity_3s, explosion=True,
+        breadth.bias,
+        score,
+        event.velocity_3s,
+        explosion=True,
+        volume_surge=event.volume_surge,
     )
     if blocked:
         return False, nb_reason
+
+    from app.engines.chop_day_guards import in_momentum_rally_window
+
+    if in_momentum_rally_window() and event.tier == "EXPLODING" and event.velocity_3s < 2.0:
+        return False, "explosion_wait_velocity"
 
     if event.tier == "ELITE":
         return True, "elite_explosion"
@@ -148,34 +157,32 @@ def evaluate_explosion_exit(
     best = max(trade.bestPnlPoints, pnl_pts)
     hold = _hold_seconds(trade)
     target = _target_points(event_tier)
+    trail_floor = _trail_floor_pts(trade, best, settings)
+    trail_keep = (
+        settings.runner_trail_keep_ratio
+        if best >= settings.runner_min_best_points
+        else settings.explosion_trail_keep_ratio
+    )
+
+    if trail_floor is None and hold >= settings.explosion_stop_min_hold_seconds and pnl_pts <= -settings.explosion_initial_stop_points:
+        return "explosion_stop_loss", pnl_inr
 
     if pnl_inr <= -settings.emergency_stop_inr:
         return "explosion_emergency_stop", pnl_inr
 
-    trail_floor = _trail_floor_pts(trade, best, settings)
-
-    # Take profit at target while winning
     if pnl_pts >= target:
         return "explosion_target_hit", pnl_inr
 
-    # Trailing stop while in profit (armed after trail_arm_points)
     if trail_floor is not None and pnl_pts <= trail_floor and best >= settings.explosion_trail_arm_points:
         return "explosion_trail_sl", pnl_inr
 
-    # Legacy trail lock label when ratio breach without stored floor
-    if trail_floor is not None and pnl_pts < best * settings.explosion_trail_keep_ratio and best >= 8:
+    if trail_floor is not None and pnl_pts < best * trail_keep and best >= 8:
         return "explosion_trail_lock", pnl_inr
 
-    # Initial hard stop before trail arms
-    if trail_floor is None and hold >= 15 and pnl_pts <= -settings.explosion_initial_stop_points:
-        return "explosion_stop_loss", pnl_inr
-
-    # No progress only when never reached trail arm
     if hold >= 90 and best < settings.explosion_trail_arm_points:
         return "explosion_no_progress", pnl_inr
 
-    # Time cap — take profit if green, else stop
-    max_hold = 300 if event_tier == "ELITE" or best >= 15 else 240
+    max_hold = 360 if best >= settings.runner_min_best_points else (300 if event_tier == "ELITE" or best >= 15 else 240)
     if hold >= max_hold:
         return ("explosion_time_profit" if pnl_pts > 0 else "explosion_time_stop"), pnl_inr
 

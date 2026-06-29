@@ -109,18 +109,48 @@ def trades_cap_reached(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     return False, "ok"
 
 
+def in_momentum_rally_window() -> bool:
+    """11:00–13:45 IST — premium expansion window (chart-style rallies)."""
+    if get_market_phase() != "LIVE_MARKET":
+        return False
+    settings = get_settings()
+    current = _minutes_now()
+    start = settings.momentum_rally_start_hour * 60 + settings.momentum_rally_start_minute
+    end = settings.momentum_rally_end_hour * 60 + settings.momentum_rally_end_minute
+    return start <= current < end
+
+
+def is_momentum_surge(
+    velocity_pct: float = 0.0,
+    volume_surge: float = 1.0,
+    explosion_score: float = 0.0,
+) -> bool:
+    """Strong premium velocity / volume — bypass neutral-chop blocks."""
+    settings = get_settings()
+    if not settings.chop_day_guards_enabled:
+        return False
+    return (
+        velocity_pct >= settings.momentum_bypass_velocity_pct
+        or volume_surge >= settings.momentum_bypass_volume_surge
+        or explosion_score >= settings.momentum_bypass_explosion_score
+    )
+
+
 def neutral_breadth_blocks_entry(
     breadth_bias: str,
     trade_score: float,
     velocity_pct: float = 0.0,
     *,
     explosion: bool = False,
+    volume_surge: float = 1.0,
 ) -> tuple[bool, str]:
     """Block NEUTRAL chop unless score/velocity prove edge."""
     settings = get_settings()
     if not settings.chop_day_guards_enabled:
         return False, "ok"
     if (breadth_bias or "NEUTRAL").upper() != "NEUTRAL":
+        return False, "ok"
+    if is_momentum_surge(velocity_pct, volume_surge, trade_score if explosion else 0):
         return False, "ok"
     min_score = settings.neutral_breadth_min_score
     if explosion and velocity_pct >= settings.explosion_early_velocity_3s:
@@ -158,6 +188,9 @@ def apply_tiered_lot_cap(
     rank_score: float,
     breadth_aligned: bool,
     symbol: str,
+    *,
+    velocity_pct: float = 0.0,
+    volume_surge: float = 1.0,
 ) -> int:
     """40 lots high conviction; 20 mid; skip handled upstream via rank gate."""
     settings = get_settings()
@@ -170,11 +203,14 @@ def apply_tiered_lot_cap(
     min_rank = settings.chop_lots_min_rank
 
     cap = high
-    if rank_score < settings.chop_lots_high_min_rank or not breadth_aligned:
+    momentum = is_momentum_surge(velocity_pct, volume_surge, 0.0)
+    if momentum and rank_score >= settings.chop_lots_min_rank:
+        cap = high
+    elif rank_score < settings.chop_lots_high_min_rank or not breadth_aligned:
         cap = mid
     if rank_score < min_rank:
         cap = 0
-    if in_midday_chop_window() and rank_score < settings.chop_lots_high_min_rank:
+    if in_midday_chop_window() and rank_score < settings.chop_lots_high_min_rank and not momentum:
         cap = min(cap, mid)
 
     if cap <= 0:
@@ -197,4 +233,5 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "sessionPaused": paused,
         "pauseReason": pause_reason if paused else None,
         "beforePrimaryWindow": before_primary_window(),
+        "momentumRallyWindow": in_momentum_rally_window(),
     }

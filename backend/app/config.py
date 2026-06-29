@@ -142,6 +142,16 @@ class Settings(BaseSettings):
     chop_lots_mid: int = 20
     chop_lots_min_rank: float = 48.0
     chop_lots_high_min_rank: float = 55.0
+    momentum_bypass_velocity_pct: float = 2.5
+    momentum_bypass_volume_surge: float = 1.4
+    momentum_bypass_explosion_score: float = 48.0
+    momentum_rally_start_hour: int = 11
+    momentum_rally_start_minute: int = 0
+    momentum_rally_end_hour: int = 13
+    momentum_rally_end_minute: int = 45
+    runner_trail_keep_ratio: float = 0.45
+    runner_micro_giveback_points: float = 2.5
+    runner_min_best_points: float = 6.0
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
