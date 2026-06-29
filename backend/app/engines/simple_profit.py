@@ -4,7 +4,9 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from app.config import get_settings
+from app.engines.chop_day_guards import in_momentum_rally_window, is_momentum_surge, neutral_breadth_blocks_entry
 from app.engines.premium_filter import premium_in_band, premium_reject_reason
+from app.engines.session_timing import in_midday_chop_window
 from app.models.schemas import (
     Breadth,
     OptimizedProfile,
@@ -36,6 +38,11 @@ def get_session_targets() -> OptimizedProfile:
         return OptimizedProfile(
             targetPoints=7.0, stopPoints=3.0, microTargetPoints=micro,
             maxHoldSeconds=180, sessionLabel="open_drive",
+        )
+    if in_momentum_rally_window() and 11 * 60 <= t < 13 * 60 + 45:
+        return OptimizedProfile(
+            targetPoints=8.0, stopPoints=3.0, microTargetPoints=micro,
+            maxHoldSeconds=300, sessionLabel="momentum_rally",
         )
     if 11 * 60 + 30 <= t < 13 * 60:
         return OptimizedProfile(
@@ -85,18 +92,16 @@ def check_entry_gate(
     if trade_score < min_score:
         return False, f"score_below_{min_score}"
 
-    from app.engines.chop_day_guards import neutral_breadth_blocks_entry
-    from app.engines.session_timing import in_midday_chop_window
-
     blocked, nb_reason = neutral_breadth_blocks_entry(
         breadth.bias, trade_score, velocity_pct, explosion=False,
     )
-    if blocked:
+    if blocked and not (momentum_surge or is_momentum_surge(velocity_pct)):
         return False, nb_reason
 
     if settings.midday_chop_block_scalps and in_midday_chop_window():
-        if not breadth.aligned or trade_score < settings.neutral_breadth_min_score:
-            return False, "midday_chop_wait"
+        if not (breadth.aligned or momentum_surge or is_momentum_surge(velocity_pct)):
+            if trade_score < settings.neutral_breadth_min_score:
+                return False, "midday_chop_wait"
 
     # Breadth: relaxed when trade score is strong
     side_bias = "BULLISH" if trade.side == Side.CALL else "BEARISH"
@@ -135,27 +140,33 @@ def evaluate_exit(
 
     # Track best
     best = max(trade.bestPnlPoints, pnl_pts)
+    min_hold = settings.scalp_stop_min_hold_seconds
+    micro_giveback = (
+        settings.runner_micro_giveback_points
+        if best >= settings.runner_min_best_points
+        else 1.25
+    )
+    trail_keep = (
+        settings.runner_trail_keep_ratio
+        if best >= settings.runner_min_best_points
+        else 0.55
+    )
 
-    # Emergency INR stop
+    # Point stop before INR emergency — lets micro/trail capture rallies
+    if hold_seconds >= min_hold and pnl_pts <= -profile.stopPoints:
+        return "simple_stop_loss", pnl_inr
+
     if pnl_inr <= -settings.emergency_stop_inr:
         return "simple_emergency_inr_stop", pnl_inr
 
-    # Min hold before stop loss
-    if hold_seconds >= 30 and pnl_pts <= -profile.stopPoints:
-        return "simple_stop_loss", pnl_inr
-
-    # Session profit target
     if pnl_pts >= profile.targetPoints:
         return "simple_profit_target_hit", pnl_inr
 
-    # Micro profit lock (enhanced: 2.5pt default)
     if pnl_pts >= profile.microTargetPoints:
-        if best - pnl_pts >= 1.25:
+        if best - pnl_pts >= micro_giveback:
             return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
-        # Still in profit zone above micro — allow trail
 
-    # Trail profit lock: retain 55% of best gain after 3pt arm
-    if best >= 3.0 and pnl_pts < best * 0.55:
+    if best >= 3.0 and pnl_pts < best * trail_keep:
         return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     # No-progress scratch: 90s never green

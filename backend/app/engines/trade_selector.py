@@ -91,7 +91,8 @@ def _explosion_candidates(
         rank = score_val * 0.55 + snap.tradeQualityScore * 0.25
         if event.tier == "ELITE":
             rank += 15
-        rank += min(10, event.velocity_3s)
+        rank += min(15, event.velocity_3s * 2)
+        rank += min(10, event.velocity_9s)
 
         out.append(EntryCandidate(
             symbol=symbol,

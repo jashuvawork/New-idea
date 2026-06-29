@@ -219,6 +219,12 @@ async def _open_from_candidate(
     )
     lots = apply_tiered_lot_cap(
         lots, candidate.score, snap.breadth.aligned, symbol,
+        velocity_pct=(
+            (candidate.explosion_event.velocity_3s if candidate.explosion_event else 0)
+            or (candidate.suggestion.runnerSignal.premiumVelocityPct
+                if candidate.suggestion and candidate.suggestion.runnerSignal else 0)
+        ),
+        volume_surge=(candidate.explosion_event.volume_surge if candidate.explosion_event else 1.0),
     )
     if lots <= 0:
         return False, "tiered_lot_cap_zero"
