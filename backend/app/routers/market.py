@@ -34,11 +34,17 @@ _sse_queues: set[asyncio.Queue] = set()
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def _effective_cache_seconds() -> int:
+def _effective_cache_seconds() -> float:
     settings = get_settings()
     if is_ws_active():
-        return settings.tick_snapshot_seconds
-    return settings.snapshot_cache_seconds
+        return settings.tick_snapshot_interval_ms / 1000.0
+    return settings.snapshot_cache_interval_ms / 1000.0
+
+
+def invalidate_snapshot_cache() -> None:
+    """Force next snapshot build — used on WebSocket tick wake."""
+    global _cache_time
+    _cache_time = None
 
 
 async def _build_multi_snapshot() -> MultiSnapshot:
@@ -85,13 +91,18 @@ async def _build_multi_snapshot() -> MultiSnapshot:
                 logger.warning("Capital refresh failed: %s", e)
 
     snapshots = {}
-    # Sequential symbol builds to reduce burst load on Upstox (throttle still applies per request)
-    for sym in settings.symbols:
+    # Parallel symbol builds — throttle lock still serializes Upstox HTTP per request
+    async def _build_one(sym: str):
         try:
-            snapshots[sym] = await build_symbol_snapshot(sym, client, news_sentiment)
+            return sym, await build_symbol_snapshot(sym, client, news_sentiment)
         except Exception as e:
             logger.error("Snapshot failed for %s: %s", sym, e)
-            err_msg = str(e)
+            return sym, e
+
+    results = await asyncio.gather(*[_build_one(sym) for sym in settings.symbols])
+    for sym, result in results:
+        if isinstance(result, Exception):
+            err_msg = str(result)
             if _cache and sym in _cache.snapshots and _cache.snapshots[sym].dataAvailable:
                 logger.info("Reusing stale snapshot for %s", sym)
                 snapshots[sym] = _cache.snapshots[sym]
@@ -104,6 +115,8 @@ async def _build_multi_snapshot() -> MultiSnapshot:
                     dataAvailable=False,
                     error=err_msg[:200],
                 )
+        else:
+            snapshots[sym] = result
 
     data_ready = any(s.dataAvailable for s in snapshots.values())
     waiting_reason = None
@@ -154,19 +167,19 @@ async def broadcast_snapshot(snapshot: MultiSnapshot) -> None:
         _sse_queues.discard(q)
 
 
-async def get_multi_snapshot(*, broadcast: bool = False) -> MultiSnapshot:
+async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) -> MultiSnapshot:
     """Cached snapshot with single-flight — UI + background monitor share one build."""
     global _cache, _cache_time
     cache_ttl = _effective_cache_seconds()
     now = datetime.now(IST)
 
-    if _cache and _cache_time:
+    if not force and _cache and _cache_time:
         age = (now - _cache_time).total_seconds()
         if age < cache_ttl:
             return _cache
 
     async with _build_lock:
-        if _cache and _cache_time:
+        if not force and _cache and _cache_time:
             age = (datetime.now(IST) - _cache_time).total_seconds()
             if age < cache_ttl:
                 return _cache

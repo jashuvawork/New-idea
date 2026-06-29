@@ -10,6 +10,7 @@ from app.services.tick_store import (
     overlay_chain_ltps,
     overlay_index_ltp,
     record_tick,
+    set_tick_wake_event,
     status,
 )
 from app.services.upstox_ws import decode_feed_message
@@ -84,3 +85,12 @@ def test_status_after_ticks():
     assert s["instrumentCount"] == 1
     assert s["tickCount"] == 1
     assert s["hasRecentTicks"] is True
+
+
+def test_tick_wake_event():
+    import asyncio
+
+    event = asyncio.Event()
+    set_tick_wake_event(event)
+    record_tick("NSE_INDEX|Nifty 50", 100.0)
+    assert event.is_set()

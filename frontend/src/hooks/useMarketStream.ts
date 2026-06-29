@@ -6,7 +6,7 @@ import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, PerformanceM
 const API_BASE = import.meta.env.DEV
   ? ''
   : (import.meta.env.VITE_API_URL || '');
-const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 1000);
+const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
 const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
@@ -165,7 +165,7 @@ export function useMarketStream() {
           latencyHistory,
           lastSuccessAt,
           'sse',
-          1000,
+          POLL_MS,
           setData,
           setError,
           setMetrics,
