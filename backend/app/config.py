@@ -92,11 +92,16 @@ class Settings(BaseSettings):
     explosion_trail_tight_arm: float = 12.0
     explosion_trail_tight_points: float = 5.0
     explosion_initial_stop_points: float = 4.0
-    explosion_reentry_cooldown_seconds: int = 120
+    explosion_reentry_cooldown_seconds: int = 180
+    explosion_emergency_cooldown_seconds: int = 300
 
     # Earliest new entries (IST) — skip first minute after 9:15 open
     entry_earliest_hour: int = 9
-    entry_earliest_minute: int = 16
+    entry_earliest_minute: int = 20
+    # Stricter explosion gates until this IST time (opening range forming)
+    open_caution_until_hour: int = 9
+    open_caution_until_minute: int = 30
+    open_caution_min_explosion_score: int = 55
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
@@ -118,7 +123,7 @@ class Settings(BaseSettings):
     aggressive_min_explosion_score: int = 45
     aggressive_min_swing_confidence: int = 65
     aggressive_max_open_scalps: int = 1
-    max_lots_per_trade: int = 0  # 0 = capital-derived max only
+    max_lots_per_trade: int = 60  # hard cap — 85% sizing derived, prevents 100+ lot blowups
     min_lots_per_trade: int = 1
     max_risk_per_trade_inr: float = 200_000
     min_per_trade_risk_inr: float = 3_000
