@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from app.services.upstox import INDEX_KEYS
 
 # symbol -> index instrument key
 _SYMBOL_BY_INDEX_KEY = {v: k for k, v in INDEX_KEYS.items()}
+
+TickWakeCallback = Callable[[], None]
+
+_tick_wake_event: Optional[asyncio.Event] = None
+_tick_wake_callbacks: list[TickWakeCallback] = []
 
 
 @dataclass
@@ -28,6 +34,26 @@ _last_tick_mono: float = 0.0
 
 def _norm_key(key: str) -> str:
     return key.replace(":", "|")
+
+
+def set_tick_wake_event(event: asyncio.Event) -> None:
+    """Register asyncio.Event — set on every recorded tick for low-latency monitor wake."""
+    global _tick_wake_event
+    _tick_wake_event = event
+
+
+def on_tick_wake(callback: TickWakeCallback) -> None:
+    _tick_wake_callbacks.append(callback)
+
+
+def _signal_tick_wake() -> None:
+    if _tick_wake_event and not _tick_wake_event.is_set():
+        _tick_wake_event.set()
+    for cb in _tick_wake_callbacks:
+        try:
+            cb()
+        except Exception:
+            pass
 
 
 def record_tick(
@@ -52,6 +78,7 @@ def record_tick(
     )
     _tick_count += 1
     _last_tick_mono = now
+    _signal_tick_wake()
 
 
 def get_tick(instrument_key: str, max_age_seconds: float = 30.0) -> Optional[Tick]:
@@ -142,7 +169,7 @@ def status() -> dict[str, Any]:
         "tickCount": _tick_count,
         "instrumentCount": len(_ticks),
         "lastTickAgeMs": age_ms,
-        "hasRecentTicks": age_ms is not None and age_ms < 5000,
+        "hasRecentTicks": age_ms is not None and age_ms < 3000,
     }
 
 

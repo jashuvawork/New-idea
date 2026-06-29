@@ -324,8 +324,8 @@ def ws_status() -> dict[str, Any]:
 
 def is_ws_active() -> bool:
     """True when WS is connected and receiving recent ticks."""
-    if not _connected or _message_stale(15.0):
+    if not _connected or _message_stale(8.0):
         return False
     if not _last_message_mono:
         return False
-    return (time.monotonic() - _last_message_mono) < 15.0
+    return (time.monotonic() - _last_message_mono) < 8.0

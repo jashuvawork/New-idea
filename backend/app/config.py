@@ -36,27 +36,32 @@ class Settings(BaseSettings):
     auto_trading_enabled: bool = True
     shadow_trade_all_signals: bool = True
 
-    # Data cadence — 1s poll for faster SL/exits; throttle via upstox_min_request_interval_ms
+    # Data cadence — sub-second when WebSocket active; ms intervals override *_seconds
     market_poll_seconds: int = 1
     snapshot_cache_seconds: int = 1
+    market_poll_interval_ms: int = 1000
+    market_poll_interval_ws_ms: int = 400
+    tick_snapshot_interval_ms: int = 300
+    snapshot_cache_interval_ms: int = 800
+    tick_wake_debounce_ms: int = 200
     background_market_monitor_enabled: bool = True
 
     # Upstox WebSocket real-time feed + SSE push to UI
     upstox_ws_enabled: bool = True
     upstox_ws_mode: str = "ltpc"  # ltpc | full | full_d30 | option_greeks
     upstox_ws_reconnect_seconds: int = 5
-    upstox_ws_resubscribe_seconds: int = 45
-    tick_snapshot_seconds: int = 1  # snapshot cache when WS feed is active
-    market_poll_seconds_ws: int = 1  # background monitor when WS active
+    upstox_ws_resubscribe_seconds: int = 30
+    tick_snapshot_seconds: int = 1  # legacy; tick_snapshot_interval_ms preferred
+    market_poll_seconds_ws: int = 1  # legacy; market_poll_interval_ws_ms preferred
     sse_enabled: bool = True
-    sse_heartbeat_seconds: int = 15
+    sse_heartbeat_seconds: int = 5
 
     # Upstox rate limiting / caching
-    upstox_min_request_interval_ms: int = 250
+    upstox_min_request_interval_ms: int = 100
     upstox_request_retries: int = 4
     upstox_rate_limit_cooldown_seconds: int = 45
-    upstox_chain_cache_seconds: int = 20
-    upstox_ltp_cache_seconds: int = 5
+    upstox_chain_cache_seconds: int = 8
+    upstox_ltp_cache_seconds: int = 2
     upstox_expiries_cache_seconds: int = 600
     upstox_funds_cache_seconds: int = 90
     upstox_candles_cache_seconds: int = 60
