@@ -76,25 +76,31 @@ def _stats_for_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _current_batch_trades(all_trades: list[dict[str, Any]]) -> tuple[int, int, list[dict[str, Any]]]:
+def _current_batch_trades(
+    all_trades: list[dict[str, Any]],
+    offset: int = 0,
+) -> tuple[int, int, list[dict[str, Any]]]:
     """
-    Rolling 50-trade windows. After batch N completes, batch N+1 starts at 0/50.
+    Rolling 50-trade windows after optional manual reset offset.
     Returns (batch_number, completed_batches, trades_in_current_batch).
     """
-    total = len(all_trades)
+    trades = all_trades[offset:]
+    total = len(trades)
     completed_batches = total // TARGET_TRADES
     batch_number = completed_batches + 1
     batch_start = completed_batches * TARGET_TRADES
-    return batch_number, completed_batches, all_trades[batch_start:]
+    return batch_number, completed_batches, trades[batch_start:]
 
 
 def compute_milestone_stats(limit: int = 500) -> dict[str, Any]:
     """Live-readiness stats for the current 50-trade batch (rolls after each 50 closes)."""
     all_trades = trade_store.get_all_closed_trades_chronological(limit=limit)
-    batch_number, completed_batches, batch_trades = _current_batch_trades(all_trades)
+    offset = trade_store.get_milestone_batch_offset()
+    batch_number, completed_batches, batch_trades = _current_batch_trades(all_trades, offset)
     core = _stats_for_trades(batch_trades)
     count = core["tradeCount"]
     checks = core["checks"]
+    meta = trade_store.get_milestone_meta()
 
     return {
         **core,
@@ -106,6 +112,8 @@ def compute_milestone_stats(limit: int = 500) -> dict[str, Any]:
         "batchNumber": batch_number,
         "completedBatches": completed_batches,
         "lifetimeTradeCount": len(all_trades),
+        "batchOffset": offset,
+        "lastResetAt": meta.get("resetAt"),
         "message": _milestone_message(
             batch_number,
             completed_batches,

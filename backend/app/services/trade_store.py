@@ -424,6 +424,77 @@ def count_all_closed_trades() -> int:
 
 
 MILESTONE_BATCH_SIZE = 50
+MILESTONE_META_FILE = "milestone_meta.json"
+
+
+def _milestone_meta_path() -> Path:
+    return get_store_dir() / MILESTONE_META_FILE
+
+
+def get_milestone_batch_offset() -> int:
+    path = _milestone_meta_path()
+    if not path.exists():
+        return 0
+    try:
+        data = json.loads(path.read_text())
+        return int(data.get("batchOffset") or 0)
+    except Exception:
+        return 0
+
+
+def get_milestone_meta() -> dict[str, Any]:
+    path = _milestone_meta_path()
+    if not path.exists():
+        return {"batchOffset": 0}
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return {"batchOffset": 0}
+
+
+def reset_milestone_batch(reason: str = "manual_reset") -> dict[str, Any]:
+    """
+    Start a fresh 50-trade milestone batch without deleting trade logs.
+    Archives the prior batch window and sets offset to current closed count.
+    """
+    from app.engines.performance_milestone import _stats_for_trades
+
+    all_closed = get_all_closed_trades_chronological(limit=100_000)
+    offset = len(all_closed)
+    prior_offset = get_milestone_batch_offset()
+    batch_trades = all_closed[prior_offset:offset]
+
+    archive_info: dict[str, Any] | None = None
+    if batch_trades:
+        batch_number = _next_batch_number()
+        summary = _stats_for_trades(batch_trades)
+        path = archive_milestone_batch(batch_number, batch_trades, {
+            **summary,
+            "resetReason": reason,
+            "archivedOnReset": True,
+        })
+        archive_info = {
+            "batchNumber": batch_number,
+            "tradeCount": len(batch_trades),
+            "summary": summary,
+            "archiveFile": str(path),
+        }
+
+    meta = {
+        "batchOffset": offset,
+        "resetAt": _now().isoformat(),
+        "reason": reason,
+        "previousOffset": prior_offset,
+        "lifetimeTradesAtReset": offset,
+    }
+    _milestone_meta_path().write_text(json.dumps(meta, indent=2, default=str))
+    _append_log("MILESTONE_BATCH_RESET", {
+        "batchOffset": offset,
+        "reason": reason,
+        "archivedBatch": archive_info,
+    })
+    logger.info("Milestone batch reset — offset=%d reason=%s", offset, reason)
+    return {"meta": meta, "archivedBatch": archive_info}
 
 
 def _batches_dir() -> Path:
@@ -460,23 +531,30 @@ def archive_milestone_batch(batch_number: int, trades: list[dict[str, Any]], sum
 
 
 def _maybe_archive_completed_batch() -> None:
-    """When closed trade count hits 50, 100, 150… archive that batch."""
-    from app.engines.performance_milestone import TARGET_TRADES, _stats_for_trades
+    """When current milestone window hits 50, 100… archive that batch."""
+    from app.engines.performance_milestone import _stats_for_trades
 
     all_closed = get_all_closed_trades_chronological(limit=100_000)
-    total = len(all_closed)
+    offset = get_milestone_batch_offset()
+    window = all_closed[offset:]
+    total = len(window)
     if total == 0 or total % MILESTONE_BATCH_SIZE != 0:
         return
 
-    batch_number = total // MILESTONE_BATCH_SIZE
+    batch_number = _next_batch_number()
     batch_path = _batches_dir() / f"batch-{batch_number:03d}.json"
     if batch_path.exists():
         return
 
-    start = (batch_number - 1) * MILESTONE_BATCH_SIZE
-    batch_trades = all_closed[start:total]
+    start = total - MILESTONE_BATCH_SIZE
+    batch_trades = window[start:total]
     summary = _stats_for_trades(batch_trades)
     archive_milestone_batch(batch_number, batch_trades, summary)
+
+
+def _next_batch_number() -> int:
+    existing = list(_batches_dir().glob("batch-*.json"))
+    return len(existing) + 1
 
 
 def list_milestone_batches(limit: int = 20) -> list[dict[str, Any]]:
