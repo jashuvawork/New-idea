@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.engines.risk_stops import effective_emergency_stop_inr
 from app.engines.capital_allocator import compute_lots
 from app.engines.explosion_detector import ExplosionEvent
+from app.engines.symbol_cooldown import symbol_in_cooldown
 from app.engines.session_timing import in_open_caution_window, min_explosion_score_now
 from app.models.schemas import Breadth, PaperTrade, Side, StrategyType, SuggestedTrade
 
@@ -58,6 +59,10 @@ def check_explosion_entry(
 
     if explosion_in_cooldown(event.symbol):
         return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
+
+    cooling, cd_reason = symbol_in_cooldown(event.symbol)
+    if cooling:
+        return False, cd_reason
 
     if event.tier not in ("EXPLODING", "ELITE"):
         return False, f"tier_{event.tier}_not_tradeable"

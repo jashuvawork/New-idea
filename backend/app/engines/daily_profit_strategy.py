@@ -17,21 +17,21 @@ class DailyCalibration:
         side = trade.side.value
         if trade.pnlInr > 0:
             self._side_stats[side]["wins"] += 1
+            # Recovering — ease loss pressure after a win on this side
+            if self._side_stats[side]["losses"] > 0:
+                self._side_stats[side]["losses"] -= 1
         elif trade.pnlInr < 0:
             self._side_stats[side]["losses"] += 1
 
     def get_blocks(self) -> dict[str, bool]:
+        from app.config import get_settings
+
+        min_losses = get_settings().calibration_block_min_losses
         blocks = {"CALL": False, "PUT": False}
         for side in ("CALL", "PUT"):
             stats = self._side_stats[side]
-            total = stats["wins"] + stats["losses"]
-            if total >= 3 and stats["wins"] == 0:
+            if stats["losses"] >= min_losses and stats["wins"] == 0:
                 blocks[side] = True
-            # PF check
-            if stats["losses"] > 0:
-                wins_sum = stats["wins"]
-                if wins_sum == 0 and stats["losses"] >= 2:
-                    blocks[side] = True
         return blocks
 
     def should_reset(self, blocks: dict[str, bool]) -> bool:

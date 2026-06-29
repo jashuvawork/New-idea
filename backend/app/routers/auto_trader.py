@@ -55,7 +55,10 @@ async def milestone_batches(limit: int = 20):
 @router.post("/milestone/reset")
 async def reset_milestone_batch(reason: str = "manual_reset"):
     """Archive current milestone window and start fresh 0/50 batch (keeps trade logs)."""
+    from app.engines.auto_trader import reset_session_calibration
+
     result = trade_store.reset_milestone_batch(reason=reason)
+    reset_session_calibration()
     from app.engines.performance_milestone import compute_milestone_stats
 
     return {

@@ -100,6 +100,15 @@ class Settings(BaseSettings):
     explosion_reentry_cooldown_seconds: int = 180
     explosion_emergency_cooldown_seconds: int = 300
 
+    # Per-symbol cooldown after losses — stops NIFTY re-entry churn
+    symbol_loss_cooldown_seconds: int = 180
+    symbol_emergency_cooldown_seconds: int = 360
+    symbol_streak_cooldown_seconds: int = 600
+    reentry_score_penalty_per_loss: int = 6
+    recent_win_window_seconds: int = 900
+    recent_win_rank_bonus: float = 15.0
+    calibration_block_min_losses: int = 5
+
     # Earliest new entries (IST) — skip first minute after 9:15 open
     entry_earliest_hour: int = 9
     entry_earliest_minute: int = 20
@@ -114,7 +123,7 @@ class Settings(BaseSettings):
     max_option_premium_inr: float = 175.0
 
     # Enhanced scalping (more powerful than base spec)
-    enhanced_micro_target_points: float = 2.5  # faster micro lock vs 3.0 base
+    enhanced_micro_target_points: float = 2.0  # bank smaller wins faster
     enhanced_velocity_threshold: float = 1.25
     enhanced_tqs_entry: int = 50
     runner_alignment_override_score: int = 82
