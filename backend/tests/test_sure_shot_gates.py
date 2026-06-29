@@ -13,9 +13,9 @@ def _trade(**kwargs) -> SuggestedTrade:
         side=Side.CALL,
         strike=24000.0,
         lastPremium=50.0,
-        tqs=56.0,
+        tqs=58.0,
         strategyType=StrategyType.SCALP,
-        confidence=56.0,
+        confidence=58.0,
     )
     base.update(kwargs)
     return SuggestedTrade(**base)
@@ -25,11 +25,11 @@ def _sure_shot_settings() -> MagicMock:
     s = MagicMock()
     s.sure_shot_mode_enabled = True
     s.midday_chop_block_scalps = True
-    s.sure_shot_scalp_min_score = 55
+    s.sure_shot_scalp_min_score = 58
     s.aggressive_lot_sizing = True
-    s.aggressive_min_tqs = 52
-    s.enhanced_tqs_entry = 52
-    s.enhanced_velocity_threshold = 1.4
+    s.aggressive_min_tqs = 55
+    s.enhanced_tqs_entry = 55
+    s.enhanced_velocity_threshold = 1.5
     return s
 
 

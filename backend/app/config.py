@@ -86,58 +86,58 @@ class Settings(BaseSettings):
     paper_slippage_swing_mult: float = 0.85
     paper_brokerage_round_trip_inr: float = 40.0
 
-    # Explosion capture — best-trade profile: confirmed score 55+, breadth required
-    explosion_min_velocity_3s: float = 2.2
+    # Explosion capture — Jun 25 66K profile + ultra entry gates
+    explosion_min_velocity_3s: float = 2.0
     explosion_min_velocity_9s: float = 3.0
-    explosion_early_velocity_3s: float = 3.5
-    explosion_early_volume_surge: float = 1.8
+    explosion_early_velocity_3s: float = 3.0
+    explosion_early_volume_surge: float = 1.5
     explosion_scan_range: int = 800
     explosion_target_elite: float = 25.0
-    explosion_target_standard: float = 8.0
+    explosion_target_standard: float = 12.0
     explosion_micro_target_points: float = 3.0
-    explosion_trail_arm_points: float = 3.5
+    explosion_trail_arm_points: float = 4.0
     explosion_trail_keep_ratio: float = 0.65
     explosion_trail_step_points: float = 3.5
     explosion_trail_tight_arm: float = 12.0
     explosion_trail_tight_points: float = 5.0
-    explosion_initial_stop_points: float = 3.0
-    explosion_stop_min_hold_seconds: int = 8
-    explosion_no_progress_seconds: int = 90
-    explosion_reentry_cooldown_seconds: int = 180
+    explosion_initial_stop_points: float = 4.0
+    explosion_stop_min_hold_seconds: int = 30
+    explosion_no_progress_seconds: int = 150
+    explosion_reentry_cooldown_seconds: int = 120
     explosion_emergency_cooldown_seconds: int = 300
 
-    # Symbol cooldown — pause re-entry after losses
-    symbol_loss_cooldown_seconds: int = 120
-    symbol_emergency_cooldown_seconds: int = 300
-    symbol_streak_cooldown_seconds: int = 600
-    reentry_score_penalty_per_loss: int = 6
+    # Symbol cooldown — off (66K); quality gates filter instead
+    symbol_loss_cooldown_seconds: int = 0
+    symbol_emergency_cooldown_seconds: int = 0
+    symbol_streak_cooldown_seconds: int = 0
+    reentry_score_penalty_per_loss: int = 0
     recent_win_window_seconds: int = 900
-    recent_win_rank_bonus: float = 12.0
+    recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5
 
-    # Earliest new entries (IST) — skip first 5 minutes after open
+    # Entries from 9:15 IST (Jun 25 first trade ~10:08 via rank gate)
     entry_earliest_hour: int = 9
-    entry_earliest_minute: int = 20
+    entry_earliest_minute: int = 15
     open_caution_until_hour: int = 9
-    open_caution_until_minute: int = 25
-    open_caution_min_explosion_score: int = 55
-    open_caution_score_bonus: int = 3
+    open_caution_until_minute: int = 15
+    open_caution_min_explosion_score: int = 58
+    open_caution_score_bonus: int = 0
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
     max_option_premium_inr: float = 175.0
 
-    # Enhanced scalping — sure-shot best-trade profile
-    enhanced_micro_target_points: float = 2.0
-    enhanced_velocity_threshold: float = 1.4
-    enhanced_tqs_entry: int = 52
-    runner_alignment_override_score: int = 85
+    # Ultra-profile — best scalp / explosion / swing only
+    enhanced_micro_target_points: float = 2.5
+    enhanced_velocity_threshold: float = 1.5
+    enhanced_tqs_entry: int = 55
+    runner_alignment_override_score: int = 88
     rapid_scalp_mode_enabled: bool = False
     sure_shot_mode_enabled: bool = True
-    sure_shot_min_symbol_tqs: int = 45
-    sure_shot_min_rank_score: float = 50.0
-    sure_shot_scalp_min_score: int = 55
-    scalp_max_lots: int = 25
+    sure_shot_min_symbol_tqs: int = 50
+    sure_shot_min_rank_score: float = 58.0
+    sure_shot_scalp_min_score: int = 58
+    scalp_max_lots: int = 0
     midday_chop_block_scalps: bool = True
     midday_chop_start_hour: int = 11
     midday_chop_start_minute: int = 30
@@ -146,35 +146,35 @@ class Settings(BaseSettings):
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
-    # Capital / risk — 50% per trade, 30-lot cap, scaled INR emergency stop
+    # Capital / risk — Jun 25 66K: 85% per trade, capital-derived lots (~100)
     fallback_capital_inr: float = 200_000
     max_sizing_capital_inr: float = 200_000
-    per_trade_capital_pct: float = 0.50
+    per_trade_capital_pct: float = 0.85
     aggressive_lot_sizing: bool = True
-    aggressive_min_tqs: int = 52
-    aggressive_min_explosion_score: int = 52
-    explosion_confirmed_min_score: int = 55
-    explosion_max_lots: int = 25
-    aggressive_min_swing_confidence: int = 65
+    aggressive_min_tqs: int = 55
+    aggressive_min_explosion_score: int = 55
+    explosion_confirmed_min_score: int = 58
+    explosion_max_lots: int = 0
+    aggressive_min_swing_confidence: int = 75
     aggressive_max_open_scalps: int = 1
-    max_lots_per_trade: int = 30
+    max_lots_per_trade: int = 0
     min_lots_per_trade: int = 1
     max_risk_per_trade_inr: float = 200_000
     min_per_trade_risk_inr: float = 3_000
-    per_trade_risk_pct: float = 0.50
-    max_exposure_pct: float = 0.50
+    per_trade_risk_pct: float = 0.85
+    max_exposure_pct: float = 0.85
     position_sl_cap_pct: float = 0.06
     position_tp_target_pct: float = 0.10
-    emergency_stop_inr: float = 12_000
-    emergency_stop_scale_with_position: bool = True
-    scalp_stop_points: float = 2.5
-    scalp_stop_min_hold_seconds: int = 12
-    scalp_trail_arm_points: float = 2.5
-    scalp_trail_keep_ratio: float = 0.55
-    scalp_no_progress_seconds: int = 75
+    emergency_stop_inr: float = 20_000
+    emergency_stop_scale_with_position: bool = False
+    scalp_stop_points: float = 3.0
+    scalp_stop_min_hold_seconds: int = 45
+    scalp_trail_arm_points: float = 3.0
+    scalp_trail_keep_ratio: float = 0.60
+    scalp_no_progress_seconds: int = 150
 
-    # Daily session targets — ₹22K min milestone; staged locks at % of capital (no upside cap)
-    daily_profit_target_inr: float = 22_000  # minimum milestone only — does not stop entries
+    # Daily target — min 10% of ₹2L book (₹20K); staged locks beyond
+    daily_profit_target_inr: float = 20_000
     daily_profit_trail_inr: float = 5_000  # legacy; unused when stage locks enabled
     daily_profit_stage_locks_enabled: bool = True
     daily_profit_stage_pcts_csv: str = "0.55,0.88,1.12"  # env: DAILY_PROFIT_STAGE_PCTS

@@ -1,4 +1,4 @@
-"""Tighter explosive runner / explosion entry gates — best-trade profile."""
+"""Ultra-profile explosion entry gates on 66K base."""
 
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.explosion_profit import check_explosion_entry
@@ -37,28 +37,28 @@ def _trade() -> SuggestedTrade:
 
 
 def test_weak_velocity_blocked():
-    event = _event(velocity_3s=2.0, velocity_9s=2.8)
+    event = _event(velocity_3s=1.5, velocity_9s=2.5)
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
     assert not ok
     assert reason == "velocity_too_low"
 
 
-def test_score_48_exploding_blocked():
-    event = _event(explosion_score=48.0, velocity_3s=3.0, velocity_9s=4.0)
-    ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
-    assert not ok
-    assert reason == "not_confirmed"
-
-
 def test_score_55_exploding_confirmed():
-    event = _event(explosion_score=55.0, velocity_3s=3.0, velocity_9s=4.0)
+    event = _event(explosion_score=58.0, velocity_3s=3.0, velocity_9s=4.0)
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
     assert ok
     assert reason == "explosion_confirmed"
 
 
+def test_score_52_blocked():
+    event = _event(explosion_score=52.0, velocity_3s=3.0, velocity_9s=4.0)
+    ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
+    assert not ok
+    assert reason == "not_confirmed"
+
+
 def test_breadth_alignment_required():
-    event = _event(explosion_score=58.0, velocity_3s=3.0, velocity_9s=4.0)
+    event = _event(explosion_score=60.0, velocity_3s=3.0, velocity_9s=4.0)
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=False), False)
     assert not ok
     assert reason == "breadth_not_aligned"
@@ -69,16 +69,3 @@ def test_elite_bypasses_score_floor():
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
     assert ok
     assert reason == "elite_explosion"
-
-
-def test_early_explosion_bypass_removed():
-    event = _event(
-        explosion_score=45.0,
-        velocity_3s=3.6,
-        velocity_9s=4.0,
-        volume_surge=1.9,
-        tier="EXPLODING",
-    )
-    ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
-    assert not ok
-    assert reason == "not_confirmed"

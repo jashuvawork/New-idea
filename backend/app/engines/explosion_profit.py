@@ -5,45 +5,40 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
-from app.engines.risk_stops import effective_emergency_stop_inr
 from app.engines.capital_allocator import compute_lots
 from app.engines.explosion_detector import ExplosionEvent
-from app.engines.symbol_cooldown import symbol_in_cooldown
-from app.engines.session_timing import in_open_caution_window, min_explosion_score_now
 from app.models.schemas import Breadth, PaperTrade, Side, StrategyType, SuggestedTrade
 
 IST = ZoneInfo("Asia/Kolkata")
 
-# symbol -> (last stop timestamp, cooldown seconds)
-_explosion_stop_at: dict[str, tuple[datetime, int]] = {}
+# symbol -> last explosion stop timestamp (IST)
+_explosion_stop_at: dict[str, datetime] = {}
 
 
-def record_explosion_stop(symbol: str, cooldown_seconds: Optional[int] = None) -> None:
-    settings = get_settings()
-    secs = cooldown_seconds if cooldown_seconds is not None else settings.explosion_reentry_cooldown_seconds
-    _explosion_stop_at[symbol.upper()] = (datetime.now(IST), secs)
+def record_explosion_stop(symbol: str) -> None:
+    _explosion_stop_at[symbol.upper()] = datetime.now(IST)
 
 
 def explosion_in_cooldown(symbol: str) -> bool:
-    entry = _explosion_stop_at.get(symbol.upper())
-    if not entry:
+    settings = get_settings()
+    ts = _explosion_stop_at.get(symbol.upper())
+    if not ts:
         return False
-    ts, cooldown = entry
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=IST)
     elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
-    return elapsed < cooldown
+    return elapsed < settings.explosion_reentry_cooldown_seconds
 
 
 def cooldown_remaining_seconds(symbol: str) -> int:
-    entry = _explosion_stop_at.get(symbol.upper())
-    if not entry:
+    settings = get_settings()
+    ts = _explosion_stop_at.get(symbol.upper())
+    if not ts:
         return 0
-    ts, cooldown = entry
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=IST)
     elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
-    return max(0, int(cooldown - elapsed))
+    return max(0, int(settings.explosion_reentry_cooldown_seconds - elapsed))
 
 
 def check_explosion_entry(
@@ -52,7 +47,7 @@ def check_explosion_entry(
     breadth: Breadth,
     calibration_blocked: bool,
 ) -> tuple[bool, str]:
-    """Fast entry on explosion — minimal gates, speed is everything."""
+    """Ultra-profile explosion — best of the best only."""
     settings = get_settings()
     if calibration_blocked:
         return False, "calibration_block"
@@ -60,14 +55,10 @@ def check_explosion_entry(
     if explosion_in_cooldown(event.symbol):
         return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
 
-    cooling, cd_reason = symbol_in_cooldown(event.symbol)
-    if cooling:
-        return False, cd_reason
-
     if event.tier not in ("EXPLODING", "ELITE"):
         return False, f"tier_{event.tier}_not_tradeable"
 
-    if not breadth.aligned:
+    if settings.sure_shot_mode_enabled and not breadth.aligned:
         return False, "breadth_not_aligned"
 
     if event.velocity_3s < settings.explosion_min_velocity_3s and event.velocity_9s < settings.explosion_min_velocity_9s:
@@ -76,30 +67,32 @@ def check_explosion_entry(
     if event.tier == "ELITE":
         return True, "elite_explosion"
 
-    min_score = min_explosion_score_now()
-    if in_open_caution_window() and event.explosion_score < min_score + settings.open_caution_score_bonus:
-        return False, "open_caution_wait_for_elite"
-    if event.tier == "EXPLODING" and event.explosion_score >= settings.explosion_confirmed_min_score:
+    min_score = (
+        settings.explosion_confirmed_min_score
+        if settings.sure_shot_mode_enabled
+        else settings.aggressive_min_explosion_score
+    )
+    if event.tier == "EXPLODING" and event.explosion_score >= min_score:
         return True, "explosion_confirmed"
+
+    if not settings.sure_shot_mode_enabled:
+        if event.velocity_3s >= settings.explosion_early_velocity_3s and event.volume_surge >= settings.explosion_early_volume_surge:
+            return True, "early_explosion"
 
     return False, "not_confirmed"
 
 
 def compute_explosion_lots(event: ExplosionEvent, tqs: float, premium: float) -> int:
-    """Size explosion trades — capital-derived lots capped by explosion_max_lots."""
-    settings = get_settings()
-    lots = compute_lots(
+    """Size explosion trades at 85% capital max — same as compute_lots."""
+    return compute_lots(
         event.symbol,
         premium,
-        stop_points=settings.explosion_initial_stop_points,
+        stop_points=get_settings().explosion_initial_stop_points,
         tqs=tqs,
         strategy_type=StrategyType.EXPLOSIVE,
         confidence=event.explosion_score,
         tier=event.tier,
     )
-    if settings.explosion_max_lots > 0:
-        return min(lots, settings.explosion_max_lots)
-    return lots
 
 
 def _hold_seconds(trade: PaperTrade) -> float:
@@ -155,28 +148,18 @@ def evaluate_explosion_exit(
     best = max(trade.bestPnlPoints, pnl_pts)
     hold = _hold_seconds(trade)
     target = _target_points(event_tier)
-
-    stop_inr = effective_emergency_stop_inr(
-        trade.lots, lot_multiplier, settings.explosion_initial_stop_points,
-    )
-    if pnl_inr <= -stop_inr:
-        return "explosion_emergency_stop", pnl_inr
-
     trail_floor = _trail_floor_pts(trade, best, settings)
 
-    # Take profit at main target while winning
+    # Point stop before flat INR emergency — Jun 25 winning pattern
+    if trail_floor is None and hold >= settings.explosion_stop_min_hold_seconds and pnl_pts <= -settings.explosion_initial_stop_points:
+        return "explosion_stop_loss", pnl_inr
+
+    if pnl_inr <= -settings.emergency_stop_inr:
+        return "explosion_emergency_stop", pnl_inr
+
+    # Take profit at target while winning
     if pnl_pts >= target:
         return "explosion_target_hit", pnl_inr
-
-    # Bank small wins on standard tier when stuck below main target
-    if event_tier != "ELITE":
-        micro = settings.explosion_micro_target_points
-        if (
-            micro <= pnl_pts < target
-            and hold >= 45
-            and best <= micro + 2.0
-        ):
-            return "explosion_micro_target_hit", pnl_inr
 
     # Trailing stop while in profit (armed after trail_arm_points)
     if trail_floor is not None and pnl_pts <= trail_floor and best >= settings.explosion_trail_arm_points:
@@ -186,11 +169,7 @@ def evaluate_explosion_exit(
     if trail_floor is not None and pnl_pts < best * settings.explosion_trail_keep_ratio and best >= 8:
         return "explosion_trail_lock", pnl_inr
 
-    # Initial hard stop before trail arms
-    if trail_floor is None and hold >= settings.explosion_stop_min_hold_seconds and pnl_pts <= -settings.explosion_initial_stop_points:
-        return "explosion_stop_loss", pnl_inr
-
-    # No progress — scratch losers; bank small winners instead of killing runners
+    # No progress — bank green trades; scratch reds only after long hold
     if hold >= settings.explosion_no_progress_seconds and best < settings.explosion_trail_arm_points:
         if pnl_pts > 0:
             return "explosion_time_profit", pnl_inr
