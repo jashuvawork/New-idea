@@ -39,11 +39,11 @@ class Settings(BaseSettings):
     # Data cadence — sub-second when WebSocket active; ms intervals override *_seconds
     market_poll_seconds: int = 1
     snapshot_cache_seconds: int = 1
-    market_poll_interval_ms: int = 1000
-    market_poll_interval_ws_ms: int = 300
-    tick_snapshot_interval_ms: int = 250
-    snapshot_cache_interval_ms: int = 800
-    tick_wake_debounce_ms: int = 150
+    market_poll_interval_ms: int = 500
+    market_poll_interval_ws_ms: int = 100
+    tick_snapshot_interval_ms: int = 100
+    snapshot_cache_interval_ms: int = 400
+    tick_wake_debounce_ms: int = 50
     background_market_monitor_enabled: bool = True
 
     # Upstox WebSocket real-time feed + SSE push to UI
@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     tick_snapshot_seconds: int = 1  # legacy; tick_snapshot_interval_ms preferred
     market_poll_seconds_ws: int = 1  # legacy; market_poll_interval_ws_ms preferred
     sse_enabled: bool = True
-    sse_heartbeat_seconds: int = 5
+    sse_heartbeat_seconds: int = 2
 
     # Upstox rate limiting / caching
     upstox_min_request_interval_ms: int = 100

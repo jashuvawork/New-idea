@@ -30,6 +30,7 @@ _subscribed_count: int = 0
 _last_error: Optional[str] = None
 _reconnect_count: int = 0
 _last_message_mono: float = 0.0
+_decode_empty_count: int = 0
 _subscription_keys: set[str] = set()
 
 
@@ -108,7 +109,8 @@ async def _send_subscribe(ws, instrument_keys: list[str], mode: str = "ltpc") ->
             "instrumentKeys": [_norm_key(k) for k in instrument_keys],
         },
     }
-    await ws.send(json.dumps(payload))
+    # Upstox V3 expects control frames as binary WebSocket messages
+    await ws.send(json.dumps(payload).encode("utf-8"))
 
 
 async def _send_unsubscribe(ws, instrument_keys: list[str]) -> None:
@@ -119,7 +121,7 @@ async def _send_unsubscribe(ws, instrument_keys: list[str]) -> None:
         "method": "unsub",
         "data": {"instrumentKeys": [_norm_key(k) for k in instrument_keys]},
     }
-    await ws.send(json.dumps(payload))
+    await ws.send(json.dumps(payload).encode("utf-8"))
 
 
 async def _base_subscription_keys() -> list[str]:
@@ -174,7 +176,7 @@ async def _subscription_refresh_loop(ws) -> None:
 
 
 async def _consume_loop(ws) -> None:
-    global _last_message_mono
+    global _last_message_mono, _decode_empty_count
     stale_seconds = 90
     while True:
         try:
@@ -185,6 +187,11 @@ async def _consume_loop(ws) -> None:
         if isinstance(raw, str):
             continue
         ticks = decode_feed_message(raw)
+        if not ticks:
+            _decode_empty_count += 1
+            if _decode_empty_count <= 3 or _decode_empty_count % 500 == 0:
+                logger.debug("WS binary frame with no LTP ticks (count=%d, bytes=%d)", _decode_empty_count, len(raw))
+            continue
         for ik, (ltp, ltt, vol) in ticks.items():
             record_tick(ik, ltp, ltt_ms=ltt, volume=vol)
 
@@ -324,8 +331,9 @@ def ws_status() -> dict[str, Any]:
 
 def is_ws_active() -> bool:
     """True when WS is connected and receiving recent ticks."""
-    if not _connected or _message_stale(8.0):
+    from app.services.tick_store import status as tick_status
+
+    if not _connected or _message_stale(12.0):
         return False
-    if not _last_message_mono:
-        return False
-    return (time.monotonic() - _last_message_mono) < 8.0
+    tick = tick_status()
+    return bool(tick.get("hasRecentTicks"))

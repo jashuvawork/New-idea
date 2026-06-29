@@ -2,8 +2,8 @@ import type { StreamMetrics } from '../types';
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   if (ms <= 0) return 'offline';
-  if (ms < 400) return 'excellent';
-  if (ms < 1200) return 'good';
+  if (ms < 80) return 'excellent';
+  if (ms < 250) return 'good';
   return 'slow';
 }
 
@@ -26,8 +26,8 @@ function deriveQuality(
   marketClosed: boolean,
 ): StreamMetrics['connectionQuality'] {
   if (marketClosed && stalenessMs < 120_000) return 'good';
-  if (stalenessMs > 15_000) return 'offline';
-  if (stalenessMs > 8_000) return 'slow';
+  if (stalenessMs > 5_000) return 'offline';
+  if (stalenessMs > 2_000) return 'slow';
   return latencyQuality(latencyMs);
 }
 

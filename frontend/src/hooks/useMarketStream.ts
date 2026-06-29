@@ -11,8 +11,8 @@ const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   if (ms <= 0) return 'offline';
-  if (ms < 400) return 'excellent';
-  if (ms < 1200) return 'good';
+  if (ms < 80) return 'excellent';
+  if (ms < 250) return 'good';
   return 'slow';
 }
 
@@ -53,6 +53,8 @@ function applySnapshot(
   const now = new Date();
   lastSuccessAt.current = now;
   const elapsed = Math.round(performance.now() - started);
+  const snapTs = json.timestamp ? new Date(json.timestamp).getTime() : now.getTime();
+  const dataAgeMs = Math.max(0, now.getTime() - snapTs);
 
   latencyHistory.current = [...latencyHistory.current.slice(-9), elapsed];
   const avg = Math.round(
@@ -63,7 +65,7 @@ function applySnapshot(
     lastLatencyMs: elapsed,
     avgLatencyMs: avg,
     lastUpdatedAt: now,
-    stalenessMs: 0,
+    stalenessMs: dataAgeMs,
     pollIntervalMs,
     connectionQuality: latencyQuality(elapsed),
     streamMode,
