@@ -241,22 +241,10 @@ def evaluate_adaptive_explosion_exit(
     tier: str,
     lot_multiplier: int,
 ) -> tuple[Optional[str], float]:
+    """Explosion exits use dedicated logic only — no adaptive SL override."""
     from app.engines.explosion_profit import evaluate_explosion_exit
 
-    exit_reason, pnl = evaluate_explosion_exit(trade, current_premium, tier, lot_multiplier)
-    if exit_reason:
-        return exit_reason, pnl
-
-    pnl_pts = current_premium - trade.entryPremium
-    best = max(trade.bestPnlPoints, pnl_pts)
-    if pnl_pts >= plan.targetPoints:
-        return "adaptive_tp", pnl_pts * trade.lots * lot_multiplier
-    if best >= plan.trailArmPoints and pnl_pts < best * plan.trailKeepRatio:
-        return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier
-    if pnl_pts <= -plan.stopPoints:
-        return "adaptive_sl", pnl_pts * trade.lots * lot_multiplier
-
-    return None, pnl_pts * trade.lots * lot_multiplier
+    return evaluate_explosion_exit(trade, current_premium, tier, lot_multiplier)
 
 
 def evaluate_adaptive_swing_exit(

@@ -65,9 +65,6 @@ def _explosion_candidates(
         # Explosion score is primary quality — don't block on low symbol TQS alone
         if snap.tradeQualityScore < 25 and score_val < min_score + 10:
             continue
-        if requires_breadth_alignment(symbol) and not snap.breadth.aligned:
-            continue
-
         from app.engines.explosion_detector import ExplosionEvent
 
         event = ExplosionEvent(
@@ -268,7 +265,7 @@ def find_best_entry(
         return None
 
     def sort_key(c: EntryCandidate) -> float:
-        bonus = 20 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
+        bonus = 8 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
         return c.score + bonus
 
     return max(filtered, key=sort_key)

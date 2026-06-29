@@ -67,6 +67,9 @@ def check_explosion_entry(
     if event.tier not in ("EXPLODING", "ELITE"):
         return False, f"tier_{event.tier}_not_tradeable"
 
+    if not breadth.aligned:
+        return False, "breadth_not_aligned"
+
     if event.velocity_3s < settings.explosion_min_velocity_3s and event.velocity_9s < settings.explosion_min_velocity_9s:
         return False, "velocity_too_low"
 
@@ -74,28 +77,29 @@ def check_explosion_entry(
         return True, "elite_explosion"
 
     min_score = min_explosion_score_now()
-    if in_open_caution_window() and event.tier != "ELITE" and event.explosion_score < min_score + settings.open_caution_score_bonus:
+    if in_open_caution_window() and event.explosion_score < min_score + settings.open_caution_score_bonus:
         return False, "open_caution_wait_for_elite"
-    if event.tier == "EXPLODING" and event.explosion_score >= min_score:
+    if event.tier == "EXPLODING" and event.explosion_score >= settings.explosion_confirmed_min_score:
         return True, "explosion_confirmed"
-
-    if event.velocity_3s >= settings.explosion_early_velocity_3s and event.volume_surge >= settings.explosion_early_volume_surge:
-        return True, "early_explosion"
 
     return False, "not_confirmed"
 
 
 def compute_explosion_lots(event: ExplosionEvent, tqs: float, premium: float) -> int:
-    """Size explosion trades at 85% capital max — same as compute_lots."""
-    return compute_lots(
+    """Size explosion trades — capital-derived lots capped by explosion_max_lots."""
+    settings = get_settings()
+    lots = compute_lots(
         event.symbol,
         premium,
-        stop_points=get_settings().explosion_initial_stop_points,
+        stop_points=settings.explosion_initial_stop_points,
         tqs=tqs,
         strategy_type=StrategyType.EXPLOSIVE,
         confidence=event.explosion_score,
         tier=event.tier,
     )
+    if settings.explosion_max_lots > 0:
+        return min(lots, settings.explosion_max_lots)
+    return lots
 
 
 def _hold_seconds(trade: PaperTrade) -> float:
@@ -160,9 +164,19 @@ def evaluate_explosion_exit(
 
     trail_floor = _trail_floor_pts(trade, best, settings)
 
-    # Take profit at target while winning
+    # Take profit at main target while winning
     if pnl_pts >= target:
         return "explosion_target_hit", pnl_inr
+
+    # Bank small wins on standard tier when stuck below main target
+    if event_tier != "ELITE":
+        micro = settings.explosion_micro_target_points
+        if (
+            micro <= pnl_pts < target
+            and hold >= 45
+            and best <= micro + 2.0
+        ):
+            return "explosion_micro_target_hit", pnl_inr
 
     # Trailing stop while in profit (armed after trail_arm_points)
     if trail_floor is not None and pnl_pts <= trail_floor and best >= settings.explosion_trail_arm_points:

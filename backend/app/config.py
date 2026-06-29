@@ -88,8 +88,9 @@ class Settings(BaseSettings):
     explosion_early_volume_surge: float = 1.8
     explosion_scan_range: int = 800
     explosion_target_elite: float = 25.0
-    explosion_target_standard: float = 12.0
-    explosion_trail_arm_points: float = 4.0
+    explosion_target_standard: float = 7.0
+    explosion_micro_target_points: float = 3.0
+    explosion_trail_arm_points: float = 3.0
     explosion_trail_keep_ratio: float = 0.65
     explosion_trail_step_points: float = 3.5
     explosion_trail_tight_arm: float = 12.0
@@ -136,7 +137,9 @@ class Settings(BaseSettings):
     per_trade_capital_pct: float = 0.55
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 48
-    aggressive_min_explosion_score: int = 47
+    aggressive_min_explosion_score: int = 52
+    explosion_confirmed_min_score: int = 55
+    explosion_max_lots: int = 25
     aggressive_min_swing_confidence: int = 65
     aggressive_max_open_scalps: int = 1
     max_lots_per_trade: int = 35
