@@ -212,7 +212,9 @@ async def market_stream():
                     )
                     yield f"data: {orjson.dumps(data).decode()}\n\n"
                 except asyncio.TimeoutError:
-                    yield ": heartbeat\n\n"
+                    # Keep clients fresh when market is quiet (heartbeats alone don't update UI)
+                    snapshot = await get_multi_snapshot()
+                    yield f"data: {orjson.dumps(snapshot.model_dump(mode='json')).decode()}\n\n"
         except asyncio.CancelledError:
             raise
         finally:

@@ -13,8 +13,24 @@ function qualityColor(quality: StreamMetrics['connectionQuality']) {
   }
 }
 
-function qualityLabel(quality: StreamMetrics['connectionQuality'], streamMode?: StreamMetrics['streamMode']) {
-  if (streamMode === 'sse' && quality !== 'offline') {
+function deriveQuality(
+  latencyMs: number,
+  stalenessMs: number,
+  marketClosed: boolean,
+): StreamMetrics['connectionQuality'] {
+  if (marketClosed && stalenessMs < 120_000) return 'good';
+  if (stalenessMs > 15_000) return 'offline';
+  if (stalenessMs > 8_000) return 'slow';
+  return latencyQuality(latencyMs);
+}
+
+function qualityLabel(
+  quality: StreamMetrics['connectionQuality'],
+  streamMode?: StreamMetrics['streamMode'],
+  marketClosed?: boolean,
+) {
+  if (marketClosed) return 'Market closed';
+  if (streamMode === 'sse' && quality !== 'offline' && quality !== 'slow') {
     return 'Live';
   }
   switch (quality) {
@@ -23,36 +39,45 @@ function qualityLabel(quality: StreamMetrics['connectionQuality'], streamMode?: 
     case 'good':
       return 'OK';
     case 'slow':
-      return 'Slow';
+      return 'Stale';
     default:
       return 'Offline';
   }
 }
 
-export function ConnectionStatus({ metrics }: { metrics: StreamMetrics }) {
+export function ConnectionStatus({
+  metrics,
+  marketClosed = false,
+}: {
+  metrics: StreamMetrics;
+  marketClosed?: boolean;
+}) {
   const ageSec = Math.round(metrics.stalenessMs / 1000);
+  const quality = deriveQuality(metrics.lastLatencyMs, metrics.stalenessMs, marketClosed);
 
   return (
     <div
-      className={`flex items-center gap-2 text-[10px] px-2.5 py-1 rounded border ${qualityColor(metrics.connectionQuality)}`}
+      className={`flex items-center gap-2 text-[10px] px-2.5 py-1 rounded border ${qualityColor(quality)}`}
       title={`${metrics.streamMode === 'sse' ? 'SSE stream' : 'HTTP poll'} · Round-trip: ${metrics.lastLatencyMs}ms · Avg: ${metrics.avgLatencyMs}ms · Refresh every ${metrics.pollIntervalMs / 1000}s`}
     >
       <span
         className={`w-1.5 h-1.5 rounded-full ${
-          metrics.connectionQuality === 'offline'
+          quality === 'offline'
             ? 'bg-nexus-red'
-            : metrics.connectionQuality === 'slow'
+            : quality === 'slow'
               ? 'bg-nexus-yellow animate-pulse'
-              : 'bg-nexus-green animate-pulse'
+              : marketClosed
+                ? 'bg-gray-400'
+                : 'bg-nexus-green animate-pulse'
         }`}
       />
-      <span className="font-semibold">{qualityLabel(metrics.connectionQuality, metrics.streamMode)}</span>
+      <span className="font-semibold">{qualityLabel(quality, metrics.streamMode, marketClosed)}</span>
       <span className="opacity-80">·</span>
       <span className="font-mono">{metrics.lastLatencyMs}ms</span>
       {metrics.lastUpdatedAt && (
         <>
           <span className="opacity-80">·</span>
-          <span>{ageSec < 5 ? 'just now' : `${ageSec}s ago`}</span>
+          <span>{ageSec < 5 ? 'just now' : marketClosed ? `idle ${ageSec}s` : `${ageSec}s ago`}</span>
         </>
       )}
     </div>
