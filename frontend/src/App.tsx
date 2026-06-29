@@ -93,6 +93,10 @@ export default function App() {
           : { className: 'bg-nexus-red/15 text-nexus-red border-nexus-red/30', label: 'Not connected' }
     : null;
 
+  const marketClosed = SYMBOLS.every(
+    (s) => data?.snapshots?.[s]?.marketPhase === 'CLOSED' || !data?.snapshots?.[s]?.dataAvailable,
+  ) && Boolean(data);
+
   return (
     <div className="min-h-screen text-gray-100">
       <header className="border-b border-nexus-border/80 bg-nexus-panel/70 backdrop-blur-md sticky top-0 z-50 shadow-panel">
@@ -130,7 +134,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <ConnectionStatus metrics={metrics} />
+            <ConnectionStatus metrics={metrics} marketClosed={marketClosed} />
 
             {upstoxBadge ? (
               <span

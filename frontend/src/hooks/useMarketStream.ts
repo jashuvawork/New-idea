@@ -118,17 +118,24 @@ export function useMarketStream() {
     }
   }, []);
 
-  // Tick staleness between updates
+  // Tick staleness between updates; fall back to HTTP poll when SSE goes quiet
   useEffect(() => {
     const id = setInterval(() => {
       if (!lastSuccessAt.current) return;
-      setMetrics((prev) => ({
-        ...prev,
-        stalenessMs: Date.now() - lastSuccessAt.current!.getTime(),
-      }));
+      const stale = Date.now() - lastSuccessAt.current.getTime();
+      setMetrics((prev) => {
+        const next = { ...prev, stalenessMs: stale };
+        if (prev.streamMode === 'sse' && stale > 8000) {
+          next.connectionQuality = stale > 15_000 ? 'offline' : 'slow';
+        }
+        return next;
+      });
+      if (SSE_ENABLED && !sseFailed.current && stale > 8000) {
+        void fetchSnapshot();
+      }
     }, 500);
     return () => clearInterval(id);
-  }, []);
+  }, [fetchSnapshot]);
 
   useEffect(() => {
     if (!SSE_ENABLED || sseFailed.current) {
@@ -178,10 +185,15 @@ export function useMarketStream() {
         pollId = setInterval(fetchSnapshot, POLL_MS);
         return;
       }
+      // SSE dropped after open — fall back to HTTP poll so UI stays fresh
+      sseFailed.current = true;
       setMetrics((prev) => ({
         ...prev,
-        connectionQuality: prev.stalenessMs > 5000 ? 'offline' : prev.connectionQuality,
+        streamMode: 'poll',
+        connectionQuality: prev.stalenessMs > 15_000 ? 'offline' : 'slow',
       }));
+      fetchSnapshot();
+      pollId = setInterval(fetchSnapshot, POLL_MS);
     };
 
     return () => {
