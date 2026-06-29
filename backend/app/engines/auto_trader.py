@@ -58,6 +58,7 @@ from app.models.schemas import (
     SymbolSnapshot,
     TradeMastermind,
 )
+from app.engines.snapshot_fast import resolve_trade_premium
 from app.engines.session_timing import entries_allowed_now, entry_window_label
 from app.services import trade_store
 from app.services.order_executor import place_entry_order, place_exit_order
@@ -277,6 +278,12 @@ async def _open_from_candidate(
             "reason": candidate.swing_setup.reason if candidate.swing_setup else "",
         })
 
+    if not ctx_extra.get("instrumentKey"):
+        from app.engines.snapshot_fast import _heatmap_instrument_key
+        ik = _heatmap_instrument_key(snap, candidate.strike, candidate.side)
+        if ik:
+            ctx_extra["instrumentKey"] = ik
+
     if is_live or use_parity:
         if not client:
             return False, "broker client required for live / paper-live-parity"
@@ -436,29 +443,25 @@ def set_capital(amount: float) -> None:
     _capital_inr = amount
 
 
-async def process(
+async def _process_open_trades(
+    state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
-    news: Optional[list[dict[str, Any]]] = None,
-    client: Optional[UpstoxClient] = None,
-) -> AutoTraderState:
-    """Process open/update/close trades from snapshot candidates."""
-    state = get_state()
+    client: Optional[UpstoxClient],
+) -> list[dict[str, Any]]:
+    """Evaluate exits on open trades — safe for tick-fast path."""
     settings = get_settings()
     skipped: list[dict[str, Any]] = []
 
-    state.calibrationBlocks = _calibration.get_blocks()
-    state.autoTradingEnabled = settings.auto_trading_enabled
-    state.liveTradingEnabled = settings.enable_live_trading
-    state.paperTrading = settings.paper_trading
-
-    # Update open trades with current premiums
     for trade in list(state.openPaperTrades):
         lot_mult = lot_multiplier(trade.symbol)
         snap = snapshots.get(trade.symbol)
         if not snap or not snap.dataAvailable:
             continue
 
-        current = _find_premium(snap, trade.strike, trade.side)
+        broker_ctx = dict(trade.entryContext or {})
+        current = resolve_trade_premium(
+            snap, trade.strike, trade.side, broker_ctx.get("instrumentKey"),
+        )
         if current is None:
             continue
 
@@ -480,7 +483,6 @@ async def process(
         profile = snap.optimizedProfile or get_session_targets()
         is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
         is_swing = trade.strategyType == StrategyType.SWING
-
         plan_dict = (trade.entryContext or {}).get("exitPlan")
         use_adaptive = settings.adaptive_exits_enabled and plan_dict
 
@@ -509,90 +511,135 @@ async def process(
             )
         else:
             exit_reason, pnl = evaluate_exit(trade, eval_premium, profile, lot_mult)
-        if exit_reason:
-            broker_ctx = dict(trade.entryContext or {})
-            is_live = settings.enable_live_trading and settings.auto_trading_enabled
-            use_parity = _uses_paper_live_parity(settings)
-            needs_broker_exit = (is_live or use_parity) and broker_ctx.get("instrumentKey")
 
-            if needs_broker_exit and not broker_ctx.get("brokerExitOrderId"):
-                try:
-                    trade.exitReason = exit_reason
-                    if is_live:
-                        exit_result = await place_exit_order(client, trade)
-                    else:
-                        exit_result = await simulate_exit_order(client, trade, current)
-                        sim_fill = exit_result.get("fill_premium", eval_premium)
-                        gross_pts, gross_inr = mark_to_market(
-                            trade.entryPremium, sim_fill, trade.lots, lot_mult,
-                        )
-                        pnl = finalize_closed_pnl_inr(gross_inr)
-                        eval_premium = sim_fill
-                    broker_ctx["brokerExitOrderId"] = exit_result.get("order_id")
-                    broker_ctx["brokerExitSimulated"] = use_parity
-                    trade.entryContext = broker_ctx
-                    if is_live:
-                        state.liveOrdersPlaced += 1
-                except UpstoxError as e:
-                    logger.error(
-                        "Exit failed for %s (%s): %s — will retry",
-                        trade.id, _execution_mode(settings), e,
+        if not exit_reason:
+            continue
+
+        is_live = settings.enable_live_trading and settings.auto_trading_enabled
+        use_parity = _uses_paper_live_parity(settings)
+        needs_broker_exit = (is_live or use_parity) and broker_ctx.get("instrumentKey")
+
+        if needs_broker_exit and not broker_ctx.get("brokerExitOrderId"):
+            try:
+                trade.exitReason = exit_reason
+                if is_live:
+                    exit_result = await place_exit_order(client, trade)
+                else:
+                    exit_result = await simulate_exit_order(client, trade, current)
+                    sim_fill = exit_result.get("fill_premium", eval_premium)
+                    gross_pts, gross_inr = mark_to_market(
+                        trade.entryPremium, sim_fill, trade.lots, lot_mult,
                     )
-                    skipped.append({
-                        "symbol": trade.symbol,
-                        "reason": "exit_pending",
-                        "message": str(e),
-                        "tradeId": trade.id,
-                    })
-                    continue
-            elif should_simulate_slippage(trade):
-                pnl = finalize_closed_pnl_inr(pnl)
-
-            trade.status = "CLOSED"
-            trade.exitReason = exit_reason
-            trade.pnlInr = pnl
-            trade.pnlPoints = pnl / (trade.lots * lot_mult) if trade.lots else 0
-            trade.closedAt = datetime.now(IST)
-            trade.sessionDate = datetime.now(IST).strftime("%Y-%m-%d")
-            if trade.strategyType == StrategyType.EXPLOSIVE and exit_reason in (
-                "explosion_stop_loss",
-                "explosion_emergency_stop",
-                "explosion_time_stop",
-                "explosion_trail_sl",
-                "adaptive_sl",
-            ) and pnl < 0:
-                cooldown = (
-                    settings.explosion_emergency_cooldown_seconds
-                    if exit_reason == "explosion_emergency_stop"
-                    else None
+                    pnl = finalize_closed_pnl_inr(gross_inr)
+                    eval_premium = sim_fill
+                broker_ctx["brokerExitOrderId"] = exit_result.get("order_id")
+                broker_ctx["brokerExitSimulated"] = use_parity
+                trade.entryContext = broker_ctx
+                if is_live:
+                    state.liveOrdersPlaced += 1
+            except UpstoxError as e:
+                logger.error(
+                    "Exit failed for %s (%s): %s — will retry",
+                    trade.id, _execution_mode(settings), e,
                 )
-                record_explosion_stop(trade.symbol, cooldown_seconds=cooldown)
-            ctx = _build_context(snap, {
-                "exitReason": exit_reason,
-                "instrumentKey": broker_ctx.get("instrumentKey"),
-                "brokerOrderId": broker_ctx.get("brokerOrderId"),
-                "brokerExitOrderId": broker_ctx.get("brokerExitOrderId"),
-                "executionMode": broker_ctx.get("executionMode", _execution_mode(settings)),
-            })
-            trade.entryContext = ctx
-            state.closedPaperTrades.append(trade)
-            _calibration.record_trade(trade)
-            record_symbol_result(trade.symbol, pnl, exit_reason or "")
-            record_session_trade_close(pnl)
-            trade_store.record_trade_closed(trade, ctx)
-            get_ai_learning().record_trade_close(trade)
-            state.lastExit = {
-                "tradeId": trade.id,
-                "symbol": trade.symbol,
-                "reason": exit_reason,
-                "pnlInr": round(pnl, 2),
-                "executionMode": ctx.get("executionMode"),
-                "brokerExitOrderId": broker_ctx.get("brokerExitOrderId"),
-                "at": datetime.now(IST).isoformat(),
-            }
-            logger.info("Trade closed: %s reason=%s pnl=%.2f", trade.id, exit_reason, pnl)
+                skipped.append({
+                    "symbol": trade.symbol,
+                    "reason": "exit_pending",
+                    "message": str(e),
+                    "tradeId": trade.id,
+                })
+                continue
+        elif should_simulate_slippage(trade):
+            pnl = finalize_closed_pnl_inr(pnl)
+
+        trade.status = "CLOSED"
+        trade.exitReason = exit_reason
+        trade.pnlInr = pnl
+        trade.pnlPoints = pnl / (trade.lots * lot_mult) if trade.lots else 0
+        trade.closedAt = datetime.now(IST)
+        trade.sessionDate = datetime.now(IST).strftime("%Y-%m-%d")
+        if trade.strategyType == StrategyType.EXPLOSIVE and exit_reason in (
+            "explosion_stop_loss",
+            "explosion_emergency_stop",
+            "explosion_time_stop",
+            "explosion_trail_sl",
+            "adaptive_sl",
+        ) and pnl < 0:
+            cooldown = (
+                settings.explosion_emergency_cooldown_seconds
+                if exit_reason == "explosion_emergency_stop"
+                else None
+            )
+            record_explosion_stop(trade.symbol, cooldown_seconds=cooldown)
+        ctx = _build_context(snap, {
+            "exitReason": exit_reason,
+            "instrumentKey": broker_ctx.get("instrumentKey"),
+            "brokerOrderId": broker_ctx.get("brokerOrderId"),
+            "brokerExitOrderId": broker_ctx.get("brokerExitOrderId"),
+            "executionMode": broker_ctx.get("executionMode", _execution_mode(settings)),
+        })
+        trade.entryContext = ctx
+        state.closedPaperTrades.append(trade)
+        _calibration.record_trade(trade)
+        record_symbol_result(trade.symbol, pnl, exit_reason or "")
+        record_session_trade_close(pnl)
+        trade_store.record_trade_closed(trade, ctx)
+        get_ai_learning().record_trade_close(trade)
+        state.lastExit = {
+            "tradeId": trade.id,
+            "symbol": trade.symbol,
+            "reason": exit_reason,
+            "pnlInr": round(pnl, 2),
+            "executionMode": ctx.get("executionMode"),
+            "brokerExitOrderId": broker_ctx.get("brokerExitOrderId"),
+            "at": datetime.now(IST).isoformat(),
+        }
+        logger.info("Trade closed: %s reason=%s pnl=%.2f", trade.id, exit_reason, pnl)
 
     state.openPaperTrades = [t for t in state.openPaperTrades if t.status == "OPEN"]
+    return skipped
+
+
+async def process_exits_only(
+    snapshots: dict[str, SymbolSnapshot],
+    client: Optional[UpstoxClient] = None,
+) -> AutoTraderState:
+    """Tick-fast path — WS LTP overlay + exit evaluation only."""
+    state = get_state()
+    settings = get_settings()
+    state.calibrationBlocks = _calibration.get_blocks()
+    state.autoTradingEnabled = settings.auto_trading_enabled
+    state.liveTradingEnabled = settings.enable_live_trading
+    state.paperTrading = settings.paper_trading
+
+    exit_skipped = await _process_open_trades(state, snapshots, client)
+    profit_gate = update_daily_profit_gate(state)
+    cap_snap = get_capital_snapshot()
+    state.capitalAllocation = {**cap_snap.to_dict(), **get_lot_sizes_meta()}
+    state.dailyProfitGate = profit_gate.to_dict()
+    state.chopGuards = chop_guard_summary(state, snapshots)
+    state.skipped = exit_skipped
+    state.dailyReport = _calibration.build_report(state.closedPaperTrades)
+    _risk_engine.update_daily_pnl(compute_session_pnl(state))
+    return state
+
+
+async def process(
+    snapshots: dict[str, SymbolSnapshot],
+    news: Optional[list[dict[str, Any]]] = None,
+    client: Optional[UpstoxClient] = None,
+) -> AutoTraderState:
+    """Process open/update/close trades from snapshot candidates."""
+    state = get_state()
+    settings = get_settings()
+    skipped: list[dict[str, Any]] = []
+
+    state.calibrationBlocks = _calibration.get_blocks()
+    state.autoTradingEnabled = settings.auto_trading_enabled
+    state.liveTradingEnabled = settings.enable_live_trading
+    state.paperTrading = settings.paper_trading
+
+    skipped.extend(await _process_open_trades(state, snapshots, client))
 
     market_live = get_market_phase() == "LIVE_MARKET"
     profit_gate = update_daily_profit_gate(state)
@@ -660,14 +707,7 @@ async def process(
 
 
 def _find_premium(snap: SymbolSnapshot, strike: float, side: Side) -> Optional[float]:
-    for row in snap.heatmap:
-        if abs(row.strike - strike) < 1:
-            if side == Side.CALL:
-                return row.callLtp
-            return row.putLtp
-    if snap.explosiveRunner.strike == strike:
-        return snap.explosiveRunner.premium
-    return None
+    return resolve_trade_premium(snap, strike, side)
 
 
 def get_performance_analysis() -> dict[str, Any]:

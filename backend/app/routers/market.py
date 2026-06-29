@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -11,9 +12,10 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
-from app.engines.auto_trader import get_state, process, refresh_trading_capital
+from app.engines.auto_trader import get_state, process, process_exits_only, refresh_trading_capital
 from app.engines.capital_allocator import refresh_lot_sizes
 from app.engines.realtime_engine import build_symbol_snapshot
+from app.engines.snapshot_fast import overlay_snapshot_ltps
 from app.engines.psychology_engine import analyze_psychology, psychology_to_dict
 from app.engines.adaptive_exits import compute_adaptive_exit_plan
 from app.models.schemas import MultiSnapshot, StrategyType
@@ -30,6 +32,11 @@ _cache: Optional[MultiSnapshot] = None
 _cache_time: Optional[datetime] = None
 _build_lock = asyncio.Lock()
 _capital_refresh_at: Optional[datetime] = None
+_news_cache: Optional[list] = None
+_news_cache_at: Optional[datetime] = None
+_last_full_scan_mono: float = 0.0
+_last_fast_cycle_ms: Optional[float] = None
+_last_full_cycle_ms: Optional[float] = None
 _sse_queues: set[asyncio.Queue] = set()
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -47,6 +54,76 @@ def invalidate_snapshot_cache() -> None:
     _cache_time = None
 
 
+def mark_full_scan_done() -> None:
+    global _last_full_scan_mono
+    _last_full_scan_mono = time.monotonic()
+
+
+def entry_scan_due() -> bool:
+    settings = get_settings()
+    if _last_full_scan_mono <= 0:
+        return True
+    elapsed_ms = (time.monotonic() - _last_full_scan_mono) * 1000
+    return elapsed_ms >= settings.entry_scan_interval_ms
+
+
+def can_run_tick_fast() -> bool:
+    settings = get_settings()
+    if not settings.tick_fast_exit_enabled or not _cache or not _cache.dataReady:
+        return False
+    if not get_state().openPaperTrades:
+        return False
+    return is_ws_active()
+
+
+def latency_stats() -> dict[str, Any]:
+    return {
+        "tickFastExitEnabled": get_settings().tick_fast_exit_enabled,
+        "entryScanIntervalMs": get_settings().entry_scan_interval_ms,
+        "lastFastCycleMs": _last_fast_cycle_ms,
+        "lastFullCycleMs": _last_full_cycle_ms,
+        "entryScanDue": entry_scan_due(),
+        "canRunTickFast": can_run_tick_fast(),
+    }
+
+
+async def _fetch_news_cached() -> list:
+    global _news_cache, _news_cache_at
+    settings = get_settings()
+    now = datetime.now(IST)
+    if _news_cache is not None and _news_cache_at is not None:
+        age = (now - _news_cache_at).total_seconds()
+        if age < settings.news_cache_seconds:
+            return _news_cache
+    _news_cache = await fetch_market_news()
+    _news_cache_at = now
+    return _news_cache
+
+
+async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
+    """Tick-fast path — overlay WS LTPs on cache and evaluate exits only."""
+    global _cache, _cache_time, _last_fast_cycle_ms
+    if not _cache or not _cache.dataReady:
+        return None
+
+    t0 = time.perf_counter()
+    overlays = overlay_snapshot_ltps(_cache.snapshots)
+    client = UpstoxClient()
+    auto_state = await process_exits_only(overlays, client=client)
+
+    snapshot = _cache.model_copy(deep=True)
+    snapshot.timestamp = datetime.now(IST)
+    snapshot.snapshots = overlays
+    snapshot.autoTrader = auto_state
+    _cache = snapshot
+    _cache_time = datetime.now(IST)
+    _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    if broadcast:
+        await broadcast_snapshot(snapshot)
+    return snapshot
+
+
 async def _build_multi_snapshot() -> MultiSnapshot:
     global _capital_refresh_at
     settings = get_settings()
@@ -61,7 +138,7 @@ async def _build_multi_snapshot() -> MultiSnapshot:
             autoTrader=get_state(),
         )
 
-    news = await fetch_market_news()
+    news = await _fetch_news_cached()
     news_sentiment = "NEUTRAL"
     if news:
         sentiments = [n.get("sentiment", "NEUTRAL") for n in news[:5]]
@@ -169,7 +246,7 @@ async def broadcast_snapshot(snapshot: MultiSnapshot) -> None:
 
 async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) -> MultiSnapshot:
     """Cached snapshot with single-flight — UI + background monitor share one build."""
-    global _cache, _cache_time
+    global _cache, _cache_time, _last_full_cycle_ms
     cache_ttl = _effective_cache_seconds()
     now = datetime.now(IST)
 
@@ -178,6 +255,7 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
         if age < cache_ttl:
             return _cache
 
+    t0 = time.perf_counter()
     async with _build_lock:
         if not force and _cache and _cache_time:
             age = (datetime.now(IST) - _cache_time).total_seconds()
@@ -194,6 +272,9 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
             raise
         _cache = snapshot
         _cache_time = datetime.now(IST)
+        _last_full_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
+        if force:
+            mark_full_scan_done()
         if broadcast:
             await broadcast_snapshot(snapshot)
         return snapshot
