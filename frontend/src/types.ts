@@ -238,6 +238,34 @@ export interface OptimizedProfile {
   sessionLabel: string;
 }
 
+export interface ChopGuards {
+  chopSession?: boolean;
+  dailyTradeCap?: number;
+  dailyTradeCapLabel?: string;
+  closedTrades?: number;
+  tradeCapReached?: boolean;
+  tradeCapMessage?: string | null;
+  lossStreak?: number;
+  sessionPaused?: boolean;
+  pauseReason?: string | null;
+  beforePrimaryWindow?: boolean;
+  momentumRallyWindow?: boolean;
+  openCautionWindow?: boolean;
+  middayChopWindow?: boolean;
+  sessionLabel?: string;
+  sessionTargetPoints?: number;
+  guardsEnabled?: boolean;
+  dayMode?: string;
+  dayModeTone?: string;
+  dayModeHint?: string;
+  symbolBreadth?: Record<string, {
+    bias: string;
+    score: number;
+    aligned: boolean;
+    regime: string;
+  }>;
+}
+
 export interface AutoTraderState {
   paperTrading: boolean;
   liveTradingEnabled: boolean;
@@ -254,6 +282,7 @@ export interface AutoTraderState {
   lastEntry?: AutoTradeEvent | null;
   lastExit?: AutoTradeEvent | null;
   liveOrdersPlaced?: number;
+  chopGuards?: ChopGuards;
 }
 
 export interface AutoTradeEvent {

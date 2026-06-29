@@ -218,20 +218,105 @@ def apply_tiered_lot_cap(
     return min(lots, cap)
 
 
+def _symbol_breadth_summary(snapshots: dict[str, SymbolSnapshot]) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for sym, snap in snapshots.items():
+        if not snap.dataAvailable:
+            continue
+        regime = str(snap.regime.value if hasattr(snap.regime, "value") else snap.regime)
+        out[sym.upper()] = {
+            "bias": (snap.breadth.bias or "NEUTRAL").upper(),
+            "score": round(float(snap.breadth.score or 50), 1),
+            "aligned": bool(snap.breadth.aligned),
+            "regime": regime,
+        }
+    return out
+
+
+def _day_mode_label(
+    chop: bool,
+    momentum: bool,
+    breadth: dict[str, dict],
+    before_primary: bool,
+) -> tuple[str, str, str]:
+    """Return (mode, badge tone key, short playbook hint)."""
+    biases = [b.get("bias", "NEUTRAL") for b in breadth.values()]
+    bullish = sum(1 for b in biases if b == "BULLISH")
+    bearish = sum(1 for b in biases if b == "BEARISH")
+    n = len(biases)
+
+    if momentum and chop:
+        return (
+            "CHOP + RALLY",
+            "rally",
+            "Neutral chop — momentum bypass active; ride velocity surges",
+        )
+    if momentum:
+        return (
+            "MOMENTUM RALLY",
+            "rally",
+            "11:00–13:45 window — wider SL, longer holds, velocity entries",
+        )
+    if chop:
+        if before_primary:
+            return (
+                "CHOP (PRE-10)",
+                "chop",
+                "Strict chop — max 5 trades, score ≥60, SENSEX preferred",
+            )
+        return (
+            "CHOP DAY",
+            "chop",
+            "Neutral/range — capped trades, score ≥60, avoid midday noise",
+        )
+    if n > 0 and bullish == n:
+        return ("BULLISH DAY", "bullish", "CALL-biased — full 40 lots on aligned setups")
+    if n > 0 and bearish == n:
+        return ("BEARISH DAY", "bearish", "PUT-biased — Jun 25 playbook, let runners run")
+    if bullish > 0 and bearish > 0:
+        return ("MIXED DAY", "mixed", "Index divergence — trade aligned side per symbol")
+    if bullish > bearish:
+        return ("LEAN BULLISH", "bullish", "CALL edge — counter-trend PUTs need high score")
+    if bearish > bullish:
+        return ("LEAN BEARISH", "bearish", "PUT edge — counter-trend CALLs need high score")
+    return ("NORMAL", "normal", "Standard gates — adaptive SL + micro locks")
+
+
 def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> dict:
     chop = is_chop_session(snapshots)
     cap, cap_label = daily_trade_cap(state, snapshots)
     paused, pause_reason = session_pause_active()
     cap_hit, cap_msg = trades_cap_reached(state, snapshots)
+    momentum = in_momentum_rally_window()
+    before_primary = before_primary_window()
+    breadth = _symbol_breadth_summary(snapshots)
+    mode, mode_tone, mode_hint = _day_mode_label(chop, momentum, breadth, before_primary)
+
+    from app.engines.session_timing import in_midday_chop_window, in_open_caution_window
+    from app.engines.simple_profit import get_session_targets
+
+    session = get_session_targets()
+    settings = get_settings()
+
     return {
         "chopSession": chop,
         "dailyTradeCap": cap,
         "dailyTradeCapLabel": cap_label,
         "closedTrades": len(state.closedPaperTrades),
         "tradeCapReached": cap_hit,
+        "tradeCapMessage": cap_msg if cap_hit else None,
         "lossStreak": _session_loss_streak,
         "sessionPaused": paused,
         "pauseReason": pause_reason if paused else None,
-        "beforePrimaryWindow": before_primary_window(),
-        "momentumRallyWindow": in_momentum_rally_window(),
+        "beforePrimaryWindow": before_primary,
+        "momentumRallyWindow": momentum,
+        "openCautionWindow": in_open_caution_window(),
+        "middayChopWindow": in_midday_chop_window(),
+        "sessionLabel": session.sessionLabel,
+        "sessionTargetPoints": session.targetPoints,
+        "guardsEnabled": settings.chop_day_guards_enabled,
+        "dayMode": mode,
+        "dayModeTone": mode_tone,
+        "dayModeHint": mode_hint,
+        "symbolBreadth": breadth,
     }

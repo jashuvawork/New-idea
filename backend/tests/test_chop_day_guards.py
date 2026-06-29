@@ -102,3 +102,30 @@ def test_tiered_lot_cap(mock_settings):
         assert apply_tiered_lot_cap(100, 45.0, True, "SENSEX") == 0
         # velocity surge → full 40 lots even at mid rank
         assert apply_tiered_lot_cap(100, 52.0, True, "SENSEX", velocity_pct=3.0) == 40
+
+
+@patch("app.engines.chop_day_guards.get_settings")
+def test_day_mode_bearish(mock_settings):
+    from app.engines.chop_day_guards import chop_guard_summary
+    from app.models.schemas import AutoTraderState
+
+    s = MagicMock()
+    s.chop_day_guards_enabled = True
+    s.primary_window_start_hour = 10
+    s.primary_window_start_minute = 0
+    s.daily_max_trades_pre10_chop = 5
+    s.daily_max_trades_chop = 20
+    s.loss_streak_pause_count = 3
+    s.loss_streak_pause_seconds = 1200
+    mock_settings.return_value = s
+
+    snaps = {
+        "NIFTY": _snap("BEARISH", Regime.TREND_EXPANSION),
+        "SENSEX": _snap("BEARISH", Regime.TREND_EXPANSION),
+    }
+    snaps["NIFTY"].symbol = "NIFTY"
+    snaps["SENSEX"].symbol = "SENSEX"
+    summary = chop_guard_summary(AutoTraderState(), snaps)
+    assert summary["dayMode"] == "BEARISH DAY"
+    assert "NIFTY" in summary["symbolBreadth"]
+    assert summary["symbolBreadth"]["NIFTY"]["bias"] == "BEARISH"
