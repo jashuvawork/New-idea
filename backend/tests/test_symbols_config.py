@@ -1,6 +1,6 @@
 """Trading symbol configuration."""
 
-from app.config import Settings
+from app.config import Settings, get_settings
 
 
 def test_default_symbols_exclude_banknifty():
@@ -10,5 +10,13 @@ def test_default_symbols_exclude_banknifty():
 
 
 def test_symbols_from_comma_env():
-    s = Settings(symbols="NIFTY,SENSEX")
+    s = Settings(symbols_csv="NIFTY,SENSEX")
     assert s.symbols == ["NIFTY", "SENSEX"]
+
+
+def test_symbols_from_symbols_env(monkeypatch):
+    monkeypatch.setenv("SYMBOLS", "NIFTY,SENSEX")
+    get_settings.cache_clear()
+    s = Settings()
+    assert s.symbols == ["NIFTY", "SENSEX"]
+    get_settings.cache_clear()

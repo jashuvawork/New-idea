@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -161,14 +161,12 @@ class Settings(BaseSettings):
     adaptive_exits_enabled: bool = True
     ml_exit_tuning_enabled: bool = True
 
-    symbols: list[str] = ["NIFTY", "SENSEX"]
+    symbols_csv: str = Field(default="NIFTY,SENSEX", validation_alias="SYMBOLS")
 
-    @field_validator("symbols", mode="before")
-    @classmethod
-    def parse_symbols(cls, v):
-        if isinstance(v, str):
-            return [s.strip().upper() for s in v.split(",") if s.strip()]
-        return v
+    @computed_field
+    @property
+    def symbols(self) -> list[str]:
+        return [s.strip().upper() for s in self.symbols_csv.split(",") if s.strip()]
 
     # Persistence
     trade_store_dir: str = "/tmp/nexusquant/trades"
