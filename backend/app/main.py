@@ -18,8 +18,14 @@ _tick_wake = asyncio.Event()
 
 
 async def _background_monitor():
-    """Poll market even without UI open — wake early on WebSocket ticks."""
-    from app.routers.market import get_multi_snapshot
+    """Poll market even without UI open — tick-fast exits + periodic entry scans."""
+    from app.routers.market import (
+        can_run_tick_fast,
+        entry_scan_due,
+        get_multi_snapshot,
+        invalidate_snapshot_cache,
+        run_tick_fast_cycle,
+    )
     from app.services.tick_store import set_tick_wake_event
     from app.services.upstox_ws import is_ws_active
 
@@ -33,14 +39,18 @@ async def _background_monitor():
             if is_ws_active()
             else settings.market_poll_interval_ms
         )
-        debounce_s = max(0.05, settings.tick_wake_debounce_ms / 1000.0)
+        debounce_s = max(0.01, settings.tick_wake_debounce_ms / 1000.0)
 
         try:
             if settings.background_market_monitor_enabled:
-                if tick_driven:
-                    from app.routers.market import invalidate_snapshot_cache
-                    invalidate_snapshot_cache()
-                await get_multi_snapshot(broadcast=True, force=tick_driven)
+                if tick_driven and can_run_tick_fast():
+                    await run_tick_fast_cycle(broadcast=True)
+                elif entry_scan_due():
+                    if tick_driven:
+                        invalidate_snapshot_cache()
+                    await get_multi_snapshot(broadcast=True, force=True)
+                elif not tick_driven:
+                    await get_multi_snapshot(broadcast=True, force=False)
         except Exception as e:
             logger.warning("Background monitor error: %s", e)
 
@@ -71,9 +81,9 @@ async def lifespan(app: FastAPI):
     if settings.background_market_monitor_enabled:
         _background_task = asyncio.create_task(_background_monitor())
         logger.info(
-            "Background market monitor started (poll=%dms, ws_poll=%dms, tick_wake=%dms)",
-            settings.market_poll_interval_ms,
-            settings.market_poll_interval_ws_ms,
+            "Background monitor: tick_fast=%s entry_scan_ms=%d debounce_ms=%d",
+            settings.tick_fast_exit_enabled,
+            settings.entry_scan_interval_ms,
             settings.tick_wake_debounce_ms,
         )
     yield

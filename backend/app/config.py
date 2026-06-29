@@ -43,7 +43,10 @@ class Settings(BaseSettings):
     market_poll_interval_ws_ms: int = 100
     tick_snapshot_interval_ms: int = 100
     snapshot_cache_interval_ms: int = 400
-    tick_wake_debounce_ms: int = 50
+    tick_wake_debounce_ms: int = 25
+    tick_fast_exit_enabled: bool = True
+    entry_scan_interval_ms: int = 250
+    news_cache_seconds: int = 60
     background_market_monitor_enabled: bool = True
 
     # Upstox WebSocket real-time feed + SSE push to UI

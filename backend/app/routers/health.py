@@ -10,6 +10,7 @@ from app.services.redis_store import has_upstox_token
 from app.services.token_manager import get_daily_token_status
 from app.services.upstox import get_market_phase
 from app.services.upstox_ws import ws_status
+from app.routers.market import latency_stats
 
 router = APIRouter(tags=["health"])
 
@@ -116,7 +117,11 @@ async def deployment_status():
             "upstoxMinRequestIntervalMs": settings.upstox_min_request_interval_ms,
             "upstoxChainCacheSeconds": settings.upstox_chain_cache_seconds,
             "upstoxLtpCacheSeconds": settings.upstox_ltp_cache_seconds,
+            "tickFastExitEnabled": settings.tick_fast_exit_enabled,
+            "entryScanIntervalMs": settings.entry_scan_interval_ms,
+            "newsCacheSeconds": settings.news_cache_seconds,
         },
+        "latency": latency_stats(),
         "websocket": ws_status(),
         "tradeLog": {
             "storeDir": store_health["storeDir"],
