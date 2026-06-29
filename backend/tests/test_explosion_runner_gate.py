@@ -37,14 +37,21 @@ def _trade() -> SuggestedTrade:
 
 
 def test_weak_velocity_blocked():
-    event = _event(velocity_3s=2.0, velocity_9s=3.0)
+    event = _event(velocity_3s=2.0, velocity_9s=2.8)
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
     assert not ok
     assert reason == "velocity_too_low"
 
 
-def test_score_48_blocked_after_caution():
+def test_score_48_exploding_confirmed():
     event = _event(explosion_score=48.0, velocity_3s=3.0, velocity_9s=4.0)
+    ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
+    assert ok
+    assert reason == "explosion_confirmed"
+
+
+def test_score_45_still_blocked():
+    event = _event(explosion_score=45.0, velocity_3s=3.0, velocity_9s=4.0)
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
     assert not ok
     assert reason == "not_confirmed"
