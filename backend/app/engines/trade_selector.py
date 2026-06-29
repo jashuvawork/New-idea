@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.config import get_settings
+from app.engines.session_timing import min_explosion_score_now
 from app.engines.premium_filter import premium_in_band
 from app.engines.explosion_profit import check_explosion_entry
 from app.engines.simple_profit import check_entry_gate
@@ -52,10 +53,11 @@ def _explosion_candidates(
         if alert.get("tier") not in ("ELITE", "EXPLODING"):
             continue
         score_val = float(alert.get("explosionScore", 0))
-        if score_val < settings.aggressive_min_explosion_score:
+        min_score = min_explosion_score_now()
+        if score_val < min_score:
             continue
         # Explosion score is primary quality — don't block on low symbol TQS alone
-        if snap.tradeQualityScore < 25 and score_val < settings.aggressive_min_explosion_score + 10:
+        if snap.tradeQualityScore < 25 and score_val < min_score + 10:
             continue
 
         from app.engines.explosion_detector import ExplosionEvent

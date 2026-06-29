@@ -534,7 +534,12 @@ async def process(
                 "explosion_trail_sl",
                 "adaptive_sl",
             ) and pnl < 0:
-                record_explosion_stop(trade.symbol)
+                cooldown = (
+                    settings.explosion_emergency_cooldown_seconds
+                    if exit_reason == "explosion_emergency_stop"
+                    else None
+                )
+                record_explosion_stop(trade.symbol, cooldown_seconds=cooldown)
             ctx = _build_context(snap, {
                 "exitReason": exit_reason,
                 "instrumentKey": broker_ctx.get("instrumentKey"),

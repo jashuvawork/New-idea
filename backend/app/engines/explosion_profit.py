@@ -7,38 +7,41 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.engines.capital_allocator import compute_lots
 from app.engines.explosion_detector import ExplosionEvent
+from app.engines.session_timing import in_open_caution_window, min_explosion_score_now
 from app.models.schemas import Breadth, PaperTrade, Side, StrategyType, SuggestedTrade
 
 IST = ZoneInfo("Asia/Kolkata")
 
-# symbol -> last explosion stop timestamp (IST)
-_explosion_stop_at: dict[str, datetime] = {}
+# symbol -> (last stop timestamp, cooldown seconds)
+_explosion_stop_at: dict[str, tuple[datetime, int]] = {}
 
 
-def record_explosion_stop(symbol: str) -> None:
-    _explosion_stop_at[symbol.upper()] = datetime.now(IST)
+def record_explosion_stop(symbol: str, cooldown_seconds: Optional[int] = None) -> None:
+    settings = get_settings()
+    secs = cooldown_seconds if cooldown_seconds is not None else settings.explosion_reentry_cooldown_seconds
+    _explosion_stop_at[symbol.upper()] = (datetime.now(IST), secs)
 
 
 def explosion_in_cooldown(symbol: str) -> bool:
-    settings = get_settings()
-    ts = _explosion_stop_at.get(symbol.upper())
-    if not ts:
+    entry = _explosion_stop_at.get(symbol.upper())
+    if not entry:
         return False
+    ts, cooldown = entry
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=IST)
     elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
-    return elapsed < settings.explosion_reentry_cooldown_seconds
+    return elapsed < cooldown
 
 
 def cooldown_remaining_seconds(symbol: str) -> int:
-    settings = get_settings()
-    ts = _explosion_stop_at.get(symbol.upper())
-    if not ts:
+    entry = _explosion_stop_at.get(symbol.upper())
+    if not entry:
         return 0
+    ts, cooldown = entry
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=IST)
     elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
-    return max(0, int(settings.explosion_reentry_cooldown_seconds - elapsed))
+    return max(0, int(cooldown - elapsed))
 
 
 def check_explosion_entry(
@@ -63,7 +66,9 @@ def check_explosion_entry(
     if event.tier == "ELITE":
         return True, "elite_explosion"
 
-    min_score = get_settings().aggressive_min_explosion_score
+    min_score = min_explosion_score_now()
+    if in_open_caution_window() and event.tier != "ELITE" and event.explosion_score < min_score + 5:
+        return False, "open_caution_wait_for_elite"
     if event.tier == "EXPLODING" and event.explosion_score >= min_score:
         return True, "explosion_confirmed"
 
