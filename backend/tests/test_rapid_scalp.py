@@ -1,4 +1,4 @@
-"""Rapid scalp mode tests."""
+"""Scalp entry gates — velocity fallback (66K profile)."""
 
 from unittest.mock import patch
 
@@ -22,18 +22,15 @@ def _trade(**kwargs) -> SuggestedTrade:
 
 
 @patch("app.engines.simple_profit.get_settings")
-def test_rapid_velocity_fallback(mock_settings):
+def test_velocity_fallback_when_score_strong(mock_settings):
     settings = mock_settings.return_value
-    settings.sure_shot_mode_enabled = False
-    settings.rapid_scalp_mode_enabled = True
-    settings.midday_chop_block_scalps = False
     settings.aggressive_lot_sizing = True
-    settings.aggressive_min_tqs = 48
-    settings.enhanced_velocity_threshold = 1.25
+    settings.aggressive_min_tqs = 50
+    settings.enhanced_velocity_threshold = 1.2
 
-    trade = _trade(tqs=53.0, confidence=53.0)
+    trade = _trade(tqs=56.0, confidence=56.0)
     ok, reason = check_entry_gate(
-        trade, Breadth(score=55, bias="NEUTRAL", aligned=False), 50.0, 0.3, False,
+        trade, Breadth(score=55, bias="BULLISH", aligned=True), 50.0, 0.3, False,
     )
     assert ok
     assert reason == "passed"
@@ -41,15 +38,13 @@ def test_rapid_velocity_fallback(mock_settings):
 
 @patch("app.engines.simple_profit.get_settings")
 @patch("app.engines.simple_profit.get_market_phase", return_value="LIVE_MARKET")
-def test_midday_rapid_targets(_phase, mock_settings):
+def test_midday_chop_targets(_phase, mock_settings):
     settings = mock_settings.return_value
-    settings.rapid_scalp_mode_enabled = True
-    settings.enhanced_micro_target_points = 1.5
-    settings.scalp_stop_points = 2.5
+    settings.enhanced_micro_target_points = 2.5
 
     with patch("app.engines.simple_profit.datetime") as mock_dt:
         mock_dt.now.return_value = type("T", (), {"hour": 12, "minute": 15})()
         profile = get_session_targets()
-    assert profile.sessionLabel == "midday_rapid"
-    assert profile.microTargetPoints == 1.5
-    assert profile.maxHoldSeconds == 120
+    assert profile.sessionLabel == "midday_chop"
+    assert profile.microTargetPoints == 2.5
+    assert profile.maxHoldSeconds == 150

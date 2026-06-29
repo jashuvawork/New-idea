@@ -4,13 +4,6 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.config import get_settings
-from app.engines.session_timing import min_explosion_score_now
-from app.engines.symbol_cooldown import (
-    entry_score_penalty,
-    recent_win_rank_bonus,
-    requires_breadth_alignment,
-    symbol_in_cooldown,
-)
 from app.engines.premium_filter import premium_in_band
 from app.engines.explosion_profit import check_explosion_entry
 from app.engines.simple_profit import check_entry_gate
@@ -54,19 +47,17 @@ def _explosion_candidates(
     for alert in snap.explosionAlerts or []:
         if not alert.get("tradeable"):
             continue
-        if settings.sure_shot_mode_enabled and snap.tradeQualityScore < settings.sure_shot_min_symbol_tqs:
-            continue
         if not premium_in_band(alert.get("premium")):
             continue
         if alert.get("tier") not in ("ELITE", "EXPLODING"):
             continue
         score_val = float(alert.get("explosionScore", 0))
-        min_score = min_explosion_score_now() + entry_score_penalty(symbol)
-        if score_val < min_score:
+        if score_val < settings.aggressive_min_explosion_score:
             continue
         # Explosion score is primary quality — don't block on low symbol TQS alone
-        if snap.tradeQualityScore < 25 and score_val < min_score + 10:
+        if snap.tradeQualityScore < 25 and score_val < settings.aggressive_min_explosion_score + 10:
             continue
+
         from app.engines.explosion_detector import ExplosionEvent
 
         event = ExplosionEvent(
@@ -130,24 +121,17 @@ def _scalp_candidates(
     for suggestion in snap.suggestedTrades or []:
         if suggestion.strategyType == StrategyType.EXPLOSIVE:
             continue
-        if settings.sure_shot_mode_enabled and snap.tradeQualityScore < settings.sure_shot_min_symbol_tqs:
-            continue
         if not premium_in_band(suggestion.lastPremium):
             continue
         if not suggestion.lastPremium or suggestion.lastPremium <= 0:
             continue
         trade_score = max(suggestion.tqs, suggestion.confidence or 0)
-        min_tqs = settings.aggressive_min_tqs + entry_score_penalty(symbol)
-        if trade_score < min_tqs:
+        if trade_score < settings.aggressive_min_tqs:
             continue
-
-        if requires_breadth_alignment(symbol) and not snap.breadth.aligned:
-            if snap.breadth.bias != "NEUTRAL":
-                continue
 
         blocked = state.calibrationBlocks.get(suggestion.side.value, False)
         momentum = (snap.orderflow.volumeAcceleration or 0) > 65
-        override = snap.explosiveRunner.candidate and (snap.explosiveRunner.score or 0) >= settings.runner_alignment_override_score
+        override = snap.explosiveRunner.candidate and (snap.explosiveRunner.score or 0) >= 82
         vel = suggestion.runnerSignal.premiumVelocityPct if suggestion.runnerSignal else 0
 
         passed, _ = check_entry_gate(
@@ -258,26 +242,12 @@ def find_best_entry(
     if not candidates:
         return None
 
-    filtered: list[EntryCandidate] = []
-    for c in candidates:
-        cooling, reason = symbol_in_cooldown(c.symbol)
-        if cooling:
-            continue
-        c.score += recent_win_rank_bonus(c.symbol)
-        filtered.append(c)
-
-    if not filtered:
-        return None
-
+    # Explosion beats scalp at similar scores; then highest score wins
     def sort_key(c: EntryCandidate) -> float:
-        bonus = 8 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
+        bonus = 20 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
         return c.score + bonus
 
-    best = max(filtered, key=sort_key)
-    min_rank = settings.sure_shot_min_rank_score if settings.sure_shot_mode_enabled else 0.0
-    if min_rank > 0 and sort_key(best) < min_rank:
-        return None
-    return best
+    return max(candidates, key=sort_key)
 
 
 def diagnose_missed_entries(
