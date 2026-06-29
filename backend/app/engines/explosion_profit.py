@@ -60,6 +60,15 @@ def check_explosion_entry(
     if event.velocity_3s < 2.0 and event.velocity_9s < 3.0:
         return False, "velocity_too_low"
 
+    from app.engines.chop_day_guards import neutral_breadth_blocks_entry
+
+    score = max(event.explosion_score, trade.tqs or 0, trade.confidence or 0)
+    blocked, nb_reason = neutral_breadth_blocks_entry(
+        breadth.bias, score, event.velocity_3s, explosion=True,
+    )
+    if blocked:
+        return False, nb_reason
+
     if event.tier == "ELITE":
         return True, "elite_explosion"
 

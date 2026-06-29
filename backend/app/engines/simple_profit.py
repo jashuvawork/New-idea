@@ -85,6 +85,19 @@ def check_entry_gate(
     if trade_score < min_score:
         return False, f"score_below_{min_score}"
 
+    from app.engines.chop_day_guards import neutral_breadth_blocks_entry
+    from app.engines.session_timing import in_midday_chop_window
+
+    blocked, nb_reason = neutral_breadth_blocks_entry(
+        breadth.bias, trade_score, velocity_pct, explosion=False,
+    )
+    if blocked:
+        return False, nb_reason
+
+    if settings.midday_chop_block_scalps and in_midday_chop_window():
+        if not breadth.aligned or trade_score < settings.neutral_breadth_min_score:
+            return False, "midday_chop_wait"
+
     # Breadth: relaxed when trade score is strong
     side_bias = "BULLISH" if trade.side == Side.CALL else "BEARISH"
     if breadth.bias != side_bias and not alignment_override:

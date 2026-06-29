@@ -224,8 +224,15 @@ def find_best_entry(
 ) -> Optional[EntryCandidate]:
     """Return highest-ranked setup across all symbols — one best trade only."""
     settings = get_settings()
+    from app.engines.chop_day_guards import (
+        is_chop_session,
+        min_rank_for_entry,
+        symbol_rank_adjustment,
+    )
+
     scalp_open = sum(1 for t in state.openPaperTrades if t.strategyType != StrategyType.SWING)
     swing_open = sum(1 for t in state.openPaperTrades if t.strategyType == StrategyType.SWING)
+    chop = is_chop_session(snapshots)
 
     candidates: list[EntryCandidate] = []
 
@@ -242,12 +249,19 @@ def find_best_entry(
     if not candidates:
         return None
 
-    # Explosion beats scalp at similar scores; then highest score wins
+    # SENSEX-first on chop days
+    for c in candidates:
+        c.score += symbol_rank_adjustment(c.symbol, chop)
+
     def sort_key(c: EntryCandidate) -> float:
         bonus = 20 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
         return c.score + bonus
 
-    return max(candidates, key=sort_key)
+    best = max(candidates, key=sort_key)
+    floor = min_rank_for_entry(chop)
+    if floor > 0 and sort_key(best) < floor:
+        return None
+    return best
 
 
 def diagnose_missed_entries(
