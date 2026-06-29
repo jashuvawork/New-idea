@@ -86,14 +86,14 @@ class Settings(BaseSettings):
     paper_slippage_swing_mult: float = 0.85
     paper_brokerage_round_trip_inr: float = 40.0
 
-    # Explosion capture — Jun 25 66K profile + ultra entry gates
+    # Explosion capture — Jun 25 +₹66K profile: micro locks, trails, 12pt standard target
     explosion_min_velocity_3s: float = 2.0
     explosion_min_velocity_9s: float = 3.0
     explosion_early_velocity_3s: float = 3.0
     explosion_early_volume_surge: float = 1.5
     explosion_scan_range: int = 800
-    explosion_target_elite: float = 50.0
-    explosion_target_standard: float = 50.0
+    explosion_target_elite: float = 25.0
+    explosion_target_standard: float = 12.0
     explosion_micro_target_points: float = 3.0
     explosion_trail_arm_points: float = 4.0
     explosion_trail_keep_ratio: float = 0.65
@@ -101,8 +101,8 @@ class Settings(BaseSettings):
     explosion_trail_tight_arm: float = 12.0
     explosion_trail_tight_points: float = 5.0
     explosion_initial_stop_points: float = 4.0
-    explosion_stop_min_hold_seconds: int = 30
-    explosion_no_progress_seconds: int = 150
+    explosion_stop_min_hold_seconds: int = 15
+    explosion_no_progress_seconds: int = 90
     explosion_reentry_cooldown_seconds: int = 120
     explosion_emergency_cooldown_seconds: int = 300
 
@@ -120,29 +120,29 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 15
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 15
-    open_caution_min_explosion_score: int = 58
+    open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
     max_option_premium_inr: float = 175.0
 
-    # Ultra-profile — best scalp / explosion / swing only
+    # Jun 25 profile — relaxed gates, micro locks + trails (no sure-shot / bullish-hold)
     enhanced_micro_target_points: float = 2.5
-    enhanced_velocity_threshold: float = 1.5
-    enhanced_tqs_entry: int = 55
-    runner_alignment_override_score: int = 88
+    enhanced_velocity_threshold: float = 1.2
+    enhanced_tqs_entry: int = 50
+    runner_alignment_override_score: int = 82
     rapid_scalp_mode_enabled: bool = False
-    sure_shot_mode_enabled: bool = True
-    sure_shot_min_symbol_tqs: int = 50
-    sure_shot_min_rank_score: float = 58.0
-    sure_shot_scalp_min_score: int = 58
-    scalp_max_lots: int = 30
-    scalp_target_points: float = 50.0
-    bullish_hold_enabled: bool = True
-    bullish_hold_trail_keep_ratio: float = 0.50
-    bullish_hold_max_hold_multiplier: float = 1.75
-    midday_chop_block_scalps: bool = True
+    sure_shot_mode_enabled: bool = False
+    sure_shot_min_symbol_tqs: int = 40
+    sure_shot_min_rank_score: float = 48.0
+    sure_shot_scalp_min_score: int = 55
+    scalp_max_lots: int = 40
+    scalp_target_points: float = 12.0  # unused — session targets in simple_profit
+    bullish_hold_enabled: bool = False
+    bullish_hold_trail_keep_ratio: float = 0.55
+    bullish_hold_max_hold_multiplier: float = 1.0
+    midday_chop_block_scalps: bool = False
     midday_chop_start_hour: int = 11
     midday_chop_start_minute: int = 30
     midday_chop_end_hour: int = 13
@@ -150,18 +150,18 @@ class Settings(BaseSettings):
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
-    # Capital / risk — Jun 25 66K: 85% per trade, capital-derived lots (~100)
+    # Capital / risk — Jun 25: 85% per trade, max 40 lots, flat ₹20K emergency
     fallback_capital_inr: float = 200_000
     max_sizing_capital_inr: float = 200_000
     per_trade_capital_pct: float = 0.85
     aggressive_lot_sizing: bool = True
-    aggressive_min_tqs: int = 55
-    aggressive_min_explosion_score: int = 55
-    explosion_confirmed_min_score: int = 58
-    explosion_max_lots: int = 30
-    aggressive_min_swing_confidence: int = 75
+    aggressive_min_tqs: int = 50
+    aggressive_min_explosion_score: int = 45
+    explosion_confirmed_min_score: int = 45
+    explosion_max_lots: int = 40
+    aggressive_min_swing_confidence: int = 65
     aggressive_max_open_scalps: int = 1
-    max_lots_per_trade: int = 30
+    max_lots_per_trade: int = 40
     min_lots_per_trade: int = 1
     max_risk_per_trade_inr: float = 200_000
     min_per_trade_risk_inr: float = 3_000
@@ -172,13 +172,13 @@ class Settings(BaseSettings):
     emergency_stop_inr: float = 20_000
     emergency_stop_scale_with_position: bool = False
     scalp_stop_points: float = 3.0
-    scalp_stop_min_hold_seconds: int = 45
+    scalp_stop_min_hold_seconds: int = 30
     scalp_trail_arm_points: float = 3.0
-    scalp_trail_keep_ratio: float = 0.60
-    scalp_no_progress_seconds: int = 150
+    scalp_trail_keep_ratio: float = 0.55
+    scalp_no_progress_seconds: int = 90
 
-    # Daily target — min 10% of ₹2L book (₹20K); staged locks beyond
-    daily_profit_target_inr: float = 20_000
+    # Daily target — Jun 25 milestone profile
+    daily_profit_target_inr: float = 44_000
     daily_profit_trail_inr: float = 5_000  # legacy; unused when stage locks enabled
     daily_profit_stage_locks_enabled: bool = True
     daily_profit_stage_pcts_csv: str = "0.55,0.88,1.12"  # env: DAILY_PROFIT_STAGE_PCTS

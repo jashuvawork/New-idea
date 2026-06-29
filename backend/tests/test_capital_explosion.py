@@ -34,11 +34,11 @@ class CapitalSizingTests(unittest.TestCase):
             lots_n = max_lots_for_capital("NIFTY", 50.0)
             self.assertEqual(lots_n, 52)
 
-    def test_clamp_respects_30_lot_cap(self):
+    def test_clamp_respects_40_lot_cap(self):
         snap = CapitalSnapshot(perTradeCapitalInr=170_000)
         with patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap):
             clamped = clamp_lots(500, "SENSEX", 40.0)
-            self.assertEqual(clamped, 30)
+            self.assertEqual(clamped, 40)
 
 
 class ExplosionExitTests(unittest.TestCase):
@@ -62,16 +62,16 @@ class ExplosionExitTests(unittest.TestCase):
         self.assertEqual(reason, "explosion_trail_sl")
         self.assertGreater(pnl, 0)
 
-    def test_target_hit_at_50pt(self):
+    def test_target_hit_at_12pt(self):
         trade = self._trade(50.0, 10)
-        reason, _ = evaluate_explosion_exit(trade, 100.0, "EXPLODING", 65)
+        reason, _ = evaluate_explosion_exit(trade, 62.0, "EXPLODING", 65)
         self.assertEqual(reason, "explosion_target_hit")
 
     def test_cooldown_blocks_reentry(self):
         record_explosion_stop("SENSEX")
         self.assertTrue(explosion_in_cooldown("SENSEX"))
 
-    def test_explosion_lots_capped_at_30(self):
+    def test_explosion_lots_capped_at_40(self):
         from app.engines.explosion_detector import ExplosionEvent
         from app.models.schemas import Side
 
@@ -91,7 +91,7 @@ class ExplosionExitTests(unittest.TestCase):
         )
         with patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap):
             lots = compute_explosion_lots(event, 70.0, 50.0)
-            self.assertEqual(lots, 30)
+            self.assertEqual(lots, 40)
 
 
 if __name__ == "__main__":

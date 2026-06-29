@@ -1,4 +1,6 @@
-"""Bullish-aligned hold logic."""
+"""Bullish-aligned hold logic (disabled in Jun 25 profile by default)."""
+
+from unittest.mock import patch
 
 from app.engines.bullish_hold import direction_aligned_with_breadth
 from app.models.schemas import PaperTrade, Side, StrategyType
@@ -22,13 +24,17 @@ def _trade(side: Side, breadth: str) -> PaperTrade:
     )
 
 
-def test_call_bullish_aligned():
+@patch("app.engines.bullish_hold.get_settings")
+def test_call_bullish_aligned(mock_settings):
+    mock_settings.return_value.bullish_hold_enabled = True
     assert direction_aligned_with_breadth(_trade(Side.CALL, "BULLISH"))
 
 
-def test_put_bearish_aligned():
+@patch("app.engines.bullish_hold.get_settings")
+def test_put_bearish_aligned(mock_settings):
+    mock_settings.return_value.bullish_hold_enabled = True
     assert direction_aligned_with_breadth(_trade(Side.PUT, "BEARISH"))
 
 
-def test_call_neutral_not_aligned():
-    assert not direction_aligned_with_breadth(_trade(Side.CALL, "NEUTRAL"))
+def test_disabled_by_default():
+    assert not direction_aligned_with_breadth(_trade(Side.CALL, "BULLISH"))

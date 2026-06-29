@@ -29,9 +29,10 @@ def test_sure_shot_requires_velocity(mock_settings):
     settings.aggressive_lot_sizing = True
     settings.aggressive_min_tqs = 52
     settings.enhanced_velocity_threshold = 1.4
+    settings.enhanced_tqs_entry = 55
     settings.midday_chop_block_scalps = False
 
-    trade = _trade()
+    trade = _trade(tqs=48.0, confidence=48.0)
     ok, reason = check_entry_gate(
         trade, Breadth(score=65, bias="BULLISH", aligned=True), 50.0, 0.5, False,
     )
@@ -51,4 +52,4 @@ def test_midday_chop_targets(_phase, mock_settings):
         profile = get_session_targets()
     assert profile.sessionLabel == "midday_chop"
     assert profile.microTargetPoints == 2.0
-    assert profile.maxHoldSeconds == 210
+    assert profile.maxHoldSeconds == 150

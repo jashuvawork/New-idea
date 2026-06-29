@@ -1,4 +1,4 @@
-"""Ultra-profile explosion entry gates on 66K base."""
+"""Jun 25 explosion entry gates — score 45+, no breadth block when sure-shot off."""
 
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.explosion_profit import check_explosion_entry
@@ -43,29 +43,29 @@ def test_weak_velocity_blocked():
     assert reason == "velocity_too_low"
 
 
-def test_score_55_exploding_confirmed():
-    event = _event(explosion_score=58.0, velocity_3s=3.0, velocity_9s=4.0)
+def test_score_45_exploding_confirmed():
+    event = _event(explosion_score=48.0, velocity_3s=3.0, velocity_9s=4.0)
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
     assert ok
     assert reason == "explosion_confirmed"
 
 
-def test_score_52_blocked():
-    event = _event(explosion_score=52.0, velocity_3s=3.0, velocity_9s=4.0)
+def test_score_40_blocked():
+    event = _event(explosion_score=40.0, velocity_3s=3.0, velocity_9s=4.0)
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
     assert not ok
     assert reason == "not_confirmed"
 
 
-def test_breadth_alignment_required():
+def test_neutral_breadth_allowed_when_sure_shot_off():
     event = _event(explosion_score=60.0, velocity_3s=3.0, velocity_9s=4.0)
-    ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=False), False)
-    assert not ok
-    assert reason == "breadth_not_aligned"
+    ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="NEUTRAL", aligned=False), False)
+    assert ok
+    assert reason == "explosion_confirmed"
 
 
 def test_elite_bypasses_score_floor():
-    event = _event(explosion_score=48.0, velocity_3s=3.0, velocity_9s=4.0, tier="ELITE")
+    event = _event(explosion_score=40.0, velocity_3s=3.0, velocity_9s=4.0, tier="ELITE")
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
     assert ok
     assert reason == "elite_explosion"
