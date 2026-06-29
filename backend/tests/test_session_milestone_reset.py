@@ -16,37 +16,37 @@ from app.services import trade_store
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def test_entries_blocked_before_915():
+def test_entries_blocked_before_920():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 14, 0, tzinfo=IST)
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 18, 0, tzinfo=IST)
             ok, reason = entries_allowed_now()
     assert not ok
-    assert "09:15" in reason
+    assert "09:20" in reason
 
 
-def test_entries_allowed_at_915():
+def test_entries_allowed_at_920():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 15, 0, tzinfo=IST)
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 20, 0, tzinfo=IST)
             ok, reason = entries_allowed_now()
     assert ok
 
 
-def test_open_caution_disabled_at_915():
+def test_open_caution_window_924():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 6, 30, 9, 24, 0, tzinfo=IST)
-            assert not in_open_caution_window()
-            assert min_explosion_score_now() == 45
+            assert in_open_caution_window()
+            assert min_explosion_score_now() >= 55
 
 
-def test_after_open_normal_score():
+def test_after_caution_normal_score():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 6, 30, 10, 0, 0, tzinfo=IST)
             assert not in_open_caution_window()
-            assert min_explosion_score_now() == 45
+            assert min_explosion_score_now() == 52
 
 
 def test_current_batch_rolls_after_fifty():

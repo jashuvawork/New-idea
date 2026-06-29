@@ -1,4 +1,4 @@
-"""Scalp entry gates — velocity fallback (66K profile)."""
+"""Scalp entry gates — sure-shot profile requires real velocity."""
 
 from unittest.mock import patch
 
@@ -13,38 +13,42 @@ def _trade(**kwargs) -> SuggestedTrade:
         side=Side.CALL,
         strike=24000.0,
         lastPremium=50.0,
-        tqs=50.0,
+        tqs=56.0,
         strategyType=StrategyType.SCALP,
-        confidence=50.0,
+        confidence=56.0,
     )
     base.update(kwargs)
     return SuggestedTrade(**base)
 
 
 @patch("app.engines.simple_profit.get_settings")
-def test_velocity_fallback_when_score_strong(mock_settings):
+def test_sure_shot_requires_velocity(mock_settings):
     settings = mock_settings.return_value
+    settings.sure_shot_mode_enabled = True
+    settings.sure_shot_scalp_min_score = 55
     settings.aggressive_lot_sizing = True
-    settings.aggressive_min_tqs = 50
-    settings.enhanced_velocity_threshold = 1.2
+    settings.aggressive_min_tqs = 52
+    settings.enhanced_velocity_threshold = 1.4
+    settings.midday_chop_block_scalps = False
 
-    trade = _trade(tqs=56.0, confidence=56.0)
+    trade = _trade()
     ok, reason = check_entry_gate(
-        trade, Breadth(score=55, bias="BULLISH", aligned=True), 50.0, 0.3, False,
+        trade, Breadth(score=65, bias="BULLISH", aligned=True), 50.0, 0.5, False,
     )
-    assert ok
-    assert reason == "passed"
+    assert not ok
+    assert "velocity_below" in reason
 
 
 @patch("app.engines.simple_profit.get_settings")
 @patch("app.engines.simple_profit.get_market_phase", return_value="LIVE_MARKET")
 def test_midday_chop_targets(_phase, mock_settings):
     settings = mock_settings.return_value
-    settings.enhanced_micro_target_points = 2.5
+    settings.scalp_stop_points = 2.5
+    settings.enhanced_micro_target_points = 2.0
 
     with patch("app.engines.simple_profit.datetime") as mock_dt:
         mock_dt.now.return_value = type("T", (), {"hour": 12, "minute": 15})()
         profile = get_session_targets()
     assert profile.sessionLabel == "midday_chop"
-    assert profile.microTargetPoints == 2.5
-    assert profile.maxHoldSeconds == 150
+    assert profile.microTargetPoints == 2.0
+    assert profile.maxHoldSeconds == 120
