@@ -47,8 +47,6 @@ def _explosion_candidates(
     for alert in snap.explosionAlerts or []:
         if not alert.get("tradeable"):
             continue
-        if settings.sure_shot_mode_enabled and snap.tradeQualityScore < settings.sure_shot_min_symbol_tqs:
-            continue
         if not premium_in_band(alert.get("premium")):
             continue
         if alert.get("tier") not in ("ELITE", "EXPLODING"):
@@ -122,8 +120,6 @@ def _scalp_candidates(
     out: list[EntryCandidate] = []
     for suggestion in snap.suggestedTrades or []:
         if suggestion.strategyType == StrategyType.EXPLOSIVE:
-            continue
-        if settings.sure_shot_mode_enabled and snap.tradeQualityScore < settings.sure_shot_min_symbol_tqs:
             continue
         if not premium_in_band(suggestion.lastPremium):
             continue
@@ -251,11 +247,7 @@ def find_best_entry(
         bonus = 20 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
         return c.score + bonus
 
-    best = max(candidates, key=sort_key)
-    min_rank = settings.sure_shot_min_rank_score if settings.sure_shot_mode_enabled else 0.0
-    if min_rank > 0 and sort_key(best) < min_rank:
-        return None
-    return best
+    return max(candidates, key=sort_key)
 
 
 def diagnose_missed_entries(

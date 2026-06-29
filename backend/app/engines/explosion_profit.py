@@ -5,7 +5,6 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
-from app.engines.bullish_hold import direction_aligned_with_breadth
 from app.engines.capital_allocator import compute_lots
 from app.engines.explosion_detector import ExplosionEvent
 from app.models.schemas import Breadth, PaperTrade, Side, StrategyType, SuggestedTrade
@@ -48,8 +47,7 @@ def check_explosion_entry(
     breadth: Breadth,
     calibration_blocked: bool,
 ) -> tuple[bool, str]:
-    """Ultra-profile explosion — best of the best only."""
-    settings = get_settings()
+    """Fast entry on explosion — minimal gates, speed is everything."""
     if calibration_blocked:
         return False, "calibration_block"
 
@@ -59,26 +57,18 @@ def check_explosion_entry(
     if event.tier not in ("EXPLODING", "ELITE"):
         return False, f"tier_{event.tier}_not_tradeable"
 
-    if settings.sure_shot_mode_enabled and not breadth.aligned:
-        return False, "breadth_not_aligned"
-
-    if event.velocity_3s < settings.explosion_min_velocity_3s and event.velocity_9s < settings.explosion_min_velocity_9s:
+    if event.velocity_3s < 2.0 and event.velocity_9s < 3.0:
         return False, "velocity_too_low"
 
     if event.tier == "ELITE":
         return True, "elite_explosion"
 
-    min_score = (
-        settings.explosion_confirmed_min_score
-        if settings.sure_shot_mode_enabled
-        else settings.aggressive_min_explosion_score
-    )
+    min_score = get_settings().aggressive_min_explosion_score
     if event.tier == "EXPLODING" and event.explosion_score >= min_score:
         return True, "explosion_confirmed"
 
-    if not settings.sure_shot_mode_enabled:
-        if event.velocity_3s >= settings.explosion_early_velocity_3s and event.volume_surge >= settings.explosion_early_volume_surge:
-            return True, "early_explosion"
+    if event.velocity_3s >= 3.0 and event.volume_surge >= 1.5:
+        return True, "early_explosion"
 
     return False, "not_confirmed"
 
@@ -149,20 +139,11 @@ def evaluate_explosion_exit(
     best = max(trade.bestPnlPoints, pnl_pts)
     hold = _hold_seconds(trade)
     target = _target_points(event_tier)
-    trail_floor = _trail_floor_pts(trade, best, settings)
-    bullish_hold = direction_aligned_with_breadth(trade)
-    trail_keep = (
-        settings.bullish_hold_trail_keep_ratio
-        if bullish_hold
-        else settings.explosion_trail_keep_ratio
-    )
-
-    # Point stop before flat INR emergency — Jun 25 winning pattern
-    if trail_floor is None and hold >= settings.explosion_stop_min_hold_seconds and pnl_pts <= -settings.explosion_initial_stop_points:
-        return "explosion_stop_loss", pnl_inr
 
     if pnl_inr <= -settings.emergency_stop_inr:
         return "explosion_emergency_stop", pnl_inr
+
+    trail_floor = _trail_floor_pts(trade, best, settings)
 
     # Take profit at target while winning
     if pnl_pts >= target:
@@ -172,21 +153,20 @@ def evaluate_explosion_exit(
     if trail_floor is not None and pnl_pts <= trail_floor and best >= settings.explosion_trail_arm_points:
         return "explosion_trail_sl", pnl_inr
 
-    # Legacy trail lock — looser when bullish aligned (ride toward 50pt TP)
-    if trail_floor is not None and pnl_pts < best * trail_keep and best >= 8:
-        if not bullish_hold or best >= target * 0.20:
-            return "explosion_trail_lock", pnl_inr
+    # Legacy trail lock label when ratio breach without stored floor
+    if trail_floor is not None and pnl_pts < best * settings.explosion_trail_keep_ratio and best >= 8:
+        return "explosion_trail_lock", pnl_inr
 
-    # No progress — hold green trades when bullish
-    if hold >= settings.explosion_no_progress_seconds and best < settings.explosion_trail_arm_points:
-        if bullish_hold and pnl_pts > 0:
-            pass
-        elif pnl_pts > 0:
-            return "explosion_time_profit", pnl_inr
+    # Initial hard stop before trail arms
+    if trail_floor is None and hold >= 15 and pnl_pts <= -settings.explosion_initial_stop_points:
+        return "explosion_stop_loss", pnl_inr
+
+    # No progress only when never reached trail arm
+    if hold >= 90 and best < settings.explosion_trail_arm_points:
         return "explosion_no_progress", pnl_inr
 
-    hold_mult = settings.bullish_hold_max_hold_multiplier if bullish_hold else 1.0
-    max_hold = int((300 if event_tier == "ELITE" or best >= 15 else 240) * hold_mult)
+    # Time cap — take profit if green, else stop
+    max_hold = 300 if event_tier == "ELITE" or best >= 15 else 240
     if hold >= max_hold:
         return ("explosion_time_profit" if pnl_pts > 0 else "explosion_time_stop"), pnl_inr
 
