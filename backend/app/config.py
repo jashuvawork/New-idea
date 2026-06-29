@@ -199,6 +199,7 @@ class Settings(BaseSettings):
     max_exposure_pct: float = 0.85
     position_sl_cap_pct: float = 0.06
     position_tp_target_pct: float = 0.10
+    emergency_stop_enabled: bool = False
     emergency_stop_inr: float = 20_000
     emergency_stop_scale_with_position: bool = False
     scalp_stop_points: float = 3.0

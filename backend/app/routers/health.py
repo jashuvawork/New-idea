@@ -59,6 +59,7 @@ async def deployment_status():
             "maxSizingCapitalInr": settings.max_sizing_capital_inr,
             "aggressiveLotSizing": settings.aggressive_lot_sizing,
             "maxLotsPerTrade": settings.max_lots_per_trade,
+            "emergencyStopEnabled": settings.emergency_stop_enabled,
             "emergencyStopInr": settings.emergency_stop_inr,
             "emergencyStopScaleWithPosition": settings.emergency_stop_scale_with_position,
             "scalpStopPoints": settings.scalp_stop_points,

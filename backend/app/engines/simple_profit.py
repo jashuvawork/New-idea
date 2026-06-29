@@ -152,11 +152,11 @@ def evaluate_exit(
         else 0.55
     )
 
-    # Point stop before INR emergency — lets micro/trail capture rallies
+    # Point stop only — no flat INR emergency cap
     if hold_seconds >= min_hold and pnl_pts <= -profile.stopPoints:
         return "simple_stop_loss", pnl_inr
 
-    if pnl_inr <= -settings.emergency_stop_inr:
+    if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
         return "simple_emergency_inr_stop", pnl_inr
 
     if pnl_pts >= profile.targetPoints:
