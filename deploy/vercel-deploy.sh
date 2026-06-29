@@ -2,12 +2,13 @@
 # Deploy NexusQuant frontend to Vercel
 set -euo pipefail
 
-cd "$(dirname "$0")/../frontend"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 
-export VITE_API_URL="${VITE_API_URL:-https://api.nexusquant.uk}"
+export VITE_API_URL="${VITE_API_URL:-}"
 export VITE_POLL_MS="${VITE_POLL_MS:-1000}"
 
-npm run build
+npm run vercel-build
 
 if [ -n "${VERCEL_TOKEN:-}" ]; then
   npx vercel deploy --prod --token "$VERCEL_TOKEN" --yes
