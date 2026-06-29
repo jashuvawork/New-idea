@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.config import get_settings
-from app.engines.session_timing import min_explosion_score_now, in_midday_chop_window
+from app.engines.session_timing import min_explosion_score_now
 from app.engines.symbol_cooldown import (
     entry_score_penalty,
     recent_win_rank_bonus,
@@ -132,8 +132,6 @@ def _scalp_candidates(
             continue
         if settings.sure_shot_mode_enabled and snap.tradeQualityScore < settings.sure_shot_min_symbol_tqs:
             continue
-        if settings.sure_shot_mode_enabled and in_midday_chop_window():
-            continue
         if not premium_in_band(suggestion.lastPremium):
             continue
         if not suggestion.lastPremium or suggestion.lastPremium <= 0:
@@ -144,7 +142,8 @@ def _scalp_candidates(
             continue
 
         if requires_breadth_alignment(symbol) and not snap.breadth.aligned:
-            continue
+            if snap.breadth.bias != "NEUTRAL":
+                continue
 
         blocked = state.calibrationBlocks.get(suggestion.side.value, False)
         momentum = (snap.orderflow.volumeAcceleration or 0) > 65
@@ -275,7 +274,8 @@ def find_best_entry(
         return c.score + bonus
 
     best = max(filtered, key=sort_key)
-    if settings.sure_shot_mode_enabled and sort_key(best) < settings.sure_shot_min_rank_score:
+    min_rank = settings.sure_shot_min_rank_score if settings.sure_shot_mode_enabled else 0.0
+    if min_rank > 0 and sort_key(best) < min_rank:
         return None
     return best
 

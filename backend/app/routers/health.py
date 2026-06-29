@@ -74,6 +74,7 @@ async def deployment_status():
             "explosionMaxLots": settings.explosion_max_lots,
             "scalpMaxLots": settings.scalp_max_lots,
             "sureShotModeEnabled": settings.sure_shot_mode_enabled,
+            "rapidScalpModeEnabled": settings.rapid_scalp_mode_enabled,
             "sureShotMinSymbolTqs": settings.sure_shot_min_symbol_tqs,
             "sureShotMinRankScore": settings.sure_shot_min_rank_score,
             "sureShotScalpMinScore": settings.sure_shot_scalp_min_score,

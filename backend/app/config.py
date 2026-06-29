@@ -123,17 +123,18 @@ class Settings(BaseSettings):
     min_option_premium_inr: float = 25.0
     max_option_premium_inr: float = 175.0
 
-    # Enhanced scalping — sure-shot: fewer entries, higher conviction
-    enhanced_micro_target_points: float = 2.0
-    enhanced_velocity_threshold: float = 1.8
-    enhanced_tqs_entry: int = 55
-    runner_alignment_override_score: int = 88
-    sure_shot_mode_enabled: bool = True
-    sure_shot_min_symbol_tqs: int = 45
-    sure_shot_min_rank_score: float = 55.0
+    # Enhanced scalping — rapid mode: fast entries/exits, full session
+    enhanced_micro_target_points: float = 1.5
+    enhanced_velocity_threshold: float = 1.25
+    enhanced_tqs_entry: int = 50
+    runner_alignment_override_score: int = 82
+    rapid_scalp_mode_enabled: bool = True
+    sure_shot_mode_enabled: bool = False
+    sure_shot_min_symbol_tqs: int = 40
+    sure_shot_min_rank_score: float = 48.0
     sure_shot_scalp_min_score: int = 55
-    scalp_max_lots: int = 25
-    midday_chop_block_scalps: bool = True
+    scalp_max_lots: int = 35
+    midday_chop_block_scalps: bool = False
     midday_chop_start_hour: int = 11
     midday_chop_start_minute: int = 30
     midday_chop_end_hour: int = 13
@@ -146,7 +147,7 @@ class Settings(BaseSettings):
     max_sizing_capital_inr: float = 200_000
     per_trade_capital_pct: float = 0.55
     aggressive_lot_sizing: bool = True
-    aggressive_min_tqs: int = 55
+    aggressive_min_tqs: int = 48
     aggressive_min_explosion_score: int = 55
     explosion_confirmed_min_score: int = 58
     explosion_max_lots: int = 25
@@ -163,7 +164,10 @@ class Settings(BaseSettings):
     emergency_stop_inr: float = 12_000
     emergency_stop_scale_with_position: bool = True
     scalp_stop_points: float = 2.5
-    scalp_stop_min_hold_seconds: int = 10
+    scalp_stop_min_hold_seconds: int = 5
+    scalp_trail_arm_points: float = 2.0
+    scalp_trail_keep_ratio: float = 0.5
+    scalp_no_progress_seconds: int = 60
 
     # Daily session targets — ₹22K min milestone; staged locks at % of capital (no upside cap)
     daily_profit_target_inr: float = 22_000  # minimum milestone only — does not stop entries
