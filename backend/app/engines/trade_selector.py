@@ -138,7 +138,9 @@ def _scalp_candidates(
             continue
 
         if requires_breadth_alignment(symbol) and not snap.breadth.aligned:
-            continue
+            # NEUTRAL breadth is not a directional mismatch — allow scalp re-entry
+            if snap.breadth.bias != "NEUTRAL":
+                continue
 
         blocked = state.calibrationBlocks.get(suggestion.side.value, False)
         momentum = (snap.orderflow.volumeAcceleration or 0) > 65

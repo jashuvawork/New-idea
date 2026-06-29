@@ -175,8 +175,12 @@ async def _subscription_refresh_loop(ws) -> None:
 
 async def _consume_loop(ws) -> None:
     global _last_message_mono
+    stale_seconds = 90
     while True:
-        raw = await ws.recv()
+        try:
+            raw = await asyncio.wait_for(ws.recv(), timeout=stale_seconds)
+        except asyncio.TimeoutError:
+            raise RuntimeError("WS stale — no feed data in 90s")
         _last_message_mono = time.monotonic()
         if isinstance(raw, str):
             continue
@@ -289,6 +293,14 @@ async def stop_upstox_ws() -> None:
     clear_ticks()
 
 
+def _message_stale(max_age_seconds: float = 90.0) -> bool:
+    if not _connected:
+        return False
+    if not _last_message_mono:
+        return True
+    return (time.monotonic() - _last_message_mono) > max_age_seconds
+
+
 def ws_status() -> dict[str, Any]:
     from app.services.tick_store import status as tick_status
 
@@ -296,9 +308,11 @@ def ws_status() -> dict[str, Any]:
     if _last_message_mono:
         age_ms = int((time.monotonic() - _last_message_mono) * 1000)
     tick = tick_status()
+    stale = _message_stale()
     return {
         "enabled": get_settings().upstox_ws_enabled,
-        "connected": _connected,
+        "connected": _connected and not stale,
+        "streamStale": stale,
         "subscribedInstruments": _subscribed_count,
         "reconnectCount": _reconnect_count,
         "lastError": _last_error,
@@ -310,7 +324,7 @@ def ws_status() -> dict[str, Any]:
 
 def is_ws_active() -> bool:
     """True when WS is connected and receiving recent ticks."""
-    if not _connected:
+    if not _connected or _message_stale(15.0):
         return False
     if not _last_message_mono:
         return False
