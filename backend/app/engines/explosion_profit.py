@@ -5,6 +5,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
+from app.engines.risk_stops import effective_emergency_stop_inr
 from app.engines.capital_allocator import compute_lots
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.session_timing import in_open_caution_window, min_explosion_score_now
@@ -68,7 +69,7 @@ def check_explosion_entry(
         return True, "elite_explosion"
 
     min_score = min_explosion_score_now()
-    if in_open_caution_window() and event.tier != "ELITE" and event.explosion_score < min_score + 5:
+    if in_open_caution_window() and event.tier != "ELITE" and event.explosion_score < min_score + settings.open_caution_score_bonus:
         return False, "open_caution_wait_for_elite"
     if event.tier == "EXPLODING" and event.explosion_score >= min_score:
         return True, "explosion_confirmed"
@@ -146,7 +147,10 @@ def evaluate_explosion_exit(
     hold = _hold_seconds(trade)
     target = _target_points(event_tier)
 
-    if pnl_inr <= -settings.emergency_stop_inr:
+    stop_inr = effective_emergency_stop_inr(
+        trade.lots, lot_multiplier, settings.explosion_initial_stop_points,
+    )
+    if pnl_inr <= -stop_inr:
         return "explosion_emergency_stop", pnl_inr
 
     trail_floor = _trail_floor_pts(trade, best, settings)
@@ -164,11 +168,13 @@ def evaluate_explosion_exit(
         return "explosion_trail_lock", pnl_inr
 
     # Initial hard stop before trail arms
-    if trail_floor is None and hold >= 15 and pnl_pts <= -settings.explosion_initial_stop_points:
+    if trail_floor is None and hold >= settings.explosion_stop_min_hold_seconds and pnl_pts <= -settings.explosion_initial_stop_points:
         return "explosion_stop_loss", pnl_inr
 
-    # No progress only when never reached trail arm
-    if hold >= 90 and best < settings.explosion_trail_arm_points:
+    # No progress — scratch losers; bank small winners instead of killing runners
+    if hold >= settings.explosion_no_progress_seconds and best < settings.explosion_trail_arm_points:
+        if pnl_pts > 0:
+            return "explosion_time_profit", pnl_inr
         return "explosion_no_progress", pnl_inr
 
     # Time cap — take profit if green, else stop

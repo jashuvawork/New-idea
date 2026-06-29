@@ -82,8 +82,8 @@ class Settings(BaseSettings):
     paper_brokerage_round_trip_inr: float = 40.0
 
     # Explosion capture tuning
-    explosion_min_velocity_3s: float = 2.5
-    explosion_min_velocity_9s: float = 3.5
+    explosion_min_velocity_3s: float = 2.2
+    explosion_min_velocity_9s: float = 3.0
     explosion_early_velocity_3s: float = 3.5
     explosion_early_volume_surge: float = 1.8
     explosion_scan_range: int = 800
@@ -94,7 +94,9 @@ class Settings(BaseSettings):
     explosion_trail_step_points: float = 3.5
     explosion_trail_tight_arm: float = 12.0
     explosion_trail_tight_points: float = 5.0
-    explosion_initial_stop_points: float = 4.0
+    explosion_initial_stop_points: float = 2.5
+    explosion_stop_min_hold_seconds: int = 5
+    explosion_no_progress_seconds: int = 120
     explosion_reentry_cooldown_seconds: int = 180
     explosion_emergency_cooldown_seconds: int = 300
 
@@ -103,8 +105,9 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 20
     # Stricter explosion gates until this IST time (opening range forming)
     open_caution_until_hour: int = 9
-    open_caution_until_minute: int = 30
-    open_caution_min_explosion_score: int = 58
+    open_caution_until_minute: int = 25
+    open_caution_min_explosion_score: int = 52
+    open_caution_score_bonus: int = 3
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
@@ -112,30 +115,33 @@ class Settings(BaseSettings):
 
     # Enhanced scalping (more powerful than base spec)
     enhanced_micro_target_points: float = 2.5  # faster micro lock vs 3.0 base
-    enhanced_velocity_threshold: float = 1.5  # runner + scalp minimum premium velocity %
-    enhanced_tqs_entry: int = 55  # explosive runner candidate minimum score
-    runner_alignment_override_score: int = 85  # scalp breadth bypass when runner is strong
+    enhanced_velocity_threshold: float = 1.25
+    enhanced_tqs_entry: int = 50
+    runner_alignment_override_score: int = 82
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
-    # Capital / risk — ₹2L book, 85% per trade, lots derived from margin (no fixed 100-lot cap)
+    # Capital / risk — smaller book per trade; hard cap on lots and INR loss
     fallback_capital_inr: float = 200_000
     max_sizing_capital_inr: float = 200_000
-    per_trade_capital_pct: float = 0.85
+    per_trade_capital_pct: float = 0.55
     aggressive_lot_sizing: bool = True
-    aggressive_min_tqs: int = 50
-    aggressive_min_explosion_score: int = 50
+    aggressive_min_tqs: int = 48
+    aggressive_min_explosion_score: int = 47
     aggressive_min_swing_confidence: int = 65
     aggressive_max_open_scalps: int = 1
-    max_lots_per_trade: int = 60  # hard cap — 85% sizing derived, prevents 100+ lot blowups
+    max_lots_per_trade: int = 35
     min_lots_per_trade: int = 1
     max_risk_per_trade_inr: float = 200_000
     min_per_trade_risk_inr: float = 3_000
-    per_trade_risk_pct: float = 0.85
-    max_exposure_pct: float = 0.85
+    per_trade_risk_pct: float = 0.55
+    max_exposure_pct: float = 0.55
     position_sl_cap_pct: float = 0.06
     position_tp_target_pct: float = 0.10
-    emergency_stop_inr: float = 20_000
+    emergency_stop_inr: float = 12_000
+    emergency_stop_scale_with_position: bool = True
+    scalp_stop_points: float = 2.5
+    scalp_stop_min_hold_seconds: int = 10
 
     # Daily session targets — ₹22K min milestone; staged locks at % of capital (no upside cap)
     daily_profit_target_inr: float = 22_000  # minimum milestone only — does not stop entries

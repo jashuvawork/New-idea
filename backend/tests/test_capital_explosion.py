@@ -35,7 +35,7 @@ class CapitalSizingTests(unittest.TestCase):
         snap = CapitalSnapshot(perTradeCapitalInr=170_000)
         with patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap):
             clamped = clamp_lots(500, "SENSEX", 40.0)
-            self.assertEqual(clamped, 60)
+            self.assertEqual(clamped, 35)
 
 
 class ExplosionExitTests(unittest.TestCase):

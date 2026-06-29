@@ -5,6 +5,7 @@ from typing import Optional
 
 from app.config import get_settings
 from app.engines.premium_filter import premium_in_band, premium_reject_reason
+from app.engines.risk_stops import effective_emergency_stop_inr
 from app.models.schemas import (
     Breadth,
     OptimizedProfile,
@@ -34,21 +35,21 @@ def get_session_targets() -> OptimizedProfile:
     # IST session windows (approximate)
     if 9 * 60 + 15 <= t < 10 * 60:
         return OptimizedProfile(
-            targetPoints=7.0, stopPoints=3.0, microTargetPoints=micro,
+            targetPoints=7.0, stopPoints=settings.scalp_stop_points, microTargetPoints=micro,
             maxHoldSeconds=180, sessionLabel="open_drive",
         )
     if 11 * 60 + 30 <= t < 13 * 60:
         return OptimizedProfile(
-            targetPoints=5.0, stopPoints=3.0, microTargetPoints=micro,
+            targetPoints=5.0, stopPoints=settings.scalp_stop_points, microTargetPoints=micro,
             maxHoldSeconds=150, sessionLabel="midday_chop",
         )
     if 14 * 60 + 30 <= t < 15 * 60 + 15:
         return OptimizedProfile(
-            targetPoints=6.5, stopPoints=3.0, microTargetPoints=micro,
+            targetPoints=6.5, stopPoints=settings.scalp_stop_points, microTargetPoints=micro,
             maxHoldSeconds=180, sessionLabel="closing_momentum",
         )
     return OptimizedProfile(
-        targetPoints=6.0, stopPoints=3.0, microTargetPoints=micro,
+        targetPoints=6.0, stopPoints=settings.scalp_stop_points, microTargetPoints=micro,
         maxHoldSeconds=180, sessionLabel="normal",
     )
 
@@ -123,12 +124,12 @@ def evaluate_exit(
     # Track best
     best = max(trade.bestPnlPoints, pnl_pts)
 
-    # Emergency INR stop
-    if pnl_inr <= -settings.emergency_stop_inr:
+    stop_inr = effective_emergency_stop_inr(trade.lots, lot_multiplier, profile.stopPoints)
+    if pnl_inr <= -stop_inr:
         return "simple_emergency_inr_stop", pnl_inr
 
     # Min hold before stop loss
-    if hold_seconds >= 30 and pnl_pts <= -profile.stopPoints:
+    if hold_seconds >= settings.scalp_stop_min_hold_seconds and pnl_pts <= -profile.stopPoints:
         return "simple_stop_loss", pnl_inr
 
     # Session profit target
