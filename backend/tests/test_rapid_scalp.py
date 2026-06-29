@@ -51,4 +51,4 @@ def test_midday_chop_targets(_phase, mock_settings):
         profile = get_session_targets()
     assert profile.sessionLabel == "midday_chop"
     assert profile.microTargetPoints == 2.0
-    assert profile.maxHoldSeconds == 120
+    assert profile.maxHoldSeconds == 210

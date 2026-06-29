@@ -30,8 +30,16 @@ def _trade(pnl: float, side: Side = Side.CALL) -> PaperTrade:
     )
 
 
+def test_symbol_cooldown_disabled_when_zero():
+    reset_symbol_cooldowns()
+    record_symbol_result("NIFTY", -1000, "simple_emergency_inr_stop")
+    blocked, reason = symbol_in_cooldown("NIFTY")
+    assert not blocked
+    assert reason == "ok"
+
+
 @patch("app.engines.symbol_cooldown.get_settings")
-def test_symbol_cooldown_after_loss(mock_settings):
+def test_symbol_cooldown_after_loss_when_enabled(mock_settings):
     settings = mock_settings.return_value
     settings.symbol_loss_cooldown_seconds = 180
     settings.symbol_emergency_cooldown_seconds = 600
