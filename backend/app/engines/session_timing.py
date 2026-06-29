@@ -40,7 +40,7 @@ def entries_allowed_now() -> tuple[bool, str]:
 
 
 def in_open_caution_window() -> bool:
-    """09:20–09:30 IST — stricter explosion gates while opening range forms."""
+    """09:15–09:45 IST — stricter rank gates while opening range forms."""
     if get_market_phase() != "LIVE_MARKET":
         return False
     current = _minutes_now()

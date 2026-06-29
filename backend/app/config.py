@@ -115,13 +115,33 @@ class Settings(BaseSettings):
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5
 
-    # Entries from 9:15 IST (Jun 25 first trade ~10:08 via rank gate)
+    # Entries from 9:15 IST; open caution until 9:45 on chop days
     entry_earliest_hour: int = 9
     entry_earliest_minute: int = 15
     open_caution_until_hour: int = 9
-    open_caution_until_minute: int = 15
+    open_caution_until_minute: int = 45
     open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
+    open_caution_min_rank_score: float = 55.0
+    primary_window_start_hour: int = 10
+    primary_window_start_minute: int = 0
+
+    # Chop-day guardrails (Jun 25 playbook for RANGE_BOUND / NEUTRAL days)
+    chop_day_guards_enabled: bool = True
+    neutral_breadth_min_score: float = 60.0
+    neutral_breadth_explosion_min_score: float = 55.0
+    sensex_rank_bonus: float = 10.0
+    nifty_rank_penalty_chop: float = 5.0
+    daily_loss_stop_inr: float = 30_000.0
+    daily_max_trades_chop: int = 20
+    daily_max_trades_pre10_chop: int = 5
+    pre10_chop_min_rank_score: float = 60.0
+    loss_streak_pause_count: int = 3
+    loss_streak_pause_seconds: int = 1200
+    chop_lots_high: int = 40
+    chop_lots_mid: int = 20
+    chop_lots_min_rank: float = 48.0
+    chop_lots_high_min_rank: float = 55.0
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
@@ -142,7 +162,7 @@ class Settings(BaseSettings):
     bullish_hold_enabled: bool = False
     bullish_hold_trail_keep_ratio: float = 0.55
     bullish_hold_max_hold_multiplier: float = 1.0
-    midday_chop_block_scalps: bool = False
+    midday_chop_block_scalps: bool = True
     midday_chop_start_hour: int = 11
     midday_chop_start_minute: int = 30
     midday_chop_end_hour: int = 13

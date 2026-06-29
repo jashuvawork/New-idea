@@ -33,11 +33,11 @@ def test_entries_allowed_at_915():
     assert ok
 
 
-def test_open_caution_disabled():
+def test_open_caution_active_until_945():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 6, 30, 9, 24, 0, tzinfo=IST)
-            assert not in_open_caution_window()
+            assert in_open_caution_window()
             assert min_explosion_score_now() == 45
 
 

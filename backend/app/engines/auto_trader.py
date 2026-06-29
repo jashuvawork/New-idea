@@ -30,6 +30,14 @@ from app.engines.capital_allocator import (
     update_daily_profit_gate,
 )
 from app.engines.symbol_cooldown import record_symbol_result, reset_symbol_cooldowns
+from app.engines.chop_day_guards import (
+    apply_tiered_lot_cap,
+    chop_guard_summary,
+    record_session_trade_close,
+    reset_session_guards,
+    session_pause_active,
+    trades_cap_reached,
+)
 from app.engines.trade_selector import EntryCandidate, diagnose_missed_entries, find_best_entry
 from app.engines.paper_slippage import (
     apply_entry_fill,
@@ -209,6 +217,11 @@ async def _open_from_candidate(
         confidence=candidate.confidence,
         tier=candidate.tier,
     )
+    lots = apply_tiered_lot_cap(
+        lots, candidate.score, snap.breadth.aligned, symbol,
+    )
+    if lots <= 0:
+        return False, "tiered_lot_cap_zero"
     lot_mult = lot_multiplier(symbol)
 
     ok, risk_reason = _risk_engine.check_new_entry(
@@ -384,6 +397,7 @@ def reset_session_calibration() -> None:
     """Clear side blocks and per-symbol loss streaks without wiping trade history."""
     _calibration.reset()
     reset_symbol_cooldowns()
+    reset_session_guards()
 
 
 def reset_session() -> None:
@@ -558,6 +572,7 @@ async def process(
             state.closedPaperTrades.append(trade)
             _calibration.record_trade(trade)
             record_symbol_result(trade.symbol, pnl, exit_reason or "")
+            record_session_trade_close(pnl)
             trade_store.record_trade_closed(trade, ctx)
             get_ai_learning().record_trade_close(trade)
             state.lastExit = {
@@ -578,6 +593,7 @@ async def process(
     cap_snap = get_capital_snapshot()
     state.capitalAllocation = {**cap_snap.to_dict(), **get_lot_sizes_meta()}
     state.dailyProfitGate = profit_gate.to_dict()
+    state.chopGuards = chop_guard_summary(state, snapshots)
 
     if not profit_gate.newEntriesAllowed:
         skipped.append({
@@ -602,18 +618,33 @@ async def process(
         and profit_gate.newEntriesAllowed
         and entries_ok
     ):
-        best = find_best_entry(snapshots, state)
-        if best:
-            opened, reason = await _open_from_candidate(best, state, client, news)
-            if not opened:
-                skipped.append({
-                    "symbol": best.symbol,
-                    "reason": reason,
-                    "mode": best.mode,
-                    "score": best.score,
-                })
-        else:
-            skipped.extend(diagnose_missed_entries(snapshots, state))
+        paused, pause_reason = session_pause_active()
+        if paused:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": pause_reason,
+                "message": "Loss streak pause — no new entries",
+            })
+        cap_hit, cap_reason = trades_cap_reached(state, snapshots)
+        if cap_hit:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": cap_reason,
+                "message": "Daily trade cap on chop session",
+            })
+        if not paused and not cap_hit:
+            best = find_best_entry(snapshots, state)
+            if best:
+                opened, reason = await _open_from_candidate(best, state, client, news)
+                if not opened:
+                    skipped.append({
+                        "symbol": best.symbol,
+                        "reason": reason,
+                        "mode": best.mode,
+                        "score": best.score,
+                    })
+            else:
+                skipped.extend(diagnose_missed_entries(snapshots, state))
 
     state.skipped = skipped
     state.dailyReport = _calibration.build_report(state.closedPaperTrades)

@@ -485,6 +485,16 @@ def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
         stages=stages,
     )
 
+    loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
+    if loss_stop > 0 and session_pnl <= -abs(loss_stop):
+        gate.newEntriesAllowed = False
+        gate.status = "DAILY_LOSS_STOP"
+        gate.message = (
+            f"Daily loss stop: session ₹{session_pnl:,.0f} ≤ −₹{loss_stop:,.0f} "
+            "— new entries paused."
+        )
+        return gate
+
     if settings.daily_profit_stage_locks_enabled:
         if locked_floor > 0 and session_pnl < locked_floor:
             gate.trailLocked = True
