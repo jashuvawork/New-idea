@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.config import get_settings
-from app.engines.session_timing import min_explosion_score_now
+from app.engines.session_timing import min_explosion_score_now, in_midday_chop_window
 from app.engines.symbol_cooldown import (
     entry_score_penalty,
     recent_win_rank_bonus,
@@ -53,6 +53,8 @@ def _explosion_candidates(
     out: list[EntryCandidate] = []
     for alert in snap.explosionAlerts or []:
         if not alert.get("tradeable"):
+            continue
+        if settings.sure_shot_mode_enabled and snap.tradeQualityScore < settings.sure_shot_min_symbol_tqs:
             continue
         if not premium_in_band(alert.get("premium")):
             continue
@@ -128,6 +130,10 @@ def _scalp_candidates(
     for suggestion in snap.suggestedTrades or []:
         if suggestion.strategyType == StrategyType.EXPLOSIVE:
             continue
+        if settings.sure_shot_mode_enabled and snap.tradeQualityScore < settings.sure_shot_min_symbol_tqs:
+            continue
+        if settings.sure_shot_mode_enabled and in_midday_chop_window():
+            continue
         if not premium_in_band(suggestion.lastPremium):
             continue
         if not suggestion.lastPremium or suggestion.lastPremium <= 0:
@@ -138,9 +144,7 @@ def _scalp_candidates(
             continue
 
         if requires_breadth_alignment(symbol) and not snap.breadth.aligned:
-            # NEUTRAL breadth is not a directional mismatch — allow scalp re-entry
-            if snap.breadth.bias != "NEUTRAL":
-                continue
+            continue
 
         blocked = state.calibrationBlocks.get(suggestion.side.value, False)
         momentum = (snap.orderflow.volumeAcceleration or 0) > 65
@@ -270,7 +274,10 @@ def find_best_entry(
         bonus = 8 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
         return c.score + bonus
 
-    return max(filtered, key=sort_key)
+    best = max(filtered, key=sort_key)
+    if settings.sure_shot_mode_enabled and sort_key(best) < settings.sure_shot_min_rank_score:
+        return None
+    return best
 
 
 def diagnose_missed_entries(

@@ -54,6 +54,19 @@ def min_explosion_score_now() -> int:
     return settings.aggressive_min_explosion_score
 
 
+def in_midday_chop_window() -> bool:
+    """11:30–13:30 IST — low-quality range; block scalp entries in sure-shot mode."""
+    if get_market_phase() != "LIVE_MARKET":
+        return False
+    settings = get_settings()
+    if not settings.midday_chop_block_scalps:
+        return False
+    current = _minutes_now()
+    start = settings.midday_chop_start_hour * 60 + settings.midday_chop_start_minute
+    end = settings.midday_chop_end_hour * 60 + settings.midday_chop_end_minute
+    return start <= current < end
+
+
 def entry_window_label() -> str:
     settings = get_settings()
     return f"{settings.entry_earliest_hour:02d}:{settings.entry_earliest_minute:02d} IST"

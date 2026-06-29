@@ -581,12 +581,18 @@ def compute_lots(
     lots = int(trade_budget / margin_per_lot)
 
     if settings.aggressive_lot_sizing:
-        return clamp_lots(max(1, lots), symbol, premium)
+        lots = clamp_lots(max(1, lots), symbol, premium)
+    else:
+        risk_per_lot = stop_points * mult
+        lots_by_risk = int(cap.perTradeRiskInr / risk_per_lot) if risk_per_lot > 0 else lots
+        lots = min(lots, lots_by_risk, max_lots_for_capital(symbol, premium))
+        lots = clamp_lots(max(settings.simple_min_lots, lots), symbol, premium)
 
-    risk_per_lot = stop_points * mult
-    lots_by_risk = int(cap.perTradeRiskInr / risk_per_lot) if risk_per_lot > 0 else lots
-    lots = min(lots, lots_by_risk, max_lots_for_capital(symbol, premium))
-    return clamp_lots(max(settings.simple_min_lots, lots), symbol, premium)
+    if strategy_type == StrategyType.SCALP and settings.scalp_max_lots > 0:
+        lots = min(lots, settings.scalp_max_lots)
+    elif strategy_type == StrategyType.EXPLOSIVE and settings.explosion_max_lots > 0:
+        lots = min(lots, settings.explosion_max_lots)
+    return lots
 
 
 def tune_exit_plan_for_position(

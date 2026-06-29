@@ -6,6 +6,7 @@ from typing import Optional
 from app.config import get_settings
 from app.engines.premium_filter import premium_in_band, premium_reject_reason
 from app.engines.risk_stops import effective_emergency_stop_inr
+from app.engines.session_timing import in_midday_chop_window
 from app.models.schemas import (
     Breadth,
     OptimizedProfile,
@@ -72,22 +73,35 @@ def check_entry_gate(
     if not premium_in_band(trade.lastPremium):
         return False, premium_reject_reason(trade.lastPremium)
 
-    min_score = settings.aggressive_min_tqs if settings.aggressive_lot_sizing else settings.enhanced_tqs_entry
+    min_score = (
+        settings.sure_shot_scalp_min_score
+        if settings.sure_shot_mode_enabled
+        else (settings.aggressive_min_tqs if settings.aggressive_lot_sizing else settings.enhanced_tqs_entry)
+    )
     trade_score = max(trade.tqs, trade.confidence or 0)
 
-    # Strategy signals may lack runner velocity — use confidence as fallback
-    effective_vel = velocity_pct
-    if effective_vel < settings.enhanced_velocity_threshold and trade_score >= min_score:
-        effective_vel = settings.enhanced_velocity_threshold
+    if settings.sure_shot_mode_enabled and in_midday_chop_window():
+        if not (breadth.aligned and trade_score >= min_score + 5):
+            return False, "midday_chop_wait"
 
-    if effective_vel < settings.enhanced_velocity_threshold:
+    if velocity_pct < settings.enhanced_velocity_threshold:
         return False, f"velocity_below_{settings.enhanced_velocity_threshold}pct"
 
     if trade_score < min_score:
         return False, f"score_below_{min_score}"
 
-    # Breadth: relaxed when trade score is strong
     side_bias = "BULLISH" if trade.side == Side.CALL else "BEARISH"
+
+    if settings.sure_shot_mode_enabled:
+        if alignment_override or (momentum_surge and trade_score >= min_score + 8):
+            return True, "passed"
+        if not breadth.aligned:
+            return False, "breadth_not_aligned"
+        if breadth.bias not in (side_bias, "NEUTRAL"):
+            return False, "breadth_opposes_side"
+        return True, "passed"
+
+    # Legacy relaxed gates when sure-shot mode off
     if breadth.bias != side_bias and not alignment_override:
         if not momentum_surge and trade_score < min_score + 8:
             return False, "breadth_misalignment"

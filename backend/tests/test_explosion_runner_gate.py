@@ -57,11 +57,18 @@ def test_score_45_still_blocked():
     assert reason == "not_confirmed"
 
 
-def test_score_55_exploding_confirmed():
-    event = _event(explosion_score=55.0, velocity_3s=3.0, velocity_9s=4.0)
+def test_score_58_exploding_confirmed():
+    event = _event(explosion_score=58.0, velocity_3s=3.0, velocity_9s=4.0)
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
     assert ok
     assert reason == "explosion_confirmed"
+
+
+def test_score_55_exploding_still_blocked():
+    event = _event(explosion_score=55.0, velocity_3s=3.0, velocity_9s=4.0)
+    ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
+    assert not ok
+    assert reason == "not_confirmed"
 
 
 def test_score_52_exploding_still_blocked():

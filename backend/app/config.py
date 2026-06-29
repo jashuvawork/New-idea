@@ -103,8 +103,8 @@ class Settings(BaseSettings):
 
     # Per-symbol cooldown after losses — stops NIFTY re-entry churn
     symbol_loss_cooldown_seconds: int = 180
-    symbol_emergency_cooldown_seconds: int = 360
-    symbol_streak_cooldown_seconds: int = 600
+    symbol_emergency_cooldown_seconds: int = 600
+    symbol_streak_cooldown_seconds: int = 900
     reentry_score_penalty_per_loss: int = 6
     recent_win_window_seconds: int = 900
     recent_win_rank_bonus: float = 15.0
@@ -123,11 +123,21 @@ class Settings(BaseSettings):
     min_option_premium_inr: float = 25.0
     max_option_premium_inr: float = 175.0
 
-    # Enhanced scalping (more powerful than base spec)
-    enhanced_micro_target_points: float = 2.0  # bank smaller wins faster
-    enhanced_velocity_threshold: float = 1.25
-    enhanced_tqs_entry: int = 50
-    runner_alignment_override_score: int = 82
+    # Enhanced scalping — sure-shot: fewer entries, higher conviction
+    enhanced_micro_target_points: float = 2.0
+    enhanced_velocity_threshold: float = 1.8
+    enhanced_tqs_entry: int = 55
+    runner_alignment_override_score: int = 88
+    sure_shot_mode_enabled: bool = True
+    sure_shot_min_symbol_tqs: int = 45
+    sure_shot_min_rank_score: float = 55.0
+    sure_shot_scalp_min_score: int = 55
+    scalp_max_lots: int = 25
+    midday_chop_block_scalps: bool = True
+    midday_chop_start_hour: int = 11
+    midday_chop_start_minute: int = 30
+    midday_chop_end_hour: int = 13
+    midday_chop_end_minute: int = 30
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
@@ -136,9 +146,9 @@ class Settings(BaseSettings):
     max_sizing_capital_inr: float = 200_000
     per_trade_capital_pct: float = 0.55
     aggressive_lot_sizing: bool = True
-    aggressive_min_tqs: int = 48
-    aggressive_min_explosion_score: int = 52
-    explosion_confirmed_min_score: int = 55
+    aggressive_min_tqs: int = 55
+    aggressive_min_explosion_score: int = 55
+    explosion_confirmed_min_score: int = 58
     explosion_max_lots: int = 25
     aggressive_min_swing_confidence: int = 65
     aggressive_max_open_scalps: int = 1

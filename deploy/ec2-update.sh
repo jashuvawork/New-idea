@@ -136,6 +136,13 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
     REENTRY_SCORE_PENALTY_PER_LOSS
     CALIBRATION_BLOCK_MIN_LOSSES
     ENHANCED_MICRO_TARGET_POINTS
+    AGGRESSIVE_MIN_TQS
+    SCALP_MAX_LOTS
+    SURE_SHOT_MODE_ENABLED
+    SURE_SHOT_MIN_SYMBOL_TQS
+    SURE_SHOT_MIN_RANK_SCORE
+    SURE_SHOT_SCALP_MIN_SCORE
+    MIDDAY_CHOP_BLOCK_SCALPS
   )
   echo "Syncing template defaults for operational keys ..."
   for key in "${SYNC_ENV_KEYS[@]}"; do
