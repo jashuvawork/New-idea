@@ -84,6 +84,7 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
 
   # Sync operational defaults from template (overwrites stale server values on deploy)
   SYNC_ENV_KEYS=(
+    SYMBOLS
     MIN_OPTION_PREMIUM_INR
     MAX_OPTION_PREMIUM_INR
     DAILY_PROFIT_STAGE_LOCKS_ENABLED

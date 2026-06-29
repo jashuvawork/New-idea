@@ -42,6 +42,7 @@ async def deployment_status():
             "message": token_status.get("message", ""),
         },
         "flags": {
+            "symbols": settings.symbols,
             "enableLiveTrading": settings.enable_live_trading,
             "autoTradingEnabled": settings.auto_trading_enabled,
             "paperTrading": settings.paper_trading,
