@@ -93,7 +93,7 @@ class ProfitStage:
 
 @dataclass
 class DailyProfitGate:
-    targetInr: float = 44_000.0
+    targetInr: float = 22_000.0
     trailInr: float = 5_000.0
     capitalBaseInr: float = 200_000.0
     sessionPnlInr: float = 0.0
@@ -439,7 +439,7 @@ def _compute_stage_lock(
 def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
     """
     Staged profit locks on sizing capital (₹2L default):
-      Min ₹44K milestone (no stop) · Lock 1: 55% · Lock 2: 88% · Lock 3: 112% · Lock 4: peak of day
+      Min ₹22K milestone (no stop) · Lock 1: 55% · Lock 2: 88% · Lock 3: 112% · Lock 4: peak of day
     New entries pause if session PnL falls below the highest stage floor reached.
     """
     global _best_pnl, _session_date, _highest_stage
