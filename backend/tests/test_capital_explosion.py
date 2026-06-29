@@ -9,7 +9,12 @@ from app.engines.capital_allocator import (
     get_capital_snapshot,
     max_lots_for_capital,
 )
-from app.engines.explosion_profit import evaluate_explosion_exit, explosion_in_cooldown, record_explosion_stop
+from app.engines.explosion_profit import (
+    compute_explosion_lots,
+    evaluate_explosion_exit,
+    explosion_in_cooldown,
+    record_explosion_stop,
+)
 from app.models.schemas import PaperTrade, Side, StrategyType
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -61,12 +66,34 @@ class ExplosionExitTests(unittest.TestCase):
 
     def test_target_hit(self):
         trade = self._trade(50.0, 10)
-        reason, _ = evaluate_explosion_exit(trade, 63.0, "EXPLODING", 65)
+        reason, _ = evaluate_explosion_exit(trade, 57.0, "EXPLODING", 65)
         self.assertEqual(reason, "explosion_target_hit")
 
     def test_cooldown_blocks_reentry(self):
         record_explosion_stop("SENSEX")
         self.assertTrue(explosion_in_cooldown("SENSEX"))
+
+    def test_explosion_lots_capped(self):
+        from app.engines.explosion_detector import ExplosionEvent
+        from app.models.schemas import Side
+
+        snap = CapitalSnapshot(perTradeCapitalInr=170_000)
+        event = ExplosionEvent(
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=24000.0,
+            premium=50.0,
+            velocity_3s=3.0,
+            velocity_9s=4.0,
+            velocity_15s=5.0,
+            volume_surge=1.5,
+            explosion_score=60.0,
+            tier="EXPLODING",
+            reason="test",
+        )
+        with patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap):
+            lots = compute_explosion_lots(event, 70.0, 50.0)
+            self.assertEqual(lots, 25)
 
 
 if __name__ == "__main__":
