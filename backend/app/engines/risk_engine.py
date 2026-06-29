@@ -27,7 +27,10 @@ class RiskEngine:
     @property
     def safe_mode(self) -> bool:
         settings = get_settings()
-        if self._daily_pnl <= -settings.emergency_stop_inr:
+        if settings.emergency_stop_enabled and self._daily_pnl <= -settings.emergency_stop_inr:
+            return True
+        loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
+        if loss_stop > 0 and self._daily_pnl <= -abs(loss_stop):
             return True
         return self.profile.safeMode
 

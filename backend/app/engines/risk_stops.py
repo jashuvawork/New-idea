@@ -13,6 +13,8 @@ def effective_emergency_stop_inr(
     Prevents 60-lot trades from bleeding ₹20K+ when SL is ~2.5pt.
     """
     settings = get_settings()
+    if not settings.emergency_stop_enabled:
+        return float("inf")
     if lots <= 0 or lot_multiplier <= 0 or stop_points <= 0:
         return settings.emergency_stop_inr
     point_budget = lots * lot_multiplier * stop_points

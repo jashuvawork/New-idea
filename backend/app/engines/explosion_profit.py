@@ -167,7 +167,7 @@ def evaluate_explosion_exit(
     if trail_floor is None and hold >= settings.explosion_stop_min_hold_seconds and pnl_pts <= -settings.explosion_initial_stop_points:
         return "explosion_stop_loss", pnl_inr
 
-    if pnl_inr <= -settings.emergency_stop_inr:
+    if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
         return "explosion_emergency_stop", pnl_inr
 
     if pnl_pts >= target:
