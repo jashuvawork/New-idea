@@ -1,5 +1,12 @@
 import type { StreamMetrics } from '../types';
 
+function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
+  if (ms <= 0) return 'offline';
+  if (ms < 400) return 'excellent';
+  if (ms < 1200) return 'good';
+  return 'slow';
+}
+
 function qualityColor(quality: StreamMetrics['connectionQuality']) {
   switch (quality) {
     case 'excellent':
