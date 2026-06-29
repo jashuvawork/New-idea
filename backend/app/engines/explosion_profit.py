@@ -1,5 +1,6 @@
 """Explosion profit mode — ride premium explosions with trailing SL/TP while winning."""
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -13,6 +14,38 @@ IST = ZoneInfo("Asia/Kolkata")
 
 # symbol -> last explosion stop timestamp (IST)
 _explosion_stop_at: dict[str, datetime] = {}
+
+
+@dataclass
+class ExplosionExitParams:
+    stop_points: float
+    target_points: float
+    trail_arm_points: float
+    trail_keep_ratio: float
+    micro_target_points: float = 3.0
+
+
+def default_explosion_exit_params(event_tier: str = "EXPLODING") -> ExplosionExitParams:
+    settings = get_settings()
+    return ExplosionExitParams(
+        stop_points=settings.explosion_initial_stop_points,
+        target_points=_target_points(event_tier),
+        trail_arm_points=settings.explosion_trail_arm_points,
+        trail_keep_ratio=settings.explosion_trail_keep_ratio,
+        micro_target_points=3.0,
+    )
+
+
+def explosion_exit_params_from_plan(plan, event_tier: str = "EXPLODING") -> ExplosionExitParams:
+    """Map adaptive exit plan onto explosion exit knobs."""
+    base = default_explosion_exit_params(event_tier)
+    return ExplosionExitParams(
+        stop_points=plan.stopPoints or base.stop_points,
+        target_points=plan.targetPoints or base.target_points,
+        trail_arm_points=plan.trailArmPoints or base.trail_arm_points,
+        trail_keep_ratio=plan.trailKeepRatio or base.trail_keep_ratio,
+        micro_target_points=plan.microTargetPoints or base.micro_target_points,
+    )
 
 
 def record_explosion_stop(symbol: str) -> None:
@@ -118,9 +151,16 @@ def _target_points(event_tier: str) -> float:
     return settings.explosion_target_standard
 
 
-def _trail_floor_pts(trade: PaperTrade, best: float, settings) -> Optional[float]:
+def _trail_floor_pts(
+    trade: PaperTrade,
+    best: float,
+    settings,
+    *,
+    trail_arm_points: Optional[float] = None,
+) -> Optional[float]:
     """Trailing floor in PnL points — arms only after minimum profit."""
-    if best < settings.explosion_trail_arm_points:
+    arm = trail_arm_points if trail_arm_points is not None else settings.explosion_trail_arm_points
+    if best < arm:
         return None
 
     ratio_floor = best * settings.explosion_trail_keep_ratio
@@ -146,25 +186,29 @@ def evaluate_explosion_exit(
     current_premium: float,
     event_tier: str = "EXPLODING",
     lot_multiplier: int = 25,
+    params: Optional[ExplosionExitParams] = None,
 ) -> tuple[Optional[str], float]:
     """
     Explosion exits: hard SL when losing, trailing SL + TP while winning.
     Lets runners extend; locks profit as peak builds.
     """
     settings = get_settings()
+    exit_params = params or default_explosion_exit_params(event_tier)
     pnl_pts = current_premium - trade.entryPremium
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
     best = max(trade.bestPnlPoints, pnl_pts)
     hold = _hold_seconds(trade)
-    target = _target_points(event_tier)
-    trail_floor = _trail_floor_pts(trade, best, settings)
+    target = exit_params.target_points
+    trail_floor = _trail_floor_pts(
+        trade, best, settings, trail_arm_points=exit_params.trail_arm_points,
+    )
     trail_keep = (
         settings.runner_trail_keep_ratio
         if best >= settings.runner_min_best_points
-        else settings.explosion_trail_keep_ratio
+        else exit_params.trail_keep_ratio
     )
 
-    if trail_floor is None and hold >= settings.explosion_stop_min_hold_seconds and pnl_pts <= -settings.explosion_initial_stop_points:
+    if trail_floor is None and hold >= settings.explosion_stop_min_hold_seconds and pnl_pts <= -exit_params.stop_points:
         return "explosion_stop_loss", pnl_inr
 
     if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
@@ -173,13 +217,20 @@ def evaluate_explosion_exit(
     if pnl_pts >= target:
         return "explosion_target_hit", pnl_inr
 
-    if trail_floor is not None and pnl_pts <= trail_floor and best >= settings.explosion_trail_arm_points:
+    if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
         return "explosion_trail_sl", pnl_inr
 
     if trail_floor is not None and pnl_pts < best * trail_keep and best >= 8:
         return "explosion_trail_lock", pnl_inr
 
-    if hold >= 90 and best < settings.explosion_trail_arm_points:
+    if (
+        pnl_pts >= exit_params.micro_target_points
+        and best - pnl_pts >= settings.runner_micro_giveback_points
+        and best >= settings.runner_min_best_points
+    ):
+        return "explosion_micro_profit_lock", pnl_inr
+
+    if hold >= 90 and best < exit_params.trail_arm_points:
         return "explosion_no_progress", pnl_inr
 
     max_hold = 360 if best >= settings.runner_min_best_points else (300 if event_tier == "ELITE" or best >= 15 else 240)

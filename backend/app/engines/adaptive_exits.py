@@ -86,6 +86,8 @@ def compute_adaptive_exit_plan(
     if win_prob >= 0.72:
         target *= 1.2
         trail_arm *= 1.15
+        if strategy_type == StrategyType.EXPLOSIVE:
+            stop *= 1.1
         reasoning.append(f"ML win prob {win_prob:.0%} — wider target")
     elif win_prob <= 0.42:
         stop *= 0.85
@@ -102,6 +104,8 @@ def compute_adaptive_exit_plan(
         target *= 1.25
         trail_arm *= 1.2
         trail_keep = min(0.75, trail_keep + 0.05)
+        if strategy_type == StrategyType.EXPLOSIVE:
+            stop *= 1.15
         reasoning.append(f"Psychology {psychology.label} — let runners run")
     elif psychology.exit_bias == "TIGHT_TRAIL":
         trail_arm *= 0.7
@@ -131,9 +135,15 @@ def compute_adaptive_exit_plan(
             target = settings.explosion_target_elite
             trail_arm = 8.0
             reasoning.append("ELITE explosion — 25pt target")
+        if profile.sessionLabel == "momentum_rally":
+            stop *= 1.1
+            trail_arm *= 1.1
+            target *= 1.05
+            reasoning.append("Momentum rally — wider explosion SL/trail")
 
+    stop_cap = 7.0 if strategy_type == StrategyType.EXPLOSIVE else 5.0
     return AdaptiveExitPlan(
-        stopPoints=round(max(2.0, stop), 2),
+        stopPoints=round(min(stop_cap, max(2.0, stop)), 2),
         targetPoints=round(max(3.0, target), 2),
         trailArmPoints=round(max(1.5, trail_arm), 2),
         trailKeepRatio=round(trail_keep, 2),
@@ -241,10 +251,25 @@ def evaluate_adaptive_explosion_exit(
     tier: str,
     lot_multiplier: int,
 ) -> tuple[Optional[str], float]:
-    """Explosion exits — dedicated 66K logic only (no adaptive SL bleed)."""
-    from app.engines.explosion_profit import evaluate_explosion_exit
+    """Explosion exits with ML/psychology-tuned SL, target, and trail levels."""
+    from app.engines.explosion_profit import (
+        evaluate_explosion_exit,
+        explosion_exit_params_from_plan,
+    )
 
-    return evaluate_explosion_exit(trade, current_premium, tier, lot_multiplier)
+    params = explosion_exit_params_from_plan(plan, tier)
+    exit_reason, pnl = evaluate_explosion_exit(
+        trade, current_premium, tier, lot_multiplier, params=params,
+    )
+    if exit_reason:
+        return exit_reason, pnl
+
+    pnl_pts = current_premium - trade.entryPremium
+    best = max(trade.bestPnlPoints, pnl_pts)
+    if best >= plan.trailArmPoints and pnl_pts < best * plan.trailKeepRatio:
+        return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier
+
+    return None, pnl_pts * trade.lots * lot_multiplier
 
 
 def evaluate_adaptive_swing_exit(
