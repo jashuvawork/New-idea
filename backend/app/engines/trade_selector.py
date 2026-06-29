@@ -133,7 +133,7 @@ def _scalp_candidates(
 
         blocked = state.calibrationBlocks.get(suggestion.side.value, False)
         momentum = (snap.orderflow.volumeAcceleration or 0) > 65
-        override = snap.explosiveRunner.candidate and (snap.explosiveRunner.score or 0) >= 82
+        override = snap.explosiveRunner.candidate and (snap.explosiveRunner.score or 0) >= settings.runner_alignment_override_score
         vel = suggestion.runnerSignal.premiumVelocityPct if suggestion.runnerSignal else 0
 
         passed, _ = check_entry_gate(
