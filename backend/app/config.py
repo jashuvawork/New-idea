@@ -134,6 +134,13 @@ class Settings(BaseSettings):
     pretrade_similar_side_min_trades: int = 3
     pretrade_block_similar_pf_below: float = 0.4
     index_selection_pf_bonus: float = 12.0
+
+    # Chart alignment — CE/PE must match index candle direction
+    chart_alignment_enabled: bool = True
+    chart_min_trend_strength: float = 25.0
+    chart_min_momentum_pct: float = 0.04
+    chart_override_min_score: float = 75
+    chart_alignment_rank_bonus: float = 10.0
     recent_win_window_seconds: int = 900
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5

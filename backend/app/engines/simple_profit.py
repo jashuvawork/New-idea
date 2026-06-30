@@ -13,6 +13,7 @@ from app.models.schemas import (
     OptimizedProfile,
     PaperTrade,
     Side,
+    SpotChart,
     SuggestedTrade,
 )
 
@@ -98,6 +99,7 @@ def check_entry_gate(
     calibration_blocked: bool,
     momentum_surge: bool = False,
     alignment_override: bool = False,
+    chart: Optional["SpotChart"] = None,
 ) -> tuple[bool, str]:
     """All gates must pass for simple profit entry."""
     settings = get_settings()
@@ -138,6 +140,14 @@ def check_entry_gate(
     if breadth.bias not in (side_bias, "NEUTRAL") and not alignment_override:
         if not momentum_surge and trade_score < settings.counter_breadth_min_score:
             return False, "breadth_counter_trend"
+
+    from app.engines.spot_direction import chart_blocks_side
+
+    blocked, chart_reason = chart_blocks_side(
+        trade.side, chart, trade_score=trade_score, momentum_surge=momentum_surge,
+    )
+    if blocked and not alignment_override:
+        return False, chart_reason
 
     if not (momentum_surge or alignment_override or breadth.aligned or trade_score >= min_score + 8):
         return False, "no_momentum_or_alignment"

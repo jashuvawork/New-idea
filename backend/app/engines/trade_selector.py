@@ -22,6 +22,7 @@ from app.engines.pretrade_validator import (
     index_rank_from_backtest,
 )
 from app.engines.simple_profit import check_entry_gate
+from app.engines.spot_direction import chart_rank_adjustment
 from app.engines.symbol_cooldown import (
     entry_score_penalty,
     requires_breadth_alignment,
@@ -130,7 +131,9 @@ def _explosion_candidates(
         moment, _ = index_moment_active(snap)
         moment_surge = moment and side_aligned_with_index_moment(event.side, snap)
         passed, _ = check_explosion_entry(
-            event, suggestion, snap.breadth, blocked, index_moment=moment_surge,
+            event, suggestion, snap.breadth, blocked,
+            index_moment=moment_surge,
+            chart=snap.spotChart,
         )
         if not passed:
             continue
@@ -145,6 +148,7 @@ def _explosion_candidates(
         rank += min(15, event.velocity_3s * 2)
         rank += min(10, event.velocity_9s)
         rank += index_moment_rank_bonus(snap, event.side)
+        rank += chart_rank_adjustment(event.side, snap.spotChart)
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -192,6 +196,7 @@ def _scalp_candidates(
         passed, _ = check_entry_gate(
             suggestion, snap.breadth, max(snap.tradeQualityScore, trade_score), vel,
             blocked, momentum_surge=momentum, alignment_override=override,
+            chart=snap.spotChart,
         )
         if not passed:
             continue
@@ -206,6 +211,7 @@ def _scalp_candidates(
         if momentum:
             rank += 5
         rank += index_moment_rank_bonus(snap, suggestion.side)
+        rank += chart_rank_adjustment(suggestion.side, snap.spotChart)
 
         out.append(EntryCandidate(
             symbol=symbol,

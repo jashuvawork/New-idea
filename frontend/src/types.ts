@@ -33,6 +33,7 @@ export interface SymbolSnapshot {
   greeks: Greeks;
   marketProfile: MarketProfile;
   breadth: Breadth;
+  spotChart?: SpotChart;
   explosiveRunner: ExplosiveRunner;
   explosiveRunnerWatchlist: RunnerWatchItem[];
   suggestedTrades: SuggestedTrade[];
@@ -190,6 +191,22 @@ export interface Breadth {
   score: number;
   bias: string;
   aligned: boolean;
+}
+
+export interface SpotChart {
+  direction: string;
+  spot: number;
+  momentum5Pct: number;
+  momentum10Pct: number;
+  momentum15Pct: number;
+  momentum30Pct: number;
+  trendStrength: number;
+  emaBias: string;
+  candleBias: string;
+  orPosition: string;
+  abovePoc: boolean;
+  belowPoc: boolean;
+  poc: number;
 }
 
 export interface ExplosiveRunner {

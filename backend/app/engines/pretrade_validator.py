@@ -202,10 +202,22 @@ def validate_candidate(
 
     from app.engines.symbol_cooldown import side_aligned_with_breadth
 
+    trade_score = max(candidate.tqs or 0, candidate.confidence or 0, candidate.score)
+
     if not side_aligned_with_breadth(side_val, snap.breadth.bias):
-        trade_score = max(candidate.tqs or 0, candidate.confidence or 0, candidate.score)
         if trade_score < settings.counter_breadth_min_score:
             return False, "pretrade_counter_breadth", meta
+
+    from app.engines.spot_direction import chart_blocks_side
+
+    blocked_chart, chart_reason = chart_blocks_side(
+        candidate.side,
+        snap.spotChart,
+        trade_score=trade_score,
+    )
+    if blocked_chart:
+        meta["chartDirection"] = snap.spotChart.direction if snap.spotChart else "NEUTRAL"
+        return False, f"pretrade_{chart_reason}", meta
 
     sym_stats = compute_symbol_stats(trades)
     meta["symbolStats"] = {k: asdict(v) for k, v in sym_stats.items()}

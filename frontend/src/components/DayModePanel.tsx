@@ -1,5 +1,5 @@
 import { Panel, BiasBadge } from './Panel';
-import type { AutoTraderState, ChopGuards, SymbolSnapshot } from '../types';
+import type { AutoTraderState, ChopGuards, SpotChart, SymbolSnapshot } from '../types';
 
 const TONE_BADGE: Record<string, string> = {
   rally: 'bg-nexus-accent/90 text-black',
@@ -58,6 +58,46 @@ function SymbolBreadthRow({
       <div className="text-right shrink-0">
         <div className="text-[10px] font-mono text-gray-300">{info.score.toFixed(0)} breadth</div>
         <div className="text-[9px] text-nexus-muted">{info.regime.replace('_', ' ')}</div>
+      </div>
+    </div>
+  );
+}
+
+function chartRecommendedSide(chart: SpotChart): string {
+  if (chart.direction === 'BULLISH') return 'CALL';
+  if (chart.direction === 'BEARISH') return 'PUT';
+  if (chart.momentum5Pct > 0.02) return 'CALL';
+  if (chart.momentum5Pct < -0.02) return 'PUT';
+  return 'WAIT';
+}
+
+function SymbolChartRow({ symbol, chart }: { symbol: string; chart: SpotChart }) {
+  const rec = chartRecommendedSide(chart);
+  const momTone =
+    chart.momentum5Pct > 0.04 ? 'text-nexus-green' : chart.momentum5Pct < -0.04 ? 'text-nexus-red' : 'text-nexus-yellow';
+
+  return (
+    <div className="flex items-center justify-between gap-2 py-1.5 border-b border-nexus-border/50 last:border-0">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-[11px] font-bold text-white w-14 shrink-0">{symbol}</span>
+        <BiasBadge bias={chart.direction} />
+        <span
+          className={`text-[9px] font-semibold uppercase ${
+            rec === 'CALL' ? 'text-nexus-green' : rec === 'PUT' ? 'text-nexus-red' : 'text-nexus-muted'
+          }`}
+        >
+          {rec}
+        </span>
+      </div>
+      <div className="text-right shrink-0 font-mono text-[9px]">
+        <div className={momTone}>
+          5m {chart.momentum5Pct > 0 ? '+' : ''}
+          {chart.momentum5Pct.toFixed(2)}% · 15m {chart.momentum15Pct > 0 ? '+' : ''}
+          {chart.momentum15Pct.toFixed(2)}%
+        </div>
+        <div className="text-nexus-muted">
+          str {chart.trendStrength.toFixed(0)} · {chart.orPosition} OR · EMA {chart.emaBias}
+        </div>
       </div>
     </div>
   );
@@ -167,6 +207,21 @@ export function DayModePanel({
               </div>
             </div>
           );
+        })}
+      </div>
+
+      <div className="text-[10px] text-nexus-muted uppercase mb-1 mt-3">Index chart CE/PE alignment</div>
+      <div className="rounded bg-black/20 px-2 mb-3">
+        {symbols.map((sym) => {
+          const chart = snapshots[sym]?.spotChart;
+          if (!chart || !snapshots[sym]?.dataAvailable) {
+            return (
+              <div key={`chart-${sym}`} className="py-1.5 text-[10px] text-nexus-muted border-b border-nexus-border/50 last:border-0">
+                {sym}: no chart data
+              </div>
+            );
+          }
+          return <SymbolChartRow key={`chart-${sym}`} symbol={sym} chart={chart} />;
         })}
       </div>
 

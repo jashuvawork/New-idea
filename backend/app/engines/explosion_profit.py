@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.engines.capital_allocator import compute_lots
 from app.engines.explosion_detector import ExplosionEvent
-from app.models.schemas import Breadth, PaperTrade, Side, StrategyType, SuggestedTrade
+from app.models.schemas import Breadth, PaperTrade, Side, SpotChart, StrategyType, SuggestedTrade
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -81,6 +81,7 @@ def check_explosion_entry(
     calibration_blocked: bool,
     *,
     index_moment: bool = False,
+    chart: Optional[SpotChart] = None,
 ) -> tuple[bool, str]:
     """Fast entry on explosion — minimal gates, speed is everything."""
     if calibration_blocked:
@@ -112,6 +113,17 @@ def check_explosion_entry(
 
     if in_momentum_rally_window() and event.tier == "EXPLODING" and event.velocity_3s < 2.0:
         return False, "explosion_wait_velocity"
+
+    from app.engines.spot_direction import chart_blocks_side
+
+    blocked_chart, chart_reason = chart_blocks_side(
+        event.side,
+        chart,
+        trade_score=score,
+        momentum_surge=index_moment,
+    )
+    if blocked_chart:
+        return False, chart_reason
 
     if event.tier == "ELITE":
         return True, "elite_explosion"
