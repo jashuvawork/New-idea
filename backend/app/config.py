@@ -172,7 +172,7 @@ class Settings(BaseSettings):
     sure_shot_min_symbol_tqs: int = 40
     sure_shot_min_rank_score: float = 48.0
     sure_shot_scalp_min_score: int = 55
-    scalp_max_lots: int = 40
+    scalp_max_lots: int = 0  # 0 = capital-derived max on 85% per trade
     scalp_target_points: float = 12.0  # unused — session targets in simple_profit
     bullish_hold_enabled: bool = False
     bullish_hold_trail_keep_ratio: float = 0.55
@@ -185,7 +185,7 @@ class Settings(BaseSettings):
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
-    # Capital / risk — Jun 25: 85% per trade, max 40 lots, flat ₹20K emergency
+    # Capital / risk — 85% per trade, max lots = floor(budget / premium×lot_size)
     fallback_capital_inr: float = 200_000
     max_sizing_capital_inr: float = 200_000
     per_trade_capital_pct: float = 0.85
@@ -193,10 +193,10 @@ class Settings(BaseSettings):
     aggressive_min_tqs: int = 50
     aggressive_min_explosion_score: int = 45
     explosion_confirmed_min_score: int = 45
-    explosion_max_lots: int = 40
+    explosion_max_lots: int = 0  # 0 = capital-derived max on 85% per trade
     aggressive_min_swing_confidence: int = 65
     aggressive_max_open_scalps: int = 1
-    max_lots_per_trade: int = 40
+    max_lots_per_trade: int = 0  # 0 = no hard cap; size from 85% capital only
     min_lots_per_trade: int = 1
     max_risk_per_trade_inr: float = 200_000
     min_per_trade_risk_inr: float = 3_000

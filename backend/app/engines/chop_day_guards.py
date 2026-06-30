@@ -196,30 +196,17 @@ def apply_tiered_lot_cap(
     velocity_pct: float = 0.0,
     volume_surge: float = 1.0,
 ) -> int:
-    """40 lots high conviction; 20 mid; skip handled upstream via rank gate."""
+    """Block weak setups; otherwise keep capital-max lots (85% cap sizing)."""
     settings = get_settings()
     if not settings.chop_day_guards_enabled:
         return lots
-    from app.engines.session_timing import in_midday_chop_window
 
-    high = settings.chop_lots_high
-    mid = settings.chop_lots_mid
     min_rank = settings.chop_lots_min_rank
-
-    cap = high
     momentum = is_momentum_surge(velocity_pct, volume_surge, 0.0)
-    if momentum and rank_score >= settings.chop_lots_min_rank:
-        cap = high
-    elif rank_score < settings.chop_lots_high_min_rank or not breadth_aligned:
-        cap = mid
-    if rank_score < min_rank:
-        cap = 0
-    if in_midday_chop_window() and rank_score < settings.chop_lots_high_min_rank and not momentum:
-        cap = min(cap, mid)
-
-    if cap <= 0:
+    if rank_score < min_rank and not momentum:
         return 0
-    return min(lots, cap)
+
+    return lots
 
 
 def _symbol_breadth_summary(snapshots: dict[str, SymbolSnapshot]) -> dict[str, dict]:
