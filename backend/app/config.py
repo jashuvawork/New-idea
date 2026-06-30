@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     cursor_http_auth: str = "bearer"  # bearer | basic
     cursor_composer_model: str = "composer-2.5"
     cursor_composer_use_standard_tier: bool = True
+    cursor_composer_runtime: str = "cloud"  # cloud | local — cloud for Docker/EC2
+    cursor_composer_workspace: str = "/app"
     composer_temperature: float = 0.2
     composer_max_tokens: int = 1200
 
