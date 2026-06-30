@@ -22,9 +22,18 @@ _constituent_fetch_lock = asyncio.Lock()
 def _parse_quote(quote: dict[str, Any], prev_close: float) -> dict[str, float]:
     ltp = float(quote.get("last_price") or quote.get("ltp") or 0)
     ohlc = quote.get("ohlc") or {}
-    close = float(
-        ohlc.get("close") or quote.get("cp") or quote.get("close") or prev_close or ltp or 0
-    )
+    net_change_raw = quote.get("net_change")
+    net_change = float(net_change_raw) if net_change_raw is not None else None
+
+    close = float(ohlc.get("close") or quote.get("cp") or prev_close or 0)
+    if net_change is not None and ltp > 0:
+        implied_prev = ltp - net_change
+        if implied_prev > 0:
+            close = implied_prev
+    elif close > 0 and ltp > 0 and abs(close - ltp) < 0.01 and ohlc.get("open"):
+        # Upstox sometimes sets close == ltp intraday — avoid false 0% moves
+        close = float(ohlc["open"])
+
     open_ = float(ohlc.get("open") or close)
     high = float(ohlc.get("high") or ltp)
     low = float(ohlc.get("low") or ltp)
@@ -32,8 +41,8 @@ def _parse_quote(quote: dict[str, Any], prev_close: float) -> dict[str, float]:
     volume = float(quote.get("volume") or 0)
     if close > 0 and ltp > 0:
         change_pct = ((ltp - close) / close) * 100
-    elif close > 0 and quote.get("net_change") is not None:
-        change_pct = (float(quote["net_change"]) / close) * 100
+    elif close > 0 and net_change is not None:
+        change_pct = (net_change / close) * 100
     else:
         change_pct = 0.0
     return {

@@ -35,6 +35,21 @@ def test_normalize_quotes_map_aliases_instrument_token():
     assert data["BSE_EQ|INE002A01018"]["last_price"] == 1420.0
 
 
+def test_parse_quote_uses_net_change_when_close_equals_ltp():
+    parsed = _parse_quote(
+        {
+            "last_price": 794.95,
+            "net_change": -11.15,
+            "ohlc": {"open": 806.1, "high": 806.1, "low": 792.75, "close": 794.95},
+            "average_price": 798.16,
+            "volume": 1000,
+        },
+        0,
+    )
+    assert parsed["changePct"] < 0
+    assert abs(parsed["changePct"] - (-1.38)) < 0.2
+
+
 def test_parse_quote_uses_cp_when_no_ohlc():
     parsed = _parse_quote({"last_price": 101.0, "cp": 100.0, "volume": 5000}, 0)
     assert parsed["changePct"] == 1.0
