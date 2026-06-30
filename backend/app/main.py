@@ -28,10 +28,12 @@ async def _background_monitor():
     )
     from app.services.tick_store import set_tick_wake_event
     from app.services.upstox_ws import is_ws_active
+    from app.services.upstox import get_market_phase
 
     set_tick_wake_event(_tick_wake)
     settings = get_settings()
     tick_driven = False
+    last_composer_mono = 0.0
 
     while True:
         poll_ms = (
@@ -51,6 +53,23 @@ async def _background_monitor():
                     await get_multi_snapshot(broadcast=True, force=True)
                 elif not tick_driven:
                     await get_multi_snapshot(broadcast=True, force=False)
+
+            if (
+                settings.composer_monitor_enabled
+                and get_market_phase() == "LIVE_MARKET"
+            ):
+                import time
+                from app.engines.composer_market_monitor import run_monitor_cycle
+
+                now_mono = time.monotonic()
+                if now_mono - last_composer_mono >= settings.composer_monitor_interval_seconds:
+                    try:
+                        multi = await get_multi_snapshot(broadcast=False, force=False)
+                        if multi and multi.snapshots:
+                            await run_monitor_cycle(multi.snapshots)
+                            last_composer_mono = now_mono
+                    except Exception as exc:
+                        logger.warning("Composer monitor cycle error: %s", exc)
         except Exception as e:
             logger.warning("Background monitor error: %s", e)
 
@@ -81,10 +100,11 @@ async def lifespan(app: FastAPI):
     if settings.background_market_monitor_enabled:
         _background_task = asyncio.create_task(_background_monitor())
         logger.info(
-            "Background monitor: tick_fast=%s entry_scan_ms=%d debounce_ms=%d",
+            "Background monitor: tick_fast=%s entry_scan_ms=%d debounce_ms=%d composer=%s",
             settings.tick_fast_exit_enabled,
             settings.entry_scan_interval_ms,
             settings.tick_wake_debounce_ms,
+            settings.composer_monitor_enabled,
         )
     yield
     if _background_task:

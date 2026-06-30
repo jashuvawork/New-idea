@@ -1,10 +1,19 @@
 """AI/ML strategy and learning API."""
 
-from fastapi import APIRouter
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException
 
 from app.engines.ai_learning import get_ai_learning
+from app.engines.composer_market_monitor import (
+    get_brief_history,
+    get_latest_brief,
+    monitor_status,
+    run_monitor_cycle,
+)
 from app.engines.ml_engine import get_ml_engine
 from app.engines.strategy_orchestrator import ALL_STRATEGIES
+from app.services.cursor_composer_client import get_composer_client
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -38,3 +47,34 @@ async def ml_status():
 @router.get("/learning/report")
 async def learning_report():
     return get_ai_learning().get_learning_report()
+
+
+@router.get("/composer/status")
+async def composer_status():
+    status = monitor_status()
+    ping = await get_composer_client().ping()
+    status["apiPing"] = ping
+    return status
+
+
+@router.get("/composer/brief")
+async def composer_brief_latest():
+    latest = get_latest_brief()
+    if not latest:
+        raise HTTPException(status_code=404, detail="No composer brief yet — wait for next monitor cycle")
+    return latest
+
+
+@router.get("/composer/history")
+async def composer_brief_history(limit: int = 12):
+    return {"briefs": get_brief_history(limit=limit)}
+
+
+@router.post("/composer/refresh")
+async def composer_refresh():
+    """Force a new market brief (rules + Composer 2.5 when API key set)."""
+    from app.routers.market import get_multi_snapshot
+
+    snapshots = (await get_multi_snapshot(force=True)).snapshots
+    brief = await run_monitor_cycle(snapshots, force=True)
+    return brief.to_dict()

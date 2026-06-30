@@ -49,6 +49,20 @@ class Settings(BaseSettings):
     news_cache_seconds: int = 60
     background_market_monitor_enabled: bool = True
 
+    # Cursor Composer 2.5 — session market monitor + trading advisory
+    composer_monitor_enabled: bool = True
+    composer_monitor_use_ai: bool = True
+    composer_monitor_interval_seconds: int = 180
+    composer_on_new_trade: bool = True
+    cursor_api_key: str = ""
+    cursor_api_base_url: str = "https://api.cursor.com"
+    cursor_chat_completions_path: str = "/v1/chat/completions"
+    cursor_http_auth: str = "bearer"  # bearer | basic
+    cursor_composer_model: str = "composer-2.5"
+    cursor_composer_use_standard_tier: bool = True
+    composer_temperature: float = 0.2
+    composer_max_tokens: int = 1200
+
     # Upstox WebSocket real-time feed + SSE push to UI
     upstox_ws_enabled: bool = True
     upstox_ws_mode: str = "ltpc"  # ltpc | full | full_d30 | option_greeks
