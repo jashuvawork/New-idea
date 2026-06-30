@@ -70,7 +70,9 @@ class Settings(BaseSettings):
     upstox_candles_cache_seconds: int = 60
     upstox_max_expiry_probes: int = 2
     capital_refresh_seconds: int = 90
-    fetch_constituents_in_snapshot: bool = False
+    fetch_constituents_in_snapshot: bool = True
+    index_momentum_enabled: bool = True
+    open_caution_moment_min_rank: float = 48.0
 
     # Trading mode
     paper_simple_profit_mode: bool = True

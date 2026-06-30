@@ -79,6 +79,8 @@ def check_explosion_entry(
     trade: SuggestedTrade,
     breadth: Breadth,
     calibration_blocked: bool,
+    *,
+    index_moment: bool = False,
 ) -> tuple[bool, str]:
     """Fast entry on explosion — minimal gates, speed is everything."""
     if calibration_blocked:
@@ -103,7 +105,7 @@ def check_explosion_entry(
         explosion=True,
         volume_surge=event.volume_surge,
     )
-    if blocked:
+    if blocked and not index_moment:
         return False, nb_reason
 
     from app.engines.chop_day_guards import in_momentum_rally_window
