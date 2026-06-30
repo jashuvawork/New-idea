@@ -308,6 +308,10 @@ async def _open_from_candidate(
             atm=float(snap.atmStrike) if snap.atmStrike else None,
         )
         ctx_extra["atmStrike"] = snap.atmStrike
+    if snap.psychology:
+        ctx_extra["psychology"] = snap.psychology.get("label", "NEUTRAL")
+        ctx_extra["psychologyLabel"] = snap.psychology.get("label", "NEUTRAL")
+        ctx_extra["psychologyExitBias"] = snap.psychology.get("exitBias", "BALANCED")
     if getattr(candidate, "pretrade_meta", None):
         ctx_extra["pretrade"] = candidate.pretrade_meta
     if candidate.mode == "explosion" and candidate.explosion_event:
@@ -781,7 +785,18 @@ async def process(
                 "message": whipsaw_meta.get("dualLegWhipsaw")
                 or f"Whipsaw/churn pause — CE↔PE flip-flops in bearish sideways",
             })
-        if not paused and not cap_hit and not ctrl_cap and not last_n_paused and not whipsaw_paused:
+        from app.engines.expiry_day_guards import check_expiry_entry_allowed
+
+        expiry_ok, expiry_reason, expiry_meta = check_expiry_entry_allowed(state, snapshots)
+        if not expiry_ok:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": expiry_reason,
+                "message": expiry_meta.get("worstDayReasons")
+                and f"Expiry guard — {', '.join(expiry_meta.get('worstDayReasons', []))}"
+                or "Expiry-day entry blocked",
+            })
+        if not paused and not cap_hit and not ctrl_cap and not last_n_paused and not whipsaw_paused and expiry_ok:
             best = find_best_entry(snapshots, state)
             if best:
                 opened, reason = await _open_from_candidate(best, state, client, news)

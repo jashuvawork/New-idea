@@ -284,6 +284,28 @@ export interface ChopGuards {
   whipsawGuards?: WhipsawGuardsSummary;
   confidenceHold?: { enabled?: boolean; minScore?: number };
   moneynessPolicy?: MoneynessPolicy;
+  expiryGuards?: ExpiryGuardsSummary;
+  psychologyHold?: { enabled?: boolean; labels?: string; minScore?: number };
+}
+
+export interface ExpiryGuardsSummary {
+  enabled?: boolean;
+  expirySession?: boolean;
+  expirySymbols?: string[];
+  morningWindow?: boolean;
+  eveningBlock?: boolean;
+  worstDay?: boolean;
+  worstDayScore?: number;
+  worstDayReasons?: string[];
+  decliningSession?: boolean;
+  dailyTradeCap?: number;
+  dailyTradeCapLabel?: string;
+  tradeCapReached?: boolean;
+  dualScalpMode?: boolean;
+  minRankScore?: number;
+  sessionPnlInr?: number;
+  entriesAllowed?: boolean;
+  blockReason?: string | null;
 }
 
 export interface WhipsawGuardsSummary {

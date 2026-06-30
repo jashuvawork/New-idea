@@ -92,7 +92,12 @@ def before_primary_window() -> bool:
 
 
 def daily_trade_cap(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> tuple[int, str]:
-    """Max closed trades allowed today under chop rules."""
+    """Max closed trades allowed today under chop / expiry rules."""
+    from app.engines.expiry_day_guards import expiry_trade_cap, is_expiry_session
+
+    if is_expiry_session(snapshots):
+        return expiry_trade_cap(state, snapshots)
+
     settings = get_settings()
     if not settings.chop_day_guards_enabled or not is_chop_session(snapshots):
         return 999, "normal"
@@ -229,8 +234,22 @@ def _day_mode_label(
     momentum: bool,
     breadth: dict[str, dict],
     before_primary: bool,
+    expiry: bool = False,
+    expiry_worst: bool = False,
 ) -> tuple[str, str, str]:
     """Return (mode, badge tone key, short playbook hint)."""
+    if expiry_worst:
+        return (
+            "EXPIRY WORST",
+            "chop",
+            "Expiry + chop/loss — max 3 trades, morning only, CE+PE scalp, hold high conf",
+        )
+    if expiry:
+        return (
+            "EXPIRY DAY",
+            "warn",
+            "Weekly expiry — fewer trades, morning focus, dual CE/PE scalp, no evening",
+        )
     biases = [b.get("bias", "NEUTRAL") for b in breadth.values()]
     bullish = sum(1 for b in biases if b == "BULLISH")
     bearish = sum(1 for b in biases if b == "BEARISH")
@@ -281,7 +300,6 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     momentum = in_momentum_rally_window()
     before_primary = before_primary_window()
     breadth = _symbol_breadth_summary(snapshots)
-    mode, mode_tone, mode_hint = _day_mode_label(chop, momentum, breadth, before_primary)
 
     from app.engines.market_momentum import index_moment_summary
     from app.engines.session_timing import in_midday_chop_window, in_open_caution_window
@@ -290,13 +308,18 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.whipsaw_guards import whipsaw_guard_summary
     from app.engines.confidence_hold import high_confidence_close_summary
     from app.engines.moneyness import resolve_preferred_moneyness
-
-
+    from app.engines.expiry_day_guards import expiry_guard_summary, is_expiry_session, predict_worst_expiry_day
+    from app.engines.psychology_hold import psychology_hold_summary
 
     session = get_session_targets()
     settings = get_settings()
     last_n = last_n_trades_summary(state)
     last_n_paused, last_n_reason, _ = check_last_n_trades_pause(state)
+    expiry_active = is_expiry_session(snapshots)
+    expiry_worst, _, _ = predict_worst_expiry_day(state, snapshots) if expiry_active else (False, 0.0, [])
+    mode, mode_tone, mode_hint = _day_mode_label(
+        chop, momentum, breadth, before_primary, expiry=expiry_active, expiry_worst=expiry_worst,
+    )
 
     return {
         "chopSession": chop,
@@ -340,4 +363,6 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
                 snapshots=snapshots,
             ) if snapshots else "ATM",
         },
+        "expiryGuards": expiry_guard_summary(state, snapshots),
+        "psychologyHold": psychology_hold_summary(),
     }
