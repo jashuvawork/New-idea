@@ -52,6 +52,47 @@ class Orderflow(BaseModel):
     breakoutVelocity: float = 0
     bidAskImbalance: float = 0
     tickMomentum: float = 0  # enhanced: tick-level fusion
+    signedMomentumPct: float = 0  # signed 5-bar index % move
+
+
+class SpotChart(BaseModel):
+    """Index candle chart read — drives CE/PE alignment."""
+    direction: str = "NEUTRAL"  # BULLISH | BEARISH | NEUTRAL
+    spot: float = 0
+    momentum5Pct: float = 0
+    momentum10Pct: float = 0
+    momentum15Pct: float = 0
+    momentum30Pct: float = 0
+    trendStrength: float = 0
+    emaBias: str = "NEUTRAL"
+    candleBias: str = "NEUTRAL"
+    orPosition: str = "INSIDE"  # ABOVE | BELOW | INSIDE
+    abovePoc: bool = False
+    belowPoc: bool = False
+    poc: float = 0
+
+
+class PremiumChart(BaseModel):
+    """Option premium 1m candle read at execution time."""
+    direction: str = "NEUTRAL"
+    lastPremium: float = 0
+    momentum3Pct: float = 0
+    momentum5Pct: float = 0
+    volumeSurge: float = 1.0
+    vwap: float = 0
+    aboveVwap: bool = False
+
+
+class TimeframeChartRead(BaseModel):
+    """Single timeframe chart read (1m / 5m / 15m / 1h / 4h)."""
+    label: str = "1m"
+    direction: str = "NEUTRAL"
+    momentumPct: float = 0
+    momentum3Pct: float = 0
+    trendStrength: float = 0
+    emaBias: str = "NEUTRAL"
+    price: float = 0
+    barCount: int = 0
 
 
 class Greeks(BaseModel):
@@ -198,6 +239,7 @@ class SymbolSnapshot(BaseModel):
     psychology: dict[str, Any] = {}
     adaptiveExitHint: dict[str, Any] = {}
     premarket: Optional[PremarketAnalysis] = None
+    spotChart: SpotChart = Field(default_factory=SpotChart)
 
 
 class PaperTrade(BaseModel):

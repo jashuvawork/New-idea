@@ -6,7 +6,7 @@ from app.config import get_settings
 from app.services import trade_store
 
 TARGET_TRADES = 50
-TARGET_PROFIT_FACTOR = 3.0
+TARGET_PROFIT_FACTOR = 2.5
 TARGET_WIN_RATE = 50.0
 MAX_DRAWDOWN_PCT = 5.0
 

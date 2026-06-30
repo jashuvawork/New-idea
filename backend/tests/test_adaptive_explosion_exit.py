@@ -54,6 +54,7 @@ def test_wider_adaptive_stop_delays_explosion_stop_loss():
         settings.explosion_trail_keep_ratio = 0.65
         settings.explosion_trail_arm_points = 4.0
         settings.explosion_initial_stop_points = 4.0
+        settings.explosion_no_progress_seconds = 90
         mock_settings.return_value = settings
 
         default_reason, _ = evaluate_explosion_exit(trade, 95.5, "EXPLODING", 65)

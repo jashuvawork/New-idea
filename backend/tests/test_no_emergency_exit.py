@@ -30,6 +30,13 @@ def test_scalp_stop_fires_with_ist_opened_at(mock_settings):
     settings = MagicMock()
     settings.emergency_stop_enabled = False
     settings.scalp_stop_min_hold_seconds = 30
+    settings.scalp_trail_arm_points = 3.0
+    settings.scalp_trail_keep_ratio = 0.60
+    settings.scalp_trail_step_points = 2.0
+    settings.scalp_trail_tight_arm = 8.0
+    settings.scalp_trail_tight_points = 3.0
+    settings.scalp_micro_giveback_points = 1.5
+    settings.scalp_no_progress_seconds = 90
     settings.runner_micro_giveback_points = 2.5
     settings.runner_min_best_points = 6.0
     settings.runner_trail_keep_ratio = 0.45
@@ -61,6 +68,13 @@ def test_scalp_skips_emergency_inr_stop(mock_settings):
     settings.emergency_stop_enabled = False
     settings.emergency_stop_inr = 20_000
     settings.scalp_stop_min_hold_seconds = 0
+    settings.scalp_trail_arm_points = 3.0
+    settings.scalp_trail_keep_ratio = 0.60
+    settings.scalp_trail_step_points = 2.0
+    settings.scalp_trail_tight_arm = 8.0
+    settings.scalp_trail_tight_points = 3.0
+    settings.scalp_micro_giveback_points = 1.5
+    settings.scalp_no_progress_seconds = 90
     settings.runner_micro_giveback_points = 2.5
     settings.runner_min_best_points = 6.0
     settings.runner_trail_keep_ratio = 0.45

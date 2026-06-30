@@ -85,6 +85,7 @@ def _detect_regime(candles: list) -> Regime:
 def _build_orderflow(candles: list, chain: list) -> Orderflow:
     """Build orderflow metrics from candles and chain."""
     delta_vel = vol_accel = breakout_vel = tick_mom = 0.0
+    signed_mom = 0.0
     bid_ask_imb = 50.0
 
     if candles and len(candles) >= 5:
@@ -98,9 +99,13 @@ def _build_orderflow(candles: list, chain: list) -> Orderflow:
 
         if len(closes) >= 5:
             move = closes[-1] - closes[-5]
-            delta_vel = min(100, abs(move / closes[-5]) * 500) if closes[-5] else 0
-            breakout_vel = min(100, abs(move / closes[-5]) * 800) if closes[-5] else 0
+            pct = (move / closes[-5]) * 100 if closes[-5] else 0
+            delta_vel = min(100, abs(pct) * 5)
+            breakout_vel = min(100, abs(pct) * 8)
             tick_mom = min(100, abs(closes[-1] - closes[-2]) / closes[-2] * 2000) if closes[-2] else 0
+            signed_mom = round(pct, 3)
+        else:
+            signed_mom = 0.0
 
     # Chain bid/ask imbalance from ATM strikes
     call_vol = put_vol = 0
@@ -119,6 +124,7 @@ def _build_orderflow(candles: list, chain: list) -> Orderflow:
         breakoutVelocity=round(breakout_vel, 1),
         bidAskImbalance=round(bid_ask_imb, 1),
         tickMomentum=round(tick_mom, 1),
+        signedMomentumPct=signed_mom if candles else 0.0,
     )
 
 
@@ -390,6 +396,9 @@ async def build_symbol_snapshot(
         heatmap = build_heatmap(chain, spot, atm)
         orderflow = _build_orderflow(candles, chain)
         profile = _build_profile(candles, spot)
+        from app.engines.spot_direction import analyze_spot_chart
+
+        spot_chart = analyze_spot_chart(candles, spot, profile)
         option_breadth = build_breadth(chain, spot)
 
         constituent_hm = None
@@ -483,6 +492,7 @@ async def build_symbol_snapshot(
             swingAlerts=swing_alerts,
             topSwing=top_swing,
             constituentHeatmap=constituent_hm if constituent_hm and constituent_hm.dataAvailable else None,
+            spotChart=spot_chart,
         )
         await attach_premarket_to_snapshot(snap, client, news_sentiment)
         return snap

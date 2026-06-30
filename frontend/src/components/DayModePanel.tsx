@@ -1,5 +1,5 @@
 import { Panel, BiasBadge } from './Panel';
-import type { AutoTraderState, ChopGuards, SymbolSnapshot } from '../types';
+import type { AutoTraderState, ChopGuards, SpotChart, SymbolSnapshot } from '../types';
 
 const TONE_BADGE: Record<string, string> = {
   rally: 'bg-nexus-accent/90 text-black',
@@ -63,6 +63,46 @@ function SymbolBreadthRow({
   );
 }
 
+function chartRecommendedSide(chart: SpotChart): string {
+  if (chart.direction === 'BULLISH') return 'CALL';
+  if (chart.direction === 'BEARISH') return 'PUT';
+  if (chart.momentum5Pct > 0.02) return 'CALL';
+  if (chart.momentum5Pct < -0.02) return 'PUT';
+  return 'WAIT';
+}
+
+function SymbolChartRow({ symbol, chart }: { symbol: string; chart: SpotChart }) {
+  const rec = chartRecommendedSide(chart);
+  const momTone =
+    chart.momentum5Pct > 0.04 ? 'text-nexus-green' : chart.momentum5Pct < -0.04 ? 'text-nexus-red' : 'text-nexus-yellow';
+
+  return (
+    <div className="flex items-center justify-between gap-2 py-1.5 border-b border-nexus-border/50 last:border-0">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-[11px] font-bold text-white w-14 shrink-0">{symbol}</span>
+        <BiasBadge bias={chart.direction} />
+        <span
+          className={`text-[9px] font-semibold uppercase ${
+            rec === 'CALL' ? 'text-nexus-green' : rec === 'PUT' ? 'text-nexus-red' : 'text-nexus-muted'
+          }`}
+        >
+          {rec}
+        </span>
+      </div>
+      <div className="text-right shrink-0 font-mono text-[9px]">
+        <div className={momTone}>
+          5m {chart.momentum5Pct > 0 ? '+' : ''}
+          {chart.momentum5Pct.toFixed(2)}% · 15m {chart.momentum15Pct > 0 ? '+' : ''}
+          {chart.momentum15Pct.toFixed(2)}%
+        </div>
+        <div className="text-nexus-muted">
+          str {chart.trendStrength.toFixed(0)} · {chart.orPosition} OR · EMA {chart.emaBias}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DayModePanel({
   auto,
   snapshots,
@@ -98,6 +138,7 @@ export function DayModePanel({
         <Flag label="Midday chop" active={Boolean(g.middayChopWindow)} tone="warn" />
         <Flag label="Loss pause" active={Boolean(g.sessionPaused)} tone="bad" />
         <Flag label="Cap hit" active={Boolean(g.tradeCapReached)} tone="bad" />
+        <Flag label="Last-5 pause" active={Boolean(g.lastNTradesPaused)} tone="bad" />
         <Flag label="Guards on" active={chopEnabled !== false && g.guardsEnabled !== false} tone="neutral" />
       </div>
 
@@ -122,7 +163,7 @@ export function DayModePanel({
         <div className="mb-3">
           <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${
+              className={`h-full rounded-full ${
                 capPct >= 100 ? 'bg-nexus-red' : capPct >= 75 ? 'bg-nexus-yellow' : 'bg-nexus-accent'
               }`}
               style={{ width: `${capPct}%` }}
@@ -135,6 +176,39 @@ export function DayModePanel({
         <div className="mb-3 text-[10px] text-nexus-yellow font-mono">
           Loss streak: {g.lossStreak}
           {g.pauseReason ? ` · ${g.pauseReason}` : ''}
+        </div>
+      )}
+
+      {g.lastNTrades && (g.lastNTrades.count ?? 0) > 0 && (
+        <div className="mb-3 p-2 rounded bg-black/30 text-[10px]">
+          <div className="text-nexus-muted uppercase mb-1">
+            Last {g.lastNTrades.lookback ?? 5} trades — best-trades gate
+          </div>
+          <div className="font-mono text-white mb-1">
+            {g.lastNTrades.wins ?? 0}W / {g.lastNTrades.losses ?? 0}L · net ₹
+            {(g.lastNTrades.netPnlInr ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            {g.lastNTrades.profitFactor != null ? ` · PF ${g.lastNTrades.profitFactor.toFixed(2)}` : ''}
+          </div>
+          {g.lastNTradesPaused && (
+            <div className="text-nexus-red font-semibold mb-1">
+              PAUSED — {g.lastNTradesPauseReason?.replace(/_/g, ' ')}
+            </div>
+          )}
+          <div className="space-y-0.5 max-h-20 overflow-y-auto">
+            {(g.lastNTrades.trades ?? []).map((t, i) => (
+              <div key={`ln-${i}`} className="font-mono text-[9px] text-nexus-muted">
+                {t.symbol} {t.side} {t.strike}{' '}
+                <span className={t.pnlInr >= 0 ? 'text-nexus-green' : 'text-nexus-red'}>
+                  ₹{t.pnlInr.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+            ))}
+          </div>
+          {g.controlledDailyCap != null && g.controlledDailyCap < 99 && (
+            <div className="text-[9px] text-nexus-muted mt-1">
+              Daily cap: {closed}/{g.controlledDailyCap} best trades only
+            </div>
+          )}
         </div>
       )}
 
@@ -167,6 +241,21 @@ export function DayModePanel({
               </div>
             </div>
           );
+        })}
+      </div>
+
+      <div className="text-[10px] text-nexus-muted uppercase mb-1 mt-3">Index chart CE/PE alignment</div>
+      <div className="rounded bg-black/20 px-2 mb-3">
+        {symbols.map((sym) => {
+          const chart = snapshots[sym]?.spotChart;
+          if (!chart || !snapshots[sym]?.dataAvailable) {
+            return (
+              <div key={`chart-${sym}`} className="py-1.5 text-[10px] text-nexus-muted border-b border-nexus-border/50 last:border-0">
+                {sym}: no chart data
+              </div>
+            );
+          }
+          return <SymbolChartRow key={`chart-${sym}`} symbol={sym} chart={chart} />;
         })}
       </div>
 

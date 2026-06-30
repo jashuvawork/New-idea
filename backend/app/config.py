@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     snapshot_cache_interval_ms: int = 400
     tick_wake_debounce_ms: int = 25
     tick_fast_exit_enabled: bool = True
-    entry_scan_interval_ms: int = 250
+    entry_scan_interval_ms: int = 500
     news_cache_seconds: int = 60
     background_market_monitor_enabled: bool = True
 
@@ -111,11 +111,65 @@ class Settings(BaseSettings):
     explosion_reentry_cooldown_seconds: int = 120
     explosion_emergency_cooldown_seconds: int = 300
 
-    # Symbol cooldown — off (66K); quality gates filter instead
-    symbol_loss_cooldown_seconds: int = 0
-    symbol_emergency_cooldown_seconds: int = 0
-    symbol_streak_cooldown_seconds: int = 0
-    reentry_score_penalty_per_loss: int = 0
+    # Symbol / instrument cooldown — stop same-strike churn after losses
+    symbol_loss_cooldown_seconds: int = 180
+    symbol_emergency_cooldown_seconds: int = 300
+    symbol_streak_cooldown_seconds: int = 600
+    reentry_score_penalty_per_loss: int = 5
+    instrument_loss_cooldown_seconds: int = 300
+    instrument_micro_win_cooldown_seconds: int = 180
+    instrument_win_cooldown_seconds: int = 90
+    instrument_max_entries_per_day: int = 3
+    counter_breadth_min_score: int = 70
+
+    # Controlled trading — pre-trade backtest + fewer entries
+    controlled_trading_enabled: bool = True
+    controlled_max_trades_per_day: int = 6
+    min_seconds_between_entries: int = 180
+    pretrade_min_rank_score: float = 65.0
+    pretrade_min_symbol_trades_for_stats: int = 3
+    pretrade_block_symbol_pf_below: float = 0.5
+    pretrade_block_symbol_net_inr_below: float = -15_000.0
+    pretrade_similar_side_lookback: int = 5
+    pretrade_similar_side_min_trades: int = 3
+    pretrade_block_similar_pf_below: float = 0.4
+    index_selection_pf_bonus: float = 12.0
+
+    # Last-N trades gate — check last 5 before any new entry
+    last_n_trades_gate_enabled: bool = True
+    last_n_trades_lookback: int = 5
+    last_n_trades_min_count: int = 3
+    last_n_pause_after_losses: int = 4
+    last_n_elevate_after_losses: int = 3
+    last_n_elevated_min_rank_score: float = 72.0
+    last_n_block_pf_below: float = 0.35
+    last_n_block_net_inr_below: float = -25_000.0
+
+    # Best trades only — fewer, higher-quality entries
+    best_trades_only_enabled: bool = True
+    best_trades_min_rank_score: float = 68.0
+    best_trades_explosion_only_after_losses: int = 3
+
+    # Chart alignment — CE/PE must match index candle direction
+    chart_alignment_enabled: bool = True
+    chart_min_trend_strength: float = 25.0
+    chart_min_momentum_pct: float = 0.04
+    chart_override_min_score: float = 75
+    chart_alignment_rank_bonus: float = 10.0
+
+    # Execution-time chart — fresh Upstox fetch right before order
+    execution_chart_gate_enabled: bool = True
+    execution_chart_force_upstox_refresh: bool = True
+    execution_chart_premium_check_enabled: bool = True
+    execution_chart_min_premium_momentum_pct: float = -0.35
+    execution_chart_candle_count: int = 60
+
+    # Multi-timeframe pre-test (1m/5m/15m/1h/4h) before execution
+    execution_mtf_enabled: bool = True
+    execution_mtf_use_v3_native: bool = True
+    execution_mtf_1m_bars: int = 300
+    execution_mtf_min_align: int = 3
+    execution_mtf_block_htf_conflict: bool = True
     recent_win_window_seconds: int = 900
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5
@@ -154,16 +208,16 @@ class Settings(BaseSettings):
     momentum_rally_start_minute: int = 0
     momentum_rally_end_hour: int = 13
     momentum_rally_end_minute: int = 45
-    runner_trail_keep_ratio: float = 0.45
-    runner_micro_giveback_points: float = 2.5
-    runner_min_best_points: float = 6.0
+    runner_trail_keep_ratio: float = 0.38
+    runner_micro_giveback_points: float = 4.0
+    runner_min_best_points: float = 5.0
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
     max_option_premium_inr: float = 175.0
 
-    # Jun 25 profile — relaxed gates, micro locks + trails (no sure-shot / bullish-hold)
-    enhanced_micro_target_points: float = 2.5
+    # Jun 25 profile — hold winners longer for 2.5+ profit factor
+    enhanced_micro_target_points: float = 4.0
     enhanced_velocity_threshold: float = 1.2
     enhanced_tqs_entry: int = 50
     runner_alignment_override_score: int = 82
@@ -174,9 +228,11 @@ class Settings(BaseSettings):
     sure_shot_scalp_min_score: int = 55
     scalp_max_lots: int = 0  # 0 = capital-derived max on 85% per trade
     scalp_target_points: float = 12.0  # unused — session targets in simple_profit
-    bullish_hold_enabled: bool = False
-    bullish_hold_trail_keep_ratio: float = 0.55
-    bullish_hold_max_hold_multiplier: float = 1.0
+    bullish_hold_enabled: bool = True
+    bullish_hold_trail_keep_ratio: float = 0.48
+    bullish_hold_max_hold_multiplier: float = 1.6
+    scalp_micro_lock_min_best_points: float = 4.5
+    scalp_min_hold_before_micro_lock_seconds: int = 90
     midday_chop_block_scalps: bool = True
     midday_chop_start_hour: int = 11
     midday_chop_start_minute: int = 30
@@ -202,16 +258,21 @@ class Settings(BaseSettings):
     min_per_trade_risk_inr: float = 3_000
     per_trade_risk_pct: float = 0.85
     max_exposure_pct: float = 0.85
-    position_sl_cap_pct: float = 0.06
-    position_tp_target_pct: float = 0.10
+    position_sl_cap_pct: float = 0.08
+    position_tp_target_pct: float = 0.12
     emergency_stop_enabled: bool = False
     emergency_stop_inr: float = 20_000
     emergency_stop_scale_with_position: bool = False
     scalp_stop_points: float = 3.0
+    scalp_stop_min_points: float = 2.5
     scalp_stop_min_hold_seconds: int = 30
-    scalp_trail_arm_points: float = 3.0
-    scalp_trail_keep_ratio: float = 0.55
-    scalp_no_progress_seconds: int = 90
+    scalp_trail_arm_points: float = 4.5
+    scalp_trail_keep_ratio: float = 0.50
+    scalp_trail_step_points: float = 3.0
+    scalp_trail_tight_arm: float = 10.0
+    scalp_trail_tight_points: float = 4.0
+    scalp_micro_giveback_points: float = 3.0
+    scalp_no_progress_seconds: int = 150
 
     # Daily target — Jun 25 milestone profile
     daily_profit_target_inr: float = 44_000

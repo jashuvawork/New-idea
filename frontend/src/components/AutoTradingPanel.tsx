@@ -1,5 +1,5 @@
 import { Panel, Metric } from './Panel';
-import type { AutoTraderState } from '../types';
+import type { AutoTraderState, ExecutionChartContext } from '../types';
 
 export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
   const report = auto.dailyReport;
@@ -39,6 +39,16 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
           <span className={auto.lastEntry.executionMode === 'LIVE' ? 'text-nexus-red' : 'text-nexus-green'}>
             [{auto.lastEntry.executionMode}]
           </span>
+          {auto.lastEntry.chartDirection && (
+            <div className="mt-0.5 text-[9px] text-nexus-muted">
+              Chart {auto.lastEntry.chartDirection}
+              {auto.lastEntry.chartAligned === false ? (
+                <span className="text-nexus-yellow"> · misaligned at scan</span>
+              ) : auto.lastEntry.chartAligned ? (
+                <span className="text-nexus-green"> · aligned</span>
+              ) : null}
+            </div>
+          )}
         </div>
       )}
 
@@ -75,6 +85,7 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
             const plan = t.entryContext?.exitPlan as Record<string, number> | undefined;
             const execMode = t.entryContext?.executionMode as string | undefined;
             const brokerId = t.entryContext?.brokerOrderId as string | undefined;
+            const execChart = t.entryContext?.executionChart as ExecutionChartContext | undefined;
             const sl = plan?.stopPct ? `−${plan.stopPct}%` : plan?.stopPoints ? `−${plan.stopPoints}pt` : null;
             const tp = plan?.targetPct ? `+${plan.targetPct}%` : plan?.targetPoints ? `+${plan.targetPoints}pt` : null;
             return (
@@ -93,6 +104,19 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
                   {sl && <span>SL {sl}</span>}
                   {tp && <span>TP {tp}</span>}
                   {brokerId && <span>ord {brokerId}</span>}
+                  {execChart?.indexChart?.direction && (
+                    <span>
+                      idx {execChart.indexChart.direction}
+                      {execChart.premiumChart?.momentum5Pct != null
+                        ? ` · prem ${execChart.premiumChart.momentum5Pct > 0 ? '+' : ''}${execChart.premiumChart.momentum5Pct.toFixed(2)}%`
+                        : ''}
+                    </span>
+                  )}
+                  {execChart?.indexMtf?.consensus && (
+                    <span>
+                      MTF {execChart.indexMtf.consensus} ({execChart.indexMtf.alignedCount}/{execChart.indexMtf.total})
+                    </span>
+                  )}
                 </div>
               </div>
             );

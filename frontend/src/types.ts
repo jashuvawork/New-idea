@@ -33,6 +33,7 @@ export interface SymbolSnapshot {
   greeks: Greeks;
   marketProfile: MarketProfile;
   breadth: Breadth;
+  spotChart?: SpotChart;
   explosiveRunner: ExplosiveRunner;
   explosiveRunnerWatchlist: RunnerWatchItem[];
   suggestedTrades: SuggestedTrade[];
@@ -192,6 +193,22 @@ export interface Breadth {
   aligned: boolean;
 }
 
+export interface SpotChart {
+  direction: string;
+  spot: number;
+  momentum5Pct: number;
+  momentum10Pct: number;
+  momentum15Pct: number;
+  momentum30Pct: number;
+  trendStrength: number;
+  emaBias: string;
+  candleBias: string;
+  orPosition: string;
+  abovePoc: boolean;
+  belowPoc: boolean;
+  poc: number;
+}
+
 export interface ExplosiveRunner {
   candidate: boolean;
   score: number;
@@ -260,6 +277,27 @@ export interface ChopGuards {
   dayModeHint?: string;
   symbolBreadth?: Record<string, SymbolBreadthSummary>;
   indexMoments?: Record<string, IndexMomentSummary>;
+  lastNTrades?: LastNTradesSummary;
+  lastNTradesPaused?: boolean;
+  lastNTradesPauseReason?: string | null;
+  controlledDailyCap?: number;
+}
+
+export interface LastNTradesSummary {
+  count?: number;
+  lookback?: number;
+  wins?: number;
+  losses?: number;
+  netPnlInr?: number;
+  profitFactor?: number;
+  allLosses?: boolean;
+  trades?: Array<{
+    symbol: string;
+    side: string;
+    strike: number;
+    pnlInr: number;
+    exitReason: string;
+  }>;
 }
 
 export interface SymbolBreadthSummary {
@@ -316,7 +354,53 @@ export interface AutoTradeEvent {
   executionMode?: string;
   brokerOrderId?: string;
   brokerExitOrderId?: string;
+  chartDirection?: string;
+  chartAligned?: boolean;
   at?: string;
+}
+
+export interface ExecutionChartContext {
+  enabled?: boolean;
+  source?: string;
+  passed?: boolean;
+  alignedWithChart?: boolean;
+  recommendedSide?: string;
+  indexChart?: SpotChart;
+  premiumChart?: PremiumChart;
+  indexMtf?: MtfPreTestSummary;
+  premiumMtf?: MtfPreTestSummary;
+  mtfPreTest?: Record<string, unknown>;
+  quoteContext?: Record<string, number | boolean>;
+  snapshotDelta?: Record<string, unknown>;
+  fetchedAt?: string;
+}
+
+export interface MtfPreTestSummary {
+  timeframes?: Record<string, MtfTimeframeRead>;
+  alignedCount?: number;
+  opposingCount?: number;
+  total?: number;
+  consensus?: string;
+}
+
+export interface MtfTimeframeRead {
+  label: string;
+  direction: string;
+  momentumPct: number;
+  trendStrength: number;
+  emaBias: string;
+  alignedCall?: boolean;
+  alignedPut?: boolean;
+}
+
+export interface PremiumChart {
+  direction: string;
+  lastPremium: number;
+  momentum3Pct: number;
+  momentum5Pct: number;
+  volumeSurge: number;
+  vwap: number;
+  aboveVwap: boolean;
 }
 
 export interface CapitalAllocation {

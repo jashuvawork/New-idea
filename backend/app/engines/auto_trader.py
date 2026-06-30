@@ -30,6 +30,7 @@ from app.engines.capital_allocator import (
     update_daily_profit_gate,
 )
 from app.engines.symbol_cooldown import record_symbol_result, reset_symbol_cooldowns
+from app.engines.instrument_cooldown import record_instrument_close, record_instrument_entry
 from app.engines.chop_day_guards import (
     apply_tiered_lot_cap,
     chop_guard_summary,
@@ -238,6 +239,41 @@ async def _open_from_candidate(
     if not ok:
         return False, risk_reason
 
+    from app.engines.snapshot_fast import _heatmap_instrument_key
+
+    instrument_key = _heatmap_instrument_key(snap, candidate.strike, candidate.side)
+
+    if settings.execution_chart_gate_enabled:
+        if client:
+            from app.engines.execution_chart_monitor import monitor_trade_chart_before_execution
+
+            chart_ok, chart_reason, chart_meta = await monitor_trade_chart_before_execution(
+                client,
+                symbol,
+                candidate.side,
+                candidate.strike,
+                snap,
+                trade_score=candidate.score,
+                instrument_key=instrument_key,
+            )
+            if not chart_ok:
+                return False, chart_reason
+        else:
+            from app.engines.spot_direction import chart_blocks_side
+
+            blocked, chart_reason = chart_blocks_side(
+                candidate.side, snap.spotChart, trade_score=candidate.score,
+            )
+            if blocked:
+                return False, f"exec_{chart_reason}"
+            chart_meta = {
+                "enabled": True,
+                "source": "snapshot_only",
+                "indexChart": snap.spotChart.model_dump() if snap.spotChart else {},
+            }
+    else:
+        chart_meta = {"enabled": False}
+
     exit_plan = _attach_exit_plan(
         snap, candidate.strategy_type, candidate.side.value,
         candidate.confidence, news,
@@ -255,7 +291,10 @@ async def _open_from_candidate(
         "slippage": slip_meta,
         "signalPremium": signal_premium,
         "paperLiveParity": use_parity,
+        "executionChart": chart_meta,
     }
+    if getattr(candidate, "pretrade_meta", None):
+        ctx_extra["pretrade"] = candidate.pretrade_meta
     if candidate.mode == "explosion" and candidate.explosion_event:
         ev = candidate.explosion_event
         ctx_extra.update({
@@ -279,10 +318,12 @@ async def _open_from_candidate(
         })
 
     if not ctx_extra.get("instrumentKey"):
-        from app.engines.snapshot_fast import _heatmap_instrument_key
-        ik = _heatmap_instrument_key(snap, candidate.strike, candidate.side)
-        if ik:
-            ctx_extra["instrumentKey"] = ik
+        if instrument_key:
+            ctx_extra["instrumentKey"] = instrument_key
+        else:
+            ik = _heatmap_instrument_key(snap, candidate.strike, candidate.side)
+            if ik:
+                ctx_extra["instrumentKey"] = ik
 
     if is_live or use_parity:
         if not client:
@@ -344,6 +385,7 @@ async def _open_from_candidate(
     paper.entryContext = ctx
     state.openPaperTrades.append(paper)
     trade_store.record_trade_opened(paper, ctx)
+    record_instrument_entry(symbol, candidate.side, candidate.strike)
     get_ai_learning().record_trade_open(
         paper.id,
         [
@@ -363,6 +405,8 @@ async def _open_from_candidate(
         "score": round(candidate.score, 2),
         "executionMode": ctx_extra["executionMode"],
         "brokerOrderId": ctx_extra.get("brokerOrderId"),
+        "chartDirection": chart_meta.get("indexChart", {}).get("direction"),
+        "chartAligned": chart_meta.get("alignedWithChart"),
         "at": datetime.now(IST).isoformat(),
     }
     logger.info(
@@ -582,6 +626,7 @@ async def _process_open_trades(
         state.closedPaperTrades.append(trade)
         _calibration.record_trade(trade)
         record_symbol_result(trade.symbol, pnl, exit_reason or "")
+        record_instrument_close(trade.symbol, trade.side, trade.strike, pnl, exit_reason or "")
         record_session_trade_close(pnl)
         trade_store.record_trade_closed(trade, ctx)
         get_ai_learning().record_trade_close(trade)
@@ -685,7 +730,23 @@ async def process(
                 "reason": cap_reason,
                 "message": "Daily trade cap on chop session",
             })
-        if not paused and not cap_hit:
+        from app.engines.pretrade_validator import controlled_daily_cap_reached, check_last_n_trades_pause
+        ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state)
+        if ctrl_cap:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": ctrl_reason,
+                "message": "Controlled trading daily cap",
+            })
+        last_n_paused, last_n_reason, last_n_meta = check_last_n_trades_pause(state)
+        if last_n_paused:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": last_n_reason,
+                "message": f"Last {last_n_meta.get('lookback', 5)} trades: "
+                f"{last_n_meta.get('losses', 0)} losses, net ₹{last_n_meta.get('netPnlInr', 0):,.0f}",
+            })
+        if not paused and not cap_hit and not ctrl_cap and not last_n_paused:
             best = find_best_entry(snapshots, state)
             if best:
                 opened, reason = await _open_from_candidate(best, state, client, news)

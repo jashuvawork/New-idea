@@ -11,7 +11,26 @@ from app.engines.market_momentum import (
     side_aligned_with_index_moment,
 )
 from app.engines.explosion_profit import check_explosion_entry
+from app.engines.instrument_cooldown import (
+    instrument_daily_cap_reached,
+    instrument_in_cooldown,
+)
+from app.engines.pretrade_validator import (
+    collect_session_trades,
+    compute_symbol_stats,
+    filter_candidates_pretrade,
+    index_rank_from_backtest,
+    last_n_elevated_min_rank,
+    last_n_trades_summary,
+)
 from app.engines.simple_profit import check_entry_gate
+from app.engines.spot_direction import chart_rank_adjustment
+from app.engines.symbol_cooldown import (
+    entry_score_penalty,
+    requires_breadth_alignment,
+    side_aligned_with_breadth,
+    symbol_in_cooldown,
+)
 from app.engines.swing_profit import check_swing_entry
 from app.engines.swing_engine import SwingSetup
 from app.models.schemas import (
@@ -40,6 +59,28 @@ class EntryCandidate:
     swing_setup: Any = None
     suggestion: Any = None
     alert: Optional[dict] = None
+    pretrade_meta: Optional[dict] = None
+
+
+def _reentry_blocked(
+    symbol: str,
+    side: Side,
+    strike: float,
+    snap: SymbolSnapshot,
+) -> tuple[bool, str]:
+    blocked, reason = symbol_in_cooldown(symbol)
+    if blocked:
+        return True, reason
+    blocked, reason = instrument_in_cooldown(symbol, side, strike)
+    if blocked:
+        return True, reason
+    if instrument_daily_cap_reached(symbol, side, strike):
+        return True, f"instrument_daily_cap_{symbol}_{side.value}_{int(strike)}"
+    if requires_breadth_alignment(symbol) and not side_aligned_with_breadth(
+        side.value, snap.breadth.bias,
+    ):
+        return True, "symbol_requires_breadth_alignment"
+    return False, "ok"
 
 
 def _explosion_candidates(
@@ -92,9 +133,15 @@ def _explosion_candidates(
         moment, _ = index_moment_active(snap)
         moment_surge = moment and side_aligned_with_index_moment(event.side, snap)
         passed, _ = check_explosion_entry(
-            event, suggestion, snap.breadth, blocked, index_moment=moment_surge,
+            event, suggestion, snap.breadth, blocked,
+            index_moment=moment_surge,
+            chart=snap.spotChart,
         )
         if not passed:
+            continue
+
+        blocked, reason = _reentry_blocked(symbol, event.side, event.strike, snap)
+        if blocked:
             continue
 
         rank = score_val * 0.55 + snap.tradeQualityScore * 0.25
@@ -103,6 +150,7 @@ def _explosion_candidates(
         rank += min(15, event.velocity_3s * 2)
         rank += min(10, event.velocity_9s)
         rank += index_moment_rank_bonus(snap, event.side)
+        rank += chart_rank_adjustment(event.side, snap.spotChart)
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -150,8 +198,13 @@ def _scalp_candidates(
         passed, _ = check_entry_gate(
             suggestion, snap.breadth, max(snap.tradeQualityScore, trade_score), vel,
             blocked, momentum_surge=momentum, alignment_override=override,
+            chart=snap.spotChart,
         )
         if not passed:
+            continue
+
+        blocked, reason = _reentry_blocked(symbol, suggestion.side, suggestion.strike, snap)
+        if blocked:
             continue
 
         rank = suggestion.tqs * 0.5 + suggestion.confidence * 0.3 + snap.tradeQualityScore * 0.2
@@ -160,6 +213,7 @@ def _scalp_candidates(
         if momentum:
             rank += 5
         rank += index_moment_rank_bonus(snap, suggestion.side)
+        rank += chart_rank_adjustment(suggestion.side, snap.spotChart)
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -263,16 +317,46 @@ def find_best_entry(
     if not candidates:
         return None
 
-    # SENSEX-first on chop days
+    # SENSEX-first on chop days + session backtest index preference
+    session_trades = collect_session_trades(state)
+    index_adj = index_rank_from_backtest(compute_symbol_stats(session_trades))
+
     for c in candidates:
         c.score += symbol_rank_adjustment(c.symbol, chop)
+        c.score += index_adj.get(c.symbol.upper(), 0.0)
+
+    candidates = filter_candidates_pretrade(candidates, state, snapshots)
+    if not candidates:
+        return None
+
+    settings = get_settings()
+    if settings.best_trades_only_enabled:
+        candidates = [
+            c for c in candidates
+            if c.score >= settings.best_trades_min_rank_score
+        ]
+        if not candidates:
+            return None
+
+    last_n = last_n_trades_summary(state)
+    if (
+        settings.best_trades_only_enabled
+        and last_n.get("losses", 0) >= settings.best_trades_explosion_only_after_losses
+    ):
+        explosion_only = [c for c in candidates if c.mode == "explosion"]
+        if explosion_only:
+            candidates = explosion_only
 
     def sort_key(c: EntryCandidate) -> float:
         bonus = 20 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
-        return c.score + bonus
+        penalty = entry_score_penalty(c.symbol)
+        return c.score + bonus - penalty
 
     best = max(candidates, key=sort_key)
     floor = min_rank_for_entry(chop, snapshots)
+    floor = max(floor, last_n_elevated_min_rank(state))
+    if settings.best_trades_only_enabled:
+        floor = max(floor, settings.best_trades_min_rank_score)
     if floor > 0 and sort_key(best) < floor:
         return None
     return best

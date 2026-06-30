@@ -100,7 +100,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen text-gray-100">
-      <header className="border-b border-nexus-border/80 bg-nexus-panel/70 backdrop-blur-md sticky top-0 z-50 shadow-panel">
+      <header className="border-b border-nexus-border/80 bg-nexus-panel sticky top-0 z-50 shadow-panel">
         <div className="max-w-[1920px] mx-auto px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4 min-w-0">
             <div className="flex items-center gap-2.5">

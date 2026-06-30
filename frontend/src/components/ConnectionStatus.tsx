@@ -59,7 +59,7 @@ export function ConnectionStatus({
   metrics: StreamMetrics;
   marketClosed?: boolean;
 }) {
-  const ageSec = Math.round(metrics.stalenessMs / 1000);
+  const ageSec = Math.floor(metrics.stalenessMs / 5000) * 5;
   const quality = deriveQuality(metrics.lastLatencyMs, metrics.stalenessMs, marketClosed);
 
   return (
@@ -68,14 +68,14 @@ export function ConnectionStatus({
       title={`${metrics.streamMode === 'sse' ? 'SSE stream' : 'HTTP poll'} · Round-trip: ${metrics.lastLatencyMs}ms · Avg: ${metrics.avgLatencyMs}ms · Refresh every ${metrics.pollIntervalMs / 1000}s`}
     >
       <span
-        className={`w-1.5 h-1.5 rounded-full ${
+        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
           quality === 'offline'
             ? 'bg-nexus-red'
             : quality === 'slow'
-              ? 'bg-nexus-yellow animate-pulse'
+              ? 'bg-nexus-yellow'
               : marketClosed
                 ? 'bg-gray-400'
-                : 'bg-nexus-green animate-pulse'
+                : 'bg-nexus-green'
         }`}
       />
       <span className="font-semibold">{qualityLabel(quality, metrics.streamMode, marketClosed)}</span>

@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.engines.capital_allocator import compute_lots
 from app.engines.explosion_detector import ExplosionEvent
-from app.models.schemas import Breadth, PaperTrade, Side, StrategyType, SuggestedTrade
+from app.models.schemas import Breadth, PaperTrade, Side, SpotChart, StrategyType, SuggestedTrade
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -81,6 +81,7 @@ def check_explosion_entry(
     calibration_blocked: bool,
     *,
     index_moment: bool = False,
+    chart: Optional[SpotChart] = None,
 ) -> tuple[bool, str]:
     """Fast entry on explosion — minimal gates, speed is everything."""
     if calibration_blocked:
@@ -112,6 +113,17 @@ def check_explosion_entry(
 
     if in_momentum_rally_window() and event.tier == "EXPLODING" and event.velocity_3s < 2.0:
         return False, "explosion_wait_velocity"
+
+    from app.engines.spot_direction import chart_blocks_side
+
+    blocked_chart, chart_reason = chart_blocks_side(
+        event.side,
+        chart,
+        trade_score=score,
+        momentum_surge=index_moment,
+    )
+    if blocked_chart:
+        return False, chart_reason
 
     if event.tier == "ELITE":
         return True, "elite_explosion"
@@ -161,26 +173,20 @@ def _trail_floor_pts(
     trail_arm_points: Optional[float] = None,
 ) -> Optional[float]:
     """Trailing floor in PnL points — arms only after minimum profit."""
+    from app.engines.trail_engine import ratcheting_trail_floor
+
     arm = trail_arm_points if trail_arm_points is not None else settings.explosion_trail_arm_points
-    if best < arm:
-        return None
-
-    ratio_floor = best * settings.explosion_trail_keep_ratio
-    step_floor = best - settings.explosion_trail_step_points
-    floor_pts = max(ratio_floor, step_floor)
-
-    if best >= settings.explosion_trail_tight_arm:
-        tight_floor = best - settings.explosion_trail_tight_points
-        floor_pts = max(floor_pts, tight_floor)
-
-    ctx = trade.entryContext or {}
-    prev = ctx.get("explosionTrailFloorPts")
-    if prev is not None:
-        floor_pts = max(floor_pts, float(prev))
-    ctx["explosionTrailFloorPts"] = round(floor_pts, 2)
-    ctx["explosionBestPts"] = round(best, 2)
-    trade.entryContext = ctx
-    return floor_pts
+    return ratcheting_trail_floor(
+        trade,
+        best,
+        arm_points=arm,
+        keep_ratio=settings.explosion_trail_keep_ratio,
+        step_points=settings.explosion_trail_step_points,
+        tight_arm=settings.explosion_trail_tight_arm,
+        tight_points=settings.explosion_trail_tight_points,
+        floor_key="explosionTrailFloorPts",
+        best_key="explosionBestPts",
+    )
 
 
 def evaluate_explosion_exit(
@@ -232,10 +238,14 @@ def evaluate_explosion_exit(
     ):
         return "explosion_micro_profit_lock", pnl_inr
 
-    if hold >= 90 and best < exit_params.trail_arm_points:
+    if hold >= settings.explosion_no_progress_seconds and best < exit_params.trail_arm_points:
         return "explosion_no_progress", pnl_inr
 
-    max_hold = 360 if best >= settings.runner_min_best_points else (300 if event_tier == "ELITE" or best >= 15 else 240)
+    max_hold = 420 if best >= settings.runner_min_best_points else (360 if event_tier == "ELITE" or best >= 15 else 300)
+    if aligned := (trade.entryContext or {}).get("breadth"):
+        side_bias = "BULLISH" if trade.side.value == "CALL" else "BEARISH"
+        if str(aligned).upper() == side_bias:
+            max_hold = int(max_hold * 1.4)
     if hold >= max_hold:
         return ("explosion_time_profit" if pnl_pts > 0 else "explosion_time_stop"), pnl_inr
 

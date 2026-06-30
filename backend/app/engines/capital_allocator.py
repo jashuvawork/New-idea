@@ -627,15 +627,20 @@ def tune_exit_plan_for_position(
     if plan_dict.get("targetPct"):
         return plan_dict
 
+    plan_stop = float(plan_dict.get("stopPoints", settings.scalp_stop_points))
+    plan_target = float(plan_dict.get("targetPoints", 6.0))
+    plan_micro = float(plan_dict.get("microTargetPoints", 2.5))
+
     max_sl_inr = trade_budget * settings.position_sl_cap_pct
     sl_pts_cap = max_sl_inr / units
     target_inr = trade_budget * settings.position_tp_target_pct
     tp_pts_floor = target_inr / units
 
-    stop = min(float(plan_dict.get("stopPoints", 3.0)), max(1.5, sl_pts_cap))
-    target = max(float(plan_dict.get("targetPoints", 6.0)), min(30.0, tp_pts_floor))
-    micro = min(float(plan_dict.get("microTargetPoints", 2.5)), stop * 0.6)
-    trail_arm = max(float(plan_dict.get("trailArmPoints", 3.0)), target * 0.45)
+    stop = max(settings.scalp_stop_min_points, min(plan_stop, sl_pts_cap))
+    target = max(plan_target, tp_pts_floor, settings.scalp_stop_points * 2)
+    micro = min(plan_micro, max(1.5, stop * 0.65))
+    trail_arm = max(float(plan_dict.get("trailArmPoints", 3.0)), target * 0.35)
+    trail_step = float(plan_dict.get("trailStepPoints", settings.scalp_trail_step_points))
 
     reasoning.append(
         f"Size tune: {lots} lots × {mult} units · ₹{position_inr:,.0f} notional · SL ≤₹{max_sl_inr:,.0f} ({stop:.1f}pt)"
@@ -648,6 +653,7 @@ def tune_exit_plan_for_position(
         "targetPoints": round(target, 2),
         "microTargetPoints": round(micro, 2),
         "trailArmPoints": round(trail_arm, 2),
+        "trailStepPoints": round(trail_step, 2),
         "lots": lots,
         "lotMultiplier": mult,
         "positionInr": round(position_inr, 2),

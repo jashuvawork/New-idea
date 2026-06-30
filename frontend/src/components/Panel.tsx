@@ -44,7 +44,7 @@ export function ScoreBar({ value, max = 100 }: { value: number; max?: number }) 
   return (
     <div className="w-full h-2 bg-gray-800/80 rounded-full overflow-hidden">
       <div
-        className={`h-full ${color} transition-all duration-500 rounded-full`}
+        className={`h-full ${color} rounded-full`}
         style={{ width: `${pct}%` }}
       />
     </div>
