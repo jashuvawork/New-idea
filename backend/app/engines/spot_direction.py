@@ -236,3 +236,96 @@ def chart_summary_dict(chart: SpotChart) -> dict[str, Any]:
             "PUT" if chart.direction == "BEARISH" else "WAIT"
         ),
     }
+
+
+def analyze_premium_chart(candles: list, ltp: float) -> "PremiumChart":
+    """Option premium chart from Upstox 1m candles."""
+    from app.models.schemas import PremiumChart
+
+    _, highs, lows, closes = _candle_rows(candles)
+    volumes = []
+    for c in candles or []:
+        if isinstance(c, list) and len(c) >= 6:
+            volumes.append(float(c[5] or 0))
+        elif isinstance(c, dict):
+            volumes.append(float(c.get("volume", 0) or 0))
+
+    if not closes or ltp <= 0:
+        return PremiumChart(lastPremium=ltp)
+
+    mom3 = _pct_change(closes, 3)
+    mom5 = _pct_change(closes, 5)
+    vwap = sum(c * v for c, v in zip(closes, volumes)) / max(1, sum(volumes)) if volumes else closes[-1]
+
+    green = red = 0
+    opens, _, _, _ = _candle_rows(candles)
+    for o, c in zip(opens[-6:], closes[-6:]):
+        if c > o:
+            green += 1
+        elif c < o:
+            red += 1
+
+    if mom5 > 0.25 and mom3 >= 0:
+        direction = "BULLISH"
+    elif mom5 < -0.25 and mom3 <= 0:
+        direction = "BEARISH"
+    elif green >= red + 2:
+        direction = "BULLISH"
+    elif red >= green + 2:
+        direction = "BEARISH"
+    else:
+        direction = "NEUTRAL"
+
+    vol_recent = sum(volumes[-3:]) if len(volumes) >= 3 else 0
+    vol_prior = sum(volumes[-6:-3]) if len(volumes) >= 6 else vol_recent or 1
+    vol_surge = vol_recent / max(1, vol_prior)
+
+    return PremiumChart(
+        direction=direction,
+        lastPremium=round(ltp, 2),
+        momentum3Pct=round(mom3, 3),
+        momentum5Pct=round(mom5, 3),
+        volumeSurge=round(vol_surge, 2),
+        vwap=round(vwap, 2),
+        aboveVwap=ltp > vwap * 1.001,
+    )
+
+
+def premium_blocks_entry(side: Side | str, premium: "PremiumChart", trade_score: float = 0.0) -> tuple[bool, str]:
+    """Block when option premium is fading at execution — bad fill timing."""
+    settings = get_settings()
+    if not settings.execution_chart_premium_check_enabled or not premium:
+        return False, "ok"
+    if trade_score >= settings.chart_override_min_score:
+        return False, "ok"
+
+    min_mom = settings.execution_chart_min_premium_momentum_pct
+
+    if premium.momentum5Pct < min_mom and premium.momentum3Pct < 0:
+        return True, "premium_fading_at_execution"
+    if premium.direction == "BEARISH" and premium.momentum5Pct < -0.15:
+        return True, "premium_chart_fading"
+    return False, "ok"
+
+
+def pro_index_quote_context(quote: dict[str, Any], spot: float) -> dict[str, Any]:
+    """Day structure from Upstox index quote."""
+    prev = float(quote.get("close") or quote.get("prev_close") or spot)
+    ohlc = quote.get("ohlc") or {}
+    day_open = float(ohlc.get("open") or quote.get("open") or spot)
+    day_high = float(ohlc.get("high") or quote.get("high") or spot)
+    day_low = float(ohlc.get("low") or quote.get("low") or spot)
+    gap_pct = ((spot - prev) / prev * 100) if prev else 0.0
+    from_open_pct = ((spot - day_open) / day_open * 100) if day_open else 0.0
+    range_pct = ((day_high - day_low) / day_low * 100) if day_low else 0.0
+    return {
+        "prevClose": round(prev, 2),
+        "dayOpen": round(day_open, 2),
+        "dayHigh": round(day_high, 2),
+        "dayLow": round(day_low, 2),
+        "gapPct": round(gap_pct, 3),
+        "fromOpenPct": round(from_open_pct, 3),
+        "dayRangePct": round(range_pct, 3),
+        "belowDayOpen": spot < day_open * 0.9999,
+        "aboveDayOpen": spot > day_open * 1.0001,
+    }

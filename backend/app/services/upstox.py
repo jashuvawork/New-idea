@@ -308,12 +308,13 @@ class UpstoxClient:
         _cache_set(cache_key, ltp)
         return float(ltp)
 
-    async def get_index_quote(self, symbol: str) -> dict[str, Any]:
+    async def get_index_quote(self, symbol: str, *, force_refresh: bool = False) -> dict[str, Any]:
         """Full index quote — prev close, OHLC, volume for premarket gap analysis."""
         cache_key = f"quote:{symbol}"
-        cached = _cache_get(cache_key, self.settings.upstox_ltp_cache_seconds)
-        if cached is not None:
-            return cached
+        if not force_refresh:
+            cached = _cache_get(cache_key, self.settings.upstox_ltp_cache_seconds)
+            if cached is not None:
+                return cached
 
         key = INDEX_KEYS.get(symbol)
         if not key:
@@ -440,24 +441,40 @@ class UpstoxClient:
         return result
 
     async def get_candles(
-        self, symbol: str, interval: str = "1minute", count: int = 60
+        self, symbol: str, interval: str = "1minute", count: int = 60, *, force_refresh: bool = False,
     ) -> list[dict[str, Any]]:
-        cache_key = f"candles:{symbol}:{interval}:{count}"
-        cached = _cache_get(cache_key, self.settings.upstox_candles_cache_seconds)
-        if cached is not None:
-            return cached
-
         key = INDEX_KEYS.get(symbol)
         if not key:
             raise UpstoxError(f"Unknown symbol: {symbol}")
+        return await self.get_historical_candles(
+            key, interval=interval, count=count, force_refresh=force_refresh,
+        )
+
+    async def get_historical_candles(
+        self,
+        instrument_key: str,
+        interval: str = "1minute",
+        count: int = 60,
+        *,
+        force_refresh: bool = False,
+    ) -> list[dict[str, Any]]:
+        """OHLCV candles for any Upstox instrument (index or option leg)."""
+        cache_key = f"candles:{instrument_key}:{interval}:{count}"
+        if not force_refresh:
+            cached = _cache_get(cache_key, self.settings.upstox_candles_cache_seconds)
+            if cached is not None:
+                return cached
+
+        encoded_key = quote(instrument_key, safe="")
         to_date = datetime.now(IST).strftime("%Y-%m-%d")
         from_date = (datetime.now(IST) - timedelta(days=2)).strftime("%Y-%m-%d")
         data = await self._get(
-            f"/historical-candle/{key}/{interval}/{to_date}/{from_date}",
+            f"/historical-candle/{encoded_key}/{interval}/{to_date}/{from_date}",
         )
         candles = data.get("candles", []) if isinstance(data, dict) else data
         result = candles[-count:] if candles else []
-        _cache_set(cache_key, result)
+        if result and not force_refresh:
+            _cache_set(cache_key, result)
         return result
 
     async def get_funds(self) -> dict[str, Any]:

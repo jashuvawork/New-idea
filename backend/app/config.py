@@ -141,6 +141,13 @@ class Settings(BaseSettings):
     chart_min_momentum_pct: float = 0.04
     chart_override_min_score: float = 75
     chart_alignment_rank_bonus: float = 10.0
+
+    # Execution-time chart — fresh Upstox fetch right before order
+    execution_chart_gate_enabled: bool = True
+    execution_chart_force_upstox_refresh: bool = True
+    execution_chart_premium_check_enabled: bool = True
+    execution_chart_min_premium_momentum_pct: float = -0.35
+    execution_chart_candle_count: int = 60
     recent_win_window_seconds: int = 900
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5

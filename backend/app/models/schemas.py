@@ -72,6 +72,17 @@ class SpotChart(BaseModel):
     poc: float = 0
 
 
+class PremiumChart(BaseModel):
+    """Option premium 1m candle read at execution time."""
+    direction: str = "NEUTRAL"
+    lastPremium: float = 0
+    momentum3Pct: float = 0
+    momentum5Pct: float = 0
+    volumeSurge: float = 1.0
+    vwap: float = 0
+    aboveVwap: bool = False
+
+
 class Greeks(BaseModel):
     delta: float = 0
     gamma: float = 0

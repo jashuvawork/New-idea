@@ -333,7 +333,32 @@ export interface AutoTradeEvent {
   executionMode?: string;
   brokerOrderId?: string;
   brokerExitOrderId?: string;
+  chartDirection?: string;
+  chartAligned?: boolean;
   at?: string;
+}
+
+export interface ExecutionChartContext {
+  enabled?: boolean;
+  source?: string;
+  passed?: boolean;
+  alignedWithChart?: boolean;
+  recommendedSide?: string;
+  indexChart?: SpotChart;
+  premiumChart?: PremiumChart;
+  quoteContext?: Record<string, number | boolean>;
+  snapshotDelta?: Record<string, unknown>;
+  fetchedAt?: string;
+}
+
+export interface PremiumChart {
+  direction: string;
+  lastPremium: number;
+  momentum3Pct: number;
+  momentum5Pct: number;
+  volumeSurge: number;
+  vwap: number;
+  aboveVwap: boolean;
 }
 
 export interface CapitalAllocation {
