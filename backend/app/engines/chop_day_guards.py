@@ -292,6 +292,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.moneyness import resolve_preferred_moneyness
 
 
+
     session = get_session_targets()
     settings = get_settings()
     last_n = last_n_trades_summary(state)
