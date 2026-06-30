@@ -377,6 +377,7 @@ def monitor_status() -> dict[str, Any]:
         "enabled": settings.composer_monitor_enabled,
         "useAi": settings.composer_monitor_use_ai,
         "model": settings.cursor_composer_model,
+        "runtime": settings.cursor_composer_runtime,
         "apiConfigured": client.configured,
         "intervalSeconds": settings.composer_monitor_interval_seconds,
         "latest": get_latest_brief(),
