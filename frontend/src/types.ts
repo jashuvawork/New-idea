@@ -282,6 +282,8 @@ export interface ChopGuards {
   lastNTradesPauseReason?: string | null;
   controlledDailyCap?: number;
   whipsawGuards?: WhipsawGuardsSummary;
+  confidenceHold?: { enabled?: boolean; minScore?: number };
+  moneynessPolicy?: MoneynessPolicy;
 }
 
 export interface WhipsawGuardsSummary {

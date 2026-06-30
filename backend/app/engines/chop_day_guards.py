@@ -329,4 +329,14 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "controlledDailyCap": settings.controlled_max_trades_per_day,
         "whipsawGuards": whipsaw_guard_summary(state, snapshots),
         "confidenceHold": high_confidence_close_summary(),
+        "moneynessPolicy": {
+            "mode": settings.trade_moneyness_mode,
+            "scalpPrefer": settings.moneyness_scalp_chop_prefer,
+            "explosionPrefer": settings.moneyness_explosion_prefer,
+            "highConfPrefer": settings.moneyness_high_conf_prefer,
+            "autoScalpPrefer": resolve_preferred_moneyness(
+                "scalp", next(iter(snapshots.values())),
+                snapshots=snapshots,
+            ) if snapshots else "ATM",
+        },
     }
