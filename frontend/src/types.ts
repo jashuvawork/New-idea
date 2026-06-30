@@ -258,12 +258,30 @@ export interface ChopGuards {
   dayMode?: string;
   dayModeTone?: string;
   dayModeHint?: string;
-  symbolBreadth?: Record<string, {
-    bias: string;
-    score: number;
-    aligned: boolean;
-    regime: string;
-  }>;
+  symbolBreadth?: Record<string, SymbolBreadthSummary>;
+  indexMoments?: Record<string, IndexMomentSummary>;
+}
+
+export interface SymbolBreadthSummary {
+  bias: string;
+  score: number;
+  aligned: boolean;
+  regime: string;
+}
+
+export interface IndexMomentSummary {
+  exchange?: string;
+  momentActive?: boolean;
+  momentReason?: string | null;
+  gapDirection?: string | null;
+  gapSize?: string | null;
+  gapPct?: number | null;
+  auctionBias?: string | null;
+  explosionRisk?: string | null;
+  constituentBreadthPct?: number | null;
+  constituentBias?: string | null;
+  constituentAdvancing?: number | null;
+  constituentDeclining?: number | null;
 }
 
 export interface AutoTraderState {

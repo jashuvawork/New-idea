@@ -5,6 +5,11 @@ from typing import Any, Optional
 
 from app.config import get_settings
 from app.engines.premium_filter import premium_in_band
+from app.engines.market_momentum import (
+    index_moment_active,
+    index_moment_rank_bonus,
+    side_aligned_with_index_moment,
+)
 from app.engines.explosion_profit import check_explosion_entry
 from app.engines.simple_profit import check_entry_gate
 from app.engines.swing_profit import check_swing_entry
@@ -84,7 +89,11 @@ def _explosion_candidates(
             confidence=score_val,
         )
         blocked = state.calibrationBlocks.get(event.side.value, False)
-        passed, _ = check_explosion_entry(event, suggestion, snap.breadth, blocked)
+        moment, _ = index_moment_active(snap)
+        moment_surge = moment and side_aligned_with_index_moment(event.side, snap)
+        passed, _ = check_explosion_entry(
+            event, suggestion, snap.breadth, blocked, index_moment=moment_surge,
+        )
         if not passed:
             continue
 
@@ -93,6 +102,7 @@ def _explosion_candidates(
             rank += 15
         rank += min(15, event.velocity_3s * 2)
         rank += min(10, event.velocity_9s)
+        rank += index_moment_rank_bonus(snap, event.side)
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -131,7 +141,9 @@ def _scalp_candidates(
             continue
 
         blocked = state.calibrationBlocks.get(suggestion.side.value, False)
-        momentum = (snap.orderflow.volumeAcceleration or 0) > 65
+        moment, _ = index_moment_active(snap)
+        moment_surge = moment and side_aligned_with_index_moment(suggestion.side, snap)
+        momentum = (snap.orderflow.volumeAcceleration or 0) > 65 or moment_surge
         override = snap.explosiveRunner.candidate and (snap.explosiveRunner.score or 0) >= 82
         vel = suggestion.runnerSignal.premiumVelocityPct if suggestion.runnerSignal else 0
 
@@ -147,6 +159,7 @@ def _scalp_candidates(
             rank += 8
         if momentum:
             rank += 5
+        rank += index_moment_rank_bonus(snap, suggestion.side)
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -259,7 +272,7 @@ def find_best_entry(
         return c.score + bonus
 
     best = max(candidates, key=sort_key)
-    floor = min_rank_for_entry(chop)
+    floor = min_rank_for_entry(chop, snapshots)
     if floor > 0 and sort_key(best) < floor:
         return None
     return best

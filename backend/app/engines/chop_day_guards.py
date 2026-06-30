@@ -172,11 +172,15 @@ def symbol_rank_adjustment(symbol: str, chop: bool) -> float:
     return 0.0
 
 
-def min_rank_for_entry(chop: bool) -> float:
+def min_rank_for_entry(chop: bool, snapshots: Optional[dict] = None) -> float:
     settings = get_settings()
     from app.engines.session_timing import in_open_caution_window
 
     if in_open_caution_window():
+        if settings.index_momentum_enabled and snapshots:
+            from app.engines.market_momentum import any_index_moment_active
+            if any_index_moment_active(snapshots):
+                return settings.open_caution_moment_min_rank
         return settings.open_caution_min_rank_score
     if chop and before_primary_window():
         return settings.pre10_chop_min_rank_score
@@ -292,6 +296,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     breadth = _symbol_breadth_summary(snapshots)
     mode, mode_tone, mode_hint = _day_mode_label(chop, momentum, breadth, before_primary)
 
+    from app.engines.market_momentum import index_moment_summary
     from app.engines.session_timing import in_midday_chop_window, in_open_caution_window
     from app.engines.simple_profit import get_session_targets
 
@@ -319,4 +324,9 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "dayModeTone": mode_tone,
         "dayModeHint": mode_hint,
         "symbolBreadth": breadth,
+        "indexMoments": {
+            sym: index_moment_summary(snapshots[sym])
+            for sym in snapshots
+            if snapshots[sym].dataAvailable
+        },
     }

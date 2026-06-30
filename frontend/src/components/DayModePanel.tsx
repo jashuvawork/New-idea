@@ -138,7 +138,39 @@ export function DayModePanel({
         </div>
       )}
 
-      <div className="text-[10px] text-nexus-muted uppercase mb-1">Breadth by symbol</div>
+      <div className="text-[10px] text-nexus-muted uppercase mb-1">NSE / BSE index moments</div>
+      <div className="rounded bg-black/20 px-2 mb-3">
+        {symbols.map((sym) => {
+          const im = g.indexMoments?.[sym];
+          if (!im) {
+            return (
+              <div key={`im-${sym}`} className="py-1.5 text-[10px] text-nexus-muted border-b border-nexus-border/50 last:border-0">
+                {sym}: no index data
+              </div>
+            );
+          }
+          return (
+            <div key={`im-${sym}`} className="py-1.5 border-b border-nexus-border/50 last:border-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-white">
+                  {sym} <span className="text-nexus-muted font-normal">({im.exchange})</span>
+                </span>
+                {im.momentActive ? (
+                  <span className="text-[9px] font-bold text-nexus-accent uppercase">MOMENT</span>
+                ) : null}
+              </div>
+              <div className="text-[9px] text-nexus-muted font-mono mt-0.5">
+                Gap {im.gapDirection?.replace('_', ' ') ?? '—'} {im.gapPct != null ? `${im.gapPct > 0 ? '+' : ''}${im.gapPct}%` : ''} ({im.gapSize ?? '—'})
+              </div>
+              <div className="text-[9px] text-nexus-muted font-mono">
+                Stocks {im.constituentAdvancing ?? '—'}↑ / {im.constituentDeclining ?? '—'}↓ · breadth {im.constituentBreadthPct ?? '—'}% ({im.constituentBias ?? '—'})
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="text-[10px] text-nexus-muted uppercase mb-1">Blended breadth by symbol</div>
       <div className="rounded bg-black/20 px-2">
         {symbols.map((sym) => {
           const info = breadth[sym] ?? (snapshots[sym]?.dataAvailable
