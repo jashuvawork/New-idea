@@ -26,8 +26,8 @@ function deriveQuality(
   marketClosed: boolean,
 ): StreamMetrics['connectionQuality'] {
   if (marketClosed && stalenessMs < 120_000) return 'good';
-  if (stalenessMs > 5_000) return 'offline';
-  if (stalenessMs > 2_000) return 'slow';
+  if (stalenessMs > 3_000) return 'offline';
+  if (stalenessMs > 800) return 'slow';
   return latencyQuality(latencyMs);
 }
 
@@ -59,7 +59,7 @@ export function ConnectionStatus({
   metrics: StreamMetrics;
   marketClosed?: boolean;
 }) {
-  const ageSec = Math.floor(metrics.stalenessMs / 5000) * 5;
+  const ageSec = Math.floor(metrics.stalenessMs / 1000);
   const quality = deriveQuality(metrics.lastLatencyMs, metrics.stalenessMs, marketClosed);
 
   return (
@@ -110,7 +110,7 @@ export function LatencyFooter({ metrics }: { metrics: StreamMetrics }) {
       <span>
         Data age:{' '}
         <span className="font-mono text-gray-300">
-          {metrics.stalenessMs < 5000 ? 'live' : `${Math.round(metrics.stalenessMs / 1000)}s`}
+          {metrics.stalenessMs < 1500 ? 'live' : `${Math.round(metrics.stalenessMs / 1000)}s`}
         </span>
       </span>
     </div>

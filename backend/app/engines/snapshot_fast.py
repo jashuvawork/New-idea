@@ -21,7 +21,7 @@ def resolve_trade_premium(
     side: Side,
     instrument_key: Optional[str] = None,
     *,
-    max_age_seconds: float = 3.0,
+    max_age_seconds: float = 1.0,
 ) -> Optional[float]:
     """Prefer fresh WebSocket LTP, then heatmap/rest snapshot."""
     keys: list[Optional[str]] = [instrument_key, _heatmap_instrument_key(snap, strike, side)]
@@ -45,7 +45,7 @@ def resolve_trade_premium(
 def overlay_snapshot_ltps(
     snapshots: dict[str, SymbolSnapshot],
     *,
-    max_age_seconds: float = 3.0,
+    max_age_seconds: float = 1.0,
 ) -> dict[str, SymbolSnapshot]:
     """Clone cached snapshots and merge fresh tick LTPs into heatmap rows."""
     out: dict[str, SymbolSnapshot] = {}

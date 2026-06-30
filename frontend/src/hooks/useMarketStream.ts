@@ -7,9 +7,9 @@ import { snapshotSignature } from './snapshotSignature';
 const API_BASE = import.meta.env.DEV
   ? ''
   : (import.meta.env.VITE_API_URL || '');
-const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 2000);
-const UI_TICK_MS = Math.max(POLL_MS, 2000);
-const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 1000), 1000);
+const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
+const UI_TICK_MS = Math.max(POLL_MS, 250);
+const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 100), 50);
 const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
@@ -81,8 +81,8 @@ function applySnapshot(
   const avgStable = stableLatencyMs(avg);
   setMetrics((prev) => {
     const quality = latencyQuality(elapsed);
-    const staleBucket = Math.floor(dataAgeMs / 5000);
-    const prevBucket = Math.floor(prev.stalenessMs / 5000);
+    const staleBucket = Math.floor(dataAgeMs / 1000);
+    const prevBucket = Math.floor(prev.stalenessMs / 1000);
     if (
       !dataChanged
       && prev.lastLatencyMs === latency
@@ -161,9 +161,9 @@ export function useMarketStream() {
     const id = setInterval(() => {
       if (!lastSuccessAt.current) return;
       const stale = Date.now() - lastSuccessAt.current.getTime();
-      const staleBucket = Math.floor(stale / 5000);
+      const staleBucket = Math.floor(stale / 1000);
       setMetrics((prev) => {
-        const prevBucket = Math.floor(prev.stalenessMs / 5000);
+        const prevBucket = Math.floor(prev.stalenessMs / 1000);
         const quality =
           prev.streamMode === 'sse' && stale > 8000
             ? (stale > 15_000 ? 'offline' : 'slow')
@@ -173,7 +173,7 @@ export function useMarketStream() {
         }
         return { ...prev, stalenessMs: stale, connectionQuality: quality };
       });
-      if (SSE_ENABLED && !sseFailed.current && stale > 8000) {
+      if (SSE_ENABLED && !sseFailed.current && stale > 4000) {
         void fetchSnapshot();
       }
     }, UI_TICK_MS);
@@ -298,7 +298,7 @@ export function useTradeLog(limit = 30) {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 15_000);
+    const id = setInterval(refresh, 5_000);
     return () => clearInterval(id);
   }, [refresh]);
 
@@ -316,7 +316,7 @@ export function useDeploymentReadiness() {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 30_000);
+    const id = setInterval(refresh, 10_000);
     return () => clearInterval(id);
   }, [refresh]);
 
@@ -334,7 +334,7 @@ export function usePerformanceMilestone() {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 30_000);
+    const id = setInterval(refresh, 10_000);
     return () => clearInterval(id);
   }, [refresh]);
 

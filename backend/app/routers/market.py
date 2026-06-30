@@ -77,9 +77,15 @@ def can_run_tick_fast() -> bool:
 
 
 def latency_stats() -> dict[str, Any]:
+    settings = get_settings()
     return {
-        "tickFastExitEnabled": get_settings().tick_fast_exit_enabled,
-        "entryScanIntervalMs": get_settings().entry_scan_interval_ms,
+        "tickFastExitEnabled": settings.tick_fast_exit_enabled,
+        "entryScanIntervalMs": settings.entry_scan_interval_ms,
+        "marketPollIntervalWsMs": settings.market_poll_interval_ws_ms,
+        "marketPollIntervalMs": settings.market_poll_interval_ms,
+        "tickSnapshotIntervalMs": settings.tick_snapshot_interval_ms,
+        "snapshotCacheIntervalMs": settings.snapshot_cache_interval_ms,
+        "sseHeartbeatSeconds": settings.sse_heartbeat_seconds,
         "lastFastCycleMs": _last_fast_cycle_ms,
         "lastFullCycleMs": _last_full_cycle_ms,
         "entryScanDue": entry_scan_due(),
@@ -107,7 +113,11 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
         return None
 
     t0 = time.perf_counter()
-    overlays = overlay_snapshot_ltps(_cache.snapshots)
+    settings = get_settings()
+    overlays = overlay_snapshot_ltps(
+        _cache.snapshots,
+        max_age_seconds=settings.tick_overlay_max_age_seconds,
+    )
     client = UpstoxClient()
     auto_state = await process_exits_only(overlays, client=client)
 

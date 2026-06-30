@@ -389,8 +389,8 @@ async def build_symbol_snapshot(
             raise UpstoxError("Empty option chain")
 
         if is_ws_active():
-            chain = overlay_chain_ltps(chain, max_age_seconds=3.0)
-            spot = overlay_index_ltp(symbol, spot, max_age_seconds=3.0)
+            chain = overlay_chain_ltps(chain, max_age_seconds=1.0)
+            spot = overlay_index_ltp(symbol, spot, max_age_seconds=1.0)
 
         atm = _atm_strike(spot, symbol)
         heatmap = build_heatmap(chain, spot, atm)
