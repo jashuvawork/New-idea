@@ -154,6 +154,11 @@ def check_opposite_side_cooldown(
     if last.get("pnlInr", 0) < 0:
         cooldown = max(cooldown, settings.opposite_side_cooldown_after_loss_seconds)
 
+    from app.engines.expiry_day_guards import relax_opposite_side_for_expiry_dual
+
+    if relax_opposite_side_for_expiry_dual(sym, side_val, snap, {sym: snap}):
+        cooldown = min(cooldown, settings.expiry_dual_scalp_opposite_cooldown_seconds)
+
     if elapsed < cooldown:
         remain = int(cooldown - elapsed)
         return True, f"opposite_side_cooldown_{sym}_{last['side']}_to_{side_val}_{remain}s"
@@ -215,8 +220,11 @@ def check_session_whipsaw_pause(
     }
 
     if flips >= settings.flip_flop_max_opposites and is_bearish_sideways_session(snapshots):
-        trigger_whipsaw_pause(settings.ce_pe_whipsaw_pause_seconds, "flip_flop_churn")
-        return True, f"flip_flop_pause_{flips}_switches", meta
+        from app.engines.expiry_day_guards import expiry_dual_scalp_active
+
+        if not expiry_dual_scalp_active(snapshots):
+            trigger_whipsaw_pause(settings.ce_pe_whipsaw_pause_seconds, "flip_flop_churn")
+            return True, f"flip_flop_pause_{flips}_switches", meta
 
     dual_symbols: list[str] = []
     for sym, snap in snapshots.items():
@@ -228,9 +236,12 @@ def check_session_whipsaw_pause(
             meta["dualLegWhipsaw"] = detail
 
     if dual_symbols and is_bearish_sideways_session(snapshots):
-        trigger_whipsaw_pause(settings.ce_pe_whipsaw_pause_seconds, "dual_leg_whipsaw")
-        meta["dualLegSymbols"] = dual_symbols
-        return True, f"ce_pe_whipsaw_{','.join(dual_symbols)}", meta
+        from app.engines.expiry_day_guards import expiry_dual_scalp_active
+
+        if not expiry_dual_scalp_active(snapshots):
+            trigger_whipsaw_pause(settings.ce_pe_whipsaw_pause_seconds, "dual_leg_whipsaw")
+            meta["dualLegSymbols"] = dual_symbols
+            return True, f"ce_pe_whipsaw_{','.join(dual_symbols)}", meta
 
     return False, "ok", meta
 

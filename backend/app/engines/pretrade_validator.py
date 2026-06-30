@@ -366,8 +366,17 @@ def validate_candidate(
     if not mn_ok:
         return False, mn_reason, meta
 
-    if candidate.score < settings.pretrade_min_rank_score:
-        return False, f"pretrade_rank_below_{settings.pretrade_min_rank_score}", meta
+    from app.engines.expiry_day_guards import check_expiry_candidate, expiry_min_rank_score
+
+    ex_ok, ex_reason, ex_meta = check_expiry_candidate(candidate, state, snap_map)
+    meta.update(ex_meta)
+    if not ex_ok:
+        return False, ex_reason, meta
+
+    expiry_floor = expiry_min_rank_score(state, snap_map)
+    min_rank = max(settings.pretrade_min_rank_score, expiry_floor)
+    if candidate.score < min_rank:
+        return False, f"pretrade_rank_below_{min_rank:.0f}", meta
 
     side_val = candidate.side.value if isinstance(candidate.side, Side) else str(candidate.side).upper()
     snap: SymbolSnapshot = candidate.snap

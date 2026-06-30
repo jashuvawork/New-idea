@@ -188,6 +188,36 @@ class Settings(BaseSettings):
     moneyness_rank_bonus: float = 12.0
     moneyness_mismatch_penalty: float = 15.0
 
+    # Expiry-day playbook — fewer trades, morning focus, worst-day prediction
+    expiry_day_guards_enabled: bool = True
+    expiry_max_trades_per_day: int = 6
+    expiry_worst_day_max_trades: int = 3
+    expiry_morning_only: bool = True
+    expiry_morning_end_hour: int = 13
+    expiry_morning_end_minute: int = 30
+    expiry_evening_block_hour: int = 14
+    expiry_evening_block_minute: int = 0
+    expiry_min_rank_score: float = 62.0
+    expiry_worst_day_min_rank_score: float = 72.0
+    expiry_worst_day_score_threshold: float = 55.0
+    expiry_worst_day_session_loss_inr: float = -12_000.0
+    expiry_decline_session_loss_inr: float = -8_000.0
+    expiry_worst_day_loss_count: int = 2
+    expiry_worst_day_halt_entries: bool = True
+    expiry_dual_scalp_mode: bool = True
+    expiry_dual_scalp_relax_whipsaw: bool = True
+    expiry_dual_scalp_opposite_cooldown_seconds: int = 90
+
+    # Psychology setup hold — FEAR/CAUTION entries held longer on expiry chop
+    psychology_hold_enabled: bool = True
+    psychology_hold_labels_csv: str = "FEAR,CAUTION"
+    psychology_hold_min_score: float = 68.0
+    psychology_hold_max_hold_multiplier: float = 1.5
+    psychology_hold_micro_min_best_points: float = 5.5
+    psychology_hold_min_hold_before_micro_seconds: int = 150
+    psychology_hold_micro_giveback_points: float = 4.0
+    psychology_hold_trail_keep_ratio: float = 0.52
+
     # Chart alignment — CE/PE must match index candle direction
     chart_alignment_enabled: bool = True
     chart_min_trend_strength: float = 25.0
@@ -304,11 +334,11 @@ class Settings(BaseSettings):
     scalp_stop_points: float = 3.0
     scalp_stop_min_points: float = 2.5
     scalp_stop_min_hold_seconds: int = 30
-    scalp_trail_arm_points: float = 4.5
-    scalp_trail_keep_ratio: float = 0.50
-    scalp_trail_step_points: float = 3.0
-    scalp_trail_tight_arm: float = 10.0
-    scalp_trail_tight_points: float = 4.0
+    scalp_trail_arm_points: float = 3.0
+    scalp_trail_keep_ratio: float = 0.60
+    scalp_trail_step_points: float = 2.0
+    scalp_trail_tight_arm: float = 8.0
+    scalp_trail_tight_points: float = 3.0
     scalp_micro_giveback_points: float = 3.0
     scalp_no_progress_seconds: int = 150
 

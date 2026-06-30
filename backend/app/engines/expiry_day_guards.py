@@ -1,0 +1,287 @@
+"""Expiry-day playbook — fewer trades, morning focus, worst-day prediction, dual CE/PE scalp."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Optional
+from zoneinfo import ZoneInfo
+
+from app.config import get_settings
+from app.engines.capital_allocator import compute_session_pnl
+from app.engines.chop_day_guards import is_chop_session
+from app.engines.pretrade_validator import collect_session_trades, compute_symbol_stats
+from app.engines.whipsaw_guards import is_bearish_sideways_session
+from app.models.schemas import AutoTraderState, Side, SymbolSnapshot
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _minutes_now() -> int:
+    now = datetime.now(IST)
+    return now.hour * 60 + now.minute
+
+
+def _today_str() -> str:
+    return datetime.now(IST).strftime("%Y-%m-%d")
+
+
+def is_symbol_expiry_day(snap: SymbolSnapshot) -> bool:
+    """True when today's session date matches the option chain expiry."""
+    settings = get_settings()
+    if not settings.expiry_day_guards_enabled:
+        return False
+    if not snap.dataAvailable or not snap.optionExpiry:
+        return False
+    expiry = str(snap.optionExpiry)[:10]
+    return expiry == _today_str()
+
+
+def expiry_symbols(snapshots: dict[str, SymbolSnapshot]) -> list[str]:
+    return [sym.upper() for sym, snap in snapshots.items() if is_symbol_expiry_day(snap)]
+
+
+def is_expiry_session(snapshots: dict[str, SymbolSnapshot]) -> bool:
+    return len(expiry_symbols(snapshots)) > 0
+
+
+def in_expiry_morning_window() -> bool:
+    """Preferred entry window on expiry — before afternoon theta crush."""
+    settings = get_settings()
+    current = _minutes_now()
+    start = settings.entry_earliest_hour * 60 + settings.entry_earliest_minute
+    end = settings.expiry_morning_end_hour * 60 + settings.expiry_morning_end_minute
+    return start <= current < end
+
+
+def in_expiry_evening_block() -> bool:
+    """Block new entries in expiry afternoon/evening — gamma + pin risk."""
+    settings = get_settings()
+    if not settings.expiry_day_guards_enabled:
+        return False
+    current = _minutes_now()
+    block_from = settings.expiry_evening_block_hour * 60 + settings.expiry_evening_block_minute
+    return current >= block_from
+
+
+def _session_declining(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> bool:
+    """Session PnL bleeding + bearish sideways — hard to make money trending."""
+    settings = get_settings()
+    session_pnl = compute_session_pnl(state)
+    if session_pnl <= settings.expiry_decline_session_loss_inr:
+        return True
+    trades = collect_session_trades(state)
+    if len(trades) >= 3:
+        stats = compute_symbol_stats(trades)
+        net = sum(s.net_pnl_inr for s in stats.values())
+        if net <= settings.expiry_decline_session_loss_inr:
+            return True
+    if is_bearish_sideways_session(snapshots):
+        declining = 0
+        for snap in snapshots.values():
+            if not snap.dataAvailable or not snap.spotChart:
+                continue
+            mom = float(snap.spotChart.momentum5Pct or 0)
+            if mom < -0.03:
+                declining += 1
+        live = sum(1 for s in snapshots.values() if s.dataAvailable)
+        if live and declining >= max(1, live // 2):
+            return True
+    return False
+
+
+def predict_worst_expiry_day(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, float, list[str]]:
+    """
+    Predict a worst expiry chop day before taking more risk.
+    Returns (is_worst, score 0-100, human reasons).
+    """
+    settings = get_settings()
+    if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
+        return False, 0.0, []
+
+    score = 0.0
+    reasons: list[str] = []
+
+    if is_chop_session(snapshots):
+        score += 25
+        reasons.append("chop_regime")
+    if is_bearish_sideways_session(snapshots):
+        score += 25
+        reasons.append("bearish_sideways")
+    session_pnl = compute_session_pnl(state)
+    if session_pnl <= settings.expiry_worst_day_session_loss_inr:
+        score += 20
+        reasons.append(f"session_loss_{session_pnl:.0f}")
+    trades = collect_session_trades(state)
+    if len(trades) >= 2:
+        losses = sum(1 for t in trades if t.pnl_inr < 0)
+        if losses >= settings.expiry_worst_day_loss_count:
+            score += 15
+            reasons.append(f"loss_cluster_{losses}")
+    if _session_declining(state, snapshots):
+        score += 15
+        reasons.append("declining_session")
+    if in_expiry_evening_block():
+        score += 10
+        reasons.append("expiry_evening")
+
+    is_worst = score >= settings.expiry_worst_day_score_threshold
+    return is_worst, round(score, 1), reasons
+
+
+def expiry_trade_cap(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> tuple[int, str]:
+    settings = get_settings()
+    if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
+        return 999, "normal"
+    is_worst, _, _ = predict_worst_expiry_day(state, snapshots)
+    if is_worst:
+        return settings.expiry_worst_day_max_trades, "expiry_worst"
+    return settings.expiry_max_trades_per_day, "expiry_day"
+
+
+def expiry_trades_cap_reached(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, str]:
+    cap, label = expiry_trade_cap(state, snapshots)
+    closed = len(state.closedPaperTrades)
+    if closed >= cap:
+        return True, f"expiry_trade_cap_{closed}>={cap}_{label}"
+    return False, "ok"
+
+
+def expiry_min_rank_score(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> float:
+    settings = get_settings()
+    if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
+        return 0.0
+    is_worst, _, _ = predict_worst_expiry_day(state, snapshots)
+    if is_worst:
+        return settings.expiry_worst_day_min_rank_score
+    return settings.expiry_min_rank_score
+
+
+def check_expiry_entry_allowed(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, str, dict[str, Any]]:
+    """Session-level expiry gates before any new entry."""
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
+        return True, "ok", meta
+
+    meta["expirySymbols"] = expiry_symbols(snapshots)
+    is_worst, worst_score, worst_reasons = predict_worst_expiry_day(state, snapshots)
+    meta["worstDay"] = is_worst
+    meta["worstDayScore"] = worst_score
+    meta["worstDayReasons"] = worst_reasons
+
+    if in_expiry_evening_block():
+        return False, "expiry_evening_block", meta
+
+    if not in_expiry_morning_window() and settings.expiry_morning_only:
+        return False, "expiry_afternoon_wait", meta
+
+    cap_hit, cap_reason = expiry_trades_cap_reached(state, snapshots)
+    if cap_hit:
+        return False, cap_reason, meta
+
+    if is_worst and settings.expiry_worst_day_halt_entries:
+        if _session_declining(state, snapshots):
+            return False, "expiry_worst_day_declining_halt", meta
+
+    return True, "ok", meta
+
+
+def check_expiry_candidate(
+    candidate: Any,
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, str, dict[str, Any]]:
+    """Per-candidate expiry rules."""
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    sym = candidate.symbol.upper()
+    snap = snapshots.get(sym) or candidate.snap
+    if not is_symbol_expiry_day(snap):
+        return True, "ok", meta
+
+    min_rank = expiry_min_rank_score(state, snapshots)
+    score = float(getattr(candidate, "score", 0) or 0)
+    meta["expiryMinRank"] = min_rank
+    if min_rank > 0 and score < min_rank:
+        return False, f"expiry_rank_below_{min_rank:.0f}", meta
+
+    is_worst, _, _ = predict_worst_expiry_day(state, snapshots)
+    if is_worst and _session_declining(state, snapshots):
+        if score < settings.expiry_worst_day_min_rank_score:
+            return False, "expiry_worst_day_low_score", meta
+
+    return True, "ok", meta
+
+
+def expiry_dual_scalp_active(snapshots: dict[str, SymbolSnapshot]) -> bool:
+    """On expiry chop, allow managed CE+PE scalps instead of one-sided churn."""
+    settings = get_settings()
+    return (
+        settings.expiry_day_guards_enabled
+        and settings.expiry_dual_scalp_mode
+        and is_expiry_session(snapshots)
+        and is_chop_session(snapshots)
+    )
+
+
+def relax_opposite_side_for_expiry_dual(
+    symbol: str,
+    side: Side | str,
+    snap: SymbolSnapshot,
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """
+    On expiry dual-scalp mode, shorten opposite-side cooldown when session is declining
+    so we can hedge with the other leg instead of fighting one direction.
+    """
+    if not expiry_dual_scalp_active(snapshots):
+        return False
+    if not is_symbol_expiry_day(snap):
+        return False
+    settings = get_settings()
+    return settings.expiry_dual_scalp_relax_whipsaw
+
+
+def expiry_guard_summary(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> dict[str, Any]:
+    settings = get_settings()
+    symbols = expiry_symbols(snapshots)
+    is_worst, worst_score, worst_reasons = predict_worst_expiry_day(state, snapshots)
+    cap, cap_label = expiry_trade_cap(state, snapshots)
+    cap_hit, cap_msg = expiry_trades_cap_reached(state, snapshots)
+    allowed, block_reason, _ = check_expiry_entry_allowed(state, snapshots)
+
+    return {
+        "enabled": settings.expiry_day_guards_enabled,
+        "expirySession": bool(symbols),
+        "expirySymbols": symbols,
+        "morningWindow": in_expiry_morning_window(),
+        "eveningBlock": in_expiry_evening_block(),
+        "worstDay": is_worst,
+        "worstDayScore": worst_score,
+        "worstDayReasons": worst_reasons,
+        "decliningSession": _session_declining(state, snapshots),
+        "dailyTradeCap": cap,
+        "dailyTradeCapLabel": cap_label,
+        "tradeCapReached": cap_hit,
+        "tradeCapMessage": cap_msg if cap_hit else None,
+        "entriesAllowed": allowed,
+        "blockReason": block_reason if not allowed else None,
+        "dualScalpMode": expiry_dual_scalp_active(snapshots),
+        "minRankScore": expiry_min_rank_score(state, snapshots),
+        "sessionPnlInr": round(compute_session_pnl(state), 2),
+    }

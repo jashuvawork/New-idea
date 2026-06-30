@@ -4,6 +4,7 @@ import type { AutoTraderState, ChopGuards, SpotChart, SymbolSnapshot } from '../
 const TONE_BADGE: Record<string, string> = {
   rally: 'bg-nexus-accent/90 text-black',
   chop: 'bg-nexus-yellow/80 text-black',
+  warn: 'bg-nexus-yellow/80 text-black',
   bullish: 'bg-nexus-green/80 text-white',
   bearish: 'bg-nexus-red/80 text-white',
   mixed: 'bg-purple-500/80 text-white',
@@ -141,6 +142,12 @@ export function DayModePanel({
         <Flag label="Last-5 pause" active={Boolean(g.lastNTradesPaused)} tone="bad" />
         <Flag label="Whipsaw pause" active={Boolean(g.whipsawGuards?.whipsawPaused)} tone="bad" />
         <Flag label="Bear/side" active={Boolean(g.whipsawGuards?.bearishSideways)} tone="warn" />
+        <Flag label="Expiry" active={Boolean(g.expiryGuards?.expirySession)} tone="warn" />
+        <Flag label="Expiry worst" active={Boolean(g.expiryGuards?.worstDay)} tone="bad" />
+        <Flag label="Expiry AM" active={Boolean(g.expiryGuards?.morningWindow)} tone="good" />
+        <Flag label="Expiry PM block" active={Boolean(g.expiryGuards?.eveningBlock)} tone="bad" />
+        <Flag label="Dual CE/PE" active={Boolean(g.expiryGuards?.dualScalpMode)} tone="neutral" />
+        <Flag label="Psy hold" active={Boolean(g.psychologyHold?.enabled)} tone="neutral" />
         {g.moneynessPolicy ? (
           <Flag
             label={`Moneyness ${g.moneynessPolicy.autoScalpPrefer ?? g.moneynessPolicy.mode ?? 'AUTO'}`}
@@ -178,6 +185,27 @@ export function DayModePanel({
               style={{ width: `${capPct}%` }}
             />
           </div>
+        </div>
+      )}
+
+      {g.expiryGuards?.expirySession && (
+        <div className="mb-3 p-2 rounded bg-black/30 text-[10px]">
+          <div className="text-nexus-muted uppercase mb-1">Expiry playbook</div>
+          <div className="font-mono text-white mb-1">
+            {(g.expiryGuards.expirySymbols ?? []).join(', ') || '—'}
+            {g.expiryGuards.worstDay ? ' · WORST DAY' : ''}
+            {g.expiryGuards.decliningSession ? ' · declining' : ''}
+          </div>
+          {g.expiryGuards.worstDayReasons && g.expiryGuards.worstDayReasons.length > 0 && (
+            <div className="text-nexus-yellow font-mono text-[9px]">
+              {g.expiryGuards.worstDayReasons.join(' · ')}
+            </div>
+          )}
+          {g.expiryGuards.blockReason && (
+            <div className="text-nexus-red font-semibold mt-1">
+              {g.expiryGuards.blockReason.replace(/_/g, ' ')}
+            </div>
+          )}
         </div>
       )}
 

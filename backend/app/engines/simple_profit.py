@@ -49,12 +49,12 @@ def get_session_targets() -> OptimizedProfile:
     # IST session windows (approximate)
     if 9 * 60 + 15 <= t < 10 * 60:
         return OptimizedProfile(
-            targetPoints=10.0, stopPoints=3.0, microTargetPoints=micro,
+            targetPoints=8.0, stopPoints=3.0, microTargetPoints=micro,
             maxHoldSeconds=420, sessionLabel="open_drive",
         )
     if in_momentum_rally_window() and 11 * 60 <= t < 13 * 60 + 45:
         return OptimizedProfile(
-            targetPoints=12.0, stopPoints=3.5, microTargetPoints=micro,
+            targetPoints=10.0, stopPoints=3.5, microTargetPoints=micro,
             maxHoldSeconds=480, sessionLabel="momentum_rally",
         )
     if 11 * 60 + 30 <= t < 13 * 60:
@@ -77,6 +77,7 @@ def _hold_profile_for_trade(trade: PaperTrade, profile: OptimizedProfile) -> Opt
     """Extend hold + target when direction matches session breadth or entry confidence."""
     from app.engines.bullish_hold import direction_aligned_with_breadth
     from app.engines.confidence_hold import apply_confidence_hold_profile
+    from app.engines.psychology_hold import apply_psychology_hold_profile
 
     settings = get_settings()
     if direction_aligned_with_breadth(trade):
@@ -88,7 +89,8 @@ def _hold_profile_for_trade(trade: PaperTrade, profile: OptimizedProfile) -> Opt
             maxHoldSeconds=int(profile.maxHoldSeconds * mult),
             sessionLabel=profile.sessionLabel,
         )
-    return apply_confidence_hold_profile(trade, profile)
+    profile = apply_confidence_hold_profile(trade, profile)
+    return apply_psychology_hold_profile(trade, profile)
 
 
 def check_entry_gate(
@@ -187,9 +189,11 @@ def evaluate_exit(
 
     from app.engines.bullish_hold import direction_aligned_with_breadth
     from app.engines.confidence_hold import confidence_exit_tuning
+    from app.engines.psychology_hold import psychology_exit_tuning
 
     aligned_hold = direction_aligned_with_breadth(trade)
     conf_tuning = confidence_exit_tuning(trade)
+    psy_tuning = psychology_exit_tuning(trade)
 
     arm = trail_arm if trail_arm is not None else settings.scalp_trail_arm_points
     keep = trail_keep if trail_keep is not None else settings.scalp_trail_keep_ratio
@@ -197,6 +201,8 @@ def evaluate_exit(
         keep = min(keep, settings.bullish_hold_trail_keep_ratio)
     if conf_tuning:
         keep = max(keep, conf_tuning.trail_keep_ratio)
+    if psy_tuning:
+        keep = max(keep, psy_tuning.trail_keep_ratio)
     step = trail_step if trail_step is not None else settings.scalp_trail_step_points
     tight_arm = trail_tight_arm if trail_tight_arm is not None else settings.scalp_trail_tight_arm
     tight_pts = trail_tight_pts if trail_tight_pts is not None else settings.scalp_trail_tight_points
@@ -209,6 +215,8 @@ def evaluate_exit(
     )
     if conf_tuning:
         micro_giveback = max(micro_giveback, conf_tuning.micro_giveback_points)
+    if psy_tuning:
+        micro_giveback = max(micro_giveback, psy_tuning.micro_giveback_points)
     runner_keep = settings.runner_trail_keep_ratio if best >= settings.runner_min_best_points else keep
 
     from app.engines.trail_engine import ratcheting_trail_floor
@@ -242,6 +250,9 @@ def evaluate_exit(
     if conf_tuning:
         micro_min_best = max(micro_min_best, conf_tuning.micro_min_best_points)
         micro_min_hold = max(micro_min_hold, conf_tuning.min_hold_before_micro_seconds)
+    if psy_tuning:
+        micro_min_best = max(micro_min_best, psy_tuning.micro_min_best_points)
+        micro_min_hold = max(micro_min_hold, psy_tuning.min_hold_before_micro_seconds)
 
     micro_ready = (
         best >= micro_min_best
@@ -252,7 +263,12 @@ def evaluate_exit(
             return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     if trail_floor is None and best >= arm and pnl_pts < best * runner_keep:
-        if not conf_tuning or hold_seconds >= conf_tuning.min_hold_before_micro_seconds:
+        min_hold_before_trail = 0
+        if conf_tuning:
+            min_hold_before_trail = max(min_hold_before_trail, conf_tuning.min_hold_before_micro_seconds)
+        if psy_tuning:
+            min_hold_before_trail = max(min_hold_before_trail, psy_tuning.min_hold_before_micro_seconds)
+        if hold_seconds >= min_hold_before_trail:
             return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     if hold_seconds >= settings.scalp_no_progress_seconds and best <= 0:
