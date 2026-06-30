@@ -346,9 +346,30 @@ export interface ExecutionChartContext {
   recommendedSide?: string;
   indexChart?: SpotChart;
   premiumChart?: PremiumChart;
+  indexMtf?: MtfPreTestSummary;
+  premiumMtf?: MtfPreTestSummary;
+  mtfPreTest?: Record<string, unknown>;
   quoteContext?: Record<string, number | boolean>;
   snapshotDelta?: Record<string, unknown>;
   fetchedAt?: string;
+}
+
+export interface MtfPreTestSummary {
+  timeframes?: Record<string, MtfTimeframeRead>;
+  alignedCount?: number;
+  opposingCount?: number;
+  total?: number;
+  consensus?: string;
+}
+
+export interface MtfTimeframeRead {
+  label: string;
+  direction: string;
+  momentumPct: number;
+  trendStrength: number;
+  emaBias: string;
+  alignedCall?: boolean;
+  alignedPut?: boolean;
 }
 
 export interface PremiumChart {

@@ -148,6 +148,13 @@ class Settings(BaseSettings):
     execution_chart_premium_check_enabled: bool = True
     execution_chart_min_premium_momentum_pct: float = -0.35
     execution_chart_candle_count: int = 60
+
+    # Multi-timeframe pre-test (1m/5m/15m/1h/4h) before execution
+    execution_mtf_enabled: bool = True
+    execution_mtf_use_v3_native: bool = True
+    execution_mtf_1m_bars: int = 300
+    execution_mtf_min_align: int = 3
+    execution_mtf_block_htf_conflict: bool = True
     recent_win_window_seconds: int = 900
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5

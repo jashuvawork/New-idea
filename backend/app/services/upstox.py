@@ -183,6 +183,7 @@ class UpstoxError(Exception):
 
 class UpstoxClient:
     BASE_URL = "https://api.upstox.com/v2"
+    V3_BASE_URL = "https://api.upstox.com/v3"
 
     def __init__(self):
         self.settings = get_settings()
@@ -232,6 +233,33 @@ class UpstoxClient:
             return data.get("data", data)
 
         raise UpstoxError(f"Upstox rate limited after retries: {last_error}")
+
+    async def _get_v3(self, path: str, params: Optional[dict] = None) -> Any:
+        """Upstox V3 API — multi-interval intraday/historical candles."""
+        settings = get_settings()
+        last_error: Optional[str] = None
+
+        for attempt in range(settings.upstox_request_retries):
+            await _throttle()
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{self.V3_BASE_URL}{path}",
+                    headers=await self._headers(),
+                    params=params or {},
+                )
+            if resp.status_code == 401:
+                raise UpstoxError("Upstox token expired — re-authenticate")
+            if resp.status_code == 429:
+                _trip_rate_limit_cooldown()
+                last_error = resp.text[:200]
+                await asyncio.sleep(min(60, 5 * (2 ** attempt)))
+                continue
+            if resp.status_code >= 400:
+                raise UpstoxError(f"Upstox V3 error {resp.status_code}: {resp.text[:200]}")
+            data = resp.json()
+            return data.get("data", data)
+
+        raise UpstoxError(f"Upstox V3 rate limited after retries: {last_error}")
 
     def get_login_url(self) -> str:
         key = self.settings.upstox_api_key
@@ -473,6 +501,31 @@ class UpstoxClient:
         )
         candles = data.get("candles", []) if isinstance(data, dict) else data
         result = candles[-count:] if candles else []
+        if result and not force_refresh:
+            _cache_set(cache_key, result)
+        return result
+
+    async def get_intraday_candles_v3(
+        self,
+        instrument_key: str,
+        *,
+        unit: str = "minutes",
+        interval: int = 1,
+        force_refresh: bool = False,
+    ) -> list[dict[str, Any]]:
+        """V3 intraday OHLCV — supports minutes 1-300, hours 1-5."""
+        cache_key = f"v3intraday:{instrument_key}:{unit}:{interval}"
+        if not force_refresh:
+            cached = _cache_get(cache_key, self.settings.upstox_candles_cache_seconds)
+            if cached is not None:
+                return cached
+
+        encoded_key = quote(instrument_key, safe="")
+        data = await self._get_v3(
+            f"/historical-candle/intraday/{encoded_key}/{unit}/{interval}",
+        )
+        candles = data.get("candles", []) if isinstance(data, dict) else data
+        result = candles if isinstance(candles, list) else []
         if result and not force_refresh:
             _cache_set(cache_key, result)
         return result

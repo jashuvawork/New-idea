@@ -83,6 +83,18 @@ class PremiumChart(BaseModel):
     aboveVwap: bool = False
 
 
+class TimeframeChartRead(BaseModel):
+    """Single timeframe chart read (1m / 5m / 15m / 1h / 4h)."""
+    label: str = "1m"
+    direction: str = "NEUTRAL"
+    momentumPct: float = 0
+    momentum3Pct: float = 0
+    trendStrength: float = 0
+    emaBias: str = "NEUTRAL"
+    price: float = 0
+    barCount: int = 0
+
+
 class Greeks(BaseModel):
     delta: float = 0
     gamma: float = 0

@@ -39,6 +39,11 @@ def _settings():
     s.execution_chart_premium_check_enabled = True
     s.execution_chart_min_premium_momentum_pct = -0.35
     s.execution_chart_candle_count = 60
+    s.execution_mtf_enabled = True
+    s.execution_mtf_use_v3_native = False
+    s.execution_mtf_1m_bars = 300
+    s.execution_mtf_min_align = 3
+    s.execution_mtf_block_htf_conflict = True
     s.chart_alignment_enabled = True
     s.chart_min_trend_strength = 25.0
     s.chart_min_momentum_pct = 0.04
@@ -55,7 +60,7 @@ def test_validate_execution_blocks_call_on_bearish_index():
         orPosition="BELOW",
         belowPoc=True,
     )
-    ok, reason = validate_execution_charts(Side.CALL, chart, trade_score=60)
+    ok, reason, _ = validate_execution_charts(Side.CALL, chart, trade_score=60)
     assert not ok
     assert reason.startswith("exec_chart_")
 
@@ -63,7 +68,7 @@ def test_validate_execution_blocks_call_on_bearish_index():
 def test_validate_execution_blocks_fading_premium():
     index = SpotChart(direction="NEUTRAL", momentum5Pct=0.01, momentum15Pct=0.0, trendStrength=10)
     premium = PremiumChart(direction="BEARISH", momentum5Pct=-0.5, momentum3Pct=-0.3)
-    ok, reason = validate_execution_charts(
+    ok, reason, _ = validate_execution_charts(
         Side.CALL, index, premium_chart=premium, trade_score=60,
     )
     assert not ok
@@ -119,7 +124,12 @@ def test_monitor_passes_aligned_put_on_decline():
             "close": spot + 1,
         })
         client.get_candles = AsyncMock(return_value=candles)
-        client.get_historical_candles = AsyncMock(return_value=_rising_candles(start=80))
+        async def hist_side_effect(key, **kwargs):
+            if "FO" in str(key):
+                return _rising_candles(start=80)
+            return candles
+
+        client.get_historical_candles = AsyncMock(side_effect=hist_side_effect)
         client.get_full_quotes = AsyncMock(return_value={
             "NSE_FO|OPT": {"last_price": 90.0},
         })

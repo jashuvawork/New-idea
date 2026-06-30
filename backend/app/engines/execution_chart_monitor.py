@@ -1,4 +1,4 @@
-"""Fresh Upstox chart fetch + pro analysis immediately before trade execution."""
+"""Fresh Upstox chart fetch + pro MTF analysis immediately before trade execution."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
+from app.engines.mtf_chart_analysis import fetch_mtf_charts, mtf_summary, validate_mtf_scalp
 from app.engines.realtime_engine import _build_profile
 from app.engines.spot_direction import (
     analyze_premium_chart,
@@ -19,7 +20,7 @@ from app.engines.spot_direction import (
     side_aligned_with_chart,
 )
 from app.models.schemas import PremiumChart, Side, SpotChart, SymbolSnapshot
-from app.services.upstox import UpstoxClient
+from app.services.upstox import INDEX_KEYS, UpstoxClient
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -59,7 +60,8 @@ async def fetch_live_trade_charts(
 ) -> dict[str, Any]:
     """
     Pull fresh index + option premium charts from Upstox for the exact trade leg.
-  """
+    Includes multi-timeframe (1m/5m/15m/1h/4h) pre-test analysis.
+    """
     settings = get_settings()
     force = settings.execution_chart_force_upstox_refresh
     count = settings.execution_chart_candle_count
@@ -75,12 +77,27 @@ async def fetch_live_trade_charts(
     except Exception:
         pass
 
+    index_key = INDEX_KEYS.get(sym)
     index_candles = await client.get_candles(sym, count=count, force_refresh=force)
     profile = _build_profile(index_candles, spot)
     index_chart = analyze_spot_chart(index_candles, spot, profile)
     quote_ctx = pro_index_quote_context(quote, spot)
 
+    index_mtf_reads = None
+    premium_mtf_reads = None
+    if settings.execution_mtf_enabled and index_key:
+        try:
+            index_mtf_reads = await fetch_mtf_charts(client, index_key, spot, force_refresh=force)
+            index_mtf = mtf_summary(index_mtf_reads, side)
+        except Exception as exc:
+            logger.warning("Index MTF fetch failed for %s: %s", sym, exc)
+            index_mtf = {"error": str(exc)[:120]}
+    else:
+        index_mtf = {}
+
     premium_chart: Optional[PremiumChart] = None
+    premium_mtf: dict[str, Any] = {}
+    premium_mtf_reads = None
     prem_ltp = 0.0
     if instrument_key:
         try:
@@ -93,8 +110,20 @@ async def fetch_live_trade_charts(
                 leg.get("last_price") or leg.get("ltp") or strike or snap.spot or 0,
             )
             if not prem_ltp:
-                prem_ltp = float(strike)  # fallback for analysis shape
+                prem_ltp = float(strike)
             premium_chart = analyze_premium_chart(opt_candles, prem_ltp)
+
+            if settings.execution_mtf_enabled:
+                try:
+                    premium_mtf_reads = await fetch_mtf_charts(
+                        client, instrument_key, prem_ltp, force_refresh=force,
+                    )
+                    premium_mtf = mtf_summary(premium_mtf_reads, side)
+                except Exception as exc:
+                    logger.warning("Premium MTF fetch failed: %s", exc)
+                    premium_mtf = {}
+            else:
+                premium_mtf = {}
         except Exception as exc:
             logger.warning("Option chart fetch failed for %s: %s", instrument_key, exc)
 
@@ -110,10 +139,18 @@ async def fetch_live_trade_charts(
         "indexChartFull": index_chart.model_dump(),
         "quoteContext": quote_ctx,
         "premiumChart": _premium_chart_dict(premium_chart),
+        "indexMtf": index_mtf,
+        "premiumMtf": premium_mtf,
         "snapshotDelta": _snapshot_chart_delta(snap.spotChart, index_chart),
         "alignedWithChart": side_aligned_with_chart(side, index_chart),
         "recommendedSide": chart_summary_dict(index_chart).get("recommendedSide"),
+        "_indexMtfReads": index_mtf_reads,
+        "_premiumMtfReads": premium_mtf_reads,
     }
+
+
+def _strip_mtf_reads(mtf: dict[str, Any]) -> dict[str, Any]:
+    return mtf or {}
 
 
 def validate_execution_charts(
@@ -122,19 +159,33 @@ def validate_execution_charts(
     *,
     premium_chart: Optional[PremiumChart] = None,
     trade_score: float = 0.0,
-) -> tuple[bool, str]:
-    """Final chart gate at execution — index direction + premium expansion."""
+    index_mtf_reads: Optional[dict] = None,
+    premium_mtf_reads: Optional[dict] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Final chart gate — 1m index + MTF scalp pre-test + premium."""
+    mtf_meta: dict[str, Any] = {}
+
     blocked, reason = chart_blocks_side(
         side, index_chart, trade_score=trade_score,
     )
     if blocked:
-        return False, f"exec_{reason}"
+        return False, f"exec_{reason}", mtf_meta
 
     blocked, reason = premium_blocks_entry(side, premium_chart, trade_score=trade_score)
     if blocked:
-        return False, f"exec_{reason}"
+        return False, f"exec_{reason}", mtf_meta
 
-    return True, "ok"
+    if index_mtf_reads:
+        passed, reason, mtf_meta = validate_mtf_scalp(
+            side,
+            index_mtf_reads,
+            premium_mtf_reads,
+            trade_score=trade_score,
+        )
+        if not passed:
+            return False, reason, mtf_meta
+
+    return True, "ok", mtf_meta
 
 
 async def monitor_trade_chart_before_execution(
@@ -148,7 +199,7 @@ async def monitor_trade_chart_before_execution(
     instrument_key: Optional[str] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
-    Fetch live Upstox charts for this trade and block if index/premium disagree.
+    Fetch live Upstox charts (1m–4h) for this trade and block if misaligned.
     Returns (passed, reason, metadata for entryContext.executionChart).
     """
     settings = get_settings()
@@ -176,10 +227,20 @@ async def monitor_trade_chart_before_execution(
     index_chart = SpotChart(**meta["indexChartFull"])
     premium_data = meta.get("premiumChart") or {}
     premium_chart = PremiumChart(**premium_data) if premium_data else None
+    index_mtf_reads = meta.pop("_indexMtfReads", None)
+    premium_mtf_reads = meta.pop("_premiumMtfReads", None)
 
-    passed, reason = validate_execution_charts(
-        side, index_chart, premium_chart=premium_chart, trade_score=trade_score,
+    passed, reason, mtf_meta = validate_execution_charts(
+        side,
+        index_chart,
+        premium_chart=premium_chart,
+        trade_score=trade_score,
+        index_mtf_reads=index_mtf_reads,
+        premium_mtf_reads=premium_mtf_reads,
     )
+    if mtf_meta:
+        meta["mtfPreTest"] = mtf_meta
+
     meta["enabled"] = True
     meta["passed"] = passed
     meta["blockReason"] = reason if not passed else None

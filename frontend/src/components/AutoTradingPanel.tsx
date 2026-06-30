@@ -112,6 +112,11 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
                         : ''}
                     </span>
                   )}
+                  {execChart?.indexMtf?.consensus && (
+                    <span>
+                      MTF {execChart.indexMtf.consensus} ({execChart.indexMtf.alignedCount}/{execChart.indexMtf.total})
+                    </span>
+                  )}
                 </div>
               </div>
             );
