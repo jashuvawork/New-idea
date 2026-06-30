@@ -341,6 +341,17 @@ def validate_candidate(
         if not ws_ok:
             return False, ws_reason, meta
 
+    from app.engines.confidence_hold import high_confidence_reentry_blocked
+
+    hc_blocked, hc_reason = high_confidence_reentry_blocked(
+        candidate.symbol,
+        candidate.side,
+        candidate.strike,
+        float(getattr(candidate, "score", 0) or 0),
+    )
+    if hc_blocked:
+        return False, hc_reason, meta
+
     if candidate.score < settings.pretrade_min_rank_score:
         return False, f"pretrade_rank_below_{settings.pretrade_min_rank_score}", meta
 

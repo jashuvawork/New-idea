@@ -165,6 +165,17 @@ class Settings(BaseSettings):
     bearish_sideways_block_scalps: bool = True
     bearish_sideways_explosion_min_score: float = 78.0
 
+    # High-confidence hold — don't micro-exit then immediately re-enter same setup
+    high_confidence_hold_enabled: bool = True
+    high_confidence_min_score: float = 72.0
+    high_confidence_max_hold_multiplier: float = 1.8
+    high_confidence_micro_min_best_points: float = 6.0
+    high_confidence_min_hold_before_micro_seconds: int = 180
+    high_confidence_micro_giveback_points: float = 4.5
+    high_confidence_trail_keep_ratio: float = 0.55
+    high_confidence_reentry_cooldown_seconds: int = 600
+    high_confidence_reentry_score_uplift: float = 5.0
+
     # Chart alignment — CE/PE must match index candle direction
     chart_alignment_enabled: bool = True
     chart_min_trend_strength: float = 25.0
