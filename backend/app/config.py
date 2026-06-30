@@ -111,11 +111,16 @@ class Settings(BaseSettings):
     explosion_reentry_cooldown_seconds: int = 120
     explosion_emergency_cooldown_seconds: int = 300
 
-    # Symbol cooldown — off (66K); quality gates filter instead
-    symbol_loss_cooldown_seconds: int = 0
-    symbol_emergency_cooldown_seconds: int = 0
-    symbol_streak_cooldown_seconds: int = 0
-    reentry_score_penalty_per_loss: int = 0
+    # Symbol / instrument cooldown — stop same-strike churn after losses
+    symbol_loss_cooldown_seconds: int = 180
+    symbol_emergency_cooldown_seconds: int = 300
+    symbol_streak_cooldown_seconds: int = 600
+    reentry_score_penalty_per_loss: int = 5
+    instrument_loss_cooldown_seconds: int = 300
+    instrument_micro_win_cooldown_seconds: int = 180
+    instrument_win_cooldown_seconds: int = 90
+    instrument_max_entries_per_day: int = 3
+    counter_breadth_min_score: int = 70
     recent_win_window_seconds: int = 900
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5

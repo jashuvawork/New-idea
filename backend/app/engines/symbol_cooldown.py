@@ -81,7 +81,20 @@ def requires_breadth_alignment(symbol: str) -> bool:
     return _consecutive_losses.get(symbol.upper(), 0) >= 1
 
 
+def side_aligned_with_breadth(side: str, breadth_bias: str) -> bool:
+    """CALL needs BULLISH/NEUTRAL; PUT needs BEARISH/NEUTRAL."""
+    bias = (breadth_bias or "NEUTRAL").upper()
+    if bias == "NEUTRAL":
+        return True
+    if side.upper() == "CALL":
+        return bias == "BULLISH"
+    return bias == "BEARISH"
+
+
 def reset_symbol_cooldowns() -> None:
     _cooldown_until.clear()
     _consecutive_losses.clear()
     _last_win_at.clear()
+    from app.engines.instrument_cooldown import reset_instrument_cooldowns
+
+    reset_instrument_cooldowns()

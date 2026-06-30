@@ -30,6 +30,7 @@ from app.engines.capital_allocator import (
     update_daily_profit_gate,
 )
 from app.engines.symbol_cooldown import record_symbol_result, reset_symbol_cooldowns
+from app.engines.instrument_cooldown import record_instrument_close, record_instrument_entry
 from app.engines.chop_day_guards import (
     apply_tiered_lot_cap,
     chop_guard_summary,
@@ -344,6 +345,7 @@ async def _open_from_candidate(
     paper.entryContext = ctx
     state.openPaperTrades.append(paper)
     trade_store.record_trade_opened(paper, ctx)
+    record_instrument_entry(symbol, candidate.side, candidate.strike)
     get_ai_learning().record_trade_open(
         paper.id,
         [
@@ -582,6 +584,7 @@ async def _process_open_trades(
         state.closedPaperTrades.append(trade)
         _calibration.record_trade(trade)
         record_symbol_result(trade.symbol, pnl, exit_reason or "")
+        record_instrument_close(trade.symbol, trade.side, trade.strike, pnl, exit_reason or "")
         record_session_trade_close(pnl)
         trade_store.record_trade_closed(trade, ctx)
         get_ai_learning().record_trade_close(trade)

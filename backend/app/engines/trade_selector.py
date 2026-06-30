@@ -11,7 +11,17 @@ from app.engines.market_momentum import (
     side_aligned_with_index_moment,
 )
 from app.engines.explosion_profit import check_explosion_entry
+from app.engines.instrument_cooldown import (
+    instrument_daily_cap_reached,
+    instrument_in_cooldown,
+)
 from app.engines.simple_profit import check_entry_gate
+from app.engines.symbol_cooldown import (
+    entry_score_penalty,
+    requires_breadth_alignment,
+    side_aligned_with_breadth,
+    symbol_in_cooldown,
+)
 from app.engines.swing_profit import check_swing_entry
 from app.engines.swing_engine import SwingSetup
 from app.models.schemas import (
@@ -40,6 +50,27 @@ class EntryCandidate:
     swing_setup: Any = None
     suggestion: Any = None
     alert: Optional[dict] = None
+
+
+def _reentry_blocked(
+    symbol: str,
+    side: Side,
+    strike: float,
+    snap: SymbolSnapshot,
+) -> tuple[bool, str]:
+    blocked, reason = symbol_in_cooldown(symbol)
+    if blocked:
+        return True, reason
+    blocked, reason = instrument_in_cooldown(symbol, side, strike)
+    if blocked:
+        return True, reason
+    if instrument_daily_cap_reached(symbol, side, strike):
+        return True, f"instrument_daily_cap_{symbol}_{side.value}_{int(strike)}"
+    if requires_breadth_alignment(symbol) and not side_aligned_with_breadth(
+        side.value, snap.breadth.bias,
+    ):
+        return True, "symbol_requires_breadth_alignment"
+    return False, "ok"
 
 
 def _explosion_candidates(
@@ -97,6 +128,10 @@ def _explosion_candidates(
         if not passed:
             continue
 
+        blocked, reason = _reentry_blocked(symbol, event.side, event.strike, snap)
+        if blocked:
+            continue
+
         rank = score_val * 0.55 + snap.tradeQualityScore * 0.25
         if event.tier == "ELITE":
             rank += 15
@@ -152,6 +187,10 @@ def _scalp_candidates(
             blocked, momentum_surge=momentum, alignment_override=override,
         )
         if not passed:
+            continue
+
+        blocked, reason = _reentry_blocked(symbol, suggestion.side, suggestion.strike, snap)
+        if blocked:
             continue
 
         rank = suggestion.tqs * 0.5 + suggestion.confidence * 0.3 + snap.tradeQualityScore * 0.2
@@ -269,7 +308,8 @@ def find_best_entry(
 
     def sort_key(c: EntryCandidate) -> float:
         bonus = 20 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
-        return c.score + bonus
+        penalty = entry_score_penalty(c.symbol)
+        return c.score + bonus - penalty
 
     best = max(candidates, key=sort_key)
     floor = min_rank_for_entry(chop, snapshots)

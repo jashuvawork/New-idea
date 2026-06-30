@@ -133,11 +133,11 @@ def check_entry_gate(
             if trade_score < settings.neutral_breadth_min_score:
                 return False, "midday_chop_wait"
 
-    # Breadth: block weak counter-trend scalps (major loss driver in recent sessions)
+    # Counter-trend scalps (CALL in BEARISH / PUT in BULLISH) caused most session losses
     side_bias = "BULLISH" if trade.side == Side.CALL else "BEARISH"
-    if breadth.bias != side_bias and not alignment_override:
-        if not momentum_surge and trade_score < min_score + 12:
-            return False, "breadth_misalignment"
+    if breadth.bias not in (side_bias, "NEUTRAL") and not alignment_override:
+        if not momentum_surge and trade_score < settings.counter_breadth_min_score:
+            return False, "breadth_counter_trend"
 
     if not (momentum_surge or alignment_override or breadth.aligned or trade_score >= min_score + 8):
         return False, "no_momentum_or_alignment"
