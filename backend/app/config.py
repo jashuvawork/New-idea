@@ -202,15 +202,20 @@ class Settings(BaseSettings):
     min_per_trade_risk_inr: float = 3_000
     per_trade_risk_pct: float = 0.85
     max_exposure_pct: float = 0.85
-    position_sl_cap_pct: float = 0.06
-    position_tp_target_pct: float = 0.10
+    position_sl_cap_pct: float = 0.08
+    position_tp_target_pct: float = 0.12
     emergency_stop_enabled: bool = False
     emergency_stop_inr: float = 20_000
     emergency_stop_scale_with_position: bool = False
     scalp_stop_points: float = 3.0
+    scalp_stop_min_points: float = 2.5
     scalp_stop_min_hold_seconds: int = 30
     scalp_trail_arm_points: float = 3.0
-    scalp_trail_keep_ratio: float = 0.55
+    scalp_trail_keep_ratio: float = 0.60
+    scalp_trail_step_points: float = 2.0
+    scalp_trail_tight_arm: float = 8.0
+    scalp_trail_tight_points: float = 3.0
+    scalp_micro_giveback_points: float = 1.5
     scalp_no_progress_seconds: int = 90
 
     # Daily target — Jun 25 milestone profile

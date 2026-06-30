@@ -15,7 +15,10 @@ class AdaptiveExitPlan:
     targetPoints: float
     trailArmPoints: float
     trailKeepRatio: float
-    microTargetPoints: float
+    trailStepPoints: float = 2.5
+    trailTightArm: float = 8.0
+    trailTightPoints: float = 3.0
+    microTargetPoints: float = 2.5
     stopPct: float = 0.0
     targetPct: float = 0.0
     mlWinProb: float = 0.5
@@ -38,6 +41,9 @@ class AdaptiveExitPlan:
             trailArmPoints=data.get("trailArmPoints", 3.0),
             trailKeepRatio=data.get("trailKeepRatio", 0.55),
             microTargetPoints=data.get("microTargetPoints", 2.5),
+            trailStepPoints=data.get("trailStepPoints", 2.5),
+            trailTightArm=data.get("trailTightArm", 8.0),
+            trailTightPoints=data.get("trailTightPoints", 3.0),
             stopPct=data.get("stopPct", 0.0),
             targetPct=data.get("targetPct", 0.0),
             mlWinProb=data.get("mlWinProb", 0.5),
@@ -70,13 +76,19 @@ def compute_adaptive_exit_plan(
 
     if strategy_type == StrategyType.EXPLOSIVE:
         base_stop, base_target = 4.0, settings.explosion_target_standard
-        trail_arm, trail_keep = 5.0, 0.65
-        micro = 3.0
+        trail_arm, trail_keep = settings.explosion_trail_arm_points, settings.explosion_trail_keep_ratio
+        trail_step = settings.explosion_trail_step_points
+        trail_tight_arm = settings.explosion_trail_tight_arm
+        trail_tight_pts = settings.explosion_trail_tight_points
+        micro = settings.explosion_micro_target_points
     else:
         base_stop = session_profile.stopPoints
         base_target = session_profile.targetPoints
-        trail_arm = 3.0
-        trail_keep = 0.55
+        trail_arm = settings.scalp_trail_arm_points
+        trail_keep = settings.scalp_trail_keep_ratio
+        trail_step = settings.scalp_trail_step_points
+        trail_tight_arm = settings.scalp_trail_tight_arm
+        trail_tight_pts = settings.scalp_trail_tight_points
         micro = session_profile.microTargetPoints
 
     stop = base_stop
@@ -90,16 +102,16 @@ def compute_adaptive_exit_plan(
             stop *= 1.1
         reasoning.append(f"ML win prob {win_prob:.0%} — wider target")
     elif win_prob <= 0.42:
-        stop *= 0.85
-        target *= 0.85
-        reasoning.append(f"ML win prob {win_prob:.0%} — tighter SL/TP")
+        stop = max(settings.scalp_stop_min_points, stop * 0.9)
+        target = max(base_target * 0.92, target * 0.92)
+        reasoning.append(f"ML win prob {win_prob:.0%} — slightly tighter SL/TP")
 
     # Psychology tuning
     if psychology.exit_bias == "TIGHT_STOPS":
-        stop *= 0.8
-        target *= 0.9
-        micro *= 0.9
-        reasoning.append(f"Psychology {psychology.label} — tighter stops")
+        stop = max(settings.scalp_stop_min_points, stop * 0.92)
+        target = max(base_target * 0.95, target * 0.95)
+        micro *= 0.95
+        reasoning.append(f"Psychology {psychology.label} — modestly tighter stops")
     elif psychology.exit_bias == "LET_RUNNERS":
         target *= 1.25
         trail_arm *= 1.2
@@ -135,18 +147,24 @@ def compute_adaptive_exit_plan(
             target = settings.explosion_target_elite
             trail_arm = 8.0
             reasoning.append("ELITE explosion — 25pt target")
-        if profile.sessionLabel == "momentum_rally":
-            stop *= 1.1
+        if session_profile.sessionLabel in ("momentum_rally", "open_drive"):
+            stop = max(settings.scalp_stop_min_points, stop * 1.05)
             trail_arm *= 1.1
-            target *= 1.05
-            reasoning.append("Momentum rally — wider explosion SL/trail")
+            target = max(target, session_profile.targetPoints)
+            reasoning.append(f"{session_profile.sessionLabel} — wider trail + session TP")
 
+    stop_floor = settings.explosion_initial_stop_points if strategy_type == StrategyType.EXPLOSIVE else settings.scalp_stop_min_points
     stop_cap = 7.0 if strategy_type == StrategyType.EXPLOSIVE else 5.0
+    target_floor = base_target * 0.95 if strategy_type != StrategyType.EXPLOSIVE else settings.explosion_target_standard * 0.85
+
     return AdaptiveExitPlan(
-        stopPoints=round(min(stop_cap, max(2.0, stop)), 2),
-        targetPoints=round(max(3.0, target), 2),
+        stopPoints=round(min(stop_cap, max(stop_floor, stop)), 2),
+        targetPoints=round(max(target_floor, target), 2),
         trailArmPoints=round(max(1.5, trail_arm), 2),
         trailKeepRatio=round(trail_keep, 2),
+        trailStepPoints=round(max(1.0, trail_step), 2),
+        trailTightArm=round(trail_tight_arm, 2),
+        trailTightPoints=round(max(1.0, trail_tight_pts), 2),
         microTargetPoints=round(max(1.5, micro), 2),
         mlWinProb=round(win_prob, 3),
         psychologyLabel=psychology.label,
@@ -231,17 +249,18 @@ def evaluate_adaptive_scalp_exit(
     )
     from app.engines.simple_profit import evaluate_exit
 
-    exit_reason, pnl = evaluate_exit(trade, current_premium, adapted, lot_multiplier)
-    if exit_reason:
-        return exit_reason, pnl
-
-    # Extra adaptive trail using plan ratios
-    pnl_pts = current_premium - trade.entryPremium
-    best = max(trade.bestPnlPoints, pnl_pts)
-    if best >= plan.trailArmPoints and pnl_pts < best * plan.trailKeepRatio:
-        return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier
-
-    return None, pnl_pts * trade.lots * lot_multiplier
+    exit_reason, pnl = evaluate_exit(
+        trade,
+        current_premium,
+        adapted,
+        lot_multiplier,
+        trail_arm=plan.trailArmPoints,
+        trail_keep=plan.trailKeepRatio,
+        trail_step=plan.trailStepPoints,
+        trail_tight_arm=plan.trailTightArm,
+        trail_tight_pts=plan.trailTightPoints,
+    )
+    return exit_reason, pnl
 
 
 def evaluate_adaptive_explosion_exit(

@@ -187,9 +187,15 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
     RECENT_WIN_RANK_BONUS
     MIDDAY_CHOP_BLOCK_SCALPS
     SCALP_STOP_MIN_HOLD_SECONDS
+    SCALP_STOP_MIN_POINTS
     SCALP_TRAIL_ARM_POINTS
     SCALP_TRAIL_KEEP_RATIO
+    SCALP_TRAIL_STEP_POINTS
+    SCALP_TRAIL_TIGHT_ARM
+    SCALP_TRAIL_TIGHT_POINTS
     SCALP_NO_PROGRESS_SECONDS
+    POSITION_SL_CAP_PCT
+    POSITION_TP_TARGET_PCT
   )
   echo "Syncing template defaults for operational keys ..."
   for key in "${SYNC_ENV_KEYS[@]}"; do
