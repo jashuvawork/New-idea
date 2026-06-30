@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.engines.chop_day_guards import in_momentum_rally_window, is_momentum_surge, neutral_breadth_blocks_entry
@@ -14,6 +15,15 @@ from app.models.schemas import (
     Side,
     SuggestedTrade,
 )
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _hold_seconds(trade: PaperTrade) -> float:
+    opened = trade.openedAt
+    if opened.tzinfo is None:
+        opened = opened.replace(tzinfo=IST)
+    return (datetime.now(IST) - opened.astimezone(IST)).total_seconds()
 from app.services.upstox import get_market_phase
 
 
@@ -136,7 +146,7 @@ def evaluate_exit(
     settings = get_settings()
     pnl_pts = current_premium - trade.entryPremium
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
-    hold_seconds = (datetime.utcnow() - trade.openedAt.replace(tzinfo=None)).total_seconds()
+    hold_seconds = _hold_seconds(trade)
 
     # Track best
     best = max(trade.bestPnlPoints, pnl_pts)
