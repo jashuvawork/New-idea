@@ -124,9 +124,9 @@ class Settings(BaseSettings):
 
     # Controlled trading — pre-trade backtest + fewer entries
     controlled_trading_enabled: bool = True
-    controlled_max_trades_per_day: int = 12
-    min_seconds_between_entries: int = 120
-    pretrade_min_rank_score: float = 55.0
+    controlled_max_trades_per_day: int = 6
+    min_seconds_between_entries: int = 180
+    pretrade_min_rank_score: float = 65.0
     pretrade_min_symbol_trades_for_stats: int = 3
     pretrade_block_symbol_pf_below: float = 0.5
     pretrade_block_symbol_net_inr_below: float = -15_000.0
@@ -134,6 +134,21 @@ class Settings(BaseSettings):
     pretrade_similar_side_min_trades: int = 3
     pretrade_block_similar_pf_below: float = 0.4
     index_selection_pf_bonus: float = 12.0
+
+    # Last-N trades gate — check last 5 before any new entry
+    last_n_trades_gate_enabled: bool = True
+    last_n_trades_lookback: int = 5
+    last_n_trades_min_count: int = 3
+    last_n_pause_after_losses: int = 4
+    last_n_elevate_after_losses: int = 3
+    last_n_elevated_min_rank_score: float = 72.0
+    last_n_block_pf_below: float = 0.35
+    last_n_block_net_inr_below: float = -25_000.0
+
+    # Best trades only — fewer, higher-quality entries
+    best_trades_only_enabled: bool = True
+    best_trades_min_rank_score: float = 68.0
+    best_trades_explosion_only_after_losses: int = 3
 
     # Chart alignment — CE/PE must match index candle direction
     chart_alignment_enabled: bool = True

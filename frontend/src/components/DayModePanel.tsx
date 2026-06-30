@@ -138,6 +138,7 @@ export function DayModePanel({
         <Flag label="Midday chop" active={Boolean(g.middayChopWindow)} tone="warn" />
         <Flag label="Loss pause" active={Boolean(g.sessionPaused)} tone="bad" />
         <Flag label="Cap hit" active={Boolean(g.tradeCapReached)} tone="bad" />
+        <Flag label="Last-5 pause" active={Boolean(g.lastNTradesPaused)} tone="bad" />
         <Flag label="Guards on" active={chopEnabled !== false && g.guardsEnabled !== false} tone="neutral" />
       </div>
 
@@ -175,6 +176,39 @@ export function DayModePanel({
         <div className="mb-3 text-[10px] text-nexus-yellow font-mono">
           Loss streak: {g.lossStreak}
           {g.pauseReason ? ` · ${g.pauseReason}` : ''}
+        </div>
+      )}
+
+      {g.lastNTrades && (g.lastNTrades.count ?? 0) > 0 && (
+        <div className="mb-3 p-2 rounded bg-black/30 text-[10px]">
+          <div className="text-nexus-muted uppercase mb-1">
+            Last {g.lastNTrades.lookback ?? 5} trades — best-trades gate
+          </div>
+          <div className="font-mono text-white mb-1">
+            {g.lastNTrades.wins ?? 0}W / {g.lastNTrades.losses ?? 0}L · net ₹
+            {(g.lastNTrades.netPnlInr ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            {g.lastNTrades.profitFactor != null ? ` · PF ${g.lastNTrades.profitFactor.toFixed(2)}` : ''}
+          </div>
+          {g.lastNTradesPaused && (
+            <div className="text-nexus-red font-semibold mb-1">
+              PAUSED — {g.lastNTradesPauseReason?.replace(/_/g, ' ')}
+            </div>
+          )}
+          <div className="space-y-0.5 max-h-20 overflow-y-auto">
+            {(g.lastNTrades.trades ?? []).map((t, i) => (
+              <div key={`ln-${i}`} className="font-mono text-[9px] text-nexus-muted">
+                {t.symbol} {t.side} {t.strike}{' '}
+                <span className={t.pnlInr >= 0 ? 'text-nexus-green' : 'text-nexus-red'}>
+                  ₹{t.pnlInr.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+            ))}
+          </div>
+          {g.controlledDailyCap != null && g.controlledDailyCap < 99 && (
+            <div className="text-[9px] text-nexus-muted mt-1">
+              Daily cap: {closed}/{g.controlledDailyCap} best trades only
+            </div>
+          )}
         </div>
       )}
 

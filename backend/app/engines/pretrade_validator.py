@@ -170,6 +170,120 @@ def controlled_daily_cap_reached(state: AutoTraderState) -> tuple[bool, str]:
     return False, "ok"
 
 
+def analyze_last_n_trades(trades: list[TradeRecord], n: int = 5) -> dict[str, Any]:
+    """Summarize the most recent closed trades for gating."""
+    recent = trades[-n:] if trades else []
+    if not recent:
+        return {"count": 0, "wins": 0, "losses": 0, "netPnlInr": 0.0, "profitFactor": 0.0}
+
+    wins = sum(1 for t in recent if t.pnl_inr > 0)
+    losses = sum(1 for t in recent if t.pnl_inr < 0)
+    net = sum(t.pnl_inr for t in recent)
+    pf = round(_profit_factor(recent), 2)
+
+    return {
+        "count": len(recent),
+        "lookback": n,
+        "wins": wins,
+        "losses": losses,
+        "netPnlInr": round(net, 2),
+        "profitFactor": pf,
+        "allLosses": losses == len(recent) and len(recent) >= n,
+        "trades": [
+            {
+                "symbol": t.symbol,
+                "side": t.side,
+                "strike": t.strike,
+                "pnlInr": round(t.pnl_inr, 2),
+                "exitReason": t.exit_reason,
+            }
+            for t in recent
+        ],
+    }
+
+
+def last_n_trades_summary(state: AutoTraderState) -> dict[str, Any]:
+    settings = get_settings()
+    trades = collect_session_trades(state)
+    n = settings.last_n_trades_lookback
+    return analyze_last_n_trades(trades, n)
+
+
+def check_last_n_trades_pause(state: AutoTraderState) -> tuple[bool, str, dict[str, Any]]:
+    """Session-level pause when last N trades are catastrophic (e.g. 4/5 losses)."""
+    settings = get_settings()
+    if not settings.last_n_trades_gate_enabled:
+        return False, "ok", {}
+
+    trades = collect_session_trades(state)
+    if len(trades) < settings.last_n_trades_min_count:
+        return False, "ok", last_n_trades_summary(state)
+
+    summary = analyze_last_n_trades(trades, settings.last_n_trades_lookback)
+    losses = summary["losses"]
+    count = summary["count"]
+
+    if count >= settings.last_n_trades_lookback and losses >= settings.last_n_pause_after_losses:
+        return True, f"last_n_pause_{losses}_of_{count}_losses", summary
+
+    if count >= settings.last_n_trades_lookback and summary.get("allLosses"):
+        return True, f"last_n_pause_all_{count}_losses", summary
+
+    if count >= settings.last_n_trades_lookback and summary["profitFactor"] < settings.last_n_block_pf_below:
+        return True, f"last_n_pause_pf_{summary['profitFactor']:.2f}", summary
+
+    if summary["netPnlInr"] <= settings.last_n_block_net_inr_below:
+        return True, f"last_n_pause_net_{summary['netPnlInr']:.0f}", summary
+
+    return False, "ok", summary
+
+
+def last_n_elevated_min_rank(state: AutoTraderState) -> float:
+    """Raise rank floor when last N shows a loss cluster."""
+    settings = get_settings()
+    if not settings.last_n_trades_gate_enabled:
+        return 0.0
+    trades = collect_session_trades(state)
+    if len(trades) < settings.last_n_trades_min_count:
+        return 0.0
+    summary = analyze_last_n_trades(trades, settings.last_n_trades_lookback)
+    if summary["losses"] >= settings.last_n_elevate_after_losses:
+        return settings.last_n_elevated_min_rank_score
+    return 0.0
+
+
+def check_last_n_candidate_gate(
+    candidate: Any,
+    state: AutoTraderState,
+    session_trades: Optional[list[TradeRecord]] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Per-candidate gate from last N trade performance."""
+    settings = get_settings()
+    trades = session_trades if session_trades is not None else collect_session_trades(state)
+    summary = analyze_last_n_trades(trades, settings.last_n_trades_lookback)
+    meta = {"lastN": summary}
+
+    if not settings.last_n_trades_gate_enabled or len(trades) < settings.last_n_trades_min_count:
+        return True, "ok", meta
+
+    score = float(getattr(candidate, "score", 0) or 0)
+    elevated = last_n_elevated_min_rank(state)
+    if elevated > 0 and score < elevated:
+        return False, f"last_n_elevated_rank_{elevated:.0f}", meta
+
+    if (
+        settings.best_trades_only_enabled
+        and summary["losses"] >= settings.best_trades_explosion_only_after_losses
+        and getattr(candidate, "mode", "") != "explosion"
+    ):
+        return False, "last_n_explosion_only", meta
+
+    if settings.best_trades_only_enabled and score < settings.best_trades_min_rank_score:
+        return False, f"best_trades_rank_below_{settings.best_trades_min_rank_score:.0f}", meta
+
+    return True, "ok", meta
+
+
 def validate_candidate(
     candidate: Any,
     state: AutoTraderState,
@@ -193,6 +307,11 @@ def validate_candidate(
     cap_hit, cap_reason = controlled_daily_cap_reached(state)
     if cap_hit:
         return False, cap_reason, meta
+
+    ln_ok, ln_reason, ln_meta = check_last_n_candidate_gate(candidate, state, trades)
+    meta.update(ln_meta)
+    if not ln_ok:
+        return False, ln_reason, meta
 
     if candidate.score < settings.pretrade_min_rank_score:
         return False, f"pretrade_rank_below_{settings.pretrade_min_rank_score}", meta

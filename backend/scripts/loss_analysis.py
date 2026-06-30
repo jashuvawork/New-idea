@@ -121,7 +121,6 @@ def analyze(trades: list[dict]) -> dict:
     loss_blockers = Counter()
 
     prior_records: list[TradeRecord] = []
-    prior_all: list[dict] = []
     prior_losses: list[dict] = []
 
     for t in trades:
@@ -165,7 +164,6 @@ def analyze(trades: list[dict]) -> dict:
                 blockers=blockers,
             ))
 
-        prior_all.append(t)
         if pnl < 0:
             prior_losses.append(t)
         prior_records.append(TradeRecord(
@@ -184,6 +182,10 @@ def analyze(trades: list[dict]) -> dict:
     avg_win = gross_win / len(wins) if wins else 0
     avg_loss = gross_loss / len(losses) if losses else 0
     pf = abs(gross_win / gross_loss) if gross_loss else 0
+
+    last5 = trades[-5:] if len(trades) >= 5 else trades
+    l5_losses = sum(1 for t in last5 if (t.get("pnlInr") or 0) < 0)
+    l5_net = sum(t.get("pnlInr", 0) for t in last5)
 
     return {
         "total": len(trades),
@@ -235,7 +237,16 @@ def print_report(report: dict, date: str) -> None:
         loss_n = report["losses_with_blockers"].get(gate, 0)
         print(f"  {gate}: {n} entries ({loss_n} were losses)")
 
-    print("\n--- MTF + chart pre-test (after deploy) ---")
+    print("\n--- Last 5 trades gate (new) ---")
+    if len(trades) >= 5:
+        last5 = trades[-5:]
+        l5_losses = sum(1 for t in last5 if t.pnl_inr < 0)
+        l5_net = sum(t.pnl_inr for t in last5)
+        print(f"  Last 5: {l5_losses} losses, net ₹{l5_net:,.0f}")
+        if l5_losses >= 4:
+            print("  → SESSION PAUSED (4+ losses in last 5)")
+        elif l5_losses >= 3:
+            print("  → Elevated rank floor 72, explosion-only scalps blocked")
     print("  Blocks CALL when index 1m/5m/15m/1h/4h declining + premium fading")
     print("  Blocks PUT when index rallying on multiple timeframes")
     print("  Requires ≥3/5 TF alignment + no 15m+1h conflict")

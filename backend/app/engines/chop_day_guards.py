@@ -286,9 +286,12 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.market_momentum import index_moment_summary
     from app.engines.session_timing import in_midday_chop_window, in_open_caution_window
     from app.engines.simple_profit import get_session_targets
+    from app.engines.pretrade_validator import check_last_n_trades_pause, last_n_trades_summary
 
     session = get_session_targets()
     settings = get_settings()
+    last_n = last_n_trades_summary(state)
+    last_n_paused, last_n_reason, _ = check_last_n_trades_pause(state)
 
     return {
         "chopSession": chop,
@@ -316,4 +319,8 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
             for sym in snapshots
             if snapshots[sym].dataAvailable
         },
+        "lastNTrades": last_n,
+        "lastNTradesPaused": last_n_paused,
+        "lastNTradesPauseReason": last_n_reason if last_n_paused else None,
+        "controlledDailyCap": settings.controlled_max_trades_per_day,
     }

@@ -20,6 +20,8 @@ from app.engines.pretrade_validator import (
     compute_symbol_stats,
     filter_candidates_pretrade,
     index_rank_from_backtest,
+    last_n_elevated_min_rank,
+    last_n_trades_summary,
 )
 from app.engines.simple_profit import check_entry_gate
 from app.engines.spot_direction import chart_rank_adjustment
@@ -327,6 +329,24 @@ def find_best_entry(
     if not candidates:
         return None
 
+    settings = get_settings()
+    if settings.best_trades_only_enabled:
+        candidates = [
+            c for c in candidates
+            if c.score >= settings.best_trades_min_rank_score
+        ]
+        if not candidates:
+            return None
+
+    last_n = last_n_trades_summary(state)
+    if (
+        settings.best_trades_only_enabled
+        and last_n.get("losses", 0) >= settings.best_trades_explosion_only_after_losses
+    ):
+        explosion_only = [c for c in candidates if c.mode == "explosion"]
+        if explosion_only:
+            candidates = explosion_only
+
     def sort_key(c: EntryCandidate) -> float:
         bonus = 20 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
         penalty = entry_score_penalty(c.symbol)
@@ -334,6 +354,9 @@ def find_best_entry(
 
     best = max(candidates, key=sort_key)
     floor = min_rank_for_entry(chop, snapshots)
+    floor = max(floor, last_n_elevated_min_rank(state))
+    if settings.best_trades_only_enabled:
+        floor = max(floor, settings.best_trades_min_rank_score)
     if floor > 0 and sort_key(best) < floor:
         return None
     return best

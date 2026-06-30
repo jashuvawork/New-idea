@@ -730,7 +730,7 @@ async def process(
                 "reason": cap_reason,
                 "message": "Daily trade cap on chop session",
             })
-        from app.engines.pretrade_validator import controlled_daily_cap_reached
+        from app.engines.pretrade_validator import controlled_daily_cap_reached, check_last_n_trades_pause
         ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state)
         if ctrl_cap:
             skipped.append({
@@ -738,7 +738,15 @@ async def process(
                 "reason": ctrl_reason,
                 "message": "Controlled trading daily cap",
             })
-        if not paused and not cap_hit and not ctrl_cap:
+        last_n_paused, last_n_reason, last_n_meta = check_last_n_trades_pause(state)
+        if last_n_paused:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": last_n_reason,
+                "message": f"Last {last_n_meta.get('lookback', 5)} trades: "
+                f"{last_n_meta.get('losses', 0)} losses, net ₹{last_n_meta.get('netPnlInr', 0):,.0f}",
+            })
+        if not paused and not cap_hit and not ctrl_cap and not last_n_paused:
             best = find_best_entry(snapshots, state)
             if best:
                 opened, reason = await _open_from_candidate(best, state, client, news)

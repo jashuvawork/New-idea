@@ -277,6 +277,27 @@ export interface ChopGuards {
   dayModeHint?: string;
   symbolBreadth?: Record<string, SymbolBreadthSummary>;
   indexMoments?: Record<string, IndexMomentSummary>;
+  lastNTrades?: LastNTradesSummary;
+  lastNTradesPaused?: boolean;
+  lastNTradesPauseReason?: string | null;
+  controlledDailyCap?: number;
+}
+
+export interface LastNTradesSummary {
+  count?: number;
+  lookback?: number;
+  wins?: number;
+  losses?: number;
+  netPnlInr?: number;
+  profitFactor?: number;
+  allLosses?: boolean;
+  trades?: Array<{
+    symbol: string;
+    side: string;
+    strike: number;
+    pnlInr: number;
+    exitReason: string;
+  }>;
 }
 
 export interface SymbolBreadthSummary {
