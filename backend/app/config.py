@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     snapshot_cache_interval_ms: int = 400
     tick_wake_debounce_ms: int = 25
     tick_fast_exit_enabled: bool = True
-    entry_scan_interval_ms: int = 250
+    entry_scan_interval_ms: int = 500
     news_cache_seconds: int = 60
     background_market_monitor_enabled: bool = True
 
@@ -121,6 +121,19 @@ class Settings(BaseSettings):
     instrument_win_cooldown_seconds: int = 90
     instrument_max_entries_per_day: int = 3
     counter_breadth_min_score: int = 70
+
+    # Controlled trading — pre-trade backtest + fewer entries
+    controlled_trading_enabled: bool = True
+    controlled_max_trades_per_day: int = 12
+    min_seconds_between_entries: int = 120
+    pretrade_min_rank_score: float = 55.0
+    pretrade_min_symbol_trades_for_stats: int = 3
+    pretrade_block_symbol_pf_below: float = 0.5
+    pretrade_block_symbol_net_inr_below: float = -15_000.0
+    pretrade_similar_side_lookback: int = 5
+    pretrade_similar_side_min_trades: int = 3
+    pretrade_block_similar_pf_below: float = 0.4
+    index_selection_pf_bonus: float = 12.0
     recent_win_window_seconds: int = 900
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5

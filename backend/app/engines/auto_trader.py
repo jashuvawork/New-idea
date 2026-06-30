@@ -257,6 +257,8 @@ async def _open_from_candidate(
         "signalPremium": signal_premium,
         "paperLiveParity": use_parity,
     }
+    if getattr(candidate, "pretrade_meta", None):
+        ctx_extra["pretrade"] = candidate.pretrade_meta
     if candidate.mode == "explosion" and candidate.explosion_event:
         ev = candidate.explosion_event
         ctx_extra.update({
@@ -688,7 +690,15 @@ async def process(
                 "reason": cap_reason,
                 "message": "Daily trade cap on chop session",
             })
-        if not paused and not cap_hit:
+        from app.engines.pretrade_validator import controlled_daily_cap_reached
+        ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state)
+        if ctrl_cap:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": ctrl_reason,
+                "message": "Controlled trading daily cap",
+            })
+        if not paused and not cap_hit and not ctrl_cap:
             best = find_best_entry(snapshots, state)
             if best:
                 opened, reason = await _open_from_candidate(best, state, client, news)

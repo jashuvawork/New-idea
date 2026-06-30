@@ -15,6 +15,12 @@ from app.engines.instrument_cooldown import (
     instrument_daily_cap_reached,
     instrument_in_cooldown,
 )
+from app.engines.pretrade_validator import (
+    collect_session_trades,
+    compute_symbol_stats,
+    filter_candidates_pretrade,
+    index_rank_from_backtest,
+)
 from app.engines.simple_profit import check_entry_gate
 from app.engines.symbol_cooldown import (
     entry_score_penalty,
@@ -50,6 +56,7 @@ class EntryCandidate:
     swing_setup: Any = None
     suggestion: Any = None
     alert: Optional[dict] = None
+    pretrade_meta: Optional[dict] = None
 
 
 def _reentry_blocked(
@@ -302,9 +309,17 @@ def find_best_entry(
     if not candidates:
         return None
 
-    # SENSEX-first on chop days
+    # SENSEX-first on chop days + session backtest index preference
+    session_trades = collect_session_trades(state)
+    index_adj = index_rank_from_backtest(compute_symbol_stats(session_trades))
+
     for c in candidates:
         c.score += symbol_rank_adjustment(c.symbol, chop)
+        c.score += index_adj.get(c.symbol.upper(), 0.0)
+
+    candidates = filter_candidates_pretrade(candidates, state, snapshots)
+    if not candidates:
+        return None
 
     def sort_key(c: EntryCandidate) -> float:
         bonus = 20 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
