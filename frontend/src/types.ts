@@ -281,6 +281,18 @@ export interface ChopGuards {
   lastNTradesPaused?: boolean;
   lastNTradesPauseReason?: string | null;
   controlledDailyCap?: number;
+  whipsawGuards?: WhipsawGuardsSummary;
+}
+
+export interface WhipsawGuardsSummary {
+  enabled?: boolean;
+  bearishSideways?: boolean;
+  whipsawPaused?: boolean;
+  whipsawPauseReason?: string | null;
+  flipFlops?: number;
+  flipFlopLookback?: number;
+  dualLegWhipsaw?: Record<string, { callVel?: number; putVel?: number; symbol?: string }>;
+  oppositeSideCooldownSeconds?: number;
 }
 
 export interface LastNTradesSummary {

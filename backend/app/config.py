@@ -125,7 +125,7 @@ class Settings(BaseSettings):
     # Controlled trading — pre-trade backtest + fewer entries
     controlled_trading_enabled: bool = True
     controlled_max_trades_per_day: int = 6
-    min_seconds_between_entries: int = 180
+    min_seconds_between_entries: int = 240
     pretrade_min_rank_score: float = 65.0
     pretrade_min_symbol_trades_for_stats: int = 3
     pretrade_block_symbol_pf_below: float = 0.5
@@ -149,6 +149,21 @@ class Settings(BaseSettings):
     best_trades_only_enabled: bool = True
     best_trades_min_rank_score: float = 68.0
     best_trades_explosion_only_after_losses: int = 3
+
+    # Whipsaw / churn — CE↔PE flip-flops in bearish sideways chop
+    whipsaw_guards_enabled: bool = True
+    post_exit_min_seconds: int = 120
+    post_loss_exit_min_seconds: int = 300
+    chop_session_entry_interval_seconds: int = 300
+    opposite_side_cooldown_seconds: int = 420
+    opposite_side_cooldown_after_loss_seconds: int = 600
+    ce_pe_whipsaw_velocity_threshold: float = 1.2
+    ce_pe_whipsaw_pause_seconds: int = 900
+    flip_flop_lookback_trades: int = 6
+    flip_flop_max_opposites: int = 2
+    bearish_sideways_halt_enabled: bool = True
+    bearish_sideways_block_scalps: bool = True
+    bearish_sideways_explosion_min_score: float = 78.0
 
     # Chart alignment — CE/PE must match index candle direction
     chart_alignment_enabled: bool = True

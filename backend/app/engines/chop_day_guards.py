@@ -287,6 +287,8 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.session_timing import in_midday_chop_window, in_open_caution_window
     from app.engines.simple_profit import get_session_targets
     from app.engines.pretrade_validator import check_last_n_trades_pause, last_n_trades_summary
+    from app.engines.whipsaw_guards import whipsaw_guard_summary
+
 
     session = get_session_targets()
     settings = get_settings()
@@ -323,4 +325,5 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "lastNTradesPaused": last_n_paused,
         "lastNTradesPauseReason": last_n_reason if last_n_paused else None,
         "controlledDailyCap": settings.controlled_max_trades_per_day,
+        "whipsawGuards": whipsaw_guard_summary(state, snapshots),
     }

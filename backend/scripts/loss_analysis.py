@@ -106,6 +106,72 @@ def _would_block_instrument_churn(trade: dict, prior_losses: list[dict], setting
     return False
 
 
+def _would_block_rapid_reentry(trade: dict, prior: list[dict], settings) -> bool:
+    if not prior:
+        return False
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    IST = ZoneInfo("Asia/Kolkata")
+    prev = prior[-1]
+    try:
+        prev_closed = datetime.fromisoformat(str(prev.get("closedAt", "")).replace("Z", "+00:00")).astimezone(IST)
+        opened = datetime.fromisoformat(str(trade.get("openedAt", "")).replace("Z", "+00:00")).astimezone(IST)
+    except Exception:
+        return False
+    gap = (opened - prev_closed).total_seconds()
+    required = max(
+        settings.min_seconds_between_entries,
+        settings.post_exit_min_seconds,
+    )
+    prev_pnl = float(prev.get("pnlInr") or 0)
+    if prev_pnl < 0:
+        required = max(required, settings.post_loss_exit_min_seconds)
+    return gap < required
+
+
+def _would_block_opposite_side(trade: dict, prior: list[dict], settings) -> bool:
+    if not prior:
+        return False
+    prev = prior[-1]
+    if str(prev.get("symbol", "")).upper() != str(trade.get("symbol", "")).upper():
+        return False
+    if str(prev.get("side", "")).upper() == str(trade.get("side", "")).upper():
+        return False
+    ctx = _ctx(trade)
+    regime = str(ctx.get("regime", "")).upper()
+    breadth = _breadth_bias(trade)
+    if regime not in ("RANGE_BOUND", "CHOP") or breadth not in ("BEARISH", "NEUTRAL"):
+        return False
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    IST = ZoneInfo("Asia/Kolkata")
+    try:
+        prev_closed = datetime.fromisoformat(str(prev.get("closedAt", "")).replace("Z", "+00:00")).astimezone(IST)
+        opened = datetime.fromisoformat(str(trade.get("openedAt", "")).replace("Z", "+00:00")).astimezone(IST)
+    except Exception:
+        return False
+    gap = (opened - prev_closed).total_seconds()
+    cooldown = settings.opposite_side_cooldown_seconds
+    if float(prev.get("pnlInr") or 0) < 0:
+        cooldown = max(cooldown, settings.opposite_side_cooldown_after_loss_seconds)
+    return gap < cooldown
+
+
+def _would_block_bearish_sideways_scalp(trade: dict, settings) -> bool:
+    if not settings.bearish_sideways_halt_enabled or not settings.bearish_sideways_block_scalps:
+        return False
+    ctx = _ctx(trade)
+    regime = str(ctx.get("regime", "")).upper()
+    breadth = _breadth_bias(trade)
+    mode = str(ctx.get("selectionMode") or ctx.get("strategyType") or "SCALP").lower()
+    if regime in ("RANGE_BOUND", "CHOP") and breadth in ("BEARISH", "NEUTRAL"):
+        if mode in ("scalp", "scalp".lower()) or "scalp" in mode:
+            return True
+    return False
+
+
 def analyze(trades: list[dict]) -> dict:
     settings = get_settings()
     losses = [t for t in trades if (t.get("pnlInr") or 0) < 0]
@@ -121,6 +187,7 @@ def analyze(trades: list[dict]) -> dict:
     loss_blockers = Counter()
 
     prior_records: list[TradeRecord] = []
+    prior_records_raw: list[dict] = []
     prior_losses: list[dict] = []
 
     for t in trades:
@@ -145,6 +212,15 @@ def analyze(trades: list[dict]) -> dict:
         if _would_block_instrument_churn(t, prior_losses, settings):
             blockers.append("instrument_cooldown")
             gate_blocks["instrument_cooldown"] += 1
+        if _would_block_rapid_reentry(t, prior_records_raw, settings):
+            blockers.append("rapid_reentry")
+            gate_blocks["rapid_reentry"] += 1
+        if _would_block_opposite_side(t, prior_records_raw, settings):
+            blockers.append("opposite_side_cooldown")
+            gate_blocks["opposite_side_cooldown"] += 1
+        if _would_block_bearish_sideways_scalp(t, settings):
+            blockers.append("bearish_sideways_halt")
+            gate_blocks["bearish_sideways_halt"] += 1
         if _counter_trend(t) and not ctx.get("executionChart"):
             blockers.append("chart_mtf_not_deployed")
         if pnl < 0:
@@ -174,6 +250,7 @@ def analyze(trades: list[dict]) -> dict:
             strike=strike,
             trade_id=str(t.get("id", "")),
         ))
+        prior_records_raw.append(t)
 
     counter_losses = [r for r in loss_rows if _counter_trend({"side": r.side, "entryContext": {"breadth": r.breadth}})]
     call_bearish = [r for r in counter_losses if r.side == "CALL"]
@@ -210,6 +287,9 @@ def analyze(trades: list[dict]) -> dict:
         "losses_with_blockers": dict(loss_blockers),
         "losses_without_execution_chart": sum(1 for r in loss_rows if not r.has_execution_chart),
         "top_loss_trades": sorted(loss_rows, key=lambda r: r.pnl_inr)[:10],
+        "last5_losses": l5_losses,
+        "last5_net_inr": round(l5_net, 2),
+        "last5_would_pause": l5_losses >= 4 and len(last5) >= 5,
     }
 
 
@@ -238,15 +318,11 @@ def print_report(report: dict, date: str) -> None:
         print(f"  {gate}: {n} entries ({loss_n} were losses)")
 
     print("\n--- Last 5 trades gate (new) ---")
-    if len(trades) >= 5:
-        last5 = trades[-5:]
-        l5_losses = sum(1 for t in last5 if t.pnl_inr < 0)
-        l5_net = sum(t.pnl_inr for t in last5)
-        print(f"  Last 5: {l5_losses} losses, net ₹{l5_net:,.0f}")
-        if l5_losses >= 4:
-            print("  → SESSION PAUSED (4+ losses in last 5)")
-        elif l5_losses >= 3:
-            print("  → Elevated rank floor 72, explosion-only scalps blocked")
+    print(f"  Last 5: {report.get('last5_losses', 0)} losses, net ₹{report.get('last5_net_inr', 0):,.0f}")
+    if report.get("last5_would_pause"):
+        print("  → SESSION PAUSED (4+ losses in last 5) — no new entries until win breaks streak")
+    elif (report.get("last5_losses") or 0) >= 3:
+        print("  → Elevated rank floor 72, explosion-only until recovery")
     print("  Blocks CALL when index 1m/5m/15m/1h/4h declining + premium fading")
     print("  Blocks PUT when index rallying on multiple timeframes")
     print("  Requires ≥3/5 TF alignment + no 15m+1h conflict")

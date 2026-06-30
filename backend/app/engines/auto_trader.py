@@ -39,6 +39,10 @@ from app.engines.chop_day_guards import (
     session_pause_active,
     trades_cap_reached,
 )
+from app.engines.whipsaw_guards import (
+    check_session_whipsaw_pause,
+    record_trade_close as record_whipsaw_close,
+)
 from app.engines.trade_selector import EntryCandidate, diagnose_missed_entries, find_best_entry
 from app.engines.paper_slippage import (
     apply_entry_fill,
@@ -628,11 +632,13 @@ async def _process_open_trades(
         record_symbol_result(trade.symbol, pnl, exit_reason or "")
         record_instrument_close(trade.symbol, trade.side, trade.strike, pnl, exit_reason or "")
         record_session_trade_close(pnl)
+        record_whipsaw_close(trade.symbol, trade.side, pnl, exit_reason or "")
         trade_store.record_trade_closed(trade, ctx)
         get_ai_learning().record_trade_close(trade)
         state.lastExit = {
             "tradeId": trade.id,
             "symbol": trade.symbol,
+            "side": trade.side.value if hasattr(trade.side, "value") else str(trade.side),
             "reason": exit_reason,
             "pnlInr": round(pnl, 2),
             "executionMode": ctx.get("executionMode"),
@@ -746,7 +752,15 @@ async def process(
                 "message": f"Last {last_n_meta.get('lookback', 5)} trades: "
                 f"{last_n_meta.get('losses', 0)} losses, net ₹{last_n_meta.get('netPnlInr', 0):,.0f}",
             })
-        if not paused and not cap_hit and not ctrl_cap and not last_n_paused:
+        whipsaw_paused, whipsaw_reason, whipsaw_meta = check_session_whipsaw_pause(state, snapshots)
+        if whipsaw_paused:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": whipsaw_reason,
+                "message": whipsaw_meta.get("dualLegWhipsaw")
+                or f"Whipsaw/churn pause — CE↔PE flip-flops in bearish sideways",
+            })
+        if not paused and not cap_hit and not ctrl_cap and not last_n_paused and not whipsaw_paused:
             best = find_best_entry(snapshots, state)
             if best:
                 opened, reason = await _open_from_candidate(best, state, client, news)
