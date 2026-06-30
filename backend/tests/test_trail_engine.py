@@ -177,4 +177,4 @@ def test_open_drive_session_tp_is_8pt():
             mock_dt.now.return_value = datetime(2026, 6, 24, 9, 30)
             profile = get_session_targets()
     assert profile.sessionLabel == "open_drive"
-    assert profile.targetPoints == 8.0
+    assert profile.targetPoints == 10.0

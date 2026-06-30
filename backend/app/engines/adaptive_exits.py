@@ -247,6 +247,14 @@ def evaluate_adaptive_scalp_exit(
         maxHoldSeconds=profile.maxHoldSeconds,
         sessionLabel=profile.sessionLabel,
     )
+    if plan.exitBias == "LET_RUNNERS" or plan.mlWinProb >= 0.72:
+        adapted = OP(
+            targetPoints=adapted.targetPoints,
+            stopPoints=adapted.stopPoints,
+            microTargetPoints=adapted.microTargetPoints,
+            maxHoldSeconds=int(adapted.maxHoldSeconds * 1.25),
+            sessionLabel=adapted.sessionLabel,
+        )
     from app.engines.simple_profit import evaluate_exit
 
     exit_reason, pnl = evaluate_exit(

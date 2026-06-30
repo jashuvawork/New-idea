@@ -30,15 +30,15 @@ from app.services.upstox import get_market_phase
 
 
 def get_session_targets() -> OptimizedProfile:
-    """Session-adaptive targets — enhanced with tighter micro locks."""
+    """Session-adaptive targets — longer holds to let winners reach 2.5+ PF."""
     settings = get_settings()
     phase = get_market_phase()
     micro = settings.enhanced_micro_target_points
 
     if phase == "PREMARKET":
         return OptimizedProfile(
-            targetPoints=7.0, stopPoints=3.0, microTargetPoints=micro,
-            maxHoldSeconds=180, sessionLabel="premarket",
+            targetPoints=8.0, stopPoints=3.0, microTargetPoints=micro,
+            maxHoldSeconds=300, sessionLabel="premarket",
         )
 
     now = datetime.now()
@@ -48,27 +48,45 @@ def get_session_targets() -> OptimizedProfile:
     # IST session windows (approximate)
     if 9 * 60 + 15 <= t < 10 * 60:
         return OptimizedProfile(
-            targetPoints=8.0, stopPoints=3.0, microTargetPoints=micro,
-            maxHoldSeconds=240, sessionLabel="open_drive",
+            targetPoints=10.0, stopPoints=3.0, microTargetPoints=micro,
+            maxHoldSeconds=420, sessionLabel="open_drive",
         )
     if in_momentum_rally_window() and 11 * 60 <= t < 13 * 60 + 45:
         return OptimizedProfile(
-            targetPoints=10.0, stopPoints=3.5, microTargetPoints=micro,
-            maxHoldSeconds=360, sessionLabel="momentum_rally",
+            targetPoints=12.0, stopPoints=3.5, microTargetPoints=micro,
+            maxHoldSeconds=480, sessionLabel="momentum_rally",
         )
     if 11 * 60 + 30 <= t < 13 * 60:
         return OptimizedProfile(
-            targetPoints=5.0, stopPoints=3.0, microTargetPoints=micro,
-            maxHoldSeconds=150, sessionLabel="midday_chop",
+            targetPoints=7.0, stopPoints=3.0, microTargetPoints=micro,
+            maxHoldSeconds=240, sessionLabel="midday_chop",
         )
     if 14 * 60 + 30 <= t < 15 * 60 + 15:
         return OptimizedProfile(
-            targetPoints=6.5, stopPoints=3.0, microTargetPoints=micro,
-            maxHoldSeconds=180, sessionLabel="closing_momentum",
+            targetPoints=8.0, stopPoints=3.0, microTargetPoints=micro,
+            maxHoldSeconds=300, sessionLabel="closing_momentum",
         )
     return OptimizedProfile(
-        targetPoints=6.0, stopPoints=3.0, microTargetPoints=micro,
-        maxHoldSeconds=180, sessionLabel="normal",
+        targetPoints=8.0, stopPoints=3.0, microTargetPoints=micro,
+        maxHoldSeconds=300, sessionLabel="normal",
+    )
+
+
+def _hold_profile_for_trade(trade: PaperTrade, profile: OptimizedProfile) -> OptimizedProfile:
+    """Extend hold + target when direction matches session breadth."""
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    settings = get_settings()
+    if not direction_aligned_with_breadth(trade):
+        return profile
+
+    mult = settings.bullish_hold_max_hold_multiplier
+    return OptimizedProfile(
+        targetPoints=round(profile.targetPoints * 1.15, 2),
+        stopPoints=profile.stopPoints,
+        microTargetPoints=profile.microTargetPoints,
+        maxHoldSeconds=int(profile.maxHoldSeconds * mult),
+        sessionLabel=profile.sessionLabel,
     )
 
 
@@ -115,13 +133,13 @@ def check_entry_gate(
             if trade_score < settings.neutral_breadth_min_score:
                 return False, "midday_chop_wait"
 
-    # Breadth: relaxed when trade score is strong
+    # Breadth: block weak counter-trend scalps (major loss driver in recent sessions)
     side_bias = "BULLISH" if trade.side == Side.CALL else "BEARISH"
     if breadth.bias != side_bias and not alignment_override:
-        if not momentum_surge and trade_score < min_score + 8:
+        if not momentum_surge and trade_score < min_score + 12:
             return False, "breadth_misalignment"
 
-    if not (momentum_surge or alignment_override or breadth.aligned or trade_score >= min_score + 5):
+    if not (momentum_surge or alignment_override or breadth.aligned or trade_score >= min_score + 8):
         return False, "no_momentum_or_alignment"
 
     return True, "passed"
@@ -149,15 +167,22 @@ def evaluate_exit(
 ) -> tuple[Optional[str], float]:
     """
     Scalp exit: hard SL when losing, ratcheting trail SL when winning, TP ladder.
-  """
+    """
     settings = get_settings()
+    profile = _hold_profile_for_trade(trade, profile)
     pnl_pts = current_premium - trade.entryPremium
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
     hold_seconds = _hold_seconds(trade)
     best = max(trade.bestPnlPoints, pnl_pts)
 
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    aligned_hold = direction_aligned_with_breadth(trade)
+
     arm = trail_arm if trail_arm is not None else settings.scalp_trail_arm_points
     keep = trail_keep if trail_keep is not None else settings.scalp_trail_keep_ratio
+    if aligned_hold:
+        keep = min(keep, settings.bullish_hold_trail_keep_ratio)
     step = trail_step if trail_step is not None else settings.scalp_trail_step_points
     tight_arm = trail_tight_arm if trail_tight_arm is not None else settings.scalp_trail_tight_arm
     tight_pts = trail_tight_pts if trail_tight_pts is not None else settings.scalp_trail_tight_points
@@ -196,11 +221,15 @@ def evaluate_exit(
     if pnl_pts >= profile.targetPoints:
         return "simple_profit_target_hit", pnl_inr
 
-    if pnl_pts >= profile.microTargetPoints:
+    micro_ready = (
+        best >= settings.scalp_micro_lock_min_best_points
+        or hold_seconds >= settings.scalp_min_hold_before_micro_lock_seconds
+    )
+    if micro_ready and pnl_pts >= profile.microTargetPoints:
         if best - pnl_pts >= micro_giveback:
             return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
-    if best >= arm and pnl_pts < best * runner_keep:
+    if trail_floor is None and best >= arm and pnl_pts < best * runner_keep:
         return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     if hold_seconds >= settings.scalp_no_progress_seconds and best <= 0:

@@ -154,16 +154,16 @@ class Settings(BaseSettings):
     momentum_rally_start_minute: int = 0
     momentum_rally_end_hour: int = 13
     momentum_rally_end_minute: int = 45
-    runner_trail_keep_ratio: float = 0.45
-    runner_micro_giveback_points: float = 2.5
-    runner_min_best_points: float = 6.0
+    runner_trail_keep_ratio: float = 0.38
+    runner_micro_giveback_points: float = 4.0
+    runner_min_best_points: float = 5.0
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
     max_option_premium_inr: float = 175.0
 
-    # Jun 25 profile — relaxed gates, micro locks + trails (no sure-shot / bullish-hold)
-    enhanced_micro_target_points: float = 2.5
+    # Jun 25 profile — hold winners longer for 2.5+ profit factor
+    enhanced_micro_target_points: float = 4.0
     enhanced_velocity_threshold: float = 1.2
     enhanced_tqs_entry: int = 50
     runner_alignment_override_score: int = 82
@@ -174,9 +174,11 @@ class Settings(BaseSettings):
     sure_shot_scalp_min_score: int = 55
     scalp_max_lots: int = 0  # 0 = capital-derived max on 85% per trade
     scalp_target_points: float = 12.0  # unused — session targets in simple_profit
-    bullish_hold_enabled: bool = False
-    bullish_hold_trail_keep_ratio: float = 0.55
-    bullish_hold_max_hold_multiplier: float = 1.0
+    bullish_hold_enabled: bool = True
+    bullish_hold_trail_keep_ratio: float = 0.48
+    bullish_hold_max_hold_multiplier: float = 1.6
+    scalp_micro_lock_min_best_points: float = 4.5
+    scalp_min_hold_before_micro_lock_seconds: int = 90
     midday_chop_block_scalps: bool = True
     midday_chop_start_hour: int = 11
     midday_chop_start_minute: int = 30
@@ -210,13 +212,13 @@ class Settings(BaseSettings):
     scalp_stop_points: float = 3.0
     scalp_stop_min_points: float = 2.5
     scalp_stop_min_hold_seconds: int = 30
-    scalp_trail_arm_points: float = 3.0
-    scalp_trail_keep_ratio: float = 0.60
-    scalp_trail_step_points: float = 2.0
-    scalp_trail_tight_arm: float = 8.0
-    scalp_trail_tight_points: float = 3.0
-    scalp_micro_giveback_points: float = 1.5
-    scalp_no_progress_seconds: int = 90
+    scalp_trail_arm_points: float = 4.5
+    scalp_trail_keep_ratio: float = 0.50
+    scalp_trail_step_points: float = 3.0
+    scalp_trail_tight_arm: float = 10.0
+    scalp_trail_tight_points: float = 4.0
+    scalp_micro_giveback_points: float = 3.0
+    scalp_no_progress_seconds: int = 150
 
     # Daily target — Jun 25 milestone profile
     daily_profit_target_inr: float = 44_000

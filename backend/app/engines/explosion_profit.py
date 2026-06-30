@@ -226,10 +226,14 @@ def evaluate_explosion_exit(
     ):
         return "explosion_micro_profit_lock", pnl_inr
 
-    if hold >= 90 and best < exit_params.trail_arm_points:
+    if hold >= settings.explosion_no_progress_seconds and best < exit_params.trail_arm_points:
         return "explosion_no_progress", pnl_inr
 
-    max_hold = 360 if best >= settings.runner_min_best_points else (300 if event_tier == "ELITE" or best >= 15 else 240)
+    max_hold = 420 if best >= settings.runner_min_best_points else (360 if event_tier == "ELITE" or best >= 15 else 300)
+    if aligned := (trade.entryContext or {}).get("breadth"):
+        side_bias = "BULLISH" if trade.side.value == "CALL" else "BEARISH"
+        if str(aligned).upper() == side_bias:
+            max_hold = int(max_hold * 1.4)
     if hold >= max_hold:
         return ("explosion_time_profit" if pnl_pts > 0 else "explosion_time_stop"), pnl_inr
 

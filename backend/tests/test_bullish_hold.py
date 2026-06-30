@@ -36,5 +36,7 @@ def test_put_bearish_aligned(mock_settings):
     assert direction_aligned_with_breadth(_trade(Side.PUT, "BEARISH"))
 
 
-def test_disabled_by_default():
+@patch("app.engines.bullish_hold.get_settings")
+def test_disabled_when_flag_off(mock_settings):
+    mock_settings.return_value.bullish_hold_enabled = False
     assert not direction_aligned_with_breadth(_trade(Side.CALL, "BULLISH"))
