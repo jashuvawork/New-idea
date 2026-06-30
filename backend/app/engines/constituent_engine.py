@@ -1,5 +1,6 @@
 """Constituent market heatmap — weight-sized tiles, breadth, real Upstox quotes."""
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -14,12 +15,16 @@ IST = ZoneInfo("Asia/Kolkata")
 
 _cache: dict[str, tuple[datetime, ConstituentHeatmap]] = {}
 CACHE_SECONDS = 90
+MIN_TILES_FOR_HEATMAP = 10
+_constituent_fetch_lock = asyncio.Lock()
 
 
 def _parse_quote(quote: dict[str, Any], prev_close: float) -> dict[str, float]:
     ltp = float(quote.get("last_price") or quote.get("ltp") or 0)
     ohlc = quote.get("ohlc") or {}
-    close = float(ohlc.get("close") or prev_close or ltp or 0)
+    close = float(
+        ohlc.get("close") or quote.get("cp") or quote.get("close") or prev_close or ltp or 0
+    )
     open_ = float(ohlc.get("open") or close)
     high = float(ohlc.get("high") or ltp)
     low = float(ohlc.get("low") or ltp)
@@ -27,6 +32,8 @@ def _parse_quote(quote: dict[str, Any], prev_close: float) -> dict[str, float]:
     volume = float(quote.get("volume") or 0)
     if close > 0 and ltp > 0:
         change_pct = ((ltp - close) / close) * 100
+    elif close > 0 and quote.get("net_change") is not None:
+        change_pct = (float(quote["net_change"]) / close) * 100
     else:
         change_pct = 0.0
     return {
@@ -126,7 +133,8 @@ async def build_constituent_heatmap(
     tiles: list[ConstituentTile] = []
 
     try:
-        quotes = await client.get_full_quotes(keys)
+        async with _constituent_fetch_lock:
+            quotes = await client.get_full_quotes(keys)
         for c in constituents:
             key = instrument_key(c)
             q = resolve_quote_payload(quotes, key)
@@ -158,13 +166,13 @@ async def build_constituent_heatmap(
             error=str(e),
         )
 
-    if not tiles:
+    if len(tiles) < MIN_TILES_FOR_HEATMAP:
         return ConstituentHeatmap(
             symbol=symbol,
             indexLabel=label,
             stockCount=len(constituents),
             dataAvailable=False,
-            error="No constituent quotes returned — check Upstox token",
+            error=f"Only {len(tiles)}/{len(constituents)} constituent quotes resolved",
         )
 
     breadth_pct, bias, advancing, declining, unchanged = _compute_breadth(tiles)
