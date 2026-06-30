@@ -98,3 +98,6 @@ def reset_symbol_cooldowns() -> None:
     from app.engines.instrument_cooldown import reset_instrument_cooldowns
 
     reset_instrument_cooldowns()
+    from app.engines.whipsaw_guards import reset_whipsaw_guards
+
+    reset_whipsaw_guards()

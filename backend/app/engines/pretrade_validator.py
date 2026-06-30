@@ -145,15 +145,29 @@ def seconds_since_last_exit(state: AutoTraderState) -> float:
         return 999_999.0
 
 
-def check_min_entry_interval(state: AutoTraderState) -> tuple[bool, str]:
+def check_min_entry_interval(state: AutoTraderState, *, chop: bool = False) -> tuple[bool, str]:
     settings = get_settings()
-    gap = settings.min_seconds_between_entries
-    if gap <= 0:
+    last = state.lastExit
+    if not last or not last.get("at"):
         return True, "ok"
-    elapsed = seconds_since_last_exit(state)
+    try:
+        closed = datetime.fromisoformat(str(last["at"]).replace("Z", "+00:00")).astimezone(IST)
+    except Exception:
+        return True, "ok"
+
+    gap = settings.min_seconds_between_entries
+    if chop:
+        gap = max(gap, settings.chop_session_entry_interval_seconds)
+    gap = max(gap, settings.post_exit_min_seconds)
+    pnl = float(last.get("pnlInr", 0) or 0)
+    if pnl < 0:
+        gap = max(gap, settings.post_loss_exit_min_seconds)
+
+    elapsed = (datetime.now(IST) - closed).total_seconds()
     if elapsed < gap:
         remain = int(gap - elapsed)
-        return False, f"pretrade_entry_interval_{remain}s"
+        suffix = "after_loss" if pnl < 0 else "after_exit"
+        return False, f"pretrade_entry_interval_{suffix}_{remain}s"
     return True, "ok"
 
 
@@ -288,6 +302,7 @@ def validate_candidate(
     candidate: Any,
     state: AutoTraderState,
     session_trades: Optional[list[TradeRecord]] = None,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Pre-trade backtest checks before execution.
@@ -300,7 +315,12 @@ def validate_candidate(
     trades = session_trades if session_trades is not None else collect_session_trades(state)
     meta: dict[str, Any] = {"controlledTrading": True}
 
-    ok, reason = check_min_entry_interval(state)
+    from app.engines.chop_day_guards import is_chop_session
+
+    snap_map = snapshots or {candidate.symbol.upper(): candidate.snap}
+    chop = is_chop_session(snap_map)
+
+    ok, reason = check_min_entry_interval(state, chop=chop)
     if not ok:
         return False, reason, meta
 
@@ -312,6 +332,14 @@ def validate_candidate(
     meta.update(ln_meta)
     if not ln_ok:
         return False, ln_reason, meta
+
+    from app.engines.whipsaw_guards import check_whipsaw_candidate
+
+    if settings.whipsaw_guards_enabled:
+        ws_ok, ws_reason, ws_meta = check_whipsaw_candidate(candidate, state, snap_map)
+        meta.update(ws_meta)
+        if not ws_ok:
+            return False, ws_reason, meta
 
     if candidate.score < settings.pretrade_min_rank_score:
         return False, f"pretrade_rank_below_{settings.pretrade_min_rank_score}", meta
@@ -378,7 +406,7 @@ def filter_candidates_pretrade(
     session_trades = collect_session_trades(state)
     viable: list[Any] = []
     for c in candidates:
-        ok, reason, meta = validate_candidate(c, state, session_trades)
+        ok, reason, meta = validate_candidate(c, state, session_trades, snapshots)
         if ok:
             c.pretrade_meta = meta
             viable.append(c)

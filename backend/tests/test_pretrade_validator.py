@@ -17,6 +17,7 @@ from app.models.schemas import (
     Breadth,
     MarketPhase,
     PaperTrade,
+    Regime,
     Side,
     StrategyType,
     SymbolSnapshot,
@@ -53,6 +54,10 @@ def _settings():
     s.best_trades_min_rank_score = 68.0
     s.best_trades_explosion_only_after_losses = 3
     s.chart_alignment_enabled = False
+    s.whipsaw_guards_enabled = False
+    s.post_exit_min_seconds = 120
+    s.post_loss_exit_min_seconds = 300
+    s.chop_session_entry_interval_seconds = 300
     return s
 
 
@@ -65,6 +70,7 @@ def _snap(symbol: str, bias: str = "BEARISH") -> SymbolSnapshot:
         marketPhase=MarketPhase.LIVE_MARKET,
         dataAvailable=True,
         tradeQualityScore=45,
+        regime=Regime.TREND_EXPANSION,
         breadth=Breadth(
             bias=bias,
             score=45,
@@ -181,7 +187,7 @@ def test_filter_drops_nifty_after_bad_session(mock_settings):
         ))
     from datetime import timedelta
     state.lastExit = {
-        "at": (datetime.now(IST) - timedelta(seconds=200)).isoformat(),
+        "at": (datetime.now(IST) - timedelta(seconds=400)).isoformat(),
         "pnlInr": -5000,
     }
     nifty = _candidate("NIFTY", Side.PUT, score=72.0)

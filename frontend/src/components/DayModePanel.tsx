@@ -139,6 +139,8 @@ export function DayModePanel({
         <Flag label="Loss pause" active={Boolean(g.sessionPaused)} tone="bad" />
         <Flag label="Cap hit" active={Boolean(g.tradeCapReached)} tone="bad" />
         <Flag label="Last-5 pause" active={Boolean(g.lastNTradesPaused)} tone="bad" />
+        <Flag label="Whipsaw pause" active={Boolean(g.whipsawGuards?.whipsawPaused)} tone="bad" />
+        <Flag label="Bear/side" active={Boolean(g.whipsawGuards?.bearishSideways)} tone="warn" />
         <Flag label="Guards on" active={chopEnabled !== false && g.guardsEnabled !== false} tone="neutral" />
       </div>
 
@@ -169,6 +171,15 @@ export function DayModePanel({
               style={{ width: `${capPct}%` }}
             />
           </div>
+        </div>
+      )}
+
+      {g.whipsawGuards && (g.whipsawGuards.flipFlops ?? 0) > 0 && (
+        <div className="mb-3 text-[10px] text-nexus-yellow font-mono">
+          CE↔PE flips (last {g.whipsawGuards.flipFlopLookback ?? 6}): {g.whipsawGuards.flipFlops}
+          {g.whipsawGuards.whipsawPaused && g.whipsawGuards.whipsawPauseReason
+            ? ` · ${g.whipsawGuards.whipsawPauseReason.replace(/_/g, ' ')}`
+            : ''}
         </div>
       )}
 
