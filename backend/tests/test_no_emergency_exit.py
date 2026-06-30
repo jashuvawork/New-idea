@@ -1,6 +1,6 @@
 """Per-trade INR emergency stops disabled — point stops and trails only."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from app.engines.explosion_profit import evaluate_explosion_exit
@@ -21,6 +21,38 @@ def _trade(strategy: StrategyType = StrategyType.SCALP) -> PaperTrade:
         strategyType=strategy,
         bestPnlPoints=0.0,
     )
+
+
+@patch("app.engines.simple_profit.get_settings")
+def test_scalp_stop_fires_with_ist_opened_at(mock_settings):
+    from zoneinfo import ZoneInfo
+
+    settings = MagicMock()
+    settings.emergency_stop_enabled = False
+    settings.scalp_stop_min_hold_seconds = 30
+    settings.runner_micro_giveback_points = 2.5
+    settings.runner_min_best_points = 6.0
+    settings.runner_trail_keep_ratio = 0.45
+    mock_settings.return_value = settings
+
+    IST = ZoneInfo("Asia/Kolkata")
+    trade = PaperTrade(
+        id="t2",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=23850,
+        lots=64,
+        entryPremium=40.55,
+        openedAt=datetime.now(IST) - timedelta(minutes=5),
+        strategyType=StrategyType.SCALP,
+        bestPnlPoints=1.35,
+    )
+    profile = OptimizedProfile(
+        targetPoints=5.4, stopPoints=2.16, microTargetPoints=1.3,
+        maxHoldSeconds=300, sessionLabel="test",
+    )
+    reason, _ = evaluate_exit(trade, 37.0, profile, lot_multiplier=65)
+    assert reason == "simple_stop_loss"
 
 
 @patch("app.engines.simple_profit.get_settings")
