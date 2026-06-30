@@ -282,6 +282,8 @@ export interface ChopGuards {
   lastNTradesPauseReason?: string | null;
   controlledDailyCap?: number;
   whipsawGuards?: WhipsawGuardsSummary;
+  confidenceHold?: { enabled?: boolean; minScore?: number };
+  moneynessPolicy?: MoneynessPolicy;
 }
 
 export interface WhipsawGuardsSummary {
@@ -293,6 +295,14 @@ export interface WhipsawGuardsSummary {
   flipFlopLookback?: number;
   dualLegWhipsaw?: Record<string, { callVel?: number; putVel?: number; symbol?: string }>;
   oppositeSideCooldownSeconds?: number;
+}
+
+export interface MoneynessPolicy {
+  mode?: string;
+  scalpPrefer?: string;
+  explosionPrefer?: string;
+  highConfPrefer?: string;
+  autoScalpPrefer?: string;
 }
 
 export interface LastNTradesSummary {

@@ -297,6 +297,17 @@ async def _open_from_candidate(
         "paperLiveParity": use_parity,
         "executionChart": chart_meta,
     }
+    from app.engines.moneyness import classify_moneyness
+
+    if snap.spot and snap.spot > 0:
+        ctx_extra["moneyness"] = classify_moneyness(
+            candidate.side,
+            candidate.strike,
+            float(snap.spot),
+            symbol=symbol,
+            atm=float(snap.atmStrike) if snap.atmStrike else None,
+        )
+        ctx_extra["atmStrike"] = snap.atmStrike
     if getattr(candidate, "pretrade_meta", None):
         ctx_extra["pretrade"] = candidate.pretrade_meta
     if candidate.mode == "explosion" and candidate.explosion_event:
@@ -633,6 +644,16 @@ async def _process_open_trades(
         record_instrument_close(trade.symbol, trade.side, trade.strike, pnl, exit_reason or "")
         record_session_trade_close(pnl)
         record_whipsaw_close(trade.symbol, trade.side, pnl, exit_reason or "")
+        from app.engines.confidence_hold import record_high_confidence_close, trade_entry_score
+
+        record_high_confidence_close(
+            trade.symbol,
+            trade.side,
+            trade.strike,
+            trade_entry_score(trade),
+            pnl,
+            exit_reason or "",
+        )
         trade_store.record_trade_closed(trade, ctx)
         get_ai_learning().record_trade_close(trade)
         state.lastExit = {

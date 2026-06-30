@@ -74,21 +74,21 @@ def get_session_targets() -> OptimizedProfile:
 
 
 def _hold_profile_for_trade(trade: PaperTrade, profile: OptimizedProfile) -> OptimizedProfile:
-    """Extend hold + target when direction matches session breadth."""
+    """Extend hold + target when direction matches session breadth or entry confidence."""
     from app.engines.bullish_hold import direction_aligned_with_breadth
+    from app.engines.confidence_hold import apply_confidence_hold_profile
 
     settings = get_settings()
-    if not direction_aligned_with_breadth(trade):
-        return profile
-
-    mult = settings.bullish_hold_max_hold_multiplier
-    return OptimizedProfile(
-        targetPoints=round(profile.targetPoints * 1.15, 2),
-        stopPoints=profile.stopPoints,
-        microTargetPoints=profile.microTargetPoints,
-        maxHoldSeconds=int(profile.maxHoldSeconds * mult),
-        sessionLabel=profile.sessionLabel,
-    )
+    if direction_aligned_with_breadth(trade):
+        mult = settings.bullish_hold_max_hold_multiplier
+        profile = OptimizedProfile(
+            targetPoints=round(profile.targetPoints * 1.15, 2),
+            stopPoints=profile.stopPoints,
+            microTargetPoints=profile.microTargetPoints,
+            maxHoldSeconds=int(profile.maxHoldSeconds * mult),
+            sessionLabel=profile.sessionLabel,
+        )
+    return apply_confidence_hold_profile(trade, profile)
 
 
 def check_entry_gate(
@@ -186,13 +186,17 @@ def evaluate_exit(
     best = max(trade.bestPnlPoints, pnl_pts)
 
     from app.engines.bullish_hold import direction_aligned_with_breadth
+    from app.engines.confidence_hold import confidence_exit_tuning
 
     aligned_hold = direction_aligned_with_breadth(trade)
+    conf_tuning = confidence_exit_tuning(trade)
 
     arm = trail_arm if trail_arm is not None else settings.scalp_trail_arm_points
     keep = trail_keep if trail_keep is not None else settings.scalp_trail_keep_ratio
     if aligned_hold:
         keep = min(keep, settings.bullish_hold_trail_keep_ratio)
+    if conf_tuning:
+        keep = max(keep, conf_tuning.trail_keep_ratio)
     step = trail_step if trail_step is not None else settings.scalp_trail_step_points
     tight_arm = trail_tight_arm if trail_tight_arm is not None else settings.scalp_trail_tight_arm
     tight_pts = trail_tight_pts if trail_tight_pts is not None else settings.scalp_trail_tight_points
@@ -203,6 +207,8 @@ def evaluate_exit(
         if best >= settings.runner_min_best_points
         else settings.scalp_micro_giveback_points
     )
+    if conf_tuning:
+        micro_giveback = max(micro_giveback, conf_tuning.micro_giveback_points)
     runner_keep = settings.runner_trail_keep_ratio if best >= settings.runner_min_best_points else keep
 
     from app.engines.trail_engine import ratcheting_trail_floor
@@ -231,16 +237,23 @@ def evaluate_exit(
     if pnl_pts >= profile.targetPoints:
         return "simple_profit_target_hit", pnl_inr
 
+    micro_min_best = settings.scalp_micro_lock_min_best_points
+    micro_min_hold = settings.scalp_min_hold_before_micro_lock_seconds
+    if conf_tuning:
+        micro_min_best = max(micro_min_best, conf_tuning.micro_min_best_points)
+        micro_min_hold = max(micro_min_hold, conf_tuning.min_hold_before_micro_seconds)
+
     micro_ready = (
-        best >= settings.scalp_micro_lock_min_best_points
-        or hold_seconds >= settings.scalp_min_hold_before_micro_lock_seconds
+        best >= micro_min_best
+        or hold_seconds >= micro_min_hold
     )
     if micro_ready and pnl_pts >= profile.microTargetPoints:
         if best - pnl_pts >= micro_giveback:
             return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     if trail_floor is None and best >= arm and pnl_pts < best * runner_keep:
-        return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
+        if not conf_tuning or hold_seconds >= conf_tuning.min_hold_before_micro_seconds:
+            return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     if hold_seconds >= settings.scalp_no_progress_seconds and best <= 0:
         return "simple_no_progress_scratch", pnl_inr

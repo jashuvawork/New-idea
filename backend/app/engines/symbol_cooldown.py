@@ -101,3 +101,6 @@ def reset_symbol_cooldowns() -> None:
     from app.engines.whipsaw_guards import reset_whipsaw_guards
 
     reset_whipsaw_guards()
+    from app.engines.confidence_hold import reset_confidence_hold_state
+
+    reset_confidence_hold_state()

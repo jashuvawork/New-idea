@@ -25,6 +25,11 @@ from app.engines.pretrade_validator import (
 )
 from app.engines.simple_profit import check_entry_gate
 from app.engines.spot_direction import chart_rank_adjustment
+from app.engines.moneyness import (
+    classify_moneyness,
+    heatmap_moneyness_candidates,
+    moneyness_rank_adjustment,
+)
 from app.engines.symbol_cooldown import (
     entry_score_penalty,
     requires_breadth_alignment,
@@ -151,6 +156,10 @@ def _explosion_candidates(
         rank += min(10, event.velocity_9s)
         rank += index_moment_rank_bonus(snap, event.side)
         rank += chart_rank_adjustment(event.side, snap.spotChart)
+        rank += moneyness_rank_adjustment(
+            event.side, event.strike, snap, mode="explosion", candidate_score=rank,
+            snapshots={symbol: snap},
+        )
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -214,6 +223,10 @@ def _scalp_candidates(
             rank += 5
         rank += index_moment_rank_bonus(snap, suggestion.side)
         rank += chart_rank_adjustment(suggestion.side, snap.spotChart)
+        rank += moneyness_rank_adjustment(
+            suggestion.side, suggestion.strike, snap, mode="scalp", candidate_score=rank,
+            snapshots={symbol: snap},
+        )
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -224,6 +237,30 @@ def _scalp_candidates(
             strike=suggestion.strike,
             premium=suggestion.lastPremium,
             strategy_type=suggestion.strategyType,
+            confidence=suggestion.confidence,
+            tqs=suggestion.tqs,
+            suggestion=suggestion,
+        ))
+
+    for row in heatmap_moneyness_candidates(symbol, snap, snapshots={symbol: snap}):
+        suggestion = row["suggestion"]
+        blocked, reason = _reentry_blocked(symbol, suggestion.side, suggestion.strike, snap)
+        if blocked:
+            continue
+        rank = float(row["score"]) + snap.tradeQualityScore * 0.2
+        rank += moneyness_rank_adjustment(
+            suggestion.side, suggestion.strike, snap, mode="scalp", candidate_score=rank,
+            snapshots={symbol: snap},
+        )
+        out.append(EntryCandidate(
+            symbol=symbol,
+            snap=snap,
+            mode="scalp",
+            score=rank,
+            side=suggestion.side,
+            strike=suggestion.strike,
+            premium=row["premium"],
+            strategy_type=StrategyType.SCALP,
             confidence=suggestion.confidence,
             tqs=suggestion.tqs,
             suggestion=suggestion,
