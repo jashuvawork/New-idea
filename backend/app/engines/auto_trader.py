@@ -297,6 +297,17 @@ async def _open_from_candidate(
         "paperLiveParity": use_parity,
         "executionChart": chart_meta,
     }
+    from app.engines.moneyness import classify_moneyness
+
+    if snap.spot and snap.spot > 0:
+        ctx_extra["moneyness"] = classify_moneyness(
+            candidate.side,
+            candidate.strike,
+            float(snap.spot),
+            symbol=symbol,
+            atm=float(snap.atmStrike) if snap.atmStrike else None,
+        )
+        ctx_extra["atmStrike"] = snap.atmStrike
     if getattr(candidate, "pretrade_meta", None):
         ctx_extra["pretrade"] = candidate.pretrade_meta
     if candidate.mode == "explosion" and candidate.explosion_event:

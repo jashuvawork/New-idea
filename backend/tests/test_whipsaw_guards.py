@@ -69,6 +69,8 @@ def _settings():
     s.best_trades_explosion_only_after_losses = 3
     s.chart_alignment_enabled = False
     s.chop_day_guards_enabled = True
+    s.whipsaw_guards_enabled = True
+    s.moneyness_selection_enabled = False
     return s
 
 

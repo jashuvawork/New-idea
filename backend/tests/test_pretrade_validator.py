@@ -59,6 +59,7 @@ def _settings():
     s.post_loss_exit_min_seconds = 300
     s.chop_session_entry_interval_seconds = 300
     s.high_confidence_hold_enabled = False
+    s.moneyness_selection_enabled = False
     return s
 
 

@@ -289,6 +289,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.pretrade_validator import check_last_n_trades_pause, last_n_trades_summary
     from app.engines.whipsaw_guards import whipsaw_guard_summary
     from app.engines.confidence_hold import high_confidence_close_summary
+    from app.engines.moneyness import resolve_preferred_moneyness
 
 
     session = get_session_targets()

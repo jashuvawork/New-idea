@@ -352,6 +352,20 @@ def validate_candidate(
     if hc_blocked:
         return False, hc_reason, meta
 
+    from app.engines.moneyness import moneyness_allows
+
+    mn_ok, mn_reason, mn_meta = moneyness_allows(
+        candidate.side,
+        candidate.strike,
+        candidate.snap,
+        mode=str(getattr(candidate, "mode", "scalp")),
+        candidate_score=float(getattr(candidate, "score", 0) or 0),
+        snapshots=snap_map,
+    )
+    meta.update(mn_meta)
+    if not mn_ok:
+        return False, mn_reason, meta
+
     if candidate.score < settings.pretrade_min_rank_score:
         return False, f"pretrade_rank_below_{settings.pretrade_min_rank_score}", meta
 

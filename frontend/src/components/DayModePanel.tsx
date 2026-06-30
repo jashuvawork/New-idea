@@ -141,6 +141,13 @@ export function DayModePanel({
         <Flag label="Last-5 pause" active={Boolean(g.lastNTradesPaused)} tone="bad" />
         <Flag label="Whipsaw pause" active={Boolean(g.whipsawGuards?.whipsawPaused)} tone="bad" />
         <Flag label="Bear/side" active={Boolean(g.whipsawGuards?.bearishSideways)} tone="warn" />
+        {g.moneynessPolicy ? (
+          <Flag
+            label={`Moneyness ${g.moneynessPolicy.autoScalpPrefer ?? g.moneynessPolicy.mode ?? 'AUTO'}`}
+            active
+            tone="neutral"
+          />
+        ) : null}
         <Flag label="Guards on" active={chopEnabled !== false && g.guardsEnabled !== false} tone="neutral" />
       </div>
 

@@ -176,6 +176,18 @@ class Settings(BaseSettings):
     high_confidence_reentry_cooldown_seconds: int = 600
     high_confidence_reentry_score_uplift: float = 5.0
 
+    # ITM / ATM / OTM strike selection (AUTO = regime-based)
+    moneyness_selection_enabled: bool = True
+    trade_moneyness_mode: str = "AUTO"  # AUTO | ITM | OTM | ATM
+    moneyness_atm_tolerance_points: float = 50.0
+    moneyness_max_otm_steps: int = 2
+    moneyness_max_itm_steps: int = 2
+    moneyness_explosion_prefer: str = "OTM"
+    moneyness_scalp_chop_prefer: str = "ITM"
+    moneyness_high_conf_prefer: str = "ITM"
+    moneyness_rank_bonus: float = 12.0
+    moneyness_mismatch_penalty: float = 15.0
+
     # Chart alignment — CE/PE must match index candle direction
     chart_alignment_enabled: bool = True
     chart_min_trend_strength: float = 25.0

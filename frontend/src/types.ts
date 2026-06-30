@@ -295,6 +295,14 @@ export interface WhipsawGuardsSummary {
   oppositeSideCooldownSeconds?: number;
 }
 
+export interface MoneynessPolicy {
+  mode?: string;
+  scalpPrefer?: string;
+  explosionPrefer?: string;
+  highConfPrefer?: string;
+  autoScalpPrefer?: string;
+}
+
 export interface LastNTradesSummary {
   count?: number;
   lookback?: number;
