@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, PerformanceMilestone, StreamMetrics, TradeHistoryResponse, TradeLogResponse } from '../types';
+import { snapshotSignature } from './snapshotSignature';
 
 // Production: always use same-origin /api (Vercel rewrites → EC2 backend)
 // Dev: vite proxy handles /api → localhost:8000
 const API_BASE = import.meta.env.DEV
   ? ''
   : (import.meta.env.VITE_API_URL || '');
-const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
+const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 2000);
+const UI_TICK_MS = Math.max(POLL_MS, 2000);
+const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 1000), 1000);
 const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
@@ -14,6 +17,11 @@ function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   if (ms < 80) return 'excellent';
   if (ms < 250) return 'good';
   return 'slow';
+}
+
+/** Round-trip display — dampens jitter from ±few ms network variance */
+function stableLatencyMs(ms: number): number {
+  return Math.round(ms / 25) * 25;
 }
 
 const EMPTY_METRICS: StreamMetrics = {
@@ -41,6 +49,7 @@ function applySnapshot(
   started: number,
   latencyHistory: React.MutableRefObject<number[]>,
   lastSuccessAt: React.MutableRefObject<Date | null>,
+  lastSignature: React.MutableRefObject<string>,
   streamMode: StreamMetrics['streamMode'],
   pollIntervalMs: number,
   setData: (d: MultiSnapshot) => void,
@@ -61,16 +70,40 @@ function applySnapshot(
     latencyHistory.current.reduce((a, b) => a + b, 0) / latencyHistory.current.length,
   );
 
-  setMetrics({
-    lastLatencyMs: elapsed,
-    avgLatencyMs: avg,
-    lastUpdatedAt: now,
-    stalenessMs: dataAgeMs,
-    pollIntervalMs,
-    connectionQuality: latencyQuality(elapsed),
-    streamMode,
+  const sig = snapshotSignature(json);
+  const dataChanged = sig !== lastSignature.current;
+  if (dataChanged) {
+    lastSignature.current = sig;
+    setData(json);
+  }
+
+  const latency = stableLatencyMs(elapsed);
+  const avgStable = stableLatencyMs(avg);
+  setMetrics((prev) => {
+    const quality = latencyQuality(elapsed);
+    const staleBucket = Math.floor(dataAgeMs / 5000);
+    const prevBucket = Math.floor(prev.stalenessMs / 5000);
+    if (
+      !dataChanged
+      && prev.lastLatencyMs === latency
+      && prev.avgLatencyMs === avgStable
+      && prev.connectionQuality === quality
+      && prev.streamMode === streamMode
+      && staleBucket === prevBucket
+      && prev.pollIntervalMs === pollIntervalMs
+    ) {
+      return prev;
+    }
+    return {
+      lastLatencyMs: latency,
+      avgLatencyMs: avgStable,
+      lastUpdatedAt: dataChanged ? now : prev.lastUpdatedAt,
+      stalenessMs: dataAgeMs,
+      pollIntervalMs,
+      connectionQuality: quality,
+      streamMode,
+    };
   });
-  setData(json);
   setError(null);
 }
 
@@ -81,7 +114,9 @@ export function useMarketStream() {
   const [metrics, setMetrics] = useState<StreamMetrics>(EMPTY_METRICS);
   const latencyHistory = useRef<number[]>([]);
   const lastSuccessAt = useRef<Date | null>(null);
+  const lastSignature = useRef('');
   const sseFailed = useRef(false);
+  const lastSseApplyAt = useRef(0);
 
   const fetchSnapshot = useCallback(async () => {
     const started = performance.now();
@@ -96,6 +131,7 @@ export function useMarketStream() {
         started,
         latencyHistory,
         lastSuccessAt,
+        lastSignature,
         'poll',
         POLL_MS,
         setData,
@@ -125,17 +161,22 @@ export function useMarketStream() {
     const id = setInterval(() => {
       if (!lastSuccessAt.current) return;
       const stale = Date.now() - lastSuccessAt.current.getTime();
+      const staleBucket = Math.floor(stale / 5000);
       setMetrics((prev) => {
-        const next = { ...prev, stalenessMs: stale };
-        if (prev.streamMode === 'sse' && stale > 8000) {
-          next.connectionQuality = stale > 15_000 ? 'offline' : 'slow';
+        const prevBucket = Math.floor(prev.stalenessMs / 5000);
+        const quality =
+          prev.streamMode === 'sse' && stale > 8000
+            ? (stale > 15_000 ? 'offline' : 'slow')
+            : prev.connectionQuality;
+        if (prevBucket === staleBucket && quality === prev.connectionQuality) {
+          return prev;
         }
-        return next;
+        return { ...prev, stalenessMs: stale, connectionQuality: quality };
       });
       if (SSE_ENABLED && !sseFailed.current && stale > 8000) {
         void fetchSnapshot();
       }
-    }, 500);
+    }, UI_TICK_MS);
     return () => clearInterval(id);
   }, [fetchSnapshot]);
 
@@ -154,10 +195,19 @@ export function useMarketStream() {
     es.onopen = () => {
       opened = true;
       setLoading(false);
-      setMetrics((prev) => ({ ...prev, streamMode: 'sse', connectionQuality: 'good' }));
+      setMetrics((prev) => (
+        prev.streamMode === 'sse' && prev.connectionQuality === 'good'
+          ? prev
+          : { ...prev, streamMode: 'sse', connectionQuality: 'good' }
+      ));
     };
 
     es.onmessage = (ev) => {
+      const now = performance.now();
+      if (now - lastSseApplyAt.current < SSE_MIN_INTERVAL_MS) {
+        return;
+      }
+      lastSseApplyAt.current = now;
       const started = performance.now();
       try {
         const json = JSON.parse(ev.data) as MultiSnapshot;
@@ -166,6 +216,7 @@ export function useMarketStream() {
           started,
           latencyHistory,
           lastSuccessAt,
+          lastSignature,
           'sse',
           POLL_MS,
           setData,
@@ -187,7 +238,6 @@ export function useMarketStream() {
         pollId = setInterval(fetchSnapshot, POLL_MS);
         return;
       }
-      // SSE dropped after open — fall back to HTTP poll so UI stays fresh
       sseFailed.current = true;
       setMetrics((prev) => ({
         ...prev,

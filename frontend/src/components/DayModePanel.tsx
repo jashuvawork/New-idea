@@ -163,7 +163,7 @@ export function DayModePanel({
         <div className="mb-3">
           <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${
+              className={`h-full rounded-full ${
                 capPct >= 100 ? 'bg-nexus-red' : capPct >= 75 ? 'bg-nexus-yellow' : 'bg-nexus-accent'
               }`}
               style={{ width: `${capPct}%` }}

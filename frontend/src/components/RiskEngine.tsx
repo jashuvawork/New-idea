@@ -53,7 +53,7 @@ export function RiskEngine({ auto }: { auto: AutoTraderState }) {
         </div>
         <div className="h-1.5 bg-gray-800 rounded overflow-hidden mb-2">
           <div
-            className={`h-full transition-all ${minProgress >= 100 ? 'bg-nexus-green' : 'bg-nexus-accent'}`}
+            className={`h-full ${minProgress >= 100 ? 'bg-nexus-green' : 'bg-nexus-accent'}`}
             style={{ width: `${Math.min(100, minProgress)}%` }}
           />
         </div>
