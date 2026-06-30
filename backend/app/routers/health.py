@@ -100,6 +100,8 @@ async def deployment_status():
             "enhancedMode": True,
             "shadowTradeAllSignals": settings.shadow_trade_all_signals,
             "backgroundMonitor": settings.background_market_monitor_enabled,
+            "composerMonitor": settings.composer_monitor_enabled,
+            "composerApiConfigured": bool(settings.cursor_api_key),
             "paperSlippageEnabled": settings.paper_slippage_enabled,
             "paperLiveParityEnabled": settings.paper_live_parity_enabled,
         },

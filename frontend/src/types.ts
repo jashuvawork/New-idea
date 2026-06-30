@@ -327,6 +327,31 @@ export interface MoneynessPolicy {
   autoScalpPrefer?: string;
 }
 
+export interface ComposerBrief {
+  at?: string;
+  source?: string;
+  marketRead?: string;
+  tradeBias?: string;
+  confidence?: string;
+  sessionPlan?: string;
+  risks?: string[];
+  actions?: string[];
+  standDown?: boolean;
+  raw?: string;
+  error?: string | null;
+}
+
+export interface ComposerMonitorStatus {
+  enabled?: boolean;
+  useAi?: boolean;
+  model?: string;
+  apiConfigured?: boolean;
+  intervalSeconds?: number;
+  historyCount?: number;
+  apiPing?: { ok?: boolean; reason?: string };
+  latest?: ComposerBrief | null;
+}
+
 export interface LastNTradesSummary {
   count?: number;
   lookback?: number;

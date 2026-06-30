@@ -24,6 +24,7 @@ import { GreeksIV } from './components/GreeksIV';
 import { StrategyRouter } from './components/StrategyRouter';
 import { AutoTradingPanel } from './components/AutoTradingPanel';
 import { DayModePanel } from './components/DayModePanel';
+import { ComposerMonitorPanel } from './components/ComposerMonitorPanel';
 import { RiskEngine } from './components/RiskEngine';
 import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
@@ -260,6 +261,9 @@ export default function App() {
             </DashboardSection>
 
             <DashboardSection title="Signals & Trades" subtitle="Day mode, router, auto-trader, heatmap, swing lane">
+              <div className="col-span-12 lg:col-span-3">
+                <ComposerMonitorPanel />
+              </div>
               <div className="col-span-12 lg:col-span-3">
                 <DayModePanel
                   auto={auto}

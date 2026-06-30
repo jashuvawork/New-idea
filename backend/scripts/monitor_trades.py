@@ -84,7 +84,7 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=15)
     parser.add_argument("--watch", action="store_true", help="Poll every N seconds")
     parser.add_argument("--interval", type=int, default=45)
-    parser.add_argument("--rounds", type=int, default=6)
+    parser.add_argument("--composer", action="store_true", help="Show Composer 2.5 market brief each round")
     args = parser.parse_args()
 
     seen_ids: set[str] = set()
@@ -131,6 +131,20 @@ def main() -> None:
                         print(f"  skip: {s}")
             except Exception as exc:
                 print(f"status fetch failed: {exc}", file=sys.stderr)
+
+        if args.composer:
+            try:
+                base = args.url.split("/api/")[0]
+                brief = fetch_json(f"{base}/api/ai/composer/brief")
+                print(
+                    f"\nComposer: {brief.get('source')} | bias={brief.get('tradeBias')} | "
+                    f"conf={brief.get('confidence')} | standDown={brief.get('standDown')}"
+                )
+                print(f"  Read: {brief.get('marketRead', '')[:200]}")
+                if brief.get("actions"):
+                    print(f"  Actions: {'; '.join(brief['actions'][:3])}")
+            except Exception as exc:
+                print(f"composer brief unavailable: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":
