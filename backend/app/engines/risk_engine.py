@@ -73,7 +73,7 @@ class RiskEngine:
         per_trade_cap = cap.perTradeCapitalInr or (cap.availableMarginInr * settings.per_trade_capital_pct)
 
         if new_exposure > per_trade_cap * 1.02:
-            return False, "per_trade_50pct_cap_exceeded"
+            return False, "per_trade_capital_exceeded"
 
         exposure = sum(
             (t.currentPremium or t.entryPremium) * t.lots * lot_multiplier

@@ -570,39 +570,40 @@ def compute_lots(
     tier: Optional[str] = None,
 ) -> int:
     """
-    Lots from 85% of sizing capital: floor(budget / (premium × lot_multiplier)).
-    No fixed 100-lot cap — max is whatever 85% margin affords.
+    Max lots on 85% of sizing capital: floor(budget / (premium × lot_multiplier)).
+    Optional hard caps apply only when max_lots_per_trade / strategy caps are > 0.
     """
-    cap = get_capital_snapshot()
     settings = get_settings()
-    mult = lot_multiplier(symbol)
 
     if premium <= 0:
         return 1
 
-    trade_budget = cap.perTradeCapitalInr
-    if trade_budget <= 0:
-        trade_budget = _effective_capital_inr(cap.availableMarginInr) * settings.per_trade_capital_pct
-
-    margin_per_lot = premium * mult
-    if margin_per_lot <= 0:
-        return 1
-
-    lots = int(trade_budget / margin_per_lot)
-
     if settings.aggressive_lot_sizing:
-        lots = clamp_lots(max(1, lots), symbol, premium)
+        lots = max_lots_for_capital(symbol, premium)
     else:
+        cap = get_capital_snapshot()
+        mult = lot_multiplier(symbol)
+        trade_budget = cap.perTradeCapitalInr
+        if trade_budget <= 0:
+            trade_budget = _effective_capital_inr(cap.availableMarginInr) * settings.per_trade_capital_pct
+        margin_per_lot = premium * mult
+        if margin_per_lot <= 0:
+            return 1
+        lots = int(trade_budget / margin_per_lot)
         risk_per_lot = stop_points * mult
         lots_by_risk = int(cap.perTradeRiskInr / risk_per_lot) if risk_per_lot > 0 else lots
         lots = min(lots, lots_by_risk, max_lots_for_capital(symbol, premium))
         lots = clamp_lots(max(settings.simple_min_lots, lots), symbol, premium)
 
+    if settings.max_lots_per_trade > 0:
+        lots = min(lots, settings.max_lots_per_trade)
     if strategy_type == StrategyType.SCALP and settings.scalp_max_lots > 0:
         lots = min(lots, settings.scalp_max_lots)
     elif strategy_type == StrategyType.EXPLOSIVE and settings.explosion_max_lots > 0:
         lots = min(lots, settings.explosion_max_lots)
-    return lots
+
+    min_l = max(1, settings.min_lots_per_trade or settings.simple_min_lots or 1)
+    return max(min_l, lots)
 
 
 def tune_exit_plan_for_position(

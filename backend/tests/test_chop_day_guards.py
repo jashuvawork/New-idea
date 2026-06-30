@@ -97,11 +97,10 @@ def test_tiered_lot_cap(mock_settings):
     s.momentum_bypass_explosion_score = 48.0
     mock_settings.return_value = s
     with patch("app.engines.session_timing.in_midday_chop_window", return_value=False):
-        assert apply_tiered_lot_cap(100, 58.0, True, "SENSEX") == 40
-        assert apply_tiered_lot_cap(100, 52.0, True, "SENSEX") == 20
+        assert apply_tiered_lot_cap(100, 58.0, True, "SENSEX") == 100
+        assert apply_tiered_lot_cap(100, 52.0, True, "SENSEX") == 100
         assert apply_tiered_lot_cap(100, 45.0, True, "SENSEX") == 0
-        # velocity surge → full 40 lots even at mid rank
-        assert apply_tiered_lot_cap(100, 52.0, True, "SENSEX", velocity_pct=3.0) == 40
+        assert apply_tiered_lot_cap(100, 52.0, True, "SENSEX", velocity_pct=3.0) == 100
 
 
 @patch("app.engines.chop_day_guards.get_settings")
