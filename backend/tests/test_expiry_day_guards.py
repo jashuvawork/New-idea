@@ -16,6 +16,7 @@ from app.engines.expiry_day_guards import (
 from app.models.schemas import (
     AutoTraderState,
     Breadth,
+    MarketPhase,
     PaperTrade,
     Regime,
     Side,
@@ -29,6 +30,8 @@ IST = ZoneInfo("Asia/Kolkata")
 def _snap(symbol: str = "NIFTY", expiry: str = "2026-06-30") -> SymbolSnapshot:
     return SymbolSnapshot(
         symbol=symbol,
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
         dataAvailable=True,
         optionExpiry=expiry,
         spot=24000.0,
