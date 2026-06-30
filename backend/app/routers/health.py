@@ -78,6 +78,8 @@ async def deployment_status():
             "scalpTargetPoints": settings.scalp_target_points,
             "bullishHoldEnabled": settings.bullish_hold_enabled,
             "chopDayGuardsEnabled": settings.chop_day_guards_enabled,
+            "fetchConstituentsInSnapshot": settings.fetch_constituents_in_snapshot,
+            "indexMomentumEnabled": settings.index_momentum_enabled,
             "dailyLossStopInr": settings.daily_loss_stop_inr,
             "dailyMaxTradesChop": settings.daily_max_trades_chop,
             "primaryWindowStartIst": f"{settings.primary_window_start_hour:02d}:{settings.primary_window_start_minute:02d}",
