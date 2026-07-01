@@ -22,7 +22,7 @@ from app.models.schemas import MultiSnapshot, StrategyType
 from app.services.finnhub import aggregate_sentiment
 from app.services.finnhub import fetch_market_news
 from app.services.redis_store import has_upstox_token
-from app.services.upstox import UpstoxClient
+from app.services.upstox import UpstoxClient, UpstoxError, rate_limit_active, rate_limit_cooldown_remaining
 from app.services.upstox_ws import is_ws_active
 
 logger = logging.getLogger(__name__)
@@ -134,6 +134,20 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
     return snapshot
 
 
+async def _serve_stale_during_cooldown(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
+    """Serve last good snapshot while Upstox REST is in 429 cooldown — no API hammering."""
+    global _cache
+    if not _cache or not _cache.dataReady:
+        return None
+    secs = int(rate_limit_cooldown_remaining())
+    stale = _cache.model_copy(deep=True)
+    stale.timestamp = datetime.now(IST)
+    stale.waitingReason = f"Upstox cooling down — retry in {secs}s · showing last good data"
+    if broadcast:
+        await broadcast_snapshot(stale)
+    return stale
+
+
 async def _build_multi_snapshot() -> MultiSnapshot:
     global _capital_refresh_at
     settings = get_settings()
@@ -147,6 +161,10 @@ async def _build_multi_snapshot() -> MultiSnapshot:
             snapshots={},
             autoTrader=get_state(),
         )
+
+    if rate_limit_active():
+        secs = int(rate_limit_cooldown_remaining())
+        raise UpstoxError(f"Upstox cooling down — retry in {secs}s")
 
     news = await _fetch_news_cached()
     news_sentiment = "NEUTRAL"
@@ -260,6 +278,19 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
     cache_ttl = _effective_cache_seconds()
     now = datetime.now(IST)
 
+    if rate_limit_active():
+        stale = await _serve_stale_during_cooldown(broadcast=broadcast)
+        if stale:
+            return stale
+        secs = int(rate_limit_cooldown_remaining())
+        return MultiSnapshot(
+            timestamp=now,
+            dataReady=False,
+            waitingReason=f"Upstox cooling down — retry in {secs}s",
+            snapshots={},
+            autoTrader=get_state(),
+        )
+
     if not force and _cache and _cache_time:
         age = (now - _cache_time).total_seconds()
         if age < cache_ttl:
@@ -267,6 +298,19 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
 
     t0 = time.perf_counter()
     async with _build_lock:
+        if rate_limit_active():
+            stale = await _serve_stale_during_cooldown(broadcast=broadcast)
+            if stale:
+                return stale
+            secs = int(rate_limit_cooldown_remaining())
+            return MultiSnapshot(
+                timestamp=now,
+                dataReady=False,
+                waitingReason=f"Upstox cooling down — retry in {secs}s",
+                snapshots={},
+                autoTrader=get_state(),
+            )
+
         if not force and _cache and _cache_time:
             age = (datetime.now(IST) - _cache_time).total_seconds()
             if age < cache_ttl:
@@ -274,6 +318,15 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
         try:
             snapshot = await _build_multi_snapshot()
         except Exception as e:
+            err = str(e)
+            if _cache and _cache.dataReady and ("cooling down" in err.lower() or "rate limit" in err.lower()):
+                logger.warning("Serving stale snapshot during Upstox cooldown: %s", e)
+                stale = _cache.model_copy(deep=True)
+                stale.timestamp = datetime.now(IST)
+                stale.waitingReason = f"{err} · showing last good data"
+                if broadcast:
+                    await broadcast_snapshot(stale)
+                return stale
             if _cache:
                 logger.warning("Serving stale snapshot after build error: %s", e)
                 stale = _cache.model_copy(deep=True)
