@@ -15,9 +15,11 @@ def test_blocks_put_on_bullish_breadth():
     assert "bullish" in reason
 
 
-def test_allows_elite_counter_breadth():
-    blocked, _ = breadth_blocks_explosion_side(Side.PUT, "BULLISH", "ELITE")
-    assert not blocked
+def test_blocks_elite_counter_breadth():
+    """ELITE no longer bypasses breadth — directional lock requires CE-only on bullish."""
+    blocked, reason = breadth_blocks_explosion_side(Side.PUT, "BULLISH", "ELITE")
+    assert blocked
+    assert "bullish" in reason
 
 
 def test_exhaustion_blocks_late_chase():
