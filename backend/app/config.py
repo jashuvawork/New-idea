@@ -325,6 +325,17 @@ class Settings(BaseSettings):
     enhanced_tqs_entry: int = 50
     runner_alignment_override_score: int = 82
     rapid_scalp_mode_enabled: bool = False
+    quick_sideways_enabled: bool = True
+    quick_sideways_min_rank_score: float = 58.0
+    quick_sideways_min_velocity_pct: float = 0.5
+    quick_sideways_min_tqs: int = 35
+    quick_sideways_target_points: float = 3.0
+    quick_sideways_stop_points: float = 2.0
+    quick_sideways_micro_target_points: float = 2.0
+    quick_sideways_micro_giveback_points: float = 1.5
+    quick_sideways_max_hold_seconds: int = 120
+    quick_sideways_no_progress_seconds: int = 75
+    quick_sideways_min_seconds_between_entries: int = 120
     sure_shot_mode_enabled: bool = False
     sure_shot_min_symbol_tqs: int = 40
     sure_shot_min_rank_score: float = 48.0

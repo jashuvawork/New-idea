@@ -63,7 +63,7 @@ from app.models.schemas import (
     SymbolSnapshot,
     TradeMastermind,
 )
-from app.engines.snapshot_fast import resolve_trade_premium
+from app.engines.quick_sideways import evaluate_quick_sideways_exit, get_quick_sideways_profile
 from app.engines.session_timing import entries_allowed_now, entry_window_label
 from app.services import trade_store
 from app.services.order_executor import place_entry_order, place_exit_order
@@ -255,6 +255,8 @@ async def _open_from_candidate(
     symbol = candidate.symbol
     snap = candidate.snap
     profile = snap.optimizedProfile or get_session_targets()
+    if candidate.mode == "quick_sideways":
+        profile = get_quick_sideways_profile()
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
 
     signal_premium = candidate.premium
@@ -649,6 +651,8 @@ async def _process_open_trades(
                 )
             else:
                 exit_reason, pnl = evaluate_explosion_exit(trade, eval_premium, tier, lot_mult)
+        elif (trade.entryContext or {}).get("selectionMode") == "quick_sideways":
+            exit_reason, pnl = evaluate_quick_sideways_exit(trade, eval_premium, lot_mult)
         elif use_adaptive:
             exit_reason, pnl = evaluate_adaptive_scalp_exit(
                 trade, eval_premium, AdaptiveExitPlan.from_dict(plan_dict), profile, lot_mult,

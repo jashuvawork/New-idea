@@ -90,6 +90,8 @@ async def deployment_status():
             "primaryWindowStartIst": f"{settings.primary_window_start_hour:02d}:{settings.primary_window_start_minute:02d}",
             "sureShotModeEnabled": settings.sure_shot_mode_enabled,
             "rapidScalpModeEnabled": settings.rapid_scalp_mode_enabled,
+            "quickSidewaysEnabled": settings.quick_sideways_enabled,
+            "quickSidewaysMinRankScore": settings.quick_sideways_min_rank_score,
             "sureShotMinSymbolTqs": settings.sure_shot_min_symbol_tqs,
             "sureShotMinRankScore": settings.sure_shot_min_rank_score,
             "sureShotScalpMinScore": settings.sure_shot_scalp_min_score,

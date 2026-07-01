@@ -212,7 +212,12 @@ def seconds_since_last_exit(state: AutoTraderState) -> float:
         return 999_999.0
 
 
-def check_min_entry_interval(state: AutoTraderState, *, chop: bool = False) -> tuple[bool, str]:
+def check_min_entry_interval(
+    state: AutoTraderState,
+    *,
+    chop: bool = False,
+    quick_sideways: bool = False,
+) -> tuple[bool, str]:
     settings = get_settings()
     last = state.lastExit
     if not last or not last.get("at"):
@@ -222,7 +227,11 @@ def check_min_entry_interval(state: AutoTraderState, *, chop: bool = False) -> t
     except Exception:
         return True, "ok"
 
-    gap = settings.min_seconds_between_entries
+    gap = (
+        settings.quick_sideways_min_seconds_between_entries
+        if quick_sideways
+        else settings.min_seconds_between_entries
+    )
     if chop:
         gap = max(gap, settings.chop_session_entry_interval_seconds)
     gap = max(gap, settings.post_exit_min_seconds)
@@ -365,6 +374,9 @@ def check_last_n_candidate_gate(
     ):
         return False, "last_n_explosion_only", meta
 
+    if settings.best_trades_only_enabled and getattr(candidate, "mode", "") == "quick_sideways":
+        return True, "ok", meta
+
     if settings.best_trades_only_enabled and score < settings.best_trades_min_rank_score:
         return False, f"best_trades_rank_below_{settings.best_trades_min_rank_score:.0f}", meta
 
@@ -393,7 +405,11 @@ def validate_candidate(
     snap_map = snapshots or {candidate.symbol.upper(): candidate.snap}
     chop = is_chop_session(snap_map)
 
-    ok, reason = check_min_entry_interval(state, chop=chop)
+    ok, reason = check_min_entry_interval(
+        state,
+        chop=chop,
+        quick_sideways=getattr(candidate, "mode", "") == "quick_sideways",
+    )
     if not ok:
         return False, reason, meta
 
@@ -457,6 +473,8 @@ def validate_candidate(
 
     expiry_floor = expiry_min_rank_score(state, snap_map)
     min_rank = max(settings.pretrade_min_rank_score, expiry_floor)
+    if getattr(candidate, "mode", "") == "quick_sideways":
+        min_rank = min(min_rank, settings.quick_sideways_min_rank_score)
     if candidate.score < min_rank:
         return False, f"pretrade_rank_below_{min_rank:.0f}", meta
 

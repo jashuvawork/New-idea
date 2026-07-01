@@ -36,7 +36,12 @@ from app.engines.symbol_cooldown import (
     side_aligned_with_breadth,
     symbol_in_cooldown,
 )
-from app.engines.swing_profit import check_swing_entry
+from app.engines.quick_sideways import (
+    check_quick_sideways_entry,
+    is_sideways_session,
+    quick_sideways_enabled,
+    scan_quick_sideways_setups,
+)
 from app.engines.swing_engine import SwingSetup
 from app.models.schemas import (
     AutoTraderState,
@@ -283,6 +288,38 @@ def _scalp_candidates(
     return out
 
 
+def _quick_sideways_candidates(
+    symbol: str,
+    snap: SymbolSnapshot,
+    state: AutoTraderState,
+    settings,
+) -> list[EntryCandidate]:
+    if not quick_sideways_enabled():
+        return []
+    out: list[EntryCandidate] = []
+    for setup in scan_quick_sideways_setups(symbol, snap):
+        side = setup["side"]
+        strike = float(setup["strike"])
+        premium = float(setup["premium"])
+        blocked, reason = _reentry_blocked(symbol, side, strike, snap)
+        if blocked:
+            continue
+        out.append(EntryCandidate(
+            symbol=symbol,
+            snap=snap,
+            mode="quick_sideways",
+            score=float(setup["score"]),
+            side=side,
+            strike=strike,
+            premium=premium,
+            strategy_type=StrategyType.SCALP,
+            confidence=float(setup["score"]),
+            tqs=snap.tradeQualityScore,
+            pretrade_meta={"quickSideways": True, "velocityPct": setup.get("velocityPct")},
+        ))
+    return out
+
+
 def _swing_candidates(
     symbol: str,
     snap: SymbolSnapshot,
@@ -363,6 +400,8 @@ def find_best_entry(
             candidates.extend(_explosion_candidates(symbol, snap, state, settings))
         if settings.paper_simple_profit_mode and scalp_open < settings.aggressive_max_open_scalps:
             candidates.extend(_scalp_candidates(symbol, snap, state, settings))
+        if quick_sideways_enabled() and scalp_open < settings.aggressive_max_open_scalps:
+            candidates.extend(_quick_sideways_candidates(symbol, snap, state, settings))
         if swing_open < settings.swing_max_open:
             candidates.extend(_swing_candidates(symbol, snap, state, settings))
 
@@ -400,14 +439,16 @@ def find_best_entry(
             candidates = explosion_only
 
     def sort_key(c: EntryCandidate) -> float:
-        bonus = 20 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
+        bonus = 20 if c.mode == "explosion" else (8 if c.mode == "quick_sideways" else (5 if c.mode == "swing" else 0))
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty
 
     best = max(candidates, key=sort_key)
     floor = min_rank_for_entry(chop, snapshots)
     floor = max(floor, last_n_elevated_min_rank(state))
-    if settings.best_trades_only_enabled:
+    if best.mode == "quick_sideways":
+        floor = settings.quick_sideways_min_rank_score
+    elif settings.best_trades_only_enabled:
         floor = max(floor, settings.best_trades_min_rank_score)
     if floor > 0 and sort_key(best) < floor:
         return None
