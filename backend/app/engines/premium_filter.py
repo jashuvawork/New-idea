@@ -3,12 +3,15 @@
 from app.config import get_settings
 
 
-def premium_in_band(premium: float | None) -> bool:
-    """True when option LTP is within configured tradeable band (default ₹25–175)."""
+def premium_in_band(premium: float | None, *, mode: str = "default") -> bool:
+    """True when option LTP is within configured tradeable band."""
     if premium is None or premium <= 0:
         return False
     settings = get_settings()
-    return settings.min_option_premium_inr <= premium <= settings.max_option_premium_inr
+    max_prem = settings.max_option_premium_inr
+    if mode == "explosion" and settings.explosion_max_premium_inr > 0:
+        max_prem = max(max_prem, settings.explosion_max_premium_inr)
+    return settings.min_option_premium_inr <= premium <= max_prem
 
 
 def premium_band_label() -> str:

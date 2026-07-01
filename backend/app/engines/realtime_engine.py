@@ -197,7 +197,7 @@ def _scan_runners(
             prev = _premium_history[hist_key].get(strike if side == Side.CALL else -strike)
             score, vel = rank_runner(opt, side, prev)
             ltp = opt.get("ltp") or opt.get("last_price", 0)
-            if not premium_in_band(ltp):
+            if not premium_in_band(ltp, mode="explosion"):
                 continue
 
             entry = {

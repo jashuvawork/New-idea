@@ -122,11 +122,15 @@ class Settings(BaseSettings):
     explosion_trail_step_points: float = 3.5
     explosion_trail_tight_arm: float = 12.0
     explosion_trail_tight_points: float = 5.0
-    explosion_initial_stop_points: float = 4.0
+    explosion_initial_stop_points: float = 6.0
     explosion_stop_min_hold_seconds: int = 15
     explosion_no_progress_seconds: int = 90
-    explosion_reentry_cooldown_seconds: int = 120
-    explosion_emergency_cooldown_seconds: int = 300
+    explosion_reentry_cooldown_seconds: int = 90
+    explosion_emergency_cooldown_seconds: int = 180
+    explosion_breadth_alignment_enabled: bool = True
+    explosion_single_side_per_symbol: bool = True
+    explosion_dominant_side_min_score: float = 50.0
+    explosion_exhaustion_v15_pct: float = 18.0
 
     # Symbol / instrument cooldown — stop same-strike churn after losses
     symbol_loss_cooldown_seconds: int = 180
@@ -199,7 +203,7 @@ class Settings(BaseSettings):
     moneyness_atm_tolerance_points: float = 50.0
     moneyness_max_otm_steps: int = 2
     moneyness_max_itm_steps: int = 2
-    moneyness_explosion_prefer: str = "OTM"
+    moneyness_explosion_prefer: str = "ATM"
     moneyness_scalp_chop_prefer: str = "ITM"
     moneyness_high_conf_prefer: str = "ITM"
     moneyness_rank_bonus: float = 12.0
@@ -276,7 +280,7 @@ class Settings(BaseSettings):
     neutral_breadth_explosion_min_score: float = 55.0
     sensex_rank_bonus: float = 10.0
     nifty_rank_penalty_chop: float = 5.0
-    daily_loss_stop_inr: float = 30_000.0
+    daily_loss_stop_inr: float = 100_000.0
     daily_max_trades_chop: int = 20
     daily_max_trades_pre10_chop: int = 5
     pre10_chop_min_rank_score: float = 60.0
@@ -300,6 +304,7 @@ class Settings(BaseSettings):
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 25.0
     max_option_premium_inr: float = 175.0
+    explosion_max_premium_inr: float = 250.0
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0

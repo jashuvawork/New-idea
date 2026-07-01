@@ -98,7 +98,7 @@ def _explosion_candidates(
     for alert in snap.explosionAlerts or []:
         if not alert.get("tradeable"):
             continue
-        if not premium_in_band(alert.get("premium")):
+        if not premium_in_band(alert.get("premium"), mode="explosion"):
             continue
         if alert.get("tier") not in ("ELITE", "EXPLODING"):
             continue
@@ -145,6 +145,12 @@ def _explosion_candidates(
         if not passed:
             continue
 
+        from app.engines.rally_capture import cross_side_chase_blocked
+
+        blocked_x, _ = cross_side_chase_blocked(event, snap)
+        if blocked_x:
+            continue
+
         blocked, reason = _reentry_blocked(symbol, event.side, event.strike, snap)
         if blocked:
             continue
@@ -160,6 +166,10 @@ def _explosion_candidates(
             event.side, event.strike, snap, mode="explosion", candidate_score=rank,
             snapshots={symbol: snap},
         )
+        from app.engines.rally_capture import atm_proximity_rank_bonus, runner_strike_rank_bonus
+
+        rank += runner_strike_rank_bonus(event, snap)
+        rank += atm_proximity_rank_bonus(event, snap)
 
         out.append(EntryCandidate(
             symbol=symbol,
