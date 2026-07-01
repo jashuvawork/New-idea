@@ -27,23 +27,24 @@ set +a
 : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY required in deploy/aws.env}"
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-ap-south-1}"
 INSTANCE_ID="${EC2_INSTANCE_ID:-i-02b2962f02b61005f}"
+DEPLOY_BRANCH="${BRANCH:-main}"
 
-echo "==> Deploying to EC2 $INSTANCE_ID ($AWS_DEFAULT_REGION)"
+echo "==> Deploying to EC2 $INSTANCE_ID ($AWS_DEFAULT_REGION) branch=$DEPLOY_BRANCH"
 
 CMD_ID=$(aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
   --document-name "AWS-RunShellScript" \
-  --comment "aws-deploy.sh $(date -Iseconds)" \
+  --comment "aws-deploy.sh $(date -Iseconds) branch=$DEPLOY_BRANCH" \
   --parameters "commands=[
     \"set -euo pipefail\",
     \"export HOME=/root\",
     \"export GIT_CONFIG_GLOBAL=/root/.gitconfig\",
     \"git config --global --add safe.directory /opt/nexusquant/New-idea\",
     \"cd /opt/nexusquant/New-idea\",
-    \"git fetch origin main\",
-    \"git checkout main\",
-    \"git pull --ff-only origin main || git reset --hard origin/main\",
-    \"bash deploy/ec2-update.sh\"
+    \"git fetch origin $DEPLOY_BRANCH\",
+    \"git checkout $DEPLOY_BRANCH\",
+    \"git pull --ff-only origin $DEPLOY_BRANCH || git reset --hard origin/$DEPLOY_BRANCH\",
+    \"BRANCH=$DEPLOY_BRANCH bash deploy/ec2-update.sh\"
   ]" \
   --query Command.CommandId \
   --output text)
