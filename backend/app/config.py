@@ -132,11 +132,16 @@ class Settings(BaseSettings):
     explosion_dominant_side_min_score: float = 50.0
     explosion_exhaustion_v15_pct: float = 18.0
 
-    # Directional lock — BULLISH = CE only, BEARISH = PE only, no CE↔PE switch
+    # Directional lock — aligned side default; CE↔PE switch only on full confirmation
     directional_side_lock_enabled: bool = True
     directional_sticky_per_symbol: bool = True
     directional_lock_use_chart: bool = True
     directional_lock_block_chart_counter: bool = True
+    directional_switch_min_confirmations: int = 5
+    directional_switch_min_velocity_pct: float = 2.5
+    directional_switch_min_explosion_score: float = 55.0
+    directional_switch_min_runner_score: float = 60.0
+    directional_switch_min_trend_strength: float = 50.0
 
     # Symbol / instrument cooldown — stop same-strike churn after losses
     symbol_loss_cooldown_seconds: int = 180

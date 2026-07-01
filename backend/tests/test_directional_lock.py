@@ -1,4 +1,4 @@
-"""Directional side lock — BULLISH = CE only, no CE↔PE switch."""
+"""Directional lock — aligned default; CE↔PE switch only on full confirmation."""
 
 from datetime import datetime
 from unittest.mock import MagicMock, patch
@@ -11,8 +11,18 @@ from app.engines.directional_lock import (
     record_trade_side,
     reset_directional_lock,
     session_locked_side,
+    side_switch_confirmed,
 )
-from app.models.schemas import Breadth, MarketPhase, Side, SpotChart, SymbolSnapshot
+from app.models.schemas import (
+    Breadth,
+    ExplosiveRunner,
+    MarketPhase,
+    Orderflow,
+    RunnerSignal,
+    Side,
+    SpotChart,
+    SymbolSnapshot,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -23,6 +33,11 @@ def _settings():
     s.directional_sticky_per_symbol = True
     s.directional_lock_use_chart = True
     s.directional_lock_block_chart_counter = True
+    s.directional_switch_min_confirmations = 5
+    s.directional_switch_min_velocity_pct = 2.5
+    s.directional_switch_min_explosion_score = 55.0
+    s.directional_switch_min_runner_score = 60.0
+    s.directional_switch_min_trend_strength = 50.0
     return s
 
 
@@ -30,61 +45,97 @@ def _snap(
     symbol: str = "NIFTY",
     bias: str = "BULLISH",
     chart_dir: str = "NEUTRAL",
+    *,
+    chart: SpotChart | None = None,
+    velocity: float = 0.0,
+    explosion_side: str = "",
+    explosion_score: float = 0.0,
 ) -> SymbolSnapshot:
-    return SymbolSnapshot(
+    spot_chart = chart or SpotChart(direction=chart_dir)
+    snap = SymbolSnapshot(
         symbol=symbol,
         timestamp=datetime.now(IST),
         marketPhase=MarketPhase.LIVE_MARKET,
         dataAvailable=True,
-        breadth=Breadth(bias=bias),
-        spotChart=SpotChart(direction=chart_dir),
+        breadth=Breadth(bias=bias, aligned=bias in ("BULLISH", "BEARISH")),
+        spotChart=spot_chart,
+        orderflow=Orderflow(tickMomentum=1.0 if bias == "BULLISH" else -1.0),
     )
+    if velocity > 0 and explosion_side:
+        snap.topExplosion = {
+            "side": explosion_side,
+            "velocity3s": velocity,
+            "explosionScore": explosion_score,
+        }
+        snap.explosiveRunner = ExplosiveRunner(
+            candidate=True,
+            score=explosion_score,
+            side=Side.CALL if explosion_side == "CALL" else Side.PUT,
+            strike=24000,
+            premium=100,
+            signal=RunnerSignal(premiumVelocityPct=velocity, score=explosion_score),
+        )
+        snap.explosiveRunnerWatchlist = [
+            {"side": explosion_side, "premiumVelocityPct": velocity, "score": explosion_score},
+        ]
+    return snap
 
 
 @patch("app.engines.directional_lock.get_settings", _settings)
-def test_bullish_blocks_put():
+def test_aligned_call_on_bullish_passes():
+    blocked, reason = check_directional_side_lock("NIFTY", Side.CALL, _snap(bias="BULLISH"))
+    assert not blocked
+    assert reason == "ok"
+
+
+@patch("app.engines.directional_lock.get_settings", _settings)
+def test_unconfirmed_put_on_bullish_blocked():
     blocked, reason = check_directional_side_lock("NIFTY", Side.PUT, _snap(bias="BULLISH"))
     assert blocked
-    assert reason == "directional_lock_bullish_ce_only"
+    assert "needs_confirmation" in reason or "switch" in reason
 
 
 @patch("app.engines.directional_lock.get_settings", _settings)
-def test_bearish_blocks_call():
-    blocked, reason = check_directional_side_lock("NIFTY", Side.CALL, _snap(bias="BEARISH"))
-    assert blocked
-    assert reason == "directional_lock_bearish_pe_only"
-
-
-@patch("app.engines.directional_lock.get_settings", _settings)
-def test_chart_counter_blocks_put_on_bullish_chart():
-    blocked, reason = check_directional_side_lock(
-        "NIFTY", Side.PUT, _snap(bias="NEUTRAL", chart_dir="BULLISH"),
-    )
-    assert blocked
-    assert reason in (
-        "directional_lock_chart_bullish_ce_only",
-        "directional_lock_bullish_ce_only",
-    )
-
-
-@patch("app.engines.directional_lock.get_settings", _settings)
-def test_sticky_lock_blocks_ce_pe_switch():
+def test_confirmed_bearish_flip_allows_put_switch():
     reset_directional_lock()
-    snap = _snap(bias="NEUTRAL", chart_dir="NEUTRAL")
-    record_trade_side("NIFTY", Side.CALL, snap)
-    assert session_locked_side("NIFTY") == "CALL"
+    record_trade_side("NIFTY", Side.CALL, _snap(bias="BULLISH"))
+
+    bearish_chart = SpotChart(
+        direction="BEARISH",
+        emaBias="BEARISH",
+        candleBias="BEARISH",
+        momentum5Pct=-0.08,
+        momentum15Pct=-0.1,
+        trendStrength=65,
+        belowPoc=True,
+    )
+    snap = _snap(
+        bias="BEARISH",
+        chart=bearish_chart,
+        velocity=3.5,
+        explosion_side="PUT",
+        explosion_score=72,
+    )
+    snap.orderflow = Orderflow(tickMomentum=-2.0, deltaVelocity=-1.0)
+    snap.breadth = Breadth(bias="BEARISH", aligned=True)
+
+    confirmed, _, meta = side_switch_confirmed(Side.PUT, snap)
+    assert confirmed
+    assert len(meta["signals"]) >= 5
 
     blocked, reason = check_directional_side_lock("NIFTY", Side.PUT, snap)
-    assert blocked
-    assert "directional_lock_no_ce_pe_switch_CALL_locked" in reason
+    assert not blocked
 
 
 @patch("app.engines.directional_lock.get_settings", _settings)
-def test_bullish_trade_locks_call_even_if_first_side_was_put_attempt_blocked():
+def test_weak_switch_blocked_while_breadth_still_bullish():
     reset_directional_lock()
-    snap = _snap(bias="BULLISH")
-    record_trade_side("NIFTY", Side.CALL, snap)
-    assert session_locked_side("NIFTY") == "CALL"
+    record_trade_side("NIFTY", Side.CALL, _snap(bias="BULLISH"))
+
+    snap = _snap(bias="BULLISH", chart_dir="NEUTRAL", velocity=1.0, explosion_side="PUT", explosion_score=40)
+    blocked, reason = check_directional_side_lock("NIFTY", Side.PUT, snap)
+    assert blocked
+    assert "switch" in reason or "needs_confirmation" in reason
 
 
 @patch("app.engines.directional_lock.get_settings", _settings)
@@ -94,9 +145,10 @@ def test_market_direction_prefers_breadth():
 
 @patch("app.engines.directional_lock.get_settings", _settings)
 def test_simple_lock_blocks_put_on_bullish_breadth():
+    reset_directional_lock()
     blocked, reason = check_directional_side_lock_simple("NIFTY", Side.PUT, "BULLISH")
     assert blocked
-    assert reason == "directional_lock_bullish_ce_only"
+    assert "needs_confirmation" in reason or "switch" in reason
 
 
 @patch("app.engines.directional_lock.get_settings", _settings)

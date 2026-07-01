@@ -337,7 +337,8 @@ def validate_candidate(
 
     sym = candidate.symbol.upper()
     snap = snap_map.get(sym) or candidate.snap
-    dir_blocked, dir_reason = check_directional_side_lock(sym, candidate.side, snap)
+    tier = str(getattr(candidate, "tier", "") or "")
+    dir_blocked, dir_reason = check_directional_side_lock(sym, candidate.side, snap, tier=tier)
     if dir_blocked:
         return False, dir_reason, meta
 
