@@ -82,7 +82,9 @@ async def composer_brief_history(limit: int = 12):
 async def composer_refresh():
     """Force a new market brief (rules + Composer 2.5 when API key set)."""
     from app.routers.market import get_multi_snapshot
+    from app.services.upstox import rate_limit_active, rate_limit_recovery_active
 
-    snapshots = (await get_multi_snapshot(force=True)).snapshots
+    force = not rate_limit_active() and not rate_limit_recovery_active()
+    snapshots = (await get_multi_snapshot(force=force)).snapshots
     brief = await run_monitor_cycle(snapshots, force=True)
     return brief.to_dict()

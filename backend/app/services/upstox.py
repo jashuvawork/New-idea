@@ -239,21 +239,10 @@ class UpstoxClient:
             if resp.status_code == 401:
                 raise UpstoxError("Upstox token expired — re-authenticate")
             if resp.status_code == 429:
-                retry_after = resp.headers.get("Retry-After")
-                backoff = min(60, 5 * (2 ** attempt))
-                if retry_after:
-                    try:
-                        backoff = max(backoff, float(retry_after))
-                    except ValueError:
-                        pass
                 last_error = resp.text[:200]
                 _trip_rate_limit_cooldown()
-                logger.warning(
-                    "Upstox 429 on %s — backing off %.1fs (attempt %d/%d)",
-                    path, backoff, attempt + 1, settings.upstox_request_retries,
-                )
-                await asyncio.sleep(backoff)
-                continue
+                logger.warning("Upstox 429 on %s — entering cooldown (no retry hammer)", path)
+                raise UpstoxError(f"Upstox rate limited: {last_error}")
             if resp.status_code >= 400:
                 raise UpstoxError(f"Upstox API error {resp.status_code}: {resp.text[:200]}")
             data = resp.json()
@@ -277,10 +266,10 @@ class UpstoxClient:
             if resp.status_code == 401:
                 raise UpstoxError("Upstox token expired — re-authenticate")
             if resp.status_code == 429:
-                _trip_rate_limit_cooldown()
                 last_error = resp.text[:200]
-                await asyncio.sleep(min(60, 5 * (2 ** attempt)))
-                continue
+                _trip_rate_limit_cooldown()
+                logger.warning("Upstox V3 429 on %s — entering cooldown", path)
+                raise UpstoxError(f"Upstox V3 rate limited: {last_error}")
             if resp.status_code >= 400:
                 raise UpstoxError(f"Upstox V3 error {resp.status_code}: {resp.text[:200]}")
             data = resp.json()

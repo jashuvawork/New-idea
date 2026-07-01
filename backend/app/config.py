@@ -42,10 +42,11 @@ class Settings(BaseSettings):
     market_poll_interval_ms: int = 300
     market_poll_interval_ws_ms: int = 75
     tick_snapshot_interval_ms: int = 75
+    ws_snapshot_cache_interval_ms: int = 2000  # full REST snapshot TTL when WS feed is active
     snapshot_cache_interval_ms: int = 250
     tick_wake_debounce_ms: int = 15
     tick_fast_exit_enabled: bool = True
-    entry_scan_interval_ms: int = 350
+    entry_scan_interval_ms: int = 2000
     tick_overlay_max_age_seconds: float = 1.0
     news_cache_seconds: int = 60
     background_market_monitor_enabled: bool = True
@@ -77,17 +78,17 @@ class Settings(BaseSettings):
     sse_heartbeat_seconds: int = 1
 
     # Upstox rate limiting / caching
-    upstox_min_request_interval_ms: int = 100
-    upstox_request_retries: int = 4
-    upstox_rate_limit_cooldown_seconds: int = 30
-    upstox_chain_cache_seconds: int = 8
-    upstox_ltp_cache_seconds: int = 1
+    upstox_min_request_interval_ms: int = 250
+    upstox_request_retries: int = 2
+    upstox_rate_limit_cooldown_seconds: int = 45
+    upstox_chain_cache_seconds: int = 20
+    upstox_ltp_cache_seconds: int = 2
     upstox_expiries_cache_seconds: int = 600
     upstox_funds_cache_seconds: int = 90
-    upstox_candles_cache_seconds: int = 60
+    upstox_candles_cache_seconds: int = 120
     upstox_max_expiry_probes: int = 2
     capital_refresh_seconds: int = 90
-    fetch_constituents_in_snapshot: bool = True
+    fetch_constituents_in_snapshot: bool = False
     index_momentum_enabled: bool = True
     open_caution_moment_min_rank: float = 48.0
 
