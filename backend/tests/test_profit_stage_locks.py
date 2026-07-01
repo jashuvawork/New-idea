@@ -92,9 +92,12 @@ class StageLockTests(unittest.TestCase):
             )
         ]
         with patch("app.engines.capital_allocator.get_settings", return_value=_legacy_settings()):
-            gate = update_daily_profit_gate(state)
-            self.assertTrue(gate.newEntriesAllowed)
-            self.assertTrue(gate.minTargetHit)
+            with patch("app.engines.capital_allocator._session_date", NOW.strftime("%Y-%m-%d")):
+                with patch("app.engines.capital_allocator._best_pnl", 0.0):
+                    with patch("app.engines.capital_allocator._highest_stage", 0):
+                        gate = update_daily_profit_gate(state)
+        self.assertTrue(gate.newEntriesAllowed)
+        self.assertTrue(gate.minTargetHit)
 
 
 if __name__ == "__main__":

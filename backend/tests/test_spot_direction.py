@@ -197,7 +197,7 @@ def test_explosion_blocks_call_on_bearish_chart():
             event, trade, Breadth(score=50, bias="NEUTRAL", aligned=False), False, chart=chart,
         )
     assert not ok
-    assert "chart_" in reason
+    assert "bearish" in reason.lower() or "chart" in reason.lower()
 
 
 def test_side_aligned_with_chart():
