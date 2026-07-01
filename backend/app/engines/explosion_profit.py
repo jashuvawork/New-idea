@@ -14,6 +14,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 # symbol -> last explosion stop timestamp (IST)
 _explosion_stop_at: dict[str, datetime] = {}
+_explosion_stop_cooldown_sec: dict[str, int] = {}
 
 
 @dataclass
@@ -48,8 +49,13 @@ def explosion_exit_params_from_plan(plan, event_tier: str = "EXPLODING") -> Expl
     )
 
 
-def record_explosion_stop(symbol: str) -> None:
-    _explosion_stop_at[symbol.upper()] = datetime.now(IST)
+def record_explosion_stop(symbol: str, cooldown_seconds: Optional[int] = None) -> None:
+    sym = symbol.upper()
+    _explosion_stop_at[sym] = datetime.now(IST)
+    if cooldown_seconds is not None:
+        _explosion_stop_cooldown_sec[sym] = cooldown_seconds
+    else:
+        _explosion_stop_cooldown_sec.pop(sym, None)
 
 
 def explosion_in_cooldown(symbol: str) -> bool:
@@ -60,7 +66,11 @@ def explosion_in_cooldown(symbol: str) -> bool:
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=IST)
     elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
-    return elapsed < settings.explosion_reentry_cooldown_seconds
+    cooldown = _explosion_stop_cooldown_sec.get(
+        symbol.upper(),
+        settings.explosion_reentry_cooldown_seconds,
+    )
+    return elapsed < cooldown
 
 
 def cooldown_remaining_seconds(symbol: str) -> int:
@@ -71,7 +81,11 @@ def cooldown_remaining_seconds(symbol: str) -> int:
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=IST)
     elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
-    return max(0, int(settings.explosion_reentry_cooldown_seconds - elapsed))
+    cooldown = _explosion_stop_cooldown_sec.get(
+        symbol.upper(),
+        settings.explosion_reentry_cooldown_seconds,
+    )
+    return max(0, int(cooldown - elapsed))
 
 
 def check_explosion_entry(
