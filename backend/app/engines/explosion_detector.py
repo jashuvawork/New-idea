@@ -98,7 +98,7 @@ def scan_chain_explosions(
 
             premium = opt.get("ltp") or opt.get("last_price") or 0
             volume = opt.get("volume", 0) or 0
-            if not premium_in_band(premium):
+            if not premium_in_band(premium, mode="explosion"):
                 continue
 
             _record(symbol, strike, side, premium, volume)

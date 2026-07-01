@@ -36,6 +36,7 @@ import { PsychologyPanel } from './components/PsychologyPanel';
 import { PremarketPanel } from './components/PremarketPanel';
 import { SwingTrading } from './components/SwingTrading';
 import { PerformanceMilestone } from './components/PerformanceMilestone';
+import { deriveMarketSession } from './lib/marketSession';
 
 const SYMBOLS = ['NIFTY', 'SENSEX'] as const;
 
@@ -95,9 +96,7 @@ export default function App() {
           : { className: 'bg-nexus-red/15 text-nexus-red border-nexus-red/30', label: 'Not connected' }
     : null;
 
-  const marketClosed = SYMBOLS.every(
-    (s) => data?.snapshots?.[s]?.marketPhase === 'CLOSED' || !data?.snapshots?.[s]?.dataAvailable,
-  ) && Boolean(data);
+  const session = deriveMarketSession(data);
 
   return (
     <div className="min-h-screen text-gray-100">
@@ -136,7 +135,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <ConnectionStatus metrics={metrics} marketClosed={marketClosed} />
+            <ConnectionStatus metrics={metrics} session={session} />
 
             {upstoxBadge ? (
               <span

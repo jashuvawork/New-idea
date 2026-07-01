@@ -1,4 +1,5 @@
 import type { StreamMetrics } from '../types';
+import { connectionStatusLabel, type MarketSessionInfo } from '../lib/marketSession';
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   if (ms <= 0) return 'offline';
@@ -23,68 +24,56 @@ function qualityColor(quality: StreamMetrics['connectionQuality']) {
 function deriveQuality(
   latencyMs: number,
   stalenessMs: number,
-  marketClosed: boolean,
+  session: MarketSessionInfo,
 ): StreamMetrics['connectionQuality'] {
-  if (marketClosed && stalenessMs < 120_000) return 'good';
+  if (session.marketClosed && stalenessMs < 120_000) return 'good';
+  if (session.dataPauseReason && stalenessMs < 120_000) return 'slow';
   if (stalenessMs > 3_000) return 'offline';
   if (stalenessMs > 800) return 'slow';
   return latencyQuality(latencyMs);
 }
 
-function qualityLabel(
-  quality: StreamMetrics['connectionQuality'],
-  streamMode?: StreamMetrics['streamMode'],
-  marketClosed?: boolean,
-) {
-  if (marketClosed) return 'Market closed';
-  if (streamMode === 'sse' && quality !== 'offline' && quality !== 'slow') {
-    return 'Live';
-  }
-  switch (quality) {
-    case 'excellent':
-      return 'Fast';
-    case 'good':
-      return 'OK';
-    case 'slow':
-      return 'Stale';
-    default:
-      return 'Offline';
-  }
-}
-
 export function ConnectionStatus({
   metrics,
-  marketClosed = false,
+  session,
 }: {
   metrics: StreamMetrics;
-  marketClosed?: boolean;
+  session: MarketSessionInfo;
 }) {
   const ageSec = Math.floor(metrics.stalenessMs / 1000);
-  const quality = deriveQuality(metrics.lastLatencyMs, metrics.stalenessMs, marketClosed);
+  const quality = deriveQuality(metrics.lastLatencyMs, metrics.stalenessMs, session);
+  const label = connectionStatusLabel(session, quality, metrics.streamMode);
+  const paused = Boolean(session.dataPauseReason);
 
   return (
     <div
       className={`flex items-center gap-2 text-[10px] px-2.5 py-1 rounded border ${qualityColor(quality)}`}
-      title={`${metrics.streamMode === 'sse' ? 'SSE stream' : 'HTTP poll'} · Round-trip: ${metrics.lastLatencyMs}ms · Avg: ${metrics.avgLatencyMs}ms · Refresh every ${metrics.pollIntervalMs / 1000}s`}
+      title={[
+        metrics.streamMode === 'sse' ? 'SSE stream' : 'HTTP poll',
+        `Round-trip: ${metrics.lastLatencyMs}ms`,
+        `Avg: ${metrics.avgLatencyMs}ms`,
+        `Refresh every ${metrics.pollIntervalMs / 1000}s`,
+        session.dataPauseReason,
+      ].filter(Boolean).join(' · ')}
     >
       <span
         className={`w-1.5 h-1.5 rounded-full shrink-0 ${
           quality === 'offline'
             ? 'bg-nexus-red'
-            : quality === 'slow'
+            : quality === 'slow' || paused
               ? 'bg-nexus-yellow'
-              : marketClosed
+              : session.marketClosed
                 ? 'bg-gray-400'
                 : 'bg-nexus-green'
         }`}
       />
-      <span className="font-semibold">{qualityLabel(quality, metrics.streamMode, marketClosed)}</span>
+      <span className="font-semibold">{label}</span>
       <span className="opacity-80">·</span>
       <span className="font-mono">{metrics.lastLatencyMs}ms</span>
       {metrics.lastUpdatedAt && (
         <>
           <span className="opacity-80">·</span>
-          <span>{ageSec < 5 ? 'just now' : marketClosed ? `idle ${ageSec}s` : `${ageSec}s ago`}</span>
+          <span>{ageSec < 5 ? 'just now' : session.marketClosed ? `idle ${ageSec}s` : `${ageSec}s ago`}</span>
         </>
       )}
     </div>

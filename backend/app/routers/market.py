@@ -280,6 +280,14 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
                 stale.waitingReason = f"Stale data — {e}"
                 return stale
             raise
+        if not snapshot.dataReady and _cache and _cache.dataReady:
+            reason = snapshot.waitingReason or "Data refresh paused"
+            logger.warning("Serving stale snapshot — fresh build unavailable: %s", reason)
+            stale = _cache.model_copy(deep=True)
+            stale.waitingReason = f"{reason} · showing last good data"
+            if broadcast:
+                await broadcast_snapshot(stale)
+            return stale
         _cache = snapshot
         _cache_time = datetime.now(IST)
         _last_full_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
