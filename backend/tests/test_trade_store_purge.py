@@ -28,6 +28,7 @@ def test_purge_removes_day_files_and_clears_log(isolated_store):
     batches = isolated_store / "batches"
     batches.mkdir()
     (batches / "batch-001.json").write_text("{}")
+    (isolated_store / "session_meta.json").write_text('{"lastResetAt": "2026-07-01T09:00:00+05:30"}')
 
     result = trade_store.purge_all_trade_data()
 
@@ -37,3 +38,4 @@ def test_purge_removes_day_files_and_clears_log(isolated_store):
     assert result["removedCount"] >= 3
     assert trade_store.get_milestone_batch_offset() == 0
     assert trade_store.count_today_trades()["closed"] == 0
+    assert not (isolated_store / "session_meta.json").exists()

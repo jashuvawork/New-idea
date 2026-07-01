@@ -458,6 +458,14 @@ def purge_all_trade_data() -> dict[str, Any]:
     _milestone_meta_path().write_text(json.dumps(meta, indent=2), encoding="utf-8")
     removed.append(str(_milestone_meta_path()))
 
+    session_meta = _session_meta_path()
+    if session_meta.exists():
+        try:
+            session_meta.unlink()
+            removed.append(str(session_meta))
+        except OSError as e:
+            logger.warning("Failed to remove %s: %s", session_meta, e)
+
     _append_log("PURGE_ALL", {"removedFiles": len(removed), "storeDir": str(store)})
     logger.warning("Purged all trade data — %d paths touched", len(removed))
     return {
