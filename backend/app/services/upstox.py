@@ -77,11 +77,28 @@ async def _throttle() -> None:
 def _trip_rate_limit_cooldown() -> None:
     global _rate_limit_until_mono
     settings = get_settings()
-    _rate_limit_until_mono = time.monotonic() + settings.upstox_rate_limit_cooldown_seconds
-    logger.warning(
-        "Upstox rate limit cooldown for %ds",
-        settings.upstox_rate_limit_cooldown_seconds,
-    )
+    until = time.monotonic() + settings.upstox_rate_limit_cooldown_seconds
+    if until > _rate_limit_until_mono:
+        _rate_limit_until_mono = until
+        logger.warning(
+            "Upstox rate limit cooldown for %ds",
+            settings.upstox_rate_limit_cooldown_seconds,
+        )
+
+
+def rate_limit_cooldown_remaining() -> float:
+    """Seconds until Upstox REST calls are allowed again."""
+    return max(0.0, _rate_limit_until_mono - time.monotonic())
+
+
+def rate_limit_active() -> bool:
+    return rate_limit_cooldown_remaining() > 0
+
+
+def clear_rate_limit_cooldown() -> None:
+    """Clear in-memory 429 backoff (e.g. after env/deploy fix)."""
+    global _rate_limit_until_mono
+    _rate_limit_until_mono = 0.0
 
 
 def resolve_quote_payload(data: dict[str, Any], instrument_key: str) -> dict[str, Any]:
