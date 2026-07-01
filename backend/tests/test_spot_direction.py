@@ -61,6 +61,8 @@ def test_analyze_spot_chart_bearish_on_decline():
     assert chart.momentum5Pct < 0
     assert chart.momentum15Pct < 0
     assert chart.trendStrength >= 25
+    assert chart.rsi < 50
+    assert chart.macdBias in ("BEARISH", "NEUTRAL")
 
 
 def test_analyze_spot_chart_bullish_on_rally():
@@ -71,6 +73,8 @@ def test_analyze_spot_chart_bullish_on_rally():
     assert chart.direction == "BULLISH"
     assert chart.momentum5Pct > 0
     assert chart.momentum15Pct > 0
+    assert chart.rsi > 50
+    assert chart.macdBias in ("BULLISH", "NEUTRAL")
 
 
 @patch("app.engines.spot_direction.get_settings")

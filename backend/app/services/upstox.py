@@ -59,12 +59,12 @@ def rate_limit_recovery_active() -> bool:
     return time.monotonic() < _rate_limit_recovery_until_mono
 
 
-async def _throttle() -> None:
+async def _throttle(*, bypass_cooldown: bool = False) -> None:
     """Serialize requests and enforce minimum spacing to avoid UDAPI10005 429s."""
     global _last_request_mono, _rate_limit_until_mono
     settings = get_settings()
     now = time.monotonic()
-    if now < _rate_limit_until_mono:
+    if not bypass_cooldown and now < _rate_limit_until_mono:
         wait = _rate_limit_until_mono - now
         raise UpstoxError(f"Upstox cooling down — retry in {wait:.0f}s")
 
@@ -74,7 +74,7 @@ async def _throttle() -> None:
     min_interval = max(0.05, min_ms / 1000.0)
     async with _throttle_lock:
         now = time.monotonic()
-        if now < _rate_limit_until_mono:
+        if not bypass_cooldown and now < _rate_limit_until_mono:
             wait = _rate_limit_until_mono - now
             raise UpstoxError(f"Upstox cooling down — retry in {wait:.0f}s")
         wait = min_interval - (now - _last_request_mono)
@@ -239,21 +239,10 @@ class UpstoxClient:
             if resp.status_code == 401:
                 raise UpstoxError("Upstox token expired — re-authenticate")
             if resp.status_code == 429:
-                retry_after = resp.headers.get("Retry-After")
-                backoff = min(60, 5 * (2 ** attempt))
-                if retry_after:
-                    try:
-                        backoff = max(backoff, float(retry_after))
-                    except ValueError:
-                        pass
                 last_error = resp.text[:200]
                 _trip_rate_limit_cooldown()
-                logger.warning(
-                    "Upstox 429 on %s — backing off %.1fs (attempt %d/%d)",
-                    path, backoff, attempt + 1, settings.upstox_request_retries,
-                )
-                await asyncio.sleep(backoff)
-                continue
+                logger.warning("Upstox 429 on %s — entering cooldown (no retry hammer)", path)
+                raise UpstoxError(f"Upstox rate limited: {last_error}")
             if resp.status_code >= 400:
                 raise UpstoxError(f"Upstox API error {resp.status_code}: {resp.text[:200]}")
             data = resp.json()
@@ -277,10 +266,10 @@ class UpstoxClient:
             if resp.status_code == 401:
                 raise UpstoxError("Upstox token expired — re-authenticate")
             if resp.status_code == 429:
-                _trip_rate_limit_cooldown()
                 last_error = resp.text[:200]
-                await asyncio.sleep(min(60, 5 * (2 ** attempt)))
-                continue
+                _trip_rate_limit_cooldown()
+                logger.warning("Upstox V3 429 on %s — entering cooldown", path)
+                raise UpstoxError(f"Upstox V3 rate limited: {last_error}")
             if resp.status_code >= 400:
                 raise UpstoxError(f"Upstox V3 error {resp.status_code}: {resp.text[:200]}")
             data = resp.json()
@@ -573,7 +562,7 @@ class UpstoxClient:
     async def place_order(self, order_payload: dict[str, Any]) -> dict[str, Any]:
         if not self.settings.enable_live_trading:
             raise UpstoxError("Live trading disabled — ENABLE_LIVE_TRADING=false")
-        await _throttle()
+        await _throttle(bypass_cooldown=True)
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
                 f"{self.BASE_URL}/order/place",
@@ -581,6 +570,7 @@ class UpstoxClient:
                 json=order_payload,
             )
             if resp.status_code == 429:
+                _trip_rate_limit_cooldown()
                 raise UpstoxError("Upstox rate limited — order not placed, retry next tick")
             if resp.status_code >= 400:
                 raise UpstoxError(f"Order failed: {resp.status_code}: {resp.text[:300]}")

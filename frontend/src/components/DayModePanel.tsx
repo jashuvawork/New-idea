@@ -99,6 +99,11 @@ function SymbolChartRow({ symbol, chart }: { symbol: string; chart: SpotChart })
         <div className="text-nexus-muted">
           str {chart.trendStrength.toFixed(0)} · {chart.orPosition} OR · EMA {chart.emaBias}
         </div>
+        {(chart.rsi != null || chart.macdBias) && (
+          <div className="text-nexus-muted">
+            RSI {chart.rsi?.toFixed(0) ?? '—'} {chart.rsiBias ?? ''} · MACD {chart.macdBias ?? '—'}
+          </div>
+        )}
       </div>
     </div>
   );

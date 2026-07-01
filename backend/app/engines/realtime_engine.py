@@ -43,7 +43,7 @@ from app.engines.premarket_engine import (
     build_premarket_snapshot,
 )
 from app.engines.ml_engine import get_ml_engine
-from app.services.tick_store import overlay_chain_ltps, overlay_index_ltp
+from app.services.tick_store import get_index_spot, overlay_chain_ltps, overlay_index_ltp
 from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase
 from app.services.upstox_ws import is_ws_active
 
@@ -381,7 +381,11 @@ async def build_symbol_snapshot(
             )
 
     try:
-        spot = await client.get_index_ltp(symbol)
+        if is_ws_active():
+            ws_spot = get_index_spot(symbol, max_age_seconds=3.0)
+            spot = ws_spot if ws_spot is not None else await client.get_index_ltp(symbol)
+        else:
+            spot = await client.get_index_ltp(symbol)
         chain, expiry = await client.get_option_chain_resolved(symbol)
         candles = await client.get_candles(symbol)
 
@@ -402,7 +406,9 @@ async def build_symbol_snapshot(
         option_breadth = build_breadth(chain, spot)
 
         constituent_hm = None
-        if get_settings().fetch_constituents_in_snapshot:
+        from app.services.upstox import rate_limit_active
+
+        if get_settings().fetch_constituents_in_snapshot and not rate_limit_active():
             constituent_hm = await build_constituent_heatmap(symbol, client)
             stock_breadth = breadth_from_constituents(constituent_hm)
             breadth = blend_breadth(option_breadth, stock_breadth)

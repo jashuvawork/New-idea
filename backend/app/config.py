@@ -42,10 +42,11 @@ class Settings(BaseSettings):
     market_poll_interval_ms: int = 300
     market_poll_interval_ws_ms: int = 75
     tick_snapshot_interval_ms: int = 75
+    ws_snapshot_cache_interval_ms: int = 2000  # full REST snapshot TTL when WS feed is active
     snapshot_cache_interval_ms: int = 250
     tick_wake_debounce_ms: int = 15
     tick_fast_exit_enabled: bool = True
-    entry_scan_interval_ms: int = 350
+    entry_scan_interval_ms: int = 2000
     tick_overlay_max_age_seconds: float = 1.0
     news_cache_seconds: int = 60
     background_market_monitor_enabled: bool = True
@@ -77,17 +78,17 @@ class Settings(BaseSettings):
     sse_heartbeat_seconds: int = 1
 
     # Upstox rate limiting / caching
-    upstox_min_request_interval_ms: int = 100
-    upstox_request_retries: int = 4
-    upstox_rate_limit_cooldown_seconds: int = 30
-    upstox_chain_cache_seconds: int = 8
-    upstox_ltp_cache_seconds: int = 1
+    upstox_min_request_interval_ms: int = 250
+    upstox_request_retries: int = 2
+    upstox_rate_limit_cooldown_seconds: int = 45
+    upstox_chain_cache_seconds: int = 20
+    upstox_ltp_cache_seconds: int = 2
     upstox_expiries_cache_seconds: int = 600
     upstox_funds_cache_seconds: int = 90
-    upstox_candles_cache_seconds: int = 60
+    upstox_candles_cache_seconds: int = 120
     upstox_max_expiry_probes: int = 2
     capital_refresh_seconds: int = 90
-    fetch_constituents_in_snapshot: bool = True
+    fetch_constituents_in_snapshot: bool = False
     index_momentum_enabled: bool = True
     open_caution_moment_min_rank: float = 48.0
 
@@ -176,6 +177,7 @@ class Settings(BaseSettings):
     last_n_elevated_min_rank_score: float = 72.0
     last_n_block_pf_below: float = 0.35
     last_n_block_net_inr_below: float = -25_000.0
+    last_n_momentum_rally_bypass_enabled: bool = True
 
     # Best trades only — fewer, higher-quality entries
     best_trades_only_enabled: bool = True
@@ -193,6 +195,8 @@ class Settings(BaseSettings):
     ce_pe_whipsaw_pause_seconds: int = 900
     flip_flop_lookback_trades: int = 6
     flip_flop_max_opposites: int = 2
+    whipsaw_momentum_rally_bypass_enabled: bool = True
+    whipsaw_dual_retrigger_cooldown_seconds: int = 300
     bearish_sideways_halt_enabled: bool = True
     bearish_sideways_block_scalps: bool = True
     bearish_sideways_explosion_min_score: float = 78.0
@@ -323,6 +327,17 @@ class Settings(BaseSettings):
     enhanced_tqs_entry: int = 50
     runner_alignment_override_score: int = 82
     rapid_scalp_mode_enabled: bool = False
+    quick_sideways_enabled: bool = True
+    quick_sideways_min_rank_score: float = 58.0
+    quick_sideways_min_velocity_pct: float = 0.5
+    quick_sideways_min_tqs: int = 35
+    quick_sideways_target_points: float = 3.0
+    quick_sideways_stop_points: float = 2.0
+    quick_sideways_micro_target_points: float = 2.0
+    quick_sideways_micro_giveback_points: float = 1.5
+    quick_sideways_max_hold_seconds: int = 120
+    quick_sideways_no_progress_seconds: int = 75
+    quick_sideways_min_seconds_between_entries: int = 120
     sure_shot_mode_enabled: bool = False
     sure_shot_min_symbol_tqs: int = 40
     sure_shot_min_rank_score: float = 48.0
@@ -375,14 +390,32 @@ class Settings(BaseSettings):
     scalp_micro_giveback_points: float = 3.0
     scalp_no_progress_seconds: int = 150
 
-    # Daily target — Jun 25 milestone profile
-    daily_profit_target_inr: float = 44_000
+    # Daily target — 18% of capital per session (confidence-gated full limits)
+    daily_profit_target_from_capital: bool = True
+    daily_profit_target_pct: float = 0.18
+    daily_profit_target_inr: float = 44_000  # fallback when pct mode off
     daily_profit_trail_inr: float = 5_000  # legacy; unused when stage locks enabled
     daily_profit_stage_locks_enabled: bool = True
     daily_profit_stage_pcts_csv: str = "0.55,0.88,1.12"  # env: DAILY_PROFIT_STAGE_PCTS
+    daily_profit_stage_from_target: bool = True
+    daily_profit_stage_target_mults_csv: str = "0.5,1.0,1.5"  # locks at 9%, 18%, 27% of cap
+
+    # Daily 18% strategy — progressive playbook across all day types
+    daily_18pct_strategy_enabled: bool = True
+    daily_18pct_medium_confidence_min: float = 55.0
+    daily_18pct_high_confidence_min: float = 72.0
+    daily_18pct_elite_confidence_min: float = 85.0
+    daily_18pct_unlock_full_limits_min_confidence: float = 78.0
+    daily_18pct_chop_max_trades: int = 10
+    daily_18pct_expiry_max_trades: int = 5
+    daily_18pct_expiry_min_rank: float = 65.0
+    daily_18pct_full_limit_max_trades: int = 12
 
     def daily_profit_stage_pcts(self) -> list[float]:
         return [float(x.strip()) for x in self.daily_profit_stage_pcts_csv.split(",") if x.strip()]
+
+    def daily_profit_stage_target_mults(self) -> list[float]:
+        return [float(x.strip()) for x in self.daily_profit_stage_target_mults_csv.split(",") if x.strip()]
 
     use_upstox_capital_for_sizing: bool = True  # paper parity uses real margin when token present
 

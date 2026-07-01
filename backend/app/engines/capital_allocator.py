@@ -364,6 +364,11 @@ def _capital_base_for_stages() -> float:
     return settings.max_sizing_capital_inr or settings.fallback_capital_inr
 
 
+def _resolve_daily_target_inr(capital_base: float) -> float:
+    from app.engines.daily_18pct_strategy import resolve_daily_target_inr
+    return resolve_daily_target_inr(capital_base)
+
+
 def _stage_pcts_from_settings(settings) -> list[float]:
     raw = getattr(settings, "daily_profit_stage_pcts", None)
     if callable(raw):
@@ -374,21 +379,39 @@ def _stage_pcts_from_settings(settings) -> list[float]:
     return [float(x.strip()) for x in str(csv).split(",") if x.strip()]
 
 
-def _build_profit_stages(capital_base: float, best_pnl: float, pcts: list[float]) -> list[ProfitStage]:
-    labels = ["55% lock", "88% lock", "112% lock"]
+def _stage_thresholds(capital_base: float, daily_target: float, settings) -> list[float]:
+    """Profit lock thresholds — multiples of daily 18% target or legacy capital %."""
+    if settings.daily_profit_stage_from_target and daily_target > 0:
+        mults = settings.daily_profit_stage_target_mults()
+        return [daily_target * m for m in mults[:3]]
+    pcts = _stage_pcts_from_settings(settings) or [0.55, 0.88, 1.12]
+    return [capital_base * p for p in pcts[:3]]
+
+
+def _build_profit_stages(
+    capital_base: float,
+    best_pnl: float,
+    thresholds: list[float],
+    *,
+    from_target: bool = False,
+) -> list[ProfitStage]:
+    if from_target:
+        labels = ["50% of daily target", "100% of daily target (18%)", "150% of daily target"]
+    else:
+        labels = ["55% lock", "88% lock", "112% lock"]
     stages: list[ProfitStage] = []
-    for i, pct in enumerate(pcts[:3]):
-        threshold = capital_base * pct
+    for i, threshold in enumerate(thresholds[:3]):
+        pct = (threshold / capital_base) if capital_base > 0 and not from_target else 0.0
         stages.append(
             ProfitStage(
                 stage=i + 1,
                 pct=pct,
                 thresholdInr=threshold,
                 reached=best_pnl >= threshold,
-                label=labels[i] if i < len(labels) else f"{pct:.0%} lock",
+                label=labels[i] if i < len(labels) else f"Stage {i + 1}",
             )
         )
-    if len(pcts) >= 3 and best_pnl > capital_base * pcts[2]:
+    if len(thresholds) >= 3 and best_pnl > thresholds[2]:
         stages.append(
             ProfitStage(
                 stage=4,
@@ -405,17 +428,15 @@ def _compute_stage_lock(
     session_pnl: float,
     best_pnl: float,
     highest_stage: int,
-    capital_base: float,
-    stage_pcts: list[float],
+    thresholds: list[float],
 ) -> tuple[int, float, int]:
     """
     Returns (highest_stage, locked_floor_inr, current_stage_display).
-    Stage 1–3: floor = capital × pct when that stage is reached.
-    Stage 4: floor trails session peak once above 112% of capital.
+    Stage 1–3: floor = threshold when that stage is reached.
+    Stage 4: floor trails session peak once above final threshold.
     """
-    thresholds = [capital_base * p for p in stage_pcts[:3]]
     if len(thresholds) < 3:
-        thresholds.extend([0.0] * (3 - len(thresholds)))
+        thresholds = thresholds + [0.0] * (3 - len(thresholds))
 
     if best_pnl >= thresholds[0]:
         highest_stage = max(highest_stage, 1)
@@ -454,15 +475,18 @@ def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
     capital_base = _capital_base_for_stages()
     session_pnl = compute_session_pnl(state)
     _best_pnl = max(_best_pnl, session_pnl)
-    min_target = settings.daily_profit_target_inr
+    min_target = _resolve_daily_target_inr(capital_base)
     min_hit = _best_pnl >= min_target
 
-    stage_pcts = _stage_pcts_from_settings(settings) or [0.55, 0.88, 1.12]
-    stages = _build_profit_stages(capital_base, _best_pnl, stage_pcts)
+    from_target = getattr(settings, "daily_profit_stage_from_target", False)
+    thresholds = _stage_thresholds(capital_base, min_target, settings)
+    stages = _build_profit_stages(
+        capital_base, _best_pnl, thresholds, from_target=from_target,
+    )
 
     if settings.daily_profit_stage_locks_enabled:
         _highest_stage, locked_floor, current_stage = _compute_stage_lock(
-            session_pnl, _best_pnl, _highest_stage, capital_base, stage_pcts,
+            session_pnl, _best_pnl, _highest_stage, thresholds,
         )
     else:
         # Legacy single trail
@@ -506,9 +530,11 @@ def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
                     f"₹{locked_floor:,.0f} — entries paused."
                 )
             else:
-                pct_label = stage_pcts[current_stage - 1] if 0 < current_stage <= len(stage_pcts) else 0
+                pct_label = ""
+                if 0 < current_stage <= len(thresholds):
+                    pct_label = f"₹{thresholds[current_stage - 1]:,.0f} floor"
                 gate.message = (
-                    f"Stage {current_stage} lock ({pct_label:.0%} of ₹{capital_base:,.0f}): "
+                    f"Stage {current_stage} lock ({pct_label}): "
                     f"session ₹{session_pnl:,.0f} < floor ₹{locked_floor:,.0f} — protecting profits."
                 )
         else:
@@ -522,22 +548,23 @@ def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
             elif current_stage >= 1:
                 next_idx = current_stage
                 if current_stage < 3:
-                    nxt = capital_base * stage_pcts[current_stage]
+                    nxt = thresholds[current_stage] if current_stage < len(thresholds) else thresholds[-1]
                     gate.message = (
                         f"Stage {current_stage} active · floor ₹{locked_floor:,.0f} · "
-                        f"next lock ₹{nxt:,.0f} · min ₹{min_target:,.0f}"
-                        + (" ✓" if min_hit else "")
+                        f"next lock ₹{nxt:,.0f} · target ₹{min_target:,.0f} (18%)"
+                        + (" ✓" if min_hit else f" · {session_pnl / min_target * 100:.0f}%")
                     )
                 else:
                     gate.message = (
-                        f"Stage 3 (112%) · floor ₹{locked_floor:,.0f} · "
-                        f"above → peak lock · min ₹{min_target:,.0f}" + (" ✓" if min_hit else "")
+                        f"Stage 3 · floor ₹{locked_floor:,.0f} · "
+                        f"above → peak lock · target ₹{min_target:,.0f}" + (" ✓" if min_hit else "")
                     )
             else:
                 gate.message = (
-                    f"Min target ₹{min_target:,.0f}"
+                    f"Daily target ₹{min_target:,.0f} (18% of ₹{capital_base:,.0f})"
+                    + (f" · {session_pnl / min_target * 100:.0f}%" if min_target else "")
                     + (" ✓" if min_hit else "")
-                    + f" · 1st lock at ₹{capital_base * stage_pcts[0]:,.0f} (55%)"
+                    + f" · 1st lock at ₹{thresholds[0]:,.0f}"
                 )
     else:
         # Legacy fallback

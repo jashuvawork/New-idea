@@ -315,7 +315,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     session = get_session_targets()
     settings = get_settings()
     last_n = last_n_trades_summary(state)
-    last_n_paused, last_n_reason, _ = check_last_n_trades_pause(state)
+    last_n_paused, last_n_reason, _ = check_last_n_trades_pause(state, snapshots)
     expiry_active = is_expiry_session(snapshots)
     expiry_worst, _, _ = predict_worst_expiry_day(state, snapshots) if expiry_active else (False, 0.0, [])
     mode, mode_tone, mode_hint = _day_mode_label(

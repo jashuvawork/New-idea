@@ -45,7 +45,8 @@ IST = ZoneInfo("Asia/Kolkata")
 def _effective_cache_seconds() -> float:
     settings = get_settings()
     if is_ws_active():
-        return settings.tick_snapshot_interval_ms / 1000.0
+        # WS overlays LTPs on cache — avoid full REST rebuild every tick (was 75ms → 429s)
+        return max(1.0, settings.ws_snapshot_cache_interval_ms / 1000.0)
     return settings.snapshot_cache_interval_ms / 1000.0
 
 

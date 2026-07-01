@@ -207,6 +207,12 @@ export interface SpotChart {
   abovePoc: boolean;
   belowPoc: boolean;
   poc: number;
+  rsi?: number;
+  rsiBias?: string;
+  macd?: number;
+  macdSignal?: number;
+  macdHistogram?: number;
+  macdBias?: string;
 }
 
 export interface ExplosiveRunner {
@@ -350,6 +356,8 @@ export interface ComposerMonitorStatus {
   historyCount?: number;
   apiPing?: { ok?: boolean; reason?: string };
   latest?: ComposerBrief | null;
+  tradingBlockers?: { symbol?: string; reason?: string; message?: string }[];
+  composerAdvisoryOnly?: boolean;
 }
 
 export interface LastNTradesSummary {
@@ -458,6 +466,12 @@ export interface MtfTimeframeRead {
   momentumPct: number;
   trendStrength: number;
   emaBias: string;
+  rsi?: number;
+  rsiBias?: string;
+  macd?: number;
+  macdSignal?: number;
+  macdHistogram?: number;
+  macdBias?: string;
   alignedCall?: boolean;
   alignedPut?: boolean;
 }
@@ -470,6 +484,12 @@ export interface PremiumChart {
   volumeSurge: number;
   vwap: number;
   aboveVwap: boolean;
+  rsi?: number;
+  rsiBias?: string;
+  macd?: number;
+  macdSignal?: number;
+  macdHistogram?: number;
+  macdBias?: string;
 }
 
 export interface CapitalAllocation {

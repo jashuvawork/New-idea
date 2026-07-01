@@ -7,7 +7,14 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
+from app.engines.daily_18pct_strategy import (
+    compute_trading_limits,
+    scale_lots_for_limits,
+    set_session_limits,
+    get_session_limits,
+)
 from app.engines.daily_profit_strategy import DailyCalibration
+from app.engines.capital_allocator import _capital_base_for_stages
 from app.engines.ai_learning import get_ai_learning
 from app.engines.risk_engine import RiskEngine
 from app.engines.explosion_profit import evaluate_explosion_exit, record_explosion_stop
@@ -63,7 +70,7 @@ from app.models.schemas import (
     SymbolSnapshot,
     TradeMastermind,
 )
-from app.engines.snapshot_fast import resolve_trade_premium
+from app.engines.quick_sideways import evaluate_quick_sideways_exit, get_quick_sideways_profile
 from app.engines.session_timing import entries_allowed_now, entry_window_label
 from app.services import trade_store
 from app.services.order_executor import place_entry_order, place_exit_order
@@ -195,7 +202,8 @@ def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
             return float(runner.signal.premiumVelocityPct or 0)
     top = snap.topExplosion or {}
     if str(top.get("side", "")).upper() == side_v:
-        return float(top.get("velocity3s") or 0)
+        if abs(float(top.get("strike") or 0) - strike) <= 50:
+            return float(top.get("velocity3s") or 0)
     return 0.0
 
 
@@ -254,6 +262,8 @@ async def _open_from_candidate(
     symbol = candidate.symbol
     snap = candidate.snap
     profile = snap.optimizedProfile or get_session_targets()
+    if candidate.mode == "quick_sideways":
+        profile = get_quick_sideways_profile()
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
 
     signal_premium = candidate.premium
@@ -292,6 +302,9 @@ async def _open_from_candidate(
         ),
         volume_surge=(candidate.explosion_event.volume_surge if candidate.explosion_event else 1.0),
     )
+    limits = get_session_limits()
+    if limits is not None:
+        lots = scale_lots_for_limits(lots, limits)
     if lots <= 0:
         return False, "tiered_lot_cap_zero"
     lot_mult = lot_multiplier(symbol)
@@ -648,6 +661,8 @@ async def _process_open_trades(
                 )
             else:
                 exit_reason, pnl = evaluate_explosion_exit(trade, eval_premium, tier, lot_mult)
+        elif (trade.entryContext or {}).get("selectionMode") == "quick_sideways":
+            exit_reason, pnl = evaluate_quick_sideways_exit(trade, eval_premium, lot_mult)
         elif use_adaptive:
             exit_reason, pnl = evaluate_adaptive_scalp_exit(
                 trade, eval_premium, AdaptiveExitPlan.from_dict(plan_dict), profile, lot_mult,
@@ -803,6 +818,19 @@ async def process(
     cap_snap = get_capital_snapshot()
     state.capitalAllocation = {**cap_snap.to_dict(), **get_lot_sizes_meta()}
     state.dailyProfitGate = profit_gate.to_dict()
+
+    from app.engines.pretrade_validator import collect_session_trades
+    session_pnl = compute_session_pnl(state)
+    trading_limits = compute_trading_limits(
+        snapshots,
+        state,
+        session_pnl=session_pnl,
+        capital_base=_capital_base_for_stages(),
+        trades_today=len(collect_session_trades(state)),
+    )
+    state.dailyStrategy = trading_limits.to_dict()
+    set_session_limits(trading_limits)
+
     state.chopGuards = chop_guard_summary(state, snapshots)
 
     if not profit_gate.newEntriesAllowed:
@@ -850,7 +878,7 @@ async def process(
                 "reason": ctrl_reason,
                 "message": "Controlled trading daily cap",
             })
-        last_n_paused, last_n_reason, last_n_meta = check_last_n_trades_pause(state)
+        last_n_paused, last_n_reason, last_n_meta = check_last_n_trades_pause(state, snapshots)
         if last_n_paused:
             skipped.append({
                 "symbol": "SESSION",
@@ -878,7 +906,7 @@ async def process(
                 or "Expiry-day entry blocked",
             })
         if not paused and not cap_hit and not ctrl_cap and not last_n_paused and not whipsaw_paused and expiry_ok:
-            best = find_best_entry(snapshots, state)
+            best = find_best_entry(snapshots, state, trading_limits)
             if best:
                 opened, reason = await _open_from_candidate(best, state, client, news)
                 if not opened:
