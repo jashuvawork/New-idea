@@ -132,6 +132,7 @@ export interface ExplosionAlert {
   tier: string;
   reason: string;
   tradeable: boolean;
+  morningCapture?: boolean;
 }
 
 export interface StrategyMatrixEntry {
@@ -412,6 +413,7 @@ export interface AutoTraderState {
   calibrationBlocks: Record<string, boolean>;
   capitalAllocation?: CapitalAllocation;
   dailyProfitGate?: DailyProfitGate;
+  dailyStrategy?: DailyStrategy;
   lastEntry?: AutoTradeEvent | null;
   lastExit?: AutoTradeEvent | null;
   liveOrdersPlaced?: number;
@@ -507,6 +509,25 @@ export interface CapitalAllocation {
   lotSizes?: Record<string, number>;
   lotSizesSource?: string;
   lotSizesFetchedAt?: string;
+}
+
+export interface DailyStrategy {
+  phase?: string;
+  confidenceTier?: string;
+  marketConfidence?: number;
+  dayMode?: string;
+  dailyTargetInr?: number;
+  sessionPnlInr?: number;
+  progressPct?: number;
+  minRankScore?: number;
+  maxTradesToday?: number;
+  lotSizeMultiplier?: number;
+  allowExplosion?: boolean;
+  allowQuickSideways?: boolean;
+  allowFullLots?: boolean;
+  unlockFullLimits?: boolean;
+  message?: string;
+  playbook?: string[];
 }
 
 export interface DailyProfitGate {
