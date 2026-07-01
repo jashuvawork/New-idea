@@ -316,6 +316,11 @@ def check_last_n_trades_pause(
     if momentum_rally_bypass_last_n(snapshots):
         return False, "momentum_rally_bypass", summary
 
+    from app.engines.morning_premium_capture import morning_capture_active
+
+    if morning_capture_active(snapshots):
+        return False, "morning_capture_bypass", summary
+
     losses = summary["losses"]
     count = summary["count"]
 

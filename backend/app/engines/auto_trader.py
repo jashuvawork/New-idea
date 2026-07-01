@@ -50,6 +50,13 @@ from app.engines.whipsaw_guards import (
     check_session_whipsaw_pause,
     record_trade_close as record_whipsaw_close,
 )
+from app.engines.edge_engine import (
+    check_edge_realtime_exit,
+    compute_entry_edge,
+    scale_lots_by_edge,
+    session_pf_feedback,
+    tune_plan_with_edge,
+)
 from app.engines.trade_selector import EntryCandidate, diagnose_missed_entries, find_best_entry
 from app.engines.paper_slippage import (
     apply_entry_fill,
@@ -307,6 +314,17 @@ async def _open_from_candidate(
         lots = scale_lots_for_limits(lots, limits)
     if lots <= 0:
         return False, "tiered_lot_cap_zero"
+
+    entry_velocity_3s = 0.0
+    if candidate.explosion_event:
+        entry_velocity_3s = float(candidate.explosion_event.velocity_3s or 0)
+    elif candidate.suggestion and candidate.suggestion.runnerSignal:
+        entry_velocity_3s = float(candidate.suggestion.runnerSignal.premiumVelocityPct or 0)
+
+    edge = compute_entry_edge(candidate, snap, state)
+    lots = scale_lots_by_edge(lots, edge)
+    if lots <= 0:
+        return False, "edge_lot_scale_zero"
     lot_mult = lot_multiplier(symbol)
 
     ok, risk_reason = _risk_engine.check_new_entry(
@@ -355,19 +373,24 @@ async def _open_from_candidate(
         snap, candidate.strategy_type, candidate.side.value,
         candidate.confidence, news,
         entry_premium=fill_premium,
-        entry_velocity_3s=(
-            candidate.explosion_event.velocity_3s if candidate.explosion_event else None
-        ),
+        entry_velocity_3s=entry_velocity_3s or None,
         explosion_tier=(
             candidate.explosion_event.tier if candidate.explosion_event else None
         ),
     )
     exit_plan = tune_exit_plan_for_position(exit_plan, lots, fill_premium, symbol)
+    if exit_plan and settings.edge_engine_enabled:
+        plan_obj = AdaptiveExitPlan.from_dict(exit_plan)
+        plan_obj = tune_plan_with_edge(
+            plan_obj, edge, snap.spotChart, entry_velocity_3s,
+        )
+        exit_plan = plan_obj.to_dict()
 
     ctx_extra: dict[str, Any] = {
         "selectionScore": round(candidate.score, 2),
         "selectionMode": candidate.mode,
         "lots": lots,
+        "edgeScore": edge.to_dict(),
         "tradeBudgetInr": exit_plan.get("tradeBudgetInr"),
         "exitPlan": exit_plan,
         "executionMode": _execution_mode(settings),
@@ -394,11 +417,13 @@ async def _open_from_candidate(
         ctx_extra["psychologyExitBias"] = snap.psychology.get("exitBias", "BALANCED")
     if getattr(candidate, "pretrade_meta", None):
         ctx_extra["pretrade"] = candidate.pretrade_meta
+    if entry_velocity_3s > 0:
+        ctx_extra["velocity3s"] = entry_velocity_3s
+        ctx_extra["entryVelocity3s"] = entry_velocity_3s
     if candidate.mode == "explosion" and candidate.explosion_event:
         ev = candidate.explosion_event
         ctx_extra.update({
             "explosionTier": ev.tier,
-            "velocity3s": ev.velocity_3s,
             "explosionScore": ev.explosion_score,
         })
     elif candidate.mode == "scalp" and candidate.suggestion:
@@ -634,7 +659,21 @@ async def _process_open_trades(
             plan_dict or trade.strategyType == StrategyType.EXPLOSIVE
         )
 
-        if is_swing and settings.swing_trading_enabled:
+        live_vel = _trade_premium_velocity(snap, trade)
+        if settings.edge_engine_enabled:
+            edge_exit, edge_pnl = check_edge_realtime_exit(
+                trade, eval_premium, snap,
+                current_velocity_3s=live_vel,
+                lot_multiplier=lot_mult,
+            )
+            if edge_exit:
+                exit_reason, pnl = edge_exit, edge_pnl
+            else:
+                exit_reason, pnl = None, 0.0
+        else:
+            exit_reason, pnl = None, 0.0
+
+        if not exit_reason and is_swing and settings.swing_trading_enabled:
             if trade.entryContext is None:
                 trade.entryContext = {}
             pct = ((eval_premium - trade.entryPremium) / trade.entryPremium * 100) if trade.entryPremium else 0
@@ -645,7 +684,7 @@ async def _process_open_trades(
                 )
             else:
                 exit_reason, pnl = evaluate_swing_exit(trade, eval_premium, lot_mult)
-        elif is_explosion and settings.explosion_capture_mode:
+        elif not exit_reason and is_explosion and settings.explosion_capture_mode:
             tier = (trade.entryContext or {}).get("explosionTier") or (
                 "ELITE" if (trade.bestPnlPoints or 0) >= 10 else "EXPLODING"
             )
@@ -657,17 +696,17 @@ async def _process_open_trades(
                     AdaptiveExitPlan.from_dict(plan_dict),
                     tier,
                     lot_mult,
-                    current_velocity_3s=_trade_premium_velocity(snap, trade),
+                    current_velocity_3s=live_vel,
                 )
             else:
                 exit_reason, pnl = evaluate_explosion_exit(trade, eval_premium, tier, lot_mult)
-        elif (trade.entryContext or {}).get("selectionMode") == "quick_sideways":
+        elif not exit_reason and (trade.entryContext or {}).get("selectionMode") == "quick_sideways":
             exit_reason, pnl = evaluate_quick_sideways_exit(trade, eval_premium, lot_mult)
-        elif use_adaptive:
+        elif not exit_reason and use_adaptive:
             exit_reason, pnl = evaluate_adaptive_scalp_exit(
                 trade, eval_premium, AdaptiveExitPlan.from_dict(plan_dict), profile, lot_mult,
             )
-        else:
+        elif not exit_reason:
             exit_reason, pnl = evaluate_exit(trade, eval_premium, profile, lot_mult)
 
         if not exit_reason:
@@ -828,7 +867,21 @@ async def process(
         capital_base=_capital_base_for_stages(),
         trades_today=len(collect_session_trades(state)),
     )
-    state.dailyStrategy = trading_limits.to_dict()
+    edge_fb = session_pf_feedback(state)
+    state.dailyStrategy = {
+        **trading_limits.to_dict(),
+        "edgeSession": {
+            "profitFactor": round(edge_fb.profit_factor, 2),
+            "winRate": round(edge_fb.win_rate, 1),
+            "tradeCount": edge_fb.trade_count,
+            "lotScale": round(edge_fb.lot_scale, 2),
+            "rankPenalty": round(edge_fb.rank_penalty, 1),
+            "tightenExits": edge_fb.tighten_exits,
+            "pauseQuickScalps": edge_fb.pause_quick_scalps,
+            "message": edge_fb.message,
+            "pfTarget": settings.edge_session_pf_target,
+        },
+    }
     set_session_limits(trading_limits)
 
     state.chopGuards = chop_guard_summary(state, snapshots)

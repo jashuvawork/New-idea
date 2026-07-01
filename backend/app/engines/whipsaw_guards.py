@@ -254,6 +254,10 @@ def whipsaw_pause_active(
     _roll_session()
     if momentum_rally_bypass_whipsaw(snapshots):
         return False, "momentum_rally_bypass"
+    from app.engines.morning_premium_capture import morning_capture_active
+
+    if morning_capture_active(snapshots):
+        return False, "morning_capture_bypass"
     _clear_expired_pause()
     if _whipsaw_pause_until is None:
         return False, "ok"
@@ -276,6 +280,11 @@ def check_session_whipsaw_pause(
 
     if momentum_rally_bypass_whipsaw(snapshots):
         return False, "momentum_rally_bypass", {"momentumRallyBypass": True}
+
+    from app.engines.morning_premium_capture import morning_capture_active
+
+    if morning_capture_active(snapshots):
+        return False, "morning_capture_bypass", {"morningCaptureBypass": True}
 
     paused, pause_reason = whipsaw_pause_active(snapshots)
     if paused:
@@ -365,6 +374,11 @@ def check_bearish_sideways_entry(
         tier = str(getattr(candidate, "tier", "") or "")
         score = float(getattr(candidate, "score", 0) or 0)
         if tier in ("ELITE", "EXPLODING") and score >= settings.bearish_sideways_explosion_min_score:
+            return False, "ok"
+        from app.engines.morning_premium_capture import is_morning_capture_event
+
+        event = getattr(candidate, "explosion_event", None)
+        if event and is_morning_capture_event(event, chart=snap.spotChart):
             return False, "ok"
         return True, "bearish_sideways_explosion_only"
 
