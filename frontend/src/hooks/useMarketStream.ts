@@ -97,7 +97,7 @@ function applySnapshot(
     return {
       lastLatencyMs: latency,
       avgLatencyMs: avgStable,
-      lastUpdatedAt: dataChanged ? now : prev.lastUpdatedAt,
+      lastUpdatedAt: now,
       stalenessMs: dataAgeMs,
       pollIntervalMs,
       connectionQuality: quality,
@@ -165,8 +165,8 @@ export function useMarketStream() {
       setMetrics((prev) => {
         const prevBucket = Math.floor(prev.stalenessMs / 1000);
         const quality =
-          prev.streamMode === 'sse' && stale > 8000
-            ? (stale > 15_000 ? 'offline' : 'slow')
+          prev.streamMode === 'sse' && stale > 30_000
+            ? (stale > 60_000 ? 'offline' : 'slow')
             : prev.connectionQuality;
         if (prevBucket === staleBucket && quality === prev.connectionQuality) {
           return prev;
@@ -204,6 +204,7 @@ export function useMarketStream() {
 
     es.onmessage = (ev) => {
       const now = performance.now();
+      lastSuccessAt.current = new Date();
       if (now - lastSseApplyAt.current < SSE_MIN_INTERVAL_MS) {
         return;
       }

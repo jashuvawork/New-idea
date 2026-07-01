@@ -135,7 +135,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <ConnectionStatus metrics={metrics} session={session} />
+            <ConnectionStatus metrics={metrics} session={session} dataReady={Boolean(data?.dataReady)} />
 
             {upstoxBadge ? (
               <span
