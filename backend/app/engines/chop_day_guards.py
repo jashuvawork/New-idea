@@ -306,6 +306,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.simple_profit import get_session_targets
     from app.engines.pretrade_validator import check_last_n_trades_pause, last_n_trades_summary
     from app.engines.whipsaw_guards import whipsaw_guard_summary
+    from app.engines.directional_lock import directional_lock_summary
     from app.engines.confidence_hold import high_confidence_close_summary
     from app.engines.moneyness import resolve_preferred_moneyness
     from app.engines.expiry_day_guards import expiry_guard_summary, is_expiry_session, predict_worst_expiry_day
@@ -352,6 +353,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "lastNTradesPauseReason": last_n_reason if last_n_paused else None,
         "controlledDailyCap": settings.controlled_max_trades_per_day,
         "whipsawGuards": whipsaw_guard_summary(state, snapshots),
+        "directionalLock": directional_lock_summary(snapshots),
         "confidenceHold": high_confidence_close_summary(),
         "moneynessPolicy": {
             "mode": settings.trade_moneyness_mode,
