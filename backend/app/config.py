@@ -422,6 +422,12 @@ class Settings(BaseSettings):
     daily_18pct_expiry_min_rank: float = 65.0
     daily_18pct_full_limit_max_trades: int = 12
 
+    # Day-adaptive engine — trade well on worst, chop, normal, and good days
+    day_adaptive_enabled: bool = True
+    day_adaptive_worst_rank_cap: float = 68.0
+    day_adaptive_chop_rank_cap: float = 70.0
+    day_adaptive_good_day_rank_relief: float = 3.0
+
     def daily_profit_stage_pcts(self) -> list[float]:
         return [float(x.strip()) for x in self.daily_profit_stage_pcts_csv.split(",") if x.strip()]
 

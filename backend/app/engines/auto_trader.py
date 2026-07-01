@@ -868,6 +868,15 @@ async def process(
         trades_today=len(collect_session_trades(state)),
     )
     edge_fb = session_pf_feedback(state)
+    from app.engines.day_adaptive_engine import build_day_adaptive_profile
+
+    day_adaptive = build_day_adaptive_profile(
+        trading_limits.dayMode,
+        trading_limits.confidenceTier,
+        snapshots,
+        phase=trading_limits.phase,
+        state=state,
+    )
     state.dailyStrategy = {
         **trading_limits.to_dict(),
         "edgeSession": {
@@ -881,6 +890,7 @@ async def process(
             "message": edge_fb.message,
             "pfTarget": settings.edge_session_pf_target,
         },
+        "dayAdaptive": day_adaptive.to_dict(),
     }
     set_session_limits(trading_limits)
 

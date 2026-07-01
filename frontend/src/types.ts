@@ -529,6 +529,7 @@ export interface DailyStrategy {
   message?: string;
   playbook?: string[];
   edgeSession?: EdgeSessionFeedback;
+  dayAdaptive?: DayAdaptiveProfile;
 }
 
 export interface EdgeSessionFeedback {
@@ -541,6 +542,21 @@ export interface EdgeSessionFeedback {
   pauseQuickScalps?: boolean;
   message?: string;
   pfTarget?: number;
+}
+
+export interface DayAdaptiveProfile {
+  dayType?: string;
+  dayMode?: string;
+  confidenceTier?: string;
+  preferredModes?: string[];
+  modeBonuses?: Record<string, number>;
+  minRankCap?: number;
+  minRankRelief?: number;
+  lotScaleBoost?: number;
+  allowExplosion?: boolean;
+  allowQuickSideways?: boolean;
+  pauseRegularScalps?: boolean;
+  playbook?: string[];
 }
 
 export interface DailyProfitGate {
