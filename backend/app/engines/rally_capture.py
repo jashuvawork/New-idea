@@ -21,8 +21,6 @@ def breadth_blocks_explosion_side(side: Side | str, breadth_bias: str, tier: str
         return False, "ok"
     bias = (breadth_bias or "NEUTRAL").upper()
     side_v = _side_val(side)
-    if tier == "ELITE":
-        return False, "ok"
     if bias == "BULLISH" and side_v == "PUT":
         return True, "explosion_put_vs_bullish_breadth"
     if bias == "BEARISH" and side_v == "CALL":
@@ -37,8 +35,6 @@ def chart_blocks_explosion_side(side: Side | str, chart: Optional[SpotChart], ti
     direction = (chart.direction or "NEUTRAL").upper()
     side_v = _side_val(side)
     if direction == "NEUTRAL":
-        return False, "ok"
-    if tier == "ELITE":
         return False, "ok"
     if direction == "BULLISH" and side_v == "PUT":
         return True, "explosion_put_vs_bullish_chart"

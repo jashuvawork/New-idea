@@ -333,6 +333,14 @@ def validate_candidate(
     if not ln_ok:
         return False, ln_reason, meta
 
+    from app.engines.directional_lock import check_directional_side_lock
+
+    sym = candidate.symbol.upper()
+    snap = snap_map.get(sym) or candidate.snap
+    dir_blocked, dir_reason = check_directional_side_lock(sym, candidate.side, snap)
+    if dir_blocked:
+        return False, dir_reason, meta
+
     from app.engines.whipsaw_guards import check_whipsaw_candidate
 
     if settings.whipsaw_guards_enabled:

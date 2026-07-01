@@ -79,6 +79,11 @@ def _reentry_blocked(
     blocked, reason = instrument_in_cooldown(symbol, side, strike)
     if blocked:
         return True, reason
+    from app.engines.directional_lock import check_directional_side_lock
+
+    blocked, reason = check_directional_side_lock(symbol, side, snap)
+    if blocked:
+        return True, reason
     if instrument_daily_cap_reached(symbol, side, strike):
         return True, f"instrument_daily_cap_{symbol}_{side.value}_{int(strike)}"
     if requires_breadth_alignment(symbol) and not side_aligned_with_breadth(

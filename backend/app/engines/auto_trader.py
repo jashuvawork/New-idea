@@ -405,6 +405,9 @@ async def _open_from_candidate(
     state.openPaperTrades.append(paper)
     trade_store.record_trade_opened(paper, ctx)
     record_instrument_entry(symbol, candidate.side, candidate.strike)
+    from app.engines.directional_lock import record_trade_side
+
+    record_trade_side(symbol, candidate.side, snap)
     get_ai_learning().record_trade_open(
         paper.id,
         [
