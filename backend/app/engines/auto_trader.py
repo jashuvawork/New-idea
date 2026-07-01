@@ -195,7 +195,8 @@ def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
             return float(runner.signal.premiumVelocityPct or 0)
     top = snap.topExplosion or {}
     if str(top.get("side", "")).upper() == side_v:
-        return float(top.get("velocity3s") or 0)
+        if abs(float(top.get("strike") or 0) - strike) <= 50:
+            return float(top.get("velocity3s") or 0)
     return 0.0
 
 
@@ -850,7 +851,7 @@ async def process(
                 "reason": ctrl_reason,
                 "message": "Controlled trading daily cap",
             })
-        last_n_paused, last_n_reason, last_n_meta = check_last_n_trades_pause(state)
+        last_n_paused, last_n_reason, last_n_meta = check_last_n_trades_pause(state, snapshots)
         if last_n_paused:
             skipped.append({
                 "symbol": "SESSION",

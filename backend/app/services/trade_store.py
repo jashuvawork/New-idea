@@ -280,13 +280,15 @@ def record_trade_closed(trade: PaperTrade, context: Optional[dict] = None) -> No
 
 def record_session_reset(reason: str = "manual_reset", open_trade_ids: Optional[list[str]] = None) -> None:
     """Log session reset — aligns in-memory state with persistent store audit trail."""
+    reset_at = set_session_reset_at()
     payload = {
         "reason": reason,
         "openTradeIds": open_trade_ids or [],
         "sessionDate": _today(),
+        "resetAt": reset_at,
     }
     _append_log("SESSION_RESET", payload)
-    logger.info("SESSION_RESET reason=%s open_trades=%s", reason, len(open_trade_ids or []))
+    logger.info("SESSION_RESET reason=%s open_trades=%s reset_at=%s", reason, len(open_trade_ids or []), reset_at)
 
 
 def close_open_trades_on_reset(reason: str = "SESSION_RESET") -> list[str]:
@@ -468,6 +470,57 @@ def purge_all_trade_data() -> dict[str, Any]:
 
 MILESTONE_BATCH_SIZE = 50
 MILESTONE_META_FILE = "milestone_meta.json"
+SESSION_META_FILE = "session_meta.json"
+
+
+def _session_meta_path() -> Path:
+    return get_store_dir() / SESSION_META_FILE
+
+
+def set_session_reset_at(ts: Optional[datetime] = None) -> str:
+    """Record IST timestamp of session reset — gates ignore trades closed before this."""
+    ts = ts or _now()
+    meta = {"lastResetAt": ts.isoformat(), "sessionDate": _today()}
+    _session_meta_path().write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return meta["lastResetAt"]
+
+
+def get_session_reset_at() -> Optional[datetime]:
+    """Last manual/session reset time, or None if never reset today."""
+    path = _session_meta_path()
+    if path.exists():
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8"))
+            raw = meta.get("lastResetAt")
+            if raw:
+                return datetime.fromisoformat(str(raw))
+        except Exception as exc:
+            logger.warning("Failed to read session meta: %s", exc)
+
+    # Fallback: scan log for most recent SESSION_RESET today
+    log_path = get_log_path()
+    if not log_path.exists():
+        return None
+    today = _today()
+    last_reset: Optional[datetime] = None
+    try:
+        for line in reversed(log_path.read_text(encoding="utf-8").splitlines()):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("event") != "SESSION_RESET":
+                continue
+            ts_raw = str(row.get("ts", ""))
+            if not ts_raw.startswith(today):
+                continue
+            last_reset = datetime.fromisoformat(ts_raw)
+            break
+    except Exception as exc:
+        logger.warning("Failed to scan log for SESSION_RESET: %s", exc)
+    return last_reset
 
 
 def _milestone_meta_path() -> Path:

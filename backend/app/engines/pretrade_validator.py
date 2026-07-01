@@ -42,9 +42,17 @@ def _profit_factor(trades: list[TradeRecord]) -> float:
     return gross_win / gross_loss
 
 
-def _paper_trade_records(state: AutoTraderState) -> list[TradeRecord]:
+def _paper_trade_records(state: AutoTraderState, reset_at: Optional[datetime] = None) -> list[TradeRecord]:
     out: list[TradeRecord] = []
     for t in state.closedPaperTrades:
+        if reset_at:
+            closed_at = t.closedAt
+            if closed_at is None:
+                continue
+            if closed_at.tzinfo is None:
+                closed_at = closed_at.replace(tzinfo=IST)
+            if closed_at <= reset_at:
+                continue
         side = t.side.value if isinstance(t.side, Side) else str(t.side).upper()
         out.append(TradeRecord(
             symbol=t.symbol.upper(),
@@ -59,9 +67,18 @@ def _paper_trade_records(state: AutoTraderState) -> list[TradeRecord]:
 
 def collect_session_trades(state: AutoTraderState) -> list[TradeRecord]:
     """Session closed trades — in-memory plus today's archive (survives restarts)."""
-    records = _paper_trade_records(state)
-    seen = {r.trade_id for r in records if r.trade_id}
     today = datetime.now(IST).strftime("%Y-%m-%d")
+    reset_at: Optional[datetime] = None
+
+    try:
+        from app.services import trade_store
+
+        reset_at = trade_store.get_session_reset_at()
+    except Exception:
+        pass
+
+    records = _paper_trade_records(state, reset_at)
+    seen = {r.trade_id for r in records if r.trade_id}
 
     try:
         from app.services import trade_store
@@ -70,6 +87,17 @@ def collect_session_trades(state: AutoTraderState) -> list[TradeRecord]:
         for row in day.get("trades", []):
             if row.get("status") != "CLOSED":
                 continue
+            exit_reason = str(row.get("exitReason") or "")
+            if exit_reason in ("SESSION_RESET", "manual_reset"):
+                continue
+            closed_raw = row.get("closedAt")
+            if reset_at and closed_raw:
+                try:
+                    closed_at = datetime.fromisoformat(str(closed_raw))
+                    if closed_at <= reset_at:
+                        continue
+                except ValueError:
+                    pass
             tid = str(row.get("id", ""))
             if tid and tid in seen:
                 continue
@@ -77,14 +105,53 @@ def collect_session_trades(state: AutoTraderState) -> list[TradeRecord]:
                 symbol=str(row.get("symbol", "")).upper(),
                 side=str(row.get("side", "")).upper(),
                 pnl_inr=float(row.get("pnlInr") or 0),
-                exit_reason=str(row.get("exitReason") or ""),
+                exit_reason=exit_reason,
                 strike=float(row.get("strike") or 0),
                 trade_id=tid,
             ))
     except Exception:
         pass
 
+    if reset_at:
+        filtered: list[TradeRecord] = []
+        for rec in records:
+            if rec.exit_reason in ("SESSION_RESET", "manual_reset"):
+                continue
+            filtered.append(rec)
+        records = filtered
+
     return records
+
+
+def momentum_rally_bypass_last_n(snapshots: Optional[dict[str, SymbolSnapshot]]) -> bool:
+    """Allow entries during 11:00–13:45 rally when premium velocity is expanding."""
+    if not snapshots:
+        return False
+    settings = get_settings()
+    if not settings.last_n_momentum_rally_bypass_enabled:
+        return False
+    from app.engines.chop_day_guards import in_momentum_rally_window, is_momentum_surge
+
+    if not in_momentum_rally_window():
+        return False
+    for snap in snapshots.values():
+        if not snap.dataAvailable:
+            continue
+        vel = 0.0
+        vol = 1.0
+        score = 0.0
+        runner = snap.explosiveRunner
+        if runner and runner.signal:
+            vel = float(runner.signal.premiumVelocityPct or 0)
+            score = float(runner.score or 0)
+            vol = float(runner.signal.volumeSurge or 1.0)
+        top = snap.topExplosion or {}
+        if top:
+            vel = max(vel, float(top.get("velocity3s") or 0))
+            score = max(score, float(top.get("score") or 0))
+        if is_momentum_surge(vel, vol, score):
+            return True
+    return False
 
 
 def compute_symbol_stats(trades: list[TradeRecord]) -> dict[str, SymbolSessionStats]:
@@ -223,7 +290,10 @@ def last_n_trades_summary(state: AutoTraderState) -> dict[str, Any]:
     return analyze_last_n_trades(trades, n)
 
 
-def check_last_n_trades_pause(state: AutoTraderState) -> tuple[bool, str, dict[str, Any]]:
+def check_last_n_trades_pause(
+    state: AutoTraderState,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+) -> tuple[bool, str, dict[str, Any]]:
     """Session-level pause when last N trades are catastrophic (e.g. 4/5 losses)."""
     settings = get_settings()
     if not settings.last_n_trades_gate_enabled:
@@ -234,6 +304,9 @@ def check_last_n_trades_pause(state: AutoTraderState) -> tuple[bool, str, dict[s
         return False, "ok", last_n_trades_summary(state)
 
     summary = analyze_last_n_trades(trades, settings.last_n_trades_lookback)
+    if momentum_rally_bypass_last_n(snapshots):
+        return False, "momentum_rally_bypass", summary
+
     losses = summary["losses"]
     count = summary["count"]
 

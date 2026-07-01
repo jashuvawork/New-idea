@@ -402,7 +402,9 @@ async def build_symbol_snapshot(
         option_breadth = build_breadth(chain, spot)
 
         constituent_hm = None
-        if get_settings().fetch_constituents_in_snapshot:
+        from app.services.upstox import rate_limit_active
+
+        if get_settings().fetch_constituents_in_snapshot and not rate_limit_active():
             constituent_hm = await build_constituent_heatmap(symbol, client)
             stock_breadth = breadth_from_constituents(constituent_hm)
             breadth = blend_breadth(option_breadth, stock_breadth)

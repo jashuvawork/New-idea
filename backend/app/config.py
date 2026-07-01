@@ -176,6 +176,7 @@ class Settings(BaseSettings):
     last_n_elevated_min_rank_score: float = 72.0
     last_n_block_pf_below: float = 0.35
     last_n_block_net_inr_below: float = -25_000.0
+    last_n_momentum_rally_bypass_enabled: bool = True
 
     # Best trades only — fewer, higher-quality entries
     best_trades_only_enabled: bool = True

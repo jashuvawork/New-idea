@@ -256,3 +256,61 @@ def test_best_trades_blocks_low_rank(mock_settings):
     ok, reason, _ = validate_candidate(_candidate("NIFTY", Side.PUT, score=60), state)
     assert not ok
     assert "best_trades_rank" in reason or "pretrade_rank" in reason
+
+
+@patch("app.engines.pretrade_validator.get_settings")
+def test_session_reset_clears_last_n_gate(mock_settings, tmp_path):
+    from app.engines.pretrade_validator import check_last_n_trades_pause, collect_session_trades
+    from app.services import trade_store
+
+    mock_settings.return_value = _settings()
+    with patch.object(trade_store, "get_store_dir", return_value=tmp_path):
+        state = AutoTraderState()
+        state.closedPaperTrades = [
+            PaperTrade(
+                id="old", symbol="SENSEX", side=Side.CALL, strike=77500,
+                entryPremium=100, currentPremium=90, lots=1,
+                openedAt=datetime.now(IST), strategyType=StrategyType.EXPLOSIVE,
+                pnlInr=-20_000, exitReason="adaptive_stop_loss",
+            )
+        ]
+        trade_store.set_session_reset_at()
+        paused, reason, _ = check_last_n_trades_pause(state)
+        assert not paused
+        assert collect_session_trades(state) == []
+
+
+@patch("app.engines.pretrade_validator.get_settings")
+@patch("app.engines.chop_day_guards.in_momentum_rally_window", return_value=True)
+def test_momentum_rally_bypasses_last_n_pause(mock_rally, mock_settings):
+    from app.engines.pretrade_validator import check_last_n_trades_pause
+    from app.models.schemas import ExplosiveRunner, MarketPhase, RunnerSignal, SymbolSnapshot
+
+    s = _settings()
+    s.last_n_momentum_rally_bypass_enabled = True
+    mock_settings.return_value = s
+    state = AutoTraderState()
+    state.closedPaperTrades = [
+        PaperTrade(
+            id=str(i), symbol="SENSEX", side=Side.CALL, strike=77500,
+            entryPremium=100, currentPremium=80, lots=1,
+            openedAt=datetime.now(IST), strategyType=StrategyType.EXPLOSIVE,
+            pnlInr=-12_000, exitReason="adaptive_stop_loss",
+        )
+        for i in range(3)
+    ]
+    snap = SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        explosiveRunner=ExplosiveRunner(
+            strike=77800,
+            side=Side.CALL,
+            score=55,
+            signal=RunnerSignal(premiumVelocityPct=3.5, volumeSurge=1.6, score=55),
+        ),
+    )
+    paused, reason, _ = check_last_n_trades_pause(state, {"SENSEX": snap})
+    assert not paused
+    assert reason == "momentum_rally_bypass"

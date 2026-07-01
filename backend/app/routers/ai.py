@@ -51,7 +51,15 @@ async def learning_report():
 
 @router.get("/composer/status")
 async def composer_status():
+    from app.engines.expiry_day_guards import is_expiry_session
+    from app.routers.market import get_multi_snapshot
+
     status = monitor_status()
+    try:
+        multi = await get_multi_snapshot(force=False)
+        status["isExpirySession"] = is_expiry_session(multi.snapshots) if multi else None
+    except Exception:
+        status["isExpirySession"] = None
     ping = await get_composer_client().ping()
     status["apiPing"] = ping
     return status
