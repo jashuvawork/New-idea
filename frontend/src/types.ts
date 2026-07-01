@@ -528,6 +528,19 @@ export interface DailyStrategy {
   unlockFullLimits?: boolean;
   message?: string;
   playbook?: string[];
+  edgeSession?: EdgeSessionFeedback;
+}
+
+export interface EdgeSessionFeedback {
+  profitFactor?: number;
+  winRate?: number;
+  tradeCount?: number;
+  lotScale?: number;
+  rankPenalty?: number;
+  tightenExits?: boolean;
+  pauseQuickScalps?: boolean;
+  message?: string;
+  pfTarget?: number;
 }
 
 export interface DailyProfitGate {

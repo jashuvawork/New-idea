@@ -23,6 +23,7 @@ from app.engines.pretrade_validator import (
     last_n_elevated_min_rank,
     last_n_trades_summary,
 )
+from app.engines.edge_engine import compute_entry_edge, edge_rank_bonus, session_pf_feedback
 from app.engines.simple_profit import check_entry_gate
 from app.engines.spot_direction import chart_rank_adjustment
 from app.engines.moneyness import (
@@ -424,6 +425,14 @@ def find_best_entry(
     for c in candidates:
         c.score += symbol_rank_adjustment(c.symbol, chop)
         c.score += index_adj.get(c.symbol.upper(), 0.0)
+        if settings.edge_engine_enabled:
+            edge = compute_entry_edge(c, c.snap, state)
+            c.score += edge_rank_bonus(edge)
+            c.pretrade_meta = {**(c.pretrade_meta or {}), "edgeScore": edge.total}
+
+    pf_fb = session_pf_feedback(state) if settings.edge_engine_enabled else None
+    if pf_fb and pf_fb.pause_quick_scalps:
+        candidates = [c for c in candidates if c.mode != "scalp"]
 
     candidates = filter_candidates_pretrade(candidates, state, snapshots)
     if limits and settings.daily_18pct_strategy_enabled:
@@ -464,6 +473,8 @@ def find_best_entry(
     best = max(candidates, key=sort_key)
     floor = min_rank_for_entry(chop, snapshots)
     floor = max(floor, last_n_elevated_min_rank(state))
+    if pf_fb and settings.edge_engine_enabled and pf_fb.rank_penalty > 0:
+        floor += pf_fb.rank_penalty
     if limits and settings.daily_18pct_strategy_enabled:
         floor = max(floor, limits.minRankScore)
     from app.engines.morning_premium_capture import in_morning_premium_capture_window, morning_capture_rank_floor

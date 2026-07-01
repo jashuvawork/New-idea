@@ -443,6 +443,18 @@ class Settings(BaseSettings):
     adaptive_exits_enabled: bool = True
     ml_exit_tuning_enabled: bool = True
 
+    # Edge engine — realtime statistical entry scoring + 2.5+ PF feedback loop
+    edge_engine_enabled: bool = True
+    edge_session_pf_target: float = 2.5
+    edge_session_pf_tighten_below: float = 1.5
+    edge_min_score_for_full_size: float = 72.0
+    edge_min_score_for_entry: float = 52.0
+    edge_lot_scale_min: float = 0.45
+    edge_lot_scale_max: float = 1.0
+    edge_velocity_exhaustion_ratio: float = 0.35
+    edge_rsi_overbought_exit: float = 72.0
+    edge_macd_fade_exit_enabled: bool = True
+
     symbols_csv: str = Field(default="NIFTY,SENSEX", validation_alias="SYMBOLS")
 
     @computed_field

@@ -107,6 +107,9 @@ export function TomorrowPlaybookPanel({
   const maxTrades = Number(strategy.maxTradesToday ?? 10);
   const closed = chop.closedTrades ?? auto.closedPaperTrades?.length ?? 0;
   const lotMult = Number(strategy.lotSizeMultiplier ?? 1);
+  const edge = strategy.edgeSession;
+  const sessionPf = Number(edge?.profitFactor ?? 0);
+  const pfTarget = Number(edge?.pfTarget ?? 2.5);
 
   const morningCapture = morningCaptureWindowActive();
   const momentumRally = momentumRallyWindowActive() || Boolean(chop.momentumRallyWindow);
@@ -160,6 +163,21 @@ export function TomorrowPlaybookPanel({
           </div>
           <div className="text-nexus-muted">lots ×{lotMult.toFixed(2)}</div>
         </div>
+        {edge ? (
+          <div className="p-2 rounded bg-black/30 col-span-2 sm:col-span-4">
+            <div className="text-nexus-muted uppercase mb-0.5">Edge engine (PF target {pfTarget})</div>
+            <div className="flex flex-wrap gap-3 font-mono text-[10px]">
+              <span className={sessionPf >= pfTarget ? 'text-nexus-green' : sessionPf >= 1.5 ? 'text-nexus-yellow' : 'text-nexus-red'}>
+                PF {sessionPf > 0 ? sessionPf.toFixed(2) : '—'}
+              </span>
+              <span className="text-white">WR {Number(edge.winRate ?? 0).toFixed(0)}%</span>
+              <span className="text-nexus-muted">n={edge.tradeCount ?? 0}</span>
+              <span className="text-white">lot ×{Number(edge.lotScale ?? 1).toFixed(2)}</span>
+              {edge.tightenExits ? <span className="text-nexus-yellow">tight exits</span> : null}
+              {edge.pauseQuickScalps ? <span className="text-nexus-red">no quick scalps</span> : null}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {gate ? (
