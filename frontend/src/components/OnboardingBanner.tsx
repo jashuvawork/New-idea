@@ -21,6 +21,10 @@ export function OnboardingBanner({
     return t >= 9 * 60 && t < 9 * 60 + 15;
   })();
 
+  const isRateLimited = Boolean(
+    waitingReason && /cooling down|rate limit|429/i.test(waitingReason),
+  );
+
   const steps = [
     {
       label: 'Server connected',
@@ -35,11 +39,17 @@ export function OnboardingBanner({
       actionLabel: 'Connect Upstox',
     },
     {
-      label: premarketHours ? 'Premarket analysis active' : 'Live market data',
+      label: isRateLimited
+        ? 'Market data paused'
+        : premarketHours
+          ? 'Premarket analysis active'
+          : 'Live market data',
       done: dataReady,
-      hint: premarketHours
-        ? 'Gap, volume & constituent breadth — prepare for 9:15 open'
-        : waitingReason || 'Waiting for market hours and real prices',
+      hint: isRateLimited
+        ? waitingReason
+        : premarketHours
+          ? 'Gap, volume & constituent breadth — prepare for 9:15 open'
+          : waitingReason || 'Waiting for market hours and real prices',
     },
   ];
 

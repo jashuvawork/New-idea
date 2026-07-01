@@ -39,13 +39,13 @@ class Settings(BaseSettings):
     # Data cadence — sub-second when WebSocket active; ms intervals override *_seconds
     market_poll_seconds: int = 1
     snapshot_cache_seconds: int = 1
-    market_poll_interval_ms: int = 250
-    market_poll_interval_ws_ms: int = 50
-    tick_snapshot_interval_ms: int = 50
-    snapshot_cache_interval_ms: int = 200
-    tick_wake_debounce_ms: int = 10
+    market_poll_interval_ms: int = 300
+    market_poll_interval_ws_ms: int = 75
+    tick_snapshot_interval_ms: int = 75
+    snapshot_cache_interval_ms: int = 250
+    tick_wake_debounce_ms: int = 15
     tick_fast_exit_enabled: bool = True
-    entry_scan_interval_ms: int = 250
+    entry_scan_interval_ms: int = 350
     tick_overlay_max_age_seconds: float = 1.0
     news_cache_seconds: int = 60
     background_market_monitor_enabled: bool = True
@@ -77,10 +77,10 @@ class Settings(BaseSettings):
     sse_heartbeat_seconds: int = 1
 
     # Upstox rate limiting / caching
-    upstox_min_request_interval_ms: int = 50
+    upstox_min_request_interval_ms: int = 100
     upstox_request_retries: int = 4
-    upstox_rate_limit_cooldown_seconds: int = 45
-    upstox_chain_cache_seconds: int = 5
+    upstox_rate_limit_cooldown_seconds: int = 30
+    upstox_chain_cache_seconds: int = 8
     upstox_ltp_cache_seconds: int = 1
     upstox_expiries_cache_seconds: int = 600
     upstox_funds_cache_seconds: int = 90
