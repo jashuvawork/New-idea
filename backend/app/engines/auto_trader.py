@@ -139,6 +139,10 @@ def _attach_exit_plan(
     side: str,
     confidence: float,
     news: Optional[list[dict]] = None,
+    *,
+    entry_premium: Optional[float] = None,
+    entry_velocity_3s: Optional[float] = None,
+    explosion_tier: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build ML + psychology adaptive SL/TP plan for a new trade."""
     settings = get_settings()
@@ -161,9 +165,65 @@ def _attach_exit_plan(
 
     profile = snap.optimizedProfile or get_session_targets()
     plan = compute_adaptive_exit_plan(
-        snap, strategy_type, psychology, profile, side=side, confidence=confidence, news=news,
+        snap,
+        strategy_type,
+        psychology,
+        profile,
+        side=side,
+        confidence=confidence,
+        news=news,
+        entry_premium=entry_premium,
+        entry_velocity_3s=entry_velocity_3s,
+        explosion_tier=explosion_tier,
     )
     return plan.to_dict()
+
+
+def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
+    """Live premium velocity % for this leg — used to avoid adaptive SL during expansion."""
+    side_v = trade.side.value
+    strike = trade.strike
+    for entry in snap.explosiveRunnerWatchlist or []:
+        if str(entry.get("side", "")).upper() != side_v:
+            continue
+        if abs(float(entry.get("strike") or 0) - strike) > 0.5:
+            continue
+        return float(entry.get("premiumVelocityPct") or 0)
+    runner = snap.explosiveRunner
+    if runner and runner.side == trade.side and runner.signal:
+        if abs(float(runner.strike or 0) - strike) <= 0.5:
+            return float(runner.signal.premiumVelocityPct or 0)
+    top = snap.topExplosion or {}
+    if str(top.get("side", "")).upper() == side_v:
+        return float(top.get("velocity3s") or 0)
+    return 0.0
+
+
+def _exit_plan_for_trade(
+    trade: PaperTrade,
+    snap: SymbolSnapshot,
+    news: Optional[list[dict]] = None,
+) -> dict[str, Any]:
+    """Resolve or rebuild per-trade adaptive exit plan."""
+    ctx = trade.entryContext or {}
+    plan_dict = ctx.get("exitPlan")
+    if plan_dict:
+        return plan_dict
+    if not get_settings().adaptive_exits_enabled:
+        return {}
+    confidence = float(
+        ctx.get("explosionScore") or ctx.get("confidence") or ctx.get("selectionScore") or 70,
+    )
+    return _attach_exit_plan(
+        snap,
+        trade.strategyType,
+        trade.side.value,
+        confidence,
+        news,
+        entry_premium=trade.entryPremium,
+        entry_velocity_3s=float(ctx.get("velocity3s") or 0) or None,
+        explosion_tier=ctx.get("explosionTier"),
+    )
 
 
 def _execution_mode(settings) -> str:
@@ -281,6 +341,13 @@ async def _open_from_candidate(
     exit_plan = _attach_exit_plan(
         snap, candidate.strategy_type, candidate.side.value,
         candidate.confidence, news,
+        entry_premium=fill_premium,
+        entry_velocity_3s=(
+            candidate.explosion_event.velocity_3s if candidate.explosion_event else None
+        ),
+        explosion_tier=(
+            candidate.explosion_event.tier if candidate.explosion_event else None
+        ),
     )
     exit_plan = tune_exit_plan_for_position(exit_plan, lots, fill_premium, symbol)
 
@@ -550,7 +617,9 @@ async def _process_open_trades(
         is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
         is_swing = trade.strategyType == StrategyType.SWING
         plan_dict = (trade.entryContext or {}).get("exitPlan")
-        use_adaptive = settings.adaptive_exits_enabled and plan_dict
+        use_adaptive = settings.adaptive_exits_enabled and (
+            plan_dict or trade.strategyType == StrategyType.EXPLOSIVE
+        )
 
         if is_swing and settings.swing_trading_enabled:
             if trade.entryContext is None:
@@ -564,10 +633,18 @@ async def _process_open_trades(
             else:
                 exit_reason, pnl = evaluate_swing_exit(trade, eval_premium, lot_mult)
         elif is_explosion and settings.explosion_capture_mode:
-            tier = "ELITE" if (trade.bestPnlPoints or 0) >= 10 else "EXPLODING"
+            tier = (trade.entryContext or {}).get("explosionTier") or (
+                "ELITE" if (trade.bestPnlPoints or 0) >= 10 else "EXPLODING"
+            )
             if use_adaptive:
+                plan_dict = _exit_plan_for_trade(trade, snap, news=None)
                 exit_reason, pnl = evaluate_adaptive_explosion_exit(
-                    trade, eval_premium, AdaptiveExitPlan.from_dict(plan_dict), tier, lot_mult,
+                    trade,
+                    eval_premium,
+                    AdaptiveExitPlan.from_dict(plan_dict),
+                    tier,
+                    lot_mult,
+                    current_velocity_3s=_trade_premium_velocity(snap, trade),
                 )
             else:
                 exit_reason, pnl = evaluate_explosion_exit(trade, eval_premium, tier, lot_mult)
@@ -629,7 +706,8 @@ async def _process_open_trades(
             "explosion_emergency_stop",
             "explosion_time_stop",
             "explosion_trail_sl",
-            "adaptive_sl",
+            "adaptive_stop_loss",
+            "adaptive_trail_sl",
         ) and pnl < 0:
             cooldown = (
                 settings.explosion_emergency_cooldown_seconds

@@ -24,6 +24,7 @@ class ExplosionExitParams:
     trail_arm_points: float
     trail_keep_ratio: float
     micro_target_points: float = 3.0
+    adaptive_stop: bool = False  # per-trade plan — no fixed explosion_stop_loss
 
 
 def default_explosion_exit_params(event_tier: str = "EXPLODING") -> ExplosionExitParams:
@@ -38,7 +39,7 @@ def default_explosion_exit_params(event_tier: str = "EXPLODING") -> ExplosionExi
 
 
 def explosion_exit_params_from_plan(plan, event_tier: str = "EXPLODING") -> ExplosionExitParams:
-    """Map adaptive exit plan onto explosion exit knobs."""
+    """Map adaptive exit plan onto explosion exit knobs — per-trade SL, no fixed stop."""
     base = default_explosion_exit_params(event_tier)
     return ExplosionExitParams(
         stop_points=plan.stopPoints or base.stop_points,
@@ -46,6 +47,7 @@ def explosion_exit_params_from_plan(plan, event_tier: str = "EXPLODING") -> Expl
         trail_arm_points=plan.trailArmPoints or base.trail_arm_points,
         trail_keep_ratio=plan.trailKeepRatio or base.trail_keep_ratio,
         micro_target_points=plan.microTargetPoints or base.micro_target_points,
+        adaptive_stop=True,
     )
 
 
@@ -249,7 +251,12 @@ def evaluate_explosion_exit(
         else exit_params.trail_keep_ratio
     )
 
-    if trail_floor is None and hold >= settings.explosion_stop_min_hold_seconds and pnl_pts <= -exit_params.stop_points:
+    if (
+        not exit_params.adaptive_stop
+        and trail_floor is None
+        and hold >= settings.explosion_stop_min_hold_seconds
+        and pnl_pts <= -exit_params.stop_points
+    ):
         return "explosion_stop_loss", pnl_inr
 
     if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
