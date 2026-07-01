@@ -107,7 +107,10 @@ def check_explosion_entry(
         return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
 
     if event.tier not in ("EXPLODING", "ELITE"):
-        return False, f"tier_{event.tier}_not_tradeable"
+        from app.engines.morning_premium_capture import is_morning_capture_event
+
+        if not is_morning_capture_event(event, chart=chart):
+            return False, f"tier_{event.tier}_not_tradeable"
 
     if event.velocity_3s < 2.0 and event.velocity_9s < 3.0:
         return False, "velocity_too_low"

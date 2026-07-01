@@ -271,6 +271,13 @@ def compute_trading_limits(
     if trades_today >= limits.maxTradesToday:
         playbook.append(f"Daily trade cap reached ({trades_today}/{limits.maxTradesToday})")
 
+    from app.engines.morning_premium_capture import in_morning_premium_capture_window, morning_capture_active
+
+    if in_morning_premium_capture_window() and morning_capture_active(snapshots):
+        limits.allowExplosion = True
+        limits.minRankScore = min(limits.minRankScore, settings.morning_capture_min_rank_score)
+        playbook.append("Morning premium capture — BUILDING+ explosions enabled")
+
     limits.playbook = playbook
     limits.message = (
         f"{phase} · {tier} conf ({conf_score:.0f}) · "
