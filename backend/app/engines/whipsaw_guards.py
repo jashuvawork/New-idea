@@ -15,23 +15,84 @@ IST = ZoneInfo("Asia/Kolkata")
 
 _last_close_by_symbol: dict[str, dict[str, Any]] = {}
 _whipsaw_pause_until: Optional[datetime] = None
+_whipsaw_dual_cooldown_until: Optional[datetime] = None
 _session_date: Optional[str] = None
 
 
 def _roll_session() -> None:
-    global _session_date, _last_close_by_symbol, _whipsaw_pause_until
+    global _session_date, _last_close_by_symbol, _whipsaw_pause_until, _whipsaw_dual_cooldown_until
     today = datetime.now(IST).strftime("%Y-%m-%d")
     if _session_date != today:
         _session_date = today
         _last_close_by_symbol.clear()
         _whipsaw_pause_until = None
+        _whipsaw_dual_cooldown_until = None
 
 
 def reset_whipsaw_guards() -> None:
-    global _session_date, _last_close_by_symbol, _whipsaw_pause_until
+    global _session_date, _last_close_by_symbol, _whipsaw_pause_until, _whipsaw_dual_cooldown_until
     _last_close_by_symbol.clear()
     _whipsaw_pause_until = None
+    _whipsaw_dual_cooldown_until = None
     _session_date = None
+
+
+def momentum_rally_bypass_whipsaw(snapshots: Optional[dict[str, SymbolSnapshot]]) -> bool:
+    """Allow entries during 11:00–13:45 rally when premium velocity is expanding."""
+    if not snapshots:
+        return False
+    settings = get_settings()
+    if not settings.whipsaw_momentum_rally_bypass_enabled:
+        return False
+    from app.engines.chop_day_guards import in_momentum_rally_window, is_momentum_surge
+
+    if not in_momentum_rally_window():
+        return False
+    for snap in snapshots.values():
+        if not snap.dataAvailable:
+            continue
+        vel = 0.0
+        vol = 1.0
+        score = 0.0
+        runner = snap.explosiveRunner
+        if runner and runner.signal:
+            vel = float(runner.signal.premiumVelocityPct or 0)
+            score = float(runner.score or 0)
+            vol = float(runner.signal.volumeSurge or 1.0)
+        top = snap.topExplosion or {}
+        if top:
+            vel = max(vel, float(top.get("velocity3s") or 0))
+            score = max(score, float(top.get("score") or 0))
+        if is_momentum_surge(vel, vol, score):
+            return True
+    return False
+
+
+def _clear_expired_pause() -> None:
+    """Drop expired timer and start dual-leg retrigger cooldown."""
+    global _whipsaw_pause_until, _whipsaw_dual_cooldown_until
+    if _whipsaw_pause_until is None:
+        return
+    now = datetime.now(IST)
+    until = _whipsaw_pause_until if _whipsaw_pause_until.tzinfo else _whipsaw_pause_until.replace(tzinfo=IST)
+    if now >= until.astimezone(IST):
+        settings = get_settings()
+        _whipsaw_pause_until = None
+        cooldown = max(0, settings.whipsaw_dual_retrigger_cooldown_seconds)
+        if cooldown > 0:
+            _whipsaw_dual_cooldown_until = now + timedelta(seconds=cooldown)
+
+
+def _dual_retrigger_blocked() -> bool:
+    if _whipsaw_dual_cooldown_until is None:
+        return False
+    now = datetime.now(IST)
+    until = (
+        _whipsaw_dual_cooldown_until
+        if _whipsaw_dual_cooldown_until.tzinfo
+        else _whipsaw_dual_cooldown_until.replace(tzinfo=IST)
+    )
+    return now < until.astimezone(IST)
 
 
 def _side_val(side: Side | str) -> str:
@@ -184,11 +245,16 @@ def trigger_whipsaw_pause(seconds: int, reason: str) -> None:
         _whipsaw_pause_until = until
 
 
-def whipsaw_pause_active() -> tuple[bool, str]:
+def whipsaw_pause_active(
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+) -> tuple[bool, str]:
     settings = get_settings()
     if not settings.whipsaw_guards_enabled:
         return False, "ok"
     _roll_session()
+    if momentum_rally_bypass_whipsaw(snapshots):
+        return False, "momentum_rally_bypass"
+    _clear_expired_pause()
     if _whipsaw_pause_until is None:
         return False, "ok"
     now = datetime.now(IST)
@@ -208,7 +274,10 @@ def check_session_whipsaw_pause(
     if not settings.whipsaw_guards_enabled:
         return False, "ok", {}
 
-    paused, pause_reason = whipsaw_pause_active()
+    if momentum_rally_bypass_whipsaw(snapshots):
+        return False, "momentum_rally_bypass", {"momentumRallyBypass": True}
+
+    paused, pause_reason = whipsaw_pause_active(snapshots)
     if paused:
         return True, pause_reason, {"whipsawPaused": True}
 
@@ -238,12 +307,44 @@ def check_session_whipsaw_pause(
     if dual_symbols and is_bearish_sideways_session(snapshots):
         from app.engines.expiry_day_guards import expiry_dual_scalp_active
 
-        if not expiry_dual_scalp_active(snapshots):
+        if not expiry_dual_scalp_active(snapshots) and not _dual_retrigger_blocked():
             trigger_whipsaw_pause(settings.ce_pe_whipsaw_pause_seconds, "dual_leg_whipsaw")
             meta["dualLegSymbols"] = dual_symbols
             return True, f"ce_pe_whipsaw_{','.join(dual_symbols)}", meta
 
     return False, "ok", meta
+
+
+def whipsaw_session_status(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> dict[str, Any]:
+    """Read-only whipsaw status — does not trigger new pauses (safe for UI summaries)."""
+    settings = get_settings()
+    trades = collect_session_trades(state)
+    bypass = momentum_rally_bypass_whipsaw(snapshots)
+    paused, pause_reason = whipsaw_pause_active(snapshots)
+
+    dual_active: dict[str, Any] = {}
+    for sym, snap in snapshots.items():
+        if not snap.dataAvailable:
+            continue
+        active, detail = detect_ce_pe_whipsaw(snap)
+        if active:
+            dual_active[sym] = detail
+
+    return {
+        "enabled": settings.whipsaw_guards_enabled,
+        "bearishSideways": is_bearish_sideways_session(snapshots),
+        "whipsawPaused": paused and not bypass,
+        "whipsawPauseReason": pause_reason if paused and not bypass else None,
+        "momentumRallyBypass": bypass,
+        "flipFlops": count_flip_flops(trades, settings.flip_flop_lookback_trades),
+        "flipFlopLookback": settings.flip_flop_lookback_trades,
+        "dualLegWhipsaw": dual_active,
+        "dualRetriggerCooldown": _dual_retrigger_blocked(),
+        "oppositeSideCooldownSeconds": settings.opposite_side_cooldown_seconds,
+    }
 
 
 def check_bearish_sideways_entry(
@@ -320,27 +421,4 @@ def whipsaw_guard_summary(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
 ) -> dict[str, Any]:
-    settings = get_settings()
-    trades = collect_session_trades(state)
-    paused, pause_reason = whipsaw_pause_active()
-    _, _, session_meta = check_session_whipsaw_pause(state, snapshots)
-
-    dual_active: dict[str, Any] = {}
-    for sym, snap in snapshots.items():
-        if not snap.dataAvailable:
-            continue
-        active, detail = detect_ce_pe_whipsaw(snap)
-        if active:
-            dual_active[sym] = detail
-
-    return {
-        "enabled": settings.whipsaw_guards_enabled,
-        "bearishSideways": is_bearish_sideways_session(snapshots),
-        "whipsawPaused": paused,
-        "whipsawPauseReason": pause_reason if paused else None,
-        "flipFlops": count_flip_flops(trades, settings.flip_flop_lookback_trades),
-        "flipFlopLookback": settings.flip_flop_lookback_trades,
-        "dualLegWhipsaw": dual_active,
-        "oppositeSideCooldownSeconds": settings.opposite_side_cooldown_seconds,
-        **session_meta,
-    }
+    return whipsaw_session_status(state, snapshots)

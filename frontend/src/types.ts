@@ -356,6 +356,8 @@ export interface ComposerMonitorStatus {
   historyCount?: number;
   apiPing?: { ok?: boolean; reason?: string };
   latest?: ComposerBrief | null;
+  tradingBlockers?: { symbol?: string; reason?: string; message?: string }[];
+  composerAdvisoryOnly?: boolean;
 }
 
 export interface LastNTradesSummary {

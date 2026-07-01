@@ -51,10 +51,25 @@ async def learning_report():
 
 @router.get("/composer/status")
 async def composer_status():
+    from app.engines.auto_trader import get_state
     from app.engines.expiry_day_guards import is_expiry_session
     from app.routers.market import get_multi_snapshot
 
     status = monitor_status()
+    state = get_state()
+    skipped = state.skipped or []
+    status["tradingBlockers"] = [
+        {
+            "symbol": s.get("symbol"),
+            "reason": s.get("reason"),
+            "message": s.get("message"),
+        }
+        for s in skipped
+        if s.get("symbol") == "SESSION" or s.get("reason", "").startswith(
+            ("whipsaw_", "last_n_", "loss_streak", "controlled_", "daily_", "STAGE", "TRAIL", "expiry")
+        )
+    ]
+    status["composerAdvisoryOnly"] = True
     try:
         multi = await get_multi_snapshot(force=False)
         status["isExpirySession"] = is_expiry_session(multi.snapshots) if multi else None

@@ -38,6 +38,8 @@ def _settings():
     s.ce_pe_whipsaw_pause_seconds = 900
     s.flip_flop_lookback_trades = 6
     s.flip_flop_max_opposites = 2
+    s.whipsaw_momentum_rally_bypass_enabled = True
+    s.whipsaw_dual_retrigger_cooldown_seconds = 300
     s.bearish_sideways_halt_enabled = True
     s.bearish_sideways_block_scalps = True
     s.bearish_sideways_explosion_min_score = 78.0
@@ -163,6 +165,32 @@ def test_flip_flop_pause(mock_settings):
         paused, reason, _ = check_session_whipsaw_pause(state, snapshots)
     assert paused is True
     assert "flip_flop" in reason
+
+
+@patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
+@patch("app.engines.chop_day_guards.in_momentum_rally_window", return_value=True)
+@patch("app.engines.chop_day_guards.is_momentum_surge", return_value=True)
+def test_momentum_rally_bypasses_whipsaw_pause(mock_surge, mock_window, mock_settings):
+    from app.engines.whipsaw_guards import trigger_whipsaw_pause, whipsaw_pause_active
+
+    trigger_whipsaw_pause(900, "flip_flop_churn")
+    paused, reason = whipsaw_pause_active({"NIFTY": _snap()})
+    assert not paused
+    assert reason == "momentum_rally_bypass"
+
+
+@patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
+def test_whipsaw_summary_does_not_trigger_pause(mock_settings):
+    from app.engines.whipsaw_guards import whipsaw_guard_summary, whipsaw_pause_active
+
+    state = AutoTraderState()
+    snapshots = {"NIFTY": _snap("NIFTY")}
+    assert not whipsaw_pause_active(snapshots)[0]
+    whipsaw_guard_summary(state, snapshots)
+    assert not whipsaw_pause_active(snapshots)[0]
+    paused, reason, _ = check_session_whipsaw_pause(state, snapshots)
+    assert paused
+    assert "ce_pe_whipsaw" in reason or "flip_flop" in reason
 
 
 @patch("app.engines.pretrade_validator.get_settings", return_value=_settings())

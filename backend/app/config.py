@@ -195,6 +195,8 @@ class Settings(BaseSettings):
     ce_pe_whipsaw_pause_seconds: int = 900
     flip_flop_lookback_trades: int = 6
     flip_flop_max_opposites: int = 2
+    whipsaw_momentum_rally_bypass_enabled: bool = True
+    whipsaw_dual_retrigger_cooldown_seconds: int = 300
     bearish_sideways_halt_enabled: bool = True
     bearish_sideways_block_scalps: bool = True
     bearish_sideways_explosion_min_score: float = 78.0
