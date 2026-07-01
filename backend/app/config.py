@@ -388,14 +388,32 @@ class Settings(BaseSettings):
     scalp_micro_giveback_points: float = 3.0
     scalp_no_progress_seconds: int = 150
 
-    # Daily target — Jun 25 milestone profile
-    daily_profit_target_inr: float = 44_000
+    # Daily target — 18% of capital per session (confidence-gated full limits)
+    daily_profit_target_from_capital: bool = True
+    daily_profit_target_pct: float = 0.18
+    daily_profit_target_inr: float = 44_000  # fallback when pct mode off
     daily_profit_trail_inr: float = 5_000  # legacy; unused when stage locks enabled
     daily_profit_stage_locks_enabled: bool = True
     daily_profit_stage_pcts_csv: str = "0.55,0.88,1.12"  # env: DAILY_PROFIT_STAGE_PCTS
+    daily_profit_stage_from_target: bool = True
+    daily_profit_stage_target_mults_csv: str = "0.5,1.0,1.5"  # locks at 9%, 18%, 27% of cap
+
+    # Daily 18% strategy — progressive playbook across all day types
+    daily_18pct_strategy_enabled: bool = True
+    daily_18pct_medium_confidence_min: float = 55.0
+    daily_18pct_high_confidence_min: float = 72.0
+    daily_18pct_elite_confidence_min: float = 85.0
+    daily_18pct_unlock_full_limits_min_confidence: float = 78.0
+    daily_18pct_chop_max_trades: int = 10
+    daily_18pct_expiry_max_trades: int = 5
+    daily_18pct_expiry_min_rank: float = 65.0
+    daily_18pct_full_limit_max_trades: int = 12
 
     def daily_profit_stage_pcts(self) -> list[float]:
         return [float(x.strip()) for x in self.daily_profit_stage_pcts_csv.split(",") if x.strip()]
+
+    def daily_profit_stage_target_mults(self) -> list[float]:
+        return [float(x.strip()) for x in self.daily_profit_stage_target_mults_csv.split(",") if x.strip()]
 
     use_upstox_capital_for_sizing: bool = True  # paper parity uses real margin when token present
 

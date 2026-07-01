@@ -7,7 +7,14 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
+from app.engines.daily_18pct_strategy import (
+    compute_trading_limits,
+    scale_lots_for_limits,
+    set_session_limits,
+    get_session_limits,
+)
 from app.engines.daily_profit_strategy import DailyCalibration
+from app.engines.capital_allocator import _capital_base_for_stages
 from app.engines.ai_learning import get_ai_learning
 from app.engines.risk_engine import RiskEngine
 from app.engines.explosion_profit import evaluate_explosion_exit, record_explosion_stop
@@ -295,6 +302,9 @@ async def _open_from_candidate(
         ),
         volume_surge=(candidate.explosion_event.volume_surge if candidate.explosion_event else 1.0),
     )
+    limits = get_session_limits()
+    if limits is not None:
+        lots = scale_lots_for_limits(lots, limits)
     if lots <= 0:
         return False, "tiered_lot_cap_zero"
     lot_mult = lot_multiplier(symbol)
@@ -808,6 +818,19 @@ async def process(
     cap_snap = get_capital_snapshot()
     state.capitalAllocation = {**cap_snap.to_dict(), **get_lot_sizes_meta()}
     state.dailyProfitGate = profit_gate.to_dict()
+
+    from app.engines.pretrade_validator import collect_session_trades
+    session_pnl = compute_session_pnl(state)
+    trading_limits = compute_trading_limits(
+        snapshots,
+        state,
+        session_pnl=session_pnl,
+        capital_base=_capital_base_for_stages(),
+        trades_today=len(collect_session_trades(state)),
+    )
+    state.dailyStrategy = trading_limits.to_dict()
+    set_session_limits(trading_limits)
+
     state.chopGuards = chop_guard_summary(state, snapshots)
 
     if not profit_gate.newEntriesAllowed:
@@ -883,7 +906,7 @@ async def process(
                 or "Expiry-day entry blocked",
             })
         if not paused and not cap_hit and not ctrl_cap and not last_n_paused and not whipsaw_paused and expiry_ok:
-            best = find_best_entry(snapshots, state)
+            best = find_best_entry(snapshots, state, trading_limits)
             if best:
                 opened, reason = await _open_from_candidate(best, state, client, news)
                 if not opened:

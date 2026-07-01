@@ -15,19 +15,36 @@ IST = ZoneInfo("Asia/Kolkata")
 NOW = datetime.now(IST)
 
 
+def _legacy_settings():
+    return type(
+        "S",
+        (),
+        {
+            "daily_profit_target_inr": 22_000,
+            "daily_profit_target_from_capital": False,
+            "daily_profit_trail_inr": 5_000,
+            "daily_profit_stage_locks_enabled": True,
+            "daily_profit_stage_from_target": False,
+            "daily_profit_stage_pcts": [0.55, 0.88, 1.12],
+            "daily_loss_stop_inr": 0,
+            "max_sizing_capital_inr": 200_000,
+            "fallback_capital_inr": 200_000,
+        },
+    )()
+
+
 class StageLockTests(unittest.TestCase):
     def test_stage_thresholds_on_2l_capital(self):
-        base = 200_000
-        pcts = [0.55, 0.88, 1.12]
-        _, floor, stage = _compute_stage_lock(120_000, 120_000, 0, base, pcts)
+        thresholds = [110_000, 176_000, 224_000]
+        _, floor, stage = _compute_stage_lock(120_000, 120_000, 0, thresholds)
         self.assertEqual(stage, 1)
         self.assertAlmostEqual(floor, 110_000, places=0)
 
-        _, floor, stage = _compute_stage_lock(180_000, 180_000, 1, base, pcts)
+        _, floor, stage = _compute_stage_lock(180_000, 180_000, 1, thresholds)
         self.assertEqual(stage, 2)
         self.assertEqual(floor, 176_000)
 
-        _, floor, stage = _compute_stage_lock(230_000, 230_000, 2, base, pcts)
+        _, floor, stage = _compute_stage_lock(230_000, 230_000, 2, thresholds)
         self.assertEqual(stage, 4)
         self.assertEqual(floor, 230_000)
 
@@ -48,19 +65,7 @@ class StageLockTests(unittest.TestCase):
                 sessionDate=NOW.strftime("%Y-%m-%d"),
             )
         ]
-        settings = type(
-            "S",
-            (),
-            {
-                "daily_profit_target_inr": 22_000,
-                "daily_profit_trail_inr": 5_000,
-                "daily_profit_stage_locks_enabled": True,
-                "daily_profit_stage_pcts": [0.55, 0.88, 1.12],
-                "max_sizing_capital_inr": 200_000,
-                "fallback_capital_inr": 200_000,
-            },
-        )()
-        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+        with patch("app.engines.capital_allocator.get_settings", return_value=_legacy_settings()):
             with patch("app.engines.capital_allocator._session_date", NOW.strftime("%Y-%m-%d")):
                 with patch("app.engines.capital_allocator._best_pnl", 120_000):
                     with patch("app.engines.capital_allocator._highest_stage", 1):
@@ -86,19 +91,7 @@ class StageLockTests(unittest.TestCase):
                 sessionDate=NOW.strftime("%Y-%m-%d"),
             )
         ]
-        settings = type(
-            "S",
-            (),
-            {
-                "daily_profit_target_inr": 22_000,
-                "daily_profit_trail_inr": 5_000,
-                "daily_profit_stage_locks_enabled": True,
-                "daily_profit_stage_pcts": [0.55, 0.88, 1.12],
-                "max_sizing_capital_inr": 200_000,
-                "fallback_capital_inr": 200_000,
-            },
-        )()
-        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+        with patch("app.engines.capital_allocator.get_settings", return_value=_legacy_settings()):
             gate = update_daily_profit_gate(state)
             self.assertTrue(gate.newEntriesAllowed)
             self.assertTrue(gate.minTargetHit)

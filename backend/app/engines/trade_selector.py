@@ -378,6 +378,7 @@ def _swing_candidates(
 def find_best_entry(
     snapshots: dict[str, SymbolSnapshot],
     state: AutoTraderState,
+    limits: Optional[Any] = None,
 ) -> Optional[EntryCandidate]:
     """Return highest-ranked setup across all symbols — one best trade only."""
     settings = get_settings()
@@ -386,6 +387,10 @@ def find_best_entry(
         min_rank_for_entry,
         symbol_rank_adjustment,
     )
+    from app.engines.daily_18pct_strategy import entries_allowed_by_limits
+    from app.engines.pretrade_validator import collect_session_trades
+
+    trades_today = len(collect_session_trades(state))
 
     scalp_open = sum(1 for t in state.openPaperTrades if t.strategyType != StrategyType.SWING)
     swing_open = sum(1 for t in state.openPaperTrades if t.strategyType == StrategyType.SWING)
@@ -397,7 +402,8 @@ def find_best_entry(
         if not snap.dataAvailable:
             continue
         if settings.explosion_capture_mode and scalp_open < settings.aggressive_max_open_scalps:
-            candidates.extend(_explosion_candidates(symbol, snap, state, settings))
+            if not limits or getattr(limits, "allowExplosion", True):
+                candidates.extend(_explosion_candidates(symbol, snap, state, settings))
         if settings.paper_simple_profit_mode and scalp_open < settings.aggressive_max_open_scalps:
             candidates.extend(_scalp_candidates(symbol, snap, state, settings))
         if quick_sideways_enabled() and scalp_open < settings.aggressive_max_open_scalps:
@@ -417,6 +423,15 @@ def find_best_entry(
         c.score += index_adj.get(c.symbol.upper(), 0.0)
 
     candidates = filter_candidates_pretrade(candidates, state, snapshots)
+    if limits and settings.daily_18pct_strategy_enabled:
+        filtered: list[EntryCandidate] = []
+        for c in candidates:
+            ok, reason = entries_allowed_by_limits(
+                limits, c.mode, c.score, trades_today,
+            )
+            if ok:
+                filtered.append(c)
+        candidates = filtered
     if not candidates:
         return None
 
@@ -446,8 +461,10 @@ def find_best_entry(
     best = max(candidates, key=sort_key)
     floor = min_rank_for_entry(chop, snapshots)
     floor = max(floor, last_n_elevated_min_rank(state))
+    if limits and settings.daily_18pct_strategy_enabled:
+        floor = max(floor, limits.minRankScore)
     if best.mode == "quick_sideways":
-        floor = settings.quick_sideways_min_rank_score
+        floor = min(floor, settings.quick_sideways_min_rank_score)
     elif settings.best_trades_only_enabled:
         floor = max(floor, settings.best_trades_min_rank_score)
     if floor > 0 and sort_key(best) < floor:

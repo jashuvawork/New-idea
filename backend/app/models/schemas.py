@@ -298,6 +298,7 @@ class AutoTraderState(BaseModel):
     capitalAllocation: dict[str, Any] = {}
     dailyProfitGate: dict[str, Any] = {}
     chopGuards: dict[str, Any] = {}
+    dailyStrategy: dict[str, Any] = {}
     lastEntry: Optional[dict[str, Any]] = None
     lastExit: Optional[dict[str, Any]] = None
     liveOrdersPlaced: int = 0
