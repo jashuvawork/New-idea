@@ -24,6 +24,7 @@ from app.services.finnhub import fetch_market_news
 from app.services.redis_store import has_upstox_token
 from app.services.upstox import UpstoxClient, UpstoxError, rate_limit_active, rate_limit_cooldown_remaining
 from app.services.upstox_ws import is_ws_active
+from app.engines.ws_snapshot import build_ws_index_snapshot
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/market", tags=["market"])
@@ -132,6 +133,16 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
     if broadcast:
         await broadcast_snapshot(snapshot)
     return snapshot
+
+
+async def _serve_ws_fallback_during_cooldown(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
+    """Index LTP from WebSocket when REST is cooling down and no stale cache exists."""
+    ws_snap = build_ws_index_snapshot()
+    if not ws_snap:
+        return None
+    if broadcast:
+        await broadcast_snapshot(ws_snap)
+    return ws_snap
 
 
 async def _serve_stale_during_cooldown(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
@@ -282,6 +293,9 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
         stale = await _serve_stale_during_cooldown(broadcast=broadcast)
         if stale:
             return stale
+        ws_snap = await _serve_ws_fallback_during_cooldown(broadcast=broadcast)
+        if ws_snap:
+            return ws_snap
         secs = int(rate_limit_cooldown_remaining())
         return MultiSnapshot(
             timestamp=now,
@@ -302,6 +316,9 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
             stale = await _serve_stale_during_cooldown(broadcast=broadcast)
             if stale:
                 return stale
+            ws_snap = await _serve_ws_fallback_during_cooldown(broadcast=broadcast)
+            if ws_snap:
+                return ws_snap
             secs = int(rate_limit_cooldown_remaining())
             return MultiSnapshot(
                 timestamp=now,
@@ -327,6 +344,10 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
                 if broadcast:
                     await broadcast_snapshot(stale)
                 return stale
+            if "cooling down" in err.lower() or "rate limit" in err.lower():
+                ws_snap = await _serve_ws_fallback_during_cooldown(broadcast=broadcast)
+                if ws_snap:
+                    return ws_snap
             if _cache:
                 logger.warning("Serving stale snapshot after build error: %s", e)
                 stale = _cache.model_copy(deep=True)
