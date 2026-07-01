@@ -423,6 +423,49 @@ def count_all_closed_trades() -> int:
     return len(get_all_closed_trades_chronological(limit=100_000))
 
 
+def purge_all_trade_data() -> dict[str, Any]:
+    """
+    Delete all persisted trade archives, log, and batch files.
+    Use when old logs block gates (collect_session_trades reads today's file).
+    """
+    store = get_store_dir()
+    removed: list[str] = []
+
+    log_path = get_log_path()
+    if log_path.exists():
+        log_path.write_text("", encoding="utf-8")
+        removed.append(str(log_path))
+
+    for path in sorted(store.glob("????-??-??.json")):
+        try:
+            path.unlink()
+            removed.append(str(path))
+        except OSError as e:
+            logger.warning("Failed to remove %s: %s", path, e)
+
+    batches = store / "batches"
+    if batches.exists():
+        for path in sorted(batches.glob("*.json")):
+            try:
+                path.unlink()
+                removed.append(str(path))
+            except OSError as e:
+                logger.warning("Failed to remove %s: %s", path, e)
+
+    meta = {"batchOffset": 0, "purgedAt": _now().isoformat()}
+    _milestone_meta_path().write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    removed.append(str(_milestone_meta_path()))
+
+    _append_log("PURGE_ALL", {"removedFiles": len(removed), "storeDir": str(store)})
+    logger.warning("Purged all trade data — %d paths touched", len(removed))
+    return {
+        "storeDir": str(store),
+        "removedCount": len(removed),
+        "removedFiles": removed,
+        "logSizeBytes": log_path.stat().st_size if log_path.exists() else 0,
+    }
+
+
 MILESTONE_BATCH_SIZE = 50
 MILESTONE_META_FILE = "milestone_meta.json"
 

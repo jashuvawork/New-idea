@@ -75,6 +75,23 @@ async def reset_paper_session():
     return {"status": "reset", "message": "Paper session and calibration blocks cleared"}
 
 
+@router.post("/purge-logs")
+async def purge_trade_logs():
+    """Wipe all trade archives + log, reset session and milestone — unblocks stale gates."""
+    from app.engines.auto_trader import reset_session_calibration
+    from app.engines.performance_milestone import compute_milestone_stats
+
+    purge = trade_store.purge_all_trade_data()
+    reset_session()
+    reset_session_calibration()
+    return {
+        "status": "purged",
+        "message": "All trade logs removed; session and gates cleared",
+        "purge": purge,
+        "milestone": compute_milestone_stats(),
+    }
+
+
 @router.post("/capital")
 async def set_trading_capital(config: CapitalConfig):
     set_capital(config.allocatedInr)
