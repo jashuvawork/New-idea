@@ -35,6 +35,7 @@ OPTION_SEGMENTS = {
 _throttle_lock = asyncio.Lock()
 _last_request_mono: float = 0.0
 _rate_limit_until_mono: float = 0.0
+_rate_limit_recovery_until_mono: float = 0.0
 _response_cache: dict[str, tuple[float, Any]] = {}
 _resolved_expiry: dict[str, str] = {}
 
@@ -53,6 +54,11 @@ def _cache_set(key: str, value: Any) -> None:
     _response_cache[key] = (time.monotonic(), value)
 
 
+def rate_limit_recovery_active() -> bool:
+    """True briefly after cooldown clears — use gentler REST pacing."""
+    return time.monotonic() < _rate_limit_recovery_until_mono
+
+
 async def _throttle() -> None:
     """Serialize requests and enforce minimum spacing to avoid UDAPI10005 429s."""
     global _last_request_mono, _rate_limit_until_mono
@@ -62,7 +68,10 @@ async def _throttle() -> None:
         wait = _rate_limit_until_mono - now
         raise UpstoxError(f"Upstox cooling down — retry in {wait:.0f}s")
 
-    min_interval = max(0.05, settings.upstox_min_request_interval_ms / 1000.0)
+    min_ms = settings.upstox_min_request_interval_ms
+    if rate_limit_recovery_active():
+        min_ms = max(min_ms, min_ms * 2)
+    min_interval = max(0.05, min_ms / 1000.0)
     async with _throttle_lock:
         now = time.monotonic()
         if now < _rate_limit_until_mono:
@@ -97,8 +106,9 @@ def rate_limit_active() -> bool:
 
 def clear_rate_limit_cooldown() -> None:
     """Clear in-memory 429 backoff (e.g. after env/deploy fix)."""
-    global _rate_limit_until_mono
+    global _rate_limit_until_mono, _rate_limit_recovery_until_mono
     _rate_limit_until_mono = 0.0
+    _rate_limit_recovery_until_mono = time.monotonic() + 90.0
 
 
 def resolve_quote_payload(data: dict[str, Any], instrument_key: str) -> dict[str, Any]:

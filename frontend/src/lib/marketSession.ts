@@ -29,9 +29,11 @@ export function deriveMarketSession(data: MultiSnapshot | null | undefined): Mar
   const marketClosed = phase === 'CLOSED';
 
   const dataPauseReason =
-    data && !data.dataReady && !marketClosed
-      ? data.waitingReason ?? 'Refreshing market data…'
-      : null;
+    data?.waitingReason && !marketClosed
+      ? data.waitingReason
+      : data && !data.dataReady && !marketClosed
+        ? (data.waitingReason ?? 'Refreshing market data…')
+        : null;
 
   return { phase, marketClosed, dataPauseReason };
 }

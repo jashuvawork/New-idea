@@ -7,6 +7,7 @@ from app.services.upstox import (
     clear_rate_limit_cooldown,
     rate_limit_active,
     rate_limit_cooldown_remaining,
+    rate_limit_recovery_active,
     _trip_rate_limit_cooldown,
 )
 
@@ -25,6 +26,13 @@ def test_trip_and_clear_cooldown():
     assert rate_limit_active()
     assert rate_limit_cooldown_remaining() > 0
     clear_rate_limit_cooldown()
+    assert not rate_limit_active()
+
+
+@patch("app.services.upstox.get_settings", _settings)
+def test_clear_sets_recovery_grace():
+    clear_rate_limit_cooldown()
+    assert rate_limit_recovery_active()
     assert not rate_limit_active()
 
 
