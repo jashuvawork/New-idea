@@ -79,6 +79,7 @@ from app.models.schemas import (
 )
 from app.engines.quick_sideways import evaluate_quick_sideways_exit, get_quick_sideways_profile
 from app.engines.session_timing import entries_allowed_now, entry_window_label
+from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
 from app.services.order_executor import place_entry_order, place_exit_order
 from app.services.paper_broker import simulate_entry_order, simulate_exit_order
