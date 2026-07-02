@@ -45,13 +45,15 @@ while IFS= read -r line || [ -n "$line" ]; do
     if [ "$key" = "$k" ] && [ -n "$val" ]; then
       esc="${val//\\/\\\\}"
       esc="${esc//|/\\|}"
-      REMOTE_CMDS+=("if grep -q '^${key}=' /opt/nexusquant/env; then sed -i 's|^${key}=.*|${key}=${esc}|' /opt/nexusquant/env; else echo '${key}=${esc}' >> /opt/nexusquant/env; fi")
+      REMOTE_CMDS+=("grep -v '^${key}=' /opt/nexusquant/env > /opt/nexusquant/env.tmp || true")
+      REMOTE_CMDS+=("mv /opt/nexusquant/env.tmp /opt/nexusquant/env")
+      REMOTE_CMDS+=("echo '${key}=${esc}' >> /opt/nexusquant/env")
       echo "  sync $key"
     fi
   done
 done < "$SECRETS_FILE"
 
-REMOTE_CMDS+=("cd /opt/nexusquant/New-idea && docker compose -f docker-compose.prod.yml restart backend")
+REMOTE_CMDS+=("cd /opt/nexusquant/New-idea && docker compose -f docker-compose.prod.yml up -d --force-recreate backend")
 REMOTE_CMDS+=("sleep 5 && curl -sf http://127.0.0.1:8000/api/upstox/setup | python3 -c \"import json,sys; d=json.load(sys.stdin); print('clientId configured:', bool(d.get('clientId')))\"")
 
 JSON_CMDS=$(printf '%s\n' "${REMOTE_CMDS[@]}" | python3 -c "import json,sys; print(json.dumps([l.rstrip('\n') for l in sys.stdin]))")
