@@ -118,6 +118,11 @@ def compute_market_confidence(snapshots: dict[str, SymbolSnapshot]) -> tuple[flo
 
     if chop_meta.get("momentumRally"):
         score += 8
+    dm_upper = day_mode.upper()
+    if any(x in dm_upper for x in ("BULLISH", "BEARISH")) and "MIXED" not in dm_upper:
+        score += 10
+    if "RALLY" in dm_upper:
+        score += 6
     if is_expiry_session(snapshots):
         score -= 6
         if expiry.get("worstDay"):
@@ -277,6 +282,13 @@ def compute_trading_limits(
         limits.allowExplosion = True
         limits.minRankScore = min(limits.minRankScore, settings.morning_capture_min_rank_score)
         playbook.append("Morning premium capture — BUILDING+ explosions enabled")
+
+    if settings.day_adaptive_enabled:
+        from app.engines.day_adaptive_engine import build_day_adaptive_profile, apply_profile_to_limits
+
+        adaptive = build_day_adaptive_profile(day_mode, tier, snapshots, phase=phase, state=state)
+        apply_profile_to_limits(adaptive, limits)
+        playbook.extend(adaptive.playbook)
 
     limits.playbook = playbook
     limits.message = (

@@ -247,11 +247,66 @@ def check_min_entry_interval(
     return True, "ok"
 
 
-def controlled_daily_cap_reached(state: AutoTraderState) -> tuple[bool, str]:
+def resolve_effective_daily_trade_cap(
+    state: AutoTraderState,
+    snapshots: Optional[dict] = None,
+) -> tuple[int, str]:
+    """
+    Effective closed-trade cap — merges controlled base, daily 18% strategy, rally windows.
+    Avoids hard 6-trade ceiling blocking momentum rallies toward 18% target.
+    """
+    settings = get_settings()
+    if not settings.controlled_trading_enabled:
+        return 999, "off"
+
+    cap = settings.controlled_max_trades_per_day
+    label = "controlled"
+
+    from app.engines.daily_18pct_strategy import get_session_limits
+
+    limits = get_session_limits()
+    if limits and settings.daily_18pct_strategy_enabled:
+        cap = max(cap, limits.maxTradesToday)
+        label = "daily_strategy"
+
+    if snapshots:
+        from app.engines.chop_day_guards import in_momentum_rally_window, is_chop_session
+        from app.engines.morning_premium_capture import in_morning_premium_capture_window
+
+        if in_momentum_rally_window():
+            cap = max(cap, settings.daily_18pct_chop_max_trades)
+            cap += settings.controlled_rally_trade_cap_bonus
+            label = "momentum_rally"
+        elif in_morning_premium_capture_window():
+            cap = max(cap, settings.controlled_max_trades_per_day + 4)
+            label = "morning_capture"
+        elif is_chop_session(snapshots):
+            cap = max(cap, settings.daily_18pct_chop_max_trades)
+
+        if limits and settings.day_adaptive_enabled:
+            from app.engines.day_adaptive_engine import build_day_adaptive_profile
+
+            profile = build_day_adaptive_profile(
+                limits.dayMode,
+                limits.confidenceTier,
+                snapshots,
+                phase=limits.phase,
+                state=state,
+            )
+            if profile.day_type in ("GOOD", "ELITE"):
+                cap = max(cap, settings.daily_18pct_chop_max_trades + 2)
+
+    return cap, label
+
+
+def controlled_daily_cap_reached(
+    state: AutoTraderState,
+    snapshots: Optional[dict] = None,
+) -> tuple[bool, str]:
     settings = get_settings()
     if not settings.controlled_trading_enabled:
         return False, "ok"
-    cap = settings.controlled_max_trades_per_day
+    cap, _ = resolve_effective_daily_trade_cap(state, snapshots)
     if cap <= 0:
         return False, "ok"
     closed = len(collect_session_trades(state))
@@ -418,7 +473,7 @@ def validate_candidate(
     if not ok:
         return False, reason, meta
 
-    cap_hit, cap_reason = controlled_daily_cap_reached(state)
+    cap_hit, cap_reason = controlled_daily_cap_reached(state, snap_map)
     if cap_hit:
         return False, cap_reason, meta
 

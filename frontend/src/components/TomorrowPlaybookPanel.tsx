@@ -108,6 +108,8 @@ export function TomorrowPlaybookPanel({
   const closed = chop.closedTrades ?? auto.closedPaperTrades?.length ?? 0;
   const lotMult = Number(strategy.lotSizeMultiplier ?? 1);
   const edge = strategy.edgeSession;
+  const adaptive = strategy.dayAdaptive;
+  const dayType = String(adaptive?.dayType ?? 'NORMAL');
   const sessionPf = Number(edge?.profitFactor ?? 0);
   const pfTarget = Number(edge?.pfTarget ?? 2.5);
 
@@ -141,6 +143,9 @@ export function TomorrowPlaybookPanel({
         <div className="p-2 rounded bg-black/30">
           <div className="text-nexus-muted uppercase mb-0.5">Day mode</div>
           <div className="font-bold text-white">{dayMode}</div>
+          {adaptive?.dayType ? (
+            <div className="text-[9px] text-nexus-accent font-mono mt-0.5">{dayType} playbook</div>
+          ) : null}
         </div>
         <div className="p-2 rounded bg-black/30">
           <div className="text-nexus-muted uppercase mb-0.5">Confidence</div>

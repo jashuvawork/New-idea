@@ -24,6 +24,12 @@ from app.engines.pretrade_validator import (
     last_n_trades_summary,
 )
 from app.engines.edge_engine import compute_entry_edge, edge_rank_bonus, session_pf_feedback
+from app.engines.day_adaptive_engine import (
+    apply_rank_floor_adaptive,
+    mode_rank_bonus,
+    resolve_day_adaptive,
+    should_pause_regular_scalps,
+)
 from app.engines.simple_profit import check_entry_gate
 from app.engines.spot_direction import chart_rank_adjustment
 from app.engines.moneyness import (
@@ -431,7 +437,25 @@ def find_best_entry(
             c.pretrade_meta = {**(c.pretrade_meta or {}), "edgeScore": edge.total}
 
     pf_fb = session_pf_feedback(state) if settings.edge_engine_enabled else None
-    if pf_fb and pf_fb.pause_quick_scalps:
+
+    if limits:
+        day_mode = str(getattr(limits, "dayMode", "") or "")
+        conf_tier = str(getattr(limits, "confidenceTier", "") or "MEDIUM")
+        phase = str(getattr(limits, "phase", "") or "ACCUMULATE")
+    else:
+        from app.engines.chop_day_guards import chop_guard_summary
+
+        chop_meta = chop_guard_summary(state, snapshots)
+        day_mode = str(chop_meta.get("dayMode") or "NORMAL")
+        conf_tier = "MEDIUM"
+        phase = "ACCUMULATE"
+    adaptive = resolve_day_adaptive(
+        snapshots, state, day_mode=day_mode, confidence_tier=conf_tier, phase=phase,
+    )
+
+    if should_pause_regular_scalps(
+        adaptive, edge_pause_scalps=bool(pf_fb and pf_fb.pause_quick_scalps),
+    ):
         candidates = [c for c in candidates if c.mode != "scalp"]
 
     candidates = filter_candidates_pretrade(candidates, state, snapshots)
@@ -467,6 +491,7 @@ def find_best_entry(
 
     def sort_key(c: EntryCandidate) -> float:
         bonus = 20 if c.mode == "explosion" else (8 if c.mode == "quick_sideways" else (5 if c.mode == "swing" else 0))
+        bonus += mode_rank_bonus(c.mode, adaptive)
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty
 
@@ -485,6 +510,7 @@ def find_best_entry(
         floor = min(floor, settings.quick_sideways_min_rank_score)
     elif settings.best_trades_only_enabled:
         floor = max(floor, settings.best_trades_min_rank_score)
+    floor = apply_rank_floor_adaptive(floor, adaptive, candidate_mode=best.mode)
     if floor > 0 and sort_key(best) < floor:
         return None
     return best

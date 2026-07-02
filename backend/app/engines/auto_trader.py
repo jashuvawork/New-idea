@@ -33,6 +33,7 @@ from app.engines.capital_allocator import (
     get_lot_sizes_meta,
     lot_multiplier,
     refresh_capital_from_upstox,
+    reset_session_profit_gate,
     tune_exit_plan_for_position,
     update_daily_profit_gate,
 )
@@ -79,6 +80,7 @@ from app.models.schemas import (
 )
 from app.engines.quick_sideways import evaluate_quick_sideways_exit, get_quick_sideways_profile
 from app.engines.session_timing import entries_allowed_now, entry_window_label
+from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
 from app.services.order_executor import place_entry_order, place_exit_order
 from app.services.paper_broker import simulate_entry_order, simulate_exit_order
@@ -582,6 +584,7 @@ def reset_session_calibration() -> None:
     _calibration.reset()
     reset_symbol_cooldowns()
     reset_session_guards()
+    reset_session_profit_gate()
 
 
 def reset_session() -> None:
@@ -868,6 +871,15 @@ async def process(
         trades_today=len(collect_session_trades(state)),
     )
     edge_fb = session_pf_feedback(state)
+    from app.engines.day_adaptive_engine import build_day_adaptive_profile
+
+    day_adaptive = build_day_adaptive_profile(
+        trading_limits.dayMode,
+        trading_limits.confidenceTier,
+        snapshots,
+        phase=trading_limits.phase,
+        state=state,
+    )
     state.dailyStrategy = {
         **trading_limits.to_dict(),
         "edgeSession": {
@@ -881,6 +893,7 @@ async def process(
             "message": edge_fb.message,
             "pfTarget": settings.edge_session_pf_target,
         },
+        "dayAdaptive": day_adaptive.to_dict(),
     }
     set_session_limits(trading_limits)
 
@@ -924,7 +937,7 @@ async def process(
                 "message": "Daily trade cap on chop session",
             })
         from app.engines.pretrade_validator import controlled_daily_cap_reached, check_last_n_trades_pause
-        ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state)
+        ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state, snapshots)
         if ctrl_cap:
             skipped.append({
                 "symbol": "SESSION",

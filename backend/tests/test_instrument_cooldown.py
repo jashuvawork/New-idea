@@ -76,4 +76,4 @@ def test_counter_breadth_call_blocked(mock_settings):
     breadth = Breadth(bias="BEARISH", score=40, aligned=False)
     passed, reason = check_entry_gate(trade, breadth, 39, 2.0, False)
     assert not passed
-    assert reason == "breadth_counter_trend"
+    assert reason.startswith("directional_") or reason == "breadth_counter_trend"

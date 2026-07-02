@@ -45,6 +45,9 @@ export function connectionStatusLabel(
 ): string {
   if (session.marketClosed) return 'Market closed';
   if (session.dataPauseReason) {
+    if (/showing last good data/i.test(session.dataPauseReason)) {
+      return 'Live (cached)';
+    }
     if (/cooling down|rate limit|429/i.test(session.dataPauseReason)) {
       return 'Rate limited';
     }

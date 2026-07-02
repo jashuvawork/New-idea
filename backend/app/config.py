@@ -125,7 +125,10 @@ class Settings(BaseSettings):
     explosion_trail_tight_points: float = 5.0
     explosion_initial_stop_points: float = 6.0
     explosion_stop_min_hold_seconds: int = 15
-    explosion_no_progress_seconds: int = 90
+    explosion_no_progress_enabled: bool = True
+    explosion_no_progress_seconds: int = 150
+    explosion_no_progress_aligned_seconds: int = 420
+    explosion_no_progress_skip_when_aligned: bool = True
     explosion_reentry_cooldown_seconds: int = 90
     explosion_emergency_cooldown_seconds: int = 180
     explosion_breadth_alignment_enabled: bool = True
@@ -157,7 +160,8 @@ class Settings(BaseSettings):
 
     # Controlled trading — pre-trade backtest + fewer entries
     controlled_trading_enabled: bool = True
-    controlled_max_trades_per_day: int = 6
+    controlled_max_trades_per_day: int = 10
+    controlled_rally_trade_cap_bonus: int = 4
     min_seconds_between_entries: int = 240
     pretrade_min_rank_score: float = 65.0
     pretrade_min_symbol_trades_for_stats: int = 3
@@ -407,6 +411,7 @@ class Settings(BaseSettings):
     daily_profit_target_inr: float = 44_000  # fallback when pct mode off
     daily_profit_trail_inr: float = 5_000  # legacy; unused when stage locks enabled
     daily_profit_stage_locks_enabled: bool = True
+    daily_profit_stage_block_entries_min_stage: int = 2
     daily_profit_stage_pcts_csv: str = "0.55,0.88,1.12"  # env: DAILY_PROFIT_STAGE_PCTS
     daily_profit_stage_from_target: bool = True
     daily_profit_stage_target_mults_csv: str = "0.5,1.0,1.5"  # locks at 9%, 18%, 27% of cap
@@ -421,6 +426,12 @@ class Settings(BaseSettings):
     daily_18pct_expiry_max_trades: int = 5
     daily_18pct_expiry_min_rank: float = 65.0
     daily_18pct_full_limit_max_trades: int = 12
+
+    # Day-adaptive engine — trade well on worst, chop, normal, and good days
+    day_adaptive_enabled: bool = True
+    day_adaptive_worst_rank_cap: float = 68.0
+    day_adaptive_chop_rank_cap: float = 70.0
+    day_adaptive_good_day_rank_relief: float = 3.0
 
     def daily_profit_stage_pcts(self) -> list[float]:
         return [float(x.strip()) for x in self.daily_profit_stage_pcts_csv.split(",") if x.strip()]

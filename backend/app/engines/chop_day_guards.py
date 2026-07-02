@@ -304,7 +304,11 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.market_momentum import index_moment_summary
     from app.engines.session_timing import in_midday_chop_window, in_open_caution_window
     from app.engines.simple_profit import get_session_targets
-    from app.engines.pretrade_validator import check_last_n_trades_pause, last_n_trades_summary
+    from app.engines.pretrade_validator import (
+        check_last_n_trades_pause,
+        last_n_trades_summary,
+        resolve_effective_daily_trade_cap,
+    )
     from app.engines.whipsaw_guards import whipsaw_guard_summary
     from app.engines.directional_lock import directional_lock_summary
     from app.engines.confidence_hold import high_confidence_close_summary
@@ -322,6 +326,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         chop, momentum, breadth, before_primary, expiry=expiry_active, expiry_worst=expiry_worst,
     )
 
+    effective_cap, cap_source = resolve_effective_daily_trade_cap(state, snapshots)
     return {
         "chopSession": chop,
         "dailyTradeCap": cap,
@@ -351,7 +356,9 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "lastNTrades": last_n,
         "lastNTradesPaused": last_n_paused,
         "lastNTradesPauseReason": last_n_reason if last_n_paused else None,
-        "controlledDailyCap": settings.controlled_max_trades_per_day,
+        "controlledDailyCap": effective_cap,
+        "controlledDailyCapBase": settings.controlled_max_trades_per_day,
+        "controlledDailyCapSource": cap_source,
         "whipsawGuards": whipsaw_guard_summary(state, snapshots),
         "directionalLock": directional_lock_summary(snapshots),
         "confidenceHold": high_confidence_close_summary(),

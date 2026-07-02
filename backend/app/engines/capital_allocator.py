@@ -139,6 +139,14 @@ _best_pnl: float = 0.0
 _highest_stage: int = 0
 
 
+def reset_session_profit_gate() -> None:
+    """Clear staged profit lock memory — used on session reset / purge."""
+    global _session_date, _best_pnl, _highest_stage
+    _session_date = ""
+    _best_pnl = 0.0
+    _highest_stage = 0
+
+
 def lot_multiplier(symbol: str) -> int:
     """Units per lot — from config (default) or Upstox when enabled."""
     settings = get_settings()
@@ -520,7 +528,10 @@ def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
         return gate
 
     if settings.daily_profit_stage_locks_enabled:
-        if locked_floor > 0 and session_pnl < locked_floor:
+        block_min_stage = max(1, int(settings.daily_profit_stage_block_entries_min_stage))
+        below_floor = locked_floor > 0 and session_pnl < locked_floor
+        should_block = below_floor and current_stage >= block_min_stage
+        if should_block:
             gate.trailLocked = True
             gate.newEntriesAllowed = False
             gate.status = "STAGE_LOCK"
@@ -537,6 +548,14 @@ def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
                     f"Stage {current_stage} lock ({pct_label}): "
                     f"session ₹{session_pnl:,.0f} < floor ₹{locked_floor:,.0f} — protecting profits."
                 )
+        elif below_floor and current_stage > 0:
+            gate.trailLocked = False
+            gate.newEntriesAllowed = True
+            gate.status = "STAGE_CAUTION"
+            gate.message = (
+                f"Stage {current_stage} caution: session ₹{session_pnl:,.0f} dipped below "
+                f"₹{locked_floor:,.0f} floor — still building toward ₹{min_target:,.0f} (18%)"
+            )
         else:
             gate.newEntriesAllowed = True
             gate.status = "ACTIVE"
