@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-EC2_HOST="${EC2_HOST:-65.1.137.232}"
+EC2_HOST="${EC2_HOST:-65.0.136.146}"
 EC2_USER="${EC2_USER:-ec2-user}"
 EC2_KEY="${EC2_KEY:-}"
 BRANCH="${BRANCH:-main}"
