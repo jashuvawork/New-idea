@@ -26,7 +26,7 @@ set +a
 : "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID required in deploy/aws.env}"
 : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY required in deploy/aws.env}"
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-ap-south-1}"
-INSTANCE_ID="${EC2_INSTANCE_ID:-i-02b2962f02b61005f}"
+INSTANCE_ID="${EC2_INSTANCE_ID:-i-0f3f9e5e67815c21b}"
 DEPLOY_BRANCH="${BRANCH:-main}"
 
 echo "==> Deploying to EC2 $INSTANCE_ID ($AWS_DEFAULT_REGION) branch=$DEPLOY_BRANCH"

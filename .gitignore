@@ -14,6 +14,9 @@ frontend/tsconfig.tsbuildinfo
 .env
 .env.local
 deploy/aws.env
+deploy/aws-infra.state
+*.pem
+deploy/nexusquant-ec2.pem
 
 # IDE
 .idea/
