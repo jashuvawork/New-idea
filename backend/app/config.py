@@ -125,7 +125,10 @@ class Settings(BaseSettings):
     explosion_trail_tight_points: float = 5.0
     explosion_initial_stop_points: float = 6.0
     explosion_stop_min_hold_seconds: int = 15
-    explosion_no_progress_seconds: int = 90
+    explosion_no_progress_enabled: bool = True
+    explosion_no_progress_seconds: int = 150
+    explosion_no_progress_aligned_seconds: int = 420
+    explosion_no_progress_skip_when_aligned: bool = True
     explosion_reentry_cooldown_seconds: int = 90
     explosion_emergency_cooldown_seconds: int = 180
     explosion_breadth_alignment_enabled: bool = True

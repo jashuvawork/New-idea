@@ -227,6 +227,49 @@ def _trail_floor_pts(
     )
 
 
+def _chart_aligned_with_trade(trade: PaperTrade) -> bool:
+    """CALL+BULLISH or PUT+BEARISH from entry chart snapshot."""
+    ctx = trade.entryContext or {}
+    chart = (ctx.get("executionChart") or {}).get("indexChart") or {}
+    direction = str(chart.get("direction", "NEUTRAL")).upper()
+    if trade.side == Side.CALL and direction == "BULLISH":
+        return True
+    if trade.side == Side.PUT and direction == "BEARISH":
+        return True
+    return False
+
+
+def _should_skip_no_progress(trade: PaperTrade, settings) -> bool:
+    """Bullish/directional holds can grind for minutes before premium expands."""
+    if not settings.explosion_no_progress_enabled:
+        return True
+    if not settings.explosion_no_progress_skip_when_aligned:
+        return False
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if direction_aligned_with_breadth(trade) or _chart_aligned_with_trade(trade):
+        return True
+    ctx = trade.entryContext or {}
+    edge = ctx.get("edgeScore") or {}
+    if edge.get("letRunners"):
+        return True
+    return False
+
+
+def _no_progress_limit_seconds(trade: PaperTrade, settings) -> int:
+    """How long to wait before no-progress exit — longer on aligned bullish holds."""
+    if not settings.explosion_no_progress_enabled:
+        return 999_999
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if direction_aligned_with_breadth(trade) or _chart_aligned_with_trade(trade):
+        return settings.explosion_no_progress_aligned_seconds
+    ctx = trade.entryContext or {}
+    if float(ctx.get("selectionScore") or 0) >= 80:
+        return int(settings.explosion_no_progress_seconds * 1.5)
+    return settings.explosion_no_progress_seconds
+
+
 def evaluate_explosion_exit(
     trade: PaperTrade,
     current_premium: float,
@@ -281,7 +324,9 @@ def evaluate_explosion_exit(
     ):
         return "explosion_micro_profit_lock", pnl_inr
 
-    if hold >= settings.explosion_no_progress_seconds and best < exit_params.trail_arm_points:
+    if _should_skip_no_progress(trade, settings):
+        pass
+    elif hold >= _no_progress_limit_seconds(trade, settings) and best < exit_params.trail_arm_points:
         return "explosion_no_progress", pnl_inr
 
     max_hold = 420 if best >= settings.runner_min_best_points else (360 if event_tier == "ELITE" or best >= 15 else 300)
