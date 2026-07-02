@@ -33,6 +33,7 @@ from app.engines.capital_allocator import (
     get_lot_sizes_meta,
     lot_multiplier,
     refresh_capital_from_upstox,
+    reset_session_profit_gate,
     tune_exit_plan_for_position,
     update_daily_profit_gate,
 )
@@ -583,6 +584,7 @@ def reset_session_calibration() -> None:
     _calibration.reset()
     reset_symbol_cooldowns()
     reset_session_guards()
+    reset_session_profit_gate()
 
 
 def reset_session() -> None:

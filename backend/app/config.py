@@ -410,6 +410,7 @@ class Settings(BaseSettings):
     daily_profit_target_inr: float = 44_000  # fallback when pct mode off
     daily_profit_trail_inr: float = 5_000  # legacy; unused when stage locks enabled
     daily_profit_stage_locks_enabled: bool = True
+    daily_profit_stage_block_entries_min_stage: int = 2
     daily_profit_stage_pcts_csv: str = "0.55,0.88,1.12"  # env: DAILY_PROFIT_STAGE_PCTS
     daily_profit_stage_from_target: bool = True
     daily_profit_stage_target_mults_csv: str = "0.5,1.0,1.5"  # locks at 9%, 18%, 27% of cap
