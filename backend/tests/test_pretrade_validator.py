@@ -31,7 +31,11 @@ IST = ZoneInfo("Asia/Kolkata")
 def _settings():
     s = MagicMock()
     s.controlled_trading_enabled = True
-    s.controlled_max_trades_per_day = 6
+    s.controlled_max_trades_per_day = 10
+    s.controlled_rally_trade_cap_bonus = 4
+    s.daily_18pct_strategy_enabled = False
+    s.daily_18pct_chop_max_trades = 10
+    s.day_adaptive_enabled = False
     s.min_seconds_between_entries = 180
     s.pretrade_min_rank_score = 65.0
     s.pretrade_min_symbol_trades_for_stats = 3

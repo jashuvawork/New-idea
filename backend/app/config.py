@@ -160,7 +160,8 @@ class Settings(BaseSettings):
 
     # Controlled trading — pre-trade backtest + fewer entries
     controlled_trading_enabled: bool = True
-    controlled_max_trades_per_day: int = 6
+    controlled_max_trades_per_day: int = 10
+    controlled_rally_trade_cap_bonus: int = 4
     min_seconds_between_entries: int = 240
     pretrade_min_rank_score: float = 65.0
     pretrade_min_symbol_trades_for_stats: int = 3

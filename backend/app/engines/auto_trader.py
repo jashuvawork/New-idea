@@ -937,7 +937,7 @@ async def process(
                 "message": "Daily trade cap on chop session",
             })
         from app.engines.pretrade_validator import controlled_daily_cap_reached, check_last_n_trades_pause
-        ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state)
+        ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state, snapshots)
         if ctrl_cap:
             skipped.append({
                 "symbol": "SESSION",
