@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.engines.chop_day_guards import is_chop_session
 from app.engines.premium_filter import premium_in_band, premium_reject_reason
 from app.models.schemas import (
+    HeatmapStrike,
     OptimizedProfile,
     PaperTrade,
     Regime,
@@ -51,6 +52,20 @@ def is_sideways_session(snapshots: dict[str, SymbolSnapshot]) -> bool:
     return sideways >= max(1, len(live) // 2) or is_chop_session(snapshots)
 
 
+def _in_chop(snap: SymbolSnapshot) -> bool:
+    regime = str(snap.regime.value if hasattr(snap.regime, "value") else snap.regime)
+    return regime in (Regime.RANGE_BOUND.value, Regime.CHOP.value) or is_chop_session(
+        {snap.symbol: snap},
+    )
+
+
+def _min_velocity_pct(snap: SymbolSnapshot) -> float:
+    settings = get_settings()
+    if _in_chop(snap):
+        return settings.quick_sideways_chop_min_velocity_pct
+    return settings.quick_sideways_min_velocity_pct
+
+
 def get_quick_sideways_profile() -> OptimizedProfile:
     settings = get_settings()
     return OptimizedProfile(
@@ -71,13 +86,22 @@ def _hold_seconds(trade: PaperTrade) -> float:
 
 def _pick_side(chart: SpotChart, snap: SymbolSnapshot) -> Optional[Side]:
     """Fade micro-moves in a range — follow short-term spot impulse."""
+    settings = get_settings()
+    mom_thresh = (
+        settings.quick_sideways_chop_pick_momentum_pct
+        if _in_chop(snap)
+        else 0.04
+    )
+    tick_thresh = 28 if _in_chop(snap) else 38
+    delta_thresh = 25 if _in_chop(snap) else 35
+
     mom5 = chart.momentum5Pct or 0
     tick = snap.orderflow.tickMomentum or 0
     delta = snap.orderflow.deltaVelocity or 0
 
-    if mom5 >= 0.04 or tick >= 38 or delta >= 35:
+    if mom5 >= mom_thresh or tick >= tick_thresh or delta >= delta_thresh:
         return Side.CALL
-    if mom5 <= -0.04 or tick <= -38 or delta <= -35:
+    if mom5 <= -mom_thresh or tick <= -tick_thresh or delta <= -delta_thresh:
         return Side.PUT
 
     direction = (chart.direction or "NEUTRAL").upper()
@@ -88,29 +112,66 @@ def _pick_side(chart: SpotChart, snap: SymbolSnapshot) -> Optional[Side]:
     return None
 
 
-def _atm_premium(snap: SymbolSnapshot, side: Side) -> tuple[Optional[float], Optional[float]]:
-    atm = snap.atmStrike or snap.spot
-    if not atm:
-        return None, None
-    for row in snap.heatmap:
-        if abs(row.strike - atm) > 50:
-            continue
-        if side == Side.CALL:
-            return row.strike, row.callLtp
-        return row.strike, row.putLtp
-    return None, None
+def _strike_premium(row: HeatmapStrike, side: Side) -> tuple[float, Optional[float]]:
+    if side == Side.CALL:
+        return row.strike, row.callLtp
+    return row.strike, row.putLtp
+
+
+def _near_spot(strike: float, spot: float, radius: float) -> bool:
+    return abs(strike - spot) <= radius
 
 
 def _micro_velocity(snap: SymbolSnapshot, side: Side, strike: float) -> float:
+    best = 0.0
     for entry in snap.explosiveRunnerWatchlist or []:
         if str(entry.get("side", "")).upper() != side.value:
             continue
-        if abs(float(entry.get("strike") or 0) - strike) <= 100:
-            return abs(float(entry.get("premiumVelocityPct") or 0))
+        if abs(float(entry.get("strike") or 0) - strike) <= 150:
+            best = max(best, abs(float(entry.get("premiumVelocityPct") or 0)))
     runner = snap.explosiveRunner
     if runner and runner.signal and runner.side == side:
-        return abs(float(runner.signal.premiumVelocityPct or 0))
-    return abs(snap.orderflow.signedMomentumPct or 0)
+        if abs((runner.strike or 0) - strike) <= 150:
+            best = max(best, abs(float(runner.signal.premiumVelocityPct or 0)))
+    for alert in snap.explosionAlerts or []:
+        if str(alert.get("side", "")).upper() != side.value:
+            continue
+        if abs(float(alert.get("strike") or 0) - strike) <= 150:
+            best = max(
+                best,
+                abs(float(alert.get("velocity3s") or 0)),
+                abs(float(alert.get("velocity9s") or 0)) * 0.5,
+            )
+    return max(best, abs(snap.orderflow.signedMomentumPct or 0))
+
+
+def _collect_strike_candidates(
+    snap: SymbolSnapshot,
+    side: Side,
+) -> list[tuple[float, float]]:
+    """ATM + watchlist/heatmap strikes for slow sideways premium ticks."""
+    settings = get_settings()
+    spot = snap.spot or snap.atmStrike or 0.0
+    radius = float(settings.quick_sideways_strike_scan_radius)
+    out: dict[float, float] = {}
+
+    for row in snap.heatmap:
+        if not _near_spot(row.strike, spot, radius):
+            continue
+        strike, prem = _strike_premium(row, side)
+        if prem and prem > 0:
+            out[strike] = prem
+
+    if settings.quick_sideways_scan_watchlist:
+        for entry in snap.explosiveRunnerWatchlist or []:
+            if str(entry.get("side", "")).upper() != side.value:
+                continue
+            strike = float(entry.get("strike") or 0)
+            prem = float(entry.get("premium") or entry.get("ltp") or 0)
+            if strike > 0 and prem > 0 and _near_spot(strike, spot, radius):
+                out[strike] = prem
+
+    return sorted(out.items(), key=lambda x: abs(x[0] - spot))
 
 
 def check_quick_sideways_entry(
@@ -134,8 +195,9 @@ def check_quick_sideways_entry(
     chart = snap.spotChart
     mom5 = abs(chart.momentum5Pct or 0) if chart else 0
     vel = max(velocity_pct, _micro_velocity(snap, side, strike), mom5)
-    if vel < settings.quick_sideways_min_velocity_pct:
-        return False, f"velocity_below_{settings.quick_sideways_min_velocity_pct}"
+    floor = _min_velocity_pct(snap)
+    if vel < floor:
+        return False, f"velocity_below_{floor}"
 
     # Avoid chasing full explosions in sideways mode
     if vel > settings.enhanced_velocity_threshold * 1.8:
@@ -168,6 +230,10 @@ def score_quick_sideways(
         )
         if aligned:
             score += 6
+    # Closer-to-spot liquid strikes in chop
+    spot = snap.spot or snap.atmStrike or strike
+    if abs(strike - spot) <= 100:
+        score += 3
     return round(score, 2)
 
 
@@ -175,7 +241,7 @@ def scan_quick_sideways_setups(
     symbol: str,
     snap: SymbolSnapshot,
 ) -> list[dict]:
-    """Build quick sideways entry setups for one symbol."""
+    """Build quick sideways entry setups — ATM + watchlist strikes for slow chop ticks."""
     if not quick_sideways_enabled() or not is_sideways_snapshot(snap):
         return []
 
@@ -187,26 +253,26 @@ def scan_quick_sideways_setups(
     if not side:
         return []
 
-    strike, premium = _atm_premium(snap, side)
-    if not strike or not premium or premium <= 0:
-        return []
+    setups: list[dict] = []
+    for strike, premium in _collect_strike_candidates(snap, side):
+        vel = _micro_velocity(snap, side, strike)
+        ok, reason = check_quick_sideways_entry(
+            snap, side, strike, premium, velocity_pct=vel,
+        )
+        if not ok:
+            continue
+        setups.append({
+            "symbol": symbol,
+            "side": side,
+            "strike": strike,
+            "premium": premium,
+            "velocityPct": vel,
+            "score": score_quick_sideways(snap, side, strike, premium, vel),
+            "reason": reason,
+        })
 
-    vel = _micro_velocity(snap, side, strike)
-    ok, reason = check_quick_sideways_entry(
-        snap, side, strike, premium, velocity_pct=vel,
-    )
-    if not ok:
-        return []
-
-    return [{
-        "symbol": symbol,
-        "side": side,
-        "strike": strike,
-        "premium": premium,
-        "velocityPct": vel,
-        "score": score_quick_sideways(snap, side, strike, premium, vel),
-        "reason": reason,
-    }]
+    setups.sort(key=lambda s: s["score"], reverse=True)
+    return setups[:2]
 
 
 def evaluate_quick_sideways_exit(

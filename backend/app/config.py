@@ -356,6 +356,11 @@ class Settings(BaseSettings):
     quick_sideways_enabled: bool = True
     quick_sideways_min_rank_score: float = 58.0
     quick_sideways_min_velocity_pct: float = 0.5
+    quick_sideways_chop_min_velocity_pct: float = 0.22
+    quick_sideways_chop_pick_momentum_pct: float = 0.02
+    quick_sideways_scan_watchlist: bool = True
+    quick_sideways_strike_scan_radius: int = 250
+    quick_sideways_allow_bearish_chop: bool = True
     quick_sideways_min_tqs: int = 35
     quick_sideways_target_points: float = 3.0
     quick_sideways_stop_points: float = 2.0

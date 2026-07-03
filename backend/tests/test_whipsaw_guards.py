@@ -43,6 +43,7 @@ def _settings():
     s.whipsaw_single_side_surge_bypass_enabled = True
     s.whipsaw_dominant_velocity_min = 2.5
     s.whipsaw_dominant_velocity_ratio = 1.6
+    s.quick_sideways_allow_bearish_chop = True
     s.bearish_sideways_halt_enabled = True
     s.bearish_sideways_block_scalps = True
     s.bearish_sideways_explosion_min_score = 78.0
@@ -147,6 +148,16 @@ def test_blocks_scalp_in_bearish_sideways(mock_settings):
     ok, reason, _ = check_whipsaw_candidate(_candidate(side=Side.PUT), state, snapshots)
     assert not ok
     assert reason in ("bearish_sideways_no_scalps", "ce_pe_dual_velocity_NIFTY")
+
+
+@patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
+def test_quick_sideways_allowed_in_bearish_chop(mock_settings):
+    from app.engines.whipsaw_guards import check_bearish_sideways_entry
+
+    cand = _candidate(side=Side.CALL, score=62.0, mode="quick_sideways")
+    blocked, reason = check_bearish_sideways_entry(cand, {"NIFTY": _snap()})
+    assert not blocked
+    assert reason == "ok"
 
 
 @patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())

@@ -402,6 +402,9 @@ def check_bearish_sideways_entry(
             return False, "ok"
         return True, "bearish_sideways_explosion_only"
 
+    if mode == "quick_sideways" and settings.quick_sideways_allow_bearish_chop:
+        return False, "ok"
+
     if settings.bearish_sideways_block_scalps:
         return True, "bearish_sideways_no_scalps"
 

@@ -69,6 +69,11 @@ def test_scan_finds_atm_call_setup(mock_settings):
     s.quick_sideways_enabled = True
     s.quick_sideways_min_tqs = 35
     s.quick_sideways_min_velocity_pct = 0.5
+    s.quick_sideways_chop_min_velocity_pct = 0.22
+    s.quick_sideways_chop_pick_momentum_pct = 0.02
+    s.quick_sideways_scan_watchlist = True
+    s.quick_sideways_strike_scan_radius = 250
+    s.quick_sideways_allow_bearish_chop = True
     s.enhanced_velocity_threshold = 1.2
     setups = scan_quick_sideways_setups("SENSEX", _snap())
     assert len(setups) == 1
@@ -109,8 +114,71 @@ def test_entry_rejects_low_velocity(mock_settings):
     s.quick_sideways_enabled = True
     s.quick_sideways_min_tqs = 35
     s.quick_sideways_min_velocity_pct = 0.5
+    s.quick_sideways_chop_min_velocity_pct = 0.22
+    s.quick_sideways_chop_pick_momentum_pct = 0.02
+    s.quick_sideways_scan_watchlist = True
+    s.quick_sideways_strike_scan_radius = 250
+    s.quick_sideways_allow_bearish_chop = True
     s.enhanced_velocity_threshold = 1.2
     snap = _snap(orderflow=Orderflow(tickMomentum=5, deltaVelocity=5), spotChart=SpotChart(direction="NEUTRAL"))
     ok, reason = check_quick_sideways_entry(snap, Side.CALL, 77000, 55.0, velocity_pct=0.1)
     assert not ok
     assert "velocity" in reason
+
+
+@patch("app.engines.quick_sideways.get_settings")
+def test_chop_allows_lower_velocity(mock_settings):
+    s = mock_settings.return_value
+    s.quick_sideways_enabled = True
+    s.quick_sideways_min_tqs = 35
+    s.quick_sideways_min_velocity_pct = 0.5
+    s.quick_sideways_chop_min_velocity_pct = 0.22
+    s.quick_sideways_chop_pick_momentum_pct = 0.02
+    s.quick_sideways_scan_watchlist = True
+    s.quick_sideways_strike_scan_radius = 250
+    s.quick_sideways_allow_bearish_chop = True
+    s.enhanced_velocity_threshold = 1.2
+    snap = _snap(
+        regime=Regime.CHOP,
+        breadth=Breadth(score=50, bias="BEARISH", aligned=False),
+        spotChart=SpotChart(direction="BULLISH", momentum5Pct=0.03, trendStrength=20),
+        explosiveRunnerWatchlist=[
+            {"side": "CALL", "strike": 24400, "premium": 75.5, "premiumVelocityPct": 0.28},
+        ],
+        heatmap=[
+            HeatmapStrike(strike=24400.0, callLtp=75.5, putLtp=48.0),
+        ],
+        spot=24380.0,
+        atmStrike=24400.0,
+    )
+    ok, reason = check_quick_sideways_entry(snap, Side.CALL, 24400, 75.5, velocity_pct=0.28)
+    assert ok, reason
+
+
+@patch("app.engines.quick_sideways.get_settings")
+def test_scan_watchlist_strike_in_chop(mock_settings):
+    s = mock_settings.return_value
+    s.quick_sideways_enabled = True
+    s.quick_sideways_min_tqs = 35
+    s.quick_sideways_min_velocity_pct = 0.5
+    s.quick_sideways_chop_min_velocity_pct = 0.22
+    s.quick_sideways_chop_pick_momentum_pct = 0.02
+    s.quick_sideways_scan_watchlist = True
+    s.quick_sideways_strike_scan_radius = 250
+    s.quick_sideways_allow_bearish_chop = True
+    s.enhanced_velocity_threshold = 1.2
+    snap = _snap(
+        symbol="NIFTY",
+        regime=Regime.CHOP,
+        spot=24380.0,
+        atmStrike=24400.0,
+        breadth=Breadth(score=50, bias="BEARISH", aligned=False),
+        spotChart=SpotChart(direction="BULLISH", momentum5Pct=0.03, trendStrength=22),
+        explosiveRunnerWatchlist=[
+            {"side": "CALL", "strike": 24400, "premium": 75.5, "premiumVelocityPct": 0.3},
+        ],
+        heatmap=[HeatmapStrike(strike=24400.0, callLtp=75.5, putLtp=48.0)],
+    )
+    setups = scan_quick_sideways_setups("NIFTY", snap)
+    assert len(setups) >= 1
+    assert setups[0]["strike"] == 24400.0
