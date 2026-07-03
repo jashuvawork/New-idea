@@ -546,7 +546,12 @@ def validate_candidate(
     trade_score = max(candidate.tqs or 0, candidate.confidence or 0, candidate.score)
 
     if not side_aligned_with_breadth(side_val, snap.breadth.bias):
-        if trade_score < settings.counter_breadth_min_score:
+        counter_floor = settings.counter_breadth_min_score
+        from app.engines.morning_premium_capture import premium_led_entry_allowed
+
+        if premium_led_entry_allowed(candidate.side, snap):
+            counter_floor = min(counter_floor, settings.premium_led_counter_breadth_min_score)
+        if trade_score < counter_floor:
             return False, "pretrade_counter_breadth", meta
 
     from app.engines.spot_direction import chart_blocks_side

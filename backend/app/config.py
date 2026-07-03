@@ -201,6 +201,9 @@ class Settings(BaseSettings):
     flip_flop_max_opposites: int = 2
     whipsaw_momentum_rally_bypass_enabled: bool = True
     whipsaw_dual_retrigger_cooldown_seconds: int = 300
+    whipsaw_single_side_surge_bypass_enabled: bool = True
+    whipsaw_dominant_velocity_min: float = 2.5
+    whipsaw_dominant_velocity_ratio: float = 1.6
     bearish_sideways_halt_enabled: bool = True
     bearish_sideways_block_scalps: bool = True
     bearish_sideways_explosion_min_score: float = 78.0
@@ -317,8 +320,8 @@ class Settings(BaseSettings):
     momentum_rally_end_hour: int = 13
     momentum_rally_end_minute: int = 45
     morning_premium_capture_enabled: bool = True
-    morning_capture_start_hour: int = 10
-    morning_capture_start_minute: int = 0
+    morning_capture_start_hour: int = 9
+    morning_capture_start_minute: int = 15
     morning_capture_end_hour: int = 11
     morning_capture_end_minute: int = 45
     morning_capture_min_rank_score: float = 48.0
@@ -327,6 +330,14 @@ class Settings(BaseSettings):
     morning_capture_min_velocity_9s: float = 2.8
     morning_capture_building_min_velocity_3s: float = 2.0
     morning_capture_min_vol_surge: float = 1.3
+    morning_capture_skip_chart_on_extreme_velocity: bool = True
+    morning_capture_extreme_velocity_3s: float = 3.0
+    morning_capture_extreme_velocity_9s: float = 4.0
+    premium_led_counter_breadth_enabled: bool = True
+    premium_led_min_velocity_3s: float = 2.8
+    premium_led_min_velocity_9s: float = 3.5
+    premium_led_min_explosion_score: float = 42.0
+    premium_led_counter_breadth_min_score: float = 48.0
     runner_trail_keep_ratio: float = 0.38
     runner_micro_giveback_points: float = 4.0
     runner_min_best_points: float = 5.0

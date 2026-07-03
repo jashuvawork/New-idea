@@ -148,7 +148,12 @@ def check_entry_gate(
 
     side_bias = "BULLISH" if trade.side == Side.CALL else "BEARISH"
     if breadth.bias not in (side_bias, "NEUTRAL") and not alignment_override:
-        if not momentum_surge and trade_score < settings.counter_breadth_min_score:
+        counter_floor = settings.counter_breadth_min_score
+        from app.engines.morning_premium_capture import premium_led_entry_allowed
+
+        if premium_led_entry_allowed(trade.side, snap):
+            counter_floor = min(counter_floor, settings.premium_led_counter_breadth_min_score)
+        if not momentum_surge and trade_score < counter_floor:
             return False, "breadth_counter_trend"
 
     from app.engines.spot_direction import chart_blocks_side
