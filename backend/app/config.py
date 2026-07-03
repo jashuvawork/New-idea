@@ -343,9 +343,9 @@ class Settings(BaseSettings):
     runner_min_best_points: float = 5.0
 
     # Option premium (LTP) band for entries and scanners
-    min_option_premium_inr: float = 25.0
-    max_option_premium_inr: float = 175.0
-    explosion_max_premium_inr: float = 250.0
+    min_option_premium_inr: float = 20.0
+    max_option_premium_inr: float = 300.0
+    explosion_max_premium_inr: float = 400.0
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0

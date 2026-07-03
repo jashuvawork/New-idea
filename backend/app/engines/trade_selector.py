@@ -534,7 +534,7 @@ def diagnose_missed_entries(
             score = float(alert.get("explosionScore", 0))
             prem = alert.get("premium")
             blockers: list[str] = []
-            if not premium_in_band(prem):
+            if not premium_in_band(prem, mode="explosion"):
                 blockers.append("premium_out_of_band")
             if score < settings.aggressive_min_explosion_score:
                 blockers.append(f"explosion_score<{settings.aggressive_min_explosion_score}")
