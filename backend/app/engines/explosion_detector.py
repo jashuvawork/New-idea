@@ -167,9 +167,15 @@ def scan_chain_explosions(
 
 
 def event_to_dict(e: ExplosionEvent) -> dict[str, Any]:
-    from app.engines.morning_premium_capture import is_morning_capture_event
+    from app.engines.morning_premium_capture import (
+        is_afternoon_capture_event,
+        is_morning_capture_event,
+        is_premium_capture_event,
+    )
 
     morning = is_morning_capture_event(e)
+    afternoon = is_afternoon_capture_event(e)
+    capture = is_premium_capture_event(e)
     return {
         "symbol": e.symbol,
         "side": e.side.value,
@@ -182,6 +188,8 @@ def event_to_dict(e: ExplosionEvent) -> dict[str, Any]:
         "explosionScore": e.explosion_score,
         "tier": e.tier,
         "reason": e.reason,
-        "tradeable": e.tier in ("EXPLODING", "ELITE") or morning,
+        "tradeable": e.tier in ("EXPLODING", "ELITE") or capture,
         "morningCapture": morning,
+        "afternoonCapture": afternoon,
+        "premiumCapture": capture,
     }

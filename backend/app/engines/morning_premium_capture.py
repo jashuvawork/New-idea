@@ -1,4 +1,4 @@
-"""Morning premium capture — catch chart-style CE/PE explosions (e.g. NIFTY 24350 CE open rip)."""
+"""Premium capture — morning open rips and afternoon consolidation breakouts."""
 
 from __future__ import annotations
 
@@ -57,18 +57,48 @@ def _best_surge_for_side(
     return best_v3, best_v9, best_score, best_tier
 
 
+def in_afternoon_premium_capture_window() -> bool:
+    """11:45–13:45 IST — afternoon momentum rally after morning window closes."""
+    if get_market_phase() != "LIVE_MARKET":
+        return False
+    settings = get_settings()
+    if not settings.afternoon_premium_capture_enabled:
+        return False
+    from app.engines.chop_day_guards import in_momentum_rally_window
+
+    return in_momentum_rally_window() and not in_morning_premium_capture_window()
+
+
+def in_premium_capture_window() -> bool:
+    return in_morning_premium_capture_window() or in_afternoon_premium_capture_window()
+
+
+def _effective_dominant_velocity_min() -> float:
+    settings = get_settings()
+    if in_afternoon_premium_capture_window():
+        return settings.afternoon_capture_dominant_velocity_min
+    return settings.whipsaw_dominant_velocity_min
+
+
+def _effective_dominant_velocity_ratio() -> float:
+    settings = get_settings()
+    if in_afternoon_premium_capture_window():
+        return settings.afternoon_capture_dominant_velocity_ratio
+    return settings.whipsaw_dominant_velocity_ratio
+
+
 def premium_led_entry_allowed(
     side: Side | str,
     snap: SymbolSnapshot,
 ) -> bool:
     """
     Option premium velocity leads index breadth — allow CE in bearish chop (or PE in bullish)
-    when the leg itself is exploding at the open.
+    when the leg itself is exploding at the open or afternoon rally window.
     """
     settings = get_settings()
     if not settings.premium_led_counter_breadth_enabled:
         return False
-    if not in_morning_premium_capture_window():
+    if not in_premium_capture_window():
         return False
     v3, v9, score, tier = _best_surge_for_side(snap, _side_str(side))
     if tier in ("BUILDING", "EXPLODING", "ELITE") and score >= settings.premium_led_min_explosion_score:
@@ -109,11 +139,13 @@ def dominant_single_side_surge(snap: SymbolSnapshot) -> bool:
 
     dominant = max(best_call, best_put)
     weaker = min(best_call, best_put)
-    if dominant < settings.whipsaw_dominant_velocity_min:
+    vel_min = _effective_dominant_velocity_min()
+    vel_ratio = _effective_dominant_velocity_ratio()
+    if dominant < vel_min:
         return False
     if weaker <= 0.05:
         return True
-    return dominant / weaker >= settings.whipsaw_dominant_velocity_ratio
+    return dominant / weaker >= vel_ratio
 
 
 def single_side_surge_session_bypass(snapshots: Optional[dict[str, SymbolSnapshot]]) -> bool:
@@ -125,7 +157,7 @@ def single_side_surge_session_bypass(snapshots: Optional[dict[str, SymbolSnapsho
         return False
     from app.engines.session_timing import in_open_caution_window
 
-    if not (in_morning_premium_capture_window() or in_open_caution_window()):
+    if not (in_premium_capture_window() or in_open_caution_window()):
         return False
     return any(
         snap.dataAvailable and dominant_single_side_surge(snap)
@@ -243,3 +275,174 @@ def morning_capture_active(snapshots: Optional[dict[str, SymbolSnapshot]]) -> bo
 def morning_capture_rank_floor() -> float:
     settings = get_settings()
     return settings.morning_capture_min_rank_score
+
+
+def _is_consolidation_breakout(event: ExplosionEvent) -> bool:
+    """Volume-confirmed base breakout — catches slow 1pm grinds before 3s velocity spikes."""
+    settings = get_settings()
+    vol = event.volume_surge
+    if vol < settings.afternoon_capture_consolidation_vol_surge:
+        return False
+    if event.explosion_score < settings.afternoon_capture_building_min_score:
+        return False
+    return (
+        event.velocity_9s >= settings.afternoon_capture_consolidation_velocity_9s
+        or event.velocity_3s >= settings.afternoon_capture_building_min_velocity_3s
+    )
+
+
+def _chart_ok_for_afternoon_event(event: ExplosionEvent, chart: Optional[SpotChart]) -> bool:
+    if _chart_confirms_side(event.side, chart):
+        return True
+    settings = get_settings()
+    if not settings.afternoon_capture_skip_chart_on_volume:
+        return False
+    if event.volume_surge >= settings.afternoon_capture_chart_bypass_vol_surge:
+        if (
+            event.velocity_9s >= settings.afternoon_capture_chart_bypass_velocity_9s
+            or event.velocity_3s >= settings.afternoon_capture_min_velocity_3s
+        ):
+            return True
+    return (
+        event.velocity_3s >= settings.morning_capture_extreme_velocity_3s
+        or event.velocity_9s >= settings.morning_capture_extreme_velocity_9s
+    )
+
+
+def is_afternoon_capture_event(
+    event: ExplosionEvent,
+    *,
+    chart: Optional[SpotChart] = None,
+) -> bool:
+    """True when a BUILDING/EXPLODING leg matches afternoon consolidation breakout."""
+    settings = get_settings()
+    if not settings.afternoon_premium_capture_enabled:
+        return False
+    if not in_afternoon_premium_capture_window():
+        return False
+    if event.tier not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+    if event.explosion_score < settings.afternoon_capture_building_min_score:
+        return False
+
+    v3 = event.velocity_3s
+    v9 = event.velocity_9s
+    vol = event.volume_surge
+
+    if _is_consolidation_breakout(event):
+        if chart and not _chart_ok_for_afternoon_event(event, chart):
+            return False
+        return True
+
+    vel_ok = (
+        v3 >= settings.afternoon_capture_min_velocity_3s
+        or v9 >= settings.afternoon_capture_min_velocity_9s
+    )
+    vol_ok = vol >= settings.afternoon_capture_min_vol_surge or v3 >= 1.8
+    if not vel_ok or not vol_ok:
+        return False
+
+    if event.tier == "BUILDING":
+        building_ok = (
+            v3 >= settings.afternoon_capture_building_min_velocity_3s
+            or (
+                v9 >= settings.afternoon_capture_min_velocity_9s
+                and vol >= settings.afternoon_capture_min_vol_surge
+            )
+        )
+        if not building_ok:
+            return False
+
+    if chart and not _chart_ok_for_afternoon_event(event, chart):
+        return False
+
+    return True
+
+
+def is_afternoon_capture_alert(alert: dict[str, Any], chart: Optional[SpotChart] = None) -> bool:
+    try:
+        event = ExplosionEvent(
+            symbol=str(alert.get("symbol", "")),
+            side=Side(alert.get("side", "CALL")),
+            strike=float(alert.get("strike", 0)),
+            premium=float(alert.get("premium", 0)),
+            velocity_3s=float(alert.get("velocity3s", 0)),
+            velocity_9s=float(alert.get("velocity9s", 0)),
+            velocity_15s=float(alert.get("velocity15s", 0)),
+            volume_surge=float(alert.get("volumeSurge", 1)),
+            explosion_score=float(alert.get("explosionScore", 0)),
+            tier=str(alert.get("tier", "WATCH")),
+            reason=str(alert.get("reason", "")),
+        )
+    except (TypeError, ValueError):
+        return False
+    return is_afternoon_capture_event(event, chart=chart)
+
+
+def afternoon_capture_active(snapshots: Optional[dict[str, SymbolSnapshot]]) -> bool:
+    if not snapshots or not in_afternoon_premium_capture_window():
+        return False
+    for snap in snapshots.values():
+        if not snap.dataAvailable:
+            continue
+        chart = snap.spotChart
+        for alert in snap.explosionAlerts or []:
+            if is_afternoon_capture_alert(alert, chart):
+                return True
+    return False
+
+
+def is_premium_capture_event(
+    event: ExplosionEvent,
+    *,
+    chart: Optional[SpotChart] = None,
+) -> bool:
+    return is_morning_capture_event(event, chart=chart) or is_afternoon_capture_event(
+        event, chart=chart,
+    )
+
+
+def is_premium_capture_alert(alert: dict[str, Any], chart: Optional[SpotChart] = None) -> bool:
+    return is_morning_capture_alert(alert, chart) or is_afternoon_capture_alert(alert, chart)
+
+
+def premium_capture_active(snapshots: Optional[dict[str, SymbolSnapshot]]) -> bool:
+    return morning_capture_active(snapshots) or afternoon_capture_active(snapshots)
+
+
+def premium_capture_rank_floor() -> float:
+    settings = get_settings()
+    floors: list[float] = []
+    if in_morning_premium_capture_window():
+        floors.append(settings.morning_capture_min_rank_score)
+    if in_afternoon_premium_capture_window():
+        floors.append(settings.afternoon_capture_min_rank_score)
+    return min(floors) if floors else settings.morning_capture_min_rank_score
+
+
+def afternoon_capture_skips_chart_block(
+    event: ExplosionEvent,
+    chart: Optional[SpotChart],
+) -> bool:
+    """Premium-led afternoon rally — option moves before index chart flips."""
+    return is_afternoon_capture_event(event, chart=chart) and _chart_ok_for_afternoon_event(
+        event, chart,
+    )
+
+
+def afternoon_capture_exit_params(event_tier: str = "BUILDING") -> "ExplosionExitParams":
+    """Wider targets/trails for afternoon momentum rides."""
+    from app.engines.explosion_profit import ExplosionExitParams
+
+    settings = get_settings()
+    target = settings.afternoon_capture_exit_target_points
+    if event_tier == "ELITE":
+        target = max(target, settings.explosion_target_elite * 0.75)
+    return ExplosionExitParams(
+        stop_points=settings.afternoon_capture_exit_stop_points,
+        target_points=target,
+        trail_arm_points=settings.afternoon_capture_exit_trail_arm_points,
+        trail_keep_ratio=settings.afternoon_capture_exit_trail_keep_ratio,
+        micro_target_points=4.0,
+        adaptive_stop=True,
+    )
