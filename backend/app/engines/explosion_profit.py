@@ -107,13 +107,16 @@ def check_explosion_entry(
         return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
 
     if event.tier not in ("EXPLODING", "ELITE"):
-        from app.engines.morning_premium_capture import is_morning_capture_event
+        from app.engines.morning_premium_capture import is_premium_capture_event
 
-        if not is_morning_capture_event(event, chart=chart):
+        if not is_premium_capture_event(event, chart=chart):
             return False, f"tier_{event.tier}_not_tradeable"
 
+    from app.engines.morning_premium_capture import is_afternoon_capture_event
+
     if event.velocity_3s < 2.0 and event.velocity_9s < 3.0:
-        return False, "velocity_too_low"
+        if not is_afternoon_capture_event(event, chart=chart):
+            return False, "velocity_too_low"
 
     from app.engines.rally_capture import (
         breadth_blocks_explosion_side,
@@ -121,12 +124,15 @@ def check_explosion_entry(
         cross_side_chase_blocked,
         explosion_exhausted,
     )
+    from app.engines.morning_premium_capture import afternoon_capture_skips_chart_block
 
     blocked, reason = breadth_blocks_explosion_side(event.side, breadth.bias, event.tier)
     if blocked:
         return False, reason
 
     blocked, reason = chart_blocks_explosion_side(event.side, chart, event.tier)
+    if blocked and afternoon_capture_skips_chart_block(event, chart):
+        blocked, reason = False, "ok"
     if blocked:
         return False, reason
 
@@ -172,6 +178,11 @@ def check_explosion_entry(
 
     if event.velocity_3s >= 3.0 and event.volume_surge >= 1.5:
         return True, "early_explosion"
+
+    from app.engines.morning_premium_capture import is_premium_capture_event
+
+    if is_premium_capture_event(event, chart=chart):
+        return True, "premium_capture_confirmed"
 
     return False, "not_confirmed"
 
@@ -330,7 +341,10 @@ def evaluate_explosion_exit(
         return "explosion_no_progress", pnl_inr
 
     max_hold = 420 if best >= settings.runner_min_best_points else (360 if event_tier == "ELITE" or best >= 15 else 300)
-    if aligned := (trade.entryContext or {}).get("breadth"):
+    ctx = trade.entryContext or {}
+    if ctx.get("afternoonCapture"):
+        max_hold = max(max_hold, settings.afternoon_capture_exit_max_hold_seconds)
+    if aligned := ctx.get("breadth"):
         side_bias = "BULLISH" if trade.side.value == "CALL" else "BEARISH"
         if str(aligned).upper() == side_bias:
             max_hold = int(max_hold * 1.4)

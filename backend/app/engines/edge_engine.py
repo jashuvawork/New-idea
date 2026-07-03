@@ -143,13 +143,19 @@ def _timing_edge(snap: SymbolSnapshot) -> tuple[float, list[str]]:
     reasons: list[str] = []
     score = 12.0
 
-    from app.engines.morning_premium_capture import in_morning_premium_capture_window
+    from app.engines.morning_premium_capture import (
+        in_afternoon_premium_capture_window,
+        in_morning_premium_capture_window,
+    )
     from app.engines.chop_day_guards import in_momentum_rally_window
     from app.engines.session_timing import in_open_caution_window, in_midday_chop_window
 
     if in_morning_premium_capture_window():
         score += 14
         reasons.append("morning_capture_window")
+    elif in_afternoon_premium_capture_window():
+        score += 12
+        reasons.append("afternoon_capture_window")
     elif in_momentum_rally_window():
         score += 10
         reasons.append("momentum_rally_window")

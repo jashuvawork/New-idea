@@ -265,12 +265,13 @@ def whipsaw_pause_active(
     if momentum_rally_bypass_whipsaw(snapshots):
         return False, "momentum_rally_bypass"
     from app.engines.morning_premium_capture import (
-        morning_capture_active,
+        afternoon_capture_active,
+        premium_capture_active,
         single_side_surge_session_bypass,
     )
 
-    if morning_capture_active(snapshots):
-        return False, "morning_capture_bypass"
+    if premium_capture_active(snapshots):
+        return False, "premium_capture_bypass"
     if single_side_surge_session_bypass(snapshots):
         return False, "single_side_surge_bypass"
     _clear_expired_pause()
@@ -297,12 +298,13 @@ def check_session_whipsaw_pause(
         return False, "momentum_rally_bypass", {"momentumRallyBypass": True}
 
     from app.engines.morning_premium_capture import (
-        morning_capture_active,
+        afternoon_capture_active,
+        premium_capture_active,
         single_side_surge_session_bypass,
     )
 
-    if morning_capture_active(snapshots):
-        return False, "morning_capture_bypass", {"morningCaptureBypass": True}
+    if premium_capture_active(snapshots):
+        return False, "premium_capture_bypass", {"morningCaptureBypass": True}
     if single_side_surge_session_bypass(snapshots):
         return False, "single_side_surge_bypass", {"singleSideSurgeBypass": True}
 
@@ -395,10 +397,10 @@ def check_bearish_sideways_entry(
         score = float(getattr(candidate, "score", 0) or 0)
         if tier in ("ELITE", "EXPLODING") and score >= settings.bearish_sideways_explosion_min_score:
             return False, "ok"
-        from app.engines.morning_premium_capture import is_morning_capture_event
+        from app.engines.morning_premium_capture import is_premium_capture_event
 
         event = getattr(candidate, "explosion_event", None)
-        if event and is_morning_capture_event(event, chart=snap.spotChart):
+        if event and is_premium_capture_event(event, chart=snap.spotChart):
             return False, "ok"
         return True, "bearish_sideways_explosion_only"
 

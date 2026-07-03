@@ -431,9 +431,13 @@ async def _open_from_candidate(
         ctx_extra["entryVelocity3s"] = entry_velocity_3s
     if candidate.mode == "explosion" and candidate.explosion_event:
         ev = candidate.explosion_event
+        from app.engines.morning_premium_capture import is_afternoon_capture_event
+
+        afternoon = is_afternoon_capture_event(ev, chart=snap.spotChart)
         ctx_extra.update({
             "explosionTier": ev.tier,
             "explosionScore": ev.explosion_score,
+            "afternoonCapture": afternoon,
         })
     elif candidate.mode == "scalp" and candidate.suggestion:
         ctx_extra.update({
@@ -713,7 +717,14 @@ async def _process_open_trades(
                     current_velocity_3s=live_vel,
                 )
             else:
-                exit_reason, pnl = evaluate_explosion_exit(trade, eval_premium, tier, lot_mult)
+                from app.engines.morning_premium_capture import afternoon_capture_exit_params
+
+                exit_params = None
+                if (trade.entryContext or {}).get("afternoonCapture"):
+                    exit_params = afternoon_capture_exit_params(tier)
+                exit_reason, pnl = evaluate_explosion_exit(
+                    trade, eval_premium, tier, lot_mult, params=exit_params,
+                )
         elif not exit_reason and (trade.entryContext or {}).get("selectionMode") == "quick_sideways":
             exit_reason, pnl = evaluate_quick_sideways_exit(trade, eval_premium, lot_mult)
         elif not exit_reason and use_adaptive:

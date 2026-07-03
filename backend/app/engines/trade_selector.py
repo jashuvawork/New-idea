@@ -118,9 +118,9 @@ def _explosion_candidates(
         if not premium_in_band(alert.get("premium"), mode="explosion"):
             continue
         if alert.get("tier") not in ("ELITE", "EXPLODING"):
-            from app.engines.morning_premium_capture import is_morning_capture_alert
+            from app.engines.morning_premium_capture import is_premium_capture_alert
 
-            if not is_morning_capture_alert(alert, snap.spotChart):
+            if not is_premium_capture_alert(alert, snap.spotChart):
                 continue
         score_val = float(alert.get("explosionScore", 0))
         if score_val < settings.aggressive_min_explosion_score:
@@ -502,10 +502,13 @@ def find_best_entry(
         floor += pf_fb.rank_penalty
     if limits and settings.daily_18pct_strategy_enabled:
         floor = max(floor, limits.minRankScore)
-    from app.engines.morning_premium_capture import in_morning_premium_capture_window, morning_capture_rank_floor
+    from app.engines.morning_premium_capture import (
+        in_premium_capture_window,
+        premium_capture_rank_floor,
+    )
 
-    if in_morning_premium_capture_window() and best.mode == "explosion":
-        floor = min(floor, morning_capture_rank_floor())
+    if in_premium_capture_window() and best.mode == "explosion":
+        floor = min(floor, premium_capture_rank_floor())
     if best.mode == "quick_sideways":
         floor = min(floor, settings.quick_sideways_min_rank_score)
     elif settings.best_trades_only_enabled:

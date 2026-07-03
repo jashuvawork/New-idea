@@ -338,6 +338,29 @@ class Settings(BaseSettings):
     premium_led_min_velocity_9s: float = 3.5
     premium_led_min_explosion_score: float = 42.0
     premium_led_counter_breadth_min_score: float = 48.0
+
+    # Afternoon premium capture — 11:45–13:45 consolidation breakouts (e.g. NIFTY 24250 PE 1pm rip)
+    afternoon_premium_capture_enabled: bool = True
+    afternoon_capture_min_rank_score: float = 46.0
+    afternoon_capture_building_min_score: float = 35.0
+    afternoon_capture_min_velocity_3s: float = 1.2
+    afternoon_capture_min_velocity_9s: float = 1.8
+    afternoon_capture_building_min_velocity_3s: float = 1.0
+    afternoon_capture_min_vol_surge: float = 1.4
+    afternoon_capture_consolidation_vol_surge: float = 1.5
+    afternoon_capture_consolidation_velocity_9s: float = 1.2
+    afternoon_capture_skip_chart_on_volume: bool = True
+    afternoon_capture_chart_bypass_vol_surge: float = 1.5
+    afternoon_capture_chart_bypass_velocity_9s: float = 1.2
+    afternoon_capture_bearish_min_score: float = 42.0
+    afternoon_capture_dominant_velocity_min: float = 1.6
+    afternoon_capture_dominant_velocity_ratio: float = 1.4
+    afternoon_capture_exit_target_points: float = 18.0
+    afternoon_capture_exit_stop_points: float = 4.0
+    afternoon_capture_exit_trail_arm_points: float = 6.0
+    afternoon_capture_exit_max_hold_seconds: int = 480
+    afternoon_capture_exit_trail_keep_ratio: float = 0.55
+
     runner_trail_keep_ratio: float = 0.38
     runner_micro_giveback_points: float = 4.0
     runner_min_best_points: float = 5.0
