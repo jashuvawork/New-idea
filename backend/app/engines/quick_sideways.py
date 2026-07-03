@@ -66,11 +66,41 @@ def _min_velocity_pct(snap: SymbolSnapshot) -> float:
     return settings.quick_sideways_min_velocity_pct
 
 
-def get_quick_sideways_profile() -> OptimizedProfile:
+def resolve_quick_sideways_stop_points(entry_premium: float) -> float:
+    """Wider stop for expensive premiums — reduces noise stops on ₹100+ strikes."""
     settings = get_settings()
+    if not settings.quick_sideways_stop_adaptive_enabled:
+        return settings.quick_sideways_stop_points
+    if entry_premium < 60:
+        return settings.quick_sideways_stop_premium_lt_60
+    if entry_premium < 90:
+        return settings.quick_sideways_stop_premium_60_90
+    if entry_premium < 130:
+        return settings.quick_sideways_stop_premium_90_130
+    return settings.quick_sideways_stop_premium_gt_130
+
+
+def cap_quick_sideways_lots(lots: int, premium: float) -> int:
+    settings = get_settings()
+    if premium > settings.quick_sideways_high_premium_threshold_inr:
+        return min(lots, settings.quick_sideways_high_premium_lot_cap)
+    return lots
+
+
+def snapshot_in_chop(snap: SymbolSnapshot) -> bool:
+    return _in_chop(snap)
+
+
+def get_quick_sideways_profile(entry_premium: float | None = None) -> OptimizedProfile:
+    settings = get_settings()
+    stop = (
+        resolve_quick_sideways_stop_points(entry_premium)
+        if entry_premium is not None
+        else settings.quick_sideways_stop_points
+    )
     return OptimizedProfile(
         targetPoints=settings.quick_sideways_target_points,
-        stopPoints=settings.quick_sideways_stop_points,
+        stopPoints=stop,
         microTargetPoints=settings.quick_sideways_micro_target_points,
         maxHoldSeconds=settings.quick_sideways_max_hold_seconds,
         sessionLabel="quick_sideways",
@@ -234,6 +264,11 @@ def score_quick_sideways(
     spot = snap.spot or snap.atmStrike or strike
     if abs(strike - spot) <= 100:
         score += 3
+    settings = get_settings()
+    if settings.quick_sideways_preferred_premium_min <= premium <= settings.quick_sideways_preferred_premium_max:
+        score += 8
+    elif premium > settings.quick_sideways_high_premium_penalty_start:
+        score -= min(12.0, (premium - settings.quick_sideways_high_premium_penalty_start) * 0.15)
     return round(score, 2)
 
 
@@ -280,20 +315,28 @@ def evaluate_quick_sideways_exit(
     current_premium: float,
     lot_multiplier: int,
 ) -> tuple[Optional[str], float]:
-    """Tight quick scalp exits — 2–3pt targets, 2pt stop, short hold."""
+    """Tight quick scalp exits — adaptive stop by premium, 30s min hold, chop early lock."""
     settings = get_settings()
-    profile = get_quick_sideways_profile()
+    profile = get_quick_sideways_profile(trade.entryPremium)
     pnl_pts = current_premium - trade.entryPremium
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
     hold = _hold_seconds(trade)
     best = max(trade.bestPnlPoints, pnl_pts)
+    in_chop = bool((trade.entryContext or {}).get("inChop"))
 
-    min_hold = max(15, settings.scalp_stop_min_hold_seconds // 2)
+    min_hold = settings.quick_sideways_min_stop_hold_seconds
     if hold >= min_hold and pnl_pts <= -profile.stopPoints:
         return "quick_sideways_stop", pnl_inr
 
     if pnl_pts >= profile.targetPoints:
         return "quick_sideways_target", pnl_inr
+
+    if in_chop and settings.quick_sideways_chop_early_lock_points > 0:
+        early = settings.quick_sideways_chop_early_lock_points
+        if best >= early and pnl_pts > 0:
+            giveback = best - pnl_pts
+            if giveback >= settings.quick_sideways_chop_early_giveback_points:
+                return "quick_sideways_chop_early_lock", pnl_inr
 
     if best >= profile.microTargetPoints and pnl_pts >= profile.microTargetPoints * 0.85:
         if best - pnl_pts >= settings.quick_sideways_micro_giveback_points:

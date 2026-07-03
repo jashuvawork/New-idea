@@ -78,7 +78,12 @@ from app.models.schemas import (
     SymbolSnapshot,
     TradeMastermind,
 )
-from app.engines.quick_sideways import evaluate_quick_sideways_exit, get_quick_sideways_profile
+from app.engines.quick_sideways import (
+    cap_quick_sideways_lots,
+    evaluate_quick_sideways_exit,
+    get_quick_sideways_profile,
+    snapshot_in_chop,
+)
 from app.engines.session_timing import entries_allowed_now, entry_window_label
 from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
@@ -272,7 +277,7 @@ async def _open_from_candidate(
     snap = candidate.snap
     profile = snap.optimizedProfile or get_session_targets()
     if candidate.mode == "quick_sideways":
-        profile = get_quick_sideways_profile()
+        profile = get_quick_sideways_profile(candidate.premium)
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
 
     signal_premium = candidate.premium
@@ -302,6 +307,8 @@ async def _open_from_candidate(
         confidence=candidate.confidence,
         tier=candidate.tier,
     )
+    if candidate.mode == "quick_sideways":
+        lots = cap_quick_sideways_lots(lots, fill_premium)
     lots = apply_tiered_lot_cap(
         lots, candidate.score, snap.breadth.aligned, symbol,
         velocity_pct=(
@@ -442,6 +449,10 @@ async def _open_from_candidate(
             "maxHoldDays": candidate.alert.get("maxHoldDays"),
             "reason": candidate.swing_setup.reason if candidate.swing_setup else "",
         })
+    elif candidate.mode == "quick_sideways":
+        regime = snap.regime
+        ctx_extra["inChop"] = snapshot_in_chop(snap)
+        ctx_extra["regime"] = regime.value if hasattr(regime, "value") else str(regime)
 
     if not ctx_extra.get("instrumentKey"):
         if instrument_key:

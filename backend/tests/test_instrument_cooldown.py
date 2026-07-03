@@ -23,6 +23,7 @@ def _settings():
     s.instrument_micro_win_cooldown_seconds = 180
     s.instrument_win_cooldown_seconds = 90
     s.instrument_max_entries_per_day = 3
+    s.quick_sideways_instrument_cooldown_seconds = 300
     return s
 
 
@@ -36,6 +37,16 @@ def test_loss_blocks_same_strike_reentry(mock_settings):
     assert "instrument_cooldown" in reason
     blocked, _ = instrument_in_cooldown("NIFTY", Side.PUT, 23900)
     assert not blocked
+
+
+@patch("app.engines.instrument_cooldown.get_settings")
+def test_quick_sideways_exit_blocks_same_strike(mock_settings):
+    mock_settings.return_value = _settings()
+    reset_instrument_cooldowns()
+    record_instrument_close("NIFTY", Side.PUT, 24350, 3444, "quick_sideways_target")
+    blocked, reason = instrument_in_cooldown("NIFTY", Side.PUT, 24350)
+    assert blocked
+    assert "instrument_cooldown" in reason
 
 
 @patch("app.engines.instrument_cooldown.get_settings")
