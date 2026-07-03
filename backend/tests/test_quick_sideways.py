@@ -5,10 +5,12 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from app.engines.quick_sideways import (
+    cap_quick_sideways_lots,
     check_quick_sideways_entry,
     evaluate_quick_sideways_exit,
     is_sideways_snapshot,
     quick_sideways_enabled,
+    resolve_quick_sideways_stop_points,
     scan_quick_sideways_setups,
     score_quick_sideways,
 )
@@ -75,6 +77,9 @@ def test_scan_finds_atm_call_setup(mock_settings):
     s.quick_sideways_strike_scan_radius = 250
     s.quick_sideways_allow_bearish_chop = True
     s.enhanced_velocity_threshold = 1.2
+    s.quick_sideways_preferred_premium_min = 30.0
+    s.quick_sideways_preferred_premium_max = 80.0
+    s.quick_sideways_high_premium_penalty_start = 90.0
     setups = scan_quick_sideways_setups("SENSEX", _snap())
     assert len(setups) == 1
     assert setups[0]["side"] == Side.CALL
@@ -87,11 +92,18 @@ def test_quick_sideways_exit_target(mock_settings):
     s = mock_settings.return_value
     s.quick_sideways_target_points = 3.0
     s.quick_sideways_stop_points = 2.0
+    s.quick_sideways_stop_adaptive_enabled = True
+    s.quick_sideways_stop_premium_lt_60 = 2.0
+    s.quick_sideways_stop_premium_60_90 = 2.5
+    s.quick_sideways_stop_premium_90_130 = 3.0
+    s.quick_sideways_stop_premium_gt_130 = 3.5
     s.quick_sideways_micro_target_points = 2.0
     s.quick_sideways_micro_giveback_points = 1.5
+    s.quick_sideways_chop_early_lock_points = 1.5
+    s.quick_sideways_chop_early_giveback_points = 0.75
     s.quick_sideways_max_hold_seconds = 120
     s.quick_sideways_no_progress_seconds = 75
-    s.scalp_stop_min_hold_seconds = 30
+    s.quick_sideways_min_stop_hold_seconds = 30
     trade = PaperTrade(
         id="q1",
         symbol="SENSEX",
@@ -106,6 +118,114 @@ def test_quick_sideways_exit_target(mock_settings):
     reason, pnl = evaluate_quick_sideways_exit(trade, 53.5, 20)
     assert reason == "quick_sideways_target"
     assert pnl > 0
+
+
+@patch("app.engines.quick_sideways.get_settings")
+def test_adaptive_stop_by_premium(mock_settings):
+    s = mock_settings.return_value
+    s.quick_sideways_stop_adaptive_enabled = True
+    s.quick_sideways_stop_points = 2.0
+    s.quick_sideways_stop_premium_lt_60 = 2.0
+    s.quick_sideways_stop_premium_60_90 = 2.5
+    s.quick_sideways_stop_premium_90_130 = 3.0
+    s.quick_sideways_stop_premium_gt_130 = 3.5
+    assert resolve_quick_sideways_stop_points(45.0) == 2.0
+    assert resolve_quick_sideways_stop_points(75.0) == 2.5
+    assert resolve_quick_sideways_stop_points(110.0) == 3.0
+    assert resolve_quick_sideways_stop_points(150.0) == 3.5
+
+
+@patch("app.engines.quick_sideways.get_settings")
+def test_stop_blocked_before_min_hold(mock_settings):
+    s = mock_settings.return_value
+    s.quick_sideways_stop_adaptive_enabled = True
+    s.quick_sideways_stop_premium_lt_60 = 2.0
+    s.quick_sideways_stop_premium_60_90 = 2.5
+    s.quick_sideways_stop_premium_90_130 = 3.0
+    s.quick_sideways_stop_premium_gt_130 = 3.5
+    s.quick_sideways_target_points = 3.0
+    s.quick_sideways_micro_target_points = 2.0
+    s.quick_sideways_micro_giveback_points = 1.5
+    s.quick_sideways_chop_early_lock_points = 1.5
+    s.quick_sideways_chop_early_giveback_points = 0.75
+    s.quick_sideways_max_hold_seconds = 120
+    s.quick_sideways_no_progress_seconds = 75
+    s.quick_sideways_min_stop_hold_seconds = 30
+    from datetime import timedelta
+
+    trade = PaperTrade(
+        id="q2",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24400,
+        entryPremium=119.0,
+        currentPremium=116.0,
+        lots=13,
+        openedAt=datetime.now(IST) - timedelta(seconds=17),
+        strategyType=StrategyType.SCALP,
+    )
+    reason, _ = evaluate_quick_sideways_exit(trade, 116.0, 65)
+    assert reason is None
+
+    trade.openedAt = datetime.now(IST) - timedelta(seconds=35)
+    reason, pnl = evaluate_quick_sideways_exit(trade, 116.0, 65)
+    assert reason == "quick_sideways_stop"
+    assert pnl < 0
+
+
+@patch("app.engines.quick_sideways.get_settings")
+def test_chop_early_lock(mock_settings):
+    s = mock_settings.return_value
+    s.quick_sideways_stop_adaptive_enabled = True
+    s.quick_sideways_stop_premium_lt_60 = 2.0
+    s.quick_sideways_stop_premium_60_90 = 2.5
+    s.quick_sideways_stop_premium_90_130 = 3.0
+    s.quick_sideways_stop_premium_gt_130 = 3.5
+    s.quick_sideways_target_points = 3.0
+    s.quick_sideways_micro_target_points = 2.0
+    s.quick_sideways_micro_giveback_points = 1.5
+    s.quick_sideways_chop_early_lock_points = 1.5
+    s.quick_sideways_chop_early_giveback_points = 0.75
+    s.quick_sideways_max_hold_seconds = 120
+    s.quick_sideways_no_progress_seconds = 75
+    s.quick_sideways_min_stop_hold_seconds = 30
+    trade = PaperTrade(
+        id="q3",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24100,
+        entryPremium=34.0,
+        currentPremium=35.0,
+        lots=10,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.SCALP,
+        bestPnlPoints=2.0,
+        entryContext={"inChop": True},
+    )
+    reason, pnl = evaluate_quick_sideways_exit(trade, 35.0, 65)
+    assert reason == "quick_sideways_chop_early_lock"
+    assert pnl > 0
+
+
+@patch("app.engines.quick_sideways.get_settings")
+def test_score_prefers_cheaper_premium(mock_settings):
+    s = mock_settings.return_value
+    s.quick_sideways_preferred_premium_min = 30.0
+    s.quick_sideways_preferred_premium_max = 80.0
+    s.quick_sideways_high_premium_penalty_start = 90.0
+    snap = _snap()
+    cheap = score_quick_sideways(snap, Side.CALL, 77000, 55.0, 0.5)
+    expensive = score_quick_sideways(snap, Side.CALL, 77000, 115.0, 0.5)
+    assert cheap > expensive
+
+
+@patch("app.engines.quick_sideways.get_settings")
+def test_high_premium_lot_cap(mock_settings):
+    s = mock_settings.return_value
+    s.quick_sideways_high_premium_threshold_inr = 90.0
+    s.quick_sideways_high_premium_lot_cap = 10
+    assert cap_quick_sideways_lots(16, 101.0) == 10
+    assert cap_quick_sideways_lots(16, 75.0) == 16
 
 
 @patch("app.engines.quick_sideways.get_settings")
@@ -167,6 +287,9 @@ def test_scan_watchlist_strike_in_chop(mock_settings):
     s.quick_sideways_strike_scan_radius = 250
     s.quick_sideways_allow_bearish_chop = True
     s.enhanced_velocity_threshold = 1.2
+    s.quick_sideways_preferred_premium_min = 30.0
+    s.quick_sideways_preferred_premium_max = 80.0
+    s.quick_sideways_high_premium_penalty_start = 90.0
     snap = _snap(
         symbol="NIFTY",
         regime=Regime.CHOP,
