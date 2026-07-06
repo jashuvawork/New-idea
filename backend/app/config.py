@@ -270,6 +270,8 @@ class Settings(BaseSettings):
     chart_min_momentum_pct: float = 0.04
     chart_override_min_score: float = 75
     chart_alignment_rank_bonus: float = 10.0
+    spot_chart_timeframe_minutes: int = 5
+    spot_chart_1m_bars: int = 300  # 1m history for 5m resample + RSI/MACD warmup
 
     # Execution-time chart — fresh Upstox fetch right before order
     execution_chart_gate_enabled: bool = True

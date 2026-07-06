@@ -56,15 +56,19 @@ class Orderflow(BaseModel):
 
 
 class SpotChart(BaseModel):
-    """Index candle chart read — drives CE/PE alignment."""
+    """Index candle chart read — drives CE/PE alignment (primary 5m timeframe)."""
     direction: str = "NEUTRAL"  # BULLISH | BEARISH | NEUTRAL
     spot: float = 0
+    timeframe: str = "5m"
+    barCount: int = 0
     momentum5Pct: float = 0
     momentum10Pct: float = 0
     momentum15Pct: float = 0
     momentum30Pct: float = 0
     trendStrength: float = 0
     emaBias: str = "NEUTRAL"
+    ema9: float = 0.0
+    ema21: float = 0.0
     candleBias: str = "NEUTRAL"
     orPosition: str = "INSIDE"  # ABOVE | BELOW | INSIDE
     abovePoc: bool = False
