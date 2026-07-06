@@ -7,6 +7,7 @@ import logging
 from typing import Any, Optional
 
 from app.config import get_settings
+from app.engines.chart_indicators import compute_macd, compute_rsi
 from app.engines.spot_direction import _candle_rows, _ema, _pct_change
 from app.models.schemas import Side, TimeframeChartRead
 from app.services.upstox import UpstoxClient
@@ -100,6 +101,17 @@ def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChart
     elif red >= green + 1:
         bearish += 1
 
+    rsi_read = compute_rsi(closes)
+    macd_read = compute_macd(closes)
+    if rsi_read.bias == "OVERSOLD":
+        bullish += 1
+    elif rsi_read.bias == "OVERBOUGHT":
+        bearish += 1
+    if macd_read.bias == "BULLISH":
+        bullish += 1
+    elif macd_read.bias == "BEARISH":
+        bearish += 1
+
     if bullish >= bearish + 2:
         direction = "BULLISH"
     elif bearish >= bullish + 2:
@@ -111,7 +123,11 @@ def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChart
     else:
         direction = "NEUTRAL"
 
-    strength = min(100.0, abs(mom) * 30 + abs(mom3) * 20 + abs(bullish - bearish) * 10)
+    strength = min(
+        100.0,
+        abs(mom) * 30 + abs(mom3) * 20 + abs(bullish - bearish) * 10
+        + abs(rsi_read.value - 50) * 0.2,
+    )
 
     return TimeframeChartRead(
         label=label,
@@ -122,6 +138,12 @@ def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChart
         emaBias=ema_bias,
         price=round(price, 2),
         barCount=len(closes),
+        rsi=rsi_read.value,
+        rsiBias=rsi_read.bias,
+        macd=macd_read.line,
+        macdSignal=macd_read.signal,
+        macdHistogram=macd_read.histogram,
+        macdBias=macd_read.bias,
     )
 
 
@@ -134,6 +156,12 @@ def _tf_dict(read: TimeframeChartRead) -> dict[str, Any]:
         "trendStrength": read.trendStrength,
         "emaBias": read.emaBias,
         "barCount": read.barCount,
+        "rsi": read.rsi,
+        "rsiBias": read.rsiBias,
+        "macd": read.macd,
+        "macdSignal": read.macdSignal,
+        "macdHistogram": read.macdHistogram,
+        "macdBias": read.macdBias,
         "alignedCall": read.direction in ("BULLISH", "NEUTRAL") and read.momentumPct >= -0.02,
         "alignedPut": read.direction in ("BEARISH", "NEUTRAL") and read.momentumPct <= 0.02,
     }

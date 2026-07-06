@@ -61,6 +61,10 @@ def compute_adaptive_exit_plan(
     side: str = "CALL",
     confidence: float = 70.0,
     news: Optional[list[dict[str, Any]]] = None,
+    *,
+    entry_premium: Optional[float] = None,
+    entry_velocity_3s: Optional[float] = None,
+    explosion_tier: Optional[str] = None,
 ) -> AdaptiveExitPlan:
     """Derive SL, TP, and trailing parameters from ML + psychology + session."""
     settings = get_settings()
@@ -75,12 +79,39 @@ def compute_adaptive_exit_plan(
         return _swing_plan(settings, psychology, win_prob, reasoning)
 
     if strategy_type == StrategyType.EXPLOSIVE:
-        base_stop, base_target = 4.0, settings.explosion_target_standard
+        top = snap.topExplosion or {}
+        tier = explosion_tier or str(top.get("tier") or "EXPLODING")
+        vel = entry_velocity_3s
+        if vel is None:
+            vel = float(top.get("velocity3s") or 0)
+            if not vel and snap.explosiveRunner and snap.explosiveRunner.signal:
+                vel = float(snap.explosiveRunner.signal.premiumVelocityPct or 0)
+        premium = entry_premium
+        if premium is None:
+            premium = float(top.get("premium") or 0)
+            if not premium and snap.explosiveRunner:
+                premium = float(snap.explosiveRunner.premium or 0)
+        premium = max(premium, 25.0)
+
+        # Per-trade SL from premium + momentum — not a global fixed point value
+        base_stop = max(settings.scalp_stop_min_points, premium * 0.10)
+        base_target = settings.explosion_target_standard
         trail_arm, trail_keep = settings.explosion_trail_arm_points, settings.explosion_trail_keep_ratio
         trail_step = settings.explosion_trail_step_points
         trail_tight_arm = settings.explosion_trail_tight_arm
         trail_tight_pts = settings.explosion_trail_tight_points
         micro = settings.explosion_micro_target_points
+
+        if vel >= 2.5:
+            base_stop *= 1.25
+            reasoning.append(f"Explosion vel {vel:.1f}% — wider adaptive SL")
+        if vel >= 4.0:
+            base_stop *= 1.15
+        if tier == "ELITE":
+            base_stop *= 1.12
+            base_target = settings.explosion_target_elite
+            trail_arm = max(trail_arm, 8.0)
+            reasoning.append("ELITE explosion — wider SL + 25pt target")
     else:
         base_stop = session_profile.stopPoints
         base_target = session_profile.targetPoints
@@ -143,18 +174,14 @@ def compute_adaptive_exit_plan(
         stop *= 0.9
 
     if strategy_type == StrategyType.EXPLOSIVE:
-        if (snap.topExplosion or {}).get("tier") == "ELITE":
-            target = settings.explosion_target_elite
-            trail_arm = 8.0
-            reasoning.append("ELITE explosion — 25pt target")
         if session_profile.sessionLabel in ("momentum_rally", "open_drive"):
-            stop = max(settings.scalp_stop_min_points, stop * 1.05)
+            stop = max(settings.scalp_stop_min_points, stop * 1.12)
             trail_arm *= 1.1
             target = max(target, session_profile.targetPoints)
-            reasoning.append(f"{session_profile.sessionLabel} — wider trail + session TP")
+            reasoning.append(f"{session_profile.sessionLabel} — ride rally, wider adaptive SL")
 
-    stop_floor = settings.explosion_initial_stop_points if strategy_type == StrategyType.EXPLOSIVE else settings.scalp_stop_min_points
-    stop_cap = 7.0 if strategy_type == StrategyType.EXPLOSIVE else 5.0
+    stop_floor = settings.scalp_stop_min_points
+    stop_cap = 20.0 if strategy_type == StrategyType.EXPLOSIVE else 5.0
     target_floor = base_target * 0.95 if strategy_type != StrategyType.EXPLOSIVE else settings.explosion_target_standard * 0.85
 
     return AdaptiveExitPlan(
@@ -277,13 +304,19 @@ def evaluate_adaptive_explosion_exit(
     plan: AdaptiveExitPlan,
     tier: str,
     lot_multiplier: int,
+    *,
+    current_velocity_3s: float = 0.0,
 ) -> tuple[Optional[str], float]:
-    """Explosion exits with ML/psychology-tuned SL, target, and trail levels."""
+    """Explosion exits — per-trade adaptive SL/trail; no fixed global stop."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
     from app.engines.explosion_profit import (
         evaluate_explosion_exit,
         explosion_exit_params_from_plan,
     )
 
+    IST = ZoneInfo("Asia/Kolkata")
     params = explosion_exit_params_from_plan(plan, tier)
     exit_reason, pnl = evaluate_explosion_exit(
         trade, current_premium, tier, lot_multiplier, params=params,
@@ -293,6 +326,7 @@ def evaluate_adaptive_explosion_exit(
 
     pnl_pts = current_premium - trade.entryPremium
     best = max(trade.bestPnlPoints, pnl_pts)
+
     if best >= plan.trailArmPoints and pnl_pts < best * plan.trailKeepRatio:
         return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier
 

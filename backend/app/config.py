@@ -42,10 +42,11 @@ class Settings(BaseSettings):
     market_poll_interval_ms: int = 300
     market_poll_interval_ws_ms: int = 75
     tick_snapshot_interval_ms: int = 75
+    ws_snapshot_cache_interval_ms: int = 2000  # full REST snapshot TTL when WS feed is active
     snapshot_cache_interval_ms: int = 250
     tick_wake_debounce_ms: int = 15
     tick_fast_exit_enabled: bool = True
-    entry_scan_interval_ms: int = 350
+    entry_scan_interval_ms: int = 2000
     tick_overlay_max_age_seconds: float = 1.0
     news_cache_seconds: int = 60
     background_market_monitor_enabled: bool = True
@@ -77,17 +78,17 @@ class Settings(BaseSettings):
     sse_heartbeat_seconds: int = 1
 
     # Upstox rate limiting / caching
-    upstox_min_request_interval_ms: int = 100
-    upstox_request_retries: int = 4
-    upstox_rate_limit_cooldown_seconds: int = 30
-    upstox_chain_cache_seconds: int = 8
-    upstox_ltp_cache_seconds: int = 1
+    upstox_min_request_interval_ms: int = 250
+    upstox_request_retries: int = 2
+    upstox_rate_limit_cooldown_seconds: int = 45
+    upstox_chain_cache_seconds: int = 20
+    upstox_ltp_cache_seconds: int = 2
     upstox_expiries_cache_seconds: int = 600
     upstox_funds_cache_seconds: int = 90
-    upstox_candles_cache_seconds: int = 60
+    upstox_candles_cache_seconds: int = 120
     upstox_max_expiry_probes: int = 2
     capital_refresh_seconds: int = 90
-    fetch_constituents_in_snapshot: bool = True
+    fetch_constituents_in_snapshot: bool = False
     index_momentum_enabled: bool = True
     open_caution_moment_min_rank: float = 48.0
 
@@ -122,11 +123,31 @@ class Settings(BaseSettings):
     explosion_trail_step_points: float = 3.5
     explosion_trail_tight_arm: float = 12.0
     explosion_trail_tight_points: float = 5.0
-    explosion_initial_stop_points: float = 4.0
+    explosion_initial_stop_points: float = 6.0
     explosion_stop_min_hold_seconds: int = 15
-    explosion_no_progress_seconds: int = 90
-    explosion_reentry_cooldown_seconds: int = 120
-    explosion_emergency_cooldown_seconds: int = 300
+    explosion_no_progress_enabled: bool = True
+    explosion_no_progress_seconds: int = 150
+    explosion_no_progress_aligned_seconds: int = 420
+    explosion_no_progress_skip_when_aligned: bool = True
+    explosion_reentry_cooldown_seconds: int = 90
+    explosion_emergency_cooldown_seconds: int = 180
+    explosion_breadth_alignment_enabled: bool = True
+    explosion_single_side_per_symbol: bool = True
+    explosion_dominant_side_min_score: float = 50.0
+    explosion_exhaustion_v15_pct: float = 18.0
+    explosion_high_premium_threshold_inr: float = 90.0
+    explosion_high_premium_lot_cap: int = 10
+
+    # Directional lock — aligned side default; CE↔PE switch only on full confirmation
+    directional_side_lock_enabled: bool = True
+    directional_sticky_per_symbol: bool = True
+    directional_lock_use_chart: bool = True
+    directional_lock_block_chart_counter: bool = True
+    directional_switch_min_confirmations: int = 5
+    directional_switch_min_velocity_pct: float = 2.5
+    directional_switch_min_explosion_score: float = 55.0
+    directional_switch_min_runner_score: float = 60.0
+    directional_switch_min_trend_strength: float = 50.0
 
     # Symbol / instrument cooldown — stop same-strike churn after losses
     symbol_loss_cooldown_seconds: int = 180
@@ -141,7 +162,8 @@ class Settings(BaseSettings):
 
     # Controlled trading — pre-trade backtest + fewer entries
     controlled_trading_enabled: bool = True
-    controlled_max_trades_per_day: int = 6
+    controlled_max_trades_per_day: int = 10
+    controlled_rally_trade_cap_bonus: int = 4
     min_seconds_between_entries: int = 240
     pretrade_min_rank_score: float = 65.0
     pretrade_min_symbol_trades_for_stats: int = 3
@@ -161,6 +183,7 @@ class Settings(BaseSettings):
     last_n_elevated_min_rank_score: float = 72.0
     last_n_block_pf_below: float = 0.35
     last_n_block_net_inr_below: float = -25_000.0
+    last_n_momentum_rally_bypass_enabled: bool = True
 
     # Best trades only — fewer, higher-quality entries
     best_trades_only_enabled: bool = True
@@ -178,6 +201,11 @@ class Settings(BaseSettings):
     ce_pe_whipsaw_pause_seconds: int = 900
     flip_flop_lookback_trades: int = 6
     flip_flop_max_opposites: int = 2
+    whipsaw_momentum_rally_bypass_enabled: bool = True
+    whipsaw_dual_retrigger_cooldown_seconds: int = 300
+    whipsaw_single_side_surge_bypass_enabled: bool = True
+    whipsaw_dominant_velocity_min: float = 2.5
+    whipsaw_dominant_velocity_ratio: float = 1.6
     bearish_sideways_halt_enabled: bool = True
     bearish_sideways_block_scalps: bool = True
     bearish_sideways_explosion_min_score: float = 78.0
@@ -199,7 +227,7 @@ class Settings(BaseSettings):
     moneyness_atm_tolerance_points: float = 50.0
     moneyness_max_otm_steps: int = 2
     moneyness_max_itm_steps: int = 2
-    moneyness_explosion_prefer: str = "OTM"
+    moneyness_explosion_prefer: str = "ATM"
     moneyness_scalp_chop_prefer: str = "ITM"
     moneyness_high_conf_prefer: str = "ITM"
     moneyness_rank_bonus: float = 12.0
@@ -224,6 +252,7 @@ class Settings(BaseSettings):
     expiry_dual_scalp_mode: bool = True
     expiry_dual_scalp_relax_whipsaw: bool = True
     expiry_dual_scalp_opposite_cooldown_seconds: int = 90
+    expiry_explosion_open_block_minutes: int = 5
 
     # Psychology setup hold — FEAR/CAUTION entries held longer on expiry chop
     psychology_hold_enabled: bool = True
@@ -259,9 +288,9 @@ class Settings(BaseSettings):
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5
 
-    # Entries from 9:15 IST; open caution until 9:45 on chop days
+    # Entries from 9:20 IST — skip 9:15 open auction; open caution until 9:45
     entry_earliest_hour: int = 9
-    entry_earliest_minute: int = 15
+    entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
     open_caution_min_explosion_score: int = 45
@@ -276,12 +305,14 @@ class Settings(BaseSettings):
     neutral_breadth_explosion_min_score: float = 55.0
     sensex_rank_bonus: float = 10.0
     nifty_rank_penalty_chop: float = 5.0
-    daily_loss_stop_inr: float = 30_000.0
+    daily_loss_stop_inr: float = 100_000.0
     daily_max_trades_chop: int = 20
     daily_max_trades_pre10_chop: int = 5
     pre10_chop_min_rank_score: float = 60.0
     loss_streak_pause_count: int = 3
     loss_streak_pause_seconds: int = 1200
+    session_large_loss_pause_inr: float = 15_000.0
+    session_large_loss_pause_seconds: int = 900
     chop_lots_high: int = 40
     chop_lots_mid: int = 20
     chop_lots_min_rank: float = 48.0
@@ -289,17 +320,60 @@ class Settings(BaseSettings):
     momentum_bypass_velocity_pct: float = 2.5
     momentum_bypass_volume_surge: float = 1.4
     momentum_bypass_explosion_score: float = 48.0
-    momentum_rally_start_hour: int = 11
+    momentum_rally_start_hour: int = 10
     momentum_rally_start_minute: int = 0
     momentum_rally_end_hour: int = 13
     momentum_rally_end_minute: int = 45
+    morning_premium_capture_enabled: bool = True
+    morning_capture_start_hour: int = 9
+    morning_capture_start_minute: int = 15
+    morning_capture_end_hour: int = 11
+    morning_capture_end_minute: int = 45
+    morning_capture_min_rank_score: float = 48.0
+    morning_capture_building_min_score: float = 38.0
+    morning_capture_min_velocity_3s: float = 2.0
+    morning_capture_min_velocity_9s: float = 2.8
+    morning_capture_building_min_velocity_3s: float = 2.0
+    morning_capture_min_vol_surge: float = 1.3
+    morning_capture_skip_chart_on_extreme_velocity: bool = True
+    morning_capture_extreme_velocity_3s: float = 3.0
+    morning_capture_extreme_velocity_9s: float = 4.0
+    premium_led_counter_breadth_enabled: bool = True
+    premium_led_min_velocity_3s: float = 2.8
+    premium_led_min_velocity_9s: float = 3.5
+    premium_led_min_explosion_score: float = 42.0
+    premium_led_counter_breadth_min_score: float = 48.0
+
+    # Afternoon premium capture — 11:45–13:45 consolidation breakouts (e.g. NIFTY 24250 PE 1pm rip)
+    afternoon_premium_capture_enabled: bool = True
+    afternoon_capture_min_rank_score: float = 46.0
+    afternoon_capture_building_min_score: float = 35.0
+    afternoon_capture_min_velocity_3s: float = 1.2
+    afternoon_capture_min_velocity_9s: float = 1.8
+    afternoon_capture_building_min_velocity_3s: float = 1.0
+    afternoon_capture_min_vol_surge: float = 1.4
+    afternoon_capture_consolidation_vol_surge: float = 1.5
+    afternoon_capture_consolidation_velocity_9s: float = 1.2
+    afternoon_capture_skip_chart_on_volume: bool = True
+    afternoon_capture_chart_bypass_vol_surge: float = 1.5
+    afternoon_capture_chart_bypass_velocity_9s: float = 1.2
+    afternoon_capture_bearish_min_score: float = 42.0
+    afternoon_capture_dominant_velocity_min: float = 1.6
+    afternoon_capture_dominant_velocity_ratio: float = 1.4
+    afternoon_capture_exit_target_points: float = 18.0
+    afternoon_capture_exit_stop_points: float = 4.0
+    afternoon_capture_exit_trail_arm_points: float = 6.0
+    afternoon_capture_exit_max_hold_seconds: int = 480
+    afternoon_capture_exit_trail_keep_ratio: float = 0.55
+
     runner_trail_keep_ratio: float = 0.38
     runner_micro_giveback_points: float = 4.0
     runner_min_best_points: float = 5.0
 
     # Option premium (LTP) band for entries and scanners
-    min_option_premium_inr: float = 25.0
-    max_option_premium_inr: float = 175.0
+    min_option_premium_inr: float = 20.0
+    max_option_premium_inr: float = 300.0
+    explosion_max_premium_inr: float = 400.0
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0
@@ -307,6 +381,36 @@ class Settings(BaseSettings):
     enhanced_tqs_entry: int = 50
     runner_alignment_override_score: int = 82
     rapid_scalp_mode_enabled: bool = False
+    quick_sideways_enabled: bool = True
+    quick_sideways_min_rank_score: float = 58.0
+    quick_sideways_min_velocity_pct: float = 0.5
+    quick_sideways_chop_min_velocity_pct: float = 0.22
+    quick_sideways_chop_pick_momentum_pct: float = 0.02
+    quick_sideways_scan_watchlist: bool = True
+    quick_sideways_strike_scan_radius: int = 250
+    quick_sideways_allow_bearish_chop: bool = True
+    quick_sideways_min_tqs: int = 35
+    quick_sideways_target_points: float = 3.0
+    quick_sideways_stop_points: float = 2.0
+    quick_sideways_micro_target_points: float = 2.0
+    quick_sideways_micro_giveback_points: float = 1.5
+    quick_sideways_max_hold_seconds: int = 120
+    quick_sideways_no_progress_seconds: int = 75
+    quick_sideways_min_seconds_between_entries: int = 120
+    quick_sideways_stop_adaptive_enabled: bool = True
+    quick_sideways_stop_premium_lt_60: float = 2.0
+    quick_sideways_stop_premium_60_90: float = 2.5
+    quick_sideways_stop_premium_90_130: float = 3.0
+    quick_sideways_stop_premium_gt_130: float = 3.5
+    quick_sideways_min_stop_hold_seconds: int = 30
+    quick_sideways_instrument_cooldown_seconds: int = 300
+    quick_sideways_high_premium_threshold_inr: float = 90.0
+    quick_sideways_high_premium_lot_cap: int = 10
+    quick_sideways_preferred_premium_min: float = 30.0
+    quick_sideways_preferred_premium_max: float = 80.0
+    quick_sideways_high_premium_penalty_start: float = 90.0
+    quick_sideways_chop_early_lock_points: float = 1.5
+    quick_sideways_chop_early_giveback_points: float = 0.75
     sure_shot_mode_enabled: bool = False
     sure_shot_min_symbol_tqs: int = 40
     sure_shot_min_rank_score: float = 48.0
@@ -359,14 +463,39 @@ class Settings(BaseSettings):
     scalp_micro_giveback_points: float = 3.0
     scalp_no_progress_seconds: int = 150
 
-    # Daily target — Jun 25 milestone profile
-    daily_profit_target_inr: float = 44_000
+    # Daily target — 18% of capital per session (confidence-gated full limits)
+    daily_profit_target_from_capital: bool = True
+    daily_profit_target_pct: float = 0.18
+    daily_profit_target_inr: float = 44_000  # fallback when pct mode off
     daily_profit_trail_inr: float = 5_000  # legacy; unused when stage locks enabled
     daily_profit_stage_locks_enabled: bool = True
+    daily_profit_stage_block_entries_min_stage: int = 2
     daily_profit_stage_pcts_csv: str = "0.55,0.88,1.12"  # env: DAILY_PROFIT_STAGE_PCTS
+    daily_profit_stage_from_target: bool = True
+    daily_profit_stage_target_mults_csv: str = "0.5,1.0,1.5"  # locks at 9%, 18%, 27% of cap
+
+    # Daily 18% strategy — progressive playbook across all day types
+    daily_18pct_strategy_enabled: bool = True
+    daily_18pct_medium_confidence_min: float = 55.0
+    daily_18pct_high_confidence_min: float = 72.0
+    daily_18pct_elite_confidence_min: float = 85.0
+    daily_18pct_unlock_full_limits_min_confidence: float = 78.0
+    daily_18pct_chop_max_trades: int = 10
+    daily_18pct_expiry_max_trades: int = 5
+    daily_18pct_expiry_min_rank: float = 65.0
+    daily_18pct_full_limit_max_trades: int = 12
+
+    # Day-adaptive engine — trade well on worst, chop, normal, and good days
+    day_adaptive_enabled: bool = True
+    day_adaptive_worst_rank_cap: float = 68.0
+    day_adaptive_chop_rank_cap: float = 70.0
+    day_adaptive_good_day_rank_relief: float = 3.0
 
     def daily_profit_stage_pcts(self) -> list[float]:
         return [float(x.strip()) for x in self.daily_profit_stage_pcts_csv.split(",") if x.strip()]
+
+    def daily_profit_stage_target_mults(self) -> list[float]:
+        return [float(x.strip()) for x in self.daily_profit_stage_target_mults_csv.split(",") if x.strip()]
 
     use_upstox_capital_for_sizing: bool = True  # paper parity uses real margin when token present
 
@@ -382,6 +511,18 @@ class Settings(BaseSettings):
 
     adaptive_exits_enabled: bool = True
     ml_exit_tuning_enabled: bool = True
+
+    # Edge engine — realtime statistical entry scoring + 2.5+ PF feedback loop
+    edge_engine_enabled: bool = True
+    edge_session_pf_target: float = 2.5
+    edge_session_pf_tighten_below: float = 1.5
+    edge_min_score_for_full_size: float = 72.0
+    edge_min_score_for_entry: float = 52.0
+    edge_lot_scale_min: float = 0.45
+    edge_lot_scale_max: float = 1.0
+    edge_velocity_exhaustion_ratio: float = 0.35
+    edge_rsi_overbought_exit: float = 72.0
+    edge_macd_fade_exit_enabled: bool = True
 
     symbols_csv: str = Field(default="NIFTY,SENSEX", validation_alias="SYMBOLS")
 

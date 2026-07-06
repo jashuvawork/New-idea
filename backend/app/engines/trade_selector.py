@@ -23,6 +23,13 @@ from app.engines.pretrade_validator import (
     last_n_elevated_min_rank,
     last_n_trades_summary,
 )
+from app.engines.edge_engine import compute_entry_edge, edge_rank_bonus, session_pf_feedback
+from app.engines.day_adaptive_engine import (
+    apply_rank_floor_adaptive,
+    mode_rank_bonus,
+    resolve_day_adaptive,
+    should_pause_regular_scalps,
+)
 from app.engines.simple_profit import check_entry_gate
 from app.engines.spot_direction import chart_rank_adjustment
 from app.engines.moneyness import (
@@ -36,7 +43,12 @@ from app.engines.symbol_cooldown import (
     side_aligned_with_breadth,
     symbol_in_cooldown,
 )
-from app.engines.swing_profit import check_swing_entry
+from app.engines.quick_sideways import (
+    check_quick_sideways_entry,
+    is_sideways_session,
+    quick_sideways_enabled,
+    scan_quick_sideways_setups,
+)
 from app.engines.swing_engine import SwingSetup
 from app.models.schemas import (
     AutoTraderState,
@@ -79,6 +91,11 @@ def _reentry_blocked(
     blocked, reason = instrument_in_cooldown(symbol, side, strike)
     if blocked:
         return True, reason
+    from app.engines.directional_lock import check_directional_side_lock
+
+    blocked, reason = check_directional_side_lock(symbol, side, snap)
+    if blocked:
+        return True, reason
     if instrument_daily_cap_reached(symbol, side, strike):
         return True, f"instrument_daily_cap_{symbol}_{side.value}_{int(strike)}"
     if requires_breadth_alignment(symbol) and not side_aligned_with_breadth(
@@ -98,10 +115,13 @@ def _explosion_candidates(
     for alert in snap.explosionAlerts or []:
         if not alert.get("tradeable"):
             continue
-        if not premium_in_band(alert.get("premium")):
+        if not premium_in_band(alert.get("premium"), mode="explosion"):
             continue
         if alert.get("tier") not in ("ELITE", "EXPLODING"):
-            continue
+            from app.engines.morning_premium_capture import is_premium_capture_alert
+
+            if not is_premium_capture_alert(alert, snap.spotChart):
+                continue
         score_val = float(alert.get("explosionScore", 0))
         if score_val < settings.aggressive_min_explosion_score:
             continue
@@ -141,8 +161,15 @@ def _explosion_candidates(
             event, suggestion, snap.breadth, blocked,
             index_moment=moment_surge,
             chart=snap.spotChart,
+            snap=snap,
         )
         if not passed:
+            continue
+
+        from app.engines.rally_capture import cross_side_chase_blocked
+
+        blocked_x, _ = cross_side_chase_blocked(event, snap)
+        if blocked_x:
             continue
 
         blocked, reason = _reentry_blocked(symbol, event.side, event.strike, snap)
@@ -160,6 +187,10 @@ def _explosion_candidates(
             event.side, event.strike, snap, mode="explosion", candidate_score=rank,
             snapshots={symbol: snap},
         )
+        from app.engines.rally_capture import atm_proximity_rank_bonus, runner_strike_rank_bonus
+
+        rank += runner_strike_rank_bonus(event, snap)
+        rank += atm_proximity_rank_bonus(event, snap)
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -268,6 +299,38 @@ def _scalp_candidates(
     return out
 
 
+def _quick_sideways_candidates(
+    symbol: str,
+    snap: SymbolSnapshot,
+    state: AutoTraderState,
+    settings,
+) -> list[EntryCandidate]:
+    if not quick_sideways_enabled():
+        return []
+    out: list[EntryCandidate] = []
+    for setup in scan_quick_sideways_setups(symbol, snap):
+        side = setup["side"]
+        strike = float(setup["strike"])
+        premium = float(setup["premium"])
+        blocked, reason = _reentry_blocked(symbol, side, strike, snap)
+        if blocked:
+            continue
+        out.append(EntryCandidate(
+            symbol=symbol,
+            snap=snap,
+            mode="quick_sideways",
+            score=float(setup["score"]),
+            side=side,
+            strike=strike,
+            premium=premium,
+            strategy_type=StrategyType.SCALP,
+            confidence=float(setup["score"]),
+            tqs=snap.tradeQualityScore,
+            pretrade_meta={"quickSideways": True, "velocityPct": setup.get("velocityPct")},
+        ))
+    return out
+
+
 def _swing_candidates(
     symbol: str,
     snap: SymbolSnapshot,
@@ -326,6 +389,7 @@ def _swing_candidates(
 def find_best_entry(
     snapshots: dict[str, SymbolSnapshot],
     state: AutoTraderState,
+    limits: Optional[Any] = None,
 ) -> Optional[EntryCandidate]:
     """Return highest-ranked setup across all symbols — one best trade only."""
     settings = get_settings()
@@ -334,6 +398,10 @@ def find_best_entry(
         min_rank_for_entry,
         symbol_rank_adjustment,
     )
+    from app.engines.daily_18pct_strategy import entries_allowed_by_limits
+    from app.engines.pretrade_validator import collect_session_trades
+
+    trades_today = len(collect_session_trades(state))
 
     scalp_open = sum(1 for t in state.openPaperTrades if t.strategyType != StrategyType.SWING)
     swing_open = sum(1 for t in state.openPaperTrades if t.strategyType == StrategyType.SWING)
@@ -345,9 +413,12 @@ def find_best_entry(
         if not snap.dataAvailable:
             continue
         if settings.explosion_capture_mode and scalp_open < settings.aggressive_max_open_scalps:
-            candidates.extend(_explosion_candidates(symbol, snap, state, settings))
+            if not limits or getattr(limits, "allowExplosion", True):
+                candidates.extend(_explosion_candidates(symbol, snap, state, settings))
         if settings.paper_simple_profit_mode and scalp_open < settings.aggressive_max_open_scalps:
             candidates.extend(_scalp_candidates(symbol, snap, state, settings))
+        if quick_sideways_enabled() and scalp_open < settings.aggressive_max_open_scalps:
+            candidates.extend(_quick_sideways_candidates(symbol, snap, state, settings))
         if swing_open < settings.swing_max_open:
             candidates.extend(_swing_candidates(symbol, snap, state, settings))
 
@@ -361,8 +432,43 @@ def find_best_entry(
     for c in candidates:
         c.score += symbol_rank_adjustment(c.symbol, chop)
         c.score += index_adj.get(c.symbol.upper(), 0.0)
+        if settings.edge_engine_enabled:
+            edge = compute_entry_edge(c, c.snap, state)
+            c.score += edge_rank_bonus(edge)
+            c.pretrade_meta = {**(c.pretrade_meta or {}), "edgeScore": edge.total}
+
+    pf_fb = session_pf_feedback(state) if settings.edge_engine_enabled else None
+
+    if limits:
+        day_mode = str(getattr(limits, "dayMode", "") or "")
+        conf_tier = str(getattr(limits, "confidenceTier", "") or "MEDIUM")
+        phase = str(getattr(limits, "phase", "") or "ACCUMULATE")
+    else:
+        from app.engines.chop_day_guards import chop_guard_summary
+
+        chop_meta = chop_guard_summary(state, snapshots)
+        day_mode = str(chop_meta.get("dayMode") or "NORMAL")
+        conf_tier = "MEDIUM"
+        phase = "ACCUMULATE"
+    adaptive = resolve_day_adaptive(
+        snapshots, state, day_mode=day_mode, confidence_tier=conf_tier, phase=phase,
+    )
+
+    if should_pause_regular_scalps(
+        adaptive, edge_pause_scalps=bool(pf_fb and pf_fb.pause_quick_scalps),
+    ):
+        candidates = [c for c in candidates if c.mode != "scalp"]
 
     candidates = filter_candidates_pretrade(candidates, state, snapshots)
+    if limits and settings.daily_18pct_strategy_enabled:
+        filtered: list[EntryCandidate] = []
+        for c in candidates:
+            ok, reason = entries_allowed_by_limits(
+                limits, c.mode, c.score, trades_today,
+            )
+            if ok:
+                filtered.append(c)
+        candidates = filtered
     if not candidates:
         return None
 
@@ -385,15 +491,30 @@ def find_best_entry(
             candidates = explosion_only
 
     def sort_key(c: EntryCandidate) -> float:
-        bonus = 20 if c.mode == "explosion" else (5 if c.mode == "swing" else 0)
+        bonus = 20 if c.mode == "explosion" else (8 if c.mode == "quick_sideways" else (5 if c.mode == "swing" else 0))
+        bonus += mode_rank_bonus(c.mode, adaptive)
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty
 
     best = max(candidates, key=sort_key)
     floor = min_rank_for_entry(chop, snapshots)
     floor = max(floor, last_n_elevated_min_rank(state))
-    if settings.best_trades_only_enabled:
+    if pf_fb and settings.edge_engine_enabled and pf_fb.rank_penalty > 0:
+        floor += pf_fb.rank_penalty
+    if limits and settings.daily_18pct_strategy_enabled:
+        floor = max(floor, limits.minRankScore)
+    from app.engines.morning_premium_capture import (
+        in_premium_capture_window,
+        premium_capture_rank_floor,
+    )
+
+    if in_premium_capture_window() and best.mode == "explosion":
+        floor = min(floor, premium_capture_rank_floor())
+    if best.mode == "quick_sideways":
+        floor = min(floor, settings.quick_sideways_min_rank_score)
+    elif settings.best_trades_only_enabled:
         floor = max(floor, settings.best_trades_min_rank_score)
+    floor = apply_rank_floor_adaptive(floor, adaptive, candidate_mode=best.mode)
     if floor > 0 and sort_key(best) < floor:
         return None
     return best
@@ -417,7 +538,7 @@ def diagnose_missed_entries(
             score = float(alert.get("explosionScore", 0))
             prem = alert.get("premium")
             blockers: list[str] = []
-            if not premium_in_band(prem):
+            if not premium_in_band(prem, mode="explosion"):
                 blockers.append("premium_out_of_band")
             if score < settings.aggressive_min_explosion_score:
                 blockers.append(f"explosion_score<{settings.aggressive_min_explosion_score}")

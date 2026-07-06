@@ -63,7 +63,9 @@ async def fetch_live_trade_charts(
     Includes multi-timeframe (1m/5m/15m/1h/4h) pre-test analysis.
     """
     settings = get_settings()
-    force = settings.execution_chart_force_upstox_refresh
+    from app.services.upstox import rate_limit_active
+
+    force = settings.execution_chart_force_upstox_refresh and not rate_limit_active()
     count = settings.execution_chart_candle_count
     sym = symbol.upper()
 

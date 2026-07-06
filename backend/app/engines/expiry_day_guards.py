@@ -53,6 +53,54 @@ def in_expiry_morning_window() -> bool:
     return start <= current < end
 
 
+def in_expiry_explosion_open_block() -> bool:
+    """First N minutes after entry window on expiry — block noisy EXPLODING opens."""
+    from app.services.upstox import get_market_phase
+
+    settings = get_settings()
+    if not settings.expiry_day_guards_enabled or get_market_phase() != "LIVE_MARKET":
+        return False
+    start = settings.entry_earliest_hour * 60 + settings.entry_earliest_minute
+    end = start + settings.expiry_explosion_open_block_minutes
+    return start <= _minutes_now() < end
+
+
+def _breadth_aligned_for_side(side: Side | str, breadth: Any) -> bool:
+    side_val = side.value if isinstance(side, Side) else str(side).upper()
+    side_bias = "BULLISH" if side_val == "CALL" else "BEARISH"
+    bias = (getattr(breadth, "bias", None) or "NEUTRAL")
+    if hasattr(bias, "upper"):
+        bias = bias.upper()
+    else:
+        bias = str(bias).upper()
+    aligned = bool(getattr(breadth, "aligned", False))
+    return aligned or bias == side_bias
+
+
+def check_expiry_explosion_open_block(
+    *,
+    snap: SymbolSnapshot,
+    tier: str,
+    side: Side | str,
+    breadth: Any,
+) -> tuple[bool, str]:
+    """
+    On expiry, block EXPLODING tier in the first minutes after open.
+    ELITE + breadth-aligned legs may still enter.
+    Returns (blocked, reason).
+    """
+    if not is_symbol_expiry_day(snap):
+        return False, "ok"
+    if not in_expiry_explosion_open_block():
+        return False, "ok"
+    tier_u = str(tier or "").upper()
+    if tier_u == "ELITE" and _breadth_aligned_for_side(side, breadth):
+        return False, "ok"
+    if tier_u in ("EXPLODING", "BUILDING"):
+        return True, "expiry_open_block_exploding"
+    return False, "ok"
+
+
 def in_expiry_evening_block() -> bool:
     """Block new entries in expiry afternoon/evening — gamma + pin risk."""
     settings = get_settings()
@@ -210,6 +258,18 @@ def check_expiry_candidate(
     snap = snapshots.get(sym) or candidate.snap
     if not is_symbol_expiry_day(snap):
         return True, "ok", meta
+
+    mode = str(getattr(candidate, "mode", "") or "")
+    if mode == "explosion":
+        tier = str(getattr(candidate, "tier", "") or "")
+        blocked, block_reason = check_expiry_explosion_open_block(
+            snap=snap,
+            tier=tier,
+            side=candidate.side,
+            breadth=snap.breadth,
+        )
+        if blocked:
+            return False, block_reason, meta
 
     min_rank = expiry_min_rank_score(state, snapshots)
     score = float(getattr(candidate, "score", 0) or 0)

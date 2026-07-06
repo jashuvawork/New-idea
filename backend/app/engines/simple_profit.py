@@ -137,10 +137,23 @@ def check_entry_gate(
             if trade_score < settings.neutral_breadth_min_score:
                 return False, "midday_chop_wait"
 
-    # Counter-trend scalps (CALL in BEARISH / PUT in BULLISH) caused most session losses
+    # Counter-trend — BULLISH = CE only, BEARISH = PE only, no CE↔PE switch
+    from app.engines.directional_lock import check_directional_side_lock_simple
+
+    blocked_dir, dir_reason = check_directional_side_lock_simple(
+        trade.symbol, trade.side, breadth.bias, chart,
+    )
+    if blocked_dir:
+        return False, dir_reason
+
     side_bias = "BULLISH" if trade.side == Side.CALL else "BEARISH"
     if breadth.bias not in (side_bias, "NEUTRAL") and not alignment_override:
-        if not momentum_surge and trade_score < settings.counter_breadth_min_score:
+        counter_floor = settings.counter_breadth_min_score
+        from app.engines.morning_premium_capture import premium_led_entry_allowed
+
+        if premium_led_entry_allowed(trade.side, snap):
+            counter_floor = min(counter_floor, settings.premium_led_counter_breadth_min_score)
+        if not momentum_surge and trade_score < counter_floor:
             return False, "breadth_counter_trend"
 
     from app.engines.spot_direction import chart_blocks_side

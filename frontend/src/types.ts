@@ -132,6 +132,7 @@ export interface ExplosionAlert {
   tier: string;
   reason: string;
   tradeable: boolean;
+  morningCapture?: boolean;
 }
 
 export interface StrategyMatrixEntry {
@@ -207,6 +208,12 @@ export interface SpotChart {
   abovePoc: boolean;
   belowPoc: boolean;
   poc: number;
+  rsi?: number;
+  rsiBias?: string;
+  macd?: number;
+  macdSignal?: number;
+  macdHistogram?: number;
+  macdBias?: string;
 }
 
 export interface ExplosiveRunner {
@@ -350,6 +357,8 @@ export interface ComposerMonitorStatus {
   historyCount?: number;
   apiPing?: { ok?: boolean; reason?: string };
   latest?: ComposerBrief | null;
+  tradingBlockers?: { symbol?: string; reason?: string; message?: string }[];
+  composerAdvisoryOnly?: boolean;
 }
 
 export interface LastNTradesSummary {
@@ -404,6 +413,7 @@ export interface AutoTraderState {
   calibrationBlocks: Record<string, boolean>;
   capitalAllocation?: CapitalAllocation;
   dailyProfitGate?: DailyProfitGate;
+  dailyStrategy?: DailyStrategy;
   lastEntry?: AutoTradeEvent | null;
   lastExit?: AutoTradeEvent | null;
   liveOrdersPlaced?: number;
@@ -458,6 +468,12 @@ export interface MtfTimeframeRead {
   momentumPct: number;
   trendStrength: number;
   emaBias: string;
+  rsi?: number;
+  rsiBias?: string;
+  macd?: number;
+  macdSignal?: number;
+  macdHistogram?: number;
+  macdBias?: string;
   alignedCall?: boolean;
   alignedPut?: boolean;
 }
@@ -470,6 +486,12 @@ export interface PremiumChart {
   volumeSurge: number;
   vwap: number;
   aboveVwap: boolean;
+  rsi?: number;
+  rsiBias?: string;
+  macd?: number;
+  macdSignal?: number;
+  macdHistogram?: number;
+  macdBias?: string;
 }
 
 export interface CapitalAllocation {
@@ -487,6 +509,54 @@ export interface CapitalAllocation {
   lotSizes?: Record<string, number>;
   lotSizesSource?: string;
   lotSizesFetchedAt?: string;
+}
+
+export interface DailyStrategy {
+  phase?: string;
+  confidenceTier?: string;
+  marketConfidence?: number;
+  dayMode?: string;
+  dailyTargetInr?: number;
+  sessionPnlInr?: number;
+  progressPct?: number;
+  minRankScore?: number;
+  maxTradesToday?: number;
+  lotSizeMultiplier?: number;
+  allowExplosion?: boolean;
+  allowQuickSideways?: boolean;
+  allowFullLots?: boolean;
+  unlockFullLimits?: boolean;
+  message?: string;
+  playbook?: string[];
+  edgeSession?: EdgeSessionFeedback;
+  dayAdaptive?: DayAdaptiveProfile;
+}
+
+export interface EdgeSessionFeedback {
+  profitFactor?: number;
+  winRate?: number;
+  tradeCount?: number;
+  lotScale?: number;
+  rankPenalty?: number;
+  tightenExits?: boolean;
+  pauseQuickScalps?: boolean;
+  message?: string;
+  pfTarget?: number;
+}
+
+export interface DayAdaptiveProfile {
+  dayType?: string;
+  dayMode?: string;
+  confidenceTier?: string;
+  preferredModes?: string[];
+  modeBonuses?: Record<string, number>;
+  minRankCap?: number;
+  minRankRelief?: number;
+  lotScaleBoost?: number;
+  allowExplosion?: boolean;
+  allowQuickSideways?: boolean;
+  pauseRegularScalps?: boolean;
+  playbook?: string[];
 }
 
 export interface DailyProfitGate {

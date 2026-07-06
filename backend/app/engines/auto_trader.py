@@ -7,7 +7,14 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
+from app.engines.daily_18pct_strategy import (
+    compute_trading_limits,
+    scale_lots_for_limits,
+    set_session_limits,
+    get_session_limits,
+)
 from app.engines.daily_profit_strategy import DailyCalibration
+from app.engines.capital_allocator import _capital_base_for_stages
 from app.engines.ai_learning import get_ai_learning
 from app.engines.risk_engine import RiskEngine
 from app.engines.explosion_profit import evaluate_explosion_exit, record_explosion_stop
@@ -26,6 +33,7 @@ from app.engines.capital_allocator import (
     get_lot_sizes_meta,
     lot_multiplier,
     refresh_capital_from_upstox,
+    reset_session_profit_gate,
     tune_exit_plan_for_position,
     update_daily_profit_gate,
 )
@@ -42,6 +50,13 @@ from app.engines.chop_day_guards import (
 from app.engines.whipsaw_guards import (
     check_session_whipsaw_pause,
     record_trade_close as record_whipsaw_close,
+)
+from app.engines.edge_engine import (
+    check_edge_realtime_exit,
+    compute_entry_edge,
+    scale_lots_by_edge,
+    session_pf_feedback,
+    tune_plan_with_edge,
 )
 from app.engines.trade_selector import EntryCandidate, diagnose_missed_entries, find_best_entry
 from app.engines.paper_slippage import (
@@ -63,8 +78,14 @@ from app.models.schemas import (
     SymbolSnapshot,
     TradeMastermind,
 )
-from app.engines.snapshot_fast import resolve_trade_premium
+from app.engines.quick_sideways import (
+    cap_quick_sideways_lots,
+    evaluate_quick_sideways_exit,
+    get_quick_sideways_profile,
+    snapshot_in_chop,
+)
 from app.engines.session_timing import entries_allowed_now, entry_window_label
+from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
 from app.services.order_executor import place_entry_order, place_exit_order
 from app.services.paper_broker import simulate_entry_order, simulate_exit_order
@@ -139,6 +160,10 @@ def _attach_exit_plan(
     side: str,
     confidence: float,
     news: Optional[list[dict]] = None,
+    *,
+    entry_premium: Optional[float] = None,
+    entry_velocity_3s: Optional[float] = None,
+    explosion_tier: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build ML + psychology adaptive SL/TP plan for a new trade."""
     settings = get_settings()
@@ -161,9 +186,66 @@ def _attach_exit_plan(
 
     profile = snap.optimizedProfile or get_session_targets()
     plan = compute_adaptive_exit_plan(
-        snap, strategy_type, psychology, profile, side=side, confidence=confidence, news=news,
+        snap,
+        strategy_type,
+        psychology,
+        profile,
+        side=side,
+        confidence=confidence,
+        news=news,
+        entry_premium=entry_premium,
+        entry_velocity_3s=entry_velocity_3s,
+        explosion_tier=explosion_tier,
     )
     return plan.to_dict()
+
+
+def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
+    """Live premium velocity % for this leg — used to avoid adaptive SL during expansion."""
+    side_v = trade.side.value
+    strike = trade.strike
+    for entry in snap.explosiveRunnerWatchlist or []:
+        if str(entry.get("side", "")).upper() != side_v:
+            continue
+        if abs(float(entry.get("strike") or 0) - strike) > 0.5:
+            continue
+        return float(entry.get("premiumVelocityPct") or 0)
+    runner = snap.explosiveRunner
+    if runner and runner.side == trade.side and runner.signal:
+        if abs(float(runner.strike or 0) - strike) <= 0.5:
+            return float(runner.signal.premiumVelocityPct or 0)
+    top = snap.topExplosion or {}
+    if str(top.get("side", "")).upper() == side_v:
+        if abs(float(top.get("strike") or 0) - strike) <= 50:
+            return float(top.get("velocity3s") or 0)
+    return 0.0
+
+
+def _exit_plan_for_trade(
+    trade: PaperTrade,
+    snap: SymbolSnapshot,
+    news: Optional[list[dict]] = None,
+) -> dict[str, Any]:
+    """Resolve or rebuild per-trade adaptive exit plan."""
+    ctx = trade.entryContext or {}
+    plan_dict = ctx.get("exitPlan")
+    if plan_dict:
+        return plan_dict
+    if not get_settings().adaptive_exits_enabled:
+        return {}
+    confidence = float(
+        ctx.get("explosionScore") or ctx.get("confidence") or ctx.get("selectionScore") or 70,
+    )
+    return _attach_exit_plan(
+        snap,
+        trade.strategyType,
+        trade.side.value,
+        confidence,
+        news,
+        entry_premium=trade.entryPremium,
+        entry_velocity_3s=float(ctx.get("velocity3s") or 0) or None,
+        explosion_tier=ctx.get("explosionTier"),
+    )
 
 
 def _execution_mode(settings) -> str:
@@ -194,6 +276,8 @@ async def _open_from_candidate(
     symbol = candidate.symbol
     snap = candidate.snap
     profile = snap.optimizedProfile or get_session_targets()
+    if candidate.mode == "quick_sideways":
+        profile = get_quick_sideways_profile(candidate.premium)
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
 
     signal_premium = candidate.premium
@@ -223,6 +307,12 @@ async def _open_from_candidate(
         confidence=candidate.confidence,
         tier=candidate.tier,
     )
+    if candidate.mode == "explosion":
+        from app.engines.explosion_profit import cap_explosion_lots
+
+        lots = cap_explosion_lots(lots, fill_premium)
+    elif candidate.mode == "quick_sideways":
+        lots = cap_quick_sideways_lots(lots, fill_premium)
     lots = apply_tiered_lot_cap(
         lots, candidate.score, snap.breadth.aligned, symbol,
         velocity_pct=(
@@ -232,8 +322,22 @@ async def _open_from_candidate(
         ),
         volume_surge=(candidate.explosion_event.volume_surge if candidate.explosion_event else 1.0),
     )
+    limits = get_session_limits()
+    if limits is not None:
+        lots = scale_lots_for_limits(lots, limits)
     if lots <= 0:
         return False, "tiered_lot_cap_zero"
+
+    entry_velocity_3s = 0.0
+    if candidate.explosion_event:
+        entry_velocity_3s = float(candidate.explosion_event.velocity_3s or 0)
+    elif candidate.suggestion and candidate.suggestion.runnerSignal:
+        entry_velocity_3s = float(candidate.suggestion.runnerSignal.premiumVelocityPct or 0)
+
+    edge = compute_entry_edge(candidate, snap, state)
+    lots = scale_lots_by_edge(lots, edge)
+    if lots <= 0:
+        return False, "edge_lot_scale_zero"
     lot_mult = lot_multiplier(symbol)
 
     ok, risk_reason = _risk_engine.check_new_entry(
@@ -281,13 +385,25 @@ async def _open_from_candidate(
     exit_plan = _attach_exit_plan(
         snap, candidate.strategy_type, candidate.side.value,
         candidate.confidence, news,
+        entry_premium=fill_premium,
+        entry_velocity_3s=entry_velocity_3s or None,
+        explosion_tier=(
+            candidate.explosion_event.tier if candidate.explosion_event else None
+        ),
     )
     exit_plan = tune_exit_plan_for_position(exit_plan, lots, fill_premium, symbol)
+    if exit_plan and settings.edge_engine_enabled:
+        plan_obj = AdaptiveExitPlan.from_dict(exit_plan)
+        plan_obj = tune_plan_with_edge(
+            plan_obj, edge, snap.spotChart, entry_velocity_3s,
+        )
+        exit_plan = plan_obj.to_dict()
 
     ctx_extra: dict[str, Any] = {
         "selectionScore": round(candidate.score, 2),
         "selectionMode": candidate.mode,
         "lots": lots,
+        "edgeScore": edge.to_dict(),
         "tradeBudgetInr": exit_plan.get("tradeBudgetInr"),
         "exitPlan": exit_plan,
         "executionMode": _execution_mode(settings),
@@ -314,12 +430,18 @@ async def _open_from_candidate(
         ctx_extra["psychologyExitBias"] = snap.psychology.get("exitBias", "BALANCED")
     if getattr(candidate, "pretrade_meta", None):
         ctx_extra["pretrade"] = candidate.pretrade_meta
+    if entry_velocity_3s > 0:
+        ctx_extra["velocity3s"] = entry_velocity_3s
+        ctx_extra["entryVelocity3s"] = entry_velocity_3s
     if candidate.mode == "explosion" and candidate.explosion_event:
         ev = candidate.explosion_event
+        from app.engines.morning_premium_capture import is_afternoon_capture_event
+
+        afternoon = is_afternoon_capture_event(ev, chart=snap.spotChart)
         ctx_extra.update({
             "explosionTier": ev.tier,
-            "velocity3s": ev.velocity_3s,
             "explosionScore": ev.explosion_score,
+            "afternoonCapture": afternoon,
         })
     elif candidate.mode == "scalp" and candidate.suggestion:
         ctx_extra.update({
@@ -335,6 +457,10 @@ async def _open_from_candidate(
             "maxHoldDays": candidate.alert.get("maxHoldDays"),
             "reason": candidate.swing_setup.reason if candidate.swing_setup else "",
         })
+    elif candidate.mode == "quick_sideways":
+        regime = snap.regime
+        ctx_extra["inChop"] = snapshot_in_chop(snap)
+        ctx_extra["regime"] = regime.value if hasattr(regime, "value") else str(regime)
 
     if not ctx_extra.get("instrumentKey"):
         if instrument_key:
@@ -405,6 +531,9 @@ async def _open_from_candidate(
     state.openPaperTrades.append(paper)
     trade_store.record_trade_opened(paper, ctx)
     record_instrument_entry(symbol, candidate.side, candidate.strike)
+    from app.engines.directional_lock import record_trade_side
+
+    record_trade_side(symbol, candidate.side, snap)
     get_ai_learning().record_trade_open(
         paper.id,
         [
@@ -474,6 +603,7 @@ def reset_session_calibration() -> None:
     _calibration.reset()
     reset_symbol_cooldowns()
     reset_session_guards()
+    reset_session_profit_gate()
 
 
 def reset_session() -> None:
@@ -547,9 +677,25 @@ async def _process_open_trades(
         is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
         is_swing = trade.strategyType == StrategyType.SWING
         plan_dict = (trade.entryContext or {}).get("exitPlan")
-        use_adaptive = settings.adaptive_exits_enabled and plan_dict
+        use_adaptive = settings.adaptive_exits_enabled and (
+            plan_dict or trade.strategyType == StrategyType.EXPLOSIVE
+        )
 
-        if is_swing and settings.swing_trading_enabled:
+        live_vel = _trade_premium_velocity(snap, trade)
+        if settings.edge_engine_enabled:
+            edge_exit, edge_pnl = check_edge_realtime_exit(
+                trade, eval_premium, snap,
+                current_velocity_3s=live_vel,
+                lot_multiplier=lot_mult,
+            )
+            if edge_exit:
+                exit_reason, pnl = edge_exit, edge_pnl
+            else:
+                exit_reason, pnl = None, 0.0
+        else:
+            exit_reason, pnl = None, 0.0
+
+        if not exit_reason and is_swing and settings.swing_trading_enabled:
             if trade.entryContext is None:
                 trade.entryContext = {}
             pct = ((eval_premium - trade.entryPremium) / trade.entryPremium * 100) if trade.entryPremium else 0
@@ -560,19 +706,36 @@ async def _process_open_trades(
                 )
             else:
                 exit_reason, pnl = evaluate_swing_exit(trade, eval_premium, lot_mult)
-        elif is_explosion and settings.explosion_capture_mode:
-            tier = "ELITE" if (trade.bestPnlPoints or 0) >= 10 else "EXPLODING"
+        elif not exit_reason and is_explosion and settings.explosion_capture_mode:
+            tier = (trade.entryContext or {}).get("explosionTier") or (
+                "ELITE" if (trade.bestPnlPoints or 0) >= 10 else "EXPLODING"
+            )
             if use_adaptive:
+                plan_dict = _exit_plan_for_trade(trade, snap, news=None)
                 exit_reason, pnl = evaluate_adaptive_explosion_exit(
-                    trade, eval_premium, AdaptiveExitPlan.from_dict(plan_dict), tier, lot_mult,
+                    trade,
+                    eval_premium,
+                    AdaptiveExitPlan.from_dict(plan_dict),
+                    tier,
+                    lot_mult,
+                    current_velocity_3s=live_vel,
                 )
             else:
-                exit_reason, pnl = evaluate_explosion_exit(trade, eval_premium, tier, lot_mult)
-        elif use_adaptive:
+                from app.engines.morning_premium_capture import afternoon_capture_exit_params
+
+                exit_params = None
+                if (trade.entryContext or {}).get("afternoonCapture"):
+                    exit_params = afternoon_capture_exit_params(tier)
+                exit_reason, pnl = evaluate_explosion_exit(
+                    trade, eval_premium, tier, lot_mult, params=exit_params,
+                )
+        elif not exit_reason and (trade.entryContext or {}).get("selectionMode") == "quick_sideways":
+            exit_reason, pnl = evaluate_quick_sideways_exit(trade, eval_premium, lot_mult)
+        elif not exit_reason and use_adaptive:
             exit_reason, pnl = evaluate_adaptive_scalp_exit(
                 trade, eval_premium, AdaptiveExitPlan.from_dict(plan_dict), profile, lot_mult,
             )
-        else:
+        elif not exit_reason:
             exit_reason, pnl = evaluate_exit(trade, eval_premium, profile, lot_mult)
 
         if not exit_reason:
@@ -626,7 +789,8 @@ async def _process_open_trades(
             "explosion_emergency_stop",
             "explosion_time_stop",
             "explosion_trail_sl",
-            "adaptive_sl",
+            "adaptive_stop_loss",
+            "adaptive_trail_sl",
         ) and pnl < 0:
             cooldown = (
                 settings.explosion_emergency_cooldown_seconds
@@ -722,6 +886,43 @@ async def process(
     cap_snap = get_capital_snapshot()
     state.capitalAllocation = {**cap_snap.to_dict(), **get_lot_sizes_meta()}
     state.dailyProfitGate = profit_gate.to_dict()
+
+    from app.engines.pretrade_validator import collect_session_trades
+    session_pnl = compute_session_pnl(state)
+    trading_limits = compute_trading_limits(
+        snapshots,
+        state,
+        session_pnl=session_pnl,
+        capital_base=_capital_base_for_stages(),
+        trades_today=len(collect_session_trades(state)),
+    )
+    edge_fb = session_pf_feedback(state)
+    from app.engines.day_adaptive_engine import build_day_adaptive_profile
+
+    day_adaptive = build_day_adaptive_profile(
+        trading_limits.dayMode,
+        trading_limits.confidenceTier,
+        snapshots,
+        phase=trading_limits.phase,
+        state=state,
+    )
+    state.dailyStrategy = {
+        **trading_limits.to_dict(),
+        "edgeSession": {
+            "profitFactor": round(edge_fb.profit_factor, 2),
+            "winRate": round(edge_fb.win_rate, 1),
+            "tradeCount": edge_fb.trade_count,
+            "lotScale": round(edge_fb.lot_scale, 2),
+            "rankPenalty": round(edge_fb.rank_penalty, 1),
+            "tightenExits": edge_fb.tighten_exits,
+            "pauseQuickScalps": edge_fb.pause_quick_scalps,
+            "message": edge_fb.message,
+            "pfTarget": settings.edge_session_pf_target,
+        },
+        "dayAdaptive": day_adaptive.to_dict(),
+    }
+    set_session_limits(trading_limits)
+
     state.chopGuards = chop_guard_summary(state, snapshots)
 
     if not profit_gate.newEntriesAllowed:
@@ -762,14 +963,14 @@ async def process(
                 "message": "Daily trade cap on chop session",
             })
         from app.engines.pretrade_validator import controlled_daily_cap_reached, check_last_n_trades_pause
-        ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state)
+        ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state, snapshots)
         if ctrl_cap:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": ctrl_reason,
                 "message": "Controlled trading daily cap",
             })
-        last_n_paused, last_n_reason, last_n_meta = check_last_n_trades_pause(state)
+        last_n_paused, last_n_reason, last_n_meta = check_last_n_trades_pause(state, snapshots)
         if last_n_paused:
             skipped.append({
                 "symbol": "SESSION",
@@ -797,7 +998,7 @@ async def process(
                 or "Expiry-day entry blocked",
             })
         if not paused and not cap_hit and not ctrl_cap and not last_n_paused and not whipsaw_paused and expiry_ok:
-            best = find_best_entry(snapshots, state)
+            best = find_best_entry(snapshots, state, trading_limits)
             if best:
                 opened, reason = await _open_from_candidate(best, state, client, news)
                 if not opened:

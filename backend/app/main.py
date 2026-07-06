@@ -28,7 +28,11 @@ async def _background_monitor():
     )
     from app.services.tick_store import set_tick_wake_event
     from app.services.upstox_ws import is_ws_active
-    from app.services.upstox import get_market_phase
+    from app.services.upstox import (
+        get_market_phase,
+        rate_limit_active,
+        rate_limit_recovery_active,
+    )
 
     set_tick_wake_event(_tick_wake)
     settings = get_settings()
@@ -48,9 +52,15 @@ async def _background_monitor():
                 if tick_driven and can_run_tick_fast():
                     await run_tick_fast_cycle(broadcast=True)
                 elif entry_scan_due():
-                    if tick_driven:
+                    ws = is_ws_active()
+                    # Tick-fast exits use WS LTP overlay — don't bust REST cache on every tick wake
+                    if tick_driven and not ws:
                         invalidate_snapshot_cache()
-                    await get_multi_snapshot(broadcast=True, force=True)
+                    rest_ok = not rate_limit_active() and not rate_limit_recovery_active()
+                    await get_multi_snapshot(
+                        broadcast=True,
+                        force=rest_ok and not ws,
+                    )
                 elif not tick_driven:
                     await get_multi_snapshot(broadcast=True, force=False)
 

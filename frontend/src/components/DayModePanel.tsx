@@ -1,5 +1,6 @@
 import { Panel, BiasBadge } from './Panel';
 import type { AutoTraderState, ChopGuards, SpotChart, SymbolSnapshot } from '../types';
+import { morningCaptureWindowActive } from '../lib/playbookSession';
 
 const TONE_BADGE: Record<string, string> = {
   rally: 'bg-nexus-accent/90 text-black',
@@ -99,6 +100,11 @@ function SymbolChartRow({ symbol, chart }: { symbol: string; chart: SpotChart })
         <div className="text-nexus-muted">
           str {chart.trendStrength.toFixed(0)} · {chart.orPosition} OR · EMA {chart.emaBias}
         </div>
+        {(chart.rsi != null || chart.macdBias) && (
+          <div className="text-nexus-muted">
+            RSI {chart.rsi?.toFixed(0) ?? '—'} {chart.rsiBias ?? ''} · MACD {chart.macdBias ?? '—'}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -133,7 +139,8 @@ export function DayModePanel({
 
       <div className="flex flex-wrap gap-1 mb-3">
         <Flag label="Chop" active={Boolean(g.chopSession)} tone="warn" />
-        <Flag label="Rally 11–13:45" active={Boolean(g.momentumRallyWindow)} tone="good" />
+        <Flag label="Rally 10–13:45" active={Boolean(g.momentumRallyWindow)} tone="good" />
+        <Flag label="Morning capture" active={morningCaptureWindowActive()} tone="good" />
         <Flag label="Pre-10" active={Boolean(g.beforePrimaryWindow)} tone="warn" />
         <Flag label="Open caution" active={Boolean(g.openCautionWindow)} tone="warn" />
         <Flag label="Midday chop" active={Boolean(g.middayChopWindow)} tone="warn" />

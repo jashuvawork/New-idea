@@ -23,6 +23,7 @@ import { AIMatrix } from './components/AIMatrix';
 import { GreeksIV } from './components/GreeksIV';
 import { StrategyRouter } from './components/StrategyRouter';
 import { AutoTradingPanel } from './components/AutoTradingPanel';
+import { TomorrowPlaybookPanel } from './components/TomorrowPlaybookPanel';
 import { DayModePanel } from './components/DayModePanel';
 import { ComposerMonitorPanel } from './components/ComposerMonitorPanel';
 import { RiskEngine } from './components/RiskEngine';
@@ -135,7 +136,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <ConnectionStatus metrics={metrics} session={session} />
+            <ConnectionStatus metrics={metrics} session={session} dataReady={Boolean(data?.dataReady)} />
 
             {upstoxBadge ? (
               <span
@@ -260,6 +261,9 @@ export default function App() {
             </DashboardSection>
 
             <DashboardSection title="Signals & Trades" subtitle="Day mode, router, auto-trader, heatmap, swing lane">
+              <div className="col-span-12">
+                <TomorrowPlaybookPanel auto={auto} snapshots={data.snapshots} deployment={deployment} />
+              </div>
               <div className="col-span-12 lg:col-span-3">
                 <ComposerMonitorPanel />
               </div>

@@ -26,6 +26,8 @@ export function snapshotSignature(json: MultiSnapshot): string {
   const lastN = chop?.lastNTrades;
 
   return [
+    json.timestamp ?? '',
+    json.waitingReason ?? '',
     json.dataReady ? '1' : '0',
     auto?.openPaperTrades?.length ?? 0,
     auto?.closedPaperTrades?.length ?? 0,

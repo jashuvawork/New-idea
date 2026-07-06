@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.config import get_settings
+from app.engines.chart_indicators import compute_macd, compute_rsi
 from app.models.schemas import MarketProfile, Side, SpotChart
 
 
@@ -92,6 +93,9 @@ def analyze_spot_chart(
     above_poc = spot > poc * 1.0001
     below_poc = spot < poc * 0.9999
 
+    rsi_read = compute_rsi(closes)
+    macd_read = compute_macd(closes)
+
     bullish = bearish = 0
     if mom5 > 0.04:
         bullish += 2
@@ -117,6 +121,18 @@ def analyze_spot_chart(
         bullish += 1
     elif or_pos == "BELOW":
         bearish += 1
+    if rsi_read.bias == "OVERSOLD":
+        bullish += 1
+    elif rsi_read.bias == "OVERBOUGHT":
+        bearish += 1
+    elif rsi_read.value > 55:
+        bullish += 1
+    elif rsi_read.value < 45:
+        bearish += 1
+    if macd_read.bias == "BULLISH":
+        bullish += 2
+    elif macd_read.bias == "BEARISH":
+        bearish += 2
 
     if bullish >= bearish + 3:
         direction = "BULLISH"
@@ -131,7 +147,8 @@ def analyze_spot_chart(
 
     trend_strength = min(
         100.0,
-        abs(mom15) * 15 + abs(mom5) * 25 + abs(bullish - bearish) * 8,
+        abs(mom15) * 15 + abs(mom5) * 25 + abs(bullish - bearish) * 8
+        + abs(rsi_read.value - 50) * 0.15 + abs(macd_read.histogram) * 2,
     )
 
     return SpotChart(
@@ -148,6 +165,12 @@ def analyze_spot_chart(
         abovePoc=above_poc,
         belowPoc=below_poc,
         poc=round(poc, 2),
+        rsi=rsi_read.value,
+        rsiBias=rsi_read.bias,
+        macd=macd_read.line,
+        macdSignal=macd_read.signal,
+        macdHistogram=macd_read.histogram,
+        macdBias=macd_read.bias,
     )
 
 
@@ -191,6 +214,8 @@ def chart_blocks_side(
             return True, "chart_declining_no_calls"
         if chart.orPosition == "BELOW" and chart.belowPoc and chart.momentum5Pct < 0:
             return True, "chart_below_poc_no_calls"
+        if chart.rsiBias == "OVERBOUGHT" and chart.macdBias == "BEARISH" and chart.momentum5Pct < 0:
+            return True, "chart_rsi_macd_bearish_no_calls"
     else:
         if chart.direction == "BULLISH" and chart.trendStrength >= min_strength:
             return True, "chart_bullish_no_puts"
@@ -198,6 +223,8 @@ def chart_blocks_side(
             return True, "chart_rallying_no_puts"
         if chart.orPosition == "ABOVE" and chart.abovePoc and chart.momentum5Pct > 0:
             return True, "chart_above_poc_no_puts"
+        if chart.rsiBias == "OVERSOLD" and chart.macdBias == "BULLISH" and chart.momentum5Pct > 0:
+            return True, "chart_rsi_macd_bullish_no_puts"
 
     return False, "ok"
 
@@ -232,6 +259,12 @@ def chart_summary_dict(chart: SpotChart) -> dict[str, Any]:
         "candleBias": chart.candleBias,
         "orPosition": chart.orPosition,
         "abovePoc": chart.abovePoc,
+        "rsi": chart.rsi,
+        "rsiBias": chart.rsiBias,
+        "macd": chart.macd,
+        "macdSignal": chart.macdSignal,
+        "macdHistogram": chart.macdHistogram,
+        "macdBias": chart.macdBias,
         "recommendedSide": "CALL" if chart.direction == "BULLISH" else (
             "PUT" if chart.direction == "BEARISH" else "WAIT"
         ),
@@ -280,6 +313,9 @@ def analyze_premium_chart(candles: list, ltp: float) -> "PremiumChart":
     vol_prior = sum(volumes[-6:-3]) if len(volumes) >= 6 else vol_recent or 1
     vol_surge = vol_recent / max(1, vol_prior)
 
+    rsi_read = compute_rsi(closes)
+    macd_read = compute_macd(closes)
+
     return PremiumChart(
         direction=direction,
         lastPremium=round(ltp, 2),
@@ -288,6 +324,12 @@ def analyze_premium_chart(candles: list, ltp: float) -> "PremiumChart":
         volumeSurge=round(vol_surge, 2),
         vwap=round(vwap, 2),
         aboveVwap=ltp > vwap * 1.001,
+        rsi=rsi_read.value,
+        rsiBias=rsi_read.bias,
+        macd=macd_read.line,
+        macdSignal=macd_read.signal,
+        macdHistogram=macd_read.histogram,
+        macdBias=macd_read.bias,
     )
 
 
