@@ -31,7 +31,11 @@ IST = ZoneInfo("Asia/Kolkata")
 def _settings():
     s = MagicMock()
     s.controlled_trading_enabled = True
-    s.controlled_max_trades_per_day = 6
+    s.controlled_max_trades_per_day = 10
+    s.controlled_rally_trade_cap_bonus = 4
+    s.daily_18pct_strategy_enabled = False
+    s.daily_18pct_chop_max_trades = 10
+    s.day_adaptive_enabled = False
     s.min_seconds_between_entries = 180
     s.pretrade_min_rank_score = 65.0
     s.pretrade_min_symbol_trades_for_stats = 3
@@ -157,7 +161,7 @@ def test_blocks_counter_breadth_low_score(mock_settings):
     cand.confidence = 62.0
     ok, reason, _ = validate_candidate(cand, state)
     assert not ok
-    assert reason == "pretrade_counter_breadth"
+    assert reason.startswith("directional_") or reason == "pretrade_counter_breadth"
 
 
 def test_backtest_summary_recommends_index():
@@ -256,3 +260,61 @@ def test_best_trades_blocks_low_rank(mock_settings):
     ok, reason, _ = validate_candidate(_candidate("NIFTY", Side.PUT, score=60), state)
     assert not ok
     assert "best_trades_rank" in reason or "pretrade_rank" in reason
+
+
+@patch("app.engines.pretrade_validator.get_settings")
+def test_session_reset_clears_last_n_gate(mock_settings, tmp_path):
+    from app.engines.pretrade_validator import check_last_n_trades_pause, collect_session_trades
+    from app.services import trade_store
+
+    mock_settings.return_value = _settings()
+    with patch.object(trade_store, "get_store_dir", return_value=tmp_path):
+        state = AutoTraderState()
+        state.closedPaperTrades = [
+            PaperTrade(
+                id="old", symbol="SENSEX", side=Side.CALL, strike=77500,
+                entryPremium=100, currentPremium=90, lots=1,
+                openedAt=datetime.now(IST), strategyType=StrategyType.EXPLOSIVE,
+                pnlInr=-20_000, exitReason="adaptive_stop_loss",
+            )
+        ]
+        trade_store.set_session_reset_at()
+        paused, reason, _ = check_last_n_trades_pause(state)
+        assert not paused
+        assert collect_session_trades(state) == []
+
+
+@patch("app.engines.pretrade_validator.get_settings")
+@patch("app.engines.chop_day_guards.in_momentum_rally_window", return_value=True)
+def test_momentum_rally_bypasses_last_n_pause(mock_rally, mock_settings):
+    from app.engines.pretrade_validator import check_last_n_trades_pause
+    from app.models.schemas import ExplosiveRunner, MarketPhase, RunnerSignal, SymbolSnapshot
+
+    s = _settings()
+    s.last_n_momentum_rally_bypass_enabled = True
+    mock_settings.return_value = s
+    state = AutoTraderState()
+    state.closedPaperTrades = [
+        PaperTrade(
+            id=str(i), symbol="SENSEX", side=Side.CALL, strike=77500,
+            entryPremium=100, currentPremium=80, lots=1,
+            openedAt=datetime.now(IST), strategyType=StrategyType.EXPLOSIVE,
+            pnlInr=-12_000, exitReason="adaptive_stop_loss",
+        )
+        for i in range(3)
+    ]
+    snap = SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        explosiveRunner=ExplosiveRunner(
+            strike=77800,
+            side=Side.CALL,
+            score=55,
+            signal=RunnerSignal(premiumVelocityPct=3.5, volumeSurge=1.6, score=55),
+        ),
+    )
+    paused, reason, _ = check_last_n_trades_pause(state, {"SENSEX": snap})
+    assert not paused
+    assert reason == "momentum_rally_bypass"

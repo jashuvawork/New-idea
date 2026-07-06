@@ -16,6 +16,7 @@ _EMERGENCY_EXITS = frozenset({
     "simple_emergency_inr_stop",
     "explosion_emergency_stop",
     "explosion_stop_loss",
+    "adaptive_stop_loss",
     "simple_stop_loss",
     "adaptive_sl",
 })
@@ -101,6 +102,9 @@ def reset_symbol_cooldowns() -> None:
     from app.engines.whipsaw_guards import reset_whipsaw_guards
 
     reset_whipsaw_guards()
+    from app.engines.directional_lock import reset_directional_lock
+
+    reset_directional_lock()
     from app.engines.confidence_hold import reset_confidence_hold_state
 
     reset_confidence_hold_state()

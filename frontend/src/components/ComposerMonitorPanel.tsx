@@ -67,9 +67,24 @@ export function ComposerMonitorPanel({ pollMs = 30_000 }: { pollMs?: number }) {
       badgeColor={apiOk ? 'bg-purple-600/90 text-white' : 'bg-gray-600/80 text-white'}
     >
       <p className="text-[10px] text-nexus-muted leading-relaxed mb-2">
-        Session market read — understands regime, expiry, churn, and advises CALL / PUT / BOTH / stand
-        aside. Refreshes every {status?.intervalSeconds ?? 180}s during live market.
+        Advisory only — does not block orders. Reads regime, expiry, churn, and suggests CALL / PUT /
+        BOTH / stand aside. Refreshes every {status?.intervalSeconds ?? 180}s during live market.
       </p>
+
+      {status?.tradingBlockers && status.tradingBlockers.length > 0 ? (
+        <div className="mb-2 p-2 rounded border border-nexus-red/40 bg-nexus-red/10 text-[10px]">
+          <div className="text-nexus-red font-semibold uppercase mb-1">Trading blocked by engine</div>
+          {status.tradingBlockers.map((b, i) => (
+            <div key={`blocker-${i}`} className="text-white font-mono">
+              {b.reason}
+              {b.message ? ` — ${b.message}` : ''}
+            </div>
+          ))}
+          <div className="text-nexus-muted mt-1 text-[9px]">
+            Composer mirrors this — it does not cause the pause.
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap gap-1 mb-2 text-[9px]">
         <span
@@ -87,8 +102,8 @@ export function ComposerMonitorPanel({ pollMs = 30_000 }: { pollMs?: number }) {
           API {apiOk ? 'connected' : status?.apiConfigured ? 'ping fail' : 'no key'}
         </span>
         {brief?.standDown ? (
-          <span className="px-1.5 py-0.5 rounded border border-nexus-red/50 text-nexus-red font-semibold">
-            STAND DOWN
+          <span className="px-1.5 py-0.5 rounded border border-nexus-yellow/50 text-nexus-yellow font-semibold">
+            ADVISORY: STAND ASIDE
           </span>
         ) : null}
       </div>

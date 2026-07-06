@@ -70,6 +70,12 @@ class SpotChart(BaseModel):
     abovePoc: bool = False
     belowPoc: bool = False
     poc: float = 0
+    rsi: float = 50.0
+    rsiBias: str = "NEUTRAL"  # OVERBOUGHT | OVERSOLD | NEUTRAL
+    macd: float = 0.0
+    macdSignal: float = 0.0
+    macdHistogram: float = 0.0
+    macdBias: str = "NEUTRAL"  # BULLISH | BEARISH | NEUTRAL
 
 
 class PremiumChart(BaseModel):
@@ -81,6 +87,12 @@ class PremiumChart(BaseModel):
     volumeSurge: float = 1.0
     vwap: float = 0
     aboveVwap: bool = False
+    rsi: float = 50.0
+    rsiBias: str = "NEUTRAL"
+    macd: float = 0.0
+    macdSignal: float = 0.0
+    macdHistogram: float = 0.0
+    macdBias: str = "NEUTRAL"
 
 
 class TimeframeChartRead(BaseModel):
@@ -93,6 +105,12 @@ class TimeframeChartRead(BaseModel):
     emaBias: str = "NEUTRAL"
     price: float = 0
     barCount: int = 0
+    rsi: float = 50.0
+    rsiBias: str = "NEUTRAL"
+    macd: float = 0.0
+    macdSignal: float = 0.0
+    macdHistogram: float = 0.0
+    macdBias: str = "NEUTRAL"
 
 
 class Greeks(BaseModel):
@@ -298,6 +316,7 @@ class AutoTraderState(BaseModel):
     capitalAllocation: dict[str, Any] = {}
     dailyProfitGate: dict[str, Any] = {}
     chopGuards: dict[str, Any] = {}
+    dailyStrategy: dict[str, Any] = {}
     lastEntry: Optional[dict[str, Any]] = None
     lastExit: Optional[dict[str, Any]] = None
     liveOrdersPlaced: int = 0

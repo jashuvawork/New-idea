@@ -23,6 +23,7 @@ import { AIMatrix } from './components/AIMatrix';
 import { GreeksIV } from './components/GreeksIV';
 import { StrategyRouter } from './components/StrategyRouter';
 import { AutoTradingPanel } from './components/AutoTradingPanel';
+import { TomorrowPlaybookPanel } from './components/TomorrowPlaybookPanel';
 import { DayModePanel } from './components/DayModePanel';
 import { ComposerMonitorPanel } from './components/ComposerMonitorPanel';
 import { RiskEngine } from './components/RiskEngine';
@@ -36,6 +37,7 @@ import { PsychologyPanel } from './components/PsychologyPanel';
 import { PremarketPanel } from './components/PremarketPanel';
 import { SwingTrading } from './components/SwingTrading';
 import { PerformanceMilestone } from './components/PerformanceMilestone';
+import { deriveMarketSession } from './lib/marketSession';
 
 const SYMBOLS = ['NIFTY', 'SENSEX'] as const;
 
@@ -95,9 +97,7 @@ export default function App() {
           : { className: 'bg-nexus-red/15 text-nexus-red border-nexus-red/30', label: 'Not connected' }
     : null;
 
-  const marketClosed = SYMBOLS.every(
-    (s) => data?.snapshots?.[s]?.marketPhase === 'CLOSED' || !data?.snapshots?.[s]?.dataAvailable,
-  ) && Boolean(data);
+  const session = deriveMarketSession(data);
 
   return (
     <div className="min-h-screen text-gray-100">
@@ -136,7 +136,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <ConnectionStatus metrics={metrics} marketClosed={marketClosed} />
+            <ConnectionStatus metrics={metrics} session={session} dataReady={Boolean(data?.dataReady)} />
 
             {upstoxBadge ? (
               <span
@@ -261,6 +261,9 @@ export default function App() {
             </DashboardSection>
 
             <DashboardSection title="Signals & Trades" subtitle="Day mode, router, auto-trader, heatmap, swing lane">
+              <div className="col-span-12">
+                <TomorrowPlaybookPanel auto={auto} snapshots={data.snapshots} deployment={deployment} />
+              </div>
               <div className="col-span-12 lg:col-span-3">
                 <ComposerMonitorPanel />
               </div>

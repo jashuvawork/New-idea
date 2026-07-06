@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
   "ignoreCommand": "bash scripts/vercel-should-build.sh",
   "installCommand": "npm ci --prefix frontend --include=dev",
   "buildCommand": "npm run build --prefix frontend",
@@ -7,11 +8,11 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "http://65.1.137.232:8000/api/$1"
+      "destination": "http://65.0.136.146:8000/api/$1"
     },
     {
       "source": "/health",
-      "destination": "http://65.1.137.232:8000/health"
+      "destination": "http://65.0.136.146:8000/health"
     },
     {
       "source": "/((?!api/|assets/|health).*)",

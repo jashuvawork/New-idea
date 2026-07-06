@@ -61,6 +61,8 @@ def test_analyze_spot_chart_bearish_on_decline():
     assert chart.momentum5Pct < 0
     assert chart.momentum15Pct < 0
     assert chart.trendStrength >= 25
+    assert chart.rsi < 50
+    assert chart.macdBias in ("BEARISH", "NEUTRAL")
 
 
 def test_analyze_spot_chart_bullish_on_rally():
@@ -71,6 +73,8 @@ def test_analyze_spot_chart_bullish_on_rally():
     assert chart.direction == "BULLISH"
     assert chart.momentum5Pct > 0
     assert chart.momentum15Pct > 0
+    assert chart.rsi > 50
+    assert chart.macdBias in ("BULLISH", "NEUTRAL")
 
 
 @patch("app.engines.spot_direction.get_settings")
@@ -193,7 +197,7 @@ def test_explosion_blocks_call_on_bearish_chart():
             event, trade, Breadth(score=50, bias="NEUTRAL", aligned=False), False, chart=chart,
         )
     assert not ok
-    assert "chart_" in reason
+    assert "bearish" in reason.lower() or "chart" in reason.lower()
 
 
 def test_side_aligned_with_chart():

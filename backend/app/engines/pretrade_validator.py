@@ -42,9 +42,17 @@ def _profit_factor(trades: list[TradeRecord]) -> float:
     return gross_win / gross_loss
 
 
-def _paper_trade_records(state: AutoTraderState) -> list[TradeRecord]:
+def _paper_trade_records(state: AutoTraderState, reset_at: Optional[datetime] = None) -> list[TradeRecord]:
     out: list[TradeRecord] = []
     for t in state.closedPaperTrades:
+        if reset_at:
+            closed_at = t.closedAt
+            if closed_at is None:
+                continue
+            if closed_at.tzinfo is None:
+                closed_at = closed_at.replace(tzinfo=IST)
+            if closed_at <= reset_at:
+                continue
         side = t.side.value if isinstance(t.side, Side) else str(t.side).upper()
         out.append(TradeRecord(
             symbol=t.symbol.upper(),
@@ -59,9 +67,18 @@ def _paper_trade_records(state: AutoTraderState) -> list[TradeRecord]:
 
 def collect_session_trades(state: AutoTraderState) -> list[TradeRecord]:
     """Session closed trades — in-memory plus today's archive (survives restarts)."""
-    records = _paper_trade_records(state)
-    seen = {r.trade_id for r in records if r.trade_id}
     today = datetime.now(IST).strftime("%Y-%m-%d")
+    reset_at: Optional[datetime] = None
+
+    try:
+        from app.services import trade_store
+
+        reset_at = trade_store.get_session_reset_at()
+    except Exception:
+        pass
+
+    records = _paper_trade_records(state, reset_at)
+    seen = {r.trade_id for r in records if r.trade_id}
 
     try:
         from app.services import trade_store
@@ -70,6 +87,17 @@ def collect_session_trades(state: AutoTraderState) -> list[TradeRecord]:
         for row in day.get("trades", []):
             if row.get("status") != "CLOSED":
                 continue
+            exit_reason = str(row.get("exitReason") or "")
+            if exit_reason in ("SESSION_RESET", "manual_reset"):
+                continue
+            closed_raw = row.get("closedAt")
+            if reset_at and closed_raw:
+                try:
+                    closed_at = datetime.fromisoformat(str(closed_raw))
+                    if closed_at <= reset_at:
+                        continue
+                except ValueError:
+                    pass
             tid = str(row.get("id", ""))
             if tid and tid in seen:
                 continue
@@ -77,14 +105,53 @@ def collect_session_trades(state: AutoTraderState) -> list[TradeRecord]:
                 symbol=str(row.get("symbol", "")).upper(),
                 side=str(row.get("side", "")).upper(),
                 pnl_inr=float(row.get("pnlInr") or 0),
-                exit_reason=str(row.get("exitReason") or ""),
+                exit_reason=exit_reason,
                 strike=float(row.get("strike") or 0),
                 trade_id=tid,
             ))
     except Exception:
         pass
 
+    if reset_at:
+        filtered: list[TradeRecord] = []
+        for rec in records:
+            if rec.exit_reason in ("SESSION_RESET", "manual_reset"):
+                continue
+            filtered.append(rec)
+        records = filtered
+
     return records
+
+
+def momentum_rally_bypass_last_n(snapshots: Optional[dict[str, SymbolSnapshot]]) -> bool:
+    """Allow entries during 11:00–13:45 rally when premium velocity is expanding."""
+    if not snapshots:
+        return False
+    settings = get_settings()
+    if not settings.last_n_momentum_rally_bypass_enabled:
+        return False
+    from app.engines.chop_day_guards import in_momentum_rally_window, is_momentum_surge
+
+    if not in_momentum_rally_window():
+        return False
+    for snap in snapshots.values():
+        if not snap.dataAvailable:
+            continue
+        vel = 0.0
+        vol = 1.0
+        score = 0.0
+        runner = snap.explosiveRunner
+        if runner and runner.signal:
+            vel = float(runner.signal.premiumVelocityPct or 0)
+            score = float(runner.score or 0)
+            vol = float(runner.signal.volumeSurge or 1.0)
+        top = snap.topExplosion or {}
+        if top:
+            vel = max(vel, float(top.get("velocity3s") or 0))
+            score = max(score, float(top.get("score") or 0))
+        if is_momentum_surge(vel, vol, score):
+            return True
+    return False
 
 
 def compute_symbol_stats(trades: list[TradeRecord]) -> dict[str, SymbolSessionStats]:
@@ -145,7 +212,12 @@ def seconds_since_last_exit(state: AutoTraderState) -> float:
         return 999_999.0
 
 
-def check_min_entry_interval(state: AutoTraderState, *, chop: bool = False) -> tuple[bool, str]:
+def check_min_entry_interval(
+    state: AutoTraderState,
+    *,
+    chop: bool = False,
+    quick_sideways: bool = False,
+) -> tuple[bool, str]:
     settings = get_settings()
     last = state.lastExit
     if not last or not last.get("at"):
@@ -155,7 +227,11 @@ def check_min_entry_interval(state: AutoTraderState, *, chop: bool = False) -> t
     except Exception:
         return True, "ok"
 
-    gap = settings.min_seconds_between_entries
+    gap = (
+        settings.quick_sideways_min_seconds_between_entries
+        if quick_sideways
+        else settings.min_seconds_between_entries
+    )
     if chop:
         gap = max(gap, settings.chop_session_entry_interval_seconds)
     gap = max(gap, settings.post_exit_min_seconds)
@@ -171,11 +247,72 @@ def check_min_entry_interval(state: AutoTraderState, *, chop: bool = False) -> t
     return True, "ok"
 
 
-def controlled_daily_cap_reached(state: AutoTraderState) -> tuple[bool, str]:
+def resolve_effective_daily_trade_cap(
+    state: AutoTraderState,
+    snapshots: Optional[dict] = None,
+) -> tuple[int, str]:
+    """
+    Effective closed-trade cap — merges controlled base, daily 18% strategy, rally windows.
+    Avoids hard 6-trade ceiling blocking momentum rallies toward 18% target.
+    """
+    settings = get_settings()
+    if not settings.controlled_trading_enabled:
+        return 999, "off"
+
+    cap = settings.controlled_max_trades_per_day
+    label = "controlled"
+
+    from app.engines.daily_18pct_strategy import get_session_limits
+
+    limits = get_session_limits()
+    if limits and settings.daily_18pct_strategy_enabled:
+        cap = max(cap, limits.maxTradesToday)
+        label = "daily_strategy"
+
+    if snapshots:
+        from app.engines.chop_day_guards import in_momentum_rally_window, is_chop_session
+        from app.engines.morning_premium_capture import (
+            in_afternoon_premium_capture_window,
+            in_morning_premium_capture_window,
+        )
+
+        if in_momentum_rally_window():
+            cap = max(cap, settings.daily_18pct_chop_max_trades)
+            cap += settings.controlled_rally_trade_cap_bonus
+            label = "momentum_rally"
+        elif in_morning_premium_capture_window():
+            cap = max(cap, settings.controlled_max_trades_per_day + 4)
+            label = "morning_capture"
+        elif in_afternoon_premium_capture_window():
+            cap = max(cap, settings.controlled_max_trades_per_day + 2)
+            label = "afternoon_capture"
+        elif is_chop_session(snapshots):
+            cap = max(cap, settings.daily_18pct_chop_max_trades)
+
+        if limits and settings.day_adaptive_enabled:
+            from app.engines.day_adaptive_engine import build_day_adaptive_profile
+
+            profile = build_day_adaptive_profile(
+                limits.dayMode,
+                limits.confidenceTier,
+                snapshots,
+                phase=limits.phase,
+                state=state,
+            )
+            if profile.day_type in ("GOOD", "ELITE"):
+                cap = max(cap, settings.daily_18pct_chop_max_trades + 2)
+
+    return cap, label
+
+
+def controlled_daily_cap_reached(
+    state: AutoTraderState,
+    snapshots: Optional[dict] = None,
+) -> tuple[bool, str]:
     settings = get_settings()
     if not settings.controlled_trading_enabled:
         return False, "ok"
-    cap = settings.controlled_max_trades_per_day
+    cap, _ = resolve_effective_daily_trade_cap(state, snapshots)
     if cap <= 0:
         return False, "ok"
     closed = len(collect_session_trades(state))
@@ -223,7 +360,10 @@ def last_n_trades_summary(state: AutoTraderState) -> dict[str, Any]:
     return analyze_last_n_trades(trades, n)
 
 
-def check_last_n_trades_pause(state: AutoTraderState) -> tuple[bool, str, dict[str, Any]]:
+def check_last_n_trades_pause(
+    state: AutoTraderState,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+) -> tuple[bool, str, dict[str, Any]]:
     """Session-level pause when last N trades are catastrophic (e.g. 4/5 losses)."""
     settings = get_settings()
     if not settings.last_n_trades_gate_enabled:
@@ -234,6 +374,14 @@ def check_last_n_trades_pause(state: AutoTraderState) -> tuple[bool, str, dict[s
         return False, "ok", last_n_trades_summary(state)
 
     summary = analyze_last_n_trades(trades, settings.last_n_trades_lookback)
+    if momentum_rally_bypass_last_n(snapshots):
+        return False, "momentum_rally_bypass", summary
+
+    from app.engines.morning_premium_capture import premium_capture_active
+
+    if premium_capture_active(snapshots):
+        return False, "premium_capture_bypass", summary
+
     losses = summary["losses"]
     count = summary["count"]
 
@@ -292,6 +440,9 @@ def check_last_n_candidate_gate(
     ):
         return False, "last_n_explosion_only", meta
 
+    if settings.best_trades_only_enabled and getattr(candidate, "mode", "") == "quick_sideways":
+        return True, "ok", meta
+
     if settings.best_trades_only_enabled and score < settings.best_trades_min_rank_score:
         return False, f"best_trades_rank_below_{settings.best_trades_min_rank_score:.0f}", meta
 
@@ -320,11 +471,15 @@ def validate_candidate(
     snap_map = snapshots or {candidate.symbol.upper(): candidate.snap}
     chop = is_chop_session(snap_map)
 
-    ok, reason = check_min_entry_interval(state, chop=chop)
+    ok, reason = check_min_entry_interval(
+        state,
+        chop=chop,
+        quick_sideways=getattr(candidate, "mode", "") == "quick_sideways",
+    )
     if not ok:
         return False, reason, meta
 
-    cap_hit, cap_reason = controlled_daily_cap_reached(state)
+    cap_hit, cap_reason = controlled_daily_cap_reached(state, snap_map)
     if cap_hit:
         return False, cap_reason, meta
 
@@ -332,6 +487,15 @@ def validate_candidate(
     meta.update(ln_meta)
     if not ln_ok:
         return False, ln_reason, meta
+
+    from app.engines.directional_lock import check_directional_side_lock
+
+    sym = candidate.symbol.upper()
+    snap = snap_map.get(sym) or candidate.snap
+    tier = str(getattr(candidate, "tier", "") or "")
+    dir_blocked, dir_reason = check_directional_side_lock(sym, candidate.side, snap, tier=tier)
+    if dir_blocked:
+        return False, dir_reason, meta
 
     from app.engines.whipsaw_guards import check_whipsaw_candidate
 
@@ -375,6 +539,8 @@ def validate_candidate(
 
     expiry_floor = expiry_min_rank_score(state, snap_map)
     min_rank = max(settings.pretrade_min_rank_score, expiry_floor)
+    if getattr(candidate, "mode", "") == "quick_sideways":
+        min_rank = min(min_rank, settings.quick_sideways_min_rank_score)
     if candidate.score < min_rank:
         return False, f"pretrade_rank_below_{min_rank:.0f}", meta
 
@@ -386,7 +552,12 @@ def validate_candidate(
     trade_score = max(candidate.tqs or 0, candidate.confidence or 0, candidate.score)
 
     if not side_aligned_with_breadth(side_val, snap.breadth.bias):
-        if trade_score < settings.counter_breadth_min_score:
+        counter_floor = settings.counter_breadth_min_score
+        from app.engines.morning_premium_capture import premium_led_entry_allowed
+
+        if premium_led_entry_allowed(candidate.side, snap):
+            counter_floor = min(counter_floor, settings.premium_led_counter_breadth_min_score)
+        if trade_score < counter_floor:
             return False, "pretrade_counter_breadth", meta
 
     from app.engines.spot_direction import chart_blocks_side

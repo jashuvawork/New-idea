@@ -152,7 +152,17 @@ def generate_rule_brief(context: dict[str, Any]) -> ComposerBrief:
     if context.get("sessionPaused"):
         stand_down = True
         risks.append("loss_streak_pause_active")
-        actions.append("No new entries until pause clears")
+        actions.append("No new entries until pause clears (engine guard — not Composer)")
+
+    whipsaw = (context.get("whipsaw") or {})
+    if whipsaw.get("whipsawPaused") and not whipsaw.get("momentumRallyBypass"):
+        stand_down = True
+        risks.append("whipsaw_churn_pause_active")
+        actions.append(
+            f"Trading paused by whipsaw guard"
+            + (f" ({whipsaw.get('whipsawPauseReason')})" if whipsaw.get("whipsawPauseReason") else "")
+            + " — Composer is advisory only"
+        )
 
     if expiry.get("eveningBlock"):
         stand_down = True

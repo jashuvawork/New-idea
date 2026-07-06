@@ -51,7 +51,30 @@ async def learning_report():
 
 @router.get("/composer/status")
 async def composer_status():
+    from app.engines.auto_trader import get_state
+    from app.engines.expiry_day_guards import is_expiry_session
+    from app.routers.market import get_multi_snapshot
+
     status = monitor_status()
+    state = get_state()
+    skipped = state.skipped or []
+    status["tradingBlockers"] = [
+        {
+            "symbol": s.get("symbol"),
+            "reason": s.get("reason"),
+            "message": s.get("message"),
+        }
+        for s in skipped
+        if s.get("symbol") == "SESSION" or s.get("reason", "").startswith(
+            ("whipsaw_", "last_n_", "loss_streak", "controlled_", "daily_", "STAGE", "TRAIL", "expiry")
+        )
+    ]
+    status["composerAdvisoryOnly"] = True
+    try:
+        multi = await get_multi_snapshot(force=False)
+        status["isExpirySession"] = is_expiry_session(multi.snapshots) if multi else None
+    except Exception:
+        status["isExpirySession"] = None
     ping = await get_composer_client().ping()
     status["apiPing"] = ping
     return status
@@ -74,7 +97,9 @@ async def composer_brief_history(limit: int = 12):
 async def composer_refresh():
     """Force a new market brief (rules + Composer 2.5 when API key set)."""
     from app.routers.market import get_multi_snapshot
+    from app.services.upstox import rate_limit_active, rate_limit_recovery_active
 
-    snapshots = (await get_multi_snapshot(force=True)).snapshots
+    force = not rate_limit_active() and not rate_limit_recovery_active()
+    snapshots = (await get_multi_snapshot(force=force)).snapshots
     brief = await run_monitor_cycle(snapshots, force=True)
     return brief.to_dict()

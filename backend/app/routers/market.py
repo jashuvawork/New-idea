@@ -22,8 +22,9 @@ from app.models.schemas import MultiSnapshot, StrategyType
 from app.services.finnhub import aggregate_sentiment
 from app.services.finnhub import fetch_market_news
 from app.services.redis_store import has_upstox_token
-from app.services.upstox import UpstoxClient
+from app.services.upstox import UpstoxClient, UpstoxError, rate_limit_active, rate_limit_cooldown_remaining
 from app.services.upstox_ws import is_ws_active
+from app.engines.ws_snapshot import build_ws_index_snapshot
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/market", tags=["market"])
@@ -44,7 +45,8 @@ IST = ZoneInfo("Asia/Kolkata")
 def _effective_cache_seconds() -> float:
     settings = get_settings()
     if is_ws_active():
-        return settings.tick_snapshot_interval_ms / 1000.0
+        # WS overlays LTPs on cache — avoid full REST rebuild every tick (was 75ms → 429s)
+        return max(1.0, settings.ws_snapshot_cache_interval_ms / 1000.0)
     return settings.snapshot_cache_interval_ms / 1000.0
 
 
@@ -77,9 +79,15 @@ def can_run_tick_fast() -> bool:
 
 
 def latency_stats() -> dict[str, Any]:
+    settings = get_settings()
     return {
-        "tickFastExitEnabled": get_settings().tick_fast_exit_enabled,
-        "entryScanIntervalMs": get_settings().entry_scan_interval_ms,
+        "tickFastExitEnabled": settings.tick_fast_exit_enabled,
+        "entryScanIntervalMs": settings.entry_scan_interval_ms,
+        "marketPollIntervalWsMs": settings.market_poll_interval_ws_ms,
+        "marketPollIntervalMs": settings.market_poll_interval_ms,
+        "tickSnapshotIntervalMs": settings.tick_snapshot_interval_ms,
+        "snapshotCacheIntervalMs": settings.snapshot_cache_interval_ms,
+        "sseHeartbeatSeconds": settings.sse_heartbeat_seconds,
         "lastFastCycleMs": _last_fast_cycle_ms,
         "lastFullCycleMs": _last_full_cycle_ms,
         "entryScanDue": entry_scan_due(),
@@ -107,7 +115,11 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
         return None
 
     t0 = time.perf_counter()
-    overlays = overlay_snapshot_ltps(_cache.snapshots)
+    settings = get_settings()
+    overlays = overlay_snapshot_ltps(
+        _cache.snapshots,
+        max_age_seconds=settings.tick_overlay_max_age_seconds,
+    )
     client = UpstoxClient()
     auto_state = await process_exits_only(overlays, client=client)
 
@@ -124,6 +136,30 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
     return snapshot
 
 
+async def _serve_ws_fallback_during_cooldown(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
+    """Index LTP from WebSocket when REST is cooling down and no stale cache exists."""
+    ws_snap = build_ws_index_snapshot()
+    if not ws_snap:
+        return None
+    if broadcast:
+        await broadcast_snapshot(ws_snap)
+    return ws_snap
+
+
+async def _serve_stale_during_cooldown(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
+    """Serve last good snapshot while Upstox REST is in 429 cooldown — no API hammering."""
+    global _cache
+    if not _cache or not _cache.dataReady:
+        return None
+    secs = int(rate_limit_cooldown_remaining())
+    stale = _cache.model_copy(deep=True)
+    stale.timestamp = datetime.now(IST)
+    stale.waitingReason = f"Upstox cooling down — retry in {secs}s · showing last good data"
+    if broadcast:
+        await broadcast_snapshot(stale)
+    return stale
+
+
 async def _build_multi_snapshot() -> MultiSnapshot:
     global _capital_refresh_at
     settings = get_settings()
@@ -137,6 +173,10 @@ async def _build_multi_snapshot() -> MultiSnapshot:
             snapshots={},
             autoTrader=get_state(),
         )
+
+    if rate_limit_active():
+        secs = int(rate_limit_cooldown_remaining())
+        raise UpstoxError(f"Upstox cooling down — retry in {secs}s")
 
     news = await _fetch_news_cached()
     news_sentiment = "NEUTRAL"
@@ -250,6 +290,22 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
     cache_ttl = _effective_cache_seconds()
     now = datetime.now(IST)
 
+    if rate_limit_active():
+        stale = await _serve_stale_during_cooldown(broadcast=broadcast)
+        if stale:
+            return stale
+        ws_snap = await _serve_ws_fallback_during_cooldown(broadcast=broadcast)
+        if ws_snap:
+            return ws_snap
+        secs = int(rate_limit_cooldown_remaining())
+        return MultiSnapshot(
+            timestamp=now,
+            dataReady=False,
+            waitingReason=f"Upstox cooling down — retry in {secs}s",
+            snapshots={},
+            autoTrader=get_state(),
+        )
+
     if not force and _cache and _cache_time:
         age = (now - _cache_time).total_seconds()
         if age < cache_ttl:
@@ -257,6 +313,22 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
 
     t0 = time.perf_counter()
     async with _build_lock:
+        if rate_limit_active():
+            stale = await _serve_stale_during_cooldown(broadcast=broadcast)
+            if stale:
+                return stale
+            ws_snap = await _serve_ws_fallback_during_cooldown(broadcast=broadcast)
+            if ws_snap:
+                return ws_snap
+            secs = int(rate_limit_cooldown_remaining())
+            return MultiSnapshot(
+                timestamp=now,
+                dataReady=False,
+                waitingReason=f"Upstox cooling down — retry in {secs}s",
+                snapshots={},
+                autoTrader=get_state(),
+            )
+
         if not force and _cache and _cache_time:
             age = (datetime.now(IST) - _cache_time).total_seconds()
             if age < cache_ttl:
@@ -264,12 +336,33 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
         try:
             snapshot = await _build_multi_snapshot()
         except Exception as e:
+            err = str(e)
+            if _cache and _cache.dataReady and ("cooling down" in err.lower() or "rate limit" in err.lower()):
+                logger.warning("Serving stale snapshot during Upstox cooldown: %s", e)
+                stale = _cache.model_copy(deep=True)
+                stale.timestamp = datetime.now(IST)
+                stale.waitingReason = f"{err} · showing last good data"
+                if broadcast:
+                    await broadcast_snapshot(stale)
+                return stale
+            if "cooling down" in err.lower() or "rate limit" in err.lower():
+                ws_snap = await _serve_ws_fallback_during_cooldown(broadcast=broadcast)
+                if ws_snap:
+                    return ws_snap
             if _cache:
                 logger.warning("Serving stale snapshot after build error: %s", e)
                 stale = _cache.model_copy(deep=True)
                 stale.waitingReason = f"Stale data — {e}"
                 return stale
             raise
+        if not snapshot.dataReady and _cache and _cache.dataReady:
+            reason = snapshot.waitingReason or "Data refresh paused"
+            logger.warning("Serving stale snapshot — fresh build unavailable: %s", reason)
+            stale = _cache.model_copy(deep=True)
+            stale.waitingReason = f"{reason} · showing last good data"
+            if broadcast:
+                await broadcast_snapshot(stale)
+            return stale
         _cache = snapshot
         _cache_time = datetime.now(IST)
         _last_full_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)

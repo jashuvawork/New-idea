@@ -22,13 +22,22 @@ def test_entries_blocked_before_915():
             mock_dt.now.return_value = datetime(2026, 6, 30, 9, 14, 0, tzinfo=IST)
             ok, reason = entries_allowed_now()
     assert not ok
-    assert "09:15" in reason
+    assert "09:20" in reason
 
 
-def test_entries_allowed_at_915():
+def test_entries_blocked_at_915():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 6, 30, 9, 15, 0, tzinfo=IST)
+            ok, reason = entries_allowed_now()
+    assert not ok
+    assert "09:20" in reason
+
+
+def test_entries_allowed_at_920():
+    with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
+        with patch("app.engines.session_timing.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 20, 0, tzinfo=IST)
             ok, reason = entries_allowed_now()
     assert ok
 
@@ -39,6 +48,13 @@ def test_open_caution_active_until_945():
             mock_dt.now.return_value = datetime(2026, 6, 30, 9, 24, 0, tzinfo=IST)
             assert in_open_caution_window()
             assert min_explosion_score_now() == 45
+
+
+def test_open_caution_starts_at_920_not_915():
+    with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
+        with patch("app.engines.session_timing.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 18, 0, tzinfo=IST)
+            assert not in_open_caution_window()
 
 
 def test_after_open_normal_score():

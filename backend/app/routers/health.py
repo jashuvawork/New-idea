@@ -8,7 +8,12 @@ from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.services import trade_store
 from app.services.redis_store import has_upstox_token
 from app.services.token_manager import get_daily_token_status
-from app.services.upstox import get_market_phase
+from app.services.upstox import (
+    clear_rate_limit_cooldown,
+    get_market_phase,
+    rate_limit_active,
+    rate_limit_cooldown_remaining,
+)
 from app.services.upstox_ws import ws_status
 from app.routers.market import latency_stats
 
@@ -52,6 +57,9 @@ async def deployment_status():
             "explosionCaptureMode": settings.explosion_capture_mode,
             "swingTradingEnabled": settings.swing_trading_enabled,
             "dailyProfitTargetInr": settings.daily_profit_target_inr,
+            "dailyProfitTargetPct": settings.daily_profit_target_pct,
+            "dailyProfitTargetFromCapital": settings.daily_profit_target_from_capital,
+            "daily18PctStrategyEnabled": settings.daily_18pct_strategy_enabled,
             "dailyProfitTrailInr": settings.daily_profit_trail_inr,
             "dailyProfitStageLocksEnabled": settings.daily_profit_stage_locks_enabled,
             "dailyProfitStagePcts": settings.daily_profit_stage_pcts(),
@@ -85,6 +93,8 @@ async def deployment_status():
             "primaryWindowStartIst": f"{settings.primary_window_start_hour:02d}:{settings.primary_window_start_minute:02d}",
             "sureShotModeEnabled": settings.sure_shot_mode_enabled,
             "rapidScalpModeEnabled": settings.rapid_scalp_mode_enabled,
+            "quickSidewaysEnabled": settings.quick_sideways_enabled,
+            "quickSidewaysMinRankScore": settings.quick_sideways_min_rank_score,
             "sureShotMinSymbolTqs": settings.sure_shot_min_symbol_tqs,
             "sureShotMinRankScore": settings.sure_shot_min_rank_score,
             "sureShotScalpMinScore": settings.sure_shot_scalp_min_score,
@@ -121,6 +131,9 @@ async def deployment_status():
             "upstoxMinRequestIntervalMs": settings.upstox_min_request_interval_ms,
             "upstoxChainCacheSeconds": settings.upstox_chain_cache_seconds,
             "upstoxLtpCacheSeconds": settings.upstox_ltp_cache_seconds,
+            "upstoxRateLimitCooldownSeconds": settings.upstox_rate_limit_cooldown_seconds,
+            "upstoxRateLimitActive": rate_limit_active(),
+            "upstoxRateLimitRemainingSeconds": round(rate_limit_cooldown_remaining(), 1),
             "tickFastExitEnabled": settings.tick_fast_exit_enabled,
             "entryScanIntervalMs": settings.entry_scan_interval_ms,
             "newsCacheSeconds": settings.news_cache_seconds,
@@ -136,6 +149,20 @@ async def deployment_status():
             "todayClosed": today_counts["closed"],
         },
         **get_lot_sizes_meta(),
+    }
+
+
+@router.post("/api/deployment/clear-rate-limit")
+async def clear_upstox_rate_limit():
+    """Clear in-memory Upstox 429 backoff after deploy or quota recovery."""
+    was_active = rate_limit_active()
+    remaining = round(rate_limit_cooldown_remaining(), 1)
+    clear_rate_limit_cooldown()
+    return {
+        "status": "ok",
+        "wasActive": was_active,
+        "previousRemainingSeconds": remaining,
+        "message": "Upstox rate-limit cooldown cleared",
     }
 
 
