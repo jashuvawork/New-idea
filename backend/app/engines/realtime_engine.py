@@ -387,7 +387,13 @@ async def build_symbol_snapshot(
         else:
             spot = await client.get_index_ltp(symbol)
         chain, expiry = await client.get_option_chain_resolved(symbol)
-        candles = await client.get_candles(symbol)
+        from app.engines.index_chart_candles import fetch_index_chart_candles
+        from app.engines.spot_direction import build_spot_chart
+
+        candles_5m, candles_1m = await fetch_index_chart_candles(client, symbol)
+        if not candles_1m:
+            candles_1m = await client.get_candles(symbol)
+        candles = candles_1m
 
         if not chain:
             raise UpstoxError("Empty option chain")
@@ -400,9 +406,7 @@ async def build_symbol_snapshot(
         heatmap = build_heatmap(chain, spot, atm)
         orderflow = _build_orderflow(candles, chain)
         profile = _build_profile(candles, spot)
-        from app.engines.spot_direction import analyze_spot_chart
-
-        spot_chart = analyze_spot_chart(candles, spot, profile)
+        spot_chart = build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=candles_1m)
         option_breadth = build_breadth(chain, spot)
 
         constituent_hm = None

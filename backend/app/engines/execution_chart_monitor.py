@@ -10,9 +10,10 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.engines.mtf_chart_analysis import fetch_mtf_charts, mtf_summary, validate_mtf_scalp
 from app.engines.realtime_engine import _build_profile
+from app.engines.index_chart_candles import fetch_index_chart_candles
 from app.engines.spot_direction import (
     analyze_premium_chart,
-    analyze_spot_chart,
+    build_spot_chart,
     chart_blocks_side,
     chart_summary_dict,
     premium_blocks_entry,
@@ -80,9 +81,11 @@ async def fetch_live_trade_charts(
         pass
 
     index_key = INDEX_KEYS.get(sym)
-    index_candles = await client.get_candles(sym, count=count, force_refresh=force)
+    candles_5m, index_candles = await fetch_index_chart_candles(client, sym, force_refresh=force)
+    if not index_candles:
+        index_candles = await client.get_candles(sym, count=count, force_refresh=force)
     profile = _build_profile(index_candles, spot)
-    index_chart = analyze_spot_chart(index_candles, spot, profile)
+    index_chart = build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=index_candles)
     quote_ctx = pro_index_quote_context(quote, spot)
 
     index_mtf_reads = None

@@ -8,6 +8,7 @@ from app.engines.execution_chart_monitor import (
     monitor_trade_chart_before_execution,
     validate_execution_charts,
 )
+from app.engines.mtf_chart_analysis import resample_candles
 from app.models.schemas import (
     Breadth,
     PremiumChart,
@@ -39,6 +40,8 @@ def _settings():
     s.execution_chart_premium_check_enabled = True
     s.execution_chart_min_premium_momentum_pct = -0.35
     s.execution_chart_candle_count = 60
+    s.spot_chart_timeframe_minutes = 5
+    s.spot_chart_1m_bars = 300
     s.execution_mtf_enabled = True
     s.execution_mtf_use_v3_native = False
     s.execution_mtf_1m_bars = 300
@@ -93,16 +96,20 @@ def test_monitor_fetches_upstox_and_blocks_counter_chart():
         client.get_full_quotes = AsyncMock(return_value={
             "NSE_FO|OPT": {"last_price": 85.0, "ltp": 85.0},
         })
-
-        passed, reason, meta = asyncio.run(monitor_trade_chart_before_execution(
-            client,
-            "NIFTY",
-            Side.CALL,
-            23900,
-            snap,
-            trade_score=62,
-            instrument_key="NSE_FO|OPT",
-        ))
+        candles_5m = resample_candles(candles, 5)
+        with patch(
+            "app.engines.execution_chart_monitor.fetch_index_chart_candles",
+            AsyncMock(return_value=(candles_5m, candles)),
+        ):
+            passed, reason, meta = asyncio.run(monitor_trade_chart_before_execution(
+                client,
+                "NIFTY",
+                Side.CALL,
+                23900,
+                snap,
+                trade_score=62,
+                instrument_key="NSE_FO|OPT",
+            ))
 
         assert meta["source"] == "upstox_live"
         assert meta["indexChart"]["direction"] == "BEARISH"
@@ -133,10 +140,14 @@ def test_monitor_passes_aligned_put_on_decline():
         client.get_full_quotes = AsyncMock(return_value={
             "NSE_FO|OPT": {"last_price": 90.0},
         })
-
-        passed, reason, meta = asyncio.run(monitor_trade_chart_before_execution(
-            client, "NIFTY", Side.PUT, 23900, snap, trade_score=65, instrument_key="NSE_FO|OPT",
-        ))
+        candles_5m = resample_candles(candles, 5)
+        with patch(
+            "app.engines.execution_chart_monitor.fetch_index_chart_candles",
+            AsyncMock(return_value=(candles_5m, candles)),
+        ):
+            passed, reason, meta = asyncio.run(monitor_trade_chart_before_execution(
+                client, "NIFTY", Side.PUT, 23900, snap, trade_score=65, instrument_key="NSE_FO|OPT",
+            ))
         assert passed
         assert reason == "ok"
         assert meta["alignedWithChart"] is True
@@ -155,9 +166,13 @@ def test_fetch_live_trade_charts_includes_quote_context():
             "close": spot - 0.5,
         })
         client.get_candles = AsyncMock(return_value=candles)
-
-        meta = asyncio.run(fetch_live_trade_charts(
-            client, "NIFTY", Side.CALL, 24000, _snap(SpotChart()), instrument_key=None,
-        ))
+        candles_5m = resample_candles(candles, 5)
+        with patch(
+            "app.engines.execution_chart_monitor.fetch_index_chart_candles",
+            AsyncMock(return_value=(candles_5m, candles)),
+        ):
+            meta = asyncio.run(fetch_live_trade_charts(
+                client, "NIFTY", Side.CALL, 24000, _snap(SpotChart()), instrument_key=None,
+            ))
         assert meta["quoteContext"]["dayOpen"] > 0
         assert meta["indexChart"]["direction"] == "BULLISH"

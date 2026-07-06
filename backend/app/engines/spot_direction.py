@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.config import get_settings
-from app.engines.chart_indicators import compute_macd, compute_rsi
+from app.engines.chart_indicators import _ema_series, compute_macd, compute_rsi
 from app.models.schemas import MarketProfile, Side, SpotChart
 
 
@@ -38,31 +38,58 @@ def _ema(closes: list[float], period: int) -> float:
     return sum(window) / len(window)
 
 
-def analyze_spot_chart(
-    candles: list,
+def _ema(closes: list[float], period: int) -> float:
+    if not closes:
+        return 0.0
+    series = _ema_series(closes, period)
+    return series[-1] if series else 0.0
+
+
+def _indicator_closes(candles_5m: list, candles_1m: list | None) -> list[float]:
+    """RSI/MACD input — prefer extended 5m; fall back to 1m when session is still thin."""
+    if candles_1m:
+        from app.engines.mtf_chart_analysis import resample_candles
+
+        settings = get_settings()
+        extended_5m = resample_candles(candles_1m, settings.spot_chart_timeframe_minutes)
+        closes_5m_ext = _candle_rows(extended_5m)[3]
+        if len(closes_5m_ext) >= 35:
+            return closes_5m_ext
+        _, _, _, closes_1m = _candle_rows(candles_1m)
+        if len(closes_1m) >= 15:
+            return closes_1m
+    _, _, _, closes_5m = _candle_rows(candles_5m)
+    return closes_5m
+
+
+def build_spot_chart(
+    candles_5m: list,
     spot: float,
     profile: MarketProfile,
+    *,
+    indicator_candles_1m: list | None = None,
 ) -> SpotChart:
     """
-    Multi-factor index chart read from 1m candles:
-    momentum, EMA stack, POC/OR position, candle color bias.
+    Index chart read from 5m candles: direction, EMA9/21, RSI, MACD.
+    RSI/MACD use extended 5m series resampled from 1m when available (MACD warmup).
     """
-    _, _, _, closes = _candle_rows(candles)
-    opens, _, _, _ = _candle_rows(candles)
+    opens, _, _, closes = _candle_rows(candles_5m)
+    ind_closes = _indicator_closes(candles_5m, indicator_candles_1m)
 
     if not closes or spot <= 0:
-        return SpotChart(direction="NEUTRAL", spot=spot)
+        return SpotChart(direction="NEUTRAL", spot=spot, timeframe="5m")
 
-    mom5 = _pct_change(closes, 5)
-    mom10 = _pct_change(closes, 10)
-    mom15 = _pct_change(closes, 15) if len(closes) > 15 else mom10
-    mom30 = _pct_change(closes, 30) if len(closes) > 30 else mom15
+    # On 5m: 1 bar = 5min, 3 bars = 15min, 6 = 30min, 12 = 60min
+    mom5 = _pct_change(closes, 1)
+    mom10 = _pct_change(closes, 2)
+    mom15 = _pct_change(closes, 3) if len(closes) > 3 else mom10
+    mom30 = _pct_change(closes, 6) if len(closes) > 6 else mom15
 
-    ema5 = _ema(closes, 5)
-    ema15 = _ema(closes, 15)
-    if ema5 > ema15 * 1.00015:
+    ema9 = _ema(closes, min(9, len(closes)))
+    ema21 = _ema(closes, min(21, len(closes)))
+    if ema9 > ema21 * 1.00015:
         ema_bias = "BULLISH"
-    elif ema5 < ema15 * 0.99985:
+    elif ema9 < ema21 * 0.99985:
         ema_bias = "BEARISH"
     else:
         ema_bias = "NEUTRAL"
@@ -93,8 +120,8 @@ def analyze_spot_chart(
     above_poc = spot > poc * 1.0001
     below_poc = spot < poc * 0.9999
 
-    rsi_read = compute_rsi(closes)
-    macd_read = compute_macd(closes)
+    rsi_read = compute_rsi(ind_closes)
+    macd_read = compute_macd(ind_closes)
 
     bullish = bearish = 0
     if mom5 > 0.04:
@@ -154,12 +181,16 @@ def analyze_spot_chart(
     return SpotChart(
         direction=direction,
         spot=round(spot, 2),
+        timeframe="5m",
+        barCount=len(closes),
         momentum5Pct=round(mom5, 3),
         momentum10Pct=round(mom10, 3),
         momentum15Pct=round(mom15, 3),
         momentum30Pct=round(mom30, 3),
         trendStrength=round(trend_strength, 1),
         emaBias=ema_bias,
+        ema9=round(ema9, 2),
+        ema21=round(ema21, 2),
         candleBias=candle_bias,
         orPosition=or_pos,
         abovePoc=above_poc,
@@ -172,6 +203,21 @@ def analyze_spot_chart(
         macdHistogram=macd_read.histogram,
         macdBias=macd_read.bias,
     )
+
+
+def analyze_spot_chart(
+    candles: list,
+    spot: float,
+    profile: MarketProfile,
+) -> SpotChart:
+    """
+    Back-compat wrapper — resamples 1m input to 5m and builds spot chart.
+    """
+    from app.engines.mtf_chart_analysis import resample_candles
+
+    settings = get_settings()
+    candles_5m = resample_candles(candles, settings.spot_chart_timeframe_minutes) if candles else []
+    return build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=candles)
 
 
 def side_aligned_with_chart(side: Side | str, chart: Optional[SpotChart]) -> bool:
@@ -252,10 +298,14 @@ def signed_momentum_pct(candles: list, bars: int = 5) -> float:
 def chart_summary_dict(chart: SpotChart) -> dict[str, Any]:
     return {
         "direction": chart.direction,
+        "timeframe": chart.timeframe,
+        "barCount": chart.barCount,
         "momentum5Pct": chart.momentum5Pct,
         "momentum15Pct": chart.momentum15Pct,
         "trendStrength": chart.trendStrength,
         "emaBias": chart.emaBias,
+        "ema9": chart.ema9,
+        "ema21": chart.ema21,
         "candleBias": chart.candleBias,
         "orPosition": chart.orPosition,
         "abovePoc": chart.abovePoc,
