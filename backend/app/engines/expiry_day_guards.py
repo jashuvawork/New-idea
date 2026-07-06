@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -42,6 +42,56 @@ def expiry_symbols(snapshots: dict[str, SymbolSnapshot]) -> list[str]:
 
 def is_expiry_session(snapshots: dict[str, SymbolSnapshot]) -> bool:
     return len(expiry_symbols(snapshots)) > 0
+
+
+def is_near_expiry_day(snap: SymbolSnapshot) -> bool:
+    """True when chain expiry is today or tomorrow (pre-expiry + expiry session)."""
+    if not snap.dataAvailable or not snap.optionExpiry:
+        return False
+    expiry = str(snap.optionExpiry)[:10]
+    today = _today_str()
+    tomorrow = (datetime.now(IST) + timedelta(days=1)).strftime("%Y-%m-%d")
+    return expiry in (today, tomorrow)
+
+
+def in_expiry_pm_itm_window() -> bool:
+    """14:00–15:25 IST window for small ITM quick scalps near expiry."""
+    from app.services.upstox import get_market_phase
+
+    settings = get_settings()
+    if not settings.expiry_pm_itm_quick_enabled or get_market_phase() != "LIVE_MARKET":
+        return False
+    current = _minutes_now()
+    start = settings.expiry_pm_itm_window_start_hour * 60 + settings.expiry_pm_itm_window_start_minute
+    end = settings.expiry_pm_itm_window_end_hour * 60 + settings.expiry_pm_itm_window_end_minute
+    return start <= current < end
+
+
+def expiry_pm_itm_quick_active(snap: SymbolSnapshot) -> bool:
+    return in_expiry_pm_itm_window() and is_near_expiry_day(snap)
+
+
+def expiry_pm_itm_quick_session_active(snapshots: dict[str, SymbolSnapshot]) -> bool:
+    if not in_expiry_pm_itm_window():
+        return False
+    return any(is_near_expiry_day(s) for s in snapshots.values() if s.dataAvailable)
+
+
+def expiry_pm_itm_chart_bypass_allowed(
+    side: Side | str,
+    snap: SymbolSnapshot,
+    *,
+    mode: str = "",
+) -> bool:
+    """Allow ITM quick scalps through opposite 5m chart when breadth aligns (PM expiry window)."""
+    settings = get_settings()
+    if not settings.expiry_pm_itm_chart_bypass_breadth:
+        return False
+    if str(mode or "") != "quick_sideways":
+        return False
+    if not expiry_pm_itm_quick_active(snap):
+        return False
+    return _breadth_aligned_for_side(side, snap.breadth)
 
 
 def in_expiry_morning_window() -> bool:
@@ -220,28 +270,46 @@ def check_expiry_entry_allowed(
     """Session-level expiry gates before any new entry."""
     settings = get_settings()
     meta: dict[str, Any] = {}
-    if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
+    if not settings.expiry_day_guards_enabled:
         return True, "ok", meta
 
-    meta["expirySymbols"] = expiry_symbols(snapshots)
-    is_worst, worst_score, worst_reasons = predict_worst_expiry_day(state, snapshots)
-    meta["worstDay"] = is_worst
-    meta["worstDayScore"] = worst_score
-    meta["worstDayReasons"] = worst_reasons
+    has_expiry_today = is_expiry_session(snapshots)
+    pm_itm = expiry_pm_itm_quick_session_active(snapshots)
+    meta["expiryPmItmQuickActive"] = pm_itm
 
-    if in_expiry_evening_block():
+    if not has_expiry_today and not pm_itm:
+        return True, "ok", meta
+
+    if has_expiry_today:
+        meta["expirySymbols"] = expiry_symbols(snapshots)
+        is_worst, worst_score, worst_reasons = predict_worst_expiry_day(state, snapshots)
+        meta["worstDay"] = is_worst
+        meta["worstDayScore"] = worst_score
+        meta["worstDayReasons"] = worst_reasons
+
+    if pm_itm:
+        meta["expiryPmItmQuickOnly"] = True
+        if not has_expiry_today:
+            return True, "ok", meta
+
+    if in_expiry_evening_block() and has_expiry_today:
+        if pm_itm:
+            return True, "ok", meta
         return False, "expiry_evening_block", meta
 
-    if not in_expiry_morning_window() and settings.expiry_morning_only:
+    if not in_expiry_morning_window() and settings.expiry_morning_only and has_expiry_today:
+        if pm_itm:
+            return True, "ok", meta
         return False, "expiry_afternoon_wait", meta
 
-    cap_hit, cap_reason = expiry_trades_cap_reached(state, snapshots)
-    if cap_hit:
-        return False, cap_reason, meta
+    if has_expiry_today:
+        cap_hit, cap_reason = expiry_trades_cap_reached(state, snapshots)
+        if cap_hit:
+            return False, cap_reason, meta
 
-    if is_worst and settings.expiry_worst_day_halt_entries:
-        if _session_declining(state, snapshots):
-            return False, "expiry_worst_day_declining_halt", meta
+        if is_worst and settings.expiry_worst_day_halt_entries:
+            if _session_declining(state, snapshots):
+                return False, "expiry_worst_day_declining_halt", meta
 
     return True, "ok", meta
 
@@ -256,10 +324,31 @@ def check_expiry_candidate(
     meta: dict[str, Any] = {}
     sym = candidate.symbol.upper()
     snap = snapshots.get(sym) or candidate.snap
+    score = float(getattr(candidate, "score", 0) or 0)
+    mode = str(getattr(candidate, "mode", "") or "")
+    pm_itm = expiry_pm_itm_quick_active(snap)
+    meta["expiryPmItmQuick"] = pm_itm
+
+    if pm_itm:
+        if mode != "quick_sideways":
+            return False, "expiry_pm_itm_quick_only", meta
+        from app.engines.moneyness import classify_moneyness
+
+        money = classify_moneyness(
+            candidate.side, float(candidate.strike), float(snap.spot or 0),
+            symbol=sym, atm=float(snap.atmStrike or 0) or None,
+        )
+        meta["moneyness"] = money
+        if money != "ITM":
+            return False, "expiry_pm_itm_strike_only", meta
+        floor = settings.expiry_pm_itm_min_rank_score
+        if score < floor:
+            return False, f"expiry_pm_itm_rank_below_{floor:.0f}", meta
+        return True, "ok", meta
+
     if not is_symbol_expiry_day(snap):
         return True, "ok", meta
 
-    mode = str(getattr(candidate, "mode", "") or "")
     if mode == "explosion":
         tier = str(getattr(candidate, "tier", "") or "")
         blocked, block_reason = check_expiry_explosion_open_block(
@@ -272,7 +361,6 @@ def check_expiry_candidate(
             return False, block_reason, meta
 
     min_rank = expiry_min_rank_score(state, snapshots)
-    score = float(getattr(candidate, "score", 0) or 0)
     meta["expiryMinRank"] = min_rank
     if min_rank > 0 and score < min_rank:
         return False, f"expiry_rank_below_{min_rank:.0f}", meta
@@ -344,4 +432,6 @@ def expiry_guard_summary(
         "dualScalpMode": expiry_dual_scalp_active(snapshots),
         "minRankScore": expiry_min_rank_score(state, snapshots),
         "sessionPnlInr": round(compute_session_pnl(state), 2),
+        "expiryPmItmQuickActive": expiry_pm_itm_quick_session_active(snapshots),
+        "expiryPmItmWindow": in_expiry_pm_itm_window(),
     }

@@ -166,12 +166,14 @@ def validate_execution_charts(
     trade_score: float = 0.0,
     index_mtf_reads: Optional[dict] = None,
     premium_mtf_reads: Optional[dict] = None,
+    breadth_aligned_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
 
     blocked, reason = chart_blocks_side(
         side, index_chart, trade_score=trade_score,
+        breadth_aligned_bypass=breadth_aligned_bypass,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -202,6 +204,7 @@ async def monitor_trade_chart_before_execution(
     *,
     trade_score: float,
     instrument_key: Optional[str] = None,
+    mode: str = "",
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Fetch live Upstox charts (1m–4h) for this trade and block if misaligned.
@@ -211,13 +214,20 @@ async def monitor_trade_chart_before_execution(
     if not settings.execution_chart_gate_enabled:
         return True, "ok", {"enabled": False}
 
+    from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
+
+    breadth_bypass = expiry_pm_itm_chart_bypass_allowed(side, snap, mode=mode)
+
     try:
         meta = await fetch_live_trade_charts(
             client, symbol, side, strike, snap, instrument_key=instrument_key,
         )
     except Exception as exc:
         logger.warning("Execution chart fetch failed for %s — using snapshot: %s", symbol, exc)
-        blocked, reason = chart_blocks_side(side, snap.spotChart, trade_score=trade_score)
+        blocked, reason = chart_blocks_side(
+            side, snap.spotChart, trade_score=trade_score,
+            breadth_aligned_bypass=breadth_bypass,
+        )
         fallback = {
             "enabled": True,
             "source": "snapshot_fallback",
@@ -242,6 +252,7 @@ async def monitor_trade_chart_before_execution(
         trade_score=trade_score,
         index_mtf_reads=index_mtf_reads,
         premium_mtf_reads=premium_mtf_reads,
+        breadth_aligned_bypass=breadth_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta

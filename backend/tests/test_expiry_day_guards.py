@@ -1,5 +1,6 @@
 """Tests for expiry-day guards and worst-day prediction."""
 
+from dataclasses import dataclass
 from datetime import datetime
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -7,9 +8,13 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.engines.expiry_day_guards import (
+    check_expiry_candidate,
     check_expiry_entry_allowed,
+    expiry_pm_itm_chart_bypass_allowed,
     in_expiry_evening_block,
     in_expiry_morning_window,
+    in_expiry_pm_itm_window,
+    is_near_expiry_day,
     is_symbol_expiry_day,
     predict_worst_expiry_day,
 )
@@ -93,7 +98,8 @@ def test_expiry_evening_block_entries():
     snaps = {"NIFTY": _snap()}
     with patch("app.engines.expiry_day_guards._today_str", return_value="2026-06-30"):
         with patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=True):
-            ok, reason, meta = check_expiry_entry_allowed(state, snaps)
+            with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=False):
+                ok, reason, meta = check_expiry_entry_allowed(state, snaps)
     assert ok is False
     assert reason == "expiry_evening_block"
     assert meta["expirySymbols"] == ["NIFTY"]
@@ -143,3 +149,82 @@ def test_expiry_open_allows_elite_aligned(mock_settings):
                     breadth=snap.breadth,
                 )
     assert blocked is False
+
+
+def test_near_expiry_day_includes_tomorrow():
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-06"):
+        assert is_near_expiry_day(_snap(expiry="2026-07-07")) is True
+        assert is_near_expiry_day(_snap(expiry="2026-07-08")) is False
+
+
+@patch("app.services.upstox.get_market_phase", return_value="LIVE_MARKET")
+def test_in_expiry_pm_itm_window(mock_phase):
+    with patch("app.engines.expiry_day_guards.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 7, 6, 14, 30, tzinfo=IST)
+        assert in_expiry_pm_itm_window() is True
+    with patch("app.engines.expiry_day_guards.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 7, 6, 13, 30, tzinfo=IST)
+        assert in_expiry_pm_itm_window() is False
+
+
+def test_pm_itm_evening_block_allows_quick_entries():
+    state = AutoTraderState()
+    snaps = {"NIFTY": _snap(expiry="2026-07-07")}
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-06"):
+        with patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=True):
+            with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True):
+                ok, reason, meta = check_expiry_entry_allowed(state, snaps)
+    assert ok is True
+    assert reason == "ok"
+    assert meta.get("expiryPmItmQuickActive") is True
+    assert meta.get("expiryPmItmQuickOnly") is True
+
+
+@dataclass
+class _Cand:
+    symbol: str
+    side: Side
+    strike: float
+    score: float
+    mode: str
+    snap: SymbolSnapshot
+
+
+def test_check_expiry_candidate_pm_itm_requires_itm_quick():
+    state = AutoTraderState()
+    snap = _snap(expiry="2026-07-07")
+    snap.spot = 24450.0
+    snap.atmStrike = 24450.0
+    snaps = {"NIFTY": snap}
+
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-06"):
+        with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True):
+            ok, reason, meta = check_expiry_candidate(
+                _Cand("NIFTY", Side.CALL, 24300.0, 58.0, "quick_sideways", snap),
+                state, snaps,
+            )
+    assert ok is True
+    assert meta.get("expiryPmItmQuick") is True
+
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-06"):
+        with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True):
+            ok, reason, _ = check_expiry_candidate(
+                _Cand("NIFTY", Side.CALL, 24500.0, 58.0, "quick_sideways", snap),
+                state, snaps,
+            )
+    assert ok is False
+    assert reason == "expiry_pm_itm_strike_only"
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+def test_pm_itm_chart_bypass_when_breadth_aligned(mock_settings):
+    s = mock_settings.return_value
+    s.expiry_pm_itm_chart_bypass_breadth = True
+    snap = _snap(expiry="2026-07-07")
+    snap.breadth = Breadth(bias="BULLISH", score=65, aligned=True)
+    with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True):
+        assert expiry_pm_itm_chart_bypass_allowed(Side.CALL, snap, mode="quick_sideways") is True
+    snap.breadth = Breadth(bias="BEARISH", score=65, aligned=True)
+    with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True):
+        assert expiry_pm_itm_chart_bypass_allowed(Side.PUT, snap, mode="quick_sideways") is True
+        assert expiry_pm_itm_chart_bypass_allowed(Side.CALL, snap, mode="scalp") is False

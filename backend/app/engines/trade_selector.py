@@ -315,6 +315,8 @@ def _quick_sideways_candidates(
         blocked, reason = _reentry_blocked(symbol, side, strike, snap)
         if blocked:
             continue
+        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+
         out.append(EntryCandidate(
             symbol=symbol,
             snap=snap,
@@ -326,7 +328,11 @@ def _quick_sideways_candidates(
             strategy_type=StrategyType.SCALP,
             confidence=float(setup["score"]),
             tqs=snap.tradeQualityScore,
-            pretrade_meta={"quickSideways": True, "velocityPct": setup.get("velocityPct")},
+            pretrade_meta={
+                "quickSideways": True,
+                "velocityPct": setup.get("velocityPct"),
+                "expiryPmItmQuick": expiry_pm_itm_quick_active(snap),
+            },
         ))
     return out
 

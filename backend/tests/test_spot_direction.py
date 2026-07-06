@@ -143,6 +143,24 @@ def test_high_score_cannot_override_bearish_chart_direction(mock_settings):
 
 
 @patch("app.engines.spot_direction.get_settings")
+def test_breadth_bypass_allows_pm_itm_call_on_bearish_chart(mock_settings):
+    mock_settings.return_value = _settings()
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=-0.04,
+        momentum15Pct=-0.06,
+        trendStrength=42,
+        emaBias="BEARISH",
+        macdBias="BEARISH",
+    )
+    blocked, reason = chart_blocks_side(
+        Side.CALL, chart, trade_score=55, breadth_aligned_bypass=True,
+    )
+    assert not blocked
+    assert reason == "ok"
+
+
+@patch("app.engines.spot_direction.get_settings")
 def test_chart_rank_bonus_for_aligned_side(mock_settings):
     mock_settings.return_value = _settings()
     chart = SpotChart(direction="BEARISH", momentum5Pct=-0.1, momentum15Pct=-0.15, trendStrength=35)
