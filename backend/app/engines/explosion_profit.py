@@ -136,12 +136,18 @@ def check_explosion_entry(
         chart_blocks_explosion_side,
         cross_side_chase_blocked,
         explosion_exhausted,
+        index_pin_blocks_put_explosion,
     )
     from app.engines.morning_premium_capture import afternoon_capture_skips_chart_block
 
     blocked, reason = breadth_blocks_explosion_side(event.side, breadth.bias, event.tier)
     if blocked:
         return False, reason
+
+    if snap is not None:
+        blocked, reason = index_pin_blocks_put_explosion(event, snap)
+        if blocked:
+            return False, reason
 
     blocked, reason = chart_blocks_explosion_side(event.side, chart, event.tier)
     if blocked and afternoon_capture_skips_chart_block(event, chart):

@@ -88,7 +88,10 @@ class Settings(BaseSettings):
     upstox_candles_cache_seconds: int = 120
     upstox_max_expiry_probes: int = 2
     capital_refresh_seconds: int = 90
-    fetch_constituents_in_snapshot: bool = False
+    fetch_constituents_in_snapshot: bool = True
+    constituent_stock_breadth_override_enabled: bool = True
+    index_pin_put_block_enabled: bool = True
+    index_pin_min_stock_breadth_pct: float = 58.0
     index_momentum_enabled: bool = True
     open_caution_moment_min_rank: float = 48.0
 

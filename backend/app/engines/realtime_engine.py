@@ -29,9 +29,8 @@ from app.models.schemas import (
     SymbolSnapshot,
 )
 from app.engines.constituent_engine import (
-    blend_breadth,
     build_constituent_heatmap,
-    breadth_from_constituents,
+    resolve_snapshot_breadth,
 )
 from app.engines.simple_profit import get_session_targets
 from app.engines.strategy_orchestrator import run_all_strategies, signals_to_suggested_trades
@@ -412,12 +411,17 @@ async def build_symbol_snapshot(
         constituent_hm = None
         from app.services.upstox import rate_limit_active
 
-        if get_settings().fetch_constituents_in_snapshot and not rate_limit_active():
-            constituent_hm = await build_constituent_heatmap(symbol, client)
-            stock_breadth = breadth_from_constituents(constituent_hm)
-            breadth = blend_breadth(option_breadth, stock_breadth)
-        else:
-            breadth = option_breadth
+        settings = get_settings()
+        if settings.fetch_constituents_in_snapshot:
+            if rate_limit_active():
+                constituent_hm = await build_constituent_heatmap(symbol, client, cache_only=True)
+            else:
+                constituent_hm = await build_constituent_heatmap(symbol, client)
+        breadth = resolve_snapshot_breadth(
+            option_breadth,
+            constituent_hm,
+            use_constituents=settings.fetch_constituents_in_snapshot,
+        )
 
         greeks = _build_greeks(chain, atm, spot)
         regime = _detect_regime(candles)

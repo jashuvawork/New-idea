@@ -192,6 +192,9 @@ export interface Breadth {
   score: number;
   bias: string;
   aligned: boolean;
+  source?: string;
+  stockScore?: number;
+  oiScore?: number;
 }
 
 export interface SpotChart {
@@ -214,6 +217,8 @@ export interface SpotChart {
   macdSignal?: number;
   macdHistogram?: number;
   macdBias?: string;
+  timeframe?: string;
+  barCount?: number;
 }
 
 export interface ExplosiveRunner {

@@ -33,6 +33,14 @@ function deriveQuality(
     if (/cooling down|rate limit|429/i.test(session.dataPauseReason)) return 'slow';
     return 'slow';
   }
+  if (dataReady && stalenessMs < 4_000) {
+    if (streamMode === 'sse') {
+      if (stalenessMs > 20_000) return 'offline';
+      if (stalenessMs > 5_000) return 'slow';
+      return stalenessMs > 1_500 ? 'good' : 'excellent';
+    }
+    return latencyQuality(latencyMs);
+  }
   if (streamMode === 'sse') {
     if (!dataReady && stalenessMs > 30_000) return 'offline';
     if (stalenessMs > 20_000) return 'offline';
@@ -43,7 +51,7 @@ function deriveQuality(
   if (dataReady && stalenessMs < 30_000) return latencyQuality(latencyMs);
   if (stalenessMs > 20_000) return 'offline';
   if (stalenessMs > 5_000) return 'slow';
-  if (stalenessMs > 1_500) return 'slow';
+  if (stalenessMs > 3_000) return 'slow';
   return latencyQuality(latencyMs);
 }
 

@@ -14,6 +14,35 @@ def _side_val(side: Side | str) -> str:
     return side.value if isinstance(side, Side) else str(side).upper()
 
 
+def index_pin_blocks_put_explosion(event: ExplosionEvent, snap: SymbolSnapshot) -> tuple[bool, str]:
+    """Block PE fades when index pins at day high with bullish stock breadth."""
+    settings = get_settings()
+    if not settings.index_pin_put_block_enabled:
+        return False, "ok"
+    if _side_val(event.side) != "PUT":
+        return False, "ok"
+
+    hm = snap.constituentHeatmap
+    stock_pct = float(hm.breadthPct) if hm and hm.dataAvailable else float(snap.breadth.stockScore or 0)
+    if stock_pct < settings.index_pin_min_stock_breadth_pct:
+        return False, "ok"
+
+    chart = snap.spotChart
+    profile = snap.marketProfile
+    if not chart or chart.spot <= 0:
+        return False, "ok"
+
+    or_high = profile.openingRangeHigh or profile.vah or 0
+    if or_high <= 0:
+        return False, "ok"
+
+    pinning = chart.spot >= or_high * 0.9995
+    if not pinning:
+        return False, "ok"
+
+    return True, "put_blocked_index_pin_bullish_stocks"
+
+
 def breadth_blocks_explosion_side(side: Side | str, breadth_bias: str, tier: str) -> tuple[bool, str]:
     """No PUT into BULLISH breadth / no CALL into BEARISH unless ELITE."""
     settings = get_settings()

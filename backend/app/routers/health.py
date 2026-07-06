@@ -87,6 +87,8 @@ async def deployment_status():
             "bullishHoldEnabled": settings.bullish_hold_enabled,
             "chopDayGuardsEnabled": settings.chop_day_guards_enabled,
             "fetchConstituentsInSnapshot": settings.fetch_constituents_in_snapshot,
+            "constituentStockBreadthOverrideEnabled": settings.constituent_stock_breadth_override_enabled,
+            "indexPinPutBlockEnabled": settings.index_pin_put_block_enabled,
             "indexMomentumEnabled": settings.index_momentum_enabled,
             "dailyLossStopInr": settings.daily_loss_stop_inr,
             "dailyMaxTradesChop": settings.daily_max_trades_chop,

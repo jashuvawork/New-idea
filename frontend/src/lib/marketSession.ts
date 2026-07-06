@@ -58,6 +58,9 @@ export function connectionStatusLabel(
   if (streamMode === 'sse' && quality !== 'offline' && quality !== 'slow') {
     return 'Live';
   }
+  if (dataReady && quality === 'good') {
+    return 'Live';
+  }
   switch (quality) {
     case 'excellent':
       return 'Fast';

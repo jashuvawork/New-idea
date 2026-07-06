@@ -138,6 +138,9 @@ class Breadth(BaseModel):
     score: float = 50
     bias: str = "NEUTRAL"
     aligned: bool = False
+    source: str = "oi"  # oi | stocks | blended
+    stockScore: Optional[float] = None
+    oiScore: Optional[float] = None
 
 
 class ConstituentTile(BaseModel):
