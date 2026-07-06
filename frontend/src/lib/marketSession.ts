@@ -42,6 +42,7 @@ export function connectionStatusLabel(
   session: MarketSessionInfo,
   quality: 'excellent' | 'good' | 'slow' | 'offline',
   streamMode?: 'sse' | 'poll',
+  dataReady?: boolean,
 ): string {
   if (session.marketClosed) return 'Market closed';
   if (session.dataPauseReason) {

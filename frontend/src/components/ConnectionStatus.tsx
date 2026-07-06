@@ -72,7 +72,7 @@ export function ConnectionStatus({
     dataReady,
     metrics.streamMode,
   );
-  const label = connectionStatusLabel(session, quality, metrics.streamMode);
+  const label = connectionStatusLabel(session, quality, metrics.streamMode, dataReady);
   const paused = Boolean(session.dataPauseReason);
   const latencyLabel = metrics.streamMode === 'sse' && metrics.lastLatencyMs > 0
     ? `${metrics.lastLatencyMs}ms fresh`
