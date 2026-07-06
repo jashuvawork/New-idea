@@ -249,6 +249,7 @@ class Settings(BaseSettings):
     expiry_dual_scalp_mode: bool = True
     expiry_dual_scalp_relax_whipsaw: bool = True
     expiry_dual_scalp_opposite_cooldown_seconds: int = 90
+    expiry_explosion_open_block_minutes: int = 5
 
     # Psychology setup hold — FEAR/CAUTION entries held longer on expiry chop
     psychology_hold_enabled: bool = True

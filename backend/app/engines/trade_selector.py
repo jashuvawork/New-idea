@@ -161,6 +161,7 @@ def _explosion_candidates(
             event, suggestion, snap.breadth, blocked,
             index_moment=moment_surge,
             chart=snap.spotChart,
+            snap=snap,
         )
         if not passed:
             continue

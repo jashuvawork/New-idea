@@ -97,3 +97,49 @@ def test_expiry_evening_block_entries():
     assert ok is False
     assert reason == "expiry_evening_block"
     assert meta["expirySymbols"] == ["NIFTY"]
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+def test_expiry_open_block_exploding(mock_settings):
+    from app.engines.expiry_day_guards import check_expiry_explosion_open_block
+
+    s = mock_settings.return_value
+    s.expiry_day_guards_enabled = True
+    s.entry_earliest_hour = 9
+    s.entry_earliest_minute = 20
+    s.expiry_explosion_open_block_minutes = 5
+    snap = _snap(expiry="2026-06-30")
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-06-30"):
+        with patch("app.engines.expiry_day_guards.get_market_phase", return_value="LIVE_MARKET"):
+            with patch("app.engines.expiry_day_guards._minutes_now", return_value=9 * 60 + 22):
+                blocked, reason = check_expiry_explosion_open_block(
+                    snap=snap,
+                    tier="EXPLODING",
+                    side=Side.PUT,
+                    breadth=snap.breadth,
+                )
+    assert blocked is True
+    assert reason == "expiry_open_block_exploding"
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+def test_expiry_open_allows_elite_aligned(mock_settings):
+    from app.engines.expiry_day_guards import check_expiry_explosion_open_block
+
+    s = mock_settings.return_value
+    s.expiry_day_guards_enabled = True
+    s.entry_earliest_hour = 9
+    s.entry_earliest_minute = 20
+    s.expiry_explosion_open_block_minutes = 5
+    snap = _snap(expiry="2026-06-30")
+    snap.breadth = Breadth(bias="BEARISH", score=70, aligned=True)
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-06-30"):
+        with patch("app.engines.expiry_day_guards.get_market_phase", return_value="LIVE_MARKET"):
+            with patch("app.engines.expiry_day_guards._minutes_now", return_value=9 * 60 + 22):
+                blocked, reason = check_expiry_explosion_open_block(
+                    snap=snap,
+                    tier="ELITE",
+                    side=Side.PUT,
+                    breadth=snap.breadth,
+                )
+    assert blocked is False
