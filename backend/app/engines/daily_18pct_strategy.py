@@ -24,7 +24,7 @@ class TradingLimits:
     maxTradesToday: int = 8
     lotSizeMultiplier: float = 1.0
     allowExplosion: bool = False
-    allowQuickSideways: bool = True
+    allowQuickSideways: bool = False
     allowFullLots: bool = False
     unlockFullLimits: bool = False
     message: str = ""
@@ -202,12 +202,20 @@ def compute_trading_limits(
         limits.lotSizeMultiplier = 0.65 if tier == "LOW" else 0.85
         playbook.append("Expiry day — selective entries, dual-side only when chop")
     elif "CHOP" in day_mode or "RALLY" in day_mode:
-        limits.minRankScore = settings.quick_sideways_min_rank_score
-        limits.allowQuickSideways = True
+        limits.minRankScore = (
+            settings.quick_sideways_min_rank_score
+            if settings.quick_sideways_enabled
+            else settings.pretrade_min_rank_score
+        )
+        limits.allowQuickSideways = settings.quick_sideways_enabled
         limits.maxTradesToday = settings.daily_18pct_chop_max_trades
         limits.lotSizeMultiplier = 0.6 if tier == "LOW" else 0.8
         limits.allowExplosion = tier in ("HIGH", "ELITE") or "RALLY" in day_mode
-        playbook.append("Chop/sideways — quick scalps build toward 18%")
+        playbook.append(
+            "Chop/sideways — quick scalps build toward 18%"
+            if settings.quick_sideways_enabled
+            else "Chop/sideways — explosions only, no quick trades"
+        )
     elif "BULLISH" in day_mode or "BEARISH" in day_mode:
         limits.minRankScore = settings.best_trades_min_rank_score - 4
         limits.allowExplosion = tier != "LOW"
@@ -223,10 +231,15 @@ def compute_trading_limits(
 
     # Phase adjustments (progress toward 18%)
     if phase == "ACCUMULATE":
-        limits.allowQuickSideways = True
-        limits.minRankScore = min(limits.minRankScore, settings.quick_sideways_min_rank_score)
+        limits.allowQuickSideways = settings.quick_sideways_enabled
+        if settings.quick_sideways_enabled:
+            limits.minRankScore = min(limits.minRankScore, settings.quick_sideways_min_rank_score)
         limits.lotSizeMultiplier = min(limits.lotSizeMultiplier, 0.7 if tier == "LOW" else 0.85)
-        playbook.append(f"Accumulate ({progress:.0f}% of ₹{target:,.0f}) — base hits from quick trades")
+        playbook.append(
+            f"Accumulate ({progress:.0f}% of ₹{target:,.0f}) — base hits from quick trades"
+            if settings.quick_sideways_enabled
+            else f"Accumulate ({progress:.0f}% of ₹{target:,.0f}) — explosions + ranked setups only"
+        )
     elif phase == "BUILD":
         limits.minRankScore = max(limits.minRankScore, settings.pretrade_min_rank_score)
         playbook.append(f"Build ({progress:.0f}%) — add quality setups toward daily 18%")
