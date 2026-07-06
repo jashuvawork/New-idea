@@ -69,14 +69,26 @@ Production env lives at `/opt/nexusquant/env` (not in git). Add after first boot
 - `FINNHUB_API_KEY`
 - `CURSOR_API_KEY` (optional, for Composer monitor)
 
-## GitHub Actions
+## GitHub Actions (auto-deploy on push to `main`)
 
-Set repository secrets:
+**Required** repository secrets (Settings → Secrets and variables → Actions):
 
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
+| Secret | Description |
+|--------|-------------|
+| `AWS_ACCESS_KEY_ID` | IAM user access key with `ssm:SendCommand` on the EC2 instance |
+| `AWS_SECRET_ACCESS_KEY` | Matching secret key |
 
-Workflow `.github/workflows/deploy-ec2.yml` deploys on push to `main`.
+If either secret is missing, the **Deploy to EC2** workflow fails at *Configure AWS credentials* with:
+`Credentials could not be loaded`.
+
+Workflow: `.github/workflows/deploy-ec2.yml`
+
+**Manual deploy** (bypasses GitHub Actions):
+
+```bash
+cp deploy/aws.env.example deploy/aws.env   # add same IAM keys
+BRANCH=main bash deploy/aws-deploy.sh
+```
 
 ## Costs (approximate)
 
