@@ -15,6 +15,7 @@ from app.models.schemas import (
     Side,
     SpotChart,
     SuggestedTrade,
+    SymbolSnapshot,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -102,6 +103,7 @@ def check_entry_gate(
     momentum_surge: bool = False,
     alignment_override: bool = False,
     chart: Optional["SpotChart"] = None,
+    snap: Optional[SymbolSnapshot] = None,
 ) -> tuple[bool, str]:
     """All gates must pass for simple profit entry."""
     settings = get_settings()
@@ -151,18 +153,21 @@ def check_entry_gate(
         counter_floor = settings.counter_breadth_min_score
         from app.engines.morning_premium_capture import premium_led_entry_allowed
 
-        if premium_led_entry_allowed(trade.side, snap):
+        if snap is not None and premium_led_entry_allowed(trade.side, snap):
             counter_floor = min(counter_floor, settings.premium_led_counter_breadth_min_score)
         if not momentum_surge and trade_score < counter_floor:
             return False, "breadth_counter_trend"
 
-    from app.engines.spot_direction import chart_blocks_side
+    from app.engines.spot_direction import chart_blocks_side, is_hard_chart_block
 
     blocked, chart_reason = chart_blocks_side(
         trade.side, chart, trade_score=trade_score, momentum_surge=momentum_surge,
     )
-    if blocked and not alignment_override:
-        return False, chart_reason
+    if blocked:
+        if is_hard_chart_block(chart_reason):
+            return False, chart_reason
+        if not alignment_override:
+            return False, chart_reason
 
     if not (momentum_surge or alignment_override or breadth.aligned or trade_score >= min_score + 8):
         return False, "no_momentum_or_alignment"

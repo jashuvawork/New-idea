@@ -238,7 +238,7 @@ def _scalp_candidates(
         passed, _ = check_entry_gate(
             suggestion, snap.breadth, max(snap.tradeQualityScore, trade_score), vel,
             blocked, momentum_surge=momentum, alignment_override=override,
-            chart=snap.spotChart,
+            chart=snap.spotChart, snap=snap,
         )
         if not passed:
             continue

@@ -49,8 +49,9 @@ def is_near_expiry_day(snap: SymbolSnapshot) -> bool:
     if not snap.dataAvailable or not snap.optionExpiry:
         return False
     expiry = str(snap.optionExpiry)[:10]
-    today = _today_str()
-    tomorrow = (datetime.now(IST) + timedelta(days=1)).strftime("%Y-%m-%d")
+    today_dt = datetime.now(IST)
+    today = today_dt.strftime("%Y-%m-%d")
+    tomorrow = (today_dt + timedelta(days=1)).strftime("%Y-%m-%d")
     return expiry in (today, tomorrow)
 
 

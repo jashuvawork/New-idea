@@ -152,7 +152,8 @@ def test_expiry_open_allows_elite_aligned(mock_settings):
 
 
 def test_near_expiry_day_includes_tomorrow():
-    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-06"):
+    with patch("app.engines.expiry_day_guards.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 7, 6, 10, 0, tzinfo=IST)
         assert is_near_expiry_day(_snap(expiry="2026-07-07")) is True
         assert is_near_expiry_day(_snap(expiry="2026-07-08")) is False
 

@@ -282,6 +282,16 @@ def chart_blocks_side(
     return False, "ok"
 
 
+HARD_CHART_BLOCK_REASONS = frozenset({
+    "chart_bearish_no_calls",
+    "chart_bullish_no_puts",
+})
+
+
+def is_hard_chart_block(reason: str) -> bool:
+    return reason in HARD_CHART_BLOCK_REASONS
+
+
 def chart_rank_adjustment(side: Side | str, chart: Optional[SpotChart]) -> float:
     settings = get_settings()
     if not settings.chart_alignment_enabled or not chart:
