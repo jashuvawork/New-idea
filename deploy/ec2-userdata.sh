@@ -23,14 +23,13 @@ mkdir -p /opt/nexusquant
 cd /opt/nexusquant
 
 if [ ! -d New-idea ]; then
-  git clone --branch cursor/nexusquant-scalping-terminal-8564 \
-    https://github.com/jashuvawork/New-idea.git || \
-  git clone https://github.com/jashuvawork/New-idea.git
+  git clone --branch main https://github.com/jashuvawork/New-idea.git
 fi
 
 cd New-idea
 git fetch origin
-git checkout cursor/nexusquant-scalping-terminal-8564 2>/dev/null || git checkout main
+git checkout main
+git pull --ff-only origin main || git reset --hard origin/main
 
 cp deploy/env.production.template /opt/nexusquant/env
 cat >> /opt/nexusquant/env << 'EOF'

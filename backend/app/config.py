@@ -203,6 +203,9 @@ class Settings(BaseSettings):
     flip_flop_max_opposites: int = 2
     whipsaw_momentum_rally_bypass_enabled: bool = True
     whipsaw_dual_retrigger_cooldown_seconds: int = 300
+    whipsaw_single_side_surge_bypass_enabled: bool = True
+    whipsaw_dominant_velocity_min: float = 2.5
+    whipsaw_dominant_velocity_ratio: float = 1.6
     bearish_sideways_halt_enabled: bool = True
     bearish_sideways_block_scalps: bool = True
     bearish_sideways_explosion_min_score: float = 78.0
@@ -322,8 +325,8 @@ class Settings(BaseSettings):
     momentum_rally_end_hour: int = 13
     momentum_rally_end_minute: int = 45
     morning_premium_capture_enabled: bool = True
-    morning_capture_start_hour: int = 10
-    morning_capture_start_minute: int = 0
+    morning_capture_start_hour: int = 9
+    morning_capture_start_minute: int = 15
     morning_capture_end_hour: int = 11
     morning_capture_end_minute: int = 45
     morning_capture_min_rank_score: float = 48.0
@@ -332,14 +335,45 @@ class Settings(BaseSettings):
     morning_capture_min_velocity_9s: float = 2.8
     morning_capture_building_min_velocity_3s: float = 2.0
     morning_capture_min_vol_surge: float = 1.3
+    morning_capture_skip_chart_on_extreme_velocity: bool = True
+    morning_capture_extreme_velocity_3s: float = 3.0
+    morning_capture_extreme_velocity_9s: float = 4.0
+    premium_led_counter_breadth_enabled: bool = True
+    premium_led_min_velocity_3s: float = 2.8
+    premium_led_min_velocity_9s: float = 3.5
+    premium_led_min_explosion_score: float = 42.0
+    premium_led_counter_breadth_min_score: float = 48.0
+
+    # Afternoon premium capture — 11:45–13:45 consolidation breakouts (e.g. NIFTY 24250 PE 1pm rip)
+    afternoon_premium_capture_enabled: bool = True
+    afternoon_capture_min_rank_score: float = 46.0
+    afternoon_capture_building_min_score: float = 35.0
+    afternoon_capture_min_velocity_3s: float = 1.2
+    afternoon_capture_min_velocity_9s: float = 1.8
+    afternoon_capture_building_min_velocity_3s: float = 1.0
+    afternoon_capture_min_vol_surge: float = 1.4
+    afternoon_capture_consolidation_vol_surge: float = 1.5
+    afternoon_capture_consolidation_velocity_9s: float = 1.2
+    afternoon_capture_skip_chart_on_volume: bool = True
+    afternoon_capture_chart_bypass_vol_surge: float = 1.5
+    afternoon_capture_chart_bypass_velocity_9s: float = 1.2
+    afternoon_capture_bearish_min_score: float = 42.0
+    afternoon_capture_dominant_velocity_min: float = 1.6
+    afternoon_capture_dominant_velocity_ratio: float = 1.4
+    afternoon_capture_exit_target_points: float = 18.0
+    afternoon_capture_exit_stop_points: float = 4.0
+    afternoon_capture_exit_trail_arm_points: float = 6.0
+    afternoon_capture_exit_max_hold_seconds: int = 480
+    afternoon_capture_exit_trail_keep_ratio: float = 0.55
+
     runner_trail_keep_ratio: float = 0.38
     runner_micro_giveback_points: float = 4.0
     runner_min_best_points: float = 5.0
 
     # Option premium (LTP) band for entries and scanners
-    min_option_premium_inr: float = 25.0
-    max_option_premium_inr: float = 175.0
-    explosion_max_premium_inr: float = 250.0
+    min_option_premium_inr: float = 20.0
+    max_option_premium_inr: float = 300.0
+    explosion_max_premium_inr: float = 400.0
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0
@@ -350,6 +384,11 @@ class Settings(BaseSettings):
     quick_sideways_enabled: bool = True
     quick_sideways_min_rank_score: float = 58.0
     quick_sideways_min_velocity_pct: float = 0.5
+    quick_sideways_chop_min_velocity_pct: float = 0.22
+    quick_sideways_chop_pick_momentum_pct: float = 0.02
+    quick_sideways_scan_watchlist: bool = True
+    quick_sideways_strike_scan_radius: int = 250
+    quick_sideways_allow_bearish_chop: bool = True
     quick_sideways_min_tqs: int = 35
     quick_sideways_target_points: float = 3.0
     quick_sideways_stop_points: float = 2.0
@@ -358,6 +397,20 @@ class Settings(BaseSettings):
     quick_sideways_max_hold_seconds: int = 120
     quick_sideways_no_progress_seconds: int = 75
     quick_sideways_min_seconds_between_entries: int = 120
+    quick_sideways_stop_adaptive_enabled: bool = True
+    quick_sideways_stop_premium_lt_60: float = 2.0
+    quick_sideways_stop_premium_60_90: float = 2.5
+    quick_sideways_stop_premium_90_130: float = 3.0
+    quick_sideways_stop_premium_gt_130: float = 3.5
+    quick_sideways_min_stop_hold_seconds: int = 30
+    quick_sideways_instrument_cooldown_seconds: int = 300
+    quick_sideways_high_premium_threshold_inr: float = 90.0
+    quick_sideways_high_premium_lot_cap: int = 10
+    quick_sideways_preferred_premium_min: float = 30.0
+    quick_sideways_preferred_premium_max: float = 80.0
+    quick_sideways_high_premium_penalty_start: float = 90.0
+    quick_sideways_chop_early_lock_points: float = 1.5
+    quick_sideways_chop_early_giveback_points: float = 0.75
     sure_shot_mode_enabled: bool = False
     sure_shot_min_symbol_tqs: int = 40
     sure_shot_min_rank_score: float = 48.0

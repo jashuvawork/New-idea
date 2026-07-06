@@ -78,7 +78,12 @@ from app.models.schemas import (
     SymbolSnapshot,
     TradeMastermind,
 )
-from app.engines.quick_sideways import evaluate_quick_sideways_exit, get_quick_sideways_profile
+from app.engines.quick_sideways import (
+    cap_quick_sideways_lots,
+    evaluate_quick_sideways_exit,
+    get_quick_sideways_profile,
+    snapshot_in_chop,
+)
 from app.engines.session_timing import entries_allowed_now, entry_window_label
 from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
@@ -272,7 +277,7 @@ async def _open_from_candidate(
     snap = candidate.snap
     profile = snap.optimizedProfile or get_session_targets()
     if candidate.mode == "quick_sideways":
-        profile = get_quick_sideways_profile()
+        profile = get_quick_sideways_profile(candidate.premium)
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
 
     signal_premium = candidate.premium
@@ -306,6 +311,8 @@ async def _open_from_candidate(
         from app.engines.explosion_profit import cap_explosion_lots
 
         lots = cap_explosion_lots(lots, fill_premium)
+    elif candidate.mode == "quick_sideways":
+        lots = cap_quick_sideways_lots(lots, fill_premium)
     lots = apply_tiered_lot_cap(
         lots, candidate.score, snap.breadth.aligned, symbol,
         velocity_pct=(
@@ -428,9 +435,13 @@ async def _open_from_candidate(
         ctx_extra["entryVelocity3s"] = entry_velocity_3s
     if candidate.mode == "explosion" and candidate.explosion_event:
         ev = candidate.explosion_event
+        from app.engines.morning_premium_capture import is_afternoon_capture_event
+
+        afternoon = is_afternoon_capture_event(ev, chart=snap.spotChart)
         ctx_extra.update({
             "explosionTier": ev.tier,
             "explosionScore": ev.explosion_score,
+            "afternoonCapture": afternoon,
         })
     elif candidate.mode == "scalp" and candidate.suggestion:
         ctx_extra.update({
@@ -446,6 +457,10 @@ async def _open_from_candidate(
             "maxHoldDays": candidate.alert.get("maxHoldDays"),
             "reason": candidate.swing_setup.reason if candidate.swing_setup else "",
         })
+    elif candidate.mode == "quick_sideways":
+        regime = snap.regime
+        ctx_extra["inChop"] = snapshot_in_chop(snap)
+        ctx_extra["regime"] = regime.value if hasattr(regime, "value") else str(regime)
 
     if not ctx_extra.get("instrumentKey"):
         if instrument_key:
@@ -706,7 +721,14 @@ async def _process_open_trades(
                     current_velocity_3s=live_vel,
                 )
             else:
-                exit_reason, pnl = evaluate_explosion_exit(trade, eval_premium, tier, lot_mult)
+                from app.engines.morning_premium_capture import afternoon_capture_exit_params
+
+                exit_params = None
+                if (trade.entryContext or {}).get("afternoonCapture"):
+                    exit_params = afternoon_capture_exit_params(tier)
+                exit_reason, pnl = evaluate_explosion_exit(
+                    trade, eval_premium, tier, lot_mult, params=exit_params,
+                )
         elif not exit_reason and (trade.entryContext or {}).get("selectionMode") == "quick_sideways":
             exit_reason, pnl = evaluate_quick_sideways_exit(trade, eval_premium, lot_mult)
         elif not exit_reason and use_adaptive:

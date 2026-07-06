@@ -276,12 +276,22 @@ def compute_trading_limits(
     if trades_today >= limits.maxTradesToday:
         playbook.append(f"Daily trade cap reached ({trades_today}/{limits.maxTradesToday})")
 
-    from app.engines.morning_premium_capture import in_morning_premium_capture_window, morning_capture_active
+    from app.engines.morning_premium_capture import (
+        afternoon_capture_active,
+        in_afternoon_premium_capture_window,
+        in_morning_premium_capture_window,
+        morning_capture_active,
+    )
 
     if in_morning_premium_capture_window() and morning_capture_active(snapshots):
         limits.allowExplosion = True
         limits.minRankScore = min(limits.minRankScore, settings.morning_capture_min_rank_score)
         playbook.append("Morning premium capture — BUILDING+ explosions enabled")
+
+    if in_afternoon_premium_capture_window() and afternoon_capture_active(snapshots):
+        limits.allowExplosion = True
+        limits.minRankScore = min(limits.minRankScore, settings.afternoon_capture_min_rank_score)
+        playbook.append("Afternoon premium capture — consolidation breakout explosions enabled")
 
     if settings.day_adaptive_enabled:
         from app.engines.day_adaptive_engine import build_day_adaptive_profile, apply_profile_to_limits

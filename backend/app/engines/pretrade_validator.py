@@ -271,7 +271,10 @@ def resolve_effective_daily_trade_cap(
 
     if snapshots:
         from app.engines.chop_day_guards import in_momentum_rally_window, is_chop_session
-        from app.engines.morning_premium_capture import in_morning_premium_capture_window
+        from app.engines.morning_premium_capture import (
+            in_afternoon_premium_capture_window,
+            in_morning_premium_capture_window,
+        )
 
         if in_momentum_rally_window():
             cap = max(cap, settings.daily_18pct_chop_max_trades)
@@ -280,6 +283,9 @@ def resolve_effective_daily_trade_cap(
         elif in_morning_premium_capture_window():
             cap = max(cap, settings.controlled_max_trades_per_day + 4)
             label = "morning_capture"
+        elif in_afternoon_premium_capture_window():
+            cap = max(cap, settings.controlled_max_trades_per_day + 2)
+            label = "afternoon_capture"
         elif is_chop_session(snapshots):
             cap = max(cap, settings.daily_18pct_chop_max_trades)
 
@@ -371,10 +377,10 @@ def check_last_n_trades_pause(
     if momentum_rally_bypass_last_n(snapshots):
         return False, "momentum_rally_bypass", summary
 
-    from app.engines.morning_premium_capture import morning_capture_active
+    from app.engines.morning_premium_capture import premium_capture_active
 
-    if morning_capture_active(snapshots):
-        return False, "morning_capture_bypass", summary
+    if premium_capture_active(snapshots):
+        return False, "premium_capture_bypass", summary
 
     losses = summary["losses"]
     count = summary["count"]
@@ -546,7 +552,12 @@ def validate_candidate(
     trade_score = max(candidate.tqs or 0, candidate.confidence or 0, candidate.score)
 
     if not side_aligned_with_breadth(side_val, snap.breadth.bias):
-        if trade_score < settings.counter_breadth_min_score:
+        counter_floor = settings.counter_breadth_min_score
+        from app.engines.morning_premium_capture import premium_led_entry_allowed
+
+        if premium_led_entry_allowed(candidate.side, snap):
+            counter_floor = min(counter_floor, settings.premium_led_counter_breadth_min_score)
+        if trade_score < counter_floor:
             return False, "pretrade_counter_breadth", meta
 
     from app.engines.spot_direction import chart_blocks_side

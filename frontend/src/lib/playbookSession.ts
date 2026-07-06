@@ -20,7 +20,7 @@ export function inIstWindow(startH: number, startM: number, endH: number, endM: 
 }
 
 export function morningCaptureWindowActive(now = new Date()): boolean {
-  return inIstWindow(10, 0, 11, 45, now);
+  return inIstWindow(9, 15, 11, 45, now);
 }
 
 export function momentumRallyWindowActive(now = new Date()): boolean {
