@@ -537,15 +537,19 @@ def validate_candidate(
     if not ex_ok:
         return False, ex_reason, meta
 
+    snap: SymbolSnapshot = candidate.snap
+    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+
     expiry_floor = expiry_min_rank_score(state, snap_map)
     min_rank = max(settings.pretrade_min_rank_score, expiry_floor)
     if getattr(candidate, "mode", "") == "quick_sideways":
         min_rank = min(min_rank, settings.quick_sideways_min_rank_score)
+    if expiry_pm_itm_quick_active(snap):
+        min_rank = min(min_rank, settings.expiry_pm_itm_min_rank_score)
     if candidate.score < min_rank:
         return False, f"pretrade_rank_below_{min_rank:.0f}", meta
 
     side_val = candidate.side.value if isinstance(candidate.side, Side) else str(candidate.side).upper()
-    snap: SymbolSnapshot = candidate.snap
 
     from app.engines.symbol_cooldown import side_aligned_with_breadth
 
@@ -560,12 +564,17 @@ def validate_candidate(
         if trade_score < counter_floor:
             return False, "pretrade_counter_breadth", meta
 
+    from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
     from app.engines.spot_direction import chart_blocks_side
 
+    breadth_bypass = expiry_pm_itm_chart_bypass_allowed(
+        candidate.side, snap, mode=str(getattr(candidate, "mode", "")),
+    )
     blocked_chart, chart_reason = chart_blocks_side(
         candidate.side,
         snap.spotChart,
         trade_score=trade_score,
+        breadth_aligned_bypass=breadth_bypass,
     )
     if blocked_chart:
         meta["chartDirection"] = snap.spotChart.direction if snap.spotChart else "NEUTRAL"

@@ -175,6 +175,30 @@ def _micro_velocity(snap: SymbolSnapshot, side: Side, strike: float) -> float:
     return max(best, abs(snap.orderflow.signedMomentumPct or 0))
 
 
+def _collect_itm_strike_candidates(
+    snap: SymbolSnapshot,
+    side: Side,
+) -> list[tuple[float, float]]:
+    """ITM strikes for expiry PM quick scalps (e.g. 24300 CE when spot ~24440)."""
+    from app.engines.moneyness import atm_strike, classify_moneyness
+
+    spot = snap.spot or snap.atmStrike or 0.0
+    if spot <= 0:
+        return []
+    atm = float(snap.atmStrike or 0) or atm_strike(spot, snap.symbol)
+    settings = get_settings()
+    max_prem = settings.expiry_pm_itm_premium_max_inr
+    out: dict[float, float] = {}
+    for row in snap.heatmap:
+        strike, prem = _strike_premium(row, side)
+        if not prem or prem <= 0 or prem > max_prem:
+            continue
+        if classify_moneyness(side, strike, spot, symbol=snap.symbol, atm=atm) != "ITM":
+            continue
+        out[strike] = prem
+    return sorted(out.items(), key=lambda x: -x[1])
+
+
 def _collect_strike_candidates(
     snap: SymbolSnapshot,
     side: Side,
@@ -218,7 +242,14 @@ def check_quick_sideways_entry(
     if not is_sideways_snapshot(snap):
         return False, "not_sideways"
     if not premium_in_band(premium):
-        return False, premium_reject_reason(premium)
+        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+
+        if not (
+            expiry_pm_itm_quick_active(snap)
+            and premium >= settings.min_option_premium_inr
+            and premium <= settings.expiry_pm_itm_premium_max_inr
+        ):
+            return False, premium_reject_reason(premium)
     if snap.tradeQualityScore < settings.quick_sideways_min_tqs:
         return False, f"tqs_below_{settings.quick_sideways_min_tqs}"
 
@@ -226,6 +257,10 @@ def check_quick_sideways_entry(
     mom5 = abs(chart.momentum5Pct or 0) if chart else 0
     vel = max(velocity_pct, _micro_velocity(snap, side, strike), mom5)
     floor = _min_velocity_pct(snap)
+    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+
+    if expiry_pm_itm_quick_active(snap):
+        floor = min(floor, settings.expiry_pm_itm_min_velocity_pct)
     if vel < floor:
         return False, f"velocity_below_{floor}"
 
@@ -269,6 +304,13 @@ def score_quick_sideways(
         score += 8
     elif premium > settings.quick_sideways_high_premium_penalty_start:
         score -= min(12.0, (premium - settings.quick_sideways_high_premium_penalty_start) * 0.15)
+    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+    from app.engines.moneyness import classify_moneyness
+
+    if expiry_pm_itm_quick_active(snap):
+        atm = float(snap.atmStrike or spot)
+        if classify_moneyness(side, strike, spot, symbol=snap.symbol, atm=atm) == "ITM":
+            score += 10
     return round(score, 2)
 
 
@@ -289,7 +331,16 @@ def scan_quick_sideways_setups(
         return []
 
     setups: list[dict] = []
-    for strike, premium in _collect_strike_candidates(snap, side):
+    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+
+    strike_rows = _collect_strike_candidates(snap, side)
+    if expiry_pm_itm_quick_active(snap):
+        seen = {s for s, _ in strike_rows}
+        for strike, premium in _collect_itm_strike_candidates(snap, side):
+            if strike not in seen:
+                strike_rows.append((strike, premium))
+
+    for strike, premium in strike_rows:
         vel = _micro_velocity(snap, side, strike)
         ok, reason = check_quick_sideways_entry(
             snap, side, strike, premium, velocity_pct=vel,

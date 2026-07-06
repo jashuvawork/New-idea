@@ -257,6 +257,17 @@ class Settings(BaseSettings):
     expiry_dual_scalp_opposite_cooldown_seconds: int = 90
     expiry_explosion_open_block_minutes: int = 5
 
+    # Expiry PM ITM quick scalps — day-of / next-day expiry, 14:00–15:25 IST
+    expiry_pm_itm_quick_enabled: bool = True
+    expiry_pm_itm_window_start_hour: int = 14
+    expiry_pm_itm_window_start_minute: int = 0
+    expiry_pm_itm_window_end_hour: int = 15
+    expiry_pm_itm_window_end_minute: int = 25
+    expiry_pm_itm_premium_max_inr: float = 180.0
+    expiry_pm_itm_min_velocity_pct: float = 0.35
+    expiry_pm_itm_min_rank_score: float = 52.0
+    expiry_pm_itm_chart_bypass_breadth: bool = True
+
     # Psychology setup hold — FEAR/CAUTION entries held longer on expiry chop
     psychology_hold_enabled: bool = True
     psychology_hold_labels_csv: str = "FEAR,CAUTION"

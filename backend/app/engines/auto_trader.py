@@ -363,14 +363,20 @@ async def _open_from_candidate(
                 snap,
                 trade_score=candidate.score,
                 instrument_key=instrument_key,
+                mode=candidate.mode or "",
             )
             if not chart_ok:
                 return False, chart_reason
         else:
+            from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
             from app.engines.spot_direction import chart_blocks_side
 
+            breadth_bypass = expiry_pm_itm_chart_bypass_allowed(
+                candidate.side, snap, mode=candidate.mode or "",
+            )
             blocked, chart_reason = chart_blocks_side(
                 candidate.side, snap.spotChart, trade_score=candidate.score,
+                breadth_aligned_bypass=breadth_bypass,
             )
             if blocked:
                 return False, f"exec_{chart_reason}"
