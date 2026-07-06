@@ -178,7 +178,7 @@ def check_explosion_entry(
 
 def compute_explosion_lots(event: ExplosionEvent, tqs: float, premium: float) -> int:
     """Size explosion trades at 85% capital max — same as compute_lots."""
-    return compute_lots(
+    lots = compute_lots(
         event.symbol,
         premium,
         stop_points=get_settings().explosion_initial_stop_points,
@@ -187,6 +187,14 @@ def compute_explosion_lots(event: ExplosionEvent, tqs: float, premium: float) ->
         confidence=event.explosion_score,
         tier=event.tier,
     )
+    return cap_explosion_lots(lots, premium)
+
+
+def cap_explosion_lots(lots: int, premium: float) -> int:
+    settings = get_settings()
+    if premium > settings.explosion_high_premium_threshold_inr:
+        return min(lots, settings.explosion_high_premium_lot_cap)
+    return lots
 
 
 def _hold_seconds(trade: PaperTrade) -> float:
@@ -323,6 +331,13 @@ def evaluate_explosion_exit(
         and best >= settings.runner_min_best_points
     ):
         return "explosion_micro_profit_lock", pnl_inr
+
+    if (
+        exit_params.adaptive_stop
+        and hold >= settings.explosion_stop_min_hold_seconds
+        and pnl_pts <= -exit_params.stop_points
+    ):
+        return "adaptive_stop_loss", pnl_inr
 
     if _should_skip_no_progress(trade, settings):
         pass

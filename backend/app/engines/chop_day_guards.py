@@ -14,29 +14,34 @@ IST = ZoneInfo("Asia/Kolkata")
 
 _session_loss_streak: int = 0
 _pause_until: Optional[datetime] = None
+_large_loss_pause_until: Optional[datetime] = None
 _session_date: Optional[str] = None
 
 
 def _reset_session_if_new_day() -> None:
-    global _session_loss_streak, _pause_until, _session_date
+    global _session_loss_streak, _pause_until, _large_loss_pause_until, _session_date
     today = datetime.now(IST).strftime("%Y-%m-%d")
     if _session_date != today:
         _session_date = today
         _session_loss_streak = 0
         _pause_until = None
+        _large_loss_pause_until = None
 
 
 def record_session_trade_close(pnl_inr: float) -> None:
-    """Global loss streak — pause new entries after N consecutive losses."""
-    global _session_loss_streak, _pause_until
+    """Global loss streak — pause new entries after N consecutive losses or one large hit."""
+    global _session_loss_streak, _pause_until, _large_loss_pause_until
     settings = get_settings()
     if not settings.chop_day_guards_enabled:
         return
     _reset_session_if_new_day()
+    now = datetime.now(IST)
+    if pnl_inr <= -settings.session_large_loss_pause_inr:
+        _large_loss_pause_until = now + timedelta(seconds=settings.session_large_loss_pause_seconds)
     if pnl_inr < -50:
         _session_loss_streak += 1
         if _session_loss_streak >= settings.loss_streak_pause_count:
-            _pause_until = datetime.now(IST) + timedelta(seconds=settings.loss_streak_pause_seconds)
+            _pause_until = now + timedelta(seconds=settings.loss_streak_pause_seconds)
     elif pnl_inr > 50:
         _session_loss_streak = 0
 
@@ -46,9 +51,18 @@ def session_pause_active() -> tuple[bool, str]:
     if not settings.chop_day_guards_enabled:
         return False, "ok"
     _reset_session_if_new_day()
+    now = datetime.now(IST)
+    if _large_loss_pause_until is not None:
+        until = (
+            _large_loss_pause_until
+            if _large_loss_pause_until.tzinfo
+            else _large_loss_pause_until.replace(tzinfo=IST)
+        )
+        if now < until.astimezone(IST):
+            secs = int((until.astimezone(IST) - now).total_seconds())
+            return True, f"large_loss_pause_{secs}s"
     if _pause_until is None:
         return False, "ok"
-    now = datetime.now(IST)
     until = _pause_until if _pause_until.tzinfo else _pause_until.replace(tzinfo=IST)
     if now < until.astimezone(IST):
         secs = int((until.astimezone(IST) - now).total_seconds())
@@ -57,9 +71,10 @@ def session_pause_active() -> tuple[bool, str]:
 
 
 def reset_session_guards() -> None:
-    global _session_loss_streak, _pause_until, _session_date
+    global _session_loss_streak, _pause_until, _large_loss_pause_until, _session_date
     _session_loss_streak = 0
     _pause_until = None
+    _large_loss_pause_until = None
     _session_date = None
 
 

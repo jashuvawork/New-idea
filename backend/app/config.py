@@ -135,6 +135,8 @@ class Settings(BaseSettings):
     explosion_single_side_per_symbol: bool = True
     explosion_dominant_side_min_score: float = 50.0
     explosion_exhaustion_v15_pct: float = 18.0
+    explosion_high_premium_threshold_inr: float = 90.0
+    explosion_high_premium_lot_cap: int = 10
 
     # Directional lock — aligned side default; CE↔PE switch only on full confirmation
     directional_side_lock_enabled: bool = True
@@ -282,9 +284,9 @@ class Settings(BaseSettings):
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5
 
-    # Entries from 9:15 IST; open caution until 9:45 on chop days
+    # Entries from 9:20 IST — skip 9:15 open auction; open caution until 9:45
     entry_earliest_hour: int = 9
-    entry_earliest_minute: int = 15
+    entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
     open_caution_min_explosion_score: int = 45
@@ -305,6 +307,8 @@ class Settings(BaseSettings):
     pre10_chop_min_rank_score: float = 60.0
     loss_streak_pause_count: int = 3
     loss_streak_pause_seconds: int = 1200
+    session_large_loss_pause_inr: float = 15_000.0
+    session_large_loss_pause_seconds: int = 900
     chop_lots_high: int = 40
     chop_lots_mid: int = 20
     chop_lots_min_rank: float = 48.0
