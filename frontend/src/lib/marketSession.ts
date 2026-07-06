@@ -42,6 +42,7 @@ export function connectionStatusLabel(
   session: MarketSessionInfo,
   quality: 'excellent' | 'good' | 'slow' | 'offline',
   streamMode?: 'sse' | 'poll',
+  dataReady?: boolean,
 ): string {
   if (session.marketClosed) return 'Market closed';
   if (session.dataPauseReason) {
@@ -56,6 +57,9 @@ export function connectionStatusLabel(
   if (session.phase === 'PREMARKET') return 'Premarket';
   if (session.phase === 'POST_MARKET') return 'Post-market';
   if (streamMode === 'sse' && quality !== 'offline' && quality !== 'slow') {
+    return 'Live';
+  }
+  if (dataReady && quality === 'good') {
     return 'Live';
   }
   switch (quality) {

@@ -46,20 +46,46 @@ function SymbolBreadthRow({
   info,
 }: {
   symbol: string;
-  info: { bias: string; score: number; aligned: boolean; regime: string };
+  info: {
+    bias: string;
+    score: number;
+    aligned: boolean;
+    regime: string;
+    source?: string;
+    stockScore?: number;
+    oiScore?: number;
+  };
 }) {
+  const sourceLabel =
+    info.source === 'blended'
+      ? 'blended'
+      : info.source === 'stocks'
+        ? 'stocks'
+        : info.source === 'oi'
+          ? 'OI only'
+          : null;
   return (
     <div className="flex items-center justify-between gap-2 py-1.5 border-b border-nexus-border/50 last:border-0">
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-2 min-w-0 flex-wrap">
         <span className="text-[11px] font-bold text-white w-14 shrink-0">{symbol}</span>
         <BiasBadge bias={info.bias} />
         {info.aligned ? (
           <span className="text-[9px] text-nexus-accent font-semibold">ALIGNED</span>
         ) : null}
+        {sourceLabel ? (
+          <span className="text-[8px] uppercase text-nexus-muted border border-nexus-border/60 px-1 rounded">
+            {sourceLabel}
+          </span>
+        ) : null}
       </div>
       <div className="text-right shrink-0">
         <div className="text-[10px] font-mono text-gray-300">{info.score.toFixed(0)} breadth</div>
-        <div className="text-[9px] text-nexus-muted">{info.regime.replace('_', ' ')}</div>
+        <div className="text-[9px] text-nexus-muted">
+          {info.regime.replace('_', ' ')}
+          {info.source === 'blended' && info.stockScore != null && info.oiScore != null
+            ? ` · stk ${info.stockScore.toFixed(0)} / OI ${info.oiScore.toFixed(0)}`
+            : ''}
+        </div>
       </div>
     </div>
   );
@@ -102,6 +128,7 @@ function SymbolChartRow({ symbol, chart }: { symbol: string; chart: SpotChart })
         </div>
         {(chart.rsi != null || chart.macdBias) && (
           <div className="text-nexus-muted">
+            {chart.timeframe ? `${chart.timeframe} · ` : ''}
             RSI {chart.rsi?.toFixed(0) ?? '—'} {chart.rsiBias ?? ''} · MACD {chart.macdBias ?? '—'}
           </div>
         )}
@@ -312,7 +339,7 @@ export function DayModePanel({
         })}
       </div>
 
-      <div className="text-[10px] text-nexus-muted uppercase mb-1">Blended breadth by symbol</div>
+      <div className="text-[10px] text-nexus-muted uppercase mb-1">Breadth by symbol</div>
       <div className="rounded bg-black/20 px-2">
         {symbols.map((sym) => {
           const info = breadth[sym] ?? (snapshots[sym]?.dataAvailable
@@ -321,6 +348,9 @@ export function DayModePanel({
                 score: snapshots[sym].breadth?.score ?? 50,
                 aligned: snapshots[sym].breadth?.aligned ?? false,
                 regime: snapshots[sym].regime ?? 'RANGE_BOUND',
+                source: snapshots[sym].breadth?.source,
+                stockScore: snapshots[sym].breadth?.stockScore,
+                oiScore: snapshots[sym].breadth?.oiScore,
               }
             : null);
           if (!info) {
