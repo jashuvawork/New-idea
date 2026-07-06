@@ -26,11 +26,19 @@ function deriveQuality(
   stalenessMs: number,
   session: MarketSessionInfo,
   dataReady?: boolean,
+  streamMode?: StreamMetrics['streamMode'],
 ): StreamMetrics['connectionQuality'] {
   if (session.marketClosed && stalenessMs < 120_000) return 'good';
   if (session.dataPauseReason) {
     if (/cooling down|rate limit|429/i.test(session.dataPauseReason)) return 'slow';
     return 'slow';
+  }
+  if (streamMode === 'sse') {
+    if (!dataReady && stalenessMs > 30_000) return 'offline';
+    if (stalenessMs > 20_000) return 'offline';
+    if (stalenessMs > 5_000) return 'slow';
+    if (stalenessMs > 1_500) return 'good';
+    return 'excellent';
   }
   if (dataReady && stalenessMs < 30_000) return latencyQuality(latencyMs);
   if (stalenessMs > 20_000) return 'offline';
@@ -49,16 +57,27 @@ export function ConnectionStatus({
   dataReady?: boolean;
 }) {
   const ageSec = Math.floor(metrics.stalenessMs / 1000);
-  const quality = deriveQuality(metrics.lastLatencyMs, metrics.stalenessMs, session, dataReady);
+  const quality = deriveQuality(
+    metrics.lastLatencyMs,
+    metrics.stalenessMs,
+    session,
+    dataReady,
+    metrics.streamMode,
+  );
   const label = connectionStatusLabel(session, quality, metrics.streamMode);
   const paused = Boolean(session.dataPauseReason);
+  const latencyLabel = metrics.streamMode === 'sse' && metrics.lastLatencyMs > 0
+    ? `${metrics.lastLatencyMs}ms fresh`
+    : `${metrics.lastLatencyMs}ms`;
 
   return (
     <div
       className={`flex items-center gap-2 text-[10px] px-2.5 py-1 rounded border ${qualityColor(quality)}`}
       title={[
         metrics.streamMode === 'sse' ? 'SSE stream' : 'HTTP poll',
-        `Round-trip: ${metrics.lastLatencyMs}ms`,
+        metrics.streamMode === 'sse'
+          ? `Data age: ${metrics.stalenessMs}ms`
+          : `Round-trip: ${metrics.lastLatencyMs}ms`,
         `Avg: ${metrics.avgLatencyMs}ms`,
         `Refresh every ${metrics.pollIntervalMs / 1000}s`,
         session.dataPauseReason,
@@ -77,7 +96,7 @@ export function ConnectionStatus({
       />
       <span className="font-semibold">{label}</span>
       <span className="opacity-80">·</span>
-      <span className="font-mono">{metrics.lastLatencyMs}ms</span>
+      <span className="font-mono">{latencyLabel}</span>
       {metrics.lastUpdatedAt && (
         <>
           <span className="opacity-80">·</span>

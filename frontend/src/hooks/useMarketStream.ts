@@ -19,6 +19,23 @@ function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   return 'slow';
 }
 
+/** SSE is server-push — use data freshness, not JSON parse time (which is ~0ms). */
+function sseConnectionQuality(
+  dataAgeMs: number,
+  dataReady: boolean,
+): StreamMetrics['connectionQuality'] {
+  if (!dataReady && dataAgeMs > 30_000) return 'offline';
+  if (dataAgeMs > 20_000) return 'offline';
+  if (dataAgeMs > 5_000) return 'slow';
+  if (dataAgeMs > 1_500) return 'good';
+  return 'excellent';
+}
+
+function sseDisplayLatencyMs(dataAgeMs: number, pollIntervalMs: number): number {
+  const age = dataAgeMs > 0 ? dataAgeMs : pollIntervalMs;
+  return stableLatencyMs(Math.max(25, Math.min(pollIntervalMs, age)));
+}
+
 /** Round-trip display — dampens jitter from ±few ms network variance */
 function stableLatencyMs(ms: number): number {
   return Math.round(ms / 25) * 25;
@@ -65,10 +82,9 @@ function applySnapshot(
   const snapTs = json.timestamp ? new Date(json.timestamp).getTime() : now.getTime();
   const dataAgeMs = Math.max(0, now.getTime() - snapTs);
 
-  latencyHistory.current = [...latencyHistory.current.slice(-9), elapsed];
-  const avg = Math.round(
-    latencyHistory.current.reduce((a, b) => a + b, 0) / latencyHistory.current.length,
-  );
+  if (streamMode !== 'sse') {
+    latencyHistory.current = [...latencyHistory.current.slice(-9), elapsed];
+  }
 
   const sig = snapshotSignature(json);
   const dataChanged = sig !== lastSignature.current;
@@ -77,10 +93,22 @@ function applySnapshot(
     setData(json);
   }
 
-  const latency = stableLatencyMs(elapsed);
-  const avgStable = stableLatencyMs(avg);
+  const isSse = streamMode === 'sse';
+  const roundTripMs = Math.round(performance.now() - started);
+  const latency = isSse
+    ? sseDisplayLatencyMs(dataAgeMs, pollIntervalMs)
+    : stableLatencyMs(roundTripMs);
+  const avgStable = isSse
+    ? latency
+    : stableLatencyMs(
+        Math.round(
+          latencyHistory.current.reduce((a, b) => a + b, 0) / latencyHistory.current.length,
+        ),
+      );
+  const quality = isSse
+    ? sseConnectionQuality(dataAgeMs, Boolean(json.dataReady))
+    : latencyQuality(roundTripMs);
   setMetrics((prev) => {
-    const quality = latencyQuality(elapsed);
     const staleBucket = Math.floor(dataAgeMs / 1000);
     const prevBucket = Math.floor(prev.stalenessMs / 1000);
     if (
@@ -165,13 +193,16 @@ export function useMarketStream() {
       setMetrics((prev) => {
         const prevBucket = Math.floor(prev.stalenessMs / 1000);
         const quality =
-          prev.streamMode === 'sse' && stale > 30_000
-            ? (stale > 60_000 ? 'offline' : 'slow')
+          prev.streamMode === 'sse'
+            ? (stale > 20_000 ? 'offline' : stale > 5_000 ? 'slow' : stale > 1_500 ? 'good' : 'excellent')
             : prev.connectionQuality;
-        if (prevBucket === staleBucket && quality === prev.connectionQuality) {
+        const latency = prev.streamMode === 'sse'
+          ? sseDisplayLatencyMs(stale, prev.pollIntervalMs)
+          : prev.lastLatencyMs;
+        if (prevBucket === staleBucket && quality === prev.connectionQuality && latency === prev.lastLatencyMs) {
           return prev;
         }
-        return { ...prev, stalenessMs: stale, connectionQuality: quality };
+        return { ...prev, stalenessMs: stale, connectionQuality: quality, lastLatencyMs: latency };
       });
       if (SSE_ENABLED && !sseFailed.current && stale > 4000) {
         void fetchSnapshot();
