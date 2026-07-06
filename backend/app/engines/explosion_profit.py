@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.engines.capital_allocator import compute_lots
 from app.engines.explosion_detector import ExplosionEvent
-from app.models.schemas import Breadth, PaperTrade, Side, SpotChart, StrategyType, SuggestedTrade
+from app.models.schemas import Breadth, PaperTrade, Side, SpotChart, StrategyType, SuggestedTrade, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -98,10 +98,23 @@ def check_explosion_entry(
     *,
     index_moment: bool = False,
     chart: Optional[SpotChart] = None,
+    snap: Optional[SymbolSnapshot] = None,
 ) -> tuple[bool, str]:
     """Fast entry on explosion — minimal gates, speed is everything."""
     if calibration_blocked:
         return False, "calibration_block"
+
+    if snap is not None:
+        from app.engines.expiry_day_guards import check_expiry_explosion_open_block
+
+        blocked, reason = check_expiry_explosion_open_block(
+            snap=snap,
+            tier=event.tier,
+            side=event.side,
+            breadth=breadth,
+        )
+        if blocked:
+            return False, reason
 
     if explosion_in_cooldown(event.symbol):
         return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
@@ -189,7 +202,7 @@ def check_explosion_entry(
 
 def compute_explosion_lots(event: ExplosionEvent, tqs: float, premium: float) -> int:
     """Size explosion trades at 85% capital max — same as compute_lots."""
-    return compute_lots(
+    lots = compute_lots(
         event.symbol,
         premium,
         stop_points=get_settings().explosion_initial_stop_points,
@@ -198,6 +211,14 @@ def compute_explosion_lots(event: ExplosionEvent, tqs: float, premium: float) ->
         confidence=event.explosion_score,
         tier=event.tier,
     )
+    return cap_explosion_lots(lots, premium)
+
+
+def cap_explosion_lots(lots: int, premium: float) -> int:
+    settings = get_settings()
+    if premium > settings.explosion_high_premium_threshold_inr:
+        return min(lots, settings.explosion_high_premium_lot_cap)
+    return lots
 
 
 def _hold_seconds(trade: PaperTrade) -> float:
@@ -334,6 +355,13 @@ def evaluate_explosion_exit(
         and best >= settings.runner_min_best_points
     ):
         return "explosion_micro_profit_lock", pnl_inr
+
+    if (
+        exit_params.adaptive_stop
+        and hold >= settings.explosion_stop_min_hold_seconds
+        and pnl_pts <= -exit_params.stop_points
+    ):
+        return "adaptive_stop_loss", pnl_inr
 
     if _should_skip_no_progress(trade, settings):
         pass

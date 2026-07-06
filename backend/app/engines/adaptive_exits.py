@@ -324,24 +324,8 @@ def evaluate_adaptive_explosion_exit(
     if exit_reason:
         return exit_reason, pnl
 
-    settings = get_settings()
-    opened = trade.openedAt
-    if opened.tzinfo is None:
-        opened = opened.replace(tzinfo=IST)
-    hold = (datetime.now(IST) - opened.astimezone(IST)).total_seconds()
     pnl_pts = current_premium - trade.entryPremium
     best = max(trade.bestPnlPoints, pnl_pts)
-    entry_vel = float((trade.entryContext or {}).get("velocity3s") or 0)
-    still_expanding = current_velocity_3s >= max(1.2, entry_vel * 0.35)
-
-    # Adaptive per-trade stop — only when momentum is fading, not during active expansion
-    if (
-        best < plan.trailArmPoints
-        and hold >= settings.explosion_stop_min_hold_seconds
-        and pnl_pts <= -plan.stopPoints
-        and not still_expanding
-    ):
-        return "adaptive_stop_loss", pnl_pts * trade.lots * lot_multiplier
 
     if best >= plan.trailArmPoints and pnl_pts < best * plan.trailKeepRatio:
         return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier

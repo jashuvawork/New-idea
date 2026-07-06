@@ -307,7 +307,11 @@ async def _open_from_candidate(
         confidence=candidate.confidence,
         tier=candidate.tier,
     )
-    if candidate.mode == "quick_sideways":
+    if candidate.mode == "explosion":
+        from app.engines.explosion_profit import cap_explosion_lots
+
+        lots = cap_explosion_lots(lots, fill_premium)
+    elif candidate.mode == "quick_sideways":
         lots = cap_quick_sideways_lots(lots, fill_premium)
     lots = apply_tiered_lot_cap(
         lots, candidate.score, snap.breadth.aligned, symbol,

@@ -25,7 +25,7 @@ def open_caution_until_minutes() -> int:
 
 
 def entries_allowed_now() -> tuple[bool, str]:
-    """False until configured IST time (default 09:20) during live market."""
+    """False until configured IST time (default 09:20) during live market — skips open auction."""
     phase = get_market_phase()
     if phase != "LIVE_MARKET":
         return False, "market_not_live"
@@ -40,7 +40,7 @@ def entries_allowed_now() -> tuple[bool, str]:
 
 
 def in_open_caution_window() -> bool:
-    """09:15–09:45 IST — stricter rank gates while opening range forms."""
+    """09:20–09:45 IST — stricter rank gates while opening range forms."""
     if get_market_phase() != "LIVE_MARKET":
         return False
     current = _minutes_now()

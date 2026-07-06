@@ -33,6 +33,7 @@ def _params() -> ExplosionExitParams:
         trail_arm_points=10.0,
         trail_keep_ratio=0.65,
         micro_target_points=3.0,
+        adaptive_stop=True,
     )
 
 
@@ -95,3 +96,14 @@ def test_no_progress_extended_when_alignment_skip_disabled(mock_settings):
     trade.openedAt = datetime.now(IST) - timedelta(seconds=310)
     reason, _ = evaluate_explosion_exit(trade, 41.0, "ELITE", 20, params=_params())
     assert reason == "explosion_no_progress"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_adaptive_stop_fires_before_no_progress_on_large_loss(mock_settings):
+    mock_settings.return_value = _settings()
+    trade = _trade(breadth="NEUTRAL", selectionScore=108.0)
+    trade.openedAt = datetime.now(IST) - timedelta(seconds=135)
+    trade.bestPnlPoints = 0.0
+    reason, pnl = evaluate_explosion_exit(trade, 20.0, "EXPLODING", 65, params=_params())
+    assert reason == "adaptive_stop_loss"
+    assert pnl < 0

@@ -108,7 +108,8 @@ def test_adaptive_explosion_exit_uses_plan_trail(mock_settings):
 
 
 @patch("app.engines.adaptive_exits.get_settings")
-def test_adaptive_stop_skipped_while_premium_expanding(mock_settings):
+def test_adaptive_stop_fires_at_plan_stop_even_while_expanding(mock_settings):
+    """Stop must fire at plan SL before no_progress — even if velocity still hot."""
     settings = MagicMock()
     settings.explosion_stop_min_hold_seconds = 0
     mock_settings.return_value = settings
@@ -136,14 +137,17 @@ def test_adaptive_stop_skipped_while_premium_expanding(mock_settings):
         s.explosion_trail_keep_ratio = 0.65
         s.explosion_trail_arm_points = 4.0
         s.explosion_initial_stop_points = 4.0
+        s.explosion_no_progress_enabled = True
         s.explosion_no_progress_seconds = 90
+        s.explosion_no_progress_aligned_seconds = 420
+        s.explosion_no_progress_skip_when_aligned = True
         exp_settings.return_value = s
 
         reason, _ = evaluate_adaptive_explosion_exit(
             trade, 132.0, plan, "EXPLODING", 20, current_velocity_3s=3.5,
         )
 
-    assert reason is None
+    assert reason == "adaptive_stop_loss"
 
 
 @patch("app.engines.adaptive_exits.get_settings")
