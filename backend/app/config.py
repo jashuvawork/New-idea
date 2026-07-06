@@ -383,7 +383,7 @@ class Settings(BaseSettings):
     enhanced_tqs_entry: int = 50
     runner_alignment_override_score: int = 82
     rapid_scalp_mode_enabled: bool = False
-    quick_sideways_enabled: bool = False
+    quick_sideways_enabled: bool = True
     quick_sideways_min_rank_score: float = 58.0
     quick_sideways_min_velocity_pct: float = 0.5
     quick_sideways_chop_min_velocity_pct: float = 0.22

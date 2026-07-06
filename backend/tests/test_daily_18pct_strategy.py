@@ -28,7 +28,7 @@ def _settings():
     s.daily_18pct_expiry_min_rank = 65
     s.daily_18pct_full_limit_max_trades = 12
     s.quick_sideways_min_rank_score = 58
-    s.quick_sideways_enabled = False
+    s.quick_sideways_enabled = True
     s.best_trades_min_rank_score = 68
     s.pretrade_min_rank_score = 65
     s.controlled_max_trades_per_day = 6
@@ -65,4 +65,4 @@ def test_accumulate_phase_low_confidence(_conf):
     assert limits.phase == "ACCUMULATE"
     assert limits.confidenceTier == "LOW"
     assert limits.allowExplosion is False
-    assert limits.allowQuickSideways is False
+    assert limits.allowQuickSideways is True

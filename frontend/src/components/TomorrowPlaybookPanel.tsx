@@ -120,9 +120,9 @@ export function TomorrowPlaybookPanel({
 
   const allowExplosion =
     Boolean(strategy.allowExplosion) || (morningCapture && (morningSurge || momentumRally));
-  const allowQuick = strategy.allowQuickSideways === true;
+  const allowQuick = strategy.allowQuickSideways !== false;
   const explosionMode = Boolean(flags.explosionCaptureMode ?? true);
-  const quickMode = flags.quickSidewaysEnabled === true;
+  const quickMode = flags.quickSidewaysEnabled !== false;
   const scalpMode = Boolean(flags.simpleProfitMode ?? auto.tradeMastermind?.simpleProfitMode);
   const swingMode = Boolean(flags.swingTradingEnabled ?? auto.tradeMastermind?.swingTradingEnabled);
 

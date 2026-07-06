@@ -24,7 +24,7 @@ class TradingLimits:
     maxTradesToday: int = 8
     lotSizeMultiplier: float = 1.0
     allowExplosion: bool = False
-    allowQuickSideways: bool = False
+    allowQuickSideways: bool = True
     allowFullLots: bool = False
     unlockFullLimits: bool = False
     message: str = ""
