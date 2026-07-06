@@ -112,10 +112,34 @@ def test_chart_blocks_put_on_rallying_index(mock_settings):
 @patch("app.engines.spot_direction.get_settings")
 def test_chart_override_allows_high_score_counter_trend(mock_settings):
     mock_settings.return_value = _settings()
-    chart = SpotChart(direction="BEARISH", momentum5Pct=-0.2, momentum15Pct=-0.3, trendStrength=50)
+    # Override applies to soft momentum conflicts, not explicit opposite direction.
+    chart = SpotChart(
+        direction="NEUTRAL",
+        momentum5Pct=-0.2,
+        momentum15Pct=-0.3,
+        trendStrength=50,
+        orPosition="BELOW",
+        belowPoc=True,
+    )
     blocked, reason = chart_blocks_side(Side.CALL, chart, trade_score=78)
     assert not blocked
     assert reason == "ok"
+
+
+@patch("app.engines.spot_direction.get_settings")
+def test_high_score_cannot_override_bearish_chart_direction(mock_settings):
+    mock_settings.return_value = _settings()
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.04,
+        momentum15Pct=-0.06,
+        trendStrength=42,
+        emaBias="BEARISH",
+        macdBias="BEARISH",
+    )
+    blocked, reason = chart_blocks_side(Side.CALL, chart, trade_score=91)
+    assert blocked
+    assert reason == "chart_bearish_no_calls"
 
 
 @patch("app.engines.spot_direction.get_settings")

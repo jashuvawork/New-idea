@@ -250,12 +250,16 @@ def chart_blocks_side(
     min_mom = settings.chart_min_momentum_pct
     override = settings.chart_override_min_score
 
+    # Hard direction conflict — never bypass with rank score (momentum surge only).
+    if side_val == "CALL" and chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
+        return True, "chart_bearish_no_calls"
+    if side_val == "PUT" and chart.direction == "BULLISH" and chart.trendStrength >= min_strength:
+        return True, "chart_bullish_no_puts"
+
     if momentum_surge or trade_score >= override:
         return False, "ok"
 
     if side_val == "CALL":
-        if chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
-            return True, "chart_bearish_no_calls"
         if chart.momentum5Pct < -min_mom and chart.momentum15Pct < 0:
             return True, "chart_declining_no_calls"
         if chart.orPosition == "BELOW" and chart.belowPoc and chart.momentum5Pct < 0:
@@ -263,8 +267,6 @@ def chart_blocks_side(
         if chart.rsiBias == "OVERBOUGHT" and chart.macdBias == "BEARISH" and chart.momentum5Pct < 0:
             return True, "chart_rsi_macd_bearish_no_calls"
     else:
-        if chart.direction == "BULLISH" and chart.trendStrength >= min_strength:
-            return True, "chart_bullish_no_puts"
         if chart.momentum5Pct > min_mom and chart.momentum15Pct > 0:
             return True, "chart_rallying_no_puts"
         if chart.orPosition == "ABOVE" and chart.abovePoc and chart.momentum5Pct > 0:
