@@ -240,7 +240,10 @@ def check_quick_sideways_entry(
     if not quick_sideways_enabled():
         return False, "quick_sideways_disabled"
     if not is_sideways_snapshot(snap):
-        return False, "not_sideways"
+        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+
+        if not expiry_pm_itm_quick_active(snap):
+            return False, "not_sideways"
     if not premium_in_band(premium):
         from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
 
@@ -319,8 +322,13 @@ def scan_quick_sideways_setups(
     snap: SymbolSnapshot,
 ) -> list[dict]:
     """Build quick sideways entry setups — ATM + watchlist strikes for slow chop ticks."""
-    if not quick_sideways_enabled() or not is_sideways_snapshot(snap):
+    if not quick_sideways_enabled():
         return []
+    if not is_sideways_snapshot(snap):
+        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+
+        if not expiry_pm_itm_quick_active(snap):
+            return []
 
     chart = snap.spotChart
     if not chart:

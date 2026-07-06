@@ -13,6 +13,15 @@ from app.models.schemas import AutoTraderState, Side, SymbolSnapshot
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def candidate_trade_score(candidate: Any) -> float:
+    """Composite score used consistently across pretrade and execution chart gates."""
+    return max(
+        float(getattr(candidate, "tqs", 0) or 0),
+        float(getattr(candidate, "confidence", 0) or 0),
+        float(getattr(candidate, "score", 0) or 0),
+    )
+
+
 @dataclass
 class TradeRecord:
     symbol: str
@@ -521,7 +530,7 @@ def validate_candidate(
     mn_ok, mn_reason, mn_meta = moneyness_allows(
         candidate.side,
         candidate.strike,
-        candidate.snap,
+        snap,
         mode=str(getattr(candidate, "mode", "scalp")),
         candidate_score=float(getattr(candidate, "score", 0) or 0),
         snapshots=snap_map,
@@ -537,7 +546,6 @@ def validate_candidate(
     if not ex_ok:
         return False, ex_reason, meta
 
-    snap: SymbolSnapshot = candidate.snap
     from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
 
     expiry_floor = expiry_min_rank_score(state, snap_map)
@@ -553,7 +561,7 @@ def validate_candidate(
 
     from app.engines.symbol_cooldown import side_aligned_with_breadth
 
-    trade_score = max(candidate.tqs or 0, candidate.confidence or 0, candidate.score)
+    trade_score = candidate_trade_score(candidate)
 
     if not side_aligned_with_breadth(side_val, snap.breadth.bias):
         counter_floor = settings.counter_breadth_min_score

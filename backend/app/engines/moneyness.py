@@ -157,7 +157,10 @@ def moneyness_allows(
             return False, f"moneyness_otm_too_deep_{depth}", meta
 
     if money == "ITM" and depth > settings.moneyness_max_itm_steps:
-        return False, f"moneyness_itm_too_deep_{depth}", meta
+        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+
+        if not (mode == "quick_sideways" and expiry_pm_itm_quick_active(snap)):
+            return False, f"moneyness_itm_too_deep_{depth}", meta
 
     if settings.trade_moneyness_mode.upper() == "AUTO" and preferred != money:
         # Soft mismatch — rank penalty handles preference; hard-block only deep wrong-way OTM in chop

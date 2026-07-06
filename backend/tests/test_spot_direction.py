@@ -201,6 +201,39 @@ def test_scalp_gate_blocks_call_when_chart_declining(mock_settings):
     assert "chart_" in reason
 
 
+@patch("app.engines.simple_profit.get_settings")
+@patch("app.engines.directional_lock.check_directional_side_lock_simple", return_value=(False, "ok"))
+def test_alignment_override_cannot_bypass_hard_chart_direction(mock_dir, mock_settings):
+    mock_settings.return_value = _settings()
+    trade = SuggestedTrade(
+        id="x",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=23900,
+        lastPremium=80.0,
+        tqs=90,
+        confidence=90,
+        strategyType=StrategyType.SCALP,
+    )
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.04,
+        momentum15Pct=-0.06,
+        trendStrength=42,
+    )
+    ok, reason = check_entry_gate(
+        trade,
+        Breadth(bias="NEUTRAL", score=50, aligned=False),
+        90,
+        2.5,
+        False,
+        alignment_override=True,
+        chart=chart,
+    )
+    assert not ok
+    assert reason == "chart_bearish_no_calls"
+
+
 def test_explosion_blocks_call_on_bearish_chart():
     event = ExplosionEvent(
         symbol="NIFTY",

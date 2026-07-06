@@ -351,6 +351,10 @@ async def _open_from_candidate(
 
     instrument_key = _heatmap_instrument_key(snap, candidate.strike, candidate.side)
 
+    from app.engines.pretrade_validator import candidate_trade_score
+
+    trade_score = candidate_trade_score(candidate)
+
     if settings.execution_chart_gate_enabled:
         if client:
             from app.engines.execution_chart_monitor import monitor_trade_chart_before_execution
@@ -361,7 +365,7 @@ async def _open_from_candidate(
                 candidate.side,
                 candidate.strike,
                 snap,
-                trade_score=candidate.score,
+                trade_score=trade_score,
                 instrument_key=instrument_key,
                 mode=candidate.mode or "",
             )
@@ -375,7 +379,7 @@ async def _open_from_candidate(
                 candidate.side, snap, mode=candidate.mode or "",
             )
             blocked, chart_reason = chart_blocks_side(
-                candidate.side, snap.spotChart, trade_score=candidate.score,
+                candidate.side, snap.spotChart, trade_score=trade_score,
                 breadth_aligned_bypass=breadth_bypass,
             )
             if blocked:

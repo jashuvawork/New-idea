@@ -264,6 +264,10 @@ def whipsaw_pause_active(
     _roll_session()
     if momentum_rally_bypass_whipsaw(snapshots):
         return False, "momentum_rally_bypass"
+    from app.engines.expiry_day_guards import expiry_pm_itm_quick_session_active
+
+    if snapshots and expiry_pm_itm_quick_session_active(snapshots):
+        return False, "expiry_pm_itm_bypass"
     from app.engines.morning_premium_capture import (
         afternoon_capture_active,
         premium_capture_active,
@@ -296,6 +300,11 @@ def check_session_whipsaw_pause(
 
     if momentum_rally_bypass_whipsaw(snapshots):
         return False, "momentum_rally_bypass", {"momentumRallyBypass": True}
+
+    from app.engines.expiry_day_guards import expiry_pm_itm_quick_session_active
+
+    if expiry_pm_itm_quick_session_active(snapshots):
+        return False, "expiry_pm_itm_bypass", {"expiryPmItmBypass": True}
 
     from app.engines.morning_premium_capture import (
         afternoon_capture_active,
