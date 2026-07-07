@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, PerformanceMilestone, StreamMetrics, TradeHistoryResponse, TradeLogResponse } from '../types';
+import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, PerformanceMilestone, StreamMetrics, TradeHistoryResponse, TradeLogResponse, WeeklyDashboard } from '../types';
 import { snapshotSignature } from './snapshotSignature';
 
 // Production: always use same-origin /api (Vercel rewrites → EC2 backend)
@@ -371,6 +371,24 @@ export function usePerformanceMilestone() {
   }, [refresh]);
 
   return milestone;
+}
+
+export function useWeeklyDashboard(days = 7) {
+  const [dashboard, setDashboard] = useState<WeeklyDashboard | null>(null);
+
+  const refresh = useCallback(() => {
+    fetchJson<WeeklyDashboard>(`${API_BASE}/api/auto-trader/weekly-dashboard?days=${days}`).then((json) => {
+      if (json && json.summary) setDashboard(json);
+    });
+  }, [days]);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 30_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  return dashboard;
 }
 
 export async function stopTrading() {
