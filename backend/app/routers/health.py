@@ -183,10 +183,12 @@ async def deployment_readiness():
 
     market_live = False
     upstox_data = False
+    snapshots = {}
     try:
         snapshot = await get_multi_snapshot()
+        snapshots = snapshot.snapshots if snapshot else {}
         for sym in settings.symbols:
-            snap = snapshot.snapshots.get(sym)
+            snap = snapshots.get(sym)
             if snap and snap.dataAvailable:
                 upstox_data = True
             if snap and getattr(snap.marketPhase, "value", snap.marketPhase) == "LIVE_MARKET":
@@ -241,14 +243,31 @@ async def deployment_readiness():
         arm_live_steps.append("Set ENABLE_LIVE_TRADING=true in env and redeploy")
 
     from app.engines.performance_milestone import compute_milestone_stats
+    from app.engines.worst_day_guard import worst_day_blocks_live
+
     milestone = compute_milestone_stats()
     checks["milestonePassed"] = milestone["readyForLiveMilestone"]
     if not milestone["readyForLiveMilestone"]:
         arm_live_steps.append(milestone["message"])
 
+    try:
+        worst_live_block, worst_reason, worst_meta = worst_day_blocks_live(state, snapshots)
+        checks["worstDayClear"] = not worst_live_block
+        if worst_live_block:
+            reasons = (worst_meta.get("worstDay") or {}).get("reasons") or []
+            arm_live_steps.append(
+                f"Worst day active ({', '.join(reasons[:3])}) — wait for chop to clear before live"
+            )
+    except Exception:
+        checks["worstDayClear"] = True
+
     return {
         "readyForPaper": paper_ready,
-        "readyForLive": live_ready and milestone["readyForLiveMilestone"],
+        "readyForLive": (
+            live_ready
+            and milestone["readyForLiveMilestone"]
+            and checks.get("worstDayClear", True)
+        ),
         "executionMode": "LIVE" if settings.enable_live_trading else "PAPER",
         "checks": checks,
         "milestone": milestone,

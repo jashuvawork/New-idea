@@ -469,6 +469,9 @@ def find_best_entry(
         candidates = [c for c in candidates if c.mode != "scalp"]
 
     candidates = filter_candidates_pretrade(candidates, state, snapshots)
+    from app.engines.worst_day_guard import filter_worst_day_candidates
+
+    candidates = filter_worst_day_candidates(candidates, state, snapshots)
     if limits and settings.daily_18pct_strategy_enabled:
         filtered: list[EntryCandidate] = []
         for c in candidates:
@@ -527,6 +530,11 @@ def find_best_entry(
     from app.engines.bad_day_routing import bad_day_min_rank_floor
 
     floor = max(floor, bad_day_min_rank_floor(state, snapshots))
+    from app.engines.worst_day_guard import session_entry_policy
+
+    policy, _ = session_entry_policy(state, snapshots)
+    if policy == "BREAKOUT_ONLY":
+        floor = max(floor, settings.worst_day_breakout_min_rank)
     if floor > 0 and sort_key(best) < floor:
         return None
     return best

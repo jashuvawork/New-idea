@@ -276,6 +276,14 @@ async def _open_from_candidate(
     settings = get_settings()
     symbol = candidate.symbol
     snap = candidate.snap
+
+    from app.engines.worst_day_guard import worst_day_blocks_live
+
+    if snapshots:
+        live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
+        if live_blocked and settings.enable_live_trading:
+            return False, live_reason
+
     profile = snap.optimizedProfile or get_session_targets()
     if candidate.mode == "quick_sideways":
         profile = get_quick_sideways_profile(candidate.premium)
@@ -1002,6 +1010,22 @@ async def process(
                 or f"Whipsaw/churn pause — CE↔PE flip-flops in bearish sideways",
             })
         from app.engines.expiry_day_guards import check_expiry_entry_allowed
+        from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
+
+        policy, policy_meta = session_entry_policy(state, snapshots)
+        if policy == "PAUSED":
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": policy_meta.get("pauseReason", "worst_day_paused"),
+                "message": f"Worst day — trading paused ({', '.join(policy_meta.get('worstDay', {}).get('reasons', []))})",
+            })
+        live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
+        if live_blocked:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": live_reason,
+                "message": "Worst day — live trading blocked until conditions improve",
+            })
 
         expiry_ok, expiry_reason, expiry_meta = check_expiry_entry_allowed(state, snapshots)
         if not expiry_ok:
@@ -1012,7 +1036,10 @@ async def process(
                 and f"Expiry guard — {', '.join(expiry_meta.get('worstDayReasons', []))}"
                 or "Expiry-day entry blocked",
             })
-        if not paused and not cap_hit and not ctrl_cap and not last_n_paused and not whipsaw_paused and expiry_ok:
+        if (
+            not paused and not cap_hit and not ctrl_cap and not last_n_paused
+            and not whipsaw_paused and expiry_ok and policy != "PAUSED" and not live_blocked
+        ):
             best = find_best_entry(snapshots, state, trading_limits)
             if best:
                 opened, reason = await _open_from_candidate(best, state, client, news, snapshots)

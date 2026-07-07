@@ -522,6 +522,19 @@ class Settings(BaseSettings):
     expiry_fading_max_symbol_tqs: float = 42.0
     bad_day_cheap_premium_threshold_inr: float = 55.0
     bad_day_cheap_premium_lot_cap: int = 20
+
+    # Worst-day pause — identify early, pause regular entries, breakout-only
+    worst_day_pause_enabled: bool = True
+    worst_day_pause_score_threshold: float = 45.0
+    worst_day_early_chop_pause: bool = True
+    worst_day_breakout_only_enabled: bool = True
+    worst_day_breakout_min_rank: float = 78.0
+    worst_day_breakout_min_velocity_3s: float = 2.5
+    worst_day_breakout_min_symbol_tqs: float = 45.0
+    worst_day_breakout_tiers_csv: str = "ELITE,EXPLODING"
+    worst_day_breakout_require_chart_align: bool = True
+    worst_day_full_pause_loss_inr: float = -20_000.0
+    worst_day_blocks_live: bool = True
     day_adaptive_chop_rank_cap: float = 70.0
     day_adaptive_good_day_rank_relief: float = 3.0
 

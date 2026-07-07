@@ -547,6 +547,13 @@ def validate_candidate(
     if not bd_ok:
         return False, bd_reason, meta
 
+    from app.engines.worst_day_guard import worst_day_allows_candidate
+
+    wd_ok, wd_reason, wd_meta = worst_day_allows_candidate(candidate, state, snap_map)
+    meta.update(wd_meta)
+    if not wd_ok:
+        return False, wd_reason, meta
+
     ex_ok, ex_reason, ex_meta = check_expiry_candidate(candidate, state, snap_map)
     meta.update(ex_meta)
     if not ex_ok:
