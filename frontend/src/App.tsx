@@ -6,6 +6,7 @@ import {
   useTradeHistory,
   useTradeLog,
   usePerformanceMilestone,
+  useWeeklyDashboard,
   stopTrading,
   resumeTrading,
   resetSession,
@@ -37,6 +38,7 @@ import { PsychologyPanel } from './components/PsychologyPanel';
 import { PremarketPanel } from './components/PremarketPanel';
 import { SwingTrading } from './components/SwingTrading';
 import { PerformanceMilestone } from './components/PerformanceMilestone';
+import { WeeklyDashboardPanel } from './components/WeeklyDashboardPanel';
 import { deriveMarketSession } from './lib/marketSession';
 
 const SYMBOLS = ['NIFTY', 'SENSEX'] as const;
@@ -74,6 +76,7 @@ export default function App() {
   const tradeHistory = useTradeHistory(14);
   const tradeLog = useTradeLog(20);
   const milestone = usePerformanceMilestone();
+  const weeklyDashboard = useWeeklyDashboard(7);
   const [activeSymbol, setActiveSymbol] = useState<string>('NIFTY');
 
   const auto = data?.autoTrader;
@@ -213,8 +216,9 @@ export default function App() {
           waitingReason={data?.waitingReason}
         />
 
-        <div className="max-w-lg">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-5xl">
           <PerformanceMilestone stats={milestone} />
+          <WeeklyDashboardPanel data={weeklyDashboard} />
         </div>
 
         {canShowDashboard && snap && auto && report ? (

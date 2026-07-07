@@ -739,6 +739,74 @@ export interface PerformanceMilestone {
   slippageNote?: string;
 }
 
+export interface WeeklyDashboard {
+  periodDays: number;
+  periodStart: string;
+  periodEnd: string;
+  generatedAt: string;
+  sessionResetAt?: string | null;
+  summary: {
+    tradeCount: number;
+    wins: number;
+    losses: number;
+    scratches: number;
+    profitFactor: number;
+    winRate: number;
+    maxDrawdownPct: number;
+    netPnlInr: number;
+    expectancy: {
+      perTradeInr: number;
+      winPct: number;
+      avgWinInr: number;
+      avgLossInr: number;
+    };
+  };
+  daily: Array<{
+    date: string;
+    trades: number;
+    wins: number;
+    losses: number;
+    netPnlInr: number;
+    profitFactor: number;
+    policyViolations: number;
+  }>;
+  policyViolations: {
+    count: number;
+    trades: Array<{
+      openedAt?: string;
+      symbol?: string;
+      side?: string;
+      strike?: number;
+      lots?: number;
+      entryPremium?: number;
+      pnlInr?: number;
+      mode?: string;
+      violations: string[];
+    }>;
+  };
+  currentSession: {
+    skipped: {
+      total: number;
+      byReason: Record<string, number>;
+      bySymbol: Record<string, number>;
+      sessionBlocks: Array<Record<string, unknown>>;
+      candidateBlocks: Array<Record<string, unknown>>;
+      nearMisses: Array<Record<string, unknown>>;
+    };
+    nearMisses: Array<Record<string, unknown>>;
+    openTrades: number;
+    closedToday: number;
+    guards: Record<string, unknown>;
+  };
+  goals: {
+    safety: { passed: boolean; policyViolations: number; maxDailyLossInr: number; emergencyStopInr: number; maxTradesInDay: number; message: string };
+    process: { passed: boolean; avgTradesPerDay: number; breadthAlignedPct: number; cheapPremiumCompliancePct: number; message: string };
+    outcome: { passed: boolean; expectancyPerTradeInr: number; profitFactor: number; winRate: number; netPnlInr: number; dailyTargetInr: number; message: string };
+    overallReady: boolean;
+  };
+  recommendation: string;
+}
+
 export interface TradeMastermind {
   simpleProfitMode: boolean;
   dualStrategyEnabled: boolean;
