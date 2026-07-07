@@ -540,6 +540,12 @@ def validate_candidate(
         return False, mn_reason, meta
 
     from app.engines.expiry_day_guards import check_expiry_candidate, expiry_min_rank_score
+    from app.engines.bad_day_routing import check_bad_day_candidate
+
+    bd_ok, bd_reason, bd_meta = check_bad_day_candidate(candidate, state, snap_map)
+    meta.update(bd_meta)
+    if not bd_ok:
+        return False, bd_reason, meta
 
     ex_ok, ex_reason, ex_meta = check_expiry_candidate(candidate, state, snap_map)
     meta.update(ex_meta)

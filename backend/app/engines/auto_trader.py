@@ -270,6 +270,7 @@ async def _open_from_candidate(
     state: AutoTraderState,
     client: Optional[UpstoxClient] = None,
     news: Optional[list[dict]] = None,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
 ) -> tuple[bool, str]:
     """Open one trade from best-ranked setup — paper journal + optional live broker order."""
     settings = get_settings()
@@ -313,6 +314,10 @@ async def _open_from_candidate(
         lots = cap_explosion_lots(lots, fill_premium)
     elif candidate.mode == "quick_sideways":
         lots = cap_quick_sideways_lots(lots, fill_premium)
+    from app.engines.bad_day_routing import bad_day_lot_cap
+
+    snap_map = snapshots or {symbol: snap}
+    lots = bad_day_lot_cap(fill_premium, lots, state, snap_map)
     lots = apply_tiered_lot_cap(
         lots, candidate.score, snap.breadth.aligned, symbol,
         velocity_pct=(
@@ -1010,7 +1015,7 @@ async def process(
         if not paused and not cap_hit and not ctrl_cap and not last_n_paused and not whipsaw_paused and expiry_ok:
             best = find_best_entry(snapshots, state, trading_limits)
             if best:
-                opened, reason = await _open_from_candidate(best, state, client, news)
+                opened, reason = await _open_from_candidate(best, state, client, news, snapshots)
                 if not opened:
                     skipped.append({
                         "symbol": best.symbol,
