@@ -438,6 +438,9 @@ def find_best_entry(
     for c in candidates:
         c.score += symbol_rank_adjustment(c.symbol, chop)
         c.score += index_adj.get(c.symbol.upper(), 0.0)
+        from app.engines.bad_day_routing import cross_index_rank_adjustment
+
+        c.score += cross_index_rank_adjustment(c, state, snapshots)
         if settings.edge_engine_enabled:
             edge = compute_entry_edge(c, c.snap, state)
             c.score += edge_rank_bonus(edge)
@@ -521,6 +524,9 @@ def find_best_entry(
     elif settings.best_trades_only_enabled:
         floor = max(floor, settings.best_trades_min_rank_score)
     floor = apply_rank_floor_adaptive(floor, adaptive, candidate_mode=best.mode)
+    from app.engines.bad_day_routing import bad_day_min_rank_floor
+
+    floor = max(floor, bad_day_min_rank_floor(state, snapshots))
     if floor > 0 and sort_key(best) < floor:
         return None
     return best

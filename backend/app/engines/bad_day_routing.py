@@ -1,0 +1,271 @@
+"""Bad-day routing — fading expiry index, cross-index preference, high-confidence only."""
+
+from __future__ import annotations
+
+from typing import Any, Optional
+
+from app.config import get_settings
+from app.engines.capital_allocator import compute_session_pnl
+from app.engines.expiry_day_guards import is_symbol_expiry_day
+from app.engines.pretrade_validator import collect_session_trades
+from app.engines.symbol_cooldown import side_aligned_with_breadth
+from app.engines.whipsaw_guards import is_bearish_sideways_session
+from app.models.schemas import AutoTraderState, Side, SymbolSnapshot
+
+
+def symbol_session_pnl(symbol: str, state: AutoTraderState) -> float:
+    sym = symbol.upper()
+    return sum(
+        float(t.pnl_inr or 0)
+        for t in collect_session_trades(state)
+        if str(t.symbol).upper() == sym
+    )
+
+
+def expiry_index_fading(
+    snap: SymbolSnapshot,
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, list[str]]:
+    """
+    Expiry symbol bleeding / chop — route away unless very high confidence.
+    """
+    settings = get_settings()
+    if not settings.bad_day_routing_enabled or not is_symbol_expiry_day(snap):
+        return False, []
+
+    reasons: list[str] = []
+    sym_pnl = symbol_session_pnl(snap.symbol, state)
+    if sym_pnl <= settings.expiry_fading_symbol_loss_inr:
+        reasons.append(f"symbol_loss_{sym_pnl:.0f}")
+
+    if is_bearish_sideways_session(snapshots):
+        reasons.append("bearish_sideways")
+
+    if float(snap.tradeQualityScore or 0) < settings.expiry_fading_max_symbol_tqs:
+        reasons.append(f"low_tqs_{snap.tradeQualityScore:.0f}")
+
+    chart = snap.spotChart
+    if chart and abs(float(chart.momentum5Pct or 0)) < 0.02 and sym_pnl < 0:
+        reasons.append("stale_momentum_while_losing")
+
+    session_pnl = compute_session_pnl(state)
+    if session_pnl <= settings.expiry_fading_session_loss_inr:
+        reasons.append(f"session_loss_{session_pnl:.0f}")
+
+    return bool(reasons), reasons
+
+
+def fading_expiry_symbols(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for sym, snap in snapshots.items():
+        if not snap.dataAvailable:
+            continue
+        fading, reasons = expiry_index_fading(snap, state, snapshots)
+        if fading:
+            out[sym.upper()] = reasons
+    return out
+
+
+def alternate_index_for(fading_symbol: str, snapshots: dict[str, SymbolSnapshot]) -> Optional[str]:
+    """Non-expiry / healthier index when expiry symbol is fading."""
+    fading = fading_symbol.upper()
+    best: Optional[str] = None
+    best_tqs = -1.0
+    for sym, snap in snapshots.items():
+        if not snap.dataAvailable or sym.upper() == fading:
+            continue
+        if is_symbol_expiry_day(snap):
+            continue
+        tqs = float(snap.tradeQualityScore or 0)
+        if tqs > best_tqs:
+            best_tqs = tqs
+            best = sym.upper()
+    return best
+
+
+def bad_day_session_active(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, list[str]]:
+    settings = get_settings()
+    if not settings.bad_day_routing_enabled:
+        return False, []
+
+    reasons: list[str] = []
+    if is_bearish_sideways_session(snapshots):
+        reasons.append("bearish_sideways")
+
+    if fading_expiry_symbols(state, snapshots):
+        reasons.append("expiry_index_fading")
+
+    from app.engines.expiry_day_guards import is_expiry_session, predict_worst_expiry_day
+
+    if is_expiry_session(snapshots):
+        worst, score, worst_reasons = predict_worst_expiry_day(state, snapshots)
+        if worst:
+            reasons.append(f"expiry_worst_{score:.0f}")
+            reasons.extend(worst_reasons[:2])
+
+    session_pnl = compute_session_pnl(state)
+    if session_pnl <= settings.bad_day_session_loss_inr:
+        reasons.append(f"session_loss_{session_pnl:.0f}")
+
+    trades = collect_session_trades(state)
+    if len(trades) >= 2:
+        recent = trades[-3:]
+        losses = sum(1 for t in recent if t.pnl_inr < 0)
+        if losses >= settings.bad_day_recent_loss_count:
+            reasons.append(f"recent_losses_{losses}")
+
+    return bool(reasons), reasons
+
+
+def bad_day_min_rank_floor(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> float:
+    settings = get_settings()
+    active, _ = bad_day_session_active(state, snapshots)
+    if not active:
+        return 0.0
+    floor = settings.bad_day_high_confidence_min_rank
+    session_pnl = compute_session_pnl(state)
+    if session_pnl <= settings.bad_day_severe_session_loss_inr:
+        floor = max(floor, settings.bad_day_severe_min_rank)
+    return floor
+
+
+def _side_val(side: Side | str) -> str:
+    return side.value if isinstance(side, Side) else str(side).upper()
+
+
+def _breadth_aligned(candidate: Any, snap: SymbolSnapshot) -> bool:
+    side_val = _side_val(candidate.side)
+    return side_aligned_with_breadth(side_val, snap.breadth.bias)
+
+
+def check_bad_day_candidate(
+    candidate: Any,
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, str, dict[str, Any]]:
+    """High-confidence only on bad days; block fading expiry index unless elite."""
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    if not settings.bad_day_routing_enabled:
+        return True, "ok", meta
+
+    active, session_reasons = bad_day_session_active(state, snapshots)
+    meta["badDaySession"] = active
+    meta["badDayReasons"] = session_reasons
+    if not active:
+        return True, "ok", meta
+
+    sym = candidate.symbol.upper()
+    snap = snapshots.get(sym) or candidate.snap
+    score = float(getattr(candidate, "score", 0) or 0)
+    mode = str(getattr(candidate, "mode", "") or "")
+    tier = str(getattr(candidate, "tier", "") or "").upper()
+    aligned = _breadth_aligned(candidate, snap)
+    meta["breadthAligned"] = aligned
+
+    floor = bad_day_min_rank_floor(state, snapshots)
+    meta["badDayMinRank"] = floor
+
+    fading, fade_reasons = expiry_index_fading(snap, state, snapshots)
+    meta["expiryIndexFading"] = fading
+    meta["fadingReasons"] = fade_reasons
+    if fading:
+        alt = alternate_index_for(sym, snapshots)
+        meta["alternateIndex"] = alt
+        elite = tier == "ELITE"
+        if mode == "scalp":
+            return False, "bad_day_no_regular_scalps_on_fading_expiry", meta
+        if mode == "explosion" and not elite:
+            return False, "bad_day_fading_expiry_explosion_elite_only", meta
+        if not aligned:
+            return False, "bad_day_fading_expiry_requires_alignment", meta
+        if score < settings.bad_day_fading_expiry_min_rank:
+            return False, f"bad_day_fading_expiry_rank_below_{settings.bad_day_fading_expiry_min_rank:.0f}", meta
+        return True, "ok", meta
+
+    if mode == "scalp" and score < floor:
+        return False, f"bad_day_scalp_rank_below_{floor:.0f}", meta
+
+    if mode == "explosion":
+        if tier != "ELITE" and score < floor:
+            return False, f"bad_day_explosion_rank_below_{floor:.0f}", meta
+        if not aligned and score < settings.high_confidence_min_score:
+            return False, "bad_day_explosion_counter_breadth", meta
+        if float(snap.tradeQualityScore or 0) < settings.bad_day_min_symbol_tqs:
+            return False, f"bad_day_symbol_tqs_below_{settings.bad_day_min_symbol_tqs:.0f}", meta
+        return True, "ok", meta
+
+    if score < floor:
+        return False, f"bad_day_rank_below_{floor:.0f}", meta
+
+    return True, "ok", meta
+
+
+def cross_index_rank_adjustment(
+    candidate: Any,
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> float:
+    """Prefer healthier non-expiry index when expiry symbol is fading."""
+    settings = get_settings()
+    if not settings.bad_day_routing_enabled:
+        return 0.0
+
+    fading_map = fading_expiry_symbols(state, snapshots)
+    if not fading_map:
+        return 0.0
+
+    sym = candidate.symbol.upper()
+    snap = snapshots.get(sym) or candidate.snap
+    bonus = 0.0
+
+    for fading_sym, _ in fading_map.items():
+        alt = alternate_index_for(fading_sym, snapshots)
+        if sym == fading_sym:
+            bonus -= settings.bad_day_fading_symbol_penalty
+            continue
+        if alt and sym == alt:
+            fading_snap = snapshots.get(fading_sym)
+            if fading_snap and float(snap.tradeQualityScore or 0) >= float(fading_snap.tradeQualityScore or 0):
+                bonus += settings.bad_day_alternate_index_bonus
+            if _breadth_aligned(candidate, snap):
+                bonus += settings.bad_day_alternate_aligned_bonus
+
+    return bonus
+
+
+def bad_day_lot_cap(premium: float, lots: int, state: AutoTraderState, snapshots: dict) -> int:
+    settings = get_settings()
+    active, _ = bad_day_session_active(state, snapshots)
+    if not active or premium > settings.bad_day_cheap_premium_threshold_inr:
+        return lots
+    return min(lots, settings.bad_day_cheap_premium_lot_cap)
+
+
+def bad_day_routing_summary(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> dict[str, Any]:
+    settings = get_settings()
+    active, reasons = bad_day_session_active(state, snapshots)
+    fading = fading_expiry_symbols(state, snapshots)
+    alts = {sym: alternate_index_for(sym, snapshots) for sym in fading}
+    return {
+        "enabled": settings.bad_day_routing_enabled,
+        "badDaySession": active,
+        "badDayReasons": reasons,
+        "minRankFloor": bad_day_min_rank_floor(state, snapshots),
+        "fadingExpirySymbols": fading,
+        "alternateIndex": alts,
+        "sessionPnlInr": round(compute_session_pnl(state), 2),
+    }

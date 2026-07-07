@@ -330,6 +330,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.moneyness import resolve_preferred_moneyness
     from app.engines.expiry_day_guards import expiry_guard_summary, is_expiry_session, predict_worst_expiry_day
     from app.engines.psychology_hold import psychology_hold_summary
+    from app.engines.bad_day_routing import bad_day_routing_summary
 
     session = get_session_targets()
     settings = get_settings()
@@ -389,4 +390,5 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         },
         "expiryGuards": expiry_guard_summary(state, snapshots),
         "psychologyHold": psychology_hold_summary(),
+        "badDayRouting": bad_day_routing_summary(state, snapshots),
     }

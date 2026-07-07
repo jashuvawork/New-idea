@@ -504,6 +504,24 @@ class Settings(BaseSettings):
     # Day-adaptive engine — trade well on worst, chop, normal, and good days
     day_adaptive_enabled: bool = True
     day_adaptive_worst_rank_cap: float = 68.0
+
+    # Bad-day routing — fading expiry index, cross-index preference, high-confidence only
+    bad_day_routing_enabled: bool = True
+    bad_day_high_confidence_min_rank: float = 72.0
+    bad_day_severe_min_rank: float = 78.0
+    bad_day_severe_session_loss_inr: float = -25_000.0
+    bad_day_session_loss_inr: float = -8_000.0
+    bad_day_recent_loss_count: int = 2
+    bad_day_min_symbol_tqs: float = 42.0
+    bad_day_fading_expiry_min_rank: float = 75.0
+    bad_day_fading_symbol_penalty: float = 18.0
+    bad_day_alternate_index_bonus: float = 14.0
+    bad_day_alternate_aligned_bonus: float = 8.0
+    expiry_fading_symbol_loss_inr: float = -5_000.0
+    expiry_fading_session_loss_inr: float = -10_000.0
+    expiry_fading_max_symbol_tqs: float = 42.0
+    bad_day_cheap_premium_threshold_inr: float = 55.0
+    bad_day_cheap_premium_lot_cap: int = 20
     day_adaptive_chop_rank_cap: float = 70.0
     day_adaptive_good_day_rank_relief: float = 3.0
 
