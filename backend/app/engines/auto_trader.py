@@ -285,7 +285,7 @@ async def _open_from_candidate(
             return False, live_reason
 
     profile = snap.optimizedProfile or get_session_targets()
-    if candidate.mode == "quick_sideways":
+    if candidate.mode in ("quick_sideways", "slow_bounce"):
         profile = get_quick_sideways_profile(candidate.premium)
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
 
@@ -320,7 +320,7 @@ async def _open_from_candidate(
         from app.engines.explosion_profit import cap_explosion_lots
 
         lots = cap_explosion_lots(lots, fill_premium)
-    elif candidate.mode == "quick_sideways":
+    elif candidate.mode in ("quick_sideways", "slow_bounce"):
         lots = cap_quick_sideways_lots(lots, fill_premium)
     from app.engines.bad_day_routing import bad_day_lot_cap
 
@@ -480,10 +480,12 @@ async def _open_from_candidate(
             "maxHoldDays": candidate.alert.get("maxHoldDays"),
             "reason": candidate.swing_setup.reason if candidate.swing_setup else "",
         })
-    elif candidate.mode == "quick_sideways":
+    elif candidate.mode in ("quick_sideways", "slow_bounce"):
         regime = snap.regime
         ctx_extra["inChop"] = snapshot_in_chop(snap)
         ctx_extra["regime"] = regime.value if hasattr(regime, "value") else str(regime)
+        if candidate.mode == "slow_bounce":
+            ctx_extra.update(candidate.pretrade_meta or {})
 
     if not ctx_extra.get("instrumentKey"):
         if instrument_key:
@@ -752,7 +754,9 @@ async def _process_open_trades(
                 exit_reason, pnl = evaluate_explosion_exit(
                     trade, eval_premium, tier, lot_mult, params=exit_params,
                 )
-        elif not exit_reason and (trade.entryContext or {}).get("selectionMode") == "quick_sideways":
+        elif not exit_reason and (trade.entryContext or {}).get("selectionMode") in (
+            "quick_sideways", "slow_bounce",
+        ):
             exit_reason, pnl = evaluate_quick_sideways_exit(trade, eval_premium, lot_mult)
         elif not exit_reason and use_adaptive:
             exit_reason, pnl = evaluate_adaptive_scalp_exit(

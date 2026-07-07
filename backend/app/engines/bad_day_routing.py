@@ -70,6 +70,42 @@ def fading_expiry_symbols(
     return out
 
 
+def pm_itm_alternate_symbols(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> set[str]:
+    """Non-expiry alternate indices eligible for PM ITM rules when expiry index fades."""
+    settings = get_settings()
+    if not settings.expiry_pm_itm_alternate_index_enabled:
+        return set()
+    from app.engines.expiry_day_guards import in_expiry_pm_itm_window, is_expiry_session
+
+    if not in_expiry_pm_itm_window() or not is_expiry_session(snapshots):
+        return set()
+    active, _ = bad_day_session_active(state, snapshots)
+    if not active:
+        return set()
+    fading = fading_expiry_symbols(state, snapshots)
+    if not fading:
+        return set()
+    out: set[str] = set()
+    for fading_sym in fading:
+        alt = alternate_index_for(fading_sym, snapshots)
+        if alt:
+            out.add(alt)
+    return out
+
+
+def pm_itm_alternate_symbol_active(
+    snap: SymbolSnapshot,
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    if not snap.dataAvailable:
+        return False
+    return snap.symbol.upper() in pm_itm_alternate_symbols(state, snapshots)
+
+
 def alternate_index_for(fading_symbol: str, snapshots: dict[str, SymbolSnapshot]) -> Optional[str]:
     """Non-expiry / healthier index when expiry symbol is fading."""
     fading = fading_symbol.upper()
@@ -185,6 +221,8 @@ def check_bad_day_candidate(
         elite = tier == "ELITE"
         if mode == "scalp":
             return False, "bad_day_no_regular_scalps_on_fading_expiry", meta
+        if mode == "slow_bounce":
+            return False, "bad_day_slow_bounce_on_fading_expiry", meta
         if mode == "explosion" and not elite:
             return False, "bad_day_fading_expiry_explosion_elite_only", meta
         if not aligned:
@@ -204,6 +242,15 @@ def check_bad_day_candidate(
         if float(snap.tradeQualityScore or 0) < settings.bad_day_min_symbol_tqs:
             return False, f"bad_day_symbol_tqs_below_{settings.bad_day_min_symbol_tqs:.0f}", meta
         return True, "ok", meta
+
+    if mode == "slow_bounce":
+        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+
+        if expiry_pm_itm_quick_active(snap, state, snapshots):
+            sb_floor = settings.quick_sideways_slow_bounce_min_rank_score
+            if score >= sb_floor and _breadth_aligned(candidate, snap):
+                return True, "ok", meta
+        return False, "bad_day_slow_bounce_requires_pm_itm_alternate", meta
 
     if score < floor:
         return False, f"bad_day_rank_below_{floor:.0f}", meta
@@ -260,6 +307,7 @@ def bad_day_routing_summary(
     active, reasons = bad_day_session_active(state, snapshots)
     fading = fading_expiry_symbols(state, snapshots)
     alts = {sym: alternate_index_for(sym, snapshots) for sym in fading}
+    pm_alts = sorted(pm_itm_alternate_symbols(state, snapshots))
     return {
         "enabled": settings.bad_day_routing_enabled,
         "badDaySession": active,
@@ -267,5 +315,6 @@ def bad_day_routing_summary(
         "minRankFloor": bad_day_min_rank_floor(state, snapshots),
         "fadingExpirySymbols": fading,
         "alternateIndex": alts,
+        "pmItmAlternateSymbols": pm_alts,
         "sessionPnlInr": round(compute_session_pnl(state), 2),
     }

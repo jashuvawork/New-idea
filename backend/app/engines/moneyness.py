@@ -124,6 +124,7 @@ def moneyness_allows(
     mode: str = "scalp",
     candidate_score: float = 0.0,
     snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+    state: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     settings = get_settings()
     if not settings.moneyness_selection_enabled:
@@ -159,7 +160,8 @@ def moneyness_allows(
     if money == "ITM" and depth > settings.moneyness_max_itm_steps:
         from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
 
-        if not (mode == "quick_sideways" and expiry_pm_itm_quick_active(snap)):
+        pm_modes = ("quick_sideways", "slow_bounce")
+        if not (mode in pm_modes and expiry_pm_itm_quick_active(snap, state, snapshots)):
             return False, f"moneyness_itm_too_deep_{depth}", meta
 
     if settings.trade_moneyness_mode.upper() == "AUTO" and preferred != money:

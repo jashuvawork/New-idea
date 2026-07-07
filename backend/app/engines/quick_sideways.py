@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
@@ -228,6 +228,195 @@ def _collect_strike_candidates(
     return sorted(out.items(), key=lambda x: abs(x[0] - spot))
 
 
+def _pm_itm_active(
+    snap: SymbolSnapshot,
+    state: Any = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
+) -> bool:
+    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+
+    return expiry_pm_itm_quick_active(snap, state, snapshots)
+
+
+def detect_slow_bounce_signal(
+    snap: SymbolSnapshot,
+    side: Side,
+    strike: float,
+    premium: float,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Expensive ITM bounce — RSI recovery + MACD turn without velocity burst."""
+    settings = get_settings()
+    if not settings.quick_sideways_slow_bounce_enabled:
+        return False, "slow_bounce_disabled", {}
+
+    chart = snap.spotChart
+    if not chart:
+        return False, "no_chart", {}
+
+    from app.engines.moneyness import atm_strike, classify_moneyness
+
+    spot = snap.spot or snap.atmStrike or 0.0
+    if spot <= 0:
+        return False, "no_spot", {}
+    atm = float(snap.atmStrike or 0) or atm_strike(spot, snap.symbol)
+    if classify_moneyness(side, strike, spot, symbol=snap.symbol, atm=atm) != "ITM":
+        return False, "not_itm", {}
+
+    if premium < settings.quick_sideways_slow_bounce_premium_min_inr:
+        return False, "premium_below_slow_bounce_min", {}
+    if premium > settings.expiry_pm_itm_premium_max_inr:
+        return False, "premium_above_slow_bounce_max", {}
+
+    rsi = float(chart.rsi or 50.0)
+    rsi_ok = (
+        settings.quick_sideways_slow_bounce_rsi_min <= rsi <= settings.quick_sideways_slow_bounce_rsi_max
+        and chart.rsiBias in ("OVERSOLD", "NEUTRAL")
+    )
+    hist = float(chart.macdHistogram or 0.0)
+    macd_ok = (
+        hist >= settings.quick_sideways_slow_bounce_macd_hist_min
+        or float(chart.macd or 0.0) > float(chart.macdSignal or 0.0)
+    )
+
+    side_val = side.value
+    if side_val == "PUT":
+        context_ok = (
+            chart.emaBias in ("BEARISH", "NEUTRAL")
+            or chart.macdBias == "BEARISH"
+            or (snap.breadth.bias or "NEUTRAL").upper() in ("BEARISH", "NEUTRAL")
+        )
+    else:
+        context_ok = (
+            chart.emaBias in ("BULLISH", "NEUTRAL")
+            or chart.macdBias == "BULLISH"
+            or (snap.breadth.bias or "NEUTRAL").upper() in ("BULLISH", "NEUTRAL")
+        )
+
+    if rsi_ok and macd_ok and context_ok:
+        return True, "slow_bounce", {
+            "rsi": round(rsi, 2),
+            "macdHistogram": round(hist, 2),
+            "emaBias": chart.emaBias,
+        }
+    return False, "no_slow_bounce_signal", {}
+
+
+def check_slow_bounce_entry(
+    snap: SymbolSnapshot,
+    side: Side,
+    strike: float,
+    premium: float,
+    *,
+    velocity_pct: float = 0.0,
+    state: Any = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
+) -> tuple[bool, str]:
+    settings = get_settings()
+    if not settings.quick_sideways_slow_bounce_enabled:
+        return False, "slow_bounce_disabled"
+    if not _pm_itm_active(snap, state, snapshots):
+        return False, "slow_bounce_requires_pm_itm"
+
+    ok, reason, _ = detect_slow_bounce_signal(snap, side, strike, premium)
+    if not ok:
+        return False, reason
+
+    min_tqs = settings.quick_sideways_slow_bounce_min_tqs
+    if float(snap.tradeQualityScore or 0) < min_tqs:
+        return False, f"slow_bounce_tqs_below_{min_tqs:.0f}"
+
+    if not premium_in_band(premium):
+        if premium > settings.expiry_pm_itm_premium_max_inr:
+            return False, premium_reject_reason(premium)
+
+    chart = snap.spotChart
+    mom5 = abs(chart.momentum5Pct or 0) if chart else 0
+    vel = max(velocity_pct, _micro_velocity(snap, side, strike), mom5)
+    floor = settings.quick_sideways_slow_bounce_min_velocity_pct
+    if vel < floor:
+        return False, f"slow_bounce_velocity_below_{floor}"
+    if vel > settings.enhanced_velocity_threshold * 1.8:
+        return False, "velocity_too_hot_for_slow_bounce"
+    return True, "passed"
+
+
+def score_slow_bounce(
+    snap: SymbolSnapshot,
+    side: Side,
+    strike: float,
+    premium: float,
+    velocity_pct: float,
+    signal_meta: dict[str, Any],
+) -> float:
+    chart = snap.spotChart
+    mom5 = abs(chart.momentum5Pct or 0) if chart else 0
+    vel = max(velocity_pct, _micro_velocity(snap, side, strike), mom5)
+    score = 52.0
+    score += min(8, vel * 6)
+    score += float(snap.tradeQualityScore or 0) * 0.3
+    if snap.symbol.upper() == "SENSEX":
+        score += 6
+    rsi = float(signal_meta.get("rsi") or 0)
+    if 45 <= rsi <= 52:
+        score += 8
+    hist = float(signal_meta.get("macdHistogram") or 0)
+    if hist > 0:
+        score += 5
+    from app.engines.moneyness import classify_moneyness
+
+    spot = snap.spot or snap.atmStrike or strike
+    atm = float(snap.atmStrike or spot)
+    if classify_moneyness(side, strike, spot, symbol=snap.symbol, atm=atm) == "ITM":
+        score += 10
+    return round(score, 2)
+
+
+def scan_slow_bounce_setups(
+    symbol: str,
+    snap: SymbolSnapshot,
+    state: Any = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
+) -> list[dict]:
+    """PM ITM / alternate slow ITM bounces — expensive strikes, RSI/MACD recovery."""
+    settings = get_settings()
+    if not settings.quick_sideways_slow_bounce_enabled:
+        return []
+    if not _pm_itm_active(snap, state, snapshots):
+        return []
+
+    chart = snap.spotChart
+    if not chart:
+        return []
+
+    setups: list[dict] = []
+    for side in (Side.PUT, Side.CALL):
+        for strike, premium in _collect_itm_strike_candidates(snap, side):
+            sig_ok, _, sig_meta = detect_slow_bounce_signal(snap, side, strike, premium)
+            if not sig_ok:
+                continue
+            vel = _micro_velocity(snap, side, strike)
+            ok, reason = check_slow_bounce_entry(
+                snap, side, strike, premium,
+                velocity_pct=vel, state=state, snapshots=snapshots,
+            )
+            if not ok:
+                continue
+            setups.append({
+                "symbol": symbol,
+                "side": side,
+                "strike": strike,
+                "premium": premium,
+                "velocityPct": vel,
+                "score": score_slow_bounce(snap, side, strike, premium, vel, sig_meta),
+                "reason": reason,
+                "mode": "slow_bounce",
+                "slowBounceMeta": sig_meta,
+            })
+
+    setups.sort(key=lambda s: s["score"], reverse=True)
+    return setups[:2]
+
+
 def check_quick_sideways_entry(
     snap: SymbolSnapshot,
     side: Side,
@@ -235,18 +424,17 @@ def check_quick_sideways_entry(
     premium: float,
     *,
     velocity_pct: float = 0.0,
+    state: Any = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
 ) -> tuple[bool, str]:
     settings = get_settings()
     if not quick_sideways_enabled():
         return False, "quick_sideways_disabled"
     if not is_sideways_snapshot(snap):
-        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
-
-        if not expiry_pm_itm_quick_active(snap):
+        if not _pm_itm_active(snap, state, snapshots):
             return False, "not_sideways"
-    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
 
-    pm_itm = expiry_pm_itm_quick_active(snap)
+    pm_itm = _pm_itm_active(snap, state, snapshots)
     raw_max = getattr(settings, "quick_sideways_high_premium_threshold_inr", 90.0)
     max_quick_prem = float(raw_max) if isinstance(raw_max, (int, float)) else 90.0
 
@@ -266,9 +454,7 @@ def check_quick_sideways_entry(
     mom5 = abs(chart.momentum5Pct or 0) if chart else 0
     vel = max(velocity_pct, _micro_velocity(snap, side, strike), mom5)
     floor = _min_velocity_pct(snap)
-    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
-
-    if expiry_pm_itm_quick_active(snap):
+    if pm_itm:
         floor = min(floor, settings.expiry_pm_itm_min_velocity_pct)
     if vel < floor:
         return False, f"velocity_below_{floor}"
@@ -286,6 +472,9 @@ def score_quick_sideways(
     strike: float,
     premium: float,
     velocity_pct: float,
+    *,
+    state: Any = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
 ) -> float:
     chart = snap.spotChart
     mom5 = abs(chart.momentum5Pct or 0) if chart else 0
@@ -309,14 +498,14 @@ def score_quick_sideways(
     if abs(strike - spot) <= 100:
         score += 3
     settings = get_settings()
+    pm_itm = _pm_itm_active(snap, state, snapshots)
     if settings.quick_sideways_preferred_premium_min <= premium <= settings.quick_sideways_preferred_premium_max:
         score += 8
     elif premium > settings.quick_sideways_high_premium_penalty_start:
         score -= min(12.0, (premium - settings.quick_sideways_high_premium_penalty_start) * 0.15)
-    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
     from app.engines.moneyness import classify_moneyness
 
-    if expiry_pm_itm_quick_active(snap):
+    if pm_itm:
         atm = float(snap.atmStrike or spot)
         if classify_moneyness(side, strike, spot, symbol=snap.symbol, atm=atm) == "ITM":
             score += 10
@@ -326,14 +515,14 @@ def score_quick_sideways(
 def scan_quick_sideways_setups(
     symbol: str,
     snap: SymbolSnapshot,
+    state: Any = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
 ) -> list[dict]:
     """Build quick sideways entry setups — ATM + watchlist strikes for slow chop ticks."""
     if not quick_sideways_enabled():
         return []
     if not is_sideways_snapshot(snap):
-        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
-
-        if not expiry_pm_itm_quick_active(snap):
+        if not _pm_itm_active(snap, state, snapshots):
             return []
 
     chart = snap.spotChart
@@ -345,10 +534,10 @@ def scan_quick_sideways_setups(
         return []
 
     setups: list[dict] = []
-    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+    pm_itm = _pm_itm_active(snap, state, snapshots)
 
     strike_rows = _collect_strike_candidates(snap, side)
-    if expiry_pm_itm_quick_active(snap):
+    if pm_itm:
         seen = {s for s, _ in strike_rows}
         for strike, premium in _collect_itm_strike_candidates(snap, side):
             if strike not in seen:
@@ -358,6 +547,7 @@ def scan_quick_sideways_setups(
         vel = _micro_velocity(snap, side, strike)
         ok, reason = check_quick_sideways_entry(
             snap, side, strike, premium, velocity_pct=vel,
+            state=state, snapshots=snapshots,
         )
         if not ok:
             continue
@@ -367,8 +557,11 @@ def scan_quick_sideways_setups(
             "strike": strike,
             "premium": premium,
             "velocityPct": vel,
-            "score": score_quick_sideways(snap, side, strike, premium, vel),
+            "score": score_quick_sideways(
+                snap, side, strike, premium, vel, state=state, snapshots=snapshots,
+            ),
             "reason": reason,
+            "mode": "quick_sideways",
         })
 
     setups.sort(key=lambda s: s["score"], reverse=True)

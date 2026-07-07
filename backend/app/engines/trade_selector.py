@@ -48,6 +48,7 @@ from app.engines.quick_sideways import (
     is_sideways_session,
     quick_sideways_enabled,
     scan_quick_sideways_setups,
+    scan_slow_bounce_setups,
 )
 from app.engines.swing_engine import SwingSetup
 from app.models.schemas import (
@@ -304,18 +305,20 @@ def _quick_sideways_candidates(
     snap: SymbolSnapshot,
     state: AutoTraderState,
     settings,
+    snapshots: dict[str, SymbolSnapshot],
 ) -> list[EntryCandidate]:
     if not quick_sideways_enabled():
         return []
     out: list[EntryCandidate] = []
-    for setup in scan_quick_sideways_setups(symbol, snap):
+    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+
+    for setup in scan_quick_sideways_setups(symbol, snap, state, snapshots):
         side = setup["side"]
         strike = float(setup["strike"])
         premium = float(setup["premium"])
         blocked, reason = _reentry_blocked(symbol, side, strike, snap)
         if blocked:
             continue
-        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -331,7 +334,34 @@ def _quick_sideways_candidates(
             pretrade_meta={
                 "quickSideways": True,
                 "velocityPct": setup.get("velocityPct"),
-                "expiryPmItmQuick": expiry_pm_itm_quick_active(snap),
+                "expiryPmItmQuick": expiry_pm_itm_quick_active(snap, state, snapshots),
+            },
+        ))
+
+    for setup in scan_slow_bounce_setups(symbol, snap, state, snapshots):
+        side = setup["side"]
+        strike = float(setup["strike"])
+        premium = float(setup["premium"])
+        blocked, reason = _reentry_blocked(symbol, side, strike, snap)
+        if blocked:
+            continue
+
+        out.append(EntryCandidate(
+            symbol=symbol,
+            snap=snap,
+            mode="slow_bounce",
+            score=float(setup["score"]),
+            side=side,
+            strike=strike,
+            premium=premium,
+            strategy_type=StrategyType.SCALP,
+            confidence=float(setup["score"]),
+            tqs=snap.tradeQualityScore,
+            pretrade_meta={
+                "slowBounce": True,
+                "velocityPct": setup.get("velocityPct"),
+                "slowBounceMeta": setup.get("slowBounceMeta"),
+                "expiryPmItmQuick": expiry_pm_itm_quick_active(snap, state, snapshots),
             },
         ))
     return out
@@ -424,7 +454,7 @@ def find_best_entry(
         if settings.paper_simple_profit_mode and scalp_open < settings.aggressive_max_open_scalps:
             candidates.extend(_scalp_candidates(symbol, snap, state, settings))
         if quick_sideways_enabled() and scalp_open < settings.aggressive_max_open_scalps:
-            candidates.extend(_quick_sideways_candidates(symbol, snap, state, settings))
+            candidates.extend(_quick_sideways_candidates(symbol, snap, state, settings, snapshots))
         if swing_open < settings.swing_max_open:
             candidates.extend(_swing_candidates(symbol, snap, state, settings))
 
@@ -503,7 +533,11 @@ def find_best_entry(
             candidates = explosion_only
 
     def sort_key(c: EntryCandidate) -> float:
-        bonus = 20 if c.mode == "explosion" else (8 if c.mode == "quick_sideways" else (5 if c.mode == "swing" else 0))
+        bonus = 20 if c.mode == "explosion" else (
+            10 if c.mode == "slow_bounce" else (
+                8 if c.mode == "quick_sideways" else (5 if c.mode == "swing" else 0)
+            )
+        )
         bonus += mode_rank_bonus(c.mode, adaptive)
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty
@@ -524,6 +558,8 @@ def find_best_entry(
         floor = min(floor, premium_capture_rank_floor())
     if best.mode == "quick_sideways":
         floor = min(floor, settings.quick_sideways_min_rank_score)
+    elif best.mode == "slow_bounce":
+        floor = min(floor, settings.quick_sideways_slow_bounce_min_rank_score)
     elif settings.best_trades_only_enabled:
         floor = max(floor, settings.best_trades_min_rank_score)
     floor = apply_rank_floor_adaptive(floor, adaptive, candidate_mode=best.mode)

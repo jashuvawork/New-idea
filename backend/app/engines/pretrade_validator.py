@@ -483,7 +483,7 @@ def validate_candidate(
     ok, reason = check_min_entry_interval(
         state,
         chop=chop,
-        quick_sideways=getattr(candidate, "mode", "") == "quick_sideways",
+        quick_sideways=getattr(candidate, "mode", "") in ("quick_sideways", "slow_bounce"),
     )
     if not ok:
         return False, reason, meta
@@ -534,6 +534,7 @@ def validate_candidate(
         mode=str(getattr(candidate, "mode", "scalp")),
         candidate_score=float(getattr(candidate, "score", 0) or 0),
         snapshots=snap_map,
+        state=state,
     )
     meta.update(mn_meta)
     if not mn_ok:
@@ -566,11 +567,18 @@ def validate_candidate(
 
     expiry_floor = expiry_min_rank_score(state, snap_map)
     min_rank = max(settings.pretrade_min_rank_score, expiry_floor)
-    if getattr(candidate, "mode", "") == "quick_sideways":
-        if expiry_pm_itm_quick_active(snap):
+    mode = getattr(candidate, "mode", "")
+    if mode == "quick_sideways":
+        if expiry_pm_itm_quick_active(snap, state, snap_map):
             min_rank = min(min_rank, settings.expiry_pm_itm_min_rank_score)
         elif not is_symbol_expiry_day(snap):
             min_rank = min(min_rank, settings.quick_sideways_min_rank_score)
+    elif mode == "slow_bounce":
+        min_rank = min(
+            min_rank,
+            settings.quick_sideways_slow_bounce_min_rank_score,
+            settings.expiry_pm_itm_min_rank_score,
+        )
     if candidate.score < min_rank:
         return False, f"pretrade_rank_below_{min_rank:.0f}", meta
 
@@ -593,7 +601,9 @@ def validate_candidate(
     from app.engines.spot_direction import chart_blocks_side
 
     breadth_bypass = expiry_pm_itm_chart_bypass_allowed(
-        candidate.side, snap, mode=str(getattr(candidate, "mode", "")),
+        candidate.side, snap,
+        mode=str(getattr(candidate, "mode", "")),
+        state=state, snapshots=snap_map,
     )
     blocked_chart, chart_reason = chart_blocks_side(
         candidate.side,

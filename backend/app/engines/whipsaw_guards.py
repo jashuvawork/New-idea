@@ -303,7 +303,7 @@ def check_session_whipsaw_pause(
 
     from app.engines.expiry_day_guards import expiry_pm_itm_quick_session_active
 
-    if expiry_pm_itm_quick_session_active(snapshots):
+    if expiry_pm_itm_quick_session_active(snapshots, state):
         return False, "expiry_pm_itm_bypass", {"expiryPmItmBypass": True}
 
     from app.engines.morning_premium_capture import (
