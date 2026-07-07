@@ -305,3 +305,20 @@ def test_scan_watchlist_strike_in_chop(mock_settings):
     setups = scan_quick_sideways_setups("NIFTY", snap)
     assert len(setups) >= 1
     assert setups[0]["strike"] == 24400.0
+
+
+@patch("app.engines.quick_sideways.get_settings")
+def test_high_premium_quick_sideways_blocked_outside_pm_itm(mock_settings):
+    s = mock_settings.return_value
+    s.quick_sideways_enabled = True
+    s.quick_sideways_min_tqs = 35
+    s.quick_sideways_min_velocity_pct = 0.5
+    s.quick_sideways_chop_min_velocity_pct = 0.22
+    s.quick_sideways_high_premium_threshold_inr = 90.0
+    s.min_option_premium_inr = 20.0
+    s.max_option_premium_inr = 300.0
+    s.enhanced_velocity_threshold = 1.2
+    snap = _snap()
+    ok, reason = check_quick_sideways_entry(snap, Side.CALL, 24250, 199.0, velocity_pct=0.6)
+    assert not ok
+    assert reason == "quick_sideways_premium_above_90"

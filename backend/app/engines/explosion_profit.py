@@ -162,6 +162,17 @@ def check_explosion_entry(
     from app.engines.chop_day_guards import neutral_breadth_blocks_entry
 
     score = max(event.explosion_score, trade.tqs or 0, trade.confidence or 0)
+    if snap is not None:
+        from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+        if is_symbol_expiry_day(snap):
+            label = str((snap.psychology or {}).get("label", "NEUTRAL")).upper()
+            if label in ("CAUTION", "FEAR") and event.tier != "ELITE":
+                return False, f"expiry_psychology_block_{label.lower()}"
+            settings = get_settings()
+            if (breadth.bias or "NEUTRAL").upper() == "NEUTRAL" and score < settings.expiry_min_rank_score:
+                return False, f"expiry_neutral_breadth_below_{settings.expiry_min_rank_score:.0f}"
+
     blocked, nb_reason = neutral_breadth_blocks_entry(
         breadth.bias,
         score,
