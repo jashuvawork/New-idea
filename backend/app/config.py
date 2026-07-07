@@ -267,6 +267,17 @@ class Settings(BaseSettings):
     expiry_pm_itm_min_velocity_pct: float = 0.35
     expiry_pm_itm_min_rank_score: float = 52.0
     expiry_pm_itm_chart_bypass_breadth: bool = True
+    expiry_pm_itm_alternate_index_enabled: bool = True
+
+    # Slow bounce — expensive ITM mean-reversion (RSI/MACD recovery, low velocity)
+    quick_sideways_slow_bounce_enabled: bool = True
+    quick_sideways_slow_bounce_premium_min_inr: float = 90.0
+    quick_sideways_slow_bounce_min_velocity_pct: float = 0.1
+    quick_sideways_slow_bounce_min_tqs: float = 28.0
+    quick_sideways_slow_bounce_min_rank_score: float = 55.0
+    quick_sideways_slow_bounce_rsi_min: float = 40.0
+    quick_sideways_slow_bounce_rsi_max: float = 55.0
+    quick_sideways_slow_bounce_macd_hist_min: float = -15.0
 
     # Psychology setup hold — FEAR/CAUTION entries held longer on expiry chop
     psychology_hold_enabled: bool = True
@@ -535,6 +546,9 @@ class Settings(BaseSettings):
     worst_day_breakout_require_chart_align: bool = True
     worst_day_full_pause_loss_inr: float = -20_000.0
     worst_day_blocks_live: bool = True
+    worst_day_call_block_enabled: bool = True
+    worst_day_call_block_symbols_csv: str = "SENSEX"
+    worst_day_slow_bounce_min_rank: float = 55.0
     day_adaptive_chop_rank_cap: float = 70.0
     day_adaptive_good_day_rank_relief: float = 3.0
 

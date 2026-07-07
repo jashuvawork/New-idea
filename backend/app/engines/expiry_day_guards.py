@@ -68,14 +68,35 @@ def in_expiry_pm_itm_window() -> bool:
     return start <= current < end
 
 
-def expiry_pm_itm_quick_active(snap: SymbolSnapshot) -> bool:
-    return in_expiry_pm_itm_window() and is_near_expiry_day(snap)
-
-
-def expiry_pm_itm_quick_session_active(snapshots: dict[str, SymbolSnapshot]) -> bool:
+def expiry_pm_itm_quick_active(
+    snap: SymbolSnapshot,
+    state: AutoTraderState | None = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
+) -> bool:
     if not in_expiry_pm_itm_window():
         return False
-    return any(is_near_expiry_day(s) for s in snapshots.values() if s.dataAvailable)
+    if is_near_expiry_day(snap):
+        return True
+    if state is not None and snapshots is not None:
+        from app.engines.bad_day_routing import pm_itm_alternate_symbol_active
+
+        return pm_itm_alternate_symbol_active(snap, state, snapshots)
+    return False
+
+
+def expiry_pm_itm_quick_session_active(
+    snapshots: dict[str, SymbolSnapshot],
+    state: AutoTraderState | None = None,
+) -> bool:
+    if not in_expiry_pm_itm_window():
+        return False
+    if any(is_near_expiry_day(s) for s in snapshots.values() if s.dataAvailable):
+        return True
+    if state is not None:
+        from app.engines.bad_day_routing import pm_itm_alternate_symbols
+
+        return bool(pm_itm_alternate_symbols(state, snapshots))
+    return False
 
 
 def expiry_pm_itm_chart_bypass_allowed(
@@ -83,14 +104,16 @@ def expiry_pm_itm_chart_bypass_allowed(
     snap: SymbolSnapshot,
     *,
     mode: str = "",
+    state: AutoTraderState | None = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
 ) -> bool:
     """Allow ITM quick scalps through opposite 5m chart when breadth aligns (PM expiry window)."""
     settings = get_settings()
     if not settings.expiry_pm_itm_chart_bypass_breadth:
         return False
-    if str(mode or "") != "quick_sideways":
+    if str(mode or "") not in ("quick_sideways", "slow_bounce"):
         return False
-    if not expiry_pm_itm_quick_active(snap):
+    if not expiry_pm_itm_quick_active(snap, state, snapshots):
         return False
     return _breadth_aligned_for_side(side, snap.breadth)
 
@@ -275,7 +298,7 @@ def check_expiry_entry_allowed(
         return True, "ok", meta
 
     has_expiry_today = is_expiry_session(snapshots)
-    pm_itm = expiry_pm_itm_quick_session_active(snapshots)
+    pm_itm = expiry_pm_itm_quick_session_active(snapshots, state)
     meta["expiryPmItmQuickActive"] = pm_itm
 
     if not has_expiry_today and not pm_itm:
@@ -327,11 +350,11 @@ def check_expiry_candidate(
     snap = snapshots.get(sym) or candidate.snap
     score = float(getattr(candidate, "score", 0) or 0)
     mode = str(getattr(candidate, "mode", "") or "")
-    pm_itm = expiry_pm_itm_quick_active(snap)
+    pm_itm = expiry_pm_itm_quick_active(snap, state, snapshots)
     meta["expiryPmItmQuick"] = pm_itm
 
     if pm_itm:
-        if mode != "quick_sideways":
+        if mode not in ("quick_sideways", "slow_bounce"):
             return False, "expiry_pm_itm_quick_only", meta
         from app.engines.moneyness import classify_moneyness
 
@@ -414,6 +437,12 @@ def expiry_guard_summary(
     cap_hit, cap_msg = expiry_trades_cap_reached(state, snapshots)
     allowed, block_reason, _ = check_expiry_entry_allowed(state, snapshots)
 
+    pm_alts: list[str] = []
+    if state is not None:
+        from app.engines.bad_day_routing import pm_itm_alternate_symbols
+
+        pm_alts = sorted(pm_itm_alternate_symbols(state, snapshots))
+
     return {
         "enabled": settings.expiry_day_guards_enabled,
         "expirySession": bool(symbols),
@@ -433,6 +462,7 @@ def expiry_guard_summary(
         "dualScalpMode": expiry_dual_scalp_active(snapshots),
         "minRankScore": expiry_min_rank_score(state, snapshots),
         "sessionPnlInr": round(compute_session_pnl(state), 2),
-        "expiryPmItmQuickActive": expiry_pm_itm_quick_session_active(snapshots),
+        "expiryPmItmQuickActive": expiry_pm_itm_quick_session_active(snapshots, state),
         "expiryPmItmWindow": in_expiry_pm_itm_window(),
+        "expiryPmItmAlternateSymbols": pm_alts,
     }

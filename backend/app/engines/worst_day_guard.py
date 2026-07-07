@@ -123,6 +123,44 @@ def _allowed_breakout_tiers() -> set[str]:
     return {t.strip().upper() for t in raw.split(",") if t.strip()}
 
 
+def worst_day_blocks_call_scalp(
+    candidate: Any,
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    policy: EntryPolicy,
+) -> tuple[bool, str]:
+    """Block CALL scalps on configured symbols when EMA bearish + breadth not bullish."""
+    settings = get_settings()
+    if not settings.worst_day_call_block_enabled or policy == "NORMAL":
+        return False, "ok"
+
+    mode = str(getattr(candidate, "mode", "") or "")
+    if mode not in ("scalp", "quick_sideways"):
+        return False, "ok"
+
+    if _side_val(candidate.side) != "CALL":
+        return False, "ok"
+
+    sym = candidate.symbol.upper()
+    blocked_symbols = {
+        s.strip().upper()
+        for s in (settings.worst_day_call_block_symbols_csv or "").split(",")
+        if s.strip()
+    }
+    if sym not in blocked_symbols:
+        return False, "ok"
+
+    snap = snapshots.get(sym) or candidate.snap
+    chart = snap.spotChart
+    breadth_bias = (snap.breadth.bias or "NEUTRAL").upper()
+    ema_bearish = bool(chart and (chart.emaBias or "NEUTRAL").upper() == "BEARISH")
+    breadth_not_bullish = breadth_bias in ("BEARISH", "NEUTRAL")
+
+    if ema_bearish and breadth_not_bullish:
+        return True, "worst_day_call_blocked_bearish_context"
+    return False, "ok"
+
+
 def worst_day_allows_candidate(
     candidate: Any,
     state: AutoTraderState,
@@ -151,6 +189,30 @@ def worst_day_allows_candidate(
     sym = candidate.symbol.upper()
     snap = snapshots.get(sym) or candidate.snap
     meta["entryPolicy"] = policy
+
+    blocked_call, call_reason = worst_day_blocks_call_scalp(candidate, snapshots, policy=policy)
+    if blocked_call:
+        return False, call_reason, meta
+
+    if mode == "slow_bounce":
+        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+        from app.engines.quick_sideways import detect_slow_bounce_signal
+
+        if not expiry_pm_itm_quick_active(snap, state, snapshots):
+            return False, "worst_day_slow_bounce_requires_pm_itm", meta
+        sig_ok, sig_reason, sb_meta = detect_slow_bounce_signal(
+            snap,
+            candidate.side,
+            float(candidate.strike),
+            float(candidate.premium),
+        )
+        meta["slowBounce"] = sb_meta
+        if not sig_ok:
+            return False, sig_reason, meta
+        min_rank = settings.worst_day_slow_bounce_min_rank
+        if score < min_rank:
+            return False, f"worst_day_slow_bounce_rank_below_{min_rank:.0f}", meta
+        return True, "ok", meta
 
     if mode != "explosion":
         return False, "worst_day_breakout_only", meta
