@@ -244,15 +244,21 @@ def check_quick_sideways_entry(
 
         if not expiry_pm_itm_quick_active(snap):
             return False, "not_sideways"
-    if not premium_in_band(premium):
-        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
 
+    pm_itm = expiry_pm_itm_quick_active(snap)
+    raw_max = getattr(settings, "quick_sideways_high_premium_threshold_inr", 90.0)
+    max_quick_prem = float(raw_max) if isinstance(raw_max, (int, float)) else 90.0
+
+    if not premium_in_band(premium):
         if not (
-            expiry_pm_itm_quick_active(snap)
+            pm_itm
             and premium >= settings.min_option_premium_inr
             and premium <= settings.expiry_pm_itm_premium_max_inr
         ):
             return False, premium_reject_reason(premium)
+    elif not pm_itm and premium > max_quick_prem:
+        return False, f"quick_sideways_premium_above_{max_quick_prem:.0f}"
     if snap.tradeQualityScore < settings.quick_sideways_min_tqs:
         return False, f"tqs_below_{settings.quick_sideways_min_tqs}"
 

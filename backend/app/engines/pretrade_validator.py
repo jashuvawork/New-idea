@@ -546,14 +546,18 @@ def validate_candidate(
     if not ex_ok:
         return False, ex_reason, meta
 
-    from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+    from app.engines.expiry_day_guards import (
+        expiry_pm_itm_quick_active,
+        is_symbol_expiry_day,
+    )
 
     expiry_floor = expiry_min_rank_score(state, snap_map)
     min_rank = max(settings.pretrade_min_rank_score, expiry_floor)
     if getattr(candidate, "mode", "") == "quick_sideways":
-        min_rank = min(min_rank, settings.quick_sideways_min_rank_score)
-    if expiry_pm_itm_quick_active(snap):
-        min_rank = min(min_rank, settings.expiry_pm_itm_min_rank_score)
+        if expiry_pm_itm_quick_active(snap):
+            min_rank = min(min_rank, settings.expiry_pm_itm_min_rank_score)
+        elif not is_symbol_expiry_day(snap):
+            min_rank = min(min_rank, settings.quick_sideways_min_rank_score)
     if candidate.score < min_rank:
         return False, f"pretrade_rank_below_{min_rank:.0f}", meta
 
