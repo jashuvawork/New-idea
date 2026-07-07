@@ -15,7 +15,15 @@ from app.services import trade_store
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def _parse_date(iso: str) -> Optional[datetime]:
+def _parse_date(value: str | datetime | None) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=IST)
+        return dt.astimezone(IST)
+    iso = str(value)
     if not iso:
         return None
     try:
@@ -107,7 +115,7 @@ def _trades_in_window(days: int) -> tuple[list[dict[str, Any]], str, str]:
     end = now.strftime("%Y-%m-%d")
     all_closed = trade_store.get_all_closed_trades_chronological(limit=10_000)
     reset_at = trade_store.get_session_reset_at()
-    reset_dt = _parse_date(reset_at) if reset_at else None
+    reset_dt = _parse_date(reset_at)
 
     filtered: list[dict[str, Any]] = []
     for t in all_closed:
@@ -298,9 +306,12 @@ def build_weekly_dashboard(
 
     near_misses: list[dict[str, Any]] = []
     if snapshots and state:
-        from app.engines.trade_selector import diagnose_missed_entries
+        try:
+            from app.engines.trade_selector import diagnose_missed_entries
 
-        near_misses = diagnose_missed_entries(snapshots, state)
+            near_misses = diagnose_missed_entries(snapshots, state)
+        except Exception:
+            near_misses = []
 
     guards: dict[str, Any] = {}
     if state:
@@ -313,12 +324,20 @@ def build_weekly_dashboard(
 
     goals = _assess_goals(trades, daily, len(violation_rows), settings)
 
+    reset_raw = trade_store.get_session_reset_at()
+    if isinstance(reset_raw, datetime):
+        session_reset_at = reset_raw.isoformat()
+    elif reset_raw:
+        session_reset_at = str(reset_raw)
+    else:
+        session_reset_at = None
+
     return {
         "periodDays": days,
         "periodStart": period_start,
         "periodEnd": period_end,
         "generatedAt": datetime.now(IST).isoformat(),
-        "sessionResetAt": trade_store.get_session_reset_at(),
+        "sessionResetAt": session_reset_at,
         "summary": {
             **stats,
             "expectancy": expectancy,
