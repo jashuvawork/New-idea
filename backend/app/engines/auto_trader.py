@@ -284,6 +284,19 @@ async def _open_from_candidate(
         if live_blocked and settings.enable_live_trading:
             return False, live_reason
 
+        from app.engines.worst_day_guard import worst_day_allows_candidate
+
+        wd_ok, wd_reason, _ = worst_day_allows_candidate(candidate, state, snapshots)
+        if not wd_ok:
+            return False, wd_reason
+
+    if snapshots and settings.controlled_trading_enabled:
+        from app.engines.pretrade_validator import validate_candidate
+
+        vt_ok, vt_reason, _ = validate_candidate(candidate, state, snapshots=snapshots)
+        if not vt_ok:
+            return False, vt_reason
+
     profile = snap.optimizedProfile or get_session_targets()
     if candidate.mode in ("quick_sideways", "slow_bounce"):
         profile = get_quick_sideways_profile(candidate.premium)
@@ -326,6 +339,9 @@ async def _open_from_candidate(
 
     snap_map = snapshots or {symbol: snap}
     lots = bad_day_lot_cap(fill_premium, lots, state, snap_map)
+    from app.engines.explosion_profit import expiry_session_lot_cap
+
+    lots = expiry_session_lot_cap(lots, fill_premium, snap.tradeQualityScore, snap_map)
     lots = apply_tiered_lot_cap(
         lots, candidate.score, snap.breadth.aligned, symbol,
         velocity_pct=(

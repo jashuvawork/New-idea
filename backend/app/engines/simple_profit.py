@@ -128,6 +128,16 @@ def check_entry_gate(
     if trade_score < min_score:
         return False, f"score_below_{min_score}"
 
+    if snap is not None:
+        from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+        if is_symbol_expiry_day(snap):
+            label = str((snap.psychology or {}).get("label", "NEUTRAL")).upper()
+            if label in ("CAUTION", "FEAR"):
+                return False, f"expiry_psychology_block_{label.lower()}"
+            if float(snap.tradeQualityScore or 0) < settings.expiry_scalp_min_symbol_tqs:
+                return False, f"expiry_scalp_tqs_below_{settings.expiry_scalp_min_symbol_tqs:.0f}"
+
     blocked, nb_reason = neutral_breadth_blocks_entry(
         breadth.bias, trade_score, velocity_pct, explosion=False,
     )

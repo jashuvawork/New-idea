@@ -172,6 +172,12 @@ def check_explosion_entry(
             settings = get_settings()
             if (breadth.bias or "NEUTRAL").upper() == "NEUTRAL" and score < settings.expiry_min_rank_score:
                 return False, f"expiry_neutral_breadth_below_{settings.expiry_min_rank_score:.0f}"
+            from app.engines.symbol_cooldown import side_aligned_with_breadth
+
+            if settings.expiry_counter_breadth_elite_only:
+                side_val = event.side.value if hasattr(event.side, "value") else str(event.side).upper()
+                if not side_aligned_with_breadth(side_val, breadth.bias) and event.tier != "ELITE":
+                    return False, "expiry_counter_breadth_elite_only"
 
     blocked, nb_reason = neutral_breadth_blocks_entry(
         breadth.bias,
@@ -235,6 +241,27 @@ def cap_explosion_lots(lots: int, premium: float) -> int:
     settings = get_settings()
     if premium > settings.explosion_high_premium_threshold_inr:
         return min(lots, settings.explosion_high_premium_lot_cap)
+    if premium <= settings.expiry_cheap_premium_threshold_inr:
+        return min(lots, settings.expiry_cheap_premium_lot_cap)
+    return lots
+
+
+def expiry_session_lot_cap(
+    lots: int,
+    premium: float,
+    symbol_tqs: float,
+    snapshots: dict[str, SymbolSnapshot],
+) -> int:
+    """Cap oversized lot counts on cheap premiums / low TQS during expiry sessions."""
+    from app.engines.expiry_day_guards import is_expiry_session
+
+    settings = get_settings()
+    if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
+        return lots
+    if premium <= settings.expiry_cheap_premium_threshold_inr:
+        lots = min(lots, settings.expiry_cheap_premium_lot_cap)
+    if float(symbol_tqs or 0) < settings.expiry_low_tqs_lot_cap_tqs:
+        lots = min(lots, settings.expiry_low_tqs_lot_cap)
     return lots
 
 

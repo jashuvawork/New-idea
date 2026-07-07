@@ -246,6 +246,12 @@ class Settings(BaseSettings):
     expiry_evening_block_hour: int = 14
     expiry_evening_block_minute: int = 0
     expiry_min_rank_score: float = 62.0
+    expiry_cheap_premium_threshold_inr: float = 55.0
+    expiry_cheap_premium_lot_cap: int = 20
+    expiry_low_tqs_lot_cap_tqs: float = 40.0
+    expiry_low_tqs_lot_cap: int = 15
+    expiry_scalp_min_symbol_tqs: float = 38.0
+    expiry_counter_breadth_elite_only: bool = True
     expiry_worst_day_min_rank_score: float = 72.0
     expiry_worst_day_score_threshold: float = 55.0
     expiry_worst_day_session_loss_inr: float = -12_000.0

@@ -93,7 +93,8 @@ def test_pm_itm_alternate_sensex_when_nifty_fading(mock_win, mock_exp, mock_alt,
     assert "SENSEX" in pm_itm_alternate_symbols(state, snaps)
     assert pm_itm_alternate_symbol_active(sensex, state, snaps) is True
     assert expiry_pm_itm_quick_active(sensex, state, snaps) is True
-    assert expiry_pm_itm_quick_active(nifty, state, snaps) is True
+    with patch("app.engines.expiry_day_guards.is_near_expiry_day", return_value=True):
+        assert expiry_pm_itm_quick_active(nifty, state, snaps) is True
 
 
 @patch("app.engines.quick_sideways.get_settings")
