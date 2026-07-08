@@ -103,3 +103,36 @@ async def composer_refresh():
     snapshots = (await get_multi_snapshot(force=force)).snapshots
     brief = await run_monitor_cycle(snapshots, force=True)
     return brief.to_dict()
+
+
+@router.get("/snapshot-analysis")
+async def snapshot_analysis_rules():
+    """Rules-based gap report: radar vs entry gates, misleading UI flags."""
+    from app.engines.auto_trader import get_state
+    from app.engines.snapshot_lag_analyzer import analyze_snapshot_lag
+    from app.routers.market import get_multi_snapshot
+
+    multi = await get_multi_snapshot(force=False)
+    return analyze_snapshot_lag(multi.snapshots, get_state())
+
+
+@router.post("/snapshot-analysis")
+async def snapshot_analysis_ai():
+    """Rules + Composer audit of where monitoring lags execution."""
+    from app.engines.auto_trader import get_state
+    from app.engines.snapshot_lag_analyzer import analyze_with_ai
+    from app.routers.market import get_multi_snapshot
+    from app.services.upstox import rate_limit_active, rate_limit_recovery_active
+
+    force = not rate_limit_active() and not rate_limit_recovery_active()
+    multi = await get_multi_snapshot(force=force)
+    return await analyze_with_ai(multi.snapshots, get_state())
+
+
+@router.get("/trade-reports")
+async def trade_reports(limit: int = 30, days: int = 7):
+    from app.services import trade_store
+
+    return {
+        "reports": trade_store.get_trade_reports_range(days=min(days, 30), limit=min(limit, 200)),
+    }

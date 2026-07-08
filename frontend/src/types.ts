@@ -134,6 +134,11 @@ export interface ExplosionAlert {
   reason: string;
   tradeable: boolean;
   morningCapture?: boolean;
+  afternoonCapture?: boolean;
+  allDayExplosion?: boolean;
+  premiumCapture?: boolean;
+  dailyMovePct?: number;
+  openPremiumMove?: number;
 }
 
 export interface StrategyMatrixEntry {
@@ -332,8 +337,11 @@ export interface ExpiryGuardsSummary {
   enabled?: boolean;
   expirySession?: boolean;
   expirySymbols?: string[];
+  nearExpirySymbols?: string[];
+  preExpirySymbols?: string[];
   morningWindow?: boolean;
   eveningBlock?: boolean;
+  eveningBlockActive?: boolean;
   worstDay?: boolean;
   worstDayScore?: number;
   worstDayReasons?: string[];

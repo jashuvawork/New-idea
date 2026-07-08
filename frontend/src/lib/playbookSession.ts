@@ -24,7 +24,11 @@ export function morningCaptureWindowActive(now = new Date()): boolean {
 }
 
 export function momentumRallyWindowActive(now = new Date()): boolean {
-  return inIstWindow(10, 0, 13, 45, now);
+  return inIstWindow(10, 0, 15, 25, now);
+}
+
+export function allDayExplosionWindowActive(now = new Date()): boolean {
+  return inIstWindow(9, 20, 15, 25, now);
 }
 
 export function openCautionWindowActive(now = new Date()): boolean {
