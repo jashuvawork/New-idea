@@ -241,6 +241,7 @@ def chart_blocks_side(
     trade_score: float = 0.0,
     momentum_surge: bool = False,
     breadth_aligned_bypass: bool = False,
+    premium_led_bypass: bool = False,
 ) -> tuple[bool, str]:
     settings = get_settings()
     if not settings.chart_alignment_enabled or not chart:
@@ -253,11 +254,11 @@ def chart_blocks_side(
 
     # Hard direction conflict — never bypass with rank score (momentum surge / breadth ITM PM only).
     if side_val == "CALL" and chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
-        if breadth_aligned_bypass:
+        if breadth_aligned_bypass or premium_led_bypass:
             return False, "ok"
         return True, "chart_bearish_no_calls"
     if side_val == "PUT" and chart.direction == "BULLISH" and chart.trendStrength >= min_strength:
-        if breadth_aligned_bypass:
+        if breadth_aligned_bypass or premium_led_bypass:
             return False, "ok"
         return True, "chart_bullish_no_puts"
 

@@ -84,7 +84,7 @@ from app.engines.quick_sideways import (
     get_quick_sideways_profile,
     snapshot_in_chop,
 )
-from app.engines.session_timing import entries_allowed_now, entry_window_label
+from app.engines.session_timing import entries_allowed_now, entry_window_label, explosion_entries_allowed_now
 from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
 from app.services.order_executor import place_entry_order, place_exit_order
@@ -977,7 +977,8 @@ async def process(
 
     # Try new entries — best setup only, max lots on 85% sizing capital
     entries_ok, entry_window_reason = entries_allowed_now()
-    if market_live and not entries_ok:
+    explosion_early_ok, _ = explosion_entries_allowed_now()
+    if market_live and not entries_ok and not explosion_early_ok:
         skipped.append({
             "symbol": "SESSION",
             "reason": entry_window_reason,
@@ -989,7 +990,7 @@ async def process(
         and settings.auto_trading_enabled
         and market_live
         and profit_gate.newEntriesAllowed
-        and entries_ok
+        and (entries_ok or explosion_early_ok)
     ):
         paused, pause_reason = session_pause_active()
         if paused:
@@ -1061,6 +1062,8 @@ async def process(
             and not whipsaw_paused and expiry_ok and policy != "PAUSED" and not live_blocked
         ):
             best = find_best_entry(snapshots, state, trading_limits)
+            if best and explosion_early_ok and not entries_ok and best.mode != "explosion":
+                best = None
             if best:
                 opened, reason = await _open_from_candidate(best, state, client, news, snapshots)
                 if not opened:

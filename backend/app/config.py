@@ -376,6 +376,11 @@ class Settings(BaseSettings):
     premium_led_min_velocity_9s: float = 3.5
     premium_led_min_explosion_score: float = 42.0
     premium_led_counter_breadth_min_score: float = 48.0
+    premium_led_explosion_bypass_enabled: bool = True
+    # Explosion-only entries from 9:15 — catch open premium rips before 9:20 general window
+    explosion_open_entry_enabled: bool = True
+    explosion_entry_earliest_hour: int = 9
+    explosion_entry_earliest_minute: int = 15
 
     # Afternoon premium capture — 11:45–13:45 consolidation breakouts (e.g. NIFTY 24250 PE 1pm rip)
     afternoon_premium_capture_enabled: bool = True

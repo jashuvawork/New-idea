@@ -138,21 +138,25 @@ def check_explosion_entry(
         explosion_exhausted,
         index_pin_blocks_put_explosion,
     )
-    from app.engines.morning_premium_capture import afternoon_capture_skips_chart_block
+    from app.engines.morning_premium_capture import (
+        afternoon_capture_skips_chart_block,
+        premium_led_explosion_bypass,
+    )
+
+    breadth_bias = (breadth.bias or "NEUTRAL") if breadth else "NEUTRAL"
+    premium_bypass = premium_led_explosion_bypass(event, chart, breadth_bias)
 
     blocked, reason = breadth_blocks_explosion_side(event.side, breadth.bias, event.tier)
-    if blocked:
+    if blocked and not premium_bypass:
         return False, reason
 
     if snap is not None:
         blocked, reason = index_pin_blocks_put_explosion(event, snap)
-        if blocked:
+        if blocked and not premium_bypass:
             return False, reason
 
     blocked, reason = chart_blocks_explosion_side(event.side, chart, event.tier)
-    if blocked and afternoon_capture_skips_chart_block(event, chart):
-        blocked, reason = False, "ok"
-    if blocked:
+    if blocked and not premium_bypass and not afternoon_capture_skips_chart_block(event, chart):
         return False, reason
 
     blocked, reason = explosion_exhausted(event)
@@ -177,7 +181,8 @@ def check_explosion_entry(
             if settings.expiry_counter_breadth_elite_only:
                 side_val = event.side.value if hasattr(event.side, "value") else str(event.side).upper()
                 if not side_aligned_with_breadth(side_val, breadth.bias) and event.tier != "ELITE":
-                    return False, "expiry_counter_breadth_elite_only"
+                    if not (premium_bypass and event.tier in ("EXPLODING", "ELITE")):
+                        return False, "expiry_counter_breadth_elite_only"
 
     blocked, nb_reason = neutral_breadth_blocks_entry(
         breadth.bias,
@@ -201,16 +206,17 @@ def check_explosion_entry(
         chart,
         trade_score=score,
         momentum_surge=index_moment,
+        premium_led_bypass=premium_bypass,
     )
     if blocked_chart:
         return False, chart_reason
 
     if event.tier == "ELITE":
-        return True, "elite_explosion"
+        return True, "elite_explosion" if not premium_bypass else "premium_led_elite_explosion"
 
     min_score = get_settings().aggressive_min_explosion_score
     if event.tier == "EXPLODING" and event.explosion_score >= min_score:
-        return True, "explosion_confirmed"
+        return True, "explosion_confirmed" if not premium_bypass else "premium_led_explosion_confirmed"
 
     if event.velocity_3s >= 3.0 and event.volume_surge >= 1.5:
         return True, "early_explosion"
