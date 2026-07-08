@@ -8,9 +8,11 @@ from app.engines.chart_exit_levels import (
     ChartExitLevels,
     chart_trade_confidence,
     compute_chart_exit_levels,
+    compute_live_chart_trail_tuning,
     high_quality_chart_entry,
     merge_chart_into_exit_plan,
     should_promote_quick_to_trailing,
+    update_live_chart_trail,
 )
 from app.models.schemas import (
     Breadth,
@@ -136,3 +138,81 @@ def test_promote_quick_to_trailing_on_chart_confidence():
         s.quick_trail_promote_min_confidence = 58.0
         s.quick_trail_promote_min_best_points = 2.0
         assert should_promote_quick_to_trailing(trade, best_pts=1.0) is True
+
+
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_live_chart_trail_tuning_high_confidence(mock_settings):
+    s = mock_settings.return_value
+    s.scalp_stop_min_points = 2.0
+    s.chart_confidence_trail_enabled = True
+    plan = {
+        "stopPoints": 3.0,
+        "targetPoints": 6.0,
+        "targetPoints2": 9.0,
+        "trailArmPoints": 3.0,
+        "trailKeepRatio": 0.60,
+    }
+    tuning = compute_live_chart_trail_tuning(
+        plan, _snap_with_chart(), Side.PUT,
+        entry_confidence=65.0, live_confidence=82.0, entry_premium=216.0,
+    )
+    assert tuning.letRun is True
+    assert tuning.trailKeepRatio < 0.60
+    assert tuning.targetPoints >= 6.0
+
+
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_live_chart_trail_tuning_confidence_fade(mock_settings):
+    s = mock_settings.return_value
+    s.scalp_stop_min_points = 2.0
+    plan = {
+        "stopPoints": 3.0,
+        "targetPoints": 6.0,
+        "targetPoints2": 9.0,
+        "trailArmPoints": 3.0,
+        "trailKeepRatio": 0.60,
+    }
+    tuning = compute_live_chart_trail_tuning(
+        plan, _snap_with_chart("BULLISH", "BULLISH"), Side.PUT,
+        entry_confidence=72.0, live_confidence=48.0, entry_premium=216.0,
+    )
+    assert tuning.tighten is True
+    assert tuning.trailKeepRatio > 0.60
+    assert tuning.stopPoints < 3.0
+
+
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_update_live_chart_trail_on_trade(mock_settings):
+    s = mock_settings.return_value
+    s.chart_exit_levels_enabled = True
+    s.chart_confidence_trail_enabled = True
+    s.chart_trail_tune_seconds = 0
+    s.scalp_stop_min_points = 2.0
+    s.scalp_stop_points = 3.0
+    s.scalp_target_points = 6.0
+    s.scalp_trail_arm_points = 3.0
+    s.scalp_trail_keep_ratio = 0.60
+    s.scalp_trail_step_points = 2.0
+    s.enhanced_micro_target_points = 2.5
+
+    trade = PaperTrade(
+        id="t2",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=77600.0,
+        entryPremium=216.0,
+        lots=10,
+        openedAt=datetime.now(IST),
+        entryContext={
+            "entryChartConfidence": 70.0,
+            "exitPlan": {
+                "stopPoints": 3.0,
+                "targetPoints": 6.0,
+                "trailArmPoints": 3.0,
+                "trailKeepRatio": 0.60,
+            },
+        },
+    )
+    out = update_live_chart_trail(trade, _snap_with_chart())
+    assert out.get("chartConfidenceLive") is not None
+    assert trade.entryContext.get("chartExitLive") is not None

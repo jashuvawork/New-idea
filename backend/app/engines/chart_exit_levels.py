@@ -21,6 +21,25 @@ _BEARISH_PATTERNS = frozenset({
 
 
 @dataclass
+class ChartTrailTuning:
+    """Live confidence-driven trail/SL/TP adjustments for open trades."""
+    liveConfidence: float
+    entryConfidence: float
+    confidenceDelta: float
+    trailArmPoints: float
+    trailKeepRatio: float
+    stopPoints: float
+    targetPoints: float
+    targetPoints2: float = 0.0
+    tighten: bool = False
+    letRun: bool = False
+    sources: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class ChartExitLevels:
     stopPoints: float
     targetPoints: float
@@ -149,7 +168,76 @@ def chart_trade_confidence(
     tqs = float(snap.tradeQualityScore or 50)
     score += (tqs - 50) * 0.15
 
-    return round(min(95.0, max(20.0, score)), 1), sources[:12]
+    # 5m spot chart — RSI, MACD, EMA, momentum
+    spot = snap.spotChart
+    if spot:
+        if spot.direction == target_bias:
+            score += 10
+            sources.append(f"spot_{spot.direction.lower()}")
+        elif spot.direction not in ("NEUTRAL", target_bias):
+            score -= 6
+        if side_v == "CALL":
+            if spot.rsiBias == "OVERSOLD" and spot.momentum15Pct > 0:
+                score += 6
+                sources.append("spot_rsi_oversold_bounce")
+            elif spot.rsiBias == "OVERBOUGHT":
+                score -= 5
+        else:
+            if spot.rsiBias == "OVERBOUGHT" and spot.momentum15Pct < 0:
+                score += 6
+                sources.append("spot_rsi_overbought_fade")
+            elif spot.rsiBias == "OVERSOLD":
+                score -= 5
+        if spot.macdBias == target_bias:
+            score += 5
+            sources.append(f"spot_macd_{spot.macdBias.lower()}")
+        if spot.emaBias == target_bias:
+            score += 4
+            sources.append(f"spot_ema_{spot.emaBias.lower()}")
+
+    # Per-timeframe RSI/MACD alignment (1m–4h)
+    tf_bull = tf_bear = tf_rsi_ok = tf_macd_ok = 0
+    for tf_name, tf in (analysis.timeframes or {}).items():
+        if not isinstance(tf, dict):
+            continue
+        d = str(tf.get("direction") or "NEUTRAL").upper()
+        if d == "BULLISH":
+            tf_bull += 1
+        elif d == "BEARISH":
+            tf_bear += 1
+        rsi_bias = str(tf.get("rsiBias") or "").upper()
+        macd_bias = str(tf.get("macdBias") or "").upper()
+        if side_v == "PUT" and rsi_bias == "OVERBOUGHT":
+            tf_rsi_ok += 1
+        elif side_v == "CALL" and rsi_bias == "OVERSOLD":
+            tf_rsi_ok += 1
+        if macd_bias == target_bias:
+            tf_macd_ok += 1
+    tf_total = max(len(analysis.timeframes or {}), 1)
+    if side_v == "PUT" and tf_bear >= 2:
+        score += min(12, tf_bear * 3)
+        sources.append(f"tf_bear_{tf_bear}")
+    elif side_v == "CALL" and tf_bull >= 2:
+        score += min(12, tf_bull * 3)
+        sources.append(f"tf_bull_{tf_bull}")
+    if tf_rsi_ok >= 2:
+        score += 6
+        sources.append("tf_rsi_aligned")
+    if tf_macd_ok >= 3:
+        score += 8
+        sources.append("tf_macd_aligned")
+
+    # Session breadth
+    breadth = snap.breadth
+    if breadth:
+        bb = (breadth.bias or "NEUTRAL").upper()
+        if bb == target_bias:
+            score += 10
+            sources.append(f"breadth_{bb.lower()}")
+        elif bb != "NEUTRAL" and bb != target_bias:
+            score -= 8
+
+    return round(min(95.0, max(20.0, score)), 1), sources[:16]
 
 
 def _index_dist_to_premium_pts(
@@ -366,6 +454,177 @@ def high_quality_chart_entry(
     return ok, conf
 
 
+def compute_live_chart_trail_tuning(
+    plan_dict: dict[str, Any],
+    snap: SymbolSnapshot,
+    side: Side | str,
+    *,
+    entry_confidence: float,
+    live_confidence: float,
+    entry_premium: float = 50.0,
+) -> ChartTrailTuning:
+    """
+    Continuously tune SL/TP/trail from live multi-indicator chart confidence.
+    High confidence → wider targets, looser trail (let runners run).
+    Low / fading confidence → tighter SL, earlier trail arm, higher keep ratio.
+    """
+    settings = get_settings()
+    base_stop = float(plan_dict.get("stopPoints", 3.0))
+    base_target = float(plan_dict.get("targetPoints", 6.0))
+    base_target2 = float(plan_dict.get("targetPoints2", base_target * 1.5))
+    base_arm = float(plan_dict.get("trailArmPoints", 3.0))
+    base_keep = float(plan_dict.get("trailKeepRatio", 0.60))
+
+    delta = live_confidence - entry_confidence
+    conf = live_confidence / 100.0
+    sources: list[str] = []
+
+    stop = base_stop
+    target = base_target
+    target2 = base_target2
+    arm = base_arm
+    keep = base_keep
+    tighten = False
+    let_run = False
+
+    # Confidence tier tuning
+    if live_confidence >= 78:
+        let_run = True
+        target *= 1.0 + conf * 0.25
+        target2 *= 1.0 + conf * 0.20
+        arm = max(1.5, arm * (1.0 - conf * 0.15))
+        keep = max(0.48, keep - conf * 0.10)
+        sources.append("high_conf_let_run")
+    elif live_confidence >= 62:
+        target *= 1.0 + conf * 0.12
+        keep = min(0.75, keep + conf * 0.04)
+        sources.append("mid_conf_balanced")
+    else:
+        tighten = True
+        stop = max(settings.scalp_stop_min_points, stop * (0.88 - (0.62 - conf) * 0.05))
+        arm = max(1.2, arm * 0.85)
+        keep = min(0.82, keep + 0.12)
+        target = max(base_target * 0.9, target * 0.94)
+        sources.append("low_conf_tighten")
+
+    # Confidence fade since entry — protect open profit
+    if delta <= -12:
+        tighten = True
+        stop *= 0.88
+        keep = min(0.85, keep + 0.10)
+        arm = max(1.0, arm * 0.80)
+        sources.append(f"conf_fade_{delta:.0f}")
+    elif delta >= 10:
+        let_run = True
+        target *= 1.08
+        keep = max(0.50, keep - 0.06)
+        sources.append(f"conf_rise_{delta:.0f}")
+
+    # Live structure check — opposing MTF consensus forces tighten
+    analysis = snap.chartAnalysis
+    side_v = _side_val(side)
+    target_bias = "BULLISH" if side_v == "CALL" else "BEARISH"
+    if analysis:
+        consensus = (analysis.consensus or "NEUTRAL").upper()
+        if consensus not in ("NEUTRAL", target_bias):
+            tighten = True
+            stop *= 0.90
+            keep = min(0.88, keep + 0.08)
+            sources.append(f"mtf_oppose_{consensus.lower()}")
+
+    stop_cap = max(8.0, entry_premium * 0.12)
+    return ChartTrailTuning(
+        liveConfidence=round(live_confidence, 1),
+        entryConfidence=round(entry_confidence, 1),
+        confidenceDelta=round(delta, 1),
+        trailArmPoints=round(max(1.0, arm), 2),
+        trailKeepRatio=round(min(0.88, max(0.45, keep)), 3),
+        stopPoints=round(min(stop_cap, max(settings.scalp_stop_min_points, stop)), 2),
+        targetPoints=round(max(base_target * 0.85, target), 2),
+        targetPoints2=round(max(target, target2), 2),
+        tighten=tighten,
+        letRun=let_run,
+        sources=sources,
+    )
+
+
+def update_live_chart_trail(
+    trade: PaperTrade,
+    snap: SymbolSnapshot,
+) -> dict[str, Any]:
+    """
+    Lightweight per-exit-cycle chart re-analysis — tune trail/SL/TP from live confidence.
+    Full structure merge runs on chart_exit_refresh_seconds; this runs every trail tune interval.
+    """
+    settings = get_settings()
+    if not settings.chart_exit_levels_enabled or not settings.chart_confidence_trail_enabled:
+        return (trade.entryContext or {}).get("exitPlan") or {}
+
+    ctx = trade.entryContext or {}
+    last_tune = ctx.get("chartTrailTunedAt")
+    if last_tune:
+        try:
+            ts = datetime.fromisoformat(str(last_tune))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=IST)
+            elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
+            if elapsed < settings.chart_trail_tune_seconds:
+                return ctx.get("exitPlan") or {}
+        except (TypeError, ValueError):
+            pass
+
+    plan_dict = dict(ctx.get("exitPlan") or {})
+    if not plan_dict:
+        plan_dict = {
+            "stopPoints": settings.scalp_stop_points,
+            "targetPoints": settings.scalp_target_points,
+            "trailArmPoints": settings.scalp_trail_arm_points,
+            "trailKeepRatio": settings.scalp_trail_keep_ratio,
+            "trailStepPoints": settings.scalp_trail_step_points,
+            "microTargetPoints": settings.enhanced_micro_target_points,
+        }
+
+    entry_conf = float(
+        ctx.get("entryChartConfidence")
+        or plan_dict.get("chartConfidence")
+        or ctx.get("chartConfidence")
+        or 50.0,
+    )
+    live_conf, live_sources = chart_trade_confidence(snap, trade.side)
+    tuning = compute_live_chart_trail_tuning(
+        plan_dict,
+        snap,
+        trade.side,
+        entry_confidence=entry_conf,
+        live_confidence=live_conf,
+        entry_premium=float(trade.entryPremium or 50),
+    )
+
+    merged = dict(plan_dict)
+    merged["stopPoints"] = tuning.stopPoints
+    merged["targetPoints"] = tuning.targetPoints
+    merged["targetPoints2"] = tuning.targetPoints2
+    merged["trailArmPoints"] = tuning.trailArmPoints
+    merged["trailKeepRatio"] = tuning.trailKeepRatio
+    merged["chartConfidence"] = live_conf
+    merged["chartConfidenceLive"] = live_conf
+    merged["chartConfidenceEntry"] = entry_conf
+    merged["chartConfidenceDelta"] = tuning.confidenceDelta
+    merged["chartTrailTighten"] = tuning.tighten
+    merged["chartTrailLetRun"] = tuning.letRun
+
+    if trade.entryContext is None:
+        trade.entryContext = {}
+    trade.entryContext["exitPlan"] = merged
+    trade.entryContext["chartConfidence"] = live_conf
+    trade.entryContext["chartExitLive"] = tuning.to_dict()
+    trade.entryContext["chartExitLiveSources"] = live_sources[:8] + tuning.sources
+    trade.entryContext["chartTrailTunedAt"] = datetime.now(IST).isoformat()
+    if "entryChartConfidence" not in trade.entryContext:
+        trade.entryContext["entryChartConfidence"] = entry_conf
+    return merged
+
+
 def should_promote_quick_to_trailing(
     trade: PaperTrade,
     snap: Optional[SymbolSnapshot] = None,
@@ -428,11 +687,15 @@ def refresh_open_trade_chart_plan(
     merged = merge_chart_into_exit_plan(
         plan_dict, snap, trade.side, float(trade.entryPremium or 50),
     )
+    entry_conf = float(merged.get("chartConfidence") or 50.0)
     if trade.entryContext is None:
         trade.entryContext = {}
+    trade.entryContext["entryChartConfidence"] = entry_conf
     trade.entryContext["exitPlan"] = merged
     trade.entryContext["chartExitLevels"] = merged.get("chartExitLevels")
     trade.entryContext["chartConfidence"] = merged.get("chartConfidence")
     trade.entryContext["promoteToTrailing"] = merged.get("promoteToTrailing")
     trade.entryContext["chartExitRefreshedAt"] = datetime.now(IST).isoformat()
-    return merged
+    # Apply live trail tuning immediately after full refresh
+    update_live_chart_trail(trade, snap)
+    return trade.entryContext.get("exitPlan") or merged
