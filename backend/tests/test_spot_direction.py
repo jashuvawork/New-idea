@@ -77,6 +77,34 @@ def test_analyze_spot_chart_bullish_on_rally():
     assert chart.macdBias in ("BULLISH", "NEUTRAL")
 
 
+def test_oversold_bounce_does_not_flip_bearish_session_bullish():
+    """5m micro-bounce on oversold RSI must not override bearish 15m/30m session."""
+    from app.engines.spot_direction import build_spot_chart
+
+    candles_5m: list[list[float]] = []
+    price = 24000.0
+    for i in range(14):
+        nxt = price - 8.0
+        candles_5m.append([i, price, price + 2, nxt - 2, nxt])
+        price = nxt
+    # Tiny 5m bounce — mimics Jul 8 screenshot (+0.16% on 5m, still down on 15m/30m)
+    bounce = price + 12.0
+    candles_5m.append([14, price, bounce + 3, price - 2, bounce])
+    spot = bounce
+    profile = MarketProfile(
+        poc=spot + 40,
+        openingRangeHigh=spot + 80,
+        openingRangeLow=spot - 20,
+        val=spot - 10,
+        vah=spot + 30,
+    )
+    chart = build_spot_chart(candles_5m, spot, profile)
+    assert chart.momentum5Pct > 0
+    assert chart.momentum15Pct < 0
+    assert chart.rsiBias == "OVERSOLD"
+    assert chart.direction in ("BEARISH", "NEUTRAL")
+
+
 @patch("app.engines.spot_direction.get_settings")
 def test_chart_blocks_call_on_declining_index(mock_settings):
     mock_settings.return_value = _settings()

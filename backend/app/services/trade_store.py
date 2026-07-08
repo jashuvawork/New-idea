@@ -387,6 +387,61 @@ def get_analysis_reports_range(days: int = 7, limit: int = 200) -> list[dict[str
     return reports[:limit]
 
 
+def _eod_playbook_file(target_date: str) -> Path:
+    playbook_dir = get_store_dir() / "playbook"
+    playbook_dir.mkdir(parents=True, exist_ok=True)
+    return playbook_dir / f"{target_date}.json"
+
+
+def save_eod_playbook(playbook: dict[str, Any]) -> None:
+    """Persist next-day EOD playbook (one file per target session date)."""
+    target = str(playbook.get("targetDate") or next_trading_day_from_store())[:10]
+    path = _eod_playbook_file(target)
+    path.write_text(json.dumps(playbook, indent=2, default=str))
+    _append_log("EOD_PLAYBOOK", {
+        "targetDate": target,
+        "bias": playbook.get("bias"),
+        "summary": (playbook.get("summary") or "")[:200],
+    })
+
+
+def next_trading_day_from_store() -> str:
+    from datetime import timedelta
+
+    d = _now().date() + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d.strftime("%Y-%m-%d")
+
+
+def get_eod_playbook(target_date: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """Load playbook for target session date."""
+    target = target_date or next_trading_day_from_store()
+    path = _eod_playbook_file(target)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("Failed to load EOD playbook %s: %s", target, e)
+        return None
+
+
+def get_eod_playbook_history(limit: int = 7) -> list[dict[str, Any]]:
+    """Recent EOD playbooks sorted by target date descending."""
+    playbook_dir = get_store_dir() / "playbook"
+    if not playbook_dir.exists():
+        return []
+    files = sorted(playbook_dir.glob("*.json"), reverse=True)[:limit]
+    out: list[dict[str, Any]] = []
+    for path in files:
+        try:
+            out.append(json.loads(path.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+    return out
+
+
 def record_session_reset(reason: str = "manual_reset", open_trade_ids: Optional[list[str]] = None) -> None:
     """Log session reset — aligns in-memory state with persistent store audit trail."""
     reset_at = set_session_reset_at()

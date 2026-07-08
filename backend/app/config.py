@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     ai_analysis_monitor_enabled: bool = True
     ai_analysis_monitor_interval_seconds: int = 120
     ai_analysis_monitor_use_ai: bool = True
+
+    # EOD next-day playbook — generated after 15:20 IST
+    eod_playbook_enabled: bool = True
+    eod_playbook_start_hour: int = 15
+    eod_playbook_start_minute: int = 20
+    eod_playbook_use_ai: bool = True
     cursor_api_key: str = ""
     cursor_api_base_url: str = "https://api.cursor.com"
     cursor_chat_completions_path: str = "/v1/chat/completions"

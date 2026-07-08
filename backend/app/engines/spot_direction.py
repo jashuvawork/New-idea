@@ -149,7 +149,8 @@ def build_spot_chart(
     elif or_pos == "BELOW":
         bearish += 1
     if rsi_read.bias == "OVERSOLD":
-        bullish += 1
+        if mom15 > 0 and mom30 > -0.05:
+            bullish += 1
     elif rsi_read.bias == "OVERBOUGHT":
         bearish += 1
     elif rsi_read.value > 55:
@@ -169,10 +170,14 @@ def build_spot_chart(
         direction = "BEARISH"
     elif mom30 > 0.08 and mom15 >= 0:
         direction = "BULLISH"
-    elif mom5 > 0.02 and mom15 >= 0 and mom30 >= -0.05:
+    elif mom5 > 0.02 and mom15 > 0.05 and mom30 > 0:
         direction = "BULLISH"
-    elif mom5 < -0.02 and mom15 <= 0 and mom30 <= 0.05:
+    elif mom5 < -0.02 and mom15 < -0.05 and mom30 < 0:
         direction = "BEARISH"
+    elif mom15 < 0 and mom30 < 0:
+        direction = "BEARISH"
+    elif mom15 > 0 and mom30 > 0:
+        direction = "BULLISH"
     else:
         direction = "NEUTRAL"
 
@@ -225,7 +230,9 @@ def reconcile_spot_chart_with_mtf(
 
     consensus = str(getattr(chart_analysis, "consensus", None) or "NEUTRAL").upper()
     spot_dir = (spot_chart.direction or "NEUTRAL").upper()
-    if consensus not in ("BULLISH", "BEARISH") or consensus == spot_dir:
+    if consensus not in ("BULLISH", "BEARISH"):
+        return spot_chart
+    if spot_dir == consensus:
         return spot_chart
 
     tfs = getattr(chart_analysis, "timeframes", None) or {}
@@ -240,11 +247,24 @@ def reconcile_spot_chart_with_mtf(
 
     consensus_ct = bear if consensus == "BEARISH" else bull
     breadth = (breadth_bias or "NEUTRAL").upper()
-    aligned = int(getattr(chart_analysis, "alignedCount", 0) or 0)
     total = int(getattr(chart_analysis, "totalTimeframes", 0) or len(tfs) or 0)
 
+    # MTF + breadth agree — always trust over lone 5m oversold bounce
+    if consensus == "BEARISH" and bear >= 2 and breadth == "BEARISH":
+        return spot_chart.model_copy(update={"direction": "BEARISH"})
+    if consensus == "BULLISH" and bull >= 2 and breadth == "BULLISH":
+        return spot_chart.model_copy(update={"direction": "BULLISH"})
+
+    # Tiny 5m flicker vs 3+ bearish/bullish TFs
+    if consensus == "BEARISH" and spot_dir == "BULLISH" and bear >= 2:
+        if abs(spot_chart.momentum5Pct) < 0.5 or spot_chart.momentum30Pct < 0:
+            return spot_chart.model_copy(update={"direction": "BEARISH"})
+    if consensus == "BULLISH" and spot_dir == "BEARISH" and bull >= 2:
+        if abs(spot_chart.momentum5Pct) < 0.5 or spot_chart.momentum30Pct > 0:
+            return spot_chart.model_copy(update={"direction": "BULLISH"})
+
     override = consensus_ct >= 3
-    if total >= 4 and aligned >= total - 1:
+    if total >= 4 and consensus_ct >= total - 1:
         override = True
     if breadth == consensus and consensus_ct >= 2:
         override = True
@@ -253,14 +273,7 @@ def reconcile_spot_chart_with_mtf(
     if consensus == "BULLISH" and from_open_pct >= 0.08 and consensus_ct >= 2:
         override = True
 
-    if not override:
-        return spot_chart
-
-    if consensus == "BEARISH" and spot_chart.momentum30Pct < -0.03:
-        return spot_chart.model_copy(update={"direction": "BEARISH"})
-    if consensus == "BULLISH" and spot_chart.momentum30Pct > 0.03:
-        return spot_chart.model_copy(update={"direction": "BULLISH"})
-    if consensus_ct >= 3:
+    if override:
         return spot_chart.model_copy(update={"direction": consensus})
     return spot_chart
 
