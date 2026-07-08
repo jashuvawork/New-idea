@@ -85,6 +85,8 @@ def _reentry_blocked(
     side: Side,
     strike: float,
     snap: SymbolSnapshot,
+    *,
+    explosion_event: Any = None,
 ) -> tuple[bool, str]:
     blocked, reason = symbol_in_cooldown(symbol)
     if blocked:
@@ -93,8 +95,13 @@ def _reentry_blocked(
     if blocked:
         return True, reason
     from app.engines.directional_lock import check_directional_side_lock
+    from app.engines.morning_premium_capture import premium_led_bypass_for_snap
 
-    blocked, reason = check_directional_side_lock(symbol, side, snap)
+    premium_bypass = premium_led_bypass_for_snap(side, snap, explosion_event=explosion_event)
+    tier = str(getattr(explosion_event, "tier", "") or "")
+    blocked, reason = check_directional_side_lock(
+        symbol, side, snap, tier=tier, premium_led_bypass=premium_bypass,
+    )
     if blocked:
         return True, reason
     if instrument_daily_cap_reached(symbol, side, strike):
@@ -173,7 +180,9 @@ def _explosion_candidates(
         if blocked_x:
             continue
 
-        blocked, reason = _reentry_blocked(symbol, event.side, event.strike, snap)
+        blocked, reason = _reentry_blocked(
+            symbol, event.side, event.strike, snap, explosion_event=event,
+        )
         if blocked:
             continue
 

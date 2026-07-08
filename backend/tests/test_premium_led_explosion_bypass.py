@@ -172,3 +172,90 @@ def test_explosion_entries_allowed_915_to_920(mock_phase, mock_settings, mock_mi
     ok, reason = explosion_entries_allowed_now()
     assert ok is True
     assert "explosion_open_window" in reason
+
+
+@patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
+@patch("app.engines.morning_premium_capture.get_settings")
+def test_directional_lock_bypassed_for_premium_led_put(mock_settings, mock_window):
+    from app.engines.directional_lock import check_directional_side_lock
+
+    s = mock_settings.return_value
+    s.premium_led_explosion_bypass_enabled = True
+    s.premium_led_counter_breadth_enabled = True
+    s.directional_side_lock_enabled = True
+    s.morning_capture_extreme_velocity_3s = 3.0
+    s.morning_capture_extreme_velocity_9s = 4.0
+
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24500.0,
+        spotChart=_bullish_chart(),
+        breadth=Breadth(score=62, bias="BULLISH", aligned=True),
+    )
+    event = _put_event()
+    assert premium_led_explosion_bypass(event, _bullish_chart(), "BULLISH") is True
+
+    blocked, reason = check_directional_side_lock(
+        "NIFTY", Side.PUT, snap, premium_led_bypass=True,
+    )
+    assert blocked is False
+    assert reason == "ok"
+
+
+@patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
+@patch("app.engines.morning_premium_capture.get_settings")
+def test_execution_chart_bypasses_bullish_index_for_put(mock_settings, mock_window):
+    from app.engines.execution_chart_monitor import validate_execution_charts
+
+    s = mock_settings.return_value
+    s.chart_alignment_enabled = True
+    s.chart_min_trend_strength = 25.0
+    s.chart_min_momentum_pct = 0.04
+    s.chart_override_min_score = 75
+    s.execution_mtf_enabled = False
+
+    ok, reason, _ = validate_execution_charts(
+        Side.PUT,
+        _bullish_chart(),
+        trade_score=60,
+        premium_led_bypass=True,
+    )
+    assert ok is True
+    assert reason == "ok"
+
+
+@patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
+@patch("app.engines.morning_premium_capture.get_settings")
+def test_reentry_allows_premium_led_explosion(mock_settings, mock_window):
+    from app.engines.trade_selector import _reentry_blocked
+
+    s = mock_settings.return_value
+    s.premium_led_explosion_bypass_enabled = True
+    s.premium_led_counter_breadth_enabled = True
+    s.directional_side_lock_enabled = True
+    s.morning_capture_extreme_velocity_3s = 3.0
+    s.morning_capture_extreme_velocity_9s = 4.0
+    s.premium_led_min_velocity_3s = 2.8
+    s.premium_led_min_velocity_9s = 3.5
+    s.premium_led_min_explosion_score = 42.0
+
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24500.0,
+        spotChart=_bullish_chart(),
+        breadth=Breadth(score=62, bias="BULLISH", aligned=True),
+    )
+    event = _put_event()
+    with patch("app.engines.symbol_cooldown.symbol_in_cooldown", return_value=(False, "ok")):
+        with patch("app.engines.instrument_cooldown.instrument_in_cooldown", return_value=(False, "ok")):
+            blocked, reason = _reentry_blocked(
+                "NIFTY", Side.PUT, 24050.0, snap, explosion_event=event,
+            )
+    assert blocked is False
+    assert reason == "ok"

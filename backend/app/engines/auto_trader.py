@@ -397,19 +397,25 @@ async def _open_from_candidate(
                 trade_score=trade_score,
                 instrument_key=instrument_key,
                 mode=candidate.mode or "",
+                explosion_event=candidate.explosion_event,
             )
             if not chart_ok:
                 return False, chart_reason
         else:
             from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
+            from app.engines.morning_premium_capture import premium_led_bypass_for_snap
             from app.engines.spot_direction import chart_blocks_side
 
             breadth_bypass = expiry_pm_itm_chart_bypass_allowed(
                 candidate.side, snap, mode=candidate.mode or "",
             )
+            premium_bypass = premium_led_bypass_for_snap(
+                candidate.side, snap, explosion_event=candidate.explosion_event,
+            )
             blocked, chart_reason = chart_blocks_side(
                 candidate.side, snap.spotChart, trade_score=trade_score,
                 breadth_aligned_bypass=breadth_bypass,
+                premium_led_bypass=premium_bypass,
             )
             if blocked:
                 return False, f"exec_{chart_reason}"

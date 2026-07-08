@@ -167,6 +167,7 @@ def validate_execution_charts(
     index_mtf_reads: Optional[dict] = None,
     premium_mtf_reads: Optional[dict] = None,
     breadth_aligned_bypass: bool = False,
+    premium_led_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -174,6 +175,7 @@ def validate_execution_charts(
     blocked, reason = chart_blocks_side(
         side, index_chart, trade_score=trade_score,
         breadth_aligned_bypass=breadth_aligned_bypass,
+        premium_led_bypass=premium_led_bypass,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -188,6 +190,7 @@ def validate_execution_charts(
             index_mtf_reads,
             premium_mtf_reads,
             trade_score=trade_score,
+            premium_led_bypass=premium_led_bypass,
         )
         if not passed:
             return False, reason, mtf_meta
@@ -205,6 +208,7 @@ async def monitor_trade_chart_before_execution(
     trade_score: float,
     instrument_key: Optional[str] = None,
     mode: str = "",
+    explosion_event: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Fetch live Upstox charts (1m–4h) for this trade and block if misaligned.
@@ -215,8 +219,12 @@ async def monitor_trade_chart_before_execution(
         return True, "ok", {"enabled": False}
 
     from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
+    from app.engines.morning_premium_capture import premium_led_bypass_for_snap
 
     breadth_bypass = expiry_pm_itm_chart_bypass_allowed(side, snap, mode=mode)
+    premium_bypass = premium_led_bypass_for_snap(
+        side, snap, explosion_event=explosion_event,
+    )
 
     try:
         meta = await fetch_live_trade_charts(
@@ -227,6 +235,7 @@ async def monitor_trade_chart_before_execution(
         blocked, reason = chart_blocks_side(
             side, snap.spotChart, trade_score=trade_score,
             breadth_aligned_bypass=breadth_bypass,
+            premium_led_bypass=premium_bypass,
         )
         fallback = {
             "enabled": True,
@@ -253,6 +262,7 @@ async def monitor_trade_chart_before_execution(
         index_mtf_reads=index_mtf_reads,
         premium_mtf_reads=premium_mtf_reads,
         breadth_aligned_bypass=breadth_bypass,
+        premium_led_bypass=premium_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
@@ -260,4 +270,5 @@ async def monitor_trade_chart_before_execution(
     meta["enabled"] = True
     meta["passed"] = passed
     meta["blockReason"] = reason if not passed else None
+    meta["premiumLedBypass"] = premium_bypass
     return passed, reason, meta

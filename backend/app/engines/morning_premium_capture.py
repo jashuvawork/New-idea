@@ -483,6 +483,42 @@ def premium_led_explosion_bypass(
     return False
 
 
+def premium_led_bypass_for_snap(
+    side: Side | str,
+    snap: SymbolSnapshot,
+    *,
+    explosion_event: Optional[ExplosionEvent] = None,
+) -> bool:
+    """Resolve premium-led bypass from explosion event or matching live alert."""
+    chart = snap.spotChart
+    bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    if explosion_event is not None:
+        return premium_led_explosion_bypass(explosion_event, chart, bias)
+
+    side_v = _side_str(side)
+    for alert in snap.explosionAlerts or []:
+        if str(alert.get("side", "")).upper() != side_v:
+            continue
+        if alert.get("tier") not in ("BUILDING", "EXPLODING", "ELITE"):
+            continue
+        event = ExplosionEvent(
+            symbol=snap.symbol,
+            side=Side(side_v),
+            strike=float(alert.get("strike") or 0),
+            premium=float(alert.get("premium") or 0),
+            velocity_3s=float(alert.get("velocity3s") or 0),
+            velocity_9s=float(alert.get("velocity9s") or 0),
+            velocity_15s=float(alert.get("velocity15s") or 0),
+            volume_surge=float(alert.get("volumeSurge") or 1),
+            explosion_score=float(alert.get("explosionScore") or 0),
+            tier=str(alert.get("tier") or ""),
+            reason=str(alert.get("reason") or ""),
+        )
+        if premium_led_explosion_bypass(event, chart, bias):
+            return True
+    return False
+
+
 def afternoon_capture_exit_params(event_tier: str = "BUILDING") -> "ExplosionExitParams":
     """Wider targets/trails for afternoon momentum rides."""
     from app.engines.explosion_profit import ExplosionExitParams
