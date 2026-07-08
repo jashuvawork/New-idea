@@ -75,3 +75,29 @@ def test_forward_signals_includes_explosion_and_moments():
     assert "EXPLOSION" in horizons
     assert "SWING" in horizons
     assert report.get("tradeableCount", 0) >= 1
+
+
+def test_forward_signals_composer_brief_dict(monkeypatch):
+    """get_latest_brief returns dict — must not AttributeError."""
+    from app.engines import forward_signals_engine as fse
+
+    monkeypatch.setattr(
+        fse,
+        "get_latest_brief",
+        lambda: {
+            "at": "2026-07-08T15:00:00+05:30",
+            "tradeBias": "PUT",
+            "confidence": "HIGH",
+            "marketRead": "Bearish momentum into power hour",
+            "sessionPlan": "Fade rips, size down",
+            "standDown": False,
+            "risks": ["gamma squeeze"],
+            "actions": ["watch deep OTM PE"],
+        },
+    )
+    report = build_forward_signals({"SENSEX": _snap()}, AutoTraderState())
+    composer = report.get("composer")
+    assert composer is not None
+    assert composer.get("tradeBias") == "PUT"
+    assert composer.get("tradeable") is True
+    assert any(s.get("source") == "composer" for s in report.get("signals") or [])

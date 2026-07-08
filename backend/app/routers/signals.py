@@ -1,6 +1,10 @@
 """Forward signals API — future moments and trade setups."""
 
-from fastapi import APIRouter
+import logging
+
+from fastapi import APIRouter, HTTPException
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/signals", tags=["signals"])
 
@@ -12,5 +16,9 @@ async def forward_signals():
     from app.engines.forward_signals_engine import build_forward_signals
     from app.routers.market import get_multi_snapshot
 
-    multi = await get_multi_snapshot(force=False)
-    return build_forward_signals(multi.snapshots, get_state())
+    try:
+        multi = await get_multi_snapshot(force=False)
+        return build_forward_signals(multi.snapshots, get_state())
+    except Exception:
+        logger.exception("forward_signals failed")
+        raise HTTPException(status_code=500, detail="forward_signals_build_failed")
