@@ -131,7 +131,11 @@ def _explosion_candidates(
             if not is_premium_capture_alert(alert, snap.spotChart):
                 continue
         score_val = float(alert.get("explosionScore", 0))
-        if score_val < settings.aggressive_min_explosion_score:
+        daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
+        min_explosion_score = settings.aggressive_min_explosion_score
+        if daily_move >= settings.all_day_explosion_session_move_min_pct:
+            min_explosion_score = min(min_explosion_score, settings.all_day_explosion_min_score)
+        if score_val < min_explosion_score:
             continue
         # Explosion score is primary quality — don't block on low symbol TQS alone
         if snap.tradeQualityScore < 25 and score_val < settings.aggressive_min_explosion_score + 10:
@@ -151,6 +155,7 @@ def _explosion_candidates(
             explosion_score=score_val,
             tier=alert.get("tier", "WATCH"),
             reason=alert.get("reason", ""),
+            daily_move_pct=daily_move,
         )
         suggestion = SuggestedTrade(
             id=alert.get("id", "x"),
@@ -607,11 +612,15 @@ def diagnose_missed_entries(
                 continue
             score = float(alert.get("explosionScore", 0))
             prem = alert.get("premium")
+            daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
+            min_score = settings.aggressive_min_explosion_score
+            if daily_move >= settings.all_day_explosion_session_move_min_pct:
+                min_score = min(min_score, settings.all_day_explosion_min_score)
             blockers: list[str] = []
             if not premium_in_band(prem, mode="explosion"):
                 blockers.append("premium_out_of_band")
-            if score < settings.aggressive_min_explosion_score:
-                blockers.append(f"explosion_score<{settings.aggressive_min_explosion_score}")
+            if score < min_score:
+                blockers.append(f"explosion_score<{min_score:.0f}")
             if snap.tradeQualityScore < 25 and score < settings.aggressive_min_explosion_score + 10:
                 blockers.append("symbol_tqs_low")
             if blockers:

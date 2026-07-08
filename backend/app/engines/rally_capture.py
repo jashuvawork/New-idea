@@ -130,10 +130,23 @@ def chart_blocks_explosion_side(side: Side | str, chart: Optional[SpotChart], ti
 
 
 def dominant_explosion_alert(snap: SymbolSnapshot) -> Optional[dict[str, Any]]:
-    alerts = [
-        a for a in (snap.explosionAlerts or [])
-        if a.get("tradeable") and a.get("tier") in ("EXPLODING", "ELITE")
-    ]
+    settings = get_settings()
+    dom_min = float(getattr(settings, "all_day_explosion_dominant_min_score", 40.0) or 40.0)
+    session_move_min = float(getattr(settings, "all_day_explosion_session_move_min_pct", 40.0) or 40.0)
+    alerts = []
+    for a in snap.explosionAlerts or []:
+        if not a.get("tradeable") and a.get("tier") not in ("BUILDING", "EXPLODING", "ELITE"):
+            continue
+        tier = str(a.get("tier") or "")
+        score = float(a.get("explosionScore") or 0)
+        daily_move = float(a.get("dailyMovePct") or a.get("openPremiumMove") or 0)
+        if tier in ("EXPLODING", "ELITE"):
+            alerts.append(a)
+        elif tier == "BUILDING" and (
+            score >= dom_min
+            or daily_move >= session_move_min
+        ):
+            alerts.append(a)
     if not alerts:
         return None
     return max(alerts, key=lambda a: float(a.get("explosionScore") or 0))

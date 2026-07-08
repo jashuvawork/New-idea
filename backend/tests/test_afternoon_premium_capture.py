@@ -73,8 +73,11 @@ def _settings():
     s.explosion_no_progress_seconds = 120
     s.momentum_rally_start_hour = 10
     s.momentum_rally_start_minute = 0
-    s.momentum_rally_end_hour = 13
-    s.momentum_rally_end_minute = 45
+    s.momentum_rally_end_hour = 15
+    s.momentum_rally_end_minute = 25
+    s.all_day_explosion_capture_enabled = False
+    s.all_day_explosion_session_move_min_pct = 40.0
+    s.all_day_explosion_min_score = 38.0
     return s
 
 
@@ -125,19 +128,21 @@ def test_volume_bypasses_bullish_chart_for_put(mock_window, mock_settings):
     assert afternoon_capture_skips_chart_block(event, chart) is True
 
 
+@patch("app.engines.morning_premium_capture.in_all_day_explosion_window", return_value=False)
 @patch("app.engines.morning_premium_capture.get_settings", return_value=_settings())
 @patch("app.engines.morning_premium_capture.in_afternoon_premium_capture_window", return_value=True)
-def test_event_to_dict_marks_afternoon_tradeable(mock_window, mock_settings):
+def test_event_to_dict_marks_afternoon_tradeable(mock_window, mock_settings, mock_all_day):
     d = event_to_dict(_nifty_24250_pe_event())
     assert d["tradeable"] is True
     assert d["afternoonCapture"] is True
     assert d["premiumCapture"] is True
 
 
+@patch("app.engines.morning_premium_capture.in_all_day_explosion_window", return_value=False)
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.morning_premium_capture.get_settings", return_value=_settings())
 @patch("app.engines.morning_premium_capture.in_afternoon_premium_capture_window", return_value=True)
-def test_explosion_entry_allows_building_afternoon(mock_window, mock_morn, mock_exp_settings):
+def test_explosion_entry_allows_building_afternoon(mock_window, mock_morn, mock_exp_settings, mock_all_day):
     mock_exp_settings.return_value = _settings()
     event = _nifty_24250_pe_event()
     trade = SuggestedTrade(
