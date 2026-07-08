@@ -3,12 +3,13 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import ai, auto_trader, config, execution, health, market, signals, upstox_auth
+from app.routers import ai, auto_trader, config, execution, health, market, playbook, signals, upstox_auth
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ async def _background_monitor():
     tick_driven = False
     last_composer_mono = 0.0
     last_analysis_mono = 0.0
+    last_eod_playbook_date: Optional[str] = None
 
     while True:
         poll_ms = (
@@ -98,6 +100,28 @@ async def _background_monitor():
                             last_analysis_mono = now_mono
                     except Exception as exc:
                         logger.warning("AI analysis monitor cycle error: %s", exc)
+
+            if settings.eod_playbook_enabled and settings.background_market_monitor_enabled:
+                import time
+                from app.engines.eod_playbook_engine import (
+                    in_eod_playbook_window,
+                    next_trading_day,
+                    run_eod_playbook_cycle,
+                )
+                from app.engines.auto_trader import get_state
+
+                if in_eod_playbook_window():
+                    target = next_trading_day()
+                    if last_eod_playbook_date != target:
+                        try:
+                            multi = await get_multi_snapshot(broadcast=False, force=False)
+                            if multi and multi.snapshots:
+                                await run_eod_playbook_cycle(
+                                    multi.snapshots, get_state(), force=False,
+                                )
+                                last_eod_playbook_date = target
+                        except Exception as exc:
+                            logger.warning("EOD playbook cycle error: %s", exc)
         except Exception as e:
             logger.warning("Background monitor error: %s", e)
 
@@ -166,6 +190,7 @@ def create_app() -> FastAPI:
     app.include_router(upstox_auth.router)
     app.include_router(ai.router)
     app.include_router(signals.router)
+    app.include_router(playbook.router)
 
     return app
 

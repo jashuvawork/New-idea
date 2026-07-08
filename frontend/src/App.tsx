@@ -30,6 +30,7 @@ import { ComposerMonitorPanel } from './components/ComposerMonitorPanel';
 import { SnapshotLagPanel } from './components/SnapshotLagPanel';
 import { AnalysisReportsPanel } from './components/AnalysisReportsPanel';
 import { FutureSignalsPanel } from './components/FutureSignalsPanel';
+import { EodTomorrowPlaybookPanel } from './components/EodTomorrowPlaybookPanel';
 import { RiskEngine } from './components/RiskEngine';
 import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
@@ -273,6 +274,9 @@ export default function App() {
               </div>
               <div className="col-span-12">
                 <FutureSignalsPanel snapshots={data.snapshots} auto={auto} />
+              </div>
+              <div className="col-span-12 lg:col-span-6">
+                <EodTomorrowPlaybookPanel />
               </div>
               <div className="col-span-12 lg:col-span-3">
                 <ComposerMonitorPanel />
