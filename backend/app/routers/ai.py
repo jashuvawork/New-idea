@@ -156,7 +156,11 @@ async def analysis_reports_latest():
         stored = trade_store.get_analysis_reports(limit=1)
         if stored:
             return stored[0]
-        raise HTTPException(status_code=404, detail="No analysis report yet — wait for next monitor cycle")
+        return {
+            "waiting": True,
+            "summary": "No analysis report yet — wait for next monitor cycle or POST /analysis-monitor/refresh",
+            "reports": [],
+        }
     return latest
 
 

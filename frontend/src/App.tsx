@@ -29,6 +29,7 @@ import { DayModePanel } from './components/DayModePanel';
 import { ComposerMonitorPanel } from './components/ComposerMonitorPanel';
 import { SnapshotLagPanel } from './components/SnapshotLagPanel';
 import { AnalysisReportsPanel } from './components/AnalysisReportsPanel';
+import { FutureSignalsPanel } from './components/FutureSignalsPanel';
 import { RiskEngine } from './components/RiskEngine';
 import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
@@ -269,6 +270,9 @@ export default function App() {
             <DashboardSection title="Signals & Trades" subtitle="Day mode, router, auto-trader, heatmap, swing lane">
               <div className="col-span-12">
                 <TomorrowPlaybookPanel auto={auto} snapshots={data.snapshots} deployment={deployment} />
+              </div>
+              <div className="col-span-12">
+                <FutureSignalsPanel snapshots={data.snapshots} auto={auto} />
               </div>
               <div className="col-span-12 lg:col-span-3">
                 <ComposerMonitorPanel />

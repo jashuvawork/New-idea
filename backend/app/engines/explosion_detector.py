@@ -97,6 +97,33 @@ def _volume_surge(history: deque) -> float:
     return recent_vol / prior_vol
 
 
+def _volume_surge_with_chain(volume: float, history: deque, settings) -> float:
+    """Blend poll history with chain volume — catches flat-then-vertical rips at 14:00."""
+    hist_surge = _volume_surge(history)
+    min_vol = int(getattr(settings, "explosion_volume_awaken_min", 25000) or 25000)
+    if volume >= min_vol:
+        if hist_surge <= 1.2:
+            return max(hist_surge, 2.5)
+        return max(hist_surge, 1.8)
+    if volume >= min_vol * 0.4 and hist_surge >= 1.5:
+        return max(hist_surge, 2.0)
+    return hist_surge
+
+
+def _volume_awakening(
+    volume: float,
+    v3: float,
+    open_move: float,
+    settings,
+) -> bool:
+    """Flat base all session then sudden volume bar — wake before full velocity builds."""
+    min_vol = int(getattr(settings, "explosion_volume_awaken_min", 25000) or 25000)
+    min_v3 = float(getattr(settings, "explosion_volume_awaken_min_velocity_3s", 1.0) or 1.0)
+    if volume < min_vol:
+        return False
+    return v3 >= min_v3 or open_move >= settings.open_premium_min_move_pct
+
+
 def resolve_explosion_scan_range(symbol: str, settings=None) -> float:
     """ATM ± range for chain scan — wider on SENSEX and during all-day capture."""
     from app.config import get_settings
@@ -188,7 +215,7 @@ def scan_chain_explosions(
                 v3 = _velocity(hist, 1)
                 v9 = _velocity(hist, 3)
                 v15 = _velocity(hist, 5)
-                vol_surge = _volume_surge(hist)
+                vol_surge = _volume_surge_with_chain(volume, hist, settings)
                 if open_window and open_move >= settings.open_premium_min_move_pct:
                     v3 = max(v3, open_move * 0.25)
                     v9 = max(v9, open_move * 0.65)
@@ -236,7 +263,17 @@ def scan_chain_explosions(
             else:
                 reason_parts_open = []
 
-            if tier == "WATCH" and score < 25:
+            awakened = _volume_awakening(volume, v3, open_move, settings)
+            if awakened:
+                vol_surge = max(vol_surge, 2.0)
+                score = min(100, score + 12)
+                if tier == "WATCH":
+                    tier = "BUILDING"
+                if open_move >= settings.open_premium_min_move_pct:
+                    tier = "EXPLODING" if tier == "BUILDING" else tier
+                reason_parts_open.append(f"volAwaken×{volume // 1000}k")
+
+            if tier == "WATCH" and score < 25 and not awakened:
                 continue
 
             # OTM bias during explosions (like 24000 CE rallying hard)

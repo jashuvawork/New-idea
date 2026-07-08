@@ -284,3 +284,29 @@ def test_side_aligned_with_chart():
     assert not side_aligned_with_chart(Side.CALL, bear)
     assert side_aligned_with_chart(Side.PUT, bear)
     assert not side_aligned_with_chart(Side.PUT, bull)
+
+
+def test_reconcile_spot_chart_overrides_bullish_5m_on_bearish_mtf():
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+    from app.models.schemas import ChartAnalysis
+
+    spot = SpotChart(
+        direction="BULLISH",
+        momentum5Pct=0.1,
+        momentum15Pct=-0.2,
+        momentum30Pct=-0.25,
+    )
+    analysis = ChartAnalysis(
+        consensus="BEARISH",
+        alignedCount=4,
+        totalTimeframes=5,
+        timeframes={
+            "1m": {"direction": "BEARISH"},
+            "5m": {"direction": "BEARISH"},
+            "15m": {"direction": "BEARISH"},
+            "1h": {"direction": "BEARISH"},
+            "4h": {"direction": "NEUTRAL"},
+        },
+    )
+    out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="BEARISH", from_open_pct=-0.5)
+    assert out.direction == "BEARISH"
