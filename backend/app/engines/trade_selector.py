@@ -580,6 +580,11 @@ def find_best_entry(
     policy, _ = session_entry_policy(state, snapshots)
     if policy == "BREAKOUT_ONLY":
         floor = max(floor, settings.worst_day_breakout_min_rank)
+    from app.engines.chart_exit_levels import chart_trade_confidence
+
+    chart_conf, _ = chart_trade_confidence(best.snap, best.side)
+    if chart_conf >= settings.all_day_min_chart_confidence:
+        floor = min(floor, settings.all_day_min_rank_score)
     if floor > 0 and sort_key(best) < floor:
         return None
     return best

@@ -145,7 +145,12 @@ def check_entry_gate(
         return False, nb_reason
 
     if settings.midday_chop_block_scalps and in_midday_chop_window():
-        if not (breadth.aligned or momentum_surge or is_momentum_surge(velocity_pct)):
+        from app.engines.chart_exit_levels import high_quality_chart_entry
+
+        hq = False
+        if snap is not None:
+            hq, _ = high_quality_chart_entry(snap, trade.side, trade_score)
+        if not hq and not (breadth.aligned or momentum_surge or is_momentum_surge(velocity_pct)):
             if trade_score < settings.neutral_breadth_min_score:
                 return False, "midday_chop_wait"
 
@@ -269,6 +274,11 @@ def evaluate_exit(
 
     if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
         return "simple_emergency_inr_stop", pnl_inr
+
+    exit_plan = (trade.entryContext or {}).get("exitPlan") or {}
+    target2 = float(exit_plan.get("targetPoints2") or 0)
+    if target2 > profile.targetPoints and pnl_pts >= target2:
+        return "chart_tp2_hit", pnl_inr
 
     if pnl_pts >= profile.targetPoints:
         return "simple_profit_target_hit", pnl_inr

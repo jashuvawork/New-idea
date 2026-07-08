@@ -26,6 +26,7 @@ from app.engines.adaptive_exits import (
     evaluate_adaptive_scalp_exit,
     evaluate_adaptive_swing_exit,
 )
+from app.engines.chart_exit_levels import refresh_open_trade_chart_plan
 from app.engines.capital_allocator import (
     compute_lots,
     compute_session_pnl,
@@ -197,7 +198,12 @@ def _attach_exit_plan(
         entry_velocity_3s=entry_velocity_3s,
         explosion_tier=explosion_tier,
     )
-    return plan.to_dict()
+    from app.engines.adaptive_exits import apply_chart_exit_tuning
+
+    tuned = apply_chart_exit_tuning(
+        plan, snap, side, float(entry_premium or snap.spot or 50),
+    )
+    return tuned.to_dict()
 
 
 def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
@@ -729,6 +735,8 @@ async def _process_open_trades(
         )
 
         live_vel = _trade_premium_velocity(snap, trade)
+        refresh_open_trade_chart_plan(trade, snap)
+        plan_dict = (trade.entryContext or {}).get("exitPlan") or plan_dict
         if settings.edge_engine_enabled:
             edge_exit, edge_pnl = check_edge_realtime_exit(
                 trade, eval_premium, snap,
@@ -779,7 +787,23 @@ async def _process_open_trades(
         elif not exit_reason and (trade.entryContext or {}).get("selectionMode") in (
             "quick_sideways", "slow_bounce",
         ):
-            exit_reason, pnl = evaluate_quick_sideways_exit(trade, eval_premium, lot_mult)
+            from app.engines.chart_exit_levels import should_promote_quick_to_trailing
+
+            best_pts = max(trade.bestPnlPoints, eval_premium - trade.entryPremium)
+            if should_promote_quick_to_trailing(
+                trade, snap, best_pts=best_pts, live_velocity=live_vel,
+            ) and plan_dict:
+                exit_reason, pnl = evaluate_adaptive_scalp_exit(
+                    trade,
+                    eval_premium,
+                    AdaptiveExitPlan.from_dict(plan_dict),
+                    profile,
+                    lot_mult,
+                )
+            else:
+                exit_reason, pnl = evaluate_quick_sideways_exit(
+                    trade, eval_premium, lot_mult, snap=snap,
+                )
         elif not exit_reason and use_adaptive:
             exit_reason, pnl = evaluate_adaptive_scalp_exit(
                 trade, eval_premium, AdaptiveExitPlan.from_dict(plan_dict), profile, lot_mult,
