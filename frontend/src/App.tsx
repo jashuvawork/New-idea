@@ -28,6 +28,7 @@ import { TomorrowPlaybookPanel } from './components/TomorrowPlaybookPanel';
 import { DayModePanel } from './components/DayModePanel';
 import { ComposerMonitorPanel } from './components/ComposerMonitorPanel';
 import { SnapshotLagPanel } from './components/SnapshotLagPanel';
+import { AnalysisReportsPanel } from './components/AnalysisReportsPanel';
 import { RiskEngine } from './components/RiskEngine';
 import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
@@ -274,6 +275,9 @@ export default function App() {
               </div>
               <div className="col-span-12 lg:col-span-3">
                 <SnapshotLagPanel />
+              </div>
+              <div className="col-span-12 lg:col-span-3">
+                <AnalysisReportsPanel />
               </div>
               <div className="col-span-12 lg:col-span-3">
                 <DayModePanel

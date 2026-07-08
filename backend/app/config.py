@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     composer_monitor_use_ai: bool = True
     composer_monitor_interval_seconds: int = 180
     composer_on_new_trade: bool = True
+
+    # Interval AI market analysis — stored reports for missed-move post-mortems
+    ai_analysis_monitor_enabled: bool = True
+    ai_analysis_monitor_interval_seconds: int = 120
+    ai_analysis_monitor_use_ai: bool = True
     cursor_api_key: str = ""
     cursor_api_base_url: str = "https://api.cursor.com"
     cursor_chat_completions_path: str = "/v1/chat/completions"
@@ -118,6 +123,8 @@ class Settings(BaseSettings):
     explosion_early_velocity_3s: float = 3.0
     explosion_early_volume_surge: float = 1.5
     explosion_scan_range: int = 800
+    explosion_sensex_scan_range: int = 1500
+    explosion_deep_otm_min_premium_inr: float = 3.0
     explosion_target_elite: float = 25.0
     explosion_target_standard: float = 12.0
     explosion_micro_target_points: float = 3.0
