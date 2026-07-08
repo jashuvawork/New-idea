@@ -24,13 +24,17 @@ interface MonitorStatus {
 
 async function fetchStatus(): Promise<MonitorStatus> {
   const res = await fetch('/api/ai/analysis-monitor/status');
-  if (!res.ok) throw new Error(`${res.status}`);
+  if (res.status === 404) {
+    return { enabled: false, cycleCount: 0 };
+  }
+  if (!res.ok) throw new Error(`status ${res.status}`);
   return res.json() as Promise<MonitorStatus>;
 }
 
 async function fetchReports(): Promise<AnalysisReport[]> {
   const res = await fetch('/api/ai/analysis-reports?limit=8&days=3');
-  if (!res.ok) throw new Error(`${res.status}`);
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error(`reports ${res.status}`);
   const data = await res.json();
   return (data.reports ?? []) as AnalysisReport[];
 }
@@ -40,12 +44,14 @@ export function AnalysisReportsPanel({ pollMs = 60_000 }: { pollMs?: number }) {
   const [reports, setReports] = useState<AnalysisReport[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [apiMissing, setApiMissing] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const [st, reps] = await Promise.all([fetchStatus(), fetchReports()]);
       setStatus(st);
       setReports(reps);
+      setApiMissing(st.enabled === false && (st.cycleCount ?? 0) === 0 && reps.length === 0);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'load failed');
@@ -56,7 +62,12 @@ export function AnalysisReportsPanel({ pollMs = 60_000 }: { pollMs?: number }) {
     setRefreshing(true);
     try {
       const res = await fetch('/api/ai/analysis-monitor/refresh', { method: 'POST' });
-      if (!res.ok) throw new Error(`${res.status}`);
+      if (res.status === 404) {
+        setApiMissing(true);
+        setError('Analysis monitor not deployed — merge latest backend');
+        return;
+      }
+      if (!res.ok) throw new Error(`refresh ${res.status}`);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'refresh failed');
@@ -75,16 +86,23 @@ export function AnalysisReportsPanel({ pollMs = 60_000 }: { pollMs?: number }) {
   const lag = latest?.lagScore ?? status?.lastLagScore ?? 0;
   const scoreTone =
     lag >= 60 ? 'text-nexus-red' : lag >= 30 ? 'text-nexus-yellow' : 'text-nexus-green';
+  const badge = apiMissing ? 'SETUP' : status?.enabled ? 'LIVE' : 'OFF';
 
   return (
     <Panel
       title="AI Analysis Reports"
-      badge={status?.enabled ? 'LIVE' : 'OFF'}
-      badgeColor={status?.enabled ? 'bg-purple-600/90' : 'bg-gray-700'}
+      badge={badge}
+      badgeColor={apiMissing ? 'bg-nexus-yellow/90 text-black' : status?.enabled ? 'bg-purple-600/90' : 'bg-gray-700'}
     >
       <p className="text-[10px] text-nexus-muted mb-2 leading-relaxed">
         Interval audit of radar vs gates — stored every {status?.intervalSeconds ?? 120}s so missed rips are explainable later.
       </p>
+
+      {apiMissing ? (
+        <div className="text-[10px] text-nexus-yellow mb-2 p-2 rounded border border-nexus-yellow/40 bg-nexus-yellow/5">
+          No stored reports yet. Deploy latest backend, then click Run now for the first cycle.
+        </div>
+      ) : null}
 
       <div className={`text-[11px] font-mono mb-2 ${scoreTone}`}>
         Lag score: {lag}/100 · cycles: {status?.cycleCount ?? 0}
@@ -92,6 +110,10 @@ export function AnalysisReportsPanel({ pollMs = 60_000 }: { pollMs?: number }) {
 
       {latest?.summary ? (
         <div className="text-[10px] text-white mb-2 p-2 rounded bg-black/30">{latest.summary}</div>
+      ) : !apiMissing ? (
+        <div className="text-[10px] text-nexus-muted mb-2 p-2 rounded bg-black/20">
+          Waiting for first analysis cycle…
+        </div>
       ) : null}
 
       {latest?.aiSummary?.headline ? (

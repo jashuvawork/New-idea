@@ -99,16 +99,34 @@ function chartRecommendedSide(chart: SpotChart): string {
   return 'WAIT';
 }
 
-function SymbolChartRow({ symbol, chart }: { symbol: string; chart: SpotChart }) {
+function SymbolChartRow({
+  symbol,
+  chart,
+  mtfConsensus,
+}: {
+  symbol: string;
+  chart: SpotChart;
+  mtfConsensus?: string;
+}) {
   const rec = chartRecommendedSide(chart);
   const momTone =
     chart.momentum5Pct > 0.04 ? 'text-nexus-green' : chart.momentum5Pct < -0.04 ? 'text-nexus-red' : 'text-nexus-yellow';
+  const mtf = (mtfConsensus || '').toUpperCase();
+  const mismatch =
+    mtf && mtf !== 'NEUTRAL' && chart.direction !== mtf
+      ? `5m ${chart.direction} vs MTF ${mtf}`
+      : null;
 
   return (
     <div className="flex items-center justify-between gap-2 py-1.5 border-b border-nexus-border/50 last:border-0">
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-2 min-w-0 flex-wrap">
         <span className="text-[11px] font-bold text-white w-14 shrink-0">{symbol}</span>
         <BiasBadge bias={chart.direction} />
+        {mismatch ? (
+          <span className="text-[8px] px-1 py-0.5 rounded border border-nexus-yellow/50 text-nexus-yellow" title="Reconciled to MTF when session disagrees">
+            {mismatch}
+          </span>
+        ) : null}
         <span
           className={`text-[9px] font-semibold uppercase ${
             rec === 'CALL' ? 'text-nexus-green' : rec === 'PUT' ? 'text-nexus-red' : 'text-nexus-muted'
@@ -454,7 +472,7 @@ export function DayModePanel({
               </div>
             );
           }
-          return <SymbolChartRow key={`chart-${sym}`} symbol={sym} chart={chart} />;
+          return <SymbolChartRow key={`chart-${sym}`} symbol={sym} chart={chart} mtfConsensus={snapshots[sym]?.chartAnalysis?.consensus} />;
         })}
       </div>
 

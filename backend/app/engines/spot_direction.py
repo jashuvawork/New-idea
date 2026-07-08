@@ -165,9 +165,13 @@ def build_spot_chart(
         direction = "BULLISH"
     elif bearish >= bullish + 3:
         direction = "BEARISH"
-    elif mom5 > 0.02 and mom15 >= 0:
+    elif mom30 < -0.08 and mom15 <= 0:
+        direction = "BEARISH"
+    elif mom30 > 0.08 and mom15 >= 0:
         direction = "BULLISH"
-    elif mom5 < -0.02 and mom15 <= 0:
+    elif mom5 > 0.02 and mom15 >= 0 and mom30 >= -0.05:
+        direction = "BULLISH"
+    elif mom5 < -0.02 and mom15 <= 0 and mom30 <= 0.05:
         direction = "BEARISH"
     else:
         direction = "NEUTRAL"
@@ -203,6 +207,62 @@ def build_spot_chart(
         macdHistogram=macd_read.histogram,
         macdBias=macd_read.bias,
     )
+
+
+def reconcile_spot_chart_with_mtf(
+    spot_chart: SpotChart,
+    chart_analysis: Optional[Any],
+    breadth_bias: str = "NEUTRAL",
+    *,
+    from_open_pct: float = 0.0,
+) -> SpotChart:
+    """
+    Align primary spotChart with MTF consensus when a lone 5m flicker disagrees
+    with session + multi-timeframe bearish/bullish read.
+    """
+    if not chart_analysis:
+        return spot_chart
+
+    consensus = str(getattr(chart_analysis, "consensus", None) or "NEUTRAL").upper()
+    spot_dir = (spot_chart.direction or "NEUTRAL").upper()
+    if consensus not in ("BULLISH", "BEARISH") or consensus == spot_dir:
+        return spot_chart
+
+    tfs = getattr(chart_analysis, "timeframes", None) or {}
+    bull = bear = 0
+    for tf in tfs.values():
+        d = tf.get("direction") if isinstance(tf, dict) else getattr(tf, "direction", "NEUTRAL")
+        d = str(d or "NEUTRAL").upper()
+        if d == "BULLISH":
+            bull += 1
+        elif d == "BEARISH":
+            bear += 1
+
+    consensus_ct = bear if consensus == "BEARISH" else bull
+    breadth = (breadth_bias or "NEUTRAL").upper()
+    aligned = int(getattr(chart_analysis, "alignedCount", 0) or 0)
+    total = int(getattr(chart_analysis, "totalTimeframes", 0) or len(tfs) or 0)
+
+    override = consensus_ct >= 3
+    if total >= 4 and aligned >= total - 1:
+        override = True
+    if breadth == consensus and consensus_ct >= 2:
+        override = True
+    if consensus == "BEARISH" and from_open_pct <= -0.08 and consensus_ct >= 2:
+        override = True
+    if consensus == "BULLISH" and from_open_pct >= 0.08 and consensus_ct >= 2:
+        override = True
+
+    if not override:
+        return spot_chart
+
+    if consensus == "BEARISH" and spot_chart.momentum30Pct < -0.03:
+        return spot_chart.model_copy(update={"direction": "BEARISH"})
+    if consensus == "BULLISH" and spot_chart.momentum30Pct > 0.03:
+        return spot_chart.model_copy(update={"direction": "BULLISH"})
+    if consensus_ct >= 3:
+        return spot_chart.model_copy(update={"direction": consensus})
+    return spot_chart
 
 
 def analyze_spot_chart(

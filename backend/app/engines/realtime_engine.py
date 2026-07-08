@@ -408,6 +408,7 @@ async def build_symbol_snapshot(
         spot_chart = build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=candles_1m)
 
         chart_analysis = None
+        day_from_open_pct = 0.0
         try:
             from app.engines.chart_advanced_analysis import build_chart_analysis
             from app.engines.spot_direction import _candle_rows, pro_index_quote_context
@@ -419,6 +420,7 @@ async def build_symbol_snapshot(
                 prev_close = qctx["prevClose"]
                 day_high = qctx["dayHigh"]
                 day_low = qctx["dayLow"]
+                day_from_open_pct = float(qctx.get("fromOpenPct") or 0)
             except Exception:
                 _, highs, lows, closes = _candle_rows(candles_1m)
                 if highs and lows:
@@ -456,6 +458,16 @@ async def build_symbol_snapshot(
             constituent_hm,
             use_constituents=settings.fetch_constituents_in_snapshot,
         )
+
+        if chart_analysis:
+            from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+
+            spot_chart = reconcile_spot_chart_with_mtf(
+                spot_chart,
+                chart_analysis,
+                breadth_bias=breadth.bias or "NEUTRAL",
+                from_open_pct=day_from_open_pct,
+            )
 
         greeks = _build_greeks(chain, atm, spot)
         regime = _detect_regime(candles)
