@@ -336,7 +336,7 @@ export function FutureSignalsPanel({
 
       {apiMissing ? (
         <div className="text-[10px] text-nexus-yellow mt-2">
-          Forward API not deployed — showing live snapshot scan. Merge PR #100 backend to EC2.
+          Forward API not deployed — showing live snapshot scan. Redeploy EC2 backend after merge.
         </div>
       ) : null}
       {error && !apiMissing ? <div className="text-[10px] text-nexus-red mt-2">{error}</div> : null}
