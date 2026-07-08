@@ -211,6 +211,28 @@ def _breadth_aligned(candidate: Any, snap: SymbolSnapshot) -> bool:
     return side_aligned_with_breadth(side_val, snap.breadth.bias)
 
 
+def _candidate_session_move(candidate: Any) -> float:
+    ev = getattr(candidate, "explosion_event", None)
+    if ev is not None:
+        return float(getattr(ev, "daily_move_pct", 0) or 0)
+    alert = getattr(candidate, "alert", None) or {}
+    return float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
+
+
+def _extreme_explosion_bypass(candidate: Any) -> bool:
+    """Session rip +4520% — don't apply bad-day / pre-expiry blocks meant for chop days."""
+    settings = get_settings()
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+    open_move = _candidate_session_move(candidate)
+    score = float(getattr(candidate, "score", 0) or 0)
+    if open_move >= settings.all_day_explosion_extreme_move_min_pct:
+        return score >= settings.all_day_explosion_min_score - 5
+    if open_move >= settings.all_day_explosion_session_move_min_pct:
+        return score >= settings.all_day_explosion_min_score
+    return False
+
+
 def check_bad_day_candidate(
     candidate: Any,
     state: AutoTraderState,
@@ -264,6 +286,8 @@ def check_bad_day_candidate(
 
     if pre_restricted and pre_alt:
         meta["alternateIndex"] = pre_alt
+        if _extreme_explosion_bypass(candidate):
+            return True, "ok", meta
         if mode in ("quick_sideways", "slow_bounce"):
             return True, "ok", meta
         if mode == "scalp":
@@ -278,6 +302,8 @@ def check_bad_day_candidate(
         return False, f"bad_day_scalp_rank_below_{floor:.0f}", meta
 
     if mode == "explosion":
+        if _extreme_explosion_bypass(candidate):
+            return True, "ok", meta
         if tier != "ELITE" and score < floor:
             return False, f"bad_day_explosion_rank_below_{floor:.0f}", meta
         if not aligned and score < settings.high_confidence_min_score:

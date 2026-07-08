@@ -125,6 +125,8 @@ class Settings(BaseSettings):
     explosion_scan_range: int = 800
     explosion_sensex_scan_range: int = 1500
     explosion_deep_otm_min_premium_inr: float = 3.0
+    explosion_volume_awaken_min: int = 25000
+    explosion_volume_awaken_min_velocity_3s: float = 1.0
     explosion_target_elite: float = 25.0
     explosion_target_standard: float = 12.0
     explosion_micro_target_points: float = 3.0

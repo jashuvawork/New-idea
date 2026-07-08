@@ -564,6 +564,7 @@ def find_best_entry(
     if limits and settings.daily_18pct_strategy_enabled:
         floor = max(floor, limits.minRankScore)
     from app.engines.morning_premium_capture import (
+        in_all_day_explosion_window,
         in_premium_capture_window,
         premium_capture_rank_floor,
     )
@@ -580,6 +581,15 @@ def find_best_entry(
     from app.engines.bad_day_routing import bad_day_min_rank_floor
 
     floor = max(floor, bad_day_min_rank_floor(state, snapshots))
+    if best.mode == "explosion" and best.explosion_event is not None:
+        open_move = float(getattr(best.explosion_event, "daily_move_pct", 0) or 0)
+        if open_move >= settings.all_day_explosion_extreme_move_min_pct:
+            floor = min(floor, settings.all_day_explosion_min_score)
+        elif (
+            open_move >= settings.all_day_explosion_session_move_min_pct
+            and in_all_day_explosion_window()
+        ):
+            floor = min(floor, settings.all_day_explosion_min_score + 4)
     from app.engines.worst_day_guard import session_entry_policy
 
     policy, _ = session_entry_policy(state, snapshots)
