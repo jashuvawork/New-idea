@@ -196,23 +196,33 @@ export function FutureSignalsPanel({
   const [tab, setTab] = useState<Horizon | 'ALL'>('ALL');
   const [error, setError] = useState<string | null>(null);
   const [apiMissing, setApiMissing] = useState(false);
+  const [apiDegraded, setApiDegraded] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/signals/forward');
       if (res.status === 404) {
         setApiMissing(true);
+        setApiDegraded(false);
         setData(buildLocalForwardPayload(snapshots, auto));
         setError(null);
         return;
       }
-      if (!res.ok) throw new Error(`${res.status}`);
+      if (!res.ok) {
+        setApiMissing(false);
+        setApiDegraded(true);
+        setData(buildLocalForwardPayload(snapshots, auto));
+        setError(`Forward API error ${res.status} — showing live snapshot scan`);
+        return;
+      }
       const payload = (await res.json()) as ForwardPayload;
       setApiMissing(false);
+      setApiDegraded(false);
       setData(payload);
       setError(null);
     } catch (e) {
-      setApiMissing(true);
+      setApiMissing(false);
+      setApiDegraded(true);
       setData(buildLocalForwardPayload(snapshots, auto));
       setError(e instanceof Error ? e.message : 'fetch failed');
     }
@@ -236,10 +246,18 @@ export function FutureSignalsPanel({
     <Panel
       title="Future Signals"
       badge={
-        apiMissing ? 'LOCAL' : entriesOk ? `${data?.tradeableCount ?? 0} READY` : 'GATED'
+        apiMissing || apiDegraded
+          ? 'LOCAL'
+          : entriesOk
+            ? `${data?.tradeableCount ?? 0} READY`
+            : 'GATED'
       }
       badgeColor={
-        apiMissing ? 'bg-nexus-yellow/90 text-black' : entriesOk ? 'bg-nexus-accent/90 text-black' : 'bg-nexus-red/90'
+        apiMissing || apiDegraded
+          ? 'bg-nexus-yellow/90 text-black'
+          : entriesOk
+            ? 'bg-nexus-accent/90 text-black'
+            : 'bg-nexus-red/90'
       }
     >
       <p className="text-[10px] text-nexus-muted mb-2 leading-relaxed">
@@ -339,7 +357,12 @@ export function FutureSignalsPanel({
           Forward API not deployed — showing live snapshot scan. Redeploy EC2 backend after merge.
         </div>
       ) : null}
-      {error && !apiMissing ? <div className="text-[10px] text-nexus-red mt-2">{error}</div> : null}
+      {apiDegraded && !apiMissing ? (
+        <div className="text-[10px] text-nexus-yellow mt-2">
+          Forward API unavailable — showing live snapshot scan until backend recovers.
+        </div>
+      ) : null}
+      {error ? <div className="text-[10px] text-nexus-red mt-2">{error}</div> : null}
 
       <button
         type="button"

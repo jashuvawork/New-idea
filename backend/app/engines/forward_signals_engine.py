@@ -308,27 +308,39 @@ def _risk_signals(
     return out
 
 
+def _brief_field(brief: Any, key: str, default: Any = None) -> Any:
+    """Read composer brief fields from dict (API) or dataclass (in-process)."""
+    if isinstance(brief, dict):
+        return brief.get(key, default)
+    return getattr(brief, key, default)
+
+
 def _composer_signal() -> Optional[dict[str, Any]]:
     brief = get_latest_brief()
     if not brief:
         return None
+    trade_bias = str(_brief_field(brief, "tradeBias", "STAND_ASIDE") or "STAND_ASIDE")
+    confidence = str(_brief_field(brief, "confidence", "LOW") or "LOW")
+    stand_down = bool(_brief_field(brief, "standDown", False))
+    market_read = str(_brief_field(brief, "marketRead", "") or "")
+    session_plan = str(_brief_field(brief, "sessionPlan", "") or "")
     conf_map = {"HIGH": 85, "MEDIUM": 55, "LOW": 30}
     return {
         "id": "advisory:composer",
         "horizon": "ADVISORY",
         "symbol": "SESSION",
-        "side": brief.tradeBias if brief.tradeBias in ("CALL", "PUT") else None,
-        "confidence": conf_map.get(brief.confidence, 40),
-        "tradeable": not brief.standDown and brief.tradeBias not in ("STAND_ASIDE",),
-        "summary": brief.marketRead[:140] if brief.marketRead else "Composer session read",
-        "detail": brief.sessionPlan or "",
-        "tradeBias": brief.tradeBias,
-        "risks": brief.risks,
-        "actions": brief.actions,
-        "standDown": brief.standDown,
-        "blockers": ["stand_down"] if brief.standDown else [],
+        "side": trade_bias if trade_bias in ("CALL", "PUT") else None,
+        "confidence": conf_map.get(confidence, 40),
+        "tradeable": not stand_down and trade_bias not in ("STAND_ASIDE",),
+        "summary": market_read[:140] if market_read else "Composer session read",
+        "detail": session_plan,
+        "tradeBias": trade_bias,
+        "risks": _brief_field(brief, "risks", []) or [],
+        "actions": _brief_field(brief, "actions", []) or [],
+        "standDown": stand_down,
+        "blockers": ["stand_down"] if stand_down else [],
         "source": "composer",
-        "at": brief.at,
+        "at": _brief_field(brief, "at"),
     }
 
 
