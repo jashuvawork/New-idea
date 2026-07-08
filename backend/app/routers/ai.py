@@ -105,6 +105,17 @@ async def composer_refresh():
     return brief.to_dict()
 
 
+@router.get("/missed-trades")
+async def missed_trades_explainer():
+    """Per-alert gate-by-gate explainer — why radar rips did not become trades."""
+    from app.engines.auto_trader import get_state
+    from app.engines.missed_trade_explainer import build_missed_trade_report
+    from app.routers.market import get_multi_snapshot
+
+    multi = await get_multi_snapshot(force=False)
+    return build_missed_trade_report(multi.snapshots, get_state())
+
+
 @router.get("/snapshot-analysis")
 async def snapshot_analysis_rules():
     """Rules-based gap report: radar vs entry gates, misleading UI flags."""

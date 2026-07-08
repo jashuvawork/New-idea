@@ -28,6 +28,7 @@ import { TomorrowPlaybookPanel } from './components/TomorrowPlaybookPanel';
 import { DayModePanel } from './components/DayModePanel';
 import { ComposerMonitorPanel } from './components/ComposerMonitorPanel';
 import { SnapshotLagPanel } from './components/SnapshotLagPanel';
+import { MissedTradeExplainerPanel } from './components/MissedTradeExplainerPanel';
 import { AnalysisReportsPanel } from './components/AnalysisReportsPanel';
 import { FutureSignalsPanel } from './components/FutureSignalsPanel';
 import { EodTomorrowPlaybookPanel } from './components/EodTomorrowPlaybookPanel';
@@ -283,6 +284,9 @@ export default function App() {
               </div>
               <div className="col-span-12 lg:col-span-3">
                 <SnapshotLagPanel />
+              </div>
+              <div className="col-span-12 lg:col-span-3">
+                <MissedTradeExplainerPanel />
               </div>
               <div className="col-span-12 lg:col-span-3">
                 <AnalysisReportsPanel />
