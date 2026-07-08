@@ -128,7 +128,9 @@ def check_explosion_entry(
     from app.engines.morning_premium_capture import is_afternoon_capture_event
 
     if event.velocity_3s < 2.0 and event.velocity_9s < 3.0:
-        if not is_afternoon_capture_event(event, chart=chart):
+        open_move = float(getattr(event, "daily_move_pct", 0) or 0)
+        open_min = float(getattr(get_settings(), "open_premium_min_move_pct", 25.0) or 25.0)
+        if not is_afternoon_capture_event(event, chart=chart) and open_move < open_min:
             return False, "velocity_too_low"
 
     from app.engines.rally_capture import (
@@ -181,7 +183,7 @@ def check_explosion_entry(
             if settings.expiry_counter_breadth_elite_only:
                 side_val = event.side.value if hasattr(event.side, "value") else str(event.side).upper()
                 if not side_aligned_with_breadth(side_val, breadth.bias) and event.tier != "ELITE":
-                    if not (premium_bypass and event.tier in ("EXPLODING", "ELITE")):
+                    if not (premium_bypass and event.tier in ("EXPLODING", "ELITE", "BUILDING")):
                         return False, "expiry_counter_breadth_elite_only"
 
     blocked, nb_reason = neutral_breadth_blocks_entry(

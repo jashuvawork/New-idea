@@ -191,11 +191,18 @@ def _chart_ok_for_morning_event(event: ExplosionEvent, chart: Optional[SpotChart
     if _chart_confirms_side(event.side, chart):
         return True
     settings = get_settings()
+    open_move = float(event.daily_move_pct or 0)
+    open_min = float(getattr(settings, "open_premium_min_move_pct", 25.0) or 25.0)
+    open_bypass_score = float(getattr(settings, "open_premium_bypass_min_score", 35.0) or 35.0)
+    open_chart_bypass = float(getattr(settings, "open_premium_chart_bypass_move_pct", 20.0) or 20.0)
+    if open_move >= open_min:
+        return True
     if not settings.morning_capture_skip_chart_on_extreme_velocity:
         return False
     return (
         event.velocity_3s >= settings.morning_capture_extreme_velocity_3s
         or event.velocity_9s >= settings.morning_capture_extreme_velocity_9s
+        or open_move >= open_chart_bypass
     )
 
 
@@ -219,7 +226,15 @@ def is_morning_capture_event(
     v9 = event.velocity_9s
     vol = event.volume_surge
     vel_ok = v3 >= settings.morning_capture_min_velocity_3s or v9 >= settings.morning_capture_min_velocity_9s
+    open_move = float(event.daily_move_pct or 0)
+    open_min = float(getattr(settings, "open_premium_min_move_pct", 25.0) or 25.0)
+    open_bypass_score = float(getattr(settings, "open_premium_bypass_min_score", 35.0) or 35.0)
+    open_chart_bypass = float(getattr(settings, "open_premium_chart_bypass_move_pct", 20.0) or 20.0)
+    if open_move >= open_min:
+        vel_ok = True
     vol_ok = vol >= settings.morning_capture_min_vol_surge or v3 >= 2.5
+    if open_move >= open_min:
+        vol_ok = True
 
     if not vel_ok or not vol_ok:
         return False
@@ -228,6 +243,7 @@ def is_morning_capture_event(
         building_ok = (
             v3 >= settings.morning_capture_building_min_velocity_3s
             or (v9 >= settings.morning_capture_min_velocity_9s and vol >= settings.morning_capture_min_vol_surge)
+            or open_move >= open_min
         )
         if not building_ok:
             return False
@@ -450,6 +466,10 @@ def premium_led_explosion_bypass(
     side = _side_str(event.side)
     bias = (breadth_bias or "NEUTRAL").upper()
     direction = (chart.direction or "NEUTRAL").upper() if chart else "NEUTRAL"
+    open_move = float(event.daily_move_pct or 0)
+    open_min = float(getattr(settings, "open_premium_min_move_pct", 25.0) or 25.0)
+    open_bypass_score = float(getattr(settings, "open_premium_bypass_min_score", 35.0) or 35.0)
+    open_chart_bypass = float(getattr(settings, "open_premium_chart_bypass_move_pct", 20.0) or 20.0)
 
     counter_breadth = (bias == "BULLISH" and side == "PUT") or (bias == "BEARISH" and side == "CALL")
     counter_chart = (direction == "BULLISH" and side == "PUT") or (direction == "BEARISH" and side == "CALL")
@@ -464,8 +484,21 @@ def premium_led_explosion_bypass(
     v9 = float(event.velocity_9s or 0)
     score = float(event.explosion_score or 0)
 
+    if open_move >= open_min and score >= open_bypass_score:
+        return True
+
     if v3 >= settings.morning_capture_extreme_velocity_3s or v9 >= settings.morning_capture_extreme_velocity_9s:
         return True
+
+    from app.engines.session_timing import in_open_caution_window
+
+    if in_open_caution_window():
+        bypass_v3 = float(getattr(settings, "open_premium_relax_velocity_3s", 1.8) or 1.8)
+        bypass_v9 = float(getattr(settings, "open_premium_relax_velocity_9s", 2.5) or 2.5)
+        if tier in ("EXPLODING", "ELITE"):
+            vel_ok = v3 >= bypass_v3 or v9 >= bypass_v9
+            if vel_ok and score >= settings.premium_led_min_explosion_score - 4:
+                return True
 
     if tier in ("EXPLODING", "ELITE"):
         vel_ok = v3 >= settings.premium_led_min_velocity_3s or v9 >= settings.premium_led_min_velocity_9s
@@ -478,6 +511,8 @@ def premium_led_explosion_bypass(
             or (v9 >= settings.morning_capture_min_velocity_9s and event.volume_surge >= settings.morning_capture_min_vol_surge)
         )
         if building_vel and score >= settings.morning_capture_building_min_score:
+            return True
+        if open_move >= open_min and score >= open_bypass_score:
             return True
 
     return False

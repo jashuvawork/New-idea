@@ -39,6 +39,13 @@ def _settings():
     s.whipsaw_single_side_surge_bypass_enabled = True
     s.whipsaw_dominant_velocity_min = 2.5
     s.whipsaw_dominant_velocity_ratio = 1.6
+    s.open_premium_min_move_pct = 25.0
+    s.open_premium_bypass_min_score = 35.0
+    s.open_premium_chart_bypass_move_pct = 20.0
+    s.open_premium_relax_velocity_3s = 1.8
+    s.open_premium_relax_velocity_9s = 2.5
+    s.afternoon_capture_dominant_velocity_min = 1.6
+    s.afternoon_capture_dominant_velocity_ratio = 1.4
     return s
 
 

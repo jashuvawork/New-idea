@@ -397,6 +397,14 @@ class Settings(BaseSettings):
     explosion_open_entry_enabled: bool = True
     explosion_entry_earliest_hour: int = 9
     explosion_entry_earliest_minute: int = 15
+    # Open premium explosion — NIFTY PE 60→160 style gap rips at 9:15
+    open_premium_explosion_enabled: bool = True
+    open_premium_min_move_pct: float = 25.0
+    open_premium_chart_bypass_move_pct: float = 20.0
+    open_premium_bypass_min_score: float = 35.0
+    open_premium_relax_velocity_3s: float = 1.8
+    open_premium_relax_velocity_9s: float = 2.5
+    explosion_open_scan_interval_ms: int = 1000
 
     # Afternoon premium capture — 11:45–13:45 consolidation breakouts (e.g. NIFTY 24250 PE 1pm rip)
     afternoon_premium_capture_enabled: bool = True

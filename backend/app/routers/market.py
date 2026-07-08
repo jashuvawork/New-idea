@@ -62,11 +62,12 @@ def mark_full_scan_done() -> None:
 
 
 def entry_scan_due() -> bool:
-    settings = get_settings()
+    from app.engines.session_timing import effective_entry_scan_interval_ms
+
     if _last_full_scan_mono <= 0:
         return True
     elapsed_ms = (time.monotonic() - _last_full_scan_mono) * 1000
-    return elapsed_ms >= settings.entry_scan_interval_ms
+    return elapsed_ms >= effective_entry_scan_interval_ms()
 
 
 def can_run_tick_fast() -> bool:
