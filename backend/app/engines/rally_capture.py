@@ -35,6 +35,12 @@ def explosion_exhausted(event: ExplosionEvent) -> tuple[bool, str]:
     settings = get_settings()
     key = _exhaustion_key(event)
 
+    open_move = float(getattr(event, "daily_move_pct", 0) or 0)
+    open_min = float(getattr(settings, "open_premium_min_move_pct", 25.0) or 25.0)
+    if open_move >= open_min and event.velocity_3s >= 1.5:
+        _exhaustion_marked_at.pop(key, None)
+        return False, "ok"
+
     if settings.explosion_exhaustion_consolidation_reset_enabled:
         if _in_consolidation(event):
             _exhaustion_marked_at.pop(key, None)

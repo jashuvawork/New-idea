@@ -64,6 +64,25 @@ def in_open_caution_window() -> bool:
     return entry_earliest_minutes() <= current < open_caution_until_minutes()
 
 
+def in_open_premium_window() -> bool:
+    """09:15–09:45 IST — session-open premium explosion detection."""
+    if get_market_phase() != "LIVE_MARKET":
+        return False
+    settings = get_settings()
+    current = _minutes_now()
+    start = settings.explosion_entry_earliest_hour * 60 + settings.explosion_entry_earliest_minute
+    end = open_caution_until_minutes()
+    return start <= current < end
+
+
+def effective_entry_scan_interval_ms() -> int:
+    """Faster polling during open premium window."""
+    settings = get_settings()
+    if in_open_premium_window() and settings.explosion_open_entry_enabled:
+        return min(settings.entry_scan_interval_ms, settings.explosion_open_scan_interval_ms)
+    return settings.entry_scan_interval_ms
+
+
 def min_explosion_score_now() -> int:
     settings = get_settings()
     if in_open_caution_window():

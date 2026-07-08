@@ -80,6 +80,9 @@ def test_premium_led_bypass_detects_put_vs_bullish(mock_settings, mock_window):
     s.morning_capture_min_velocity_9s = 2.8
     s.morning_capture_min_vol_surge = 1.3
     s.morning_capture_building_min_score = 38.0
+    s.open_premium_min_move_pct = 25.0
+    s.open_premium_bypass_min_score = 35.0
+    s.open_premium_chart_bypass_move_pct = 20.0
 
     event = _put_event()
     assert premium_led_explosion_bypass(event, _bullish_chart(), "BULLISH") is True
@@ -106,6 +109,8 @@ def test_put_explosion_passes_bullish_breadth_and_chart(mock_settings, mock_wind
     s.chart_min_trend_strength = 25.0
     s.index_pin_put_block_enabled = True
     s.index_pin_min_stock_breadth_pct = 58.0
+    s.open_premium_min_move_pct = 25.0
+    s.open_premium_bypass_min_score = 35.0
 
     snap = SymbolSnapshot(
         symbol="NIFTY",
@@ -185,6 +190,10 @@ def test_directional_lock_bypassed_for_premium_led_put(mock_settings, mock_windo
     s.directional_side_lock_enabled = True
     s.morning_capture_extreme_velocity_3s = 3.0
     s.morning_capture_extreme_velocity_9s = 4.0
+    s.open_premium_min_move_pct = 25.0
+    s.open_premium_bypass_min_score = 35.0
+    s.premium_led_min_velocity_3s = 2.8
+    s.premium_led_min_explosion_score = 42.0
 
     snap = SymbolSnapshot(
         symbol="NIFTY",
@@ -241,6 +250,8 @@ def test_reentry_allows_premium_led_explosion(mock_settings, mock_window):
     s.premium_led_min_velocity_3s = 2.8
     s.premium_led_min_velocity_9s = 3.5
     s.premium_led_min_explosion_score = 42.0
+    s.open_premium_min_move_pct = 25.0
+    s.open_premium_bypass_min_score = 35.0
 
     snap = SymbolSnapshot(
         symbol="NIFTY",

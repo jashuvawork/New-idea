@@ -15,7 +15,35 @@ IST = ZoneInfo("Asia/Kolkata")
 
 # Rolling premium history: symbol -> strike_key -> deque of (timestamp, premium, volume)
 _history: dict[str, dict[str, deque]] = {}
+# Session open premium: symbol:side:strike -> first seen premium today
+_session_open: dict[str, float] = {}
+_session_date: Optional[str] = None
 MAX_HISTORY = 40  # ~2 min at 3s poll
+
+
+def _roll_session() -> None:
+    global _session_date, _session_open
+    today = datetime.now(IST).strftime("%Y-%m-%d")
+    if _session_date != today:
+        _session_date = today
+        _session_open.clear()
+
+
+def _open_key(symbol: str, strike: float, side: Side) -> str:
+    return f"{symbol.upper()}:{_strike_key(strike, side)}"
+
+
+def _session_open_move_pct(symbol: str, strike: float, side: Side, premium: float) -> float:
+    """Premium % change since first tick today — catches 60→160 open rips."""
+    _roll_session()
+    key = _open_key(symbol, strike, side)
+    if key not in _session_open and premium > 0:
+        _session_open[key] = premium
+        return 0.0
+    open_prem = _session_open.get(key, 0)
+    if open_prem <= 0:
+        return 0.0
+    return ((premium - open_prem) / open_prem) * 100
 
 
 @dataclass
@@ -79,6 +107,11 @@ def scan_chain_explosions(
     Scan full chain for premium explosions.
     Matches chart pattern: sudden 3-8% moves in 1-3 min with volume spike.
     """
+    from app.config import get_settings
+    from app.engines.session_timing import in_open_premium_window
+
+    settings = get_settings()
+    open_window = in_open_premium_window()
     events: list[ExplosionEvent] = []
     step = 100
     scan_range = 800 if symbol != "SENSEX" else 1000
@@ -104,13 +137,27 @@ def scan_chain_explosions(
             _record(symbol, strike, side, premium, volume)
             key_h = _strike_key(strike, side)
             hist = _history.get(symbol, {}).get(key_h)
-            if not hist or len(hist) < 2:
-                continue
+            open_move = _session_open_move_pct(symbol, strike, side, premium)
 
-            v3 = _velocity(hist, 1)
-            v9 = _velocity(hist, 3)
-            v15 = _velocity(hist, 5)
-            vol_surge = _volume_surge(hist)
+            if not hist or len(hist) < 2:
+                if not (
+                    settings.open_premium_explosion_enabled
+                    and open_move >= settings.open_premium_min_move_pct
+                ):
+                    continue
+                v3 = open_move * 0.35
+                v9 = open_move * 0.65
+                v15 = min(open_move * 0.35, 12.0)
+                vol_surge = 1.5
+            else:
+                v3 = _velocity(hist, 1)
+                v9 = _velocity(hist, 3)
+                v15 = _velocity(hist, 5)
+                vol_surge = _volume_surge(hist)
+                if open_window and open_move >= settings.open_premium_min_move_pct:
+                    v3 = max(v3, open_move * 0.25)
+                    v9 = max(v9, open_move * 0.65)
+                    v15 = max(v15, min(open_move * 0.35, float(getattr(settings, "explosion_exhaustion_v15_pct", 18.0) or 18.0) - 0.5))
 
             # Composite explosion score
             score = (
@@ -119,15 +166,36 @@ def scan_chain_explosions(
                 + min(20, max(0, v15) * 3)
                 + min(10, (vol_surge - 1) * 10)
             )
+            if open_move >= settings.open_premium_min_move_pct:
+                score = min(100, score + min(30, open_move * 0.35))
 
-            # Tier classification
+            # Tier classification — relaxed thresholds at open for premium-led rips
             tier = "WATCH"
-            if v3 >= 2.0 or v9 >= 3.5:
+            v3_build = 1.5 if open_window else 2.0
+            v9_build = 2.5 if open_window else 3.5
+            v3_explode = 2.8 if open_window else 3.5
+            v9_explode = 4.0 if open_window else 5.0
+            if v3 >= v3_build or v9 >= v9_build:
                 tier = "BUILDING"
-            if v3 >= 3.5 or v9 >= 5.0 or (v3 >= 2.5 and vol_surge >= 1.8):
+            if v3 >= v3_explode or v9 >= v9_explode or (v3 >= 2.0 and vol_surge >= 1.8):
                 tier = "EXPLODING"
             if v3 >= 5.0 or v9 >= 8.0 or (v3 >= 4.0 and vol_surge >= 2.0):
                 tier = "ELITE"
+            if open_move >= settings.open_premium_min_move_pct:
+                _tier_rank = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
+
+                def _tier_at_least(current: str, minimum: str) -> str:
+                    return minimum if _tier_rank.get(current, 0) < _tier_rank.get(minimum, 0) else current
+
+                if open_move >= 80:
+                    tier = "ELITE"
+                elif open_move >= 40:
+                    tier = _tier_at_least(tier, "EXPLODING")
+                elif open_move >= 25:
+                    tier = _tier_at_least(tier, "BUILDING")
+                reason_parts_open = [f"open+{open_move:.0f}%"]
+            else:
+                reason_parts_open = []
 
             if tier == "WATCH" and score < 25:
                 continue
@@ -147,6 +215,7 @@ def scan_chain_explosions(
                 reason_parts.append(f"+{v9:.1f}%/9s")
             if vol_surge >= 1.5:
                 reason_parts.append(f"vol×{vol_surge:.1f}")
+            reason_parts.extend(reason_parts_open)
 
             events.append(ExplosionEvent(
                 symbol=symbol,
@@ -160,6 +229,7 @@ def scan_chain_explosions(
                 explosion_score=round(score, 1),
                 tier=tier,
                 reason=" ".join(reason_parts) or "momentum building",
+                daily_move_pct=round(open_move, 2),
             ))
 
     events.sort(key=lambda e: ({"ELITE": 4, "EXPLODING": 3, "BUILDING": 2, "WATCH": 1}[e.tier], e.explosion_score), reverse=True)
@@ -188,6 +258,8 @@ def event_to_dict(e: ExplosionEvent) -> dict[str, Any]:
         "explosionScore": e.explosion_score,
         "tier": e.tier,
         "reason": e.reason,
+        "dailyMovePct": e.daily_move_pct,
+        "openPremiumMove": e.daily_move_pct,
         "tradeable": e.tier in ("EXPLODING", "ELITE") or capture,
         "morningCapture": morning,
         "afternoonCapture": afternoon,
