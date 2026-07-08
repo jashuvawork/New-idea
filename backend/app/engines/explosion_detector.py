@@ -97,6 +97,39 @@ def _volume_surge(history: deque) -> float:
     return recent_vol / prior_vol
 
 
+def resolve_explosion_scan_range(symbol: str, settings=None) -> float:
+    """ATM ± range for chain scan — wider on SENSEX and during all-day capture."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    base = float(settings.explosion_scan_range)
+    if symbol.upper() == "SENSEX":
+        base = max(base, float(getattr(settings, "explosion_sensex_scan_range", 1500)))
+    try:
+        from app.engines.morning_premium_capture import in_all_day_explosion_window
+
+        if in_all_day_explosion_window():
+            base *= 1.15
+    except Exception:
+        pass
+    return base
+
+
+def _premium_ok_for_scan(premium: float, open_move: float, settings) -> bool:
+    """Allow sub-min premium when session move is explosive (deep OTM rips)."""
+    if premium_in_band(premium, mode="explosion"):
+        return True
+    min_deep = float(getattr(settings, "explosion_deep_otm_min_premium_inr", 3.0))
+    if premium < min_deep:
+        return False
+    max_prem = settings.explosion_max_premium_inr or settings.max_option_premium_inr
+    if open_move >= settings.all_day_explosion_session_move_min_pct:
+        return premium <= max(max_prem, 500.0)
+    if open_move >= settings.open_premium_min_move_pct:
+        return premium <= max_prem
+    return False
+
+
 def scan_chain_explosions(
     symbol: str,
     chain: list[dict[str, Any]],
@@ -114,7 +147,7 @@ def scan_chain_explosions(
     open_window = in_open_premium_window()
     events: list[ExplosionEvent] = []
     step = 100
-    scan_range = 800 if symbol != "SENSEX" else 1000
+    scan_range = resolve_explosion_scan_range(symbol, settings)
 
     for row in chain:
         strike = row.get("strike_price") or row.get("strike", 0)
@@ -131,13 +164,15 @@ def scan_chain_explosions(
 
             premium = opt.get("ltp") or opt.get("last_price") or 0
             volume = opt.get("volume", 0) or 0
-            if not premium_in_band(premium, mode="explosion"):
+            if not premium or premium <= 0:
                 continue
 
             _record(symbol, strike, side, premium, volume)
             key_h = _strike_key(strike, side)
             hist = _history.get(symbol, {}).get(key_h)
             open_move = _session_open_move_pct(symbol, strike, side, premium)
+            if not _premium_ok_for_scan(premium, open_move, settings):
+                continue
 
             if not hist or len(hist) < 2:
                 if not (

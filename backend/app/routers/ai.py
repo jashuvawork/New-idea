@@ -136,3 +136,46 @@ async def trade_reports(limit: int = 30, days: int = 7):
     return {
         "reports": trade_store.get_trade_reports_range(days=min(days, 30), limit=min(limit, 200)),
     }
+
+
+@router.get("/analysis-monitor/status")
+async def analysis_monitor_status():
+    from app.engines.ai_market_analysis_monitor import monitor_status
+
+    return monitor_status()
+
+
+@router.get("/analysis-reports/latest")
+async def analysis_reports_latest():
+    from app.engines.ai_market_analysis_monitor import get_latest_report
+
+    latest = get_latest_report()
+    if not latest:
+        from app.services import trade_store
+
+        stored = trade_store.get_analysis_reports(limit=1)
+        if stored:
+            return stored[0]
+        raise HTTPException(status_code=404, detail="No analysis report yet — wait for next monitor cycle")
+    return latest
+
+
+@router.get("/analysis-reports")
+async def analysis_reports(limit: int = 30, days: int = 7):
+    from app.services import trade_store
+
+    return {
+        "reports": trade_store.get_analysis_reports_range(days=min(days, 30), limit=min(limit, 200)),
+    }
+
+
+@router.post("/analysis-monitor/refresh")
+async def analysis_monitor_refresh():
+    """Force a full market analysis cycle (rules + Composer when API key set)."""
+    from app.engines.ai_market_analysis_monitor import run_analysis_cycle
+    from app.routers.market import get_multi_snapshot
+    from app.services.upstox import rate_limit_active, rate_limit_recovery_active
+
+    force = not rate_limit_active() and not rate_limit_recovery_active()
+    multi = await get_multi_snapshot(force=force)
+    return await run_analysis_cycle(multi.snapshots, source="manual")

@@ -330,6 +330,63 @@ def get_trade_reports_range(days: int = 7, limit: int = 200) -> list[dict[str, A
     return reports[:limit]
 
 
+def _analysis_file(date: Optional[str] = None) -> Path:
+    d = date or _today()
+    analysis_dir = get_store_dir() / "analysis"
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    return analysis_dir / f"{d}.jsonl"
+
+
+def record_analysis_report(report: dict[str, Any]) -> None:
+    """Append interval market analysis (rules + optional AI) — one JSON line per cycle."""
+    at = str(report.get("at") or _now().isoformat())
+    date = at[:10]
+    entry = {"ts": at, **report}
+    line = json.dumps(entry, default=str, separators=(",", ":"))
+    try:
+        with open(_analysis_file(date), "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except Exception as e:
+        logger.error("Failed to write analysis report: %s", e)
+        raise
+    _append_log("ANALYSIS_REPORT", {
+        "lagScore": report.get("lagScore"),
+        "source": report.get("source"),
+        "summary": (report.get("summary") or "")[:200],
+    })
+
+
+def get_analysis_reports(
+    *,
+    date: Optional[str] = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    path = _analysis_file(date)
+    if not path.exists():
+        return []
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    out: list[dict[str, Any]] = []
+    for line in lines[-limit:]:
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return list(reversed(out))
+
+
+def get_analysis_reports_range(days: int = 7, limit: int = 200) -> list[dict[str, Any]]:
+    from datetime import timedelta
+
+    reports: list[dict[str, Any]] = []
+    today = _now().date()
+    for i in range(max(1, min(days, 30))):
+        d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+        reports.extend(get_analysis_reports(date=d, limit=limit))
+        if len(reports) >= limit:
+            break
+    return reports[:limit]
+
+
 def record_session_reset(reason: str = "manual_reset", open_trade_ids: Optional[list[str]] = None) -> None:
     """Log session reset — aligns in-memory state with persistent store audit trail."""
     reset_at = set_session_reset_at()
