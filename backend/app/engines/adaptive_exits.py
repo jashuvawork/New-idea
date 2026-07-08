@@ -200,6 +200,19 @@ def compute_adaptive_exit_plan(
     )
 
 
+def apply_chart_exit_tuning(
+    plan: AdaptiveExitPlan,
+    snap: SymbolSnapshot,
+    side: str,
+    entry_premium: float,
+) -> AdaptiveExitPlan:
+    """Merge multi-chart SL/TP/trail levels into adaptive plan."""
+    from app.engines.chart_exit_levels import merge_chart_into_exit_plan
+
+    merged = merge_chart_into_exit_plan(plan.to_dict(), snap, side, entry_premium)
+    return AdaptiveExitPlan.from_dict(merged)
+
+
 def _swing_plan(settings, psychology: PsychologyState, win_prob: float, reasoning: list[str]) -> AdaptiveExitPlan:
     target_pct = settings.swing_target_pct
     stop_pct = settings.swing_stop_pct

@@ -600,6 +600,15 @@ class Settings(BaseSettings):
     adaptive_exits_enabled: bool = True
     ml_exit_tuning_enabled: bool = True
 
+    # Chart-driven SL/TP/trailing — fib, pivots, SMC for all trade types
+    chart_exit_levels_enabled: bool = True
+    chart_exit_refresh_seconds: int = 30
+    all_day_high_quality_enabled: bool = True
+    all_day_min_chart_confidence: float = 62.0
+    all_day_min_rank_score: float = 68.0
+    quick_trail_promote_min_confidence: float = 58.0
+    quick_trail_promote_min_best_points: float = 2.0
+
     # Edge engine — realtime statistical entry scoring + 2.5+ PF feedback loop
     edge_engine_enabled: bool = True
     edge_session_pf_target: float = 2.5

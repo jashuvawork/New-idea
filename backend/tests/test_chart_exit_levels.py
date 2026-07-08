@@ -1,0 +1,138 @@
+"""Chart-driven SL/TP/trailing and all-day quality gates."""
+
+from datetime import datetime
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
+
+from app.engines.chart_exit_levels import (
+    ChartExitLevels,
+    chart_trade_confidence,
+    compute_chart_exit_levels,
+    high_quality_chart_entry,
+    merge_chart_into_exit_plan,
+    should_promote_quick_to_trailing,
+)
+from app.models.schemas import (
+    Breadth,
+    ChartAnalysis,
+    MarketPhase,
+    OptimizedProfile,
+    PaperTrade,
+    Side,
+    SpotChart,
+    SymbolSnapshot,
+)
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _snap_with_chart(consensus: str = "BEARISH", side_bias: str = "BEARISH") -> SymbolSnapshot:
+    return SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=77800.0,
+        atmStrike=77800.0,
+        tradeQualityScore=72.0,
+        breadth=Breadth(bias="NEUTRAL", score=52, aligned=False),
+        spotChart=SpotChart(direction=consensus, spot=77800.0, trendStrength=40.0),
+        chartAnalysis=ChartAnalysis(
+            consensus=consensus,
+            alignedCount=4,
+            totalTimeframes=5,
+            pivots={"P": 77700.0, "S1": 77550.0, "S2": 77400.0, "R1": 77950.0},
+            fibonacci={
+                "zone": "PREMIUM",
+                "nearestLevel": "618",
+                "retracement": {"618": 77620.0},
+                "extension": {"1.618": 77200.0},
+            },
+            institutional={
+                "structure": side_bias,
+                "displacement": True,
+                "bos": "bearish_bos",
+                "stopHunt": "sell_side_liquidity_sweep",
+            },
+            ichimoku={"cloudBias": "BEARISH"},
+            patterns=[{"name": "bearish_engulfing", "timeframe": "5m", "strength": 0.8}],
+        ),
+    )
+
+
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_chart_confidence_high_for_aligned_put(mock_settings):
+    s = mock_settings.return_value
+    s.chart_exit_levels_enabled = True
+    snap = _snap_with_chart("BEARISH", "BEARISH")
+    conf, sources = chart_trade_confidence(snap, Side.PUT)
+    assert conf >= 62
+    assert any("smc" in x or "mtf" in x for x in sources)
+
+
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_compute_chart_exit_levels_structure(mock_settings):
+    s = mock_settings.return_value
+    s.chart_exit_levels_enabled = True
+    s.scalp_stop_min_points = 2.0
+    s.scalp_trail_step_points = 2.0
+    s.quick_trail_promote_min_confidence = 58.0
+    s.all_day_min_chart_confidence = 62.0
+
+    levels = compute_chart_exit_levels(
+        _snap_with_chart(), Side.PUT, 216.0, base_stop=2.0, base_target=3.0,
+    )
+    assert isinstance(levels, ChartExitLevels)
+    assert levels.stopPoints >= 2.0
+    assert levels.targetPoints >= 3.0
+    assert levels.targetPoints2 >= levels.targetPoints
+    assert levels.promoteToTrailing is True
+
+
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_merge_chart_into_exit_plan(mock_settings):
+    s = mock_settings.return_value
+    s.chart_exit_levels_enabled = True
+    s.scalp_stop_min_points = 2.0
+    s.scalp_trail_step_points = 2.0
+    s.quick_trail_promote_min_confidence = 58.0
+    s.all_day_min_chart_confidence = 62.0
+
+    base = {"stopPoints": 2.0, "targetPoints": 3.0, "trailArmPoints": 2.5, "trailKeepRatio": 0.55}
+    merged = merge_chart_into_exit_plan(base, _snap_with_chart(), Side.PUT, 216.0)
+    assert merged["chartConfidence"] >= 62
+    assert merged.get("targetPoints2", 0) > 0
+    assert merged.get("promoteToTrailing") is True
+
+
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_high_quality_chart_entry(mock_settings):
+    s = mock_settings.return_value
+    s.all_day_high_quality_enabled = True
+    s.all_day_min_chart_confidence = 62.0
+    s.all_day_min_rank_score = 68.0
+    s.chart_exit_levels_enabled = True
+
+    ok, conf = high_quality_chart_entry(_snap_with_chart(), Side.PUT, 70.0)
+    assert ok is True
+    assert conf >= 62
+
+
+def test_promote_quick_to_trailing_on_chart_confidence():
+    trade = PaperTrade(
+        id="t1",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=77600.0,
+        entryPremium=216.0,
+        lots=10,
+        openedAt=datetime.now(IST),
+        entryContext={
+            "chartExitLevels": {"confidence": 65, "promoteToTrailing": True},
+        },
+    )
+    with patch("app.engines.chart_exit_levels.get_settings") as mock_settings:
+        s = mock_settings.return_value
+        s.quick_trail_promote_min_confidence = 58.0
+        s.quick_trail_promote_min_best_points = 2.0
+        assert should_promote_quick_to_trailing(trade, best_pts=1.0) is True

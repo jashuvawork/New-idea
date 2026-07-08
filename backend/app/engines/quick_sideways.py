@@ -605,10 +605,25 @@ def evaluate_quick_sideways_exit(
     trade: PaperTrade,
     current_premium: float,
     lot_multiplier: int,
+    *,
+    snap: SymbolSnapshot | None = None,
 ) -> tuple[Optional[str], float]:
-    """Tight quick scalp exits — adaptive stop by premium, 30s min hold, chop early lock."""
+    """Tight quick scalp exits — chart-tuned SL/TP; upgrades to trailing via auto_trader."""
     settings = get_settings()
     profile = get_quick_sideways_profile(trade.entryPremium)
+    ctx = trade.entryContext or {}
+    exit_plan = ctx.get("exitPlan") or {}
+    if exit_plan:
+        profile = OptimizedProfile(
+            targetPoints=float(exit_plan.get("targetPoints", profile.targetPoints)),
+            stopPoints=float(exit_plan.get("stopPoints", profile.stopPoints)),
+            microTargetPoints=float(
+                exit_plan.get("microTargetPoints", profile.microTargetPoints),
+            ),
+            maxHoldSeconds=profile.maxHoldSeconds,
+            sessionLabel=profile.sessionLabel,
+        )
+    target2 = float(exit_plan.get("targetPoints2") or 0)
     pnl_pts = current_premium - trade.entryPremium
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
     hold = _hold_seconds(trade)
@@ -618,6 +633,9 @@ def evaluate_quick_sideways_exit(
     min_hold = settings.quick_sideways_min_stop_hold_seconds
     if hold >= min_hold and pnl_pts <= -profile.stopPoints:
         return "quick_sideways_stop", pnl_inr
+
+    if target2 > profile.targetPoints and pnl_pts >= target2:
+        return "quick_sideways_chart_tp2", pnl_inr
 
     if pnl_pts >= profile.targetPoints:
         return "quick_sideways_target", pnl_inr
