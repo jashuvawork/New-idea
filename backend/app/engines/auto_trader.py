@@ -26,7 +26,7 @@ from app.engines.adaptive_exits import (
     evaluate_adaptive_scalp_exit,
     evaluate_adaptive_swing_exit,
 )
-from app.engines.chart_exit_levels import refresh_open_trade_chart_plan
+from app.engines.chart_exit_levels import refresh_open_trade_chart_plan, update_live_chart_trail
 from app.engines.capital_allocator import (
     compute_lots,
     compute_session_pnl,
@@ -450,6 +450,11 @@ async def _open_from_candidate(
         )
         exit_plan = plan_obj.to_dict()
 
+    entry_chart_conf = float(exit_plan.get("chartConfidence") or 0)
+    if entry_chart_conf <= 0:
+        from app.engines.chart_exit_levels import chart_trade_confidence
+        entry_chart_conf, _ = chart_trade_confidence(snap, candidate.side)
+
     ctx_extra: dict[str, Any] = {
         "selectionScore": round(candidate.score, 2),
         "selectionMode": candidate.mode,
@@ -457,6 +462,8 @@ async def _open_from_candidate(
         "edgeScore": edge.to_dict(),
         "tradeBudgetInr": exit_plan.get("tradeBudgetInr"),
         "exitPlan": exit_plan,
+        "entryChartConfidence": round(entry_chart_conf, 1),
+        "chartConfidence": round(entry_chart_conf, 1),
         "executionMode": _execution_mode(settings),
         "optionExpiry": snap.optionExpiry,
         "slippage": slip_meta,
@@ -736,6 +743,7 @@ async def _process_open_trades(
 
         live_vel = _trade_premium_velocity(snap, trade)
         refresh_open_trade_chart_plan(trade, snap)
+        update_live_chart_trail(trade, snap)
         plan_dict = (trade.entryContext or {}).get("exitPlan") or plan_dict
         if settings.edge_engine_enabled:
             edge_exit, edge_pnl = check_edge_realtime_exit(

@@ -82,12 +82,17 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
       ) : (
         <div className="space-y-1.5 max-h-36 overflow-y-auto">
           {auto.openPaperTrades.map((t) => {
-            const plan = t.entryContext?.exitPlan as Record<string, number> | undefined;
+            const plan = t.entryContext?.exitPlan as Record<string, number | string | boolean> | undefined;
+            const chartLive = t.entryContext?.chartExitLive as Record<string, number | boolean> | undefined;
             const execMode = t.entryContext?.executionMode as string | undefined;
             const brokerId = t.entryContext?.brokerOrderId as string | undefined;
             const execChart = t.entryContext?.executionChart as ExecutionChartContext | undefined;
-            const sl = plan?.stopPct ? `−${plan.stopPct}%` : plan?.stopPoints ? `−${plan.stopPoints}pt` : null;
-            const tp = plan?.targetPct ? `+${plan.targetPct}%` : plan?.targetPoints ? `+${plan.targetPoints}pt` : null;
+            const sl = plan?.stopPct ? `−${plan.stopPct}%` : plan?.stopPoints ? `−${Number(plan.stopPoints).toFixed(1)}pt` : null;
+            const tp = plan?.targetPct ? `+${plan.targetPct}%` : plan?.targetPoints ? `+${Number(plan.targetPoints).toFixed(1)}pt` : null;
+            const tp2 = plan?.targetPoints2 ? ` / +${Number(plan.targetPoints2).toFixed(1)}pt` : '';
+            const trailKeep = plan?.trailKeepRatio != null ? `${(Number(plan.trailKeepRatio) * 100).toFixed(0)}%` : null;
+            const chartConf = plan?.chartConfidenceLive ?? plan?.chartConfidence;
+            const chartDelta = plan?.chartConfidenceDelta;
             return (
               <div key={t.id} className="p-1.5 bg-black/30 rounded text-[11px]">
                 <div className="flex justify-between">
@@ -102,7 +107,18 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[9px] text-nexus-muted font-mono">
                   <span>{t.strategyType}</span>
                   {sl && <span>SL {sl}</span>}
-                  {tp && <span>TP {tp}</span>}
+                  {tp && <span>TP {tp}{tp2}</span>}
+                  {trailKeep && <span>trail keep {trailKeep}</span>}
+                  {chartConf != null && (
+                    <span className={Number(chartConf) >= 62 ? 'text-nexus-green' : 'text-nexus-yellow'}>
+                      chart {Number(chartConf).toFixed(0)}%
+                      {chartDelta != null && Number(chartDelta) !== 0
+                        ? ` (${Number(chartDelta) > 0 ? '+' : ''}${Number(chartDelta).toFixed(0)})`
+                        : ''}
+                    </span>
+                  )}
+                  {chartLive?.letRun ? <span className="text-nexus-green">LET RUN</span> : null}
+                  {chartLive?.tighten ? <span className="text-nexus-red">TIGHTEN</span> : null}
                   {brokerId && <span>ord {brokerId}</span>}
                   {execChart?.indexChart?.direction && (
                     <span>

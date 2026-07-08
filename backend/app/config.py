@@ -644,6 +644,8 @@ class Settings(BaseSettings):
     # Chart-driven SL/TP/trailing — fib, pivots, SMC for all trade types
     chart_exit_levels_enabled: bool = True
     chart_exit_refresh_seconds: int = 30
+    chart_trail_tune_seconds: int = 5
+    chart_confidence_trail_enabled: bool = True
     all_day_high_quality_enabled: bool = True
     all_day_min_chart_confidence: float = 62.0
     all_day_min_rank_score: float = 68.0
