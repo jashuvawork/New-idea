@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import ai, auto_trader, config, execution, health, market, upstox_auth
+from app.routers import ai, auto_trader, config, execution, health, market, signals, upstox_auth
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -165,6 +165,7 @@ def create_app() -> FastAPI:
     app.include_router(config.router)
     app.include_router(upstox_auth.router)
     app.include_router(ai.router)
+    app.include_router(signals.router)
 
     return app
 
