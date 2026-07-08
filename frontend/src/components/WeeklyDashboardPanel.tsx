@@ -42,7 +42,11 @@ export function WeeklyDashboardPanel({ data }: { data: WeeklyDashboard | null })
   return (
     <Panel
       title="Weekly Review"
-      badge={`${data.periodStart} → ${data.periodEnd}`}
+      badge={
+        data.periodMode === 'trading_week'
+          ? `Mon–Fri ${data.periodStart} → ${data.tradeThrough ?? data.periodEnd}`
+          : `${data.periodStart} → ${data.periodEnd}`
+      }
       badgeColor="bg-nexus-accent/70"
     >
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 text-[10px]">
@@ -119,11 +123,14 @@ export function WeeklyDashboardPanel({ data }: { data: WeeklyDashboard | null })
 
       {daily.length > 0 ? (
         <div className="mb-3">
-          <p className="text-[10px] text-nexus-muted mb-1">Daily breakdown</p>
+          <p className="text-[10px] text-nexus-muted mb-1">Mon–Fri daily breakdown</p>
           <div className="space-y-1 max-h-28 overflow-y-auto">
             {daily.map((d) => (
               <div key={d.date} className="flex justify-between text-[10px] font-mono">
-                <span>{d.date}</span>
+                <span>
+                  {d.weekday ? `${d.weekday} ` : ''}
+                  {d.date}
+                </span>
                 <span className={d.netPnlInr >= 0 ? 'text-nexus-green' : 'text-nexus-red'}>
                   {d.trades}t · ₹{d.netPnlInr.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                 </span>

@@ -160,6 +160,30 @@ async def _serve_stale_during_cooldown(*, broadcast: bool = False) -> Optional[M
     return stale
 
 
+def _enrich_smt_divergence(snapshots: dict) -> None:
+    """Cross-index SMT divergence between first two available symbols."""
+    from app.engines.chart_advanced_analysis import detect_smt_divergence
+
+    symbols = [s for s, snap in snapshots.items() if snap.dataAvailable and snap.chartAnalysis]
+    if len(symbols) < 2:
+        return
+    primary, compare = symbols[0], symbols[1]
+    p_snap = snapshots[primary]
+    c_snap = snapshots[compare]
+    p_closes = (p_snap.chartAnalysis.recentCloses or []) if p_snap.chartAnalysis else []
+    c_closes = (c_snap.chartAnalysis.recentCloses or []) if c_snap.chartAnalysis else []
+    if len(p_closes) < 15 or len(c_closes) < 15:
+        return
+    smt = detect_smt_divergence(p_closes, c_closes, primary_symbol=primary, compare_symbol=compare)
+    if smt and p_snap.chartAnalysis:
+        updated = p_snap.chartAnalysis.model_copy(update={"smtDivergence": smt})
+        p_snap.chartAnalysis = updated
+        if smt.get("bias") == "BEARISH":
+            p_snap.chartAnalysis.keySignals = (p_snap.chartAnalysis.keySignals or [])[:8] + [
+                f"SMT: {smt.get('message', '')}",
+            ]
+
+
 async def _build_multi_snapshot() -> MultiSnapshot:
     global _capital_refresh_at
     settings = get_settings()
@@ -252,6 +276,8 @@ async def _build_multi_snapshot() -> MultiSnapshot:
         )
         snap.adaptiveExitHint = hint.to_dict()
         snap.psychology["newsAggregate"] = news_sentiment_agg
+
+    _enrich_smt_divergence(snapshots)
 
     auto_state = await process(snapshots, news=news, client=client) if data_ready else get_state()
 

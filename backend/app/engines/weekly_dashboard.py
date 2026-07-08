@@ -109,10 +109,40 @@ def _expectancy(trades: list[dict[str, Any]]) -> dict[str, float]:
     }
 
 
-def _trades_in_window(days: int) -> tuple[list[dict[str, Any]], str, str]:
+def _trading_week_bounds(now: datetime) -> tuple[str, str, str]:
+    """
+    Current IST trading week Mon–Fri.
+    On Sat/Sun returns the previous completed week; on weekdays Mon through today (or Fri).
+    """
+    weekday = now.weekday()  # Mon=0 … Sun=6
+    if weekday >= 5:
+        friday = (now - timedelta(days=weekday - 4)).date()
+        monday = friday - timedelta(days=4)
+        trade_end = friday
+    else:
+        monday = (now - timedelta(days=weekday)).date()
+        friday = monday + timedelta(days=4)
+        trade_end = now.date()
+    return monday.strftime("%Y-%m-%d"), friday.strftime("%Y-%m-%d"), trade_end.strftime("%Y-%m-%d")
+
+
+def _weekday_dates(start: str, end: str) -> list[str]:
+    """All Mon–Fri dates from start through end (inclusive)."""
+    start_dt = datetime.strptime(start, "%Y-%m-%d").date()
+    end_dt = datetime.strptime(end, "%Y-%m-%d").date()
+    days: list[str] = []
+    cur = start_dt
+    while cur <= end_dt:
+        if cur.weekday() < 5:
+            days.append(cur.strftime("%Y-%m-%d"))
+        cur += timedelta(days=1)
+    return days
+
+
+def _trades_in_window(days: int = 5) -> tuple[list[dict[str, Any]], str, str, str]:
+    """Trades in current Mon–Fri trading week (IST). `days` kept for API compat."""
     now = datetime.now(IST)
-    start = (now - timedelta(days=max(1, days) - 1)).strftime("%Y-%m-%d")
-    end = now.strftime("%Y-%m-%d")
+    period_start, period_end, trade_through = _trading_week_bounds(now)
     all_closed = trade_store.get_all_closed_trades_chronological(limit=10_000)
     reset_at = trade_store.get_session_reset_at()
     reset_dt = _parse_date(reset_at)
@@ -123,12 +153,12 @@ def _trades_in_window(days: int) -> tuple[list[dict[str, Any]], str, str]:
         if not opened:
             continue
         day = opened.strftime("%Y-%m-%d")
-        if day < start or day > end:
+        if day < period_start or day > trade_through:
             continue
         if reset_dt and opened < reset_dt:
             continue
         filtered.append(t)
-    return filtered, start, end
+    return filtered, period_start, period_end, trade_through
 
 
 def _aggregate_skips(skipped: list[dict[str, Any]]) -> dict[str, Any]:
@@ -167,7 +197,7 @@ def _aggregate_skips(skipped: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _daily_breakdown(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _daily_breakdown(trades: list[dict[str, Any]], period_start: str, trade_through: str) -> list[dict[str, Any]]:
     by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for t in trades:
         opened = _parse_date(str(t.get("openedAt") or ""))
@@ -176,12 +206,13 @@ def _daily_breakdown(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
         by_day[opened.strftime("%Y-%m-%d")].append(t)
 
     rows: list[dict[str, Any]] = []
-    for day in sorted(by_day.keys()):
-        day_trades = by_day[day]
+    for day in _weekday_dates(period_start, trade_through):
+        day_trades = by_day.get(day, [])
         stats = _stats_for_trades(day_trades)
         violations = sum(len(detect_policy_violations(t)) for t in day_trades)
         rows.append({
             "date": day,
+            "weekday": datetime.strptime(day, "%Y-%m-%d").strftime("%a"),
             "trades": stats["tradeCount"],
             "wins": stats["wins"],
             "losses": stats["losses"],
@@ -279,7 +310,7 @@ def build_weekly_dashboard(
 ) -> dict[str, Any]:
     """Aggregate weekly review metrics for API / UI."""
     settings = get_settings()
-    trades, period_start, period_end = _trades_in_window(days)
+    trades, period_start, period_end, trade_through = _trades_in_window(days)
     stats = _stats_for_trades(trades)
     expectancy = _expectancy(trades)
 
@@ -301,7 +332,7 @@ def build_weekly_dashboard(
             "violations": vlist,
         })
 
-    daily = _daily_breakdown(trades)
+    daily = _daily_breakdown(trades, period_start, trade_through)
     skipped_agg = _aggregate_skips(list(state.skipped) if state and state.skipped else [])
 
     near_misses: list[dict[str, Any]] = []
@@ -333,9 +364,11 @@ def build_weekly_dashboard(
         session_reset_at = None
 
     return {
-        "periodDays": days,
+        "periodDays": 5,
+        "periodMode": "trading_week",
         "periodStart": period_start,
         "periodEnd": period_end,
+        "tradeThrough": trade_through,
         "generatedAt": datetime.now(IST).isoformat(),
         "sessionResetAt": session_reset_at,
         "summary": {
