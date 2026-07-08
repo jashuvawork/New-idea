@@ -120,8 +120,8 @@ async def trade_log_tail(limit: int = 50):
 
 
 @router.get("/weekly-dashboard")
-async def weekly_dashboard(days: int = 7):
-    """Weekly review — trades, skips, expectancy, policy violations, goal layers."""
+async def weekly_dashboard(days: int = 5):
+    """Weekly review (Mon–Fri trading week) — trades, skips, expectancy, goals."""
     from app.engines.auto_trader import get_state
     from app.engines.weekly_dashboard import build_weekly_dashboard
     from app.routers.market import get_multi_snapshot

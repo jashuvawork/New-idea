@@ -86,7 +86,7 @@ def test_build_weekly_dashboard_goals(mock_settings, mock_trades, mock_reset):
     s.expiry_scalp_min_symbol_tqs = 38.0
     s.quick_sideways_high_premium_threshold_inr = 90.0
 
-    mock_trades.return_value = ([_trade()], "2026-07-07", "2026-07-07")
+    mock_trades.return_value = ([_trade()], "2026-07-06", "2026-07-10", "2026-07-08")
     state = AutoTraderState()
     state.skipped = [{"symbol": "SESSION", "reason": "worst_day_breakout_only", "message": "test"}]
 

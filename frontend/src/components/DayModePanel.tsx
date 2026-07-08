@@ -1,5 +1,5 @@
 import { Panel, BiasBadge } from './Panel';
-import type { AutoTraderState, ChopGuards, SpotChart, SymbolSnapshot } from '../types';
+import type { AutoTraderState, ChartAnalysis, ChopGuards, SpotChart, SymbolSnapshot } from '../types';
 import { morningCaptureWindowActive } from '../lib/playbookSession';
 
 const TONE_BADGE: Record<string, string> = {
@@ -133,6 +133,100 @@ function SymbolChartRow({ symbol, chart }: { symbol: string; chart: SpotChart })
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+const TF_ORDER = ['1m', '5m', '15m', '1h', '4h'];
+
+function ChartAnalysisSection({ symbol, analysis }: { symbol: string; analysis: ChartAnalysis }) {
+  const inst = analysis.institutional || {};
+  const ich = analysis.ichimoku || {};
+  const fib = analysis.fibonacci as { zone?: string; nearestLevel?: string };
+
+  return (
+    <div className="py-2 border-b border-nexus-border/50 last:border-0 space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-[11px] font-bold text-white">{symbol}</span>
+        <BiasBadge bias={analysis.consensus} />
+        <span className="text-[9px] text-nexus-muted font-mono">
+          {analysis.alignedCount}/{analysis.totalTimeframes} TF aligned
+        </span>
+      </div>
+
+      <div className="grid grid-cols-5 gap-0.5 text-[8px] font-mono">
+        {TF_ORDER.map((tf) => {
+          const r = analysis.timeframes?.[tf];
+          if (!r) return null;
+          const tone =
+            r.direction === 'BULLISH' ? 'text-nexus-green' : r.direction === 'BEARISH' ? 'text-nexus-red' : 'text-nexus-muted';
+          return (
+            <div key={tf} className="text-center p-1 rounded bg-black/30">
+              <div className="text-nexus-muted">{tf}</div>
+              <div className={`font-bold ${tone}`}>{r.direction.slice(0, 4)}</div>
+              <div className="text-nexus-muted">RSI {r.rsi?.toFixed(0) ?? '—'}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {analysis.keySignals?.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {analysis.keySignals.slice(0, 6).map((sig) => (
+            <span key={sig} className="text-[8px] px-1 py-0.5 rounded border border-nexus-border/50 text-nexus-yellow">
+              {sig}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-1 text-[8px] font-mono text-nexus-muted">
+        <div>
+          Fib: <span className="text-white">{fib.zone ?? '—'}</span>
+          {fib.nearestLevel ? ` · ${fib.nearestLevel}` : ''}
+        </div>
+        <div>
+          Pivot P: <span className="text-white">{analysis.pivots?.P ?? '—'}</span>
+          {analysis.pivots?.R1 ? ` · R1 ${analysis.pivots.R1}` : ''}
+        </div>
+        <div>
+          Ichimoku: <span className="text-white">{(ich as { cloudBias?: string }).cloudBias ?? '—'}</span>
+        </div>
+        <div>
+          SMC: <span className="text-white">{(inst as { structure?: string }).structure ?? '—'}</span>
+          {(inst as { premiumDiscount?: string }).premiumDiscount
+            ? ` · ${(inst as { premiumDiscount?: string }).premiumDiscount}`
+            : ''}
+        </div>
+        {(inst as { stopHunt?: string }).stopHunt ? (
+          <div className="col-span-2 text-nexus-yellow">Liquidity: {(inst as { stopHunt?: string }).stopHunt}</div>
+        ) : null}
+        {(inst as { inKillZone?: boolean }).inKillZone ? (
+          <div className="col-span-2 text-nexus-accent">Kill zone: {(inst as { killZone?: string }).killZone}</div>
+        ) : null}
+        {analysis.smtDivergence ? (
+          <div className="col-span-2 text-nexus-yellow">SMT: {analysis.smtDivergence.message}</div>
+        ) : null}
+      </div>
+
+      {analysis.patterns?.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {analysis.patterns.slice(0, 5).map((p) => (
+            <span
+              key={`${p.name}-${p.timeframe}`}
+              className={`text-[8px] px-1 rounded ${
+                p.bias === 'BULLISH'
+                  ? 'bg-nexus-green/20 text-nexus-green'
+                  : p.bias === 'BEARISH'
+                    ? 'bg-nexus-red/20 text-nexus-red'
+                    : 'bg-gray-700/40 text-nexus-muted'
+              }`}
+            >
+              {p.name} ({p.timeframe})
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -324,7 +418,22 @@ export function DayModePanel({
         })}
       </div>
 
-      <div className="text-[10px] text-nexus-muted uppercase mb-1 mt-3">Index chart CE/PE alignment</div>
+      <div className="text-[10px] text-nexus-muted uppercase mb-1 mt-3">Multi-timeframe chart analysis</div>
+      <div className="rounded bg-black/20 px-2 mb-3">
+        {symbols.map((sym) => {
+          const analysis = snapshots[sym]?.chartAnalysis;
+          if (!analysis || !snapshots[sym]?.dataAvailable) {
+            return (
+              <div key={`mtf-${sym}`} className="py-1.5 text-[10px] text-nexus-muted border-b border-nexus-border/50 last:border-0">
+                {sym}: no MTF analysis
+              </div>
+            );
+          }
+          return <ChartAnalysisSection key={`mtf-${sym}`} symbol={sym} analysis={analysis} />;
+        })}
+      </div>
+
+      <div className="text-[10px] text-nexus-muted uppercase mb-1">Index chart CE/PE alignment</div>
       <div className="rounded bg-black/20 px-2 mb-3">
         {symbols.map((sym) => {
           const chart = snapshots[sym]?.spotChart;

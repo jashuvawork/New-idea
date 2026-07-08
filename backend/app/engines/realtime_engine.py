@@ -406,6 +406,40 @@ async def build_symbol_snapshot(
         orderflow = _build_orderflow(candles, chain)
         profile = _build_profile(candles, spot)
         spot_chart = build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=candles_1m)
+
+        chart_analysis = None
+        try:
+            from app.engines.chart_advanced_analysis import build_chart_analysis
+            from app.engines.spot_direction import _candle_rows, pro_index_quote_context
+
+            prev_close = day_high = day_low = 0.0
+            try:
+                quote = await client.get_index_quote(symbol)
+                qctx = pro_index_quote_context(quote, spot)
+                prev_close = qctx["prevClose"]
+                day_high = qctx["dayHigh"]
+                day_low = qctx["dayLow"]
+            except Exception:
+                _, highs, lows, closes = _candle_rows(candles_1m)
+                if highs and lows:
+                    day_high = max(highs)
+                    day_low = min(lows)
+                if closes:
+                    prev_close = closes[0]
+
+            chart_analysis = build_chart_analysis(
+                candles_1m,
+                candles_5m,
+                spot,
+                profile,
+                prev_close=prev_close,
+                day_high=day_high,
+                day_low=day_low,
+                symbol=symbol,
+            )
+        except Exception as exc:
+            logger.debug("Chart analysis skipped for %s: %s", symbol, exc)
+
         option_breadth = build_breadth(chain, spot)
 
         constituent_hm = None
@@ -507,6 +541,7 @@ async def build_symbol_snapshot(
             topSwing=top_swing,
             constituentHeatmap=constituent_hm if constituent_hm and constituent_hm.dataAvailable else None,
             spotChart=spot_chart,
+            chartAnalysis=chart_analysis,
         )
         await attach_premarket_to_snapshot(snap, client, news_sentiment)
         return snap

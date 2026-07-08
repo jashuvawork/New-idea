@@ -117,6 +117,25 @@ class TimeframeChartRead(BaseModel):
     macdBias: str = "NEUTRAL"
 
 
+class ChartAnalysis(BaseModel):
+    """Multi-timeframe chart analysis with levels, patterns, and institutional concepts."""
+    consensus: str = "NEUTRAL"
+    alignedCount: int = 0
+    totalTimeframes: int = 0
+    timeframes: dict[str, Any] = {}
+    fibonacci: dict[str, Any] = {}
+    fibExtension: dict[str, Any] = {}
+    pivots: dict[str, float] = {}
+    gann: dict[str, float] = {}
+    pitchfork: dict[str, Any] = {}
+    ichimoku: dict[str, Any] = {}
+    patterns: list[dict[str, Any]] = []
+    institutional: dict[str, Any] = {}
+    smtDivergence: Optional[dict[str, Any]] = None
+    keySignals: list[str] = []
+    recentCloses: list[float] = []
+
+
 class Greeks(BaseModel):
     delta: float = 0
     gamma: float = 0
@@ -265,6 +284,7 @@ class SymbolSnapshot(BaseModel):
     adaptiveExitHint: dict[str, Any] = {}
     premarket: Optional[PremarketAnalysis] = None
     spotChart: SpotChart = Field(default_factory=SpotChart)
+    chartAnalysis: Optional[ChartAnalysis] = None
 
 
 class PaperTrade(BaseModel):

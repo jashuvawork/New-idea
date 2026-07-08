@@ -34,6 +34,7 @@ export interface SymbolSnapshot {
   marketProfile: MarketProfile;
   breadth: Breadth;
   spotChart?: SpotChart;
+  chartAnalysis?: ChartAnalysis;
   explosiveRunner: ExplosiveRunner;
   explosiveRunnerWatchlist: RunnerWatchItem[];
   suggestedTrades: SuggestedTrade[];
@@ -219,6 +220,33 @@ export interface SpotChart {
   macdBias?: string;
   timeframe?: string;
   barCount?: number;
+}
+
+export interface ChartAnalysis {
+  consensus: string;
+  alignedCount: number;
+  totalTimeframes: number;
+  timeframes: Record<string, {
+    label: string;
+    direction: string;
+    momentumPct: number;
+    trendStrength: number;
+    emaBias: string;
+    rsi?: number;
+    rsiBias?: string;
+    macdBias?: string;
+    barCount?: number;
+  }>;
+  fibonacci: Record<string, unknown>;
+  fibExtension: Record<string, number>;
+  pivots: Record<string, number>;
+  gann: Record<string, number>;
+  pitchfork: Record<string, unknown>;
+  ichimoku: Record<string, unknown>;
+  patterns: Array<{ name: string; bias: string; strength: number; timeframe: string }>;
+  institutional: Record<string, unknown>;
+  smtDivergence?: { type: string; message: string; bias: string } | null;
+  keySignals: string[];
 }
 
 export interface ExplosiveRunner {
@@ -741,8 +769,10 @@ export interface PerformanceMilestone {
 
 export interface WeeklyDashboard {
   periodDays: number;
+  periodMode?: string;
   periodStart: string;
   periodEnd: string;
+  tradeThrough?: string;
   generatedAt: string;
   sessionResetAt?: string | null;
   summary: {
@@ -763,6 +793,7 @@ export interface WeeklyDashboard {
   };
   daily: Array<{
     date: string;
+    weekday?: string;
     trades: number;
     wins: number;
     losses: number;
