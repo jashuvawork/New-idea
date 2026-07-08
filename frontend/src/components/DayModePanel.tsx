@@ -108,22 +108,24 @@ function SymbolChartRow({
   chart: SpotChart;
   mtfConsensus?: string;
 }) {
-  const rec = chartRecommendedSide(chart);
+  const mtf = (mtfConsensus || '').toUpperCase();
+  const displayBias =
+    mtf && mtf !== 'NEUTRAL' ? mtf : chart.direction;
+  const rec = chartRecommendedSide({ ...chart, direction: displayBias });
   const momTone =
     chart.momentum5Pct > 0.04 ? 'text-nexus-green' : chart.momentum5Pct < -0.04 ? 'text-nexus-red' : 'text-nexus-yellow';
-  const mtf = (mtfConsensus || '').toUpperCase();
   const mismatch =
     mtf && mtf !== 'NEUTRAL' && chart.direction !== mtf
-      ? `5m ${chart.direction} vs MTF ${mtf}`
+      ? `5m ${chart.direction} · MTF ${mtf}`
       : null;
 
   return (
     <div className="flex items-center justify-between gap-2 py-1.5 border-b border-nexus-border/50 last:border-0">
       <div className="flex items-center gap-2 min-w-0 flex-wrap">
         <span className="text-[11px] font-bold text-white w-14 shrink-0">{symbol}</span>
-        <BiasBadge bias={chart.direction} />
+        <BiasBadge bias={displayBias} />
         {mismatch ? (
-          <span className="text-[8px] px-1 py-0.5 rounded border border-nexus-yellow/50 text-nexus-yellow" title="Reconciled to MTF when session disagrees">
+          <span className="text-[8px] px-1 py-0.5 rounded border border-nexus-yellow/50 text-nexus-yellow" title="5m oversold bounce — MTF direction used for CE/PE">
             {mismatch}
           </span>
         ) : null}

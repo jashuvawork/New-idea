@@ -71,6 +71,85 @@ const TABS: { key: Horizon | 'ALL'; label: string }[] = [
   { key: 'ADVISORY', label: 'AI' },
 ];
 
+function buildLocalForwardPayload(
+  snapshots: Record<string, SymbolSnapshot>,
+  auto: AutoTraderState,
+): ForwardPayload {
+  const signals: ForwardSignal[] = [];
+  for (const [sym, snap] of Object.entries(snapshots)) {
+    if (!snap.dataAvailable) continue;
+    for (const alert of snap.explosionAlerts ?? []) {
+      const tier = String(alert.tier ?? 'WATCH');
+      if (tier === 'WATCH' && !alert.allDayExplosion) continue;
+      const score = Number(alert.explosionScore ?? 0);
+      signals.push({
+        id: `explosion:${sym}:${alert.side}:${alert.strike}`,
+        horizon: 'EXPLOSION',
+        symbol: sym,
+        side: alert.side,
+        strike: alert.strike,
+        premium: alert.premium,
+        confidence: score,
+        tradeable: Boolean(alert.tradeable),
+        summary: `${sym} ${alert.side} ${alert.strike} · ${tier} · score ${score.toFixed(0)}`,
+        detail: alert.reason,
+        tier,
+        dailyMovePct: alert.dailyMovePct ?? alert.openPremiumMove,
+        blockers: alert.tradeable ? undefined : ['tier_or_velocity'],
+      });
+    }
+    for (const alert of snap.swingAlerts ?? []) {
+      signals.push({
+        id: `swing:${sym}:${alert.side}:${alert.strike}`,
+        horizon: 'SWING',
+        symbol: sym,
+        side: alert.side,
+        strike: alert.strike,
+        premium: alert.premium,
+        confidence: Number(alert.confidence ?? 0),
+        tradeable: Boolean(alert.tradeable),
+        summary: `${sym} ${alert.side} ${alert.strike} · ${alert.swingType ?? 'swing'}`,
+        detail: alert.reason,
+        blockers: alert.tradeable ? undefined : ['swing_gate'],
+      });
+    }
+    for (const t of snap.suggestedTrades ?? []) {
+      const conf = Number(t.confidence ?? 0);
+      signals.push({
+        id: `scalp:${sym}:${t.side}:${t.strike}:${t.id}`,
+        horizon: 'SCALP',
+        symbol: sym,
+        side: t.side,
+        strike: t.strike,
+        premium: t.lastPremium,
+        confidence: conf,
+        tradeable: conf >= 50,
+        summary: `${sym} ${t.side} ${t.strike} · TQS ${t.tqs?.toFixed(0) ?? '—'}`,
+        blockers: conf >= 50 ? undefined : ['low_confidence'],
+      });
+    }
+  }
+  signals.sort((a, b) => (b.tradeable ? 1 : 0) - (a.tradeable ? 1 : 0) || b.confidence - a.confidence);
+  const moments = localMoments();
+  const live = moments.filter((m) => m.status === 'LIVE');
+  const tradeable = signals.filter((s) => s.tradeable);
+  const counts: Record<string, number> = {};
+  for (const s of signals) {
+    counts[s.horizon] = (counts[s.horizon] ?? 0) + 1;
+  }
+  return {
+    at: new Date().toISOString(),
+    summary: live.length
+      ? `Local scan · Live: ${live[0].label} · ${tradeable.length} tradeable`
+      : 'Local scan — deploy /api/signals/forward for full forward engine',
+    moments,
+    signals: signals.slice(0, 40),
+    tradeableCount: tradeable.length,
+    counts,
+    entriesAllowed: auto.dailyProfitGate?.newEntriesAllowed !== false,
+  };
+}
+
 function localMoments(): ForwardMoment[] {
   const now = new Date();
   const items: ForwardMoment[] = [
@@ -116,17 +195,28 @@ export function FutureSignalsPanel({
   const [data, setData] = useState<ForwardPayload | null>(null);
   const [tab, setTab] = useState<Horizon | 'ALL'>('ALL');
   const [error, setError] = useState<string | null>(null);
+  const [apiMissing, setApiMissing] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/signals/forward');
+      if (res.status === 404) {
+        setApiMissing(true);
+        setData(buildLocalForwardPayload(snapshots, auto));
+        setError(null);
+        return;
+      }
       if (!res.ok) throw new Error(`${res.status}`);
-      setData(await res.json());
+      const payload = (await res.json()) as ForwardPayload;
+      setApiMissing(false);
+      setData(payload);
       setError(null);
     } catch (e) {
+      setApiMissing(true);
+      setData(buildLocalForwardPayload(snapshots, auto));
       setError(e instanceof Error ? e.message : 'fetch failed');
     }
-  }, []);
+  }, [snapshots, auto]);
 
   useEffect(() => {
     load();
@@ -145,8 +235,12 @@ export function FutureSignalsPanel({
   return (
     <Panel
       title="Future Signals"
-      badge={entriesOk ? `${data?.tradeableCount ?? 0} READY` : 'GATED'}
-      badgeColor={entriesOk ? 'bg-nexus-accent/90 text-black' : 'bg-nexus-red/90'}
+      badge={
+        apiMissing ? 'LOCAL' : entriesOk ? `${data?.tradeableCount ?? 0} READY` : 'GATED'
+      }
+      badgeColor={
+        apiMissing ? 'bg-nexus-yellow/90 text-black' : entriesOk ? 'bg-nexus-accent/90 text-black' : 'bg-nexus-red/90'
+      }
     >
       <p className="text-[10px] text-nexus-muted mb-2 leading-relaxed">
         Predicted session moments + forward trade setups — explosions, swings, scalps, risk.
@@ -240,7 +334,12 @@ export function FutureSignalsPanel({
         </div>
       ) : null}
 
-      {error ? <div className="text-[10px] text-nexus-red mt-2">{error}</div> : null}
+      {apiMissing ? (
+        <div className="text-[10px] text-nexus-yellow mt-2">
+          Forward API not deployed — showing live snapshot scan. Merge PR #100 backend to EC2.
+        </div>
+      ) : null}
+      {error && !apiMissing ? <div className="text-[10px] text-nexus-red mt-2">{error}</div> : null}
 
       <button
         type="button"
