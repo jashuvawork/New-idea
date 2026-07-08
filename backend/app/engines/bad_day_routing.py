@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from app.config import get_settings
 from app.engines.capital_allocator import compute_session_pnl
-from app.engines.expiry_day_guards import is_symbol_expiry_day
+from app.engines.expiry_day_guards import is_near_expiry_day, is_symbol_expiry_day, near_expiry_symbols
 from app.engines.pretrade_validator import collect_session_trades
 from app.engines.symbol_cooldown import side_aligned_with_breadth
 from app.engines.whipsaw_guards import is_bearish_sideways_session
@@ -74,23 +74,31 @@ def pm_itm_alternate_symbols(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
 ) -> set[str]:
-    """Non-expiry alternate indices eligible for PM ITM rules when expiry index fades."""
+    """Non-expiry alternate indices eligible for PM ITM when another index is near-expiry."""
     settings = get_settings()
     if not settings.expiry_pm_itm_alternate_index_enabled:
         return set()
     from app.engines.expiry_day_guards import in_expiry_pm_itm_window, is_expiry_session
 
-    if not in_expiry_pm_itm_window() or not is_expiry_session(snapshots):
+    if not in_expiry_pm_itm_window():
         return set()
-    active, _ = bad_day_session_active(state, snapshots)
-    if not active:
+
+    near = near_expiry_symbols(snapshots)
+    if not is_expiry_session(snapshots) and not near:
         return set()
-    fading = fading_expiry_symbols(state, snapshots)
-    if not fading:
+
+    restricted: set[str] = set()
+    if is_expiry_session(snapshots):
+        fading = fading_expiry_symbols(state, snapshots)
+        restricted.update(fading.keys())
+    restricted.update(near)
+
+    if not restricted:
         return set()
+
     out: set[str] = set()
-    for fading_sym in fading:
-        alt = alternate_index_for(fading_sym, snapshots)
+    for restricted_sym in restricted:
+        alt = alternate_index_for(restricted_sym, snapshots)
         if alt:
             out.add(alt)
     return out
@@ -107,20 +115,39 @@ def pm_itm_alternate_symbol_active(
 
 
 def alternate_index_for(fading_symbol: str, snapshots: dict[str, SymbolSnapshot]) -> Optional[str]:
-    """Non-expiry / healthier index when expiry symbol is fading."""
+    """Healthier non-near-expiry index when another symbol is expiry/fading."""
     fading = fading_symbol.upper()
     best: Optional[str] = None
     best_tqs = -1.0
     for sym, snap in snapshots.items():
         if not snap.dataAvailable or sym.upper() == fading:
             continue
-        if is_symbol_expiry_day(snap):
+        if is_symbol_expiry_day(snap) or is_near_expiry_day(snap):
             continue
         tqs = float(snap.tradeQualityScore or 0)
         if tqs > best_tqs:
             best_tqs = tqs
             best = sym.upper()
     return best
+
+
+def pre_expiry_index_restricted(
+    snap: SymbolSnapshot,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, Optional[str]]:
+    """
+    Near-expiry symbol (today or tomorrow) with a healthier alternate index.
+  Used to route explosion/scalp to NIFTY when SENSEX is pre-expiry, and vice versa.
+    """
+    settings = get_settings()
+    if not settings.pre_expiry_cross_index_enabled or not settings.bad_day_routing_enabled:
+        return False, None
+    if not snap.dataAvailable or not is_near_expiry_day(snap):
+        return False, None
+    alt = alternate_index_for(snap.symbol.upper(), snapshots)
+    if not alt:
+        return False, None
+    return True, alt
 
 
 def bad_day_session_active(
@@ -215,6 +242,10 @@ def check_bad_day_candidate(
     fading, fade_reasons = expiry_index_fading(snap, state, snapshots)
     meta["expiryIndexFading"] = fading
     meta["fadingReasons"] = fade_reasons
+    pre_restricted, pre_alt = pre_expiry_index_restricted(snap, snapshots)
+    meta["preExpiryRestricted"] = pre_restricted
+    meta["preExpiryAlternate"] = pre_alt
+
     if fading:
         alt = alternate_index_for(sym, snapshots)
         meta["alternateIndex"] = alt
@@ -230,6 +261,18 @@ def check_bad_day_candidate(
         if score < settings.bad_day_fading_expiry_min_rank:
             return False, f"bad_day_fading_expiry_rank_below_{settings.bad_day_fading_expiry_min_rank:.0f}", meta
         return True, "ok", meta
+
+    if pre_restricted and pre_alt:
+        meta["alternateIndex"] = pre_alt
+        if mode in ("quick_sideways", "slow_bounce"):
+            return True, "ok", meta
+        if mode == "scalp":
+            return False, "pre_expiry_route_to_alternate_index", meta
+        if mode == "explosion":
+            if tier != "ELITE" and score < settings.pre_expiry_alternate_min_rank:
+                return False, "pre_expiry_explosion_route_to_alternate", meta
+        elif score < settings.pre_expiry_alternate_min_rank:
+            return False, "pre_expiry_route_to_alternate_index", meta
 
     if mode == "scalp" and score < floor:
         return False, f"bad_day_scalp_rank_below_{floor:.0f}", meta
@@ -269,21 +312,27 @@ def cross_index_rank_adjustment(
         return 0.0
 
     fading_map = fading_expiry_symbols(state, snapshots)
-    if not fading_map:
+    near = near_expiry_symbols(snapshots)
+    if not fading_map and not near:
         return 0.0
 
     sym = candidate.symbol.upper()
     snap = snapshots.get(sym) or candidate.snap
     bonus = 0.0
+    settings = get_settings()
 
-    for fading_sym, _ in fading_map.items():
-        alt = alternate_index_for(fading_sym, snapshots)
-        if sym == fading_sym:
-            bonus -= settings.bad_day_fading_symbol_penalty
+    restricted = set(fading_map.keys()) | set(near)
+    for restricted_sym in restricted:
+        alt = alternate_index_for(restricted_sym, snapshots)
+        if sym == restricted_sym:
+            if restricted_sym in fading_map:
+                bonus -= settings.bad_day_fading_symbol_penalty
+            elif settings.pre_expiry_cross_index_enabled:
+                bonus -= settings.pre_expiry_symbol_rank_penalty
             continue
         if alt and sym == alt:
-            fading_snap = snapshots.get(fading_sym)
-            if fading_snap and float(snap.tradeQualityScore or 0) >= float(fading_snap.tradeQualityScore or 0):
+            fading_snap = snapshots.get(restricted_sym)
+            if fading_snap and float(snap.tradeQualityScore or 0) >= float(fading_snap.tradeQualityScore or 0) - 5:
                 bonus += settings.bad_day_alternate_index_bonus
             if _breadth_aligned(candidate, snap):
                 bonus += settings.bad_day_alternate_aligned_bonus
@@ -306,14 +355,22 @@ def bad_day_routing_summary(
     settings = get_settings()
     active, reasons = bad_day_session_active(state, snapshots)
     fading = fading_expiry_symbols(state, snapshots)
-    alts = {sym: alternate_index_for(sym, snapshots) for sym in fading}
+    near = near_expiry_symbols(snapshots)
+    alts = {sym: alternate_index_for(sym, snapshots) for sym in set(fading.keys()) | set(near)}
     pm_alts = sorted(pm_itm_alternate_symbols(state, snapshots))
+    pre_alts = {
+        sym: alternate_index_for(sym, snapshots)
+        for sym in near
+        if alternate_index_for(sym, snapshots)
+    }
     return {
         "enabled": settings.bad_day_routing_enabled,
         "badDaySession": active,
         "badDayReasons": reasons,
         "minRankFloor": bad_day_min_rank_floor(state, snapshots),
         "fadingExpirySymbols": fading,
+        "nearExpirySymbols": near,
+        "preExpiryAlternates": pre_alts,
         "alternateIndex": alts,
         "pmItmAlternateSymbols": pm_alts,
         "sessionPnlInr": round(compute_session_pnl(state), 2),

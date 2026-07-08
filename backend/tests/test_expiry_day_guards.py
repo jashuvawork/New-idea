@@ -152,8 +152,7 @@ def test_expiry_open_allows_elite_aligned(mock_settings):
 
 
 def test_near_expiry_day_includes_tomorrow():
-    with patch("app.engines.expiry_day_guards.datetime") as mock_dt:
-        mock_dt.now.return_value = datetime(2026, 7, 6, 10, 0, tzinfo=IST)
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-06"):
         assert is_near_expiry_day(_snap(expiry="2026-07-07")) is True
         assert is_near_expiry_day(_snap(expiry="2026-07-08")) is False
 
@@ -223,9 +222,11 @@ def test_pm_itm_chart_bypass_when_breadth_aligned(mock_settings):
     s.expiry_pm_itm_chart_bypass_breadth = True
     snap = _snap(expiry="2026-07-07")
     snap.breadth = Breadth(bias="BULLISH", score=65, aligned=True)
-    with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True):
-        assert expiry_pm_itm_chart_bypass_allowed(Side.CALL, snap, mode="quick_sideways") is True
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-06"):
+        with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True):
+            assert expiry_pm_itm_chart_bypass_allowed(Side.CALL, snap, mode="quick_sideways") is True
     snap.breadth = Breadth(bias="BEARISH", score=65, aligned=True)
-    with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True):
-        assert expiry_pm_itm_chart_bypass_allowed(Side.PUT, snap, mode="quick_sideways") is True
-        assert expiry_pm_itm_chart_bypass_allowed(Side.CALL, snap, mode="scalp") is False
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-06"):
+        with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True):
+            assert expiry_pm_itm_chart_bypass_allowed(Side.PUT, snap, mode="quick_sideways") is True
+            assert expiry_pm_itm_chart_bypass_allowed(Side.CALL, snap, mode="scalp") is False

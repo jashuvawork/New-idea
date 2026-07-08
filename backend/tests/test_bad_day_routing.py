@@ -1,6 +1,6 @@
 """Tests for bad-day cross-index routing."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -65,20 +65,23 @@ def _state_with_nifty_loss() -> AutoTraderState:
 @patch("app.engines.bad_day_routing.collect_session_trades")
 @patch("app.engines.bad_day_routing.compute_session_pnl", return_value=-15000)
 @patch("app.engines.bad_day_routing.is_bearish_sideways_session", return_value=True)
-def test_expiry_index_fading_detected(mock_bear, mock_pnl, mock_trades):
+@patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-07")
+def test_expiry_index_fading_detected(mock_today, mock_bear, mock_pnl, mock_trades):
     mock_trades.return_value = [
         TradeRecord("NIFTY", "CALL", -12000, strike=24500),
     ]
-    snap = _snap("NIFTY", tqs=35)
+    snap = _snap("NIFTY", expiry="2026-07-07", tqs=35)
     fading, reasons = expiry_index_fading(snap, _state_with_nifty_loss(), {"NIFTY": snap})
     assert fading is True
     assert "bearish_sideways" in reasons
 
 
-def test_alternate_index_skips_expiry_symbol():
+def test_alternate_index_skips_near_expiry_symbol():
+    tomorrow = (datetime.now(IST) + timedelta(days=1)).strftime("%Y-%m-%d")
+    far = (datetime.now(IST) + timedelta(days=7)).strftime("%Y-%m-%d")
     snaps = {
-        "NIFTY": _snap("NIFTY", expiry="2026-07-07", tqs=35),
-        "SENSEX": _snap("SENSEX", expiry="2026-07-09", tqs=40),
+        "NIFTY": _snap("NIFTY", expiry=tomorrow, tqs=35),
+        "SENSEX": _snap("SENSEX", expiry=far, tqs=40),
     }
     assert alternate_index_for("NIFTY", snaps) == "SENSEX"
 
@@ -95,7 +98,8 @@ def test_blocks_low_rank_explosion_on_fading_expiry(mock_fade, mock_bad):
 
 @patch("app.engines.bad_day_routing.bad_day_session_active", return_value=(True, ["bearish_sideways"]))
 @patch("app.engines.bad_day_routing.expiry_index_fading", return_value=(False, []))
-def test_bad_day_requires_high_rank_on_sensex(mock_fade, mock_bad):
+@patch("app.engines.bad_day_routing.pre_expiry_index_restricted", return_value=(False, None))
+def test_bad_day_requires_high_rank_on_sensex(mock_pre, mock_fade, mock_bad):
     snap = _snap("SENSEX", expiry="2026-07-09", tqs=45, bias="BEARISH")
     cand = _Cand("SENSEX", Side.CALL, 60.0, mode="explosion", tier="EXPLODING", snap=snap)
     ok, reason, _ = check_bad_day_candidate(cand, _state_with_nifty_loss(), {"SENSEX": snap})
@@ -103,9 +107,10 @@ def test_bad_day_requires_high_rank_on_sensex(mock_fade, mock_bad):
     assert "rank_below" in reason
 
 
+@patch("app.engines.bad_day_routing.near_expiry_symbols", return_value=["NIFTY"])
 @patch("app.engines.bad_day_routing.fading_expiry_symbols", return_value={"NIFTY": ["loss"]})
 @patch("app.engines.bad_day_routing.alternate_index_for", return_value="SENSEX")
-def test_cross_index_bonus_for_alternate(mock_alt, mock_fading):
+def test_cross_index_bonus_for_alternate(mock_alt, mock_fading, mock_near):
     nifty = _snap("NIFTY", tqs=35)
     sensex = _snap("SENSEX", expiry="2026-07-09", tqs=42, bias="BEARISH")
     cand = _Cand("SENSEX", Side.PUT, 70.0, snap=sensex)

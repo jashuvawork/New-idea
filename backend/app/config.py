@@ -279,6 +279,10 @@ class Settings(BaseSettings):
     expiry_pm_itm_min_rank_score: float = 52.0
     expiry_pm_itm_chart_bypass_breadth: bool = True
     expiry_pm_itm_alternate_index_enabled: bool = True
+    # When one index is near-expiry (today/tomorrow), prefer the other for explosion/scalp
+    pre_expiry_cross_index_enabled: bool = True
+    pre_expiry_symbol_rank_penalty: float = 12.0
+    pre_expiry_alternate_min_rank: float = 68.0
 
     # Slow bounce — expensive ITM mean-reversion (RSI/MACD recovery, low velocity)
     quick_sideways_slow_bounce_enabled: bool = True

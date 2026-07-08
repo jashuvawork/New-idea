@@ -25,6 +25,11 @@ def _today_str() -> str:
     return datetime.now(IST).strftime("%Y-%m-%d")
 
 
+def _tomorrow_str() -> str:
+    today_dt = datetime.strptime(_today_str(), "%Y-%m-%d").replace(tzinfo=IST)
+    return (today_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 def is_symbol_expiry_day(snap: SymbolSnapshot) -> bool:
     """True when today's session date matches the option chain expiry."""
     settings = get_settings()
@@ -40,6 +45,19 @@ def expiry_symbols(snapshots: dict[str, SymbolSnapshot]) -> list[str]:
     return [sym.upper() for sym, snap in snapshots.items() if is_symbol_expiry_day(snap)]
 
 
+def near_expiry_symbols(snapshots: dict[str, SymbolSnapshot]) -> list[str]:
+    """Symbols whose chain expires today or tomorrow (pre-expiry + expiry session)."""
+    return [sym.upper() for sym, snap in snapshots.items() if is_near_expiry_day(snap)]
+
+
+def is_pre_expiry_day(snap: SymbolSnapshot) -> bool:
+    """True when chain expires tomorrow only — not yet expiry day."""
+    if not snap.dataAvailable or not snap.optionExpiry:
+        return False
+    expiry = str(snap.optionExpiry)[:10]
+    return expiry == _tomorrow_str()
+
+
 def is_expiry_session(snapshots: dict[str, SymbolSnapshot]) -> bool:
     return len(expiry_symbols(snapshots)) > 0
 
@@ -49,10 +67,7 @@ def is_near_expiry_day(snap: SymbolSnapshot) -> bool:
     if not snap.dataAvailable or not snap.optionExpiry:
         return False
     expiry = str(snap.optionExpiry)[:10]
-    today_dt = datetime.now(IST)
-    today = today_dt.strftime("%Y-%m-%d")
-    tomorrow = (today_dt + timedelta(days=1)).strftime("%Y-%m-%d")
-    return expiry in (today, tomorrow)
+    return expiry in (_today_str(), _tomorrow_str())
 
 
 def in_expiry_pm_itm_window() -> bool:
@@ -490,10 +505,15 @@ def expiry_guard_summary(
 
         pm_alts = sorted(pm_itm_alternate_symbols(state, snapshots))
 
+    near = near_expiry_symbols(snapshots)
+    pre_only = [s for s in near if s not in symbols]
     return {
         "enabled": settings.expiry_day_guards_enabled,
         "expirySession": bool(symbols),
         "expirySymbols": symbols,
+        "nearExpirySymbols": near,
+        "preExpirySymbols": pre_only,
+        "eveningBlockActive": in_expiry_evening_block() and bool(symbols),
         "morningWindow": in_expiry_morning_window(),
         "eveningBlock": in_expiry_evening_block(),
         "worstDay": is_worst,
