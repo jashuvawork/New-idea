@@ -214,6 +214,16 @@ def worst_day_allows_candidate(
             return False, f"worst_day_slow_bounce_rank_below_{min_rank:.0f}", meta
         return True, "ok", meta
 
+    if mode == "explosion":
+        from app.engines.bad_day_routing import _extreme_explosion_bypass
+
+        if _extreme_explosion_bypass(candidate):
+            if tier in _allowed_breakout_tiers() or tier == "BUILDING":
+                min_rank = max(settings.all_day_explosion_min_score - 5, settings.worst_day_breakout_min_rank - 15)
+                if score >= min_rank:
+                    meta["extremeMoveBypass"] = True
+                    return True, "ok", meta
+
     if mode != "explosion":
         return False, "worst_day_breakout_only", meta
 

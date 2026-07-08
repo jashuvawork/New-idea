@@ -209,7 +209,7 @@ class Settings(BaseSettings):
 
     # Best trades only — fewer, higher-quality entries
     best_trades_only_enabled: bool = True
-    best_trades_min_rank_score: float = 68.0
+    best_trades_min_rank_score: float = 62.0
     best_trades_explosion_only_after_losses: int = 3
 
     # Whipsaw / churn — CE↔PE flip-flops in bearish sideways chop
@@ -586,7 +586,7 @@ class Settings(BaseSettings):
 
     # Bad-day routing — fading expiry index, cross-index preference, high-confidence only
     bad_day_routing_enabled: bool = True
-    bad_day_high_confidence_min_rank: float = 72.0
+    bad_day_high_confidence_min_rank: float = 65.0
     bad_day_severe_min_rank: float = 78.0
     bad_day_severe_session_loss_inr: float = -25_000.0
     bad_day_session_loss_inr: float = -8_000.0
@@ -607,7 +607,7 @@ class Settings(BaseSettings):
     worst_day_pause_score_threshold: float = 45.0
     worst_day_early_chop_pause: bool = True
     worst_day_breakout_only_enabled: bool = True
-    worst_day_breakout_min_rank: float = 78.0
+    worst_day_breakout_min_rank: float = 68.0
     worst_day_breakout_min_velocity_3s: float = 2.5
     worst_day_breakout_min_symbol_tqs: float = 45.0
     worst_day_breakout_tiers_csv: str = "ELITE,EXPLODING"
