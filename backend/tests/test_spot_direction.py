@@ -266,7 +266,9 @@ def test_explosion_blocks_call_on_bearish_chart():
         orPosition="BELOW",
         belowPoc=True,
     )
-    with patch("app.engines.spot_direction.get_settings") as mock_settings:
+    with patch("app.engines.spot_direction.get_settings") as mock_settings, patch(
+        "app.engines.morning_premium_capture.in_premium_capture_window", return_value=False,
+    ):
         mock_settings.return_value = _settings()
         ok, reason = check_explosion_entry(
             event, trade, Breadth(score=50, bias="NEUTRAL", aligned=False), False, chart=chart,

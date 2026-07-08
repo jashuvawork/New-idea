@@ -430,6 +430,59 @@ def afternoon_capture_skips_chart_block(
     )
 
 
+def premium_led_explosion_bypass(
+    event: ExplosionEvent,
+    chart: Optional[SpotChart],
+    breadth_bias: str,
+) -> bool:
+    """
+    Option premium leading index — bypass counter-breadth/chart blocks on explosions.
+    Catches PE rips when index chart is still bullish from gap-up (Jul 8 style).
+    """
+    settings = get_settings()
+    if not settings.premium_led_explosion_bypass_enabled:
+        return False
+    if not settings.premium_led_counter_breadth_enabled:
+        return False
+    if not in_premium_capture_window():
+        return False
+
+    side = _side_str(event.side)
+    bias = (breadth_bias or "NEUTRAL").upper()
+    direction = (chart.direction or "NEUTRAL").upper() if chart else "NEUTRAL"
+
+    counter_breadth = (bias == "BULLISH" and side == "PUT") or (bias == "BEARISH" and side == "CALL")
+    counter_chart = (direction == "BULLISH" and side == "PUT") or (direction == "BEARISH" and side == "CALL")
+    if not counter_breadth and not counter_chart:
+        return False
+
+    tier = str(event.tier or "").upper()
+    if tier not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+
+    v3 = float(event.velocity_3s or 0)
+    v9 = float(event.velocity_9s or 0)
+    score = float(event.explosion_score or 0)
+
+    if v3 >= settings.morning_capture_extreme_velocity_3s or v9 >= settings.morning_capture_extreme_velocity_9s:
+        return True
+
+    if tier in ("EXPLODING", "ELITE"):
+        vel_ok = v3 >= settings.premium_led_min_velocity_3s or v9 >= settings.premium_led_min_velocity_9s
+        if vel_ok and score >= settings.premium_led_min_explosion_score:
+            return True
+
+    if tier == "BUILDING":
+        building_vel = (
+            v3 >= settings.morning_capture_building_min_velocity_3s
+            or (v9 >= settings.morning_capture_min_velocity_9s and event.volume_surge >= settings.morning_capture_min_vol_surge)
+        )
+        if building_vel and score >= settings.morning_capture_building_min_score:
+            return True
+
+    return False
+
+
 def afternoon_capture_exit_params(event_tier: str = "BUILDING") -> "ExplosionExitParams":
     """Wider targets/trails for afternoon momentum rides."""
     from app.engines.explosion_profit import ExplosionExitParams

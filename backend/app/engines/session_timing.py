@@ -39,6 +39,23 @@ def entries_allowed_now() -> tuple[bool, str]:
     return True, "ok"
 
 
+def explosion_entries_allowed_now() -> tuple[bool, str]:
+    """9:15–09:20 IST — explosion-only window before general entries."""
+    settings = get_settings()
+    if not settings.explosion_open_entry_enabled:
+        return False, "explosion_open_entry_disabled"
+    if get_market_phase() != "LIVE_MARKET":
+        return False, "market_not_live"
+
+    current = _minutes_now()
+    explosion_start = settings.explosion_entry_earliest_hour * 60 + settings.explosion_entry_earliest_minute
+    general_start = entry_earliest_minutes()
+    if explosion_start <= current < general_start:
+        label = f"{settings.explosion_entry_earliest_hour:02d}:{settings.explosion_entry_earliest_minute:02d}"
+        return True, f"explosion_open_window_{label}_IST"
+    return False, "outside_explosion_open_window"
+
+
 def in_open_caution_window() -> bool:
     """09:20–09:45 IST — stricter rank gates while opening range forms."""
     if get_market_phase() != "LIVE_MARKET":

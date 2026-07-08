@@ -588,7 +588,18 @@ def validate_candidate(
 
     trade_score = candidate_trade_score(candidate)
 
-    if not side_aligned_with_breadth(side_val, snap.breadth.bias):
+    premium_bypass = False
+    explosion_event = getattr(candidate, "explosion_event", None)
+    if getattr(candidate, "mode", "") == "explosion" and explosion_event is not None:
+        from app.engines.morning_premium_capture import premium_led_explosion_bypass
+
+        premium_bypass = premium_led_explosion_bypass(
+            explosion_event,
+            snap.spotChart,
+            (snap.breadth.bias if snap.breadth else "NEUTRAL"),
+        )
+
+    if not side_aligned_with_breadth(side_val, snap.breadth.bias) and not premium_bypass:
         counter_floor = settings.counter_breadth_min_score
         from app.engines.morning_premium_capture import premium_led_entry_allowed
 
@@ -610,6 +621,7 @@ def validate_candidate(
         snap.spotChart,
         trade_score=trade_score,
         breadth_aligned_bypass=breadth_bypass,
+        premium_led_bypass=premium_bypass,
     )
     if blocked_chart:
         meta["chartDirection"] = snap.spotChart.direction if snap.spotChart else "NEUTRAL"
