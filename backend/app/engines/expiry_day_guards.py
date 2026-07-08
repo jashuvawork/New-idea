@@ -84,6 +84,51 @@ def expiry_pm_itm_quick_active(
     return False
 
 
+def in_morning_slow_bounce_window() -> bool:
+    """10:30–13:30 IST — post-open consolidation bounces on near-expiry ITM."""
+    from app.services.upstox import get_market_phase
+
+    settings = get_settings()
+    if not settings.morning_slow_bounce_enabled or get_market_phase() != "LIVE_MARKET":
+        return False
+    current = _minutes_now()
+    start = settings.morning_slow_bounce_start_hour * 60 + settings.morning_slow_bounce_start_minute
+    end = settings.morning_slow_bounce_end_hour * 60 + settings.morning_slow_bounce_end_minute
+    return start <= current < end
+
+
+def slow_bounce_premium_max_inr(snap: SymbolSnapshot) -> float:
+    """Higher cap on near-expiry days (e.g. SENSEX 77600 PE at ₹216)."""
+    settings = get_settings()
+    if is_near_expiry_day(snap):
+        return settings.expiry_near_expiry_premium_max_inr
+    return settings.expiry_pm_itm_premium_max_inr
+
+
+def slow_bounce_session_active(
+    snap: SymbolSnapshot,
+    state: AutoTraderState | None = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
+) -> bool:
+    """PM ITM window (14:00+) or morning consolidation window on near-expiry."""
+    if expiry_pm_itm_quick_active(snap, state, snapshots):
+        return True
+    if in_morning_slow_bounce_window() and is_near_expiry_day(snap):
+        return True
+    return False
+
+
+def slow_bounce_session_active_any(
+    snapshots: dict[str, SymbolSnapshot],
+    state: AutoTraderState | None = None,
+) -> bool:
+    if expiry_pm_itm_quick_session_active(snapshots, state):
+        return True
+    if not in_morning_slow_bounce_window():
+        return False
+    return any(is_near_expiry_day(s) for s in snapshots.values() if s.dataAvailable)
+
+
 def expiry_pm_itm_quick_session_active(
     snapshots: dict[str, SymbolSnapshot],
     state: AutoTraderState | None = None,
@@ -113,7 +158,9 @@ def expiry_pm_itm_chart_bypass_allowed(
         return False
     if str(mode or "") not in ("quick_sideways", "slow_bounce"):
         return False
-    if not expiry_pm_itm_quick_active(snap, state, snapshots):
+    if not expiry_pm_itm_quick_active(snap, state, snapshots) and not (
+        in_morning_slow_bounce_window() and is_near_expiry_day(snap)
+    ):
         return False
     return _breadth_aligned_for_side(side, snap.breadth)
 

@@ -138,6 +138,10 @@ class Settings(BaseSettings):
     explosion_single_side_per_symbol: bool = True
     explosion_dominant_side_min_score: float = 50.0
     explosion_exhaustion_v15_pct: float = 18.0
+    explosion_exhaustion_consolidation_reset_enabled: bool = True
+    explosion_exhaustion_reset_minutes: int = 12
+    explosion_exhaustion_consolidation_v3_max: float = 1.2
+    explosion_exhaustion_consolidation_v9_max: float = 2.0
     explosion_high_premium_threshold_inr: float = 90.0
     explosion_high_premium_lot_cap: int = 10
 
@@ -269,7 +273,8 @@ class Settings(BaseSettings):
     expiry_pm_itm_window_start_minute: int = 0
     expiry_pm_itm_window_end_hour: int = 15
     expiry_pm_itm_window_end_minute: int = 25
-    expiry_pm_itm_premium_max_inr: float = 180.0
+    expiry_pm_itm_premium_max_inr: float = 280.0
+    expiry_near_expiry_premium_max_inr: float = 300.0
     expiry_pm_itm_min_velocity_pct: float = 0.35
     expiry_pm_itm_min_rank_score: float = 52.0
     expiry_pm_itm_chart_bypass_breadth: bool = True
@@ -284,6 +289,17 @@ class Settings(BaseSettings):
     quick_sideways_slow_bounce_rsi_min: float = 40.0
     quick_sideways_slow_bounce_rsi_max: float = 55.0
     quick_sideways_slow_bounce_macd_hist_min: float = -15.0
+
+    # Morning slow-bounce — post-spike ITM consolidation (10:30–13:30 near-expiry)
+    morning_slow_bounce_enabled: bool = True
+    morning_slow_bounce_start_hour: int = 10
+    morning_slow_bounce_start_minute: int = 30
+    morning_slow_bounce_end_hour: int = 13
+    morning_slow_bounce_end_minute: int = 30
+    morning_slow_bounce_rsi_min: float = 45.0
+    morning_slow_bounce_rsi_max: float = 60.0
+    morning_slow_bounce_macd_hist_min: float = -20.0
+    morning_slow_bounce_max_velocity_pct: float = 1.8
 
     # Psychology setup hold — FEAR/CAUTION entries held longer on expiry chop
     psychology_hold_enabled: bool = True

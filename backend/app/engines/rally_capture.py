@@ -2,16 +2,63 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.moneyness import steps_from_atm, strike_step
 from app.models.schemas import Side, SpotChart, SymbolSnapshot
 
+IST = ZoneInfo("Asia/Kolkata")
 
-def _side_val(side: Side | str) -> str:
-    return side.value if isinstance(side, Side) else str(side).upper()
+# symbol:side:strike -> when exhaustion last blocked (for timed reset)
+_exhaustion_marked_at: dict[str, datetime] = {}
+
+
+def _exhaustion_key(event: ExplosionEvent) -> str:
+    side = _side_val(event.side)
+    return f"{event.symbol.upper()}:{side}:{event.strike:.0f}"
+
+
+def _in_consolidation(event: ExplosionEvent) -> bool:
+    settings = get_settings()
+    return (
+        event.velocity_3s <= settings.explosion_exhaustion_consolidation_v3_max
+        and event.velocity_9s <= settings.explosion_exhaustion_consolidation_v9_max
+    )
+
+
+def explosion_exhausted(event: ExplosionEvent) -> tuple[bool, str]:
+    """Block late chase — big 15s move already in, 3s fading (buying the top)."""
+    settings = get_settings()
+    key = _exhaustion_key(event)
+
+    if settings.explosion_exhaustion_consolidation_reset_enabled:
+        if _in_consolidation(event):
+            _exhaustion_marked_at.pop(key, None)
+            return False, "ok"
+
+        marked = _exhaustion_marked_at.get(key)
+        if marked is not None:
+            if marked.tzinfo is None:
+                marked = marked.replace(tzinfo=IST)
+            elapsed_min = (datetime.now(IST) - marked.astimezone(IST)).total_seconds() / 60.0
+            if elapsed_min >= settings.explosion_exhaustion_reset_minutes and _in_consolidation(event):
+                _exhaustion_marked_at.pop(key, None)
+                return False, "ok"
+
+    threshold = settings.explosion_exhaustion_v15_pct
+    if event.velocity_15s < threshold:
+        _exhaustion_marked_at.pop(key, None)
+        return False, "ok"
+    if event.velocity_3s >= max(1.5, event.velocity_9s * 0.45):
+        _exhaustion_marked_at.pop(key, None)
+        return False, "ok"
+
+    _exhaustion_marked_at[key] = datetime.now(IST)
+    return True, f"explosion_exhausted_v15_{event.velocity_15s:.1f}"
 
 
 def index_pin_blocks_put_explosion(event: ExplosionEvent, snap: SymbolSnapshot) -> tuple[bool, str]:
@@ -43,6 +90,10 @@ def index_pin_blocks_put_explosion(event: ExplosionEvent, snap: SymbolSnapshot) 
     return True, "put_blocked_index_pin_bullish_stocks"
 
 
+def _side_val(side: Side | str) -> str:
+    return side.value if isinstance(side, Side) else str(side).upper()
+
+
 def breadth_blocks_explosion_side(side: Side | str, breadth_bias: str, tier: str) -> tuple[bool, str]:
     """No PUT into BULLISH breadth / no CALL into BEARISH unless ELITE."""
     settings = get_settings()
@@ -70,17 +121,6 @@ def chart_blocks_explosion_side(side: Side | str, chart: Optional[SpotChart], ti
     if direction == "BEARISH" and side_v == "CALL":
         return True, "explosion_call_vs_bearish_chart"
     return False, "ok"
-
-
-def explosion_exhausted(event: ExplosionEvent) -> tuple[bool, str]:
-    """Block late chase — big 15s move already in, 3s fading (buying the top)."""
-    settings = get_settings()
-    threshold = settings.explosion_exhaustion_v15_pct
-    if event.velocity_15s < threshold:
-        return False, "ok"
-    if event.velocity_3s >= max(1.5, event.velocity_9s * 0.45):
-        return False, "ok"
-    return True, f"explosion_exhausted_v15_{event.velocity_15s:.1f}"
 
 
 def dominant_explosion_alert(snap: SymbolSnapshot) -> Optional[dict[str, Any]]:

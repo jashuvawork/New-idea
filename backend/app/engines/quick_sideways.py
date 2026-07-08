@@ -238,6 +238,22 @@ def _pm_itm_active(
     return expiry_pm_itm_quick_active(snap, state, snapshots)
 
 
+def _slow_bounce_active(
+    snap: SymbolSnapshot,
+    state: Any = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
+) -> bool:
+    from app.engines.expiry_day_guards import slow_bounce_session_active
+
+    return slow_bounce_session_active(snap, state, snapshots)
+
+
+def _is_morning_slow_bounce(snap: SymbolSnapshot) -> bool:
+    from app.engines.expiry_day_guards import in_morning_slow_bounce_window, is_near_expiry_day
+
+    return in_morning_slow_bounce_window() and is_near_expiry_day(snap)
+
+
 def detect_slow_bounce_signal(
     snap: SymbolSnapshot,
     side: Side,
@@ -264,18 +280,25 @@ def detect_slow_bounce_signal(
 
     if premium < settings.quick_sideways_slow_bounce_premium_min_inr:
         return False, "premium_below_slow_bounce_min", {}
-    if premium > settings.expiry_pm_itm_premium_max_inr:
+    from app.engines.expiry_day_guards import slow_bounce_premium_max_inr
+
+    prem_max = slow_bounce_premium_max_inr(snap)
+    if premium > prem_max:
         return False, "premium_above_slow_bounce_max", {}
 
+    morning = _is_morning_slow_bounce(snap)
     rsi = float(chart.rsi or 50.0)
-    rsi_ok = (
-        settings.quick_sideways_slow_bounce_rsi_min <= rsi <= settings.quick_sideways_slow_bounce_rsi_max
-        and chart.rsiBias in ("OVERSOLD", "NEUTRAL")
-    )
+    rsi_min = settings.morning_slow_bounce_rsi_min if morning else settings.quick_sideways_slow_bounce_rsi_min
+    rsi_max = settings.morning_slow_bounce_rsi_max if morning else settings.quick_sideways_slow_bounce_rsi_max
+    rsi_ok = rsi_min <= rsi <= rsi_max and chart.rsiBias in ("OVERSOLD", "NEUTRAL")
     hist = float(chart.macdHistogram or 0.0)
+    macd_line = float(chart.macd or 0.0)
+    macd_signal = float(chart.macdSignal or 0.0)
+    hist_min = settings.morning_slow_bounce_macd_hist_min if morning else settings.quick_sideways_slow_bounce_macd_hist_min
     macd_ok = (
-        hist >= settings.quick_sideways_slow_bounce_macd_hist_min
-        or float(chart.macd or 0.0) > float(chart.macdSignal or 0.0)
+        hist >= hist_min
+        or macd_line > macd_signal
+        or (morning and macd_signal != 0 and abs(macd_line - macd_signal) / abs(macd_signal) < 0.08)
     )
 
     side_val = side.value
@@ -314,7 +337,7 @@ def check_slow_bounce_entry(
     settings = get_settings()
     if not settings.quick_sideways_slow_bounce_enabled:
         return False, "slow_bounce_disabled"
-    if not _pm_itm_active(snap, state, snapshots):
+    if not _slow_bounce_active(snap, state, snapshots):
         return False, "slow_bounce_requires_pm_itm"
 
     ok, reason, _ = detect_slow_bounce_signal(snap, side, strike, premium)
@@ -326,7 +349,9 @@ def check_slow_bounce_entry(
         return False, f"slow_bounce_tqs_below_{min_tqs:.0f}"
 
     if not premium_in_band(premium):
-        if premium > settings.expiry_pm_itm_premium_max_inr:
+        from app.engines.expiry_day_guards import slow_bounce_premium_max_inr
+
+        if premium > slow_bounce_premium_max_inr(snap):
             return False, premium_reject_reason(premium)
 
     chart = snap.spotChart
@@ -335,7 +360,12 @@ def check_slow_bounce_entry(
     floor = settings.quick_sideways_slow_bounce_min_velocity_pct
     if vel < floor:
         return False, f"slow_bounce_velocity_below_{floor}"
-    if vel > settings.enhanced_velocity_threshold * 1.8:
+    max_vel = (
+        settings.morning_slow_bounce_max_velocity_pct
+        if _is_morning_slow_bounce(snap)
+        else settings.enhanced_velocity_threshold * 1.8
+    )
+    if vel > max_vel:
         return False, "velocity_too_hot_for_slow_bounce"
     return True, "passed"
 
@@ -357,7 +387,10 @@ def score_slow_bounce(
     if snap.symbol.upper() == "SENSEX":
         score += 6
     rsi = float(signal_meta.get("rsi") or 0)
-    if 45 <= rsi <= 52:
+    if morning := _is_morning_slow_bounce(snap):
+        if 45 <= rsi <= 60:
+            score += 10
+    elif 45 <= rsi <= 52:
         score += 8
     hist = float(signal_meta.get("macdHistogram") or 0)
     if hist > 0:
@@ -381,7 +414,7 @@ def scan_slow_bounce_setups(
     settings = get_settings()
     if not settings.quick_sideways_slow_bounce_enabled:
         return []
-    if not _pm_itm_active(snap, state, snapshots):
+    if not _slow_bounce_active(snap, state, snapshots):
         return []
 
     chart = snap.spotChart

@@ -195,10 +195,10 @@ def worst_day_allows_candidate(
         return False, call_reason, meta
 
     if mode == "slow_bounce":
-        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+        from app.engines.expiry_day_guards import slow_bounce_session_active
         from app.engines.quick_sideways import detect_slow_bounce_signal
 
-        if not expiry_pm_itm_quick_active(snap, state, snapshots):
+        if not slow_bounce_session_active(snap, state, snapshots):
             return False, "worst_day_slow_bounce_requires_pm_itm", meta
         sig_ok, sig_reason, sb_meta = detect_slow_bounce_signal(
             snap,

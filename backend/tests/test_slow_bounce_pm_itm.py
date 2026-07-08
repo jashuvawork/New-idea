@@ -97,8 +97,9 @@ def test_pm_itm_alternate_sensex_when_nifty_fading(mock_win, mock_exp, mock_alt,
         assert expiry_pm_itm_quick_active(nifty, state, snaps) is True
 
 
+@patch("app.engines.quick_sideways._is_morning_slow_bounce", return_value=False)
 @patch("app.engines.quick_sideways.get_settings")
-def test_detect_slow_bounce_put_signal(mock_settings):
+def test_detect_slow_bounce_put_signal(mock_settings, mock_morning):
     s = mock_settings.return_value
     s.quick_sideways_slow_bounce_enabled = True
     s.quick_sideways_slow_bounce_premium_min_inr = 90.0
@@ -114,9 +115,10 @@ def test_detect_slow_bounce_put_signal(mock_settings):
     assert meta["rsi"] == 48.5
 
 
-@patch("app.engines.quick_sideways._pm_itm_active", return_value=True)
+@patch("app.engines.quick_sideways._is_morning_slow_bounce", return_value=False)
+@patch("app.engines.quick_sideways._slow_bounce_active", return_value=True)
 @patch("app.engines.quick_sideways.get_settings")
-def test_scan_slow_bounce_finds_78300_pe(mock_settings, mock_pm):
+def test_scan_slow_bounce_finds_78300_pe(mock_settings, mock_slow, mock_morning):
     s = mock_settings.return_value
     s.quick_sideways_slow_bounce_enabled = True
     s.quick_sideways_slow_bounce_premium_min_inr = 90.0
