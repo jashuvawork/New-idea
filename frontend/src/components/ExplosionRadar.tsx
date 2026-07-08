@@ -51,7 +51,12 @@ export function ExplosionRadar({ snap }: { snap: SymbolSnapshot }) {
                 <span className={`font-bold ${a.side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'}`}>
                   {a.side} {a.strike}
                 </span>
-                <span className="ml-2 opacity-70">{a.tier}</span>
+                <span className="ml-2 opacity-70">
+                {a.tier}
+                {a.allDayExplosion ? ' · ALL-DAY' : ''}
+                {a.morningCapture ? ' · AM' : ''}
+                {a.afternoonCapture ? ' · PM' : ''}
+              </span>
               </span>
               <span className="font-mono">
                 +{a.velocity3s?.toFixed(1)}% · {a.explosionScore}
@@ -62,7 +67,7 @@ export function ExplosionRadar({ snap }: { snap: SymbolSnapshot }) {
       </div>
 
       <div className="mt-2 text-[9px] text-nexus-muted border-t border-nexus-border pt-1">
-        Captures daily moments like NIFTY CE +40pt runs · Auto-enters EXPLODING/ELITE tiers
+        ALL-DAY · AM · PM = capture windows · Auto-enters EXPLODING/ELITE/BUILDING when tradeable
       </div>
     </Panel>
   );

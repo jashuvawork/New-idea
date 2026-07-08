@@ -142,6 +142,8 @@ def check_explosion_entry(
     )
     from app.engines.morning_premium_capture import (
         afternoon_capture_skips_chart_block,
+        is_all_day_explosion_event,
+        is_premium_capture_event,
         premium_led_explosion_bypass,
     )
 
@@ -159,7 +161,8 @@ def check_explosion_entry(
 
     blocked, reason = chart_blocks_explosion_side(event.side, chart, event.tier)
     if blocked and not premium_bypass and not afternoon_capture_skips_chart_block(event, chart):
-        return False, reason
+        if not is_all_day_explosion_event(event, chart=chart):
+            return False, reason
 
     blocked, reason = explosion_exhausted(event)
     if blocked:
@@ -216,14 +219,21 @@ def check_explosion_entry(
     if event.tier == "ELITE":
         return True, "elite_explosion" if not premium_bypass else "premium_led_elite_explosion"
 
-    min_score = get_settings().aggressive_min_explosion_score
+    settings = get_settings()
+    min_score = settings.aggressive_min_explosion_score
+    open_move = float(getattr(event, "daily_move_pct", 0) or 0)
+    if open_move >= settings.all_day_explosion_session_move_min_pct:
+        min_score = min(min_score, settings.all_day_explosion_min_score)
+
     if event.tier == "EXPLODING" and event.explosion_score >= min_score:
         return True, "explosion_confirmed" if not premium_bypass else "premium_led_explosion_confirmed"
 
+    if event.tier == "BUILDING" and event.explosion_score >= min_score:
+        if is_all_day_explosion_event(event, chart=chart) or is_premium_capture_event(event, chart=chart):
+            return True, "building_explosion_confirmed" if not premium_bypass else "premium_led_building_confirmed"
+
     if event.velocity_3s >= 3.0 and event.volume_surge >= 1.5:
         return True, "early_explosion"
-
-    from app.engines.morning_premium_capture import is_premium_capture_event
 
     if is_premium_capture_event(event, chart=chart):
         return True, "premium_capture_confirmed"

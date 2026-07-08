@@ -175,6 +175,10 @@ def scan_chain_explosions(
             v9_build = 2.5 if open_window else 3.5
             v3_explode = 2.8 if open_window else 3.5
             v9_explode = 4.0 if open_window else 5.0
+            if open_move >= settings.all_day_explosion_session_move_min_pct:
+                v3_build = min(v3_build, 1.8)
+                v3_explode = min(v3_explode, 2.5)
+                v9_explode = min(v9_explode, 3.5)
             if v3 >= v3_build or v9 >= v9_build:
                 tier = "BUILDING"
             if v3 >= v3_explode or v9 >= v9_explode or (v3 >= 2.0 and vol_surge >= 1.8):
@@ -239,12 +243,14 @@ def scan_chain_explosions(
 def event_to_dict(e: ExplosionEvent) -> dict[str, Any]:
     from app.engines.morning_premium_capture import (
         is_afternoon_capture_event,
+        is_all_day_explosion_event,
         is_morning_capture_event,
         is_premium_capture_event,
     )
 
     morning = is_morning_capture_event(e)
     afternoon = is_afternoon_capture_event(e)
+    all_day = is_all_day_explosion_event(e)
     capture = is_premium_capture_event(e)
     return {
         "symbol": e.symbol,
@@ -263,5 +269,6 @@ def event_to_dict(e: ExplosionEvent) -> dict[str, Any]:
         "tradeable": e.tier in ("EXPLODING", "ELITE") or capture,
         "morningCapture": morning,
         "afternoonCapture": afternoon,
+        "allDayExplosion": all_day,
         "premiumCapture": capture,
     }

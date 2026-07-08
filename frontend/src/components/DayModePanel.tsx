@@ -1,6 +1,6 @@
 import { Panel, BiasBadge } from './Panel';
 import type { AutoTraderState, ChartAnalysis, ChopGuards, SpotChart, SymbolSnapshot } from '../types';
-import { morningCaptureWindowActive } from '../lib/playbookSession';
+import { morningCaptureWindowActive, allDayExplosionWindowActive } from '../lib/playbookSession';
 
 const TONE_BADGE: Record<string, string> = {
   rally: 'bg-nexus-accent/90 text-black',
@@ -260,7 +260,8 @@ export function DayModePanel({
 
       <div className="flex flex-wrap gap-1 mb-3">
         <Flag label="Chop" active={Boolean(g.chopSession)} tone="warn" />
-        <Flag label="Rally 10–13:45" active={Boolean(g.momentumRallyWindow)} tone="good" />
+        <Flag label="Rally 10–15:25" active={Boolean(g.momentumRallyWindow)} tone="good" />
+        <Flag label="All-day explosion" active={allDayExplosionWindowActive()} tone="good" />
         <Flag label="Morning capture" active={morningCaptureWindowActive()} tone="good" />
         <Flag label="Pre-10" active={Boolean(g.beforePrimaryWindow)} tone="warn" />
         <Flag label="Open caution" active={Boolean(g.openCautionWindow)} tone="warn" />
@@ -273,7 +274,16 @@ export function DayModePanel({
         <Flag label="Expiry" active={Boolean(g.expiryGuards?.expirySession)} tone="warn" />
         <Flag label="Expiry worst" active={Boolean(g.expiryGuards?.worstDay)} tone="bad" />
         <Flag label="Expiry AM" active={Boolean(g.expiryGuards?.morningWindow)} tone="good" />
-        <Flag label="Expiry PM block" active={Boolean(g.expiryGuards?.eveningBlock)} tone="bad" />
+        <Flag
+          label="Expiry PM block"
+          active={Boolean(g.expiryGuards?.eveningBlockActive)}
+          tone="bad"
+        />
+        <Flag
+          label="Past 14:00"
+          active={Boolean(g.expiryGuards?.eveningBlock && !g.expiryGuards?.eveningBlockActive)}
+          tone="neutral"
+        />
         <Flag label="Dual CE/PE" active={Boolean(g.expiryGuards?.dualScalpMode)} tone="neutral" />
         <Flag label="Psy hold" active={Boolean(g.psychologyHold?.enabled)} tone="neutral" />
         {g.moneynessPolicy ? (

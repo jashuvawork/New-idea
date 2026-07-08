@@ -58,7 +58,7 @@ def _best_surge_for_side(
 
 
 def in_afternoon_premium_capture_window() -> bool:
-    """11:45–13:45 IST — afternoon momentum rally after morning window closes."""
+    """11:45–15:25 IST — afternoon momentum / consolidation breakouts."""
     if get_market_phase() != "LIVE_MARKET":
         return False
     settings = get_settings()
@@ -69,8 +69,27 @@ def in_afternoon_premium_capture_window() -> bool:
     return in_momentum_rally_window() and not in_morning_premium_capture_window()
 
 
+def in_all_day_explosion_window() -> bool:
+    """09:20–15:25 IST — monitor explosive premium moves all session."""
+    if get_market_phase() != "LIVE_MARKET":
+        return False
+    settings = get_settings()
+    if not settings.all_day_explosion_capture_enabled:
+        return False
+    from app.engines.chop_day_guards import _minutes_now
+
+    current = _minutes_now()
+    start = settings.all_day_explosion_start_hour * 60 + settings.all_day_explosion_start_minute
+    end = settings.all_day_explosion_end_hour * 60 + settings.all_day_explosion_end_minute
+    return start <= current < end
+
+
 def in_premium_capture_window() -> bool:
-    return in_morning_premium_capture_window() or in_afternoon_premium_capture_window()
+    return (
+        in_morning_premium_capture_window()
+        or in_afternoon_premium_capture_window()
+        or in_all_day_explosion_window()
+    )
 
 
 def _effective_dominant_velocity_min() -> float:
@@ -375,6 +394,85 @@ def is_afternoon_capture_event(
     return True
 
 
+    return True
+
+
+def _chart_ok_for_all_day_event(event: ExplosionEvent, chart: Optional[SpotChart]) -> bool:
+    if _chart_confirms_side(event.side, chart):
+        return True
+    settings = get_settings()
+    open_move = float(event.daily_move_pct or 0)
+    if open_move >= settings.all_day_explosion_chart_bypass_move_pct:
+        return True
+    if event.velocity_3s >= settings.morning_capture_extreme_velocity_3s:
+        return True
+    if event.velocity_9s >= settings.morning_capture_extreme_velocity_9s:
+        return True
+    if event.volume_surge >= settings.afternoon_capture_chart_bypass_vol_surge:
+        return True
+    return False
+
+
+def is_all_day_explosion_event(
+    event: ExplosionEvent,
+    *,
+    chart: Optional[SpotChart] = None,
+) -> bool:
+    """Session-wide explosive leg — catches 14:00 PE rips after afternoon window used to close."""
+    settings = get_settings()
+    if not settings.all_day_explosion_capture_enabled:
+        return False
+    if not in_all_day_explosion_window():
+        return False
+    if event.tier not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+
+    open_move = float(event.daily_move_pct or 0)
+    score = float(event.explosion_score or 0)
+    v3 = float(event.velocity_3s or 0)
+    v9 = float(event.velocity_9s or 0)
+
+    if open_move >= settings.all_day_explosion_extreme_move_min_pct:
+        return score >= settings.all_day_explosion_min_score - 5
+
+    if open_move >= settings.all_day_explosion_session_move_min_pct:
+        if score >= settings.all_day_explosion_min_score:
+            return _chart_ok_for_all_day_event(event, chart)
+
+    vel_ok = (
+        v3 >= settings.all_day_explosion_building_min_velocity_3s
+        or v9 >= settings.all_day_explosion_min_velocity_9s
+    )
+    if not vel_ok:
+        return False
+    if score < settings.all_day_explosion_min_score:
+        return False
+    if chart and not _chart_ok_for_all_day_event(event, chart):
+        return False
+    return True
+
+
+def is_all_day_explosion_alert(alert: dict[str, Any], chart: Optional[SpotChart] = None) -> bool:
+    try:
+        event = ExplosionEvent(
+            symbol=str(alert.get("symbol", "")),
+            side=Side(alert.get("side", "CALL")),
+            strike=float(alert.get("strike", 0)),
+            premium=float(alert.get("premium", 0)),
+            velocity_3s=float(alert.get("velocity3s", 0)),
+            velocity_9s=float(alert.get("velocity9s", 0)),
+            velocity_15s=float(alert.get("velocity15s", 0)),
+            volume_surge=float(alert.get("volumeSurge", 1)),
+            explosion_score=float(alert.get("explosionScore", 0)),
+            tier=str(alert.get("tier", "WATCH")),
+            reason=str(alert.get("reason", "")),
+            daily_move_pct=float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0),
+        )
+    except (TypeError, ValueError):
+        return False
+    return is_all_day_explosion_event(event, chart=chart)
+
+
 def is_afternoon_capture_alert(alert: dict[str, Any], chart: Optional[SpotChart] = None) -> bool:
     try:
         event = ExplosionEvent(
@@ -413,17 +511,34 @@ def is_premium_capture_event(
     *,
     chart: Optional[SpotChart] = None,
 ) -> bool:
-    return is_morning_capture_event(event, chart=chart) or is_afternoon_capture_event(
-        event, chart=chart,
+    return (
+        is_morning_capture_event(event, chart=chart)
+        or is_afternoon_capture_event(event, chart=chart)
+        or is_all_day_explosion_event(event, chart=chart)
     )
 
 
 def is_premium_capture_alert(alert: dict[str, Any], chart: Optional[SpotChart] = None) -> bool:
-    return is_morning_capture_alert(alert, chart) or is_afternoon_capture_alert(alert, chart)
+    return (
+        is_morning_capture_alert(alert, chart)
+        or is_afternoon_capture_alert(alert, chart)
+        or is_all_day_explosion_alert(alert, chart)
+    )
 
 
 def premium_capture_active(snapshots: Optional[dict[str, SymbolSnapshot]]) -> bool:
-    return morning_capture_active(snapshots) or afternoon_capture_active(snapshots)
+    if not snapshots:
+        return False
+    if not in_premium_capture_window():
+        return False
+    for snap in snapshots.values():
+        if not snap.dataAvailable:
+            continue
+        chart = snap.spotChart
+        for alert in snap.explosionAlerts or []:
+            if is_premium_capture_alert(alert, chart):
+                return True
+    return False
 
 
 def premium_capture_rank_floor() -> float:
@@ -433,6 +548,8 @@ def premium_capture_rank_floor() -> float:
         floors.append(settings.morning_capture_min_rank_score)
     if in_afternoon_premium_capture_window():
         floors.append(settings.afternoon_capture_min_rank_score)
+    if in_all_day_explosion_window():
+        floors.append(settings.all_day_explosion_min_score)
     return min(floors) if floors else settings.morning_capture_min_rank_score
 
 
@@ -483,6 +600,10 @@ def premium_led_explosion_bypass(
     v3 = float(event.velocity_3s or 0)
     v9 = float(event.velocity_9s or 0)
     score = float(event.explosion_score or 0)
+
+    extreme_move = float(getattr(settings, "all_day_explosion_extreme_move_min_pct", 80.0) or 80.0)
+    if open_move >= extreme_move and score >= settings.open_premium_bypass_min_score - 3:
+        return True
 
     if open_move >= open_min and score >= open_bypass_score:
         return True
@@ -548,6 +669,7 @@ def premium_led_bypass_for_snap(
             explosion_score=float(alert.get("explosionScore") or 0),
             tier=str(alert.get("tier") or ""),
             reason=str(alert.get("reason") or ""),
+            daily_move_pct=float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0),
         )
         if premium_led_explosion_bypass(event, chart, bias):
             return True

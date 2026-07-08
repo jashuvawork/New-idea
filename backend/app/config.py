@@ -375,8 +375,8 @@ class Settings(BaseSettings):
     momentum_bypass_explosion_score: float = 48.0
     momentum_rally_start_hour: int = 10
     momentum_rally_start_minute: int = 0
-    momentum_rally_end_hour: int = 13
-    momentum_rally_end_minute: int = 45
+    momentum_rally_end_hour: int = 15
+    momentum_rally_end_minute: int = 25
     morning_premium_capture_enabled: bool = True
     morning_capture_start_hour: int = 9
     morning_capture_start_minute: int = 15
@@ -431,6 +431,20 @@ class Settings(BaseSettings):
     afternoon_capture_exit_trail_arm_points: float = 6.0
     afternoon_capture_exit_max_hold_seconds: int = 480
     afternoon_capture_exit_trail_keep_ratio: float = 0.55
+
+    # All-day explosive capture — 9:20–15:25 session rips (e.g. NIFTY 23850 PE 14:00 +1360%)
+    all_day_explosion_capture_enabled: bool = True
+    all_day_explosion_start_hour: int = 9
+    all_day_explosion_start_minute: int = 20
+    all_day_explosion_end_hour: int = 15
+    all_day_explosion_end_minute: int = 25
+    all_day_explosion_min_score: float = 38.0
+    all_day_explosion_session_move_min_pct: float = 40.0
+    all_day_explosion_extreme_move_min_pct: float = 80.0
+    all_day_explosion_building_min_velocity_3s: float = 2.0
+    all_day_explosion_min_velocity_9s: float = 2.5
+    all_day_explosion_chart_bypass_move_pct: float = 50.0
+    all_day_explosion_dominant_min_score: float = 40.0
 
     runner_trail_keep_ratio: float = 0.38
     runner_micro_giveback_points: float = 4.0
