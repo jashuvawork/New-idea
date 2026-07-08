@@ -221,6 +221,7 @@ def check_directional_side_lock(
     snap: SymbolSnapshot,
     *,
     tier: str = "",
+    premium_led_bypass: bool = False,
 ) -> tuple[bool, str]:
     """
     Returns (blocked, reason).
@@ -231,6 +232,9 @@ def check_directional_side_lock(
         return False, "ok"
 
     side_v = _side_val(side)
+
+    if premium_led_bypass:
+        return False, "ok"
 
     if not _needs_confirmation(symbol, side_v, snap):
         return False, "ok"
@@ -257,10 +261,15 @@ def check_directional_side_lock_simple(
     side: Side | str,
     breadth_bias: str,
     chart: Optional[SpotChart] = None,
+    *,
+    premium_led_bypass: bool = False,
 ) -> tuple[bool, str]:
     """Lightweight gate — counter-trend blocked unless breadth already flipped."""
     settings = get_settings()
     if not settings.directional_side_lock_enabled:
+        return False, "ok"
+
+    if premium_led_bypass:
         return False, "ok"
 
     side_v = _side_val(side)
