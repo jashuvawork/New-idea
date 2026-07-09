@@ -94,13 +94,31 @@ def _reentry_blocked(
     blocked, reason = instrument_in_cooldown(symbol, side, strike)
     if blocked:
         return True, reason
+    if explosion_event is not None:
+        from app.engines.morning_premium_capture import counter_trend_entry_allowed
+
+        if not counter_trend_entry_allowed(side, snap, explosion_event=explosion_event):
+            return True, "counter_trend_requires_elite"
     from app.engines.directional_lock import check_directional_side_lock
     from app.engines.morning_premium_capture import premium_led_bypass_for_snap
+    from types import SimpleNamespace
 
     premium_bypass = premium_led_bypass_for_snap(side, snap, explosion_event=explosion_event)
     tier = str(getattr(explosion_event, "tier", "") or "")
+    lock_candidate = None
+    if explosion_event is not None:
+        lock_candidate = SimpleNamespace(
+            mode="explosion",
+            symbol=symbol,
+            side=side,
+            strike=strike,
+            score=float(getattr(explosion_event, "explosion_score", 0) or 0),
+            tier=tier,
+            explosion_event=explosion_event,
+        )
     blocked, reason = check_directional_side_lock(
         symbol, side, snap, tier=tier, premium_led_bypass=premium_bypass,
+        candidate=lock_candidate,
     )
     if blocked:
         return True, reason

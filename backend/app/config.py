@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     tick_wake_debounce_ms: int = 15
     tick_fast_exit_enabled: bool = True
     entry_scan_interval_ms: int = 2000
+    expiry_entry_scan_interval_ms: int = 750
+    expiry_atm_tier_velocity_mult: float = 0.85
+    aligned_explosion_rip_bypass_enabled: bool = True
+    aligned_explosion_rip_min_score: float = 55.0
+    aligned_explosion_rip_min_velocity_3s: float = 2.0
+    aligned_explosion_rip_min_velocity_9s: float = 3.0
+    aligned_explosion_rip_interval_seconds: int = 30
+    directional_lock_aligned_rip_bypass_enabled: bool = True
     tick_overlay_max_age_seconds: float = 1.0
     news_cache_seconds: int = 60
     background_market_monitor_enabled: bool = True

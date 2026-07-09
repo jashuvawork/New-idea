@@ -76,10 +76,14 @@ def in_open_premium_window() -> bool:
 
 
 def effective_entry_scan_interval_ms() -> int:
-    """Faster polling during open premium window."""
+    """Faster polling during open premium window and on expiry day."""
     settings = get_settings()
     if in_open_premium_window() and settings.explosion_open_entry_enabled:
         return min(settings.entry_scan_interval_ms, settings.explosion_open_scan_interval_ms)
+    from app.engines.expiry_day_guards import any_expiry_session_active
+
+    if any_expiry_session_active() and settings.expiry_entry_scan_interval_ms > 0:
+        return min(settings.entry_scan_interval_ms, settings.expiry_entry_scan_interval_ms)
     return settings.entry_scan_interval_ms
 
 

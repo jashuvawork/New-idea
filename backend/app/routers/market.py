@@ -280,6 +280,10 @@ async def _build_multi_snapshot() -> MultiSnapshot:
 
     _enrich_smt_divergence(snapshots)
 
+    from app.engines.expiry_day_guards import refresh_expiry_session
+
+    refresh_expiry_session(snapshots)
+
     auto_state = await process(snapshots, news=news, client=client) if data_ready else get_state()
 
     return MultiSnapshot(

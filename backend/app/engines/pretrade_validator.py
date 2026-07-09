@@ -226,6 +226,8 @@ def check_min_entry_interval(
     *,
     chop: bool = False,
     quick_sideways: bool = False,
+    candidate: Any = None,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
 ) -> tuple[bool, str]:
     settings = get_settings()
     last = state.lastExit
@@ -236,22 +238,37 @@ def check_min_entry_interval(
     except Exception:
         return True, "ok"
 
-    gap = (
-        settings.quick_sideways_min_seconds_between_entries
-        if quick_sideways
-        else settings.min_seconds_between_entries
-    )
-    if chop:
-        gap = max(gap, settings.chop_session_entry_interval_seconds)
-    gap = max(gap, settings.post_exit_min_seconds)
     pnl = float(last.get("pnlInr", 0) or 0)
-    if pnl < 0:
-        gap = max(gap, settings.post_loss_exit_min_seconds)
+    after_loss = pnl < 0
+
+    from app.engines.aligned_explosion_bypass import (
+        entry_interval_gap_seconds,
+        is_aligned_explosion_rip,
+    )
+
+    aligned_rip = False
+    if candidate is not None and snapshots is not None:
+        sym = str(getattr(candidate, "symbol", "")).upper()
+        snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+        if snap is not None:
+            aligned_rip, _ = is_aligned_explosion_rip(candidate, snap)
+
+    gap = entry_interval_gap_seconds(
+        chop=chop,
+        quick_sideways=quick_sideways,
+        after_loss=after_loss and not aligned_rip,
+        aligned_rip=aligned_rip,
+    )
 
     elapsed = (datetime.now(IST) - closed).total_seconds()
     if elapsed < gap:
         remain = int(gap - elapsed)
-        suffix = "after_loss" if pnl < 0 else "after_exit"
+        if aligned_rip:
+            suffix = "aligned_rip"
+        elif after_loss:
+            suffix = "after_loss"
+        else:
+            suffix = "after_exit"
         return False, f"pretrade_entry_interval_{suffix}_{remain}s"
     return True, "ok"
 
@@ -484,9 +501,21 @@ def validate_candidate(
         state,
         chop=chop,
         quick_sideways=getattr(candidate, "mode", "") in ("quick_sideways", "slow_bounce"),
+        candidate=candidate,
+        snapshots=snap_map,
     )
     if not ok:
         return False, reason, meta
+
+    if getattr(candidate, "mode", "") == "explosion":
+        from app.engines.morning_premium_capture import counter_trend_entry_allowed
+
+        snap_pre = snap_map.get(candidate.symbol.upper()) or candidate.snap
+        explosion_event = getattr(candidate, "explosion_event", None)
+        if explosion_event is not None and not counter_trend_entry_allowed(
+            candidate.side, snap_pre, explosion_event=explosion_event,
+        ):
+            return False, "counter_trend_requires_elite", meta
 
     cap_hit, cap_reason = controlled_daily_cap_reached(state, snap_map)
     if cap_hit:
@@ -516,6 +545,7 @@ def validate_candidate(
 
     dir_blocked, dir_reason = check_directional_side_lock(
         sym, candidate.side, snap, tier=tier, premium_led_bypass=premium_bypass,
+        candidate=candidate,
     )
     if dir_blocked:
         return False, dir_reason, meta

@@ -162,6 +162,8 @@ def scan_chain_explosions(
     chain: list[dict[str, Any]],
     spot: float,
     atm: float,
+    *,
+    expiry_day: bool = False,
 ) -> list[ExplosionEvent]:
     """
     Scan full chain for premium explosions.
@@ -175,11 +177,17 @@ def scan_chain_explosions(
     events: list[ExplosionEvent] = []
     step = 100
     scan_range = resolve_explosion_scan_range(symbol, settings)
+    atm_mult = float(settings.expiry_atm_tier_velocity_mult) if expiry_day else 1.0
 
-    for row in chain:
+    chain_rows = list(chain)
+    if expiry_day:
+        chain_rows.sort(key=lambda r: abs(float(r.get("strike_price") or r.get("strike") or 0) - atm))
+
+    for row in chain_rows:
         strike = row.get("strike_price") or row.get("strike", 0)
         if abs(strike - atm) > scan_range:
             continue
+        near_atm = expiry_day and abs(float(strike) - atm) <= step
 
         for side, key, alt in [
             (Side.CALL, "call_options", "CE"),
@@ -237,6 +245,11 @@ def scan_chain_explosions(
             v9_build = 2.5 if open_window else 3.5
             v3_explode = 2.8 if open_window else 3.5
             v9_explode = 4.0 if open_window else 5.0
+            if near_atm:
+                v3_build *= atm_mult
+                v9_build *= atm_mult
+                v3_explode *= atm_mult
+                v9_explode *= atm_mult
             if open_move >= settings.all_day_explosion_session_move_min_pct:
                 v3_build = min(v3_build, 1.8)
                 v3_explode = min(v3_explode, 2.5)
