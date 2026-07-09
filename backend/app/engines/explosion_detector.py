@@ -3,7 +3,7 @@
 import logging
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -17,16 +17,23 @@ IST = ZoneInfo("Asia/Kolkata")
 _history: dict[str, dict[str, deque]] = {}
 # Session open premium: symbol:side:strike -> first seen premium today
 _session_open: dict[str, float] = {}
+# Intraday peak premium — survives pullbacks so faded rips still show as signals
+_session_peak: dict[str, float] = {}
+# Hold BUILDING+ tier briefly after velocity fades (vertical 1-min candle gaps)
+_tier_sticky: dict[str, tuple[str, datetime]] = {}
 _session_date: Optional[str] = None
 MAX_HISTORY = 40  # ~2 min at 3s poll
+_TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
 
 
 def _roll_session() -> None:
-    global _session_date, _session_open
+    global _session_date, _session_open, _session_peak, _tier_sticky
     today = datetime.now(IST).strftime("%Y-%m-%d")
     if _session_date != today:
         _session_date = today
         _session_open.clear()
+        _session_peak.clear()
+        _tier_sticky.clear()
 
 
 def _open_key(symbol: str, strike: float, side: Side) -> str:
@@ -39,11 +46,59 @@ def _session_open_move_pct(symbol: str, strike: float, side: Side, premium: floa
     key = _open_key(symbol, strike, side)
     if key not in _session_open and premium > 0:
         _session_open[key] = premium
+        _session_peak[key] = premium
         return 0.0
     open_prem = _session_open.get(key, 0)
     if open_prem <= 0:
         return 0.0
+    peak = _session_peak.get(key, premium)
+    if premium > peak:
+        _session_peak[key] = premium
     return ((premium - open_prem) / open_prem) * 100
+
+
+def _session_peak_move_pct(symbol: str, strike: float, side: Side, premium: float) -> float:
+    """Peak premium vs session open — keeps rip visible after pullback."""
+    _roll_session()
+    key = _open_key(symbol, strike, side)
+    if key not in _session_open and premium > 0:
+        _session_open[key] = premium
+        _session_peak[key] = premium
+        return 0.0
+    open_prem = _session_open.get(key, 0)
+    if open_prem <= 0:
+        return 0.0
+    peak = max(_session_peak.get(key, premium), premium)
+    _session_peak[key] = peak
+    return ((peak - open_prem) / open_prem) * 100
+
+
+def _apply_sticky_tier(strike_key: str, tier: str) -> str:
+    """Retain BUILDING+ for ~90s so fast vertical candles are not lost between polls."""
+    now = datetime.now(IST)
+    sticky = _tier_sticky.get(strike_key)
+    if sticky:
+        sticky_tier, until = sticky
+        if now < until and _TIER_RANK.get(sticky_tier, 0) > _TIER_RANK.get(tier, 0):
+            tier = sticky_tier
+    if _TIER_RANK.get(tier, 0) >= _TIER_RANK["BUILDING"]:
+        hold_s = 90 if tier in ("EXPLODING", "ELITE") else 45
+        prev = _tier_sticky.get(strike_key)
+        best = tier
+        if prev and now < prev[1] and _TIER_RANK.get(prev[0], 0) > _TIER_RANK.get(tier, 0):
+            best = prev[0]
+        _tier_sticky[strike_key] = (best, now + timedelta(seconds=hold_s))
+        tier = best
+    return tier
+
+
+def _effective_session_move(open_move: float, peak_move: float) -> float:
+    """Use peak move when price faded but intraday rip was material."""
+    if peak_move <= open_move:
+        return open_move
+    if peak_move >= 15 and open_move < peak_move * 0.45:
+        return peak_move
+    return max(open_move, peak_move * 0.65)
 
 
 @dataclass
@@ -60,6 +115,7 @@ class ExplosionEvent:
     tier: str  # WATCH | BUILDING | EXPLODING | ELITE
     reason: str
     daily_move_pct: float = 0.0
+    peak_move_pct: float = 0.0
 
 
 def _strike_key(strike: float, side: Side) -> str:
@@ -206,7 +262,9 @@ def scan_chain_explosions(
             key_h = _strike_key(strike, side)
             hist = _history.get(symbol, {}).get(key_h)
             open_move = _session_open_move_pct(symbol, strike, side, premium)
-            if not _premium_ok_for_scan(premium, open_move, settings):
+            peak_move = _session_peak_move_pct(symbol, strike, side, premium)
+            session_move = _effective_session_move(open_move, peak_move)
+            if not _premium_ok_for_scan(premium, max(open_move, session_move), settings):
                 continue
 
             if not hist or len(hist) < 2:
@@ -236,8 +294,10 @@ def scan_chain_explosions(
                 + min(20, max(0, v15) * 3)
                 + min(10, (vol_surge - 1) * 10)
             )
-            if open_move >= settings.open_premium_min_move_pct:
-                score = min(100, score + min(30, open_move * 0.35))
+            if session_move >= settings.open_premium_min_move_pct:
+                score = min(100, score + min(30, session_move * 0.35))
+            elif peak_move >= 20:
+                score = min(100, score + min(18, peak_move * 0.22))
 
             # Tier classification — relaxed thresholds at open for premium-led rips
             tier = "WATCH"
@@ -250,7 +310,7 @@ def scan_chain_explosions(
                 v9_build *= atm_mult
                 v3_explode *= atm_mult
                 v9_explode *= atm_mult
-            if open_move >= settings.all_day_explosion_session_move_min_pct:
+            if session_move >= settings.all_day_explosion_session_move_min_pct:
                 v3_build = min(v3_build, 1.8)
                 v3_explode = min(v3_explode, 2.5)
                 v9_explode = min(v9_explode, 3.5)
@@ -260,34 +320,41 @@ def scan_chain_explosions(
                 tier = "EXPLODING"
             if v3 >= 5.0 or v9 >= 8.0 or (v3 >= 4.0 and vol_surge >= 2.0):
                 tier = "ELITE"
-            if open_move >= settings.open_premium_min_move_pct:
+            if session_move >= settings.open_premium_min_move_pct:
                 _tier_rank = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
 
                 def _tier_at_least(current: str, minimum: str) -> str:
                     return minimum if _tier_rank.get(current, 0) < _tier_rank.get(minimum, 0) else current
 
-                if open_move >= 80:
+                if session_move >= 80:
                     tier = "ELITE"
-                elif open_move >= 40:
+                elif session_move >= 40:
                     tier = _tier_at_least(tier, "EXPLODING")
-                elif open_move >= 25:
+                elif session_move >= 25:
                     tier = _tier_at_least(tier, "BUILDING")
-                reason_parts_open = [f"open+{open_move:.0f}%"]
+                reason_parts_open = [f"open+{session_move:.0f}%"]
+                if peak_move > session_move + 5:
+                    reason_parts_open.append(f"peak+{peak_move:.0f}%")
             else:
                 reason_parts_open = []
 
-            awakened = _volume_awakening(volume, v3, open_move, settings)
+            awakened = _volume_awakening(volume, v3, max(open_move, session_move), settings)
             if awakened:
                 vol_surge = max(vol_surge, 2.0)
                 score = min(100, score + 12)
                 if tier == "WATCH":
                     tier = "BUILDING"
-                if open_move >= settings.open_premium_min_move_pct:
+                if expiry_day and near_atm and v3 >= 1.5:
+                    tier = "EXPLODING" if _TIER_RANK.get(tier, 0) < _TIER_RANK["EXPLODING"] else tier
+                elif session_move >= settings.open_premium_min_move_pct:
                     tier = "EXPLODING" if tier == "BUILDING" else tier
                 reason_parts_open.append(f"volAwaken×{volume // 1000}k")
 
+            tier = _apply_sticky_tier(f"{symbol}:{key_h}", tier)
+
             if tier == "WATCH" and score < 25 and not awakened:
-                continue
+                if not (peak_move >= 20 and v3 >= 1.2):
+                    continue
 
             # OTM bias during explosions (like 24000 CE rallying hard)
             otm_bonus = 0
@@ -318,7 +385,8 @@ def scan_chain_explosions(
                 explosion_score=round(score, 1),
                 tier=tier,
                 reason=" ".join(reason_parts) or "momentum building",
-                daily_move_pct=round(open_move, 2),
+                daily_move_pct=round(session_move, 2),
+                peak_move_pct=round(peak_move, 2),
             ))
 
     events.sort(key=lambda e: ({"ELITE": 4, "EXPLODING": 3, "BUILDING": 2, "WATCH": 1}[e.tier], e.explosion_score), reverse=True)
@@ -350,7 +418,9 @@ def event_to_dict(e: ExplosionEvent) -> dict[str, Any]:
         "tier": e.tier,
         "reason": e.reason,
         "dailyMovePct": e.daily_move_pct,
+        "peakMovePct": e.peak_move_pct,
         "openPremiumMove": e.daily_move_pct,
+        "volumeAwaken": "volAwaken" in (e.reason or ""),
         "tradeable": e.tier in ("EXPLODING", "ELITE") or capture,
         "morningCapture": morning,
         "afternoonCapture": afternoon,

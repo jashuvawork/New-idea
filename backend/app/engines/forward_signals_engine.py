@@ -136,6 +136,22 @@ def _side_matches_bias(side: str, bias: str) -> bool:
     return True
 
 
+def _explosion_radar_visible(alert: dict) -> bool:
+    """Include short-lived WATCH spikes so vertical rips are not invisible in Future Signals."""
+    tier = str(alert.get("tier") or "WATCH")
+    if tier != "WATCH":
+        return True
+    if alert.get("allDayExplosion"):
+        return True
+    if alert.get("volumeAwaken"):
+        return True
+    peak = float(alert.get("peakMovePct") or 0)
+    daily = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
+    v3 = float(alert.get("velocity3s") or 0)
+    v9 = float(alert.get("velocity9s") or 0)
+    return peak >= 15 or daily >= 12 or v3 >= 2.5 or v9 >= 3.5
+
+
 def _explosion_signals(
     snapshots: dict[str, SymbolSnapshot],
     state: AutoTraderState,
@@ -152,9 +168,10 @@ def _explosion_signals(
         breadth_bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
         for alert in snap.explosionAlerts or []:
             tier = str(alert.get("tier") or "WATCH")
-            if tier == "WATCH" and not alert.get("allDayExplosion"):
+            if not _explosion_radar_visible(alert):
                 continue
             daily = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
+            peak = float(alert.get("peakMovePct") or daily)
             score = float(alert.get("explosionScore") or 0)
             side = str(alert.get("side") or "")
             strike = alert.get("strike")
@@ -164,6 +181,7 @@ def _explosion_signals(
             if not radar_tradeable and "not_tradeable_tier" not in blockers:
                 blockers.append("tier_or_velocity")
             tradeable = bool(gate_row.get("wouldPass"))
+            radar_visible = True
             aligned = side_aligned_with_breadth(side, breadth_bias)
             opposes = _market_opposes_side(side, breadth_bias, snap.spotChart)
             bias_match = _side_matches_bias(side, session_bias)
@@ -191,10 +209,12 @@ def _explosion_signals(
                 "confidence": score,
                 "tradeable": tradeable,
                 "radarTradeable": radar_tradeable,
+                "radarVisible": radar_visible,
                 "summary": f"{sym} {side} {strike} · {tier} · score {score:.0f}",
                 "detail": str(alert.get("reason") or ""),
                 "tier": tier,
                 "dailyMovePct": daily,
+                "peakMovePct": peak,
                 "velocity3s": alert.get("velocity3s"),
                 "volumeSurge": alert.get("volumeSurge"),
                 "windows": windows,

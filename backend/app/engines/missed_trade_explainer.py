@@ -146,6 +146,9 @@ def _gate_checks(
     tier = str(alert.get("tier") or "")
     score = float(alert.get("explosionScore") or 0)
     daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
+    peak_move = float(alert.get("peakMovePct") or daily_move)
+    if peak_move > daily_move:
+        daily_move = max(daily_move, peak_move * 0.65)
     prem = alert.get("premium")
 
     # 1 — Radar visibility
@@ -340,6 +343,12 @@ def _gate_checks(
     floor, floor_notes = _effective_rank_floor(candidate, state, snapshots)
     sort_sc = _sort_score(candidate)
     rank_ok = sort_sc >= floor
+    from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
+
+    expiry_trade_ok, expiry_trade_reason = expiry_aligned_explosion_trade_allowed(candidate, snap)
+    if not rank_ok and expiry_trade_ok:
+        rank_ok = True
+        floor_notes = list(floor_notes) + [f"expiry_aligned_rank_bypass({expiry_trade_reason})"]
     gates.append({
         "gate": "rank_floor",
         "passed": rank_ok,

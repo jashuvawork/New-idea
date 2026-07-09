@@ -30,10 +30,12 @@ interface ForwardSignal {
   premium?: number;
   confidence: number;
   tradeable: boolean;
+  radarTradeable?: boolean;
   summary: string;
   detail?: string;
   tier?: string;
   dailyMovePct?: number;
+  peakMovePct?: number;
   blockers?: string[];
   primaryBlocker?: string | null;
   tradeBias?: string;
@@ -73,6 +75,18 @@ const TABS: { key: Horizon | 'ALL'; label: string }[] = [
   { key: 'ADVISORY', label: 'AI' },
 ];
 
+function explosionVisible(alert: { tier?: string; allDayExplosion?: boolean; volumeAwaken?: boolean; peakMovePct?: number; dailyMovePct?: number; openPremiumMove?: number; velocity3s?: number; velocity9s?: number }) {
+  const tier = String(alert.tier ?? 'WATCH');
+  if (tier !== 'WATCH') return true;
+  if (alert.allDayExplosion) return true;
+  if (alert.volumeAwaken) return true;
+  const peak = Number(alert.peakMovePct ?? 0);
+  const daily = Number(alert.dailyMovePct ?? alert.openPremiumMove ?? 0);
+  const v3 = Number(alert.velocity3s ?? 0);
+  const v9 = Number(alert.velocity9s ?? 0);
+  return peak >= 15 || daily >= 12 || v3 >= 2.5 || v9 >= 3.5;
+}
+
 function buildLocalForwardPayload(
   snapshots: Record<string, SymbolSnapshot>,
   auto: AutoTraderState,
@@ -82,8 +96,10 @@ function buildLocalForwardPayload(
     if (!snap.dataAvailable) continue;
     for (const alert of snap.explosionAlerts ?? []) {
       const tier = String(alert.tier ?? 'WATCH');
-      if (tier === 'WATCH' && !alert.allDayExplosion) continue;
+      if (!explosionVisible(alert)) continue;
       const score = Number(alert.explosionScore ?? 0);
+      const daily = Number(alert.dailyMovePct ?? alert.openPremiumMove ?? 0);
+      const peak = Number(alert.peakMovePct ?? daily);
       signals.push({
         id: `explosion:${sym}:${alert.side}:${alert.strike}`,
         horizon: 'EXPLOSION',
@@ -93,10 +109,12 @@ function buildLocalForwardPayload(
         premium: alert.premium,
         confidence: score,
         tradeable: Boolean(alert.tradeable),
+        radarTradeable: Boolean(alert.tradeable),
         summary: `${sym} ${alert.side} ${alert.strike} · ${tier} · score ${score.toFixed(0)}`,
         detail: alert.reason,
         tier,
-        dailyMovePct: alert.dailyMovePct ?? alert.openPremiumMove,
+        dailyMovePct: daily,
+        peakMovePct: peak,
         blockers: alert.tradeable ? undefined : ['tier_or_velocity'],
       });
     }
@@ -185,10 +203,34 @@ function localMoments(): ForwardMoment[] {
     : items.map((m) => ({ ...m, status: m.active ? 'LIVE' : 'ENDED' as const }));
 }
 
+function mergeLiveExplosions(api: ForwardPayload | null, snapshots: Record<string, SymbolSnapshot>): ForwardSignal[] {
+  const local = buildLocalForwardPayload(snapshots, { dailyProfitGate: { newEntriesAllowed: true } } as AutoTraderState);
+  const localExplosions = (local.signals ?? []).filter((s) => s.horizon === 'EXPLOSION');
+  const apiSignals = api?.signals ?? [];
+  const merged = new Map<string, ForwardSignal>();
+  for (const s of apiSignals) {
+    merged.set(s.id, s);
+  }
+  for (const s of localExplosions) {
+    const existing = merged.get(s.id);
+    if (!existing || (s.confidence > existing.confidence)) {
+      merged.set(s.id, { ...existing, ...s, tradeable: existing?.tradeable ?? s.tradeable });
+    }
+  }
+  const out = Array.from(merged.values());
+  out.sort(
+    (a, b) =>
+      (b.tradeable ? 1 : 0) - (a.tradeable ? 1 : 0) ||
+      (b.radarTradeable ? 1 : 0) - (a.radarTradeable ? 1 : 0) ||
+      b.confidence - a.confidence,
+  );
+  return out;
+}
+
 export function FutureSignalsPanel({
   snapshots,
   auto,
-  pollMs = 15_000,
+  pollMs = 3_000,
 }: {
   snapshots: Record<string, SymbolSnapshot>;
   auto: AutoTraderState;
@@ -237,12 +279,22 @@ export function FutureSignalsPanel({
   }, [load, pollMs]);
 
   const moments = (data?.moments?.length ? data.moments : localMoments()) as ForwardMoment[];
-  const signals = data?.signals ?? [];
-  const filtered =
-    tab === 'ALL' ? signals : tab === 'MOMENT' ? [] : signals.filter((s) => s.horizon === tab);
+  const mergedExplosions = mergeLiveExplosions(data, snapshots);
+  const signals =
+    tab === 'EXPLOSION'
+      ? mergedExplosions
+      : tab === 'ALL'
+        ? [
+            ...mergedExplosions,
+            ...(data?.signals ?? []).filter((s) => s.horizon !== 'EXPLOSION'),
+          ]
+        : (data?.signals ?? []).filter((s) => s.horizon === tab);
+  const filtered = tab === 'MOMENT' ? [] : signals;
   const liveMoments = moments.filter((m) => m.status === 'LIVE');
   const upcomingMoments = moments.filter((m) => m.status === 'UPCOMING');
   const entriesOk = data?.entriesAllowed !== false && auto.dailyProfitGate?.newEntriesAllowed !== false;
+  const radarCount = mergedExplosions.filter((s) => s.radarTradeable ?? s.tier !== 'WATCH').length;
+  const goCount = mergedExplosions.filter((s) => s.tradeable).length;
 
   return (
     <Panel
@@ -251,7 +303,11 @@ export function FutureSignalsPanel({
         apiMissing || apiDegraded
           ? 'LOCAL'
           : entriesOk
-            ? `${data?.tradeableCount ?? 0} READY`
+            ? goCount > 0
+              ? `${goCount} GO · ${radarCount} RADAR`
+              : radarCount > 0
+                ? `${radarCount} RADAR`
+                : `${data?.tradeableCount ?? 0} READY`
             : 'GATED'
       }
       badgeColor={
@@ -333,13 +389,21 @@ export function FutureSignalsPanel({
               >
                 <div className="flex justify-between gap-2">
                   <span className="text-white font-mono truncate">{s.summary}</span>
-                  <span className={`shrink-0 text-[8px] font-bold uppercase ${s.tradeable ? 'text-nexus-green' : 'text-gray-500'}`}>
-                    {s.tradeable ? 'GO' : 'WATCH'}
+                  <span className={`shrink-0 text-[8px] font-bold uppercase ${s.tradeable ? 'text-nexus-green' : s.radarTradeable || (s.tier && s.tier !== 'WATCH') ? 'text-nexus-accent' : 'text-gray-500'}`}>
+                    {s.tradeable ? 'GO' : s.radarTradeable || (s.tier && s.tier !== 'WATCH') ? 'RADAR' : 'WATCH'}
                   </span>
                 </div>
                 {s.detail ? <div className="text-[9px] text-gray-400 truncate mt-0.5">{s.detail}</div> : null}
-                {s.dailyMovePct != null && s.dailyMovePct > 0 ? (
-                  <div className="text-[9px] text-nexus-accent mt-0.5">Session +{s.dailyMovePct.toFixed(0)}%</div>
+                {(s.peakMovePct != null && s.peakMovePct > 0) || (s.dailyMovePct != null && s.dailyMovePct > 0) ? (
+                  <div className="text-[9px] text-nexus-accent mt-0.5">
+                    {s.peakMovePct != null && s.peakMovePct > (s.dailyMovePct ?? 0)
+                      ? `Peak +${s.peakMovePct.toFixed(0)}%`
+                      : null}
+                    {s.peakMovePct != null && s.peakMovePct > (s.dailyMovePct ?? 0) && s.dailyMovePct != null && s.dailyMovePct > 0
+                      ? ' · '
+                      : null}
+                    {s.dailyMovePct != null && s.dailyMovePct > 0 ? `Now +${s.dailyMovePct.toFixed(0)}%` : null}
+                  </div>
                 ) : null}
                 {s.blockers?.length || s.primaryBlocker ? (
                   <div className="text-[8px] text-nexus-red font-mono mt-0.5">
