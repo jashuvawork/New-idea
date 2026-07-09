@@ -112,6 +112,16 @@ def compute_adaptive_exit_plan(
             base_target = settings.explosion_target_elite
             trail_arm = max(trail_arm, 8.0)
             reasoning.append("ELITE explosion — wider SL + 25pt target")
+        daily_move = float(top.get("dailyMovePct") or top.get("openPremiumMove") or 0)
+        if (
+            settings.extreme_explosion_all_in_enabled
+            and daily_move >= settings.extreme_explosion_elite_move_min_pct
+        ):
+            base_target = max(base_target, settings.explosion_target_elite * 1.6)
+            trail_arm = max(trail_arm, settings.extreme_explosion_hold_min_best_points)
+            trail_keep = min(0.82, trail_keep + 0.08)
+            micro = max(micro, 5.0)
+            reasoning.append(f"extreme_rip_{daily_move:.0f}pct_chart_hold")
     else:
         base_stop = session_profile.stopPoints
         base_target = session_profile.targetPoints
@@ -344,8 +354,13 @@ def evaluate_adaptive_explosion_exit(
     from app.models.schemas import StrategyType
 
     min_arm = plan.trailArmPoints
-    if trade.strategyType == StrategyType.EXPLOSIVE and direction_aligned_with_breadth(trade):
-        min_arm = max(min_arm, 4.0)
+    ctx = trade.entryContext or {}
+    extreme_hold = bool(ctx.get("extremeAllInBypass"))
+    if trade.strategyType == StrategyType.EXPLOSIVE:
+        if direction_aligned_with_breadth(trade):
+            min_arm = max(min_arm, 4.0)
+        elif extreme_hold:
+            min_arm = max(min_arm, float(get_settings().extreme_explosion_hold_min_best_points))
 
     if best >= min_arm and pnl_pts < best * plan.trailKeepRatio:
         return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier

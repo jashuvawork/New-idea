@@ -10,11 +10,23 @@ def _side_val(side: Side | str) -> str:
     return side.value if isinstance(side, Side) else str(side).upper()
 
 
-def breadth_hard_blocks_side(side: Side | str, breadth_bias: str) -> tuple[bool, str]:
+def breadth_hard_blocks_side(
+    side: Side | str,
+    breadth_bias: str,
+    *,
+    event: Any = None,
+    candidate: Any = None,
+    alert: Any = None,
+) -> tuple[bool, str]:
     """
     No PUT on BULLISH breadth, no CALL on BEARISH breadth.
-    Applies regardless of explosion tier or premium-led bypass.
+    Extreme ELITE session rips (100%+) bypass via extreme_explosion_moment.
     """
+    from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
+
+    if is_extreme_explosion_all_in_bypass(event=event, candidate=candidate, alert=alert):
+        return False, "ok"
+
     settings = get_settings()
     if not settings.breadth_hard_side_block_enabled:
         return False, "ok"

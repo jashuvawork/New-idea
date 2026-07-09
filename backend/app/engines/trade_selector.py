@@ -99,7 +99,9 @@ def _reentry_blocked(
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
         bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
-        hard_blocked, hard_reason = breadth_hard_blocks_side(side, bias)
+        hard_blocked, hard_reason = breadth_hard_blocks_side(
+            side, bias, event=explosion_event,
+        )
         if hard_blocked:
             return True, hard_reason
         if not counter_trend_entry_allowed(side, snap, explosion_event=explosion_event):
@@ -585,7 +587,11 @@ def find_best_entry(
         bonus += mode_rank_bonus(c.mode, adaptive)
         breadth_bias = (c.snap.breadth.bias if c.snap.breadth else "NEUTRAL") or "NEUTRAL"
         if c.mode == "explosion":
-            if side_aligned_with_breadth(c.side, breadth_bias):
+            from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
+
+            if is_extreme_explosion_all_in_bypass(candidate=c):
+                bonus += 35
+            elif side_aligned_with_breadth(c.side, breadth_bias):
                 bonus += 18
             else:
                 bonus -= 22
@@ -640,7 +646,13 @@ def find_best_entry(
     if chart_conf >= settings.all_day_min_chart_confidence:
         floor = min(floor, settings.all_day_min_rank_score)
     if floor > 0 and sort_key(best) < floor:
-        return None
+        from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
+
+        if not (
+            best.mode == "explosion"
+            and is_extreme_explosion_all_in_bypass(candidate=best)
+        ):
+            return None
     return best
 
 

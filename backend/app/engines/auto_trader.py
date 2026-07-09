@@ -345,10 +345,12 @@ async def _open_from_candidate(
             return False, live_reason
 
         from app.engines.worst_day_guard import worst_day_allows_candidate
+        from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
 
-        wd_ok, wd_reason, _ = worst_day_allows_candidate(candidate, state, snapshots)
-        if not wd_ok:
-            return False, wd_reason
+        if not is_extreme_explosion_all_in_bypass(candidate=candidate):
+            wd_ok, wd_reason, _ = worst_day_allows_candidate(candidate, state, snapshots)
+            if not wd_ok:
+                return False, wd_reason
 
     if snapshots and settings.controlled_trading_enabled:
         from app.engines.pretrade_validator import validate_candidate
@@ -558,6 +560,10 @@ async def _open_from_candidate(
         ctx_extra["entryVelocity3s"] = entry_velocity_3s
     if candidate.mode == "explosion" and candidate.explosion_event:
         ev = candidate.explosion_event
+        from app.engines.extreme_explosion_moment import (
+            extreme_all_in_meta,
+            is_extreme_explosion_all_in_bypass,
+        )
         from app.engines.morning_premium_capture import is_afternoon_capture_event
 
         afternoon = is_afternoon_capture_event(ev, chart=snap.spotChart)
@@ -565,7 +571,10 @@ async def _open_from_candidate(
             "explosionTier": ev.tier,
             "explosionScore": ev.explosion_score,
             "afternoonCapture": afternoon,
+            "dailyMovePct": float(ev.daily_move_pct or 0),
         })
+        if is_extreme_explosion_all_in_bypass(candidate=candidate):
+            ctx_extra.update(extreme_all_in_meta(candidate=candidate))
     elif candidate.mode == "scalp" and candidate.suggestion:
         ctx_extra.update({
             "tqs": candidate.suggestion.tqs,
@@ -1160,7 +1169,10 @@ async def process(
         from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
 
         policy, policy_meta = session_entry_policy(state, snapshots)
-        if policy == "PAUSED":
+        from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
+
+        extreme_session = snapshots_have_all_in_explosion(snapshots)
+        if policy == "PAUSED" and not extreme_session:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": policy_meta.get("pauseReason", "worst_day_paused"),

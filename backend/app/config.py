@@ -471,6 +471,13 @@ class Settings(BaseSettings):
     all_day_explosion_min_score: float = 38.0
     all_day_explosion_session_move_min_pct: float = 40.0
     all_day_explosion_extreme_move_min_pct: float = 80.0
+    # ELITE +100% / 150%+ rips — ALL-IN bypass (AI report → trade)
+    extreme_explosion_all_in_enabled: bool = True
+    extreme_explosion_elite_move_min_pct: float = 100.0
+    extreme_explosion_all_in_move_min_pct: float = 150.0
+    extreme_explosion_all_in_min_score: float = 35.0
+    extreme_explosion_hold_min_best_points: float = 8.0
+    expiry_evening_all_in_explosion_bypass: bool = True
     all_day_explosion_building_min_velocity_3s: float = 2.0
     all_day_explosion_min_velocity_9s: float = 2.5
     all_day_explosion_chart_bypass_move_pct: float = 50.0

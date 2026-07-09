@@ -247,23 +247,27 @@ def check_min_entry_interval(
     )
 
     aligned_rip = False
+    all_in_rip = False
     if candidate is not None and snapshots is not None:
         sym = str(getattr(candidate, "symbol", "")).upper()
         snap = snapshots.get(sym) or getattr(candidate, "snap", None)
         if snap is not None:
             aligned_rip, _ = is_aligned_explosion_rip(candidate, snap)
+            from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
+
+            all_in_rip = is_extreme_explosion_all_in_bypass(candidate=candidate)
 
     gap = entry_interval_gap_seconds(
         chop=chop,
         quick_sideways=quick_sideways,
-        after_loss=after_loss and not aligned_rip,
-        aligned_rip=aligned_rip,
+        after_loss=after_loss and not aligned_rip and not all_in_rip,
+        aligned_rip=aligned_rip or all_in_rip,
     )
 
     elapsed = (datetime.now(IST) - closed).total_seconds()
     if elapsed < gap:
         remain = int(gap - elapsed)
-        if aligned_rip:
+        if aligned_rip or all_in_rip:
             suffix = "aligned_rip"
         elif after_loss:
             suffix = "after_loss"
@@ -499,6 +503,18 @@ def validate_candidate(
     trades = session_trades if session_trades is not None else collect_session_trades(state)
     meta: dict[str, Any] = {"controlledTrading": True}
 
+    from app.engines.extreme_explosion_moment import (
+        extreme_all_in_meta,
+        is_extreme_explosion_all_in_bypass,
+    )
+
+    all_in = (
+        getattr(candidate, "mode", "") == "explosion"
+        and is_extreme_explosion_all_in_bypass(candidate=candidate)
+    )
+    if all_in:
+        meta.update(extreme_all_in_meta(candidate=candidate))
+
     from app.engines.chop_day_guards import is_chop_session
 
     snap_map = snapshots or {candidate.symbol.upper(): candidate.snap}
@@ -514,13 +530,15 @@ def validate_candidate(
     if not ok:
         return False, reason, meta
 
-    if getattr(candidate, "mode", "") == "explosion":
+    if getattr(candidate, "mode", "") == "explosion" and not all_in:
         from app.engines.aligned_side_guard import breadth_hard_blocks_side
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
         snap_pre = snap_map.get(candidate.symbol.upper()) or candidate.snap
         bias = (snap_pre.breadth.bias if snap_pre.breadth else "NEUTRAL") or "NEUTRAL"
-        hard_blocked, hard_reason = breadth_hard_blocks_side(candidate.side, bias)
+        hard_blocked, hard_reason = breadth_hard_blocks_side(
+            candidate.side, bias, candidate=candidate,
+        )
         if hard_blocked:
             return False, hard_reason, meta
         explosion_event = getattr(candidate, "explosion_event", None)
@@ -535,7 +553,7 @@ def validate_candidate(
 
     ln_ok, ln_reason, ln_meta = check_last_n_candidate_gate(candidate, state, trades)
     meta.update(ln_meta)
-    if not ln_ok:
+    if not all_in and not ln_ok:
         return False, ln_reason, meta
 
     from app.engines.directional_lock import check_directional_side_lock
@@ -556,15 +574,15 @@ def validate_candidate(
         )
 
     dir_blocked, dir_reason = check_directional_side_lock(
-        sym, candidate.side, snap, tier=tier, premium_led_bypass=premium_bypass,
+        sym, candidate.side, snap, tier=tier, premium_led_bypass=premium_bypass or all_in,
         candidate=candidate,
     )
-    if dir_blocked:
+    if not all_in and dir_blocked:
         return False, dir_reason, meta
 
     from app.engines.whipsaw_guards import check_whipsaw_candidate
 
-    if settings.whipsaw_guards_enabled:
+    if settings.whipsaw_guards_enabled and not all_in:
         ws_ok, ws_reason, ws_meta = check_whipsaw_candidate(candidate, state, snap_map)
         meta.update(ws_meta)
         if not ws_ok:
@@ -578,71 +596,76 @@ def validate_candidate(
         candidate.strike,
         float(getattr(candidate, "score", 0) or 0),
     )
-    if hc_blocked:
+    if not all_in and hc_blocked:
         return False, hc_reason, meta
 
     from app.engines.moneyness import moneyness_allows
 
-    mn_ok, mn_reason, mn_meta = moneyness_allows(
-        candidate.side,
-        candidate.strike,
-        snap,
-        mode=str(getattr(candidate, "mode", "scalp")),
-        candidate_score=float(getattr(candidate, "score", 0) or 0),
-        snapshots=snap_map,
-        state=state,
-    )
-    meta.update(mn_meta)
-    if not mn_ok:
-        return False, mn_reason, meta
+    if not all_in:
+        mn_ok, mn_reason, mn_meta = moneyness_allows(
+            candidate.side,
+            candidate.strike,
+            snap,
+            mode=str(getattr(candidate, "mode", "scalp")),
+            candidate_score=float(getattr(candidate, "score", 0) or 0),
+            snapshots=snap_map,
+            state=state,
+        )
+        meta.update(mn_meta)
+        if not mn_ok:
+            return False, mn_reason, meta
 
     from app.engines.expiry_day_guards import check_expiry_candidate, expiry_min_rank_score
     from app.engines.bad_day_routing import check_bad_day_candidate
 
-    bd_ok, bd_reason, bd_meta = check_bad_day_candidate(candidate, state, snap_map)
-    meta.update(bd_meta)
-    if not bd_ok:
-        return False, bd_reason, meta
+    if not all_in:
+        bd_ok, bd_reason, bd_meta = check_bad_day_candidate(candidate, state, snap_map)
+        meta.update(bd_meta)
+        if not bd_ok:
+            return False, bd_reason, meta
 
-    from app.engines.worst_day_guard import worst_day_allows_candidate
+        from app.engines.worst_day_guard import worst_day_allows_candidate
 
-    wd_ok, wd_reason, wd_meta = worst_day_allows_candidate(candidate, state, snap_map)
-    meta.update(wd_meta)
-    if not wd_ok:
-        return False, wd_reason, meta
+        wd_ok, wd_reason, wd_meta = worst_day_allows_candidate(candidate, state, snap_map)
+        meta.update(wd_meta)
+        if not wd_ok:
+            return False, wd_reason, meta
 
-    ex_ok, ex_reason, ex_meta = check_expiry_candidate(candidate, state, snap_map)
-    meta.update(ex_meta)
-    if not ex_ok:
-        return False, ex_reason, meta
+        ex_ok, ex_reason, ex_meta = check_expiry_candidate(candidate, state, snap_map)
+        meta.update(ex_meta)
+        if not ex_ok:
+            return False, ex_reason, meta
+    elif all_in:
+        meta["expiryCheckSkipped"] = "extreme_all_in"
 
     from app.engines.expiry_day_guards import (
         expiry_pm_itm_quick_active,
         is_symbol_expiry_day,
     )
 
-    expiry_floor = expiry_min_rank_score(state, snap_map)
-    min_rank = max(settings.pretrade_min_rank_score, expiry_floor)
-    mode = getattr(candidate, "mode", "")
-    from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
+    if not all_in:
+        expiry_floor = expiry_min_rank_score(state, snap_map)
+        min_rank = max(settings.pretrade_min_rank_score, expiry_floor)
+        mode = getattr(candidate, "mode", "")
+        from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
 
-    expiry_aligned = (
-        mode == "explosion"
-        and expiry_aligned_explosion_trade_allowed(candidate, snap)[0]
-    )
-    if mode == "quick_sideways":
-        if expiry_pm_itm_quick_active(snap, state, snap_map):
-            min_rank = min(min_rank, settings.expiry_pm_itm_min_rank_score)
-        elif not is_symbol_expiry_day(snap):
-            min_rank = min(min_rank, settings.quick_sideways_min_rank_score)
-    elif mode == "slow_bounce":
-        min_rank = min(
-            min_rank,
-            settings.quick_sideways_slow_bounce_min_rank_score,
-            settings.expiry_pm_itm_min_rank_score,
+        expiry_aligned = (
+            mode == "explosion"
+            and expiry_aligned_explosion_trade_allowed(candidate, snap)[0]
         )
-    if not expiry_aligned and candidate.score < min_rank:
-        return False, f"pretrade_rank_below_{min_rank:.0f}", meta
+        if mode == "quick_sideways":
+            if expiry_pm_itm_quick_active(snap, state, snap_map):
+                min_rank = min(min_rank, settings.expiry_pm_itm_min_rank_score)
+            elif not is_symbol_expiry_day(snap):
+                min_rank = min(min_rank, settings.quick_sideways_min_rank_score)
+        elif mode == "slow_bounce":
+            min_rank = min(
+                min_rank,
+                settings.quick_sideways_slow_bounce_min_rank_score,
+                settings.expiry_pm_itm_min_rank_score,
+            )
+        if not expiry_aligned and candidate.score < min_rank:
+            return False, f"pretrade_rank_below_{min_rank:.0f}", meta
 
     side_val = candidate.side.value if isinstance(candidate.side, Side) else str(candidate.side).upper()
 
@@ -650,9 +673,12 @@ def validate_candidate(
     from app.engines.symbol_cooldown import side_aligned_with_breadth
 
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
-    hard_blocked, hard_reason = breadth_hard_blocks_side(candidate.side, bias)
-    if hard_blocked:
-        return False, hard_reason, meta
+    if not all_in:
+        hard_blocked, hard_reason = breadth_hard_blocks_side(
+            candidate.side, bias, candidate=candidate,
+        )
+        if hard_blocked:
+            return False, hard_reason, meta
 
     trade_score = candidate_trade_score(candidate)
 
@@ -666,6 +692,11 @@ def validate_candidate(
                 snap.spotChart,
                 (snap.breadth.bias if snap.breadth else "NEUTRAL"),
             )
+
+    if all_in:
+        meta["pretradePassed"] = True
+        meta["extremeAllInBypass"] = True
+        return True, "extreme_all_in_bypass", meta
 
     if not side_aligned_with_breadth(side_val, snap.breadth.bias) and not premium_bypass:
         counter_floor = settings.counter_breadth_min_score
