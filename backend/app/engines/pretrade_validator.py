@@ -619,6 +619,10 @@ def validate_candidate(
     expiry_floor = expiry_min_rank_score(state, snap_map)
     min_rank = max(settings.pretrade_min_rank_score, expiry_floor)
     mode = getattr(candidate, "mode", "")
+    from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
+
+    if expiry_aligned_explosion_trade_allowed(candidate, snap)[0]:
+        min_rank = min(min_rank, settings.pre_expiry_expiry_symbol_explosion_min_rank)
     if mode == "quick_sideways":
         if expiry_pm_itm_quick_active(snap, state, snap_map):
             min_rank = min(min_rank, settings.expiry_pm_itm_min_rank_score)
