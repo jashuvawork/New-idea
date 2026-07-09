@@ -465,7 +465,7 @@ async def _open_from_candidate(
             from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
             from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_candidate
             from app.engines.morning_premium_capture import premium_led_bypass_for_snap
-            from app.engines.spot_direction import chart_blocks_side
+            from app.engines.spot_direction import chart_blocks_side, side_aligned_with_chart
 
             breadth_bypass = expiry_pm_itm_chart_bypass_allowed(
                 candidate.side, snap, mode=candidate.mode or "",
@@ -486,6 +486,14 @@ async def _open_from_candidate(
                 "enabled": True,
                 "source": "snapshot_only",
                 "indexChart": snap.spotChart.model_dump() if snap.spotChart else {},
+                "snapshotChart": snap.spotChart.model_dump() if snap.spotChart else {},
+                "snapshotAligned": side_aligned_with_chart(candidate.side, snap.spotChart),
+                "alignedWithChart": side_aligned_with_chart(candidate.side, snap.spotChart),
+                "chartBypassUsed": bool(
+                    premium_bypass or expiry_chart_bypass or breadth_bypass
+                ),
+                "premiumLedBypass": premium_bypass,
+                "expiryExplosionBypass": expiry_chart_bypass,
             }
     else:
         chart_meta = {"enabled": False}
@@ -670,8 +678,25 @@ async def _open_from_candidate(
         "score": round(candidate.score, 2),
         "executionMode": ctx_extra["executionMode"],
         "brokerOrderId": ctx_extra.get("brokerOrderId"),
-        "chartDirection": chart_meta.get("indexChart", {}).get("direction"),
-        "chartAligned": chart_meta.get("alignedWithChart"),
+        "chartDirection": (
+            (chart_meta.get("snapshotChart") or {}).get("direction")
+            or chart_meta.get("indexChart", {}).get("direction")
+        ),
+        "execChartDirection": chart_meta.get("indexChart", {}).get("direction"),
+        "chartAligned": (
+            chart_meta.get("snapshotAligned")
+            if chart_meta.get("snapshotAligned") is not None
+            else chart_meta.get("alignedWithChart")
+        ),
+        "chartBypass": (
+            "expiry explosion"
+            if chart_meta.get("expiryExplosionBypass")
+            else "premium-led"
+            if chart_meta.get("premiumLedBypass")
+            else "breadth-aligned"
+            if chart_meta.get("chartBypassUsed")
+            else None
+        ),
         "at": datetime.now(IST).isoformat(),
     }
     logger.info(

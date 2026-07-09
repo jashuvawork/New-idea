@@ -371,14 +371,24 @@ def check_edge_realtime_exit(
     if best <= 0:
         return None, pnl_inr
 
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+    from app.models.schemas import StrategyType
+
+    is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
+    breadth_hold = is_explosion and direction_aligned_with_breadth(trade)
+    min_best_edge = 5.0 if breadth_hold else 3.0
+    if is_explosion and best < min_best_edge:
+        return None, pnl_inr
+
     ctx = trade.entryContext or {}
     entry_vel = float(ctx.get("velocity3s") or ctx.get("entryVelocity3s") or 0)
     edge_total = float((ctx.get("edgeScore") or {}).get("total") or 0)
 
     # Momentum exhaustion — premium still up but velocity collapsed
-    if entry_vel >= 1.5 and best >= 2.0:
+    if entry_vel >= 1.5 and best >= (5.0 if breadth_hold else 2.0):
         ratio = settings.edge_velocity_exhaustion_ratio
-        if current_velocity_3s < entry_vel * ratio and pnl_pts >= max(1.5, best * 0.55):
+        min_lock = 4.0 if breadth_hold else 1.5
+        if current_velocity_3s < entry_vel * ratio and pnl_pts >= max(min_lock, best * 0.55):
             return "edge_momentum_exhaustion", pnl_inr
 
     chart = snap.spotChart if snap else None
@@ -400,8 +410,9 @@ def check_edge_realtime_exit(
                 return "edge_macd_fade_lock", pnl_inr
 
     # High-edge trades get more room; low-edge take profit earlier on giveback
-    if edge_total > 0 and edge_total < 58 and best >= 2.5:
-        if best - pnl_pts >= 1.5:
+    if edge_total > 0 and edge_total < 58 and best >= (5.0 if breadth_hold else 2.5):
+        giveback_min = 3.0 if breadth_hold else 1.5
+        if best - pnl_pts >= giveback_min:
             return "edge_low_score_profit_lock", pnl_inr
 
     return None, pnl_inr
