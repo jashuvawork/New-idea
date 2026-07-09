@@ -42,6 +42,23 @@ _sse_queues: set[asyncio.Queue] = set()
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def _touch_cached_snapshot(*, overlay_ws: bool = False) -> Optional[MultiSnapshot]:
+    """Refresh timestamp + WS LTP overlay without a full REST rebuild."""
+    global _cache
+    if not _cache:
+        return None
+    settings = get_settings()
+    snap = _cache.model_copy(deep=True)
+    snap.timestamp = datetime.now(IST)
+    if overlay_ws and is_ws_active() and snap.dataReady:
+        snap.snapshots = overlay_snapshot_ltps(
+            snap.snapshots,
+            max_age_seconds=settings.tick_overlay_max_age_seconds,
+        )
+    snap.autoTrader = get_state()
+    return snap
+
+
 def _effective_cache_seconds() -> float:
     settings = get_settings()
     if is_ws_active():
@@ -88,6 +105,7 @@ def latency_stats() -> dict[str, Any]:
         "marketPollIntervalMs": settings.market_poll_interval_ms,
         "tickSnapshotIntervalMs": settings.tick_snapshot_interval_ms,
         "snapshotCacheIntervalMs": settings.snapshot_cache_interval_ms,
+        "wsSnapshotCacheIntervalMs": settings.ws_snapshot_cache_interval_ms,
         "sseHeartbeatSeconds": settings.sse_heartbeat_seconds,
         "lastFastCycleMs": _last_fast_cycle_ms,
         "lastFullCycleMs": _last_full_cycle_ms,
@@ -340,7 +358,11 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
     if not force and _cache and _cache_time:
         age = (now - _cache_time).total_seconds()
         if age < cache_ttl:
-            return _cache
+            touched = _touch_cached_snapshot(overlay_ws=is_ws_active())
+            snap = touched if touched else _cache
+            if broadcast:
+                await broadcast_snapshot(snap)
+            return snap
 
     t0 = time.perf_counter()
     async with _build_lock:
@@ -363,7 +385,11 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
         if not force and _cache and _cache_time:
             age = (datetime.now(IST) - _cache_time).total_seconds()
             if age < cache_ttl:
-                return _cache
+                touched = _touch_cached_snapshot(overlay_ws=is_ws_active())
+                snap = touched if touched else _cache
+                if broadcast:
+                    await broadcast_snapshot(snap)
+                return snap
         try:
             snapshot = await _build_multi_snapshot()
         except Exception as e:

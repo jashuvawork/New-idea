@@ -7,9 +7,9 @@ import { snapshotSignature } from './snapshotSignature';
 const API_BASE = import.meta.env.DEV
   ? ''
   : (import.meta.env.VITE_API_URL || '');
-const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
-const UI_TICK_MS = Math.max(POLL_MS, 250);
-const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 100), 50);
+const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 300);
+const UI_TICK_MS = Math.max(POLL_MS, 200);
+const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 50), 25);
 const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
@@ -25,9 +25,9 @@ function sseConnectionQuality(
   dataReady: boolean,
 ): StreamMetrics['connectionQuality'] {
   if (!dataReady && dataAgeMs > 30_000) return 'offline';
-  if (dataAgeMs > 20_000) return 'offline';
-  if (dataAgeMs > 5_000) return 'slow';
-  if (dataAgeMs > 1_500) return 'good';
+  if (dataAgeMs > 10_000) return 'offline';
+  if (dataAgeMs > 3_000) return 'slow';
+  if (dataAgeMs > 800) return 'good';
   return 'excellent';
 }
 
@@ -194,7 +194,7 @@ export function useMarketStream() {
         const prevBucket = Math.floor(prev.stalenessMs / 1000);
         const quality =
           prev.streamMode === 'sse'
-            ? (stale > 20_000 ? 'offline' : stale > 5_000 ? 'slow' : stale > 1_500 ? 'good' : 'excellent')
+            ? (stale > 10_000 ? 'offline' : stale > 3_000 ? 'slow' : stale > 800 ? 'good' : 'excellent')
             : prev.connectionQuality;
         const latency = prev.streamMode === 'sse'
           ? sseDisplayLatencyMs(stale, prev.pollIntervalMs)
@@ -204,7 +204,7 @@ export function useMarketStream() {
         }
         return { ...prev, stalenessMs: stale, connectionQuality: quality, lastLatencyMs: latency };
       });
-      if (SSE_ENABLED && !sseFailed.current && stale > 4000) {
+      if (SSE_ENABLED && !sseFailed.current && stale > 2500) {
         void fetchSnapshot();
       }
     }, UI_TICK_MS);

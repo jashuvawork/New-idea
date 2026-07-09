@@ -35,17 +35,17 @@ function deriveQuality(
   }
   if (dataReady && stalenessMs < 4_000) {
     if (streamMode === 'sse') {
-      if (stalenessMs > 20_000) return 'offline';
-      if (stalenessMs > 5_000) return 'slow';
-      return stalenessMs > 1_500 ? 'good' : 'excellent';
+      if (stalenessMs > 10_000) return 'offline';
+      if (stalenessMs > 3_000) return 'slow';
+      return stalenessMs > 800 ? 'good' : 'excellent';
     }
     return latencyQuality(latencyMs);
   }
   if (streamMode === 'sse') {
-    if (!dataReady && stalenessMs > 30_000) return 'offline';
-    if (stalenessMs > 20_000) return 'offline';
-    if (stalenessMs > 5_000) return 'slow';
-    if (stalenessMs > 1_500) return 'good';
+    if (!dataReady && stalenessMs > 20_000) return 'offline';
+    if (stalenessMs > 10_000) return 'offline';
+    if (stalenessMs > 3_000) return 'slow';
+    if (stalenessMs > 800) return 'good';
     return 'excellent';
   }
   if (dataReady && stalenessMs < 30_000) return latencyQuality(latencyMs);
@@ -134,7 +134,7 @@ export function LatencyFooter({ metrics }: { metrics: StreamMetrics }) {
       <span>
         Data age:{' '}
         <span className="font-mono text-gray-300">
-          {metrics.stalenessMs < 1500 ? 'live' : `${Math.round(metrics.stalenessMs / 1000)}s`}
+          {metrics.stalenessMs < 800 ? 'live' : `${Math.round(metrics.stalenessMs / 1000)}s`}
         </span>
       </span>
     </div>
