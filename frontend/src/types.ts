@@ -175,6 +175,7 @@ export interface Orderflow {
   breakoutVelocity: number;
   bidAskImbalance: number;
   tickMomentum: number;
+  signedMomentumPct?: number;
 }
 
 export interface Greeks {
