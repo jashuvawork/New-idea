@@ -326,8 +326,13 @@ def _gate_checks(
             blockers.append(wd_reason)
 
     # 10 — Bad day routing
+    from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
+
+    expiry_trade_ok, expiry_trade_reason = expiry_aligned_explosion_trade_allowed(candidate, snap)
     if _extreme_explosion_bypass(candidate):
         gates.append({"gate": "bad_day", "passed": True, "detail": "extreme session move bypass"})
+    elif expiry_trade_ok:
+        gates.append({"gate": "bad_day", "passed": True, "detail": f"expiry_aligned ({expiry_trade_reason})"})
     else:
         bd_ok, bd_reason, bd_meta = check_bad_day_candidate(candidate, state, snapshots)
         gates.append({
@@ -343,9 +348,6 @@ def _gate_checks(
     floor, floor_notes = _effective_rank_floor(candidate, state, snapshots)
     sort_sc = _sort_score(candidate)
     rank_ok = sort_sc >= floor
-    from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
-
-    expiry_trade_ok, expiry_trade_reason = expiry_aligned_explosion_trade_allowed(candidate, snap)
     if not rank_ok and expiry_trade_ok:
         rank_ok = True
         floor_notes = list(floor_notes) + [f"expiry_aligned_rank_bypass({expiry_trade_reason})"]

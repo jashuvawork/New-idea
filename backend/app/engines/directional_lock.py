@@ -238,15 +238,19 @@ def check_directional_side_lock(
     if premium_led_bypass:
         return False, "ok"
 
-    if (
-        settings.directional_lock_aligned_rip_bypass_enabled
-        and candidate is not None
-    ):
-        from app.engines.aligned_explosion_bypass import is_aligned_explosion_rip
+    if candidate is not None:
+        from app.engines.aligned_explosion_bypass import (
+            expiry_aligned_explosion_trade_allowed,
+            is_aligned_explosion_rip,
+        )
 
-        rip_ok, rip_reason = is_aligned_explosion_rip(candidate, snap)
-        if rip_ok:
+        if expiry_aligned_explosion_trade_allowed(candidate, snap)[0]:
             return False, "ok"
+
+        if settings.directional_lock_aligned_rip_bypass_enabled:
+            rip_ok, _ = is_aligned_explosion_rip(candidate, snap)
+            if rip_ok:
+                return False, "ok"
 
     if not _needs_confirmation(symbol, side_v, snap):
         return False, "ok"

@@ -552,9 +552,12 @@ def find_best_entry(
 
     settings = get_settings()
     if settings.best_trades_only_enabled:
+        from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
+
         candidates = [
             c for c in candidates
             if c.score >= settings.best_trades_min_rank_score
+            or expiry_aligned_explosion_trade_allowed(c, c.snap)[0]
         ]
         if not candidates:
             return None
@@ -598,7 +601,10 @@ def find_best_entry(
     elif best.mode == "slow_bounce":
         floor = min(floor, settings.quick_sideways_slow_bounce_min_rank_score)
     elif settings.best_trades_only_enabled:
-        floor = max(floor, settings.best_trades_min_rank_score)
+        from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
+
+        if not expiry_aligned_explosion_trade_allowed(best, best.snap)[0]:
+            floor = max(floor, settings.best_trades_min_rank_score)
     floor = apply_rank_floor_adaptive(floor, adaptive, candidate_mode=best.mode)
     from app.engines.bad_day_routing import bad_day_min_rank_floor
 

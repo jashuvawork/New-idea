@@ -214,3 +214,21 @@ def test_expiry_aligned_trade_bypass_on_sensex_exploding(mock_expiry, mock_setti
         Side.CALL, chart, trade_score=51.0, expiry_explosion_bypass=True,
     )
     assert blocked is False
+
+
+@patch("app.engines.aligned_explosion_bypass.get_settings")
+@patch("app.engines.expiry_day_guards.is_symbol_expiry_day", return_value=True)
+def test_expiry_elite_45_passes_bypass(mock_expiry, mock_settings):
+    from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
+
+    s = mock_settings.return_value
+    s.expiry_aligned_explosion_trade_bypass_enabled = True
+    s.pre_expiry_expiry_symbol_explosion_min_rank = 55.0
+
+    snap = _snap("BULLISH")
+    snap.optionExpiry = datetime.now(IST).strftime("%Y-%m-%d")
+    cand = _candidate(_event(explosion_score=45.3, tier="ELITE"))
+
+    ok, reason = expiry_aligned_explosion_trade_allowed(cand, snap)
+    assert ok is True
+    assert reason == "expiry_aligned_explosion"

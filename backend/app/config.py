@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     expiry_entry_scan_interval_ms: int = 750
     expiry_atm_tier_velocity_mult: float = 0.85
     aligned_explosion_rip_bypass_enabled: bool = True
-    aligned_explosion_rip_min_score: float = 55.0
+    aligned_explosion_rip_min_score: float = 45.0
     aligned_explosion_rip_min_velocity_3s: float = 2.0
     aligned_explosion_rip_min_velocity_9s: float = 3.0
     aligned_explosion_rip_interval_seconds: int = 30
@@ -256,6 +256,7 @@ class Settings(BaseSettings):
     trade_moneyness_mode: str = "AUTO"  # AUTO | ITM | OTM | ATM
     moneyness_atm_tolerance_points: float = 50.0
     moneyness_max_otm_steps: int = 2
+    expiry_explosion_max_otm_steps: int = 4
     moneyness_max_itm_steps: int = 2
     moneyness_explosion_prefer: str = "ATM"
     moneyness_scalp_chop_prefer: str = "ITM"
@@ -305,8 +306,8 @@ class Settings(BaseSettings):
     # When one index is near-expiry (today/tomorrow), prefer the other for explosion/scalp
     pre_expiry_cross_index_enabled: bool = True
     pre_expiry_symbol_rank_penalty: float = 12.0
-    pre_expiry_alternate_min_rank: float = 68.0
-    pre_expiry_expiry_symbol_explosion_min_rank: float = 55.0
+    pre_expiry_alternate_min_rank: float = 55.0
+    pre_expiry_expiry_symbol_explosion_min_rank: float = 45.0
     expiry_aligned_explosion_trade_bypass_enabled: bool = True
     expiry_aligned_explosion_chart_bypass_enabled: bool = True
 

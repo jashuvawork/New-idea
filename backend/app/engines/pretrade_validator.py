@@ -684,13 +684,17 @@ def validate_candidate(
     sym_stats = compute_symbol_stats(trades)
     meta["symbolStats"] = {k: asdict(v) for k, v in sym_stats.items()}
 
+    from app.engines.aligned_explosion_bypass import expiry_aligned_pretrade_soft_bypass
+
+    expiry_soft_bypass = expiry_aligned_pretrade_soft_bypass(candidate, snap)
+
     st = sym_stats.get(candidate.symbol.upper())
     if st and st.trades >= settings.pretrade_min_symbol_trades_for_stats:
         meta["symbolPf"] = st.profit_factor
         meta["symbolNetInr"] = st.net_pnl_inr
-        if st.profit_factor < settings.pretrade_block_symbol_pf_below:
+        if st.profit_factor < settings.pretrade_block_symbol_pf_below and not expiry_soft_bypass:
             return False, f"pretrade_symbol_pf_{st.profit_factor:.2f}", meta
-        if st.net_pnl_inr <= settings.pretrade_block_symbol_net_inr_below:
+        if st.net_pnl_inr <= settings.pretrade_block_symbol_net_inr_below and not expiry_soft_bypass:
             return False, f"pretrade_symbol_net_{st.net_pnl_inr:.0f}", meta
 
     similar = [
@@ -701,7 +705,7 @@ def validate_candidate(
         sim_pf = round(_profit_factor(similar), 2)
         meta["similarSidePf"] = sim_pf
         meta["similarSideTrades"] = len(similar)
-        if sim_pf < settings.pretrade_block_similar_pf_below:
+        if sim_pf < settings.pretrade_block_similar_pf_below and not expiry_soft_bypass:
             return False, f"pretrade_similar_pf_{sim_pf:.2f}", meta
 
     meta["pretradePassed"] = True

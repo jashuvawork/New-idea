@@ -154,7 +154,18 @@ def moneyness_allows(
         return False, f"moneyness_mode_{mode_key.lower()}_required", meta
 
     if money == "OTM" and depth > settings.moneyness_max_otm_steps:
-        if mode != "explosion" or candidate_score < settings.bearish_sideways_explosion_min_score:
+        expiry_otm_ok = False
+        if mode == "explosion":
+            from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+            max_depth = settings.moneyness_max_otm_steps
+            if is_symbol_expiry_day(snap):
+                max_depth = max(max_depth, int(getattr(settings, "expiry_explosion_max_otm_steps", 4) or 4))
+            if depth <= max_depth and candidate_score >= settings.aggressive_min_explosion_score:
+                expiry_otm_ok = True
+        if not expiry_otm_ok and (
+            mode != "explosion" or candidate_score < settings.bearish_sideways_explosion_min_score
+        ):
             return False, f"moneyness_otm_too_deep_{depth}", meta
 
     if money == "ITM" and depth > settings.moneyness_max_itm_steps:

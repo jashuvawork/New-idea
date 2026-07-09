@@ -42,6 +42,17 @@ def _event_from_candidate(candidate: Any) -> Optional[ExplosionEvent]:
         return None
 
 
+def _expiry_tier_min_score(tier: str, settings: Any) -> float:
+    """ELITE/EXPLODING floors on own expiry day — looser than global rank caps."""
+    base = float(settings.pre_expiry_expiry_symbol_explosion_min_rank)
+    tier_u = str(tier or "").upper()
+    if tier_u == "ELITE":
+        return min(base, 45.0)
+    if tier_u == "EXPLODING":
+        return min(base, 48.0)
+    return base
+
+
 def is_aligned_explosion_rip(
     candidate: Any,
     snap: SymbolSnapshot,
@@ -74,6 +85,11 @@ def is_aligned_explosion_rip(
     daily_move = float(event.daily_move_pct or 0)
     if daily_move >= settings.all_day_explosion_session_move_min_pct:
         min_score = min(min_score, settings.all_day_explosion_min_score)
+    from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+    if is_symbol_expiry_day(snap):
+        min_score = min(min_score, _expiry_tier_min_score(tier, settings))
+
     if score < min_score:
         return False, f"score_{score:.0f}<{min_score:.0f}"
 
@@ -81,6 +97,9 @@ def is_aligned_explosion_rip(
     v9 = float(event.velocity_9s or 0)
     min_v3 = float(settings.aligned_explosion_rip_min_velocity_3s)
     min_v9 = float(settings.aligned_explosion_rip_min_velocity_9s)
+    if is_symbol_expiry_day(snap):
+        min_v3 = min(min_v3, 1.2)
+        min_v9 = min(min_v9, 2.0)
     if v3 < min_v3 and v9 < min_v9:
         return False, "velocity_low"
 
@@ -146,11 +165,20 @@ def expiry_aligned_explosion_trade_allowed(
     score = float(getattr(candidate, "score", 0) or 0)
     if event is not None:
         score = max(score, float(event.explosion_score or 0))
-    min_score = float(settings.pre_expiry_expiry_symbol_explosion_min_rank)
+    min_score = _expiry_tier_min_score(tier, settings)
     if score < min_score:
         return False, f"score_{score:.0f}<{min_score:.0f}"
 
     return True, "expiry_aligned_explosion"
+
+
+def expiry_aligned_pretrade_soft_bypass(
+    candidate: Any,
+    snap: SymbolSnapshot,
+) -> bool:
+    """Waive symbol PF, similar-side PF, rank floors, and deep OTM on expiry rip."""
+    ok, _ = expiry_aligned_explosion_trade_allowed(candidate, snap)
+    return ok
 
 
 def expiry_chart_bypass_for_candidate(
