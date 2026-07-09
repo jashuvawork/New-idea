@@ -40,6 +40,10 @@ def _put_event(**kwargs) -> ExplosionEvent:
     return ExplosionEvent(**base)
 
 
+def _elite_put_event(**kwargs) -> ExplosionEvent:
+    return _put_event(tier="ELITE", explosion_score=95.0, **kwargs)
+
+
 def _trade() -> SuggestedTrade:
     return SuggestedTrade(
         id="t1",
@@ -65,17 +69,15 @@ def _bullish_chart() -> SpotChart:
     )
 
 
-@patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
-@patch("app.engines.morning_premium_capture.get_settings")
-def test_premium_led_bypass_detects_put_vs_bullish(mock_settings, mock_window):
-    s = mock_settings.return_value
+def _mock_premium_settings(s):
     s.premium_led_explosion_bypass_enabled = True
     s.premium_led_counter_breadth_enabled = True
-    s.morning_capture_extreme_velocity_3s = 3.0
-    s.morning_capture_extreme_velocity_9s = 4.0
+    s.premium_led_elite_counter_min_score = 90.0
     s.premium_led_min_velocity_3s = 2.8
     s.premium_led_min_velocity_9s = 3.5
     s.premium_led_min_explosion_score = 42.0
+    s.morning_capture_extreme_velocity_3s = 3.0
+    s.morning_capture_extreme_velocity_9s = 4.0
     s.morning_capture_building_min_velocity_3s = 2.0
     s.morning_capture_min_velocity_9s = 2.8
     s.morning_capture_min_vol_surge = 1.3
@@ -83,34 +85,29 @@ def test_premium_led_bypass_detects_put_vs_bullish(mock_settings, mock_window):
     s.open_premium_min_move_pct = 25.0
     s.open_premium_bypass_min_score = 35.0
     s.open_premium_chart_bypass_move_pct = 20.0
+    s.chart_min_trend_strength = 25.0
 
-    event = _put_event()
-    assert premium_led_explosion_bypass(event, _bullish_chart(), "BULLISH") is True
+
+@patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
+@patch("app.engines.morning_premium_capture.get_settings")
+def test_premium_led_bypass_requires_elite_on_bullish(mock_settings, mock_window):
+    s = mock_settings.return_value
+    _mock_premium_settings(s)
+
+    assert premium_led_explosion_bypass(_put_event(), _bullish_chart(), "BULLISH") is False
+    assert premium_led_explosion_bypass(_elite_put_event(), _bullish_chart(), "BULLISH") is True
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
 @patch("app.engines.morning_premium_capture.get_settings")
 def test_put_explosion_passes_bullish_breadth_and_chart(mock_settings, mock_window):
     s = mock_settings.return_value
-    s.premium_led_explosion_bypass_enabled = True
-    s.premium_led_counter_breadth_enabled = True
-    s.morning_capture_extreme_velocity_3s = 3.0
-    s.morning_capture_extreme_velocity_9s = 4.0
-    s.premium_led_min_velocity_3s = 2.8
-    s.premium_led_min_velocity_9s = 3.5
-    s.premium_led_min_explosion_score = 42.0
-    s.morning_capture_building_min_velocity_3s = 2.0
-    s.morning_capture_min_velocity_9s = 2.8
-    s.morning_capture_min_vol_surge = 1.3
-    s.morning_capture_building_min_score = 38.0
+    _mock_premium_settings(s)
     s.aggressive_min_explosion_score = 45
     s.explosion_breadth_alignment_enabled = True
     s.chart_alignment_enabled = True
-    s.chart_min_trend_strength = 25.0
     s.index_pin_put_block_enabled = True
     s.index_pin_min_stock_breadth_pct = 58.0
-    s.open_premium_min_move_pct = 25.0
-    s.open_premium_bypass_min_score = 35.0
 
     snap = SymbolSnapshot(
         symbol="NIFTY",
@@ -129,7 +126,7 @@ def test_put_explosion_passes_bullish_breadth_and_chart(mock_settings, mock_wind
             breadthPct=62.0,
         ),
     )
-    event = _put_event()
+    event = _elite_put_event()
     ok, reason = check_explosion_entry(
         event,
         _trade(),
@@ -140,6 +137,25 @@ def test_put_explosion_passes_bullish_breadth_and_chart(mock_settings, mock_wind
     )
     assert ok is True
     assert reason.startswith("premium_led_")
+
+
+@patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
+@patch("app.engines.morning_premium_capture.get_settings")
+def test_put_explosion_blocked_expanding_on_bullish(mock_settings, mock_window):
+    s = mock_settings.return_value
+    _mock_premium_settings(s)
+    s.explosion_breadth_alignment_enabled = True
+    s.chart_alignment_enabled = True
+
+    ok, reason = check_explosion_entry(
+        _put_event(),
+        _trade(),
+        Breadth(score=62, bias="BULLISH", aligned=True),
+        False,
+        chart=_bullish_chart(),
+    )
+    assert not ok
+    assert reason == "explosion_put_vs_bullish_breadth"
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=False)
@@ -185,15 +201,8 @@ def test_directional_lock_bypassed_for_premium_led_put(mock_settings, mock_windo
     from app.engines.directional_lock import check_directional_side_lock
 
     s = mock_settings.return_value
-    s.premium_led_explosion_bypass_enabled = True
-    s.premium_led_counter_breadth_enabled = True
+    _mock_premium_settings(s)
     s.directional_side_lock_enabled = True
-    s.morning_capture_extreme_velocity_3s = 3.0
-    s.morning_capture_extreme_velocity_9s = 4.0
-    s.open_premium_min_move_pct = 25.0
-    s.open_premium_bypass_min_score = 35.0
-    s.premium_led_min_velocity_3s = 2.8
-    s.premium_led_min_explosion_score = 42.0
 
     snap = SymbolSnapshot(
         symbol="NIFTY",
@@ -204,7 +213,7 @@ def test_directional_lock_bypassed_for_premium_led_put(mock_settings, mock_windo
         spotChart=_bullish_chart(),
         breadth=Breadth(score=62, bias="BULLISH", aligned=True),
     )
-    event = _put_event()
+    event = _elite_put_event()
     assert premium_led_explosion_bypass(event, _bullish_chart(), "BULLISH") is True
 
     blocked, reason = check_directional_side_lock(
@@ -242,16 +251,8 @@ def test_reentry_allows_premium_led_explosion(mock_settings, mock_window):
     from app.engines.trade_selector import _reentry_blocked
 
     s = mock_settings.return_value
-    s.premium_led_explosion_bypass_enabled = True
-    s.premium_led_counter_breadth_enabled = True
+    _mock_premium_settings(s)
     s.directional_side_lock_enabled = True
-    s.morning_capture_extreme_velocity_3s = 3.0
-    s.morning_capture_extreme_velocity_9s = 4.0
-    s.premium_led_min_velocity_3s = 2.8
-    s.premium_led_min_velocity_9s = 3.5
-    s.premium_led_min_explosion_score = 42.0
-    s.open_premium_min_move_pct = 25.0
-    s.open_premium_bypass_min_score = 35.0
 
     snap = SymbolSnapshot(
         symbol="NIFTY",
@@ -262,7 +263,7 @@ def test_reentry_allows_premium_led_explosion(mock_settings, mock_window):
         spotChart=_bullish_chart(),
         breadth=Breadth(score=62, bias="BULLISH", aligned=True),
     )
-    event = _put_event()
+    event = _elite_put_event()
     with patch("app.engines.symbol_cooldown.symbol_in_cooldown", return_value=(False, "ok")):
         with patch("app.engines.instrument_cooldown.instrument_in_cooldown", return_value=(False, "ok")):
             blocked, reason = _reentry_blocked(

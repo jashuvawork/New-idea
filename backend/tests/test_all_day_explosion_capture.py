@@ -118,6 +118,8 @@ def test_premium_led_bypass_put_vs_bullish_chart(mock_settings, mock_window):
     s = mock_settings.return_value
     s.premium_led_explosion_bypass_enabled = True
     s.premium_led_counter_breadth_enabled = True
+    s.premium_led_elite_counter_min_score = 90.0
+    s.chart_min_trend_strength = 25.0
     s.open_premium_min_move_pct = 25.0
     s.open_premium_bypass_min_score = 35.0
     s.all_day_explosion_extreme_move_min_pct = 80.0
@@ -125,7 +127,12 @@ def test_premium_led_bypass_put_vs_bullish_chart(mock_settings, mock_window):
     s.premium_led_min_velocity_9s = 3.5
     s.premium_led_min_explosion_score = 42.0
 
-    assert premium_led_explosion_bypass(_pe_rip_event(), _bullish_chart(), "BEARISH") is True
+    # Bearish breadth but bullish chart — still blocks non-elite PUT
+    assert premium_led_explosion_bypass(_pe_rip_event(), _bullish_chart(), "BEARISH") is False
+    elite = _pe_rip_event()
+    elite.tier = "ELITE"
+    elite.explosion_score = 95.0
+    assert premium_led_explosion_bypass(elite, _bullish_chart(), "BEARISH") is True
 
 
 @patch("app.engines.morning_premium_capture.get_settings")

@@ -192,6 +192,7 @@ def _gate_checks(
     chart = snap.spotChart
     side_val = candidate.side.value
     chart_dir = (chart.direction or "NEUTRAL").upper() if chart else "NEUTRAL"
+    breadth_bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     blocked, chart_reason = chart_blocks_side(
         candidate.side, chart, trade_score=score, momentum_surge=daily_move >= 40,
     )
@@ -201,10 +202,54 @@ def _gate_checks(
             "gate": "chart_alignment",
             "passed": False,
             "detail": f"chart {chart_dir} vs {side_val}",
-            "fix": "MTF reconcile or premium-led bypass",
+            "fix": "MTF reconcile or elite premium-led bypass (score ≥90)",
         })
     else:
         gates.append({"gate": "chart_alignment", "passed": True, "detail": f"chart {chart_dir}"})
+
+    # 6b — Breadth alignment
+    from app.engines.morning_premium_capture import (
+        _market_opposes_side,
+        premium_led_explosion_bypass,
+    )
+    from app.engines.rally_capture import breadth_blocks_explosion_side
+
+    premium_bypass = (
+        premium_led_explosion_bypass(candidate.explosion_event, chart, breadth_bias)
+        if candidate.explosion_event
+        else False
+    )
+    br_blocked, br_reason = breadth_blocks_explosion_side(candidate.side, breadth_bias, tier)
+    market_opposes = _market_opposes_side(candidate.side, breadth_bias, chart)
+    if br_blocked and not premium_bypass:
+        blockers.append(br_reason)
+        gates.append({
+            "gate": "breadth_alignment",
+            "passed": False,
+            "detail": f"breadth {breadth_bias} vs {side_val}",
+            "fix": "Trade CALL on bullish / PUT on bearish — or ELITE score ≥90 for counter-trend",
+        })
+    else:
+        gates.append({
+            "gate": "breadth_alignment",
+            "passed": True,
+            "detail": f"breadth {breadth_bias}" + (" (premium-led bypass)" if premium_bypass else ""),
+        })
+
+    if market_opposes and not premium_bypass:
+        blockers.append("market_opposes_side")
+        gates.append({
+            "gate": "market_direction",
+            "passed": False,
+            "detail": f"{breadth_bias} breadth / {chart_dir} chart vs {side_val}",
+            "fix": "Need ELITE tier + explosion score ≥90 for counter-trend rip",
+        })
+    else:
+        gates.append({
+            "gate": "market_direction",
+            "passed": True,
+            "detail": "aligned or elite counter-trend bypass",
+        })
 
     # 7 — Would enter candidate pool (tier filter for explosions)
     in_pool = tradeable and score >= min_score and premium_in_band(prem, mode="explosion")
@@ -402,6 +447,7 @@ def build_missed_trade_report(
         "badDayMinRank": (chop.get("badDayRouting") or {}).get("minRankFloor"),
         "worstDayBreakoutMinRank": settings.worst_day_breakout_min_rank,
         "bestTradesMinRank": settings.best_trades_min_rank_score,
+        "eliteCounterMinScore": settings.premium_led_elite_counter_min_score,
         "sessionBlocks": session_blocks[:6],
         "bestCandidate": (
             {

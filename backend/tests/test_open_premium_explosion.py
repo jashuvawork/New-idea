@@ -91,12 +91,47 @@ def test_morning_capture_accepts_open_rip_put(mock_settings, mock_win):
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
 @patch("app.engines.morning_premium_capture.get_settings")
-def test_open_rip_put_passes_explosion_entry_bullish_chart(mock_settings, mock_window, mock_ep_settings):
+def test_open_rip_put_blocked_on_bullish_without_elite(mock_settings, mock_window, mock_ep_settings):
     s = mock_settings.return_value
     ep = mock_ep_settings.return_value
     for cfg in (s, ep):
         cfg.premium_led_explosion_bypass_enabled = True
         cfg.premium_led_counter_breadth_enabled = True
+        cfg.premium_led_elite_counter_min_score = 90.0
+        cfg.chart_min_trend_strength = 25.0
+        cfg.open_premium_min_move_pct = 25.0
+        cfg.aggressive_min_explosion_score = 45
+        cfg.explosion_breadth_alignment_enabled = True
+        cfg.chart_alignment_enabled = True
+
+    chart = SpotChart(direction="BULLISH", spot=24050.0, trendStrength=35.0, emaBias="BULLISH")
+    event = ExplosionEvent(
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24200.0,
+        premium=130.0,
+        velocity_3s=35.0,
+        velocity_9s=116.0,
+        velocity_15s=116.0,
+        volume_surge=2.0,
+        explosion_score=72.0,
+        tier="EXPLODING",
+        reason="open+117%",
+        daily_move_pct=116.0,
+    )
+    assert premium_led_explosion_bypass(event, chart, "BULLISH") is False
+
+
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
+@patch("app.engines.morning_premium_capture.get_settings")
+def test_open_rip_put_passes_explosion_entry_elite_on_bullish(mock_settings, mock_window, mock_ep_settings):
+    s = mock_settings.return_value
+    ep = mock_ep_settings.return_value
+    for cfg in (s, ep):
+        cfg.premium_led_explosion_bypass_enabled = True
+        cfg.premium_led_counter_breadth_enabled = True
+        cfg.premium_led_elite_counter_min_score = 90.0
         cfg.open_premium_min_move_pct = 25.0
         cfg.open_premium_bypass_min_score = 35.0
         cfg.morning_capture_extreme_velocity_3s = 3.0
@@ -131,8 +166,8 @@ def test_open_rip_put_passes_explosion_entry_bullish_chart(mock_settings, mock_w
         velocity_9s=116.0,
         velocity_15s=116.0,
         volume_surge=2.0,
-        explosion_score=72.0,
-        tier="EXPLODING",
+        explosion_score=95.0,
+        tier="ELITE",
         reason="open+117%",
         daily_move_pct=116.0,
     )
@@ -140,7 +175,7 @@ def test_open_rip_put_passes_explosion_entry_bullish_chart(mock_settings, mock_w
 
     trade = SuggestedTrade(
         id="t1", symbol="NIFTY", side=Side.PUT, strike=24200.0,
-        lastPremium=130.0, tqs=50, strategyType=StrategyType.EXPLOSIVE, confidence=72,
+        lastPremium=130.0, tqs=50, strategyType=StrategyType.EXPLOSIVE, confidence=95,
     )
     ok, reason = check_explosion_entry(
         event, trade, Breadth(bias="BULLISH", score=62, aligned=True), False,

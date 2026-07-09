@@ -106,6 +106,52 @@ def _effective_dominant_velocity_ratio() -> float:
     return settings.whipsaw_dominant_velocity_ratio
 
 
+def _is_counter_breadth(side: Side | str, breadth_bias: str) -> bool:
+    side_v = _side_str(side)
+    bias = (breadth_bias or "NEUTRAL").upper()
+    return (bias == "BULLISH" and side_v == "PUT") or (bias == "BEARISH" and side_v == "CALL")
+
+
+def _market_opposes_side(
+    side: Side | str,
+    breadth_bias: str,
+    chart: Optional[SpotChart],
+) -> bool:
+    """True when breadth or a strong index chart conflicts with the trade leg."""
+    settings = get_settings()
+    side_v = _side_str(side)
+    bias = (breadth_bias or "NEUTRAL").upper()
+    direction = (chart.direction or "NEUTRAL").upper() if chart else "NEUTRAL"
+    trend = float(chart.trendStrength or 0) if chart else 0.0
+    min_strength = float(settings.chart_min_trend_strength or 25.0)
+
+    if side_v == "PUT":
+        if bias == "BULLISH":
+            return True
+        if direction == "BULLISH" and trend >= min_strength:
+            return True
+    elif side_v == "CALL":
+        if bias == "BEARISH":
+            return True
+        if direction == "BEARISH" and trend >= min_strength:
+            return True
+    return False
+
+
+def _elite_counter_breadth_ok(event: ExplosionEvent, settings: Any) -> bool:
+    """Counter-trend premium rip — only ELITE tier with near-max explosion score."""
+    tier = str(event.tier or "").upper()
+    score = float(event.explosion_score or 0)
+    if tier != "ELITE":
+        return False
+    elite_min = float(getattr(settings, "premium_led_elite_counter_min_score", 90.0) or 90.0)
+    if score < elite_min:
+        return False
+    v3 = float(event.velocity_3s or 0)
+    v9 = float(event.velocity_9s or 0)
+    return v3 >= settings.premium_led_min_velocity_3s or v9 >= settings.premium_led_min_velocity_9s
+
+
 def premium_led_entry_allowed(
     side: Side | str,
     snap: SymbolSnapshot,
@@ -119,7 +165,16 @@ def premium_led_entry_allowed(
         return False
     if not in_premium_capture_window():
         return False
-    v3, v9, score, tier = _best_surge_for_side(snap, _side_str(side))
+    side_v = _side_str(side)
+    bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    v3, v9, score, tier = _best_surge_for_side(snap, side_v)
+    if _is_counter_breadth(side_v, bias) or _market_opposes_side(side_v, bias, snap.spotChart):
+        settings_elite = float(getattr(settings, "premium_led_elite_counter_min_score", 90.0) or 90.0)
+        if tier != "ELITE" or score < settings_elite:
+            return False
+        if v3 >= settings.premium_led_min_velocity_3s or v9 >= settings.premium_led_min_velocity_9s:
+            return True
+        return False
     if tier in ("BUILDING", "EXPLODING", "ELITE") and score >= settings.premium_led_min_explosion_score:
         if v3 >= settings.premium_led_min_velocity_3s or v9 >= settings.premium_led_min_velocity_9s:
             return True
@@ -583,12 +638,11 @@ def premium_led_explosion_bypass(
     side = _side_str(event.side)
     bias = (breadth_bias or "NEUTRAL").upper()
     direction = (chart.direction or "NEUTRAL").upper() if chart else "NEUTRAL"
-    open_move = float(event.daily_move_pct or 0)
-    open_min = float(getattr(settings, "open_premium_min_move_pct", 25.0) or 25.0)
-    open_bypass_score = float(getattr(settings, "open_premium_bypass_min_score", 35.0) or 35.0)
-    open_chart_bypass = float(getattr(settings, "open_premium_chart_bypass_move_pct", 20.0) or 20.0)
 
-    counter_breadth = (bias == "BULLISH" and side == "PUT") or (bias == "BEARISH" and side == "CALL")
+    if _market_opposes_side(event.side, breadth_bias, chart):
+        return _elite_counter_breadth_ok(event, settings)
+
+    counter_breadth = _is_counter_breadth(side, bias)
     counter_chart = (direction == "BULLISH" and side == "PUT") or (direction == "BEARISH" and side == "CALL")
     if not counter_breadth and not counter_chart:
         return False
@@ -600,6 +654,9 @@ def premium_led_explosion_bypass(
     v3 = float(event.velocity_3s or 0)
     v9 = float(event.velocity_9s or 0)
     score = float(event.explosion_score or 0)
+    open_move = float(event.daily_move_pct or 0)
+    open_min = float(getattr(settings, "open_premium_min_move_pct", 25.0) or 25.0)
+    open_bypass_score = float(getattr(settings, "open_premium_bypass_min_score", 35.0) or 35.0)
 
     extreme_move = float(getattr(settings, "all_day_explosion_extreme_move_min_pct", 80.0) or 80.0)
     if open_move >= extreme_move and score >= settings.open_premium_bypass_min_score - 3:

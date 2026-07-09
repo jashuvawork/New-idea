@@ -410,7 +410,8 @@ class Settings(BaseSettings):
     premium_led_min_velocity_3s: float = 2.8
     premium_led_min_velocity_9s: float = 3.5
     premium_led_min_explosion_score: float = 42.0
-    premium_led_counter_breadth_min_score: float = 48.0
+    premium_led_counter_breadth_min_score: float = 90.0
+    premium_led_elite_counter_min_score: float = 90.0
     premium_led_explosion_bypass_enabled: bool = True
     # Explosion-only entries from 9:15 — catch open premium rips before 9:20 general window
     explosion_open_entry_enabled: bool = True

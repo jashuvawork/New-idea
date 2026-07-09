@@ -35,7 +35,8 @@ def _settings():
     s.premium_led_min_velocity_3s = 2.8
     s.premium_led_min_velocity_9s = 3.5
     s.premium_led_min_explosion_score = 42.0
-    s.premium_led_counter_breadth_min_score = 48.0
+    s.premium_led_counter_breadth_min_score = 90.0
+    s.premium_led_elite_counter_min_score = 90.0
     s.whipsaw_single_side_surge_bypass_enabled = True
     s.whipsaw_dominant_velocity_min = 2.5
     s.whipsaw_dominant_velocity_ratio = 1.6
