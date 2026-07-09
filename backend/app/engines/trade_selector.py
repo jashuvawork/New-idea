@@ -578,6 +578,12 @@ def find_best_entry(
             )
         )
         bonus += mode_rank_bonus(c.mode, adaptive)
+        breadth_bias = (c.snap.breadth.bias if c.snap.breadth else "NEUTRAL") or "NEUTRAL"
+        if c.mode == "explosion":
+            if side_aligned_with_breadth(c.side, breadth_bias):
+                bonus += 18
+            else:
+                bonus -= 22
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty
 

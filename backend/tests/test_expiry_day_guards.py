@@ -93,6 +93,25 @@ def test_predict_worst_expiry_day():
     assert "bearish_sideways" in reasons
 
 
+def test_expiry_afternoon_allows_all_day_explosion():
+    """Afternoon expiry session must not hard-block when all-day explosion window is live."""
+    from app.engines.expiry_day_guards import check_expiry_entry_allowed
+
+    state = AutoTraderState()
+    snaps = {"SENSEX": _snap(expiry="2026-07-09")}
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-09"):
+        with patch("app.engines.expiry_day_guards._minutes_now", return_value=14 * 60 + 30):
+            with patch("app.engines.expiry_day_guards.expiry_pm_itm_quick_session_active", return_value=False):
+                with patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=False):
+                    with patch("app.engines.expiry_day_guards.predict_worst_expiry_day", return_value=(False, 0, [])):
+                        with patch("app.engines.expiry_day_guards.expiry_trades_cap_reached", return_value=(False, "")):
+                            with patch("app.engines.morning_premium_capture.in_all_day_explosion_window", return_value=True):
+                                ok, reason, meta = check_expiry_entry_allowed(state, snaps)
+    assert ok is True
+    assert reason == "ok"
+    assert meta.get("expiryAfternoonExplosionAllowed") is True
+
+
 def test_expiry_evening_block_entries():
     state = AutoTraderState()
     snaps = {"NIFTY": _snap()}

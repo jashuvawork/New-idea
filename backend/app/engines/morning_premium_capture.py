@@ -164,6 +164,17 @@ def counter_trend_entry_allowed(
         return True
     if explosion_event is None:
         return False
+    from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+    side_v = _side_str(side)
+    bias_u = (bias or "NEUTRAL").upper()
+    if is_symbol_expiry_day(snap):
+        chart = snap.spotChart
+        mom5 = float(chart.momentum5Pct or 0) if chart else 0.0
+        if bias_u == "BULLISH" and side_v == "PUT" and mom5 >= -0.12:
+            return False
+        if bias_u == "BEARISH" and side_v == "CALL" and mom5 <= 0.12:
+            return False
     return _elite_counter_breadth_ok(explosion_event, get_settings())
 
 

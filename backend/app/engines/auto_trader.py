@@ -122,22 +122,75 @@ _state_loaded: bool = False
 
 
 def _ensure_state_loaded() -> None:
-    """Restore open paper trades from persistent store after restart."""
+    """Restore open + today's closed paper trades from persistent store after restart."""
     global _auto_trader_state, _state_loaded
     if _state_loaded:
         return
     _state_loaded = True
+    if not _auto_trader_state:
+        return
+
     saved = trade_store.load_open_trades()
-    if saved and _auto_trader_state:
+    if saved:
         for raw in saved:
             try:
                 trade = PaperTrade(**raw)
                 if trade.status == "OPEN":
                     _auto_trader_state.openPaperTrades.append(trade)
             except Exception as e:
-                logger.warning("Failed to restore trade: %s", e)
+                logger.warning("Failed to restore open trade: %s", e)
         if saved:
-            logger.info("Restored %d open paper trades from store", len(saved))
+            logger.info("Restored %d open paper trades from store", len(_auto_trader_state.openPaperTrades))
+
+    try:
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+        reset_at = trade_store.get_session_reset_at()
+        day = trade_store.get_day_detail(today)
+        restored_closed = 0
+        seen_ids = {t.id for t in _auto_trader_state.closedPaperTrades}
+        for row in day.get("trades", []):
+            if row.get("status") != "CLOSED":
+                continue
+            exit_reason = str(row.get("exitReason") or "")
+            if exit_reason in ("SESSION_RESET", "manual_reset"):
+                continue
+            tid = str(row.get("id", ""))
+            if tid and tid in seen_ids:
+                continue
+            closed_raw = row.get("closedAt")
+            if reset_at and closed_raw:
+                try:
+                    closed_at = datetime.fromisoformat(str(closed_raw))
+                    if closed_at <= reset_at:
+                        continue
+                except ValueError:
+                    pass
+            try:
+                side_raw = str(row.get("side", "CALL")).upper()
+                _auto_trader_state.closedPaperTrades.append(PaperTrade(
+                    id=tid or f"restored-{restored_closed}",
+                    symbol=str(row.get("symbol", "")),
+                    side=Side(side_raw),
+                    strike=float(row.get("strike") or 0),
+                    lots=int(row.get("lots") or 1),
+                    entryPremium=float(row.get("entryPremium") or 0),
+                    exitPremium=float(row.get("exitPremium") or row.get("entryPremium") or 0),
+                    pnlInr=float(row.get("pnlInr") or 0),
+                    openedAt=datetime.fromisoformat(str(row.get("openedAt"))) if row.get("openedAt") else datetime.now(IST),
+                    closedAt=datetime.fromisoformat(str(closed_raw)) if closed_raw else None,
+                    status="CLOSED",
+                    exitReason=exit_reason,
+                    strategyType=StrategyType(str(row.get("strategyType") or "EXPLOSIVE")),
+                    sessionDate=today,
+                ))
+                restored_closed += 1
+            except Exception as e:
+                logger.warning("Failed to restore closed trade %s: %s", tid, e)
+        if restored_closed:
+            logger.info("Restored %d closed paper trades for %s", restored_closed, today)
+            _auto_trader_state.dailyReport = _calibration.build_report(_auto_trader_state.closedPaperTrades)
+    except Exception as e:
+        logger.warning("Failed to hydrate closed trades: %s", e)
 
 
 def _build_context(snap: Optional[SymbolSnapshot], extra: Optional[dict] = None) -> dict:
