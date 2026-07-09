@@ -59,7 +59,12 @@ export function ExplosionRadar({ snap }: { snap: SymbolSnapshot }) {
               </span>
               </span>
               <span className="font-mono">
-                +{a.velocity3s?.toFixed(1)}% · {a.explosionScore}
+                +{a.velocity3s?.toFixed(1)}%
+                {a.peakMovePct != null && a.peakMovePct > (a.dailyMovePct ?? 0)
+                  ? ` · peak ${a.peakMovePct.toFixed(0)}%`
+                  : ''}
+                {' · '}
+                {a.explosionScore}
               </span>
             </div>
           ))

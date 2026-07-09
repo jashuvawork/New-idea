@@ -226,6 +226,8 @@ def check_min_entry_interval(
     *,
     chop: bool = False,
     quick_sideways: bool = False,
+    candidate: Any = None,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
 ) -> tuple[bool, str]:
     settings = get_settings()
     last = state.lastExit
@@ -236,22 +238,37 @@ def check_min_entry_interval(
     except Exception:
         return True, "ok"
 
-    gap = (
-        settings.quick_sideways_min_seconds_between_entries
-        if quick_sideways
-        else settings.min_seconds_between_entries
-    )
-    if chop:
-        gap = max(gap, settings.chop_session_entry_interval_seconds)
-    gap = max(gap, settings.post_exit_min_seconds)
     pnl = float(last.get("pnlInr", 0) or 0)
-    if pnl < 0:
-        gap = max(gap, settings.post_loss_exit_min_seconds)
+    after_loss = pnl < 0
+
+    from app.engines.aligned_explosion_bypass import (
+        entry_interval_gap_seconds,
+        is_aligned_explosion_rip,
+    )
+
+    aligned_rip = False
+    if candidate is not None and snapshots is not None:
+        sym = str(getattr(candidate, "symbol", "")).upper()
+        snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+        if snap is not None:
+            aligned_rip, _ = is_aligned_explosion_rip(candidate, snap)
+
+    gap = entry_interval_gap_seconds(
+        chop=chop,
+        quick_sideways=quick_sideways,
+        after_loss=after_loss and not aligned_rip,
+        aligned_rip=aligned_rip,
+    )
 
     elapsed = (datetime.now(IST) - closed).total_seconds()
     if elapsed < gap:
         remain = int(gap - elapsed)
-        suffix = "after_loss" if pnl < 0 else "after_exit"
+        if aligned_rip:
+            suffix = "aligned_rip"
+        elif after_loss:
+            suffix = "after_loss"
+        else:
+            suffix = "after_exit"
         return False, f"pretrade_entry_interval_{suffix}_{remain}s"
     return True, "ok"
 
@@ -452,6 +469,13 @@ def check_last_n_candidate_gate(
     if settings.best_trades_only_enabled and getattr(candidate, "mode", "") == "quick_sideways":
         return True, "ok", meta
 
+    snap = getattr(candidate, "snap", None)
+    if snap is not None:
+        from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
+
+        if expiry_aligned_explosion_trade_allowed(candidate, snap)[0]:
+            return True, "ok", meta
+
     if settings.best_trades_only_enabled and score < settings.best_trades_min_rank_score:
         return False, f"best_trades_rank_below_{settings.best_trades_min_rank_score:.0f}", meta
 
@@ -484,9 +508,21 @@ def validate_candidate(
         state,
         chop=chop,
         quick_sideways=getattr(candidate, "mode", "") in ("quick_sideways", "slow_bounce"),
+        candidate=candidate,
+        snapshots=snap_map,
     )
     if not ok:
         return False, reason, meta
+
+    if getattr(candidate, "mode", "") == "explosion":
+        from app.engines.morning_premium_capture import counter_trend_entry_allowed
+
+        snap_pre = snap_map.get(candidate.symbol.upper()) or candidate.snap
+        explosion_event = getattr(candidate, "explosion_event", None)
+        if explosion_event is not None and not counter_trend_entry_allowed(
+            candidate.side, snap_pre, explosion_event=explosion_event,
+        ):
+            return False, "counter_trend_requires_elite", meta
 
     cap_hit, cap_reason = controlled_daily_cap_reached(state, snap_map)
     if cap_hit:
@@ -516,6 +552,7 @@ def validate_candidate(
 
     dir_blocked, dir_reason = check_directional_side_lock(
         sym, candidate.side, snap, tier=tier, premium_led_bypass=premium_bypass,
+        candidate=candidate,
     )
     if dir_blocked:
         return False, dir_reason, meta
@@ -623,6 +660,7 @@ def validate_candidate(
             return False, "pretrade_counter_breadth", meta
 
     from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
+    from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_candidate
     from app.engines.spot_direction import chart_blocks_side
 
     breadth_bypass = expiry_pm_itm_chart_bypass_allowed(
@@ -630,12 +668,14 @@ def validate_candidate(
         mode=str(getattr(candidate, "mode", "")),
         state=state, snapshots=snap_map,
     )
+    expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
     blocked_chart, chart_reason = chart_blocks_side(
         candidate.side,
         snap.spotChart,
         trade_score=trade_score,
         breadth_aligned_bypass=breadth_bypass,
         premium_led_bypass=premium_bypass,
+        expiry_explosion_bypass=expiry_chart_bypass,
     )
     if blocked_chart:
         meta["chartDirection"] = snap.spotChart.direction if snap.spotChart else "NEUTRAL"
@@ -644,13 +684,17 @@ def validate_candidate(
     sym_stats = compute_symbol_stats(trades)
     meta["symbolStats"] = {k: asdict(v) for k, v in sym_stats.items()}
 
+    from app.engines.aligned_explosion_bypass import expiry_aligned_pretrade_soft_bypass
+
+    expiry_soft_bypass = expiry_aligned_pretrade_soft_bypass(candidate, snap)
+
     st = sym_stats.get(candidate.symbol.upper())
     if st and st.trades >= settings.pretrade_min_symbol_trades_for_stats:
         meta["symbolPf"] = st.profit_factor
         meta["symbolNetInr"] = st.net_pnl_inr
-        if st.profit_factor < settings.pretrade_block_symbol_pf_below:
+        if st.profit_factor < settings.pretrade_block_symbol_pf_below and not expiry_soft_bypass:
             return False, f"pretrade_symbol_pf_{st.profit_factor:.2f}", meta
-        if st.net_pnl_inr <= settings.pretrade_block_symbol_net_inr_below:
+        if st.net_pnl_inr <= settings.pretrade_block_symbol_net_inr_below and not expiry_soft_bypass:
             return False, f"pretrade_symbol_net_{st.net_pnl_inr:.0f}", meta
 
     similar = [
@@ -661,7 +705,7 @@ def validate_candidate(
         sim_pf = round(_profit_factor(similar), 2)
         meta["similarSidePf"] = sim_pf
         meta["similarSideTrades"] = len(similar)
-        if sim_pf < settings.pretrade_block_similar_pf_below:
+        if sim_pf < settings.pretrade_block_similar_pf_below and not expiry_soft_bypass:
             return False, f"pretrade_similar_pf_{sim_pf:.2f}", meta
 
     meta["pretradePassed"] = True

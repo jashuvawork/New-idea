@@ -222,10 +222,12 @@ def check_directional_side_lock(
     *,
     tier: str = "",
     premium_led_bypass: bool = False,
+    candidate: Any = None,
 ) -> tuple[bool, str]:
     """
     Returns (blocked, reason).
     Aligned side entries pass. CE↔PE switch / counter-trend needs full confirmation.
+    Breadth-aligned EXPLODING/ELITE rips bypass lock when switching from wrong side.
     """
     settings = get_settings()
     if not settings.directional_side_lock_enabled:
@@ -235,6 +237,20 @@ def check_directional_side_lock(
 
     if premium_led_bypass:
         return False, "ok"
+
+    if candidate is not None:
+        from app.engines.aligned_explosion_bypass import (
+            expiry_aligned_explosion_trade_allowed,
+            is_aligned_explosion_rip,
+        )
+
+        if expiry_aligned_explosion_trade_allowed(candidate, snap)[0]:
+            return False, "ok"
+
+        if settings.directional_lock_aligned_rip_bypass_enabled:
+            rip_ok, _ = is_aligned_explosion_rip(candidate, snap)
+            if rip_ok:
+                return False, "ok"
 
     if not _needs_confirmation(symbol, side_v, snap):
         return False, "ok"

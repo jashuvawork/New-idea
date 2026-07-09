@@ -531,7 +531,12 @@ async def build_symbol_snapshot(
         max_pain = compute_max_pain(chain)
 
         # Explosion scan — primary focus for daily chart moments
-        explosion_events = scan_chain_explosions(symbol, chain, spot, atm)
+        from app.engines.expiry_day_guards import _today_str
+
+        expiry_day = bool(expiry and str(expiry)[:10] == _today_str())
+        explosion_events = scan_chain_explosions(
+            symbol, chain, spot, atm, expiry_day=expiry_day,
+        )
         explosion_alerts = [event_to_dict(e) for e in explosion_events[:15]]
         top_explosion = explosion_alerts[0] if explosion_alerts else None
 

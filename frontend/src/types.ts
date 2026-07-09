@@ -138,7 +138,9 @@ export interface ExplosionAlert {
   allDayExplosion?: boolean;
   premiumCapture?: boolean;
   dailyMovePct?: number;
+  peakMovePct?: number;
   openPremiumMove?: number;
+  volumeAwaken?: boolean;
 }
 
 export interface StrategyMatrixEntry {

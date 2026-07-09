@@ -5,6 +5,8 @@ from unittest.mock import patch
 from app.engines.explosion_detector import (
     ExplosionEvent,
     _session_open,
+    _session_peak,
+    _tier_sticky,
     scan_chain_explosions,
 )
 from app.engines.explosion_profit import check_explosion_entry
@@ -34,11 +36,15 @@ def _chain_row(strike: float, put_ltp: float) -> dict:
 @patch("app.config.get_settings")
 def test_open_move_detected_without_poll_history(mock_settings, mock_open):
     _session_open.clear()
+    _session_peak.clear()
+    _tier_sticky.clear()
     s = mock_settings.return_value
     s.open_premium_explosion_enabled = True
     s.open_premium_min_move_pct = 25.0
     s.min_option_premium_inr = 20.0
     s.explosion_max_premium_inr = 400.0
+    s.explosion_scan_range = 500.0
+    s.all_day_explosion_session_move_min_pct = 25.0
 
     chain = [_chain_row(24200, 60.0)]
     scan_chain_explosions("NIFTY", chain, spot=24050.0, atm=24050.0)

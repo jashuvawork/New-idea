@@ -41,6 +41,19 @@ def is_symbol_expiry_day(snap: SymbolSnapshot) -> bool:
     return expiry == _today_str()
 
 
+_expiry_session_active: bool = False
+
+
+def refresh_expiry_session(snapshots: dict[str, SymbolSnapshot]) -> None:
+    """Cache expiry-session flag for fast entry-scan cadence without snapshot coupling."""
+    global _expiry_session_active
+    _expiry_session_active = is_expiry_session(snapshots)
+
+
+def any_expiry_session_active() -> bool:
+    return _expiry_session_active
+
+
 def expiry_symbols(snapshots: dict[str, SymbolSnapshot]) -> list[str]:
     return [sym.upper() for sym, snap in snapshots.items() if is_symbol_expiry_day(snap)]
 
