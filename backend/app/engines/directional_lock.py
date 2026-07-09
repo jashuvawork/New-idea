@@ -235,6 +235,13 @@ def check_directional_side_lock(
 
     side_v = _side_val(side)
 
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
+
+    bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    hard_blocked, hard_reason = breadth_hard_blocks_side(side_v, bias)
+    if hard_blocked:
+        return True, hard_reason
+
     if premium_led_bypass:
         return False, "ok"
 

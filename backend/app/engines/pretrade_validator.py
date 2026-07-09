@@ -515,9 +515,14 @@ def validate_candidate(
         return False, reason, meta
 
     if getattr(candidate, "mode", "") == "explosion":
+        from app.engines.aligned_side_guard import breadth_hard_blocks_side
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
         snap_pre = snap_map.get(candidate.symbol.upper()) or candidate.snap
+        bias = (snap_pre.breadth.bias if snap_pre.breadth else "NEUTRAL") or "NEUTRAL"
+        hard_blocked, hard_reason = breadth_hard_blocks_side(candidate.side, bias)
+        if hard_blocked:
+            return False, hard_reason, meta
         explosion_event = getattr(candidate, "explosion_event", None)
         if explosion_event is not None and not counter_trend_entry_allowed(
             candidate.side, snap_pre, explosion_event=explosion_event,
@@ -641,7 +646,13 @@ def validate_candidate(
 
     side_val = candidate.side.value if isinstance(candidate.side, Side) else str(candidate.side).upper()
 
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
     from app.engines.symbol_cooldown import side_aligned_with_breadth
+
+    bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    hard_blocked, hard_reason = breadth_hard_blocks_side(candidate.side, bias)
+    if hard_blocked:
+        return False, hard_reason, meta
 
     trade_score = candidate_trade_score(candidate)
 

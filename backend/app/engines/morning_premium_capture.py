@@ -158,8 +158,13 @@ def counter_trend_entry_allowed(
     *,
     explosion_event: Optional[ExplosionEvent] = None,
 ) -> bool:
-    """Block counter-trend legs unless ELITE score clears the elite gate."""
+    """Block counter-trend legs — no ELITE escape when breadth is directional."""
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
+
+    hard_blocked, _ = breadth_hard_blocks_side(side, bias)
+    if hard_blocked:
+        return False
     if not _market_opposes_side(side, bias, snap.spotChart):
         return True
     if explosion_event is None:
@@ -182,6 +187,11 @@ def premium_led_entry_allowed(
         return False
     side_v = _side_str(side)
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
+
+    hard_blocked, _ = breadth_hard_blocks_side(side_v, bias)
+    if hard_blocked:
+        return False
     v3, v9, score, tier = _best_surge_for_side(snap, side_v)
     if _is_counter_breadth(side_v, bias) or _market_opposes_side(side_v, bias, snap.spotChart):
         settings_elite = float(getattr(settings, "premium_led_elite_counter_min_score", 90.0) or 90.0)
@@ -639,8 +649,8 @@ def premium_led_explosion_bypass(
     breadth_bias: str,
 ) -> bool:
     """
-    Option premium leading index — bypass counter-breadth/chart blocks on explosions.
-    Catches PE rips when index chart is still bullish from gap-up (Jul 8 style).
+    Option premium leading index — bypass counter-chart blocks on explosions.
+    Never bypasses hard breadth alignment (no PUT on BULLISH / CALL on BEARISH).
     """
     settings = get_settings()
     if not settings.premium_led_explosion_bypass_enabled:
@@ -648,6 +658,12 @@ def premium_led_explosion_bypass(
     if not settings.premium_led_counter_breadth_enabled:
         return False
     if not in_premium_capture_window():
+        return False
+
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
+
+    hard_blocked, _ = breadth_hard_blocks_side(event.side, breadth_bias)
+    if hard_blocked:
         return False
 
     side = _side_str(event.side)

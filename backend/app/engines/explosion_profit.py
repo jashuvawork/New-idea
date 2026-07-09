@@ -105,8 +105,13 @@ def check_explosion_entry(
         return False, "calibration_block"
 
     if snap is not None:
+        from app.engines.aligned_side_guard import breadth_hard_blocks_side
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
+        bias = (snap.breadth.bias if snap.breadth else breadth.bias or "NEUTRAL") or "NEUTRAL"
+        hard_blocked, hard_reason = breadth_hard_blocks_side(event.side, bias)
+        if hard_blocked:
+            return False, hard_reason
         if not counter_trend_entry_allowed(event.side, snap, explosion_event=event):
             return False, "counter_trend_requires_elite"
 
@@ -154,6 +159,12 @@ def check_explosion_entry(
     )
 
     breadth_bias = (breadth.bias or "NEUTRAL") if breadth else "NEUTRAL"
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
+
+    hard_blocked, hard_reason = breadth_hard_blocks_side(event.side, breadth_bias)
+    if hard_blocked:
+        return False, hard_reason
+
     premium_bypass = premium_led_explosion_bypass(event, chart, breadth_bias)
 
     blocked, reason = breadth_blocks_explosion_side(event.side, breadth.bias, event.tier)

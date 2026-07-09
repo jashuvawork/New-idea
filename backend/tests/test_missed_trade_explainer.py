@@ -138,6 +138,6 @@ def test_missed_trade_flags_put_on_bullish(mock_state, mock_settings):
         report = build_missed_trade_report({"NIFTY": snap})
     row = report["missed"][0]
     gate_names = {g["gate"] for g in row["gates"]}
-    assert "breadth_alignment" in gate_names
+    assert "breadth_hard_block" in gate_names
     assert "market_direction" in gate_names
     assert not row["wouldPass"]

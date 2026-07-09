@@ -177,7 +177,7 @@ def test_open_rip_put_passes_explosion_entry_elite_on_bullish(mock_settings, moc
         reason="open+117%",
         daily_move_pct=116.0,
     )
-    assert premium_led_explosion_bypass(event, chart, "BULLISH") is True
+    assert premium_led_explosion_bypass(event, chart, "BULLISH") is False
 
     trade = SuggestedTrade(
         id="t1", symbol="NIFTY", side=Side.PUT, strike=24200.0,
@@ -187,5 +187,5 @@ def test_open_rip_put_passes_explosion_entry_elite_on_bullish(mock_settings, moc
         event, trade, Breadth(bias="BULLISH", score=62, aligned=True), False,
         chart=chart,
     )
-    assert ok is True
-    assert "premium_led" in reason
+    assert ok is False
+    assert reason == "hard_block_put_vs_bullish_breadth"

@@ -161,7 +161,11 @@ def test_blocks_counter_breadth_low_score(mock_settings):
     cand.confidence = 62.0
     ok, reason, _ = validate_candidate(cand, state)
     assert not ok
-    assert reason.startswith("directional_") or reason == "pretrade_counter_breadth"
+    assert reason.startswith("directional_") or reason in (
+        "pretrade_counter_breadth",
+        "hard_block_call_vs_bearish_breadth",
+        "hard_block_put_vs_bullish_breadth",
+    )
 
 
 def test_backtest_summary_recommends_index():

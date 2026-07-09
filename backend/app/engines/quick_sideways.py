@@ -337,6 +337,12 @@ def check_slow_bounce_entry(
     settings = get_settings()
     if not settings.quick_sideways_slow_bounce_enabled:
         return False, "slow_bounce_disabled"
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
+
+    bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    hard_blocked, hard_reason = breadth_hard_blocks_side(side, bias)
+    if hard_blocked:
+        return False, hard_reason
     if not _slow_bounce_active(snap, state, snapshots):
         return False, "slow_bounce_requires_pm_itm"
 
@@ -463,6 +469,12 @@ def check_quick_sideways_entry(
     settings = get_settings()
     if not quick_sideways_enabled():
         return False, "quick_sideways_disabled"
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
+
+    bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    hard_blocked, hard_reason = breadth_hard_blocks_side(side, bias)
+    if hard_blocked:
+        return False, hard_reason
     if not is_sideways_snapshot(snap):
         if not _pm_itm_active(snap, state, snapshots):
             return False, "not_sideways"

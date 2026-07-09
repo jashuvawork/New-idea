@@ -399,6 +399,11 @@ def check_expiry_entry_allowed(
     if not in_expiry_morning_window() and settings.expiry_morning_only and has_expiry_today:
         if pm_itm:
             return True, "ok", meta
+        from app.engines.morning_premium_capture import in_all_day_explosion_window
+
+        if in_all_day_explosion_window():
+            meta["expiryAfternoonExplosionAllowed"] = True
+            return True, "ok", meta
         return False, "expiry_afternoon_wait", meta
 
     if has_expiry_today:

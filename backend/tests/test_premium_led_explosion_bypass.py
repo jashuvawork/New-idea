@@ -86,6 +86,7 @@ def _mock_premium_settings(s):
     s.open_premium_bypass_min_score = 35.0
     s.open_premium_chart_bypass_move_pct = 20.0
     s.chart_min_trend_strength = 25.0
+    s.breadth_hard_side_block_enabled = True
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
@@ -95,7 +96,7 @@ def test_premium_led_bypass_requires_elite_on_bullish(mock_settings, mock_window
     _mock_premium_settings(s)
 
     assert premium_led_explosion_bypass(_put_event(), _bullish_chart(), "BULLISH") is False
-    assert premium_led_explosion_bypass(_elite_put_event(), _bullish_chart(), "BULLISH") is True
+    assert premium_led_explosion_bypass(_elite_put_event(), _bullish_chart(), "BULLISH") is False
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
@@ -135,8 +136,8 @@ def test_put_explosion_passes_bullish_breadth_and_chart(mock_settings, mock_wind
         chart=_bullish_chart(),
         snap=snap,
     )
-    assert ok is True
-    assert reason.startswith("premium_led_")
+    assert ok is False
+    assert reason == "hard_block_put_vs_bullish_breadth"
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
@@ -155,7 +156,7 @@ def test_put_explosion_blocked_expanding_on_bullish(mock_settings, mock_window):
         chart=_bullish_chart(),
     )
     assert not ok
-    assert reason == "explosion_put_vs_bullish_breadth"
+    assert reason == "hard_block_put_vs_bullish_breadth"
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=False)
@@ -176,7 +177,7 @@ def test_put_explosion_still_blocked_without_bypass_window(mock_settings, mock_w
         chart=_bullish_chart(),
     )
     assert not ok
-    assert reason == "explosion_put_vs_bullish_breadth"
+    assert reason == "hard_block_put_vs_bullish_breadth"
 
 
 @patch("app.engines.session_timing._minutes_now", return_value=9 * 60 + 17)
@@ -214,13 +215,13 @@ def test_directional_lock_bypassed_for_premium_led_put(mock_settings, mock_windo
         breadth=Breadth(score=62, bias="BULLISH", aligned=True),
     )
     event = _elite_put_event()
-    assert premium_led_explosion_bypass(event, _bullish_chart(), "BULLISH") is True
+    assert premium_led_explosion_bypass(event, _bullish_chart(), "BULLISH") is False
 
     blocked, reason = check_directional_side_lock(
-        "NIFTY", Side.PUT, snap, premium_led_bypass=True,
+        "NIFTY", Side.PUT, snap, premium_led_bypass=False,
     )
-    assert blocked is False
-    assert reason == "ok"
+    assert blocked is True
+    assert "directional_put" in reason or "hard_block" in reason
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
@@ -269,5 +270,5 @@ def test_reentry_allows_premium_led_explosion(mock_settings, mock_window):
             blocked, reason = _reentry_blocked(
                 "NIFTY", Side.PUT, 24050.0, snap, explosion_event=event,
             )
-    assert blocked is False
-    assert reason == "ok"
+    assert blocked is True
+    assert "hard_block_put_vs_bullish_breadth" in reason

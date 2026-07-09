@@ -260,7 +260,7 @@ def test_chop_allows_lower_velocity(mock_settings):
     s.enhanced_velocity_threshold = 1.2
     snap = _snap(
         regime=Regime.CHOP,
-        breadth=Breadth(score=50, bias="BEARISH", aligned=False),
+        breadth=Breadth(score=50, bias="NEUTRAL", aligned=False),
         spotChart=SpotChart(direction="BULLISH", momentum5Pct=0.03, trendStrength=20),
         explosiveRunnerWatchlist=[
             {"side": "CALL", "strike": 24400, "premium": 75.5, "premiumVelocityPct": 0.28},
@@ -295,7 +295,7 @@ def test_scan_watchlist_strike_in_chop(mock_settings):
         regime=Regime.CHOP,
         spot=24380.0,
         atmStrike=24400.0,
-        breadth=Breadth(score=50, bias="BEARISH", aligned=False),
+        breadth=Breadth(score=50, bias="NEUTRAL", aligned=False),
         spotChart=SpotChart(direction="BULLISH", momentum5Pct=0.03, trendStrength=22),
         explosiveRunnerWatchlist=[
             {"side": "CALL", "strike": 24400, "premium": 75.5, "premiumVelocityPct": 0.3},

@@ -225,17 +225,27 @@ def _gate_checks(
         gates.append({"gate": "chart_alignment", "passed": True, "detail": f"chart {chart_dir}"})
 
     # 6b — Breadth alignment
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
     from app.engines.rally_capture import breadth_blocks_explosion_side
 
+    hard_blocked, hard_reason = breadth_hard_blocks_side(candidate.side, breadth_bias)
     br_blocked, br_reason = breadth_blocks_explosion_side(candidate.side, breadth_bias, tier)
     market_opposes = _market_opposes_side(candidate.side, breadth_bias, chart)
-    if br_blocked and not premium_bypass:
+    if hard_blocked:
+        blockers.append(hard_reason)
+        gates.append({
+            "gate": "breadth_hard_block",
+            "passed": False,
+            "detail": f"breadth {breadth_bias} vs {side_val}",
+            "fix": "Hard block — trade CALL on bullish / PUT on bearish breadth only",
+        })
+    elif br_blocked and not premium_bypass:
         blockers.append(br_reason)
         gates.append({
             "gate": "breadth_alignment",
             "passed": False,
             "detail": f"breadth {breadth_bias} vs {side_val}",
-            "fix": "Trade CALL on bullish / PUT on bearish — or ELITE score ≥90 for counter-trend",
+            "fix": "Trade CALL on bullish / PUT on bearish breadth",
         })
     else:
         gates.append({
@@ -244,7 +254,15 @@ def _gate_checks(
             "detail": f"breadth {breadth_bias}" + (" (premium-led bypass)" if premium_bypass else ""),
         })
 
-    if market_opposes and not premium_bypass:
+    if hard_blocked:
+        blockers.append("market_opposes_side")
+        gates.append({
+            "gate": "market_direction",
+            "passed": False,
+            "detail": f"{breadth_bias} breadth vs {side_val}",
+            "fix": "Counter-breadth blocked — no ELITE bypass on directional breadth",
+        })
+    elif market_opposes and not premium_bypass:
         blockers.append("market_opposes_side")
         gates.append({
             "gate": "market_direction",
