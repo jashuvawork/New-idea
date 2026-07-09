@@ -12,7 +12,7 @@ from app.engines.chop_day_guards import chop_guard_summary
 from app.engines.composer_market_monitor import get_latest_brief
 from app.engines.expiry_day_guards import expiry_guard_summary
 from app.engines.worst_day_guard import identify_worst_day, session_entry_policy
-from app.models.schemas import AutoTraderState, SymbolSnapshot
+from app.models.schemas import AutoTraderState, Side, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -107,11 +107,49 @@ def _build_moments() -> list[dict[str, Any]]:
     return moments
 
 
-def _explosion_signals(snapshots: dict[str, SymbolSnapshot]) -> list[dict[str, Any]]:
+def _session_bias(snapshots: dict[str, SymbolSnapshot], composer: Optional[dict[str, Any]]) -> str:
+    bias = str((composer or {}).get("tradeBias") or "").upper()
+    if bias in ("CALL", "PUT"):
+        return bias
+    scores = {"BULLISH": 0, "BEARISH": 0, "NEUTRAL": 0}
+    for snap in snapshots.values():
+        if not snap.dataAvailable:
+            continue
+        b = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+        scores[str(b).upper()] = scores.get(str(b).upper(), 0) + 1
+        chart = snap.spotChart
+        if chart and chart.direction in ("BULLISH", "BEARISH"):
+            scores[str(chart.direction).upper()] += 1
+    if scores["BULLISH"] > scores["BEARISH"]:
+        return "CALL"
+    if scores["BEARISH"] > scores["BULLISH"]:
+        return "PUT"
+    return "NEUTRAL"
+
+
+def _side_matches_bias(side: str, bias: str) -> bool:
+    side_v = str(side or "").upper()
+    if bias == "CALL":
+        return side_v == "CALL"
+    if bias == "PUT":
+        return side_v == "PUT"
+    return True
+
+
+def _explosion_signals(
+    snapshots: dict[str, SymbolSnapshot],
+    state: AutoTraderState,
+    session_bias: str,
+) -> list[dict[str, Any]]:
+    from app.engines.missed_trade_explainer import _gate_checks
+    from app.engines.morning_premium_capture import _market_opposes_side
+    from app.engines.symbol_cooldown import side_aligned_with_breadth
+
     out: list[dict[str, Any]] = []
     for sym, snap in snapshots.items():
         if not snap.dataAvailable:
             continue
+        breadth_bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
         for alert in snap.explosionAlerts or []:
             tier = str(alert.get("tier") or "WATCH")
             if tier == "WATCH" and not alert.get("allDayExplosion"):
@@ -120,12 +158,22 @@ def _explosion_signals(snapshots: dict[str, SymbolSnapshot]) -> list[dict[str, A
             score = float(alert.get("explosionScore") or 0)
             side = str(alert.get("side") or "")
             strike = alert.get("strike")
-            tradeable = bool(alert.get("tradeable"))
-            blockers: list[str] = []
-            if not tradeable:
+            gate_row = _gate_checks(sym, snap, alert, state, snapshots)
+            blockers: list[str] = list(gate_row.get("blockers") or [])
+            radar_tradeable = bool(alert.get("tradeable"))
+            if not radar_tradeable and "not_tradeable_tier" not in blockers:
                 blockers.append("tier_or_velocity")
-            if tier == "BUILDING" and not alert.get("allDayExplosion") and not alert.get("premiumCapture"):
-                blockers.append("building_await_upgrade")
+            tradeable = bool(gate_row.get("wouldPass"))
+            aligned = side_aligned_with_breadth(side, breadth_bias)
+            opposes = _market_opposes_side(side, breadth_bias, snap.spotChart)
+            bias_match = _side_matches_bias(side, session_bias)
+            rank_bonus = 0.0
+            if aligned:
+                rank_bonus += 12.0
+            if bias_match:
+                rank_bonus += 10.0
+            if opposes:
+                rank_bonus -= 25.0
             windows: list[str] = []
             if alert.get("morningCapture"):
                 windows.append("morningCapture")
@@ -142,6 +190,7 @@ def _explosion_signals(snapshots: dict[str, SymbolSnapshot]) -> list[dict[str, A
                 "premium": alert.get("premium"),
                 "confidence": score,
                 "tradeable": tradeable,
+                "radarTradeable": radar_tradeable,
                 "summary": f"{sym} {side} {strike} · {tier} · score {score:.0f}",
                 "detail": str(alert.get("reason") or ""),
                 "tier": tier,
@@ -150,9 +199,23 @@ def _explosion_signals(snapshots: dict[str, SymbolSnapshot]) -> list[dict[str, A
                 "volumeSurge": alert.get("volumeSurge"),
                 "windows": windows,
                 "blockers": blockers,
+                "primaryBlocker": gate_row.get("primaryBlocker"),
+                "sortScore": float(gate_row.get("sortScore") or score) + rank_bonus,
+                "aligned": aligned,
+                "biasMatch": bias_match,
                 "source": "explosion_radar",
             })
-    out.sort(key=lambda s: (s.get("tradeable", False), s.get("confidence", 0), s.get("dailyMovePct", 0)), reverse=True)
+    out.sort(
+        key=lambda s: (
+            s.get("tradeable", False),
+            s.get("biasMatch", False),
+            s.get("aligned", False),
+            s.get("sortScore", 0),
+            s.get("confidence", 0),
+            s.get("dailyMovePct", 0),
+        ),
+        reverse=True,
+    )
     return out
 
 
@@ -375,15 +438,16 @@ def build_forward_signals(
     chop = chop_guard_summary(state, snapshots)
 
     moments = _build_moments()
+    composer = _composer_signal()
+    session_bias = _session_bias(snapshots, composer)
     signals: list[dict[str, Any]] = []
     signals.extend(_premarket_signals(snapshots))
-    signals.extend(_explosion_signals(snapshots))
+    signals.extend(_explosion_signals(snapshots, state, session_bias))
     signals.extend(_swing_signals(snapshots))
     signals.extend(_scalp_signals(snapshots))
     signals.extend(_strategy_signals(snapshots))
     signals.extend(_risk_signals(state, snapshots))
     signals.extend(_playbook_signals(state))
-    composer = _composer_signal()
     if composer:
         signals.append(composer)
 
@@ -391,7 +455,12 @@ def build_forward_signals(
     upcoming = [m for m in moments if m.get("status") == "UPCOMING"]
     live_moments = [m for m in moments if m.get("status") == "LIVE"]
 
-    top_explosion = next((s for s in signals if s.get("horizon") == "EXPLOSION"), None)
+    explosions = [s for s in signals if s.get("horizon") == "EXPLOSION"]
+    top_explosion = next((s for s in explosions if s.get("tradeable")), None)
+    if top_explosion is None:
+        top_explosion = next((s for s in explosions if s.get("biasMatch")), None)
+    if top_explosion is None:
+        top_explosion = explosions[0] if explosions else None
     parts: list[str] = []
     if live_moments:
         parts.append(f"Live: {live_moments[0]['label']}")
@@ -419,6 +488,7 @@ def build_forward_signals(
         "moments": moments,
         "signals": signals[:40],
         "tradeableCount": len(tradeable),
+        "sessionBias": session_bias,
         "counts": counts,
         "indexMoments": chop.get("indexMoments") or {},
         "windows": {

@@ -101,3 +101,44 @@ def test_forward_signals_composer_brief_dict(monkeypatch):
     assert composer.get("tradeBias") == "PUT"
     assert composer.get("tradeable") is True
     assert any(s.get("source") == "composer" for s in report.get("signals") or [])
+
+
+def test_forward_signals_blocks_put_on_bullish_breadth():
+    snap = _snap()
+    snap.explosionAlerts = [
+        {
+            "symbol": "SENSEX",
+            "side": "PUT",
+            "strike": 76300.0,
+            "premium": 26.0,
+            "explosionScore": 65.0,
+            "tier": "BUILDING",
+            "dailyMovePct": 12.0,
+            "tradeable": True,
+            "velocity3s": 3.6,
+            "velocity9s": 2.5,
+            "volumeSurge": 2.5,
+            "allDayExplosion": True,
+        },
+        {
+            "symbol": "SENSEX",
+            "side": "CALL",
+            "strike": 77200.0,
+            "premium": 140.0,
+            "explosionScore": 50.0,
+            "tier": "EXPLODING",
+            "dailyMovePct": 73.0,
+            "tradeable": True,
+            "velocity3s": 2.0,
+            "velocity9s": 2.5,
+            "volumeSurge": 2.5,
+            "allDayExplosion": True,
+        },
+    ]
+    state = AutoTraderState()
+    report = build_forward_signals({"SENSEX": snap}, state)
+    explosions = [s for s in report.get("signals") or [] if s.get("horizon") == "EXPLOSION"]
+    put_sig = next(s for s in explosions if s.get("side") == "PUT")
+    assert put_sig.get("tradeable") is False
+    assert report.get("sessionBias") == "CALL"
+    assert "PUT" not in (report.get("summary") or "")

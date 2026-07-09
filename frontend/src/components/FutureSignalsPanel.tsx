@@ -35,6 +35,7 @@ interface ForwardSignal {
   tier?: string;
   dailyMovePct?: number;
   blockers?: string[];
+  primaryBlocker?: string | null;
   tradeBias?: string;
   targets?: Record<string, number | undefined>;
 }
@@ -42,6 +43,7 @@ interface ForwardSignal {
 interface ForwardPayload {
   at?: string;
   summary?: string;
+  sessionBias?: string;
   moments?: ForwardMoment[];
   signals?: ForwardSignal[];
   tradeableCount?: number;
@@ -266,6 +268,9 @@ export function FutureSignalsPanel({
 
       <div className="text-[10px] text-white mb-2 p-2 rounded bg-black/30 min-h-[2rem]">
         {data?.summary ?? 'Loading forward scan…'}
+        {data?.sessionBias && data.sessionBias !== 'NEUTRAL' ? (
+          <span className="text-nexus-muted"> · Session bias {data.sessionBias}</span>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap gap-1 mb-2">
@@ -336,8 +341,10 @@ export function FutureSignalsPanel({
                 {s.dailyMovePct != null && s.dailyMovePct > 0 ? (
                   <div className="text-[9px] text-nexus-accent mt-0.5">Session +{s.dailyMovePct.toFixed(0)}%</div>
                 ) : null}
-                {s.blockers?.length ? (
-                  <div className="text-[8px] text-nexus-red font-mono mt-0.5">{s.blockers.join(' · ')}</div>
+                {s.blockers?.length || s.primaryBlocker ? (
+                  <div className="text-[8px] text-nexus-red font-mono mt-0.5">
+                    {s.primaryBlocker ?? s.blockers?.slice(0, 2).join(' · ')}
+                  </div>
                 ) : null}
               </div>
             ))

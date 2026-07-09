@@ -271,18 +271,21 @@ def check_bad_day_candidate(
     if fading:
         alt = alternate_index_for(sym, snapshots)
         meta["alternateIndex"] = alt
-        elite = tier == "ELITE"
         if mode == "scalp":
             return False, "bad_day_no_regular_scalps_on_fading_expiry", meta
         if mode == "slow_bounce":
             return False, "bad_day_slow_bounce_on_fading_expiry", meta
-        if mode == "explosion" and not elite:
-            return False, "bad_day_fading_expiry_explosion_elite_only", meta
-        if not aligned:
-            return False, "bad_day_fading_expiry_requires_alignment", meta
-        if score < settings.bad_day_fading_expiry_min_rank:
-            return False, f"bad_day_fading_expiry_rank_below_{settings.bad_day_fading_expiry_min_rank:.0f}", meta
-        return True, "ok", meta
+        if mode == "explosion":
+            if tier not in ("ELITE", "EXPLODING"):
+                return False, "bad_day_fading_expiry_explosion_tier", meta
+            if not aligned:
+                return False, "bad_day_fading_expiry_requires_alignment", meta
+            min_req = min(settings.bad_day_fading_expiry_min_rank, floor)
+            if tier == "EXPLODING" and aligned:
+                min_req = min(min_req, max(floor, settings.best_trades_min_rank_score))
+            if score < min_req:
+                return False, f"bad_day_fading_expiry_rank_below_{min_req:.0f}", meta
+            return True, "ok", meta
 
     if pre_restricted and pre_alt:
         meta["alternateIndex"] = pre_alt

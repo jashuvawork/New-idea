@@ -105,6 +105,12 @@ def check_explosion_entry(
         return False, "calibration_block"
 
     if snap is not None:
+        from app.engines.morning_premium_capture import counter_trend_entry_allowed
+
+        if not counter_trend_entry_allowed(event.side, snap, explosion_event=event):
+            return False, "counter_trend_requires_elite"
+
+    if snap is not None:
         from app.engines.expiry_day_guards import check_expiry_explosion_open_block
 
         blocked, reason = check_expiry_explosion_open_block(

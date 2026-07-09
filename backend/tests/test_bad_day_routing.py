@@ -90,10 +90,20 @@ def test_alternate_index_skips_near_expiry_symbol():
 @patch("app.engines.bad_day_routing.expiry_index_fading", return_value=(True, ["low_tqs"]))
 def test_blocks_low_rank_explosion_on_fading_expiry(mock_fade, mock_bad):
     snap = _snap("NIFTY", tqs=35)
-    cand = _Cand("NIFTY", Side.PUT, 65.0, tier="EXPLODING", snap=snap)
+    cand = _Cand("NIFTY", Side.PUT, 50.0, tier="EXPLODING", snap=snap)
     ok, reason, _ = check_bad_day_candidate(cand, _state_with_nifty_loss(), {"NIFTY": snap})
     assert not ok
-    assert "elite_only" in reason or "rank_below" in reason
+    assert "rank_below" in reason or "requires_alignment" in reason
+
+
+@patch("app.engines.bad_day_routing.bad_day_session_active", return_value=(True, ["bearish_sideways"]))
+@patch("app.engines.bad_day_routing.expiry_index_fading", return_value=(True, ["low_tqs"]))
+def test_allows_aligned_exploding_on_fading_expiry(mock_fade, mock_bad):
+    snap = _snap("SENSEX", expiry="2026-07-09", tqs=38, bias="BULLISH")
+    cand = _Cand("SENSEX", Side.CALL, 71.0, tier="EXPLODING", snap=snap)
+    ok, reason, meta = check_bad_day_candidate(cand, _state_with_nifty_loss(), {"SENSEX": snap})
+    assert ok, reason
+    assert meta.get("breadthAligned") is True
 
 
 @patch("app.engines.bad_day_routing.bad_day_session_active", return_value=(True, ["bearish_sideways"]))
@@ -121,4 +131,4 @@ def test_cross_index_bonus_for_alternate(mock_alt, mock_fading, mock_near):
 @patch("app.engines.bad_day_routing.bad_day_session_active", return_value=(True, ["session_loss"]))
 def test_bad_day_min_rank_floor(mock_active):
     floor = bad_day_min_rank_floor(_state_with_nifty_loss(), {"NIFTY": _snap()})
-    assert floor >= 72.0
+    assert floor >= 65.0

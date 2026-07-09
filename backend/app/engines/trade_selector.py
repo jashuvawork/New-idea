@@ -157,6 +157,10 @@ def _explosion_candidates(
             reason=alert.get("reason", ""),
             daily_move_pct=daily_move,
         )
+        from app.engines.morning_premium_capture import counter_trend_entry_allowed
+
+        if not counter_trend_entry_allowed(event.side, snap, explosion_event=event):
+            continue
         suggestion = SuggestedTrade(
             id=alert.get("id", "x"),
             symbol=symbol,

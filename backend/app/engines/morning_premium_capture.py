@@ -152,6 +152,21 @@ def _elite_counter_breadth_ok(event: ExplosionEvent, settings: Any) -> bool:
     return v3 >= settings.premium_led_min_velocity_3s or v9 >= settings.premium_led_min_velocity_9s
 
 
+def counter_trend_entry_allowed(
+    side: Side | str,
+    snap: SymbolSnapshot,
+    *,
+    explosion_event: Optional[ExplosionEvent] = None,
+) -> bool:
+    """Block counter-trend legs unless ELITE score clears the elite gate."""
+    bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    if not _market_opposes_side(side, bias, snap.spotChart):
+        return True
+    if explosion_event is None:
+        return False
+    return _elite_counter_breadth_ok(explosion_event, get_settings())
+
+
 def premium_led_entry_allowed(
     side: Side | str,
     snap: SymbolSnapshot,

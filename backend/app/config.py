@@ -593,7 +593,7 @@ class Settings(BaseSettings):
     bad_day_session_loss_inr: float = -8_000.0
     bad_day_recent_loss_count: int = 2
     bad_day_min_symbol_tqs: float = 42.0
-    bad_day_fading_expiry_min_rank: float = 75.0
+    bad_day_fading_expiry_min_rank: float = 65.0
     bad_day_fading_symbol_penalty: float = 18.0
     bad_day_alternate_index_bonus: float = 14.0
     bad_day_alternate_aligned_bonus: float = 8.0
