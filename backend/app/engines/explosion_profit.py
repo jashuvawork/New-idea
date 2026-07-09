@@ -335,14 +335,20 @@ def _trail_floor_pts(
 
 
 def _chart_aligned_with_trade(trade: PaperTrade) -> bool:
-    """CALL+BULLISH or PUT+BEARISH from entry chart snapshot."""
+    """CALL+BULLISH or PUT+BEARISH — snapshot scan chart or entry execution chart."""
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if direction_aligned_with_breadth(trade):
+        return True
     ctx = trade.entryContext or {}
-    chart = (ctx.get("executionChart") or {}).get("indexChart") or {}
-    direction = str(chart.get("direction", "NEUTRAL")).upper()
-    if trade.side == Side.CALL and direction == "BULLISH":
-        return True
-    if trade.side == Side.PUT and direction == "BEARISH":
-        return True
+    exec_chart = (ctx.get("executionChart") or {}).get("indexChart") or {}
+    snap_chart = (ctx.get("executionChart") or {}).get("snapshotChart") or {}
+    for chart in (snap_chart, exec_chart):
+        direction = str(chart.get("direction", "NEUTRAL")).upper()
+        if trade.side == Side.CALL and direction == "BULLISH":
+            return True
+        if trade.side == Side.PUT and direction == "BEARISH":
+            return True
     return False
 
 

@@ -281,4 +281,17 @@ async def monitor_trade_chart_before_execution(
     meta["passed"] = passed
     meta["blockReason"] = reason if not passed else None
     meta["premiumLedBypass"] = premium_bypass
+    meta["expiryExplosionBypass"] = expiry_chart_bypass
+    meta["breadthAlignedBypass"] = breadth_bypass
+    snap_aligned = side_aligned_with_chart(side, snap.spotChart)
+    exec_aligned = side_aligned_with_chart(side, index_chart)
+    meta["snapshotAligned"] = snap_aligned
+    meta["snapshotChart"] = chart_summary_dict(snap.spotChart) if snap.spotChart else {}
+    meta["chartBypassUsed"] = bool(
+        passed
+        and not exec_aligned
+        and (premium_bypass or expiry_chart_bypass or breadth_bypass)
+    )
+    if meta["chartBypassUsed"] and snap_aligned:
+        meta["alignedWithChart"] = True
     return passed, reason, meta

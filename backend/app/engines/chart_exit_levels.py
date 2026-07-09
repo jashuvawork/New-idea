@@ -600,6 +600,37 @@ def update_live_chart_trail(
         entry_premium=float(trade.entryPremium or 50),
     )
 
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+    from app.models.schemas import StrategyType
+
+    best_pts = max(trade.bestPnlPoints, trade.pnlPoints or 0)
+    entry_vel = float(ctx.get("entryVelocity3s") or ctx.get("velocity3s") or 0)
+    is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
+    breadth_aligned = direction_aligned_with_breadth(trade)
+
+    # Breadth-aligned explosions: don't tighten exits on brief chart noise before +5pt
+    if is_explosion and breadth_aligned and best_pts < 5.0:
+        tuning.tighten = False
+        tuning.letRun = True
+        tuning.trailArmPoints = max(
+            tuning.trailArmPoints,
+            float(plan_dict.get("trailArmPoints") or settings.explosion_trail_arm_points),
+        )
+        tuning.trailKeepRatio = min(
+            tuning.trailKeepRatio,
+            float(plan_dict.get("trailKeepRatio") or settings.explosion_trail_keep_ratio),
+        )
+        plan_dict = dict(plan_dict)
+        plan_dict["microTargetPoints"] = max(
+            float(plan_dict.get("microTargetPoints") or settings.explosion_micro_target_points),
+            settings.explosion_micro_target_points,
+        )
+        tuning.sources.append("explosion_breadth_hold")
+    elif is_explosion and entry_vel >= 3.0 and best_pts < 4.0 and tuning.tighten:
+        tuning.tighten = False
+        tuning.trailArmPoints = max(tuning.trailArmPoints, settings.explosion_trail_arm_points)
+        tuning.sources.append("explosion_velocity_hold")
+
     merged = dict(plan_dict)
     merged["stopPoints"] = tuning.stopPoints
     merged["targetPoints"] = tuning.targetPoints

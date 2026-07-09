@@ -478,7 +478,9 @@ export interface AutoTradeEvent {
   brokerOrderId?: string;
   brokerExitOrderId?: string;
   chartDirection?: string;
+  execChartDirection?: string;
   chartAligned?: boolean;
+  chartBypass?: string | null;
   at?: string;
 }
 

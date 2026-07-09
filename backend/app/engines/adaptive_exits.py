@@ -340,7 +340,14 @@ def evaluate_adaptive_explosion_exit(
     pnl_pts = current_premium - trade.entryPremium
     best = max(trade.bestPnlPoints, pnl_pts)
 
-    if best >= plan.trailArmPoints and pnl_pts < best * plan.trailKeepRatio:
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+    from app.models.schemas import StrategyType
+
+    min_arm = plan.trailArmPoints
+    if trade.strategyType == StrategyType.EXPLOSIVE and direction_aligned_with_breadth(trade):
+        min_arm = max(min_arm, 4.0)
+
+    if best >= min_arm and pnl_pts < best * plan.trailKeepRatio:
         return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier
 
     return None, pnl_pts * trade.lots * lot_multiplier

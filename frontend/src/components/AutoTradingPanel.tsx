@@ -41,8 +41,14 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
           </span>
           {auto.lastEntry.chartDirection && (
             <div className="mt-0.5 text-[9px] text-nexus-muted">
-              Chart {auto.lastEntry.chartDirection}
-              {auto.lastEntry.chartAligned === false ? (
+              Scan chart {auto.lastEntry.chartDirection}
+              {auto.lastEntry.execChartDirection
+                && auto.lastEntry.execChartDirection !== auto.lastEntry.chartDirection && (
+                <span> · live {auto.lastEntry.execChartDirection}</span>
+              )}
+              {auto.lastEntry.chartBypass ? (
+                <span className="text-nexus-green"> · {auto.lastEntry.chartBypass} bypass</span>
+              ) : auto.lastEntry.chartAligned === false ? (
                 <span className="text-nexus-yellow"> · misaligned at scan</span>
               ) : auto.lastEntry.chartAligned ? (
                 <span className="text-nexus-green"> · aligned</span>
