@@ -158,6 +158,8 @@ class Settings(BaseSettings):
     explosion_reentry_cooldown_seconds: int = 90
     explosion_emergency_cooldown_seconds: int = 180
     explosion_breadth_alignment_enabled: bool = True
+    # Hard block PUT on BULLISH / CALL on BEARISH — no ELITE or premium-led bypass
+    breadth_hard_side_block_enabled: bool = True
     explosion_single_side_per_symbol: bool = True
     explosion_dominant_side_min_score: float = 50.0
     explosion_exhaustion_v15_pct: float = 18.0

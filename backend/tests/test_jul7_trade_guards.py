@@ -108,4 +108,8 @@ def test_expiry_counter_breadth_requires_elite(mock_settings):
             with patch("app.engines.spot_direction.chart_blocks_side", return_value=(False, "ok")):
                 ok, reason = check_explosion_entry(event, trade, breadth, False, snap=snap)
     assert not ok
-    assert reason in ("expiry_counter_breadth_elite_only", "explosion_call_vs_bearish_breadth")
+    assert reason in (
+        "expiry_counter_breadth_elite_only",
+        "explosion_call_vs_bearish_breadth",
+        "hard_block_call_vs_bearish_breadth",
+    )

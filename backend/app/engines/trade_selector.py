@@ -95,8 +95,13 @@ def _reentry_blocked(
     if blocked:
         return True, reason
     if explosion_event is not None:
+        from app.engines.aligned_side_guard import breadth_hard_blocks_side
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
+        bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+        hard_blocked, hard_reason = breadth_hard_blocks_side(side, bias)
+        if hard_blocked:
+            return True, hard_reason
         if not counter_trend_entry_allowed(side, snap, explosion_event=explosion_event):
             return True, "counter_trend_requires_elite"
     from app.engines.directional_lock import check_directional_side_lock
