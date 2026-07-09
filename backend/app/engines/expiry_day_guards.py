@@ -394,6 +394,14 @@ def check_expiry_entry_allowed(
     if in_expiry_evening_block() and has_expiry_today:
         if pm_itm:
             return True, "ok", meta
+        from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
+
+        if (
+            settings.expiry_evening_all_in_explosion_bypass
+            and snapshots_have_all_in_explosion(snapshots)
+        ):
+            meta["expiryEveningAllInBypass"] = True
+            return True, "ok", meta
         return False, "expiry_evening_block", meta
 
     if not in_expiry_morning_window() and settings.expiry_morning_only and has_expiry_today:

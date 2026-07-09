@@ -104,12 +104,19 @@ def check_explosion_entry(
     if calibration_blocked:
         return False, "calibration_block"
 
+    from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
+
+    if is_extreme_explosion_all_in_bypass(event=event):
+        if explosion_in_cooldown(event.symbol):
+            return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
+        return True, "extreme_all_in_explosion_confirmed"
+
     if snap is not None:
         from app.engines.aligned_side_guard import breadth_hard_blocks_side
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
         bias = (snap.breadth.bias if snap.breadth else breadth.bias or "NEUTRAL") or "NEUTRAL"
-        hard_blocked, hard_reason = breadth_hard_blocks_side(event.side, bias)
+        hard_blocked, hard_reason = breadth_hard_blocks_side(event.side, bias, event=event)
         if hard_blocked:
             return False, hard_reason
         if not counter_trend_entry_allowed(event.side, snap, explosion_event=event):
@@ -161,7 +168,7 @@ def check_explosion_entry(
     breadth_bias = (breadth.bias or "NEUTRAL") if breadth else "NEUTRAL"
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
 
-    hard_blocked, hard_reason = breadth_hard_blocks_side(event.side, breadth_bias)
+    hard_blocked, hard_reason = breadth_hard_blocks_side(event.side, breadth_bias, event=event)
     if hard_blocked:
         return False, hard_reason
 
@@ -374,6 +381,8 @@ def _should_skip_no_progress(trade: PaperTrade, settings) -> bool:
     if direction_aligned_with_breadth(trade) or _chart_aligned_with_trade(trade):
         return True
     ctx = trade.entryContext or {}
+    if ctx.get("extremeAllInBypass"):
+        return True
     edge = ctx.get("edgeScore") or {}
     if edge.get("letRunners"):
         return True

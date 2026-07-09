@@ -158,11 +158,16 @@ def counter_trend_entry_allowed(
     *,
     explosion_event: Optional[ExplosionEvent] = None,
 ) -> bool:
-    """Block counter-trend legs — no ELITE escape when breadth is directional."""
+    """Block counter-trend legs — extreme ALL-IN rips bypass."""
+    if explosion_event is not None:
+        from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
+
+        if is_extreme_explosion_all_in_bypass(event=explosion_event):
+            return True
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
 
-    hard_blocked, _ = breadth_hard_blocks_side(side, bias)
+    hard_blocked, _ = breadth_hard_blocks_side(side, bias, event=explosion_event)
     if hard_blocked:
         return False
     if not _market_opposes_side(side, bias, snap.spotChart):

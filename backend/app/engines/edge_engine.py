@@ -335,7 +335,7 @@ def tune_plan_with_edge(
         plan.trailKeepRatio = round(min(0.78, plan.trailKeepRatio + 0.06), 2)
         plan.microTargetPoints = round(max(plan.microTargetPoints, 3.5), 2)
         plan.reasoning = (plan.reasoning or []) + ["edge_let_runners"]
-    elif edge.tighten_exits:
+    elif edge.tighten_exits and not getattr(plan, "_extreme_all_in", False):
         plan.stopPoints = round(max(settings.scalp_stop_min_points, plan.stopPoints * 0.92), 2)
         plan.trailKeepRatio = round(max(0.48, plan.trailKeepRatio - 0.04), 2)
         plan.microTargetPoints = round(plan.microTargetPoints * 0.95, 2)
@@ -375,12 +375,15 @@ def check_edge_realtime_exit(
     from app.models.schemas import StrategyType
 
     is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
-    breadth_hold = is_explosion and direction_aligned_with_breadth(trade)
-    min_best_edge = 5.0 if breadth_hold else 3.0
+    ctx = trade.entryContext or {}
+    extreme_hold = bool(ctx.get("extremeAllInBypass"))
+    breadth_hold = is_explosion and (direction_aligned_with_breadth(trade) or extreme_hold)
+    min_best_edge = float(get_settings().extreme_explosion_hold_min_best_points) if extreme_hold else (
+        5.0 if breadth_hold else 3.0
+    )
     if is_explosion and best < min_best_edge:
         return None, pnl_inr
 
-    ctx = trade.entryContext or {}
     entry_vel = float(ctx.get("velocity3s") or ctx.get("entryVelocity3s") or 0)
     edge_total = float((ctx.get("edgeScore") or {}).get("total") or 0)
 

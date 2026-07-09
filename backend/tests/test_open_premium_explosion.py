@@ -187,5 +187,5 @@ def test_open_rip_put_passes_explosion_entry_elite_on_bullish(mock_settings, moc
         event, trade, Breadth(bias="BULLISH", score=62, aligned=True), False,
         chart=chart,
     )
-    assert ok is False
-    assert reason == "hard_block_put_vs_bullish_breadth"
+    assert ok is True
+    assert reason == "extreme_all_in_explosion_confirmed"

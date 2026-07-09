@@ -226,12 +226,23 @@ def _gate_checks(
 
     # 6b — Breadth alignment
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
+    from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
     from app.engines.rally_capture import breadth_blocks_explosion_side
 
-    hard_blocked, hard_reason = breadth_hard_blocks_side(candidate.side, breadth_bias)
+    all_in = is_extreme_explosion_all_in_bypass(candidate=candidate, alert=alert)
+    if all_in:
+        gates.append({
+            "gate": "extreme_all_in_bypass",
+            "passed": True,
+            "detail": f"{tier} {daily_move:.0f}% session rip — ALL-IN bypass active",
+        })
+
+    hard_blocked, hard_reason = breadth_hard_blocks_side(
+        candidate.side, breadth_bias, candidate=candidate, alert=alert,
+    )
     br_blocked, br_reason = breadth_blocks_explosion_side(candidate.side, breadth_bias, tier)
     market_opposes = _market_opposes_side(candidate.side, breadth_bias, chart)
-    if hard_blocked:
+    if hard_blocked and not all_in:
         blockers.append(hard_reason)
         gates.append({
             "gate": "breadth_hard_block",
@@ -254,7 +265,7 @@ def _gate_checks(
             "detail": f"breadth {breadth_bias}" + (" (premium-led bypass)" if premium_bypass else ""),
         })
 
-    if hard_blocked:
+    if hard_blocked and not all_in:
         blockers.append("market_opposes_side")
         gates.append({
             "gate": "market_direction",
