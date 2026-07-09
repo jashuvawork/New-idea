@@ -24,6 +24,11 @@ export function snapshotSignature(json: MultiSnapshot): string {
 
   const chop = auto?.chopGuards;
   const lastN = chop?.lastNTrades;
+  const openFp = (auto?.openPaperTrades ?? [])
+    .map((t) => `${t.id}:${t.pnlInr?.toFixed(0) ?? 0}:${t.pnlPoints?.toFixed(1) ?? 0}`)
+    .join(',');
+  const lastEntryId = auto?.lastEntry?.tradeId ?? auto?.lastEntry?.at ?? '';
+  const lastExitId = auto?.lastExit?.tradeId ?? auto?.lastExit?.at ?? '';
 
   return [
     json.timestamp ?? '',
@@ -33,8 +38,13 @@ export function snapshotSignature(json: MultiSnapshot): string {
     auto?.closedPaperTrades?.length ?? 0,
     auto?.dailyReport?.netPnlInr?.toFixed(0) ?? '',
     auto?.dailyReport?.profitFactor?.toFixed(2) ?? '',
+    auto?.dailyReport?.wins ?? '',
+    auto?.dailyReport?.losses ?? '',
     auto?.running ? '1' : '0',
     auto?.skipped?.length ?? 0,
+    lastEntryId,
+    lastExitId,
+    openFp,
     chop?.dayMode ?? '',
     chop?.sessionPaused ? '1' : '0',
     chop?.lastNTradesPaused ? '1' : '0',

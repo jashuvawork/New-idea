@@ -140,6 +140,27 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
         </div>
       )}
 
+      {(auto.closedPaperTrades?.length ?? 0) > 0 ? (
+        <div className="mt-2 pt-2 border-t border-nexus-border">
+          <div className="text-[10px] text-nexus-muted uppercase mb-1">
+            Recent closed ({auto.closedPaperTrades.length})
+          </div>
+          <div className="space-y-1 max-h-24 overflow-y-auto">
+            {auto.closedPaperTrades.slice(-3).reverse().map((t) => (
+              <div key={`closed-${t.id}`} className="p-1 rounded bg-black/20 text-[10px] font-mono flex justify-between gap-2">
+                <span className={t.side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'}>
+                  {t.symbol} {t.side} {t.strike} ×{t.lots}
+                </span>
+                <span className={t.pnlInr >= 0 ? 'text-nexus-green' : 'text-nexus-red'}>
+                  ₹{t.pnlInr.toFixed(0)}
+                  {t.exitReason ? ` · ${t.exitReason.replace('simple_', '').replace('adaptive_', '')}` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {!liveMode && (
         <div className="mt-2 pt-2 border-t border-nexus-border text-[9px] text-nexus-muted leading-relaxed">
           Paper auto-trading with slippage-adjusted fills. Set ENABLE_LIVE_TRADING=true on the server for broker execution.
