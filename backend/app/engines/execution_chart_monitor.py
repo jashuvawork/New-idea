@@ -168,6 +168,7 @@ def validate_execution_charts(
     premium_mtf_reads: Optional[dict] = None,
     breadth_aligned_bypass: bool = False,
     premium_led_bypass: bool = False,
+    expiry_explosion_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -176,6 +177,7 @@ def validate_execution_charts(
         side, index_chart, trade_score=trade_score,
         breadth_aligned_bypass=breadth_aligned_bypass,
         premium_led_bypass=premium_led_bypass,
+        expiry_explosion_bypass=expiry_explosion_bypass,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -219,11 +221,17 @@ async def monitor_trade_chart_before_execution(
         return True, "ok", {"enabled": False}
 
     from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
+    from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_event
     from app.engines.morning_premium_capture import premium_led_bypass_for_snap
 
     breadth_bypass = expiry_pm_itm_chart_bypass_allowed(side, snap, mode=mode)
     premium_bypass = premium_led_bypass_for_snap(
         side, snap, explosion_event=explosion_event,
+    )
+    expiry_chart_bypass = (
+        expiry_chart_bypass_for_event(explosion_event, snap)
+        if explosion_event is not None
+        else False
     )
 
     try:
@@ -236,6 +244,7 @@ async def monitor_trade_chart_before_execution(
             side, snap.spotChart, trade_score=trade_score,
             breadth_aligned_bypass=breadth_bypass,
             premium_led_bypass=premium_bypass,
+            expiry_explosion_bypass=expiry_chart_bypass,
         )
         fallback = {
             "enabled": True,
@@ -263,6 +272,7 @@ async def monitor_trade_chart_before_execution(
         premium_mtf_reads=premium_mtf_reads,
         breadth_aligned_bypass=breadth_bypass,
         premium_led_bypass=premium_bypass,
+        expiry_explosion_bypass=expiry_chart_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta

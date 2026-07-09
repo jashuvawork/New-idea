@@ -315,6 +315,7 @@ def chart_blocks_side(
     momentum_surge: bool = False,
     breadth_aligned_bypass: bool = False,
     premium_led_bypass: bool = False,
+    expiry_explosion_bypass: bool = False,
 ) -> tuple[bool, str]:
     settings = get_settings()
     if not settings.chart_alignment_enabled or not chart:
@@ -336,6 +337,9 @@ def chart_blocks_side(
         return True, "chart_bullish_no_puts"
 
     if momentum_surge or trade_score >= override:
+        return False, "ok"
+
+    if expiry_explosion_bypass and side_val == "CALL":
         return False, "ok"
 
     if side_val == "CALL":

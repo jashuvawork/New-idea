@@ -212,12 +212,19 @@ def check_explosion_entry(
 
     from app.engines.spot_direction import chart_blocks_side
 
+    expiry_chart_bypass = False
+    if snap is not None:
+        from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_event
+
+        expiry_chart_bypass = expiry_chart_bypass_for_event(event, snap)
+
     blocked_chart, chart_reason = chart_blocks_side(
         event.side,
         chart,
         trade_score=score,
         momentum_surge=index_moment,
         premium_led_bypass=premium_bypass,
+        expiry_explosion_bypass=expiry_chart_bypass,
     )
     if blocked_chart:
         return False, chart_reason

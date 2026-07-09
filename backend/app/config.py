@@ -306,6 +306,9 @@ class Settings(BaseSettings):
     pre_expiry_cross_index_enabled: bool = True
     pre_expiry_symbol_rank_penalty: float = 12.0
     pre_expiry_alternate_min_rank: float = 68.0
+    pre_expiry_expiry_symbol_explosion_min_rank: float = 55.0
+    expiry_aligned_explosion_trade_bypass_enabled: bool = True
+    expiry_aligned_explosion_chart_bypass_enabled: bool = True
 
     # Slow bounce — expensive ITM mean-reversion (RSI/MACD recovery, low velocity)
     quick_sideways_slow_bounce_enabled: bool = True

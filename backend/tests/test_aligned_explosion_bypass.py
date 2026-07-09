@@ -185,3 +185,32 @@ def test_expiry_session_enables_faster_entry_scan(mock_settings):
     assert any_expiry_session_active() is True
     with patch("app.engines.session_timing.in_open_premium_window", return_value=False):
         assert effective_entry_scan_interval_ms() == 750
+
+
+@patch("app.engines.aligned_explosion_bypass.get_settings")
+@patch("app.engines.expiry_day_guards.is_symbol_expiry_day", return_value=True)
+def test_expiry_aligned_trade_bypass_on_sensex_exploding(mock_expiry, mock_settings):
+    from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
+    from app.engines.spot_direction import chart_blocks_side
+
+    s = mock_settings.return_value
+    s.expiry_aligned_explosion_trade_bypass_enabled = True
+    s.expiry_aligned_explosion_chart_bypass_enabled = True
+    s.pre_expiry_expiry_symbol_explosion_min_rank = 55.0
+
+    snap = _snap("BULLISH")
+    snap.optionExpiry = datetime.now(IST).strftime("%Y-%m-%d")
+    cand = _candidate(_event(explosion_score=56.0, tier="EXPLODING"))
+
+    ok, reason = expiry_aligned_explosion_trade_allowed(cand, snap)
+    assert ok is True
+    assert reason == "expiry_aligned_explosion"
+
+    chart = SpotChart(
+        direction="BULLISH", spot=77000.0, trendStrength=55.0,
+        momentum5Pct=-0.5, momentum15Pct=-0.2,
+    )
+    blocked, block_reason = chart_blocks_side(
+        Side.CALL, chart, trade_score=51.0, expiry_explosion_bypass=True,
+    )
+    assert blocked is False

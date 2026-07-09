@@ -193,8 +193,22 @@ def _gate_checks(
     side_val = candidate.side.value
     chart_dir = (chart.direction or "NEUTRAL").upper() if chart else "NEUTRAL"
     breadth_bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_candidate
+    from app.engines.morning_premium_capture import (
+        _market_opposes_side,
+        premium_led_explosion_bypass,
+    )
+
+    premium_bypass = (
+        premium_led_explosion_bypass(candidate.explosion_event, chart, breadth_bias)
+        if candidate.explosion_event
+        else False
+    )
+    expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
     blocked, chart_reason = chart_blocks_side(
         candidate.side, chart, trade_score=score, momentum_surge=daily_move >= 40,
+        premium_led_bypass=premium_bypass,
+        expiry_explosion_bypass=expiry_chart_bypass,
     )
     if blocked:
         blockers.append(chart_reason)
@@ -208,17 +222,8 @@ def _gate_checks(
         gates.append({"gate": "chart_alignment", "passed": True, "detail": f"chart {chart_dir}"})
 
     # 6b — Breadth alignment
-    from app.engines.morning_premium_capture import (
-        _market_opposes_side,
-        premium_led_explosion_bypass,
-    )
     from app.engines.rally_capture import breadth_blocks_explosion_side
 
-    premium_bypass = (
-        premium_led_explosion_bypass(candidate.explosion_event, chart, breadth_bias)
-        if candidate.explosion_event
-        else False
-    )
     br_blocked, br_reason = breadth_blocks_explosion_side(candidate.side, breadth_bias, tier)
     market_opposes = _market_opposes_side(candidate.side, breadth_bias, chart)
     if br_blocked and not premium_bypass:

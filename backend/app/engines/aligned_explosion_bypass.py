@@ -110,3 +110,69 @@ def entry_interval_gap_seconds(
     if after_loss:
         gap = max(gap, settings.post_loss_exit_min_seconds)
     return gap
+
+
+def expiry_aligned_explosion_trade_allowed(
+    candidate: Any,
+    snap: SymbolSnapshot,
+) -> tuple[bool, str]:
+    """
+    Breadth-aligned EXPLODING/ELITE on the symbol's own expiry day.
+    Unlocks soft chart blocks + pre-expiry alternate-index routing.
+    """
+    settings = get_settings()
+    if not settings.expiry_aligned_explosion_trade_bypass_enabled:
+        return False, "disabled"
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, "not_explosion"
+
+    from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+    if not is_symbol_expiry_day(snap):
+        return False, "not_expiry_day"
+
+    tier = str(getattr(candidate, "tier", "") or "").upper()
+    event = _event_from_candidate(candidate)
+    if event is not None:
+        tier = str(event.tier or tier).upper()
+    if tier not in ("EXPLODING", "ELITE"):
+        return False, f"tier_{tier.lower()}"
+
+    side_v = _side_val(getattr(candidate, "side", ""))
+    bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    if not side_aligned_with_breadth(side_v, bias):
+        return False, "breadth_not_aligned"
+
+    score = float(getattr(candidate, "score", 0) or 0)
+    if event is not None:
+        score = max(score, float(event.explosion_score or 0))
+    min_score = float(settings.pre_expiry_expiry_symbol_explosion_min_rank)
+    if score < min_score:
+        return False, f"score_{score:.0f}<{min_score:.0f}"
+
+    return True, "expiry_aligned_explosion"
+
+
+def expiry_chart_bypass_for_candidate(
+    candidate: Any,
+    snap: SymbolSnapshot,
+) -> bool:
+    """Whether soft chart gates (declining momentum, POC) should be waived."""
+    if not get_settings().expiry_aligned_explosion_chart_bypass_enabled:
+        return False
+    ok, _ = expiry_aligned_explosion_trade_allowed(candidate, snap)
+    return ok
+
+
+def expiry_chart_bypass_for_event(event: ExplosionEvent, snap: SymbolSnapshot) -> bool:
+    from types import SimpleNamespace
+
+    stub = SimpleNamespace(
+        mode="explosion",
+        symbol=event.symbol,
+        side=event.side,
+        tier=event.tier,
+        score=event.explosion_score,
+        explosion_event=event,
+    )
+    return expiry_chart_bypass_for_candidate(stub, snap)

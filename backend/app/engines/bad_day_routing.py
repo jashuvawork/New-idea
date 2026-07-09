@@ -291,6 +291,16 @@ def check_bad_day_candidate(
         meta["alternateIndex"] = pre_alt
         if _extreme_explosion_bypass(candidate):
             return True, "ok", meta
+        from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+        if (
+            mode == "explosion"
+            and is_symbol_expiry_day(snap)
+            and aligned
+            and tier in ("EXPLODING", "ELITE")
+            and score >= settings.pre_expiry_expiry_symbol_explosion_min_rank
+        ):
+            return True, "ok", meta
         if mode in ("quick_sideways", "slow_bounce"):
             return True, "ok", meta
         if mode == "scalp":
