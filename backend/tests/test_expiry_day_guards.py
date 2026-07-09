@@ -230,3 +230,41 @@ def test_pm_itm_chart_bypass_when_breadth_aligned(mock_settings):
         with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True):
             assert expiry_pm_itm_chart_bypass_allowed(Side.PUT, snap, mode="quick_sideways") is True
             assert expiry_pm_itm_chart_bypass_allowed(Side.CALL, snap, mode="scalp") is False
+
+
+@patch("app.engines.expiry_day_guards.check_expiry_explosion_open_block", return_value=(False, "ok"))
+@patch("app.engines.expiry_day_guards.expiry_pm_itm_quick_active", return_value=False)
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.expiry_day_guards.is_symbol_expiry_day", return_value=True)
+@patch(
+    "app.engines.aligned_explosion_bypass.expiry_aligned_explosion_trade_allowed",
+    return_value=(True, "expiry_aligned_explosion"),
+)
+def test_check_expiry_candidate_aligned_explosion_skips_rank_floor(
+    mock_aligned, mock_expiry, mock_settings, _pm_itm, _open_block,
+):
+    from types import SimpleNamespace
+
+    s = mock_settings.return_value
+    s.expiry_day_guards_enabled = True
+    s.expiry_min_rank_score = 62.0
+
+    snap = _snap("SENSEX", expiry=datetime.now(IST).strftime("%Y-%m-%d"))
+    snap.breadth = Breadth(bias="BULLISH", score=65, aligned=True)
+    cand = SimpleNamespace(
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=77000.0,
+        premium=131.8,
+        score=58.9,
+        mode="explosion",
+        tier="ELITE",
+        snap=snap,
+        tqs=54.0,
+        confidence=58.9,
+    )
+    ok, reason, meta = check_expiry_candidate(cand, AutoTraderState(), {"SENSEX": snap})
+    assert ok is True
+    assert reason == "ok"
+    assert meta.get("expiryAlignedBypass") is True
+    mock_aligned.assert_called_once()

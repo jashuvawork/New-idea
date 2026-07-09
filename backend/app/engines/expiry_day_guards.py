@@ -459,9 +459,19 @@ def check_expiry_candidate(
         if blocked:
             return False, block_reason, meta
 
+        from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
+
+        if expiry_aligned_explosion_trade_allowed(candidate, snap)[0]:
+            meta["expiryAlignedBypass"] = True
+            return True, "ok", meta
+
+    from app.engines.pretrade_validator import candidate_trade_score
+
+    rank_score = candidate_trade_score(candidate)
     min_rank = expiry_min_rank_score(state, snapshots)
     meta["expiryMinRank"] = min_rank
-    if min_rank > 0 and score < min_rank:
+    meta["rankScore"] = rank_score
+    if min_rank > 0 and rank_score < min_rank:
         return False, f"expiry_rank_below_{min_rank:.0f}", meta
 
     is_worst, _, _ = predict_worst_expiry_day(state, snapshots)

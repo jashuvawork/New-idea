@@ -326,13 +326,13 @@ def chart_blocks_side(
     min_mom = settings.chart_min_momentum_pct
     override = settings.chart_override_min_score
 
-    # Hard direction conflict — never bypass with rank score (momentum surge / breadth ITM PM only).
+    # Hard direction conflict — breadth-aligned / premium-led / expiry explosion bypass.
     if side_val == "CALL" and chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
-        if breadth_aligned_bypass or premium_led_bypass:
+        if breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass:
             return False, "ok"
         return True, "chart_bearish_no_calls"
     if side_val == "PUT" and chart.direction == "BULLISH" and chart.trendStrength >= min_strength:
-        if breadth_aligned_bypass or premium_led_bypass:
+        if breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass:
             return False, "ok"
         return True, "chart_bullish_no_puts"
 

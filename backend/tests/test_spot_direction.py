@@ -155,6 +155,22 @@ def test_chart_override_allows_high_score_counter_trend(mock_settings):
 
 
 @patch("app.engines.spot_direction.get_settings")
+def test_expiry_explosion_bypass_hard_bearish_chart(mock_settings):
+    mock_settings.return_value = _settings()
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=-0.12,
+        momentum15Pct=-0.18,
+        trendStrength=42,
+    )
+    blocked, reason = chart_blocks_side(
+        Side.CALL, chart, trade_score=60, expiry_explosion_bypass=True,
+    )
+    assert not blocked
+    assert reason == "ok"
+
+
+@patch("app.engines.spot_direction.get_settings")
 def test_high_score_cannot_override_bearish_chart_direction(mock_settings):
     mock_settings.return_value = _settings()
     chart = SpotChart(
