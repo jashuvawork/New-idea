@@ -7,7 +7,7 @@ import { snapshotSignature } from './snapshotSignature';
 const API_BASE = import.meta.env.DEV
   ? ''
   : (import.meta.env.VITE_API_URL || '');
-const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 300);
+const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
 const UI_TICK_MS = Math.max(POLL_MS, 200);
 const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 50), 25);
 const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';

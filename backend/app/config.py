@@ -18,7 +18,7 @@ LATENCY_PRESETS: dict[str, dict[str, Any]] = {
         "tick_wake_debounce_ms": 15,
         "snapshot_cache_interval_ms": 150,
         "ws_snapshot_cache_interval_ms": 600,
-        "sse_heartbeat_seconds": 0.75,
+        "sse_heartbeat_seconds": 0.5,
         "tick_snapshot_interval_ms": 75,
     },
     "aggressive": {
@@ -126,7 +126,7 @@ class Settings(BaseSettings):
     tick_snapshot_seconds: int = 1  # legacy; tick_snapshot_interval_ms preferred
     market_poll_seconds_ws: int = 1  # legacy; market_poll_interval_ws_ms preferred
     sse_enabled: bool = True
-    sse_heartbeat_seconds: float = 0.75
+    sse_heartbeat_seconds: float = 0.5
 
     # Upstox rate limiting / caching
     upstox_min_request_interval_ms: int = 250

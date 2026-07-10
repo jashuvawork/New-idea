@@ -440,7 +440,7 @@ async def get_snapshots():
 
 @router.get("/stream")
 async def market_stream():
-    """Server-Sent Events — push snapshots ~1s when WebSocket feed is active."""
+    """Server-Sent Events — push snapshots ~0.5s when WebSocket feed is active."""
     settings = get_settings()
 
     async def event_generator():
