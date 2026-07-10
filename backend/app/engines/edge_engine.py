@@ -378,9 +378,18 @@ def check_edge_realtime_exit(
     ctx = trade.entryContext or {}
     extreme_hold = bool(ctx.get("extremeAllInBypass"))
     breadth_hold = is_explosion and (direction_aligned_with_breadth(trade) or extreme_hold)
+
+    from app.engines.confidence_hold import hold_until_target_active, is_confidence_runner_hold
+
+    if is_explosion and hold_until_target_active(trade, best):
+        return None, pnl_inr
+
     min_best_edge = float(get_settings().extreme_explosion_hold_min_best_points) if extreme_hold else (
         5.0 if breadth_hold else 3.0
     )
+    if is_confidence_runner_hold(trade):
+        from app.engines.confidence_hold import target_points_for_trade
+        min_best_edge = max(min_best_edge, target_points_for_trade(trade) * 0.5)
     if is_explosion and best < min_best_edge:
         return None, pnl_inr
 

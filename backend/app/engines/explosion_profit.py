@@ -391,9 +391,16 @@ def _should_skip_no_progress(trade: PaperTrade, settings) -> bool:
 
 def _adaptive_stop_min_hold(trade: PaperTrade, settings) -> int:
     """Minimum hold before adaptive SL — longer when chart/breadth support the trade."""
+    from app.engines.confidence_hold import chart_confidence_for_trade, is_confidence_runner_hold
+
     base = settings.explosion_stop_min_hold_seconds
-    ctx = trade.entryContext or {}
-    chart_conf = float(ctx.get("chartConfidence") or ctx.get("entryChartConfidence") or 0)
+    if is_confidence_runner_hold(trade):
+        conf = chart_confidence_for_trade(trade)
+        if conf >= 85:
+            return max(base, 90)
+        return max(base, 60)
+
+    chart_conf = chart_confidence_for_trade(trade)
     from app.engines.bullish_hold import direction_aligned_with_breadth
 
     if direction_aligned_with_breadth(trade) and chart_conf >= settings.all_day_min_chart_confidence:
@@ -403,28 +410,53 @@ def _adaptive_stop_min_hold(trade: PaperTrade, settings) -> int:
     return base
 
 
+def _effective_stop_points(trade: PaperTrade, stop_points: float) -> float:
+    """Chart-tuned SL from exit plan, widened for confidence-runner holds."""
+    from app.engines.confidence_hold import (
+        chart_confidence_for_trade,
+        confidence_hold_stop_multiplier,
+    )
+
+    settings = get_settings()
+    ctx = trade.entryContext or {}
+    plan_stop = float((ctx.get("exitPlan") or {}).get("stopPoints") or 0)
+    base = plan_stop if plan_stop > 0 else stop_points
+    mult = confidence_hold_stop_multiplier(trade)
+    conf = chart_confidence_for_trade(trade)
+    if conf >= 85:
+        mult = max(mult, 1.4)
+    elif conf >= settings.all_day_min_chart_confidence:
+        mult = max(mult, 1.2)
+    return round(base * mult, 2)
+
+
 def _defer_adaptive_stop(
     trade: PaperTrade,
     best: float,
     hold: float,
     settings,
 ) -> bool:
-    """
-    Give aligned high-confidence trades room to develop before SL.
-    Stops 1pt scratch exits when premium rip hasn't started yet.
-    """
-    ctx = trade.entryContext or {}
-    chart_conf = float(ctx.get("chartConfidence") or ctx.get("entryChartConfidence") or 0)
+    """Defer adaptive SL while high-confidence trade works toward chart TP."""
+    from app.engines.confidence_hold import (
+        hold_until_target_active,
+        is_confidence_runner_hold,
+        chart_confidence_for_trade,
+    )
     from app.engines.bullish_hold import direction_aligned_with_breadth
 
-    if not direction_aligned_with_breadth(trade):
-        return False
-    if chart_conf < settings.all_day_min_chart_confidence:
-        return False
-    if best < 5.0 and hold < 60:
+    if hold_until_target_active(trade, best):
         return True
-    if best < 3.0 and hold < 45:
-        return True
+
+    if not is_confidence_runner_hold(trade):
+        chart_conf = chart_confidence_for_trade(trade)
+        if not direction_aligned_with_breadth(trade):
+            return False
+        if chart_conf < settings.all_day_min_chart_confidence:
+            return False
+        if best < 5.0 and hold < 60:
+            return True
+        if best < 3.0 and hold < 45:
+            return True
     return False
 
 
@@ -473,7 +505,7 @@ def evaluate_explosion_exit(
         not exit_params.adaptive_stop
         and trail_floor is None
         and hold >= settings.explosion_stop_min_hold_seconds
-        and pnl_pts <= -exit_params.stop_points
+        and pnl_pts <= -_effective_stop_points(trade, exit_params.stop_points)
     ):
         return "explosion_stop_loss", pnl_inr
 
@@ -483,23 +515,29 @@ def evaluate_explosion_exit(
     if pnl_pts >= target:
         return "explosion_target_hit", pnl_inr
 
+    from app.engines.confidence_hold import hold_until_target_active
+
     if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
-        return "explosion_trail_sl", pnl_inr
+        if not hold_until_target_active(trade, best, target_points=target):
+            return "explosion_trail_sl", pnl_inr
 
     if trail_floor is not None and pnl_pts < best * trail_keep and best >= 8:
-        return "explosion_trail_lock", pnl_inr
+        if not hold_until_target_active(trade, best, target_points=target):
+            return "explosion_trail_lock", pnl_inr
 
     if (
         pnl_pts >= exit_params.micro_target_points
         and best - pnl_pts >= settings.runner_micro_giveback_points
         and best >= settings.runner_min_best_points
     ):
-        return "explosion_micro_profit_lock", pnl_inr
+        if not hold_until_target_active(trade, best, target_points=target):
+            return "explosion_micro_profit_lock", pnl_inr
 
+    stop_floor = _effective_stop_points(trade, exit_params.stop_points)
     if (
         exit_params.adaptive_stop
         and hold >= _adaptive_stop_min_hold(trade, settings)
-        and pnl_pts <= -exit_params.stop_points
+        and pnl_pts <= -stop_floor
         and not _defer_adaptive_stop(trade, best, hold, settings)
     ):
         return "adaptive_stop_loss", pnl_inr
@@ -507,9 +545,17 @@ def evaluate_explosion_exit(
     if _should_skip_no_progress(trade, settings):
         pass
     elif hold >= _no_progress_limit_seconds(trade, settings) and best < exit_params.trail_arm_points:
-        return "explosion_no_progress", pnl_inr
+        from app.engines.confidence_hold import hold_until_target_active
+
+        if not hold_until_target_active(trade, best, target_points=target):
+            return "explosion_no_progress", pnl_inr
 
     max_hold = 420 if best >= settings.runner_min_best_points else (360 if event_tier == "ELITE" or best >= 15 else 300)
+    from app.engines.confidence_hold import confidence_hold_max_seconds
+
+    conf_max = confidence_hold_max_seconds(trade)
+    if conf_max > 0:
+        max_hold = max(max_hold, conf_max)
     ctx = trade.entryContext or {}
     if ctx.get("afternoonCapture"):
         max_hold = max(max_hold, settings.afternoon_capture_exit_max_hold_seconds)

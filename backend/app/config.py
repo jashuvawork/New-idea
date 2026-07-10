@@ -284,6 +284,13 @@ class Settings(BaseSettings):
     high_confidence_trail_keep_ratio: float = 0.55
     high_confidence_reentry_cooldown_seconds: int = 600
     high_confidence_reentry_score_uplift: float = 5.0
+    # Chart-confidence hold — ride to TP when MTF/chart conf is high
+    chart_confidence_hold_enabled: bool = True
+    chart_confidence_hold_min_confidence: float = 62.0
+    chart_confidence_hold_min_target_pct: float = 0.85
+    chart_confidence_hold_defer_stop_seconds: int = 180
+    chart_confidence_hold_max_seconds: int = 600
+    chart_confidence_hold_stop_mult: float = 1.35
 
     # ITM / ATM / OTM strike selection (AUTO = regime-based)
     moneyness_selection_enabled: bool = True

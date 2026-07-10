@@ -270,7 +270,10 @@ def evaluate_exit(
         return "scalp_trail_sl", pnl_inr
 
     if trail_floor is None and hold_seconds >= min_hold and pnl_pts <= -profile.stopPoints:
-        return "simple_stop_loss", pnl_inr
+        from app.engines.confidence_hold import hold_until_target_active
+
+        if not hold_until_target_active(trade, best):
+            return "simple_stop_loss", pnl_inr
 
     if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
         return "simple_emergency_inr_stop", pnl_inr

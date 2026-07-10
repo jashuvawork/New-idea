@@ -356,14 +356,19 @@ def evaluate_adaptive_explosion_exit(
     min_arm = plan.trailArmPoints
     ctx = trade.entryContext or {}
     extreme_hold = bool(ctx.get("extremeAllInBypass"))
+    from app.engines.confidence_hold import hold_until_target_active, is_confidence_runner_hold
+
     if trade.strategyType == StrategyType.EXPLOSIVE:
         if direction_aligned_with_breadth(trade):
             min_arm = max(min_arm, 4.0)
         elif extreme_hold:
             min_arm = max(min_arm, float(get_settings().extreme_explosion_hold_min_best_points))
+        if is_confidence_runner_hold(trade):
+            min_arm = max(min_arm, plan.targetPoints * 0.45)
 
     if best >= min_arm and pnl_pts < best * plan.trailKeepRatio:
-        return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier
+        if not hold_until_target_active(trade, best, target_points=plan.targetPoints):
+            return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier
 
     return None, pnl_pts * trade.lots * lot_multiplier
 
