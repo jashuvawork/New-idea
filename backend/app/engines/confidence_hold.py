@@ -171,6 +171,8 @@ def half_tp_giveback_exit(
     target_points: Optional[float] = None,
 ) -> bool:
     """After half-TP touched, exit on meaningful giveback (e.g. 12pt best → 1pt)."""
+    if not is_confidence_runner_hold(trade):
+        return False
     if pnl_pts <= 0 or not half_tp_reached(trade, best, target_points=target_points):
         return False
     settings = get_settings()
