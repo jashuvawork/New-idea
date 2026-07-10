@@ -706,6 +706,8 @@ def validate_candidate(
 
     if all_in or high_mover:
         meta["pretradePassed"] = True
+        if all_in:
+            meta["extremeAllInBypass"] = True
         return True, "extreme_all_in_bypass" if all_in else "high_mover_elite_bypass", meta
 
     if not side_aligned_with_breadth(side_val, snap.breadth.bias) and not premium_bypass:
