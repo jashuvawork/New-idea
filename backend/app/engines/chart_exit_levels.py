@@ -500,6 +500,11 @@ def merge_chart_into_exit_plan(
 
     merged["targetPoints"] = _clamp_chart_target_pts(float(merged["targetPoints"]), entry_premium)
     merged["targetPoints2"] = _clamp_chart_target_pts(levels.targetPoints2, entry_premium, is_tp2=True)
+    settings = get_settings()
+    merged["targetPointsHalf"] = round(
+        float(merged["targetPoints"]) * settings.chart_confidence_half_tp_lock_pct,
+        2,
+    )
     merged = _stamp_entry_baselines(merged)
     merged["chartConfidence"] = levels.confidence
     merged["chartExitSources"] = levels.sources
@@ -711,6 +716,11 @@ def update_live_chart_trail(
     merged["stopPoints"] = tuning.stopPoints
     merged["targetPoints"] = tuning.targetPoints
     merged["targetPoints2"] = tuning.targetPoints2
+    merged["targetPointsHalf"] = round(
+        float(plan_dict.get("entryTargetPoints") or tuning.targetPoints)
+        * settings.chart_confidence_half_tp_lock_pct,
+        2,
+    )
     merged["trailArmPoints"] = tuning.trailArmPoints
     merged["trailKeepRatio"] = tuning.trailKeepRatio
     merged["entryTargetPoints"] = plan_dict.get("entryTargetPoints", tuning.targetPoints)

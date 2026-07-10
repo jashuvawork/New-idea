@@ -125,6 +125,63 @@ def hold_until_target_active(
     return best < floor
 
 
+def half_tp_floor_for_trade(
+    trade: PaperTrade,
+    *,
+    target_points: Optional[float] = None,
+) -> float:
+    """Premium points at 50% of chart TP — profit-lock milestone."""
+    settings = get_settings()
+    target = target_points if target_points is not None else target_points_for_trade(trade)
+    half_pct = float(getattr(settings, "chart_confidence_half_tp_lock_pct", 0.50) or 0.50)
+    return max(settings.runner_min_best_points, target * half_pct)
+
+
+def half_tp_reached(
+    trade: PaperTrade,
+    best: float,
+    *,
+    target_points: Optional[float] = None,
+) -> bool:
+    return best >= half_tp_floor_for_trade(trade, target_points=target_points)
+
+
+def should_defer_profit_lock(
+    trade: PaperTrade,
+    best: float,
+    *,
+    target_points: Optional[float] = None,
+) -> bool:
+    """
+    Block micro/trail profit locks while working toward full chart TP.
+    Once best crosses half-TP (e.g. 10pt on 20pt target), allow locks.
+    """
+    if not is_confidence_runner_hold(trade):
+        return False
+    if half_tp_reached(trade, best, target_points=target_points):
+        return False
+    return hold_until_target_active(trade, best, target_points=target_points)
+
+
+def half_tp_giveback_exit(
+    trade: PaperTrade,
+    best: float,
+    pnl_pts: float,
+    *,
+    target_points: Optional[float] = None,
+) -> bool:
+    """After half-TP touched, exit on meaningful giveback (e.g. 12pt best → 1pt)."""
+    if pnl_pts <= 0 or not half_tp_reached(trade, best, target_points=target_points):
+        return False
+    settings = get_settings()
+    giveback = best - pnl_pts
+    min_giveback = max(
+        settings.scalp_micro_giveback_points,
+        best * float(getattr(settings, "chart_confidence_half_tp_giveback_ratio", 0.40) or 0.40),
+    )
+    return giveback >= min_giveback
+
+
 def confidence_hold_max_seconds(trade: PaperTrade) -> int:
     settings = get_settings()
     if not is_confidence_runner_hold(trade):

@@ -288,6 +288,8 @@ class Settings(BaseSettings):
     chart_confidence_hold_enabled: bool = True
     chart_confidence_hold_min_confidence: float = 62.0
     chart_confidence_hold_min_target_pct: float = 0.85
+    chart_confidence_half_tp_lock_pct: float = 0.50
+    chart_confidence_half_tp_giveback_ratio: float = 0.40
     chart_confidence_hold_defer_stop_seconds: int = 180
     chart_confidence_hold_max_seconds: int = 600
     chart_confidence_hold_stop_mult: float = 1.35

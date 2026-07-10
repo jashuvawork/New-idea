@@ -515,14 +515,21 @@ def evaluate_explosion_exit(
     if pnl_pts >= target:
         return "explosion_target_hit", pnl_inr
 
-    from app.engines.confidence_hold import hold_until_target_active
+    from app.engines.confidence_hold import (
+        half_tp_giveback_exit,
+        hold_until_target_active,
+        should_defer_profit_lock,
+    )
+
+    if half_tp_giveback_exit(trade, best, pnl_pts, target_points=target):
+        return "explosion_half_tp_profit_lock", pnl_inr
 
     if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
-        if not hold_until_target_active(trade, best, target_points=target):
+        if not should_defer_profit_lock(trade, best, target_points=target):
             return "explosion_trail_sl", pnl_inr
 
     if trail_floor is not None and pnl_pts < best * trail_keep and best >= 8:
-        if not hold_until_target_active(trade, best, target_points=target):
+        if not should_defer_profit_lock(trade, best, target_points=target):
             return "explosion_trail_lock", pnl_inr
 
     if (
@@ -530,7 +537,7 @@ def evaluate_explosion_exit(
         and best - pnl_pts >= settings.runner_micro_giveback_points
         and best >= settings.runner_min_best_points
     ):
-        if not hold_until_target_active(trade, best, target_points=target):
+        if not should_defer_profit_lock(trade, best, target_points=target):
             return "explosion_micro_profit_lock", pnl_inr
 
     stop_floor = _effective_stop_points(trade, exit_params.stop_points)
