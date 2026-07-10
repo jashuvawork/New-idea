@@ -708,6 +708,8 @@ class Settings(BaseSettings):
     chart_exit_levels_enabled: bool = True
     chart_exit_refresh_seconds: int = 30
     chart_trail_tune_seconds: int = 5
+    chart_exit_max_target_points: float = 80.0
+    chart_exit_max_index_structure_pct: float = 0.04
     chart_confidence_trail_enabled: bool = True
     all_day_high_quality_enabled: bool = True
     all_day_min_chart_confidence: float = 62.0

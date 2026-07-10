@@ -94,8 +94,13 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
             const brokerId = t.entryContext?.brokerOrderId as string | undefined;
             const execChart = t.entryContext?.executionChart as ExecutionChartContext | undefined;
             const sl = plan?.stopPct ? `−${plan.stopPct}%` : plan?.stopPoints ? `−${Number(plan.stopPoints).toFixed(1)}pt` : null;
-            const tp = plan?.targetPct ? `+${plan.targetPct}%` : plan?.targetPoints ? `+${Number(plan.targetPoints).toFixed(1)}pt` : null;
-            const tp2 = plan?.targetPoints2 ? ` / +${Number(plan.targetPoints2).toFixed(1)}pt` : '';
+            const fmtTp = (v: unknown) => {
+              const n = Number(v);
+              if (!Number.isFinite(n) || n <= 0 || n > 500) return null;
+              return `+${n.toFixed(1)}pt`;
+            };
+            const tp = plan?.targetPct ? `+${plan.targetPct}%` : fmtTp(plan?.targetPoints);
+            const tp2 = fmtTp(plan?.targetPoints2) ? ` / ${fmtTp(plan?.targetPoints2)}` : '';
             const trailKeep = plan?.trailKeepRatio != null ? `${(Number(plan.trailKeepRatio) * 100).toFixed(0)}%` : null;
             const chartConf = plan?.chartConfidenceLive ?? plan?.chartConfidence;
             const chartDelta = plan?.chartConfidenceDelta;
