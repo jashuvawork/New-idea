@@ -244,17 +244,67 @@ def chart_trade_confidence(
     return round(min(95.0, max(20.0, score)), 1), sources[:16]
 
 
+def _resolve_index_spot(snap: SymbolSnapshot) -> float:
+    """Index spot for pivot/fib structure — reject option-premium scale values."""
+    candidates: list[float] = []
+    if snap.spotChart and float(snap.spotChart.spot or 0) > 500:
+        candidates.append(float(snap.spotChart.spot))
+    for raw in (snap.spot, snap.atmStrike):
+        v = float(raw or 0)
+        if v > 500:
+            candidates.append(v)
+    return max(candidates) if candidates else 0.0
+
+
+def _valid_index_structure_level(level: float, index_spot: float) -> bool:
+    """Pivot/fib levels must be index-scale and near current spot."""
+    if level <= 0 or index_spot <= 0:
+        return False
+    if index_spot > 1000 and level < 500:
+        return False
+    settings = get_settings()
+    max_pct = float(getattr(settings, "chart_exit_max_index_structure_pct", 0.04) or 0.04)
+    max_move = max(250.0, index_spot * max_pct)
+    return abs(level - index_spot) <= max_move
+
+
+def _clamp_chart_target_pts(
+    pts: float,
+    entry_premium: float,
+    *,
+    is_tp2: bool = False,
+) -> float:
+    settings = get_settings()
+    cap = float(getattr(settings, "chart_exit_max_target_points", 80.0) or 80.0)
+    prem_cap = max(12.0, entry_premium * (0.90 if is_tp2 else 0.65))
+    return round(min(pts, cap, prem_cap), 2)
+
+
+def _stamp_entry_baselines(plan_dict: dict[str, Any]) -> dict[str, Any]:
+    """Freeze entry SL/TP baselines so live tuning does not compound each cycle."""
+    stamped = dict(plan_dict)
+    if "entryTargetPoints" not in stamped and stamped.get("targetPoints") is not None:
+        stamped["entryTargetPoints"] = float(stamped["targetPoints"])
+    if "entryTargetPoints2" not in stamped and stamped.get("targetPoints2") is not None:
+        stamped["entryTargetPoints2"] = float(stamped["targetPoints2"])
+    if "entryStopPoints" not in stamped and stamped.get("stopPoints") is not None:
+        stamped["entryStopPoints"] = float(stamped["stopPoints"])
+    return stamped
+
+
 def _index_dist_to_premium_pts(
-    spot: float,
+    index_spot: float,
     index_distance: float,
     entry_premium: float,
 ) -> float:
     """Rough ATM option sensitivity: index move → premium points."""
-    if spot <= 0 or index_distance <= 0:
+    if index_spot <= 0 or index_distance <= 0:
         return 0.0
-    pct = index_distance / spot
-    leverage = max(1.8, min(4.5, entry_premium / 40.0))
-    return max(1.0, pct * spot * 0.45 * leverage / max(spot * 0.001, 1.0))
+    settings = get_settings()
+    max_move = max(250.0, index_spot * float(getattr(settings, "chart_exit_max_index_structure_pct", 0.04) or 0.04))
+    dist = min(index_distance, max_move)
+    ratio = max(0.20, min(0.70, (entry_premium / max(index_spot, 1000.0)) * 8.0))
+    return max(1.0, round(dist * ratio, 2))
 
 
 def _structure_stop_pts(
@@ -272,24 +322,24 @@ def _structure_stop_pts(
     if side_v == "PUT":
         for key in ("R1", "R2", "P"):
             lvl = pivots.get(key)
-            if lvl and float(lvl) > spot:
+            if lvl and float(lvl) > spot and _valid_index_structure_level(float(lvl), spot):
                 candidates.append(float(lvl) - spot)
         fib = analysis.fibonacci or {}
         retr = fib.get("retracement") or {}
         for price in retr.values():
             p = float(price)
-            if p > spot:
+            if p > spot and _valid_index_structure_level(p, spot):
                 candidates.append(p - spot)
     else:
         for key in ("S1", "S2", "P"):
             lvl = pivots.get(key)
-            if lvl and float(lvl) < spot:
+            if lvl and float(lvl) < spot and _valid_index_structure_level(float(lvl), spot):
                 candidates.append(spot - float(lvl))
         fib = analysis.fibonacci or {}
         retr = fib.get("retracement") or {}
         for price in retr.values():
             p = float(price)
-            if p < spot:
+            if p < spot and _valid_index_structure_level(p, spot):
                 candidates.append(spot - p)
 
     if not candidates:
@@ -312,20 +362,20 @@ def _structure_target_pts(
     if side_v == "PUT":
         for key in ("S1", "S2", "S3"):
             lvl = pivots.get(key)
-            if lvl and float(lvl) < spot:
+            if lvl and float(lvl) < spot and _valid_index_structure_level(float(lvl), spot):
                 t1_candidates.append(spot - float(lvl))
         for price in ext.values():
             p = float(price)
-            if p < spot:
+            if p < spot and _valid_index_structure_level(p, spot):
                 t2_candidates.append(spot - p)
     else:
         for key in ("R1", "R2", "R3"):
             lvl = pivots.get(key)
-            if lvl and float(lvl) > spot:
+            if lvl and float(lvl) > spot and _valid_index_structure_level(float(lvl), spot):
                 t1_candidates.append(float(lvl) - spot)
         for price in ext.values():
             p = float(price)
-            if p > spot:
+            if p > spot and _valid_index_structure_level(p, spot):
                 t2_candidates.append(p - spot)
 
     tp1 = _index_dist_to_premium_pts(spot, min(t1_candidates), entry_premium) if t1_candidates else 0.0
@@ -348,7 +398,7 @@ def compute_chart_exit_levels(
     settings = get_settings()
     confidence, sources = chart_trade_confidence(snap, side)
     side_v = _side_val(side)
-    spot = float(snap.spot or snap.atmStrike or 0)
+    spot = _resolve_index_spot(snap)
 
     stop = base_stop
     target = base_target
@@ -404,8 +454,8 @@ def compute_chart_exit_levels(
     stop_cap = max(8.0, entry_premium * 0.12)
     return ChartExitLevels(
         stopPoints=round(min(stop_cap, max(stop_floor, stop)), 2),
-        targetPoints=round(max(base_target * 0.9, target), 2),
-        targetPoints2=round(max(target, target2), 2),
+        targetPoints=_clamp_chart_target_pts(max(base_target * 0.9, target), entry_premium),
+        targetPoints2=_clamp_chart_target_pts(max(target, target2), entry_premium, is_tp2=True),
         trailArmPoints=round(trail_arm, 2),
         trailKeepRatio=round(trail_keep, 2),
         trailStepPoints=round(trail_step, 2),
@@ -448,7 +498,9 @@ def merge_chart_into_exit_plan(
         chart_val = float(getattr(levels, key))
         merged[key] = round(base_val * (1 - weight) + chart_val * weight, 2)
 
-    merged["targetPoints2"] = levels.targetPoints2
+    merged["targetPoints"] = _clamp_chart_target_pts(float(merged["targetPoints"]), entry_premium)
+    merged["targetPoints2"] = _clamp_chart_target_pts(levels.targetPoints2, entry_premium, is_tp2=True)
+    merged = _stamp_entry_baselines(merged)
     merged["chartConfidence"] = levels.confidence
     merged["chartExitSources"] = levels.sources
     merged["promoteToTrailing"] = levels.promoteToTrailing
@@ -488,9 +540,14 @@ def compute_live_chart_trail_tuning(
     Low / fading confidence → tighter SL, earlier trail arm, higher keep ratio.
     """
     settings = get_settings()
-    base_stop = float(plan_dict.get("stopPoints", 3.0))
-    base_target = float(plan_dict.get("targetPoints", 6.0))
-    base_target2 = float(plan_dict.get("targetPoints2", base_target * 1.5))
+    plan_dict = _stamp_entry_baselines(plan_dict)
+    base_stop, base_target, base_target2 = (
+        float(plan_dict.get("entryStopPoints") or plan_dict.get("stopPoints", 3.0)),
+        float(plan_dict.get("entryTargetPoints") or plan_dict.get("targetPoints", 6.0)),
+        float(plan_dict.get("entryTargetPoints2") or plan_dict.get("targetPoints2", 0) or 0),
+    )
+    if base_target2 <= 0:
+        base_target2 = base_target * 1.5
     base_arm = float(plan_dict.get("trailArmPoints", 3.0))
     base_keep = float(plan_dict.get("trailKeepRatio", 0.60))
 
@@ -559,8 +616,8 @@ def compute_live_chart_trail_tuning(
         trailArmPoints=round(max(1.0, arm), 2),
         trailKeepRatio=round(min(0.88, max(0.45, keep)), 3),
         stopPoints=round(min(stop_cap, max(settings.scalp_stop_min_points, stop)), 2),
-        targetPoints=round(max(base_target * 0.85, target), 2),
-        targetPoints2=round(max(target, target2), 2),
+        targetPoints=_clamp_chart_target_pts(max(base_target * 0.85, target), entry_premium),
+        targetPoints2=_clamp_chart_target_pts(max(target, target2), entry_premium, is_tp2=True),
         tighten=tighten,
         letRun=let_run,
         sources=sources,
@@ -592,16 +649,16 @@ def update_live_chart_trail(
         except (TypeError, ValueError):
             pass
 
-    plan_dict = dict(ctx.get("exitPlan") or {})
+    plan_dict = _stamp_entry_baselines(dict(ctx.get("exitPlan") or {}))
     if not plan_dict:
-        plan_dict = {
+        plan_dict = _stamp_entry_baselines({
             "stopPoints": settings.scalp_stop_points,
             "targetPoints": settings.scalp_target_points,
             "trailArmPoints": settings.scalp_trail_arm_points,
             "trailKeepRatio": settings.scalp_trail_keep_ratio,
             "trailStepPoints": settings.scalp_trail_step_points,
             "microTargetPoints": settings.enhanced_micro_target_points,
-        }
+        })
 
     entry_conf = float(
         ctx.get("entryChartConfidence")
@@ -656,6 +713,9 @@ def update_live_chart_trail(
     merged["targetPoints2"] = tuning.targetPoints2
     merged["trailArmPoints"] = tuning.trailArmPoints
     merged["trailKeepRatio"] = tuning.trailKeepRatio
+    merged["entryTargetPoints"] = plan_dict.get("entryTargetPoints", tuning.targetPoints)
+    merged["entryTargetPoints2"] = plan_dict.get("entryTargetPoints2", tuning.targetPoints2)
+    merged["entryStopPoints"] = plan_dict.get("entryStopPoints", tuning.stopPoints)
     merged["chartConfidence"] = live_conf
     merged["chartConfidenceLive"] = live_conf
     merged["chartConfidenceEntry"] = entry_conf
@@ -723,16 +783,16 @@ def refresh_open_trade_chart_plan(
         except (TypeError, ValueError):
             pass
 
-    plan_dict = dict(ctx.get("exitPlan") or {})
+    plan_dict = _stamp_entry_baselines(dict(ctx.get("exitPlan") or {}))
     if not plan_dict:
-        plan_dict = {
+        plan_dict = _stamp_entry_baselines({
             "stopPoints": settings.scalp_stop_points,
             "targetPoints": settings.scalp_target_points,
             "trailArmPoints": settings.scalp_trail_arm_points,
             "trailKeepRatio": settings.scalp_trail_keep_ratio,
             "trailStepPoints": settings.scalp_trail_step_points,
             "microTargetPoints": settings.enhanced_micro_target_points,
-        }
+        })
 
     merged = merge_chart_into_exit_plan(
         plan_dict, snap, trade.side, float(trade.entryPremium or 50),
