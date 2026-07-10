@@ -28,6 +28,7 @@ from app.engines.adaptive_exits import (
 )
 from app.engines.chart_exit_levels import refresh_open_trade_chart_plan, update_live_chart_trail
 from app.engines.capital_allocator import (
+    clamp_lots,
     compute_lots,
     compute_session_pnl,
     get_capital_snapshot,
@@ -429,6 +430,9 @@ async def _open_from_candidate(
     lots = scale_lots_by_edge(lots, edge)
     if lots <= 0:
         return False, "edge_lot_scale_zero"
+    if settings.lot_size_multiplier > 1.0:
+        lots = max(1, int(lots * settings.lot_size_multiplier))
+    lots = clamp_lots(lots, symbol, fill_premium)
     lot_mult = lot_multiplier(symbol)
 
     ok, risk_reason = _risk_engine.check_new_entry(

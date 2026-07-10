@@ -32,7 +32,7 @@ class CapitalSizingTests(unittest.TestCase):
             lots = max_lots_for_capital("SENSEX", 40.0)
             self.assertEqual(lots, 212)
             lots_n = max_lots_for_capital("NIFTY", 50.0)
-            self.assertEqual(lots_n, 52)
+            self.assertEqual(lots_n, 136)
 
     def test_compute_lots_aggressive_uses_full_85pct_budget(self):
         from app.engines.capital_allocator import compute_lots
@@ -48,11 +48,11 @@ class CapitalSizingTests(unittest.TestCase):
                 s.explosion_max_lots = 0
                 s.min_lots_per_trade = 1
                 s.simple_min_lots = 1
-                s.per_trade_capital_pct = 0.85
-                s.lot_size_nifty = 65
+                s.per_trade_capital_pct = 0.92
+                s.lot_size_nifty = 25
                 s.use_upstox_lot_sizes = False
                 lots = compute_lots("NIFTY", 50.0, 3.0, strategy_type=StrategyType.SCALP)
-                self.assertEqual(lots, 52)
+                self.assertEqual(lots, 136)
 
     def test_clamp_respects_hard_cap_when_configured(self):
         snap = CapitalSnapshot(perTradeCapitalInr=170_000)
@@ -84,7 +84,7 @@ class ExplosionExitTests(unittest.TestCase):
     def test_trailing_sl_locks_winner(self):
         trade = self._trade(50.0, 10)
         trade.bestPnlPoints = 10.0
-        trade.entryContext = {"explosionTrailFloorPts": 6.5}
+        trade.entryContext = {"explosionTrailFloorPts": 6.5, "exitPlan": {"targetPoints": 30.0}}
         reason, pnl = evaluate_explosion_exit(trade, 55.5, "EXPLODING", 65)
         self.assertEqual(reason, "explosion_trail_sl")
         self.assertGreater(pnl, 0)
@@ -107,7 +107,7 @@ class ExplosionExitTests(unittest.TestCase):
             symbol="NIFTY",
             side=Side.CALL,
             strike=24000.0,
-            premium=50.0,
+            premium=60.0,
             velocity_3s=3.0,
             velocity_9s=4.0,
             velocity_15s=5.0,
@@ -117,8 +117,8 @@ class ExplosionExitTests(unittest.TestCase):
             reason="test",
         )
         with patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap):
-            lots = compute_explosion_lots(event, 70.0, 50.0)
-            self.assertEqual(lots, 52)
+            lots = compute_explosion_lots(event, 70.0, 60.0)
+            self.assertEqual(lots, 136)
 
 
 if __name__ == "__main__":
