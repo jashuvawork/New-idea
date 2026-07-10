@@ -99,8 +99,11 @@ def can_run_tick_fast() -> bool:
 def latency_stats() -> dict[str, Any]:
     settings = get_settings()
     return {
+        "latencyMode": settings.latency_mode,
         "tickFastExitEnabled": settings.tick_fast_exit_enabled,
         "entryScanIntervalMs": settings.entry_scan_interval_ms,
+        "expiryEntryScanIntervalMs": settings.expiry_entry_scan_interval_ms,
+        "explosionOpenScanIntervalMs": settings.explosion_open_scan_interval_ms,
         "marketPollIntervalWsMs": settings.market_poll_interval_ws_ms,
         "marketPollIntervalMs": settings.market_poll_interval_ms,
         "tickSnapshotIntervalMs": settings.tick_snapshot_interval_ms,

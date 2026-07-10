@@ -1,10 +1,39 @@
 """NexusQuant configuration — all settings from environment."""
 
+import os
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Cadence presets — explicit env vars (e.g. ENTRY_SCAN_INTERVAL_MS) override preset values.
+LATENCY_PRESETS: dict[str, dict[str, Any]] = {
+    "low": {
+        "market_poll_interval_ms": 300,
+        "market_poll_interval_ws_ms": 75,
+        "entry_scan_interval_ms": 1000,
+        "expiry_entry_scan_interval_ms": 500,
+        "explosion_open_scan_interval_ms": 750,
+        "tick_wake_debounce_ms": 15,
+        "snapshot_cache_interval_ms": 150,
+        "ws_snapshot_cache_interval_ms": 600,
+        "sse_heartbeat_seconds": 0.75,
+        "tick_snapshot_interval_ms": 75,
+    },
+    "aggressive": {
+        "market_poll_interval_ms": 250,
+        "market_poll_interval_ws_ms": 50,
+        "entry_scan_interval_ms": 500,
+        "expiry_entry_scan_interval_ms": 350,
+        "explosion_open_scan_interval_ms": 400,
+        "tick_wake_debounce_ms": 10,
+        "snapshot_cache_interval_ms": 100,
+        "ws_snapshot_cache_interval_ms": 400,
+        "sse_heartbeat_seconds": 0.5,
+        "tick_snapshot_interval_ms": 50,
+    },
+}
 
 
 class Settings(BaseSettings):
@@ -35,6 +64,9 @@ class Settings(BaseSettings):
     paper_trading: bool = True
     auto_trading_enabled: bool = True
     shadow_trade_all_signals: bool = True
+
+    # Latency profile — normal uses field defaults; low/aggressive apply cadence presets
+    latency_mode: Literal["normal", "low", "aggressive"] = "low"
 
     # Data cadence — sub-second when WebSocket active; ms intervals override *_seconds
     market_poll_seconds: int = 1
@@ -711,6 +743,23 @@ class Settings(BaseSettings):
     swing_max_loss_inr: float = 25_000
 
 
+def _with_latency_presets(settings: Settings) -> Settings:
+    """Apply cadence presets unless individual env vars are set explicitly."""
+    if settings.latency_mode == "normal":
+        return settings
+    preset = LATENCY_PRESETS.get(settings.latency_mode)
+    if not preset:
+        return settings
+    updates: dict[str, Any] = {}
+    for key, value in preset.items():
+        env_key = key.upper()
+        if env_key not in os.environ:
+            updates[key] = value
+    if updates:
+        return settings.model_copy(update=updates)
+    return settings
+
+
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return _with_latency_presets(Settings())
