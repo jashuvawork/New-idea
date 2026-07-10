@@ -389,6 +389,45 @@ def _should_skip_no_progress(trade: PaperTrade, settings) -> bool:
     return False
 
 
+def _adaptive_stop_min_hold(trade: PaperTrade, settings) -> int:
+    """Minimum hold before adaptive SL — longer when chart/breadth support the trade."""
+    base = settings.explosion_stop_min_hold_seconds
+    ctx = trade.entryContext or {}
+    chart_conf = float(ctx.get("chartConfidence") or ctx.get("entryChartConfidence") or 0)
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if direction_aligned_with_breadth(trade) and chart_conf >= settings.all_day_min_chart_confidence:
+        return max(base, 45)
+    if chart_conf >= 85:
+        return max(base, 35)
+    return base
+
+
+def _defer_adaptive_stop(
+    trade: PaperTrade,
+    best: float,
+    hold: float,
+    settings,
+) -> bool:
+    """
+    Give aligned high-confidence trades room to develop before SL.
+    Stops 1pt scratch exits when premium rip hasn't started yet.
+    """
+    ctx = trade.entryContext or {}
+    chart_conf = float(ctx.get("chartConfidence") or ctx.get("entryChartConfidence") or 0)
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if not direction_aligned_with_breadth(trade):
+        return False
+    if chart_conf < settings.all_day_min_chart_confidence:
+        return False
+    if best < 5.0 and hold < 60:
+        return True
+    if best < 3.0 and hold < 45:
+        return True
+    return False
+
+
 def _no_progress_limit_seconds(trade: PaperTrade, settings) -> int:
     """How long to wait before no-progress exit — longer on aligned bullish holds."""
     if not settings.explosion_no_progress_enabled:
@@ -459,8 +498,9 @@ def evaluate_explosion_exit(
 
     if (
         exit_params.adaptive_stop
-        and hold >= settings.explosion_stop_min_hold_seconds
+        and hold >= _adaptive_stop_min_hold(trade, settings)
         and pnl_pts <= -exit_params.stop_points
+        and not _defer_adaptive_stop(trade, best, hold, settings)
     ):
         return "adaptive_stop_loss", pnl_inr
 

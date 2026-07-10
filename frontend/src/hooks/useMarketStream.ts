@@ -204,7 +204,7 @@ export function useMarketStream() {
         }
         return { ...prev, stalenessMs: stale, connectionQuality: quality, lastLatencyMs: latency };
       });
-      if (SSE_ENABLED && !sseFailed.current && stale > 2500) {
+      if (SSE_ENABLED && stale > 2500) {
         void fetchSnapshot();
       }
     }, UI_TICK_MS);
@@ -212,77 +212,106 @@ export function useMarketStream() {
   }, [fetchSnapshot]);
 
   useEffect(() => {
-    if (!SSE_ENABLED || sseFailed.current) {
+    if (!SSE_ENABLED) {
       fetchSnapshot();
       const id = setInterval(fetchSnapshot, POLL_MS);
       return () => clearInterval(id);
     }
 
-    const url = `${API_BASE}/api/market/stream`;
-    const es = new EventSource(url);
-    let opened = false;
+    let es: EventSource | null = null;
     let pollId: ReturnType<typeof setInterval> | null = null;
+    let retryId: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+    let retryMs = 1500;
 
-    es.onopen = () => {
-      opened = true;
-      setLoading(false);
-      setMetrics((prev) => (
-        prev.streamMode === 'sse' && prev.connectionQuality === 'good'
-          ? prev
-          : { ...prev, streamMode: 'sse', connectionQuality: 'good' }
-      ));
-    };
-
-    es.onmessage = (ev) => {
-      const now = performance.now();
-      lastSuccessAt.current = new Date();
-      if (now - lastSseApplyAt.current < SSE_MIN_INTERVAL_MS) {
-        return;
-      }
-      lastSseApplyAt.current = now;
-      const started = performance.now();
-      try {
-        const json = JSON.parse(ev.data) as MultiSnapshot;
-        applySnapshot(
-          json,
-          started,
-          latencyHistory,
-          lastSuccessAt,
-          lastSignature,
-          'sse',
-          POLL_MS,
-          setData,
-          setError,
-          setMetrics,
-        );
-        setLoading(false);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Invalid stream payload');
-      }
-    };
-
-    es.onerror = () => {
-      es.close();
-      if (!opened) {
-        sseFailed.current = true;
-        setMetrics((prev) => ({ ...prev, streamMode: 'poll' }));
-        fetchSnapshot();
-        pollId = setInterval(fetchSnapshot, POLL_MS);
-        return;
-      }
-      sseFailed.current = true;
-      setMetrics((prev) => ({
-        ...prev,
-        streamMode: 'poll',
-        connectionQuality: prev.stalenessMs > 15_000 ? 'offline' : 'slow',
-      }));
+    const startPollFallback = () => {
+      if (pollId) return;
       fetchSnapshot();
       pollId = setInterval(fetchSnapshot, POLL_MS);
+      setMetrics((prev) => ({ ...prev, streamMode: 'poll' }));
     };
 
+    const stopPollFallback = () => {
+      if (pollId) {
+        clearInterval(pollId);
+        pollId = null;
+      }
+    };
+
+    const connectSse = () => {
+      if (disposed) return;
+      stopPollFallback();
+      const url = `${API_BASE}/api/market/stream`;
+      es = new EventSource(url);
+      let opened = false;
+
+      es.onopen = () => {
+        opened = true;
+        retryMs = 1500;
+        sseFailed.current = false;
+        setLoading(false);
+        setMetrics((prev) => ({
+          ...prev,
+          streamMode: 'sse',
+          connectionQuality: 'good',
+        }));
+      };
+
+      es.onmessage = (ev) => {
+        const now = performance.now();
+        lastSuccessAt.current = new Date();
+        if (now - lastSseApplyAt.current < SSE_MIN_INTERVAL_MS) {
+          return;
+        }
+        lastSseApplyAt.current = now;
+        const started = performance.now();
+        try {
+          const json = JSON.parse(ev.data) as MultiSnapshot;
+          applySnapshot(
+            json,
+            started,
+            latencyHistory,
+            lastSuccessAt,
+            lastSignature,
+            'sse',
+            POLL_MS,
+            setData,
+            setError,
+            setMetrics,
+          );
+          setLoading(false);
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Invalid stream payload');
+        }
+      };
+
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        if (!disposed) {
+          startPollFallback();
+          retryId = setTimeout(() => {
+            if (!disposed) connectSse();
+          }, retryMs);
+          retryMs = Math.min(retryMs * 2, 30_000);
+        }
+        if (!opened) {
+          setMetrics((prev) => ({
+            ...prev,
+            streamMode: 'poll',
+            connectionQuality: 'slow',
+          }));
+        }
+      };
+    };
+
+    connectSse();
+
     return () => {
-      es.close();
+      disposed = true;
+      es?.close();
       if (pollId) clearInterval(pollId);
+      if (retryId) clearTimeout(retryId);
     };
   }, [fetchSnapshot]);
 

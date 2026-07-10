@@ -389,7 +389,7 @@ class Settings(BaseSettings):
     execution_chart_gate_enabled: bool = True
     execution_chart_force_upstox_refresh: bool = True
     execution_chart_premium_check_enabled: bool = True
-    execution_chart_min_premium_momentum_pct: float = -0.35
+    execution_chart_min_premium_momentum_pct: float = -0.15
     execution_chart_candle_count: int = 60
 
     # Multi-timeframe pre-test (1m/5m/15m/1h/4h) before execution
