@@ -143,6 +143,7 @@ def confidence_hold_stop_multiplier(trade: PaperTrade) -> float:
     return settings.chart_confidence_hold_stop_mult
 
 
+
 def should_defer_no_progress_exit(trade: PaperTrade, best: float) -> bool:
     """Skip no-progress scratch while a high-confidence trade works toward chart TP."""
     if hold_until_target_active(trade, best):
