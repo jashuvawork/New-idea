@@ -411,9 +411,23 @@ def _adaptive_stop_min_hold(trade: PaperTrade, settings) -> int:
 
 
 def _effective_stop_points(trade: PaperTrade, stop_points: float) -> float:
-    from app.engines.confidence_hold import confidence_hold_stop_multiplier
+    """Chart-tuned SL from exit plan, widened for confidence-runner holds."""
+    from app.engines.confidence_hold import (
+        chart_confidence_for_trade,
+        confidence_hold_stop_multiplier,
+    )
 
-    return stop_points * confidence_hold_stop_multiplier(trade)
+    settings = get_settings()
+    ctx = trade.entryContext or {}
+    plan_stop = float((ctx.get("exitPlan") or {}).get("stopPoints") or 0)
+    base = plan_stop if plan_stop > 0 else stop_points
+    mult = confidence_hold_stop_multiplier(trade)
+    conf = chart_confidence_for_trade(trade)
+    if conf >= 85:
+        mult = max(mult, 1.4)
+    elif conf >= settings.all_day_min_chart_confidence:
+        mult = max(mult, 1.2)
+    return round(base * mult, 2)
 
 
 def _defer_adaptive_stop(
@@ -426,15 +440,14 @@ def _defer_adaptive_stop(
     from app.engines.confidence_hold import (
         hold_until_target_active,
         is_confidence_runner_hold,
+        chart_confidence_for_trade,
     )
+    from app.engines.bullish_hold import direction_aligned_with_breadth
 
     if hold_until_target_active(trade, best):
         return True
 
     if not is_confidence_runner_hold(trade):
-        from app.engines.confidence_hold import chart_confidence_for_trade
-        from app.engines.bullish_hold import direction_aligned_with_breadth
-
         chart_conf = chart_confidence_for_trade(trade)
         if not direction_aligned_with_breadth(trade):
             return False
