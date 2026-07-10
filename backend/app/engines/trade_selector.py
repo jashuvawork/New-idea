@@ -92,6 +92,11 @@ def _reentry_blocked(
     if blocked:
         return True, reason
     blocked, reason = instrument_in_cooldown(symbol, side, strike)
+    if blocked and explosion_event is not None:
+        from app.engines.extreme_explosion_moment import is_high_mover_elite_bypass
+
+        if is_high_mover_elite_bypass(event=explosion_event):
+            blocked = False
     if blocked:
         return True, reason
     if explosion_event is not None:
@@ -589,6 +594,14 @@ def find_best_entry(
         if c.mode == "explosion":
             from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
 
+            daily_move = 0.0
+            if c.explosion_event is not None:
+                daily_move = float(getattr(c.explosion_event, "daily_move_pct", 0) or 0)
+                peak = float(getattr(c.explosion_event, "peak_move_pct", 0) or 0)
+                if peak > daily_move:
+                    daily_move = peak
+            if daily_move >= settings.all_day_explosion_session_move_min_pct:
+                bonus += min(25, daily_move * 0.08)
             if is_extreme_explosion_all_in_bypass(candidate=c):
                 bonus += 35
             elif side_aligned_with_breadth(c.side, breadth_bias):
@@ -646,11 +659,17 @@ def find_best_entry(
     if chart_conf >= settings.all_day_min_chart_confidence:
         floor = min(floor, settings.all_day_min_rank_score)
     if floor > 0 and sort_key(best) < floor:
-        from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
+        from app.engines.extreme_explosion_moment import (
+            is_extreme_explosion_all_in_bypass,
+            is_high_mover_elite_bypass,
+        )
 
         if not (
             best.mode == "explosion"
-            and is_extreme_explosion_all_in_bypass(candidate=best)
+            and (
+                is_extreme_explosion_all_in_bypass(candidate=best)
+                or is_high_mover_elite_bypass(candidate=best)
+            )
         ):
             return None
     return best

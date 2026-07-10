@@ -115,6 +115,7 @@ def _effective_rank_floor(
                 notes.append(f"session_move_floor={reduced:.0f}")
 
     from app.engines.chart_exit_levels import chart_trade_confidence
+    from app.engines.extreme_explosion_moment import is_high_mover_elite_bypass
 
     chart_conf, _ = chart_trade_confidence(candidate.snap, candidate.side)
     if chart_conf >= settings.all_day_min_chart_confidence:
@@ -122,6 +123,9 @@ def _effective_rank_floor(
         if reduced < floor:
             floor = reduced
             notes.append(f"chart_quality_floor={reduced:.0f}")
+
+    if candidate.mode == "explosion" and is_high_mover_elite_bypass(candidate=candidate):
+        notes.append("high_mover_rank_bypass")
 
     return floor, notes
 
@@ -335,6 +339,35 @@ def _gate_checks(
     if not ok:
         blockers.append(reason)
 
+    # 8b — Instrument cooldown (same strike re-entry after loss)
+    from app.engines.trade_selector import _reentry_blocked
+    from app.engines.extreme_explosion_moment import is_high_mover_elite_bypass
+
+    high_mover = is_high_mover_elite_bypass(candidate=candidate, alert=alert)
+    reentry_blocked, reentry_reason = _reentry_blocked(
+        symbol,
+        candidate.side,
+        float(alert.get("strike") or 0),
+        snap,
+        explosion_event=candidate.explosion_event,
+    )
+    if reentry_blocked and not high_mover:
+        blockers.append(reentry_reason)
+        gates.append({
+            "gate": "instrument_cooldown",
+            "passed": False,
+            "detail": reentry_reason,
+            "fix": "Wait for cooldown or ELITE 95%+ session rip bypasses re-entry block",
+        })
+    elif reentry_blocked and high_mover:
+        gates.append({
+            "gate": "instrument_cooldown",
+            "passed": True,
+            "detail": f"{reentry_reason} bypassed — high-mover ELITE rip",
+        })
+    else:
+        gates.append({"gate": "instrument_cooldown", "passed": True, "detail": "ok"})
+
     # 9 — Worst day
     policy, policy_meta = session_entry_policy(state, snapshots)
     if _extreme_explosion_bypass(candidate) and policy == "BREAKOUT_ONLY":
@@ -380,6 +413,9 @@ def _gate_checks(
     if not rank_ok and expiry_trade_ok:
         rank_ok = True
         floor_notes = list(floor_notes) + [f"expiry_aligned_rank_bypass({expiry_trade_reason})"]
+    if not rank_ok and high_mover:
+        rank_ok = True
+        floor_notes = list(floor_notes) + ["high_mover_rank_bypass"]
     gates.append({
         "gate": "rank_floor",
         "passed": rank_ok,
@@ -437,6 +473,10 @@ def _fix_for_blockers(blockers: list[str]) -> str:
         return "Chart reconcile — MTF over 5m bounce"
     if "score" in b:
         return "Wait for tier upgrade to EXPLODING"
+    if "instrument_cooldown" in b:
+        return "Same-strike cooldown after loss — ELITE 95%+ session rip bypasses re-entry"
+    if "last_n" in b:
+        return "Elevated rank floor after loss cluster — ELITE 95%+ bypasses last-N gate"
     return "Review pretrade gates in Auto Trading skipped list"
 
 
@@ -536,8 +576,18 @@ def _report_summary(
             f"+{top.get('dailyMovePct', 0):.0f}% blocked by {top.get('primaryBlocker')}",
         )
     if passed and not best:
-        p = passed[0]
-        parts.append(f"{len(passed)} would pass gates but not selected as best")
+        cooldown_misses = [
+            r for r in passed
+            if any(g.get("gate") == "instrument_cooldown" and not g.get("passed") for g in r.get("gates") or [])
+        ]
+        if cooldown_misses:
+            c0 = cooldown_misses[0]
+            parts.append(
+                f"{len(passed)} pass gates but blocked by instrument cooldown "
+                f"(e.g. {c0.get('symbol')} {c0.get('strike')})",
+            )
+        else:
+            parts.append(f"{len(passed)} would pass gates but not selected as best")
     elif best:
         parts.append(f"Best: {best.symbol} {best.mode} score={best.score:.0f}")
     elif not missed and not passed:
