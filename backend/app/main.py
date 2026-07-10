@@ -152,7 +152,8 @@ async def lifespan(app: FastAPI):
     if settings.background_market_monitor_enabled:
         _background_task = asyncio.create_task(_background_monitor())
         logger.info(
-            "Background monitor: tick_fast=%s entry_scan_ms=%d debounce_ms=%d composer=%s analysis=%s",
+            "Background monitor: latency=%s tick_fast=%s entry_scan_ms=%d debounce_ms=%d composer=%s analysis=%s",
+            settings.latency_mode,
             settings.tick_fast_exit_enabled,
             settings.entry_scan_interval_ms,
             settings.tick_wake_debounce_ms,
