@@ -200,7 +200,7 @@ class Settings(BaseSettings):
     explosion_exhaustion_consolidation_v3_max: float = 1.2
     explosion_exhaustion_consolidation_v9_max: float = 2.0
     explosion_high_premium_threshold_inr: float = 90.0
-    explosion_high_premium_lot_cap: int = 10
+    explosion_high_premium_lot_cap: int = 15
 
     # Directional lock — aligned side default; CE↔PE switch only on full confirmation
     directional_side_lock_enabled: bool = True
@@ -318,7 +318,7 @@ class Settings(BaseSettings):
     expiry_evening_block_minute: int = 0
     expiry_min_rank_score: float = 62.0
     expiry_cheap_premium_threshold_inr: float = 55.0
-    expiry_cheap_premium_lot_cap: int = 45
+    expiry_cheap_premium_lot_cap: int = 55
     expiry_low_tqs_lot_cap_tqs: float = 40.0
     expiry_low_tqs_lot_cap: int = 15
     expiry_scalp_min_symbol_tqs: float = 38.0
@@ -591,7 +591,7 @@ class Settings(BaseSettings):
     # Capital / risk — 85% per trade, max lots = floor(budget / premium×lot_size)
     fallback_capital_inr: float = 200_000
     max_sizing_capital_inr: float = 200_000
-    per_trade_capital_pct: float = 0.92
+    per_trade_capital_pct: float = 0.95
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
     aggressive_min_explosion_score: int = 45
@@ -603,8 +603,8 @@ class Settings(BaseSettings):
     min_lots_per_trade: int = 1
     max_risk_per_trade_inr: float = 200_000
     min_per_trade_risk_inr: float = 3_000
-    per_trade_risk_pct: float = 0.85
-    max_exposure_pct: float = 0.85
+    per_trade_risk_pct: float = 0.95
+    max_exposure_pct: float = 0.95
     position_sl_cap_pct: float = 0.08
     position_tp_target_pct: float = 0.12
     emergency_stop_enabled: bool = False
@@ -694,7 +694,7 @@ class Settings(BaseSettings):
     use_upstox_capital_for_sizing: bool = True  # paper parity uses real margin when token present
 
     # Quantity per lot (units) — NSE/BSE contract sizes
-    lot_size_nifty: int = 25
+    lot_size_nifty: int = 65
     lot_size_banknifty: int = 30
     lot_size_sensex: int = 20
     use_upstox_lot_sizes: bool = False  # when false, env values above are authoritative
@@ -725,9 +725,9 @@ class Settings(BaseSettings):
     edge_session_pf_tighten_below: float = 1.5
     edge_min_score_for_full_size: float = 72.0
     edge_min_score_for_entry: float = 52.0
-    edge_lot_scale_min: float = 0.58
-    edge_lot_scale_max: float = 1.15
-    lot_size_multiplier: float = 1.25
+    edge_lot_scale_min: float = 0.65
+    edge_lot_scale_max: float = 1.25
+    lot_size_multiplier: float = 1.40
     edge_velocity_exhaustion_ratio: float = 0.35
     edge_rsi_overbought_exit: float = 72.0
     edge_macd_fade_exit_enabled: bool = True
