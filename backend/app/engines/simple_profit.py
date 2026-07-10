@@ -221,7 +221,13 @@ def evaluate_exit(
     best = max(trade.bestPnlPoints, pnl_pts)
 
     from app.engines.bullish_hold import direction_aligned_with_breadth
-    from app.engines.confidence_hold import confidence_exit_tuning
+    from app.engines.confidence_hold import (
+        confidence_exit_tuning,
+        confidence_hold_max_seconds,
+        hold_until_target_active,
+        scalp_no_progress_limit_seconds,
+        should_defer_no_progress_exit,
+    )
     from app.engines.psychology_hold import psychology_exit_tuning
 
     aligned_hold = direction_aligned_with_breadth(trade)
@@ -267,11 +273,10 @@ def evaluate_exit(
     )
 
     if trail_floor is not None and pnl_pts <= trail_floor and best >= arm:
-        return "scalp_trail_sl", pnl_inr
+        if not hold_until_target_active(trade, best):
+            return "scalp_trail_sl", pnl_inr
 
     if trail_floor is None and hold_seconds >= min_hold and pnl_pts <= -profile.stopPoints:
-        from app.engines.confidence_hold import hold_until_target_active
-
         if not hold_until_target_active(trade, best):
             return "simple_stop_loss", pnl_inr
 
@@ -301,7 +306,8 @@ def evaluate_exit(
     )
     if micro_ready and pnl_pts >= profile.microTargetPoints:
         if best - pnl_pts >= micro_giveback:
-            return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
+            if not hold_until_target_active(trade, best):
+                return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     if trail_floor is None and best >= arm and pnl_pts < best * runner_keep:
         min_hold_before_trail = 0
@@ -310,12 +316,20 @@ def evaluate_exit(
         if psy_tuning:
             min_hold_before_trail = max(min_hold_before_trail, psy_tuning.min_hold_before_micro_seconds)
         if hold_seconds >= min_hold_before_trail:
-            return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
+            if not hold_until_target_active(trade, best):
+                return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
-    if hold_seconds >= settings.scalp_no_progress_seconds and best <= 0:
-        return "simple_no_progress_scratch", pnl_inr
+    if hold_seconds >= scalp_no_progress_limit_seconds(trade) and best <= 0:
+        if not should_defer_no_progress_exit(trade, best):
+            return "simple_no_progress_scratch", pnl_inr
 
-    if hold_seconds >= profile.maxHoldSeconds:
+    effective_max_hold = profile.maxHoldSeconds
+    conf_max = confidence_hold_max_seconds(trade)
+    if conf_max > 0:
+        effective_max_hold = max(effective_max_hold, conf_max)
+    if hold_seconds >= effective_max_hold:
+        if hold_until_target_active(trade, best):
+            return None, pnl_inr
         if pnl_pts > 0:
             return "simple_time_profit_lock", pnl_inr
         return "simple_time_stop", pnl_inr

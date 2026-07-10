@@ -29,6 +29,7 @@ def _settings():
     s.high_confidence_trail_keep_ratio = 0.55
     s.high_confidence_reentry_cooldown_seconds = 600
     s.high_confidence_reentry_score_uplift = 5.0
+    s.chart_confidence_hold_enabled = False
     s.bullish_hold_enabled = False
     s.scalp_trail_arm_points = 4.5
     s.scalp_trail_keep_ratio = 0.65
@@ -43,6 +44,9 @@ def _settings():
     s.runner_min_best_points = 8.0
     s.runner_trail_keep_ratio = 0.7
     s.scalp_no_progress_seconds = 120
+    s.scalp_no_progress_aligned_seconds = 420
+    s.scalp_no_progress_skip_when_aligned = True
+    s.chart_confidence_hold_max_seconds = 600
     s.emergency_stop_enabled = False
     return s
 
