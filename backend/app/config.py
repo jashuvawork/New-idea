@@ -618,6 +618,8 @@ class Settings(BaseSettings):
     scalp_trail_tight_points: float = 3.0
     scalp_micro_giveback_points: float = 3.0
     scalp_no_progress_seconds: int = 150
+    scalp_no_progress_aligned_seconds: int = 420
+    scalp_no_progress_skip_when_aligned: bool = True
 
     # Daily target — 18% of capital per session (confidence-gated full limits)
     daily_profit_target_from_capital: bool = True

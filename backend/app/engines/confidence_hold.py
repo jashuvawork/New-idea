@@ -143,6 +143,43 @@ def confidence_hold_stop_multiplier(trade: PaperTrade) -> float:
     return settings.chart_confidence_hold_stop_mult
 
 
+def should_defer_no_progress_exit(trade: PaperTrade, best: float) -> bool:
+    """Skip no-progress scratch while a high-confidence trade works toward chart TP."""
+    if hold_until_target_active(trade, best):
+        return True
+    settings = get_settings()
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if is_confidence_runner_hold(trade):
+        return True
+    if not settings.scalp_no_progress_skip_when_aligned:
+        return False
+    if direction_aligned_with_breadth(trade):
+        return True
+    ctx = trade.entryContext or {}
+    if ctx.get("extremeAllInBypass"):
+        return True
+    edge = ctx.get("edgeScore") or {}
+    if edge.get("letRunners"):
+        return True
+    return False
+
+
+def scalp_no_progress_limit_seconds(trade: PaperTrade) -> int:
+    """How long to wait before scalp no-progress exit — longer on aligned holds."""
+    settings = get_settings()
+    base = settings.scalp_no_progress_seconds
+    aligned = settings.scalp_no_progress_aligned_seconds
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if is_confidence_runner_hold(trade) or direction_aligned_with_breadth(trade):
+        conf_max = confidence_hold_max_seconds(trade)
+        return max(aligned, conf_max or aligned)
+    if trade_entry_score(trade) >= 80:
+        return int(base * 1.5)
+    return base
+
+
 def apply_confidence_hold_profile(
     trade: PaperTrade,
     profile: OptimizedProfile,
