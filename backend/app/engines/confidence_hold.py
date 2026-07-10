@@ -72,6 +72,77 @@ def confidence_exit_tuning(trade: PaperTrade) -> Optional[ConfidenceExitTuning]:
     )
 
 
+def chart_confidence_for_trade(trade: PaperTrade) -> float:
+    """Best available chart confidence on the trade (live or entry)."""
+    ctx = trade.entryContext or {}
+    return max(
+        float(ctx.get("chartConfidence") or 0),
+        float(ctx.get("entryChartConfidence") or 0),
+        float((ctx.get("exitPlan") or {}).get("chartConfidence") or 0),
+    )
+
+
+def target_points_for_trade(trade: PaperTrade) -> float:
+    ctx = trade.entryContext or {}
+    plan = ctx.get("exitPlan") or {}
+    return float(plan.get("targetPoints") or plan.get("targetPoints2") or 12.0)
+
+
+def is_confidence_runner_hold(trade: PaperTrade) -> bool:
+    """
+    High chart/score confidence + aligned — hold until chart TP, not scratch exits.
+    """
+    settings = get_settings()
+    if not settings.chart_confidence_hold_enabled:
+        return is_high_confidence_trade(trade)
+
+    conf = chart_confidence_for_trade(trade)
+    score = trade_entry_score(trade)
+    if conf < settings.chart_confidence_hold_min_confidence and score < settings.high_confidence_min_score:
+        return False
+
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if direction_aligned_with_breadth(trade):
+        return True
+    if conf >= settings.all_day_min_chart_confidence + 16:
+        return True
+    return score >= settings.high_confidence_min_score + 8
+
+
+def hold_until_target_active(
+    trade: PaperTrade,
+    best: float,
+    *,
+    target_points: Optional[float] = None,
+) -> bool:
+    """True while trade should keep running toward chart/adaptive TP."""
+    if not is_confidence_runner_hold(trade):
+        return False
+    settings = get_settings()
+    target = target_points if target_points is not None else target_points_for_trade(trade)
+    floor = max(settings.runner_min_best_points, target * settings.chart_confidence_hold_min_target_pct)
+    return best < floor
+
+
+def confidence_hold_max_seconds(trade: PaperTrade) -> int:
+    settings = get_settings()
+    if not is_confidence_runner_hold(trade):
+        return 0
+    base = settings.chart_confidence_hold_max_seconds
+    conf = chart_confidence_for_trade(trade)
+    if conf >= 85:
+        return int(base * 1.25)
+    return base
+
+
+def confidence_hold_stop_multiplier(trade: PaperTrade) -> float:
+    settings = get_settings()
+    if not is_confidence_runner_hold(trade):
+        return 1.0
+    return settings.chart_confidence_hold_stop_mult
+
+
 def apply_confidence_hold_profile(
     trade: PaperTrade,
     profile: OptimizedProfile,
