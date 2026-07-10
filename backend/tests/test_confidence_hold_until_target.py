@@ -5,9 +5,12 @@ from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from app.engines.confidence_hold import (
+    half_tp_giveback_exit,
+    half_tp_reached,
     hold_until_target_active,
     is_confidence_runner_hold,
     should_defer_no_progress_exit,
+    should_defer_profit_lock,
     target_points_for_trade,
 )
 from app.engines.explosion_profit import _defer_adaptive_stop, evaluate_explosion_exit
@@ -59,6 +62,57 @@ def test_confidence_runner_hold_detected(mock_settings):
     assert hold_until_target_active(_trade(), best=110.0) is False
 
 
+@patch("app.engines.confidence_hold.get_settings")
+def test_half_tp_unlocks_profit_lock_before_full_target(mock_settings):
+    s = MagicMock()
+    s.chart_confidence_hold_enabled = True
+    s.chart_confidence_hold_min_confidence = 62.0
+    s.chart_confidence_hold_min_target_pct = 0.85
+    s.chart_confidence_half_tp_lock_pct = 0.50
+    s.chart_confidence_half_tp_giveback_ratio = 0.40
+    s.high_confidence_min_score = 72.0
+    s.all_day_min_chart_confidence = 62.0
+    s.runner_min_best_points = 5.0
+    s.scalp_micro_giveback_points = 3.0
+    mock_settings.return_value = s
+    trade = _trade()
+    trade.entryContext["exitPlan"] = {"targetPoints": 20.4, "targetPoints2": 36.5}
+    # 12pt best = past half-TP (10.2) but below full hold floor (17.3)
+    assert half_tp_reached(trade, best=12.0) is True
+    assert hold_until_target_active(trade, best=12.0) is True
+    assert should_defer_profit_lock(trade, best=12.0) is False
+    assert half_tp_giveback_exit(trade, best=12.0, pnl_pts=1.3) is True
+
+
+@patch("app.engines.psychology_hold.get_settings")
+@patch("app.engines.bullish_hold.get_settings")
+@patch("app.engines.simple_profit.get_settings")
+@patch("app.engines.confidence_hold.get_settings")
+def test_nifty_scalp_half_tp_lock_on_giveback(mock_ch, mock_sp, mock_bh, mock_psy):
+    s = _scalp_settings()
+    s.chart_confidence_half_tp_lock_pct = 0.50
+    s.chart_confidence_half_tp_giveback_ratio = 0.40
+    mock_ch.return_value = s
+    mock_sp.return_value = s
+    mock_bh.return_value.bullish_hold_enabled = False
+    mock_psy.return_value.psychology_hold_enabled = False
+
+    trade = _nifty_call_trade()
+    trade.bestPnlPoints = 11.0
+    trade.openedAt = datetime.now(IST) - timedelta(seconds=200)
+    profile = OptimizedProfile(
+        targetPoints=8.0,
+        stopPoints=3.0,
+        microTargetPoints=2.5,
+        maxHoldSeconds=300,
+        sessionLabel="normal",
+    )
+    # Entry 120, current 121.3 → +1.3pt; best was 11pt
+    reason, pnl = evaluate_exit(trade, 121.3, profile, lot_multiplier=25)
+    assert reason == "simple_half_tp_profit_lock"
+    assert pnl > 0
+
+
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.confidence_hold.get_settings")
 def test_adaptive_stop_deferred_until_target(mock_conf, mock_exp):
@@ -66,6 +120,8 @@ def test_adaptive_stop_deferred_until_target(mock_conf, mock_exp):
     s.chart_confidence_hold_enabled = True
     s.chart_confidence_hold_min_confidence = 62.0
     s.chart_confidence_hold_min_target_pct = 0.85
+    s.chart_confidence_half_tp_lock_pct = 0.50
+    s.chart_confidence_half_tp_giveback_ratio = 0.40
     s.high_confidence_min_score = 72.0
     s.all_day_min_chart_confidence = 62.0
     s.explosion_stop_min_hold_seconds = 15
@@ -130,7 +186,7 @@ def _nifty_call_trade(**ctx) -> PaperTrade:
         "entryChartConfidence": 88.0,
         "breadth": "BULLISH",
         "selectionScore": 82.0,
-        "exitPlan": {"targetPoints": 45.0, "stopPoints": 6.0, "chartConfidence": 88.0},
+        "exitPlan": {"targetPoints": 20.4, "stopPoints": 6.0, "chartConfidence": 88.0, "targetPoints2": 36.5},
     }
     base.update(ctx)
     return PaperTrade(

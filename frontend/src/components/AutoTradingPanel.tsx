@@ -99,8 +99,12 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
               if (!Number.isFinite(n) || n <= 0 || n > 500) return null;
               return `+${n.toFixed(1)}pt`;
             };
-            const tp = plan?.targetPct ? `+${plan.targetPct}%` : fmtTp(plan?.targetPoints);
-            const tp2 = fmtTp(plan?.targetPoints2) ? ` / ${fmtTp(plan?.targetPoints2)}` : '';
+            const tpHalf = fmtTp(plan?.targetPointsHalf);
+            const tpFull = fmtTp(plan?.targetPoints);
+            const tp2 = fmtTp(plan?.targetPoints2);
+            const tpLine = plan?.targetPct
+              ? `+${plan.targetPct}%`
+              : [tpHalf ? `${tpHalf}½` : null, tpFull, tp2].filter(Boolean).join(' / ');
             const trailKeep = plan?.trailKeepRatio != null ? `${(Number(plan.trailKeepRatio) * 100).toFixed(0)}%` : null;
             const chartConf = plan?.chartConfidenceLive ?? plan?.chartConfidence;
             const chartDelta = plan?.chartConfidenceDelta;
@@ -118,7 +122,7 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[9px] text-nexus-muted font-mono">
                   <span>{t.strategyType}</span>
                   {sl && <span>SL {sl}</span>}
-                  {tp && <span>TP {tp}{tp2}</span>}
+                  {tpLine && <span>TP {tpLine}</span>}
                   {trailKeep && <span>trail keep {trailKeep}</span>}
                   {chartConf != null && (
                     <span className={Number(chartConf) >= 62 ? 'text-nexus-green' : 'text-nexus-yellow'}>

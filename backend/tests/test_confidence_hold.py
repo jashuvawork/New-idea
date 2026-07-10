@@ -30,6 +30,8 @@ def _settings():
     s.high_confidence_reentry_cooldown_seconds = 600
     s.high_confidence_reentry_score_uplift = 5.0
     s.chart_confidence_hold_enabled = False
+    s.chart_confidence_half_tp_lock_pct = 0.50
+    s.chart_confidence_half_tp_giveback_ratio = 0.40
     s.bullish_hold_enabled = False
     s.scalp_trail_arm_points = 4.5
     s.scalp_trail_keep_ratio = 0.65

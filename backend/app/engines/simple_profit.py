@@ -224,9 +224,12 @@ def evaluate_exit(
     from app.engines.confidence_hold import (
         confidence_exit_tuning,
         confidence_hold_max_seconds,
+        half_tp_giveback_exit,
         hold_until_target_active,
         scalp_no_progress_limit_seconds,
         should_defer_no_progress_exit,
+        should_defer_profit_lock,
+        target_points_for_trade,
     )
     from app.engines.psychology_hold import psychology_exit_tuning
 
@@ -272,8 +275,13 @@ def evaluate_exit(
         best_key="scalpTrailBestPts",
     )
 
+    exit_plan = (trade.entryContext or {}).get("exitPlan") or {}
+    chart_target = float(exit_plan.get("entryTargetPoints") or exit_plan.get("targetPoints") or profile.targetPoints)
+    if half_tp_giveback_exit(trade, best, pnl_pts, target_points=chart_target):
+        return "simple_half_tp_profit_lock", pnl_inr
+
     if trail_floor is not None and pnl_pts <= trail_floor and best >= arm:
-        if not hold_until_target_active(trade, best):
+        if not should_defer_profit_lock(trade, best, target_points=target_points_for_trade(trade)):
             return "scalp_trail_sl", pnl_inr
 
     if trail_floor is None and hold_seconds >= min_hold and pnl_pts <= -profile.stopPoints:
@@ -283,7 +291,6 @@ def evaluate_exit(
     if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
         return "simple_emergency_inr_stop", pnl_inr
 
-    exit_plan = (trade.entryContext or {}).get("exitPlan") or {}
     target2 = float(exit_plan.get("targetPoints2") or 0)
     if target2 > profile.targetPoints and pnl_pts >= target2:
         return "chart_tp2_hit", pnl_inr
@@ -306,7 +313,7 @@ def evaluate_exit(
     )
     if micro_ready and pnl_pts >= profile.microTargetPoints:
         if best - pnl_pts >= micro_giveback:
-            if not hold_until_target_active(trade, best):
+            if not should_defer_profit_lock(trade, best, target_points=chart_target):
                 return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     if trail_floor is None and best >= arm and pnl_pts < best * runner_keep:
@@ -316,7 +323,7 @@ def evaluate_exit(
         if psy_tuning:
             min_hold_before_trail = max(min_hold_before_trail, psy_tuning.min_hold_before_micro_seconds)
         if hold_seconds >= min_hold_before_trail:
-            if not hold_until_target_active(trade, best):
+            if not should_defer_profit_lock(trade, best, target_points=chart_target):
                 return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     if hold_seconds >= scalp_no_progress_limit_seconds(trade) and best <= 0:
