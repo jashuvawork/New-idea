@@ -567,10 +567,21 @@ def validate_candidate(
     if not all_in and not high_mover and not ln_ok:
         return False, ln_reason, meta
 
-    from app.engines.directional_lock import check_directional_side_lock
+    from app.engines.winner_entry_guards import chop_weak_explosion_blocks_entry, session_winner_gate
 
     sym = candidate.symbol.upper()
     snap = snap_map.get(sym) or candidate.snap
+    if not all_in and not high_mover:
+        chop_blocked, chop_reason = chop_weak_explosion_blocks_entry(candidate, snap)
+        if chop_blocked:
+            return False, chop_reason, meta
+        win_ok, win_reason, win_meta = session_winner_gate(candidate, state)
+        meta.update(win_meta)
+        if not win_ok:
+            return False, win_reason, meta
+
+    from app.engines.directional_lock import check_directional_side_lock
+
     tier = str(getattr(candidate, "tier", "") or "")
 
     premium_bypass = False

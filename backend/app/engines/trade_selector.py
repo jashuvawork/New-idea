@@ -191,6 +191,17 @@ def _explosion_candidates(
 
         if not counter_trend_entry_allowed(event.side, snap, explosion_event=event):
             continue
+        from app.engines.winner_entry_guards import chop_weak_explosion_blocks_entry
+
+        cand_probe = EntryCandidate(
+            symbol=symbol, snap=snap, mode="explosion", score=score_val,
+            side=event.side, strike=event.strike, premium=event.premium,
+            strategy_type=StrategyType.EXPLOSIVE, confidence=score_val,
+            tier=event.tier, explosion_event=event, alert=alert,
+        )
+        chop_blocked, _ = chop_weak_explosion_blocks_entry(cand_probe, snap)
+        if chop_blocked:
+            continue
         suggestion = SuggestedTrade(
             id=alert.get("id", "x"),
             symbol=symbol,

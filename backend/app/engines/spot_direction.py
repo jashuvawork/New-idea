@@ -478,21 +478,26 @@ def analyze_premium_chart(candles: list, ltp: float) -> "PremiumChart":
     )
 
 
-def premium_blocks_entry(side: Side | str, premium: "PremiumChart", trade_score: float = 0.0) -> tuple[bool, str]:
+def premium_blocks_entry(
+    side: Side | str,
+    premium: "PremiumChart",
+    trade_score: float = 0.0,
+    *,
+    explosion_event: Any = None,
+) -> tuple[bool, str]:
     """Block when option premium is fading at execution — bad fill timing."""
     settings = get_settings()
     if not settings.execution_chart_premium_check_enabled or not premium:
         return False, "ok"
-    if trade_score >= settings.chart_override_min_score:
-        return False, "ok"
+    from app.engines.winner_entry_guards import premium_fading_blocks_entry
 
-    min_mom = settings.execution_chart_min_premium_momentum_pct
-
-    if premium.momentum5Pct < min_mom and premium.momentum3Pct < 0:
-        return True, "premium_fading_at_execution"
-    if premium.direction == "BEARISH" and premium.momentum5Pct < -0.15:
-        return True, "premium_chart_fading"
-    return False, "ok"
+    return premium_fading_blocks_entry(
+        trade_score=trade_score,
+        premium_momentum_3s=float(premium.momentum3Pct or 0),
+        premium_momentum_5s=float(premium.momentum5Pct or 0),
+        premium_direction=str(premium.direction or ""),
+        explosion_event=explosion_event,
+    )
 
 
 def pro_index_quote_context(quote: dict[str, Any], spot: float) -> dict[str, Any]:
