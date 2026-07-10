@@ -461,7 +461,10 @@ def check_last_n_candidate_gate(
     score = float(getattr(candidate, "score", 0) or 0)
     elevated = last_n_elevated_min_rank(state)
     if elevated > 0 and score < elevated:
-        return False, f"last_n_elevated_rank_{elevated:.0f}", meta
+        from app.engines.extreme_explosion_moment import is_high_mover_elite_bypass
+
+        if not is_high_mover_elite_bypass(candidate=candidate):
+            return False, f"last_n_elevated_rank_{elevated:.0f}", meta
 
     if (
         settings.best_trades_only_enabled
@@ -512,8 +515,16 @@ def validate_candidate(
         getattr(candidate, "mode", "") == "explosion"
         and is_extreme_explosion_all_in_bypass(candidate=candidate)
     )
+    from app.engines.extreme_explosion_moment import is_high_mover_elite_bypass
+
+    high_mover = (
+        getattr(candidate, "mode", "") == "explosion"
+        and is_high_mover_elite_bypass(candidate=candidate)
+    )
     if all_in:
         meta.update(extreme_all_in_meta(candidate=candidate))
+    elif high_mover:
+        meta["highMoverEliteBypass"] = True
 
     from app.engines.chop_day_guards import is_chop_session
 
@@ -553,7 +564,7 @@ def validate_candidate(
 
     ln_ok, ln_reason, ln_meta = check_last_n_candidate_gate(candidate, state, trades)
     meta.update(ln_meta)
-    if not all_in and not ln_ok:
+    if not all_in and not high_mover and not ln_ok:
         return False, ln_reason, meta
 
     from app.engines.directional_lock import check_directional_side_lock
@@ -693,10 +704,11 @@ def validate_candidate(
                 (snap.breadth.bias if snap.breadth else "NEUTRAL"),
             )
 
-    if all_in:
+    if all_in or high_mover:
         meta["pretradePassed"] = True
-        meta["extremeAllInBypass"] = True
-        return True, "extreme_all_in_bypass", meta
+        if all_in:
+            meta["extremeAllInBypass"] = True
+        return True, "extreme_all_in_bypass" if all_in else "high_mover_elite_bypass", meta
 
     if not side_aligned_with_breadth(side_val, snap.breadth.bias) and not premium_bypass:
         counter_floor = settings.counter_breadth_min_score

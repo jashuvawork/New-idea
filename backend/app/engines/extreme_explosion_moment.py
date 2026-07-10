@@ -107,6 +107,32 @@ def extreme_all_in_meta(
     }
 
 
+
+def is_high_mover_elite_bypass(
+    *,
+    event: Optional[ExplosionEvent] = None,
+    candidate: Any = None,
+    alert: Optional[dict] = None,
+) -> bool:
+    """Aligned ELITE/EXPLODING session rips — bypass last-N rank / cooldown gates."""
+    if is_extreme_explosion_all_in_bypass(event=event, candidate=candidate, alert=alert):
+        return True
+    settings = get_settings()
+    tier, daily_move, score, mode = _metrics_from_sources(
+        event=event, candidate=candidate, alert=alert,
+    )
+    if mode and mode != "explosion":
+        return False
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    elite_floor = float(settings.extreme_explosion_elite_move_min_pct) * 0.95
+    if daily_move >= elite_floor and score >= settings.all_day_explosion_min_score:
+        return True
+    if daily_move >= settings.all_day_explosion_session_move_min_pct and score >= settings.all_day_explosion_min_score + 4:
+        return True
+    return False
+
+
 def snapshots_have_all_in_explosion(
     snapshots: dict[str, SymbolSnapshot],
 ) -> bool:

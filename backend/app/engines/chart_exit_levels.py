@@ -96,79 +96,107 @@ def chart_trade_confidence(
     side_v = _side_val(side)
     target_bias = "BULLISH" if side_v == "CALL" else "BEARISH"
     analysis = snap.chartAnalysis
-    if not analysis:
-        return 50.0, []
-
     score = 42.0
     sources: list[str] = []
 
-    consensus = (analysis.consensus or "NEUTRAL").upper()
-    if consensus == target_bias:
-        score += 18
-        sources.append(f"mtf_{consensus.lower()}")
-    elif consensus == "NEUTRAL":
-        score += 6
-    else:
-        score -= 8
+    if analysis:
+        consensus = (analysis.consensus or "NEUTRAL").upper()
+        if consensus == target_bias:
+            score += 18
+            sources.append(f"mtf_{consensus.lower()}")
+        elif consensus == "NEUTRAL":
+            score += 6
+        else:
+            score -= 8
 
-    total = max(analysis.totalTimeframes, 1)
-    align_ratio = (analysis.alignedCount or 0) / total
-    score += align_ratio * 12
-    if align_ratio >= 0.6:
-        sources.append(f"mtf_align_{analysis.alignedCount}/{total}")
+        total = max(analysis.totalTimeframes, 1)
+        align_ratio = (analysis.alignedCount or 0) / total
+        score += align_ratio * 12
+        if align_ratio >= 0.6:
+            sources.append(f"mtf_align_{analysis.alignedCount}/{total}")
 
-    inst = analysis.institutional or {}
-    structure = (inst.get("structure") or "NEUTRAL").upper()
-    if structure == target_bias:
-        score += 14
-        sources.append(f"smc_{structure.lower()}")
-    if inst.get("displacement"):
-        score += 8
-        sources.append("smc_displacement")
-    if inst.get("bos") and target_bias in str(inst.get("bos", "")).upper():
-        score += 10
-        sources.append(str(inst["bos"]))
-    stop_hunt = str(inst.get("stopHunt") or "")
-    if side_v == "PUT" and "sell_side" in stop_hunt:
-        score += 12
-        sources.append("stop_hunt_sell_side")
-    elif side_v == "CALL" and "buy_side" in stop_hunt:
-        score += 12
-        sources.append("stop_hunt_buy_side")
-
-    ich = analysis.ichimoku or {}
-    cloud = (ich.get("cloudBias") or "NEUTRAL").upper()
-    if cloud == target_bias:
-        score += 8
-        sources.append(f"ichimoku_{cloud.lower()}")
-
-    fib = analysis.fibonacci or {}
-    zone = (fib.get("zone") or "NEUTRAL").upper()
-    if side_v == "PUT" and zone in ("PREMIUM", "EQUILIBRIUM"):
-        score += 6
-        sources.append(f"fib_{zone.lower()}")
-    elif side_v == "CALL" and zone in ("DISCOUNT", "EQUILIBRIUM"):
-        score += 6
-        sources.append(f"fib_{zone.lower()}")
-
-    for pat in analysis.patterns or []:
-        p_side = _pattern_side(str(pat.get("name", "")))
-        strength = float(pat.get("strength") or 0)
-        if p_side == side_v:
-            score += min(10, 4 + strength * 4)
-            sources.append(f"pattern_{pat.get('name')}")
-
-    smt = analysis.smtDivergence or {}
-    if smt.get("signal"):
-        sig = str(smt["signal"]).upper()
-        if (side_v == "PUT" and "BEARISH" in sig) or (side_v == "CALL" and "BULLISH" in sig):
+        inst = analysis.institutional or {}
+        structure = (inst.get("structure") or "NEUTRAL").upper()
+        if structure == target_bias:
+            score += 14
+            sources.append(f"smc_{structure.lower()}")
+        if inst.get("displacement"):
+            score += 8
+            sources.append("smc_displacement")
+        if inst.get("bos") and target_bias in str(inst.get("bos", "")).upper():
             score += 10
-            sources.append("smt_divergence")
+            sources.append(str(inst["bos"]))
+        stop_hunt = str(inst.get("stopHunt") or "")
+        if side_v == "PUT" and "sell_side" in stop_hunt:
+            score += 12
+            sources.append("stop_hunt_sell_side")
+        elif side_v == "CALL" and "buy_side" in stop_hunt:
+            score += 12
+            sources.append("stop_hunt_buy_side")
+
+        ich = analysis.ichimoku or {}
+        cloud = (ich.get("cloudBias") or "NEUTRAL").upper()
+        if cloud == target_bias:
+            score += 8
+            sources.append(f"ichimoku_{cloud.lower()}")
+
+        fib = analysis.fibonacci or {}
+        zone = (fib.get("zone") or "NEUTRAL").upper()
+        if side_v == "PUT" and zone in ("PREMIUM", "EQUILIBRIUM"):
+            score += 6
+            sources.append(f"fib_{zone.lower()}")
+        elif side_v == "CALL" and zone in ("DISCOUNT", "EQUILIBRIUM"):
+            score += 6
+            sources.append(f"fib_{zone.lower()}")
+
+        for pat in analysis.patterns or []:
+            p_side = _pattern_side(str(pat.get("name", "")))
+            strength = float(pat.get("strength") or 0)
+            if p_side == side_v:
+                score += min(10, 4 + strength * 4)
+                sources.append(f"pattern_{pat.get('name')}")
+
+        smt = analysis.smtDivergence or {}
+        if smt.get("signal"):
+            sig = str(smt["signal"]).upper()
+            if (side_v == "PUT" and "BEARISH" in sig) or (side_v == "CALL" and "BULLISH" in sig):
+                score += 10
+                sources.append("smt_divergence")
+
+        tf_bull = tf_bear = tf_rsi_ok = tf_macd_ok = 0
+        for tf_name, tf in (analysis.timeframes or {}).items():
+            if not isinstance(tf, dict):
+                continue
+            d = str(tf.get("direction") or "NEUTRAL").upper()
+            if d == "BULLISH":
+                tf_bull += 1
+            elif d == "BEARISH":
+                tf_bear += 1
+            rsi_bias = str(tf.get("rsiBias") or "").upper()
+            macd_bias = str(tf.get("macdBias") or "").upper()
+            if side_v == "PUT" and rsi_bias == "OVERBOUGHT":
+                tf_rsi_ok += 1
+            elif side_v == "CALL" and rsi_bias == "OVERSOLD":
+                tf_rsi_ok += 1
+            if macd_bias == target_bias:
+                tf_macd_ok += 1
+        if side_v == "PUT" and tf_bear >= 2:
+            score += min(12, tf_bear * 3)
+            sources.append(f"tf_bear_{tf_bear}")
+        elif side_v == "CALL" and tf_bull >= 2:
+            score += min(12, tf_bull * 3)
+            sources.append(f"tf_bull_{tf_bull}")
+        if tf_rsi_ok >= 2:
+            score += 6
+            sources.append("tf_rsi_aligned")
+        if tf_macd_ok >= 3:
+            score += 8
+            sources.append("tf_macd_aligned")
 
     tqs = float(snap.tradeQualityScore or 50)
     score += (tqs - 50) * 0.15
 
-    # 5m spot chart — RSI, MACD, EMA, momentum
+    # 5m spot chart — RSI, MACD, EMA, momentum (always used)
     spot = snap.spotChart
     if spot:
         if spot.direction == target_bias:
@@ -194,38 +222,14 @@ def chart_trade_confidence(
         if spot.emaBias == target_bias:
             score += 4
             sources.append(f"spot_ema_{spot.emaBias.lower()}")
-
-    # Per-timeframe RSI/MACD alignment (1m–4h)
-    tf_bull = tf_bear = tf_rsi_ok = tf_macd_ok = 0
-    for tf_name, tf in (analysis.timeframes or {}).items():
-        if not isinstance(tf, dict):
-            continue
-        d = str(tf.get("direction") or "NEUTRAL").upper()
-        if d == "BULLISH":
-            tf_bull += 1
-        elif d == "BEARISH":
-            tf_bear += 1
-        rsi_bias = str(tf.get("rsiBias") or "").upper()
-        macd_bias = str(tf.get("macdBias") or "").upper()
-        if side_v == "PUT" and rsi_bias == "OVERBOUGHT":
-            tf_rsi_ok += 1
-        elif side_v == "CALL" and rsi_bias == "OVERSOLD":
-            tf_rsi_ok += 1
-        if macd_bias == target_bias:
-            tf_macd_ok += 1
-    tf_total = max(len(analysis.timeframes or {}), 1)
-    if side_v == "PUT" and tf_bear >= 2:
-        score += min(12, tf_bear * 3)
-        sources.append(f"tf_bear_{tf_bear}")
-    elif side_v == "CALL" and tf_bull >= 2:
-        score += min(12, tf_bull * 3)
-        sources.append(f"tf_bull_{tf_bull}")
-    if tf_rsi_ok >= 2:
-        score += 6
-        sources.append("tf_rsi_aligned")
-    if tf_macd_ok >= 3:
-        score += 8
-        sources.append("tf_macd_aligned")
+        mom5 = abs(float(spot.momentum5Pct or 0))
+        trend = float(spot.trendStrength or 0)
+        if mom5 >= 0.05 and spot.direction == target_bias:
+            score += min(8, mom5 * 40)
+            sources.append("spot_momentum")
+        if trend >= 30 and spot.direction == target_bias:
+            score += min(6, trend * 0.12)
+            sources.append("spot_trend")
 
     # Session breadth
     breadth = snap.breadth
@@ -368,6 +372,21 @@ def compute_chart_exit_levels(
             target2 = max(target * 1.2, tp2 * 0.88)
             sources.append("chart_fib_tp2")
 
+    spot_chart = snap.spotChart
+    if spot_chart and spot > 0 and not analysis:
+        mom5 = abs(float(spot_chart.momentum5Pct or 0))
+        trend = float(spot_chart.trendStrength or 0)
+        aligned = (
+            (side_v == "CALL" and spot_chart.direction == "BULLISH")
+            or (side_v == "PUT" and spot_chart.direction == "BEARISH")
+        )
+        if aligned:
+            target = max(target, 6.0 + mom5 * 80 + trend * 0.08)
+            target2 = max(target2, target * 1.35)
+            trail_arm = max(2.0, trail_arm * 0.85)
+            sources.append("spot_chart_tp")
+        stop = max(stop, 3.0 + entry_premium * 0.06 * (1.0 + mom5 * 2))
+
     conf_factor = confidence / 100.0
     stop = stop * (1.05 - conf_factor * 0.12)
     target = target * (1.0 + conf_factor * 0.35)
@@ -405,7 +424,7 @@ def merge_chart_into_exit_plan(
 ) -> dict[str, Any]:
     """Blend chart levels into an adaptive exit plan dict."""
     settings = get_settings()
-    if not settings.chart_exit_levels_enabled or not snap.chartAnalysis:
+    if not settings.chart_exit_levels_enabled:
         return plan_dict
 
     levels = compute_chart_exit_levels(
