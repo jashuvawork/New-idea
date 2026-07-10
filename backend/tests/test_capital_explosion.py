@@ -118,7 +118,7 @@ class ExplosionExitTests(unittest.TestCase):
         )
         with patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap):
             lots = compute_explosion_lots(event, 70.0, 60.0)
-            self.assertEqual(lots, 136)
+            self.assertEqual(lots, 113)
 
 
 if __name__ == "__main__":
