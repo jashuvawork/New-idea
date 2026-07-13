@@ -45,6 +45,15 @@ def _ema(closes: list[float], period: int) -> float:
     return series[-1] if series else 0.0
 
 
+def _patch_live_close(closes: list[float], spot: float) -> list[float]:
+    """Replace forming-bar close with live spot so RSI/MACD/momentum match broker charts."""
+    if not closes or spot <= 0:
+        return closes
+    out = list(closes)
+    out[-1] = spot
+    return out
+
+
 def _indicator_closes(candles_5m: list, candles_1m: list | None) -> list[float]:
     """RSI/MACD input — prefer extended 5m; fall back to 1m when session is still thin."""
     if candles_1m:
@@ -75,6 +84,8 @@ def build_spot_chart(
     """
     opens, _, _, closes = _candle_rows(candles_5m)
     ind_closes = _indicator_closes(candles_5m, indicator_candles_1m)
+    closes = _patch_live_close(closes, spot)
+    ind_closes = _patch_live_close(ind_closes, spot)
 
     if not closes or spot <= 0:
         return SpotChart(direction="NEUTRAL", spot=spot, timeframe="5m")
@@ -149,7 +160,9 @@ def build_spot_chart(
     elif or_pos == "BELOW":
         bearish += 1
     if rsi_read.bias == "OVERSOLD":
-        if mom15 > 0 and mom30 > -0.05:
+        if mom5 > 0.01 and mom15 >= -0.02:
+            bullish += 2
+        elif mom15 > 0 and mom30 > -0.05:
             bullish += 1
     elif rsi_read.bias == "OVERBOUGHT":
         bearish += 1
@@ -174,9 +187,25 @@ def build_spot_chart(
         direction = "BULLISH"
     elif mom5 < -0.02 and mom15 < -0.05 and mom30 < 0:
         direction = "BEARISH"
-    elif mom15 < 0 and mom30 < 0:
+    elif (
+        mom5 > 0.01
+        and mom15 >= 0
+        and rsi_read.value >= 50
+        and macd_read.bias == "BULLISH"
+    ):
+        direction = "BULLISH"
+    elif (
+        mom5 < -0.01
+        and mom15 <= 0
+        and rsi_read.value <= 50
+        and macd_read.bias == "BEARISH"
+    ):
+        direction = "BEARISH"
+    elif mom15 < 0 and mom30 < 0 and not (mom5 > 0.02 and rsi_read.value >= 55):
         direction = "BEARISH"
     elif mom15 > 0 and mom30 > 0:
+        direction = "BULLISH"
+    elif mom5 > 0.015 and rsi_read.value >= 58 and macd_read.bias != "BEARISH":
         direction = "BULLISH"
     else:
         direction = "NEUTRAL"
@@ -230,7 +259,49 @@ def reconcile_spot_chart_with_mtf(
 
     consensus = str(getattr(chart_analysis, "consensus", None) or "NEUTRAL").upper()
     spot_dir = (spot_chart.direction or "NEUTRAL").upper()
+
+    ich = getattr(chart_analysis, "ichimoku", None) or {}
+    if isinstance(ich, dict):
+        cloud_bias = str(ich.get("cloudBias") or "NEUTRAL").upper()
+        price_vs = str(ich.get("priceVsCloud") or "NEUTRAL").upper()
+        tk_cross = str(ich.get("tkCross") or "NEUTRAL").upper()
+    else:
+        cloud_bias = str(getattr(ich, "cloudBias", None) or "NEUTRAL").upper()
+        price_vs = str(getattr(ich, "priceVsCloud", None) or "NEUTRAL").upper()
+        tk_cross = str(getattr(ich, "tkCross", None) or "NEUTRAL").upper()
+
+    mom5 = float(spot_chart.momentum5Pct or 0)
+    mom15 = float(spot_chart.momentum15Pct or 0)
+    rsi = float(spot_chart.rsi or 50)
+    macd_bias = str(spot_chart.macdBias or "NEUTRAL").upper()
+
+    # Ichimoku + live momentum — broker charts often agree here when MTF is thin.
+    if spot_dir == "BEARISH" and cloud_bias == "BULLISH" and price_vs == "ABOVE":
+        if mom5 > 0.01 and (mom15 >= 0 or rsi >= 55) and macd_bias != "BEARISH":
+            return spot_chart.model_copy(update={"direction": "BULLISH"})
+    if spot_dir == "BULLISH" and cloud_bias == "BEARISH" and price_vs == "BELOW":
+        if mom5 < -0.01 and (mom15 <= 0 or rsi <= 45) and macd_bias != "BULLISH":
+            return spot_chart.model_copy(update={"direction": "BEARISH"})
+
     if consensus not in ("BULLISH", "BEARISH"):
+        if (
+            cloud_bias == "BULLISH"
+            and price_vs == "ABOVE"
+            and mom5 > 0.01
+            and rsi >= 52
+            and macd_bias == "BULLISH"
+            and spot_dir != "BULLISH"
+        ):
+            return spot_chart.model_copy(update={"direction": "BULLISH"})
+        if (
+            cloud_bias == "BEARISH"
+            and price_vs == "BELOW"
+            and mom5 < -0.01
+            and rsi <= 48
+            and macd_bias == "BEARISH"
+            and spot_dir != "BEARISH"
+        ):
+            return spot_chart.model_copy(update={"direction": "BEARISH"})
         return spot_chart
     if spot_dir == consensus:
         return spot_chart

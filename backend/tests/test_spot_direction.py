@@ -354,3 +354,56 @@ def test_reconcile_spot_chart_overrides_bullish_5m_on_bearish_mtf():
     )
     out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="BEARISH", from_open_pct=-0.5)
     assert out.direction == "BEARISH"
+
+
+def test_live_spot_patch_fixes_stale_rsi_on_afternoon_rally():
+    """Morning dip leaves stale 5m close; live spot rally should lift RSI like broker charts."""
+    from app.engines.spot_direction import build_spot_chart
+
+    candles_5m: list[list[float]] = []
+    price = 24000.0
+    for i in range(20):
+        nxt = price - 6.0
+        candles_5m.append([i, price, price + 2, nxt - 2, nxt])
+        price = nxt
+    stale_close = price + 30.0
+    candles_5m.append([20, price, stale_close + 5, price - 2, stale_close])
+    live_spot = 24233.2
+    profile = MarketProfile(
+        poc=live_spot - 40,
+        openingRangeHigh=live_spot + 80,
+        openingRangeLow=live_spot - 120,
+    )
+    chart_stale = build_spot_chart(candles_5m, stale_close, profile)
+    chart_live = build_spot_chart(candles_5m, live_spot, profile)
+    assert chart_stale.rsi < 35
+    assert chart_live.rsi > 50
+    assert chart_live.macdBias in ("BULLISH", "NEUTRAL")
+    assert chart_live.direction in ("BULLISH", "NEUTRAL")
+
+
+def test_reconcile_ichimoku_flips_bearish_spot_on_live_rally():
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+    from app.models.schemas import ChartAnalysis
+
+    spot = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.02,
+        momentum15Pct=0.01,
+        momentum30Pct=-0.05,
+        rsi=58.0,
+        macdBias="BULLISH",
+    )
+    analysis = ChartAnalysis(
+        consensus="NEUTRAL",
+        alignedCount=0,
+        totalTimeframes=0,
+        timeframes={},
+        ichimoku={
+            "cloudBias": "BULLISH",
+            "priceVsCloud": "ABOVE",
+            "tkCross": "BEARISH",
+        },
+    )
+    out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="BEARISH")
+    assert out.direction == "BULLISH"
