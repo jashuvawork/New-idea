@@ -980,6 +980,11 @@ async def _process_open_trades(
             "brokerOrderId": broker_ctx.get("brokerOrderId"),
             "brokerExitOrderId": broker_ctx.get("brokerExitOrderId"),
             "executionMode": broker_ctx.get("executionMode", _execution_mode(settings)),
+            "exitPlan": broker_ctx.get("exitPlan"),
+            "explosionTier": broker_ctx.get("explosionTier"),
+            "selectionMode": broker_ctx.get("selectionMode"),
+            "selectionScore": broker_ctx.get("selectionScore"),
+            "bestPnlPoints": trade.bestPnlPoints,
         })
         trade.entryContext = ctx
         state.closedPaperTrades.append(trade)
