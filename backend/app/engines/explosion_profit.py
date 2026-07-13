@@ -512,7 +512,11 @@ def evaluate_explosion_exit(
     if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
         return "explosion_emergency_stop", pnl_inr
 
-    if pnl_pts >= target:
+    # Peak touch counts — polling can miss the exact TP tick (e.g. best 12pt, current 8pt)
+    if best >= target:
+        return "explosion_target_hit", pnl_inr
+    near = max(0.5, target * 0.04)
+    if best >= target - near and best >= settings.explosion_trail_arm_points:
         return "explosion_target_hit", pnl_inr
 
     from app.engines.confidence_hold import (
@@ -521,15 +525,21 @@ def evaluate_explosion_exit(
         should_defer_profit_lock,
     )
 
+    def _profit_lock_ok() -> bool:
+        if not should_defer_profit_lock(trade, best, target_points=target):
+            return True
+        # Standard explosion TP zone reached — don't block trail for distant chart TP
+        return best >= settings.explosion_target_standard * 0.95
+
     if half_tp_giveback_exit(trade, best, pnl_pts, target_points=target):
         return "explosion_half_tp_profit_lock", pnl_inr
 
     if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
-        if not should_defer_profit_lock(trade, best, target_points=target):
+        if _profit_lock_ok():
             return "explosion_trail_sl", pnl_inr
 
     if trail_floor is not None and pnl_pts < best * trail_keep and best >= 8:
-        if not should_defer_profit_lock(trade, best, target_points=target):
+        if _profit_lock_ok():
             return "explosion_trail_lock", pnl_inr
 
     if (
@@ -537,7 +547,7 @@ def evaluate_explosion_exit(
         and best - pnl_pts >= settings.runner_micro_giveback_points
         and best >= settings.runner_min_best_points
     ):
-        if not should_defer_profit_lock(trade, best, target_points=target):
+        if _profit_lock_ok():
             return "explosion_micro_profit_lock", pnl_inr
 
     stop_floor = _effective_stop_points(trade, exit_params.stop_points)
@@ -557,6 +567,20 @@ def evaluate_explosion_exit(
         if not hold_until_target_active(trade, best, target_points=target):
             return "explosion_no_progress", pnl_inr
 
+    # Peak fade after reaching explosion TP zone — even without confidence-runner hold
+    if (
+        best >= settings.explosion_target_standard * 0.85
+        and pnl_pts > 0
+        and best >= exit_params.trail_arm_points
+    ):
+        giveback = best - pnl_pts
+        min_give = max(
+            settings.runner_micro_giveback_points,
+            best * float(getattr(settings, "chart_confidence_half_tp_giveback_ratio", 0.40) or 0.40),
+        )
+        if giveback >= min_give:
+            return "explosion_runner_giveback", pnl_inr
+
     max_hold = 420 if best >= settings.runner_min_best_points else (360 if event_tier == "ELITE" or best >= 15 else 300)
     from app.engines.confidence_hold import confidence_hold_max_seconds
 
@@ -571,6 +595,19 @@ def evaluate_explosion_exit(
         if str(aligned).upper() == side_bias:
             max_hold = int(max_hold * 1.4)
     if hold >= max_hold:
+        # Prefer trail/giveback over blind time exit when runner peaked then faded
+        if best >= exit_params.trail_arm_points:
+            giveback = best - pnl_pts
+            min_give = max(
+                settings.runner_micro_giveback_points,
+                best * settings.explosion_trail_keep_ratio * 0.5,
+            )
+            if giveback >= min_give and pnl_pts > 0:
+                return "explosion_trail_sl", pnl_inr
+            if trail_floor is not None and pnl_pts <= trail_floor:
+                return "explosion_trail_sl", pnl_inr
+            if pnl_pts < best * trail_keep and best >= 8:
+                return "explosion_trail_lock", pnl_inr
         return ("explosion_time_profit" if pnl_pts > 0 else "explosion_time_stop"), pnl_inr
 
     return None, pnl_inr

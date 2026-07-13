@@ -292,10 +292,10 @@ def evaluate_exit(
         return "simple_emergency_inr_stop", pnl_inr
 
     target2 = float(exit_plan.get("targetPoints2") or 0)
-    if target2 > profile.targetPoints and pnl_pts >= target2:
+    if target2 > profile.targetPoints and max(best, pnl_pts) >= target2:
         return "chart_tp2_hit", pnl_inr
 
-    if pnl_pts >= profile.targetPoints:
+    if max(best, pnl_pts) >= profile.targetPoints:
         return "simple_profit_target_hit", pnl_inr
 
     micro_min_best = settings.scalp_micro_lock_min_best_points

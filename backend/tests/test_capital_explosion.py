@@ -1,6 +1,7 @@
 """Capital sizing and explosion exit tests."""
 
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 from app.engines.capital_allocator import (
@@ -16,7 +17,6 @@ from app.engines.explosion_profit import (
     record_explosion_stop,
 )
 from app.models.schemas import PaperTrade, Side, StrategyType
-from datetime import datetime
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -93,6 +93,58 @@ class ExplosionExitTests(unittest.TestCase):
         trade = self._trade(50.0, 10)
         reason, _ = evaluate_explosion_exit(trade, 62.0, "EXPLODING", 65)
         self.assertEqual(reason, "explosion_target_hit")
+
+    def test_target_hit_on_best_even_when_current_faded(self):
+        """Peak 12pt should count as TP even if current tick is lower (poll gap)."""
+        trade = self._trade(50.0, 10)
+        trade.bestPnlPoints = 12.0
+        reason, _ = evaluate_explosion_exit(trade, 58.0, "EXPLODING", 65)
+        self.assertEqual(reason, "explosion_target_hit")
+
+    def test_runner_giveback_before_time_exit(self):
+        trade = self._trade(82.52, 22)
+        trade.bestPnlPoints = 11.44
+        trade.entryContext = {
+            "exitPlan": {"targetPoints": 36.0, "stopPoints": 6.0, "trailArmPoints": 4.0},
+            "chartConfidence": 75.0,
+            "entryChartConfidence": 75.0,
+            "breadth": "BEARISH",
+        }
+        from unittest.mock import patch
+        from datetime import timedelta
+        from zoneinfo import ZoneInfo
+
+        IST = ZoneInfo("Asia/Kolkata")
+        trade.openedAt = datetime.now(IST) - timedelta(seconds=4000)
+        with patch("app.engines.explosion_profit.get_settings") as mock_s:
+            s = mock_s.return_value
+            for k, v in {
+                "explosion_target_standard": 12.0,
+                "explosion_trail_arm_points": 4.0,
+                "explosion_trail_keep_ratio": 0.65,
+                "runner_trail_keep_ratio": 0.38,
+                "runner_min_best_points": 5.0,
+                "runner_micro_giveback_points": 4.0,
+                "chart_confidence_half_tp_giveback_ratio": 0.40,
+                "explosion_no_progress_enabled": True,
+                "explosion_no_progress_seconds": 150,
+                "explosion_no_progress_aligned_seconds": 420,
+                "explosion_no_progress_skip_when_aligned": True,
+                "chart_confidence_hold_enabled": True,
+                "chart_confidence_hold_min_confidence": 62.0,
+                "chart_confidence_half_tp_lock_pct": 0.50,
+                "chart_confidence_hold_min_target_pct": 0.85,
+                "high_confidence_min_score": 72.0,
+                "all_day_min_chart_confidence": 62.0,
+                "emergency_stop_enabled": False,
+                "explosion_stop_min_hold_seconds": 15,
+                "afternoon_capture_exit_max_hold_seconds": 480,
+            }.items():
+                setattr(s, k, v)
+            reason, pnl = evaluate_explosion_exit(trade, 85.38, "EXPLODING", 65)
+        self.assertIn(reason, ("explosion_runner_giveback", "explosion_trail_sl", "explosion_trail_lock"))
+        self.assertGreater(pnl, 0)
+        self.assertNotIn(reason, ("explosion_time_profit", "explosion_time_stop"))
 
     def test_cooldown_blocks_reentry(self):
         record_explosion_stop("SENSEX")
