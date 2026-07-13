@@ -385,17 +385,42 @@ def _consensus(reads: dict[str, TimeframeChartRead]) -> str:
     return "NEUTRAL"
 
 
-def build_mtf_reads(candles_1m: list, spot: float) -> dict[str, TimeframeChartRead]:
+# When 1m history is missing, derive higher TFs from native 5m bars (3→15m, 12→1h, 48→4h).
+_FALLBACK_5M_FRAMES: list[tuple[str, int]] = [
+    ("5m", 1),
+    ("15m", 3),
+    ("1h", 12),
+    ("4h", 48),
+]
+
+
+def build_mtf_reads(
+    candles_1m: list,
+    spot: float,
+    *,
+    candles_5m: list | None = None,
+) -> dict[str, TimeframeChartRead]:
     """Build MTF chart reads from 1m candles (no extra API calls)."""
     reads: dict[str, TimeframeChartRead] = {}
-    if not candles_1m:
+    if candles_1m:
+        for frame in SCALP_TIMEFRAMES:
+            label = frame["label"]
+            if label == "1m":
+                candles = candles_1m
+            else:
+                candles = resample_candles(candles_1m, frame["resample"])
+            reads[label] = analyze_timeframe(candles, spot, label) if candles else TimeframeChartRead(
+                label=label, price=round(spot, 2),
+            )
         return reads
-    for frame in SCALP_TIMEFRAMES:
-        label = frame["label"]
-        if label == "1m":
-            candles = candles_1m
-        else:
-            candles = resample_candles(candles_1m, frame["resample"])
+
+    if not candles_5m:
+        return reads
+
+    from app.engines.mtf_chart_analysis import resample_ohlc_bars
+
+    for label, bucket in _FALLBACK_5M_FRAMES:
+        candles = candles_5m if bucket <= 1 else resample_ohlc_bars(candles_5m, bucket)
         reads[label] = analyze_timeframe(candles, spot, label) if candles else TimeframeChartRead(
             label=label, price=round(spot, 2),
         )
@@ -416,7 +441,7 @@ def build_chart_analysis(
     symbol: str = "",
 ) -> ChartAnalysis:
     """Full chart analysis for snapshot — MTF + levels + patterns + SMC/ICT."""
-    mtf_reads = build_mtf_reads(candles_1m, spot)
+    mtf_reads = build_mtf_reads(candles_1m, spot, candles_5m=candles_5m)
     consensus = _consensus(mtf_reads)
 
     primary_candles = candles_5m or candles_1m

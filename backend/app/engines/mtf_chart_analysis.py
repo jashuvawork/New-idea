@@ -24,19 +24,19 @@ SCALP_TIMEFRAMES: list[dict[str, Any]] = [
 ]
 
 
-def resample_candles(candles_1m: list, period: int) -> list[list[float]]:
-    """Aggregate 1m OHLCV into higher timeframe bars."""
-    if period <= 1 or not candles_1m:
-        return candles_1m
+def resample_ohlc_bars(candles: list, bars_per_bucket: int) -> list[list[float]]:
+    """Aggregate OHLCV every N bars (works for 1m→5m or 5m→15m grouping)."""
+    if bars_per_bucket <= 1 or not candles:
+        return candles
 
-    buckets: list[list[list]] = []
+    buckets: list[list] = []
     chunk: list = []
-    for c in candles_1m:
+    for c in candles:
         chunk.append(c)
-        if len(chunk) >= period:
+        if len(chunk) >= bars_per_bucket:
             buckets.append(chunk)
             chunk = []
-    if chunk and len(chunk) >= max(2, period // 2):
+    if chunk and len(chunk) >= max(2, bars_per_bucket // 2):
         buckets.append(chunk)
 
     out: list[list[float]] = []
@@ -61,11 +61,22 @@ def resample_candles(candles_1m: list, period: int) -> list[list[float]]:
     return out
 
 
+def resample_candles(candles_1m: list, period: int) -> list[list[float]]:
+    """Aggregate 1m OHLCV into higher timeframe bars."""
+    if period <= 1 or not candles_1m:
+        return candles_1m
+    return resample_ohlc_bars(candles_1m, period)
+
+
 def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChartRead:
     """Direction + momentum read for one timeframe."""
     opens, _, _, closes = _candle_rows(candles)
     if not closes or price <= 0:
         return TimeframeChartRead(label=label, price=round(price, 2))
+
+    from app.engines.spot_direction import _patch_live_close
+
+    closes = _patch_live_close(closes, price)
 
     lookback = min(5, len(closes) - 1) if len(closes) > 1 else 1
     mom = _pct_change(closes, lookback)

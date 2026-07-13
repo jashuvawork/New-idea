@@ -88,6 +88,26 @@ def test_build_chart_analysis_mtf():
     assert len(analysis.recentCloses) > 0
 
 
+def test_build_chart_analysis_mtf_fallback_from_5m_only():
+    closes = [100 + i * 0.25 for i in range(40)]
+    candles_5m = _candles(closes)
+    profile = MarketProfile(poc=108, openingRangeHigh=112, openingRangeLow=102)
+    analysis = build_chart_analysis(
+        [],
+        candles_5m,
+        closes[-1],
+        profile,
+        prev_close=100.0,
+        day_high=112.0,
+        day_low=99.0,
+        symbol="NIFTY",
+    )
+    assert analysis.totalTimeframes >= 4
+    assert "5m" in analysis.timeframes
+    assert "15m" in analysis.timeframes
+    assert analysis.consensus in ("BULLISH", "BEARISH", "NEUTRAL")
+
+
 def test_ichimoku_cloud_bias():
     highs = [110 + i * 0.1 for i in range(60)]
     lows = [108 + i * 0.1 for i in range(60)]
