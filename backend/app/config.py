@@ -706,7 +706,7 @@ class Settings(BaseSettings):
     adaptive_exits_enabled: bool = True
     ml_exit_tuning_enabled: bool = True
 
-    # Chart-driven SL/TP/trailing — fib, pivots, SMC for all trade types
+    # Chart-driven SL/TP/trailing — fib, pivots, Ichimoku, SMC for all trade types
     chart_exit_levels_enabled: bool = True
     chart_exit_refresh_seconds: int = 30
     chart_trail_tune_seconds: int = 5

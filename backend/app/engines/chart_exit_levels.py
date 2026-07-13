@@ -1,4 +1,4 @@
-"""Chart-driven SL/TP/trailing — fib, pivots, SMC/ICT, MTF consensus for all trade types."""
+"""Chart-driven SL/TP/trailing — fib, pivots, Ichimoku, SMC/ICT, MTF consensus for all trade types."""
 
 from __future__ import annotations
 
@@ -139,6 +139,16 @@ def chart_trade_confidence(
         if cloud == target_bias:
             score += 8
             sources.append(f"ichimoku_{cloud.lower()}")
+        tk = (ich.get("tkCross") or "NEUTRAL").upper()
+        if tk == target_bias:
+            score += 5
+            sources.append(f"ichimoku_tk_{tk.lower()}")
+        elif tk != "NEUTRAL" and tk != target_bias:
+            score -= 4
+        price_vs = (ich.get("priceVsCloud") or "").upper()
+        if (side_v == "CALL" and price_vs == "ABOVE") or (side_v == "PUT" and price_vs == "BELOW"):
+            score += 4
+            sources.append(f"ichimoku_{price_vs.lower()}")
 
         fib = analysis.fibonacci or {}
         zone = (fib.get("zone") or "NEUTRAL").upper()
@@ -383,6 +393,105 @@ def _structure_target_pts(
     return tp1, tp2
 
 
+def _ichimoku_levels(ichimoku: dict[str, Any]) -> dict[str, float]:
+    """Normalize ichimoku dict values to floats."""
+    out: dict[str, float] = {}
+    for key in ("tenkan", "kijun", "senkouA", "senkouB", "cloudTop", "cloudBottom"):
+        val = ichimoku.get(key)
+        if val is not None:
+            try:
+                out[key] = float(val)
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _ichimoku_stop_pts(
+    side_v: str,
+    spot: float,
+    ichimoku: dict[str, Any],
+    entry_premium: float,
+) -> Optional[float]:
+    """SL from Ichimoku cloud edge / kijun / tenkan on the opposing side."""
+    if spot <= 0:
+        return None
+    ich = _ichimoku_levels(ichimoku)
+    if not ich:
+        return None
+    candidates: list[float] = []
+
+    if side_v == "PUT":
+        for key in ("cloudTop", "kijun", "tenkan", "senkouA", "senkouB"):
+            lvl = ich.get(key, 0)
+            if lvl > spot and _valid_index_structure_level(lvl, spot):
+                candidates.append(lvl - spot)
+    else:
+        for key in ("cloudBottom", "kijun", "tenkan", "senkouA", "senkouB"):
+            lvl = ich.get(key, 0)
+            if 0 < lvl < spot and _valid_index_structure_level(lvl, spot):
+                candidates.append(spot - lvl)
+
+    if not candidates:
+        return None
+    return _index_dist_to_premium_pts(spot, min(candidates), entry_premium)
+
+
+def _ichimoku_target_pts(
+    side_v: str,
+    spot: float,
+    ichimoku: dict[str, Any],
+    entry_premium: float,
+) -> tuple[float, float]:
+    """TP1/TP2 from Ichimoku support-resistance in trade direction."""
+    if spot <= 0:
+        return 0.0, 0.0
+    ich = _ichimoku_levels(ichimoku)
+    if not ich:
+        return 0.0, 0.0
+
+    near: list[float] = []
+    far: list[float] = []
+
+    if side_v == "PUT":
+        for key in ("tenkan", "kijun", "cloudBottom"):
+            lvl = ich.get(key, 0)
+            if 0 < lvl < spot and _valid_index_structure_level(lvl, spot):
+                near.append(spot - lvl)
+        cloud_bottom = ich.get("cloudBottom", 0)
+        kijun = ich.get("kijun", 0)
+        if cloud_bottom > 0 and kijun > 0 and cloud_bottom < spot:
+            span = max(0.0, kijun - cloud_bottom)
+            proj = spot - (cloud_bottom - span)
+            if proj > 0 and _valid_index_structure_level(spot - proj, spot):
+                far.append(proj)
+        for key in ("cloudBottom", "kijun", "tenkan"):
+            lvl = ich.get(key, 0)
+            if 0 < lvl < spot and _valid_index_structure_level(lvl, spot):
+                far.append(spot - lvl)
+    else:
+        for key in ("tenkan", "kijun", "cloudTop"):
+            lvl = ich.get(key, 0)
+            if lvl > spot and _valid_index_structure_level(lvl, spot):
+                near.append(lvl - spot)
+        cloud_top = ich.get("cloudTop", 0)
+        kijun = ich.get("kijun", 0)
+        if cloud_top > spot and kijun > spot:
+            span = max(0.0, cloud_top - kijun)
+            proj = (cloud_top + span) - spot
+            if _valid_index_structure_level(spot + proj, spot):
+                far.append(proj)
+        for key in ("cloudTop", "kijun", "tenkan"):
+            lvl = ich.get(key, 0)
+            if lvl > spot and _valid_index_structure_level(lvl, spot):
+                far.append(lvl - spot)
+
+    tp1 = _index_dist_to_premium_pts(spot, min(near), entry_premium) if near else 0.0
+    tp2 = _index_dist_to_premium_pts(spot, max(far), entry_premium) if far else 0.0
+    if tp2 > 0 and tp2 < tp1:
+        tp2 = tp1 * 1.35
+    return tp1, tp2
+
+
 def compute_chart_exit_levels(
     snap: SymbolSnapshot,
     side: Side | str,
@@ -411,16 +520,30 @@ def compute_chart_exit_levels(
     analysis = snap.chartAnalysis
     if analysis and spot > 0:
         struct_sl = _structure_stop_pts(side_v, spot, analysis, entry_premium)
-        if struct_sl:
-            stop = struct_sl * 1.08
-            sources.append("chart_structure_sl")
+        ich_sl = _ichimoku_stop_pts(side_v, spot, analysis.ichimoku or {}, entry_premium)
+        sl_candidates = [x for x in (struct_sl, ich_sl) if x and x > 0]
+        if sl_candidates:
+            stop = min(sl_candidates) * 1.08
+            if struct_sl:
+                sources.append("chart_structure_sl")
+            if ich_sl:
+                sources.append("chart_ichimoku_sl")
         tp1, tp2 = _structure_target_pts(side_v, spot, analysis, entry_premium)
+        ich_tp1, ich_tp2 = _ichimoku_target_pts(side_v, spot, analysis.ichimoku or {}, entry_premium)
+        if ich_tp1 > 0:
+            tp1 = max(tp1, ich_tp1)
+            sources.append("chart_ichimoku_tp1")
+        if ich_tp2 > 0:
+            tp2 = max(tp2, ich_tp2)
+            sources.append("chart_ichimoku_tp2")
         if tp1 > 0:
             target = max(target, tp1 * 0.92)
-            sources.append("chart_pivot_tp1")
+            if not ich_tp1:
+                sources.append("chart_pivot_tp1")
         if tp2 > 0:
             target2 = max(target * 1.2, tp2 * 0.88)
-            sources.append("chart_fib_tp2")
+            if not ich_tp2:
+                sources.append("chart_fib_tp2")
 
     spot_chart = snap.spotChart
     if spot_chart and spot > 0 and not analysis:
@@ -612,6 +735,25 @@ def compute_live_chart_trail_tuning(
             stop *= 0.90
             keep = min(0.88, keep + 0.08)
             sources.append(f"mtf_oppose_{consensus.lower()}")
+
+        ich = analysis.ichimoku or {}
+        cloud = (ich.get("cloudBias") or "NEUTRAL").upper()
+        tk = (ich.get("tkCross") or "NEUTRAL").upper()
+        if cloud not in ("NEUTRAL", target_bias):
+            tighten = True
+            stop *= 0.92
+            keep = min(0.86, keep + 0.06)
+            sources.append(f"ichimoku_cloud_oppose_{cloud.lower()}")
+        elif cloud == target_bias and live_confidence >= 62:
+            target *= 1.04
+            sources.append(f"ichimoku_cloud_{cloud.lower()}")
+        if tk not in ("NEUTRAL", target_bias):
+            tighten = True
+            arm = max(1.0, arm * 0.90)
+            sources.append(f"ichimoku_tk_oppose_{tk.lower()}")
+        elif tk == target_bias:
+            target *= 1.03
+            sources.append(f"ichimoku_tk_{tk.lower()}")
 
     stop_cap = max(8.0, entry_premium * 0.12)
     return ChartTrailTuning(

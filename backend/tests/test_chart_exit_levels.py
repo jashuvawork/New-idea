@@ -61,7 +61,17 @@ def _snap_with_chart(consensus: str = "BEARISH", side_bias: str = "BEARISH") -> 
                 "bos": "bearish_bos",
                 "stopHunt": "sell_side_liquidity_sweep",
             },
-            ichimoku={"cloudBias": "BEARISH"},
+            ichimoku={
+                "tenkan": 77750.0,
+                "kijun": 77680.0,
+                "senkouA": 77850.0,
+                "senkouB": 77650.0,
+                "cloudTop": 77850.0,
+                "cloudBottom": 77650.0,
+                "cloudBias": "BEARISH",
+                "tkCross": "BEARISH",
+                "priceVsCloud": "INSIDE",
+            },
             patterns=[{"name": "bearish_engulfing", "timeframe": "5m", "strength": 0.8}],
         ),
     )
@@ -95,6 +105,41 @@ def test_compute_chart_exit_levels_structure(mock_settings):
     assert levels.targetPoints >= 3.0
     assert levels.targetPoints2 >= levels.targetPoints
     assert levels.promoteToTrailing is True
+
+
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_ichimoku_sl_tp_in_chart_exit_levels(mock_settings):
+    s = mock_settings.return_value
+    s.chart_exit_levels_enabled = True
+    s.scalp_stop_min_points = 2.0
+    s.scalp_trail_step_points = 2.0
+    s.quick_trail_promote_min_confidence = 58.0
+    s.all_day_min_chart_confidence = 62.0
+    _chart_cap_settings(s)
+
+    snap = _snap_with_chart()
+    levels = compute_chart_exit_levels(snap, Side.PUT, 82.0, base_stop=3.0, base_target=6.0)
+    assert any("ichimoku" in src for src in levels.sources)
+    assert levels.stopPoints >= 2.0
+    assert levels.targetPoints >= 6.0
+    assert levels.targetPoints2 >= levels.targetPoints
+
+
+def test_ichimoku_helpers_put_direction():
+    from app.engines.chart_exit_levels import _ichimoku_stop_pts, _ichimoku_target_pts
+
+    ich = {
+        "tenkan": 77750.0,
+        "kijun": 77680.0,
+        "cloudTop": 77850.0,
+        "cloudBottom": 77650.0,
+    }
+    spot = 77800.0
+    sl = _ichimoku_stop_pts("PUT", spot, ich, 80.0)
+    tp1, tp2 = _ichimoku_target_pts("PUT", spot, ich, 80.0)
+    assert sl is not None and sl > 0
+    assert tp1 > 0
+    assert tp2 >= tp1
 
 
 @patch("app.engines.chart_exit_levels.get_settings")
