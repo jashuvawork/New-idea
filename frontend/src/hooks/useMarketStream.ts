@@ -10,7 +10,11 @@ const API_BASE = import.meta.env.DEV
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
 const UI_TICK_MS = Math.max(POLL_MS, 200);
 const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 50), 25);
-const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
+// Production: SSE does not work through Vercel → EC2 HTTP proxy; use HTTP poll unless explicitly enabled.
+const SSE_ENABLED = import.meta.env.DEV
+  ? import.meta.env.VITE_SSE_ENABLED !== 'false'
+  : import.meta.env.VITE_SSE_ENABLED === 'true';
+const SNAPSHOT_URL = `${API_BASE}/api/market/snapshots/cached`;
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   if (ms <= 0) return 'offline';
@@ -149,7 +153,7 @@ export function useMarketStream() {
   const fetchSnapshot = useCallback(async () => {
     const started = performance.now();
     try {
-      const res = await fetch(`${API_BASE}/api/market/snapshots`);
+      const res = await fetch(SNAPSHOT_URL);
       const elapsed = Math.round(performance.now() - started);
       if (!res.ok) throw new Error(`API ${res.status}`);
 

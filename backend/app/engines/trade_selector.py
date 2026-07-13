@@ -197,6 +197,7 @@ def _explosion_candidates(
             symbol=symbol, snap=snap, mode="explosion", score=score_val,
             side=event.side, strike=event.strike, premium=event.premium,
             strategy_type=StrategyType.EXPLOSIVE, confidence=score_val,
+            tqs=snap.tradeQualityScore,
             tier=event.tier, explosion_event=event, alert=alert,
         )
         chop_blocked, _ = chop_weak_explosion_blocks_entry(cand_probe, snap)

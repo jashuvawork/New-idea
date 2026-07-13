@@ -438,6 +438,21 @@ async def get_snapshots():
     return await get_multi_snapshot()
 
 
+@router.get("/snapshots/cached")
+async def get_snapshots_cached():
+    """Return in-memory cache immediately — fast UI poll path via Vercel proxy."""
+    if _cache:
+        touched = _touch_cached_snapshot(overlay_ws=is_ws_active())
+        snap = touched if touched else _cache
+        if snap.snapshots:
+            fresh = snap.model_copy(deep=True)
+            fresh.timestamp = datetime.now(IST)
+            if fresh.dataReady:
+                fresh.waitingReason = None
+            return fresh
+    return await get_multi_snapshot()
+
+
 @router.get("/stream")
 async def market_stream():
     """Server-Sent Events — push snapshots ~0.5s when WebSocket feed is active."""
