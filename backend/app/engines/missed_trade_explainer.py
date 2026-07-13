@@ -229,7 +229,10 @@ def _gate_checks(
         gates.append({"gate": "chart_alignment", "passed": True, "detail": f"chart {chart_dir}"})
 
     # 6b — Breadth alignment
-    from app.engines.aligned_side_guard import breadth_hard_blocks_side
+    from app.engines.aligned_side_guard import (
+        breadth_hard_blocks_side,
+        chart_mtf_breadth_bypass_active,
+    )
     from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
     from app.engines.rally_capture import breadth_blocks_explosion_side
 
@@ -241,12 +244,22 @@ def _gate_checks(
             "detail": f"{tier} {daily_move:.0f}% session rip — ALL-IN bypass active",
         })
 
+    bypassed, bypass_reason = chart_mtf_breadth_bypass_active(
+        candidate.side, breadth_bias, snap, score=score,
+    )
     hard_blocked, hard_reason = breadth_hard_blocks_side(
-        candidate.side, breadth_bias, candidate=candidate, alert=alert,
+        candidate.side, breadth_bias, candidate=candidate, alert=alert, snap=snap,
     )
     br_blocked, br_reason = breadth_blocks_explosion_side(candidate.side, breadth_bias, tier)
     market_opposes = _market_opposes_side(candidate.side, breadth_bias, chart)
-    if hard_blocked and not all_in:
+    if bypassed and not all_in:
+        gates.append({
+            "gate": "breadth_hard_block",
+            "passed": True,
+            "detail": f"chart+MTF override — OI breadth {breadth_bias} lags live price",
+            "fix": bypass_reason,
+        })
+    elif hard_blocked and not all_in:
         blockers.append(hard_reason)
         gates.append({
             "gate": "breadth_hard_block",
@@ -269,7 +282,7 @@ def _gate_checks(
             "detail": f"breadth {breadth_bias}" + (" (premium-led bypass)" if premium_bypass else ""),
         })
 
-    if hard_blocked and not all_in:
+    if hard_blocked and not all_in and not bypassed:
         blockers.append("market_opposes_side")
         gates.append({
             "gate": "market_direction",

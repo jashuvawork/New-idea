@@ -548,7 +548,7 @@ def validate_candidate(
         snap_pre = snap_map.get(candidate.symbol.upper()) or candidate.snap
         bias = (snap_pre.breadth.bias if snap_pre.breadth else "NEUTRAL") or "NEUTRAL"
         hard_blocked, hard_reason = breadth_hard_blocks_side(
-            candidate.side, bias, candidate=candidate,
+            candidate.side, bias, candidate=candidate, snap=snap_pre,
         )
         if hard_blocked:
             return False, hard_reason, meta
@@ -697,7 +697,7 @@ def validate_candidate(
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     if not all_in:
         hard_blocked, hard_reason = breadth_hard_blocks_side(
-            candidate.side, bias, candidate=candidate,
+            candidate.side, bias, candidate=candidate, snap=snap,
         )
         if hard_blocked:
             return False, hard_reason, meta

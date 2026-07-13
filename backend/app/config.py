@@ -192,6 +192,11 @@ class Settings(BaseSettings):
     explosion_breadth_alignment_enabled: bool = True
     # Hard block PUT on BULLISH / CALL on BEARISH — no ELITE or premium-led bypass
     breadth_hard_side_block_enabled: bool = True
+    # When option-chain OI breadth lags a live rally/selloff, trust chart+MTF over OI
+    chart_mtf_breadth_bypass_enabled: bool = True
+    chart_mtf_breadth_bypass_min_explosion_score: float = 42.0
+    chart_mtf_breadth_bypass_min_aligned: int = 3
+    chart_mtf_breadth_bypass_min_rsi: float = 52.0
     explosion_single_side_per_symbol: bool = True
     explosion_dominant_side_min_score: float = 50.0
     explosion_exhaustion_v15_pct: float = 18.0

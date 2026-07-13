@@ -4,7 +4,13 @@ from datetime import datetime
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from app.engines.aligned_side_guard import breadth_hard_blocks_side, counter_breadth_side_blocked
+from app.engines.aligned_side_guard import (
+    breadth_hard_blocks_side,
+    chart_mtf_breadth_bypass_active,
+    chart_mtf_bullish_confirmed,
+    counter_breadth_side_blocked,
+)
+from app.models.schemas import ChartAnalysis
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.explosion_profit import check_explosion_entry
 from app.engines.morning_premium_capture import (
@@ -89,6 +95,82 @@ def test_hard_block_call_on_bearish_breadth():
 def test_neutral_breadth_allows_both_sides():
     assert breadth_hard_blocks_side(Side.PUT, "NEUTRAL") == (False, "ok")
     assert breadth_hard_blocks_side(Side.CALL, "NEUTRAL") == (False, "ok")
+
+
+def _bullish_chart_mtf_snap() -> SymbolSnapshot:
+    return SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24200.0,
+        spotChart=SpotChart(
+            direction="BULLISH",
+            spot=24200.0,
+            momentum5Pct=0.08,
+            trendStrength=45.0,
+            rsi=65.0,
+            macdBias="BULLISH",
+        ),
+        breadth=Breadth(score=52, bias="BEARISH", aligned=True),
+        chartAnalysis=ChartAnalysis(
+            consensus="BULLISH",
+            alignedCount=4,
+            totalTimeframes=4,
+            ichimoku={"cloudBias": "BULLISH", "priceVsCloud": "ABOVE"},
+        ),
+    )
+
+
+@patch("app.engines.aligned_side_guard.get_settings")
+def test_chart_mtf_bypass_allows_call_on_bearish_breadth(mock_settings):
+    s = mock_settings.return_value
+    s.breadth_hard_side_block_enabled = True
+    s.chart_mtf_breadth_bypass_enabled = True
+    s.chart_mtf_breadth_bypass_min_explosion_score = 42.0
+    s.chart_mtf_breadth_bypass_min_aligned = 3
+    s.chart_mtf_breadth_bypass_min_rsi = 52.0
+
+    snap = _bullish_chart_mtf_snap()
+    assert chart_mtf_bullish_confirmed(snap) is True
+    bypassed, reason = chart_mtf_breadth_bypass_active(Side.CALL, "BEARISH", snap, score=45.0)
+    assert bypassed is True
+    assert "bullish" in reason
+
+    blocked, block_reason = breadth_hard_blocks_side(
+        Side.CALL,
+        "BEARISH",
+        snap=snap,
+        event=ExplosionEvent(
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=24350.0,
+            premium=30.0,
+            velocity_3s=3.0,
+            velocity_9s=4.0,
+            velocity_15s=5.0,
+            volume_surge=2.0,
+            explosion_score=45.0,
+            tier="ELITE",
+            reason="test",
+        ),
+    )
+    assert blocked is False
+
+
+@patch("app.engines.aligned_side_guard.get_settings")
+def test_chart_mtf_bypass_requires_min_score(mock_settings):
+    s = mock_settings.return_value
+    s.breadth_hard_side_block_enabled = True
+    s.chart_mtf_breadth_bypass_enabled = True
+    s.chart_mtf_breadth_bypass_min_explosion_score = 45.0
+    s.chart_mtf_breadth_bypass_min_aligned = 3
+    s.chart_mtf_breadth_bypass_min_rsi = 52.0
+
+    snap = _bullish_chart_mtf_snap()
+    blocked, reason = breadth_hard_blocks_side(Side.CALL, "BEARISH", snap=snap, alert={"explosionScore": 40})
+    assert blocked is True
+    assert reason == "hard_block_call_vs_bearish_breadth"
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)

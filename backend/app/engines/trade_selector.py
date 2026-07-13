@@ -105,7 +105,7 @@ def _reentry_blocked(
 
         bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
         hard_blocked, hard_reason = breadth_hard_blocks_side(
-            side, bias, event=explosion_event,
+            side, bias, event=explosion_event, snap=snap,
         )
         if hard_blocked:
             return True, hard_reason
