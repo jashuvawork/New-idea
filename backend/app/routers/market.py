@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.engines.auto_trader import get_state, process, process_exits_only, refresh_trading_capital
 from app.engines.capital_allocator import refresh_lot_sizes
 from app.engines.realtime_engine import build_symbol_snapshot
-from app.engines.snapshot_fast import overlay_snapshot_ltps
+from app.engines.snapshot_fast import overlay_snapshot_live, overlay_snapshot_ltps
 from app.engines.psychology_engine import analyze_psychology, psychology_to_dict
 from app.engines.adaptive_exits import compute_adaptive_exit_plan
 from app.models.schemas import MultiSnapshot, StrategyType
@@ -51,7 +51,7 @@ def _touch_cached_snapshot(*, overlay_ws: bool = False) -> Optional[MultiSnapsho
     snap = _cache.model_copy(deep=True)
     snap.timestamp = datetime.now(IST)
     if overlay_ws and is_ws_active() and snap.dataReady:
-        snap.snapshots = overlay_snapshot_ltps(
+        snap.snapshots = overlay_snapshot_live(
             snap.snapshots,
             max_age_seconds=settings.tick_overlay_max_age_seconds,
         )
@@ -138,7 +138,7 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
 
     t0 = time.perf_counter()
     settings = get_settings()
-    overlays = overlay_snapshot_ltps(
+    overlays = overlay_snapshot_live(
         _cache.snapshots,
         max_age_seconds=settings.tick_overlay_max_age_seconds,
     )

@@ -114,6 +114,13 @@ async def fetch_live_trade_charts(
             prem_ltp = float(
                 leg.get("last_price") or leg.get("ltp") or strike or snap.spot or 0,
             )
+            from app.engines.snapshot_fast import resolve_trade_premium
+
+            ws_prem = resolve_trade_premium(
+                snap, strike, side, instrument_key=instrument_key, max_age_seconds=3.0,
+            )
+            if ws_prem is not None and ws_prem > 0:
+                prem_ltp = ws_prem
             if not prem_ltp:
                 prem_ltp = float(strike)
             premium_chart = analyze_premium_chart(opt_candles, prem_ltp)

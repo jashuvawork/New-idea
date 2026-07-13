@@ -7,12 +7,16 @@ from zoneinfo import ZoneInfo
 from app.engines.snapshot_fast import overlay_snapshot_ltps, resolve_trade_premium
 from app.models.schemas import (
     Breadth,
+    ChartAnalysis,
     HeatmapStrike,
     MarketPhase,
+    MarketProfile,
     Side,
+    SpotChart,
     SymbolSnapshot,
 )
 from app.services.tick_store import record_tick, clear
+from app.services.upstox import INDEX_KEYS
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -42,6 +46,33 @@ def test_resolve_trade_premium_prefers_ws_tick():
     snap = _snap()
     premium = resolve_trade_premium(snap, 24000, Side.PUT, "NSE_FO|67890")
     assert premium == 88.5
+
+
+def test_overlay_snapshot_spot_charts_refreshes_rsi():
+    from app.engines.snapshot_fast import overlay_snapshot_spot_charts
+
+    clear()
+    record_tick(INDEX_KEYS["NIFTY"], 24233.2)
+
+    recent = [24000 + i * 2 for i in range(20)] + [24030.0]
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24030.0,
+        spotChart=SpotChart(direction="BEARISH", spot=24030.0, rsi=22.0, macdBias="BEARISH"),
+        chartAnalysis=ChartAnalysis(
+            consensus="NEUTRAL",
+            recentCloses=recent,
+            ichimoku={"cloudBias": "BULLISH", "priceVsCloud": "ABOVE"},
+        ),
+        marketProfile=MarketProfile(poc=24100, openingRangeHigh=24200, openingRangeLow=23900),
+    )
+    out = overlay_snapshot_spot_charts({"NIFTY": snap})
+    refreshed = out["NIFTY"]
+    assert refreshed.spot == 24233.2
+    assert refreshed.spotChart.rsi > 50
 
 
 def test_overlay_snapshot_ltps_updates_heatmap():

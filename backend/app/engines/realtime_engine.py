@@ -60,13 +60,17 @@ def _atm_strike(spot: float, symbol: str) -> float:
     return round(spot / step) * step
 
 
-def _detect_regime(candles: list) -> Regime:
+def _detect_regime(candles: list, spot: float = 0.0) -> Regime:
     if not candles or len(candles) < 10:
         return Regime.RANGE_BOUND
 
     closes = [c[4] if isinstance(c, list) else c.get("close", 0) for c in candles[-20:]]
     if not closes:
         return Regime.RANGE_BOUND
+
+    if spot > 0:
+        from app.engines.spot_direction import _patch_live_close
+        closes = _patch_live_close(closes, spot)
 
     high, low = max(closes), min(closes)
     range_pct = ((high - low) / low) * 100 if low else 0
@@ -517,7 +521,7 @@ async def build_symbol_snapshot(
             )
 
         greeks = _build_greeks(chain, atm, spot)
-        regime = _detect_regime(candles)
+        regime = _detect_regime(candles, spot)
         runner, watchlist = _scan_runners(chain, spot, atm, symbol)
 
         tqs, _ = score_tqs(

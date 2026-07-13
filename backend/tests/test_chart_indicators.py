@@ -56,11 +56,34 @@ def test_analyze_spot_chart_includes_rsi_macd():
     assert chart.macdBias in ("BEARISH", "NEUTRAL", "BULLISH")
 
 
-def test_analyze_premium_chart_includes_rsi_macd():
-    closes = _trending_closes(80.0, 0.2, 40)
+def test_analyze_premium_chart_live_ltp_patches_indicators():
+    closes = _trending_closes(100.0, -0.4, 40)
     candles = _candles_from_closes(closes)
     for c in candles:
         c.append(1000)
-    chart = analyze_premium_chart(candles, closes[-1])
-    assert chart.rsi > 0
-    assert chart.macdBias in ("BULLISH", "BEARISH", "NEUTRAL")
+    stale = closes[-1]
+    live = stale + 6.0
+    chart_stale = analyze_premium_chart(candles, stale)
+    chart_live = analyze_premium_chart(candles, live)
+    assert chart_live.rsi > chart_stale.rsi
+    assert chart_live.momentum5Pct > chart_stale.momentum5Pct
+    assert chart_live.macdBias in ("BULLISH", "BEARISH", "NEUTRAL")
+
+
+def test_refresh_spot_chart_live_from_recent_closes():
+    from app.engines.spot_direction import refresh_spot_chart_live
+    from app.models.schemas import ChartAnalysis, SpotChart
+
+    recent = [24000 + i * 2 for i in range(20)] + [24030.0]
+    live = 24233.2
+    chart = SpotChart(direction="BEARISH", spot=24030.0, rsi=22.0, macdBias="BEARISH")
+    analysis = ChartAnalysis(consensus="NEUTRAL", recentCloses=recent, ichimoku={
+        "cloudBias": "BULLISH", "priceVsCloud": "ABOVE", "tkCross": "BEARISH",
+    })
+    profile = MarketProfile(poc=24100, openingRangeHigh=24200, openingRangeLow=23900)
+    out = refresh_spot_chart_live(
+        chart, live_spot=live, profile=profile, chart_analysis=analysis, breadth_bias="BEARISH",
+    )
+    assert out.spot == live
+    assert out.rsi > 50
+    assert out.direction in ("BULLISH", "NEUTRAL")

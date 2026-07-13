@@ -7,7 +7,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.engines.chart_indicators import compute_macd, compute_rsi
-from app.engines.mtf_chart_analysis import SCALP_TIMEFRAMES, analyze_timeframe, resample_candles
+from app.engines.mtf_chart_analysis import SCALP_TIMEFRAMES, analyze_timeframe, resample_candles, resample_ohlc_bars
 from app.engines.spot_direction import _candle_rows
 from app.models.schemas import ChartAnalysis, MarketProfile, TimeframeChartRead
 
@@ -417,8 +417,6 @@ def build_mtf_reads(
     if not candles_5m:
         return reads
 
-    from app.engines.mtf_chart_analysis import resample_ohlc_bars
-
     for label, bucket in _FALLBACK_5M_FRAMES:
         candles = candles_5m if bucket <= 1 else resample_ohlc_bars(candles_5m, bucket)
         reads[label] = analyze_timeframe(candles, spot, label) if candles else TimeframeChartRead(
@@ -449,6 +447,16 @@ def build_chart_analysis(
     if not closes:
         return ChartAnalysis(consensus=consensus, timeframes={k: v.model_dump() for k, v in mtf_reads.items()})
 
+    from app.engines.spot_direction import _patch_live_close
+
+    closes = _patch_live_close(closes, spot)
+    if highs:
+        highs = list(highs)
+        highs[-1] = max(highs[-1], spot)
+    if lows:
+        lows = list(lows)
+        lows[-1] = min(lows[-1], spot)
+
     swing_highs, swing_lows = _find_swings(highs, lows)
     sh = swing_highs[-1][1] if swing_highs else max(highs)
     sl = swing_lows[-1][1] if swing_lows else min(lows)
@@ -466,11 +474,16 @@ def build_chart_analysis(
     smc = analyze_smc_ict(opens, highs, lows, closes, spot)
 
     patterns: list[dict[str, Any]] = []
-    for label, resample in (("5m", 5), ("15m", 15)):
-        if candles_1m:
-            tf_candles = candles_1m if label == "1m" else resample_candles(candles_1m, resample)
-            o, h, l, c = _candle_rows(tf_candles)
-            patterns.extend(detect_candlestick_patterns(o, h, l, c, timeframe=label))
+    pattern_sources: list[tuple[str, list]] = []
+    if candles_1m:
+        pattern_sources.append(("5m", resample_candles(candles_1m, 5)))
+        pattern_sources.append(("15m", resample_candles(candles_1m, 15)))
+    elif candles_5m:
+        pattern_sources.append(("5m", candles_5m))
+        pattern_sources.append(("15m", resample_ohlc_bars(candles_5m, 3)))
+    for label, tf_candles in pattern_sources:
+        o, h, l, c = _candle_rows(tf_candles)
+        patterns.extend(detect_candlestick_patterns(o, h, l, c, timeframe=label))
 
     # Deduplicate pattern names — keep strongest
     seen: dict[str, dict[str, Any]] = {}

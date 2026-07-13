@@ -243,6 +243,54 @@ def build_spot_chart(
     )
 
 
+def _closes_to_synthetic_candles(closes: list[float]) -> list[list[float]]:
+    """Rebuild minimal OHLC rows from close series for lightweight chart refresh."""
+    out: list[list[float]] = []
+    for i, c in enumerate(closes):
+        o = closes[i - 1] if i > 0 else c
+        out.append([float(i), o, max(o, c) + 0.5, min(o, c) - 0.5, c])
+    return out
+
+
+def refresh_spot_chart_live(
+    spot_chart: SpotChart,
+    *,
+    live_spot: float,
+    profile: MarketProfile,
+    chart_analysis: Optional[Any] = None,
+    breadth_bias: str = "NEUTRAL",
+    from_open_pct: float = 0.0,
+) -> SpotChart:
+    """
+    Recompute spotChart RSI/MACD/momentum on cached snapshots without a full REST rebuild.
+    Uses chartAnalysis.recentCloses (5m) with live spot patched into the forming bar.
+    """
+    if live_spot <= 0:
+        return spot_chart
+
+    recent: list[float] = []
+    if chart_analysis is not None:
+        recent = list(getattr(chart_analysis, "recentCloses", None) or [])
+        if not recent and isinstance(chart_analysis, dict):
+            recent = list(chart_analysis.get("recentCloses") or [])
+
+    if len(recent) < 5:
+        updated = spot_chart.model_copy(update={"spot": round(live_spot, 2)})
+        if chart_analysis:
+            return reconcile_spot_chart_with_mtf(
+                updated, chart_analysis, breadth_bias=breadth_bias, from_open_pct=from_open_pct,
+            )
+        return updated
+
+    candles_5m = _closes_to_synthetic_candles(recent)
+    refreshed = build_spot_chart(candles_5m, live_spot, profile)
+    if chart_analysis:
+        return reconcile_spot_chart_with_mtf(
+            refreshed, chart_analysis, breadth_bias=breadth_bias, from_open_pct=from_open_pct,
+        )
+    return refreshed
+
+
 def reconcile_spot_chart_with_mtf(
     spot_chart: SpotChart,
     chart_analysis: Optional[Any],
@@ -501,6 +549,8 @@ def analyze_premium_chart(candles: list, ltp: float) -> "PremiumChart":
 
     if not closes or ltp <= 0:
         return PremiumChart(lastPremium=ltp)
+
+    closes = _patch_live_close(closes, ltp)
 
     mom3 = _pct_change(closes, 3)
     mom5 = _pct_change(closes, 5)
