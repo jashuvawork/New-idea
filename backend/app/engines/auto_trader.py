@@ -26,7 +26,9 @@ from app.engines.adaptive_exits import (
     evaluate_adaptive_scalp_exit,
     evaluate_adaptive_swing_exit,
 )
+from app.engines.chart_exit_levels import refresh_open_trade_chart_plan, update_live_chart_trail
 from app.engines.capital_allocator import (
+    clamp_lots,
     compute_lots,
     compute_session_pnl,
     get_capital_snapshot,
@@ -78,8 +80,13 @@ from app.models.schemas import (
     SymbolSnapshot,
     TradeMastermind,
 )
-from app.engines.quick_sideways import evaluate_quick_sideways_exit, get_quick_sideways_profile
-from app.engines.session_timing import entries_allowed_now, entry_window_label
+from app.engines.quick_sideways import (
+    cap_quick_sideways_lots,
+    evaluate_quick_sideways_exit,
+    get_quick_sideways_profile,
+    snapshot_in_chop,
+)
+from app.engines.session_timing import entries_allowed_now, entry_window_label, explosion_entries_allowed_now
 from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
 from app.services.order_executor import place_entry_order, place_exit_order
@@ -116,22 +123,76 @@ _state_loaded: bool = False
 
 
 def _ensure_state_loaded() -> None:
-    """Restore open paper trades from persistent store after restart."""
+    """Restore open + today's closed paper trades from persistent store after restart."""
     global _auto_trader_state, _state_loaded
     if _state_loaded:
         return
     _state_loaded = True
+    if not _auto_trader_state:
+        return
+
     saved = trade_store.load_open_trades()
-    if saved and _auto_trader_state:
+    if saved:
         for raw in saved:
             try:
                 trade = PaperTrade(**raw)
                 if trade.status == "OPEN":
                     _auto_trader_state.openPaperTrades.append(trade)
             except Exception as e:
-                logger.warning("Failed to restore trade: %s", e)
+                logger.warning("Failed to restore open trade: %s", e)
         if saved:
-            logger.info("Restored %d open paper trades from store", len(saved))
+            logger.info("Restored %d open paper trades from store", len(_auto_trader_state.openPaperTrades))
+
+    try:
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+        reset_at = trade_store.get_session_reset_at()
+        day = trade_store.get_day_detail(today)
+        restored_closed = 0
+        seen_ids = {t.id for t in _auto_trader_state.closedPaperTrades}
+        for row in day.get("trades", []):
+            if row.get("status") != "CLOSED":
+                continue
+            exit_reason = str(row.get("exitReason") or "")
+            if exit_reason in ("SESSION_RESET", "manual_reset"):
+                continue
+            tid = str(row.get("id", ""))
+            if tid and tid in seen_ids:
+                continue
+            closed_raw = row.get("closedAt")
+            if reset_at and closed_raw:
+                try:
+                    closed_at = datetime.fromisoformat(str(closed_raw))
+                    if closed_at <= reset_at:
+                        continue
+                except ValueError:
+                    pass
+            try:
+                side_raw = str(row.get("side", "CALL")).upper()
+                _auto_trader_state.closedPaperTrades.append(PaperTrade(
+                    id=tid or f"restored-{restored_closed}",
+                    symbol=str(row.get("symbol", "")),
+                    side=Side(side_raw),
+                    strike=float(row.get("strike") or 0),
+                    entryPremium=float(row.get("entryPremium") or 0),
+                    currentPremium=float(row.get("currentPremium") or row.get("exitPremium") or row.get("entryPremium") or 0),
+                    lots=int(row.get("lots") or 1),
+                    exitPremium=float(row.get("exitPremium") or row.get("entryPremium") or 0),
+                    pnlInr=float(row.get("pnlInr") or 0),
+                    openedAt=datetime.fromisoformat(str(row.get("openedAt"))) if row.get("openedAt") else datetime.now(IST),
+                    closedAt=datetime.fromisoformat(str(closed_raw)) if closed_raw else None,
+                    status="CLOSED",
+                    exitReason=exit_reason,
+                    strategyType=StrategyType(str(row.get("strategyType") or "EXPLOSIVE")),
+                    sessionDate=today,
+                ))
+                restored_closed += 1
+            except Exception as e:
+                logger.warning("Failed to restore closed trade %s: %s", tid, e)
+        if restored_closed:
+            logger.info("Restored %d closed paper trades for %s", restored_closed, today)
+            _auto_trader_state.dailyReport = _calibration.build_report(_auto_trader_state.closedPaperTrades)
+    except Exception as e:
+        logger.warning("Failed to hydrate closed trades: %s", e)
 
 
 def _build_context(snap: Optional[SymbolSnapshot], extra: Optional[dict] = None) -> dict:
@@ -192,7 +253,12 @@ def _attach_exit_plan(
         entry_velocity_3s=entry_velocity_3s,
         explosion_tier=explosion_tier,
     )
-    return plan.to_dict()
+    from app.engines.adaptive_exits import apply_chart_exit_tuning
+
+    tuned = apply_chart_exit_tuning(
+        plan, snap, side, float(entry_premium or snap.spot or 50),
+    )
+    return tuned.to_dict()
 
 
 def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
@@ -265,14 +331,38 @@ async def _open_from_candidate(
     state: AutoTraderState,
     client: Optional[UpstoxClient] = None,
     news: Optional[list[dict]] = None,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
 ) -> tuple[bool, str]:
     """Open one trade from best-ranked setup — paper journal + optional live broker order."""
     settings = get_settings()
     symbol = candidate.symbol
     snap = candidate.snap
+
+    from app.engines.worst_day_guard import worst_day_blocks_live
+
+    if snapshots:
+        live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
+        if live_blocked and settings.enable_live_trading:
+            return False, live_reason
+
+        from app.engines.worst_day_guard import worst_day_allows_candidate
+        from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
+
+        if not is_extreme_explosion_all_in_bypass(candidate=candidate):
+            wd_ok, wd_reason, _ = worst_day_allows_candidate(candidate, state, snapshots)
+            if not wd_ok:
+                return False, wd_reason
+
+    if snapshots and settings.controlled_trading_enabled:
+        from app.engines.pretrade_validator import validate_candidate
+
+        vt_ok, vt_reason, _ = validate_candidate(candidate, state, snapshots=snapshots)
+        if not vt_ok:
+            return False, vt_reason
+
     profile = snap.optimizedProfile or get_session_targets()
-    if candidate.mode == "quick_sideways":
-        profile = get_quick_sideways_profile()
+    if candidate.mode in ("quick_sideways", "slow_bounce"):
+        profile = get_quick_sideways_profile(candidate.premium)
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
 
     signal_premium = candidate.premium
@@ -302,6 +392,19 @@ async def _open_from_candidate(
         confidence=candidate.confidence,
         tier=candidate.tier,
     )
+    if candidate.mode == "explosion":
+        from app.engines.explosion_profit import cap_explosion_lots
+
+        lots = cap_explosion_lots(lots, fill_premium)
+    elif candidate.mode in ("quick_sideways", "slow_bounce"):
+        lots = cap_quick_sideways_lots(lots, fill_premium)
+    from app.engines.bad_day_routing import bad_day_lot_cap
+
+    snap_map = snapshots or {symbol: snap}
+    lots = bad_day_lot_cap(fill_premium, lots, state, snap_map)
+    from app.engines.explosion_profit import expiry_session_lot_cap
+
+    lots = expiry_session_lot_cap(lots, fill_premium, snap.tradeQualityScore, snap_map)
     lots = apply_tiered_lot_cap(
         lots, candidate.score, snap.breadth.aligned, symbol,
         velocity_pct=(
@@ -327,6 +430,9 @@ async def _open_from_candidate(
     lots = scale_lots_by_edge(lots, edge)
     if lots <= 0:
         return False, "edge_lot_scale_zero"
+    if settings.lot_size_multiplier > 1.0:
+        lots = max(1, int(lots * settings.lot_size_multiplier))
+    lots = clamp_lots(lots, symbol, fill_premium)
     lot_mult = lot_multiplier(symbol)
 
     ok, risk_reason = _risk_engine.check_new_entry(
@@ -340,6 +446,10 @@ async def _open_from_candidate(
 
     instrument_key = _heatmap_instrument_key(snap, candidate.strike, candidate.side)
 
+    from app.engines.pretrade_validator import candidate_trade_score
+
+    trade_score = candidate_trade_score(candidate)
+
     if settings.execution_chart_gate_enabled:
         if client:
             from app.engines.execution_chart_monitor import monitor_trade_chart_before_execution
@@ -350,16 +460,31 @@ async def _open_from_candidate(
                 candidate.side,
                 candidate.strike,
                 snap,
-                trade_score=candidate.score,
+                trade_score=trade_score,
                 instrument_key=instrument_key,
+                mode=candidate.mode or "",
+                explosion_event=candidate.explosion_event,
             )
             if not chart_ok:
                 return False, chart_reason
         else:
-            from app.engines.spot_direction import chart_blocks_side
+            from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
+            from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_candidate
+            from app.engines.morning_premium_capture import premium_led_bypass_for_snap
+            from app.engines.spot_direction import chart_blocks_side, side_aligned_with_chart
 
+            breadth_bypass = expiry_pm_itm_chart_bypass_allowed(
+                candidate.side, snap, mode=candidate.mode or "",
+            )
+            premium_bypass = premium_led_bypass_for_snap(
+                candidate.side, snap, explosion_event=candidate.explosion_event,
+            )
+            expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
             blocked, chart_reason = chart_blocks_side(
-                candidate.side, snap.spotChart, trade_score=candidate.score,
+                candidate.side, snap.spotChart, trade_score=trade_score,
+                breadth_aligned_bypass=breadth_bypass,
+                premium_led_bypass=premium_bypass,
+                expiry_explosion_bypass=expiry_chart_bypass,
             )
             if blocked:
                 return False, f"exec_{chart_reason}"
@@ -367,6 +492,14 @@ async def _open_from_candidate(
                 "enabled": True,
                 "source": "snapshot_only",
                 "indexChart": snap.spotChart.model_dump() if snap.spotChart else {},
+                "snapshotChart": snap.spotChart.model_dump() if snap.spotChart else {},
+                "snapshotAligned": side_aligned_with_chart(candidate.side, snap.spotChart),
+                "alignedWithChart": side_aligned_with_chart(candidate.side, snap.spotChart),
+                "chartBypassUsed": bool(
+                    premium_bypass or expiry_chart_bypass or breadth_bypass
+                ),
+                "premiumLedBypass": premium_bypass,
+                "expiryExplosionBypass": expiry_chart_bypass,
             }
     else:
         chart_meta = {"enabled": False}
@@ -388,6 +521,11 @@ async def _open_from_candidate(
         )
         exit_plan = plan_obj.to_dict()
 
+    entry_chart_conf = float(exit_plan.get("chartConfidence") or 0)
+    if entry_chart_conf <= 0:
+        from app.engines.chart_exit_levels import chart_trade_confidence
+        entry_chart_conf, _ = chart_trade_confidence(snap, candidate.side)
+
     ctx_extra: dict[str, Any] = {
         "selectionScore": round(candidate.score, 2),
         "selectionMode": candidate.mode,
@@ -395,6 +533,8 @@ async def _open_from_candidate(
         "edgeScore": edge.to_dict(),
         "tradeBudgetInr": exit_plan.get("tradeBudgetInr"),
         "exitPlan": exit_plan,
+        "entryChartConfidence": round(entry_chart_conf, 1),
+        "chartConfidence": round(entry_chart_conf, 1),
         "executionMode": _execution_mode(settings),
         "optionExpiry": snap.optionExpiry,
         "slippage": slip_meta,
@@ -424,10 +564,21 @@ async def _open_from_candidate(
         ctx_extra["entryVelocity3s"] = entry_velocity_3s
     if candidate.mode == "explosion" and candidate.explosion_event:
         ev = candidate.explosion_event
+        from app.engines.extreme_explosion_moment import (
+            extreme_all_in_meta,
+            is_extreme_explosion_all_in_bypass,
+        )
+        from app.engines.morning_premium_capture import is_afternoon_capture_event
+
+        afternoon = is_afternoon_capture_event(ev, chart=snap.spotChart)
         ctx_extra.update({
             "explosionTier": ev.tier,
             "explosionScore": ev.explosion_score,
+            "afternoonCapture": afternoon,
+            "dailyMovePct": float(ev.daily_move_pct or 0),
         })
+        if is_extreme_explosion_all_in_bypass(candidate=candidate):
+            ctx_extra.update(extreme_all_in_meta(candidate=candidate))
     elif candidate.mode == "scalp" and candidate.suggestion:
         ctx_extra.update({
             "tqs": candidate.suggestion.tqs,
@@ -442,6 +593,12 @@ async def _open_from_candidate(
             "maxHoldDays": candidate.alert.get("maxHoldDays"),
             "reason": candidate.swing_setup.reason if candidate.swing_setup else "",
         })
+    elif candidate.mode in ("quick_sideways", "slow_bounce"):
+        regime = snap.regime
+        ctx_extra["inChop"] = snapshot_in_chop(snap)
+        ctx_extra["regime"] = regime.value if hasattr(regime, "value") else str(regime)
+        if candidate.mode == "slow_bounce":
+            ctx_extra.update(candidate.pretrade_meta or {})
 
     if not ctx_extra.get("instrumentKey"):
         if instrument_key:
@@ -534,8 +691,25 @@ async def _open_from_candidate(
         "score": round(candidate.score, 2),
         "executionMode": ctx_extra["executionMode"],
         "brokerOrderId": ctx_extra.get("brokerOrderId"),
-        "chartDirection": chart_meta.get("indexChart", {}).get("direction"),
-        "chartAligned": chart_meta.get("alignedWithChart"),
+        "chartDirection": (
+            (chart_meta.get("snapshotChart") or {}).get("direction")
+            or chart_meta.get("indexChart", {}).get("direction")
+        ),
+        "execChartDirection": chart_meta.get("indexChart", {}).get("direction"),
+        "chartAligned": (
+            chart_meta.get("snapshotAligned")
+            if chart_meta.get("snapshotAligned") is not None
+            else chart_meta.get("alignedWithChart")
+        ),
+        "chartBypass": (
+            "expiry explosion"
+            if chart_meta.get("expiryExplosionBypass")
+            else "premium-led"
+            if chart_meta.get("premiumLedBypass")
+            else "breadth-aligned"
+            if chart_meta.get("chartBypassUsed")
+            else None
+        ),
         "at": datetime.now(IST).isoformat(),
     }
     logger.info(
@@ -663,6 +837,9 @@ async def _process_open_trades(
         )
 
         live_vel = _trade_premium_velocity(snap, trade)
+        refresh_open_trade_chart_plan(trade, snap)
+        update_live_chart_trail(trade, snap)
+        plan_dict = (trade.entryContext or {}).get("exitPlan") or plan_dict
         if settings.edge_engine_enabled:
             edge_exit, edge_pnl = check_edge_realtime_exit(
                 trade, eval_premium, snap,
@@ -702,9 +879,34 @@ async def _process_open_trades(
                     current_velocity_3s=live_vel,
                 )
             else:
-                exit_reason, pnl = evaluate_explosion_exit(trade, eval_premium, tier, lot_mult)
-        elif not exit_reason and (trade.entryContext or {}).get("selectionMode") == "quick_sideways":
-            exit_reason, pnl = evaluate_quick_sideways_exit(trade, eval_premium, lot_mult)
+                from app.engines.morning_premium_capture import afternoon_capture_exit_params
+
+                exit_params = None
+                if (trade.entryContext or {}).get("afternoonCapture"):
+                    exit_params = afternoon_capture_exit_params(tier)
+                exit_reason, pnl = evaluate_explosion_exit(
+                    trade, eval_premium, tier, lot_mult, params=exit_params,
+                )
+        elif not exit_reason and (trade.entryContext or {}).get("selectionMode") in (
+            "quick_sideways", "slow_bounce",
+        ):
+            from app.engines.chart_exit_levels import should_promote_quick_to_trailing
+
+            best_pts = max(trade.bestPnlPoints, eval_premium - trade.entryPremium)
+            if should_promote_quick_to_trailing(
+                trade, snap, best_pts=best_pts, live_velocity=live_vel,
+            ) and plan_dict:
+                exit_reason, pnl = evaluate_adaptive_scalp_exit(
+                    trade,
+                    eval_premium,
+                    AdaptiveExitPlan.from_dict(plan_dict),
+                    profile,
+                    lot_mult,
+                )
+            else:
+                exit_reason, pnl = evaluate_quick_sideways_exit(
+                    trade, eval_premium, lot_mult, snap=snap,
+                )
         elif not exit_reason and use_adaptive:
             exit_reason, pnl = evaluate_adaptive_scalp_exit(
                 trade, eval_premium, AdaptiveExitPlan.from_dict(plan_dict), profile, lot_mult,
@@ -797,6 +999,12 @@ async def _process_open_trades(
             exit_reason or "",
         )
         trade_store.record_trade_closed(trade, ctx)
+        from app.engines.snapshot_lag_analyzer import build_trade_close_report
+        from app.services import trade_store as ts
+
+        report = build_trade_close_report(trade, snapshots, state)
+        report["sessionDate"] = trade.sessionDate or datetime.now(IST).strftime("%Y-%m-%d")
+        ts.record_trade_report(report)
         get_ai_learning().record_trade_close(trade)
         state.lastExit = {
             "tradeId": trade.id,
@@ -908,7 +1116,8 @@ async def process(
 
     # Try new entries — best setup only, max lots on 85% sizing capital
     entries_ok, entry_window_reason = entries_allowed_now()
-    if market_live and not entries_ok:
+    explosion_early_ok, _ = explosion_entries_allowed_now()
+    if market_live and not entries_ok and not explosion_early_ok:
         skipped.append({
             "symbol": "SESSION",
             "reason": entry_window_reason,
@@ -920,7 +1129,7 @@ async def process(
         and settings.auto_trading_enabled
         and market_live
         and profit_gate.newEntriesAllowed
-        and entries_ok
+        and (entries_ok or explosion_early_ok)
     ):
         paused, pause_reason = session_pause_active()
         if paused:
@@ -961,6 +1170,25 @@ async def process(
                 or f"Whipsaw/churn pause — CE↔PE flip-flops in bearish sideways",
             })
         from app.engines.expiry_day_guards import check_expiry_entry_allowed
+        from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
+
+        policy, policy_meta = session_entry_policy(state, snapshots)
+        from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
+
+        extreme_session = snapshots_have_all_in_explosion(snapshots)
+        if policy == "PAUSED" and not extreme_session:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": policy_meta.get("pauseReason", "worst_day_paused"),
+                "message": f"Worst day — trading paused ({', '.join(policy_meta.get('worstDay', {}).get('reasons', []))})",
+            })
+        live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
+        if live_blocked:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": live_reason,
+                "message": "Worst day — live trading blocked until conditions improve",
+            })
 
         expiry_ok, expiry_reason, expiry_meta = check_expiry_entry_allowed(state, snapshots)
         if not expiry_ok:
@@ -971,10 +1199,15 @@ async def process(
                 and f"Expiry guard — {', '.join(expiry_meta.get('worstDayReasons', []))}"
                 or "Expiry-day entry blocked",
             })
-        if not paused and not cap_hit and not ctrl_cap and not last_n_paused and not whipsaw_paused and expiry_ok:
+        if (
+            not paused and not cap_hit and not ctrl_cap and not last_n_paused
+            and not whipsaw_paused and expiry_ok and policy != "PAUSED" and not live_blocked
+        ):
             best = find_best_entry(snapshots, state, trading_limits)
+            if best and explosion_early_ok and not entries_ok and best.mode != "explosion":
+                best = None
             if best:
-                opened, reason = await _open_from_candidate(best, state, client, news)
+                opened, reason = await _open_from_candidate(best, state, client, news, snapshots)
                 if not opened:
                     skipped.append({
                         "symbol": best.symbol,

@@ -26,16 +26,32 @@ function deriveQuality(
   stalenessMs: number,
   session: MarketSessionInfo,
   dataReady?: boolean,
+  streamMode?: StreamMetrics['streamMode'],
 ): StreamMetrics['connectionQuality'] {
   if (session.marketClosed && stalenessMs < 120_000) return 'good';
   if (session.dataPauseReason) {
     if (/cooling down|rate limit|429/i.test(session.dataPauseReason)) return 'slow';
     return 'slow';
   }
+  if (dataReady && stalenessMs < 4_000) {
+    if (streamMode === 'sse') {
+      if (stalenessMs > 10_000) return 'offline';
+      if (stalenessMs > 3_000) return 'slow';
+      return stalenessMs > 800 ? 'good' : 'excellent';
+    }
+    return latencyQuality(latencyMs);
+  }
+  if (streamMode === 'sse') {
+    if (!dataReady && stalenessMs > 20_000) return 'offline';
+    if (stalenessMs > 10_000) return 'offline';
+    if (stalenessMs > 3_000) return 'slow';
+    if (stalenessMs > 800) return 'good';
+    return 'excellent';
+  }
   if (dataReady && stalenessMs < 30_000) return latencyQuality(latencyMs);
   if (stalenessMs > 20_000) return 'offline';
   if (stalenessMs > 5_000) return 'slow';
-  if (stalenessMs > 1_500) return 'slow';
+  if (stalenessMs > 3_000) return 'slow';
   return latencyQuality(latencyMs);
 }
 
@@ -49,16 +65,27 @@ export function ConnectionStatus({
   dataReady?: boolean;
 }) {
   const ageSec = Math.floor(metrics.stalenessMs / 1000);
-  const quality = deriveQuality(metrics.lastLatencyMs, metrics.stalenessMs, session, dataReady);
-  const label = connectionStatusLabel(session, quality, metrics.streamMode);
+  const quality = deriveQuality(
+    metrics.lastLatencyMs,
+    metrics.stalenessMs,
+    session,
+    dataReady,
+    metrics.streamMode,
+  );
+  const label = connectionStatusLabel(session, quality, metrics.streamMode, dataReady);
   const paused = Boolean(session.dataPauseReason);
+  const latencyLabel = metrics.streamMode === 'sse' && metrics.lastLatencyMs > 0
+    ? `${metrics.lastLatencyMs}ms fresh`
+    : `${metrics.lastLatencyMs}ms`;
 
   return (
     <div
       className={`flex items-center gap-2 text-[10px] px-2.5 py-1 rounded border ${qualityColor(quality)}`}
       title={[
         metrics.streamMode === 'sse' ? 'SSE stream' : 'HTTP poll',
-        `Round-trip: ${metrics.lastLatencyMs}ms`,
+        metrics.streamMode === 'sse'
+          ? `Data age: ${metrics.stalenessMs}ms`
+          : `Round-trip: ${metrics.lastLatencyMs}ms`,
         `Avg: ${metrics.avgLatencyMs}ms`,
         `Refresh every ${metrics.pollIntervalMs / 1000}s`,
         session.dataPauseReason,
@@ -77,7 +104,7 @@ export function ConnectionStatus({
       />
       <span className="font-semibold">{label}</span>
       <span className="opacity-80">·</span>
-      <span className="font-mono">{metrics.lastLatencyMs}ms</span>
+      <span className="font-mono">{latencyLabel}</span>
       {metrics.lastUpdatedAt && (
         <>
           <span className="opacity-80">·</span>
@@ -107,7 +134,7 @@ export function LatencyFooter({ metrics }: { metrics: StreamMetrics }) {
       <span>
         Data age:{' '}
         <span className="font-mono text-gray-300">
-          {metrics.stalenessMs < 1500 ? 'live' : `${Math.round(metrics.stalenessMs / 1000)}s`}
+          {metrics.stalenessMs < 800 ? 'live' : `${Math.round(metrics.stalenessMs / 1000)}s`}
         </span>
       </span>
     </div>

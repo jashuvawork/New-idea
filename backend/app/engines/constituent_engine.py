@@ -114,6 +114,7 @@ async def build_constituent_heatmap(
     symbol: str,
     client: Optional[UpstoxClient] = None,
     force_refresh: bool = False,
+    cache_only: bool = False,
 ) -> ConstituentHeatmap:
     """Fetch real constituent quotes and build heatmap analysis."""
     symbol = symbol.upper()
@@ -122,6 +123,8 @@ async def build_constituent_heatmap(
     if not force_refresh and symbol in _cache:
         cached_at, cached = _cache[symbol]
         if (now - cached_at).total_seconds() < CACHE_SECONDS:
+            return cached
+        if cache_only:
             return cached
 
     constituents = get_constituents(symbol)
@@ -135,6 +138,14 @@ async def build_constituent_heatmap(
             error=f"No constituent map for {symbol}",
         )
 
+    if cache_only:
+        return ConstituentHeatmap(
+            symbol=symbol,
+            indexLabel=label,
+            dataAvailable=False,
+            error="Constituent cache miss during rate limit",
+        )
+
     if not client:
         client = UpstoxClient()
 
@@ -144,6 +155,14 @@ async def build_constituent_heatmap(
     try:
         async with _constituent_fetch_lock:
             quotes = await client.get_full_quotes(keys)
+        missing_keys = [k for k in keys if not resolve_quote_payload(quotes, k)]
+        if missing_keys and len(missing_keys) <= 6:
+            try:
+                async with _constituent_fetch_lock:
+                    retry_quotes = await client.get_full_quotes(missing_keys)
+                quotes.update(retry_quotes)
+            except UpstoxError:
+                pass
         for c in constituents:
             key = instrument_key(c)
             q = resolve_quote_payload(quotes, key)
@@ -213,14 +232,63 @@ def breadth_from_constituents(heatmap: ConstituentHeatmap) -> Optional[Breadth]:
         score=heatmap.breadthPct,
         bias=heatmap.bias,
         aligned=heatmap.breadthPct >= 58 or heatmap.breadthPct <= 42,
+        source="stocks",
+        stockScore=heatmap.breadthPct,
+    )
+
+
+def _tag_breadth(
+    breadth: Breadth,
+    *,
+    source: str,
+    stock_score: Optional[float] = None,
+    oi_score: Optional[float] = None,
+) -> Breadth:
+    return breadth.model_copy(
+        update={
+            "source": source,
+            "stockScore": stock_score if stock_score is not None else breadth.stockScore,
+            "oiScore": oi_score if oi_score is not None else breadth.oiScore,
+        },
     )
 
 
 def blend_breadth(option_breadth: Breadth, constituent: Optional[Breadth]) -> Breadth:
     """Blend option-chain OI breadth with real stock breadth (60% constituents)."""
     if not constituent:
-        return option_breadth
+        return _tag_breadth(option_breadth, source="oi", oi_score=option_breadth.score)
     score = round(constituent.score * 0.6 + option_breadth.score * 0.4, 1)
-    bias = constituent.bias if constituent.aligned else option_breadth.bias
+    # When stocks and OI disagree, stocks lead bias (60% weight — intraday price truth).
+    if constituent.aligned and option_breadth.aligned and constituent.bias != option_breadth.bias:
+        bias = constituent.bias
+    elif constituent.aligned:
+        bias = constituent.bias
+    elif option_breadth.aligned:
+        bias = option_breadth.bias
+    else:
+        bias = "NEUTRAL"
     aligned = constituent.aligned or option_breadth.aligned
-    return Breadth(score=score, bias=bias, aligned=aligned)
+    return Breadth(
+        score=score,
+        bias=bias,
+        aligned=aligned,
+        source="blended",
+        stockScore=constituent.score,
+        oiScore=option_breadth.score,
+    )
+
+
+def resolve_snapshot_breadth(
+    option_breadth: Breadth,
+    constituent_hm: Optional[ConstituentHeatmap],
+    *,
+    use_constituents: bool,
+) -> Breadth:
+    """Resolve trading breadth from OI + optional constituent heatmap."""
+    oi = _tag_breadth(option_breadth, source="oi", oi_score=option_breadth.score)
+    if not use_constituents:
+        return oi
+    stock = breadth_from_constituents(constituent_hm) if constituent_hm else None
+    if not stock:
+        return oi
+    return blend_breadth(oi, stock)

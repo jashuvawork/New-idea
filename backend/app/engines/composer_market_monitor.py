@@ -99,6 +99,18 @@ def build_market_context(
             "chartDirection": chart.direction if chart else None,
             "momentum5Pct": chart.momentum5Pct if chart else None,
             "pcr": snap.pcr,
+            "explosionAlerts": [
+                {
+                    "side": a.get("side"),
+                    "strike": a.get("strike"),
+                    "tier": a.get("tier"),
+                    "score": a.get("explosionScore"),
+                    "tradeable": a.get("tradeable"),
+                    "allDayExplosion": a.get("allDayExplosion"),
+                    "dailyMovePct": a.get("dailyMovePct"),
+                }
+                for a in (snap.explosionAlerts or [])[:6]
+            ],
         }
 
     recent_trades = []
@@ -164,10 +176,12 @@ def generate_rule_brief(context: dict[str, Any]) -> ComposerBrief:
             + " — Composer is advisory only"
         )
 
-    if expiry.get("eveningBlock"):
+    if expiry.get("eveningBlockActive"):
         stand_down = True
         risks.append("expiry_evening_theta_gamma")
-        actions.append("Avoid new entries after 14:00 on expiry")
+        actions.append("Avoid new entries after 14:00 on expiry day only")
+    elif expiry.get("eveningBlock") and not expiry.get("expirySession"):
+        actions.append("Note: past 14:00 IST but NOT expiry today — eveningBlock is time-only, not a block")
 
     if expiry.get("worstDay"):
         risks.extend(expiry.get("worstDayReasons") or ["worst_expiry_day"])

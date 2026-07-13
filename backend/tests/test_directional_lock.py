@@ -92,7 +92,7 @@ def test_aligned_call_on_bullish_passes():
 def test_unconfirmed_put_on_bullish_blocked():
     blocked, reason = check_directional_side_lock("NIFTY", Side.PUT, _snap(bias="BULLISH"))
     assert blocked
-    assert "needs_confirmation" in reason or "switch" in reason
+    assert "needs_confirmation" in reason or "switch" in reason or "hard_block" in reason
 
 
 @patch("app.engines.directional_lock.get_settings", _settings)
@@ -135,7 +135,7 @@ def test_weak_switch_blocked_while_breadth_still_bullish():
     snap = _snap(bias="BULLISH", chart_dir="NEUTRAL", velocity=1.0, explosion_side="PUT", explosion_score=40)
     blocked, reason = check_directional_side_lock("NIFTY", Side.PUT, snap)
     assert blocked
-    assert "switch" in reason or "needs_confirmation" in reason
+    assert "switch" in reason or "needs_confirmation" in reason or "hard_block" in reason
 
 
 @patch("app.engines.directional_lock.get_settings", _settings)
@@ -148,7 +148,7 @@ def test_simple_lock_blocks_put_on_bullish_breadth():
     reset_directional_lock()
     blocked, reason = check_directional_side_lock_simple("NIFTY", Side.PUT, "BULLISH")
     assert blocked
-    assert "needs_confirmation" in reason or "switch" in reason
+    assert "needs_confirmation" in reason or "switch" in reason or "hard_block" in reason
 
 
 @patch("app.engines.directional_lock.get_settings", _settings)

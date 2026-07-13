@@ -112,6 +112,16 @@ def compute_adaptive_exit_plan(
             base_target = settings.explosion_target_elite
             trail_arm = max(trail_arm, 8.0)
             reasoning.append("ELITE explosion — wider SL + 25pt target")
+        daily_move = float(top.get("dailyMovePct") or top.get("openPremiumMove") or 0)
+        if (
+            settings.extreme_explosion_all_in_enabled
+            and daily_move >= settings.extreme_explosion_elite_move_min_pct
+        ):
+            base_target = max(base_target, settings.explosion_target_elite * 1.6)
+            trail_arm = max(trail_arm, settings.extreme_explosion_hold_min_best_points)
+            trail_keep = min(0.82, trail_keep + 0.08)
+            micro = max(micro, 5.0)
+            reasoning.append(f"extreme_rip_{daily_move:.0f}pct_chart_hold")
     else:
         base_stop = session_profile.stopPoints
         base_target = session_profile.targetPoints
@@ -198,6 +208,19 @@ def compute_adaptive_exit_plan(
         exitBias=psychology.exit_bias,
         reasoning=reasoning,
     )
+
+
+def apply_chart_exit_tuning(
+    plan: AdaptiveExitPlan,
+    snap: SymbolSnapshot,
+    side: str,
+    entry_premium: float,
+) -> AdaptiveExitPlan:
+    """Merge multi-chart SL/TP/trail levels into adaptive plan."""
+    from app.engines.chart_exit_levels import merge_chart_into_exit_plan
+
+    merged = merge_chart_into_exit_plan(plan.to_dict(), snap, side, entry_premium)
+    return AdaptiveExitPlan.from_dict(merged)
 
 
 def _swing_plan(settings, psychology: PsychologyState, win_prob: float, reasoning: list[str]) -> AdaptiveExitPlan:
@@ -324,27 +347,28 @@ def evaluate_adaptive_explosion_exit(
     if exit_reason:
         return exit_reason, pnl
 
-    settings = get_settings()
-    opened = trade.openedAt
-    if opened.tzinfo is None:
-        opened = opened.replace(tzinfo=IST)
-    hold = (datetime.now(IST) - opened.astimezone(IST)).total_seconds()
     pnl_pts = current_premium - trade.entryPremium
     best = max(trade.bestPnlPoints, pnl_pts)
-    entry_vel = float((trade.entryContext or {}).get("velocity3s") or 0)
-    still_expanding = current_velocity_3s >= max(1.2, entry_vel * 0.35)
 
-    # Adaptive per-trade stop — only when momentum is fading, not during active expansion
-    if (
-        best < plan.trailArmPoints
-        and hold >= settings.explosion_stop_min_hold_seconds
-        and pnl_pts <= -plan.stopPoints
-        and not still_expanding
-    ):
-        return "adaptive_stop_loss", pnl_pts * trade.lots * lot_multiplier
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+    from app.models.schemas import StrategyType
 
-    if best >= plan.trailArmPoints and pnl_pts < best * plan.trailKeepRatio:
-        return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier
+    min_arm = plan.trailArmPoints
+    ctx = trade.entryContext or {}
+    extreme_hold = bool(ctx.get("extremeAllInBypass"))
+    from app.engines.confidence_hold import should_defer_profit_lock, is_confidence_runner_hold
+
+    if trade.strategyType == StrategyType.EXPLOSIVE:
+        if direction_aligned_with_breadth(trade):
+            min_arm = max(min_arm, 4.0)
+        elif extreme_hold:
+            min_arm = max(min_arm, float(get_settings().extreme_explosion_hold_min_best_points))
+        if is_confidence_runner_hold(trade):
+            min_arm = max(min_arm, plan.targetPoints * 0.45)
+
+    if best >= min_arm and pnl_pts < best * plan.trailKeepRatio:
+        if not should_defer_profit_lock(trade, best, target_points=plan.targetPoints):
+            return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier
 
     return None, pnl_pts * trade.lots * lot_multiplier
 

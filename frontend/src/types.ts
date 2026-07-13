@@ -34,6 +34,7 @@ export interface SymbolSnapshot {
   marketProfile: MarketProfile;
   breadth: Breadth;
   spotChart?: SpotChart;
+  chartAnalysis?: ChartAnalysis;
   explosiveRunner: ExplosiveRunner;
   explosiveRunnerWatchlist: RunnerWatchItem[];
   suggestedTrades: SuggestedTrade[];
@@ -133,6 +134,13 @@ export interface ExplosionAlert {
   reason: string;
   tradeable: boolean;
   morningCapture?: boolean;
+  afternoonCapture?: boolean;
+  allDayExplosion?: boolean;
+  premiumCapture?: boolean;
+  dailyMovePct?: number;
+  peakMovePct?: number;
+  openPremiumMove?: number;
+  volumeAwaken?: boolean;
 }
 
 export interface StrategyMatrixEntry {
@@ -169,6 +177,7 @@ export interface Orderflow {
   breakoutVelocity: number;
   bidAskImbalance: number;
   tickMomentum: number;
+  signedMomentumPct?: number;
 }
 
 export interface Greeks {
@@ -192,6 +201,9 @@ export interface Breadth {
   score: number;
   bias: string;
   aligned: boolean;
+  source?: string;
+  stockScore?: number;
+  oiScore?: number;
 }
 
 export interface SpotChart {
@@ -214,6 +226,35 @@ export interface SpotChart {
   macdSignal?: number;
   macdHistogram?: number;
   macdBias?: string;
+  timeframe?: string;
+  barCount?: number;
+}
+
+export interface ChartAnalysis {
+  consensus: string;
+  alignedCount: number;
+  totalTimeframes: number;
+  timeframes: Record<string, {
+    label: string;
+    direction: string;
+    momentumPct: number;
+    trendStrength: number;
+    emaBias: string;
+    rsi?: number;
+    rsiBias?: string;
+    macdBias?: string;
+    barCount?: number;
+  }>;
+  fibonacci: Record<string, unknown>;
+  fibExtension: Record<string, number>;
+  pivots: Record<string, number>;
+  gann: Record<string, number>;
+  pitchfork: Record<string, unknown>;
+  ichimoku: Record<string, unknown>;
+  patterns: Array<{ name: string; bias: string; strength: number; timeframe: string }>;
+  institutional: Record<string, unknown>;
+  smtDivergence?: { type: string; message: string; bias: string } | null;
+  keySignals: string[];
 }
 
 export interface ExplosiveRunner {
@@ -299,8 +340,11 @@ export interface ExpiryGuardsSummary {
   enabled?: boolean;
   expirySession?: boolean;
   expirySymbols?: string[];
+  nearExpirySymbols?: string[];
+  preExpirySymbols?: string[];
   morningWindow?: boolean;
   eveningBlock?: boolean;
+  eveningBlockActive?: boolean;
   worstDay?: boolean;
   worstDayScore?: number;
   worstDayReasons?: string[];
@@ -434,7 +478,9 @@ export interface AutoTradeEvent {
   brokerOrderId?: string;
   brokerExitOrderId?: string;
   chartDirection?: string;
+  execChartDirection?: string;
   chartAligned?: boolean;
+  chartBypass?: string | null;
   at?: string;
 }
 
@@ -732,6 +778,77 @@ export interface PerformanceMilestone {
   message: string;
   slippageAdjusted?: boolean;
   slippageNote?: string;
+}
+
+export interface WeeklyDashboard {
+  periodDays: number;
+  periodMode?: string;
+  periodStart: string;
+  periodEnd: string;
+  tradeThrough?: string;
+  generatedAt: string;
+  sessionResetAt?: string | null;
+  summary: {
+    tradeCount: number;
+    wins: number;
+    losses: number;
+    scratches: number;
+    profitFactor: number;
+    winRate: number;
+    maxDrawdownPct: number;
+    netPnlInr: number;
+    expectancy: {
+      perTradeInr: number;
+      winPct: number;
+      avgWinInr: number;
+      avgLossInr: number;
+    };
+  };
+  daily: Array<{
+    date: string;
+    weekday?: string;
+    trades: number;
+    wins: number;
+    losses: number;
+    netPnlInr: number;
+    profitFactor: number;
+    policyViolations: number;
+  }>;
+  policyViolations: {
+    count: number;
+    trades: Array<{
+      openedAt?: string;
+      symbol?: string;
+      side?: string;
+      strike?: number;
+      lots?: number;
+      entryPremium?: number;
+      pnlInr?: number;
+      mode?: string;
+      violations: string[];
+    }>;
+  };
+  currentSession: {
+    skipped: {
+      total: number;
+      byReason: Record<string, number>;
+      bySymbol: Record<string, number>;
+      sessionBlocks: Array<Record<string, unknown>>;
+      candidateBlocks: Array<Record<string, unknown>>;
+      nearMisses: Array<Record<string, unknown>>;
+    };
+    nearMisses: Array<Record<string, unknown>>;
+    openTrades: number;
+    closedToday: number;
+    guards: Record<string, unknown>;
+  };
+  goals: {
+    safety: { passed: boolean; policyViolations: number; maxDailyLossInr: number; emergencyStopInr: number; maxTradesInDay: number; message: string };
+    process: { passed: boolean; avgTradesPerDay: number; breadthAlignedPct: number; cheapPremiumCompliancePct: number; message: string };
+    outcome: { passed: boolean; expectancyPerTradeInr: number; profitFactor: number; winRate: number; netPnlInr: number; dailyTargetInr: number; message: string };
+    overallReady: boolean;
+  };
+  recommendation: string;
 }
 
 export interface TradeMastermind {

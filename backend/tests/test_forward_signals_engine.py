@@ -1,0 +1,144 @@
+"""Tests for forward signals engine."""
+
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from app.engines.forward_signals_engine import build_forward_signals, _build_moments
+from app.models.schemas import (
+    AutoTraderState,
+    Breadth,
+    MarketPhase,
+    PremarketAnalysis,
+    Regime,
+    SymbolSnapshot,
+)
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _snap() -> SymbolSnapshot:
+    return SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        optionExpiry="2026-07-09",
+        spot=77600.0,
+        regime=Regime.CHOP,
+        tradeQualityScore=34.0,
+        breadth=Breadth(bias="BULLISH", score=55, aligned=True),
+        premarket=PremarketAnalysis(openPlay="GAP_AND_GO", confidence=72.0, gapDirection="GAP_UP"),
+        explosionAlerts=[
+            {
+                "symbol": "SENSEX",
+                "side": "PUT",
+                "strike": 76900.0,
+                "premium": 400.0,
+                "explosionScore": 78.0,
+                "tier": "EXPLODING",
+                "dailyMovePct": 4520.0,
+                "tradeable": True,
+                "allDayExplosion": True,
+                "reason": "volAwaken×48k",
+            },
+        ],
+        swingAlerts=[
+            {
+                "symbol": "SENSEX",
+                "side": "PUT",
+                "strike": 77000.0,
+                "premium": 200.0,
+                "swingType": "PCR_EXTREME",
+                "confidence": 65.0,
+                "reason": "test",
+                "targetPct": 30.0,
+                "stopPct": 12.0,
+                "maxHoldDays": 3,
+                "tradeable": True,
+            },
+        ],
+    )
+
+
+def test_build_moments_has_power_hour():
+    moments = _build_moments()
+    ids = [m["id"] for m in moments]
+    assert "power_hour" in ids
+    assert "all_day_explosion" in ids
+
+
+def test_forward_signals_includes_explosion_and_moments():
+    state = AutoTraderState()
+    report = build_forward_signals({"SENSEX": _snap()}, state)
+    assert report.get("moments")
+    horizons = {s["horizon"] for s in report.get("signals") or []}
+    assert "EXPLOSION" in horizons
+    assert "SWING" in horizons
+    assert report.get("tradeableCount", 0) >= 1
+
+
+def test_forward_signals_composer_brief_dict(monkeypatch):
+    """get_latest_brief returns dict — must not AttributeError."""
+    from app.engines import forward_signals_engine as fse
+
+    monkeypatch.setattr(
+        fse,
+        "get_latest_brief",
+        lambda: {
+            "at": "2026-07-08T15:00:00+05:30",
+            "tradeBias": "PUT",
+            "confidence": "HIGH",
+            "marketRead": "Bearish momentum into power hour",
+            "sessionPlan": "Fade rips, size down",
+            "standDown": False,
+            "risks": ["gamma squeeze"],
+            "actions": ["watch deep OTM PE"],
+        },
+    )
+    report = build_forward_signals({"SENSEX": _snap()}, AutoTraderState())
+    composer = report.get("composer")
+    assert composer is not None
+    assert composer.get("tradeBias") == "PUT"
+    assert composer.get("tradeable") is True
+    assert any(s.get("source") == "composer" for s in report.get("signals") or [])
+
+
+def test_forward_signals_blocks_put_on_bullish_breadth():
+    snap = _snap()
+    snap.explosionAlerts = [
+        {
+            "symbol": "SENSEX",
+            "side": "PUT",
+            "strike": 76300.0,
+            "premium": 26.0,
+            "explosionScore": 65.0,
+            "tier": "BUILDING",
+            "dailyMovePct": 12.0,
+            "tradeable": True,
+            "velocity3s": 3.6,
+            "velocity9s": 2.5,
+            "volumeSurge": 2.5,
+            "allDayExplosion": True,
+        },
+        {
+            "symbol": "SENSEX",
+            "side": "CALL",
+            "strike": 77200.0,
+            "premium": 140.0,
+            "explosionScore": 50.0,
+            "tier": "EXPLODING",
+            "dailyMovePct": 73.0,
+            "tradeable": True,
+            "velocity3s": 2.0,
+            "velocity9s": 2.5,
+            "volumeSurge": 2.5,
+            "allDayExplosion": True,
+        },
+    ]
+    state = AutoTraderState()
+    report = build_forward_signals({"SENSEX": snap}, state)
+    explosions = [s for s in report.get("signals") or [] if s.get("horizon") == "EXPLOSION"]
+    put_sig = next(s for s in explosions if s.get("side") == "PUT")
+    assert put_sig.get("tradeable") is False
+    assert report.get("sessionBias") == "CALL"
+    assert "PUT" not in (report.get("summary") or "")

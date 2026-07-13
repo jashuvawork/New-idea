@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.engines.capital_allocator import compute_lots
 from app.engines.explosion_detector import ExplosionEvent
-from app.models.schemas import Breadth, PaperTrade, Side, SpotChart, StrategyType, SuggestedTrade
+from app.models.schemas import Breadth, PaperTrade, Side, SpotChart, StrategyType, SuggestedTrade, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -98,37 +98,95 @@ def check_explosion_entry(
     *,
     index_moment: bool = False,
     chart: Optional[SpotChart] = None,
+    snap: Optional[SymbolSnapshot] = None,
 ) -> tuple[bool, str]:
     """Fast entry on explosion — minimal gates, speed is everything."""
     if calibration_blocked:
         return False, "calibration_block"
 
+    from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
+
+    if is_extreme_explosion_all_in_bypass(event=event):
+        if explosion_in_cooldown(event.symbol):
+            return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
+        return True, "extreme_all_in_explosion_confirmed"
+
+    if snap is not None:
+        from app.engines.aligned_side_guard import breadth_hard_blocks_side
+        from app.engines.morning_premium_capture import counter_trend_entry_allowed
+
+        bias = (snap.breadth.bias if snap.breadth else breadth.bias or "NEUTRAL") or "NEUTRAL"
+        hard_blocked, hard_reason = breadth_hard_blocks_side(event.side, bias, event=event)
+        if hard_blocked:
+            return False, hard_reason
+        if not counter_trend_entry_allowed(event.side, snap, explosion_event=event):
+            return False, "counter_trend_requires_elite"
+
+    if snap is not None:
+        from app.engines.expiry_day_guards import check_expiry_explosion_open_block
+
+        blocked, reason = check_expiry_explosion_open_block(
+            snap=snap,
+            tier=event.tier,
+            side=event.side,
+            breadth=breadth,
+        )
+        if blocked:
+            return False, reason
+
     if explosion_in_cooldown(event.symbol):
         return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
 
     if event.tier not in ("EXPLODING", "ELITE"):
-        from app.engines.morning_premium_capture import is_morning_capture_event
+        from app.engines.morning_premium_capture import is_premium_capture_event
 
-        if not is_morning_capture_event(event, chart=chart):
+        if not is_premium_capture_event(event, chart=chart):
             return False, f"tier_{event.tier}_not_tradeable"
 
+    from app.engines.morning_premium_capture import is_afternoon_capture_event
+
     if event.velocity_3s < 2.0 and event.velocity_9s < 3.0:
-        return False, "velocity_too_low"
+        open_move = float(getattr(event, "daily_move_pct", 0) or 0)
+        open_min = float(getattr(get_settings(), "open_premium_min_move_pct", 25.0) or 25.0)
+        if not is_afternoon_capture_event(event, chart=chart) and open_move < open_min:
+            return False, "velocity_too_low"
 
     from app.engines.rally_capture import (
         breadth_blocks_explosion_side,
         chart_blocks_explosion_side,
         cross_side_chase_blocked,
         explosion_exhausted,
+        index_pin_blocks_put_explosion,
+    )
+    from app.engines.morning_premium_capture import (
+        afternoon_capture_skips_chart_block,
+        is_all_day_explosion_event,
+        is_premium_capture_event,
+        premium_led_explosion_bypass,
     )
 
+    breadth_bias = (breadth.bias or "NEUTRAL") if breadth else "NEUTRAL"
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
+
+    hard_blocked, hard_reason = breadth_hard_blocks_side(event.side, breadth_bias, event=event)
+    if hard_blocked:
+        return False, hard_reason
+
+    premium_bypass = premium_led_explosion_bypass(event, chart, breadth_bias)
+
     blocked, reason = breadth_blocks_explosion_side(event.side, breadth.bias, event.tier)
-    if blocked:
+    if blocked and not premium_bypass:
         return False, reason
 
+    if snap is not None:
+        blocked, reason = index_pin_blocks_put_explosion(event, snap)
+        if blocked and not premium_bypass:
+            return False, reason
+
     blocked, reason = chart_blocks_explosion_side(event.side, chart, event.tier)
-    if blocked:
-        return False, reason
+    if blocked and not premium_bypass and not afternoon_capture_skips_chart_block(event, chart):
+        if not is_all_day_explosion_event(event, chart=chart):
+            return False, reason
 
     blocked, reason = explosion_exhausted(event)
     if blocked:
@@ -137,6 +195,24 @@ def check_explosion_entry(
     from app.engines.chop_day_guards import neutral_breadth_blocks_entry
 
     score = max(event.explosion_score, trade.tqs or 0, trade.confidence or 0)
+    if snap is not None:
+        from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+        if is_symbol_expiry_day(snap):
+            label = str((snap.psychology or {}).get("label", "NEUTRAL")).upper()
+            if label in ("CAUTION", "FEAR") and event.tier != "ELITE":
+                return False, f"expiry_psychology_block_{label.lower()}"
+            settings = get_settings()
+            if (breadth.bias or "NEUTRAL").upper() == "NEUTRAL" and score < settings.expiry_min_rank_score:
+                return False, f"expiry_neutral_breadth_below_{settings.expiry_min_rank_score:.0f}"
+            from app.engines.symbol_cooldown import side_aligned_with_breadth
+
+            if settings.expiry_counter_breadth_elite_only:
+                side_val = event.side.value if hasattr(event.side, "value") else str(event.side).upper()
+                if not side_aligned_with_breadth(side_val, breadth.bias) and event.tier != "ELITE":
+                    if not (premium_bypass and event.tier in ("EXPLODING", "ELITE", "BUILDING")):
+                        return False, "expiry_counter_breadth_elite_only"
+
     blocked, nb_reason = neutral_breadth_blocks_entry(
         breadth.bias,
         score,
@@ -154,31 +230,51 @@ def check_explosion_entry(
 
     from app.engines.spot_direction import chart_blocks_side
 
+    expiry_chart_bypass = False
+    if snap is not None:
+        from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_event
+
+        expiry_chart_bypass = expiry_chart_bypass_for_event(event, snap)
+
     blocked_chart, chart_reason = chart_blocks_side(
         event.side,
         chart,
         trade_score=score,
         momentum_surge=index_moment,
+        premium_led_bypass=premium_bypass,
+        expiry_explosion_bypass=expiry_chart_bypass,
     )
     if blocked_chart:
         return False, chart_reason
 
     if event.tier == "ELITE":
-        return True, "elite_explosion"
+        return True, "elite_explosion" if not premium_bypass else "premium_led_elite_explosion"
 
-    min_score = get_settings().aggressive_min_explosion_score
+    settings = get_settings()
+    min_score = settings.aggressive_min_explosion_score
+    open_move = float(getattr(event, "daily_move_pct", 0) or 0)
+    if open_move >= settings.all_day_explosion_session_move_min_pct:
+        min_score = min(min_score, settings.all_day_explosion_min_score)
+
     if event.tier == "EXPLODING" and event.explosion_score >= min_score:
-        return True, "explosion_confirmed"
+        return True, "explosion_confirmed" if not premium_bypass else "premium_led_explosion_confirmed"
+
+    if event.tier == "BUILDING" and event.explosion_score >= min_score:
+        if is_all_day_explosion_event(event, chart=chart) or is_premium_capture_event(event, chart=chart):
+            return True, "building_explosion_confirmed" if not premium_bypass else "premium_led_building_confirmed"
 
     if event.velocity_3s >= 3.0 and event.volume_surge >= 1.5:
         return True, "early_explosion"
+
+    if is_premium_capture_event(event, chart=chart):
+        return True, "premium_capture_confirmed"
 
     return False, "not_confirmed"
 
 
 def compute_explosion_lots(event: ExplosionEvent, tqs: float, premium: float) -> int:
     """Size explosion trades at 85% capital max — same as compute_lots."""
-    return compute_lots(
+    lots = compute_lots(
         event.symbol,
         premium,
         stop_points=get_settings().explosion_initial_stop_points,
@@ -187,6 +283,35 @@ def compute_explosion_lots(event: ExplosionEvent, tqs: float, premium: float) ->
         confidence=event.explosion_score,
         tier=event.tier,
     )
+    return cap_explosion_lots(lots, premium)
+
+
+def cap_explosion_lots(lots: int, premium: float) -> int:
+    settings = get_settings()
+    if premium > settings.explosion_high_premium_threshold_inr:
+        return min(lots, settings.explosion_high_premium_lot_cap)
+    if premium <= settings.expiry_cheap_premium_threshold_inr:
+        return min(lots, settings.expiry_cheap_premium_lot_cap)
+    return lots
+
+
+def expiry_session_lot_cap(
+    lots: int,
+    premium: float,
+    symbol_tqs: float,
+    snapshots: dict[str, SymbolSnapshot],
+) -> int:
+    """Cap oversized lot counts on cheap premiums / low TQS during expiry sessions."""
+    from app.engines.expiry_day_guards import is_expiry_session
+
+    settings = get_settings()
+    if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
+        return lots
+    if premium <= settings.expiry_cheap_premium_threshold_inr:
+        lots = min(lots, settings.expiry_cheap_premium_lot_cap)
+    if float(symbol_tqs or 0) < settings.expiry_low_tqs_lot_cap_tqs:
+        lots = min(lots, settings.expiry_low_tqs_lot_cap)
+    return lots
 
 
 def _hold_seconds(trade: PaperTrade) -> float:
@@ -228,14 +353,20 @@ def _trail_floor_pts(
 
 
 def _chart_aligned_with_trade(trade: PaperTrade) -> bool:
-    """CALL+BULLISH or PUT+BEARISH from entry chart snapshot."""
+    """CALL+BULLISH or PUT+BEARISH — snapshot scan chart or entry execution chart."""
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if direction_aligned_with_breadth(trade):
+        return True
     ctx = trade.entryContext or {}
-    chart = (ctx.get("executionChart") or {}).get("indexChart") or {}
-    direction = str(chart.get("direction", "NEUTRAL")).upper()
-    if trade.side == Side.CALL and direction == "BULLISH":
-        return True
-    if trade.side == Side.PUT and direction == "BEARISH":
-        return True
+    exec_chart = (ctx.get("executionChart") or {}).get("indexChart") or {}
+    snap_chart = (ctx.get("executionChart") or {}).get("snapshotChart") or {}
+    for chart in (snap_chart, exec_chart):
+        direction = str(chart.get("direction", "NEUTRAL")).upper()
+        if trade.side == Side.CALL and direction == "BULLISH":
+            return True
+        if trade.side == Side.PUT and direction == "BEARISH":
+            return True
     return False
 
 
@@ -250,9 +381,82 @@ def _should_skip_no_progress(trade: PaperTrade, settings) -> bool:
     if direction_aligned_with_breadth(trade) or _chart_aligned_with_trade(trade):
         return True
     ctx = trade.entryContext or {}
+    if ctx.get("extremeAllInBypass"):
+        return True
     edge = ctx.get("edgeScore") or {}
     if edge.get("letRunners"):
         return True
+    return False
+
+
+def _adaptive_stop_min_hold(trade: PaperTrade, settings) -> int:
+    """Minimum hold before adaptive SL — longer when chart/breadth support the trade."""
+    from app.engines.confidence_hold import chart_confidence_for_trade, is_confidence_runner_hold
+
+    base = settings.explosion_stop_min_hold_seconds
+    if is_confidence_runner_hold(trade):
+        conf = chart_confidence_for_trade(trade)
+        if conf >= 85:
+            return max(base, 90)
+        return max(base, 60)
+
+    chart_conf = chart_confidence_for_trade(trade)
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if direction_aligned_with_breadth(trade) and chart_conf >= settings.all_day_min_chart_confidence:
+        return max(base, 45)
+    if chart_conf >= 85:
+        return max(base, 35)
+    return base
+
+
+def _effective_stop_points(trade: PaperTrade, stop_points: float) -> float:
+    """Chart-tuned SL from exit plan, widened for confidence-runner holds."""
+    from app.engines.confidence_hold import (
+        chart_confidence_for_trade,
+        confidence_hold_stop_multiplier,
+    )
+
+    settings = get_settings()
+    ctx = trade.entryContext or {}
+    plan_stop = float((ctx.get("exitPlan") or {}).get("stopPoints") or 0)
+    base = plan_stop if plan_stop > 0 else stop_points
+    mult = confidence_hold_stop_multiplier(trade)
+    conf = chart_confidence_for_trade(trade)
+    if conf >= 85:
+        mult = max(mult, 1.4)
+    elif conf >= settings.all_day_min_chart_confidence:
+        mult = max(mult, 1.2)
+    return round(base * mult, 2)
+
+
+def _defer_adaptive_stop(
+    trade: PaperTrade,
+    best: float,
+    hold: float,
+    settings,
+) -> bool:
+    """Defer adaptive SL while high-confidence trade works toward chart TP."""
+    from app.engines.confidence_hold import (
+        hold_until_target_active,
+        is_confidence_runner_hold,
+        chart_confidence_for_trade,
+    )
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if hold_until_target_active(trade, best):
+        return True
+
+    if not is_confidence_runner_hold(trade):
+        chart_conf = chart_confidence_for_trade(trade)
+        if not direction_aligned_with_breadth(trade):
+            return False
+        if chart_conf < settings.all_day_min_chart_confidence:
+            return False
+        if best < 5.0 and hold < 60:
+            return True
+        if best < 3.0 and hold < 45:
+            return True
     return False
 
 
@@ -301,7 +505,7 @@ def evaluate_explosion_exit(
         not exit_params.adaptive_stop
         and trail_floor is None
         and hold >= settings.explosion_stop_min_hold_seconds
-        and pnl_pts <= -exit_params.stop_points
+        and pnl_pts <= -_effective_stop_points(trade, exit_params.stop_points)
     ):
         return "explosion_stop_loss", pnl_inr
 
@@ -311,26 +515,58 @@ def evaluate_explosion_exit(
     if pnl_pts >= target:
         return "explosion_target_hit", pnl_inr
 
+    from app.engines.confidence_hold import (
+        half_tp_giveback_exit,
+        hold_until_target_active,
+        should_defer_profit_lock,
+    )
+
+    if half_tp_giveback_exit(trade, best, pnl_pts, target_points=target):
+        return "explosion_half_tp_profit_lock", pnl_inr
+
     if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
-        return "explosion_trail_sl", pnl_inr
+        if not should_defer_profit_lock(trade, best, target_points=target):
+            return "explosion_trail_sl", pnl_inr
 
     if trail_floor is not None and pnl_pts < best * trail_keep and best >= 8:
-        return "explosion_trail_lock", pnl_inr
+        if not should_defer_profit_lock(trade, best, target_points=target):
+            return "explosion_trail_lock", pnl_inr
 
     if (
         pnl_pts >= exit_params.micro_target_points
         and best - pnl_pts >= settings.runner_micro_giveback_points
         and best >= settings.runner_min_best_points
     ):
-        return "explosion_micro_profit_lock", pnl_inr
+        if not should_defer_profit_lock(trade, best, target_points=target):
+            return "explosion_micro_profit_lock", pnl_inr
+
+    stop_floor = _effective_stop_points(trade, exit_params.stop_points)
+    if (
+        exit_params.adaptive_stop
+        and hold >= _adaptive_stop_min_hold(trade, settings)
+        and pnl_pts <= -stop_floor
+        and not _defer_adaptive_stop(trade, best, hold, settings)
+    ):
+        return "adaptive_stop_loss", pnl_inr
 
     if _should_skip_no_progress(trade, settings):
         pass
     elif hold >= _no_progress_limit_seconds(trade, settings) and best < exit_params.trail_arm_points:
-        return "explosion_no_progress", pnl_inr
+        from app.engines.confidence_hold import hold_until_target_active
+
+        if not hold_until_target_active(trade, best, target_points=target):
+            return "explosion_no_progress", pnl_inr
 
     max_hold = 420 if best >= settings.runner_min_best_points else (360 if event_tier == "ELITE" or best >= 15 else 300)
-    if aligned := (trade.entryContext or {}).get("breadth"):
+    from app.engines.confidence_hold import confidence_hold_max_seconds
+
+    conf_max = confidence_hold_max_seconds(trade)
+    if conf_max > 0:
+        max_hold = max(max_hold, conf_max)
+    ctx = trade.entryContext or {}
+    if ctx.get("afternoonCapture"):
+        max_hold = max(max_hold, settings.afternoon_capture_exit_max_hold_seconds)
+    if aligned := ctx.get("breadth"):
         side_bias = "BULLISH" if trade.side.value == "CALL" else "BEARISH"
         if str(aligned).upper() == side_bias:
             max_hold = int(max_hold * 1.4)

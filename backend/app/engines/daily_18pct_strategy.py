@@ -202,12 +202,20 @@ def compute_trading_limits(
         limits.lotSizeMultiplier = 0.65 if tier == "LOW" else 0.85
         playbook.append("Expiry day — selective entries, dual-side only when chop")
     elif "CHOP" in day_mode or "RALLY" in day_mode:
-        limits.minRankScore = settings.quick_sideways_min_rank_score
-        limits.allowQuickSideways = True
+        limits.minRankScore = (
+            settings.quick_sideways_min_rank_score
+            if settings.quick_sideways_enabled
+            else settings.pretrade_min_rank_score
+        )
+        limits.allowQuickSideways = settings.quick_sideways_enabled
         limits.maxTradesToday = settings.daily_18pct_chop_max_trades
         limits.lotSizeMultiplier = 0.6 if tier == "LOW" else 0.8
         limits.allowExplosion = tier in ("HIGH", "ELITE") or "RALLY" in day_mode
-        playbook.append("Chop/sideways — quick scalps build toward 18%")
+        playbook.append(
+            "Chop/sideways — quick scalps build toward 18%"
+            if settings.quick_sideways_enabled
+            else "Chop/sideways — explosions only, no quick trades"
+        )
     elif "BULLISH" in day_mode or "BEARISH" in day_mode:
         limits.minRankScore = settings.best_trades_min_rank_score - 4
         limits.allowExplosion = tier != "LOW"
@@ -223,10 +231,15 @@ def compute_trading_limits(
 
     # Phase adjustments (progress toward 18%)
     if phase == "ACCUMULATE":
-        limits.allowQuickSideways = True
-        limits.minRankScore = min(limits.minRankScore, settings.quick_sideways_min_rank_score)
+        limits.allowQuickSideways = settings.quick_sideways_enabled
+        if settings.quick_sideways_enabled:
+            limits.minRankScore = min(limits.minRankScore, settings.quick_sideways_min_rank_score)
         limits.lotSizeMultiplier = min(limits.lotSizeMultiplier, 0.7 if tier == "LOW" else 0.85)
-        playbook.append(f"Accumulate ({progress:.0f}% of ₹{target:,.0f}) — base hits from quick trades")
+        playbook.append(
+            f"Accumulate ({progress:.0f}% of ₹{target:,.0f}) — base hits from quick trades"
+            if settings.quick_sideways_enabled
+            else f"Accumulate ({progress:.0f}% of ₹{target:,.0f}) — explosions + ranked setups only"
+        )
     elif phase == "BUILD":
         limits.minRankScore = max(limits.minRankScore, settings.pretrade_min_rank_score)
         playbook.append(f"Build ({progress:.0f}%) — add quality setups toward daily 18%")
@@ -276,12 +289,22 @@ def compute_trading_limits(
     if trades_today >= limits.maxTradesToday:
         playbook.append(f"Daily trade cap reached ({trades_today}/{limits.maxTradesToday})")
 
-    from app.engines.morning_premium_capture import in_morning_premium_capture_window, morning_capture_active
+    from app.engines.morning_premium_capture import (
+        afternoon_capture_active,
+        in_afternoon_premium_capture_window,
+        in_morning_premium_capture_window,
+        morning_capture_active,
+    )
 
     if in_morning_premium_capture_window() and morning_capture_active(snapshots):
         limits.allowExplosion = True
         limits.minRankScore = min(limits.minRankScore, settings.morning_capture_min_rank_score)
         playbook.append("Morning premium capture — BUILDING+ explosions enabled")
+
+    if in_afternoon_premium_capture_window() and afternoon_capture_active(snapshots):
+        limits.allowExplosion = True
+        limits.minRankScore = min(limits.minRankScore, settings.afternoon_capture_min_rank_score)
+        playbook.append("Afternoon premium capture — consolidation breakout explosions enabled")
 
     if settings.day_adaptive_enabled:
         from app.engines.day_adaptive_engine import build_day_adaptive_profile, apply_profile_to_limits

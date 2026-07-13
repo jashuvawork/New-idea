@@ -29,9 +29,8 @@ from app.models.schemas import (
     SymbolSnapshot,
 )
 from app.engines.constituent_engine import (
-    blend_breadth,
     build_constituent_heatmap,
-    breadth_from_constituents,
+    resolve_snapshot_breadth,
 )
 from app.engines.simple_profit import get_session_targets
 from app.engines.strategy_orchestrator import run_all_strategies, signals_to_suggested_trades
@@ -82,8 +81,16 @@ def _detect_regime(candles: list) -> Regime:
     return Regime.RANGE_BOUND
 
 
-def _build_orderflow(candles: list, chain: list) -> Orderflow:
-    """Build orderflow metrics from candles and chain."""
+def _build_orderflow(
+    candles: list,
+    chain: list,
+    *,
+    spot: float = 0.0,
+    atm: float = 0.0,
+    symbol: str = "",
+    spot_chart: Optional[Any] = None,
+) -> Orderflow:
+    """Build orderflow metrics from candles, option chain, and chart momentum."""
     delta_vel = vol_accel = breakout_vel = tick_mom = 0.0
     signed_mom = 0.0
     bid_ask_imb = 50.0
@@ -93,30 +100,67 @@ def _build_orderflow(candles: list, chain: list) -> Orderflow:
         closes = [c[4] if isinstance(c, list) else c.get("close", 0) for c in candles[-10:]]
 
         if len(volumes) >= 3:
-            recent_vol = sum(volumes[-3:])
-            prior_vol = sum(volumes[-6:-3]) or 1
-            vol_accel = min(100, (recent_vol / prior_vol) * 40)
+            recent_vol = sum(float(v or 0) for v in volumes[-3:])
+            prior_vol = sum(float(v or 0) for v in volumes[-6:-3]) or 1.0
+            if prior_vol > 0 and recent_vol > 0:
+                vol_accel = min(100, (recent_vol / prior_vol) * 40)
 
-        if len(closes) >= 5:
+        if len(closes) >= 5 and closes[-5]:
             move = closes[-1] - closes[-5]
-            pct = (move / closes[-5]) * 100 if closes[-5] else 0
+            pct = (move / closes[-5]) * 100
             delta_vel = min(100, abs(pct) * 5)
             breakout_vel = min(100, abs(pct) * 8)
-            tick_mom = min(100, abs(closes[-1] - closes[-2]) / closes[-2] * 2000) if closes[-2] else 0
+            if len(closes) >= 2 and closes[-2]:
+                tick_mom = min(100, abs(closes[-1] - closes[-2]) / closes[-2] * 2000)
             signed_mom = round(pct, 3)
-        else:
-            signed_mom = 0.0
 
-    # Chain bid/ask imbalance from ATM strikes
-    call_vol = put_vol = 0
-    for row in chain[:5]:
-        ce = row.get("call_options", {}) or row.get("CE", {})
-        pe = row.get("put_options", {}) or row.get("PE", {})
-        call_vol += ce.get("volume", 0) or 0
-        put_vol += pe.get("volume", 0) or 0
+    if spot_chart is not None:
+        mom5 = abs(float(getattr(spot_chart, "momentum5Pct", 0) or 0))
+        mom15 = abs(float(getattr(spot_chart, "momentum15Pct", 0) or 0))
+        trend = float(getattr(spot_chart, "trendStrength", 0) or 0)
+        if delta_vel < 8:
+            delta_vel = max(delta_vel, min(100, mom5 * 30 + trend * 0.15))
+        if breakout_vel < 8:
+            breakout_vel = max(breakout_vel, min(100, mom15 * 40 + trend * 0.2))
+        if tick_mom < 8:
+            tick_mom = max(tick_mom, min(100, mom5 * 20))
+        if not signed_mom and mom5:
+            signed_mom = round(float(getattr(spot_chart, "momentum5Pct", 0) or 0), 3)
+
+    from app.engines.moneyness import strike_step
+
+    step = strike_step(symbol) if symbol else 100.0
+    scan_steps = 3
+    call_vol = put_vol = 0.0
+    chain_total = 0.0
+    for row in chain:
+        strike = float(row.get("strike_price") or row.get("strike") or 0)
+        ce = row.get("call_options", {}) or row.get("CE", {}) or {}
+        pe = row.get("put_options", {}) or row.get("PE", {}) or {}
+        cv = float(ce.get("volume") or 0)
+        pv = float(pe.get("volume") or 0)
+        chain_total += cv + pv
+        if atm > 0 and abs(strike - atm) <= step * scan_steps:
+            call_vol += cv
+            put_vol += pv
+
+    if call_vol + put_vol <= 0 and chain_total > 0:
+        for row in sorted(
+            chain,
+            key=lambda r: float((r.get("call_options") or r.get("CE") or {}).get("volume") or 0)
+            + float((r.get("put_options") or r.get("PE") or {}).get("volume") or 0),
+            reverse=True,
+        )[:8]:
+            ce = row.get("call_options", {}) or row.get("CE", {}) or {}
+            pe = row.get("put_options", {}) or row.get("PE", {}) or {}
+            call_vol += float(ce.get("volume") or 0)
+            put_vol += float(pe.get("volume") or 0)
+
     total = call_vol + put_vol
-    if total:
+    if total > 0:
         bid_ask_imb = (call_vol / total) * 100
+        if vol_accel < 10:
+            vol_accel = max(vol_accel, min(100, total / 5000))
 
     return Orderflow(
         deltaVelocity=round(delta_vel, 1),
@@ -124,7 +168,7 @@ def _build_orderflow(candles: list, chain: list) -> Orderflow:
         breakoutVelocity=round(breakout_vel, 1),
         bidAskImbalance=round(bid_ask_imb, 1),
         tickMomentum=round(tick_mom, 1),
-        signedMomentumPct=signed_mom if candles else 0.0,
+        signedMomentumPct=signed_mom if candles or spot_chart else 0.0,
     )
 
 
@@ -387,7 +431,13 @@ async def build_symbol_snapshot(
         else:
             spot = await client.get_index_ltp(symbol)
         chain, expiry = await client.get_option_chain_resolved(symbol)
-        candles = await client.get_candles(symbol)
+        from app.engines.index_chart_candles import fetch_index_chart_candles
+        from app.engines.spot_direction import build_spot_chart
+
+        candles_5m, candles_1m = await fetch_index_chart_candles(client, symbol)
+        if not candles_1m:
+            candles_1m = await client.get_candles(symbol)
+        candles = candles_1m
 
         if not chain:
             raise UpstoxError("Empty option chain")
@@ -398,22 +448,73 @@ async def build_symbol_snapshot(
 
         atm = _atm_strike(spot, symbol)
         heatmap = build_heatmap(chain, spot, atm)
-        orderflow = _build_orderflow(candles, chain)
         profile = _build_profile(candles, spot)
-        from app.engines.spot_direction import analyze_spot_chart
+        spot_chart = build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=candles_1m)
+        orderflow = _build_orderflow(
+            candles, chain, spot=spot, atm=atm, symbol=symbol, spot_chart=spot_chart,
+        )
 
-        spot_chart = analyze_spot_chart(candles, spot, profile)
+        chart_analysis = None
+        day_from_open_pct = 0.0
+        try:
+            from app.engines.chart_advanced_analysis import build_chart_analysis
+            from app.engines.spot_direction import _candle_rows, pro_index_quote_context
+
+            prev_close = day_high = day_low = 0.0
+            try:
+                quote = await client.get_index_quote(symbol)
+                qctx = pro_index_quote_context(quote, spot)
+                prev_close = qctx["prevClose"]
+                day_high = qctx["dayHigh"]
+                day_low = qctx["dayLow"]
+                day_from_open_pct = float(qctx.get("fromOpenPct") or 0)
+            except Exception:
+                _, highs, lows, closes = _candle_rows(candles_1m)
+                if highs and lows:
+                    day_high = max(highs)
+                    day_low = min(lows)
+                if closes:
+                    prev_close = closes[0]
+
+            chart_analysis = build_chart_analysis(
+                candles_1m,
+                candles_5m,
+                spot,
+                profile,
+                prev_close=prev_close,
+                day_high=day_high,
+                day_low=day_low,
+                symbol=symbol,
+            )
+        except Exception as exc:
+            logger.debug("Chart analysis skipped for %s: %s", symbol, exc)
+
         option_breadth = build_breadth(chain, spot)
 
         constituent_hm = None
         from app.services.upstox import rate_limit_active
 
-        if get_settings().fetch_constituents_in_snapshot and not rate_limit_active():
-            constituent_hm = await build_constituent_heatmap(symbol, client)
-            stock_breadth = breadth_from_constituents(constituent_hm)
-            breadth = blend_breadth(option_breadth, stock_breadth)
-        else:
-            breadth = option_breadth
+        settings = get_settings()
+        if settings.fetch_constituents_in_snapshot:
+            if rate_limit_active():
+                constituent_hm = await build_constituent_heatmap(symbol, client, cache_only=True)
+            else:
+                constituent_hm = await build_constituent_heatmap(symbol, client)
+        breadth = resolve_snapshot_breadth(
+            option_breadth,
+            constituent_hm,
+            use_constituents=settings.fetch_constituents_in_snapshot,
+        )
+
+        if chart_analysis:
+            from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+
+            spot_chart = reconcile_spot_chart_with_mtf(
+                spot_chart,
+                chart_analysis,
+                breadth_bias=breadth.bias or "NEUTRAL",
+                from_open_pct=day_from_open_pct,
+            )
 
         greeks = _build_greeks(chain, atm, spot)
         regime = _detect_regime(candles)
@@ -430,7 +531,12 @@ async def build_symbol_snapshot(
         max_pain = compute_max_pain(chain)
 
         # Explosion scan — primary focus for daily chart moments
-        explosion_events = scan_chain_explosions(symbol, chain, spot, atm)
+        from app.engines.expiry_day_guards import _today_str
+
+        expiry_day = bool(expiry and str(expiry)[:10] == _today_str())
+        explosion_events = scan_chain_explosions(
+            symbol, chain, spot, atm, expiry_day=expiry_day,
+        )
         explosion_alerts = [event_to_dict(e) for e in explosion_events[:15]]
         top_explosion = explosion_alerts[0] if explosion_alerts else None
 
@@ -499,6 +605,7 @@ async def build_symbol_snapshot(
             topSwing=top_swing,
             constituentHeatmap=constituent_hm if constituent_hm and constituent_hm.dataAvailable else None,
             spotChart=spot_chart,
+            chartAnalysis=chart_analysis,
         )
         await attach_premarket_to_snapshot(snap, client, news_sentiment)
         return snap

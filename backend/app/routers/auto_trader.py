@@ -119,6 +119,24 @@ async def trade_log_tail(limit: int = 50):
     }
 
 
+@router.get("/weekly-dashboard")
+async def weekly_dashboard(days: int = 5):
+    """Weekly review (Mon–Fri trading week) — trades, skips, expectancy, goals."""
+    from app.engines.auto_trader import get_state
+    from app.engines.weekly_dashboard import build_weekly_dashboard
+    from app.routers.market import get_multi_snapshot
+
+    state = get_state()
+    snapshots: dict = {}
+    try:
+        payload = await get_multi_snapshot()
+        snapshots = payload.snapshots or {}
+    except Exception:
+        snapshots = {}
+
+    return build_weekly_dashboard(days=min(max(days, 1), 30), state=state, snapshots=snapshots)
+
+
 @router.get("/history/{date}")
 async def trade_history_day(date: str):
     """Full trade + event log for a specific IST session date (YYYY-MM-DD)."""

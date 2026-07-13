@@ -73,6 +73,8 @@ def test_loss_streak_pause(mock_settings):
     s.chop_day_guards_enabled = True
     s.loss_streak_pause_count = 3
     s.loss_streak_pause_seconds = 1200
+    s.session_large_loss_pause_inr = 15_000.0
+    s.session_large_loss_pause_seconds = 900
     mock_settings.return_value = s
     reset_session_guards()
     record_session_trade_close(-1000)
@@ -82,6 +84,22 @@ def test_loss_streak_pause(mock_settings):
     paused, reason = session_pause_active()
     assert paused
     assert "loss_streak_pause" in reason
+
+
+@patch("app.engines.chop_day_guards.get_settings")
+def test_large_single_loss_pauses_entries(mock_settings):
+    s = MagicMock()
+    s.chop_day_guards_enabled = True
+    s.loss_streak_pause_count = 3
+    s.loss_streak_pause_seconds = 1200
+    s.session_large_loss_pause_inr = 15_000.0
+    s.session_large_loss_pause_seconds = 900
+    mock_settings.return_value = s
+    reset_session_guards()
+    record_session_trade_close(-30_447)
+    paused, reason = session_pause_active()
+    assert paused
+    assert "large_loss_pause" in reason
 
 
 @patch("app.engines.chop_day_guards.get_settings")

@@ -7,13 +7,22 @@ on:
 
 env:
   AWS_REGION: ap-south-1
-  EC2_INSTANCE_ID: i-02b2962f02b61005f
+  EC2_INSTANCE_ID: i-0f3f9e5e67815c21b
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Verify GitHub AWS secrets
+        run: |
+          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] || [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "::error::Missing GitHub Actions secrets AWS_ACCESS_KEY_ID and/or AWS_SECRET_ACCESS_KEY."
+            echo "Add them under: Repository → Settings → Secrets and variables → Actions"
+            echo "Or deploy manually: BRANCH=main bash deploy/aws-deploy.sh (with deploy/aws.env)"
+            exit 1
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:

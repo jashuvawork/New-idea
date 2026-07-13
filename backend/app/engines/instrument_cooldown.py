@@ -41,6 +41,10 @@ def record_instrument_entry(symbol: str, side: Side | str, strike: float) -> Non
     _entries_today[key] = _entries_today.get(key, 0) + 1
 
 
+def _is_quick_sideways_exit(exit_reason: str) -> bool:
+    return bool(exit_reason) and exit_reason.startswith("quick_sideways")
+
+
 def record_instrument_close(
     symbol: str,
     side: Side | str,
@@ -52,7 +56,9 @@ def record_instrument_close(
     key = _instrument_key(symbol, side, strike)
     now = datetime.now(IST)
     secs = 0
-    if pnl_inr < 0:
+    if _is_quick_sideways_exit(exit_reason):
+        secs = settings.quick_sideways_instrument_cooldown_seconds
+    elif pnl_inr < 0:
         secs = settings.instrument_loss_cooldown_seconds
     elif pnl_inr > 0 and exit_reason in _MICRO_WIN_EXITS:
         secs = settings.instrument_micro_win_cooldown_seconds

@@ -25,7 +25,7 @@ def open_caution_until_minutes() -> int:
 
 
 def entries_allowed_now() -> tuple[bool, str]:
-    """False until configured IST time (default 09:20) during live market."""
+    """False until configured IST time (default 09:20) during live market — skips open auction."""
     phase = get_market_phase()
     if phase != "LIVE_MARKET":
         return False, "market_not_live"
@@ -39,12 +39,52 @@ def entries_allowed_now() -> tuple[bool, str]:
     return True, "ok"
 
 
+def explosion_entries_allowed_now() -> tuple[bool, str]:
+    """9:15–09:20 IST — explosion-only window before general entries."""
+    settings = get_settings()
+    if not settings.explosion_open_entry_enabled:
+        return False, "explosion_open_entry_disabled"
+    if get_market_phase() != "LIVE_MARKET":
+        return False, "market_not_live"
+
+    current = _minutes_now()
+    explosion_start = settings.explosion_entry_earliest_hour * 60 + settings.explosion_entry_earliest_minute
+    general_start = entry_earliest_minutes()
+    if explosion_start <= current < general_start:
+        label = f"{settings.explosion_entry_earliest_hour:02d}:{settings.explosion_entry_earliest_minute:02d}"
+        return True, f"explosion_open_window_{label}_IST"
+    return False, "outside_explosion_open_window"
+
+
 def in_open_caution_window() -> bool:
-    """09:15–09:45 IST — stricter rank gates while opening range forms."""
+    """09:20–09:45 IST — stricter rank gates while opening range forms."""
     if get_market_phase() != "LIVE_MARKET":
         return False
     current = _minutes_now()
     return entry_earliest_minutes() <= current < open_caution_until_minutes()
+
+
+def in_open_premium_window() -> bool:
+    """09:15–09:45 IST — session-open premium explosion detection."""
+    if get_market_phase() != "LIVE_MARKET":
+        return False
+    settings = get_settings()
+    current = _minutes_now()
+    start = settings.explosion_entry_earliest_hour * 60 + settings.explosion_entry_earliest_minute
+    end = open_caution_until_minutes()
+    return start <= current < end
+
+
+def effective_entry_scan_interval_ms() -> int:
+    """Faster polling during open premium window and on expiry day."""
+    settings = get_settings()
+    if in_open_premium_window() and settings.explosion_open_entry_enabled:
+        return min(settings.entry_scan_interval_ms, settings.explosion_open_scan_interval_ms)
+    from app.engines.expiry_day_guards import any_expiry_session_active
+
+    if any_expiry_session_active() and settings.expiry_entry_scan_interval_ms > 0:
+        return min(settings.entry_scan_interval_ms, settings.expiry_entry_scan_interval_ms)
+    return settings.entry_scan_interval_ms
 
 
 def min_explosion_score_now() -> int:

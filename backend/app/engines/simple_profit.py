@@ -15,6 +15,7 @@ from app.models.schemas import (
     Side,
     SpotChart,
     SuggestedTrade,
+    SymbolSnapshot,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -102,6 +103,7 @@ def check_entry_gate(
     momentum_surge: bool = False,
     alignment_override: bool = False,
     chart: Optional["SpotChart"] = None,
+    snap: Optional[SymbolSnapshot] = None,
 ) -> tuple[bool, str]:
     """All gates must pass for simple profit entry."""
     settings = get_settings()
@@ -126,6 +128,16 @@ def check_entry_gate(
     if trade_score < min_score:
         return False, f"score_below_{min_score}"
 
+    if snap is not None:
+        from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+        if is_symbol_expiry_day(snap):
+            label = str((snap.psychology or {}).get("label", "NEUTRAL")).upper()
+            if label in ("CAUTION", "FEAR"):
+                return False, f"expiry_psychology_block_{label.lower()}"
+            if float(snap.tradeQualityScore or 0) < settings.expiry_scalp_min_symbol_tqs:
+                return False, f"expiry_scalp_tqs_below_{settings.expiry_scalp_min_symbol_tqs:.0f}"
+
     blocked, nb_reason = neutral_breadth_blocks_entry(
         breadth.bias, trade_score, velocity_pct, explosion=False,
     )
@@ -133,7 +145,12 @@ def check_entry_gate(
         return False, nb_reason
 
     if settings.midday_chop_block_scalps and in_midday_chop_window():
-        if not (breadth.aligned or momentum_surge or is_momentum_surge(velocity_pct)):
+        from app.engines.chart_exit_levels import high_quality_chart_entry
+
+        hq = False
+        if snap is not None:
+            hq, _ = high_quality_chart_entry(snap, trade.side, trade_score)
+        if not hq and not (breadth.aligned or momentum_surge or is_momentum_surge(velocity_pct)):
             if trade_score < settings.neutral_breadth_min_score:
                 return False, "midday_chop_wait"
 
@@ -148,16 +165,24 @@ def check_entry_gate(
 
     side_bias = "BULLISH" if trade.side == Side.CALL else "BEARISH"
     if breadth.bias not in (side_bias, "NEUTRAL") and not alignment_override:
-        if not momentum_surge and trade_score < settings.counter_breadth_min_score:
+        counter_floor = settings.counter_breadth_min_score
+        from app.engines.morning_premium_capture import premium_led_entry_allowed
+
+        if snap is not None and premium_led_entry_allowed(trade.side, snap):
+            counter_floor = min(counter_floor, settings.premium_led_counter_breadth_min_score)
+        if not momentum_surge and trade_score < counter_floor:
             return False, "breadth_counter_trend"
 
-    from app.engines.spot_direction import chart_blocks_side
+    from app.engines.spot_direction import chart_blocks_side, is_hard_chart_block
 
     blocked, chart_reason = chart_blocks_side(
         trade.side, chart, trade_score=trade_score, momentum_surge=momentum_surge,
     )
-    if blocked and not alignment_override:
-        return False, chart_reason
+    if blocked:
+        if is_hard_chart_block(chart_reason):
+            return False, chart_reason
+        if not alignment_override:
+            return False, chart_reason
 
     if not (momentum_surge or alignment_override or breadth.aligned or trade_score >= min_score + 8):
         return False, "no_momentum_or_alignment"
@@ -196,7 +221,16 @@ def evaluate_exit(
     best = max(trade.bestPnlPoints, pnl_pts)
 
     from app.engines.bullish_hold import direction_aligned_with_breadth
-    from app.engines.confidence_hold import confidence_exit_tuning
+    from app.engines.confidence_hold import (
+        confidence_exit_tuning,
+        confidence_hold_max_seconds,
+        half_tp_giveback_exit,
+        hold_until_target_active,
+        scalp_no_progress_limit_seconds,
+        should_defer_no_progress_exit,
+        should_defer_profit_lock,
+        target_points_for_trade,
+    )
     from app.engines.psychology_hold import psychology_exit_tuning
 
     aligned_hold = direction_aligned_with_breadth(trade)
@@ -241,14 +275,25 @@ def evaluate_exit(
         best_key="scalpTrailBestPts",
     )
 
+    exit_plan = (trade.entryContext or {}).get("exitPlan") or {}
+    chart_target = float(exit_plan.get("entryTargetPoints") or exit_plan.get("targetPoints") or profile.targetPoints)
+    if half_tp_giveback_exit(trade, best, pnl_pts, target_points=chart_target):
+        return "simple_half_tp_profit_lock", pnl_inr
+
     if trail_floor is not None and pnl_pts <= trail_floor and best >= arm:
-        return "scalp_trail_sl", pnl_inr
+        if not should_defer_profit_lock(trade, best, target_points=target_points_for_trade(trade)):
+            return "scalp_trail_sl", pnl_inr
 
     if trail_floor is None and hold_seconds >= min_hold and pnl_pts <= -profile.stopPoints:
-        return "simple_stop_loss", pnl_inr
+        if not hold_until_target_active(trade, best):
+            return "simple_stop_loss", pnl_inr
 
     if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
         return "simple_emergency_inr_stop", pnl_inr
+
+    target2 = float(exit_plan.get("targetPoints2") or 0)
+    if target2 > profile.targetPoints and pnl_pts >= target2:
+        return "chart_tp2_hit", pnl_inr
 
     if pnl_pts >= profile.targetPoints:
         return "simple_profit_target_hit", pnl_inr
@@ -268,7 +313,8 @@ def evaluate_exit(
     )
     if micro_ready and pnl_pts >= profile.microTargetPoints:
         if best - pnl_pts >= micro_giveback:
-            return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
+            if not should_defer_profit_lock(trade, best, target_points=chart_target):
+                return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     if trail_floor is None and best >= arm and pnl_pts < best * runner_keep:
         min_hold_before_trail = 0
@@ -277,12 +323,20 @@ def evaluate_exit(
         if psy_tuning:
             min_hold_before_trail = max(min_hold_before_trail, psy_tuning.min_hold_before_micro_seconds)
         if hold_seconds >= min_hold_before_trail:
-            return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
+            if not should_defer_profit_lock(trade, best, target_points=chart_target):
+                return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
-    if hold_seconds >= settings.scalp_no_progress_seconds and best <= 0:
-        return "simple_no_progress_scratch", pnl_inr
+    if hold_seconds >= scalp_no_progress_limit_seconds(trade) and best <= 0:
+        if not should_defer_no_progress_exit(trade, best):
+            return "simple_no_progress_scratch", pnl_inr
 
-    if hold_seconds >= profile.maxHoldSeconds:
+    effective_max_hold = profile.maxHoldSeconds
+    conf_max = confidence_hold_max_seconds(trade)
+    if conf_max > 0:
+        effective_max_hold = max(effective_max_hold, conf_max)
+    if hold_seconds >= effective_max_hold:
+        if hold_until_target_active(trade, best):
+            return None, pnl_inr
         if pnl_pts > 0:
             return "simple_time_profit_lock", pnl_inr
         return "simple_time_stop", pnl_inr

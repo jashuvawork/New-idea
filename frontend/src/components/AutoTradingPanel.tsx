@@ -41,8 +41,14 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
           </span>
           {auto.lastEntry.chartDirection && (
             <div className="mt-0.5 text-[9px] text-nexus-muted">
-              Chart {auto.lastEntry.chartDirection}
-              {auto.lastEntry.chartAligned === false ? (
+              Scan chart {auto.lastEntry.chartDirection}
+              {auto.lastEntry.execChartDirection
+                && auto.lastEntry.execChartDirection !== auto.lastEntry.chartDirection && (
+                <span> · live {auto.lastEntry.execChartDirection}</span>
+              )}
+              {auto.lastEntry.chartBypass ? (
+                <span className="text-nexus-green"> · {auto.lastEntry.chartBypass} bypass</span>
+              ) : auto.lastEntry.chartAligned === false ? (
                 <span className="text-nexus-yellow"> · misaligned at scan</span>
               ) : auto.lastEntry.chartAligned ? (
                 <span className="text-nexus-green"> · aligned</span>
@@ -82,12 +88,26 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
       ) : (
         <div className="space-y-1.5 max-h-36 overflow-y-auto">
           {auto.openPaperTrades.map((t) => {
-            const plan = t.entryContext?.exitPlan as Record<string, number> | undefined;
+            const plan = t.entryContext?.exitPlan as Record<string, number | string | boolean> | undefined;
+            const chartLive = t.entryContext?.chartExitLive as Record<string, number | boolean> | undefined;
             const execMode = t.entryContext?.executionMode as string | undefined;
             const brokerId = t.entryContext?.brokerOrderId as string | undefined;
             const execChart = t.entryContext?.executionChart as ExecutionChartContext | undefined;
-            const sl = plan?.stopPct ? `−${plan.stopPct}%` : plan?.stopPoints ? `−${plan.stopPoints}pt` : null;
-            const tp = plan?.targetPct ? `+${plan.targetPct}%` : plan?.targetPoints ? `+${plan.targetPoints}pt` : null;
+            const sl = plan?.stopPct ? `−${plan.stopPct}%` : plan?.stopPoints ? `−${Number(plan.stopPoints).toFixed(1)}pt` : null;
+            const fmtTp = (v: unknown) => {
+              const n = Number(v);
+              if (!Number.isFinite(n) || n <= 0 || n > 500) return null;
+              return `+${n.toFixed(1)}pt`;
+            };
+            const tpHalf = fmtTp(plan?.targetPointsHalf);
+            const tpFull = fmtTp(plan?.targetPoints);
+            const tp2 = fmtTp(plan?.targetPoints2);
+            const tpLine = plan?.targetPct
+              ? `+${plan.targetPct}%`
+              : [tpHalf ? `${tpHalf}½` : null, tpFull, tp2].filter(Boolean).join(' / ');
+            const trailKeep = plan?.trailKeepRatio != null ? `${(Number(plan.trailKeepRatio) * 100).toFixed(0)}%` : null;
+            const chartConf = plan?.chartConfidenceLive ?? plan?.chartConfidence;
+            const chartDelta = plan?.chartConfidenceDelta;
             return (
               <div key={t.id} className="p-1.5 bg-black/30 rounded text-[11px]">
                 <div className="flex justify-between">
@@ -102,7 +122,18 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[9px] text-nexus-muted font-mono">
                   <span>{t.strategyType}</span>
                   {sl && <span>SL {sl}</span>}
-                  {tp && <span>TP {tp}</span>}
+                  {tpLine && <span>TP {tpLine}</span>}
+                  {trailKeep && <span>trail keep {trailKeep}</span>}
+                  {chartConf != null && (
+                    <span className={Number(chartConf) >= 62 ? 'text-nexus-green' : 'text-nexus-yellow'}>
+                      chart {Number(chartConf).toFixed(0)}%
+                      {chartDelta != null && Number(chartDelta) !== 0
+                        ? ` (${Number(chartDelta) > 0 ? '+' : ''}${Number(chartDelta).toFixed(0)})`
+                        : ''}
+                    </span>
+                  )}
+                  {chartLive?.letRun ? <span className="text-nexus-green">LET RUN</span> : null}
+                  {chartLive?.tighten ? <span className="text-nexus-red">TIGHTEN</span> : null}
                   {brokerId && <span>ord {brokerId}</span>}
                   {execChart?.indexChart?.direction && (
                     <span>
@@ -123,6 +154,27 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
           })}
         </div>
       )}
+
+      {(auto.closedPaperTrades?.length ?? 0) > 0 ? (
+        <div className="mt-2 pt-2 border-t border-nexus-border">
+          <div className="text-[10px] text-nexus-muted uppercase mb-1">
+            Recent closed ({auto.closedPaperTrades.length})
+          </div>
+          <div className="space-y-1 max-h-24 overflow-y-auto">
+            {auto.closedPaperTrades.slice(-3).reverse().map((t) => (
+              <div key={`closed-${t.id}`} className="p-1 rounded bg-black/20 text-[10px] font-mono flex justify-between gap-2">
+                <span className={t.side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'}>
+                  {t.symbol} {t.side} {t.strike} ×{t.lots}
+                </span>
+                <span className={t.pnlInr >= 0 ? 'text-nexus-green' : 'text-nexus-red'}>
+                  ₹{t.pnlInr.toFixed(0)}
+                  {t.exitReason ? ` · ${t.exitReason.replace('simple_', '').replace('adaptive_', '')}` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {!liveMode && (
         <div className="mt-2 pt-2 border-t border-nexus-border text-[9px] text-nexus-muted leading-relaxed">

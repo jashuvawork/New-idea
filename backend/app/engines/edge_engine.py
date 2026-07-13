@@ -143,13 +143,19 @@ def _timing_edge(snap: SymbolSnapshot) -> tuple[float, list[str]]:
     reasons: list[str] = []
     score = 12.0
 
-    from app.engines.morning_premium_capture import in_morning_premium_capture_window
+    from app.engines.morning_premium_capture import (
+        in_afternoon_premium_capture_window,
+        in_morning_premium_capture_window,
+    )
     from app.engines.chop_day_guards import in_momentum_rally_window
     from app.engines.session_timing import in_open_caution_window, in_midday_chop_window
 
     if in_morning_premium_capture_window():
         score += 14
         reasons.append("morning_capture_window")
+    elif in_afternoon_premium_capture_window():
+        score += 12
+        reasons.append("afternoon_capture_window")
     elif in_momentum_rally_window():
         score += 10
         reasons.append("momentum_rally_window")
@@ -329,7 +335,7 @@ def tune_plan_with_edge(
         plan.trailKeepRatio = round(min(0.78, plan.trailKeepRatio + 0.06), 2)
         plan.microTargetPoints = round(max(plan.microTargetPoints, 3.5), 2)
         plan.reasoning = (plan.reasoning or []) + ["edge_let_runners"]
-    elif edge.tighten_exits:
+    elif edge.tighten_exits and not getattr(plan, "_extreme_all_in", False):
         plan.stopPoints = round(max(settings.scalp_stop_min_points, plan.stopPoints * 0.92), 2)
         plan.trailKeepRatio = round(max(0.48, plan.trailKeepRatio - 0.04), 2)
         plan.microTargetPoints = round(plan.microTargetPoints * 0.95, 2)
@@ -365,14 +371,36 @@ def check_edge_realtime_exit(
     if best <= 0:
         return None, pnl_inr
 
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+    from app.models.schemas import StrategyType
+
+    is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
     ctx = trade.entryContext or {}
+    extreme_hold = bool(ctx.get("extremeAllInBypass"))
+    breadth_hold = is_explosion and (direction_aligned_with_breadth(trade) or extreme_hold)
+
+    from app.engines.confidence_hold import hold_until_target_active, is_confidence_runner_hold
+
+    if is_explosion and hold_until_target_active(trade, best):
+        return None, pnl_inr
+
+    min_best_edge = float(get_settings().extreme_explosion_hold_min_best_points) if extreme_hold else (
+        5.0 if breadth_hold else 3.0
+    )
+    if is_confidence_runner_hold(trade):
+        from app.engines.confidence_hold import target_points_for_trade
+        min_best_edge = max(min_best_edge, target_points_for_trade(trade) * 0.5)
+    if is_explosion and best < min_best_edge:
+        return None, pnl_inr
+
     entry_vel = float(ctx.get("velocity3s") or ctx.get("entryVelocity3s") or 0)
     edge_total = float((ctx.get("edgeScore") or {}).get("total") or 0)
 
     # Momentum exhaustion — premium still up but velocity collapsed
-    if entry_vel >= 1.5 and best >= 2.0:
+    if entry_vel >= 1.5 and best >= (5.0 if breadth_hold else 2.0):
         ratio = settings.edge_velocity_exhaustion_ratio
-        if current_velocity_3s < entry_vel * ratio and pnl_pts >= max(1.5, best * 0.55):
+        min_lock = 4.0 if breadth_hold else 1.5
+        if current_velocity_3s < entry_vel * ratio and pnl_pts >= max(min_lock, best * 0.55):
             return "edge_momentum_exhaustion", pnl_inr
 
     chart = snap.spotChart if snap else None
@@ -394,8 +422,9 @@ def check_edge_realtime_exit(
                 return "edge_macd_fade_lock", pnl_inr
 
     # High-edge trades get more room; low-edge take profit earlier on giveback
-    if edge_total > 0 and edge_total < 58 and best >= 2.5:
-        if best - pnl_pts >= 1.5:
+    if edge_total > 0 and edge_total < 58 and best >= (5.0 if breadth_hold else 2.5):
+        giveback_min = 3.0 if breadth_hold else 1.5
+        if best - pnl_pts >= giveback_min:
             return "edge_low_score_profit_lock", pnl_inr
 
     return None, pnl_inr

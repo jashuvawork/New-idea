@@ -16,7 +16,7 @@ class DayAdaptiveProfile:
     day_type: str = "NORMAL"
     day_mode: str = "NORMAL"
     confidence_tier: str = "MEDIUM"
-    preferred_modes: list[str] = field(default_factory=lambda: ["explosion", "quick_sideways", "scalp"])
+    preferred_modes: list[str] = field(default_factory=lambda: ["explosion", "scalp"])
     mode_bonuses: dict[str, float] = field(default_factory=dict)
     min_rank_cap: float = 72.0
     min_rank_relief: float = 0.0
@@ -177,6 +177,15 @@ def build_day_adaptive_profile(
     elif phase == "EXTEND":
         profile.min_rank_cap = min(profile.min_rank_cap, settings.daily_18pct_high_confidence_min)
         profile.playbook.append("Target hit — extend only on HIGH+ confidence")
+
+    if not settings.quick_sideways_enabled:
+        profile.allow_quick_sideways = False
+        profile.preferred_modes = [m for m in profile.preferred_modes if m != "quick_sideways"]
+        profile.mode_bonuses.pop("quick_sideways", None)
+        profile.playbook = [
+            line for line in profile.playbook
+            if "quick sideways" not in line.lower()
+        ]
 
     return profile
 

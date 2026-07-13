@@ -6,6 +6,7 @@ import {
   useTradeHistory,
   useTradeLog,
   usePerformanceMilestone,
+  useWeeklyDashboard,
   stopTrading,
   resumeTrading,
   resetSession,
@@ -26,6 +27,11 @@ import { AutoTradingPanel } from './components/AutoTradingPanel';
 import { TomorrowPlaybookPanel } from './components/TomorrowPlaybookPanel';
 import { DayModePanel } from './components/DayModePanel';
 import { ComposerMonitorPanel } from './components/ComposerMonitorPanel';
+import { SnapshotLagPanel } from './components/SnapshotLagPanel';
+import { MissedTradeExplainerPanel } from './components/MissedTradeExplainerPanel';
+import { AnalysisReportsPanel } from './components/AnalysisReportsPanel';
+import { FutureSignalsPanel } from './components/FutureSignalsPanel';
+import { EodTomorrowPlaybookPanel } from './components/EodTomorrowPlaybookPanel';
 import { RiskEngine } from './components/RiskEngine';
 import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
@@ -37,6 +43,7 @@ import { PsychologyPanel } from './components/PsychologyPanel';
 import { PremarketPanel } from './components/PremarketPanel';
 import { SwingTrading } from './components/SwingTrading';
 import { PerformanceMilestone } from './components/PerformanceMilestone';
+import { WeeklyDashboardPanel } from './components/WeeklyDashboardPanel';
 import { deriveMarketSession } from './lib/marketSession';
 
 const SYMBOLS = ['NIFTY', 'SENSEX'] as const;
@@ -74,6 +81,7 @@ export default function App() {
   const tradeHistory = useTradeHistory(14);
   const tradeLog = useTradeLog(20);
   const milestone = usePerformanceMilestone();
+  const weeklyDashboard = useWeeklyDashboard(7);
   const [activeSymbol, setActiveSymbol] = useState<string>('NIFTY');
 
   const auto = data?.autoTrader;
@@ -213,8 +221,9 @@ export default function App() {
           waitingReason={data?.waitingReason}
         />
 
-        <div className="max-w-lg">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-5xl">
           <PerformanceMilestone stats={milestone} />
+          <WeeklyDashboardPanel data={weeklyDashboard} />
         </div>
 
         {canShowDashboard && snap && auto && report ? (
@@ -264,8 +273,23 @@ export default function App() {
               <div className="col-span-12">
                 <TomorrowPlaybookPanel auto={auto} snapshots={data.snapshots} deployment={deployment} />
               </div>
+              <div className="col-span-12">
+                <FutureSignalsPanel snapshots={data.snapshots} auto={auto} />
+              </div>
+              <div className="col-span-12 lg:col-span-6">
+                <EodTomorrowPlaybookPanel />
+              </div>
               <div className="col-span-12 lg:col-span-3">
                 <ComposerMonitorPanel />
+              </div>
+              <div className="col-span-12 lg:col-span-3">
+                <SnapshotLagPanel />
+              </div>
+              <div className="col-span-12 lg:col-span-3">
+                <MissedTradeExplainerPanel />
+              </div>
+              <div className="col-span-12 lg:col-span-3">
+                <AnalysisReportsPanel />
               </div>
               <div className="col-span-12 lg:col-span-3">
                 <DayModePanel

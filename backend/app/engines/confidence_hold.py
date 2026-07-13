@@ -72,6 +72,174 @@ def confidence_exit_tuning(trade: PaperTrade) -> Optional[ConfidenceExitTuning]:
     )
 
 
+def chart_confidence_for_trade(trade: PaperTrade) -> float:
+    """Best available chart confidence on the trade (live or entry)."""
+    ctx = trade.entryContext or {}
+    return max(
+        float(ctx.get("chartConfidence") or 0),
+        float(ctx.get("entryChartConfidence") or 0),
+        float((ctx.get("exitPlan") or {}).get("chartConfidence") or 0),
+    )
+
+
+def target_points_for_trade(trade: PaperTrade) -> float:
+    ctx = trade.entryContext or {}
+    plan = ctx.get("exitPlan") or {}
+    return float(plan.get("targetPoints") or plan.get("targetPoints2") or 12.0)
+
+
+def is_confidence_runner_hold(trade: PaperTrade) -> bool:
+    """
+    High chart/score confidence + aligned — hold until chart TP, not scratch exits.
+    """
+    settings = get_settings()
+    if not settings.chart_confidence_hold_enabled:
+        return is_high_confidence_trade(trade)
+
+    conf = chart_confidence_for_trade(trade)
+    score = trade_entry_score(trade)
+    if conf < settings.chart_confidence_hold_min_confidence and score < settings.high_confidence_min_score:
+        return False
+
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if direction_aligned_with_breadth(trade):
+        return True
+    if conf >= settings.all_day_min_chart_confidence + 16:
+        return True
+    return score >= settings.high_confidence_min_score + 8
+
+
+def hold_until_target_active(
+    trade: PaperTrade,
+    best: float,
+    *,
+    target_points: Optional[float] = None,
+) -> bool:
+    """True while trade should keep running toward chart/adaptive TP."""
+    if not is_confidence_runner_hold(trade):
+        return False
+    settings = get_settings()
+    target = target_points if target_points is not None else target_points_for_trade(trade)
+    floor = max(settings.runner_min_best_points, target * settings.chart_confidence_hold_min_target_pct)
+    return best < floor
+
+
+def half_tp_floor_for_trade(
+    trade: PaperTrade,
+    *,
+    target_points: Optional[float] = None,
+) -> float:
+    """Premium points at 50% of chart TP — profit-lock milestone."""
+    settings = get_settings()
+    target = target_points if target_points is not None else target_points_for_trade(trade)
+    half_pct = float(getattr(settings, "chart_confidence_half_tp_lock_pct", 0.50) or 0.50)
+    return max(settings.runner_min_best_points, target * half_pct)
+
+
+def half_tp_reached(
+    trade: PaperTrade,
+    best: float,
+    *,
+    target_points: Optional[float] = None,
+) -> bool:
+    return best >= half_tp_floor_for_trade(trade, target_points=target_points)
+
+
+def should_defer_profit_lock(
+    trade: PaperTrade,
+    best: float,
+    *,
+    target_points: Optional[float] = None,
+) -> bool:
+    """
+    Block micro/trail profit locks while working toward full chart TP.
+    Once best crosses half-TP (e.g. 10pt on 20pt target), allow locks.
+    """
+    if not is_confidence_runner_hold(trade):
+        return False
+    if half_tp_reached(trade, best, target_points=target_points):
+        return False
+    return hold_until_target_active(trade, best, target_points=target_points)
+
+
+def half_tp_giveback_exit(
+    trade: PaperTrade,
+    best: float,
+    pnl_pts: float,
+    *,
+    target_points: Optional[float] = None,
+) -> bool:
+    """After half-TP touched, exit on meaningful giveback (e.g. 12pt best → 1pt)."""
+    if not is_confidence_runner_hold(trade):
+        return False
+    if pnl_pts <= 0 or not half_tp_reached(trade, best, target_points=target_points):
+        return False
+    settings = get_settings()
+    giveback = best - pnl_pts
+    min_giveback = max(
+        settings.scalp_micro_giveback_points,
+        best * float(getattr(settings, "chart_confidence_half_tp_giveback_ratio", 0.40) or 0.40),
+    )
+    return giveback >= min_giveback
+
+
+def confidence_hold_max_seconds(trade: PaperTrade) -> int:
+    settings = get_settings()
+    if not is_confidence_runner_hold(trade):
+        return 0
+    base = settings.chart_confidence_hold_max_seconds
+    conf = chart_confidence_for_trade(trade)
+    if conf >= 85:
+        return int(base * 1.25)
+    return base
+
+
+def confidence_hold_stop_multiplier(trade: PaperTrade) -> float:
+    settings = get_settings()
+    if not is_confidence_runner_hold(trade):
+        return 1.0
+    return settings.chart_confidence_hold_stop_mult
+
+
+
+def should_defer_no_progress_exit(trade: PaperTrade, best: float) -> bool:
+    """Skip no-progress scratch while a high-confidence trade works toward chart TP."""
+    if hold_until_target_active(trade, best):
+        return True
+    settings = get_settings()
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if is_confidence_runner_hold(trade):
+        return True
+    if not settings.scalp_no_progress_skip_when_aligned:
+        return False
+    if direction_aligned_with_breadth(trade):
+        return True
+    ctx = trade.entryContext or {}
+    if ctx.get("extremeAllInBypass"):
+        return True
+    edge = ctx.get("edgeScore") or {}
+    if edge.get("letRunners"):
+        return True
+    return False
+
+
+def scalp_no_progress_limit_seconds(trade: PaperTrade) -> int:
+    """How long to wait before scalp no-progress exit — longer on aligned holds."""
+    settings = get_settings()
+    base = settings.scalp_no_progress_seconds
+    aligned = settings.scalp_no_progress_aligned_seconds
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    if is_confidence_runner_hold(trade) or direction_aligned_with_breadth(trade):
+        conf_max = confidence_hold_max_seconds(trade)
+        return max(aligned, conf_max or aligned)
+    if trade_entry_score(trade) >= 80:
+        return int(base * 1.5)
+    return base
+
+
 def apply_confidence_hold_profile(
     trade: PaperTrade,
     profile: OptimizedProfile,

@@ -2,12 +2,98 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.moneyness import steps_from_atm, strike_step
 from app.models.schemas import Side, SpotChart, SymbolSnapshot
+
+IST = ZoneInfo("Asia/Kolkata")
+
+# symbol:side:strike -> when exhaustion last blocked (for timed reset)
+_exhaustion_marked_at: dict[str, datetime] = {}
+
+
+def _exhaustion_key(event: ExplosionEvent) -> str:
+    side = _side_val(event.side)
+    return f"{event.symbol.upper()}:{side}:{event.strike:.0f}"
+
+
+def _in_consolidation(event: ExplosionEvent) -> bool:
+    settings = get_settings()
+    return (
+        event.velocity_3s <= settings.explosion_exhaustion_consolidation_v3_max
+        and event.velocity_9s <= settings.explosion_exhaustion_consolidation_v9_max
+    )
+
+
+def explosion_exhausted(event: ExplosionEvent) -> tuple[bool, str]:
+    """Block late chase — big 15s move already in, 3s fading (buying the top)."""
+    settings = get_settings()
+    key = _exhaustion_key(event)
+
+    open_move = float(getattr(event, "daily_move_pct", 0) or 0)
+    open_min = float(getattr(settings, "open_premium_min_move_pct", 25.0) or 25.0)
+    if open_move >= open_min and event.velocity_3s >= 1.5:
+        _exhaustion_marked_at.pop(key, None)
+        return False, "ok"
+
+    if settings.explosion_exhaustion_consolidation_reset_enabled:
+        if _in_consolidation(event):
+            _exhaustion_marked_at.pop(key, None)
+            return False, "ok"
+
+        marked = _exhaustion_marked_at.get(key)
+        if marked is not None:
+            if marked.tzinfo is None:
+                marked = marked.replace(tzinfo=IST)
+            elapsed_min = (datetime.now(IST) - marked.astimezone(IST)).total_seconds() / 60.0
+            if elapsed_min >= settings.explosion_exhaustion_reset_minutes and _in_consolidation(event):
+                _exhaustion_marked_at.pop(key, None)
+                return False, "ok"
+
+    threshold = settings.explosion_exhaustion_v15_pct
+    if event.velocity_15s < threshold:
+        _exhaustion_marked_at.pop(key, None)
+        return False, "ok"
+    if event.velocity_3s >= max(1.5, event.velocity_9s * 0.45):
+        _exhaustion_marked_at.pop(key, None)
+        return False, "ok"
+
+    _exhaustion_marked_at[key] = datetime.now(IST)
+    return True, f"explosion_exhausted_v15_{event.velocity_15s:.1f}"
+
+
+def index_pin_blocks_put_explosion(event: ExplosionEvent, snap: SymbolSnapshot) -> tuple[bool, str]:
+    """Block PE fades when index pins at day high with bullish stock breadth."""
+    settings = get_settings()
+    if not settings.index_pin_put_block_enabled:
+        return False, "ok"
+    if _side_val(event.side) != "PUT":
+        return False, "ok"
+
+    hm = snap.constituentHeatmap
+    stock_pct = float(hm.breadthPct) if hm and hm.dataAvailable else float(snap.breadth.stockScore or 0)
+    if stock_pct < settings.index_pin_min_stock_breadth_pct:
+        return False, "ok"
+
+    chart = snap.spotChart
+    profile = snap.marketProfile
+    if not chart or chart.spot <= 0:
+        return False, "ok"
+
+    or_high = profile.openingRangeHigh or profile.vah or 0
+    if or_high <= 0:
+        return False, "ok"
+
+    pinning = chart.spot >= or_high * 0.9995
+    if not pinning:
+        return False, "ok"
+
+    return True, "put_blocked_index_pin_bullish_stocks"
 
 
 def _side_val(side: Side | str) -> str:
@@ -43,22 +129,24 @@ def chart_blocks_explosion_side(side: Side | str, chart: Optional[SpotChart], ti
     return False, "ok"
 
 
-def explosion_exhausted(event: ExplosionEvent) -> tuple[bool, str]:
-    """Block late chase — big 15s move already in, 3s fading (buying the top)."""
-    settings = get_settings()
-    threshold = settings.explosion_exhaustion_v15_pct
-    if event.velocity_15s < threshold:
-        return False, "ok"
-    if event.velocity_3s >= max(1.5, event.velocity_9s * 0.45):
-        return False, "ok"
-    return True, f"explosion_exhausted_v15_{event.velocity_15s:.1f}"
-
-
 def dominant_explosion_alert(snap: SymbolSnapshot) -> Optional[dict[str, Any]]:
-    alerts = [
-        a for a in (snap.explosionAlerts or [])
-        if a.get("tradeable") and a.get("tier") in ("EXPLODING", "ELITE")
-    ]
+    settings = get_settings()
+    dom_min = float(getattr(settings, "all_day_explosion_dominant_min_score", 40.0) or 40.0)
+    session_move_min = float(getattr(settings, "all_day_explosion_session_move_min_pct", 40.0) or 40.0)
+    alerts = []
+    for a in snap.explosionAlerts or []:
+        if not a.get("tradeable") and a.get("tier") not in ("BUILDING", "EXPLODING", "ELITE"):
+            continue
+        tier = str(a.get("tier") or "")
+        score = float(a.get("explosionScore") or 0)
+        daily_move = float(a.get("dailyMovePct") or a.get("openPremiumMove") or 0)
+        if tier in ("EXPLODING", "ELITE"):
+            alerts.append(a)
+        elif tier == "BUILDING" and (
+            score >= dom_min
+            or daily_move >= session_move_min
+        ):
+            alerts.append(a)
     if not alerts:
         return None
     return max(alerts, key=lambda a: float(a.get("explosionScore") or 0))

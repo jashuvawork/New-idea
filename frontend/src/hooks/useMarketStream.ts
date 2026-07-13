@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, PerformanceMilestone, StreamMetrics, TradeHistoryResponse, TradeLogResponse } from '../types';
+import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, PerformanceMilestone, StreamMetrics, TradeHistoryResponse, TradeLogResponse, WeeklyDashboard } from '../types';
 import { snapshotSignature } from './snapshotSignature';
 
 // Production: always use same-origin /api (Vercel rewrites → EC2 backend)
@@ -8,15 +8,36 @@ const API_BASE = import.meta.env.DEV
   ? ''
   : (import.meta.env.VITE_API_URL || '');
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
-const UI_TICK_MS = Math.max(POLL_MS, 250);
-const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 100), 50);
-const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
+const UI_TICK_MS = Math.max(POLL_MS, 200);
+const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 50), 25);
+// Production: SSE does not work through Vercel → EC2 HTTP proxy; use HTTP poll unless explicitly enabled.
+const SSE_ENABLED = import.meta.env.DEV
+  ? import.meta.env.VITE_SSE_ENABLED !== 'false'
+  : import.meta.env.VITE_SSE_ENABLED === 'true';
+const SNAPSHOT_URL = `${API_BASE}/api/market/snapshots/cached`;
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   if (ms <= 0) return 'offline';
   if (ms < 80) return 'excellent';
   if (ms < 250) return 'good';
   return 'slow';
+}
+
+/** SSE is server-push — use data freshness, not JSON parse time (which is ~0ms). */
+function sseConnectionQuality(
+  dataAgeMs: number,
+  dataReady: boolean,
+): StreamMetrics['connectionQuality'] {
+  if (!dataReady && dataAgeMs > 30_000) return 'offline';
+  if (dataAgeMs > 10_000) return 'offline';
+  if (dataAgeMs > 3_000) return 'slow';
+  if (dataAgeMs > 800) return 'good';
+  return 'excellent';
+}
+
+function sseDisplayLatencyMs(dataAgeMs: number, pollIntervalMs: number): number {
+  const age = dataAgeMs > 0 ? dataAgeMs : pollIntervalMs;
+  return stableLatencyMs(Math.max(25, Math.min(pollIntervalMs, age)));
 }
 
 /** Round-trip display — dampens jitter from ±few ms network variance */
@@ -65,10 +86,9 @@ function applySnapshot(
   const snapTs = json.timestamp ? new Date(json.timestamp).getTime() : now.getTime();
   const dataAgeMs = Math.max(0, now.getTime() - snapTs);
 
-  latencyHistory.current = [...latencyHistory.current.slice(-9), elapsed];
-  const avg = Math.round(
-    latencyHistory.current.reduce((a, b) => a + b, 0) / latencyHistory.current.length,
-  );
+  if (streamMode !== 'sse') {
+    latencyHistory.current = [...latencyHistory.current.slice(-9), elapsed];
+  }
 
   const sig = snapshotSignature(json);
   const dataChanged = sig !== lastSignature.current;
@@ -77,10 +97,22 @@ function applySnapshot(
     setData(json);
   }
 
-  const latency = stableLatencyMs(elapsed);
-  const avgStable = stableLatencyMs(avg);
+  const isSse = streamMode === 'sse';
+  const roundTripMs = Math.round(performance.now() - started);
+  const latency = isSse
+    ? sseDisplayLatencyMs(dataAgeMs, pollIntervalMs)
+    : stableLatencyMs(roundTripMs);
+  const avgStable = isSse
+    ? latency
+    : stableLatencyMs(
+        Math.round(
+          latencyHistory.current.reduce((a, b) => a + b, 0) / latencyHistory.current.length,
+        ),
+      );
+  const quality = isSse
+    ? sseConnectionQuality(dataAgeMs, Boolean(json.dataReady))
+    : latencyQuality(roundTripMs);
   setMetrics((prev) => {
-    const quality = latencyQuality(elapsed);
     const staleBucket = Math.floor(dataAgeMs / 1000);
     const prevBucket = Math.floor(prev.stalenessMs / 1000);
     if (
@@ -121,7 +153,7 @@ export function useMarketStream() {
   const fetchSnapshot = useCallback(async () => {
     const started = performance.now();
     try {
-      const res = await fetch(`${API_BASE}/api/market/snapshots`);
+      const res = await fetch(SNAPSHOT_URL);
       const elapsed = Math.round(performance.now() - started);
       if (!res.ok) throw new Error(`API ${res.status}`);
 
@@ -165,15 +197,18 @@ export function useMarketStream() {
       setMetrics((prev) => {
         const prevBucket = Math.floor(prev.stalenessMs / 1000);
         const quality =
-          prev.streamMode === 'sse' && stale > 30_000
-            ? (stale > 60_000 ? 'offline' : 'slow')
+          prev.streamMode === 'sse'
+            ? (stale > 10_000 ? 'offline' : stale > 3_000 ? 'slow' : stale > 800 ? 'good' : 'excellent')
             : prev.connectionQuality;
-        if (prevBucket === staleBucket && quality === prev.connectionQuality) {
+        const latency = prev.streamMode === 'sse'
+          ? sseDisplayLatencyMs(stale, prev.pollIntervalMs)
+          : prev.lastLatencyMs;
+        if (prevBucket === staleBucket && quality === prev.connectionQuality && latency === prev.lastLatencyMs) {
           return prev;
         }
-        return { ...prev, stalenessMs: stale, connectionQuality: quality };
+        return { ...prev, stalenessMs: stale, connectionQuality: quality, lastLatencyMs: latency };
       });
-      if (SSE_ENABLED && !sseFailed.current && stale > 4000) {
+      if (SSE_ENABLED && stale > 2500) {
         void fetchSnapshot();
       }
     }, UI_TICK_MS);
@@ -181,77 +216,106 @@ export function useMarketStream() {
   }, [fetchSnapshot]);
 
   useEffect(() => {
-    if (!SSE_ENABLED || sseFailed.current) {
+    if (!SSE_ENABLED) {
       fetchSnapshot();
       const id = setInterval(fetchSnapshot, POLL_MS);
       return () => clearInterval(id);
     }
 
-    const url = `${API_BASE}/api/market/stream`;
-    const es = new EventSource(url);
-    let opened = false;
+    let es: EventSource | null = null;
     let pollId: ReturnType<typeof setInterval> | null = null;
+    let retryId: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+    let retryMs = 1500;
 
-    es.onopen = () => {
-      opened = true;
-      setLoading(false);
-      setMetrics((prev) => (
-        prev.streamMode === 'sse' && prev.connectionQuality === 'good'
-          ? prev
-          : { ...prev, streamMode: 'sse', connectionQuality: 'good' }
-      ));
-    };
-
-    es.onmessage = (ev) => {
-      const now = performance.now();
-      lastSuccessAt.current = new Date();
-      if (now - lastSseApplyAt.current < SSE_MIN_INTERVAL_MS) {
-        return;
-      }
-      lastSseApplyAt.current = now;
-      const started = performance.now();
-      try {
-        const json = JSON.parse(ev.data) as MultiSnapshot;
-        applySnapshot(
-          json,
-          started,
-          latencyHistory,
-          lastSuccessAt,
-          lastSignature,
-          'sse',
-          POLL_MS,
-          setData,
-          setError,
-          setMetrics,
-        );
-        setLoading(false);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Invalid stream payload');
-      }
-    };
-
-    es.onerror = () => {
-      es.close();
-      if (!opened) {
-        sseFailed.current = true;
-        setMetrics((prev) => ({ ...prev, streamMode: 'poll' }));
-        fetchSnapshot();
-        pollId = setInterval(fetchSnapshot, POLL_MS);
-        return;
-      }
-      sseFailed.current = true;
-      setMetrics((prev) => ({
-        ...prev,
-        streamMode: 'poll',
-        connectionQuality: prev.stalenessMs > 15_000 ? 'offline' : 'slow',
-      }));
+    const startPollFallback = () => {
+      if (pollId) return;
       fetchSnapshot();
       pollId = setInterval(fetchSnapshot, POLL_MS);
+      setMetrics((prev) => ({ ...prev, streamMode: 'poll' }));
     };
 
+    const stopPollFallback = () => {
+      if (pollId) {
+        clearInterval(pollId);
+        pollId = null;
+      }
+    };
+
+    const connectSse = () => {
+      if (disposed) return;
+      stopPollFallback();
+      const url = `${API_BASE}/api/market/stream`;
+      es = new EventSource(url);
+      let opened = false;
+
+      es.onopen = () => {
+        opened = true;
+        retryMs = 1500;
+        sseFailed.current = false;
+        setLoading(false);
+        setMetrics((prev) => ({
+          ...prev,
+          streamMode: 'sse',
+          connectionQuality: 'good',
+        }));
+      };
+
+      es.onmessage = (ev) => {
+        const now = performance.now();
+        lastSuccessAt.current = new Date();
+        if (now - lastSseApplyAt.current < SSE_MIN_INTERVAL_MS) {
+          return;
+        }
+        lastSseApplyAt.current = now;
+        const started = performance.now();
+        try {
+          const json = JSON.parse(ev.data) as MultiSnapshot;
+          applySnapshot(
+            json,
+            started,
+            latencyHistory,
+            lastSuccessAt,
+            lastSignature,
+            'sse',
+            POLL_MS,
+            setData,
+            setError,
+            setMetrics,
+          );
+          setLoading(false);
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Invalid stream payload');
+        }
+      };
+
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        if (!disposed) {
+          startPollFallback();
+          retryId = setTimeout(() => {
+            if (!disposed) connectSse();
+          }, retryMs);
+          retryMs = Math.min(retryMs * 2, 30_000);
+        }
+        if (!opened) {
+          setMetrics((prev) => ({
+            ...prev,
+            streamMode: 'poll',
+            connectionQuality: 'slow',
+          }));
+        }
+      };
+    };
+
+    connectSse();
+
     return () => {
-      es.close();
+      disposed = true;
+      es?.close();
       if (pollId) clearInterval(pollId);
+      if (retryId) clearTimeout(retryId);
     };
   }, [fetchSnapshot]);
 
@@ -340,6 +404,24 @@ export function usePerformanceMilestone() {
   }, [refresh]);
 
   return milestone;
+}
+
+export function useWeeklyDashboard(days = 7) {
+  const [dashboard, setDashboard] = useState<WeeklyDashboard | null>(null);
+
+  const refresh = useCallback(() => {
+    fetchJson<WeeklyDashboard>(`${API_BASE}/api/auto-trader/weekly-dashboard?days=${days}`).then((json) => {
+      if (json && json.summary) setDashboard(json);
+    });
+  }, [days]);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 30_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  return dashboard;
 }
 
 export async function stopTrading() {

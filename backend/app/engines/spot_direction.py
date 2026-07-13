@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.config import get_settings
-from app.engines.chart_indicators import compute_macd, compute_rsi
+from app.engines.chart_indicators import _ema_series, compute_macd, compute_rsi
 from app.models.schemas import MarketProfile, Side, SpotChart
 
 
@@ -38,31 +38,58 @@ def _ema(closes: list[float], period: int) -> float:
     return sum(window) / len(window)
 
 
-def analyze_spot_chart(
-    candles: list,
+def _ema(closes: list[float], period: int) -> float:
+    if not closes:
+        return 0.0
+    series = _ema_series(closes, period)
+    return series[-1] if series else 0.0
+
+
+def _indicator_closes(candles_5m: list, candles_1m: list | None) -> list[float]:
+    """RSI/MACD input — prefer extended 5m; fall back to 1m when session is still thin."""
+    if candles_1m:
+        from app.engines.mtf_chart_analysis import resample_candles
+
+        settings = get_settings()
+        extended_5m = resample_candles(candles_1m, settings.spot_chart_timeframe_minutes)
+        closes_5m_ext = _candle_rows(extended_5m)[3]
+        if len(closes_5m_ext) >= 35:
+            return closes_5m_ext
+        _, _, _, closes_1m = _candle_rows(candles_1m)
+        if len(closes_1m) >= 15:
+            return closes_1m
+    _, _, _, closes_5m = _candle_rows(candles_5m)
+    return closes_5m
+
+
+def build_spot_chart(
+    candles_5m: list,
     spot: float,
     profile: MarketProfile,
+    *,
+    indicator_candles_1m: list | None = None,
 ) -> SpotChart:
     """
-    Multi-factor index chart read from 1m candles:
-    momentum, EMA stack, POC/OR position, candle color bias.
+    Index chart read from 5m candles: direction, EMA9/21, RSI, MACD.
+    RSI/MACD use extended 5m series resampled from 1m when available (MACD warmup).
     """
-    _, _, _, closes = _candle_rows(candles)
-    opens, _, _, _ = _candle_rows(candles)
+    opens, _, _, closes = _candle_rows(candles_5m)
+    ind_closes = _indicator_closes(candles_5m, indicator_candles_1m)
 
     if not closes or spot <= 0:
-        return SpotChart(direction="NEUTRAL", spot=spot)
+        return SpotChart(direction="NEUTRAL", spot=spot, timeframe="5m")
 
-    mom5 = _pct_change(closes, 5)
-    mom10 = _pct_change(closes, 10)
-    mom15 = _pct_change(closes, 15) if len(closes) > 15 else mom10
-    mom30 = _pct_change(closes, 30) if len(closes) > 30 else mom15
+    # On 5m: 1 bar = 5min, 3 bars = 15min, 6 = 30min, 12 = 60min
+    mom5 = _pct_change(closes, 1)
+    mom10 = _pct_change(closes, 2)
+    mom15 = _pct_change(closes, 3) if len(closes) > 3 else mom10
+    mom30 = _pct_change(closes, 6) if len(closes) > 6 else mom15
 
-    ema5 = _ema(closes, 5)
-    ema15 = _ema(closes, 15)
-    if ema5 > ema15 * 1.00015:
+    ema9 = _ema(closes, min(9, len(closes)))
+    ema21 = _ema(closes, min(21, len(closes)))
+    if ema9 > ema21 * 1.00015:
         ema_bias = "BULLISH"
-    elif ema5 < ema15 * 0.99985:
+    elif ema9 < ema21 * 0.99985:
         ema_bias = "BEARISH"
     else:
         ema_bias = "NEUTRAL"
@@ -93,8 +120,8 @@ def analyze_spot_chart(
     above_poc = spot > poc * 1.0001
     below_poc = spot < poc * 0.9999
 
-    rsi_read = compute_rsi(closes)
-    macd_read = compute_macd(closes)
+    rsi_read = compute_rsi(ind_closes)
+    macd_read = compute_macd(ind_closes)
 
     bullish = bearish = 0
     if mom5 > 0.04:
@@ -122,7 +149,8 @@ def analyze_spot_chart(
     elif or_pos == "BELOW":
         bearish += 1
     if rsi_read.bias == "OVERSOLD":
-        bullish += 1
+        if mom15 > 0 and mom30 > -0.05:
+            bullish += 1
     elif rsi_read.bias == "OVERBOUGHT":
         bearish += 1
     elif rsi_read.value > 55:
@@ -138,10 +166,18 @@ def analyze_spot_chart(
         direction = "BULLISH"
     elif bearish >= bullish + 3:
         direction = "BEARISH"
-    elif mom5 > 0.02 and mom15 >= 0:
-        direction = "BULLISH"
-    elif mom5 < -0.02 and mom15 <= 0:
+    elif mom30 < -0.08 and mom15 <= 0:
         direction = "BEARISH"
+    elif mom30 > 0.08 and mom15 >= 0:
+        direction = "BULLISH"
+    elif mom5 > 0.02 and mom15 > 0.05 and mom30 > 0:
+        direction = "BULLISH"
+    elif mom5 < -0.02 and mom15 < -0.05 and mom30 < 0:
+        direction = "BEARISH"
+    elif mom15 < 0 and mom30 < 0:
+        direction = "BEARISH"
+    elif mom15 > 0 and mom30 > 0:
+        direction = "BULLISH"
     else:
         direction = "NEUTRAL"
 
@@ -154,12 +190,16 @@ def analyze_spot_chart(
     return SpotChart(
         direction=direction,
         spot=round(spot, 2),
+        timeframe="5m",
+        barCount=len(closes),
         momentum5Pct=round(mom5, 3),
         momentum10Pct=round(mom10, 3),
         momentum15Pct=round(mom15, 3),
         momentum30Pct=round(mom30, 3),
         trendStrength=round(trend_strength, 1),
         emaBias=ema_bias,
+        ema9=round(ema9, 2),
+        ema21=round(ema21, 2),
         candleBias=candle_bias,
         orPosition=or_pos,
         abovePoc=above_poc,
@@ -172,6 +212,85 @@ def analyze_spot_chart(
         macdHistogram=macd_read.histogram,
         macdBias=macd_read.bias,
     )
+
+
+def reconcile_spot_chart_with_mtf(
+    spot_chart: SpotChart,
+    chart_analysis: Optional[Any],
+    breadth_bias: str = "NEUTRAL",
+    *,
+    from_open_pct: float = 0.0,
+) -> SpotChart:
+    """
+    Align primary spotChart with MTF consensus when a lone 5m flicker disagrees
+    with session + multi-timeframe bearish/bullish read.
+    """
+    if not chart_analysis:
+        return spot_chart
+
+    consensus = str(getattr(chart_analysis, "consensus", None) or "NEUTRAL").upper()
+    spot_dir = (spot_chart.direction or "NEUTRAL").upper()
+    if consensus not in ("BULLISH", "BEARISH"):
+        return spot_chart
+    if spot_dir == consensus:
+        return spot_chart
+
+    tfs = getattr(chart_analysis, "timeframes", None) or {}
+    bull = bear = 0
+    for tf in tfs.values():
+        d = tf.get("direction") if isinstance(tf, dict) else getattr(tf, "direction", "NEUTRAL")
+        d = str(d or "NEUTRAL").upper()
+        if d == "BULLISH":
+            bull += 1
+        elif d == "BEARISH":
+            bear += 1
+
+    consensus_ct = bear if consensus == "BEARISH" else bull
+    breadth = (breadth_bias or "NEUTRAL").upper()
+    total = int(getattr(chart_analysis, "totalTimeframes", 0) or len(tfs) or 0)
+
+    # MTF + breadth agree — always trust over lone 5m oversold bounce
+    if consensus == "BEARISH" and bear >= 2 and breadth == "BEARISH":
+        return spot_chart.model_copy(update={"direction": "BEARISH"})
+    if consensus == "BULLISH" and bull >= 2 and breadth == "BULLISH":
+        return spot_chart.model_copy(update={"direction": "BULLISH"})
+
+    # Tiny 5m flicker vs 3+ bearish/bullish TFs
+    if consensus == "BEARISH" and spot_dir == "BULLISH" and bear >= 2:
+        if abs(spot_chart.momentum5Pct) < 0.5 or spot_chart.momentum30Pct < 0:
+            return spot_chart.model_copy(update={"direction": "BEARISH"})
+    if consensus == "BULLISH" and spot_dir == "BEARISH" and bull >= 2:
+        if abs(spot_chart.momentum5Pct) < 0.5 or spot_chart.momentum30Pct > 0:
+            return spot_chart.model_copy(update={"direction": "BULLISH"})
+
+    override = consensus_ct >= 3
+    if total >= 4 and consensus_ct >= total - 1:
+        override = True
+    if breadth == consensus and consensus_ct >= 2:
+        override = True
+    if consensus == "BEARISH" and from_open_pct <= -0.08 and consensus_ct >= 2:
+        override = True
+    if consensus == "BULLISH" and from_open_pct >= 0.08 and consensus_ct >= 2:
+        override = True
+
+    if override:
+        return spot_chart.model_copy(update={"direction": consensus})
+    return spot_chart
+
+
+def analyze_spot_chart(
+    candles: list,
+    spot: float,
+    profile: MarketProfile,
+) -> SpotChart:
+    """
+    Back-compat wrapper — resamples 1m input to 5m and builds spot chart.
+    """
+    from app.engines.mtf_chart_analysis import resample_candles
+
+    settings = get_settings()
+    candles_5m = resample_candles(candles, settings.spot_chart_timeframe_minutes) if candles else []
+    return build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=candles)
 
 
 def side_aligned_with_chart(side: Side | str, chart: Optional[SpotChart]) -> bool:
@@ -194,6 +313,9 @@ def chart_blocks_side(
     *,
     trade_score: float = 0.0,
     momentum_surge: bool = False,
+    breadth_aligned_bypass: bool = False,
+    premium_led_bypass: bool = False,
+    expiry_explosion_bypass: bool = False,
 ) -> tuple[bool, str]:
     settings = get_settings()
     if not settings.chart_alignment_enabled or not chart:
@@ -204,12 +326,23 @@ def chart_blocks_side(
     min_mom = settings.chart_min_momentum_pct
     override = settings.chart_override_min_score
 
+    # Hard direction conflict — breadth-aligned / premium-led / expiry explosion bypass.
+    if side_val == "CALL" and chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
+        if breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass:
+            return False, "ok"
+        return True, "chart_bearish_no_calls"
+    if side_val == "PUT" and chart.direction == "BULLISH" and chart.trendStrength >= min_strength:
+        if breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass:
+            return False, "ok"
+        return True, "chart_bullish_no_puts"
+
     if momentum_surge or trade_score >= override:
         return False, "ok"
 
+    if expiry_explosion_bypass and side_val == "CALL":
+        return False, "ok"
+
     if side_val == "CALL":
-        if chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
-            return True, "chart_bearish_no_calls"
         if chart.momentum5Pct < -min_mom and chart.momentum15Pct < 0:
             return True, "chart_declining_no_calls"
         if chart.orPosition == "BELOW" and chart.belowPoc and chart.momentum5Pct < 0:
@@ -217,8 +350,6 @@ def chart_blocks_side(
         if chart.rsiBias == "OVERBOUGHT" and chart.macdBias == "BEARISH" and chart.momentum5Pct < 0:
             return True, "chart_rsi_macd_bearish_no_calls"
     else:
-        if chart.direction == "BULLISH" and chart.trendStrength >= min_strength:
-            return True, "chart_bullish_no_puts"
         if chart.momentum5Pct > min_mom and chart.momentum15Pct > 0:
             return True, "chart_rallying_no_puts"
         if chart.orPosition == "ABOVE" and chart.abovePoc and chart.momentum5Pct > 0:
@@ -227,6 +358,16 @@ def chart_blocks_side(
             return True, "chart_rsi_macd_bullish_no_puts"
 
     return False, "ok"
+
+
+HARD_CHART_BLOCK_REASONS = frozenset({
+    "chart_bearish_no_calls",
+    "chart_bullish_no_puts",
+})
+
+
+def is_hard_chart_block(reason: str) -> bool:
+    return reason in HARD_CHART_BLOCK_REASONS
 
 
 def chart_rank_adjustment(side: Side | str, chart: Optional[SpotChart]) -> float:
@@ -252,10 +393,14 @@ def signed_momentum_pct(candles: list, bars: int = 5) -> float:
 def chart_summary_dict(chart: SpotChart) -> dict[str, Any]:
     return {
         "direction": chart.direction,
+        "timeframe": chart.timeframe,
+        "barCount": chart.barCount,
         "momentum5Pct": chart.momentum5Pct,
         "momentum15Pct": chart.momentum15Pct,
         "trendStrength": chart.trendStrength,
         "emaBias": chart.emaBias,
+        "ema9": chart.ema9,
+        "ema21": chart.ema21,
         "candleBias": chart.candleBias,
         "orPosition": chart.orPosition,
         "abovePoc": chart.abovePoc,
@@ -333,21 +478,26 @@ def analyze_premium_chart(candles: list, ltp: float) -> "PremiumChart":
     )
 
 
-def premium_blocks_entry(side: Side | str, premium: "PremiumChart", trade_score: float = 0.0) -> tuple[bool, str]:
+def premium_blocks_entry(
+    side: Side | str,
+    premium: "PremiumChart",
+    trade_score: float = 0.0,
+    *,
+    explosion_event: Any = None,
+) -> tuple[bool, str]:
     """Block when option premium is fading at execution — bad fill timing."""
     settings = get_settings()
     if not settings.execution_chart_premium_check_enabled or not premium:
         return False, "ok"
-    if trade_score >= settings.chart_override_min_score:
-        return False, "ok"
+    from app.engines.winner_entry_guards import premium_fading_blocks_entry
 
-    min_mom = settings.execution_chart_min_premium_momentum_pct
-
-    if premium.momentum5Pct < min_mom and premium.momentum3Pct < 0:
-        return True, "premium_fading_at_execution"
-    if premium.direction == "BEARISH" and premium.momentum5Pct < -0.15:
-        return True, "premium_chart_fading"
-    return False, "ok"
+    return premium_fading_blocks_entry(
+        trade_score=trade_score,
+        premium_momentum_3s=float(premium.momentum3Pct or 0),
+        premium_momentum_5s=float(premium.momentum5Pct or 0),
+        premium_direction=str(premium.direction or ""),
+        explosion_event=explosion_event,
+    )
 
 
 def pro_index_quote_context(quote: dict[str, Any], spot: float) -> dict[str, Any]:

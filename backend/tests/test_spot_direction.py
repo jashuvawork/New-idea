@@ -77,6 +77,34 @@ def test_analyze_spot_chart_bullish_on_rally():
     assert chart.macdBias in ("BULLISH", "NEUTRAL")
 
 
+def test_oversold_bounce_does_not_flip_bearish_session_bullish():
+    """5m micro-bounce on oversold RSI must not override bearish 15m/30m session."""
+    from app.engines.spot_direction import build_spot_chart
+
+    candles_5m: list[list[float]] = []
+    price = 24000.0
+    for i in range(14):
+        nxt = price - 8.0
+        candles_5m.append([i, price, price + 2, nxt - 2, nxt])
+        price = nxt
+    # Tiny 5m bounce — mimics Jul 8 screenshot (+0.16% on 5m, still down on 15m/30m)
+    bounce = price + 12.0
+    candles_5m.append([14, price, bounce + 3, price - 2, bounce])
+    spot = bounce
+    profile = MarketProfile(
+        poc=spot + 40,
+        openingRangeHigh=spot + 80,
+        openingRangeLow=spot - 20,
+        val=spot - 10,
+        vah=spot + 30,
+    )
+    chart = build_spot_chart(candles_5m, spot, profile)
+    assert chart.momentum5Pct > 0
+    assert chart.momentum15Pct < 0
+    assert chart.rsiBias == "OVERSOLD"
+    assert chart.direction in ("BEARISH", "NEUTRAL")
+
+
 @patch("app.engines.spot_direction.get_settings")
 def test_chart_blocks_call_on_declining_index(mock_settings):
     mock_settings.return_value = _settings()
@@ -112,8 +140,66 @@ def test_chart_blocks_put_on_rallying_index(mock_settings):
 @patch("app.engines.spot_direction.get_settings")
 def test_chart_override_allows_high_score_counter_trend(mock_settings):
     mock_settings.return_value = _settings()
-    chart = SpotChart(direction="BEARISH", momentum5Pct=-0.2, momentum15Pct=-0.3, trendStrength=50)
+    # Override applies to soft momentum conflicts, not explicit opposite direction.
+    chart = SpotChart(
+        direction="NEUTRAL",
+        momentum5Pct=-0.2,
+        momentum15Pct=-0.3,
+        trendStrength=50,
+        orPosition="BELOW",
+        belowPoc=True,
+    )
     blocked, reason = chart_blocks_side(Side.CALL, chart, trade_score=78)
+    assert not blocked
+    assert reason == "ok"
+
+
+@patch("app.engines.spot_direction.get_settings")
+def test_expiry_explosion_bypass_hard_bearish_chart(mock_settings):
+    mock_settings.return_value = _settings()
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=-0.12,
+        momentum15Pct=-0.18,
+        trendStrength=42,
+    )
+    blocked, reason = chart_blocks_side(
+        Side.CALL, chart, trade_score=60, expiry_explosion_bypass=True,
+    )
+    assert not blocked
+    assert reason == "ok"
+
+
+@patch("app.engines.spot_direction.get_settings")
+def test_high_score_cannot_override_bearish_chart_direction(mock_settings):
+    mock_settings.return_value = _settings()
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.04,
+        momentum15Pct=-0.06,
+        trendStrength=42,
+        emaBias="BEARISH",
+        macdBias="BEARISH",
+    )
+    blocked, reason = chart_blocks_side(Side.CALL, chart, trade_score=91)
+    assert blocked
+    assert reason == "chart_bearish_no_calls"
+
+
+@patch("app.engines.spot_direction.get_settings")
+def test_breadth_bypass_allows_pm_itm_call_on_bearish_chart(mock_settings):
+    mock_settings.return_value = _settings()
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=-0.04,
+        momentum15Pct=-0.06,
+        trendStrength=42,
+        emaBias="BEARISH",
+        macdBias="BEARISH",
+    )
+    blocked, reason = chart_blocks_side(
+        Side.CALL, chart, trade_score=55, breadth_aligned_bypass=True,
+    )
     assert not blocked
     assert reason == "ok"
 
@@ -159,6 +245,39 @@ def test_scalp_gate_blocks_call_when_chart_declining(mock_settings):
     assert "chart_" in reason
 
 
+@patch("app.engines.simple_profit.get_settings")
+@patch("app.engines.directional_lock.check_directional_side_lock_simple", return_value=(False, "ok"))
+def test_alignment_override_cannot_bypass_hard_chart_direction(mock_dir, mock_settings):
+    mock_settings.return_value = _settings()
+    trade = SuggestedTrade(
+        id="x",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=23900,
+        lastPremium=80.0,
+        tqs=90,
+        confidence=90,
+        strategyType=StrategyType.SCALP,
+    )
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.04,
+        momentum15Pct=-0.06,
+        trendStrength=42,
+    )
+    ok, reason = check_entry_gate(
+        trade,
+        Breadth(bias="NEUTRAL", score=50, aligned=False),
+        90,
+        2.5,
+        False,
+        alignment_override=True,
+        chart=chart,
+    )
+    assert not ok
+    assert reason == "chart_bearish_no_calls"
+
+
 def test_explosion_blocks_call_on_bearish_chart():
     event = ExplosionEvent(
         symbol="NIFTY",
@@ -191,7 +310,9 @@ def test_explosion_blocks_call_on_bearish_chart():
         orPosition="BELOW",
         belowPoc=True,
     )
-    with patch("app.engines.spot_direction.get_settings") as mock_settings:
+    with patch("app.engines.spot_direction.get_settings") as mock_settings, patch(
+        "app.engines.morning_premium_capture.in_premium_capture_window", return_value=False,
+    ):
         mock_settings.return_value = _settings()
         ok, reason = check_explosion_entry(
             event, trade, Breadth(score=50, bias="NEUTRAL", aligned=False), False, chart=chart,
@@ -207,3 +328,29 @@ def test_side_aligned_with_chart():
     assert not side_aligned_with_chart(Side.CALL, bear)
     assert side_aligned_with_chart(Side.PUT, bear)
     assert not side_aligned_with_chart(Side.PUT, bull)
+
+
+def test_reconcile_spot_chart_overrides_bullish_5m_on_bearish_mtf():
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+    from app.models.schemas import ChartAnalysis
+
+    spot = SpotChart(
+        direction="BULLISH",
+        momentum5Pct=0.1,
+        momentum15Pct=-0.2,
+        momentum30Pct=-0.25,
+    )
+    analysis = ChartAnalysis(
+        consensus="BEARISH",
+        alignedCount=4,
+        totalTimeframes=5,
+        timeframes={
+            "1m": {"direction": "BEARISH"},
+            "5m": {"direction": "BEARISH"},
+            "15m": {"direction": "BEARISH"},
+            "1h": {"direction": "BEARISH"},
+            "4h": {"direction": "NEUTRAL"},
+        },
+    )
+    out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="BEARISH", from_open_pct=-0.5)
+    assert out.direction == "BEARISH"

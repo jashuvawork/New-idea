@@ -122,7 +122,7 @@ export function TomorrowPlaybookPanel({
     Boolean(strategy.allowExplosion) || (morningCapture && (morningSurge || momentumRally));
   const allowQuick = strategy.allowQuickSideways !== false;
   const explosionMode = Boolean(flags.explosionCaptureMode ?? true);
-  const quickMode = Boolean(flags.quickSidewaysEnabled ?? true);
+  const quickMode = flags.quickSidewaysEnabled !== false;
   const scalpMode = Boolean(flags.simpleProfitMode ?? auto.tradeMastermind?.simpleProfitMode);
   const swingMode = Boolean(flags.swingTradingEnabled ?? auto.tradeMastermind?.swingTradingEnabled);
 
@@ -227,7 +227,7 @@ export function TomorrowPlaybookPanel({
       <div className="text-[10px] text-nexus-muted uppercase mb-1.5">Time windows (IST)</div>
       <div className="flex flex-wrap gap-1 mb-3">
         <WindowChip label="Open caution 9:15–9:45" active={openCaution} />
-        <WindowChip label="Morning capture 10:00–11:45" active={morningCapture} hint="BUILDING CE/PE surges" />
+        <WindowChip label="Morning capture 9:15–11:45" active={morningCapture} hint="BUILDING CE/PE surges" />
         <WindowChip label="Momentum rally 10:00–13:45" active={momentumRally} />
         <WindowChip label="Primary ≥10:00" active={primaryWindowActive()} />
         <WindowChip label="Midday chop" active={Boolean(chop.middayChopWindow)} />

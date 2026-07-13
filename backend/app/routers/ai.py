@@ -103,3 +103,94 @@ async def composer_refresh():
     snapshots = (await get_multi_snapshot(force=force)).snapshots
     brief = await run_monitor_cycle(snapshots, force=True)
     return brief.to_dict()
+
+
+@router.get("/missed-trades")
+async def missed_trades_explainer():
+    """Per-alert gate-by-gate explainer — why radar rips did not become trades."""
+    from app.engines.auto_trader import get_state
+    from app.engines.missed_trade_explainer import build_missed_trade_report
+    from app.routers.market import get_multi_snapshot
+
+    multi = await get_multi_snapshot(force=False)
+    return build_missed_trade_report(multi.snapshots, get_state())
+
+
+@router.get("/snapshot-analysis")
+async def snapshot_analysis_rules():
+    """Rules-based gap report: radar vs entry gates, misleading UI flags."""
+    from app.engines.auto_trader import get_state
+    from app.engines.snapshot_lag_analyzer import analyze_snapshot_lag
+    from app.routers.market import get_multi_snapshot
+
+    multi = await get_multi_snapshot(force=False)
+    return analyze_snapshot_lag(multi.snapshots, get_state())
+
+
+@router.post("/snapshot-analysis")
+async def snapshot_analysis_ai():
+    """Rules + Composer audit of where monitoring lags execution."""
+    from app.engines.auto_trader import get_state
+    from app.engines.snapshot_lag_analyzer import analyze_with_ai
+    from app.routers.market import get_multi_snapshot
+    from app.services.upstox import rate_limit_active, rate_limit_recovery_active
+
+    force = not rate_limit_active() and not rate_limit_recovery_active()
+    multi = await get_multi_snapshot(force=force)
+    return await analyze_with_ai(multi.snapshots, get_state())
+
+
+@router.get("/trade-reports")
+async def trade_reports(limit: int = 30, days: int = 7):
+    from app.services import trade_store
+
+    return {
+        "reports": trade_store.get_trade_reports_range(days=min(days, 30), limit=min(limit, 200)),
+    }
+
+
+@router.get("/analysis-monitor/status")
+async def analysis_monitor_status():
+    from app.engines.ai_market_analysis_monitor import monitor_status
+
+    return monitor_status()
+
+
+@router.get("/analysis-reports/latest")
+async def analysis_reports_latest():
+    from app.engines.ai_market_analysis_monitor import get_latest_report
+
+    latest = get_latest_report()
+    if not latest:
+        from app.services import trade_store
+
+        stored = trade_store.get_analysis_reports(limit=1)
+        if stored:
+            return stored[0]
+        return {
+            "waiting": True,
+            "summary": "No analysis report yet — wait for next monitor cycle or POST /analysis-monitor/refresh",
+            "reports": [],
+        }
+    return latest
+
+
+@router.get("/analysis-reports")
+async def analysis_reports(limit: int = 30, days: int = 7):
+    from app.services import trade_store
+
+    return {
+        "reports": trade_store.get_analysis_reports_range(days=min(days, 30), limit=min(limit, 200)),
+    }
+
+
+@router.post("/analysis-monitor/refresh")
+async def analysis_monitor_refresh():
+    """Force a full market analysis cycle (rules + Composer when API key set)."""
+    from app.engines.ai_market_analysis_monitor import run_analysis_cycle
+    from app.routers.market import get_multi_snapshot
+    from app.services.upstox import rate_limit_active, rate_limit_recovery_active
+
+    force = not rate_limit_active() and not rate_limit_recovery_active()
+    multi = await get_multi_snapshot(force=force)
+    return await run_analysis_cycle(multi.snapshots, source="manual")

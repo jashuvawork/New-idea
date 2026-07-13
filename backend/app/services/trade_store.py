@@ -278,6 +278,170 @@ def record_trade_closed(trade: PaperTrade, context: Optional[dict] = None) -> No
     _maybe_archive_completed_batch()
 
 
+def _reports_file(date: Optional[str] = None) -> Path:
+    d = date or _today()
+    reports_dir = get_store_dir() / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    return reports_dir / f"{d}.jsonl"
+
+
+def record_trade_report(report: dict[str, Any]) -> None:
+    """Append structured post-trade analysis (one JSON line per close)."""
+    date = str(report.get("sessionDate") or _today())[:10]
+    entry = {"ts": _now().isoformat(), **report}
+    line = json.dumps(entry, default=str, separators=(",", ":"))
+    try:
+        with open(_reports_file(date), "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except Exception as e:
+        logger.error("Failed to write trade report: %s", e)
+    _append_log("TRADE_REPORT", {"report": report})
+
+
+def get_trade_reports(
+    *,
+    date: Optional[str] = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Recent trade close reports for dashboard / AI review."""
+    path = _reports_file(date)
+    if not path.exists():
+        return []
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    out: list[dict[str, Any]] = []
+    for line in lines[-limit:]:
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return list(reversed(out))
+
+
+def get_trade_reports_range(days: int = 7, limit: int = 200) -> list[dict[str, Any]]:
+    from datetime import timedelta
+
+    reports: list[dict[str, Any]] = []
+    today = _now().date()
+    for i in range(max(1, min(days, 30))):
+        d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+        reports.extend(get_trade_reports(date=d, limit=limit))
+        if len(reports) >= limit:
+            break
+    return reports[:limit]
+
+
+def _analysis_file(date: Optional[str] = None) -> Path:
+    d = date or _today()
+    analysis_dir = get_store_dir() / "analysis"
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    return analysis_dir / f"{d}.jsonl"
+
+
+def record_analysis_report(report: dict[str, Any]) -> None:
+    """Append interval market analysis (rules + optional AI) — one JSON line per cycle."""
+    at = str(report.get("at") or _now().isoformat())
+    date = at[:10]
+    entry = {"ts": at, **report}
+    line = json.dumps(entry, default=str, separators=(",", ":"))
+    try:
+        with open(_analysis_file(date), "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except Exception as e:
+        logger.error("Failed to write analysis report: %s", e)
+        raise
+    _append_log("ANALYSIS_REPORT", {
+        "lagScore": report.get("lagScore"),
+        "source": report.get("source"),
+        "summary": (report.get("summary") or "")[:200],
+    })
+
+
+def get_analysis_reports(
+    *,
+    date: Optional[str] = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    path = _analysis_file(date)
+    if not path.exists():
+        return []
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    out: list[dict[str, Any]] = []
+    for line in lines[-limit:]:
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return list(reversed(out))
+
+
+def get_analysis_reports_range(days: int = 7, limit: int = 200) -> list[dict[str, Any]]:
+    from datetime import timedelta
+
+    reports: list[dict[str, Any]] = []
+    today = _now().date()
+    for i in range(max(1, min(days, 30))):
+        d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+        reports.extend(get_analysis_reports(date=d, limit=limit))
+        if len(reports) >= limit:
+            break
+    return reports[:limit]
+
+
+def _eod_playbook_file(target_date: str) -> Path:
+    playbook_dir = get_store_dir() / "playbook"
+    playbook_dir.mkdir(parents=True, exist_ok=True)
+    return playbook_dir / f"{target_date}.json"
+
+
+def save_eod_playbook(playbook: dict[str, Any]) -> None:
+    """Persist next-day EOD playbook (one file per target session date)."""
+    target = str(playbook.get("targetDate") or next_trading_day_from_store())[:10]
+    path = _eod_playbook_file(target)
+    path.write_text(json.dumps(playbook, indent=2, default=str))
+    _append_log("EOD_PLAYBOOK", {
+        "targetDate": target,
+        "bias": playbook.get("bias"),
+        "summary": (playbook.get("summary") or "")[:200],
+    })
+
+
+def next_trading_day_from_store() -> str:
+    from datetime import timedelta
+
+    d = _now().date() + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d.strftime("%Y-%m-%d")
+
+
+def get_eod_playbook(target_date: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """Load playbook for target session date."""
+    target = target_date or next_trading_day_from_store()
+    path = _eod_playbook_file(target)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("Failed to load EOD playbook %s: %s", target, e)
+        return None
+
+
+def get_eod_playbook_history(limit: int = 7) -> list[dict[str, Any]]:
+    """Recent EOD playbooks sorted by target date descending."""
+    playbook_dir = get_store_dir() / "playbook"
+    if not playbook_dir.exists():
+        return []
+    files = sorted(playbook_dir.glob("*.json"), reverse=True)[:limit]
+    out: list[dict[str, Any]] = []
+    for path in files:
+        try:
+            out.append(json.loads(path.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+    return out
+
+
 def record_session_reset(reason: str = "manual_reset", open_trade_ids: Optional[list[str]] = None) -> None:
     """Log session reset — aligns in-memory state with persistent store audit trail."""
     reset_at = set_session_reset_at()

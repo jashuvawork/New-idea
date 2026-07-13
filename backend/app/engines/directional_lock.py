@@ -221,16 +221,51 @@ def check_directional_side_lock(
     snap: SymbolSnapshot,
     *,
     tier: str = "",
+    premium_led_bypass: bool = False,
+    candidate: Any = None,
 ) -> tuple[bool, str]:
     """
     Returns (blocked, reason).
     Aligned side entries pass. CE↔PE switch / counter-trend needs full confirmation.
+    Breadth-aligned EXPLODING/ELITE rips bypass lock when switching from wrong side.
     """
     settings = get_settings()
     if not settings.directional_side_lock_enabled:
         return False, "ok"
 
     side_v = _side_val(side)
+
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
+
+    bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+    hard_blocked, hard_reason = breadth_hard_blocks_side(
+        side_v, bias, candidate=candidate,
+    )
+    if hard_blocked:
+        return True, hard_reason
+
+    if candidate is not None:
+        from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
+
+        if is_extreme_explosion_all_in_bypass(candidate=candidate):
+            return False, "ok"
+
+    if premium_led_bypass:
+        return False, "ok"
+
+    if candidate is not None:
+        from app.engines.aligned_explosion_bypass import (
+            expiry_aligned_explosion_trade_allowed,
+            is_aligned_explosion_rip,
+        )
+
+        if expiry_aligned_explosion_trade_allowed(candidate, snap)[0]:
+            return False, "ok"
+
+        if settings.directional_lock_aligned_rip_bypass_enabled:
+            rip_ok, _ = is_aligned_explosion_rip(candidate, snap)
+            if rip_ok:
+                return False, "ok"
 
     if not _needs_confirmation(symbol, side_v, snap):
         return False, "ok"
@@ -257,10 +292,15 @@ def check_directional_side_lock_simple(
     side: Side | str,
     breadth_bias: str,
     chart: Optional[SpotChart] = None,
+    *,
+    premium_led_bypass: bool = False,
 ) -> tuple[bool, str]:
     """Lightweight gate — counter-trend blocked unless breadth already flipped."""
     settings = get_settings()
     if not settings.directional_side_lock_enabled:
+        return False, "ok"
+
+    if premium_led_bypass:
         return False, "ok"
 
     side_v = _side_val(side)

@@ -42,6 +42,23 @@ _sse_queues: set[asyncio.Queue] = set()
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def _touch_cached_snapshot(*, overlay_ws: bool = False) -> Optional[MultiSnapshot]:
+    """Refresh timestamp + WS LTP overlay without a full REST rebuild."""
+    global _cache
+    if not _cache:
+        return None
+    settings = get_settings()
+    snap = _cache.model_copy(deep=True)
+    snap.timestamp = datetime.now(IST)
+    if overlay_ws and is_ws_active() and snap.dataReady:
+        snap.snapshots = overlay_snapshot_ltps(
+            snap.snapshots,
+            max_age_seconds=settings.tick_overlay_max_age_seconds,
+        )
+    snap.autoTrader = get_state()
+    return snap
+
+
 def _effective_cache_seconds() -> float:
     settings = get_settings()
     if is_ws_active():
@@ -62,11 +79,12 @@ def mark_full_scan_done() -> None:
 
 
 def entry_scan_due() -> bool:
-    settings = get_settings()
+    from app.engines.session_timing import effective_entry_scan_interval_ms
+
     if _last_full_scan_mono <= 0:
         return True
     elapsed_ms = (time.monotonic() - _last_full_scan_mono) * 1000
-    return elapsed_ms >= settings.entry_scan_interval_ms
+    return elapsed_ms >= effective_entry_scan_interval_ms()
 
 
 def can_run_tick_fast() -> bool:
@@ -81,12 +99,16 @@ def can_run_tick_fast() -> bool:
 def latency_stats() -> dict[str, Any]:
     settings = get_settings()
     return {
+        "latencyMode": settings.latency_mode,
         "tickFastExitEnabled": settings.tick_fast_exit_enabled,
         "entryScanIntervalMs": settings.entry_scan_interval_ms,
+        "expiryEntryScanIntervalMs": settings.expiry_entry_scan_interval_ms,
+        "explosionOpenScanIntervalMs": settings.explosion_open_scan_interval_ms,
         "marketPollIntervalWsMs": settings.market_poll_interval_ws_ms,
         "marketPollIntervalMs": settings.market_poll_interval_ms,
         "tickSnapshotIntervalMs": settings.tick_snapshot_interval_ms,
         "snapshotCacheIntervalMs": settings.snapshot_cache_interval_ms,
+        "wsSnapshotCacheIntervalMs": settings.ws_snapshot_cache_interval_ms,
         "sseHeartbeatSeconds": settings.sse_heartbeat_seconds,
         "lastFastCycleMs": _last_fast_cycle_ms,
         "lastFullCycleMs": _last_full_cycle_ms,
@@ -158,6 +180,30 @@ async def _serve_stale_during_cooldown(*, broadcast: bool = False) -> Optional[M
     if broadcast:
         await broadcast_snapshot(stale)
     return stale
+
+
+def _enrich_smt_divergence(snapshots: dict) -> None:
+    """Cross-index SMT divergence between first two available symbols."""
+    from app.engines.chart_advanced_analysis import detect_smt_divergence
+
+    symbols = [s for s, snap in snapshots.items() if snap.dataAvailable and snap.chartAnalysis]
+    if len(symbols) < 2:
+        return
+    primary, compare = symbols[0], symbols[1]
+    p_snap = snapshots[primary]
+    c_snap = snapshots[compare]
+    p_closes = (p_snap.chartAnalysis.recentCloses or []) if p_snap.chartAnalysis else []
+    c_closes = (c_snap.chartAnalysis.recentCloses or []) if c_snap.chartAnalysis else []
+    if len(p_closes) < 15 or len(c_closes) < 15:
+        return
+    smt = detect_smt_divergence(p_closes, c_closes, primary_symbol=primary, compare_symbol=compare)
+    if smt and p_snap.chartAnalysis:
+        updated = p_snap.chartAnalysis.model_copy(update={"smtDivergence": smt})
+        p_snap.chartAnalysis = updated
+        if smt.get("bias") == "BEARISH":
+            p_snap.chartAnalysis.keySignals = (p_snap.chartAnalysis.keySignals or [])[:8] + [
+                f"SMT: {smt.get('message', '')}",
+            ]
 
 
 async def _build_multi_snapshot() -> MultiSnapshot:
@@ -253,6 +299,12 @@ async def _build_multi_snapshot() -> MultiSnapshot:
         snap.adaptiveExitHint = hint.to_dict()
         snap.psychology["newsAggregate"] = news_sentiment_agg
 
+    _enrich_smt_divergence(snapshots)
+
+    from app.engines.expiry_day_guards import refresh_expiry_session
+
+    refresh_expiry_session(snapshots)
+
     auto_state = await process(snapshots, news=news, client=client) if data_ready else get_state()
 
     return MultiSnapshot(
@@ -309,7 +361,11 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
     if not force and _cache and _cache_time:
         age = (now - _cache_time).total_seconds()
         if age < cache_ttl:
-            return _cache
+            touched = _touch_cached_snapshot(overlay_ws=is_ws_active())
+            snap = touched if touched else _cache
+            if broadcast:
+                await broadcast_snapshot(snap)
+            return snap
 
     t0 = time.perf_counter()
     async with _build_lock:
@@ -332,7 +388,11 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
         if not force and _cache and _cache_time:
             age = (datetime.now(IST) - _cache_time).total_seconds()
             if age < cache_ttl:
-                return _cache
+                touched = _touch_cached_snapshot(overlay_ws=is_ws_active())
+                snap = touched if touched else _cache
+                if broadcast:
+                    await broadcast_snapshot(snap)
+                return snap
         try:
             snapshot = await _build_multi_snapshot()
         except Exception as e:
@@ -378,9 +438,24 @@ async def get_snapshots():
     return await get_multi_snapshot()
 
 
+@router.get("/snapshots/cached")
+async def get_snapshots_cached():
+    """Return in-memory cache immediately — fast UI poll path via Vercel proxy."""
+    if _cache:
+        touched = _touch_cached_snapshot(overlay_ws=is_ws_active())
+        snap = touched if touched else _cache
+        if snap.snapshots:
+            fresh = snap.model_copy(deep=True)
+            fresh.timestamp = datetime.now(IST)
+            if fresh.dataReady:
+                fresh.waitingReason = None
+            return fresh
+    return await get_multi_snapshot()
+
+
 @router.get("/stream")
 async def market_stream():
-    """Server-Sent Events — push snapshots ~1s when WebSocket feed is active."""
+    """Server-Sent Events — push snapshots ~0.5s when WebSocket feed is active."""
     settings = get_settings()
 
     async def event_generator():

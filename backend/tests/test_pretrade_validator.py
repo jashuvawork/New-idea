@@ -161,7 +161,11 @@ def test_blocks_counter_breadth_low_score(mock_settings):
     cand.confidence = 62.0
     ok, reason, _ = validate_candidate(cand, state)
     assert not ok
-    assert reason.startswith("directional_") or reason == "pretrade_counter_breadth"
+    assert reason.startswith("directional_") or reason in (
+        "pretrade_counter_breadth",
+        "hard_block_call_vs_bearish_breadth",
+        "hard_block_put_vs_bullish_breadth",
+    )
 
 
 def test_backtest_summary_recommends_index():
@@ -179,11 +183,19 @@ def test_backtest_summary_recommends_index():
     assert summary["symbolStats"]["NIFTY"]["profit_factor"] == 0.0
 
 
+@patch("app.engines.bad_day_routing.get_settings")
+@patch("app.engines.worst_day_guard.get_settings")
 @patch("app.engines.pretrade_validator.get_settings")
-def test_filter_drops_nifty_after_bad_session(mock_settings):
+def test_filter_drops_nifty_after_bad_session(mock_settings, mock_wd_settings, mock_bd_settings):
     from app.engines.pretrade_validator import filter_candidates_pretrade
 
-    mock_settings.return_value = _settings()
+    s = _settings()
+    s.worst_day_pause_enabled = False
+    s.bad_day_routing_enabled = False
+    s.expiry_day_guards_enabled = False
+    mock_settings.return_value = s
+    mock_wd_settings.return_value = s
+    mock_bd_settings.return_value = s
     state = AutoTraderState()
     for i, pnl in enumerate([-10000, -8000, -5000]):
         state.closedPaperTrades.append(PaperTrade(

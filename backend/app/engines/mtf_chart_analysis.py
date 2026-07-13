@@ -248,6 +248,7 @@ def validate_mtf_scalp(
     premium_mtf: Optional[dict[str, TimeframeChartRead]] = None,
     *,
     trade_score: float = 0.0,
+    premium_led_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Pre-trade MTF gate for scalping:
@@ -259,6 +260,22 @@ def validate_mtf_scalp(
     settings = get_settings()
     if not settings.execution_mtf_enabled or not index_mtf:
         return True, "ok", {}
+
+    if premium_led_bypass:
+        meta = {
+            "index": mtf_summary(index_mtf, side),
+            "passed": True,
+            "premiumLedBypass": True,
+        }
+        if premium_mtf:
+            meta["premium"] = mtf_summary(premium_mtf, side)
+        if premium_mtf and settings.execution_chart_premium_check_enabled:
+            for req in ("1m", "5m"):
+                pt = premium_mtf.get(req)
+                if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
+                    meta["passed"] = False
+                    return False, f"exec_mtf_premium_{req}_fading", meta
+        return True, "ok", meta
 
     if trade_score >= settings.chart_override_min_score:
         return True, "ok", mtf_summary(index_mtf, side)

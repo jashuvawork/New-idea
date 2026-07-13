@@ -3,12 +3,13 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import ai, auto_trader, config, execution, health, market, upstox_auth
+from app.routers import ai, auto_trader, config, execution, health, market, playbook, signals, upstox_auth
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,6 +39,8 @@ async def _background_monitor():
     settings = get_settings()
     tick_driven = False
     last_composer_mono = 0.0
+    last_analysis_mono = 0.0
+    last_eod_playbook_date: Optional[str] = None
 
     while True:
         poll_ms = (
@@ -80,6 +83,45 @@ async def _background_monitor():
                             last_composer_mono = now_mono
                     except Exception as exc:
                         logger.warning("Composer monitor cycle error: %s", exc)
+
+            if (
+                settings.ai_analysis_monitor_enabled
+                and get_market_phase() == "LIVE_MARKET"
+            ):
+                import time
+                from app.engines.ai_market_analysis_monitor import run_analysis_cycle
+
+                now_mono = time.monotonic()
+                if now_mono - last_analysis_mono >= settings.ai_analysis_monitor_interval_seconds:
+                    try:
+                        multi = await get_multi_snapshot(broadcast=False, force=False)
+                        if multi and multi.snapshots:
+                            await run_analysis_cycle(multi.snapshots, source="interval")
+                            last_analysis_mono = now_mono
+                    except Exception as exc:
+                        logger.warning("AI analysis monitor cycle error: %s", exc)
+
+            if settings.eod_playbook_enabled and settings.background_market_monitor_enabled:
+                import time
+                from app.engines.eod_playbook_engine import (
+                    in_eod_playbook_window,
+                    next_trading_day,
+                    run_eod_playbook_cycle,
+                )
+                from app.engines.auto_trader import get_state
+
+                if in_eod_playbook_window():
+                    target = next_trading_day()
+                    if last_eod_playbook_date != target:
+                        try:
+                            multi = await get_multi_snapshot(broadcast=False, force=False)
+                            if multi and multi.snapshots:
+                                await run_eod_playbook_cycle(
+                                    multi.snapshots, get_state(), force=False,
+                                )
+                                last_eod_playbook_date = target
+                        except Exception as exc:
+                            logger.warning("EOD playbook cycle error: %s", exc)
         except Exception as e:
             logger.warning("Background monitor error: %s", e)
 
@@ -110,11 +152,13 @@ async def lifespan(app: FastAPI):
     if settings.background_market_monitor_enabled:
         _background_task = asyncio.create_task(_background_monitor())
         logger.info(
-            "Background monitor: tick_fast=%s entry_scan_ms=%d debounce_ms=%d composer=%s",
+            "Background monitor: latency=%s tick_fast=%s entry_scan_ms=%d debounce_ms=%d composer=%s analysis=%s",
+            settings.latency_mode,
             settings.tick_fast_exit_enabled,
             settings.entry_scan_interval_ms,
             settings.tick_wake_debounce_ms,
             settings.composer_monitor_enabled,
+            settings.ai_analysis_monitor_enabled,
         )
     yield
     if _background_task:
@@ -146,6 +190,8 @@ def create_app() -> FastAPI:
     app.include_router(config.router)
     app.include_router(upstox_auth.router)
     app.include_router(ai.router)
+    app.include_router(signals.router)
+    app.include_router(playbook.router)
 
     return app
 

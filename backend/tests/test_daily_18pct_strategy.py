@@ -28,6 +28,7 @@ def _settings():
     s.daily_18pct_expiry_min_rank = 65
     s.daily_18pct_full_limit_max_trades = 12
     s.quick_sideways_min_rank_score = 58
+    s.quick_sideways_enabled = True
     s.best_trades_min_rank_score = 68
     s.pretrade_min_rank_score = 65
     s.controlled_max_trades_per_day = 6

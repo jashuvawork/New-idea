@@ -40,6 +40,10 @@ def _settings():
     s.flip_flop_max_opposites = 2
     s.whipsaw_momentum_rally_bypass_enabled = True
     s.whipsaw_dual_retrigger_cooldown_seconds = 300
+    s.whipsaw_single_side_surge_bypass_enabled = True
+    s.whipsaw_dominant_velocity_min = 2.5
+    s.whipsaw_dominant_velocity_ratio = 1.6
+    s.quick_sideways_allow_bearish_chop = True
     s.bearish_sideways_halt_enabled = True
     s.bearish_sideways_block_scalps = True
     s.bearish_sideways_explosion_min_score = 78.0
@@ -73,6 +77,14 @@ def _settings():
     s.chop_day_guards_enabled = True
     s.whipsaw_guards_enabled = True
     s.moneyness_selection_enabled = False
+    s.momentum_rally_start_hour = 10
+    s.momentum_rally_start_minute = 0
+    s.momentum_rally_end_hour = 13
+    s.momentum_rally_end_minute = 45
+    s.daily_18pct_strategy_enabled = False
+    s.daily_18pct_chop_max_trades = 10
+    s.controlled_rally_trade_cap_bonus = 4
+    s.day_adaptive_enabled = False
     return s
 
 
@@ -136,6 +148,16 @@ def test_blocks_scalp_in_bearish_sideways(mock_settings):
     ok, reason, _ = check_whipsaw_candidate(_candidate(side=Side.PUT), state, snapshots)
     assert not ok
     assert reason in ("bearish_sideways_no_scalps", "ce_pe_dual_velocity_NIFTY")
+
+
+@patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
+def test_quick_sideways_allowed_in_bearish_chop(mock_settings):
+    from app.engines.whipsaw_guards import check_bearish_sideways_entry
+
+    cand = _candidate(side=Side.CALL, score=62.0, mode="quick_sideways")
+    blocked, reason = check_bearish_sideways_entry(cand, {"NIFTY": _snap()})
+    assert not blocked
+    assert reason == "ok"
 
 
 @patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
@@ -227,3 +249,28 @@ def test_validate_allows_entry_after_long_gap(mock_chop, mock_ws, mock_pre):
         with patch("app.engines.whipsaw_guards.detect_ce_pe_whipsaw", return_value=(False, {})):
             ok, reason, _ = validate_candidate(cand, state, snapshots={"NIFTY": _snap()})
     assert ok or "last_n" in reason or "best_trades" in reason
+
+
+@patch("app.engines.morning_premium_capture.get_settings", return_value=_settings())
+@patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
+def test_dominant_call_surge_not_dual_whipsaw(mock_settings, mock_morning):
+    snap = _snap()
+    snap.explosiveRunnerWatchlist = [
+        {"side": "CALL", "premiumVelocityPct": 3.5, "score": 72},
+        {"side": "PUT", "premiumVelocityPct": 1.1, "score": 50},
+    ]
+    active, detail = detect_ce_pe_whipsaw(snap)
+    assert active is False
+    assert detail.get("dominantSurge") is True
+
+
+@patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
+@patch("app.engines.morning_premium_capture.in_morning_premium_capture_window", return_value=True)
+@patch("app.engines.morning_premium_capture.single_side_surge_session_bypass", return_value=True)
+def test_single_side_surge_bypasses_session_pause(mock_bypass, mock_window, mock_settings):
+    from app.engines.whipsaw_guards import trigger_whipsaw_pause, whipsaw_pause_active
+
+    trigger_whipsaw_pause(900, "dual_leg_whipsaw")
+    paused, reason = whipsaw_pause_active({"NIFTY": _snap()})
+    assert not paused
+    assert reason == "single_side_surge_bypass"

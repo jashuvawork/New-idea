@@ -148,6 +148,16 @@ def detect_ce_pe_whipsaw(snap: SymbolSnapshot) -> tuple[bool, dict[str, Any]]:
     if not is_bearish_sideways(snap):
         return False, {"callVel": best_call_vel, "putVel": best_put_vel}
 
+    from app.engines.morning_premium_capture import dominant_single_side_surge
+
+    if dominant_single_side_surge(snap):
+        return False, {
+            "callVel": round(best_call_vel, 2),
+            "putVel": round(best_put_vel, 2),
+            "dominantSurge": True,
+            "symbol": snap.symbol,
+        }
+
     if best_call_vel >= threshold and best_put_vel >= threshold:
         return True, {
             "callVel": round(best_call_vel, 2),
@@ -254,10 +264,20 @@ def whipsaw_pause_active(
     _roll_session()
     if momentum_rally_bypass_whipsaw(snapshots):
         return False, "momentum_rally_bypass"
-    from app.engines.morning_premium_capture import morning_capture_active
+    from app.engines.expiry_day_guards import expiry_pm_itm_quick_session_active
 
-    if morning_capture_active(snapshots):
-        return False, "morning_capture_bypass"
+    if snapshots and expiry_pm_itm_quick_session_active(snapshots):
+        return False, "expiry_pm_itm_bypass"
+    from app.engines.morning_premium_capture import (
+        afternoon_capture_active,
+        premium_capture_active,
+        single_side_surge_session_bypass,
+    )
+
+    if premium_capture_active(snapshots):
+        return False, "premium_capture_bypass"
+    if single_side_surge_session_bypass(snapshots):
+        return False, "single_side_surge_bypass"
     _clear_expired_pause()
     if _whipsaw_pause_until is None:
         return False, "ok"
@@ -281,10 +301,21 @@ def check_session_whipsaw_pause(
     if momentum_rally_bypass_whipsaw(snapshots):
         return False, "momentum_rally_bypass", {"momentumRallyBypass": True}
 
-    from app.engines.morning_premium_capture import morning_capture_active
+    from app.engines.expiry_day_guards import expiry_pm_itm_quick_session_active
 
-    if morning_capture_active(snapshots):
-        return False, "morning_capture_bypass", {"morningCaptureBypass": True}
+    if expiry_pm_itm_quick_session_active(snapshots, state):
+        return False, "expiry_pm_itm_bypass", {"expiryPmItmBypass": True}
+
+    from app.engines.morning_premium_capture import (
+        afternoon_capture_active,
+        premium_capture_active,
+        single_side_surge_session_bypass,
+    )
+
+    if premium_capture_active(snapshots):
+        return False, "premium_capture_bypass", {"morningCaptureBypass": True}
+    if single_side_surge_session_bypass(snapshots):
+        return False, "single_side_surge_bypass", {"singleSideSurgeBypass": True}
 
     paused, pause_reason = whipsaw_pause_active(snapshots)
     if paused:
@@ -375,12 +406,15 @@ def check_bearish_sideways_entry(
         score = float(getattr(candidate, "score", 0) or 0)
         if tier in ("ELITE", "EXPLODING") and score >= settings.bearish_sideways_explosion_min_score:
             return False, "ok"
-        from app.engines.morning_premium_capture import is_morning_capture_event
+        from app.engines.morning_premium_capture import is_premium_capture_event
 
         event = getattr(candidate, "explosion_event", None)
-        if event and is_morning_capture_event(event, chart=snap.spotChart):
+        if event and is_premium_capture_event(event, chart=snap.spotChart):
             return False, "ok"
         return True, "bearish_sideways_explosion_only"
+
+    if mode == "quick_sideways" and settings.quick_sideways_allow_bearish_chop:
+        return False, "ok"
 
     if settings.bearish_sideways_block_scalps:
         return True, "bearish_sideways_no_scalps"
@@ -422,7 +456,10 @@ def check_whipsaw_candidate(
     dual, dual_meta = detect_ce_pe_whipsaw(snap)
     meta["cePeWhipsaw"] = dual_meta
     if dual and is_bearish_sideways_session(snapshots):
-        return False, f"ce_pe_dual_velocity_{symbol}", meta
+        from app.engines.morning_premium_capture import dominant_single_side_surge
+
+        if not dominant_single_side_surge(snap):
+            return False, f"ce_pe_dual_velocity_{symbol}", meta
 
     blocked, reason = check_bearish_sideways_entry(candidate, snapshots)
     if blocked:
