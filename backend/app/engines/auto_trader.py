@@ -196,12 +196,14 @@ def _ensure_state_loaded() -> None:
 
 
 def _build_context(snap: Optional[SymbolSnapshot], extra: Optional[dict] = None) -> dict:
-    ctx: dict = extra or {}
+    from app.engines.entry_context import snapshot_chart_context
+
+    ctx: dict = dict(extra or {})
     if snap:
+        ctx.update(snapshot_chart_context(snap))
         ctx.update({
             "tqs": snap.tradeQualityScore,
             "regime": snap.regime.value if hasattr(snap.regime, "value") else snap.regime,
-            "breadth": snap.breadth.bias,
             "spot": snap.spot,
             "session": snap.optimizedProfile.sessionLabel if snap.optimizedProfile else "",
         })
@@ -665,6 +667,10 @@ async def _open_from_candidate(
     )
 
     ctx = _build_context(snap, ctx_extra)
+    from app.engines.entry_context import annotate_breadth_bypass, merge_execution_chart_context
+
+    ctx = merge_execution_chart_context(ctx, chart_meta if chart_meta.get("enabled") else None)
+    ctx = annotate_breadth_bypass(ctx, side=candidate.side, snap=snap, score=candidate.score)
     paper.entryContext = ctx
     state.openPaperTrades.append(paper)
     trade_store.record_trade_opened(paper, ctx)
@@ -974,7 +980,9 @@ async def _process_open_trades(
                 else None
             )
             record_explosion_stop(trade.symbol, cooldown_seconds=cooldown)
-        ctx = _build_context(snap, {
+        from app.engines.entry_context import merge_close_context
+
+        ctx = merge_close_context(broker_ctx, snap, {
             "exitReason": exit_reason,
             "instrumentKey": broker_ctx.get("instrumentKey"),
             "brokerOrderId": broker_ctx.get("brokerOrderId"),
@@ -985,6 +993,8 @@ async def _process_open_trades(
             "selectionMode": broker_ctx.get("selectionMode"),
             "selectionScore": broker_ctx.get("selectionScore"),
             "bestPnlPoints": trade.bestPnlPoints,
+            "pnlPoints": trade.pnlPoints,
+            "pnlInr": trade.pnlInr,
         })
         trade.entryContext = ctx
         state.closedPaperTrades.append(trade)

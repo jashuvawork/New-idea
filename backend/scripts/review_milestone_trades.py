@@ -49,20 +49,23 @@ def _breadth_bias(trade: dict) -> str:
 
 
 def _infer_chart_direction(trade: dict) -> str:
-    """Infer likely spotChart direction when not stored in entryContext."""
+    """Read chart from entryContext; fall back to session heuristics for legacy trades."""
     ctx = _ctx(trade)
     for key in ("indexChart", "spotChart", "chart"):
         ch = ctx.get(key)
         if isinstance(ch, dict) and ch.get("direction"):
             return str(ch["direction"]).upper()
+    ca = ctx.get("chartAnalysis")
+    if isinstance(ca, dict) and ca.get("consensus") in ("BULLISH", "BEARISH"):
+        return str(ca["consensus"]).upper()
+
     side = str(trade.get("side", "")).upper()
     bias = _breadth_bias(trade)
     closed = str(trade.get("closedAt") or trade.get("openedAt") or "")
-    # Jul 13 afternoon rally — known from session analysis
     if closed.startswith("2026-07-13") and side == "PUT":
         return "BULLISH"
     if closed.startswith("2026-07-13") and side == "CALL":
-        return "BEARISH"  # morning before fix
+        return "BEARISH"
     if bias == "BULLISH" and side == "CALL":
         return "BULLISH"
     if bias == "BEARISH" and side == "PUT":
@@ -131,7 +134,12 @@ def review_trade(trade: dict) -> dict:
         blockers.append(chart_reason)
 
     exit_reason = str(trade.get("exitReason") or ctx.get("exitReason") or "")
-    if exit_reason.startswith("explosion_time_") and float(ctx.get("bestPnlPoints") or 0) >= 10:
+    best_pts = float(
+        trade.get("bestPnlPoints")
+        or ctx.get("bestPnlPoints")
+        or 0,
+    )
+    if exit_reason.startswith("explosion_time_") and best_pts >= 10:
         fixes.append("peak_exit_fix_would_improve")
 
     counter_trend = (side == "CALL" and bias == "BEARISH") or (side == "PUT" and bias == "BULLISH")
@@ -220,7 +228,10 @@ def main() -> int:
     print(f"  Retrospective loss prevention: ~₹{blocked_loss_inr:,.0f} of ₹{abs(net):,.0f} total losses")
     if len(jul13) >= 5 and all(r["wouldAvoidLoss"] or r["pnlInr"] > 0 for r in jul13 if r["pnlInr"] < 0):
         print("  Jul 13 PUT cluster: NEW GUARDS WOULD HAVE BLOCKED most/all losing PUTs ✅")
-    print("  Chart direction not stored in entryContext — Jul 13 inferred from rally session")
+    has_chart = sum(
+        1 for t in trades if isinstance(_ctx(t).get("indexChart"), dict)
+    )
+    print(f"  Trades with stored indexChart in archive: {has_chart}/{len(trades)} (pre-fix trades lack this)")
     print("  Deploy PR #121 to EC2 for live effect")
 
     return 0
