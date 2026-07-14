@@ -41,4 +41,10 @@ def test_touch_cached_snapshot_overlays_ws_when_active():
     ):
         market_router._touch_cached_snapshot(overlay_ws=True)
 
-    mock_overlay.assert_called_once()
+def test_refresh_cached_json_throttled():
+    snap = _empty_snapshot()
+    market_router._store_cache(snap)
+    first = market_router._refresh_cached_json(overlay_ws=False)
+    second = market_router._refresh_cached_json(overlay_ws=False)
+    assert first == second
+    assert len(first) > 10

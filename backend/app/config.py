@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     market_poll_interval_ms: int = 300
     market_poll_interval_ws_ms: int = 75
     tick_snapshot_interval_ms: int = 75
-    ws_snapshot_cache_interval_ms: int = 600  # full REST snapshot TTL when WS feed is active
+    ws_snapshot_cache_interval_ms: int = 2000  # full REST snapshot TTL when WS feed is active
     snapshot_cache_interval_ms: int = 150
     tick_wake_debounce_ms: int = 15
     tick_fast_exit_enabled: bool = True

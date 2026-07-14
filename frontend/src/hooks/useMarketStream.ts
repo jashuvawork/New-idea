@@ -10,10 +10,10 @@ const API_BASE = import.meta.env.DEV
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
 const UI_TICK_MS = Math.max(POLL_MS, 200);
 const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 50), 25);
-// Production: SSE does not work through Vercel → EC2 HTTP proxy; use HTTP poll unless explicitly enabled.
+// Production: SSE works via Vercel rewrite → EC2; enable unless explicitly disabled.
 const SSE_ENABLED = import.meta.env.DEV
   ? import.meta.env.VITE_SSE_ENABLED !== 'false'
-  : import.meta.env.VITE_SSE_ENABLED === 'true';
+  : import.meta.env.VITE_SSE_ENABLED !== 'false';
 const SNAPSHOT_URL = `${API_BASE}/api/market/snapshots/cached`;
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
@@ -99,10 +99,14 @@ function applySnapshot(
 
   const isSse = streamMode === 'sse';
   const roundTripMs = Math.round(performance.now() - started);
+  // HTTP poll via Vercel→EC2 inflates round-trip; prefer data freshness when payload is current.
+  const pollFresh = !isSse && Boolean(json.dataReady) && dataAgeMs < 3000;
   const latency = isSse
     ? sseDisplayLatencyMs(dataAgeMs, pollIntervalMs)
-    : stableLatencyMs(roundTripMs);
-  const avgStable = isSse
+    : pollFresh
+      ? sseDisplayLatencyMs(dataAgeMs, pollIntervalMs)
+      : stableLatencyMs(roundTripMs);
+  const avgStable = isSse || pollFresh
     ? latency
     : stableLatencyMs(
         Math.round(
@@ -111,7 +115,9 @@ function applySnapshot(
       );
   const quality = isSse
     ? sseConnectionQuality(dataAgeMs, Boolean(json.dataReady))
-    : latencyQuality(roundTripMs);
+    : pollFresh
+      ? sseConnectionQuality(dataAgeMs, Boolean(json.dataReady))
+      : latencyQuality(roundTripMs);
   setMetrics((prev) => {
     const staleBucket = Math.floor(dataAgeMs / 1000);
     const prevBucket = Math.floor(prev.stalenessMs / 1000);
@@ -149,11 +155,15 @@ export function useMarketStream() {
   const lastSignature = useRef('');
   const sseFailed = useRef(false);
   const lastSseApplyAt = useRef(0);
+  const pollAbortRef = useRef<AbortController | null>(null);
 
   const fetchSnapshot = useCallback(async () => {
+    pollAbortRef.current?.abort();
+    const ac = new AbortController();
+    pollAbortRef.current = ac;
     const started = performance.now();
     try {
-      const res = await fetch(SNAPSHOT_URL);
+      const res = await fetch(SNAPSHOT_URL, { signal: ac.signal });
       const elapsed = Math.round(performance.now() - started);
       if (!res.ok) throw new Error(`API ${res.status}`);
 
@@ -172,6 +182,7 @@ export function useMarketStream() {
       );
       void elapsed;
     } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
       const elapsed = Math.round(performance.now() - started);
       setMetrics((prev) => ({
         ...prev,

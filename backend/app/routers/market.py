@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import orjson
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from app.config import get_settings
 from app.engines.auto_trader import get_state, process, process_exits_only, refresh_trading_capital
@@ -39,11 +39,27 @@ _last_full_scan_mono: float = 0.0
 _last_fast_cycle_ms: Optional[float] = None
 _last_full_cycle_ms: Optional[float] = None
 _sse_queues: set[asyncio.Queue] = set()
+_cache_json: Optional[bytes] = None
+_last_touch_mono: float = 0.0
 IST = ZoneInfo("Asia/Kolkata")
 
+# Min interval between WS overlay + re-serialize on hot /snapshots/cached path
+_CACHED_TOUCH_MIN_MS = 100
 
-def _touch_cached_snapshot(*, overlay_ws: bool = False) -> Optional[MultiSnapshot]:
-    """Refresh timestamp + WS LTP overlay without a full REST rebuild."""
+
+def _serialize_snapshot(snap: MultiSnapshot) -> bytes:
+    return orjson.dumps(snap.model_dump(mode="json"))
+
+
+def _store_cache(snap: MultiSnapshot) -> None:
+    global _cache, _cache_time, _cache_json
+    _cache = snap
+    _cache_time = datetime.now(IST)
+    _cache_json = _serialize_snapshot(snap)
+
+
+def _touch_cached_snapshot(*, overlay_ws: bool = False, light: bool = False) -> Optional[MultiSnapshot]:
+    """Refresh timestamp + WS overlay without a full REST rebuild."""
     global _cache
     if not _cache:
         return None
@@ -51,12 +67,39 @@ def _touch_cached_snapshot(*, overlay_ws: bool = False) -> Optional[MultiSnapsho
     snap = _cache.model_copy(deep=True)
     snap.timestamp = datetime.now(IST)
     if overlay_ws and is_ws_active() and snap.dataReady:
-        snap.snapshots = overlay_snapshot_live(
-            snap.snapshots,
-            max_age_seconds=settings.tick_overlay_max_age_seconds,
-        )
+        if light:
+            from app.engines.snapshot_fast import overlay_snapshot_spot_charts
+
+            snap.snapshots = overlay_snapshot_spot_charts(
+                snap.snapshots,
+                max_age_seconds=settings.tick_overlay_max_age_seconds,
+            )
+        else:
+            snap.snapshots = overlay_snapshot_live(
+                snap.snapshots,
+                max_age_seconds=settings.tick_overlay_max_age_seconds,
+            )
     snap.autoTrader = get_state()
     return snap
+
+
+def _refresh_cached_json(*, overlay_ws: bool = False) -> bytes:
+    """Throttled serialize for hot UI poll — avoids 5–10s JSON rebuild per request."""
+    global _cache_json, _last_touch_mono
+    now_mono = time.monotonic()
+    if _cache_json and (now_mono - _last_touch_mono) * 1000 < _CACHED_TOUCH_MIN_MS:
+        return _cache_json
+    _last_touch_mono = now_mono
+    if not _cache or not _cache.snapshots:
+        return _cache_json or b"{}"
+    touched = _touch_cached_snapshot(overlay_ws=overlay_ws, light=True)
+    snap = touched if touched else _cache
+    payload = snap.model_dump(mode="json")
+    payload["timestamp"] = datetime.now(IST).isoformat()
+    if snap.dataReady:
+        payload["waitingReason"] = None
+    _cache_json = orjson.dumps(payload)
+    return _cache_json
 
 
 def _effective_cache_seconds() -> float:
@@ -69,8 +112,9 @@ def _effective_cache_seconds() -> float:
 
 def invalidate_snapshot_cache() -> None:
     """Force next snapshot build — used on WebSocket tick wake."""
-    global _cache_time
+    global _cache_time, _cache_json
     _cache_time = None
+    _cache_json = None
 
 
 def mark_full_scan_done() -> None:
@@ -149,8 +193,7 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
     snapshot.timestamp = datetime.now(IST)
     snapshot.snapshots = overlays
     snapshot.autoTrader = auto_state
-    _cache = snapshot
-    _cache_time = datetime.now(IST)
+    _store_cache(snapshot)
     _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
 
     if broadcast:
@@ -448,8 +491,7 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
             if broadcast:
                 await broadcast_snapshot(stale)
             return stale
-        _cache = snapshot
-        _cache_time = datetime.now(IST)
+        _store_cache(snapshot)
         _last_full_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
         if force:
             mark_full_scan_done()
@@ -465,16 +507,14 @@ async def get_snapshots():
 
 @router.get("/snapshots/cached")
 async def get_snapshots_cached():
-    """Return in-memory cache immediately — fast UI poll path via Vercel proxy."""
-    if _cache:
-        touched = _touch_cached_snapshot(overlay_ws=is_ws_active())
-        snap = touched if touched else _cache
-        if snap.snapshots:
-            fresh = snap.model_copy(deep=True)
-            fresh.timestamp = datetime.now(IST)
-            if fresh.dataReady:
-                fresh.waitingReason = None
-            return fresh
+    """Return pre-serialized in-memory cache — fast UI poll path via Vercel proxy."""
+    if _cache and _cache.snapshots:
+        body = _refresh_cached_json(overlay_ws=is_ws_active())
+        return Response(content=body, media_type="application/json")
+    fast = await get_multi_snapshot_fast(overlay_ws=False)
+    if fast.snapshots:
+        _store_cache(fast)
+        return Response(content=_cache_json or _serialize_snapshot(fast), media_type="application/json")
     return await get_multi_snapshot()
 
 
@@ -499,9 +539,11 @@ async def market_stream():
                     )
                     yield f"data: {orjson.dumps(data).decode()}\n\n"
                 except asyncio.TimeoutError:
-                    # Keep clients fresh when market is quiet (heartbeats alone don't update UI)
-                    snapshot = await get_multi_snapshot()
-                    yield f"data: {orjson.dumps(snapshot.model_dump(mode='json')).decode()}\n\n"
+                    fast = await get_multi_snapshot_fast(overlay_ws=is_ws_active())
+                    if _cache_json:
+                        yield f"data: {_cache_json.decode()}\n\n"
+                    else:
+                        yield f"data: {orjson.dumps(fast.model_dump(mode='json')).decode()}\n\n"
         except asyncio.CancelledError:
             raise
         finally:
