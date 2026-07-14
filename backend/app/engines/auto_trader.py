@@ -443,6 +443,24 @@ async def _open_from_candidate(
         return False, "edge_lot_scale_zero"
     if settings.lot_size_multiplier > 1.0:
         lots = max(1, int(lots * settings.lot_size_multiplier))
+
+    good_day_ict = False
+    ict_meta: dict[str, Any] = {}
+    if candidate.mode == "explosion" and candidate.explosion_event and snapshots:
+        from app.engines.ict_breakout_monitor import (
+            analyze_explosion_event_ict,
+            good_day_ict_capture_active,
+        )
+
+        ict = analyze_explosion_event_ict(candidate.explosion_event, snap)
+        good_day_ict, ict_meta = good_day_ict_capture_active(
+            state, snapshots, event=candidate.explosion_event, ict=ict,
+        )
+        if good_day_ict and settings.ict_good_day_force_max_lots:
+            from app.engines.capital_allocator import max_lots_for_capital
+
+            lots = max(lots, max_lots_for_capital(symbol, fill_premium))
+
     lots = clamp_lots(lots, symbol, fill_premium)
     lot_mult = lot_multiplier(symbol)
 
@@ -582,12 +600,25 @@ async def _open_from_candidate(
         from app.engines.morning_premium_capture import is_afternoon_capture_event
 
         afternoon = is_afternoon_capture_event(ev, chart=snap.spotChart)
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+        ict = analyze_explosion_event_ict(ev, snap)
         ctx_extra.update({
             "explosionTier": ev.tier,
             "explosionScore": ev.explosion_score,
             "afternoonCapture": afternoon,
             "dailyMovePct": float(ev.daily_move_pct or 0),
+            "ictBreakout": ict.active,
+            "ictPattern": ict.pattern,
+            "ictScore": round(ict.score, 1),
+            "ictMegaRip": ict.mega_rip,
+            "ictPremiumFvg": ict.premium_fvg,
+            "ictFlatThenVertical": ict.flat_then_vertical,
+            "ictReasons": ict.reasons,
         })
+        if good_day_ict:
+            ctx_extra["goodDayIctCapture"] = True
+            ctx_extra["ictCaptureMeta"] = ict_meta
         if is_extreme_explosion_all_in_bypass(candidate=candidate):
             ctx_extra.update(extreme_all_in_meta(candidate=candidate))
     elif candidate.mode == "scalp" and candidate.suggestion:

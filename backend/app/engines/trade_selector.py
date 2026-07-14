@@ -163,7 +163,8 @@ def _explosion_candidates(
         if alert.get("tier") not in ("ELITE", "EXPLODING"):
             from app.engines.morning_premium_capture import is_premium_capture_alert
 
-            if not is_premium_capture_alert(alert, snap.spotChart):
+            ict_ok = bool(alert.get("ictBreakout")) and float(alert.get("ictScore") or 0) >= 28
+            if not is_premium_capture_alert(alert, snap.spotChart) and not ict_ok:
                 continue
         score_val = float(alert.get("explosionScore", 0))
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
@@ -257,6 +258,27 @@ def _explosion_candidates(
 
         rank += runner_strike_rank_bonus(event, snap)
         rank += atm_proximity_rank_bonus(event, snap)
+        from app.engines.dual_mode_strategy import resolve_trading_session_mode
+        from app.engines.ict_breakout_monitor import (
+            analyze_explosion_event_ict,
+            ict_explosion_rank_bonus,
+        )
+
+        trading_mode, _ = resolve_trading_session_mode(state, {symbol: snap})
+        ict = analyze_explosion_event_ict(event, snap)
+        if not ict.active and alert.get("ictBreakout"):
+            from app.engines.ict_breakout_monitor import ICTBreakoutSignal
+
+            ict = ICTBreakoutSignal(
+                active=bool(alert.get("ictBreakout")),
+                pattern=str(alert.get("ictPattern") or "watch"),
+                score=float(alert.get("ictScore") or 0),
+                reasons=list(alert.get("ictReasons") or []),
+                premium_fvg=bool(alert.get("ictPremiumFvg")),
+                flat_then_vertical=bool(alert.get("ictFlatThenVertical")),
+                mega_rip=bool(alert.get("ictMegaRip")),
+            )
+        rank += ict_explosion_rank_bonus(ict, trading_mode)
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -709,6 +731,16 @@ def find_best_entry(
                 bonus += 18
             else:
                 bonus -= 22
+            from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+            if c.explosion_event is not None:
+                ict = analyze_explosion_event_ict(c.explosion_event, c.snap)
+                if ict.mega_rip:
+                    bonus += 30
+                elif ict.active:
+                    bonus += min(20, ict.score * 0.25)
+                if ict.flat_then_vertical and trading_mode == "AGGRESSIVE":
+                    bonus += 12
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty
 

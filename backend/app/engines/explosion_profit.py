@@ -342,7 +342,10 @@ def _trail_floor_pts(
     """Trailing floor in PnL points — arms only after minimum profit."""
     from app.engines.trail_engine import ratcheting_trail_floor
 
+    from app.engines.ict_breakout_monitor import ict_trail_arm_multiplier
+
     arm = trail_arm_points if trail_arm_points is not None else settings.explosion_trail_arm_points
+    arm *= ict_trail_arm_multiplier(trade)
     return ratcheting_trail_floor(
         trade,
         best,
@@ -386,6 +389,8 @@ def _should_skip_no_progress(trade: PaperTrade, settings) -> bool:
         return True
     ctx = trade.entryContext or {}
     if ctx.get("extremeAllInBypass"):
+        return True
+    if ctx.get("ictMegaRip") or ctx.get("goodDayIctCapture"):
         return True
     edge = ctx.get("edgeScore") or {}
     if edge.get("letRunners"):
@@ -469,7 +474,11 @@ def _no_progress_limit_seconds(trade: PaperTrade, settings) -> int:
     if not settings.explosion_no_progress_enabled:
         return 999_999
     from app.engines.bullish_hold import direction_aligned_with_breadth
+    from app.engines.ict_breakout_monitor import ict_no_progress_seconds
 
+    ict_limit = ict_no_progress_seconds(trade, settings)
+    if ict_limit != settings.explosion_no_progress_seconds:
+        return ict_limit
     if direction_aligned_with_breadth(trade) or _chart_aligned_with_trade(trade):
         return settings.explosion_no_progress_aligned_seconds
     ctx = trade.entryContext or {}
