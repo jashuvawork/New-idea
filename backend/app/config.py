@@ -741,6 +741,28 @@ class Settings(BaseSettings):
     aggressive_good_day_bypass_bad_day_floor: bool = True
     aggressive_good_day_allow_building_tier: bool = True
 
+    # ICT / FVG breakout monitor — flat-then-vertical premium rips (8→393 PE style)
+    ict_breakout_monitor_enabled: bool = True
+    ict_fvg_min_gap_pct: float = 12.0
+    ict_flat_base_max_range_pct: float = 8.0
+    ict_displacement_min_velocity_3s: float = 3.0
+    ict_vertical_min_session_move_pct: float = 80.0
+    ict_mega_rip_min_session_move_pct: float = 200.0
+    ict_breakout_min_score: float = 28.0
+    ict_fvg_score_bonus: float = 14.0
+    ict_flat_vertical_score_bonus: float = 18.0
+    ict_mega_rip_score_bonus: float = 22.0
+    ict_max_rank_bonus: float = 30.0
+    ict_good_day_capture_enabled: bool = True
+    ict_good_day_min_score: float = 35.0
+    ict_good_day_rank_bonus: float = 18.0
+    ict_mega_rip_rank_bonus: float = 25.0
+    ict_breakout_no_progress_seconds: int = 360
+    ict_mega_rip_no_progress_seconds: int = 600
+    ict_breakout_trail_arm_multiplier: float = 1.5
+    ict_mega_rip_trail_arm_multiplier: float = 2.2
+    ict_good_day_force_max_lots: bool = True
+
     def daily_profit_stage_pcts(self) -> list[float]:
         return [float(x.strip()) for x in self.daily_profit_stage_pcts_csv.split(",") if x.strip()]
 

@@ -334,6 +334,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.worst_day_guard import worst_day_guard_summary
     from app.engines.worst_day_itm_fade import worst_day_trades_summary
     from app.engines.dual_mode_strategy import dual_mode_summary
+    from app.engines.ict_breakout_monitor import ict_monitor_summary
     from app.engines.daily_18pct_strategy import get_session_limits
 
     session_limits = get_session_limits()
@@ -405,4 +406,5 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
             day_mode=mode,
             confidence_tier=conf_tier,
         ),
+        "ictBreakoutMonitor": ict_monitor_summary(snapshots),
     }

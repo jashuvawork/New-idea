@@ -421,7 +421,8 @@ def scan_chain_explosions(
     return events
 
 
-def event_to_dict(e: ExplosionEvent) -> dict[str, Any]:
+def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, Any]:
+    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
     from app.engines.morning_premium_capture import (
         is_afternoon_capture_event,
         is_all_day_explosion_event,
@@ -433,6 +434,10 @@ def event_to_dict(e: ExplosionEvent) -> dict[str, Any]:
     afternoon = is_afternoon_capture_event(e)
     all_day = is_all_day_explosion_event(e)
     capture = is_premium_capture_event(e)
+    ict = analyze_explosion_event_ict(e, snap)
+    tradeable = e.tier in ("EXPLODING", "ELITE") or capture
+    if ict.mega_rip or (ict.active and (ict.flat_then_vertical or ict.premium_fvg)):
+        tradeable = True
     return {
         "symbol": e.symbol,
         "side": e.side.value,
@@ -449,9 +454,16 @@ def event_to_dict(e: ExplosionEvent) -> dict[str, Any]:
         "peakMovePct": e.peak_move_pct,
         "openPremiumMove": e.daily_move_pct,
         "volumeAwaken": "volAwaken" in (e.reason or ""),
-        "tradeable": e.tier in ("EXPLODING", "ELITE") or capture,
+        "tradeable": tradeable,
         "morningCapture": morning,
         "afternoonCapture": afternoon,
         "allDayExplosion": all_day,
         "premiumCapture": capture,
+        "ictBreakout": ict.active,
+        "ictPattern": ict.pattern,
+        "ictScore": round(ict.score, 1),
+        "ictMegaRip": ict.mega_rip,
+        "ictPremiumFvg": ict.premium_fvg,
+        "ictFlatThenVertical": ict.flat_then_vertical,
+        "ictReasons": ict.reasons,
     }

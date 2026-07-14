@@ -355,6 +355,9 @@ def evaluate_adaptive_explosion_exit(
 
     min_arm = plan.trailArmPoints
     ctx = trade.entryContext or {}
+    from app.engines.ict_breakout_monitor import ict_trail_arm_multiplier
+
+    min_arm *= ict_trail_arm_multiplier(trade)
     extreme_hold = bool(ctx.get("extremeAllInBypass"))
     from app.engines.confidence_hold import should_defer_profit_lock, is_confidence_runner_hold
 
