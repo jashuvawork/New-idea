@@ -333,7 +333,11 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.bad_day_routing import bad_day_routing_summary
     from app.engines.worst_day_guard import worst_day_guard_summary
     from app.engines.worst_day_itm_fade import worst_day_trades_summary
+    from app.engines.dual_mode_strategy import dual_mode_summary
+    from app.engines.daily_18pct_strategy import get_session_limits
 
+    session_limits = get_session_limits()
+    conf_tier = str(getattr(session_limits, "confidenceTier", None) or "MEDIUM")
     session = get_session_targets()
     settings = get_settings()
     last_n = last_n_trades_summary(state)
@@ -395,4 +399,10 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "badDayRouting": bad_day_routing_summary(state, snapshots),
         "worstDayGuard": worst_day_guard_summary(state, snapshots),
         "worstDayTrades": worst_day_trades_summary(state, snapshots),
+        "dualMode": dual_mode_summary(
+            state,
+            snapshots,
+            day_mode=mode,
+            confidence_tier=conf_tier,
+        ),
     }

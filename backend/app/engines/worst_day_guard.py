@@ -297,6 +297,23 @@ def filter_worst_day_candidates(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
 ) -> list[Any]:
+    settings = get_settings()
+    if settings.dual_mode_enabled:
+        from app.engines.daily_18pct_strategy import get_session_limits
+        from app.engines.dual_mode_strategy import (
+            resolve_trading_session_mode,
+            skip_worst_day_breakout_only,
+        )
+
+        limits = get_session_limits()
+        day_mode = str(getattr(limits, "dayMode", "") or "") if limits else ""
+        tier = str(getattr(limits, "confidenceTier", "") or "MEDIUM") if limits else "MEDIUM"
+        mode, _ = resolve_trading_session_mode(
+            state, snapshots, day_mode=day_mode, confidence_tier=tier,
+        )
+        if skip_worst_day_breakout_only(mode):
+            return candidates
+
     policy, _ = session_entry_policy(state, snapshots)
     if policy == "NORMAL":
         return candidates

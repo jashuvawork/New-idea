@@ -66,6 +66,11 @@ def test_morning_vs_evening_windows():
     with patch("app.engines.expiry_day_guards.datetime") as mock_dt:
         mock_dt.now.return_value = datetime(2026, 6, 30, 14, 30, tzinfo=IST)
         assert in_expiry_morning_window() is False
+        assert in_expiry_evening_block() is False
+
+    with patch("app.engines.expiry_day_guards.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 6, 30, 15, 30, tzinfo=IST)
+        assert in_expiry_morning_window() is False
         assert in_expiry_evening_block() is True
 
 

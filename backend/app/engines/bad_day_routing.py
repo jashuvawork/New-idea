@@ -192,6 +192,22 @@ def bad_day_min_rank_floor(
     snapshots: dict[str, SymbolSnapshot],
 ) -> float:
     settings = get_settings()
+    if settings.dual_mode_enabled:
+        from app.engines.daily_18pct_strategy import get_session_limits
+        from app.engines.dual_mode_strategy import (
+            resolve_trading_session_mode,
+            skip_bad_day_rank_floor,
+        )
+
+        limits = get_session_limits()
+        day_mode = str(getattr(limits, "dayMode", "") or "") if limits else ""
+        tier = str(getattr(limits, "confidenceTier", "") or "MEDIUM") if limits else "MEDIUM"
+        mode, _ = resolve_trading_session_mode(
+            state, snapshots, day_mode=day_mode, confidence_tier=tier,
+        )
+        if skip_bad_day_rank_floor(mode) and settings.aggressive_good_day_bypass_bad_day_floor:
+            return 0.0
+
     active, _ = bad_day_session_active(state, snapshots)
     if not active:
         return 0.0

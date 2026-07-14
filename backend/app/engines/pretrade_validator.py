@@ -306,6 +306,23 @@ def resolve_effective_daily_trade_cap(
             in_morning_premium_capture_window,
         )
 
+        if limits and settings.dual_mode_enabled:
+            from app.models.schemas import AutoTraderState as _ATS
+
+            if isinstance(state, _ATS):
+                from app.engines.dual_mode_strategy import (
+                    aggressive_trade_cap_bonus,
+                    resolve_trading_session_mode,
+                )
+
+                mode, _ = resolve_trading_session_mode(
+                    state,
+                    snapshots,
+                    day_mode=str(getattr(limits, "dayMode", "") or ""),
+                    confidence_tier=str(getattr(limits, "confidenceTier", "") or "MEDIUM"),
+                )
+                cap += aggressive_trade_cap_bonus(mode)
+
         if in_momentum_rally_window():
             cap = max(cap, settings.daily_18pct_chop_max_trades)
             cap += settings.controlled_rally_trade_cap_bonus
@@ -404,6 +421,23 @@ def check_last_n_trades_pause(
         return False, "ok", last_n_trades_summary(state)
 
     summary = analyze_last_n_trades(trades, settings.last_n_trades_lookback)
+    if snapshots and settings.dual_mode_enabled:
+        from app.engines.daily_18pct_strategy import get_session_limits
+        from app.engines.dual_mode_strategy import (
+            resolve_trading_session_mode,
+            skip_last_n_session_pause,
+        )
+
+        limits = get_session_limits()
+        mode, _ = resolve_trading_session_mode(
+            state,
+            snapshots,
+            day_mode=str(getattr(limits, "dayMode", "") or "") if limits else "",
+            confidence_tier=str(getattr(limits, "confidenceTier", "") or "MEDIUM") if limits else "MEDIUM",
+        )
+        if skip_last_n_session_pause(mode, snapshots):
+            return False, "aggressive_good_day_bypass", summary
+
     if momentum_rally_bypass_last_n(snapshots):
         return False, "momentum_rally_bypass", summary
 
@@ -430,11 +464,28 @@ def check_last_n_trades_pause(
     return False, "ok", summary
 
 
-def last_n_elevated_min_rank(state: AutoTraderState) -> float:
+def last_n_elevated_min_rank(
+    state: AutoTraderState,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+) -> float:
     """Raise rank floor when last N shows a loss cluster."""
     settings = get_settings()
     if not settings.last_n_trades_gate_enabled:
         return 0.0
+    if snapshots and settings.dual_mode_enabled:
+        from app.engines.daily_18pct_strategy import get_session_limits
+        from app.engines.dual_mode_strategy import resolve_trading_session_mode
+
+        limits = get_session_limits()
+        mode, _ = resolve_trading_session_mode(
+            state,
+            snapshots,
+            day_mode=str(getattr(limits, "dayMode", "") or "") if limits else "",
+            confidence_tier=str(getattr(limits, "confidenceTier", "") or "MEDIUM") if limits else "MEDIUM",
+        )
+        if mode == "AGGRESSIVE":
+            return 0.0
+
     trades = collect_session_trades(state)
     if len(trades) < settings.last_n_trades_min_count:
         return 0.0
@@ -572,7 +623,25 @@ def validate_candidate(
     sym = candidate.symbol.upper()
     snap = snap_map.get(sym) or candidate.snap
     if not all_in and not high_mover:
+        trading_mode = "NORMAL"
+        if settings.dual_mode_enabled:
+            from app.engines.daily_18pct_strategy import get_session_limits
+            from app.engines.dual_mode_strategy import resolve_trading_session_mode
+
+            limits_dm = get_session_limits()
+            trading_mode, _ = resolve_trading_session_mode(
+                state,
+                snap_map,
+                day_mode=str(getattr(limits_dm, "dayMode", "") or "") if limits_dm else "",
+                confidence_tier=str(getattr(limits_dm, "confidenceTier", "") or "MEDIUM") if limits_dm else "MEDIUM",
+            )
         chop_blocked, chop_reason = chop_weak_explosion_blocks_entry(candidate, snap)
+        if (
+            chop_blocked
+            and trading_mode == "AGGRESSIVE"
+            and settings.aggressive_good_day_allow_building_tier
+        ):
+            chop_blocked = False
         if chop_blocked:
             return False, chop_reason, meta
         win_ok, win_reason, win_meta = session_winner_gate(candidate, state)
