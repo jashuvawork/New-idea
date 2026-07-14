@@ -429,9 +429,9 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
     if not force and _cache and _cache_time:
         age = (now - _cache_time).total_seconds()
         if age < cache_ttl:
-            touched = _touch_cached_snapshot(overlay_ws=is_ws_active())
-            snap = touched if touched else _cache
-            if broadcast:
+            _refresh_cached_json(overlay_ws=is_ws_active())
+            snap = _cache
+            if snap and broadcast:
                 await broadcast_snapshot(snap)
             return snap
 
@@ -456,9 +456,9 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
         if not force and _cache and _cache_time:
             age = (datetime.now(IST) - _cache_time).total_seconds()
             if age < cache_ttl:
-                touched = _touch_cached_snapshot(overlay_ws=is_ws_active())
-                snap = touched if touched else _cache
-                if broadcast:
+                _refresh_cached_json(overlay_ws=is_ws_active())
+                snap = _cache
+                if snap and broadcast:
                     await broadcast_snapshot(snap)
                 return snap
         try:
@@ -507,7 +507,9 @@ async def get_snapshots():
 
 @router.get("/snapshots/cached")
 async def get_snapshots_cached():
-    """Return pre-serialized in-memory cache — fast UI poll path via Vercel proxy."""
+    """Return pre-serialized cache instantly — no overlay/serialize on read path."""
+    if _cache_json:
+        return Response(content=_cache_json, media_type="application/json")
     if _cache and _cache.snapshots:
         body = _refresh_cached_json(overlay_ws=is_ws_active())
         return Response(content=body, media_type="application/json")
