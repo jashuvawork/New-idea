@@ -37,7 +37,7 @@ def test_touch_cached_snapshot_overlays_ws_when_active():
 
     with (
         patch("app.routers.market.is_ws_active", return_value=True),
-        patch("app.routers.market.overlay_snapshot_ltps", return_value=snap.snapshots) as mock_overlay,
+        patch("app.routers.market.overlay_snapshot_live", return_value=snap.snapshots) as mock_overlay,
     ):
         market_router._touch_cached_snapshot(overlay_ws=True)
 

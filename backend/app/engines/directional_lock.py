@@ -239,7 +239,7 @@ def check_directional_side_lock(
 
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     hard_blocked, hard_reason = breadth_hard_blocks_side(
-        side_v, bias, candidate=candidate,
+        side_v, bias, candidate=candidate, snap=snap,
     )
     if hard_blocked:
         return True, hard_reason

@@ -221,7 +221,9 @@ def analyze(trades: list[dict]) -> dict:
         if _would_block_bearish_sideways_scalp(t, settings):
             blockers.append("bearish_sideways_halt")
             gate_blocks["bearish_sideways_halt"] += 1
-        if _counter_trend(t) and not ctx.get("executionChart"):
+        if _counter_trend(t) and not (
+            ctx.get("executionChart") or ctx.get("indexChart") or ctx.get("spotChart")
+        ):
             blockers.append("chart_mtf_not_deployed")
         if pnl < 0:
             for b in blockers:
@@ -236,7 +238,9 @@ def analyze(trades: list[dict]) -> dict:
                 breadth=_breadth_bias(t),
                 mode=str(ctx.get("selectionMode") or "unknown"),
                 score=float(ctx.get("selectionScore") or ctx.get("tqs") or 0),
-                has_execution_chart=bool(ctx.get("executionChart")),
+                has_execution_chart=bool(
+                    ctx.get("executionChart") or ctx.get("indexChart") or ctx.get("spotChart")
+                ),
                 blockers=blockers,
             ))
 

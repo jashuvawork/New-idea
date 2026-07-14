@@ -116,7 +116,9 @@ def check_explosion_entry(
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
         bias = (snap.breadth.bias if snap.breadth else breadth.bias or "NEUTRAL") or "NEUTRAL"
-        hard_blocked, hard_reason = breadth_hard_blocks_side(event.side, bias, event=event)
+        hard_blocked, hard_reason = breadth_hard_blocks_side(
+            event.side, bias, event=event, snap=snap,
+        )
         if hard_blocked:
             return False, hard_reason
         if not counter_trend_entry_allowed(event.side, snap, explosion_event=event):
@@ -168,7 +170,9 @@ def check_explosion_entry(
     breadth_bias = (breadth.bias or "NEUTRAL") if breadth else "NEUTRAL"
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
 
-    hard_blocked, hard_reason = breadth_hard_blocks_side(event.side, breadth_bias, event=event)
+    hard_blocked, hard_reason = breadth_hard_blocks_side(
+        event.side, breadth_bias, event=event, snap=snap,
+    )
     if hard_blocked:
         return False, hard_reason
 

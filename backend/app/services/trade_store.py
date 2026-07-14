@@ -113,6 +113,14 @@ def _trade_payload(trade: PaperTrade, context: Optional[dict] = None) -> dict[st
         "exitPlan",
         "signalPremium",
         "slippage",
+        "spotChart",
+        "indexChart",
+        "chartAnalysis",
+        "chartMtfBreadthBypass",
+        "executionChart",
+        "bestPnlPoints",
+        "pnlPoints",
+        "pnlInr",
     ):
         if key in ctx:
             payload[key] = ctx[key]
