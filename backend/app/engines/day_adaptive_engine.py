@@ -134,29 +134,31 @@ def build_day_adaptive_profile(
     elif day_type == "GOOD":
         profile.preferred_modes = ["explosion", "scalp", "quick_sideways"]
         profile.mode_bonuses = {
-            "explosion": 16.0,
-            "scalp": 8.0,
-            "quick_sideways": 4.0,
-            "swing": 6.0,
+            "explosion": 22.0,
+            "scalp": 12.0,
+            "quick_sideways": 6.0,
+            "swing": 8.0,
         }
-        profile.min_rank_relief = settings.day_adaptive_good_day_rank_relief
-        profile.lot_scale_boost = 1.08
+        profile.min_rank_relief = settings.day_adaptive_good_day_rank_relief + 4.0
+        profile.lot_scale_boost = 1.12
         profile.allow_explosion = True
+        profile.pause_regular_scalps = False
         profile.playbook = [
             "Good day — explosions + aligned scalps, let runners on HIGH edge",
-            f"Rank relief −{settings.day_adaptive_good_day_rank_relief:.0f} on quality setups",
+            f"Rank relief −{profile.min_rank_relief:.0f} on quality setups",
         ]
     elif day_type == "ELITE":
         profile.preferred_modes = ["explosion", "scalp", "swing"]
         profile.mode_bonuses = {
-            "explosion": 20.0,
-            "scalp": 10.0,
-            "quick_sideways": 5.0,
-            "swing": 8.0,
+            "explosion": 28.0,
+            "scalp": 14.0,
+            "quick_sideways": 8.0,
+            "swing": 10.0,
         }
-        profile.min_rank_relief = settings.day_adaptive_good_day_rank_relief + 2.0
-        profile.lot_scale_boost = 1.15
+        profile.min_rank_relief = settings.day_adaptive_good_day_rank_relief + 6.0
+        profile.lot_scale_boost = 1.22
         profile.allow_explosion = True
+        profile.pause_regular_scalps = False
         profile.playbook = [
             "Elite day — full aggression on aligned momentum",
             "Explosions first; widen trails on high edge + PF",
@@ -251,6 +253,14 @@ def resolve_day_adaptive(
     settings = get_settings()
     if not settings.day_adaptive_enabled:
         return DayAdaptiveProfile(day_type="NORMAL", day_mode=day_mode, confidence_tier=confidence_tier)
-    return build_day_adaptive_profile(
+    profile = build_day_adaptive_profile(
         day_mode, confidence_tier, snapshots, phase=phase, state=state,
     )
+    if settings.dual_mode_enabled:
+        from app.engines.dual_mode_strategy import apply_aggressive_profile_boost, resolve_trading_session_mode
+
+        mode, _ = resolve_trading_session_mode(
+            state, snapshots, day_mode=day_mode, confidence_tier=confidence_tier,
+        )
+        apply_aggressive_profile_boost(profile, mode)
+    return profile

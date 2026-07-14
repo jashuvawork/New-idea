@@ -620,6 +620,19 @@ def find_best_entry(
         snapshots, state, day_mode=day_mode, confidence_tier=conf_tier, phase=phase,
     )
 
+    from app.engines.dual_mode_strategy import (
+        aggressive_min_rank_floor,
+        resolve_trading_session_mode,
+        skip_best_trades_only_filter,
+    )
+
+    trading_mode, _dual_meta = resolve_trading_session_mode(
+        state,
+        snapshots,
+        day_mode=day_mode,
+        confidence_tier=conf_tier,
+    )
+
     if should_pause_regular_scalps(
         adaptive, edge_pause_scalps=bool(pf_fb and pf_fb.pause_quick_scalps),
     ):
@@ -642,7 +655,7 @@ def find_best_entry(
         return None
 
     settings = get_settings()
-    if settings.best_trades_only_enabled:
+    if settings.best_trades_only_enabled and not skip_best_trades_only_filter(trading_mode):
         from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
 
         candidates = [
@@ -656,6 +669,7 @@ def find_best_entry(
     last_n = last_n_trades_summary(state)
     if (
         settings.best_trades_only_enabled
+        and not skip_best_trades_only_filter(trading_mode)
         and last_n.get("losses", 0) >= settings.best_trades_explosion_only_after_losses
     ):
         explosion_only = [c for c in candidates if c.mode == "explosion"]
@@ -674,6 +688,8 @@ def find_best_entry(
             bonus = max(bonus, 12)
         if worst_day_defensive_session_active(state, snapshots) and c.mode == "explosion":
             bonus -= 12
+        if trading_mode == "AGGRESSIVE" and c.mode == "explosion":
+            bonus += 14
         bonus += mode_rank_bonus(c.mode, adaptive)
         breadth_bias = (c.snap.breadth.bias if c.snap.breadth else "NEUTRAL") or "NEUTRAL"
         if c.mode == "explosion":
@@ -698,7 +714,11 @@ def find_best_entry(
 
     best = max(candidates, key=sort_key)
     floor = min_rank_for_entry(chop, snapshots)
-    floor = max(floor, last_n_elevated_min_rank(state))
+    floor = max(floor, last_n_elevated_min_rank(state, snapshots))
+
+    agg_floor = aggressive_min_rank_floor(trading_mode)
+    if agg_floor > 0:
+        floor = min(floor, agg_floor)
     if pf_fb and settings.edge_engine_enabled and pf_fb.rank_penalty > 0:
         floor += pf_fb.rank_penalty
     if limits and settings.daily_18pct_strategy_enabled:
@@ -740,7 +760,7 @@ def find_best_entry(
     from app.engines.worst_day_guard import session_entry_policy
 
     policy, _ = session_entry_policy(state, snapshots)
-    if policy == "BREAKOUT_ONLY":
+    if policy == "BREAKOUT_ONLY" and trading_mode != "AGGRESSIVE":
         floor = max(floor, settings.worst_day_breakout_min_rank)
     from app.engines.chart_exit_levels import chart_trade_confidence
 

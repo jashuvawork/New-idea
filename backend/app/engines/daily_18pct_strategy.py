@@ -222,6 +222,21 @@ def compute_trading_limits(
         limits.maxTradesToday = settings.controlled_max_trades_per_day + 2
         limits.lotSizeMultiplier = 0.85
         playbook.append("Directional day — trade aligned side, hold runners on HIGH conf")
+        if settings.dual_mode_enabled and tier in ("HIGH", "ELITE"):
+            from app.engines.dual_mode_strategy import aggressive_trade_cap_bonus
+
+            limits.minRankScore = min(
+                limits.minRankScore,
+                settings.aggressive_good_day_min_rank,
+            )
+            limits.maxTradesToday += aggressive_trade_cap_bonus("AGGRESSIVE")
+            limits.lotSizeMultiplier = max(
+                limits.lotSizeMultiplier,
+                settings.aggressive_good_day_lot_scale,
+            )
+            limits.allowExplosion = True
+            limits.allowFullLots = tier == "ELITE"
+            playbook.append("Good directional day — aggressive capture limits")
     else:
         limits.minRankScore = settings.pretrade_min_rank_score
         limits.maxTradesToday = settings.controlled_max_trades_per_day

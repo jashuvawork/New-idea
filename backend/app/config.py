@@ -328,7 +328,7 @@ class Settings(BaseSettings):
     expiry_morning_only: bool = True
     expiry_morning_end_hour: int = 13
     expiry_morning_end_minute: int = 30
-    expiry_evening_block_hour: int = 14
+    expiry_evening_block_hour: int = 15
     expiry_evening_block_minute: int = 0
     expiry_min_rank_score: float = 62.0
     expiry_cheap_premium_threshold_inr: float = 55.0
@@ -700,7 +700,7 @@ class Settings(BaseSettings):
   # Worst-day defensive ITM fade — alternate index, tight targets, 1 lot
     worst_day_itm_fade_enabled: bool = True
     worst_day_itm_fade_alternate_only: bool = True
-    worst_day_itm_fade_min_rank: float = 58.0
+    worst_day_itm_fade_min_rank: float = 52.0
     worst_day_itm_fade_max_itm_steps: int = 1
     worst_day_itm_fade_lot_cap: int = 1
     worst_day_itm_fade_min_premium_inr: float = 90.0
@@ -725,6 +725,21 @@ class Settings(BaseSettings):
     worst_day_dead_zone_end_minute: int = 0
     day_adaptive_chop_rank_cap: float = 70.0
     day_adaptive_good_day_rank_relief: float = 3.0
+
+    # Dual-mode weekly playbook — defensive worst days vs aggressive good-day capture
+    dual_mode_enabled: bool = True
+    defensive_daily_target_pct_min: float = 0.05
+    defensive_daily_target_pct_max: float = 0.10
+    aggressive_good_day_min_rank: float = 52.0
+    aggressive_good_day_rank_relief: float = 10.0
+    aggressive_good_day_min_tqs: float = 45.0
+    aggressive_good_day_trade_cap_bonus: int = 8
+    aggressive_good_day_lot_scale: float = 1.2
+    aggressive_good_day_skip_best_trades_only: bool = True
+    aggressive_good_day_skip_worst_day_policy: bool = True
+    aggressive_good_day_bypass_last_n_pause: bool = True
+    aggressive_good_day_bypass_bad_day_floor: bool = True
+    aggressive_good_day_allow_building_tier: bool = True
 
     def daily_profit_stage_pcts(self) -> list[float]:
         return [float(x.strip()) for x in self.daily_profit_stage_pcts_csv.split(",") if x.strip()]
