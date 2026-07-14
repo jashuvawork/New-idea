@@ -697,6 +697,32 @@ class Settings(BaseSettings):
     worst_day_call_block_enabled: bool = True
     worst_day_call_block_symbols_csv: str = "SENSEX"
     worst_day_slow_bounce_min_rank: float = 55.0
+  # Worst-day defensive ITM fade — alternate index, tight targets, 1 lot
+    worst_day_itm_fade_enabled: bool = True
+    worst_day_itm_fade_alternate_only: bool = True
+    worst_day_itm_fade_min_rank: float = 58.0
+    worst_day_itm_fade_max_itm_steps: int = 1
+    worst_day_itm_fade_lot_cap: int = 1
+    worst_day_itm_fade_min_premium_inr: float = 90.0
+    worst_day_itm_fade_min_tqs: float = 28.0
+    worst_day_itm_fade_min_velocity_pct: float = 0.08
+    worst_day_itm_fade_max_velocity_pct: float = 1.5
+    worst_day_itm_fade_target_points: float = 2.5
+    worst_day_itm_fade_stop_points: float = 2.0
+    worst_day_itm_fade_micro_target_points: float = 1.5
+    worst_day_itm_fade_max_hold_seconds: int = 90
+    worst_day_itm_fade_rank_bonus: float = 8.0
+    # Worst-day quick scalps — alternate index chop fades only
+    worst_day_quick_enabled: bool = True
+    worst_day_quick_alternate_only: bool = True
+    worst_day_quick_min_rank: float = 60.0
+    worst_day_quick_max_velocity_pct: float = 1.2
+    worst_day_quick_rank_bonus: float = 6.0
+    worst_day_dead_zone_enabled: bool = True
+    worst_day_dead_zone_start_hour: int = 11
+    worst_day_dead_zone_start_minute: int = 0
+    worst_day_dead_zone_end_hour: int = 12
+    worst_day_dead_zone_end_minute: int = 0
     day_adaptive_chop_rank_cap: float = 70.0
     day_adaptive_good_day_rank_relief: float = 3.0
 

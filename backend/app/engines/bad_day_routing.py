@@ -275,6 +275,8 @@ def check_bad_day_candidate(
             return False, "bad_day_no_regular_scalps_on_fading_expiry", meta
         if mode == "slow_bounce":
             return False, "bad_day_slow_bounce_on_fading_expiry", meta
+        if mode == "worst_day_itm_fade":
+            return False, "bad_day_worst_day_itm_fade_on_fading_expiry", meta
         if mode == "explosion":
             if tier not in ("ELITE", "EXPLODING"):
                 return False, "bad_day_fading_expiry_explosion_tier", meta
@@ -333,6 +335,23 @@ def check_bad_day_candidate(
             if score >= sb_floor and _breadth_aligned(candidate, snap):
                 return True, "ok", meta
         return False, "bad_day_slow_bounce_requires_pm_itm_alternate", meta
+
+    if mode == "worst_day_itm_fade":
+        from app.engines.worst_day_itm_fade import is_worst_day_alternate_symbol
+
+        if is_worst_day_alternate_symbol(snap, state, snapshots) and _breadth_aligned(candidate, snap):
+            if score >= settings.worst_day_itm_fade_min_rank:
+                return True, "ok", meta
+        return False, "bad_day_worst_day_itm_fade_requires_alternate", meta
+
+    pre_meta = getattr(candidate, "pretrade_meta", None) or {}
+    if mode == "quick_sideways" and pre_meta.get("worstDayQuick"):
+        from app.engines.worst_day_itm_fade import is_worst_day_alternate_symbol
+
+        if is_worst_day_alternate_symbol(snap, state, snapshots) and _breadth_aligned(candidate, snap):
+            if score >= settings.worst_day_quick_min_rank:
+                return True, "ok", meta
+        return False, "bad_day_worst_day_quick_requires_alternate", meta
 
     if score < floor:
         return False, f"bad_day_rank_below_{floor:.0f}", meta

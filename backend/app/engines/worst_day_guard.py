@@ -214,6 +214,38 @@ def worst_day_allows_candidate(
             return False, f"worst_day_slow_bounce_rank_below_{min_rank:.0f}", meta
         return True, "ok", meta
 
+    if mode == "worst_day_itm_fade":
+        from app.engines.worst_day_itm_fade import check_worst_day_itm_fade_entry
+
+        ok, reason, fade_meta = check_worst_day_itm_fade_entry(
+            snap,
+            candidate.side,
+            float(candidate.strike),
+            float(candidate.premium),
+            velocity_pct=float((getattr(candidate, "pretrade_meta", None) or {}).get("velocityPct") or 0),
+            state=state,
+            snapshots=snapshots,
+        )
+        meta["worstDayItmFade"] = fade_meta
+        if not ok:
+            return False, reason, meta
+        if score < settings.worst_day_itm_fade_min_rank:
+            return False, f"worst_day_itm_fade_rank_below_{settings.worst_day_itm_fade_min_rank:.0f}", meta
+        return True, "ok", meta
+
+    if mode == "quick_sideways":
+        from app.engines.worst_day_itm_fade import (
+            worst_day_defensive_session_active,
+            worst_day_quick_trade_allowed,
+        )
+
+        quick_ok, quick_reason = worst_day_quick_trade_allowed(candidate, state, snapshots)
+        if quick_ok:
+            meta["worstDayQuick"] = True
+            return True, "ok", meta
+        if worst_day_defensive_session_active(state, snapshots):
+            return False, quick_reason, meta
+
     if mode == "explosion":
         from app.engines.bad_day_routing import _extreme_explosion_bypass
 

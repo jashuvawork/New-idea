@@ -534,7 +534,7 @@ def validate_candidate(
     ok, reason = check_min_entry_interval(
         state,
         chop=chop,
-        quick_sideways=getattr(candidate, "mode", "") in ("quick_sideways", "slow_bounce"),
+        quick_sideways=getattr(candidate, "mode", "") in ("quick_sideways", "slow_bounce", "worst_day_itm_fade"),
         candidate=candidate,
         snapshots=snap_map,
     )
@@ -654,6 +654,11 @@ def validate_candidate(
     from app.engines.bad_day_routing import check_bad_day_candidate
 
     if not all_in:
+        from app.engines.worst_day_itm_fade import in_worst_day_dead_zone, worst_day_defensive_session_active
+
+        if worst_day_defensive_session_active(state, snap_map) and in_worst_day_dead_zone():
+            return False, "worst_day_dead_zone", meta
+
         bd_ok, bd_reason, bd_meta = check_bad_day_candidate(candidate, state, snap_map)
         meta.update(bd_meta)
         if not bd_ok:
@@ -699,6 +704,10 @@ def validate_candidate(
                 settings.quick_sideways_slow_bounce_min_rank_score,
                 settings.expiry_pm_itm_min_rank_score,
             )
+        elif mode == "worst_day_itm_fade":
+            min_rank = min(min_rank, settings.worst_day_itm_fade_min_rank)
+        elif mode == "quick_sideways" and (getattr(candidate, "pretrade_meta", None) or {}).get("worstDayQuick"):
+            min_rank = min(min_rank, settings.worst_day_quick_min_rank)
         if not expiry_aligned and candidate.score < min_rank:
             return False, f"pretrade_rank_below_{min_rank:.0f}", meta
 

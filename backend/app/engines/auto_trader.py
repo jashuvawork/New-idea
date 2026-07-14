@@ -86,6 +86,11 @@ from app.engines.quick_sideways import (
     get_quick_sideways_profile,
     snapshot_in_chop,
 )
+from app.engines.worst_day_itm_fade import (
+    cap_worst_day_itm_fade_lots,
+    evaluate_worst_day_itm_fade_exit,
+    get_worst_day_itm_fade_profile,
+)
 from app.engines.session_timing import entries_allowed_now, entry_window_label, explosion_entries_allowed_now
 from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
@@ -363,7 +368,9 @@ async def _open_from_candidate(
             return False, vt_reason
 
     profile = snap.optimizedProfile or get_session_targets()
-    if candidate.mode in ("quick_sideways", "slow_bounce"):
+    if candidate.mode == "worst_day_itm_fade":
+        profile = get_worst_day_itm_fade_profile(candidate.premium)
+    elif candidate.mode in ("quick_sideways", "slow_bounce"):
         profile = get_quick_sideways_profile(candidate.premium)
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
 
@@ -398,6 +405,8 @@ async def _open_from_candidate(
         from app.engines.explosion_profit import cap_explosion_lots
 
         lots = cap_explosion_lots(lots, fill_premium)
+    elif candidate.mode == "worst_day_itm_fade":
+        lots = cap_worst_day_itm_fade_lots(lots)
     elif candidate.mode in ("quick_sideways", "slow_bounce"):
         lots = cap_quick_sideways_lots(lots, fill_premium)
     from app.engines.bad_day_routing import bad_day_lot_cap
@@ -601,6 +610,11 @@ async def _open_from_candidate(
         ctx_extra["regime"] = regime.value if hasattr(regime, "value") else str(regime)
         if candidate.mode == "slow_bounce":
             ctx_extra.update(candidate.pretrade_meta or {})
+    elif candidate.mode == "worst_day_itm_fade":
+        regime = snap.regime
+        ctx_extra["inChop"] = snapshot_in_chop(snap)
+        ctx_extra["regime"] = regime.value if hasattr(regime, "value") else str(regime)
+        ctx_extra.update(candidate.pretrade_meta or {})
 
     if not ctx_extra.get("instrumentKey"):
         if instrument_key:
@@ -893,6 +907,10 @@ async def _process_open_trades(
                 exit_reason, pnl = evaluate_explosion_exit(
                     trade, eval_premium, tier, lot_mult, params=exit_params,
                 )
+        elif not exit_reason and (trade.entryContext or {}).get("selectionMode") == "worst_day_itm_fade":
+            exit_reason, pnl = evaluate_worst_day_itm_fade_exit(
+                trade, eval_premium, lot_mult, snap=snap,
+            )
         elif not exit_reason and (trade.entryContext or {}).get("selectionMode") in (
             "quick_sideways", "slow_bounce",
         ):

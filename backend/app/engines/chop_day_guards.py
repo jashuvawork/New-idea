@@ -332,6 +332,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.psychology_hold import psychology_hold_summary
     from app.engines.bad_day_routing import bad_day_routing_summary
     from app.engines.worst_day_guard import worst_day_guard_summary
+    from app.engines.worst_day_itm_fade import worst_day_trades_summary
 
     session = get_session_targets()
     settings = get_settings()
@@ -393,4 +394,5 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "psychologyHold": psychology_hold_summary(),
         "badDayRouting": bad_day_routing_summary(state, snapshots),
         "worstDayGuard": worst_day_guard_summary(state, snapshots),
+        "worstDayTrades": worst_day_trades_summary(state, snapshots),
     }
