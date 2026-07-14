@@ -50,6 +50,11 @@ from app.engines.quick_sideways import (
     scan_quick_sideways_setups,
     scan_slow_bounce_setups,
 )
+from app.engines.worst_day_itm_fade import (
+    scan_worst_day_itm_fade_setups,
+    scan_worst_day_quick_setups,
+    worst_day_defensive_session_active,
+)
 from app.engines.swing_engine import SwingSetup
 from app.models.schemas import (
     AutoTraderState,
@@ -360,6 +365,67 @@ def _scalp_candidates(
     return out
 
 
+def _worst_day_candidates(
+    symbol: str,
+    snap: SymbolSnapshot,
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> list[EntryCandidate]:
+    if not worst_day_defensive_session_active(state, snapshots):
+        return []
+    out: list[EntryCandidate] = []
+    for setup in scan_worst_day_itm_fade_setups(symbol, snap, state, snapshots):
+        side = setup["side"]
+        strike = float(setup["strike"])
+        premium = float(setup["premium"])
+        blocked, _ = _reentry_blocked(symbol, side, strike, snap)
+        if blocked:
+            continue
+        out.append(EntryCandidate(
+            symbol=symbol,
+            snap=snap,
+            mode="worst_day_itm_fade",
+            score=float(setup["score"]),
+            side=side,
+            strike=strike,
+            premium=premium,
+            strategy_type=StrategyType.SCALP,
+            confidence=float(setup["score"]),
+            tqs=snap.tradeQualityScore,
+            pretrade_meta={
+                "worstDayItmFade": True,
+                "velocityPct": setup.get("velocityPct"),
+                "worstDayFadeMeta": setup.get("worstDayFadeMeta"),
+            },
+        ))
+
+    for setup in scan_worst_day_quick_setups(symbol, snap, state, snapshots):
+        side = setup["side"]
+        strike = float(setup["strike"])
+        premium = float(setup["premium"])
+        blocked, _ = _reentry_blocked(symbol, side, strike, snap)
+        if blocked:
+            continue
+        out.append(EntryCandidate(
+            symbol=symbol,
+            snap=snap,
+            mode="quick_sideways",
+            score=float(setup["score"]),
+            side=side,
+            strike=strike,
+            premium=premium,
+            strategy_type=StrategyType.SCALP,
+            confidence=float(setup["score"]),
+            tqs=snap.tradeQualityScore,
+            pretrade_meta={
+                "quickSideways": True,
+                "worstDayQuick": True,
+                "velocityPct": setup.get("velocityPct"),
+            },
+        ))
+    return out
+
+
 def _quick_sideways_candidates(
     symbol: str,
     snap: SymbolSnapshot,
@@ -515,6 +581,7 @@ def find_best_entry(
             candidates.extend(_scalp_candidates(symbol, snap, state, settings))
         if quick_sideways_enabled() and scalp_open < settings.aggressive_max_open_scalps:
             candidates.extend(_quick_sideways_candidates(symbol, snap, state, settings, snapshots))
+            candidates.extend(_worst_day_candidates(symbol, snap, state, snapshots))
         if swing_open < settings.swing_max_open:
             candidates.extend(_swing_candidates(symbol, snap, state, settings))
 
@@ -597,10 +664,16 @@ def find_best_entry(
 
     def sort_key(c: EntryCandidate) -> float:
         bonus = 20 if c.mode == "explosion" else (
-            10 if c.mode == "slow_bounce" else (
-                8 if c.mode == "quick_sideways" else (5 if c.mode == "swing" else 0)
+            15 if c.mode == "worst_day_itm_fade" else (
+                10 if c.mode == "slow_bounce" else (
+                    8 if c.mode == "quick_sideways" else (5 if c.mode == "swing" else 0)
+                )
             )
         )
+        if c.mode == "quick_sideways" and (c.pretrade_meta or {}).get("worstDayQuick"):
+            bonus = max(bonus, 12)
+        if worst_day_defensive_session_active(state, snapshots) and c.mode == "explosion":
+            bonus -= 12
         bonus += mode_rank_bonus(c.mode, adaptive)
         breadth_bias = (c.snap.breadth.bias if c.snap.breadth else "NEUTRAL") or "NEUTRAL"
         if c.mode == "explosion":
@@ -640,6 +713,10 @@ def find_best_entry(
         floor = min(floor, premium_capture_rank_floor())
     if best.mode == "quick_sideways":
         floor = min(floor, settings.quick_sideways_min_rank_score)
+        if (best.pretrade_meta or {}).get("worstDayQuick"):
+            floor = min(floor, settings.worst_day_quick_min_rank)
+    elif best.mode == "worst_day_itm_fade":
+        floor = min(floor, settings.worst_day_itm_fade_min_rank)
     elif best.mode == "slow_bounce":
         floor = min(floor, settings.quick_sideways_slow_bounce_min_rank_score)
     elif settings.best_trades_only_enabled:

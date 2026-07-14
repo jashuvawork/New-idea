@@ -184,7 +184,7 @@ def expiry_pm_itm_chart_bypass_allowed(
     settings = get_settings()
     if not settings.expiry_pm_itm_chart_bypass_breadth:
         return False
-    if str(mode or "") not in ("quick_sideways", "slow_bounce"):
+    if str(mode or "") not in ("quick_sideways", "slow_bounce", "worst_day_itm_fade"):
         return False
     if not expiry_pm_itm_quick_active(snap, state, snapshots) and not (
         in_morning_slow_bounce_window() and is_near_expiry_day(snap)
@@ -442,7 +442,7 @@ def check_expiry_candidate(
     meta["expiryPmItmQuick"] = pm_itm
 
     if pm_itm:
-        if mode not in ("quick_sideways", "slow_bounce"):
+        if mode not in ("quick_sideways", "slow_bounce", "worst_day_itm_fade"):
             return False, "expiry_pm_itm_quick_only", meta
         from app.engines.moneyness import classify_moneyness
 
