@@ -170,6 +170,15 @@ class Settings(BaseSettings):
     explosion_early_volume_surge: float = 1.5
     explosion_scan_range: int = 800
     explosion_sensex_scan_range: int = 1500
+    explosion_worst_day_scan_range: int = 500
+    explosion_sensex_worst_day_scan_range: int = 500
+    explosion_atm_proximity_bonus_max: float = 8.0
+    explosion_otm_depth_penalty_per_step: float = 3.0
+    explosion_peak_chase_guard_enabled: bool = True
+    explosion_peak_chase_min_premium_mom_pct: float = 15.0
+    explosion_peak_chase_max_otm_steps: int = 3
+    explosion_peak_chase_min_session_move_pct: float = 40.0
+    explosion_macd_alignment_required: bool = True
     explosion_deep_otm_min_premium_inr: float = 3.0
     explosion_volume_awaken_min: int = 25000
     explosion_volume_awaken_min_velocity_3s: float = 1.0
@@ -522,6 +531,7 @@ class Settings(BaseSettings):
     extreme_explosion_elite_move_min_pct: float = 100.0
     extreme_explosion_all_in_move_min_pct: float = 150.0
     extreme_explosion_all_in_min_score: float = 35.0
+    extreme_all_in_max_otm_steps: int = 3
     extreme_explosion_hold_min_best_points: float = 8.0
     expiry_evening_all_in_explosion_bypass: bool = True
     all_day_explosion_building_min_velocity_3s: float = 2.0

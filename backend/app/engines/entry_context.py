@@ -24,12 +24,29 @@ def snapshot_chart_context(snap: Optional[SymbolSnapshot]) -> dict[str, Any]:
 
     if snap.chartAnalysis:
         ca = snap.chartAnalysis
+        mtf_out: dict[str, Any] | None = None
+        if ca.timeframes or ca.alignedCount:
+            tf_summary: dict[str, Any] = {}
+            for label, tf in (ca.timeframes or {}).items():
+                if isinstance(tf, dict):
+                    tf_summary[label] = {
+                        "direction": tf.get("direction"),
+                        "rsi": tf.get("rsi"),
+                        "macdBias": tf.get("macdBias"),
+                    }
+            mtf_out = {
+                "consensus": ca.consensus,
+                "alignedCount": ca.alignedCount,
+                "totalTimeframes": ca.totalTimeframes,
+                "timeframes": tf_summary,
+            }
         out["chartAnalysis"] = {
             "consensus": ca.consensus,
             "alignedCount": ca.alignedCount,
             "totalTimeframes": ca.totalTimeframes,
             "ichimoku": ca.ichimoku or {},
             "keySignals": (ca.keySignals or [])[:8],
+            "mtf": mtf_out,
         }
 
     if snap.breadth:
@@ -59,6 +76,25 @@ def merge_execution_chart_context(
         out["spotChartFull"] = full
     if execution_chart.get("indexMtf"):
         out["indexMtf"] = execution_chart["indexMtf"]
+        ca = out.get("chartAnalysis")
+        if isinstance(ca, dict):
+            im = execution_chart["indexMtf"]
+            tf_summary: dict[str, Any] = {}
+            for label, tf in (im.get("timeframes") or {}).items():
+                if isinstance(tf, dict):
+                    tf_summary[label] = {
+                        "direction": tf.get("direction"),
+                        "rsi": tf.get("rsi"),
+                        "macdBias": tf.get("macdBias"),
+                    }
+            ca = dict(ca)
+            ca["mtf"] = {
+                "consensus": im.get("consensus"),
+                "alignedCount": im.get("alignedCount"),
+                "totalTimeframes": im.get("total"),
+                "timeframes": tf_summary,
+            }
+            out["chartAnalysis"] = ca
     out["executionChartSource"] = execution_chart.get("source", "unknown")
     return out
 

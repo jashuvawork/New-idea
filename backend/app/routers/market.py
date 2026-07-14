@@ -336,6 +336,31 @@ async def broadcast_snapshot(snapshot: MultiSnapshot) -> None:
         _sse_queues.discard(q)
 
 
+async def get_multi_snapshot_fast(*, overlay_ws: bool = True) -> MultiSnapshot:
+    """Fast read for diagnostics — never triggers a full REST rebuild."""
+    now = datetime.now(IST)
+    if _cache and _cache.snapshots:
+        touched = _touch_cached_snapshot(overlay_ws=overlay_ws and is_ws_active())
+        snap = touched if touched else _cache
+        fresh = snap.model_copy(deep=True)
+        fresh.timestamp = now
+        if fresh.dataReady:
+            fresh.waitingReason = None
+        return fresh
+    if _cache:
+        stale = _cache.model_copy(deep=True)
+        stale.timestamp = now
+        stale.waitingReason = stale.waitingReason or "No fresh snapshot — serving stale cache"
+        return stale
+    return MultiSnapshot(
+        timestamp=now,
+        dataReady=False,
+        waitingReason="Snapshot cache empty",
+        snapshots={},
+        autoTrader=get_state(),
+    )
+
+
 async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) -> MultiSnapshot:
     """Cached snapshot with single-flight — UI + background monitor share one build."""
     global _cache, _cache_time, _last_full_cycle_ms

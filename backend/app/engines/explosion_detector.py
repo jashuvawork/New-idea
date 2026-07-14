@@ -180,11 +180,29 @@ def _volume_awakening(
     return v3 >= min_v3 or open_move >= settings.open_premium_min_move_pct
 
 
-def resolve_explosion_scan_range(symbol: str, settings=None) -> float:
-    """ATM ± range for chain scan — wider on SENSEX and during all-day capture."""
+def resolve_explosion_scan_range(
+    symbol: str,
+    settings=None,
+    *,
+    tight_scan: bool | None = None,
+) -> float:
+    """ATM ± range for chain scan — wider on SENSEX; tighter on expiry session."""
     from app.config import get_settings
 
     settings = settings or get_settings()
+    if tight_scan is None:
+        try:
+            from app.engines.expiry_day_guards import any_expiry_session_active
+
+            tight_scan = any_expiry_session_active()
+        except Exception:
+            tight_scan = False
+
+    if tight_scan:
+        if symbol.upper() == "SENSEX":
+            return float(getattr(settings, "explosion_sensex_worst_day_scan_range", 500))
+        return float(getattr(settings, "explosion_worst_day_scan_range", 500))
+
     base = float(settings.explosion_scan_range)
     if symbol.upper() == "SENSEX":
         base = max(base, float(getattr(settings, "explosion_sensex_scan_range", 1500)))
@@ -356,13 +374,23 @@ def scan_chain_explosions(
                 if not (peak_move >= 20 and v3 >= 1.2):
                     continue
 
-            # OTM bias during explosions (like 24000 CE rallying hard)
-            otm_bonus = 0
-            if side == Side.CALL and strike > atm:
-                otm_bonus = min(10, (strike - atm) / step * 2)
-            elif side == Side.PUT and strike < atm:
-                otm_bonus = min(10, (atm - strike) / step * 2)
-            score = min(100, score + otm_bonus)
+            # Reward ATM proximity; penalize deep OTM (delta + IV crush risk)
+            from app.engines.moneyness import strike_step
+
+            strike_inc = strike_step(symbol)
+            dist_steps = abs(strike - atm) / strike_inc if strike_inc else 0
+            atm_bonus = 0.0
+            if dist_steps <= 1:
+                atm_bonus = float(getattr(settings, "explosion_atm_proximity_bonus_max", 8.0))
+            elif dist_steps <= 2:
+                atm_bonus = float(getattr(settings, "explosion_atm_proximity_bonus_max", 8.0)) * 0.5
+            otm_penalty = 0.0
+            if (side == Side.CALL and strike > atm) or (side == Side.PUT and strike < atm):
+                otm_penalty = min(
+                    30.0,
+                    dist_steps * float(getattr(settings, "explosion_otm_depth_penalty_per_step", 3.0)),
+                )
+            score = min(100, max(0, score + atm_bonus - otm_penalty))
 
             reason_parts = []
             if v3 >= 2:

@@ -54,10 +54,16 @@ def _snap() -> SymbolSnapshot:
 
 
 def test_snapshot_chart_context_includes_chart_and_mtf():
-    ctx = snapshot_chart_context(_snap())
+    snap = _snap()
+    snap.chartAnalysis.timeframes = {
+        "5m": {"direction": "BULLISH", "rsi": 55.0, "macdBias": "NEUTRAL"},
+    }
+    ctx = snapshot_chart_context(snap)
     assert ctx["indexChart"]["direction"] == "BULLISH"
     assert ctx["spotChart"]["rsi"] == 65.0
     assert ctx["chartAnalysis"]["consensus"] == "BULLISH"
+    assert ctx["chartAnalysis"]["mtf"]["consensus"] == "BULLISH"
+    assert ctx["chartAnalysis"]["mtf"]["timeframes"]["5m"]["direction"] == "BULLISH"
     assert ctx["breadth"]["bias"] == "BEARISH"
 
 

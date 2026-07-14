@@ -586,6 +586,19 @@ def validate_candidate(
 
     premium_bypass = False
     explosion_event = getattr(candidate, "explosion_event", None)
+    if getattr(candidate, "mode", "") == "explosion":
+        from app.engines.explosion_entry_guards import (
+            check_explosion_macd_alignment,
+            check_peak_chase_entry,
+        )
+
+        macd_ok, macd_reason = check_explosion_macd_alignment(candidate.side, snap)
+        if not macd_ok:
+            return False, macd_reason, meta
+        peak_ok, peak_reason = check_peak_chase_entry(candidate, explosion_event, snap)
+        if not peak_ok:
+            return False, peak_reason, meta
+
     if getattr(candidate, "mode", "") == "explosion" and explosion_event is not None:
         from app.engines.morning_premium_capture import premium_led_explosion_bypass
 
@@ -716,6 +729,15 @@ def validate_candidate(
             )
 
     if all_in or high_mover:
+        if all_in:
+            from app.engines.explosion_entry_guards import check_all_in_moneyness_cap
+
+            cap_ok, cap_reason, cap_meta = check_all_in_moneyness_cap(
+                candidate.side, float(candidate.strike), snap,
+            )
+            meta.update(cap_meta)
+            if not cap_ok:
+                return False, cap_reason, meta
         meta["pretradePassed"] = True
         if all_in:
             meta["extremeAllInBypass"] = True
