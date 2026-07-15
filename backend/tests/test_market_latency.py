@@ -14,11 +14,15 @@ def _reset_market_cache():
     market_router._cache_time = None
     market_router._cache_json = None
     market_router._build_in_progress = False
+    market_router._last_ws_overlay_mono = 0.0
+    market_router._sse_payload_dict = None
     yield
     market_router._cache = None
     market_router._cache_time = None
     market_router._cache_json = None
     market_router._build_in_progress = False
+    market_router._last_ws_overlay_mono = 0.0
+    market_router._sse_payload_dict = None
 
 
 def test_serve_stale_cache_when_build_in_progress():
@@ -158,3 +162,12 @@ def test_ws_overlay_cycle_updates_cache_without_trader():
     out = asyncio.run(_run())
     assert out is not None
     assert market_router._cache_json is not None
+
+
+def test_ws_overlay_due_throttles_rapid_calls():
+    import time
+
+    market_router._last_ws_overlay_mono = time.monotonic()
+    assert market_router.ws_overlay_due() is False
+    market_router._last_ws_overlay_mono = 0.0
+    assert market_router.ws_overlay_due() is True

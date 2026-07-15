@@ -2,20 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, PerformanceMilestone, StreamMetrics, TradeHistoryResponse, TradeLogResponse, WeeklyDashboard } from '../types';
 import { snapshotSignature } from './snapshotSignature';
 
-// Production: same-origin /api (Vercel rewrites → EC2). SSE streams direct to EC2 to skip proxy buffering.
+// Production: same-origin /api (Vercel HTTPS → EC2). Do NOT use http:// IP — mixed-content blocks SSE.
 const API_BASE = import.meta.env.DEV
   ? ''
   : (import.meta.env.VITE_API_URL || '');
 const STREAM_BASE = import.meta.env.DEV
   ? ''
-  : (import.meta.env.VITE_STREAM_BASE_URL || 'http://65.0.136.146:8000');
+  : (import.meta.env.VITE_STREAM_BASE_URL || API_BASE);
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
 const UI_TICK_MS = Math.max(POLL_MS, 200);
 const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 50), 25);
-// SSE-first — only disable via VITE_SSE_ENABLED=false at build time
 const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
-const SSE_STALE_POLL_MS = Number(import.meta.env.VITE_SSE_STALE_POLL_MS || 8000);
+const SSE_STALE_POLL_MS = Number(import.meta.env.VITE_SSE_STALE_POLL_MS || 3000);
 const SNAPSHOT_URL = `${API_BASE}/api/market/snapshots/cached`;
+const SNAPSHOT_FALLBACK_URL = 'https://api.jashuvatrade.xyz/api/market/snapshots/cached';
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   if (ms <= 0) return 'offline';
@@ -162,46 +162,49 @@ export function useMarketStream() {
   const lastSseApplyAt = useRef(0);
   const pollAbortRef = useRef<AbortController | null>(null);
 
-  const fetchSnapshot = useCallback(async () => {
+  const fetchSnapshot = useCallback(async (streamMode: StreamMetrics['streamMode'] = 'poll') => {
     pollAbortRef.current?.abort();
     const ac = new AbortController();
     pollAbortRef.current = ac;
     const started = performance.now();
-    try {
-      const res = await fetch(SNAPSHOT_URL, { signal: ac.signal });
-      const elapsed = Math.round(performance.now() - started);
-      if (!res.ok) throw new Error(`API ${res.status}`);
-
-      const json = (await res.json()) as MultiSnapshot;
-      applySnapshot(
-        json,
-        started,
-        latencyHistory,
-        lastSuccessAt,
-        lastSignature,
-        'poll',
-        POLL_MS,
-        setData,
-        setError,
-        setMetrics,
-      );
-      void elapsed;
-    } catch (e) {
-      if (e instanceof DOMException && e.name === 'AbortError') return;
-      const elapsed = Math.round(performance.now() - started);
-      setMetrics((prev) => ({
-        ...prev,
-        lastLatencyMs: elapsed,
-        connectionQuality: 'offline',
-        streamMode: 'poll',
-        stalenessMs: lastSuccessAt.current
-          ? Date.now() - lastSuccessAt.current.getTime()
-          : prev.stalenessMs,
-      }));
-      setError(e instanceof Error ? e.message : 'Connection failed');
-    } finally {
-      setLoading(false);
+    const urls = streamMode === 'sse' && SNAPSHOT_FALLBACK_URL !== SNAPSHOT_URL
+      ? [SNAPSHOT_URL, SNAPSHOT_FALLBACK_URL]
+      : [SNAPSHOT_URL];
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, { signal: ac.signal });
+        if (!res.ok) continue;
+        const json = (await res.json()) as MultiSnapshot;
+        applySnapshot(
+          json,
+          started,
+          latencyHistory,
+          lastSuccessAt,
+          lastSignature,
+          streamMode,
+          POLL_MS,
+          setData,
+          setError,
+          setMetrics,
+        );
+        setLoading(false);
+        return;
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+      }
     }
+    const elapsed = Math.round(performance.now() - started);
+    setMetrics((prev) => ({
+      ...prev,
+      lastLatencyMs: elapsed,
+      connectionQuality: 'offline',
+      streamMode: streamMode === 'sse' ? 'sse' : 'poll',
+      stalenessMs: lastSuccessAt.current
+        ? Date.now() - lastSuccessAt.current.getTime()
+        : prev.stalenessMs,
+    }));
+    setError('Connection failed');
+    setLoading(false);
   }, []);
 
   // Tick staleness between updates; fall back to HTTP poll when SSE goes quiet
@@ -225,7 +228,7 @@ export function useMarketStream() {
         return { ...prev, stalenessMs: stale, connectionQuality: quality, lastLatencyMs: latency };
       });
       if (SSE_ENABLED && stale > SSE_STALE_POLL_MS) {
-        void fetchSnapshot();
+        void fetchSnapshot('sse');
       }
     }, UI_TICK_MS);
     return () => clearInterval(id);
@@ -233,8 +236,8 @@ export function useMarketStream() {
 
   useEffect(() => {
     if (!SSE_ENABLED) {
-      fetchSnapshot();
-      const id = setInterval(fetchSnapshot, POLL_MS);
+      fetchSnapshot('poll');
+      const id = setInterval(() => fetchSnapshot('poll'), POLL_MS);
       return () => clearInterval(id);
     }
 
@@ -246,8 +249,8 @@ export function useMarketStream() {
 
     const startPollFallback = () => {
       if (pollId) return;
-      fetchSnapshot();
-      pollId = setInterval(fetchSnapshot, POLL_MS);
+      fetchSnapshot('sse');
+      pollId = setInterval(() => fetchSnapshot('sse'), POLL_MS);
       setMetrics((prev) => ({
         ...prev,
         streamMode: prev.streamMode === 'sse' ? 'sse' : 'poll',
@@ -283,7 +286,13 @@ export function useMarketStream() {
       es.onmessage = (ev) => {
         const now = performance.now();
         lastSuccessAt.current = new Date();
-        if (now - lastSseApplyAt.current < SSE_MIN_INTERVAL_MS) {
+        try {
+          const json = JSON.parse(ev.data) as MultiSnapshot;
+          const tickAge = typeof json.wsTickAgeMs === 'number' ? json.wsTickAgeMs : 0;
+          if (now - lastSseApplyAt.current < SSE_MIN_INTERVAL_MS && tickAge < 2000) {
+            return;
+          }
+        } catch {
           return;
         }
         lastSseApplyAt.current = now;

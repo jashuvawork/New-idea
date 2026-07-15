@@ -41,6 +41,8 @@ _last_full_cycle_ms: Optional[float] = None
 _sse_queues: set[asyncio.Queue] = set()
 _cache_json: Optional[bytes] = None
 _last_touch_mono: float = 0.0
+_last_ws_overlay_mono: float = 0.0
+_sse_payload_dict: Optional[dict[str, Any]] = None
 IST = ZoneInfo("Asia/Kolkata")
 
 # Min interval between WS overlay + re-serialize on hot /snapshots/cached path
@@ -64,11 +66,19 @@ def _attach_ws_tick_age(snap: MultiSnapshot) -> MultiSnapshot:
 
 
 def _store_cache(snap: MultiSnapshot) -> None:
-    global _cache, _cache_time, _cache_json
+    global _cache, _cache_time, _cache_json, _sse_payload_dict
     snap = _attach_ws_tick_age(snap)
     _cache = snap
     _cache_time = datetime.now(IST)
     _cache_json = _serialize_snapshot(snap)
+    _sse_payload_dict = None
+
+
+def ws_overlay_due() -> bool:
+    """Throttle WS overlay serialize+broadcast — avoid 132KB JSON every 75ms poll."""
+    settings = get_settings()
+    min_ms = max(500.0, settings.sse_heartbeat_seconds * 1000)
+    return (time.monotonic() - _last_ws_overlay_mono) * 1000 >= min_ms
 
 
 def _serve_stale_cache(*, reason: str = "") -> MultiSnapshot:
@@ -218,9 +228,11 @@ async def _fetch_news_cached() -> list:
 
 async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
     """WS overlay only — refresh cache + SSE without trader REST work."""
-    global _last_fast_cycle_ms
+    global _last_fast_cycle_ms, _last_ws_overlay_mono
     if not _cache or not _cache.dataReady or not is_ws_active():
         return None
+    if not ws_overlay_due():
+        return _cache
 
     t0 = time.perf_counter()
     settings = get_settings()
@@ -233,6 +245,7 @@ async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnap
     snapshot.snapshots = overlays
     snapshot.autoTrader = get_state()
     _store_cache(snapshot)
+    _last_ws_overlay_mono = time.monotonic()
     _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
 
     if broadcast:
@@ -429,11 +442,20 @@ async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
     )
 
 
-async def broadcast_snapshot(snapshot: MultiSnapshot) -> None:
+async def broadcast_snapshot(snapshot: MultiSnapshot | None = None) -> None:
     """Push snapshot to all SSE subscribers."""
+    global _sse_payload_dict
     if not _sse_queues:
         return
-    payload = snapshot.model_dump(mode="json")
+    snap = snapshot or _cache
+    if snap is not None and snap is _cache and _cache_json:
+        if _sse_payload_dict is None:
+            _sse_payload_dict = orjson.loads(_cache_json)
+        payload = _sse_payload_dict
+    elif snap is not None:
+        payload = snap.model_dump(mode="json")
+    else:
+        return
     dead: list[asyncio.Queue] = []
     for q in list(_sse_queues):
         try:
