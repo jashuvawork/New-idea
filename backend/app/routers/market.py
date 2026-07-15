@@ -61,9 +61,21 @@ def _serialize_snapshot(snap: MultiSnapshot) -> bytes:
 def _update_cache_memory(snap: MultiSnapshot) -> MultiSnapshot:
     """In-memory cache update without JSON serialize — hot tick path."""
     global _cache, _cache_time
-    snap = _attach_ws_tick_age(snap)
+    snap = _finalize_snapshot(_attach_ws_tick_age(snap))
     _cache = snap
     _cache_time = datetime.now(IST)
+    return snap
+
+
+def _finalize_snapshot(snap: MultiSnapshot) -> MultiSnapshot:
+    """Clear stale waitingReason when market data is ready (keeps rate-limit messages)."""
+    if not snap.dataReady:
+        return snap
+    reason = (snap.waitingReason or "").lower()
+    if "cooling down" in reason or "rate limit" in reason or "429" in reason:
+        return snap
+    if snap.waitingReason:
+        return snap.model_copy(update={"waitingReason": None})
     return snap
 
 
@@ -80,7 +92,7 @@ def _attach_ws_tick_age(snap: MultiSnapshot) -> MultiSnapshot:
 
 def _store_cache(snap: MultiSnapshot) -> None:
     global _cache, _cache_time, _cache_json, _sse_payload_dict
-    snap = _attach_ws_tick_age(snap)
+    snap = _finalize_snapshot(_attach_ws_tick_age(snap))
     _cache = snap
     _cache_time = datetime.now(IST)
     _cache_json = _serialize_snapshot(snap)
@@ -90,7 +102,7 @@ def _store_cache(snap: MultiSnapshot) -> None:
 async def _store_cache_async(snap: MultiSnapshot) -> None:
     """Serialize off the event loop — keeps /health responsive under load."""
     global _cache, _cache_time, _cache_json, _sse_payload_dict
-    snap = _attach_ws_tick_age(snap)
+    snap = _finalize_snapshot(_attach_ws_tick_age(snap))
     _cache = snap
     _cache_time = datetime.now(IST)
     _cache_json = await asyncio.to_thread(_serialize_snapshot, snap)
@@ -711,6 +723,14 @@ async def get_snapshots():
 async def get_snapshots_cached():
     """Return pre-serialized cache instantly — zero overlay/serialize on read path."""
     if _cache_json:
+        if _cache and _cache.dataReady and not _cache.waitingReason:
+            try:
+                payload = orjson.loads(_cache_json)
+                if payload.get("dataReady") and payload.get("waitingReason"):
+                    payload["waitingReason"] = None
+                    return Response(content=orjson.dumps(payload), media_type="application/json")
+            except Exception:
+                pass
         return Response(content=_cache_json, media_type="application/json")
     fast = await get_multi_snapshot_fast(overlay_ws=False)
     if fast.snapshots:
