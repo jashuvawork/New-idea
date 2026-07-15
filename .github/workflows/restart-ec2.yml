@@ -1,0 +1,73 @@
+name: Restart EC2 backend
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-south-1
+  EC2_INSTANCE_ID: i-0f3f9e5e67815c21b
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Restart backend container via SSM
+        id: restart
+        run: |
+          set -euo pipefail
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Emergency backend restart" \
+            --parameters 'commands=[
+              "set -euo pipefail",
+              "COMPOSE=/opt/nexusquant/New-idea/docker-compose.prod.yml",
+              "cd /opt/nexusquant/New-idea",
+              "docker compose -f $COMPOSE ps",
+              "docker compose -f $COMPOSE restart backend",
+              "sleep 5",
+              "curl -sf http://127.0.0.1:8000/health"
+            ]' \
+            --query Command.CommandId \
+            --output text)
+          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for restart
+        run: |
+          CMD_ID="${{ steps.restart.outputs.command_id }}"
+          for i in $(seq 1 20); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+              --query Status \
+              --output text 2>/dev/null || echo Pending)
+            echo "Attempt $i: $STATUS"
+            if [ "$STATUS" = "Success" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                --query StandardOutputContent \
+                --output text
+              exit 0
+            fi
+            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                --output json
+              exit 1
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Verify public health
+        run: curl -sf --max-time 30 https://www.jashuvatrade.xyz/health

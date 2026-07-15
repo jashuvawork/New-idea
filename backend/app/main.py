@@ -70,7 +70,7 @@ async def _background_monitor():
                         mark_full_scan_done()
                 elif is_ws_active() and ws_overlay_due():
                     await run_ws_overlay_cycle(broadcast=True)
-                elif not tick_driven:
+                elif not tick_driven and not is_ws_active():
                     await get_multi_snapshot(broadcast=True, force=False)
 
             if (

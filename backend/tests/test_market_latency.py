@@ -171,3 +171,47 @@ def test_ws_overlay_due_throttles_rapid_calls():
     assert market_router.ws_overlay_due() is False
     market_router._last_ws_overlay_mono = 0.0
     assert market_router.ws_overlay_due() is True
+
+
+def test_tick_fast_skips_serialize_when_throttled():
+    import asyncio
+    import time
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from unittest.mock import AsyncMock, patch
+
+    from app.models.schemas import AutoTraderState, MarketPhase, MultiSnapshot, SymbolSnapshot
+
+    IST = ZoneInfo("Asia/Kolkata")
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=50.0,
+    )
+    market_router._store_cache(
+        MultiSnapshot(
+            timestamp=datetime.now(IST),
+            dataReady=True,
+            snapshots={"NIFTY": snap},
+            autoTrader=AutoTraderState(),
+        ),
+    )
+    market_router._last_ws_overlay_mono = time.monotonic()
+
+    async def _run():
+        with patch("app.routers.market.is_ws_active", return_value=True), patch(
+            "app.routers.market.overlay_snapshot_live",
+            return_value={"NIFTY": snap},
+        ), patch("app.routers.market.process_exits_only", new_callable=AsyncMock) as exits, patch.object(
+            market_router, "_store_cache",
+        ) as store:
+            from app.engines.auto_trader import get_state
+
+            exits.return_value = get_state()
+            await market_router.run_tick_fast_cycle()
+            return store
+
+    store = asyncio.run(_run())
+    store.assert_not_called()
