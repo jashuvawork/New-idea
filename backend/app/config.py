@@ -542,6 +542,12 @@ class Settings(BaseSettings):
     all_day_explosion_min_velocity_9s: float = 2.5
     all_day_explosion_chart_bypass_move_pct: float = 50.0
     all_day_explosion_dominant_min_score: float = 40.0
+    # Peak-move bypass — faded vertical rips (velocity cooled, session peak still huge)
+    peak_move_explosion_bypass_enabled: bool = True
+    peak_move_explosion_min_pct: float = 50.0
+    peak_move_explosion_min_tier: str = "ELITE"
+    peak_move_explosion_score_floor: float = 38.0
+    peak_move_explosion_score_boost_per_pct: float = 0.12
 
     runner_trail_keep_ratio: float = 0.38
     runner_micro_giveback_points: float = 4.0

@@ -179,12 +179,18 @@ def _gate_checks(
         gates.append({"gate": "premium_band", "passed": True, "detail": f"₹{prem}"})
 
     # 4 — Explosion score
-    min_score = settings.aggressive_min_explosion_score
-    if daily_move >= settings.all_day_explosion_session_move_min_pct:
-        min_score = min(min_score, settings.all_day_explosion_min_score)
+    from app.engines.explosion_detector import effective_explosion_min_score
+
+    peak_move = float(alert.get("peakMovePct") or 0)
+    min_score = effective_explosion_min_score(
+        tier=str(alert.get("tier") or "WATCH"),
+        peak_move_pct=peak_move,
+        daily_move_pct=daily_move,
+    )
     if score < min_score:
         blockers.append(f"score_{score:.0f}<{min_score:.0f}")
-        gates.append({"gate": "explosion_score", "passed": False, "detail": f"{score:.0f} < {min_score:.0f}", "fix": "Wait for velocity spike"})
+        fix = "Peak-move bypass needs session peak ≥50%" if peak_move < settings.peak_move_explosion_min_pct else "Wait for velocity spike"
+        gates.append({"gate": "explosion_score", "passed": False, "detail": f"{score:.0f} < {min_score:.0f} (peak {peak_move:.0f}%)", "fix": fix})
     else:
         gates.append({"gate": "explosion_score", "passed": True, "detail": f"{score:.0f} ≥ {min_score:.0f}"})
 
