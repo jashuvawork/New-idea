@@ -44,7 +44,8 @@ _last_touch_mono: float = 0.0
 IST = ZoneInfo("Asia/Kolkata")
 
 # Min interval between WS overlay + re-serialize on hot /snapshots/cached path
-_CACHED_TOUCH_MIN_MS = 100
+_CACHED_TOUCH_MIN_MS = 250
+_build_in_progress: bool = False
 
 
 def _serialize_snapshot(snap: MultiSnapshot) -> bytes:
@@ -58,7 +59,33 @@ def _store_cache(snap: MultiSnapshot) -> None:
     _cache_json = _serialize_snapshot(snap)
 
 
-def _touch_cached_snapshot(*, overlay_ws: bool = False, light: bool = False) -> Optional[MultiSnapshot]:
+def _serve_stale_cache(*, reason: str = "") -> MultiSnapshot:
+    """Instant read — never waits on _build_lock or REST rebuild."""
+    now = datetime.now(IST)
+    if _cache and _cache.snapshots:
+        stale = _cache.model_copy(deep=True)
+        stale.timestamp = now
+        if stale.dataReady and reason:
+            stale.waitingReason = reason
+        elif stale.dataReady:
+            stale.waitingReason = None
+        stale.autoTrader = get_state()
+        return stale
+    return MultiSnapshot(
+        timestamp=now,
+        dataReady=False,
+        waitingReason=reason or "Snapshot cache empty",
+        snapshots={},
+        autoTrader=get_state(),
+    )
+
+
+def _touch_cached_snapshot(
+    *,
+    overlay_ws: bool = False,
+    light: bool = False,
+    attach_trader: bool = True,
+) -> Optional[MultiSnapshot]:
     """Refresh timestamp + WS overlay without a full REST rebuild."""
     global _cache
     if not _cache:
@@ -79,7 +106,8 @@ def _touch_cached_snapshot(*, overlay_ws: bool = False, light: bool = False) -> 
                 snap.snapshots,
                 max_age_seconds=settings.tick_overlay_max_age_seconds,
             )
-    snap.autoTrader = get_state()
+    if attach_trader:
+        snap.autoTrader = get_state()
     return snap
 
 
@@ -156,6 +184,8 @@ def latency_stats() -> dict[str, Any]:
         "sseHeartbeatSeconds": settings.sse_heartbeat_seconds,
         "lastFastCycleMs": _last_fast_cycle_ms,
         "lastFullCycleMs": _last_full_cycle_ms,
+        "buildInProgress": _build_in_progress,
+        "buildLockHeld": _build_lock.locked(),
         "entryScanDue": entry_scan_due(),
         "canRunTickFast": can_run_tick_fast(),
     }
@@ -249,7 +279,7 @@ def _enrich_smt_divergence(snapshots: dict) -> None:
             ]
 
 
-async def _build_multi_snapshot() -> MultiSnapshot:
+async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
     global _capital_refresh_at
     settings = get_settings()
     now = datetime.now(IST)
@@ -348,7 +378,10 @@ async def _build_multi_snapshot() -> MultiSnapshot:
 
     refresh_expiry_session(snapshots)
 
-    auto_state = await process(snapshots, news=news, client=client) if data_ready else get_state()
+    if data_ready and run_trader:
+        auto_state = await process(snapshots, news=news, client=client)
+    else:
+        auto_state = get_state()
 
     return MultiSnapshot(
         timestamp=now,
@@ -404,11 +437,23 @@ async def get_multi_snapshot_fast(*, overlay_ws: bool = True) -> MultiSnapshot:
     )
 
 
-async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) -> MultiSnapshot:
+async def get_multi_snapshot(
+    *,
+    broadcast: bool = False,
+    force: bool = False,
+    run_trader: Optional[bool] = None,
+) -> MultiSnapshot:
     """Cached snapshot with single-flight — UI + background monitor share one build."""
-    global _cache, _cache_time, _last_full_cycle_ms
+    global _cache, _cache_time, _last_full_cycle_ms, _build_in_progress
     cache_ttl = _effective_cache_seconds()
     now = datetime.now(IST)
+    trader_pass = entry_scan_due() if run_trader is None else bool(run_trader)
+
+    if _build_in_progress and _cache and _cache.dataReady:
+        stale = _serve_stale_cache(reason="Refresh in progress — serving last good data")
+        if broadcast:
+            await broadcast_snapshot(stale)
+        return stale
 
     if rate_limit_active():
         stale = await _serve_stale_during_cooldown(broadcast=broadcast)
@@ -436,7 +481,22 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
             return snap
 
     t0 = time.perf_counter()
+    if _build_lock.locked() and _cache and _cache.dataReady:
+        stale = _serve_stale_cache(reason="Refresh in progress — serving last good data")
+        if broadcast:
+            await broadcast_snapshot(stale)
+        return stale
+
     async with _build_lock:
+        if _cache and _cache.dataReady and not force:
+            age = (datetime.now(IST) - _cache_time).total_seconds() if _cache_time else 999
+            if age < cache_ttl:
+                _refresh_cached_json(overlay_ws=is_ws_active())
+                snap = _cache
+                if snap and broadcast:
+                    await broadcast_snapshot(snap)
+                return snap
+
         if rate_limit_active():
             stale = await _serve_stale_during_cooldown(broadcast=broadcast)
             if stale:
@@ -461,8 +521,9 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
                 if snap and broadcast:
                     await broadcast_snapshot(snap)
                 return snap
+        _build_in_progress = True
         try:
-            snapshot = await _build_multi_snapshot()
+            snapshot = await _build_multi_snapshot(run_trader=trader_pass)
         except Exception as e:
             err = str(e)
             if _cache and _cache.dataReady and ("cooling down" in err.lower() or "rate limit" in err.lower()):
@@ -483,6 +544,8 @@ async def get_multi_snapshot(*, broadcast: bool = False, force: bool = False) ->
                 stale.waitingReason = f"Stale data — {e}"
                 return stale
             raise
+        finally:
+            _build_in_progress = False
         if not snapshot.dataReady and _cache and _cache.dataReady:
             reason = snapshot.waitingReason or "Data refresh paused"
             logger.warning("Serving stale snapshot — fresh build unavailable: %s", reason)
@@ -508,6 +571,13 @@ async def get_snapshots():
 @router.get("/snapshots/cached")
 async def get_snapshots_cached():
     """Return pre-serialized cache instantly — no overlay/serialize on read path."""
+    if _build_in_progress and _cache_json:
+        return Response(content=_cache_json, media_type="application/json")
+    if _cache_json and not _build_lock.locked():
+        now_mono = time.monotonic()
+        if (now_mono - _last_touch_mono) * 1000 >= _CACHED_TOUCH_MIN_MS:
+            body = _refresh_cached_json(overlay_ws=is_ws_active())
+            return Response(content=body, media_type="application/json")
     if _cache_json:
         return Response(content=_cache_json, media_type="application/json")
     if _cache and _cache.snapshots:
@@ -541,10 +611,10 @@ async def market_stream():
                     )
                     yield f"data: {orjson.dumps(data).decode()}\n\n"
                 except asyncio.TimeoutError:
-                    fast = await get_multi_snapshot_fast(overlay_ws=is_ws_active())
                     if _cache_json:
                         yield f"data: {_cache_json.decode()}\n\n"
                     else:
+                        fast = await get_multi_snapshot_fast(overlay_ws=False)
                         yield f"data: {orjson.dumps(fast.model_dump(mode='json')).decode()}\n\n"
         except asyncio.CancelledError:
             raise

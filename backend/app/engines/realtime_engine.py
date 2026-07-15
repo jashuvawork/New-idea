@@ -49,8 +49,37 @@ from app.services.upstox_ws import is_ws_active
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 
+_constituent_cache: dict[str, tuple[float, Any]] = {}
+
 # Premium history for velocity calc
 _premium_history: dict[str, dict[float, float]] = {}
+
+
+def constituents_due(symbol: str) -> bool:
+    """Throttle heavy constituent REST fetches — reuse cache between snapshot builds."""
+    import time
+
+    settings = get_settings()
+    if not settings.fetch_constituents_in_snapshot:
+        return False
+    sym = symbol.upper()
+    cached = _constituent_cache.get(sym)
+    if not cached:
+        return True
+    fetched_at, _ = cached
+    return (time.monotonic() - fetched_at) >= max(15, settings.fetch_constituents_interval_seconds)
+
+
+def last_constituent_heatmap(symbol: str):
+    cached = _constituent_cache.get(symbol.upper())
+    return cached[1] if cached else None
+
+
+def record_constituent_heatmap(symbol: str, heatmap) -> None:
+    import time
+
+    if heatmap is not None:
+        _constituent_cache[symbol.upper()] = (time.monotonic(), heatmap)
 
 
 def _atm_strike(spot: float, symbol: str) -> float:
@@ -495,15 +524,19 @@ async def build_symbol_snapshot(
 
         option_breadth = build_breadth(chain, spot)
 
-        constituent_hm = None
         from app.services.upstox import rate_limit_active
 
         settings = get_settings()
+        constituent_hm = None
         if settings.fetch_constituents_in_snapshot:
-            if rate_limit_active():
-                constituent_hm = await build_constituent_heatmap(symbol, client, cache_only=True)
+            if constituents_due(symbol):
+                if rate_limit_active():
+                    constituent_hm = await build_constituent_heatmap(symbol, client, cache_only=True)
+                else:
+                    constituent_hm = await build_constituent_heatmap(symbol, client)
+                record_constituent_heatmap(symbol, constituent_hm)
             else:
-                constituent_hm = await build_constituent_heatmap(symbol, client)
+                constituent_hm = last_constituent_heatmap(symbol)
         breadth = resolve_snapshot_breadth(
             option_breadth,
             constituent_hm,
