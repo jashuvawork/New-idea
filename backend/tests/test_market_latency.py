@@ -15,6 +15,8 @@ def _reset_market_cache():
     market_router._cache_json = None
     market_router._build_in_progress = False
     market_router._last_ws_overlay_mono = 0.0
+    market_router._last_exit_eval_mono = 0.0
+    market_router._last_full_rest_mono = 0.0
     market_router._sse_payload_dict = None
     yield
     market_router._cache = None
@@ -22,6 +24,8 @@ def _reset_market_cache():
     market_router._cache_json = None
     market_router._build_in_progress = False
     market_router._last_ws_overlay_mono = 0.0
+    market_router._last_exit_eval_mono = 0.0
+    market_router._last_full_rest_mono = 0.0
     market_router._sse_payload_dict = None
 
 
@@ -205,11 +209,12 @@ def test_tick_fast_skips_serialize_when_throttled():
             "app.routers.market.overlay_snapshot_live",
             return_value={"NIFTY": snap},
         ), patch("app.routers.market.process_exits_only", new_callable=AsyncMock) as exits, patch.object(
-            market_router, "_store_cache",
+            market_router, "_store_cache_async", new_callable=AsyncMock,
         ) as store:
             from app.engines.auto_trader import get_state
 
             exits.return_value = get_state()
+            market_router._last_exit_eval_mono = 0.0
             await market_router.run_tick_fast_cycle()
             return store
 

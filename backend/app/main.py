@@ -23,8 +23,12 @@ async def _background_monitor():
     from app.routers.market import (
         can_run_tick_fast,
         entry_scan_due,
+        full_rest_rebuild_due,
         get_multi_snapshot,
         invalidate_snapshot_cache,
+        mark_full_rest_done,
+        mark_full_scan_done,
+        run_entry_scan_on_cache,
         run_tick_fast_cycle,
         run_ws_overlay_cycle,
         ws_overlay_due,
@@ -55,17 +59,28 @@ async def _background_monitor():
         try:
             if settings.background_market_monitor_enabled:
                 if tick_driven and can_run_tick_fast():
-                    await run_tick_fast_cycle(broadcast=True)
+                    await run_tick_fast_cycle(broadcast=False)
                 elif entry_scan_due():
                     ws = is_ws_active()
                     if tick_driven and not ws:
                         invalidate_snapshot_cache()
                     rest_ok = not rate_limit_active() and not rate_limit_recovery_active()
-                    await get_multi_snapshot(
-                        broadcast=True,
-                        force=False,
-                        run_trader=rest_ok,
-                    )
+                    if ws and full_rest_rebuild_due():
+                        await get_multi_snapshot(
+                            broadcast=True,
+                            force=False,
+                            run_trader=rest_ok,
+                        )
+                        mark_full_rest_done()
+                    elif ws:
+                        await run_entry_scan_on_cache(broadcast=True, run_trader=rest_ok)
+                    else:
+                        await get_multi_snapshot(
+                            broadcast=True,
+                            force=False,
+                            run_trader=rest_ok,
+                        )
+                        mark_full_rest_done()
                     if rest_ok:
                         mark_full_scan_done()
                 elif is_ws_active() and ws_overlay_due():

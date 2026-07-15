@@ -42,12 +42,16 @@ _sse_queues: set[asyncio.Queue] = set()
 _cache_json: Optional[bytes] = None
 _last_touch_mono: float = 0.0
 _last_ws_overlay_mono: float = 0.0
+_last_exit_eval_mono: float = 0.0
+_last_full_rest_mono: float = 0.0
 _sse_payload_dict: Optional[dict[str, Any]] = None
 IST = ZoneInfo("Asia/Kolkata")
 
 # Min interval between WS overlay + re-serialize on hot /snapshots/cached path
 _CACHED_TOUCH_MIN_MS = 250
 _build_in_progress: bool = False
+_EXIT_EVAL_MIN_MS = 200.0
+_FULL_REST_MIN_SECONDS = 45.0
 
 
 def _serialize_snapshot(snap: MultiSnapshot) -> bytes:
@@ -83,11 +87,34 @@ def _store_cache(snap: MultiSnapshot) -> None:
     _sse_payload_dict = None
 
 
+async def _store_cache_async(snap: MultiSnapshot) -> None:
+    """Serialize off the event loop — keeps /health responsive under load."""
+    global _cache, _cache_time, _cache_json, _sse_payload_dict
+    snap = _attach_ws_tick_age(snap)
+    _cache = snap
+    _cache_time = datetime.now(IST)
+    _cache_json = await asyncio.to_thread(_serialize_snapshot, snap)
+    _sse_payload_dict = None
+
+
 def ws_overlay_due() -> bool:
     """Throttle WS overlay serialize+broadcast — avoid 132KB JSON every tick."""
     settings = get_settings()
     min_ms = max(1000.0, settings.sse_heartbeat_seconds * 1000)
     return (time.monotonic() - _last_ws_overlay_mono) * 1000 >= min_ms
+
+
+def exit_eval_due() -> bool:
+    return (time.monotonic() - _last_exit_eval_mono) * 1000 >= _EXIT_EVAL_MIN_MS
+
+
+def full_rest_rebuild_due() -> bool:
+    return (time.monotonic() - _last_full_rest_mono) >= _FULL_REST_MIN_SECONDS
+
+
+def mark_full_rest_done() -> None:
+    global _last_full_rest_mono
+    _last_full_rest_mono = time.monotonic()
 
 
 def _serve_stale_cache(*, reason: str = "") -> MultiSnapshot:
@@ -253,7 +280,7 @@ async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnap
     snapshot.timestamp = datetime.now(IST)
     snapshot.snapshots = overlays
     snapshot.autoTrader = get_state()
-    _store_cache(snapshot)
+    await _store_cache_async(snapshot)
     _last_ws_overlay_mono = time.monotonic()
     _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
 
@@ -262,11 +289,53 @@ async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnap
     return snapshot
 
 
-async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
-    """Tick-fast path — overlay WS LTPs on cache and evaluate exits only."""
+async def run_entry_scan_on_cache(
+    *,
+    broadcast: bool = False,
+    run_trader: bool = True,
+) -> Optional[MultiSnapshot]:
+    """Entry scan on WS-overlaid cache — skip expensive REST chain rebuild when WS is live."""
     global _last_fast_cycle_ms
     if not _cache or not _cache.dataReady:
         return None
+
+    t0 = time.perf_counter()
+    settings = get_settings()
+    overlays = overlay_snapshot_live(
+        _cache.snapshots,
+        max_age_seconds=settings.tick_overlay_max_age_seconds,
+    )
+    news = await _fetch_news_cached()
+    if run_trader:
+        client = UpstoxClient()
+        auto_state = await process(overlays, news=news, client=client)
+    else:
+        auto_state = get_state()
+
+    snapshot = _cache.model_copy(deep=True)
+    snapshot.timestamp = datetime.now(IST)
+    snapshot.snapshots = overlays
+    snapshot.autoTrader = auto_state
+    snapshot.news = news
+    _update_cache_memory(snapshot)
+
+    if ws_overlay_due():
+        await _store_cache_async(snapshot)
+        _last_ws_overlay_mono = time.monotonic()
+        if broadcast:
+            await broadcast_snapshot(snapshot)
+
+    _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
+    return snapshot
+
+
+async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
+    """Tick-fast path — overlay WS LTPs on cache and evaluate exits only."""
+    global _last_fast_cycle_ms, _last_exit_eval_mono
+    if not _cache or not _cache.dataReady:
+        return None
+    if not exit_eval_due():
+        return _cache
 
     t0 = time.perf_counter()
     settings = get_settings()
@@ -282,9 +351,10 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
     snapshot.snapshots = overlays
     snapshot.autoTrader = auto_state
     _update_cache_memory(snapshot)
+    _last_exit_eval_mono = time.monotonic()
 
     if ws_overlay_due():
-        _store_cache(snapshot)
+        await _store_cache_async(snapshot)
         _last_ws_overlay_mono = time.monotonic()
         if broadcast:
             await broadcast_snapshot(snapshot)
@@ -585,7 +655,6 @@ async def get_multi_snapshot(
         if not force and _cache and _cache_time:
             age = (datetime.now(IST) - _cache_time).total_seconds()
             if age < cache_ttl:
-                _refresh_cached_json(overlay_ws=is_ws_active())
                 snap = _cache
                 if snap and broadcast:
                     await broadcast_snapshot(snap)
@@ -593,6 +662,7 @@ async def get_multi_snapshot(
         _build_in_progress = True
         try:
             snapshot = await _build_multi_snapshot(run_trader=trader_pass)
+            mark_full_rest_done()
         except Exception as e:
             err = str(e)
             if _cache and _cache.dataReady and ("cooling down" in err.lower() or "rate limit" in err.lower()):
