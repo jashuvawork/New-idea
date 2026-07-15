@@ -417,13 +417,15 @@ if [ "$ready" -ne 1 ]; then
 fi
 
 # Health watchdog — auto-restart hung backend (every 2 minutes)
-if [ -f "$REPO_DIR/deploy/health-watchdog.sh" ]; then
+if [ -f "$REPO_DIR/deploy/health-watchdog.sh" ] && command -v crontab >/dev/null 2>&1; then
   chmod +x "$REPO_DIR/deploy/health-watchdog.sh"
   CRON_LINE="*/2 * * * * $REPO_DIR/deploy/health-watchdog.sh"
   if ! crontab -l 2>/dev/null | grep -Fq "health-watchdog.sh"; then
     (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
     echo "Installed health watchdog cron (every 2 min)"
   fi
+elif [ -f "$REPO_DIR/deploy/health-watchdog.sh" ]; then
+  echo "WARN: crontab not installed — skip health watchdog cron (install cronie and redeploy)"
 fi
 
 echo ""
