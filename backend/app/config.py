@@ -140,6 +140,7 @@ class Settings(BaseSettings):
     upstox_max_expiry_probes: int = 2
     capital_refresh_seconds: int = 90
     fetch_constituents_in_snapshot: bool = True
+    fetch_constituents_interval_seconds: int = 45
     constituent_stock_breadth_override_enabled: bool = True
     index_pin_put_block_enabled: bool = True
     index_pin_min_stock_breadth_pct: float = 58.0

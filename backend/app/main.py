@@ -56,14 +56,16 @@ async def _background_monitor():
                     await run_tick_fast_cycle(broadcast=True)
                 elif entry_scan_due():
                     ws = is_ws_active()
-                    # Tick-fast exits use WS LTP overlay — don't bust REST cache on every tick wake
                     if tick_driven and not ws:
                         invalidate_snapshot_cache()
                     rest_ok = not rate_limit_active() and not rate_limit_recovery_active()
                     await get_multi_snapshot(
                         broadcast=True,
-                        force=rest_ok and not ws,
+                        force=False,
+                        run_trader=rest_ok,
                     )
+                    if rest_ok:
+                        mark_full_scan_done()
                 elif not tick_driven:
                     await get_multi_snapshot(broadcast=True, force=False)
 
@@ -77,7 +79,9 @@ async def _background_monitor():
                 now_mono = time.monotonic()
                 if now_mono - last_composer_mono >= settings.composer_monitor_interval_seconds:
                     try:
-                        multi = await get_multi_snapshot(broadcast=False, force=False)
+                        from app.routers.market import get_multi_snapshot_fast
+
+                        multi = await get_multi_snapshot_fast(overlay_ws=True)
                         if multi and multi.snapshots:
                             await run_monitor_cycle(multi.snapshots)
                             last_composer_mono = now_mono
@@ -94,7 +98,9 @@ async def _background_monitor():
                 now_mono = time.monotonic()
                 if now_mono - last_analysis_mono >= settings.ai_analysis_monitor_interval_seconds:
                     try:
-                        multi = await get_multi_snapshot(broadcast=False, force=False)
+                        from app.routers.market import get_multi_snapshot_fast
+
+                        multi = await get_multi_snapshot_fast(overlay_ws=True)
                         if multi and multi.snapshots:
                             await run_analysis_cycle(multi.snapshots, source="interval")
                             last_analysis_mono = now_mono
@@ -114,7 +120,9 @@ async def _background_monitor():
                     target = next_trading_day()
                     if last_eod_playbook_date != target:
                         try:
-                            multi = await get_multi_snapshot(broadcast=False, force=False)
+                            from app.routers.market import get_multi_snapshot_fast
+
+                            multi = await get_multi_snapshot_fast(overlay_ws=False)
                             if multi and multi.snapshots:
                                 await run_eod_playbook_cycle(
                                     multi.snapshots, get_state(), force=False,
