@@ -392,11 +392,11 @@ echo "Compose: $COMPOSE_PATH"
 
 if [ "${SKIP_BUILD:-0}" = "1" ]; then
   echo "Skipping build (SKIP_BUILD=1)"
-  docker compose -f "$COMPOSE_PATH" up -d --remove-orphans
+  docker compose -f "$COMPOSE_PATH" up -d --remove-orphans --force-recreate backend
 else
   echo "Building backend image ..."
   docker compose -f "$COMPOSE_PATH" build --pull backend
-  docker compose -f "$COMPOSE_PATH" up -d --remove-orphans
+  docker compose -f "$COMPOSE_PATH" up -d --remove-orphans --force-recreate backend
 fi
 
 echo "Waiting for API health ..."

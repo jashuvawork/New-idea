@@ -54,6 +54,15 @@ def _serialize_snapshot(snap: MultiSnapshot) -> bytes:
     return orjson.dumps(snap.model_dump(mode="json"))
 
 
+def _update_cache_memory(snap: MultiSnapshot) -> MultiSnapshot:
+    """In-memory cache update without JSON serialize — hot tick path."""
+    global _cache, _cache_time
+    snap = _attach_ws_tick_age(snap)
+    _cache = snap
+    _cache_time = datetime.now(IST)
+    return snap
+
+
 def _attach_ws_tick_age(snap: MultiSnapshot) -> MultiSnapshot:
     if not is_ws_active():
         return snap
@@ -75,9 +84,9 @@ def _store_cache(snap: MultiSnapshot) -> None:
 
 
 def ws_overlay_due() -> bool:
-    """Throttle WS overlay serialize+broadcast — avoid 132KB JSON every 75ms poll."""
+    """Throttle WS overlay serialize+broadcast — avoid 132KB JSON every tick."""
     settings = get_settings()
-    min_ms = max(500.0, settings.sse_heartbeat_seconds * 1000)
+    min_ms = max(1000.0, settings.sse_heartbeat_seconds * 1000)
     return (time.monotonic() - _last_ws_overlay_mono) * 1000 >= min_ms
 
 
@@ -255,7 +264,7 @@ async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnap
 
 async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
     """Tick-fast path — overlay WS LTPs on cache and evaluate exits only."""
-    global _cache, _cache_time, _last_fast_cycle_ms
+    global _last_fast_cycle_ms
     if not _cache or not _cache.dataReady:
         return None
 
@@ -272,11 +281,15 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
     snapshot.timestamp = datetime.now(IST)
     snapshot.snapshots = overlays
     snapshot.autoTrader = auto_state
-    _store_cache(snapshot)
-    _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
+    _update_cache_memory(snapshot)
 
-    if broadcast:
-        await broadcast_snapshot(snapshot)
+    if ws_overlay_due():
+        _store_cache(snapshot)
+        _last_ws_overlay_mono = time.monotonic()
+        if broadcast:
+            await broadcast_snapshot(snapshot)
+
+    _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
     return snapshot
 
 
