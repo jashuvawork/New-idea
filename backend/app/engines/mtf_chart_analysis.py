@@ -260,6 +260,7 @@ def validate_mtf_scalp(
     *,
     trade_score: float = 0.0,
     premium_led_bypass: bool = False,
+    scalp_mode: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Pre-trade MTF gate for scalping:
@@ -288,16 +289,32 @@ def validate_mtf_scalp(
                     return False, f"exec_mtf_premium_{req}_fading", meta
         return True, "ok", meta
 
-    if trade_score >= settings.chart_override_min_score:
-        return True, "ok", mtf_summary(index_mtf, side)
-
     side_val = side.value
-    meta = {
+    meta: dict[str, Any] = {
         "index": mtf_summary(index_mtf, side),
         "passed": True,
     }
     if premium_mtf:
         meta["premium"] = mtf_summary(premium_mtf, side)
+
+    def _anchor_opposes(r: TimeframeChartRead | None, label: str) -> tuple[bool, str]:
+        if not r:
+            return False, ""
+        if side_val == "CALL" and r.direction == "BEARISH":
+            return True, f"exec_mtf_{label}_opposes_call"
+        if side_val == "PUT" and r.direction == "BULLISH":
+            return True, f"exec_mtf_{label}_opposes_put"
+        return False, ""
+
+    # Live 5m anchor — never skippable by rank score on scalp entries
+    anchor_tf = index_mtf.get("5m")
+    blocked, reason = _anchor_opposes(anchor_tf, "5m")
+    if blocked:
+        meta["passed"] = False
+        return False, reason, meta
+
+    if trade_score >= settings.chart_override_min_score and not scalp_mode:
+        return True, "ok", meta
 
     def _opposes(r: TimeframeChartRead) -> bool:
         if side_val == "CALL":

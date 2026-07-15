@@ -467,6 +467,7 @@ async def _open_from_candidate(
     ok, risk_reason = _risk_engine.check_new_entry(
         state, symbol, candidate.side, lots, fill_premium, lot_mult,
         strategy_type=candidate.strategy_type,
+        strike=candidate.strike,
     )
     if not ok:
         return False, risk_reason
@@ -514,6 +515,7 @@ async def _open_from_candidate(
                 breadth_aligned_bypass=breadth_bypass,
                 premium_led_bypass=premium_bypass,
                 expiry_explosion_bypass=expiry_chart_bypass,
+                scalp_mode=(candidate.mode or "").lower() in {"scalp", "quick_sideways", "slow_bounce"},
             )
             if blocked:
                 return False, f"exec_{chart_reason}"

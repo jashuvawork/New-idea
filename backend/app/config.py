@@ -237,6 +237,7 @@ class Settings(BaseSettings):
     instrument_micro_win_cooldown_seconds: int = 180
     instrument_win_cooldown_seconds: int = 90
     instrument_max_entries_per_day: int = 3
+    block_duplicate_open_leg: bool = True
     counter_breadth_min_score: int = 70
 
     # Controlled trading — pre-trade backtest + fewer entries
@@ -405,6 +406,8 @@ class Settings(BaseSettings):
     chart_min_trend_strength: float = 25.0
     chart_min_momentum_pct: float = 0.04
     chart_override_min_score: float = 75
+    # Live 5m direction hard block — not skippable by high rank score (fixes scalp mis-entries)
+    chart_live_direction_hard_block: bool = True
     chart_alignment_rank_bonus: float = 10.0
     spot_chart_timeframe_minutes: int = 5
     spot_chart_1m_bars: int = 300  # 1m history for 5m resample + RSI/MACD warmup

@@ -426,6 +426,41 @@ def side_aligned_with_chart(side: Side | str, chart: Optional[SpotChart]) -> boo
     return direction == "BEARISH"
 
 
+def live_direction_blocks_side(
+    side: Side | str,
+    chart: Optional[SpotChart],
+    *,
+    breadth_aligned_bypass: bool = False,
+    premium_led_bypass: bool = False,
+    expiry_explosion_bypass: bool = False,
+    scalp_mode: bool = False,
+) -> tuple[bool, str]:
+    """
+  Hard live 5m direction gate — blocks CALL on BEARISH / PUT on BULLISH regardless of
+  trendStrength or rank score. Scalp modes only allow expiry-explosion bypass.
+    """
+    settings = get_settings()
+    if not settings.chart_alignment_enabled or not chart:
+        return False, "ok"
+    if not getattr(settings, "chart_live_direction_hard_block", True):
+        return False, "ok"
+
+    side_val = side.value if isinstance(side, Side) else str(side).upper()
+    bypass = expiry_explosion_bypass
+    if not scalp_mode:
+        bypass = bypass or breadth_aligned_bypass or premium_led_bypass
+
+    if side_val == "CALL" and chart.direction == "BEARISH":
+        if bypass:
+            return False, "ok"
+        return True, "chart_live_bearish_no_calls"
+    if side_val == "PUT" and chart.direction == "BULLISH":
+        if bypass:
+            return False, "ok"
+        return True, "chart_live_bullish_no_puts"
+    return False, "ok"
+
+
 def chart_blocks_side(
     side: Side | str,
     chart: Optional[SpotChart],
@@ -435,6 +470,7 @@ def chart_blocks_side(
     breadth_aligned_bypass: bool = False,
     premium_led_bypass: bool = False,
     expiry_explosion_bypass: bool = False,
+    scalp_mode: bool = False,
 ) -> tuple[bool, str]:
     settings = get_settings()
     if not settings.chart_alignment_enabled or not chart:
@@ -444,6 +480,17 @@ def chart_blocks_side(
     min_strength = settings.chart_min_trend_strength
     min_mom = settings.chart_min_momentum_pct
     override = settings.chart_override_min_score
+
+    live_blocked, live_reason = live_direction_blocks_side(
+        side_val,
+        chart,
+        breadth_aligned_bypass=breadth_aligned_bypass,
+        premium_led_bypass=premium_led_bypass,
+        expiry_explosion_bypass=expiry_explosion_bypass,
+        scalp_mode=scalp_mode,
+    )
+    if live_blocked:
+        return True, live_reason
 
     # Hard direction conflict — breadth-aligned / premium-led / expiry explosion bypass.
     if side_val == "CALL" and chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
@@ -482,6 +529,8 @@ def chart_blocks_side(
 HARD_CHART_BLOCK_REASONS = frozenset({
     "chart_bearish_no_calls",
     "chart_bullish_no_puts",
+    "chart_live_bearish_no_calls",
+    "chart_live_bullish_no_puts",
 })
 
 

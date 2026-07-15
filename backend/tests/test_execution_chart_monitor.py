@@ -51,6 +51,7 @@ def _settings():
     s.chart_min_trend_strength = 25.0
     s.chart_min_momentum_pct = 0.04
     s.chart_override_min_score = 75
+    s.chart_live_direction_hard_block = True
     return s
 
 
@@ -66,6 +67,20 @@ def test_validate_execution_blocks_call_on_bearish_index():
     ok, reason, _ = validate_execution_charts(Side.CALL, chart, trade_score=60)
     assert not ok
     assert reason.startswith("exec_chart_")
+
+
+def test_validate_execution_blocks_scalp_call_on_weak_bearish_with_elite_score():
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=-0.116,
+        momentum15Pct=-0.154,
+        trendStrength=9.9,
+    )
+    ok, reason, _ = validate_execution_charts(
+        Side.CALL, chart, trade_score=122.45, mode="scalp",
+    )
+    assert not ok
+    assert reason == "exec_chart_live_bearish_no_calls"
 
 
 def test_validate_execution_blocks_fading_premium():
