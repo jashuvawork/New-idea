@@ -421,6 +421,42 @@ def scan_chain_explosions(
     return events
 
 
+def scan_snapshot_explosions(
+    snap: Any,
+    *,
+    expiry_day: bool = False,
+) -> list[ExplosionEvent]:
+    """Rescan explosions from WS-overlaid heatmap — runs between full REST rebuilds."""
+    if not snap or not getattr(snap, "heatmap", None) or not float(getattr(snap, "spot", 0) or 0):
+        return []
+    atm = float(getattr(snap, "atmStrike", None) or snap.spot)
+    chain: list[dict[str, Any]] = []
+    for row in snap.heatmap:
+        chain.append({
+            "strike_price": row.strike,
+            "strike": row.strike,
+            "call_options": {
+                "ltp": row.callLtp,
+                "last_price": row.callLtp,
+                "volume": int(getattr(row, "callOi", 0) or 0),
+            },
+            "put_options": {
+                "ltp": row.putLtp,
+                "last_price": row.putLtp,
+                "volume": int(getattr(row, "putOi", 0) or 0),
+            },
+        })
+    return scan_chain_explosions(
+        snap.symbol, chain, float(snap.spot), atm, expiry_day=expiry_day,
+    )
+
+
+def refresh_snapshot_explosion_alerts(snap: Any, *, expiry_day: bool = False) -> None:
+    """Update explosionAlerts on a cached snapshot using fresh WS LTPs."""
+    events = scan_snapshot_explosions(snap, expiry_day=expiry_day)
+    snap.explosionAlerts = [event_to_dict(e, snap) for e in events[:15]]
+
+
 def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, Any]:
     from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
     from app.engines.morning_premium_capture import (

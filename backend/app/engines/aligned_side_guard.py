@@ -149,6 +149,18 @@ def chart_mtf_breadth_bypass_active(
     return False, ""
 
 
+def _live_chart_supports_put(snap: Optional[SymbolSnapshot]) -> bool:
+    """Live index dump — OI breadth can lag; allow PE when 5m chart is bearish."""
+    if not snap or not snap.spotChart:
+        return False
+    chart = snap.spotChart
+    if str(chart.direction or "").upper() != "BEARISH":
+        return False
+    mom = float(chart.momentum5Pct or 0)
+    trend = float(chart.trendStrength or 0)
+    return mom <= -0.06 or trend >= 15.0
+
+
 def breadth_hard_blocks_side(
     side: Side | str,
     breadth_bias: str,
@@ -185,6 +197,8 @@ def breadth_hard_blocks_side(
         return False, "ok"
     side_v = _side_val(side)
     if bias == "BULLISH" and side_v == "PUT":
+        if _live_chart_supports_put(resolved_snap):
+            return False, "ok"
         return True, "hard_block_put_vs_bullish_breadth"
     if bias == "BEARISH" and side_v == "CALL":
         return True, "hard_block_call_vs_bearish_breadth"

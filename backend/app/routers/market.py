@@ -324,6 +324,15 @@ async def run_entry_scan_on_cache(
         _cache.snapshots,
         max_age_seconds=settings.tick_overlay_max_age_seconds,
     )
+    from app.engines.expiry_day_guards import _today_str
+    from app.engines.explosion_detector import refresh_snapshot_explosion_alerts
+
+    today = _today_str()
+    for snap in overlays.values():
+        if not snap.dataAvailable:
+            continue
+        expiry_day = bool(snap.optionExpiry and str(snap.optionExpiry)[:10] == today)
+        refresh_snapshot_explosion_alerts(snap, expiry_day=expiry_day)
     news = await _fetch_news_cached()
     if run_trader:
         client = UpstoxClient()
