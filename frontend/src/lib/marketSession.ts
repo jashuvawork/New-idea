@@ -28,12 +28,18 @@ export function deriveMarketSession(data: MultiSnapshot | null | undefined): Mar
   const phase = resolveSessionPhase(phases);
   const marketClosed = phase === 'CLOSED';
 
-  const dataPauseReason =
-    data?.waitingReason && !marketClosed
-      ? data.waitingReason
-      : data && !data.dataReady && !marketClosed
-        ? (data.waitingReason ?? 'Refreshing market data…')
-        : null;
+  const reason = data?.waitingReason?.trim() ?? '';
+  let dataPauseReason: string | null = null;
+  if (!marketClosed && data) {
+    if (!data.dataReady) {
+      dataPauseReason = reason || 'Refreshing market data…';
+    } else if (/cooling down|rate limit|429|not authenticated/i.test(reason)) {
+      dataPauseReason = reason;
+    } else if (/showing last good data|refresh in progress/i.test(reason)) {
+      dataPauseReason = reason;
+    }
+    // dataReady + no blocking reason => live (do not show "Data paused")
+  }
 
   return { phase, marketClosed, dataPauseReason };
 }
@@ -46,7 +52,7 @@ export function connectionStatusLabel(
 ): string {
   if (session.marketClosed) return 'Market closed';
   if (session.dataPauseReason) {
-    if (/showing last good data/i.test(session.dataPauseReason)) {
+    if (/showing last good data|refresh in progress/i.test(session.dataPauseReason)) {
       return 'Live (cached)';
     }
     if (/cooling down|rate limit|429/i.test(session.dataPauseReason)) {
