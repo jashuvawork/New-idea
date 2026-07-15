@@ -234,7 +234,7 @@ export function TomorrowPlaybookPanel({
         {expiry?.expirySession ? (
           <>
             <WindowChip label="Expiry AM" active={Boolean(expiry.morningWindow)} />
-            <WindowChip label="Expiry PM block" active={Boolean(expiry.eveningBlock)} />
+            <WindowChip label="Expiry PM block" active={Boolean(expiry.eveningBlockActive)} />
           </>
         ) : null}
         {morningSurge ? (

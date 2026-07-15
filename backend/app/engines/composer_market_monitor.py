@@ -179,9 +179,7 @@ def generate_rule_brief(context: dict[str, Any]) -> ComposerBrief:
     if expiry.get("eveningBlockActive"):
         stand_down = True
         risks.append("expiry_evening_theta_gamma")
-        actions.append("Avoid new entries after 14:00 on expiry day only")
-    elif expiry.get("eveningBlock") and not expiry.get("expirySession"):
-        actions.append("Note: past 14:00 IST but NOT expiry today — eveningBlock is time-only, not a block")
+        actions.append("Avoid new entries after 15:00 on expiry day only")
 
     if expiry.get("worstDay"):
         risks.extend(expiry.get("worstDayReasons") or ["worst_expiry_day"])

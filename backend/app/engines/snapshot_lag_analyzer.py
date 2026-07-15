@@ -27,12 +27,6 @@ IST = ZoneInfo("Asia/Kolkata")
 def _misleading_flags(chop: dict[str, Any], expiry: dict[str, Any]) -> list[dict[str, str]]:
     """Dashboard labels that confuse operators."""
     notes: list[dict[str, str]] = []
-    if expiry.get("eveningBlock") and not expiry.get("eveningBlockActive"):
-        notes.append({
-            "field": "expiryGuards.eveningBlock",
-            "issue": "Shows true after 14:00 IST even when expiry is NOT today",
-            "useInstead": "expiryGuards.eveningBlockActive (only blocks when expirySession=true)",
-        })
     if expiry.get("expirySession") and not expiry.get("entriesAllowed"):
         notes.append({
             "field": "expiryGuards.entriesAllowed",
