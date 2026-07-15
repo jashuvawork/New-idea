@@ -101,6 +101,53 @@ def _effective_session_move(open_move: float, peak_move: float) -> float:
     return max(open_move, peak_move * 0.65)
 
 
+def peak_move_tier_ok(tier: str) -> bool:
+    from app.config import get_settings
+
+    settings = get_settings()
+    min_tier = str(getattr(settings, "peak_move_explosion_min_tier", "ELITE") or "ELITE").upper()
+    return _TIER_RANK.get(str(tier or "").upper(), 0) >= _TIER_RANK.get(min_tier, 4)
+
+
+def apply_peak_move_score_boost(score: float, peak_move: float, tier: str) -> float:
+    """Boost composite score when session peak rip was large but velocity cooled."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not getattr(settings, "peak_move_explosion_bypass_enabled", True):
+        return score
+    if peak_move < float(getattr(settings, "peak_move_explosion_min_pct", 50.0) or 50.0):
+        return score
+    if not peak_move_tier_ok(tier):
+        return score
+    floor = float(getattr(settings, "peak_move_explosion_score_floor", 38.0) or 38.0)
+    per_pct = float(getattr(settings, "peak_move_explosion_score_boost_per_pct", 0.12) or 0.12)
+    boosted = max(floor, peak_move * per_pct)
+    return max(score, min(100.0, boosted))
+
+
+def effective_explosion_min_score(
+    *,
+    tier: str,
+    peak_move_pct: float = 0.0,
+    daily_move_pct: float = 0.0,
+) -> float:
+    """Lower min score when a material session peak rip qualifies for bypass."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    base = float(settings.aggressive_min_explosion_score)
+    if daily_move_pct >= settings.all_day_explosion_session_move_min_pct:
+        base = min(base, float(settings.all_day_explosion_min_score))
+    if not getattr(settings, "peak_move_explosion_bypass_enabled", True):
+        return base
+    if peak_move_pct < float(getattr(settings, "peak_move_explosion_min_pct", 50.0) or 50.0):
+        return base
+    if not peak_move_tier_ok(tier):
+        return base
+    return min(base, float(getattr(settings, "peak_move_explosion_score_floor", 38.0) or 38.0))
+
+
 @dataclass
 class ExplosionEvent:
     symbol: str
@@ -332,6 +379,12 @@ def scan_chain_explosions(
                 v3_build = min(v3_build, 1.8)
                 v3_explode = min(v3_explode, 2.5)
                 v9_explode = min(v9_explode, 3.5)
+            peak_min = float(getattr(settings, "peak_move_explosion_min_pct", 50.0) or 50.0)
+            if peak_move >= peak_min:
+                if peak_move >= 80:
+                    tier = "ELITE" if _TIER_RANK.get(tier, 0) < _TIER_RANK["ELITE"] else tier
+                elif _TIER_RANK.get(tier, 0) < _TIER_RANK["EXPLODING"]:
+                    tier = "EXPLODING"
             if v3 >= v3_build or v9 >= v9_build:
                 tier = "BUILDING"
             if v3 >= v3_explode or v9 >= v9_explode or (v3 >= 2.0 and vol_surge >= 1.8):
@@ -391,6 +444,7 @@ def scan_chain_explosions(
                     dist_steps * float(getattr(settings, "explosion_otm_depth_penalty_per_step", 3.0)),
                 )
             score = min(100, max(0, score + atm_bonus - otm_penalty))
+            score = apply_peak_move_score_boost(score, peak_move, tier)
 
             reason_parts = []
             if v3 >= 2:

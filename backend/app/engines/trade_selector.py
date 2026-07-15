@@ -154,6 +154,8 @@ def _explosion_candidates(
     state: AutoTraderState,
     settings,
 ) -> list[EntryCandidate]:
+    from app.engines.explosion_detector import ExplosionEvent, effective_explosion_min_score
+
     out: list[EntryCandidate] = []
     for alert in snap.explosionAlerts or []:
         if not alert.get("tradeable"):
@@ -168,16 +170,18 @@ def _explosion_candidates(
                 continue
         score_val = float(alert.get("explosionScore", 0))
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
-        min_explosion_score = settings.aggressive_min_explosion_score
-        if daily_move >= settings.all_day_explosion_session_move_min_pct:
-            min_explosion_score = min(min_explosion_score, settings.all_day_explosion_min_score)
+        peak_move = float(alert.get("peakMovePct") or 0)
+        tier_str = str(alert.get("tier") or "WATCH")
+        min_explosion_score = effective_explosion_min_score(
+            tier=tier_str,
+            peak_move_pct=peak_move,
+            daily_move_pct=daily_move,
+        )
         if score_val < min_explosion_score:
             continue
         # Explosion score is primary quality — don't block on low symbol TQS alone
         if snap.tradeQualityScore < 25 and score_val < settings.aggressive_min_explosion_score + 10:
             continue
-
-        from app.engines.explosion_detector import ExplosionEvent
 
         event = ExplosionEvent(
             symbol=symbol,
@@ -192,6 +196,7 @@ def _explosion_candidates(
             tier=alert.get("tier", "WATCH"),
             reason=alert.get("reason", ""),
             daily_move_pct=daily_move,
+            peak_move_pct=peak_move,
         )
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
@@ -821,6 +826,8 @@ def diagnose_missed_entries(
     state: AutoTraderState,
 ) -> list[dict[str, Any]]:
     """Surface near-miss signals when no entry is taken — helps debug zero-trade sessions."""
+    from app.engines.explosion_detector import effective_explosion_min_score
+
     settings = get_settings()
     notes: list[dict[str, Any]] = []
 
@@ -834,9 +841,13 @@ def diagnose_missed_entries(
             score = float(alert.get("explosionScore", 0))
             prem = alert.get("premium")
             daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
-            min_score = settings.aggressive_min_explosion_score
-            if daily_move >= settings.all_day_explosion_session_move_min_pct:
-                min_score = min(min_score, settings.all_day_explosion_min_score)
+            peak_move = float(alert.get("peakMovePct") or 0)
+            tier_str = str(alert.get("tier") or "WATCH")
+            min_score = effective_explosion_min_score(
+                tier=tier_str,
+                peak_move_pct=peak_move,
+                daily_move_pct=daily_move,
+            )
             blockers: list[str] = []
             if not premium_in_band(prem, mode="explosion"):
                 blockers.append("premium_out_of_band")
