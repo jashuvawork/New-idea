@@ -3,7 +3,6 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import orjson
 import pytest
 
 from app.routers import market as market_router
@@ -53,7 +52,7 @@ def test_serve_stale_cache_when_build_in_progress():
     market_router._build_in_progress = True
     stale = market_router._serve_stale_cache(reason="Refresh in progress")
     assert stale.dataReady is True
-    assert "Refresh in progress" in (stale.waitingReason or "")
+    assert stale.waitingReason is None
 
 
 def test_build_in_progress_flag_serves_stale():
@@ -223,8 +222,7 @@ def test_tick_fast_skips_serialize_when_throttled():
     store.assert_not_called()
 
 
-def test_sync_cache_json_meta_updates_timestamp():
-    import time
+def test_serve_stale_cache_omits_refresh_reason_when_ready():
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
@@ -238,20 +236,11 @@ def test_sync_cache_json_meta_updates_timestamp():
         dataAvailable=True,
         tradeQualityScore=50.0,
     )
-    multi = MultiSnapshot(
+    market_router._cache = MultiSnapshot(
         timestamp=datetime.now(IST),
         dataReady=True,
         snapshots={"NIFTY": snap},
         autoTrader=AutoTraderState(),
-        wsTickAgeMs=42,
     )
-    market_router._store_cache(multi)
-    old_ts = orjson.loads(market_router._cache_json)["timestamp"]
-
-    time.sleep(0.01)
-    market_router._last_json_meta_sync_mono = 0.0
-    newer = multi.model_copy(update={"timestamp": datetime.now(IST), "wsTickAgeMs": 17})
-    market_router._sync_cache_json_meta(newer)
-    payload = orjson.loads(market_router._cache_json)
-    assert payload["wsTickAgeMs"] == 17
-    assert payload["timestamp"] != old_ts
+    stale = market_router._serve_stale_cache(reason="Refresh in progress — serving last good data")
+    assert stale.waitingReason is None

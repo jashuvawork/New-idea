@@ -54,6 +54,7 @@ _build_in_progress: bool = False
 _EXIT_EVAL_MIN_MS = 200.0
 _FULL_REST_MIN_SECONDS = 45.0
 _JSON_META_SYNC_MS = 400.0
+_WS_OVERLAY_MIN_MS = 1000.0
 
 
 def _serialize_snapshot(snap: MultiSnapshot) -> bytes:
@@ -66,30 +67,7 @@ def _update_cache_memory(snap: MultiSnapshot) -> MultiSnapshot:
     snap = _finalize_snapshot(_attach_ws_tick_age(snap))
     _cache = snap
     _cache_time = datetime.now(IST)
-    _sync_cache_json_meta(snap)
     return snap
-
-
-def _sync_cache_json_meta(snap: MultiSnapshot) -> None:
-    """Patch timestamp + wsTickAgeMs into cached JSON without full rebuild (~2/s)."""
-    global _cache_json, _sse_payload_dict, _last_json_meta_sync_mono
-    if not _cache_json:
-        return
-    now_mono = time.monotonic()
-    if (now_mono - _last_json_meta_sync_mono) * 1000 < _JSON_META_SYNC_MS:
-        return
-    _last_json_meta_sync_mono = now_mono
-    try:
-        payload = orjson.loads(_cache_json)
-        payload["timestamp"] = snap.timestamp.isoformat()
-        if snap.wsTickAgeMs is not None:
-            payload["wsTickAgeMs"] = snap.wsTickAgeMs
-        if snap.dataReady:
-            payload["waitingReason"] = None
-        _cache_json = orjson.dumps(payload)
-        _sse_payload_dict = None
-    except Exception:
-        pass
 
 
 def _finalize_snapshot(snap: MultiSnapshot) -> MultiSnapshot:
@@ -135,9 +113,9 @@ async def _store_cache_async(snap: MultiSnapshot) -> None:
 
 
 def ws_overlay_due() -> bool:
-    """Throttle WS overlay serialize+broadcast — target ≤1s UI data age."""
+    """Throttle WS overlay serialize+broadcast — balance freshness vs event-loop load."""
     settings = get_settings()
-    min_ms = max(500.0, settings.sse_heartbeat_seconds * 1000)
+    min_ms = max(_WS_OVERLAY_MIN_MS, settings.sse_heartbeat_seconds * 1000)
     return (time.monotonic() - _last_ws_overlay_mono) * 1000 >= min_ms
 
 
@@ -161,7 +139,11 @@ def _serve_stale_cache(*, reason: str = "") -> MultiSnapshot:
         stale = _cache.model_copy(deep=True)
         stale.timestamp = now
         if stale.dataReady and reason:
-            stale.waitingReason = reason
+            low = reason.lower()
+            if "refresh in progress" in low:
+                stale.waitingReason = None
+            else:
+                stale.waitingReason = reason
         elif stale.dataReady:
             stale.waitingReason = None
         stale.autoTrader = get_state()

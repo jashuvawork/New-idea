@@ -35,10 +35,10 @@ export function deriveMarketSession(data: MultiSnapshot | null | undefined): Mar
       dataPauseReason = reason || 'Refreshing market data…';
     } else if (/cooling down|rate limit|429|not authenticated/i.test(reason)) {
       dataPauseReason = reason;
-    } else if (/showing last good data|refresh in progress/i.test(reason)) {
+    } else if (/showing last good data/i.test(reason)) {
       dataPauseReason = reason;
     }
-    // dataReady + no blocking reason => live (do not show "Data paused")
+    // refresh in progress + dataReady => still live, not paused
   }
 
   return { phase, marketClosed, dataPauseReason };
@@ -51,8 +51,10 @@ export function connectionStatusLabel(
   dataReady?: boolean,
 ): string {
   if (session.marketClosed) return 'Market closed';
+  if (quality === 'offline') return 'Offline';
+  if (quality === 'slow' && session.dataPauseReason) return 'Reconnecting';
   if (session.dataPauseReason) {
-    if (/showing last good data|refresh in progress/i.test(session.dataPauseReason)) {
+    if (/showing last good data/i.test(session.dataPauseReason)) {
       return 'Live (cached)';
     }
     if (/cooling down|rate limit|429/i.test(session.dataPauseReason)) {

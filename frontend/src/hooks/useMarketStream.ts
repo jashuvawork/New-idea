@@ -100,6 +100,7 @@ function applySnapshot(
   if (dataChanged) {
     lastSignature.current = sig;
     setData(json);
+    hasDataRef.current = true;
   }
 
   const isSse = streamMode === 'sse';
@@ -198,6 +199,7 @@ export function useMarketStream() {
   const sseFailed = useRef(false);
   const lastSseApplyAt = useRef(0);
   const pollAbortRef = useRef<AbortController | null>(null);
+  const hasDataRef = useRef(false);
 
   const fetchSnapshot = useCallback(async (streamMode: StreamMetrics['streamMode'] = 'poll') => {
     pollAbortRef.current?.abort();
@@ -231,16 +233,28 @@ export function useMarketStream() {
       }
     }
     const elapsed = Math.round(performance.now() - started);
-    setMetrics((prev) => ({
-      ...prev,
-      lastLatencyMs: elapsed,
-      connectionQuality: 'offline',
-      streamMode: streamMode === 'sse' ? 'sse' : 'poll',
-      stalenessMs: lastSuccessAt.current
-        ? Date.now() - lastSuccessAt.current.getTime()
-        : prev.stalenessMs,
-    }));
-    setError('Connection failed');
+    const stale = lastSuccessAt.current
+      ? Date.now() - lastSuccessAt.current.getTime()
+      : 0;
+    if (hasDataRef.current) {
+      setMetrics((prev) => ({
+        ...prev,
+        lastLatencyMs: elapsed,
+        connectionQuality: stale > 15_000 ? 'offline' : stale > 5_000 ? 'slow' : prev.connectionQuality,
+        streamMode: streamMode === 'sse' ? 'sse' : 'poll',
+        stalenessMs: stale || prev.stalenessMs,
+      }));
+      setError(null);
+    } else {
+      setMetrics((prev) => ({
+        ...prev,
+        lastLatencyMs: elapsed,
+        connectionQuality: 'offline',
+        streamMode: streamMode === 'sse' ? 'sse' : 'poll',
+        stalenessMs: prev.stalenessMs,
+      }));
+      setError('Cannot reach server');
+    }
     setLoading(false);
   }, []);
 

@@ -238,6 +238,12 @@ export default function App() {
 
         {loading && !data ? <WaitingState reason="Connecting to server..." showConnect={false} /> : null}
 
+        {error && data ? (
+          <div className="rounded-lg border border-nexus-yellow/30 bg-nexus-yellow/5 px-3 py-2 text-[11px] text-nexus-yellow">
+            Server reconnecting — showing last cached data. Some panels may be stale.
+          </div>
+        ) : null}
+
         {error && !data ? (
           <div className="text-center py-16 rounded-xl border border-nexus-red/30 bg-nexus-red/5 shadow-panel">
             <p className="text-nexus-red font-bold text-lg">Cannot reach server</p>
