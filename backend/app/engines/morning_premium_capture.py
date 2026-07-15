@@ -126,6 +126,10 @@ def _market_opposes_side(
     min_strength = float(settings.chart_min_trend_strength or 25.0)
 
     if side_v == "PUT":
+        if direction == "BEARISH":
+            mom = float(chart.momentum5Pct or 0) if chart else 0.0
+            if trend >= min_strength or mom <= -0.06:
+                return False
         if bias == "BULLISH":
             return True
         if direction == "BULLISH" and trend >= min_strength:
