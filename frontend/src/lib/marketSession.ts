@@ -64,7 +64,7 @@ export function connectionStatusLabel(
   }
   if (session.phase === 'PREMARKET') return 'Premarket';
   if (session.phase === 'POST_MARKET') return 'Post-market';
-  if (streamMode === 'sse' && quality !== 'offline' && quality !== 'slow') {
+  if (streamMode === 'sse' && quality !== 'slow') {
     return 'Live';
   }
   if (dataReady && quality === 'good') {
