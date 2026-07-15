@@ -3,6 +3,7 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import orjson
 import pytest
 
 from app.routers import market as market_router
@@ -220,3 +221,37 @@ def test_tick_fast_skips_serialize_when_throttled():
 
     store = asyncio.run(_run())
     store.assert_not_called()
+
+
+def test_sync_cache_json_meta_updates_timestamp():
+    import time
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.models.schemas import AutoTraderState, MarketPhase, MultiSnapshot, SymbolSnapshot
+
+    IST = ZoneInfo("Asia/Kolkata")
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=50.0,
+    )
+    multi = MultiSnapshot(
+        timestamp=datetime.now(IST),
+        dataReady=True,
+        snapshots={"NIFTY": snap},
+        autoTrader=AutoTraderState(),
+        wsTickAgeMs=42,
+    )
+    market_router._store_cache(multi)
+    old_ts = orjson.loads(market_router._cache_json)["timestamp"]
+
+    time.sleep(0.01)
+    market_router._last_json_meta_sync_mono = 0.0
+    newer = multi.model_copy(update={"timestamp": datetime.now(IST), "wsTickAgeMs": 17})
+    market_router._sync_cache_json_meta(newer)
+    payload = orjson.loads(market_router._cache_json)
+    assert payload["wsTickAgeMs"] == 17
+    assert payload["timestamp"] != old_ts

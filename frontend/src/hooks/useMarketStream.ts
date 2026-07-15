@@ -13,7 +13,7 @@ const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
 const UI_TICK_MS = Math.max(POLL_MS, 200);
 const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 50), 25);
 const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
-const SSE_STALE_POLL_MS = Number(import.meta.env.VITE_SSE_STALE_POLL_MS || 3000);
+const SSE_STALE_POLL_MS = Number(import.meta.env.VITE_SSE_STALE_POLL_MS || 1000);
 const SNAPSHOT_URL = `${API_BASE}/api/market/snapshots/cached`;
 const SNAPSHOT_FALLBACK_URL = 'https://api.jashuvatrade.xyz/api/market/snapshots/cached';
 
@@ -32,7 +32,7 @@ function sseConnectionQuality(
   if (!dataReady && dataAgeMs > 30_000) return 'offline';
   if (dataAgeMs > 10_000) return 'offline';
   if (dataAgeMs > 3_000) return 'slow';
-  if (dataAgeMs > 800) return 'good';
+  if (dataAgeMs > 1_000) return 'good';
   return 'excellent';
 }
 
@@ -150,6 +150,43 @@ function applySnapshot(
   setError(null);
 }
 
+function applySseFreshness(
+  json: MultiSnapshot,
+  pollIntervalMs: number,
+  setMetrics: React.Dispatch<React.SetStateAction<StreamMetrics>>,
+) {
+  const now = new Date();
+  const snapTs = json.timestamp ? new Date(json.timestamp).getTime() : now.getTime();
+  const snapshotAgeMs = Math.max(0, now.getTime() - snapTs);
+  const tickAgeMs = typeof json.wsTickAgeMs === 'number' && json.wsTickAgeMs >= 0
+    ? json.wsTickAgeMs
+    : null;
+  const dataAgeMs = tickAgeMs != null && tickAgeMs < 5000 ? tickAgeMs : snapshotAgeMs;
+  const latency = sseDisplayLatencyMs(dataAgeMs, pollIntervalMs);
+  const quality = sseConnectionQuality(dataAgeMs, Boolean(json.dataReady));
+  setMetrics((prev) => {
+    const staleBucket = Math.floor(dataAgeMs / 1000);
+    const prevBucket = Math.floor(prev.stalenessMs / 1000);
+    if (
+      prev.lastLatencyMs === latency
+      && prev.connectionQuality === quality
+      && staleBucket === prevBucket
+      && prev.streamMode === 'sse'
+    ) {
+      return prev;
+    }
+    return {
+      ...prev,
+      lastLatencyMs: latency,
+      avgLatencyMs: latency,
+      lastUpdatedAt: now,
+      stalenessMs: dataAgeMs,
+      connectionQuality: quality,
+      streamMode: 'sse',
+    };
+  });
+}
+
 export function useMarketStream() {
   const [data, setData] = useState<MultiSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -217,7 +254,7 @@ export function useMarketStream() {
         const prevBucket = Math.floor(prev.stalenessMs / 1000);
         const quality =
           prev.streamMode === 'sse'
-            ? (stale > 10_000 ? 'offline' : stale > 3_000 ? 'slow' : stale > 800 ? 'good' : 'excellent')
+            ? (stale > 10_000 ? 'offline' : stale > 3_000 ? 'slow' : stale > 1_000 ? 'good' : 'excellent')
             : prev.connectionQuality;
         const latency = prev.streamMode === 'sse'
           ? sseDisplayLatencyMs(stale, prev.pollIntervalMs)
@@ -286,19 +323,20 @@ export function useMarketStream() {
       es.onmessage = (ev) => {
         const now = performance.now();
         lastSuccessAt.current = new Date();
+        let json: MultiSnapshot;
         try {
-          const json = JSON.parse(ev.data) as MultiSnapshot;
-          const tickAge = typeof json.wsTickAgeMs === 'number' ? json.wsTickAgeMs : 0;
-          if (now - lastSseApplyAt.current < SSE_MIN_INTERVAL_MS && tickAge < 2000) {
-            return;
-          }
+          json = JSON.parse(ev.data) as MultiSnapshot;
         } catch {
+          return;
+        }
+        const tickAge = typeof json.wsTickAgeMs === 'number' ? json.wsTickAgeMs : 0;
+        if (now - lastSseApplyAt.current < SSE_MIN_INTERVAL_MS && tickAge < 2000) {
+          applySseFreshness(json, POLL_MS, setMetrics);
           return;
         }
         lastSseApplyAt.current = now;
         const started = performance.now();
         try {
-          const json = JSON.parse(ev.data) as MultiSnapshot;
           applySnapshot(
             json,
             started,
