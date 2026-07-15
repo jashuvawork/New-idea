@@ -416,6 +416,16 @@ if [ "$ready" -ne 1 ]; then
   exit 1
 fi
 
+# Health watchdog — auto-restart hung backend (every 2 minutes)
+if [ -f "$REPO_DIR/deploy/health-watchdog.sh" ]; then
+  chmod +x "$REPO_DIR/deploy/health-watchdog.sh"
+  CRON_LINE="*/2 * * * * $REPO_DIR/deploy/health-watchdog.sh"
+  if ! crontab -l 2>/dev/null | grep -Fq "health-watchdog.sh"; then
+    (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+    echo "Installed health watchdog cron (every 2 min)"
+  fi
+fi
+
 echo ""
 echo "=== Health ==="
 curl -sf "$HEALTH_URL" | python3 -m json.tool 2>/dev/null || curl -sf "$HEALTH_URL"
