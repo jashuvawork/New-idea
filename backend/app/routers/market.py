@@ -52,8 +52,20 @@ def _serialize_snapshot(snap: MultiSnapshot) -> bytes:
     return orjson.dumps(snap.model_dump(mode="json"))
 
 
+def _attach_ws_tick_age(snap: MultiSnapshot) -> MultiSnapshot:
+    if not is_ws_active():
+        return snap
+    from app.services.tick_store import status as tick_status
+
+    age = tick_status().get("lastTickAgeMs")
+    if age is None:
+        return snap
+    return snap.model_copy(update={"wsTickAgeMs": int(age)})
+
+
 def _store_cache(snap: MultiSnapshot) -> None:
     global _cache, _cache_time, _cache_json
+    snap = _attach_ws_tick_age(snap)
     _cache = snap
     _cache_time = datetime.now(IST)
     _cache_json = _serialize_snapshot(snap)
@@ -202,6 +214,30 @@ async def _fetch_news_cached() -> list:
     _news_cache = await fetch_market_news()
     _news_cache_at = now
     return _news_cache
+
+
+async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
+    """WS overlay only — refresh cache + SSE without trader REST work."""
+    global _last_fast_cycle_ms
+    if not _cache or not _cache.dataReady or not is_ws_active():
+        return None
+
+    t0 = time.perf_counter()
+    settings = get_settings()
+    overlays = overlay_snapshot_live(
+        _cache.snapshots,
+        max_age_seconds=settings.tick_overlay_max_age_seconds,
+    )
+    snapshot = _cache.model_copy(deep=True)
+    snapshot.timestamp = datetime.now(IST)
+    snapshot.snapshots = overlays
+    snapshot.autoTrader = get_state()
+    _store_cache(snapshot)
+    _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    if broadcast:
+        await broadcast_snapshot(snapshot)
+    return snapshot
 
 
 async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
@@ -474,7 +510,6 @@ async def get_multi_snapshot(
     if not force and _cache and _cache_time:
         age = (now - _cache_time).total_seconds()
         if age < cache_ttl:
-            _refresh_cached_json(overlay_ws=is_ws_active())
             snap = _cache
             if snap and broadcast:
                 await broadcast_snapshot(snap)
@@ -491,7 +526,6 @@ async def get_multi_snapshot(
         if _cache and _cache.dataReady and not force:
             age = (datetime.now(IST) - _cache_time).total_seconds() if _cache_time else 999
             if age < cache_ttl:
-                _refresh_cached_json(overlay_ws=is_ws_active())
                 snap = _cache
                 if snap and broadcast:
                     await broadcast_snapshot(snap)
@@ -570,24 +604,19 @@ async def get_snapshots():
 
 @router.get("/snapshots/cached")
 async def get_snapshots_cached():
-    """Return pre-serialized cache instantly — no overlay/serialize on read path."""
-    if _build_in_progress and _cache_json:
-        return Response(content=_cache_json, media_type="application/json")
-    if _cache_json and not _build_lock.locked():
-        now_mono = time.monotonic()
-        if (now_mono - _last_touch_mono) * 1000 >= _CACHED_TOUCH_MIN_MS:
-            body = _refresh_cached_json(overlay_ws=is_ws_active())
-            return Response(content=body, media_type="application/json")
+    """Return pre-serialized cache instantly — zero overlay/serialize on read path."""
     if _cache_json:
         return Response(content=_cache_json, media_type="application/json")
-    if _cache and _cache.snapshots:
-        body = _refresh_cached_json(overlay_ws=is_ws_active())
-        return Response(content=body, media_type="application/json")
     fast = await get_multi_snapshot_fast(overlay_ws=False)
     if fast.snapshots:
         _store_cache(fast)
         return Response(content=_cache_json or _serialize_snapshot(fast), media_type="application/json")
     return await get_multi_snapshot()
+
+
+@router.get("/latency")
+async def get_market_latency():
+    return latency_stats()
 
 
 @router.get("/stream")

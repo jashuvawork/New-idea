@@ -354,6 +354,7 @@ class MultiSnapshot(BaseModel):
     timestamp: datetime
     dataReady: bool = False
     waitingReason: Optional[str] = None
+    wsTickAgeMs: Optional[int] = None
     snapshots: dict[str, SymbolSnapshot] = {}
     autoTrader: AutoTraderState = Field(default_factory=AutoTraderState)
     news: list[dict[str, Any]] = []

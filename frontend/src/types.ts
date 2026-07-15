@@ -13,6 +13,7 @@ export interface MultiSnapshot {
   timestamp: string;
   dataReady: boolean;
   waitingReason?: string;
+  wsTickAgeMs?: number;
   snapshots: Record<string, SymbolSnapshot>;
   autoTrader: AutoTraderState;
   news: NewsItem[];
