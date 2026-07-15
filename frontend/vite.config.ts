@@ -7,7 +7,7 @@ export default defineConfig({
     'import.meta.env.VITE_SSE_ENABLED': JSON.stringify(process.env.VITE_SSE_ENABLED ?? 'true'),
     'import.meta.env.VITE_POLL_MS': JSON.stringify(process.env.VITE_POLL_MS ?? '500'),
     'import.meta.env.VITE_SSE_THROTTLE_MS': JSON.stringify(process.env.VITE_SSE_THROTTLE_MS ?? '50'),
-    'import.meta.env.VITE_STREAM_BASE_URL': JSON.stringify(process.env.VITE_STREAM_BASE_URL ?? 'http://65.0.136.146:8000'),
+    'import.meta.env.VITE_STREAM_BASE_URL': JSON.stringify(process.env.VITE_STREAM_BASE_URL ?? ''),
   },
   server: {
     port: 5173,
