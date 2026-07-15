@@ -16,6 +16,7 @@ from app.engines.spot_direction import (
     build_spot_chart,
     chart_blocks_side,
     chart_summary_dict,
+    live_direction_blocks_side,
     premium_blocks_entry,
     pro_index_quote_context,
     side_aligned_with_chart,
@@ -165,6 +166,10 @@ def _strip_mtf_reads(mtf: dict[str, Any]) -> dict[str, Any]:
     return mtf or {}
 
 
+def _is_scalp_mode(mode: str) -> bool:
+    return (mode or "").lower() in {"scalp", "quick_sideways", "slow_bounce"}
+
+
 def validate_execution_charts(
     side: Side,
     index_chart: SpotChart,
@@ -177,15 +182,29 @@ def validate_execution_charts(
     premium_led_bypass: bool = False,
     expiry_explosion_bypass: bool = False,
     explosion_event: Any = None,
+    mode: str = "",
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
+    scalp_mode = _is_scalp_mode(mode)
+
+    blocked, reason = live_direction_blocks_side(
+        side,
+        index_chart,
+        breadth_aligned_bypass=breadth_aligned_bypass,
+        premium_led_bypass=premium_led_bypass,
+        expiry_explosion_bypass=expiry_explosion_bypass,
+        scalp_mode=scalp_mode,
+    )
+    if blocked:
+        return False, f"exec_{reason}", mtf_meta
 
     blocked, reason = chart_blocks_side(
         side, index_chart, trade_score=trade_score,
         breadth_aligned_bypass=breadth_aligned_bypass,
         premium_led_bypass=premium_led_bypass,
         expiry_explosion_bypass=expiry_explosion_bypass,
+        scalp_mode=scalp_mode,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -203,6 +222,7 @@ def validate_execution_charts(
             premium_mtf_reads,
             trade_score=trade_score,
             premium_led_bypass=premium_led_bypass,
+            scalp_mode=scalp_mode,
         )
         if not passed:
             return False, reason, mtf_meta
@@ -234,6 +254,7 @@ async def monitor_trade_chart_before_execution(
     from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_event
     from app.engines.morning_premium_capture import premium_led_bypass_for_snap
 
+    scalp_mode = _is_scalp_mode(mode)
     breadth_bypass = expiry_pm_itm_chart_bypass_allowed(side, snap, mode=mode)
     premium_bypass = premium_led_bypass_for_snap(
         side, snap, explosion_event=explosion_event,
@@ -284,9 +305,28 @@ async def monitor_trade_chart_before_execution(
         premium_led_bypass=premium_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
         explosion_event=explosion_event,
+        mode=mode,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
+
+    delta = meta.get("snapshotDelta") or {}
+    if delta.get("directionChanged"):
+        live_dir = str(delta.get("liveDirection") or "").upper()
+        side_val = side.value
+        flip_blocks = (
+            (side_val == "CALL" and live_dir == "BEARISH")
+            or (side_val == "PUT" and live_dir == "BULLISH")
+        )
+        if flip_blocks and not (
+            expiry_chart_bypass
+            or (premium_bypass and not scalp_mode)
+            or (breadth_bypass and not scalp_mode)
+        ):
+            meta["enabled"] = True
+            meta["passed"] = False
+            meta["blockReason"] = "exec_snapshot_direction_flip"
+            return False, "exec_snapshot_direction_flip", meta
 
     meta["enabled"] = True
     meta["passed"] = passed

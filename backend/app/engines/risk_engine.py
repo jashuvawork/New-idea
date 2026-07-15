@@ -43,6 +43,7 @@ class RiskEngine:
         premium: float,
         lot_multiplier: int = 25,
         strategy_type: StrategyType = StrategyType.SCALP,
+        strike: float = 0.0,
     ) -> tuple[bool, str]:
         settings = get_settings()
         cap = get_capital_snapshot()
@@ -87,6 +88,16 @@ class RiskEngine:
         potential_loss = profile_stop_points(lots, lot_multiplier, stop_pts)
         if potential_loss > max_loss:
             return False, "per_trade_risk_exceeded"
+
+        if not is_swing and settings.block_duplicate_open_leg and strike > 0:
+            for t in open_trades:
+                if (
+                    t.strategyType != StrategyType.SWING
+                    and t.symbol.upper() == symbol.upper()
+                    and t.side == side
+                    and abs(float(t.strike) - float(strike)) < 0.01
+                ):
+                    return False, "same_leg_already_open"
 
         if not is_swing:
             explosive_open = sum(

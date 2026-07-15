@@ -41,6 +41,7 @@ def _settings():
     s.chart_min_trend_strength = 25.0
     s.chart_min_momentum_pct = 0.04
     s.chart_override_min_score = 75
+    s.chart_live_direction_hard_block = True
     s.chart_alignment_rank_bonus = 10.0
     s.aggressive_lot_sizing = True
     s.aggressive_min_tqs = 50
@@ -118,7 +119,12 @@ def test_chart_blocks_call_on_declining_index(mock_settings):
     )
     blocked, reason = chart_blocks_side(Side.CALL, chart, trade_score=60)
     assert blocked
-    assert reason in ("chart_bearish_no_calls", "chart_declining_no_calls", "chart_below_poc_no_calls")
+    assert reason in (
+        "chart_bearish_no_calls",
+        "chart_live_bearish_no_calls",
+        "chart_declining_no_calls",
+        "chart_below_poc_no_calls",
+    )
 
 
 @patch("app.engines.spot_direction.get_settings")
@@ -134,7 +140,12 @@ def test_chart_blocks_put_on_rallying_index(mock_settings):
     )
     blocked, reason = chart_blocks_side(Side.PUT, chart, trade_score=60)
     assert blocked
-    assert reason in ("chart_bullish_no_puts", "chart_rallying_no_puts", "chart_above_poc_no_puts")
+    assert reason in (
+        "chart_bullish_no_puts",
+        "chart_live_bullish_no_puts",
+        "chart_rallying_no_puts",
+        "chart_above_poc_no_puts",
+    )
 
 
 @patch("app.engines.spot_direction.get_settings")
@@ -183,7 +194,25 @@ def test_high_score_cannot_override_bearish_chart_direction(mock_settings):
     )
     blocked, reason = chart_blocks_side(Side.CALL, chart, trade_score=91)
     assert blocked
-    assert reason == "chart_bearish_no_calls"
+    assert reason in ("chart_bearish_no_calls", "chart_live_bearish_no_calls")
+
+
+@patch("app.engines.spot_direction.get_settings")
+def test_elite_score_cannot_override_weak_bearish_live_chart(mock_settings):
+    """Jul 15 12:38 regression — trendStrength 9.9 + score 122 slipped through."""
+    mock_settings.return_value = _settings()
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=-0.116,
+        momentum15Pct=-0.154,
+        trendStrength=9.9,
+        emaBias="NEUTRAL",
+        macdBias="BULLISH",
+        recommendedSide="PUT",
+    )
+    blocked, reason = chart_blocks_side(Side.CALL, chart, trade_score=122.45, scalp_mode=True)
+    assert blocked
+    assert reason == "chart_live_bearish_no_calls"
 
 
 @patch("app.engines.spot_direction.get_settings")
@@ -275,7 +304,7 @@ def test_alignment_override_cannot_bypass_hard_chart_direction(mock_dir, mock_se
         chart=chart,
     )
     assert not ok
-    assert reason == "chart_bearish_no_calls"
+    assert reason in ("chart_bearish_no_calls", "chart_live_bearish_no_calls")
 
 
 def test_explosion_blocks_call_on_bearish_chart():
