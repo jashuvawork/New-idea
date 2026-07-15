@@ -543,15 +543,19 @@ def expiry_guard_summary(
 
     near = near_expiry_symbols(snapshots)
     pre_only = [s for s in near if s not in symbols]
+    past_evening = in_expiry_evening_block()
+    has_expiry_today = bool(symbols)
+    evening_active = past_evening and has_expiry_today
     return {
         "enabled": settings.expiry_day_guards_enabled,
-        "expirySession": bool(symbols),
+        "expirySession": has_expiry_today,
         "expirySymbols": symbols,
         "nearExpirySymbols": near,
         "preExpirySymbols": pre_only,
-        "eveningBlockActive": in_expiry_evening_block() and bool(symbols),
+        "eveningBlockActive": evening_active,
         "morningWindow": in_expiry_morning_window(),
-        "eveningBlock": in_expiry_evening_block(),
+        "eveningBlock": evening_active,
+        "pastEveningBlockTime": past_evening,
         "worstDay": is_worst,
         "worstDayScore": worst_score,
         "worstDayReasons": worst_reasons,

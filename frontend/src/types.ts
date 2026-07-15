@@ -346,6 +346,7 @@ export interface ExpiryGuardsSummary {
   morningWindow?: boolean;
   eveningBlock?: boolean;
   eveningBlockActive?: boolean;
+  pastEveningBlockTime?: boolean;
   worstDay?: boolean;
   worstDayScore?: number;
   worstDayReasons?: string[];

@@ -300,8 +300,8 @@ export function DayModePanel({
           tone="bad"
         />
         <Flag
-          label="Past 14:00"
-          active={Boolean(g.expiryGuards?.eveningBlock && !g.expiryGuards?.eveningBlockActive)}
+          label="Past 15:00"
+          active={Boolean(g.expiryGuards?.pastEveningBlockTime && !g.expiryGuards?.eveningBlockActive)}
           tone="neutral"
         />
         <Flag label="Dual CE/PE" active={Boolean(g.expiryGuards?.dualScalpMode)} tone="neutral" />

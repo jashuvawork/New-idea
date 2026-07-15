@@ -50,13 +50,14 @@ def _snap() -> SymbolSnapshot:
 
 @patch("app.engines.snapshot_lag_analyzer.find_best_entry", return_value=None)
 @patch("app.engines.morning_premium_capture.in_all_day_explosion_window", return_value=True)
-def test_lag_detects_misleading_evening_block(mock_all_day, mock_best):
+def test_lag_evening_block_not_misleading_on_non_expiry_afternoon(mock_all_day, mock_best):
     state = AutoTraderState()
     snap = _snap()
     with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-08"):
-        report = analyze_snapshot_lag({"NIFTY": snap}, state)
+        with patch("app.engines.expiry_day_guards._minutes_now", return_value=15 * 60 + 30):
+            report = analyze_snapshot_lag({"NIFTY": snap}, state)
     misleading = [m["field"] for m in report.get("misleadingLabels", [])]
-    assert "expiryGuards.eveningBlock" in misleading or report.get("lagScore", 0) >= 0
+    assert "expiryGuards.eveningBlock" not in misleading
     assert report.get("windows", {}).get("allDayExplosion") is True
     gaps = report.get("explosionGaps") or []
     assert any(g.get("side") == "PUT" for g in gaps)
