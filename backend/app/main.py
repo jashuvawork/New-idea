@@ -26,6 +26,7 @@ async def _background_monitor():
         get_multi_snapshot,
         invalidate_snapshot_cache,
         run_tick_fast_cycle,
+        run_ws_overlay_cycle,
     )
     from app.services.tick_store import set_tick_wake_event
     from app.services.upstox_ws import is_ws_active
@@ -66,6 +67,8 @@ async def _background_monitor():
                     )
                     if rest_ok:
                         mark_full_scan_done()
+                elif is_ws_active():
+                    await run_ws_overlay_cycle(broadcast=True)
                 elif not tick_driven:
                     await get_multi_snapshot(broadcast=True, force=False)
 

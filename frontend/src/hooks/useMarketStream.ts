@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DeploymentReadiness, DeploymentStatus, MultiSnapshot, PerformanceMilestone, StreamMetrics, TradeHistoryResponse, TradeLogResponse, WeeklyDashboard } from '../types';
 import { snapshotSignature } from './snapshotSignature';
 
-// Production: always use same-origin /api (Vercel rewrites → EC2 backend)
-// Dev: vite proxy handles /api → localhost:8000
+// Production: same-origin /api (Vercel rewrites → EC2). SSE streams direct to EC2 to skip proxy buffering.
 const API_BASE = import.meta.env.DEV
   ? ''
   : (import.meta.env.VITE_API_URL || '');
+const STREAM_BASE = import.meta.env.DEV
+  ? ''
+  : (import.meta.env.VITE_STREAM_BASE_URL || 'http://65.0.136.146:8000');
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
 const UI_TICK_MS = Math.max(POLL_MS, 200);
 const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 50), 25);
@@ -83,7 +85,11 @@ function applySnapshot(
   lastSuccessAt.current = now;
   const elapsed = Math.round(performance.now() - started);
   const snapTs = json.timestamp ? new Date(json.timestamp).getTime() : now.getTime();
-  const dataAgeMs = Math.max(0, now.getTime() - snapTs);
+  const snapshotAgeMs = Math.max(0, now.getTime() - snapTs);
+  const tickAgeMs = typeof json.wsTickAgeMs === 'number' && json.wsTickAgeMs >= 0
+    ? json.wsTickAgeMs
+    : null;
+  const dataAgeMs = tickAgeMs != null && tickAgeMs < 5000 ? tickAgeMs : snapshotAgeMs;
 
   if (streamMode !== 'sse') {
     latencyHistory.current = [...latencyHistory.current.slice(-9), elapsed];
@@ -258,7 +264,7 @@ export function useMarketStream() {
     const connectSse = () => {
       if (disposed) return;
       stopPollFallback();
-      const url = `${API_BASE}/api/market/stream`;
+      const url = `${STREAM_BASE}/api/market/stream`;
       es = new EventSource(url);
       let opened = false;
 

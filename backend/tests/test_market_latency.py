@@ -88,3 +88,73 @@ def test_constituents_due_respects_interval():
         assert constituents_due("NIFTY") is True
         record_constituent_heatmap("NIFTY", {"rows": []})
         assert constituents_due("NIFTY") is False
+
+
+def test_cached_endpoint_returns_bytes_without_refresh():
+    import asyncio
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.models.schemas import AutoTraderState, MarketPhase, MultiSnapshot, SymbolSnapshot
+
+    IST = ZoneInfo("Asia/Kolkata")
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=50.0,
+    )
+    multi = MultiSnapshot(
+        timestamp=datetime.now(IST),
+        dataReady=True,
+        snapshots={"NIFTY": snap},
+        autoTrader=AutoTraderState(),
+    )
+    market_router._store_cache(multi)
+    sentinel = market_router._cache_json
+
+    async def _run():
+        with patch.object(market_router, "_refresh_cached_json") as refresh:
+            resp = await market_router.get_snapshots_cached()
+            refresh.assert_not_called()
+        return resp
+
+    resp = asyncio.run(_run())
+    assert resp.body == sentinel
+
+
+def test_ws_overlay_cycle_updates_cache_without_trader():
+    import asyncio
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.models.schemas import AutoTraderState, MarketPhase, MultiSnapshot, SymbolSnapshot
+
+    IST = ZoneInfo("Asia/Kolkata")
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=50.0,
+    )
+    market_router._store_cache(
+        MultiSnapshot(
+            timestamp=datetime.now(IST),
+            dataReady=True,
+            snapshots={"NIFTY": snap},
+            autoTrader=AutoTraderState(),
+        ),
+    )
+
+    async def _run():
+        with patch("app.routers.market.is_ws_active", return_value=True), patch(
+            "app.routers.market.overlay_snapshot_live",
+            return_value={"NIFTY": snap},
+        ):
+            return await market_router.run_ws_overlay_cycle()
+
+    out = asyncio.run(_run())
+    assert out is not None
+    assert market_router._cache_json is not None
