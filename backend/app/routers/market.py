@@ -599,9 +599,12 @@ async def market_stream():
         queue: asyncio.Queue = asyncio.Queue(maxsize=4)
         _sse_queues.add(queue)
         try:
-            snapshot = await get_multi_snapshot()
-            payload = orjson.dumps(snapshot.model_dump(mode="json")).decode()
-            yield f"data: {payload}\n\n"
+            # Instant first frame — EventSource times out if full rebuild blocks the handshake
+            if _cache_json:
+                yield f"data: {_cache_json.decode()}\n\n"
+            else:
+                fast = await get_multi_snapshot_fast(overlay_ws=is_ws_active())
+                yield f"data: {orjson.dumps(fast.model_dump(mode='json')).decode()}\n\n"
 
             while True:
                 try:

@@ -10,10 +10,9 @@ const API_BASE = import.meta.env.DEV
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
 const UI_TICK_MS = Math.max(POLL_MS, 200);
 const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 50), 25);
-// Production: SSE works via Vercel rewrite → EC2; enable unless explicitly disabled.
-const SSE_ENABLED = import.meta.env.DEV
-  ? import.meta.env.VITE_SSE_ENABLED !== 'false'
-  : import.meta.env.VITE_SSE_ENABLED !== 'false';
+// SSE-first — only disable via VITE_SSE_ENABLED=false at build time
+const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
+const SSE_STALE_POLL_MS = Number(import.meta.env.VITE_SSE_STALE_POLL_MS || 8000);
 const SNAPSHOT_URL = `${API_BASE}/api/market/snapshots/cached`;
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
@@ -219,7 +218,7 @@ export function useMarketStream() {
         }
         return { ...prev, stalenessMs: stale, connectionQuality: quality, lastLatencyMs: latency };
       });
-      if (SSE_ENABLED && stale > 2500) {
+      if (SSE_ENABLED && stale > SSE_STALE_POLL_MS) {
         void fetchSnapshot();
       }
     }, UI_TICK_MS);
@@ -243,7 +242,10 @@ export function useMarketStream() {
       if (pollId) return;
       fetchSnapshot();
       pollId = setInterval(fetchSnapshot, POLL_MS);
-      setMetrics((prev) => ({ ...prev, streamMode: 'poll' }));
+      setMetrics((prev) => ({
+        ...prev,
+        streamMode: prev.streamMode === 'sse' ? 'sse' : 'poll',
+      }));
     };
 
     const stopPollFallback = () => {
@@ -304,16 +306,17 @@ export function useMarketStream() {
         es?.close();
         es = null;
         if (!disposed) {
+          // Keep SSE as primary — poll only supplements stale data, not replace stream label
           startPollFallback();
           retryId = setTimeout(() => {
             if (!disposed) connectSse();
           }, retryMs);
-          retryMs = Math.min(retryMs * 2, 30_000);
+          retryMs = Math.min(retryMs * 2, 15_000);
         }
         if (!opened) {
           setMetrics((prev) => ({
             ...prev,
-            streamMode: 'poll',
+            streamMode: 'sse',
             connectionQuality: 'slow',
           }));
         }
