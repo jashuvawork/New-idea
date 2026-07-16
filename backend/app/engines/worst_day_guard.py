@@ -272,13 +272,16 @@ def worst_day_allows_candidate(
         return False, f"worst_day_breakout_tqs_below_{settings.worst_day_breakout_min_symbol_tqs:.0f}", meta
 
     event = getattr(candidate, "explosion_event", None)
-    vel3 = float(getattr(event, "velocity_3s", 0) or 0) if event else 0.0
-    vel9 = float(getattr(event, "velocity_9s", 0) or 0) if event else 0.0
+    from app.engines.explosion_detector import effective_breakout_velocities
+
+    vel3, vel9, vel_meta = effective_breakout_velocities(event)
+    meta.update(vel_meta)
     meta["velocity3s"] = vel3
     meta["velocity9s"] = vel9
 
     min_vel = settings.worst_day_breakout_min_velocity_3s
-    if tier != "ELITE" and vel3 < min_vel and vel9 < min_vel * 1.2:
+    tier_upper = tier.upper()
+    if tier_upper != "ELITE" and vel3 < min_vel and vel9 < min_vel * 1.2:
         return False, f"worst_day_breakout_velocity_below_{min_vel}", meta
 
     chart = snap.spotChart

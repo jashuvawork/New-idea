@@ -373,6 +373,16 @@ async def _open_from_candidate(
     elif candidate.mode in ("quick_sideways", "slow_bounce"):
         profile = get_quick_sideways_profile(candidate.premium)
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
+    faded_rip_meta: dict[str, Any] = {}
+    if candidate.mode == "explosion" and candidate.explosion_event:
+        from app.engines.explosion_entry_guards import (
+            detect_faded_vertical_rip,
+            faded_rip_stop_multiplier,
+        )
+
+        faded, faded_rip_meta = detect_faded_vertical_rip(candidate.explosion_event, snap)
+        if faded:
+            stop_pts *= faded_rip_stop_multiplier()
 
     signal_premium = candidate.premium
     is_live = settings.enable_live_trading and settings.auto_trading_enabled
@@ -405,6 +415,10 @@ async def _open_from_candidate(
         from app.engines.explosion_profit import cap_explosion_lots
 
         lots = cap_explosion_lots(lots, fill_premium)
+        from app.engines.explosion_entry_guards import cap_faded_rip_lots
+
+        if faded_rip_meta:
+            lots = cap_faded_rip_lots(lots)
     elif candidate.mode == "worst_day_itm_fade":
         lots = cap_worst_day_itm_fade_lots(lots)
     elif candidate.mode in ("quick_sideways", "slow_bounce"):
@@ -610,6 +624,7 @@ async def _open_from_candidate(
             "explosionScore": ev.explosion_score,
             "afternoonCapture": afternoon,
             "dailyMovePct": float(ev.daily_move_pct or 0),
+            "peakMovePct": float(ev.peak_move_pct or 0),
             "ictBreakout": ict.active,
             "ictPattern": ict.pattern,
             "ictScore": round(ict.score, 1),
@@ -623,6 +638,8 @@ async def _open_from_candidate(
             ctx_extra["ictCaptureMeta"] = ict_meta
         if is_extreme_explosion_all_in_bypass(candidate=candidate):
             ctx_extra.update(extreme_all_in_meta(candidate=candidate))
+        if faded_rip_meta:
+            ctx_extra.update(faded_rip_meta)
     elif candidate.mode == "scalp" and candidate.suggestion:
         ctx_extra.update({
             "tqs": candidate.suggestion.tqs,
