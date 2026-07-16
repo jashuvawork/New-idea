@@ -58,9 +58,14 @@ def _analyze_explosion_gaps(
             continue
         score = float(alert.get("explosionScore") or 0)
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
-        effective_min = min_score
-        if daily_move >= settings.all_day_explosion_session_move_min_pct:
-            effective_min = min(effective_min, settings.all_day_explosion_min_score)
+        peak_move = float(alert.get("peakMovePct") or 0)
+        from app.engines.explosion_detector import effective_explosion_min_score
+
+        effective_min = effective_explosion_min_score(
+            tier=tier,
+            peak_move_pct=peak_move,
+            daily_move_pct=daily_move,
+        )
 
         blockers: list[str] = []
         if not alert.get("tradeable"):

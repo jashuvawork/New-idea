@@ -544,10 +544,19 @@ class Settings(BaseSettings):
     all_day_explosion_dominant_min_score: float = 40.0
     # Peak-move bypass — faded vertical rips (velocity cooled, session peak still huge)
     peak_move_explosion_bypass_enabled: bool = True
-    peak_move_explosion_min_pct: float = 50.0
+    peak_move_explosion_min_pct: float = 35.0
     peak_move_explosion_min_tier: str = "ELITE"
     peak_move_explosion_score_floor: float = 38.0
     peak_move_explosion_score_boost_per_pct: float = 0.12
+    # Session-open baseline — use intraday low when first tick arrived mid-rip
+    session_open_use_intraday_low: bool = True
+    session_open_low_backfill_pct: float = 8.0
+    # Velocity-at-peak scoring — retain spike velocity after fade
+    velocity_peak_score_boost_enabled: bool = True
+    velocity_peak_min_3s: float = 2.5
+    velocity_peak_score_floor: float = 42.0
+    velocity_peak_decay_seconds: int = 180
+    velocity_peak_score_blend: float = 0.55
 
     runner_trail_keep_ratio: float = 0.38
     runner_micro_giveback_points: float = 4.0
@@ -733,6 +742,12 @@ class Settings(BaseSettings):
     worst_day_dead_zone_start_minute: int = 0
     worst_day_dead_zone_end_hour: int = 12
     worst_day_dead_zone_end_minute: int = 0
+    # Allow ELITE/EXPLODING vertical rips through 11:00–12:00 dead zone
+    worst_day_dead_zone_explosion_bypass_enabled: bool = True
+    worst_day_dead_zone_bypass_min_tier: str = "EXPLODING"
+    worst_day_dead_zone_bypass_min_peak_pct: float = 30.0
+    worst_day_dead_zone_bypass_min_velocity_3s: float = 2.0
+    worst_day_dead_zone_bypass_min_session_move_pct: float = 35.0
     day_adaptive_chop_rank_cap: float = 70.0
     day_adaptive_good_day_rank_relief: float = 3.0
 

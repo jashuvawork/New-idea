@@ -17,8 +17,12 @@ IST = ZoneInfo("Asia/Kolkata")
 _history: dict[str, dict[str, deque]] = {}
 # Session open premium: symbol:side:strike -> first seen premium today
 _session_open: dict[str, float] = {}
+# Intraday low premium — backfill baseline when first tick was mid-rip
+_session_low: dict[str, float] = {}
 # Intraday peak premium — survives pullbacks so faded rips still show as signals
 _session_peak: dict[str, float] = {}
+# Peak 3s velocity retained briefly after spike fades
+_peak_velocity: dict[str, tuple[float, datetime]] = {}
 # Hold BUILDING+ tier briefly after velocity fades (vertical 1-min candle gaps)
 _tier_sticky: dict[str, tuple[str, datetime]] = {}
 _session_date: Optional[str] = None
@@ -27,50 +31,127 @@ _TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
 
 
 def _roll_session() -> None:
-    global _session_date, _session_open, _session_peak, _tier_sticky
+    global _session_date, _session_open, _session_low, _session_peak, _tier_sticky, _peak_velocity
     today = datetime.now(IST).strftime("%Y-%m-%d")
     if _session_date != today:
         _session_date = today
         _session_open.clear()
+        _session_low.clear()
         _session_peak.clear()
         _tier_sticky.clear()
+        _peak_velocity.clear()
 
 
 def _open_key(symbol: str, strike: float, side: Side) -> str:
     return f"{symbol.upper()}:{_strike_key(strike, side)}"
 
 
-def _session_open_move_pct(symbol: str, strike: float, side: Side, premium: float) -> float:
-    """Premium % change since first tick today — catches 60→160 open rips."""
+def _hist_min_premium(hist: Optional[deque]) -> Optional[float]:
+    if not hist:
+        return None
+    vals = [h[1] for h in hist if h[1] and h[1] > 0]
+    return min(vals) if vals else None
+
+
+def _update_session_low(key: str, premium: float, hist: Optional[deque] = None) -> None:
+    if premium <= 0:
+        return
+    low = _session_low.get(key)
+    if low is None or premium < low:
+        _session_low[key] = premium
+    hist_min = _hist_min_premium(hist)
+    if hist_min is not None:
+        low = _session_low.get(key, hist_min)
+        if hist_min < low:
+            _session_low[key] = hist_min
+
+
+def _effective_session_baseline(key: str, premium: float, hist: Optional[deque] = None) -> float:
+    """Use intraday low as open baseline when first tick arrived mid-rip."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    open_prem = _session_open.get(key, premium)
+    _update_session_low(key, premium, hist)
+    low = _session_low.get(key, open_prem)
+    if not getattr(settings, "session_open_use_intraday_low", True):
+        return open_prem
+    if low >= open_prem:
+        return open_prem
+    drop_pct = ((open_prem - low) / open_prem) * 100
+    threshold = float(getattr(settings, "session_open_low_backfill_pct", 8.0) or 8.0)
+    if drop_pct >= threshold:
+        return low
+    return open_prem
+
+
+def _update_peak_velocity(key: str, v3: float) -> float:
+    """Retain peak 3s velocity for scoring after vertical spike fades."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not getattr(settings, "velocity_peak_score_boost_enabled", True):
+        return v3
+    now = datetime.now(IST)
+    prev = _peak_velocity.get(key)
+    if v3 > 0 and (not prev or v3 >= prev[0]):
+        _peak_velocity[key] = (v3, now)
+        return v3
+    if not prev:
+        return v3
+    age = (now - prev[1]).total_seconds()
+    decay_s = float(getattr(settings, "velocity_peak_decay_seconds", 180) or 180)
+    if age <= decay_s:
+        return max(v3, prev[0])
+    faded = prev[0] * max(0.25, 1.0 - (age - decay_s) / decay_s)
+    return max(v3, faded)
+
+
+def _session_open_move_pct(
+    symbol: str,
+    strike: float,
+    side: Side,
+    premium: float,
+    hist: Optional[deque] = None,
+) -> float:
+    """Premium % change since session baseline — catches 60→160 open rips."""
     _roll_session()
     key = _open_key(symbol, strike, side)
     if key not in _session_open and premium > 0:
         _session_open[key] = premium
         _session_peak[key] = premium
+        _session_low[key] = premium
         return 0.0
-    open_prem = _session_open.get(key, 0)
-    if open_prem <= 0:
+    baseline = _effective_session_baseline(key, premium, hist)
+    if baseline <= 0:
         return 0.0
     peak = _session_peak.get(key, premium)
     if premium > peak:
         _session_peak[key] = premium
-    return ((premium - open_prem) / open_prem) * 100
+    return ((premium - baseline) / baseline) * 100
 
 
-def _session_peak_move_pct(symbol: str, strike: float, side: Side, premium: float) -> float:
-    """Peak premium vs session open — keeps rip visible after pullback."""
+def _session_peak_move_pct(
+    symbol: str,
+    strike: float,
+    side: Side,
+    premium: float,
+    hist: Optional[deque] = None,
+) -> float:
+    """Peak premium vs session baseline — keeps rip visible after pullback."""
     _roll_session()
     key = _open_key(symbol, strike, side)
     if key not in _session_open and premium > 0:
         _session_open[key] = premium
         _session_peak[key] = premium
+        _session_low[key] = premium
         return 0.0
-    open_prem = _session_open.get(key, 0)
-    if open_prem <= 0:
+    baseline = _effective_session_baseline(key, premium, hist)
+    if baseline <= 0:
         return 0.0
     peak = max(_session_peak.get(key, premium), premium)
     _session_peak[key] = peak
-    return ((peak - open_prem) / open_prem) * 100
+    return ((peak - baseline) / baseline) * 100
 
 
 def _apply_sticky_tier(strike_key: str, tier: str) -> str:
@@ -116,7 +197,7 @@ def apply_peak_move_score_boost(score: float, peak_move: float, tier: str) -> fl
     settings = get_settings()
     if not getattr(settings, "peak_move_explosion_bypass_enabled", True):
         return score
-    if peak_move < float(getattr(settings, "peak_move_explosion_min_pct", 50.0) or 50.0):
+    if peak_move < float(getattr(settings, "peak_move_explosion_min_pct", 35.0) or 35.0):
         return score
     if not peak_move_tier_ok(tier):
         return score
@@ -124,6 +205,34 @@ def apply_peak_move_score_boost(score: float, peak_move: float, tier: str) -> fl
     per_pct = float(getattr(settings, "peak_move_explosion_score_boost_per_pct", 0.12) or 0.12)
     boosted = max(floor, peak_move * per_pct)
     return max(score, min(100.0, boosted))
+
+
+def apply_velocity_peak_score_boost(
+    score: float,
+    *,
+    v3: float,
+    peak_v3: float,
+    tier: str,
+    peak_move: float = 0.0,
+) -> float:
+    """Boost score using retained spike velocity when live v3 has faded."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not getattr(settings, "velocity_peak_score_boost_enabled", True):
+        return score
+    min_v3 = float(getattr(settings, "velocity_peak_min_3s", 2.5) or 2.5)
+    if peak_v3 < min_v3:
+        return score
+    if _TIER_RANK.get(str(tier or "").upper(), 0) < _TIER_RANK["BUILDING"]:
+        return score
+    blend = float(getattr(settings, "velocity_peak_score_blend", 0.55) or 0.55)
+    vel_bonus = min(40.0, max(0.0, peak_v3) * 8.0) * blend
+    if peak_move >= float(getattr(settings, "peak_move_explosion_min_pct", 35.0) or 35.0):
+        vel_bonus += min(12.0, peak_move * 0.08)
+    boosted = score + vel_bonus
+    floor = float(getattr(settings, "velocity_peak_score_floor", 42.0) or 42.0)
+    return max(score, min(100.0, max(boosted, floor)))
 
 
 def effective_explosion_min_score(
@@ -141,7 +250,7 @@ def effective_explosion_min_score(
         base = min(base, float(settings.all_day_explosion_min_score))
     if not getattr(settings, "peak_move_explosion_bypass_enabled", True):
         return base
-    if peak_move_pct < float(getattr(settings, "peak_move_explosion_min_pct", 50.0) or 50.0):
+    if peak_move_pct < float(getattr(settings, "peak_move_explosion_min_pct", 35.0) or 35.0):
         return base
     if not peak_move_tier_ok(tier):
         return base
@@ -326,8 +435,9 @@ def scan_chain_explosions(
             _record(symbol, strike, side, premium, volume)
             key_h = _strike_key(strike, side)
             hist = _history.get(symbol, {}).get(key_h)
-            open_move = _session_open_move_pct(symbol, strike, side, premium)
-            peak_move = _session_peak_move_pct(symbol, strike, side, premium)
+            vel_key = _open_key(symbol, strike, side)
+            open_move = _session_open_move_pct(symbol, strike, side, premium, hist)
+            peak_move = _session_peak_move_pct(symbol, strike, side, premium, hist)
             session_move = _effective_session_move(open_move, peak_move)
             if not _premium_ok_for_scan(premium, max(open_move, session_move), settings):
                 continue
@@ -342,19 +452,24 @@ def scan_chain_explosions(
                 v9 = open_move * 0.65
                 v15 = min(open_move * 0.35, 12.0)
                 vol_surge = 1.5
+                peak_v3 = _update_peak_velocity(vel_key, v3)
+                v3_score = max(v3, peak_v3)
             else:
                 v3 = _velocity(hist, 1)
                 v9 = _velocity(hist, 3)
                 v15 = _velocity(hist, 5)
+                peak_v3 = _update_peak_velocity(vel_key, v3)
+                v3_score = max(v3, peak_v3)
                 vol_surge = _volume_surge_with_chain(volume, hist, settings)
                 if open_window and open_move >= settings.open_premium_min_move_pct:
                     v3 = max(v3, open_move * 0.25)
                     v9 = max(v9, open_move * 0.65)
                     v15 = max(v15, min(open_move * 0.35, float(getattr(settings, "explosion_exhaustion_v15_pct", 18.0) or 18.0) - 0.5))
+                    v3_score = max(v3_score, v3)
 
-            # Composite explosion score
+            # Composite explosion score — peak velocity retained after fade
             score = (
-                min(40, max(0, v3) * 8)
+                min(40, max(0, v3_score) * 8)
                 + min(30, max(0, v9) * 5)
                 + min(20, max(0, v15) * 3)
                 + min(10, (vol_surge - 1) * 10)
@@ -379,7 +494,7 @@ def scan_chain_explosions(
                 v3_build = min(v3_build, 1.8)
                 v3_explode = min(v3_explode, 2.5)
                 v9_explode = min(v9_explode, 3.5)
-            peak_min = float(getattr(settings, "peak_move_explosion_min_pct", 50.0) or 50.0)
+            peak_min = float(getattr(settings, "peak_move_explosion_min_pct", 35.0) or 35.0)
             if peak_move >= peak_min:
                 if peak_move >= 80:
                     tier = "ELITE" if _TIER_RANK.get(tier, 0) < _TIER_RANK["ELITE"] else tier
@@ -444,11 +559,16 @@ def scan_chain_explosions(
                     dist_steps * float(getattr(settings, "explosion_otm_depth_penalty_per_step", 3.0)),
                 )
             score = min(100, max(0, score + atm_bonus - otm_penalty))
+            score = apply_velocity_peak_score_boost(
+                score, v3=v3, peak_v3=peak_v3, tier=tier, peak_move=peak_move,
+            )
             score = apply_peak_move_score_boost(score, peak_move, tier)
 
             reason_parts = []
             if v3 >= 2:
                 reason_parts.append(f"+{v3:.1f}%/3s")
+            if peak_v3 >= 2.5 and peak_v3 > v3 + 0.5:
+                reason_parts.append(f"peakV3={peak_v3:.1f}%")
             if v9 >= 3:
                 reason_parts.append(f"+{v9:.1f}%/9s")
             if vol_surge >= 1.5:

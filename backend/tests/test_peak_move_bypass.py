@@ -8,6 +8,8 @@ from app.engines.explosion_detector import (
     effective_explosion_min_score,
     scan_chain_explosions,
     _history,
+    _peak_velocity,
+    _session_low,
     _session_open,
     _session_peak,
     _tier_sticky,
@@ -33,7 +35,7 @@ def _settings() -> MagicMock:
     s.explosion_atm_proximity_bonus_max = 8.0
     s.explosion_otm_depth_penalty_per_step = 3.0
     s.peak_move_explosion_bypass_enabled = True
-    s.peak_move_explosion_min_pct = 50.0
+    s.peak_move_explosion_min_pct = 35.0
     s.peak_move_explosion_min_tier = "ELITE"
     s.peak_move_explosion_score_floor = 38.0
     s.peak_move_explosion_score_boost_per_pct = 0.12
@@ -60,6 +62,7 @@ def test_effective_min_score_lowers_for_peak_elite(mock_settings):
     mock_settings.return_value = _settings()
     assert effective_explosion_min_score(tier="ELITE", peak_move_pct=80.0) == 38.0
     assert effective_explosion_min_score(tier="ELITE", peak_move_pct=30.0) == 45.0
+    assert effective_explosion_min_score(tier="ELITE", peak_move_pct=35.0) == 38.0
     assert effective_explosion_min_score(tier="EXPLODING", peak_move_pct=80.0) == 45.0
 
 
@@ -69,8 +72,10 @@ def test_scan_chain_boosts_score_after_vertical_fade(mock_settings, _open):
     mock_settings.return_value = _settings()
     _history.clear()
     _session_open.clear()
+    _session_low.clear()
     _session_peak.clear()
     _tier_sticky.clear()
+    _peak_velocity.clear()
 
     chain = _chain(24000.0, 80.0)
     scan_chain_explosions("NIFTY", chain, spot=24070.0, atm=24100.0)
@@ -78,5 +83,5 @@ def test_scan_chain_boosts_score_after_vertical_fade(mock_settings, _open):
     events = scan_chain_explosions("NIFTY", chain, spot=24070.0, atm=24100.0)
     puts = [e for e in events if e.side == Side.PUT and e.strike == 24000.0]
     assert puts
-    assert puts[0].peak_move_pct >= 50.0
+    assert puts[0].peak_move_pct >= 35.0
     assert puts[0].explosion_score >= 45.0
