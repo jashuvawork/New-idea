@@ -90,6 +90,38 @@ def test_hard_breadth_bypass_call_on_bearish(mock_settings):
 
 
 @patch("app.config.get_settings")
+def test_candidate_unwrap_reads_peak_from_explosion_event(mock_settings):
+    from app.engines.trade_selector import EntryCandidate
+    from app.models.schemas import StrategyType
+
+    mock_settings.return_value = _settings()
+    ev = _event(peak_move_pct=68.0, daily_move_pct=68.0)
+    cand = EntryCandidate(
+        symbol="SENSEX",
+        snap=SymbolSnapshot(
+            symbol="SENSEX",
+            timestamp="2026-07-16T14:00:00+05:30",
+            marketPhase="LIVE_MARKET",
+            spot=77000,
+            dataAvailable=True,
+            breadth=Breadth(bias="BULLISH"),
+        ),
+        mode="explosion",
+        score=100.0,
+        side=Side.PUT,
+        strike=77300.0,
+        premium=68.7,
+        strategy_type=StrategyType.EXPLOSIVE,
+        confidence=100.0,
+        tqs=56.0,
+        tier="ELITE",
+        explosion_event=ev,
+    )
+    assert qualifies_for_vertical_rip_bypass(cand) is True
+    assert vertical_rip_bypasses_hard_breadth(Side.PUT, "BULLISH", event=cand, snap=cand.snap) is True
+
+
+@patch("app.config.get_settings")
 def test_spike_baseline_raises_peak_move(mock_settings):
     from app.engines.explosion_detector import (
         _history,

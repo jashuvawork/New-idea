@@ -44,6 +44,7 @@ def _candidate_from_alert(symbol: str, snap: SymbolSnapshot, alert: dict) -> Ent
         tier=str(alert.get("tier") or "WATCH"),
         reason=str(alert.get("reason") or ""),
         daily_move_pct=float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0),
+        peak_move_pct=float(alert.get("peakMovePct") or 0),
     )
     score = float(alert.get("explosionScore") or 0)
     return EntryCandidate(
@@ -217,10 +218,20 @@ def _gate_checks(
         if candidate.explosion_event
         else False
     )
+    from app.engines.vertical_rip_bypass import (
+        qualifies_for_vertical_rip_bypass,
+        vertical_rip_bypass_for_snap,
+    )
+
+    vertical_bypass = (
+        qualifies_for_vertical_rip_bypass(candidate.explosion_event, snap=snap)
+        if candidate.explosion_event
+        else vertical_rip_bypass_for_snap(candidate.side, snap, explosion_event=None)
+    )
     expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
     blocked, chart_reason = chart_blocks_side(
         candidate.side, chart, trade_score=score, momentum_surge=daily_move >= 40,
-        premium_led_bypass=premium_bypass,
+        premium_led_bypass=premium_bypass or vertical_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
     )
     if blocked:
@@ -254,18 +265,25 @@ def _gate_checks(
         candidate.side, breadth_bias, snap, score=score,
     )
     hard_blocked, hard_reason = breadth_hard_blocks_side(
-        candidate.side, breadth_bias, candidate=candidate, alert=alert, snap=snap,
+        candidate.side,
+        breadth_bias,
+        event=candidate.explosion_event,
+        candidate=candidate,
+        alert=alert,
+        snap=snap,
     )
-    br_blocked, br_reason = breadth_blocks_explosion_side(candidate.side, breadth_bias, tier)
+    br_blocked, br_reason = breadth_blocks_explosion_side(
+        candidate.side, breadth_bias, tier, event=candidate.explosion_event,
+    )
     market_opposes = _market_opposes_side(candidate.side, breadth_bias, chart)
-    if bypassed and not all_in:
+    if bypassed and not all_in and not vertical_bypass:
         gates.append({
             "gate": "breadth_hard_block",
             "passed": True,
             "detail": f"chart+MTF override — OI breadth {breadth_bias} lags live price",
             "fix": bypass_reason,
         })
-    elif hard_blocked and not all_in:
+    elif hard_blocked and not all_in and not vertical_bypass:
         blockers.append(hard_reason)
         gates.append({
             "gate": "breadth_hard_block",
@@ -273,7 +291,7 @@ def _gate_checks(
             "detail": f"breadth {breadth_bias} vs {side_val}",
             "fix": "Hard block — trade CALL on bullish / PUT on bearish breadth only",
         })
-    elif br_blocked and not premium_bypass:
+    elif br_blocked and not premium_bypass and not vertical_bypass:
         blockers.append(br_reason)
         gates.append({
             "gate": "breadth_alignment",
