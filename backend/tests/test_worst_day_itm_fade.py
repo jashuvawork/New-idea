@@ -1,6 +1,4 @@
-"""Worst-day defensive ITM fade + alternate quick scalps."""
-
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -29,13 +27,17 @@ from app.models.schemas import (
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def _next_week() -> str:
+    return (datetime.now(IST) + timedelta(days=7)).strftime("%Y-%m-%d")
+
+
 def _sensex_snap(spot: float = 77100.0, tqs: float = 44.0, bias: str = "BEARISH") -> SymbolSnapshot:
     return SymbolSnapshot(
         symbol="SENSEX",
         timestamp=datetime.now(IST),
         marketPhase=MarketPhase.LIVE_MARKET,
         dataAvailable=True,
-        optionExpiry="2026-07-17",
+        optionExpiry=_next_week(),
         spot=spot,
         atmStrike=77100.0,
         regime=Regime.CHOP,
@@ -63,12 +65,13 @@ def _sensex_snap(spot: float = 77100.0, tqs: float = 44.0, bias: str = "BEARISH"
 
 
 def _nifty_snap() -> SymbolSnapshot:
+    tomorrow = (datetime.now(IST) + timedelta(days=1)).strftime("%Y-%m-%d")
     return SymbolSnapshot(
         symbol="NIFTY",
         timestamp=datetime.now(IST),
         marketPhase=MarketPhase.LIVE_MARKET,
         dataAvailable=True,
-        optionExpiry="2026-07-14",
+        optionExpiry=tomorrow,
         spot=24050.0,
         atmStrike=24050.0,
         regime=Regime.CHOP,

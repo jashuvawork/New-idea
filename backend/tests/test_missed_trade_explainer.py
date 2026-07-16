@@ -71,6 +71,11 @@ def test_missed_trade_report_finds_blockers(mock_state, mock_settings):
     s.whipsaw_guards_enabled = False
     s.all_day_min_chart_confidence = 62.0
     s.all_day_min_rank_score = 68.0
+    s.peak_move_explosion_min_pct = 35.0
+    s.vertical_rip_bypass_enabled = True
+    s.min_option_premium_inr = 20.0
+    s.max_option_premium_inr = 400.0
+    s.explosion_max_premium_inr = 400.0
 
     mock_state.return_value = AutoTraderState(running=True, skipped=[])
 
@@ -109,6 +114,14 @@ def test_missed_trade_flags_put_on_bullish(mock_state, mock_settings):
     s.whipsaw_guards_enabled = False
     s.premium_led_min_velocity_3s = 2.8
     s.premium_led_min_velocity_9s = 3.5
+    s.peak_move_explosion_min_pct = 35.0
+    s.vertical_rip_bypass_enabled = True
+    s.vertical_rip_bypass_min_peak_pct = 30.0
+    s.vertical_rip_bypass_min_score = 38.0
+    s.vertical_rip_hard_breadth_bypass_enabled = True
+    s.min_option_premium_inr = 20.0
+    s.max_option_premium_inr = 400.0
+    s.explosion_max_premium_inr = 400.0
 
     mock_state.return_value = AutoTraderState(running=True, skipped=[])
     snap = SymbolSnapshot(
@@ -128,7 +141,8 @@ def test_missed_trade_flags_put_on_bullish(mock_state, mock_settings):
                 "premium": 45.0,
                 "explosionScore": 72.0,
                 "tier": "EXPLODING",
-                "dailyMovePct": 120.0,
+                "dailyMovePct": 18.0,
+                "peakMovePct": 18.0,
                 "tradeable": True,
                 "velocity3s": 4.5,
             },

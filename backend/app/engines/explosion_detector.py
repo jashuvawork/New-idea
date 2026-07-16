@@ -42,6 +42,18 @@ def _roll_session() -> None:
         _peak_velocity.clear()
 
 
+def reset_detector_state_for_tests() -> None:
+    """Clear module globals so pytest order does not leak session premiums across tests."""
+    global _history, _session_date
+    _history.clear()
+    _session_open.clear()
+    _session_low.clear()
+    _session_peak.clear()
+    _tier_sticky.clear()
+    _peak_velocity.clear()
+    _session_date = None
+
+
 def _open_key(symbol: str, strike: float, side: Side) -> str:
     return f"{symbol.upper()}:{_strike_key(strike, side)}"
 
@@ -486,12 +498,13 @@ def resolve_explosion_scan_range(
 
     if tight_scan:
         if symbol.upper() == "SENSEX":
-            return float(getattr(settings, "explosion_sensex_worst_day_scan_range", 500))
-        return float(getattr(settings, "explosion_worst_day_scan_range", 500))
+            return float(getattr(settings, "explosion_sensex_worst_day_scan_range", 500) or 500)
+        return float(getattr(settings, "explosion_worst_day_scan_range", 500) or 500)
 
-    base = float(settings.explosion_scan_range)
+    base = float(getattr(settings, "explosion_scan_range", 800) or 800)
     if symbol.upper() == "SENSEX":
-        base = max(base, float(getattr(settings, "explosion_sensex_scan_range", 1500)))
+        sensex_range = float(getattr(settings, "explosion_sensex_scan_range", 1500) or 1500)
+        base = max(base, sensex_range)
     try:
         from app.engines.morning_premium_capture import in_all_day_explosion_window
 

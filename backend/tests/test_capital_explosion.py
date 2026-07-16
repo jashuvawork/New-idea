@@ -138,6 +138,9 @@ class ExplosionExitTests(unittest.TestCase):
                 "all_day_min_chart_confidence": 62.0,
                 "emergency_stop_enabled": False,
                 "explosion_stop_min_hold_seconds": 15,
+                "explosion_trail_step_points": 2.0,
+                "explosion_trail_tight_arm": 999.0,
+                "explosion_trail_tight_points": 0.0,
                 "afternoon_capture_exit_max_hold_seconds": 480,
             }.items():
                 setattr(s, k, v)

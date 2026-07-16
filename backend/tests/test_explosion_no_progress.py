@@ -55,6 +55,8 @@ def _settings():
     s.explosion_no_progress_aligned_seconds = 420
     s.explosion_no_progress_skip_when_aligned = True
     s.bullish_hold_enabled = True
+    s.all_day_min_chart_confidence = 62.0
+    s.explosion_target_standard = 18.0
     return s
 
 

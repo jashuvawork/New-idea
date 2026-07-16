@@ -232,10 +232,12 @@ def test_validate_blocks_rapid_reentry_after_loss(mock_chop, mock_ws, mock_pre):
     assert "pretrade_entry_interval_after_loss" in reason
 
 
+@patch("app.engines.worst_day_guard.worst_day_allows_candidate", return_value=(True, "ok", {}))
+@patch("app.engines.bad_day_routing.check_bad_day_candidate", return_value=(True, "ok", {}))
 @patch("app.engines.pretrade_validator.get_settings", return_value=_settings())
 @patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
 @patch("app.engines.chop_day_guards.get_settings")
-def test_validate_allows_entry_after_long_gap(mock_chop, mock_ws, mock_pre):
+def test_validate_allows_entry_after_long_gap(mock_chop, mock_ws, mock_pre, mock_bad_day, mock_worst_day):
     mock_chop.return_value = _settings()
     state = AutoTraderState()
     state.lastExit = {

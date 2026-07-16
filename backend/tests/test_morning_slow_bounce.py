@@ -18,6 +18,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 def _sensex_near_expiry_snap(**chart_kw) -> SymbolSnapshot:
+    today = datetime.now(IST).strftime("%Y-%m-%d")
     chart = SpotChart(
         direction="NEUTRAL",
         spot=77800.0,
@@ -37,7 +38,7 @@ def _sensex_near_expiry_snap(**chart_kw) -> SymbolSnapshot:
         timestamp=datetime.now(IST),
         marketPhase=MarketPhase.LIVE_MARKET,
         dataAvailable=True,
-        optionExpiry="2026-07-09",
+        optionExpiry=today,
         spot=77800.0,
         atmStrike=77800.0,
         tradeQualityScore=35.0,

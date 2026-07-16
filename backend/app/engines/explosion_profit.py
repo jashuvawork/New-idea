@@ -12,6 +12,14 @@ from app.models.schemas import Breadth, PaperTrade, Side, SpotChart, StrategyTyp
 
 IST = ZoneInfo("Asia/Kolkata")
 
+
+def _cfg_float(settings, name: str, default: float) -> float:
+    try:
+        return float(getattr(settings, name, default) or default)
+    except (TypeError, ValueError):
+        return default
+
+
 # symbol -> last explosion stop timestamp (IST)
 _explosion_stop_at: dict[str, datetime] = {}
 _explosion_stop_cooldown_sec: dict[str, int] = {}
@@ -70,7 +78,7 @@ def explosion_in_cooldown(symbol: str) -> bool:
     elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
     cooldown = _explosion_stop_cooldown_sec.get(
         symbol.upper(),
-        settings.explosion_reentry_cooldown_seconds,
+        int(_cfg_float(settings, "explosion_reentry_cooldown_seconds", 90)),
     )
     return elapsed < cooldown
 
@@ -85,7 +93,7 @@ def cooldown_remaining_seconds(symbol: str) -> int:
     elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
     cooldown = _explosion_stop_cooldown_sec.get(
         symbol.upper(),
-        settings.explosion_reentry_cooldown_seconds,
+        int(_cfg_float(settings, "explosion_reentry_cooldown_seconds", 90)),
     )
     return max(0, int(cooldown - elapsed))
 
@@ -240,15 +248,17 @@ def check_explosion_entry(
 
         expiry_chart_bypass = expiry_chart_bypass_for_event(event, snap)
 
+    afternoon_chart_skip = afternoon_capture_skips_chart_block(event, chart)
+
     blocked_chart, chart_reason = chart_blocks_side(
         event.side,
         chart,
         trade_score=score,
         momentum_surge=index_moment,
-        premium_led_bypass=premium_bypass,
+        premium_led_bypass=premium_bypass or afternoon_chart_skip,
         expiry_explosion_bypass=expiry_chart_bypass,
     )
-    if blocked_chart:
+    if blocked_chart and not afternoon_chart_skip:
         return False, chart_reason
 
     if event.tier == "ELITE":
@@ -257,8 +267,9 @@ def check_explosion_entry(
     settings = get_settings()
     min_score = settings.aggressive_min_explosion_score
     open_move = float(getattr(event, "daily_move_pct", 0) or 0)
-    if open_move >= settings.all_day_explosion_session_move_min_pct:
-        min_score = min(min_score, settings.all_day_explosion_min_score)
+    session_move_min = _cfg_float(settings, "all_day_explosion_session_move_min_pct", 40.0)
+    if open_move >= session_move_min:
+        min_score = min(min_score, _cfg_float(settings, "all_day_explosion_min_score", 38.0))
 
     if event.tier == "EXPLODING" and event.explosion_score >= min_score:
         return True, "explosion_confirmed" if not premium_bypass else "premium_led_explosion_confirmed"
@@ -344,16 +355,16 @@ def _trail_floor_pts(
 
     from app.engines.ict_breakout_monitor import ict_trail_arm_multiplier
 
-    arm = trail_arm_points if trail_arm_points is not None else settings.explosion_trail_arm_points
+    arm = trail_arm_points if trail_arm_points is not None else _cfg_float(settings, "explosion_trail_arm_points", 10.0)
     arm *= ict_trail_arm_multiplier(trade)
     return ratcheting_trail_floor(
         trade,
         best,
         arm_points=arm,
-        keep_ratio=settings.explosion_trail_keep_ratio,
-        step_points=settings.explosion_trail_step_points,
-        tight_arm=settings.explosion_trail_tight_arm,
-        tight_points=settings.explosion_trail_tight_points,
+        keep_ratio=_cfg_float(settings, "explosion_trail_keep_ratio", 0.65),
+        step_points=_cfg_float(settings, "explosion_trail_step_points", 2.0),
+        tight_arm=_cfg_float(settings, "explosion_trail_tight_arm", 999.0),
+        tight_points=_cfg_float(settings, "explosion_trail_tight_points", 0.0),
         floor_key="explosionTrailFloorPts",
         best_key="explosionBestPts",
     )
@@ -416,7 +427,8 @@ def _adaptive_stop_min_hold(trade: PaperTrade, settings) -> int:
     chart_conf = chart_confidence_for_trade(trade)
     from app.engines.bullish_hold import direction_aligned_with_breadth
 
-    if direction_aligned_with_breadth(trade) and chart_conf >= settings.all_day_min_chart_confidence:
+    min_conf = _cfg_float(settings, "all_day_min_chart_confidence", 62.0)
+    if direction_aligned_with_breadth(trade) and chart_conf >= min_conf:
         return max(base, 45)
     if chart_conf >= 85:
         return max(base, 35)
@@ -438,7 +450,7 @@ def _effective_stop_points(trade: PaperTrade, stop_points: float) -> float:
     conf = chart_confidence_for_trade(trade)
     if conf >= 85:
         mult = max(mult, 1.4)
-    elif conf >= settings.all_day_min_chart_confidence:
+    elif conf >= _cfg_float(settings, "all_day_min_chart_confidence", 62.0):
         mult = max(mult, 1.2)
     return round(base * mult, 2)
 
@@ -448,8 +460,13 @@ def _defer_adaptive_stop(
     best: float,
     hold: float,
     settings,
+    *,
+    pnl_pts: float = 0.0,
+    stop_floor: float = 0.0,
 ) -> bool:
     """Defer adaptive SL while high-confidence trade works toward chart TP."""
+    if stop_floor > 0 and pnl_pts <= -stop_floor:
+        return False
     from app.engines.confidence_hold import (
         hold_until_target_active,
         is_confidence_runner_hold,
@@ -468,7 +485,7 @@ def _defer_adaptive_stop(
         chart_conf = chart_confidence_for_trade(trade)
         if not direction_aligned_with_breadth(trade):
             return False
-        if chart_conf < settings.all_day_min_chart_confidence:
+        if chart_conf < _cfg_float(settings, "all_day_min_chart_confidence", 62.0):
             return False
         if best < 5.0 and hold < 60:
             return True
@@ -557,7 +574,7 @@ def evaluate_explosion_exit(
         if not should_defer_profit_lock(trade, best, target_points=target):
             return True
         # Standard explosion TP zone reached — don't block trail for distant chart TP
-        return best >= settings.explosion_target_standard * 0.95
+        return best >= _cfg_float(settings, "explosion_target_standard", 18.0) * 0.95
 
     if half_tp_giveback_exit(trade, best, pnl_pts, target_points=target):
         return "explosion_half_tp_profit_lock", pnl_inr
@@ -583,7 +600,9 @@ def evaluate_explosion_exit(
         exit_params.adaptive_stop
         and hold >= _adaptive_stop_min_hold(trade, settings)
         and pnl_pts <= -stop_floor
-        and not _defer_adaptive_stop(trade, best, hold, settings)
+        and not _defer_adaptive_stop(
+            trade, best, hold, settings, pnl_pts=pnl_pts, stop_floor=stop_floor,
+        )
     ):
         return "adaptive_stop_loss", pnl_inr
 
@@ -596,8 +615,9 @@ def evaluate_explosion_exit(
             return "explosion_no_progress", pnl_inr
 
     # Peak fade after reaching explosion TP zone — even without confidence-runner hold
+    target_std = _cfg_float(settings, "explosion_target_standard", 18.0)
     if (
-        best >= settings.explosion_target_standard * 0.85
+        best >= target_std * 0.85
         and pnl_pts > 0
         and best >= exit_params.trail_arm_points
     ):
