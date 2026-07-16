@@ -182,6 +182,72 @@ def _effective_session_move(open_move: float, peak_move: float) -> float:
     return max(open_move, peak_move * 0.65)
 
 
+def retained_peak_velocity_3s(symbol: str, strike: float, side: Side) -> float:
+    """Public accessor — peak 3s velocity retained after vertical spike fades."""
+    _roll_session()
+    key = _open_key(symbol, strike, side)
+    prev = _peak_velocity.get(key)
+    if not prev:
+        return 0.0
+    from app.config import get_settings
+
+    settings = get_settings()
+    now = datetime.now(IST)
+    age = (now - prev[1]).total_seconds()
+    decay_s = float(getattr(settings, "velocity_peak_decay_seconds", 180) or 180)
+    if age <= decay_s:
+        return float(prev[0])
+    return float(prev[0]) * max(0.25, 1.0 - (age - decay_s) / decay_s)
+
+
+def effective_breakout_velocities(
+    event: Any,
+) -> tuple[float, float, dict[str, Any]]:
+    """
+  Live vs retained peak velocities for worst-day breakout gate.
+    Uses peak velocity when session peak rip qualifies and live v3 faded.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    if event is None:
+        return 0.0, 0.0, meta
+
+    vel3 = float(getattr(event, "velocity_3s", 0) or 0)
+    vel9 = float(getattr(event, "velocity_9s", 0) or 0)
+    peak_move = float(getattr(event, "peak_move_pct", 0) or 0)
+    peak_v3 = retained_peak_velocity_3s(
+        str(getattr(event, "symbol", "") or ""),
+        float(getattr(event, "strike", 0) or 0),
+        getattr(event, "side", Side.CALL),
+    )
+    meta.update({
+        "liveVelocity3s": vel3,
+        "liveVelocity9s": vel9,
+        "peakVelocity3s": peak_v3,
+        "peakMovePct": peak_move,
+    })
+
+    min_peak = float(getattr(settings, "peak_move_explosion_min_pct", 35.0) or 35.0)
+    min_vel = float(settings.worst_day_breakout_min_velocity_3s)
+    if (
+        getattr(settings, "worst_day_breakout_peak_velocity_bypass_enabled", True)
+        and peak_move >= min_peak
+        and peak_v3 >= min_vel
+    ):
+        eff3 = max(vel3, peak_v3)
+        eff9 = max(vel9, peak_v3 * 1.1)
+        meta["peakVelocityBypass"] = True
+        meta["effectiveVelocity3s"] = eff3
+        meta["effectiveVelocity9s"] = eff9
+        return eff3, eff9, meta
+
+    meta["effectiveVelocity3s"] = vel3
+    meta["effectiveVelocity9s"] = vel9
+    return vel3, vel9, meta
+
+
 def peak_move_tier_ok(tier: str) -> bool:
     from app.config import get_settings
 

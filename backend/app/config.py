@@ -179,6 +179,12 @@ class Settings(BaseSettings):
     explosion_peak_chase_min_premium_mom_pct: float = 15.0
     explosion_peak_chase_max_otm_steps: int = 3
     explosion_peak_chase_min_session_move_pct: float = 40.0
+    # Faded vertical rip — peak move huge but live velocity cooled (caution sizing)
+    explosion_faded_rip_caution_enabled: bool = True
+    explosion_faded_rip_min_peak_pct: float = 35.0
+    explosion_faded_rip_max_live_velocity_3s: float = 0.5
+    explosion_faded_rip_lot_cap: int = 8
+    explosion_faded_rip_tighter_stop_mult: float = 0.85
     explosion_macd_alignment_required: bool = True
     explosion_deep_otm_min_premium_inr: float = 3.0
     explosion_volume_awaken_min: int = 25000
@@ -708,6 +714,7 @@ class Settings(BaseSettings):
     worst_day_breakout_only_enabled: bool = True
     worst_day_breakout_min_rank: float = 68.0
     worst_day_breakout_min_velocity_3s: float = 2.5
+    worst_day_breakout_peak_velocity_bypass_enabled: bool = True
     worst_day_breakout_min_symbol_tqs: float = 45.0
     worst_day_breakout_tiers_csv: str = "ELITE,EXPLODING"
     worst_day_breakout_require_chart_align: bool = True

@@ -103,3 +103,72 @@ def check_explosion_macd_alignment(
     if side_val == "PUT" and macd_bias == "BULLISH":
         return False, "explosion_macd_bullish_blocks_put"
     return True, "ok"
+
+
+def detect_faded_vertical_rip(
+    explosion_event: Any,
+    snap: Optional[SymbolSnapshot] = None,
+) -> tuple[bool, dict[str, Any]]:
+    """
+    Peak rip already happened but live velocity cooled — same pattern as cheap OTM
+    explosion chase on worst days. Take with caution (smaller size, tighter stop).
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    if not getattr(settings, "explosion_faded_rip_caution_enabled", True):
+        return False, meta
+    if explosion_event is None:
+        return False, meta
+
+    tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False, meta
+
+    v3 = float(getattr(explosion_event, "velocity_3s", 0) or 0)
+    peak = float(getattr(explosion_event, "peak_move_pct", 0) or 0)
+    min_peak = float(getattr(settings, "explosion_faded_rip_min_peak_pct", 35.0) or 35.0)
+    max_live = float(getattr(settings, "explosion_faded_rip_max_live_velocity_3s", 0.5) or 0.5)
+    if peak < min_peak or v3 > max_live:
+        return False, meta
+
+    from app.engines.explosion_detector import retained_peak_velocity_3s
+    from app.models.schemas import Side
+
+    side = getattr(explosion_event, "side", Side.CALL)
+    peak_v3 = retained_peak_velocity_3s(
+        str(getattr(explosion_event, "symbol", "") or ""),
+        float(getattr(explosion_event, "strike", 0) or 0),
+        side,
+    )
+    if peak_v3 < float(settings.worst_day_breakout_min_velocity_3s):
+        return False, meta
+
+    meta = {
+        "fadedVerticalRip": True,
+        "fadedRipCaution": True,
+        "peakMovePct": round(peak, 2),
+        "liveVelocity3s": round(v3, 2),
+        "peakVelocity3s": round(peak_v3, 2),
+        "cautionLotCap": int(getattr(settings, "explosion_faded_rip_lot_cap", 8) or 8),
+    }
+    if snap is not None:
+        depth, money, atm = _strike_depth(
+            side,
+            float(getattr(explosion_event, "strike", 0) or 0),
+            snap,
+        )
+        meta["moneyness"] = money
+        meta["strikeStepsFromAtm"] = depth
+        meta["atmStrike"] = atm
+    return True, meta
+
+
+def cap_faded_rip_lots(lots: int) -> int:
+    settings = get_settings()
+    cap = int(getattr(settings, "explosion_faded_rip_lot_cap", 8) or 8)
+    return min(max(1, lots), cap)
+
+
+def faded_rip_stop_multiplier() -> float:
+    settings = get_settings()
+    return float(getattr(settings, "explosion_faded_rip_tighter_stop_mult", 0.85) or 0.85)
