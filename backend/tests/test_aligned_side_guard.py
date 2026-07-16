@@ -182,7 +182,21 @@ def test_elite_put_blocked_on_bullish_breadth(mock_settings, _window):
     s.premium_led_elite_counter_min_score = 90.0
     s.breadth_hard_side_block_enabled = True
 
-    event = _elite_put_event()
+    event = ExplosionEvent(
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=77100.0,
+        premium=120.0,
+        velocity_3s=5.0,
+        velocity_9s=7.0,
+        velocity_15s=10.0,
+        volume_surge=2.5,
+        explosion_score=82.0,
+        tier="ELITE",
+        reason="+5%/3s",
+        daily_move_pct=18.0,
+        peak_move_pct=18.0,
+    )
     chart = _bullish_snap().spotChart
     assert premium_led_explosion_bypass(event, chart, "BULLISH") is False
     assert counter_trend_entry_allowed(Side.PUT, _bullish_snap(), explosion_event=event) is False

@@ -515,6 +515,7 @@ async def _open_from_candidate(
             from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
             from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_candidate
             from app.engines.morning_premium_capture import premium_led_bypass_for_snap
+            from app.engines.vertical_rip_bypass import vertical_rip_bypass_for_snap
             from app.engines.spot_direction import chart_blocks_side, side_aligned_with_chart
 
             breadth_bypass = expiry_pm_itm_chart_bypass_allowed(
@@ -523,11 +524,14 @@ async def _open_from_candidate(
             premium_bypass = premium_led_bypass_for_snap(
                 candidate.side, snap, explosion_event=candidate.explosion_event,
             )
+            vertical_bypass = vertical_rip_bypass_for_snap(
+                candidate.side, snap, explosion_event=candidate.explosion_event,
+            )
             expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
             blocked, chart_reason = chart_blocks_side(
                 candidate.side, snap.spotChart, trade_score=trade_score,
                 breadth_aligned_bypass=breadth_bypass,
-                premium_led_bypass=premium_bypass,
+                premium_led_bypass=premium_bypass or vertical_bypass,
                 expiry_explosion_bypass=expiry_chart_bypass,
                 scalp_mode=(candidate.mode or "").lower() in {"scalp", "quick_sideways", "slow_bounce"},
             )
@@ -541,9 +545,10 @@ async def _open_from_candidate(
                 "snapshotAligned": side_aligned_with_chart(candidate.side, snap.spotChart),
                 "alignedWithChart": side_aligned_with_chart(candidate.side, snap.spotChart),
                 "chartBypassUsed": bool(
-                    premium_bypass or expiry_chart_bypass or breadth_bypass
+                    premium_bypass or vertical_bypass or expiry_chart_bypass or breadth_bypass
                 ),
                 "premiumLedBypass": premium_bypass,
+                "verticalRipBypass": vertical_bypass,
                 "expiryExplosionBypass": expiry_chart_bypass,
             }
     else:

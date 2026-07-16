@@ -260,6 +260,7 @@ def validate_mtf_scalp(
     *,
     trade_score: float = 0.0,
     premium_led_bypass: bool = False,
+    vertical_rip_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
@@ -273,11 +274,12 @@ def validate_mtf_scalp(
     if not settings.execution_mtf_enabled or not index_mtf:
         return True, "ok", {}
 
-    if premium_led_bypass:
+    if premium_led_bypass or vertical_rip_bypass:
         meta = {
             "index": mtf_summary(index_mtf, side),
             "passed": True,
-            "premiumLedBypass": True,
+            "premiumLedBypass": premium_led_bypass,
+            "verticalRipBypass": vertical_rip_bypass,
         }
         if premium_mtf:
             meta["premium"] = mtf_summary(premium_mtf, side)

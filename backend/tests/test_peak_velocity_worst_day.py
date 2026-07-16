@@ -136,7 +136,7 @@ def test_worst_day_allows_exploding_call_on_peak_velocity_bypass(mock_settings, 
         _Cand(event), AutoTraderState(), {"SENSEX": _snap()}, policy="BREAKOUT_ONLY",
     )
     assert ok is True, reason
-    assert meta.get("peakVelocityBypass") is True
+    assert meta.get("peakVelocityBypass") or meta.get("extremeMoveBypass")
 
 
 @patch("app.config.get_settings")

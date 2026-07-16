@@ -53,6 +53,62 @@ def _hist_min_premium(hist: Optional[deque]) -> Optional[float]:
     return min(vals) if vals else None
 
 
+def _hist_earliest_premium(hist: Optional[deque]) -> Optional[float]:
+    if not hist:
+        return None
+    for _, prem, _ in hist:
+        if prem and prem > 0:
+            return prem
+    return None
+
+
+def _retrofit_baseline_from_spike(
+    key: str,
+    premium: float,
+    hist: Optional[deque],
+    v3: float,
+    vol_surge: float = 1.0,
+) -> None:
+    """Lower session open when a single poll shows a vertical spike — fixes 36% vs 68% peak."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    if premium <= 0:
+        return
+
+    earliest = _hist_earliest_premium(hist)
+    if earliest is not None:
+        open_prem = _session_open.get(key)
+        if open_prem is None or earliest < open_prem:
+            _session_open[key] = earliest
+
+    spike_min = float(getattr(settings, "spike_velocity_baseline_min_pct", 12.0) or 12.0)
+    if hist and len(hist) >= 2 and v3 >= spike_min:
+        prior = hist[-2][1]
+        if prior and prior > 0 and prior < premium:
+            open_prem = _session_open.get(key, premium)
+            if prior < open_prem:
+                _session_open[key] = prior
+            low = _session_low.get(key, prior)
+            if prior < low:
+                _session_low[key] = prior
+
+    if not getattr(settings, "volume_spike_baseline_enabled", True):
+        return
+    min_surge = float(getattr(settings, "volume_spike_baseline_min_surge", 3.5) or 3.5)
+    if vol_surge < min_surge:
+        return
+    hist_min = _hist_min_premium(hist)
+    if hist_min is None or hist_min <= 0:
+        return
+    open_prem = _session_open.get(key, premium)
+    if hist_min < open_prem:
+        _session_open[key] = hist_min
+    low = _session_low.get(key, hist_min)
+    if hist_min < low:
+        _session_low[key] = hist_min
+
+
 def _update_session_low(key: str, premium: float, hist: Optional[deque] = None) -> None:
     if premium <= 0:
         return
@@ -113,6 +169,9 @@ def _session_open_move_pct(
     side: Side,
     premium: float,
     hist: Optional[deque] = None,
+    *,
+    v3: float = 0.0,
+    vol_surge: float = 1.0,
 ) -> float:
     """Premium % change since session baseline — catches 60→160 open rips."""
     _roll_session()
@@ -122,6 +181,7 @@ def _session_open_move_pct(
         _session_peak[key] = premium
         _session_low[key] = premium
         return 0.0
+    _retrofit_baseline_from_spike(key, premium, hist, v3, vol_surge)
     baseline = _effective_session_baseline(key, premium, hist)
     if baseline <= 0:
         return 0.0
@@ -137,6 +197,9 @@ def _session_peak_move_pct(
     side: Side,
     premium: float,
     hist: Optional[deque] = None,
+    *,
+    v3: float = 0.0,
+    vol_surge: float = 1.0,
 ) -> float:
     """Peak premium vs session baseline — keeps rip visible after pullback."""
     _roll_session()
@@ -146,6 +209,7 @@ def _session_peak_move_pct(
         _session_peak[key] = premium
         _session_low[key] = premium
         return 0.0
+    _retrofit_baseline_from_spike(key, premium, hist, v3, vol_surge)
     baseline = _effective_session_baseline(key, premium, hist)
     if baseline <= 0:
         return 0.0
@@ -502,8 +566,22 @@ def scan_chain_explosions(
             key_h = _strike_key(strike, side)
             hist = _history.get(symbol, {}).get(key_h)
             vel_key = _open_key(symbol, strike, side)
-            open_move = _session_open_move_pct(symbol, strike, side, premium, hist)
-            peak_move = _session_peak_move_pct(symbol, strike, side, premium, hist)
+
+            if not hist or len(hist) < 2:
+                v3_probe = 0.0
+                vol_surge_probe = 1.0
+            else:
+                v3_probe = _velocity(hist, 1)
+                vol_surge_probe = _volume_surge_with_chain(volume, hist, settings)
+
+            open_move = _session_open_move_pct(
+                symbol, strike, side, premium, hist,
+                v3=v3_probe, vol_surge=vol_surge_probe,
+            )
+            peak_move = _session_peak_move_pct(
+                symbol, strike, side, premium, hist,
+                v3=v3_probe, vol_surge=vol_surge_probe,
+            )
             session_move = _effective_session_move(open_move, peak_move)
             if not _premium_ok_for_scan(premium, max(open_move, session_move), settings):
                 continue

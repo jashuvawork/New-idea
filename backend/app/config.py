@@ -559,13 +559,28 @@ class Settings(BaseSettings):
     peak_move_explosion_score_boost_per_pct: float = 0.12
     # Session-open baseline — use intraday low when first tick arrived mid-rip
     session_open_use_intraday_low: bool = True
-    session_open_low_backfill_pct: float = 8.0
+    session_open_low_backfill_pct: float = 5.0
     # Velocity-at-peak scoring — retain spike velocity after fade
     velocity_peak_score_boost_enabled: bool = True
     velocity_peak_min_3s: float = 2.5
     velocity_peak_score_floor: float = 42.0
     velocity_peak_decay_seconds: int = 180
     velocity_peak_score_blend: float = 0.55
+    # Vertical rip bypass — catch premium-led explosions vs stale chart/breadth/MTF
+    vertical_rip_bypass_enabled: bool = True
+    vertical_rip_bypass_min_peak_pct: float = 30.0
+    vertical_rip_bypass_min_tier: str = "EXPLODING"
+    vertical_rip_bypass_min_score: float = 38.0
+    vertical_rip_bypass_min_peak_velocity_3s: float = 2.0
+    vertical_rip_bypass_min_volume_surge: float = 3.0
+    vertical_rip_hard_breadth_bypass_enabled: bool = True
+    vertical_rip_mtf_bypass_enabled: bool = True
+    # Volume-spike baseline — flat-then-vertical rips under-report peak move
+    volume_spike_baseline_enabled: bool = True
+    volume_spike_baseline_min_surge: float = 3.5
+    spike_velocity_baseline_min_pct: float = 12.0
+    explosion_cheap_rip_min_premium_inr: float = 12.0
+    explosion_cheap_rip_min_peak_pct: float = 28.0
 
     runner_trail_keep_ratio: float = 0.38
     runner_micro_giveback_points: float = 4.0

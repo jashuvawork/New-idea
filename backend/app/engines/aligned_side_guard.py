@@ -185,6 +185,14 @@ def breadth_hard_blocks_side(
         return False, "ok"
 
     resolved_snap = _resolve_snap(snap, candidate=candidate)
+
+    from app.engines.vertical_rip_bypass import vertical_rip_bypasses_hard_breadth
+
+    if vertical_rip_bypasses_hard_breadth(
+        side, breadth_bias, event=event or candidate, snap=resolved_snap,
+    ):
+        return False, "ok"
+
     score = _explosion_score(event=event, candidate=candidate, alert=alert)
     bypassed, _ = chart_mtf_breadth_bypass_active(
         side, breadth_bias, resolved_snap, score=score,
