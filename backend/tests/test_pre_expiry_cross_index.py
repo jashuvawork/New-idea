@@ -82,7 +82,7 @@ def test_blocks_sensex_explosion_routes_to_nifty(mock_fade, mock_bad):
         "NIFTY": _snap("NIFTY", _next_week(), tqs=38.0),
         "SENSEX": _snap("SENSEX", tomorrow, tqs=34.0),
     }
-    cand = _Cand("SENSEX", Side.PUT, 62.0, snap=snaps["SENSEX"])
+    cand = _Cand("SENSEX", Side.PUT, 50.0, snap=snaps["SENSEX"])
     ok, reason, meta = check_bad_day_candidate(cand, AutoTraderState(), snaps)
     assert not ok
     assert "pre_expiry" in reason

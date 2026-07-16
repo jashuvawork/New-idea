@@ -173,7 +173,8 @@ def _gate_checks(
         gates.append({"gate": "tradeable_tier", "passed": True, "detail": tier})
 
     # 3 — Premium band
-    if not premium_in_band(prem, mode="explosion"):
+    peak_for_prem = float(alert.get("peakMovePct") or daily_move or 0)
+    if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_for_prem):
         blockers.append("premium_out_of_band")
         gates.append({"gate": "premium_band", "passed": False, "detail": f"premium ₹{prem}", "fix": "Sub-min bypass on extreme session move"})
     else:
@@ -190,7 +191,8 @@ def _gate_checks(
     )
     if score < min_score:
         blockers.append(f"score_{score:.0f}<{min_score:.0f}")
-        fix = "Peak-move bypass needs session peak ≥50%" if peak_move < settings.peak_move_explosion_min_pct else "Wait for velocity spike"
+        min_peak = float(getattr(settings, "peak_move_explosion_min_pct", 35.0) or 35.0)
+        fix = f"Peak-move bypass needs session peak ≥{min_peak:.0f}%" if peak_move < min_peak else "Wait for velocity spike"
         gates.append({"gate": "explosion_score", "passed": False, "detail": f"{score:.0f} < {min_score:.0f} (peak {peak_move:.0f}%)", "fix": fix})
     else:
         gates.append({"gate": "explosion_score", "passed": True, "detail": f"{score:.0f} ≥ {min_score:.0f}"})
@@ -259,6 +261,12 @@ def _gate_checks(
             "gate": "extreme_all_in_bypass",
             "passed": True,
             "detail": f"{tier} {daily_move:.0f}% session rip — ALL-IN bypass active",
+        })
+    elif vertical_bypass:
+        gates.append({
+            "gate": "vertical_rip_bypass",
+            "passed": True,
+            "detail": f"{tier} peak rip — chart/breadth bypass active",
         })
 
     bypassed, bypass_reason = chart_mtf_breadth_bypass_active(

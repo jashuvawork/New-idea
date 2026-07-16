@@ -343,8 +343,10 @@ def check_bad_day_candidate(
 
         event = getattr(candidate, "explosion_event", None)
         if event is not None and qualifies_for_vertical_rip_bypass(event, snap=snap):
-            meta["verticalRipBypass"] = True
-            return True, "ok", meta
+            routed_away = bool(pre_restricted and pre_alt and sym.upper() != pre_alt.upper())
+            if not routed_away:
+                meta["verticalRipBypass"] = True
+                return True, "ok", meta
         if tier != "ELITE" and score < floor:
             return False, f"bad_day_explosion_rank_below_{floor:.0f}", meta
         if not aligned and score < settings.high_confidence_min_score:

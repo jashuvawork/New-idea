@@ -48,9 +48,9 @@ def _snap() -> SymbolSnapshot:
     )
 
 
+@patch("app.engines.snapshot_lag_analyzer.in_all_day_explosion_window", return_value=True)
 @patch("app.engines.snapshot_lag_analyzer.find_best_entry", return_value=None)
-@patch("app.engines.morning_premium_capture.in_all_day_explosion_window", return_value=True)
-def test_lag_evening_block_not_misleading_on_non_expiry_afternoon(mock_all_day, mock_best):
+def test_lag_evening_block_not_misleading_on_non_expiry_afternoon(mock_best, mock_all_day):
     state = AutoTraderState()
     snap = _snap()
     with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-08"):

@@ -33,7 +33,7 @@ def classify_moneyness(
     """CALL ITM below spot/ATM; PUT ITM above spot/ATM."""
     settings = get_settings()
     ref = atm if atm is not None else atm_strike(spot, symbol)
-    tol = settings.moneyness_atm_tolerance_points
+    tol = float(getattr(settings, "moneyness_atm_tolerance_points", 50.0) or 50.0)
     side_val = side.value if isinstance(side, Side) else str(side).upper()
 
     if abs(strike - ref) <= tol:

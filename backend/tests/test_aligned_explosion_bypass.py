@@ -158,20 +158,22 @@ def test_directional_lock_bypass_on_aligned_rip(mock_settings):
     assert blocked is False
 
 
+@patch("app.engines.session_timing.get_settings")
 @patch("app.engines.expiry_day_guards.get_settings")
-def test_expiry_session_enables_faster_entry_scan(mock_settings):
+def test_expiry_session_enables_faster_entry_scan(mock_expiry_settings, mock_timing_settings):
     from app.engines.expiry_day_guards import any_expiry_session_active, refresh_expiry_session
     from app.engines.session_timing import effective_entry_scan_interval_ms
     from app.models.schemas import MarketPhase, SymbolSnapshot
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    s = mock_settings.return_value
+    s = mock_expiry_settings.return_value
     s.entry_scan_interval_ms = 2000
     s.expiry_entry_scan_interval_ms = 750
     s.expiry_day_guards_enabled = True
     s.explosion_open_entry_enabled = True
     s.explosion_open_scan_interval_ms = 1000
+    mock_timing_settings.return_value = s
 
     IST = ZoneInfo("Asia/Kolkata")
     snap = SymbolSnapshot(

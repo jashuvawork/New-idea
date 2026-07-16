@@ -143,13 +143,15 @@ def _market_opposes_side(
 
 
 def _elite_counter_breadth_ok(event: ExplosionEvent, settings: Any) -> bool:
-    """Counter-trend premium rip — ELITE tier with near-max explosion score or vertical peak."""
+    """Counter-trend premium rip — ELITE tier with vertical peak or near-max explosion score."""
     from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
 
-    if qualifies_for_vertical_rip_bypass(event):
-        return True
-
     tier = str(event.tier or "").upper()
+    score = float(event.explosion_score or 0)
+    if tier == "ELITE" and qualifies_for_vertical_rip_bypass(event):
+        return True
+    if tier != "ELITE":
+        return False
     score = float(event.explosion_score or 0)
     if tier != "ELITE":
         return False
@@ -529,20 +531,25 @@ def is_all_day_explosion_event(
     v3 = float(event.velocity_3s or 0)
     v9 = float(event.velocity_9s or 0)
 
-    if open_move >= settings.all_day_explosion_extreme_move_min_pct:
-        return score >= settings.all_day_explosion_min_score - 5
+    extreme_min = float(getattr(settings, "all_day_explosion_extreme_move_min_pct", 80.0) or 80.0)
+    if open_move >= extreme_min:
+        min_score = float(getattr(settings, "all_day_explosion_min_score", 38.0) or 38.0)
+        return score >= min_score - 5
 
-    if open_move >= settings.all_day_explosion_session_move_min_pct:
-        if score >= settings.all_day_explosion_min_score:
+    session_min = float(getattr(settings, "all_day_explosion_session_move_min_pct", 40.0) or 40.0)
+    if open_move >= session_min:
+        min_score = float(getattr(settings, "all_day_explosion_min_score", 38.0) or 38.0)
+        if score >= min_score:
             return _chart_ok_for_all_day_event(event, chart)
 
     vel_ok = (
-        v3 >= settings.all_day_explosion_building_min_velocity_3s
-        or v9 >= settings.all_day_explosion_min_velocity_9s
+        v3 >= float(getattr(settings, "all_day_explosion_building_min_velocity_3s", 1.0) or 1.0)
+        or v9 >= float(getattr(settings, "all_day_explosion_min_velocity_9s", 1.8) or 1.8)
     )
     if not vel_ok:
         return False
-    if score < settings.all_day_explosion_min_score:
+    min_score = float(getattr(settings, "all_day_explosion_min_score", 38.0) or 38.0)
+    if score < min_score:
         return False
     if chart and not _chart_ok_for_all_day_event(event, chart):
         return False
