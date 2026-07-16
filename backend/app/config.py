@@ -185,6 +185,9 @@ class Settings(BaseSettings):
     explosion_faded_rip_max_live_velocity_3s: float = 0.5
     explosion_faded_rip_lot_cap: int = 8
     explosion_faded_rip_tighter_stop_mult: float = 0.85
+    explosion_faded_rip_no_green_exit_enabled: bool = True
+    explosion_faded_rip_no_green_seconds: int = 60
+    explosion_faded_rip_min_green_points: float = 0.5
     explosion_macd_alignment_required: bool = True
     explosion_deep_otm_min_premium_inr: float = 3.0
     explosion_volume_awaken_min: int = 25000
