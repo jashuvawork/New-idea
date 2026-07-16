@@ -16,16 +16,68 @@ def _side_val(side: Side | str) -> str:
 
 
 def _metrics_from_event(event: Any) -> dict[str, float | str]:
-    tier = str(getattr(event, "tier", "") or "").upper()
-    score = float(getattr(event, "explosion_score", 0) or getattr(event, "score", 0) or 0)
-    daily = float(getattr(event, "daily_move_pct", 0) or 0)
-    peak = float(getattr(event, "peak_move_pct", 0) or 0)
-    v3 = float(getattr(event, "velocity_3s", 0) or 0)
-    v9 = float(getattr(event, "velocity_9s", 0) or 0)
-    vol = float(getattr(event, "volume_surge", 0) or 1.0)
-    symbol = str(getattr(event, "symbol", "") or "")
-    strike = float(getattr(event, "strike", 0) or 0)
-    side = getattr(event, "side", Side.CALL)
+    """Resolve explosion metrics from ExplosionEvent, EntryCandidate, or alert dict."""
+    tier = ""
+    score = 0.0
+    daily = 0.0
+    peak = 0.0
+    v3 = 0.0
+    v9 = 0.0
+    vol = 1.0
+    symbol = ""
+    strike = 0.0
+    side = Side.CALL
+
+    ev = getattr(event, "explosion_event", None) if event is not None else None
+    if isinstance(ev, ExplosionEvent):
+        event = ev
+    elif isinstance(event, dict):
+        alert = event
+        tier = str(alert.get("tier", "") or "").upper()
+        score = float(alert.get("explosionScore") or alert.get("score") or 0)
+        daily = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
+        peak = float(alert.get("peakMovePct") or 0)
+        v3 = float(alert.get("velocity3s") or 0)
+        v9 = float(alert.get("velocity9s") or 0)
+        vol = float(alert.get("volumeSurge") or 1)
+        symbol = str(alert.get("symbol", "") or "")
+        strike = float(alert.get("strike") or 0)
+        try:
+            side = Side(str(alert.get("side", "CALL")).upper())
+        except (TypeError, ValueError):
+            side = Side.CALL
+        peak_v3 = retained_peak_velocity_3s(symbol, strike, side) if symbol and strike else 0.0
+        session_move = max(daily, peak)
+        return {
+            "tier": tier,
+            "score": score,
+            "daily_move": daily,
+            "peak_move": peak,
+            "session_move": session_move,
+            "velocity_3s": v3,
+            "velocity_9s": v9,
+            "volume_surge": vol,
+            "peak_velocity_3s": peak_v3,
+        }
+
+    if event is not None:
+        tier = str(getattr(event, "tier", "") or "").upper()
+        score = float(getattr(event, "explosion_score", 0) or getattr(event, "score", 0) or 0)
+        daily = float(getattr(event, "daily_move_pct", 0) or 0)
+        peak = float(getattr(event, "peak_move_pct", 0) or 0)
+        if peak <= 0:
+            alert = getattr(event, "alert", None) or {}
+            if isinstance(alert, dict):
+                peak = float(alert.get("peakMovePct") or 0)
+                if peak > daily:
+                    daily = max(daily, float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0))
+        v3 = float(getattr(event, "velocity_3s", 0) or 0)
+        v9 = float(getattr(event, "velocity_9s", 0) or 0)
+        vol = float(getattr(event, "volume_surge", 0) or 1.0)
+        symbol = str(getattr(event, "symbol", "") or "")
+        strike = float(getattr(event, "strike", 0) or 0)
+        side = getattr(event, "side", Side.CALL)
+
     peak_v3 = retained_peak_velocity_3s(symbol, strike, side) if symbol and strike else 0.0
     session_move = max(daily, peak)
     return {
