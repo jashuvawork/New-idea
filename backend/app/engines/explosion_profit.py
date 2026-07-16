@@ -390,6 +390,10 @@ def _should_skip_no_progress(trade: PaperTrade, settings) -> bool:
     ctx = trade.entryContext or {}
     if ctx.get("extremeAllInBypass"):
         return True
+    from app.engines.explosion_entry_guards import is_faded_rip_caution_trade
+
+    if is_faded_rip_caution_trade(trade):
+        return False
     if ctx.get("ictMegaRip") or ctx.get("goodDayIctCapture"):
         return True
     edge = ctx.get("edgeScore") or {}
@@ -452,6 +456,10 @@ def _defer_adaptive_stop(
         chart_confidence_for_trade,
     )
     from app.engines.bullish_hold import direction_aligned_with_breadth
+    from app.engines.explosion_entry_guards import is_faded_rip_caution_trade
+
+    if is_faded_rip_caution_trade(trade):
+        return False
 
     if hold_until_target_active(trade, best):
         return True
@@ -504,6 +512,13 @@ def evaluate_explosion_exit(
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
     best = max(trade.bestPnlPoints, pnl_pts)
     hold = _hold_seconds(trade)
+
+    from app.engines.explosion_entry_guards import faded_rip_no_green_exit_reason
+
+    faded_exit = faded_rip_no_green_exit_reason(trade, hold_seconds=hold, best_points=best)
+    if faded_exit:
+        return faded_exit, pnl_inr
+
     target = exit_params.target_points
     trail_floor = _trail_floor_pts(
         trade, best, settings, trail_arm_points=exit_params.trail_arm_points,

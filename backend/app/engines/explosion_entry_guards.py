@@ -172,3 +172,35 @@ def cap_faded_rip_lots(lots: int) -> int:
 def faded_rip_stop_multiplier() -> float:
     settings = get_settings()
     return float(getattr(settings, "explosion_faded_rip_tighter_stop_mult", 0.85) or 0.85)
+
+
+def is_faded_rip_caution_trade(trade: Any) -> bool:
+    """Explosion-only — faded vertical rip entered with caution sizing."""
+    from app.models.schemas import StrategyType
+
+    ctx = getattr(trade, "entryContext", None) or {}
+    if not (ctx.get("fadedRipCaution") or ctx.get("fadedVerticalRip")):
+        return False
+    strategy = getattr(trade, "strategyType", None)
+    if strategy == StrategyType.EXPLOSIVE:
+        return True
+    return str(ctx.get("selectionMode") or "").lower() == "explosion"
+
+
+def faded_rip_no_green_exit_reason(
+    trade: Any,
+    *,
+    hold_seconds: float,
+    best_points: float,
+) -> Optional[str]:
+    """Exit explosive fade-chase if never went green within the caution window."""
+    settings = get_settings()
+    if not getattr(settings, "explosion_faded_rip_no_green_exit_enabled", True):
+        return None
+    if not is_faded_rip_caution_trade(trade):
+        return None
+    limit = int(getattr(settings, "explosion_faded_rip_no_green_seconds", 60) or 60)
+    min_green = float(getattr(settings, "explosion_faded_rip_min_green_points", 0.5) or 0.5)
+    if hold_seconds >= limit and best_points < min_green:
+        return "explosion_faded_rip_no_green"
+    return None
