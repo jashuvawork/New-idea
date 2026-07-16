@@ -44,6 +44,53 @@ def in_worst_day_dead_zone() -> bool:
     return start <= current < end
 
 
+_TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
+
+
+def dead_zone_allows_candidate(candidate: Any) -> tuple[bool, str]:
+    """
+    Dead zone blocks quick/defensive entries but allows ELITE/EXPLODING vertical rips
+    with material session peak or retained spike velocity.
+    """
+    if not in_worst_day_dead_zone():
+        return True, "ok"
+    settings = get_settings()
+    if not getattr(settings, "worst_day_dead_zone_explosion_bypass_enabled", True):
+        return False, "worst_day_dead_zone"
+
+    mode = str(getattr(candidate, "mode", "") or "")
+    if mode != "explosion":
+        return False, "worst_day_dead_zone"
+
+    tier = "WATCH"
+    peak_move = 0.0
+    vel3 = 0.0
+    daily_move = 0.0
+    event = getattr(candidate, "explosion_event", None)
+    if event is not None:
+        tier = str(getattr(event, "tier", "WATCH") or "WATCH")
+        peak_move = float(getattr(event, "peak_move_pct", 0) or 0)
+        vel3 = float(getattr(event, "velocity_3s", 0) or 0)
+        daily_move = float(getattr(event, "daily_move_pct", 0) or 0)
+    else:
+        tier = str(getattr(candidate, "tier", "WATCH") or "WATCH")
+
+    min_tier = str(getattr(settings, "worst_day_dead_zone_bypass_min_tier", "EXPLODING") or "EXPLODING").upper()
+    if _TIER_RANK.get(tier.upper(), 0) < _TIER_RANK.get(min_tier, 3):
+        return False, "worst_day_dead_zone"
+
+    min_peak = float(getattr(settings, "worst_day_dead_zone_bypass_min_peak_pct", 30.0) or 30.0)
+    min_vel = float(getattr(settings, "worst_day_dead_zone_bypass_min_velocity_3s", 2.0) or 2.0)
+    min_session = float(
+        getattr(settings, "worst_day_dead_zone_bypass_min_session_move_pct", 35.0) or 35.0,
+    )
+    if peak_move >= min_peak or daily_move >= min_session or vel3 >= min_vel:
+        return True, "ok"
+    if vel3 < min_vel and peak_move >= min_peak * 0.85:
+        return True, "ok"
+    return False, "worst_day_dead_zone"
+
+
 def worst_day_defensive_session_active(
     state: Any,
     snapshots: dict[str, SymbolSnapshot],

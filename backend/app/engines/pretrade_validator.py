@@ -723,10 +723,15 @@ def validate_candidate(
     from app.engines.bad_day_routing import check_bad_day_candidate
 
     if not all_in:
-        from app.engines.worst_day_itm_fade import in_worst_day_dead_zone, worst_day_defensive_session_active
+        from app.engines.worst_day_itm_fade import (
+            dead_zone_allows_candidate,
+            worst_day_defensive_session_active,
+        )
 
-        if worst_day_defensive_session_active(state, snap_map) and in_worst_day_dead_zone():
-            return False, "worst_day_dead_zone", meta
+        if worst_day_defensive_session_active(state, snap_map):
+            dz_ok, dz_reason = dead_zone_allows_candidate(candidate)
+            if not dz_ok:
+                return False, dz_reason, meta
 
         bd_ok, bd_reason, bd_meta = check_bad_day_candidate(candidate, state, snap_map)
         meta.update(bd_meta)
