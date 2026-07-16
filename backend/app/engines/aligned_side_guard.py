@@ -189,7 +189,10 @@ def breadth_hard_blocks_side(
     from app.engines.vertical_rip_bypass import vertical_rip_bypasses_hard_breadth
 
     if vertical_rip_bypasses_hard_breadth(
-        side, breadth_bias, event=event or candidate, snap=resolved_snap,
+        side,
+        breadth_bias,
+        event=event or getattr(candidate, "explosion_event", None) or candidate,
+        snap=resolved_snap,
     ):
         return False, "ok"
 
