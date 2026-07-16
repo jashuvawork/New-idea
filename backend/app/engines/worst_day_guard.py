@@ -266,7 +266,12 @@ def worst_day_allows_candidate(
         return False, f"worst_day_breakout_rank_below_{settings.worst_day_breakout_min_rank:.0f}", meta
 
     if not _breadth_aligned(candidate, snap):
-        return False, "worst_day_breakout_requires_alignment", meta
+        from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
+
+        event = getattr(candidate, "explosion_event", None)
+        if not (event is not None and qualifies_for_vertical_rip_bypass(event, snap=snap)):
+            return False, "worst_day_breakout_requires_alignment", meta
+        meta["verticalRipBypass"] = True
 
     if float(snap.tradeQualityScore or 0) < settings.worst_day_breakout_min_symbol_tqs:
         return False, f"worst_day_breakout_tqs_below_{settings.worst_day_breakout_min_symbol_tqs:.0f}", meta
@@ -287,10 +292,15 @@ def worst_day_allows_candidate(
     chart = snap.spotChart
     if chart and settings.worst_day_breakout_require_chart_align:
         from app.engines.spot_direction import side_aligned_with_chart
+        from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
         from app.models.schemas import Side
+
+        event = getattr(candidate, "explosion_event", None)
         side = candidate.side if hasattr(candidate.side, "value") else Side(candidate.side)
         if not side_aligned_with_chart(side, chart):
-            return False, "worst_day_breakout_chart_misaligned", meta
+            if not (event is not None and qualifies_for_vertical_rip_bypass(event, snap=snap)):
+                return False, "worst_day_breakout_chart_misaligned", meta
+            meta["verticalRipBypass"] = True
 
     return True, "ok", meta
 

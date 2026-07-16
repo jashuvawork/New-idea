@@ -160,7 +160,11 @@ def _explosion_candidates(
     for alert in snap.explosionAlerts or []:
         if not alert.get("tradeable"):
             continue
-        if not premium_in_band(alert.get("premium"), mode="explosion"):
+        if not premium_in_band(
+            alert.get("premium"),
+            mode="explosion",
+            peak_move_pct=float(alert.get("peakMovePct") or 0),
+        ):
             continue
         if alert.get("tier") not in ("ELITE", "EXPLODING"):
             from app.engines.morning_premium_capture import is_premium_capture_alert
@@ -849,7 +853,7 @@ def diagnose_missed_entries(
                 daily_move_pct=daily_move,
             )
             blockers: list[str] = []
-            if not premium_in_band(prem, mode="explosion"):
+            if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move):
                 blockers.append("premium_out_of_band")
             if score < min_score:
                 blockers.append(f"explosion_score<{min_score:.0f}")

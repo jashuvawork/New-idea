@@ -180,6 +180,7 @@ def validate_execution_charts(
     premium_mtf_reads: Optional[dict] = None,
     breadth_aligned_bypass: bool = False,
     premium_led_bypass: bool = False,
+    vertical_rip_bypass: bool = False,
     expiry_explosion_bypass: bool = False,
     explosion_event: Any = None,
     mode: str = "",
@@ -192,7 +193,7 @@ def validate_execution_charts(
         side,
         index_chart,
         breadth_aligned_bypass=breadth_aligned_bypass,
-        premium_led_bypass=premium_led_bypass,
+        premium_led_bypass=premium_led_bypass or vertical_rip_bypass,
         expiry_explosion_bypass=expiry_explosion_bypass,
         scalp_mode=scalp_mode,
     )
@@ -202,7 +203,7 @@ def validate_execution_charts(
     blocked, reason = chart_blocks_side(
         side, index_chart, trade_score=trade_score,
         breadth_aligned_bypass=breadth_aligned_bypass,
-        premium_led_bypass=premium_led_bypass,
+        premium_led_bypass=premium_led_bypass or vertical_rip_bypass,
         expiry_explosion_bypass=expiry_explosion_bypass,
         scalp_mode=scalp_mode,
     )
@@ -222,6 +223,7 @@ def validate_execution_charts(
             premium_mtf_reads,
             trade_score=trade_score,
             premium_led_bypass=premium_led_bypass,
+            vertical_rip_bypass=vertical_rip_bypass,
             scalp_mode=scalp_mode,
         )
         if not passed:
@@ -253,10 +255,14 @@ async def monitor_trade_chart_before_execution(
     from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
     from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_event
     from app.engines.morning_premium_capture import premium_led_bypass_for_snap
+    from app.engines.vertical_rip_bypass import vertical_rip_bypass_for_snap
 
     scalp_mode = _is_scalp_mode(mode)
     breadth_bypass = expiry_pm_itm_chart_bypass_allowed(side, snap, mode=mode)
     premium_bypass = premium_led_bypass_for_snap(
+        side, snap, explosion_event=explosion_event,
+    )
+    vertical_bypass = vertical_rip_bypass_for_snap(
         side, snap, explosion_event=explosion_event,
     )
     expiry_chart_bypass = (
@@ -274,7 +280,7 @@ async def monitor_trade_chart_before_execution(
         blocked, reason = chart_blocks_side(
             side, snap.spotChart, trade_score=trade_score,
             breadth_aligned_bypass=breadth_bypass,
-            premium_led_bypass=premium_bypass,
+            premium_led_bypass=premium_bypass or vertical_bypass,
             expiry_explosion_bypass=expiry_chart_bypass,
         )
         fallback = {
@@ -303,6 +309,7 @@ async def monitor_trade_chart_before_execution(
         premium_mtf_reads=premium_mtf_reads,
         breadth_aligned_bypass=breadth_bypass,
         premium_led_bypass=premium_bypass,
+        vertical_rip_bypass=vertical_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
         explosion_event=explosion_event,
         mode=mode,
@@ -320,6 +327,7 @@ async def monitor_trade_chart_before_execution(
         )
         if flip_blocks and not (
             expiry_chart_bypass
+            or vertical_bypass
             or (premium_bypass and not scalp_mode)
             or (breadth_bypass and not scalp_mode)
         ):
@@ -332,6 +340,7 @@ async def monitor_trade_chart_before_execution(
     meta["passed"] = passed
     meta["blockReason"] = reason if not passed else None
     meta["premiumLedBypass"] = premium_bypass
+    meta["verticalRipBypass"] = vertical_bypass
     meta["expiryExplosionBypass"] = expiry_chart_bypass
     meta["breadthAlignedBypass"] = breadth_bypass
     snap_aligned = side_aligned_with_chart(side, snap.spotChart)
@@ -341,7 +350,7 @@ async def monitor_trade_chart_before_execution(
     meta["chartBypassUsed"] = bool(
         passed
         and not exec_aligned
-        and (premium_bypass or expiry_chart_bypass or breadth_bypass)
+        and (premium_bypass or vertical_bypass or expiry_chart_bypass or breadth_bypass)
     )
     if meta["chartBypassUsed"] and snap_aligned:
         meta["alignedWithChart"] = True

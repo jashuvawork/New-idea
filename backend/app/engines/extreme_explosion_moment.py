@@ -128,6 +128,9 @@ def is_high_mover_elite_bypass(
     elite_floor = float(settings.extreme_explosion_elite_move_min_pct) * 0.95
     if daily_move >= elite_floor and score >= settings.all_day_explosion_min_score:
         return True
+    rip_min = float(getattr(settings, "vertical_rip_bypass_min_peak_pct", 30.0) or 30.0)
+    if daily_move >= rip_min and score >= settings.all_day_explosion_min_score - 2:
+        return True
     if daily_move >= settings.all_day_explosion_session_move_min_pct and score >= settings.all_day_explosion_min_score + 4:
         return True
     return False

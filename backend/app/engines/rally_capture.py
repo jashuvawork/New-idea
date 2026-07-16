@@ -100,8 +100,19 @@ def _side_val(side: Side | str) -> str:
     return side.value if isinstance(side, Side) else str(side).upper()
 
 
-def breadth_blocks_explosion_side(side: Side | str, breadth_bias: str, tier: str) -> tuple[bool, str]:
+def breadth_blocks_explosion_side(
+    side: Side | str,
+    breadth_bias: str,
+    tier: str,
+    *,
+    event: Optional[ExplosionEvent] = None,
+) -> tuple[bool, str]:
     """No PUT into BULLISH breadth / no CALL into BEARISH unless ELITE."""
+    from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
+
+    if event is not None and qualifies_for_vertical_rip_bypass(event):
+        return False, "ok"
+
     settings = get_settings()
     if not settings.explosion_breadth_alignment_enabled:
         return False, "ok"
@@ -114,8 +125,19 @@ def breadth_blocks_explosion_side(side: Side | str, breadth_bias: str, tier: str
     return False, "ok"
 
 
-def chart_blocks_explosion_side(side: Side | str, chart: Optional[SpotChart], tier: str) -> tuple[bool, str]:
+def chart_blocks_explosion_side(
+    side: Side | str,
+    chart: Optional[SpotChart],
+    tier: str,
+    *,
+    event: Optional[ExplosionEvent] = None,
+) -> tuple[bool, str]:
     """Block counter-trend explosion legs when index chart has clear bias."""
+    from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
+
+    if event is not None and qualifies_for_vertical_rip_bypass(event):
+        return False, "ok"
+
     if chart is None:
         return False, "ok"
     direction = (chart.direction or "NEUTRAL").upper()

@@ -230,9 +230,13 @@ def _breadth_aligned(candidate: Any, snap: SymbolSnapshot) -> bool:
 def _candidate_session_move(candidate: Any) -> float:
     ev = getattr(candidate, "explosion_event", None)
     if ev is not None:
-        return float(getattr(ev, "daily_move_pct", 0) or 0)
+        daily = float(getattr(ev, "daily_move_pct", 0) or 0)
+        peak = float(getattr(ev, "peak_move_pct", 0) or 0)
+        return max(daily, peak)
     alert = getattr(candidate, "alert", None) or {}
-    return float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
+    daily = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
+    peak = float(alert.get("peakMovePct") or 0)
+    return max(daily, peak)
 
 
 def _extreme_explosion_bypass(candidate: Any) -> bool:
@@ -335,6 +339,12 @@ def check_bad_day_candidate(
     if mode == "explosion":
         if _extreme_explosion_bypass(candidate):
             return True, "ok", meta
+        from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
+
+        event = getattr(candidate, "explosion_event", None)
+        if event is not None and qualifies_for_vertical_rip_bypass(event, snap=snap):
+            meta["verticalRipBypass"] = True
+            return True, "ok", meta
         if tier != "ELITE" and score < floor:
             return False, f"bad_day_explosion_rank_below_{floor:.0f}", meta
         if not aligned and score < settings.high_confidence_min_score:
@@ -370,6 +380,12 @@ def check_bad_day_candidate(
         return False, "bad_day_worst_day_quick_requires_alternate", meta
 
     if score < floor:
+        from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
+
+        event = getattr(candidate, "explosion_event", None)
+        if mode == "explosion" and event is not None and qualifies_for_vertical_rip_bypass(event, snap=snap):
+            meta["verticalRipBypass"] = True
+            return True, "ok", meta
         return False, f"bad_day_rank_below_{floor:.0f}", meta
 
     return True, "ok", meta

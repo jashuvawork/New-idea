@@ -143,7 +143,12 @@ def _market_opposes_side(
 
 
 def _elite_counter_breadth_ok(event: ExplosionEvent, settings: Any) -> bool:
-    """Counter-trend premium rip — only ELITE tier with near-max explosion score."""
+    """Counter-trend premium rip — ELITE tier with near-max explosion score or vertical peak."""
+    from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
+
+    if qualifies_for_vertical_rip_bypass(event):
+        return True
+
     tier = str(event.tier or "").upper()
     score = float(event.explosion_score or 0)
     if tier != "ELITE":
@@ -165,8 +170,11 @@ def counter_trend_entry_allowed(
     """Block counter-trend legs — extreme ALL-IN rips bypass."""
     if explosion_event is not None:
         from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
+        from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
 
         if is_extreme_explosion_all_in_bypass(event=explosion_event):
+            return True
+        if qualifies_for_vertical_rip_bypass(explosion_event, snap=snap):
             return True
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
@@ -695,14 +703,21 @@ def premium_led_explosion_bypass(
     v9 = float(event.velocity_9s or 0)
     score = float(event.explosion_score or 0)
     open_move = float(event.daily_move_pct or 0)
+    peak_move = float(getattr(event, "peak_move_pct", 0) or 0)
+    session_move = max(open_move, peak_move)
     open_min = float(getattr(settings, "open_premium_min_move_pct", 25.0) or 25.0)
     open_bypass_score = float(getattr(settings, "open_premium_bypass_min_score", 35.0) or 35.0)
 
-    extreme_move = float(getattr(settings, "all_day_explosion_extreme_move_min_pct", 80.0) or 80.0)
-    if open_move >= extreme_move and score >= settings.open_premium_bypass_min_score - 3:
+    from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
+
+    if qualifies_for_vertical_rip_bypass(event):
         return True
 
-    if open_move >= open_min and score >= open_bypass_score:
+    extreme_move = float(getattr(settings, "all_day_explosion_extreme_move_min_pct", 80.0) or 80.0)
+    if session_move >= extreme_move and score >= settings.open_premium_bypass_min_score - 3:
+        return True
+
+    if session_move >= open_min and score >= open_bypass_score:
         return True
 
     if v3 >= settings.morning_capture_extreme_velocity_3s or v9 >= settings.morning_capture_extreme_velocity_9s:

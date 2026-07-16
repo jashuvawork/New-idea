@@ -178,7 +178,7 @@ def check_explosion_entry(
 
     premium_bypass = premium_led_explosion_bypass(event, chart, breadth_bias)
 
-    blocked, reason = breadth_blocks_explosion_side(event.side, breadth.bias, event.tier)
+    blocked, reason = breadth_blocks_explosion_side(event.side, breadth.bias, event.tier, event=event)
     if blocked and not premium_bypass:
         return False, reason
 
@@ -187,7 +187,7 @@ def check_explosion_entry(
         if blocked and not premium_bypass:
             return False, reason
 
-    blocked, reason = chart_blocks_explosion_side(event.side, chart, event.tier)
+    blocked, reason = chart_blocks_explosion_side(event.side, chart, event.tier, event=event)
     if blocked and not premium_bypass and not afternoon_capture_skips_chart_block(event, chart):
         if not is_all_day_explosion_event(event, chart=chart):
             return False, reason
