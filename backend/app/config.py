@@ -188,6 +188,7 @@ class Settings(BaseSettings):
     explosion_faded_rip_no_green_exit_enabled: bool = True
     explosion_faded_rip_no_green_seconds: int = 60
     explosion_faded_rip_min_green_points: float = 0.5
+    faded_rip_no_green_hold_min_session_move_pct: float = 60.0
     explosion_macd_alignment_required: bool = True
     explosion_deep_otm_min_premium_inr: float = 3.0
     explosion_volume_awaken_min: int = 25000
@@ -719,6 +720,9 @@ class Settings(BaseSettings):
     bad_day_fading_symbol_penalty: float = 18.0
     bad_day_alternate_index_bonus: float = 14.0
     bad_day_alternate_aligned_bonus: float = 8.0
+    cross_index_elite_priority_enabled: bool = True
+    cross_index_elite_min_session_move_pct: float = 40.0
+    cross_index_elite_priority_bonus: float = 22.0
     expiry_fading_symbol_loss_inr: float = -5_000.0
     expiry_fading_session_loss_inr: float = -10_000.0
     expiry_fading_max_symbol_tqs: float = 42.0

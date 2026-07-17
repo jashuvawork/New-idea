@@ -626,9 +626,10 @@ def find_best_entry(
     for c in candidates:
         c.score += symbol_rank_adjustment(c.symbol, chop)
         c.score += index_adj.get(c.symbol.upper(), 0.0)
-        from app.engines.bad_day_routing import cross_index_rank_adjustment
+        from app.engines.bad_day_routing import cross_index_elite_priority_bonus, cross_index_rank_adjustment
 
         c.score += cross_index_rank_adjustment(c, state, snapshots)
+        c.score += cross_index_elite_priority_bonus(c, snapshots)
         if settings.edge_engine_enabled:
             edge = compute_entry_edge(c, c.snap, state)
             c.score += edge_rank_bonus(edge)
