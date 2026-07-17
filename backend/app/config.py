@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     tick_fast_exit_enabled: bool = True
     entry_scan_interval_ms: int = 2000
     expiry_entry_scan_interval_ms: int = 750
+    # Cap full REST rebuild so background monitor never stalls UI for minutes.
+    full_rest_rebuild_timeout_seconds: float = 25.0
+    full_rest_min_seconds: float = 45.0
+    full_rest_backoff_slow_ms: float = 15000.0
+    full_rest_backoff_seconds: float = 75.0
     expiry_atm_tier_velocity_mult: float = 0.85
     aligned_explosion_rip_bypass_enabled: bool = True
     aligned_explosion_rip_min_score: float = 45.0

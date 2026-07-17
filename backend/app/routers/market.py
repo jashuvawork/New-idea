@@ -55,6 +55,7 @@ _EXIT_EVAL_MIN_MS = 200.0
 _FULL_REST_MIN_SECONDS = 45.0
 _JSON_META_SYNC_MS = 400.0
 _WS_OVERLAY_MIN_MS = 1000.0
+_full_rest_task: Optional[asyncio.Task] = None
 
 
 def _serialize_snapshot(snap: MultiSnapshot) -> bytes:
@@ -124,12 +125,51 @@ def exit_eval_due() -> bool:
 
 
 def full_rest_rebuild_due() -> bool:
-    return (time.monotonic() - _last_full_rest_mono) >= _FULL_REST_MIN_SECONDS
+    """True when a full REST chain refresh is due — backs off after slow builds."""
+    settings = get_settings()
+    min_s = float(getattr(settings, "full_rest_min_seconds", _FULL_REST_MIN_SECONDS) or _FULL_REST_MIN_SECONDS)
+    slow_ms = float(getattr(settings, "full_rest_backoff_slow_ms", 15000.0) or 15000.0)
+    backoff_s = float(getattr(settings, "full_rest_backoff_seconds", 75.0) or 75.0)
+    if _last_full_cycle_ms is not None and _last_full_cycle_ms >= slow_ms:
+        min_s = max(min_s, backoff_s)
+    return (time.monotonic() - _last_full_rest_mono) >= min_s
 
 
 def mark_full_rest_done() -> None:
     global _last_full_rest_mono
     _last_full_rest_mono = time.monotonic()
+
+
+def full_rest_rebuild_running() -> bool:
+    return _full_rest_task is not None and not _full_rest_task.done()
+
+
+def schedule_full_rest_rebuild(*, broadcast: bool = True, run_trader: bool = True) -> bool:
+    """
+    Start a full REST rebuild as a background task.
+
+    Critical: do NOT await this from the monitor loop — a slow Upstox rebuild
+    (observed 90s+) blocks WS overlays and makes the UI look offline.
+    """
+    global _full_rest_task
+    if full_rest_rebuild_running() or _build_in_progress:
+        return False
+
+    async def _run() -> None:
+        try:
+            await get_multi_snapshot(
+                broadcast=broadcast,
+                force=False,
+                run_trader=run_trader,
+            )
+        except Exception as exc:
+            logger.warning("Background full REST rebuild failed: %s", exc)
+        finally:
+            mark_full_rest_done()
+
+    _full_rest_task = asyncio.create_task(_run())
+    logger.info("Scheduled background full REST rebuild (timeout-protected)")
+    return True
 
 
 def _serve_stale_cache(*, reason: str = "") -> MultiSnapshot:
@@ -262,9 +302,16 @@ def latency_stats() -> dict[str, Any]:
         "lastFastCycleMs": _last_fast_cycle_ms,
         "lastFullCycleMs": _last_full_cycle_ms,
         "buildInProgress": _build_in_progress,
+        "fullRestRebuildRunning": full_rest_rebuild_running(),
         "buildLockHeld": _build_lock.locked(),
         "entryScanDue": entry_scan_due(),
         "canRunTickFast": can_run_tick_fast(),
+        "fullRestMinSeconds": float(
+            getattr(get_settings(), "full_rest_min_seconds", _FULL_REST_MIN_SECONDS) or _FULL_REST_MIN_SECONDS
+        ),
+        "fullRestTimeoutSeconds": float(
+            getattr(get_settings(), "full_rest_rebuild_timeout_seconds", 25.0) or 25.0
+        ),
     }
 
 
@@ -688,8 +735,36 @@ async def get_multi_snapshot(
                     await broadcast_snapshot(snap)
                 return snap
         _build_in_progress = True
+        settings = get_settings()
+        timeout_s = float(getattr(settings, "full_rest_rebuild_timeout_seconds", 25.0) or 25.0)
         try:
-            snapshot = await _build_multi_snapshot(run_trader=trader_pass)
+            try:
+                snapshot = await asyncio.wait_for(
+                    _build_multi_snapshot(run_trader=trader_pass),
+                    timeout=max(8.0, timeout_s),
+                )
+            except asyncio.TimeoutError:
+                elapsed = round((time.perf_counter() - t0) * 1000, 2)
+                _last_full_cycle_ms = elapsed
+                logger.warning(
+                    "Full REST rebuild timed out after %.1fs — keeping WS cache live",
+                    timeout_s,
+                )
+                mark_full_rest_done()
+                if _cache and _cache.dataReady:
+                    stale = _serve_stale_cache(
+                        reason=f"Upstox refresh timed out after {timeout_s:.0f}s — showing live cache",
+                    )
+                    if is_ws_active():
+                        touched = _touch_cached_snapshot(overlay_ws=True)
+                        if touched:
+                            stale = touched
+                            stale.waitingReason = None
+                            _update_cache_memory(stale)
+                    if broadcast:
+                        await broadcast_snapshot(stale)
+                    return stale
+                raise UpstoxError(f"Upstox refresh timed out after {timeout_s:.0f}s")
             mark_full_rest_done()
         except Exception as e:
             err = str(e)
@@ -721,6 +796,14 @@ async def get_multi_snapshot(
             if broadcast:
                 await broadcast_snapshot(stale)
             return stale
+        # Merge live WS ticks onto fresh REST chain so UI age stays low after long builds.
+        if is_ws_active() and snapshot.dataReady:
+            snapshot.snapshots = overlay_snapshot_live(
+                snapshot.snapshots,
+                max_age_seconds=settings.tick_overlay_max_age_seconds,
+            )
+            snapshot.timestamp = datetime.now(IST)
+            snapshot.waitingReason = None
         _store_cache(snapshot)
         _last_full_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
         if force:
