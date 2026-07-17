@@ -176,17 +176,16 @@ def _serve_stale_cache(*, reason: str = "") -> MultiSnapshot:
     """Instant read — never waits on _build_lock or REST rebuild."""
     now = datetime.now(IST)
     if _cache and _cache.snapshots:
-        stale = _cache.model_copy(deep=True)
-        stale.timestamp = now
-        if stale.dataReady and reason:
+        waiting = None
+        if reason:
             low = reason.lower()
-            if "refresh in progress" in low:
-                stale.waitingReason = None
-            else:
-                stale.waitingReason = reason
-        elif stale.dataReady:
-            stale.waitingReason = None
-        stale.autoTrader = get_state()
+            if "refresh in progress" not in low:
+                waiting = reason
+        stale = _shallow_cache_copy(
+            auto_trader=get_state(),
+            waiting_reason=waiting if (_cache.dataReady and waiting) else (None if _cache.dataReady else reason),
+        )
+        stale.timestamp = now
         return stale
     return MultiSnapshot(
         timestamp=now,
@@ -208,23 +207,24 @@ def _touch_cached_snapshot(
     if not _cache:
         return None
     settings = get_settings()
-    snap = _cache.model_copy(deep=True)
-    snap.timestamp = datetime.now(IST)
-    if overlay_ws and is_ws_active() and snap.dataReady:
+    overlays = None
+    if overlay_ws and is_ws_active() and _cache.dataReady:
         if light:
             from app.engines.snapshot_fast import overlay_snapshot_spot_charts
 
-            snap.snapshots = overlay_snapshot_spot_charts(
-                snap.snapshots,
+            overlays = overlay_snapshot_spot_charts(
+                _cache.snapshots,
                 max_age_seconds=settings.tick_overlay_max_age_seconds,
             )
         else:
-            snap.snapshots = overlay_snapshot_live(
-                snap.snapshots,
+            overlays = overlay_snapshot_live(
+                _cache.snapshots,
                 max_age_seconds=settings.tick_overlay_max_age_seconds,
             )
-    if attach_trader:
-        snap.autoTrader = get_state()
+    snap = _shallow_cache_copy(
+        snapshots=overlays,
+        auto_trader=get_state() if attach_trader else None,
+    )
     return snap
 
 
@@ -328,6 +328,30 @@ async def _fetch_news_cached() -> list:
     return _news_cache
 
 
+def _shallow_cache_copy(
+    *,
+    snapshots: Optional[dict] = None,
+    auto_trader: Any = None,
+    news: Any = None,
+    waiting_reason: Any = ...,
+) -> MultiSnapshot:
+    """Shallow MultiSnapshot copy — deep=True on ~130KB trees freezes the event loop."""
+    assert _cache is not None
+    snap = _cache.model_copy(deep=False)
+    snap.timestamp = datetime.now(IST)
+    if snapshots is not None:
+        snap.snapshots = snapshots
+    if auto_trader is not None:
+        snap.autoTrader = auto_trader
+    if news is not None:
+        snap.news = news
+    if waiting_reason is not ...:
+        snap.waitingReason = waiting_reason
+    elif snap.dataReady:
+        snap.waitingReason = None
+    return snap
+
+
 async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
     """WS overlay only — refresh cache + SSE without trader REST work."""
     global _last_fast_cycle_ms, _last_ws_overlay_mono
@@ -342,10 +366,7 @@ async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnap
         _cache.snapshots,
         max_age_seconds=settings.tick_overlay_max_age_seconds,
     )
-    snapshot = _cache.model_copy(deep=True)
-    snapshot.timestamp = datetime.now(IST)
-    snapshot.snapshots = overlays
-    snapshot.autoTrader = get_state()
+    snapshot = _shallow_cache_copy(snapshots=overlays, auto_trader=get_state())
     await _store_cache_async(snapshot)
     _last_ws_overlay_mono = time.monotonic()
     _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
@@ -387,11 +408,11 @@ async def run_entry_scan_on_cache(
     else:
         auto_state = get_state()
 
-    snapshot = _cache.model_copy(deep=True)
-    snapshot.timestamp = datetime.now(IST)
-    snapshot.snapshots = overlays
-    snapshot.autoTrader = auto_state
-    snapshot.news = news
+    snapshot = _shallow_cache_copy(
+        snapshots=overlays,
+        auto_trader=auto_state,
+        news=news,
+    )
     _update_cache_memory(snapshot)
 
     if ws_overlay_due():
@@ -421,10 +442,7 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
     client = UpstoxClient()
     auto_state = await process_exits_only(overlays, client=client)
 
-    snapshot = _cache.model_copy(deep=True)
-    snapshot.timestamp = datetime.now(IST)
-    snapshot.snapshots = overlays
-    snapshot.autoTrader = auto_state
+    snapshot = _shallow_cache_copy(snapshots=overlays, auto_trader=auto_state)
     _update_cache_memory(snapshot)
     _last_exit_eval_mono = time.monotonic()
 
@@ -454,9 +472,10 @@ async def _serve_stale_during_cooldown(*, broadcast: bool = False) -> Optional[M
     if not _cache or not _cache.dataReady:
         return None
     secs = int(rate_limit_cooldown_remaining())
-    stale = _cache.model_copy(deep=True)
-    stale.timestamp = datetime.now(IST)
-    stale.waitingReason = f"Upstox cooling down — retry in {secs}s · showing last good data"
+    stale = _shallow_cache_copy(
+        auto_trader=get_state(),
+        waiting_reason=f"Upstox cooling down — retry in {secs}s · showing last good data",
+    )
     if broadcast:
         await broadcast_snapshot(stale)
     return stale
@@ -633,16 +652,17 @@ async def get_multi_snapshot_fast(*, overlay_ws: bool = True) -> MultiSnapshot:
     now = datetime.now(IST)
     if _cache and _cache.snapshots:
         touched = _touch_cached_snapshot(overlay_ws=overlay_ws and is_ws_active())
-        snap = touched if touched else _cache
-        fresh = snap.model_copy(deep=True)
-        fresh.timestamp = now
-        if fresh.dataReady:
-            fresh.waitingReason = None
+        if touched:
+            if touched.dataReady:
+                touched.waitingReason = None
+            return touched
+        fresh = _shallow_cache_copy(auto_trader=get_state(), waiting_reason=None)
         return fresh
     if _cache:
-        stale = _cache.model_copy(deep=True)
-        stale.timestamp = now
-        stale.waitingReason = stale.waitingReason or "No fresh snapshot — serving stale cache"
+        stale = _shallow_cache_copy(
+            auto_trader=get_state(),
+            waiting_reason=_cache.waitingReason or "No fresh snapshot — serving stale cache",
+        )
         return stale
     return MultiSnapshot(
         timestamp=now,
@@ -770,9 +790,10 @@ async def get_multi_snapshot(
             err = str(e)
             if _cache and _cache.dataReady and ("cooling down" in err.lower() or "rate limit" in err.lower()):
                 logger.warning("Serving stale snapshot during Upstox cooldown: %s", e)
-                stale = _cache.model_copy(deep=True)
-                stale.timestamp = datetime.now(IST)
-                stale.waitingReason = f"{err} · showing last good data"
+                stale = _shallow_cache_copy(
+                    auto_trader=get_state(),
+                    waiting_reason=f"{err} · showing last good data",
+                )
                 if broadcast:
                     await broadcast_snapshot(stale)
                 return stale
@@ -782,8 +803,10 @@ async def get_multi_snapshot(
                     return ws_snap
             if _cache:
                 logger.warning("Serving stale snapshot after build error: %s", e)
-                stale = _cache.model_copy(deep=True)
-                stale.waitingReason = f"Stale data — {e}"
+                stale = _shallow_cache_copy(
+                    auto_trader=get_state(),
+                    waiting_reason=f"Stale data — {e}",
+                )
                 return stale
             raise
         finally:
@@ -791,8 +814,10 @@ async def get_multi_snapshot(
         if not snapshot.dataReady and _cache and _cache.dataReady:
             reason = snapshot.waitingReason or "Data refresh paused"
             logger.warning("Serving stale snapshot — fresh build unavailable: %s", reason)
-            stale = _cache.model_copy(deep=True)
-            stale.waitingReason = f"{reason} · showing last good data"
+            stale = _shallow_cache_copy(
+                auto_trader=get_state(),
+                waiting_reason=f"{reason} · showing last good data",
+            )
             if broadcast:
                 await broadcast_snapshot(stale)
             return stale
