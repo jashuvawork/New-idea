@@ -8,6 +8,7 @@
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    overflow-anchor: none;
   }
 
   body {
@@ -16,6 +17,7 @@
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     letter-spacing: -0.011em;
     line-height: 1.5;
+    overflow-anchor: none;
     background-image:
       radial-gradient(ellipse 80% 50% at 50% -20%, rgba(6, 182, 212, 0.08), transparent),
       radial-gradient(ellipse 60% 40% at 100% 0%, rgba(16, 185, 129, 0.04), transparent);
@@ -64,6 +66,27 @@
   .panel-card {
     @apply bg-nexus-panel border border-nexus-border rounded-xl overflow-hidden shadow-panel;
     contain: layout style paint;
+    overflow-anchor: none;
+  }
+
+  .layout-status-slot {
+    min-height: 2.25rem;
+  }
+
+  .layout-stats-slot {
+    min-height: 2rem;
+  }
+
+  .app-header {
+    min-height: 3.5rem;
+  }
+
+  .overflow-anchor-none {
+    overflow-anchor: none;
+  }
+
+  .conn-status {
+    min-width: 11.5rem;
   }
 
   .panel-card:hover {
