@@ -795,19 +795,29 @@ class Settings(BaseSettings):
     aggressive_good_day_bypass_bad_day_floor: bool = True
     aggressive_good_day_allow_building_tier: bool = True
 
-    # ICT / FVG breakout monitor — flat-then-vertical premium rips (8→393 PE style)
+    # ICT / FVG breakout monitor — flat-then-vertical premium rips (8→393 / 26→70 CE style)
     ict_breakout_monitor_enabled: bool = True
     ict_fvg_min_gap_pct: float = 12.0
     ict_flat_base_max_range_pct: float = 8.0
-    ict_displacement_min_velocity_3s: float = 3.0
+    ict_displacement_min_velocity_3s: float = 2.2
+    # Full vertical confirmation (legacy mega-style). Early breakout uses ict_early_vertical_*.
     ict_vertical_min_session_move_pct: float = 80.0
+    # Early flat→vertical (NIFTY 24400 CE 26→45): capture before 80% is reached.
+    ict_early_vertical_min_session_move_pct: float = 28.0
+    ict_early_vertical_min_velocity_3s: float = 2.0
+    ict_volume_surge_awaken_min: float = 3.0
     ict_mega_rip_min_session_move_pct: float = 200.0
     ict_breakout_min_score: float = 28.0
     ict_fvg_score_bonus: float = 14.0
     ict_flat_vertical_score_bonus: float = 18.0
+    ict_early_breakout_score_bonus: float = 16.0
     ict_mega_rip_score_bonus: float = 22.0
     ict_max_rank_bonus: float = 30.0
     ict_good_day_capture_enabled: bool = True
+    # All-day ICT capture — NORMAL + AGGRESSIVE (not only good-day AGGRESSIVE).
+    ict_all_day_capture_enabled: bool = True
+    ict_all_day_capture_min_score: float = 30.0
+    ict_all_day_lot_multiplier: float = 0.85
     ict_good_day_min_score: float = 35.0
     ict_good_day_rank_bonus: float = 18.0
     ict_mega_rip_rank_bonus: float = 25.0
@@ -816,6 +826,10 @@ class Settings(BaseSettings):
     ict_breakout_trail_arm_multiplier: float = 1.5
     ict_mega_rip_trail_arm_multiplier: float = 2.2
     ict_good_day_force_max_lots: bool = True
+    # Late fade-chase: skip new entries when peak already huge and live velocity dead.
+    ict_late_chase_block_enabled: bool = True
+    ict_late_chase_min_peak_pct: float = 120.0
+    ict_late_chase_max_live_velocity_3s: float = 0.4
 
     def daily_profit_stage_pcts(self) -> list[float]:
         return [float(x.strip()) for x in self.daily_profit_stage_pcts_csv.split(",") if x.strip()]

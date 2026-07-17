@@ -271,6 +271,7 @@ def _explosion_candidates(
         from app.engines.ict_breakout_monitor import (
             analyze_explosion_event_ict,
             ict_explosion_rank_bonus,
+            late_fade_chase_blocked,
         )
 
         trading_mode, _ = resolve_trading_session_mode(state, {symbol: snap})
@@ -286,8 +287,19 @@ def _explosion_candidates(
                 premium_fvg=bool(alert.get("ictPremiumFvg")),
                 flat_then_vertical=bool(alert.get("ictFlatThenVertical")),
                 mega_rip=bool(alert.get("ictMegaRip")),
+                volume_awakening=bool(alert.get("volumeAwaken") or alert.get("ictVolumeAwakening")),
+                displacement=bool(alert.get("ictDisplacement")),
+                session_move_pct=max(daily_move, peak_move),
+                velocity_3s=float(alert.get("velocity3s") or 0),
+                volume_surge=float(alert.get("volumeSurge") or 0),
             )
+        late_blocked, _late_reason = late_fade_chase_blocked(event, ict)
+        if late_blocked:
+            continue
         rank += ict_explosion_rank_bonus(ict, trading_mode)
+        # Early flat→vertical breakouts (26→45 CE) jump the queue on all day modes.
+        if ict.flat_then_vertical and ict.active and trading_mode != "DEFENSIVE":
+            rank += 12.0 if ict.volume_awakening or ict.displacement else 8.0
 
         out.append(EntryCandidate(
             symbol=symbol,

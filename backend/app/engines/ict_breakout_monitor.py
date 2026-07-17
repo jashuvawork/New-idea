@@ -82,16 +82,30 @@ def _detect_premium_fvg(history: list[tuple[datetime, float, float]], settings) 
 
 
 def _detect_flat_base(history: list[tuple[datetime, float, float]], settings) -> tuple[bool, float]:
-    """Flat consolidation — low variance in premium before breakout."""
+    """Flat consolidation — low variance in premium before breakout.
+
+    Excludes the last 3–4 polls (breakout candles) so the rip itself does not
+    destroy the flat-base signal (e.g. 26–28 base then 32/38/45).
+    """
     if len(history) < 6:
         return False, 0.0
-    base = [h[1] for h in list(history)[:-2]]
-    if not base:
+    # Drop breakout tail; keep at least 4 base samples.
+    trim = 4 if len(history) >= 10 else 3
+    base = [h[1] for h in list(history)[:-trim]]
+    if len(base) < 4:
         return False, 0.0
     avg = sum(base) / len(base)
     if avg <= 0:
         return False, 0.0
     max_dev = max(abs(p - avg) / avg * 100 for p in base)
+    # Also accept a short rolling window of 5–6 bars with low range.
+    if max_dev > settings.ict_flat_base_max_range_pct and len(base) >= 6:
+        window = base[-6:]
+        wavg = sum(window) / len(window)
+        if wavg > 0:
+            wdev = max(abs(p - wavg) / wavg * 100 for p in window)
+            if wdev <= settings.ict_flat_base_max_range_pct:
+                return True, wdev
     return max_dev <= settings.ict_flat_base_max_range_pct, max_dev
 
 
@@ -123,9 +137,30 @@ def analyze_ict_breakout(
 
     fvg, gap_pct = _detect_premium_fvg(history, settings)
     flat, flat_dev = _detect_flat_base(history, settings)
-    vol_awaken = volume >= settings.explosion_volume_awaken_min or "volAwaken" in (reason or "")
+    surge_awaken = volume_surge >= float(
+        getattr(settings, "ict_volume_surge_awaken_min", 3.0) or 3.0
+    )
+    vol_awaken = (
+        volume >= settings.explosion_volume_awaken_min
+        or "volAwaken" in (reason or "")
+        or surge_awaken
+    )
     displacement = velocity_3s >= settings.ict_displacement_min_velocity_3s
+    early_min = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
+    early_v3 = float(getattr(settings, "ict_early_vertical_min_velocity_3s", 2.0) or 2.0)
     vertical = move >= settings.ict_vertical_min_session_move_pct
+    # Early breakout: flat base + displacement/volume + ≥28% — catch 26→45 before 80%.
+    early_break = (
+        flat
+        and move >= early_min
+        and (
+            displacement
+            or vol_awaken
+            or fvg
+            or velocity_3s >= early_v3
+        )
+    )
+    flat_then_vertical = (flat and vertical) or early_break
     mega = move >= settings.ict_mega_rip_min_session_move_pct
 
     if fvg:
@@ -134,6 +169,9 @@ def analyze_ict_breakout(
     if flat and vertical:
         score += settings.ict_flat_vertical_score_bonus
         reasons.append(f"flat_then_vertical_{flat_dev:.1f}%base")
+    elif early_break:
+        score += float(getattr(settings, "ict_early_breakout_score_bonus", 16.0) or 16.0)
+        reasons.append(f"early_flat_break_{move:.0f}%_{flat_dev:.1f}%base")
     elif flat and displacement:
         score += settings.ict_flat_vertical_score_bonus * 0.7
         reasons.append("flat_base_breaking")
@@ -142,8 +180,8 @@ def analyze_ict_breakout(
         reasons.append(f"displacement_v3_{velocity_3s:.1f}")
     if vol_awaken:
         score += 10.0
-        reasons.append("volume_awakening")
-    if vertical:
+        reasons.append("volume_awakening" if not surge_awaken else f"volume_surge_{volume_surge:.1f}x")
+    if vertical or early_break:
         score += min(25, move * 0.08)
         reasons.append(f"session_rip_{move:.0f}%")
     if mega:
@@ -152,6 +190,9 @@ def analyze_ict_breakout(
     if tier in ("EXPLODING", "ELITE"):
         score += 6.0
         reasons.append(f"tier_{tier.lower()}")
+    elif tier == "BUILDING" and (early_break or flat_then_vertical):
+        score += 4.0
+        reasons.append("tier_building_breakout")
 
     if snap and snap.spotChart:
         from app.engines.chart_advanced_analysis import analyze_smc_ict
@@ -175,9 +216,14 @@ def analyze_ict_breakout(
                     score += 5.0
                     reasons.append(str(smc["bos"]))
 
-    active = score >= settings.ict_breakout_min_score or mega or (fvg and vertical)
+    active = (
+        score >= settings.ict_breakout_min_score
+        or mega
+        or (fvg and (vertical or early_break))
+        or early_break
+    )
     pattern = "mega_rip" if mega else (
-        "flat_then_vertical" if flat and vertical else (
+        "flat_then_vertical" if flat_then_vertical else (
             "premium_fvg" if fvg else (
                 "displacement" if displacement else "watch"
             )
@@ -190,7 +236,7 @@ def analyze_ict_breakout(
         score=score,
         reasons=reasons,
         premium_fvg=fvg,
-        flat_then_vertical=flat and vertical,
+        flat_then_vertical=flat_then_vertical,
         displacement=displacement,
         volume_awakening=vol_awaken,
         mega_rip=mega,
@@ -217,6 +263,25 @@ def analyze_explosion_event_ict(event: Any, snap: Optional[SymbolSnapshot] = Non
     )
 
 
+def late_fade_chase_blocked(event: Any, ict: Optional[ICTBreakoutSignal] = None) -> tuple[bool, str]:
+    """Block chasing rips that already peaked hard with dead live velocity (PF killer)."""
+    settings = get_settings()
+    if not getattr(settings, "ict_late_chase_block_enabled", True):
+        return False, ""
+    peak = float(getattr(event, "peak_move_pct", 0) or 0)
+    daily = float(getattr(event, "daily_move_pct", 0) or 0)
+    move = max(peak, daily, float(ict.session_move_pct) if ict else 0.0)
+    v3 = float(getattr(event, "velocity_3s", 0) or 0)
+    min_peak = float(getattr(settings, "ict_late_chase_min_peak_pct", 120.0) or 120.0)
+    max_v3 = float(getattr(settings, "ict_late_chase_max_live_velocity_3s", 0.4) or 0.4)
+    # Still allow if ICT says volume awakening / live displacement is on.
+    if ict and (ict.volume_awakening or ict.displacement) and v3 >= max_v3:
+        return False, ""
+    if move >= min_peak and v3 <= max_v3:
+        return True, f"ict_late_fade_chase_peak_{move:.0f}%_v3_{v3:.1f}"
+    return False, ""
+
+
 def good_day_ict_capture_active(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
@@ -226,11 +291,9 @@ def good_day_ict_capture_active(
     day_mode: str = "",
     confidence_tier: str = "",
 ) -> tuple[bool, dict[str, Any]]:
-    """Good day + ICT mega rip — max lots, extended hold, full gate bypass."""
+    """ICT capture — AGGRESSIVE max-lots path + all-day early flat→vertical on NORMAL days."""
     settings = get_settings()
     meta: dict[str, Any] = {}
-    if not settings.ict_good_day_capture_enabled:
-        return False, meta
 
     from app.engines.dual_mode_strategy import resolve_trading_session_mode
 
@@ -238,8 +301,7 @@ def good_day_ict_capture_active(
         state, snapshots, day_mode=day_mode, confidence_tier=confidence_tier,
     )
     meta["tradingMode"] = mode
-    if mode != "AGGRESSIVE":
-        return False, meta
+    meta.update(mode_meta or {})
 
     if ict is None and event is not None:
         sym = str(getattr(event, "symbol", "") or "").upper()
@@ -250,12 +312,42 @@ def good_day_ict_capture_active(
         return False, meta
 
     meta["ict"] = ict.to_dict()
-    if ict.mega_rip or (ict.active and ict.score >= settings.ict_good_day_min_score):
-        meta["maxProfitCapture"] = True
-        return True, meta
-    if ict.flat_then_vertical and ict.session_move_pct >= settings.ict_vertical_min_session_move_pct:
-        meta["maxProfitCapture"] = True
-        return True, meta
+
+    # Aggressive good-day path (unchanged intent).
+    if settings.ict_good_day_capture_enabled and mode == "AGGRESSIVE":
+        if ict.mega_rip or (ict.active and ict.score >= settings.ict_good_day_min_score):
+            meta["maxProfitCapture"] = True
+            meta["capturePath"] = "good_day_aggressive"
+            return True, meta
+        if ict.flat_then_vertical and ict.session_move_pct >= float(
+            getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0
+        ):
+            meta["maxProfitCapture"] = True
+            meta["capturePath"] = "good_day_flat_vertical"
+            return True, meta
+
+    # All-day path — NORMAL (and AGGRESSIVE fallback): catch 26→70 CE style early.
+    if getattr(settings, "ict_all_day_capture_enabled", True) and mode != "DEFENSIVE":
+        early_ok = (
+            ict.active
+            and ict.flat_then_vertical
+            and (
+                ict.volume_awakening
+                or ict.displacement
+                or ict.premium_fvg
+                or ict.score >= float(getattr(settings, "ict_all_day_capture_min_score", 30.0) or 30.0)
+            )
+        )
+        if early_ok or ict.mega_rip:
+            meta["maxProfitCapture"] = mode == "AGGRESSIVE"
+            meta["allDayIctCapture"] = True
+            meta["capturePath"] = "all_day_flat_vertical"
+            meta["lotMultiplier"] = (
+                1.0 if mode == "AGGRESSIVE"
+                else float(getattr(settings, "ict_all_day_lot_multiplier", 0.85) or 0.85)
+            )
+            return True, meta
+
     return False, meta
 
 
