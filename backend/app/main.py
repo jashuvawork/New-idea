@@ -24,6 +24,7 @@ async def _background_monitor():
         can_run_tick_fast,
         entry_scan_due,
         full_rest_rebuild_due,
+        full_rest_rebuild_running,
         get_multi_snapshot,
         invalidate_snapshot_cache,
         mark_full_rest_done,
@@ -31,6 +32,7 @@ async def _background_monitor():
         run_entry_scan_on_cache,
         run_tick_fast_cycle,
         run_ws_overlay_cycle,
+        schedule_full_rest_rebuild,
         ws_overlay_due,
     )
     from app.services.tick_store import set_tick_wake_event
@@ -65,15 +67,23 @@ async def _background_monitor():
                     if tick_driven and not ws:
                         invalidate_snapshot_cache()
                     rest_ok = not rate_limit_active() and not rate_limit_recovery_active()
-                    if ws and full_rest_rebuild_due():
-                        await get_multi_snapshot(
-                            broadcast=True,
-                            force=False,
-                            run_trader=rest_ok,
-                        )
-                        mark_full_rest_done()
-                    elif ws:
-                        await run_entry_scan_on_cache(broadcast=True, run_trader=rest_ok)
+                    if ws:
+                        # Never await full REST on this loop — 30–90s builds freeze overlays.
+                        if full_rest_rebuild_due() and not full_rest_rebuild_running():
+                            schedule_full_rest_rebuild(
+                                broadcast=True,
+                                run_trader=rest_ok,
+                            )
+                        if full_rest_rebuild_running():
+                            if ws_overlay_due():
+                                await run_ws_overlay_cycle(broadcast=True)
+                        else:
+                            await run_entry_scan_on_cache(
+                                broadcast=True,
+                                run_trader=rest_ok,
+                            )
+                            if rest_ok:
+                                mark_full_scan_done()
                     else:
                         await get_multi_snapshot(
                             broadcast=True,
@@ -81,8 +91,8 @@ async def _background_monitor():
                             run_trader=rest_ok,
                         )
                         mark_full_rest_done()
-                    if rest_ok:
-                        mark_full_scan_done()
+                        if rest_ok:
+                            mark_full_scan_done()
                 elif is_ws_active() and ws_overlay_due():
                     await run_ws_overlay_cycle(broadcast=True)
                 elif not tick_driven and not is_ws_active():
