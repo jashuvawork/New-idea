@@ -415,8 +415,12 @@ async def _open_from_candidate(
         from app.engines.explosion_profit import cap_explosion_lots
 
         lots = cap_explosion_lots(lots, fill_premium)
-        from app.engines.explosion_entry_guards import cap_faded_rip_lots
+        from app.engines.explosion_entry_guards import (
+            cap_extended_chase_lots,
+            cap_faded_rip_lots,
+        )
 
+        lots = cap_extended_chase_lots(lots, candidate.explosion_event)
         if faded_rip_meta:
             lots = cap_faded_rip_lots(lots)
     elif candidate.mode == "worst_day_itm_fade":

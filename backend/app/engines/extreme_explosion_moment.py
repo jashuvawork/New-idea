@@ -66,8 +66,10 @@ def is_extreme_explosion_all_in_bypass(
     alert: Optional[dict] = None,
 ) -> bool:
     """
-    ELITE +100%+ or any tier +150%+ session premium move — bypass ALL entry gates.
-    Matches AI report rows like SENSEX PUT 76800 · 497% ELITE.
+    ELITE session rips — bypass rank floors only before the extended-chase ceiling.
+
+    Past extreme_all_in_bypass_max_move_pct these are late chases (PF killers) and
+    must not bypass gates (Jul17 24250 @ +91%).
     """
     settings = get_settings()
     if not settings.extreme_explosion_all_in_enabled:
@@ -77,6 +79,10 @@ def is_extreme_explosion_all_in_bypass(
         event=event, candidate=candidate, alert=alert,
     )
     if mode and mode != "explosion":
+        return False
+
+    max_move = float(getattr(settings, "extreme_all_in_bypass_max_move_pct", 70.0) or 70.0)
+    if daily_move >= max_move:
         return False
 
     min_score = float(settings.extreme_explosion_all_in_min_score)
@@ -114,7 +120,7 @@ def is_high_mover_elite_bypass(
     candidate: Any = None,
     alert: Optional[dict] = None,
 ) -> bool:
-    """Aligned ELITE/EXPLODING session rips — bypass last-N rank / cooldown gates."""
+    """Aligned ELITE/EXPLODING rips — bypass last-N/cooldown only before chase ceiling."""
     if is_extreme_explosion_all_in_bypass(event=event, candidate=candidate, alert=alert):
         return True
     settings = get_settings()
@@ -124,6 +130,9 @@ def is_high_mover_elite_bypass(
     if mode and mode != "explosion":
         return False
     if tier not in ("ELITE", "EXPLODING"):
+        return False
+    max_move = float(getattr(settings, "high_mover_bypass_max_move_pct", 70.0) or 70.0)
+    if daily_move >= max_move:
         return False
     elite_floor = float(settings.extreme_explosion_elite_move_min_pct) * 0.95
     if daily_move >= elite_floor and score >= settings.all_day_explosion_min_score:

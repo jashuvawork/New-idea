@@ -296,10 +296,23 @@ def _explosion_candidates(
         late_blocked, _late_reason = late_fade_chase_blocked(event, ict)
         if late_blocked:
             continue
+        from app.engines.explosion_entry_guards import extended_session_chase_blocked
+
+        ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)
+        if ext_blocked:
+            continue
         rank += ict_explosion_rank_bonus(ict, trading_mode)
         # Early flat→vertical breakouts (26→45 CE) jump the queue on all day modes.
         if ict.flat_then_vertical and ict.active and trading_mode != "DEFENSIVE":
             rank += 12.0 if ict.volume_awakening or ict.displacement else 8.0
+        # Prefer early expansion window; demote already-extended rips in ranking.
+        early_min = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
+        early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+        move_for_rank = max(daily_move, peak_move)
+        if early_min <= move_for_rank <= early_max and (ict.flat_then_vertical or ict.displacement):
+            rank += 14.0
+        elif move_for_rank > early_max:
+            rank -= min(35.0, (move_for_rank - early_max) * 0.6)
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -745,10 +758,15 @@ def find_best_entry(
                 peak = float(getattr(c.explosion_event, "peak_move_pct", 0) or 0)
                 if peak > daily_move:
                     daily_move = peak
-            if daily_move >= settings.all_day_explosion_session_move_min_pct:
-                bonus += min(25, daily_move * 0.08)
+            early_min = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
+            early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+            # Reward early window only — do NOT boost already-extended % moves.
+            if early_min <= daily_move <= early_max:
+                bonus += 18
+            elif daily_move > early_max:
+                bonus -= min(40, (daily_move - early_max) * 0.7)
             if is_extreme_explosion_all_in_bypass(candidate=c):
-                bonus += 35
+                bonus += 20
             elif side_aligned_with_breadth(c.side, breadth_bias):
                 bonus += 18
             else:
@@ -757,12 +775,16 @@ def find_best_entry(
 
             if c.explosion_event is not None:
                 ict = analyze_explosion_event_ict(c.explosion_event, c.snap)
-                if ict.mega_rip:
-                    bonus += 30
-                elif ict.active:
-                    bonus += min(20, ict.score * 0.25)
-                if ict.flat_then_vertical and trading_mode == "AGGRESSIVE":
-                    bonus += 12
+                if ict.flat_then_vertical and ict.active:
+                    bonus += 18 if trading_mode == "AGGRESSIVE" else 12
+                elif ict.active and daily_move <= early_max:
+                    bonus += min(16, ict.score * 0.2)
+                elif ict.mega_rip:
+                    # Mega rip without early flat base is usually a chase — small bump only.
+                    bonus += 6
+        elif c.mode == "scalp":
+            # When explosions are extended, scalp path is the PF-positive bucket.
+            bonus += 6
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty
 

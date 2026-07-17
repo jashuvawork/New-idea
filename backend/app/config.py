@@ -184,16 +184,30 @@ class Settings(BaseSettings):
     explosion_peak_chase_min_premium_mom_pct: float = 15.0
     explosion_peak_chase_max_otm_steps: int = 3
     explosion_peak_chase_min_session_move_pct: float = 40.0
+    # Extended-session chase hard block — PF killer (Jul17 24250 CE entered +91%).
+    # No new EXPLOSIVE entries once the session/peak move is already mostly done.
+    explosion_extended_chase_block_enabled: bool = True
+    explosion_extended_chase_min_move_pct: float = 70.0
+    # Soft zone: keep small size only (before hard block).
+    explosion_extended_soft_min_move_pct: float = 50.0
+    explosion_extended_soft_lot_cap: int = 6
+    explosion_hard_lot_cap: int = 10
+    # Early capture window preferred in ranking (base break → first expansion).
+    explosion_early_window_min_move_pct: float = 28.0
+    explosion_early_window_max_move_pct: float = 55.0
     # Faded vertical rip — peak move huge but live velocity cooled (caution sizing)
     explosion_faded_rip_caution_enabled: bool = True
     explosion_faded_rip_min_peak_pct: float = 35.0
     explosion_faded_rip_max_live_velocity_3s: float = 0.5
-    explosion_faded_rip_lot_cap: int = 8
+    explosion_faded_rip_lot_cap: int = 6
     explosion_faded_rip_tighter_stop_mult: float = 0.85
     explosion_faded_rip_no_green_exit_enabled: bool = True
-    explosion_faded_rip_no_green_seconds: int = 60
+    explosion_faded_rip_no_green_seconds: int = 45
     explosion_faded_rip_min_green_points: float = 0.5
     faded_rip_no_green_hold_min_session_move_pct: float = 60.0
+    # High-mover / all-in bypasses must not reopen late chases.
+    high_mover_bypass_max_move_pct: float = 70.0
+    extreme_all_in_bypass_max_move_pct: float = 70.0
     explosion_macd_alignment_required: bool = True
     explosion_deep_otm_min_premium_inr: float = 3.0
     explosion_volume_awaken_min: int = 25000
@@ -212,8 +226,8 @@ class Settings(BaseSettings):
     explosion_no_progress_seconds: int = 150
     explosion_no_progress_aligned_seconds: int = 420
     explosion_no_progress_skip_when_aligned: bool = True
-    explosion_reentry_cooldown_seconds: int = 90
-    explosion_emergency_cooldown_seconds: int = 180
+    explosion_reentry_cooldown_seconds: int = 180
+    explosion_emergency_cooldown_seconds: int = 300
     explosion_breadth_alignment_enabled: bool = True
     # Hard block PUT on BULLISH / CALL on BEARISH — no ELITE or premium-led bypass
     breadth_hard_side_block_enabled: bool = True
@@ -831,10 +845,11 @@ class Settings(BaseSettings):
     ict_breakout_trail_arm_multiplier: float = 1.5
     ict_mega_rip_trail_arm_multiplier: float = 2.2
     ict_good_day_force_max_lots: bool = True
-    # Late fade-chase: skip new entries when peak already huge and live velocity dead.
+    # Late fade-chase: skip new entries when peak already extended and live velocity cooling.
+    # Was 120% — too late (24250-style +91% chases still passed).
     ict_late_chase_block_enabled: bool = True
-    ict_late_chase_min_peak_pct: float = 120.0
-    ict_late_chase_max_live_velocity_3s: float = 0.4
+    ict_late_chase_min_peak_pct: float = 75.0
+    ict_late_chase_max_live_velocity_3s: float = 1.0
 
     def daily_profit_stage_pcts(self) -> list[float]:
         return [float(x.strip()) for x in self.daily_profit_stage_pcts_csv.split(",") if x.strip()]

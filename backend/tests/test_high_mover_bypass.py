@@ -26,7 +26,8 @@ def _elite_call_event(daily_move: float = 105.0) -> ExplosionEvent:
 
 
 @patch("app.engines.extreme_explosion_moment.get_settings")
-def test_elite_105pct_high_mover_bypass(mock_settings):
+def test_elite_105pct_high_mover_bypass_blocked_as_late_chase(mock_settings):
+    """+105% is past the chase ceiling — bypass must NOT reopen PF killers."""
     s = MagicMock()
     s.extreme_explosion_all_in_enabled = True
     s.extreme_explosion_elite_move_min_pct = 100.0
@@ -34,9 +35,29 @@ def test_elite_105pct_high_mover_bypass(mock_settings):
     s.extreme_explosion_all_in_min_score = 35.0
     s.all_day_explosion_min_score = 38.0
     s.all_day_explosion_session_move_min_pct = 40.0
+    s.high_mover_bypass_max_move_pct = 70.0
+    s.extreme_all_in_bypass_max_move_pct = 70.0
+    s.vertical_rip_bypass_min_peak_pct = 30.0
     mock_settings.return_value = s
 
-    assert is_high_mover_elite_bypass(event=_elite_call_event()) is True
+    assert is_high_mover_elite_bypass(event=_elite_call_event()) is False
+
+
+@patch("app.engines.extreme_explosion_moment.get_settings")
+def test_elite_45pct_high_mover_bypass_still_works(mock_settings):
+    s = MagicMock()
+    s.extreme_explosion_all_in_enabled = True
+    s.extreme_explosion_elite_move_min_pct = 100.0
+    s.extreme_explosion_all_in_move_min_pct = 150.0
+    s.extreme_explosion_all_in_min_score = 35.0
+    s.all_day_explosion_min_score = 38.0
+    s.all_day_explosion_session_move_min_pct = 40.0
+    s.high_mover_bypass_max_move_pct = 70.0
+    s.extreme_all_in_bypass_max_move_pct = 70.0
+    s.vertical_rip_bypass_min_peak_pct = 30.0
+    mock_settings.return_value = s
+
+    assert is_high_mover_elite_bypass(event=_elite_call_event(daily_move=45.0)) is True
 
 
 @patch("app.engines.pretrade_validator.get_settings")
