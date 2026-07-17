@@ -210,28 +210,37 @@ export function useMarketStream() {
     const urls = streamMode === 'sse' && SNAPSHOT_FALLBACK_URL !== SNAPSHOT_URL
       ? [SNAPSHOT_URL, SNAPSHOT_FALLBACK_URL]
       : [SNAPSHOT_URL];
-    for (const url of urls) {
-      try {
-        const res = await fetch(url, { signal: ac.signal });
-        if (!res.ok) continue;
-        const json = (await res.json()) as MultiSnapshot;
-        applySnapshot(
-          json,
-          started,
-          latencyHistory,
-          lastSuccessAt,
-          lastSignature,
-          hasDataRef,
-          streamMode,
-          POLL_MS,
-          setData,
-          setError,
-          setMetrics,
-        );
-        setLoading(false);
-        return;
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
+    // Brief hung-backend blips are common during full REST rebuilds — retry before
+    // flipping the UI to a hard "Cannot reach server" offline state.
+    const maxAttempts = hasDataRef.current ? 2 : 3;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 400 * attempt));
+        if (ac.signal.aborted) return;
+      }
+      for (const url of urls) {
+        try {
+          const res = await fetch(url, { signal: ac.signal });
+          if (!res.ok) continue;
+          const json = (await res.json()) as MultiSnapshot;
+          applySnapshot(
+            json,
+            started,
+            latencyHistory,
+            lastSuccessAt,
+            lastSignature,
+            hasDataRef,
+            streamMode,
+            POLL_MS,
+            setData,
+            setError,
+            setMetrics,
+          );
+          setLoading(false);
+          return;
+        } catch (e) {
+          if (e instanceof DOMException && e.name === 'AbortError') return;
+        }
       }
     }
     const elapsed = Math.round(performance.now() - started);
