@@ -30,10 +30,11 @@ export function snapshotSignature(json: MultiSnapshot): string {
   const lastEntryId = auto?.lastEntry?.tradeId ?? auto?.lastEntry?.at ?? '';
   const lastExitId = auto?.lastExit?.tradeId ?? auto?.lastExit?.at ?? '';
 
+  // Omit timestamp — WS overlay heartbeats rewrite it every tick and remount the page.
   return [
-    json.timestamp ?? '',
-    json.waitingReason ?? '',
     json.dataReady ? '1' : '0',
+    // Only fingerprint waitingReason when it blocks data (avoids banner flash on null↔msg).
+    json.dataReady ? '' : (json.waitingReason ?? ''),
     auto?.openPaperTrades?.length ?? 0,
     auto?.closedPaperTrades?.length ?? 0,
     auto?.dailyReport?.netPnlInr?.toFixed(0) ?? '',

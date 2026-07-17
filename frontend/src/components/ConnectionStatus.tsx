@@ -78,9 +78,17 @@ export function ConnectionStatus({
     ? `${metrics.lastLatencyMs}ms fresh`
     : `${metrics.lastLatencyMs}ms`;
 
+  const ageLabel = !metrics.lastUpdatedAt
+    ? '—'
+    : ageSec < 5
+      ? 'live'
+      : session.marketClosed
+        ? `idle ${ageSec}s`
+        : `${ageSec}s`;
+
   return (
     <div
-      className={`flex items-center gap-2 text-[10px] px-2.5 py-1 rounded border ${qualityColor(quality)}`}
+      className={`conn-status flex items-center gap-2 text-[10px] px-2.5 py-1 rounded border whitespace-nowrap ${qualityColor(quality)}`}
       title={[
         metrics.streamMode === 'sse' ? 'SSE stream' : 'HTTP poll',
         metrics.streamMode === 'sse'
@@ -102,15 +110,11 @@ export function ConnectionStatus({
                 : 'bg-nexus-green'
         }`}
       />
-      <span className="font-semibold">{label}</span>
+      <span className="font-semibold truncate max-w-[7rem]">{label}</span>
       <span className="opacity-80">·</span>
-      <span className="font-mono">{latencyLabel}</span>
-      {metrics.lastUpdatedAt && (
-        <>
-          <span className="opacity-80">·</span>
-          <span>{ageSec < 5 ? 'just now' : session.marketClosed ? `idle ${ageSec}s` : `${ageSec}s ago`}</span>
-        </>
-      )}
+      <span className="font-mono tabular-nums w-[4.5rem]">{latencyLabel}</span>
+      <span className="opacity-80">·</span>
+      <span className="font-mono tabular-nums w-[3.25rem]">{ageLabel}</span>
     </div>
   );
 }

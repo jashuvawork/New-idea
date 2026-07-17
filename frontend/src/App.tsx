@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   useMarketStream,
   useDeploymentStatus,
@@ -45,6 +45,7 @@ import { SwingTrading } from './components/SwingTrading';
 import { PerformanceMilestone } from './components/PerformanceMilestone';
 import { WeeklyDashboardPanel } from './components/WeeklyDashboardPanel';
 import { deriveMarketSession } from './lib/marketSession';
+import type { MultiSnapshot, SymbolSnapshot } from './types';
 
 const SYMBOLS = ['NIFTY', 'SENSEX'] as const;
 
@@ -74,6 +75,13 @@ function QuickStat({
   );
 }
 
+function pickSnap(data: MultiSnapshot | null, activeSymbol: string): SymbolSnapshot | undefined {
+  return (
+    data?.snapshots?.[activeSymbol] ??
+    SYMBOLS.map((s) => data?.snapshots?.[s]).find((s) => s?.dataAvailable)
+  );
+}
+
 export default function App() {
   const { data, error, loading, metrics, refetch } = useMarketStream();
   const deployment = useDeploymentStatus();
@@ -84,12 +92,21 @@ export default function App() {
   const weeklyDashboard = useWeeklyDashboard(7);
   const [activeSymbol, setActiveSymbol] = useState<string>('NIFTY');
 
+  // Hold last good snapshot so brief stream gaps don't unmount the dashboard (layout jump).
+  const lastGoodSnapRef = useRef<SymbolSnapshot | undefined>(undefined);
+  const dashboardUnlockedRef = useRef(false);
+  const liveSnap = pickSnap(data, activeSymbol);
+  if (liveSnap?.dataAvailable) {
+    lastGoodSnapRef.current = liveSnap;
+  }
+  const snap = liveSnap ?? lastGoodSnapRef.current;
   const auto = data?.autoTrader;
-  const snap =
-    data?.snapshots?.[activeSymbol] ??
-    SYMBOLS.map((s) => data?.snapshots?.[s]).find((s) => s?.dataAvailable);
   const needsUpstox = deployment && !deployment.upstox.validToday;
-  const canShowDashboard = Boolean(data && auto && snap);
+
+  if (data && auto && snap) {
+    dashboardUnlockedRef.current = true;
+  }
+  const canShowDashboard = dashboardUnlockedRef.current && Boolean(data && auto && snap);
 
   const report = auto?.dailyReport;
   const netPnl = report?.netPnlInr ?? 0;
@@ -103,28 +120,37 @@ export default function App() {
         : deployment.upstox.hasToken
           ? { className: 'bg-nexus-yellow/15 text-nexus-yellow border-nexus-yellow/30', label: 'Relogin needed' }
           : { className: 'bg-nexus-red/15 text-nexus-red border-nexus-red/30', label: 'Not connected' }
-    : null;
+    : { className: 'bg-black/30 text-nexus-muted border-nexus-border', label: 'Checking broker…' };
 
   const session = deriveMarketSession(data);
+  const showReconnect = Boolean(error && data);
+  const showHardError = Boolean(error && !data);
+  const showBootWait = Boolean(loading && !data);
+  const showDataWait = Boolean(data && !canShowDashboard);
+
+  // Sticky header height changes from wrapping cause the classic "page jumps up/down".
+  useEffect(() => {
+    document.documentElement.style.overflowAnchor = 'none';
+  }, []);
 
   return (
-    <div className="min-h-screen text-gray-100">
-      <header className="border-b border-nexus-border/80 bg-nexus-panel sticky top-0 z-50 shadow-panel">
-        <div className="max-w-[1920px] mx-auto px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-4 min-w-0">
+    <div className="min-h-screen text-gray-100 overflow-anchor-none">
+      <header className="app-header border-b border-nexus-border/80 bg-nexus-panel sticky top-0 z-50 shadow-panel">
+        <div className="max-w-[1920px] mx-auto px-4 sm:px-5 py-3 flex items-center justify-between gap-3 overflow-x-auto">
+          <div className="flex items-center gap-4 min-w-0 shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-nexus-accent to-emerald-500 flex items-center justify-center shadow-glow-accent">
                 <span className="text-xs font-black text-black">NQ</span>
               </div>
               <div>
                 <h1 className="text-base font-bold leading-tight">
-                  <span className="text-nexus-accent">Nexus</span>Quant
+                  Nexus<span className="text-nexus-accent">Quant</span>
                 </h1>
-                <p className="text-[10px] text-nexus-muted tracking-wide">Indian index options · Paper</p>
+                <p className="text-[10px] text-nexus-muted leading-none mt-0.5">Paper trading terminal</p>
               </div>
             </div>
 
-            <div className="hidden sm:flex items-center gap-1 p-1 rounded-xl bg-black/25 border border-nexus-border">
+            <div className="hidden sm:flex gap-1">
               {SYMBOLS.map((s) => (
                 <button
                   key={s}
@@ -133,43 +159,38 @@ export default function App() {
                   className={`symbol-tab ${activeSymbol === s ? 'symbol-tab-active' : 'symbol-tab-idle'}`}
                 >
                   {s}
-                  {data?.snapshots?.[s]?.spot != null ? (
-                    <span className="ml-1 font-mono text-[10px] opacity-90">
-                      {data.snapshots[s].spot!.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                    </span>
-                  ) : null}
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <ConnectionStatus metrics={metrics} session={session} dataReady={Boolean(data?.dataReady)} />
 
-            {upstoxBadge ? (
-              <span
-                className={`text-[10px] px-2 py-1 rounded-lg border ${upstoxBadge.className}`}
-                title={deployment?.upstox.message}
-              >
-                {upstoxBadge.label}
-              </span>
-            ) : null}
+            <span
+              className={`text-[10px] px-2 py-1 rounded-lg border whitespace-nowrap ${upstoxBadge.className}`}
+              title={deployment?.upstox.message}
+            >
+              {upstoxBadge.label}
+            </span>
 
             {needsUpstox ? (
               <a
                 href={getLoginUrl()}
-                className="px-3 py-1.5 text-[11px] bg-nexus-accent text-black font-bold rounded-lg hover:opacity-90 shadow-glow-accent"
+                className="px-3 py-1.5 text-[11px] bg-nexus-accent text-black font-bold rounded-lg hover:opacity-90 shadow-glow-accent whitespace-nowrap"
               >
                 Connect Upstox
               </a>
             ) : null}
 
-            {data?.dataReady && snap ? (
-              <span className="stat-pill hidden md:inline-flex">
-                <span className="text-nexus-muted">{(snap.marketPhase ?? 'MARKET').replace(/_/g, ' ')}</span>
-                <span className="font-mono text-nexus-accent">TQS {(snap.tradeQualityScore ?? 0).toFixed(0)}</span>
+            <span className="stat-pill hidden md:inline-flex min-w-[9.5rem]">
+              <span className="text-nexus-muted">
+                {((snap?.marketPhase ?? 'MARKET') as string).replace(/_/g, ' ')}
               </span>
-            ) : null}
+              <span className="font-mono text-nexus-accent">
+                TQS {(snap?.tradeQualityScore ?? 0).toFixed(0)}
+              </span>
+            </span>
 
             <div className="flex gap-1 border-l border-nexus-border pl-2">
               <button
@@ -214,37 +235,52 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-[1920px] mx-auto px-4 sm:px-5 py-4 sm:py-5 space-y-5">
-        <OnboardingBanner
-          deployment={deployment}
-          dataReady={Boolean(data?.dataReady)}
-          waitingReason={data?.waitingReason}
-        />
+      <main className="max-w-[1920px] mx-auto px-4 sm:px-5 py-4 sm:py-5 space-y-5 overflow-anchor-none">
+        {!canShowDashboard ? (
+          <OnboardingBanner
+            deployment={deployment}
+            dataReady={Boolean(data?.dataReady)}
+            waitingReason={data?.waitingReason}
+          />
+        ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-5xl">
           <PerformanceMilestone stats={milestone} />
           <WeeklyDashboardPanel data={weeklyDashboard} />
         </div>
 
-        {canShowDashboard && snap && auto && report ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <QuickStat label="Net PnL" value={`₹${netPnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} tone={netPnl >= 0 ? 'good' : 'bad'} />
-            <QuickStat label="PF" value={pf.toFixed(2)} tone={pf >= 1.2 ? 'good' : pf < 1 ? 'bad' : 'neutral'} />
-            <QuickStat label="Open" value={String(auto.openPaperTrades.length)} tone="accent" />
-            <QuickStat label="Regime" value={(snap.regime ?? '—').replace(/_/g, ' ')} />
-            <QuickStat label="Bias" value={snap.breadth?.bias ?? 'NEUTRAL'} tone={snap.breadth?.bias === 'BULLISH' ? 'good' : snap.breadth?.bias === 'BEARISH' ? 'bad' : 'neutral'} />
-          </div>
-        ) : null}
+        {/* Fixed-height stats slot — never collapse when report briefly missing */}
+        <div className="layout-stats-slot flex flex-wrap items-center gap-2">
+          {canShowDashboard && snap && auto ? (
+            <>
+              <QuickStat label="Net PnL" value={`₹${netPnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} tone={netPnl >= 0 ? 'good' : 'bad'} />
+              <QuickStat label="PF" value={pf.toFixed(2)} tone={pf >= 1.2 ? 'good' : pf < 1 ? 'bad' : 'neutral'} />
+              <QuickStat label="Open" value={String(auto.openPaperTrades.length)} tone="accent" />
+              <QuickStat label="Regime" value={(snap.regime ?? '—').replace(/_/g, ' ')} />
+              <QuickStat label="Bias" value={snap.breadth?.bias ?? 'NEUTRAL'} tone={snap.breadth?.bias === 'BULLISH' ? 'good' : snap.breadth?.bias === 'BEARISH' ? 'bad' : 'neutral'} />
+            </>
+          ) : (
+            <span className="text-[11px] text-nexus-muted">Session stats load with live data…</span>
+          )}
+        </div>
 
-        {loading && !data ? <WaitingState reason="Connecting to server..." showConnect={false} /> : null}
+        {/* Fixed-height status strip — reconnect banner no longer shoves content */}
+        <div
+          className={`layout-status-slot ${
+            showReconnect
+              ? 'rounded-lg border border-nexus-yellow/30 bg-nexus-yellow/5 px-3 py-2 text-[11px] text-nexus-yellow'
+              : 'invisible pointer-events-none'
+          }`}
+          aria-hidden={!showReconnect}
+        >
+          {showReconnect
+            ? 'Server reconnecting — showing last cached data. Some panels may be stale.'
+            : '\u00a0'}
+        </div>
 
-        {error && data ? (
-          <div className="rounded-lg border border-nexus-yellow/30 bg-nexus-yellow/5 px-3 py-2 text-[11px] text-nexus-yellow">
-            Server reconnecting — showing last cached data. Some panels may be stale.
-          </div>
-        ) : null}
+        {showBootWait ? <WaitingState reason="Connecting to server..." showConnect={false} /> : null}
 
-        {error && !data ? (
+        {showHardError ? (
           <div className="text-center py-16 rounded-xl border border-nexus-red/30 bg-nexus-red/5 shadow-panel">
             <p className="text-nexus-red font-bold text-lg">Cannot reach server</p>
             <p className="text-nexus-muted text-sm mt-2 max-w-md mx-auto leading-relaxed">{error}</p>
@@ -258,15 +294,14 @@ export default function App() {
           </div>
         ) : null}
 
-        {data && !data.dataReady && !canShowDashboard ? (
-          <WaitingState reason={data.waitingReason} showConnect={Boolean(needsUpstox)} />
+        {showDataWait ? (
+          <WaitingState
+            reason={data?.waitingReason || 'Loading symbol snapshots…'}
+            showConnect={Boolean(needsUpstox)}
+          />
         ) : null}
 
-        {data && auto && !snap ? (
-          <WaitingState reason={data.waitingReason || 'Loading symbol snapshots…'} showConnect={Boolean(needsUpstox)} />
-        ) : null}
-
-        {canShowDashboard && snap && auto ? (
+        {canShowDashboard && snap && auto && data ? (
           <div className="space-y-6">
             <DashboardSection title="Execution" subtitle="Live context for the active symbol">
               <div className="col-span-12 lg:col-span-3"><ExecutionHUD snap={snap} auto={auto} /></div>
