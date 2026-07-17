@@ -417,7 +417,8 @@ class ExplosionEvent:
 
 
 def _strike_key(strike: float, side: Side) -> str:
-    return f"{side.value}:{strike}"
+    # Normalize so 24400 and 24400.0 share one history key.
+    return f"{side.value}:{float(strike)}"
 
 
 def _record(symbol: str, strike: float, side: Side, premium: float, volume: float = 0) -> None:
@@ -805,6 +806,14 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     tradeable = e.tier in ("EXPLODING", "ELITE") or capture
     if ict.mega_rip or (ict.active and (ict.flat_then_vertical or ict.premium_fvg)):
         tradeable = True
+    # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).
+    if e.tier == "BUILDING" and ict.active and ict.flat_then_vertical:
+        tradeable = True
+    vol_awaken = (
+        "volAwaken" in (e.reason or "")
+        or ict.volume_awakening
+        or float(e.volume_surge or 0) >= 3.0
+    )
     return {
         "symbol": e.symbol,
         "side": e.side.value,
@@ -820,7 +829,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "dailyMovePct": e.daily_move_pct,
         "peakMovePct": e.peak_move_pct,
         "openPremiumMove": e.daily_move_pct,
-        "volumeAwaken": "volAwaken" in (e.reason or ""),
+        "volumeAwaken": vol_awaken,
         "tradeable": tradeable,
         "morningCapture": morning,
         "afternoonCapture": afternoon,
@@ -832,5 +841,8 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictMegaRip": ict.mega_rip,
         "ictPremiumFvg": ict.premium_fvg,
         "ictFlatThenVertical": ict.flat_then_vertical,
+        "ictVolumeAwakening": ict.volume_awakening,
+        "ictDisplacement": ict.displacement,
+        "momentType": ict.pattern if ict.active else ("volume_awaken" if vol_awaken else e.tier),
         "ictReasons": ict.reasons,
     }

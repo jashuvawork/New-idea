@@ -479,6 +479,37 @@ def _gate_checks(
             "fix": "Deploy chart reconcile fix",
         })
 
+    from app.engines.ict_breakout_monitor import (
+        analyze_explosion_event_ict,
+        late_fade_chase_blocked,
+    )
+
+    ict = (
+        analyze_explosion_event_ict(candidate.explosion_event, snap)
+        if candidate.explosion_event
+        else None
+    )
+    if ict and candidate.explosion_event:
+        late_blocked, late_reason = late_fade_chase_blocked(candidate.explosion_event, ict)
+        if late_blocked:
+            blockers.append(late_reason)
+            gates.append({
+                "gate": "ict_late_fade_chase",
+                "passed": False,
+                "detail": late_reason,
+                "fix": "Enter earlier on flat-base break — do not chase after peak fades",
+            })
+        else:
+            gates.append({"gate": "ict_late_fade_chase", "passed": True, "detail": "not a late fade chase"})
+
+    moment_type = str(
+        alert.get("momentType")
+        or (ict.pattern if ict and ict.active else None)
+        or alert.get("ictPattern")
+        or tier
+        or "unknown"
+    )
+
     would_pass = not blockers
     return {
         "symbol": symbol,
@@ -487,10 +518,17 @@ def _gate_checks(
         "tier": tier,
         "score": score,
         "dailyMovePct": daily_move,
+        "peakMovePct": float(alert.get("peakMovePct") or 0),
         "premium": prem,
         "velocity3s": alert.get("velocity3s"),
         "allDayExplosion": bool(alert.get("allDayExplosion")),
         "volumeAwaken": bool(alert.get("volumeAwaken")),
+        "momentType": moment_type,
+        "ictPattern": alert.get("ictPattern") or (ict.pattern if ict else None),
+        "ictFlatThenVertical": bool(
+            alert.get("ictFlatThenVertical") or (ict.flat_then_vertical if ict else False)
+        ),
+        "ictBreakout": bool(alert.get("ictBreakout") or (ict.active if ict else False)),
         "wouldPass": would_pass,
         "primaryBlocker": blockers[0] if blockers else None,
         "blockers": blockers,
@@ -568,10 +606,11 @@ def build_missed_trade_report(
     passed.sort(key=lambda r: -float(r.get("sortScore") or 0))
 
     session_blocks = [s for s in (state.skipped or []) if s.get("symbol") == "SESSION"]
+    moment_taxonomy = _classify_moment_types(missed, passed, snapshots)
 
     return {
         "at": datetime.now(IST).isoformat(),
-        "summary": _report_summary(missed, passed, best, session_blocks, policy),
+        "summary": _report_summary(missed, passed, best, session_blocks, policy, moment_taxonomy),
         "entryPolicy": policy,
         "policyMeta": policy_meta,
         "badDayMinRank": (chop.get("badDayRouting") or {}).get("minRankFloor"),
@@ -579,6 +618,7 @@ def build_missed_trade_report(
         "bestTradesMinRank": settings.best_trades_min_rank_score,
         "eliteCounterMinScore": settings.premium_led_elite_counter_min_score,
         "sessionBlocks": session_blocks[:6],
+        "momentTaxonomy": moment_taxonomy,
         "bestCandidate": (
             {
                 "symbol": best.symbol,
@@ -603,17 +643,113 @@ def build_missed_trade_report(
     }
 
 
+def _classify_moment_types(
+    missed: list[dict],
+    passed: list[dict],
+    snapshots: dict[str, SymbolSnapshot],
+) -> dict[str, Any]:
+    """Bucket radar moments so operators see which rip styles are being missed."""
+    from collections import Counter
+
+    buckets: Counter[str] = Counter()
+    examples: dict[str, list[dict[str, Any]]] = {}
+
+    def _bucket_alert(alert: dict, symbol: str) -> str:
+        if alert.get("ictMegaRip") or float(alert.get("dailyMovePct") or 0) >= 200:
+            return "mega_rip"
+        if alert.get("ictFlatThenVertical") or alert.get("ictPattern") == "flat_then_vertical":
+            return "flat_then_vertical"
+        if alert.get("ictPremiumFvg") or alert.get("ictPattern") == "premium_fvg":
+            return "premium_fvg"
+        if alert.get("volumeAwaken") or alert.get("ictVolumeAwakening"):
+            return "volume_awakening"
+        peak = float(alert.get("peakMovePct") or 0)
+        v3 = float(alert.get("velocity3s") or 0)
+        if peak >= 40 and v3 < 1.0:
+            return "faded_vertical_rip"
+        if str(alert.get("tier") or "") in ("ELITE", "EXPLODING"):
+            return "live_explosion"
+        return "building_or_watch"
+
+    for sym, snap in snapshots.items():
+        if not snap.dataAvailable:
+            continue
+        for alert in snap.explosionAlerts or []:
+            tier = str(alert.get("tier") or "")
+            daily = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
+            if tier == "WATCH" and daily < 20 and not alert.get("ictBreakout"):
+                continue
+            kind = _bucket_alert(alert, sym)
+            buckets[kind] += 1
+            examples.setdefault(kind, []).append({
+                "symbol": sym,
+                "side": alert.get("side"),
+                "strike": alert.get("strike"),
+                "premium": alert.get("premium"),
+                "tier": tier,
+                "dailyMovePct": daily,
+                "peakMovePct": alert.get("peakMovePct"),
+                "ictPattern": alert.get("ictPattern"),
+            })
+
+    missed_by_type: Counter[str] = Counter()
+    for row in missed:
+        kind = str(row.get("momentType") or row.get("ictPattern") or "unknown")
+        missed_by_type[kind] += 1
+
+    priority = [
+        "flat_then_vertical",
+        "volume_awakening",
+        "premium_fvg",
+        "live_explosion",
+        "faded_vertical_rip",
+        "mega_rip",
+        "building_or_watch",
+    ]
+    ordered = [
+        {
+            "type": t,
+            "radarCount": buckets.get(t, 0),
+            "missedCount": missed_by_type.get(t, 0),
+            "examples": (examples.get(t) or [])[:3],
+            "captureHint": _moment_capture_hint(t),
+        }
+        for t in priority
+        if buckets.get(t) or missed_by_type.get(t)
+    ]
+    return {
+        "types": ordered,
+        "totalRadarMoments": sum(buckets.values()),
+        "topMissedType": ordered[0]["type"] if ordered else None,
+    }
+
+
+def _moment_capture_hint(moment_type: str) -> str:
+    return {
+        "flat_then_vertical": "Enter on base break + volume (early ICT) — do not wait for 80%+",
+        "volume_awakening": "Trade volume surge on BUILDING/EXPLODING immediately",
+        "premium_fvg": "Premium gap-up imbalance — prioritize over faded peak chase",
+        "live_explosion": "Live EXPLODING/ELITE — clear chart/breadth gates via vertical-rip bypass",
+        "faded_vertical_rip": "Peak already printed — caution size or skip if velocity dead",
+        "mega_rip": "ALL-IN path — extreme session move, max hold / trail",
+        "building_or_watch": "Promote via ICT early break when flat base + displacement",
+    }.get(moment_type, "Review skipped reasons for this moment class")
+
+
 def _report_summary(
     missed: list[dict],
     passed: list[dict],
     best: Any,
     session_blocks: list[dict],
     policy: str,
+    moment_taxonomy: Optional[dict[str, Any]] = None,
 ) -> str:
     parts: list[str] = []
     if session_blocks:
         parts.append(f"Session: {session_blocks[0].get('reason')}")
     parts.append(f"Policy: {policy}")
+    if moment_taxonomy and moment_taxonomy.get("topMissedType"):
+        parts.append(f"Moment class: {moment_taxonomy['topMissedType']}")
     if missed:
         top = missed[0]
         parts.append(

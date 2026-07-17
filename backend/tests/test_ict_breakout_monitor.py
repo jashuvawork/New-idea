@@ -24,15 +24,22 @@ def _settings():
     s.ict_breakout_monitor_enabled = True
     s.ict_fvg_min_gap_pct = 12.0
     s.ict_flat_base_max_range_pct = 8.0
-    s.ict_displacement_min_velocity_3s = 3.0
+    s.ict_displacement_min_velocity_3s = 2.2
     s.ict_vertical_min_session_move_pct = 80.0
+    s.ict_early_vertical_min_session_move_pct = 28.0
+    s.ict_early_vertical_min_velocity_3s = 2.0
+    s.ict_volume_surge_awaken_min = 3.0
     s.ict_mega_rip_min_session_move_pct = 200.0
     s.ict_breakout_min_score = 28.0
     s.ict_fvg_score_bonus = 14.0
     s.ict_flat_vertical_score_bonus = 18.0
+    s.ict_early_breakout_score_bonus = 16.0
     s.ict_mega_rip_score_bonus = 22.0
     s.ict_max_rank_bonus = 30.0
     s.ict_good_day_capture_enabled = True
+    s.ict_all_day_capture_enabled = True
+    s.ict_all_day_capture_min_score = 30.0
+    s.ict_all_day_lot_multiplier = 0.85
     s.ict_good_day_min_score = 35.0
     s.ict_good_day_rank_bonus = 18.0
     s.ict_mega_rip_rank_bonus = 25.0
@@ -40,6 +47,9 @@ def _settings():
     s.ict_mega_rip_no_progress_seconds = 600
     s.ict_breakout_trail_arm_multiplier = 1.5
     s.ict_mega_rip_trail_arm_multiplier = 2.2
+    s.ict_late_chase_block_enabled = True
+    s.ict_late_chase_min_peak_pct = 120.0
+    s.ict_late_chase_max_live_velocity_3s = 0.4
     s.explosion_volume_awaken_min = 25000
     s.explosion_no_progress_seconds = 150
     return s

@@ -470,10 +470,13 @@ async def _open_from_candidate(
         good_day_ict, ict_meta = good_day_ict_capture_active(
             state, snapshots, event=candidate.explosion_event, ict=ict,
         )
-        if good_day_ict and settings.ict_good_day_force_max_lots:
+        if good_day_ict and settings.ict_good_day_force_max_lots and ict_meta.get("maxProfitCapture"):
             from app.engines.capital_allocator import max_lots_for_capital
 
             lots = max(lots, max_lots_for_capital(symbol, fill_premium))
+        elif good_day_ict and ict_meta.get("allDayIctCapture"):
+            lot_scale = float(ict_meta.get("lotMultiplier") or 0.85)
+            lots = max(1, int(lots * lot_scale))
 
     lots = clamp_lots(lots, symbol, fill_premium)
     lot_mult = lot_multiplier(symbol)
@@ -639,8 +642,16 @@ async def _open_from_candidate(
             "ictReasons": ict.reasons,
         })
         if good_day_ict:
-            ctx_extra["goodDayIctCapture"] = True
+            ctx_extra["goodDayIctCapture"] = bool(ict_meta.get("maxProfitCapture"))
+            ctx_extra["allDayIctCapture"] = bool(ict_meta.get("allDayIctCapture"))
+            ctx_extra["ictCapturePath"] = ict_meta.get("capturePath")
             ctx_extra["ictCaptureMeta"] = ict_meta
+            if ict.flat_then_vertical:
+                ctx_extra["momentType"] = "flat_then_vertical"
+            elif ict.mega_rip:
+                ctx_extra["momentType"] = "mega_rip"
+            elif ict.premium_fvg:
+                ctx_extra["momentType"] = "premium_fvg"
         if is_extreme_explosion_all_in_bypass(candidate=candidate):
             ctx_extra.update(extreme_all_in_meta(candidate=candidate))
         if faded_rip_meta:
