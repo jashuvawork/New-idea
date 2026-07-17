@@ -48,8 +48,9 @@ def _settings():
     s.ict_breakout_trail_arm_multiplier = 1.5
     s.ict_mega_rip_trail_arm_multiplier = 2.2
     s.ict_late_chase_block_enabled = True
-    s.ict_late_chase_min_peak_pct = 120.0
-    s.ict_late_chase_max_live_velocity_3s = 0.4
+    s.ict_late_chase_min_peak_pct = 75.0
+    s.ict_late_chase_max_live_velocity_3s = 1.0
+    s.explosion_early_window_max_move_pct = 55.0
     s.explosion_volume_awaken_min = 25000
     s.explosion_no_progress_seconds = 150
     return s

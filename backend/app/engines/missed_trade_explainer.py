@@ -479,6 +479,7 @@ def _gate_checks(
             "fix": "Deploy chart reconcile fix",
         })
 
+    from app.engines.explosion_entry_guards import extended_session_chase_blocked
     from app.engines.ict_breakout_monitor import (
         analyze_explosion_event_ict,
         late_fade_chase_blocked,
@@ -489,6 +490,24 @@ def _gate_checks(
         if candidate.explosion_event
         else None
     )
+    if candidate.explosion_event:
+        ext_blocked, ext_reason = extended_session_chase_blocked(
+            candidate.explosion_event, ict=ict,
+        )
+        if ext_blocked:
+            blockers.append(ext_reason)
+            gates.append({
+                "gate": "explosion_extended_chase",
+                "passed": False,
+                "detail": ext_reason,
+                "fix": "Enter in the early window (≈28–55% move) — block EXPLOSIVE after +70%",
+            })
+        else:
+            gates.append({
+                "gate": "explosion_extended_chase",
+                "passed": True,
+                "detail": "inside early/soft window",
+            })
     if ict and candidate.explosion_event:
         late_blocked, late_reason = late_fade_chase_blocked(candidate.explosion_event, ict)
         if late_blocked:
@@ -727,6 +746,7 @@ def _classify_moment_types(
 def _moment_capture_hint(moment_type: str) -> str:
     return {
         "flat_then_vertical": "Enter on base break + volume (early ICT) — do not wait for 80%+",
+        "explosion_extended_chase": "Skip EXPLOSIVE after +70% session move — chase kills PF",
         "volume_awakening": "Trade volume surge on BUILDING/EXPLODING immediately",
         "premium_fvg": "Premium gap-up imbalance — prioritize over faded peak chase",
         "live_explosion": "Live EXPLODING/ELITE — clear chart/breadth gates via vertical-rip bypass",

@@ -44,7 +44,7 @@ def _settings() -> MagicMock:
     s.explosion_faded_rip_caution_enabled = True
     s.explosion_faded_rip_min_peak_pct = 35.0
     s.explosion_faded_rip_max_live_velocity_3s = 0.5
-    s.explosion_faded_rip_lot_cap = 8
+    s.explosion_faded_rip_lot_cap = 6
     s.explosion_faded_rip_tighter_stop_mult = 0.85
     return s
 
@@ -162,4 +162,4 @@ def test_detect_faded_vertical_rip_and_lot_cap(mock_settings):
     faded, meta = detect_faded_vertical_rip(event, _snap())
     assert faded is True
     assert meta.get("fadedRipCaution") is True
-    assert cap_faded_rip_lots(15) == 8
+    assert cap_faded_rip_lots(15) == 6

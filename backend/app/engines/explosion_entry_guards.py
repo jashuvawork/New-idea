@@ -82,6 +82,65 @@ def check_peak_chase_entry(
     return True, "ok"
 
 
+def _session_peak_move(explosion_event: Any) -> float:
+    if explosion_event is None:
+        return 0.0
+    daily = float(getattr(explosion_event, "daily_move_pct", 0) or 0)
+    peak = float(getattr(explosion_event, "peak_move_pct", 0) or 0)
+    return max(daily, peak)
+
+
+def extended_session_chase_blocked(
+    explosion_event: Any,
+    *,
+    ict: Any = None,
+) -> tuple[bool, str]:
+    """
+    Hard-block EXPLOSIVE entries after the move is already mostly done.
+
+    Hot velocity at +90% is still a chase (Jul17 NIFTY 24250 CE) — not a start.
+    Early flat→vertical inside the early window remains allowed.
+    """
+    settings = get_settings()
+    if not getattr(settings, "explosion_extended_chase_block_enabled", True):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+
+    move = _session_peak_move(explosion_event)
+    if ict is not None:
+        move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
+
+    hard = float(getattr(settings, "explosion_extended_chase_min_move_pct", 70.0) or 70.0)
+    early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+    if move < hard:
+        return False, ""
+
+    # Only keep true early base-break ICT inside the early window (should be < hard).
+    if (
+        ict is not None
+        and bool(getattr(ict, "flat_then_vertical", False))
+        and bool(getattr(ict, "active", False))
+        and move <= early_max
+    ):
+        return False, ""
+
+    return True, f"explosion_extended_chase_{move:.0f}%"
+
+
+def cap_extended_chase_lots(lots: int, explosion_event: Any) -> int:
+    """Shrink size in the soft extended zone; hard-cap all explosion size."""
+    settings = get_settings()
+    hard_cap = int(getattr(settings, "explosion_hard_lot_cap", 10) or 10)
+    lots = min(max(1, lots), hard_cap)
+    move = _session_peak_move(explosion_event)
+    soft = float(getattr(settings, "explosion_extended_soft_min_move_pct", 50.0) or 50.0)
+    if move >= soft:
+        soft_cap = int(getattr(settings, "explosion_extended_soft_lot_cap", 6) or 6)
+        lots = min(lots, soft_cap)
+    return lots
+
+
 def check_explosion_macd_alignment(
     side: Side | str,
     snap: SymbolSnapshot,

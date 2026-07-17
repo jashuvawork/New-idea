@@ -264,7 +264,7 @@ def analyze_explosion_event_ict(event: Any, snap: Optional[SymbolSnapshot] = Non
 
 
 def late_fade_chase_blocked(event: Any, ict: Optional[ICTBreakoutSignal] = None) -> tuple[bool, str]:
-    """Block chasing rips that already peaked hard with dead live velocity (PF killer)."""
+    """Block chasing rips that already peaked hard with cooling live velocity (PF killer)."""
     settings = get_settings()
     if not getattr(settings, "ict_late_chase_block_enabled", True):
         return False, ""
@@ -272,10 +272,17 @@ def late_fade_chase_blocked(event: Any, ict: Optional[ICTBreakoutSignal] = None)
     daily = float(getattr(event, "daily_move_pct", 0) or 0)
     move = max(peak, daily, float(ict.session_move_pct) if ict else 0.0)
     v3 = float(getattr(event, "velocity_3s", 0) or 0)
-    min_peak = float(getattr(settings, "ict_late_chase_min_peak_pct", 120.0) or 120.0)
-    max_v3 = float(getattr(settings, "ict_late_chase_max_live_velocity_3s", 0.4) or 0.4)
-    # Still allow if ICT says volume awakening / live displacement is on.
-    if ict and (ict.volume_awakening or ict.displacement) and v3 >= max_v3:
+    min_peak = float(getattr(settings, "ict_late_chase_min_peak_pct", 75.0) or 75.0)
+    max_v3 = float(getattr(settings, "ict_late_chase_max_live_velocity_3s", 1.0) or 1.0)
+    # Early flat→vertical still in the capture window may keep a live displacement pass.
+    early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+    if (
+        ict
+        and ict.flat_then_vertical
+        and move <= early_max
+        and (ict.volume_awakening or ict.displacement)
+        and v3 >= max_v3
+    ):
         return False, ""
     if move >= min_peak and v3 <= max_v3:
         return True, f"ict_late_fade_chase_peak_{move:.0f}%_v3_{v3:.1f}"
