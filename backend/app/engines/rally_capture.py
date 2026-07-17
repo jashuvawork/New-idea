@@ -131,12 +131,19 @@ def chart_blocks_explosion_side(
     tier: str,
     *,
     event: Optional[ExplosionEvent] = None,
+    breadth_bias: str = "NEUTRAL",
 ) -> tuple[bool, str]:
     """Block counter-trend explosion legs when index chart has clear bias."""
     from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
 
     if event is not None and qualifies_for_vertical_rip_bypass(event):
         return False, "ok"
+
+    if event is not None and chart is not None:
+        from app.engines.morning_premium_capture import premium_led_explosion_bypass
+
+        if premium_led_explosion_bypass(event, chart, breadth_bias):
+            return False, "ok"
 
     if chart is None:
         return False, "ok"

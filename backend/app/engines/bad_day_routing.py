@@ -432,6 +432,73 @@ def cross_index_rank_adjustment(
     return bonus
 
 
+def _hottest_elite_rip(
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[float, str, str]:
+    """Best ELITE session move across all indices."""
+    best_move = 0.0
+    best_sym = ""
+    best_side = ""
+    for sym, snap in snapshots.items():
+        for alert in snap.explosionAlerts or []:
+            if str(alert.get("tier") or "").upper() != "ELITE":
+                continue
+            move = max(
+                float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0),
+                float(alert.get("peakMovePct") or 0),
+            )
+            score = float(alert.get("explosionScore") or 0)
+            rank = move + score * 0.05
+            if rank > best_move:
+                best_move = rank
+                best_sym = sym.upper()
+                best_side = str(alert.get("side") or "").upper()
+    return best_move, best_sym, best_side
+
+
+def cross_index_elite_priority_bonus(
+    candidate: Any,
+    snapshots: dict[str, SymbolSnapshot],
+) -> float:
+    """
+    Prefer the hottest ELITE rip on an alternate index (e.g. NIFTY 24400 CE)
+    over weaker setups on the other index.
+    """
+    settings = get_settings()
+    if not getattr(settings, "cross_index_elite_priority_enabled", True):
+        return 0.0
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return 0.0
+    event = getattr(candidate, "explosion_event", None)
+    if event is None:
+        return 0.0
+    tier = str(getattr(event, "tier", "") or "").upper()
+    if tier != "ELITE":
+        return 0.0
+
+    session_move = max(
+        float(getattr(event, "daily_move_pct", 0) or 0),
+        float(getattr(event, "peak_move_pct", 0) or 0),
+    )
+    min_move = float(getattr(settings, "cross_index_elite_min_session_move_pct", 40.0) or 40.0)
+    if session_move < min_move:
+        return 0.0
+
+    hot_rank, hot_sym, hot_side = _hottest_elite_rip(snapshots)
+    if not hot_sym or hot_sym != candidate.symbol.upper():
+        return 0.0
+    side_val = candidate.side.value if hasattr(candidate.side, "value") else str(candidate.side).upper()
+    if hot_side and hot_side != side_val:
+        return 0.0
+
+    score = float(getattr(event, "explosion_score", 0) or 0)
+    if score < 90:
+        return 0.0
+
+    base = float(getattr(settings, "cross_index_elite_priority_bonus", 22.0) or 22.0)
+    return min(base + 8, base + session_move * 0.12)
+
+
 def bad_day_lot_cap(premium: float, lots: int, state: AutoTraderState, snapshots: dict) -> int:
     settings = get_settings()
     active, _ = bad_day_session_active(state, snapshots)

@@ -195,7 +195,9 @@ def check_explosion_entry(
         if blocked and not premium_bypass:
             return False, reason
 
-    blocked, reason = chart_blocks_explosion_side(event.side, chart, event.tier, event=event)
+    blocked, reason = chart_blocks_explosion_side(
+        event.side, chart, event.tier, event=event, breadth_bias=breadth_bias,
+    )
     if blocked and not premium_bypass and not afternoon_capture_skips_chart_block(event, chart):
         if not is_all_day_explosion_event(event, chart=chart):
             return False, reason
@@ -565,18 +567,26 @@ def evaluate_explosion_exit(
         return "explosion_target_hit", pnl_inr
 
     from app.engines.confidence_hold import (
+        chart_confidence_for_trade,
         half_tp_giveback_exit,
         hold_until_target_active,
         should_defer_profit_lock,
+        target_points_for_trade,
     )
 
+    chart_target = target_points_for_trade(trade)
+    chart_conf = chart_confidence_for_trade(trade)
+    defer_target = chart_target if chart_conf >= 95.0 else target
+
     def _profit_lock_ok() -> bool:
-        if not should_defer_profit_lock(trade, best, target_points=target):
+        if not should_defer_profit_lock(trade, best, target_points=defer_target):
             return True
+        if chart_conf >= 95.0:
+            return False
         # Standard explosion TP zone reached — don't block trail for distant chart TP
         return best >= _cfg_float(settings, "explosion_target_standard", 18.0) * 0.95
 
-    if half_tp_giveback_exit(trade, best, pnl_pts, target_points=target):
+    if half_tp_giveback_exit(trade, best, pnl_pts, target_points=defer_target):
         return "explosion_half_tp_profit_lock", pnl_inr
 
     if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:

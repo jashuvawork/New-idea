@@ -187,6 +187,40 @@ def is_faded_rip_caution_trade(trade: Any) -> bool:
     return str(ctx.get("selectionMode") or "").lower() == "explosion"
 
 
+def _faded_rip_chart_aligned_hold(trade: Any) -> bool:
+    """Strong session rip + chart flipped aligned — keep faded-rip runner."""
+    settings = get_settings()
+    min_move = float(getattr(settings, "faded_rip_no_green_hold_min_session_move_pct", 60.0) or 60.0)
+    ctx = getattr(trade, "entryContext", None) or {}
+    session_move = max(
+        float(ctx.get("dailyMovePct") or ctx.get("openPremiumMove") or 0),
+        float(ctx.get("peakMovePct") or 0),
+        float(ctx.get("sessionMovePct") or 0),
+    )
+    if session_move < min_move:
+        return False
+
+    from app.models.schemas import Side
+
+    side = getattr(trade, "side", Side.CALL)
+    side_val = side.value if isinstance(side, Side) else str(side).upper()
+    for chart in (
+        (ctx.get("executionChart") or {}).get("indexChart") or {},
+        (ctx.get("executionChart") or {}).get("snapshotChart") or {},
+    ):
+        direction = str(chart.get("direction", "NEUTRAL")).upper()
+        if side_val == "CALL" and direction == "BULLISH":
+            return True
+        if side_val == "PUT" and direction == "BEARISH":
+            return True
+    breadth = str(ctx.get("breadth") or "").upper()
+    if side_val == "CALL" and breadth == "BULLISH":
+        return True
+    if side_val == "PUT" and breadth == "BEARISH":
+        return True
+    return False
+
+
 def faded_rip_no_green_exit_reason(
     trade: Any,
     *,
@@ -198,6 +232,8 @@ def faded_rip_no_green_exit_reason(
     if not getattr(settings, "explosion_faded_rip_no_green_exit_enabled", True):
         return None
     if not is_faded_rip_caution_trade(trade):
+        return None
+    if _faded_rip_chart_aligned_hold(trade):
         return None
     limit = int(getattr(settings, "explosion_faded_rip_no_green_seconds", 60) or 60)
     min_green = float(getattr(settings, "explosion_faded_rip_min_green_points", 0.5) or 0.5)

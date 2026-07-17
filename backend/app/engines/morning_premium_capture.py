@@ -142,19 +142,50 @@ def _market_opposes_side(
     return False
 
 
+def _session_move_pct(event: ExplosionEvent) -> float:
+    daily = float(getattr(event, "daily_move_pct", 0) or 0)
+    peak = float(getattr(event, "peak_move_pct", 0) or 0)
+    return max(daily, peak)
+
+
+def _counter_trend_rip_ok(event: ExplosionEvent, settings: Any) -> bool:
+    """Premium-led vertical rip — allow counter-chart/breadth before ELITE tier peaks."""
+    from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
+
+    if qualifies_for_vertical_rip_bypass(event):
+        return True
+
+    tier = str(event.tier or "").upper()
+    if tier not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+
+    session_move = _session_move_pct(event)
+    score = float(event.explosion_score or 0)
+    v3 = float(event.velocity_3s or 0)
+    v9 = float(event.velocity_9s or 0)
+    min_peak = float(getattr(settings, "vertical_rip_bypass_min_peak_pct", 30.0) or 30.0)
+    min_score = float(getattr(settings, "premium_led_min_explosion_score", 42.0) or 42.0)
+    min_v3 = float(getattr(settings, "premium_led_min_velocity_3s", 2.8) or 2.8)
+    min_v9 = float(getattr(settings, "premium_led_min_velocity_9s", 3.5) or 3.5)
+    vel_ok = v3 >= min_v3 or v9 >= min_v9
+
+    if tier in ("EXPLODING", "ELITE") and session_move >= min_peak and vel_ok:
+        return score >= min_score - 6
+    if tier == "BUILDING" and session_move >= min_peak * 0.7 and v3 >= min_v3 * 0.75:
+        return score >= min_score - 4
+    return False
+
+
 def _elite_counter_breadth_ok(event: ExplosionEvent, settings: Any) -> bool:
     """Counter-trend premium rip — ELITE tier with vertical peak or near-max explosion score."""
     from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
 
     tier = str(event.tier or "").upper()
-    score = float(event.explosion_score or 0)
     if tier == "ELITE" and qualifies_for_vertical_rip_bypass(event):
         return True
     if tier != "ELITE":
         return False
     score = float(event.explosion_score or 0)
-    if tier != "ELITE":
-        return False
     elite_min = float(getattr(settings, "premium_led_elite_counter_min_score", 90.0) or 90.0)
     if score < elite_min:
         return False
@@ -177,6 +208,9 @@ def counter_trend_entry_allowed(
         if is_extreme_explosion_all_in_bypass(event=explosion_event):
             return True
         if qualifies_for_vertical_rip_bypass(explosion_event, snap=snap):
+            return True
+        side_v = _side_str(side)
+        if side_v == "CALL" and _counter_trend_rip_ok(explosion_event, get_settings()):
             return True
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
@@ -695,10 +729,14 @@ def premium_led_explosion_bypass(
     direction = (chart.direction or "NEUTRAL").upper() if chart else "NEUTRAL"
 
     if _market_opposes_side(event.side, breadth_bias, chart):
+        if side == "CALL" and _counter_trend_rip_ok(event, settings):
+            return True
         return _elite_counter_breadth_ok(event, settings)
 
     counter_breadth = _is_counter_breadth(side, bias)
     counter_chart = (direction == "BULLISH" and side == "PUT") or (direction == "BEARISH" and side == "CALL")
+    if counter_chart and side == "CALL" and _counter_trend_rip_ok(event, settings):
+        return True
     if not counter_breadth and not counter_chart:
         return False
 
