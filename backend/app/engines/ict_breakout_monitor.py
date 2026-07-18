@@ -333,25 +333,45 @@ def good_day_ict_capture_active(
             meta["capturePath"] = "good_day_flat_vertical"
             return True, meta
 
-    # All-day path — NORMAL (and AGGRESSIVE fallback): catch 26→70 CE style early.
-    if getattr(settings, "ict_all_day_capture_enabled", True) and mode != "DEFENSIVE":
-        early_ok = (
-            ict.active
-            and ict.flat_then_vertical
-            and (
-                ict.volume_awakening
-                or ict.displacement
-                or ict.premium_fvg
-                or ict.score >= float(getattr(settings, "ict_all_day_capture_min_score", 30.0) or 30.0)
-            )
+    early_ok = (
+        ict.active
+        and ict.flat_then_vertical
+        and (
+            ict.volume_awakening
+            or ict.displacement
+            or ict.premium_fvg
+            or ict.score >= float(getattr(settings, "ict_all_day_capture_min_score", 30.0) or 30.0)
         )
+    )
+
+    # All-day path — NORMAL / AGGRESSIVE: catch 26→70 CE and 12→392 PE style early.
+    if getattr(settings, "ict_all_day_capture_enabled", True) and mode != "DEFENSIVE":
         if early_ok or ict.mega_rip:
-            meta["maxProfitCapture"] = mode == "AGGRESSIVE"
+            # Always mark max-profit so trail skips tiny hard TPs (not only on AGGRESSIVE).
+            meta["maxProfitCapture"] = True
             meta["allDayIctCapture"] = True
             meta["capturePath"] = "all_day_flat_vertical"
             meta["lotMultiplier"] = (
                 1.0 if mode == "AGGRESSIVE"
                 else float(getattr(settings, "ict_all_day_lot_multiplier", 0.85) or 0.85)
+            )
+            return True, meta
+
+    # DEFENSIVE / worst days — still take clean base→vertical rips (not chase).
+    if (
+        mode == "DEFENSIVE"
+        and getattr(settings, "ict_defensive_base_rip_enabled", True)
+        and early_ok
+        and not ict.mega_rip
+    ):
+        max_move = float(getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0)
+        if ict.session_move_pct <= max_move and (ict.volume_awakening or ict.displacement):
+            meta["maxProfitCapture"] = True
+            meta["allDayIctCapture"] = True
+            meta["defensiveBaseRip"] = True
+            meta["capturePath"] = "defensive_base_flat_vertical"
+            meta["lotMultiplier"] = float(
+                getattr(settings, "ict_defensive_base_rip_lot_multiplier", 0.55) or 0.55
             )
             return True, meta
 
@@ -370,11 +390,23 @@ def ict_explosion_rank_bonus(ict: ICTBreakoutSignal, trading_mode: str = "NORMAL
     return bonus
 
 
+def _ict_max_profit_trade(trade: Any) -> bool:
+    ctx = getattr(trade, "entryContext", None) or {}
+    return bool(
+        ctx.get("maxProfitCapture")
+        or ctx.get("goodDayIctCapture")
+        or ctx.get("allDayIctCapture")
+        or ctx.get("ictMegaRip")
+        or ctx.get("ictFlatThenVertical")
+        or ctx.get("defensiveBaseRip")
+    )
+
+
 def ict_no_progress_seconds(trade: Any, settings=None) -> int:
     """Extended hold for ICT mega rips — ride 8→393 style moves."""
     settings = settings or get_settings()
     ctx = getattr(trade, "entryContext", None) or {}
-    if ctx.get("ictMegaRip") or ctx.get("goodDayIctCapture"):
+    if _ict_max_profit_trade(trade) or ctx.get("ictMegaRip") or ctx.get("goodDayIctCapture"):
         return settings.ict_mega_rip_no_progress_seconds
     if ctx.get("ictBreakout"):
         return settings.ict_breakout_no_progress_seconds
@@ -384,7 +416,7 @@ def ict_no_progress_seconds(trade: Any, settings=None) -> int:
 def ict_trail_arm_multiplier(trade: Any) -> float:
     ctx = getattr(trade, "entryContext", None) or {}
     settings = get_settings()
-    if ctx.get("ictMegaRip") or ctx.get("goodDayIctCapture"):
+    if _ict_max_profit_trade(trade) or ctx.get("ictMegaRip") or ctx.get("goodDayIctCapture"):
         return settings.ict_mega_rip_trail_arm_multiplier
     if ctx.get("ictBreakout"):
         return settings.ict_breakout_trail_arm_multiplier
