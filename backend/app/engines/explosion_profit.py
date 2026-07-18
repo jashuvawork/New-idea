@@ -407,7 +407,14 @@ def _should_skip_no_progress(trade: PaperTrade, settings) -> bool:
 
     if is_faded_rip_caution_trade(trade):
         return False
-    if ctx.get("ictMegaRip") or ctx.get("goodDayIctCapture"):
+    if (
+        ctx.get("ictMegaRip")
+        or ctx.get("goodDayIctCapture")
+        or ctx.get("allDayIctCapture")
+        or ctx.get("maxProfitCapture")
+        or ctx.get("ictFlatThenVertical")
+        or ctx.get("defensiveBaseRip")
+    ):
         return True
     edge = ctx.get("edgeScore") or {}
     if edge.get("letRunners"):
@@ -538,7 +545,15 @@ def evaluate_explosion_exit(
     if faded_exit:
         return faded_exit, pnl_inr
 
+    from app.engines.ict_breakout_monitor import _ict_max_profit_trade
+
+    max_profit = _ict_max_profit_trade(trade)
     target = exit_params.target_points
+    if max_profit:
+        target = max(
+            target,
+            float(getattr(settings, "ict_max_profit_target_points", 180.0) or 180.0),
+        )
     trail_floor = _trail_floor_pts(
         trade, best, settings, trail_arm_points=exit_params.trail_arm_points,
     )
@@ -547,6 +562,11 @@ def evaluate_explosion_exit(
         if best >= settings.runner_min_best_points
         else exit_params.trail_keep_ratio
     )
+    if max_profit:
+        trail_keep = min(
+            trail_keep,
+            float(getattr(settings, "ict_max_profit_trail_keep_ratio", 0.42) or 0.42),
+        )
 
     if (
         not exit_params.adaptive_stop
@@ -559,12 +579,21 @@ def evaluate_explosion_exit(
     if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
         return "explosion_emergency_stop", pnl_inr
 
-    # Peak touch counts — polling can miss the exact TP tick (e.g. best 12pt, current 8pt)
-    if best >= target:
-        return "explosion_target_hit", pnl_inr
-    near = max(0.5, target * 0.04)
-    if best >= target - near and best >= settings.explosion_trail_arm_points:
-        return "explosion_target_hit", pnl_inr
+    # Base→vertical ICT (12→392 PE): skip tiny hard TP — trail toward max.
+    skip_hard_tp = max_profit and bool(
+        getattr(settings, "ict_max_profit_skip_hard_target", True)
+    )
+    if not skip_hard_tp:
+        # Peak touch counts — polling can miss the exact TP tick (e.g. best 12pt, current 8pt)
+        if best >= target:
+            return "explosion_target_hit", pnl_inr
+        near = max(0.5, target * 0.04)
+        if best >= target - near and best >= settings.explosion_trail_arm_points:
+            return "explosion_target_hit", pnl_inr
+    else:
+        # Only book hard TP at the elevated ICT max-profit target.
+        if best >= target:
+            return "explosion_target_hit", pnl_inr
 
     from app.engines.confidence_hold import (
         chart_confidence_for_trade,
@@ -579,6 +608,9 @@ def evaluate_explosion_exit(
     defer_target = chart_target if chart_conf >= 95.0 else target
 
     def _profit_lock_ok() -> bool:
+        if max_profit:
+            # Let ICT base rips run — only trail after a real expansion.
+            return best >= min(40.0, target * 0.25)
         if not should_defer_profit_lock(trade, best, target_points=defer_target):
             return True
         if chart_conf >= 95.0:
@@ -586,19 +618,20 @@ def evaluate_explosion_exit(
         # Standard explosion TP zone reached — don't block trail for distant chart TP
         return best >= _cfg_float(settings, "explosion_target_standard", 18.0) * 0.95
 
-    if half_tp_giveback_exit(trade, best, pnl_pts, target_points=defer_target):
+    if not max_profit and half_tp_giveback_exit(trade, best, pnl_pts, target_points=defer_target):
         return "explosion_half_tp_profit_lock", pnl_inr
 
     if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
         if _profit_lock_ok():
             return "explosion_trail_sl", pnl_inr
 
-    if trail_floor is not None and pnl_pts < best * trail_keep and best >= 8:
+    if trail_floor is not None and pnl_pts < best * trail_keep and best >= (20 if max_profit else 8):
         if _profit_lock_ok():
             return "explosion_trail_lock", pnl_inr
 
     if (
-        pnl_pts >= exit_params.micro_target_points
+        not max_profit
+        and pnl_pts >= exit_params.micro_target_points
         and best - pnl_pts >= settings.runner_micro_giveback_points
         and best >= settings.runner_min_best_points
     ):
@@ -627,7 +660,8 @@ def evaluate_explosion_exit(
     # Peak fade after reaching explosion TP zone — even without confidence-runner hold
     target_std = _cfg_float(settings, "explosion_target_standard", 18.0)
     if (
-        best >= target_std * 0.85
+        not max_profit
+        and best >= target_std * 0.85
         and pnl_pts > 0
         and best >= exit_params.trail_arm_points
     ):
@@ -646,6 +680,11 @@ def evaluate_explosion_exit(
     if conf_max > 0:
         max_hold = max(max_hold, conf_max)
     ctx = trade.entryContext or {}
+    if max_profit:
+        max_hold = max(
+            max_hold,
+            int(getattr(settings, "ict_max_profit_max_hold_seconds", 1200) or 1200),
+        )
     if ctx.get("afternoonCapture"):
         max_hold = max(max_hold, settings.afternoon_capture_exit_max_hold_seconds)
     if aligned := ctx.get("breadth"):

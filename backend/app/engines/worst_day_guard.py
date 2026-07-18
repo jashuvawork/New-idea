@@ -256,10 +256,42 @@ def worst_day_allows_candidate(
                     meta["extremeMoveBypass"] = True
                     return True, "ok", meta
 
+        # Flat→vertical base rip on worst days (12→392 PE) — allow BUILDING ICT early.
+        alert = getattr(candidate, "alert", None) or {}
+        event = getattr(candidate, "explosion_event", None)
+        ict_flat = bool(alert.get("ictFlatThenVertical"))
+        ict_vol = bool(alert.get("volumeAwaken") or alert.get("ictVolumeAwakening"))
+        move = 0.0
+        if event is not None:
+            move = max(
+                float(getattr(event, "daily_move_pct", 0) or 0),
+                float(getattr(event, "peak_move_pct", 0) or 0),
+            )
+            ict_flat = ict_flat or bool(getattr(event, "ict_flat_then_vertical", False))
+        if not ict_flat and event is not None:
+            from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+            ict = analyze_explosion_event_ict(event, snap)
+            ict_flat = bool(ict.flat_then_vertical and ict.active)
+            ict_vol = ict_vol or bool(ict.volume_awakening or ict.displacement)
+            move = max(move, float(ict.session_move_pct or 0))
+        early_max = float(getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0)
+        if (
+            getattr(settings, "ict_defensive_base_rip_enabled", True)
+            and ict_flat
+            and ict_vol
+            and move <= early_max
+            and score >= settings.all_day_explosion_min_score - 8
+        ):
+            meta["defensiveBaseRip"] = True
+            meta["worstDayIctBaseRip"] = True
+            return True, "ok", meta
+
     if mode != "explosion":
         return False, "worst_day_breakout_only", meta
 
     if tier not in _allowed_breakout_tiers():
+        # BUILDING + ICT flat→vertical already handled above; block other BUILDING.
         return False, f"worst_day_tier_{tier.lower()}_blocked", meta
 
     if score < settings.worst_day_breakout_min_rank:

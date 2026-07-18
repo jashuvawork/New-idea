@@ -474,11 +474,19 @@ async def _open_from_candidate(
         good_day_ict, ict_meta = good_day_ict_capture_active(
             state, snapshots, event=candidate.explosion_event, ict=ict,
         )
-        if good_day_ict and settings.ict_good_day_force_max_lots and ict_meta.get("maxProfitCapture"):
+        if (
+            good_day_ict
+            and settings.ict_good_day_force_max_lots
+            and ict_meta.get("maxProfitCapture")
+            and not ict_meta.get("defensiveBaseRip")
+            and float(ict_meta.get("lotMultiplier") or 1.0) >= 0.99
+        ):
             from app.engines.capital_allocator import max_lots_for_capital
 
             lots = max(lots, max_lots_for_capital(symbol, fill_premium))
-        elif good_day_ict and ict_meta.get("allDayIctCapture"):
+        elif good_day_ict and (
+            ict_meta.get("allDayIctCapture") or ict_meta.get("defensiveBaseRip")
+        ):
             lot_scale = float(ict_meta.get("lotMultiplier") or 0.85)
             lots = max(1, int(lots * lot_scale))
 
@@ -646,8 +654,10 @@ async def _open_from_candidate(
             "ictReasons": ict.reasons,
         })
         if good_day_ict:
+            ctx_extra["maxProfitCapture"] = bool(ict_meta.get("maxProfitCapture"))
             ctx_extra["goodDayIctCapture"] = bool(ict_meta.get("maxProfitCapture"))
             ctx_extra["allDayIctCapture"] = bool(ict_meta.get("allDayIctCapture"))
+            ctx_extra["defensiveBaseRip"] = bool(ict_meta.get("defensiveBaseRip"))
             ctx_extra["ictCapturePath"] = ict_meta.get("capturePath")
             ctx_extra["ictCaptureMeta"] = ict_meta
             if ict.flat_then_vertical:

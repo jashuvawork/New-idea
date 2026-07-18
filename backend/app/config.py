@@ -599,8 +599,9 @@ class Settings(BaseSettings):
     volume_spike_baseline_enabled: bool = True
     volume_spike_baseline_min_surge: float = 3.5
     spike_velocity_baseline_min_pct: float = 12.0
-    explosion_cheap_rip_min_premium_inr: float = 12.0
-    explosion_cheap_rip_min_peak_pct: float = 28.0
+    # Cheap PE/CE bases (SENSEX ~12, NIFTY ~25–40) must be tradeable at first break.
+    explosion_cheap_rip_min_premium_inr: float = 8.0
+    explosion_cheap_rip_min_peak_pct: float = 25.0
 
     runner_trail_keep_ratio: float = 0.38
     runner_micro_giveback_points: float = 4.0
@@ -850,6 +851,15 @@ class Settings(BaseSettings):
     ict_late_chase_block_enabled: bool = True
     ict_late_chase_min_peak_pct: float = 75.0
     ict_late_chase_max_live_velocity_3s: float = 1.0
+    # DEFENSIVE/worst days: still catch true flat→vertical base rips (12→392 PE style).
+    ict_defensive_base_rip_enabled: bool = True
+    ict_defensive_base_rip_lot_multiplier: float = 0.55
+    ict_defensive_base_rip_max_move_pct: float = 55.0
+    # Max-profit trail — do not bank tiny TP on base→vertical ICT (25pt elite TP kills 12→392).
+    ict_max_profit_skip_hard_target: bool = True
+    ict_max_profit_target_points: float = 180.0
+    ict_max_profit_trail_keep_ratio: float = 0.42
+    ict_max_profit_max_hold_seconds: int = 1200
 
     def daily_profit_stage_pcts(self) -> list[float]:
         return [float(x.strip()) for x in self.daily_profit_stage_pcts_csv.split(",") if x.strip()]

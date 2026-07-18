@@ -116,7 +116,8 @@ def extended_session_chase_blocked(
     if move < hard:
         return False, ""
 
-    # Only keep true early base-break ICT inside the early window (should be < hard).
+    # Keep true early base-break ICT inside the early window only.
+    # (premium_fvg chases at +91% stay blocked — that is the PF killer.)
     if (
         ict is not None
         and bool(getattr(ict, "flat_then_vertical", False))

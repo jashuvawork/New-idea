@@ -302,16 +302,20 @@ def _explosion_candidates(
         if ext_blocked:
             continue
         rank += ict_explosion_rank_bonus(ict, trading_mode)
-        # Early flat→vertical breakouts (26→45 CE) jump the queue on all day modes.
-        if ict.flat_then_vertical and ict.active and trading_mode != "DEFENSIVE":
-            rank += 12.0 if ict.volume_awakening or ict.displacement else 8.0
+        # Early flat→vertical breakouts (26→45 CE / 12→40 PE) jump the queue —
+        # including DEFENSIVE days when volume/displacement confirms the base break.
+        if ict.flat_then_vertical and ict.active:
+            if trading_mode != "DEFENSIVE":
+                rank += 12.0 if ict.volume_awakening or ict.displacement else 8.0
+            elif ict.volume_awakening or ict.displacement:
+                rank += 16.0  # rare clean base rip on bad day — prioritize
         # Prefer early expansion window; demote already-extended rips in ranking.
         early_min = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
         early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
         move_for_rank = max(daily_move, peak_move)
         if early_min <= move_for_rank <= early_max and (ict.flat_then_vertical or ict.displacement):
             rank += 14.0
-        elif move_for_rank > early_max:
+        elif move_for_rank > early_max and not (ict.flat_then_vertical and ict.volume_awakening):
             rank -= min(35.0, (move_for_rank - early_max) * 0.6)
 
         out.append(EntryCandidate(
