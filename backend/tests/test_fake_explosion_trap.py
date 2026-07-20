@@ -19,6 +19,8 @@ def _settings(**overrides):
     s = MagicMock()
     s.fake_explosion_trap_enabled = True
     s.fake_explosion_trap_min_session_move_pct = 28.0
+    s.fake_explosion_trap_extended_move_pct = 55.0
+    s.explosion_early_window_max_move_pct = 55.0
     s.fake_explosion_trap_max_premium_mom_pct = 0.15
     s.fake_explosion_trap_block_on_conflict = True
     s.fake_explosion_trap_min_conflict_flags = 3
@@ -204,6 +206,36 @@ def test_clean_trend_atm_not_trapped(mock_money_settings, mock_settings):
     assert blocked is False
     assert meta.get("action") not in ("block", "cut_size")
     assert cap_fake_explosion_trap_lots(20, meta) == 20
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_jul15_atm_base_window_not_hard_blocked(mock_money_settings, mock_settings):
+    """RANGE + ELITE + ATM + 32–45% move = Jul15 keep — soft size cut only, not hard block."""
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+    snap = _snap(or_pos="BELOW")
+    cand = _candidate(_event(daily=32.0, v3=7.9, strike=24250.0), snap)
+    with patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
+        blocked, reason, meta = detect_fake_explosion_trap(cand, snap)
+    assert blocked is False
+    assert meta.get("action") == "cut_size"
+    assert "base_window" in meta.get("conflictFlags", [])
+    assert "session_extended" not in meta.get("conflictFlags", [])
+    assert cap_fake_explosion_trap_lots(49, meta) == 6
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_extended_chase_still_flags_session_extended(mock_money_settings, mock_settings):
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+    snap = _snap(or_pos="ABOVE")
+    cand = _candidate(_event(daily=80.0, strike=24200.0), snap)
+    blocked, reason, meta = detect_fake_explosion_trap(cand, snap)
+    assert "session_extended" in meta.get("conflictFlags", [])
 
 
 def test_cap_block_zeros_lots():

@@ -485,10 +485,20 @@ def detect_fake_explosion_trap(
     elite_hot = tier in ("ELITE", "EXPLODING") and (
         v3 >= 2.0 or tier == "ELITE"
     )
+    # "Extended" = chase territory past the early base window — NOT the entry min.
+    # Using min_move (28%) here hard-blocked Jul15 ATM ELITE winners (32–45% moves).
     min_move = float(
         getattr(settings, "fake_explosion_trap_min_session_move_pct", 28.0) or 28.0
     )
-    session_extended = move >= min_move
+    extended_move = float(
+        getattr(settings, "fake_explosion_trap_extended_move_pct", 0) or 0
+    )
+    if extended_move <= 0:
+        extended_move = float(
+            getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0
+        )
+    session_extended = move >= extended_move
+    in_base_window = min_move <= move < extended_move
     premium_flat = _premium_mom_flat(premium_chart)
 
     depth, money, atm = _strike_depth(candidate.side, float(candidate.strike), snap)
@@ -517,6 +527,8 @@ def detect_fake_explosion_trap(
         flags.append("elite_hot")
     if session_extended:
         flags.append("session_extended")
+    if in_base_window:
+        flags.append("base_window")
     if premium_flat:
         flags.append("premium_flat")
     if otm_inside_or:
