@@ -422,6 +422,53 @@ def check_bearish_sideways_entry(
     return False, "ok"
 
 
+def _elite_momentum_flip_bypass(candidate: Any, snap: SymbolSnapshot) -> bool:
+    """Allow CE↔PE flip after a loss when a real elite momentum rip is printing."""
+    settings = get_settings()
+    if not getattr(settings, "whipsaw_elite_momentum_flip_bypass_enabled", True):
+        return False
+    mode = str(getattr(candidate, "mode", "") or "")
+    if mode not in ("explosion", "scalp"):
+        return False
+    tier = str(getattr(candidate, "tier", "") or "").upper()
+    score = float(getattr(candidate, "score", 0) or 0)
+    min_score = float(
+        getattr(settings, "whipsaw_elite_momentum_flip_min_score", 85.0) or 85.0
+    )
+    if score < min_score and tier not in ("ELITE", "EXPLODING"):
+        return False
+
+    alert = getattr(candidate, "alert", None) or {}
+    event = getattr(candidate, "explosion_event", None)
+    ict_flat = bool(alert.get("ictFlatThenVertical"))
+    move = max(
+        float(alert.get("dailyMovePct") or alert.get("peakMovePct") or 0),
+        float(getattr(event, "daily_move_pct", 0) or 0) if event is not None else 0.0,
+        float(getattr(event, "peak_move_pct", 0) or 0) if event is not None else 0.0,
+    )
+    if event is not None and not ict_flat:
+        try:
+            from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+            ict = analyze_explosion_event_ict(event, snap)
+            ict_flat = bool(ict.flat_then_vertical and ict.active)
+            move = max(move, float(ict.session_move_pct or 0))
+        except Exception:
+            pass
+    if ict_flat and move >= 28.0:
+        return True
+    if tier == "ELITE" and score >= min_score and move >= 35.0:
+        return True
+    try:
+        from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
+
+        if event is not None and qualifies_for_vertical_rip_bypass(event, snap=snap):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def check_whipsaw_candidate(
     candidate: Any,
     state: AutoTraderState,
@@ -447,7 +494,12 @@ def check_whipsaw_candidate(
         ):
             meta["lastTradeOppositeSide"] = True
             if last.pnl_inr < 0:
-                return False, f"no_flip_after_{last.side}_loss", meta
+                # Jul20 NIFTY 24200 CE ELITE flat→vertical (~102 LTP) was blocked
+                # after a PUT loss — allow true momentum flips.
+                if _elite_momentum_flip_bypass(candidate, snap):
+                    meta["eliteMomentumFlipBypass"] = True
+                else:
+                    return False, f"no_flip_after_{last.side}_loss", meta
 
     blocked, reason = check_opposite_side_cooldown(symbol, side, snap)
     if blocked:

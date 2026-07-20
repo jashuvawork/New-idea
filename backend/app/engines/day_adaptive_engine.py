@@ -100,23 +100,23 @@ def build_day_adaptive_profile(
     )
 
     if day_type == "WORST":
-        # Jul20: quick/scalp primary on worst days printed large losses — explosions only.
-        profile.preferred_modes = ["explosion"]
+        # Block quick_sideways only — keep scalp + momentum explosions.
+        profile.preferred_modes = ["explosion", "scalp"]
         profile.mode_bonuses = {
-            "explosion": 10.0,
-            "quick_sideways": -12.0,
-            "slow_bounce": -12.0,
-            "scalp": -10.0,
-            "swing": -8.0,
+            "explosion": 12.0,
+            "scalp": 8.0,
+            "slow_bounce": 4.0,
+            "quick_sideways": -14.0,
+            "swing": -6.0,
         }
         profile.min_rank_cap = settings.day_adaptive_worst_rank_cap
         profile.lot_scale_boost = 0.72
         profile.allow_explosion = confidence_tier in ("HIGH", "ELITE")
         profile.allow_quick_sideways = False
-        profile.pause_regular_scalps = True
+        profile.pause_regular_scalps = False
         profile.playbook = [
-            "Worst day — elite/ICT explosions only; no quick sideways or scalps",
-            "Cap rank floor — smaller size, breakout-only policy",
+            "Worst day — scalp + elite momentum OK; no quick sideways",
+            "Cap rank floor — smaller size on chop",
         ]
     elif day_type == "CHOP":
         profile.preferred_modes = ["quick_sideways", "explosion", "scalp"]
