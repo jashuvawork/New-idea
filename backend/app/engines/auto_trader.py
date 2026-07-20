@@ -483,12 +483,27 @@ async def _open_from_candidate(
         good_day_ict, ict_meta = good_day_ict_capture_active(
             state, snapshots, event=candidate.explosion_event, ict=ict,
         )
+        # Never force max lots on chop/RANGE — Jul20 good-day override → 49-lot FOMO.
+        chopish_day = False
+        if getattr(settings, "ict_force_max_lots_block_on_chop", True):
+            day_type = str(ict_meta.get("dayType") or "").upper()
+            regime = str(
+                snap.regime.value if hasattr(snap.regime, "value") else snap.regime or ""
+            ).upper()
+            from app.engines.chop_day_guards import is_chop_session
+
+            chopish_day = (
+                day_type in ("CHOP", "WORST")
+                or regime in ("CHOP", "RANGE_BOUND")
+                or is_chop_session(snapshots)
+            )
         if (
             good_day_ict
             and settings.ict_good_day_force_max_lots
             and ict_meta.get("maxProfitCapture")
             and not ict_meta.get("defensiveBaseRip")
             and float(ict_meta.get("lotMultiplier") or 1.0) >= 0.99
+            and not chopish_day
         ):
             from app.engines.capital_allocator import max_lots_for_capital
 
@@ -507,6 +522,12 @@ async def _open_from_candidate(
         lots = cap_fake_explosion_trap_lots(lots, trap_meta)
         if lots <= 0:
             return False, str(trap_meta.get("action") or "fake_explosion_trap")
+    if candidate.mode == "explosion":
+        from app.engines.session_mode_feedback import cap_lots_until_first_green
+
+        lots = cap_lots_until_first_green(lots, state, mode=candidate.mode)
+        if lots <= 0:
+            return False, "size_until_first_green"
     lot_mult = lot_multiplier(symbol)
 
     ok, risk_reason = _risk_engine.check_new_entry(
@@ -822,13 +843,54 @@ async def _open_from_candidate(
     from app.engines.directional_lock import record_trade_side
 
     record_trade_side(symbol, candidate.side, snap)
+    # Full 18-dim ML features — 3-float stub broke online retrain.
+    try:
+        from app.engines.ml_engine import get_ml_engine
+
+        of = snap.orderflow
+        gk = snap.greeks
+        br = snap.breadth
+        session_label = (
+            (snap.optimizedProfile.sessionLabel if snap.optimizedProfile else None)
+            or "normal"
+        )
+        vel = 0.0
+        if candidate.explosion_event is not None:
+            vel = float(candidate.explosion_event.velocity_3s or 0)
+        elif candidate.suggestion and candidate.suggestion.runnerSignal:
+            vel = float(candidate.suggestion.runnerSignal.premiumVelocityPct or 0)
+        ml_ctx = {
+            "tqs": float(candidate.tqs or snap.tradeQualityScore or 50),
+            "delta_velocity": float(getattr(of, "deltaVelocity", 0) or 0) if of else 0,
+            "volume_accel": float(getattr(of, "volumeAcceleration", 0) or 0) if of else 0,
+            "breakout_vel": float(getattr(of, "breakoutVelocity", 0) or 0) if of else 0,
+            "tick_momentum": float(getattr(of, "tickMomentum", 0) or 0) if of else 0,
+            "breadth_score": float(br.score if br else 50),
+            "iv_expansion": float(getattr(gk, "ivExpansion", 1.0) or 1.0) if gk else 1.0,
+            "iv_rank": float(getattr(gk, "ivRank", 50) or 50) if gk else 50,
+            "pcr": float(snap.pcr or 1.0),
+            "liquidity_score": max(
+                (float(h.liquidityScore or 0) for h in (snap.heatmap or [])),
+                default=50.0,
+            ),
+            "velocity_pct": vel,
+            "regime": str(
+                snap.regime.value if hasattr(snap.regime, "value") else snap.regime or "RANGE_BOUND"
+            ),
+            "session": session_label,
+            "hour_ist": datetime.now(IST).hour + datetime.now(IST).minute / 60,
+        }
+        # extract_features reads signal.side / signal.confidence
+        class _Sig:
+            side = candidate.side
+            confidence = float(candidate.confidence or candidate.score or 50)
+
+        features = get_ml_engine().extract_features(_Sig(), ml_ctx)
+    except Exception:
+        features = [float(candidate.tqs or 0), float(candidate.confidence or 0), float(candidate.score or 0)] + [0.0] * 15
     get_ai_learning().record_trade_open(
         paper.id,
-        [
-            float(candidate.tqs or 0),
-            float(candidate.confidence or 0),
-            float(candidate.score or 0),
-        ],
+        features,
         candidate.strategy_type.value,
     )
     state.lastEntry = {

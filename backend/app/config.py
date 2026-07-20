@@ -225,6 +225,17 @@ class Settings(BaseSettings):
     fake_explosion_trap_post_win_max_pnl_inr: float = 3_000.0
     fake_explosion_trap_post_win_lookback: int = 1
     fake_explosion_trap_psychology_escalate: bool = True
+    # Size until first green — no full-size explosions before a proven green (Jul20 FOMO).
+    size_until_first_green_enabled: bool = True
+    size_until_first_green_lot_cap: int = 6
+    # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
+    session_mode_feedback_enabled: bool = True
+    session_mode_feedback_min_trades: int = 2
+    # Composer advisory → hard gate (standDown / side bias).
+    composer_hard_gate_enabled: bool = True
+    composer_bias_gate_enabled: bool = True
+    # Never force ICT max lots on chop/RANGE (good-day override was Jul49-lot hole).
+    ict_force_max_lots_block_on_chop: bool = True
     # High-mover / all-in bypasses must not reopen late chases.
     high_mover_bypass_max_move_pct: float = 70.0
     extreme_all_in_bypass_max_move_pct: float = 70.0
