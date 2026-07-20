@@ -88,6 +88,66 @@ def test_half_tp_unlocks_profit_lock_before_full_target(mock_settings):
 @patch("app.engines.bullish_hold.get_settings")
 @patch("app.engines.simple_profit.get_settings")
 @patch("app.engines.confidence_hold.get_settings")
+def test_never_green_hard_sl_not_deferred_by_confidence_hold(
+    mock_ch, mock_sp, mock_bh, mock_psy,
+):
+    """Jul20 NIFTY 23950 CE scalp: score 90, best=0, −28pt — must hard-stop."""
+    s = _scalp_settings()
+    s.chart_confidence_hold_stop_mult = 1.35
+    s.bullish_hold_enabled = True
+    s.bullish_hold_trail_keep_ratio = 0.85
+    s.bullish_hold_max_hold_multiplier = 1.5
+    s.psychology_hold_enabled = False
+    s.scalp_trail_arm_points = 1.2
+    s.scalp_trail_keep_ratio = 0.86
+    s.scalp_trail_step_points = 2.0
+    s.scalp_trail_tight_arm = 8.0
+    s.scalp_trail_tight_points = 3.0
+    mock_ch.return_value = s
+    mock_sp.return_value = s
+    mock_bh.return_value = s
+    mock_psy.return_value = s
+
+    trade = _nifty_call_trade(
+        breadth="BULLISH",
+        chartConfidence=48.4,
+        entryChartConfidence=48.4,
+        selectionScore=90.14,
+        exitPlan={
+            "targetPoints": 29.98,
+            "entryTargetPoints": 31.89,
+            "stopPoints": 2.5,
+            "trailArmPoints": 1.2,
+            "trailKeepRatio": 0.86,
+            "trailStepPoints": 2.0,
+            "microTargetPoints": 16.7,
+            "chartConfidence": 48.4,
+        },
+    )
+    trade.entryPremium = 249.6
+    trade.bestPnlPoints = 0.0
+    trade.lots = 11
+    trade.openedAt = datetime.now(IST) - timedelta(seconds=600)
+    assert is_confidence_runner_hold(trade) is True
+    assert hold_until_target_active(trade, best=0.0) is True
+
+    reason, pnl = evaluate_exit(
+        trade,
+        220.8,
+        OptimizedProfile(
+            targetPoints=29.98, stopPoints=2.5, microTargetPoints=16.7,
+            maxHoldSeconds=480, sessionLabel="midday_chop",
+        ),
+        lot_multiplier=65,
+    )
+    assert reason == "simple_stop_loss"
+    assert pnl < 0
+
+
+@patch("app.engines.psychology_hold.get_settings")
+@patch("app.engines.bullish_hold.get_settings")
+@patch("app.engines.simple_profit.get_settings")
+@patch("app.engines.confidence_hold.get_settings")
 def test_armed_trail_exits_when_confidence_hold_would_defer_into_loss(
     mock_ch, mock_sp, mock_bh, mock_psy,
 ):
@@ -247,6 +307,7 @@ def _scalp_settings() -> MagicMock:
     s.chart_confidence_hold_min_confidence = 62.0
     s.chart_confidence_hold_min_target_pct = 0.85
     s.chart_confidence_hold_max_seconds = 600
+    s.chart_confidence_hold_stop_mult = 1.35
     s.high_confidence_min_score = 72.0
     s.high_confidence_hold_enabled = True
     s.high_confidence_max_hold_multiplier = 1.8
@@ -327,5 +388,6 @@ def test_no_progress_scratch_skipped_for_high_conf_nifty_call(mock_ch, mock_sp, 
         maxHoldSeconds=300,
         sessionLabel="normal",
     )
-    reason, _ = evaluate_exit(trade, 109.0, profile, lot_multiplier=25)
+    # Slightly red but inside SL — no-progress scratch should stay deferred.
+    reason, _ = evaluate_exit(trade, 118.5, profile, lot_multiplier=25)
     assert reason is None

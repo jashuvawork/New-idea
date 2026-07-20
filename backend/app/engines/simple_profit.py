@@ -285,9 +285,20 @@ def evaluate_exit(
     if trail_floor is not None and pnl_pts <= trail_floor and best >= arm:
         return "scalp_trail_sl", pnl_inr
 
-    # Hard SL safety net — cuts losses even after trail armed.
+    # Hard SL — confidence-hold may briefly cushion a green runner, but never a
+    # never-green loser (Jul20 NIFTY 23950 CE scalp: best=0, −28pt, SL 2.5 deferred).
     if hold_seconds >= min_hold and pnl_pts <= -profile.stopPoints:
-        if trail_floor is not None or not hold_until_target_active(trade, best):
+        from app.engines.confidence_hold import confidence_hold_stop_multiplier
+
+        stop_cap = profile.stopPoints * confidence_hold_stop_multiplier(trade)
+        never_green = best <= 0
+        past_stop_cap = pnl_pts <= -stop_cap
+        if (
+            trail_floor is not None
+            or never_green
+            or past_stop_cap
+            or not hold_until_target_active(trade, best)
+        ):
             return "simple_stop_loss", pnl_inr
 
     if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
