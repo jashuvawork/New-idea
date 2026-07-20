@@ -374,15 +374,24 @@ async def _open_from_candidate(
         profile = get_quick_sideways_profile(candidate.premium)
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
     faded_rip_meta: dict[str, Any] = {}
+    trap_meta: dict[str, Any] = {}
     if candidate.mode == "explosion" and candidate.explosion_event:
         from app.engines.explosion_entry_guards import (
+            detect_fake_explosion_trap,
             detect_faded_vertical_rip,
             faded_rip_stop_multiplier,
         )
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
         faded, faded_rip_meta = detect_faded_vertical_rip(candidate.explosion_event, snap)
         if faded:
             stop_pts *= faded_rip_stop_multiplier()
+        trap_ict = analyze_explosion_event_ict(candidate.explosion_event, snap)
+        trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
+            candidate, snap, state=state, ict=trap_ict,
+        )
+        if trap_block or trap_meta.get("action") == "block":
+            return False, trap_reason
 
     signal_premium = candidate.premium
     is_live = settings.enable_live_trading and settings.auto_trading_enabled
@@ -491,6 +500,13 @@ async def _open_from_candidate(
             lots = max(1, int(lots * lot_scale))
 
     lots = clamp_lots(lots, symbol, fill_premium)
+    if candidate.mode == "explosion" and trap_meta:
+        from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
+
+        # Must run AFTER good-day ICT max-lot force (Jul20 49-lot FOMO hole).
+        lots = cap_fake_explosion_trap_lots(lots, trap_meta)
+        if lots <= 0:
+            return False, str(trap_meta.get("action") or "fake_explosion_trap")
     lot_mult = lot_multiplier(symbol)
 
     ok, risk_reason = _risk_engine.check_new_entry(
@@ -526,6 +542,30 @@ async def _open_from_candidate(
             )
             if not chart_ok:
                 return False, chart_reason
+            if candidate.mode == "explosion" and candidate.explosion_event:
+                from app.engines.explosion_entry_guards import (
+                    cap_fake_explosion_trap_lots,
+                    detect_fake_explosion_trap,
+                )
+                from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+                live_prem = (chart_meta or {}).get("premiumChart")
+                trap_ict = analyze_explosion_event_ict(candidate.explosion_event, snap)
+                trap_block, trap_reason, live_trap = detect_fake_explosion_trap(
+                    candidate,
+                    snap,
+                    state=state,
+                    premium_chart=live_prem,
+                    ict=trap_ict,
+                )
+                if live_trap.get("fakeExplosionTrap"):
+                    trap_meta = {**trap_meta, **live_trap}
+                if trap_block or live_trap.get("action") == "block":
+                    return False, trap_reason
+                if trap_meta.get("action") == "cut_size":
+                    lots = cap_fake_explosion_trap_lots(lots, trap_meta)
+                    if lots <= 0:
+                        return False, "fake_explosion_trap"
         else:
             from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
             from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_candidate
@@ -622,6 +662,16 @@ async def _open_from_candidate(
         ctx_extra["psychology"] = snap.psychology.get("label", "NEUTRAL")
         ctx_extra["psychologyLabel"] = snap.psychology.get("label", "NEUTRAL")
         ctx_extra["psychologyExitBias"] = snap.psychology.get("exitBias", "BALANCED")
+    if trap_meta.get("fakeExplosionTrap"):
+        ctx_extra.update({k: v for k, v in trap_meta.items() if v is not None})
+        escalate = trap_meta.get("psychologyEscalate")
+        if escalate:
+            ctx_extra["psychology"] = escalate
+            ctx_extra["psychologyLabel"] = escalate
+            ctx_extra["psychologyExitBias"] = "PROTECT"
+            ctx_extra["psychologyTrapOverride"] = True
+        # Keep lots in context aligned with trap-capped size.
+        ctx_extra["lots"] = lots
     if getattr(candidate, "pretrade_meta", None):
         ctx_extra["pretrade"] = candidate.pretrade_meta
     if entry_velocity_3s > 0:

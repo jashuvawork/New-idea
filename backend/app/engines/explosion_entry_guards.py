@@ -347,3 +347,304 @@ def faded_rip_no_green_exit_reason(
     if hold_seconds >= limit and best_points < min_green:
         return "explosion_faded_rip_no_green"
     return None
+
+
+def _regime_chopish(snap: SymbolSnapshot) -> bool:
+    regime = str(snap.regime.value if hasattr(snap.regime, "value") else snap.regime or "").upper()
+    if regime in ("CHOP", "RANGE_BOUND"):
+        return True
+    chart = snap.spotChart
+    if chart is None:
+        return False
+    mom = abs(float(getattr(chart, "momentum5Pct", 0) or 0))
+    strength = float(getattr(chart, "trendStrength", 100) or 100)
+    return mom < 0.25 and strength < 45
+
+
+def _midday_chop_active() -> bool:
+    """Time-window chop — independent of scalp-block toggle."""
+    try:
+        from app.engines.session_timing import _minutes_now
+        from app.services.upstox import get_market_phase
+
+        if get_market_phase() != "LIVE_MARKET":
+            return False
+        settings = get_settings()
+        current = _minutes_now()
+        start = settings.midday_chop_start_hour * 60 + settings.midday_chop_start_minute
+        end = settings.midday_chop_end_hour * 60 + settings.midday_chop_end_minute
+        return start <= current < end
+    except Exception:
+        return False
+
+
+def _or_position(snap: SymbolSnapshot) -> str:
+    chart = snap.spotChart
+    if chart is None:
+        return ""
+    return str(getattr(chart, "orPosition", "") or "").upper()
+
+
+def _premium_mom_flat(premium_chart: Any) -> bool:
+    """Live premium already cooled — FOMO fill risk (Jul20 mom3/5=0, NEUTRAL)."""
+    if premium_chart is None:
+        return False
+    settings = get_settings()
+    max_mom = float(
+        getattr(settings, "fake_explosion_trap_max_premium_mom_pct", 0.15) or 0.15
+    )
+    if isinstance(premium_chart, dict):
+        mom3 = float(premium_chart.get("momentum3Pct") or 0)
+        mom5 = float(premium_chart.get("momentum5Pct") or 0)
+        direction = str(premium_chart.get("direction") or "").upper()
+    else:
+        mom3 = float(getattr(premium_chart, "momentum3Pct", 0) or 0)
+        mom5 = float(getattr(premium_chart, "momentum5Pct", 0) or 0)
+        direction = str(getattr(premium_chart, "direction", "") or "").upper()
+    flat_mom = abs(mom3) <= max_mom and abs(mom5) <= max_mom
+    return flat_mom or direction == "NEUTRAL"
+
+
+def _post_small_win(state: Any) -> tuple[bool, dict[str, Any]]:
+    """Last closed trade was a small green — size-up FOMO risk unless trail-proved."""
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    if state is None:
+        return False, meta
+    try:
+        from app.engines.pretrade_validator import collect_session_trades
+    except Exception:
+        return False, meta
+
+    lookback = int(getattr(settings, "fake_explosion_trap_post_win_lookback", 1) or 1)
+    trades = collect_session_trades(state)
+    if not trades:
+        return False, meta
+    recent = trades[-lookback:]
+    last = recent[-1]
+    pnl = float(getattr(last, "pnl_inr", 0) or 0)
+    reason = str(getattr(last, "exit_reason", "") or "").lower()
+    max_pnl = float(
+        getattr(settings, "fake_explosion_trap_post_win_max_pnl_inr", 3000.0) or 3000.0
+    )
+    meta = {
+        "lastPnlInr": round(pnl, 2),
+        "lastExitReason": reason,
+    }
+    if pnl <= 0:
+        return False, meta
+    # Trail / runner / target exits proved the move — allow normal size.
+    if any(tok in reason for tok in ("trail", "runner", "target", "tp")):
+        if pnl >= max_pnl:
+            return False, meta
+        # Small trail win still clamps — Jul20 +₹446 trail then 49-lot trap.
+        meta["postSmallWin"] = True
+        meta["trailProvedButSmall"] = True
+        return True, meta
+    if pnl < max_pnl:
+        meta["postSmallWin"] = True
+        return True, meta
+    return False, meta
+
+
+def detect_fake_explosion_trap(
+    candidate: Any,
+    snap: SymbolSnapshot,
+    *,
+    state: Any = None,
+    premium_chart: Any = None,
+    ict: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Detect FOMO / fake-rip explosion traps (Jul20 NIFTY 24300 CE).
+
+    Returns (should_block, reason, meta).
+    meta.action is "block" or "cut_size"; lotCap / psychologyEscalate when cutting.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"fakeExplosionTrap": False}
+    if not getattr(settings, "fake_explosion_trap_enabled", True):
+        return False, "ok", meta
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, "ok", meta
+
+    event = getattr(candidate, "explosion_event", None)
+    tier = str(
+        getattr(event, "tier", None)
+        or getattr(candidate, "tier", "")
+        or ""
+    ).upper()
+    v3 = float(getattr(event, "velocity_3s", 0) or 0) if event else 0.0
+    move = _session_peak_move(event)
+    if ict is not None:
+        move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
+
+    chop_regime = _regime_chopish(snap)
+    midday = _midday_chop_active()
+    chopish = chop_regime or midday
+    elite_hot = tier in ("ELITE", "EXPLODING") and (
+        v3 >= 2.0 or tier == "ELITE"
+    )
+    min_move = float(
+        getattr(settings, "fake_explosion_trap_min_session_move_pct", 28.0) or 28.0
+    )
+    session_extended = move >= min_move
+    premium_flat = _premium_mom_flat(premium_chart)
+
+    depth, money, atm = _strike_depth(candidate.side, float(candidate.strike), snap)
+    from app.engines.moneyness import resolve_preferred_moneyness
+
+    preferred = resolve_preferred_moneyness(
+        "explosion", snap, candidate_score=float(getattr(candidate, "score", 0) or 0),
+        side=candidate.side,
+    )
+    or_pos = _or_position(snap)
+    otm_inside_or = (
+        getattr(settings, "fake_explosion_trap_otm_requires_or_breakout", True)
+        and money == "OTM"
+        and preferred == "ATM"
+        and or_pos == "INSIDE"
+    )
+    post_win, post_meta = _post_small_win(state)
+    meta.update(post_meta)
+
+    flags: list[str] = []
+    if chop_regime:
+        flags.append("chop_regime")
+    if midday:
+        flags.append("midday_chop")
+    if elite_hot:
+        flags.append("elite_hot")
+    if session_extended:
+        flags.append("session_extended")
+    if premium_flat:
+        flags.append("premium_flat")
+    if otm_inside_or:
+        flags.append("otm_inside_or")
+    if post_win:
+        flags.append("post_small_win")
+
+    meta.update({
+        "fakeExplosionTrap": False,
+        "conflictFlags": flags,
+        "conflictCount": len(flags),
+        "explosionTier": tier,
+        "sessionMovePct": round(move, 2),
+        "velocity3s": round(v3, 2),
+        "moneyness": money,
+        "preferredMoneyness": preferred,
+        "orPosition": or_pos,
+        "atmStrike": atm,
+        "strikeStepsFromAtm": depth,
+        "chopRegime": chop_regime,
+        "middayChop": midday,
+        "premiumFlat": premium_flat,
+    })
+
+    if not flags:
+        return False, "ok", meta
+
+    lot_cap = int(
+        getattr(settings, "fake_explosion_trap_chop_elite_lot_cap", 6) or 6
+    )
+    post_cap = int(
+        getattr(settings, "fake_explosion_trap_post_win_lot_cap", 8) or 8
+    )
+    action = ""
+    reason = ""
+    psych = ""
+
+    # Hard block: classic fake rip — extension already printed, premium cooled,
+    # or OTM inside OR on chop with elite narrative.
+    hard_block = False
+    if getattr(settings, "fake_explosion_trap_block_on_conflict", True):
+        if premium_flat and session_extended and (chopish or elite_hot):
+            hard_block = True
+            reason = "fake_explosion_trap_premium_flat_extension"
+        elif otm_inside_or and chopish and elite_hot:
+            hard_block = True
+            reason = "fake_explosion_trap_otm_inside_or"
+        elif (
+            chopish
+            and elite_hot
+            and session_extended
+            and otm_inside_or
+            and post_win
+        ):
+            hard_block = True
+            reason = "fake_explosion_trap_fomo_stack"
+        else:
+            min_flags = int(
+                getattr(settings, "fake_explosion_trap_min_conflict_flags", 3) or 3
+            )
+            # Require chop + elite + at least one structural risk (extension/OTM/flat/post-win)
+            structural = {
+                "session_extended",
+                "premium_flat",
+                "otm_inside_or",
+                "post_small_win",
+            }
+            if (
+                len(flags) >= min_flags
+                and (chop_regime or midday)
+                and elite_hot
+                and structural.intersection(flags)
+            ):
+                hard_block = True
+                reason = "fake_explosion_trap_conflict"
+
+    if hard_block:
+        meta.update({
+            "fakeExplosionTrap": True,
+            "action": "block",
+            "psychologyEscalate": "FOMO" if post_win else "OVERCONFIDENCE",
+        })
+        return True, reason, meta
+
+    # Soft cut: chop+elite full-size forbidden; post-small-win clamp.
+    cut = False
+    if chopish and elite_hot:
+        cut = True
+        action = "cut_size"
+        reason = "fake_explosion_trap_chop_elite_size"
+        lot_cap = min(lot_cap, int(
+            getattr(settings, "fake_explosion_trap_chop_elite_lot_cap", 6) or 6
+        ))
+        psych = "OVERCONFIDENCE"
+    if post_win:
+        cut = True
+        action = "cut_size"
+        reason = reason or "fake_explosion_trap_post_win_size"
+        lot_cap = min(lot_cap, post_cap) if chopish and elite_hot else post_cap
+        psych = "FOMO" if psych != "OVERCONFIDENCE" else "OVERCONFIDENCE"
+
+    if cut:
+        if getattr(settings, "fake_explosion_trap_psychology_escalate", True):
+            # Conflict stack escalates label even on soft cut.
+            conflict_heavy = len(flags) >= 3 and chopish and elite_hot
+            if conflict_heavy and post_win:
+                psych = "FOMO"
+            elif conflict_heavy:
+                psych = psych or "OVERCONFIDENCE"
+        meta.update({
+            "fakeExplosionTrap": True,
+            "action": action,
+            "lotCap": lot_cap,
+            "psychologyEscalate": psych or None,
+        })
+        # Soft cut does not block entry — open path applies lotCap.
+        return False, reason, meta
+
+    return False, "ok", meta
+
+
+def cap_fake_explosion_trap_lots(lots: int, trap_meta: Optional[dict[str, Any]]) -> int:
+    """Apply trap lot cap after good-day max-lot force (Jul20 49-lot hole)."""
+    if not trap_meta or not trap_meta.get("fakeExplosionTrap"):
+        return lots
+    if trap_meta.get("action") == "block":
+        return 0
+    cap = trap_meta.get("lotCap")
+    if cap is None:
+        return lots
+    return min(max(0, lots), int(cap))

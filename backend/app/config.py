@@ -211,6 +211,20 @@ class Settings(BaseSettings):
     explosion_faded_rip_no_green_seconds: int = 45
     explosion_faded_rip_min_green_points: float = 0.5
     faded_rip_no_green_hold_min_session_move_pct: float = 60.0
+    # Fake explosion trap — Jul20 NIFTY 24300 CE: RANGE + midday_chop + ELITE vel spike,
+    # session~30%, live premium mom≈0, OTM inside OR after small win → never-green −₹18k.
+    # Market harvests FOMO; system must not treat post-extension spikes as ELITE full-size.
+    fake_explosion_trap_enabled: bool = True
+    fake_explosion_trap_min_session_move_pct: float = 28.0
+    fake_explosion_trap_max_premium_mom_pct: float = 0.15
+    fake_explosion_trap_block_on_conflict: bool = True
+    fake_explosion_trap_min_conflict_flags: int = 3
+    fake_explosion_trap_chop_elite_lot_cap: int = 6
+    fake_explosion_trap_otm_requires_or_breakout: bool = True
+    fake_explosion_trap_post_win_lot_cap: int = 8
+    fake_explosion_trap_post_win_max_pnl_inr: float = 3_000.0
+    fake_explosion_trap_post_win_lookback: int = 1
+    fake_explosion_trap_psychology_escalate: bool = True
     # High-mover / all-in bypasses must not reopen late chases.
     high_mover_bypass_max_move_pct: float = 70.0
     extreme_all_in_bypass_max_move_pct: float = 70.0

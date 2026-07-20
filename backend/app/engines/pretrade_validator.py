@@ -659,7 +659,9 @@ def validate_candidate(
         from app.engines.explosion_entry_guards import (
             check_explosion_macd_alignment,
             check_peak_chase_entry,
+            detect_fake_explosion_trap,
         )
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
         macd_ok, macd_reason = check_explosion_macd_alignment(candidate.side, snap)
         if not macd_ok:
@@ -667,6 +669,18 @@ def validate_candidate(
         peak_ok, peak_reason = check_peak_chase_entry(candidate, explosion_event, snap)
         if not peak_ok:
             return False, peak_reason, meta
+
+        trap_ict = (
+            analyze_explosion_event_ict(explosion_event, snap)
+            if explosion_event is not None
+            else None
+        )
+        trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
+            candidate, snap, state=state, ict=trap_ict,
+        )
+        meta.update(trap_meta)
+        if trap_block or trap_meta.get("action") == "block":
+            return False, trap_reason, meta
 
     if getattr(candidate, "mode", "") == "explosion" and explosion_event is not None:
         from app.engines.morning_premium_capture import premium_led_explosion_bypass

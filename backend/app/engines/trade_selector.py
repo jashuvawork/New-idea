@@ -297,6 +297,7 @@ def _explosion_candidates(
         if late_blocked:
             continue
         from app.engines.explosion_entry_guards import (
+            detect_fake_explosion_trap,
             extended_session_chase_blocked,
             immature_explosion_blocked,
         )
@@ -306,6 +307,11 @@ def _explosion_candidates(
             continue
         ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)
         if ext_blocked:
+            continue
+        trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
+            cand_probe, snap, state=state, ict=ict,
+        )
+        if trap_block or trap_meta.get("action") == "block":
             continue
         # Displacement-only without flat base / FVG / real rip — skip (Jul20 noise).
         if (
