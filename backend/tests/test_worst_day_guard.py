@@ -70,10 +70,12 @@ def test_breakout_only_policy(mock_identify):
 
 
 @patch("app.engines.worst_day_guard.session_entry_policy", return_value=("BREAKOUT_ONLY", {}))
-def test_blocks_scalp_on_breakout_only(mock_policy):
-    ok, reason, _ = worst_day_allows_candidate(_Cand(mode="scalp"), AutoTraderState(), {"NIFTY": _snap()})
-    assert not ok
-    assert reason in ("worst_day_breakout_only", "worst_day_blocks_scalp")
+def test_allows_scalp_momentum_on_breakout_only(mock_policy):
+    ok, reason, meta = worst_day_allows_candidate(
+        _Cand(mode="scalp", score=72.0), AutoTraderState(), {"NIFTY": _snap()},
+    )
+    assert ok, reason
+    assert meta.get("worstDayScalpMomentum") is True
 
 
 @patch("app.engines.worst_day_guard.session_entry_policy", return_value=("BREAKOUT_ONLY", {}))

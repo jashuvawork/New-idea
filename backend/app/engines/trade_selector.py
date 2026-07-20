@@ -722,12 +722,9 @@ def find_best_entry(
     ):
         candidates = [c for c in candidates if c.mode != "scalp"]
 
-    # Worst-day adaptive: do not even rank quick/slow-bounce candidates.
+    # Worst-day adaptive: drop quick_sideways only (scalp/momentum stay).
     if adaptive.allow_quick_sideways is False or adaptive.day_type == "WORST":
-        candidates = [
-            c for c in candidates
-            if c.mode not in ("quick_sideways", "slow_bounce")
-        ]
+        candidates = [c for c in candidates if c.mode != "quick_sideways"]
 
     candidates = filter_candidates_pretrade(candidates, state, snapshots)
     from app.engines.worst_day_guard import filter_worst_day_candidates

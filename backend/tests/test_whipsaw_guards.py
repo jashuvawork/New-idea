@@ -85,6 +85,8 @@ def _settings():
     s.daily_18pct_chop_max_trades = 10
     s.controlled_rally_trade_cap_bonus = 4
     s.day_adaptive_enabled = False
+    s.whipsaw_elite_momentum_flip_bypass_enabled = False
+    s.whipsaw_elite_momentum_flip_min_score = 85.0
     return s
 
 
@@ -170,6 +172,45 @@ def test_blocks_flip_after_put_loss(mock_settings):
         ok, reason, _ = check_whipsaw_candidate(_candidate(side=Side.CALL), state, {"NIFTY": snap})
     assert not ok
     assert reason == "no_flip_after_PUT_loss"
+
+
+@patch("app.engines.whipsaw_guards.get_settings")
+def test_elite_momentum_bypasses_flip_after_put_loss(mock_settings):
+    """Jul20 NIFTY 24200 CE → ~102: ELITE flat→vertical must flip after PUT loss."""
+    s = _settings()
+    s.whipsaw_elite_momentum_flip_bypass_enabled = True
+    s.bearish_sideways_block_scalps = False
+    mock_settings.return_value = s
+    state = AutoTraderState()
+    trades = [TradeRecord("NIFTY", "PUT", -1096.9, "adaptive_stop_loss", 23950, "a")]
+    snap = _snap()
+    snap.explosiveRunnerWatchlist = []
+    from app.engines.explosion_detector import ExplosionEvent
+
+    cand = _candidate(side=Side.CALL, score=100.0, mode="explosion")
+    cand.tier = "ELITE"
+    cand.explosion_event = ExplosionEvent(
+        symbol="NIFTY", side=Side.CALL, strike=24200, premium=102.0,
+        velocity_3s=5.3, velocity_9s=4.0, velocity_15s=3.0,
+        volume_surge=2.5, explosion_score=100, tier="ELITE", reason="flat_then_vertical",
+        daily_move_pct=55.0, peak_move_pct=57.0,
+    )
+    cand.alert = {
+        "ictFlatThenVertical": True,
+        "dailyMovePct": 55.0,
+        "peakMovePct": 57.0,
+        "tier": "ELITE",
+    }
+    with patch("app.engines.whipsaw_guards.collect_session_trades", return_value=trades), patch(
+        "app.engines.whipsaw_guards.detect_ce_pe_whipsaw", return_value=(False, {}),
+    ), patch(
+        "app.engines.whipsaw_guards.check_bearish_sideways_entry", return_value=(False, "ok"),
+    ), patch(
+        "app.engines.whipsaw_guards.check_opposite_side_cooldown", return_value=(False, "ok"),
+    ):
+        ok, reason, meta = check_whipsaw_candidate(cand, state, {"NIFTY": snap})
+    assert ok, reason
+    assert meta.get("eliteMomentumFlipBypass") is True
 
 
 @patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())

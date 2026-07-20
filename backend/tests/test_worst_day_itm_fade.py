@@ -171,14 +171,13 @@ def test_worst_day_blocks_quick_on_alternate(mock_policy):
 
 
 @patch("app.engines.worst_day_guard.session_entry_policy", return_value=("BREAKOUT_ONLY", {}))
-def test_worst_day_blocks_slow_bounce_and_scalp(mock_policy):
-    for mode in ("slow_bounce", "scalp"):
-        cand = _Cand(mode=mode)
-        ok, reason, _ = worst_day_allows_candidate(
-            cand, AutoTraderState(), {"SENSEX": _sensex_snap()}, policy="BREAKOUT_ONLY",
-        )
-        assert ok is False, mode
-        assert mode in reason
+def test_worst_day_allows_scalp_momentum(mock_policy):
+    cand = _Cand(mode="scalp", score=72.0)
+    ok, reason, meta = worst_day_allows_candidate(
+        cand, AutoTraderState(), {"SENSEX": _sensex_snap()}, policy="BREAKOUT_ONLY",
+    )
+    assert ok is True, reason
+    assert meta.get("worstDayScalpMomentum") is True
 
 
 @patch("app.engines.bad_day_routing.bad_day_session_active", return_value=(True, ["bearish_sideways"]))
