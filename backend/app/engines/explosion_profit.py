@@ -622,11 +622,11 @@ def evaluate_explosion_exit(
         return "explosion_half_tp_profit_lock", pnl_inr
 
     if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
-        if _profit_lock_ok():
-            return "explosion_trail_sl", pnl_inr
+        # Armed trail floor always exits — do not defer into a loss.
+        return "explosion_trail_sl", pnl_inr
 
     if trail_floor is not None and pnl_pts < best * trail_keep and best >= (20 if max_profit else 8):
-        if _profit_lock_ok():
+        if pnl_pts <= 0 or _profit_lock_ok():
             return "explosion_trail_lock", pnl_inr
 
     if (

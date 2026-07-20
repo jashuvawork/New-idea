@@ -280,12 +280,14 @@ def evaluate_exit(
     if half_tp_giveback_exit(trade, best, pnl_pts, target_points=chart_target):
         return "simple_half_tp_profit_lock", pnl_inr
 
+    # Armed trail floor is a hard stop — confidence-hold must not override it.
+    # Jul20 NIFTY 23950 CE: best +16pt / floor 14.2, defer rode it into a loss.
     if trail_floor is not None and pnl_pts <= trail_floor and best >= arm:
-        if not should_defer_profit_lock(trade, best, target_points=target_points_for_trade(trade)):
-            return "scalp_trail_sl", pnl_inr
+        return "scalp_trail_sl", pnl_inr
 
-    if trail_floor is None and hold_seconds >= min_hold and pnl_pts <= -profile.stopPoints:
-        if not hold_until_target_active(trade, best):
+    # Hard SL safety net — cuts losses even after trail armed.
+    if hold_seconds >= min_hold and pnl_pts <= -profile.stopPoints:
+        if trail_floor is not None or not hold_until_target_active(trade, best):
             return "simple_stop_loss", pnl_inr
 
     if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
@@ -313,7 +315,9 @@ def evaluate_exit(
     )
     if micro_ready and pnl_pts >= profile.microTargetPoints:
         if best - pnl_pts >= micro_giveback:
-            if not should_defer_profit_lock(trade, best, target_points=chart_target):
+            if not should_defer_profit_lock(
+                trade, best, target_points=chart_target, pnl_pts=pnl_pts,
+            ):
                 return "simple_micro_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     if trail_floor is None and best >= arm and pnl_pts < best * runner_keep:
@@ -323,7 +327,9 @@ def evaluate_exit(
         if psy_tuning:
             min_hold_before_trail = max(min_hold_before_trail, psy_tuning.min_hold_before_micro_seconds)
         if hold_seconds >= min_hold_before_trail:
-            if not should_defer_profit_lock(trade, best, target_points=chart_target):
+            if not should_defer_profit_lock(
+                trade, best, target_points=chart_target, pnl_pts=pnl_pts,
+            ):
                 return "simple_trail_profit_lock", pnl_pts * trade.lots * lot_multiplier
 
     if hold_seconds >= scalp_no_progress_limit_seconds(trade) and best <= 0:

@@ -151,11 +151,17 @@ def should_defer_profit_lock(
     best: float,
     *,
     target_points: Optional[float] = None,
+    pnl_pts: Optional[float] = None,
 ) -> bool:
     """
     Block micro/trail profit locks while working toward full chart TP.
     Once best crosses half-TP (e.g. 10pt on 20pt target), allow locks.
+
+    Never defer when the trade is at/below breakeven — an armed trail must
+    cut losers (Jul20 NIFTY 23950 CE: +16pt best → red while defer blocked exit).
     """
+    if pnl_pts is not None and pnl_pts <= 0:
+        return False
     if not is_confidence_runner_hold(trade):
         return False
     if half_tp_reached(trade, best, target_points=target_points):

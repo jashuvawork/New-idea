@@ -88,6 +88,101 @@ def test_half_tp_unlocks_profit_lock_before_full_target(mock_settings):
 @patch("app.engines.bullish_hold.get_settings")
 @patch("app.engines.simple_profit.get_settings")
 @patch("app.engines.confidence_hold.get_settings")
+def test_armed_trail_exits_when_confidence_hold_would_defer_into_loss(
+    mock_ch, mock_sp, mock_bh, mock_psy,
+):
+    """Jul20 NIFTY 23950 CE: best +16pt, floor 14.2, then red — must trail out."""
+    s = _scalp_settings()
+    s.chart_confidence_half_tp_lock_pct = 0.50
+    s.chart_confidence_half_tp_giveback_ratio = 0.40
+    s.scalp_trail_arm_points = 1.2
+    s.scalp_trail_keep_ratio = 0.82
+    s.scalp_trail_step_points = 2.0
+    s.scalp_trail_tight_arm = 8.0
+    s.scalp_trail_tight_points = 3.0
+    s.bullish_hold_enabled = True
+    s.bullish_hold_trail_keep_ratio = 0.85
+    s.bullish_hold_max_hold_multiplier = 1.5
+    s.psychology_hold_enabled = False
+    s.scalp_micro_lock_min_best_points = 4.5
+    s.scalp_min_hold_before_micro_lock_seconds = 90
+    mock_ch.return_value = s
+    mock_sp.return_value = s
+    mock_bh.return_value = s
+    mock_psy.return_value = s
+
+    trade = _nifty_call_trade(
+        breadth="BULLISH",
+        chartConfidence=71.0,
+        entryChartConfidence=89.2,
+        selectionScore=84.42,
+        exitPlan={
+            "targetPoints": 47.59,
+            "entryTargetPoints": 43.85,
+            "stopPoints": 2.5,
+            "trailArmPoints": 1.2,
+            "trailKeepRatio": 0.819,
+            "trailStepPoints": 2.0,
+            "trailTightArm": 8.0,
+            "trailTightPoints": 3.0,
+            "microTargetPoints": 7.4,
+            "chartConfidence": 71.0,
+            "promoteToTrailing": True,
+        },
+        scalpTrailFloorPts=14.2,
+        scalpTrailBestPts=16.2,
+    )
+    trade.entryPremium = 242.05
+    trade.bestPnlPoints = 16.2
+    trade.lots = 8
+    trade.openedAt = datetime.now(IST) - timedelta(seconds=600)
+
+    # Still green but below trail floor — trail must fire (was deferred before).
+    reason, pnl = evaluate_exit(trade, 255.0, OptimizedProfile(
+        targetPoints=47.59, stopPoints=2.5, microTargetPoints=7.4,
+        maxHoldSeconds=480, sessionLabel="momentum_rally",
+    ), lot_multiplier=65)
+    assert reason == "scalp_trail_sl"
+    assert pnl > 0
+
+    # Red after +16pt peak — hard trail / SL safety, never hold for distant chart TP.
+    trade2 = _nifty_call_trade(
+        breadth="BULLISH",
+        chartConfidence=71.0,
+        entryChartConfidence=89.2,
+        selectionScore=84.42,
+        exitPlan={
+            "targetPoints": 47.59,
+            "entryTargetPoints": 43.85,
+            "stopPoints": 2.5,
+            "trailArmPoints": 1.2,
+            "trailKeepRatio": 0.819,
+            "trailStepPoints": 2.0,
+            "trailTightArm": 8.0,
+            "trailTightPoints": 3.0,
+            "microTargetPoints": 7.4,
+            "chartConfidence": 71.0,
+        },
+        scalpTrailFloorPts=14.2,
+        scalpTrailBestPts=16.2,
+    )
+    trade2.entryPremium = 242.05
+    trade2.bestPnlPoints = 16.2
+    trade2.lots = 8
+    trade2.openedAt = datetime.now(IST) - timedelta(seconds=600)
+    reason2, pnl2 = evaluate_exit(trade2, 235.3, OptimizedProfile(
+        targetPoints=47.59, stopPoints=2.5, microTargetPoints=7.4,
+        maxHoldSeconds=480, sessionLabel="momentum_rally",
+    ), lot_multiplier=65)
+    assert reason2 == "scalp_trail_sl"
+    assert pnl2 < 0
+    assert should_defer_profit_lock(trade2, 16.2, target_points=47.59, pnl_pts=-6.75) is False
+
+
+@patch("app.engines.psychology_hold.get_settings")
+@patch("app.engines.bullish_hold.get_settings")
+@patch("app.engines.simple_profit.get_settings")
+@patch("app.engines.confidence_hold.get_settings")
 def test_nifty_scalp_half_tp_lock_on_giveback(mock_ch, mock_sp, mock_bh, mock_psy):
     s = _scalp_settings()
     s.chart_confidence_half_tp_lock_pct = 0.50
