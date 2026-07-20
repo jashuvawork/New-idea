@@ -225,6 +225,9 @@ class Settings(BaseSettings):
     # Market harvests FOMO; system must not treat post-extension spikes as ELITE full-size.
     fake_explosion_trap_enabled: bool = True
     fake_explosion_trap_min_session_move_pct: float = 28.0
+    # Chase / extension threshold for trap flags (defaults to early-window max 55%).
+    # Must stay ABOVE base-window entries — 28% wrongly blocked Jul15 ATM ELITE winners.
+    fake_explosion_trap_extended_move_pct: float = 55.0
     fake_explosion_trap_max_premium_mom_pct: float = 0.15
     fake_explosion_trap_block_on_conflict: bool = True
     fake_explosion_trap_min_conflict_flags: int = 3
