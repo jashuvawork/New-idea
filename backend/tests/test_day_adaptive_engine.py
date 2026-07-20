@@ -61,10 +61,11 @@ def test_classify_good_day(_rally, _chop, _bear):
     assert day_type in ("GOOD", "ELITE")
 
 
-def test_worst_day_favors_quick_sideways():
+def test_worst_day_blocks_quick_sideways():
     profile = build_day_adaptive_profile("EXPIRY WORST", "LOW", {"SENSEX": _snap()})
-    assert profile.preferred_modes[0] == "quick_sideways"
-    assert mode_rank_bonus("quick_sideways", profile) > mode_rank_bonus("scalp", profile)
+    assert profile.preferred_modes[0] == "explosion"
+    assert profile.allow_quick_sideways is False
+    assert mode_rank_bonus("explosion", profile) > mode_rank_bonus("quick_sideways", profile)
 
 
 def test_rank_floor_cap_on_worst_day():
@@ -79,7 +80,8 @@ def test_good_day_rank_relief():
     assert relieved < 68.0
 
 
-def test_pause_scalps_not_quick_sideways_on_worst():
+def test_pause_scalps_and_quick_on_worst():
     profile = build_day_adaptive_profile("EXPIRY WORST", "LOW", {})
     assert should_pause_regular_scalps(profile, edge_pause_scalps=True) is True
-    assert profile.preferred_modes[0] == "quick_sideways"
+    assert profile.allow_quick_sideways is False
+    assert profile.preferred_modes[0] == "explosion"

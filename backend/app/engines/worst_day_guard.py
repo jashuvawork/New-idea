@@ -194,25 +194,11 @@ def worst_day_allows_candidate(
     if blocked_call:
         return False, call_reason, meta
 
-    if mode == "slow_bounce":
-        from app.engines.expiry_day_guards import slow_bounce_session_active
-        from app.engines.quick_sideways import detect_slow_bounce_signal
-
-        if not slow_bounce_session_active(snap, state, snapshots):
-            return False, "worst_day_slow_bounce_requires_pm_itm", meta
-        sig_ok, sig_reason, sb_meta = detect_slow_bounce_signal(
-            snap,
-            candidate.side,
-            float(candidate.strike),
-            float(candidate.premium),
-        )
-        meta["slowBounce"] = sb_meta
-        if not sig_ok:
-            return False, sig_reason, meta
-        min_rank = settings.worst_day_slow_bounce_min_rank
-        if score < min_rank:
-            return False, f"worst_day_slow_bounce_rank_below_{min_rank:.0f}", meta
-        return True, "ok", meta
+    # Jul20: quick/scalp/slow_bounce on worst days drove the largest losses.
+    if getattr(settings, "worst_day_block_quick_trades", True) and mode in (
+        "quick_sideways", "slow_bounce", "scalp",
+    ):
+        return False, f"worst_day_blocks_{mode}", meta
 
     if mode == "worst_day_itm_fade":
         from app.engines.worst_day_itm_fade import check_worst_day_itm_fade_entry
@@ -231,6 +217,27 @@ def worst_day_allows_candidate(
             return False, reason, meta
         if score < settings.worst_day_itm_fade_min_rank:
             return False, f"worst_day_itm_fade_rank_below_{settings.worst_day_itm_fade_min_rank:.0f}", meta
+        return True, "ok", meta
+
+    # Legacy path — only reached when worst_day_block_quick_trades is False.
+    if mode == "slow_bounce":
+        from app.engines.expiry_day_guards import slow_bounce_session_active
+        from app.engines.quick_sideways import detect_slow_bounce_signal
+
+        if not slow_bounce_session_active(snap, state, snapshots):
+            return False, "worst_day_slow_bounce_requires_pm_itm", meta
+        sig_ok, sig_reason, sb_meta = detect_slow_bounce_signal(
+            snap,
+            candidate.side,
+            float(candidate.strike),
+            float(candidate.premium),
+        )
+        meta["slowBounce"] = sb_meta
+        if not sig_ok:
+            return False, sig_reason, meta
+        min_rank = settings.worst_day_slow_bounce_min_rank
+        if score < min_rank:
+            return False, f"worst_day_slow_bounce_rank_below_{min_rank:.0f}", meta
         return True, "ok", meta
 
     if mode == "quick_sideways":

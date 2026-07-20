@@ -355,6 +355,8 @@ def worst_day_quick_trade_allowed(
 ) -> tuple[bool, str]:
     """Quick sideways on alternate index during bad-day chop — not dead zone."""
     settings = get_settings()
+    if getattr(settings, "worst_day_block_quick_trades", True):
+        return False, "worst_day_blocks_quick_sideways"
     if not settings.worst_day_quick_enabled:
         return False, "worst_day_quick_disabled"
     if str(getattr(candidate, "mode", "") or "") != "quick_sideways":

@@ -161,7 +161,7 @@ def resolve_trading_session_mode(
         meta["playbook"] = [
             f"Defensive day — target {settings.defensive_daily_target_pct_min:.0%}–"
             f"{settings.defensive_daily_target_pct_max:.0%} of capital",
-            "Worst-day ITM fade + alternate quick scalps only; no explosion chasing",
+            "Worst day — ITM fade / elite explosions only; no quick sideways or scalps",
         ]
         meta["defensiveTargetPct"] = settings.defensive_daily_target_pct_min
         return "DEFENSIVE", meta
