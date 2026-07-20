@@ -156,6 +156,15 @@ class Settings(BaseSettings):
     paper_simple_profit_mode: bool = True
     paper_dual_strategy_enabled: bool = False
     explosion_capture_mode: bool = True  # PRIMARY — capture daily premium explosions
+    # Explosion-only book — skip scalp/quick (Jul15 PF 2.89 was explosion+trail; Jul20 bleed was quick/scalp/FOMO).
+    explosion_only_trading_enabled: bool = True
+    # Promote high-confidence radar explosions the missed-trade monitor flags as bullish/base-window.
+    # Does NOT trade premium_out_of_band cheap OTM chases (Jul20 24550 @ ₹3 — correctly blocked).
+    missed_explosion_promote_enabled: bool = True
+    missed_explosion_promote_min_score: float = 70.0
+    missed_explosion_promote_min_move_pct: float = 28.0
+    missed_explosion_promote_max_move_pct: float = 55.0
+    missed_explosion_promote_rank_bonus: float = 22.0
 
     # Paper should mirror live execution (broker flow + slippage) before going live
     paper_live_parity_enabled: bool = True

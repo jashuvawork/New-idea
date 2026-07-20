@@ -659,6 +659,8 @@ def find_best_entry(
     chop = is_chop_session(snapshots)
 
     candidates: list[EntryCandidate] = []
+    # Focus the book on the same ELITE/EXPLODING set missed-trade radar watches.
+    explosion_only = bool(getattr(settings, "explosion_only_trading_enabled", True))
 
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
@@ -666,12 +668,20 @@ def find_best_entry(
         if settings.explosion_capture_mode and scalp_open < settings.aggressive_max_open_scalps:
             if not limits or getattr(limits, "allowExplosion", True):
                 candidates.extend(_explosion_candidates(symbol, snap, state, settings))
-        if settings.paper_simple_profit_mode and scalp_open < settings.aggressive_max_open_scalps:
+        if (
+            not explosion_only
+            and settings.paper_simple_profit_mode
+            and scalp_open < settings.aggressive_max_open_scalps
+        ):
             candidates.extend(_scalp_candidates(symbol, snap, state, settings))
-        if quick_sideways_enabled() and scalp_open < settings.aggressive_max_open_scalps:
+        if (
+            not explosion_only
+            and quick_sideways_enabled()
+            and scalp_open < settings.aggressive_max_open_scalps
+        ):
             candidates.extend(_quick_sideways_candidates(symbol, snap, state, settings, snapshots))
             candidates.extend(_worst_day_candidates(symbol, snap, state, snapshots))
-        if swing_open < settings.swing_max_open:
+        if not explosion_only and swing_open < settings.swing_max_open:
             candidates.extend(_swing_candidates(symbol, snap, state, settings))
 
     if not candidates:
@@ -735,6 +745,33 @@ def find_best_entry(
     if adaptive.allow_quick_sideways is False or adaptive.day_type == "WORST":
         candidates = [c for c in candidates if c.mode != "quick_sideways"]
 
+    # When high-confidence base rips exist (missed-trade keep list), trade those
+    # first so capital captures Jul15-style ELITE simultaneously — not cheap OTM.
+    if (
+        explosion_only
+        and getattr(settings, "missed_explosion_promote_enabled", True)
+    ):
+        from app.engines.explosion_confidence import high_confidence_explosion
+
+        preferred: list[EntryCandidate] = []
+        for c in candidates:
+            if c.mode != "explosion":
+                continue
+            ok, _, _ = high_confidence_explosion(
+                side=c.side,
+                strike=float(c.strike),
+                premium=float(c.premium or 0),
+                snap=c.snap,
+                alert=c.alert if isinstance(c.alert, dict) else {},
+                explosion_event=c.explosion_event,
+                tier=str(c.tier or ""),
+                score=float(c.confidence or 0),
+            )
+            if ok:
+                preferred.append(c)
+        if preferred:
+            candidates = preferred
+
     candidates = filter_candidates_pretrade(candidates, state, snapshots)
     from app.engines.worst_day_guard import filter_worst_day_candidates
 
@@ -790,6 +827,10 @@ def find_best_entry(
         bonus += mode_rank_bonus(c.mode, adaptive)
         # Today's book: promote modes that paid, demote modes that bled.
         bonus += mode_session_rank_bonus(c.mode, mode_stats)
+        # Missed-trade quality promote: bullish/bearish base-window ELITE jumps queue.
+        from app.engines.explosion_confidence import missed_explosion_rank_bonus
+
+        bonus += missed_explosion_rank_bonus(c, c.snap)
         breadth_bias = (c.snap.breadth.bias if c.snap.breadth else "NEUTRAL") or "NEUTRAL"
         if c.mode == "explosion":
             from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
