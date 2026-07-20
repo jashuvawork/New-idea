@@ -477,30 +477,35 @@ def _worst_day_candidates(
             },
         ))
 
-    for setup in scan_worst_day_quick_setups(symbol, snap, state, snapshots):
-        side = setup["side"]
-        strike = float(setup["strike"])
-        premium = float(setup["premium"])
-        blocked, _ = _reentry_blocked(symbol, side, strike, snap)
-        if blocked:
-            continue
-        out.append(EntryCandidate(
-            symbol=symbol,
-            snap=snap,
-            mode="quick_sideways",
-            score=float(setup["score"]),
-            side=side,
-            strike=strike,
-            premium=premium,
-            strategy_type=StrategyType.SCALP,
-            confidence=float(setup["score"]),
-            tqs=snap.tradeQualityScore,
-            pretrade_meta={
-                "quickSideways": True,
-                "worstDayQuick": True,
-                "velocityPct": setup.get("velocityPct"),
-            },
-        ))
+    settings = get_settings()
+    if (
+        settings.worst_day_quick_enabled
+        and not getattr(settings, "worst_day_block_quick_trades", True)
+    ):
+        for setup in scan_worst_day_quick_setups(symbol, snap, state, snapshots):
+            side = setup["side"]
+            strike = float(setup["strike"])
+            premium = float(setup["premium"])
+            blocked, _ = _reentry_blocked(symbol, side, strike, snap)
+            if blocked:
+                continue
+            out.append(EntryCandidate(
+                symbol=symbol,
+                snap=snap,
+                mode="quick_sideways",
+                score=float(setup["score"]),
+                side=side,
+                strike=strike,
+                premium=premium,
+                strategy_type=StrategyType.SCALP,
+                confidence=float(setup["score"]),
+                tqs=snap.tradeQualityScore,
+                pretrade_meta={
+                    "quickSideways": True,
+                    "worstDayQuick": True,
+                    "velocityPct": setup.get("velocityPct"),
+                },
+            ))
     return out
 
 
@@ -716,6 +721,13 @@ def find_best_entry(
         adaptive, edge_pause_scalps=bool(pf_fb and pf_fb.pause_quick_scalps),
     ):
         candidates = [c for c in candidates if c.mode != "scalp"]
+
+    # Worst-day adaptive: do not even rank quick/slow-bounce candidates.
+    if adaptive.allow_quick_sideways is False or adaptive.day_type == "WORST":
+        candidates = [
+            c for c in candidates
+            if c.mode not in ("quick_sideways", "slow_bounce")
+        ]
 
     candidates = filter_candidates_pretrade(candidates, state, snapshots)
     from app.engines.worst_day_guard import filter_worst_day_candidates

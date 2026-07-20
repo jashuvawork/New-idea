@@ -73,7 +73,16 @@ def test_breakout_only_policy(mock_identify):
 def test_blocks_scalp_on_breakout_only(mock_policy):
     ok, reason, _ = worst_day_allows_candidate(_Cand(mode="scalp"), AutoTraderState(), {"NIFTY": _snap()})
     assert not ok
-    assert reason == "worst_day_breakout_only"
+    assert reason in ("worst_day_breakout_only", "worst_day_blocks_scalp")
+
+
+@patch("app.engines.worst_day_guard.session_entry_policy", return_value=("BREAKOUT_ONLY", {}))
+def test_blocks_quick_sideways_on_breakout_only(mock_policy):
+    ok, reason, _ = worst_day_allows_candidate(
+        _Cand(mode="quick_sideways"), AutoTraderState(), {"NIFTY": _snap()},
+    )
+    assert not ok
+    assert "quick" in reason
 
 
 @patch("app.engines.worst_day_guard.session_entry_policy", return_value=("BREAKOUT_ONLY", {}))

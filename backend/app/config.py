@@ -788,11 +788,15 @@ class Settings(BaseSettings):
     worst_day_itm_fade_max_hold_seconds: int = 90
     worst_day_itm_fade_rank_bonus: float = 8.0
     # Worst-day quick scalps — alternate index chop fades only
-    worst_day_quick_enabled: bool = True
+    # Jul20 — quick sideways / slow-bounce on worst days caused oversized losses.
+    # Keep disabled; elite explosions + ITM fade only when worst-day policy is on.
+    worst_day_quick_enabled: bool = False
     worst_day_quick_alternate_only: bool = True
     worst_day_quick_min_rank: float = 60.0
     worst_day_quick_max_velocity_pct: float = 1.2
     worst_day_quick_rank_bonus: float = 6.0
+    # Also hard-block quick/scalp/slow_bounce whenever BREAKOUT_ONLY/PAUSED.
+    worst_day_block_quick_trades: bool = True
     worst_day_dead_zone_enabled: bool = True
     worst_day_dead_zone_start_hour: int = 11
     worst_day_dead_zone_start_minute: int = 0

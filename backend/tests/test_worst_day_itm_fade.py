@@ -159,15 +159,26 @@ def test_scan_finds_sensex_fade(mock_sig, mock_dz, mock_win, mock_fade, mock_alt
 
 
 @patch("app.engines.worst_day_guard.session_entry_policy", return_value=("BREAKOUT_ONLY", {}))
-@patch("app.engines.worst_day_itm_fade.worst_day_quick_trade_allowed", return_value=(True, "ok"))
-def test_worst_day_allows_quick_on_alternate(mock_quick, mock_policy):
+def test_worst_day_blocks_quick_on_alternate(mock_policy):
+    """Jul20 — quick sideways on worst days must be blocked (was +14 bonus path)."""
     snap = _sensex_snap()
     cand = _Cand(mode="quick_sideways", pretrade_meta={"worstDayQuick": True, "velocityPct": 0.2})
-    ok, reason, meta = worst_day_allows_candidate(
+    ok, reason, _ = worst_day_allows_candidate(
         cand, AutoTraderState(), {"SENSEX": snap}, policy="BREAKOUT_ONLY",
     )
-    assert ok is True
-    assert meta.get("worstDayQuick") is True
+    assert ok is False
+    assert "quick" in reason
+
+
+@patch("app.engines.worst_day_guard.session_entry_policy", return_value=("BREAKOUT_ONLY", {}))
+def test_worst_day_blocks_slow_bounce_and_scalp(mock_policy):
+    for mode in ("slow_bounce", "scalp"):
+        cand = _Cand(mode=mode)
+        ok, reason, _ = worst_day_allows_candidate(
+            cand, AutoTraderState(), {"SENSEX": _sensex_snap()}, policy="BREAKOUT_ONLY",
+        )
+        assert ok is False, mode
+        assert mode in reason
 
 
 @patch("app.engines.bad_day_routing.bad_day_session_active", return_value=(True, ["bearish_sideways"]))
