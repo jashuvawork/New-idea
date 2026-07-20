@@ -18,19 +18,21 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
-    # Hung asyncio loop still accepts TCP but never answers /health.
-    # Kill PID 1 on probe failure so restart:unless-stopped brings it back
-    # (docker "unhealthy" alone does NOT restart the container).
+    # Probe only — do NOT kill PID 1 here. Docker still runs the test during
+    # start_period; a kill-on-fail healthcheck caused a restart storm (Jul20).
+    # Hung-loop recovery is handled by deploy/health-watchdog.sh (cron).
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\" || kill -TERM 1",
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)",
         ]
       interval: 20s
       timeout: 5s
-      retries: 2
-      start_period: 60s
+      retries: 3
+      start_period: 90s
 
 volumes:
   redis_data:
