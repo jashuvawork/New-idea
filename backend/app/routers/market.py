@@ -229,21 +229,27 @@ def _touch_cached_snapshot(
 
 
 def _refresh_cached_json(*, overlay_ws: bool = False) -> bytes:
-    """Throttled serialize for hot UI poll — avoids 5–10s JSON rebuild per request."""
+    """
+    Throttled serialize for hot UI poll.
+
+    Prefer serving last `_cache_json` when still fresh — rebuilding model_dump
+    on the event loop freezes /health under load. Full rebuild happens via
+    `_store_cache_async` on overlay/REST paths.
+    """
     global _cache_json, _last_touch_mono
     now_mono = time.monotonic()
     if _cache_json and (now_mono - _last_touch_mono) * 1000 < _CACHED_TOUCH_MIN_MS:
         return _cache_json
+    # Serve stale JSON rather than blocking the loop on a full dump.
+    if _cache_json:
+        _last_touch_mono = now_mono
+        return _cache_json
     _last_touch_mono = now_mono
     if not _cache or not _cache.snapshots:
-        return _cache_json or b"{}"
+        return b"{}"
     touched = _touch_cached_snapshot(overlay_ws=overlay_ws, light=True)
     snap = touched if touched else _cache
-    payload = snap.model_dump(mode="json")
-    payload["timestamp"] = datetime.now(IST).isoformat()
-    if snap.dataReady:
-        payload["waitingReason"] = None
-    _cache_json = orjson.dumps(payload)
+    _cache_json = _serialize_snapshot(snap)
     return _cache_json
 
 
@@ -620,17 +626,22 @@ async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
 
 
 async def broadcast_snapshot(snapshot: MultiSnapshot | None = None) -> None:
-    """Push snapshot to all SSE subscribers."""
+    """Push snapshot to all SSE subscribers — never model_dump on the event loop."""
     global _sse_payload_dict
     if not _sse_queues:
         return
     snap = snapshot or _cache
     if snap is not None and snap is _cache and _cache_json:
         if _sse_payload_dict is None:
-            _sse_payload_dict = orjson.loads(_cache_json)
+            _sse_payload_dict = await asyncio.to_thread(orjson.loads, _cache_json)
         payload = _sse_payload_dict
     elif snap is not None:
-        payload = snap.model_dump(mode="json")
+        # Prefer cached bytes; fall back to off-loop serialize (hang killer).
+        if _cache_json and snap is _cache:
+            payload = await asyncio.to_thread(orjson.loads, _cache_json)
+        else:
+            raw = await asyncio.to_thread(_serialize_snapshot, snap)
+            payload = await asyncio.to_thread(orjson.loads, raw)
     else:
         return
     dead: list[asyncio.Queue] = []
@@ -829,7 +840,7 @@ async def get_multi_snapshot(
             )
             snapshot.timestamp = datetime.now(IST)
             snapshot.waitingReason = None
-        _store_cache(snapshot)
+        await _store_cache_async(snapshot)
         _last_full_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
         if force:
             mark_full_scan_done()
@@ -858,8 +869,8 @@ async def get_snapshots_cached():
         return Response(content=_cache_json, media_type="application/json")
     fast = await get_multi_snapshot_fast(overlay_ws=False)
     if fast.snapshots:
-        _store_cache(fast)
-        return Response(content=_cache_json or _serialize_snapshot(fast), media_type="application/json")
+        await _store_cache_async(fast)
+        return Response(content=_cache_json or b"{}", media_type="application/json")
     return await get_multi_snapshot()
 
 

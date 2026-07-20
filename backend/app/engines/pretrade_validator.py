@@ -30,6 +30,8 @@ class TradeRecord:
     exit_reason: str = ""
     strike: float = 0.0
     trade_id: str = ""
+    mode: str = ""
+    best_pnl_points: float = 0.0
 
 
 @dataclass
@@ -63,6 +65,8 @@ def _paper_trade_records(state: AutoTraderState, reset_at: Optional[datetime] = 
             if closed_at <= reset_at:
                 continue
         side = t.side.value if isinstance(t.side, Side) else str(t.side).upper()
+        ctx = getattr(t, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or "").strip().lower()
         out.append(TradeRecord(
             symbol=t.symbol.upper(),
             side=side,
@@ -70,6 +74,8 @@ def _paper_trade_records(state: AutoTraderState, reset_at: Optional[datetime] = 
             exit_reason=str(t.exitReason or ""),
             strike=float(t.strike or 0),
             trade_id=str(t.id),
+            mode=mode,
+            best_pnl_points=float(getattr(t, "bestPnlPoints", 0) or 0),
         ))
     return out
 
@@ -110,6 +116,12 @@ def collect_session_trades(state: AutoTraderState) -> list[TradeRecord]:
             tid = str(row.get("id", ""))
             if tid and tid in seen:
                 continue
+            ctx = row.get("entryContext") or {}
+            mode = str(
+                row.get("selectionMode")
+                or (ctx.get("selectionMode") if isinstance(ctx, dict) else "")
+                or ""
+            ).strip().lower()
             records.append(TradeRecord(
                 symbol=str(row.get("symbol", "")).upper(),
                 side=str(row.get("side", "")).upper(),
@@ -117,6 +129,8 @@ def collect_session_trades(state: AutoTraderState) -> list[TradeRecord]:
                 exit_reason=exit_reason,
                 strike=float(row.get("strike") or 0),
                 trade_id=tid,
+                mode=mode,
+                best_pnl_points=float(row.get("bestPnlPoints") or 0),
             ))
     except Exception:
         pass
@@ -556,6 +570,30 @@ def validate_candidate(
 
     trades = session_trades if session_trades is not None else collect_session_trades(state)
     meta: dict[str, Any] = {"controlledTrading": True}
+
+    # Composer advisory → hard gate (standDown / opposing bias).
+    if getattr(settings, "composer_hard_gate_enabled", True):
+        try:
+            from app.engines.composer_market_monitor import get_latest_brief
+
+            brief = get_latest_brief() or {}
+            if brief.get("standDown"):
+                meta["composerStandDown"] = True
+                meta["composerBias"] = brief.get("tradeBias")
+                return False, "composer_stand_down", meta
+            if getattr(settings, "composer_bias_gate_enabled", True):
+                bias = str(brief.get("tradeBias") or "").upper()
+                side = getattr(candidate, "side", None)
+                side_val = side.value if hasattr(side, "value") else str(side or "").upper()
+                if bias in ("CALL", "PUT") and side_val in ("CALL", "PUT") and bias != side_val:
+                    # Allow ELITE explosions to bypass soft bias; hard-block scalps/quick.
+                    mode = str(getattr(candidate, "mode", "") or "")
+                    tier = str(getattr(candidate, "tier", "") or "").upper()
+                    if mode != "explosion" or tier not in ("ELITE",):
+                        meta["composerBias"] = bias
+                        return False, f"composer_bias_{bias.lower()}_blocks_{side_val.lower()}", meta
+        except Exception:
+            pass
 
     from app.engines.extreme_explosion_moment import (
         extreme_all_in_meta,

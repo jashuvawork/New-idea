@@ -27,10 +27,18 @@ class AILearningEngine:
         features = self._feature_cache.pop(trade.id, None)
 
         won = trade.pnlInr > 0
-        if features:
-            ml.record_outcome(features, won)
+        # Only train when features match model dimensionality (was 3-float stub).
+        if features and len(features) >= 18:
+            ml.record_outcome(features[:18], won)
+        elif features:
+            logger.warning(
+                "AI learning: skip retrain trade %s — feature dim %d (need 18)",
+                trade.id, len(features),
+            )
 
         strategy_id = trade.strategyType.value if trade.strategyType else "unknown"
+        ctx = getattr(trade, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or "").strip().lower()
         stats = self._strategy_stats[strategy_id]
         if won:
             stats["wins"] += 1
@@ -44,9 +52,22 @@ class AILearningEngine:
             wr = stats["wins"] / total
             stats["weight"] = max(0.3, min(1.5, 0.5 + wr))
 
+        if mode:
+            mstats = self._strategy_stats[f"mode:{mode}"]
+            if won:
+                mstats["wins"] += 1
+            else:
+                mstats["losses"] += 1
+            mstats["pnl"] += trade.pnlInr
+            mtotal = mstats["wins"] + mstats["losses"]
+            if mtotal >= 3:
+                mwr = mstats["wins"] / mtotal
+                mstats["weight"] = max(0.25, min(1.6, 0.4 + mwr))
+
         logger.info(
-            "AI learning: trade %s %s pnl=%.0f strategy=%s weight=%.2f",
-            trade.id, "WIN" if won else "LOSS", trade.pnlInr, strategy_id, stats["weight"],
+            "AI learning: trade %s %s pnl=%.0f strategy=%s mode=%s weight=%.2f feats=%s",
+            trade.id, "WIN" if won else "LOSS", trade.pnlInr, strategy_id, mode or "-",
+            stats["weight"], len(features) if features else 0,
         )
 
     def get_strategy_weights(self) -> dict[str, float]:

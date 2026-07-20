@@ -694,6 +694,9 @@ def find_best_entry(
             c.pretrade_meta = {**(c.pretrade_meta or {}), "edgeScore": edge.total}
 
     pf_fb = session_pf_feedback(state) if settings.edge_engine_enabled else None
+    from app.engines.session_mode_feedback import compute_mode_stats, mode_session_rank_bonus
+
+    mode_stats = compute_mode_stats(session_trades)
 
     if limits:
         day_mode = str(getattr(limits, "dayMode", "") or "")
@@ -785,6 +788,8 @@ def find_best_entry(
         if trading_mode == "AGGRESSIVE" and c.mode == "explosion":
             bonus += 14
         bonus += mode_rank_bonus(c.mode, adaptive)
+        # Today's book: promote modes that paid, demote modes that bled.
+        bonus += mode_session_rank_bonus(c.mode, mode_stats)
         breadth_bias = (c.snap.breadth.bias if c.snap.breadth else "NEUTRAL") or "NEUTRAL"
         if c.mode == "explosion":
             from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
