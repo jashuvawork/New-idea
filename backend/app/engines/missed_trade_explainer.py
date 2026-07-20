@@ -480,6 +480,7 @@ def _gate_checks(
         })
 
     from app.engines.explosion_entry_guards import (
+        detect_fake_explosion_trap,
         extended_session_chase_blocked,
         immature_explosion_blocked,
     )
@@ -527,6 +528,37 @@ def _gate_checks(
                 "gate": "explosion_extended_chase",
                 "passed": True,
                 "detail": "inside early/soft window",
+            })
+        trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
+            candidate, snap, state=state, ict=ict,
+        )
+        if trap_block or trap_meta.get("action") == "block":
+            blockers.append(trap_reason)
+            gates.append({
+                "gate": "fake_explosion_trap",
+                "passed": False,
+                "detail": trap_reason,
+                "fix": (
+                    "FOMO/fake-rip — RANGE/chop + ELITE spike after extension, "
+                    "OTM inside OR, or flat live premium. Skip or tiny size only."
+                ),
+                "meta": {
+                    "conflictFlags": trap_meta.get("conflictFlags"),
+                    "psychologyEscalate": trap_meta.get("psychologyEscalate"),
+                },
+            })
+        elif trap_meta.get("action") == "cut_size":
+            gates.append({
+                "gate": "fake_explosion_trap",
+                "passed": True,
+                "detail": f"size_cut_cap_{trap_meta.get('lotCap')}",
+                "fix": "Trap soft-cut — keep small until trail proves the move",
+            })
+        else:
+            gates.append({
+                "gate": "fake_explosion_trap",
+                "passed": True,
+                "detail": "no FOMO/fake-rip conflict stack",
             })
     if ict and candidate.explosion_event:
         late_blocked, late_reason = late_fade_chase_blocked(candidate.explosion_event, ict)
