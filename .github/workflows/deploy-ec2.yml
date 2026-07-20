@@ -100,4 +100,17 @@ jobs:
 
       - name: Verify public deployment status
         run: |
-          curl -sf https://www.jashuvatrade.xyz/api/deployment/status | python3 -m json.tool
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            if curl -sf --connect-timeout 5 --max-time 15 \
+              https://www.jashuvatrade.xyz/api/deployment/status | python3 -m json.tool; then
+              exit 0
+            fi
+            echo "verify attempt $i failed — waiting"
+            sleep 8
+          done
+          # Last resort: local health via SSM already passed in ec2-update; surface public failure
+          curl -sf --connect-timeout 5 --max-time 20 \
+            https://www.jashuvatrade.xyz/health | python3 -m json.tool
+          curl -sf --connect-timeout 5 --max-time 20 \
+            https://www.jashuvatrade.xyz/api/deployment/status | python3 -m json.tool
