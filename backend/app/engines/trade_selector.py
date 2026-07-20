@@ -296,10 +296,28 @@ def _explosion_candidates(
         late_blocked, _late_reason = late_fade_chase_blocked(event, ict)
         if late_blocked:
             continue
-        from app.engines.explosion_entry_guards import extended_session_chase_blocked
+        from app.engines.explosion_entry_guards import (
+            extended_session_chase_blocked,
+            immature_explosion_blocked,
+        )
 
+        immature_blocked, _immature_reason = immature_explosion_blocked(event, ict=ict)
+        if immature_blocked:
+            continue
         ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)
         if ext_blocked:
+            continue
+        # Displacement-only without flat base / FVG / real rip — skip (Jul20 noise).
+        if (
+            ict.active
+            and ict.displacement
+            and not ict.flat_then_vertical
+            and not ict.premium_fvg
+            and not ict.mega_rip
+            and max(daily_move, peak_move) < float(
+                getattr(settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
+            )
+        ):
             continue
         rank += ict_explosion_rank_bonus(ict, trading_mode)
         # Early flat→vertical breakouts (26→45 CE / 12→40 PE) jump the queue —

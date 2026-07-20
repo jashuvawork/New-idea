@@ -216,11 +216,21 @@ def analyze_ict_breakout(
                     score += 5.0
                     reasons.append(str(smc["bos"]))
 
+    # Displacement alone must not activate ICT on tiny session moves (Jul20 +1% noise).
+    early_floor = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
+    immature_floor = float(
+        getattr(settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
+    )
+    displacement_only_ok = displacement and move >= immature_floor and (flat or vol_awaken or fvg)
     active = (
-        score >= settings.ict_breakout_min_score
-        or mega
-        or (fvg and (vertical or early_break))
+        mega
         or early_break
+        or (fvg and (vertical or early_break or move >= early_floor))
+        or flat_then_vertical
+        or (
+            score >= settings.ict_breakout_min_score
+            and (flat_then_vertical or fvg or mega or displacement_only_ok or move >= early_floor)
+        )
     )
     pattern = "mega_rip" if mega else (
         "flat_then_vertical" if flat_then_vertical else (

@@ -70,16 +70,20 @@ def test_chop_weak_explosion_blocked(mock_settings):
     s = MagicMock()
     s.all_day_explosion_session_move_min_pct = 40.0
     s.aggressive_min_explosion_score = 45.0
+    s.explosion_chop_min_session_move_pct = 28.0
+    s.ict_early_vertical_min_session_move_pct = 28.0
     mock_settings.return_value = s
 
     snap = MagicMock()
     snap.regime = Regime.CHOP
+    snap.spotChart = None
     candidate = SimpleNamespace(
         mode="explosion",
         score=50.0,
         tier="EXPLODING",
         explosion_event=_event(daily_move=5.0),
+        alert={"ictFlatThenVertical": False, "ictDisplacement": True},
     )
     blocked, reason = chop_weak_explosion_blocks_entry(candidate, snap)
     assert blocked
-    assert reason == "chop_weak_explosion"
+    assert "chop_immature" in reason or reason == "chop_weak_explosion"

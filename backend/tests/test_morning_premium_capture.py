@@ -31,6 +31,38 @@ def _settings():
     s.morning_capture_skip_chart_on_extreme_velocity = True
     s.morning_capture_extreme_velocity_3s = 3.0
     s.morning_capture_extreme_velocity_9s = 4.0
+    s.all_day_explosion_capture_enabled = True
+    s.all_day_explosion_start_hour = 9
+    s.all_day_explosion_start_minute = 20
+    s.all_day_explosion_end_hour = 15
+    s.all_day_explosion_end_minute = 25
+    s.all_day_explosion_min_score = 38.0
+    s.all_day_explosion_session_move_min_pct = 40.0
+    s.all_day_explosion_extreme_move_min_pct = 80.0
+    s.explosion_immature_min_session_move_pct = 22.0
+    s.explosion_immature_block_enabled = True
+    s.explosion_volume_awaken_min = 2.2
+    s.explosion_chop_min_session_move_pct = 28.0
+    s.explosion_early_window_max_move_pct = 55.0
+    s.ict_breakout_monitor_enabled = True
+    s.ict_fvg_min_gap_pct = 1.2
+    s.ict_flat_base_max_range_pct = 8.0
+    s.ict_flat_base_lookback_seconds = 180
+    s.ict_displacement_min_velocity_3s = 2.8
+    s.ict_vertical_min_session_move_pct = 35.0
+    s.ict_early_vertical_min_session_move_pct = 28.0
+    s.ict_early_vertical_min_velocity_3s = 2.0
+    s.ict_mega_rip_min_session_move_pct = 90.0
+    s.ict_volume_surge_awaken_min = 3.0
+    s.ict_fvg_score_bonus = 18.0
+    s.ict_flat_vertical_score_bonus = 22.0
+    s.ict_early_breakout_score_bonus = 16.0
+    s.ict_mega_rip_score_bonus = 28.0
+    s.ict_breakout_min_score = 42.0
+    s.ict_late_chase_block_enabled = True
+    s.ict_late_chase_min_peak_pct = 75.0
+    s.ict_late_chase_max_live_velocity_3s = 1.0
+    s.afternoon_premium_capture_enabled = False
     s.premium_led_counter_breadth_enabled = True
     s.premium_led_min_velocity_3s = 2.8
     s.premium_led_min_velocity_9s = 3.5
@@ -102,12 +134,15 @@ def test_watch_tier_rejected(mock_window, mock_settings):
     assert is_morning_capture_event(_building_event(tier="WATCH", explosion_score=30)) is False
 
 
+@patch("app.engines.ict_breakout_monitor.get_settings", return_value=_settings())
+@patch("app.config.get_settings", return_value=_settings())
 @patch("app.engines.morning_premium_capture.get_settings", return_value=_settings())
 @patch("app.engines.morning_premium_capture.in_morning_premium_capture_window", return_value=True)
-def test_event_to_dict_marks_building_tradeable(mock_window, mock_settings):
-    d = event_to_dict(_building_event())
-    assert d["tradeable"] is True
+def test_event_to_dict_marks_building_tradeable(mock_window, mock_settings, mock_cfg, mock_ict):
+    # Morning BUILDING capture stays tradeable even when session move is still small.
+    d = event_to_dict(_building_event(daily_move_pct=12.0, peak_move_pct=12.0))
     assert d["morningCapture"] is True
+    assert d["tradeable"] is True
 
 
 @patch("app.engines.morning_premium_capture.get_settings", return_value=_settings())
