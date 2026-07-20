@@ -50,24 +50,68 @@ def chop_weak_explosion_blocks_entry(
     candidate: Any,
     snap: SymbolSnapshot,
 ) -> tuple[bool, str]:
-    """CHOP regime — require proven session move or ELITE tier."""
+    """
+    CHOP / RANGE_BOUND — require a real session premium rip.
+
+    Jul20: rank-score bypass let EXPLODING entries through at +0.8%/+1.4% move.
+    Use event explosion_score + session move — never candidate rank.
+    """
     settings = get_settings()
     if getattr(candidate, "mode", "") != "explosion":
         return False, "ok"
 
     regime = str(snap.regime.value if hasattr(snap.regime, "value") else snap.regime or "").upper()
-    if regime not in ("CHOP", "RANGE_BOUND"):
+    # Also treat day-mode chop via breadth-neutral sessions when regime lags.
+    chart = snap.spotChart
+    chopish = regime in ("CHOP", "RANGE_BOUND")
+    if not chopish and chart is not None:
+        mom = abs(float(getattr(chart, "momentum5Pct", 0) or 0))
+        strength = float(getattr(chart, "trendStrength", 100) or 100)
+        if mom < 0.25 and strength < 45:
+            chopish = True
+    if not chopish:
         return False, "ok"
 
     event = getattr(candidate, "explosion_event", None)
     daily_move = float(getattr(event, "daily_move_pct", 0) or 0) if event else 0.0
+    peak_move = float(getattr(event, "peak_move_pct", 0) or 0) if event else 0.0
+    move = max(daily_move, peak_move)
     tier = str(getattr(event, "tier", "") or getattr(candidate, "tier", "") or "").upper()
-    score = float(getattr(candidate, "score", 0) or 0)
+    exp_score = float(getattr(event, "explosion_score", 0) or 0) if event else 0.0
 
-    if tier in ("ELITE", "EXPLODING") and daily_move >= settings.all_day_explosion_session_move_min_pct:
+    alert = getattr(candidate, "alert", None) or {}
+    ict_flat = bool(alert.get("ictFlatThenVertical"))
+    ict_vol = bool(alert.get("volumeAwaken") or alert.get("ictVolumeAwakening"))
+    if event is not None and not ict_flat:
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+        ict = analyze_explosion_event_ict(event, snap)
+        ict_flat = bool(ict.flat_then_vertical and ict.active)
+        ict_vol = ict_vol or bool(ict.volume_awakening)
+        move = max(move, float(ict.session_move_pct or 0))
+
+    chop_min = float(
+        getattr(settings, "explosion_chop_min_session_move_pct", 28.0) or 28.0
+    )
+    early_min = float(
+        getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0
+    )
+
+    # True flat→vertical with volume at early floor — allow on chop.
+    if ict_flat and ict_vol and move >= early_min:
         return False, "ok"
-    if score >= settings.aggressive_min_explosion_score + 25:
+
+    if move < chop_min:
+        return True, f"chop_immature_explosion_{move:.1f}%"
+
+    # Proven rip on chop: ELITE/EXPLODING with session move ≥ all-day floor.
+    if tier in ("ELITE", "EXPLODING") and move >= settings.all_day_explosion_session_move_min_pct:
         return False, "ok"
+
+    # Extreme radar score still needs meaningful move (no rank bypass).
+    if exp_score >= settings.aggressive_min_explosion_score + 40 and move >= chop_min + 10:
+        return False, "ok"
+
     return True, "chop_weak_explosion"
 
 

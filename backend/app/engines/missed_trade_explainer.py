@@ -479,7 +479,10 @@ def _gate_checks(
             "fix": "Deploy chart reconcile fix",
         })
 
-    from app.engines.explosion_entry_guards import extended_session_chase_blocked
+    from app.engines.explosion_entry_guards import (
+        extended_session_chase_blocked,
+        immature_explosion_blocked,
+    )
     from app.engines.ict_breakout_monitor import (
         analyze_explosion_event_ict,
         late_fade_chase_blocked,
@@ -491,6 +494,23 @@ def _gate_checks(
         else None
     )
     if candidate.explosion_event:
+        immature_blocked, immature_reason = immature_explosion_blocked(
+            candidate.explosion_event, ict=ict,
+        )
+        if immature_blocked:
+            blockers.append(immature_reason)
+            gates.append({
+                "gate": "immature_explosion",
+                "passed": False,
+                "detail": immature_reason,
+                "fix": "Wait for ≥22% session rip or confirmed flat→vertical — skip displacement noise",
+            })
+        else:
+            gates.append({
+                "gate": "immature_explosion",
+                "passed": True,
+                "detail": "session move mature enough",
+            })
         ext_blocked, ext_reason = extended_session_chase_blocked(
             candidate.explosion_event, ict=ict,
         )

@@ -90,6 +90,53 @@ def _session_peak_move(explosion_event: Any) -> float:
     return max(daily, peak)
 
 
+def immature_explosion_blocked(
+    explosion_event: Any,
+    *,
+    ict: Any = None,
+) -> tuple[bool, str]:
+    """
+    Block hot-velocity / displacement noise before a real premium rip prints.
+
+    Jul20 NIFTY CALL losses entered at +0.8% / +1.4% session move with
+    ictPattern=displacement — not a base→vertical. Require a minimum session
+    move unless true flat→vertical early ICT is already confirmed.
+    """
+    settings = get_settings()
+    if not getattr(settings, "explosion_immature_block_enabled", True):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+
+    move = _session_peak_move(explosion_event)
+    if ict is not None:
+        move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
+
+    min_move = float(
+        getattr(settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
+    )
+    early_min = float(
+        getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0
+    )
+    if move >= min_move:
+        return False, ""
+
+    # Only exception: confirmed flat→vertical already at early ICT floor.
+    if (
+        ict is not None
+        and bool(getattr(ict, "active", False))
+        and bool(getattr(ict, "flat_then_vertical", False))
+        and (
+            bool(getattr(ict, "volume_awakening", False))
+            or bool(getattr(ict, "displacement", False))
+        )
+        and move >= early_min
+    ):
+        return False, ""
+
+    return True, f"immature_explosion_move_{move:.1f}%"
+
+
 def extended_session_chase_blocked(
     explosion_event: Any,
     *,

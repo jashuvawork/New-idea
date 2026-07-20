@@ -803,7 +803,15 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     all_day = is_all_day_explosion_event(e)
     capture = is_premium_capture_event(e)
     ict = analyze_explosion_event_ict(e, snap)
-    tradeable = e.tier in ("EXPLODING", "ELITE") or capture
+    move = max(float(e.daily_move_pct or 0), float(e.peak_move_pct or 0), float(ict.session_move_pct or 0))
+    from app.config import get_settings as _gs
+
+    _settings = _gs()
+    immature_floor = float(
+        getattr(_settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
+    )
+    # EXPLODING/ELITE still need a real rip — tiny displacement spikes are not tradeable.
+    tradeable = (e.tier in ("EXPLODING", "ELITE") and move >= immature_floor) or capture
     if ict.mega_rip or (ict.active and (ict.flat_then_vertical or ict.premium_fvg)):
         tradeable = True
     # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).

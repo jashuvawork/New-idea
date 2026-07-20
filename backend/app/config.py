@@ -195,6 +195,12 @@ class Settings(BaseSettings):
     # Early capture window preferred in ranking (base break → first expansion).
     explosion_early_window_min_move_pct: float = 28.0
     explosion_early_window_max_move_pct: float = 55.0
+    # Immature explosion block — Jul20 losses at +0.8%/+1.4% "displacement" noise.
+    # Require a real premium rip before EXPLOSIVE entries (unless true flat→vertical).
+    explosion_immature_block_enabled: bool = True
+    explosion_immature_min_session_move_pct: float = 22.0
+    # CHOP/RANGE — stricter floor than immature (false EXPLODING is common).
+    explosion_chop_min_session_move_pct: float = 28.0
     # Faded vertical rip — peak move huge but live velocity cooled (caution sizing)
     explosion_faded_rip_caution_enabled: bool = True
     explosion_faded_rip_min_peak_pct: float = 35.0
@@ -479,9 +485,10 @@ class Settings(BaseSettings):
     daily_max_trades_chop: int = 20
     daily_max_trades_pre10_chop: int = 5
     pre10_chop_min_rank_score: float = 60.0
-    loss_streak_pause_count: int = 3
+    # Pause after 2 losses — Jul20 burned 6 before the old 3-loss pause helped.
+    loss_streak_pause_count: int = 2
     loss_streak_pause_seconds: int = 1200
-    session_large_loss_pause_inr: float = 15_000.0
+    session_large_loss_pause_inr: float = 8_000.0
     session_large_loss_pause_seconds: int = 900
     chop_lots_high: int = 40
     chop_lots_mid: int = 20
