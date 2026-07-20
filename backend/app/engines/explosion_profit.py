@@ -476,6 +476,9 @@ def _defer_adaptive_stop(
     """Defer adaptive SL while high-confidence trade works toward chart TP."""
     if stop_floor > 0 and pnl_pts <= -stop_floor:
         return False
+    # Never defer a never-green loser — hold-until-target is for runners only.
+    if best <= 0 and pnl_pts < 0:
+        return False
     from app.engines.confidence_hold import (
         hold_until_target_active,
         is_confidence_runner_hold,
