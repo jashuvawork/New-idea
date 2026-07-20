@@ -47,30 +47,55 @@ def overlay_snapshot_ltps(
     *,
     max_age_seconds: float = 1.0,
 ) -> dict[str, SymbolSnapshot]:
-    """Clone cached snapshots and merge fresh tick LTPs into heatmap rows."""
+    """Shallow-clone only mutated rows — deep=True freezes the event loop."""
     out: dict[str, SymbolSnapshot] = {}
     for sym, snap in snapshots.items():
         if not snap.dataAvailable:
             out[sym] = snap
             continue
-        cloned = snap.model_copy(deep=True)
-        for row in cloned.heatmap:
-            if row.callInstrumentKey:
-                ltp = get_ltp(row.callInstrumentKey, max_age_seconds=max_age_seconds)
-                if ltp is not None:
-                    row.callLtp = ltp
-            if row.putInstrumentKey:
-                ltp = get_ltp(row.putInstrumentKey, max_age_seconds=max_age_seconds)
-                if ltp is not None:
-                    row.putLtp = ltp
-        if cloned.explosiveRunner.premium is not None and cloned.explosiveRunner.strike:
+
+        new_heatmap = None
+        for idx, row in enumerate(snap.heatmap):
+            call_ltp = (
+                get_ltp(row.callInstrumentKey, max_age_seconds=max_age_seconds)
+                if row.callInstrumentKey
+                else None
+            )
+            put_ltp = (
+                get_ltp(row.putInstrumentKey, max_age_seconds=max_age_seconds)
+                if row.putInstrumentKey
+                else None
+            )
+            if call_ltp is None and put_ltp is None:
+                continue
+            if new_heatmap is None:
+                new_heatmap = list(snap.heatmap)
+            updated = row.model_copy(deep=False)
+            if call_ltp is not None:
+                updated.callLtp = call_ltp
+            if put_ltp is not None:
+                updated.putLtp = put_ltp
+            new_heatmap[idx] = updated
+
+        runner_ltp = None
+        runner = snap.explosiveRunner
+        if runner and runner.premium is not None and runner.strike:
             ik = _heatmap_instrument_key(
-                cloned, cloned.explosiveRunner.strike, cloned.explosiveRunner.side or Side.CALL,
+                snap, runner.strike, runner.side or Side.CALL,
             )
             if ik:
-                ltp = get_ltp(ik, max_age_seconds=max_age_seconds)
-                if ltp is not None:
-                    cloned.explosiveRunner.premium = ltp
+                runner_ltp = get_ltp(ik, max_age_seconds=max_age_seconds)
+
+        if new_heatmap is None and runner_ltp is None:
+            out[sym] = snap
+            continue
+
+        cloned = snap.model_copy(deep=False)
+        if new_heatmap is not None:
+            cloned.heatmap = new_heatmap
+        if runner_ltp is not None and runner is not None:
+            cloned.explosiveRunner = runner.model_copy(deep=False)
+            cloned.explosiveRunner.premium = runner_ltp
         out[sym] = cloned
     return out
 
@@ -80,7 +105,7 @@ def overlay_snapshot_spot_charts(
     *,
     max_age_seconds: float = 1.0,
 ) -> dict[str, SymbolSnapshot]:
-    """Refresh index spot + spotChart RSI/MACD on cached snapshots from WS ticks."""
+    """Refresh index spot + spotChart — shallow clone only (no deep tree copy)."""
     from app.engines.spot_direction import refresh_spot_chart_live
 
     out: dict[str, SymbolSnapshot] = {}
@@ -94,7 +119,7 @@ def overlay_snapshot_spot_charts(
             out[sym] = snap
             continue
 
-        cloned = snap.model_copy(deep=True)
+        cloned = snap.model_copy(deep=False)
         cloned.spot = live_spot
         breadth_bias = cloned.breadth.bias if cloned.breadth else "NEUTRAL"
         cloned.spotChart = refresh_spot_chart_live(

@@ -426,14 +426,20 @@ if [ "$ready" -ne 1 ]; then
   exit 1
 fi
 
-# Health watchdog — auto-restart hung backend (every 2 minutes)
+# Health watchdog — auto-restart hung backend (every minute during market risk)
 if [ -f "$REPO_DIR/deploy/health-watchdog.sh" ] && command -v crontab >/dev/null 2>&1; then
   chmod +x "$REPO_DIR/deploy/health-watchdog.sh"
-  CRON_LINE="*/2 * * * * $REPO_DIR/deploy/health-watchdog.sh"
-  if ! crontab -l 2>/dev/null | grep -Fq "health-watchdog.sh"; then
-    (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
-    echo "Installed health watchdog cron (every 2 min)"
-  fi
+  # Pin correct compose path — older cron lines pointed at /opt/nexusquant/app/...
+  CRON_LINE="* * * * * COMPOSE_FILE=$REPO_DIR/docker-compose.prod.yml REPO_DIR=$REPO_DIR $REPO_DIR/deploy/health-watchdog.sh"
+  TMP_CRON="$(mktemp)"
+  crontab -l 2>/dev/null | grep -v "health-watchdog.sh" >"$TMP_CRON" || true
+  echo "$CRON_LINE" >>"$TMP_CRON"
+  crontab "$TMP_CRON"
+  rm -f "$TMP_CRON"
+  echo "Installed/refreshed health watchdog cron (every 1 min, compose=$REPO_DIR/docker-compose.prod.yml)"
+  # Immediate recovery if deploy found a hung loop
+  COMPOSE_FILE="$REPO_DIR/docker-compose.prod.yml" REPO_DIR="$REPO_DIR" \
+    bash "$REPO_DIR/deploy/health-watchdog.sh" || true
 elif [ -f "$REPO_DIR/deploy/health-watchdog.sh" ]; then
   echo "WARN: crontab not installed — skip health watchdog cron"
 fi

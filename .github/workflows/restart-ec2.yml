@@ -33,8 +33,14 @@ jobs:
               "cd /opt/nexusquant/New-idea",
               "docker compose -f $COMPOSE ps",
               "docker compose -f $COMPOSE restart backend",
-              "sleep 5",
-              "curl -sf http://127.0.0.1:8000/health"
+              "sleep 8",
+              "if ! curl -sf --max-time 5 http://127.0.0.1:8000/health; then",
+              "  echo health_still_down force_recreate",
+              "  docker compose -f $COMPOSE up -d --force-recreate --no-deps backend",
+              "  sleep 10",
+              "  curl -sf --max-time 5 http://127.0.0.1:8000/health",
+              "fi",
+              "bash /opt/nexusquant/New-idea/deploy/health-watchdog.sh || true"
             ]' \
             --query Command.CommandId \
             --output text)
