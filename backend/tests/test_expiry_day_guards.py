@@ -295,6 +295,11 @@ def test_check_expiry_candidate_aligned_explosion_skips_rank_floor(
     s = mock_settings.return_value
     s.expiry_day_guards_enabled = True
     s.expiry_min_rank_score = 62.0
+    s.expiry_worst_day_elite_top_bypass_enabled = True
+    s.expiry_worst_day_session_loss_inr = -12000.0
+    s.expiry_worst_day_score_threshold = 55.0
+    s.expiry_decline_session_loss_inr = -8000.0
+    s.expiry_worst_day_loss_count = 2
 
     snap = _snap("SENSEX", expiry=datetime.now(IST).strftime("%Y-%m-%d"))
     snap.breadth = Breadth(bias="BULLISH", score=65, aligned=True)
@@ -310,7 +315,12 @@ def test_check_expiry_candidate_aligned_explosion_skips_rank_floor(
         tqs=54.0,
         confidence=58.9,
     )
-    ok, reason, meta = check_expiry_candidate(cand, AutoTraderState(), {"SENSEX": snap})
+    with patch(
+        "app.engines.expiry_day_guards.predict_worst_expiry_day",
+        return_value=(False, 0.0, []),
+    ):
+        with patch("app.engines.expiry_day_guards._session_declining", return_value=False):
+            ok, reason, meta = check_expiry_candidate(cand, AutoTraderState(), {"SENSEX": snap})
     assert ok is True
     assert reason == "ok"
     assert meta.get("expiryAlignedBypass") is True

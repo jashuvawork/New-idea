@@ -580,7 +580,16 @@ def validate_candidate(
             if brief.get("standDown"):
                 meta["composerStandDown"] = True
                 meta["composerBias"] = brief.get("tradeBias")
-                return False, "composer_stand_down", meta
+                # Expiry / session stand-aside must not bury early-window ELITE tops.
+                if getattr(settings, "expiry_worst_day_elite_top_composer_bypass", True):
+                    from app.engines.expiry_day_guards import is_expiry_elite_top_candidate
+
+                    if is_expiry_elite_top_candidate(candidate):
+                        meta["composerStandDownBypass"] = "elite_top"
+                    else:
+                        return False, "composer_stand_down", meta
+                else:
+                    return False, "composer_stand_down", meta
             if getattr(settings, "composer_bias_gate_enabled", True):
                 bias = str(brief.get("tradeBias") or "").upper()
                 side = getattr(candidate, "side", None)

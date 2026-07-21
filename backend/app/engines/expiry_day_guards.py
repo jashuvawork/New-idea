@@ -362,6 +362,118 @@ def expiry_min_rank_score(
     return settings.expiry_min_rank_score
 
 
+def expiry_elite_top_tiers() -> set[str]:
+    settings = get_settings()
+    raw = str(getattr(settings, "expiry_worst_day_elite_top_tiers_csv", "ELITE") or "ELITE")
+    return {t.strip().upper() for t in raw.split(",") if t.strip()}
+
+
+def _alert_session_move(alert: dict[str, Any]) -> float:
+    return max(
+        float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0),
+        float(alert.get("peakMovePct") or 0),
+    )
+
+
+def alert_is_expiry_elite_top(alert: dict[str, Any], snap: Optional[SymbolSnapshot] = None) -> bool:
+    """True for early-window ELITE rips worth lifting the expiry-worst halt."""
+    settings = get_settings()
+    if not getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True):
+        return False
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in expiry_elite_top_tiers():
+        return False
+    score = float(alert.get("explosionScore") or 0)
+    min_score = float(getattr(settings, "expiry_worst_day_elite_top_min_score", 70.0) or 70.0)
+    if score < min_score:
+        return False
+    move = _alert_session_move(alert)
+    min_move = float(getattr(settings, "expiry_worst_day_elite_top_min_move_pct", 28.0) or 28.0)
+    max_move = float(getattr(settings, "expiry_worst_day_elite_top_max_move_pct", 55.0) or 55.0)
+    if move < min_move or move > max_move:
+        return False
+    prem = alert.get("premium")
+    from app.engines.premium_filter import premium_in_band
+
+    if not premium_in_band(prem, mode="explosion", peak_move_pct=move):
+        return False
+    if snap is not None and snap.spotChart:
+        from app.engines.spot_direction import side_aligned_with_chart
+
+        side = str(alert.get("side") or "").upper()
+        if side in ("CALL", "PUT") and not side_aligned_with_chart(side, snap.spotChart):
+            breadth = str(snap.breadth.bias if snap.breadth else "NEUTRAL").upper()
+            if not (
+                (side == "CALL" and breadth == "BULLISH")
+                or (side == "PUT" and breadth == "BEARISH")
+            ):
+                return False
+    return True
+
+
+def snapshots_have_expiry_elite_top(snapshots: dict[str, SymbolSnapshot]) -> bool:
+    for snap in snapshots.values():
+        if not snap.dataAvailable:
+            continue
+        for alert in snap.explosionAlerts or []:
+            if alert_is_expiry_elite_top(alert, snap):
+                return True
+    return False
+
+
+def is_expiry_elite_top_candidate(candidate: Any) -> bool:
+    """Per-candidate elite-top check used under expiry-worst declining sessions."""
+    settings = get_settings()
+    if not getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True):
+        return False
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+    tier = str(getattr(candidate, "tier", "") or "").upper()
+    alert = getattr(candidate, "alert", None) if isinstance(getattr(candidate, "alert", None), dict) else {}
+    if not tier:
+        tier = str(alert.get("tier") or "").upper()
+    if tier not in expiry_elite_top_tiers():
+        return False
+    event = getattr(candidate, "explosion_event", None)
+    score = float(
+        getattr(candidate, "confidence", 0)
+        or alert.get("explosionScore")
+        or getattr(event, "explosion_score", 0)
+        or 0
+    )
+    min_score = float(getattr(settings, "expiry_worst_day_elite_top_min_score", 70.0) or 70.0)
+    if score < min_score:
+        return False
+    move = max(
+        float(getattr(event, "daily_move_pct", 0) or 0) if event is not None else 0.0,
+        float(getattr(event, "peak_move_pct", 0) or 0) if event is not None else 0.0,
+        _alert_session_move(alert) if alert else 0.0,
+    )
+    min_move = float(getattr(settings, "expiry_worst_day_elite_top_min_move_pct", 28.0) or 28.0)
+    max_move = float(getattr(settings, "expiry_worst_day_elite_top_max_move_pct", 55.0) or 55.0)
+    if move < min_move or move > max_move:
+        return False
+    prem = float(getattr(candidate, "premium", 0) or alert.get("premium") or 0)
+    from app.engines.premium_filter import premium_in_band
+
+    if not premium_in_band(prem, mode="explosion", peak_move_pct=move):
+        return False
+    snap = getattr(candidate, "snap", None)
+    if snap is not None and snap.spotChart:
+        from app.engines.spot_direction import side_aligned_with_chart
+
+        side = getattr(candidate, "side", None)
+        side_v = side.value if hasattr(side, "value") else str(side or "").upper()
+        if side_v in ("CALL", "PUT") and not side_aligned_with_chart(side_v, snap.spotChart):
+            breadth = str(snap.breadth.bias if snap.breadth else "NEUTRAL").upper()
+            if not (
+                (side_v == "CALL" and breadth == "BULLISH")
+                or (side_v == "PUT" and breadth == "BEARISH")
+            ):
+                return False
+    return True
+
+
 def check_expiry_entry_allowed(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
@@ -421,6 +533,13 @@ def check_expiry_entry_allowed(
 
         if is_worst and settings.expiry_worst_day_halt_entries:
             if _session_declining(state, snapshots):
+                if (
+                    getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True)
+                    and snapshots_have_expiry_elite_top(snapshots)
+                ):
+                    meta["expiryWorstDayEliteTopBypass"] = True
+                    meta["expiryWorstDayEliteTopOnly"] = True
+                    return True, "ok", meta
                 return False, "expiry_worst_day_declining_halt", meta
 
     return True, "ok", meta
@@ -461,6 +580,15 @@ def check_expiry_candidate(
     if not is_symbol_expiry_day(snap):
         return True, "ok", meta
 
+    is_worst, _, _ = predict_worst_expiry_day(state, snapshots)
+    declining = is_worst and _session_declining(state, snapshots)
+    if declining and getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True):
+        # Declining expiry-worst: only early-window ELITE tops — no scalp/noise/chase.
+        if not is_expiry_elite_top_candidate(candidate):
+            return False, "expiry_worst_day_elite_top_only", meta
+        meta["expiryEliteTop"] = True
+        # Still run open-block + aligned checks below for explosions.
+
     if mode == "explosion":
         tier = str(getattr(candidate, "tier", "") or "")
         blocked, block_reason = check_expiry_explosion_open_block(
@@ -487,8 +615,7 @@ def check_expiry_candidate(
     if min_rank > 0 and rank_score < min_rank:
         return False, f"expiry_rank_below_{min_rank:.0f}", meta
 
-    is_worst, _, _ = predict_worst_expiry_day(state, snapshots)
-    if is_worst and _session_declining(state, snapshots):
+    if declining and not getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True):
         if score < settings.expiry_worst_day_min_rank_score:
             return False, "expiry_worst_day_low_score", meta
 
