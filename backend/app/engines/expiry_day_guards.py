@@ -606,6 +606,11 @@ def check_expiry_candidate(
             meta["expiryAlignedBypass"] = True
             return True, "ok", meta
 
+    # Qualified base-window elite top already cleared tier/score/move/premium/chart —
+    # let it skip the expiry worst-day rank floor (72) that would otherwise re-block it.
+    if declining and meta.get("expiryEliteTop"):
+        return True, "ok", meta
+
     from app.engines.pretrade_validator import candidate_trade_score
 
     rank_score = candidate_trade_score(candidate)

@@ -31,10 +31,10 @@ def _settings(**overrides):
     s.expiry_day_guards_enabled = True
     s.expiry_worst_day_halt_entries = True
     s.expiry_worst_day_elite_top_bypass_enabled = True
-    s.expiry_worst_day_elite_top_min_score = 70.0
+    s.expiry_worst_day_elite_top_min_score = 62.0
     s.expiry_worst_day_elite_top_min_move_pct = 28.0
     s.expiry_worst_day_elite_top_max_move_pct = 55.0
-    s.expiry_worst_day_elite_top_tiers_csv = "ELITE"
+    s.expiry_worst_day_elite_top_tiers_csv = "ELITE,EXPLODING"
     s.expiry_worst_day_elite_top_composer_bypass = True
     s.expiry_worst_day_min_rank_score = 72.0
     s.expiry_morning_only = True
@@ -105,6 +105,38 @@ def test_alert_elite_top_rejects_extended_chase(mock_p, mock_s):
     mock_p.return_value = cfg
     snap = _snap()
     alert = {**snap.explosionAlerts[0], "dailyMovePct": 131.0, "peakMovePct": 202.0}
+    assert alert_is_expiry_elite_top(alert, snap) is False
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
+def test_alert_accepts_exploding_base_score62(mock_p, mock_s):
+    """Jul21 matched PUT base rip: EXPLODING, score 63.6, move 55% → now accepted."""
+    cfg = _settings()
+    mock_s.return_value = cfg
+    mock_p.return_value = cfg
+    snap = _snap()
+    alert = {
+        "side": "PUT", "strike": 24300.0, "tier": "EXPLODING",
+        "explosionScore": 63.6, "premium": 111.95,
+        "dailyMovePct": 55.0, "peakMovePct": 55.0, "tradeable": True,
+    }
+    assert alert_is_expiry_elite_top(alert, snap) is True
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
+def test_alert_rejects_weak_score_below_62(mock_p, mock_s):
+    """EXPLODING but score 49 (< 62) stays blocked — genuinely weak base rip."""
+    cfg = _settings()
+    mock_s.return_value = cfg
+    mock_p.return_value = cfg
+    snap = _snap()
+    alert = {
+        "side": "PUT", "strike": 24350.0, "tier": "EXPLODING",
+        "explosionScore": 49.5, "premium": 162.3,
+        "dailyMovePct": 35.0, "peakMovePct": 35.0, "tradeable": True,
+    }
     assert alert_is_expiry_elite_top(alert, snap) is False
 
 
