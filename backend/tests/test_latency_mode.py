@@ -42,4 +42,5 @@ def test_normal_latency_keeps_defaults():
     with patch.dict(os.environ, {"LATENCY_MODE": "normal"}, clear=False):
         os.environ.pop("ENTRY_SCAN_INTERVAL_MS", None)
         s = get_settings()
-    assert s.entry_scan_interval_ms == 2000
+    # Default tightened so base rips are caught in the 28-55% window before extending.
+    assert s.entry_scan_interval_ms == 1000

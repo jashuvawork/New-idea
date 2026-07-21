@@ -78,8 +78,8 @@ class Settings(BaseSettings):
     snapshot_cache_interval_ms: int = 150
     tick_wake_debounce_ms: int = 15
     tick_fast_exit_enabled: bool = True
-    entry_scan_interval_ms: int = 2000
-    expiry_entry_scan_interval_ms: int = 750
+    entry_scan_interval_ms: int = 1000
+    expiry_entry_scan_interval_ms: int = 500
     # Cap full REST rebuild so background monitor never stalls UI for minutes.
     full_rest_rebuild_timeout_seconds: float = 25.0
     full_rest_min_seconds: float = 45.0
@@ -586,7 +586,7 @@ class Settings(BaseSettings):
     open_premium_bypass_min_score: float = 35.0
     open_premium_relax_velocity_3s: float = 1.8
     open_premium_relax_velocity_9s: float = 2.5
-    explosion_open_scan_interval_ms: int = 1000
+    explosion_open_scan_interval_ms: int = 600
 
     # Afternoon premium capture — 11:45–13:45 consolidation breakouts (e.g. NIFTY 24250 PE 1pm rip)
     afternoon_premium_capture_enabled: bool = True
