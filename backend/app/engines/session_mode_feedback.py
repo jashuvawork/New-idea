@@ -89,15 +89,17 @@ def mode_session_rank_bonus(mode: str, mode_stats: dict[str, ModeSessionStats]) 
     return round(bonus, 2)
 
 
-def session_has_green_explosion(state: AutoTraderState, trades: Optional[list[Any]] = None) -> bool:
-    """True once any explosion trade went green (pnl>0 or best≥1pt)."""
+def session_has_green_mode(
+    state: AutoTraderState, mode: str, trades: Optional[list[Any]] = None
+) -> bool:
+    """True once any trade in `mode` went green (pnl>0 or best≥1pt) this session."""
+    mode = (mode or "").lower()
     if trades is None:
         from app.engines.pretrade_validator import collect_session_trades
 
         trades = collect_session_trades(state)
     for t in trades:
-        mode = _mode_of(t)
-        if mode != "explosion":
+        if _mode_of(t) != mode:
             continue
         pnl = float(getattr(t, "pnl_inr", 0) or 0)
         best = float(getattr(t, "best_pnl_points", 0) or 0)
@@ -106,7 +108,10 @@ def session_has_green_explosion(state: AutoTraderState, trades: Optional[list[An
     # Also check in-memory paper trades (bestPnlPoints may not be on TradeRecord yet)
     for t in getattr(state, "closedPaperTrades", []) or []:
         ctx = getattr(t, "entryContext", None) or {}
-        if str(ctx.get("selectionMode") or "").lower() != "explosion":
+        st = str(ctx.get("selectionMode") or "").lower()
+        if not st:
+            st = "explosion" if str(getattr(t, "strategyType", "")).upper() == "EXPLOSIVE" else "scalp"
+        if st != mode:
             continue
         if float(getattr(t, "pnlInr", 0) or 0) > 0:
             return True
@@ -115,14 +120,29 @@ def session_has_green_explosion(state: AutoTraderState, trades: Optional[list[An
     return False
 
 
+def session_has_green_explosion(state: AutoTraderState, trades: Optional[list[Any]] = None) -> bool:
+    """True once any explosion trade went green (pnl>0 or best≥1pt)."""
+    return session_has_green_mode(state, "explosion", trades)
+
+
+def _first_green_capped_modes() -> set[str]:
+    settings = get_settings()
+    raw = str(getattr(settings, "size_until_first_green_modes_csv", "explosion,scalp") or "explosion,scalp")
+    return {m.strip().lower() for m in raw.split(",") if m.strip()}
+
+
 def cap_lots_until_first_green(lots: int, state: AutoTraderState, *, mode: str = "") -> int:
-    """Keep explosion size tiny until session proves a green explosion."""
+    """Keep size tiny until the session proves a green trade in this mode.
+
+    Applies to explosion AND scalp (both were never-green oversize sources on Jul20).
+    """
     settings = get_settings()
     if not getattr(settings, "size_until_first_green_enabled", True):
         return lots
-    if (mode or "").lower() != "explosion":
+    m = (mode or "").lower()
+    if m not in _first_green_capped_modes():
         return lots
-    if session_has_green_explosion(state):
+    if session_has_green_mode(state, m):
         return lots
     cap = int(getattr(settings, "size_until_first_green_lot_cap", 6) or 6)
     return min(max(0, lots), cap)

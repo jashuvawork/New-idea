@@ -23,6 +23,7 @@ def _settings(**overrides):
     s.edge_session_pf_target = 2.5
     s.size_until_first_green_enabled = True
     s.size_until_first_green_lot_cap = 6
+    s.size_until_first_green_modes_csv = "explosion,scalp"
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -102,3 +103,48 @@ def test_size_until_first_green_allows_after_proof():
     with patch("app.engines.session_mode_feedback.get_settings", return_value=_settings()):
         assert session_has_green_explosion(state) is True
         assert cap_lots_until_first_green(49, state, mode="explosion") == 49
+
+
+def test_size_until_first_green_caps_scalp_before_proof():
+    """Jul20 never-green oversize scalp (16 lots) must be capped to 6 before a green scalp."""
+    state = AutoTraderState()
+    state.closedPaperTrades = [
+        PaperTrade(
+            id="s1",
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=23950,
+            entryPremium=248,
+            currentPremium=220,
+            lots=11,
+            openedAt=datetime.now(IST),
+            strategyType=StrategyType.SCALP,
+            pnlInr=-21490,
+            bestPnlPoints=0,
+            entryContext={"selectionMode": "scalp"},
+        )
+    ]
+    with patch("app.engines.session_mode_feedback.get_settings", return_value=_settings()):
+        assert cap_lots_until_first_green(16, state, mode="scalp") == 6
+
+
+def test_size_until_first_green_allows_scalp_after_green():
+    state = AutoTraderState()
+    state.closedPaperTrades = [
+        PaperTrade(
+            id="s2",
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=24200,
+            entryPremium=143,
+            currentPremium=200,
+            lots=8,
+            openedAt=datetime.now(IST),
+            strategyType=StrategyType.SCALP,
+            pnlInr=43705,
+            bestPnlPoints=33,
+            entryContext={"selectionMode": "scalp"},
+        )
+    ]
+    with patch("app.engines.session_mode_feedback.get_settings", return_value=_settings()):
+        assert cap_lots_until_first_green(20, state, mode="scalp") == 20
