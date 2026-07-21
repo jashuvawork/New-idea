@@ -661,6 +661,10 @@ def find_best_entry(
     candidates: list[EntryCandidate] = []
     # Focus the book on the same ELITE/EXPLODING set missed-trade radar watches.
     explosion_only = bool(getattr(settings, "explosion_only_trading_enabled", True))
+    # Scalps were PF 1.3 across the book and carried Jul17 (+43k). Allow them back even
+    # under explosion-only — but only guarded (first-green lot cap + chart align). Quick
+    # sideways / swing stay off (quick was the −34k disaster).
+    allow_guarded_scalp = bool(getattr(settings, "explosion_only_allow_guarded_scalp", True))
 
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
@@ -669,7 +673,7 @@ def find_best_entry(
             if not limits or getattr(limits, "allowExplosion", True):
                 candidates.extend(_explosion_candidates(symbol, snap, state, settings))
         if (
-            not explosion_only
+            (not explosion_only or allow_guarded_scalp)
             and settings.paper_simple_profit_mode
             and scalp_open < settings.aggressive_max_open_scalps
         ):

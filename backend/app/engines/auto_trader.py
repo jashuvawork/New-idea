@@ -522,7 +522,7 @@ async def _open_from_candidate(
         lots = cap_fake_explosion_trap_lots(lots, trap_meta)
         if lots <= 0:
             return False, str(trap_meta.get("action") or "fake_explosion_trap")
-    if candidate.mode == "explosion":
+    if candidate.mode in ("explosion", "scalp"):
         from app.engines.session_mode_feedback import cap_lots_until_first_green
 
         lots = cap_lots_until_first_green(lots, state, mode=candidate.mode)

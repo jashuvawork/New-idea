@@ -156,8 +156,12 @@ class Settings(BaseSettings):
     paper_simple_profit_mode: bool = True
     paper_dual_strategy_enabled: bool = False
     explosion_capture_mode: bool = True  # PRIMARY — capture daily premium explosions
-    # Explosion-only book — skip scalp/quick (Jul15 PF 2.89 was explosion+trail; Jul20 bleed was quick/scalp/FOMO).
+    # Explosion-only book — skip quick/swing (Jul20 bleed was quick/FOMO). Scalps allowed
+    # back guarded (below) because they were PF 1.3 across the book and caught Jul17 +43k.
     explosion_only_trading_enabled: bool = True
+    # Allow guarded scalps even under explosion-only: first-green lot cap + chart align.
+    # Quick_sideways / swing stay off (quick_sideways was the −34k disaster).
+    explosion_only_allow_guarded_scalp: bool = True
     # Promote high-confidence radar explosions the missed-trade monitor flags as bullish/base-window.
     # Does NOT trade premium_out_of_band cheap OTM chases (Jul20 24550 @ ₹3 — correctly blocked).
     missed_explosion_promote_enabled: bool = True
@@ -240,6 +244,8 @@ class Settings(BaseSettings):
     # Size until first green — no full-size explosions before a proven green (Jul20 FOMO).
     size_until_first_green_enabled: bool = True
     size_until_first_green_lot_cap: int = 6
+    # Modes capped until a green print in that mode (Jul20 never-green oversize: explosion + scalp).
+    size_until_first_green_modes_csv: str = "explosion,scalp"
     # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
     session_mode_feedback_enabled: bool = True
     session_mode_feedback_min_trades: int = 2
