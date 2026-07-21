@@ -417,6 +417,14 @@ class Settings(BaseSettings):
     expiry_decline_session_loss_inr: float = -8_000.0
     expiry_worst_day_loss_count: int = 2
     expiry_worst_day_halt_entries: bool = True
+    # On expiry worst + declining, still allow top ELITE explosions (not scalp/noise).
+    # Session halt lifts only when an early-window elite top is on radar; late chase stays blocked.
+    expiry_worst_day_elite_top_bypass_enabled: bool = True
+    expiry_worst_day_elite_top_min_score: float = 70.0
+    expiry_worst_day_elite_top_min_move_pct: float = 28.0
+    expiry_worst_day_elite_top_max_move_pct: float = 55.0
+    expiry_worst_day_elite_top_tiers_csv: str = "ELITE"
+    expiry_worst_day_elite_top_composer_bypass: bool = True
     expiry_dual_scalp_mode: bool = True
     expiry_dual_scalp_relax_whipsaw: bool = True
     expiry_dual_scalp_opposite_cooldown_seconds: int = 90
