@@ -1195,7 +1195,13 @@ async def _process_open_trades(
                     gross_pts, gross_inr = mark_to_market(
                         trade.entryPremium, sim_fill, trade.lots, lot_mult,
                     )
-                    pnl = finalize_closed_pnl_inr(gross_inr)
+                    pnl = finalize_closed_pnl_inr(
+                        gross_inr,
+                        entry_premium=trade.entryPremium,
+                        exit_premium=sim_fill,
+                        lots=trade.lots,
+                        lot_mult=lot_mult,
+                    )
                     eval_premium = sim_fill
                 broker_ctx["brokerExitOrderId"] = exit_result.get("order_id")
                 broker_ctx["brokerExitSimulated"] = use_parity
@@ -1215,7 +1221,13 @@ async def _process_open_trades(
                 })
                 continue
         elif should_simulate_slippage(trade):
-            pnl = finalize_closed_pnl_inr(pnl)
+            pnl = finalize_closed_pnl_inr(
+                pnl,
+                entry_premium=trade.entryPremium,
+                exit_premium=eval_premium,
+                lots=trade.lots,
+                lot_mult=lot_mult,
+            )
 
         trade.status = "CLOSED"
         trade.exitReason = exit_reason
