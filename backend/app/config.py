@@ -799,6 +799,9 @@ class Settings(BaseSettings):
     max_exposure_pct: float = 0.95
     position_sl_cap_pct: float = 0.08
     position_tp_target_pct: float = 0.12
+    # Never let the position-tuned target land below the stop (budget-cap SL could exceed
+    # the target floor → inverted R:R). Guarantee target >= stop x this ratio.
+    position_min_risk_reward: float = 1.2
     emergency_stop_enabled: bool = False
     emergency_stop_inr: float = 20_000
     emergency_stop_scale_with_position: bool = False

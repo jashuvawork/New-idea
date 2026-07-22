@@ -684,6 +684,9 @@ def tune_exit_plan_for_position(
 
     stop = max(settings.scalp_stop_min_points, min(plan_stop, sl_pts_cap))
     target = max(plan_target, tp_pts_floor, settings.scalp_stop_points * 2)
+    # Guard inverted R:R — a budget-capped stop can exceed the target floor.
+    min_rr = float(getattr(settings, "position_min_risk_reward", 1.2) or 1.2)
+    target = max(target, round(stop * min_rr, 2))
     micro = min(plan_micro, max(1.5, stop * 0.65))
     trail_arm = max(float(plan_dict.get("trailArmPoints", 3.0)), target * 0.35)
     trail_step = float(plan_dict.get("trailStepPoints", settings.scalp_trail_step_points))
