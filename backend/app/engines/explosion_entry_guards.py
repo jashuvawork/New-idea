@@ -173,6 +173,30 @@ def extended_session_chase_blocked(
     ):
         return False, ""
 
+    # Base-relative bypass: a fresh break off a consolidation base reads as a high
+    # day-move only because premium was elevated earlier (SENSEX 76300 PE: 30→100
+    # range then 100→144 break). If the move FROM THE BASE is still in the early
+    # window and volume is rising, it is a base breakout — not a late chase.
+    if (
+        ict is not None
+        and getattr(settings, "ict_base_relative_chase_bypass_enabled", True)
+        and bool(getattr(ict, "flat_then_vertical", False))
+        and bool(getattr(ict, "active", False))
+        and (
+            bool(getattr(ict, "volume_awakening", False))
+            or bool(getattr(ict, "displacement", False))
+        )
+    ):
+        base_move = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+        base_max = float(
+            getattr(settings, "ict_base_relative_chase_max_move_pct", 55.0) or 55.0
+        )
+        abs_cap = float(
+            getattr(settings, "ict_base_relative_chase_abs_move_cap_pct", 160.0) or 160.0
+        )
+        if 0 < base_move <= base_max and move <= abs_cap:
+            return False, ""
+
     return True, f"explosion_extended_chase_{move:.0f}%"
 
 
