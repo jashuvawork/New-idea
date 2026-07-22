@@ -312,7 +312,7 @@ class UpstoxClient:
         if not instrument_keys:
             return {}
         results: dict[str, Any] = {}
-        chunk_size = 25
+        chunk_size = max(1, min(500, int(getattr(self.settings, "upstox_quote_batch_size", 100) or 100)))
         for i in range(0, len(instrument_keys), chunk_size):
             chunk = instrument_keys[i : i + chunk_size]
             keys_param = ",".join(chunk)

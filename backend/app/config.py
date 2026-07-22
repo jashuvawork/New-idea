@@ -134,7 +134,13 @@ class Settings(BaseSettings):
     sse_heartbeat_seconds: float = 0.5
 
     # Upstox rate limiting / caching
-    upstox_min_request_interval_ms: int = 250
+    # 160ms ≈ 6 req/s — well under Upstox's 25 req/s ceiling; cuts the full-rebuild
+    # throttle floor vs the old 250ms. A 429 auto-doubles the interval (recovery), so
+    # this stays self-protecting.
+    upstox_min_request_interval_ms: int = 160
+    # Market-quote batch size — endpoint accepts up to 500 keys. 100 lets NIFTY(52)/
+    # SENSEX(30) constituents fetch in ONE call each instead of 3+2 (fewer throttled calls).
+    upstox_quote_batch_size: int = 100
     upstox_request_retries: int = 2
     upstox_rate_limit_cooldown_seconds: int = 45
     upstox_chain_cache_seconds: int = 20
