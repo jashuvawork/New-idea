@@ -851,6 +851,8 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictFlatThenVertical": ict.flat_then_vertical,
         "ictVolumeAwakening": ict.volume_awakening,
         "ictDisplacement": ict.displacement,
+        "ictBaseRelativeMovePct": round(ict.base_relative_move_pct, 1),
+        "ictBasePremium": round(ict.base_premium, 2),
         "momentType": ict.pattern if ict.active else ("volume_awaken" if vol_awaken else e.tier),
         "ictReasons": ict.reasons,
     }

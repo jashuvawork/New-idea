@@ -203,6 +203,12 @@ class Settings(BaseSettings):
     explosion_extended_chase_min_move_pct: float = 70.0
     # Soft zone: keep small size only (before hard block).
     explosion_extended_soft_min_move_pct: float = 50.0
+    # Base-relative chase bypass — a fresh flat→vertical break off a consolidation base
+    # (SENSEX 76300 PE: 30-100 range then 100-144 break) reads as high day-move but the
+    # move FROM THE BASE is still early. Allow it when volume is rising + base move in window.
+    ict_base_relative_chase_bypass_enabled: bool = True
+    ict_base_relative_chase_max_move_pct: float = 55.0
+    ict_base_relative_chase_abs_move_cap_pct: float = 160.0
     explosion_extended_soft_lot_cap: int = 6
     explosion_hard_lot_cap: int = 10
     # Early capture window preferred in ranking (base break → first expansion).

@@ -27,6 +27,8 @@ class ICTBreakoutSignal:
     session_move_pct: float = 0.0
     velocity_3s: float = 0.0
     volume_surge: float = 1.0
+    base_premium: float = 0.0
+    base_relative_move_pct: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -42,6 +44,8 @@ class ICTBreakoutSignal:
             "sessionMovePct": round(self.session_move_pct, 1),
             "velocity3s": round(self.velocity_3s, 1),
             "volumeSurge": round(self.volume_surge, 2),
+            "basePremium": round(self.base_premium, 2),
+            "baseRelativeMovePct": round(self.base_relative_move_pct, 1),
         }
 
 
@@ -81,22 +85,25 @@ def _detect_premium_fvg(history: list[tuple[datetime, float, float]], settings) 
     return False, gap_pct
 
 
-def _detect_flat_base(history: list[tuple[datetime, float, float]], settings) -> tuple[bool, float]:
+def _detect_flat_base(history: list[tuple[datetime, float, float]], settings) -> tuple[bool, float, float]:
     """Flat consolidation — low variance in premium before breakout.
 
     Excludes the last 3–4 polls (breakout candles) so the rip itself does not
     destroy the flat-base signal (e.g. 26–28 base then 32/38/45).
+
+    Returns (is_flat, max_dev_pct, base_level) — base_level is the consolidation
+    premium the breakout launched from (used for base-relative move measurement).
     """
     if len(history) < 6:
-        return False, 0.0
+        return False, 0.0, 0.0
     # Drop breakout tail; keep at least 4 base samples.
     trim = 4 if len(history) >= 10 else 3
     base = [h[1] for h in list(history)[:-trim]]
     if len(base) < 4:
-        return False, 0.0
+        return False, 0.0, 0.0
     avg = sum(base) / len(base)
     if avg <= 0:
-        return False, 0.0
+        return False, 0.0, 0.0
     max_dev = max(abs(p - avg) / avg * 100 for p in base)
     # Also accept a short rolling window of 5–6 bars with low range.
     if max_dev > settings.ict_flat_base_max_range_pct and len(base) >= 6:
@@ -105,8 +112,8 @@ def _detect_flat_base(history: list[tuple[datetime, float, float]], settings) ->
         if wavg > 0:
             wdev = max(abs(p - wavg) / wavg * 100 for p in window)
             if wdev <= settings.ict_flat_base_max_range_pct:
-                return True, wdev
-    return max_dev <= settings.ict_flat_base_max_range_pct, max_dev
+                return True, wdev, wavg
+    return max_dev <= settings.ict_flat_base_max_range_pct, max_dev, avg
 
 
 def analyze_ict_breakout(
@@ -136,7 +143,12 @@ def analyze_ict_breakout(
     score = 0.0
 
     fvg, gap_pct = _detect_premium_fvg(history, settings)
-    flat, flat_dev = _detect_flat_base(history, settings)
+    flat, flat_dev, base_level = _detect_flat_base(history, settings)
+    # Move measured from the consolidation base (not day low) — a fresh break off a
+    # range should not read as "extended" just because premium was elevated earlier.
+    base_rel_move = 0.0
+    if base_level > 0 and premium > 0:
+        base_rel_move = (premium - base_level) / base_level * 100.0
     surge_awaken = volume_surge >= float(
         getattr(settings, "ict_volume_surge_awaken_min", 3.0) or 3.0
     )
@@ -253,6 +265,8 @@ def analyze_ict_breakout(
         session_move_pct=move,
         velocity_3s=velocity_3s,
         volume_surge=volume_surge,
+        base_premium=base_level,
+        base_relative_move_pct=base_rel_move,
     )
 
 

@@ -292,6 +292,8 @@ def _explosion_candidates(
                 session_move_pct=max(daily_move, peak_move),
                 velocity_3s=float(alert.get("velocity3s") or 0),
                 volume_surge=float(alert.get("volumeSurge") or 0),
+                base_relative_move_pct=float(alert.get("ictBaseRelativeMovePct") or 0),
+                base_premium=float(alert.get("ictBasePremium") or 0),
             )
         late_blocked, _late_reason = late_fade_chase_blocked(event, ict)
         if late_blocked:
