@@ -49,6 +49,7 @@ class ChartExitLevels:
     trailStepPoints: float = 2.0
     microTargetPoints: float = 2.0
     confidence: float = 50.0
+    confidenceRaw: float = 50.0
     promoteToTrailing: bool = False
     sources: list[str] = field(default_factory=list)
 
@@ -66,6 +67,7 @@ class ChartExitLevels:
             trailStepPoints=float(data.get("trailStepPoints", 2.0)),
             microTargetPoints=float(data.get("microTargetPoints", 2.0)),
             confidence=float(data.get("confidence", 50.0)),
+            confidenceRaw=float(data.get("confidenceRaw", data.get("confidence", 50.0))),
             promoteToTrailing=bool(data.get("promoteToTrailing", False)),
             sources=list(data.get("sources") or []),
         )
@@ -84,15 +86,72 @@ def _pattern_side(name: str) -> Optional[str]:
     return None
 
 
+def _cfg_float(settings: Any, name: str, default: float) -> float:
+    """Float setting with MagicMock-safe fallback (tests often stub settings)."""
+    v = getattr(settings, name, default)
+    if isinstance(v, bool) or v is None:
+        return float(default)
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v)
+        except ValueError:
+            return float(default)
+    # MagicMock and other stubs implement __float__ → 1.0; ignore them.
+    return float(default)
+
+
+def rescale_chart_confidence(raw: float, settings: Any = None) -> float:
+    """
+    Map uncapped chart score → display confidence on [40, 100].
+
+    Additive chart features routinely score 150–200 before the old min(95) clamp,
+    which pinned ~88% of trades at 95. Linear map raw[lo, hi] → [dmin, dmax]
+    restores spread while keeping threshold comparisons equivalent when cutovers
+    are transformed with the same map.
+    """
+    settings = settings or get_settings()
+    lo = _cfg_float(settings, "chart_confidence_scale_raw_lo", 40.0)
+    hi = _cfg_float(settings, "chart_confidence_scale_raw_hi", 200.0)
+    dmin = _cfg_float(settings, "chart_confidence_display_min", 40.0)
+    dmax = _cfg_float(settings, "chart_confidence_display_max", 100.0)
+    if hi <= lo:
+        return round(dmin, 1)
+    t = (float(raw) - lo) / (hi - lo)
+    return round(max(dmin, min(dmax, dmin + t * (dmax - dmin))), 1)
+
+
 def chart_trade_confidence(
     snap: SymbolSnapshot,
     side: Side | str,
 ) -> tuple[float, list[str]]:
-    """0–100 confidence from MTF + fib/pivot/SMC/patterns on snapshot chartAnalysis."""
+    """Display chart confidence on 40–100 from MTF + fib/pivot/SMC/patterns."""
     settings = get_settings()
     if not settings.chart_exit_levels_enabled:
         return 50.0, []
 
+    raw, sources = _chart_trade_confidence_raw(snap, side)
+    return rescale_chart_confidence(raw, settings), sources
+
+
+def chart_trade_confidence_with_raw(
+    snap: SymbolSnapshot,
+    side: Side | str,
+) -> tuple[float, float, list[str]]:
+    """Return (display_confidence, raw_uncapped, sources)."""
+    settings = get_settings()
+    if not settings.chart_exit_levels_enabled:
+        return 50.0, 50.0, []
+    raw, sources = _chart_trade_confidence_raw(snap, side)
+    return rescale_chart_confidence(raw, settings), round(float(raw), 1), sources
+
+
+def _chart_trade_confidence_raw(
+    snap: SymbolSnapshot,
+    side: Side | str,
+) -> tuple[float, list[str]]:
+    """Uncapped additive chart score (pre-rescale)."""
     side_v = _side_val(side)
     target_bias = "BULLISH" if side_v == "CALL" else "BEARISH"
     analysis = snap.chartAnalysis
@@ -251,7 +310,7 @@ def chart_trade_confidence(
         elif bb != "NEUTRAL" and bb != target_bias:
             score -= 8
 
-    return round(min(95.0, max(20.0, score)), 1), sources[:16]
+    return float(score), sources[:16]
 
 
 def _resolve_index_spot(snap: SymbolSnapshot) -> float:
@@ -505,7 +564,7 @@ def compute_chart_exit_levels(
 ) -> ChartExitLevels:
     """Multi-chart SL/TP/trail with confidence-weighted blending."""
     settings = get_settings()
-    confidence, sources = chart_trade_confidence(snap, side)
+    confidence, confidence_raw, sources = chart_trade_confidence_with_raw(snap, side)
     side_v = _side_val(side)
     spot = _resolve_index_spot(snap)
 
@@ -584,6 +643,7 @@ def compute_chart_exit_levels(
         trailStepPoints=round(trail_step, 2),
         microTargetPoints=round(micro, 2),
         confidence=confidence,
+        confidenceRaw=confidence_raw,
         promoteToTrailing=promote,
         sources=sources,
     )
@@ -630,6 +690,7 @@ def merge_chart_into_exit_plan(
     )
     merged = _stamp_entry_baselines(merged)
     merged["chartConfidence"] = levels.confidence
+    merged["chartConfidenceRaw"] = levels.confidenceRaw
     merged["chartExitSources"] = levels.sources
     merged["promoteToTrailing"] = levels.promoteToTrailing
     reasoning = list(merged.get("reasoning") or [])

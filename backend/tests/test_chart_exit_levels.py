@@ -7,10 +7,12 @@ from zoneinfo import ZoneInfo
 from app.engines.chart_exit_levels import (
     ChartExitLevels,
     chart_trade_confidence,
+    chart_trade_confidence_with_raw,
     compute_chart_exit_levels,
     compute_live_chart_trail_tuning,
     high_quality_chart_entry,
     merge_chart_into_exit_plan,
+    rescale_chart_confidence,
     should_promote_quick_to_trailing,
     update_live_chart_trail,
 )
@@ -77,14 +79,49 @@ def _snap_with_chart(consensus: str = "BEARISH", side_bias: str = "BEARISH") -> 
     )
 
 
+def _chart_scale_settings(s) -> None:
+    s.chart_confidence_scale_raw_lo = 40.0
+    s.chart_confidence_scale_raw_hi = 200.0
+    s.chart_confidence_display_min = 40.0
+    s.chart_confidence_display_max = 100.0
+
+
 @patch("app.engines.chart_exit_levels.get_settings")
 def test_chart_confidence_high_for_aligned_put(mock_settings):
     s = mock_settings.return_value
     s.chart_exit_levels_enabled = True
+    _chart_scale_settings(s)
     snap = _snap_with_chart("BEARISH", "BEARISH")
     conf, sources = chart_trade_confidence(snap, Side.PUT)
-    assert conf >= 62
+    assert conf >= 48.2
+    assert conf <= 100.0
     assert any("smc" in x or "mtf" in x for x in sources)
+
+
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_chart_confidence_rescale_spreads_40_to_100(mock_settings):
+    """Uncapped raw scores map onto display [40,100] instead of clamping at 95."""
+    s = mock_settings.return_value
+    s.chart_exit_levels_enabled = True
+    _chart_scale_settings(s)
+
+    assert rescale_chart_confidence(40.0, s) == 40.0
+    assert rescale_chart_confidence(200.0, s) == 100.0
+    assert rescale_chart_confidence(120.0, s) == 70.0
+    # Old cutovers preserve raw-gate equivalence after transform.
+    assert rescale_chart_confidence(85.0, s) == 56.9
+    assert rescale_chart_confidence(90.0, s) == 58.8
+    assert rescale_chart_confidence(95.0, s) == 60.6
+
+    strong = _snap_with_chart("BEARISH", "BEARISH")
+    weak = _snap_with_chart("BULLISH", "BULLISH")
+    strong_disp, strong_raw, _ = chart_trade_confidence_with_raw(strong, Side.PUT)
+    weak_disp, weak_raw, _ = chart_trade_confidence_with_raw(weak, Side.PUT)
+    assert strong_raw > 95.0  # would have been capped at 95 before
+    assert strong_disp > weak_disp
+    assert 40.0 <= weak_disp <= 100.0
+    assert 40.0 <= strong_disp <= 100.0
+    assert strong_disp == rescale_chart_confidence(strong_raw, s)
 
 
 @patch("app.engines.chart_exit_levels.get_settings")
@@ -93,9 +130,10 @@ def test_compute_chart_exit_levels_structure(mock_settings):
     s.chart_exit_levels_enabled = True
     s.scalp_stop_min_points = 2.0
     s.scalp_trail_step_points = 2.0
-    s.quick_trail_promote_min_confidence = 58.0
-    s.all_day_min_chart_confidence = 62.0
+    s.quick_trail_promote_min_confidence = 46.8
+    s.all_day_min_chart_confidence = 48.2
     _chart_cap_settings(s)
+    _chart_scale_settings(s)
 
     levels = compute_chart_exit_levels(
         _snap_with_chart(), Side.PUT, 216.0, base_stop=2.0, base_target=3.0,
@@ -113,9 +151,10 @@ def test_ichimoku_sl_tp_in_chart_exit_levels(mock_settings):
     s.chart_exit_levels_enabled = True
     s.scalp_stop_min_points = 2.0
     s.scalp_trail_step_points = 2.0
-    s.quick_trail_promote_min_confidence = 58.0
-    s.all_day_min_chart_confidence = 62.0
+    s.quick_trail_promote_min_confidence = 46.8
+    s.all_day_min_chart_confidence = 48.2
     _chart_cap_settings(s)
+    _chart_scale_settings(s)
 
     snap = _snap_with_chart()
     levels = compute_chart_exit_levels(snap, Side.PUT, 82.0, base_stop=3.0, base_target=6.0)
@@ -148,13 +187,16 @@ def test_merge_chart_into_exit_plan(mock_settings):
     s.chart_exit_levels_enabled = True
     s.scalp_stop_min_points = 2.0
     s.scalp_trail_step_points = 2.0
-    s.quick_trail_promote_min_confidence = 58.0
-    s.all_day_min_chart_confidence = 62.0
+    s.quick_trail_promote_min_confidence = 46.8
+    s.all_day_min_chart_confidence = 48.2
+    s.chart_confidence_half_tp_lock_pct = 0.50
     _chart_cap_settings(s)
+    _chart_scale_settings(s)
 
     base = {"stopPoints": 2.0, "targetPoints": 3.0, "trailArmPoints": 2.5, "trailKeepRatio": 0.55}
     merged = merge_chart_into_exit_plan(base, _snap_with_chart(), Side.PUT, 216.0)
-    assert merged["chartConfidence"] >= 62
+    assert merged["chartConfidence"] >= 48.2
+    assert merged.get("chartConfidenceRaw", 0) > 95.0
     assert merged.get("targetPoints2", 0) > 0
     assert merged.get("promoteToTrailing") is True
 
@@ -163,13 +205,14 @@ def test_merge_chart_into_exit_plan(mock_settings):
 def test_high_quality_chart_entry(mock_settings):
     s = mock_settings.return_value
     s.all_day_high_quality_enabled = True
-    s.all_day_min_chart_confidence = 62.0
+    s.all_day_min_chart_confidence = 48.2
     s.all_day_min_rank_score = 68.0
     s.chart_exit_levels_enabled = True
+    _chart_scale_settings(s)
 
     ok, conf = high_quality_chart_entry(_snap_with_chart(), Side.PUT, 70.0)
     assert ok is True
-    assert conf >= 62
+    assert conf >= 48.2
 
 
 def test_promote_quick_to_trailing_on_chart_confidence():

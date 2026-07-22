@@ -274,15 +274,18 @@ class Settings(BaseSettings):
     # Bypasses the first-green + defensive throttles; fake-trap chop cap still applies.
     high_conviction_sizing_enabled: bool = True
     high_conviction_min_score: float = 90.0
-    high_conviction_min_chart_confidence: float = 85.0
+    # Rescaled chartConf cutover (was 85 on the old 20–95 clamp). Same raw gate after
+    # linear map raw[40,200]→[40,100]: rescale(85)≈56.9.
+    high_conviction_min_chart_confidence: float = 56.9
     # Wider trail so high-conviction runners hold the move instead of booking at ~38% of peak.
     high_conviction_trail_keep_ratio: float = 0.30
     high_conviction_defer_profit_lock: bool = True
     # Elevated size tier — strong EXPLODING/ELITE base rip below full high-conviction.
-    # 1.5x base size when score>=65 + chartConf>=90 + matched + 28-55% window (SENSEX 76800 PE).
+    # 1.5x base size when score>=65 + chartConf>=58.8 + matched + 28-55% window.
+    # (was chartConf>=90 on the old clamp; rescale(90)≈58.8)
     elevated_size_enabled: bool = True
     elevated_size_min_score: float = 65.0
-    elevated_size_min_chart_confidence: float = 90.0
+    elevated_size_min_chart_confidence: float = 58.8
     elevated_size_lot_scale: float = 1.5
     # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
     session_mode_feedback_enabled: bool = True
@@ -418,13 +421,20 @@ class Settings(BaseSettings):
     high_confidence_reentry_score_uplift: float = 5.0
     # Chart-confidence hold — ride to TP when MTF/chart conf is high
     chart_confidence_hold_enabled: bool = True
-    chart_confidence_hold_min_confidence: float = 62.0
+    # Was 62 on old clamp; rescale(62)≈48.2 on the 40–100 display scale.
+    chart_confidence_hold_min_confidence: float = 48.2
     chart_confidence_hold_min_target_pct: float = 0.85
     chart_confidence_half_tp_lock_pct: float = 0.50
     chart_confidence_half_tp_giveback_ratio: float = 0.40
     chart_confidence_hold_defer_stop_seconds: int = 180
     chart_confidence_hold_max_seconds: int = 600
     chart_confidence_hold_stop_mult: float = 1.35
+    # Elevated hold path (was hardcoded chartConf>=85); rescale(85)≈56.9.
+    chart_confidence_elevated_threshold: float = 56.9
+    # Defer to chart TP / block early profit-lock (was hardcoded >=95); rescale(95)≈60.6.
+    chart_confidence_defer_tp_min: float = 60.6
+    # Runner hold without breadth align (was all_day_min+16=78); rescale(78)≈54.2.
+    chart_confidence_runner_hold_min: float = 54.2
 
     # ITM / ATM / OTM strike selection (AUTO = regime-based)
     moneyness_selection_enabled: bool = True
@@ -997,10 +1007,17 @@ class Settings(BaseSettings):
     chart_exit_max_index_structure_pct: float = 0.04
     chart_confidence_trail_enabled: bool = True
     all_day_high_quality_enabled: bool = True
-    all_day_min_chart_confidence: float = 62.0
+    # Display chartConf floor after rescale (was 62); rescale(62)≈48.2.
+    all_day_min_chart_confidence: float = 48.2
     all_day_min_rank_score: float = 68.0
-    quick_trail_promote_min_confidence: float = 58.0
+    # Was 58; rescale(58)≈46.8.
+    quick_trail_promote_min_confidence: float = 46.8
     quick_trail_promote_min_best_points: float = 2.0
+    # chartConf rescale — uncapped additive score → display [40, 100]
+    chart_confidence_scale_raw_lo: float = 40.0
+    chart_confidence_scale_raw_hi: float = 200.0
+    chart_confidence_display_min: float = 40.0
+    chart_confidence_display_max: float = 100.0
 
     # Edge engine — realtime statistical entry scoring + 2.5+ PF feedback loop
     edge_engine_enabled: bool = True

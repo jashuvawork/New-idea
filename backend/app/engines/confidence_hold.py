@@ -16,6 +16,21 @@ _last_high_conf_close: dict[str, dict[str, Any]] = {}
 _session_date: Optional[str] = None
 
 
+def _settings_float(settings: Any, name: str, default: float) -> float:
+    """Float setting with MagicMock-safe fallback."""
+    v = getattr(settings, name, default)
+    if isinstance(v, bool) or v is None:
+        return float(default)
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v)
+        except ValueError:
+            return float(default)
+    return float(default)
+
+
 @dataclass
 class ConfidenceExitTuning:
     micro_min_best_points: float
@@ -105,7 +120,12 @@ def is_confidence_runner_hold(trade: PaperTrade) -> bool:
 
     if direction_aligned_with_breadth(trade):
         return True
-    if conf >= settings.all_day_min_chart_confidence + 16:
+    runner_min = _settings_float(
+        settings,
+        "chart_confidence_runner_hold_min",
+        float(getattr(settings, "all_day_min_chart_confidence", 48.2) or 48.2) + 6.0,
+    )
+    if conf >= runner_min:
         return True
     return score >= settings.high_confidence_min_score + 8
 
@@ -196,7 +216,8 @@ def confidence_hold_max_seconds(trade: PaperTrade) -> int:
         return 0
     base = settings.chart_confidence_hold_max_seconds
     conf = chart_confidence_for_trade(trade)
-    if conf >= 85:
+    elevated = _settings_float(settings, "chart_confidence_elevated_threshold", 56.9)
+    if conf >= elevated:
         return int(base * 1.25)
     return base
 

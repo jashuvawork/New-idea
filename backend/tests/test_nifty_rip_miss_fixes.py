@@ -164,12 +164,15 @@ def test_faded_rip_skips_no_green_on_bullish_flip():
 def test_trail_deferred_until_half_chart_tp_at_95_conf(mock_conf, mock_exp):
     s = MagicMock()
     s.chart_confidence_hold_enabled = True
-    s.chart_confidence_hold_min_confidence = 62.0
+    s.chart_confidence_hold_min_confidence = 48.2
     s.chart_confidence_hold_min_target_pct = 0.85
     s.chart_confidence_half_tp_lock_pct = 0.50
     s.chart_confidence_half_tp_giveback_ratio = 0.40
+    s.chart_confidence_elevated_threshold = 56.9
+    s.chart_confidence_defer_tp_min = 60.6
+    s.chart_confidence_runner_hold_min = 54.2
     s.high_confidence_min_score = 72.0
-    s.all_day_min_chart_confidence = 62.0
+    s.all_day_min_chart_confidence = 48.2
     s.explosion_stop_min_hold_seconds = 15
     s.runner_min_best_points = 5.0
     s.runner_trail_keep_ratio = 0.38
@@ -184,6 +187,7 @@ def test_trail_deferred_until_half_chart_tp_at_95_conf(mock_conf, mock_exp):
     s.afternoon_capture_exit_max_hold_seconds = 600
     s.chart_confidence_hold_stop_mult = 1.35
     s.explosion_faded_rip_no_green_exit_enabled = True
+    s.high_conviction_defer_profit_lock = True
     mock_conf.return_value = s
     mock_exp.return_value = s
 
@@ -199,10 +203,11 @@ def test_trail_deferred_until_half_chart_tp_at_95_conf(mock_conf, mock_exp):
         openedAt=datetime.now(IST) - timedelta(seconds=120),
         bestPnlPoints=8.5,
         entryContext={
-            "chartConfidence": 95.0,
+            # Display-scale high conviction (was 95 on old clamp; still clears defer_tp_min 60.6)
+            "chartConfidence": 96.0,
             "breadth": "BULLISH",
             "selectionScore": 100.0,
-            "exitPlan": {"targetPoints": 120.0, "stopPoints": 8.0, "chartConfidence": 95.0},
+            "exitPlan": {"targetPoints": 120.0, "stopPoints": 8.0, "chartConfidence": 96.0},
         },
     )
     plan = AdaptiveExitPlan(stopPoints=8.0, targetPoints=12.0, trailArmPoints=4.0, trailKeepRatio=0.65)

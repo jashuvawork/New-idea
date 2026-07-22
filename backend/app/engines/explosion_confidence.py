@@ -193,9 +193,9 @@ def is_high_conviction_entry(
     """
     Very high-confidence base rip → take max lots + hold longer.
 
-    Strict: ELITE, score≥90, chartConf≥85, matched side (chart or breadth), and move in
-    the 28-55% base window. This is the Jul22 SENSEX 77200 PE profile (ELITE 100, conf 95)
-    that only got 4 lots and trailed out in 1 min while it ran +122%.
+    Strict: ELITE, score≥90, chartConf≥56.9 (rescaled; was 85 on old clamp), matched side
+    (chart or breadth), and move in the 28-55% base window. Jul22 SENSEX 77200 PE profile
+    (ELITE 100, high chartConf) that only got 4 lots and trailed out in 1 min while +122%.
     """
     settings = get_settings()
     if not getattr(settings, "high_conviction_sizing_enabled", True):
@@ -205,7 +205,7 @@ def is_high_conviction_entry(
     if float(score or 0) < float(getattr(settings, "high_conviction_min_score", 90.0) or 90.0):
         return False
     if float(chart_confidence or 0) < float(
-        getattr(settings, "high_conviction_min_chart_confidence", 85.0) or 85.0
+        getattr(settings, "high_conviction_min_chart_confidence", 56.9) or 56.9
     ):
         return False
     lo = float(getattr(settings, "missed_explosion_promote_min_move_pct", 28.0) or 28.0)
@@ -242,9 +242,10 @@ def is_elevated_size_entry(
     Strong EXPLODING/ELITE base rip that deserves > base size but < full max.
 
     Between base size and high-conviction max: EXPLODING or ELITE, score ≥65,
-    chartConf ≥90, matched side, 28-55% base window. Sizes up genuine base rips
-    (SENSEX 76800 PE: EXPLODING 73.7 / 48% / conf 95) without touching extended
-    (>55%) or weak (<65) setups. High-conviction (ELITE/90) still takes full max.
+    chartConf ≥58.8 (rescaled; was 90 on old clamp), matched side, 28-55% base window.
+    Sizes up genuine base rips (SENSEX 76800 PE: EXPLODING 73.7 / 48% / high conf)
+    without touching extended (>55%) or weak (<65) setups. High-conviction (ELITE/90)
+    still takes full max.
     """
     settings = get_settings()
     if not getattr(settings, "elevated_size_enabled", True):
@@ -254,7 +255,7 @@ def is_elevated_size_entry(
     if float(score or 0) < float(getattr(settings, "elevated_size_min_score", 65.0) or 65.0):
         return False
     if float(chart_confidence or 0) < float(
-        getattr(settings, "elevated_size_min_chart_confidence", 90.0) or 90.0
+        getattr(settings, "elevated_size_min_chart_confidence", 58.8) or 58.8
     ):
         return False
     lo = float(getattr(settings, "missed_explosion_promote_min_move_pct", 28.0) or 28.0)
