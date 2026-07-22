@@ -658,9 +658,15 @@ def scan_chain_explosions(
                     tier = "ELITE" if _TIER_RANK.get(tier, 0) < _TIER_RANK["ELITE"] else tier
                 elif _TIER_RANK.get(tier, 0) < _TIER_RANK["EXPLODING"]:
                     tier = "EXPLODING"
-            if v3 >= v3_build or v9 >= v9_build:
+            # Tier is monotonic — velocity votes UPGRADE only, never downgrade a
+            # higher tier already set by peak-move (previously BUILDING/EXPLODING here
+            # clobbered a peak-move ELITE/EXPLODING).
+            if (v3 >= v3_build or v9 >= v9_build) and _TIER_RANK.get(tier, 0) < _TIER_RANK["BUILDING"]:
                 tier = "BUILDING"
-            if v3 >= v3_explode or v9 >= v9_explode or (v3 >= 2.0 and vol_surge >= 1.8):
+            if (
+                (v3 >= v3_explode or v9 >= v9_explode or (v3 >= 2.0 and vol_surge >= 1.8))
+                and _TIER_RANK.get(tier, 0) < _TIER_RANK["EXPLODING"]
+            ):
                 tier = "EXPLODING"
             if v3 >= 5.0 or v9 >= 8.0 or (v3 >= 4.0 and vol_surge >= 2.0):
                 tier = "ELITE"
