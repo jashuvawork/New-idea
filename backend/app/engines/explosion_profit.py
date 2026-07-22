@@ -14,10 +14,18 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 def _cfg_float(settings, name: str, default: float) -> float:
-    try:
-        return float(getattr(settings, name, default) or default)
-    except (TypeError, ValueError):
-        return default
+    """Float setting with MagicMock-safe fallback (tests often stub settings)."""
+    v = getattr(settings, name, default)
+    if isinstance(v, bool) or v is None:
+        return float(default)
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v)
+        except ValueError:
+            return float(default)
+    return float(default)
 
 
 # symbol -> last explosion stop timestamp (IST)
@@ -433,19 +441,20 @@ def _adaptive_stop_min_hold(trade: PaperTrade, settings) -> int:
     from app.engines.confidence_hold import chart_confidence_for_trade, is_confidence_runner_hold
 
     base = settings.explosion_stop_min_hold_seconds
+    elevated = _cfg_float(settings, "chart_confidence_elevated_threshold", 56.9)
     if is_confidence_runner_hold(trade):
         conf = chart_confidence_for_trade(trade)
-        if conf >= 85:
+        if conf >= elevated:
             return max(base, 90)
         return max(base, 60)
 
     chart_conf = chart_confidence_for_trade(trade)
     from app.engines.bullish_hold import direction_aligned_with_breadth
 
-    min_conf = _cfg_float(settings, "all_day_min_chart_confidence", 62.0)
+    min_conf = _cfg_float(settings, "all_day_min_chart_confidence", 48.2)
     if direction_aligned_with_breadth(trade) and chart_conf >= min_conf:
         return max(base, 45)
-    if chart_conf >= 85:
+    if chart_conf >= elevated:
         return max(base, 35)
     return base
 
@@ -463,9 +472,10 @@ def _effective_stop_points(trade: PaperTrade, stop_points: float) -> float:
     base = plan_stop if plan_stop > 0 else stop_points
     mult = confidence_hold_stop_multiplier(trade)
     conf = chart_confidence_for_trade(trade)
-    if conf >= 85:
+    elevated = _cfg_float(settings, "chart_confidence_elevated_threshold", 56.9)
+    if conf >= elevated:
         mult = max(mult, 1.4)
-    elif conf >= _cfg_float(settings, "all_day_min_chart_confidence", 62.0):
+    elif conf >= _cfg_float(settings, "all_day_min_chart_confidence", 48.2):
         mult = max(mult, 1.2)
     return round(base * mult, 2)
 
@@ -503,7 +513,7 @@ def _defer_adaptive_stop(
         chart_conf = chart_confidence_for_trade(trade)
         if not direction_aligned_with_breadth(trade):
             return False
-        if chart_conf < _cfg_float(settings, "all_day_min_chart_confidence", 62.0):
+        if chart_conf < _cfg_float(settings, "all_day_min_chart_confidence", 48.2):
             return False
         if best < 5.0 and hold < 60:
             return True
@@ -627,7 +637,8 @@ def evaluate_explosion_exit(
 
     chart_target = target_points_for_trade(trade)
     chart_conf = chart_confidence_for_trade(trade)
-    defer_target = chart_target if chart_conf >= 95.0 else target
+    defer_tp_min = _cfg_float(settings, "chart_confidence_defer_tp_min", 60.6)
+    defer_target = chart_target if chart_conf >= defer_tp_min else target
 
     def _profit_lock_ok() -> bool:
         if max_profit:
@@ -635,7 +646,7 @@ def evaluate_explosion_exit(
             return best >= min(40.0, target * 0.25)
         if not should_defer_profit_lock(trade, best, target_points=defer_target):
             return True
-        if chart_conf >= 95.0:
+        if chart_conf >= defer_tp_min:
             return False
         # Standard explosion TP zone reached — don't block trail for distant chart TP
         return best >= _cfg_float(settings, "explosion_target_standard", 18.0) * 0.95

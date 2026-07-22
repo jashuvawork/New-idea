@@ -125,7 +125,7 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
                   {tpLine && <span>TP {tpLine}</span>}
                   {trailKeep && <span>trail keep {trailKeep}</span>}
                   {chartConf != null && (
-                    <span className={Number(chartConf) >= 62 ? 'text-nexus-green' : 'text-nexus-yellow'}>
+                    <span className={Number(chartConf) >= 48 ? 'text-nexus-green' : 'text-nexus-yellow'}>
                       chart {Number(chartConf).toFixed(0)}%
                       {chartDelta != null && Number(chartDelta) !== 0
                         ? ` (${Number(chartDelta) > 0 ? '+' : ''}${Number(chartDelta).toFixed(0)})`

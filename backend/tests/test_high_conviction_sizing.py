@@ -18,12 +18,13 @@ def _settings(**overrides):
     s = MagicMock()
     s.high_conviction_sizing_enabled = True
     s.high_conviction_min_score = 90.0
-    s.high_conviction_min_chart_confidence = 85.0
+    # Rescaled display cutovers (was 85 / 90 on old 20–95 clamp).
+    s.high_conviction_min_chart_confidence = 56.9
     s.missed_explosion_promote_min_move_pct = 28.0
     s.missed_explosion_promote_max_move_pct = 55.0
     s.elevated_size_enabled = True
     s.elevated_size_min_score = 65.0
-    s.elevated_size_min_chart_confidence = 90.0
+    s.elevated_size_min_chart_confidence = 58.8
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -71,7 +72,7 @@ def test_rejects_low_chart_conf(mock_s):
     mock_s.return_value = _settings()
     assert is_high_conviction_entry(
         side=Side.PUT, snap=_snap(), tier="ELITE", score=100.0,
-        move_pct=32.0, chart_confidence=70.0,
+        move_pct=32.0, chart_confidence=50.0,
     ) is False
 
 
