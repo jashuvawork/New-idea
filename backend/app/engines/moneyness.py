@@ -14,7 +14,16 @@ Moneyness = str  # "ITM" | "ATM" | "OTM"
 
 
 def strike_step(symbol: str) -> float:
-    return 100.0 if symbol.upper() in ("NIFTY", "SENSEX", "BANKNIFTY") else 50.0
+    """Listed strike interval per index — NIFTY 50, SENSEX/BANKNIFTY 100 (config-driven)."""
+    settings = get_settings()
+    sym = symbol.upper()
+    if sym == "SENSEX":
+        return float(getattr(settings, "sensex_strike_step", 100.0) or 100.0)
+    if sym == "BANKNIFTY":
+        return float(getattr(settings, "banknifty_strike_step", 100.0) or 100.0)
+    if sym == "NIFTY":
+        return float(getattr(settings, "nifty_strike_step", 50.0) or 50.0)
+    return 50.0
 
 
 def atm_strike(spot: float, symbol: str) -> float:

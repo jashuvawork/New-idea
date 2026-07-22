@@ -440,6 +440,11 @@ class Settings(BaseSettings):
     moneyness_selection_enabled: bool = True
     trade_moneyness_mode: str = "AUTO"  # AUTO | ITM | OTM | ATM
     moneyness_atm_tolerance_points: float = 50.0
+    # Real listed strike intervals — NIFTY is 50, SENSEX/BANKNIFTY are 100. The old
+    # hardcoded 100 for NIFTY halved its OTM-depth counting (deep-OTM guards too loose).
+    nifty_strike_step: float = 50.0
+    sensex_strike_step: float = 100.0
+    banknifty_strike_step: float = 100.0
     moneyness_max_otm_steps: int = 2
     expiry_explosion_max_otm_steps: int = 4
     moneyness_max_itm_steps: int = 2
