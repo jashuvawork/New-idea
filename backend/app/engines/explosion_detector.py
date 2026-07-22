@@ -764,18 +764,22 @@ def scan_snapshot_explosions(
     atm = float(getattr(snap, "atmStrike", None) or snap.spot)
     chain: list[dict[str, Any]] = []
     for row in snap.heatmap:
+        # HeatmapStrike carries OI, not bar volume. OI is cumulative open positions —
+        # NOT trade volume — so using it for volume_surge produced garbage/false surges.
+        # WS overlay has no reliable volume → pass 0 so volume_surge stays neutral (1.0);
+        # the authoritative full REST rebuild supplies real volume.
         chain.append({
             "strike_price": row.strike,
             "strike": row.strike,
             "call_options": {
                 "ltp": row.callLtp,
                 "last_price": row.callLtp,
-                "volume": int(getattr(row, "callOi", 0) or 0),
+                "volume": 0,
             },
             "put_options": {
                 "ltp": row.putLtp,
                 "last_price": row.putLtp,
-                "volume": int(getattr(row, "putOi", 0) or 0),
+                "volume": 0,
             },
         })
     return scan_chain_explosions(
