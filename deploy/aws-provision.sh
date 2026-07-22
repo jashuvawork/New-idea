@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Provision NexusQuant AWS stack: security group, EC2 t3.large (50GB), Elastic IP, SSM.
+# Provision NexusQuant AWS stack: security group, EC2 m6i.large (50GB), Elastic IP, SSM.
 #
 # Prerequisites:
 #   cp deploy/aws.env.example deploy/aws.env
@@ -9,7 +9,7 @@
 #   ./deploy/aws-provision.sh
 #
 # Optional env overrides:
-#   INSTANCE_TYPE=t3.large
+#   INSTANCE_TYPE=m6i.large   # or c6i.xlarge for heavier load
 #   ROOT_VOLUME_GB=50
 #   KEY_NAME=nexusquant-ec2
 #   PROJECT_NAME=nexusquant
@@ -34,7 +34,10 @@ set +a
 : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY required}"
 
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-ap-south-1}"
-INSTANCE_TYPE="${INSTANCE_TYPE:-t3.large}"
+# m6i.large = 2 vCPU / 8 GiB DEDICATED CPU (no burstable-credit throttling like t3.large).
+# t3.large throttled under sustained market-hours load → intermittent health timeouts.
+# For heavier load use c6i.xlarge (4 vCPU / 8 GiB). Override with INSTANCE_TYPE=...
+INSTANCE_TYPE="${INSTANCE_TYPE:-m6i.large}"
 ROOT_VOLUME_GB="${ROOT_VOLUME_GB:-50}"
 KEY_NAME="${KEY_NAME:-nexusquant-ec2}"
 PROJECT_NAME="${PROJECT_NAME:-nexusquant}"
