@@ -76,8 +76,12 @@ class RiskEngine:
         if new_exposure > per_trade_cap * 1.02:
             return False, "per_trade_capital_exceeded"
 
+        # Each open leg uses ITS OWN symbol multiplier — not the new trade's — so a
+        # mixed NIFTY(75)/SENSEX(20) book computes true exposure.
+        from app.engines.capital_allocator import lot_multiplier as _symbol_lot_mult
+
         exposure = sum(
-            (t.currentPremium or t.entryPremium) * t.lots * lot_multiplier
+            (t.currentPremium or t.entryPremium) * t.lots * _symbol_lot_mult(t.symbol)
             for t in open_trades
         )
         if exposure + new_exposure > cap.availableMarginInr * 0.98:
