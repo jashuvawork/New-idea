@@ -116,3 +116,5 @@ Verify first: CloudWatch → `CPUCreditBalance` hitting 0 during market hours co
 - c6i.xlarge on-demand ap-south-1: ~$0.19/hr (4 vCPU / 8 GiB)
 - 50 GB gp3: ~$4/mo
 - Elastic IP: free while attached to running instance
+
+# Redeploy trigger: 2026-07-22T17:47Z — land realistic F&O charges (#175, 8de79bd) after EC2 was resized/restarted.
