@@ -26,6 +26,9 @@ def _settings():
     s.moneyness_selection_enabled = True
     s.trade_moneyness_mode = "AUTO"
     s.moneyness_atm_tolerance_points = 50.0
+    s.nifty_strike_step = 50.0
+    s.sensex_strike_step = 100.0
+    s.banknifty_strike_step = 100.0
     s.moneyness_max_otm_steps = 2
     s.moneyness_max_itm_steps = 2
     s.moneyness_explosion_prefer = "OTM"
@@ -95,7 +98,8 @@ def test_blocks_otm_scalp_in_chop(mock_bs, mock_chop, mock_settings):
     snap = _snap()
     ok, reason, meta = moneyness_allows(Side.PUT, 23800, snap, mode="scalp", candidate_score=60)
     assert not ok
-    assert "chop_requires" in reason or "itm" in reason.lower()
+    # 23800 is 3 steps OTM on NIFTY (150/50) — blocked as too-deep or chop-requires-ITM.
+    assert "chop_requires" in reason or "itm" in reason.lower() or "otm_too_deep" in reason
     assert meta["moneyness"] == "OTM"
 
 
