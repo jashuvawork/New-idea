@@ -20,12 +20,15 @@ class MacdRead:
 
 
 def _ema_series(values: list[float], period: int) -> list[float]:
+    """Progressive EMA (pandas ewm adjust=False style) — each value used exactly once.
+
+    Prior version seeded with SMA(values[:period]) but then iterated from values[1],
+    double-counting the warmup bars and corrupting MACD bias near warmup.
+    """
     if not values or period <= 0:
         return []
     alpha = 2.0 / (period + 1)
-    out: list[float] = []
-    seed = sum(values[:period]) / min(period, len(values))
-    out.append(seed)
+    out: list[float] = [float(values[0])]
     for v in values[1:]:
         out.append(alpha * v + (1 - alpha) * out[-1])
     return out

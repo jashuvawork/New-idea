@@ -1,8 +1,40 @@
 """RSI and MACD chart indicator tests."""
 
-from app.engines.chart_indicators import compute_macd, compute_rsi
+from app.engines.chart_indicators import _ema_series, compute_macd, compute_rsi
 from app.engines.spot_direction import analyze_premium_chart, analyze_spot_chart
 from app.models.schemas import MarketProfile
+
+
+def _ref_ema(vals: list[float], period: int) -> list[float]:
+    a = 2.0 / (period + 1)
+    out = [float(vals[0])]
+    for v in vals[1:]:
+        out.append(a * v + (1 - a) * out[-1])
+    return out
+
+
+def test_ema_uses_each_value_once_matches_reference():
+    """No warmup double-count: progressive EMA equals pandas ewm(adjust=False)."""
+    vals = [100 + (i % 5) - 2 + i * 0.4 for i in range(40)]
+    ours = _ema_series(vals, 12)
+    ref = _ref_ema(vals, 12)
+    assert len(ours) == len(vals)
+    assert abs(ours[-1] - ref[-1]) < 1e-9
+    assert all(abs(a - b) < 1e-9 for a, b in zip(ours, ref))
+
+
+def test_macd_bias_bullish_on_rising_series():
+    closes = [100 + i * 0.8 for i in range(40)]
+    m = compute_macd(closes)
+    assert m.bias == "BULLISH"
+    assert m.histogram > 0
+
+
+def test_macd_bias_bearish_on_falling_series():
+    closes = [140 - i * 0.8 for i in range(40)]
+    m = compute_macd(closes)
+    assert m.bias == "BEARISH"
+    assert m.histogram < 0
 
 
 def _trending_closes(start: float, step: float, count: int) -> list[float]:
