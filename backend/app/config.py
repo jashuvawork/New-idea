@@ -187,6 +187,17 @@ class Settings(BaseSettings):
     paper_slippage_explosion_mult: float = 1.5
     paper_slippage_swing_mult: float = 0.85
     paper_brokerage_round_trip_inr: float = 40.0
+    # Realistic Indian options charges (F&O buy) — replaces flat brokerage so paper P&L
+    # matches live net, esp. once positions size up. Turnover-based: brokerage + STT +
+    # exchange txn + SEBI + stamp + GST. Rates ~Zerodha 2024-25 (configurable).
+    realistic_charges_enabled: bool = True
+    charge_brokerage_per_order_inr: float = 20.0     # ₹20/order cap
+    charge_brokerage_pct: float = 0.0003             # or 0.03% of turnover, whichever lower
+    charge_stt_pct_sell: float = 0.000625            # 0.0625% on SELL premium
+    charge_exchange_txn_pct: float = 0.00035         # ~0.035% of premium turnover (both sides)
+    charge_sebi_pct: float = 0.000001                # ₹10 per crore
+    charge_stamp_pct_buy: float = 0.00003            # 0.003% on BUY premium
+    charge_gst_pct: float = 0.18                     # 18% on brokerage+exchange+SEBI
 
     # Explosion capture — Jun 25 +₹66K profile: micro locks, trails, 12pt standard target
     explosion_min_velocity_3s: float = 2.0

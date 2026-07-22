@@ -101,10 +101,56 @@ def mark_to_market(
     return pts, inr
 
 
-def finalize_closed_pnl_inr(gross_inr: float) -> float:
+def compute_charges_inr(
+    entry_premium: float,
+    exit_premium: float,
+    lots: int,
+    lot_mult: int,
+) -> float:
+    """Realistic Indian F&O options charges (buy leg) on a round-trip.
+
+    brokerage + STT(sell) + exchange txn + SEBI + stamp(buy) + GST. Turnover-based
+    so it scales with position size — matches live broker net, unlike the flat fee.
+    """
+    settings = get_settings()
+    qty = max(0, int(lots)) * max(0, int(lot_mult))
+    if qty <= 0:
+        return 0.0
+    buy_turnover = max(0.0, float(entry_premium)) * qty
+    sell_turnover = max(0.0, float(exit_premium)) * qty
+    total_turnover = buy_turnover + sell_turnover
+
+    bkg_cap = float(getattr(settings, "charge_brokerage_per_order_inr", 20.0) or 20.0)
+    bkg_pct = float(getattr(settings, "charge_brokerage_pct", 0.0003) or 0.0003)
+    brokerage = min(bkg_cap, bkg_pct * buy_turnover) + min(bkg_cap, bkg_pct * sell_turnover)
+    stt = float(getattr(settings, "charge_stt_pct_sell", 0.000625) or 0.000625) * sell_turnover
+    exchange = float(getattr(settings, "charge_exchange_txn_pct", 0.00035) or 0.00035) * total_turnover
+    sebi = float(getattr(settings, "charge_sebi_pct", 0.000001) or 0.000001) * total_turnover
+    stamp = float(getattr(settings, "charge_stamp_pct_buy", 0.00003) or 0.00003) * buy_turnover
+    gst = float(getattr(settings, "charge_gst_pct", 0.18) or 0.18) * (brokerage + exchange + sebi)
+    return round(brokerage + stt + exchange + sebi + stamp + gst, 2)
+
+
+def finalize_closed_pnl_inr(
+    gross_inr: float,
+    *,
+    entry_premium: float | None = None,
+    exit_premium: float | None = None,
+    lots: int | None = None,
+    lot_mult: int | None = None,
+) -> float:
     settings = get_settings()
     if not settings.paper_slippage_enabled:
         return round(gross_inr, 2)
+    # Realistic turnover-based charges when trade context is available; else flat fallback.
+    if (
+        getattr(settings, "realistic_charges_enabled", True)
+        and entry_premium is not None
+        and exit_premium is not None
+        and lots is not None
+        and lot_mult is not None
+    ):
+        return round(gross_inr - compute_charges_inr(entry_premium, exit_premium, lots, lot_mult), 2)
     return round(gross_inr - settings.paper_brokerage_round_trip_inr, 2)
 
 
