@@ -261,6 +261,12 @@ class Settings(BaseSettings):
     # Wider trail so high-conviction runners hold the move instead of booking at ~38% of peak.
     high_conviction_trail_keep_ratio: float = 0.30
     high_conviction_defer_profit_lock: bool = True
+    # Elevated size tier — strong EXPLODING/ELITE base rip below full high-conviction.
+    # 1.5x base size when score>=65 + chartConf>=90 + matched + 28-55% window (SENSEX 76800 PE).
+    elevated_size_enabled: bool = True
+    elevated_size_min_score: float = 65.0
+    elevated_size_min_chart_confidence: float = 90.0
+    elevated_size_lot_scale: float = 1.5
     # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
     session_mode_feedback_enabled: bool = True
     session_mode_feedback_min_trades: int = 2

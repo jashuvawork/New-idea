@@ -517,6 +517,7 @@ async def _open_from_candidate(
     # High-conviction base rip → take MAX lots (bypass defensive/first-green throttles).
     # fake-trap chop cap still runs after, so chop/FOMO can't ride this to oversize.
     high_conviction = False
+    elevated_size = False
     if candidate.mode == "explosion" and candidate.explosion_event is not None:
         from app.engines.chart_exit_levels import chart_trade_confidence
         from app.engines.explosion_confidence import is_high_conviction_entry
@@ -539,6 +540,24 @@ async def _open_from_candidate(
             from app.engines.capital_allocator import max_lots_for_capital
 
             lots = max(lots, max_lots_for_capital(symbol, fill_premium))
+        elif getattr(settings, "elevated_size_enabled", True):
+            # Strong EXPLODING base rip (not full high-conviction) → elevated (1.5x) size.
+            from app.engines.explosion_confidence import is_elevated_size_entry
+
+            if is_elevated_size_entry(
+                side=candidate.side,
+                snap=snap,
+                tier=str(candidate.tier or ""),
+                score=float(candidate.confidence or getattr(ev, "explosion_score", 0) or 0),
+                move_pct=conv_move,
+                chart_confidence=conv_chart_conf,
+            ):
+                from app.engines.capital_allocator import max_lots_for_capital
+
+                scale = float(getattr(settings, "elevated_size_lot_scale", 1.5) or 1.5)
+                cap = max_lots_for_capital(symbol, fill_premium)
+                lots = min(cap, max(lots, int(round(lots * scale))))
+                elevated_size = True
 
     lots = clamp_lots(lots, symbol, fill_premium)
     if candidate.mode == "explosion" and trap_meta:
@@ -694,6 +713,7 @@ async def _open_from_candidate(
         "paperLiveParity": use_parity,
         "executionChart": chart_meta,
         "highConviction": bool(high_conviction),
+        "elevatedSize": bool(elevated_size),
     }
     from app.engines.moneyness import classify_moneyness
 
