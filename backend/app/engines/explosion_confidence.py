@@ -179,3 +179,51 @@ def missed_explosion_rank_bonus(candidate: Any, snap: SymbolSnapshot) -> float:
     except Exception:
         pass
     return bonus
+
+
+def is_high_conviction_entry(
+    *,
+    side: Any,
+    snap: SymbolSnapshot,
+    tier: str,
+    score: float,
+    move_pct: float,
+    chart_confidence: float,
+) -> bool:
+    """
+    Very high-confidence base rip → take max lots + hold longer.
+
+    Strict: ELITE, score≥90, chartConf≥85, matched side (chart or breadth), and move in
+    the 28-55% base window. This is the Jul22 SENSEX 77200 PE profile (ELITE 100, conf 95)
+    that only got 4 lots and trailed out in 1 min while it ran +122%.
+    """
+    settings = get_settings()
+    if not getattr(settings, "high_conviction_sizing_enabled", True):
+        return False
+    if str(tier or "").upper() != "ELITE":
+        return False
+    if float(score or 0) < float(getattr(settings, "high_conviction_min_score", 90.0) or 90.0):
+        return False
+    if float(chart_confidence or 0) < float(
+        getattr(settings, "high_conviction_min_chart_confidence", 85.0) or 85.0
+    ):
+        return False
+    lo = float(getattr(settings, "missed_explosion_promote_min_move_pct", 28.0) or 28.0)
+    hi = float(getattr(settings, "missed_explosion_promote_max_move_pct", 55.0) or 55.0)
+    if not (lo <= float(move_pct or 0) <= hi):
+        return False
+    side_v = _side_val(side)
+    if snap is not None and snap.spotChart and not side_aligned_with_chart(side_v, snap.spotChart):
+        breadth = str(snap.breadth.bias if snap.breadth else "NEUTRAL").upper()
+        if not (
+            (side_v == "CALL" and breadth == "BULLISH")
+            or (side_v == "PUT" and breadth == "BEARISH")
+        ):
+            return False
+    return True
+
+
+def trade_is_high_conviction(trade: Any) -> bool:
+    """True when this open trade was flagged high-conviction at entry."""
+    ctx = getattr(trade, "entryContext", None) or {}
+    return bool(ctx.get("highConviction"))

@@ -514,6 +514,32 @@ async def _open_from_candidate(
             lot_scale = float(ict_meta.get("lotMultiplier") or 0.85)
             lots = max(1, int(lots * lot_scale))
 
+    # High-conviction base rip → take MAX lots (bypass defensive/first-green throttles).
+    # fake-trap chop cap still runs after, so chop/FOMO can't ride this to oversize.
+    high_conviction = False
+    if candidate.mode == "explosion" and candidate.explosion_event is not None:
+        from app.engines.chart_exit_levels import chart_trade_confidence
+        from app.engines.explosion_confidence import is_high_conviction_entry
+
+        ev = candidate.explosion_event
+        conv_move = max(
+            float(getattr(ev, "daily_move_pct", 0) or 0),
+            float(getattr(ev, "peak_move_pct", 0) or 0),
+        )
+        conv_chart_conf, _ = chart_trade_confidence(snap, candidate.side)
+        high_conviction = is_high_conviction_entry(
+            side=candidate.side,
+            snap=snap,
+            tier=str(candidate.tier or ""),
+            score=float(candidate.confidence or getattr(ev, "explosion_score", 0) or 0),
+            move_pct=conv_move,
+            chart_confidence=conv_chart_conf,
+        )
+        if high_conviction and getattr(settings, "high_conviction_sizing_enabled", True):
+            from app.engines.capital_allocator import max_lots_for_capital
+
+            lots = max(lots, max_lots_for_capital(symbol, fill_premium))
+
     lots = clamp_lots(lots, symbol, fill_premium)
     if candidate.mode == "explosion" and trap_meta:
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
@@ -522,7 +548,7 @@ async def _open_from_candidate(
         lots = cap_fake_explosion_trap_lots(lots, trap_meta)
         if lots <= 0:
             return False, str(trap_meta.get("action") or "fake_explosion_trap")
-    if candidate.mode in ("explosion", "scalp"):
+    if candidate.mode in ("explosion", "scalp") and not high_conviction:
         from app.engines.session_mode_feedback import cap_lots_until_first_green
 
         lots = cap_lots_until_first_green(lots, state, mode=candidate.mode)
@@ -667,6 +693,7 @@ async def _open_from_candidate(
         "signalPremium": signal_premium,
         "paperLiveParity": use_parity,
         "executionChart": chart_meta,
+        "highConviction": bool(high_conviction),
     }
     from app.engines.moneyness import classify_moneyness
 
