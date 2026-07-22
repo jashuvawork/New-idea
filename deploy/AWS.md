@@ -6,7 +6,7 @@
 
 | Resource | Spec |
 |----------|------|
-| EC2 | **t3.large** (2 vCPU, 8 GiB RAM) |
+| EC2 | **m6i.large** (2 vCPU, 8 GiB RAM, dedicated CPU) |
 | Root volume | **50 GB gp3** encrypted |
 | OS | Amazon Linux 2023 |
 | IAM | `NexusQuantSSMProfile` (SSM deploy, no SSH required) |
@@ -90,8 +90,29 @@ cp deploy/aws.env.example deploy/aws.env   # add same IAM keys
 BRANCH=main bash deploy/aws-deploy.sh
 ```
 
+## Instance sizing
+
+- **m6i.large** (default) — 2 vCPU / 8 GiB, **dedicated CPU**. Replaces t3.large,
+  which is *burstable*: under sustained market-hours load (WebSocket + 1s polling +
+  scanning) t3 exhausts CPU credits and throttles → intermittent `/health` timeouts.
+- **c6i.xlarge** — 4 vCPU / 8 GiB, for heavier load / more scan headroom.
+- Region **ap-south-1 (Mumbai)** is optimal — closest to NSE/Upstox. Do not change.
+- A bigger instance does **not** beat Upstox API rate limits / caches (vendor-bound).
+
+### Resize an existing running instance (manual — AWS console or CLI)
+The running instance type cannot be changed live; stop → modify → start:
+```bash
+aws ec2 stop-instances --instance-ids <ID> --region ap-south-1
+aws ec2 wait instance-stopped --instance-ids <ID> --region ap-south-1
+aws ec2 modify-instance-attribute --instance-id <ID> --instance-type m6i.large --region ap-south-1
+aws ec2 start-instances --instance-ids <ID> --region ap-south-1
+```
+Elastic IP + EBS persist across the stop/start, so DNS and data are unaffected.
+Verify first: CloudWatch → `CPUCreditBalance` hitting 0 during market hours confirms throttling.
+
 ## Costs (approximate)
 
-- t3.large on-demand ap-south-1: ~$0.08/hr
+- m6i.large on-demand ap-south-1: ~$0.10/hr (dedicated 2 vCPU / 8 GiB)
+- c6i.xlarge on-demand ap-south-1: ~$0.19/hr (4 vCPU / 8 GiB)
 - 50 GB gp3: ~$4/mo
 - Elastic IP: free while attached to running instance
