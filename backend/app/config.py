@@ -246,6 +246,15 @@ class Settings(BaseSettings):
     size_until_first_green_lot_cap: int = 6
     # Modes capped until a green print in that mode (Jul20 never-green oversize: explosion + scalp).
     size_until_first_green_modes_csv: str = "explosion,scalp"
+    # High-conviction override — take MAX lots + hold longer when a genuine base rip is
+    # very high confidence (ELITE, score≥90, chartConf≥85, matched side, 28-55% window).
+    # Bypasses the first-green + defensive throttles; fake-trap chop cap still applies.
+    high_conviction_sizing_enabled: bool = True
+    high_conviction_min_score: float = 90.0
+    high_conviction_min_chart_confidence: float = 85.0
+    # Wider trail so high-conviction runners hold the move instead of booking at ~38% of peak.
+    high_conviction_trail_keep_ratio: float = 0.30
+    high_conviction_defer_profit_lock: bool = True
     # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
     session_mode_feedback_enabled: bool = True
     session_mode_feedback_min_trades: int = 2

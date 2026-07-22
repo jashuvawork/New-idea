@@ -351,6 +351,7 @@ def _trail_floor_pts(
     settings,
     *,
     trail_arm_points: Optional[float] = None,
+    keep_ratio_override: Optional[float] = None,
 ) -> Optional[float]:
     """Trailing floor in PnL points — arms only after minimum profit."""
     from app.engines.trail_engine import ratcheting_trail_floor
@@ -359,11 +360,16 @@ def _trail_floor_pts(
 
     arm = trail_arm_points if trail_arm_points is not None else _cfg_float(settings, "explosion_trail_arm_points", 10.0)
     arm *= ict_trail_arm_multiplier(trade)
+    keep_ratio = (
+        keep_ratio_override
+        if keep_ratio_override is not None
+        else _cfg_float(settings, "explosion_trail_keep_ratio", 0.65)
+    )
     return ratcheting_trail_floor(
         trade,
         best,
         arm_points=arm,
-        keep_ratio=_cfg_float(settings, "explosion_trail_keep_ratio", 0.65),
+        keep_ratio=keep_ratio,
         step_points=_cfg_float(settings, "explosion_trail_step_points", 2.0),
         tight_arm=_cfg_float(settings, "explosion_trail_tight_arm", 999.0),
         tight_points=_cfg_float(settings, "explosion_trail_tight_points", 0.0),
@@ -557,8 +563,19 @@ def evaluate_explosion_exit(
             target,
             float(getattr(settings, "ict_max_profit_target_points", 180.0) or 180.0),
         )
+    # High-conviction base rip → hold the runner (wider trail = lower keep floor).
+    # Still exits on real reversal; just does not book at ~38% of peak (Jul22 SENSEX PE).
+    from app.engines.explosion_confidence import trade_is_high_conviction
+
+    high_conviction_trade = trade_is_high_conviction(trade)
+    hc_keep = (
+        float(getattr(settings, "high_conviction_trail_keep_ratio", 0.30) or 0.30)
+        if high_conviction_trade
+        else None
+    )
     trail_floor = _trail_floor_pts(
         trade, best, settings, trail_arm_points=exit_params.trail_arm_points,
+        keep_ratio_override=hc_keep,
     )
     trail_keep = (
         settings.runner_trail_keep_ratio
@@ -570,6 +587,8 @@ def evaluate_explosion_exit(
             trail_keep,
             float(getattr(settings, "ict_max_profit_trail_keep_ratio", 0.42) or 0.42),
         )
+    if high_conviction_trade and best >= settings.runner_min_best_points and hc_keep is not None:
+        trail_keep = min(trail_keep, hc_keep)
 
     if (
         not exit_params.adaptive_stop
@@ -621,7 +640,14 @@ def evaluate_explosion_exit(
         # Standard explosion TP zone reached — don't block trail for distant chart TP
         return best >= _cfg_float(settings, "explosion_target_standard", 18.0) * 0.95
 
-    if not max_profit and half_tp_giveback_exit(trade, best, pnl_pts, target_points=defer_target):
+    defer_hc_lock = high_conviction_trade and bool(
+        getattr(settings, "high_conviction_defer_profit_lock", True)
+    )
+    if (
+        not max_profit
+        and not defer_hc_lock
+        and half_tp_giveback_exit(trade, best, pnl_pts, target_points=defer_target)
+    ):
         return "explosion_half_tp_profit_lock", pnl_inr
 
     if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
