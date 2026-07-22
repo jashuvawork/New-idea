@@ -4,7 +4,11 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
-from app.engines.explosion_confidence import is_high_conviction_entry, trade_is_high_conviction
+from app.engines.explosion_confidence import (
+    is_elevated_size_entry,
+    is_high_conviction_entry,
+    trade_is_high_conviction,
+)
 from app.models.schemas import Breadth, MarketPhase, Regime, Side, SpotChart, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -17,6 +21,9 @@ def _settings(**overrides):
     s.high_conviction_min_chart_confidence = 85.0
     s.missed_explosion_promote_min_move_pct = 28.0
     s.missed_explosion_promote_max_move_pct = 55.0
+    s.elevated_size_enabled = True
+    s.elevated_size_min_score = 65.0
+    s.elevated_size_min_chart_confidence = 90.0
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -93,6 +100,50 @@ def test_rejects_non_elite(mock_s):
     assert is_high_conviction_entry(
         side=Side.PUT, snap=_snap(), tier="EXPLODING", score=100.0,
         move_pct=32.0, chart_confidence=95.0,
+    ) is False
+
+
+@patch("app.engines.explosion_confidence.get_settings")
+def test_elevated_accepts_strong_exploding_base(mock_s):
+    """SENSEX 76800 PE: EXPLODING 73.7, conf 95, 48% base → elevated (not high-conv)."""
+    mock_s.return_value = _settings()
+    assert is_elevated_size_entry(
+        side=Side.PUT, snap=_snap(), tier="EXPLODING", score=73.7,
+        move_pct=48.0, chart_confidence=95.0,
+    ) is True
+    # but NOT full high-conviction (EXPLODING/73 < ELITE/90)
+    assert is_high_conviction_entry(
+        side=Side.PUT, snap=_snap(), tier="EXPLODING", score=73.7,
+        move_pct=48.0, chart_confidence=95.0,
+    ) is False
+
+
+@patch("app.engines.explosion_confidence.get_settings")
+def test_elevated_rejects_extended_move(mock_s):
+    mock_s.return_value = _settings()
+    # 58-64% move (extended) → not elevated
+    assert is_elevated_size_entry(
+        side=Side.PUT, snap=_snap(), tier="EXPLODING", score=73.0,
+        move_pct=58.0, chart_confidence=95.0,
+    ) is False
+
+
+@patch("app.engines.explosion_confidence.get_settings")
+def test_elevated_rejects_low_score(mock_s):
+    mock_s.return_value = _settings()
+    # score 45 (weak) → not elevated
+    assert is_elevated_size_entry(
+        side=Side.PUT, snap=_snap(), tier="EXPLODING", score=45.0,
+        move_pct=31.0, chart_confidence=95.0,
+    ) is False
+
+
+@patch("app.engines.explosion_confidence.get_settings")
+def test_elevated_rejects_wrong_side(mock_s):
+    mock_s.return_value = _settings()
+    assert is_elevated_size_entry(
+        side=Side.CALL, snap=_snap(direction="BEARISH", breadth="BEARISH"),
+        tier="EXPLODING", score=73.0, move_pct=48.0, chart_confidence=95.0,
     ) is False
 
 

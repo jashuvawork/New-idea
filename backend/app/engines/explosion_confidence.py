@@ -227,3 +227,46 @@ def trade_is_high_conviction(trade: Any) -> bool:
     """True when this open trade was flagged high-conviction at entry."""
     ctx = getattr(trade, "entryContext", None) or {}
     return bool(ctx.get("highConviction"))
+
+
+def is_elevated_size_entry(
+    *,
+    side: Any,
+    snap: SymbolSnapshot,
+    tier: str,
+    score: float,
+    move_pct: float,
+    chart_confidence: float,
+) -> bool:
+    """
+    Strong EXPLODING/ELITE base rip that deserves > base size but < full max.
+
+    Between base size and high-conviction max: EXPLODING or ELITE, score ≥65,
+    chartConf ≥90, matched side, 28-55% base window. Sizes up genuine base rips
+    (SENSEX 76800 PE: EXPLODING 73.7 / 48% / conf 95) without touching extended
+    (>55%) or weak (<65) setups. High-conviction (ELITE/90) still takes full max.
+    """
+    settings = get_settings()
+    if not getattr(settings, "elevated_size_enabled", True):
+        return False
+    if str(tier or "").upper() not in ("ELITE", "EXPLODING"):
+        return False
+    if float(score or 0) < float(getattr(settings, "elevated_size_min_score", 65.0) or 65.0):
+        return False
+    if float(chart_confidence or 0) < float(
+        getattr(settings, "elevated_size_min_chart_confidence", 90.0) or 90.0
+    ):
+        return False
+    lo = float(getattr(settings, "missed_explosion_promote_min_move_pct", 28.0) or 28.0)
+    hi = float(getattr(settings, "missed_explosion_promote_max_move_pct", 55.0) or 55.0)
+    if not (lo <= float(move_pct or 0) <= hi):
+        return False
+    side_v = _side_val(side)
+    if snap is not None and snap.spotChart and not side_aligned_with_chart(side_v, snap.spotChart):
+        breadth = str(snap.breadth.bias if snap.breadth else "NEUTRAL").upper()
+        if not (
+            (side_v == "CALL" and breadth == "BULLISH")
+            or (side_v == "PUT" and breadth == "BEARISH")
+        ):
+            return False
+    return True
