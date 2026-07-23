@@ -142,6 +142,63 @@ def test_alert_rejects_over_70pct_chase(mock_p, mock_s):
 
 @patch("app.engines.expiry_day_guards.get_settings")
 @patch("app.engines.premium_filter.get_settings")
+def test_alert_accepts_fast_base_rip_via_base_relative(mock_p, mock_s):
+    """SENSEX 76300 PE Jul23: base ~40 → ~132. Off-low move blew past 70% before ELITE
+    confirmed, but the flat→vertical break off the base is ~40% → still lifts the halt."""
+    cfg = _settings()
+    mock_s.return_value = cfg
+    mock_p.return_value = cfg
+    snap = _snap()
+    alert = {
+        "side": "PUT", "strike": 76300.0, "tier": "ELITE",
+        "explosionScore": 100.0, "premium": 90.0,
+        "dailyMovePct": 130.0, "peakMovePct": 230.0,  # extended off the day low
+        "ictFlatThenVertical": True, "ictBaseRelativeMovePct": 40.0,
+        "tradeable": True,
+    }
+    assert alert_is_expiry_elite_top(alert, snap) is True
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
+def test_alert_rejects_base_relative_also_extended(mock_p, mock_s):
+    """Base-relative bypass is additive — a genuine late chase where BOTH off-low and
+    base-relative moves are extended stays blocked."""
+    cfg = _settings()
+    mock_s.return_value = cfg
+    mock_p.return_value = cfg
+    snap = _snap()
+    alert = {
+        "side": "PUT", "strike": 76300.0, "tier": "ELITE",
+        "explosionScore": 100.0, "premium": 90.0,
+        "dailyMovePct": 130.0, "peakMovePct": 230.0,
+        "ictFlatThenVertical": True, "ictBaseRelativeMovePct": 95.0,  # base break also extended
+        "tradeable": True,
+    }
+    assert alert_is_expiry_elite_top(alert, snap) is False
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
+def test_alert_base_relative_requires_flat_then_vertical(mock_p, mock_s):
+    """Base-relative move only rescues a CONFIRMED flat→vertical break — without it,
+    an extended off-low move stays blocked even if base-relative looks small."""
+    cfg = _settings()
+    mock_s.return_value = cfg
+    mock_p.return_value = cfg
+    snap = _snap()
+    alert = {
+        "side": "PUT", "strike": 76300.0, "tier": "ELITE",
+        "explosionScore": 100.0, "premium": 90.0,
+        "dailyMovePct": 130.0, "peakMovePct": 230.0,
+        "ictFlatThenVertical": False, "ictBaseRelativeMovePct": 40.0,
+        "tradeable": True,
+    }
+    assert alert_is_expiry_elite_top(alert, snap) is False
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
 def test_alert_accepts_exploding_base_score62(mock_p, mock_s):
     """Jul21 matched PUT base rip: EXPLODING, score 63.6, move 55% → now accepted."""
     cfg = _settings()
