@@ -441,11 +441,20 @@ class ExplosionEvent:
     reason: str
     daily_move_pct: float = 0.0
     peak_move_pct: float = 0.0
+    # Absolute chain volume at detection (0 when unknown). Forwarded to ICT analyze.
+    volume: float = 0.0
 
 
 def _strike_key(strike: float, side: Side) -> str:
     # Normalize so 24400 and 24400.0 share one history key.
     return f"{side.value}:{float(strike)}"
+
+
+def _last_known_volume(history: deque) -> float:
+    for _, _, prev_vol in reversed(history):
+        if prev_vol and float(prev_vol) > 0:
+            return float(prev_vol)
+    return 0.0
 
 
 def _record(symbol: str, strike: float, side: Side, premium: float, volume: float = 0) -> None:
@@ -456,7 +465,13 @@ def _record(symbol: str, strike: float, side: Side, premium: float, volume: floa
     key = _strike_key(strike, side)
     if key not in _history[symbol]:
         _history[symbol][key] = deque(maxlen=MAX_HISTORY)
-    _history[symbol][key].append((datetime.now(IST), premium, volume))
+    hist = _history[symbol][key]
+    # WS heatmap rescans pass volume=0 (no bar volume). Do NOT zero the series —
+    # that collapses volume_surge and drops ICT volume_awakening mid-rip (Jul23).
+    vol = float(volume or 0)
+    if vol <= 0 and hist:
+        vol = _last_known_volume(hist)
+    hist.append((datetime.now(IST), premium, vol))
 
 
 def _velocity(history: deque, polls_back: int) -> float:
@@ -782,6 +797,7 @@ def scan_chain_explosions(
                 reason=" ".join(reason_parts) or "momentum building",
                 daily_move_pct=round(session_move, 2),
                 peak_move_pct=round(peak_move, 2),
+                volume=float(volume or 0),
             ))
 
     events.sort(key=lambda e: ({"ELITE": 4, "EXPLODING": 3, "BUILDING": 2, "WATCH": 1}[e.tier], e.explosion_score), reverse=True)
