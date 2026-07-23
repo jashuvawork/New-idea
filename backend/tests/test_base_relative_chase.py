@@ -18,6 +18,7 @@ def _settings(**overrides):
     s.ict_base_relative_chase_bypass_enabled = True
     s.ict_base_relative_chase_max_move_pct = 55.0
     s.ict_base_relative_chase_abs_move_cap_pct = 160.0
+    s.ict_base_relative_ignore_abs_cap = True
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -51,11 +52,19 @@ def test_extended_base_move_still_blocked(mock_s):
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_parabolic_abs_cap_still_blocks(mock_s):
-    mock_s.return_value = _settings()
+def test_parabolic_abs_cap_blocks_when_ignore_disabled(mock_s):
+    mock_s.return_value = _settings(ict_base_relative_ignore_abs_cap=False)
     # base move looks early but absolute day-move is parabolic (>160%) → block
     blocked, reason = extended_session_chase_blocked(_event(220.0), ict=_ict(base_move=40.0))
     assert blocked is True
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_low_base_rip_ignores_abs_cap(mock_s):
+    """30→140 style: session % is huge, but base-relative is still early — allow."""
+    mock_s.return_value = _settings()
+    blocked, reason = extended_session_chase_blocked(_event(340.0), ict=_ict(base_move=44.0))
+    assert blocked is False
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")

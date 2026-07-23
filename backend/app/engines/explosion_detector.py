@@ -257,8 +257,8 @@ def _apply_sticky_tier(strike_key: str, tier: str) -> str:
 
 def _apply_sticky_score(strike_key: str, score: float, tier: str) -> float:
     """Peak-hold explosion score for a short window so bursty velocity doesn't
-    flicker it below entry gates during a sustained rip. Only holds for real
-    tiers (EXPLODING/ELITE); decays after the window."""
+    flicker it below entry gates during a sustained rip. Holds for BUILDING+
+    (early ICT window) and EXPLODING/ELITE; decays after the window."""
     from app.config import get_settings
 
     settings = get_settings()
@@ -270,8 +270,8 @@ def _apply_sticky_score(strike_key: str, score: float, tier: str) -> float:
     held = score
     if prev and now < prev[1]:
         held = max(score, prev[0])
-    # Only retain when the current read is a genuine rip tier (avoid holding WATCH noise).
-    if _TIER_RANK.get(str(tier or "").upper(), 0) >= _TIER_RANK["EXPLODING"] or held > score:
+    # Retain for BUILDING+ so early ICT flat→vertical doesn't flicker below gates.
+    if _TIER_RANK.get(str(tier or "").upper(), 0) >= _TIER_RANK["BUILDING"] or held > score:
         _score_sticky[strike_key] = (held, now + timedelta(seconds=hold_s))
     return round(held, 1)
 

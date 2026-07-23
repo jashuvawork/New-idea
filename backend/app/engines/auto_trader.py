@@ -428,8 +428,14 @@ async def _open_from_candidate(
             cap_extended_chase_lots,
             cap_faded_rip_lots,
         )
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
-        lots = cap_extended_chase_lots(lots, candidate.explosion_event)
+        chase_ict = (
+            analyze_explosion_event_ict(candidate.explosion_event, snap)
+            if candidate.explosion_event is not None
+            else None
+        )
+        lots = cap_extended_chase_lots(lots, candidate.explosion_event, ict=chase_ict)
         if faded_rip_meta:
             lots = cap_faded_rip_lots(lots)
     elif candidate.mode == "worst_day_itm_fade":
