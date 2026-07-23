@@ -638,8 +638,14 @@ def detect_fake_explosion_trap(
         return True, reason, meta
 
     # Soft cut: chop+elite full-size forbidden; post-small-win clamp.
+    # Exception: ATM/ITM inside the early base window (28–55%) is the capture
+    # profile — soft-cutting those to 6 lots is how Jul23 76300 PE high-conv died.
+    skip_soft = bool(
+        getattr(settings, "fake_explosion_trap_skip_soft_cut_base_window", True)
+    ) and in_base_window and money in ("ATM", "ITM") and not session_extended and not otm_inside_or
+
     cut = False
-    if chopish and elite_hot:
+    if chopish and elite_hot and not skip_soft:
         cut = True
         action = "cut_size"
         reason = "fake_explosion_trap_chop_elite_size"
@@ -647,7 +653,7 @@ def detect_fake_explosion_trap(
             getattr(settings, "fake_explosion_trap_chop_elite_lot_cap", 6) or 6
         ))
         psych = "OVERCONFIDENCE"
-    if post_win:
+    if post_win and not skip_soft:
         cut = True
         action = "cut_size"
         reason = reason or "fake_explosion_trap_post_win_size"
@@ -674,12 +680,20 @@ def detect_fake_explosion_trap(
     return False, "ok", meta
 
 
-def cap_fake_explosion_trap_lots(lots: int, trap_meta: Optional[dict[str, Any]]) -> int:
+def cap_fake_explosion_trap_lots(
+    lots: int,
+    trap_meta: Optional[dict[str, Any]],
+    *,
+    bypass_soft_cap: bool = False,
+) -> int:
     """Apply trap lot cap after good-day max-lot force (Jul20 49-lot hole)."""
     if not trap_meta or not trap_meta.get("fakeExplosionTrap"):
         return lots
     if trap_meta.get("action") == "block":
         return 0
+    # High-conviction / elevated ATM base rips keep max lots; hard block still wins.
+    if bypass_soft_cap and trap_meta.get("action") == "cut_size":
+        return lots
     cap = trap_meta.get("lotCap")
     if cap is None:
         return lots
