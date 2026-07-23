@@ -162,6 +162,15 @@ def moneyness_allows(
     if mode_key in ("ITM", "OTM", "ATM") and money != mode_key:
         return False, f"moneyness_mode_{mode_key.lower()}_required", meta
 
+    # Explosion ATM-first: OTM is a hard miss, not a soft rank penalty.
+    if (
+        mode == "explosion"
+        and money == "OTM"
+        and preferred == "ATM"
+        and bool(getattr(settings, "moneyness_explosion_block_otm", True))
+    ):
+        return False, "moneyness_explosion_atm_only_otm_blocked", meta
+
     if money == "OTM" and depth > settings.moneyness_max_otm_steps:
         expiry_otm_ok = False
         if mode == "explosion":

@@ -32,6 +32,7 @@ def _settings():
     s.moneyness_max_otm_steps = 2
     s.moneyness_max_itm_steps = 2
     s.moneyness_explosion_prefer = "OTM"
+    s.moneyness_explosion_block_otm = True
     s.moneyness_scalp_chop_prefer = "ITM"
     s.moneyness_high_conf_prefer = "ITM"
     s.moneyness_rank_bonus = 12.0
@@ -89,6 +90,32 @@ def test_explosion_prefers_otm(mock_settings):
     snap = _snap(bias="BULLISH")
     snap.regime = Regime.TREND_EXPANSION
     assert resolve_preferred_moneyness("explosion", snap) == "OTM"
+
+
+@patch("app.engines.moneyness.get_settings")
+def test_explosion_atm_prefer_hard_blocks_otm(mock_settings):
+    """Jul23: explosion prefer ATM must not soft-allow 2-step OTM (76100 PE)."""
+    s = _settings()
+    s.moneyness_explosion_prefer = "ATM"
+    s.moneyness_explosion_block_otm = True
+    mock_settings.return_value = s
+    snap = _snap(spot=76300.0)
+    snap.symbol = "SENSEX"
+    snap.atmStrike = 76300.0
+    snap.heatmap = []
+    # SENSEX PUT 76100 = 2 steps OTM
+    ok, reason, meta = moneyness_allows(
+        Side.PUT, 76100, snap, mode="explosion", candidate_score=100,
+    )
+    assert ok is False
+    assert reason == "moneyness_explosion_atm_only_otm_blocked"
+    assert meta["moneyness"] == "OTM"
+    # ATM still allowed
+    ok_atm, _, meta_atm = moneyness_allows(
+        Side.PUT, 76300, snap, mode="explosion", candidate_score=100,
+    )
+    assert ok_atm is True
+    assert meta_atm["moneyness"] == "ATM"
 
 
 @patch("app.engines.moneyness.get_settings", return_value=_settings())
