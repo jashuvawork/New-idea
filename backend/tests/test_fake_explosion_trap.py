@@ -9,10 +9,30 @@ from app.engines.explosion_entry_guards import (
     cap_fake_explosion_trap_lots,
     detect_fake_explosion_trap,
 )
+from app.engines.ict_breakout_monitor import ICTBreakoutSignal
 from app.engines.pretrade_validator import TradeRecord
 from app.models.schemas import MarketPhase, Regime, Side, SpotChart, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def _confirmed_ict(move: float) -> ICTBreakoutSignal:
+    """Confirmed flat→vertical structure — what a genuine base rip supplies live.
+
+    detect_fake_explosion_trap now hard-blocks chop+ELITE with NO ICT structure
+    (Jul23 displacement-spike fix). Real base rips carry structure, so the trap
+    tests must pass it in; without it every case looks structure-less.
+    """
+    return ICTBreakoutSignal(
+        active=True,
+        pattern="flat_then_vertical",
+        score=80.0,
+        reasons=["flat_then_vertical"],
+        flat_then_vertical=True,
+        volume_awakening=True,
+        session_move_pct=move,
+        base_relative_move_pct=move,
+    )
 
 
 def _settings(**overrides):
@@ -183,7 +203,7 @@ def test_chop_elite_soft_cut_without_otm_trap(mock_money_settings, mock_settings
     mock_money_settings.return_value = cfg
     snap = _snap(or_pos="ABOVE")
     cand = _candidate(_event(daily=18.0, strike=24200.0), snap)
-    blocked, reason, meta = detect_fake_explosion_trap(cand, snap)
+    blocked, reason, meta = detect_fake_explosion_trap(cand, snap, ict=_confirmed_ict(18.0))
     assert blocked is False
     assert meta.get("action") == "cut_size"
     assert meta.get("lotCap") == 6
@@ -220,7 +240,7 @@ def test_jul15_atm_base_window_not_hard_blocked(mock_money_settings, mock_settin
     # True ATM (24200) — 24250 is 1-step OTM and must still be soft-cut capable.
     cand = _candidate(_event(daily=32.0, v3=7.9, strike=24200.0), snap)
     with patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
-        blocked, reason, meta = detect_fake_explosion_trap(cand, snap)
+        blocked, reason, meta = detect_fake_explosion_trap(cand, snap, ict=_confirmed_ict(32.0))
     assert blocked is False
     assert meta.get("action") not in ("block", "cut_size")
     assert "base_window" in meta.get("conflictFlags", [])

@@ -161,7 +161,11 @@ def test_faded_rip_skips_no_green_on_bullish_flip():
 
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.confidence_hold.get_settings")
-def test_trail_deferred_until_half_chart_tp_at_95_conf(mock_conf, mock_exp):
+def test_high_conf_trail_stops_when_winner_gives_back_to_loss(mock_conf, mock_exp):
+    """A high-chart-conf explosion that peaked +8.5pt then faded to a LOSS is stopped
+    out by the armed trail — not held. High conviction/chart-confidence defers the
+    profit *lock* (won't book a runner early) but an armed trail must not defer into a
+    loss (recent 'hard-stop never-green / do-not-defer-into-loss' tightening)."""
     s = MagicMock()
     s.chart_confidence_hold_enabled = True
     s.chart_confidence_hold_min_confidence = 48.2
@@ -212,8 +216,9 @@ def test_trail_deferred_until_half_chart_tp_at_95_conf(mock_conf, mock_exp):
     )
     plan = AdaptiveExitPlan(stopPoints=8.0, targetPoints=12.0, trailArmPoints=4.0, trailKeepRatio=0.65)
     params = explosion_exit_params_from_plan(plan, "ELITE")
+    # Peaked +8.5pt, now -1.67pt (gave the whole winner back) → protective trail exit.
     reason, _ = evaluate_explosion_exit(trade, 61.95, "ELITE", 25, params=params)
-    assert reason is None
+    assert reason == "explosion_trail_sl"
 
 
 def test_cross_index_elite_priority_bonus():

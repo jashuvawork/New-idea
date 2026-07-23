@@ -131,7 +131,7 @@ def test_open_rip_put_blocked_on_bullish_without_elite(mock_settings, mock_windo
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
 @patch("app.engines.morning_premium_capture.get_settings")
-def test_open_rip_put_passes_explosion_entry_elite_on_bullish(mock_settings, mock_window, mock_ep_settings):
+def test_open_rip_put_blocked_as_counter_trend_chase_on_bullish(mock_settings, mock_window, mock_ep_settings):
     s = mock_settings.return_value
     ep = mock_ep_settings.return_value
     for cfg in (s, ep):
@@ -187,5 +187,9 @@ def test_open_rip_put_passes_explosion_entry_elite_on_bullish(mock_settings, moc
         event, trade, Breadth(bias="BULLISH", score=62, aligned=True), False,
         chart=chart,
     )
-    assert ok is True
-    assert reason == "extreme_all_in_explosion_confirmed"
+    # A +116% PUT into a live-bullish chart is a late counter-trend chase. The
+    # extreme all-in bypass no longer reopens moves past the 70% chase ceiling
+    # (cf96440 "block late EXPLOSIVE chases that kill PF"), so this is correctly
+    # blocked as counter-trend instead of forced through.
+    assert ok is False
+    assert reason in ("chart_live_bullish_no_puts", "hard_block_put_vs_bullish_breadth")

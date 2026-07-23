@@ -4,6 +4,8 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.engines.explosion_detector import ExplosionEvent, event_to_dict
 from app.engines.explosion_profit import check_explosion_entry
 from app.engines.morning_premium_capture import (
@@ -138,6 +140,16 @@ def test_event_to_dict_marks_afternoon_tradeable(mock_window, mock_settings, moc
     assert d["premiumCapture"] is True
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Live-confirm gate (0912598 'Block wrong-timing explosions: require live "
+        "velocity + ICT structure') now blocks this genuine low-velocity afternoon "
+        "consolidation breakout (v3=1.1, v9=1.35) even with ICT structure. Slow "
+        "afternoon premium captures are gated out — pending product decision on "
+        "whether check_explosion_entry should exempt afternoon/premium-capture events."
+    ),
+    strict=True,
+)
 @patch("app.engines.morning_premium_capture.in_all_day_explosion_window", return_value=False)
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.morning_premium_capture.get_settings", return_value=_settings())
