@@ -135,6 +135,8 @@ def build_market_context(
         "dayModeHint": chop.get("dayModeHint"),
         "chopSession": chop.get("chopSession"),
         "sessionPaused": chop.get("sessionPaused"),
+        "entriesBlockedByPause": chop.get("entriesBlockedByPause"),
+        "lossStreakEliteBypass": chop.get("lossStreakEliteBypass"),
         "tradeCap": {
             "closed": chop.get("closedTrades"),
             "cap": chop.get("dailyTradeCap"),
@@ -161,10 +163,15 @@ def generate_rule_brief(context: dict[str, Any]) -> ComposerBrief:
     bias = "STAND_ASIDE"
     confidence = "LOW"
 
-    if context.get("sessionPaused"):
+    if context.get("sessionPaused") and not context.get("lossStreakEliteBypass"):
         stand_down = True
         risks.append("loss_streak_pause_active")
         actions.append("No new entries until pause clears (engine guard — not Composer)")
+    elif context.get("lossStreakEliteBypass"):
+        risks.append("loss_streak_pause_elite_bypass")
+        actions.append(
+            "Loss streak pause lifted for high-confidence ELITE / top explosive only"
+        )
 
     whipsaw = (context.get("whipsaw") or {})
     if whipsaw.get("whipsawPaused") and not whipsaw.get("momentumRallyBypass"):

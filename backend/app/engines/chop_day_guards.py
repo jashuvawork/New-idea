@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
@@ -68,6 +68,226 @@ def session_pause_active() -> tuple[bool, str]:
         secs = int((until.astimezone(IST) - now).total_seconds())
         return True, f"loss_streak_pause_{secs}s"
     return False, "ok"
+
+
+def loss_streak_elite_bypass_tiers() -> set[str]:
+    settings = get_settings()
+    raw = str(getattr(settings, "loss_streak_elite_bypass_tiers_csv", "ELITE,EXPLODING") or "ELITE")
+    return {t.strip().upper() for t in raw.split(",") if t.strip()}
+
+
+def _alert_session_move(alert: dict[str, Any]) -> float:
+    return max(
+        float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0),
+        float(alert.get("peakMovePct") or 0),
+    )
+
+
+def _loss_streak_move_ok(
+    move: float,
+    min_move: float,
+    max_move: float,
+    *,
+    flat_then_vertical: bool = False,
+    base_relative_move: float = 0.0,
+) -> bool:
+    if min_move <= move <= max_move:
+        return True
+    # Confirmed flat→vertical base rip: accept on base-relative move so a fast
+    # rip past the off-low ceiling can still lift the loss-streak pause.
+    if flat_then_vertical and min_move <= float(base_relative_move or 0) <= max_move:
+        return True
+    return False
+
+
+def _loss_streak_confidence_ok(
+    alert: dict[str, Any],
+    snap: Optional[SymbolSnapshot],
+    side: str,
+    min_chart_conf: float,
+) -> bool:
+    """Chart confidence, or ICT structure signals that stand in for conviction."""
+    if bool(alert.get("ictMegaRip")) or bool(alert.get("ictFlatThenVertical")):
+        return True
+    if float(alert.get("ictScore") or 0) >= 70.0 and bool(alert.get("ictBreakout")):
+        return True
+    if snap is None or side not in ("CALL", "PUT"):
+        return False
+    try:
+        from app.engines.chart_exit_levels import chart_trade_confidence
+        from app.models.schemas import Side
+
+        conf, _ = chart_trade_confidence(snap, Side(side))
+        return float(conf or 0) >= min_chart_conf
+    except Exception:
+        return False
+
+
+def alert_is_loss_streak_elite_bypass(
+    alert: dict[str, Any],
+    snap: Optional[SymbolSnapshot] = None,
+) -> bool:
+    """True for high-confidence ELITE / top explosive worth lifting loss-streak pause."""
+    settings = get_settings()
+    if not getattr(settings, "loss_streak_elite_bypass_enabled", True):
+        return False
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in loss_streak_elite_bypass_tiers():
+        return False
+    score = float(alert.get("explosionScore") or 0)
+    min_score = float(getattr(settings, "loss_streak_elite_bypass_min_score", 90.0) or 90.0)
+    if score < min_score:
+        return False
+    # EXPLODING needs ICT structure confirmation — bare EXPLODING is not "top explosive".
+    if tier != "ELITE" and not (
+        bool(alert.get("ictFlatThenVertical"))
+        or bool(alert.get("ictMegaRip"))
+        or (bool(alert.get("ictBreakout")) and float(alert.get("ictScore") or 0) >= 70.0)
+    ):
+        return False
+    move = _alert_session_move(alert)
+    min_move = float(getattr(settings, "loss_streak_elite_bypass_min_move_pct", 28.0) or 28.0)
+    max_move = float(getattr(settings, "loss_streak_elite_bypass_max_move_pct", 70.0) or 70.0)
+    if not _loss_streak_move_ok(
+        move,
+        min_move,
+        max_move,
+        flat_then_vertical=bool(alert.get("ictFlatThenVertical")),
+        base_relative_move=float(alert.get("ictBaseRelativeMovePct") or 0),
+    ):
+        return False
+    side = str(alert.get("side") or "").upper()
+    min_conf = float(
+        getattr(settings, "loss_streak_elite_bypass_min_chart_confidence", 56.9) or 56.9
+    )
+    if not _loss_streak_confidence_ok(alert, snap, side, min_conf):
+        return False
+    if snap is not None and snap.spotChart and side in ("CALL", "PUT"):
+        from app.engines.spot_direction import side_aligned_with_chart
+
+        if not side_aligned_with_chart(side, snap.spotChart):
+            breadth = str(snap.breadth.bias if snap.breadth else "NEUTRAL").upper()
+            if not (
+                (side == "CALL" and breadth == "BULLISH")
+                or (side == "PUT" and breadth == "BEARISH")
+            ):
+                return False
+    return True
+
+
+def snapshots_have_loss_streak_elite_bypass(snapshots: dict[str, SymbolSnapshot]) -> bool:
+    for snap in snapshots.values():
+        if not snap.dataAvailable:
+            continue
+        for alert in snap.explosionAlerts or []:
+            if alert_is_loss_streak_elite_bypass(alert, snap):
+                return True
+    return False
+
+
+def is_loss_streak_elite_bypass_candidate(candidate: Any) -> bool:
+    """Per-candidate gate when loss-streak pause is lifted for elite-only entries."""
+    settings = get_settings()
+    if not getattr(settings, "loss_streak_elite_bypass_enabled", True):
+        return False
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+    alert = getattr(candidate, "alert", None) if isinstance(getattr(candidate, "alert", None), dict) else {}
+    snap = getattr(candidate, "snap", None)
+    if alert:
+        # Prefer the live alert dict (has ICT fields); enrich missing tier/score from candidate.
+        enriched = dict(alert)
+        if not enriched.get("tier"):
+            enriched["tier"] = getattr(candidate, "tier", None)
+        if not enriched.get("explosionScore"):
+            enriched["explosionScore"] = getattr(candidate, "confidence", None) or getattr(
+                candidate, "score", None
+            )
+        if not enriched.get("side"):
+            side = getattr(candidate, "side", None)
+            enriched["side"] = side.value if hasattr(side, "value") else side
+        return alert_is_loss_streak_elite_bypass(enriched, snap)
+
+    # Fallback when candidate has no alert payload.
+    tier = str(getattr(candidate, "tier", "") or "").upper()
+    if tier not in loss_streak_elite_bypass_tiers():
+        return False
+    score = float(getattr(candidate, "confidence", 0) or getattr(candidate, "score", 0) or 0)
+    min_score = float(getattr(settings, "loss_streak_elite_bypass_min_score", 90.0) or 90.0)
+    if score < min_score:
+        return False
+    event = getattr(candidate, "explosion_event", None)
+    move = 0.0
+    flat = False
+    base_rel = 0.0
+    if event is not None:
+        move = max(
+            float(getattr(event, "daily_move_pct", 0) or 0),
+            float(getattr(event, "peak_move_pct", 0) or 0),
+        )
+        try:
+            from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+            ict = analyze_explosion_event_ict(event, snap)
+            flat = bool(ict.active and ict.flat_then_vertical)
+            base_rel = float(ict.base_relative_move_pct or 0)
+            if ict.mega_rip:
+                flat = True
+        except Exception:
+            pass
+    min_move = float(getattr(settings, "loss_streak_elite_bypass_min_move_pct", 28.0) or 28.0)
+    max_move = float(getattr(settings, "loss_streak_elite_bypass_max_move_pct", 70.0) or 70.0)
+    if not _loss_streak_move_ok(
+        move, min_move, max_move, flat_then_vertical=flat, base_relative_move=base_rel,
+    ):
+        return False
+    side_obj = getattr(candidate, "side", None)
+    side = side_obj.value if hasattr(side_obj, "value") else str(side_obj or "").upper()
+    min_conf = float(
+        getattr(settings, "loss_streak_elite_bypass_min_chart_confidence", 56.9) or 56.9
+    )
+    synthetic = {
+        "tier": tier,
+        "explosionScore": score,
+        "side": side,
+        "ictFlatThenVertical": flat,
+        "ictMegaRip": False,
+        "ictBreakout": flat,
+        "ictScore": 80.0 if flat else 0.0,
+        "dailyMovePct": move,
+        "ictBaseRelativeMovePct": base_rel,
+    }
+    return _loss_streak_confidence_ok(synthetic, snap, side, min_conf)
+
+
+def resolve_session_entry_pause(
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Entry-gate pause resolver.
+
+    large_loss_pause is never bypassed.
+    loss_streak_pause lifts when a high-confidence ELITE / top explosive is on radar;
+    caller must then restrict entries to those candidates only (meta lossStreakEliteOnly).
+    """
+    paused, reason = session_pause_active()
+    meta: dict[str, Any] = {"rawPaused": paused, "rawReason": reason if paused else None}
+    if not paused:
+        return False, "ok", meta
+    if reason.startswith("large_loss_pause"):
+        return True, reason, meta
+    if not reason.startswith("loss_streak_pause"):
+        return True, reason, meta
+    if snapshots is None:
+        return True, reason, meta
+    settings = get_settings()
+    if not getattr(settings, "loss_streak_elite_bypass_enabled", True):
+        return True, reason, meta
+    if not snapshots_have_loss_streak_elite_bypass(snapshots):
+        return True, reason, meta
+    meta["lossStreakEliteOnly"] = True
+    meta["lossStreakEliteBypass"] = True
+    return False, "loss_streak_elite_bypass", meta
 
 
 def reset_session_guards() -> None:
@@ -311,6 +531,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     chop = is_chop_session(snapshots)
     cap, cap_label = daily_trade_cap(state, snapshots)
     paused, pause_reason = session_pause_active()
+    entry_paused, entry_pause_reason, entry_pause_meta = resolve_session_entry_pause(snapshots)
     cap_hit, cap_msg = trades_cap_reached(state, snapshots)
     momentum = in_momentum_rally_window()
     before_primary = before_primary_window()
@@ -360,6 +581,10 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "lossStreak": _session_loss_streak,
         "sessionPaused": paused,
         "pauseReason": pause_reason if paused else None,
+        "entriesBlockedByPause": entry_paused,
+        "entryPauseReason": None if entry_pause_reason == "ok" else entry_pause_reason,
+        "lossStreakEliteBypass": bool(entry_pause_meta.get("lossStreakEliteBypass")),
+        "lossStreakEliteOnly": bool(entry_pause_meta.get("lossStreakEliteOnly")),
         "beforePrimaryWindow": before_primary,
         "momentumRallyWindow": momentum,
         "openCautionWindow": in_open_caution_window(),
