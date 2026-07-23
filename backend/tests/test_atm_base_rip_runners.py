@@ -75,6 +75,10 @@ def _entry_settings():
     return s
 
 
+@patch(
+    "app.engines.explosion_entry_guards.live_explosion_confirmation_blocked",
+    return_value=(False, ""),
+)
 @patch("app.engines.explosion_profit._ict_flat_vertical_entry_ok", return_value=True)
 @patch("app.engines.morning_premium_capture.is_premium_capture_event", return_value=False)
 @patch("app.engines.morning_premium_capture.is_all_day_explosion_event", return_value=False)
