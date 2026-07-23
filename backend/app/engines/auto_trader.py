@@ -548,6 +548,7 @@ async def _open_from_candidate(
                 float(getattr(ev, "peak_move_pct", 0) or 0),
             )
         ]
+        base_relative_rip = False
         try:
             from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
@@ -558,6 +559,7 @@ async def _open_from_candidate(
                 and float(ict_sizing.base_relative_move_pct or 0) > 0
             ):
                 move_candidates.append(float(ict_sizing.base_relative_move_pct))
+                base_relative_rip = True
         except Exception:
             pass
 
@@ -580,11 +582,21 @@ async def _open_from_candidate(
 
             lots = max(lots, max_lots_for_capital(symbol, fill_premium))
         elif getattr(settings, "elevated_size_enabled", True):
-            # Strong EXPLODING base rip (not full high-conviction) → elevated (1.5x) size.
+            # Strong EXPLODING base rip (not full high-conviction) → elevated size.
             if _size_gate(is_elevated_size_entry):
                 from app.engines.capital_allocator import max_lots_for_capital
 
                 scale = float(getattr(settings, "elevated_size_lot_scale", 1.5) or 1.5)
+                # Confirmed flat→vertical base rip (the genuine runner) → scale harder
+                # (~2x) so we actually double the capture instead of a token bump.
+                if base_relative_rip:
+                    scale = max(
+                        scale,
+                        float(
+                            getattr(settings, "elevated_size_base_relative_lot_scale", 2.0)
+                            or 2.0
+                        ),
+                    )
                 cap = max_lots_for_capital(symbol, fill_premium)
                 lots = min(cap, max(lots, int(round(lots * scale))))
                 elevated_size = True

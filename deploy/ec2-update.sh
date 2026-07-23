@@ -258,6 +258,7 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
     ELEVATED_SIZE_MIN_SCORE
     ELEVATED_SIZE_MIN_CHART_CONFIDENCE
     ELEVATED_SIZE_LOT_SCALE
+    ELEVATED_SIZE_BASE_RELATIVE_LOT_SCALE
     # chartConf rescale 40–100 — keep cutovers in lockstep with display scale
     ALL_DAY_MIN_CHART_CONFIDENCE
     QUICK_TRAIL_PROMOTE_MIN_CONFIDENCE

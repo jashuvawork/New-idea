@@ -375,6 +375,29 @@ def _alert_session_move(alert: dict[str, Any]) -> float:
     )
 
 
+def _elite_top_move_ok(
+    move: float,
+    min_move: float,
+    max_move: float,
+    *,
+    flat_then_vertical: bool = False,
+    base_relative_move: float = 0.0,
+) -> bool:
+    """Move gate for the expiry worst-day elite-top halt bypass.
+
+    A fast flat→vertical base rip blows past the off-the-low ceiling before ELITE
+    confirms; for a confirmed flat→vertical break also accept on the base-relative
+    move (distance from the consolidation base) so a genuine base rip still lifts the
+    worst-day halt. Mirrors the sizing + extended-chase entry-guard base-relative
+    bypass. Purely additive — only widens acceptance, never removes it.
+    """
+    if min_move <= move <= max_move:
+        return True
+    if flat_then_vertical and min_move <= float(base_relative_move or 0) <= max_move:
+        return True
+    return False
+
+
 def alert_is_expiry_elite_top(alert: dict[str, Any], snap: Optional[SymbolSnapshot] = None) -> bool:
     """True for early-window ELITE rips worth lifting the expiry-worst halt."""
     settings = get_settings()
@@ -390,7 +413,13 @@ def alert_is_expiry_elite_top(alert: dict[str, Any], snap: Optional[SymbolSnapsh
     move = _alert_session_move(alert)
     min_move = float(getattr(settings, "expiry_worst_day_elite_top_min_move_pct", 28.0) or 28.0)
     max_move = float(getattr(settings, "expiry_worst_day_elite_top_max_move_pct", 55.0) or 55.0)
-    if move < min_move or move > max_move:
+    if not _elite_top_move_ok(
+        move,
+        min_move,
+        max_move,
+        flat_then_vertical=bool(alert.get("ictFlatThenVertical")),
+        base_relative_move=float(alert.get("ictBaseRelativeMovePct") or 0),
+    ):
         return False
     prem = alert.get("premium")
     from app.engines.premium_filter import premium_in_band
@@ -451,7 +480,29 @@ def is_expiry_elite_top_candidate(candidate: Any) -> bool:
     )
     min_move = float(getattr(settings, "expiry_worst_day_elite_top_min_move_pct", 28.0) or 28.0)
     max_move = float(getattr(settings, "expiry_worst_day_elite_top_max_move_pct", 55.0) or 55.0)
-    if move < min_move or move > max_move:
+    # Confirmed flat→vertical base rip → also accept on base-relative move (from the alert,
+    # else from the event's ICT analysis) so a fast rip past the off-low ceiling still lifts
+    # the worst-day halt.
+    snap_for_ict = getattr(candidate, "snap", None)
+    flat_then_vertical = bool(alert.get("ictFlatThenVertical")) if alert else False
+    base_rel_move = float(alert.get("ictBaseRelativeMovePct") or 0) if alert else 0.0
+    if event is not None and (not flat_then_vertical or base_rel_move <= 0):
+        try:
+            from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+            ict = analyze_explosion_event_ict(event, snap_for_ict)
+            if ict.active and ict.flat_then_vertical:
+                flat_then_vertical = True
+                base_rel_move = max(base_rel_move, float(ict.base_relative_move_pct or 0))
+        except Exception:
+            pass
+    if not _elite_top_move_ok(
+        move,
+        min_move,
+        max_move,
+        flat_then_vertical=flat_then_vertical,
+        base_relative_move=base_rel_move,
+    ):
         return False
     prem = float(getattr(candidate, "premium", 0) or alert.get("premium") or 0)
     from app.engines.premium_filter import premium_in_band
