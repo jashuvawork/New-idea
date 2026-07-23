@@ -89,6 +89,43 @@ def _analyze_explosion_gaps(
         if chart_dir == "BEARISH" and side == "CALL" and not all_day and not capture:
             blockers.append("call_vs_bearish_chart")
 
+        # Surface extended-chase / ICT late-fade — Jul23 SENSEX 76400 PE showed
+        # empty blockers while selector silently skipped +188–471% session moves.
+        try:
+            from app.engines.explosion_detector import ExplosionEvent
+            from app.engines.explosion_entry_guards import extended_session_chase_blocked
+            from app.engines.ict_breakout_monitor import (
+                analyze_explosion_event_ict,
+                late_fade_chase_blocked,
+            )
+            from app.models.schemas import Side as _Side
+
+            event = ExplosionEvent(
+                symbol=symbol,
+                side=_Side(side) if side in ("CALL", "PUT") else _Side.PUT,
+                strike=float(alert.get("strike") or 0),
+                premium=float(alert.get("premium") or 0),
+                velocity_3s=float(alert.get("velocity3s") or 0),
+                velocity_9s=float(alert.get("velocity9s") or 0),
+                velocity_15s=float(alert.get("velocity15s") or 0),
+                volume_surge=float(alert.get("volumeSurge") or 1),
+                explosion_score=score,
+                tier=tier,
+                reason=str(alert.get("reason") or ""),
+                daily_move_pct=daily_move,
+                peak_move_pct=float(alert.get("peakMovePct") or daily_move),
+                volume=float(alert.get("volume") or 0),
+            )
+            ict = analyze_explosion_event_ict(event, snap)
+            ext_blocked, ext_reason = extended_session_chase_blocked(event, ict=ict)
+            if ext_blocked:
+                blockers.append(ext_reason or "explosion_extended_chase")
+            late_blocked, late_reason = late_fade_chase_blocked(event, ict)
+            if late_blocked:
+                blockers.append(late_reason or "ict_late_fade_chase")
+        except Exception:
+            pass
+
         if blockers or alert.get("allDayExplosion") or daily_move >= 40:
             gaps.append({
                 "symbol": symbol,
@@ -117,6 +154,10 @@ def _fix_hint(blockers: list[str]) -> str:
         return "Premium-led bypass (PE rip vs bullish index chart)"
     if "not_tradeable_tier" in blockers:
         return "Velocity/volume spike needed for tradeable tier"
+    if any("extended_chase" in b for b in blockers):
+        return "Enter on base-relative early window — day-move % alone looks like a chase"
+    if any("late_fade" in b for b in blockers):
+        return "Enter earlier on flat-base break — do not chase after peak fades"
     return "Review pretrade + directional lock"
 
 
