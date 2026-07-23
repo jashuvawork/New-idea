@@ -714,7 +714,13 @@ class Settings(BaseSettings):
     all_day_explosion_min_score: float = 38.0
     all_day_explosion_session_move_min_pct: float = 40.0
     all_day_explosion_extreme_move_min_pct: float = 80.0
-    # ELITE +100% / 150%+ rips — ALL-IN bypass (AI report → trade)
+    # ELITE +100% / 150%+ rips — ALL-IN bypass (AI report → trade).
+    # NOTE: these move floors sit ABOVE the extended-chase ceiling
+    # (extreme_all_in_bypass_max_move_pct = 70%), so the ALL-IN gate-skip in
+    # is_extreme_explosion_all_in_bypass is intentionally inert — a +100% move is a
+    # late chase, not an entry. Genuine early rips are captured by high-conviction
+    # sizing + the expiry elite-top bypass. elite_move_min is still used by
+    # adaptive_exits (mega-move exit behavior), so it is kept, not removed.
     extreme_explosion_all_in_enabled: bool = True
     extreme_explosion_elite_move_min_pct: float = 100.0
     extreme_explosion_all_in_move_min_pct: float = 150.0
