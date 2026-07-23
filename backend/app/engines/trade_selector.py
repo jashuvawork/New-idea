@@ -302,10 +302,14 @@ def _explosion_candidates(
             detect_fake_explosion_trap,
             extended_session_chase_blocked,
             immature_explosion_blocked,
+            live_explosion_confirmation_blocked,
         )
 
         immature_blocked, _immature_reason = immature_explosion_blocked(event, ict=ict)
         if immature_blocked:
+            continue
+        live_blocked, _live_reason = live_explosion_confirmation_blocked(event, ict=ict)
+        if live_blocked:
             continue
         ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)
         if ext_blocked:
@@ -316,14 +320,16 @@ def _explosion_candidates(
         if trap_block or trap_meta.get("action") == "block":
             continue
         # Displacement-only without flat base / FVG / real rip — skip (Jul20 noise).
+        # Raised floor to early-window min (28%) so ~22% displacement spikes stay out.
         if (
             ict.active
             and ict.displacement
             and not ict.flat_then_vertical
             and not ict.premium_fvg
             and not ict.mega_rip
+            and not ict.volume_awakening
             and max(daily_move, peak_move) < float(
-                getattr(settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
+                getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0
             )
         ):
             continue

@@ -137,6 +137,99 @@ def immature_explosion_blocked(
     return True, f"immature_explosion_move_{move:.1f}%"
 
 
+def _ict_structure_confirmed(ict: Any) -> bool:
+    """True ICT structure — not displacement-only / sticky-tier noise."""
+    if ict is None:
+        return False
+    if not bool(getattr(ict, "active", False)):
+        return False
+    if bool(getattr(ict, "flat_then_vertical", False)):
+        return True
+    if bool(getattr(ict, "mega_rip", False)):
+        return True
+    if bool(getattr(ict, "premium_fvg", False)) and (
+        bool(getattr(ict, "volume_awakening", False))
+        or bool(getattr(ict, "displacement", False))
+    ):
+        return True
+    if bool(getattr(ict, "volume_awakening", False)) and bool(
+        getattr(ict, "displacement", False)
+    ):
+        return True
+    return False
+
+
+def live_explosion_confirmation_blocked(
+    explosion_event: Any,
+    *,
+    ict: Any = None,
+    midday_chop: Optional[bool] = None,
+) -> tuple[bool, str]:
+    """
+    Hard-block wrong-timing explosions that look ELITE but lack live confirmation.
+
+    Jul23 day book failures this stops:
+    - NIFTY 23900 PE ELITE with v3=0.26 / ictPattern=watch (stale sticky tier)
+    - NIFTY 23900 PE ELITE v3=2.35 displacement-only (no flat→vertical)
+    - SENSEX 76200 PE midday displacement spike without structure
+
+    Still allows: ICT flat→vertical with live heat (Jul23 76300 PE profile).
+    """
+    settings = get_settings()
+    if not getattr(settings, "explosion_live_confirm_enabled", True):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+
+    tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False, ""
+
+    v3 = float(getattr(explosion_event, "velocity_3s", 0) or 0)
+    v9 = float(getattr(explosion_event, "velocity_9s", 0) or 0)
+    min_v3 = float(
+        getattr(settings, "explosion_live_confirm_min_velocity_3s", 2.0) or 2.0
+    )
+    # Soft floor for confirmed ICT flat→vertical mid-burst (brief velocity dip).
+    ict_min_v3 = float(
+        getattr(settings, "explosion_live_confirm_ict_min_velocity_3s", 1.5) or 1.5
+    )
+    structure = _ict_structure_confirmed(ict)
+
+    # 1) Stale / cooled live velocity — sticky ELITE alone is not enough.
+    if structure:
+        if v3 < ict_min_v3 and v9 < min_v3:
+            return True, f"stale_live_velocity_v3_{v3:.2f}_ict"
+    elif v3 < min_v3:
+        return True, f"stale_live_velocity_v3_{v3:.2f}"
+
+    # 2) Structure confirmation — displacement-only / watch must not enter.
+    require_structure = bool(
+        getattr(settings, "explosion_live_confirm_require_structure", True)
+    )
+    if require_structure and not structure:
+        # Allow extreme hot velocity + real session rip without ICT object only
+        # when both v3 and session move clear early-window floors.
+        move = _session_peak_move(explosion_event)
+        if ict is not None:
+            move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
+        early_min = float(
+            getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0
+        )
+        hot_v3 = float(
+            getattr(settings, "explosion_live_confirm_hot_velocity_3s", 8.0) or 8.0
+        )
+        # Midday chop: never allow structure-less entries (FOMO spikes).
+        if midday_chop is None:
+            midday_chop = _midday_chop_active()
+        if midday_chop:
+            return True, "midday_no_ict_structure"
+        if not (v3 >= hot_v3 and move >= early_min):
+            return True, "no_ict_structure_confirmation"
+
+    return False, ""
+
+
 def extended_session_chase_blocked(
     explosion_event: Any,
     *,
@@ -636,6 +729,22 @@ def detect_fake_explosion_trap(
             "psychologyEscalate": "FOMO" if post_win else "OVERCONFIDENCE",
         })
         return True, reason, meta
+
+    # Midday/chop + elite narrative without ICT structure → hard block.
+    # Soft lot-cap alone still let Jul23 displacement spikes through.
+    if (
+        getattr(settings, "fake_explosion_trap_midday_require_structure", True)
+        and chopish
+        and elite_hot
+        and not _ict_structure_confirmed(ict)
+    ):
+        meta.update({
+            "fakeExplosionTrap": True,
+            "action": "block",
+            "psychologyEscalate": "FOMO" if post_win else "OVERCONFIDENCE",
+            "structureMissing": True,
+        })
+        return True, "fake_explosion_trap_midday_no_structure", meta
 
     # Soft cut: chop+elite full-size forbidden; post-small-win clamp.
     # Exception: ATM/ITM inside the early base window (28–55%) is the capture

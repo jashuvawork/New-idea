@@ -483,6 +483,7 @@ def _gate_checks(
         detect_fake_explosion_trap,
         extended_session_chase_blocked,
         immature_explosion_blocked,
+        live_explosion_confirmation_blocked,
     )
     from app.engines.ict_breakout_monitor import (
         analyze_explosion_event_ict,
@@ -511,6 +512,23 @@ def _gate_checks(
                 "gate": "immature_explosion",
                 "passed": True,
                 "detail": "session move mature enough",
+            })
+        live_blocked, live_reason = live_explosion_confirmation_blocked(
+            candidate.explosion_event, ict=ict,
+        )
+        if live_blocked:
+            blockers.append(live_reason)
+            gates.append({
+                "gate": "live_explosion_confirmation",
+                "passed": False,
+                "detail": live_reason,
+                "fix": "Need live velocity + ICT structure (flat→vertical / vol+displace) — skip stale ELITE",
+            })
+        else:
+            gates.append({
+                "gate": "live_explosion_confirmation",
+                "passed": True,
+                "detail": "live velocity + structure confirmed",
             })
         ext_blocked, ext_reason = extended_session_chase_blocked(
             candidate.explosion_event, ict=ict,
