@@ -235,6 +235,13 @@ class Settings(BaseSettings):
     # Require a real premium rip before EXPLOSIVE entries (unless true flat→vertical).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 22.0
+    # Live confirmation — sticky ELITE / displacement spikes without live heat+structure
+    # (Jul23 NIFTY 23900 PE v3=0.26 watch, SENSEX 76200 PE midday displacement-only).
+    explosion_live_confirm_enabled: bool = True
+    explosion_live_confirm_min_velocity_3s: float = 2.0
+    explosion_live_confirm_ict_min_velocity_3s: float = 1.5
+    explosion_live_confirm_require_structure: bool = True
+    explosion_live_confirm_hot_velocity_3s: float = 8.0
     # Peak-hold the explosion score for a short window so bursty velocity doesn't flicker
     # it below entry gates mid-rip (SENSEX 76500 PE Jul23: 27→71→36 in one sustained move).
     explosion_score_sticky_enabled: bool = True
@@ -268,6 +275,8 @@ class Settings(BaseSettings):
     fake_explosion_trap_post_win_max_pnl_inr: float = 3_000.0
     fake_explosion_trap_post_win_lookback: int = 1
     fake_explosion_trap_psychology_escalate: bool = True
+    # Midday/chop ELITE without ICT structure → hard block (not soft lot-cap).
+    fake_explosion_trap_midday_require_structure: bool = True
     # Size until first green — no full-size explosions before a proven green (Jul20 FOMO).
     size_until_first_green_enabled: bool = True
     size_until_first_green_lot_cap: int = 6

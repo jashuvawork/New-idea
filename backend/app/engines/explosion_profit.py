@@ -261,6 +261,16 @@ def check_explosion_entry(
     if blocked:
         return False, reason
 
+    from app.engines.explosion_entry_guards import live_explosion_confirmation_blocked
+    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+    ict_live = analyze_explosion_event_ict(event, snap) if snap is not None else None
+    live_blocked, live_reason = live_explosion_confirmation_blocked(
+        event, ict=ict_live,
+    )
+    if live_blocked:
+        return False, live_reason
+
     from app.engines.chop_day_guards import neutral_breadth_blocks_entry
 
     score = max(event.explosion_score, trade.tqs or 0, trade.confidence or 0)
