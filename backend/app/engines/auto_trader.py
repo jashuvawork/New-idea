@@ -44,9 +44,10 @@ from app.engines.instrument_cooldown import record_instrument_close, record_inst
 from app.engines.chop_day_guards import (
     apply_tiered_lot_cap,
     chop_guard_summary,
+    is_loss_streak_elite_bypass_candidate,
     record_session_trade_close,
     reset_session_guards,
-    session_pause_active,
+    resolve_session_entry_pause,
     trades_cap_reached,
 )
 from app.engines.whipsaw_guards import (
@@ -1467,12 +1468,19 @@ async def process(
         and profit_gate.newEntriesAllowed
         and (entries_ok or explosion_early_ok)
     ):
-        paused, pause_reason = session_pause_active()
+        paused, pause_reason, pause_meta = resolve_session_entry_pause(snapshots)
+        loss_streak_elite_only = bool(pause_meta.get("lossStreakEliteOnly"))
         if paused:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": pause_reason,
                 "message": "Loss streak pause — no new entries",
+            })
+        elif loss_streak_elite_only:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": "loss_streak_elite_bypass",
+                "message": "Loss streak pause lifted — high-confidence ELITE / top explosive only",
             })
         cap_hit, cap_reason = trades_cap_reached(state, snapshots)
         if cap_hit:
@@ -1541,6 +1549,16 @@ async def process(
         ):
             best = find_best_entry(snapshots, state, trading_limits)
             if best and explosion_early_ok and not entries_ok and best.mode != "explosion":
+                best = None
+            if best and loss_streak_elite_only and not is_loss_streak_elite_bypass_candidate(best):
+                skipped.append({
+                    "symbol": best.symbol,
+                    "reason": "loss_streak_elite_only",
+                    "message": "Loss streak pause — only high-confidence ELITE / top explosive allowed",
+                    "mode": best.mode,
+                    "score": best.score,
+                    "tier": getattr(best, "tier", None),
+                })
                 best = None
             if best:
                 opened, reason = await _open_from_candidate(best, state, client, news, snapshots)

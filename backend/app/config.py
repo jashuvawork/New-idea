@@ -638,6 +638,14 @@ class Settings(BaseSettings):
     loss_streak_pause_seconds: int = 1200
     session_large_loss_pause_inr: float = 8_000.0
     session_large_loss_pause_seconds: int = 900
+    # Jul23: loss_streak_pause blanked 13:57–14:18 while SENSEX 76400 PE went ELITE.
+    # Lift pause only for high-confidence ELITE / top explosive (not large_loss_pause).
+    loss_streak_elite_bypass_enabled: bool = True
+    loss_streak_elite_bypass_min_score: float = 90.0
+    loss_streak_elite_bypass_min_chart_confidence: float = 56.9
+    loss_streak_elite_bypass_tiers_csv: str = "ELITE,EXPLODING"
+    loss_streak_elite_bypass_min_move_pct: float = 28.0
+    loss_streak_elite_bypass_max_move_pct: float = 70.0
     chop_lots_high: int = 40
     chop_lots_mid: int = 20
     chop_lots_min_rank: float = 48.0
