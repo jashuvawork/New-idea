@@ -33,7 +33,7 @@ def _settings(**overrides):
     s.expiry_worst_day_elite_top_bypass_enabled = True
     s.expiry_worst_day_elite_top_min_score = 62.0
     s.expiry_worst_day_elite_top_min_move_pct = 28.0
-    s.expiry_worst_day_elite_top_max_move_pct = 55.0
+    s.expiry_worst_day_elite_top_max_move_pct = 70.0
     s.expiry_worst_day_elite_top_tiers_csv = "ELITE,EXPLODING"
     s.expiry_worst_day_elite_top_composer_bypass = True
     s.expiry_worst_day_min_rank_score = 72.0
@@ -105,6 +105,38 @@ def test_alert_elite_top_rejects_extended_chase(mock_p, mock_s):
     mock_p.return_value = cfg
     snap = _snap()
     alert = {**snap.explosionAlerts[0], "dailyMovePct": 131.0, "peakMovePct": 202.0}
+    assert alert_is_expiry_elite_top(alert, snap) is False
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
+def test_alert_accepts_fast_rip_at_63pct(mock_p, mock_s):
+    """SENSEX 76500 PE Jul23: EXPLODING score 71, move ~63% (blew past 55 before
+    score confirmed) — now accepted with the 70% ceiling."""
+    cfg = _settings()
+    mock_s.return_value = cfg
+    mock_p.return_value = cfg
+    snap = _snap()
+    alert = {
+        "side": "PUT", "strike": 76500.0, "tier": "EXPLODING",
+        "explosionScore": 71.0, "premium": 98.0,
+        "dailyMovePct": 52.7, "peakMovePct": 63.0, "tradeable": True,
+    }
+    assert alert_is_expiry_elite_top(alert, snap) is True
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
+def test_alert_rejects_over_70pct_chase(mock_p, mock_s):
+    cfg = _settings()
+    mock_s.return_value = cfg
+    mock_p.return_value = cfg
+    snap = _snap()
+    alert = {
+        "side": "PUT", "strike": 76500.0, "tier": "ELITE",
+        "explosionScore": 100.0, "premium": 80.0,
+        "dailyMovePct": 80.0, "peakMovePct": 130.0, "tradeable": True,
+    }
     assert alert_is_expiry_elite_top(alert, snap) is False
 
 
