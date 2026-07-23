@@ -982,7 +982,9 @@ class Settings(BaseSettings):
     # Early flat→vertical (NIFTY 24400 CE 26→45): capture before 80% is reached.
     ict_early_vertical_min_session_move_pct: float = 28.0
     ict_early_vertical_min_velocity_3s: float = 2.0
-    ict_volume_surge_awaken_min: float = 3.0
+    # Aligned with detector volAwaken boost (max(surge, 2.0)) — was 3.0 so ICT
+    # never saw volume_awakening after WS/REST blended surges of ~2.0 (Jul23 gap).
+    ict_volume_surge_awaken_min: float = 2.0
     ict_mega_rip_min_session_move_pct: float = 200.0
     ict_breakout_min_score: float = 28.0
     ict_fvg_score_bonus: float = 14.0

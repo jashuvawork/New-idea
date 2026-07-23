@@ -271,6 +271,21 @@ def analyze_ict_breakout(
 
 
 def analyze_explosion_event_ict(event: Any, snap: Optional[SymbolSnapshot] = None) -> ICTBreakoutSignal:
+    volume = float(getattr(event, "volume", 0) or 0)
+    # Event path used to drop absolute volume (always 0) → ICT never saw abs awaken.
+    # Fall back to detector history carry-forward when the event field is empty.
+    if volume <= 0:
+        try:
+            from app.engines.explosion_detector import _history, _last_known_volume, _strike_key
+
+            sym = str(getattr(event, "symbol", "") or "")
+            side = getattr(event, "side", Side.CALL)
+            strike = float(getattr(event, "strike", 0) or 0)
+            hist = (_history.get(sym) or {}).get(_strike_key(strike, side))
+            if hist:
+                volume = _last_known_volume(hist)
+        except Exception:
+            volume = 0.0
     return analyze_ict_breakout(
         symbol=str(getattr(event, "symbol", "") or ""),
         side=getattr(event, "side", Side.CALL),
@@ -280,6 +295,7 @@ def analyze_explosion_event_ict(event: Any, snap: Optional[SymbolSnapshot] = Non
         peak_move_pct=float(getattr(event, "peak_move_pct", 0) or 0),
         velocity_3s=float(getattr(event, "velocity_3s", 0) or 0),
         velocity_9s=float(getattr(event, "velocity_9s", 0) or 0),
+        volume=volume,
         volume_surge=float(getattr(event, "volume_surge", 0) or 0),
         tier=str(getattr(event, "tier", "") or ""),
         reason=str(getattr(event, "reason", "") or ""),
