@@ -4,6 +4,8 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.engines.explosion_detector import ExplosionEvent, event_to_dict
 from app.engines.explosion_profit import check_explosion_entry
 from app.engines.morning_premium_capture import (

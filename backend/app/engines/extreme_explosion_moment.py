@@ -66,10 +66,16 @@ def is_extreme_explosion_all_in_bypass(
     alert: Optional[dict] = None,
 ) -> bool:
     """
-    ELITE session rips — bypass rank floors only before the extended-chase ceiling.
+    ELITE/EXPLODING extreme-rip ALL-IN bypass — skip entry gates for a genuine rip.
 
-    Past extreme_all_in_bypass_max_move_pct these are late chases (PF killers) and
-    must not bypass gates (Jul17 24250 @ +91%).
+    Inert by design under the current policy: the extended-chase ceiling
+    (``extreme_all_in_bypass_max_move_pct``, 70%) sits *below* the extreme-move
+    floors (``extreme_explosion_elite_move_min_pct`` 100% / ...all_in 150%), so no
+    move can satisfy both — anything big enough to be "extreme" is already past the
+    chase ceiling and must not skip gates (Jul17 24250 @ +91% PF killer). Genuine
+    early base rips are handled by high-conviction sizing + the expiry elite-top
+    bypass instead. The ``floor < ceiling`` guards below make that explicit and keep
+    this a no-op unless a floor is ever deliberately re-tuned below the ceiling.
     """
     settings = get_settings()
     if not settings.extreme_explosion_all_in_enabled:
@@ -89,9 +95,14 @@ def is_extreme_explosion_all_in_bypass(
     elite_min = float(settings.extreme_explosion_elite_move_min_pct)
     all_in_min = float(settings.extreme_explosion_all_in_move_min_pct)
 
-    if tier == "ELITE" and daily_move >= elite_min and score >= min_score:
+    if tier == "ELITE" and elite_min < max_move and daily_move >= elite_min and score >= min_score:
         return True
-    if tier in ("ELITE", "EXPLODING") and daily_move >= all_in_min and score >= min_score:
+    if (
+        tier in ("ELITE", "EXPLODING")
+        and all_in_min < max_move
+        and daily_move >= all_in_min
+        and score >= min_score
+    ):
         return True
     return False
 
@@ -134,9 +145,9 @@ def is_high_mover_elite_bypass(
     max_move = float(getattr(settings, "high_mover_bypass_max_move_pct", 70.0) or 70.0)
     if daily_move >= max_move:
         return False
-    elite_floor = float(settings.extreme_explosion_elite_move_min_pct) * 0.95
-    if daily_move >= elite_floor and score >= settings.all_day_explosion_min_score:
-        return True
+    # (An elite-move-floor branch used to sit here, but elite_move_min (100%) * 0.95 = 95%
+    # is always above the 70% ceiling above, so it could never fire. Removed as dead code —
+    # the rip_min / session-move branches below cover genuine sub-ceiling ELITE rips.)
     rip_min = float(getattr(settings, "vertical_rip_bypass_min_peak_pct", 30.0) or 30.0)
     if daily_move >= rip_min and score >= settings.all_day_explosion_min_score - 2:
         return True

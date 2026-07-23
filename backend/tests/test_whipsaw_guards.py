@@ -291,7 +291,13 @@ def test_validate_allows_entry_after_long_gap(mock_chop, mock_ws, mock_pre, mock
     with patch("app.engines.whipsaw_guards.check_bearish_sideways_entry", return_value=(False, "ok")):
         with patch("app.engines.whipsaw_guards.detect_ce_pe_whipsaw", return_value=(False, {})):
             ok, reason, _ = validate_candidate(cand, state, snapshots={"NIFTY": _snap()})
-    assert ok or "last_n" in reason or "best_trades" in reason
+    # This test only asserts the long gap is NOT blocked by the reentry-interval gate.
+    # Reaching any downstream gate (rank/last_n/best_trades, or the immature-move gate
+    # on this minimal bare candidate) proves the reentry gate let it through.
+    assert ok or any(
+        k in reason for k in ("last_n", "best_trades", "immature", "rank")
+    )
+    assert "entry_interval_after_loss" not in reason
 
 
 @patch("app.engines.morning_premium_capture.get_settings", return_value=_settings())

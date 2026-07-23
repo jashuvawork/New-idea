@@ -308,7 +308,11 @@ def _explosion_candidates(
         immature_blocked, _immature_reason = immature_explosion_blocked(event, ict=ict)
         if immature_blocked:
             continue
-        live_blocked, _live_reason = live_explosion_confirmation_blocked(event, ict=ict)
+        from app.engines.morning_premium_capture import is_premium_capture_event
+
+        live_blocked, _live_reason = live_explosion_confirmation_blocked(
+            event, ict=ict, premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
+        )
         if live_blocked:
             continue
         ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)

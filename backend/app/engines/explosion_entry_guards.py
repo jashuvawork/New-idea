@@ -164,6 +164,7 @@ def live_explosion_confirmation_blocked(
     *,
     ict: Any = None,
     midday_chop: Optional[bool] = None,
+    premium_capture: bool = False,
 ) -> tuple[bool, str]:
     """
     Hard-block wrong-timing explosions that look ELITE but lack live confirmation.
@@ -173,7 +174,9 @@ def live_explosion_confirmation_blocked(
     - NIFTY 23900 PE ELITE v3=2.35 displacement-only (no flat→vertical)
     - SENSEX 76200 PE midday displacement spike without structure
 
-    Still allows: ICT flat→vertical with live heat (Jul23 76300 PE profile).
+    Still allows: ICT flat→vertical with live heat (Jul23 76300 PE profile), and
+    genuine volume-backed premium/afternoon captures (slow grinds, low velocity by
+    design — e.g. NIFTY 24250 PE 1pm consolidation breakout).
     """
     settings = get_settings()
     if not getattr(settings, "explosion_live_confirm_enabled", True):
@@ -195,6 +198,21 @@ def live_explosion_confirmation_blocked(
         getattr(settings, "explosion_live_confirm_ict_min_velocity_3s", 1.5) or 1.5
     )
     structure = _ict_structure_confirmed(ict)
+
+    # Genuine premium/afternoon capture is a validated slow-grind path (in-window +
+    # score + volume + consolidation + chart alignment). It is live-confirmed by that
+    # classification, not by raw velocity — afternoon consolidation breakouts are slow
+    # by design. Require a real volume surge (or ICT structure) so a structure-less,
+    # low-volume displacement spike cannot ride this bypass.
+    if premium_capture and getattr(
+        settings, "explosion_live_confirm_premium_capture_bypass", True
+    ):
+        vol_surge = float(getattr(explosion_event, "volume_surge", 0) or 0)
+        min_vol = float(
+            getattr(settings, "explosion_live_confirm_premium_min_vol_surge", 1.3) or 1.3
+        )
+        if structure or vol_surge >= min_vol:
+            return False, ""
 
     # 1) Stale / cooled live velocity — sticky ELITE alone is not enough.
     if structure:
