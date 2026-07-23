@@ -235,6 +235,10 @@ class Settings(BaseSettings):
     # Require a real premium rip before EXPLOSIVE entries (unless true flat→vertical).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 22.0
+    # Peak-hold the explosion score for a short window so bursty velocity doesn't flicker
+    # it below entry gates mid-rip (SENSEX 76500 PE Jul23: 27→71→36 in one sustained move).
+    explosion_score_sticky_enabled: bool = True
+    explosion_score_sticky_seconds: float = 45.0
     # CHOP/RANGE — stricter floor than immature (false EXPLODING is common).
     explosion_chop_min_session_move_pct: float = 28.0
     # Faded vertical rip — peak move huge but live velocity cooled (caution sizing)

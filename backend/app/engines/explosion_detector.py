@@ -25,6 +25,10 @@ _session_peak: dict[str, float] = {}
 _peak_velocity: dict[str, tuple[float, datetime]] = {}
 # Hold BUILDING+ tier briefly after velocity fades (vertical 1-min candle gaps)
 _tier_sticky: dict[str, tuple[str, datetime]] = {}
+# Hold peak explosion score briefly — velocity is bursty so raw score oscillates
+# (27→71→36 during one sustained rip). Peak-hold stops the score≥gate check from
+# flickering below the cutoff mid-move (missed SENSEX 76500 PE Jul23).
+_score_sticky: dict[str, tuple[float, datetime]] = {}
 _session_date: Optional[str] = None
 MAX_HISTORY = 40  # ~2 min at 3s poll
 _TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
@@ -39,6 +43,7 @@ def _roll_session() -> None:
         _session_low.clear()
         _session_peak.clear()
         _tier_sticky.clear()
+        _score_sticky.clear()
         _peak_velocity.clear()
 
 
@@ -50,6 +55,7 @@ def reset_detector_state_for_tests() -> None:
     _session_low.clear()
     _session_peak.clear()
     _tier_sticky.clear()
+    _score_sticky.clear()
     _peak_velocity.clear()
     _session_date = None
 
@@ -247,6 +253,27 @@ def _apply_sticky_tier(strike_key: str, tier: str) -> str:
         _tier_sticky[strike_key] = (best, now + timedelta(seconds=hold_s))
         tier = best
     return tier
+
+
+def _apply_sticky_score(strike_key: str, score: float, tier: str) -> float:
+    """Peak-hold explosion score for a short window so bursty velocity doesn't
+    flicker it below entry gates during a sustained rip. Only holds for real
+    tiers (EXPLODING/ELITE); decays after the window."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not getattr(settings, "explosion_score_sticky_enabled", True):
+        return score
+    hold_s = float(getattr(settings, "explosion_score_sticky_seconds", 45.0) or 45.0)
+    now = datetime.now(IST)
+    prev = _score_sticky.get(strike_key)
+    held = score
+    if prev and now < prev[1]:
+        held = max(score, prev[0])
+    # Only retain when the current read is a genuine rip tier (avoid holding WATCH noise).
+    if _TIER_RANK.get(str(tier or "").upper(), 0) >= _TIER_RANK["EXPLODING"] or held > score:
+        _score_sticky[strike_key] = (held, now + timedelta(seconds=hold_s))
+    return round(held, 1)
 
 
 def _effective_session_move(open_move: float, peak_move: float) -> float:
@@ -727,6 +754,8 @@ def scan_chain_explosions(
                 score, v3=v3, peak_v3=peak_v3, tier=tier, peak_move=peak_move,
             )
             score = apply_peak_move_score_boost(score, peak_move, tier)
+            # Peak-hold to stop the score flickering below entry gates mid-rip.
+            score = _apply_sticky_score(f"{symbol}:{key_h}", score, tier)
 
             reason_parts = []
             if v3 >= 2:
