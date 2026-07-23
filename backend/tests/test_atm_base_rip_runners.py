@@ -70,7 +70,7 @@ def _entry_settings():
     s.explosion_exhaustion_consolidation_v9_max = 1.2
     s.neutral_breadth_min_score = 55.0
     s.chop_day_guards_enabled = True
-    s.base_rip_never_green_grace_seconds = 90.0
+    s.base_rip_never_green_grace_seconds = 150.0
     s.base_rip_never_green_stop_mult = 2.0
     return s
 
@@ -133,6 +133,30 @@ def test_never_green_grace_defers_hc_runner():
     assert _defer_adaptive_stop(
         trade, best=0.0, hold=30.0, settings=s, pnl_pts=-5.0, stop_floor=8.0,
     ) is True
+    # Still within extended 150s grace (Jul23 kill was ~90s)
+    assert _defer_adaptive_stop(
+        trade, best=0.0, hold=120.0, settings=s, pnl_pts=-5.0, stop_floor=8.0,
+    ) is True
+
+
+def test_never_green_grace_expires_after_window():
+    s = _entry_settings()
+    trade = PaperTrade(
+        id="hc1b",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=76300.0,
+        entryPremium=40.0,
+        currentPremium=35.0,
+        lots=10,
+        strategyType=StrategyType.EXPLOSIVE,
+        openedAt=datetime.now(IST),
+        bestPnlPoints=0.0,
+        entryContext={"highConviction": True, "ictFlatThenVertical": True},
+    )
+    assert _defer_adaptive_stop(
+        trade, best=0.0, hold=160.0, settings=s, pnl_pts=-5.0, stop_floor=8.0,
+    ) is False
 
 
 def test_never_green_grace_hard_floor_still_kills():

@@ -293,8 +293,9 @@ class Settings(BaseSettings):
     # Wider trail so high-conviction runners hold the move instead of booking at ~38% of peak.
     high_conviction_trail_keep_ratio: float = 0.30
     high_conviction_defer_profit_lock: bool = True
-    # Never-green grace for ICT/HC ATM base rips (Jul23 76300 PE killed in 90s at best=0).
-    base_rip_never_green_grace_seconds: float = 90.0
+    # Never-green grace for ICT/HC ATM base rips (Jul23 76300 PE killed ~90s at best=0).
+    # 150s gives the vertical a bit more room to print first green before adaptive SL.
+    base_rip_never_green_grace_seconds: float = 150.0
     base_rip_never_green_stop_mult: float = 2.0
     # Composer bias: allow ICT flat→vertical explosions (not only ELITE).
     composer_ict_flat_vertical_bias_bypass: bool = True

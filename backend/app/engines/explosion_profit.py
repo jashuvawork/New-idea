@@ -562,7 +562,7 @@ def _defer_adaptive_stop(
     # Base-rip runners get a short never-green grace with a wider floor so a
     # brief dip after entry (Jul23 76300 PE) does not kill the rip at best=0.
     runner = _is_base_rip_runner_trade(trade)
-    grace_s = _cfg_float(settings, "base_rip_never_green_grace_seconds", 90.0)
+    grace_s = _cfg_float(settings, "base_rip_never_green_grace_seconds", 150.0)
     grace_mult = _cfg_float(settings, "base_rip_never_green_stop_mult", 2.0)
     hard_floor = float(stop_floor or 0)
     if runner and best <= 0 and hold < grace_s and hard_floor > 0:
