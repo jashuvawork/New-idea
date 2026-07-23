@@ -483,7 +483,10 @@ class Settings(BaseSettings):
     # Widened from ELITE/70 so matched PUT base rips (Jul21 EXPLODING score 50–65) can enter.
     expiry_worst_day_elite_top_min_score: float = 62.0
     expiry_worst_day_elite_top_min_move_pct: float = 28.0
-    expiry_worst_day_elite_top_max_move_pct: float = 55.0
+    # Ceiling raised 55→70 (the chase ceiling): a fast matched rip (SENSEX 76500 PE
+    # Jul23) blew past 55% before its explosion score confirmed ≥62, so the old
+    # score-AND-move≤55 window never aligned. 70 still blocks >70% late chases.
+    expiry_worst_day_elite_top_max_move_pct: float = 70.0
     expiry_worst_day_elite_top_tiers_csv: str = "ELITE,EXPLODING"
     expiry_worst_day_elite_top_composer_bypass: bool = True
     expiry_dual_scalp_mode: bool = True
