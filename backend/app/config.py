@@ -453,10 +453,18 @@ class Settings(BaseSettings):
     expiry_explosion_max_otm_steps: int = 4
     moneyness_max_itm_steps: int = 2
     moneyness_explosion_prefer: str = "ATM"
+    # When explosion prefer is ATM, hard-block OTM (Jul23 76100 PE −₹1.3k after ATM miss).
+    # ATM + shallow ITM still allowed; deep OTM FOMO is not a soft rank penalty.
+    moneyness_explosion_block_otm: bool = True
     moneyness_scalp_chop_prefer: str = "ITM"
     moneyness_high_conf_prefer: str = "ITM"
     moneyness_rank_bonus: float = 12.0
     moneyness_mismatch_penalty: float = 15.0
+    # ATM/ITM inside the 28–55% base window must not get fake-trap soft lot-cap
+    # (Jul23 76300 PE high-conviction was cut to 6 lots then stopped never-green).
+    fake_explosion_trap_skip_soft_cut_base_window: bool = True
+    # High-conviction max lots win over fake-trap soft cap (hard block still applies).
+    high_conviction_bypasses_fake_trap_lot_cap: bool = True
 
     # Expiry-day playbook — fewer trades, morning focus, worst-day prediction
     expiry_day_guards_enabled: bool = True

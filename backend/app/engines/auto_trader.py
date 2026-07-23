@@ -515,7 +515,7 @@ async def _open_from_candidate(
             lots = max(1, int(lots * lot_scale))
 
     # High-conviction base rip → take MAX lots (bypass defensive/first-green throttles).
-    # fake-trap chop cap still runs after, so chop/FOMO can't ride this to oversize.
+    # Soft fake-trap lot-cap is skipped for high-conviction; hard trap block still applies.
     high_conviction = False
     elevated_size = False
     if candidate.mode == "explosion" and candidate.explosion_event is not None:
@@ -588,7 +588,12 @@ async def _open_from_candidate(
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
         # Must run AFTER good-day ICT max-lot force (Jul20 49-lot FOMO hole).
-        lots = cap_fake_explosion_trap_lots(lots, trap_meta)
+        bypass_soft = bool(high_conviction) and bool(
+            getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
+        )
+        lots = cap_fake_explosion_trap_lots(
+            lots, trap_meta, bypass_soft_cap=bypass_soft,
+        )
         if lots <= 0:
             return False, str(trap_meta.get("action") or "fake_explosion_trap")
     if candidate.mode in ("explosion", "scalp") and not high_conviction:
@@ -653,7 +658,12 @@ async def _open_from_candidate(
                 if trap_block or live_trap.get("action") == "block":
                     return False, trap_reason
                 if trap_meta.get("action") == "cut_size":
-                    lots = cap_fake_explosion_trap_lots(lots, trap_meta)
+                    bypass_soft = bool(high_conviction) and bool(
+                        getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
+                    )
+                    lots = cap_fake_explosion_trap_lots(
+                        lots, trap_meta, bypass_soft_cap=bypass_soft,
+                    )
                     if lots <= 0:
                         return False, "fake_explosion_trap"
         else:

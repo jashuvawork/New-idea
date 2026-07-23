@@ -30,6 +30,7 @@ def _settings(**overrides):
     s.fake_explosion_trap_post_win_max_pnl_inr = 3000.0
     s.fake_explosion_trap_post_win_lookback = 1
     s.fake_explosion_trap_psychology_escalate = True
+    s.fake_explosion_trap_skip_soft_cut_base_window = True
     s.moneyness_explosion_prefer = "ATM"
     s.trade_moneyness_mode = "AUTO"
     s.midday_chop_start_hour = 11
@@ -162,7 +163,7 @@ def test_post_small_win_cuts_size(mock_collect, mock_money_settings, mock_settin
                 strike=78300.0,
             )
         ],
-    ):
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
         blocked, reason, meta = detect_fake_explosion_trap(
             cand, snap, state=MagicMock(),
         )
@@ -211,19 +212,27 @@ def test_clean_trend_atm_not_trapped(mock_money_settings, mock_settings):
 @patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.moneyness.get_settings")
 def test_jul15_atm_base_window_not_hard_blocked(mock_money_settings, mock_settings):
-    """RANGE + ELITE + ATM + 32–45% move = Jul15 keep — soft size cut only, not hard block."""
+    """RANGE + ELITE + ATM + 32–45% move = Jul15 keep — no hard block, no soft lot-cap."""
     cfg = _settings()
     mock_settings.return_value = cfg
     mock_money_settings.return_value = cfg
     snap = _snap(or_pos="BELOW")
-    cand = _candidate(_event(daily=32.0, v3=7.9, strike=24250.0), snap)
+    # True ATM (24200) — 24250 is 1-step OTM and must still be soft-cut capable.
+    cand = _candidate(_event(daily=32.0, v3=7.9, strike=24200.0), snap)
     with patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
         blocked, reason, meta = detect_fake_explosion_trap(cand, snap)
     assert blocked is False
-    assert meta.get("action") == "cut_size"
+    assert meta.get("action") not in ("block", "cut_size")
     assert "base_window" in meta.get("conflictFlags", [])
     assert "session_extended" not in meta.get("conflictFlags", [])
-    assert cap_fake_explosion_trap_lots(49, meta) == 6
+    assert cap_fake_explosion_trap_lots(49, meta) == 49
+
+
+def test_high_conviction_bypasses_soft_trap_cap():
+    meta = {"fakeExplosionTrap": True, "action": "cut_size", "lotCap": 6}
+    assert cap_fake_explosion_trap_lots(40, meta, bypass_soft_cap=True) == 40
+    assert cap_fake_explosion_trap_lots(40, meta, bypass_soft_cap=False) == 6
+    assert cap_fake_explosion_trap_lots(40, {"fakeExplosionTrap": True, "action": "block"}, bypass_soft_cap=True) == 0
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
