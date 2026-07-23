@@ -242,6 +242,13 @@ class Settings(BaseSettings):
     explosion_live_confirm_ict_min_velocity_3s: float = 1.5
     explosion_live_confirm_require_structure: bool = True
     explosion_live_confirm_hot_velocity_3s: float = 8.0
+    # Premium/afternoon captures are slow volume-backed grinds (low velocity by design,
+    # e.g. NIFTY 24250 PE 1pm consolidation breakout). They are already validated by the
+    # capture criteria (window+score+volume+consolidation+chart), so a genuine one with a
+    # real volume surge is live-confirmed by that — don't re-block it on the velocity
+    # floor. A structure-less displacement spike (low volume) still gets blocked.
+    explosion_live_confirm_premium_capture_bypass: bool = True
+    explosion_live_confirm_premium_min_vol_surge: float = 1.3
     # Peak-hold the explosion score for a short window so bursty velocity doesn't flicker
     # it below entry gates mid-rip (SENSEX 76500 PE Jul23: 27→71→36 in one sustained move).
     explosion_score_sticky_enabled: bool = True

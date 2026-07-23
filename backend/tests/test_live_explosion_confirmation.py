@@ -24,6 +24,8 @@ def _settings(**overrides):
     s.explosion_live_confirm_ict_min_velocity_3s = 1.5
     s.explosion_live_confirm_require_structure = True
     s.explosion_live_confirm_hot_velocity_3s = 8.0
+    s.explosion_live_confirm_premium_capture_bypass = True
+    s.explosion_live_confirm_premium_min_vol_surge = 1.3
     s.explosion_early_window_min_move_pct = 28.0
     s.fake_explosion_trap_enabled = True
     s.fake_explosion_trap_midday_require_structure = True
@@ -45,13 +47,14 @@ def _settings(**overrides):
     return s
 
 
-def _event(*, tier="ELITE", v3=0.26, v9=0.5, move=27.0):
+def _event(*, tier="ELITE", v3=0.26, v9=0.5, move=27.0, vol_surge=2.5):
     return SimpleNamespace(
         tier=tier,
         velocity_3s=v3,
         velocity_9s=v9,
         daily_move_pct=move,
         peak_move_pct=move,
+        volume_surge=vol_surge,
         symbol="NIFTY",
         strike=23900.0,
         side=Side.PUT,
@@ -134,6 +137,49 @@ def test_hot_non_ict_outside_midday_allowed(mock_s):
         _event(v3=12.0, move=35.0), ict=None, midday_chop=False,
     )
     assert blocked is False
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_premium_capture_slow_grind_allowed(mock_s):
+    """NIFTY 24250 PE 1pm profile — slow volume-backed afternoon consolidation
+    breakout (low velocity, no ICT structure) is live-confirmed by its capture
+    classification + volume surge and must not be blocked on the velocity floor."""
+    mock_s.return_value = _settings()
+    blocked, reason = live_explosion_confirmation_blocked(
+        _event(tier="BUILDING", v3=1.1, v9=1.35, move=0.0, vol_surge=1.62),
+        ict=_ict(active=False, displacement=False, flat_then_vertical=False),
+        midday_chop=False,
+        premium_capture=True,
+    )
+    assert blocked is False
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_premium_capture_low_volume_still_blocked(mock_s):
+    """A structure-less, low-volume slow spike cannot ride the premium bypass —
+    without a real volume surge it is still blocked on the velocity floor."""
+    mock_s.return_value = _settings()
+    blocked, reason = live_explosion_confirmation_blocked(
+        _event(tier="BUILDING", v3=1.1, v9=1.35, move=0.0, vol_surge=1.0),
+        ict=_ict(active=False, displacement=False, flat_then_vertical=False),
+        midday_chop=False,
+        premium_capture=True,
+    )
+    assert blocked is True
+    assert "stale_live_velocity" in reason
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_premium_capture_flag_off_no_bypass(mock_s):
+    """Bypass is opt-in — with premium_capture=False the slow grind is still blocked."""
+    mock_s.return_value = _settings()
+    blocked, reason = live_explosion_confirmation_blocked(
+        _event(tier="BUILDING", v3=1.1, v9=1.35, move=0.0, vol_surge=1.62),
+        ict=_ict(active=False, displacement=False, flat_then_vertical=False),
+        midday_chop=False,
+        premium_capture=False,
+    )
+    assert blocked is True
 
 
 @patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=True)
