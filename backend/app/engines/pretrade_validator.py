@@ -596,9 +596,26 @@ def validate_candidate(
                 side_val = side.value if hasattr(side, "value") else str(side or "").upper()
                 if bias in ("CALL", "PUT") and side_val in ("CALL", "PUT") and bias != side_val:
                     # Allow ELITE explosions to bypass soft bias; hard-block scalps/quick.
+                    # ICT flat→vertical explosions also bypass (early ATM PE blocked as BUILDING).
                     mode = str(getattr(candidate, "mode", "") or "")
                     tier = str(getattr(candidate, "tier", "") or "").upper()
-                    if mode != "explosion" or tier not in ("ELITE",):
+                    ict_bypass = False
+                    if (
+                        mode == "explosion"
+                        and bool(getattr(settings, "composer_ict_flat_vertical_bias_bypass", True))
+                    ):
+                        alert = getattr(candidate, "alert", None) or {}
+                        ict_flat = bool(
+                            getattr(candidate, "ictFlatThenVertical", False)
+                            or (alert.get("ictFlatThenVertical") if isinstance(alert, dict) else False)
+                        )
+                        if not ict_flat:
+                            ict_obj = getattr(candidate, "ict", None)
+                            ict_flat = bool(getattr(ict_obj, "flat_then_vertical", False))
+                        if ict_flat:
+                            ict_bypass = True
+                            meta["composerBiasBypass"] = "ict_flat_vertical"
+                    if mode != "explosion" or (tier not in ("ELITE",) and not ict_bypass):
                         meta["composerBias"] = bias
                         return False, f"composer_bias_{bias.lower()}_blocks_{side_val.lower()}", meta
         except Exception:

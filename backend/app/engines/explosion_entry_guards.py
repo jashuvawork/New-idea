@@ -287,18 +287,35 @@ def extended_session_chase_blocked(
         abs_cap = float(
             getattr(settings, "ict_base_relative_chase_abs_move_cap_pct", 160.0) or 160.0
         )
-        if 0 < base_move <= base_max and move <= abs_cap:
+        # True low-base rips (30→140) print huge session % while base_rel stays
+        # early-window — ignore abs_cap when flat+vol base break is confirmed.
+        ignore_abs = bool(
+            getattr(settings, "ict_base_relative_ignore_abs_cap", True)
+        )
+        if 0 < base_move <= base_max and (ignore_abs or move <= abs_cap):
             return False, ""
 
     return True, f"explosion_extended_chase_{move:.0f}%"
 
 
-def cap_extended_chase_lots(lots: int, explosion_event: Any) -> int:
+def cap_extended_chase_lots(lots: int, explosion_event: Any, *, ict: Any = None) -> int:
     """Shrink size in the soft extended zone; hard-cap all explosion size."""
     settings = get_settings()
     hard_cap = int(getattr(settings, "explosion_hard_lot_cap", 10) or 10)
     lots = min(max(1, lots), hard_cap)
     move = _session_peak_move(explosion_event)
+    # ICT flat→vertical still inside base-relative early window keeps full size.
+    if (
+        ict is not None
+        and bool(getattr(ict, "flat_then_vertical", False))
+        and bool(getattr(ict, "active", False))
+    ):
+        base_move = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+        base_max = float(
+            getattr(settings, "ict_base_relative_chase_max_move_pct", 55.0) or 55.0
+        )
+        if 0 < base_move <= base_max:
+            return lots
     soft = float(getattr(settings, "explosion_extended_soft_min_move_pct", 50.0) or 50.0)
     if move >= soft:
         soft_cap = int(getattr(settings, "explosion_extended_soft_lot_cap", 6) or 6)

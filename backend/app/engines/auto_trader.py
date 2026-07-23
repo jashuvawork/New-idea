@@ -428,8 +428,14 @@ async def _open_from_candidate(
             cap_extended_chase_lots,
             cap_faded_rip_lots,
         )
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
-        lots = cap_extended_chase_lots(lots, candidate.explosion_event)
+        chase_ict = (
+            analyze_explosion_event_ict(candidate.explosion_event, snap)
+            if candidate.explosion_event is not None
+            else None
+        )
+        lots = cap_extended_chase_lots(lots, candidate.explosion_event, ict=chase_ict)
         if faded_rip_meta:
             lots = cap_faded_rip_lots(lots)
     elif candidate.mode == "worst_day_itm_fade":
@@ -520,38 +526,62 @@ async def _open_from_candidate(
     elevated_size = False
     if candidate.mode == "explosion" and candidate.explosion_event is not None:
         from app.engines.chart_exit_levels import chart_trade_confidence
-        from app.engines.explosion_confidence import is_high_conviction_entry
+        from app.engines.explosion_confidence import (
+            is_elevated_size_entry,
+            is_high_conviction_entry,
+        )
 
         ev = candidate.explosion_event
-        conv_move = max(
-            float(getattr(ev, "daily_move_pct", 0) or 0),
-            float(getattr(ev, "peak_move_pct", 0) or 0),
-        )
         conv_chart_conf, _ = chart_trade_confidence(snap, candidate.side)
-        high_conviction = is_high_conviction_entry(
-            side=candidate.side,
-            snap=snap,
-            tier=str(candidate.tier or ""),
-            score=float(candidate.confidence or getattr(ev, "explosion_score", 0) or 0),
-            move_pct=conv_move,
-            chart_confidence=conv_chart_conf,
-        )
+        conv_score = float(candidate.confidence or getattr(ev, "explosion_score", 0) or 0)
+        # Moves to test against the 28-55% sizing window. Off-the-day-low move is the
+        # default. A fast base rip can blow past 55% off the day low before ELITE score
+        # confirms, which would drop a genuine flat→vertical breakout back to base lots
+        # (entered but tiny — the "small position on a great runner" problem). For a
+        # confirmed flat→vertical breakout also test the base-relative move (distance
+        # from the consolidation base) so the runner still earns elevated/high-conviction
+        # lots. Purely additive: only ADDS a qualifying move, never removes one. Mirrors
+        # the extended-chase entry-guard base-relative bypass.
+        move_candidates = [
+            max(
+                float(getattr(ev, "daily_move_pct", 0) or 0),
+                float(getattr(ev, "peak_move_pct", 0) or 0),
+            )
+        ]
+        try:
+            from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+            ict_sizing = analyze_explosion_event_ict(ev, snap)
+            if (
+                ict_sizing.active
+                and ict_sizing.flat_then_vertical
+                and float(ict_sizing.base_relative_move_pct or 0) > 0
+            ):
+                move_candidates.append(float(ict_sizing.base_relative_move_pct))
+        except Exception:
+            pass
+
+        def _size_gate(gate_fn: Any) -> bool:
+            return any(
+                gate_fn(
+                    side=candidate.side,
+                    snap=snap,
+                    tier=str(candidate.tier or ""),
+                    score=conv_score,
+                    move_pct=mv,
+                    chart_confidence=conv_chart_conf,
+                )
+                for mv in move_candidates
+            )
+
+        high_conviction = _size_gate(is_high_conviction_entry)
         if high_conviction and getattr(settings, "high_conviction_sizing_enabled", True):
             from app.engines.capital_allocator import max_lots_for_capital
 
             lots = max(lots, max_lots_for_capital(symbol, fill_premium))
         elif getattr(settings, "elevated_size_enabled", True):
             # Strong EXPLODING base rip (not full high-conviction) → elevated (1.5x) size.
-            from app.engines.explosion_confidence import is_elevated_size_entry
-
-            if is_elevated_size_entry(
-                side=candidate.side,
-                snap=snap,
-                tier=str(candidate.tier or ""),
-                score=float(candidate.confidence or getattr(ev, "explosion_score", 0) or 0),
-                move_pct=conv_move,
-                chart_confidence=conv_chart_conf,
-            ):
+            if _size_gate(is_elevated_size_entry):
                 from app.engines.capital_allocator import max_lots_for_capital
 
                 scale = float(getattr(settings, "elevated_size_lot_scale", 1.5) or 1.5)

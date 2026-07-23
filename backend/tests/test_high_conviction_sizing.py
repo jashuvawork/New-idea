@@ -148,6 +148,68 @@ def test_elevated_rejects_wrong_side(mock_s):
     ) is False
 
 
+def _size_gate(gate_fn, *, side, snap, tier, score, chart_confidence, move_candidates):
+    """Mirror of auto_trader._size_gate: qualify if ANY candidate move is in window."""
+    return any(
+        gate_fn(
+            side=side, snap=snap, tier=tier, score=score,
+            move_pct=mv, chart_confidence=chart_confidence,
+        )
+        for mv in move_candidates
+    )
+
+
+@patch("app.engines.explosion_confidence.get_settings")
+def test_base_relative_move_upsizes_fast_rip(mock_s):
+    """Fast base rip (SENSEX 76300 PE profile): raw peak move blew past 55% off the
+    day low, but the flat→vertical break off the consolidation base is only ~40%.
+    Off-the-low move alone disqualifies; base-relative move keeps it high-conviction."""
+    mock_s.return_value = _settings()
+    off_low_move = 92.0  # ran hard off the day low before ELITE confirmed
+    base_relative_move = 40.0  # distance from the flat consolidation base
+
+    # Off-the-low move alone → NOT high conviction (looks like an extended chase)
+    assert is_high_conviction_entry(
+        side=Side.PUT, snap=_snap(), tier="ELITE", score=100.0,
+        move_pct=off_low_move, chart_confidence=95.0,
+    ) is False
+
+    # With base-relative move added as a candidate → qualifies for max lots
+    assert _size_gate(
+        is_high_conviction_entry, side=Side.PUT, snap=_snap(), tier="ELITE",
+        score=100.0, chart_confidence=95.0,
+        move_candidates=[off_low_move, base_relative_move],
+    ) is True
+
+
+@patch("app.engines.explosion_confidence.get_settings")
+def test_base_relative_move_upsizes_exploding_rip(mock_s):
+    """Same for the elevated (1.5x) tier: strong EXPLODING rip past 55% off the low
+    still earns elevated size when the base-relative break is in the 28-55% window."""
+    mock_s.return_value = _settings()
+    assert is_elevated_size_entry(
+        side=Side.PUT, snap=_snap(), tier="EXPLODING", score=73.0,
+        move_pct=88.0, chart_confidence=95.0,
+    ) is False
+    assert _size_gate(
+        is_elevated_size_entry, side=Side.PUT, snap=_snap(), tier="EXPLODING",
+        score=73.0, chart_confidence=95.0,
+        move_candidates=[88.0, 42.0],
+    ) is True
+
+
+@patch("app.engines.explosion_confidence.get_settings")
+def test_base_relative_still_rejects_true_late_chase(mock_s):
+    """A genuine late chase (both off-low AND base-relative move are extended) stays
+    blocked — base-relative is additive, it never rescues a real chase."""
+    mock_s.return_value = _settings()
+    assert _size_gate(
+        is_high_conviction_entry, side=Side.PUT, snap=_snap(), tier="ELITE",
+        score=100.0, chart_confidence=95.0,
+        move_candidates=[92.0, 70.0],
+    ) is False
+
+
 def test_trade_is_high_conviction_flag():
     t = MagicMock()
     t.entryContext = {"highConviction": True}

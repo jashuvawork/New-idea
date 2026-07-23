@@ -293,6 +293,13 @@ class Settings(BaseSettings):
     # Wider trail so high-conviction runners hold the move instead of booking at ~38% of peak.
     high_conviction_trail_keep_ratio: float = 0.30
     high_conviction_defer_profit_lock: bool = True
+    # Never-green grace for ICT/HC ATM base rips (Jul23 76300 PE killed in 90s at best=0).
+    base_rip_never_green_grace_seconds: float = 90.0
+    base_rip_never_green_stop_mult: float = 2.0
+    # Composer bias: allow ICT flat→vertical explosions (not only ELITE).
+    composer_ict_flat_vertical_bias_bypass: bool = True
+    # Base-relative chase: ignore huge session % when base_rel is still early-window.
+    ict_base_relative_ignore_abs_cap: bool = True
     # Elevated size tier — strong EXPLODING/ELITE base rip below full high-conviction.
     # 1.5x base size when score>=65 + chartConf>=58.8 + matched + 28-55% window.
     # (was chartConf>=90 on the old clamp; rescale(90)≈58.8)

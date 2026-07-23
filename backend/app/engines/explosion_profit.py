@@ -28,6 +28,49 @@ def _cfg_float(settings, name: str, default: float) -> float:
     return float(default)
 
 
+def _ict_flat_vertical_entry_ok(
+    event: ExplosionEvent,
+    snap: Optional[SymbolSnapshot],
+) -> bool:
+    """BUILDING-tier ICT flat→vertical is enterable in the early base window.
+
+    Without this, selector surfaces ICT BUILDING at 28% but check_explosion_entry
+    rejects until EXPLODING (≥40% session ladder) — Jul23 76300 PE entered late.
+    """
+    if event is None or snap is None:
+        return False
+    if str(getattr(event, "tier", "") or "").upper() not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+    ict = analyze_explosion_event_ict(event, snap)
+    if not bool(getattr(ict, "active", False)):
+        return False
+    if not bool(getattr(ict, "flat_then_vertical", False)):
+        return False
+    return bool(
+        getattr(ict, "volume_awakening", False)
+        or getattr(ict, "displacement", False)
+        or getattr(ict, "premium_fvg", False)
+    )
+
+
+def _is_base_rip_runner_trade(trade: PaperTrade) -> bool:
+    """High-conviction / ICT flat→vertical / max-profit — deserve never-green grace."""
+    ctx = trade.entryContext or {}
+    if ctx.get("highConviction") or ctx.get("ictFlatThenVertical") or ctx.get("maxProfitCapture"):
+        return True
+    try:
+        from app.engines.explosion_confidence import trade_is_high_conviction
+        from app.engines.ict_breakout_monitor import _ict_max_profit_trade
+
+        if trade_is_high_conviction(trade) or _ict_max_profit_trade(trade):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 # symbol -> last explosion stop timestamp (IST)
 _explosion_stop_at: dict[str, datetime] = {}
 _explosion_stop_cooldown_sec: dict[str, int] = {}
@@ -158,7 +201,11 @@ def check_explosion_entry(
     if event.tier not in ("EXPLODING", "ELITE"):
         from app.engines.morning_premium_capture import is_premium_capture_event
 
-        if not is_premium_capture_event(event, chart=chart):
+        if is_premium_capture_event(event, chart=chart):
+            pass  # premium-capture BUILDING continues through remaining gates
+        elif _ict_flat_vertical_entry_ok(event, snap):
+            pass  # early ICT flat→vertical BUILDING — enter in 28–40% window
+        else:
             return False, f"tier_{event.tier}_not_tradeable"
 
     from app.engines.morning_premium_capture import is_afternoon_capture_event
@@ -295,8 +342,17 @@ def check_explosion_entry(
         return True, "explosion_confirmed" if not premium_bypass else "premium_led_explosion_confirmed"
 
     if event.tier == "BUILDING" and event.explosion_score >= min_score:
-        if is_all_day_explosion_event(event, chart=chart) or is_premium_capture_event(event, chart=chart):
-            return True, "building_explosion_confirmed" if not premium_bypass else "premium_led_building_confirmed"
+        ict_flat_ok = _ict_flat_vertical_entry_ok(event, snap)
+        if (
+            is_all_day_explosion_event(event, chart=chart)
+            or is_premium_capture_event(event, chart=chart)
+            or ict_flat_ok
+        ):
+            return True, (
+                "ict_building_flat_vertical"
+                if ict_flat_ok
+                else ("building_explosion_confirmed" if not premium_bypass else "premium_led_building_confirmed")
+            )
 
     if event.velocity_3s >= 3.0 and event.volume_surge >= 1.5:
         return True, "early_explosion"
@@ -500,10 +556,21 @@ def _defer_adaptive_stop(
     stop_floor: float = 0.0,
 ) -> bool:
     """Defer adaptive SL while high-confidence trade works toward chart TP."""
-    if stop_floor > 0 and pnl_pts <= -stop_floor:
+    # Base-rip runners get a short never-green grace with a wider floor so a
+    # brief dip after entry (Jul23 76300 PE) does not kill the rip at best=0.
+    runner = _is_base_rip_runner_trade(trade)
+    grace_s = _cfg_float(settings, "base_rip_never_green_grace_seconds", 90.0)
+    grace_mult = _cfg_float(settings, "base_rip_never_green_stop_mult", 2.0)
+    hard_floor = float(stop_floor or 0)
+    if runner and best <= 0 and hold < grace_s and hard_floor > 0:
+        hard_floor = hard_floor * grace_mult
+
+    if hard_floor > 0 and pnl_pts <= -hard_floor:
         return False
-    # Never defer a never-green loser — hold-until-target is for runners only.
+    # Never defer a never-green loser — except ICT/HC base-rip grace above.
     if best <= 0 and pnl_pts < 0:
+        if runner and hold < grace_s:
+            return True
         return False
     from app.engines.confidence_hold import (
         hold_until_target_active,
