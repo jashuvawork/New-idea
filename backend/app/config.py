@@ -308,6 +308,9 @@ class Settings(BaseSettings):
     elevated_size_min_score: float = 65.0
     elevated_size_min_chart_confidence: float = 58.8
     elevated_size_lot_scale: float = 1.5
+    # Confirmed flat→vertical base rips (qualified via base-relative move) are the genuine
+    # runners — scale them harder (~2x) to actually double the capture vs a base-size entry.
+    elevated_size_base_relative_lot_scale: float = 2.0
     # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
     session_mode_feedback_enabled: bool = True
     session_mode_feedback_min_trades: int = 2
