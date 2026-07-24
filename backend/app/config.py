@@ -252,6 +252,9 @@ class Settings(BaseSettings):
     explosion_live_confirm_enabled: bool = True
     explosion_live_confirm_min_velocity_3s: float = 2.0
     explosion_live_confirm_ict_min_velocity_3s: float = 1.5
+    # Jul24 23850 CE: structured near-ATM CALL may use softer live/peak velocity.
+    explosion_live_confirm_structured_ce_min_velocity_3s: float = 1.0
+    structured_near_atm_max_otm_steps: int = 3
     explosion_live_confirm_require_structure: bool = True
     explosion_live_confirm_hot_velocity_3s: float = 8.0
     # Premium/afternoon captures are slow volume-backed grinds (low velocity by design,
@@ -451,6 +454,8 @@ class Settings(BaseSettings):
     bearish_sideways_halt_enabled: bool = True
     bearish_sideways_block_scalps: bool = True
     bearish_sideways_explosion_min_score: float = 78.0
+    # Local-base CE may clear sideways at 75 (aligns with moneyness OTM bypass floor).
+    bearish_sideways_local_base_min_score: float = 75.0
 
     # High-confidence hold — don't micro-exit then immediately re-enter same setup
     high_confidence_hold_enabled: bool = True
@@ -498,7 +503,7 @@ class Settings(BaseSettings):
     # Confirmed local-base CALL rip: allow shallow OTM (2–3 steps) when ATM CE is absent.
     moneyness_local_base_otm_bypass_enabled: bool = True
     moneyness_local_base_max_otm_steps: int = 3
-    moneyness_local_base_otm_min_score: float = 78.0
+    moneyness_local_base_otm_min_score: float = 75.0
     moneyness_scalp_chop_prefer: str = "ITM"
     moneyness_high_conf_prefer: str = "ITM"
     moneyness_rank_bonus: float = 12.0
@@ -959,6 +964,8 @@ class Settings(BaseSettings):
     worst_day_breakout_only_enabled: bool = True
     worst_day_breakout_min_rank: float = 68.0
     worst_day_breakout_min_velocity_3s: float = 2.5
+    # Structured near-ATM CE soft floor + peak-velocity carry (Jul24 23850 CE).
+    worst_day_structured_ce_min_velocity_3s: float = 1.5
     worst_day_breakout_peak_velocity_bypass_enabled: bool = True
     worst_day_breakout_min_symbol_tqs: float = 45.0
     worst_day_breakout_tiers_csv: str = "ELITE,EXPLODING"

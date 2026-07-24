@@ -26,6 +26,47 @@ def _strike_depth(
     return depth, money, atm
 
 
+def structured_near_atm_call(
+    side: Side | str,
+    strike: float,
+    snap: SymbolSnapshot,
+    *,
+    ict: Any = None,
+    event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    candidate: Any = None,
+) -> bool:
+    """
+    Jul24 closest miss profile: CALL within 3 OTM of ATM with ICT/local-base structure.
+
+    Used to soften worst-day / live-velocity floors without opening deep-OTM FOMO.
+    """
+    settings = get_settings()
+    if _side_val(side) != "CALL":
+        return False
+    depth, money, _ = _strike_depth(side, strike, snap)
+    max_steps = int(getattr(settings, "structured_near_atm_max_otm_steps", 3) or 3)
+    if money == "OTM" and depth > max_steps:
+        return False
+    if money not in ("ATM", "ITM", "OTM"):
+        return False
+    if _ict_structure_confirmed(ict):
+        return True
+    from app.engines.local_base_chart_bypass import local_base_structure_active
+
+    resolved_alert = alert if isinstance(alert, dict) else None
+    if resolved_alert is None and candidate is not None:
+        ca = getattr(candidate, "alert", None)
+        if isinstance(ca, dict):
+            resolved_alert = ca
+    resolved_event = event
+    if resolved_event is None and candidate is not None:
+        resolved_event = getattr(candidate, "explosion_event", None)
+    return local_base_structure_active(
+        side, snap, event=resolved_event, alert=resolved_alert,
+    )
+
+
 def check_all_in_moneyness_cap(
     side: Side | str,
     strike: float,
@@ -221,6 +262,7 @@ def live_explosion_confirmation_blocked(
     ict: Any = None,
     midday_chop: Optional[bool] = None,
     premium_capture: bool = False,
+    snap: Optional[SymbolSnapshot] = None,
 ) -> tuple[bool, str]:
     """
     Hard-block wrong-timing explosions that look ELITE but lack live confirmation.
@@ -255,6 +297,39 @@ def live_explosion_confirmation_blocked(
     )
     structure = _ict_structure_confirmed(ict)
 
+    # Jul24 23850 CE: structured near-ATM CALL with cooled live v3 but retained peak.
+    near_atm_ce = False
+    peak_v3 = 0.0
+    if snap is not None:
+        near_atm_ce = structured_near_atm_call(
+            getattr(explosion_event, "side", ""),
+            float(getattr(explosion_event, "strike", 0) or 0),
+            snap,
+            ict=ict,
+            event=explosion_event,
+        )
+        if near_atm_ce:
+            from app.engines.explosion_detector import retained_peak_velocity_3s
+
+            peak_v3 = float(
+                retained_peak_velocity_3s(
+                    str(getattr(explosion_event, "symbol", "") or ""),
+                    float(getattr(explosion_event, "strike", 0) or 0),
+                    getattr(explosion_event, "side", Side.CALL),
+                )
+                or 0
+            )
+            soft = float(
+                getattr(
+                    settings,
+                    "explosion_live_confirm_structured_ce_min_velocity_3s",
+                    1.0,
+                )
+                or 1.0
+            )
+            ict_min_v3 = min(ict_min_v3, soft)
+            min_v3 = min(min_v3, soft)
+
     # Genuine premium/afternoon capture is a validated slow-grind path (in-window +
     # score + volume + consolidation + chart alignment). It is live-confirmed by that
     # classification, not by raw velocity — afternoon consolidation breakouts are slow
@@ -271,8 +346,10 @@ def live_explosion_confirmation_blocked(
             return False, ""
 
     # 1) Stale / cooled live velocity — sticky ELITE alone is not enough.
-    if structure:
-        if v3 < ict_min_v3 and v9 < min_v3:
+    # Structured near-ATM CE may use retained peak velocity when live cooled.
+    eff_v3 = max(v3, peak_v3) if near_atm_ce else v3
+    if structure or near_atm_ce:
+        if eff_v3 < ict_min_v3 and v9 < min_v3:
             return True, f"stale_live_velocity_v3_{v3:.2f}_ict"
     elif v3 < min_v3:
         return True, f"stale_live_velocity_v3_{v3:.2f}"
@@ -846,13 +923,28 @@ def detect_fake_explosion_trap(
         })
         return True, reason, meta
 
-    # Midday/chop + elite narrative without ICT structure → hard block.
+    # Midday/chop + elite narrative without ICT / local-base structure → hard block.
     # Soft lot-cap alone still let Jul23 displacement spikes through.
+    structure_ok = _ict_structure_confirmed(ict)
+    if not structure_ok:
+        from app.engines.local_base_chart_bypass import local_base_structure_active
+
+        alert = getattr(candidate, "alert", None)
+        if not isinstance(alert, dict):
+            alert = None
+        structure_ok = local_base_structure_active(
+            candidate.side,
+            snap,
+            event=event,
+            alert=alert,
+        )
+        if structure_ok:
+            meta["localBaseStructure"] = True
     if (
         getattr(settings, "fake_explosion_trap_midday_require_structure", True)
         and chopish
         and elite_hot
-        and not _ict_structure_confirmed(ict)
+        and not structure_ok
     ):
         meta.update({
             "fakeExplosionTrap": True,
