@@ -84,9 +84,12 @@ def _analyze_explosion_gaps(
         side = str(alert.get("side") or "").upper()
         breadth = (snap.breadth.bias or "NEUTRAL").upper()
         chart_dir = (chart.direction or "NEUTRAL").upper() if chart else "NEUTRAL"
-        if chart_dir == "BULLISH" and side == "PUT" and not all_day and not capture:
+        from app.engines.local_base_chart_bypass import local_base_ichimoku_chart_bypass
+
+        local_ichi_ok = local_base_ichimoku_chart_bypass(side, snap, alert=alert)
+        if chart_dir == "BULLISH" and side == "PUT" and not all_day and not capture and not local_ichi_ok:
             blockers.append("put_vs_bullish_chart")
-        if chart_dir == "BEARISH" and side == "CALL" and not all_day and not capture:
+        if chart_dir == "BEARISH" and side == "CALL" and not all_day and not capture and not local_ichi_ok:
             blockers.append("call_vs_bearish_chart")
 
         # Surface extended-chase / ICT late-fade — Jul23 SENSEX 76400 PE showed

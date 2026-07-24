@@ -250,10 +250,20 @@ def check_explosion_entry(
         if blocked and not premium_bypass:
             return False, reason
 
-    blocked, reason = chart_blocks_explosion_side(
-        event.side, chart, event.tier, event=event, breadth_bias=breadth_bias,
+    from app.engines.local_base_chart_bypass import local_base_ichimoku_chart_bypass
+
+    local_ichi_bypass = local_base_ichimoku_chart_bypass(
+        event.side, snap, event=event,
     )
-    if blocked and not premium_bypass and not afternoon_capture_skips_chart_block(event, chart):
+    blocked, reason = chart_blocks_explosion_side(
+        event.side, chart, event.tier, event=event, breadth_bias=breadth_bias, snap=snap,
+    )
+    if (
+        blocked
+        and not premium_bypass
+        and not local_ichi_bypass
+        and not afternoon_capture_skips_chart_block(event, chart)
+    ):
         if not is_all_day_explosion_event(event, chart=chart):
             return False, reason
 

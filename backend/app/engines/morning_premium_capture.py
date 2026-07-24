@@ -212,6 +212,10 @@ def counter_trend_entry_allowed(
         side_v = _side_str(side)
         if side_v == "CALL" and _counter_trend_rip_ok(explosion_event, get_settings()):
             return True
+    from app.engines.local_base_chart_bypass import local_base_ichimoku_bypass_for_snap
+
+    if local_base_ichimoku_bypass_for_snap(side, snap, explosion_event=explosion_event):
+        return True
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
 

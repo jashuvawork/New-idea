@@ -600,6 +600,12 @@ class Settings(BaseSettings):
     # Live 5m direction hard block — not skippable by high rank score (fixes scalp mis-entries)
     chart_live_direction_hard_block: bool = True
     chart_alignment_rank_bonus: float = 10.0
+    # Gap-down leaves spotChart BEARISH while Ichimoku + local premium base can be
+    # bullish (Jul24 NIFTY 23650 CE). Lift call_vs_bearish / put_vs_bullish when
+    # Ichimoku agrees with the side and a local base structure is present.
+    local_base_ichimoku_chart_bypass_enabled: bool = True
+    local_base_ichimoku_require_cloud: bool = True
+    local_base_ichimoku_max_adverse_mom5_pct: float = 0.08
     spot_chart_timeframe_minutes: int = 5
     spot_chart_1m_bars: int = 300  # 1m history for 5m resample + RSI/MACD warmup
 

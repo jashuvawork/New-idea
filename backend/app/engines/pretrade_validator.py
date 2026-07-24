@@ -923,12 +923,21 @@ def validate_candidate(
         state=state, snapshots=snap_map,
     )
     expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
+    from app.engines.local_base_chart_bypass import local_base_ichimoku_bypass_for_snap
+
+    local_ichi_bypass = local_base_ichimoku_bypass_for_snap(
+        candidate.side,
+        snap,
+        explosion_event=getattr(candidate, "explosion_event", None),
+    )
+    if local_ichi_bypass:
+        meta["localBaseIchimokuBypass"] = True
     blocked_chart, chart_reason = chart_blocks_side(
         candidate.side,
         snap.spotChart,
         trade_score=trade_score,
         breadth_aligned_bypass=breadth_bypass,
-        premium_led_bypass=premium_bypass,
+        premium_led_bypass=premium_bypass or local_ichi_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
     )
     if blocked_chart:

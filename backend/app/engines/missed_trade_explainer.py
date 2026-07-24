@@ -230,10 +230,15 @@ def _gate_checks(
         if candidate.explosion_event
         else vertical_rip_bypass_for_snap(candidate.side, snap, explosion_event=None)
     )
+    from app.engines.local_base_chart_bypass import local_base_ichimoku_bypass_for_snap
+
+    local_ichi_bypass = local_base_ichimoku_bypass_for_snap(
+        candidate.side, snap, explosion_event=candidate.explosion_event,
+    )
     expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
     blocked, chart_reason = chart_blocks_side(
         candidate.side, chart, trade_score=score, momentum_surge=daily_move >= 40,
-        premium_led_bypass=premium_bypass or vertical_bypass,
+        premium_led_bypass=premium_bypass or vertical_bypass or local_ichi_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
     )
     if blocked:
@@ -242,10 +247,13 @@ def _gate_checks(
             "gate": "chart_alignment",
             "passed": False,
             "detail": f"chart {chart_dir} vs {side_val}",
-            "fix": "MTF reconcile or elite premium-led bypass (score ≥90)",
+            "fix": "Local-base + Ichimoku bypass, MTF reconcile, or elite premium-led",
         })
     else:
-        gates.append({"gate": "chart_alignment", "passed": True, "detail": f"chart {chart_dir}"})
+        detail = f"chart {chart_dir}"
+        if local_ichi_bypass:
+            detail += " (local_base_ichimoku_bypass)"
+        gates.append({"gate": "chart_alignment", "passed": True, "detail": detail})
 
     # 6b — Breadth alignment
     from app.engines.aligned_side_guard import (
