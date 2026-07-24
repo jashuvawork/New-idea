@@ -1,9 +1,11 @@
-"""Local-base + Ichimoku chart bypass — gap-down session bias vs structure.
+"""Local-base overrides session chart bias (call_vs_bearish_chart killer).
 
-Gap-down mornings leave spotChart.direction BEARISH (mom15/mom30 still red),
-which blocks every CALL as call_vs_bearish_chart. Local premium bases and
-Ichimoku (cloud / TK) can already be bullish — allow CE/PE when those agree
-with the trade side and a local premium base is confirmed.
+Gap-down mornings leave spotChart.direction BEARISH, which blanket-blocks every
+CALL. Jul24 NIFTY 23700 CE was EXPLODING ~98 off a ~110 local base and still
+died on call_vs_bearish_chart because Ichimoku was required.
+
+Policy: a confirmed LOCAL PREMIUM BASE is enough to lift the session-direction
+hard block. Ichimoku agreement is optional confirmation, not a gate.
 """
 
 from __future__ import annotations
@@ -39,11 +41,10 @@ def ichimoku_supports_side(side: Side | str, snap: Optional[SymbolSnapshot]) -> 
     cloud = str(ich.get("cloudBias") or "NEUTRAL").upper()
     tk = str(ich.get("tkCross") or "NEUTRAL").upper()
     price_vs = str(ich.get("priceVsCloud") or "").upper()
-    require_cloud = bool(getattr(settings, "local_base_ichimoku_require_cloud", True))
+    require_cloud = bool(getattr(settings, "local_base_ichimoku_require_cloud", False))
     if require_cloud:
         if cloud == target:
             return True
-        # Price above/below cloud with TK agree — still counts as structure bias.
         if tk == target and (
             (target == "BULLISH" and price_vs == "ABOVE")
             or (target == "BEARISH" and price_vs == "BELOW")
@@ -53,12 +54,60 @@ def ichimoku_supports_side(side: Side | str, snap: Optional[SymbolSnapshot]) -> 
     return cloud == target or tk == target
 
 
+def _alert_session_move(alert: dict[str, Any]) -> float:
+    return max(
+        float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0),
+        float(alert.get("peakMovePct") or 0),
+        float(alert.get("ictBaseRelativeMovePct") or 0),
+    )
+
+
 def _alert_has_local_base(alert: dict[str, Any]) -> bool:
+    """Local premium launch pad — ICT structure OR strong early-window explosion."""
+    settings = get_settings()
     if alert.get("ictFlatThenVertical") or alert.get("localSwingBase"):
         return True
     if alert.get("ictBreakout") and float(alert.get("ictBaseRelativeMovePct") or 0) > 0:
         return True
-    if str(alert.get("ictPattern") or "") in ("flat_then_vertical", "early_flat_break"):
+    if str(alert.get("ictPattern") or "") in (
+        "flat_then_vertical", "early_flat_break", "local_swing_base",
+    ):
+        return True
+    # Base-relative already measured in the tradeable local window.
+    base_rel = float(alert.get("ictBaseRelativeMovePct") or 0)
+    local_max = float(
+        getattr(settings, "explosion_local_base_chase_max_move_pct", 70.0) or 70.0
+    )
+    if 0 < base_rel < local_max:
+        return True
+    # Jul24 23700 CE: EXPLODING/ELITE on radar with early-window move after a
+    # gap-down — ICT flags sometimes lag one poll; tier+score+move is enough.
+    tier = str(alert.get("tier") or "").upper()
+    score = float(alert.get("explosionScore") or 0)
+    move = _alert_session_move(alert)
+    min_score = float(
+        getattr(settings, "local_base_chart_bypass_min_score", 38.0) or 38.0
+    )
+    early_min = float(
+        getattr(settings, "explosion_local_base_entry_min_move_pct", 28.0) or 28.0
+    )
+    if (
+        tier in ("EXPLODING", "ELITE")
+        and score >= min_score
+        and early_min <= move <= local_max
+    ):
+        return True
+    if (
+        tier == "BUILDING"
+        and score >= min_score
+        and (
+            bool(alert.get("volumeAwaken"))
+            or bool(alert.get("ictVolumeAwakening"))
+            or float(alert.get("velocity3s") or 0) >= 2.0
+        )
+        and move >= early_min * 0.5
+        and move <= local_max
+    ):
         return True
     return False
 
@@ -69,10 +118,9 @@ def _alert_or_event_local_base(
     alert: Optional[dict[str, Any]] = None,
     snap: Optional[SymbolSnapshot] = None,
 ) -> bool:
-    """Local premium structure: flat→vertical, swing V-base, or ICT breakout base."""
+    """Local premium structure: flat→vertical, swing V-base, or early EXPLODING rip."""
     if isinstance(alert, dict) and _alert_has_local_base(alert):
         return True
-    # Prefer radar alert fields when the live ICT recompute has no poll history yet.
     if event is not None and snap is not None:
         side_v = _side_val(getattr(event, "side", ""))
         strike = float(getattr(event, "strike", 0) or 0)
@@ -98,6 +146,29 @@ def _alert_or_event_local_base(
                 return True
         except Exception:
             pass
+        # Event-only fallback (same as alert early-window EXPLODING path).
+        settings = get_settings()
+        tier = str(getattr(event, "tier", "") or "").upper()
+        score = float(getattr(event, "explosion_score", 0) or 0)
+        move = max(
+            float(getattr(event, "daily_move_pct", 0) or 0),
+            float(getattr(event, "peak_move_pct", 0) or 0),
+        )
+        min_score = float(
+            getattr(settings, "local_base_chart_bypass_min_score", 38.0) or 38.0
+        )
+        early_min = float(
+            getattr(settings, "explosion_local_base_entry_min_move_pct", 28.0) or 28.0
+        )
+        local_max = float(
+            getattr(settings, "explosion_local_base_chase_max_move_pct", 70.0) or 70.0
+        )
+        if (
+            tier in ("EXPLODING", "ELITE")
+            and score >= min_score
+            and early_min <= move <= local_max
+        ):
+            return True
     return False
 
 
@@ -114,36 +185,29 @@ def session_chart_conflicts_side(side: Side | str, snap: Optional[SymbolSnapshot
     return False
 
 
-def local_base_ichimoku_chart_bypass(
+def local_base_structure_active(
     side: Side | str,
     snap: Optional[SymbolSnapshot],
     *,
     event: Any = None,
     alert: Optional[dict[str, Any]] = None,
 ) -> bool:
-    """
-    Lift gap-down (or gap-up) session chart hard-block when local structure agrees.
-
-    Example: spotChart BEARISH after gap-down, but Ichimoku cloud bullish and the
-    option is breaking a local premium base → allow CALL.
-    """
+    """True when a local premium base / early EXPLODING rip is confirmed for side."""
     settings = get_settings()
-    if not getattr(settings, "local_base_ichimoku_chart_bypass_enabled", True):
-        return False
+    if not getattr(settings, "local_base_overrides_session_chart_enabled", True):
+        if not getattr(settings, "local_base_ichimoku_chart_bypass_enabled", True):
+            return False
     if snap is None:
-        return False
-    if not session_chart_conflicts_side(side, snap):
-        return False
-    if not ichimoku_supports_side(side, snap):
         return False
     if not _alert_or_event_local_base(event=event, alert=alert, snap=snap):
         return False
-
-    # Avoid bypassing while the index is still in a hard live dump against the side.
+    if getattr(settings, "local_base_chart_bypass_require_ichimoku", False):
+        if not ichimoku_supports_side(side, snap):
+            return False
     chart = snap.spotChart
     side_v = _side_val(side)
     max_against = float(
-        getattr(settings, "local_base_ichimoku_max_adverse_mom5_pct", 0.08) or 0.08
+        getattr(settings, "local_base_ichimoku_max_adverse_mom5_pct", 0.12) or 0.12
     )
     mom5 = float(getattr(chart, "momentum5Pct", 0) or 0) if chart else 0.0
     if side_v == "CALL" and mom5 < -max_against:
@@ -153,6 +217,36 @@ def local_base_ichimoku_chart_bypass(
     return True
 
 
+def local_base_overrides_session_chart(
+    side: Side | str,
+    snap: Optional[SymbolSnapshot],
+    *,
+    event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> bool:
+    """
+    Lift call_vs_bearish / put_vs_bullish when a local premium base is confirmed.
+
+    Ichimoku is optional. Primary signal = local base / early-window EXPLODING rip.
+    """
+    if not session_chart_conflicts_side(side, snap):
+        return False
+    return local_base_structure_active(side, snap, event=event, alert=alert)
+
+
+# Backward-compatible names used across the codebase.
+def local_base_ichimoku_chart_bypass(
+    side: Side | str,
+    snap: Optional[SymbolSnapshot],
+    *,
+    event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> bool:
+    return local_base_overrides_session_chart(
+        side, snap, event=event, alert=alert,
+    )
+
+
 def local_base_ichimoku_bypass_for_snap(
     side: Side | str,
     snap: SymbolSnapshot,
@@ -160,12 +254,14 @@ def local_base_ichimoku_bypass_for_snap(
     explosion_event: Any = None,
 ) -> bool:
     """Snap helper — also scans matching explosionAlerts when event is absent."""
-    if local_base_ichimoku_chart_bypass(side, snap, event=explosion_event):
+    if local_base_overrides_session_chart(side, snap, event=explosion_event):
         return True
     side_v = _side_val(side)
     for alert in snap.explosionAlerts or []:
         if str(alert.get("side") or "").upper() != side_v:
             continue
-        if local_base_ichimoku_chart_bypass(side, snap, event=explosion_event, alert=alert):
+        if local_base_overrides_session_chart(
+            side, snap, event=explosion_event, alert=alert,
+        ):
             return True
     return False
