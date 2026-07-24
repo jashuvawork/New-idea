@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from app.engines.local_base_chart_bypass import (
     ichimoku_supports_side,
+    is_local_base_elite_bypass,
     local_base_ichimoku_chart_bypass,
     local_base_overrides_session_chart,
     local_base_overrides_side_bias,
@@ -304,6 +305,114 @@ def test_directional_lock_lifted_for_local_base_call(mock_ag, mock_lb, mock_dl):
             "NIFTY", Side.CALL, snap, tier="EXPLODING", candidate=candidate,
         )
     assert blocked is False
+
+
+def _elite_alert(**overrides):
+    a = {
+        "side": "CALL",
+        "strike": 24000.0,
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "dailyMovePct": 32.0,
+        "peakMovePct": 32.0,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 30.0,
+        "ictPattern": "flat_then_vertical",
+        "premium": 44.3,
+        "tradeable": True,
+    }
+    a.update(overrides)
+    return a
+
+
+def _settings_lb_elite(**overrides):
+    s = _settings()
+    s.composer_stand_down_local_base_elite_bypass = True
+    s.composer_stand_down_elite_bypass_min_score = 62.0
+    for k, v in overrides.items():
+        setattr(s, k, v)
+    return s
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_local_base_elite_bypass_accepts_jul24_24000ce(mock_lb):
+    """Jul24 NIFTY 24000 CE: ELITE 100 off a local base — overrides composer stand-down."""
+    mock_lb.return_value = _settings_lb_elite()
+    alert = _elite_alert()
+    snap = _snap(alert=alert)
+    cand = SimpleNamespace(
+        mode="explosion", side=Side.CALL, tier="ELITE", confidence=100.0,
+        score=120.0, snap=snap, explosion_event=None, alert=alert,
+    )
+    assert is_local_base_elite_bypass(cand) is True
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_local_base_elite_bypass_rejects_exploding(mock_lb):
+    """Narrow to ELITE — EXPLODING does not override a stand-down."""
+    mock_lb.return_value = _settings_lb_elite()
+    alert = _elite_alert(tier="EXPLODING")
+    snap = _snap(alert=alert)
+    cand = SimpleNamespace(
+        mode="explosion", side=Side.CALL, tier="EXPLODING", confidence=100.0,
+        score=120.0, snap=snap, explosion_event=None, alert=alert,
+    )
+    assert is_local_base_elite_bypass(cand) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_local_base_elite_bypass_rejects_low_score(mock_lb):
+    mock_lb.return_value = _settings_lb_elite()
+    alert = _elite_alert(explosionScore=55.0)
+    snap = _snap(alert=alert)
+    cand = SimpleNamespace(
+        mode="explosion", side=Side.CALL, tier="ELITE", confidence=55.0,
+        score=120.0, snap=snap, explosion_event=None, alert=alert,
+    )
+    assert is_local_base_elite_bypass(cand) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_local_base_elite_bypass_rejects_no_local_base(mock_lb):
+    """ELITE with no local premium base (deep chase, no structure) stays blocked."""
+    mock_lb.return_value = _settings_lb_elite()
+    alert = _elite_alert(
+        ictFlatThenVertical=False, ictBreakout=False, ictBaseRelativeMovePct=0,
+        ictPattern="watch", dailyMovePct=5.0, peakMovePct=5.0,
+    )
+    snap = _snap(alert=alert)
+    cand = SimpleNamespace(
+        mode="explosion", side=Side.CALL, tier="ELITE", confidence=100.0,
+        score=120.0, snap=snap, explosion_event=None, alert=alert,
+    )
+    assert is_local_base_elite_bypass(cand) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_local_base_elite_bypass_rejects_scalp(mock_lb):
+    mock_lb.return_value = _settings_lb_elite()
+    alert = _elite_alert()
+    snap = _snap(alert=alert)
+    cand = SimpleNamespace(
+        mode="scalp", side=Side.CALL, tier="ELITE", confidence=100.0,
+        score=120.0, snap=snap, explosion_event=None, alert=alert,
+    )
+    assert is_local_base_elite_bypass(cand) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_local_base_elite_bypass_rejects_hard_live_dump(mock_lb):
+    """Even ELITE local base does not override stand-down while index is dumping hard."""
+    mock_lb.return_value = _settings_lb_elite()
+    alert = _elite_alert()
+    snap = _snap(alert=alert)
+    snap.spotChart = _bearish_gap_chart(mom5=-0.25)
+    cand = SimpleNamespace(
+        mode="explosion", side=Side.CALL, tier="ELITE", confidence=100.0,
+        score=120.0, snap=snap, explosion_event=None, alert=alert,
+    )
+    assert is_local_base_elite_bypass(cand) is False
 
 
 @patch("app.engines.local_base_chart_bypass.get_settings")
