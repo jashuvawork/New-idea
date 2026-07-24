@@ -209,12 +209,17 @@ def breadth_hard_blocks_side(
     side_v = _side_val(side)
     # Local premium base rip (Jul24 23700 CE) — gap-down breadth stays BEARISH while
     # the option is breaking its own base; do not hard-block that structure.
-    if getattr(settings, "local_base_overrides_bearish_breadth", True) and resolved_snap is not None:
-        from app.engines.local_base_chart_bypass import local_base_structure_active
+    if resolved_snap is not None:
+        from app.engines.local_base_chart_bypass import local_base_overrides_side_bias
 
         ev = event or getattr(candidate, "explosion_event", None)
-        if local_base_structure_active(
-            side_v, resolved_snap, event=ev, alert=alert if isinstance(alert, dict) else None,
+        resolved_alert = alert if isinstance(alert, dict) else None
+        if resolved_alert is None and candidate is not None:
+            ca = getattr(candidate, "alert", None)
+            if isinstance(ca, dict):
+                resolved_alert = ca
+        if local_base_overrides_side_bias(
+            side_v, resolved_snap, event=ev, alert=resolved_alert,
         ):
             return False, "ok"
     if bias == "BULLISH" and side_v == "PUT":

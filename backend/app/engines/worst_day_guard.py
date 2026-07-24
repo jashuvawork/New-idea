@@ -114,7 +114,21 @@ def _side_val(side) -> str:
 
 def _breadth_aligned(candidate: Any, snap: SymbolSnapshot) -> bool:
     from app.engines.symbol_cooldown import side_aligned_with_breadth
-    return side_aligned_with_breadth(_side_val(candidate.side), snap.breadth.bias)
+
+    side_val = _side_val(candidate.side)
+    if side_aligned_with_breadth(side_val, snap.breadth.bias):
+        return True
+    from app.engines.local_base_chart_bypass import local_base_overrides_side_bias
+
+    alert = getattr(candidate, "alert", None)
+    if not isinstance(alert, dict):
+        alert = None
+    return local_base_overrides_side_bias(
+        side_val,
+        snap,
+        event=getattr(candidate, "explosion_event", None),
+        alert=alert,
+    )
 
 
 def _allowed_breakout_tiers() -> set[str]:
@@ -342,9 +356,17 @@ def worst_day_allows_candidate(
         event = getattr(candidate, "explosion_event", None)
         side = candidate.side if hasattr(candidate.side, "value") else Side(candidate.side)
         if not side_aligned_with_chart(side, chart):
-            if not (event is not None and qualifies_for_vertical_rip_bypass(event, snap=snap)):
+            from app.engines.local_base_chart_bypass import local_base_overrides_side_bias
+
+            alert = getattr(candidate, "alert", None)
+            if not isinstance(alert, dict):
+                alert = None
+            if local_base_overrides_side_bias(side, snap, event=event, alert=alert):
+                meta["localBaseBypass"] = True
+            elif not (event is not None and qualifies_for_vertical_rip_bypass(event, snap=snap)):
                 return False, "worst_day_breakout_chart_misaligned", meta
-            meta["verticalRipBypass"] = True
+            else:
+                meta["verticalRipBypass"] = True
 
     return True, "ok", meta
 

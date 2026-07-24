@@ -158,7 +158,7 @@ def check_entry_gate(
     from app.engines.directional_lock import check_directional_side_lock_simple
 
     blocked_dir, dir_reason = check_directional_side_lock_simple(
-        trade.symbol, trade.side, breadth.bias, chart,
+        trade.symbol, trade.side, breadth.bias, chart, snap=snap,
     )
     if blocked_dir:
         return False, dir_reason

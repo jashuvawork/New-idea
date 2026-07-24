@@ -1,11 +1,13 @@
-"""Local-base overrides session chart bias (call_vs_bearish_chart killer).
+"""Local-base overrides session chart + sibling side/bias blocks.
 
-Gap-down mornings leave spotChart.direction BEARISH, which blanket-blocks every
-CALL. Jul24 NIFTY 23700 CE was EXPLODING ~98 off a ~110 local base and still
-died on call_vs_bearish_chart because Ichimoku was required.
+Gap-down mornings leave spotChart.direction / breadth BEARISH, which
+blanket-blocks every CALL. Jul24 NIFTY 23700 CE was EXPLODING ~98 off a ~110
+local base and still died on call_vs_bearish_chart /
+explosion_call_vs_bearish_breadth / market_opposes_side.
 
-Policy: a confirmed LOCAL PREMIUM BASE is enough to lift the session-direction
-hard block. Ichimoku agreement is optional confirmation, not a gate.
+Policy: a confirmed LOCAL PREMIUM BASE lifts session chart, explosion breadth,
+market-opposes, directional confirmation, and bad-day/worst-day alignment
+gates. Ichimoku agreement is optional confirmation, not a gate.
 """
 
 from __future__ import annotations
@@ -114,6 +116,7 @@ def _alert_has_local_base(alert: dict[str, Any]) -> bool:
 
 def _alert_or_event_local_base(
     *,
+    side: Side | str = "",
     event: Any = None,
     alert: Optional[dict[str, Any]] = None,
     snap: Optional[SymbolSnapshot] = None,
@@ -121,9 +124,12 @@ def _alert_or_event_local_base(
     """Local premium structure: flat→vertical, swing V-base, or early EXPLODING rip."""
     if isinstance(alert, dict) and _alert_has_local_base(alert):
         return True
-    if event is not None and snap is not None:
+    side_v = _side_val(side) if side else ""
+    if not side_v and event is not None:
         side_v = _side_val(getattr(event, "side", ""))
-        strike = float(getattr(event, "strike", 0) or 0)
+    # Scan live radar alerts even when event is absent (directional lock / hard block).
+    if snap is not None and side_v:
+        strike = float(getattr(event, "strike", 0) or 0) if event is not None else 0.0
         for a in snap.explosionAlerts or []:
             if str(a.get("side") or "").upper() != side_v:
                 continue
@@ -199,7 +205,7 @@ def local_base_structure_active(
             return False
     if snap is None:
         return False
-    if not _alert_or_event_local_base(event=event, alert=alert, snap=snap):
+    if not _alert_or_event_local_base(side=side, event=event, alert=alert, snap=snap):
         return False
     if getattr(settings, "local_base_chart_bypass_require_ichimoku", False):
         if not ichimoku_supports_side(side, snap):
@@ -215,6 +221,26 @@ def local_base_structure_active(
     if side_v == "PUT" and mom5 > max_against:
         return False
     return True
+
+
+def local_base_overrides_side_bias(
+    side: Side | str,
+    snap: Optional[SymbolSnapshot],
+    *,
+    event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> bool:
+    """
+    Lift session breadth / market-opposes / directional / bad-day / worst-day
+    side blocks when a local premium base is confirmed.
+
+    Same structure gate as chart bypass; gated by local_base_overrides_bearish_breadth
+    (name kept for config compat — covers CALL-vs-bearish and PUT-vs-bullish alike).
+    """
+    settings = get_settings()
+    if not getattr(settings, "local_base_overrides_bearish_breadth", True):
+        return False
+    return local_base_structure_active(side, snap, event=event, alert=alert)
 
 
 def local_base_overrides_session_chart(

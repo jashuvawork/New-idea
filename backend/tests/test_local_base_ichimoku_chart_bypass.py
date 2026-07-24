@@ -9,9 +9,13 @@ from app.engines.local_base_chart_bypass import (
     ichimoku_supports_side,
     local_base_ichimoku_chart_bypass,
     local_base_overrides_session_chart,
+    local_base_overrides_side_bias,
     local_base_structure_active,
 )
-from app.engines.rally_capture import chart_blocks_explosion_side
+from app.engines.rally_capture import (
+    breadth_blocks_explosion_side,
+    chart_blocks_explosion_side,
+)
 from app.models.schemas import (
     Breadth,
     ChartAnalysis,
@@ -230,3 +234,88 @@ def test_breadth_hard_block_lifted_for_local_base_call(mock_lb, mock_ag):
             Side.CALL, "BEARISH", snap=snap, alert=snap.explosionAlerts[0],
         )
     assert blocked is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+@patch("app.engines.rally_capture.get_settings")
+def test_explosion_breadth_block_lifted_for_local_base_call(mock_rc, mock_lb):
+    """Jul24 top CALL miss: explosion_call_vs_bearish_breadth on 23700 CE."""
+    s = _settings()
+    s.explosion_breadth_alignment_enabled = True
+    mock_lb.return_value = s
+    mock_rc.return_value = s
+    snap = _snap()
+    with patch(
+        "app.engines.vertical_rip_bypass.qualifies_for_vertical_rip_bypass",
+        return_value=False,
+    ):
+        blocked, reason = breadth_blocks_explosion_side(
+            Side.CALL, "BEARISH", "EXPLODING", snap=snap, alert=snap.explosionAlerts[0],
+        )
+    assert blocked is False
+    assert local_base_overrides_side_bias(
+        Side.CALL, snap, alert=snap.explosionAlerts[0],
+    ) is True
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_market_opposes_lifted_for_local_base_call(mock_lb):
+    from app.engines.morning_premium_capture import _market_opposes_side
+
+    mock_lb.return_value = _settings()
+    snap = _snap()
+    assert _market_opposes_side(
+        Side.CALL, "BEARISH", snap.spotChart, snap=snap, alert=snap.explosionAlerts[0],
+    ) is False
+    # Without snap, still opposes (legacy path).
+    assert _market_opposes_side(Side.CALL, "BEARISH", snap.spotChart) is True
+
+
+@patch("app.engines.directional_lock.get_settings")
+@patch("app.engines.local_base_chart_bypass.get_settings")
+@patch("app.engines.aligned_side_guard.get_settings")
+def test_directional_lock_lifted_for_local_base_call(mock_ag, mock_lb, mock_dl):
+    from app.engines.directional_lock import check_directional_side_lock
+
+    s = _settings()
+    s.directional_side_lock_enabled = True
+    s.breadth_hard_side_block_enabled = True
+    mock_ag.return_value = s
+    mock_lb.return_value = s
+    mock_dl.return_value = s
+    snap = _snap()
+    candidate = SimpleNamespace(
+        side=Side.CALL,
+        alert=snap.explosionAlerts[0],
+        explosion_event=None,
+    )
+    with patch(
+        "app.engines.extreme_explosion_moment.is_extreme_explosion_all_in_bypass",
+        return_value=False,
+    ), patch(
+        "app.engines.vertical_rip_bypass.vertical_rip_bypasses_hard_breadth",
+        return_value=False,
+    ), patch(
+        "app.engines.aligned_side_guard.chart_mtf_breadth_bypass_active",
+        return_value=(False, {}),
+    ):
+        blocked, reason = check_directional_side_lock(
+            "NIFTY", Side.CALL, snap, tier="EXPLODING", candidate=candidate,
+        )
+    assert blocked is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_bad_day_and_worst_day_alignment_via_local_base(mock_lb):
+    from app.engines.bad_day_routing import _breadth_aligned as bad_aligned
+    from app.engines.worst_day_guard import _breadth_aligned as worst_aligned
+
+    mock_lb.return_value = _settings()
+    snap = _snap()
+    candidate = SimpleNamespace(
+        side=Side.CALL,
+        alert=snap.explosionAlerts[0],
+        explosion_event=None,
+    )
+    assert bad_aligned(candidate, snap) is True
+    assert worst_aligned(candidate, snap) is True

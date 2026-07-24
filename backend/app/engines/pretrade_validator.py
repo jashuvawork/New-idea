@@ -753,6 +753,7 @@ def validate_candidate(
             explosion_event,
             snap.spotChart,
             (snap.breadth.bias if snap.breadth else "NEUTRAL"),
+            snap=snap,
         )
 
     dir_blocked, dir_reason = check_directional_side_lock(
@@ -887,6 +888,7 @@ def validate_candidate(
                 explosion_event,
                 snap.spotChart,
                 (snap.breadth.bias if snap.breadth else "NEUTRAL"),
+                snap=snap,
             )
 
     if all_in or high_mover:

@@ -600,15 +600,17 @@ class Settings(BaseSettings):
     # Live 5m direction hard block — not skippable by high rank score (fixes scalp mis-entries)
     chart_live_direction_hard_block: bool = True
     chart_alignment_rank_bonus: float = 10.0
-    # Gap-down leaves spotChart BEARISH and blanket-blocks CEs (Jul24 NIFTY 23700 CE
-    # EXPLODING 98 off a ~110 local base → only call_vs_bearish_chart). Local premium
-    # base alone lifts the session-direction hard block; Ichimoku is optional.
+    # Gap-down leaves spotChart/breadth BEARISH and blanket-blocks CEs (Jul24 NIFTY
+    # 23700 CE EXPLODING 98 off a ~110 local base). Local premium base alone lifts
+    # session-direction + sibling side/bias blocks; Ichimoku is optional.
     local_base_overrides_session_chart_enabled: bool = True
     local_base_ichimoku_chart_bypass_enabled: bool = True  # legacy alias, still honored
     local_base_chart_bypass_require_ichimoku: bool = False
     local_base_ichimoku_require_cloud: bool = False
     local_base_ichimoku_max_adverse_mom5_pct: float = 0.12
     local_base_chart_bypass_min_score: float = 38.0
+    # Also lifts explosion_call_vs_bearish_breadth, market_opposes_side,
+    # directional_call_needs_confirmation_*, bad_day/worst_day alignment.
     local_base_overrides_bearish_breadth: bool = True
     spot_chart_timeframe_minutes: int = 5
     spot_chart_1m_bars: int = 300  # 1m history for 5m resample + RSI/MACD warmup

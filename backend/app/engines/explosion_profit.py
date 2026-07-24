@@ -239,9 +239,11 @@ def check_explosion_entry(
     if hard_blocked:
         return False, hard_reason
 
-    premium_bypass = premium_led_explosion_bypass(event, chart, breadth_bias)
+    premium_bypass = premium_led_explosion_bypass(event, chart, breadth_bias, snap=snap)
 
-    blocked, reason = breadth_blocks_explosion_side(event.side, breadth.bias, event.tier, event=event)
+    blocked, reason = breadth_blocks_explosion_side(
+        event.side, breadth.bias, event.tier, event=event, snap=snap,
+    )
     if blocked and not premium_bypass:
         return False, reason
 

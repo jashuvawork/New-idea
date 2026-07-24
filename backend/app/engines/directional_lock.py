@@ -250,6 +250,15 @@ def check_directional_side_lock(
         if is_extreme_explosion_all_in_bypass(candidate=candidate):
             return False, "ok"
 
+    from app.engines.local_base_chart_bypass import local_base_overrides_side_bias
+
+    alert = getattr(candidate, "alert", None) if candidate is not None else None
+    if not isinstance(alert, dict):
+        alert = None
+    ev = getattr(candidate, "explosion_event", None) if candidate is not None else None
+    if local_base_overrides_side_bias(side_v, snap, event=ev, alert=alert):
+        return False, "ok"
+
     if premium_led_bypass:
         return False, "ok"
 
@@ -294,6 +303,7 @@ def check_directional_side_lock_simple(
     chart: Optional[SpotChart] = None,
     *,
     premium_led_bypass: bool = False,
+    snap: Optional[SymbolSnapshot] = None,
 ) -> tuple[bool, str]:
     """Lightweight gate — counter-trend blocked unless breadth already flipped."""
     settings = get_settings()
@@ -304,6 +314,12 @@ def check_directional_side_lock_simple(
         return False, "ok"
 
     side_v = _side_val(side)
+    if snap is not None:
+        from app.engines.local_base_chart_bypass import local_base_overrides_side_bias
+
+        if local_base_overrides_side_bias(side_v, snap):
+            return False, "ok"
+
     bias = (breadth_bias or "NEUTRAL").upper()
     locked = session_locked_side(symbol)
 
