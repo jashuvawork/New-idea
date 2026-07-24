@@ -233,6 +233,9 @@ class Settings(BaseSettings):
     explosion_chase_use_local_base: bool = True
     explosion_local_base_chase_max_move_pct: float = 40.0
     explosion_local_base_entry_min_move_pct: float = 15.0
+    # Ignore micro baseRel (<8%) for immature/chase — Jul24 PUTs showed ~1–2%
+    # "local base" noise while day-move was already mature (~28%).
+    explosion_local_base_trust_min_move_pct: float = 8.0
     ict_local_base_lookback_polls: int = 16
     ict_local_base_min_dump_pct: float = 25.0
     explosion_extended_soft_lot_cap: int = 6
@@ -492,6 +495,10 @@ class Settings(BaseSettings):
     # When explosion prefer is ATM, hard-block OTM (Jul23 76100 PE −₹1.3k after ATM miss).
     # ATM + shallow ITM still allowed; deep OTM FOMO is not a soft rank penalty.
     moneyness_explosion_block_otm: bool = True
+    # Confirmed local-base CALL rip: allow shallow OTM (2–3 steps) when ATM CE is absent.
+    moneyness_local_base_otm_bypass_enabled: bool = True
+    moneyness_local_base_max_otm_steps: int = 3
+    moneyness_local_base_otm_min_score: float = 78.0
     moneyness_scalp_chop_prefer: str = "ITM"
     moneyness_high_conf_prefer: str = "ITM"
     moneyness_rank_bonus: float = 12.0

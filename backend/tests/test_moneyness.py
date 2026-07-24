@@ -33,6 +33,9 @@ def _settings():
     s.moneyness_max_itm_steps = 2
     s.moneyness_explosion_prefer = "OTM"
     s.moneyness_explosion_block_otm = True
+    s.moneyness_local_base_otm_bypass_enabled = True
+    s.moneyness_local_base_max_otm_steps = 3
+    s.moneyness_local_base_otm_min_score = 78.0
     s.moneyness_scalp_chop_prefer = "ITM"
     s.moneyness_high_conf_prefer = "ITM"
     s.moneyness_rank_bonus = 12.0
@@ -43,6 +46,16 @@ def _settings():
     s.max_option_premium_inr = 175.0
     s.chop_day_guards_enabled = True
     s.whipsaw_guards_enabled = True
+    # local-base structure checks
+    s.local_base_overrides_session_chart_enabled = True
+    s.local_base_ichimoku_chart_bypass_enabled = True
+    s.local_base_chart_bypass_require_ichimoku = False
+    s.local_base_overrides_bearish_breadth = True
+    s.local_base_ichimoku_max_adverse_mom5_pct = 0.12
+    s.local_base_chart_bypass_min_score = 38.0
+    s.local_base_chart_bypass_radar_min_move_pct = 28.0
+    s.explosion_local_base_entry_min_move_pct = 15.0
+    s.explosion_local_base_chase_max_move_pct = 40.0
     return s
 
 
@@ -116,6 +129,64 @@ def test_explosion_atm_prefer_hard_blocks_otm(mock_settings):
     )
     assert ok_atm is True
     assert meta_atm["moneyness"] == "ATM"
+
+
+@patch("app.engines.moneyness.get_settings")
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_local_base_call_allows_shallow_otm(mock_lb, mock_mn):
+    """Confirmed local-base CE within 3 OTM steps may bypass ATM-only."""
+    from types import SimpleNamespace
+
+    s = _settings()
+    s.moneyness_explosion_prefer = "ATM"
+    mock_mn.return_value = s
+    mock_lb.return_value = s
+    snap = _snap(spot=23800.0)
+    snap.atmStrike = 23800.0
+    snap.spotChart = None
+    alert = {
+        "side": "CALL",
+        "strike": 23900.0,
+        "tier": "EXPLODING",
+        "explosionScore": 87.0,
+        "dailyMovePct": 35.0,
+        "peakMovePct": 35.0,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 30.0,
+        "ictPattern": "flat_then_vertical",
+    }
+    candidate = SimpleNamespace(
+        side=Side.CALL, strike=23900.0, mode="explosion", score=87.0,
+        alert=alert, explosion_event=None,
+    )
+    # 23900 = 2 steps OTM on NIFTY
+    ok, reason, meta = moneyness_allows(
+        Side.CALL, 23900, snap, mode="explosion", candidate_score=87.0,
+        candidate=candidate,
+    )
+    assert ok is True
+    assert meta.get("localBaseOtmBypass") is True
+
+    # 4 steps OTM still blocked
+    alert4 = {**alert, "strike": 24000.0}
+    cand4 = SimpleNamespace(
+        side=Side.CALL, strike=24000.0, mode="explosion", score=87.0,
+        alert=alert4, explosion_event=None,
+    )
+    ok4, reason4, _ = moneyness_allows(
+        Side.CALL, 24000, snap, mode="explosion", candidate_score=87.0,
+        candidate=cand4,
+    )
+    assert ok4 is False
+    assert reason4 == "moneyness_explosion_atm_only_otm_blocked"
+
+    # PUT never gets the CE local-base OTM bypass
+    ok_put, reason_put, _ = moneyness_allows(
+        Side.PUT, 23700, snap, mode="explosion", candidate_score=100.0,
+    )
+    assert ok_put is False
+    assert reason_put == "moneyness_explosion_atm_only_otm_blocked"
 
 
 @patch("app.engines.moneyness.get_settings", return_value=_settings())

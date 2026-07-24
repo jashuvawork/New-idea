@@ -36,6 +36,7 @@ def _settings(**overrides):
     s.explosion_chase_use_local_base = True
     s.explosion_local_base_chase_max_move_pct = 40.0
     s.explosion_local_base_entry_min_move_pct = 15.0
+    s.explosion_local_base_trust_min_move_pct = 8.0
     s.ict_local_base_lookback_polls = 16
     s.ict_local_base_min_dump_pct = 25.0
     s.explosion_immature_block_enabled = True
@@ -142,6 +143,29 @@ def test_immature_waits_for_15pct_from_local_base(mock_s):
         ict=_ict(flat=False, base_move=18.0, local_swing=True),
     )
     assert blocked2 is False
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_noise_baserel_does_not_false_immature(mock_s):
+    """Jul24 PUTs: baseRel≈1.5% noise must not hold a day-mature +28% rip."""
+    mock_s.return_value = _settings()
+    blocked, reason = immature_explosion_blocked(
+        _event(28.0),
+        ict=_ict(flat=False, base_move=1.5, local_swing=True),
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_unstructured_baserel_ignored_for_immature(mock_s):
+    """baseRel without swing/flat→vertical is not a launch pad."""
+    mock_s.return_value = _settings()
+    blocked, reason = immature_explosion_blocked(
+        _event(28.0),
+        ict=_ict(flat=False, base_move=12.0, local_swing=False),
+    )
+    assert blocked is False
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
