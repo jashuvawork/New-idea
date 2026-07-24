@@ -339,12 +339,16 @@ class Settings(BaseSettings):
     # Composer advisory → hard gate (standDown / side bias).
     composer_hard_gate_enabled: bool = True
     composer_bias_gate_enabled: bool = True
-    # A confirmed high-confidence local-base ELITE rip overrides a Composer stand-down
-    # on ANY day (Jul24: composer STAND_ASIDE on a chop day buried 17/18 flat→vertical
-    # rips incl. NIFTY 24000 CE +61%). Narrow: ELITE + score≥floor + confirmed local
-    # base in the early window; scalps/low-tier/chases stay blocked.
-    composer_stand_down_local_base_elite_bypass: bool = True
-    composer_stand_down_elite_bypass_min_score: float = 62.0
+    # A confirmed TOP explosion (ELITE/EXPLODING) off a local base overrides advisory
+    # stand-asides on ANY day — composer stand-down, composer opposing-bias, and the
+    # worst-day PAUSED halt (Jul24: composer STAND_ASIDE on a chop day buried 17/18
+    # flat→vertical rips incl. NIFTY 24000 CE +61%). "Never miss the best base rips."
+    # Bounded: top tier + score≥floor + confirmed local base in the early window (which
+    # enforces the 15–40% base-relative window + adverse-momentum cap). Scalps, low
+    # tiers/scores, late chases, and hard live-dumps still respect every gate.
+    top_explosion_local_base_bypass_enabled: bool = True
+    top_explosion_local_base_bypass_tiers_csv: str = "ELITE,EXPLODING"
+    top_explosion_local_base_bypass_min_score: float = 62.0
     # Never force ICT max lots on chop/RANGE (good-day override was Jul49-lot hole).
     ict_force_max_lots_block_on_chop: bool = True
     # High-mover / all-in bypasses must not reopen late chases.

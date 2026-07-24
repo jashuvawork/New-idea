@@ -99,3 +99,33 @@ def test_allows_elite_explosion(mock_policy):
     )
     ok, reason, _ = worst_day_allows_candidate(cand, AutoTraderState(), {"NIFTY": _snap(tqs=48)})
     assert ok, reason
+
+
+@patch("app.engines.worst_day_guard.session_entry_policy",
+       return_value=("PAUSED", {"pauseReason": "worst_day_severe_session_loss"}))
+def test_paused_blocks_normal_but_allows_top_local_base(mock_policy):
+    """A severe-loss PAUSE blocks everything EXCEPT a confirmed top local-base rip."""
+    # Ordinary scalp — still blocked on a paused day.
+    ok, reason, _ = worst_day_allows_candidate(
+        _Cand(mode="scalp", score=72.0), AutoTraderState(), {"NIFTY": _snap()},
+    )
+    assert ok is False
+    assert reason == "worst_day_severe_session_loss"
+
+    # Top ELITE explosion off a confirmed local base — never miss it.
+    cand = _Cand(mode="explosion", tier="ELITE", score=100.0, side=Side.CALL)
+    cand.snap = _snap()
+    cand.snap.spotChart = SpotChart(direction="BEARISH", momentum5Pct=0.01, trendStrength=30)
+    cand.explosion_event = None
+    cand.alert = {
+        "side": "CALL", "strike": 24500.0, "tier": "ELITE", "explosionScore": 100.0,
+        "dailyMovePct": 30.0, "peakMovePct": 30.0, "ictFlatThenVertical": True,
+        "ictBreakout": True, "ictBaseRelativeMovePct": 28.0,
+        "ictPattern": "flat_then_vertical", "premium": 120.0, "tradeable": True,
+    }
+    cand.confidence = 100.0
+    ok2, reason2, meta2 = worst_day_allows_candidate(
+        cand, AutoTraderState(), {"NIFTY": cand.snap},
+    )
+    assert ok2 is True
+    assert meta2.get("worstDayBypass") == "local_base_top_explosion"

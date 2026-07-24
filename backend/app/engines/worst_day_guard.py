@@ -195,6 +195,16 @@ def worst_day_allows_candidate(
         return True, "ok", meta
 
     if policy == "PAUSED":
+        # Never miss a confirmed TOP explosion off a local base — even a paused
+        # worst day yields to the best ELITE/EXPLODING base rips (bounded predicate).
+        if getattr(settings, "top_explosion_local_base_bypass_enabled", True):
+            from app.engines.local_base_chart_bypass import (
+                is_top_explosion_local_base_bypass,
+            )
+
+            if is_top_explosion_local_base_bypass(candidate):
+                meta["worstDayBypass"] = "local_base_top_explosion"
+                return True, "ok", meta
         return False, meta.get("pauseReason", "worst_day_paused"), meta
 
     mode = str(getattr(candidate, "mode", "") or "")
