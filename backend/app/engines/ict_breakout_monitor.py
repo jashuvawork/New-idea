@@ -375,7 +375,7 @@ def late_fade_chase_blocked(event: Any, ict: Optional[ICTBreakoutSignal] = None)
     max_v3 = float(getattr(settings, "ict_late_chase_max_live_velocity_3s", 1.0) or 1.0)
     early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
     local_max = float(
-        getattr(settings, "explosion_local_base_chase_max_move_pct", 70.0) or 70.0
+        getattr(settings, "explosion_local_base_chase_max_move_pct", 40.0) or 40.0
     )
     # Fresh local-base leg (flat or V-bottom) still inside the tradeable window —
     # day peak % must not late-fade-block the reclaim (76400 PE at 14:35).
@@ -385,7 +385,7 @@ def late_fade_chase_blocked(event: Any, ict: Optional[ICTBreakoutSignal] = None)
         and float(getattr(ict, "base_relative_move_pct", 0) or 0) > 0
     ):
         base_rel = float(ict.base_relative_move_pct or 0)
-        if base_rel < local_max:
+        if base_rel <= local_max:
             return False, ""
     # Early flat→vertical still in the capture window may keep a live displacement pass.
     if (

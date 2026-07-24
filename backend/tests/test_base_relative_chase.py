@@ -4,7 +4,7 @@ SENSEX 76300 PE: ranged 30-100 then broke 100->144. Day-move reads +113% (chase)
 but the move FROM THE BASE is early — should not be blocked as extended chase.
 
 SENSEX 76400 PE Jul23: dumped 110→42 at 14:35 then ripped to 240. Day-move +471%
-always looks like a chase; local-base window 28–70% is the real gate.
+always looks like a chase; local-base window 15–40% is the real gate.
 """
 
 from datetime import datetime, timedelta
@@ -34,8 +34,8 @@ def _settings(**overrides):
     s.ict_base_relative_chase_abs_move_cap_pct = 160.0
     s.ict_base_relative_ignore_abs_cap = True
     s.explosion_chase_use_local_base = True
-    s.explosion_local_base_chase_max_move_pct = 70.0
-    s.explosion_local_base_entry_min_move_pct = 28.0
+    s.explosion_local_base_chase_max_move_pct = 40.0
+    s.explosion_local_base_entry_min_move_pct = 15.0
     s.ict_local_base_lookback_polls = 16
     s.ict_local_base_min_dump_pct = 25.0
     s.explosion_immature_block_enabled = True
@@ -68,22 +68,22 @@ def _ict(*, flat=True, active=True, vol=True, base_move=44.0, local_swing=False)
 @patch("app.engines.explosion_entry_guards.get_settings")
 def test_base_break_allowed_despite_high_day_move(mock_s):
     mock_s.return_value = _settings()
-    blocked, reason = extended_session_chase_blocked(_event(113.0), ict=_ict(base_move=44.0))
+    blocked, reason = extended_session_chase_blocked(_event(113.0), ict=_ict(base_move=35.0))
     assert blocked is False
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
 def test_extended_local_base_still_blocked(mock_s):
     mock_s.return_value = _settings()
-    # local-base move at/above 70% → chase from the local launch
-    blocked, reason = extended_session_chase_blocked(_event(113.0), ict=_ict(base_move=70.0))
+    # local-base move past 40% → chase from the local launch
+    blocked, reason = extended_session_chase_blocked(_event(113.0), ict=_ict(base_move=41.0))
     assert blocked is True
     assert "extended_chase_local" in reason
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
 def test_local_base_allows_parabolic_day_move(mock_s):
-    """Day +220% is fine when local-base expansion is still early."""
+    """Day +220% is fine when local-base expansion is still early (≤40%)."""
     mock_s.return_value = _settings()
     blocked, reason = extended_session_chase_blocked(_event(220.0), ict=_ict(base_move=40.0))
     assert blocked is False
@@ -93,7 +93,7 @@ def test_local_base_allows_parabolic_day_move(mock_s):
 def test_low_base_rip_ignores_day_chase(mock_s):
     """30→140 style: session % is huge, but base-relative is still early — allow."""
     mock_s.return_value = _settings()
-    blocked, reason = extended_session_chase_blocked(_event(340.0), ict=_ict(base_move=44.0))
+    blocked, reason = extended_session_chase_blocked(_event(340.0), ict=_ict(base_move=35.0))
     assert blocked is False
 
 
@@ -114,7 +114,7 @@ def test_local_primary_disabled_falls_back_to_legacy(mock_s):
         explosion_chase_use_local_base=False,
         ict_base_relative_chase_bypass_enabled=False,
     )
-    blocked, reason = extended_session_chase_blocked(_event(113.0), ict=_ict(base_move=44.0))
+    blocked, reason = extended_session_chase_blocked(_event(113.0), ict=_ict(base_move=35.0))
     assert blocked is True
 
 
@@ -127,7 +127,7 @@ def test_normal_early_move_not_affected(mock_s):
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_immature_waits_for_28pct_from_local_base(mock_s):
+def test_immature_waits_for_15pct_from_local_base(mock_s):
     mock_s.return_value = _settings()
     # Day move looks mature (+471%) but local V-bottom only +12% — wait.
     blocked, reason = immature_explosion_blocked(
@@ -139,7 +139,7 @@ def test_immature_waits_for_28pct_from_local_base(mock_s):
 
     blocked2, _ = immature_explosion_blocked(
         _event(471.0),
-        ict=_ict(flat=False, base_move=32.0, local_swing=True),
+        ict=_ict(flat=False, base_move=18.0, local_swing=True),
     )
     assert blocked2 is False
 

@@ -228,10 +228,11 @@ class Settings(BaseSettings):
     ict_base_relative_chase_abs_move_cap_pct: float = 160.0
     # Jul23 SENSEX 76400 PE: day-move +471% after an earlier run-up/dump, but the NEW leg
     # launched from the 14:35 local V-bottom (~42). Chase/entry must use that local base
-    # (tradeable 28–70%); day-session % alone always looks like a chase.
+    # (tradeable 15–40% — earlier than the old 28–70 catch zone); day-session % alone
+    # always looks like a chase. ~50% from base was catching, not profitable.
     explosion_chase_use_local_base: bool = True
-    explosion_local_base_chase_max_move_pct: float = 70.0
-    explosion_local_base_entry_min_move_pct: float = 28.0
+    explosion_local_base_chase_max_move_pct: float = 40.0
+    explosion_local_base_entry_min_move_pct: float = 15.0
     ict_local_base_lookback_polls: int = 16
     ict_local_base_min_dump_pct: float = 25.0
     explosion_extended_soft_lot_cap: int = 6
@@ -609,6 +610,9 @@ class Settings(BaseSettings):
     local_base_ichimoku_require_cloud: bool = False
     local_base_ichimoku_max_adverse_mom5_pct: float = 0.12
     local_base_chart_bypass_min_score: float = 38.0
+    # Radar-lag side-bias fallback (no ICT flags yet) — keep above entry floor so
+    # bare ELITE+15% cannot lift counter-breadth locks.
+    local_base_chart_bypass_radar_min_move_pct: float = 28.0
     # Also lifts explosion_call_vs_bearish_breadth, market_opposes_side,
     # directional_call_needs_confirmation_*, bad_day/worst_day alignment.
     local_base_overrides_bearish_breadth: bool = True
