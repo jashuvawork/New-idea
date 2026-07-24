@@ -118,7 +118,7 @@ def immature_explosion_blocked(
     early_min = float(
         getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0
     )
-    # When a local base is known, maturity is measured from THAT base (28%+), not
+    # When a local base is known, maturity is measured from THAT base (15%+), not
     # day-session % — otherwise a post-dump V-bottom always looks "mature" from open.
     base_move = float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict is not None else 0.0
     if (
@@ -127,7 +127,7 @@ def immature_explosion_blocked(
         and base_move > 0
     ):
         local_floor = float(
-            getattr(settings, "explosion_local_base_entry_min_move_pct", 28.0) or 28.0
+            getattr(settings, "explosion_local_base_entry_min_move_pct", 15.0) or 15.0
         )
         if base_move >= local_floor:
             return False, ""
@@ -172,10 +172,14 @@ def _ict_structure_confirmed(ict: Any) -> bool:
     ):
         return True
     # Dump→V-bottom reclaim with heat + early local-base expansion.
+    settings = get_settings()
+    local_floor = float(
+        getattr(settings, "explosion_local_base_entry_min_move_pct", 15.0) or 15.0
+    )
     base_rel = float(getattr(ict, "base_relative_move_pct", 0) or 0)
     if (
         bool(getattr(ict, "local_swing_base", False))
-        and base_rel >= 28.0
+        and base_rel >= local_floor
         and (
             bool(getattr(ict, "volume_awakening", False))
             or bool(getattr(ict, "displacement", False))
@@ -305,11 +309,12 @@ def extended_session_chase_blocked(
         and getattr(settings, "explosion_chase_use_local_base", True)
         and base_move > 0
     ):
-        # Hard ceiling from local base (default 70%). Soft 55% only shrinks size.
+        # Hard ceiling from local base (default 40%). Soft 55% only shrinks size.
         local_max = float(
-            getattr(settings, "explosion_local_base_chase_max_move_pct", 70.0) or 70.0
+            getattr(settings, "explosion_local_base_chase_max_move_pct", 40.0) or 40.0
         )
-        if base_move >= local_max:
+        # Inclusive ceiling: block only once past 40% from the local launch.
+        if base_move > local_max:
             return True, f"explosion_extended_chase_local_{base_move:.0f}%"
         # Local base still inside the tradeable window — never block on day %.
         return False, ""

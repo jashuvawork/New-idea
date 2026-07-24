@@ -78,25 +78,30 @@ def _alert_has_local_base(alert: dict[str, Any]) -> bool:
     # Base-relative already measured in the tradeable local window.
     base_rel = float(alert.get("ictBaseRelativeMovePct") or 0)
     local_max = float(
-        getattr(settings, "explosion_local_base_chase_max_move_pct", 70.0) or 70.0
+        getattr(settings, "explosion_local_base_chase_max_move_pct", 40.0) or 40.0
     )
-    if 0 < base_rel < local_max:
+    entry_min = float(
+        getattr(settings, "explosion_local_base_entry_min_move_pct", 15.0) or 15.0
+    )
+    if entry_min <= base_rel <= local_max:
         return True
     # Jul24 23700 CE: EXPLODING/ELITE on radar with early-window move after a
     # gap-down — ICT flags sometimes lag one poll; tier+score+move is enough.
+    # Keep this radar fallback ABOVE the entry floor so bare ELITE+15% cannot
+    # lift counter-breadth locks without real ICT structure.
     tier = str(alert.get("tier") or "").upper()
     score = float(alert.get("explosionScore") or 0)
     move = _alert_session_move(alert)
     min_score = float(
         getattr(settings, "local_base_chart_bypass_min_score", 38.0) or 38.0
     )
-    early_min = float(
-        getattr(settings, "explosion_local_base_entry_min_move_pct", 28.0) or 28.0
+    radar_min = float(
+        getattr(settings, "local_base_chart_bypass_radar_min_move_pct", 28.0) or 28.0
     )
     if (
         tier in ("EXPLODING", "ELITE")
         and score >= min_score
-        and early_min <= move <= local_max
+        and radar_min <= move <= local_max
     ):
         return True
     if (
@@ -107,7 +112,7 @@ def _alert_has_local_base(alert: dict[str, Any]) -> bool:
             or bool(alert.get("ictVolumeAwakening"))
             or float(alert.get("velocity3s") or 0) >= 2.0
         )
-        and move >= early_min * 0.5
+        and move >= radar_min * 0.5
         and move <= local_max
     ):
         return True
@@ -152,7 +157,7 @@ def _alert_or_event_local_base(
                 return True
         except Exception:
             pass
-        # Event-only fallback (same as alert early-window EXPLODING path).
+        # Event-only radar fallback — stricter than entry floor (see alert path).
         settings = get_settings()
         tier = str(getattr(event, "tier", "") or "").upper()
         score = float(getattr(event, "explosion_score", 0) or 0)
@@ -163,16 +168,16 @@ def _alert_or_event_local_base(
         min_score = float(
             getattr(settings, "local_base_chart_bypass_min_score", 38.0) or 38.0
         )
-        early_min = float(
-            getattr(settings, "explosion_local_base_entry_min_move_pct", 28.0) or 28.0
+        radar_min = float(
+            getattr(settings, "local_base_chart_bypass_radar_min_move_pct", 28.0) or 28.0
         )
         local_max = float(
-            getattr(settings, "explosion_local_base_chase_max_move_pct", 70.0) or 70.0
+            getattr(settings, "explosion_local_base_chase_max_move_pct", 40.0) or 40.0
         )
         if (
             tier in ("EXPLODING", "ELITE")
             and score >= min_score
-            and early_min <= move <= local_max
+            and radar_min <= move <= local_max
         ):
             return True
     return False

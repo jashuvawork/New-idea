@@ -37,8 +37,9 @@ def _settings(**overrides):
     s.local_base_ichimoku_require_cloud = False
     s.local_base_ichimoku_max_adverse_mom5_pct = 0.12
     s.local_base_chart_bypass_min_score = 38.0
-    s.explosion_local_base_entry_min_move_pct = 28.0
-    s.explosion_local_base_chase_max_move_pct = 70.0
+    s.explosion_local_base_entry_min_move_pct = 15.0
+    s.explosion_local_base_chase_max_move_pct = 40.0
+    s.local_base_chart_bypass_radar_min_move_pct = 28.0
     s.local_base_overrides_bearish_breadth = True
     for k, v in overrides.items():
         setattr(s, k, v)
@@ -117,7 +118,7 @@ def test_local_base_alone_lifts_call_vs_bearish_without_ichimoku(mock_s):
 
 @patch("app.engines.local_base_chart_bypass.get_settings")
 def test_exploding_early_window_without_ict_flags(mock_s):
-    """Radar sometimes lags ICT flags — EXPLODING + 28-70% move still counts."""
+    """Radar sometimes lags ICT flags — EXPLODING + 15-40% move still counts."""
     mock_s.return_value = _settings()
     alert = {
         "side": "CALL",

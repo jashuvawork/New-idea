@@ -221,8 +221,9 @@ def test_explosion_entry_blocks_elite_put_on_rally(
     s.local_base_overrides_bearish_breadth = True
     s.local_base_chart_bypass_require_ichimoku = False
     s.local_base_chart_bypass_min_score = 38.0
-    s.explosion_local_base_entry_min_move_pct = 28.0
-    s.explosion_local_base_chase_max_move_pct = 70.0
+    s.explosion_local_base_entry_min_move_pct = 15.0
+    s.explosion_local_base_chase_max_move_pct = 40.0
+    s.local_base_chart_bypass_radar_min_move_pct = 28.0
     s.local_base_ichimoku_max_adverse_mom5_pct = 0.12
     s.explosion_live_confirm_enabled = False
     s.chart_mtf_breadth_bypass_min_score = 999.0
