@@ -154,8 +154,12 @@ def _fix_hint(blockers: list[str]) -> str:
         return "Premium-led bypass (PE rip vs bullish index chart)"
     if "not_tradeable_tier" in blockers:
         return "Velocity/volume spike needed for tradeable tier"
+    if any("extended_chase_local" in b for b in blockers):
+        return "Local-base move already past 70% — wait for a fresh swing low"
     if any("extended_chase" in b for b in blockers):
-        return "Enter on base-relative early window — day-move % alone looks like a chase"
+        return "Enter on local-base early window (28–70%) — day-move % alone looks like a chase"
+    if any("immature_local_base" in b for b in blockers):
+        return "Wait for ≥28% expansion from the local swing/flat base"
     if any("late_fade" in b for b in blockers):
         return "Enter earlier on flat-base break — do not chase after peak fades"
     return "Review pretrade + directional lock"
