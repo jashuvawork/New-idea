@@ -90,6 +90,33 @@ def _session_peak_move(explosion_event: Any) -> float:
     return max(daily, peak)
 
 
+def trustworthy_local_base_move(ict: Any) -> float:
+    """
+    Base-relative % only when structure is real enough for timing gates.
+
+    Jul24: alerts printed baseRel≈1–2% (noise / near a chop low) while day-move
+    was already ~28%. Treating that as a launch pad false-immatured mature rips.
+    Require swing/flat→vertical structure and ≥ trust floor (default 8%).
+    """
+    if ict is None:
+        return 0.0
+    settings = get_settings()
+    base = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+    if base <= 0:
+        return 0.0
+    structured = bool(getattr(ict, "local_swing_base", False)) or bool(
+        getattr(ict, "flat_then_vertical", False)
+    )
+    if not structured:
+        return 0.0
+    trust_min = float(
+        getattr(settings, "explosion_local_base_trust_min_move_pct", 8.0) or 8.0
+    )
+    if base < trust_min:
+        return 0.0
+    return base
+
+
 def immature_explosion_blocked(
     explosion_event: Any,
     *,
@@ -118,14 +145,13 @@ def immature_explosion_blocked(
     early_min = float(
         getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0
     )
-    # When a local base is known, maturity is measured from THAT base (15%+), not
-    # day-session % — otherwise a post-dump V-bottom always looks "mature" from open.
-    base_move = float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict is not None else 0.0
-    if (
-        ict is not None
-        and getattr(settings, "explosion_chase_use_local_base", True)
-        and base_move > 0
-    ):
+    # Trustworthy local base only — micro baseRel noise falls through to session %.
+    base_move = (
+        trustworthy_local_base_move(ict)
+        if getattr(settings, "explosion_chase_use_local_base", True)
+        else 0.0
+    )
+    if base_move > 0:
         local_floor = float(
             getattr(settings, "explosion_local_base_entry_min_move_pct", 15.0) or 15.0
         )
@@ -290,7 +316,7 @@ def extended_session_chase_blocked(
     known — day-session % alone always looks like a chase after an earlier run-up
     (Jul23 SENSEX 76400 PE: +471% day-move at the 14:35 local base reclaim).
 
-    Tradeable local window: entry_min (28%) … chase_max (70%). Outside that,
+    Tradeable local window: entry_min (15%) … chase_max (40%). Outside that,
     either wait (too early — handled by immature) or block as local chase.
     """
     settings = get_settings()
@@ -303,12 +329,12 @@ def extended_session_chase_blocked(
     if ict is not None:
         move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
 
-    base_move = float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict is not None else 0.0
-    if (
-        ict is not None
-        and getattr(settings, "explosion_chase_use_local_base", True)
-        and base_move > 0
-    ):
+    base_move = (
+        trustworthy_local_base_move(ict)
+        if getattr(settings, "explosion_chase_use_local_base", True)
+        else 0.0
+    )
+    if base_move > 0:
         # Hard ceiling from local base (default 40%). Soft 55% only shrinks size.
         local_max = float(
             getattr(settings, "explosion_local_base_chase_max_move_pct", 40.0) or 40.0

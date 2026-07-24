@@ -793,6 +793,7 @@ def validate_candidate(
             candidate_score=float(getattr(candidate, "score", 0) or 0),
             snapshots=snap_map,
             state=state,
+            candidate=candidate,
         )
         meta.update(mn_meta)
         if not mn_ok:

@@ -125,6 +125,40 @@ def resolve_preferred_moneyness(
     return "ATM"
 
 
+def _local_base_call_otm_bypass(
+    side: Side | str,
+    depth: int,
+    snap: SymbolSnapshot,
+    *,
+    candidate_score: float = 0.0,
+    candidate: Any = None,
+) -> bool:
+    """Shallow OTM CALL with confirmed local base — ATM CE often missing on gap-down rips."""
+    settings = get_settings()
+    if not getattr(settings, "moneyness_local_base_otm_bypass_enabled", True):
+        return False
+    side_v = side.value if isinstance(side, Side) else str(side).upper()
+    if side_v != "CALL":
+        return False
+    max_steps = int(getattr(settings, "moneyness_local_base_max_otm_steps", 3) or 3)
+    if depth < 1 or depth > max_steps:
+        return False
+    min_score = float(
+        getattr(settings, "moneyness_local_base_otm_min_score", 78.0) or 78.0
+    )
+    if float(candidate_score or 0) < min_score:
+        return False
+    from app.engines.local_base_chart_bypass import local_base_structure_active
+
+    alert = getattr(candidate, "alert", None) if candidate is not None else None
+    if not isinstance(alert, dict):
+        alert = None
+    event = (
+        getattr(candidate, "explosion_event", None) if candidate is not None else None
+    )
+    return local_base_structure_active(side_v, snap, event=event, alert=alert)
+
+
 def moneyness_allows(
     side: Side | str,
     strike: float,
@@ -134,6 +168,7 @@ def moneyness_allows(
     candidate_score: float = 0.0,
     snapshots: Optional[dict[str, SymbolSnapshot]] = None,
     state: Any = None,
+    candidate: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     settings = get_settings()
     if not settings.moneyness_selection_enabled:
@@ -169,7 +204,12 @@ def moneyness_allows(
         and preferred == "ATM"
         and bool(getattr(settings, "moneyness_explosion_block_otm", True))
     ):
-        return False, "moneyness_explosion_atm_only_otm_blocked", meta
+        if _local_base_call_otm_bypass(
+            side, depth, snap, candidate_score=candidate_score, candidate=candidate,
+        ):
+            meta["localBaseOtmBypass"] = True
+        else:
+            return False, "moneyness_explosion_atm_only_otm_blocked", meta
 
     if money == "OTM" and depth > settings.moneyness_max_otm_steps:
         expiry_otm_ok = False
