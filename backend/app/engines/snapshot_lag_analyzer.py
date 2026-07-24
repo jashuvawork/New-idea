@@ -162,7 +162,7 @@ def _fix_hint(blockers: list[str]) -> str:
     if any("extended_chase" in b for b in blockers):
         return "Enter on local-base early window (15–40%) — day-move % alone looks like a chase"
     if any("immature_local_base" in b for b in blockers):
-        return "Wait for ≥15% expansion from the local swing/flat base"
+        return "Wait for ≥15% expansion from a trustworthy local swing/flat base (≥8%)"
     if any("late_fade" in b for b in blockers):
         return "Enter earlier on flat-base break — do not chase after peak fades"
     return "Review pretrade + directional lock"
