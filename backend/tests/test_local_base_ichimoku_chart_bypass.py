@@ -1,4 +1,4 @@
-"""Gap-down bearish session chart vs bullish Ichimoku + local premium base."""
+"""Local base overrides gap-down bearish session chart (call_vs_bearish_chart)."""
 
 from datetime import datetime
 from types import SimpleNamespace
@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 from app.engines.local_base_chart_bypass import (
     ichimoku_supports_side,
     local_base_ichimoku_chart_bypass,
+    local_base_overrides_session_chart,
+    local_base_structure_active,
 )
 from app.engines.rally_capture import chart_blocks_explosion_side
 from app.models.schemas import (
@@ -25,18 +27,24 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def _settings(**overrides):
     s = MagicMock()
+    s.local_base_overrides_session_chart_enabled = True
     s.local_base_ichimoku_chart_bypass_enabled = True
-    s.local_base_ichimoku_require_cloud = True
-    s.local_base_ichimoku_max_adverse_mom5_pct = 0.08
+    s.local_base_chart_bypass_require_ichimoku = False
+    s.local_base_ichimoku_require_cloud = False
+    s.local_base_ichimoku_max_adverse_mom5_pct = 0.12
+    s.local_base_chart_bypass_min_score = 38.0
+    s.explosion_local_base_entry_min_move_pct = 28.0
+    s.explosion_local_base_chase_max_move_pct = 70.0
+    s.local_base_overrides_bearish_breadth = True
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
 
 
-def _bearish_gap_chart():
+def _bearish_gap_chart(*, mom5=0.01):
     return SpotChart(
         direction="BEARISH",
-        momentum5Pct=0.01,
+        momentum5Pct=mom5,
         momentum15Pct=-0.35,
         momentum30Pct=-0.55,
         trendStrength=70,
@@ -49,7 +57,8 @@ def _bearish_gap_chart():
     )
 
 
-def _snap(*, ichimoku_cloud="BULLISH", tk="BULLISH", price_vs="ABOVE"):
+def _snap(*, alert=None, ichimoku_cloud="BEARISH"):
+    """Default: bearish Ichimoku — local base alone must still lift the chart block."""
     return SymbolSnapshot(
         symbol="NIFTY",
         timestamp=datetime.now(IST),
@@ -57,7 +66,7 @@ def _snap(*, ichimoku_cloud="BULLISH", tk="BULLISH", price_vs="ABOVE"):
         dataAvailable=True,
         regime=Regime.TREND_EXPANSION,
         spot=23680.0,
-        atmStrike=23650.0,
+        atmStrike=23700.0,
         tradeQualityScore=55,
         breadth=Breadth(bias="BEARISH", score=40, aligned=False),
         spotChart=_bearish_gap_chart(),
@@ -65,25 +74,23 @@ def _snap(*, ichimoku_cloud="BULLISH", tk="BULLISH", price_vs="ABOVE"):
             consensus="BEARISH",
             ichimoku={
                 "cloudBias": ichimoku_cloud,
-                "tkCross": tk,
-                "priceVsCloud": price_vs,
-                "tenkan": 23690.0,
-                "kijun": 23670.0,
-                "cloudTop": 23660.0,
-                "cloudBottom": 23640.0,
+                "tkCross": "BEARISH",
+                "priceVsCloud": "BELOW",
             },
         ),
-        explosionAlerts=[{
+        explosionAlerts=[alert or {
             "side": "CALL",
-            "strike": 23650.0,
-            "tier": "BUILDING",
-            "explosionScore": 42.0,
-            "dailyMovePct": 17.0,
+            "strike": 23700.0,
+            "tier": "EXPLODING",
+            "explosionScore": 98.4,
+            "dailyMovePct": 32.0,
+            "peakMovePct": 32.0,
             "ictFlatThenVertical": True,
             "ictBreakout": True,
             "ictBaseRelativeMovePct": 30.0,
             "ictPattern": "flat_then_vertical",
             "premium": 148.0,
+            "tradeable": True,
         }],
     )
 
@@ -91,30 +98,55 @@ def _snap(*, ichimoku_cloud="BULLISH", tk="BULLISH", price_vs="ABOVE"):
 @patch("app.engines.local_base_chart_bypass.get_settings")
 def test_ichimoku_supports_call_when_cloud_bullish(mock_s):
     mock_s.return_value = _settings()
-    assert ichimoku_supports_side(Side.CALL, _snap()) is True
-    assert ichimoku_supports_side(Side.CALL, _snap(ichimoku_cloud="BEARISH", tk="BEARISH", price_vs="BELOW")) is False
+    assert ichimoku_supports_side(Side.CALL, _snap(ichimoku_cloud="BULLISH")) is True
 
 
 @patch("app.engines.local_base_chart_bypass.get_settings")
-def test_bypass_allows_call_on_gap_down_with_bullish_ichi(mock_s):
+def test_local_base_alone_lifts_call_vs_bearish_without_ichimoku(mock_s):
+    """Jul24 23700 CE: EXPLODING off local base, Ichimoku still bearish after gap-down."""
     mock_s.return_value = _settings()
-    snap = _snap()
-    alert = snap.explosionAlerts[0]
+    snap = _snap(ichimoku_cloud="BEARISH")
+    assert local_base_overrides_session_chart(
+        Side.CALL, snap, alert=snap.explosionAlerts[0],
+    ) is True
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_exploding_early_window_without_ict_flags(mock_s):
+    """Radar sometimes lags ICT flags — EXPLODING + 28-70% move still counts."""
+    mock_s.return_value = _settings()
+    alert = {
+        "side": "CALL",
+        "strike": 23700.0,
+        "tier": "EXPLODING",
+        "explosionScore": 98.4,
+        "dailyMovePct": 28.86,
+        "peakMovePct": 28.86,
+        "ictFlatThenVertical": False,
+        "ictBreakout": False,
+        "ictBaseRelativeMovePct": 0,
+        "ictPattern": "watch",
+        "tradeable": True,
+    }
+    snap = _snap(alert=alert)
+    assert local_base_structure_active(Side.CALL, snap, alert=alert) is True
     assert local_base_ichimoku_chart_bypass(Side.CALL, snap, alert=alert) is True
 
 
 @patch("app.engines.local_base_chart_bypass.get_settings")
 def test_bypass_rejects_without_local_base(mock_s):
     mock_s.return_value = _settings()
-    snap = _snap()
     alert = {
         "side": "CALL",
         "tier": "BUILDING",
+        "explosionScore": 30.0,
+        "dailyMovePct": 5.0,
         "ictFlatThenVertical": False,
         "ictBreakout": False,
         "ictBaseRelativeMovePct": 0,
         "ictPattern": "watch",
     }
+    snap = _snap(alert=alert)
     assert local_base_ichimoku_chart_bypass(Side.CALL, snap, alert=alert) is False
 
 
@@ -122,25 +154,36 @@ def test_bypass_rejects_without_local_base(mock_s):
 def test_bypass_rejects_hard_live_dump(mock_s):
     mock_s.return_value = _settings()
     snap = _snap()
-    snap.spotChart.momentum5Pct = -0.20  # still dumping
-    assert local_base_ichimoku_chart_bypass(Side.CALL, snap, alert=snap.explosionAlerts[0]) is False
+    snap.spotChart = _bearish_gap_chart(mom5=-0.20)
+    assert local_base_ichimoku_chart_bypass(
+        Side.CALL, snap, alert=snap.explosionAlerts[0],
+    ) is False
 
 
 @patch("app.engines.local_base_chart_bypass.get_settings")
-def test_chart_blocks_explosion_lifted_with_snap(mock_s):
+def test_require_ichimoku_when_flag_on(mock_s):
+    mock_s.return_value = _settings(local_base_chart_bypass_require_ichimoku=True)
+    snap = _snap(ichimoku_cloud="BEARISH")
+    assert local_base_overrides_session_chart(
+        Side.CALL, snap, alert=snap.explosionAlerts[0],
+    ) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_chart_blocks_explosion_lifted_for_23700_profile(mock_s):
     mock_s.return_value = _settings()
     snap = _snap()
     event = SimpleNamespace(
         side=Side.CALL,
-        tier="BUILDING",
-        daily_move_pct=17.0,
-        peak_move_pct=17.0,
-        velocity_3s=2.5,
-        velocity_9s=2.0,
+        tier="EXPLODING",
+        daily_move_pct=28.86,
+        peak_move_pct=28.86,
+        velocity_3s=3.0,
+        velocity_9s=2.5,
         volume_surge=2.0,
-        explosion_score=42.0,
+        explosion_score=98.4,
         symbol="NIFTY",
-        strike=23650.0,
+        strike=23700.0,
         premium=148.0,
         reason="",
         volume=0,
@@ -155,9 +198,35 @@ def test_chart_blocks_explosion_lifted_with_snap(mock_s):
         blocked, reason = chart_blocks_explosion_side(
             Side.CALL,
             snap.spotChart,
-            "BUILDING",
+            "EXPLODING",
             event=event,
             breadth_bias="BEARISH",
             snap=snap,
+        )
+    assert blocked is False
+
+
+@patch("app.engines.aligned_side_guard.get_settings")
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_breadth_hard_block_lifted_for_local_base_call(mock_lb, mock_ag):
+    from app.engines.aligned_side_guard import breadth_hard_blocks_side
+
+    s = _settings()
+    s.breadth_hard_side_block_enabled = True
+    mock_lb.return_value = s
+    mock_ag.return_value = s
+    snap = _snap()
+    with patch(
+        "app.engines.extreme_explosion_moment.is_extreme_explosion_all_in_bypass",
+        return_value=False,
+    ), patch(
+        "app.engines.vertical_rip_bypass.vertical_rip_bypasses_hard_breadth",
+        return_value=False,
+    ), patch(
+        "app.engines.aligned_side_guard.chart_mtf_breadth_bypass_active",
+        return_value=(False, {}),
+    ):
+        blocked, reason = breadth_hard_blocks_side(
+            Side.CALL, "BEARISH", snap=snap, alert=snap.explosionAlerts[0],
         )
     assert blocked is False

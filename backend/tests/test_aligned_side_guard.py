@@ -202,26 +202,56 @@ def test_elite_put_blocked_on_bullish_breadth(mock_settings, _window):
     assert counter_trend_entry_allowed(Side.PUT, _bullish_snap(), explosion_event=event) is False
 
 
+@patch("app.engines.morning_premium_capture.in_morning_premium_capture_window", return_value=False)
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
 @patch("app.engines.morning_premium_capture.get_settings")
 @patch("app.engines.explosion_profit.get_settings")
-def test_explosion_entry_blocks_elite_put_on_rally(mock_explosion_settings, mock_morning_settings, _window):
+@patch("app.engines.aligned_side_guard.get_settings")
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_explosion_entry_blocks_elite_put_on_rally(
+    mock_lb, mock_ag, mock_explosion_settings, mock_morning_settings, _window, _morning_win,
+):
     s = mock_morning_settings.return_value
     s.premium_led_explosion_bypass_enabled = True
     s.premium_led_counter_breadth_enabled = True
     s.breadth_hard_side_block_enabled = True
     s.explosion_breadth_alignment_enabled = True
     s.aggressive_min_explosion_score = 45
+    s.local_base_overrides_session_chart_enabled = True
+    s.local_base_overrides_bearish_breadth = True
+    s.local_base_chart_bypass_require_ichimoku = False
+    s.local_base_chart_bypass_min_score = 38.0
+    s.explosion_local_base_entry_min_move_pct = 28.0
+    s.explosion_local_base_chase_max_move_pct = 70.0
+    s.local_base_ichimoku_max_adverse_mom5_pct = 0.12
+    s.explosion_live_confirm_enabled = False
+    s.chart_mtf_breadth_bypass_min_score = 999.0
+    s.extreme_explosion_all_in_enabled = False
     mock_explosion_settings.return_value = s
+    mock_ag.return_value = s
+    mock_lb.return_value = s
 
     snap = _bullish_snap()
-    ok, reason = check_explosion_entry(
-        _elite_put_event(),
-        _trade(),
-        snap.breadth,
-        False,
-        chart=snap.spotChart,
-        snap=snap,
-    )
+    with patch(
+        "app.engines.aligned_side_guard.chart_mtf_breadth_bypass_active",
+        return_value=(False, {}),
+    ), patch(
+        "app.engines.extreme_explosion_moment.is_extreme_explosion_all_in_bypass",
+        return_value=False,
+    ), patch(
+        "app.engines.vertical_rip_bypass.vertical_rip_bypasses_hard_breadth",
+        return_value=False,
+    ), patch(
+        "app.engines.local_base_chart_bypass.local_base_structure_active",
+        return_value=False,
+    ):
+        ok, reason = check_explosion_entry(
+            _elite_put_event(),
+            _trade(),
+            snap.breadth,
+            False,
+            chart=snap.spotChart,
+            snap=snap,
+        )
     assert ok is False
     assert reason == "hard_block_put_vs_bullish_breadth"
