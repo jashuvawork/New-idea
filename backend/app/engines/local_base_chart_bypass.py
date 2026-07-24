@@ -278,22 +278,33 @@ def local_base_ichimoku_chart_bypass(
     )
 
 
-def is_local_base_elite_bypass(
+def _top_explosion_bypass_tiers() -> set[str]:
+    settings = get_settings()
+    raw = str(
+        getattr(settings, "top_explosion_local_base_bypass_tiers_csv", "ELITE,EXPLODING")
+        or "ELITE,EXPLODING"
+    )
+    return {t.strip().upper() for t in raw.split(",") if t.strip()}
+
+
+def is_top_explosion_local_base_bypass(
     candidate: Any,
     snap: Optional[SymbolSnapshot] = None,
 ) -> bool:
-    """High-confidence local-base ELITE rip that may override advisory stand-asides
-    (Composer stand-down) on ANY day — not just expiry.
+    """A confirmed TOP explosion off a local base — may override advisory stand-asides
+    (composer stand-down / opposing bias / worst-day PAUSED halt) on ANY day.
 
-    Narrow by design so this is "best elite trades from local base", never chop FOMO:
-    - explosion mode, ELITE tier
-    - explosion score ≥ composer_stand_down_elite_bypass_min_score (62)
+    "Never miss the best base rips" — but bounded so it can't become chop FOMO:
+    - explosion mode, tier in top_explosion_local_base_bypass_tiers_csv (ELITE/EXPLODING)
+    - explosion score ≥ top_explosion_local_base_bypass_min_score (62)
     - a CONFIRMED local premium base for the side (flat→vertical / early-window rip),
-      which also enforces the base-relative early window + the adverse-momentum cap.
-    Scalps, BUILDING/EXPLODING, low scores, and late chases do NOT qualify.
+      which also enforces the base-relative early window (15–40%) + the adverse-momentum
+      cap (won't fire while the index is dumping hard).
+    Scalps, low tiers/scores, late chases, and hard live-dumps do NOT qualify. This is
+    the "enter the 100→250 rip at the base" gate.
     """
     settings = get_settings()
-    if not getattr(settings, "composer_stand_down_local_base_elite_bypass", True):
+    if not getattr(settings, "top_explosion_local_base_bypass_enabled", True):
         return False
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         return False
@@ -307,7 +318,7 @@ def is_local_base_elite_bypass(
         or alert.get("tier", "")
         or ""
     ).upper()
-    if tier != "ELITE":
+    if tier not in _top_explosion_bypass_tiers():
         return False
 
     score = float(
@@ -317,7 +328,7 @@ def is_local_base_elite_bypass(
         or 0
     )
     min_score = float(
-        getattr(settings, "composer_stand_down_elite_bypass_min_score", 62.0) or 62.0
+        getattr(settings, "top_explosion_local_base_bypass_min_score", 62.0) or 62.0
     )
     if score < min_score:
         return False
@@ -327,6 +338,14 @@ def is_local_base_elite_bypass(
     return local_base_structure_active(
         side, snap, event=event, alert=alert or None,
     )
+
+
+# Backward-compatible alias (ELITE-focused name, now ELITE/EXPLODING via config).
+def is_local_base_elite_bypass(
+    candidate: Any,
+    snap: Optional[SymbolSnapshot] = None,
+) -> bool:
+    return is_top_explosion_local_base_bypass(candidate, snap)
 
 
 def local_base_ichimoku_bypass_for_snap(

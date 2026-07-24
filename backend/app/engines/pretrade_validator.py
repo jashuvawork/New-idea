@@ -589,16 +589,19 @@ def validate_candidate(
                     if is_expiry_elite_top_candidate(candidate):
                         stand_down_bypass = True
                         meta["composerStandDownBypass"] = "elite_top"
-                # (2) Any-day high-confidence local-base ELITE rip (Jul24 24000 CE +61%
-                #     buried by a chop-day STAND_ASIDE while it ripped off a local base).
+                # (2) Any-day TOP explosion (ELITE/EXPLODING) off a local base (Jul24
+                #     24000 CE +61% buried by a chop-day STAND_ASIDE while it ripped off
+                #     a local base). Never miss the best base rips.
                 if not stand_down_bypass and getattr(
-                    settings, "composer_stand_down_local_base_elite_bypass", True
+                    settings, "top_explosion_local_base_bypass_enabled", True
                 ):
-                    from app.engines.local_base_chart_bypass import is_local_base_elite_bypass
+                    from app.engines.local_base_chart_bypass import (
+                        is_top_explosion_local_base_bypass,
+                    )
 
-                    if is_local_base_elite_bypass(candidate):
+                    if is_top_explosion_local_base_bypass(candidate):
                         stand_down_bypass = True
-                        meta["composerStandDownBypass"] = "local_base_elite"
+                        meta["composerStandDownBypass"] = "local_base_top_explosion"
                 if not stand_down_bypass:
                     return False, "composer_stand_down", meta
             if getattr(settings, "composer_bias_gate_enabled", True):
@@ -626,6 +629,14 @@ def validate_candidate(
                         if ict_flat:
                             ict_bypass = True
                             meta["composerBiasBypass"] = "ict_flat_vertical"
+                        if not ict_bypass:
+                            from app.engines.local_base_chart_bypass import (
+                                is_top_explosion_local_base_bypass,
+                            )
+
+                            if is_top_explosion_local_base_bypass(candidate):
+                                ict_bypass = True
+                                meta["composerBiasBypass"] = "local_base_top_explosion"
                     if mode != "explosion" or (tier not in ("ELITE",) and not ict_bypass):
                         meta["composerBias"] = bias
                         return False, f"composer_bias_{bias.lower()}_blocks_{side_val.lower()}", meta
