@@ -353,6 +353,12 @@ def test_day_mode_bearish(mock_settings):
     s.daily_max_trades_chop = 20
     s.loss_streak_pause_count = 3
     s.loss_streak_pause_seconds = 1200
+    s.session_large_loss_pause_inr = 15_000.0
+    s.session_large_loss_pause_seconds = 900
+    s.loss_streak_elite_bypass_enabled = False
+    s.momentum_bypass_velocity_pct = 2.5
+    s.momentum_bypass_volume_surge = 1.4
+    s.momentum_bypass_explosion_score = 48.0
     s.momentum_rally_start_hour = 11
     s.momentum_rally_start_minute = 0
     s.momentum_rally_end_hour = 13
