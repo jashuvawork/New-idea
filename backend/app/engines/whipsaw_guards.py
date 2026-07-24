@@ -404,11 +404,25 @@ def check_bearish_sideways_entry(
     if mode == "explosion":
         tier = str(getattr(candidate, "tier", "") or "")
         score = float(getattr(candidate, "score", 0) or 0)
-        if tier in ("ELITE", "EXPLODING") and score >= settings.bearish_sideways_explosion_min_score:
+        min_score = float(settings.bearish_sideways_explosion_min_score)
+        # Jul24: local-base CE at ~77 sat one point under 78 — align with OTM bypass floor.
+        alert = getattr(candidate, "alert", None)
+        if not isinstance(alert, dict):
+            alert = None
+        event = getattr(candidate, "explosion_event", None)
+        from app.engines.local_base_chart_bypass import local_base_structure_active
+
+        if local_base_structure_active(
+            candidate.side, snap, event=event, alert=alert,
+        ):
+            soft = float(
+                getattr(settings, "bearish_sideways_local_base_min_score", 75.0) or 75.0
+            )
+            min_score = min(min_score, soft)
+        if tier in ("ELITE", "EXPLODING") and score >= min_score:
             return False, "ok"
         from app.engines.morning_premium_capture import is_premium_capture_event
 
-        event = getattr(candidate, "explosion_event", None)
         if event and is_premium_capture_event(event, chart=snap.spotChart):
             return False, "ok"
         return True, "bearish_sideways_explosion_only"
