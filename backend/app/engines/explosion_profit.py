@@ -281,7 +281,10 @@ def check_explosion_entry(
     # BUILDING+ICT flat→vertical entries (no structure → no_ict_structure_confirmation).
     ict_live = analyze_explosion_event_ict(event, snap)
     live_blocked, live_reason = live_explosion_confirmation_blocked(
-        event, ict=ict_live, premium_capture=is_premium_capture_event(event, chart=chart),
+        event,
+        ict=ict_live,
+        premium_capture=is_premium_capture_event(event, chart=chart),
+        snap=snap,
     )
     if live_blocked:
         return False, live_reason

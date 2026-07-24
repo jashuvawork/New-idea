@@ -536,7 +536,7 @@ def _gate_checks(
                 "detail": "session move mature enough",
             })
         live_blocked, live_reason = live_explosion_confirmation_blocked(
-            candidate.explosion_event, ict=ict,
+            candidate.explosion_event, ict=ict, snap=snap,
         )
         if live_blocked:
             blockers.append(live_reason)

@@ -311,7 +311,10 @@ def _explosion_candidates(
         from app.engines.morning_premium_capture import is_premium_capture_event
 
         live_blocked, _live_reason = live_explosion_confirmation_blocked(
-            event, ict=ict, premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
+            event,
+            ict=ict,
+            premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
+            snap=snap,
         )
         if live_blocked:
             continue

@@ -342,7 +342,51 @@ def worst_day_allows_candidate(
     meta["velocity3s"] = vel3
     meta["velocity9s"] = vel9
 
-    min_vel = settings.worst_day_breakout_min_velocity_3s
+    min_vel = float(settings.worst_day_breakout_min_velocity_3s)
+    alert = getattr(candidate, "alert", None)
+    if not isinstance(alert, dict):
+        alert = None
+    from app.engines.explosion_entry_guards import structured_near_atm_call
+    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+    ict_obj = analyze_explosion_event_ict(event, snap) if event is not None else None
+    strike = float(
+        getattr(candidate, "strike", 0)
+        or (getattr(event, "strike", 0) if event is not None else 0)
+        or 0
+    )
+    if structured_near_atm_call(
+        candidate.side,
+        strike,
+        snap,
+        ict=ict_obj,
+        event=event,
+        alert=alert,
+        candidate=candidate,
+    ):
+        soft = float(
+            getattr(settings, "worst_day_structured_ce_min_velocity_3s", 1.5) or 1.5
+        )
+        min_vel = min(min_vel, soft)
+        meta["structuredNearAtmCe"] = True
+        # Peak-velocity carry when live cooled (Jul24 23850 CE profile).
+        if vel3 < min_vel and event is not None:
+            from app.engines.explosion_detector import retained_peak_velocity_3s
+
+            peak_v3 = float(
+                retained_peak_velocity_3s(
+                    str(getattr(event, "symbol", "") or snap.symbol),
+                    float(getattr(event, "strike", 0) or strike),
+                    getattr(event, "side", candidate.side),
+                )
+                or 0
+            )
+            if peak_v3 >= soft:
+                vel3 = max(vel3, peak_v3)
+                vel9 = max(vel9, peak_v3 * 1.1)
+                meta["structuredCePeakVelocity"] = True
+                meta["peakVelocity3s"] = peak_v3
+
     tier_upper = tier.upper()
     if tier_upper != "ELITE" and vel3 < min_vel and vel9 < min_vel * 1.2:
         return False, f"worst_day_breakout_velocity_below_{min_vel}", meta

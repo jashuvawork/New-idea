@@ -35,7 +35,7 @@ def _settings():
     s.moneyness_explosion_block_otm = True
     s.moneyness_local_base_otm_bypass_enabled = True
     s.moneyness_local_base_max_otm_steps = 3
-    s.moneyness_local_base_otm_min_score = 78.0
+    s.moneyness_local_base_otm_min_score = 75.0
     s.moneyness_scalp_chop_prefer = "ITM"
     s.moneyness_high_conf_prefer = "ITM"
     s.moneyness_rank_bonus = 12.0
