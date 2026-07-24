@@ -265,11 +265,17 @@ async def monitor_trade_chart_before_execution(
     vertical_bypass = vertical_rip_bypass_for_snap(
         side, snap, explosion_event=explosion_event,
     )
+    from app.engines.local_base_chart_bypass import local_base_ichimoku_bypass_for_snap
+
+    local_ichi_bypass = local_base_ichimoku_bypass_for_snap(
+        side, snap, explosion_event=explosion_event,
+    )
     expiry_chart_bypass = (
         expiry_chart_bypass_for_event(explosion_event, snap)
         if explosion_event is not None
         else False
     )
+    structure_chart_bypass = premium_bypass or vertical_bypass or local_ichi_bypass
 
     try:
         meta = await fetch_live_trade_charts(
@@ -280,7 +286,7 @@ async def monitor_trade_chart_before_execution(
         blocked, reason = chart_blocks_side(
             side, snap.spotChart, trade_score=trade_score,
             breadth_aligned_bypass=breadth_bypass,
-            premium_led_bypass=premium_bypass or vertical_bypass,
+            premium_led_bypass=structure_chart_bypass,
             expiry_explosion_bypass=expiry_chart_bypass,
         )
         fallback = {
@@ -308,7 +314,7 @@ async def monitor_trade_chart_before_execution(
         index_mtf_reads=index_mtf_reads,
         premium_mtf_reads=premium_mtf_reads,
         breadth_aligned_bypass=breadth_bypass,
-        premium_led_bypass=premium_bypass,
+        premium_led_bypass=structure_chart_bypass,
         vertical_rip_bypass=vertical_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
         explosion_event=explosion_event,
@@ -341,6 +347,7 @@ async def monitor_trade_chart_before_execution(
     meta["blockReason"] = reason if not passed else None
     meta["premiumLedBypass"] = premium_bypass
     meta["verticalRipBypass"] = vertical_bypass
+    meta["localBaseIchimokuBypass"] = local_ichi_bypass
     meta["expiryExplosionBypass"] = expiry_chart_bypass
     meta["breadthAlignedBypass"] = breadth_bypass
     snap_aligned = side_aligned_with_chart(side, snap.spotChart)
@@ -350,7 +357,10 @@ async def monitor_trade_chart_before_execution(
     meta["chartBypassUsed"] = bool(
         passed
         and not exec_aligned
-        and (premium_bypass or vertical_bypass or expiry_chart_bypass or breadth_bypass)
+        and (
+            premium_bypass or vertical_bypass or expiry_chart_bypass
+            or breadth_bypass or local_ichi_bypass
+        )
     )
     if meta["chartBypassUsed"] and snap_aligned:
         meta["alignedWithChart"] = True

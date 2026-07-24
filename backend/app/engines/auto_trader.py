@@ -701,11 +701,16 @@ async def _open_from_candidate(
             vertical_bypass = vertical_rip_bypass_for_snap(
                 candidate.side, snap, explosion_event=candidate.explosion_event,
             )
+            from app.engines.local_base_chart_bypass import local_base_ichimoku_bypass_for_snap
+
+            local_ichi_bypass = local_base_ichimoku_bypass_for_snap(
+                candidate.side, snap, explosion_event=candidate.explosion_event,
+            )
             expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
             blocked, chart_reason = chart_blocks_side(
                 candidate.side, snap.spotChart, trade_score=trade_score,
                 breadth_aligned_bypass=breadth_bypass,
-                premium_led_bypass=premium_bypass or vertical_bypass,
+                premium_led_bypass=premium_bypass or vertical_bypass or local_ichi_bypass,
                 expiry_explosion_bypass=expiry_chart_bypass,
                 scalp_mode=(candidate.mode or "").lower() in {"scalp", "quick_sideways", "slow_bounce"},
             )
@@ -719,10 +724,12 @@ async def _open_from_candidate(
                 "snapshotAligned": side_aligned_with_chart(candidate.side, snap.spotChart),
                 "alignedWithChart": side_aligned_with_chart(candidate.side, snap.spotChart),
                 "chartBypassUsed": bool(
-                    premium_bypass or vertical_bypass or expiry_chart_bypass or breadth_bypass
+                    premium_bypass or vertical_bypass or expiry_chart_bypass
+                    or breadth_bypass or local_ichi_bypass
                 ),
                 "premiumLedBypass": premium_bypass,
                 "verticalRipBypass": vertical_bypass,
+                "localBaseIchimokuBypass": local_ichi_bypass,
                 "expiryExplosionBypass": expiry_chart_bypass,
             }
     else:

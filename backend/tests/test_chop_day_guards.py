@@ -342,6 +342,7 @@ def test_tiered_lot_cap(mock_settings):
 
 @patch("app.engines.chop_day_guards.get_settings")
 def test_day_mode_bearish(mock_settings):
+    from contextlib import ExitStack
     from app.engines.chop_day_guards import chop_guard_summary
     from app.models.schemas import AutoTraderState
 
@@ -353,6 +354,12 @@ def test_day_mode_bearish(mock_settings):
     s.daily_max_trades_chop = 20
     s.loss_streak_pause_count = 3
     s.loss_streak_pause_seconds = 1200
+    s.session_large_loss_pause_inr = 15_000.0
+    s.session_large_loss_pause_seconds = 900
+    s.loss_streak_elite_bypass_enabled = False
+    s.momentum_bypass_velocity_pct = 2.5
+    s.momentum_bypass_volume_surge = 1.4
+    s.momentum_bypass_explosion_score = 48.0
     s.momentum_rally_start_hour = 11
     s.momentum_rally_start_minute = 0
     s.momentum_rally_end_hour = 13
@@ -365,7 +372,36 @@ def test_day_mode_bearish(mock_settings):
     }
     snaps["NIFTY"].symbol = "NIFTY"
     snaps["SENSEX"].symbol = "SENSEX"
-    summary = chop_guard_summary(AutoTraderState(), snaps)
+    # chop_guard_summary pulls many engines; stub heavy deps (ExitStack avoids
+    # Python's nested-block limit on a giant `with` chain).
+    stubs = [
+        ("app.engines.pretrade_validator.check_last_n_trades_pause", (False, "ok", {})),
+        ("app.engines.pretrade_validator.last_n_trades_summary", {}),
+        ("app.engines.pretrade_validator.resolve_effective_daily_trade_cap", (20, "chop")),
+        ("app.engines.whipsaw_guards.whipsaw_guard_summary", {}),
+        ("app.engines.session_timing.in_midday_chop_window", False),
+        ("app.engines.session_timing.in_open_caution_window", False),
+        ("app.engines.chop_day_guards.in_momentum_rally_window", False),
+        ("app.engines.chop_day_guards.before_primary_window", False),
+        ("app.engines.expiry_day_guards.is_expiry_session", False),
+        ("app.engines.expiry_day_guards.expiry_guard_summary", {}),
+        ("app.engines.worst_day_guard.worst_day_guard_summary", {}),
+        ("app.engines.dual_mode_strategy.dual_mode_summary", {}),
+        ("app.engines.bad_day_routing.bad_day_routing_summary", {}),
+        ("app.engines.directional_lock.directional_lock_summary", {}),
+        ("app.engines.confidence_hold.high_confidence_close_summary", {}),
+        ("app.engines.psychology_hold.psychology_hold_summary", {}),
+        ("app.engines.ict_breakout_monitor.ict_monitor_summary", {}),
+        ("app.engines.worst_day_itm_fade.worst_day_trades_summary", {}),
+        ("app.engines.moneyness.resolve_preferred_moneyness", "ATM"),
+        ("app.engines.simple_profit.get_session_targets", MagicMock(sessionLabel="TEST", targetPoints=20)),
+        ("app.engines.daily_18pct_strategy.get_session_limits", MagicMock(confidenceTier="MEDIUM")),
+        ("app.engines.market_momentum.index_moment_summary", {}),
+    ]
+    with ExitStack() as stack:
+        for target, value in stubs:
+            stack.enter_context(patch(target, return_value=value))
+        summary = chop_guard_summary(AutoTraderState(), snaps)
     assert summary["dayMode"] == "BEARISH DAY"
     assert "NIFTY" in summary["symbolBreadth"]
     assert summary["symbolBreadth"]["NIFTY"]["bias"] == "BEARISH"
