@@ -64,6 +64,35 @@ def _alert_session_move(alert: dict[str, Any]) -> float:
     )
 
 
+def local_base_entry_window(tier: str = "", volume_surge: float = 0.0) -> tuple[float, float]:
+    """Adaptive base-relative entry window (entry_min%, chase_max%) off the local base.
+
+    - ELITE + strong volume → wider ceiling (catch more of the best 100→250 rips).
+    - EXPLODING → higher floor (clear the base's ~8% noise band, fewer fakeouts).
+    - Otherwise → the base 15–40% window.
+    """
+    settings = get_settings()
+    entry_min = float(getattr(settings, "explosion_local_base_entry_min_move_pct", 15.0) or 15.0)
+    chase_max = float(getattr(settings, "explosion_local_base_chase_max_move_pct", 40.0) or 40.0)
+    if not getattr(settings, "local_base_adaptive_window_enabled", True):
+        return entry_min, chase_max
+    tier_u = str(tier or "").upper()
+    strong_vol = float(volume_surge or 0) >= float(
+        getattr(settings, "local_base_wide_window_min_vol_surge", 3.0) or 3.0
+    )
+    if tier_u == "ELITE" and strong_vol:
+        chase_max = max(
+            chase_max,
+            float(getattr(settings, "local_base_elite_chase_max_move_pct", 50.0) or 50.0),
+        )
+    elif tier_u == "EXPLODING":
+        entry_min = max(
+            entry_min,
+            float(getattr(settings, "local_base_exploding_entry_min_move_pct", 20.0) or 20.0),
+        )
+    return entry_min, chase_max
+
+
 def _alert_has_local_base(alert: dict[str, Any]) -> bool:
     """Local premium launch pad — ICT structure OR strong early-window explosion."""
     settings = get_settings()
@@ -75,13 +104,10 @@ def _alert_has_local_base(alert: dict[str, Any]) -> bool:
         "flat_then_vertical", "early_flat_break", "local_swing_base",
     ):
         return True
-    # Base-relative already measured in the tradeable local window.
+    # Base-relative already measured in the tradeable local window (tier/volume-adaptive).
     base_rel = float(alert.get("ictBaseRelativeMovePct") or 0)
-    local_max = float(
-        getattr(settings, "explosion_local_base_chase_max_move_pct", 40.0) or 40.0
-    )
-    entry_min = float(
-        getattr(settings, "explosion_local_base_entry_min_move_pct", 15.0) or 15.0
+    entry_min, local_max = local_base_entry_window(
+        str(alert.get("tier") or ""), float(alert.get("volumeSurge") or 0),
     )
     if entry_min <= base_rel <= local_max:
         return True
@@ -171,8 +197,8 @@ def _alert_or_event_local_base(
         radar_min = float(
             getattr(settings, "local_base_chart_bypass_radar_min_move_pct", 28.0) or 28.0
         )
-        local_max = float(
-            getattr(settings, "explosion_local_base_chase_max_move_pct", 40.0) or 40.0
+        _, local_max = local_base_entry_window(
+            tier, float(getattr(event, "volume_surge", 0) or 0),
         )
         if (
             tier in ("EXPLODING", "ELITE")
