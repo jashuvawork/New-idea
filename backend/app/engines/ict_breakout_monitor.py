@@ -29,6 +29,7 @@ class ICTBreakoutSignal:
     volume_surge: float = 1.0
     base_premium: float = 0.0
     base_relative_move_pct: float = 0.0
+    local_swing_base: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +47,7 @@ class ICTBreakoutSignal:
             "volumeSurge": round(self.volume_surge, 2),
             "basePremium": round(self.base_premium, 2),
             "baseRelativeMovePct": round(self.base_relative_move_pct, 1),
+            "localSwingBase": self.local_swing_base,
         }
 
 
@@ -116,6 +118,49 @@ def _detect_flat_base(history: list[tuple[datetime, float, float]], settings) ->
     return max_dev <= settings.ict_flat_base_max_range_pct, max_dev, avg
 
 
+def _detect_local_swing_base(
+    history: list[tuple[datetime, float, float]],
+    premium: float,
+    settings,
+) -> tuple[bool, float, float]:
+    """Local swing low after a dump — Jul23 SENSEX 76400 PE 14:35 (110→42→45).
+
+    Flat-base detection fails on violent V-bottoms. When recent polls show a
+    meaningful dump into a low, measure the new leg from that local low instead
+    of the day open / earlier peak.
+
+    Returns (found, local_low, base_relative_move_pct).
+    """
+    if premium <= 0 or len(history) < 4:
+        return False, 0.0, 0.0
+    lookback = int(getattr(settings, "ict_local_base_lookback_polls", 16) or 16)
+    lookback = max(4, lookback)
+    window = list(history)[-lookback:]
+    premiums = [float(h[1]) for h in window if float(h[1] or 0) > 0]
+    if len(premiums) < 4:
+        return False, 0.0, 0.0
+    local_low = min(premiums)
+    local_high = max(premiums)
+    if local_low <= 0:
+        return False, 0.0, 0.0
+    dump_pct = (local_high - local_low) / local_low * 100.0
+    min_dump = float(getattr(settings, "ict_local_base_min_dump_pct", 25.0) or 25.0)
+    if dump_pct < min_dump:
+        return False, 0.0, 0.0
+    # Low should be recent (in the back half of the window) — not a stale morning print.
+    low_idx = min(i for i, p in enumerate(premiums) if p <= local_low * 1.001)
+    if low_idx < max(0, len(premiums) // 3):
+        # Low only at the start of the window with a grind up = prior leg, not a fresh V.
+        # Still accept when the current premium has pulled back near that low again.
+        near_low = premium <= local_low * 1.35
+        if not near_low:
+            return False, 0.0, 0.0
+    base_rel = (premium - local_low) / local_low * 100.0
+    if base_rel < 0:
+        base_rel = 0.0
+    return True, local_low, base_rel
+
+
 def analyze_ict_breakout(
     *,
     symbol: str,
@@ -143,12 +188,20 @@ def analyze_ict_breakout(
     score = 0.0
 
     fvg, gap_pct = _detect_premium_fvg(history, settings)
-    flat, flat_dev, base_level = _detect_flat_base(history, settings)
-    # Move measured from the consolidation base (not day low) — a fresh break off a
-    # range should not read as "extended" just because premium was elevated earlier.
+    flat, flat_dev, flat_base = _detect_flat_base(history, settings)
+    swing_found, swing_low, swing_rel = _detect_local_swing_base(history, premium, settings)
+    # Prefer local swing low after a dump (V-bottom) over flat-base average; otherwise
+    # use consolidation base. Day-open % is intentionally not used here.
+    local_swing_base = False
+    base_level = 0.0
     base_rel_move = 0.0
-    if base_level > 0 and premium > 0:
-        base_rel_move = (premium - base_level) / base_level * 100.0
+    if swing_found and swing_low > 0:
+        local_swing_base = True
+        base_level = swing_low
+        base_rel_move = swing_rel
+    elif flat and flat_base > 0 and premium > 0:
+        base_level = flat_base
+        base_rel_move = (premium - flat_base) / flat_base * 100.0
     surge_awaken = volume_surge >= float(
         getattr(settings, "ict_volume_surge_awaken_min", 3.0) or 3.0
     )
@@ -160,11 +213,13 @@ def analyze_ict_breakout(
     displacement = velocity_3s >= settings.ict_displacement_min_velocity_3s
     early_min = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
     early_v3 = float(getattr(settings, "ict_early_vertical_min_velocity_3s", 2.0) or 2.0)
+    # Structure / early-window heat: prefer local-base move when we have one.
+    structure_move = base_rel_move if base_rel_move > 0 else move
     vertical = move >= settings.ict_vertical_min_session_move_pct
-    # Early breakout: flat base + displacement/volume + ≥28% — catch 26→45 before 80%.
+    # Early breakout: flat OR local V-base + heat + ≥28% from that base.
     early_break = (
-        flat
-        and move >= early_min
+        (flat or local_swing_base)
+        and structure_move >= early_min
         and (
             displacement
             or vol_awaken
@@ -178,12 +233,15 @@ def analyze_ict_breakout(
     if fvg:
         score += settings.ict_fvg_score_bonus
         reasons.append(f"premium_fvg_{gap_pct:.0f}%")
+    if local_swing_base:
+        reasons.append(f"local_swing_base_{base_level:.1f}")
     if flat and vertical:
         score += settings.ict_flat_vertical_score_bonus
         reasons.append(f"flat_then_vertical_{flat_dev:.1f}%base")
     elif early_break:
         score += float(getattr(settings, "ict_early_breakout_score_bonus", 16.0) or 16.0)
-        reasons.append(f"early_flat_break_{move:.0f}%_{flat_dev:.1f}%base")
+        src = "local" if local_swing_base and not flat else "flat"
+        reasons.append(f"early_{src}_break_{structure_move:.0f}%")
     elif flat and displacement:
         score += settings.ict_flat_vertical_score_bonus * 0.7
         reasons.append("flat_base_breaking")
@@ -267,6 +325,7 @@ def analyze_ict_breakout(
         volume_surge=volume_surge,
         base_premium=base_level,
         base_relative_move_pct=base_rel_move,
+        local_swing_base=local_swing_base,
     )
 
 
@@ -314,8 +373,21 @@ def late_fade_chase_blocked(event: Any, ict: Optional[ICTBreakoutSignal] = None)
     v3 = float(getattr(event, "velocity_3s", 0) or 0)
     min_peak = float(getattr(settings, "ict_late_chase_min_peak_pct", 75.0) or 75.0)
     max_v3 = float(getattr(settings, "ict_late_chase_max_live_velocity_3s", 1.0) or 1.0)
-    # Early flat→vertical still in the capture window may keep a live displacement pass.
     early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+    local_max = float(
+        getattr(settings, "explosion_local_base_chase_max_move_pct", 70.0) or 70.0
+    )
+    # Fresh local-base leg (flat or V-bottom) still inside the tradeable window —
+    # day peak % must not late-fade-block the reclaim (76400 PE at 14:35).
+    if (
+        ict is not None
+        and getattr(settings, "explosion_chase_use_local_base", True)
+        and float(getattr(ict, "base_relative_move_pct", 0) or 0) > 0
+    ):
+        base_rel = float(ict.base_relative_move_pct or 0)
+        if base_rel < local_max:
+            return False, ""
+    # Early flat→vertical still in the capture window may keep a live displacement pass.
     if (
         ict
         and ict.flat_then_vertical
