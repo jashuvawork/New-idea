@@ -580,15 +580,26 @@ def validate_candidate(
             if brief.get("standDown"):
                 meta["composerStandDown"] = True
                 meta["composerBias"] = brief.get("tradeBias")
-                # Expiry / session stand-aside must not bury early-window ELITE tops.
+                # Session stand-aside must not bury high-confidence base-rip explosions.
+                stand_down_bypass = False
+                # (1) Expiry early-window ELITE top.
                 if getattr(settings, "expiry_worst_day_elite_top_composer_bypass", True):
                     from app.engines.expiry_day_guards import is_expiry_elite_top_candidate
 
                     if is_expiry_elite_top_candidate(candidate):
+                        stand_down_bypass = True
                         meta["composerStandDownBypass"] = "elite_top"
-                    else:
-                        return False, "composer_stand_down", meta
-                else:
+                # (2) Any-day high-confidence local-base ELITE rip (Jul24 24000 CE +61%
+                #     buried by a chop-day STAND_ASIDE while it ripped off a local base).
+                if not stand_down_bypass and getattr(
+                    settings, "composer_stand_down_local_base_elite_bypass", True
+                ):
+                    from app.engines.local_base_chart_bypass import is_local_base_elite_bypass
+
+                    if is_local_base_elite_bypass(candidate):
+                        stand_down_bypass = True
+                        meta["composerStandDownBypass"] = "local_base_elite"
+                if not stand_down_bypass:
                     return False, "composer_stand_down", meta
             if getattr(settings, "composer_bias_gate_enabled", True):
                 bias = str(brief.get("tradeBias") or "").upper()

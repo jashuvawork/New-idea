@@ -278,6 +278,57 @@ def local_base_ichimoku_chart_bypass(
     )
 
 
+def is_local_base_elite_bypass(
+    candidate: Any,
+    snap: Optional[SymbolSnapshot] = None,
+) -> bool:
+    """High-confidence local-base ELITE rip that may override advisory stand-asides
+    (Composer stand-down) on ANY day — not just expiry.
+
+    Narrow by design so this is "best elite trades from local base", never chop FOMO:
+    - explosion mode, ELITE tier
+    - explosion score ≥ composer_stand_down_elite_bypass_min_score (62)
+    - a CONFIRMED local premium base for the side (flat→vertical / early-window rip),
+      which also enforces the base-relative early window + the adverse-momentum cap.
+    Scalps, BUILDING/EXPLODING, low scores, and late chases do NOT qualify.
+    """
+    settings = get_settings()
+    if not getattr(settings, "composer_stand_down_local_base_elite_bypass", True):
+        return False
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+
+    event = getattr(candidate, "explosion_event", None)
+    alert = getattr(candidate, "alert", None)
+    alert = alert if isinstance(alert, dict) else {}
+    tier = str(
+        getattr(candidate, "tier", "")
+        or (getattr(event, "tier", "") if event is not None else "")
+        or alert.get("tier", "")
+        or ""
+    ).upper()
+    if tier != "ELITE":
+        return False
+
+    score = float(
+        getattr(candidate, "confidence", 0)
+        or (alert.get("explosionScore") if alert else 0)
+        or (getattr(event, "explosion_score", 0) if event is not None else 0)
+        or 0
+    )
+    min_score = float(
+        getattr(settings, "composer_stand_down_elite_bypass_min_score", 62.0) or 62.0
+    )
+    if score < min_score:
+        return False
+
+    snap = snap if snap is not None else getattr(candidate, "snap", None)
+    side = getattr(candidate, "side", "")
+    return local_base_structure_active(
+        side, snap, event=event, alert=alert or None,
+    )
+
+
 def local_base_ichimoku_bypass_for_snap(
     side: Side | str,
     snap: SymbolSnapshot,
