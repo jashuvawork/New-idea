@@ -216,7 +216,9 @@ def _gate_checks(
     )
 
     premium_bypass = (
-        premium_led_explosion_bypass(candidate.explosion_event, chart, breadth_bias)
+        premium_led_explosion_bypass(
+            candidate.explosion_event, chart, breadth_bias, snap=snap,
+        )
         if candidate.explosion_event
         else False
     )
@@ -289,9 +291,21 @@ def _gate_checks(
         snap=snap,
     )
     br_blocked, br_reason = breadth_blocks_explosion_side(
-        candidate.side, breadth_bias, tier, event=candidate.explosion_event,
+        candidate.side,
+        breadth_bias,
+        tier,
+        event=candidate.explosion_event,
+        snap=snap,
+        alert=alert if isinstance(alert, dict) else None,
     )
-    market_opposes = _market_opposes_side(candidate.side, breadth_bias, chart)
+    market_opposes = _market_opposes_side(
+        candidate.side,
+        breadth_bias,
+        chart,
+        snap=snap,
+        event=candidate.explosion_event,
+        alert=alert if isinstance(alert, dict) else None,
+    )
     if bypassed and not all_in and not vertical_bypass:
         gates.append({
             "gate": "breadth_hard_block",

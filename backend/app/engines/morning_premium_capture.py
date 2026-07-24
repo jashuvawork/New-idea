@@ -116,8 +116,18 @@ def _market_opposes_side(
     side: Side | str,
     breadth_bias: str,
     chart: Optional[SpotChart],
+    *,
+    snap: Optional[SymbolSnapshot] = None,
+    event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> bool:
     """True when breadth or a strong index chart conflicts with the trade leg."""
+    if snap is not None:
+        from app.engines.local_base_chart_bypass import local_base_overrides_side_bias
+
+        if local_base_overrides_side_bias(side, snap, event=event, alert=alert):
+            return False
+
     settings = get_settings()
     side_v = _side_str(side)
     bias = (breadth_bias or "NEUTRAL").upper()
@@ -212,17 +222,24 @@ def counter_trend_entry_allowed(
         side_v = _side_str(side)
         if side_v == "CALL" and _counter_trend_rip_ok(explosion_event, get_settings()):
             return True
-    from app.engines.local_base_chart_bypass import local_base_ichimoku_bypass_for_snap
+    from app.engines.local_base_chart_bypass import (
+        local_base_ichimoku_bypass_for_snap,
+        local_base_overrides_side_bias,
+    )
 
     if local_base_ichimoku_bypass_for_snap(side, snap, explosion_event=explosion_event):
+        return True
+    if local_base_overrides_side_bias(side, snap, event=explosion_event):
         return True
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
 
-    hard_blocked, _ = breadth_hard_blocks_side(side, bias, event=explosion_event)
+    hard_blocked, _ = breadth_hard_blocks_side(
+        side, bias, event=explosion_event, snap=snap,
+    )
     if hard_blocked:
         return False
-    if not _market_opposes_side(side, bias, snap.spotChart):
+    if not _market_opposes_side(side, bias, snap.spotChart, snap=snap, event=explosion_event):
         return True
     if explosion_event is None:
         return False
@@ -245,12 +262,20 @@ def premium_led_entry_allowed(
     side_v = _side_str(side)
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
+    from app.engines.local_base_chart_bypass import local_base_overrides_side_bias
 
-    hard_blocked, _ = breadth_hard_blocks_side(side_v, bias)
+    hard_blocked, _ = breadth_hard_blocks_side(side_v, bias, snap=snap)
     if hard_blocked:
         return False
     v3, v9, score, tier = _best_surge_for_side(snap, side_v)
-    if _is_counter_breadth(side_v, bias) or _market_opposes_side(side_v, bias, snap.spotChart):
+    local_base_ok = local_base_overrides_side_bias(side_v, snap)
+    if (
+        not local_base_ok
+        and (
+            _is_counter_breadth(side_v, bias)
+            or _market_opposes_side(side_v, bias, snap.spotChart, snap=snap)
+        )
+    ):
         settings_elite = float(getattr(settings, "premium_led_elite_counter_min_score", 90.0) or 90.0)
         if tier != "ELITE" or score < settings_elite:
             return False
@@ -709,6 +734,8 @@ def premium_led_explosion_bypass(
     event: ExplosionEvent,
     chart: Optional[SpotChart],
     breadth_bias: str,
+    *,
+    snap: Optional[SymbolSnapshot] = None,
 ) -> bool:
     """
     Option premium leading index — bypass counter-chart blocks on explosions.
@@ -724,7 +751,7 @@ def premium_led_explosion_bypass(
 
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
 
-    hard_blocked, _ = breadth_hard_blocks_side(event.side, breadth_bias)
+    hard_blocked, _ = breadth_hard_blocks_side(event.side, breadth_bias, event=event, snap=snap)
     if hard_blocked:
         return False
 
@@ -732,7 +759,7 @@ def premium_led_explosion_bypass(
     bias = (breadth_bias or "NEUTRAL").upper()
     direction = (chart.direction or "NEUTRAL").upper() if chart else "NEUTRAL"
 
-    if _market_opposes_side(event.side, breadth_bias, chart):
+    if _market_opposes_side(event.side, breadth_bias, chart, snap=snap, event=event):
         if side == "CALL" and _counter_trend_rip_ok(event, settings):
             return True
         return _elite_counter_breadth_ok(event, settings)
@@ -810,7 +837,7 @@ def premium_led_bypass_for_snap(
     chart = snap.spotChart
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     if explosion_event is not None:
-        return premium_led_explosion_bypass(explosion_event, chart, bias)
+        return premium_led_explosion_bypass(explosion_event, chart, bias, snap=snap)
 
     side_v = _side_str(side)
     for alert in snap.explosionAlerts or []:
@@ -832,7 +859,7 @@ def premium_led_bypass_for_snap(
             reason=str(alert.get("reason") or ""),
             daily_move_pct=float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0),
         )
-        if premium_led_explosion_bypass(event, chart, bias):
+        if premium_led_explosion_bypass(event, chart, bias, snap=snap):
             return True
     return False
 

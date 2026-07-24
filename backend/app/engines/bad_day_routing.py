@@ -224,7 +224,19 @@ def _side_val(side: Side | str) -> str:
 
 def _breadth_aligned(candidate: Any, snap: SymbolSnapshot) -> bool:
     side_val = _side_val(candidate.side)
-    return side_aligned_with_breadth(side_val, snap.breadth.bias)
+    if side_aligned_with_breadth(side_val, snap.breadth.bias):
+        return True
+    from app.engines.local_base_chart_bypass import local_base_overrides_side_bias
+
+    alert = getattr(candidate, "alert", None)
+    if not isinstance(alert, dict):
+        alert = None
+    return local_base_overrides_side_bias(
+        side_val,
+        snap,
+        event=getattr(candidate, "explosion_event", None),
+        alert=alert,
+    )
 
 
 def _candidate_session_move(candidate: Any) -> float:

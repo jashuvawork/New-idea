@@ -183,7 +183,9 @@ def _explosion_signals(
             tradeable = bool(gate_row.get("wouldPass"))
             radar_visible = True
             aligned = side_aligned_with_breadth(side, breadth_bias)
-            opposes = _market_opposes_side(side, breadth_bias, snap.spotChart)
+            opposes = _market_opposes_side(
+                side, breadth_bias, snap.spotChart, snap=snap, alert=alert,
+            )
             bias_match = _side_matches_bias(side, session_bias)
             rank_bonus = 0.0
             if aligned:

@@ -106,12 +106,20 @@ def breadth_blocks_explosion_side(
     tier: str,
     *,
     event: Optional[ExplosionEvent] = None,
+    snap: Optional[SymbolSnapshot] = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str]:
     """No PUT into BULLISH breadth / no CALL into BEARISH unless ELITE."""
     from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
 
     if event is not None and qualifies_for_vertical_rip_bypass(event):
         return False, "ok"
+
+    if snap is not None:
+        from app.engines.local_base_chart_bypass import local_base_overrides_side_bias
+
+        if local_base_overrides_side_bias(side, snap, event=event, alert=alert):
+            return False, "ok"
 
     settings = get_settings()
     if not settings.explosion_breadth_alignment_enabled:
@@ -143,7 +151,7 @@ def chart_blocks_explosion_side(
     if event is not None and chart is not None:
         from app.engines.morning_premium_capture import premium_led_explosion_bypass
 
-        if premium_led_explosion_bypass(event, chart, breadth_bias):
+        if premium_led_explosion_bypass(event, chart, breadth_bias, snap=snap):
             return False, "ok"
 
     if snap is not None:
