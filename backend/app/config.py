@@ -233,6 +233,14 @@ class Settings(BaseSettings):
     explosion_chase_use_local_base: bool = True
     explosion_local_base_chase_max_move_pct: float = 40.0
     explosion_local_base_entry_min_move_pct: float = 15.0
+    # Adaptive local-base entry window by tier/volume: ELITE + strong volume widens the
+    # ceiling (catch more of the best 100→250 rips); EXPLODING lifts the floor to clear
+    # the base noise band (fewer fakeouts). Others keep the 15–40 default. Tune from the
+    # localBaseBaseRelPct instrumentation logged on each entry.
+    local_base_adaptive_window_enabled: bool = True
+    local_base_elite_chase_max_move_pct: float = 50.0
+    local_base_exploding_entry_min_move_pct: float = 20.0
+    local_base_wide_window_min_vol_surge: float = 3.0
     # Ignore micro baseRel (<8%) for immature/chase — Jul24 PUTs showed ~1–2%
     # "local base" noise while day-move was already mature (~28%).
     explosion_local_base_trust_min_move_pct: float = 8.0

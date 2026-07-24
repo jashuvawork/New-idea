@@ -830,7 +830,17 @@ async def _open_from_candidate(
             "ictPremiumFvg": ict.premium_fvg,
             "ictFlatThenVertical": ict.flat_then_vertical,
             "ictReasons": ict.reasons,
+            # Local-base entry instrumentation — correlate entry base-rel% + the adaptive
+            # window used with the trade outcome to tune the 15–40 range from real data.
+            "localBaseBaseRelPct": round(float(getattr(ict, "base_relative_move_pct", 0) or 0), 1),
+            "localBaseBasePremium": round(float(getattr(ict, "base_premium", 0) or 0), 2),
         })
+        from app.engines.local_base_chart_bypass import local_base_entry_window
+
+        _lb_min, _lb_max = local_base_entry_window(
+            str(ev.tier or ""), float(getattr(ev, "volume_surge", 0) or 0),
+        )
+        ctx_extra["localBaseEntryWindow"] = [round(_lb_min, 1), round(_lb_max, 1)]
         if good_day_ict:
             ctx_extra["maxProfitCapture"] = bool(ict_meta.get("maxProfitCapture"))
             ctx_extra["goodDayIctCapture"] = bool(ict_meta.get("maxProfitCapture"))

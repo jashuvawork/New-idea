@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from app.engines.local_base_chart_bypass import (
     ichimoku_supports_side,
     is_top_explosion_local_base_bypass,
+    local_base_entry_window,
     local_base_ichimoku_chart_bypass,
     local_base_overrides_session_chart,
     local_base_overrides_side_bias,
@@ -42,9 +43,55 @@ def _settings(**overrides):
     s.explosion_local_base_chase_max_move_pct = 40.0
     s.local_base_chart_bypass_radar_min_move_pct = 28.0
     s.local_base_overrides_bearish_breadth = True
+    s.local_base_adaptive_window_enabled = True
+    s.local_base_elite_chase_max_move_pct = 50.0
+    s.local_base_exploding_entry_min_move_pct = 20.0
+    s.local_base_wide_window_min_vol_surge = 3.0
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_adaptive_window_elite_strong_vol_widens_ceiling(mock_s):
+    mock_s.return_value = _settings()
+    lo, hi = local_base_entry_window("ELITE", volume_surge=3.5)
+    assert lo == 15.0 and hi == 50.0
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_adaptive_window_elite_low_vol_keeps_default_ceiling(mock_s):
+    mock_s.return_value = _settings()
+    lo, hi = local_base_entry_window("ELITE", volume_surge=1.5)
+    assert lo == 15.0 and hi == 40.0
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_adaptive_window_exploding_lifts_floor(mock_s):
+    mock_s.return_value = _settings()
+    lo, hi = local_base_entry_window("EXPLODING", volume_surge=3.5)
+    assert lo == 20.0 and hi == 40.0
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_adaptive_window_disabled_uses_default(mock_s):
+    mock_s.return_value = _settings(local_base_adaptive_window_enabled=False)
+    lo, hi = local_base_entry_window("ELITE", volume_surge=5.0)
+    assert lo == 15.0 and hi == 40.0
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_adaptive_window_elite_accepts_45pct_off_base(mock_s):
+    """ELITE + strong volume: a 45% base-rel move is now inside the widened window."""
+    mock_s.return_value = _settings()
+    alert = {
+        "side": "CALL", "strike": 23700.0, "tier": "ELITE", "explosionScore": 100.0,
+        "ictFlatThenVertical": False, "ictBreakout": True, "ictBaseRelativeMovePct": 45.0,
+        "ictPattern": "watch", "volumeSurge": 3.5, "dailyMovePct": 45.0, "peakMovePct": 45.0,
+        "premium": 150.0, "tradeable": True,
+    }
+    snap = _snap(alert=alert)
+    assert local_base_structure_active(Side.CALL, snap, alert=alert) is True
 
 
 def _bearish_gap_chart(*, mom5=0.01):
