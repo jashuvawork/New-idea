@@ -371,7 +371,56 @@ def test_day_mode_bearish(mock_settings):
     }
     snaps["NIFTY"].symbol = "NIFTY"
     snaps["SENSEX"].symbol = "SENSEX"
-    summary = chop_guard_summary(AutoTraderState(), snaps)
+    # chop_guard_summary pulls many engines; stub the heavy ones so MagicMock
+    # numeric comparisons don't explode on unset attrs.
+    with patch(
+        "app.engines.pretrade_validator.check_last_n_trades_pause",
+        return_value=(False, "ok", {}),
+    ), patch(
+        "app.engines.pretrade_validator.last_n_trades_summary",
+        return_value={},
+    ), patch(
+        "app.engines.pretrade_validator.resolve_effective_daily_trade_cap",
+        return_value=(20, "chop"),
+    ), patch(
+        "app.engines.whipsaw_guards.whipsaw_guard_summary",
+        return_value={},
+    ), patch(
+        "app.engines.session_timing.in_midday_chop_window", return_value=False,
+    ), patch(
+        "app.engines.session_timing.in_open_caution_window", return_value=False,
+    ), patch(
+        "app.engines.expiry_day_guards.is_expiry_session", return_value=False,
+    ), patch(
+        "app.engines.expiry_day_guards.expiry_guard_summary", return_value={},
+    ), patch(
+        "app.engines.worst_day_guard.worst_day_guard_summary", return_value={},
+    ), patch(
+        "app.engines.dual_mode_strategy.dual_mode_summary", return_value={},
+    ), patch(
+        "app.engines.bad_day_routing.bad_day_routing_summary", return_value={},
+    ), patch(
+        "app.engines.directional_lock.directional_lock_summary", return_value={},
+    ), patch(
+        "app.engines.confidence_hold.high_confidence_close_summary", return_value={},
+    ), patch(
+        "app.engines.psychology_hold.psychology_hold_summary", return_value={},
+    ), patch(
+        "app.engines.ict_breakout_monitor.ict_monitor_summary", return_value={},
+    ), patch(
+        "app.engines.worst_day_itm_fade.worst_day_trades_summary", return_value={},
+    ), patch(
+        "app.engines.moneyness.resolve_preferred_moneyness", return_value="ATM",
+    ), patch(
+        "app.engines.simple_profit.get_session_targets",
+        return_value=MagicMock(sessionLabel="TEST", targetPoints=20),
+    ), patch(
+        "app.engines.daily_18pct_strategy.get_session_limits",
+        return_value=MagicMock(confidenceTier="MEDIUM"),
+    ), patch(
+        "app.engines.market_momentum.index_moment_summary", return_value={},
+    ):
+        summary = chop_guard_summary(AutoTraderState(), snaps)
     assert summary["dayMode"] == "BEARISH DAY"
     assert "NIFTY" in summary["symbolBreadth"]
     assert summary["symbolBreadth"]["NIFTY"]["bias"] == "BEARISH"
