@@ -390,6 +390,10 @@ def test_day_mode_bearish(mock_settings):
     ), patch(
         "app.engines.session_timing.in_open_caution_window", return_value=False,
     ), patch(
+        "app.engines.chop_day_guards.in_momentum_rally_window", return_value=False,
+    ), patch(
+        "app.engines.chop_day_guards.before_primary_window", return_value=False,
+    ), patch(
         "app.engines.expiry_day_guards.is_expiry_session", return_value=False,
     ), patch(
         "app.engines.expiry_day_guards.expiry_guard_summary", return_value={},
