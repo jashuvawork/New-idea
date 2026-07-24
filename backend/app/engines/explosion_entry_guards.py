@@ -118,6 +118,21 @@ def immature_explosion_blocked(
     early_min = float(
         getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0
     )
+    # When a local base is known, maturity is measured from THAT base (28%+), not
+    # day-session % — otherwise a post-dump V-bottom always looks "mature" from open.
+    base_move = float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict is not None else 0.0
+    if (
+        ict is not None
+        and getattr(settings, "explosion_chase_use_local_base", True)
+        and base_move > 0
+    ):
+        local_floor = float(
+            getattr(settings, "explosion_local_base_entry_min_move_pct", 28.0) or 28.0
+        )
+        if base_move >= local_floor:
+            return False, ""
+        return True, f"immature_local_base_{base_move:.1f}%"
+
     if move >= min_move:
         return False, ""
 
@@ -154,6 +169,17 @@ def _ict_structure_confirmed(ict: Any) -> bool:
         return True
     if bool(getattr(ict, "volume_awakening", False)) and bool(
         getattr(ict, "displacement", False)
+    ):
+        return True
+    # Dump→V-bottom reclaim with heat + early local-base expansion.
+    base_rel = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+    if (
+        bool(getattr(ict, "local_swing_base", False))
+        and base_rel >= 28.0
+        and (
+            bool(getattr(ict, "volume_awakening", False))
+            or bool(getattr(ict, "displacement", False))
+        )
     ):
         return True
     return False
@@ -256,8 +282,12 @@ def extended_session_chase_blocked(
     """
     Hard-block EXPLOSIVE entries after the move is already mostly done.
 
-    Hot velocity at +90% is still a chase (Jul17 NIFTY 24250 CE) — not a start.
-    Early flat→vertical inside the early window remains allowed.
+    Prefer LOCAL BASE move (flat consolidation or dump→V-bottom swing low) when
+    known — day-session % alone always looks like a chase after an earlier run-up
+    (Jul23 SENSEX 76400 PE: +471% day-move at the 14:35 local base reclaim).
+
+    Tradeable local window: entry_min (28%) … chase_max (70%). Outside that,
+    either wait (too early — handled by immature) or block as local chase.
     """
     settings = get_settings()
     if not getattr(settings, "explosion_extended_chase_block_enabled", True):
@@ -268,6 +298,21 @@ def extended_session_chase_blocked(
     move = _session_peak_move(explosion_event)
     if ict is not None:
         move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
+
+    base_move = float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict is not None else 0.0
+    if (
+        ict is not None
+        and getattr(settings, "explosion_chase_use_local_base", True)
+        and base_move > 0
+    ):
+        # Hard ceiling from local base (default 70%). Soft 55% only shrinks size.
+        local_max = float(
+            getattr(settings, "explosion_local_base_chase_max_move_pct", 70.0) or 70.0
+        )
+        if base_move >= local_max:
+            return True, f"explosion_extended_chase_local_{base_move:.0f}%"
+        # Local base still inside the tradeable window — never block on day %.
+        return False, ""
 
     hard = float(getattr(settings, "explosion_extended_chase_min_move_pct", 70.0) or 70.0)
     early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
@@ -284,10 +329,7 @@ def extended_session_chase_blocked(
     ):
         return False, ""
 
-    # Base-relative bypass: a fresh break off a consolidation base reads as a high
-    # day-move only because premium was elevated earlier (SENSEX 76300 PE: 30→100
-    # range then 100→144 break). If the move FROM THE BASE is still in the early
-    # window and volume is rising, it is a base breakout — not a late chase.
+    # Legacy base-relative bypass when local-primary path is off / no base_move.
     if (
         ict is not None
         and getattr(settings, "ict_base_relative_chase_bypass_enabled", True)
@@ -298,15 +340,12 @@ def extended_session_chase_blocked(
             or bool(getattr(ict, "displacement", False))
         )
     ):
-        base_move = float(getattr(ict, "base_relative_move_pct", 0) or 0)
         base_max = float(
             getattr(settings, "ict_base_relative_chase_max_move_pct", 55.0) or 55.0
         )
         abs_cap = float(
             getattr(settings, "ict_base_relative_chase_abs_move_cap_pct", 160.0) or 160.0
         )
-        # True low-base rips (30→140) print huge session % while base_rel stays
-        # early-window — ignore abs_cap when flat+vol base break is confirmed.
         ignore_abs = bool(
             getattr(settings, "ict_base_relative_ignore_abs_cap", True)
         )
@@ -322,18 +361,29 @@ def cap_extended_chase_lots(lots: int, explosion_event: Any, *, ict: Any = None)
     hard_cap = int(getattr(settings, "explosion_hard_lot_cap", 10) or 10)
     lots = min(max(1, lots), hard_cap)
     move = _session_peak_move(explosion_event)
+    base_move = float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict is not None else 0.0
+    base_max = float(
+        getattr(settings, "ict_base_relative_chase_max_move_pct", 55.0) or 55.0
+    )
+    # Local / flat base still inside the soft early window → full size.
+    if ict is not None and 0 < base_move <= base_max:
+        return lots
+    # Soft-cap using local base when day-move is misleadingly large.
+    if (
+        ict is not None
+        and getattr(settings, "explosion_chase_use_local_base", True)
+        and base_move > base_max
+    ):
+        soft_cap = int(getattr(settings, "explosion_extended_soft_lot_cap", 6) or 6)
+        return min(lots, soft_cap)
     # ICT flat→vertical still inside base-relative early window keeps full size.
     if (
         ict is not None
         and bool(getattr(ict, "flat_then_vertical", False))
         and bool(getattr(ict, "active", False))
+        and 0 < base_move <= base_max
     ):
-        base_move = float(getattr(ict, "base_relative_move_pct", 0) or 0)
-        base_max = float(
-            getattr(settings, "ict_base_relative_chase_max_move_pct", 55.0) or 55.0
-        )
-        if 0 < base_move <= base_max:
-            return lots
+        return lots
     soft = float(getattr(settings, "explosion_extended_soft_min_move_pct", 50.0) or 50.0)
     if move >= soft:
         soft_cap = int(getattr(settings, "explosion_extended_soft_lot_cap", 6) or 6)

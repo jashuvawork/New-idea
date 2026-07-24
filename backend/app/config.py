@@ -226,6 +226,14 @@ class Settings(BaseSettings):
     ict_base_relative_chase_bypass_enabled: bool = True
     ict_base_relative_chase_max_move_pct: float = 55.0
     ict_base_relative_chase_abs_move_cap_pct: float = 160.0
+    # Jul23 SENSEX 76400 PE: day-move +471% after an earlier run-up/dump, but the NEW leg
+    # launched from the 14:35 local V-bottom (~42). Chase/entry must use that local base
+    # (tradeable 28–70%); day-session % alone always looks like a chase.
+    explosion_chase_use_local_base: bool = True
+    explosion_local_base_chase_max_move_pct: float = 70.0
+    explosion_local_base_entry_min_move_pct: float = 28.0
+    ict_local_base_lookback_polls: int = 16
+    ict_local_base_min_dump_pct: float = 25.0
     explosion_extended_soft_lot_cap: int = 6
     explosion_hard_lot_cap: int = 10
     # Early capture window preferred in ranking (base break → first expansion).
