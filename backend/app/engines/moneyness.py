@@ -125,7 +125,7 @@ def resolve_preferred_moneyness(
     return "ATM"
 
 
-def _local_base_call_otm_bypass(
+def _local_base_otm_bypass(
     side: Side | str,
     depth: int,
     snap: SymbolSnapshot,
@@ -133,18 +133,18 @@ def _local_base_call_otm_bypass(
     candidate_score: float = 0.0,
     candidate: Any = None,
 ) -> bool:
-    """Shallow OTM CALL with confirmed local base — ATM CE often missing on gap-down rips."""
+    """Shallow OTM CE/PE with confirmed local base — ATM often missing on directional rips."""
     settings = get_settings()
     if not getattr(settings, "moneyness_local_base_otm_bypass_enabled", True):
         return False
     side_v = side.value if isinstance(side, Side) else str(side).upper()
-    if side_v != "CALL":
+    if side_v not in ("CALL", "PUT"):
         return False
     max_steps = int(getattr(settings, "moneyness_local_base_max_otm_steps", 3) or 3)
     if depth < 1 or depth > max_steps:
         return False
     min_score = float(
-        getattr(settings, "moneyness_local_base_otm_min_score", 78.0) or 78.0
+        getattr(settings, "moneyness_local_base_otm_min_score", 75.0) or 75.0
     )
     if float(candidate_score or 0) < min_score:
         return False
@@ -157,6 +157,10 @@ def _local_base_call_otm_bypass(
         getattr(candidate, "explosion_event", None) if candidate is not None else None
     )
     return local_base_structure_active(side_v, snap, event=event, alert=alert)
+
+
+# Backward-compatible alias.
+_local_base_call_otm_bypass = _local_base_otm_bypass
 
 
 def moneyness_allows(
@@ -204,7 +208,7 @@ def moneyness_allows(
         and preferred == "ATM"
         and bool(getattr(settings, "moneyness_explosion_block_otm", True))
     ):
-        if _local_base_call_otm_bypass(
+        if _local_base_otm_bypass(
             side, depth, snap, candidate_score=candidate_score, candidate=candidate,
         ):
             meta["localBaseOtmBypass"] = True

@@ -133,8 +133,8 @@ def test_explosion_atm_prefer_hard_blocks_otm(mock_settings):
 
 @patch("app.engines.moneyness.get_settings")
 @patch("app.engines.local_base_chart_bypass.get_settings")
-def test_local_base_call_allows_shallow_otm(mock_lb, mock_mn):
-    """Confirmed local-base CE within 3 OTM steps may bypass ATM-only."""
+def test_local_base_allows_shallow_otm_ce_and_pe(mock_lb, mock_mn):
+    """Confirmed local-base CE/PE within 3 OTM steps may bypass ATM-only."""
     from types import SimpleNamespace
 
     s = _settings()
@@ -181,12 +181,45 @@ def test_local_base_call_allows_shallow_otm(mock_lb, mock_mn):
     assert ok4 is False
     assert reason4 == "moneyness_explosion_atm_only_otm_blocked"
 
-    # PUT never gets the CE local-base OTM bypass
-    ok_put, reason_put, _ = moneyness_allows(
-        Side.PUT, 23700, snap, mode="explosion", candidate_score=100.0,
+    # Structured local-base PUT also gets shallow OTM bypass (2 steps).
+    put_alert = {
+        "side": "PUT",
+        "strike": 23700.0,
+        "tier": "EXPLODING",
+        "explosionScore": 87.0,
+        "dailyMovePct": 35.0,
+        "peakMovePct": 35.0,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 30.0,
+        "ictPattern": "flat_then_vertical",
+    }
+    put_cand = SimpleNamespace(
+        side=Side.PUT, strike=23700.0, mode="explosion", score=87.0,
+        alert=put_alert, explosion_event=None,
     )
-    assert ok_put is False
-    assert reason_put == "moneyness_explosion_atm_only_otm_blocked"
+    ok_put, _, meta_put = moneyness_allows(
+        Side.PUT, 23700, snap, mode="explosion", candidate_score=87.0,
+        candidate=put_cand,
+    )
+    assert ok_put is True
+    assert meta_put.get("localBaseOtmBypass") is True
+
+    # Deep PUT OTM still blocked
+    put_deep = {
+        **put_alert,
+        "strike": 23600.0,
+    }
+    put_deep_cand = SimpleNamespace(
+        side=Side.PUT, strike=23600.0, mode="explosion", score=100.0,
+        alert=put_deep, explosion_event=None,
+    )
+    ok_deep, reason_deep, _ = moneyness_allows(
+        Side.PUT, 23600, snap, mode="explosion", candidate_score=100.0,
+        candidate=put_deep_cand,
+    )
+    assert ok_deep is False
+    assert reason_deep == "moneyness_explosion_atm_only_otm_blocked"
 
 
 @patch("app.engines.moneyness.get_settings", return_value=_settings())

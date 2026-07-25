@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from app.engines.explosion_entry_guards import (
     detect_fake_explosion_trap,
     live_explosion_confirmation_blocked,
-    structured_near_atm_call,
+    structured_near_atm,
 )
 from app.engines.whipsaw_guards import check_bearish_sideways_entry
 from app.models.schemas import (
@@ -153,39 +153,64 @@ def _event(*, strike=23850.0, v3=0.4, tier="EXPLODING", score=88.5, move=36.0):
 
 @patch("app.engines.local_base_chart_bypass.get_settings")
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_structured_near_atm_call_detects_23850(mock_eg, mock_lb):
+def test_structured_near_atm_detects_ce_and_pe(mock_eg, mock_lb):
     s = _settings()
     mock_eg.return_value = s
     mock_lb.return_value = s
     snap = _snap()
-    assert structured_near_atm_call(
+    assert structured_near_atm(
         Side.CALL, 23850.0, snap, ict=_ict(), alert=snap.explosionAlerts[0],
     ) is True
-    assert structured_near_atm_call(
+    assert structured_near_atm(
         Side.CALL, 24100.0, snap, ict=_ict(), alert=snap.explosionAlerts[0],
+    ) is False  # 6 OTM
+    put_alert = {
+        "side": "PUT",
+        "strike": 23750.0,
+        "tier": "EXPLODING",
+        "explosionScore": 88.5,
+        "dailyMovePct": 36.0,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 30.0,
+        "ictPattern": "flat_then_vertical",
+    }
+    assert structured_near_atm(
+        Side.PUT, 23750.0, snap, ict=_ict(), alert=put_alert,
+    ) is True
+    assert structured_near_atm(
+        Side.PUT, 23500.0, snap, ict=_ict(), alert=put_alert,
     ) is False  # 6 OTM
 
 
 @patch("app.engines.explosion_detector.retained_peak_velocity_3s", return_value=3.2)
 @patch("app.engines.local_base_chart_bypass.get_settings")
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_live_confirm_allows_structured_ce_with_peak_velocity(mock_eg, mock_lb, _peak):
+def test_live_confirm_allows_structured_ce_pe_with_peak_velocity(mock_eg, mock_lb, _peak):
     s = _settings()
     mock_eg.return_value = s
     mock_lb.return_value = s
     snap = _snap()
-    blocked, reason = live_explosion_confirmation_blocked(
+    blocked, _ = live_explosion_confirmation_blocked(
         _event(v3=0.4),
         ict=_ict(),
         snap=snap,
     )
     assert blocked is False
+    put_event = _event(strike=23750.0, v3=0.4)
+    put_event.side = Side.PUT
+    blocked_pe, _ = live_explosion_confirmation_blocked(
+        put_event,
+        ict=_ict(),
+        snap=snap,
+    )
+    assert blocked_pe is False
 
 
 @patch("app.engines.explosion_detector.retained_peak_velocity_3s", return_value=0.0)
 @patch("app.engines.local_base_chart_bypass.get_settings")
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_live_confirm_still_blocks_dead_structured_ce(mock_eg, mock_lb, _peak):
+def test_live_confirm_still_blocks_dead_structured_near_atm(mock_eg, mock_lb, _peak):
     s = _settings()
     mock_eg.return_value = s
     mock_lb.return_value = s
@@ -197,6 +222,15 @@ def test_live_confirm_still_blocks_dead_structured_ce(mock_eg, mock_lb, _peak):
     )
     assert blocked is True
     assert "stale_live_velocity" in reason
+    put_event = _event(strike=23750.0, v3=0.2)
+    put_event.side = Side.PUT
+    blocked_pe, reason_pe = live_explosion_confirmation_blocked(
+        put_event,
+        ict=_ict(),
+        snap=snap,
+    )
+    assert blocked_pe is True
+    assert "stale_live_velocity" in reason_pe
 
 
 @patch("app.engines.explosion_detector.retained_peak_velocity_3s", return_value=2.8)
