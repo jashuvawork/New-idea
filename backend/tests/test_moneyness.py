@@ -52,6 +52,8 @@ def _settings():
     s.local_base_chart_bypass_require_ichimoku = False
     s.local_base_overrides_bearish_breadth = True
     s.local_base_ichimoku_max_adverse_mom5_pct = 0.12
+    s.local_base_require_aligned_live_momentum = True
+    s.local_base_aligned_momentum_max_adverse_pct = 0.05
     s.local_base_chart_bypass_min_score = 38.0
     s.local_base_chart_bypass_radar_min_move_pct = 28.0
     s.explosion_local_base_entry_min_move_pct = 15.0

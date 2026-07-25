@@ -639,6 +639,13 @@ class Settings(BaseSettings):
     local_base_chart_bypass_require_ichimoku: bool = False
     local_base_ichimoku_require_cloud: bool = False
     local_base_ichimoku_max_adverse_mom5_pct: float = 0.12
+    # Bullish-for-CALL / bearish-for-PUT: require the LIVE 5-min index momentum to be
+    # aligned with the option side before the local-base bypass fires. Uses live momentum
+    # (not the stale day chart), so a genuine bounce (index turning up) still lets a CALL
+    # rip through, but a CALL drifting while the index falls > tolerance is rejected.
+    # Symmetric for PUT. Tighter than the 0.12 hard cap above.
+    local_base_require_aligned_live_momentum: bool = True
+    local_base_aligned_momentum_max_adverse_pct: float = 0.05
     local_base_chart_bypass_min_score: float = 38.0
     # Radar-lag side-bias fallback (no ICT flags yet) — keep above entry floor so
     # bare ELITE+15% cannot lift counter-breadth locks.

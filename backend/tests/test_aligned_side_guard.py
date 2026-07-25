@@ -225,6 +225,8 @@ def test_explosion_entry_blocks_elite_put_on_rally(
     s.explosion_local_base_chase_max_move_pct = 40.0
     s.local_base_chart_bypass_radar_min_move_pct = 28.0
     s.local_base_ichimoku_max_adverse_mom5_pct = 0.12
+    s.local_base_require_aligned_live_momentum = True
+    s.local_base_aligned_momentum_max_adverse_pct = 0.05
     s.explosion_live_confirm_enabled = False
     s.chart_mtf_breadth_bypass_min_score = 999.0
     s.extreme_explosion_all_in_enabled = False
