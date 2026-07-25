@@ -246,6 +246,14 @@ def local_base_structure_active(
     max_against = float(
         getattr(settings, "local_base_ichimoku_max_adverse_mom5_pct", 0.12) or 0.12
     )
+    # Bullish-for-CALL / bearish-for-PUT: tighten the adverse tolerance using LIVE 5-min
+    # momentum so a CALL only fires when the index is turning up (not drifting down), and
+    # a PUT only when it's turning down. Keeps genuine bounces; rejects counter-drift.
+    if getattr(settings, "local_base_require_aligned_live_momentum", True):
+        max_against = min(
+            max_against,
+            float(getattr(settings, "local_base_aligned_momentum_max_adverse_pct", 0.05) or 0.05),
+        )
     mom5 = float(getattr(chart, "momentum5Pct", 0) or 0) if chart else 0.0
     if side_v == "CALL" and mom5 < -max_against:
         return False

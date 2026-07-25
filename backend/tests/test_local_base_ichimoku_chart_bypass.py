@@ -38,6 +38,8 @@ def _settings(**overrides):
     s.local_base_chart_bypass_require_ichimoku = False
     s.local_base_ichimoku_require_cloud = False
     s.local_base_ichimoku_max_adverse_mom5_pct = 0.12
+    s.local_base_require_aligned_live_momentum = True
+    s.local_base_aligned_momentum_max_adverse_pct = 0.05
     s.local_base_chart_bypass_min_score = 38.0
     s.explosion_local_base_entry_min_move_pct = 15.0
     s.explosion_local_base_chase_max_move_pct = 40.0
@@ -211,6 +213,56 @@ def test_bypass_rejects_hard_live_dump(mock_s):
     assert local_base_ichimoku_chart_bypass(
         Side.CALL, snap, alert=snap.explosionAlerts[0],
     ) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_aligned_momentum_rejects_call_drifting_down(mock_s):
+    """Bullish-for-CALL: a CALL local base with the index drifting down (-0.08%, inside
+    the old 0.12 cap) is now rejected by the tighter 0.05 aligned-momentum requirement."""
+    mock_s.return_value = _settings()
+    snap = _snap()
+    snap.spotChart = _bearish_gap_chart(mom5=-0.08)
+    assert local_base_structure_active(
+        Side.CALL, snap, alert=snap.explosionAlerts[0],
+    ) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_aligned_momentum_allows_call_turning_up(mock_s):
+    """A CALL local base with the index flat/turning up (-0.03%) still fires."""
+    mock_s.return_value = _settings()
+    snap = _snap()
+    snap.spotChart = _bearish_gap_chart(mom5=-0.03)
+    assert local_base_structure_active(
+        Side.CALL, snap, alert=snap.explosionAlerts[0],
+    ) is True
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_aligned_momentum_symmetric_for_put(mock_s):
+    """Bearish-for-PUT mirror: PUT rejected when index drifting UP (+0.08%), allowed flat."""
+    mock_s.return_value = _settings()
+    put_alert = {
+        "side": "PUT", "strike": 23700.0, "tier": "ELITE", "explosionScore": 98.4,
+        "ictFlatThenVertical": True, "ictBreakout": True, "ictBaseRelativeMovePct": 30.0,
+        "ictPattern": "flat_then_vertical", "premium": 148.0, "tradeable": True,
+    }
+    snap = _snap(alert=put_alert)
+    snap.spotChart = _bearish_gap_chart(mom5=0.08)
+    assert local_base_structure_active(Side.PUT, snap, alert=put_alert) is False
+    snap.spotChart = _bearish_gap_chart(mom5=0.03)
+    assert local_base_structure_active(Side.PUT, snap, alert=put_alert) is True
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_aligned_momentum_disabled_uses_wide_cap(mock_s):
+    """With the aligned requirement off, the old 0.12 tolerance applies (CALL at -0.08 ok)."""
+    mock_s.return_value = _settings(local_base_require_aligned_live_momentum=False)
+    snap = _snap()
+    snap.spotChart = _bearish_gap_chart(mom5=-0.08)
+    assert local_base_structure_active(
+        Side.CALL, snap, alert=snap.explosionAlerts[0],
+    ) is True
 
 
 @patch("app.engines.local_base_chart_bypass.get_settings")
