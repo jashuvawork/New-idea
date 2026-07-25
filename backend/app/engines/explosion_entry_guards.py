@@ -26,7 +26,7 @@ def _strike_depth(
     return depth, money, atm
 
 
-def structured_near_atm_call(
+def structured_near_atm(
     side: Side | str,
     strike: float,
     snap: SymbolSnapshot,
@@ -37,12 +37,13 @@ def structured_near_atm_call(
     candidate: Any = None,
 ) -> bool:
     """
-    Jul24 closest miss profile: CALL within 3 OTM of ATM with ICT/local-base structure.
+    Near-ATM CE/PE (≤N OTM) with ICT/local-base structure.
 
-    Used to soften worst-day / live-velocity floors without opening deep-OTM FOMO.
+    Softens worst-day / live-velocity floors for both sides without opening deep-OTM FOMO.
     """
     settings = get_settings()
-    if _side_val(side) != "CALL":
+    side_v = _side_val(side)
+    if side_v not in ("CALL", "PUT"):
         return False
     depth, money, _ = _strike_depth(side, strike, snap)
     max_steps = int(getattr(settings, "structured_near_atm_max_otm_steps", 3) or 3)
@@ -65,6 +66,10 @@ def structured_near_atm_call(
     return local_base_structure_active(
         side, snap, event=resolved_event, alert=resolved_alert,
     )
+
+
+# Backward-compatible alias (Jul24 CE-named helper).
+structured_near_atm_call = structured_near_atm
 
 
 def check_all_in_moneyness_cap(
@@ -297,18 +302,18 @@ def live_explosion_confirmation_blocked(
     )
     structure = _ict_structure_confirmed(ict)
 
-    # Jul24 23850 CE: structured near-ATM CALL with cooled live v3 but retained peak.
-    near_atm_ce = False
+    # Structured near-ATM CE/PE with cooled live v3 but retained peak.
+    near_atm_structured = False
     peak_v3 = 0.0
     if snap is not None:
-        near_atm_ce = structured_near_atm_call(
+        near_atm_structured = structured_near_atm(
             getattr(explosion_event, "side", ""),
             float(getattr(explosion_event, "strike", 0) or 0),
             snap,
             ict=ict,
             event=explosion_event,
         )
-        if near_atm_ce:
+        if near_atm_structured:
             from app.engines.explosion_detector import retained_peak_velocity_3s
 
             peak_v3 = float(
@@ -346,9 +351,9 @@ def live_explosion_confirmation_blocked(
             return False, ""
 
     # 1) Stale / cooled live velocity — sticky ELITE alone is not enough.
-    # Structured near-ATM CE may use retained peak velocity when live cooled.
-    eff_v3 = max(v3, peak_v3) if near_atm_ce else v3
-    if structure or near_atm_ce:
+    # Structured near-ATM CE/PE may use retained peak velocity when live cooled.
+    eff_v3 = max(v3, peak_v3) if near_atm_structured else v3
+    if structure or near_atm_structured:
         if eff_v3 < ict_min_v3 and v9 < min_v3:
             return True, f"stale_live_velocity_v3_{v3:.2f}_ict"
     elif v3 < min_v3:
