@@ -356,7 +356,7 @@ def worst_day_allows_candidate(
     alert = getattr(candidate, "alert", None)
     if not isinstance(alert, dict):
         alert = None
-    from app.engines.explosion_entry_guards import structured_near_atm_call
+    from app.engines.explosion_entry_guards import structured_near_atm
     from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
     ict_obj = analyze_explosion_event_ict(event, snap) if event is not None else None
@@ -365,7 +365,7 @@ def worst_day_allows_candidate(
         or (getattr(event, "strike", 0) if event is not None else 0)
         or 0
     )
-    if structured_near_atm_call(
+    if structured_near_atm(
         candidate.side,
         strike,
         snap,
@@ -378,8 +378,9 @@ def worst_day_allows_candidate(
             getattr(settings, "worst_day_structured_ce_min_velocity_3s", 1.5) or 1.5
         )
         min_vel = min(min_vel, soft)
-        meta["structuredNearAtmCe"] = True
-        # Peak-velocity carry when live cooled (Jul24 23850 CE profile).
+        meta["structuredNearAtm"] = True
+        meta["structuredNearAtmCe"] = True  # compat alias
+        # Peak-velocity carry when live cooled (structured near-ATM CE/PE).
         if vel3 < min_vel and event is not None:
             from app.engines.explosion_detector import retained_peak_velocity_3s
 

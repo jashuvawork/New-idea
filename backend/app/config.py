@@ -260,7 +260,7 @@ class Settings(BaseSettings):
     explosion_live_confirm_enabled: bool = True
     explosion_live_confirm_min_velocity_3s: float = 2.0
     explosion_live_confirm_ict_min_velocity_3s: float = 1.5
-    # Jul24 23850 CE: structured near-ATM CALL may use softer live/peak velocity.
+    # Structured near-ATM CE/PE may use softer live/peak velocity (key name kept for compat).
     explosion_live_confirm_structured_ce_min_velocity_3s: float = 1.0
     structured_near_atm_max_otm_steps: int = 3
     explosion_live_confirm_require_structure: bool = True
@@ -518,7 +518,7 @@ class Settings(BaseSettings):
     # When explosion prefer is ATM, hard-block OTM (Jul23 76100 PE −₹1.3k after ATM miss).
     # ATM + shallow ITM still allowed; deep OTM FOMO is not a soft rank penalty.
     moneyness_explosion_block_otm: bool = True
-    # Confirmed local-base CALL rip: allow shallow OTM (2–3 steps) when ATM CE is absent.
+    # Confirmed local-base CE/PE rip: allow shallow OTM (≤3 steps) when ATM is absent.
     moneyness_local_base_otm_bypass_enabled: bool = True
     moneyness_local_base_max_otm_steps: int = 3
     moneyness_local_base_otm_min_score: float = 75.0
@@ -982,7 +982,7 @@ class Settings(BaseSettings):
     worst_day_breakout_only_enabled: bool = True
     worst_day_breakout_min_rank: float = 68.0
     worst_day_breakout_min_velocity_3s: float = 2.5
-    # Structured near-ATM CE soft floor + peak-velocity carry (Jul24 23850 CE).
+    # Structured near-ATM CE/PE soft floor + peak-velocity carry (key name kept for compat).
     worst_day_structured_ce_min_velocity_3s: float = 1.5
     worst_day_breakout_peak_velocity_bypass_enabled: bool = True
     worst_day_breakout_min_symbol_tqs: float = 45.0
