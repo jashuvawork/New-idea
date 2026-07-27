@@ -162,12 +162,14 @@ class Settings(BaseSettings):
     paper_simple_profit_mode: bool = True
     paper_dual_strategy_enabled: bool = False
     explosion_capture_mode: bool = True  # PRIMARY — capture daily premium explosions
-    # Explosion-only book — skip quick/swing (Jul20 bleed was quick/FOMO). Scalps allowed
-    # back guarded (below) because they were PF 1.3 across the book and caught Jul17 +43k.
+    # Explosion-only book — skip quick/swing/scalp. Jul27 scalp churn (−33.8k on one CE)
+    # proved guarded scalps still bleed the milestone; catch ELITE/EXPLODING only.
     explosion_only_trading_enabled: bool = True
-    # Allow guarded scalps even under explosion-only: first-green lot cap + chart align.
-    # Quick_sideways / swing stay off (quick_sideways was the −34k disaster).
-    explosion_only_allow_guarded_scalp: bool = True
+    # Guarded scalps OFF under explosion-only (set true only for explicit scalp experiments).
+    # Quick_sideways / swing stay off regardless (quick was the −34k disaster).
+    explosion_only_allow_guarded_scalp: bool = False
+    # Explosion entries: only ELITE + EXPLODING (no BUILDING / soft premium-capture admits).
+    explosion_elite_exploding_only: bool = True
     # Promote high-confidence radar explosions the missed-trade monitor flags as bullish/base-window.
     # Does NOT trade premium_out_of_band cheap OTM chases (Jul20 24550 @ ₹3 — correctly blocked).
     missed_explosion_promote_enabled: bool = True
