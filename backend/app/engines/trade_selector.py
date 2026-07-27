@@ -168,7 +168,12 @@ def _explosion_candidates(
             peak_move_pct=float(alert.get("peakMovePct") or 0),
         ):
             continue
-        if alert.get("tier") not in ("ELITE", "EXPLODING"):
+        tier_u = str(alert.get("tier") or "").upper()
+        elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
+        if elite_only:
+            if tier_u not in ("ELITE", "EXPLODING"):
+                continue
+        elif tier_u not in ("ELITE", "EXPLODING"):
             from app.engines.morning_premium_capture import is_premium_capture_alert
 
             ict_ok = bool(alert.get("ictBreakout")) and float(alert.get("ictScore") or 0) >= 28
@@ -854,12 +859,9 @@ def find_best_entry(
     chop = is_chop_session(snapshots)
 
     candidates: list[EntryCandidate] = []
-    # Focus the book on the same ELITE/EXPLODING set missed-trade radar watches.
+    # Focus the book on ELITE/EXPLODING only — scalps off under explosion-only (Jul27 bleed).
     explosion_only = bool(getattr(settings, "explosion_only_trading_enabled", True))
-    # Scalps were PF 1.3 across the book and carried Jul17 (+43k). Allow them back even
-    # under explosion-only — but only guarded (first-green lot cap + chart align). Quick
-    # sideways / swing stay off (quick was the −34k disaster).
-    allow_guarded_scalp = bool(getattr(settings, "explosion_only_allow_guarded_scalp", True))
+    allow_guarded_scalp = bool(getattr(settings, "explosion_only_allow_guarded_scalp", False))
 
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
@@ -1162,6 +1164,7 @@ def diagnose_missed_entries(
         if not snap.dataAvailable:
             continue
 
+        elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
         for alert in snap.explosionAlerts or []:
             if alert.get("tier") not in ("ELITE", "EXPLODING", "BUILDING"):
                 continue
@@ -1176,6 +1179,8 @@ def diagnose_missed_entries(
                 daily_move_pct=daily_move,
             )
             blockers: list[str] = []
+            if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
+                blockers.append("tier_not_elite_exploding")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move):
                 blockers.append("premium_out_of_band")
             if score < min_score:
