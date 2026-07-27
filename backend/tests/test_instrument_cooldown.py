@@ -24,6 +24,9 @@ def _settings():
     s.instrument_win_cooldown_seconds = 90
     s.instrument_max_entries_per_day = 3
     s.quick_sideways_instrument_cooldown_seconds = 300
+    s.scalp_instrument_win_cooldown_seconds = 600
+    s.scalp_instrument_loss_cooldown_seconds = 900
+    s.scalp_max_entries_per_strike_per_day = 2
     return s
 
 
@@ -65,6 +68,35 @@ def test_daily_cap_limits_same_instrument_entries(mock_settings):
     for _ in range(3):
         record_instrument_entry("NIFTY", Side.CALL, 23900)
     assert instrument_daily_cap_reached("NIFTY", Side.CALL, 23900)
+
+
+@patch("app.engines.instrument_cooldown.get_settings")
+def test_scalp_win_uses_longer_cooldown(mock_settings):
+    """Jul27: tiny scalp win must not allow immediate full-size re-entry."""
+    mock_settings.return_value = _settings()
+    reset_instrument_cooldowns()
+    record_instrument_close(
+        "NIFTY", Side.CALL, 23900, 461.0, "scalp_trail_sl", mode="scalp",
+    )
+    blocked, reason = instrument_in_cooldown("NIFTY", Side.CALL, 23900)
+    assert blocked
+    # Generic win cooldown is 90s; scalp win is 600s — remaining should exceed 90.
+    assert "instrument_cooldown" in reason
+    secs = int(reason.rsplit("_", 1)[-1].rstrip("s"))
+    assert secs > 90
+
+
+@patch("app.engines.instrument_cooldown.get_settings")
+def test_scalp_daily_cap_two_per_strike(mock_settings):
+    mock_settings.return_value = _settings()
+    reset_instrument_cooldowns()
+    record_instrument_entry("NIFTY", Side.CALL, 23900)
+    record_instrument_entry("NIFTY", Side.CALL, 23900)
+    assert instrument_daily_cap_reached(
+        "NIFTY", Side.CALL, 23900, mode="scalp",
+    ) is True
+    # Non-scalp still uses the general cap of 3.
+    assert instrument_daily_cap_reached("NIFTY", Side.CALL, 23900) is False
 
 
 @patch("app.engines.simple_profit.get_settings")

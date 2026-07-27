@@ -420,6 +420,11 @@ class Settings(BaseSettings):
     instrument_micro_win_cooldown_seconds: int = 180
     instrument_win_cooldown_seconds: int = 90
     instrument_max_entries_per_day: int = 3
+    # Jul27 scalp churn: tiny win @6 lots → full size @24/25 → stop → repeat same CE.
+    # Longer same-strike cooldowns + hard daily cap for scalp only.
+    scalp_instrument_win_cooldown_seconds: int = 600
+    scalp_instrument_loss_cooldown_seconds: int = 900
+    scalp_max_entries_per_strike_per_day: int = 2
     block_duplicate_open_leg: bool = True
     counter_breadth_min_score: int = 70
 
@@ -882,7 +887,8 @@ class Settings(BaseSettings):
     sure_shot_min_symbol_tqs: int = 40
     sure_shot_min_rank_score: float = 48.0
     sure_shot_scalp_min_score: int = 55
-    scalp_max_lots: int = 0  # 0 = capital-derived max on 85% per trade
+    # Hard scalp ceiling — 0 used to mean unlimited (Jul27 24/25-lot stops). Default 10.
+    scalp_max_lots: int = 10
     scalp_target_points: float = 12.0  # unused — session targets in simple_profit
     bullish_hold_enabled: bool = True
     bullish_hold_trail_keep_ratio: float = 0.48

@@ -1339,7 +1339,18 @@ async def _process_open_trades(
         state.closedPaperTrades.append(trade)
         _calibration.record_trade(trade)
         record_symbol_result(trade.symbol, pnl, exit_reason or "")
-        record_instrument_close(trade.symbol, trade.side, trade.strike, pnl, exit_reason or "")
+        _close_ctx = trade.entryContext or {}
+        record_instrument_close(
+            trade.symbol,
+            trade.side,
+            trade.strike,
+            pnl,
+            exit_reason or "",
+            mode=str(_close_ctx.get("selectionMode") or ""),
+            strategy_type=str(
+                getattr(trade.strategyType, "value", None) or trade.strategyType or ""
+            ),
+        )
         record_session_trade_close(pnl)
         record_whipsaw_close(trade.symbol, trade.side, pnl, exit_reason or "")
         from app.engines.confidence_hold import record_high_confidence_close, trade_entry_score

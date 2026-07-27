@@ -92,6 +92,7 @@ def _reentry_blocked(
     snap: SymbolSnapshot,
     *,
     explosion_event: Any = None,
+    mode: str = "",
 ) -> tuple[bool, str]:
     blocked, reason = symbol_in_cooldown(symbol)
     if blocked:
@@ -122,6 +123,7 @@ def _reentry_blocked(
 
     premium_bypass = premium_led_bypass_for_snap(side, snap, explosion_event=explosion_event)
     tier = str(getattr(explosion_event, "tier", "") or "")
+    resolved_mode = (mode or ("explosion" if explosion_event is not None else "")).lower()
     lock_candidate = None
     if explosion_event is not None:
         lock_candidate = SimpleNamespace(
@@ -139,7 +141,7 @@ def _reentry_blocked(
     )
     if blocked:
         return True, reason
-    if instrument_daily_cap_reached(symbol, side, strike):
+    if instrument_daily_cap_reached(symbol, side, strike, mode=resolved_mode):
         return True, f"instrument_daily_cap_{symbol}_{side.value}_{int(strike)}"
     if requires_breadth_alignment(symbol) and not side_aligned_with_breadth(
         side.value, snap.breadth.bias,
@@ -408,7 +410,9 @@ def _scalp_candidates(
         if not passed:
             continue
 
-        blocked, reason = _reentry_blocked(symbol, suggestion.side, suggestion.strike, snap)
+        blocked, reason = _reentry_blocked(
+            symbol, suggestion.side, suggestion.strike, snap, mode="scalp",
+        )
         if blocked:
             continue
 
@@ -440,7 +444,9 @@ def _scalp_candidates(
 
     for row in heatmap_moneyness_candidates(symbol, snap, snapshots={symbol: snap}):
         suggestion = row["suggestion"]
-        blocked, reason = _reentry_blocked(symbol, suggestion.side, suggestion.strike, snap)
+        blocked, reason = _reentry_blocked(
+            symbol, suggestion.side, suggestion.strike, snap, mode="scalp",
+        )
         if blocked:
             continue
         rank = float(row["score"]) + snap.tradeQualityScore * 0.2
