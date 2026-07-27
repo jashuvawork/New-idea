@@ -92,6 +92,7 @@ def _reentry_blocked(
     snap: SymbolSnapshot,
     *,
     explosion_event: Any = None,
+    mode: str = "",
 ) -> tuple[bool, str]:
     blocked, reason = symbol_in_cooldown(symbol)
     if blocked:
@@ -122,6 +123,7 @@ def _reentry_blocked(
 
     premium_bypass = premium_led_bypass_for_snap(side, snap, explosion_event=explosion_event)
     tier = str(getattr(explosion_event, "tier", "") or "")
+    resolved_mode = (mode or ("explosion" if explosion_event is not None else "")).lower()
     lock_candidate = None
     if explosion_event is not None:
         lock_candidate = SimpleNamespace(
@@ -139,7 +141,7 @@ def _reentry_blocked(
     )
     if blocked:
         return True, reason
-    if instrument_daily_cap_reached(symbol, side, strike):
+    if instrument_daily_cap_reached(symbol, side, strike, mode=resolved_mode):
         return True, f"instrument_daily_cap_{symbol}_{side.value}_{int(strike)}"
     if requires_breadth_alignment(symbol) and not side_aligned_with_breadth(
         side.value, snap.breadth.bias,
@@ -375,6 +377,90 @@ def _explosion_candidates(
     return out
 
 
+def _tradeable_explosion_on_side(snap: SymbolSnapshot, side: Side | str) -> bool:
+    """True when radar already has a tradeable EXPLODING/ELITE on this side."""
+    side_v = side.value if isinstance(side, Side) else str(side).upper()
+    for alert in snap.explosionAlerts or []:
+        if str(alert.get("side") or "").upper() != side_v:
+            continue
+        if not alert.get("tradeable"):
+            continue
+        tier = str(alert.get("tier") or "").upper()
+        if tier in ("ELITE", "EXPLODING"):
+            return True
+    top = snap.topExplosion or {}
+    if (
+        str(top.get("side") or "").upper() == side_v
+        and str(top.get("tier") or "").upper() in ("ELITE", "EXPLODING")
+        and top.get("tradeable", True)
+    ):
+        return True
+    return False
+
+
+def _scalp_best_quality_ok(
+    candidate: "EntryCandidate",
+    snap: SymbolSnapshot,
+    settings,
+) -> tuple[bool, str]:
+    """Jul27: only allow A+ scalps — mid-quality CE probes during rips lost capital."""
+    if not getattr(settings, "scalp_best_only_enabled", True):
+        return True, "ok"
+    min_rank = float(getattr(settings, "scalp_best_min_rank_score", 88.0) or 88.0)
+    if float(candidate.score or 0) < min_rank:
+        return False, f"scalp_best_rank_below_{min_rank:.0f}"
+
+    if getattr(settings, "scalp_best_require_breadth_aligned", True):
+        bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+        side_v = candidate.side.value if isinstance(candidate.side, Side) else str(candidate.side).upper()
+        want = "BULLISH" if side_v == "CALL" else "BEARISH"
+        if bias != want:
+            return False, "scalp_best_breadth_not_aligned"
+
+    if getattr(settings, "scalp_best_require_chart_aligned", True):
+        from app.engines.spot_direction import side_aligned_with_chart
+
+        if not side_aligned_with_chart(candidate.side, snap.spotChart):
+            return False, "scalp_best_chart_not_aligned"
+
+    if getattr(settings, "scalp_best_atm_itm_only", True):
+        from app.engines.moneyness import classify_moneyness
+
+        money = classify_moneyness(
+            candidate.side,
+            float(candidate.strike),
+            float(snap.spot or 0),
+            symbol=snap.symbol,
+            atm=float(snap.atmStrike or 0) or None,
+        )
+        if money not in ("ATM", "ITM"):
+            return False, f"scalp_best_requires_atm_itm_{money.lower()}"
+
+    min_conf = float(getattr(settings, "scalp_best_min_chart_confidence", 72.0) or 72.0)
+    if min_conf > 0:
+        from app.engines.chart_exit_levels import chart_trade_confidence
+
+        conf, _ = chart_trade_confidence(snap, candidate.side)
+        if conf < min_conf:
+            return False, f"scalp_best_chart_conf_below_{min_conf:.0f}"
+
+    min_vel = float(getattr(settings, "scalp_best_min_velocity_pct", 1.2) or 1.2)
+    vel = 0.0
+    sug = candidate.suggestion
+    if sug is not None and getattr(sug, "runnerSignal", None) is not None:
+        vel = float(sug.runnerSignal.premiumVelocityPct or 0)
+    if vel < min_vel:
+        # Heatmap rows may lack runnerSignal — allow if confidence is elite-tier.
+        if float(candidate.confidence or 0) < min_rank:
+            return False, f"scalp_best_velocity_below_{min_vel}"
+
+    if getattr(settings, "scalp_best_defer_to_explosion", True):
+        if _tradeable_explosion_on_side(snap, candidate.side):
+            return False, "scalp_best_defer_to_explosion"
+
+    return True, "ok"
+
+
 def _scalp_candidates(
     symbol: str,
     snap: SymbolSnapshot,
@@ -408,7 +494,9 @@ def _scalp_candidates(
         if not passed:
             continue
 
-        blocked, reason = _reentry_blocked(symbol, suggestion.side, suggestion.strike, snap)
+        blocked, reason = _reentry_blocked(
+            symbol, suggestion.side, suggestion.strike, snap, mode="scalp",
+        )
         if blocked:
             continue
 
@@ -440,7 +528,9 @@ def _scalp_candidates(
 
     for row in heatmap_moneyness_candidates(symbol, snap, snapshots={symbol: snap}):
         suggestion = row["suggestion"]
-        blocked, reason = _reentry_blocked(symbol, suggestion.side, suggestion.strike, snap)
+        blocked, reason = _reentry_blocked(
+            symbol, suggestion.side, suggestion.strike, snap, mode="scalp",
+        )
         if blocked:
             continue
         rank = float(row["score"]) + snap.tradeQualityScore * 0.2
@@ -461,6 +551,13 @@ def _scalp_candidates(
             tqs=suggestion.tqs,
             suggestion=suggestion,
         ))
+    if getattr(settings, "scalp_best_only_enabled", True):
+        kept: list[EntryCandidate] = []
+        for c in out:
+            ok, _ = _scalp_best_quality_ok(c, snap, settings)
+            if ok:
+                kept.append(c)
+        return kept
     return out
 
 
@@ -885,8 +982,9 @@ def find_best_entry(
                     # Mega rip without early flat base is usually a chase — small bump only.
                     bonus += 6
         elif c.mode == "scalp":
-            # When explosions are extended, scalp path is the PF-positive bucket.
-            bonus += 6
+            # Best-only: do not boost mediocre scalps over explosions (Jul27 pattern).
+            if not getattr(settings, "scalp_best_only_enabled", True):
+                bonus += 6
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty
 
@@ -917,6 +1015,11 @@ def find_best_entry(
         floor = min(floor, settings.worst_day_itm_fade_min_rank)
     elif best.mode == "slow_bounce":
         floor = min(floor, settings.quick_sideways_slow_bounce_min_rank_score)
+    elif best.mode == "scalp" and getattr(settings, "scalp_best_only_enabled", True):
+        floor = max(
+            floor,
+            float(getattr(settings, "scalp_best_min_rank_score", 88.0) or 88.0),
+        )
     elif settings.best_trades_only_enabled:
         from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
 

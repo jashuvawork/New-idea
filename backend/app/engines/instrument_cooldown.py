@@ -51,6 +51,9 @@ def record_instrument_close(
     strike: float,
     pnl_inr: float,
     exit_reason: str = "",
+    *,
+    mode: str = "",
+    strategy_type: str = "",
 ) -> None:
     settings = get_settings()
     key = _instrument_key(symbol, side, strike)
@@ -64,6 +67,23 @@ def record_instrument_close(
         secs = settings.instrument_micro_win_cooldown_seconds
     elif pnl_inr > 0:
         secs = settings.instrument_win_cooldown_seconds
+
+    # Scalp same-strike churn (Jul27 23900 CE): tiny win → max size → stop.
+    mode_l = (mode or "").lower()
+    strat_u = str(strategy_type or "").upper()
+    is_scalp = mode_l == "scalp" or strat_u == "SCALP"
+    if is_scalp:
+        if pnl_inr < 0:
+            secs = max(
+                secs,
+                int(getattr(settings, "scalp_instrument_loss_cooldown_seconds", 900) or 900),
+            )
+        elif pnl_inr > 0:
+            secs = max(
+                secs,
+                int(getattr(settings, "scalp_instrument_win_cooldown_seconds", 600) or 600),
+            )
+
     if secs > 0:
         _cooldown_until[key] = now + timedelta(seconds=secs)
 
@@ -82,9 +102,23 @@ def instrument_in_cooldown(symbol: str, side: Side | str, strike: float) -> tupl
     return False, "ok"
 
 
-def instrument_daily_cap_reached(symbol: str, side: Side | str, strike: float) -> bool:
+def instrument_daily_cap_reached(
+    symbol: str,
+    side: Side | str,
+    strike: float,
+    *,
+    mode: str = "",
+    strategy_type: str = "",
+) -> bool:
     settings = get_settings()
     cap = settings.instrument_max_entries_per_day
+    mode_l = (mode or "").lower()
+    strat_u = str(strategy_type or "").upper()
+    is_scalp = mode_l == "scalp" or strat_u == "SCALP"
+    if is_scalp:
+        scalp_cap = int(getattr(settings, "scalp_max_entries_per_strike_per_day", 2) or 2)
+        if scalp_cap > 0:
+            cap = min(cap, scalp_cap) if cap > 0 else scalp_cap
     if cap <= 0:
         return False
     _roll_session()
