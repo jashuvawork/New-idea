@@ -123,7 +123,17 @@ def compute_adaptive_exit_plan(
             micro = max(micro, 5.0)
             reasoning.append(f"extreme_rip_{daily_move:.0f}pct_chart_hold")
     else:
-        base_stop = session_profile.stopPoints
+        # Calculated scalp SL from entry premium (not fixed 3pt).
+        # Jul27 23900 CE @121: fixed 3pt stopped a bullish rip; 10% ≈ 12pt breathes.
+        premium = float(entry_premium or 0)
+        if premium <= 0:
+            top = snap.topExplosion or {}
+            premium = float(top.get("premium") or 0)
+        premium = max(premium, 25.0)
+        pct = float(getattr(settings, "scalp_stop_pct_of_premium", 0.10) or 0.10)
+        base_stop = max(settings.scalp_stop_min_points, premium * pct)
+        # Session profile can only widen slightly — never collapse back to fixed 3pt.
+        base_stop = max(base_stop, float(session_profile.stopPoints or 0))
         base_target = session_profile.targetPoints
         trail_arm = settings.scalp_trail_arm_points
         trail_keep = settings.scalp_trail_keep_ratio
@@ -131,6 +141,9 @@ def compute_adaptive_exit_plan(
         trail_tight_arm = settings.scalp_trail_tight_arm
         trail_tight_pts = settings.scalp_trail_tight_points
         micro = session_profile.microTargetPoints
+        reasoning.append(
+            f"Scalp SL from premium {premium:.1f} x {pct:.0%} = {base_stop:.1f}pt"
+        )
 
     stop = base_stop
     target = base_target
@@ -191,7 +204,10 @@ def compute_adaptive_exit_plan(
             reasoning.append(f"{session_profile.sessionLabel} — ride rally, wider adaptive SL")
 
     stop_floor = settings.scalp_stop_min_points
-    stop_cap = 20.0 if strategy_type == StrategyType.EXPLOSIVE else 5.0
+    if strategy_type == StrategyType.EXPLOSIVE:
+        stop_cap = 20.0
+    else:
+        stop_cap = float(getattr(settings, "scalp_stop_max_points", 15.0) or 15.0)
     target_floor = base_target * 0.95 if strategy_type != StrategyType.EXPLOSIVE else settings.explosion_target_standard * 0.85
 
     return AdaptiveExitPlan(

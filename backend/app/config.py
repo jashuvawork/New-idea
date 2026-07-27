@@ -922,7 +922,10 @@ class Settings(BaseSettings):
     emergency_stop_enabled: bool = False
     emergency_stop_inr: float = 20_000
     emergency_stop_scale_with_position: bool = False
-    scalp_stop_points: float = 3.0
+    scalp_stop_points: float = 3.0  # legacy fallback when premium unknown
+    # Calculated scalp SL = max(min_points, premium * pct), capped at max_points.
+    scalp_stop_pct_of_premium: float = 0.10
+    scalp_stop_max_points: float = 15.0
     scalp_stop_min_points: float = 2.5
     scalp_stop_min_hold_seconds: int = 30
     scalp_trail_arm_points: float = 3.0
