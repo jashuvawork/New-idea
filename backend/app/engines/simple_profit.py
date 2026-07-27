@@ -157,14 +157,40 @@ def check_entry_gate(
     # Counter-trend — BULLISH = CE only, BEARISH = PE only, no CE↔PE switch
     from app.engines.directional_lock import check_directional_side_lock_simple
 
+    local_base_ok = False
+    if snap is not None and getattr(settings, "scalp_local_base_enabled", True):
+        from app.engines.local_base_chart_bypass import (
+            local_base_overrides_session_chart,
+            local_base_overrides_side_bias,
+        )
+
+        side_v = trade.side.value if isinstance(trade.side, Side) else str(trade.side).upper()
+        strike_f = float(trade.strike or 0)
+        alert = None
+        for row in snap.explosionAlerts or []:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("side") or "").upper() != side_v:
+                continue
+            if abs(float(row.get("strike") or 0) - strike_f) > 0.5:
+                continue
+            alert = row
+            break
+        if alert is not None:
+            local_base_ok = local_base_overrides_side_bias(
+                trade.side, snap, alert=alert,
+            ) or local_base_overrides_session_chart(
+                trade.side, snap, alert=alert,
+            )
+
     blocked_dir, dir_reason = check_directional_side_lock_simple(
         trade.symbol, trade.side, breadth.bias, chart, snap=snap,
     )
-    if blocked_dir:
+    if blocked_dir and not local_base_ok:
         return False, dir_reason
 
     side_bias = "BULLISH" if trade.side == Side.CALL else "BEARISH"
-    if breadth.bias not in (side_bias, "NEUTRAL") and not alignment_override:
+    if breadth.bias not in (side_bias, "NEUTRAL") and not alignment_override and not local_base_ok:
         counter_floor = settings.counter_breadth_min_score
         from app.engines.morning_premium_capture import premium_led_entry_allowed
 
@@ -178,13 +204,19 @@ def check_entry_gate(
     blocked, chart_reason = chart_blocks_side(
         trade.side, chart, trade_score=trade_score, momentum_surge=momentum_surge,
     )
-    if blocked:
+    if blocked and not local_base_ok:
         if is_hard_chart_block(chart_reason):
             return False, chart_reason
         if not alignment_override:
             return False, chart_reason
 
-    if not (momentum_surge or alignment_override or breadth.aligned or trade_score >= min_score + 8):
+    if not (
+        momentum_surge
+        or alignment_override
+        or breadth.aligned
+        or local_base_ok
+        or trade_score >= min_score + 8
+    ):
         return False, "no_momentum_or_alignment"
 
     return True, "passed"
