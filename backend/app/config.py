@@ -891,15 +891,22 @@ class Settings(BaseSettings):
     scalp_max_lots: int = 10
     scalp_target_points: float = 12.0  # unused — session targets in simple_profit
     # Best-scalps-only — Jul27 mid-quality CE scalps chewed capital during a rip.
+    # Floors eased slightly; local-base structured scalps get a softer path.
     scalp_best_only_enabled: bool = True
-    scalp_best_min_rank_score: float = 88.0
-    scalp_best_min_chart_confidence: float = 72.0
+    scalp_best_min_rank_score: float = 84.0
+    scalp_best_min_chart_confidence: float = 68.0
     scalp_best_require_breadth_aligned: bool = True
     scalp_best_require_chart_aligned: bool = True
     scalp_best_atm_itm_only: bool = True
-    scalp_best_min_velocity_pct: float = 1.2
-    # If a tradeable EXPLODING/ELITE exists on same side, skip scalp (take the rip path).
+    scalp_best_min_velocity_pct: float = 1.0
+    # If a tradeable EXPLODING/ELITE exists on same side, skip scalp (take the rip path)
+    # — unless this scalp itself has confirmed local-base structure.
     scalp_best_defer_to_explosion: bool = True
+    scalp_local_base_enabled: bool = True
+    scalp_local_base_min_rank_score: float = 80.0
+    scalp_local_base_min_chart_confidence: float = 62.0
+    scalp_local_base_min_velocity_pct: float = 0.8
+    scalp_local_base_max_otm_steps: int = 3
     bullish_hold_enabled: bool = True
     bullish_hold_trail_keep_ratio: float = 0.48
     bullish_hold_max_hold_multiplier: float = 1.6

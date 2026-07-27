@@ -377,6 +377,32 @@ def _explosion_candidates(
     return out
 
 
+def _matching_radar_alert(
+    snap: SymbolSnapshot,
+    side: Side | str,
+    strike: float,
+) -> Optional[dict]:
+    """Nearest explosionAlerts row for this scalp leg (same side, strike within 0.5)."""
+    side_v = side.value if isinstance(side, Side) else str(side).upper()
+    strike_f = float(strike or 0)
+    for alert in snap.explosionAlerts or []:
+        if not isinstance(alert, dict):
+            continue
+        if str(alert.get("side") or "").upper() != side_v:
+            continue
+        if abs(float(alert.get("strike") or 0) - strike_f) > 0.5:
+            continue
+        return alert
+    top = snap.topExplosion or {}
+    if (
+        isinstance(top, dict)
+        and str(top.get("side") or "").upper() == side_v
+        and abs(float(top.get("strike") or 0) - strike_f) <= 0.5
+    ):
+        return top
+    return None
+
+
 def _tradeable_explosion_on_side(snap: SymbolSnapshot, side: Side | str) -> bool:
     """True when radar already has a tradeable EXPLODING/ELITE on this side."""
     side_v = side.value if isinstance(side, Side) else str(side).upper()
@@ -398,33 +424,71 @@ def _tradeable_explosion_on_side(snap: SymbolSnapshot, side: Side | str) -> bool
     return False
 
 
+def _scalp_local_base_active(
+    candidate: "EntryCandidate",
+    snap: SymbolSnapshot,
+    settings,
+) -> tuple[bool, Optional[dict]]:
+    """Confirmed local-base structure for this scalp strike (from radar alert)."""
+    if not getattr(settings, "scalp_local_base_enabled", True):
+        return False, None
+    alert = getattr(candidate, "alert", None)
+    if not isinstance(alert, dict):
+        alert = _matching_radar_alert(snap, candidate.side, float(candidate.strike))
+    if alert is None:
+        return False, None
+    from app.engines.local_base_chart_bypass import local_base_structure_active
+
+    if local_base_structure_active(candidate.side, snap, alert=alert):
+        return True, alert
+    return False, alert
+
+
 def _scalp_best_quality_ok(
     candidate: "EntryCandidate",
     snap: SymbolSnapshot,
     settings,
 ) -> tuple[bool, str]:
-    """Jul27: only allow A+ scalps — mid-quality CE probes during rips lost capital."""
+    """Only allow strong scalps; local-base structure softens floors (not alignment FOMO)."""
     if not getattr(settings, "scalp_best_only_enabled", True):
         return True, "ok"
-    min_rank = float(getattr(settings, "scalp_best_min_rank_score", 88.0) or 88.0)
+
+    local_ok, alert = _scalp_local_base_active(candidate, snap, settings)
+    min_rank = float(getattr(settings, "scalp_best_min_rank_score", 84.0) or 84.0)
+    min_conf = float(getattr(settings, "scalp_best_min_chart_confidence", 68.0) or 68.0)
+    min_vel = float(getattr(settings, "scalp_best_min_velocity_pct", 1.0) or 1.0)
+    if local_ok:
+        min_rank = min(
+            min_rank,
+            float(getattr(settings, "scalp_local_base_min_rank_score", 80.0) or 80.0),
+        )
+        min_conf = min(
+            min_conf,
+            float(getattr(settings, "scalp_local_base_min_chart_confidence", 62.0) or 62.0),
+        )
+        min_vel = min(
+            min_vel,
+            float(getattr(settings, "scalp_local_base_min_velocity_pct", 0.8) or 0.8),
+        )
+
     if float(candidate.score or 0) < min_rank:
         return False, f"scalp_best_rank_below_{min_rank:.0f}"
 
-    if getattr(settings, "scalp_best_require_breadth_aligned", True):
+    if getattr(settings, "scalp_best_require_breadth_aligned", True) and not local_ok:
         bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
         side_v = candidate.side.value if isinstance(candidate.side, Side) else str(candidate.side).upper()
         want = "BULLISH" if side_v == "CALL" else "BEARISH"
         if bias != want:
             return False, "scalp_best_breadth_not_aligned"
 
-    if getattr(settings, "scalp_best_require_chart_aligned", True):
+    if getattr(settings, "scalp_best_require_chart_aligned", True) and not local_ok:
         from app.engines.spot_direction import side_aligned_with_chart
 
         if not side_aligned_with_chart(candidate.side, snap.spotChart):
             return False, "scalp_best_chart_not_aligned"
 
     if getattr(settings, "scalp_best_atm_itm_only", True):
-        from app.engines.moneyness import classify_moneyness
+        from app.engines.moneyness import classify_moneyness, _depth_steps
 
         money = classify_moneyness(
             candidate.side,
@@ -434,9 +498,23 @@ def _scalp_best_quality_ok(
             atm=float(snap.atmStrike or 0) or None,
         )
         if money not in ("ATM", "ITM"):
-            return False, f"scalp_best_requires_atm_itm_{money.lower()}"
+            if local_ok and money == "OTM":
+                max_steps = int(
+                    getattr(settings, "scalp_local_base_max_otm_steps", 3) or 3
+                )
+                atm = float(snap.atmStrike or 0) or float(snap.spot or 0)
+                depth = _depth_steps(
+                    candidate.side,
+                    float(candidate.strike),
+                    float(snap.spot or 0),
+                    snap.symbol,
+                    atm,
+                )
+                if depth > max_steps:
+                    return False, f"scalp_local_base_otm_too_deep_{depth}"
+            else:
+                return False, f"scalp_best_requires_atm_itm_{money.lower()}"
 
-    min_conf = float(getattr(settings, "scalp_best_min_chart_confidence", 72.0) or 72.0)
     if min_conf > 0:
         from app.engines.chart_exit_levels import chart_trade_confidence
 
@@ -444,17 +522,18 @@ def _scalp_best_quality_ok(
         if conf < min_conf:
             return False, f"scalp_best_chart_conf_below_{min_conf:.0f}"
 
-    min_vel = float(getattr(settings, "scalp_best_min_velocity_pct", 1.2) or 1.2)
     vel = 0.0
     sug = candidate.suggestion
     if sug is not None and getattr(sug, "runnerSignal", None) is not None:
         vel = float(sug.runnerSignal.premiumVelocityPct or 0)
+    if alert is not None:
+        vel = max(vel, float(alert.get("velocity3s") or 0))
     if vel < min_vel:
-        # Heatmap rows may lack runnerSignal — allow if confidence is elite-tier.
+        # Heatmap rows may lack runnerSignal — allow if confidence clears rank floor.
         if float(candidate.confidence or 0) < min_rank:
             return False, f"scalp_best_velocity_below_{min_vel}"
 
-    if getattr(settings, "scalp_best_defer_to_explosion", True):
+    if getattr(settings, "scalp_best_defer_to_explosion", True) and not local_ok:
         if _tradeable_explosion_on_side(snap, candidate.side):
             return False, "scalp_best_defer_to_explosion"
 
@@ -512,6 +591,7 @@ def _scalp_candidates(
             snapshots={symbol: snap},
         )
 
+        alert = _matching_radar_alert(snap, suggestion.side, float(suggestion.strike))
         out.append(EntryCandidate(
             symbol=symbol,
             snap=snap,
@@ -524,6 +604,7 @@ def _scalp_candidates(
             confidence=suggestion.confidence,
             tqs=suggestion.tqs,
             suggestion=suggestion,
+            alert=alert,
         ))
 
     for row in heatmap_moneyness_candidates(symbol, snap, snapshots={symbol: snap}):
@@ -538,6 +619,7 @@ def _scalp_candidates(
             suggestion.side, suggestion.strike, snap, mode="scalp", candidate_score=rank,
             snapshots={symbol: snap},
         )
+        alert = _matching_radar_alert(snap, suggestion.side, float(suggestion.strike))
         out.append(EntryCandidate(
             symbol=symbol,
             snap=snap,
@@ -550,6 +632,7 @@ def _scalp_candidates(
             confidence=suggestion.confidence,
             tqs=suggestion.tqs,
             suggestion=suggestion,
+            alert=alert,
         ))
     if getattr(settings, "scalp_best_only_enabled", True):
         kept: list[EntryCandidate] = []
@@ -1018,7 +1101,7 @@ def find_best_entry(
     elif best.mode == "scalp" and getattr(settings, "scalp_best_only_enabled", True):
         floor = max(
             floor,
-            float(getattr(settings, "scalp_best_min_rank_score", 88.0) or 88.0),
+            float(getattr(settings, "scalp_best_min_rank_score", 84.0) or 84.0),
         )
     elif settings.best_trades_only_enabled:
         from app.engines.aligned_explosion_bypass import expiry_aligned_explosion_trade_allowed
