@@ -194,6 +194,16 @@ def worst_day_allows_candidate(
     if policy == "NORMAL":
         return True, "ok", meta
 
+    from app.engines.elite_never_block import elite_never_block_active
+
+    # ELITE explosions are never blocked by worst-day / BREAKOUT_ONLY / pause gates.
+    if (
+        str(getattr(candidate, "mode", "") or "") == "explosion"
+        and elite_never_block_active(candidate=candidate)
+    ):
+        meta["worstDayBypass"] = "elite_never_block"
+        return True, "ok", meta
+
     if policy == "PAUSED":
         # Never miss a confirmed TOP explosion off a local base — even a paused
         # worst day yields to the best ELITE/EXPLODING base rips (bounded predicate).

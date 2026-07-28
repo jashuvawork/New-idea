@@ -582,8 +582,13 @@ def validate_candidate(
                 meta["composerBias"] = brief.get("tradeBias")
                 # Session stand-aside must not bury high-confidence base-rip explosions.
                 stand_down_bypass = False
+                from app.engines.elite_never_block import elite_never_block_active
+
+                if elite_never_block_active(candidate=candidate):
+                    stand_down_bypass = True
+                    meta["composerStandDownBypass"] = "elite_never_block"
                 # (1) Expiry early-window ELITE top.
-                if getattr(settings, "expiry_worst_day_elite_top_composer_bypass", True):
+                if not stand_down_bypass and getattr(settings, "expiry_worst_day_elite_top_composer_bypass", True):
                     from app.engines.expiry_day_guards import is_expiry_elite_top_candidate
 
                     if is_expiry_elite_top_candidate(candidate):
