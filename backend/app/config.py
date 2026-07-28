@@ -170,6 +170,9 @@ class Settings(BaseSettings):
     explosion_only_allow_guarded_scalp: bool = True
     # Explosion entries: only ELITE + EXPLODING (no BUILDING / soft premium-capture admits).
     explosion_elite_exploding_only: bool = True
+    # Never block ELITE explosions — skip fake-trap / extended-chase / late-fade /
+    # live-confirm / composer stand-down. Premium band still applies (no ₹3 OTM).
+    explosion_elite_never_block_enabled: bool = True
     # Promote high-confidence radar explosions the missed-trade monitor flags as bullish/base-window.
     # Does NOT trade premium_out_of_band cheap OTM chases (Jul20 24550 @ ₹3 — correctly blocked).
     missed_explosion_promote_enabled: bool = True

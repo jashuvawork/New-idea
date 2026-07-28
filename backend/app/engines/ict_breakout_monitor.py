@@ -367,6 +367,10 @@ def late_fade_chase_blocked(event: Any, ict: Optional[ICTBreakoutSignal] = None)
     settings = get_settings()
     if not getattr(settings, "ict_late_chase_block_enabled", True):
         return False, ""
+    from app.engines.elite_never_block import elite_never_block_active
+
+    if elite_never_block_active(event=event):
+        return False, ""
     peak = float(getattr(event, "peak_move_pct", 0) or 0)
     daily = float(getattr(event, "daily_move_pct", 0) or 0)
     move = max(peak, daily, float(ict.session_move_pct) if ict else 0.0)

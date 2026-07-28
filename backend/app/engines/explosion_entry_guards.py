@@ -181,6 +181,11 @@ def immature_explosion_blocked(
     if explosion_event is None:
         return False, ""
 
+    from app.engines.elite_never_block import elite_never_block_active
+
+    if elite_never_block_active(event=explosion_event):
+        return False, ""
+
     move = _session_peak_move(explosion_event)
     if ict is not None:
         move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
@@ -285,6 +290,11 @@ def live_explosion_confirmation_blocked(
     if not getattr(settings, "explosion_live_confirm_enabled", True):
         return False, ""
     if explosion_event is None:
+        return False, ""
+
+    from app.engines.elite_never_block import elite_never_block_active
+
+    if elite_never_block_active(event=explosion_event):
         return False, ""
 
     tier = str(getattr(explosion_event, "tier", "") or "").upper()
@@ -405,6 +415,11 @@ def extended_session_chase_blocked(
     if not getattr(settings, "explosion_extended_chase_block_enabled", True):
         return False, ""
     if explosion_event is None:
+        return False, ""
+
+    from app.engines.elite_never_block import elite_never_block_active
+
+    if elite_never_block_active(event=explosion_event):
         return False, ""
 
     move = _session_peak_move(explosion_event)
@@ -781,6 +796,12 @@ def detect_fake_explosion_trap(
     if not getattr(settings, "fake_explosion_trap_enabled", True):
         return False, "ok", meta
     if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, "ok", meta
+
+    from app.engines.elite_never_block import elite_never_block_active
+
+    if elite_never_block_active(candidate=candidate):
+        meta["eliteNeverBlock"] = True
         return False, "ok", meta
 
     event = getattr(candidate, "explosion_event", None)
