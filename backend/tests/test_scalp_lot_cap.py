@@ -42,3 +42,14 @@ def test_explosion_not_forced_to_scalp_cap(mock_settings, _max):
         tier="ELITE",
     )
     assert lots == 24
+
+
+@patch("app.engines.capital_allocator.max_lots_for_capital", return_value=24)
+@patch("app.engines.capital_allocator.get_settings")
+def test_scalp_max_lots_zero_uses_capital(mock_settings, _max):
+    """Jul17 logic: scalp_max_lots=0 → capital-derived (first-green still caps live)."""
+    mock_settings.return_value = _settings(scalp_max_lots=0)
+    lots = compute_lots(
+        "NIFTY", 121.0, 3.0, strategy_type=StrategyType.SCALP, confidence=90,
+    )
+    assert lots == 24
