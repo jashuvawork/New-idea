@@ -180,7 +180,8 @@ def _collect_itm_strike_candidates(
     side: Side,
 ) -> list[tuple[float, float]]:
     """ITM strikes for expiry PM quick scalps (e.g. 24300 CE when spot ~24440)."""
-    from app.engines.moneyness import atm_strike, classify_moneyness
+    from app.engines.expiry_day_guards import expiry_itm_max_steps, expiry_itm_monitor_active
+    from app.engines.moneyness import atm_strike, classify_moneyness, steps_from_atm
 
     spot = snap.spot or snap.atmStrike or 0.0
     if spot <= 0:
@@ -188,12 +189,20 @@ def _collect_itm_strike_candidates(
     atm = float(snap.atmStrike or 0) or atm_strike(spot, snap.symbol)
     settings = get_settings()
     max_prem = settings.expiry_pm_itm_premium_max_inr
+    max_steps = (
+        expiry_itm_max_steps()
+        if expiry_itm_monitor_active(snap)
+        else int(getattr(settings, "moneyness_max_itm_steps", 2) or 2)
+    )
     out: dict[float, float] = {}
     for row in snap.heatmap:
         strike, prem = _strike_premium(row, side)
         if not prem or prem <= 0 or prem > max_prem:
             continue
         if classify_moneyness(side, strike, spot, symbol=snap.symbol, atm=atm) != "ITM":
+            continue
+        depth = abs(steps_from_atm(strike, spot, snap.symbol, atm=atm))
+        if depth > max_steps or depth <= 0:
             continue
         out[strike] = prem
     return sorted(out.items(), key=lambda x: -x[1])

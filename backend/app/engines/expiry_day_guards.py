@@ -41,6 +41,35 @@ def is_symbol_expiry_day(snap: SymbolSnapshot) -> bool:
     return expiry == _today_str()
 
 
+def expiry_itm_monitor_active(snap: SymbolSnapshot | None = None) -> bool:
+    """
+    Expiry-day ITM CE+PE coverage mode — widen scan/depth so most ITM strikes
+    on both sides stay on radar (not just ATM ±2).
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "expiry_itm_monitor_enabled", True)):
+        return False
+    if snap is not None:
+        return is_symbol_expiry_day(snap)
+    return any_expiry_session_active()
+
+
+def expiry_itm_max_steps() -> int:
+    settings = get_settings()
+    base = int(getattr(settings, "moneyness_max_itm_steps", 2) or 2)
+    if not bool(getattr(settings, "expiry_itm_monitor_enabled", True)):
+        return base
+    return max(base, int(getattr(settings, "expiry_max_itm_steps", 6) or 6))
+
+
+def resolve_expiry_itm_scan_range(symbol: str) -> float:
+    """ATM ± range wide enough to cover expiry_max_itm_steps on both CE and PE."""
+    settings = get_settings()
+    if symbol.upper() == "SENSEX":
+        return float(getattr(settings, "expiry_sensex_itm_scan_range", 1200) or 1200)
+    return float(getattr(settings, "expiry_itm_scan_range", 800) or 800)
+
+
 _expiry_session_active: bool = False
 
 
@@ -755,4 +784,8 @@ def expiry_guard_summary(
         "expiryPmItmQuickActive": expiry_pm_itm_quick_session_active(snapshots, state),
         "expiryPmItmWindow": in_expiry_pm_itm_window(),
         "expiryPmItmAlternateSymbols": pm_alts,
+        "expiryItmMonitor": bool(getattr(settings, "expiry_itm_monitor_enabled", True))
+        and has_expiry_today,
+        "expiryMaxItmSteps": expiry_itm_max_steps() if has_expiry_today else None,
+        "expiryItmBothSides": bool(getattr(settings, "expiry_itm_both_sides", True)),
     }

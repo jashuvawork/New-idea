@@ -87,7 +87,24 @@ def test_peak_chase_blocks_deep_otm_rip():
 
 
 def test_tight_scan_on_expiry_session():
+    """Expiry + ITM monitor uses wide ITM scan (not worst-day 500 clamp)."""
     s = _settings()
+    s.expiry_itm_monitor_enabled = True
+    s.expiry_itm_scan_range = 800
+    s.expiry_sensex_itm_scan_range = 1200
+    with patch(
+        "app.engines.expiry_day_guards.any_expiry_session_active",
+        return_value=True,
+    ):
+        assert resolve_explosion_scan_range("SENSEX", s, tight_scan=None) == 1200
+        assert resolve_explosion_scan_range("NIFTY", s, tight_scan=None) == 800
+
+
+def test_tight_scan_worst_day_when_itm_monitor_off():
+    s = _settings()
+    s.expiry_itm_monitor_enabled = False
+    s.explosion_worst_day_scan_range = 500
+    s.explosion_sensex_worst_day_scan_range = 500
     with patch(
         "app.engines.expiry_day_guards.any_expiry_session_active",
         return_value=True,

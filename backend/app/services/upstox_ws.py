@@ -130,20 +130,23 @@ async def _base_subscription_keys() -> list[str]:
 
 
 async def _refresh_option_keys() -> list[str]:
-    """Pull ATM option keys from cached REST chain for WS subscription."""
+    """Pull ATM±scan-range option keys from cached REST chain for WS subscription."""
     settings = get_settings()
     keys: list[str] = []
     client = UpstoxClient()
+    from app.engines.explosion_detector import resolve_explosion_scan_range
+    from app.engines.moneyness import atm_strike
+
     for sym in settings.symbols:
         try:
             spot = await client.get_index_ltp(sym)
             chain, _ = await client.get_option_chain_resolved(sym)
             if not chain:
                 continue
-            step = 100
-            atm = round(spot / step) * step
+            atm = atm_strike(float(spot or 0), sym)
+            scan_range = resolve_explosion_scan_range(sym, settings)
             keys.extend(
-                collect_option_keys_from_chain(chain, atm, settings.explosion_scan_range)
+                collect_option_keys_from_chain(chain, atm, scan_range)
             )
         except Exception as e:
             logger.debug("Option key refresh failed for %s: %s", sym, e)

@@ -231,10 +231,21 @@ def moneyness_allows(
             return False, f"moneyness_otm_too_deep_{depth}", meta
 
     if money == "ITM" and depth > settings.moneyness_max_itm_steps:
-        from app.engines.expiry_day_guards import expiry_pm_itm_quick_active
+        from app.engines.expiry_day_guards import (
+            expiry_itm_max_steps,
+            expiry_itm_monitor_active,
+            expiry_pm_itm_quick_active,
+        )
 
+        max_itm = int(settings.moneyness_max_itm_steps)
+        if expiry_itm_monitor_active(snap):
+            max_itm = max(max_itm, expiry_itm_max_steps())
+            meta["expiryItmMonitor"] = True
+            meta["expiryMaxItmSteps"] = max_itm
         pm_modes = ("quick_sideways", "slow_bounce")
-        if not (mode in pm_modes and expiry_pm_itm_quick_active(snap, state, snapshots)):
+        if depth > max_itm and not (
+            mode in pm_modes and expiry_pm_itm_quick_active(snap, state, snapshots)
+        ):
             return False, f"moneyness_itm_too_deep_{depth}", meta
 
     if settings.trade_moneyness_mode.upper() == "AUTO" and preferred != money:
@@ -295,6 +306,9 @@ def heatmap_moneyness_candidates(
     """
     Build supplemental ITM/OTM scalp legs from the option heatmap when AUTO mode
     needs non-ATM strikes (e.g. ITM puts in bearish chop).
+
+    On expiry, monitor most ITM CE and PE (both sides) so ATM-cluster fixation
+    does not miss deep-ITM rips.
     """
     settings = get_settings()
     if not settings.moneyness_selection_enabled or not snap.heatmap:
@@ -304,55 +318,89 @@ def heatmap_moneyness_candidates(
     if spot <= 0:
         return []
 
+    from app.engines.expiry_day_guards import (
+        expiry_itm_max_steps,
+        expiry_itm_monitor_active,
+    )
+
     atm = float(snap.atmStrike or atm_strike(spot, symbol))
+    expiry_itm = expiry_itm_monitor_active(snap)
     preferred = resolve_preferred_moneyness("scalp", snap, snapshots=snapshots)
+    if expiry_itm:
+        preferred = "ITM"
     if preferred == "ATM":
         return []
 
     out: list[dict[str, Any]] = []
     bias = (snap.breadth.bias or "NEUTRAL").upper()
+    both_sides = expiry_itm and bool(getattr(settings, "expiry_itm_both_sides", True))
+    max_depth = (
+        expiry_itm_max_steps()
+        if preferred == "ITM" and expiry_itm
+        else (
+            settings.moneyness_max_itm_steps
+            if preferred == "ITM"
+            else settings.moneyness_max_otm_steps
+        )
+    )
+    limit = (
+        int(getattr(settings, "expiry_itm_candidate_limit", 12) or 12)
+        if expiry_itm
+        else 4
+    )
 
     for row in snap.heatmap:
         for side, ltp, ikey in (
             (Side.CALL, row.callLtp, row.callInstrumentKey),
             (Side.PUT, row.putLtp, row.putInstrumentKey),
         ):
-            if not premium_in_band(ltp):
+            prem = float(ltp or 0)
+            if expiry_itm:
+                # ITM premiums run higher on expiry — use near-expiry ceiling.
+                max_prem = float(
+                    getattr(settings, "expiry_near_expiry_premium_max_inr", 300)
+                    or getattr(settings, "expiry_pm_itm_premium_max_inr", 280)
+                    or 280
+                )
+                min_prem = float(getattr(settings, "min_option_premium_inr", 25) or 25)
+                if prem < min_prem or prem > max_prem:
+                    continue
+            elif not premium_in_band(ltp):
                 continue
             money = classify_moneyness(side, row.strike, spot, symbol=symbol, atm=atm)
             if money != preferred:
                 continue
             depth = _depth_steps(side, row.strike, spot, symbol, atm)
-            max_depth = (
-                settings.moneyness_max_itm_steps
-                if preferred == "ITM"
-                else settings.moneyness_max_otm_steps
-            )
             if depth > max_depth or depth <= 0:
                 continue
 
-            # Side alignment with breadth for ITM defensive legs
-            if preferred == "ITM":
+            # Side alignment with breadth for ITM defensive legs — skipped on
+            # expiry so both CE and PE ITM stay monitored regardless of OI bias.
+            if preferred == "ITM" and not both_sides:
                 if side == Side.CALL and bias not in ("BULLISH", "NEUTRAL"):
                     continue
                 if side == Side.PUT and bias not in ("BEARISH", "NEUTRAL"):
                     continue
 
             score = 52.0 + row.liquidityScore * 0.15
+            if expiry_itm:
+                # Prefer nearer ITM (still allow deep) so selection stays liquid.
+                score += max(0.0, (max_depth - depth + 1) * 1.5)
             out.append({
                 "symbol": symbol,
                 "side": side,
                 "strike": row.strike,
-                "premium": float(ltp),
+                "premium": prem,
                 "moneyness": money,
                 "liquidityScore": row.liquidityScore,
                 "instrumentKey": ikey,
+                "expiryItmMonitor": expiry_itm,
                 "suggestion": SuggestedTrade(
                     id=f"mny-{symbol}-{side.value}-{int(row.strike)}",
                     symbol=symbol,
                     side=side,
                     strike=row.strike,
-                    lastPremium=float(ltp),
+                    lastPremium=prem,
                     tqs=snap.tradeQualityScore,
                     strategyType=StrategyType.SCALP,
                     confidence=score,
@@ -361,4 +409,4 @@ def heatmap_moneyness_candidates(
             })
 
     out.sort(key=lambda x: (x["liquidityScore"], x["score"]), reverse=True)
-    return out[:4]
+    return out[:limit]

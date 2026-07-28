@@ -524,6 +524,14 @@ class Settings(BaseSettings):
     moneyness_max_otm_steps: int = 2
     expiry_explosion_max_otm_steps: int = 4
     moneyness_max_itm_steps: int = 2
+    # Expiry-day ITM CE+PE monitor — cover most liquid ITM strikes on both sides
+    # (ATM±2 was too narrow; Jul28 24050 PE rip sat outside the watched ATM cluster).
+    expiry_itm_monitor_enabled: bool = True
+    expiry_max_itm_steps: int = 6
+    expiry_itm_candidate_limit: int = 12
+    expiry_itm_scan_range: int = 800
+    expiry_sensex_itm_scan_range: int = 1200
+    expiry_itm_both_sides: bool = True
     moneyness_explosion_prefer: str = "ATM"
     # When explosion prefer is ATM, hard-block OTM (Jul23 76100 PE −₹1.3k after ATM miss).
     # ATM + shallow ITM still allowed; deep OTM FOMO is not a soft rank penalty.
