@@ -162,12 +162,12 @@ class Settings(BaseSettings):
     paper_simple_profit_mode: bool = True
     paper_dual_strategy_enabled: bool = False
     explosion_capture_mode: bool = True  # PRIMARY — capture daily premium explosions
-    # Explosion-only book — skip quick/swing/scalp. Jul27 scalp churn (−33.8k on one CE)
-    # proved guarded scalps still bleed the milestone; catch ELITE/EXPLODING only.
+    # Explosion-only book — skip quick/swing. Jul17 scalps (+₹54k sleeve / +₹43k runner)
+    # were the PF edge; restore guarded scalps under explosion-only (first-green lot cap).
+    # Quick_sideways / swing stay off (quick was the −34k disaster).
     explosion_only_trading_enabled: bool = True
-    # Guarded scalps OFF under explosion-only (set true only for explicit scalp experiments).
-    # Quick_sideways / swing stay off regardless (quick was the −34k disaster).
-    explosion_only_allow_guarded_scalp: bool = False
+    # Jul17 logic: allow guarded scalps even under explosion-only.
+    explosion_only_allow_guarded_scalp: bool = True
     # Explosion entries: only ELITE + EXPLODING (no BUILDING / soft premium-capture admits).
     explosion_elite_exploding_only: bool = True
     # Promote high-confidence radar explosions the missed-trade monitor flags as bullish/base-window.
@@ -889,21 +889,21 @@ class Settings(BaseSettings):
     sure_shot_min_symbol_tqs: int = 40
     sure_shot_min_rank_score: float = 48.0
     sure_shot_scalp_min_score: int = 55
-    # Hard scalp ceiling — 0 used to mean unlimited (Jul27 24/25-lot stops). Default 10.
-    scalp_max_lots: int = 10
+    # Jul17 logic: 0 = capital-derived max (14–20 lot ITM runners). First-green lot
+    # cap (size_until_first_green) still guards never-green oversize.
+    scalp_max_lots: int = 0
     scalp_target_points: float = 12.0  # unused — session targets in simple_profit
-    # Best-scalps-only — Jul27 mid-quality CE scalps chewed capital during a rip.
-    # Floors eased slightly; local-base structured scalps get a softer path.
-    scalp_best_only_enabled: bool = True
+    # Jul17 logic: best-only OFF — Jul17 winners used enhanced TQS/velocity gates only.
+    # (Jul27 clamps remain available via env if churn returns.)
+    scalp_best_only_enabled: bool = False
     scalp_best_min_rank_score: float = 84.0
     scalp_best_min_chart_confidence: float = 68.0
     scalp_best_require_breadth_aligned: bool = True
     scalp_best_require_chart_aligned: bool = True
     scalp_best_atm_itm_only: bool = True
     scalp_best_min_velocity_pct: float = 1.0
-    # If a tradeable EXPLODING/ELITE exists on same side, skip scalp (take the rip path)
-    # — unless this scalp itself has confirmed local-base structure.
-    scalp_best_defer_to_explosion: bool = True
+    # Jul17: do not defer scalp when an explosion is also on radar — selector picks best.
+    scalp_best_defer_to_explosion: bool = False
     scalp_local_base_enabled: bool = True
     scalp_local_base_min_rank_score: float = 80.0
     scalp_local_base_min_chart_confidence: float = 62.0

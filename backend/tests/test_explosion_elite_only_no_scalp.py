@@ -177,10 +177,42 @@ def test_find_best_entry_skips_scalp_under_explosion_only():
     scalp_fn.assert_not_called()
 
 
-def test_default_config_disables_guarded_scalp():
+def test_default_config_jul17_scalp_logic():
     from app.config import Settings
 
     s = Settings()
     assert s.explosion_only_trading_enabled is True
-    assert s.explosion_only_allow_guarded_scalp is False
+    # Jul17 restore: guarded scalps allowed again under explosion-only.
+    assert s.explosion_only_allow_guarded_scalp is True
     assert s.explosion_elite_exploding_only is True
+    assert s.scalp_best_only_enabled is False
+    assert s.scalp_max_lots == 0
+    assert s.scalp_best_defer_to_explosion is False
+
+
+def test_find_best_entry_invokes_scalp_when_guarded_enabled():
+    settings = _settings(
+        explosion_only_trading_enabled=True,
+        explosion_only_allow_guarded_scalp=True,
+        paper_simple_profit_mode=True,
+        aggressive_max_open_scalps=2,
+    )
+    snap = _snap([])
+    state = SimpleNamespace(
+        openPaperTrades=[],
+        calibrationBlocks={"CALL": False, "PUT": False},
+        closedPaperTrades=[],
+    )
+
+    with (
+        patch("app.engines.trade_selector.get_settings", return_value=settings),
+        patch("app.engines.trade_selector._explosion_candidates", return_value=[]),
+        patch("app.engines.trade_selector._scalp_candidates", return_value=[]) as scalp_fn,
+        patch("app.engines.trade_selector.quick_sideways_enabled", return_value=False),
+        patch("app.engines.chop_day_guards.is_chop_session", return_value=False),
+        patch("app.engines.pretrade_validator.collect_session_trades", return_value=[]),
+    ):
+        find_best_entry({"NIFTY": snap}, state)
+
+    scalp_fn.assert_called()
+

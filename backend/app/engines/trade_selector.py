@@ -859,9 +859,9 @@ def find_best_entry(
     chop = is_chop_session(snapshots)
 
     candidates: list[EntryCandidate] = []
-    # Focus the book on ELITE/EXPLODING only — scalps off under explosion-only (Jul27 bleed).
+    # ELITE/EXPLODING explosions + Jul17-style guarded scalps under explosion-only.
     explosion_only = bool(getattr(settings, "explosion_only_trading_enabled", True))
-    allow_guarded_scalp = bool(getattr(settings, "explosion_only_allow_guarded_scalp", False))
+    allow_guarded_scalp = bool(getattr(settings, "explosion_only_allow_guarded_scalp", True))
 
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
