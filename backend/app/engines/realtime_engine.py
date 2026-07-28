@@ -262,9 +262,18 @@ def _scan_runners(
     if hist_key not in _premium_history:
         _premium_history[hist_key] = {}
 
+    # Expiry ITM monitor widens the band so most ITM CE/PE stay on the runner list.
+    scan_pts = 800.0
+    try:
+        from app.engines.explosion_detector import resolve_explosion_scan_range
+
+        scan_pts = float(resolve_explosion_scan_range(symbol) or 800)
+    except Exception:
+        scan_pts = 800.0
+
     for row in chain:
         strike = row.get("strike_price") or row.get("strike", 0)
-        if abs(strike - atm) > 800:
+        if abs(strike - atm) > scan_pts:
             continue
 
         for side, key in [(Side.CALL, "call_options"), (Side.PUT, "put_options")]:

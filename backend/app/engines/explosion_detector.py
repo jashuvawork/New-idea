@@ -527,7 +527,13 @@ def resolve_explosion_scan_range(
     *,
     tight_scan: bool | None = None,
 ) -> float:
-    """ATM ± range for chain scan — wider on SENSEX; tighter on expiry session."""
+    """
+    ATM ± range for chain scan — wider on SENSEX.
+
+    On expiry with ITM monitor enabled, keep a wide enough band to cover most
+    ITM CE/PE (not the old worst-day 500pt clamp that missed deep ITM rips).
+    Worst-day tight scan only applies when expiry ITM monitor is off.
+    """
     from app.config import get_settings
 
     settings = settings or get_settings()
@@ -540,6 +546,16 @@ def resolve_explosion_scan_range(
             tight_scan = False
 
     if tight_scan:
+        itm_monitor = bool(getattr(settings, "expiry_itm_monitor_enabled", True))
+        if itm_monitor:
+            try:
+                from app.engines.expiry_day_guards import resolve_expiry_itm_scan_range
+
+                return resolve_expiry_itm_scan_range(symbol)
+            except Exception:
+                if symbol.upper() == "SENSEX":
+                    return float(getattr(settings, "expiry_sensex_itm_scan_range", 1200) or 1200)
+                return float(getattr(settings, "expiry_itm_scan_range", 800) or 800)
         if symbol.upper() == "SENSEX":
             return float(getattr(settings, "explosion_sensex_worst_day_scan_range", 500) or 500)
         return float(getattr(settings, "explosion_worst_day_scan_range", 500) or 500)
