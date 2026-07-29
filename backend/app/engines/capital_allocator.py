@@ -682,7 +682,19 @@ def tune_exit_plan_for_position(
     target_inr = trade_budget * settings.position_tp_target_pct
     tp_pts_floor = target_inr / units
 
-    stop = max(settings.scalp_stop_min_points, min(plan_stop, sl_pts_cap))
+    # Oversized lots (Jul29 32× SENSEX) crushed a ₹279 ITM natural ~28pt SL to 6pt
+    # and never-green-killed the rip. Keep a fraction of the premium-based stop.
+    preserve = float(getattr(settings, "position_sl_preserve_natural_frac", 0.45) or 0.0)
+    natural_floor = max(
+        settings.scalp_stop_min_points,
+        plan_stop * max(0.0, min(1.0, preserve)),
+    )
+    stop = max(natural_floor, min(plan_stop, sl_pts_cap))
+    if sl_pts_cap + 1e-9 < natural_floor:
+        reasoning.append(
+            f"Size-tune SL floor {natural_floor:.1f}pt (preserve {preserve:.0%} of natural "
+            f"{plan_stop:.1f}pt; budget cap was {sl_pts_cap:.1f}pt)"
+        )
     target = max(plan_target, tp_pts_floor, settings.scalp_stop_points * 2)
     # Guard inverted R:R — a budget-capped stop can exceed the target floor.
     min_rr = float(getattr(settings, "position_min_risk_reward", 1.2) or 1.2)

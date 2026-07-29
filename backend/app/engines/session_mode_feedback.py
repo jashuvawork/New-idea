@@ -92,7 +92,14 @@ def mode_session_rank_bonus(mode: str, mode_stats: dict[str, ModeSessionStats]) 
 def session_has_green_mode(
     state: AutoTraderState, mode: str, trades: Optional[list[Any]] = None
 ) -> bool:
-    """True once any trade in `mode` went green (pnl>0 or best≥1pt) this session."""
+    """
+    True once any trade in `mode` proved green this session.
+
+    Default: closed winner only (pnl>0). Fleeting best≥1pt on a red close must
+    not unlock full size (Jul29 24100 CE best+1.5 → −₹72 unlocked 32-lot 77500).
+    """
+    settings = get_settings()
+    require_win = bool(getattr(settings, "size_until_first_green_require_closed_win", True))
     mode = (mode or "").lower()
     if trades is None:
         from app.engines.pretrade_validator import collect_session_trades
@@ -103,7 +110,9 @@ def session_has_green_mode(
             continue
         pnl = float(getattr(t, "pnl_inr", 0) or 0)
         best = float(getattr(t, "best_pnl_points", 0) or 0)
-        if pnl > 0 or best >= 1.0:
+        if pnl > 0:
+            return True
+        if not require_win and best >= 1.0:
             return True
     # Also check in-memory paper trades (bestPnlPoints may not be on TradeRecord yet)
     for t in getattr(state, "closedPaperTrades", []) or []:
@@ -115,7 +124,10 @@ def session_has_green_mode(
             continue
         if float(getattr(t, "pnlInr", 0) or 0) > 0:
             return True
-        if float(getattr(t, "bestPnlPoints", 0) or 0) >= 1.0:
+        if (
+            not require_win
+            and float(getattr(t, "bestPnlPoints", 0) or 0) >= 1.0
+        ):
             return True
     return False
 
