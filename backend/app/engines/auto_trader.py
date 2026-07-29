@@ -525,11 +525,13 @@ async def _open_from_candidate(
     # Soft fake-trap lot-cap is skipped for high-conviction; hard trap block still applies.
     high_conviction = False
     elevated_size = False
+    top_explosion_max = False
     if candidate.mode == "explosion" and candidate.explosion_event is not None:
         from app.engines.chart_exit_levels import chart_trade_confidence
         from app.engines.explosion_confidence import (
             is_elevated_size_entry,
             is_high_conviction_entry,
+            is_top_explosion_max_lots_entry,
         )
 
         ev = candidate.explosion_event
@@ -602,20 +604,55 @@ async def _open_from_candidate(
                 lots = min(cap, max(lots, int(round(lots * scale))))
                 elevated_size = True
 
+        # ELITE/EXPLODING → capital max on first take (Jul29 77500 CE under-sized at 6).
+        # Does not require HC score/move windows; still skip true CHOP/WORST days.
+        if is_top_explosion_max_lots_entry(
+            side=candidate.side,
+            snap=snap,
+            tier=str(candidate.tier or ""),
+            chart_confidence=conv_chart_conf,
+        ):
+            block_days = {
+                t.strip().upper()
+                for t in str(
+                    getattr(settings, "top_explosion_force_max_block_day_types_csv", "CHOP,WORST")
+                    or "CHOP,WORST"
+                ).split(",")
+                if t.strip()
+            }
+            # Reuse dayType from the good-day ICT block above when available.
+            day_type = str((ict_meta or {}).get("dayType") or "").upper()
+            if day_type not in block_days:
+                from app.engines.capital_allocator import max_lots_for_capital
+
+                lots = max(lots, max_lots_for_capital(symbol, fill_premium))
+                top_explosion_max = True
+
+    force_max_size = bool(high_conviction or top_explosion_max)
+
     lots = clamp_lots(lots, symbol, fill_premium)
     if candidate.mode == "explosion" and trap_meta:
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
         # Must run AFTER good-day ICT max-lot force (Jul20 49-lot FOMO hole).
-        bypass_soft = bool(high_conviction) and bool(
-            getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
+        bypass_soft = (
+            (bool(high_conviction) and bool(
+                getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
+            ))
+            or (bool(top_explosion_max) and bool(
+                getattr(settings, "top_explosion_force_max_bypasses_fake_trap_lot_cap", True)
+            ))
         )
         lots = cap_fake_explosion_trap_lots(
             lots, trap_meta, bypass_soft_cap=bypass_soft,
         )
         if lots <= 0:
             return False, str(trap_meta.get("action") or "fake_explosion_trap")
-    if candidate.mode in ("explosion", "scalp") and not high_conviction:
+    skip_first_green = force_max_size and (
+        high_conviction
+        or bool(getattr(settings, "top_explosion_force_max_bypasses_first_green", True))
+    )
+    if candidate.mode in ("explosion", "scalp") and not skip_first_green:
         from app.engines.session_mode_feedback import cap_lots_until_first_green
 
         lots = cap_lots_until_first_green(lots, state, mode=candidate.mode)
@@ -677,8 +714,13 @@ async def _open_from_candidate(
                 if trap_block or live_trap.get("action") == "block":
                     return False, trap_reason
                 if trap_meta.get("action") == "cut_size":
-                    bypass_soft = bool(high_conviction) and bool(
-                        getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
+                    bypass_soft = (
+                        (bool(high_conviction) and bool(
+                            getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
+                        ))
+                        or (bool(top_explosion_max) and bool(
+                            getattr(settings, "top_explosion_force_max_bypasses_fake_trap_lot_cap", True)
+                        ))
                     )
                     lots = cap_fake_explosion_trap_lots(
                         lots, trap_meta, bypass_soft_cap=bypass_soft,
@@ -774,6 +816,7 @@ async def _open_from_candidate(
         "executionChart": chart_meta,
         "highConviction": bool(high_conviction),
         "elevatedSize": bool(elevated_size),
+        "topExplosionMaxLots": bool(top_explosion_max),
     }
     from app.engines.moneyness import classify_moneyness
 
