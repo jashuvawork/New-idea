@@ -859,9 +859,10 @@ def find_best_entry(
     chop = is_chop_session(snapshots)
 
     candidates: list[EntryCandidate] = []
-    # ELITE/EXPLODING explosions + Jul17-style guarded scalps under explosion-only.
+    # ELITE/EXPLODING explosions; scalps off by default (Jul29 scalp sleeve bled).
     explosion_only = bool(getattr(settings, "explosion_only_trading_enabled", True))
-    allow_guarded_scalp = bool(getattr(settings, "explosion_only_allow_guarded_scalp", True))
+    allow_guarded_scalp = bool(getattr(settings, "explosion_only_allow_guarded_scalp", False))
+    scalp_entries = bool(getattr(settings, "scalp_entries_enabled", False))
 
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
@@ -870,7 +871,8 @@ def find_best_entry(
             if not limits or getattr(limits, "allowExplosion", True):
                 candidates.extend(_explosion_candidates(symbol, snap, state, settings))
         if (
-            (not explosion_only or allow_guarded_scalp)
+            scalp_entries
+            and (not explosion_only or allow_guarded_scalp)
             and settings.paper_simple_profit_mode
             and scalp_open < settings.aggressive_max_open_scalps
         ):
