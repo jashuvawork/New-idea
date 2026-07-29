@@ -266,6 +266,9 @@ def build_eod_playbook(
     bias, confidence = _aggregate_bias(symbols_ctx)
     scenarios = _build_scenarios(symbols_ctx, expiry, bias, worst)
     watchlist = _build_watchlist(symbols_ctx)
+    from app.engines.strike_watchlist import build_strike_watchlist
+
+    strike_watchlist = build_strike_watchlist(snapshots, per_side=3)
     playbook_steps = _build_playbook_steps(bias, expiry, scenarios)
 
     risk_flags: list[str] = []
@@ -295,6 +298,7 @@ def build_eod_playbook(
         "confidence": confidence,
         "scenarios": scenarios,
         "watchlist": watchlist,
+        "strikeWatchlist": strike_watchlist,
         "riskFlags": risk_flags,
         "symbols": symbols_ctx,
         "playbook": playbook_steps,

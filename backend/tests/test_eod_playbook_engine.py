@@ -78,3 +78,7 @@ def test_build_eod_playbook_bearish_bias(_today):
     assert len(pb["scenarios"]) >= 3
     assert len(pb["watchlist"]) >= 1
     assert len(pb["playbook"]) >= 4
+    assert "strikeWatchlist" in pb
+    assert len(pb["strikeWatchlist"]["indexes"]) >= 1
+    sensex = next(i for i in pb["strikeWatchlist"]["indexes"] if i["symbol"] == "SENSEX")
+    assert sensex["puts"] or sensex["calls"]
