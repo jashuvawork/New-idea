@@ -32,6 +32,7 @@ import { MissedTradeExplainerPanel } from './components/MissedTradeExplainerPane
 import { AnalysisReportsPanel } from './components/AnalysisReportsPanel';
 import { FutureSignalsPanel } from './components/FutureSignalsPanel';
 import { EodTomorrowPlaybookPanel } from './components/EodTomorrowPlaybookPanel';
+import { StrikeWatchlistPanel } from './components/StrikeWatchlistPanel';
 import { RiskEngine } from './components/RiskEngine';
 import { MarketProfilePanel } from './components/MarketProfile';
 import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate';
@@ -316,6 +317,9 @@ export default function App() {
               </div>
               <div className="col-span-12">
                 <FutureSignalsPanel snapshots={data.snapshots} auto={auto} />
+              </div>
+              <div className="col-span-12">
+                <StrikeWatchlistPanel snapshots={data.snapshots} />
               </div>
               <div className="col-span-12 lg:col-span-6">
                 <EodTomorrowPlaybookPanel />

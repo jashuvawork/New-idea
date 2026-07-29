@@ -15,6 +15,27 @@ interface EodWatch {
   reason?: string;
 }
 
+interface StrikeWatchItem {
+  side?: string;
+  strike?: number;
+  premium?: number;
+  score?: number;
+  tier?: string;
+  movePct?: number;
+  priority?: number;
+  source?: string;
+}
+
+interface StrikeWatchIndex {
+  symbol?: string;
+  spot?: number;
+  atmStrike?: number;
+  optionExpiry?: string;
+  bias?: string;
+  calls?: StrikeWatchItem[];
+  puts?: StrikeWatchItem[];
+}
+
 interface EodPlaybook {
   waiting?: boolean;
   generatedAt?: string;
@@ -25,6 +46,10 @@ interface EodPlaybook {
   confidence?: string;
   scenarios?: EodScenario[];
   watchlist?: EodWatch[];
+  strikeWatchlist?: {
+    indexes?: StrikeWatchIndex[];
+    priorityQueue?: Array<StrikeWatchItem & { symbol?: string }>;
+  };
   riskFlags?: string[];
   playbook?: string[];
   sessionPnlInr?: number;
@@ -164,9 +189,35 @@ export function EodTomorrowPlaybookPanel({ pollMs = 120_000 }: { pollMs?: number
         </div>
       ) : null}
 
+      {playbook?.strikeWatchlist?.indexes && playbook.strikeWatchlist.indexes.length > 0 ? (
+        <div className="mb-2 text-[9px]">
+          <div className="text-nexus-accent uppercase mb-1">CE / PE strike watchlist</div>
+          <div className="grid grid-cols-1 gap-1.5">
+            {playbook.strikeWatchlist.indexes.map((idx) => (
+              <div key={idx.symbol} className="rounded border border-nexus-border/40 bg-black/20 p-1.5">
+                <div className="text-white font-semibold mb-0.5">
+                  {idx.symbol}{' '}
+                  <span className="text-nexus-muted font-normal">
+                    ATM {idx.atmStrike ?? '—'} · bias {idx.bias ?? '—'}
+                  </span>
+                </div>
+                <div className="font-mono text-[9px]">
+                  <span className="text-nexus-green">CE </span>
+                  {(idx.calls || []).slice(0, 3).map((c) => `${c.strike}${c.tier ? `/${c.tier}` : ''}`).join(' · ') || '—'}
+                </div>
+                <div className="font-mono text-[9px]">
+                  <span className="text-nexus-red">PE </span>
+                  {(idx.puts || []).slice(0, 3).map((p) => `${p.strike}${p.tier ? `/${p.tier}` : ''}`).join(' · ') || '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {playbook?.watchlist && playbook.watchlist.length > 0 ? (
         <div className="mb-2 text-[9px]">
-          <div className="text-nexus-accent uppercase mb-1">Watchlist</div>
+          <div className="text-nexus-accent uppercase mb-1">Bias watchlist</div>
           {playbook.watchlist.map((w, i) => (
             <div key={i} className="font-mono text-white mb-0.5">
               <span className={w.side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'}>

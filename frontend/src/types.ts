@@ -29,6 +29,7 @@ export interface SymbolSnapshot {
   regime: string;
   spot?: number;
   atmStrike?: number;
+  optionExpiry?: string | null;
   heatmap: HeatmapStrike[];
   orderflow: Orderflow;
   greeks: Greeks;

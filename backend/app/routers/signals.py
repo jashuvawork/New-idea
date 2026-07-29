@@ -22,3 +22,22 @@ async def forward_signals():
     except Exception:
         logger.exception("forward_signals failed")
         raise HTTPException(status_code=500, detail="forward_signals_build_failed")
+
+
+@router.get("/strike-watchlist")
+async def strike_watchlist(per_side: int = 3):
+    """CE + PE priority strikes for NIFTY and SENSEX — live trade-priority board."""
+    from app.engines.strike_watchlist import build_strike_watchlist
+    from app.routers.market import get_multi_snapshot_fast
+
+    try:
+        multi = await get_multi_snapshot_fast()
+        payload = build_strike_watchlist(
+            multi.snapshots,
+            per_side=max(1, min(int(per_side or 3), 6)),
+        )
+        payload["live"] = True
+        return payload
+    except Exception:
+        logger.exception("strike_watchlist failed")
+        raise HTTPException(status_code=500, detail="strike_watchlist_build_failed")
