@@ -230,6 +230,57 @@ def compute_lot_size(tqs: float, symbol: str = "NIFTY", premium: float = 100.0) 
     return compute_lots(symbol, premium, profile.stopPoints, tqs=tqs, strategy_type=StrategyType.SCALP)
 
 
+def _scalp_never_green_grace_active(
+    trade: PaperTrade,
+    *,
+    best: float,
+    hold_seconds: float,
+    pnl_pts: float,
+    stop_points: float,
+    settings,
+) -> bool:
+    """
+    Defer simple_stop_loss briefly for high-conf never-green ITM dips.
+
+    Jul29 SENSEX 77500 CE: entered 279, never-green −7pt in 49s on a 6pt size-tuned
+    SL, then premium recovered to 286. Hard-kill only past stop×mult or after grace.
+    """
+    if not bool(getattr(settings, "scalp_never_green_grace_enabled", True)):
+        return False
+    if best > 0 or pnl_pts >= 0:
+        return False
+    grace_s = float(getattr(settings, "scalp_never_green_grace_seconds", 150.0) or 150.0)
+    if hold_seconds >= grace_s:
+        return False
+    stop = float(stop_points or 0)
+    if stop <= 0:
+        return False
+    mult = float(getattr(settings, "scalp_never_green_stop_mult", 2.5) or 2.5)
+    hard_floor = stop * max(1.0, mult)
+    if pnl_pts <= -hard_floor:
+        return False
+
+    ctx = trade.entryContext or {}
+    exit_plan = ctx.get("exitPlan") or {}
+    conf = float(
+        ctx.get("entryChartConfidence")
+        or ctx.get("chartConfidence")
+        or exit_plan.get("chartConfidence")
+        or 0
+    )
+    min_conf = float(
+        getattr(settings, "scalp_never_green_min_chart_confidence", 55.0) or 55.0
+    )
+    if conf < min_conf:
+        return False
+    min_prem = float(
+        getattr(settings, "scalp_never_green_min_premium_inr", 80.0) or 80.0
+    )
+    if float(trade.entryPremium or 0) < min_prem:
+        return False
+    return True
+
+
 def evaluate_exit(
     trade: PaperTrade,
     current_premium: float,
@@ -317,21 +368,32 @@ def evaluate_exit(
     if trail_floor is not None and pnl_pts <= trail_floor and best >= arm:
         return "scalp_trail_sl", pnl_inr
 
-    # Hard SL — confidence-hold may briefly cushion a green runner, but never a
-    # never-green loser (Jul20 NIFTY 23950 CE scalp: best=0, −28pt, SL 2.5 deferred).
+    # Hard SL — confidence-hold may briefly cushion a green runner.
+    # Never-green: Jul20 deep losers still hard-stop; Jul29 high-conf ITM dips get
+    # a short wider grace so a −6pt shakeout does not kill a 279→286 rip.
     if hold_seconds >= min_hold and pnl_pts <= -profile.stopPoints:
         from app.engines.confidence_hold import confidence_hold_stop_multiplier
 
-        stop_cap = profile.stopPoints * confidence_hold_stop_multiplier(trade)
-        never_green = best <= 0
-        past_stop_cap = pnl_pts <= -stop_cap
-        if (
-            trail_floor is not None
-            or never_green
-            or past_stop_cap
-            or not hold_until_target_active(trade, best)
+        if _scalp_never_green_grace_active(
+            trade,
+            best=best,
+            hold_seconds=hold_seconds,
+            pnl_pts=pnl_pts,
+            stop_points=profile.stopPoints,
+            settings=settings,
         ):
-            return "simple_stop_loss", pnl_inr
+            pass  # defer simple_stop_loss inside grace / inside wider floor
+        else:
+            stop_cap = profile.stopPoints * confidence_hold_stop_multiplier(trade)
+            never_green = best <= 0
+            past_stop_cap = pnl_pts <= -stop_cap
+            if (
+                trail_floor is not None
+                or never_green
+                or past_stop_cap
+                or not hold_until_target_active(trade, best)
+            ):
+                return "simple_stop_loss", pnl_inr
 
     if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
         return "simple_emergency_inr_stop", pnl_inr

@@ -317,6 +317,18 @@ class Settings(BaseSettings):
     size_until_first_green_lot_cap: int = 6
     # Modes capped until a green print in that mode (Jul20 never-green oversize: explosion + scalp).
     size_until_first_green_modes_csv: str = "explosion,scalp"
+    # Unlock only on a closed winner (pnl>0). Fleeting best≥1pt on a red scalp
+    # (Jul29 NIFTY 24100 best+1.5 then −₹72) must NOT unlock 32-lot SENSEX size.
+    size_until_first_green_require_closed_win: bool = True
+    # Scalp never-green grace — high-conf ITM dips (Jul29 77500 CE 279→273→286)
+    # get a short wider floor before simple_stop_loss kills the rip.
+    scalp_never_green_grace_enabled: bool = True
+    scalp_never_green_grace_seconds: float = 150.0
+    scalp_never_green_stop_mult: float = 2.5
+    scalp_never_green_min_chart_confidence: float = 55.0
+    scalp_never_green_min_premium_inr: float = 80.0
+    # Size-tune must not crush premium-based SL below this fraction (oversized lots).
+    position_sl_preserve_natural_frac: float = 0.45
     # High-conviction override — take MAX lots + hold longer when a genuine base rip is
     # very high confidence (ELITE, score≥90, chartConf≥85, matched side, 28-55% window).
     # Bypasses the first-green + defensive throttles; fake-trap chop cap still applies.
