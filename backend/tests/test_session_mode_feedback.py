@@ -148,3 +148,121 @@ def test_size_until_first_green_allows_scalp_after_green():
     ]
     with patch("app.engines.session_mode_feedback.get_settings", return_value=_settings()):
         assert cap_lots_until_first_green(20, state, mode="scalp") == 20
+
+
+def test_same_strike_post_win_caps_next_entry():
+    """Jul29 77500 CE: after +₹5848 explosive win, next same-strike entry capped."""
+    from app.engines.session_mode_feedback import cap_same_strike_explosion_reentry_after_win
+
+    state = AutoTraderState()
+    state.closedPaperTrades = [
+        PaperTrade(
+            id="win8",
+            symbol="SENSEX",
+            side=Side.CALL,
+            strike=77500,
+            entryPremium=285,
+            currentPremium=334,
+            lots=6,
+            openedAt=datetime.now(IST),
+            closedAt=datetime.now(IST),
+            strategyType=StrategyType.EXPLOSIVE,
+            pnlInr=5848,
+            bestPnlPoints=54.7,
+            entryContext={"selectionMode": "explosion", "explosionTier": "ELITE"},
+        )
+    ]
+    s = _settings(
+        explosion_post_win_same_strike_lot_cap_enabled=True,
+        explosion_post_win_same_strike_lot_cap=6,
+    )
+    with patch("app.engines.session_mode_feedback.get_settings", return_value=s):
+        lots, meta = cap_same_strike_explosion_reentry_after_win(
+            29, state, symbol="SENSEX", side=Side.CALL, strike=77500,
+        )
+    assert lots == 6
+    assert meta["applied"] is True
+    assert meta["priorPnlInr"] == 5848
+
+
+def test_same_strike_post_win_ignores_other_strike():
+    from app.engines.session_mode_feedback import cap_same_strike_explosion_reentry_after_win
+
+    state = AutoTraderState()
+    state.closedPaperTrades = [
+        PaperTrade(
+            id="win8",
+            symbol="SENSEX",
+            side=Side.CALL,
+            strike=77500,
+            entryPremium=285,
+            currentPremium=334,
+            lots=6,
+            openedAt=datetime.now(IST),
+            closedAt=datetime.now(IST),
+            strategyType=StrategyType.EXPLOSIVE,
+            pnlInr=5848,
+            bestPnlPoints=54.7,
+            entryContext={"selectionMode": "explosion"},
+        )
+    ]
+    s = _settings(
+        explosion_post_win_same_strike_lot_cap_enabled=True,
+        explosion_post_win_same_strike_lot_cap=6,
+    )
+    with patch("app.engines.session_mode_feedback.get_settings", return_value=s):
+        lots, meta = cap_same_strike_explosion_reentry_after_win(
+            29, state, symbol="SENSEX", side=Side.CALL, strike=77900,
+        )
+    assert lots == 29
+    assert meta["applied"] is False
+
+
+def test_same_strike_latest_loss_clears_prior_win_cap():
+    from app.engines.session_mode_feedback import cap_same_strike_explosion_reentry_after_win
+    from datetime import timedelta
+
+    now = datetime.now(IST)
+    state = AutoTraderState()
+    state.closedPaperTrades = [
+        PaperTrade(
+            id="win8",
+            symbol="SENSEX",
+            side=Side.CALL,
+            strike=77500,
+            entryPremium=285,
+            currentPremium=334,
+            lots=6,
+            openedAt=now - timedelta(minutes=20),
+            closedAt=now - timedelta(minutes=15),
+            strategyType=StrategyType.EXPLOSIVE,
+            pnlInr=5848,
+            bestPnlPoints=54.7,
+            entryContext={"selectionMode": "explosion"},
+        ),
+        PaperTrade(
+            id="loss9",
+            symbol="SENSEX",
+            side=Side.CALL,
+            strike=77500,
+            entryPremium=320,
+            currentPremium=300,
+            lots=6,
+            openedAt=now - timedelta(minutes=10),
+            closedAt=now - timedelta(minutes=5),
+            strategyType=StrategyType.EXPLOSIVE,
+            pnlInr=-2000,
+            bestPnlPoints=1.0,
+            entryContext={"selectionMode": "explosion"},
+        ),
+    ]
+    s = _settings(
+        explosion_post_win_same_strike_lot_cap_enabled=True,
+        explosion_post_win_same_strike_lot_cap=6,
+    )
+    with patch("app.engines.session_mode_feedback.get_settings", return_value=s):
+        lots, meta = cap_same_strike_explosion_reentry_after_win(
+            29, state, symbol="SENSEX", side=Side.CALL, strike=77500,
+        )
+    assert lots == 29
+    assert meta.get("reason") == "latest_same_strike_not_a_win"

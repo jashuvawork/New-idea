@@ -162,12 +162,13 @@ class Settings(BaseSettings):
     paper_simple_profit_mode: bool = True
     paper_dual_strategy_enabled: bool = False
     explosion_capture_mode: bool = True  # PRIMARY — capture daily premium explosions
-    # Explosion-only book — skip quick/swing. Jul17 scalps (+₹54k sleeve / +₹43k runner)
-    # were the PF edge; restore guarded scalps under explosion-only (first-green lot cap).
-    # Quick_sideways / swing stay off (quick was the −34k disaster).
+    # Explosion-only book — skip quick/swing. Jul29 scalps bled while explosive
+    # ELITE was the edge; stop guarded scalps under explosion-only.
     explosion_only_trading_enabled: bool = True
-    # Jul17 logic: allow guarded scalps even under explosion-only.
-    explosion_only_allow_guarded_scalp: bool = True
+    # Jul29: stop scalp entries entirely (guarded scalp sleeve was net negative).
+    explosion_only_allow_guarded_scalp: bool = False
+    # Master switch — when false, no scalp-mode / SCALP strategy entries at all.
+    scalp_entries_enabled: bool = False
     # Explosion entries: only ELITE + EXPLODING (no BUILDING / soft premium-capture admits).
     explosion_elite_exploding_only: bool = True
     # Never block ELITE explosions — skip fake-trap / extended-chase / late-fade /
@@ -369,6 +370,10 @@ class Settings(BaseSettings):
     top_explosion_force_max_bypasses_fake_trap_lot_cap: bool = True
     # Only block force-max on true CHOP/WORST days — not mere RANGE_BOUND (Jul29 #8).
     top_explosion_force_max_block_day_types_csv: str = "CHOP,WORST"
+    # After booking profit on an explosive at symbol+side+strike, next entry on that
+    # exact strike is lot-capped (Jul29 77500 CE +₹5.8k @6 → re-entry 29 lots −₹11k).
+    explosion_post_win_same_strike_lot_cap_enabled: bool = True
+    explosion_post_win_same_strike_lot_cap: int = 6
     # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
     session_mode_feedback_enabled: bool = True
     session_mode_feedback_min_trades: int = 2

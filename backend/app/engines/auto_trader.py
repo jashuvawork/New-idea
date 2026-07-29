@@ -346,6 +346,14 @@ async def _open_from_candidate(
     symbol = candidate.symbol
     snap = candidate.snap
 
+    # Jul29: stop scalp entries — explosions only.
+    if not getattr(settings, "scalp_entries_enabled", False):
+        mode = str(candidate.mode or "").lower()
+        st = candidate.strategy_type
+        st_u = st.value if hasattr(st, "value") else str(st or "").upper()
+        if mode == "scalp" or st_u in ("SCALP", "DUAL_SCALP"):
+            return False, "scalp_entries_disabled"
+
     from app.engines.worst_day_guard import worst_day_blocks_live
 
     if snapshots:
@@ -658,6 +666,27 @@ async def _open_from_candidate(
         lots = cap_lots_until_first_green(lots, state, mode=candidate.mode)
         if lots <= 0:
             return False, "size_until_first_green"
+
+    # AFTER force-max: same-strike explosive win → cut next entry (Jul29 77500 CE).
+    post_win_cap_meta: dict[str, Any] = {}
+    if candidate.mode == "explosion":
+        from app.engines.session_mode_feedback import (
+            cap_same_strike_explosion_reentry_after_win,
+        )
+
+        lots, post_win_cap_meta = cap_same_strike_explosion_reentry_after_win(
+            lots,
+            state,
+            symbol=symbol,
+            side=candidate.side,
+            strike=float(candidate.strike or 0),
+        )
+        if lots <= 0:
+            return False, "same_strike_post_win_lot_cap"
+        # Force-max stamp is misleading if post-win cut the size back down.
+        if post_win_cap_meta.get("applied"):
+            top_explosion_max = False
+
     lot_mult = lot_multiplier(symbol)
 
     ok, risk_reason = _risk_engine.check_new_entry(
@@ -817,6 +846,7 @@ async def _open_from_candidate(
         "highConviction": bool(high_conviction),
         "elevatedSize": bool(elevated_size),
         "topExplosionMaxLots": bool(top_explosion_max),
+        "sameStrikePostWinCap": post_win_cap_meta or None,
     }
     from app.engines.moneyness import classify_moneyness
 

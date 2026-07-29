@@ -23,6 +23,7 @@ def _settings(**overrides):
     s.explosion_elite_exploding_only = True
     s.explosion_only_trading_enabled = True
     s.explosion_only_allow_guarded_scalp = False
+    s.scalp_entries_enabled = False
     s.explosion_capture_mode = True
     s.paper_simple_profit_mode = True
     s.aggressive_max_open_scalps = 2
@@ -177,13 +178,14 @@ def test_find_best_entry_skips_scalp_under_explosion_only():
     scalp_fn.assert_not_called()
 
 
-def test_default_config_jul17_scalp_logic():
+def test_default_config_stops_scalp_entries():
     from app.config import Settings
 
     s = Settings()
     assert s.explosion_only_trading_enabled is True
-    # Jul17 restore: guarded scalps allowed again under explosion-only.
-    assert s.explosion_only_allow_guarded_scalp is True
+    # Jul29: stop scalp entries — explosions only.
+    assert s.explosion_only_allow_guarded_scalp is False
+    assert s.scalp_entries_enabled is False
     assert s.explosion_elite_exploding_only is True
     assert s.scalp_best_only_enabled is False
     assert s.scalp_max_lots == 0
@@ -194,6 +196,7 @@ def test_find_best_entry_invokes_scalp_when_guarded_enabled():
     settings = _settings(
         explosion_only_trading_enabled=True,
         explosion_only_allow_guarded_scalp=True,
+        scalp_entries_enabled=True,
         paper_simple_profit_mode=True,
         aggressive_max_open_scalps=2,
     )

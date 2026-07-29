@@ -158,3 +158,95 @@ def cap_lots_until_first_green(lots: int, state: AutoTraderState, *, mode: str =
         return lots
     cap = int(getattr(settings, "size_until_first_green_lot_cap", 6) or 6)
     return min(max(0, lots), cap)
+
+
+def _side_key(side: Any) -> str:
+    return side.value if hasattr(side, "value") else str(side or "").upper()
+
+
+def _latest_same_strike_explosion_close(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+) -> Optional[Any]:
+    """Latest closed explosion on exact symbol+side+strike (paper book first)."""
+    sym = str(symbol or "").upper()
+    side_v = _side_key(side)
+    strike_f = float(strike or 0)
+    latest: Optional[Any] = None
+    latest_ts = None
+
+    def _is_match(t: Any) -> bool:
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            return False
+        if _side_key(getattr(t, "side", "")) != side_v:
+            return False
+        if abs(float(getattr(t, "strike", 0) or 0) - strike_f) > 0.01:
+            return False
+        ctx = getattr(t, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
+        st = str(getattr(t, "strategyType", "") or "")
+        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+        if mode == "explosion" or st_u == "EXPLOSIVE":
+            return True
+        if mode == "" and st_u == "EXPLOSIVE":
+            return True
+        return False
+
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if not _is_match(t):
+            continue
+        ts = getattr(t, "closedAt", None) or getattr(t, "openedAt", None)
+        if latest is None or (ts is not None and (latest_ts is None or ts > latest_ts)):
+            latest = t
+            latest_ts = ts
+    return latest
+
+
+def cap_same_strike_explosion_reentry_after_win(
+    lots: int,
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+) -> tuple[int, dict[str, Any]]:
+    """
+    After a profitable explosive on this exact strike, cap the next entry.
+
+    Jul29 SENSEX 77500 CE: booked +₹5,848 @ 6 lots, then re-entered ELITE 100 at
+    29 lots and lost −₹11,225. Profit already taken → next same-strike size stays small.
+    """
+    meta: dict[str, Any] = {"applied": False}
+    settings = get_settings()
+    if not getattr(settings, "explosion_post_win_same_strike_lot_cap_enabled", True):
+        return lots, meta
+    prior = _latest_same_strike_explosion_close(
+        state, symbol=symbol, side=side, strike=strike,
+    )
+    if prior is None:
+        return lots, meta
+    prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
+    if prior_pnl <= 0:
+        meta.update({
+            "applied": False,
+            "priorTradeId": getattr(prior, "id", None),
+            "priorPnlInr": round(prior_pnl, 2),
+            "reason": "latest_same_strike_not_a_win",
+        })
+        return lots, meta
+    cap = int(getattr(settings, "explosion_post_win_same_strike_lot_cap", 6) or 6)
+    capped = min(max(0, lots), max(1, cap))
+    meta.update({
+        "applied": capped < lots,
+        "priorTradeId": getattr(prior, "id", None),
+        "priorPnlInr": round(prior_pnl, 2),
+        "priorLots": getattr(prior, "lots", None),
+        "uncappedLots": lots,
+        "lotCap": cap,
+        "cappedLots": capped,
+    })
+    return capped, meta
+
