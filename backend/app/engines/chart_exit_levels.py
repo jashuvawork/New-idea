@@ -350,7 +350,7 @@ def _clamp_chart_target_pts(
 
 
 def _stamp_entry_baselines(plan_dict: dict[str, Any]) -> dict[str, Any]:
-    """Freeze entry SL/TP baselines so live tuning does not compound each cycle."""
+    """Freeze entry SL/TP/trail baselines so live tuning does not compound each cycle."""
     stamped = dict(plan_dict)
     if "entryTargetPoints" not in stamped and stamped.get("targetPoints") is not None:
         stamped["entryTargetPoints"] = float(stamped["targetPoints"])
@@ -358,6 +358,12 @@ def _stamp_entry_baselines(plan_dict: dict[str, Any]) -> dict[str, Any]:
         stamped["entryTargetPoints2"] = float(stamped["targetPoints2"])
     if "entryStopPoints" not in stamped and stamped.get("stopPoints") is not None:
         stamped["entryStopPoints"] = float(stamped["stopPoints"])
+    # Jul29 NIFTY 24100 CE: live high-conf retunes compounded trailArm 26→1.35
+    # and scratched a +1.45pt winner while TP sat at 58pt.
+    if "entryTrailArmPoints" not in stamped and stamped.get("trailArmPoints") is not None:
+        stamped["entryTrailArmPoints"] = float(stamped["trailArmPoints"])
+    if "entryTrailKeepRatio" not in stamped and stamped.get("trailKeepRatio") is not None:
+        stamped["entryTrailKeepRatio"] = float(stamped["trailKeepRatio"])
     return stamped
 
 
@@ -615,7 +621,7 @@ def compute_chart_exit_levels(
         if aligned:
             target = max(target, 6.0 + mom5 * 80 + trend * 0.08)
             target2 = max(target2, target * 1.35)
-            trail_arm = max(2.0, trail_arm * 0.85)
+            trail_arm = max(trail_arm, base_trail_arm, 3.0)
             sources.append("spot_chart_tp")
         stop = max(stop, 3.0 + entry_premium * 0.06 * (1.0 + mom5 * 2))
 
@@ -623,8 +629,10 @@ def compute_chart_exit_levels(
     stop = stop * (1.05 - conf_factor * 0.12)
     target = target * (1.0 + conf_factor * 0.35)
     target2 = target2 * (1.0 + conf_factor * 0.25)
-    trail_arm = max(1.5, trail_arm * (1.0 - conf_factor * 0.2))
-    trail_keep = min(0.78, trail_keep + conf_factor * 0.12)
+    # High confidence must HOLD winners — raise trail arm (delay trail), don't
+    # shrink it (Jul29 24100 CE armed at 1.35pt vs 58pt TP).
+    trail_arm = max(base_trail_arm, trail_arm * (1.0 + conf_factor * 0.25))
+    trail_keep = max(0.45, trail_keep - conf_factor * 0.08)
     micro = max(1.5, micro * (1.0 + conf_factor * 0.15))
 
     promote = (
@@ -737,8 +745,15 @@ def compute_live_chart_trail_tuning(
     )
     if base_target2 <= 0:
         base_target2 = base_target * 1.5
-    base_arm = float(plan_dict.get("trailArmPoints", 3.0))
-    base_keep = float(plan_dict.get("trailKeepRatio", 0.60))
+    # Always retune from entry baselines — never from last live arm (compounds down).
+    base_arm = float(
+        plan_dict.get("entryTrailArmPoints")
+        or plan_dict.get("trailArmPoints", 3.0)
+    )
+    base_keep = float(
+        plan_dict.get("entryTrailKeepRatio")
+        or plan_dict.get("trailKeepRatio", 0.60)
+    )
 
     delta = live_confidence - entry_confidence
     conf = live_confidence / 100.0
@@ -752,22 +767,27 @@ def compute_live_chart_trail_tuning(
     tighten = False
     let_run = False
 
-    # Confidence tier tuning
+    # Confidence tier tuning — high conf holds for TP (higher arm), low conf protects.
     if live_confidence >= 78:
         let_run = True
         target *= 1.0 + conf * 0.25
         target2 *= 1.0 + conf * 0.20
-        arm = max(1.5, arm * (1.0 - conf * 0.15))
-        keep = max(0.48, keep - conf * 0.10)
+        # Delay trail until a meaningful fraction of entry target is printed.
+        min_arm_frac = float(
+            getattr(settings, "high_conf_trail_arm_min_target_frac", 0.22) or 0.22
+        )
+        arm = max(base_arm * (1.0 + conf * 0.15), base_target * min_arm_frac, 4.0)
+        keep = max(0.42, keep - conf * 0.10)
         sources.append("high_conf_let_run")
     elif live_confidence >= 62:
         target *= 1.0 + conf * 0.12
         keep = min(0.75, keep + conf * 0.04)
+        arm = max(base_arm, 3.0)
         sources.append("mid_conf_balanced")
     else:
         tighten = True
         stop = max(settings.scalp_stop_min_points, stop * (0.88 - (0.62 - conf) * 0.05))
-        arm = max(1.2, arm * 0.85)
+        arm = max(1.5, base_arm * 0.85)
         keep = min(0.82, keep + 0.12)
         target = max(base_target * 0.9, target * 0.94)
         sources.append("low_conf_tighten")
@@ -777,12 +797,13 @@ def compute_live_chart_trail_tuning(
         tighten = True
         stop *= 0.88
         keep = min(0.85, keep + 0.10)
-        arm = max(1.0, arm * 0.80)
+        arm = max(1.5, arm * 0.85)
         sources.append(f"conf_fade_{delta:.0f}")
     elif delta >= 10:
         let_run = True
         target *= 1.08
-        keep = max(0.50, keep - 0.06)
+        keep = max(0.45, keep - 0.06)
+        arm = max(arm, base_arm)
         sources.append(f"conf_rise_{delta:.0f}")
 
     # Live structure check — opposing MTF consensus forces tighten

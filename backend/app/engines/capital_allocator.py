@@ -714,6 +714,11 @@ def tune_exit_plan_for_position(
         "targetPoints": round(target, 2),
         "microTargetPoints": round(micro, 2),
         "trailArmPoints": round(trail_arm, 2),
+        # Refresh entry trail baseline after size raise so live retunes don't
+        # compound from a pre-size 1.5pt chart arm (Jul29 24100 CE scratch).
+        "entryTrailArmPoints": round(trail_arm, 2),
+        "entryTargetPoints": round(target, 2),
+        "entryStopPoints": round(stop, 2),
         "trailStepPoints": round(trail_step, 2),
         "lots": lots,
         "lotMultiplier": mult,
