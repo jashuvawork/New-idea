@@ -77,16 +77,56 @@ def test_sensex_pre_expiry_routes_to_nifty():
 @patch("app.engines.bad_day_routing.bad_day_session_active", return_value=(True, ["bearish_sideways"]))
 @patch("app.engines.bad_day_routing.expiry_index_fading", return_value=(False, []))
 def test_blocks_sensex_explosion_routes_to_nifty(mock_fade, mock_bad):
+    """Weak BUILDING on pre-expiry still routes to the alternate index."""
     tomorrow = _tomorrow()
     snaps = {
         "NIFTY": _snap("NIFTY", _next_week(), tqs=38.0),
         "SENSEX": _snap("SENSEX", tomorrow, tqs=34.0),
     }
-    cand = _Cand("SENSEX", Side.PUT, 50.0, snap=snaps["SENSEX"])
+    cand = _Cand("SENSEX", Side.PUT, 50.0, mode="explosion", tier="BUILDING", snap=snaps["SENSEX"])
     ok, reason, meta = check_bad_day_candidate(cand, AutoTraderState(), snaps)
     assert not ok
     assert "pre_expiry" in reason
     assert meta.get("preExpiryAlternate") == "NIFTY"
+
+
+@patch("app.engines.bad_day_routing.bad_day_session_active", return_value=(True, ["bearish_sideways"]))
+@patch("app.engines.bad_day_routing.expiry_index_fading", return_value=(False, []))
+def test_allows_aligned_sensex_elite_on_pre_expiry(mock_fade, mock_bad):
+    """Jul29: breadth-aligned ELITE/EXPLODING on near-expiry SENSEX must not be deferred."""
+    tomorrow = _tomorrow()
+    snaps = {
+        "NIFTY": _snap("NIFTY", _next_week(), tqs=38.0),
+        "SENSEX": _snap("SENSEX", tomorrow, tqs=45.0),
+    }
+    snaps["SENSEX"].breadth = Breadth(bias="BULLISH", score=80, aligned=True)
+    from app.engines.explosion_detector import ExplosionEvent
+
+    event = ExplosionEvent(
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=77500.0,
+        premium=270.0,
+        velocity_3s=4.0,
+        velocity_9s=6.0,
+        velocity_15s=8.0,
+        volume_surge=2.5,
+        explosion_score=80.0,
+        tier="ELITE",
+        reason="open-gap",
+        daily_move_pct=192.0,
+        peak_move_pct=192.0,
+    )
+    cand = _Cand("SENSEX", Side.CALL, 80.0, mode="explosion", tier="ELITE", snap=snaps["SENSEX"])
+    cand.explosion_event = event
+    ok, reason, meta = check_bad_day_candidate(cand, AutoTraderState(), snaps)
+    assert ok, reason
+    # Extreme session-move bypass and/or explicit near-expiry allow both count.
+    assert (
+        meta.get("openGapNearExpiryAllow")
+        or meta.get("nearExpirySymbolExplosionAllow")
+        or reason == "ok"
+    )
 
 
 @patch("app.engines.bad_day_routing.bad_day_session_active", return_value=(True, ["bearish_sideways"]))

@@ -266,16 +266,22 @@ async def monitor_trade_chart_before_execution(
         side, snap, explosion_event=explosion_event,
     )
     from app.engines.local_base_chart_bypass import local_base_ichimoku_bypass_for_snap
+    from app.engines.open_gap_capture import elite_open_gap_mtf_bypass
 
     local_ichi_bypass = local_base_ichimoku_bypass_for_snap(
         side, snap, explosion_event=explosion_event,
+    )
+    open_gap_mtf_bypass = elite_open_gap_mtf_bypass(
+        side, snap, explosion_event=explosion_event, mode=mode,
     )
     expiry_chart_bypass = (
         expiry_chart_bypass_for_event(explosion_event, snap)
         if explosion_event is not None
         else False
     )
-    structure_chart_bypass = premium_bypass or vertical_bypass or local_ichi_bypass
+    structure_chart_bypass = (
+        premium_bypass or vertical_bypass or local_ichi_bypass or open_gap_mtf_bypass
+    )
 
     try:
         meta = await fetch_live_trade_charts(

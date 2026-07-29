@@ -97,6 +97,12 @@ def chop_weak_explosion_blocks_entry(
         getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0
     )
 
+    # Open-gap ELITE (Jul29 77500 CE / 24200 CE) — never die as chop_immature pre-10.
+    from app.engines.open_gap_capture import open_gap_chop_bypass
+
+    if open_gap_chop_bypass(candidate, snap):
+        return False, "ok"
+
     # True flat→vertical with volume at early floor — allow on chop.
     if ict_flat and ict_vol and move >= early_min:
         return False, "ok"

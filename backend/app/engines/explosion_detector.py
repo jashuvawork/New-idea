@@ -159,6 +159,75 @@ def _effective_session_baseline(key: str, premium: float, hist: Optional[deque] 
     return open_prem
 
 
+def prior_close_from_option_leg(opt: dict[str, Any] | None) -> float:
+    """Extract previous-session close / day open from a normalized option leg."""
+    if not isinstance(opt, dict):
+        return 0.0
+    ohlc = opt.get("ohlc") or opt.get("OHLC") or {}
+    for key in (
+        "prev_close",
+        "prevClose",
+        "close",
+        "previous_close",
+        "day_close",
+    ):
+        raw = opt.get(key)
+        if raw is None:
+            raw = ohlc.get(key) if isinstance(ohlc, dict) else None
+        try:
+            val = float(raw or 0)
+        except (TypeError, ValueError):
+            val = 0.0
+        if val > 0:
+            return val
+    for key in ("open", "day_open"):
+        raw = opt.get(key)
+        if raw is None:
+            raw = ohlc.get("open") if isinstance(ohlc, dict) else None
+        try:
+            val = float(raw or 0)
+        except (TypeError, ValueError):
+            val = 0.0
+        if val > 0:
+            return val
+    return 0.0
+
+
+def apply_prior_close_baseline(
+    key: str,
+    premium: float,
+    prior_close: float,
+) -> bool:
+    """
+    Seed/lower session baseline from option prev-close on open-gap rips.
+
+    First LTP after a gap (90→270) must not become the baseline — that under-reports
+    session move as ~0–8% and hides ELITE ITM CE/PE.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not bool(getattr(settings, "open_gap_prev_close_baseline_enabled", True)):
+        return False
+    if prior_close <= 0 or premium <= 0:
+        return False
+    min_gap = float(getattr(settings, "open_gap_baseline_min_gap_pct", 15.0) or 15.0)
+    gap_pct = ((premium - prior_close) / prior_close) * 100.0
+    if gap_pct < min_gap:
+        return False
+
+    cur = _session_open.get(key)
+    changed = False
+    if cur is None or prior_close < cur:
+        _session_open[key] = prior_close
+        changed = True
+    low = _session_low.get(key, prior_close)
+    _session_low[key] = min(low, prior_close, premium)
+    peak = _session_peak.get(key, premium)
+    _session_peak[key] = max(peak, premium)
+    return changed
+
+
 def _update_peak_velocity(key: str, v3: float) -> float:
     """Retain peak 3s velocity for scoring after vertical spike fades."""
     from app.config import get_settings
@@ -190,15 +259,24 @@ def _session_open_move_pct(
     *,
     v3: float = 0.0,
     vol_surge: float = 1.0,
+    prior_close: float = 0.0,
 ) -> float:
     """Premium % change since session baseline — catches 60→160 open rips."""
     _roll_session()
     key = _open_key(symbol, strike, side)
+    seeded = apply_prior_close_baseline(key, premium, prior_close)
     if key not in _session_open and premium > 0:
         _session_open[key] = premium
         _session_peak[key] = premium
         _session_low[key] = premium
+        # First sample with no prior-close seed → 0% until next tick.
         return 0.0
+    if seeded and prior_close > 0:
+        # Immediate open-gap read on first poll that carries prev-close.
+        baseline = prior_close
+        peak = max(_session_peak.get(key, premium), premium)
+        _session_peak[key] = peak
+        return ((premium - baseline) / baseline) * 100
     _retrofit_baseline_from_spike(key, premium, hist, v3, vol_surge)
     baseline = _effective_session_baseline(key, premium, hist)
     if baseline <= 0:
@@ -218,15 +296,22 @@ def _session_peak_move_pct(
     *,
     v3: float = 0.0,
     vol_surge: float = 1.0,
+    prior_close: float = 0.0,
 ) -> float:
     """Peak premium vs session baseline — keeps rip visible after pullback."""
     _roll_session()
     key = _open_key(symbol, strike, side)
+    seeded = apply_prior_close_baseline(key, premium, prior_close)
     if key not in _session_open and premium > 0:
         _session_open[key] = premium
         _session_peak[key] = premium
         _session_low[key] = premium
         return 0.0
+    if seeded and prior_close > 0:
+        baseline = prior_close
+        peak = max(_session_peak.get(key, premium), premium)
+        _session_peak[key] = peak
+        return ((peak - baseline) / baseline) * 100
     _retrofit_baseline_from_spike(key, premium, hist, v3, vol_surge)
     baseline = _effective_session_baseline(key, premium, hist)
     if baseline <= 0:
@@ -633,6 +718,7 @@ def scan_chain_explosions(
             volume = opt.get("volume", 0) or 0
             if not premium or premium <= 0:
                 continue
+            prior_close = prior_close_from_option_leg(opt)
 
             _record(symbol, strike, side, premium, volume)
             key_h = _strike_key(strike, side)
@@ -649,10 +735,12 @@ def scan_chain_explosions(
             open_move = _session_open_move_pct(
                 symbol, strike, side, premium, hist,
                 v3=v3_probe, vol_surge=vol_surge_probe,
+                prior_close=prior_close,
             )
             peak_move = _session_peak_move_pct(
                 symbol, strike, side, premium, hist,
                 v3=v3_probe, vol_surge=vol_surge_probe,
+                prior_close=prior_close,
             )
             session_move = _effective_session_move(open_move, peak_move)
             if not _premium_ok_for_scan(premium, max(open_move, session_move), settings):
