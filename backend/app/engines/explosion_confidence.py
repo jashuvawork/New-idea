@@ -229,6 +229,63 @@ def trade_is_high_conviction(trade: Any) -> bool:
     return bool(ctx.get("highConviction"))
 
 
+def _top_explosion_force_max_tiers(settings: Any) -> set[str]:
+    raw = str(
+        getattr(settings, "top_explosion_force_max_tiers_csv", "ELITE,EXPLODING")
+        or "ELITE,EXPLODING"
+    )
+    return {t.strip().upper() for t in raw.split(",") if t.strip()}
+
+
+def is_top_explosion_max_lots_entry(
+    *,
+    side: Any,
+    snap: SymbolSnapshot,
+    tier: str,
+    chart_confidence: float,
+) -> bool:
+    """
+    ELITE / EXPLODING explosion → capital max lots.
+
+    Jul29 SENSEX 77500 CE: first print was ELITE tier (score 47.8, move ~25%) so it
+    missed high-conviction (score≥90, 28–55% window) and elevated (score≥65) gates,
+    then first-green capped it at 6 lots on a +54pt runner. The re-entry at ELITE 100
+    finally got max lots and stopped out. Top-tier explosions must size max on the
+    first take — no score/move window required beyond tier + light chart gate.
+    """
+    settings = get_settings()
+    if not getattr(settings, "top_explosion_force_max_lots_enabled", True):
+        return False
+    if str(tier or "").upper() not in _top_explosion_force_max_tiers(settings):
+        return False
+    min_conf = float(
+        getattr(settings, "top_explosion_force_max_min_chart_confidence", 55.0) or 55.0
+    )
+    if float(chart_confidence or 0) < min_conf:
+        return False
+    if getattr(settings, "top_explosion_force_max_require_aligned", True):
+        side_v = _side_val(side)
+        chart_ok = bool(
+            snap is not None
+            and snap.spotChart
+            and side_aligned_with_chart(side_v, snap.spotChart)
+        )
+        breadth = str(snap.breadth.bias if snap and snap.breadth else "NEUTRAL").upper()
+        breadth_ok = (
+            (side_v == "CALL" and breadth == "BULLISH")
+            or (side_v == "PUT" and breadth == "BEARISH")
+        )
+        if not (chart_ok or breadth_ok):
+            return False
+    return True
+
+
+def trade_is_top_explosion_max_lots(trade: Any) -> bool:
+    """True when this open trade was forced to capital-max lots as top explosion."""
+    ctx = getattr(trade, "entryContext", None) or {}
+    return bool(ctx.get("topExplosionMaxLots") or ctx.get("highConviction"))
+
+
 def is_elevated_size_entry(
     *,
     side: Any,

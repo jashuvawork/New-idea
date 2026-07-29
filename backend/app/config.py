@@ -358,6 +358,17 @@ class Settings(BaseSettings):
     # Confirmed flat→vertical base rips (qualified via base-relative move) are the genuine
     # runners — scale them harder (~2x) to actually double the capture vs a base-size entry.
     elevated_size_base_relative_lot_scale: float = 2.0
+    # Top explosion (ELITE/EXPLODING) → always capital max lots on first take.
+    # Jul29 77500 CE ELITE score 47.8 missed HC/elevated windows → 6-lot first-green
+    # scratch of a +54pt rip; re-entry ELITE 100 finally max-sized and lost.
+    top_explosion_force_max_lots_enabled: bool = True
+    top_explosion_force_max_tiers_csv: str = "ELITE,EXPLODING"
+    top_explosion_force_max_min_chart_confidence: float = 55.0
+    top_explosion_force_max_require_aligned: bool = True
+    top_explosion_force_max_bypasses_first_green: bool = True
+    top_explosion_force_max_bypasses_fake_trap_lot_cap: bool = True
+    # Only block force-max on true CHOP/WORST days — not mere RANGE_BOUND (Jul29 #8).
+    top_explosion_force_max_block_day_types_csv: str = "CHOP,WORST"
     # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
     session_mode_feedback_enabled: bool = True
     session_mode_feedback_min_trades: int = 2
