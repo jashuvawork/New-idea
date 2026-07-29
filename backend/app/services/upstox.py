@@ -165,11 +165,36 @@ def normalize_option_leg(leg: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(leg, dict):
         return {}
     if "market_data" not in leg and ("ltp" in leg or "last_price" in leg):
-        return leg
+        # Already flat — still surface prior close/open when present.
+        out = dict(leg)
+        ohlc = leg.get("ohlc") or leg.get("OHLC") or {}
+        close = (
+            leg.get("prev_close")
+            or leg.get("prevClose")
+            or leg.get("close")
+            or ohlc.get("close")
+        )
+        open_px = leg.get("open") or leg.get("day_open") or ohlc.get("open")
+        if close is not None:
+            out["prev_close"] = close
+            out["close"] = close
+        if open_px is not None:
+            out["open"] = open_px
+        return out
 
     md = leg.get("market_data") or {}
     greeks_src = leg.get("option_greeks") or leg.get("greeks") or {}
+    ohlc = md.get("ohlc") or leg.get("ohlc") or leg.get("OHLC") or {}
     ltp = md.get("ltp") or leg.get("ltp") or leg.get("last_price")
+    # Upstox market_data.close is typically previous session close for the leg.
+    close = (
+        md.get("close")
+        or md.get("prev_close")
+        or leg.get("prev_close")
+        or leg.get("close")
+        or ohlc.get("close")
+    )
+    open_px = md.get("open") or leg.get("open") or ohlc.get("open")
     return {
         "instrument_key": leg.get("instrument_key"),
         "ltp": ltp,
@@ -178,6 +203,9 @@ def normalize_option_leg(leg: dict[str, Any]) -> dict[str, Any]:
         "oi": md.get("oi") if md.get("oi") is not None else leg.get("oi", 0),
         "bid_price": md.get("bid_price") or leg.get("bid_price"),
         "ask_price": md.get("ask_price") or leg.get("ask_price"),
+        "close": close,
+        "prev_close": close,
+        "open": open_px,
         "implied_volatility": greeks_src.get("iv") or leg.get("implied_volatility"),
         "greeks": {
             "delta": greeks_src.get("delta"),

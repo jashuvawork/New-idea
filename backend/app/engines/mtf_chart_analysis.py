@@ -280,6 +280,8 @@ def validate_mtf_scalp(
             "passed": True,
             "premiumLedBypass": premium_led_bypass,
             "verticalRipBypass": vertical_rip_bypass,
+            # open-gap ELITE also arrives via premium_led_bypass from execution monitor
+            "openGapEliteBypass": bool(premium_led_bypass or vertical_rip_bypass),
         }
         if premium_mtf:
             meta["premium"] = mtf_summary(premium_mtf, side)

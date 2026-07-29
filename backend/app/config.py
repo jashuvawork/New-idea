@@ -828,6 +828,19 @@ class Settings(BaseSettings):
     # Session-open baseline — use intraday low when first tick arrived mid-rip
     session_open_use_intraday_low: bool = True
     session_open_low_backfill_pct: float = 5.0
+    # Open-gap ITM CE/PE — seed baseline from option prev-close so gap rips
+    # (Jul29 SENSEX 77500 CE 90→270, NIFTY 24200 CE 75→150) register as ELITE,
+    # not as a flat ~+8% from the first mid-spike LTP sample.
+    open_gap_prev_close_baseline_enabled: bool = True
+    open_gap_baseline_min_gap_pct: float = 15.0
+    # Breadth-aligned ELITE/EXPLODING open-gap: bypass stale 5m MTF oppose.
+    open_gap_elite_mtf_bypass_enabled: bool = True
+    open_gap_elite_mtf_min_move_pct: float = 40.0
+    # Pre-10 chop: never block ELITE; allow EXPLODING open-gaps ≥ this move.
+    open_gap_chop_elite_bypass_enabled: bool = True
+    # Near-expiry (today/tomorrow): allow breadth-aligned ELITE/EXPLODING on the
+    # expiry symbol itself — don't force alternate-index routing.
+    open_gap_near_expiry_symbol_allow_enabled: bool = True
     # Velocity-at-peak scoring — retain spike velocity after fade
     velocity_peak_score_boost_enabled: bool = True
     velocity_peak_min_3s: float = 2.5
