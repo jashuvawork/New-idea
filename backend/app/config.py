@@ -994,6 +994,11 @@ class Settings(BaseSettings):
     scalp_trail_step_points: float = 2.0
     scalp_trail_tight_arm: float = 8.0
     scalp_trail_tight_points: float = 3.0
+    # High-conf live trail: arm at least this fraction of entry TP (hold winners).
+    high_conf_trail_arm_min_target_frac: float = 0.22
+    # Defer scalp_trail_sl while best is still a scratch vs entry TP.
+    scalp_trail_defer_until_target_frac: float = 0.20
+    scalp_trail_defer_min_chart_confidence: float = 55.0
     scalp_micro_giveback_points: float = 3.0
     scalp_no_progress_seconds: int = 150
     scalp_no_progress_aligned_seconds: int = 420

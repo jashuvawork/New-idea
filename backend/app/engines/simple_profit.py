@@ -363,10 +363,38 @@ def evaluate_exit(
     if half_tp_giveback_exit(trade, best, pnl_pts, target_points=chart_target):
         return "simple_half_tp_profit_lock", pnl_inr
 
-    # Armed trail floor is a hard stop — confidence-hold must not override it.
-    # Jul20 NIFTY 23950 CE: best +16pt / floor 14.2, defer rode it into a loss.
+    # Armed trail floor — hard stop once a real runner is underway.
+    # Jul29 NIFTY 24100 CE: arm crushed to 1.35pt, best +1.45, scratched while TP=58.
+    # Defer trail exits until best clears a fraction of entry TP on high-conf books.
     if trail_floor is not None and pnl_pts <= trail_floor and best >= arm:
-        return "scalp_trail_sl", pnl_inr
+        defer_frac = float(
+            getattr(settings, "scalp_trail_defer_until_target_frac", 0.20) or 0.0
+        )
+        defer_conf = float(
+            getattr(settings, "scalp_trail_defer_min_chart_confidence", 55.0) or 55.0
+        )
+        ctx = trade.entryContext or {}
+        exit_plan_ctx = ctx.get("exitPlan") or {}
+        live_conf = float(
+            ctx.get("chartConfidence")
+            or exit_plan_ctx.get("chartConfidenceLive")
+            or exit_plan_ctx.get("chartConfidence")
+            or 0
+        )
+        entry_tp = float(
+            exit_plan_ctx.get("entryTargetPoints")
+            or exit_plan_ctx.get("targetPoints")
+            or chart_target
+            or 0
+        )
+        scratch_trail = (
+            defer_frac > 0
+            and entry_tp > 0
+            and live_conf >= defer_conf
+            and best < entry_tp * defer_frac
+        )
+        if not scratch_trail:
+            return "scalp_trail_sl", pnl_inr
 
     # Hard SL — confidence-hold may briefly cushion a green runner.
     # Never-green: Jul20 deep losers still hard-stop; Jul29 high-conf ITM dips get
@@ -431,7 +459,25 @@ def evaluate_exit(
             min_hold_before_trail = max(min_hold_before_trail, conf_tuning.min_hold_before_micro_seconds)
         if psy_tuning:
             min_hold_before_trail = max(min_hold_before_trail, psy_tuning.min_hold_before_micro_seconds)
-        if hold_seconds >= min_hold_before_trail:
+        defer_frac = float(
+            getattr(settings, "scalp_trail_defer_until_target_frac", 0.20) or 0.0
+        )
+        defer_conf = float(
+            getattr(settings, "scalp_trail_defer_min_chart_confidence", 55.0) or 55.0
+        )
+        ctx_trail = trade.entryContext or {}
+        live_conf_trail = float(
+            ctx_trail.get("chartConfidence")
+            or (ctx_trail.get("exitPlan") or {}).get("chartConfidence")
+            or 0
+        )
+        scratch_soft_trail = (
+            defer_frac > 0
+            and chart_target > 0
+            and live_conf_trail >= defer_conf
+            and best < chart_target * defer_frac
+        )
+        if hold_seconds >= min_hold_before_trail and not scratch_soft_trail:
             if not should_defer_profit_lock(
                 trade, best, target_points=chart_target, pnl_pts=pnl_pts,
             ):
