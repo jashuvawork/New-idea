@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
@@ -809,7 +809,7 @@ def evaluate_explosion_exit(
             return "explosion_runner_giveback", pnl_inr
 
     max_hold = 420 if best >= settings.runner_min_best_points else (360 if event_tier == "ELITE" or best >= 15 else 300)
-    from app.engines.confidence_hold import confidence_hold_max_seconds
+    from app.engines.confidence_hold import confidence_hold_max_seconds, hold_until_target_active
 
     conf_max = confidence_hold_max_seconds(trade)
     if conf_max > 0:
@@ -822,10 +822,26 @@ def evaluate_explosion_exit(
         )
     if ctx.get("afternoonCapture"):
         max_hold = max(max_hold, settings.afternoon_capture_exit_max_hold_seconds)
-    if aligned := ctx.get("breadth"):
-        side_bias = "BULLISH" if trade.side.value == "CALL" else "BEARISH"
-        if str(aligned).upper() == side_bias:
-            max_hold = int(max_hold * 1.4)
+    # ELITE/EXPLODING runners need room for the vertical (Jul29 77600 CE timed out
+    # at +0.3pt / best +5.5 then LTP ran 253→290).
+    tier_u = str(event_tier or ctx.get("explosionTier") or "").upper()
+    elite_hold = int(getattr(settings, "explosion_elite_max_hold_seconds", 1800) or 1800)
+    if tier_u in ("ELITE", "EXPLODING") and elite_hold > 0:
+        max_hold = max(max_hold, elite_hold)
+    if ctx.get("topExplosionMaxLots") or high_conviction_trade:
+        max_hold = max(
+            max_hold,
+            int(getattr(settings, "ict_max_profit_max_hold_seconds", 1200) or 1200),
+        )
+    breadth_raw = ctx.get("breadth")
+    breadth_bias = (
+        str((breadth_raw or {}).get("bias") or "").upper()
+        if isinstance(breadth_raw, dict)
+        else str(breadth_raw or "").upper()
+    )
+    side_bias = "BULLISH" if trade.side.value == "CALL" else "BEARISH"
+    if breadth_bias == side_bias:
+        max_hold = int(max_hold * 1.4)
     if hold >= max_hold:
         # Prefer trail/giveback over blind time exit when runner peaked then faded
         if best >= exit_params.trail_arm_points:
@@ -840,6 +856,52 @@ def evaluate_explosion_exit(
                 return "explosion_trail_sl", pnl_inr
             if pnl_pts < best * trail_keep and best >= 8:
                 return "explosion_trail_lock", pnl_inr
+        # Jul29 77600 CE: explosion_time_profit @ +0.3pt while still far from TP 37 —
+        # LTP later printed 290. Skip green time-exit on top explosions working to TP.
+        if pnl_pts > 0 and _skip_explosion_time_profit(
+            trade,
+            best=best,
+            target=target,
+            event_tier=tier_u,
+            settings=settings,
+        ):
+            return None, pnl_inr
+        if pnl_pts > 0 and hold_until_target_active(trade, best, target_points=target):
+            return None, pnl_inr
         return ("explosion_time_profit" if pnl_pts > 0 else "explosion_time_stop"), pnl_inr
 
     return None, pnl_inr
+
+
+def _skip_explosion_time_profit(
+    trade: Any,
+    *,
+    best: float,
+    target: float,
+    event_tier: str,
+    settings: Any,
+) -> bool:
+    """True → do not fire explosion_time_profit; let trail/SL/TP manage the exit."""
+    if not getattr(settings, "explosion_skip_time_profit_enabled", True):
+        return False
+    ctx = getattr(trade, "entryContext", None) or {}
+    tiers_raw = str(
+        getattr(settings, "explosion_skip_time_profit_tiers_csv", "ELITE,EXPLODING")
+        or "ELITE,EXPLODING"
+    )
+    tiers = {t.strip().upper() for t in tiers_raw.split(",") if t.strip()}
+    tier = str(event_tier or ctx.get("explosionTier") or "").upper()
+    top_size = bool(ctx.get("topExplosionMaxLots") or ctx.get("highConviction"))
+    if tier not in tiers and not top_size:
+        return False
+    frac = float(
+        getattr(settings, "explosion_skip_time_profit_until_target_frac", 0.85) or 0.85
+    )
+    entry_tp = float(
+        (ctx.get("exitPlan") or {}).get("entryTargetPoints")
+        or (ctx.get("exitPlan") or {}).get("targetPoints")
+        or target
+        or 0
+    )
+    floor = max(float(getattr(settings, "runner_min_best_points", 5.0) or 5.0), entry_tp * frac)
+    return best < floor

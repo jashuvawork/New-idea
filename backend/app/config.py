@@ -413,6 +413,12 @@ class Settings(BaseSettings):
     explosion_no_progress_seconds: int = 150
     explosion_no_progress_aligned_seconds: int = 420
     explosion_no_progress_skip_when_aligned: bool = True
+    # Jul29 77600 CE: explosion_time_profit @ +0.3pt / best +5.5 vs TP 37, then LTP→290.
+    # Skip green time-exit on ELITE/EXPLODING while still below target; let trail/SL/TP work.
+    explosion_skip_time_profit_enabled: bool = True
+    explosion_skip_time_profit_tiers_csv: str = "ELITE,EXPLODING"
+    explosion_skip_time_profit_until_target_frac: float = 0.85
+    explosion_elite_max_hold_seconds: int = 1800
     explosion_reentry_cooldown_seconds: int = 180
     explosion_emergency_cooldown_seconds: int = 300
     explosion_breadth_alignment_enabled: bool = True
