@@ -307,6 +307,7 @@ def _explosion_candidates(
             continue
         from app.engines.explosion_entry_guards import (
             detect_fake_explosion_trap,
+            explosion_entry_window_blocked,
             extended_session_chase_blocked,
             immature_explosion_blocked,
             live_explosion_confirmation_blocked,
@@ -314,6 +315,9 @@ def _explosion_candidates(
 
         immature_blocked, _immature_reason = immature_explosion_blocked(event, ict=ict)
         if immature_blocked:
+            continue
+        window_blocked, _window_reason = explosion_entry_window_blocked(event, ict=ict)
+        if window_blocked:
             continue
         from app.engines.morning_premium_capture import is_premium_capture_event
 

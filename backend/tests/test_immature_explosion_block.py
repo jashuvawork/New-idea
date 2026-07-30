@@ -16,7 +16,11 @@ IST = ZoneInfo("Asia/Kolkata")
 def _settings(**overrides):
     s = MagicMock()
     s.explosion_immature_block_enabled = True
-    s.explosion_immature_min_session_move_pct = 22.0
+    s.explosion_immature_min_session_move_pct = 28.0
+    s.explosion_local_base_entry_min_move_pct = 28.0
+    s.explosion_chase_use_local_base = True
+    s.explosion_local_base_trust_min_move_pct = 8.0
+    s.explosion_elite_never_block_enabled = False
     s.explosion_chop_min_session_move_pct = 28.0
     s.ict_early_vertical_min_session_move_pct = 28.0
     s.ict_displacement_min_velocity_3s = 2.2

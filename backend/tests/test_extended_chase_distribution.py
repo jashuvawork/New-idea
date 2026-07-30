@@ -24,6 +24,9 @@ def _settings(**overrides):
     s.explosion_hard_lot_cap = 10
     s.explosion_early_window_min_move_pct = 28.0
     s.explosion_early_window_max_move_pct = 55.0
+    s.explosion_elite_never_block_enabled = False
+    s.explosion_chase_use_local_base = True
+    s.explosion_local_base_trust_min_move_pct = 8.0
     s.ict_late_chase_block_enabled = True
     s.ict_late_chase_min_peak_pct = 75.0
     s.ict_late_chase_max_live_velocity_3s = 1.0
@@ -59,23 +62,26 @@ def _event(*, daily: float, peak: float | None = None, v3: float = 31.0) -> Expl
     )
 
 
+@patch("app.engines.elite_never_block.elite_never_block_active", return_value=False)
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_blocks_24250_style_91pct_hot_chase(mock_settings):
+def test_blocks_24250_style_91pct_hot_chase(mock_settings, _elite):
     mock_settings.return_value = _settings()
     blocked, reason = extended_session_chase_blocked(_event(daily=91.27, v3=31.42))
     assert blocked is True
     assert "extended_chase" in reason
 
 
+@patch("app.engines.elite_never_block.elite_never_block_active", return_value=False)
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_allows_early_window_45pct(mock_settings):
+def test_allows_early_window_45pct(mock_settings, _elite):
     mock_settings.return_value = _settings()
     blocked, _ = extended_session_chase_blocked(_event(daily=45.0, v3=3.5))
     assert blocked is False
 
 
+@patch("app.engines.elite_never_block.elite_never_block_active", return_value=False)
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_soft_zone_lot_cap(mock_settings):
+def test_soft_zone_lot_cap(mock_settings, _elite):
     mock_settings.return_value = _settings()
     capped = cap_extended_chase_lots(17, _event(daily=55.0))
     assert capped == 6
@@ -97,9 +103,10 @@ def test_high_mover_bypass_ok_in_early_soft_window(mock_settings):
     assert is_high_mover_elite_bypass(event=_event(daily=45.0, v3=3.0)) is True
 
 
+@patch("app.engines.elite_never_block.elite_never_block_active", return_value=False)
 @patch("app.engines.ict_breakout_monitor.get_settings")
-def test_late_fade_at_75_with_cooling_velocity(mock_settings):
-    mock_settings.return_value = _settings()
+def test_late_fade_at_75_with_cooling_velocity(mock_settings, _elite):
+    mock_settings.return_value = _settings(ict_late_chase_block_enabled=True)
     blocked, reason = late_fade_chase_blocked(_event(daily=80.0, peak=85.0, v3=0.5))
     assert blocked is True
     assert "late_fade" in reason

@@ -221,10 +221,10 @@ class Settings(BaseSettings):
     explosion_peak_chase_max_otm_steps: int = 3
     explosion_peak_chase_min_session_move_pct: float = 40.0
     # Extended-session chase hard block — PF killer (Jul17 24250 CE entered +91%).
-    # No new EXPLOSIVE entries once the session/peak move is already mostly done.
+    # Hard ceiling aligned to early window max (28–55%) — book data: 70–100% WR=0.
     explosion_extended_chase_block_enabled: bool = True
-    explosion_extended_chase_min_move_pct: float = 70.0
-    # Soft zone: keep small size only (before hard block).
+    explosion_extended_chase_min_move_pct: float = 55.0
+    # Soft zone: shrink size approaching the hard ceiling.
     explosion_extended_soft_min_move_pct: float = 50.0
     # Base-relative chase bypass — a fresh flat→vertical break off a consolidation base
     # (SENSEX 76300 PE: 30-100 range then 100-144 break) reads as high day-move but the
@@ -233,19 +233,16 @@ class Settings(BaseSettings):
     ict_base_relative_chase_max_move_pct: float = 55.0
     ict_base_relative_chase_abs_move_cap_pct: float = 160.0
     # Jul23 SENSEX 76400 PE: day-move +471% after an earlier run-up/dump, but the NEW leg
-    # launched from the 14:35 local V-bottom (~42). Chase/entry must use that local base
-    # (tradeable 15–40% — earlier than the old 28–70 catch zone); day-session % alone
-    # always looks like a chase. ~50% from base was catching, not profitable.
+    # launched from the 14:35 local V-bottom (~42). Chase/entry must use that local base.
+    # Tradeable local window aligned to early band 28–55% (Jul30 book: <22% and 70–100% lose).
     explosion_chase_use_local_base: bool = True
-    explosion_local_base_chase_max_move_pct: float = 40.0
-    explosion_local_base_entry_min_move_pct: float = 15.0
+    explosion_local_base_chase_max_move_pct: float = 55.0
+    explosion_local_base_entry_min_move_pct: float = 28.0
     # Adaptive local-base entry window by tier/volume: ELITE + strong volume widens the
-    # ceiling (catch more of the best 100→250 rips); EXPLODING lifts the floor to clear
-    # the base noise band (fewer fakeouts). Others keep the 15–40 default. Tune from the
-    # localBaseBaseRelPct instrumentation logged on each entry.
+    # ceiling slightly inside the hard 55% cap; EXPLODING keeps the 28% floor.
     local_base_adaptive_window_enabled: bool = True
-    local_base_elite_chase_max_move_pct: float = 50.0
-    local_base_exploding_entry_min_move_pct: float = 20.0
+    local_base_elite_chase_max_move_pct: float = 55.0
+    local_base_exploding_entry_min_move_pct: float = 28.0
     local_base_wide_window_min_vol_surge: float = 3.0
     # Ignore micro baseRel (<8%) for immature/chase — Jul24 PUTs showed ~1–2%
     # "local base" noise while day-move was already mature (~28%).
@@ -254,13 +251,14 @@ class Settings(BaseSettings):
     ict_local_base_min_dump_pct: float = 25.0
     explosion_extended_soft_lot_cap: int = 6
     explosion_hard_lot_cap: int = 10
-    # Early capture window preferred in ranking (base break → first expansion).
+    # Early capture window — HARD entry gate for ELITE/EXPLODING (not just rank bonus).
+    # Book (lots≤20): 28–55% WR≈56% / +₹1k avg; <22% and 70–100% lose.
     explosion_early_window_min_move_pct: float = 28.0
     explosion_early_window_max_move_pct: float = 55.0
-    # Immature explosion block — Jul20 losses at +0.8%/+1.4% "displacement" noise.
-    # Require a real premium rip before EXPLOSIVE entries (unless true flat→vertical).
+    explosion_entry_window_hard_enabled: bool = True
+    # Immature floor matches early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
-    explosion_immature_min_session_move_pct: float = 22.0
+    explosion_immature_min_session_move_pct: float = 28.0
     # Live confirmation — sticky ELITE / displacement spikes without live heat+structure
     # (Jul23 NIFTY 23900 PE v3=0.26 watch, SENSEX 76200 PE midday displacement-only).
     explosion_live_confirm_enabled: bool = True
@@ -393,8 +391,8 @@ class Settings(BaseSettings):
     # Never force ICT max lots on chop/RANGE (good-day override was Jul49-lot hole).
     ict_force_max_lots_block_on_chop: bool = True
     # High-mover / all-in bypasses must not reopen late chases.
-    high_mover_bypass_max_move_pct: float = 70.0
-    extreme_all_in_bypass_max_move_pct: float = 70.0
+    high_mover_bypass_max_move_pct: float = 55.0
+    extreme_all_in_bypass_max_move_pct: float = 55.0
     explosion_macd_alignment_required: bool = True
     explosion_deep_otm_min_premium_inr: float = 3.0
     explosion_volume_awaken_min: int = 25000
@@ -781,7 +779,7 @@ class Settings(BaseSettings):
     loss_streak_elite_bypass_min_chart_confidence: float = 56.9
     loss_streak_elite_bypass_tiers_csv: str = "ELITE,EXPLODING"
     loss_streak_elite_bypass_min_move_pct: float = 28.0
-    loss_streak_elite_bypass_max_move_pct: float = 70.0
+    loss_streak_elite_bypass_max_move_pct: float = 55.0
     chop_lots_high: int = 40
     chop_lots_mid: int = 20
     chop_lots_min_rank: float = 48.0
@@ -860,7 +858,7 @@ class Settings(BaseSettings):
     all_day_explosion_extreme_move_min_pct: float = 80.0
     # ELITE +100% / 150%+ rips — ALL-IN bypass (AI report → trade).
     # NOTE: these move floors sit ABOVE the extended-chase ceiling
-    # (extreme_all_in_bypass_max_move_pct = 70%), so the ALL-IN gate-skip in
+    # (extreme_all_in_bypass_max_move_pct = 55%), so the ALL-IN gate-skip in
     # is_extreme_explosion_all_in_bypass is intentionally inert — a +100% move is a
     # late chase, not an entry. Genuine early rips are captured by high-conviction
     # sizing + the expiry elite-top bypass. elite_move_min is still used by

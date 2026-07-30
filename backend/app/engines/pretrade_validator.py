@@ -751,6 +751,7 @@ def validate_candidate(
             check_explosion_macd_alignment,
             check_peak_chase_entry,
             detect_fake_explosion_trap,
+            explosion_entry_window_blocked,
         )
         from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
@@ -766,6 +767,11 @@ def validate_candidate(
             if explosion_event is not None
             else None
         )
+        window_blocked, window_reason = explosion_entry_window_blocked(
+            explosion_event, ict=trap_ict,
+        )
+        if window_blocked:
+            return False, window_reason, meta
         trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
             candidate, snap, state=state, ict=trap_ict,
         )
