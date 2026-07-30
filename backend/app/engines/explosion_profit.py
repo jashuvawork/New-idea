@@ -544,7 +544,12 @@ def _adaptive_stop_min_hold(trade: PaperTrade, settings) -> int:
 
 
 def _effective_stop_points(trade: PaperTrade, stop_points: float) -> float:
-    """Chart-tuned SL from exit plan, widened for confidence-runner holds."""
+    """Chart-tuned SL from exit plan.
+
+    Confidence may widen thin legacy stops, but must NOT stack multipliers on top
+    of an already-calculated local-support / natural SL (Jul30 77700: 40×1.4→56).
+    Entry stop is always the hard ceiling.
+    """
     from app.engines.confidence_hold import (
         chart_confidence_for_trade,
         confidence_hold_stop_multiplier,
@@ -552,8 +557,20 @@ def _effective_stop_points(trade: PaperTrade, stop_points: float) -> float:
 
     settings = get_settings()
     ctx = trade.entryContext or {}
-    plan_stop = float((ctx.get("exitPlan") or {}).get("stopPoints") or 0)
+    plan = ctx.get("exitPlan") or {}
+    plan_stop = float(plan.get("stopPoints") or 0)
+    entry_stop = float(plan.get("entryStopPoints") or 0)
+    natural = float(plan.get("naturalStopPoints") or plan.get("localSupportStopPoints") or 0)
     base = plan_stop if plan_stop > 0 else stop_points
+
+    # Already at calculated support/natural — do not widen further with conf mult.
+    calculated = natural > 0 or bool(plan.get("localSupportStopPoints"))
+    if calculated:
+        capped = base
+        if entry_stop > 0:
+            capped = min(capped, entry_stop)
+        return round(max(0.0, capped), 2)
+
     mult = confidence_hold_stop_multiplier(trade)
     conf = chart_confidence_for_trade(trade)
     elevated = _cfg_float(settings, "chart_confidence_elevated_threshold", 56.9)
@@ -561,7 +578,10 @@ def _effective_stop_points(trade: PaperTrade, stop_points: float) -> float:
         mult = max(mult, 1.4)
     elif conf >= _cfg_float(settings, "all_day_min_chart_confidence", 48.2):
         mult = max(mult, 1.2)
-    return round(base * mult, 2)
+    widened = base * mult
+    if entry_stop > 0:
+        widened = min(widened, entry_stop)
+    return round(widened, 2)
 
 
 def _defer_adaptive_stop(
