@@ -883,6 +883,12 @@ class Settings(BaseSettings):
     # Session-open baseline — use intraday low when first tick arrived mid-rip
     session_open_use_intraday_low: bool = True
     session_open_low_backfill_pct: float = 5.0
+    # Ignore illiquid micro-ticks as open/low baseline (Jul30 fake +8873% from ~₹0.28).
+    # Real V-bottoms print ≥ this; junk prints do not.
+    session_move_min_baseline_premium: float = 5.0
+    # Moves above this without a real local/off-low base are treated as untrustworthy
+    # mega-rip artifacts (radar noise), not elite moments.
+    session_move_max_credible_pct: float = 500.0
     # Open-gap ITM CE/PE — seed baseline from option prev-close so gap rips
     # (Jul29 SENSEX 77500 CE 90→270, NIFTY 24200 CE 75→150) register as ELITE,
     # not as a flat ~+8% from the first mid-spike LTP sample.

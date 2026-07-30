@@ -190,6 +190,7 @@ def analyze_ict_breakout(
     fvg, gap_pct = _detect_premium_fvg(history, settings)
     flat, flat_dev, flat_base = _detect_flat_base(history, settings)
     swing_found, swing_low, swing_rel = _detect_local_swing_base(history, premium, settings)
+    early_min = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
     # Prefer local swing low after a dump (V-bottom) over flat-base average; otherwise
     # use consolidation base. Day-open % is intentionally not used here.
     local_swing_base = False
@@ -200,8 +201,34 @@ def analyze_ict_breakout(
         base_level = swing_low
         base_rel_move = swing_rel
     elif flat and flat_base > 0 and premium > 0:
-        base_level = flat_base
-        base_rel_move = (premium - flat_base) / flat_base * 100.0
+        cand_rel = (premium - flat_base) / flat_base * 100.0
+        # Flat-at-the-highs after a rip is NOT a launch pad (Jul30 77700: baseRel=0
+        # while session printed +1626% / fake mega). Require real lift off the base.
+        if cand_rel >= early_min * 0.5:
+            base_level = flat_base
+            base_rel_move = cand_rel
+
+    # Seed from detector session low when poll history missed the dump (restart /
+    # thin hist) — real V-bottoms still need the 28–55% off-low window.
+    if base_rel_move <= 0 and premium > 0:
+        try:
+            from app.engines.explosion_detector import (
+                get_session_low_premium,
+                session_move_min_baseline,
+            )
+
+            sess_low = get_session_low_premium(symbol, strike, side)
+            floor = session_move_min_baseline(settings)
+            if sess_low >= floor and premium > sess_low:
+                off_low = (premium - sess_low) / sess_low * 100.0
+                if off_low >= early_min * 0.5:
+                    local_swing_base = True
+                    base_level = sess_low
+                    base_rel_move = off_low
+                    reasons.append(f"session_low_base_{sess_low:.1f}")
+        except Exception:
+            pass
+
     surge_awaken = volume_surge >= float(
         getattr(settings, "ict_volume_surge_awaken_min", 3.0) or 3.0
     )
@@ -211,7 +238,6 @@ def analyze_ict_breakout(
         or surge_awaken
     )
     displacement = velocity_3s >= settings.ict_displacement_min_velocity_3s
-    early_min = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
     early_v3 = float(getattr(settings, "ict_early_vertical_min_velocity_3s", 2.0) or 2.0)
     # Structure / early-window heat: prefer local-base move when we have one.
     structure_move = base_rel_move if base_rel_move > 0 else move
@@ -227,15 +253,29 @@ def analyze_ict_breakout(
             or velocity_3s >= early_v3
         )
     )
-    flat_then_vertical = (flat and vertical) or early_break
-    mega = move >= settings.ict_mega_rip_min_session_move_pct
+    flat_then_vertical = (
+        (flat and vertical and base_rel_move >= early_min * 0.5)
+        or early_break
+    )
+    mega_floor = float(getattr(settings, "ict_mega_rip_min_session_move_pct", 200.0) or 200.0)
+    try:
+        max_credible = float(getattr(settings, "session_move_max_credible_pct", 500.0))
+    except (TypeError, ValueError):
+        max_credible = 500.0
+    if max_credible <= 0:
+        max_credible = 500.0
+    mega = move >= mega_floor
+    # Fake mega from micro-baseline: huge day-% with no real local/off-low structure.
+    if mega and move > max_credible and base_rel_move < early_min:
+        mega = False
+        reasons.append(f"mega_rip_rejected_uncredible_{move:.0f}%")
 
     if fvg:
         score += settings.ict_fvg_score_bonus
         reasons.append(f"premium_fvg_{gap_pct:.0f}%")
     if local_swing_base:
         reasons.append(f"local_swing_base_{base_level:.1f}")
-    if flat and vertical:
+    if flat and vertical and base_rel_move >= early_min * 0.5:
         score += settings.ict_flat_vertical_score_bonus
         reasons.append(f"flat_then_vertical_{flat_dev:.1f}%base")
     elif early_break:

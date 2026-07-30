@@ -57,7 +57,8 @@ def reset_detector_state_for_tests() -> None:
     _tier_sticky.clear()
     _score_sticky.clear()
     _peak_velocity.clear()
-    _session_date = None
+    # Keep today's session date so seeded lows are not wiped by the next _roll_session().
+    _session_date = datetime.now(IST).strftime("%Y-%m-%d")
 
 
 def _open_key(symbol: str, strike: float, side: Side) -> str:
@@ -71,12 +72,34 @@ def _hist_min_premium(hist: Optional[deque]) -> Optional[float]:
     return min(vals) if vals else None
 
 
-def _hist_earliest_premium(hist: Optional[deque]) -> Optional[float]:
+def session_move_min_baseline(settings: Any = None) -> float:
+    """Minimum premium allowed as open/low baseline (blocks fake +8873% ticks)."""
+    if settings is None:
+        from app.config import get_settings
+
+        settings = get_settings()
+    return float(getattr(settings, "session_move_min_baseline_premium", 5.0) or 5.0)
+
+
+def _is_meaningful_premium(premium: float, settings: Any = None) -> bool:
+    return float(premium or 0) >= session_move_min_baseline(settings)
+
+
+def _hist_min_meaningful_premium(hist: Optional[deque], settings: Any = None) -> Optional[float]:
+    floor = session_move_min_baseline(settings)
     if not hist:
         return None
+    vals = [float(p) for _, p, *_ in hist if float(p or 0) >= floor]
+    return min(vals) if vals else None
+
+
+def _hist_earliest_premium(hist: Optional[deque], *, meaningful_only: bool = False) -> Optional[float]:
+    if not hist:
+        return None
+    floor = session_move_min_baseline() if meaningful_only else 0.0
     for _, prem, _ in hist:
-        if prem and prem > 0:
-            return prem
+        if prem and prem > 0 and float(prem) >= floor:
+            return float(prem)
     return None
 
 
@@ -94,7 +117,7 @@ def _retrofit_baseline_from_spike(
     if premium <= 0:
         return
 
-    earliest = _hist_earliest_premium(hist)
+    earliest = _hist_earliest_premium(hist, meaningful_only=True)
     if earliest is not None:
         open_prem = _session_open.get(key)
         if open_prem is None or earliest < open_prem:
@@ -102,8 +125,8 @@ def _retrofit_baseline_from_spike(
 
     spike_min = float(getattr(settings, "spike_velocity_baseline_min_pct", 12.0) or 12.0)
     if hist and len(hist) >= 2 and v3 >= spike_min:
-        prior = hist[-2][1]
-        if prior and prior > 0 and prior < premium:
+        prior = float(hist[-2][1] or 0)
+        if _is_meaningful_premium(prior, settings) and prior < premium:
             open_prem = _session_open.get(key, premium)
             if prior < open_prem:
                 _session_open[key] = prior
@@ -116,7 +139,7 @@ def _retrofit_baseline_from_spike(
     min_surge = float(getattr(settings, "volume_spike_baseline_min_surge", 3.5) or 3.5)
     if vol_surge < min_surge:
         return
-    hist_min = _hist_min_premium(hist)
+    hist_min = _hist_min_meaningful_premium(hist, settings)
     if hist_min is None or hist_min <= 0:
         return
     open_prem = _session_open.get(key, premium)
@@ -126,14 +149,22 @@ def _retrofit_baseline_from_spike(
     if hist_min < low:
         _session_low[key] = hist_min
 
-
 def _update_session_low(key: str, premium: float, hist: Optional[deque] = None) -> None:
-    if premium <= 0:
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not _is_meaningful_premium(premium, settings):
+        # Still allow hist to supply a meaningful low; ignore micro-tick prints.
+        hist_min = _hist_min_meaningful_premium(hist, settings)
+        if hist_min is not None:
+            low = _session_low.get(key)
+            if low is None or hist_min < low:
+                _session_low[key] = hist_min
         return
     low = _session_low.get(key)
     if low is None or premium < low:
         _session_low[key] = premium
-    hist_min = _hist_min_premium(hist)
+    hist_min = _hist_min_meaningful_premium(hist, settings)
     if hist_min is not None:
         low = _session_low.get(key, hist_min)
         if hist_min < low:
@@ -145,9 +176,22 @@ def _effective_session_baseline(key: str, premium: float, hist: Optional[deque] 
     from app.config import get_settings
 
     settings = get_settings()
+    floor = session_move_min_baseline(settings)
     open_prem = _session_open.get(key, premium)
+    if open_prem < floor:
+        hist_min = _hist_min_meaningful_premium(hist, settings)
+        if hist_min is not None:
+            open_prem = hist_min
+            _session_open[key] = hist_min
+        elif _is_meaningful_premium(premium, settings):
+            open_prem = premium
+            _session_open[key] = premium
+        else:
+            return 0.0
     _update_session_low(key, premium, hist)
     low = _session_low.get(key, open_prem)
+    if low < floor:
+        low = open_prem
     if not getattr(settings, "session_open_use_intraday_low", True):
         return open_prem
     if low >= open_prem:
@@ -157,6 +201,36 @@ def _effective_session_baseline(key: str, premium: float, hist: Optional[deque] 
     if drop_pct >= threshold:
         return low
     return open_prem
+
+
+def session_low_relative_move_pct(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    premium: float,
+) -> float:
+    """% above today's meaningful session low — V-bottom / reclaim timing metric."""
+    _roll_session()
+    if not _is_meaningful_premium(premium):
+        return 0.0
+    if side is None or not symbol:
+        return 0.0
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    key = _open_key(symbol, strike, side_val)
+    low = float(_session_low.get(key) or 0)
+    if not _is_meaningful_premium(low):
+        return 0.0
+    return ((float(premium) - low) / low) * 100.0
+
+
+def get_session_low_premium(symbol: str, strike: float, side: Side | str) -> float:
+    _roll_session()
+    if side is None or not symbol:
+        return 0.0
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    key = _open_key(symbol, strike, side_val)
+    low = float(_session_low.get(key) or 0)
+    return low if _is_meaningful_premium(low) else 0.0
 
 
 def prior_close_from_option_leg(opt: dict[str, Any] | None) -> float:
@@ -211,6 +285,9 @@ def apply_prior_close_baseline(
         return False
     if prior_close <= 0 or premium <= 0:
         return False
+    # Micro prev-close seeds invent fake mega-rips (₹0.28 → ₹25 = +8873%).
+    if not _is_meaningful_premium(prior_close, settings):
+        return False
     min_gap = float(getattr(settings, "open_gap_baseline_min_gap_pct", 15.0) or 15.0)
     gap_pct = ((premium - prior_close) / prior_close) * 100.0
     if gap_pct < min_gap:
@@ -222,7 +299,10 @@ def apply_prior_close_baseline(
         _session_open[key] = prior_close
         changed = True
     low = _session_low.get(key, prior_close)
-    _session_low[key] = min(low, prior_close, premium)
+    candidates = [low, prior_close]
+    if _is_meaningful_premium(premium, settings):
+        candidates.append(premium)
+    _session_low[key] = min(candidates)
     peak = _session_peak.get(key, premium)
     _session_peak[key] = max(peak, premium)
     return changed
@@ -266,12 +346,15 @@ def _session_open_move_pct(
     key = _open_key(symbol, strike, side)
     seeded = apply_prior_close_baseline(key, premium, prior_close)
     if key not in _session_open and premium > 0:
+        # Never seed open/low from illiquid micro-ticks.
+        if not _is_meaningful_premium(premium):
+            return 0.0
         _session_open[key] = premium
         _session_peak[key] = premium
         _session_low[key] = premium
         # First sample with no prior-close seed → 0% until next tick.
         return 0.0
-    if seeded and prior_close > 0:
+    if seeded and prior_close > 0 and _is_meaningful_premium(prior_close):
         # Immediate open-gap read on first poll that carries prev-close.
         baseline = prior_close
         peak = max(_session_peak.get(key, premium), premium)
@@ -303,11 +386,13 @@ def _session_peak_move_pct(
     key = _open_key(symbol, strike, side)
     seeded = apply_prior_close_baseline(key, premium, prior_close)
     if key not in _session_open and premium > 0:
+        if not _is_meaningful_premium(premium):
+            return 0.0
         _session_open[key] = premium
         _session_peak[key] = premium
         _session_low[key] = premium
         return 0.0
-    if seeded and prior_close > 0:
+    if seeded and prior_close > 0 and _is_meaningful_premium(prior_close):
         baseline = prior_close
         peak = max(_session_peak.get(key, premium), premium)
         _session_peak[key] = peak
@@ -996,6 +1081,10 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "dailyMovePct": e.daily_move_pct,
         "peakMovePct": e.peak_move_pct,
         "openPremiumMove": e.daily_move_pct,
+        "offLowMovePct": round(
+            session_low_relative_move_pct(e.symbol, e.strike, e.side, e.premium),
+            1,
+        ),
         "volumeAwaken": vol_awaken,
         "tradeable": tradeable,
         "morningCapture": morning,

@@ -171,8 +171,13 @@ def explosion_entry_window_blocked(
     """Hard-block EXPLOSIVE entries outside the 28–55% early window.
 
     Book (≤20 lots): 28–55% was the only positive band; <22% immature and
-    70–100% chase lost. Weak local-base (<28%) also blocked even when day-move
-    looks fine (Jul30 77700 CE local +7.4% / day ~29%).
+    70–100% chase lost. Timing is measured from:
+      1) trustworthy ICT local/swing base when present
+      2) else % above today's meaningful session low (V-bottom reclaim)
+      3) else day/peak session move
+
+    Weak off-low / local (<28%) must not hide behind a good-looking day %.
+    Fake micro-baseline day moves (+8873%) are ignored when off-low is known.
     """
     settings = get_settings()
     if not getattr(settings, "explosion_entry_window_hard_enabled", True):
@@ -182,6 +187,14 @@ def explosion_entry_window_blocked(
 
     lo = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
     hi = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+    try:
+        max_credible = float(
+            getattr(settings, "session_move_max_credible_pct", 500.0)
+        )
+    except (TypeError, ValueError):
+        max_credible = 500.0
+    if max_credible <= 0:
+        max_credible = 500.0
 
     session = _session_peak_move(explosion_event)
     if ict is not None:
@@ -204,6 +217,37 @@ def explosion_entry_window_blocked(
         if base > hi:
             return True, f"entry_window_local_high_{base:.0f}%"
         return False, ""
+
+    # Off session-low — catches real V-bottom rips when ICT hist missed the dump.
+    off_low = 0.0
+    try:
+        from app.engines.explosion_detector import session_low_relative_move_pct
+
+        off_low = float(
+            session_low_relative_move_pct(
+                str(getattr(explosion_event, "symbol", "") or ""),
+                float(getattr(explosion_event, "strike", 0) or 0),
+                getattr(explosion_event, "side", None),
+                float(getattr(explosion_event, "premium", 0) or 0),
+            )
+            or 0.0
+        )
+    except Exception:
+        off_low = 0.0
+    if off_low <= 0 and ict is not None:
+        # ICT may already carry session-low base when detector lookup is cold.
+        off_low = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+
+    if 0 < off_low < lo:
+        return True, f"entry_window_off_low_{off_low:.0f}%"
+    if lo <= off_low <= hi:
+        return False, ""
+    if off_low > hi:
+        return True, f"entry_window_off_low_high_{off_low:.0f}%"
+
+    # Uncredible day-% (micro-baseline artifact) with no off-low → treat as unknown/low.
+    if session > max_credible:
+        return True, f"entry_window_uncredible_{session:.0f}%"
 
     if session < lo:
         return True, f"entry_window_low_{session:.0f}%"
