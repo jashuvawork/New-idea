@@ -1194,7 +1194,13 @@ def update_live_chart_trail(
         tuning.sources.append("explosion_velocity_hold")
 
     merged = dict(plan_dict)
-    merged["stopPoints"] = tuning.stopPoints
+    # Jul30 77700 CE: live trail/refresh raised stop 13.7→40 then ×1.4 → −48pt.
+    # Never widen SL after entry — entryStopPoints is the risk ceiling.
+    entry_stop = float(plan_dict.get("entryStopPoints") or plan_dict.get("stopPoints") or 0)
+    live_stop = float(tuning.stopPoints)
+    if entry_stop > 0:
+        live_stop = min(live_stop, entry_stop)
+    merged["stopPoints"] = round(live_stop, 2)
     merged["targetPoints"] = tuning.targetPoints
     merged["targetPoints2"] = tuning.targetPoints2
     merged["targetPointsHalf"] = round(
@@ -1287,7 +1293,28 @@ def refresh_open_trade_chart_plan(
 
     merged = merge_chart_into_exit_plan(
         plan_dict, snap, trade.side, float(trade.entryPremium or 50),
+        local_base_premium=(
+            float(ctx.get("localBaseBasePremium") or 0) or None
+        ),
     )
+    # Freeze SL at entry risk — live structure refresh must not widen the stop
+    # (Jul30 77700 CE: refresh grew 13.7→40 while the rip was already failing).
+    entry_stop = float(plan_dict.get("entryStopPoints") or plan_dict.get("stopPoints") or 0)
+    if entry_stop > 0 and float(merged.get("stopPoints") or 0) > entry_stop:
+        merged["stopPoints"] = round(entry_stop, 2)
+        reasons = list(merged.get("reasoning") or [])
+        reasons.append(f"Freeze entry SL {entry_stop:.1f}pt — live chart cannot widen")
+        merged["reasoning"] = reasons
+    # Keep entry baselines intact across refresh.
+    if plan_dict.get("entryStopPoints") is not None:
+        merged["entryStopPoints"] = float(plan_dict["entryStopPoints"])
+    if plan_dict.get("entryTargetPoints") is not None:
+        merged["entryTargetPoints"] = float(plan_dict["entryTargetPoints"])
+    if plan_dict.get("entryTrailArmPoints") is not None:
+        merged["entryTrailArmPoints"] = float(plan_dict["entryTrailArmPoints"])
+    if plan_dict.get("naturalStopPoints") is not None:
+        merged["naturalStopPoints"] = float(plan_dict["naturalStopPoints"])
+
     entry_conf = float(merged.get("chartConfidence") or 50.0)
     if trade.entryContext is None:
         trade.entryContext = {}
