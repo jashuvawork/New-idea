@@ -228,6 +228,8 @@ def compute_adaptive_exit_plan(
         natural_stop = round(min(stop_cap, max(stop_floor, stop)), 2)
     else:
         stop_cap = float(getattr(settings, "scalp_stop_max_points", 15.0) or 15.0)
+        # Scalps also stamp natural so chart/edge cannot crush below premium floor.
+        natural_stop = round(min(stop_cap, max(stop_floor, stop)), 2)
     target_floor = base_target * 0.95 if strategy_type != StrategyType.EXPLOSIVE else settings.explosion_target_standard * 0.85
 
     return AdaptiveExitPlan(

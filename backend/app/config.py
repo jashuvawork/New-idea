@@ -420,6 +420,14 @@ class Settings(BaseSettings):
     # of the natural (premium×structure×score) stop for explosion entries.
     explosion_chart_stop_min_natural_frac: float = 0.85
     explosion_sl_preserve_natural_frac: float = 0.85
+    # Every trade: place SL at local support (premium base / index swing / pivot),
+    # not a weighted blend toward the nearest tiny structure.
+    exit_sl_use_local_support: bool = True
+    # Extra room beyond the support level (fraction of entry premium).
+    exit_sl_local_support_buffer_pct: float = 0.02
+    # Ignore structure closer than this (noise pivots that map to ~4pt "toy" stops).
+    exit_sl_local_support_min_premium_frac: float = 0.06
+    exit_sl_local_support_min_points: float = 5.0
     explosion_stop_min_hold_seconds: int = 15
     explosion_no_progress_enabled: bool = True
     explosion_no_progress_seconds: int = 150

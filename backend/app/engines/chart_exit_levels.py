@@ -102,6 +102,14 @@ def _cfg_float(settings: Any, name: str, default: float) -> float:
     return float(default)
 
 
+def _cfg_bool(settings: Any, name: str, default: bool = True) -> bool:
+    """Bool setting with MagicMock-safe fallback."""
+    v = getattr(settings, name, default)
+    if isinstance(v, bool):
+        return v
+    return bool(default)
+
+
 def rescale_chart_confidence(raw: float, settings: Any = None) -> float:
     """
     Map uncapped chart score → display confidence on [40, 100].
@@ -382,44 +390,190 @@ def _index_dist_to_premium_pts(
     return max(1.0, round(dist * ratio, 2))
 
 
+def _local_support_min_pts(entry_premium: float) -> float:
+    """Ignore structure closer than this — nearest noise pivots map to ~4pt toys."""
+    settings = get_settings()
+    min_pts = _cfg_float(settings, "exit_sl_local_support_min_points", 5.0)
+    min_frac = _cfg_float(settings, "exit_sl_local_support_min_premium_frac", 0.06)
+    return max(min_pts, entry_premium * min_frac)
+
+
+def _pick_local_support_pts(candidates: list[float], entry_premium: float) -> Optional[float]:
+    """Nearest *meaningful* support distance — skip sub-min noise structure."""
+    clean = [float(c) for c in candidates if c and c > 0]
+    if not clean:
+        return None
+    floor = _local_support_min_pts(entry_premium)
+    meaningful = [c for c in clean if c >= floor]
+    if meaningful:
+        return min(meaningful)
+    # All candidates are noise-close — use the farthest so SL is not a toy 4pt hold.
+    return max(clean)
+
+
+def _smc_support_index_dists(side_v: str, spot: float, analysis: ChartAnalysis) -> list[float]:
+    """Index distances to SMC swing / liquidity support on the invalidating side."""
+    inst = analysis.institutional or {}
+    out: list[float] = []
+    if side_v == "PUT":
+        for key in ("lastSwingHigh",):
+            lvl = inst.get(key)
+            if lvl and float(lvl) > spot and _valid_index_structure_level(float(lvl), spot):
+                out.append(float(lvl) - spot)
+        for lvl in inst.get("liquidityPools") or []:
+            try:
+                p = float(lvl)
+            except (TypeError, ValueError):
+                continue
+            if p > spot and _valid_index_structure_level(p, spot):
+                out.append(p - spot)
+    else:
+        for key in ("lastSwingLow",):
+            lvl = inst.get(key)
+            if lvl and 0 < float(lvl) < spot and _valid_index_structure_level(float(lvl), spot):
+                out.append(spot - float(lvl))
+        for lvl in inst.get("liquidityPools") or []:
+            try:
+                p = float(lvl)
+            except (TypeError, ValueError):
+                continue
+            if 0 < p < spot and _valid_index_structure_level(p, spot):
+                out.append(spot - p)
+    return out
+
+
 def _structure_stop_pts(
     side_v: str,
     spot: float,
     analysis: ChartAnalysis,
     entry_premium: float,
 ) -> Optional[float]:
-    """SL distance from nearest opposing pivot/fib structure."""
+    """SL distance from local opposing support (pivot/fib/SMC), not nearest noise tick."""
     if spot <= 0:
         return None
     pivots = analysis.pivots or {}
-    candidates: list[float] = []
+    index_dists: list[float] = []
 
     if side_v == "PUT":
         for key in ("R1", "R2", "P"):
             lvl = pivots.get(key)
             if lvl and float(lvl) > spot and _valid_index_structure_level(float(lvl), spot):
-                candidates.append(float(lvl) - spot)
+                index_dists.append(float(lvl) - spot)
         fib = analysis.fibonacci or {}
         retr = fib.get("retracement") or {}
         for price in retr.values():
             p = float(price)
             if p > spot and _valid_index_structure_level(p, spot):
-                candidates.append(p - spot)
+                index_dists.append(p - spot)
     else:
         for key in ("S1", "S2", "P"):
             lvl = pivots.get(key)
             if lvl and float(lvl) < spot and _valid_index_structure_level(float(lvl), spot):
-                candidates.append(spot - float(lvl))
+                index_dists.append(spot - float(lvl))
         fib = analysis.fibonacci or {}
         retr = fib.get("retracement") or {}
         for price in retr.values():
             p = float(price)
             if p < spot and _valid_index_structure_level(p, spot):
-                candidates.append(spot - p)
+                index_dists.append(spot - p)
 
-    if not candidates:
+    index_dists.extend(_smc_support_index_dists(side_v, spot, analysis))
+    if not index_dists:
         return None
-    return _index_dist_to_premium_pts(spot, min(candidates), entry_premium)
+    prem_candidates = [
+        _index_dist_to_premium_pts(spot, d, entry_premium) for d in index_dists
+    ]
+    return _pick_local_support_pts(prem_candidates, entry_premium)
+
+
+def _ichimoku_stop_pts(
+    side_v: str,
+    spot: float,
+    ichimoku: dict[str, Any],
+    entry_premium: float,
+) -> Optional[float]:
+    """SL from Ichimoku cloud edge / kijun / tenkan on the opposing side."""
+    if spot <= 0:
+        return None
+    ich = _ichimoku_levels(ichimoku)
+    if not ich:
+        return None
+    prem_candidates: list[float] = []
+
+    if side_v == "PUT":
+        for key in ("cloudTop", "kijun", "tenkan", "senkouA", "senkouB"):
+            lvl = ich.get(key, 0)
+            if lvl > spot and _valid_index_structure_level(lvl, spot):
+                prem_candidates.append(
+                    _index_dist_to_premium_pts(spot, lvl - spot, entry_premium)
+                )
+    else:
+        for key in ("cloudBottom", "kijun", "tenkan", "senkouA", "senkouB"):
+            lvl = ich.get(key, 0)
+            if 0 < lvl < spot and _valid_index_structure_level(lvl, spot):
+                prem_candidates.append(
+                    _index_dist_to_premium_pts(spot, spot - lvl, entry_premium)
+                )
+
+    return _pick_local_support_pts(prem_candidates, entry_premium)
+
+
+def _premium_local_support_stop_pts(
+    snap: SymbolSnapshot,
+    side: Side | str,
+    entry_premium: float,
+) -> Optional[float]:
+    """SL from option-premium local base / swing low (ICT), when available."""
+    if entry_premium <= 0:
+        return None
+    side_v = _side_val(side)
+    base = 0.0
+    source = ""
+
+    top = snap.topExplosion or {}
+    if str(top.get("side", "")).upper() in ("", side_v):
+        ict_base = float(top.get("ictBasePremium") or 0)
+        if 0 < ict_base < entry_premium:
+            base = ict_base
+            source = "ict_base"
+
+    if base <= 0:
+        for entry in snap.explosiveRunnerWatchlist or []:
+            if str(entry.get("side", "")).upper() != side_v:
+                continue
+            ict_base = float(entry.get("ictBasePremium") or entry.get("basePremium") or 0)
+            if 0 < ict_base < entry_premium:
+                base = ict_base
+                source = "watchlist_base"
+                break
+
+    if base <= 0 and snap.explosiveRunner and snap.explosiveRunner.side:
+        runner_side = snap.explosiveRunner.side
+        runner_v = runner_side.value if hasattr(runner_side, "value") else str(runner_side)
+        if str(runner_v).upper() == side_v:
+            ctx = getattr(snap.explosiveRunner, "signal", None)
+            # Runner may carry alert-like attrs on the signal/event dicts upstream.
+            for attr in ("ictBasePremium", "basePremium"):
+                raw = getattr(ctx, attr, None) if ctx is not None else None
+                if raw is None and isinstance(getattr(snap.explosiveRunner, "meta", None), dict):
+                    raw = snap.explosiveRunner.meta.get(attr)
+                try:
+                    ict_base = float(raw or 0)
+                except (TypeError, ValueError):
+                    ict_base = 0.0
+                if 0 < ict_base < entry_premium:
+                    base = ict_base
+                    source = "runner_base"
+                    break
+
+    if base <= 0:
+        return None
+
+    # Distance from entry down through the local premium support (buffer applied by caller).
+    stop = entry_premium - base
+    stop = max(_local_support_min_pts(entry_premium), stop)
+    _ = source
+    return round(stop, 2)
 
 
 def _structure_target_pts(
@@ -469,36 +623,6 @@ def _ichimoku_levels(ichimoku: dict[str, Any]) -> dict[str, float]:
             except (TypeError, ValueError):
                 continue
     return out
-
-
-def _ichimoku_stop_pts(
-    side_v: str,
-    spot: float,
-    ichimoku: dict[str, Any],
-    entry_premium: float,
-) -> Optional[float]:
-    """SL from Ichimoku cloud edge / kijun / tenkan on the opposing side."""
-    if spot <= 0:
-        return None
-    ich = _ichimoku_levels(ichimoku)
-    if not ich:
-        return None
-    candidates: list[float] = []
-
-    if side_v == "PUT":
-        for key in ("cloudTop", "kijun", "tenkan", "senkouA", "senkouB"):
-            lvl = ich.get(key, 0)
-            if lvl > spot and _valid_index_structure_level(lvl, spot):
-                candidates.append(lvl - spot)
-    else:
-        for key in ("cloudBottom", "kijun", "tenkan", "senkouA", "senkouB"):
-            lvl = ich.get(key, 0)
-            if 0 < lvl < spot and _valid_index_structure_level(lvl, spot):
-                candidates.append(spot - lvl)
-
-    if not candidates:
-        return None
-    return _index_dist_to_premium_pts(spot, min(candidates), entry_premium)
 
 
 def _ichimoku_target_pts(
@@ -583,12 +707,14 @@ def compute_chart_exit_levels(
     micro = base_micro
 
     analysis = snap.chartAnalysis
+    local_support_sl: Optional[float] = None
     if analysis and spot > 0:
         struct_sl = _structure_stop_pts(side_v, spot, analysis, entry_premium)
         ich_sl = _ichimoku_stop_pts(side_v, spot, analysis.ichimoku or {}, entry_premium)
         sl_candidates = [x for x in (struct_sl, ich_sl) if x and x > 0]
         if sl_candidates:
-            stop = min(sl_candidates) * 1.08
+            # Prefer meaningful local support (not min of noise ticks).
+            local_support_sl = _pick_local_support_pts(sl_candidates, entry_premium)
             if struct_sl:
                 sources.append("chart_structure_sl")
             if ich_sl:
@@ -610,6 +736,19 @@ def compute_chart_exit_levels(
             if not ich_tp2:
                 sources.append("chart_fib_tp2")
 
+    prem_sl = _premium_local_support_stop_pts(snap, side, entry_premium)
+    if prem_sl and prem_sl > 0:
+        local_support_sl = max(float(local_support_sl or 0), prem_sl)
+        sources.append("premium_local_support_sl")
+
+    use_local = _cfg_bool(settings, "exit_sl_use_local_support", True)
+    if use_local and local_support_sl and local_support_sl > 0:
+        buffer = entry_premium * _cfg_float(settings, "exit_sl_local_support_buffer_pct", 0.02)
+        stop = max(base_stop, local_support_sl + max(0.0, buffer))
+        sources.append("sl_at_local_support")
+    elif local_support_sl and local_support_sl > 0:
+        stop = local_support_sl * 1.08
+
     spot_chart = snap.spotChart
     if spot_chart and spot > 0 and not analysis:
         mom5 = abs(float(spot_chart.momentum5Pct or 0))
@@ -623,10 +762,13 @@ def compute_chart_exit_levels(
             target2 = max(target2, target * 1.35)
             trail_arm = max(trail_arm, base_trail_arm, 3.0)
             sources.append("spot_chart_tp")
-        stop = max(stop, 3.0 + entry_premium * 0.06 * (1.0 + mom5 * 2))
+        if not (use_local and local_support_sl):
+            stop = max(stop, 3.0 + entry_premium * 0.06 * (1.0 + mom5 * 2))
 
     conf_factor = confidence / 100.0
-    stop = stop * (1.05 - conf_factor * 0.12)
+    # Do not shrink local-support SL with high confidence (Jul30 crush path).
+    if not (use_local and local_support_sl):
+        stop = stop * (1.05 - conf_factor * 0.12)
     target = target * (1.0 + conf_factor * 0.35)
     target2 = target2 * (1.0 + conf_factor * 0.25)
     # High confidence must HOLD winners — raise trail arm (delay trail), don't
@@ -640,8 +782,17 @@ def compute_chart_exit_levels(
         or confidence >= settings.all_day_min_chart_confidence
     )
 
-    stop_floor = settings.scalp_stop_min_points
-    stop_cap = max(8.0, entry_premium * 0.12)
+    stop_floor = _cfg_float(settings, "scalp_stop_min_points", 2.5)
+    abs_max = _cfg_float(settings, "explosion_stop_abs_max_points", 40.0)
+    pct_cap = _cfg_float(settings, "explosion_stop_max_pct_of_premium", 0.18)
+    # Local-support stops need room through the support level (old ×12% erased structure).
+    if use_local and local_support_sl:
+        stop_cap = min(
+            abs_max,
+            max(12.0, entry_premium * pct_cap, float(stop)),
+        )
+    else:
+        stop_cap = max(8.0, entry_premium * 0.12)
     return ChartExitLevels(
         stopPoints=round(min(stop_cap, max(stop_floor, stop)), 2),
         targetPoints=_clamp_chart_target_pts(max(base_target * 0.9, target), entry_premium),
@@ -663,7 +814,11 @@ def merge_chart_into_exit_plan(
     side: Side | str,
     entry_premium: float,
 ) -> dict[str, Any]:
-    """Blend chart levels into an adaptive exit plan dict."""
+    """Merge chart levels into an adaptive exit plan dict.
+
+    SL uses local support when available (no weighted crush toward tiny structure).
+    TP/trail still confidence-blend.
+    """
     settings = get_settings()
     if not settings.chart_exit_levels_enabled:
         return plan_dict
@@ -681,19 +836,46 @@ def merge_chart_into_exit_plan(
     weight = min(0.72, 0.35 + levels.confidence / 200.0)
 
     merged = dict(plan_dict)
-    for key in (
-        "stopPoints", "targetPoints", "trailArmPoints", "trailKeepRatio",
+    blend_keys = (
+        "targetPoints", "trailArmPoints", "trailKeepRatio",
         "trailStepPoints", "microTargetPoints",
-    ):
+    )
+    for key in blend_keys:
         base_val = float(plan_dict.get(key, getattr(levels, key)))
         chart_val = float(getattr(levels, key))
         merged[key] = round(base_val * (1 - weight) + chart_val * weight, 2)
 
+    base_stop = float(plan_dict.get("stopPoints", 3.0))
+    chart_stop = float(levels.stopPoints)
+    use_local = _cfg_bool(settings, "exit_sl_use_local_support", True)
+    local_tagged = any(
+        s in (levels.sources or [])
+        for s in (
+            "sl_at_local_support",
+            "premium_local_support_sl",
+            "chart_structure_sl",
+            "chart_ichimoku_sl",
+        )
+    )
+    if use_local and local_tagged and chart_stop > 0:
+        # Every trade: SL at local support (with premium floor), never blend down.
+        merged["stopPoints"] = round(max(base_stop, chart_stop), 2)
+        merged["localSupportStopPoints"] = round(chart_stop, 2)
+        reasoning_pre = list(merged.get("reasoning") or [])
+        reasoning_pre.append(
+            f"SL at local support {chart_stop:.1f}pt (floor vs premium {base_stop:.1f}pt)"
+        )
+        merged["reasoning"] = reasoning_pre
+    else:
+        merged["stopPoints"] = round(base_stop * (1 - weight) + chart_stop * weight, 2)
+
     merged["targetPoints"] = _clamp_chart_target_pts(float(merged["targetPoints"]), entry_premium)
     merged["targetPoints2"] = _clamp_chart_target_pts(levels.targetPoints2, entry_premium, is_tp2=True)
-    # Jul30 77400/77500 CE: high-conf chart blend crushed premium SL ~20–26 → ~8pt.
-    # Explosions keep a floor of the pre-chart natural invalidation distance.
+    # Natural floor for explosions + any plan that stamped naturalStopPoints.
     natural = float(merged.get("naturalStopPoints") or plan_dict.get("naturalStopPoints") or 0)
+    # After local-support SL, raise natural to the final calculated invalidation.
+    if use_local and local_tagged:
+        natural = max(natural, float(merged.get("stopPoints") or 0))
     if natural > 0:
         preserve = float(
             getattr(settings, "explosion_chart_stop_min_natural_frac", 0.85) or 0.85
@@ -854,7 +1036,31 @@ def compute_live_chart_trail_tuning(
             target *= 1.03
             sources.append(f"ichimoku_tk_{tk.lower()}")
 
-    stop_cap = max(8.0, entry_premium * 0.12)
+    stop_cap = max(
+        8.0,
+        entry_premium * float(
+            getattr(settings, "explosion_stop_max_pct_of_premium", 0.18) or 0.18
+        ),
+    )
+    # Never live-crush below the entry natural / local-support SL.
+    natural = float(
+        plan_dict.get("naturalStopPoints")
+        or plan_dict.get("localSupportStopPoints")
+        or 0
+    )
+    if natural > 0:
+        preserve = float(
+            getattr(settings, "explosion_sl_preserve_natural_frac", 0.85) or 0.85
+        )
+        floor = natural * max(0.0, min(1.0, preserve))
+        if stop < floor:
+            stop = floor
+            sources.append(f"protect_natural_sl_{floor:.1f}")
+        stop_cap = max(stop_cap, natural)
+    stop_cap = min(
+        stop_cap,
+        float(getattr(settings, "explosion_stop_abs_max_points", 40.0) or 40.0),
+    )
     return ChartTrailTuning(
         liveConfidence=round(live_confidence, 1),
         entryConfidence=round(entry_confidence, 1),
