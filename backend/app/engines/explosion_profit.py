@@ -273,13 +273,19 @@ def check_explosion_entry(
     if blocked:
         return False, reason
 
-    from app.engines.explosion_entry_guards import live_explosion_confirmation_blocked
+    from app.engines.explosion_entry_guards import (
+        explosion_entry_window_blocked,
+        live_explosion_confirmation_blocked,
+    )
     from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
     # Analyze from event even when snap is missing — event carries move/velocity/tier
     # needed for ICT structure. Skipping analyze when snap is None falsely blocked
     # BUILDING+ICT flat→vertical entries (no structure → no_ict_structure_confirmation).
     ict_live = analyze_explosion_event_ict(event, snap)
+    window_blocked, window_reason = explosion_entry_window_blocked(event, ict=ict_live)
+    if window_blocked:
+        return False, window_reason
     live_blocked, live_reason = live_explosion_confirmation_blocked(
         event,
         ict=ict_live,

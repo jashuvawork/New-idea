@@ -163,6 +163,55 @@ def trustworthy_local_base_move(ict: Any) -> float:
     return base
 
 
+def explosion_entry_window_blocked(
+    explosion_event: Any,
+    *,
+    ict: Any = None,
+) -> tuple[bool, str]:
+    """Hard-block EXPLOSIVE entries outside the 28–55% early window.
+
+    Book (≤20 lots): 28–55% was the only positive band; <22% immature and
+    70–100% chase lost. Weak local-base (<28%) also blocked even when day-move
+    looks fine (Jul30 77700 CE local +7.4% / day ~29%).
+    """
+    settings = get_settings()
+    if not getattr(settings, "explosion_entry_window_hard_enabled", True):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+
+    lo = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
+    hi = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+
+    session = _session_peak_move(explosion_event)
+    if ict is not None:
+        session = max(session, float(getattr(ict, "session_move_pct", 0) or 0))
+
+    raw_local = float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict is not None else 0.0
+    base = (
+        trustworthy_local_base_move(ict)
+        if getattr(settings, "explosion_chase_use_local_base", True)
+        else 0.0
+    )
+
+    # Weak / early local base must not hide behind a "good-looking" day %.
+    if 0 < raw_local < lo:
+        return True, f"entry_window_weak_local_{raw_local:.0f}%"
+
+    if base > 0:
+        if base < lo:
+            return True, f"entry_window_local_low_{base:.0f}%"
+        if base > hi:
+            return True, f"entry_window_local_high_{base:.0f}%"
+        return False, ""
+
+    if session < lo:
+        return True, f"entry_window_low_{session:.0f}%"
+    if session > hi:
+        return True, f"entry_window_high_{session:.0f}%"
+    return False, ""
+
+
 def immature_explosion_blocked(
     explosion_event: Any,
     *,
