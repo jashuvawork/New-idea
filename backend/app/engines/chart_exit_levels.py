@@ -691,6 +691,21 @@ def merge_chart_into_exit_plan(
 
     merged["targetPoints"] = _clamp_chart_target_pts(float(merged["targetPoints"]), entry_premium)
     merged["targetPoints2"] = _clamp_chart_target_pts(levels.targetPoints2, entry_premium, is_tp2=True)
+    # Jul30 77400/77500 CE: high-conf chart blend crushed premium SL ~20–26 → ~8pt.
+    # Explosions keep a floor of the pre-chart natural invalidation distance.
+    natural = float(merged.get("naturalStopPoints") or plan_dict.get("naturalStopPoints") or 0)
+    if natural > 0:
+        preserve = float(
+            getattr(settings, "explosion_chart_stop_min_natural_frac", 0.85) or 0.85
+        )
+        floor = natural * max(0.0, min(1.0, preserve))
+        if float(merged.get("stopPoints") or 0) < floor:
+            merged["stopPoints"] = round(floor, 2)
+            reasoning_pre = list(merged.get("reasoning") or [])
+            reasoning_pre.append(
+                f"Natural SL floor {floor:.1f}pt ({preserve:.0%} of {natural:.1f}pt)"
+            )
+            merged["reasoning"] = reasoning_pre
     settings = get_settings()
     merged["targetPointsHalf"] = round(
         float(merged["targetPoints"]) * settings.chart_confidence_half_tp_lock_pct,
@@ -704,6 +719,8 @@ def merge_chart_into_exit_plan(
     reasoning = list(merged.get("reasoning") or [])
     reasoning.append(f"Chart exit conf {levels.confidence:.0f}% — {', '.join(levels.sources[:4])}")
     merged["reasoning"] = reasoning
+    if natural > 0:
+        merged["naturalStopPoints"] = round(natural, 2)
     merged["chartExitLevels"] = levels.to_dict()
     return merged
 

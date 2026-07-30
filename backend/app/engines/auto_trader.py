@@ -818,10 +818,34 @@ async def _open_from_candidate(
     exit_plan = tune_exit_plan_for_position(exit_plan, lots, fill_premium, symbol)
     if exit_plan and settings.edge_engine_enabled:
         plan_obj = AdaptiveExitPlan.from_dict(exit_plan)
+        # Jul30: edge_tighten crushed calculated ~20pt SL to 7.99 on max-lot ELITE.
+        skip_edge_sl_tighten = bool(
+            exit_plan.get("naturalStopPoints")
+            or high_conviction
+            or top_explosion_max
+            or elevated_size
+        )
         plan_obj = tune_plan_with_edge(
             plan_obj, edge, snap.spotChart, entry_velocity_3s,
         )
-        exit_plan = plan_obj.to_dict()
+        # Merge edge fields only — do not drop size-tune / chart metadata.
+        exit_plan = {**exit_plan, **plan_obj.to_dict()}
+        natural = float(exit_plan.get("naturalStopPoints") or 0)
+        if natural > 0:
+            preserve = float(
+                getattr(settings, "explosion_sl_preserve_natural_frac", 0.85) or 0.85
+            )
+            floor = natural * max(0.0, min(1.0, preserve))
+            if float(exit_plan.get("stopPoints") or 0) < floor:
+                exit_plan["stopPoints"] = round(floor, 2)
+                reasons = list(exit_plan.get("reasoning") or [])
+                reasons.append(f"Protect natural SL {floor:.1f}pt from edge/chart crush")
+                exit_plan["reasoning"] = reasons
+            # Keep entry baseline in lockstep after final SL.
+            exit_plan["entryStopPoints"] = float(exit_plan["stopPoints"])
+            exit_plan["naturalStopPoints"] = natural
+        elif skip_edge_sl_tighten and exit_plan.get("entryStopPoints"):
+            exit_plan["entryStopPoints"] = float(exit_plan.get("stopPoints") or exit_plan["entryStopPoints"])
 
     entry_chart_conf = float(exit_plan.get("chartConfidence") or 0)
     if entry_chart_conf <= 0:

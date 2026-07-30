@@ -24,6 +24,8 @@ class AdaptiveExitPlan:
     mlWinProb: float = 0.5
     psychologyLabel: str = "NEUTRAL"
     exitBias: str = "BALANCED"
+    # Pre-chart premium/structure invalidation — chart/edge must not crush below this.
+    naturalStopPoints: float = 0.0
     reasoning: list[str] = None
 
     def __post_init__(self):
@@ -49,6 +51,7 @@ class AdaptiveExitPlan:
             mlWinProb=data.get("mlWinProb", 0.5),
             psychologyLabel=data.get("psychologyLabel", "NEUTRAL"),
             exitBias=data.get("exitBias", "BALANCED"),
+            naturalStopPoints=float(data.get("naturalStopPoints") or 0.0),
             reasoning=data.get("reasoning", []),
         )
 
@@ -94,13 +97,17 @@ def compute_adaptive_exit_plan(
         premium = max(premium, 25.0)
 
         # Per-trade SL from premium + momentum — not a global fixed point value
-        base_stop = max(settings.scalp_stop_min_points, premium * 0.10)
+        stop_pct = float(getattr(settings, "explosion_stop_pct_of_premium", 0.10) or 0.10)
+        base_stop = max(settings.scalp_stop_min_points, premium * stop_pct)
         base_target = settings.explosion_target_standard
         trail_arm, trail_keep = settings.explosion_trail_arm_points, settings.explosion_trail_keep_ratio
         trail_step = settings.explosion_trail_step_points
         trail_tight_arm = settings.explosion_trail_tight_arm
         trail_tight_pts = settings.explosion_trail_tight_points
         micro = settings.explosion_micro_target_points
+        reasoning.append(
+            f"Explosion SL from premium {premium:.1f} × {stop_pct:.0%} = {base_stop:.1f}pt"
+        )
 
         if vel >= 2.5:
             base_stop *= 1.25
@@ -111,7 +118,11 @@ def compute_adaptive_exit_plan(
             base_stop *= 1.12
             base_target = settings.explosion_target_elite
             trail_arm = max(trail_arm, 8.0)
-            reasoning.append("ELITE explosion — wider SL + 25pt target")
+            reasoning.append("ELITE explosion — wider SL + elite target")
+        # High explosion score must not keep a flat ~8pt toy stop (Jul30 77400/77500).
+        if float(confidence or 0) >= 90:
+            base_stop *= 1.10
+            reasoning.append(f"High explosion score {confidence:.0f} — wider calculated SL")
         daily_move = float(top.get("dailyMovePct") or top.get("openPremiumMove") or 0)
         if (
             settings.extreme_explosion_all_in_enabled
@@ -204,8 +215,17 @@ def compute_adaptive_exit_plan(
             reasoning.append(f"{session_profile.sessionLabel} — ride rally, wider adaptive SL")
 
     stop_floor = settings.scalp_stop_min_points
+    natural_stop = 0.0
     if strategy_type == StrategyType.EXPLOSIVE:
-        stop_cap = 20.0
+        # Jul30: flat 20pt cap erased ELITE/velocity widening then chart crushed to ~8pt.
+        stop_cap_pct = float(
+            getattr(settings, "explosion_stop_max_pct_of_premium", 0.18) or 0.18
+        )
+        stop_abs_max = float(
+            getattr(settings, "explosion_stop_abs_max_points", 40.0) or 40.0
+        )
+        stop_cap = min(stop_abs_max, max(12.0, premium * stop_cap_pct))
+        natural_stop = round(min(stop_cap, max(stop_floor, stop)), 2)
     else:
         stop_cap = float(getattr(settings, "scalp_stop_max_points", 15.0) or 15.0)
     target_floor = base_target * 0.95 if strategy_type != StrategyType.EXPLOSIVE else settings.explosion_target_standard * 0.85
@@ -222,6 +242,7 @@ def compute_adaptive_exit_plan(
         mlWinProb=round(win_prob, 3),
         psychologyLabel=psychology.label,
         exitBias=psychology.exit_bias,
+        naturalStopPoints=natural_stop,
         reasoning=reasoning,
     )
 

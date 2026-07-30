@@ -408,6 +408,18 @@ class Settings(BaseSettings):
     explosion_trail_tight_arm: float = 12.0
     explosion_trail_tight_points: float = 5.0
     explosion_initial_stop_points: float = 6.0
+    # Soft ceiling for explosion SL (points). Absolute last-resort cap only —
+    # prefer premium-relative ceiling so high-premium ELITE/EXPLODING keeps a
+    # calculated stop instead of collapsing to a flat ~8–10pt hold (Jul30).
+    explosion_stop_abs_max_points: float = 40.0
+    # Explosion SL as a fraction of entry premium (before score/velocity widen).
+    explosion_stop_pct_of_premium: float = 0.10
+    # Premium-relative soft ceiling: min(abs_max, max(12, premium × this)).
+    explosion_stop_max_pct_of_premium: float = 0.18
+    # After chart merge / edge / size-tune, never crush SL below this fraction
+    # of the natural (premium×structure×score) stop for explosion entries.
+    explosion_chart_stop_min_natural_frac: float = 0.85
+    explosion_sl_preserve_natural_frac: float = 0.85
     explosion_stop_min_hold_seconds: int = 15
     explosion_no_progress_enabled: bool = True
     explosion_no_progress_seconds: int = 150

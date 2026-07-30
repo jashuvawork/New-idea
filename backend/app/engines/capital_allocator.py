@@ -676,24 +676,39 @@ def tune_exit_plan_for_position(
     plan_stop = float(plan_dict.get("stopPoints", settings.scalp_stop_points))
     plan_target = float(plan_dict.get("targetPoints", 6.0))
     plan_micro = float(plan_dict.get("microTargetPoints", 2.5))
+    natural_stop = float(plan_dict.get("naturalStopPoints") or 0)
 
     max_sl_inr = trade_budget * settings.position_sl_cap_pct
     sl_pts_cap = max_sl_inr / units
     target_inr = trade_budget * settings.position_tp_target_pct
     tp_pts_floor = target_inr / units
 
-    # Oversized lots (Jul29 32× SENSEX) crushed a ₹279 ITM natural ~28pt SL to 6pt
-    # and never-green-killed the rip. Keep a fraction of the premium-based stop.
+    # Oversized lots (Jul29 32× SENSEX) crushed a ₹279 ITM natural ~28pt SL to 6pt.
+    # Prefer the pre-chart naturalStopPoints when present (Jul30 chart→8pt crush).
     preserve = float(getattr(settings, "position_sl_preserve_natural_frac", 0.45) or 0.0)
+    reference_stop = natural_stop if natural_stop > 0 else plan_stop
+    if natural_stop > 0:
+        preserve = max(
+            preserve,
+            float(getattr(settings, "explosion_sl_preserve_natural_frac", 0.85) or 0.85),
+        )
     natural_floor = max(
         settings.scalp_stop_min_points,
-        plan_stop * max(0.0, min(1.0, preserve)),
+        reference_stop * max(0.0, min(1.0, preserve)),
     )
-    stop = max(natural_floor, min(plan_stop, sl_pts_cap))
-    if sl_pts_cap + 1e-9 < natural_floor:
+    stop = max(natural_floor, min(max(plan_stop, natural_floor), sl_pts_cap))
+    # If budget cap is below the calculated natural floor, keep the natural SL
+    # (size should have been reduced; don't toy-stop a high-score explosion).
+    if natural_stop > 0 and sl_pts_cap + 1e-9 < natural_floor:
+        stop = natural_floor
+        reasoning.append(
+            f"Keep calculated SL {natural_floor:.1f}pt over budget cap {sl_pts_cap:.1f}pt "
+            f"(natural {natural_stop:.1f}pt)"
+        )
+    elif sl_pts_cap + 1e-9 < natural_floor:
         reasoning.append(
             f"Size-tune SL floor {natural_floor:.1f}pt (preserve {preserve:.0%} of natural "
-            f"{plan_stop:.1f}pt; budget cap was {sl_pts_cap:.1f}pt)"
+            f"{reference_stop:.1f}pt; budget cap was {sl_pts_cap:.1f}pt)"
         )
     target = max(plan_target, tp_pts_floor, settings.scalp_stop_points * 2)
     # Guard inverted R:R — a budget-capped stop can exceed the target floor.
@@ -719,6 +734,7 @@ def tune_exit_plan_for_position(
         "entryTrailArmPoints": round(trail_arm, 2),
         "entryTargetPoints": round(target, 2),
         "entryStopPoints": round(stop, 2),
+        "naturalStopPoints": round(natural_stop, 2) if natural_stop > 0 else plan_dict.get("naturalStopPoints"),
         "trailStepPoints": round(trail_step, 2),
         "lots": lots,
         "lotMultiplier": mult,
