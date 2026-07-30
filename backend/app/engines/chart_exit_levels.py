@@ -399,16 +399,16 @@ def _local_support_min_pts(entry_premium: float) -> float:
 
 
 def _pick_local_support_pts(candidates: list[float], entry_premium: float) -> Optional[float]:
-    """Nearest *meaningful* support distance — skip sub-min noise structure."""
+    """Nearest *meaningful* support distance — ignore sub-min noise (Jul30 ~3pt toys)."""
     clean = [float(c) for c in candidates if c and c > 0]
     if not clean:
         return None
     floor = _local_support_min_pts(entry_premium)
     meaningful = [c for c in clean if c >= floor]
-    if meaningful:
-        return min(meaningful)
-    # All candidates are noise-close — use the farthest so SL is not a toy 4pt hold.
-    return max(clean)
+    if not meaningful:
+        # No real support — do not invent a 3–4pt chart SL; caller falls back to premium %.
+        return None
+    return min(meaningful)
 
 
 def _smc_support_index_dists(side_v: str, spot: float, analysis: ChartAnalysis) -> list[float]:
@@ -522,6 +522,8 @@ def _premium_local_support_stop_pts(
     snap: SymbolSnapshot,
     side: Side | str,
     entry_premium: float,
+    *,
+    local_base_premium: Optional[float] = None,
 ) -> Optional[float]:
     """SL from option-premium local base / swing low (ICT), when available."""
     if entry_premium <= 0:
@@ -530,8 +532,13 @@ def _premium_local_support_stop_pts(
     base = 0.0
     source = ""
 
+    explicit = float(local_base_premium or 0)
+    if 0 < explicit < entry_premium:
+        base = explicit
+        source = "ict_base_explicit"
+
     top = snap.topExplosion or {}
-    if str(top.get("side", "")).upper() in ("", side_v):
+    if base <= 0 and str(top.get("side", "")).upper() in ("", side_v):
         ict_base = float(top.get("ictBasePremium") or 0)
         if 0 < ict_base < entry_premium:
             base = ict_base
@@ -552,7 +559,6 @@ def _premium_local_support_stop_pts(
         runner_v = runner_side.value if hasattr(runner_side, "value") else str(runner_side)
         if str(runner_v).upper() == side_v:
             ctx = getattr(snap.explosiveRunner, "signal", None)
-            # Runner may carry alert-like attrs on the signal/event dicts upstream.
             for attr in ("ictBasePremium", "basePremium"):
                 raw = getattr(ctx, attr, None) if ctx is not None else None
                 if raw is None and isinstance(getattr(snap.explosiveRunner, "meta", None), dict):
@@ -691,8 +697,9 @@ def compute_chart_exit_levels(
     base_trail_arm: float = 3.0,
     base_trail_keep: float = 0.60,
     base_micro: float = 2.0,
+    local_base_premium: Optional[float] = None,
 ) -> ChartExitLevels:
-    """Multi-chart SL/TP/trail with confidence-weighted blending."""
+    """Multi-chart SL/TP/trail — SL from local support + chart structure confirmation."""
     settings = get_settings()
     confidence, confidence_raw, sources = chart_trade_confidence_with_raw(snap, side)
     side_v = _side_val(side)
@@ -707,18 +714,18 @@ def compute_chart_exit_levels(
     micro = base_micro
 
     analysis = snap.chartAnalysis
-    local_support_sl: Optional[float] = None
+    chart_structure_sl: Optional[float] = None
     if analysis and spot > 0:
         struct_sl = _structure_stop_pts(side_v, spot, analysis, entry_premium)
         ich_sl = _ichimoku_stop_pts(side_v, spot, analysis.ichimoku or {}, entry_premium)
         sl_candidates = [x for x in (struct_sl, ich_sl) if x and x > 0]
         if sl_candidates:
-            # Prefer meaningful local support (not min of noise ticks).
-            local_support_sl = _pick_local_support_pts(sl_candidates, entry_premium)
-            if struct_sl:
-                sources.append("chart_structure_sl")
-            if ich_sl:
-                sources.append("chart_ichimoku_sl")
+            chart_structure_sl = _pick_local_support_pts(sl_candidates, entry_premium)
+            if chart_structure_sl:
+                if struct_sl and struct_sl >= _local_support_min_pts(entry_premium):
+                    sources.append("chart_structure_sl")
+                if ich_sl and ich_sl >= _local_support_min_pts(entry_premium):
+                    sources.append("chart_ichimoku_sl")
         tp1, tp2 = _structure_target_pts(side_v, spot, analysis, entry_premium)
         ich_tp1, ich_tp2 = _ichimoku_target_pts(side_v, spot, analysis.ichimoku or {}, entry_premium)
         if ich_tp1 > 0:
@@ -736,16 +743,30 @@ def compute_chart_exit_levels(
             if not ich_tp2:
                 sources.append("chart_fib_tp2")
 
-    prem_sl = _premium_local_support_stop_pts(snap, side, entry_premium)
+    prem_sl = _premium_local_support_stop_pts(
+        snap, side, entry_premium, local_base_premium=local_base_premium,
+    )
     if prem_sl and prem_sl > 0:
-        local_support_sl = max(float(local_support_sl or 0), prem_sl)
         sources.append("premium_local_support_sl")
 
+    # Combined: local premium support AND meaningful chart structure (never noise).
+    local_support_sl: Optional[float] = None
+    support_parts = [x for x in (prem_sl, chart_structure_sl) if x and x > 0]
+    if support_parts:
+        local_support_sl = max(support_parts)
+
     use_local = _cfg_bool(settings, "exit_sl_use_local_support", True)
+    high_conf = confidence >= _cfg_float(settings, "exit_sl_chart_confirm_min_confidence", 70.0)
     if use_local and local_support_sl and local_support_sl > 0:
         buffer = entry_premium * _cfg_float(settings, "exit_sl_local_support_buffer_pct", 0.02)
+        # High-conf chart confirmation: SL stays at combined support — setup is
+        # expected to move up without retesting; do not tighten toward noise.
         stop = max(base_stop, local_support_sl + max(0.0, buffer))
         sources.append("sl_at_local_support")
+        if high_conf and chart_structure_sl and prem_sl:
+            sources.append("chart_confirmed_local_support_sl")
+        elif high_conf and (chart_structure_sl or prem_sl):
+            sources.append("chart_confirmed_sl")
     elif local_support_sl and local_support_sl > 0:
         stop = local_support_sl * 1.08
 
@@ -766,7 +787,7 @@ def compute_chart_exit_levels(
             stop = max(stop, 3.0 + entry_premium * 0.06 * (1.0 + mom5 * 2))
 
     conf_factor = confidence / 100.0
-    # Do not shrink local-support SL with high confidence (Jul30 crush path).
+    # Do not shrink local-support / chart-confirmed SL with high confidence.
     if not (use_local and local_support_sl):
         stop = stop * (1.05 - conf_factor * 0.12)
     target = target * (1.0 + conf_factor * 0.35)
@@ -813,11 +834,13 @@ def merge_chart_into_exit_plan(
     snap: SymbolSnapshot,
     side: Side | str,
     entry_premium: float,
+    *,
+    local_base_premium: Optional[float] = None,
 ) -> dict[str, Any]:
     """Merge chart levels into an adaptive exit plan dict.
 
-    SL uses local support when available (no weighted crush toward tiny structure).
-    TP/trail still confidence-blend.
+    SL = max(premium floor, local support, meaningful chart structure).
+    High-conf chart confirms — never blend down toward noise. TP/trail still blend.
     """
     settings = get_settings()
     if not settings.chart_exit_levels_enabled:
@@ -832,6 +855,7 @@ def merge_chart_into_exit_plan(
         base_trail_arm=float(plan_dict.get("trailArmPoints", 3.0)),
         base_trail_keep=float(plan_dict.get("trailKeepRatio", 0.60)),
         base_micro=float(plan_dict.get("microTargetPoints", 2.0)),
+        local_base_premium=local_base_premium,
     )
     weight = min(0.72, 0.35 + levels.confidence / 200.0)
 
@@ -855,37 +879,47 @@ def merge_chart_into_exit_plan(
             "premium_local_support_sl",
             "chart_structure_sl",
             "chart_ichimoku_sl",
+            "chart_confirmed_sl",
+            "chart_confirmed_local_support_sl",
         )
     )
     if use_local and local_tagged and chart_stop > 0:
-        # Every trade: SL at local support (with premium floor), never blend down.
+        # Combined local support + chart analysis — never blend down.
         merged["stopPoints"] = round(max(base_stop, chart_stop), 2)
         merged["localSupportStopPoints"] = round(chart_stop, 2)
+        if "chart_structure_sl" in (levels.sources or []) or "chart_ichimoku_sl" in (levels.sources or []):
+            merged["chartStructureStopPoints"] = round(chart_stop, 2)
         reasoning_pre = list(merged.get("reasoning") or [])
         reasoning_pre.append(
-            f"SL at local support {chart_stop:.1f}pt (floor vs premium {base_stop:.1f}pt)"
+            f"SL local support+chart {chart_stop:.1f}pt (premium floor {base_stop:.1f}pt)"
         )
         merged["reasoning"] = reasoning_pre
     else:
-        merged["stopPoints"] = round(base_stop * (1 - weight) + chart_stop * weight, 2)
+        # No meaningful support — keep premium natural; never crush with noise blend.
+        merged["stopPoints"] = round(max(base_stop, chart_stop), 2)
 
     merged["targetPoints"] = _clamp_chart_target_pts(float(merged["targetPoints"]), entry_premium)
     merged["targetPoints2"] = _clamp_chart_target_pts(levels.targetPoints2, entry_premium, is_tp2=True)
     # Natural floor for explosions + any plan that stamped naturalStopPoints.
     natural = float(merged.get("naturalStopPoints") or plan_dict.get("naturalStopPoints") or 0)
-    # After local-support SL, raise natural to the final calculated invalidation.
+    # After local-support + chart SL, raise natural to the final calculated invalidation.
     if use_local and local_tagged:
         natural = max(natural, float(merged.get("stopPoints") or 0))
+    elif natural <= 0:
+        natural = float(merged.get("stopPoints") or 0)
     if natural > 0:
         preserve = float(
             getattr(settings, "explosion_chart_stop_min_natural_frac", 0.85) or 0.85
         )
-        floor = natural * max(0.0, min(1.0, preserve))
+        # MagicMock-safe preserve
+        if not isinstance(preserve, (int, float)):
+            preserve = 0.85
+        floor = natural * max(0.0, min(1.0, float(preserve)))
         if float(merged.get("stopPoints") or 0) < floor:
             merged["stopPoints"] = round(floor, 2)
             reasoning_pre = list(merged.get("reasoning") or [])
             reasoning_pre.append(
-                f"Natural SL floor {floor:.1f}pt ({preserve:.0%} of {natural:.1f}pt)"
+                f"Natural SL floor {floor:.1f}pt ({float(preserve):.0%} of {natural:.1f}pt)"
             )
             merged["reasoning"] = reasoning_pre
     settings = get_settings()

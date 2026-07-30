@@ -254,11 +254,19 @@ def apply_chart_exit_tuning(
     snap: SymbolSnapshot,
     side: str,
     entry_premium: float,
+    *,
+    local_base_premium: Optional[float] = None,
 ) -> AdaptiveExitPlan:
     """Merge multi-chart SL/TP/trail levels into adaptive plan."""
     from app.engines.chart_exit_levels import merge_chart_into_exit_plan
 
-    merged = merge_chart_into_exit_plan(plan.to_dict(), snap, side, entry_premium)
+    merged = merge_chart_into_exit_plan(
+        plan.to_dict(),
+        snap,
+        side,
+        entry_premium,
+        local_base_premium=local_base_premium,
+    )
     return AdaptiveExitPlan.from_dict(merged)
 
 
