@@ -33,6 +33,8 @@ def _settings(**overrides):
     s.explosion_early_window_max_move_pct = 55.0
     s.explosion_chase_use_local_base = True
     s.explosion_local_base_trust_min_move_pct = 8.0
+    s.session_move_max_credible_pct = 500.0
+    s.session_move_min_baseline_premium = 5.0
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
