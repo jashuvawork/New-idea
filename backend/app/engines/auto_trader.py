@@ -228,6 +228,7 @@ def _attach_exit_plan(
     entry_premium: Optional[float] = None,
     entry_velocity_3s: Optional[float] = None,
     explosion_tier: Optional[str] = None,
+    local_base_premium: Optional[float] = None,
 ) -> dict[str, Any]:
     """Build ML + psychology adaptive SL/TP plan for a new trade."""
     settings = get_settings()
@@ -261,12 +262,23 @@ def _attach_exit_plan(
         entry_velocity_3s=entry_velocity_3s,
         explosion_tier=explosion_tier,
     )
-    from app.engines.adaptive_exits import apply_chart_exit_tuning
+    from app.engines.chart_exit_levels import merge_chart_into_exit_plan
 
-    tuned = apply_chart_exit_tuning(
-        plan, snap, side, float(entry_premium or snap.spot or 50),
+    # Prefer explicit ICT base; else snap topExplosion ictBasePremium.
+    base_prem = float(local_base_premium or 0)
+    if base_prem <= 0:
+        top = snap.topExplosion or {}
+        base_prem = float(top.get("ictBasePremium") or 0)
+
+    # Return full merged dict (not AdaptiveExitPlan) so localSupportStopPoints /
+    # chartExitSources / naturalStopPoints survive into the trade exit plan.
+    return merge_chart_into_exit_plan(
+        plan.to_dict(),
+        snap,
+        side,
+        float(entry_premium or snap.spot or 50),
+        local_base_premium=base_prem if base_prem > 0 else None,
     )
-    return tuned.to_dict()
 
 
 def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
@@ -806,6 +818,19 @@ async def _open_from_candidate(
     else:
         chart_meta = {"enabled": False}
 
+    local_base_prem = 0.0
+    if candidate.explosion_event:
+        try:
+            from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+            _ict_for_sl = analyze_explosion_event_ict(candidate.explosion_event, snap)
+            local_base_prem = float(getattr(_ict_for_sl, "base_premium", 0) or 0)
+        except Exception:
+            local_base_prem = 0.0
+    if local_base_prem <= 0:
+        top = snap.topExplosion or {}
+        local_base_prem = float(top.get("ictBasePremium") or 0)
+
     exit_plan = _attach_exit_plan(
         snap, candidate.strategy_type, candidate.side.value,
         candidate.confidence, news,
@@ -814,6 +839,7 @@ async def _open_from_candidate(
         explosion_tier=(
             candidate.explosion_event.tier if candidate.explosion_event else None
         ),
+        local_base_premium=local_base_prem if local_base_prem > 0 else None,
     )
     exit_plan = tune_exit_plan_for_position(exit_plan, lots, fill_premium, symbol)
     if exit_plan and settings.edge_engine_enabled:

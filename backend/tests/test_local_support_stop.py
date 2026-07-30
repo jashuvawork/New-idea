@@ -66,6 +66,7 @@ def _settings(**overrides):
     s.exit_sl_local_support_buffer_pct = 0.02
     s.exit_sl_local_support_min_premium_frac = 0.06
     s.exit_sl_local_support_min_points = 5.0
+    s.exit_sl_chart_confirm_min_confidence = 70.0
     s.explosion_stop_max_pct_of_premium = 0.18
     s.explosion_stop_abs_max_points = 40.0
     s.explosion_chart_stop_min_natural_frac = 0.85
@@ -83,15 +84,23 @@ def test_pick_local_support_skips_noise_near_structure():
     assert _pick_local_support_pts([3.0, 14.0, 22.0], 80.0) == 14.0
 
 
-def test_pick_local_support_widens_when_all_noise():
-    # All below min (~5) → take farthest, not nearest toy
-    assert _pick_local_support_pts([2.0, 3.5, 4.0], 80.0) == 4.0
+def test_pick_local_support_ignores_all_noise():
+    # All below min (~5) → None so caller falls back to premium % (not a 4pt toy)
+    assert _pick_local_support_pts([2.0, 3.5, 4.0], 80.0) is None
 
 
 def test_premium_local_support_from_ict_base():
     snap = _snap(ict_base=62.0, premium=80.0)
     pts = _premium_local_support_stop_pts(snap, Side.CALL, 80.0)
     assert pts == 18.0  # 80 - 62
+
+
+def test_premium_local_support_explicit_base():
+    snap = _snap(ict_base=0.0, premium=193.07)
+    pts = _premium_local_support_stop_pts(
+        snap, Side.CALL, 193.07, local_base_premium=176.08,
+    )
+    assert pts is not None and abs(pts - 16.99) < 0.05
 
 
 @patch("app.engines.chart_exit_levels.chart_trade_confidence_with_raw")
@@ -113,6 +122,49 @@ def test_compute_chart_exit_uses_local_support(mock_settings, mock_conf):
     assert "premium_local_support_sl" in levels.sources
 
 
+@patch("app.engines.chart_exit_levels.chart_trade_confidence_with_raw")
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_jul30_77500_combined_local_and_premium_floor(mock_settings, mock_conf):
+    """Jul30 77500 CE ELITE: local base 176, entry 193 — SL ≥~17, not 7.99."""
+    mock_settings.return_value = _settings()
+    mock_conf.return_value = (75.6, 150.0, ["mtf_bullish", "mtf_align_5/5"])
+
+    levels = compute_chart_exit_levels(
+        _snap(ict_base=0.0, premium=193.07),
+        Side.CALL,
+        193.07,
+        base_stop=19.3,  # premium 10% natural
+        base_target=25.0,
+        local_base_premium=176.08,
+    )
+    assert levels.stopPoints >= 17.0, levels.stopPoints
+    assert levels.stopPoints >= 19.3, levels.stopPoints  # premium floor wins
+    assert "premium_local_support_sl" in levels.sources
+    assert "chart_confirmed_sl" in levels.sources or "sl_at_local_support" in levels.sources
+
+
+@patch("app.engines.chart_exit_levels.chart_trade_confidence_with_raw")
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_jul30_77400_invalid_base_keeps_premium_not_noise(mock_settings, mock_conf):
+    """Jul30 77400 CE: ICT base above entry — ignore; chart noise 3pt must not win."""
+    mock_settings.return_value = _settings()
+    mock_conf.return_value = (75.9, 150.0, ["mtf_bullish"])
+
+    # Ichimoku at spot → tiny structure distance; pick returns None.
+    snap = _snap(ict_base=268.86, premium=263.8)  # base > entry → invalid
+    levels = compute_chart_exit_levels(
+        snap,
+        Side.CALL,
+        263.8,
+        base_stop=26.4,
+        base_target=25.0,
+        local_base_premium=268.86,  # invalid for SL
+    )
+    # Must keep premium floor, not collapse to ~3pt chart noise
+    assert levels.stopPoints >= 26.0, levels.stopPoints
+    assert "premium_local_support_sl" not in levels.sources
+
+
 @patch("app.engines.chart_exit_levels.compute_chart_exit_levels")
 @patch("app.engines.chart_exit_levels.get_settings")
 def test_merge_places_sl_at_local_support_not_blend(mock_settings, mock_levels):
@@ -120,7 +172,12 @@ def test_merge_places_sl_at_local_support_not_blend(mock_settings, mock_levels):
     levels = MagicMock()
     levels.confidence = 90.0
     levels.confidenceRaw = 180.0
-    levels.sources = ["sl_at_local_support", "chart_structure_sl", "premium_local_support_sl"]
+    levels.sources = [
+        "sl_at_local_support",
+        "chart_structure_sl",
+        "premium_local_support_sl",
+        "chart_confirmed_local_support_sl",
+    ]
     levels.promoteToTrailing = True
     levels.stopPoints = 22.0
     levels.targetPoints = 25.0
@@ -143,7 +200,27 @@ def test_merge_places_sl_at_local_support_not_blend(mock_settings, mock_levels):
         "reasoning": [],
     }
     merged = merge_chart_into_exit_plan(base, _snap(), Side.CALL, 80.0)
-    # max(12, 22) — not a 72% blend toward anything smaller
     assert merged["stopPoints"] >= 22.0, merged["stopPoints"]
     assert merged["localSupportStopPoints"] == 22.0
     assert any("local support" in r.lower() for r in merged["reasoning"])
+
+
+@patch("app.engines.chart_exit_levels.chart_trade_confidence_with_raw")
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_77700_style_consolidation_base_sl(mock_settings, mock_conf):
+    """77700 CE style: consolidate ~90 then spike — SL below local base, not 8pt."""
+    mock_settings.return_value = _settings()
+    mock_conf.return_value = (78.0, 160.0, ["mtf_bullish", "smc_displacement"])
+
+    # Enter mid-rip at 150 with consolidation base at 90 → 60pt to support, capped
+    levels = compute_chart_exit_levels(
+        _snap(ict_base=90.0, premium=150.0),
+        Side.CALL,
+        150.0,
+        base_stop=15.0,
+        base_target=25.0,
+        local_base_premium=90.0,
+    )
+    assert levels.stopPoints >= 20.0, levels.stopPoints
+    assert levels.stopPoints <= 40.0, levels.stopPoints
+    assert "premium_local_support_sl" in levels.sources

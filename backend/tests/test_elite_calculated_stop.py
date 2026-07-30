@@ -191,10 +191,11 @@ def test_chart_merge_floors_at_natural_stop(mock_settings, mock_levels):
         "reasoning": ["Explosion SL from premium"],
     }
     merged = merge_chart_into_exit_plan(base, _snap(), "CALL", 80.0)
-    # Without floor: 26*(1-0.72)+4*0.72 ≈ 10.2; with 85% of 26 → ≥22.1
+    # Without floor: 26*(1-0.72)+4*0.72 ≈ 10.2; with local-support path or
+    # premium keep: stop stays ≥ natural (no crush to ~8pt).
     assert merged["stopPoints"] >= natural * 0.85 - 0.05, merged["stopPoints"]
     assert merged["naturalStopPoints"] == natural
-    assert any("Natural SL floor" in r for r in merged["reasoning"])
+    assert merged["stopPoints"] >= 22.0, merged["stopPoints"]
 
 
 @patch("app.engines.capital_allocator.lot_multiplier", return_value=20)

@@ -428,6 +428,9 @@ class Settings(BaseSettings):
     # Ignore structure closer than this (noise pivots that map to ~4pt "toy" stops).
     exit_sl_local_support_min_premium_frac: float = 0.06
     exit_sl_local_support_min_points: float = 5.0
+    # Chart confidence at/above this confirms local-support SL (high-conf runners
+    # are expected to move up without retesting; do not tighten toward noise).
+    exit_sl_chart_confirm_min_confidence: float = 70.0
     explosion_stop_min_hold_seconds: int = 15
     explosion_no_progress_enabled: bool = True
     explosion_no_progress_seconds: int = 150
