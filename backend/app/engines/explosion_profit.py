@@ -661,6 +661,88 @@ def _no_progress_limit_seconds(trade: PaperTrade, settings) -> int:
     return settings.explosion_no_progress_seconds
 
 
+def peak_fade_profit_lock_reason(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    max_profit: bool = False,
+) -> Optional[str]:
+    """Book remaining profit (or scratch near BE) when a peaked trade is fading to losses.
+
+    Trail only arms after a high peak (often 20pt+). Jul31 NIFTY 24500 CE peaked
+    +12.5pt then faded toward red with trail still unarmed — this closes that hole
+    without forcing tiny early TPs on still-rising rips.
+    """
+    settings = get_settings()
+    if not getattr(settings, "explosion_peak_fade_lock_enabled", True):
+        return None
+
+    min_best = float(
+        getattr(settings, "explosion_peak_fade_min_best_points", 6.0) or 6.0
+    )
+    giveback_ratio = float(
+        getattr(settings, "explosion_peak_fade_giveback_ratio", 0.55) or 0.55
+    )
+    if max_profit:
+        min_best = max(
+            min_best,
+            float(
+                getattr(settings, "explosion_peak_fade_max_profit_min_best", 15.0)
+                or 15.0
+            ),
+        )
+        giveback_ratio = max(
+            giveback_ratio,
+            float(
+                getattr(settings, "explosion_peak_fade_max_profit_giveback_ratio", 0.70)
+                or 0.70
+            ),
+        )
+
+    # CAUTION / PROTECT psychology → slightly tighter fade lock.
+    ctx = trade.entryContext or {}
+    psych = str(
+        ctx.get("psychologyLabel")
+        or ctx.get("psychology")
+        or ((ctx.get("exitPlan") or {}).get("psychologyLabel"))
+        or ""
+    ).upper()
+    if psych in ("CAUTION", "FEAR", "OVERCONFIDENCE") or str(
+        ctx.get("psychologyExitBias") or ""
+    ).upper() in ("PROTECT", "TIGHT_STOPS"):
+        min_best = max(5.0, min_best * 0.85)
+        giveback_ratio = min(giveback_ratio, 0.50)
+
+    if best < min_best:
+        return None
+
+    giveback = best - pnl_pts
+    min_give = float(
+        getattr(settings, "explosion_peak_fade_min_giveback_points", 4.0) or 4.0
+    )
+    min_remain = float(
+        getattr(settings, "explosion_peak_fade_min_remain_points", 0.4) or 0.4
+    )
+
+    # Still green, but most of the peak is gone → book what's left.
+    if (
+        pnl_pts >= min_remain
+        and giveback >= max(min_give, best * giveback_ratio)
+    ):
+        return "explosion_peak_fade_profit_lock"
+
+    # Peaked then back to ~breakeven / slightly red — don't wait for hard SL.
+    if getattr(settings, "explosion_peak_fade_breakeven_lock", True):
+        be_buf = float(
+            getattr(settings, "explosion_peak_fade_breakeven_buffer", 0.5) or 0.5
+        )
+        if pnl_pts <= be_buf and giveback >= min_give:
+            return "explosion_peak_fade_breakeven"
+
+    return None
+
+
 def evaluate_explosion_exit(
     trade: PaperTrade,
     current_premium: float,
@@ -688,6 +770,15 @@ def evaluate_explosion_exit(
     from app.engines.ict_breakout_monitor import _ict_max_profit_trade
 
     max_profit = _ict_max_profit_trade(trade)
+
+    # Peak→fade toward losses: book remaining green / BE before hard SL.
+    # Runs before trail-arm gates so unarmed trails cannot give winners back.
+    fade_lock = peak_fade_profit_lock_reason(
+        trade, best=best, pnl_pts=pnl_pts, max_profit=max_profit,
+    )
+    if fade_lock:
+        return fade_lock, pnl_inr
+
     target = exit_params.target_points
     if max_profit:
         target = max(
