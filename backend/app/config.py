@@ -305,6 +305,12 @@ class Settings(BaseSettings):
     # ICT max-profit runners: only lock after a larger peak / deeper fade.
     explosion_peak_fade_max_profit_min_best: float = 15.0
     explosion_peak_fade_max_profit_giveback_ratio: float = 0.70
+    # Still-bullish continuation can defer the soft giveback lock (healthy pullback).
+    # Near-breakeven lock after a real peak ALWAYS fires — chart lag must not
+    # turn winners into hard-SL losses.
+    explosion_peak_fade_defer_when_bullish: bool = True
+    explosion_peak_fade_bullish_min_remain_points: float = 3.0
+    explosion_peak_fade_bullish_min_velocity_3s: float = 1.5
 
     # Fake explosion trap — Jul20 NIFTY 24300 CE: RANGE + midday_chop + ELITE vel spike,
     # session~30%, live premium mom≈0, OTM inside OR after small win → never-green −₹18k.

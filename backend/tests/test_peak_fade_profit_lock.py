@@ -25,7 +25,11 @@ def _settings(**overrides):
     s.explosion_peak_fade_breakeven_buffer = 0.5
     s.explosion_peak_fade_max_profit_min_best = 15.0
     s.explosion_peak_fade_max_profit_giveback_ratio = 0.70
+    s.explosion_peak_fade_defer_when_bullish = True
+    s.explosion_peak_fade_bullish_min_remain_points = 3.0
+    s.explosion_peak_fade_bullish_min_velocity_3s = 1.5
     s.explosion_faded_rip_no_green_exit_enabled = False
+    s.bullish_hold_enabled = True
     s.explosion_stop_min_hold_seconds = 0
     s.emergency_stop_enabled = False
     s.ict_max_profit_skip_hard_target = True
@@ -163,3 +167,66 @@ def test_max_profit_needs_larger_peak(mock_s):
         max_profit=True,
     )
     assert reason2 == "explosion_peak_fade_profit_lock"
+
+
+@patch("app.engines.explosion_profit._chart_aligned_with_trade", return_value=True)
+@patch("app.engines.bullish_hold.direction_aligned_with_breadth", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+def test_bullish_continuation_defers_soft_lock(mock_s, _br, _ch):
+    """Aligned + live heat + still ≥3pt green → hold pullback (not force bank)."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        current=48.0,
+        best=12.53,
+        ctx={
+            "breadth": "BULLISH",
+            "liveVelocity3s": 3.5,
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+        },
+    )
+    # +5.45 remain, giveback 7.08 (56% of peak) — would soft-lock without bullish defer.
+    reason = peak_fade_profit_lock_reason(
+        trade, best=12.53, pnl_pts=5.45, max_profit=False,
+    )
+    assert reason is None
+
+
+@patch("app.engines.explosion_profit._chart_aligned_with_trade", return_value=True)
+@patch("app.engines.bullish_hold.direction_aligned_with_breadth", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+def test_bullish_chart_still_locks_near_breakeven(mock_s, _br, _ch):
+    """Stale BULLISH chart must not ride a peaked winner into hard SL."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        current=42.6,
+        best=12.53,
+        ctx={"breadth": "BULLISH", "liveVelocity3s": 4.0, "psychologyLabel": "NEUTRAL"},
+    )
+    reason = peak_fade_profit_lock_reason(
+        trade, best=12.53, pnl_pts=0.05, max_profit=False,
+    )
+    assert reason == "explosion_peak_fade_breakeven"
+
+
+@patch("app.engines.explosion_profit._chart_aligned_with_trade", return_value=True)
+@patch("app.engines.bullish_hold.direction_aligned_with_breadth", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+def test_bullish_but_dead_premium_still_soft_locks(mock_s, _br, _ch):
+    """Chart bullish but velocity dead and only +2pt left → book (not wait for bearish flip)."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        current=44.85,
+        best=12.53,
+        ctx={
+            "breadth": "BULLISH",
+            "liveVelocity3s": 0.2,
+            "entryVelocity3s": 0.2,
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+        },
+    )
+    reason = peak_fade_profit_lock_reason(
+        trade, best=12.53, pnl_pts=2.3, max_profit=False,
+    )
+    assert reason == "explosion_peak_fade_profit_lock"

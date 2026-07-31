@@ -661,6 +661,54 @@ def _no_progress_limit_seconds(trade: PaperTrade, settings) -> int:
     return settings.explosion_no_progress_seconds
 
 
+def _peak_fade_bullish_continuation(
+    trade: PaperTrade,
+    *,
+    pnl_pts: float,
+    settings: Any,
+) -> bool:
+    """True when live analysis still supports holding a healthy pullback.
+
+    Chart/breadth bullish alone is NOT enough — options often die while the
+    index chart stays bullish. Require aligned direction + live heat, and that
+    we still have meaningful remaining green (not almost back to entry).
+    """
+    if not getattr(settings, "explosion_peak_fade_defer_when_bullish", True):
+        return False
+    min_remain = float(
+        getattr(settings, "explosion_peak_fade_bullish_min_remain_points", 3.0) or 3.0
+    )
+    if pnl_pts < min_remain:
+        return False
+
+    from app.engines.bullish_hold import direction_aligned_with_breadth
+
+    aligned = direction_aligned_with_breadth(trade) or _chart_aligned_with_trade(trade)
+    if not aligned:
+        return False
+
+    ctx = trade.entryContext or {}
+    # Live premium velocity if present on context; else treat as not hot.
+    live_v3 = float(
+        ctx.get("liveVelocity3s")
+        or ctx.get("velocity3s")
+        or ctx.get("entryVelocity3s")
+        or 0
+    )
+    # Prefer freshest chart premium momentum when execution chart is attached.
+    exec_chart = ctx.get("executionChart") or {}
+    prem_chart = exec_chart.get("premiumChart") or ctx.get("premiumChart") or {}
+    try:
+        mom = float(prem_chart.get("momentum3Pct") or prem_chart.get("momentum5Pct") or 0)
+    except (TypeError, ValueError):
+        mom = 0.0
+    min_v3 = float(
+        getattr(settings, "explosion_peak_fade_bullish_min_velocity_3s", 1.5) or 1.5
+    )
+    # Still expanding / not dead → allow bullish pullback hold.
+    return live_v3 >= min_v3 or mom >= 0.8
+
+
 def peak_fade_profit_lock_reason(
     trade: PaperTrade,
     *,
@@ -673,6 +721,10 @@ def peak_fade_profit_lock_reason(
     Trail only arms after a high peak (often 20pt+). Jul31 NIFTY 24500 CE peaked
     +12.5pt then faded toward red with trail still unarmed — this closes that hole
     without forcing tiny early TPs on still-rising rips.
+
+    Bullish continuation (aligned + live heat + still meaningful green) can defer
+    the soft giveback lock. Near-breakeven after a real peak always protects —
+    stale "still bullish" chart must not ride a winner into hard SL.
     """
     settings = get_settings()
     if not getattr(settings, "explosion_peak_fade_lock_enabled", True):
@@ -725,20 +777,24 @@ def peak_fade_profit_lock_reason(
         getattr(settings, "explosion_peak_fade_min_remain_points", 0.4) or 0.4
     )
 
-    # Still green, but most of the peak is gone → book what's left.
-    if (
-        pnl_pts >= min_remain
-        and giveback >= max(min_give, best * giveback_ratio)
-    ):
-        return "explosion_peak_fade_profit_lock"
-
-    # Peaked then back to ~breakeven / slightly red — don't wait for hard SL.
+    # Peaked then back to ~breakeven / slightly red — ALWAYS protect.
+    # Chart may still print BULLISH while premium is already dead.
     if getattr(settings, "explosion_peak_fade_breakeven_lock", True):
         be_buf = float(
             getattr(settings, "explosion_peak_fade_breakeven_buffer", 0.5) or 0.5
         )
         if pnl_pts <= be_buf and giveback >= min_give:
             return "explosion_peak_fade_breakeven"
+
+    # Soft lock: still green, but most of the peak is gone.
+    if (
+        pnl_pts >= min_remain
+        and giveback >= max(min_give, best * giveback_ratio)
+    ):
+        if _peak_fade_bullish_continuation(trade, pnl_pts=pnl_pts, settings=settings):
+            # Healthy bullish pullback — hold; do not force early bank.
+            return None
+        return "explosion_peak_fade_profit_lock"
 
     return None
 
