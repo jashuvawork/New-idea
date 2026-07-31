@@ -311,6 +311,18 @@ class Settings(BaseSettings):
     explosion_peak_fade_defer_when_bullish: bool = True
     explosion_peak_fade_bullish_min_remain_points: float = 3.0
     explosion_peak_fade_bullish_min_velocity_3s: float = 1.5
+    # Peak capture — bank near the top once a real peak prints and premium rolls over.
+    # Jul31 NIFTY 24500 CE: best ~+10–12pt, trailArm ~23 never armed, time-stop −0.6.
+    # After best ≥8pt, if giveback ≥22% AND live heat is dying → book (~keep 75–80%).
+    explosion_peak_capture_enabled: bool = True
+    explosion_peak_capture_min_best_points: float = 8.0
+    explosion_peak_capture_giveback_ratio: float = 0.22
+    explosion_peak_capture_min_giveback_points: float = 2.0
+    explosion_peak_capture_min_remain_points: float = 1.0
+    explosion_peak_capture_max_live_velocity_3s: float = 1.0
+    explosion_peak_capture_max_premium_mom_pct: float = 0.15
+    explosion_peak_capture_max_profit_min_best: float = 18.0
+    explosion_peak_capture_max_profit_giveback_ratio: float = 0.30
 
     # Fake explosion trap — Jul20 NIFTY 24300 CE: RANGE + midday_chop + ELITE vel spike,
     # session~30%, live premium mom≈0, OTM inside OR after small win → never-green −₹18k.

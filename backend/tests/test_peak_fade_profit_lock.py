@@ -1,4 +1,4 @@
-"""Peak-fade profit lock — book remaining green when a peaked trade fades to losses."""
+"""Peak-fade / peak-capture profit locks — book near the top when a peaked trade dies."""
 
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from app.engines.explosion_profit import (
     ExplosionExitParams,
     evaluate_explosion_exit,
+    peak_capture_profit_lock_reason,
     peak_fade_profit_lock_reason,
 )
 from app.models.schemas import PaperTrade, Side, StrategyType
@@ -28,6 +29,15 @@ def _settings(**overrides):
     s.explosion_peak_fade_defer_when_bullish = True
     s.explosion_peak_fade_bullish_min_remain_points = 3.0
     s.explosion_peak_fade_bullish_min_velocity_3s = 1.5
+    s.explosion_peak_capture_enabled = True
+    s.explosion_peak_capture_min_best_points = 8.0
+    s.explosion_peak_capture_giveback_ratio = 0.22
+    s.explosion_peak_capture_min_giveback_points = 2.0
+    s.explosion_peak_capture_min_remain_points = 1.0
+    s.explosion_peak_capture_max_live_velocity_3s = 1.0
+    s.explosion_peak_capture_max_premium_mom_pct = 0.15
+    s.explosion_peak_capture_max_profit_min_best = 18.0
+    s.explosion_peak_capture_max_profit_giveback_ratio = 0.30
     s.explosion_faded_rip_no_green_exit_enabled = False
     s.bullish_hold_enabled = True
     s.explosion_stop_min_hold_seconds = 0
@@ -106,14 +116,73 @@ def _params() -> ExplosionExitParams:
 
 
 @patch("app.engines.explosion_profit.get_settings")
-def test_jul31_fade_from_12pt_books_remaining_green(mock_s):
-    """best +12.5 → +2.3 with trail unarmed → lock remaining profit."""
+def test_peak_capture_near_12pt_top_when_rolling_over(mock_s):
+    """best +12 → +9.2 with cold velocity → bank near the peak (not wait for time-stop)."""
     mock_s.return_value = _settings()
-    # current 44.85 → +2.3pt; giveback 10.23 ≈ 82% of peak
-    reason = peak_fade_profit_lock_reason(
-        _trade(current=44.85), best=12.53, pnl_pts=2.3, max_profit=False,
+    trade = _trade(
+        current=51.75,
+        best=12.0,
+        ctx={
+            "liveVelocity3s": 0.3,
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+            "premiumChart": {"momentum3Pct": -0.2},
+        },
     )
-    assert reason == "explosion_peak_fade_profit_lock"
+    # giveback 2.8 ≈ 23% of 12 — above 22% capture threshold, still ~+9 green
+    reason = peak_capture_profit_lock_reason(
+        trade, best=12.0, pnl_pts=9.2, max_profit=False, live_velocity_3s=0.3,
+    )
+    assert reason == "explosion_peak_capture"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_peak_capture_skips_hot_velocity(mock_s):
+    """Same giveback while still ripping → do not force near-top bank."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        current=51.75,
+        best=12.0,
+        ctx={"liveVelocity3s": 3.8, "premiumChart": {"momentum3Pct": 1.2}},
+    )
+    reason = peak_capture_profit_lock_reason(
+        trade, best=12.0, pnl_pts=9.2, max_profit=False, live_velocity_3s=3.8,
+    )
+    assert reason is None
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_peak_fade_prefers_capture_before_deep_fade(mock_s):
+    """Ladder: near-top capture fires before deep 55% fade lock."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        current=51.75,
+        best=12.0,
+        ctx={
+            "liveVelocity3s": 0.2,
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+        },
+    )
+    reason = peak_fade_profit_lock_reason(
+        trade, best=12.0, pnl_pts=9.2, max_profit=False, live_velocity_3s=0.2,
+    )
+    assert reason == "explosion_peak_capture"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_jul31_fade_from_12pt_books_remaining_green(mock_s):
+    """best +12.5 → +2.3 with trail unarmed → capture/lock remaining profit."""
+    mock_s.return_value = _settings()
+    # current 44.85 → +2.3pt; giveback 10.23 — peak capture fires first (cold tape).
+    reason = peak_fade_profit_lock_reason(
+        _trade(current=44.85, ctx={"liveVelocity3s": 0.1}),
+        best=12.53,
+        pnl_pts=2.3,
+        max_profit=False,
+        live_velocity_3s=0.1,
+    )
+    assert reason == "explosion_peak_capture"
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=False)
@@ -121,11 +190,11 @@ def test_jul31_fade_from_12pt_books_remaining_green(mock_s):
 @patch("app.engines.explosion_profit.get_settings")
 def test_evaluate_exit_locks_jul31_profile(mock_s, _hc, _mp):
     mock_s.return_value = _settings()
-    trade = _trade(current=44.85, best=12.53)
+    trade = _trade(current=44.85, best=12.53, ctx={"liveVelocity3s": 0.1})
     reason, pnl = evaluate_explosion_exit(
-        trade, 44.85, "EXPLODING", 65, params=_params(),
+        trade, 44.85, "EXPLODING", 65, params=_params(), live_velocity_3s=0.1,
     )
-    assert reason == "explosion_peak_fade_profit_lock"
+    assert reason == "explosion_peak_capture"
     assert pnl > 0
 
 
@@ -143,7 +212,11 @@ def test_still_rising_not_locked(mock_s):
     """+10pt and still near peak — do not force early bank."""
     mock_s.return_value = _settings()
     reason = peak_fade_profit_lock_reason(
-        _trade(current=52.0, best=10.0), best=10.0, pnl_pts=9.45, max_profit=False,
+        _trade(current=52.0, best=10.0, ctx={"liveVelocity3s": 2.5}),
+        best=10.0,
+        pnl_pts=9.45,
+        max_profit=False,
+        live_velocity_3s=2.5,
     )
     assert reason is None
 
@@ -157,16 +230,18 @@ def test_max_profit_needs_larger_peak(mock_s):
         best=12.53,
         pnl_pts=2.3,
         max_profit=True,
+        live_velocity_3s=0.1,
     )
     assert reason is None
-    # After a real expansion peak, deep fade does lock.
+    # After a real expansion peak, deep fade / capture does lock.
     reason2 = peak_fade_profit_lock_reason(
-        _trade(current=50.0, best=40.0),
+        _trade(current=50.0, best=40.0, ctx={"liveVelocity3s": 0.2}),
         best=40.0,
         pnl_pts=7.45,
         max_profit=True,
+        live_velocity_3s=0.2,
     )
-    assert reason2 == "explosion_peak_fade_profit_lock"
+    assert reason2 == "explosion_peak_capture"
 
 
 @patch("app.engines.explosion_profit._chart_aligned_with_trade", return_value=True)
@@ -183,11 +258,13 @@ def test_bullish_continuation_defers_soft_lock(mock_s, _br, _ch):
             "liveVelocity3s": 3.5,
             "psychologyLabel": "NEUTRAL",
             "psychologyExitBias": "BALANCED",
+            "premiumChart": {"momentum3Pct": 1.5},
         },
     )
     # +5.45 remain, giveback 7.08 (56% of peak) — would soft-lock without bullish defer.
+    # Hot velocity also vetoes near-top capture.
     reason = peak_fade_profit_lock_reason(
-        trade, best=12.53, pnl_pts=5.45, max_profit=False,
+        trade, best=12.53, pnl_pts=5.45, max_profit=False, live_velocity_3s=3.5,
     )
     assert reason is None
 
@@ -204,7 +281,7 @@ def test_bullish_chart_still_locks_near_breakeven(mock_s, _br, _ch):
         ctx={"breadth": "BULLISH", "liveVelocity3s": 4.0, "psychologyLabel": "NEUTRAL"},
     )
     reason = peak_fade_profit_lock_reason(
-        trade, best=12.53, pnl_pts=0.05, max_profit=False,
+        trade, best=12.53, pnl_pts=0.05, max_profit=False, live_velocity_3s=4.0,
     )
     assert reason == "explosion_peak_fade_breakeven"
 
@@ -227,6 +304,6 @@ def test_bullish_but_dead_premium_still_soft_locks(mock_s, _br, _ch):
         },
     )
     reason = peak_fade_profit_lock_reason(
-        trade, best=12.53, pnl_pts=2.3, max_profit=False,
+        trade, best=12.53, pnl_pts=2.3, max_profit=False, live_velocity_3s=0.2,
     )
-    assert reason == "explosion_peak_fade_profit_lock"
+    assert reason == "explosion_peak_capture"
