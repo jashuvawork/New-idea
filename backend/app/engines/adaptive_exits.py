@@ -389,7 +389,12 @@ def evaluate_adaptive_explosion_exit(
     IST = ZoneInfo("Asia/Kolkata")
     params = explosion_exit_params_from_plan(plan, tier)
     exit_reason, pnl = evaluate_explosion_exit(
-        trade, current_premium, tier, lot_multiplier, params=params,
+        trade,
+        current_premium,
+        tier,
+        lot_multiplier,
+        params=params,
+        live_velocity_3s=current_velocity_3s,
     )
     if exit_reason:
         return exit_reason, pnl

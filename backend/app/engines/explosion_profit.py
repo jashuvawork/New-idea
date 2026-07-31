@@ -709,12 +709,131 @@ def _peak_fade_bullish_continuation(
     return live_v3 >= min_v3 or mom >= 0.8
 
 
+def _live_premium_heat(trade: PaperTrade, *, live_velocity_3s: float = 0.0) -> tuple[float, float]:
+    """Return (live_v3, premium_mom_pct) for rollover detection."""
+    ctx = trade.entryContext or {}
+    live_v3 = float(
+        live_velocity_3s
+        or ctx.get("liveVelocity3s")
+        or ctx.get("velocity3s")
+        or 0
+    )
+    exec_chart = ctx.get("executionChart") or {}
+    prem_chart = exec_chart.get("premiumChart") or ctx.get("premiumChart") or {}
+    try:
+        mom = float(prem_chart.get("momentum3Pct") or prem_chart.get("momentum5Pct") or 0)
+    except (TypeError, ValueError):
+        mom = 0.0
+    return live_v3, mom
+
+
+def _premium_rolling_over(
+    trade: PaperTrade,
+    *,
+    settings: Any,
+    live_velocity_3s: float = 0.0,
+) -> bool:
+    """True when live premium heat is dying — safe to capture near the peak.
+
+    Hot velocity vetoes capture so still-expanding rips are not forced out.
+    Cold velocity + flat/negative mom confirms rollover.
+    """
+    live_v3, mom = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
+    max_v3 = float(
+        getattr(settings, "explosion_peak_capture_max_live_velocity_3s", 1.0) or 1.0
+    )
+    max_mom = float(
+        getattr(settings, "explosion_peak_capture_max_premium_mom_pct", 0.15) or 0.15
+    )
+    if live_v3 > max_v3:
+        return False
+    return mom <= max_mom
+
+
+def peak_capture_profit_lock_reason(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    max_profit: bool = False,
+    live_velocity_3s: float = 0.0,
+) -> Optional[str]:
+    """Bank near the peak once a real top prints and premium starts rolling over.
+
+    Unlike deep peak-fade (55% giveback), this keeps ~75–80% of the peak when
+    analysis shows the move is dying — e.g. best +12 → exit around +9.
+    Still-rising heat (hot velocity / positive mom) skips capture so runners extend.
+    """
+    settings = get_settings()
+    if not getattr(settings, "explosion_peak_capture_enabled", True):
+        return None
+
+    min_best = float(
+        getattr(settings, "explosion_peak_capture_min_best_points", 8.0) or 8.0
+    )
+    giveback_ratio = float(
+        getattr(settings, "explosion_peak_capture_giveback_ratio", 0.22) or 0.22
+    )
+    if max_profit:
+        min_best = max(
+            min_best,
+            float(
+                getattr(settings, "explosion_peak_capture_max_profit_min_best", 18.0)
+                or 18.0
+            ),
+        )
+        giveback_ratio = max(
+            giveback_ratio,
+            float(
+                getattr(
+                    settings, "explosion_peak_capture_max_profit_giveback_ratio", 0.30
+                )
+                or 0.30
+            ),
+        )
+
+    ctx = trade.entryContext or {}
+    psych = str(
+        ctx.get("psychologyLabel")
+        or ctx.get("psychology")
+        or ((ctx.get("exitPlan") or {}).get("psychologyLabel"))
+        or ""
+    ).upper()
+    if psych in ("CAUTION", "FEAR", "OVERCONFIDENCE") or str(
+        ctx.get("psychologyExitBias") or ""
+    ).upper() in ("PROTECT", "TIGHT_STOPS"):
+        min_best = max(6.0, min_best * 0.85)
+        giveback_ratio = min(giveback_ratio, 0.18)
+
+    if best < min_best:
+        return None
+
+    giveback = best - pnl_pts
+    min_give = float(
+        getattr(settings, "explosion_peak_capture_min_giveback_points", 2.0) or 2.0
+    )
+    min_remain = float(
+        getattr(settings, "explosion_peak_capture_min_remain_points", 1.0) or 1.0
+    )
+    if pnl_pts < min_remain:
+        return None
+    if giveback < max(min_give, best * giveback_ratio):
+        return None
+    # Only capture when the tape shows rollover — not on a still-expanding rip.
+    if not _premium_rolling_over(
+        trade, settings=settings, live_velocity_3s=live_velocity_3s,
+    ):
+        return None
+    return "explosion_peak_capture"
+
+
 def peak_fade_profit_lock_reason(
     trade: PaperTrade,
     *,
     best: float,
     pnl_pts: float,
     max_profit: bool = False,
+    live_velocity_3s: float = 0.0,
 ) -> Optional[str]:
     """Book remaining profit (or scratch near BE) when a peaked trade is fading to losses.
 
@@ -722,11 +841,23 @@ def peak_fade_profit_lock_reason(
     +12.5pt then faded toward red with trail still unarmed — this closes that hole
     without forcing tiny early TPs on still-rising rips.
 
-    Bullish continuation (aligned + live heat + still meaningful green) can defer
-    the soft giveback lock. Near-breakeven after a real peak always protects —
-    stale "still bullish" chart must not ride a winner into hard SL.
+    Order: peak-capture (near top) → breakeven protect → deep fade lock.
+    Bullish continuation can defer the deep soft lock only.
     """
     settings = get_settings()
+
+    # Near-peak capture when rollover is confirmed (best +12 → book ~+9).
+    # Own enable flag — runs even if deep peak-fade lock is disabled.
+    capture = peak_capture_profit_lock_reason(
+        trade,
+        best=best,
+        pnl_pts=pnl_pts,
+        max_profit=max_profit,
+        live_velocity_3s=live_velocity_3s,
+    )
+    if capture:
+        return capture
+
     if not getattr(settings, "explosion_peak_fade_lock_enabled", True):
         return None
 
@@ -805,6 +936,8 @@ def evaluate_explosion_exit(
     event_tier: str = "EXPLODING",
     lot_multiplier: int = 25,
     params: Optional[ExplosionExitParams] = None,
+    *,
+    live_velocity_3s: float = 0.0,
 ) -> tuple[Optional[str], float]:
     """
     Explosion exits: hard SL when losing, trailing SL + TP while winning.
@@ -827,10 +960,24 @@ def evaluate_explosion_exit(
 
     max_profit = _ict_max_profit_trade(trade)
 
+    # Stamp live heat so peak-capture / bullish-defer see the same tape.
+    try:
+        v3 = float(live_velocity_3s or 0.0)
+    except (TypeError, ValueError):
+        v3 = 0.0
+    if trade.entryContext is None:
+        trade.entryContext = {}
+    if v3 or "liveVelocity3s" not in trade.entryContext:
+        trade.entryContext["liveVelocity3s"] = round(v3, 3)
+
     # Peak→fade toward losses: book remaining green / BE before hard SL.
     # Runs before trail-arm gates so unarmed trails cannot give winners back.
     fade_lock = peak_fade_profit_lock_reason(
-        trade, best=best, pnl_pts=pnl_pts, max_profit=max_profit,
+        trade,
+        best=best,
+        pnl_pts=pnl_pts,
+        max_profit=max_profit,
+        live_velocity_3s=v3,
     )
     if fade_lock:
         return fade_lock, pnl_inr

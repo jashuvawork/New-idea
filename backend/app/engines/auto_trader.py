@@ -1321,6 +1321,12 @@ async def _process_open_trades(
         )
 
         live_vel = _trade_premium_velocity(snap, trade)
+        if trade.entryContext is None:
+            trade.entryContext = {}
+        try:
+            trade.entryContext["liveVelocity3s"] = round(float(live_vel or 0.0), 3)
+        except (TypeError, ValueError):
+            trade.entryContext["liveVelocity3s"] = 0.0
         refresh_open_trade_chart_plan(trade, snap)
         update_live_chart_trail(trade, snap)
         plan_dict = (trade.entryContext or {}).get("exitPlan") or plan_dict
@@ -1369,7 +1375,12 @@ async def _process_open_trades(
                 if (trade.entryContext or {}).get("afternoonCapture"):
                     exit_params = afternoon_capture_exit_params(tier)
                 exit_reason, pnl = evaluate_explosion_exit(
-                    trade, eval_premium, tier, lot_mult, params=exit_params,
+                    trade,
+                    eval_premium,
+                    tier,
+                    lot_mult,
+                    params=exit_params,
+                    live_velocity_3s=live_vel,
                 )
         elif not exit_reason and (trade.entryContext or {}).get("selectionMode") == "worst_day_itm_fade":
             exit_reason, pnl = evaluate_worst_day_itm_fade_exit(
