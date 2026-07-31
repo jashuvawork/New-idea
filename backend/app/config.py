@@ -292,6 +292,20 @@ class Settings(BaseSettings):
     explosion_faded_rip_no_green_seconds: int = 45
     explosion_faded_rip_min_green_points: float = 0.5
     faded_rip_no_green_hold_min_session_move_pct: float = 60.0
+    # Peak-fade profit lock — Jul31 NIFTY 24500 CE: best +12.5pt then fade toward
+    # losses while trailArm (~23pt) never armed. Book remaining green / breakeven
+    # instead of waiting for hard SL.
+    explosion_peak_fade_lock_enabled: bool = True
+    explosion_peak_fade_min_best_points: float = 6.0
+    explosion_peak_fade_giveback_ratio: float = 0.55
+    explosion_peak_fade_min_giveback_points: float = 4.0
+    explosion_peak_fade_min_remain_points: float = 0.4
+    explosion_peak_fade_breakeven_lock: bool = True
+    explosion_peak_fade_breakeven_buffer: float = 0.5
+    # ICT max-profit runners: only lock after a larger peak / deeper fade.
+    explosion_peak_fade_max_profit_min_best: float = 15.0
+    explosion_peak_fade_max_profit_giveback_ratio: float = 0.70
+
     # Fake explosion trap — Jul20 NIFTY 24300 CE: RANGE + midday_chop + ELITE vel spike,
     # session~30%, live premium mom≈0, OTM inside OR after small win → never-green −₹18k.
     # Market harvests FOMO; system must not treat post-extension spikes as ELITE full-size.
