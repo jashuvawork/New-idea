@@ -51,6 +51,9 @@ def _settings(**overrides):
     s.fake_explosion_trap_post_win_lookback = 1
     s.fake_explosion_trap_psychology_escalate = True
     s.fake_explosion_trap_skip_soft_cut_base_window = True
+    s.fake_explosion_trap_skip_soft_cut_near_otm = True
+    s.moneyness_local_base_max_otm_steps = 3
+    s.fake_explosion_trap_midday_require_structure = True
     s.moneyness_explosion_prefer = "ATM"
     s.trade_moneyness_mode = "AUTO"
     s.midday_chop_start_hour = 11
@@ -246,6 +249,41 @@ def test_jul15_atm_base_window_not_hard_blocked(mock_money_settings, mock_settin
     assert "base_window" in meta.get("conflictFlags", [])
     assert "session_extended" not in meta.get("conflictFlags", [])
     assert cap_fake_explosion_trap_lots(49, meta) == 49
+
+
+@patch("app.engines.elite_never_block.elite_never_block_active", return_value=False)
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_jul31_near_otm_base_window_full_lots(
+    mock_money_settings, mock_settings, _mock_enb,
+):
+    """Jul31 NIFTY 24500 CE — 2-step OTM + local base in 28–55% → no 6-lot soft cut."""
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+    snap = _snap(or_pos="ABOVE")
+    snap.atmStrike = 24400.0
+    snap.spot = 24420.0
+    cand = _candidate(
+        _event(daily=29.9, v3=4.5, tier="EXPLODING", strike=24500.0),
+        snap,
+    )
+    ict = _confirmed_ict(29.9)
+    ict.local_swing_base = True
+    ict.base_premium = 31.9
+    ict.base_relative_move_pct = 28.7
+    ict.volume_awakening = True
+    ict.displacement = True
+    with patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=True):
+        blocked, reason, meta = detect_fake_explosion_trap(cand, snap, ict=ict)
+    assert blocked is False
+    assert meta.get("action") != "cut_size", meta
+    assert meta.get("baseWindowFullLots") is True
+    assert cap_fake_explosion_trap_lots(64, meta, bypass_soft_cap=False) == 64
+    assert cap_fake_explosion_trap_lots(
+        64, {"fakeExplosionTrap": True, "action": "cut_size", "lotCap": 6},
+        bypass_soft_cap=True,
+    ) == 64
 
 
 def test_high_conviction_bypasses_soft_trap_cap():

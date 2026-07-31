@@ -524,17 +524,23 @@ async def _open_from_candidate(
                 or regime in ("CHOP", "RANGE_BOUND")
                 or is_chop_session(snapshots)
             )
+        defensive_full = bool(
+            ict_meta.get("defensiveBaseRip")
+            and getattr(settings, "ict_defensive_base_rip_full_lots", True)
+        )
         if (
             good_day_ict
             and settings.ict_good_day_force_max_lots
             and ict_meta.get("maxProfitCapture")
-            and not ict_meta.get("defensiveBaseRip")
             and float(ict_meta.get("lotMultiplier") or 1.0) >= 0.99
-            and not chopish_day
+            and (not chopish_day or defensive_full)
         ):
             from app.engines.capital_allocator import max_lots_for_capital
 
+            # Structured defensive base rip (Jul31 24500 CE) → capital max, not 0.55×/6.
             lots = max(lots, max_lots_for_capital(symbol, fill_premium))
+            if defensive_full:
+                ict_meta["baseWindowFullLots"] = True
         elif good_day_ict and (
             ict_meta.get("allDayIctCapture") or ict_meta.get("defensiveBaseRip")
         ):
@@ -546,6 +552,7 @@ async def _open_from_candidate(
     high_conviction = False
     elevated_size = False
     top_explosion_max = False
+    base_window_full_lots = bool((ict_meta or {}).get("baseWindowFullLots"))
     if candidate.mode == "explosion" and candidate.explosion_event is not None:
         from app.engines.chart_exit_levels import chart_trade_confidence
         from app.engines.explosion_confidence import (
@@ -648,7 +655,22 @@ async def _open_from_candidate(
                 lots = max(lots, max_lots_for_capital(symbol, fill_premium))
                 top_explosion_max = True
 
-    force_max_size = bool(high_conviction or top_explosion_max)
+    # Structured base-window / defensive base rip → full capital lots (no 6-lot soft caps).
+    if (
+        candidate.mode == "explosion"
+        and getattr(settings, "base_window_full_lots_enabled", True)
+        and (
+            base_window_full_lots
+            or bool((trap_meta or {}).get("baseWindowFullLots"))
+        )
+    ):
+        from app.engines.capital_allocator import max_lots_for_capital
+
+        lots = max(lots, max_lots_for_capital(symbol, fill_premium))
+        base_window_full_lots = True
+        top_explosion_max = True
+
+    force_max_size = bool(high_conviction or top_explosion_max or base_window_full_lots)
 
     lots = clamp_lots(lots, symbol, fill_premium)
     if candidate.mode == "explosion" and trap_meta:
@@ -662,6 +684,10 @@ async def _open_from_candidate(
             or (bool(top_explosion_max) and bool(
                 getattr(settings, "top_explosion_force_max_bypasses_fake_trap_lot_cap", True)
             ))
+            or (
+                base_window_full_lots
+                and bool(getattr(settings, "base_window_full_lots_enabled", True))
+            )
         )
         lots = cap_fake_explosion_trap_lots(
             lots, trap_meta, bypass_soft_cap=bypass_soft,
@@ -670,6 +696,7 @@ async def _open_from_candidate(
             return False, str(trap_meta.get("action") or "fake_explosion_trap")
     skip_first_green = force_max_size and (
         high_conviction
+        or base_window_full_lots
         or bool(getattr(settings, "top_explosion_force_max_bypasses_first_green", True))
     )
     if candidate.mode in ("explosion", "scalp") and not skip_first_green:
@@ -762,6 +789,10 @@ async def _open_from_candidate(
                         or (bool(top_explosion_max) and bool(
                             getattr(settings, "top_explosion_force_max_bypasses_fake_trap_lot_cap", True)
                         ))
+                        or (
+                            base_window_full_lots
+                            or bool(trap_meta.get("baseWindowFullLots"))
+                        )
                     )
                     lots = cap_fake_explosion_trap_lots(
                         lots, trap_meta, bypass_soft_cap=bypass_soft,
@@ -896,6 +927,7 @@ async def _open_from_candidate(
         "highConviction": bool(high_conviction),
         "elevatedSize": bool(elevated_size),
         "topExplosionMaxLots": bool(top_explosion_max),
+        "baseWindowFullLots": bool(base_window_full_lots),
         "sameStrikePostWinCap": post_win_cap_meta or None,
     }
     from app.engines.moneyness import classify_moneyness

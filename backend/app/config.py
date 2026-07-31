@@ -599,11 +599,17 @@ class Settings(BaseSettings):
     moneyness_high_conf_prefer: str = "ITM"
     moneyness_rank_bonus: float = 12.0
     moneyness_mismatch_penalty: float = 15.0
-    # ATM/ITM inside the 28–55% base window must not get fake-trap soft lot-cap
-    # (Jul23 76300 PE high-conviction was cut to 6 lots then stopped never-green).
+    # Base-window (28–55%) structured rips must not get fake-trap soft lot-cap of 6.
+    # Jul23 ATM/ITM keep; Jul31 NIFTY 24500 CE (2-step OTM + local base) was wrongly
+    # cut to 6 lots — allow near-OTM ≤ moneyness_local_base_max_otm_steps too.
     fake_explosion_trap_skip_soft_cut_base_window: bool = True
+    fake_explosion_trap_skip_soft_cut_near_otm: bool = True
     # High-conviction max lots win over fake-trap soft cap (hard block still applies).
     high_conviction_bypasses_fake_trap_lot_cap: bool = True
+    # Structured base-window explosions take capital max lots (no first-green 6-lot throttle).
+    base_window_full_lots_enabled: bool = True
+    # DEFENSIVE/worst base rips: full capital lots (was 0.55 → under-sized Jul31 6-lot entry).
+    ict_defensive_base_rip_full_lots: bool = True
 
     # Expiry-day playbook — fewer trades, morning focus, worst-day prediction
     expiry_day_guards_enabled: bool = True
@@ -1217,7 +1223,8 @@ class Settings(BaseSettings):
     ict_late_chase_max_live_velocity_3s: float = 1.0
     # DEFENSIVE/worst days: still catch true flat→vertical base rips (12→392 PE style).
     ict_defensive_base_rip_enabled: bool = True
-    ict_defensive_base_rip_lot_multiplier: float = 0.55
+    # Kept for rollback; live path uses full lots when ict_defensive_base_rip_full_lots.
+    ict_defensive_base_rip_lot_multiplier: float = 1.0
     ict_defensive_base_rip_max_move_pct: float = 55.0
     # Max-profit trail — do not bank tiny TP on base→vertical ICT (25pt elite TP kills 12→392).
     ict_max_profit_skip_hard_target: bool = True

@@ -1074,11 +1074,21 @@ def detect_fake_explosion_trap(
         return True, "fake_explosion_trap_midday_no_structure", meta
 
     # Soft cut: chop+elite full-size forbidden; post-small-win clamp.
-    # Exception: ATM/ITM inside the early base window (28–55%) is the capture
-    # profile — soft-cutting those to 6 lots is how Jul23 76300 PE high-conv died.
+    # Exception: structured base-window (28–55%) rips take full lots — soft-cutting
+    # those to 6 lots killed Jul23 76300 PE and Jul31 NIFTY 24500 CE (2-step OTM).
+    max_near_otm = int(
+        getattr(settings, "moneyness_local_base_max_otm_steps", 3) or 3
+    )
+    near_otm_ok = bool(
+        getattr(settings, "fake_explosion_trap_skip_soft_cut_near_otm", True)
+    ) and money == "OTM" and depth <= max_near_otm and structure_ok
     skip_soft = bool(
         getattr(settings, "fake_explosion_trap_skip_soft_cut_base_window", True)
-    ) and in_base_window and money in ("ATM", "ITM") and not session_extended and not otm_inside_or
+    ) and in_base_window and (
+        money in ("ATM", "ITM") or near_otm_ok
+    ) and not session_extended and not otm_inside_or
+    if skip_soft:
+        meta["baseWindowFullLots"] = True
 
     cut = False
     if chopish and elite_hot and not skip_soft:
