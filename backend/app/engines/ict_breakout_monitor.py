@@ -526,9 +526,13 @@ def good_day_ict_capture_active(
             meta["allDayIctCapture"] = True
             meta["defensiveBaseRip"] = True
             meta["capturePath"] = "defensive_base_flat_vertical"
-            meta["lotMultiplier"] = float(
-                getattr(settings, "ict_defensive_base_rip_lot_multiplier", 0.55) or 0.55
-            )
+            if getattr(settings, "ict_defensive_base_rip_full_lots", True):
+                meta["lotMultiplier"] = 1.0
+                meta["baseWindowFullLots"] = True
+            else:
+                meta["lotMultiplier"] = float(
+                    getattr(settings, "ict_defensive_base_rip_lot_multiplier", 1.0) or 1.0
+                )
             return True, meta
 
     return False, meta
