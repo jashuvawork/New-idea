@@ -109,17 +109,26 @@ def compute_projected_max_tp(
 
     # Early flat→vertical (entry ~50 from base ~40): already_from_base is tiny, so
     # leg-extension alone under-projects (~30–80). Project absolute premium targets
-    # from base/entry multipliers so we can hold toward ~210 (SENSEX 77700 CE).
+    # from base/entry multipliers so we can hold toward ~210 — and rarely ~650 LTP.
     vertical_moment = flat_then_vertical or mega_rip or premium_fvg
+    parabolic = (
+        v3 >= _cfg_float(s, "moment_stage_parabolic_min_velocity_3s", 8.0)
+        and vol >= _cfg_float(s, "moment_stage_parabolic_min_volume_surge", 2.5)
+    )
     if vertical_moment:
         base_prem_mult = _cfg_float(s, "moment_stage_base_premium_mult", 5.5)
         entry_prem_mult = _cfg_float(s, "moment_stage_entry_premium_mult", 4.2)
-        if mega_rip:
+        if mega_rip or parabolic:
             base_prem_mult = max(
-                base_prem_mult, _cfg_float(s, "moment_stage_mega_base_premium_mult", 6.5)
+                base_prem_mult, _cfg_float(s, "moment_stage_mega_base_premium_mult", 16.0)
             )
             entry_prem_mult = max(
-                entry_prem_mult, _cfg_float(s, "moment_stage_mega_entry_premium_mult", 5.0)
+                entry_prem_mult, _cfg_float(s, "moment_stage_mega_entry_premium_mult", 14.0)
+            )
+        if parabolic:
+            entry_prem_mult = max(
+                entry_prem_mult,
+                _cfg_float(s, "moment_stage_parabolic_entry_premium_mult", 13.0),
             )
         if premium_fvg:
             base_prem_mult *= 1.05
@@ -136,7 +145,7 @@ def compute_projected_max_tp(
         is_early = (base <= 0) or (
             already_from_base <= max(entry * early_frac, early_pts)
         )
-        if is_early and (flat_then_vertical or mega_rip):
+        if is_early and (flat_then_vertical or mega_rip or parabolic):
             early_min = _cfg_float(s, "moment_stage_early_vertical_min_tp", 160.0)
             abs_candidates.append(early_min * heat)
 
@@ -154,9 +163,14 @@ def compute_projected_max_tp(
             )
         projected = max(projected, floor_tp)
 
-    # Premium-relative cap — do not project absurd ceilings on tiny premiums.
-    max_frac = _cfg_float(s, "moment_stage_max_tp_frac_of_premium", 8.0)
-    abs_cap = _cfg_float(s, "moment_stage_max_projected_tp", 500.0)
+    # Caps: normal verticals vs mega/parabolic (50→650 needs ~12–16× entry).
+    max_frac = _cfg_float(s, "moment_stage_max_tp_frac_of_premium", 12.0)
+    if mega_rip or parabolic:
+        max_frac = max(
+            max_frac,
+            _cfg_float(s, "moment_stage_mega_max_tp_frac_of_premium", 16.0),
+        )
+    abs_cap = _cfg_float(s, "moment_stage_max_projected_tp", 800.0)
     projected = min(projected, entry * max_frac, abs_cap)
     projected = max(projected, _cfg_float(s, "moment_stage_min_projected_tp", 40.0))
     return round(projected, 1)
@@ -168,11 +182,14 @@ def compute_stage_size(projected_max_tp: float, settings: Optional[Settings] = N
     min_stage = _cfg_float(s, "moment_stage_min_size", 5.0)
     max_stage = _cfg_float(s, "moment_stage_max_size", 55.0)
     raw = float(projected_max_tp) / stages
-    # Prefer ~50pt stages on large projections (50→210 / 200→440 pictures).
+    # Prefer ~50pt stages on large projections; larger steps on mega 50→650 paths.
     if projected_max_tp >= 160:
         raw = max(raw, 40.0)
     if projected_max_tp >= 200:
         raw = max(raw, 45.0)
+    if projected_max_tp >= 400:
+        raw = max(raw, 50.0)
+        max_stage = max(max_stage, 75.0)
     return round(min(max_stage, max(min_stage, raw)), 1)
 
 
@@ -248,8 +265,17 @@ def _ladder_fields(trade: PaperTrade) -> dict[str, Any]:
     return out
 
 
+def _live_velocity_3s(trade: PaperTrade) -> float:
+    ctx = trade.entryContext or {}
+    return _safe_float(ctx.get("liveVelocity3s") or ctx.get("velocity3s"))
+
+
 def maybe_extend_projected_max(trade: PaperTrade, best: float, settings: Optional[Settings] = None) -> float:
-    """If the rip exceeds the projection, ratchet the ceiling so stages continue."""
+    """If the rip exceeds the projection, ratchet the ceiling so stages continue.
+
+    Hot mega rips (50→650) keep more headroom so hard-TP / late squeeze cannot
+    cut a still-expanding vertical at a stale ~200–500 ceiling.
+    """
     s = settings or get_settings()
     fields = _ladder_fields(trade)
     projected = _safe_float(fields.get("projectedMaxTp"))
@@ -258,16 +284,32 @@ def maybe_extend_projected_max(trade: PaperTrade, best: float, settings: Optiona
     best = _safe_float(best)
     if best <= projected * _cfg_float(s, "moment_stage_extend_trigger_frac", 0.92):
         return projected
-    # Keep ~2 stages of headroom beyond the live peak.
+
     stage = max(_safe_float(fields.get("stageSize")), _cfg_float(s, "moment_stage_min_size", 5.0))
-    extended = round(max(projected, best + stage * 2.0), 1)
-    abs_cap = _cfg_float(s, "moment_stage_max_projected_tp", 500.0)
+    # Grow stage size as the runner becomes a mega path.
+    if best >= 400:
+        stage = max(stage, 50.0)
+    headroom_stages = _cfg_float(s, "moment_stage_extend_stages", 2.0)
+    live_v = _live_velocity_3s(trade)
+    hot = live_v >= _cfg_float(s, "moment_stage_extend_hot_velocity_3s", 2.5)
+    ctx = trade.entryContext or {}
+    mega = bool(ctx.get("ictMegaRip") or ctx.get("momentType") == "mega_rip")
+    if hot or mega or best >= 300:
+        headroom_stages = max(
+            headroom_stages, _cfg_float(s, "moment_stage_extend_hot_stages", 4.0)
+        )
+    extended = round(max(projected, best + stage * headroom_stages), 1)
+    abs_cap = _cfg_float(s, "moment_stage_max_projected_tp", 800.0)
     extended = min(extended, abs_cap)
     if trade.entryContext is None:
         trade.entryContext = {}
     trade.entryContext["projectedMaxTp"] = extended
+    if stage > _safe_float(fields.get("stageSize")):
+        trade.entryContext["stageSize"] = round(stage, 1)
     plan = dict(trade.entryContext.get("exitPlan") or {})
     plan["projectedMaxTp"] = extended
+    if stage > _safe_float(fields.get("stageSize")):
+        plan["stageSize"] = round(stage, 1)
     trade.entryContext["exitPlan"] = plan
     return extended
 
@@ -315,7 +357,14 @@ def stage_trail_floor_pts(
         _cfg_float(s, "moment_stage_late_progress", 0.70),
     )
     progress = stage_level / max(projected, 1e-9)
-    if progress >= late_progress:
+    live_v = _live_velocity_3s(trade)
+    hot_hold = live_v >= _cfg_float(s, "moment_stage_hot_hold_velocity_3s", 2.5)
+    # Still expanding (50→650 path) — do not squeeze; keep normal stage giveback.
+    # When heat dies, late progress can widen giveback / lock the stage.
+    if progress >= late_progress and not hot_hold:
+        giveback_ratio = max(giveback_ratio, late_ratio)
+    elif hot_hold and best >= 200:
+        # Hot mega: allow a full stage of pullback room so we don't trail out mid-rip.
         giveback_ratio = max(giveback_ratio, late_ratio)
 
     giveback = stage * giveback_ratio

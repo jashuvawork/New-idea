@@ -9,6 +9,7 @@ from app.engines.moment_stage_trail import (
     build_moment_stage_plan,
     compute_projected_max_tp,
     compute_stage_size,
+    maybe_extend_projected_max,
     stage_trail_floor_pts,
 )
 from app.models.schemas import PaperTrade, Side, StrategyType
@@ -23,14 +24,18 @@ def _settings(**overrides):
     s.moment_stage_min_size = 5.0
     s.moment_stage_max_size = 55.0
     s.moment_stage_min_projected_tp = 40.0
-    s.moment_stage_max_projected_tp = 500.0
-    s.moment_stage_max_tp_frac_of_premium = 8.0
+    s.moment_stage_max_projected_tp = 800.0
+    s.moment_stage_max_tp_frac_of_premium = 12.0
+    s.moment_stage_mega_max_tp_frac_of_premium = 16.0
     s.moment_stage_base_extension_mult = 3.0
     s.moment_stage_mega_extension_mult = 4.0
     s.moment_stage_base_premium_mult = 5.5
     s.moment_stage_entry_premium_mult = 4.2
-    s.moment_stage_mega_base_premium_mult = 6.5
-    s.moment_stage_mega_entry_premium_mult = 5.0
+    s.moment_stage_mega_base_premium_mult = 16.0
+    s.moment_stage_mega_entry_premium_mult = 14.0
+    s.moment_stage_parabolic_entry_premium_mult = 13.0
+    s.moment_stage_parabolic_min_velocity_3s = 8.0
+    s.moment_stage_parabolic_min_volume_surge = 2.5
     s.moment_stage_early_vertical_min_tp = 160.0
     s.moment_stage_early_base_frac = 0.40
     s.moment_stage_early_max_already_points = 30.0
@@ -42,6 +47,10 @@ def _settings(**overrides):
     s.moment_stage_late_progress = 0.70
     s.moment_stage_min_remain_points = 1.0
     s.moment_stage_extend_trigger_frac = 0.92
+    s.moment_stage_extend_stages = 2.0
+    s.moment_stage_extend_hot_stages = 4.0
+    s.moment_stage_extend_hot_velocity_3s = 2.5
+    s.moment_stage_hot_hold_velocity_3s = 2.5
     s.ict_max_profit_target_points = 180.0
     s.ict_max_profit_skip_hard_target = True
     s.ict_max_profit_trail_keep_ratio = 0.42
@@ -266,3 +275,40 @@ def test_early_50_to_210_holds_then_stage_exits_pullback(mock_s):
     assert 160.0 > floor  # still holding at premium 210
     # Deeper pullback through the stage floor books
     assert (50.0 + floor - 5.0 - 50.0) < floor
+
+
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_parabolic_50_projects_toward_650(mock_s):
+    """Rare mega: entry 50 with parabolic heat can project toward ~650 LTP (+600pt)."""
+    mock_s.return_value = _settings()
+    projected = compute_projected_max_tp(
+        entry_premium=50.0,
+        base_premium=40.0,
+        exit_plan={},
+        velocity_3s=10.0,
+        volume_surge=3.0,
+        session_move_pct=45.0,
+        premium_fvg=True,
+        flat_then_vertical=True,
+        mega_rip=True,
+        max_profit=True,
+    )
+    # 50 + 600 = 650 LTP → need projected near/above 600 (capped by 16×entry=800).
+    assert projected >= 500.0
+    assert 50.0 + projected >= 550.0
+
+
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_live_extension_chases_650_path(mock_s):
+    """Even if entry projected ~200, hot extension ratchets ceiling toward 650."""
+    mock_s.return_value = _settings()
+    trade = _trade(entry=50.0, best=500.0, current=550.0, projected=200.0, stage=45.0)
+    trade.entryContext["liveVelocity3s"] = 4.0
+    trade.entryContext["ictMegaRip"] = True
+    extended = maybe_extend_projected_max(trade, 500.0, settings=_settings())
+    assert extended >= 600.0
+    assert extended <= 800.0
+    # Still hot at +520 (LTP 570) — above a loose mega stage floor.
+    floor = stage_trail_floor_pts(trade, 520.0, settings=_settings())
+    assert floor is not None
+    assert 520.0 > floor

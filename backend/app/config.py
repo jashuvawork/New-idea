@@ -333,16 +333,22 @@ class Settings(BaseSettings):
     moment_stage_min_size: float = 5.0
     moment_stage_max_size: float = 55.0
     moment_stage_min_projected_tp: float = 40.0
-    moment_stage_max_projected_tp: float = 500.0
-    moment_stage_max_tp_frac_of_premium: float = 8.0
+    # Allow rare 50→650 LTP mega rips (+600pt); live extension ratchets toward this.
+    moment_stage_max_projected_tp: float = 800.0
+    moment_stage_max_tp_frac_of_premium: float = 12.0
+    moment_stage_mega_max_tp_frac_of_premium: float = 16.0
     moment_stage_base_extension_mult: float = 3.0
     moment_stage_mega_extension_mult: float = 4.0
     # Early vertical: project absolute premium targets (base×mult / entry×mult)
     # so entry ~50 from base ~40 aims for ~210, not a tiny leg-extension TP.
     moment_stage_base_premium_mult: float = 5.5
     moment_stage_entry_premium_mult: float = 4.2
-    moment_stage_mega_base_premium_mult: float = 6.5
-    moment_stage_mega_entry_premium_mult: float = 5.0
+    # Mega / parabolic: 50×14 ≈ 700 premium target (room for 50→650 LTP).
+    moment_stage_mega_base_premium_mult: float = 16.0
+    moment_stage_mega_entry_premium_mult: float = 14.0
+    moment_stage_parabolic_entry_premium_mult: float = 13.0
+    moment_stage_parabolic_min_velocity_3s: float = 8.0
+    moment_stage_parabolic_min_volume_surge: float = 2.5
     moment_stage_early_vertical_min_tp: float = 160.0
     moment_stage_early_base_frac: float = 0.40
     moment_stage_early_max_already_points: float = 30.0
@@ -354,6 +360,12 @@ class Settings(BaseSettings):
     moment_stage_late_progress: float = 0.70
     moment_stage_min_remain_points: float = 1.0
     moment_stage_extend_trigger_frac: float = 0.92
+    # Live extension headroom (stages beyond best). Hot mega rips use the larger one.
+    moment_stage_extend_stages: float = 2.0
+    moment_stage_extend_hot_stages: float = 4.0
+    moment_stage_extend_hot_velocity_3s: float = 2.5
+    # While live heat is still expanding, do not squeeze late-stage giveback.
+    moment_stage_hot_hold_velocity_3s: float = 2.5
 
     # Fake explosion trap — Jul20 NIFTY 24300 CE: RANGE + midday_chop + ELITE vel spike,
     # session~30%, live premium mom≈0, OTM inside OR after small win → never-green −₹18k.
