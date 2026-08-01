@@ -445,7 +445,10 @@ class Settings(BaseSettings):
     top_explosion_force_max_block_day_types_csv: str = "CHOP,WORST"
     # After booking profit on an explosive at symbol+side+strike, next entry on that
     # exact strike is lot-capped (Jul29 77500 CE +₹5.8k @6 → re-entry 29 lots −₹11k).
-    explosion_post_win_same_strike_lot_cap_enabled: bool = True
+    # After a same-strike win, allow full capital lots on the next vertical
+    # (multiple flat→vertical moments in one day). Set true only if you want
+    # the old Jul29 protective soft-cap behavior.
+    explosion_post_win_same_strike_lot_cap_enabled: bool = False
     explosion_post_win_same_strike_lot_cap: int = 6
     # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
     session_mode_feedback_enabled: bool = True
