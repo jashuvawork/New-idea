@@ -337,6 +337,16 @@ class Settings(BaseSettings):
     moment_stage_max_tp_frac_of_premium: float = 8.0
     moment_stage_base_extension_mult: float = 3.0
     moment_stage_mega_extension_mult: float = 4.0
+    # Early vertical: project absolute premium targets (base×mult / entry×mult)
+    # so entry ~50 from base ~40 aims for ~210, not a tiny leg-extension TP.
+    moment_stage_base_premium_mult: float = 5.5
+    moment_stage_entry_premium_mult: float = 4.2
+    moment_stage_mega_base_premium_mult: float = 6.5
+    moment_stage_mega_entry_premium_mult: float = 5.0
+    moment_stage_early_vertical_min_tp: float = 160.0
+    moment_stage_early_base_frac: float = 0.40
+    moment_stage_early_max_already_points: float = 30.0
+    moment_stage_ict_target_floor_frac: float = 0.90
     moment_stage_heat_velocity_3s: float = 3.0
     moment_stage_heat_volume_surge: float = 1.8
     moment_stage_giveback_ratio: float = 0.50

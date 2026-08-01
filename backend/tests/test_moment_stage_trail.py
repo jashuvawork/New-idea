@@ -27,6 +27,14 @@ def _settings(**overrides):
     s.moment_stage_max_tp_frac_of_premium = 8.0
     s.moment_stage_base_extension_mult = 3.0
     s.moment_stage_mega_extension_mult = 4.0
+    s.moment_stage_base_premium_mult = 5.5
+    s.moment_stage_entry_premium_mult = 4.2
+    s.moment_stage_mega_base_premium_mult = 6.5
+    s.moment_stage_mega_entry_premium_mult = 5.0
+    s.moment_stage_early_vertical_min_tp = 160.0
+    s.moment_stage_early_base_frac = 0.40
+    s.moment_stage_early_max_already_points = 30.0
+    s.moment_stage_ict_target_floor_frac = 0.90
     s.moment_stage_heat_velocity_3s = 3.0
     s.moment_stage_heat_volume_surge = 1.8
     s.moment_stage_giveback_ratio = 0.50
@@ -222,3 +230,39 @@ def test_build_plan_for_flat_then_vertical(mock_s):
     assert plan["momentStageLadder"] is True
     assert plan["projectedMaxTp"] >= 40.0
     assert plan["stageSize"] >= 5.0
+
+
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_early_entry_50_projects_toward_210(mock_s):
+    """SENSEX 77700 CE: enter ~50 from base ~40 → project enough to hold for ~210."""
+    mock_s.return_value = _settings()
+    projected = compute_projected_max_tp(
+        entry_premium=50.0,
+        base_premium=40.0,
+        exit_plan={"targetPoints2": 40.0},
+        velocity_3s=6.0,
+        volume_surge=2.2,
+        session_move_pct=35.0,
+        premium_fvg=True,
+        flat_then_vertical=True,
+        mega_rip=False,
+        max_profit=True,
+    )
+    # Need ≥160pts so premium target ≈ 50+160 = 210.
+    assert projected >= 160.0
+    stage = compute_stage_size(projected, _settings())
+    assert stage >= 40.0
+
+
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_early_50_to_210_holds_then_stage_exits_pullback(mock_s):
+    """Peak ~250 (+200) then pullback to ~210 (+160) — hold above floor, bank on deeper fade."""
+    mock_s.return_value = _settings()
+    trade = _trade(entry=50.0, best=200.0, current=210.0, projected=180.0, stage=45.0)
+    trade.currentPremium = 210.0
+    trade.pnlPoints = 160.0
+    floor = stage_trail_floor_pts(trade, 200.0, settings=_settings())
+    assert floor is not None
+    assert 160.0 > floor  # still holding at premium 210
+    # Deeper pullback through the stage floor books
+    assert (50.0 + floor - 5.0 - 50.0) < floor

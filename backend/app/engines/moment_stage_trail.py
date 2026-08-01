@@ -101,16 +101,56 @@ def compute_projected_max_tp(
         heat += min(0.25, (vol - 1.8) * 0.08)
     if session_move_pct >= 80:
         heat += 0.1
+    elif session_move_pct >= 40:
+        heat += 0.05
     structure_proj *= heat
 
     projected = max(fib_tp2, structure_proj)
 
+    # Early flat→vertical (entry ~50 from base ~40): already_from_base is tiny, so
+    # leg-extension alone under-projects (~30–80). Project absolute premium targets
+    # from base/entry multipliers so we can hold toward ~210 (SENSEX 77700 CE).
+    vertical_moment = flat_then_vertical or mega_rip or premium_fvg
+    if vertical_moment:
+        base_prem_mult = _cfg_float(s, "moment_stage_base_premium_mult", 5.5)
+        entry_prem_mult = _cfg_float(s, "moment_stage_entry_premium_mult", 4.2)
+        if mega_rip:
+            base_prem_mult = max(
+                base_prem_mult, _cfg_float(s, "moment_stage_mega_base_premium_mult", 6.5)
+            )
+            entry_prem_mult = max(
+                entry_prem_mult, _cfg_float(s, "moment_stage_mega_entry_premium_mult", 5.0)
+            )
+        if premium_fvg:
+            base_prem_mult *= 1.05
+            entry_prem_mult *= 1.05
+
+        abs_candidates: list[float] = []
+        if base > 0:
+            target_prem = base * base_prem_mult * heat
+            abs_candidates.append(max(0.0, target_prem - entry))
+        abs_candidates.append(max(0.0, entry * entry_prem_mult * heat - entry))
+
+        early_frac = _cfg_float(s, "moment_stage_early_base_frac", 0.40)
+        early_pts = _cfg_float(s, "moment_stage_early_max_already_points", 30.0)
+        is_early = (base <= 0) or (
+            already_from_base <= max(entry * early_frac, early_pts)
+        )
+        if is_early and (flat_then_vertical or mega_rip):
+            early_min = _cfg_float(s, "moment_stage_early_vertical_min_tp", 160.0)
+            abs_candidates.append(early_min * heat)
+
+        if abs_candidates:
+            projected = max(projected, max(abs_candidates))
+
     if max_profit or flat_then_vertical or mega_rip:
         floor_tp = _cfg_float(s, "moment_stage_min_projected_tp", 40.0)
-        if max_profit:
+        if max_profit or flat_then_vertical or mega_rip:
+            # Hold room for ICT runners — not a tiny 35% slice of max-profit TP.
+            ict_frac = _cfg_float(s, "moment_stage_ict_target_floor_frac", 0.90)
             floor_tp = max(
                 floor_tp,
-                _cfg_float(s, "ict_max_profit_target_points", 180.0) * 0.35,
+                _cfg_float(s, "ict_max_profit_target_points", 180.0) * ict_frac,
             )
         projected = max(projected, floor_tp)
 
@@ -128,7 +168,9 @@ def compute_stage_size(projected_max_tp: float, settings: Optional[Settings] = N
     min_stage = _cfg_float(s, "moment_stage_min_size", 5.0)
     max_stage = _cfg_float(s, "moment_stage_max_size", 55.0)
     raw = float(projected_max_tp) / stages
-    # Prefer ~50pt stages on large projections (user picture).
+    # Prefer ~50pt stages on large projections (50→210 / 200→440 pictures).
+    if projected_max_tp >= 160:
+        raw = max(raw, 40.0)
     if projected_max_tp >= 200:
         raw = max(raw, 45.0)
     return round(min(max_stage, max(min_stage, raw)), 1)
