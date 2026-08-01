@@ -214,14 +214,15 @@ def cap_same_strike_explosion_reentry_after_win(
     strike: float,
 ) -> tuple[int, dict[str, Any]]:
     """
-    After a profitable explosive on this exact strike, cap the next entry.
+    Optional soft-cap after a profitable explosive on this exact strike.
 
-    Jul29 SENSEX 77500 CE: booked +₹5,848 @ 6 lots, then re-entered ELITE 100 at
-    29 lots and lost −₹11,225. Profit already taken → next same-strike size stays small.
+    Default OFF — multiple flat→vertical moments on the same strike in one day
+    keep full capital lots. Enable only for the old Jul29 protective behavior
+    (win @ 6 lots → next same-strike re-entry capped).
     """
     meta: dict[str, Any] = {"applied": False}
     settings = get_settings()
-    if not getattr(settings, "explosion_post_win_same_strike_lot_cap_enabled", True):
+    if not getattr(settings, "explosion_post_win_same_strike_lot_cap_enabled", False):
         return lots, meta
     prior = _latest_same_strike_explosion_close(
         state, symbol=symbol, side=side, strike=strike,

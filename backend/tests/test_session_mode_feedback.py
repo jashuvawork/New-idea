@@ -150,8 +150,42 @@ def test_size_until_first_green_allows_scalp_after_green():
         assert cap_lots_until_first_green(20, state, mode="scalp") == 20
 
 
-def test_same_strike_post_win_caps_next_entry():
-    """Jul29 77500 CE: after +₹5848 explosive win, next same-strike entry capped."""
+def test_same_strike_post_win_full_size_by_default():
+    """Default: after a same-strike win, next vertical still gets full capital lots."""
+    from app.engines.session_mode_feedback import cap_same_strike_explosion_reentry_after_win
+
+    state = AutoTraderState()
+    state.closedPaperTrades = [
+        PaperTrade(
+            id="win8",
+            symbol="SENSEX",
+            side=Side.CALL,
+            strike=77500,
+            entryPremium=285,
+            currentPremium=334,
+            lots=6,
+            openedAt=datetime.now(IST),
+            closedAt=datetime.now(IST),
+            strategyType=StrategyType.EXPLOSIVE,
+            pnlInr=5848,
+            bestPnlPoints=54.7,
+            entryContext={"selectionMode": "explosion", "explosionTier": "ELITE"},
+        )
+    ]
+    s = _settings(
+        explosion_post_win_same_strike_lot_cap_enabled=False,
+        explosion_post_win_same_strike_lot_cap=6,
+    )
+    with patch("app.engines.session_mode_feedback.get_settings", return_value=s):
+        lots, meta = cap_same_strike_explosion_reentry_after_win(
+            29, state, symbol="SENSEX", side=Side.CALL, strike=77500,
+        )
+    assert lots == 29
+    assert meta["applied"] is False
+
+
+def test_same_strike_post_win_caps_when_enabled():
+    """Optional protective mode: enable cap → next same-strike entry soft-capped."""
     from app.engines.session_mode_feedback import cap_same_strike_explosion_reentry_after_win
 
     state = AutoTraderState()
