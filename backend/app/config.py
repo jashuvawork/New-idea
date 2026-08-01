@@ -324,6 +324,27 @@ class Settings(BaseSettings):
     explosion_peak_capture_max_profit_min_best: float = 18.0
     explosion_peak_capture_max_profit_giveback_ratio: float = 0.30
 
+    # Moment stage trail ladder — flat→vertical / FVG / mega-rip projections.
+    # Project max TP from fib/base-extension/heat, split into stages (~50pt on
+    # large moves), ratchet SL after each stage (250→225, 400→350) and hold
+    # toward projectedMaxTp while above the stage floor.
+    moment_stage_trail_enabled: bool = True
+    moment_stage_count: int = 8
+    moment_stage_min_size: float = 5.0
+    moment_stage_max_size: float = 55.0
+    moment_stage_min_projected_tp: float = 40.0
+    moment_stage_max_projected_tp: float = 500.0
+    moment_stage_max_tp_frac_of_premium: float = 8.0
+    moment_stage_base_extension_mult: float = 3.0
+    moment_stage_mega_extension_mult: float = 4.0
+    moment_stage_heat_velocity_3s: float = 3.0
+    moment_stage_heat_volume_surge: float = 1.8
+    moment_stage_giveback_ratio: float = 0.50
+    moment_stage_late_giveback_ratio: float = 1.0
+    moment_stage_late_progress: float = 0.70
+    moment_stage_min_remain_points: float = 1.0
+    moment_stage_extend_trigger_frac: float = 0.92
+
     # Fake explosion trap — Jul20 NIFTY 24300 CE: RANGE + midday_chop + ELITE vel spike,
     # session~30%, live premium mom≈0, OTM inside OR after small win → never-green −₹18k.
     # Market harvests FOMO; system must not treat post-extension spikes as ELITE full-size.

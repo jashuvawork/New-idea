@@ -982,12 +982,35 @@ def evaluate_explosion_exit(
     if fade_lock:
         return fade_lock, pnl_inr
 
+    from app.engines.moment_stage_trail import (
+        compose_trail_floor_with_stages,
+        maybe_extend_projected_max,
+        trade_uses_moment_stage_ladder,
+    )
+
     target = exit_params.target_points
     if max_profit:
         target = max(
             target,
             float(getattr(settings, "ict_max_profit_target_points", 180.0) or 180.0),
         )
+    # Flat→vertical stage ladder: hold toward projected max TP (e.g. 440).
+    stage_ladder = trade_uses_moment_stage_ladder(trade)
+    projected_max = 0.0
+    if stage_ladder:
+        projected_max = maybe_extend_projected_max(trade, best, settings)
+        if projected_max <= 0:
+            try:
+                projected_max = float(
+                    (trade.entryContext or {}).get("projectedMaxTp")
+                    or ((trade.entryContext or {}).get("exitPlan") or {}).get("projectedMaxTp")
+                    or 0
+                )
+            except (TypeError, ValueError):
+                projected_max = 0.0
+        if projected_max > 0:
+            target = max(target, projected_max)
+
     # High-conviction base rip → hold the runner (wider trail = lower keep floor).
     # Still exits on real reversal; just does not book at ~38% of peak (Jul22 SENSEX PE).
     from app.engines.explosion_confidence import trade_is_high_conviction
@@ -1002,6 +1025,17 @@ def evaluate_explosion_exit(
         trade, best, settings, trail_arm_points=exit_params.trail_arm_points,
         keep_ratio_override=hc_keep,
     )
+    trail_floor, stage_floor = compose_trail_floor_with_stages(
+        trade, best, trail_floor, settings=settings,
+    )
+    try:
+        stage_size = float(
+            (trade.entryContext or {}).get("stageSize")
+            or ((trade.entryContext or {}).get("exitPlan") or {}).get("stageSize")
+            or 0
+        )
+    except (TypeError, ValueError):
+        stage_size = 0.0
     trail_keep = (
         settings.runner_trail_keep_ratio
         if best >= settings.runner_min_best_points
@@ -1027,7 +1061,8 @@ def evaluate_explosion_exit(
         return "explosion_emergency_stop", pnl_inr
 
     # Base→vertical ICT (12→392 PE): skip tiny hard TP — trail toward max.
-    skip_hard_tp = max_profit and bool(
+    # Stage-ladder trades also skip tiny TP and ride stages to projectedMaxTp.
+    skip_hard_tp = (max_profit or stage_ladder) and bool(
         getattr(settings, "ict_max_profit_skip_hard_target", True)
     )
     if not skip_hard_tp:
@@ -1038,7 +1073,7 @@ def evaluate_explosion_exit(
         if best >= target - near and best >= settings.explosion_trail_arm_points:
             return "explosion_target_hit", pnl_inr
     else:
-        # Only book hard TP at the elevated ICT max-profit target.
+        # Book hard TP at elevated ICT / projected moment target.
         if best >= target:
             return "explosion_target_hit", pnl_inr
 
@@ -1054,10 +1089,12 @@ def evaluate_explosion_exit(
     chart_conf = chart_confidence_for_trade(trade)
     defer_tp_min = _cfg_float(settings, "chart_confidence_defer_tp_min", 60.6)
     defer_target = chart_target if chart_conf >= defer_tp_min else target
+    if stage_ladder and projected_max > 0:
+        defer_target = max(defer_target, projected_max)
 
     def _profit_lock_ok() -> bool:
-        if max_profit:
-            # Let ICT base rips run — only trail after a real expansion.
+        if max_profit or stage_ladder:
+            # Let ICT / stage-ladder base rips run — only trail after a real expansion.
             return best >= min(40.0, target * 0.25)
         if not should_defer_profit_lock(trade, best, target_points=defer_target):
             return True
@@ -1071,18 +1108,30 @@ def evaluate_explosion_exit(
     )
     if (
         not max_profit
+        and not stage_ladder
         and not defer_hc_lock
         and half_tp_giveback_exit(trade, best, pnl_pts, target_points=defer_target)
     ):
         return "explosion_half_tp_profit_lock", pnl_inr
 
-    if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
-        # Armed trail floor always exits — do not defer into a loss.
-        return "explosion_trail_sl", pnl_inr
+    # Stage ladder: pullback through stage floor (250→225, 400→350) books profit.
+    stage_armed = stage_floor is not None and (
+        best >= exit_params.trail_arm_points
+        or (stage_size > 0 and best >= stage_size)
+    )
+    if stage_armed and pnl_pts <= stage_floor:
+        return "explosion_stage_trail", pnl_inr
 
-    if trail_floor is not None and pnl_pts < best * trail_keep and best >= (20 if max_profit else 8):
-        if pnl_pts <= 0 or _profit_lock_ok():
-            return "explosion_trail_lock", pnl_inr
+    # When stage ladder owns the trail, skip micro step / keep-ratio locks —
+    # stage floors + projectedMaxTp are the profit path.
+    if not stage_armed:
+        if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
+            # Armed trail floor always exits — do not defer into a loss.
+            return "explosion_trail_sl", pnl_inr
+
+        if trail_floor is not None and pnl_pts < best * trail_keep and best >= (20 if max_profit else 8):
+            if pnl_pts <= 0 or _profit_lock_ok():
+                return "explosion_trail_lock", pnl_inr
 
     if (
         not max_profit

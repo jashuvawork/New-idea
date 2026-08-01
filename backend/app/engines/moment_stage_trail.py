@@ -1,0 +1,319 @@
+"""Moment stage trail ladder — divide flat→vertical projections into staged SL trails.
+
+Example (SENSEX PE flat~200 → vertical toward ~440–500):
+  projectedMaxTp ≈ 440, stageSize ≈ 50
+  best hits +250 → trail floor ~+225
+  best hits +400 → trail floor ~+350
+  hold toward +440 while above the stage floor
+
+Uses FVG / fib TP2 / base→entry extension / velocity·volume to project max TP.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Any, Optional
+
+from app.config import Settings, get_settings
+from app.models.schemas import PaperTrade
+
+
+def trade_uses_moment_stage_ladder(trade: PaperTrade) -> bool:
+    ctx = trade.entryContext or {}
+    if ctx.get("momentStageLadder") or (ctx.get("exitPlan") or {}).get("momentStageLadder"):
+        return True
+    moment = str(ctx.get("momentType") or "").lower()
+    if moment in ("flat_then_vertical", "mega_rip", "premium_fvg"):
+        return True
+    return bool(
+        ctx.get("ictFlatThenVertical")
+        or ctx.get("ictMegaRip")
+        or ctx.get("maxProfitCapture")
+        or ctx.get("defensiveBaseRip")
+    )
+
+
+def _cfg_float(settings: Any, name: str, default: float) -> float:
+    v = getattr(settings, name, default)
+    if isinstance(v, bool) or v is None:
+        return float(default)
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v)
+        except ValueError:
+            return float(default)
+    return float(default)
+
+
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(x):
+        return default
+    return x
+
+
+def compute_projected_max_tp(
+    *,
+    entry_premium: float,
+    base_premium: float = 0.0,
+    exit_plan: Optional[dict] = None,
+    velocity_3s: float = 0.0,
+    volume_surge: float = 1.0,
+    session_move_pct: float = 0.0,
+    premium_fvg: bool = False,
+    flat_then_vertical: bool = False,
+    mega_rip: bool = False,
+    max_profit: bool = False,
+    settings: Optional[Settings] = None,
+) -> float:
+    """Project max take-profit points for this moment from structure + heat."""
+    s = settings or get_settings()
+    plan = exit_plan or {}
+    entry = max(_safe_float(entry_premium), 1e-6)
+    base = _safe_float(base_premium)
+    already_from_base = max(0.0, entry - base) if base > 0 else 0.0
+
+    fib_tp2 = max(
+        _safe_float(plan.get("entryTargetPoints2") or plan.get("targetPoints2")),
+        _safe_float(plan.get("entryTargetPoints") or plan.get("targetPoints")),
+    )
+
+    # Flat→vertical: extend the base→entry leg (ICT displacement projection).
+    ext_mult = _cfg_float(s, "moment_stage_base_extension_mult", 3.0)
+    if mega_rip:
+        ext_mult = max(ext_mult, _cfg_float(s, "moment_stage_mega_extension_mult", 4.0))
+    if premium_fvg:
+        ext_mult = max(ext_mult, ext_mult * 1.1)
+    structure_proj = already_from_base * ext_mult if already_from_base > 0 else 0.0
+
+    # Velocity / volume heat can stretch the ceiling on confirmed awakenings.
+    heat = 1.0
+    v3 = _safe_float(velocity_3s)
+    vol = max(_safe_float(volume_surge, 1.0), 1.0)
+    if v3 >= _cfg_float(s, "moment_stage_heat_velocity_3s", 3.0):
+        heat += min(0.35, (v3 - 3.0) * 0.04)
+    if vol >= _cfg_float(s, "moment_stage_heat_volume_surge", 1.8):
+        heat += min(0.25, (vol - 1.8) * 0.08)
+    if session_move_pct >= 80:
+        heat += 0.1
+    structure_proj *= heat
+
+    projected = max(fib_tp2, structure_proj)
+
+    if max_profit or flat_then_vertical or mega_rip:
+        floor_tp = _cfg_float(s, "moment_stage_min_projected_tp", 40.0)
+        if max_profit:
+            floor_tp = max(
+                floor_tp,
+                _cfg_float(s, "ict_max_profit_target_points", 180.0) * 0.35,
+            )
+        projected = max(projected, floor_tp)
+
+    # Premium-relative cap — do not project absurd ceilings on tiny premiums.
+    max_frac = _cfg_float(s, "moment_stage_max_tp_frac_of_premium", 8.0)
+    abs_cap = _cfg_float(s, "moment_stage_max_projected_tp", 500.0)
+    projected = min(projected, entry * max_frac, abs_cap)
+    projected = max(projected, _cfg_float(s, "moment_stage_min_projected_tp", 40.0))
+    return round(projected, 1)
+
+
+def compute_stage_size(projected_max_tp: float, settings: Optional[Settings] = None) -> float:
+    s = settings or get_settings()
+    stages = max(4, int(_cfg_float(s, "moment_stage_count", 8)))
+    min_stage = _cfg_float(s, "moment_stage_min_size", 5.0)
+    max_stage = _cfg_float(s, "moment_stage_max_size", 55.0)
+    raw = float(projected_max_tp) / stages
+    # Prefer ~50pt stages on large projections (user picture).
+    if projected_max_tp >= 200:
+        raw = max(raw, 45.0)
+    return round(min(max_stage, max(min_stage, raw)), 1)
+
+
+def build_moment_stage_plan(
+    *,
+    entry_premium: float,
+    base_premium: float = 0.0,
+    exit_plan: Optional[dict] = None,
+    velocity_3s: float = 0.0,
+    volume_surge: float = 1.0,
+    session_move_pct: float = 0.0,
+    premium_fvg: bool = False,
+    flat_then_vertical: bool = False,
+    mega_rip: bool = False,
+    max_profit: bool = False,
+    settings: Optional[Settings] = None,
+) -> Optional[dict[str, Any]]:
+    """Build entry stamp for the stage ladder, or None if disabled / too small."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "moment_stage_trail_enabled", True)):
+        return None
+    if not (flat_then_vertical or mega_rip or premium_fvg or max_profit):
+        return None
+
+    projected = compute_projected_max_tp(
+        entry_premium=entry_premium,
+        base_premium=base_premium,
+        exit_plan=exit_plan,
+        velocity_3s=velocity_3s,
+        volume_surge=volume_surge,
+        session_move_pct=session_move_pct,
+        premium_fvg=premium_fvg,
+        flat_then_vertical=flat_then_vertical,
+        mega_rip=mega_rip,
+        max_profit=max_profit,
+        settings=s,
+    )
+    min_proj = _cfg_float(s, "moment_stage_min_projected_tp", 40.0)
+    if projected < min_proj:
+        return None
+
+    stage_size = compute_stage_size(projected, s)
+    return {
+        "momentStageLadder": True,
+        "projectedMaxTp": projected,
+        "stageSize": stage_size,
+        "stageGivebackRatio": round(_cfg_float(s, "moment_stage_giveback_ratio", 0.50), 3),
+        "stageLateGivebackRatio": round(
+            _cfg_float(s, "moment_stage_late_giveback_ratio", 1.0), 3
+        ),
+        "stageLateProgress": round(_cfg_float(s, "moment_stage_late_progress", 0.70), 3),
+    }
+
+
+def _ladder_fields(trade: PaperTrade) -> dict[str, Any]:
+    ctx = trade.entryContext or {}
+    plan = ctx.get("exitPlan") or {}
+    out: dict[str, Any] = {}
+    for key in (
+        "momentStageLadder",
+        "projectedMaxTp",
+        "stageSize",
+        "stageGivebackRatio",
+        "stageLateGivebackRatio",
+        "stageLateProgress",
+        "stageTrailFloorPts",
+        "stageLevelPts",
+    ):
+        if key in ctx and ctx[key] is not None:
+            out[key] = ctx[key]
+        elif key in plan and plan[key] is not None:
+            out[key] = plan[key]
+    return out
+
+
+def maybe_extend_projected_max(trade: PaperTrade, best: float, settings: Optional[Settings] = None) -> float:
+    """If the rip exceeds the projection, ratchet the ceiling so stages continue."""
+    s = settings or get_settings()
+    fields = _ladder_fields(trade)
+    projected = _safe_float(fields.get("projectedMaxTp"))
+    if projected <= 0:
+        return 0.0
+    best = _safe_float(best)
+    if best <= projected * _cfg_float(s, "moment_stage_extend_trigger_frac", 0.92):
+        return projected
+    # Keep ~2 stages of headroom beyond the live peak.
+    stage = max(_safe_float(fields.get("stageSize")), _cfg_float(s, "moment_stage_min_size", 5.0))
+    extended = round(max(projected, best + stage * 2.0), 1)
+    abs_cap = _cfg_float(s, "moment_stage_max_projected_tp", 500.0)
+    extended = min(extended, abs_cap)
+    if trade.entryContext is None:
+        trade.entryContext = {}
+    trade.entryContext["projectedMaxTp"] = extended
+    plan = dict(trade.entryContext.get("exitPlan") or {})
+    plan["projectedMaxTp"] = extended
+    trade.entryContext["exitPlan"] = plan
+    return extended
+
+
+def stage_trail_floor_pts(
+    trade: PaperTrade,
+    best: float,
+    *,
+    settings: Optional[Settings] = None,
+) -> Optional[float]:
+    """Ratcheting stage trail floor from completed stages of the projected move."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "moment_stage_trail_enabled", True)):
+        return None
+    if not trade_uses_moment_stage_ladder(trade):
+        return None
+
+    fields = _ladder_fields(trade)
+    projected = maybe_extend_projected_max(trade, best, s)
+    if projected <= 0:
+        projected = _safe_float(fields.get("projectedMaxTp"))
+    stage = _safe_float(fields.get("stageSize"))
+    if projected <= 0 or stage <= 0:
+        return None
+
+    best = _safe_float(best)
+    if best < stage:
+        return None
+
+    stages_hit = int(best // stage)
+    stage_level = stages_hit * stage
+    # Never trail past the projected max — leave room to tag the ceiling.
+    stage_level = min(stage_level, projected)
+
+    giveback_ratio = _safe_float(
+        fields.get("stageGivebackRatio"),
+        _cfg_float(s, "moment_stage_giveback_ratio", 0.50),
+    )
+    late_ratio = _safe_float(
+        fields.get("stageLateGivebackRatio"),
+        _cfg_float(s, "moment_stage_late_giveback_ratio", 1.0),
+    )
+    late_progress = _safe_float(
+        fields.get("stageLateProgress"),
+        _cfg_float(s, "moment_stage_late_progress", 0.70),
+    )
+    progress = stage_level / max(projected, 1e-9)
+    if progress >= late_progress:
+        giveback_ratio = max(giveback_ratio, late_ratio)
+
+    giveback = stage * giveback_ratio
+    floor_pts = stage_level - giveback
+    # Keep a small green cushion after the first stage.
+    min_remain = _cfg_float(s, "moment_stage_min_remain_points", 1.0)
+    floor_pts = max(floor_pts, min_remain)
+
+    # Ratchet only upward.
+    ctx = dict(trade.entryContext or {})
+    prev = ctx.get("stageTrailFloorPts")
+    if prev is not None:
+        floor_pts = max(floor_pts, _safe_float(prev))
+    floor_pts = round(floor_pts, 2)
+    ctx["stageTrailFloorPts"] = floor_pts
+    ctx["stageLevelPts"] = round(stage_level, 2)
+    ctx["projectedMaxTp"] = round(projected, 1)
+    plan = dict(ctx.get("exitPlan") or {})
+    plan["stageTrailFloorPts"] = floor_pts
+    plan["stageLevelPts"] = round(stage_level, 2)
+    plan["projectedMaxTp"] = round(projected, 1)
+    ctx["exitPlan"] = plan
+    trade.entryContext = ctx
+    return floor_pts
+
+
+def compose_trail_floor_with_stages(
+    trade: PaperTrade,
+    best: float,
+    base_floor: Optional[float],
+    *,
+    settings: Optional[Settings] = None,
+) -> tuple[Optional[float], Optional[float]]:
+    """Return (composed_floor, stage_floor).
+
+    While the stage ladder is active, the stage floor *owns* the trail.
+    Otherwise a best−step ratchet (~3.5pt) would stop a 250→400 rip on a
+    normal pullback long before the 225/350 stage floors.
+    """
+    stage_floor = stage_trail_floor_pts(trade, best, settings=settings)
+    if stage_floor is None:
+        return base_floor, None
+    return stage_floor, stage_floor

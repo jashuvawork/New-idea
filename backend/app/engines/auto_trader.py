@@ -1009,6 +1009,36 @@ async def _open_from_candidate(
                 ctx_extra["momentType"] = "mega_rip"
             elif ict.premium_fvg:
                 ctx_extra["momentType"] = "premium_fvg"
+        # Stage trail ladder — project max TP + stage size for flat→vertical / FVG / mega.
+        from app.engines.moment_stage_trail import build_moment_stage_plan
+
+        _max_profit = bool(
+            ctx_extra.get("maxProfitCapture")
+            or ctx_extra.get("defensiveBaseRip")
+            or ict.flat_then_vertical
+            or ict.mega_rip
+        )
+        stage_plan = build_moment_stage_plan(
+            entry_premium=float(fill_premium or candidate.premium or 50),
+            base_premium=float(getattr(ict, "base_premium", 0) or local_base_prem or 0),
+            exit_plan=exit_plan if isinstance(exit_plan, dict) else None,
+            velocity_3s=float(
+                getattr(ict, "velocity_3s", 0)
+                or entry_velocity_3s
+                or 0
+            ),
+            volume_surge=float(getattr(ict, "volume_surge", 0) or getattr(ev, "volume_surge", 0) or 1),
+            session_move_pct=float(getattr(ict, "session_move_pct", 0) or getattr(ev, "daily_move_pct", 0) or 0),
+            premium_fvg=bool(ict.premium_fvg),
+            flat_then_vertical=bool(ict.flat_then_vertical),
+            mega_rip=bool(ict.mega_rip),
+            max_profit=_max_profit,
+        )
+        if stage_plan:
+            ctx_extra.update(stage_plan)
+            plan = dict(ctx_extra.get("exitPlan") or {})
+            plan.update(stage_plan)
+            ctx_extra["exitPlan"] = plan
         if is_extreme_explosion_all_in_bypass(candidate=candidate):
             ctx_extra.update(extreme_all_in_meta(candidate=candidate))
         if faded_rip_meta:
