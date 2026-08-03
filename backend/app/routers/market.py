@@ -334,6 +334,24 @@ async def _fetch_news_cached() -> list:
     return _news_cache
 
 
+def _news_payload(news: list) -> dict[str, Any]:
+    """Dashboard news response with refresh metadata (5-minute cache cadence)."""
+    settings = get_settings()
+    now = datetime.now(IST)
+    age = 0.0
+    if _news_cache_at is not None:
+        age = max(0.0, (now - _news_cache_at).total_seconds())
+    remaining = max(0.0, settings.news_cache_seconds - age)
+    return {
+        "items": news,
+        "refreshedAt": _news_cache_at.isoformat() if _news_cache_at else None,
+        "cacheSeconds": settings.news_cache_seconds,
+        "ageSeconds": round(age, 1),
+        "nextRefreshInSeconds": round(remaining, 1),
+        "aggregate": aggregate_sentiment(news),
+    }
+
+
 def _shallow_cache_copy(
     *,
     snapshots: Optional[dict] = None,
@@ -925,6 +943,13 @@ async def market_stream():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/news")
+async def get_market_news():
+    """Market news for the dashboard — Finnhub feed cached every NEWS_CACHE_SECONDS (default 5 min)."""
+    news = await _fetch_news_cached()
+    return _news_payload(news)
 
 
 @router.get("/premarket/{symbol}")

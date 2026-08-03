@@ -1,5 +1,14 @@
+import { useEffect, useState } from 'react';
 import { Panel } from './Panel';
-import type { MultiSnapshot, TradeHistoryResponse, TradeLogResponse } from '../types';
+import type {
+  MarketNewsResponse,
+  MultiSnapshot,
+  NewsItem,
+  TradeHistoryResponse,
+  TradeLogResponse,
+} from '../types';
+
+const NEWS_POLL_MS = 5 * 60 * 1000; // match backend NEWS_CACHE_SECONDS (5 min)
 
 export function TradeJournal({
   data,
@@ -146,31 +155,114 @@ function LogEventRow({ entry }: { entry: import('../types').TradeLogEntry }) {
   );
 }
 
-export function NewsPanel({ news }: { news: MultiSnapshot['news'] }) {
+function formatNewsAge(refreshedAt: string | null): string {
+  if (!refreshedAt) return '—';
+  const ms = Date.now() - new Date(refreshedAt).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return 'just now';
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins === 1) return '1 min ago';
+  return `${mins} min ago`;
+}
+
+function formatHeadlineTime(epochSec?: number): string {
+  if (!epochSec) return '';
+  try {
+    return new Date(epochSec * 1000).toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
+export function NewsPanel({ news: seedNews = [] }: { news?: NewsItem[] }) {
+  const [items, setItems] = useState<NewsItem[]>(seedNews);
+  const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+  const [bias, setBias] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (seedNews.length > 0 && items.length === 0) {
+      setItems(seedNews);
+    }
+  }, [seedNews, items.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const res = await fetch('/api/market/news');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = (await res.json()) as MarketNewsResponse;
+        if (cancelled) return;
+        setItems(json.items ?? []);
+        setRefreshedAt(json.refreshedAt ?? null);
+        setBias(json.aggregate?.bias ?? null);
+        setError(null);
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'News unavailable');
+        }
+      }
+    }
+
+    void load();
+    const pollId = window.setInterval(() => void load(), NEWS_POLL_MS);
+    const ageId = window.setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollId);
+      window.clearInterval(ageId);
+    };
+  }, []);
+
+  const badge = [
+    bias && bias !== 'NEUTRAL' ? bias : null,
+    `↻ ${formatNewsAge(refreshedAt)}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
-    <Panel title="News & Events">
-      {news.length === 0 ? (
+    <Panel title="News & Events" badge={badge || undefined}>
+      {error && items.length === 0 ? (
+        <p className="text-xs text-nexus-muted">{error}</p>
+      ) : items.length === 0 ? (
         <p className="text-xs text-nexus-muted">No news feed configured</p>
       ) : (
-        <div className="max-h-32 overflow-y-auto space-y-2">
-          {news.slice(0, 5).map((n, i) => (
-            <div key={i} className="text-[10px] border-b border-nexus-border/30 pb-1.5">
-              <div className="flex gap-2">
-                <span
-                  className={`font-bold ${
-                    n.sentiment === 'BULLISH'
-                      ? 'text-nexus-green'
-                      : n.sentiment === 'BEARISH'
-                        ? 'text-nexus-red'
-                        : 'text-nexus-muted'
-                  }`}
-                >
-                  {n.sentiment[0]}
-                </span>
-                <span className="text-gray-300 line-clamp-2">{n.headline}</span>
+        <div className="max-h-40 overflow-y-auto space-y-2">
+          {items.slice(0, 8).map((n, i) => {
+            const when = formatHeadlineTime(n.datetime);
+            return (
+              <div key={`${n.headline.slice(0, 40)}-${i}`} className="text-[10px] border-b border-nexus-border/30 pb-1.5">
+                <div className="flex gap-2">
+                  <span
+                    className={`font-bold shrink-0 ${
+                      n.sentiment === 'BULLISH'
+                        ? 'text-nexus-green'
+                        : n.sentiment === 'BEARISH'
+                          ? 'text-nexus-red'
+                          : 'text-nexus-muted'
+                    }`}
+                  >
+                    {n.sentiment[0]}
+                  </span>
+                  <div className="min-w-0">
+                    <span className="text-gray-300 line-clamp-2">{n.headline}</span>
+                    <div className="mt-0.5 flex flex-wrap gap-x-2 text-[9px] text-nexus-muted">
+                      {n.source ? <span>{n.source}</span> : null}
+                      {when ? <span>{when}</span> : null}
+                      {n.indiaRelevant ? <span className="text-nexus-accent">IN</span> : null}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </Panel>

@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     aligned_explosion_rip_interval_seconds: int = 30
     directional_lock_aligned_rip_bypass_enabled: bool = True
     tick_overlay_max_age_seconds: float = 1.0
-    news_cache_seconds: int = 60
+    news_cache_seconds: int = 300  # dashboard + engine refresh cadence (5 min)
     background_market_monitor_enabled: bool = True
 
     # Cursor Composer 2.5 — session market monitor + trading advisory
