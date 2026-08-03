@@ -17,7 +17,13 @@ _BEARISH = (
     "fall", "drop", "crash", "bear", "decline", "low", "fear", "sell", "cut",
     "downgrade", "miss", "weak", "outflow", "recession", "war", "hike", "inflation",
 )
-_INDIA_TAGS = ("india", "nifty", "sensex", "rbi", "sebi", "rupee", "mumbai", "nse", "bse")
+# Tags that move Indian index options — domestic + global risk (oil, Fed, geopolitics).
+_INDIA_TAGS = (
+    "india", "nifty", "sensex", "banknifty", "rbi", "sebi", "rupee", "mumbai", "nse", "bse",
+    "reliance", "hdfc", "infosys", "tcs", "crude", "brent", "wti", "oil price", "opec",
+    "iran", "israel", "middle east", "geopolit", "fed ", "fomc", "dollar", "treasury",
+    "tariff", "china", "war", "ceasefire", "sanctions",
+)
 
 
 async def fetch_market_news() -> list[dict[str, Any]]:
@@ -29,14 +35,16 @@ async def fetch_market_news() -> list[dict[str, Any]]:
     try:
         async with httpx.AsyncClient(timeout=12.0) as client:
             token = settings.finnhub_api_key
-            for category in ("general", "forex", "crypto"):
+            # Prefer general/forex for index risk; keep a small crypto sample only.
+            category_limits = (("general", 15), ("forex", 10), ("crypto", 3))
+            for category, limit in category_limits:
                 resp = await client.get(
                     "https://finnhub.io/api/v1/news",
                     params={"category": category, "token": token},
                 )
                 if resp.status_code >= 400:
                     continue
-                for item in (resp.json() or [])[:10]:
+                for item in (resp.json() or [])[:limit]:
                     headline = item.get("headline", "")
                     summary = item.get("summary", "")
                     sentiment = _estimate_sentiment(headline, summary)
@@ -45,6 +53,7 @@ async def fetch_market_news() -> list[dict[str, Any]]:
                         "summary": summary[:200],
                         "source": item.get("source", category),
                         "datetime": item.get("datetime"),
+                        "url": item.get("url") or "",
                         "sentiment": sentiment,
                         "indiaRelevant": _is_india_relevant(headline, summary),
                         "category": category,
@@ -70,6 +79,7 @@ async def fetch_market_news() -> list[dict[str, Any]]:
                         "summary": (item.get("summary") or "")[:200],
                         "source": item.get("source", symbol),
                         "datetime": item.get("datetime"),
+                        "url": item.get("url") or "",
                         "sentiment": _estimate_sentiment(headline, item.get("summary", "")),
                         "indiaRelevant": True,
                         "category": "company",
@@ -78,10 +88,20 @@ async def fetch_market_news() -> list[dict[str, Any]]:
         logger.warning("Finnhub fetch failed: %s", e)
         return []
 
-    # Deduplicate by headline, prefer India-relevant
+    # Deduplicate by headline; India/macro-relevant and newer first.
+    # (Previous reverse sort on `not indiaRelevant` put relevant headlines last.)
     seen: set[str] = set()
     unique: list[dict[str, Any]] = []
-    for item in sorted(items, key=lambda x: (not x.get("indiaRelevant"), x.get("datetime") or 0), reverse=True):
+    ranked = sorted(
+        items,
+        key=lambda x: (
+            1 if x.get("indiaRelevant") else 0,
+            0 if x.get("category") == "crypto" else 1,
+            x.get("datetime") or 0,
+        ),
+        reverse=True,
+    )
+    for item in ranked:
         key = item.get("headline", "")[:80]
         if key and key not in seen:
             seen.add(key)

@@ -871,6 +871,24 @@ export interface NewsItem {
   summary: string;
   source: string;
   sentiment: string;
+  datetime?: number;
+  url?: string;
+  indiaRelevant?: boolean;
+  category?: string;
+}
+
+export interface MarketNewsResponse {
+  items: NewsItem[];
+  refreshedAt: string | null;
+  cacheSeconds: number;
+  ageSeconds: number;
+  nextRefreshInSeconds: number;
+  aggregate?: {
+    bias: string;
+    score: number;
+    indiaHeadlines: number;
+    count?: number;
+  };
 }
 
 export interface DeploymentStatus {
