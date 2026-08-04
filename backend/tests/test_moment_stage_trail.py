@@ -7,9 +7,11 @@ from zoneinfo import ZoneInfo
 from app.engines.explosion_profit import ExplosionExitParams, evaluate_explosion_exit
 from app.engines.moment_stage_trail import (
     build_moment_stage_plan,
+    compose_trail_floor_with_stages,
     compute_projected_max_tp,
     compute_stage_size,
     maybe_extend_projected_max,
+    pre_stage_hold_floor_pts,
     stage_trail_floor_pts,
 )
 from app.models.schemas import PaperTrade, Side, StrategyType
@@ -51,6 +53,8 @@ def _settings(**overrides):
     s.moment_stage_extend_hot_stages = 4.0
     s.moment_stage_extend_hot_velocity_3s = 2.5
     s.moment_stage_hot_hold_velocity_3s = 2.5
+    s.explosion_trail_pre_stage_suppress_step = True
+    s.explosion_trail_hot_defer_enabled = True
     s.ict_max_profit_target_points = 180.0
     s.ict_max_profit_skip_hard_target = True
     s.ict_max_profit_trail_keep_ratio = 0.42
@@ -312,3 +316,82 @@ def test_live_extension_chases_650_path(mock_s):
     floor = stage_trail_floor_pts(trade, 520.0, settings=_settings())
     assert floor is not None
     assert 520.0 > floor
+
+
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_pre_stage_floor_owns_trail_before_first_stage(mock_s):
+    """Before stageSize is hit, provisional floor suppresses best−3.5pt step."""
+    mock_s.return_value = _settings()
+    trade = _trade(entry=392.05, best=43.22, current=429.5, projected=800.0, stage=75.0)
+    trade.entryContext["liveVelocity3s"] = 4.4
+    trade.bestPnlPoints = 43.22
+    trade.pnlPoints = 37.46
+    pre = pre_stage_hold_floor_pts(trade, 43.22, settings=_settings())
+    assert pre is not None
+    assert pre < 37.46  # +37 pullback still above provisional floor
+    composed, stage_floor = compose_trail_floor_with_stages(
+        trade, 43.22, base_floor=39.72, settings=_settings()
+    )
+    assert stage_floor == pre
+    assert composed == pre
+    assert composed < 37.46
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_sensex_put_392_holds_through_early_trail_dip(mock_ms, mock_s, _hc, _mp):
+    """Regression: entry 392 / best +43 / live +37 must NOT explosion_trail_sl.
+
+    Aug4 SENSEX 78700 PUT was cut by the 3.5pt step trail while LTP ran to ~500.
+    """
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    trade = _trade(
+        entry=392.05,
+        best=43.22,
+        current=429.51,  # +37.46
+        projected=800.0,
+        stage=75.0,
+    )
+    trade.entryContext["liveVelocity3s"] = 4.4
+    trade.entryContext["velocity3s"] = 4.4
+    trade.entryContext["defensiveBaseRip"] = True
+    trade.bestPnlPoints = 43.22
+    trade.pnlPoints = 37.46
+    reason, pnl = evaluate_explosion_exit(
+        trade, 429.51, "EXPLODING", 10, params=_params(), live_velocity_3s=4.4,
+    )
+    assert reason != "explosion_trail_sl"
+    assert reason != "explosion_trail_lock"
+    assert reason != "explosion_micro_profit_lock"
+    assert reason != "explosion_stage_trail"
+    assert pnl > 0
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_pre_stage_deep_fade_still_books(mock_ms, mock_s, _hc, _mp):
+    """Deep fade through provisional floor still exits via stage trail."""
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    trade = _trade(
+        entry=392.05,
+        best=43.22,
+        current=393.05,  # ~+1pt — through hot provisional floor
+        projected=800.0,
+        stage=75.0,
+    )
+    trade.entryContext["liveVelocity3s"] = 4.4
+    trade.bestPnlPoints = 43.22
+    trade.pnlPoints = 1.0
+    reason, pnl = evaluate_explosion_exit(
+        trade, 393.05, "EXPLODING", 10, params=_params(), live_velocity_3s=4.4,
+    )
+    assert reason == "explosion_stage_trail"
+    assert pnl > 0

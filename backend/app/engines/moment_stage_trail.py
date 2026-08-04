@@ -391,6 +391,57 @@ def stage_trail_floor_pts(
     return floor_pts
 
 
+def pre_stage_hold_floor_pts(
+    trade: PaperTrade,
+    best: float,
+    *,
+    settings: Optional[Settings] = None,
+) -> Optional[float]:
+    """Wide provisional floor before the first stage completes.
+
+    Without this, the best−3.5pt step trail owns the 0→stageSize window and
+    cuts continuing ICT rips on normal dips (SENSEX PUT 392 best+43 → exit+37
+    while LTP ran to ~500).
+    """
+    s = settings or get_settings()
+    if not bool(getattr(s, "moment_stage_trail_enabled", True)):
+        return None
+    if not bool(getattr(s, "explosion_trail_pre_stage_suppress_step", True)):
+        return None
+    if not trade_uses_moment_stage_ladder(trade):
+        return None
+
+    fields = _ladder_fields(trade)
+    stage = _safe_float(fields.get("stageSize"))
+    if stage <= 0:
+        return None
+
+    best = _safe_float(best)
+    arm = _cfg_float(s, "explosion_trail_arm_points", 4.0)
+    if best < arm:
+        return None
+    # First stage completed — real stage floors take over.
+    if best >= stage:
+        return None
+
+    giveback_ratio = _safe_float(
+        fields.get("stageGivebackRatio"),
+        _cfg_float(s, "moment_stage_giveback_ratio", 0.50),
+    )
+    live_v = _live_velocity_3s(trade)
+    hot = live_v >= _cfg_float(s, "moment_stage_hot_hold_velocity_3s", 2.5)
+    if hot:
+        # Still expanding — allow a full stage of pullback room.
+        giveback_ratio = max(
+            giveback_ratio, _cfg_float(s, "moment_stage_late_giveback_ratio", 1.0)
+        )
+
+    giveback = stage * giveback_ratio
+    min_remain = _cfg_float(s, "moment_stage_min_remain_points", 1.0)
+    floor_pts = max(min_remain, best - giveback)
+    return round(floor_pts, 2)
+
+
 def compose_trail_floor_with_stages(
     trade: PaperTrade,
     best: float,
@@ -403,8 +454,14 @@ def compose_trail_floor_with_stages(
     While the stage ladder is active, the stage floor *owns* the trail.
     Otherwise a best−step ratchet (~3.5pt) would stop a 250→400 rip on a
     normal pullback long before the 225/350 stage floors.
+
+    Before the first stage completes, a provisional pre-stage floor owns the
+    trail so the micro step cannot cut a still-projecting vertical.
     """
     stage_floor = stage_trail_floor_pts(trade, best, settings=settings)
-    if stage_floor is None:
-        return base_floor, None
-    return stage_floor, stage_floor
+    if stage_floor is not None:
+        return stage_floor, stage_floor
+    pre_floor = pre_stage_hold_floor_pts(trade, best, settings=settings)
+    if pre_floor is not None:
+        return pre_floor, pre_floor
+    return base_floor, None
