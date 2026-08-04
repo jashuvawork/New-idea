@@ -1088,13 +1088,19 @@ def find_best_entry(
             # Best-only: do not boost mediocre scalps over explosions (Jul27 pattern).
             if not getattr(settings, "scalp_best_only_enabled", True):
                 bonus += 6
-        # Expiry day: same-day expiry index jumps the queue (NIFTY Thu / SENSEX Fri).
+        # Nearest expiry index #1, same-week next #2 (Tue NIFTY ↔ Thu SENSEX).
         if getattr(settings, "expiry_day_prefer_same_day_enabled", True):
-            from app.engines.expiry_day_guards import is_symbol_expiry_day
+            from app.engines.bad_day_routing import expiry_proximity_ranks
 
-            if is_symbol_expiry_day(c.snap):
+            nearest, nxt = expiry_proximity_ranks(snapshots)
+            sym_u = c.symbol.upper()
+            if sym_u in nearest:
                 bonus += float(
                     getattr(settings, "expiry_day_sort_priority_bonus", 30.0) or 30.0
+                )
+            elif sym_u in nxt:
+                bonus += float(
+                    getattr(settings, "expiry_day_same_week_next_sort_bonus", 15.0) or 15.0
                 )
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty

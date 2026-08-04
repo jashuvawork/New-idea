@@ -59,7 +59,8 @@ class _Cand:
         self.snap = snap
 
 
-def test_sensex_pre_expiry_routes_to_nifty():
+def test_sensex_near_expiry_is_not_routed_away():
+    """Near-expiry SENSEX (tomorrow) is priority — not demoted to NIFTY."""
     tomorrow = _tomorrow()
     snaps = {
         "NIFTY": _snap("NIFTY", _next_week(), tqs=38.0),
@@ -70,24 +71,24 @@ def test_sensex_pre_expiry_routes_to_nifty():
     assert alternate_index_for("SENSEX", snaps) == "NIFTY"
 
     restricted, alt = pre_expiry_index_restricted(snaps["SENSEX"], snaps)
-    assert restricted is True
-    assert alt == "NIFTY"
+    assert restricted is False
+    assert alt is None
 
 
 @patch("app.engines.bad_day_routing.bad_day_session_active", return_value=(True, ["bearish_sideways"]))
 @patch("app.engines.bad_day_routing.expiry_index_fading", return_value=(False, []))
-def test_blocks_sensex_explosion_routes_to_nifty(mock_fade, mock_bad):
-    """Weak BUILDING on pre-expiry still routes to the alternate index."""
+def test_near_expiry_sensex_stays_eligible_on_bad_day(mock_fade, mock_bad):
+    """Near-expiry index is not soft-routed away on a bad-day session."""
     tomorrow = _tomorrow()
     snaps = {
         "NIFTY": _snap("NIFTY", _next_week(), tqs=38.0),
-        "SENSEX": _snap("SENSEX", tomorrow, tqs=34.0),
+        "SENSEX": _snap("SENSEX", tomorrow, tqs=45.0),
     }
-    cand = _Cand("SENSEX", Side.PUT, 50.0, mode="explosion", tier="BUILDING", snap=snaps["SENSEX"])
+    snaps["SENSEX"].breadth = Breadth(bias="BEARISH", score=80, aligned=True)
+    cand = _Cand("SENSEX", Side.PUT, 74.0, mode="explosion", tier="ELITE", snap=snaps["SENSEX"])
     ok, reason, meta = check_bad_day_candidate(cand, AutoTraderState(), snaps)
-    assert not ok
-    assert "pre_expiry" in reason
-    assert meta.get("preExpiryAlternate") == "NIFTY"
+    assert ok, reason
+    assert not meta.get("preExpiryRestricted")
 
 
 @patch("app.engines.bad_day_routing.bad_day_session_active", return_value=(True, ["bearish_sideways"]))
@@ -143,7 +144,8 @@ def test_allows_nifty_explosion_when_sensex_pre_expiry(mock_fade, mock_bad):
     assert ok, reason
 
 
-def test_cross_index_bonus_nifty_when_sensex_pre_expiry():
+def test_cross_index_bonus_sensex_when_near_expiry():
+    """SENSEX nearer expiry beats next-week NIFTY (vice versa of old demote)."""
     tomorrow = _tomorrow()
     snaps = {
         "NIFTY": _snap("NIFTY", _next_week(), tqs=38.0),
@@ -153,8 +155,8 @@ def test_cross_index_bonus_nifty_when_sensex_pre_expiry():
     sensex_cand = _Cand("SENSEX", Side.PUT, 70.0, snap=snaps["SENSEX"])
     nifty_bonus = cross_index_rank_adjustment(nifty_cand, AutoTraderState(), snaps)
     sensex_bonus = cross_index_rank_adjustment(sensex_cand, AutoTraderState(), snaps)
-    assert nifty_bonus > 0
-    assert sensex_bonus < 0
+    assert sensex_bonus > nifty_bonus
+    assert sensex_bonus > 0
 
 
 @patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True)

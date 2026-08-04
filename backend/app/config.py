@@ -788,17 +788,21 @@ class Settings(BaseSettings):
     expiry_pm_itm_min_rank_score: float = 52.0
     expiry_pm_itm_chart_bypass_breadth: bool = True
     expiry_pm_itm_alternate_index_enabled: bool = True
-    # Tomorrow (pre-expiry) only: prefer the other index for weak explosion/scalp.
-    # Same-day expiry is handled separately — trade that index FIRST.
+    # Legacy pre-expiry alternate routing — disabled in favor of near-expiry priority
+    # when expiry_day_prefer_same_day_enabled (nearest expiry index wins).
     pre_expiry_cross_index_enabled: bool = True
     pre_expiry_symbol_rank_penalty: float = 12.0
     pre_expiry_alternate_min_rank: float = 55.0
     pre_expiry_expiry_symbol_explosion_min_rank: float = 45.0
-    # Expiry day: prioritize the index that expires TODAY (Aug4 NIFTY 24550 PE @~20
-    # →120). Next-week / other index is secondary. Do not demote same-day expiry.
+    # Weekly: Tue NIFTY / Thu SENSEX. Priority = nearest expiry first, then flips.
+    # Tue: NIFTY #1; Wed (SENSEX tomorrow): SENSEX #1; Thu: SENSEX #1; etc.
     expiry_day_prefer_same_day_enabled: bool = True
     expiry_day_symbol_rank_bonus: float = 22.0
     expiry_day_sort_priority_bonus: float = 30.0
+    # #2 when peer expires within a few days (Tue NIFTY → Thu SENSEX = +2d).
+    expiry_day_same_week_next_rank_bonus: float = 12.0
+    expiry_day_same_week_next_sort_bonus: float = 15.0
+    expiry_day_same_week_next_max_days: int = 3
     # Soften LTP floor slightly on same-day expiry so ~₹15–20 near-base rips clear.
     expiry_day_min_option_premium_inr: float = 15.0
     expiry_aligned_explosion_trade_bypass_enabled: bool = True
