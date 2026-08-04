@@ -32,7 +32,7 @@ def _settings(**overrides):
     s.entry_timing_cold_lot_cap = 3
     s.entry_timing_elite_bypass_requires_hot = True
     s.entry_timing_structured_cold_base_allow = True
-    s.entry_timing_structured_cold_lot_cap = 15
+    s.entry_timing_structured_cold_max_lots = True
     s.entry_timing_structured_cold_require_heat = True
     s.entry_timing_structured_cold_require_aligned = True
     s.explosion_elite_never_block_enabled = True
@@ -111,8 +111,8 @@ def _snap(regime: str = "CHOP") -> SymbolSnapshot:
 
 @patch("app.engines.entry_timing.get_settings")
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_aug4_structured_cold_base_allowed_capped(mock_g1, mock_g2):
-    """24550 PE: cold v3 but local base still in window → take with lot cap."""
+def test_aug4_structured_cold_base_allowed_full_size(mock_g1, mock_g2):
+    """24550 PE: cold v3 but local base still in window → take at max lots."""
     s = _settings()
     mock_g1.return_value = s
     mock_g2.return_value = s
@@ -123,12 +123,13 @@ def test_aug4_structured_cold_base_allowed_capped(mock_g1, mock_g2):
         midday_chop=True,
     )
     assert timing["assessment"] == "COLD_BASE"
-    assert timing["action"] == "lot_cap"
+    assert timing["action"] == "allow"
     assert timing.get("structuredColdBase") is True
     blocked, _ = timing_blocks_entry(timing)
     assert blocked is False
-    assert cap_lots_for_timing(41, timing) == 15
-    assert not timing_allows_full_size(timing)
+    assert cap_lots_for_timing(41, timing) == 41  # no lot_cap action
+    assert timing_allows_full_size(timing)
+    # Elite never-block still needs GOOD (hot) — max lots is separate.
     assert not elite_bypass_allowed_for_timing(timing)
 
 

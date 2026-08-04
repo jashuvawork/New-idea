@@ -2,13 +2,13 @@
 
 Aug4 NIFTY 24550 PUT: ELITE / mega_rip / localBase 28.8% with live v3=0.8.
 Blind max-lot cold fill was bad; blocking the whole thesis missed LTP→120.
-Structured cold-base (local still in window + heat + aligned) is allowed with
-a lot cap; true LATE/CHASE without a live local base stays blocked.
+Structured cold-base (local still in window + heat + aligned) is allowed at
+full/max lots; true LATE/CHASE without a live local base stays blocked.
 
 Timing verdicts:
   GOOD       — structured + in window + hot live velocity → full size OK
   OK         — in window with adequate live heat → allow
-  COLD_BASE  — ICT local-base pause (cold tape, still in window) → lot-cap allow
+  COLD_BASE  — ICT local-base pause (cold tape, still in window) → max lots
   COLD       — structure/ELITE but live velocity dead → block (chop) or lot-cap
   LATE       — peak already extended and live cooled → block
   CHASE      — past structured/local chase ceiling → block
@@ -197,7 +197,6 @@ def assess_entry_timing(
         event=event,
         snap=snap,
     )
-    cold_base_cap = int(getattr(settings, "entry_timing_structured_cold_lot_cap", 15) or 15)
 
     # --- priority: CHASE > structured cold-base allow > LATE > COLD > GOOD/OK ---
     if local > chase_hi > 0:
@@ -210,13 +209,12 @@ def assess_entry_timing(
         reasons.append(f"session_{session:.0f}%>ceiling_{chase_hi:.0f}%")
     elif cold_base:
         # Aug4 24550 PE: session peak already huge but local base still early —
-        # cold pause before next leg. Allow capped size; thesis-hold rides green.
+        # cold pause before next leg. Worth taking → full/max lots; thesis-hold.
         assessment = "COLD_BASE"
-        action = "lot_cap"
-        lot_cap = cold_base_cap
+        action = "allow"
         reasons.append(f"structured_cold_base_v3_{live_v:.1f}")
         reasons.append(f"local_base_{local:.0f}%_in_window")
-        reasons.append(f"cold_base_lot_cap_{lot_cap}")
+        reasons.append("cold_base_max_lots")
     elif (
         session >= late_peak
         and live_v <= late_max_v
@@ -321,13 +319,13 @@ def cap_lots_for_timing(lots: int, timing: dict[str, Any]) -> int:
 
 
 def timing_allows_full_size(timing: dict[str, Any]) -> bool:
-    """High-conviction / max-lot boosts only when timing is GOOD or OK."""
+    """Max-lot boosts when timing is GOOD, OK, or structured COLD_BASE."""
     if not timing:
         return True
     settings = get_settings()
     if not bool(getattr(settings, "entry_timing_assessment_enabled", True)):
         return True
-    return str(timing.get("assessment") or "").upper() in ("GOOD", "OK")
+    return str(timing.get("assessment") or "").upper() in ("GOOD", "OK", "COLD_BASE")
 
 
 def elite_bypass_allowed_for_timing(timing: dict[str, Any]) -> bool:

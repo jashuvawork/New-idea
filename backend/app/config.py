@@ -187,10 +187,11 @@ class Settings(BaseSettings):
     entry_timing_elite_bypass_requires_hot: bool = True
     # Aug4 NIFTY 24550 PUT: structured ICT local-base still in window (28.8%) but
     # live v3 cold (0.8) on chop → was hard-blocked as LATE/COLD, then LTP→120.
-    # Allow these "pause before next leg" moments with a lot cap — never HC/max lots,
-    # never elite never-block. True LATE chase (no local base / past ceiling) stays blocked.
+    # Allow these "pause before next leg" moments at capital max lots (worth taking
+    # → full size). Elite never-block still requires GOOD (hot) timing.
+    # True LATE chase (no local base / past ceiling) stays blocked.
     entry_timing_structured_cold_base_allow: bool = True
-    entry_timing_structured_cold_lot_cap: int = 15
+    entry_timing_structured_cold_max_lots: bool = True
     entry_timing_structured_cold_require_heat: bool = True
     entry_timing_structured_cold_require_aligned: bool = True
     # Promote high-confidence radar explosions the missed-trade monitor flags as bullish/base-window.
