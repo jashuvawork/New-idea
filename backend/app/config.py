@@ -758,6 +758,9 @@ class Settings(BaseSettings):
     expiry_worst_day_elite_top_max_move_pct: float = 70.0
     expiry_worst_day_elite_top_tiers_csv: str = "ELITE,EXPLODING"
     expiry_worst_day_elite_top_composer_bypass: bool = True
+    # daily_trade_cap_N>=3_expiry_worst must not skip ELITE / top EXPLODING —
+    # lift the hard session cap and restrict to elite-top only (same gates).
+    expiry_worst_day_elite_top_bypasses_trade_cap: bool = True
     expiry_dual_scalp_mode: bool = True
     expiry_dual_scalp_relax_whipsaw: bool = True
     expiry_dual_scalp_opposite_cooldown_seconds: int = 90

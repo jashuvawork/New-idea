@@ -47,8 +47,8 @@ from app.engines.chop_day_guards import (
     is_loss_streak_elite_bypass_candidate,
     record_session_trade_close,
     reset_session_guards,
+    resolve_daily_trade_cap,
     resolve_session_entry_pause,
-    trades_cap_reached,
 )
 from app.engines.whipsaw_guards import (
     check_session_whipsaw_pause,
@@ -1741,12 +1741,19 @@ async def process(
                 "reason": "loss_streak_elite_bypass",
                 "message": "Loss streak pause lifted — high-confidence ELITE / top explosive only",
             })
-        cap_hit, cap_reason = trades_cap_reached(state, snapshots)
+        cap_hit, cap_reason, cap_meta = resolve_daily_trade_cap(state, snapshots)
+        cap_elite_only = bool(cap_meta.get("dailyCapEliteOnly"))
         if cap_hit:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": cap_reason,
                 "message": "Daily trade cap on chop session",
+            })
+        elif cap_elite_only:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": "daily_trade_cap_elite_bypass",
+                "message": "Daily trade cap lifted — ELITE / top explosive only",
             })
         from app.engines.pretrade_validator import controlled_daily_cap_reached, check_last_n_trades_pause
         ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state, snapshots)
@@ -1772,7 +1779,10 @@ async def process(
                 "message": whipsaw_meta.get("dualLegWhipsaw")
                 or f"Whipsaw/churn pause — CE↔PE flip-flops in bearish sideways",
             })
-        from app.engines.expiry_day_guards import check_expiry_entry_allowed
+        from app.engines.expiry_day_guards import (
+            check_expiry_entry_allowed,
+            is_expiry_elite_top_candidate,
+        )
         from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
 
         policy, policy_meta = session_entry_policy(state, snapshots)
@@ -1814,6 +1824,16 @@ async def process(
                     "symbol": best.symbol,
                     "reason": "loss_streak_elite_only",
                     "message": "Loss streak pause — only high-confidence ELITE / top explosive allowed",
+                    "mode": best.mode,
+                    "score": best.score,
+                    "tier": getattr(best, "tier", None),
+                })
+                best = None
+            if best and cap_elite_only and not is_expiry_elite_top_candidate(best):
+                skipped.append({
+                    "symbol": best.symbol,
+                    "reason": "daily_trade_cap_elite_only",
+                    "message": "Daily trade cap — only ELITE / top explosive allowed",
                     "mode": best.mode,
                     "score": best.score,
                     "tier": getattr(best, "tier", None),

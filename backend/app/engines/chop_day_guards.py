@@ -349,6 +349,42 @@ def trades_cap_reached(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     return False, "ok"
 
 
+def resolve_daily_trade_cap(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Hard daily trade-cap gate with elite-top lift on expiry_worst.
+
+    When closed trades hit expiry_worst max (e.g. 3>=3) but an early-window
+    ELITE / top EXPLODING is on radar, do not block the session — caller must
+    restrict entries to those candidates only (meta dailyCapEliteOnly).
+    """
+    meta: dict[str, Any] = {}
+    hit, reason = trades_cap_reached(state, snapshots)
+    if not hit:
+        return False, "ok", meta
+
+    if "expiry_worst" not in reason:
+        return True, reason, meta
+
+    settings = get_settings()
+    if not getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True):
+        return True, reason, meta
+    if not getattr(settings, "expiry_worst_day_elite_top_bypasses_trade_cap", True):
+        return True, reason, meta
+
+    from app.engines.expiry_day_guards import snapshots_have_expiry_elite_top
+
+    if not snapshots_have_expiry_elite_top(snapshots):
+        return True, reason, meta
+
+    meta["dailyCapEliteOnly"] = True
+    meta["dailyCapEliteBypass"] = True
+    meta["rawCapReason"] = reason
+    return False, "daily_trade_cap_elite_bypass", meta
+
+
 def in_momentum_rally_window() -> bool:
     """11:00–13:45 IST — premium expansion window (chart-style rallies)."""
     if get_market_phase() != "LIVE_MARKET":
