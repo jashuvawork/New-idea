@@ -153,10 +153,14 @@ def pre_expiry_index_restricted(
         return False, None
     if not snap.dataAvailable:
         return False, None
-    # Same-day expiry: never soft-route to the other index.
-    if getattr(settings, "expiry_day_prefer_same_day_enabled", True) and is_symbol_expiry_day(snap):
+    prefer_week = getattr(settings, "expiry_day_prefer_same_day_enabled", True)
+    # Same-day expiry (#1): never soft-route away.
+    if prefer_week and is_symbol_expiry_day(snap):
         return False, None
-    # Only tomorrow (pre-expiry) gets alternate routing.
+    # Same-week next (#2, e.g. Fri SENSEX while Thu NIFTY expires): keep tradeable.
+    if prefer_week and is_same_week_next_index(snap, snapshots):
+        return False, None
+    # Only lone tomorrow pre-expiry (no same-day peer) gets alternate routing.
     if not is_pre_expiry_day(snap):
         return False, None
     alt = alternate_index_for(snap.symbol.upper(), snapshots)
@@ -426,12 +430,31 @@ def check_bad_day_candidate(
     return True, "ok", meta
 
 
+def is_same_week_next_index(
+    snap: SymbolSnapshot,
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """True when this index expires tomorrow while another expires today.
+
+    Classic week: Thu NIFTY expiry → Fri SENSEX is #2 same-week next.
+    Fri SENSEX expiry → next NIFTY is next week (not same-week next).
+    """
+    if not snap.dataAvailable:
+        return False
+    today_ex = expiry_symbols(snapshots)
+    if not today_ex:
+        return False
+    if is_symbol_expiry_day(snap):
+        return False
+    return is_pre_expiry_day(snap)
+
+
 def cross_index_rank_adjustment(
     candidate: Any,
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
 ) -> float:
-    """Expiry-day: boost same-day index first; pre-expiry tomorrow: prefer alternate."""
+    """Expiry week: (1) same-day index, (2) same-week next, else pre-expiry alternate."""
     settings = get_settings()
     if not settings.bad_day_routing_enabled:
         return 0.0
@@ -447,7 +470,7 @@ def cross_index_rank_adjustment(
     snap = snapshots.get(sym) or candidate.snap
     bonus = 0.0
 
-    # --- Same-day expiry first (Aug4 NIFTY) ---
+    # --- Expiry week ladder: #1 today, #2 same-week next (Thu NIFTY → Fri SENSEX) ---
     if getattr(settings, "expiry_day_prefer_same_day_enabled", True) and today_ex:
         if sym in today_ex:
             bonus += float(getattr(settings, "expiry_day_symbol_rank_bonus", 22.0) or 22.0)
@@ -455,8 +478,13 @@ def cross_index_rank_adjustment(
                 # Still penalize a bleeding expiry index, but keep the same-day boost.
                 bonus -= settings.bad_day_fading_symbol_penalty
             return bonus
-        # Non-expiry while a same-day index is live: only boost alternate if
-        # the expiry index is fading hard — otherwise expiry stays first.
+        if is_same_week_next_index(snap, snapshots):
+            # #2 — do NOT apply pre-expiry demotion; this is the intentional second pick.
+            bonus += float(
+                getattr(settings, "expiry_day_same_week_next_rank_bonus", 12.0) or 12.0
+            )
+            return bonus
+        # Farther / other: only boost if today's expiry index is fading hard.
         expiry_fading = any(s in fading_map for s in today_ex)
         if expiry_fading:
             for restricted_sym in today_ex:
