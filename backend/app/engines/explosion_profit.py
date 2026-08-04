@@ -295,6 +295,18 @@ def check_explosion_entry(
     if live_blocked:
         return False, live_reason
 
+    from app.engines.entry_timing import assess_entry_timing, timing_blocks_entry
+
+    timing = assess_entry_timing(
+        event,
+        ict=ict_live,
+        snap=snap,
+        premium_capture=is_premium_capture_event(event, chart=chart),
+    )
+    timing_blocked, timing_reason = timing_blocks_entry(timing)
+    if timing_blocked:
+        return False, timing_reason
+
     from app.engines.chop_day_guards import neutral_breadth_blocks_entry
 
     score = max(event.explosion_score, trade.tqs or 0, trade.confidence or 0)

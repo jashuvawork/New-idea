@@ -173,7 +173,18 @@ class Settings(BaseSettings):
     explosion_elite_exploding_only: bool = True
     # Never block ELITE explosions — skip fake-trap / extended-chase / late-fade /
     # live-confirm / composer stand-down. Premium band still applies (no ₹3 OTM).
+    # Timing COLD/LATE/CHASE still refuses the bypass when elite_bypass_requires_hot.
     explosion_elite_never_block_enabled: bool = True
+    # Per-trade timing quality (GOOD/OK/COLD/LATE/CHASE) — blocks cold ELITE fills.
+    entry_timing_assessment_enabled: bool = True
+    entry_timing_cold_max_velocity_3s: float = 1.5
+    entry_timing_ok_min_velocity_3s: float = 1.5
+    entry_timing_good_min_velocity_3s: float = 2.0
+    entry_timing_late_min_peak_pct: float = 55.0
+    entry_timing_late_max_live_velocity_3s: float = 1.0
+    entry_timing_cold_block_on_chop: bool = True
+    entry_timing_cold_lot_cap: int = 3
+    entry_timing_elite_bypass_requires_hot: bool = True
     # Promote high-confidence radar explosions the missed-trade monitor flags as bullish/base-window.
     # Does NOT trade premium_out_of_band cheap OTM chases (Jul20 24550 @ ₹3 — correctly blocked).
     missed_explosion_promote_enabled: bool = True
@@ -292,7 +303,8 @@ class Settings(BaseSettings):
     # Faded vertical rip — peak move huge but live velocity cooled (caution sizing)
     explosion_faded_rip_caution_enabled: bool = True
     explosion_faded_rip_min_peak_pct: float = 35.0
-    explosion_faded_rip_max_live_velocity_3s: float = 0.5
+    # Catch cold fills like Aug4 v3=0.8 (was 0.5 — missed the caution band).
+    explosion_faded_rip_max_live_velocity_3s: float = 1.0
     explosion_faded_rip_lot_cap: int = 6
     explosion_faded_rip_tighter_stop_mult: float = 0.85
     explosion_faded_rip_no_green_exit_enabled: bool = True
@@ -420,6 +432,8 @@ class Settings(BaseSettings):
     # Bypasses the first-green + defensive throttles; fake-trap chop cap still applies.
     high_conviction_sizing_enabled: bool = True
     high_conviction_min_score: float = 90.0
+    # Cold ELITE must not force max lots (Aug4 24550 PUT v3=0.8 + HC → −₹22k).
+    high_conviction_min_velocity_3s: float = 2.0
     # Rescaled chartConf cutover (was 85 on the old 20–95 clamp). Same raw gate after
     # linear map raw[40,200]→[40,100]: rescale(85)≈56.9.
     high_conviction_min_chart_confidence: float = 56.9

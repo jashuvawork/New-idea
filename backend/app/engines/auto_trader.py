@@ -414,6 +414,28 @@ async def _open_from_candidate(
         if trap_block or trap_meta.get("action") == "block":
             return False, trap_reason
 
+    # Per-trade timing quality — COLD/LATE/CHASE cannot open full-size on dead tape.
+    timing_meta: dict[str, Any] = {}
+    if candidate.mode == "explosion" and candidate.explosion_event is not None:
+        from app.engines.entry_timing import (
+            assess_timing_for_event,
+            cap_lots_for_timing,
+            timing_allows_full_size,
+            timing_blocks_entry,
+        )
+        from app.engines.morning_premium_capture import is_premium_capture_event
+
+        timing_meta = assess_timing_for_event(
+            candidate.explosion_event,
+            snap=snap,
+            premium_capture=is_premium_capture_event(
+                candidate.explosion_event, chart=snap.spotChart,
+            ),
+        )
+        timing_blocked, timing_reason = timing_blocks_entry(timing_meta)
+        if timing_blocked:
+            return False, timing_reason
+
     signal_premium = candidate.premium
     is_live = settings.enable_live_trading and settings.auto_trading_enabled
     use_parity = _uses_paper_live_parity(settings)
@@ -459,6 +481,10 @@ async def _open_from_candidate(
         lots = cap_extended_chase_lots(lots, candidate.explosion_event, ict=chase_ict)
         if faded_rip_meta:
             lots = cap_faded_rip_lots(lots)
+        if timing_meta:
+            from app.engines.entry_timing import cap_lots_for_timing
+
+            lots = cap_lots_for_timing(lots, timing_meta)
     elif candidate.mode == "worst_day_itm_fade":
         lots = cap_worst_day_itm_fade_lots(lots)
     elif candidate.mode in ("quick_sideways", "slow_bounce"):
@@ -593,25 +619,32 @@ async def _open_from_candidate(
         except Exception:
             pass
 
+        entry_v3 = float(getattr(ev, "velocity_3s", 0) or 0)
+
         def _size_gate(gate_fn: Any) -> bool:
+            kwargs_base = dict(
+                side=candidate.side,
+                snap=snap,
+                tier=str(candidate.tier or ""),
+                score=conv_score,
+                chart_confidence=conv_chart_conf,
+            )
             return any(
-                gate_fn(
-                    side=candidate.side,
-                    snap=snap,
-                    tier=str(candidate.tier or ""),
-                    score=conv_score,
-                    move_pct=mv,
-                    chart_confidence=conv_chart_conf,
-                )
+                gate_fn(move_pct=mv, velocity_3s=entry_v3, **kwargs_base)
+                if gate_fn is is_high_conviction_entry
+                else gate_fn(move_pct=mv, **kwargs_base)
                 for mv in move_candidates
             )
 
-        high_conviction = _size_gate(is_high_conviction_entry)
+        from app.engines.entry_timing import timing_allows_full_size
+
+        timing_ok_full = timing_allows_full_size(timing_meta) if timing_meta else True
+        high_conviction = bool(timing_ok_full) and _size_gate(is_high_conviction_entry)
         if high_conviction and getattr(settings, "high_conviction_sizing_enabled", True):
             from app.engines.capital_allocator import max_lots_for_capital
 
             lots = max(lots, max_lots_for_capital(symbol, fill_premium))
-        elif getattr(settings, "elevated_size_enabled", True):
+        elif timing_ok_full and getattr(settings, "elevated_size_enabled", True):
             # Strong EXPLODING base rip (not full high-conviction) → elevated size.
             if _size_gate(is_elevated_size_entry):
                 from app.engines.capital_allocator import max_lots_for_capital
@@ -633,7 +666,8 @@ async def _open_from_candidate(
 
         # ELITE/EXPLODING → capital max on first take (Jul29 77500 CE under-sized at 6).
         # Does not require HC score/move windows; still skip true CHOP/WORST days.
-        if is_top_explosion_max_lots_entry(
+        # Cold timing must not force max lots.
+        if timing_ok_full and is_top_explosion_max_lots_entry(
             side=candidate.side,
             snap=snap,
             tier=str(candidate.tier or ""),
@@ -656,19 +690,19 @@ async def _open_from_candidate(
                 top_explosion_max = True
 
     # Structured base-window / defensive base rip → full capital lots (no 6-lot soft caps).
-    if (
-        candidate.mode == "explosion"
-        and getattr(settings, "base_window_full_lots_enabled", True)
-        and (
+    # Skip when timing is COLD/LATE — structure alone must not max-size a dead tape.
+    if candidate.mode == "explosion" and getattr(settings, "base_window_full_lots_enabled", True):
+        from app.engines.entry_timing import timing_allows_full_size as _timing_full
+
+        if (not timing_meta or _timing_full(timing_meta)) and (
             base_window_full_lots
             or bool((trap_meta or {}).get("baseWindowFullLots"))
-        )
-    ):
-        from app.engines.capital_allocator import max_lots_for_capital
+        ):
+            from app.engines.capital_allocator import max_lots_for_capital
 
-        lots = max(lots, max_lots_for_capital(symbol, fill_premium))
-        base_window_full_lots = True
-        top_explosion_max = True
+            lots = max(lots, max_lots_for_capital(symbol, fill_premium))
+            base_window_full_lots = True
+            top_explosion_max = True
 
     force_max_size = bool(high_conviction or top_explosion_max or base_window_full_lots)
 
@@ -929,6 +963,7 @@ async def _open_from_candidate(
         "topExplosionMaxLots": bool(top_explosion_max),
         "baseWindowFullLots": bool(base_window_full_lots),
         "sameStrikePostWinCap": post_win_cap_meta or None,
+        "timingAssessment": timing_meta or None,
     }
     from app.engines.moneyness import classify_moneyness
 

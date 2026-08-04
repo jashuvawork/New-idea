@@ -189,13 +189,16 @@ def is_high_conviction_entry(
     score: float,
     move_pct: float,
     chart_confidence: float,
+    velocity_3s: float = 0.0,
 ) -> bool:
     """
     Very high-confidence base rip → take max lots + hold longer.
 
     Strict: ELITE, score≥90, chartConf≥56.9 (rescaled; was 85 on old clamp), matched side
-    (chart or breadth), and move in the 28-55% base window. Jul22 SENSEX 77200 PE profile
-    (ELITE 100, high chartConf) that only got 4 lots and trailed out in 1 min while +122%.
+    (chart or breadth), move in the 28-55% base window, and live velocity still hot.
+    Jul22 SENSEX 77200 PE profile (ELITE 100, high chartConf) that only got 4 lots and
+    trailed out in 1 min while +122%. Aug4 NIFTY 24550 PUT had HC without heat (v3=0.8)
+    — velocity floor blocks that cold max-lot path.
     """
     settings = get_settings()
     if not getattr(settings, "high_conviction_sizing_enabled", True):
@@ -207,6 +210,9 @@ def is_high_conviction_entry(
     if float(chart_confidence or 0) < float(
         getattr(settings, "high_conviction_min_chart_confidence", 56.9) or 56.9
     ):
+        return False
+    min_v3 = float(getattr(settings, "high_conviction_min_velocity_3s", 2.0) or 2.0)
+    if float(velocity_3s or 0) < min_v3:
         return False
     lo = float(getattr(settings, "missed_explosion_promote_min_move_pct", 28.0) or 28.0)
     hi = float(getattr(settings, "missed_explosion_promote_max_move_pct", 55.0) or 55.0)
