@@ -1073,7 +1073,7 @@ class Settings(BaseSettings):
     runner_min_best_points: float = 5.0
 
     # Option premium (LTP) band for entries and scanners
-    min_option_premium_inr: float = 20.0
+    min_option_premium_inr: float = 18.0
     max_option_premium_inr: float = 300.0
     explosion_max_premium_inr: float = 400.0
 
