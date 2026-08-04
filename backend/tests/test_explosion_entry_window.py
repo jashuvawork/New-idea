@@ -32,7 +32,7 @@ def _settings(**overrides):
     s.explosion_early_window_min_move_pct = 28.0
     s.explosion_early_window_max_move_pct = 55.0
     s.ict_structured_early_entry_enabled = True
-    s.ict_structured_early_min_move_pct = 12.0
+    s.ict_structured_early_min_move_pct = 10.0
     s.ict_structured_early_max_move_pct = 40.0
     s.explosion_chase_use_local_base = True
     s.explosion_local_base_trust_min_move_pct = 8.0
@@ -159,3 +159,50 @@ def test_structured_allows_18pct_first_displacement(mock_settings):
     ict = _structured_ict(18.0, session=18.0)
     blocked, reason = explosion_entry_window_blocked(_event(18.0), ict=ict)
     assert blocked is False, reason
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_aug4_78700_moment_base_235_allows_260(mock_settings):
+    """Moment base ~235 → LTP 260 ≈10.6% — old 12% floor missed the rip to 460+."""
+    mock_settings.return_value = _settings()
+    move = (260.0 - 235.0) / 235.0 * 100.0  # ≈10.64
+    assert 10.0 <= move < 12.0
+    ict = ICTBreakoutSignal(
+        active=True,
+        pattern="flat_then_vertical",
+        score=50.0,
+        reasons=["moment_base", "volume_awakening"],
+        session_move_pct=move,
+        base_relative_move_pct=move,
+        base_premium=235.0,
+        flat_then_vertical=True,
+        local_swing_base=True,
+        displacement=True,
+        volume_awakening=True,
+    )
+    ev = ExplosionEvent(
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=78700.0,
+        premium=260.0,
+        velocity_3s=2.5,
+        velocity_9s=3.0,
+        velocity_15s=3.5,
+        volume_surge=2.0,
+        explosion_score=95.0,
+        tier="ELITE",
+        reason="test",
+        daily_move_pct=move,
+        peak_move_pct=move,
+    )
+    blocked, reason = explosion_entry_window_blocked(ev, ict=ict)
+    assert blocked is False, reason
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_structured_still_blocks_below_10pct(mock_settings):
+    mock_settings.return_value = _settings()
+    ict = _structured_ict(8.5, session=8.5)
+    blocked, reason = explosion_entry_window_blocked(_event(8.5), ict=ict)
+    assert blocked is True
+    assert "weak_local" in reason or "local_low" in reason

@@ -164,7 +164,7 @@ def trustworthy_local_base_move(ict: Any) -> float:
 
 
 def structured_early_ict_ready(ict: Any) -> bool:
-    """ICT swing/flat→vertical with heat — may use the nearer-base 12–40% band."""
+    """ICT swing/flat→vertical with heat — may use the nearer-base 10–40% band."""
     settings = get_settings()
     if not bool(getattr(settings, "ict_structured_early_entry_enabled", True)):
         return False
@@ -186,13 +186,13 @@ def entry_window_bounds(ict: Any = None) -> tuple[float, float]:
     """Return (min%, max%) for the hard entry window.
 
     Unstructured spikes stay on the book band 28–55%.
-    Structured ICT + heat uses the nearer-base band (default 12–40%).
+    Structured ICT + heat uses the nearer-base band (default 10–40%).
     """
     settings = get_settings()
     lo = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
     hi = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
     if structured_early_ict_ready(ict):
-        lo = float(getattr(settings, "ict_structured_early_min_move_pct", 12.0) or 12.0)
+        lo = float(getattr(settings, "ict_structured_early_min_move_pct", 10.0) or 10.0)
         hi = float(getattr(settings, "ict_structured_early_max_move_pct", 40.0) or 40.0)
     return lo, hi
 
@@ -205,8 +205,8 @@ def explosion_entry_window_blocked(
     """Hard-block EXPLOSIVE entries outside the active early window.
 
     Unstructured: 28–55% (book). Structured ICT flat→vertical / swing V-base
-    with heat: 12–40% so first displacement near the base is tradeable
-    (Aug4 SENSEX 78700 PE ~320 / ~26% off base was blocked by the 28% floor).
+    with heat: 10–40% so first displacement near the base is tradeable
+    (Aug4 SENSEX 78700 PE base~235 → 260 ≈10.6% must enter; old 12% floor missed it).
 
     Timing is measured from:
       1) trustworthy ICT local/swing base when present
@@ -333,12 +333,12 @@ def immature_explosion_blocked(
     )
     if base_move > 0:
         local_floor = float(
-            getattr(settings, "explosion_local_base_entry_min_move_pct", 12.0) or 12.0
+            getattr(settings, "explosion_local_base_entry_min_move_pct", 10.0) or 10.0
         )
         if structured_early_ict_ready(ict):
             local_floor = min(
                 local_floor,
-                float(getattr(settings, "ict_structured_early_min_move_pct", 12.0) or 12.0),
+                float(getattr(settings, "ict_structured_early_min_move_pct", 10.0) or 10.0),
             )
         if base_move >= local_floor:
             return False, ""
