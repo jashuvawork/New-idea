@@ -1,15 +1,17 @@
 """Per-trade entry timing assessment — is this rip still live?
 
-Aug4 NIFTY 24550 PUT: ELITE / mega_rip / localBase 28.8% passed every structure
-gate, but live v3 was only 0.8 (cold). eliteNeverBlock skipped live-confirm and
-highConviction forced max lots → never-green −₹22k.
+Aug4 NIFTY 24550 PUT: ELITE / mega_rip / localBase 28.8% with live v3=0.8.
+Blind max-lot cold fill was bad; blocking the whole thesis missed LTP→120.
+Structured cold-base (local still in window + heat + aligned) is allowed at
+full/max lots; true LATE/CHASE without a live local base stays blocked.
 
-This module is the single timing verdict stamped on every explosion entry:
-  GOOD  — structured + in window + hot live velocity → full size OK
-  OK    — in window with adequate live heat → allow
-  COLD  — structure/ELITE but live velocity dead → block (chop) or lot-cap
-  LATE  — peak already extended and live cooled → block
-  CHASE — past structured/local chase ceiling → block
+Timing verdicts:
+  GOOD       — structured + in window + hot live velocity → full size OK
+  OK         — in window with adequate live heat → allow
+  COLD_BASE  — ICT local-base pause (cold tape, still in window) → max lots
+  COLD       — structure/ELITE but live velocity dead → block (chop) or lot-cap
+  LATE       — peak already extended and live cooled → block
+  CHASE      — past structured/local chase ceiling → block
 """
 
 from __future__ import annotations
@@ -80,6 +82,50 @@ def _chop_or_worst(snap: Optional[SymbolSnapshot], midday_chop: bool) -> bool:
     return False
 
 
+def _side_aligned(event: Any, snap: Optional[SymbolSnapshot]) -> bool:
+    """Breadth or chart agrees with option side (CALL↔BULLISH / PUT↔BEARISH)."""
+    if event is None or snap is None:
+        return False
+    side_v = getattr(event, "side", None)
+    side = side_v.value if hasattr(side_v, "value") else str(side_v or "").upper()
+    want = "BULLISH" if side == "CALL" else "BEARISH" if side == "PUT" else ""
+    if not want:
+        return False
+    breadth = getattr(snap, "breadth", None)
+    bias = str(getattr(breadth, "bias", "") or "").upper() if breadth is not None else ""
+    chart = getattr(snap, "spotChart", None) or getattr(snap, "indexChart", None)
+    direction = str(getattr(chart, "direction", "") or "").upper() if chart is not None else ""
+    return bias == want or direction == want
+
+
+def _structured_cold_base_ok(
+    *,
+    settings: Any,
+    structured: bool,
+    in_window: bool,
+    local: float,
+    heat: bool,
+    live_v: float,
+    good_min: float,
+    event: Any,
+    snap: Optional[SymbolSnapshot],
+) -> bool:
+    """Pause-before-continuation: ICT local base still early, live tape cold."""
+    if not bool(getattr(settings, "entry_timing_structured_cold_base_allow", True)):
+        return False
+    if not structured or not in_window or local <= 0:
+        return False
+    # Only when live is actually cold — hot path uses GOOD/OK instead.
+    if live_v >= good_min:
+        return False
+    if bool(getattr(settings, "entry_timing_structured_cold_require_heat", True)) and not heat:
+        return False
+    if bool(getattr(settings, "entry_timing_structured_cold_require_aligned", True)):
+        if not _side_aligned(event, snap):
+            return False
+    return True
+
+
 def assess_entry_timing(
     event: Any,
     *,
@@ -140,7 +186,19 @@ def assess_entry_timing(
     effective_cold = min(cold_max, 1.0) if near_atm_soft else cold_max
     effective_ok = min(ok_min, 1.0) if near_atm_soft else ok_min
 
-    # --- priority: CHASE > LATE > COLD > GOOD/OK ---
+    cold_base = _structured_cold_base_ok(
+        settings=settings,
+        structured=structured,
+        in_window=in_window,
+        local=local,
+        heat=heat,
+        live_v=live_v,
+        good_min=good_min,
+        event=event,
+        snap=snap,
+    )
+
+    # --- priority: CHASE > structured cold-base allow > LATE > COLD > GOOD/OK ---
     if local > chase_hi > 0:
         assessment = "CHASE"
         action = "block"
@@ -149,6 +207,14 @@ def assess_entry_timing(
         assessment = "CHASE"
         action = "block"
         reasons.append(f"session_{session:.0f}%>ceiling_{chase_hi:.0f}%")
+    elif cold_base:
+        # Aug4 24550 PE: session peak already huge but local base still early —
+        # cold pause before next leg. Worth taking → full/max lots; thesis-hold.
+        assessment = "COLD_BASE"
+        action = "allow"
+        reasons.append(f"structured_cold_base_v3_{live_v:.1f}")
+        reasons.append(f"local_base_{local:.0f}%_in_window")
+        reasons.append("cold_base_max_lots")
     elif (
         session >= late_peak
         and live_v <= late_max_v
@@ -220,6 +286,7 @@ def assess_entry_timing(
         "tier": tier,
         "nearAtmSoft": near_atm_soft,
         "premiumCapture": bool(premium_capture),
+        "structuredColdBase": assessment == "COLD_BASE",
         "reasons": reasons,
     }
 
@@ -252,13 +319,13 @@ def cap_lots_for_timing(lots: int, timing: dict[str, Any]) -> int:
 
 
 def timing_allows_full_size(timing: dict[str, Any]) -> bool:
-    """High-conviction / max-lot boosts only when timing is GOOD or OK."""
+    """Max-lot boosts when timing is GOOD, OK, or structured COLD_BASE."""
     if not timing:
         return True
     settings = get_settings()
     if not bool(getattr(settings, "entry_timing_assessment_enabled", True)):
         return True
-    return str(timing.get("assessment") or "").upper() in ("GOOD", "OK")
+    return str(timing.get("assessment") or "").upper() in ("GOOD", "OK", "COLD_BASE")
 
 
 def elite_bypass_allowed_for_timing(timing: dict[str, Any]) -> bool:

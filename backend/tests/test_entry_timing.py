@@ -31,6 +31,10 @@ def _settings(**overrides):
     s.entry_timing_cold_block_on_chop = True
     s.entry_timing_cold_lot_cap = 3
     s.entry_timing_elite_bypass_requires_hot = True
+    s.entry_timing_structured_cold_base_allow = True
+    s.entry_timing_structured_cold_max_lots = True
+    s.entry_timing_structured_cold_require_heat = True
+    s.entry_timing_structured_cold_require_aligned = True
     s.explosion_elite_never_block_enabled = True
     s.explosion_early_window_min_move_pct = 28.0
     s.explosion_early_window_max_move_pct = 55.0
@@ -107,7 +111,8 @@ def _snap(regime: str = "CHOP") -> SymbolSnapshot:
 
 @patch("app.engines.entry_timing.get_settings")
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_aug4_cold_elite_blocked_on_chop(mock_g1, mock_g2):
+def test_aug4_structured_cold_base_allowed_full_size(mock_g1, mock_g2):
+    """24550 PE: cold v3 but local base still in window → take at max lots."""
     s = _settings()
     mock_g1.return_value = s
     mock_g2.return_value = s
@@ -117,13 +122,46 @@ def test_aug4_cold_elite_blocked_on_chop(mock_g1, mock_g2):
         snap=_snap("CHOP"),
         midday_chop=True,
     )
-    # Dead tape after a huge stamped peak → LATE (or COLD); both hard-block.
-    assert timing["assessment"] in ("COLD", "LATE")
+    assert timing["assessment"] == "COLD_BASE"
+    assert timing["action"] == "allow"
+    assert timing.get("structuredColdBase") is True
+    blocked, _ = timing_blocks_entry(timing)
+    assert blocked is False
+    assert cap_lots_for_timing(41, timing) == 41  # no lot_cap action
+    assert timing_allows_full_size(timing)
+    # Elite never-block still needs GOOD (hot) — max lots is separate.
+    assert not elite_bypass_allowed_for_timing(timing)
+
+
+@patch("app.engines.entry_timing.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_cold_unstructured_still_blocked_on_chop(mock_g1, mock_g2):
+    """No local-base structure → chop cold block still applies."""
+    s = _settings()
+    mock_g1.return_value = s
+    mock_g2.return_value = s
+    ict = ICTBreakoutSignal(
+        active=True,
+        pattern="watch",
+        score=20.0,
+        reasons=[],
+        session_move_pct=40.0,
+        base_relative_move_pct=0.0,
+        flat_then_vertical=False,
+        local_swing_base=False,
+        displacement=False,
+        volume_awakening=False,
+    )
+    timing = assess_entry_timing(
+        _event(v3=0.8, daily=40.0, peak=42.0),
+        ict=ict,
+        snap=_snap("CHOP"),
+        midday_chop=True,
+    )
+    assert timing["assessment"] in ("COLD", "LATE", "CHASE")
     blocked, reason = timing_blocks_entry(timing)
     assert blocked is True
     assert "entry_timing_" in reason
-    assert not timing_allows_full_size(timing)
-    assert not elite_bypass_allowed_for_timing(timing)
 
 
 @patch("app.engines.entry_timing.get_settings")
@@ -179,16 +217,56 @@ def test_cold_lot_cap_when_not_chop_block(mock_g1, mock_g2):
     s = _settings(entry_timing_cold_block_on_chop=False)
     mock_g1.return_value = s
     mock_g2.return_value = s
-    # Peak kept modest so LATE does not fire — pure COLD soft-cap path.
+    # Unstructured ELITE — pure COLD soft-cap (not structured cold-base).
+    ict = ICTBreakoutSignal(
+        active=True,
+        pattern="displacement",
+        score=30.0,
+        reasons=[],
+        session_move_pct=32.0,
+        base_relative_move_pct=0.0,
+        flat_then_vertical=False,
+        local_swing_base=False,
+        displacement=True,
+        volume_awakening=False,
+    )
     timing = assess_entry_timing(
         _event(v3=0.8, daily=32.0, peak=35.0),
-        ict=_ict(base_rel=30.0),
+        ict=ict,
         snap=_snap("TRENDING"),
         midday_chop=False,
     )
     assert timing["assessment"] == "COLD"
     assert timing["action"] == "lot_cap"
     assert cap_lots_for_timing(41, timing) == 3
+
+
+@patch("app.engines.entry_timing.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_structured_cold_base_requires_alignment(mock_g1, mock_g2):
+    s = _settings()
+    mock_g1.return_value = s
+    mock_g2.return_value = s
+    snap = _snap("CHOP")
+    snap.breadth = Breadth(bias="BULLISH", score=40.0, aligned=False)
+    snap.spotChart = SpotChart(
+        direction="BULLISH",
+        timeframe="5m",
+        barCount=20,
+        momentum5Pct=0.2,
+        momentum15Pct=0.1,
+        trendStrength=40.0,
+    )
+    timing = assess_entry_timing(
+        _event(v3=0.8),
+        ict=_ict(),
+        snap=snap,
+        midday_chop=True,
+    )
+    # PUT vs BULLISH → no cold-base allow; chop cold/late still blocks.
+    assert timing["assessment"] != "COLD_BASE"
+    blocked, _ = timing_blocks_entry(timing)
+    assert blocked is True
 
 
 @patch("app.engines.elite_never_block.get_settings")

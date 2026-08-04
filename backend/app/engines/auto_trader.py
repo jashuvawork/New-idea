@@ -704,7 +704,27 @@ async def _open_from_candidate(
             base_window_full_lots = True
             top_explosion_max = True
 
-    force_max_size = bool(high_conviction or top_explosion_max or base_window_full_lots)
+    # Structured cold-base pause (Aug4 24550 PE): worth taking → capital max lots.
+    # HC/top-explosion paths often refuse cold v3 or CHOP day-types; force here.
+    structured_cold_max = False
+    if (
+        candidate.mode == "explosion"
+        and timing_meta
+        and (
+            timing_meta.get("structuredColdBase")
+            or str(timing_meta.get("assessment") or "").upper() == "COLD_BASE"
+        )
+        and getattr(settings, "entry_timing_structured_cold_max_lots", True)
+    ):
+        from app.engines.capital_allocator import max_lots_for_capital
+
+        lots = max(lots, max_lots_for_capital(symbol, fill_premium))
+        structured_cold_max = True
+        top_explosion_max = True
+
+    force_max_size = bool(
+        high_conviction or top_explosion_max or base_window_full_lots or structured_cold_max
+    )
 
     lots = clamp_lots(lots, symbol, fill_premium)
     if candidate.mode == "explosion" and trap_meta:
@@ -962,6 +982,7 @@ async def _open_from_candidate(
         "elevatedSize": bool(elevated_size),
         "topExplosionMaxLots": bool(top_explosion_max),
         "baseWindowFullLots": bool(base_window_full_lots),
+        "structuredColdMaxLots": bool(structured_cold_max),
         "sameStrikePostWinCap": post_win_cap_meta or None,
         "timingAssessment": timing_meta or None,
     }
