@@ -1,5 +1,7 @@
 """Option premium (LTP) band filter for tradeable analysis range."""
 
+from typing import Any
+
 from app.config import get_settings
 
 
@@ -8,6 +10,7 @@ def premium_in_band(
     *,
     mode: str = "default",
     peak_move_pct: float = 0.0,
+    snap: Any = None,
 ) -> bool:
     """True when option LTP is within configured tradeable band."""
     if premium is None or premium <= 0:
@@ -17,6 +20,18 @@ def premium_in_band(
     if mode == "explosion" and settings.explosion_max_premium_inr > 0:
         max_prem = max(max_prem, settings.explosion_max_premium_inr)
     min_prem = settings.min_option_premium_inr
+    # Same-day expiry: soften floor so ~₹15–20 near-base rips clear (Aug4 24550 PE).
+    if snap is not None and mode == "explosion":
+        try:
+            from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+            if is_symbol_expiry_day(snap):
+                expiry_floor = float(
+                    getattr(settings, "expiry_day_min_option_premium_inr", 15.0) or 15.0
+                )
+                min_prem = min(min_prem, expiry_floor)
+        except Exception:
+            pass
     if mode == "explosion":
         cheap_min = float(getattr(settings, "explosion_cheap_rip_min_premium_inr", 12.0) or 12.0)
         cheap_peak = float(getattr(settings, "explosion_cheap_rip_min_peak_pct", 28.0) or 28.0)
