@@ -329,6 +329,17 @@ def _explosion_candidates(
         )
         if live_blocked:
             continue
+        from app.engines.entry_timing import assess_entry_timing, timing_blocks_entry
+
+        timing = assess_entry_timing(
+            event,
+            ict=ict,
+            snap=snap,
+            premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
+        )
+        timing_blocked, _timing_reason = timing_blocks_entry(timing)
+        if timing_blocked:
+            continue
         ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)
         if ext_blocked:
             continue

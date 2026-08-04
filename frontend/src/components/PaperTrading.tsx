@@ -26,6 +26,9 @@ export function PaperTrading({ auto }: { auto: AutoTraderState }) {
           {auto.openPaperTrades.map((t) => {
             const plan = t.entryContext?.exitPlan as Record<string, number> | undefined;
             const selScore = t.entryContext?.selectionScore as number | undefined;
+            const timing = t.entryContext?.timingAssessment as
+              | { assessment?: string; liveVelocity3s?: number }
+              | undefined;
             const sl = plan?.stopPct
               ? `−${plan.stopPct}%`
               : plan?.stopPoints
@@ -36,6 +39,15 @@ export function PaperTrading({ auto }: { auto: AutoTraderState }) {
               : plan?.targetPoints
                 ? `+${plan.targetPoints}pt`
                 : null;
+            const timingLabel = timing?.assessment;
+            const timingTone =
+              timingLabel === 'GOOD'
+                ? 'text-nexus-green'
+                : timingLabel === 'OK'
+                  ? 'text-nexus-accent'
+                  : timingLabel
+                    ? 'text-nexus-yellow'
+                    : '';
             return (
               <div key={t.id} className="p-1.5 bg-black/30 rounded text-[11px]">
                 <div className="flex justify-between">
@@ -48,6 +60,12 @@ export function PaperTrading({ auto }: { auto: AutoTraderState }) {
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[9px] text-nexus-muted font-mono">
                   {selScore != null && <span>score {selScore.toFixed(0)}</span>}
+                  {timingLabel && (
+                    <span className={timingTone}>
+                      timing {timingLabel}
+                      {timing?.liveVelocity3s != null ? ` v3=${Number(timing.liveVelocity3s).toFixed(1)}` : ''}
+                    </span>
+                  )}
                   {sl && <span>SL {sl}</span>}
                   {tp && <span>TP {tp}</span>}
                   {plan?.trailArmPoints != null && (
