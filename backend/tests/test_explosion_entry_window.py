@@ -33,7 +33,7 @@ def _settings(**overrides):
     s.explosion_early_window_max_move_pct = 55.0
     s.ict_structured_early_entry_enabled = True
     s.ict_structured_early_min_move_pct = 10.0
-    s.ict_structured_early_max_move_pct = 40.0
+    s.ict_structured_early_max_move_pct = 45.0
     s.explosion_chase_use_local_base = True
     s.explosion_local_base_trust_min_move_pct = 8.0
     s.session_move_max_credible_pct = 500.0
@@ -144,8 +144,16 @@ def test_unstructured_still_blocks_26pct(mock_settings):
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
+def test_structured_allows_42pct_inside_45_ceiling(mock_settings):
+    mock_settings.return_value = _settings()
+    ict = _structured_ict(42.0, session=42.0)
+    blocked, reason = explosion_entry_window_blocked(_event(42.0), ict=ict)
+    assert blocked is False, reason
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
 def test_structured_blocks_late_54pct_chase(mock_settings):
-    """Same rip at ~392 / ~54% — structured ceiling 40% refuses the late spike."""
+    """Same rip at ~392 / ~54% — structured ceiling 45% refuses the late spike."""
     mock_settings.return_value = _settings()
     ict = _structured_ict(54.5, session=54.5)
     blocked, reason = explosion_entry_window_blocked(_event(54.5), ict=ict)

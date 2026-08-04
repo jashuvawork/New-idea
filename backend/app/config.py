@@ -274,16 +274,16 @@ class Settings(BaseSettings):
     explosion_hard_lot_cap: int = 10
     # Early capture window — HARD entry gate for unstructured ELITE/EXPLODING.
     # Book (lots≤20): 28–55% WR≈56% / +₹1k avg; <22% and 70–100% lose.
-    # Structured ICT flat→vertical / swing V-base uses ict_structured_early_* (10–40).
+    # Structured ICT flat→vertical / swing V-base uses ict_structured_early_* (10–45).
     explosion_early_window_min_move_pct: float = 28.0
     explosion_early_window_max_move_pct: float = 55.0
     explosion_entry_window_hard_enabled: bool = True
-    # Structured near-base path: ICT + heat may enter 10–40% off local base.
+    # Structured near-base path: ICT + heat may enter 10–45% off local base.
     # Aug4 SENSEX 78700 PE: moment base ~235 → 260 LTP ≈10.6% was blocked by 12% floor
-    # while the rip ran to 460+. First lift after base must be catchable.
+    # while the rip ran to 460+. Ceiling 40→45 keeps more of the vertical in-window.
     ict_structured_early_entry_enabled: bool = True
     ict_structured_early_min_move_pct: float = 10.0
-    ict_structured_early_max_move_pct: float = 40.0
+    ict_structured_early_max_move_pct: float = 45.0
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0
