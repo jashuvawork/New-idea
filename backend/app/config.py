@@ -544,6 +544,13 @@ class Settings(BaseSettings):
     explosion_skip_time_profit_tiers_csv: str = "ELITE,EXPLODING"
     explosion_skip_time_profit_until_target_frac: float = 0.85
     explosion_elite_max_hold_seconds: int = 1800
+    # Structured thesis hold — Aug4 NIFTY 24550 PUT: best +8.5 then time-stopped
+    # red at ~44min while LTP later ran 90–100. Extend max hold ONLY when the
+    # trade already printed meaningful green + ICT/HC structure. Never-green
+    # losers (Aug3 same strike, best~0) keep the short elite clock.
+    explosion_thesis_hold_enabled: bool = True
+    explosion_thesis_hold_min_best_points: float = 5.0
+    explosion_thesis_hold_max_seconds: int = 3600
     explosion_reentry_cooldown_seconds: int = 180
     explosion_emergency_cooldown_seconds: int = 300
     explosion_breadth_alignment_enabled: bool = True

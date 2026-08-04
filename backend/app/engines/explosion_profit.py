@@ -1279,6 +1279,11 @@ def evaluate_explosion_exit(
     side_bias = "BULLISH" if trade.side.value == "CALL" else "BEARISH"
     if breadth_bias == side_bias:
         max_hold = int(max_hold * 1.4)
+    # Structured + already-green thesis: hold longer (Aug4 24550 PUT → 90–100).
+    # Never-green losers (Aug3 best~0) do not qualify — keep elite clock.
+    thesis_hold = _structured_green_thesis_hold_seconds(trade, best=best, settings=settings)
+    if thesis_hold > 0:
+        max_hold = max(max_hold, thesis_hold)
     if hold >= max_hold:
         # Prefer trail/giveback over blind time exit when runner peaked then faded
         if best >= exit_params.trail_arm_points:
@@ -1308,6 +1313,67 @@ def evaluate_explosion_exit(
         return ("explosion_time_profit" if pnl_pts > 0 else "explosion_time_stop"), pnl_inr
 
     return None, pnl_inr
+
+
+def _structured_green_thesis_hold_seconds(
+    trade: Any,
+    *,
+    best: float,
+    settings: Any,
+) -> int:
+    """Extra max-hold for ICT/HC trades that already printed real green.
+
+    Qualifies (Aug4 NIFTY 24550 PUT): best ≥5pt + flat→vertical/HC + side aligned
+    → hold up to explosion_thesis_hold_max_seconds (default 60min).
+
+    Does NOT qualify (Aug3 never-green time-stop loser): best below the floor —
+    keeps the normal elite max-hold clock.
+    """
+    if not bool(getattr(settings, "explosion_thesis_hold_enabled", True)):
+        return 0
+    min_best = _cfg_float(settings, "explosion_thesis_hold_min_best_points", 5.0)
+    if float(best or 0) < min_best:
+        return 0
+
+    ctx = getattr(trade, "entryContext", None) or {}
+    pattern = str(ctx.get("ictPattern") or "").lower()
+    structured = bool(
+        ctx.get("ictFlatThenVertical")
+        or ctx.get("ictMegaRip")
+        or ctx.get("maxProfitCapture")
+        or ctx.get("momentStageLadder")
+        or ctx.get("highConviction")
+        or ctx.get("defensiveBaseRip")
+        or pattern
+        in (
+            "flat_then_vertical",
+            "mega_rip",
+            "early_flat_break",
+            "local_swing_base",
+            "premium_fvg",
+        )
+    )
+    if not structured:
+        return 0
+
+    side_v = trade.side.value if hasattr(trade.side, "value") else str(trade.side).upper()
+    side_bias = "BULLISH" if side_v == "CALL" else "BEARISH"
+    breadth_raw = ctx.get("breadth")
+    breadth_bias = (
+        str((breadth_raw or {}).get("bias") or "").upper()
+        if isinstance(breadth_raw, dict)
+        else str(breadth_raw or "").upper()
+    )
+    chart_dir = str(
+        (ctx.get("indexChart") or {}).get("direction")
+        or (ctx.get("spotChart") or {}).get("direction")
+        or ""
+    ).upper()
+    aligned = breadth_bias == side_bias or chart_dir == side_bias
+    if not aligned:
+        return 0
+
+    return int(getattr(settings, "explosion_thesis_hold_max_seconds", 3600) or 3600)
 
 
 def _skip_explosion_time_profit(
