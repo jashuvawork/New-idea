@@ -366,6 +366,11 @@ class Settings(BaseSettings):
     moment_stage_extend_hot_velocity_3s: float = 2.5
     # While live heat is still expanding, do not squeeze late-stage giveback.
     moment_stage_hot_hold_velocity_3s: float = 2.5
+    # Before the first stage completes, suppress the micro step trail (best−3.5pt)
+    # so a normal dip cannot cut a still-projecting ICT rip (e.g. 392→500).
+    explosion_trail_pre_stage_suppress_step: bool = True
+    # While live velocity is still hot and below projected max, defer explosion_trail_sl.
+    explosion_trail_hot_defer_enabled: bool = True
 
     # Fake explosion trap — Jul20 NIFTY 24300 CE: RANGE + midday_chop + ELITE vel spike,
     # session~30%, live premium mom≈0, OTM inside OR after small win → never-green −₹18k.

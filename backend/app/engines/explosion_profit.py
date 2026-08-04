@@ -476,6 +476,38 @@ def _trail_floor_pts(
     )
 
 
+def _defer_explosion_trail_while_continuing(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    live_v: float,
+    projected_max: float,
+    stage_ladder: bool,
+    max_profit: bool,
+    settings,
+) -> bool:
+    """Hold through a green trail tick while the vertical is still expanding.
+
+    Never defer into/through a loss. Near the projected ceiling, allow the trail
+    to bank. Peak-capture / hard SL still cut dying moves when heat dies.
+    """
+    if pnl_pts <= 0:
+        return False
+    if not bool(getattr(settings, "explosion_trail_hot_defer_enabled", True)):
+        return False
+    if not (stage_ladder or max_profit):
+        return False
+    hot_min = _cfg_float(settings, "moment_stage_hot_hold_velocity_3s", 2.5)
+    if live_v < hot_min:
+        return False
+    if projected_max > 0:
+        frac = _cfg_float(settings, "moment_stage_extend_trigger_frac", 0.92)
+        if best >= projected_max * frac:
+            return False
+    return True
+
+
 def _chart_aligned_with_trade(trade: PaperTrade) -> bool:
     """CALL+BULLISH or PUT+BEARISH — snapshot scan chart or entry execution chart."""
     from app.engines.bullish_hold import direction_aligned_with_breadth
@@ -1114,7 +1146,8 @@ def evaluate_explosion_exit(
     ):
         return "explosion_half_tp_profit_lock", pnl_inr
 
-    # Stage ladder: pullback through stage floor (250→225, 400→350) books profit.
+    # Stage ladder (incl. pre-stage provisional floor): pullback through the
+    # stage floor books profit; otherwise hold toward projectedMaxTp.
     stage_armed = stage_floor is not None and (
         best >= exit_params.trail_arm_points
         or (stage_size > 0 and best >= stage_size)
@@ -1126,15 +1159,38 @@ def evaluate_explosion_exit(
     # stage floors + projectedMaxTp are the profit path.
     if not stage_armed:
         if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
-            # Armed trail floor always exits — do not defer into a loss.
-            return "explosion_trail_sl", pnl_inr
+            # Hot continuing ICT/stage rips: defer green trail ticks so a 6pt
+            # dip cannot cut a still-expanding move (392→500 case). Never defer
+            # into a loss — _defer_explosion_trail_while_continuing enforces that.
+            if not _defer_explosion_trail_while_continuing(
+                trade,
+                best=best,
+                pnl_pts=pnl_pts,
+                live_v=v3,
+                projected_max=projected_max,
+                stage_ladder=stage_ladder,
+                max_profit=max_profit,
+                settings=settings,
+            ):
+                return "explosion_trail_sl", pnl_inr
 
         if trail_floor is not None and pnl_pts < best * trail_keep and best >= (20 if max_profit else 8):
             if pnl_pts <= 0 or _profit_lock_ok():
-                return "explosion_trail_lock", pnl_inr
+                if not _defer_explosion_trail_while_continuing(
+                    trade,
+                    best=best,
+                    pnl_pts=pnl_pts,
+                    live_v=v3,
+                    projected_max=projected_max,
+                    stage_ladder=stage_ladder,
+                    max_profit=max_profit,
+                    settings=settings,
+                ):
+                    return "explosion_trail_lock", pnl_inr
 
     if (
         not max_profit
+        and not stage_ladder
         and pnl_pts >= exit_params.micro_target_points
         and best - pnl_pts >= settings.runner_micro_giveback_points
         and best >= settings.runner_min_best_points
