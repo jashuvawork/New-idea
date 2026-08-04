@@ -1,4 +1,4 @@
-"""Structured green thesis hold — extend time-stop only after real green prints."""
+"""Green structured thesis: no time-stop — trail/SL own the exit."""
 
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -18,8 +18,9 @@ def _settings(**overrides):
     s = MagicMock()
     defaults = {
         "explosion_thesis_hold_enabled": True,
-        "explosion_thesis_hold_min_best_points": 5.0,
-        "explosion_thesis_hold_max_seconds": 3600,
+        "explosion_thesis_hold_skip_time_exit": True,
+        "explosion_thesis_hold_min_best_points": 2.0,
+        "explosion_thesis_hold_max_seconds": 10800,
         "explosion_elite_max_hold_seconds": 1800,
         "ict_max_profit_max_hold_seconds": 1200,
         "afternoon_capture_exit_max_hold_seconds": 480,
@@ -122,7 +123,18 @@ def test_thesis_hold_qualifies_after_green(mock_s):
     trade = _trade(best=8.54, current=69.15, hold_s=2700)
     assert _structured_green_thesis_hold_seconds(
         trade, best=8.54, settings=_settings()
-    ) == 3600
+    ) == 10800
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_just_green_best_2pts_qualifies(mock_s):
+    """As soon as trade goes green (best ≥ 2), thesis hold arms."""
+    mock_s.return_value = _settings()
+    trade = _trade(best=2.0, current=73.0, hold_s=600)
+    assert (
+        _structured_green_thesis_hold_seconds(trade, best=2.0, settings=_settings())
+        == 10800
+    )
 
 
 @patch("app.engines.explosion_profit.get_settings")
@@ -139,10 +151,10 @@ def test_yesterday_never_green_no_thesis_hold(mock_s):
 @patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
 @patch("app.engines.explosion_profit.get_settings")
 def test_aug4_holds_past_elite_time_stop(mock_s, _hc, _mp):
-    """Aug4: best +8.5, hold ~45min — must NOT explosion_time_stop (thesis → 60min)."""
+    """Aug4: best +8.5, hold ~45min — must NOT explosion_time_stop."""
     s = _settings()
     mock_s.return_value = s
-    trade = _trade(best=8.54, current=69.15, hold_s=2700)  # 45min > elite 30min*1.4
+    trade = _trade(best=8.54, current=69.15, hold_s=2700)
     reason, _pnl = evaluate_explosion_exit(
         trade, 69.15, "ELITE", 10, params=_params(), live_velocity_3s=0.1,
     )
@@ -167,8 +179,25 @@ def test_yesterday_style_still_time_stops(mock_s, _hc, _mp):
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=False)
 @patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
 @patch("app.engines.explosion_profit.get_settings")
-def test_thesis_eventually_time_stops_after_60min(mock_s, _hc, _mp):
+def test_green_thesis_no_time_stop_after_hours(mock_s, _hc, _mp):
+    """Once green, clock never forces exit — trail/SL own it."""
     s = _settings()
+    mock_s.return_value = s
+    trade = _trade(best=8.54, current=68.0, hold_s=7200)  # 2h
+    reason, _pnl = evaluate_explosion_exit(
+        trade, 68.0, "ELITE", 10, params=_params(), live_velocity_3s=0.0,
+    )
+    assert reason not in ("explosion_time_stop", "explosion_time_profit")
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=False)
+@patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+def test_legacy_cap_when_skip_disabled(mock_s, _hc, _mp):
+    s = _settings(
+        explosion_thesis_hold_skip_time_exit=False,
+        explosion_thesis_hold_max_seconds=3600,
+    )
     mock_s.return_value = s
     trade = _trade(best=8.54, current=68.0, hold_s=3700)
     reason, _pnl = evaluate_explosion_exit(

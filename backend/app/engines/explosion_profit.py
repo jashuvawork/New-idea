@@ -1279,8 +1279,8 @@ def evaluate_explosion_exit(
     side_bias = "BULLISH" if trade.side.value == "CALL" else "BEARISH"
     if breadth_bias == side_bias:
         max_hold = int(max_hold * 1.4)
-    # Structured + already-green thesis: hold longer (Aug4 24550 PUT → 90–100).
-    # Never-green losers (Aug3 best~0) do not qualify — keep elite clock.
+    # Structured + already-green thesis: hold via trail/SL/TP, not the clock
+    # (Aug4 24550 PUT → 90–100). Never-green losers keep the elite time-stop.
     thesis_hold = _structured_green_thesis_hold_seconds(trade, best=best, settings=settings)
     if thesis_hold > 0:
         max_hold = max(max_hold, thesis_hold)
@@ -1298,6 +1298,9 @@ def evaluate_explosion_exit(
                 return "explosion_trail_sl", pnl_inr
             if pnl_pts < best * trail_keep and best >= 8:
                 return "explosion_trail_lock", pnl_inr
+        # Once thesis has gone green: never time-exit — SL / trail / peak-capture only.
+        if _skip_time_exit_for_green_thesis(trade, best=best, settings=settings):
+            return None, pnl_inr
         # Jul29 77600 CE: explosion_time_profit @ +0.3pt while still far from TP 37 —
         # LTP later printed 290. Skip green time-exit on top explosions working to TP.
         if pnl_pts > 0 and _skip_explosion_time_profit(
@@ -1315,25 +1318,13 @@ def evaluate_explosion_exit(
     return None, pnl_inr
 
 
-def _structured_green_thesis_hold_seconds(
-    trade: Any,
-    *,
-    best: float,
-    settings: Any,
-) -> int:
-    """Extra max-hold for ICT/HC trades that already printed real green.
-
-    Qualifies (Aug4 NIFTY 24550 PUT): best ≥5pt + flat→vertical/HC + side aligned
-    → hold up to explosion_thesis_hold_max_seconds (default 60min).
-
-    Does NOT qualify (Aug3 never-green time-stop loser): best below the floor —
-    keeps the normal elite max-hold clock.
-    """
+def _green_thesis_active(trade: Any, *, best: float, settings: Any) -> bool:
+    """True when ICT/HC structure has already printed meaningful green + side aligned."""
     if not bool(getattr(settings, "explosion_thesis_hold_enabled", True)):
-        return 0
-    min_best = _cfg_float(settings, "explosion_thesis_hold_min_best_points", 5.0)
+        return False
+    min_best = _cfg_float(settings, "explosion_thesis_hold_min_best_points", 2.0)
     if float(best or 0) < min_best:
-        return 0
+        return False
 
     ctx = getattr(trade, "entryContext", None) or {}
     pattern = str(ctx.get("ictPattern") or "").lower()
@@ -1354,7 +1345,7 @@ def _structured_green_thesis_hold_seconds(
         )
     )
     if not structured:
-        return 0
+        return False
 
     side_v = trade.side.value if hasattr(trade.side, "value") else str(trade.side).upper()
     side_bias = "BULLISH" if side_v == "CALL" else "BEARISH"
@@ -1369,11 +1360,30 @@ def _structured_green_thesis_hold_seconds(
         or (ctx.get("spotChart") or {}).get("direction")
         or ""
     ).upper()
-    aligned = breadth_bias == side_bias or chart_dir == side_bias
-    if not aligned:
-        return 0
+    return breadth_bias == side_bias or chart_dir == side_bias
 
-    return int(getattr(settings, "explosion_thesis_hold_max_seconds", 3600) or 3600)
+
+def _skip_time_exit_for_green_thesis(trade: Any, *, best: float, settings: Any) -> bool:
+    """Once green thesis is active, never fire time_stop / time_profit."""
+    if not bool(getattr(settings, "explosion_thesis_hold_skip_time_exit", True)):
+        return False
+    return _green_thesis_active(trade, best=best, settings=settings)
+
+
+def _structured_green_thesis_hold_seconds(
+    trade: Any,
+    *,
+    best: float,
+    settings: Any,
+) -> int:
+    """Fallback max-hold bump for green ICT/HC thesis (used if skip-time is off).
+
+    Qualifies as soon as best clears the green floor + structure + side aligned.
+    Does NOT qualify never-green losers — they keep the elite time-stop clock.
+    """
+    if not _green_thesis_active(trade, best=best, settings=settings):
+        return 0
+    return int(getattr(settings, "explosion_thesis_hold_max_seconds", 10800) or 10800)
 
 
 def _skip_explosion_time_profit(
