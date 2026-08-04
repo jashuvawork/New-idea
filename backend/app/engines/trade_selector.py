@@ -166,6 +166,7 @@ def _explosion_candidates(
             alert.get("premium"),
             mode="explosion",
             peak_move_pct=float(alert.get("peakMovePct") or 0),
+            snap=snap,
         ):
             continue
         tier_u = str(alert.get("tier") or "").upper()
@@ -1087,6 +1088,14 @@ def find_best_entry(
             # Best-only: do not boost mediocre scalps over explosions (Jul27 pattern).
             if not getattr(settings, "scalp_best_only_enabled", True):
                 bonus += 6
+        # Expiry day: same-day expiry index jumps the queue (NIFTY Thu / SENSEX Fri).
+        if getattr(settings, "expiry_day_prefer_same_day_enabled", True):
+            from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+            if is_symbol_expiry_day(c.snap):
+                bonus += float(
+                    getattr(settings, "expiry_day_sort_priority_bonus", 30.0) or 30.0
+                )
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty
 
@@ -1198,7 +1207,7 @@ def diagnose_missed_entries(
             blockers: list[str] = []
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
                 blockers.append("tier_not_elite_exploding")
-            if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move):
+            if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):
                 blockers.append("premium_out_of_band")
             if score < min_score:
                 blockers.append(f"explosion_score<{min_score:.0f}")
