@@ -31,12 +31,14 @@ def _settings(**overrides):
     s.expiry_day_guards_enabled = True
     s.expiry_worst_day_halt_entries = True
     s.expiry_worst_day_elite_top_bypass_enabled = True
+    s.expiry_worst_day_elite_top_bypasses_trade_cap = True
     s.expiry_worst_day_elite_top_min_score = 62.0
     s.expiry_worst_day_elite_top_min_move_pct = 28.0
     s.expiry_worst_day_elite_top_max_move_pct = 70.0
     s.expiry_worst_day_elite_top_tiers_csv = "ELITE,EXPLODING"
     s.expiry_worst_day_elite_top_composer_bypass = True
     s.expiry_worst_day_min_rank_score = 72.0
+    s.expiry_worst_day_max_trades = 3
     s.expiry_morning_only = True
     s.expiry_pm_itm_quick_enabled = False
     s.min_option_premium_inr = 20.0
@@ -394,3 +396,147 @@ def test_validate_candidate_composer_bypass_real_path(mock_p, mock_exp, mock_bri
     assert reason == "interval_sentinel"  # passed composer, hit next gate
     assert ok_s is False
     assert reason_s == "composer_stand_down"
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
+def test_trade_cap_lifts_when_elite_top_on_radar(mock_p, mock_s):
+    """daily_trade_cap_3>=3_expiry_worst must not hard-block ELITE tops."""
+    cfg = _settings()
+    mock_s.return_value = cfg
+    mock_p.return_value = cfg
+    snap = _snap()
+    snaps = {"NIFTY": snap}
+    state = AutoTraderState()
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-21"):
+        with patch("app.engines.expiry_day_guards.in_expiry_morning_window", return_value=True):
+            with patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=False):
+                with patch(
+                    "app.engines.expiry_day_guards.predict_worst_expiry_day",
+                    return_value=(True, 65.0, ["chop_regime"]),
+                ):
+                    with patch(
+                        "app.engines.expiry_day_guards.expiry_trades_cap_reached",
+                        return_value=(True, "expiry_trade_cap_3>=3_expiry_worst"),
+                    ):
+                        ok, reason, meta = check_expiry_entry_allowed(state, snaps)
+    assert ok is True
+    assert reason == "ok"
+    assert meta.get("dailyCapEliteBypass") is True
+    assert meta.get("expiryWorstDayEliteTopOnly") is True
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
+def test_trade_cap_stays_when_no_elite_top(mock_p, mock_s):
+    cfg = _settings()
+    mock_s.return_value = cfg
+    mock_p.return_value = cfg
+    snap = _snap()
+    snap.explosionAlerts = []
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-21"):
+        with patch("app.engines.expiry_day_guards.in_expiry_morning_window", return_value=True):
+            with patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=False):
+                with patch(
+                    "app.engines.expiry_day_guards.predict_worst_expiry_day",
+                    return_value=(True, 65.0, ["chop_regime"]),
+                ):
+                    with patch(
+                        "app.engines.expiry_day_guards.expiry_trades_cap_reached",
+                        return_value=(True, "expiry_trade_cap_3>=3_expiry_worst"),
+                    ):
+                        ok, reason, _ = check_expiry_entry_allowed(
+                            AutoTraderState(), {"NIFTY": snap},
+                        )
+    assert ok is False
+    assert reason == "expiry_trade_cap_3>=3_expiry_worst"
+
+
+@patch("app.engines.chop_day_guards.get_settings")
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
+def test_resolve_daily_trade_cap_elite_bypass(mock_p, mock_exp, mock_chop):
+    from app.engines.chop_day_guards import resolve_daily_trade_cap
+    from app.models.schemas import PaperTrade, StrategyType
+
+    cfg = _settings()
+    mock_p.return_value = cfg
+    mock_exp.return_value = cfg
+    mock_chop.return_value = cfg
+
+    snap = _snap()
+    # Three closed trades → hit expiry_worst max of 3
+    closed = [
+        PaperTrade(
+            id=f"t{i}",
+            symbol="NIFTY",
+            side=Side.PUT,
+            strike=24200.0,
+            entryPremium=50.0,
+            currentPremium=45.0,
+            lots=1,
+            strategyType=StrategyType.EXPLOSIVE,
+            openedAt=datetime.now(IST),
+            closedAt=datetime.now(IST),
+            pnlInr=-500.0,
+        )
+        for i in range(3)
+    ]
+    state = AutoTraderState(closedPaperTrades=closed)
+    with patch(
+        "app.engines.chop_day_guards.daily_trade_cap",
+        return_value=(3, "expiry_worst"),
+    ):
+        blocked, reason, meta = resolve_daily_trade_cap(state, {"NIFTY": snap})
+    assert blocked is False
+    assert reason == "daily_trade_cap_elite_bypass"
+    assert meta.get("dailyCapEliteOnly") is True
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
+def test_candidate_blocks_scalp_when_cap_hit(mock_p, mock_s):
+    cfg = _settings()
+    mock_s.return_value = cfg
+    mock_p.return_value = cfg
+    snap = _snap()
+    event = SimpleNamespace(
+        daily_move_pct=35.0, peak_move_pct=42.0, explosion_score=100.0, tier="ELITE",
+    )
+    elite = SimpleNamespace(
+        symbol="NIFTY", side=Side.PUT, strike=24200.0, score=120.0, mode="explosion",
+        snap=snap, tier="ELITE", confidence=100.0, premium=58.0, explosion_event=event,
+        alert=snap.explosionAlerts[0],
+    )
+    scalp = SimpleNamespace(
+        symbol="NIFTY", side=Side.PUT, strike=24200.0, score=80.0, mode="scalp",
+        snap=snap, tier="", confidence=50.0, premium=58.0, explosion_event=None, alert={},
+    )
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-21"):
+        with patch(
+            "app.engines.expiry_day_guards.predict_worst_expiry_day",
+            return_value=(True, 65.0, ["chop_regime"]),
+        ):
+            with patch("app.engines.expiry_day_guards._session_declining", return_value=False):
+                with patch(
+                    "app.engines.expiry_day_guards.expiry_trades_cap_reached",
+                    return_value=(True, "expiry_trade_cap_3>=3_expiry_worst"),
+                ):
+                    with patch(
+                        "app.engines.expiry_day_guards.check_expiry_explosion_open_block",
+                        return_value=(False, "ok"),
+                    ):
+                        with patch(
+                            "app.engines.aligned_explosion_bypass.expiry_aligned_explosion_trade_allowed",
+                            return_value=(True, "ok"),
+                        ):
+                            ok_e, _, meta_e = check_expiry_candidate(
+                                elite, AutoTraderState(), {"NIFTY": snap},
+                            )
+                            ok_s, reason_s, _ = check_expiry_candidate(
+                                scalp, AutoTraderState(), {"NIFTY": snap},
+                            )
+    assert ok_e is True
+    assert meta_e.get("expiryEliteTop") is True
+    assert ok_s is False
+    assert reason_s == "expiry_worst_day_elite_top_only"

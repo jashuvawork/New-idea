@@ -609,6 +609,18 @@ def check_expiry_entry_allowed(
     if has_expiry_today:
         cap_hit, cap_reason = expiry_trades_cap_reached(state, snapshots)
         if cap_hit:
+            # Hard 3-trade expiry_worst cap must not skip ELITE / top EXPLODING.
+            if (
+                is_worst
+                and getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True)
+                and getattr(settings, "expiry_worst_day_elite_top_bypasses_trade_cap", True)
+                and snapshots_have_expiry_elite_top(snapshots)
+            ):
+                meta["expiryWorstDayEliteTopBypass"] = True
+                meta["expiryWorstDayEliteTopOnly"] = True
+                meta["dailyCapEliteBypass"] = True
+                meta["rawCapReason"] = cap_reason
+                return True, "ok", meta
             return False, cap_reason, meta
 
         if is_worst and settings.expiry_worst_day_halt_entries:
@@ -662,8 +674,19 @@ def check_expiry_candidate(
 
     is_worst, _, _ = predict_worst_expiry_day(state, snapshots)
     declining = is_worst and _session_declining(state, snapshots)
-    if declining and getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True):
-        # Declining expiry-worst: only early-window ELITE tops — no scalp/noise/chase.
+    cap_hit = False
+    if (
+        is_worst
+        and getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True)
+        and getattr(settings, "expiry_worst_day_elite_top_bypasses_trade_cap", True)
+    ):
+        cap_hit, _ = expiry_trades_cap_reached(state, snapshots)
+    elite_only = bool(
+        getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True)
+        and (declining or cap_hit)
+    )
+    if elite_only:
+        # Declining / post-cap expiry-worst: only early-window ELITE tops.
         if not is_expiry_elite_top_candidate(candidate):
             return False, "expiry_worst_day_elite_top_only", meta
         meta["expiryEliteTop"] = True
@@ -688,7 +711,7 @@ def check_expiry_candidate(
 
     # Qualified base-window elite top already cleared tier/score/move/premium/chart —
     # let it skip the expiry worst-day rank floor (72) that would otherwise re-block it.
-    if declining and meta.get("expiryEliteTop"):
+    if meta.get("expiryEliteTop"):
         return True, "ok", meta
 
     from app.engines.pretrade_validator import candidate_trade_score
