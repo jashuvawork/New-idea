@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Optional
 
 from app.config import get_settings
@@ -137,26 +138,80 @@ def alternate_index_for(fading_symbol: str, snapshots: dict[str, SymbolSnapshot]
     return best
 
 
+def _snap_expiry_date(snap: Optional[SymbolSnapshot]) -> Optional[str]:
+    if snap is None or not getattr(snap, "dataAvailable", False):
+        return None
+    raw = getattr(snap, "optionExpiry", None)
+    if not raw:
+        return None
+    return str(raw)[:10]
+
+
+def expiry_proximity_ranks(
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[list[str], list[str]]:
+    """
+    Return (nearest_symbols, same_week_next_symbols) by optionExpiry date.
+
+    Weekly schedule: Tue NIFTY / Thu SENSEX — whichever date is sooner is #1;
+    the other index within a few days is #2. Roles flip through the week.
+    """
+    settings = get_settings()
+    by_date: dict[str, list[str]] = {}
+    for sym, snap in snapshots.items():
+        d = _snap_expiry_date(snap)
+        if not d:
+            continue
+        by_date.setdefault(d, []).append(sym.upper())
+    if not by_date:
+        return [], []
+    dates = sorted(by_date.keys())
+    nearest = list(by_date[dates[0]])
+    nxt: list[str] = []
+    if len(dates) >= 2:
+        try:
+            d0 = datetime.strptime(dates[0], "%Y-%m-%d")
+            d1 = datetime.strptime(dates[1], "%Y-%m-%d")
+            max_gap = int(getattr(settings, "expiry_day_same_week_next_max_days", 3) or 3)
+            if 0 < (d1 - d0).days <= max_gap:
+                nxt = list(by_date[dates[1]])
+        except ValueError:
+            nxt = []
+    return nearest, nxt
+
+
+def is_same_week_next_index(
+    snap: SymbolSnapshot,
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """True when this index is #2 by expiry proximity (e.g. Thu SENSEX on Tue)."""
+    _nearest, nxt = expiry_proximity_ranks(snapshots)
+    return snap.symbol.upper() in nxt
+
+
 def pre_expiry_index_restricted(
     snap: SymbolSnapshot,
     snapshots: dict[str, SymbolSnapshot],
 ) -> tuple[bool, Optional[str]]:
     """
-    Tomorrow-only pre-expiry with a healthier alternate index.
+    Soft-route away from FAR expiry only — never from the near-expiry priority index.
 
-    Same-day expiry is NOT routed away — trade the expiry index first
-    (Aug4 NIFTY over next-week SENSEX). Pre-expiry (expires tomorrow) still
-    prefers the other index for weak setups.
+    Near expiry (today or tomorrow / nearest date) stays tradeable. Legacy
+    alternate routing only hits an index that is NOT the nearest expiry.
     """
     settings = get_settings()
     if not settings.pre_expiry_cross_index_enabled or not settings.bad_day_routing_enabled:
         return False, None
     if not snap.dataAvailable:
         return False, None
-    # Same-day expiry: never soft-route to the other index.
-    if getattr(settings, "expiry_day_prefer_same_day_enabled", True) and is_symbol_expiry_day(snap):
+    # Near-expiry priority mode: never demote today/tomorrow / nearest index.
+    if getattr(settings, "expiry_day_prefer_same_day_enabled", True):
+        nearest, nxt = expiry_proximity_ranks(snapshots)
+        sym = snap.symbol.upper()
+        if sym in nearest or sym in nxt or is_near_expiry_day(snap):
+            return False, None
         return False, None
-    # Only tomorrow (pre-expiry) gets alternate routing.
+    # Legacy path (prefer disabled): tomorrow pre-expiry → alternate.
     if not is_pre_expiry_day(snap):
         return False, None
     alt = alternate_index_for(snap.symbol.upper(), snapshots)
@@ -431,35 +486,33 @@ def cross_index_rank_adjustment(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
 ) -> float:
-    """Expiry-day: boost same-day index first; pre-expiry tomorrow: prefer alternate."""
+    """Nearest expiry index #1, same-week next #2 — flips Tue NIFTY ↔ Thu SENSEX."""
     settings = get_settings()
     if not settings.bad_day_routing_enabled:
         return 0.0
 
     fading_map = fading_expiry_symbols(state, snapshots)
-    today_ex = set(expiry_symbols(snapshots))
-    near = near_expiry_symbols(snapshots)
-    tomorrow_only = [s for s in near if s not in today_ex]
-    if not fading_map and not near and not today_ex:
-        return 0.0
-
     sym = candidate.symbol.upper()
     snap = snapshots.get(sym) or candidate.snap
     bonus = 0.0
 
-    # --- Same-day expiry first (Aug4 NIFTY) ---
-    if getattr(settings, "expiry_day_prefer_same_day_enabled", True) and today_ex:
-        if sym in today_ex:
+    if getattr(settings, "expiry_day_prefer_same_day_enabled", True):
+        nearest, nxt = expiry_proximity_ranks(snapshots)
+        if not nearest and not nxt and not fading_map:
+            return 0.0
+        if sym in nearest:
             bonus += float(getattr(settings, "expiry_day_symbol_rank_bonus", 22.0) or 22.0)
             if sym in fading_map:
-                # Still penalize a bleeding expiry index, but keep the same-day boost.
                 bonus -= settings.bad_day_fading_symbol_penalty
             return bonus
-        # Non-expiry while a same-day index is live: only boost alternate if
-        # the expiry index is fading hard — otherwise expiry stays first.
-        expiry_fading = any(s in fading_map for s in today_ex)
-        if expiry_fading:
-            for restricted_sym in today_ex:
+        if sym in nxt:
+            bonus += float(
+                getattr(settings, "expiry_day_same_week_next_rank_bonus", 12.0) or 12.0
+            )
+            return bonus
+        # Far index: only boost if nearest expiry index is fading hard.
+        if fading_map and any(s in fading_map for s in nearest):
+            for restricted_sym in nearest:
                 if restricted_sym not in fading_map:
                     continue
                 alt = alternate_index_for(restricted_sym, snapshots)
@@ -473,8 +526,13 @@ def cross_index_rank_adjustment(
                         bonus += settings.bad_day_alternate_aligned_bonus
         return bonus
 
-    # --- Pre-expiry tomorrow / fading (no same-day session) ---
-    restricted = set(fading_map.keys()) | set(tomorrow_only)
+    # Legacy: demote near-expiry / boost alternate (prefer flag off).
+    today_ex = set(expiry_symbols(snapshots))
+    near = near_expiry_symbols(snapshots)
+    tomorrow_only = [s for s in near if s not in today_ex]
+    if not fading_map and not near:
+        return 0.0
+    restricted = set(fading_map.keys()) | set(tomorrow_only) | today_ex
     for restricted_sym in restricted:
         alt = alternate_index_for(restricted_sym, snapshots)
         if sym == restricted_sym:
@@ -485,11 +543,12 @@ def cross_index_rank_adjustment(
             continue
         if alt and sym == alt:
             fading_snap = snapshots.get(restricted_sym)
-            if fading_snap and float(snap.tradeQualityScore or 0) >= float(fading_snap.tradeQualityScore or 0) - 5:
+            if fading_snap and float(snap.tradeQualityScore or 0) >= float(
+                fading_snap.tradeQualityScore or 0
+            ) - 5:
                 bonus += settings.bad_day_alternate_index_bonus
             if _breadth_aligned(candidate, snap):
                 bonus += settings.bad_day_alternate_aligned_bonus
-
     return bonus
 
 

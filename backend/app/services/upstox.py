@@ -607,9 +607,10 @@ class UpstoxClient:
 
 
 def get_nearest_expiry(symbol: str) -> str:
-    """Return nearest weekly expiry (Thursday for NIFTY/BANKNIFTY, Friday for SENSEX)."""
+    """Return nearest weekly expiry (Tuesday NIFTY/BANKNIFTY, Thursday SENSEX)."""
     now = datetime.now(IST)
-    target_dow = 4 if symbol == "SENSEX" else 3
+    # Mon=0 … Tue=1 (NIFTY), Thu=3 (SENSEX)
+    target_dow = 3 if symbol == "SENSEX" else 1
     days_ahead = (target_dow - now.weekday()) % 7
     if days_ahead == 0 and now.hour >= 15:
         days_ahead = 7
