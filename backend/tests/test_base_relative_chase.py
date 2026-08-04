@@ -128,19 +128,23 @@ def test_normal_early_move_not_affected(mock_s):
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_immature_waits_for_15pct_from_local_base(mock_s):
-    mock_s.return_value = _settings()
-    # Day move looks mature (+471%) but local V-bottom only +12% — wait.
+def test_immature_waits_for_near_base_floor(mock_s):
+    """Day move looks mature (+471%) but local V-bottom still below structured floor."""
+    mock_s.return_value = _settings(
+        explosion_local_base_entry_min_move_pct=12.0,
+        ict_structured_early_entry_enabled=True,
+        ict_structured_early_min_move_pct=12.0,
+    )
     blocked, reason = immature_explosion_blocked(
         _event(471.0),
-        ict=_ict(flat=False, base_move=12.0, local_swing=True),
+        ict=_ict(flat=False, base_move=10.0, local_swing=True),
     )
     assert blocked is True
     assert "immature_local_base" in reason
 
     blocked2, _ = immature_explosion_blocked(
         _event(471.0),
-        ict=_ict(flat=False, base_move=18.0, local_swing=True),
+        ict=_ict(flat=False, base_move=15.0, local_swing=True),
     )
     assert blocked2 is False
 

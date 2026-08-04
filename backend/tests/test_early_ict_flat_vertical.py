@@ -140,8 +140,9 @@ def test_all_day_ict_capture_on_normal_mode(mock_mode, mock_settings):
     assert meta.get("lotMultiplier") == 0.85
 
 
+@patch("app.engines.elite_never_block.elite_never_block_active", return_value=False)
 @patch("app.engines.ict_breakout_monitor.get_settings")
-def test_late_fade_chase_blocked(mock_settings):
+def test_late_fade_chase_blocked(mock_settings, _elite):
     mock_settings.return_value = _settings()
     event = ExplosionEvent(
         symbol="NIFTY",

@@ -208,9 +208,10 @@ def analyze_ict_breakout(
             base_level = flat_base
             base_rel_move = cand_rel
 
-    # Seed from detector session low when poll history missed the dump (restart /
-    # thin hist) — real V-bottoms still need the 28–55% off-low window.
-    if base_rel_move <= 0 and premium > 0:
+    # Seed / deepen from detector session low. Prefer the deeper authentic low
+    # so a morning dump (~233) is not replaced by a mid-morning consolidation
+    # average (~254) that delays the first legal lift off the true base.
+    if premium > 0:
         try:
             from app.engines.explosion_detector import (
                 get_session_low_premium,
@@ -222,10 +223,12 @@ def analyze_ict_breakout(
             if sess_low >= floor and premium > sess_low:
                 off_low = (premium - sess_low) / sess_low * 100.0
                 if off_low >= early_min * 0.5:
-                    local_swing_base = True
-                    base_level = sess_low
-                    base_rel_move = off_low
-                    reasons.append(f"session_low_base_{sess_low:.1f}")
+                    deepen = base_level <= 0 or sess_low < base_level * 0.97
+                    if deepen:
+                        local_swing_base = True
+                        base_level = sess_low
+                        base_rel_move = off_low
+                        reasons.append(f"session_low_base_{sess_low:.1f}")
         except Exception:
             pass
 

@@ -237,12 +237,13 @@ class Settings(BaseSettings):
     # Tradeable local window aligned to early band 28–55% (Jul30 book: <22% and 70–100% lose).
     explosion_chase_use_local_base: bool = True
     explosion_local_base_chase_max_move_pct: float = 55.0
-    explosion_local_base_entry_min_move_pct: float = 28.0
+    # Local-base floor for structured ICT / immature — nearer the launch pad (was 28).
+    explosion_local_base_entry_min_move_pct: float = 12.0
     # Adaptive local-base entry window by tier/volume: ELITE + strong volume widens the
-    # ceiling slightly inside the hard 55% cap; EXPLODING keeps the 28% floor.
+    # ceiling slightly inside the hard 55% cap; EXPLODING keeps the structured floor.
     local_base_adaptive_window_enabled: bool = True
     local_base_elite_chase_max_move_pct: float = 55.0
-    local_base_exploding_entry_min_move_pct: float = 28.0
+    local_base_exploding_entry_min_move_pct: float = 12.0
     local_base_wide_window_min_vol_surge: float = 3.0
     # Ignore micro baseRel (<8%) for immature/chase — Jul24 PUTs showed ~1–2%
     # "local base" noise while day-move was already mature (~28%).
@@ -251,12 +252,18 @@ class Settings(BaseSettings):
     ict_local_base_min_dump_pct: float = 25.0
     explosion_extended_soft_lot_cap: int = 6
     explosion_hard_lot_cap: int = 10
-    # Early capture window — HARD entry gate for ELITE/EXPLODING (not just rank bonus).
+    # Early capture window — HARD entry gate for unstructured ELITE/EXPLODING.
     # Book (lots≤20): 28–55% WR≈56% / +₹1k avg; <22% and 70–100% lose.
+    # Structured ICT flat→vertical / swing V-base uses ict_structured_early_* (12–40).
     explosion_early_window_min_move_pct: float = 28.0
     explosion_early_window_max_move_pct: float = 55.0
     explosion_entry_window_hard_enabled: bool = True
-    # Immature floor matches early-window min (was 22% — still let noise through).
+    # Structured near-base path: ICT + heat may enter 12–40% off local base
+    # (Aug4 SENSEX 78700 PE broke ~320 / ~26% — blocked by global 28% floor).
+    ict_structured_early_entry_enabled: bool = True
+    ict_structured_early_min_move_pct: float = 12.0
+    ict_structured_early_max_move_pct: float = 40.0
+    # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0
     # Live confirmation — sticky ELITE / displacement spikes without live heat+structure
@@ -1273,8 +1280,8 @@ class Settings(BaseSettings):
     ict_displacement_min_velocity_3s: float = 2.2
     # Full vertical confirmation (legacy mega-style). Early breakout uses ict_early_vertical_*.
     ict_vertical_min_session_move_pct: float = 80.0
-    # Early flat→vertical (NIFTY 24400 CE 26→45): capture before 80% is reached.
-    ict_early_vertical_min_session_move_pct: float = 28.0
+    # Early flat→vertical: arm pattern near the base (was 28% — missed first lift).
+    ict_early_vertical_min_session_move_pct: float = 12.0
     ict_early_vertical_min_velocity_3s: float = 2.0
     # Aligned with detector volAwaken boost (max(surge, 2.0)) — was 3.0 so ICT
     # never saw volume_awakening after WS/REST blended surges of ~2.0 (Jul23 gap).
