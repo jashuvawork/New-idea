@@ -163,20 +163,57 @@ def trustworthy_local_base_move(ict: Any) -> float:
     return base
 
 
+def structured_early_ict_ready(ict: Any) -> bool:
+    """ICT swing/flat→vertical with heat — may use the nearer-base 12–40% band."""
+    settings = get_settings()
+    if not bool(getattr(settings, "ict_structured_early_entry_enabled", True)):
+        return False
+    if ict is None:
+        return False
+    structured = bool(getattr(ict, "local_swing_base", False)) or bool(
+        getattr(ict, "flat_then_vertical", False)
+    )
+    if not structured:
+        return False
+    return bool(
+        getattr(ict, "volume_awakening", False)
+        or getattr(ict, "displacement", False)
+        or getattr(ict, "premium_fvg", False)
+    )
+
+
+def entry_window_bounds(ict: Any = None) -> tuple[float, float]:
+    """Return (min%, max%) for the hard entry window.
+
+    Unstructured spikes stay on the book band 28–55%.
+    Structured ICT + heat uses the nearer-base band (default 12–40%).
+    """
+    settings = get_settings()
+    lo = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
+    hi = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+    if structured_early_ict_ready(ict):
+        lo = float(getattr(settings, "ict_structured_early_min_move_pct", 12.0) or 12.0)
+        hi = float(getattr(settings, "ict_structured_early_max_move_pct", 40.0) or 40.0)
+    return lo, hi
+
+
 def explosion_entry_window_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
 ) -> tuple[bool, str]:
-    """Hard-block EXPLOSIVE entries outside the 28–55% early window.
+    """Hard-block EXPLOSIVE entries outside the active early window.
 
-    Book (≤20 lots): 28–55% was the only positive band; <22% immature and
-    70–100% chase lost. Timing is measured from:
+    Unstructured: 28–55% (book). Structured ICT flat→vertical / swing V-base
+    with heat: 12–40% so first displacement near the base is tradeable
+    (Aug4 SENSEX 78700 PE ~320 / ~26% off base was blocked by the 28% floor).
+
+    Timing is measured from:
       1) trustworthy ICT local/swing base when present
       2) else % above today's meaningful session low (V-bottom reclaim)
       3) else day/peak session move
 
-    Weak off-low / local (<28%) must not hide behind a good-looking day %.
+    Weak off-low / local below the active floor must not hide behind day %.
     Fake micro-baseline day moves (+8873%) are ignored when off-low is known.
     """
     settings = get_settings()
@@ -185,8 +222,7 @@ def explosion_entry_window_blocked(
     if explosion_event is None:
         return False, ""
 
-    lo = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
-    hi = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+    lo, hi = entry_window_bounds(ict)
     try:
         max_credible = float(
             getattr(settings, "session_move_max_credible_pct", 500.0)
@@ -297,8 +333,13 @@ def immature_explosion_blocked(
     )
     if base_move > 0:
         local_floor = float(
-            getattr(settings, "explosion_local_base_entry_min_move_pct", 15.0) or 15.0
+            getattr(settings, "explosion_local_base_entry_min_move_pct", 12.0) or 12.0
         )
+        if structured_early_ict_ready(ict):
+            local_floor = min(
+                local_floor,
+                float(getattr(settings, "ict_structured_early_min_move_pct", 12.0) or 12.0),
+            )
         if base_move >= local_floor:
             return False, ""
         return True, f"immature_local_base_{base_move:.1f}%"
