@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from app.engines.bad_day_routing import (
     cross_index_rank_adjustment,
+    is_same_week_next_index,
     pre_expiry_index_restricted,
 )
 from app.engines.premium_filter import premium_in_band
@@ -70,6 +71,8 @@ def _settings(**overrides):
     s.bad_day_alternate_aligned_bonus = 8.0
     s.expiry_day_prefer_same_day_enabled = True
     s.expiry_day_symbol_rank_bonus = 22.0
+    s.expiry_day_same_week_next_rank_bonus = 12.0
+    s.expiry_day_same_week_next_sort_bonus = 15.0
     s.expiry_day_min_option_premium_inr = 15.0
     s.min_option_premium_inr = 20.0
     s.max_option_premium_inr = 300.0
@@ -100,8 +103,31 @@ def test_same_day_expiry_not_restricted(mock_exp, mock_bad):
 @patch("app.engines.bad_day_routing.get_settings")
 @patch("app.engines.expiry_day_guards.get_settings")
 @patch("app.engines.bad_day_routing.fading_expiry_symbols", return_value={})
-def test_same_day_expiry_beats_next_week_rank(mock_fade, mock_exp, mock_bad):
-    """Aug4: NIFTY expiry today must outrank next-week SENSEX."""
+def test_thu_nifty_first_fri_sensex_second(mock_fade, mock_exp, mock_bad):
+    """Thu: NIFTY expires today (#1), SENSEX expires tomorrow same week (#2)."""
+    cfg = _settings()
+    mock_exp.return_value = cfg
+    mock_bad.return_value = cfg
+    snaps = {
+        "NIFTY": _snap("NIFTY", _today(), tqs=42.0),
+        "SENSEX": _snap("SENSEX", _tomorrow(), tqs=48.0),
+    }
+    assert is_same_week_next_index(snaps["SENSEX"], snaps) is True
+    assert is_same_week_next_index(snaps["NIFTY"], snaps) is False
+    nifty = _Cand("NIFTY", Side.PUT, 70.0, snap=snaps["NIFTY"])
+    sensex = _Cand("SENSEX", Side.PUT, 70.0, snap=snaps["SENSEX"])
+    n_bonus = cross_index_rank_adjustment(nifty, AutoTraderState(), snaps)
+    s_bonus = cross_index_rank_adjustment(sensex, AutoTraderState(), snaps)
+    assert n_bonus >= 22.0
+    assert s_bonus >= 12.0
+    assert n_bonus > s_bonus
+
+
+@patch("app.engines.bad_day_routing.get_settings")
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.bad_day_routing.fading_expiry_symbols", return_value={})
+def test_same_day_beats_far_next_week(mock_fade, mock_exp, mock_bad):
+    """Same-day NIFTY outranks a far next-week SENSEX (not same-week #2)."""
     cfg = _settings()
     mock_exp.return_value = cfg
     mock_bad.return_value = cfg
@@ -109,18 +135,35 @@ def test_same_day_expiry_beats_next_week_rank(mock_fade, mock_exp, mock_bad):
         "NIFTY": _snap("NIFTY", _today(), tqs=42.0),
         "SENSEX": _snap("SENSEX", _next_week(), tqs=48.0),
     }
+    assert is_same_week_next_index(snaps["SENSEX"], snaps) is False
     nifty = _Cand("NIFTY", Side.PUT, 70.0, snap=snaps["NIFTY"])
     sensex = _Cand("SENSEX", Side.PUT, 70.0, snap=snaps["SENSEX"])
     n_bonus = cross_index_rank_adjustment(nifty, AutoTraderState(), snaps)
     s_bonus = cross_index_rank_adjustment(sensex, AutoTraderState(), snaps)
     assert n_bonus >= 22.0
     assert s_bonus == 0.0
-    assert n_bonus > s_bonus
+
+
+@patch("app.engines.bad_day_routing.get_settings")
+@patch("app.engines.expiry_day_guards.get_settings")
+def test_same_week_next_not_restricted(mock_exp, mock_bad):
+    """Thu NIFTY expiry: Fri SENSEX is #2 — still tradeable, not routed away."""
+    cfg = _settings()
+    mock_exp.return_value = cfg
+    mock_bad.return_value = cfg
+    snaps = {
+        "NIFTY": _snap("NIFTY", _today()),
+        "SENSEX": _snap("SENSEX", _tomorrow()),
+    }
+    restricted, alt = pre_expiry_index_restricted(snaps["SENSEX"], snaps)
+    assert restricted is False
+    assert alt is None
 
 
 @patch("app.engines.bad_day_routing.get_settings")
 @patch("app.engines.expiry_day_guards.get_settings")
 def test_tomorrow_pre_expiry_still_routes(mock_exp, mock_bad):
+    """Lone tomorrow pre-expiry (no same-day peer) still routes to alternate."""
     cfg = _settings()
     mock_exp.return_value = cfg
     mock_bad.return_value = cfg
