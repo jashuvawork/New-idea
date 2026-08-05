@@ -780,11 +780,22 @@ def validate_candidate(
         )
         if window_blocked:
             return False, window_reason, meta
+        from app.engines.elite_never_block import elite_never_block_active
+
+        must_take = elite_never_block_active(
+            candidate=candidate,
+            event=explosion_event,
+            alert=getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None,
+            snap=snap,
+            ict=trap_ict,
+        )
         trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
             candidate, snap, state=state, ict=trap_ict,
         )
         meta.update(trap_meta)
-        if trap_block or trap_meta.get("action") == "block":
+        if (trap_block or trap_meta.get("action") == "block") and not must_take:
             return False, trap_reason, meta
 
     if getattr(candidate, "mode", "") == "explosion" and explosion_event is not None:

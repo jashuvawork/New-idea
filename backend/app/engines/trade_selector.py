@@ -330,7 +330,7 @@ def _explosion_candidates(
         must_take = elite_never_block_active(
             event=event, candidate=cand_probe, alert=alert, snap=snap, ict=ict,
         )
-        late_blocked, _late_reason = late_fade_chase_blocked(event, ict)
+        late_blocked, _late_reason = late_fade_chase_blocked(event, ict, snap=snap)
         if late_blocked and not must_take:
             continue
         from app.engines.explosion_entry_guards import (

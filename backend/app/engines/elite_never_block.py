@@ -155,22 +155,34 @@ def _near_base_move_pct(
                 v = 0.0
             if v > 0:
                 return v
-        # Fall back to session/peak only when it still sits inside the near-base band
+    # Never use mega day-peak % as "base move" — that turns every rip into a
+    # chase and blocks must-take. Only modest session moves (still near pad)
+    # may stand in when ICT local base has not printed yet.
+    try:
+        from app.config import get_settings as _gs
+
+        hi = float(getattr(_gs(), "ict_structured_early_max_move_pct", 45.0) or 45.0)
+    except Exception:
+        hi = 45.0
+    session = 0.0
+    if event is not None:
         try:
-            return max(
+            session = max(
                 float(getattr(event, "daily_move_pct", 0) or 0),
                 float(getattr(event, "peak_move_pct", 0) or 0),
             )
         except (TypeError, ValueError):
-            return 0.0
-    if alert:
+            session = 0.0
+    if session <= 0 and alert:
         try:
-            return max(
+            session = max(
                 float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0),
                 float(alert.get("peakMovePct") or 0),
             )
         except (TypeError, ValueError):
-            return 0.0
+            session = 0.0
+    if 0 < session <= hi:
+        return session
     return 0.0
 
 

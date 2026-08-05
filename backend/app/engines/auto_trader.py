@@ -408,10 +408,21 @@ async def _open_from_candidate(
         if faded:
             stop_pts *= faded_rip_stop_multiplier()
         trap_ict = analyze_explosion_event_ict(candidate.explosion_event, snap)
+        from app.engines.elite_never_block import elite_never_block_active
+
+        must_take = elite_never_block_active(
+            candidate=candidate,
+            event=candidate.explosion_event,
+            alert=getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None,
+            snap=snap,
+            ict=trap_ict,
+        )
         trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
             candidate, snap, state=state, ict=trap_ict,
         )
-        if trap_block or trap_meta.get("action") == "block":
+        if (trap_block or trap_meta.get("action") == "block") and not must_take:
             return False, trap_reason
 
     # Per-trade timing quality — COLD/LATE/CHASE cannot open full-size on dead tape.
@@ -835,6 +846,17 @@ async def _open_from_candidate(
 
                 live_prem = (chart_meta or {}).get("premiumChart")
                 trap_ict = analyze_explosion_event_ict(candidate.explosion_event, snap)
+                from app.engines.elite_never_block import elite_never_block_active
+
+                must_take_live = elite_never_block_active(
+                    candidate=candidate,
+                    event=candidate.explosion_event,
+                    alert=getattr(candidate, "alert", None)
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else None,
+                    snap=snap,
+                    ict=trap_ict,
+                )
                 trap_block, trap_reason, live_trap = detect_fake_explosion_trap(
                     candidate,
                     snap,
@@ -844,7 +866,10 @@ async def _open_from_candidate(
                 )
                 if live_trap.get("fakeExplosionTrap"):
                     trap_meta = {**trap_meta, **live_trap}
-                if trap_block or live_trap.get("action") == "block":
+                if (
+                    (trap_block or live_trap.get("action") == "block")
+                    and not must_take_live
+                ):
                     return False, trap_reason
                 if trap_meta.get("action") == "cut_size":
                     bypass_soft = (
