@@ -122,3 +122,19 @@ def test_must_take_move_ignores_day_peak(mock_s, _off_low, _off_low2):
         ict=_ict(0.0),
     )
     assert move2 == 0.0
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_alert_prefers_local_base_move_pct_over_raw_ict(mock_s):
+    """Composite localBaseMovePct wins over noisy raw ictBaseRelativeMovePct."""
+    mock_s.return_value = _settings()
+    move = _near_base_move_pct(
+        _event(daily=67.0, peak=67.0),
+        {
+            "ictBaseRelativeMovePct": 2.0,
+            "localBaseMovePct": 14.5,
+            "offLowMovePct": 14.5,
+        },
+        ict=_ict(0.0),
+    )
+    assert move == 14.5

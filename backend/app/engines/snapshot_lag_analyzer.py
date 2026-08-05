@@ -94,9 +94,22 @@ def _analyze_explosion_gaps(
 
         # Surface extended-chase / ICT late-fade — Jul23 SENSEX 76400 PE showed
         # empty blockers while selector silently skipped +188–471% session moves.
-        local_move = float(
-            alert.get("ictBaseRelativeMovePct") or alert.get("offLowMovePct") or 0
-        )
+        def _alert_local_pad(a: dict) -> float:
+            for key in (
+                "localBaseMovePct",
+                "offLowMovePct",
+                "ictBaseRelativeMovePct",
+                "baseRelativeMovePct",
+            ):
+                try:
+                    v = float(a.get(key) or 0)
+                except (TypeError, ValueError):
+                    v = 0.0
+                if v > 0:
+                    return v
+            return 0.0
+
+        local_move = _alert_local_pad(alert)
         try:
             from app.engines.explosion_detector import ExplosionEvent
             from app.engines.explosion_entry_guards import extended_session_chase_blocked
@@ -133,7 +146,7 @@ def _analyze_explosion_gaps(
             if late_blocked:
                 blockers.append(late_reason or "ict_late_fade_chase")
         except Exception:
-            local_move = float(alert.get("ictBaseRelativeMovePct") or alert.get("offLowMovePct") or 0)
+            local_move = _alert_local_pad(alert)
 
         if blockers or alert.get("allDayExplosion") or daily_move >= 40 or local_move >= 10:
             gaps.append({
@@ -165,11 +178,11 @@ def _fix_hint(blockers: list[str]) -> str:
     if "not_tradeable_tier" in blockers:
         return "Velocity/volume spike needed for tradeable tier"
     if any("extended_chase_local" in b for b in blockers):
-        return "Local-base move already past 40% — wait for a fresh swing low"
+        return "Local-base move already past 65% — wait for a fresh swing low"
     if any("extended_chase" in b for b in blockers):
-        return "Enter on local-base early window (15–40%) — day-move % alone looks like a chase"
+        return "Enter on local-base early window (10–65%) — day-move % alone looks like a chase"
     if any("immature_local_base" in b for b in blockers):
-        return "Wait for ≥15% expansion from a trustworthy local swing/flat base (≥8%)"
+        return "Wait for ≥10% expansion from a trustworthy local swing/flat base (≥8%)"
     if any("late_fade" in b for b in blockers):
         return "Enter earlier on flat-base break — do not chase after peak fades"
     return "Review pretrade + directional lock"
