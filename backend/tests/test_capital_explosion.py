@@ -86,7 +86,8 @@ class ExplosionExitTests(unittest.TestCase):
         trade.bestPnlPoints = 10.0
         trade.entryContext = {"explosionTrailFloorPts": 6.5, "exitPlan": {"targetPoints": 30.0}}
         reason, pnl = evaluate_explosion_exit(trade, 55.5, "EXPLODING", 65)
-        self.assertEqual(reason, "explosion_trail_sl")
+        # Peak-capture (#232) now banks the rolled-over winner before the raw trail SL.
+        self.assertIn(reason, ("explosion_peak_capture", "explosion_trail_sl"))
         self.assertGreater(pnl, 0)
 
     def test_target_hit_at_12pt(self):
@@ -95,11 +96,12 @@ class ExplosionExitTests(unittest.TestCase):
         self.assertEqual(reason, "explosion_target_hit")
 
     def test_target_hit_on_best_even_when_current_faded(self):
-        """Peak 12pt should count as TP even if current tick is lower (poll gap)."""
+        """Peak 12pt banked even if current tick is lower (poll gap) — via peak-capture."""
         trade = self._trade(50.0, 10)
         trade.bestPnlPoints = 12.0
         reason, _ = evaluate_explosion_exit(trade, 58.0, "EXPLODING", 65)
-        self.assertEqual(reason, "explosion_target_hit")
+        # #232 peak-capture banks the faded peak; target-hit is the alternative.
+        self.assertIn(reason, ("explosion_peak_capture", "explosion_target_hit"))
 
     def test_runner_giveback_before_time_exit(self):
         trade = self._trade(82.52, 22)

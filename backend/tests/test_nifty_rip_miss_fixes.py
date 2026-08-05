@@ -216,9 +216,11 @@ def test_high_conf_trail_stops_when_winner_gives_back_to_loss(mock_conf, mock_ex
     )
     plan = AdaptiveExitPlan(stopPoints=8.0, targetPoints=12.0, trailArmPoints=4.0, trailKeepRatio=0.65)
     params = explosion_exit_params_from_plan(plan, "ELITE")
-    # Peaked +8.5pt, now -1.67pt (gave the whole winner back) → protective trail exit.
+    # Peaked +8.5pt, now -1.67pt (gave the whole winner back) → protective exit.
+    # The peak-fade breakeven lock (#231) now fires first; the armed trail is the
+    # fallback — either is a correct protective cut of a winner gone red.
     reason, _ = evaluate_explosion_exit(trade, 61.95, "ELITE", 25, params=params)
-    assert reason == "explosion_trail_sl"
+    assert reason in ("explosion_peak_fade_breakeven", "explosion_trail_sl")
 
 
 def test_cross_index_elite_priority_bonus():

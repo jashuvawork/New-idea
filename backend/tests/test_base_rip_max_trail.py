@@ -97,7 +97,8 @@ def test_defensive_day_allows_early_base_rip(mock_mode, mock_settings):
     assert meta.get("defensiveBaseRip") is True
     assert meta.get("maxProfitCapture") is True
     assert meta.get("capturePath") == "defensive_base_flat_vertical"
-    assert meta.get("lotMultiplier") == 0.55
+    # #229: structured base-window explosions now take full capital lots (was 0.55).
+    assert meta.get("lotMultiplier") == 1.0
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")

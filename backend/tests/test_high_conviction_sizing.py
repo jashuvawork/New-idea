@@ -25,6 +25,7 @@ def _settings(**overrides):
     s.elevated_size_enabled = True
     s.elevated_size_min_score = 65.0
     s.elevated_size_min_chart_confidence = 58.8
+    s.high_conviction_min_velocity_3s = 2.0
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -54,7 +55,7 @@ def test_accepts_jul22_sensex_pe(mock_s):
     mock_s.return_value = _settings()
     assert is_high_conviction_entry(
         side=Side.PUT, snap=_snap(), tier="ELITE", score=100.0,
-        move_pct=32.0, chart_confidence=95.0,
+        move_pct=32.0, chart_confidence=95.0, velocity_3s=3.0,
     ) is True
 
 
@@ -148,12 +149,12 @@ def test_elevated_rejects_wrong_side(mock_s):
     ) is False
 
 
-def _size_gate(gate_fn, *, side, snap, tier, score, chart_confidence, move_candidates):
+def _size_gate(gate_fn, *, side, snap, tier, score, chart_confidence, move_candidates, **extra):
     """Mirror of auto_trader._size_gate: qualify if ANY candidate move is in window."""
     return any(
         gate_fn(
             side=side, snap=snap, tier=tier, score=score,
-            move_pct=mv, chart_confidence=chart_confidence,
+            move_pct=mv, chart_confidence=chart_confidence, **extra,
         )
         for mv in move_candidates
     )
@@ -171,13 +172,13 @@ def test_base_relative_move_upsizes_fast_rip(mock_s):
     # Off-the-low move alone → NOT high conviction (looks like an extended chase)
     assert is_high_conviction_entry(
         side=Side.PUT, snap=_snap(), tier="ELITE", score=100.0,
-        move_pct=off_low_move, chart_confidence=95.0,
+        move_pct=off_low_move, chart_confidence=95.0, velocity_3s=3.0,
     ) is False
 
     # With base-relative move added as a candidate → qualifies for max lots
     assert _size_gate(
         is_high_conviction_entry, side=Side.PUT, snap=_snap(), tier="ELITE",
-        score=100.0, chart_confidence=95.0,
+        score=100.0, chart_confidence=95.0, velocity_3s=3.0,
         move_candidates=[off_low_move, base_relative_move],
     ) is True
 
@@ -205,7 +206,7 @@ def test_base_relative_still_rejects_true_late_chase(mock_s):
     mock_s.return_value = _settings()
     assert _size_gate(
         is_high_conviction_entry, side=Side.PUT, snap=_snap(), tier="ELITE",
-        score=100.0, chart_confidence=95.0,
+        score=100.0, chart_confidence=95.0, velocity_3s=3.0,
         move_candidates=[92.0, 70.0],
     ) is False
 
