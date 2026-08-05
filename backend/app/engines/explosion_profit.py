@@ -288,7 +288,9 @@ def check_explosion_entry(
     must_take = elite_never_block_active(
         event=event, snap=snap, ict=ict_live,
     )
-    window_blocked, window_reason = explosion_entry_window_blocked(event, ict=ict_live)
+    window_blocked, window_reason = explosion_entry_window_blocked(
+        event, ict=ict_live, top_must_take=must_take,
+    )
     if window_blocked:
         return False, window_reason
     live_blocked, live_reason = live_explosion_confirmation_blocked(

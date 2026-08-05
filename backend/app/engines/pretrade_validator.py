@@ -775,8 +775,19 @@ def validate_candidate(
             if explosion_event is not None
             else None
         )
+        from app.engines.elite_never_block import elite_never_block_active
+
+        must_take = elite_never_block_active(
+            event=explosion_event,
+            candidate=candidate,
+            alert=getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None,
+            snap=snap,
+            ict=trap_ict,
+        )
         window_blocked, window_reason = explosion_entry_window_blocked(
-            explosion_event, ict=trap_ict,
+            explosion_event, ict=trap_ict, top_must_take=must_take,
         )
         if window_blocked:
             return False, window_reason, meta

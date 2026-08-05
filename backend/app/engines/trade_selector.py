@@ -344,8 +344,11 @@ def _explosion_candidates(
         immature_blocked, _immature_reason = immature_explosion_blocked(event, ict=ict)
         if immature_blocked and not must_take:
             continue
-        # Near-base window still applies — must_take itself requires in-window.
-        window_blocked, _window_reason = explosion_entry_window_blocked(event, ict=ict)
+        # Must-take already proved the 10–65% near-base band; pass that so the
+        # hard window does not re-raise the unstructured 28% floor.
+        window_blocked, _window_reason = explosion_entry_window_blocked(
+            event, ict=ict, top_must_take=must_take,
+        )
         if window_blocked:
             continue
         from app.engines.morning_premium_capture import is_premium_capture_event

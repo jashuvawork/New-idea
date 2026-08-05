@@ -214,3 +214,66 @@ def test_structured_still_blocks_below_10pct(mock_settings):
     blocked, reason = explosion_entry_window_blocked(_event(8.5), ict=ict)
     assert blocked is True
     assert "weak_local" in reason or "local_low" in reason
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_must_take_uses_near_base_band_without_ict_heat(mock_settings):
+    """Must-take at ~15% pad must not re-raise the unstructured 28% floor."""
+    mock_settings.return_value = _settings(
+        explosion_early_window_max_move_pct=65.0,
+        ict_structured_early_max_move_pct=65.0,
+    )
+    # Unstructured ICT — no flat→vertical heat, but pad is real.
+    ict = ICTBreakoutSignal(
+        active=True,
+        pattern="displacement",
+        score=30.0,
+        reasons=["volume_awakening"],
+        session_move_pct=40.0,
+        base_relative_move_pct=15.0,
+        base_premium=90.0,
+        flat_then_vertical=False,
+        local_swing_base=False,
+        displacement=True,
+        volume_awakening=True,
+    )
+    blocked, reason = explosion_entry_window_blocked(
+        _event(40.0), ict=ict, top_must_take=False,
+    )
+    assert blocked is True
+    assert "local_low" in reason or "weak_local" in reason
+
+    blocked_mt, reason_mt = explosion_entry_window_blocked(
+        _event(40.0), ict=ict, top_must_take=True,
+    )
+    assert blocked_mt is False, reason_mt
+
+
+@patch("app.engines.explosion_detector.session_low_relative_move_pct", return_value=22.0)
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_weak_raw_ict_does_not_override_trusted_off_low(mock_settings, _off_low):
+    """Raw ICT baseRel 7.4% must not block when off-low pad is already 22%."""
+    mock_settings.return_value = _settings()
+    ict = ICTBreakoutSignal(
+        active=True,
+        pattern="displacement",
+        score=36.0,
+        reasons=["flat_base_breaking"],
+        session_move_pct=28.9,
+        base_relative_move_pct=7.4,
+        base_premium=96.52,
+        flat_then_vertical=False,
+        local_swing_base=False,
+        displacement=True,
+        volume_awakening=True,
+    )
+    blocked, reason = explosion_entry_window_blocked(_event(28.9), ict=ict)
+    assert blocked is True  # 22% still below unstructured 28% floor
+    assert "local_low" in reason
+    assert "weak_local" not in reason
+
+    # With must-take / structured floor, 22% off-low is inside 10–65.
+    blocked_mt, reason_mt = explosion_entry_window_blocked(
+        _event(28.9), ict=ict, top_must_take=True,
+    )
+    assert blocked_mt is False, reason_mt

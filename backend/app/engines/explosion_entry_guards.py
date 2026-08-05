@@ -227,16 +227,21 @@ def structured_early_ict_ready(ict: Any) -> bool:
     )
 
 
-def entry_window_bounds(ict: Any = None) -> tuple[float, float]:
+def entry_window_bounds(
+    ict: Any = None,
+    *,
+    top_must_take: bool = False,
+) -> tuple[float, float]:
     """Return (min%, max%) for the hard entry window.
 
     Unstructured spikes stay on the book band 28–65%.
-    Structured ICT + heat uses the nearer-base band (default 10–65%).
+    Structured ICT + heat, or top must-take (already near-base ATM/ITM),
+    uses the nearer-base band (default 10–65%).
     """
     settings = get_settings()
     lo = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
     hi = float(getattr(settings, "explosion_early_window_max_move_pct", 65.0) or 65.0)
-    if structured_early_ict_ready(ict):
+    if top_must_take or structured_early_ict_ready(ict):
         lo = float(getattr(settings, "ict_structured_early_min_move_pct", 10.0) or 10.0)
         hi = float(getattr(settings, "ict_structured_early_max_move_pct", 65.0) or 65.0)
     return lo, hi
@@ -246,19 +251,21 @@ def explosion_entry_window_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
+    top_must_take: bool = False,
 ) -> tuple[bool, str]:
     """Hard-block EXPLOSIVE entries outside the active early window.
 
     Unstructured: 28–65% (book). Structured ICT flat→vertical / swing V-base
-    with heat: 10–65% so the first vertical leg stays tradeable — including
-    Aug4 SENSEX 78700 PE (~54% off local base) that the old 45% ceiling chased.
+    with heat, or top must-take: 10–65% so the first vertical leg stays
+    tradeable — including Aug4 SENSEX 78700 PE (~54% off local base).
 
     Timing is measured from:
       1) trustworthy ICT local/swing base when present
       2) else % above today's meaningful session low (V-bottom reclaim)
-      3) else day/peak session move
+      3) else day/peak session move (only when no pad exists)
 
-    Weak off-low / local below the active floor must not hide behind day %.
+    Weak ICT raw base must not hide behind day % — but only after a trusted
+    off-low / local pad has been given a chance (Aug5 24500-style).
     Fake micro-baseline day moves (+8873%) are ignored when off-low is known.
     """
     settings = get_settings()
@@ -267,7 +274,7 @@ def explosion_entry_window_blocked(
     if explosion_event is None:
         return False, ""
 
-    lo, hi = entry_window_bounds(ict)
+    lo, hi = entry_window_bounds(ict, top_must_take=top_must_take)
     try:
         max_credible = float(
             getattr(settings, "session_move_max_credible_pct", 500.0)
@@ -281,11 +288,6 @@ def explosion_entry_window_blocked(
     if ict is not None:
         session = max(session, float(getattr(ict, "session_move_pct", 0) or 0))
 
-    raw_local = float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict is not None else 0.0
-    # Weak / early local base must not hide behind a "good-looking" day %.
-    if 0 < raw_local < lo:
-        return True, f"entry_window_weak_local_{raw_local:.0f}%"
-
     # Primary: local pad / off-low — never day% when a pad exists.
     pad = effective_local_base_move_pct(explosion_event, ict)
     if pad > 0:
@@ -294,6 +296,14 @@ def explosion_entry_window_blocked(
         if pad > hi:
             return True, f"entry_window_local_high_{pad:.0f}%"
         return False, ""
+
+    # No trusted pad — ICT may still print a sub-floor raw base. Do not let
+    # a "good-looking" day % hide that still-forming local (Jul30 77700).
+    raw_local = (
+        float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict is not None else 0.0
+    )
+    if 0 < raw_local < lo:
+        return True, f"entry_window_weak_local_{raw_local:.0f}%"
 
     # Uncredible day-% (micro-baseline artifact) with no pad → treat as unknown/low.
     if session > max_credible:
@@ -638,29 +648,29 @@ def cap_extended_chase_lots(lots: int, explosion_event: Any, *, ict: Any = None)
     hard_cap = int(getattr(settings, "explosion_hard_lot_cap", 10) or 10)
     lots = min(max(1, lots), hard_cap)
     move = _session_peak_move(explosion_event)
-    base_move = float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict is not None else 0.0
-    base_max = float(
-        getattr(settings, "ict_base_relative_chase_max_move_pct", 55.0) or 55.0
-    )
+    try:
+        base_max = float(
+            getattr(settings, "ict_base_relative_chase_max_move_pct", 55.0) or 55.0
+        )
+    except (TypeError, ValueError):
+        base_max = 55.0
+    # Prefer trusted local pad / off-low over raw ICT baseRel (day% can lie).
+    try:
+        pad = float(effective_local_base_move_pct(explosion_event, ict) or 0.0)
+    except Exception:
+        pad = 0.0
+    if pad <= 0 and ict is not None:
+        try:
+            pad = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+        except (TypeError, ValueError):
+            pad = 0.0
     # Local / flat base still inside the soft early window → full size.
-    if ict is not None and 0 < base_move <= base_max:
+    if 0 < pad <= base_max:
         return lots
     # Soft-cap using local base when day-move is misleadingly large.
-    if (
-        ict is not None
-        and getattr(settings, "explosion_chase_use_local_base", True)
-        and base_move > base_max
-    ):
+    if pad > base_max and getattr(settings, "explosion_chase_use_local_base", True):
         soft_cap = int(getattr(settings, "explosion_extended_soft_lot_cap", 6) or 6)
         return min(lots, soft_cap)
-    # ICT flat→vertical still inside base-relative early window keeps full size.
-    if (
-        ict is not None
-        and bool(getattr(ict, "flat_then_vertical", False))
-        and bool(getattr(ict, "active", False))
-        and 0 < base_move <= base_max
-    ):
-        return lots
     soft = float(getattr(settings, "explosion_extended_soft_min_move_pct", 50.0) or 50.0)
     if move >= soft:
         soft_cap = int(getattr(settings, "explosion_extended_soft_lot_cap", 6) or 6)

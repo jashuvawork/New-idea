@@ -133,11 +133,13 @@ def _near_base_move_pct(
     except Exception:
         pass
     if alert:
+        # Prefer the trusted composite (localBaseMovePct) before raw ICT baseRel —
+        # raw can be noise while off-low / composite pad is already in the band.
         for key in (
+            "localBaseMovePct",
+            "offLowMovePct",
             "ictBaseRelativeMovePct",
             "baseRelativeMovePct",
-            "offLowMovePct",
-            "localBaseMovePct",
         ):
             try:
                 v = float(alert.get(key) or 0)
@@ -146,7 +148,7 @@ def _near_base_move_pct(
             if v > 0:
                 return v
     if event is not None:
-        for key in ("ict_base_relative_move_pct", "off_low_move_pct"):
+        for key in ("local_base_move_pct", "off_low_move_pct", "ict_base_relative_move_pct"):
             try:
                 v = float(getattr(event, key, 0) or 0)
             except (TypeError, ValueError):
