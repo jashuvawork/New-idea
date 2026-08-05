@@ -128,4 +128,5 @@ def test_paused_blocks_normal_but_allows_top_local_base(mock_policy):
         cand, AutoTraderState(), {"NIFTY": cand.snap},
     )
     assert ok2 is True
-    assert meta2.get("worstDayBypass") == "local_base_top_explosion"
+    # Must-take / elite-never-block short-circuits before local_base_top_explosion.
+    assert meta2.get("worstDayBypass") == "elite_never_block"

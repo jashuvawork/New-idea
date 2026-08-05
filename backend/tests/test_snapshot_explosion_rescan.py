@@ -32,6 +32,7 @@ def _settings():
     s.open_caution_until_minute = 45
     s.explosion_volume_awaken_min = 5000
     s.ict_breakout_monitor_enabled = False
+    s.explosion_scan_atm_itm_only = True
     return s
 
 
@@ -59,13 +60,14 @@ def test_snapshot_rescan_detects_put_vertical_rip(mock_settings, _open_window):
     _session_peak.clear()
     _tier_sticky.clear()
 
-    snap = _snap(24000.0, 80.0)
+    # ATM put — scan skips OTM when explosion_scan_atm_itm_only=True.
+    snap = _snap(24100.0, 80.0)
     scan_snapshot_explosions(snap)
     snap.heatmap[0].putLtp = 168.0
     events = scan_snapshot_explosions(snap)
 
-    puts = [e for e in events if e.side == Side.PUT and e.strike == 24000.0]
-    assert puts, "expected PUT 24000 explosion after vertical rip"
+    puts = [e for e in events if e.side == Side.PUT and e.strike == 24100.0]
+    assert puts, "expected PUT 24100 explosion after vertical rip"
     assert puts[0].daily_move_pct >= 50
     assert puts[0].tier in ("EXPLODING", "ELITE")
 
@@ -84,11 +86,11 @@ def test_refresh_snapshot_explosion_alerts_updates_list(
     _session_peak.clear()
     _tier_sticky.clear()
 
-    snap = _snap(24000.0, 85.0)
+    snap = _snap(24100.0, 85.0)
     scan_snapshot_explosions(snap)
     snap.heatmap[0].putLtp = 170.0
     refresh_snapshot_explosion_alerts(snap)
     assert snap.explosionAlerts
     top = snap.explosionAlerts[0]
     assert top["side"] == "PUT"
-    assert top["strike"] == 24000.0
+    assert top["strike"] == 24100.0

@@ -184,6 +184,9 @@ def test_check_explosion_entry_accepts_building_all_day(
     event = _pe_rip_event()
     event.tier = "BUILDING"
     event.explosion_score = 43.0
+    # Stay inside hard entry window (28–65%); 358% off-open is chase, not entry.
+    event.daily_move_pct = 48.0
+    event.peak_move_pct = 48.0
     trade = SuggestedTrade(
         id="x", symbol="NIFTY", side=Side.PUT, strike=23850.0,
         lastPremium=183.35, tqs=35.0, strategyType="EXPLOSIVE", confidence=43.0,

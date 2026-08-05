@@ -141,12 +141,11 @@ def test_event_to_dict_marks_afternoon_tradeable(mock_window, mock_settings, moc
 
 
 @patch("app.engines.morning_premium_capture.in_all_day_explosion_window", return_value=False)
-@patch("app.engines.explosion_profit.get_settings")
-@patch("app.engines.morning_premium_capture.get_settings", return_value=_settings())
 @patch("app.engines.morning_premium_capture.in_afternoon_premium_capture_window", return_value=True)
-def test_explosion_entry_allows_building_afternoon(mock_window, mock_morn, mock_exp_settings, mock_all_day):
-    mock_exp_settings.return_value = _settings()
-    event = _nifty_24250_pe_event()
+def test_explosion_entry_allows_building_afternoon(mock_window, mock_all_day):
+    # Use real Settings — MagicMock invents unusable numeric attrs once move > 0.
+    # Hard entry window is 28–65% unstructured — fixture must print a real move.
+    event = _nifty_24250_pe_event(daily_move_pct=35.0, peak_move_pct=35.0)
     trade = SuggestedTrade(
         id="x",
         symbol="NIFTY",
