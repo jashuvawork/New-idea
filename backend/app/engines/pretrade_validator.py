@@ -795,7 +795,7 @@ def validate_candidate(
             candidate, snap, state=state, ict=trap_ict,
         )
         meta.update(trap_meta)
-        if (trap_block or trap_meta.get("action") == "block") and not must_take:
+        if trap_block or trap_meta.get("action") == "block":
             return False, trap_reason, meta
 
     if getattr(candidate, "mode", "") == "explosion" and explosion_event is not None:

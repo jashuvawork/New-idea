@@ -116,23 +116,52 @@ def test_extended_chase_still_blocks_exploding(mock_elite_s, mock_guard_s):
 
 @patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.elite_never_block.get_settings")
-def test_fake_trap_skips_elite(mock_elite_s, mock_guard_s):
+def test_fake_trap_does_not_short_circuit_on_elite(mock_elite_s, mock_guard_s):
+    """ELITE / must-take must not skip fake-trap evaluation."""
     s = _enb_settings()
+    # Enough attrs for detect_fake_explosion_trap to run without MagicMock noise.
+    s.fake_explosion_trap_min_session_move_pct = 28.0
+    s.fake_explosion_trap_extended_move_pct = 55.0
+    s.fake_explosion_trap_max_premium_mom_pct = 0.15
+    s.fake_explosion_trap_block_on_conflict = True
+    s.fake_explosion_trap_min_conflict_flags = 3
+    s.fake_explosion_trap_chop_elite_lot_cap = 6
+    s.fake_explosion_trap_otm_requires_or_breakout = True
+    s.fake_explosion_trap_post_win_lot_cap = 8
+    s.fake_explosion_trap_post_win_max_pnl_inr = 3000.0
+    s.fake_explosion_trap_post_win_lookback = 1
+    s.fake_explosion_trap_psychology_escalate = True
+    s.fake_explosion_trap_midday_require_structure = True
+    s.fake_explosion_trap_skip_soft_cut_base_window = True
+    s.fake_explosion_trap_skip_soft_cut_near_otm = True
+    s.explosion_early_window_max_move_pct = 65.0
+    s.explosion_chase_use_local_base = True
+    s.nifty_strike_step = 50.0
+    s.sensex_strike_step = 100.0
+    s.banknifty_strike_step = 100.0
+    s.moneyness_atm_tolerance_points = 50.0
     mock_elite_s.return_value = s
     mock_guard_s.return_value = s
     blocked, reason, meta = detect_fake_explosion_trap(_cand("ELITE"), _snap())
-    assert blocked is False
-    assert meta.get("eliteNeverBlock") is True
+    assert meta.get("eliteNeverBlock") is not True
+    assert meta.get("topMustTake") is not True
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
 @patch("app.engines.elite_never_block.get_settings")
-def test_late_fade_skips_elite(mock_elite_s, mock_ict_s):
+def test_late_fade_still_blocks_elite(mock_elite_s, mock_ict_s):
+    """Cooling ELITE after a hard peak must still late-fade block."""
     s = _enb_settings()
+    s.ict_late_chase_min_peak_pct = 75.0
+    s.ict_late_chase_max_live_velocity_3s = 1.0
+    s.explosion_early_window_max_move_pct = 65.0
+    s.explosion_local_base_chase_max_move_pct = 40.0
+    s.explosion_chase_use_local_base = True
     mock_elite_s.return_value = s
     mock_ict_s.return_value = s
     blocked, reason = late_fade_chase_blocked(_event(tier="ELITE", peak=250.0, v3=0.2))
-    assert blocked is False
+    assert blocked is True
+    assert "late_fade" in reason
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")

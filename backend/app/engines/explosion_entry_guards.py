@@ -944,22 +944,8 @@ def detect_fake_explosion_trap(
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         return False, "ok", meta
 
-    from app.engines.elite_never_block import elite_never_block_active
-
-    # Fake-trap must never bury a top near-base ATM/ITM explosion — take at base.
-    if elite_never_block_active(
-        candidate=candidate,
-        event=getattr(candidate, "explosion_event", None),
-        alert=getattr(candidate, "alert", None)
-        if isinstance(getattr(candidate, "alert", None), dict)
-        else None,
-        snap=snap,
-        ict=ict,
-    ):
-        meta["eliteNeverBlock"] = True
-        meta["topMustTake"] = True
-        return False, "ok", meta
-
+    # Fake traps still apply on must-take / ELITE — FOMO stacks and flat
+    # premium extensions are real losers even when the pad looks early.
     event = getattr(candidate, "explosion_event", None)
     tier = str(
         getattr(event, "tier", None)

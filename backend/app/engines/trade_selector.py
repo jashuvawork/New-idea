@@ -331,7 +331,7 @@ def _explosion_candidates(
             event=event, candidate=cand_probe, alert=alert, snap=snap, ict=ict,
         )
         late_blocked, _late_reason = late_fade_chase_blocked(event, ict, snap=snap)
-        if late_blocked and not must_take:
+        if late_blocked:
             continue
         from app.engines.explosion_entry_guards import (
             detect_fake_explosion_trap,
@@ -375,7 +375,7 @@ def _explosion_candidates(
         trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
             cand_probe, snap, state=state, ict=ict,
         )
-        if (trap_block or trap_meta.get("action") == "block") and not must_take:
+        if trap_block or trap_meta.get("action") == "block":
             continue
         # Displacement-only without flat base / FVG / real rip — skip (Jul20 noise).
         # Raised floor to early-window min (28%) so ~22% displacement spikes stay out.
