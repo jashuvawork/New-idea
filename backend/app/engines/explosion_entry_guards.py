@@ -656,10 +656,21 @@ def cap_extended_chase_lots(lots: int, explosion_event: Any, *, ict: Any = None)
 def check_explosion_macd_alignment(
     side: Side | str,
     snap: SymbolSnapshot,
+    *,
+    event: Any = None,
+    candidate: Any = None,
+    alert: Optional[dict] = None,
 ) -> tuple[bool, str]:
     """Require MACD bias to align with explosion side (no bearish MACD CALLs)."""
     settings = get_settings()
     if not settings.explosion_macd_alignment_required:
+        return True, "ok"
+
+    from app.engines.elite_never_block import elite_never_block_active
+
+    if elite_never_block_active(
+        event=event, candidate=candidate, alert=alert, snap=snap,
+    ):
         return True, "ok"
 
     chart = snap.spotChart
