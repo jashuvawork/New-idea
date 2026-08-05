@@ -1078,8 +1078,9 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     pad_ceil = float(
         getattr(_settings, "ict_structured_early_max_move_pct", 65.0) or 65.0
     )
-    local_move = float(getattr(ict, "base_relative_move_pct", 0) or 0)
-    pad_move = local_move if local_move >= 8.0 else move
+    from app.engines.explosion_entry_guards import effective_local_base_move_pct
+
+    pad_move = effective_local_base_move_pct(e, ict)
     # EXPLODING/ELITE still need a real rip — tiny displacement spikes are not tradeable.
     tradeable = (e.tier in ("EXPLODING", "ELITE") and move >= immature_floor) or capture
     # First print inside the near-base pad is tradeable even before the 28% immature floor.
@@ -1139,6 +1140,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
             session_low_relative_move_pct(e.symbol, e.strike, e.side, e.premium),
             1,
         ),
+        "localBaseMovePct": round(float(pad_move or 0), 1),
         "volumeAwaken": vol_awaken,
         "tradeable": tradeable,
         "morningCapture": morning,

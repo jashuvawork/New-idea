@@ -123,26 +123,21 @@ def _near_base_move_pct(
     *,
     ict: Any = None,
 ) -> float:
-    if ict is not None:
-        try:
-            from app.engines.explosion_entry_guards import trustworthy_local_base_move
+    """Must-take timing: local pad / off-low only — never day-peak %."""
+    try:
+        from app.engines.explosion_entry_guards import effective_local_base_move_pct
 
-            base = trustworthy_local_base_move(ict)
-            if base > 0:
-                return float(base)
-        except Exception:
-            pass
-        try:
-            rel = float(getattr(ict, "base_relative_move_pct", 0) or 0)
-            if rel > 0:
-                return rel
-        except (TypeError, ValueError):
-            pass
+        pad = effective_local_base_move_pct(event, ict)
+        if pad > 0:
+            return float(pad)
+    except Exception:
+        pass
     if alert:
         for key in (
             "ictBaseRelativeMovePct",
             "baseRelativeMovePct",
             "offLowMovePct",
+            "localBaseMovePct",
         ):
             try:
                 v = float(alert.get(key) or 0)
@@ -158,34 +153,7 @@ def _near_base_move_pct(
                 v = 0.0
             if v > 0:
                 return v
-    # Never use mega day-peak % as "base move" — that turns every rip into a
-    # chase and blocks must-take. Only modest session moves (still near pad)
-    # may stand in when ICT local base has not printed yet.
-    try:
-        from app.config import get_settings as _gs
-
-        hi = float(getattr(_gs(), "ict_structured_early_max_move_pct", 65.0) or 65.0)
-    except Exception:
-        hi = 65.0
-    session = 0.0
-    if event is not None:
-        try:
-            session = max(
-                float(getattr(event, "daily_move_pct", 0) or 0),
-                float(getattr(event, "peak_move_pct", 0) or 0),
-            )
-        except (TypeError, ValueError):
-            session = 0.0
-    if session <= 0 and alert:
-        try:
-            session = max(
-                float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0),
-                float(alert.get("peakMovePct") or 0),
-            )
-        except (TypeError, ValueError):
-            session = 0.0
-    if 0 < session <= hi:
-        return session
+    # No pad → not in must-take window (do not fake it with day%).
     return 0.0
 
 
