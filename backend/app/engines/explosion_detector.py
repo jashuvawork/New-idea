@@ -1078,6 +1078,31 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).
     if e.tier == "BUILDING" and ict.active and ict.flat_then_vertical:
         tradeable = True
+    # Near-base ATM/ITM top explosions must be tradeable even when day-move < floor
+    # (Aug5 24500 PE ~10–45% off local base while session % still immature).
+    if not tradeable and e.tier in ("ELITE", "EXPLODING"):
+        try:
+            from app.engines.elite_never_block import top_explosion_must_take_active
+
+            alert_probe = {
+                "tier": e.tier,
+                "side": e.side.value if hasattr(e.side, "value") else str(e.side),
+                "strike": e.strike,
+                "premium": e.premium,
+                "explosionScore": e.explosion_score,
+                "dailyMovePct": e.daily_move_pct,
+                "peakMovePct": e.peak_move_pct,
+                "ictBaseRelativeMovePct": float(getattr(ict, "base_relative_move_pct", 0) or 0),
+                "ictFlatThenVertical": bool(getattr(ict, "flat_then_vertical", False)),
+                "ictBreakout": bool(getattr(ict, "active", False)),
+                "tradeable": True,
+            }
+            if top_explosion_must_take_active(
+                event=e, alert=alert_probe, snap=snap, ict=ict,
+            ):
+                tradeable = True
+        except Exception:
+            pass
     vol_awaken = (
         "volAwaken" in (e.reason or "")
         or ict.volume_awakening

@@ -175,6 +175,11 @@ class Settings(BaseSettings):
     # live-confirm / composer stand-down. Premium band still applies (no ₹3 OTM).
     # Timing COLD/LATE/CHASE still refuses the bypass when elite_bypass_requires_hot.
     explosion_elite_never_block_enabled: bool = True
+    # Top ELITE/EXPLODING ATM/ITM inside near-base window → never block (Aug5 24500).
+    explosion_top_must_take_enabled: bool = True
+    explosion_top_must_take_tiers_csv: str = "ELITE,EXPLODING"
+    explosion_top_must_take_min_score: float = 62.0
+    explosion_top_must_take_require_atm_itm: bool = True
     # Per-trade timing quality (GOOD/OK/COLD/LATE/CHASE) — blocks cold ELITE fills.
     entry_timing_assessment_enabled: bool = True
     entry_timing_cold_max_velocity_3s: float = 1.5

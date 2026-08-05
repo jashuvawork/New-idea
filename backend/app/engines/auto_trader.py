@@ -434,7 +434,18 @@ async def _open_from_candidate(
         )
         timing_blocked, timing_reason = timing_blocks_entry(timing_meta)
         if timing_blocked:
-            return False, timing_reason
+            from app.engines.elite_never_block import elite_never_block_active
+
+            if not elite_never_block_active(
+                candidate=candidate,
+                event=candidate.explosion_event,
+                alert=getattr(candidate, "alert", None)
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None,
+                snap=snap,
+                timing=timing_meta,
+            ):
+                return False, timing_reason
 
     signal_premium = candidate.premium
     is_live = settings.enable_live_trading and settings.auto_trading_enabled
@@ -1807,17 +1818,19 @@ async def process(
         from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
 
         policy, policy_meta = session_entry_policy(state, snapshots)
+        from app.engines.elite_never_block import snapshots_have_top_must_take
         from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
 
         extreme_session = snapshots_have_all_in_explosion(snapshots)
-        if policy == "PAUSED" and not extreme_session:
+        must_take_session = snapshots_have_top_must_take(snapshots)
+        if policy == "PAUSED" and not extreme_session and not must_take_session:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": policy_meta.get("pauseReason", "worst_day_paused"),
                 "message": f"Worst day — trading paused ({', '.join(policy_meta.get('worstDay', {}).get('reasons', []))})",
             })
         live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
-        if live_blocked:
+        if live_blocked and not must_take_session:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": live_reason,
@@ -1825,7 +1838,7 @@ async def process(
             })
 
         expiry_ok, expiry_reason, expiry_meta = check_expiry_entry_allowed(state, snapshots)
-        if not expiry_ok:
+        if not expiry_ok and not must_take_session:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": expiry_reason,
@@ -1833,10 +1846,14 @@ async def process(
                 and f"Expiry guard — {', '.join(expiry_meta.get('worstDayReasons', []))}"
                 or "Expiry-day entry blocked",
             })
-        if (
+        session_entries_ok = (
             not paused and not cap_hit and not ctrl_cap and not last_n_paused
-            and not whipsaw_paused and expiry_ok and policy != "PAUSED" and not live_blocked
-        ):
+            and not whipsaw_paused
+            and (expiry_ok or must_take_session)
+            and (policy != "PAUSED" or extreme_session or must_take_session)
+            and (not live_blocked or must_take_session)
+        )
+        if session_entries_ok:
             best = find_best_entry(snapshots, state, trading_limits)
             if best and explosion_early_ok and not entries_ok and best.mode != "explosion":
                 best = None
