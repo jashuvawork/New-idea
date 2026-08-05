@@ -1,8 +1,11 @@
 """Top ELITE/EXPLODING — never block near-base ATM/ITM entries.
 
 Policy (Aug5): if a top explosion is on radar at ATM/ITM with premium ≥ band
-min and still inside the near-base window, take it. Chase / cold tape / MACD /
-BREAKOUT_ONLY floors / stand-asides must not bury that print.
+min and still inside the near-base window, take it. Cold tape / MACD /
+BREAKOUT_ONLY floors / extended-chase / stand-asides must not bury that print.
+
+Fake-explosion traps and ICT late-fade chases still block — those are real
+failure modes even near the pad (do not bypass them via must-take).
 """
 
 from __future__ import annotations
@@ -325,12 +328,15 @@ def elite_never_block_active(
     snap: Any = None,
     ict: Any = None,
 ) -> bool:
-    """True when top explosions may skip FOMO/chase/stand-down/live/timing blocks.
+    """True when top explosions may skip cold/chase/stand-down/live/timing blocks.
 
     Two paths:
       1) Near-base must-take — ELITE/EXPLODING + ATM/ITM + premium≥min + in 10–65%
-         window → always take (Aug5 24500 PE).
+         window → bypass immature / cold timing / extended-chase / live-confirm.
       2) Legacy ELITE + GOOD hot timing bypass for other FOMO gates.
+
+    Does NOT authorize skipping fake-explosion-trap or ICT late-fade — callers
+    must still enforce those gates.
     """
     if top_explosion_must_take_active(
         tier=tier,

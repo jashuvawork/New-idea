@@ -171,9 +171,10 @@ class Settings(BaseSettings):
     scalp_entries_enabled: bool = False
     # Explosion entries: only ELITE + EXPLODING (no BUILDING / soft premium-capture admits).
     explosion_elite_exploding_only: bool = True
-    # Never block ELITE explosions — skip fake-trap / extended-chase / late-fade /
-    # live-confirm / composer stand-down. Premium band still applies (no ₹3 OTM).
-    # Timing COLD/LATE/CHASE still refuses the bypass when elite_bypass_requires_hot.
+    # Never block ELITE explosions — skip extended-chase / live-confirm /
+    # composer stand-down. Fake-trap + late-fade still apply (real PF killers).
+    # Premium band still applies (no ₹3 OTM). Timing COLD/LATE/CHASE still
+    # refuses the bypass when elite_bypass_requires_hot.
     explosion_elite_never_block_enabled: bool = True
     # Top ELITE/EXPLODING ATM/ITM inside near-base window → never block (Aug5 24500).
     explosion_top_must_take_enabled: bool = True
