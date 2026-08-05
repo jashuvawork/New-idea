@@ -31,6 +31,16 @@ _tier_sticky: dict[str, tuple[str, datetime]] = {}
 _score_sticky: dict[str, tuple[float, datetime]] = {}
 _session_date: Optional[str] = None
 MAX_HISTORY = 40  # ~2 min at 3s poll
+# Medium-horizon local base: the recent swing-low / support the current leg launched
+# from. The 2-min poll history + full-session low can't see it — the session low is the
+# far morning dip (overstates the move as a chase), and ICT flat-base needs a tight base.
+# This trailing-window low (~30 min, excluding the last breakout seconds) is the true
+# "local base" for entry/chase timing (Aug5 24500 PE: 72 vs ~66 local base = ~9%, not
+# ~80% off the ~40 session low).
+_local_base_hist: dict[str, deque] = {}
+LOCAL_BASE_HIST_MAXLEN = 1200  # ~60 min at 3s
+LOCAL_BASE_WINDOW_SECONDS = 1800  # 30 min lookback for the local swing low
+LOCAL_BASE_EXCLUDE_RECENT_SECONDS = 45  # drop the live breakout tail so base != the rip
 _TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
 
 
@@ -45,6 +55,7 @@ def _roll_session() -> None:
         _tier_sticky.clear()
         _score_sticky.clear()
         _peak_velocity.clear()
+        _local_base_hist.clear()
 
 
 def reset_detector_state_for_tests() -> None:
@@ -57,6 +68,7 @@ def reset_detector_state_for_tests() -> None:
     _tier_sticky.clear()
     _score_sticky.clear()
     _peak_velocity.clear()
+    _local_base_hist.clear()
     # Keep today's session date so seeded lows are not wiped by the next _roll_session().
     _session_date = datetime.now(IST).strftime("%Y-%m-%d")
 
@@ -641,7 +653,85 @@ def _record(symbol: str, strike: float, side: Side, premium: float, volume: floa
     vol = float(volume or 0)
     if vol <= 0 and hist:
         vol = _last_known_volume(hist)
-    hist.append((datetime.now(IST), premium, vol))
+    now = datetime.now(IST)
+    hist.append((now, premium, vol))
+    _record_local_base(key_for_symbol(symbol, key), now, premium)
+
+
+def key_for_symbol(symbol: str, strike_key: str) -> str:
+    return f"{symbol.upper()}:{strike_key}"
+
+
+def _record_local_base(full_key: str, ts: datetime, premium: float) -> None:
+    """Append to the medium-horizon local-base history and evict stale entries."""
+    if not premium or premium <= 0:
+        return
+    dq = _local_base_hist.get(full_key)
+    if dq is None:
+        dq = deque(maxlen=LOCAL_BASE_HIST_MAXLEN)
+        _local_base_hist[full_key] = dq
+    dq.append((ts, float(premium)))
+    cutoff = ts - timedelta(seconds=LOCAL_BASE_WINDOW_SECONDS + 300)
+    while dq and dq[0][0] < cutoff:
+        dq.popleft()
+
+
+def local_base_premium(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    *,
+    window_seconds: Optional[int] = None,
+    exclude_recent_seconds: Optional[int] = None,
+) -> float:
+    """Recent swing-low / support the current leg launched from (local base).
+
+    Trailing-window minimum over ~30 min, excluding the last breakout seconds so the
+    base is the consolidation, not the rip itself. This is the local pad for entry/chase
+    timing — far more accurate than the full-session low on a choppy base.
+    """
+    if side is None or not symbol:
+        return 0.0
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    full_key = _open_key(symbol, strike, side_val)
+    dq = _local_base_hist.get(full_key)
+    if not dq:
+        return 0.0
+    window = int(window_seconds or LOCAL_BASE_WINDOW_SECONDS)
+    excl = int(
+        exclude_recent_seconds
+        if exclude_recent_seconds is not None
+        else LOCAL_BASE_EXCLUDE_RECENT_SECONDS
+    )
+    now = dq[-1][0]
+    lo_cut = now - timedelta(seconds=window)
+    hi_cut = now - timedelta(seconds=excl)
+    vals = [p for (ts, p) in dq if lo_cut <= ts <= hi_cut and _is_meaningful_premium(p)]
+    if not vals:
+        # Not enough pre-breakout history yet — use the whole window.
+        vals = [p for (ts, p) in dq if ts >= lo_cut and _is_meaningful_premium(p)]
+    return min(vals) if vals else 0.0
+
+
+def local_base_relative_move_pct(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    premium: float,
+    *,
+    window_seconds: Optional[int] = None,
+    exclude_recent_seconds: Optional[int] = None,
+) -> float:
+    """% the premium is above its recent local base (swing low)."""
+    if not _is_meaningful_premium(premium):
+        return 0.0
+    base = local_base_premium(
+        symbol, strike, side,
+        window_seconds=window_seconds, exclude_recent_seconds=exclude_recent_seconds,
+    )
+    if not _is_meaningful_premium(base) or premium <= base:
+        return 0.0
+    return ((float(premium) - base) / base) * 100.0
 
 
 def _velocity(history: deque, polls_back: int) -> float:

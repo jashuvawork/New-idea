@@ -276,6 +276,11 @@ class Settings(BaseSettings):
     explosion_local_base_trust_min_move_pct: float = 8.0
     ict_local_base_lookback_polls: int = 16
     ict_local_base_min_dump_pct: float = 25.0
+    # Medium-horizon local base: measure entry/chase from the recent ~30-min swing low
+    # (the real "local base"), not the far full-session low. Aug5 24500 PE: 72 was ~9%
+    # off the ~66 local base but read ~80% off the ~40 session low → wrongly a chase.
+    # Preferred over off-session-low whenever local-base history exists.
+    explosion_local_base_recent_window_enabled: bool = True
     explosion_extended_soft_lot_cap: int = 6
     explosion_hard_lot_cap: int = 10
     # Early capture window — HARD entry gate for unstructured ELITE/EXPLODING.
