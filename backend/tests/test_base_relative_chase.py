@@ -163,7 +163,11 @@ def test_noise_baserel_does_not_false_immature(mock_s):
 
 @patch("app.engines.explosion_entry_guards.get_settings")
 def test_unstructured_baserel_ignored_for_immature(mock_s):
-    """baseRel without swing/flat→vertical is not a launch pad."""
+    """Immature still ignores unstructured baseRel; day-mature rip may proceed.
+
+    Chase/window use unstructured pads ≥ trust separately — immature must not
+    hold a +28% day rip as immature_local on displacement-only baseRel.
+    """
     mock_s.return_value = _settings()
     blocked, reason = immature_explosion_blocked(
         _event(28.0),

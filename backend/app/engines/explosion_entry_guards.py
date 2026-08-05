@@ -138,11 +138,14 @@ def _session_peak_move(explosion_event: Any) -> float:
 
 def trustworthy_local_base_move(ict: Any) -> float:
     """
-    Base-relative % only when structure is real enough for timing gates.
+    Base-relative % when the pad print is real enough for timing gates.
 
-    Jul24: alerts printed baseRel≈1–2% (noise / near a chop low) while day-move
-    was already ~28%. Treating that as a launch pad false-immatured mature rips.
-    Require swing/flat→vertical structure and ≥ trust floor (default 8%).
+    Jul24: alerts printed baseRel≈1–2% (noise) while day-move was already ~28%.
+    Trust floor (default 8%) filters that noise.
+
+    Aug5 24500 PE: day% showed ~67% chase while LTP was only ~9% off the chart
+    local base (~66→72). Do NOT require flat→vertical to accept a real pad % —
+    any baseRel ≥ trust floor is the launch pad for window/chase/must-take.
     """
     if ict is None:
         return 0.0
@@ -150,17 +153,59 @@ def trustworthy_local_base_move(ict: Any) -> float:
     base = float(getattr(ict, "base_relative_move_pct", 0) or 0)
     if base <= 0:
         return 0.0
-    structured = bool(getattr(ict, "local_swing_base", False)) or bool(
-        getattr(ict, "flat_then_vertical", False)
-    )
-    if not structured:
-        return 0.0
     trust_min = float(
         getattr(settings, "explosion_local_base_trust_min_move_pct", 8.0) or 8.0
     )
     if base < trust_min:
         return 0.0
     return base
+
+
+def _off_low_move_pct(explosion_event: Any) -> float:
+    """% above today's meaningful session low (V-bottom / reclaim)."""
+    if explosion_event is None:
+        return 0.0
+    try:
+        from app.engines.explosion_detector import session_low_relative_move_pct
+
+        off_low = float(
+            session_low_relative_move_pct(
+                str(getattr(explosion_event, "symbol", "") or ""),
+                float(getattr(explosion_event, "strike", 0) or 0),
+                getattr(explosion_event, "side", None),
+                float(getattr(explosion_event, "premium", 0) or 0),
+            )
+            or 0.0
+        )
+    except Exception:
+        off_low = 0.0
+    return off_low if off_low > 0 else 0.0
+
+
+def effective_local_base_move_pct(
+    explosion_event: Any = None,
+    ict: Any = None,
+) -> float:
+    """Primary timing metric: local pad %, never day-peak %.
+
+    Order:
+      1) trustworthy ICT base-relative move
+      2) session-low / off-low reclaim %
+      3) 0 → caller may fall back to day% only when no pad exists
+    """
+    settings = get_settings()
+    if not getattr(settings, "explosion_chase_use_local_base", True):
+        return 0.0
+    trust_min = float(
+        getattr(settings, "explosion_local_base_trust_min_move_pct", 8.0) or 8.0
+    )
+    base = trustworthy_local_base_move(ict)
+    if base > 0:
+        return base
+    off_low = _off_low_move_pct(explosion_event)
+    if off_low >= trust_min:
+        return off_low
+    return 0.0
 
 
 def structured_early_ict_ready(ict: Any) -> bool:
@@ -237,51 +282,20 @@ def explosion_entry_window_blocked(
         session = max(session, float(getattr(ict, "session_move_pct", 0) or 0))
 
     raw_local = float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict is not None else 0.0
-    base = (
-        trustworthy_local_base_move(ict)
-        if getattr(settings, "explosion_chase_use_local_base", True)
-        else 0.0
-    )
-
     # Weak / early local base must not hide behind a "good-looking" day %.
     if 0 < raw_local < lo:
         return True, f"entry_window_weak_local_{raw_local:.0f}%"
 
-    if base > 0:
-        if base < lo:
-            return True, f"entry_window_local_low_{base:.0f}%"
-        if base > hi:
-            return True, f"entry_window_local_high_{base:.0f}%"
+    # Primary: local pad / off-low — never day% when a pad exists.
+    pad = effective_local_base_move_pct(explosion_event, ict)
+    if pad > 0:
+        if pad < lo:
+            return True, f"entry_window_local_low_{pad:.0f}%"
+        if pad > hi:
+            return True, f"entry_window_local_high_{pad:.0f}%"
         return False, ""
 
-    # Off session-low — catches real V-bottom rips when ICT hist missed the dump.
-    off_low = 0.0
-    try:
-        from app.engines.explosion_detector import session_low_relative_move_pct
-
-        off_low = float(
-            session_low_relative_move_pct(
-                str(getattr(explosion_event, "symbol", "") or ""),
-                float(getattr(explosion_event, "strike", 0) or 0),
-                getattr(explosion_event, "side", None),
-                float(getattr(explosion_event, "premium", 0) or 0),
-            )
-            or 0.0
-        )
-    except Exception:
-        off_low = 0.0
-    if off_low <= 0 and ict is not None:
-        # ICT may already carry session-low base when detector lookup is cold.
-        off_low = float(getattr(ict, "base_relative_move_pct", 0) or 0)
-
-    if 0 < off_low < lo:
-        return True, f"entry_window_off_low_{off_low:.0f}%"
-    if lo <= off_low <= hi:
-        return False, ""
-    if off_low > hi:
-        return True, f"entry_window_off_low_high_{off_low:.0f}%"
-
-    # Uncredible day-% (micro-baseline artifact) with no off-low → treat as unknown/low.
+    # Uncredible day-% (micro-baseline artifact) with no pad → treat as unknown/low.
     if session > max_credible:
         return True, f"entry_window_uncredible_{session:.0f}%"
 
@@ -325,13 +339,19 @@ def immature_explosion_blocked(
     early_min = float(
         getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0
     )
-    # Trustworthy local base only — micro baseRel noise falls through to session %.
+    # Structured local pad only for immature — unstructured baseRel must not
+    # hold a day-mature rip as "immature_local" (Jul24). Chase/window still
+    # use any pad ≥ trust via effective_local_base_move_pct.
     base_move = (
         trustworthy_local_base_move(ict)
         if getattr(settings, "explosion_chase_use_local_base", True)
         else 0.0
     )
-    if base_move > 0:
+    structured_pad = bool(ict is not None) and (
+        bool(getattr(ict, "local_swing_base", False))
+        or bool(getattr(ict, "flat_then_vertical", False))
+    )
+    if base_move > 0 and structured_pad:
         local_floor = float(
             getattr(settings, "explosion_local_base_entry_min_move_pct", 10.0) or 10.0
         )
@@ -538,12 +558,11 @@ def extended_session_chase_blocked(
     """
     Hard-block EXPLOSIVE entries after the move is already mostly done.
 
-    Prefer LOCAL BASE move (flat consolidation or dump→V-bottom swing low) when
-    known — day-session % alone always looks like a chase after an earlier run-up
-    (Jul23 SENSEX 76400 PE: +471% day-move at the 14:35 local base reclaim).
+    Measure from LOCAL BASE / session-low pad first — day-session % alone always
+    looks like a chase after an earlier run-up (Jul23 SENSEX 76400 PE: +471% day
+    at the 14:35 local reclaim; Aug5 24500 PE: day ~67% while pad was ~9%).
 
-    Tradeable local window: entry_min (15%) … chase_max (40%). Outside that,
-    either wait (too early — handled by immature) or block as local chase.
+    When a pad exists, day% is ignored entirely.
     """
     settings = get_settings()
     if not getattr(settings, "explosion_extended_chase_block_enabled", True):
@@ -561,23 +580,17 @@ def extended_session_chase_blocked(
     if ict is not None:
         move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
 
-    base_move = (
-        trustworthy_local_base_move(ict)
-        if getattr(settings, "explosion_chase_use_local_base", True)
-        else 0.0
-    )
+    base_move = effective_local_base_move_pct(explosion_event, ict)
     if base_move > 0:
-        # Hard ceiling from local base (default 40%). Soft 55% only shrinks size.
         local_max = float(
-            getattr(settings, "explosion_local_base_chase_max_move_pct", 40.0) or 40.0
+            getattr(settings, "explosion_local_base_chase_max_move_pct", 65.0) or 65.0
         )
-        # Inclusive ceiling: block only once past 40% from the local launch.
         if base_move > local_max:
             return True, f"explosion_extended_chase_local_{base_move:.0f}%"
-        # Local base still inside the tradeable window — never block on day %.
+        # Local / off-low pad still inside the window — never block on day %.
         return False, ""
 
-    hard = float(getattr(settings, "explosion_extended_chase_min_move_pct", 70.0) or 70.0)
+    hard = float(getattr(settings, "explosion_extended_chase_min_move_pct", 65.0) or 65.0)
     early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 65.0) or 65.0)
     if move < hard:
         return False, ""
@@ -604,7 +617,7 @@ def extended_session_chase_blocked(
         )
     ):
         base_max = float(
-            getattr(settings, "ict_base_relative_chase_max_move_pct", 55.0) or 55.0
+            getattr(settings, "ict_base_relative_chase_max_move_pct", 65.0) or 65.0
         )
         abs_cap = float(
             getattr(settings, "ict_base_relative_chase_abs_move_cap_pct", 160.0) or 160.0
@@ -612,7 +625,8 @@ def extended_session_chase_blocked(
         ignore_abs = bool(
             getattr(settings, "ict_base_relative_ignore_abs_cap", True)
         )
-        if 0 < base_move <= base_max and (ignore_abs or move <= abs_cap):
+        legacy_base = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+        if 0 < legacy_base <= base_max and (ignore_abs or move <= abs_cap):
             return False, ""
 
     return True, f"explosion_extended_chase_{move:.0f}%"

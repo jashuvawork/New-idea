@@ -94,6 +94,9 @@ def _analyze_explosion_gaps(
 
         # Surface extended-chase / ICT late-fade — Jul23 SENSEX 76400 PE showed
         # empty blockers while selector silently skipped +188–471% session moves.
+        local_move = float(
+            alert.get("ictBaseRelativeMovePct") or alert.get("offLowMovePct") or 0
+        )
         try:
             from app.engines.explosion_detector import ExplosionEvent
             from app.engines.explosion_entry_guards import extended_session_chase_blocked
@@ -120,6 +123,9 @@ def _analyze_explosion_gaps(
                 volume=float(alert.get("volume") or 0),
             )
             ict = analyze_explosion_event_ict(event, snap)
+            from app.engines.explosion_entry_guards import effective_local_base_move_pct
+
+            local_move = effective_local_base_move_pct(event, ict)
             ext_blocked, ext_reason = extended_session_chase_blocked(event, ict=ict)
             if ext_blocked:
                 blockers.append(ext_reason or "explosion_extended_chase")
@@ -127,9 +133,9 @@ def _analyze_explosion_gaps(
             if late_blocked:
                 blockers.append(late_reason or "ict_late_fade_chase")
         except Exception:
-            pass
+            local_move = float(alert.get("ictBaseRelativeMovePct") or alert.get("offLowMovePct") or 0)
 
-        if blockers or alert.get("allDayExplosion") or daily_move >= 40:
+        if blockers or alert.get("allDayExplosion") or daily_move >= 40 or local_move >= 10:
             gaps.append({
                 "symbol": symbol,
                 "side": side,
@@ -137,6 +143,7 @@ def _analyze_explosion_gaps(
                 "tier": tier,
                 "score": score,
                 "dailyMovePct": daily_move,
+                "localBaseMovePct": round(float(local_move or 0), 1),
                 "tradeable": bool(alert.get("tradeable")),
                 "morningCapture": bool(alert.get("morningCapture")),
                 "afternoonCapture": bool(alert.get("afternoonCapture")),

@@ -423,19 +423,20 @@ def late_fade_chase_blocked(
     v3 = float(getattr(event, "velocity_3s", 0) or 0)
     min_peak = float(getattr(settings, "ict_late_chase_min_peak_pct", 75.0) or 75.0)
     max_v3 = float(getattr(settings, "ict_late_chase_max_live_velocity_3s", 1.0) or 1.0)
-    early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+    early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 65.0) or 65.0)
     local_max = float(
-        getattr(settings, "explosion_local_base_chase_max_move_pct", 40.0) or 40.0
+        getattr(settings, "explosion_local_base_chase_max_move_pct", 65.0) or 65.0
     )
-    # Fresh local-base leg (flat or V-bottom) still inside the tradeable window —
-    # day peak % must not late-fade-block the reclaim (76400 PE at 14:35).
-    if (
-        ict is not None
-        and getattr(settings, "explosion_chase_use_local_base", True)
-        and float(getattr(ict, "base_relative_move_pct", 0) or 0) > 0
-    ):
-        base_rel = float(ict.base_relative_move_pct or 0)
-        if base_rel <= local_max:
+    # Fresh local-base / off-low leg still inside the pad — day peak % must not
+    # late-fade-block (76400 PE reclaim; Aug5 24500 ~9% off pad while day% ~67%).
+    if getattr(settings, "explosion_chase_use_local_base", True):
+        try:
+            from app.engines.explosion_entry_guards import effective_local_base_move_pct
+
+            base_rel = effective_local_base_move_pct(event, ict)
+        except Exception:
+            base_rel = float(getattr(ict, "base_relative_move_pct", 0) or 0) if ict else 0.0
+        if 0 < base_rel <= local_max:
             return False, ""
     # Early flat→vertical still in the capture window may keep a live displacement pass.
     if (
