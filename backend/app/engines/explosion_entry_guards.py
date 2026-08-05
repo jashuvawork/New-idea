@@ -164,7 +164,7 @@ def trustworthy_local_base_move(ict: Any) -> float:
 
 
 def structured_early_ict_ready(ict: Any) -> bool:
-    """ICT swing/flat→vertical with heat — may use the nearer-base 10–45% band."""
+    """ICT swing/flat→vertical with heat — may use the nearer-base 10–65% band."""
     settings = get_settings()
     if not bool(getattr(settings, "ict_structured_early_entry_enabled", True)):
         return False
@@ -185,15 +185,15 @@ def structured_early_ict_ready(ict: Any) -> bool:
 def entry_window_bounds(ict: Any = None) -> tuple[float, float]:
     """Return (min%, max%) for the hard entry window.
 
-    Unstructured spikes stay on the book band 28–55%.
-    Structured ICT + heat uses the nearer-base band (default 10–45%).
+    Unstructured spikes stay on the book band 28–65%.
+    Structured ICT + heat uses the nearer-base band (default 10–65%).
     """
     settings = get_settings()
     lo = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
-    hi = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+    hi = float(getattr(settings, "explosion_early_window_max_move_pct", 65.0) or 65.0)
     if structured_early_ict_ready(ict):
         lo = float(getattr(settings, "ict_structured_early_min_move_pct", 10.0) or 10.0)
-        hi = float(getattr(settings, "ict_structured_early_max_move_pct", 45.0) or 45.0)
+        hi = float(getattr(settings, "ict_structured_early_max_move_pct", 65.0) or 65.0)
     return lo, hi
 
 
@@ -204,9 +204,9 @@ def explosion_entry_window_blocked(
 ) -> tuple[bool, str]:
     """Hard-block EXPLOSIVE entries outside the active early window.
 
-    Unstructured: 28–55% (book). Structured ICT flat→vertical / swing V-base
-    with heat: 10–45% so first displacement near the base is tradeable
-    (Aug4 SENSEX 78700 PE base~235 → 260 ≈10.6% must enter; old 12% floor missed it).
+    Unstructured: 28–65% (book). Structured ICT flat→vertical / swing V-base
+    with heat: 10–65% so the first vertical leg stays tradeable — including
+    Aug4 SENSEX 78700 PE (~54% off local base) that the old 45% ceiling chased.
 
     Timing is measured from:
       1) trustworthy ICT local/swing base when present
@@ -578,7 +578,7 @@ def extended_session_chase_blocked(
         return False, ""
 
     hard = float(getattr(settings, "explosion_extended_chase_min_move_pct", 70.0) or 70.0)
-    early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+    early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 65.0) or 65.0)
     if move < hard:
         return False, ""
 
@@ -987,7 +987,7 @@ def detect_fake_explosion_trap(
     )
     if extended_move <= 0:
         extended_move = float(
-            getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0
+            getattr(settings, "explosion_early_window_max_move_pct", 65.0) or 65.0
         )
     session_extended = move >= extended_move
     in_base_window = min_move <= move < extended_move

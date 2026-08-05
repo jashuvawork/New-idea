@@ -204,7 +204,7 @@ class Settings(BaseSettings):
     missed_explosion_promote_enabled: bool = True
     missed_explosion_promote_min_score: float = 70.0
     missed_explosion_promote_min_move_pct: float = 28.0
-    missed_explosion_promote_max_move_pct: float = 55.0
+    missed_explosion_promote_max_move_pct: float = 65.0
     missed_explosion_promote_rank_bonus: float = 22.0
 
     # Paper should mirror live execution (broker flow + slippage) before going live
@@ -246,28 +246,28 @@ class Settings(BaseSettings):
     explosion_peak_chase_max_otm_steps: int = 3
     explosion_peak_chase_min_session_move_pct: float = 40.0
     # Extended-session chase hard block — PF killer (Jul17 24250 CE entered +91%).
-    # Hard ceiling aligned to early window max (28–55%) — book data: 70–100% WR=0.
+    # Hard ceiling aligned to early/must-take window max (10–65%) — book: 70–100% WR=0.
     explosion_extended_chase_block_enabled: bool = True
-    explosion_extended_chase_min_move_pct: float = 55.0
+    explosion_extended_chase_min_move_pct: float = 65.0
     # Soft zone: shrink size approaching the hard ceiling.
-    explosion_extended_soft_min_move_pct: float = 50.0
+    explosion_extended_soft_min_move_pct: float = 55.0
     # Base-relative chase bypass — a fresh flat→vertical break off a consolidation base
     # (SENSEX 76300 PE: 30-100 range then 100-144 break) reads as high day-move but the
     # move FROM THE BASE is still early. Allow it when volume is rising + base move in window.
     ict_base_relative_chase_bypass_enabled: bool = True
-    ict_base_relative_chase_max_move_pct: float = 55.0
+    ict_base_relative_chase_max_move_pct: float = 65.0
     ict_base_relative_chase_abs_move_cap_pct: float = 160.0
     # Jul23 SENSEX 76400 PE: day-move +471% after an earlier run-up/dump, but the NEW leg
     # launched from the 14:35 local V-bottom (~42). Chase/entry must use that local base.
-    # Tradeable local window aligned to early band 28–55% (Jul30 book: <22% and 70–100% lose).
+    # Tradeable local window aligned to early band 10–65% (Aug4 78700 PE entered ~54%).
     explosion_chase_use_local_base: bool = True
-    explosion_local_base_chase_max_move_pct: float = 55.0
+    explosion_local_base_chase_max_move_pct: float = 65.0
     # Local-base floor for structured ICT / immature — nearer the launch pad (was 28→12).
     explosion_local_base_entry_min_move_pct: float = 10.0
     # Adaptive local-base entry window by tier/volume: ELITE + strong volume widens the
-    # ceiling slightly inside the hard 55% cap; EXPLODING keeps the structured floor.
+    # ceiling slightly inside the hard 65% cap; EXPLODING keeps the structured floor.
     local_base_adaptive_window_enabled: bool = True
-    local_base_elite_chase_max_move_pct: float = 55.0
+    local_base_elite_chase_max_move_pct: float = 65.0
     local_base_exploding_entry_min_move_pct: float = 10.0
     local_base_wide_window_min_vol_surge: float = 3.0
     # Ignore micro baseRel (<8%) for immature/chase — Jul24 PUTs showed ~1–2%
@@ -278,17 +278,18 @@ class Settings(BaseSettings):
     explosion_extended_soft_lot_cap: int = 6
     explosion_hard_lot_cap: int = 10
     # Early capture window — HARD entry gate for unstructured ELITE/EXPLODING.
-    # Book (lots≤20): 28–55% WR≈56% / +₹1k avg; <22% and 70–100% lose.
-    # Structured ICT flat→vertical / swing V-base uses ict_structured_early_* (10–45).
+    # Book (lots≤20): mid-band winners; <22% and 70–100% lose. Ceiling 55→65 so
+    # Aug4-style local-base rips (~54%) stay inside the pad (still hard-cut at 65+).
+    # Structured ICT flat→vertical / swing V-base uses ict_structured_early_* (10–65).
     explosion_early_window_min_move_pct: float = 28.0
-    explosion_early_window_max_move_pct: float = 55.0
+    explosion_early_window_max_move_pct: float = 65.0
     explosion_entry_window_hard_enabled: bool = True
-    # Structured near-base path: ICT + heat may enter 10–45% off local base.
-    # Aug4 SENSEX 78700 PE: moment base ~235 → 260 LTP ≈10.6% was blocked by 12% floor
-    # while the rip ran to 460+. Ceiling 40→45 keeps more of the vertical in-window.
+    # Structured near-base path: ICT + heat may enter 10–65% off local base.
+    # Aug4 SENSEX 78700 PE entered ~54% off local base (+₹18k) — old 45% ceiling
+    # treated that as chase. Widen so first vertical leg stays must-take / early.
     ict_structured_early_entry_enabled: bool = True
     ict_structured_early_min_move_pct: float = 10.0
-    ict_structured_early_max_move_pct: float = 45.0
+    ict_structured_early_max_move_pct: float = 65.0
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0

@@ -1071,15 +1071,27 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     immature_floor = float(
         getattr(_settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
     )
+    # Pad floor — arm tradeable at the real base (₹40), not after the rip (₹160).
+    pad_floor = float(
+        getattr(_settings, "ict_structured_early_min_move_pct", 10.0) or 10.0
+    )
+    pad_ceil = float(
+        getattr(_settings, "ict_structured_early_max_move_pct", 65.0) or 65.0
+    )
+    local_move = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+    pad_move = local_move if local_move >= 8.0 else move
     # EXPLODING/ELITE still need a real rip — tiny displacement spikes are not tradeable.
     tradeable = (e.tier in ("EXPLODING", "ELITE") and move >= immature_floor) or capture
+    # First print inside the near-base pad is tradeable even before the 28% immature floor.
+    if e.tier in ("EXPLODING", "ELITE") and pad_floor <= pad_move <= pad_ceil:
+        tradeable = True
     if ict.mega_rip or (ict.active and (ict.flat_then_vertical or ict.premium_fvg)):
         tradeable = True
     # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).
     if e.tier == "BUILDING" and ict.active and ict.flat_then_vertical:
         tradeable = True
     # Near-base ATM/ITM top explosions must be tradeable even when day-move < floor
-    # (Aug5 24500 PE ~10–45% off local base while session % still immature).
+    # (Aug5 24500 PE ~10–65% off local base while session % still immature).
     if not tradeable and e.tier in ("ELITE", "EXPLODING"):
         try:
             from app.engines.elite_never_block import top_explosion_must_take_active

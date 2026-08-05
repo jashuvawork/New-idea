@@ -37,9 +37,9 @@ def _settings(**kwargs):
     s.min_option_premium_inr = 18.0
     s.ict_structured_early_entry_enabled = True
     s.ict_structured_early_min_move_pct = 10.0
-    s.ict_structured_early_max_move_pct = 45.0
+    s.ict_structured_early_max_move_pct = 65.0
     s.explosion_early_window_min_move_pct = 28.0
-    s.explosion_early_window_max_move_pct = 55.0
+    s.explosion_early_window_max_move_pct = 65.0
     s.explosion_chase_use_local_base = True
     s.local_base_min_trustworthy_premium = 5.0
     s.moneyness_atm_tolerance_points = 50.0
@@ -139,6 +139,43 @@ def _cand(event, snap):
 @patch("app.engines.elite_never_block.get_settings")
 @patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.moneyness.get_settings")
+def test_must_take_at_true_base_without_structured_ict(mock_mny, mock_g, mock_enb):
+    """ELITE at ~11% off pad must arm even before ICT flat→vertical heat prints.
+
+    This is the 40→160 failure mode: waiting for unstructured 28% / ICT heat
+    means we only wake up after the chase.
+    """
+    s = _settings()
+    mock_enb.return_value = s
+    mock_g.return_value = s
+    mock_mny.return_value = s
+    snap = _snap()
+    event = _event(v3=2.2, base_rel=11.0, premium=45.0)
+    # Weak ICT — no structured heat yet (what 10:17 looked like).
+    ict = SimpleNamespace(
+        active=False,
+        flat_then_vertical=False,
+        local_swing_base=False,
+        volume_awakening=False,
+        displacement=False,
+        premium_fvg=False,
+        mega_rip=False,
+        base_relative_move_pct=0.0,
+        session_move_pct=11.0,
+        base_premium=40.0,
+        velocity_3s=2.2,
+        volume_surge=1.2,
+        score=40.0,
+    )
+    cand = _cand(event, snap)
+    assert top_explosion_must_take_active(
+        candidate=cand, event=event, snap=snap, ict=ict,
+    ) is True
+
+
+@patch("app.engines.elite_never_block.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
 def test_must_take_near_base_atm_even_when_cold(mock_mny, mock_g, mock_enb):
     s = _settings()
     mock_enb.return_value = s
@@ -159,14 +196,39 @@ def test_must_take_near_base_atm_even_when_cold(mock_mny, mock_g, mock_enb):
 @patch("app.engines.elite_never_block.get_settings")
 @patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.moneyness.get_settings")
+def test_must_take_allows_aug4_style_mid_extension(mock_mny, mock_g, mock_enb):
+    """Aug4 SENSEX 78700 PE ~54% off local base must stay inside 10–65% pad."""
+    s = _settings()
+    mock_enb.return_value = s
+    mock_g.return_value = s
+    mock_mny.return_value = s
+    snap = _snap(spot=78500.0)
+    # ATM PUT near pad mid-extension (Aug4 winner zone).
+    event = _event(
+        tier="EXPLODING",
+        strike=78500.0,
+        premium=390.0,
+        base_rel=54.0,
+        v3=4.4,
+    )
+    ict = _ict(54.0)
+    cand = _cand(event, snap)
+    assert top_explosion_must_take_active(
+        candidate=cand, event=event, snap=snap, ict=ict,
+    ) is True
+
+
+@patch("app.engines.elite_never_block.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
 def test_must_take_blocks_chase_outside_window(mock_mny, mock_g, mock_enb):
     s = _settings()
     mock_enb.return_value = s
     mock_g.return_value = s
     mock_mny.return_value = s
     snap = _snap()
-    event = _event(base_rel=63.0, premium=108.0)
-    ict = _ict(63.0)
+    event = _event(base_rel=72.0, premium=108.0)
+    ict = _ict(72.0)
     cand = _cand(event, snap)
     assert top_explosion_must_take_active(
         candidate=cand, event=event, snap=snap, ict=ict,
@@ -252,7 +314,7 @@ def test_trap_fade_chase_never_block_near_base_top(
     mock_mny.return_value = s
 
     snap = _snap()
-    # Day peak looks like a chase, but local base is still in the 10–45% pad.
+    # Day peak looks like a chase, but local base is still in the 10–65% pad.
     event = _event(v3=0.4, base_rel=28.0, premium=72.0)
     event.peak_move_pct = 120.0
     event.daily_move_pct = 120.0

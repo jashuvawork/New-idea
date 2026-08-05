@@ -161,9 +161,9 @@ def _near_base_move_pct(
     try:
         from app.config import get_settings as _gs
 
-        hi = float(getattr(_gs(), "ict_structured_early_max_move_pct", 45.0) or 45.0)
+        hi = float(getattr(_gs(), "ict_structured_early_max_move_pct", 65.0) or 65.0)
     except Exception:
-        hi = 45.0
+        hi = 65.0
     session = 0.0
     if event is not None:
         try:
@@ -192,18 +192,16 @@ def _in_near_base_window(
     *,
     ict: Any = None,
 ) -> bool:
-    """True when move is inside the structured near-base band (default 10–45%)."""
+    """True when move is inside the structured near-base band (default 10–65%).
+
+    Always use the structured pad (10–65), never the unstructured early floor (28%).
+    Aug5 SENSEX 77800 PE was already ELITE at ~11% off the pad — but must-take
+    borrowed entry_window_bounds() which raised the floor to 28% until ICT heat
+    printed, so we waited, then the rip was 40→160 and died as late chase.
+    """
     settings = get_settings()
     lo = float(getattr(settings, "ict_structured_early_min_move_pct", 10.0) or 10.0)
-    hi = float(getattr(settings, "ict_structured_early_max_move_pct", 45.0) or 45.0)
-    # Prefer ICT bounds when structured heat is present.
-    try:
-        from app.engines.explosion_entry_guards import entry_window_bounds
-
-        w_lo, w_hi = entry_window_bounds(ict)
-        lo, hi = float(w_lo), float(w_hi)
-    except Exception:
-        pass
+    hi = float(getattr(settings, "ict_structured_early_max_move_pct", 65.0) or 65.0)
     move = _near_base_move_pct(event, alert, ict=ict)
     if move <= 0:
         return False
@@ -248,7 +246,7 @@ def top_explosion_must_take_active(
       - tier ELITE or EXPLODING
       - premium ≥ min_option_premium_inr
       - ATM or ITM (when strike/snap known)
-      - base-relative (or session) move inside near-base window (10–45% structured)
+      - base-relative (or session) move inside near-base window (10–65% structured)
     Does NOT require hot live velocity — COLD_BASE near the pad must still fill.
     """
     settings = get_settings()
@@ -330,7 +328,7 @@ def elite_never_block_active(
     """True when top explosions may skip FOMO/chase/stand-down/live/timing blocks.
 
     Two paths:
-      1) Near-base must-take — ELITE/EXPLODING + ATM/ITM + premium≥min + in 10–45%
+      1) Near-base must-take — ELITE/EXPLODING + ATM/ITM + premium≥min + in 10–65%
          window → always take (Aug5 24500 PE).
       2) Legacy ELITE + GOOD hot timing bypass for other FOMO gates.
     """
