@@ -22,6 +22,7 @@ def _settings(**overrides):
     s.ict_good_day_min_score = 35.0
     s.ict_early_vertical_min_session_move_pct = 28.0
     s.ict_defensive_base_rip_enabled = True
+    s.ict_defensive_base_rip_full_lots = True
     s.ict_defensive_base_rip_lot_multiplier = 0.55
     s.ict_defensive_base_rip_max_move_pct = 55.0
     s.ict_max_profit_skip_hard_target = True
@@ -97,8 +98,9 @@ def test_defensive_day_allows_early_base_rip(mock_mode, mock_settings):
     assert meta.get("defensiveBaseRip") is True
     assert meta.get("maxProfitCapture") is True
     assert meta.get("capturePath") == "defensive_base_flat_vertical"
-    # #229: structured base-window explosions now take full capital lots (was 0.55).
+    # Full lots on defensive base rip (ict_defensive_base_rip_full_lots=True).
     assert meta.get("lotMultiplier") == 1.0
+    assert meta.get("baseWindowFullLots") is True
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")

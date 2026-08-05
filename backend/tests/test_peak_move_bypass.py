@@ -69,7 +69,9 @@ def test_effective_min_score_lowers_for_peak_elite(mock_settings):
 @patch("app.engines.session_timing.in_open_premium_window", return_value=False)
 @patch("app.config.get_settings")
 def test_scan_chain_boosts_score_after_vertical_fade(mock_settings, _open):
-    mock_settings.return_value = _settings()
+    s = _settings()
+    s.explosion_scan_atm_itm_only = True
+    mock_settings.return_value = s
     _history.clear()
     _session_open.clear()
     _session_low.clear()
@@ -77,11 +79,12 @@ def test_scan_chain_boosts_score_after_vertical_fade(mock_settings, _open):
     _tier_sticky.clear()
     _peak_velocity.clear()
 
-    chain = _chain(24000.0, 80.0)
+    # ATM put (scan skips OTM when explosion_scan_atm_itm_only=True).
+    chain = _chain(24100.0, 80.0)
     scan_chain_explosions("NIFTY", chain, spot=24070.0, atm=24100.0)
     chain[0]["put_options"]["ltp"] = 133.0
     events = scan_chain_explosions("NIFTY", chain, spot=24070.0, atm=24100.0)
-    puts = [e for e in events if e.side == Side.PUT and e.strike == 24000.0]
+    puts = [e for e in events if e.side == Side.PUT and e.strike == 24100.0]
     assert puts
     assert puts[0].peak_move_pct >= 35.0
     assert puts[0].explosion_score >= 45.0

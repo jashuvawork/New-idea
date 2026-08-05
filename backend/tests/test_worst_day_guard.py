@@ -128,5 +128,5 @@ def test_paused_blocks_normal_but_allows_top_local_base(mock_policy):
         cand, AutoTraderState(), {"NIFTY": cand.snap},
     )
     assert ok2 is True
-    # Bypass reason string was generalized (#250/#251 "never block top ELITE/EXPLODING").
-    assert meta2.get("worstDayBypass") in ("local_base_top_explosion", "elite_never_block")
+    # Must-take / elite-never-block short-circuits before local_base_top_explosion.
+    assert meta2.get("worstDayBypass") == "elite_never_block"

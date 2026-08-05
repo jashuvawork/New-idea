@@ -20,12 +20,12 @@ def _settings(**overrides):
     s.high_conviction_min_score = 90.0
     # Rescaled display cutovers (was 85 / 90 on old 20–95 clamp).
     s.high_conviction_min_chart_confidence = 56.9
+    s.high_conviction_min_velocity_3s = 2.0
     s.missed_explosion_promote_min_move_pct = 28.0
-    s.missed_explosion_promote_max_move_pct = 55.0
+    s.missed_explosion_promote_max_move_pct = 65.0
     s.elevated_size_enabled = True
     s.elevated_size_min_score = 65.0
     s.elevated_size_min_chart_confidence = 58.8
-    s.high_conviction_min_velocity_3s = 2.0
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -123,10 +123,10 @@ def test_elevated_accepts_strong_exploding_base(mock_s):
 @patch("app.engines.explosion_confidence.get_settings")
 def test_elevated_rejects_extended_move(mock_s):
     mock_s.return_value = _settings()
-    # 58-64% move (extended) → not elevated
+    # Past the 65% promote ceiling → not elevated
     assert is_elevated_size_entry(
         side=Side.PUT, snap=_snap(), tier="EXPLODING", score=73.0,
-        move_pct=58.0, chart_confidence=95.0,
+        move_pct=70.0, chart_confidence=95.0,
     ) is False
 
 
@@ -149,15 +149,25 @@ def test_elevated_rejects_wrong_side(mock_s):
     ) is False
 
 
-def _size_gate(gate_fn, *, side, snap, tier, score, chart_confidence, move_candidates, **extra):
+def _size_gate(
+    gate_fn, *, side, snap, tier, score, chart_confidence, move_candidates,
+    velocity_3s: float = 3.0,
+):
     """Mirror of auto_trader._size_gate: qualify if ANY candidate move is in window."""
-    return any(
-        gate_fn(
+    import inspect
+
+    accepts_v3 = "velocity_3s" in inspect.signature(gate_fn).parameters
+
+    def _call(mv: float) -> bool:
+        kwargs = dict(
             side=side, snap=snap, tier=tier, score=score,
-            move_pct=mv, chart_confidence=chart_confidence, **extra,
+            move_pct=mv, chart_confidence=chart_confidence,
         )
-        for mv in move_candidates
-    )
+        if accepts_v3:
+            kwargs["velocity_3s"] = velocity_3s
+        return gate_fn(**kwargs)
+
+    return any(_call(mv) for mv in move_candidates)
 
 
 @patch("app.engines.explosion_confidence.get_settings")
@@ -178,7 +188,7 @@ def test_base_relative_move_upsizes_fast_rip(mock_s):
     # With base-relative move added as a candidate → qualifies for max lots
     assert _size_gate(
         is_high_conviction_entry, side=Side.PUT, snap=_snap(), tier="ELITE",
-        score=100.0, chart_confidence=95.0, velocity_3s=3.0,
+        score=100.0, chart_confidence=95.0,
         move_candidates=[off_low_move, base_relative_move],
     ) is True
 
@@ -206,7 +216,7 @@ def test_base_relative_still_rejects_true_late_chase(mock_s):
     mock_s.return_value = _settings()
     assert _size_gate(
         is_high_conviction_entry, side=Side.PUT, snap=_snap(), tier="ELITE",
-        score=100.0, chart_confidence=95.0, velocity_3s=3.0,
+        score=100.0, chart_confidence=95.0,
         move_candidates=[92.0, 70.0],
     ) is False
 
