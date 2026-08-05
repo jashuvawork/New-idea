@@ -290,10 +290,10 @@ def test_timing_block_still_fires_without_must_take_context(mock_s):
 @patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.ict_breakout_monitor.get_settings")
 @patch("app.engines.moneyness.get_settings")
-def test_trap_fade_chase_never_block_near_base_top(
+def test_must_take_bypasses_chase_but_not_trap_or_late_fade(
     mock_mny, mock_ict_s, mock_g, mock_enb,
 ):
-    """At the base, fake-trap / late-fade / extended-chase must not stop the fill."""
+    """Near-base must-take skips extended-chase; fake-trap + late-fade still bind."""
     from app.engines.explosion_entry_guards import (
         detect_fake_explosion_trap,
         extended_session_chase_blocked,
@@ -302,10 +302,25 @@ def test_trap_fade_chase_never_block_near_base_top(
 
     s = _settings()
     s.fake_explosion_trap_enabled = True
+    s.fake_explosion_trap_min_session_move_pct = 28.0
+    s.fake_explosion_trap_extended_move_pct = 55.0
+    s.fake_explosion_trap_max_premium_mom_pct = 0.15
+    s.fake_explosion_trap_block_on_conflict = True
+    s.fake_explosion_trap_min_conflict_flags = 3
+    s.fake_explosion_trap_chop_elite_lot_cap = 6
+    s.fake_explosion_trap_otm_requires_or_breakout = True
+    s.fake_explosion_trap_post_win_lot_cap = 8
+    s.fake_explosion_trap_post_win_max_pnl_inr = 3000.0
+    s.fake_explosion_trap_post_win_lookback = 1
+    s.fake_explosion_trap_psychology_escalate = True
+    s.fake_explosion_trap_midday_require_structure = True
+    s.fake_explosion_trap_skip_soft_cut_base_window = True
+    s.fake_explosion_trap_skip_soft_cut_near_otm = True
     s.ict_late_chase_block_enabled = True
     s.explosion_extended_chase_block_enabled = True
     s.explosion_chase_use_local_base = True
     s.explosion_local_base_chase_max_move_pct = 40.0
+    s.explosion_extended_chase_min_move_pct = 65.0
     s.ict_late_chase_min_peak_pct = 75.0
     s.ict_late_chase_max_live_velocity_3s = 1.0
     mock_enb.return_value = s
@@ -314,21 +329,25 @@ def test_trap_fade_chase_never_block_near_base_top(
     mock_mny.return_value = s
 
     snap = _snap()
-    # Day peak looks like a chase, but local base is still in the 10–65% pad.
-    event = _event(v3=0.4, base_rel=28.0, premium=72.0)
+    # In pad for must-take / chase bypass, but late-fade should still fire:
+    # day peak cooled, local base already past local chase max.
+    event = _event(v3=0.4, base_rel=55.0, premium=72.0)
     event.peak_move_pct = 120.0
     event.daily_move_pct = 120.0
-    ict = _ict(28.0)
+    ict = _ict(55.0)
     cand = _cand(event, snap)
 
-    trap_block, _, trap_meta = detect_fake_explosion_trap(
-        cand, snap, ict=ict,
-    )
-    assert trap_block is False
-    assert trap_meta.get("topMustTake") or trap_meta.get("eliteNeverBlock")
+    assert top_explosion_must_take_active(
+        candidate=cand, event=event, snap=snap, ict=ict,
+    ) is True
 
-    late_blocked, _ = late_fade_chase_blocked(event, ict, snap=snap)
-    assert late_blocked is False
+    _, _, trap_meta = detect_fake_explosion_trap(cand, snap, ict=ict)
+    assert trap_meta.get("eliteNeverBlock") is not True
+    assert trap_meta.get("topMustTake") is not True
+
+    late_blocked, late_reason = late_fade_chase_blocked(event, ict, snap=snap)
+    assert late_blocked is True
+    assert "late_fade" in late_reason
 
     chase_blocked, _ = extended_session_chase_blocked(event, ict=ict)
     assert chase_blocked is False
