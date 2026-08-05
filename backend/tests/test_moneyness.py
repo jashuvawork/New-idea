@@ -33,6 +33,7 @@ def _settings():
     s.moneyness_max_itm_steps = 2
     s.moneyness_explosion_prefer = "OTM"
     s.moneyness_explosion_block_otm = True
+    s.moneyness_explosion_atm_itm_only = False  # legacy tests exercise prefer/bypass paths
     s.moneyness_local_base_otm_bypass_enabled = True
     s.moneyness_local_base_max_otm_steps = 3
     s.moneyness_local_base_otm_min_score = 75.0
@@ -113,6 +114,7 @@ def test_explosion_atm_prefer_hard_blocks_otm(mock_settings):
     s = _settings()
     s.moneyness_explosion_prefer = "ATM"
     s.moneyness_explosion_block_otm = True
+    s.moneyness_explosion_atm_itm_only = False
     mock_settings.return_value = s
     snap = _snap(spot=76300.0)
     snap.symbol = "SENSEX"
@@ -131,6 +133,34 @@ def test_explosion_atm_prefer_hard_blocks_otm(mock_settings):
     )
     assert ok_atm is True
     assert meta_atm["moneyness"] == "ATM"
+
+
+@patch("app.engines.moneyness.get_settings")
+def test_explosion_atm_itm_only_blocks_otm_even_when_prefer_otm(mock_settings):
+    """Aug5: ATM+ITM-only must ignore prefer=OTM so deep OTM never enters."""
+    s = _settings()
+    s.moneyness_explosion_prefer = "OTM"
+    s.moneyness_explosion_atm_itm_only = True
+    s.moneyness_local_base_otm_bypass_enabled = True
+    mock_settings.return_value = s
+    snap = _snap(spot=24500.0)
+    snap.atmStrike = 24500.0
+    ok, reason, meta = moneyness_allows(
+        Side.PUT, 24050, snap, mode="explosion", candidate_score=100,
+    )
+    assert ok is False
+    assert reason == "moneyness_explosion_atm_itm_only"
+    assert meta["moneyness"] == "OTM"
+    ok_atm, _, meta_atm = moneyness_allows(
+        Side.PUT, 24500, snap, mode="explosion", candidate_score=100,
+    )
+    assert ok_atm is True
+    assert meta_atm["moneyness"] == "ATM"
+    ok_itm, _, meta_itm = moneyness_allows(
+        Side.PUT, 24600, snap, mode="explosion", candidate_score=100,
+    )
+    assert ok_itm is True
+    assert meta_itm["moneyness"] == "ITM"
 
 
 @patch("app.engines.moneyness.get_settings")

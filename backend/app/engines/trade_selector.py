@@ -159,6 +159,10 @@ def _explosion_candidates(
     from app.engines.explosion_detector import ExplosionEvent, effective_explosion_min_score
 
     out: list[EntryCandidate] = []
+    atm_itm_only = bool(
+        getattr(settings, "moneyness_explosion_atm_itm_only", True)
+        or getattr(settings, "explosion_scan_atm_itm_only", True)
+    )
     for alert in snap.explosionAlerts or []:
         if not alert.get("tradeable"):
             continue
@@ -169,6 +173,24 @@ def _explosion_candidates(
             snap=snap,
         ):
             continue
+        if atm_itm_only:
+            side_v = str(alert.get("side") or "").upper()
+            try:
+                strike_v = float(alert.get("strike") or 0)
+            except (TypeError, ValueError):
+                strike_v = 0.0
+            spot_v = float(snap.spot or 0)
+            atm_v = float(snap.atmStrike or 0)
+            if side_v in ("CALL", "PUT") and strike_v > 0 and spot_v > 0:
+                money = classify_moneyness(
+                    Side(side_v),
+                    strike_v,
+                    spot_v,
+                    symbol=symbol,
+                    atm=atm_v if atm_v > 0 else None,
+                )
+                if money == "OTM":
+                    continue
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
         if elite_only:
