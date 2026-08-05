@@ -38,11 +38,14 @@ def test_volume_awakening_detects_flat_then_rip():
 
 @patch("app.engines.session_timing.in_open_premium_window", return_value=False)
 @patch("app.config.get_settings")
-def test_scan_awakens_76900_pe_on_volume_spike(mock_get_settings, _open):
-    mock_get_settings.return_value = _settings()
+def test_scan_awakens_atm_pe_on_volume_spike(mock_get_settings, _open):
+    # ATM/ITM-only scan — use ATM strike (was OTM 76900 vs ATM 77600).
+    s = _settings()
+    s.explosion_scan_atm_itm_only = True
+    mock_get_settings.return_value = s
     chain = [
         {
-            "strike_price": 76900,
+            "strike_price": 77600,
             "put_options": {"ltp": 46.66, "volume": 500},
             "call_options": {"ltp": 5.0, "volume": 100},
         },
@@ -50,8 +53,8 @@ def test_scan_awakens_76900_pe_on_volume_spike(mock_get_settings, _open):
     scan_chain_explosions("SENSEX", chain, spot=77600.0, atm=77600.0)
     chain[0]["put_options"] = {"ltp": 120.0, "volume": 48000}
     events = scan_chain_explosions("SENSEX", chain, spot=77600.0, atm=77600.0)
-    puts = [e for e in events if e.strike == 76900 and e.side == Side.PUT]
-    assert puts, "76900 PE should awaken on volume spike"
+    puts = [e for e in events if e.strike == 77600 and e.side == Side.PUT]
+    assert puts, "77600 PE should awaken on volume spike"
     assert puts[0].tier in ("BUILDING", "EXPLODING", "ELITE")
 
 

@@ -3,32 +3,34 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from app.routers import market
 
 
-@pytest.mark.asyncio
-async def test_schedule_full_rest_rebuild_returns_immediately():
-    market._full_rest_task = None
-    market._build_in_progress = False
+def test_schedule_full_rest_rebuild_returns_immediately():
+    """Sync wrapper — avoids requiring pytest-asyncio plugin."""
 
-    slow = asyncio.Event()
+    async def _exercise():
+        market._full_rest_task = None
+        market._build_in_progress = False
 
-    async def _hang(**kwargs):
-        await slow.wait()
-        return MagicMock()
+        slow = asyncio.Event()
 
-    with patch.object(market, "get_multi_snapshot", new=AsyncMock(side_effect=_hang)):
-        started = market.schedule_full_rest_rebuild(broadcast=False, run_trader=False)
-        assert started is True
-        assert market.full_rest_rebuild_running() is True
-        # Second schedule is a no-op while first runs
-        assert market.schedule_full_rest_rebuild() is False
+        async def _hang(**kwargs):
+            await slow.wait()
+            return MagicMock()
 
-        slow.set()
-        await market._full_rest_task
-        assert market.full_rest_rebuild_running() is False
+        with patch.object(market, "get_multi_snapshot", new=AsyncMock(side_effect=_hang)):
+            started = market.schedule_full_rest_rebuild(broadcast=False, run_trader=False)
+            assert started is True
+            assert market.full_rest_rebuild_running() is True
+            # Second schedule is a no-op while first runs
+            assert market.schedule_full_rest_rebuild() is False
+
+            slow.set()
+            await market._full_rest_task
+            assert market.full_rest_rebuild_running() is False
+
+    asyncio.run(_exercise())
 
 
 def test_full_rest_backoff_after_slow_cycle():
