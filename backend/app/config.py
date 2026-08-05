@@ -508,7 +508,12 @@ class Settings(BaseSettings):
     high_mover_bypass_max_move_pct: float = 55.0
     extreme_all_in_bypass_max_move_pct: float = 55.0
     explosion_macd_alignment_required: bool = True
-    explosion_deep_otm_min_premium_inr: float = 3.0
+    # Sub-band deep-OTM scan bypass floor. With ATM+ITM-only scan this is inert;
+    # keep aligned to min_option_premium so cheap OTM never re-enters radar.
+    explosion_deep_otm_min_premium_inr: float = 18.0
+    # Monitor + enter ATM/ITM only — drop deep-OTM noise (Aug5 24050 PE <₹18).
+    # Near-base catch then applies on liquid ATM/ITM with premium ≥ min band.
+    explosion_scan_atm_itm_only: bool = True
     explosion_volume_awaken_min: int = 25000
     explosion_volume_awaken_min_velocity_3s: float = 1.0
     explosion_target_elite: float = 25.0
@@ -713,8 +718,11 @@ class Settings(BaseSettings):
     # When explosion prefer is ATM, hard-block OTM (Jul23 76100 PE −₹1.3k after ATM miss).
     # ATM + shallow ITM still allowed; deep OTM FOMO is not a soft rank penalty.
     moneyness_explosion_block_otm: bool = True
+    # Hard ATM+ITM-only for explosion entries (ignores prefer=OTM / local-base OTM bypass).
+    moneyness_explosion_atm_itm_only: bool = True
     # Confirmed local-base CE/PE rip: allow shallow OTM (≤3 steps) when ATM is absent.
-    moneyness_local_base_otm_bypass_enabled: bool = True
+    # Off by default — ATM/ITM-only near-base capture (Aug5); re-enable only if needed.
+    moneyness_local_base_otm_bypass_enabled: bool = False
     moneyness_local_base_max_otm_steps: int = 3
     moneyness_local_base_otm_min_score: float = 75.0
     moneyness_scalp_chop_prefer: str = "ITM"
@@ -1065,7 +1073,8 @@ class Settings(BaseSettings):
     volume_spike_baseline_min_surge: float = 3.5
     spike_velocity_baseline_min_pct: float = 12.0
     # Cheap PE/CE bases (SENSEX ~12, NIFTY ~25–40) must be tradeable at first break.
-    explosion_cheap_rip_min_premium_inr: float = 8.0
+    # Keep cheap-rip floor at the main band min so ≥₹18 always holds.
+    explosion_cheap_rip_min_premium_inr: float = 18.0
     explosion_cheap_rip_min_peak_pct: float = 25.0
 
     runner_trail_keep_ratio: float = 0.38

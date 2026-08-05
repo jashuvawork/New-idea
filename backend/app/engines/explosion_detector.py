@@ -745,10 +745,16 @@ def resolve_explosion_scan_range(
 
 
 def _premium_ok_for_scan(premium: float, open_move: float, settings) -> bool:
-    """Allow sub-min premium when session move is explosive (deep OTM rips)."""
+    """Allow sub-min premium when session move is explosive (deep OTM rips).
+
+    When ATM+ITM-only scan is on, never bypass the main premium band — cheap
+    deep-OTM noise must not dominate radar over near-base ATM/ITM.
+    """
     if premium_in_band(premium, mode="explosion"):
         return True
-    min_deep = float(getattr(settings, "explosion_deep_otm_min_premium_inr", 3.0))
+    if bool(getattr(settings, "explosion_scan_atm_itm_only", True)):
+        return False
+    min_deep = float(getattr(settings, "explosion_deep_otm_min_premium_inr", 18.0))
     if premium < min_deep:
         return False
     max_prem = settings.explosion_max_premium_inr or settings.max_option_premium_inr
@@ -785,6 +791,8 @@ def scan_chain_explosions(
     if expiry_day:
         chain_rows.sort(key=lambda r: abs(float(r.get("strike_price") or r.get("strike") or 0) - atm))
 
+    atm_itm_only = bool(getattr(settings, "explosion_scan_atm_itm_only", True))
+
     for row in chain_rows:
         strike = row.get("strike_price") or row.get("strike", 0)
         if abs(strike - atm) > scan_range:
@@ -798,6 +806,15 @@ def scan_chain_explosions(
             opt = row.get(key, {}) or row.get(alt, {})
             if not opt:
                 continue
+
+            if atm_itm_only and spot and atm:
+                from app.engines.moneyness import classify_moneyness
+
+                money = classify_moneyness(
+                    side, float(strike), float(spot), symbol=symbol, atm=float(atm),
+                )
+                if money == "OTM":
+                    continue
 
             premium = opt.get("ltp") or opt.get("last_price") or 0
             volume = opt.get("volume", 0) or 0

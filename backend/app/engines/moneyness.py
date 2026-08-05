@@ -201,6 +201,15 @@ def moneyness_allows(
     if mode_key in ("ITM", "OTM", "ATM") and money != mode_key:
         return False, f"moneyness_mode_{mode_key.lower()}_required", meta
 
+    # Explosion ATM+ITM only — drop OTM entirely so near-base ATM/ITM can win
+    # radar (Aug5 deep-OTM 24050 PE <₹18 drowned the 24500 base).
+    if (
+        mode == "explosion"
+        and money == "OTM"
+        and bool(getattr(settings, "moneyness_explosion_atm_itm_only", True))
+    ):
+        return False, "moneyness_explosion_atm_itm_only", meta
+
     # Explosion ATM-first: OTM is a hard miss, not a soft rank penalty.
     if (
         mode == "explosion"
