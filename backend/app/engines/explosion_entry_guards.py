@@ -161,6 +161,37 @@ def trustworthy_local_base_move(ict: Any) -> float:
     return base
 
 
+def _recent_local_base_move(explosion_event: Any) -> float:
+    """Move % off the recent ~30-min local base (swing low); -1.0 when no history.
+
+    The full-session low is the far morning dip and overstates the move as a chase.
+    The recent-window low is the actual pad the current leg launched from. Returns the
+    accurate move even when small (near base = not a chase, just not yet in the window).
+    """
+    if explosion_event is None:
+        return -1.0
+    settings = get_settings()
+    if not getattr(settings, "explosion_local_base_recent_window_enabled", True):
+        return -1.0
+    try:
+        from app.engines.explosion_detector import local_base_premium
+
+        sym = str(getattr(explosion_event, "symbol", "") or "")
+        strike = float(getattr(explosion_event, "strike", 0) or 0)
+        side = getattr(explosion_event, "side", None)
+        prem = float(getattr(explosion_event, "premium", 0) or 0)
+        if not sym or side is None or prem <= 0:
+            return -1.0
+        base = float(local_base_premium(sym, strike, side) or 0)
+        if base <= 0:
+            return -1.0
+        if prem <= base:
+            return 0.0
+        return (prem - base) / base * 100.0
+    except Exception:
+        return -1.0
+
+
 def _off_low_move_pct(explosion_event: Any) -> float:
     """% above today's meaningful session low (V-bottom / reclaim)."""
     if explosion_event is None:
@@ -202,6 +233,13 @@ def effective_local_base_move_pct(
     base = trustworthy_local_base_move(ict)
     if base > 0:
         return base
+    # Recent ~30-min local base (swing low) — accurate pad when ICT flat-base didn't fire
+    # on a choppy base. Use it whenever local-base history exists, even if the move off it
+    # is small (near base ≠ chase). Only fall back to the far session-low when there's no
+    # local-base history at all.
+    recent = _recent_local_base_move(explosion_event)
+    if recent >= 0:
+        return recent
     off_low = _off_low_move_pct(explosion_event)
     if off_low >= trust_min:
         return off_low

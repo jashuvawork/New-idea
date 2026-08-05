@@ -276,6 +276,11 @@ class Settings(BaseSettings):
     explosion_local_base_trust_min_move_pct: float = 8.0
     ict_local_base_lookback_polls: int = 16
     ict_local_base_min_dump_pct: float = 25.0
+    # Medium-horizon local base: measure entry/chase from the recent ~30-min swing low
+    # (the real "local base"), not the far full-session low. Aug5 24500 PE: 72 was ~9%
+    # off the ~66 local base but read ~80% off the ~40 session low → wrongly a chase.
+    # Preferred over off-session-low whenever local-base history exists.
+    explosion_local_base_recent_window_enabled: bool = True
     explosion_extended_soft_lot_cap: int = 6
     explosion_hard_lot_cap: int = 10
     # Early capture window — HARD entry gate for unstructured ELITE/EXPLODING.
@@ -359,6 +364,14 @@ class Settings(BaseSettings):
     explosion_peak_capture_max_premium_mom_pct: float = 0.15
     explosion_peak_capture_max_profit_min_best: float = 18.0
     explosion_peak_capture_max_profit_giveback_ratio: float = 0.30
+    # Hold near-base top rips for the max move: an ELITE/EXPLODING entered very near the
+    # local base (entry base-rel ≤ 20%) has the whole rip ahead, so don't soft-lock a
+    # small early peak — require a bigger peak before peak-capture/peak-fade profit-lock.
+    # Breakeven lock + armed-trail-into-loss still protect the downside. (Aug5 78400 PE:
+    # entered 11% off base, peak-fade booked +₹149 instead of riding the base rip.)
+    explosion_near_base_hold_enabled: bool = True
+    explosion_near_base_hold_max_entry_rel_pct: float = 20.0
+    explosion_near_base_hold_min_best_points: float = 14.0
 
     # Moment stage trail ladder — flat→vertical / FVG / mega-rip projections.
     # Project max TP from fib/base-extension/heat, split into stages (~50pt on

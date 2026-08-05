@@ -801,6 +801,51 @@ def _premium_rolling_over(
     return mom <= max_mom
 
 
+def _near_base_top_runner(trade: PaperTrade) -> bool:
+    """True when this trade entered very near its local base on a top tier — the base
+    rip is still ahead, so soft profit-locks should wait for a bigger peak."""
+    settings = get_settings()
+    if not getattr(settings, "explosion_near_base_hold_enabled", True):
+        return False
+    ctx = trade.entryContext or {}
+    rel = ctx.get("localBaseBaseRelPct")
+    if rel is None:
+        return False
+    try:
+        rel = float(rel)
+    except (TypeError, ValueError):
+        return False
+    max_rel = float(
+        getattr(settings, "explosion_near_base_hold_max_entry_rel_pct", 20.0) or 20.0
+    )
+    if rel <= 0 or rel > max_rel:
+        return False
+    # Protective psychology overrides the hold — cut early on CAUTION/FEAR/PROTECT.
+    psych = str(ctx.get("psychologyLabel") or ctx.get("psychology") or "").upper()
+    if psych in ("CAUTION", "FEAR", "OVERCONFIDENCE") or str(
+        ctx.get("psychologyExitBias") or ""
+    ).upper() in ("PROTECT", "TIGHT_STOPS"):
+        return False
+    tier = str(ctx.get("explosionTier") or ctx.get("tier") or "").upper()
+    if tier in ("ELITE", "EXPLODING"):
+        return True
+    from app.engines.explosion_confidence import trade_is_high_conviction
+
+    return bool(trade_is_high_conviction(trade))
+
+
+def _near_base_hold_min_best(trade: PaperTrade, base_min_best: float) -> float:
+    """Raise the soft-lock min-best for a near-base top runner so a small early peak
+    doesn't book before the base rip develops."""
+    if not _near_base_top_runner(trade):
+        return base_min_best
+    settings = get_settings()
+    hold_min = float(
+        getattr(settings, "explosion_near_base_hold_min_best_points", 14.0) or 14.0
+    )
+    return max(base_min_best, hold_min)
+
+
 def peak_capture_profit_lock_reason(
     trade: PaperTrade,
     *,
@@ -855,6 +900,9 @@ def peak_capture_profit_lock_reason(
     ).upper() in ("PROTECT", "TIGHT_STOPS"):
         min_best = max(6.0, min_best * 0.85)
         giveback_ratio = min(giveback_ratio, 0.18)
+
+    # Near-base top runner → hold for a bigger peak before capturing (base rip ahead).
+    min_best = _near_base_hold_min_best(trade, min_best)
 
     if best < min_best:
         return None
@@ -969,8 +1017,12 @@ def peak_fade_profit_lock_reason(
             return "explosion_peak_fade_breakeven"
 
     # Soft lock: still green, but most of the peak is gone.
+    # Near-base top runner → require a bigger peak before the soft lock so a small early
+    # fade doesn't book the base rip early (breakeven lock above still protects downside).
+    soft_min_best = _near_base_hold_min_best(trade, min_best)
     if (
         pnl_pts >= min_remain
+        and best >= soft_min_best
         and giveback >= max(min_give, best * giveback_ratio)
     ):
         if _peak_fade_bullish_continuation(trade, pnl_pts=pnl_pts, settings=settings):
