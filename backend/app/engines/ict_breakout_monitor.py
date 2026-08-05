@@ -405,14 +405,20 @@ def analyze_explosion_event_ict(event: Any, snap: Optional[SymbolSnapshot] = Non
     )
 
 
-def late_fade_chase_blocked(event: Any, ict: Optional[ICTBreakoutSignal] = None) -> tuple[bool, str]:
+def late_fade_chase_blocked(
+    event: Any,
+    ict: Optional[ICTBreakoutSignal] = None,
+    *,
+    snap: Any = None,
+) -> tuple[bool, str]:
     """Block chasing rips that already peaked hard with cooling live velocity (PF killer)."""
     settings = get_settings()
     if not getattr(settings, "ict_late_chase_block_enabled", True):
         return False, ""
     from app.engines.elite_never_block import elite_never_block_active
 
-    if elite_never_block_active(event=event):
+    # Near-base top ELITE/EXPLODING: never late-fade-block — take at the base.
+    if elite_never_block_active(event=event, ict=ict, snap=snap):
         return False, ""
     peak = float(getattr(event, "peak_move_pct", 0) or 0)
     daily = float(getattr(event, "daily_move_pct", 0) or 0)

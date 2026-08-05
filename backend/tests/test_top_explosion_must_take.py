@@ -222,3 +222,70 @@ def test_timing_block_still_fires_without_must_take_context(mock_s):
     })
     assert blocked is True
     assert "entry_timing_cold" in reason
+
+
+@patch("app.engines.elite_never_block.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.ict_breakout_monitor.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_trap_fade_chase_never_block_near_base_top(
+    mock_mny, mock_ict_s, mock_g, mock_enb,
+):
+    """At the base, fake-trap / late-fade / extended-chase must not stop the fill."""
+    from app.engines.explosion_entry_guards import (
+        detect_fake_explosion_trap,
+        extended_session_chase_blocked,
+    )
+    from app.engines.ict_breakout_monitor import late_fade_chase_blocked
+
+    s = _settings()
+    s.fake_explosion_trap_enabled = True
+    s.ict_late_chase_block_enabled = True
+    s.explosion_extended_chase_block_enabled = True
+    s.explosion_chase_use_local_base = True
+    s.explosion_local_base_chase_max_move_pct = 40.0
+    s.ict_late_chase_min_peak_pct = 75.0
+    s.ict_late_chase_max_live_velocity_3s = 1.0
+    mock_enb.return_value = s
+    mock_g.return_value = s
+    mock_ict_s.return_value = s
+    mock_mny.return_value = s
+
+    snap = _snap()
+    # Day peak looks like a chase, but local base is still in the 10–45% pad.
+    event = _event(v3=0.4, base_rel=28.0, premium=72.0)
+    event.peak_move_pct = 120.0
+    event.daily_move_pct = 120.0
+    ict = _ict(28.0)
+    cand = _cand(event, snap)
+
+    trap_block, _, trap_meta = detect_fake_explosion_trap(
+        cand, snap, ict=ict,
+    )
+    assert trap_block is False
+    assert trap_meta.get("topMustTake") or trap_meta.get("eliteNeverBlock")
+
+    late_blocked, _ = late_fade_chase_blocked(event, ict, snap=snap)
+    assert late_blocked is False
+
+    chase_blocked, _ = extended_session_chase_blocked(event, ict=ict)
+    assert chase_blocked is False
+
+
+@patch("app.engines.elite_never_block.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_must_take_uses_local_base_not_day_peak(mock_mny, mock_g, mock_enb):
+    s = _settings()
+    mock_enb.return_value = s
+    mock_g.return_value = s
+    mock_mny.return_value = s
+    snap = _snap()
+    event = _event(base_rel=28.0)
+    event.peak_move_pct = 385.0
+    event.daily_move_pct = 385.0
+    ict = _ict(28.0)
+    cand = _cand(event, snap)
+    assert top_explosion_must_take_active(
+        candidate=cand, event=event, snap=snap, ict=ict,
+    ) is True

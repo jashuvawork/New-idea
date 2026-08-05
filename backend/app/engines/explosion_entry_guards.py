@@ -312,7 +312,7 @@ def immature_explosion_blocked(
 
     from app.engines.elite_never_block import elite_never_block_active
 
-    if elite_never_block_active(event=explosion_event):
+    if elite_never_block_active(event=explosion_event, ict=ict):
         return False, ""
 
     move = _session_peak_move(explosion_event)
@@ -428,7 +428,7 @@ def live_explosion_confirmation_blocked(
 
     from app.engines.elite_never_block import elite_never_block_active
 
-    if elite_never_block_active(event=explosion_event):
+    if elite_never_block_active(event=explosion_event, ict=ict, snap=snap):
         return False, ""
 
     tier = str(getattr(explosion_event, "tier", "") or "").upper()
@@ -553,7 +553,8 @@ def extended_session_chase_blocked(
 
     from app.engines.elite_never_block import elite_never_block_active
 
-    if elite_never_block_active(event=explosion_event):
+    # Near-base top ELITE/EXPLODING must never be chase-blocked — take at the pad.
+    if elite_never_block_active(event=explosion_event, ict=ict):
         return False, ""
 
     move = _session_peak_move(explosion_event)
@@ -945,8 +946,18 @@ def detect_fake_explosion_trap(
 
     from app.engines.elite_never_block import elite_never_block_active
 
-    if elite_never_block_active(candidate=candidate):
+    # Fake-trap must never bury a top near-base ATM/ITM explosion — take at base.
+    if elite_never_block_active(
+        candidate=candidate,
+        event=getattr(candidate, "explosion_event", None),
+        alert=getattr(candidate, "alert", None)
+        if isinstance(getattr(candidate, "alert", None), dict)
+        else None,
+        snap=snap,
+        ict=ict,
+    ):
         meta["eliteNeverBlock"] = True
+        meta["topMustTake"] = True
         return False, "ok", meta
 
     event = getattr(candidate, "explosion_event", None)
