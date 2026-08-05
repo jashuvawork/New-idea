@@ -163,9 +163,7 @@ def test_faded_rip_skips_no_green_on_bullish_flip():
 @patch("app.engines.confidence_hold.get_settings")
 def test_high_conf_trail_stops_when_winner_gives_back_to_loss(mock_conf, mock_exp):
     """A high-chart-conf explosion that peaked +8.5pt then faded to a LOSS is stopped
-    out by the armed trail — not held. High conviction/chart-confidence defers the
-    profit *lock* (won't book a runner early) but an armed trail must not defer into a
-    loss (recent 'hard-stop never-green / do-not-defer-into-loss' tightening)."""
+    out — peak-fade breakeven lock now runs before armed trail on winner→loss."""
     s = MagicMock()
     s.chart_confidence_hold_enabled = True
     s.chart_confidence_hold_min_confidence = 48.2
@@ -192,6 +190,12 @@ def test_high_conf_trail_stops_when_winner_gives_back_to_loss(mock_conf, mock_ex
     s.chart_confidence_hold_stop_mult = 1.35
     s.explosion_faded_rip_no_green_exit_enabled = True
     s.high_conviction_defer_profit_lock = True
+    s.explosion_peak_fade_lock_enabled = True
+    s.explosion_peak_fade_breakeven_lock = True
+    s.explosion_peak_fade_min_best_points = 6.0
+    s.explosion_peak_fade_min_giveback_points = 4.0
+    s.explosion_peak_fade_breakeven_buffer = 0.5
+    s.explosion_peak_capture_enabled = False
     mock_conf.return_value = s
     mock_exp.return_value = s
 
@@ -216,9 +220,9 @@ def test_high_conf_trail_stops_when_winner_gives_back_to_loss(mock_conf, mock_ex
     )
     plan = AdaptiveExitPlan(stopPoints=8.0, targetPoints=12.0, trailArmPoints=4.0, trailKeepRatio=0.65)
     params = explosion_exit_params_from_plan(plan, "ELITE")
-    # Peaked +8.5pt, now -1.67pt (gave the whole winner back) → protective trail exit.
+    # Peaked +8.5pt, now -1.67pt → peak-fade BE lock (before trail).
     reason, _ = evaluate_explosion_exit(trade, 61.95, "ELITE", 25, params=params)
-    assert reason == "explosion_trail_sl"
+    assert reason == "explosion_peak_fade_breakeven"
 
 
 def test_cross_index_elite_priority_bonus():

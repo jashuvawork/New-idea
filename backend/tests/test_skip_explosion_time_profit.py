@@ -55,6 +55,9 @@ def _settings(**overrides):
         "explosion_elite_max_hold_seconds": 1800,
         "chart_confidence_defer_tp_min": 60.6,
         "scalp_no_progress_skip_when_aligned": True,
+        # Isolate time-profit hold — MagicMock would invent peak-fade flags.
+        "explosion_peak_fade_lock_enabled": False,
+        "explosion_peak_capture_enabled": False,
     }
     defaults.update(overrides)
     for k, v in defaults.items():

@@ -210,12 +210,20 @@ def test_live_confirm_allows_structured_ce_pe_with_peak_velocity(mock_eg, mock_l
 
 
 @patch("app.engines.explosion_detector.retained_peak_velocity_3s", return_value=0.0)
+@patch("app.engines.elite_never_block.get_settings")
 @patch("app.engines.local_base_chart_bypass.get_settings")
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_live_confirm_still_blocks_dead_structured_near_atm(mock_eg, mock_lb, _peak):
-    s = _settings()
+def test_live_confirm_still_blocks_dead_structured_near_atm(
+    mock_eg, mock_lb, mock_enb, _peak,
+):
+    # Isolate soft-velocity floor — must-take would bypass live-confirm entirely.
+    s = _settings(
+        explosion_top_must_take_enabled=False,
+        explosion_elite_never_block_enabled=False,
+    )
     mock_eg.return_value = s
     mock_lb.return_value = s
+    mock_enb.return_value = s
     snap = _snap()
     blocked, reason = live_explosion_confirmation_blocked(
         _event(v3=0.2),
@@ -237,16 +245,21 @@ def test_live_confirm_still_blocks_dead_structured_near_atm(mock_eg, mock_lb, _p
 
 @patch("app.engines.explosion_detector.retained_peak_velocity_3s", return_value=2.8)
 @patch("app.engines.ict_breakout_monitor.analyze_explosion_event_ict")
+@patch("app.engines.elite_never_block.get_settings")
 @patch("app.engines.local_base_chart_bypass.get_settings")
 @patch("app.engines.worst_day_guard.get_settings")
 @patch("app.engines.explosion_entry_guards.get_settings")
 def test_worst_day_soft_velocity_for_structured_ce(
-    mock_eg, mock_wd, mock_lb, mock_ict, _peak,
+    mock_eg, mock_wd, mock_lb, mock_enb, mock_ict, _peak,
 ):
     from app.engines.worst_day_guard import worst_day_allows_candidate
     from app.models.schemas import AutoTraderState
 
-    s = _settings()
+    # Disable must-take so the structured-CE soft-velocity path is exercised.
+    s = _settings(
+        explosion_top_must_take_enabled=False,
+        explosion_elite_never_block_enabled=False,
+    )
     s.worst_day_pause_enabled = True
     s.worst_day_breakout_only_enabled = True
     s.worst_day_breakout_min_rank = 68.0
@@ -260,6 +273,7 @@ def test_worst_day_soft_velocity_for_structured_ce(
     mock_eg.return_value = s
     mock_wd.return_value = s
     mock_lb.return_value = s
+    mock_enb.return_value = s
     mock_ict.return_value = _ict(velocity_3s=1.6)
     snap = _snap()
     snap.tradeQualityScore = 54.8

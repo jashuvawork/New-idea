@@ -289,6 +289,9 @@ def test_adaptive_stop_deferred_until_target(mock_conf, mock_exp):
     s.runner_trail_keep_ratio = 0.38
     s.runner_micro_giveback_points = 4.0
     s.emergency_stop_enabled = False
+    # MagicMock invents truthy peak-fade flags; disable to isolate adaptive-stop defer.
+    s.explosion_peak_fade_lock_enabled = False
+    s.explosion_peak_capture_enabled = False
     mock_conf.return_value = s
     mock_exp.return_value = s
 
@@ -333,6 +336,9 @@ def _scalp_settings() -> MagicMock:
     s.runner_trail_keep_ratio = 0.7
     s.bullish_hold_enabled = False
     s.emergency_stop_enabled = False
+    # Real defaults — MagicMock otherwise collapses defer_frac to 1.0 and skips trail.
+    s.scalp_trail_defer_until_target_frac = 0.20
+    s.scalp_trail_defer_min_chart_confidence = 55.0
     return s
 
 
