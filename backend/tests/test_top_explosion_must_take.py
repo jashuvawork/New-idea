@@ -139,6 +139,43 @@ def _cand(event, snap):
 @patch("app.engines.elite_never_block.get_settings")
 @patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.moneyness.get_settings")
+def test_must_take_at_true_base_without_structured_ict(mock_mny, mock_g, mock_enb):
+    """ELITE at ~11% off pad must arm even before ICT flat→vertical heat prints.
+
+    This is the 40→160 failure mode: waiting for unstructured 28% / ICT heat
+    means we only wake up after the chase.
+    """
+    s = _settings()
+    mock_enb.return_value = s
+    mock_g.return_value = s
+    mock_mny.return_value = s
+    snap = _snap()
+    event = _event(v3=2.2, base_rel=11.0, premium=45.0)
+    # Weak ICT — no structured heat yet (what 10:17 looked like).
+    ict = SimpleNamespace(
+        active=False,
+        flat_then_vertical=False,
+        local_swing_base=False,
+        volume_awakening=False,
+        displacement=False,
+        premium_fvg=False,
+        mega_rip=False,
+        base_relative_move_pct=0.0,
+        session_move_pct=11.0,
+        base_premium=40.0,
+        velocity_3s=2.2,
+        volume_surge=1.2,
+        score=40.0,
+    )
+    cand = _cand(event, snap)
+    assert top_explosion_must_take_active(
+        candidate=cand, event=event, snap=snap, ict=ict,
+    ) is True
+
+
+@patch("app.engines.elite_never_block.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
 def test_must_take_near_base_atm_even_when_cold(mock_mny, mock_g, mock_enb):
     s = _settings()
     mock_enb.return_value = s
