@@ -755,7 +755,15 @@ def validate_candidate(
         )
         from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
-        macd_ok, macd_reason = check_explosion_macd_alignment(candidate.side, snap)
+        macd_ok, macd_reason = check_explosion_macd_alignment(
+            candidate.side,
+            snap,
+            event=getattr(candidate, "explosion_event", None),
+            candidate=candidate,
+            alert=getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None,
+        )
         if not macd_ok:
             return False, macd_reason, meta
         peak_ok, peak_reason = check_peak_chase_entry(candidate, explosion_event, snap)

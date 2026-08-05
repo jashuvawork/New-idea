@@ -283,6 +283,11 @@ def check_explosion_entry(
     # needed for ICT structure. Skipping analyze when snap is None falsely blocked
     # BUILDING+ICT flat→vertical entries (no structure → no_ict_structure_confirmation).
     ict_live = analyze_explosion_event_ict(event, snap)
+    from app.engines.elite_never_block import elite_never_block_active
+
+    must_take = elite_never_block_active(
+        event=event, snap=snap, ict=ict_live,
+    )
     window_blocked, window_reason = explosion_entry_window_blocked(event, ict=ict_live)
     if window_blocked:
         return False, window_reason
@@ -292,7 +297,7 @@ def check_explosion_entry(
         premium_capture=is_premium_capture_event(event, chart=chart),
         snap=snap,
     )
-    if live_blocked:
+    if live_blocked and not must_take:
         return False, live_reason
 
     from app.engines.entry_timing import assess_entry_timing, timing_blocks_entry
@@ -304,7 +309,7 @@ def check_explosion_entry(
         premium_capture=is_premium_capture_event(event, chart=chart),
     )
     timing_blocked, timing_reason = timing_blocks_entry(timing)
-    if timing_blocked:
+    if timing_blocked and not must_take:
         return False, timing_reason
 
     from app.engines.chop_day_guards import neutral_breadth_blocks_entry

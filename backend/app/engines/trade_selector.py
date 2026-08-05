@@ -325,8 +325,13 @@ def _explosion_candidates(
                 base_relative_move_pct=float(alert.get("ictBaseRelativeMovePct") or 0),
                 base_premium=float(alert.get("ictBasePremium") or 0),
             )
+        from app.engines.elite_never_block import elite_never_block_active
+
+        must_take = elite_never_block_active(
+            event=event, candidate=cand_probe, alert=alert, snap=snap, ict=ict,
+        )
         late_blocked, _late_reason = late_fade_chase_blocked(event, ict)
-        if late_blocked:
+        if late_blocked and not must_take:
             continue
         from app.engines.explosion_entry_guards import (
             detect_fake_explosion_trap,
@@ -337,8 +342,9 @@ def _explosion_candidates(
         )
 
         immature_blocked, _immature_reason = immature_explosion_blocked(event, ict=ict)
-        if immature_blocked:
+        if immature_blocked and not must_take:
             continue
+        # Near-base window still applies — must_take itself requires in-window.
         window_blocked, _window_reason = explosion_entry_window_blocked(event, ict=ict)
         if window_blocked:
             continue
@@ -350,7 +356,7 @@ def _explosion_candidates(
             premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
             snap=snap,
         )
-        if live_blocked:
+        if live_blocked and not must_take:
             continue
         from app.engines.entry_timing import assess_entry_timing, timing_blocks_entry
 
@@ -361,15 +367,15 @@ def _explosion_candidates(
             premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
         )
         timing_blocked, _timing_reason = timing_blocks_entry(timing)
-        if timing_blocked:
+        if timing_blocked and not must_take:
             continue
         ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)
-        if ext_blocked:
+        if ext_blocked and not must_take:
             continue
         trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
             cand_probe, snap, state=state, ict=ict,
         )
-        if trap_block or trap_meta.get("action") == "block":
+        if (trap_block or trap_meta.get("action") == "block") and not must_take:
             continue
         # Displacement-only without flat base / FVG / real rip — skip (Jul20 noise).
         # Raised floor to early-window min (28%) so ~22% displacement spikes stay out.
