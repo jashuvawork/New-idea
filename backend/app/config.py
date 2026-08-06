@@ -343,9 +343,11 @@ class Settings(BaseSettings):
     explosion_peak_fade_min_remain_points: float = 0.4
     explosion_peak_fade_breakeven_lock: bool = True
     explosion_peak_fade_breakeven_buffer: float = 0.5
-    # ICT max-profit runners: only lock after a larger peak / deeper fade.
-    explosion_peak_fade_max_profit_min_best: float = 15.0
-    explosion_peak_fade_max_profit_giveback_ratio: float = 0.70
+    # ICT max-profit / flat→vertical runners: hold through early pullbacks.
+    # Aug6 SENSEX 78700 CE: best +15 → soft-locked +6.5 (OVERCONFIDENCE tightened
+    # giveback to 50%) then LTP ran to ~460. Require a real expansion peak first.
+    explosion_peak_fade_max_profit_min_best: float = 28.0
+    explosion_peak_fade_max_profit_giveback_ratio: float = 0.80
     # Still-bullish continuation can defer the soft giveback lock (healthy pullback).
     # Near-breakeven lock after a real peak ALWAYS fires — chart lag must not
     # turn winners into hard-SL losses.
@@ -362,8 +364,8 @@ class Settings(BaseSettings):
     explosion_peak_capture_min_remain_points: float = 1.0
     explosion_peak_capture_max_live_velocity_3s: float = 1.0
     explosion_peak_capture_max_premium_mom_pct: float = 0.15
-    explosion_peak_capture_max_profit_min_best: float = 18.0
-    explosion_peak_capture_max_profit_giveback_ratio: float = 0.30
+    explosion_peak_capture_max_profit_min_best: float = 28.0
+    explosion_peak_capture_max_profit_giveback_ratio: float = 0.35
     # Hold near-base top rips for the max move: an ELITE/EXPLODING entered very near the
     # local base (entry base-rel ≤ 20%) has the whole rip ahead, so don't soft-lock a
     # small early peak — require a bigger peak before peak-capture/peak-fade profit-lock.
@@ -371,7 +373,8 @@ class Settings(BaseSettings):
     # entered 11% off base, peak-fade booked +₹149 instead of riding the base rip.)
     explosion_near_base_hold_enabled: bool = True
     explosion_near_base_hold_max_entry_rel_pct: float = 20.0
-    explosion_near_base_hold_min_best_points: float = 14.0
+    # Align with max-profit fade floor — small +10–15pt peaks are still the base leg.
+    explosion_near_base_hold_min_best_points: float = 28.0
 
     # Moment stage trail ladder — flat→vertical / FVG / mega-rip projections.
     # Project max TP from fib/base-extension/heat, split into stages (~50pt on

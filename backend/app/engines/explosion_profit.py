@@ -820,9 +820,11 @@ def _near_base_top_runner(trade: PaperTrade) -> bool:
     )
     if rel <= 0 or rel > max_rel:
         return False
-    # Protective psychology overrides the hold — cut early on CAUTION/FEAR/PROTECT.
+    # True protective psychology overrides the hold. OVERCONFIDENCE must NOT —
+    # it often prints on strong ICT winners and was disabling the hold on Aug6
+    # SENSEX 78700 CE (14.5% off base → soft-locked +6.5 before LTP 460).
     psych = str(ctx.get("psychologyLabel") or ctx.get("psychology") or "").upper()
-    if psych in ("CAUTION", "FEAR", "OVERCONFIDENCE") or str(
+    if psych in ("CAUTION", "FEAR") or str(
         ctx.get("psychologyExitBias") or ""
     ).upper() in ("PROTECT", "TIGHT_STOPS"):
         return False
@@ -841,7 +843,7 @@ def _near_base_hold_min_best(trade: PaperTrade, base_min_best: float) -> float:
         return base_min_best
     settings = get_settings()
     hold_min = float(
-        getattr(settings, "explosion_near_base_hold_min_best_points", 14.0) or 14.0
+        getattr(settings, "explosion_near_base_hold_min_best_points", 28.0) or 28.0
     )
     return max(base_min_best, hold_min)
 
@@ -874,32 +876,35 @@ def peak_capture_profit_lock_reason(
         min_best = max(
             min_best,
             float(
-                getattr(settings, "explosion_peak_capture_max_profit_min_best", 18.0)
-                or 18.0
+                getattr(settings, "explosion_peak_capture_max_profit_min_best", 28.0)
+                or 28.0
             ),
         )
         giveback_ratio = max(
             giveback_ratio,
             float(
                 getattr(
-                    settings, "explosion_peak_capture_max_profit_giveback_ratio", 0.30
+                    settings, "explosion_peak_capture_max_profit_giveback_ratio", 0.35
                 )
-                or 0.30
+                or 0.35
             ),
         )
 
     ctx = trade.entryContext or {}
-    psych = str(
-        ctx.get("psychologyLabel")
-        or ctx.get("psychology")
-        or ((ctx.get("exitPlan") or {}).get("psychologyLabel"))
-        or ""
-    ).upper()
-    if psych in ("CAUTION", "FEAR", "OVERCONFIDENCE") or str(
-        ctx.get("psychologyExitBias") or ""
-    ).upper() in ("PROTECT", "TIGHT_STOPS"):
-        min_best = max(6.0, min_best * 0.85)
-        giveback_ratio = min(giveback_ratio, 0.18)
+    # Psychology tighten is for normal trades only — never shrink ICT max-profit
+    # capture band (Aug6 78700 CE OVERCONFIDENCE forced an early bank).
+    if not max_profit:
+        psych = str(
+            ctx.get("psychologyLabel")
+            or ctx.get("psychology")
+            or ((ctx.get("exitPlan") or {}).get("psychologyLabel"))
+            or ""
+        ).upper()
+        if psych in ("CAUTION", "FEAR", "OVERCONFIDENCE") or str(
+            ctx.get("psychologyExitBias") or ""
+        ).upper() in ("PROTECT", "TIGHT_STOPS"):
+            min_best = max(6.0, min_best * 0.85)
+            giveback_ratio = min(giveback_ratio, 0.18)
 
     # Near-base top runner → hold for a bigger peak before capturing (base rip ahead).
     min_best = _near_base_hold_min_best(trade, min_best)
@@ -970,31 +975,33 @@ def peak_fade_profit_lock_reason(
         min_best = max(
             min_best,
             float(
-                getattr(settings, "explosion_peak_fade_max_profit_min_best", 15.0)
-                or 15.0
+                getattr(settings, "explosion_peak_fade_max_profit_min_best", 28.0)
+                or 28.0
             ),
         )
         giveback_ratio = max(
             giveback_ratio,
             float(
-                getattr(settings, "explosion_peak_fade_max_profit_giveback_ratio", 0.70)
-                or 0.70
+                getattr(settings, "explosion_peak_fade_max_profit_giveback_ratio", 0.80)
+                or 0.80
             ),
         )
 
-    # CAUTION / PROTECT psychology → slightly tighter fade lock.
+    # CAUTION / PROTECT psychology → slightly tighter fade lock on normal trades.
+    # Never tighten ICT max-profit runners — that undoes the hold band.
     ctx = trade.entryContext or {}
-    psych = str(
-        ctx.get("psychologyLabel")
-        or ctx.get("psychology")
-        or ((ctx.get("exitPlan") or {}).get("psychologyLabel"))
-        or ""
-    ).upper()
-    if psych in ("CAUTION", "FEAR", "OVERCONFIDENCE") or str(
-        ctx.get("psychologyExitBias") or ""
-    ).upper() in ("PROTECT", "TIGHT_STOPS"):
-        min_best = max(5.0, min_best * 0.85)
-        giveback_ratio = min(giveback_ratio, 0.50)
+    if not max_profit:
+        psych = str(
+            ctx.get("psychologyLabel")
+            or ctx.get("psychology")
+            or ((ctx.get("exitPlan") or {}).get("psychologyLabel"))
+            or ""
+        ).upper()
+        if psych in ("CAUTION", "FEAR", "OVERCONFIDENCE") or str(
+            ctx.get("psychologyExitBias") or ""
+        ).upper() in ("PROTECT", "TIGHT_STOPS"):
+            min_best = max(5.0, min_best * 0.85)
+            giveback_ratio = min(giveback_ratio, 0.50)
 
     if best < min_best:
         return None

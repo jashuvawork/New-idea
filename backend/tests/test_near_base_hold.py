@@ -35,6 +35,8 @@ def test_near_base_top_runner_detected():
     assert _near_base_top_runner(_trade(40.0, "ELITE")) is False  # mid-leg
     assert _near_base_top_runner(_trade(11.0, "BUILDING")) is False  # not top tier
     assert _near_base_top_runner(_trade(11.0, "ELITE", psych="CAUTION")) is False  # protective
+    # OVERCONFIDENCE is common on strong ICT winners — must still hold.
+    assert _near_base_top_runner(_trade(14.5, "EXPLODING", psych="OVERCONFIDENCE")) is True
 
 
 def test_near_base_holds_small_peak():
@@ -50,8 +52,8 @@ def test_mid_leg_still_books_on_fade():
 
 
 def test_near_base_still_books_big_peak_fade():
-    """Once a near-base runner prints a big peak (+20) and gives it back, it books."""
-    reason = peak_fade_profit_lock_reason(_trade(11.0, best=20.0), best=20.0, pnl_pts=6.0)
+    """Once a near-base runner prints a big peak (≥28) and gives it back, it books."""
+    reason = peak_fade_profit_lock_reason(_trade(11.0, best=32.0), best=32.0, pnl_pts=8.0)
     assert reason is not None
 
 
