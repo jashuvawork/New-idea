@@ -787,6 +787,16 @@ async def _open_from_candidate(
         )
         if lots <= 0:
             return False, "same_strike_post_win_lot_cap"
+
+        # Whipsaw flip: after a same-session WIN on the opposite side, don't max-size the
+        # counter-flip (Aug6 78800 PE −20k). Runs even for high-conviction/top-explosion.
+        from app.engines.session_mode_feedback import cap_opposite_side_flip_after_win
+
+        lots, flip_cap_meta = cap_opposite_side_flip_after_win(
+            lots, state, symbol=symbol, side=candidate.side,
+        )
+        if flip_cap_meta.get("applied"):
+            post_win_cap_meta["whipsawFlipCap"] = flip_cap_meta
         # Force-max stamp is misleading if post-win cut the size back down.
         if post_win_cap_meta.get("applied"):
             top_explosion_max = False
