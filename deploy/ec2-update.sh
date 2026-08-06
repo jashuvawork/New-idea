@@ -129,6 +129,11 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
     FULL_REST_MIN_SECONDS
     FULL_REST_BACKOFF_SLOW_MS
     FULL_REST_BACKOFF_SECONDS
+    EVENT_LOOP_WATCHDOG_ENABLED
+    EVENT_LOOP_WATCHDOG_STALE_SECONDS
+    EVENT_LOOP_WATCHDOG_CHECK_SECONDS
+    EVENT_LOOP_WATCHDOG_BEAT_INTERVAL_SECONDS
+    EVENT_LOOP_WATCHDOG_GRACE_SECONDS
     FETCH_CONSTITUENTS_INTERVAL_SECONDS
     TICK_OVERLAY_MAX_AGE_SECONDS
     NEWS_CACHE_SECONDS
@@ -515,6 +520,11 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
     FULL_REST_MIN_SECONDS
     FULL_REST_BACKOFF_SLOW_MS
     FULL_REST_BACKOFF_SECONDS
+    EVENT_LOOP_WATCHDOG_ENABLED
+    EVENT_LOOP_WATCHDOG_STALE_SECONDS
+    EVENT_LOOP_WATCHDOG_CHECK_SECONDS
+    EVENT_LOOP_WATCHDOG_BEAT_INTERVAL_SECONDS
+    EVENT_LOOP_WATCHDOG_GRACE_SECONDS
     FETCH_CONSTITUENTS_INTERVAL_SECONDS
     CALIBRATION_BLOCK_MIN_LOSSES
     ENHANCED_MICRO_TARGET_POINTS
@@ -654,6 +664,8 @@ ensure_env ENVIRONMENT "production"
 ensure_env TRADE_STORE_DIR "/opt/nexusquant/data/trades"
 ensure_env UPSTOX_REDIRECT_URI "https://www.jashuvatrade.xyz/api/upstox/callback"
 ensure_env COMMIT_SHA "$COMMIT_SHA"
+ensure_env EVENT_LOOP_WATCHDOG_ENABLED "true"
+ensure_env EVENT_LOOP_WATCHDOG_STALE_SECONDS "20"
 
 # Update commit sha every deploy
 if grep -q "^COMMIT_SHA=" "$ENV_FILE"; then
@@ -702,16 +714,23 @@ if [ "$ready" -ne 1 ]; then
 fi
 
 # Health watchdog — auto-restart hung backend (every minute during market risk)
+# PATH must include docker for cron (Aug6: cron with empty PATH never restarted).
 if [ -f "$REPO_DIR/deploy/health-watchdog.sh" ] && command -v crontab >/dev/null 2>&1; then
   chmod +x "$REPO_DIR/deploy/health-watchdog.sh"
   # Pin correct compose path — older cron lines pointed at /opt/nexusquant/app/...
-  CRON_LINE="* * * * * COMPOSE_FILE=$REPO_DIR/docker-compose.prod.yml REPO_DIR=$REPO_DIR $REPO_DIR/deploy/health-watchdog.sh"
+  CRON_LINE="* * * * * PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin COMPOSE_FILE=$REPO_DIR/docker-compose.prod.yml REPO_DIR=$REPO_DIR /bin/bash $REPO_DIR/deploy/health-watchdog.sh >>/opt/nexusquant/logs/health-watchdog.cron.log 2>&1"
   TMP_CRON="$(mktemp)"
   crontab -l 2>/dev/null | grep -v "health-watchdog.sh" >"$TMP_CRON" || true
   echo "$CRON_LINE" >>"$TMP_CRON"
   crontab "$TMP_CRON"
   rm -f "$TMP_CRON"
   echo "Installed/refreshed health watchdog cron (every 1 min, compose=$REPO_DIR/docker-compose.prod.yml)"
+  if crontab -l 2>/dev/null | grep -q "health-watchdog.sh"; then
+    echo "Watchdog cron verified:"
+    crontab -l 2>/dev/null | grep "health-watchdog.sh" || true
+  else
+    echo "WARN: health-watchdog cron line missing after install"
+  fi
   # Immediate recovery if deploy found a hung loop
   COMPOSE_FILE="$REPO_DIR/docker-compose.prod.yml" REPO_DIR="$REPO_DIR" \
     bash "$REPO_DIR/deploy/health-watchdog.sh" || true

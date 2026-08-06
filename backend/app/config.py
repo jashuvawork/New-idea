@@ -96,6 +96,14 @@ class Settings(BaseSettings):
     news_cache_seconds: int = 300  # dashboard + engine refresh cadence (5 min)
     background_market_monitor_enabled: bool = True
 
+    # Event-loop hang recovery — Aug6: TCP:8000 open but /health never answered.
+    # Heartbeat task + daemon thread exits the process so Docker restarts it.
+    event_loop_watchdog_enabled: bool = True
+    event_loop_watchdog_stale_seconds: float = 20.0
+    event_loop_watchdog_check_seconds: float = 2.0
+    event_loop_watchdog_beat_interval_seconds: float = 1.0
+    event_loop_watchdog_grace_seconds: float = 45.0
+
     # Cursor Composer 2.5 — session market monitor + trading advisory
     composer_monitor_enabled: bool = True
     composer_monitor_use_ai: bool = True

@@ -20,7 +20,8 @@ services:
     restart: unless-stopped
     # Probe only — do NOT kill PID 1 here. Docker still runs the test during
     # start_period; a kill-on-fail healthcheck caused a restart storm (Jul20).
-    # Hung-loop recovery is handled by deploy/health-watchdog.sh (cron).
+    # Hung-loop recovery: in-process event_loop_watchdog (os._exit → restart)
+    # plus deploy/health-watchdog.sh (host cron outer net).
     healthcheck:
       test:
         [
