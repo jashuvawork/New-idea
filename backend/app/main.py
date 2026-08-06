@@ -51,6 +51,8 @@ async def _background_monitor():
     last_eod_playbook_date: Optional[str] = None
 
     while True:
+        # Yield so /health and heartbeat can interleave under heavy sync work.
+        await asyncio.sleep(0)
         poll_ms = (
             settings.market_poll_interval_ws_ms
             if is_ws_active()
@@ -181,6 +183,7 @@ async def _background_monitor():
 async def lifespan(app: FastAPI):
     global _background_task
     settings = get_settings()
+    from app.loop_watchdog import start_loop_watchdog, stop_loop_watchdog
     from app.services.upstox_ws import start_upstox_ws, stop_upstox_ws
 
     if settings.upstox_ws_enabled:
@@ -197,7 +200,24 @@ async def lifespan(app: FastAPI):
             settings.composer_monitor_enabled,
             settings.ai_analysis_monitor_enabled,
         )
+    start_loop_watchdog(
+        enabled=bool(getattr(settings, "event_loop_watchdog_enabled", True)),
+        stale_seconds=float(
+            getattr(settings, "event_loop_watchdog_stale_seconds", 20.0) or 20.0
+        ),
+        check_seconds=float(
+            getattr(settings, "event_loop_watchdog_check_seconds", 2.0) or 2.0
+        ),
+        beat_interval_seconds=float(
+            getattr(settings, "event_loop_watchdog_beat_interval_seconds", 1.0)
+            or 1.0
+        ),
+        grace_seconds=float(
+            getattr(settings, "event_loop_watchdog_grace_seconds", 45.0) or 45.0
+        ),
+    )
     yield
+    stop_loop_watchdog()
     if _background_task:
         _background_task.cancel()
     await stop_upstox_ws()

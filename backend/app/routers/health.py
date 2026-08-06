@@ -22,11 +22,15 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 async def health():
-    return {"status": "ok"}
+    from app.loop_watchdog import watchdog_status
+
+    return {"status": "ok", "loopWatchdog": watchdog_status()}
 
 
 @router.get("/api/deployment/status")
 async def deployment_status():
+    from app.loop_watchdog import watchdog_status
+
     settings = get_settings()
     token_status = await get_daily_token_status()
     store_health = trade_store.check_store_health()
@@ -35,6 +39,7 @@ async def deployment_status():
         "status": "ok",
         "commit": settings.commit_sha,
         "environment": settings.environment,
+        "loopWatchdog": watchdog_status(),
         "upstox": {
             "hasToken": await has_upstox_token(),
             "validToday": token_status.get("validToday", False),
