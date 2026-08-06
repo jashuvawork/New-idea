@@ -24,11 +24,14 @@ def _settings(**overrides):
     s.explosion_peak_fade_min_remain_points = 0.4
     s.explosion_peak_fade_breakeven_lock = True
     s.explosion_peak_fade_breakeven_buffer = 0.5
-    s.explosion_peak_fade_max_profit_min_best = 15.0
-    s.explosion_peak_fade_max_profit_giveback_ratio = 0.70
+    s.explosion_peak_fade_max_profit_min_best = 28.0
+    s.explosion_peak_fade_max_profit_giveback_ratio = 0.80
     s.explosion_peak_fade_defer_when_bullish = True
     s.explosion_peak_fade_bullish_min_remain_points = 3.0
     s.explosion_peak_fade_bullish_min_velocity_3s = 1.5
+    s.explosion_near_base_hold_enabled = True
+    s.explosion_near_base_hold_max_entry_rel_pct = 20.0
+    s.explosion_near_base_hold_min_best_points = 28.0
     s.explosion_peak_capture_enabled = True
     s.explosion_peak_capture_min_best_points = 8.0
     s.explosion_peak_capture_giveback_ratio = 0.22
@@ -36,8 +39,8 @@ def _settings(**overrides):
     s.explosion_peak_capture_min_remain_points = 1.0
     s.explosion_peak_capture_max_live_velocity_3s = 1.0
     s.explosion_peak_capture_max_premium_mom_pct = 0.15
-    s.explosion_peak_capture_max_profit_min_best = 18.0
-    s.explosion_peak_capture_max_profit_giveback_ratio = 0.30
+    s.explosion_peak_capture_max_profit_min_best = 28.0
+    s.explosion_peak_capture_max_profit_giveback_ratio = 0.35
     s.explosion_faded_rip_no_green_exit_enabled = False
     s.bullish_hold_enabled = True
     s.explosion_stop_min_hold_seconds = 0
@@ -233,15 +236,56 @@ def test_max_profit_needs_larger_peak(mock_s):
         live_velocity_3s=0.1,
     )
     assert reason is None
-    # After a real expansion peak, deep fade / capture does lock.
+    # After a real expansion peak (≥28), deep fade / capture does lock.
     reason2 = peak_fade_profit_lock_reason(
-        _trade(current=50.0, best=40.0, ctx={"liveVelocity3s": 0.2}),
+        _trade(
+            current=50.0,
+            best=40.0,
+            ctx={
+                "liveVelocity3s": 0.2,
+                "psychologyLabel": "NEUTRAL",
+                "psychologyExitBias": "BALANCED",
+                "premiumChart": {"momentum3Pct": -0.2},
+            },
+        ),
         best=40.0,
         pnl_pts=7.45,
         max_profit=True,
         live_velocity_3s=0.2,
     )
     assert reason2 == "explosion_peak_capture"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_aug6_78700_max_profit_holds_first_pullback(mock_s):
+    """Aug6 SENSEX 78700 CE: best +15.4 → +6.5 with OVERCONFIDENCE must HOLD.
+
+    Old path tightened giveback to 50% and disabled near-base hold, booking before
+    the extension to ~460. Max-profit + near-base must wait for a ≥28pt peak.
+    """
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=380.1,
+        best=15.42,
+        current=386.65,
+        ctx={
+            "selectionMode": "explosion",
+            "explosionTier": "EXPLODING",
+            "maxProfitCapture": True,
+            "ictFlatThenVertical": True,
+            "defensiveBaseRip": True,
+            "localBaseBasePremium": 330.6,
+            "localBaseBaseRelPct": 14.5,
+            "psychologyLabel": "OVERCONFIDENCE",
+            "psychologyExitBias": "BALANCED",
+            "liveVelocity3s": 0.5,
+            "premiumChart": {"momentum3Pct": 0.0},
+        },
+    )
+    reason = peak_fade_profit_lock_reason(
+        trade, best=15.42, pnl_pts=6.55, max_profit=True, live_velocity_3s=0.5,
+    )
+    assert reason is None
 
 
 @patch("app.engines.explosion_profit._chart_aligned_with_trade", return_value=True)
