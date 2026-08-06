@@ -1066,6 +1066,25 @@ def evaluate_explosion_exit(
     if faded_exit:
         return faded_exit, pnl_inr
 
+    # Never-green hard cut: a trade that printed NO green and is now down past a tight
+    # floor is directionally wrong from entry (Aug6 78800 PE: best=0 → ran to −37pt).
+    # Cut it faster than the full adaptive stop. Threshold = max(points floor, % of entry
+    # premium) so cheap and expensive options are both handled sensibly.
+    if bool(getattr(settings, "explosion_never_green_stop_enabled", True)):
+        ng_min_green = _cfg_float(settings, "explosion_never_green_min_green_points", 0.5)
+        ng_floor = _cfg_float(settings, "explosion_never_green_stop_points", 18.0)
+        ng_pct = _cfg_float(settings, "explosion_never_green_stop_pct", 6.0)
+        ng_min_hold = int(_cfg_float(settings, "explosion_never_green_min_hold_seconds", 20))
+        ng_stop = max(ng_floor, float(trade.entryPremium or 0) * ng_pct / 100.0)
+        if best <= ng_min_green and hold >= ng_min_hold and pnl_pts <= -ng_stop:
+            return "explosion_never_green_stop", pnl_inr
+
+    # Hard per-trade ₹ loss cap — bound the worst case regardless of lots / stop width
+    # (always on in production; disabled by default under stubbed test settings).
+    hard_cap = _cfg_float(settings, "explosion_per_trade_max_loss_inr", 0.0)
+    if hard_cap > 0 and pnl_inr <= -hard_cap:
+        return "explosion_per_trade_risk_cap", pnl_inr
+
     from app.engines.ict_breakout_monitor import _ict_max_profit_trade
 
     max_profit = _ict_max_profit_trade(trade)

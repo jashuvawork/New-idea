@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.models.schemas import AutoTraderState
+
+_IST = ZoneInfo("Asia/Kolkata")
 
 
 @dataclass
@@ -203,6 +207,63 @@ def _latest_same_strike_explosion_close(
             latest = t
             latest_ts = ts
     return latest
+
+
+def cap_opposite_side_flip_after_win(
+    lots: int,
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+) -> tuple[int, dict[str, Any]]:
+    """Cap a counter-flip entry after a same-session WIN on the opposite side.
+
+    Aug6: two CALLs won (market up), then a max-size PUT flip lost −₹20k. Flipping side
+    right after an opposite-side winner is a whipsaw — don't ride it at max size.
+    """
+    meta: dict[str, Any] = {"applied": False}
+    settings = get_settings()
+    if not getattr(settings, "explosion_whipsaw_flip_guard_enabled", True):
+        return lots, meta
+    side_v = side.value if hasattr(side, "value") else str(side or "").upper()
+    if side_v not in ("CALL", "PUT"):
+        return lots, meta
+    opp = "PUT" if side_v == "CALL" else "CALL"
+    lookback = float(
+        getattr(settings, "explosion_whipsaw_flip_lookback_seconds", 3600) or 3600
+    )
+    now = datetime.now(_IST)
+    win = None
+    for t in reversed(getattr(state, "closedPaperTrades", []) or []):
+        if str(getattr(t, "symbol", "") or "").upper() != symbol.upper():
+            continue
+        t_side = getattr(t, "side", None)
+        t_side_v = t_side.value if hasattr(t_side, "value") else str(t_side or "").upper()
+        if t_side_v != opp:
+            continue
+        closed = getattr(t, "closedAt", None)
+        if closed is not None:
+            try:
+                if (now - closed).total_seconds() > lookback:
+                    continue
+            except Exception:
+                pass
+        if float(getattr(t, "pnlInr", 0) or 0) > 0:
+            win = t
+            break
+    if win is None:
+        return lots, meta
+    cap = int(getattr(settings, "explosion_whipsaw_flip_lot_cap", 8) or 8)
+    capped = min(max(0, lots), max(1, cap))
+    meta.update({
+        "applied": capped < lots,
+        "flipFromWinSide": opp,
+        "priorWinPnlInr": round(float(getattr(win, "pnlInr", 0) or 0), 2),
+        "uncappedLots": lots,
+        "lotCap": cap,
+        "cappedLots": capped,
+    })
+    return capped, meta
 
 
 def cap_same_strike_explosion_reentry_after_win(

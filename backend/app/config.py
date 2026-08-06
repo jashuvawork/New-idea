@@ -1207,6 +1207,22 @@ class Settings(BaseSettings):
     emergency_stop_enabled: bool = False
     emergency_stop_inr: float = 20_000
     emergency_stop_scale_with_position: bool = False
+    # Risk guardrails (Aug6 SENSEX 78800 PE: never-green ELITE, 27 lots, ran to −37pt =
+    # −₹20k; Jul30 90-lot ELITE = −₹86k). Three bounded, always-on protections:
+    # 1) Never-green cut — a trade that printed NO green and is down past a tight floor is
+    #    directionally wrong; cut faster than the full adaptive stop.
+    explosion_never_green_stop_enabled: bool = True
+    explosion_never_green_min_green_points: float = 0.5
+    explosion_never_green_stop_points: float = 18.0  # min floor (below the thesis grind)
+    explosion_never_green_stop_pct: float = 6.0  # or % of entry premium, whichever larger
+    explosion_never_green_min_hold_seconds: int = 20
+    # 2) Hard per-trade ₹ loss cap — bound the worst case regardless of lots/stop width.
+    explosion_per_trade_max_loss_inr: float = 12_000.0
+    # 3) Whipsaw flip — after a same-session WIN on the opposite side, don't max-size the
+    #    counter-flip (Aug6: CALLs won, then a max-size PUT flip lost). Cap flip size.
+    explosion_whipsaw_flip_guard_enabled: bool = True
+    explosion_whipsaw_flip_lookback_seconds: int = 3600
+    explosion_whipsaw_flip_lot_cap: int = 8
     scalp_stop_points: float = 3.0  # legacy fallback when premium unknown
     # Calculated scalp SL = max(min_points, premium * pct), capped at max_points.
     scalp_stop_pct_of_premium: float = 0.10
