@@ -282,6 +282,20 @@ async def monitor_trade_chart_before_execution(
     structure_chart_bypass = (
         premium_bypass or vertical_bypass or local_ichi_bypass or open_gap_mtf_bypass
     )
+    # Aug6 78800 PE: counter-trend PUT filled via expiry/local-base bypasses.
+    from app.engines.spot_direction import hard_counter_trend_chart
+
+    if (
+        getattr(settings, "chart_counter_trend_bypass_block_enabled", True)
+        and hard_counter_trend_chart(side, snap.spotChart)
+    ):
+        expiry_chart_bypass = False
+        structure_chart_bypass = False
+        premium_bypass = False
+        vertical_bypass = False
+        local_ichi_bypass = False
+        open_gap_mtf_bypass = False
+        breadth_bypass = False
 
     try:
         meta = await fetch_live_trade_charts(

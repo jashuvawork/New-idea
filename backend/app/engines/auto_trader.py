@@ -793,12 +793,21 @@ async def _open_from_candidate(
         from app.engines.session_mode_feedback import cap_opposite_side_flip_after_win
 
         lots, flip_cap_meta = cap_opposite_side_flip_after_win(
-            lots, state, symbol=symbol, side=candidate.side,
+            lots,
+            state,
+            symbol=symbol,
+            side=candidate.side,
+            velocity_3s=entry_velocity_3s,
         )
+        if flip_cap_meta.get("blocked"):
+            return False, str(
+                flip_cap_meta.get("blockReason")
+                or "whipsaw_flip_velocity_below_breakout"
+            )
         if flip_cap_meta.get("applied"):
             post_win_cap_meta["whipsawFlipCap"] = flip_cap_meta
         # Force-max stamp is misleading if post-win cut the size back down.
-        if post_win_cap_meta.get("applied"):
+        if post_win_cap_meta.get("applied") or flip_cap_meta.get("applied"):
             top_explosion_max = False
 
     lot_mult = lot_multiplier(symbol)
@@ -896,6 +905,17 @@ async def _open_from_candidate(
                 candidate.side, snap, explosion_event=candidate.explosion_event,
             )
             expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
+            from app.engines.spot_direction import hard_counter_trend_chart
+
+            if (
+                getattr(settings, "chart_counter_trend_bypass_block_enabled", True)
+                and hard_counter_trend_chart(candidate.side, snap.spotChart)
+            ):
+                expiry_chart_bypass = False
+                premium_bypass = False
+                vertical_bypass = False
+                local_ichi_bypass = False
+                breadth_bypass = False
             blocked, chart_reason = chart_blocks_side(
                 candidate.side, snap.spotChart, trade_score=trade_score,
                 breadth_aligned_bypass=breadth_bypass,

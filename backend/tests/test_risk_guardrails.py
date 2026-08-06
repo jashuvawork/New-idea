@@ -66,20 +66,37 @@ def _closed(side, pnl, symbol="SENSEX", mins_ago=10):
 
 
 def test_whipsaw_flip_caps_after_opposite_side_win():
-    """CALLs won this session → a max-size PUT flip is capped (Aug6 mechanism)."""
+    """CALLs won this session → a hot PUT flip is capped (Aug6 size mechanism)."""
     state = AutoTraderState()
     state.closedPaperTrades = [_closed(Side.CALL, 24000.0)]
-    lots, meta = cap_opposite_side_flip_after_win(27, state, symbol="SENSEX", side=Side.PUT)
+    lots, meta = cap_opposite_side_flip_after_win(
+        27, state, symbol="SENSEX", side=Side.PUT, velocity_3s=3.0,
+    )
     assert lots == 8
     assert meta["applied"] is True
+    assert meta.get("blocked") is False
     assert meta["flipFromWinSide"] == "CALL"
+
+
+def test_whipsaw_flip_blocks_weak_velocity():
+    """Aug6 PUT v3=0.54 after CALL wins — weak flip is blocked, not just sized down."""
+    state = AutoTraderState()
+    state.closedPaperTrades = [_closed(Side.CALL, 24000.0)]
+    lots, meta = cap_opposite_side_flip_after_win(
+        27, state, symbol="SENSEX", side=Side.PUT, velocity_3s=0.54,
+    )
+    assert lots == 0
+    assert meta["blocked"] is True
+    assert meta["blockReason"] == "whipsaw_flip_velocity_below_breakout"
 
 
 def test_whipsaw_flip_no_cap_same_side():
     """Same side as the winner (CALL after CALL win) — not a flip, no cap."""
     state = AutoTraderState()
     state.closedPaperTrades = [_closed(Side.CALL, 24000.0)]
-    lots, meta = cap_opposite_side_flip_after_win(27, state, symbol="SENSEX", side=Side.CALL)
+    lots, meta = cap_opposite_side_flip_after_win(
+        27, state, symbol="SENSEX", side=Side.CALL, velocity_3s=0.5,
+    )
     assert lots == 27
     assert meta["applied"] is False
 
@@ -88,6 +105,8 @@ def test_whipsaw_flip_no_cap_after_opposite_loss():
     """Opposite side LOST (not a win) → no whipsaw cap."""
     state = AutoTraderState()
     state.closedPaperTrades = [_closed(Side.CALL, -5000.0)]
-    lots, meta = cap_opposite_side_flip_after_win(27, state, symbol="SENSEX", side=Side.PUT)
+    lots, meta = cap_opposite_side_flip_after_win(
+        27, state, symbol="SENSEX", side=Side.PUT, velocity_3s=0.5,
+    )
     assert lots == 27
     assert meta["applied"] is False

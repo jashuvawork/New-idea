@@ -42,6 +42,7 @@ def _settings():
     s.chart_min_momentum_pct = 0.04
     s.chart_override_min_score = 75
     s.chart_live_direction_hard_block = True
+    s.chart_counter_trend_bypass_block_enabled = True
     s.chart_alignment_rank_bonus = 10.0
     s.aggressive_lot_sizing = True
     s.aggressive_min_tqs = 50
@@ -167,7 +168,26 @@ def test_chart_override_allows_high_score_counter_trend(mock_settings):
 
 @patch("app.engines.spot_direction.get_settings")
 def test_expiry_explosion_bypass_hard_bearish_chart(mock_settings):
+    """Aug6: hard counter-trend (CALL into BEARISH) is not waived by expiry bypass."""
     mock_settings.return_value = _settings()
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=-0.12,
+        momentum15Pct=-0.18,
+        trendStrength=42,
+    )
+    blocked, reason = chart_blocks_side(
+        Side.CALL, chart, trade_score=60, expiry_explosion_bypass=True,
+    )
+    assert blocked
+    assert reason in ("chart_live_bearish_no_calls", "chart_bearish_no_calls")
+
+
+@patch("app.engines.spot_direction.get_settings")
+def test_counter_trend_bypass_block_can_be_disabled(mock_settings):
+    s = _settings()
+    s.chart_counter_trend_bypass_block_enabled = False
+    mock_settings.return_value = s
     chart = SpotChart(
         direction="BEARISH",
         momentum5Pct=-0.12,
@@ -179,6 +199,24 @@ def test_expiry_explosion_bypass_hard_bearish_chart(mock_settings):
     )
     assert not blocked
     assert reason == "ok"
+
+
+@patch("app.engines.spot_direction.get_settings")
+def test_put_into_bullish_blocked_despite_expiry_bypass(mock_settings):
+    """Aug6 78800 PE shape — PUT + BULLISH must not fill via expiry bypass."""
+    mock_settings.return_value = _settings()
+    chart = SpotChart(
+        direction="BULLISH",
+        momentum5Pct=0.04,
+        momentum15Pct=0.08,
+        trendStrength=77.0,
+    )
+    blocked, reason = chart_blocks_side(
+        Side.PUT, chart, trade_score=100, expiry_explosion_bypass=True,
+        premium_led_bypass=True,
+    )
+    assert blocked
+    assert reason in ("chart_live_bullish_no_puts", "chart_bullish_no_puts")
 
 
 @patch("app.engines.spot_direction.get_settings")
@@ -216,7 +254,8 @@ def test_elite_score_cannot_override_weak_bearish_live_chart(mock_settings):
 
 
 @patch("app.engines.spot_direction.get_settings")
-def test_breadth_bypass_allows_pm_itm_call_on_bearish_chart(mock_settings):
+def test_breadth_bypass_no_longer_waives_hard_counter_trend(mock_settings):
+    """Aug6 policy: breadth/PM-ITM bypass cannot waive CALL into BEARISH."""
     mock_settings.return_value = _settings()
     chart = SpotChart(
         direction="BEARISH",
@@ -229,8 +268,8 @@ def test_breadth_bypass_allows_pm_itm_call_on_bearish_chart(mock_settings):
     blocked, reason = chart_blocks_side(
         Side.CALL, chart, trade_score=55, breadth_aligned_bypass=True,
     )
-    assert not blocked
-    assert reason == "ok"
+    assert blocked
+    assert reason in ("chart_live_bearish_no_calls", "chart_bearish_no_calls")
 
 
 @patch("app.engines.spot_direction.get_settings")

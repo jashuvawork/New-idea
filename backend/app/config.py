@@ -765,6 +765,9 @@ class Settings(BaseSettings):
     # cut to 6 lots — allow near-OTM ≤ moneyness_local_base_max_otm_steps too.
     fake_explosion_trap_skip_soft_cut_base_window: bool = True
     fake_explosion_trap_skip_soft_cut_near_otm: bool = True
+    # Aug6: chop+elite_hot cut_size(6) was restored to 27 by baseWindowFullLots /
+    # top_explosion soft-cap bypass. On chop/worst conflict stacks, honor the soft cap.
+    fake_explosion_trap_honor_soft_cap_on_chop: bool = True
     # High-conviction max lots win over fake-trap soft cap (hard block still applies).
     high_conviction_bypasses_fake_trap_lot_cap: bool = True
     # Structured base-window explosions take capital max lots (no first-green 6-lot throttle).
@@ -885,6 +888,9 @@ class Settings(BaseSettings):
     chart_override_min_score: float = 75
     # Live 5m direction hard block — not skippable by high rank score (fixes scalp mis-entries)
     chart_live_direction_hard_block: bool = True
+    # Aug6 78800 PE: PUT into BULLISH index filled via expiryExplosionBypass / local-base
+    # chart bypass. Hard direction conflict must not be waived by any bypass.
+    chart_counter_trend_bypass_block_enabled: bool = True
     chart_alignment_rank_bonus: float = 10.0
     # Gap-down leaves spotChart/breadth BEARISH and blanket-blocks CEs (Jul24 NIFTY
     # 23700 CE EXPLODING 98 off a ~110 local base). Local premium base alone lifts
@@ -1231,6 +1237,11 @@ class Settings(BaseSettings):
     explosion_whipsaw_flip_guard_enabled: bool = True
     explosion_whipsaw_flip_lookback_seconds: int = 3600
     explosion_whipsaw_flip_lot_cap: int = 8
+    # After opposite-side win, weak tape flips are blocked (Aug6 PUT v3=0.54).
+    # Hot flips (≥ breakout floor) still get the lot cap only.
+    explosion_whipsaw_flip_require_velocity: bool = True
+    explosion_whipsaw_flip_min_velocity_3s: float = 2.5
+    explosion_whipsaw_flip_block_weak: bool = True
     scalp_stop_points: float = 3.0  # legacy fallback when premium unknown
     # Calculated scalp SL = max(min_points, premium * pct), capped at max_points.
     scalp_stop_pct_of_premium: float = 0.10
@@ -1312,6 +1323,10 @@ class Settings(BaseSettings):
     worst_day_breakout_min_symbol_tqs: float = 45.0
     worst_day_breakout_tiers_csv: str = "ELITE,EXPLODING"
     worst_day_breakout_require_chart_align: bool = True
+    # Aug6: elite_never_block short-circuited worst-day before chart-align / cold-base
+    # checks. Require both for the elite bypass on BREAKOUT_ONLY / PAUSED days.
+    worst_day_elite_bypass_require_chart_align: bool = True
+    worst_day_elite_bypass_block_cold_base: bool = True
     worst_day_full_pause_loss_inr: float = -20_000.0
     worst_day_blocks_live: bool = True
     worst_day_call_block_enabled: bool = True

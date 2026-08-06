@@ -175,6 +175,56 @@ def worst_day_blocks_call_scalp(
     return False, "ok"
 
 
+def _elite_worst_day_bypass_allowed(
+    candidate: Any,
+    snapshots: dict[str, SymbolSnapshot],
+    meta: dict[str, Any],
+) -> tuple[bool, str]:
+    """Require chart-align + not cold-base for elite_never_block on worst days."""
+    settings = get_settings()
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+
+    if getattr(settings, "worst_day_elite_bypass_require_chart_align", True):
+        chart = getattr(snap, "spotChart", None) if snap is not None else None
+        if chart is not None:
+            from app.engines.spot_direction import side_aligned_with_chart
+
+            side = getattr(candidate, "side", None)
+            if not side_aligned_with_chart(side, chart):
+                meta["eliteBypassChartMisaligned"] = True
+                return False, "elite_bypass_chart_misaligned"
+
+    if getattr(settings, "worst_day_elite_bypass_block_cold_base", True):
+        timing = None
+        event = getattr(candidate, "explosion_event", None)
+        if event is not None and snap is not None:
+            try:
+                from app.engines.entry_timing import assess_timing_for_event
+                from app.engines.morning_premium_capture import is_premium_capture_event
+
+                timing = assess_timing_for_event(
+                    event,
+                    snap=snap,
+                    premium_capture=is_premium_capture_event(
+                        event, chart=getattr(snap, "spotChart", None),
+                    ),
+                )
+            except Exception:
+                timing = None
+        if timing:
+            assessment = str(timing.get("assessment") or "").upper()
+            if (
+                timing.get("structuredColdBase")
+                or assessment in ("COLD_BASE", "COLD")
+            ):
+                meta["eliteBypassColdBase"] = True
+                meta["eliteBypassTiming"] = assessment or "COLD_BASE"
+                return False, "elite_bypass_cold_base"
+
+    return True, "ok"
+
+
 def worst_day_allows_candidate(
     candidate: Any,
     state: AutoTraderState,
@@ -196,13 +246,17 @@ def worst_day_allows_candidate(
 
     from app.engines.elite_never_block import elite_never_block_active
 
-    # ELITE explosions are never blocked by worst-day / BREAKOUT_ONLY / pause gates.
+    # ELITE explosions may bypass worst-day / BREAKOUT_ONLY / pause gates — but only
+    # when chart-aligned and not a cold-base print (Aug6 PUT into bullish chop).
     if (
         str(getattr(candidate, "mode", "") or "") == "explosion"
         and elite_never_block_active(candidate=candidate)
     ):
-        meta["worstDayBypass"] = "elite_never_block"
-        return True, "ok", meta
+        elite_ok, elite_deny = _elite_worst_day_bypass_allowed(candidate, snapshots, meta)
+        if elite_ok:
+            meta["worstDayBypass"] = "elite_never_block"
+            return True, "ok", meta
+        meta["eliteNeverBlockDenied"] = elite_deny
 
     if policy == "PAUSED":
         # Never miss a confirmed TOP explosion off a local base — even a paused

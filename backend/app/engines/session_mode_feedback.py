@@ -215,13 +215,15 @@ def cap_opposite_side_flip_after_win(
     *,
     symbol: str,
     side: Any,
+    velocity_3s: float = 0.0,
 ) -> tuple[int, dict[str, Any]]:
-    """Cap a counter-flip entry after a same-session WIN on the opposite side.
+    """Cap / block a counter-flip entry after a same-session WIN on the opposite side.
 
     Aug6: two CALLs won (market up), then a max-size PUT flip lost −₹20k. Flipping side
     right after an opposite-side winner is a whipsaw — don't ride it at max size.
+    Weak-tape flips (v3 below breakout floor) are blocked entirely when configured.
     """
-    meta: dict[str, Any] = {"applied": False}
+    meta: dict[str, Any] = {"applied": False, "blocked": False}
     settings = get_settings()
     if not getattr(settings, "explosion_whipsaw_flip_guard_enabled", True):
         return lots, meta
@@ -253,15 +255,42 @@ def cap_opposite_side_flip_after_win(
             break
     if win is None:
         return lots, meta
+
+    try:
+        v3 = float(velocity_3s or 0.0)
+    except (TypeError, ValueError):
+        v3 = 0.0
+    min_v3 = float(
+        getattr(settings, "explosion_whipsaw_flip_min_velocity_3s", 2.5) or 2.5
+    )
+    require_v = bool(getattr(settings, "explosion_whipsaw_flip_require_velocity", True))
+    block_weak = bool(getattr(settings, "explosion_whipsaw_flip_block_weak", True))
+    if require_v and block_weak and v3 < min_v3:
+        meta.update({
+            "applied": True,
+            "blocked": True,
+            "blockReason": "whipsaw_flip_velocity_below_breakout",
+            "flipFromWinSide": opp,
+            "priorWinPnlInr": round(float(getattr(win, "pnlInr", 0) or 0), 2),
+            "velocity3s": round(v3, 3),
+            "minVelocity3s": min_v3,
+            "uncappedLots": lots,
+            "cappedLots": 0,
+        })
+        return 0, meta
+
     cap = int(getattr(settings, "explosion_whipsaw_flip_lot_cap", 8) or 8)
     capped = min(max(0, lots), max(1, cap))
     meta.update({
         "applied": capped < lots,
+        "blocked": False,
         "flipFromWinSide": opp,
         "priorWinPnlInr": round(float(getattr(win, "pnlInr", 0) or 0), 2),
         "uncappedLots": lots,
         "lotCap": cap,
         "cappedLots": capped,
+        "velocity3s": round(v3, 3),
+        "minVelocity3s": min_v3,
     })
     return capped, meta
 
