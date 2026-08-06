@@ -294,6 +294,23 @@ def test_high_conviction_bypasses_soft_trap_cap():
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
+def test_chop_cut_size_honors_soft_cap_despite_bypass(mock_settings):
+    """Aug6: chop+elite cut_size(6) must not restore 27 via baseWindowFullLots bypass."""
+    mock_settings.return_value = _settings()
+    meta = {
+        "fakeExplosionTrap": True,
+        "action": "cut_size",
+        "lotCap": 6,
+        "chopRegime": True,
+        "middayChop": True,
+        "eliteHot": True,
+        "conflictFlags": ["chop_regime", "midday_chop", "elite_hot"],
+        "conflictCount": 3,
+    }
+    assert cap_fake_explosion_trap_lots(27, meta, bypass_soft_cap=True) == 6
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.moneyness.get_settings")
 def test_extended_chase_still_flags_session_extended(mock_money_settings, mock_settings):
     cfg = _settings()

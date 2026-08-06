@@ -426,6 +426,33 @@ def side_aligned_with_chart(side: Side | str, chart: Optional[SpotChart]) -> boo
     return direction == "BEARISH"
 
 
+def hard_counter_trend_chart(
+    side: Side | str,
+    chart: Optional[SpotChart],
+) -> bool:
+    """True when PUT+BULLISH or CALL+BEARISH — hard direction conflict."""
+    if not chart:
+        return False
+    side_val = side.value if isinstance(side, Side) else str(side).upper()
+    direction = (chart.direction or "NEUTRAL").upper()
+    if side_val == "CALL" and direction == "BEARISH":
+        return True
+    if side_val == "PUT" and direction == "BULLISH":
+        return True
+    return False
+
+
+def _counter_trend_bypass_blocked(
+    side: Side | str,
+    chart: Optional[SpotChart],
+) -> bool:
+    """Aug6: never waive hard chart conflict via expiry/local-base/premium bypasses."""
+    settings = get_settings()
+    if not getattr(settings, "chart_counter_trend_bypass_block_enabled", True):
+        return False
+    return hard_counter_trend_chart(side, chart)
+
+
 def live_direction_blocks_side(
     side: Side | str,
     chart: Optional[SpotChart],
@@ -449,6 +476,8 @@ def live_direction_blocks_side(
     bypass = expiry_explosion_bypass
     if not scalp_mode:
         bypass = bypass or breadth_aligned_bypass or premium_led_bypass
+    if bypass and _counter_trend_bypass_blocked(side_val, chart):
+        bypass = False
 
     if side_val == "CALL" and chart.direction == "BEARISH":
         if bypass:
@@ -493,12 +522,20 @@ def chart_blocks_side(
         return True, live_reason
 
     # Hard direction conflict — breadth-aligned / premium-led / expiry explosion bypass.
+    # Aug6: counter-trend bypass block refuses to waive PUT+BULLISH / CALL+BEARISH.
+    counter_block = _counter_trend_bypass_blocked(side_val, chart)
     if side_val == "CALL" and chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
-        if breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass:
+        if (
+            not counter_block
+            and (breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass)
+        ):
             return False, "ok"
         return True, "chart_bearish_no_calls"
     if side_val == "PUT" and chart.direction == "BULLISH" and chart.trendStrength >= min_strength:
-        if breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass:
+        if (
+            not counter_block
+            and (breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass)
+        ):
             return False, "ok"
         return True, "chart_bullish_no_puts"
 

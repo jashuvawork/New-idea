@@ -1090,6 +1090,7 @@ def detect_fake_explosion_trap(
         "strikeStepsFromAtm": depth,
         "chopRegime": chop_regime,
         "middayChop": midday,
+        "eliteHot": elite_hot,
         "premiumFlat": premium_flat,
     })
 
@@ -1237,6 +1238,28 @@ def detect_fake_explosion_trap(
     return False, "ok", meta
 
 
+def _trap_soft_cap_must_honor(trap_meta: dict[str, Any]) -> bool:
+    """Chop/worst conflict stacks must keep cut_size lotCap (Aug6 27→6 restore hole)."""
+    settings = get_settings()
+    if not getattr(settings, "fake_explosion_trap_honor_soft_cap_on_chop", True):
+        return False
+    if trap_meta.get("action") != "cut_size":
+        return False
+    flags = {
+        str(f).lower()
+        for f in (trap_meta.get("conflictFlags") or [])
+        if f is not None
+    }
+    chopish = bool(
+        trap_meta.get("chopRegime")
+        or trap_meta.get("middayChop")
+        or "chop_regime" in flags
+        or "midday_chop" in flags
+    )
+    elite_hot = bool(trap_meta.get("eliteHot") or "elite_hot" in flags)
+    return chopish and (elite_hot or int(trap_meta.get("conflictCount") or 0) >= 3)
+
+
 def cap_fake_explosion_trap_lots(
     lots: int,
     trap_meta: Optional[dict[str, Any]],
@@ -1248,6 +1271,9 @@ def cap_fake_explosion_trap_lots(
         return lots
     if trap_meta.get("action") == "block":
         return 0
+    # Chop/worst cut_size always wins over baseWindowFullLots / HC soft bypass.
+    if _trap_soft_cap_must_honor(trap_meta):
+        bypass_soft_cap = False
     # High-conviction / elevated ATM base rips keep max lots; hard block still wins.
     if bypass_soft_cap and trap_meta.get("action") == "cut_size":
         return lots
