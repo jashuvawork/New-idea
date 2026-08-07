@@ -36,8 +36,9 @@ def _settings(**kwargs):
     s.entry_timing_elite_bypass_requires_hot = True
     s.min_option_premium_inr = 18.0
     s.ict_structured_early_entry_enabled = True
-    s.ict_structured_early_min_move_pct = 10.0
+    s.ict_structured_early_min_move_pct = 15.0
     s.ict_structured_early_max_move_pct = 65.0
+    s.explosion_local_base_entry_min_move_pct = 15.0
     s.explosion_early_window_min_move_pct = 28.0
     s.explosion_early_window_max_move_pct = 65.0
     s.explosion_chase_use_local_base = True
@@ -66,9 +67,9 @@ def _snap(spot=24500.0):
         tradeQualityScore=48.0,
         breadth=Breadth(bias="BEARISH", score=40, aligned=True),
         spotChart=SpotChart(
-            direction="BULLISH",
-            momentum5Pct=0.05,
-            macdBias="BULLISH",
+            direction="BEARISH",
+            momentum5Pct=-0.05,
+            macdBias="BEARISH",
         ),
     )
 
@@ -140,17 +141,17 @@ def _cand(event, snap):
 @patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.moneyness.get_settings")
 def test_must_take_at_true_base_without_structured_ict(mock_mny, mock_g, mock_enb):
-    """ELITE at ~11% off pad must arm even before ICT flat→vertical heat prints.
+    """ELITE at ~16% off pad must arm even before ICT flat→vertical heat prints.
 
     This is the 40→160 failure mode: waiting for unstructured 28% / ICT heat
-    means we only wake up after the chase.
+    means we only wake up after the chase. Floor is 15% (Aug7 13% noise skipped).
     """
     s = _settings()
     mock_enb.return_value = s
     mock_g.return_value = s
     mock_mny.return_value = s
     snap = _snap()
-    event = _event(v3=2.2, base_rel=11.0, premium=45.0)
+    event = _event(v3=2.2, base_rel=16.0, premium=46.4)
     # Weak ICT — no structured heat yet (what 10:17 looked like).
     ict = SimpleNamespace(
         active=False,
@@ -161,7 +162,7 @@ def test_must_take_at_true_base_without_structured_ict(mock_mny, mock_g, mock_en
         premium_fvg=False,
         mega_rip=False,
         base_relative_move_pct=0.0,
-        session_move_pct=11.0,
+        session_move_pct=16.0,
         base_premium=40.0,
         velocity_3s=2.2,
         volume_surge=1.2,
@@ -197,7 +198,7 @@ def test_must_take_near_base_atm_even_when_cold(mock_mny, mock_g, mock_enb):
 @patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.moneyness.get_settings")
 def test_must_take_allows_aug4_style_mid_extension(mock_mny, mock_g, mock_enb):
-    """Aug4 SENSEX 78700 PE ~54% off local base must stay inside 10–65% pad."""
+    """Aug4 SENSEX 78700 PE ~54% off local base must stay inside 15–65% pad."""
     s = _settings()
     mock_enb.return_value = s
     mock_g.return_value = s
