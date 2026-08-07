@@ -61,23 +61,26 @@ def _ict_flat_vertical_entry_ok(
     )
     if not heat:
         return False
-    if tier_u != "BUILDING":
-        return True
     settings = get_settings()
-    if not bool(getattr(settings, "explosion_building_aligned_ict_enabled", True)):
-        return False
-    min_score = float(getattr(settings, "explosion_building_elite_min_score", 62.0) or 62.0)
-    if float(getattr(event, "explosion_score", 0) or 0) < min_score:
-        return False
-    min_v3 = float(
-        getattr(settings, "explosion_building_elite_min_velocity_3s", 2.5) or 2.5
-    )
-    if float(getattr(event, "velocity_3s", 0) or 0) < min_v3:
-        return False
-    min_ict = float(getattr(settings, "explosion_building_elite_min_ict_score", 35.0) or 35.0)
-    if float(getattr(ict, "score", 0) or 0) < min_ict:
-        return False
-    return True
+    if tier_u == "BUILDING":
+        if not bool(getattr(settings, "explosion_building_aligned_ict_enabled", True)):
+            return False
+        min_score = float(getattr(settings, "explosion_building_elite_min_score", 62.0) or 62.0)
+        if float(getattr(event, "explosion_score", 0) or 0) < min_score:
+            return False
+        min_v3 = float(
+            getattr(settings, "explosion_building_elite_min_velocity_3s", 2.5) or 2.5
+        )
+        if float(getattr(event, "velocity_3s", 0) or 0) < min_v3:
+            return False
+        min_ict = float(getattr(settings, "explosion_building_elite_min_ict_score", 35.0) or 35.0)
+        if float(getattr(ict, "score", 0) or 0) < min_ict:
+            return False
+    # GainzAlgo-style break-P confirm — reject shallow/fake cloud exits.
+    from app.engines.smart_ichimoku import ichimoku_break_supports_side
+
+    ok, _reason = ichimoku_break_supports_side(event.side, snap, require_confirmed=True)
+    return ok
 
 
 def _is_base_rip_runner_trade(trade: PaperTrade) -> bool:
@@ -322,6 +325,15 @@ def check_explosion_entry(
     must_take = elite_never_block_active(
         event=event, snap=snap, ict=ict_live,
     )
+    # Flat→vertical ELITE/EXPLODING/BUILDING — require GainzAlgo-style break-P.
+    if bool(getattr(ict_live, "flat_then_vertical", False)):
+        from app.engines.smart_ichimoku import ichimoku_break_supports_side
+
+        ichi_ok, ichi_reason = ichimoku_break_supports_side(
+            event.side, snap, require_confirmed=True,
+        )
+        if not ichi_ok:
+            return False, ichi_reason
     window_blocked, window_reason = explosion_entry_window_blocked(
         event, ict=ict_live, top_must_take=must_take,
     )

@@ -186,6 +186,20 @@ class Settings(BaseSettings):
     explosion_building_elite_min_score: float = 62.0
     explosion_building_elite_min_velocity_3s: float = 2.5
     explosion_building_elite_min_ict_score: float = 35.0
+    # GainzAlgo-style Smart Ichimoku — HMA cloud + logistic break-P confirm on
+    # ICT flat→vertical ELITE/EXPLODING (and elite-BUILDING). Filters shallow fakes.
+    smart_ichimoku_use_hma: bool = True
+    smart_ichimoku_tenkan_period: int = 9
+    smart_ichimoku_kijun_period: int = 26
+    smart_ichimoku_senkou_b_period: int = 52
+    smart_ichimoku_displacement: int = 26
+    smart_ichimoku_break_min_probability: float = 0.60
+    smart_ichimoku_continuation_min_probability: float = 0.55
+    smart_ichimoku_flat_vertical_confirm_enabled: bool = True
+    smart_ichimoku_weight_rsi: float = 0.85
+    smart_ichimoku_weight_stoch: float = 0.65
+    smart_ichimoku_weight_zscore: float = 0.90
+    smart_ichimoku_weight_depth: float = 1.10
     # Explosion entries only when index chart agrees with option side (CALL↔BULLISH,
     # PUT↔BEARISH). No counter-trend FOMO; flat→vertical is taken only when aligned.
     explosion_require_chart_align_enabled: bool = True
