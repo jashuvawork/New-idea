@@ -252,7 +252,27 @@ export interface ChartAnalysis {
   pivots: Record<string, number>;
   gann: Record<string, number>;
   pitchfork: Record<string, unknown>;
-  ichimoku: Record<string, unknown>;
+  ichimoku: {
+    tenkan?: number;
+    kijun?: number;
+    senkouA?: number;
+    senkouB?: number;
+    cloudTop?: number;
+    cloudBottom?: number;
+    cloudBias?: string;
+    tkCross?: string;
+    tkCrossAge?: number;
+    priceVsCloud?: string;
+    chikouBias?: string;
+    cloudTwist?: string;
+    cloudThicknessPct?: number;
+    futureCloud?: string;
+    smartBias?: string;
+    smartScore?: number;
+    smartLabel?: string;
+    reasons?: string[];
+    [key: string]: unknown;
+  };
   patterns: Array<{ name: string; bias: string; strength: number; timeframe: string }>;
   institutional: Record<string, unknown>;
   smtDivergence?: { type: string; message: string; bias: string } | null;

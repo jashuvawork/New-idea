@@ -200,6 +200,60 @@ function ChartAnalysisSection({ symbol, analysis }: { symbol: string; analysis: 
         </div>
       )}
 
+      {/* Smart Ichimoku — composite cloud / TK / chikou read */}
+      <div className="rounded border border-nexus-border/40 bg-black/25 px-1.5 py-1 space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[9px] font-semibold text-nexus-muted tracking-wide">
+            Smart Ichimoku
+          </span>
+          <span
+            className={`text-[9px] font-bold ${
+              ich.smartBias === 'BULLISH'
+                ? 'text-nexus-green'
+                : ich.smartBias === 'BEARISH'
+                  ? 'text-nexus-red'
+                  : 'text-nexus-muted'
+            }`}
+          >
+            {ich.smartBias ?? ich.cloudBias ?? '—'}
+            {typeof ich.smartScore === 'number' ? ` · ${ich.smartScore.toFixed(0)}` : ''}
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-1 text-[8px] font-mono text-nexus-muted">
+          <div>
+            Cloud: <span className="text-white">{ich.priceVsCloud ?? '—'}</span>
+          </div>
+          <div>
+            TK: <span className="text-white">{ich.tkCross ?? '—'}</span>
+            {typeof ich.tkCrossAge === 'number' && ich.tkCrossAge > 0 ? ` (${ich.tkCrossAge})` : ''}
+          </div>
+          <div>
+            Chikou: <span className="text-white">{ich.chikouBias ?? '—'}</span>
+          </div>
+          <div>
+            Twist: <span className="text-white">{ich.cloudTwist && ich.cloudTwist !== 'NONE' ? ich.cloudTwist : '—'}</span>
+          </div>
+          <div>
+            Kumo: <span className="text-white">{ich.futureCloud ?? ich.cloudBias ?? '—'}</span>
+          </div>
+          <div>
+            Thick:{' '}
+            <span className="text-white">
+              {typeof ich.cloudThicknessPct === 'number' ? `${ich.cloudThicknessPct.toFixed(2)}%` : '—'}
+            </span>
+          </div>
+        </div>
+        {ich.reasons && ich.reasons.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {ich.reasons.slice(0, 4).map((r) => (
+              <span key={r} className="text-[7px] px-1 rounded bg-white/5 text-nexus-muted">
+                {r.replace(/_/g, ' ')}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
       <div className="grid grid-cols-2 gap-1 text-[8px] font-mono text-nexus-muted">
         <div>
           Fib: <span className="text-white">{fib.zone ?? '—'}</span>
@@ -208,9 +262,6 @@ function ChartAnalysisSection({ symbol, analysis }: { symbol: string; analysis: 
         <div>
           Pivot P: <span className="text-white">{analysis.pivots?.P ?? '—'}</span>
           {analysis.pivots?.R1 ? ` · R1 ${analysis.pivots.R1}` : ''}
-        </div>
-        <div>
-          Ichimoku: <span className="text-white">{(ich as { cloudBias?: string }).cloudBias ?? '—'}</span>
         </div>
         <div>
           SMC: <span className="text-white">{(inst as { structure?: string }).structure ?? '—'}</span>

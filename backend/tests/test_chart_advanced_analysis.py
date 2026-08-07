@@ -115,3 +115,30 @@ def test_ichimoku_cloud_bias():
     ich = compute_ichimoku(highs, lows, closes, closes[-1])
     assert ich["tenkan"] > 0
     assert ich["cloudBias"] in ("BULLISH", "BEARISH", "NEUTRAL")
+
+
+def test_smart_ichimoku_uptrend_composite():
+    """Rising series → smartBias bullish with chikou + displaced cloud fields."""
+    highs = [100 + i * 0.4 for i in range(80)]
+    lows = [99 + i * 0.4 for i in range(80)]
+    closes = [99.5 + i * 0.4 for i in range(80)]
+    ich = compute_ichimoku(highs, lows, closes, closes[-1])
+    assert ich["cloudDisplaced"] is True
+    assert ich["priceVsCloud"] == "ABOVE"
+    assert ich["chikouBias"] == "BULLISH"
+    assert ich["tkCross"] == "BULLISH"
+    assert ich["smartBias"] == "BULLISH"
+    assert ich["smartScore"] >= 62
+    assert "price_above_cloud" in ich["reasons"]
+    assert "chikou_above" in ich["reasons"]
+
+
+def test_smart_ichimoku_downtrend_composite():
+    highs = [140 - i * 0.35 for i in range(80)]
+    lows = [138 - i * 0.35 for i in range(80)]
+    closes = [139 - i * 0.35 for i in range(80)]
+    ich = compute_ichimoku(highs, lows, closes, closes[-1])
+    assert ich["priceVsCloud"] == "BELOW"
+    assert ich["smartBias"] == "BEARISH"
+    assert ich["smartScore"] <= 38
+    assert ich["chikouBias"] == "BEARISH"
