@@ -179,6 +179,12 @@ class Settings(BaseSettings):
     scalp_entries_enabled: bool = False
     # Explosion entries: only ELITE + EXPLODING (no BUILDING / soft premium-capture admits).
     explosion_elite_exploding_only: bool = True
+    # Exception: early BUILDING flat→vertical when chart-aligned — catch the base
+    # before the rip prints ELITE (Jul23-style PE 180→500; multiple times/week).
+    explosion_building_aligned_ict_enabled: bool = True
+    # Explosion entries only when index chart agrees with option side (CALL↔BULLISH,
+    # PUT↔BEARISH). No counter-trend FOMO; flat→vertical is taken only when aligned.
+    explosion_require_chart_align_enabled: bool = True
     # Never block ELITE explosions — skip extended-chase / live-confirm /
     # composer stand-down. Fake-trap + late-fade still apply (real PF killers).
     # Premium band still applies (no ₹3 OTM). Timing COLD/LATE/CHASE still
@@ -189,6 +195,7 @@ class Settings(BaseSettings):
     explosion_top_must_take_tiers_csv: str = "ELITE,EXPLODING"
     explosion_top_must_take_min_score: float = 62.0
     explosion_top_must_take_require_atm_itm: bool = True
+    explosion_top_must_take_require_chart_align: bool = True
     # Per-trade timing quality (GOOD/OK/COLD/LATE/CHASE) — blocks cold ELITE fills.
     entry_timing_assessment_enabled: bool = True
     entry_timing_cold_max_velocity_3s: float = 1.5
@@ -381,6 +388,9 @@ class Settings(BaseSettings):
     # entered 11% off base, peak-fade booked +₹149 instead of riding the base rip.)
     explosion_near_base_hold_enabled: bool = True
     explosion_near_base_hold_max_entry_rel_pct: float = 20.0
+    # ICT flat→vertical / maxProfitCapture: hold further into the pad so mid-window
+    # base entries (e.g. 25–40% off) still ride toward max TP instead of soft-locking.
+    explosion_near_base_hold_ict_max_entry_rel_pct: float = 40.0
     # Align with max-profit fade floor — small +10–15pt peaks are still the base leg.
     explosion_near_base_hold_min_best_points: float = 28.0
 
@@ -1121,7 +1131,10 @@ class Settings(BaseSettings):
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 18.0
     max_option_premium_inr: float = 300.0
-    explosion_max_premium_inr: float = 400.0
+    # Raised so mid-rip ATM/ITM (180→450+) stays on radar for max-TP capture.
+    explosion_max_premium_inr: float = 650.0
+    # ICT flat→vertical ATM/ITM can use a higher ceiling while still in the pad.
+    explosion_ict_max_premium_inr: float = 800.0
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0

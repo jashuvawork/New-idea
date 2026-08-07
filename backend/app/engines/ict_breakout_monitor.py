@@ -483,6 +483,21 @@ def good_day_ict_capture_active(
 
     meta["ict"] = ict.to_dict()
 
+    # Max-profit / flat→vertical capture only when chart aligns with the option side.
+    if bool(getattr(settings, "explosion_require_chart_align_enabled", True)) and event is not None:
+        sym = str(getattr(event, "symbol", "") or "").upper()
+        snap = snapshots.get(sym)
+        chart = getattr(snap, "spotChart", None) if snap is not None else None
+        if chart is not None:
+            from app.engines.spot_direction import side_aligned_with_chart
+
+            side = getattr(event, "side", None)
+            if not side_aligned_with_chart(side, chart):
+                meta["chartAligned"] = False
+                meta["deniedReason"] = "ict_capture_requires_chart_align"
+                return False, meta
+            meta["chartAligned"] = True
+
     # Aggressive good-day path (unchanged intent).
     if settings.ict_good_day_capture_enabled and mode == "AGGRESSIVE":
         if ict.mega_rip or (ict.active and ict.score >= settings.ict_good_day_min_score):

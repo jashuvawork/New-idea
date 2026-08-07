@@ -85,6 +85,40 @@ class EntryCandidate:
     pretrade_meta: Optional[dict] = None
 
 
+def _building_aligned_ict_alert_ok(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+    tier_u: str,
+) -> bool:
+    """Allow BUILDING when flat→vertical ICT + chart-aligned (catch at the base)."""
+    settings = get_settings()
+    if not bool(getattr(settings, "explosion_building_aligned_ict_enabled", True)):
+        return False
+    if tier_u != "BUILDING":
+        return False
+    if not bool(alert.get("ictFlatThenVertical") or alert.get("ictBreakout")):
+        return False
+    if float(alert.get("ictScore") or 0) < 28 and not bool(alert.get("ictFlatThenVertical")):
+        return False
+    side_raw = str(alert.get("side") or "").upper()
+    if side_raw not in ("CALL", "PUT"):
+        return False
+    from app.engines.spot_direction import side_aligned_with_chart
+
+    if snap.spotChart is None:
+        return False
+    if not side_aligned_with_chart(Side(side_raw), snap.spotChart):
+        return False
+    # Prefer heat — volume / displacement / early break flags on the alert.
+    heat = (
+        bool(alert.get("ictVolumeAwakening") or alert.get("volumeAwakening"))
+        or bool(alert.get("ictDisplacement") or alert.get("displacement"))
+        or bool(alert.get("ictPremiumFvg") or alert.get("premiumFvg"))
+        or float(alert.get("velocity3s") or alert.get("velocity_3s") or 0) >= 2.0
+    )
+    return heat or bool(alert.get("ictFlatThenVertical"))
+
+
 def _reentry_blocked(
     symbol: str,
     side: Side,
@@ -195,12 +229,33 @@ def _explosion_candidates(
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
         if elite_only:
             if tier_u not in ("ELITE", "EXPLODING"):
-                continue
+                # Early BUILDING flat→vertical when chart-aligned — catch the base
+                # before ELITE prints (multiple flat→vertical moments per week).
+                if not _building_aligned_ict_alert_ok(alert, snap, tier_u):
+                    continue
         elif tier_u not in ("ELITE", "EXPLODING"):
             from app.engines.morning_premium_capture import is_premium_capture_alert
 
             ict_ok = bool(alert.get("ictBreakout")) and float(alert.get("ictScore") or 0) >= 28
             if not is_premium_capture_alert(alert, snap.spotChart) and not ict_ok:
+                continue
+        # Only when chart aligns — drop counter-trend explosions at selection.
+        if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
+            from app.engines.spot_direction import side_aligned_with_chart
+            from app.models.schemas import Side as _Side
+
+            side_raw = str(alert.get("side") or "").upper()
+            side_v = None
+            if side_raw in ("CALL", "PUT"):
+                try:
+                    side_v = _Side(side_raw)
+                except Exception:
+                    side_v = None
+            if (
+                side_v is not None
+                and snap.spotChart is not None
+                and not side_aligned_with_chart(side_v, snap.spotChart)
+            ):
                 continue
         score_val = float(alert.get("explosionScore", 0))
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
@@ -1243,7 +1298,15 @@ def diagnose_missed_entries(
             )
             blockers: list[str] = []
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
-                blockers.append("tier_not_elite_exploding")
+                if not _building_aligned_ict_alert_ok(alert, snap, str(tier_str).upper()):
+                    blockers.append("tier_not_elite_exploding")
+            if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
+                from app.engines.spot_direction import side_aligned_with_chart
+
+                side_raw = str(alert.get("side") or "").upper()
+                if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
+                    if not side_aligned_with_chart(Side(side_raw), snap.spotChart):
+                        blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):
                 blockers.append("premium_out_of_band")
             if score < min_score:

@@ -285,6 +285,15 @@ def top_explosion_must_take_active(
     if not _in_near_base_window(resolved_event, resolved_alert, ict=resolved_ict):
         return False
 
+    # Only when chart aligns — never must-take a counter-trend flat→vertical.
+    if bool(getattr(settings, "explosion_top_must_take_require_chart_align", True)):
+        chart = getattr(resolved_snap, "spotChart", None) if resolved_snap is not None else None
+        if chart is not None:
+            from app.engines.spot_direction import side_aligned_with_chart
+
+            if not side_aligned_with_chart(side, chart):
+                return False
+
     return True
 
 

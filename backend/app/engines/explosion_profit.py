@@ -36,13 +36,18 @@ def _ict_flat_vertical_entry_ok(
 
     Without this, selector surfaces ICT BUILDING at 28% but check_explosion_entry
     rejects until EXPLODING (≥40% session ladder) — Jul23 76300 PE entered late.
+    Chart must align (PUT↔BEARISH / CALL↔BULLISH) — no counter-trend base rips.
     """
     if event is None or snap is None:
         return False
     if str(getattr(event, "tier", "") or "").upper() not in ("BUILDING", "EXPLODING", "ELITE"):
         return False
     from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+    from app.engines.spot_direction import side_aligned_with_chart
 
+    chart = getattr(snap, "spotChart", None)
+    if chart is not None and not side_aligned_with_chart(event.side, chart):
+        return False
     ict = analyze_explosion_event_ict(event, snap)
     if not bool(getattr(ict, "active", False)):
         return False
@@ -169,6 +174,15 @@ def check_explosion_entry(
         if explosion_in_cooldown(event.symbol):
             return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
         return True, "extreme_all_in_explosion_confirmed"
+
+    # Flat→vertical / ELITE only when chart aligns with the option side.
+    settings = get_settings()
+    if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
+        from app.engines.spot_direction import side_aligned_with_chart
+
+        align_chart = chart or (getattr(snap, "spotChart", None) if snap is not None else None)
+        if align_chart is not None and not side_aligned_with_chart(event.side, align_chart):
+            return False, "explosion_requires_chart_align"
 
     if snap is not None:
         from app.engines.aligned_side_guard import breadth_hard_blocks_side
@@ -818,6 +832,20 @@ def _near_base_top_runner(trade: PaperTrade) -> bool:
     max_rel = float(
         getattr(settings, "explosion_near_base_hold_max_entry_rel_pct", 20.0) or 20.0
     )
+    # ICT flat→vertical / max-profit: hold further into the pad toward max TP.
+    ict_max = bool(
+        ctx.get("ictFlatThenVertical")
+        or ctx.get("maxProfitCapture")
+        or ctx.get("defensiveBaseRip")
+    )
+    if ict_max:
+        max_rel = max(
+            max_rel,
+            float(
+                getattr(settings, "explosion_near_base_hold_ict_max_entry_rel_pct", 40.0)
+                or 40.0
+            ),
+        )
     if rel <= 0 or rel > max_rel:
         return False
     # True protective psychology overrides the hold. OVERCONFIDENCE must NOT —
@@ -829,7 +857,7 @@ def _near_base_top_runner(trade: PaperTrade) -> bool:
     ).upper() in ("PROTECT", "TIGHT_STOPS"):
         return False
     tier = str(ctx.get("explosionTier") or ctx.get("tier") or "").upper()
-    if tier in ("ELITE", "EXPLODING"):
+    if tier in ("ELITE", "EXPLODING") or ict_max:
         return True
     from app.engines.explosion_confidence import trade_is_high_conviction
 
