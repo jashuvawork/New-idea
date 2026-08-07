@@ -37,6 +37,10 @@ def premium_in_band(
         cheap_peak = float(getattr(settings, "explosion_cheap_rip_min_peak_pct", 28.0) or 28.0)
         if peak_move_pct >= cheap_peak and premium >= cheap_min:
             min_prem = min(min_prem, cheap_min)
+        # Mid-rip ATM/ITM (180→450+) stays tradeable for max-TP capture.
+        ict_ceil = float(getattr(settings, "explosion_ict_max_premium_inr", 0) or 0)
+        if ict_ceil > max_prem and peak_move_pct >= 28.0:
+            max_prem = max(max_prem, ict_ceil)
     return min_prem <= premium <= max_prem
 
 
