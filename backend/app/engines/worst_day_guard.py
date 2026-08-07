@@ -376,12 +376,26 @@ def worst_day_allows_candidate(
             ict_vol = ict_vol or bool(ict.volume_awakening or ict.displacement)
             move = max(move, float(ict.session_move_pct or 0))
         early_max = float(getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0)
+        # BUILDING defensive rip must also clear elite-build bars (score + hot v3).
+        building_elite_ok = True
+        if tier == "BUILDING":
+            min_build = float(
+                getattr(settings, "explosion_building_elite_min_score", 62.0) or 62.0
+            )
+            min_v3 = float(
+                getattr(settings, "explosion_building_elite_min_velocity_3s", 2.5) or 2.5
+            )
+            v3 = float(getattr(event, "velocity_3s", 0) or 0) if event is not None else 0.0
+            if v3 <= 0:
+                v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+            building_elite_ok = score >= min_build and v3 >= min_v3
         if (
             getattr(settings, "ict_defensive_base_rip_enabled", True)
             and ict_flat
             and ict_vol
             and move <= early_max
             and score >= settings.all_day_explosion_min_score - 8
+            and building_elite_ok
         ):
             meta["defensiveBaseRip"] = True
             meta["worstDayIctBaseRip"] = True

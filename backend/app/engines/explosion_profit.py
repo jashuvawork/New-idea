@@ -32,15 +32,16 @@ def _ict_flat_vertical_entry_ok(
     event: ExplosionEvent,
     snap: Optional[SymbolSnapshot],
 ) -> bool:
-    """BUILDING-tier ICT flat→vertical is enterable in the early base window.
+    """ICT flat→vertical entry — BUILDING only as elite-build (hot + high score).
 
-    Without this, selector surfaces ICT BUILDING at 28% but check_explosion_entry
-    rejects until EXPLODING (≥40% session ladder) — Jul23 76300 PE entered late.
+    EXPLODING/ELITE keep the structure+heat path. BUILDING must clear elite-build
+    bars (score/v3) so Aug7-style cold base prints wait for ELITE upgrade.
     Chart must align (PUT↔BEARISH / CALL↔BULLISH) — no counter-trend base rips.
     """
     if event is None or snap is None:
         return False
-    if str(getattr(event, "tier", "") or "").upper() not in ("BUILDING", "EXPLODING", "ELITE"):
+    tier_u = str(getattr(event, "tier", "") or "").upper()
+    if tier_u not in ("BUILDING", "EXPLODING", "ELITE"):
         return False
     from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
     from app.engines.spot_direction import side_aligned_with_chart
@@ -53,11 +54,30 @@ def _ict_flat_vertical_entry_ok(
         return False
     if not bool(getattr(ict, "flat_then_vertical", False)):
         return False
-    return bool(
+    heat = bool(
         getattr(ict, "volume_awakening", False)
         or getattr(ict, "displacement", False)
         or getattr(ict, "premium_fvg", False)
     )
+    if not heat:
+        return False
+    if tier_u != "BUILDING":
+        return True
+    settings = get_settings()
+    if not bool(getattr(settings, "explosion_building_aligned_ict_enabled", True)):
+        return False
+    min_score = float(getattr(settings, "explosion_building_elite_min_score", 62.0) or 62.0)
+    if float(getattr(event, "explosion_score", 0) or 0) < min_score:
+        return False
+    min_v3 = float(
+        getattr(settings, "explosion_building_elite_min_velocity_3s", 2.5) or 2.5
+    )
+    if float(getattr(event, "velocity_3s", 0) or 0) < min_v3:
+        return False
+    min_ict = float(getattr(settings, "explosion_building_elite_min_ict_score", 35.0) or 35.0)
+    if float(getattr(ict, "score", 0) or 0) < min_ict:
+        return False
+    return True
 
 
 def _is_base_rip_runner_trade(trade: PaperTrade) -> bool:
