@@ -1107,8 +1107,8 @@ def evaluate_explosion_exit(
         if best <= ng_min_green and hold >= ng_min_hold and pnl_pts <= -ng_stop:
             return "explosion_never_green_stop", pnl_inr
 
-    # Hard per-trade ₹ loss cap — bound the worst case regardless of lots / stop width
-    # (always on in production; disabled by default under stubbed test settings).
+    # Hard per-trade ₹ loss cap — optional (0 = disabled). Prefer never-green + point SL
+    # so ICT/base runners are not clipped by a rupee ceiling before the thesis stop.
     hard_cap = _cfg_float(settings, "explosion_per_trade_max_loss_inr", 0.0)
     if hard_cap > 0 and pnl_inr <= -hard_cap:
         return "explosion_per_trade_risk_cap", pnl_inr
