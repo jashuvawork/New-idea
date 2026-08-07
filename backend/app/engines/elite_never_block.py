@@ -173,7 +173,7 @@ def _in_near_base_window(
     printed, so we waited, then the rip was 40→160 and died as late chase.
     """
     settings = get_settings()
-    lo = float(getattr(settings, "ict_structured_early_min_move_pct", 10.0) or 10.0)
+    lo = float(getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0)
     hi = float(getattr(settings, "ict_structured_early_max_move_pct", 65.0) or 65.0)
     move = _near_base_move_pct(event, alert, ict=ict)
     if move <= 0:

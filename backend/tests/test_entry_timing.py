@@ -39,9 +39,10 @@ def _settings(**overrides):
     s.explosion_early_window_min_move_pct = 28.0
     s.explosion_early_window_max_move_pct = 55.0
     s.ict_structured_early_entry_enabled = True
-    s.ict_structured_early_min_move_pct = 10.0
+    s.ict_structured_early_min_move_pct = 15.0
     s.ict_structured_early_max_move_pct = 45.0
     s.explosion_chase_use_local_base = True
+    s.explosion_local_base_entry_min_move_pct = 15.0
     s.explosion_local_base_trust_min_move_pct = 8.0
     s.high_conviction_sizing_enabled = True
     s.high_conviction_min_score = 90.0

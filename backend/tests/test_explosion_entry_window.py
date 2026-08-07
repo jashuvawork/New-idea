@@ -32,9 +32,10 @@ def _settings(**overrides):
     s.explosion_early_window_min_move_pct = 28.0
     s.explosion_early_window_max_move_pct = 55.0
     s.ict_structured_early_entry_enabled = True
-    s.ict_structured_early_min_move_pct = 10.0
+    s.ict_structured_early_min_move_pct = 15.0
     s.ict_structured_early_max_move_pct = 45.0
     s.explosion_chase_use_local_base = True
+    s.explosion_local_base_entry_min_move_pct = 15.0
     s.explosion_local_base_trust_min_move_pct = 8.0
     s.session_move_max_credible_pct = 500.0
     s.session_move_min_baseline_premium = 5.0
@@ -170,11 +171,37 @@ def test_structured_allows_18pct_first_displacement(mock_settings):
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_aug4_78700_moment_base_235_allows_260(mock_settings):
-    """Moment base ~235 → LTP 260 ≈10.6% — old 12% floor missed the rip to 460+."""
+def test_aug7_building_13pct_blocked_under_15_floor(mock_settings):
+    """Aug7 NIFTY 24550 PE BUILDING entered at ~13% off base — now below 15% floor."""
     mock_settings.return_value = _settings()
-    move = (260.0 - 235.0) / 235.0 * 100.0  # ≈10.64
-    assert 10.0 <= move < 12.0
+    move = 13.2
+    ict = _structured_ict(move, session=20.8)
+    ev = ExplosionEvent(
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24550.0,
+        premium=115.8,
+        velocity_3s=1.69,
+        velocity_9s=2.0,
+        velocity_15s=2.0,
+        volume_surge=2.0,
+        explosion_score=56.2,
+        tier="BUILDING",
+        reason="test",
+        daily_move_pct=move,
+        peak_move_pct=20.79,
+    )
+    blocked, reason = explosion_entry_window_blocked(ev, ict=ict)
+    assert blocked is True
+    assert "local_low" in reason or "weak_local" in reason
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_structured_allows_16pct_after_15_floor(mock_settings):
+    """Clearer base break (≥15%) still enters on structured ICT."""
+    mock_settings.return_value = _settings()
+    move = (271.0 - 235.0) / 235.0 * 100.0  # ≈15.3
+    assert 15.0 <= move < 16.0
     ict = ICTBreakoutSignal(
         active=True,
         pattern="flat_then_vertical",
@@ -192,7 +219,7 @@ def test_aug4_78700_moment_base_235_allows_260(mock_settings):
         symbol="SENSEX",
         side=Side.PUT,
         strike=78700.0,
-        premium=260.0,
+        premium=271.0,
         velocity_3s=2.5,
         velocity_9s=3.0,
         velocity_15s=3.5,
@@ -208,7 +235,7 @@ def test_aug4_78700_moment_base_235_allows_260(mock_settings):
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_structured_still_blocks_below_10pct(mock_settings):
+def test_structured_still_blocks_below_15pct(mock_settings):
     mock_settings.return_value = _settings()
     ict = _structured_ict(8.5, session=8.5)
     blocked, reason = explosion_entry_window_blocked(_event(8.5), ict=ict)
@@ -272,7 +299,7 @@ def test_weak_raw_ict_does_not_override_trusted_off_low(mock_settings, _off_low)
     assert "local_low" in reason
     assert "weak_local" not in reason
 
-    # With must-take / structured floor, 22% off-low is inside 10–65.
+    # With must-take / structured floor, 22% off-low is inside 15–65.
     blocked_mt, reason_mt = explosion_entry_window_blocked(
         _event(28.9), ict=ict, top_must_take=True,
     )

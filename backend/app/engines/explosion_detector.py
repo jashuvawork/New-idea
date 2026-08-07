@@ -1163,7 +1163,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     )
     # Pad floor — arm tradeable at the real base (₹40), not after the rip (₹160).
     pad_floor = float(
-        getattr(_settings, "ict_structured_early_min_move_pct", 10.0) or 10.0
+        getattr(_settings, "ict_structured_early_min_move_pct", 15.0) or 15.0
     )
     pad_ceil = float(
         getattr(_settings, "ict_structured_early_max_move_pct", 65.0) or 65.0

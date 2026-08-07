@@ -275,16 +275,17 @@ class Settings(BaseSettings):
     ict_base_relative_chase_abs_move_cap_pct: float = 160.0
     # Jul23 SENSEX 76400 PE: day-move +471% after an earlier run-up/dump, but the NEW leg
     # launched from the 14:35 local V-bottom (~42). Chase/entry must use that local base.
-    # Tradeable local window aligned to early band 10–65% (Aug4 78700 PE entered ~54%).
+    # Tradeable local window aligned to early band 15–65% (Aug4 78700 PE entered ~54%).
     explosion_chase_use_local_base: bool = True
     explosion_local_base_chase_max_move_pct: float = 65.0
-    # Local-base floor for structured ICT / immature — nearer the launch pad (was 28→12).
-    explosion_local_base_entry_min_move_pct: float = 10.0
+    # Local-base floor for structured ICT / immature — Aug7 BUILDING 24550 PE entered
+    # at 13% off base and failed; require clearer break before sizing in (was 10).
+    explosion_local_base_entry_min_move_pct: float = 15.0
     # Adaptive local-base entry window by tier/volume: ELITE + strong volume widens the
     # ceiling slightly inside the hard 65% cap; EXPLODING keeps the structured floor.
     local_base_adaptive_window_enabled: bool = True
     local_base_elite_chase_max_move_pct: float = 65.0
-    local_base_exploding_entry_min_move_pct: float = 10.0
+    local_base_exploding_entry_min_move_pct: float = 15.0
     local_base_wide_window_min_vol_surge: float = 3.0
     # Ignore micro baseRel (<8%) for immature/chase — Jul24 PUTs showed ~1–2%
     # "local base" noise while day-move was already mature (~28%).
@@ -305,11 +306,11 @@ class Settings(BaseSettings):
     explosion_early_window_min_move_pct: float = 28.0
     explosion_early_window_max_move_pct: float = 65.0
     explosion_entry_window_hard_enabled: bool = True
-    # Structured near-base path: ICT + heat may enter 10–65% off local base.
+    # Structured near-base path: ICT + heat may enter 15–65% off local base.
     # Aug4 SENSEX 78700 PE entered ~54% off local base (+₹18k) — old 45% ceiling
-    # treated that as chase. Widen so first vertical leg stays must-take / early.
+    # treated that as chase. Floor 10→15 so Aug7-style 13% BUILDING noise is skipped.
     ict_structured_early_entry_enabled: bool = True
-    ict_structured_early_min_move_pct: float = 10.0
+    ict_structured_early_min_move_pct: float = 15.0
     ict_structured_early_max_move_pct: float = 65.0
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
