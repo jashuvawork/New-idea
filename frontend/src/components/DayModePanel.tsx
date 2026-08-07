@@ -204,7 +204,9 @@ function ChartAnalysisSection({ symbol, analysis }: { symbol: string; analysis: 
       <div className="rounded border border-nexus-border/40 bg-black/25 px-1.5 py-1 space-y-1">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[9px] font-semibold text-nexus-muted tracking-wide">
-            Smart Ichimoku{ich.engine === 'hma_logistic' ? ' · HMA' : ''}
+            Ichimoku
+            {ich.levelsEngine === 'classic' ? ' · classic SL' : ''}
+            {ich.engine === 'hma_logistic' ? ' · HMA break' : ''}
           </span>
           <span
             className={`text-[9px] font-bold ${
@@ -228,7 +230,13 @@ function ChartAnalysisSection({ symbol, analysis }: { symbol: string; analysis: 
         </div>
         <div className="grid grid-cols-3 gap-1 text-[8px] font-mono text-nexus-muted">
           <div>
-            Cloud: <span className="text-white">{ich.priceVsCloud ?? '—'}</span>
+            Cloud:{' '}
+            <span className="text-white">
+              {ich.priceVsCloud ?? '—'}
+              {ich.smartPriceVsCloud && ich.smartPriceVsCloud !== ich.priceVsCloud
+                ? ` / HMA ${ich.smartPriceVsCloud}`
+                : ''}
+            </span>
           </div>
           <div>
             Break P:{' '}

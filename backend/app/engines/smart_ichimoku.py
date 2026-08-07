@@ -399,12 +399,15 @@ def ichimoku_break_supports_side(
     if not target:
         return True, "bad_side"
     break_side = str(ich.get("breakSide") or "NONE").upper()
-    price_vs = str(ich.get("priceVsCloud") or "").upper()
+    # Prefer HMA cloud position when classic levels are used for SL/TP.
+    price_vs = str(
+        ich.get("smartPriceVsCloud") or ich.get("priceVsCloud") or ""
+    ).upper()
     p = float(ich.get("breakProbability") or 0)
     confirmed = bool(ich.get("breakConfirmed"))
     smart = str(ich.get("smartBias") or "NEUTRAL").upper()
 
-    # Must be on the correct side of the cloud for the option.
+    # Must be on the correct side of the (smart) cloud for the option.
     if target == "BULLISH" and price_vs != "ABOVE":
         return False, f"smart_ichimoku_cloud_{price_vs.lower()}_not_above"
     if target == "BEARISH" and price_vs != "BELOW":
