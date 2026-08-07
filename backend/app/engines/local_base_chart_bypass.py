@@ -33,17 +33,21 @@ def _ichimoku_dict(snap: Optional[SymbolSnapshot]) -> dict[str, Any]:
 
 
 def ichimoku_supports_side(side: Side | str, snap: Optional[SymbolSnapshot]) -> bool:
-    """True when Ichimoku cloud/TK agrees with CALL→bullish or PUT→bearish."""
+    """True when smart/classic Ichimoku agrees with CALL→bullish or PUT→bearish."""
     settings = get_settings()
     ich = _ichimoku_dict(snap)
     if not ich:
         return False
     side_v = _side_val(side)
     target = "BULLISH" if side_v == "CALL" else "BEARISH"
+    smart = str(ich.get("smartBias") or "NEUTRAL").upper()
     cloud = str(ich.get("cloudBias") or "NEUTRAL").upper()
     tk = str(ich.get("tkCross") or "NEUTRAL").upper()
     price_vs = str(ich.get("priceVsCloud") or "").upper()
+    chikou = str(ich.get("chikouBias") or "NEUTRAL").upper()
     require_cloud = bool(getattr(settings, "local_base_ichimoku_require_cloud", False))
+    if smart == target:
+        return True
     if require_cloud:
         if cloud == target:
             return True
@@ -52,8 +56,10 @@ def ichimoku_supports_side(side: Side | str, snap: Optional[SymbolSnapshot]) -> 
             or (target == "BEARISH" and price_vs == "BELOW")
         ):
             return True
+        if chikou == target and cloud == target:
+            return True
         return False
-    return cloud == target or tk == target
+    return cloud == target or tk == target or chikou == target
 
 
 def _alert_session_move(alert: dict[str, Any]) -> float:

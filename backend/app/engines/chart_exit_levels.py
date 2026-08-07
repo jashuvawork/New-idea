@@ -202,6 +202,16 @@ def _chart_trade_confidence_raw(
             sources.append("stop_hunt_buy_side")
 
         ich = analysis.ichimoku or {}
+        smart = (ich.get("smartBias") or "NEUTRAL").upper()
+        if smart == target_bias:
+            smart_score = float(ich.get("smartScore") or 50)
+            # Stronger composite agreement → larger confidence bump.
+            bump = 12 if abs(smart_score - 50) >= 20 else 9
+            score += bump
+            sources.append(f"smart_ichimoku_{smart.lower()}")
+        elif smart != "NEUTRAL" and smart != target_bias:
+            score -= 6
+            sources.append("smart_ichimoku_oppose")
         cloud = (ich.get("cloudBias") or "NEUTRAL").upper()
         if cloud == target_bias:
             score += 8
@@ -216,6 +226,12 @@ def _chart_trade_confidence_raw(
         if (side_v == "CALL" and price_vs == "ABOVE") or (side_v == "PUT" and price_vs == "BELOW"):
             score += 4
             sources.append(f"ichimoku_{price_vs.lower()}")
+        chikou = (ich.get("chikouBias") or "NEUTRAL").upper()
+        if chikou == target_bias:
+            score += 4
+            sources.append(f"ichimoku_chikou_{chikou.lower()}")
+        elif chikou != "NEUTRAL" and chikou != target_bias:
+            score -= 3
 
         fib = analysis.fibonacci or {}
         zone = (fib.get("zone") or "NEUTRAL").upper()

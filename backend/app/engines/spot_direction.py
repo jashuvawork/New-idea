@@ -313,27 +313,32 @@ def reconcile_spot_chart_with_mtf(
         cloud_bias = str(ich.get("cloudBias") or "NEUTRAL").upper()
         price_vs = str(ich.get("priceVsCloud") or "NEUTRAL").upper()
         tk_cross = str(ich.get("tkCross") or "NEUTRAL").upper()
+        smart_bias = str(ich.get("smartBias") or "NEUTRAL").upper()
     else:
         cloud_bias = str(getattr(ich, "cloudBias", None) or "NEUTRAL").upper()
         price_vs = str(getattr(ich, "priceVsCloud", None) or "NEUTRAL").upper()
         tk_cross = str(getattr(ich, "tkCross", None) or "NEUTRAL").upper()
+        smart_bias = str(getattr(ich, "smartBias", None) or "NEUTRAL").upper()
 
     mom5 = float(spot_chart.momentum5Pct or 0)
     mom15 = float(spot_chart.momentum15Pct or 0)
     rsi = float(spot_chart.rsi or 50)
     macd_bias = str(spot_chart.macdBias or "NEUTRAL").upper()
+    # Prefer composite smartBias when it agrees with classic cloud read.
+    ichi_bull = cloud_bias == "BULLISH" or smart_bias == "BULLISH"
+    ichi_bear = cloud_bias == "BEARISH" or smart_bias == "BEARISH"
 
-    # Ichimoku + live momentum — broker charts often agree here when MTF is thin.
-    if spot_dir == "BEARISH" and cloud_bias == "BULLISH" and price_vs == "ABOVE":
+    # Smart Ichimoku + live momentum — broker charts often agree here when MTF is thin.
+    if spot_dir == "BEARISH" and ichi_bull and price_vs == "ABOVE":
         if mom5 > 0.01 and (mom15 >= 0 or rsi >= 55) and macd_bias != "BEARISH":
             return spot_chart.model_copy(update={"direction": "BULLISH"})
-    if spot_dir == "BULLISH" and cloud_bias == "BEARISH" and price_vs == "BELOW":
+    if spot_dir == "BULLISH" and ichi_bear and price_vs == "BELOW":
         if mom5 < -0.01 and (mom15 <= 0 or rsi <= 45) and macd_bias != "BULLISH":
             return spot_chart.model_copy(update={"direction": "BEARISH"})
 
     if consensus not in ("BULLISH", "BEARISH"):
         if (
-            cloud_bias == "BULLISH"
+            ichi_bull
             and price_vs == "ABOVE"
             and mom5 > 0.01
             and rsi >= 52
@@ -342,7 +347,7 @@ def reconcile_spot_chart_with_mtf(
         ):
             return spot_chart.model_copy(update={"direction": "BULLISH"})
         if (
-            cloud_bias == "BEARISH"
+            ichi_bear
             and price_vs == "BELOW"
             and mom5 < -0.01
             and rsi <= 48
