@@ -204,24 +204,41 @@ function ChartAnalysisSection({ symbol, analysis }: { symbol: string; analysis: 
       <div className="rounded border border-nexus-border/40 bg-black/25 px-1.5 py-1 space-y-1">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[9px] font-semibold text-nexus-muted tracking-wide">
-            Smart Ichimoku
+            Smart Ichimoku{ich.engine === 'hma_logistic' ? ' · HMA' : ''}
           </span>
           <span
             className={`text-[9px] font-bold ${
-              ich.smartBias === 'BULLISH'
-                ? 'text-nexus-green'
-                : ich.smartBias === 'BEARISH'
-                  ? 'text-nexus-red'
-                  : 'text-nexus-muted'
+              ich.breakConfirmed
+                ? ich.breakSide === 'BULLISH'
+                  ? 'text-nexus-green'
+                  : ich.breakSide === 'BEARISH'
+                    ? 'text-nexus-red'
+                    : 'text-nexus-muted'
+                : ich.smartBias === 'BULLISH'
+                  ? 'text-nexus-green'
+                  : ich.smartBias === 'BEARISH'
+                    ? 'text-nexus-red'
+                    : 'text-nexus-muted'
             }`}
           >
-            {ich.smartBias ?? ich.cloudBias ?? '—'}
-            {typeof ich.smartScore === 'number' ? ` · ${ich.smartScore.toFixed(0)}` : ''}
+            {ich.breakConfirmed
+              ? `${ich.breakSide ?? 'BREAK'} P=${typeof ich.breakProbability === 'number' ? (ich.breakProbability * 100).toFixed(0) : '—'}%`
+              : `${ich.smartBias ?? ich.cloudBias ?? '—'}${typeof ich.smartScore === 'number' ? ` · ${ich.smartScore.toFixed(0)}` : ''}`}
           </span>
         </div>
         <div className="grid grid-cols-3 gap-1 text-[8px] font-mono text-nexus-muted">
           <div>
             Cloud: <span className="text-white">{ich.priceVsCloud ?? '—'}</span>
+          </div>
+          <div>
+            Break P:{' '}
+            <span className="text-white">
+              {typeof ich.breakProbability === 'number' ? `${(ich.breakProbability * 100).toFixed(0)}%` : '—'}
+              {ich.breakConfirmed ? ' ✓' : ''}
+            </span>
+          </div>
+          <div>
+            Risk: <span className="text-white">{ich.breakRisk ?? '—'}</span>
           </div>
           <div>
             TK: <span className="text-white">{ich.tkCross ?? '—'}</span>
@@ -232,15 +249,6 @@ function ChartAnalysisSection({ symbol, analysis }: { symbol: string; analysis: 
           </div>
           <div>
             Twist: <span className="text-white">{ich.cloudTwist && ich.cloudTwist !== 'NONE' ? ich.cloudTwist : '—'}</span>
-          </div>
-          <div>
-            Kumo: <span className="text-white">{ich.futureCloud ?? ich.cloudBias ?? '—'}</span>
-          </div>
-          <div>
-            Thick:{' '}
-            <span className="text-white">
-              {typeof ich.cloudThicknessPct === 'number' ? `${ich.cloudThicknessPct.toFixed(2)}%` : '—'}
-            </span>
           </div>
         </div>
         {ich.reasons && ich.reasons.length > 0 ? (

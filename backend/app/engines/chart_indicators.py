@@ -1,7 +1,8 @@
-"""RSI and MACD indicators for chart analysis."""
+"""RSI, MACD, HMA, ATR, Stochastic helpers for chart analysis."""
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -17,6 +18,95 @@ class MacdRead:
     signal: float = 0.0
     histogram: float = 0.0
     bias: str = "NEUTRAL"  # BULLISH | BEARISH | NEUTRAL
+
+
+def _wma_last(values: list[float], period: int) -> float:
+    """Weighted moving average of the last ``period`` values."""
+    if not values or period <= 0:
+        return 0.0
+    p = min(period, len(values))
+    window = values[-p:]
+    weights = list(range(1, p + 1))
+    denom = sum(weights) or 1.0
+    return sum(v * w for v, w in zip(window, weights)) / denom
+
+
+def hull_ma(values: list[float], period: int) -> float:
+    """Hull Moving Average of ``values`` (last point). Smooth + low lag."""
+    if not values or period <= 0:
+        return float(values[-1]) if values else 0.0
+    p = max(1, min(period, len(values)))
+    half = max(1, p // 2)
+    sqrt_p = max(1, int(math.sqrt(p)))
+    # Build raw series needed for nested WMAs.
+    n = len(values)
+    half_series: list[float] = []
+    full_series: list[float] = []
+    for i in range(n):
+        sl = values[: i + 1]
+        half_series.append(_wma_last(sl, half))
+        full_series.append(_wma_last(sl, p))
+    diff = [2.0 * h - f for h, f in zip(half_series, full_series)]
+    return _wma_last(diff, sqrt_p)
+
+
+def hull_ma_series(values: list[float], period: int) -> list[float]:
+    """HMA value at each bar (O(n·period) — fine for ≤300 bars)."""
+    if not values:
+        return []
+    return [hull_ma(values[: i + 1], period) for i in range(len(values))]
+
+
+def compute_atr(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = 14,
+) -> float:
+    """Average True Range (simple mean of TRs)."""
+    n = min(len(highs), len(lows), len(closes))
+    if n < 2:
+        return 0.0
+    trs: list[float] = []
+    for i in range(1, n):
+        h, l, prev_c = float(highs[i]), float(lows[i]), float(closes[i - 1])
+        trs.append(max(h - l, abs(h - prev_c), abs(l - prev_c)))
+    if not trs:
+        return 0.0
+    p = min(period, len(trs))
+    return sum(trs[-p:]) / p
+
+
+def compute_stochastic(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = 14,
+) -> float:
+    """Fast %K stochastic (0–100)."""
+    n = min(len(highs), len(lows), len(closes))
+    if n <= 0:
+        return 50.0
+    p = min(period, n)
+    hh = max(highs[-p:])
+    ll = min(lows[-p:])
+    if hh <= ll:
+        return 50.0
+    return max(0.0, min(100.0, (float(closes[-1]) - ll) / (hh - ll) * 100.0))
+
+
+def compute_zscore(closes: list[float], period: int = 20) -> float:
+    """Price z-score vs trailing mean/stdev."""
+    if len(closes) < 2:
+        return 0.0
+    p = min(period, len(closes))
+    window = [float(c) for c in closes[-p:]]
+    mean = sum(window) / p
+    var = sum((c - mean) ** 2 for c in window) / p
+    std = math.sqrt(var) if var > 0 else 0.0
+    if std <= 1e-12:
+        return 0.0
+    return (window[-1] - mean) / std
 
 
 def _ema_series(values: list[float], period: int) -> list[float]:

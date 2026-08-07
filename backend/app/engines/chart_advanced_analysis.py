@@ -135,241 +135,16 @@ def compute_andrews_pitchfork(
     }
 
 
-def _ichimoku_mid(highs: list[float], lows: list[float], end: int, period: int, fallback: float) -> float:
-    """Donchian mid over ``period`` bars ending at index ``end`` (inclusive)."""
-    if end < 0 or not highs or not lows:
-        return fallback
-    start = max(0, end - period + 1)
-    window_h = highs[start : end + 1]
-    window_l = lows[start : end + 1]
-    if not window_h or not window_l:
-        return fallback
-    return (max(window_h) + min(window_l)) / 2
-
-
 def compute_ichimoku(
     highs: list[float],
     lows: list[float],
     closes: list[float],
     spot: float,
 ) -> dict[str, Any]:
-    """Smart Ichimoku — displaced cloud, chikou, twist, TK age, composite bias.
+    """Smart Ichimoku — GainzAlgo-style HMA cloud + logistic break classifier."""
+    from app.engines.smart_ichimoku import compute_smart_ichimoku
 
-    Keeps classic fields (cloudBias / tkCross / priceVsCloud) for consumers and
-    adds smartBias / smartScore / reasons for chart analysis + UI.
-    """
-    n = min(len(highs), len(lows), len(closes))
-    if n <= 0:
-        return {
-            "tenkan": round(spot, 2),
-            "kijun": round(spot, 2),
-            "senkouA": round(spot, 2),
-            "senkouB": round(spot, 2),
-            "cloudTop": round(spot, 2),
-            "cloudBottom": round(spot, 2),
-            "cloudBias": "NEUTRAL",
-            "tkCross": "NEUTRAL",
-            "priceVsCloud": "INSIDE",
-            "smartBias": "NEUTRAL",
-            "smartScore": 50.0,
-            "smartLabel": "Ichimoku neutral",
-            "reasons": [],
-        }
-
-    highs = list(highs[-n:])
-    lows = list(lows[-n:])
-    closes = list(closes[-n:])
-    last = n - 1
-    px = float(spot or closes[last] or 0)
-
-    tenkan = _ichimoku_mid(highs, lows, last, 9, px)
-    kijun = _ichimoku_mid(highs, lows, last, 26, px)
-
-    # Projected (future) cloud from current TK — classic span A/B at lag 0.
-    future_a = (tenkan + kijun) / 2
-    future_b = _ichimoku_mid(highs, lows, last, 52, px)
-
-    # Cloud under current price = spans computed 26 bars ago (displacement).
-    displace = 26
-    if last >= displace:
-        past = last - displace
-        past_tenkan = _ichimoku_mid(highs, lows, past, 9, px)
-        past_kijun = _ichimoku_mid(highs, lows, past, 26, px)
-        senkou_a = (past_tenkan + past_kijun) / 2
-        senkou_b = _ichimoku_mid(highs, lows, past, 52, px)
-        cloud_displaced = True
-    else:
-        senkou_a = future_a
-        senkou_b = future_b
-        cloud_displaced = False
-
-    cloud_top = max(senkou_a, senkou_b)
-    cloud_bottom = min(senkou_a, senkou_b)
-    cloud_thickness = max(cloud_top - cloud_bottom, 0.0)
-    cloud_thickness_pct = (cloud_thickness / px * 100.0) if px > 0 else 0.0
-
-    if px > cloud_top:
-        cloud_bias = "BULLISH"
-        price_vs = "ABOVE"
-    elif px < cloud_bottom:
-        cloud_bias = "BEARISH"
-        price_vs = "BELOW"
-    else:
-        cloud_bias = "NEUTRAL"
-        price_vs = "INSIDE"
-
-    tk_cross = "BULLISH" if tenkan > kijun else "BEARISH" if tenkan < kijun else "NEUTRAL"
-
-    # TK cross age — bars since tenkan/kijun relationship flipped.
-    tk_cross_age = 0
-    if tk_cross != "NEUTRAL" and n >= 3:
-        for lookback in range(1, min(n, 40)):
-            i = last - lookback
-            t_i = _ichimoku_mid(highs, lows, i, 9, px)
-            k_i = _ichimoku_mid(highs, lows, i, 26, px)
-            state = "BULLISH" if t_i > k_i else "BEARISH" if t_i < k_i else "NEUTRAL"
-            if state != tk_cross:
-                break
-            tk_cross_age = lookback
-        tk_cross_age = max(1, tk_cross_age)
-
-    # Chikou span — current close vs price 26 bars ago.
-    chikou_bias = "NEUTRAL"
-    chikou_vs = "FLAT"
-    if last >= displace:
-        lag_px = float(closes[last - displace] or 0)
-        if lag_px > 0:
-            if px > lag_px * 1.0005:
-                chikou_bias = "BULLISH"
-                chikou_vs = "ABOVE"
-            elif px < lag_px * 0.9995:
-                chikou_bias = "BEARISH"
-                chikou_vs = "BELOW"
-
-    # Cloud twist — Span A/B relationship flipped recently (kumo flip).
-    cloud_twist = "NONE"
-    if last >= displace + 3:
-        states: list[str] = []
-        for lookback in range(0, 6):
-            i = last - displace - lookback
-            if i < 0:
-                break
-            a_i = (
-                _ichimoku_mid(highs, lows, i, 9, px) + _ichimoku_mid(highs, lows, i, 26, px)
-            ) / 2
-            b_i = _ichimoku_mid(highs, lows, i, 52, px)
-            states.append("BULLISH" if a_i >= b_i else "BEARISH")
-        if len(states) >= 2 and states[0] != states[1]:
-            cloud_twist = states[0]
-
-    # Future cloud bias (projected span).
-    future_top = max(future_a, future_b)
-    future_bottom = min(future_a, future_b)
-    if future_a > future_b:
-        future_cloud = "BULLISH"
-    elif future_a < future_b:
-        future_cloud = "BEARISH"
-    else:
-        future_cloud = "NEUTRAL"
-
-    # Composite smart score (0–100). 50 = neutral.
-    score = 50.0
-    reasons: list[str] = []
-    if price_vs == "ABOVE":
-        score += 14
-        reasons.append("price_above_cloud")
-    elif price_vs == "BELOW":
-        score -= 14
-        reasons.append("price_below_cloud")
-    else:
-        reasons.append("price_inside_cloud")
-
-    if tk_cross == "BULLISH":
-        score += 10 if tk_cross_age <= 5 else 6
-        reasons.append(f"tk_bullish_age_{tk_cross_age}")
-    elif tk_cross == "BEARISH":
-        score -= 10 if tk_cross_age <= 5 else 6
-        reasons.append(f"tk_bearish_age_{tk_cross_age}")
-
-    if chikou_bias == "BULLISH":
-        score += 10
-        reasons.append("chikou_above")
-    elif chikou_bias == "BEARISH":
-        score -= 10
-        reasons.append("chikou_below")
-
-    if cloud_twist == "BULLISH":
-        score += 8
-        reasons.append("cloud_twist_bullish")
-    elif cloud_twist == "BEARISH":
-        score -= 8
-        reasons.append("cloud_twist_bearish")
-    elif future_cloud == "BULLISH" and cloud_bias == "BULLISH":
-        score += 4
-        reasons.append("future_cloud_bullish")
-    elif future_cloud == "BEARISH" and cloud_bias == "BEARISH":
-        score -= 4
-        reasons.append("future_cloud_bearish")
-
-    # Thin cloud = weak conviction; thick aligned cloud reinforces.
-    if cloud_thickness_pct >= 0.15 and cloud_bias == "BULLISH":
-        score += 3
-        reasons.append("thick_bull_cloud")
-    elif cloud_thickness_pct >= 0.15 and cloud_bias == "BEARISH":
-        score -= 3
-        reasons.append("thick_bear_cloud")
-    elif 0 < cloud_thickness_pct < 0.05:
-        score += 0  # flat — no boost
-        reasons.append("thin_cloud")
-
-    # TK momentum vs kijun (price relative to baseline).
-    if px > kijun * 1.001 and tenkan > kijun:
-        score += 4
-        reasons.append("price_above_kijun")
-    elif px < kijun * 0.999 and tenkan < kijun:
-        score -= 4
-        reasons.append("price_below_kijun")
-
-    score = max(0.0, min(100.0, score))
-    if score >= 62:
-        smart_bias = "BULLISH"
-    elif score <= 38:
-        smart_bias = "BEARISH"
-    else:
-        smart_bias = "NEUTRAL"
-
-    if smart_bias == "BULLISH":
-        smart_label = "Smart Ichimoku bullish"
-    elif smart_bias == "BEARISH":
-        smart_label = "Smart Ichimoku bearish"
-    else:
-        smart_label = "Smart Ichimoku mixed"
-
-    return {
-        "tenkan": round(tenkan, 2),
-        "kijun": round(kijun, 2),
-        "senkouA": round(senkou_a, 2),
-        "senkouB": round(senkou_b, 2),
-        "futureSenkouA": round(future_a, 2),
-        "futureSenkouB": round(future_b, 2),
-        "cloudTop": round(cloud_top, 2),
-        "cloudBottom": round(cloud_bottom, 2),
-        "cloudBias": cloud_bias,
-        "tkCross": tk_cross,
-        "tkCrossAge": int(tk_cross_age),
-        "priceVsCloud": price_vs,
-        "chikouBias": chikou_bias,
-        "chikouVs": chikou_vs,
-        "cloudTwist": cloud_twist,
-        "cloudThickness": round(cloud_thickness, 2),
-        "cloudThicknessPct": round(cloud_thickness_pct, 3),
-        "futureCloud": future_cloud,
-        "cloudDisplaced": cloud_displaced,
-        "smartBias": smart_bias,
-        "smartScore": round(score, 1),
-        "smartLabel": smart_label,
-        "reasons": reasons[:8],
-    }
+    return compute_smart_ichimoku(highs, lows, closes, spot)
 
 
 def _body_size(o: float, c: float) -> float:
@@ -733,8 +508,11 @@ def _build_key_signals(
     if smart:
         score = ichimoku.get("smartScore")
         score_bit = f" {score:.0f}" if isinstance(score, (int, float)) else ""
+        bp = ichimoku.get("breakProbability")
+        bp_bit = f" P={bp:.0%}" if isinstance(bp, (int, float)) and bp > 0 else ""
+        conf = "✓" if ichimoku.get("breakConfirmed") else ""
         signals.append(
-            f"Smart Ichimoku {smart}{score_bit} ({ichimoku.get('priceVsCloud', '')})"
+            f"Smart Ichimoku {smart}{score_bit}{bp_bit}{conf} ({ichimoku.get('priceVsCloud', '')})"
         )
     elif ichimoku.get("cloudBias"):
         signals.append(f"Ichimoku {ichimoku['cloudBias']} ({ichimoku.get('priceVsCloud', '')})")

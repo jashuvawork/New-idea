@@ -132,7 +132,13 @@ def _building_aligned_ict_alert_ok(
         or bool(alert.get("ictPremiumFvg") or alert.get("premiumFvg"))
         or v3 >= min_v3
     )
-    return heat or bool(alert.get("ictFlatThenVertical"))
+    if not (heat or bool(alert.get("ictFlatThenVertical"))):
+        return False
+    # GainzAlgo-style Smart Ichimoku break-P on index chart.
+    from app.engines.smart_ichimoku import ichimoku_break_supports_side
+
+    ok, _ = ichimoku_break_supports_side(Side(side_raw), snap, require_confirmed=True)
+    return ok
 
 
 def _reentry_blocked(

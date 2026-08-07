@@ -271,6 +271,12 @@ export interface ChartAnalysis {
     smartScore?: number;
     smartLabel?: string;
     reasons?: string[];
+    engine?: string;
+    breakProbability?: number;
+    breakConfirmed?: boolean;
+    breakSide?: string;
+    breakEvent?: boolean;
+    breakRisk?: string;
     [key: string]: unknown;
   };
   patterns: Array<{ name: string; bias: string; strength: number; timeframe: string }>;
