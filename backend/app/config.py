@@ -1243,8 +1243,9 @@ class Settings(BaseSettings):
     explosion_never_green_stop_points: float = 18.0  # min floor (below the thesis grind)
     explosion_never_green_stop_pct: float = 6.0  # or % of entry premium, whichever larger
     explosion_never_green_min_hold_seconds: int = 20
-    # 2) Hard per-trade ₹ loss cap — bound the worst case regardless of lots/stop width.
-    explosion_per_trade_max_loss_inr: float = 12_000.0
+    # 2) Hard per-trade ₹ loss cap — OFF (0). Point/adaptive stops + never-green still apply.
+    # Aug7: BUILDING ICT base rip hit the ₹12k cap at −₹12.8k before the thesis SL.
+    explosion_per_trade_max_loss_inr: float = 0.0
     # 3) Whipsaw flip — after a same-session WIN on the opposite side, don't max-size the
     #    counter-flip (Aug6: CALLs won, then a max-size PUT flip lost). Cap flip size.
     explosion_whipsaw_flip_guard_enabled: bool = True

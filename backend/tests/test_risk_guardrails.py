@@ -43,13 +43,31 @@ def test_never_green_skipped_once_green_printed():
     assert reason != "explosion_never_green_stop"
 
 
-def test_hard_per_trade_risk_cap():
-    """Loss beyond the hard ₹ cap exits regardless of lots/stop width (best>0 so the
-    never-green rule doesn't preempt; small point loss × big lots → big ₹ loss)."""
-    # −5pt × 200 lots × 20 mult = −₹20,000 (> ₹12k cap)
+def test_hard_per_trade_risk_cap_disabled_by_default():
+    """₹ risk cap is off (0) — large lot point losses are not force-exited by it."""
     reason, pnl = evaluate_explosion_exit(
         _trade(500.0, 495.0, best=3.0, lots=200), 495.0, "ELITE", 20,
     )
+    assert reason != "explosion_per_trade_risk_cap"
+    assert pnl <= -12000
+
+
+def test_hard_per_trade_risk_cap_when_enabled():
+    """When explicitly set >0, the ₹ ceiling still cuts oversized losses."""
+    from unittest.mock import MagicMock, patch
+
+    s = MagicMock()
+    # Keep never-green from preempting (best>0); enable ₹ cap only.
+    s.explosion_never_green_stop_enabled = True
+    s.explosion_never_green_min_green_points = 0.5
+    s.explosion_never_green_stop_points = 18.0
+    s.explosion_never_green_stop_pct = 6.0
+    s.explosion_never_green_min_hold_seconds = 20
+    s.explosion_per_trade_max_loss_inr = 12_000.0
+    with patch("app.engines.explosion_profit.get_settings", return_value=s):
+        reason, pnl = evaluate_explosion_exit(
+            _trade(500.0, 495.0, best=3.0, lots=200), 495.0, "ELITE", 20,
+        )
     assert reason == "explosion_per_trade_risk_cap"
     assert pnl <= -12000
 
