@@ -177,11 +177,15 @@ class Settings(BaseSettings):
     explosion_only_allow_guarded_scalp: bool = False
     # Master switch — when false, no scalp-mode / SCALP strategy entries at all.
     scalp_entries_enabled: bool = False
-    # Explosion entries: only ELITE + EXPLODING (no BUILDING / soft premium-capture admits).
+    # Explosion entries: only ELITE + EXPLODING (no soft BUILDING / premium-capture).
     explosion_elite_exploding_only: bool = True
-    # Exception: early BUILDING flat→vertical when chart-aligned — catch the base
-    # before the rip prints ELITE (Jul23-style PE 180→500; multiple times/week).
+    # Exception: BUILDING only as "elite build" — chart-aligned ICT flat→vertical
+    # with ELITE-grade score + hot velocity. Aug7 cold BUILDING (score 56, v3 1.7)
+    # must wait for ELITE print or upgrade into these bars.
     explosion_building_aligned_ict_enabled: bool = True
+    explosion_building_elite_min_score: float = 62.0
+    explosion_building_elite_min_velocity_3s: float = 2.5
+    explosion_building_elite_min_ict_score: float = 35.0
     # Explosion entries only when index chart agrees with option side (CALL↔BULLISH,
     # PUT↔BEARISH). No counter-trend FOMO; flat→vertical is taken only when aligned.
     explosion_require_chart_align_enabled: bool = True

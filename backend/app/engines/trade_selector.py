@@ -90,7 +90,7 @@ def _building_aligned_ict_alert_ok(
     snap: SymbolSnapshot,
     tier_u: str,
 ) -> bool:
-    """Allow BUILDING when flat→vertical ICT + chart-aligned (catch at the base)."""
+    """Allow BUILDING only as elite-build: ICT flat→vertical + chart + hot score/v3."""
     settings = get_settings()
     if not bool(getattr(settings, "explosion_building_aligned_ict_enabled", True)):
         return False
@@ -98,7 +98,23 @@ def _building_aligned_ict_alert_ok(
         return False
     if not bool(alert.get("ictFlatThenVertical") or alert.get("ictBreakout")):
         return False
-    if float(alert.get("ictScore") or 0) < 28 and not bool(alert.get("ictFlatThenVertical")):
+    min_ict = float(getattr(settings, "explosion_building_elite_min_ict_score", 35.0) or 35.0)
+    if float(alert.get("ictScore") or 0) < min_ict and not bool(alert.get("ictFlatThenVertical")):
+        return False
+    # Elite-build bars — soft/cold BUILDING (Aug7 score 56 / v3 1.7) must wait.
+    min_score = float(getattr(settings, "explosion_building_elite_min_score", 62.0) or 62.0)
+    score = float(
+        alert.get("explosionScore")
+        or alert.get("score")
+        or 0
+    )
+    if score < min_score:
+        return False
+    min_v3 = float(
+        getattr(settings, "explosion_building_elite_min_velocity_3s", 2.5) or 2.5
+    )
+    v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+    if v3 < min_v3:
         return False
     side_raw = str(alert.get("side") or "").upper()
     if side_raw not in ("CALL", "PUT"):
@@ -114,7 +130,7 @@ def _building_aligned_ict_alert_ok(
         bool(alert.get("ictVolumeAwakening") or alert.get("volumeAwakening"))
         or bool(alert.get("ictDisplacement") or alert.get("displacement"))
         or bool(alert.get("ictPremiumFvg") or alert.get("premiumFvg"))
-        or float(alert.get("velocity3s") or alert.get("velocity_3s") or 0) >= 2.0
+        or v3 >= min_v3
     )
     return heat or bool(alert.get("ictFlatThenVertical"))
 

@@ -69,11 +69,27 @@ def test_building_aligned_ict_alert_allows_put_on_bearish():
         "ictFlatThenVertical": True,
         "ictBreakout": True,
         "ictScore": 40.0,
+        "explosionScore": 70.0,
         "velocity3s": 3.0,
         "ictVolumeAwakening": True,
     }
     assert _building_aligned_ict_alert_ok(alert, _snap("BEARISH"), "BUILDING") is True
     assert _building_aligned_ict_alert_ok(alert, _snap("BULLISH"), "BUILDING") is False
+
+
+def test_building_aligned_rejects_cold_aug7_style():
+    """Aug7 BUILDING score 56 / v3 1.7 must not pass elite-build gate."""
+    alert = {
+        "side": "PUT",
+        "tier": "BUILDING",
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictScore": 31.7,
+        "explosionScore": 56.2,
+        "velocity3s": 1.69,
+        "ictVolumeAwakening": True,
+    }
+    assert _building_aligned_ict_alert_ok(alert, _snap("BEARISH"), "BUILDING") is False
 
 
 def test_ict_flat_vertical_entry_requires_chart_align():
@@ -86,9 +102,39 @@ def test_ict_flat_vertical_entry_requires_chart_align():
         ict.volume_awakening = True
         ict.displacement = False
         ict.premium_fvg = False
+        ict.score = 40.0
         mock_ict.return_value = ict
         assert _ict_flat_vertical_entry_ok(_event(), _snap("BEARISH")) is True
         assert _ict_flat_vertical_entry_ok(_event(), _snap("BULLISH")) is False
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_ict_flat_vertical_building_requires_elite_bars(mock_settings):
+    s = MagicMock()
+    s.explosion_building_aligned_ict_enabled = True
+    s.explosion_building_elite_min_score = 62.0
+    s.explosion_building_elite_min_velocity_3s = 2.5
+    s.explosion_building_elite_min_ict_score = 35.0
+    mock_settings.return_value = s
+    with patch(
+        "app.engines.ict_breakout_monitor.analyze_explosion_event_ict"
+    ) as mock_ict:
+        ict = MagicMock()
+        ict.active = True
+        ict.flat_then_vertical = True
+        ict.volume_awakening = True
+        ict.displacement = False
+        ict.premium_fvg = False
+        ict.score = 40.0
+        mock_ict.return_value = ict
+        cold = _event(tier="BUILDING")
+        cold.explosion_score = 56.2
+        cold.velocity_3s = 1.69
+        assert _ict_flat_vertical_entry_ok(cold, _snap("BEARISH")) is False
+        hot = _event(tier="BUILDING")
+        hot.explosion_score = 70.0
+        hot.velocity_3s = 3.2
+        assert _ict_flat_vertical_entry_ok(hot, _snap("BEARISH")) is True
 
 
 @patch("app.engines.explosion_profit.get_settings")
