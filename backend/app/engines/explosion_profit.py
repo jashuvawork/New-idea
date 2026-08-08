@@ -198,14 +198,37 @@ def check_explosion_entry(
             return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
         return True, "extreme_all_in_explosion_confirmed"
 
-    # Flat→vertical / ELITE only when chart aligns with the option side.
+    # Require chart align — but honor the same capture/structure bypasses as
+    # chart_blocks_explosion_side later (afternoon / all-day / premium-led / local-base).
     settings = get_settings()
     if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
         from app.engines.spot_direction import side_aligned_with_chart
 
         align_chart = chart or (getattr(snap, "spotChart", None) if snap is not None else None)
         if align_chart is not None and not side_aligned_with_chart(event.side, align_chart):
-            return False, "explosion_requires_chart_align"
+            from app.engines.local_base_chart_bypass import local_base_ichimoku_chart_bypass
+            from app.engines.morning_premium_capture import (
+                afternoon_capture_skips_chart_block,
+                is_all_day_explosion_event,
+                premium_led_explosion_bypass,
+            )
+
+            breadth_bias = (breadth.bias or "NEUTRAL") if breadth else "NEUTRAL"
+            premium_bypass = premium_led_explosion_bypass(
+                event, align_chart, breadth_bias, snap=snap,
+            )
+            local_ichi_bypass = (
+                local_base_ichimoku_chart_bypass(event.side, snap, event=event)
+                if snap is not None
+                else False
+            )
+            if not (
+                premium_bypass
+                or local_ichi_bypass
+                or afternoon_capture_skips_chart_block(event, align_chart)
+                or is_all_day_explosion_event(event, chart=align_chart)
+            ):
+                return False, "explosion_requires_chart_align"
 
     if snap is not None:
         from app.engines.aligned_side_guard import breadth_hard_blocks_side
@@ -405,16 +428,24 @@ def check_explosion_entry(
         expiry_chart_bypass = expiry_chart_bypass_for_event(event, snap)
 
     afternoon_chart_skip = afternoon_capture_skips_chart_block(event, chart)
+    all_day_capture = is_all_day_explosion_event(event, chart=chart)
 
     blocked_chart, chart_reason = chart_blocks_side(
         event.side,
         chart,
         trade_score=score,
         momentum_surge=index_moment,
-        premium_led_bypass=premium_bypass or afternoon_chart_skip,
+        premium_led_bypass=premium_bypass or afternoon_chart_skip or all_day_capture,
         expiry_explosion_bypass=expiry_chart_bypass,
     )
-    if blocked_chart and not afternoon_chart_skip:
+    # Aug6 hard-counter-trend may ignore premium_led_bypass inside chart_blocks_side;
+    # still allow intentional afternoon / all-day / premium-led capture paths here.
+    if (
+        blocked_chart
+        and not afternoon_chart_skip
+        and not premium_bypass
+        and not all_day_capture
+    ):
         return False, chart_reason
 
     if event.tier == "ELITE":
