@@ -257,4 +257,8 @@ def test_explosion_entry_blocks_elite_put_on_rally(
             snap=snap,
         )
     assert ok is False
-    assert reason == "hard_block_put_vs_bullish_breadth"
+    # Chart-align fires before breadth hard-block when both disagree with PUT.
+    assert reason in (
+        "hard_block_put_vs_bullish_breadth",
+        "explosion_requires_chart_align",
+    )

@@ -192,4 +192,8 @@ def test_open_rip_put_blocked_as_counter_trend_chase_on_bullish(mock_settings, m
     # (cf96440 "block late EXPLOSIVE chases that kill PF"), so this is correctly
     # blocked as counter-trend instead of forced through.
     assert ok is False
-    assert reason in ("chart_live_bullish_no_puts", "hard_block_put_vs_bullish_breadth")
+    assert reason in (
+        "chart_live_bullish_no_puts",
+        "hard_block_put_vs_bullish_breadth",
+        "explosion_requires_chart_align",
+    )

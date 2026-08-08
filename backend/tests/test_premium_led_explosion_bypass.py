@@ -137,7 +137,11 @@ def test_put_explosion_passes_bullish_breadth_and_chart(mock_settings, mock_wind
         snap=snap,
     )
     assert ok is False
-    assert reason == "hard_block_put_vs_bullish_breadth"
+    # Counter-trend PUT vs bullish index — chart-align and/or hard breadth.
+    assert reason in (
+        "hard_block_put_vs_bullish_breadth",
+        "explosion_requires_chart_align",
+    )
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
@@ -156,7 +160,10 @@ def test_put_explosion_blocked_expanding_on_bullish(mock_settings, mock_window):
         chart=_bullish_chart(),
     )
     assert not ok
-    assert reason == "hard_block_put_vs_bullish_breadth"
+    assert reason in (
+        "hard_block_put_vs_bullish_breadth",
+        "explosion_requires_chart_align",
+    )
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=False)
@@ -177,7 +184,10 @@ def test_put_explosion_still_blocked_without_bypass_window(mock_settings, mock_w
         chart=_bullish_chart(),
     )
     assert not ok
-    assert reason == "hard_block_put_vs_bullish_breadth"
+    assert reason in (
+        "hard_block_put_vs_bullish_breadth",
+        "explosion_requires_chart_align",
+    )
 
 
 @patch("app.engines.session_timing._minutes_now", return_value=9 * 60 + 17)
@@ -226,11 +236,18 @@ def test_directional_lock_bypassed_for_premium_led_put(mock_settings, mock_windo
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
 @patch("app.engines.morning_premium_capture.get_settings")
-def test_execution_chart_bypasses_bullish_index_for_put(mock_settings, mock_window):
+@patch("app.engines.spot_direction.get_settings")
+def test_execution_chart_blocks_hard_counter_trend_put(
+    mock_spot_settings, mock_settings, mock_window,
+):
+    """Aug6: premium-led bypass must not waive PUT vs live-bullish index."""
     from app.engines.execution_chart_monitor import validate_execution_charts
 
     s = mock_settings.return_value
+    mock_spot_settings.return_value = s
     s.chart_alignment_enabled = True
+    s.chart_live_direction_hard_block = True
+    s.chart_counter_trend_bypass_block_enabled = True
     s.chart_min_trend_strength = 25.0
     s.chart_min_momentum_pct = 0.04
     s.chart_override_min_score = 75
@@ -242,8 +259,8 @@ def test_execution_chart_bypasses_bullish_index_for_put(mock_settings, mock_wind
         trade_score=60,
         premium_led_bypass=True,
     )
-    assert ok is True
-    assert reason == "ok"
+    assert ok is False
+    assert reason == "exec_chart_live_bullish_no_puts"
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
