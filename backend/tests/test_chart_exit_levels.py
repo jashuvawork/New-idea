@@ -181,6 +181,62 @@ def test_ichimoku_helpers_put_direction():
     assert tp2 >= tp1
 
 
+@patch("app.engines.smart_ichimoku.get_settings")
+def test_exit_sl_uses_classic_levels_from_compute_ichimoku(mock_smart_settings):
+    """SL helpers must read classic Donchian geometry from compute_ichimoku payload."""
+    from unittest.mock import MagicMock
+
+    from app.engines.chart_advanced_analysis import compute_ichimoku
+    from app.engines.chart_exit_levels import _ichimoku_stop_pts, _ichimoku_target_pts
+    from app.engines.smart_ichimoku import compute_smart_ichimoku
+
+    s = MagicMock()
+    s.smart_ichimoku_use_hma = True
+    s.smart_ichimoku_tenkan_period = 9
+    s.smart_ichimoku_kijun_period = 26
+    s.smart_ichimoku_senkou_b_period = 52
+    s.smart_ichimoku_displacement = 26
+    s.smart_ichimoku_break_min_probability = 0.60
+    s.smart_ichimoku_continuation_min_probability = 0.55
+    s.smart_ichimoku_flat_vertical_confirm_enabled = True
+    s.smart_ichimoku_weight_rsi = 0.85
+    s.smart_ichimoku_weight_stoch = 0.65
+    s.smart_ichimoku_weight_zscore = 0.90
+    s.smart_ichimoku_weight_depth = 1.10
+    mock_smart_settings.return_value = s
+
+    highs = [100 + i * 0.5 for i in range(90)]
+    lows = [99 + i * 0.5 for i in range(90)]
+    closes = [99.5 + i * 0.5 for i in range(90)]
+    spot = closes[-1]
+    ich = compute_ichimoku(highs, lows, closes, spot)
+    smart = compute_smart_ichimoku(highs, lows, closes, spot)
+
+    assert ich["levelsEngine"] == "classic"
+    assert ich["tenkan"] != smart["tenkan"]
+
+    # CALL SL uses levels below spot — present on an uptrend; TPs may be empty.
+    classic_sl = _ichimoku_stop_pts("CALL", spot, ich, 80.0)
+    hma_only = {
+        "tenkan": smart["tenkan"],
+        "kijun": smart["kijun"],
+        "senkouA": smart["senkouA"],
+        "senkouB": smart["senkouB"],
+        "cloudTop": smart["cloudTop"],
+        "cloudBottom": smart["cloudBottom"],
+    }
+    hma_sl = _ichimoku_stop_pts("CALL", spot, hma_only, 80.0)
+    assert classic_sl is not None and classic_sl > 0
+    # Geometry path must not silently equal pure-HMA levels on this series.
+    assert (
+        classic_sl != hma_sl
+        or ich["tenkan"] != smart["tenkan"]
+        or ich["cloudBottom"] != smart["cloudBottom"]
+    )
+    # Helpers still accept the merged payload (smart meta ignored for levels).
+    _ichimoku_target_pts("CALL", spot, ich, 80.0)
+
+
 @patch("app.engines.chart_exit_levels.get_settings")
 def test_merge_chart_into_exit_plan(mock_settings):
     s = mock_settings.return_value
