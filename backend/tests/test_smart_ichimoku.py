@@ -166,3 +166,82 @@ def test_fail_open_without_chart_analysis(mock_gs):
     ok, reason = ichimoku_break_supports_side(Side.PUT, snap)
     assert ok is True
     assert reason == "no_ichimoku"
+
+
+@patch("app.engines.smart_ichimoku.get_settings")
+def test_gate_prefers_smart_price_vs_cloud_over_classic(mock_gs):
+    """Classic ABOVE must not let a PUT through when HMA cloud is still ABOVE."""
+    mock_gs.return_value = _settings()
+    ich = {
+        # Classic SL/TP cloud read (could disagree with HMA on edge bars)
+        "priceVsCloud": "BELOW",
+        "levelsEngine": "classic",
+        # HMA gate cloud — still above → reject PUT
+        "smartPriceVsCloud": "ABOVE",
+        "breakSide": "BEARISH",
+        "breakProbability": 0.85,
+        "breakConfirmed": True,
+        "smartBias": "BEARISH",
+    }
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24500.0,
+        atmStrike=24500.0,
+        tradeQualityScore=50,
+        breadth=Breadth(bias="BEARISH", score=50, aligned=True),
+        spotChart=SpotChart(direction="BEARISH"),
+        chartAnalysis=ChartAnalysis(consensus="BEARISH", ichimoku=ich),
+    )
+    ok, reason = ichimoku_break_supports_side(Side.PUT, snap)
+    assert ok is False
+    assert "not_below" in reason
+
+
+@patch("app.engines.smart_ichimoku.get_settings")
+def test_gate_allows_put_when_smart_cloud_below_even_if_classic_above(mock_gs):
+    mock_gs.return_value = _settings()
+    ich = {
+        "priceVsCloud": "ABOVE",
+        "levelsEngine": "classic",
+        "smartPriceVsCloud": "BELOW",
+        "breakSide": "BEARISH",
+        "breakProbability": 0.78,
+        "breakConfirmed": True,
+        "smartBias": "BEARISH",
+    }
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24500.0,
+        atmStrike=24500.0,
+        tradeQualityScore=50,
+        breadth=Breadth(bias="BEARISH", score=50, aligned=True),
+        spotChart=SpotChart(direction="BEARISH"),
+        chartAnalysis=ChartAnalysis(consensus="BEARISH", ichimoku=ich),
+    )
+    ok, reason = ichimoku_break_supports_side(Side.PUT, snap)
+    assert ok is True
+    assert "bearish" in reason
+
+
+@patch("app.engines.smart_ichimoku.get_settings")
+def test_classic_levels_not_overwritten_by_hma(mock_gs):
+    mock_gs.return_value = _settings()
+    h, l, c = _uptrend()
+    ich = compute_ichimoku(h, l, c, c[-1])
+    smart = compute_smart_ichimoku(h, l, c, c[-1])
+    for key in ("tenkan", "kijun", "senkouA", "senkouB", "cloudTop", "cloudBottom"):
+        # Geometry must stay classic — never silently copy HMA levels into SL/TP keys.
+        classic_mid_tenkan = round((max(h[-9:]) + min(l[-9:])) / 2, 2)
+        classic_mid_kijun = round((max(h[-26:]) + min(l[-26:])) / 2, 2)
+        assert ich["tenkan"] == classic_mid_tenkan
+        assert ich["kijun"] == classic_mid_kijun
+        assert key in ich
+    assert ich["tenkan"] != smart["tenkan"]
+    assert ich.get("breakProbability") == smart.get("breakProbability")
+    assert ich.get("smartPriceVsCloud") == smart.get("priceVsCloud")
