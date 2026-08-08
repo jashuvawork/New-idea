@@ -263,6 +263,12 @@ export interface ChartAnalysis {
     tkCross?: string;
     tkCrossAge?: number;
     priceVsCloud?: string;
+    /** Classic Donchian-mid levels for SL/TP (pre-#266). */
+    levelsEngine?: string;
+    /** HMA cloud position used by flat→vertical break gate. */
+    smartPriceVsCloud?: string;
+    smartCloudBias?: string;
+    smartTkCross?: string;
     chikouBias?: string;
     cloudTwist?: string;
     cloudThicknessPct?: number;

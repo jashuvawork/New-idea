@@ -78,12 +78,21 @@ def test_hma_downtrend_break_side(mock_gs):
 
 
 @patch("app.engines.smart_ichimoku.get_settings")
-def test_compute_ichimoku_delegates(mock_gs):
+def test_compute_ichimoku_classic_levels_plus_smart_break(mock_gs):
+    """SL/TP geometry stays classic; flat→vertical gate keeps HMA break-P."""
     mock_gs.return_value = _settings()
     h, l, c = _uptrend()
     ich = compute_ichimoku(h, l, c, c[-1])
+    smart = compute_smart_ichimoku(h, l, c, c[-1])
+    # Classic Donchian mid tenkan (last 9 highs/lows)
+    classic_tenkan = (max(h[-9:]) + min(l[-9:])) / 2
+    assert ich["levelsEngine"] == "classic"
+    assert ich["tenkan"] == round(classic_tenkan, 2)
+    assert ich["tenkan"] != smart["tenkan"] or ich["kijun"] != smart["kijun"]
     assert ich["engine"] == "hma_logistic"
     assert "breakConfirmed" in ich
+    assert ich["smartPriceVsCloud"] == smart["priceVsCloud"]
+    assert ich["priceVsCloud"] in ("ABOVE", "BELOW", "INSIDE")
 
 
 @patch("app.engines.smart_ichimoku.get_settings")

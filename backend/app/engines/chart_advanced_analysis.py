@@ -135,16 +135,102 @@ def compute_andrews_pitchfork(
     }
 
 
+def _compute_classic_ichimoku(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    spot: float,
+) -> dict[str, Any]:
+    """Classic Donchian-mid Ichimoku (pre-#266) — levels for SL/TP."""
+
+    def _mid(h: list[float], l: list[float], period: int) -> float:
+        if not h or not l:
+            return spot
+        p = min(period, len(h))
+        return (max(h[-p:]) + min(l[-p:])) / 2
+
+    tenkan = _mid(highs, lows, 9)
+    kijun = _mid(highs, lows, 26)
+    senkou_a = (tenkan + kijun) / 2
+    senkou_b = _mid(highs, lows, 52)
+    cloud_top = max(senkou_a, senkou_b)
+    cloud_bottom = min(senkou_a, senkou_b)
+
+    if spot > cloud_top:
+        cloud_bias = "BULLISH"
+    elif spot < cloud_bottom:
+        cloud_bias = "BEARISH"
+    else:
+        cloud_bias = "NEUTRAL"
+
+    tk_cross = "BULLISH" if tenkan > kijun else "BEARISH" if tenkan < kijun else "NEUTRAL"
+    return {
+        "tenkan": round(tenkan, 2),
+        "kijun": round(kijun, 2),
+        "senkouA": round(senkou_a, 2),
+        "senkouB": round(senkou_b, 2),
+        "cloudTop": round(cloud_top, 2),
+        "cloudBottom": round(cloud_bottom, 2),
+        "cloudBias": cloud_bias,
+        "tkCross": tk_cross,
+        "priceVsCloud": "ABOVE" if spot > cloud_top else "BELOW" if spot < cloud_bottom else "INSIDE",
+        "levelsEngine": "classic",
+    }
+
+
+# Smart metadata attached onto classic levels (never overwrites SL/TP geometry).
+_SMART_ICHIMOKU_META_KEYS = (
+    "smartBias",
+    "smartScore",
+    "smartLabel",
+    "reasons",
+    "engine",
+    "breakProbability",
+    "breakConfirmed",
+    "breakSide",
+    "breakEvent",
+    "breakRisk",
+    "breakThreshold",
+    "breakFeatures",
+    "chikouBias",
+    "chikouVs",
+    "cloudTwist",
+    "cloudThickness",
+    "cloudThicknessPct",
+    "futureCloud",
+    "cloudDisplaced",
+    "futureSenkouA",
+    "futureSenkouB",
+    "tkCrossAge",
+)
+
+
 def compute_ichimoku(
     highs: list[float],
     lows: list[float],
     closes: list[float],
     spot: float,
 ) -> dict[str, Any]:
-    """Smart Ichimoku — GainzAlgo-style HMA cloud + logistic break classifier."""
+    """Classic Ichimoku levels for SL/TP + Smart HMA break-P for flat→vertical.
+
+    Geometry (`tenkan` / `kijun` / cloud edges / classic `priceVsCloud`) stays on the
+    pre-#266 Donchian-mid formula so exits match broker-style Ichimoku. GainzAlgo
+    HMA break fields are attached alongside; the entry gate reads
+    `smartPriceVsCloud` + break-P.
+    """
     from app.engines.smart_ichimoku import compute_smart_ichimoku
 
-    return compute_smart_ichimoku(highs, lows, closes, spot)
+    classic = _compute_classic_ichimoku(highs, lows, closes, spot)
+    smart = compute_smart_ichimoku(highs, lows, closes, spot)
+    out = dict(classic)
+    for key in _SMART_ICHIMOKU_META_KEYS:
+        if key in smart:
+            out[key] = smart[key]
+    # Gate must use HMA cloud position, not classic.
+    out["smartPriceVsCloud"] = smart.get("priceVsCloud") or classic.get("priceVsCloud")
+    out["smartCloudBias"] = smart.get("cloudBias") or classic.get("cloudBias")
+    out["smartTkCross"] = smart.get("tkCross") or classic.get("tkCross")
+    return out
 
 
 def _body_size(o: float, c: float) -> float:
