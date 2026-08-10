@@ -14,6 +14,7 @@ from app.engines.explosion_profit import (
 from app.engines.premium_filter import premium_in_band
 from app.engines.trade_selector import _building_aligned_ict_alert_ok
 from app.models.schemas import (
+    AutoTraderState,
     Breadth,
     MarketPhase,
     PaperTrade,
@@ -74,8 +75,22 @@ def test_building_aligned_ict_alert_allows_put_on_bearish():
         "velocity9s": 3.0,
         "ictVolumeAwakening": True,
     }
-    assert _building_aligned_ict_alert_ok(alert, _snap("BEARISH"), "BUILDING") is True
-    assert _building_aligned_ict_alert_ok(alert, _snap("BULLISH"), "BUILDING") is False
+    with (
+        patch(
+            "app.engines.worst_day_itm_fade.worst_day_defensive_session_active",
+            return_value=False,
+        ),
+        patch(
+            "app.engines.worst_day_guard.session_entry_policy",
+            return_value=("NORMAL", {}),
+        ),
+        patch(
+            "app.engines.dual_mode_strategy.resolve_trading_session_mode",
+            return_value=("NORMAL", {}),
+        ),
+    ):
+        assert _building_aligned_ict_alert_ok(alert, _snap("BEARISH"), "BUILDING") is True
+        assert _building_aligned_ict_alert_ok(alert, _snap("BULLISH"), "BUILDING") is False
 
 
 def test_building_aligned_rejects_cold_aug7_style():
@@ -91,7 +106,21 @@ def test_building_aligned_rejects_cold_aug7_style():
         "velocity9s": 0.5,
         "ictVolumeAwakening": True,
     }
-    assert _building_aligned_ict_alert_ok(alert, _snap("BEARISH"), "BUILDING") is False
+    with (
+        patch(
+            "app.engines.worst_day_itm_fade.worst_day_defensive_session_active",
+            return_value=False,
+        ),
+        patch(
+            "app.engines.worst_day_guard.session_entry_policy",
+            return_value=("NORMAL", {}),
+        ),
+        patch(
+            "app.engines.dual_mode_strategy.resolve_trading_session_mode",
+            return_value=("NORMAL", {}),
+        ),
+    ):
+        assert _building_aligned_ict_alert_ok(alert, _snap("BEARISH"), "BUILDING") is False
 
 
 def test_building_aligned_rejects_aug10_v3_spike_cold_v9():
@@ -107,7 +136,69 @@ def test_building_aligned_rejects_aug10_v3_spike_cold_v9():
         "velocity9s": 0.0,
         "ictVolumeAwakening": True,
     }
-    assert _building_aligned_ict_alert_ok(alert, _snap("BULLISH"), "BUILDING") is False
+    with (
+        patch(
+            "app.engines.worst_day_itm_fade.worst_day_defensive_session_active",
+            return_value=False,
+        ),
+        patch(
+            "app.engines.worst_day_guard.session_entry_policy",
+            return_value=("NORMAL", {}),
+        ),
+        patch(
+            "app.engines.dual_mode_strategy.resolve_trading_session_mode",
+            return_value=("NORMAL", {}),
+        ),
+    ):
+        assert _building_aligned_ict_alert_ok(alert, _snap("BULLISH"), "BUILDING") is False
+
+
+def test_building_aligned_fail_closed_without_state_on_breakout_only():
+    """Missing state must not re-admit BUILDING on BREAKOUT_ONLY."""
+    alert = {
+        "side": "CALL",
+        "tier": "BUILDING",
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictScore": 40.0,
+        "explosionScore": 70.0,
+        "velocity3s": 3.2,
+        "velocity9s": 3.0,
+        "ictVolumeAwakening": True,
+    }
+    with (
+        patch(
+            "app.engines.worst_day_itm_fade.worst_day_defensive_session_active",
+            return_value=True,
+        ),
+        patch(
+            "app.engines.worst_day_guard.session_entry_policy",
+            return_value=("BREAKOUT_ONLY", {}),
+        ),
+    ):
+        assert _building_aligned_ict_alert_ok(alert, _snap("BULLISH"), "BUILDING") is False
+
+
+def test_building_aligned_fail_closed_on_policy_error():
+    alert = {
+        "side": "CALL",
+        "tier": "BUILDING",
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictScore": 40.0,
+        "explosionScore": 70.0,
+        "velocity3s": 3.2,
+        "velocity9s": 3.0,
+        "ictVolumeAwakening": True,
+    }
+    with patch(
+        "app.engines.worst_day_itm_fade.worst_day_defensive_session_active",
+        side_effect=RuntimeError("boom"),
+    ):
+        assert _building_aligned_ict_alert_ok(
+            alert, _snap("BULLISH"), "BUILDING",
+            state=AutoTraderState(), snapshots={"SENSEX": _snap("BULLISH")},
+        ) is False
 
 
 def test_ict_flat_vertical_entry_requires_chart_align():

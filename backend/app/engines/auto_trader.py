@@ -584,12 +584,17 @@ async def _open_from_candidate(
             and getattr(settings, "ict_defensive_base_rip_full_lots", True)
             and tier_u in full_lots_tiers
         )
+        # Defensive rip force-max only for eligible top tiers — lotMultiplier=1.0
+        # must not max-size BUILDING / unknown on a non-chop DEFENSIVE day.
+        defensive_rip = bool(ict_meta.get("defensiveBaseRip"))
+        can_force_max = (not defensive_rip) or defensive_full
         if (
             good_day_ict
             and settings.ict_good_day_force_max_lots
             and ict_meta.get("maxProfitCapture")
             and float(ict_meta.get("lotMultiplier") or 1.0) >= 0.99
             and (not chopish_day or defensive_full)
+            and can_force_max
         ):
             from app.engines.capital_allocator import max_lots_for_capital
 
@@ -601,6 +606,13 @@ async def _open_from_candidate(
             ict_meta.get("allDayIctCapture") or ict_meta.get("defensiveBaseRip")
         ):
             lot_scale = float(ict_meta.get("lotMultiplier") or 0.85)
+            if defensive_rip and not defensive_full and lot_scale >= 0.99:
+                lot_scale = float(
+                    getattr(settings, "ict_defensive_base_rip_lot_multiplier", 0.55)
+                    or 0.55
+                )
+                if lot_scale >= 0.99:
+                    lot_scale = 0.55
             lots = max(1, int(lots * lot_scale))
 
     # High-conviction base rip → take MAX lots (bypass defensive/first-green throttles).
