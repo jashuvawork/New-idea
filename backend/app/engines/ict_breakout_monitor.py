@@ -535,20 +535,59 @@ def good_day_ict_capture_active(
             )
             return True, meta
 
-    # DEFENSIVE / worst days — still take clean base→vertical rips (not chase).
+    # DEFENSIVE / worst days — ELITE/EXPLODING clean base→vertical only (not BUILDING).
     if (
         mode == "DEFENSIVE"
         and getattr(settings, "ict_defensive_base_rip_enabled", True)
         and early_ok
         and not ict.mega_rip
     ):
+        tier_u = ""
+        if event is not None:
+            tier_u = str(getattr(event, "tier", "") or "").upper()
+        rip_raw = str(
+            getattr(settings, "ict_defensive_base_rip_tiers_csv", "ELITE,EXPLODING")
+            or "ELITE,EXPLODING"
+        )
+        rip_tiers = {t.strip().upper() for t in rip_raw.split(",") if t.strip()}
+        # Unknown tier (tests / ICT-only probe): allow capture meta, no full lots.
+        # Known BUILDING (or other non-rip tier): deny — Aug10 fake elite-build.
+        if tier_u and tier_u not in rip_tiers:
+            meta["deniedReason"] = f"defensive_base_rip_tier_{tier_u.lower()}"
+            return False, meta
         max_move = float(getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0)
+        if tier_u in ("ELITE", "EXPLODING"):
+            elite_hi = float(
+                getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0
+            )
+            from app.engines.elite_never_block import top_explosion_must_take_active
+
+            snap_for_mt = None
+            if event is not None:
+                snap_for_mt = snapshots.get(str(getattr(event, "symbol", "") or "").upper())
+            if not top_explosion_must_take_active(event=event, snap=snap_for_mt):
+                max_move = min(max_move, elite_hi)
         if ict.session_move_pct <= max_move and (ict.volume_awakening or ict.displacement):
             meta["maxProfitCapture"] = True
             meta["allDayIctCapture"] = True
             meta["defensiveBaseRip"] = True
             meta["capturePath"] = "defensive_base_flat_vertical"
-            if getattr(settings, "ict_defensive_base_rip_full_lots", True):
+            full_lots_raw = str(
+                getattr(
+                    settings,
+                    "ict_defensive_base_rip_full_lots_tiers_csv",
+                    "ELITE,EXPLODING",
+                )
+                or "ELITE,EXPLODING"
+            )
+            full_lots_tiers = {
+                t.strip().upper() for t in full_lots_raw.split(",") if t.strip()
+            }
+            allow_full = (
+                getattr(settings, "ict_defensive_base_rip_full_lots", True)
+                and (not tier_u or tier_u in full_lots_tiers)
+            )
+            if allow_full:
                 meta["lotMultiplier"] = 1.0
                 meta["baseWindowFullLots"] = True
             else:

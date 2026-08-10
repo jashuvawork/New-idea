@@ -561,9 +561,23 @@ async def _open_from_candidate(
                 or regime in ("CHOP", "RANGE_BOUND")
                 or is_chop_session(snapshots)
             )
+        tier_u = str(getattr(candidate, "tier", "") or "").upper()
+        full_lots_raw = str(
+            getattr(
+                settings,
+                "ict_defensive_base_rip_full_lots_tiers_csv",
+                "ELITE,EXPLODING",
+            )
+            or "ELITE,EXPLODING"
+        )
+        full_lots_tiers = {
+            t.strip().upper() for t in full_lots_raw.split(",") if t.strip()
+        }
+        # Aug10: never full-lot BUILDING on defensive/worst base rip.
         defensive_full = bool(
             ict_meta.get("defensiveBaseRip")
             and getattr(settings, "ict_defensive_base_rip_full_lots", True)
+            and tier_u in full_lots_tiers
         )
         if (
             good_day_ict

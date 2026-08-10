@@ -313,6 +313,16 @@ def explosion_entry_window_blocked(
         return False, ""
 
     lo, hi = entry_window_bounds(ict, top_must_take=top_must_take)
+    # Non-must-take ELITE/EXPLODING: take at local-base pad (default ≤40%).
+    # Must-take keeps the wider structured band (≤65%).
+    if not top_must_take:
+        tier_u = str(getattr(explosion_event, "tier", "") or "").upper()
+        if tier_u in ("ELITE", "EXPLODING"):
+            elite_hi = float(
+                getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0
+            )
+            if elite_hi > 0:
+                hi = min(hi, elite_hi)
     try:
         max_credible = float(
             getattr(settings, "session_move_max_credible_pct", 500.0)

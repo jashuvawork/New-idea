@@ -24,7 +24,9 @@ def _settings(**overrides):
     s.explosion_building_aligned_ict_enabled = True
     s.explosion_building_elite_min_score = 62.0
     s.explosion_building_elite_min_velocity_3s = 2.5
+    s.explosion_building_elite_min_velocity_9s = 2.5
     s.explosion_building_elite_min_ict_score = 35.0
+    s.worst_day_block_building_ict = True
     s.explosion_require_chart_align_enabled = True
     s.explosion_only_trading_enabled = True
     s.explosion_only_allow_guarded_scalp = False
@@ -99,7 +101,7 @@ def test_building_skipped_when_elite_exploding_only():
 
 
 def test_elite_building_admitted_when_hot():
-    """BUILDING with elite-build bars (score≥62, v3≥2.5, ICT) can enter."""
+    """BUILDING with elite-build bars (score≥62, v3/v9≥2.5, ICT) can enter."""
     settings = _settings(explosion_elite_exploding_only=True)
     alert = _alert("BUILDING", 70.0)
     alert.update({
@@ -107,6 +109,7 @@ def test_elite_building_admitted_when_hot():
         "ictBreakout": True,
         "ictScore": 40.0,
         "velocity3s": 3.2,
+        "velocity9s": 3.0,
         "ictVolumeAwakening": True,
         "explosionScore": 70.0,
     })

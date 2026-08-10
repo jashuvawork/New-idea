@@ -89,13 +89,35 @@ def _building_aligned_ict_alert_ok(
     alert: dict[str, Any],
     snap: SymbolSnapshot,
     tier_u: str,
+    *,
+    state: Any = None,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
 ) -> bool:
-    """Allow BUILDING only as elite-build: ICT flat→vertical + chart + hot score/v3."""
+    """Allow BUILDING only as elite-build: ICT flat→vertical + chart + hot score/v3/v9.
+
+    On WORST / BREAKOUT_ONLY / DEFENSIVE sessions, BUILDING ICT is blocked entirely
+    (Aug10 fake elite-build CE) — ELITE/EXPLODING take at local-base pad instead.
+    """
     settings = get_settings()
     if not bool(getattr(settings, "explosion_building_aligned_ict_enabled", True)):
         return False
     if tier_u != "BUILDING":
         return False
+    if bool(getattr(settings, "worst_day_block_building_ict", True)):
+        try:
+            from app.engines.worst_day_itm_fade import worst_day_defensive_session_active
+            from app.engines.worst_day_guard import session_entry_policy
+
+            snaps = snapshots or ({snap.symbol: snap} if snap is not None else {})
+            st = state
+            if st is not None and snaps and worst_day_defensive_session_active(st, snaps):
+                return False
+            if st is not None and snaps:
+                policy, _ = session_entry_policy(st, snaps)
+                if policy in ("BREAKOUT_ONLY", "PAUSED"):
+                    return False
+        except Exception:
+            pass
     if not bool(alert.get("ictFlatThenVertical") or alert.get("ictBreakout")):
         return False
     min_ict = float(getattr(settings, "explosion_building_elite_min_ict_score", 35.0) or 35.0)
@@ -115,6 +137,12 @@ def _building_aligned_ict_alert_ok(
     )
     v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
     if v3 < min_v3:
+        return False
+    min_v9 = float(
+        getattr(settings, "explosion_building_elite_min_velocity_9s", 2.5) or 2.5
+    )
+    v9 = float(alert.get("velocity9s") or alert.get("velocity_9s") or 0)
+    if v9 < min_v9:
         return False
     side_raw = str(alert.get("side") or "").upper()
     if side_raw not in ("CALL", "PUT"):
@@ -253,7 +281,9 @@ def _explosion_candidates(
             if tier_u not in ("ELITE", "EXPLODING"):
                 # Early BUILDING flat→vertical when chart-aligned — catch the base
                 # before ELITE prints (multiple flat→vertical moments per week).
-                if not _building_aligned_ict_alert_ok(alert, snap, tier_u):
+                if not _building_aligned_ict_alert_ok(
+                    alert, snap, tier_u, state=state, snapshots={symbol: snap},
+                ):
                     continue
         elif tier_u not in ("ELITE", "EXPLODING"):
             from app.engines.morning_premium_capture import is_premium_capture_alert
@@ -1320,7 +1350,10 @@ def diagnose_missed_entries(
             )
             blockers: list[str] = []
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
-                if not _building_aligned_ict_alert_ok(alert, snap, str(tier_str).upper()):
+                if not _building_aligned_ict_alert_ok(
+                    alert, snap, str(tier_str).upper(),
+                    state=state, snapshots=snapshots,
+                ):
                     blockers.append("tier_not_elite_exploding")
             if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
                 from app.engines.spot_direction import side_aligned_with_chart

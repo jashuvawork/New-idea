@@ -25,6 +25,10 @@ def _settings(**overrides):
     s.ict_defensive_base_rip_full_lots = True
     s.ict_defensive_base_rip_lot_multiplier = 0.55
     s.ict_defensive_base_rip_max_move_pct = 55.0
+    s.ict_defensive_base_rip_tiers_csv = "ELITE,EXPLODING"
+    s.ict_defensive_base_rip_full_lots_tiers_csv = "ELITE,EXPLODING"
+    s.elite_local_base_max_move_pct = 40.0
+    s.worst_day_block_building_ict = True
     s.ict_max_profit_skip_hard_target = True
     s.ict_max_profit_target_points = 180.0
     s.ict_max_profit_trail_keep_ratio = 0.42
@@ -91,8 +95,9 @@ def test_defensive_day_allows_early_base_rip(mock_mode, mock_settings):
         dataAvailable=True,
         tradeQualityScore=50,
     )
+    # Unknown tier (ICT-only probe) — still marks defensive rip; full lots ok.
     active, meta = good_day_ict_capture_active(
-        state, {"SENSEX": snap}, ict=_ict_flat(session_move_pct=40.0),
+        state, {"SENSEX": snap}, ict=_ict_flat(session_move_pct=35.0),
     )
     assert active is True
     assert meta.get("defensiveBaseRip") is True
@@ -100,6 +105,65 @@ def test_defensive_day_allows_early_base_rip(mock_mode, mock_settings):
     assert meta.get("capturePath") == "defensive_base_flat_vertical"
     # Full lots on defensive base rip (ict_defensive_base_rip_full_lots=True).
     assert meta.get("lotMultiplier") == 1.0
+    assert meta.get("baseWindowFullLots") is True
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+@patch("app.engines.dual_mode_strategy.resolve_trading_session_mode", return_value=("DEFENSIVE", {}))
+def test_defensive_blocks_building_base_rip(mock_mode, mock_settings):
+    """Aug10: BUILDING ICT must not open defensive base-rip path."""
+    from app.engines.explosion_detector import ExplosionEvent
+    from app.models.schemas import Side
+
+    mock_settings.return_value = _settings()
+    state = AutoTraderState()
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=50,
+    )
+    event = ExplosionEvent(
+        symbol="NIFTY", side=Side.CALL, strike=24650, premium=75.8,
+        velocity_3s=3.05, velocity_9s=0.0, velocity_15s=1.0,
+        volume_surge=2.0, explosion_score=70.0, tier="BUILDING", reason="t",
+        daily_move_pct=16.0, peak_move_pct=25.0,
+    )
+    active, meta = good_day_ict_capture_active(
+        state, {"NIFTY": snap}, event=event, ict=_ict_flat(session_move_pct=25.0),
+    )
+    assert active is False
+    assert "building" in str(meta.get("deniedReason") or "")
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+@patch("app.engines.dual_mode_strategy.resolve_trading_session_mode", return_value=("DEFENSIVE", {}))
+def test_defensive_elite_local_base_allows_early(mock_mode, mock_settings):
+    """ELITE at local-base pad (≤40%) still takes on DEFENSIVE days."""
+    from app.engines.explosion_detector import ExplosionEvent
+    from app.models.schemas import Side
+
+    mock_settings.return_value = _settings()
+    state = AutoTraderState()
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=55,
+    )
+    event = ExplosionEvent(
+        symbol="NIFTY", side=Side.PUT, strike=24500, premium=90.0,
+        velocity_3s=3.5, velocity_9s=4.0, velocity_15s=3.0,
+        volume_surge=3.0, explosion_score=85.0, tier="ELITE", reason="t",
+        daily_move_pct=28.0, peak_move_pct=30.0,
+    )
+    active, meta = good_day_ict_capture_active(
+        state, {"NIFTY": snap}, event=event, ict=_ict_flat(session_move_pct=28.0),
+    )
+    assert active is True
+    assert meta.get("defensiveBaseRip") is True
     assert meta.get("baseWindowFullLots") is True
 
 
