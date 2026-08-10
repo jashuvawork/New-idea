@@ -4,6 +4,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.engines.chart_advanced_analysis import (
+    _build_key_signals,
+    _mtf_aligned_count,
     build_chart_analysis,
     compute_fibonacci_levels,
     compute_ichimoku,
@@ -12,7 +14,7 @@ from app.engines.chart_advanced_analysis import (
     detect_smt_divergence,
     analyze_smc_ict,
 )
-from app.models.schemas import MarketProfile
+from app.models.schemas import MarketProfile, TimeframeChartRead
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -149,3 +151,49 @@ def test_smart_ichimoku_downtrend_composite():
     assert ich["smartBias"] == "BEARISH"
     assert ich["smartScore"] <= 38
     assert ich["chikouBias"] == "BEARISH"
+
+
+def _tf(label: str, direction: str) -> TimeframeChartRead:
+    return TimeframeChartRead(label=label, price=100.0, direction=direction, rsi=50.0)
+
+
+def test_mtf_aligned_count_neutral_uses_stronger_lean():
+    """Screenshot case: 2 BULL / 1 BEAR / 1 NEUT → NEUTRAL consensus, aligned=2 not 1."""
+    reads = {
+        "5m": _tf("5m", "BULLISH"),
+        "15m": _tf("15m", "BEARISH"),
+        "1h": _tf("1h", "BULLISH"),
+        "4h": _tf("4h", "NEUTRAL"),
+    }
+    assert _mtf_aligned_count(reads, "NEUTRAL") == 2
+
+
+def test_mtf_aligned_count_bullish_includes_neutral_soft():
+    reads = {
+        "5m": _tf("5m", "BULLISH"),
+        "15m": _tf("15m", "BULLISH"),
+        "1h": _tf("1h", "BULLISH"),
+        "4h": _tf("4h", "NEUTRAL"),
+    }
+    assert _mtf_aligned_count(reads, "BULLISH") == 4
+
+
+def test_key_signal_uses_hma_cloud_position():
+    signals = _build_key_signals(
+        fib={},
+        pivots={},
+        ichimoku={
+            "smartBias": "NEUTRAL",
+            "smartScore": 58.0,
+            "priceVsCloud": "ABOVE",
+            "smartPriceVsCloud": "INSIDE",
+            "breakProbability": 0.0,
+            "breakConfirmed": False,
+        },
+        smc={},
+        patterns=[],
+        consensus="NEUTRAL",
+    )
+    smart_sig = next(s for s in signals if s.startswith("Smart Ichimoku"))
+    assert "(INSIDE)" in smart_sig
+    assert "(ABOVE)" not in smart_sig
