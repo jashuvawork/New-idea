@@ -130,7 +130,15 @@ def _build_orderflow(
 
     if candles and len(candles) >= 5:
         volumes = [c[5] if isinstance(c, list) else c.get("volume", 0) for c in candles[-10:]]
-        closes = [c[4] if isinstance(c, list) else c.get("close", 0) for c in candles[-10:]]
+        closes = [
+            float(c[4] if isinstance(c, list) else c.get("close", 0) or 0)
+            for c in candles[-10:]
+        ]
+        # Live spot into the forming bar — stale last close was pinning tickMomentum at 0.
+        # Only when spot is on the same instrument scale (avoid synthetic/mismatched tests).
+        if spot > 0 and closes and closes[-1] > 0:
+            if abs(spot - closes[-1]) / closes[-1] <= 0.05:
+                closes[-1] = float(spot)
 
         if len(volumes) >= 3:
             recent_vol = sum(float(v or 0) for v in volumes[-3:])
@@ -143,9 +151,16 @@ def _build_orderflow(
             pct = (move / closes[-5]) * 100
             delta_vel = min(100, abs(pct) * 5)
             breakout_vel = min(100, abs(pct) * 8)
-            if len(closes) >= 2 and closes[-2]:
-                tick_mom = min(100, abs(closes[-1] - closes[-2]) / closes[-2] * 2000)
             signed_mom = round(pct, 3)
+
+        # Tick momentum 0–100. Old *2000 mapped NIFTY 5–20pt bars to 0.4–1.6 → UI "0".
+        # *25000 ≈ 1 score per index point at ~25k; 3-bar burst catches short rips.
+        tick_1 = tick_3 = 0.0
+        if len(closes) >= 2 and closes[-2] > 0:
+            tick_1 = abs(closes[-1] - closes[-2]) / closes[-2] * 25000
+        if len(closes) >= 4 and closes[-4] > 0:
+            tick_3 = abs(closes[-1] - closes[-4]) / closes[-4] * 12000
+        tick_mom = min(100.0, max(tick_1, tick_3))
 
     if spot_chart is not None:
         mom5 = abs(float(getattr(spot_chart, "momentum5Pct", 0) or 0))
@@ -156,7 +171,8 @@ def _build_orderflow(
         if breakout_vel < 8:
             breakout_vel = max(breakout_vel, min(100, mom15 * 40 + trend * 0.2))
         if tick_mom < 8:
-            tick_mom = max(tick_mom, min(100, mom5 * 20))
+            # 0.25% 5m → ~20; was *20 which left quiet sessions stuck at 0–2.
+            tick_mom = max(tick_mom, min(100, mom5 * 80 + mom15 * 15))
         if not signed_mom and mom5:
             signed_mom = round(float(getattr(spot_chart, "momentum5Pct", 0) or 0), 3)
 
