@@ -105,3 +105,21 @@ def test_chart_fallback_tick_momentum_on_quiet_candles():
         candles, [], spot=24600.0, atm=24600.0, symbol="NIFTY", spot_chart=chart,
     )
     assert of.tickMomentum >= 8
+
+
+def test_nifty_delta_breakout_not_stuck_near_zero():
+    """~80pt / 5×1m NIFTY impulse must score well above UI-zero (old *5/*8 → ~1.6)."""
+    base = 24600.0
+    closes = [base, base + 15, base + 30, base + 50, base + 65, base + 80]
+    candles = []
+    for i, c in enumerate(closes):
+        o = closes[i - 1] if i else c
+        candles.append([i, o, max(o, c) + 2, min(o, c) - 2, c, 1000])
+    of = _build_orderflow(
+        candles, [], spot=closes[-1], atm=24600.0, symbol="NIFTY",
+    )
+    assert of.deltaVelocity >= 25
+    assert of.breakoutVelocity >= 35
+    assert of.signedMomentumPct > 0
+    # Old scale would have printed ~1–2 here.
+    assert of.deltaVelocity > 10

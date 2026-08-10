@@ -3,8 +3,16 @@ import type { SymbolSnapshot } from '../types';
 
 export function AIMatrix({ snap }: { snap: SymbolSnapshot }) {
   const tqs = snap.tradeQualityScore ?? 0;
+  // Match backend ai_engine.score_tqs orderflow blend (not raw delta alone).
+  const of = snap.orderflow;
+  const orderflowScore = of
+    ? (of.deltaVelocity ?? 0) * 0.35
+      + (of.volumeAcceleration ?? 0) * 0.3
+      + (of.breakoutVelocity ?? 0) * 0.2
+      + (of.tickMomentum ?? 0) * 0.15
+    : 0;
   const components = [
-    { label: 'Orderflow', weight: '30%', value: snap.orderflow?.deltaVelocity ?? 0 },
+    { label: 'Orderflow', weight: '30%', value: orderflowScore },
     { label: 'Breadth', weight: '20%', value: snap.breadth?.score ?? 0 },
     { label: 'Greeks/IV', weight: '15%', value: snap.greeks?.ivRank ?? 0 },
     { label: 'Profile', weight: '15%', value: 65 },

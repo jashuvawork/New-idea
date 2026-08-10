@@ -144,8 +144,19 @@ def build_breadth(chain: list[dict[str, Any]], spot: float) -> Breadth:
     return Breadth(score=round(score, 1), bias=bias, aligned=abs(call_pct - 50) > 5)
 
 
-def build_heatmap(chain: list[dict[str, Any]], spot: float, atm: float) -> list:
+def build_heatmap(
+    chain: list[dict[str, Any]],
+    spot: float,
+    atm: float,
+    *,
+    symbol: str = "",
+) -> list:
     """Build strike heatmap with liquidity and gamma wall detection."""
+    from app.engines.moneyness import strike_step
+
+    step = float(strike_step(symbol) if symbol else 100.0)
+    wall_near = max(50.0, step)          # ATM ± 1 step (SENSEX=100)
+    sweep_near = max(100.0, step * 2)    # ATM ± 2 steps
     rows: list[HeatmapStrike] = []
     max_oi = 1
     for row in chain:
@@ -166,8 +177,10 @@ def build_heatmap(chain: list[dict[str, Any]], spot: float, atm: float) -> list:
         put_ltp = pe.get("ltp") or pe.get("last_price")
 
         liq = ((call_oi + put_oi) / max_oi) * 100
-        gamma_wall = abs(strike - atm) <= 50 and (call_oi > max_oi * 0.7 or put_oi > max_oi * 0.7)
-        sweep_risk = liq * 0.3 if abs(strike - spot) < 100 else liq * 0.1
+        gamma_wall = abs(strike - atm) <= wall_near and (
+            call_oi > max_oi * 0.7 or put_oi > max_oi * 0.7
+        )
+        sweep_risk = liq * 0.3 if abs(strike - spot) < sweep_near else liq * 0.1
 
         rows.append(
             HeatmapStrike(

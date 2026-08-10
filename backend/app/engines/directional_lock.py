@@ -155,9 +155,15 @@ def side_switch_confirmed(
             signals.append("runner")
 
     of = snap.orderflow
-    if side_v == "CALL" and of.tickMomentum > 0 and of.deltaVelocity >= 0:
+    # Magnitude scores are abs 0–100; direction comes from signedMomentumPct
+    # (live) or a signed tickMomentum (tests / legacy).
+    tick = float(getattr(of, "tickMomentum", 0) or 0)
+    signed = float(getattr(of, "signedMomentumPct", 0) or 0)
+    bullish_of = signed > 0 or (signed == 0 and tick > 0)
+    bearish_of = signed < 0 or (signed == 0 and tick < 0)
+    if side_v == "CALL" and bullish_of:
         signals.append("orderflow")
-    elif side_v == "PUT" and of.tickMomentum < 0 and of.deltaVelocity <= 0:
+    elif side_v == "PUT" and bearish_of:
         signals.append("orderflow")
 
     if snap.breadth.aligned and breadth == target_bias:

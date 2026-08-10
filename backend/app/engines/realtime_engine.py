@@ -105,11 +105,13 @@ def _detect_regime(candles: list, spot: float = 0.0) -> Regime:
     range_pct = ((high - low) / low) * 100 if low else 0
     recent_move = abs(closes[-1] - closes[-5]) / closes[-5] * 100 if closes[-5] else 0
 
-    if range_pct > 1.5 and recent_move > 0.4:
+    # Thresholds for ~20×1m bars (not session %). Old 1.5%/0.4% needed ~370 NIFTY pts
+    # in 20 minutes — almost never fired TREND/VOL on live index.
+    if range_pct > 0.45 and recent_move > 0.12:
         return Regime.TREND_EXPANSION
-    if range_pct > 2.0:
+    if range_pct > 0.80:
         return Regime.VOLATILITY_SPIKE
-    if range_pct < 0.3:
+    if range_pct < 0.12:
         return Regime.CHOP
     return Regime.RANGE_BOUND
 
@@ -149,8 +151,10 @@ def _build_orderflow(
         if len(closes) >= 5 and closes[-5]:
             move = closes[-1] - closes[-5]
             pct = (move / closes[-5]) * 100
-            delta_vel = min(100, abs(pct) * 5)
-            breakout_vel = min(100, abs(pct) * 8)
+            # Same class of bug as tick: *5/*8 mapped NIFTY 40–80pt/5m to ~1–2 → UI 0.
+            # *120/*160: ~60pt impulse → delta≈30, breakout≈40 (strategy gates reachable).
+            delta_vel = min(100.0, abs(pct) * 120)
+            breakout_vel = min(100.0, abs(pct) * 160)
             signed_mom = round(pct, 3)
 
         # Tick momentum 0–100. Old *2000 mapped NIFTY 5–20pt bars to 0.4–1.6 → UI "0".
@@ -167,9 +171,9 @@ def _build_orderflow(
         mom15 = abs(float(getattr(spot_chart, "momentum15Pct", 0) or 0))
         trend = float(getattr(spot_chart, "trendStrength", 0) or 0)
         if delta_vel < 8:
-            delta_vel = max(delta_vel, min(100, mom5 * 30 + trend * 0.15))
+            delta_vel = max(delta_vel, min(100, mom5 * 120 + trend * 0.2))
         if breakout_vel < 8:
-            breakout_vel = max(breakout_vel, min(100, mom15 * 40 + trend * 0.2))
+            breakout_vel = max(breakout_vel, min(100, mom15 * 100 + trend * 0.25))
         if tick_mom < 8:
             # 0.25% 5m → ~20; was *20 which left quiet sessions stuck at 0–2.
             tick_mom = max(tick_mom, min(100, mom5 * 80 + mom15 * 15))
@@ -244,11 +248,15 @@ def _build_profile(candles: list, spot: float) -> MarketProfile:
     )
 
 
-def _build_greeks(chain: list, atm: float, spot: float) -> Greeks:
+def _build_greeks(chain: list, atm: float, spot: float, *, symbol: str = "") -> Greeks:
     """Approximate greeks from chain ATM row."""
+    from app.engines.moneyness import strike_step
+
+    # SENSEX/BANKNIFTY step=100 — hardcoded 50pt window skipped every off-ATM row.
+    near = max(50.0, float(strike_step(symbol) if symbol else 100.0))
     for row in chain:
         strike = row.get("strike_price") or row.get("strike", 0)
-        if abs(strike - atm) > 50:
+        if abs(float(strike or 0) - atm) > near:
             continue
         ce = row.get("call_options", {}) or row.get("CE", {})
         greeks = ce.get("greeks", {}) or {}
@@ -505,7 +513,7 @@ async def build_symbol_snapshot(
             spot = overlay_index_ltp(symbol, spot, max_age_seconds=1.0)
 
         atm = _atm_strike(spot, symbol)
-        heatmap = build_heatmap(chain, spot, atm)
+        heatmap = build_heatmap(chain, spot, atm, symbol=symbol)
         profile = _build_profile(candles, spot)
         spot_chart = build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=candles_1m)
         orderflow = _build_orderflow(
@@ -578,7 +586,7 @@ async def build_symbol_snapshot(
                 from_open_pct=day_from_open_pct,
             )
 
-        greeks = _build_greeks(chain, atm, spot)
+        greeks = _build_greeks(chain, atm, spot, symbol=symbol)
         regime = _detect_regime(candles, spot)
         runner, watchlist = _scan_runners(chain, spot, atm, symbol)
 
