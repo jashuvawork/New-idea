@@ -573,7 +573,12 @@ async def _open_from_candidate(
         full_lots_tiers = {
             t.strip().upper() for t in full_lots_raw.split(",") if t.strip()
         }
-        # Aug10: never full-lot BUILDING on defensive/worst base rip.
+        # Aug10: never full-lot BUILDING (or unknown tier) on defensive/worst base rip.
+        if (
+            ict_meta.get("baseWindowFullLots")
+            and tier_u not in full_lots_tiers
+        ):
+            ict_meta["baseWindowFullLots"] = False
         defensive_full = bool(
             ict_meta.get("defensiveBaseRip")
             and getattr(settings, "ict_defensive_base_rip_full_lots", True)

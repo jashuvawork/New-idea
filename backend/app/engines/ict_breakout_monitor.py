@@ -550,12 +550,14 @@ def good_day_ict_capture_active(
             or "ELITE,EXPLODING"
         )
         rip_tiers = {t.strip().upper() for t in rip_raw.split(",") if t.strip()}
-        # Unknown tier (tests / ICT-only probe): allow capture meta, no full lots.
+        # Unknown tier (tests / ICT-only probe): allow capture meta, never full lots.
         # Known BUILDING (or other non-rip tier): deny — Aug10 fake elite-build.
         if tier_u and tier_u not in rip_tiers:
             meta["deniedReason"] = f"defensive_base_rip_tier_{tier_u.lower()}"
             return False, meta
         max_move = float(getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0)
+        # ELITE local-base gate uses pad % (not session/day %) — day% can be 50+
+        # while LTP is still ~28% off the pad; those must still take.
         if tier_u in ("ELITE", "EXPLODING"):
             elite_hi = float(
                 getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0
@@ -566,7 +568,22 @@ def good_day_ict_capture_active(
             if event is not None:
                 snap_for_mt = snapshots.get(str(getattr(event, "symbol", "") or "").upper())
             if not top_explosion_must_take_active(event=event, snap=snap_for_mt):
-                max_move = min(max_move, elite_hi)
+                pad = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+                if pad <= 0 and event is not None:
+                    try:
+                        from app.engines.explosion_entry_guards import (
+                            effective_local_base_move_pct,
+                        )
+
+                        pad = float(effective_local_base_move_pct(event, ict) or 0)
+                    except Exception:
+                        pad = 0.0
+                timing_move = pad if pad > 0 else float(ict.session_move_pct or 0)
+                if timing_move > elite_hi:
+                    meta["deniedReason"] = (
+                        f"elite_local_base_high_{timing_move:.0f}%"
+                    )
+                    return False, meta
         if ict.session_move_pct <= max_move and (ict.volume_awakening or ict.displacement):
             meta["maxProfitCapture"] = True
             meta["allDayIctCapture"] = True
@@ -583,9 +600,10 @@ def good_day_ict_capture_active(
             full_lots_tiers = {
                 t.strip().upper() for t in full_lots_raw.split(",") if t.strip()
             }
+            # Require a known top tier — unknown tier must not inherit full lots.
             allow_full = (
                 getattr(settings, "ict_defensive_base_rip_full_lots", True)
-                and (not tier_u or tier_u in full_lots_tiers)
+                and tier_u in full_lots_tiers
             )
             if allow_full:
                 meta["lotMultiplier"] = 1.0

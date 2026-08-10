@@ -399,7 +399,9 @@ def worst_day_allows_candidate(
             early_max = float(
                 getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0
             )
-            # Prefer early local-base pad for ELITE/EXPLODING (must-take may go wider).
+            # ELITE local-base gate: pad % (not day/peak %). Day% can read 50+ while
+            # the print is still ~28% off the pad — those must still take.
+            elite_pad_ok = True
             if tier in ("ELITE", "EXPLODING"):
                 elite_hi = float(
                     getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0
@@ -407,7 +409,35 @@ def worst_day_allows_candidate(
                 from app.engines.elite_never_block import top_explosion_must_take_active
 
                 if not top_explosion_must_take_active(candidate=candidate, snap=snap):
-                    early_max = min(early_max, elite_hi)
+                    pad = 0.0
+                    for key in (
+                        "localBaseMovePct",
+                        "ictBaseRelativeMovePct",
+                        "baseRelativeMovePct",
+                    ):
+                        try:
+                            pad = float(alert.get(key) or 0)
+                        except (TypeError, ValueError):
+                            pad = 0.0
+                        if pad > 0:
+                            break
+                    if pad <= 0 and event is not None:
+                        try:
+                            from app.engines.explosion_entry_guards import (
+                                effective_local_base_move_pct,
+                            )
+                            from app.engines.ict_breakout_monitor import (
+                                analyze_explosion_event_ict,
+                            )
+
+                            ict_pad = analyze_explosion_event_ict(event, snap)
+                            pad = float(
+                                effective_local_base_move_pct(event, ict_pad) or 0
+                            )
+                        except Exception:
+                            pad = 0.0
+                    timing_move = pad if pad > 0 else move
+                    elite_pad_ok = timing_move <= elite_hi
             rip_tiers = _defensive_base_rip_tiers()
             # Legacy BUILDING path only when worst_day_block_building_ict is off.
             building_elite_ok = True
@@ -438,6 +468,7 @@ def worst_day_allows_candidate(
                 and ict_flat
                 and ict_vol
                 and move <= early_max
+                and elite_pad_ok
                 and score >= settings.all_day_explosion_min_score - 8
                 and building_elite_ok
             ):
