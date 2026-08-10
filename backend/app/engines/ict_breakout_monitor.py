@@ -550,10 +550,13 @@ def good_day_ict_capture_active(
             or "ELITE,EXPLODING"
         )
         rip_tiers = {t.strip().upper() for t in rip_raw.split(",") if t.strip()}
-        # Unknown tier (tests / ICT-only probe): allow capture meta, never full lots.
-        # Known BUILDING (or other non-rip tier): deny — Aug10 fake elite-build.
-        if tier_u and tier_u not in rip_tiers:
-            meta["deniedReason"] = f"defensive_base_rip_tier_{tier_u.lower()}"
+        # Require a known rip tier — empty/unknown must not open the Aug10 hole.
+        if tier_u not in rip_tiers:
+            meta["deniedReason"] = (
+                "defensive_base_rip_tier_unknown"
+                if not tier_u
+                else f"defensive_base_rip_tier_{tier_u.lower()}"
+            )
             return False, meta
         max_move = float(getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0)
         # ELITE local-base gate uses pad % (not session/day %) — day% can be 50+
@@ -600,7 +603,6 @@ def good_day_ict_capture_active(
             full_lots_tiers = {
                 t.strip().upper() for t in full_lots_raw.split(",") if t.strip()
             }
-            # Require a known top tier — unknown tier must not inherit full lots.
             allow_full = (
                 getattr(settings, "ict_defensive_base_rip_full_lots", True)
                 and tier_u in full_lots_tiers
@@ -609,9 +611,14 @@ def good_day_ict_capture_active(
                 meta["lotMultiplier"] = 1.0
                 meta["baseWindowFullLots"] = True
             else:
-                meta["lotMultiplier"] = float(
-                    getattr(settings, "ict_defensive_base_rip_lot_multiplier", 1.0) or 1.0
+                # Cap below 0.99 so auto_trader force-max path cannot fire.
+                mult = float(
+                    getattr(settings, "ict_defensive_base_rip_lot_multiplier", 0.55)
+                    or 0.55
                 )
+                if mult >= 0.99:
+                    mult = 0.55
+                meta["lotMultiplier"] = mult
             return True, meta
 
     return False, meta

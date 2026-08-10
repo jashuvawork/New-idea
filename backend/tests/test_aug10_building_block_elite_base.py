@@ -88,6 +88,34 @@ def test_aug10_building_ce_blocked_on_breakout_only(mock_policy):
     assert "building" in reason
 
 
+def test_building_aligned_fail_closed_no_state():
+    """No state + BREAKOUT_ONLY snap path must still block BUILDING."""
+    from app.engines.trade_selector import _building_aligned_ict_alert_ok
+
+    alert = {
+        "side": "CALL",
+        "tier": "BUILDING",
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictScore": 40.0,
+        "explosionScore": 70.0,
+        "velocity3s": 3.2,
+        "velocity9s": 3.0,
+        "ictVolumeAwakening": True,
+    }
+    with (
+        patch(
+            "app.engines.worst_day_itm_fade.worst_day_defensive_session_active",
+            return_value=True,
+        ),
+        patch(
+            "app.engines.worst_day_guard.session_entry_policy",
+            return_value=("BREAKOUT_ONLY", {}),
+        ),
+    ):
+        assert _building_aligned_ict_alert_ok(alert, _snap(), "BUILDING") is False
+
+
 @patch("app.engines.explosion_entry_guards.get_settings")
 def test_elite_entry_window_prefers_local_base_pad(mock_settings):
     """Non-must-take ELITE capped at elite_local_base_max_move_pct (40)."""

@@ -381,7 +381,11 @@ def worst_day_allows_candidate(
             alert = getattr(candidate, "alert", None) or {}
             event = getattr(candidate, "explosion_event", None)
             ict_flat = bool(alert.get("ictFlatThenVertical"))
-            ict_vol = bool(alert.get("volumeAwaken") or alert.get("ictVolumeAwakening"))
+            ict_vol = bool(
+                alert.get("volumeAwaken")
+                or alert.get("volumeAwakening")
+                or alert.get("ictVolumeAwakening")
+            )
             move = 0.0
             if event is not None:
                 move = max(

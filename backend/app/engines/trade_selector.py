@@ -104,20 +104,27 @@ def _building_aligned_ict_alert_ok(
     if tier_u != "BUILDING":
         return False
     if bool(getattr(settings, "worst_day_block_building_ict", True)):
+        # Fail closed on DEFENSIVE / BREAKOUT_ONLY / PAUSED — missing state or
+        # policy errors must not re-admit Aug10-style BUILDING ICT.
         try:
             from app.engines.worst_day_itm_fade import worst_day_defensive_session_active
             from app.engines.worst_day_guard import session_entry_policy
+            from app.engines.dual_mode_strategy import resolve_trading_session_mode
+            from app.models.schemas import AutoTraderState as _ATS
 
             snaps = snapshots or ({snap.symbol: snap} if snap is not None else {})
-            st = state
-            if st is not None and snaps and worst_day_defensive_session_active(st, snaps):
-                return False
-            if st is not None and snaps:
+            st = state if state is not None else _ATS()
+            if snaps:
+                if worst_day_defensive_session_active(st, snaps):
+                    return False
                 policy, _ = session_entry_policy(st, snaps)
                 if policy in ("BREAKOUT_ONLY", "PAUSED"):
                     return False
+                mode, _ = resolve_trading_session_mode(st, snaps)
+                if mode == "DEFENSIVE":
+                    return False
         except Exception:
-            pass
+            return False
     if not bool(alert.get("ictFlatThenVertical") or alert.get("ictBreakout")):
         return False
     min_ict = float(getattr(settings, "explosion_building_elite_min_ict_score", 35.0) or 35.0)

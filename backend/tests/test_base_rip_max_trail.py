@@ -86,6 +86,10 @@ def _ict_flat(**kwargs):
 @patch("app.engines.ict_breakout_monitor.get_settings")
 @patch("app.engines.dual_mode_strategy.resolve_trading_session_mode", return_value=("DEFENSIVE", {}))
 def test_defensive_day_allows_early_base_rip(mock_mode, mock_settings):
+    """ELITE defensive base rip — full lots for known top tier."""
+    from app.engines.explosion_detector import ExplosionEvent
+    from app.models.schemas import Side
+
     mock_settings.return_value = _settings()
     state = AutoTraderState()
     snap = SymbolSnapshot(
@@ -95,16 +99,41 @@ def test_defensive_day_allows_early_base_rip(mock_mode, mock_settings):
         dataAvailable=True,
         tradeQualityScore=50,
     )
-    # Unknown tier (ICT-only probe) — still marks defensive rip; never full lots.
+    event = ExplosionEvent(
+        symbol="SENSEX", side=Side.PUT, strike=77200, premium=200.0,
+        velocity_3s=3.5, velocity_9s=4.0, velocity_15s=3.0,
+        volume_surge=3.0, explosion_score=85.0, tier="ELITE", reason="t",
+        daily_move_pct=35.0, peak_move_pct=35.0,
+    )
     active, meta = good_day_ict_capture_active(
-        state, {"SENSEX": snap}, ict=_ict_flat(session_move_pct=35.0),
+        state, {"SENSEX": snap}, event=event, ict=_ict_flat(session_move_pct=35.0),
     )
     assert active is True
     assert meta.get("defensiveBaseRip") is True
     assert meta.get("maxProfitCapture") is True
     assert meta.get("capturePath") == "defensive_base_flat_vertical"
-    assert meta.get("baseWindowFullLots") is not True
-    assert float(meta.get("lotMultiplier") or 0) == 0.55
+    assert meta.get("lotMultiplier") == 1.0
+    assert meta.get("baseWindowFullLots") is True
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+@patch("app.engines.dual_mode_strategy.resolve_trading_session_mode", return_value=("DEFENSIVE", {}))
+def test_defensive_unknown_tier_denied(mock_mode, mock_settings):
+    """Empty/unknown tier must not open defensive base-rip (Aug10 hole)."""
+    mock_settings.return_value = _settings()
+    state = AutoTraderState()
+    snap = SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=50,
+    )
+    active, meta = good_day_ict_capture_active(
+        state, {"SENSEX": snap}, ict=_ict_flat(session_move_pct=35.0),
+    )
+    assert active is False
+    assert meta.get("deniedReason") == "defensive_base_rip_tier_unknown"
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")

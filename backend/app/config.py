@@ -1473,8 +1473,8 @@ class Settings(BaseSettings):
     # Aug10: BUILDING was admitted here and full-lotted into a dead spike — ELITE only.
     ict_defensive_base_rip_enabled: bool = True
     ict_defensive_base_rip_tiers_csv: str = "ELITE,EXPLODING"
-    # Kept for rollback; live path uses full lots when ict_defensive_base_rip_full_lots.
-    ict_defensive_base_rip_lot_multiplier: float = 1.0
+    # Reduced size when full-lots tiers do not apply (never ≥0.99 — blocks force-max).
+    ict_defensive_base_rip_lot_multiplier: float = 0.55
     ict_defensive_base_rip_max_move_pct: float = 55.0
     # Full lots only for top tiers on defensive rip (never BUILDING).
     ict_defensive_base_rip_full_lots_tiers_csv: str = "ELITE,EXPLODING"
