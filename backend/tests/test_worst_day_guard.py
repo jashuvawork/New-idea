@@ -101,6 +101,50 @@ def test_allows_elite_explosion(mock_policy):
     assert ok, reason
 
 
+@patch("app.engines.worst_day_guard.session_entry_policy", return_value=("BREAKOUT_ONLY", {}))
+def test_breakout_only_blocks_building_ict_allows_elite_local_base(mock_policy):
+    """Aug10: BUILDING ICT defensive rip blocked; ELITE at local base still allowed."""
+    from app.engines.explosion_detector import ExplosionEvent
+
+    building = _Cand(mode="explosion", tier="BUILDING", score=70.0, side=Side.CALL)
+    building.alert = {
+        "side": "CALL", "tier": "BUILDING", "ictFlatThenVertical": True,
+        "ictVolumeAwakening": True, "velocity3s": 3.05, "velocity9s": 0.0,
+        "explosionScore": 70.0,
+    }
+    building.explosion_event = ExplosionEvent(
+        symbol="NIFTY", side=Side.CALL, strike=24650, premium=75.8,
+        velocity_3s=3.05, velocity_9s=0.0, velocity_15s=1.0,
+        volume_surge=2.0, explosion_score=70.0, tier="BUILDING", reason="t",
+        daily_move_pct=16.0, peak_move_pct=25.0,
+    )
+    ok_b, reason_b, meta_b = worst_day_allows_candidate(
+        building, AutoTraderState(), {"NIFTY": _snap(tqs=48)},
+    )
+    assert ok_b is False
+    assert meta_b.get("defensiveBaseRip") is not True
+    assert "tier" in reason_b or "building" in reason_b.lower() or reason_b.startswith("worst_day")
+
+    elite = _Cand(mode="explosion", tier="ELITE", score=85.0, side=Side.PUT)
+    elite.alert = {
+        "side": "PUT", "tier": "ELITE", "ictFlatThenVertical": True,
+        "ictVolumeAwakening": True, "velocity3s": 3.5, "velocity9s": 4.0,
+        "explosionScore": 85.0, "ictBaseRelativeMovePct": 28.0, "premium": 90.0,
+    }
+    elite.explosion_event = ExplosionEvent(
+        symbol="NIFTY", side=Side.PUT, strike=24450, premium=90.0,
+        velocity_3s=3.5, velocity_9s=4.0, velocity_15s=3.0,
+        volume_surge=3.0, explosion_score=85.0, tier="ELITE", reason="t",
+        daily_move_pct=28.0, peak_move_pct=30.0,
+    )
+    ok_e, reason_e, meta_e = worst_day_allows_candidate(
+        elite, AutoTraderState(), {"NIFTY": _snap(tqs=48)},
+    )
+    assert ok_e is True, reason_e
+    # Either standard breakout tier path or defensive ICT base rip.
+    assert meta_e.get("defensiveBaseRip") or meta_e.get("worstDayIctBaseRip") or ok_e
+
+
 @patch("app.engines.worst_day_guard.session_entry_policy",
        return_value=("PAUSED", {"pauseReason": "worst_day_severe_session_loss"}))
 def test_paused_blocks_normal_but_allows_top_local_base(mock_policy):

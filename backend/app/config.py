@@ -185,7 +185,14 @@ class Settings(BaseSettings):
     explosion_building_aligned_ict_enabled: bool = True
     explosion_building_elite_min_score: float = 62.0
     explosion_building_elite_min_velocity_3s: float = 2.5
+    # Sustained heat — Aug10 BUILDING CE spiked v3 then died (v9≈0). Require hot v9.
+    explosion_building_elite_min_velocity_9s: float = 2.5
     explosion_building_elite_min_ict_score: float = 35.0
+    # WORST / BREAKOUT_ONLY: never admit BUILDING ICT flat→vertical (fake elite-build).
+    # ELITE/EXPLODING still take at local-base pad levels.
+    worst_day_block_building_ict: bool = True
+    # Non-must-take ELITE/EXPLODING: prefer early local-base pad (must-take may go to 65%).
+    elite_local_base_max_move_pct: float = 40.0
     # GainzAlgo-style Smart Ichimoku — HMA cloud + logistic break-P confirm on
     # ICT flat→vertical ELITE/EXPLODING (and elite-BUILDING). Filters shallow fakes.
     smart_ichimoku_use_hma: bool = True
@@ -1463,10 +1470,14 @@ class Settings(BaseSettings):
     ict_late_chase_min_peak_pct: float = 75.0
     ict_late_chase_max_live_velocity_3s: float = 1.0
     # DEFENSIVE/worst days: still catch true flat→vertical base rips (12→392 PE style).
+    # Aug10: BUILDING was admitted here and full-lotted into a dead spike — ELITE only.
     ict_defensive_base_rip_enabled: bool = True
+    ict_defensive_base_rip_tiers_csv: str = "ELITE,EXPLODING"
     # Kept for rollback; live path uses full lots when ict_defensive_base_rip_full_lots.
     ict_defensive_base_rip_lot_multiplier: float = 1.0
     ict_defensive_base_rip_max_move_pct: float = 55.0
+    # Full lots only for top tiers on defensive rip (never BUILDING).
+    ict_defensive_base_rip_full_lots_tiers_csv: str = "ELITE,EXPLODING"
     # Max-profit trail — do not bank tiny TP on base→vertical ICT (25pt elite TP kills 12→392).
     ict_max_profit_skip_hard_target: bool = True
     ict_max_profit_target_points: float = 180.0

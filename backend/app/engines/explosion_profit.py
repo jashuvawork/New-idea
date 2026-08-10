@@ -73,6 +73,12 @@ def _ict_flat_vertical_entry_ok(
         )
         if float(getattr(event, "velocity_3s", 0) or 0) < min_v3:
             return False
+        # Sustained heat — Aug10 CE spiked v3 then cooled (v9≈0).
+        min_v9 = float(
+            getattr(settings, "explosion_building_elite_min_velocity_9s", 2.5) or 2.5
+        )
+        if float(getattr(event, "velocity_9s", 0) or 0) < min_v9:
+            return False
         min_ict = float(getattr(settings, "explosion_building_elite_min_ict_score", 35.0) or 35.0)
         if float(getattr(ict, "score", 0) or 0) < min_ict:
             return False

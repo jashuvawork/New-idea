@@ -137,6 +137,15 @@ def _allowed_breakout_tiers() -> set[str]:
     return {t.strip().upper() for t in raw.split(",") if t.strip()}
 
 
+def _defensive_base_rip_tiers() -> set[str]:
+    settings = get_settings()
+    raw = str(
+        getattr(settings, "ict_defensive_base_rip_tiers_csv", "ELITE,EXPLODING")
+        or "ELITE,EXPLODING"
+    )
+    return {t.strip().upper() for t in raw.split(",") if t.strip()}
+
+
 def worst_day_blocks_call_scalp(
     candidate: Any,
     snapshots: dict[str, SymbolSnapshot],
@@ -350,56 +359,122 @@ def worst_day_allows_candidate(
         from app.engines.bad_day_routing import _extreme_explosion_bypass
 
         if _extreme_explosion_bypass(candidate):
-            if tier in _allowed_breakout_tiers() or tier == "BUILDING":
+            # Aug10: do not let extreme bypass re-admit BUILDING on worst days.
+            allow_building_extreme = (
+                tier == "BUILDING"
+                and not bool(getattr(settings, "worst_day_block_building_ict", True))
+            )
+            if tier in _allowed_breakout_tiers() or allow_building_extreme:
                 min_rank = max(settings.all_day_explosion_min_score - 5, settings.worst_day_breakout_min_rank - 15)
                 if score >= min_rank:
                     meta["extremeMoveBypass"] = True
                     return True, "ok", meta
 
-        # Flat→vertical base rip on worst days (12→392 PE) — allow BUILDING ICT early.
-        alert = getattr(candidate, "alert", None) or {}
-        event = getattr(candidate, "explosion_event", None)
-        ict_flat = bool(alert.get("ictFlatThenVertical"))
-        ict_vol = bool(alert.get("volumeAwaken") or alert.get("ictVolumeAwakening"))
-        move = 0.0
-        if event is not None:
-            move = max(
-                float(getattr(event, "daily_move_pct", 0) or 0),
-                float(getattr(event, "peak_move_pct", 0) or 0),
-            )
-            ict_flat = ict_flat or bool(getattr(event, "ict_flat_then_vertical", False))
-        if not ict_flat and event is not None:
-            from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
-
-            ict = analyze_explosion_event_ict(event, snap)
-            ict_flat = bool(ict.flat_then_vertical and ict.active)
-            ict_vol = ict_vol or bool(ict.volume_awakening or ict.displacement)
-            move = max(move, float(ict.session_move_pct or 0))
-        early_max = float(getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0)
-        # BUILDING defensive rip must also clear elite-build bars (score + hot v3).
-        building_elite_ok = True
-        if tier == "BUILDING":
-            min_build = float(
-                getattr(settings, "explosion_building_elite_min_score", 62.0) or 62.0
-            )
-            min_v3 = float(
-                getattr(settings, "explosion_building_elite_min_velocity_3s", 2.5) or 2.5
-            )
-            v3 = float(getattr(event, "velocity_3s", 0) or 0) if event is not None else 0.0
-            if v3 <= 0:
-                v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
-            building_elite_ok = score >= min_build and v3 >= min_v3
+        # Flat→vertical base rip on worst days — ELITE/EXPLODING at local-base pad.
+        # Aug10 BUILDING CE (v3 spike, cold v9, mid-pad) must not use this path.
         if (
-            getattr(settings, "ict_defensive_base_rip_enabled", True)
-            and ict_flat
-            and ict_vol
-            and move <= early_max
-            and score >= settings.all_day_explosion_min_score - 8
-            and building_elite_ok
+            tier == "BUILDING"
+            and bool(getattr(settings, "worst_day_block_building_ict", True))
         ):
-            meta["defensiveBaseRip"] = True
-            meta["worstDayIctBaseRip"] = True
-            return True, "ok", meta
+            pass  # fall through to tier block below
+        else:
+            alert = getattr(candidate, "alert", None) or {}
+            event = getattr(candidate, "explosion_event", None)
+            ict_flat = bool(alert.get("ictFlatThenVertical"))
+            ict_vol = bool(alert.get("volumeAwaken") or alert.get("ictVolumeAwakening"))
+            move = 0.0
+            if event is not None:
+                move = max(
+                    float(getattr(event, "daily_move_pct", 0) or 0),
+                    float(getattr(event, "peak_move_pct", 0) or 0),
+                )
+                ict_flat = ict_flat or bool(getattr(event, "ict_flat_then_vertical", False))
+            if not ict_flat and event is not None:
+                from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+                ict = analyze_explosion_event_ict(event, snap)
+                ict_flat = bool(ict.flat_then_vertical and ict.active)
+                ict_vol = ict_vol or bool(ict.volume_awakening or ict.displacement)
+                move = max(move, float(ict.session_move_pct or 0))
+            early_max = float(
+                getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0
+            )
+            # ELITE local-base gate: pad % (not day/peak %). Day% can read 50+ while
+            # the print is still ~28% off the pad — those must still take.
+            elite_pad_ok = True
+            if tier in ("ELITE", "EXPLODING"):
+                elite_hi = float(
+                    getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0
+                )
+                from app.engines.elite_never_block import top_explosion_must_take_active
+
+                if not top_explosion_must_take_active(candidate=candidate, snap=snap):
+                    pad = 0.0
+                    for key in (
+                        "localBaseMovePct",
+                        "ictBaseRelativeMovePct",
+                        "baseRelativeMovePct",
+                    ):
+                        try:
+                            pad = float(alert.get(key) or 0)
+                        except (TypeError, ValueError):
+                            pad = 0.0
+                        if pad > 0:
+                            break
+                    if pad <= 0 and event is not None:
+                        try:
+                            from app.engines.explosion_entry_guards import (
+                                effective_local_base_move_pct,
+                            )
+                            from app.engines.ict_breakout_monitor import (
+                                analyze_explosion_event_ict,
+                            )
+
+                            ict_pad = analyze_explosion_event_ict(event, snap)
+                            pad = float(
+                                effective_local_base_move_pct(event, ict_pad) or 0
+                            )
+                        except Exception:
+                            pad = 0.0
+                    timing_move = pad if pad > 0 else move
+                    elite_pad_ok = timing_move <= elite_hi
+            rip_tiers = _defensive_base_rip_tiers()
+            # Legacy BUILDING path only when worst_day_block_building_ict is off.
+            building_elite_ok = True
+            if tier == "BUILDING":
+                min_build = float(
+                    getattr(settings, "explosion_building_elite_min_score", 62.0) or 62.0
+                )
+                min_v3 = float(
+                    getattr(settings, "explosion_building_elite_min_velocity_3s", 2.5)
+                    or 2.5
+                )
+                min_v9 = float(
+                    getattr(settings, "explosion_building_elite_min_velocity_9s", 2.5)
+                    or 2.5
+                )
+                v3 = float(getattr(event, "velocity_3s", 0) or 0) if event is not None else 0.0
+                v9 = float(getattr(event, "velocity_9s", 0) or 0) if event is not None else 0.0
+                if v3 <= 0:
+                    v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+                if v9 <= 0:
+                    v9 = float(alert.get("velocity9s") or alert.get("velocity_9s") or 0)
+                building_elite_ok = (
+                    score >= min_build and v3 >= min_v3 and v9 >= min_v9
+                )
+            if (
+                getattr(settings, "ict_defensive_base_rip_enabled", True)
+                and tier in rip_tiers
+                and ict_flat
+                and ict_vol
+                and move <= early_max
+                and elite_pad_ok
+                and score >= settings.all_day_explosion_min_score - 8
+                and building_elite_ok
+            ):
+                meta["defensiveBaseRip"] = True
+                meta["worstDayIctBaseRip"] = True
+                return True, "ok", meta
 
     if mode != "explosion":
         return False, "worst_day_breakout_only", meta

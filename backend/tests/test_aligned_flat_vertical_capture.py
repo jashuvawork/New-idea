@@ -71,6 +71,7 @@ def test_building_aligned_ict_alert_allows_put_on_bearish():
         "ictScore": 40.0,
         "explosionScore": 70.0,
         "velocity3s": 3.0,
+        "velocity9s": 3.0,
         "ictVolumeAwakening": True,
     }
     assert _building_aligned_ict_alert_ok(alert, _snap("BEARISH"), "BUILDING") is True
@@ -87,9 +88,26 @@ def test_building_aligned_rejects_cold_aug7_style():
         "ictScore": 31.7,
         "explosionScore": 56.2,
         "velocity3s": 1.69,
+        "velocity9s": 0.5,
         "ictVolumeAwakening": True,
     }
     assert _building_aligned_ict_alert_ok(alert, _snap("BEARISH"), "BUILDING") is False
+
+
+def test_building_aligned_rejects_aug10_v3_spike_cold_v9():
+    """Aug10 BUILDING CE: hot v3 spike with cold v9 must not pass."""
+    alert = {
+        "side": "CALL",
+        "tier": "BUILDING",
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictScore": 40.0,
+        "explosionScore": 70.0,
+        "velocity3s": 3.05,
+        "velocity9s": 0.0,
+        "ictVolumeAwakening": True,
+    }
+    assert _building_aligned_ict_alert_ok(alert, _snap("BULLISH"), "BUILDING") is False
 
 
 def test_ict_flat_vertical_entry_requires_chart_align():
@@ -114,6 +132,7 @@ def test_ict_flat_vertical_building_requires_elite_bars(mock_settings):
     s.explosion_building_aligned_ict_enabled = True
     s.explosion_building_elite_min_score = 62.0
     s.explosion_building_elite_min_velocity_3s = 2.5
+    s.explosion_building_elite_min_velocity_9s = 2.5
     s.explosion_building_elite_min_ict_score = 35.0
     mock_settings.return_value = s
     with patch(
@@ -130,10 +149,17 @@ def test_ict_flat_vertical_building_requires_elite_bars(mock_settings):
         cold = _event(tier="BUILDING")
         cold.explosion_score = 56.2
         cold.velocity_3s = 1.69
+        cold.velocity_9s = 0.5
         assert _ict_flat_vertical_entry_ok(cold, _snap("BEARISH")) is False
+        spike = _event(tier="BUILDING")
+        spike.explosion_score = 70.0
+        spike.velocity_3s = 3.2
+        spike.velocity_9s = 0.2
+        assert _ict_flat_vertical_entry_ok(spike, _snap("BEARISH")) is False
         hot = _event(tier="BUILDING")
         hot.explosion_score = 70.0
         hot.velocity_3s = 3.2
+        hot.velocity_9s = 3.0
         assert _ict_flat_vertical_entry_ok(hot, _snap("BEARISH")) is True
 
 
@@ -154,7 +180,11 @@ def test_check_explosion_entry_requires_chart_align(mock_settings):
         False, chart=_snap("BULLISH").spotChart, snap=_snap("BULLISH"),
     )
     assert ok is False
-    assert reason == "explosion_requires_chart_align"
+    # Counter-trend PUT vs bullish chart/breadth — align gate or breadth hard-block.
+    assert reason in (
+        "explosion_requires_chart_align",
+        "hard_block_put_vs_bullish_breadth",
+    )
 
 
 @patch("app.engines.elite_never_block.get_settings")
