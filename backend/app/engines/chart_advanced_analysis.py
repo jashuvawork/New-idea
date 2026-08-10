@@ -441,6 +441,26 @@ def _consensus(reads: dict[str, TimeframeChartRead]) -> str:
     return "NEUTRAL"
 
 
+def _mtf_aligned_count(reads: dict[str, TimeframeChartRead], consensus: str) -> int:
+    """How many TFs agree with the book consensus.
+
+    When consensus is BULLISH/BEARISH, NEUTRAL TFs count as soft-aligned.
+    When consensus is NEUTRAL (mixed book), count the stronger lean — never
+    "NEUTRAL-aligned" which produced misleading 1/4 next to two BULL chips.
+    """
+    if not reads:
+        return 0
+    if consensus == "NEUTRAL":
+        bull = sum(1 for r in reads.values() if r.direction == "BULLISH")
+        bear = sum(1 for r in reads.values() if r.direction == "BEARISH")
+        return max(bull, bear)
+    return sum(
+        1
+        for r in reads.values()
+        if r.direction == consensus or r.direction == "NEUTRAL"
+    )
+
+
 # When 1m history is missing, derive higher TFs from native 5m bars (3→15m, 12→1h, 48→4h).
 _FALLBACK_5M_FRAMES: list[tuple[str, int]] = [
     ("5m", 1),
@@ -555,7 +575,7 @@ def build_chart_analysis(
     if compare_closes and compare_symbol:
         smt = detect_smt_divergence(closes, compare_closes, primary_symbol=symbol, compare_symbol=compare_symbol)
 
-    aligned = sum(1 for r in mtf_reads.values() if r.direction == consensus or r.direction == "NEUTRAL")
+    aligned = _mtf_aligned_count(mtf_reads, consensus)
     recent_closes = [round(c, 2) for c in closes[-30:]]
 
     return ChartAnalysis(
@@ -597,8 +617,14 @@ def _build_key_signals(
         bp = ichimoku.get("breakProbability")
         bp_bit = f" P={bp:.0%}" if isinstance(bp, (int, float)) and bp > 0 else ""
         conf = "✓" if ichimoku.get("breakConfirmed") else ""
+        # Parenthesize HMA cloud position — classic priceVsCloud is for SL/TP only.
+        cloud_pos = (
+            ichimoku.get("smartPriceVsCloud")
+            or ichimoku.get("priceVsCloud")
+            or ""
+        )
         signals.append(
-            f"Smart Ichimoku {smart}{score_bit}{bp_bit}{conf} ({ichimoku.get('priceVsCloud', '')})"
+            f"Smart Ichimoku {smart}{score_bit}{bp_bit}{conf} ({cloud_pos})"
         )
     elif ichimoku.get("cloudBias"):
         signals.append(f"Ichimoku {ichimoku['cloudBias']} ({ichimoku.get('priceVsCloud', '')})")

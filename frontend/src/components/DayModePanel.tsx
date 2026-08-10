@@ -246,10 +246,15 @@ function ChartAnalysisSection({ symbol, analysis }: { symbol: string; analysis: 
             </span>
           </div>
           <div>
-            Risk: <span className="text-white">{ich.breakRisk ?? '—'}</span>
+            Break risk: <span className="text-white">{ich.breakRisk ?? '—'}</span>
           </div>
           <div>
-            TK: <span className="text-white">{ich.tkCross ?? '—'}</span>
+            TK:{' '}
+            <span className="text-white">
+              {ich.smartTkCross && ich.tkCross && ich.smartTkCross !== ich.tkCross
+                ? `${ich.tkCross} / HMA ${ich.smartTkCross}`
+                : (ich.smartTkCross ?? ich.tkCross ?? '—')}
+            </span>
             {typeof ich.tkCrossAge === 'number' && ich.tkCrossAge > 0 ? ` (${ich.tkCrossAge})` : ''}
           </div>
           <div>
