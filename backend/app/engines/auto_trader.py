@@ -297,7 +297,10 @@ def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
             return float(runner.signal.premiumVelocityPct or 0)
     top = snap.topExplosion or {}
     if str(top.get("side", "")).upper() == side_v:
-        if abs(float(top.get("strike") or 0) - strike) <= 50:
+        from app.engines.moneyness import strike_step
+
+        near = max(50.0, float(strike_step(str(trade.symbol or ""))))
+        if abs(float(top.get("strike") or 0) - strike) <= near:
             return float(top.get("velocity3s") or 0)
     return 0.0
 

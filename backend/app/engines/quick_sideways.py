@@ -126,12 +126,18 @@ def _pick_side(chart: SpotChart, snap: SymbolSnapshot) -> Optional[Side]:
     delta_thresh = 25 if _in_chop(snap) else 35
 
     mom5 = chart.momentum5Pct or 0
-    tick = snap.orderflow.tickMomentum or 0
-    delta = snap.orderflow.deltaVelocity or 0
+    # tick/delta are unsigned magnitudes; use signedMomentumPct for PUT/CALL side.
+    tick = abs(float(snap.orderflow.tickMomentum or 0))
+    delta = abs(float(snap.orderflow.deltaVelocity or 0))
+    signed = float(snap.orderflow.signedMomentumPct or 0)
 
-    if mom5 >= mom_thresh or tick >= tick_thresh or delta >= delta_thresh:
+    if mom5 >= mom_thresh or (
+        signed >= 0 and (tick >= tick_thresh or delta >= delta_thresh)
+    ):
         return Side.CALL
-    if mom5 <= -mom_thresh or tick <= -tick_thresh or delta <= -delta_thresh:
+    if mom5 <= -mom_thresh or (
+        signed < 0 and (tick >= tick_thresh or delta >= delta_thresh)
+    ):
         return Side.PUT
 
     direction = (chart.direction or "NEUTRAL").upper()
