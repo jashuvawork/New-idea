@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -122,6 +122,10 @@ def _detect_local_swing_base(
     history: list[tuple[datetime, float, float]],
     premium: float,
     settings,
+    *,
+    symbol: str = "",
+    strike: float = 0.0,
+    side: Side | str | None = None,
 ) -> tuple[bool, float, float]:
     """Local swing low after a dump — Jul23 SENSEX 76400 PE 14:35 (110→42→45).
 
@@ -129,14 +133,40 @@ def _detect_local_swing_base(
     meaningful dump into a low, measure the new leg from that local low instead
     of the day open / earlier peak.
 
+    Also merges the medium-horizon local-base history (~30 min) — the short
+    premium_poll_history (~2 min) alone misses completed V-bottoms (Aug12
+    SENSEX 77800 PE).
+
     Returns (found, local_low, base_relative_move_pct).
     """
-    if premium <= 0 or len(history) < 4:
+    if premium <= 0:
         return False, 0.0, 0.0
     lookback = int(getattr(settings, "ict_local_base_lookback_polls", 16) or 16)
     lookback = max(4, lookback)
-    window = list(history)[-lookback:]
+    window = list(history)[-lookback:] if history else []
     premiums = [float(h[1]) for h in window if float(h[1] or 0) > 0]
+
+    # Merge ~30m local-base hist so ICT still sees the trough after the rip.
+    try:
+        from app.engines.explosion_detector import (
+            LOCAL_BASE_WINDOW_SECONDS,
+            _local_base_hist,
+            _open_key,
+            _is_meaningful_premium,
+        )
+
+        if symbol and side is not None and strike > 0:
+            full_key = _open_key(symbol, strike, side)
+            dq = _local_base_hist.get(full_key)
+            if dq:
+                now = dq[-1][0]
+                lo_cut = now - timedelta(seconds=int(LOCAL_BASE_WINDOW_SECONDS))
+                for ts, p in dq:
+                    if ts >= lo_cut and _is_meaningful_premium(p):
+                        premiums.append(float(p))
+    except Exception:
+        pass
+
     if len(premiums) < 4:
         return False, 0.0, 0.0
     local_low = min(premiums)
@@ -148,16 +178,18 @@ def _detect_local_swing_base(
     if dump_pct < min_dump:
         return False, 0.0, 0.0
     # Low should be recent (in the back half of the window) — not a stale morning print.
+    # With merged long history, accept when premium is still in an early expansion
+    # off that low (≤65% pad) even if the trough is early in the series.
     low_idx = min(i for i, p in enumerate(premiums) if p <= local_low * 1.001)
-    if low_idx < max(0, len(premiums) // 3):
-        # Low only at the start of the window with a grind up = prior leg, not a fresh V.
-        # Still accept when the current premium has pulled back near that low again.
-        near_low = premium <= local_low * 1.35
-        if not near_low:
-            return False, 0.0, 0.0
     base_rel = (premium - local_low) / local_low * 100.0
     if base_rel < 0:
         base_rel = 0.0
+    early_max = float(getattr(settings, "ict_structured_early_max_move_pct", 65.0) or 65.0)
+    if low_idx < max(0, len(premiums) // 3):
+        near_low = premium <= local_low * 1.35
+        in_early_pad = 0 < base_rel <= early_max
+        if not near_low and not in_early_pad:
+            return False, 0.0, 0.0
     return True, local_low, base_rel
 
 
@@ -189,7 +221,9 @@ def analyze_ict_breakout(
 
     fvg, gap_pct = _detect_premium_fvg(history, settings)
     flat, flat_dev, flat_base = _detect_flat_base(history, settings)
-    swing_found, swing_low, swing_rel = _detect_local_swing_base(history, premium, settings)
+    swing_found, swing_low, swing_rel = _detect_local_swing_base(
+        history, premium, settings, symbol=symbol, strike=strike, side=side,
+    )
     early_min = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
     # Prefer local swing low after a dump (V-bottom) over flat-base average; otherwise
     # use consolidation base. Day-open % is intentionally not used here.

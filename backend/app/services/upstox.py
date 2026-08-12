@@ -165,7 +165,7 @@ def normalize_option_leg(leg: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(leg, dict):
         return {}
     if "market_data" not in leg and ("ltp" in leg or "last_price" in leg):
-        # Already flat — still surface prior close/open when present.
+        # Already flat — still surface prior close/open/day extremes when present.
         out = dict(leg)
         ohlc = leg.get("ohlc") or leg.get("OHLC") or {}
         close = (
@@ -175,11 +175,34 @@ def normalize_option_leg(leg: dict[str, Any]) -> dict[str, Any]:
             or ohlc.get("close")
         )
         open_px = leg.get("open") or leg.get("day_open") or ohlc.get("open")
+        day_high = (
+            leg.get("day_high")
+            or leg.get("high")
+            or ohlc.get("high")
+        )
+        day_low = (
+            leg.get("day_low")
+            or leg.get("low")
+            or ohlc.get("low")
+        )
         if close is not None:
             out["prev_close"] = close
             out["close"] = close
         if open_px is not None:
             out["open"] = open_px
+        if day_high is not None:
+            out["day_high"] = day_high
+            out["high"] = day_high
+        if day_low is not None:
+            out["day_low"] = day_low
+            out["low"] = day_low
+        if isinstance(ohlc, dict) and ohlc:
+            out["ohlc"] = {
+                "open": open_px,
+                "high": day_high,
+                "low": day_low,
+                "close": close,
+            }
         return out
 
     md = leg.get("market_data") or {}
@@ -195,6 +218,10 @@ def normalize_option_leg(leg: dict[str, Any]) -> dict[str, Any]:
         or ohlc.get("close")
     )
     open_px = md.get("open") or leg.get("open") or ohlc.get("open")
+    # Day high/low from chain OHLC — critical for V-bottoms missed between LTP polls
+    # (Aug12 SENSEX 77800 PE: trough ~120 / peak ~238 never seen on sparse LTP).
+    day_high = md.get("high") or leg.get("day_high") or leg.get("high") or ohlc.get("high")
+    day_low = md.get("low") or leg.get("day_low") or leg.get("low") or ohlc.get("low")
     return {
         "instrument_key": leg.get("instrument_key"),
         "ltp": ltp,
@@ -206,6 +233,16 @@ def normalize_option_leg(leg: dict[str, Any]) -> dict[str, Any]:
         "close": close,
         "prev_close": close,
         "open": open_px,
+        "day_high": day_high,
+        "day_low": day_low,
+        "high": day_high,
+        "low": day_low,
+        "ohlc": {
+            "open": open_px,
+            "high": day_high,
+            "low": day_low,
+            "close": close,
+        },
         "implied_volatility": greeks_src.get("iv") or leg.get("implied_volatility"),
         "greeks": {
             "delta": greeks_src.get("delta"),
