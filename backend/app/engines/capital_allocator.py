@@ -658,11 +658,17 @@ def tune_exit_plan_for_position(
     premium: float,
     symbol: str,
 ) -> dict[str, Any]:
-    """Tune TP/SL for position — INR risk caps on 85% trade capital."""
+    """Tune TP/SL for position — INR risk caps on 85% trade capital.
+
+    Never crush a calculated/natural SL to a toy stop when lots are oversized.
+    Instead shrink lots so stop × units fits the SL INR budget (Aug11 63-lot
+    NIFTY kept 9pt SL while claiming SL ≤₹15k with ~₹37k real risk).
+    """
     settings = get_settings()
     cap = get_capital_snapshot()
     mult = lot_multiplier(symbol)
     trade_budget = cap.perTradeCapitalInr or (cap.availableMarginInr * settings.per_trade_capital_pct)
+    lots = max(1, int(lots or 1))
     units = lots * mult
     if units <= 0 or premium <= 0:
         return plan_dict
@@ -679,9 +685,9 @@ def tune_exit_plan_for_position(
     natural_stop = float(plan_dict.get("naturalStopPoints") or 0)
 
     max_sl_inr = trade_budget * settings.position_sl_cap_pct
-    sl_pts_cap = max_sl_inr / units
+    sl_pts_cap = max_sl_inr / units if units > 0 else 0.0
     target_inr = trade_budget * settings.position_tp_target_pct
-    tp_pts_floor = target_inr / units
+    tp_pts_floor = target_inr / units if units > 0 else 0.0
 
     # Oversized lots (Jul29 32× SENSEX) crushed a ₹279 ITM natural ~28pt SL to 6pt.
     # Prefer the pre-chart naturalStopPoints when present (Jul30 chart→8pt crush).
@@ -698,7 +704,7 @@ def tune_exit_plan_for_position(
     )
     stop = max(natural_floor, min(max(plan_stop, natural_floor), sl_pts_cap))
     # If budget cap is below the calculated natural floor, keep the natural SL
-    # (size should have been reduced; don't toy-stop a high-score explosion).
+    # and shrink lots so ₹ risk actually fits (don't lie about SL ≤ budget).
     if natural_stop > 0 and sl_pts_cap + 1e-9 < natural_floor:
         stop = natural_floor
         reasoning.append(
@@ -706,10 +712,28 @@ def tune_exit_plan_for_position(
             f"(natural {natural_stop:.1f}pt)"
         )
     elif sl_pts_cap + 1e-9 < natural_floor:
+        stop = natural_floor
         reasoning.append(
             f"Size-tune SL floor {natural_floor:.1f}pt (preserve {preserve:.0%} of natural "
             f"{reference_stop:.1f}pt; budget cap was {sl_pts_cap:.1f}pt)"
         )
+
+    # Honor the comment above: when preserving SL over the pt-cap, reduce size.
+    if stop > 0 and mult > 0 and max_sl_inr > 0:
+        risk_at_size = stop * units
+        if risk_at_size > max_sl_inr + 1e-6:
+            lots_fit = max(1, int(max_sl_inr / (stop * mult)))
+            if lots_fit < lots:
+                reasoning.append(
+                    f"Shrink lots {lots}→{lots_fit} so {stop:.1f}pt SL fits "
+                    f"₹{max_sl_inr:,.0f} risk budget (was ₹{risk_at_size:,.0f})"
+                )
+                lots = lots_fit
+                units = lots * mult
+                position_inr = premium * units
+                sl_pts_cap = max_sl_inr / units if units > 0 else sl_pts_cap
+                tp_pts_floor = target_inr / units if units > 0 else tp_pts_floor
+
     target = max(plan_target, tp_pts_floor, settings.scalp_stop_points * 2)
     # Guard inverted R:R — a budget-capped stop can exceed the target floor.
     min_rr = float(getattr(settings, "position_min_risk_reward", 1.2) or 1.2)
@@ -718,8 +742,17 @@ def tune_exit_plan_for_position(
     trail_arm = max(float(plan_dict.get("trailArmPoints", 3.0)), target * 0.35)
     trail_step = float(plan_dict.get("trailStepPoints", settings.scalp_trail_step_points))
 
+    actual_sl_inr = stop * units
+    if actual_sl_inr <= max_sl_inr + 1e-6:
+        sl_msg = f"SL ≤₹{max_sl_inr:,.0f} ({stop:.1f}pt · ₹{actual_sl_inr:,.0f})"
+    else:
+        # Even 1 lot can exceed a tiny budget — never claim a false ceiling.
+        sl_msg = (
+            f"SL risk ₹{actual_sl_inr:,.0f} > budget ₹{max_sl_inr:,.0f} "
+            f"({stop:.1f}pt · {lots} lot min)"
+        )
     reasoning.append(
-        f"Size tune: {lots} lots × {mult} units · ₹{position_inr:,.0f} notional · SL ≤₹{max_sl_inr:,.0f} ({stop:.1f}pt)"
+        f"Size tune: {lots} lots × {mult} units · ₹{position_inr:,.0f} notional · {sl_msg}"
     )
     reasoning.append(f"TP target ~₹{target_inr:,.0f} ({target:.1f}pt) on {settings.per_trade_capital_pct:.0%} capital")
 
@@ -740,5 +773,7 @@ def tune_exit_plan_for_position(
         "lotMultiplier": mult,
         "positionInr": round(position_inr, 2),
         "tradeBudgetInr": round(trade_budget, 2),
+        "maxSlBudgetInr": round(max_sl_inr, 2),
+        "actualSlRiskInr": round(actual_sl_inr, 2),
         "reasoning": reasoning,
     }
