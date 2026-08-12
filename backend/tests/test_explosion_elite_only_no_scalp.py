@@ -28,6 +28,7 @@ def _settings(**overrides):
     s.explosion_building_elite_min_ict_score = 35.0
     s.worst_day_block_building_ict = True
     s.explosion_require_chart_align_enabled = True
+    s.explosion_selector_local_base_chart_bypass_enabled = True
     s.explosion_only_trading_enabled = True
     s.explosion_only_allow_guarded_scalp = False
     s.scalp_entries_enabled = False
@@ -215,6 +216,84 @@ def test_elite_admitted_when_elite_exploding_only():
     assert len(out) == 1
     assert out[0].tier == "ELITE"
     assert out[0].mode == "explosion"
+
+
+def _counter_chart_ict():
+    return SimpleNamespace(
+        active=True,
+        pattern="flat_then_vertical",
+        score=40.0,
+        reasons=[],
+        premium_fvg=False,
+        flat_then_vertical=True,
+        mega_rip=False,
+        volume_awakening=True,
+        displacement=True,
+        session_move_pct=30.0,
+        velocity_3s=4.0,
+        volume_surge=2.0,
+        base_relative_move_pct=22.0,
+        base_premium=90.0,
+    )
+
+
+def _run_counter_chart_selector(settings, bypass_value):
+    """EXPLODING PUT vs a still-bullish 5m chart at a confirmed local base."""
+    alert = _alert("EXPLODING", 90.0)
+    alert["side"] = "PUT"
+    snap = _snap([alert])  # spotChart BULLISH → PUT is counter-chart
+    state = SimpleNamespace(
+        openPaperTrades=[],
+        closedPaperTrades=[],
+        calibrationBlocks={"CALL": False, "PUT": False},
+    )
+    with (
+        patch("app.engines.trade_selector.premium_in_band", return_value=True),
+        patch("app.engines.explosion_detector.effective_explosion_min_score", return_value=50.0),
+        patch("app.engines.morning_premium_capture.counter_trend_entry_allowed", return_value=True),
+        patch("app.engines.winner_entry_guards.chop_weak_explosion_blocks_entry", return_value=(False, "")),
+        patch("app.engines.trade_selector.check_explosion_entry", return_value=(True, "ok")),
+        patch("app.engines.trade_selector.index_moment_active", return_value=(False, "")),
+        patch("app.engines.trade_selector.side_aligned_with_index_moment", return_value=False),
+        patch("app.engines.trade_selector.index_moment_rank_bonus", return_value=0),
+        patch("app.engines.trade_selector.chart_rank_adjustment", return_value=0),
+        patch("app.engines.trade_selector.moneyness_rank_adjustment", return_value=0),
+        patch("app.engines.rally_capture.cross_side_chase_blocked", return_value=(False, "")),
+        patch("app.engines.rally_capture.runner_strike_rank_bonus", return_value=0),
+        patch("app.engines.rally_capture.atm_proximity_rank_bonus", return_value=0),
+        patch("app.engines.dual_mode_strategy.resolve_trading_session_mode", return_value=("NORMAL", {})),
+        patch("app.engines.ict_breakout_monitor.analyze_explosion_event_ict", return_value=_counter_chart_ict()),
+        patch("app.engines.ict_breakout_monitor.ict_explosion_rank_bonus", return_value=5),
+        patch("app.engines.ict_breakout_monitor.late_fade_chase_blocked", return_value=(False, "")),
+        patch("app.engines.trade_selector._reentry_blocked", return_value=(False, "ok")),
+        patch(
+            "app.engines.local_base_chart_bypass.local_base_ichimoku_chart_bypass",
+            return_value=bypass_value,
+        ),
+    ):
+        return _explosion_candidates("NIFTY", snap, state, settings)
+
+
+def test_selector_local_base_bypass_keeps_counter_chart_base_rip():
+    """Confirmed local base off which the side breaks survives the chart-align drop."""
+    settings = _settings(explosion_selector_local_base_chart_bypass_enabled=True)
+    out = _run_counter_chart_selector(settings, bypass_value=True)
+    assert len(out) == 1
+    assert out[0].side == Side.PUT
+
+
+def test_selector_drops_counter_chart_without_local_base():
+    """No confirmed local base → counter-chart candidate is still dropped at selection."""
+    settings = _settings(explosion_selector_local_base_chart_bypass_enabled=True)
+    out = _run_counter_chart_selector(settings, bypass_value=False)
+    assert out == []
+
+
+def test_selector_local_base_bypass_respects_disable_flag():
+    """Flag off → revert to the strict chart-align drop even with a local base."""
+    settings = _settings(explosion_selector_local_base_chart_bypass_enabled=False)
+    out = _run_counter_chart_selector(settings, bypass_value=True)
+    assert out == []
 
 
 def test_find_best_entry_skips_scalp_under_explosion_only():

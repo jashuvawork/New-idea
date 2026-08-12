@@ -210,6 +210,14 @@ class Settings(BaseSettings):
     # Explosion entries only when index chart agrees with option side (CALL↔BULLISH,
     # PUT↔BEARISH). No counter-trend FOMO; flat→vertical is taken only when aligned.
     explosion_require_chart_align_enabled: bool = True
+    # Selector parity: let a CONFIRMED local base off which the side is breaking survive
+    # the selection-time chart-align drop, the same way check_explosion_entry already
+    # honors local_base_ichimoku_chart_bypass. Without this, a genuine base rip whose 5m
+    # spot chart hasn't flipped yet (e.g. SENSEX PE at a tight base) is silently dropped
+    # in _explosion_candidates before the downstream local-base bypass can admit it. The
+    # bypass still requires a confirmed base AND non-adverse live momentum, so this can
+    # never admit counter-trend chop.
+    explosion_selector_local_base_chart_bypass_enabled: bool = True
     # Never block ELITE explosions — skip extended-chase / live-confirm /
     # composer stand-down. Fake-trap + late-fade still apply (real PF killers).
     # Premium band still applies (no ₹3 OTM). Timing COLD/LATE/CHASE still

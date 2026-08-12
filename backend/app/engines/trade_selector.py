@@ -315,7 +315,29 @@ def _explosion_candidates(
                 and snap.spotChart is not None
                 and not side_aligned_with_chart(side_v, snap.spotChart)
             ):
-                continue
+                # A confirmed local base off which the side is breaking may survive the
+                # chart-align drop — mirror check_explosion_entry so a genuine base rip
+                # (e.g. SENSEX PE off a tight base while the 5m spot chart hasn't flipped
+                # yet) is not silently dropped here before the downstream local-base
+                # bypass runs. local_base_ichimoku_chart_bypass still requires a confirmed
+                # base AND non-adverse live momentum, so this cannot admit chop FOMO.
+                local_base_ok = False
+                if bool(
+                    getattr(
+                        settings,
+                        "explosion_selector_local_base_chart_bypass_enabled",
+                        True,
+                    )
+                ):
+                    from app.engines.local_base_chart_bypass import (
+                        local_base_ichimoku_chart_bypass,
+                    )
+
+                    local_base_ok = local_base_ichimoku_chart_bypass(
+                        side_v, snap, alert=alert,
+                    )
+                if not local_base_ok:
+                    continue
         score_val = float(alert.get("explosionScore", 0))
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
         peak_move = float(alert.get("peakMovePct") or 0)
