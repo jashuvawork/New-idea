@@ -401,6 +401,7 @@ def evaluate_adaptive_explosion_exit(
 
     pnl_pts = current_premium - trade.entryPremium
     best = max(trade.bestPnlPoints, pnl_pts)
+    pnl_inr = pnl_pts * trade.lots * lot_multiplier
 
     from app.engines.bullish_hold import direction_aligned_with_breadth
     from app.models.schemas import StrategyType
@@ -412,6 +413,8 @@ def evaluate_adaptive_explosion_exit(
     min_arm *= ict_trail_arm_multiplier(trade)
     extreme_hold = bool(ctx.get("extremeAllInBypass"))
     from app.engines.confidence_hold import should_defer_profit_lock, is_confidence_runner_hold
+    from app.engines.explosion_confidence import trade_is_high_conviction
+    from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
 
     if trade.strategyType == StrategyType.EXPLOSIVE:
         if direction_aligned_with_breadth(trade):
@@ -421,11 +424,27 @@ def evaluate_adaptive_explosion_exit(
         if is_confidence_runner_hold(trade):
             min_arm = max(min_arm, plan.targetPoints * 0.45)
 
-    if best >= min_arm and pnl_pts < best * plan.trailKeepRatio:
-        if not should_defer_profit_lock(trade, best, target_points=plan.targetPoints):
-            return "adaptive_trail_sl", pnl_pts * trade.lots * lot_multiplier
+    # Aug12 NIFTY 24350 PE: explosion/stage path correctly held (best +36.7 → ~₹135,
+    # stage/HC floor still green) then this fallback cut at +20pt (~₹120) using the
+    # stamped plan keep 0.56 — undoing LET_RUNNERS / high-conviction / stage ladder.
+    if trade_uses_moment_stage_ladder(trade) or bool(ctx.get("maxProfitCapture")):
+        return None, pnl_inr
 
-    return None, pnl_pts * trade.lots * lot_multiplier
+    settings = get_settings()
+    keep = float(plan.trailKeepRatio or 0.0)
+    if trade_is_high_conviction(trade) and best >= float(
+        getattr(settings, "runner_min_best_points", 6.0) or 6.0
+    ):
+        hc_keep = float(getattr(settings, "high_conviction_trail_keep_ratio", 0.30) or 0.30)
+        keep = min(keep, hc_keep)
+
+    if best >= min_arm and keep > 0 and pnl_pts < best * keep:
+        if not should_defer_profit_lock(
+            trade, best, target_points=plan.targetPoints, pnl_pts=pnl_pts,
+        ):
+            return "adaptive_trail_sl", pnl_inr
+
+    return None, pnl_inr
 
 
 def evaluate_adaptive_swing_exit(
