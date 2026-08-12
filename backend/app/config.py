@@ -1118,6 +1118,10 @@ class Settings(BaseSettings):
     # not as a flat ~+8% from the first mid-spike LTP sample.
     open_gap_prev_close_baseline_enabled: bool = True
     open_gap_baseline_min_gap_pct: float = 15.0
+    # Seed session low/peak from option-chain day OHLC — catches V-bottoms missed
+    # between sparse LTP polls (Aug12 SENSEX 77800 PE ~120 trough / ~238 peak).
+    session_day_ohlc_extremes_enabled: bool = True
+    session_day_ohlc_max_dev_mult: float = 8.0
     # Breadth-aligned ELITE/EXPLODING open-gap: bypass stale 5m MTF oppose.
     open_gap_elite_mtf_bypass_enabled: bool = True
     open_gap_elite_mtf_min_move_pct: float = 40.0

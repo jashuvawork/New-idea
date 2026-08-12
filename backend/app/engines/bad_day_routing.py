@@ -637,11 +637,22 @@ def bad_day_routing_summary(
     near = near_expiry_symbols(snapshots)
     alts = {sym: alternate_index_for(sym, snapshots) for sym in set(fading.keys()) | set(near)}
     pm_alts = sorted(pm_itm_alternate_symbols(state, snapshots))
-    pre_alts = {
-        sym: alternate_index_for(sym, snapshots)
-        for sym in near
-        if alternate_index_for(sym, snapshots)
-    }
+    nearest, nxt = expiry_proximity_ranks(snapshots)
+    prefer_near = bool(getattr(settings, "expiry_day_prefer_same_day_enabled", True))
+    # When near-expiry is priority, do NOT advertise near→far alternates (misleading
+    # Aug12 SENSEX→NIFTY stand-down). Only list alternates for fading nearest expiry.
+    if prefer_near:
+        pre_alts = {
+            sym: alternate_index_for(sym, snapshots)
+            for sym in fading.keys()
+            if alternate_index_for(sym, snapshots)
+        }
+    else:
+        pre_alts = {
+            sym: alternate_index_for(sym, snapshots)
+            for sym in near
+            if alternate_index_for(sym, snapshots)
+        }
     return {
         "enabled": settings.bad_day_routing_enabled,
         "badDaySession": active,
@@ -649,6 +660,8 @@ def bad_day_routing_summary(
         "minRankFloor": bad_day_min_rank_floor(state, snapshots),
         "fadingExpirySymbols": fading,
         "nearExpirySymbols": near,
+        "nearExpiryPriority": nearest if prefer_near else [],
+        "sameWeekNextSymbols": nxt if prefer_near else [],
         "preExpiryAlternates": pre_alts,
         "alternateIndex": alts,
         "pmItmAlternateSymbols": pm_alts,

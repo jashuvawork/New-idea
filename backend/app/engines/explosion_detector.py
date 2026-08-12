@@ -279,6 +279,89 @@ def prior_close_from_option_leg(opt: dict[str, Any] | None) -> float:
     return 0.0
 
 
+def day_extremes_from_option_leg(opt: dict[str, Any] | None) -> tuple[float, float]:
+    """Extract session day low/high from a normalized option leg (chain OHLC).
+
+    Sparse LTP polls miss V-bottom troughs and spike peaks (Aug12 SENSEX 77800 PE
+    ~120→238). Chain day low/high survive those gaps.
+    """
+    if not isinstance(opt, dict):
+        return 0.0, 0.0
+    ohlc = opt.get("ohlc") or opt.get("OHLC") or {}
+    low = 0.0
+    high = 0.0
+    for key in ("day_low", "low", "dayLow"):
+        raw = opt.get(key)
+        if raw is None and isinstance(ohlc, dict):
+            raw = ohlc.get("low") if key != "dayLow" else ohlc.get("low")
+        try:
+            val = float(raw or 0)
+        except (TypeError, ValueError):
+            val = 0.0
+        if val > 0:
+            low = val
+            break
+    for key in ("day_high", "high", "dayHigh"):
+        raw = opt.get(key)
+        if raw is None and isinstance(ohlc, dict):
+            raw = ohlc.get("high")
+        try:
+            val = float(raw or 0)
+        except (TypeError, ValueError):
+            val = 0.0
+        if val > 0:
+            high = val
+            break
+    return low, high
+
+
+def apply_day_extremes_baseline(
+    key: str,
+    premium: float,
+    day_low: float,
+    day_high: float,
+) -> bool:
+    """Deepen session low / raise session peak from chain day OHLC extremes.
+
+    Never raises the low or lowers the peak. Ignores micro-tick extremes.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not bool(getattr(settings, "session_day_ohlc_extremes_enabled", True)):
+        return False
+    changed = False
+    floor = session_move_min_baseline(settings)
+    # Sanity: day extreme must be near the live premium band (reject bad chain ticks).
+    max_dev = float(getattr(settings, "session_day_ohlc_max_dev_mult", 8.0) or 8.0)
+    prem = float(premium or 0)
+
+    if day_low >= floor and (prem <= 0 or day_low <= prem * max_dev):
+        # Also reject absurd lows far below live premium (stale/wrong contract).
+        if prem <= 0 or day_low >= prem / max_dev:
+            cur_low = _session_low.get(key)
+            if cur_low is None or day_low < cur_low:
+                _session_low[key] = float(day_low)
+                changed = True
+            # If open was seeded mid-rip above the true trough, backfill open toward low
+            # when the dump is meaningful (same spirit as session_open_use_intraday_low).
+            open_prem = _session_open.get(key)
+            if open_prem is not None and day_low < open_prem:
+                drop_pct = ((open_prem - day_low) / open_prem) * 100.0
+                threshold = float(getattr(settings, "session_open_low_backfill_pct", 8.0) or 8.0)
+                if drop_pct >= threshold:
+                    _session_open[key] = float(day_low)
+                    changed = True
+
+    if day_high >= floor and (prem <= 0 or day_high >= prem / max_dev):
+        if prem <= 0 or day_high <= prem * max_dev:
+            cur_peak = _session_peak.get(key)
+            if cur_peak is None or day_high > cur_peak:
+                _session_peak[key] = float(day_high)
+                changed = True
+    return changed
+
+
 def apply_prior_close_baseline(
     key: str,
     premium: float,
@@ -352,11 +435,14 @@ def _session_open_move_pct(
     v3: float = 0.0,
     vol_surge: float = 1.0,
     prior_close: float = 0.0,
+    day_low: float = 0.0,
+    day_high: float = 0.0,
 ) -> float:
     """Premium % change since session baseline — catches 60→160 open rips."""
     _roll_session()
     key = _open_key(symbol, strike, side)
     seeded = apply_prior_close_baseline(key, premium, prior_close)
+    apply_day_extremes_baseline(key, premium, day_low, day_high)
     if key not in _session_open and premium > 0:
         # Never seed open/low from illiquid micro-ticks.
         if not _is_meaningful_premium(premium):
@@ -364,15 +450,25 @@ def _session_open_move_pct(
         _session_open[key] = premium
         _session_peak[key] = premium
         _session_low[key] = premium
-        # First sample with no prior-close seed → 0% until next tick.
+        # Re-apply day extremes after first seed so a mid-rip first LTP still
+        # deepens to the chain trough / raises to the chain peak.
+        apply_day_extremes_baseline(key, premium, day_low, day_high)
+        # First sample with no prior-close seed → 0% until next tick unless
+        # day-low backfilled the open (then report live vs trough immediately).
+        baseline = float(_session_open.get(key) or premium)
+        if baseline > 0 and premium > baseline:
+            peak = max(_session_peak.get(key, premium), premium)
+            _session_peak[key] = peak
+            return ((premium - baseline) / baseline) * 100
         return 0.0
     if seeded and prior_close > 0 and _is_meaningful_premium(prior_close):
         # Immediate open-gap read on first poll that carries prev-close.
-        baseline = prior_close
+        baseline = float(_session_open.get(key) or prior_close)
         peak = max(_session_peak.get(key, premium), premium)
         _session_peak[key] = peak
         return ((premium - baseline) / baseline) * 100
     _retrofit_baseline_from_spike(key, premium, hist, v3, vol_surge)
+    apply_day_extremes_baseline(key, premium, day_low, day_high)
     baseline = _effective_session_baseline(key, premium, hist)
     if baseline <= 0:
         return 0.0
@@ -392,24 +488,34 @@ def _session_peak_move_pct(
     v3: float = 0.0,
     vol_surge: float = 1.0,
     prior_close: float = 0.0,
+    day_low: float = 0.0,
+    day_high: float = 0.0,
 ) -> float:
     """Peak premium vs session baseline — keeps rip visible after pullback."""
     _roll_session()
     key = _open_key(symbol, strike, side)
     seeded = apply_prior_close_baseline(key, premium, prior_close)
+    apply_day_extremes_baseline(key, premium, day_low, day_high)
     if key not in _session_open and premium > 0:
         if not _is_meaningful_premium(premium):
             return 0.0
         _session_open[key] = premium
         _session_peak[key] = premium
         _session_low[key] = premium
+        apply_day_extremes_baseline(key, premium, day_low, day_high)
+        baseline = float(_session_open.get(key) or premium)
+        peak = max(_session_peak.get(key, premium), premium)
+        _session_peak[key] = peak
+        if baseline > 0 and peak > baseline:
+            return ((peak - baseline) / baseline) * 100
         return 0.0
     if seeded and prior_close > 0 and _is_meaningful_premium(prior_close):
-        baseline = prior_close
+        baseline = float(_session_open.get(key) or prior_close)
         peak = max(_session_peak.get(key, premium), premium)
         _session_peak[key] = peak
         return ((peak - baseline) / baseline) * 100
     _retrofit_baseline_from_spike(key, premium, hist, v3, vol_surge)
+    apply_day_extremes_baseline(key, premium, day_low, day_high)
     baseline = _effective_session_baseline(key, premium, hist)
     if baseline <= 0:
         return 0.0
@@ -911,6 +1017,7 @@ def scan_chain_explosions(
             if not premium or premium <= 0:
                 continue
             prior_close = prior_close_from_option_leg(opt)
+            day_low, day_high = day_extremes_from_option_leg(opt)
 
             _record(symbol, strike, side, premium, volume)
             key_h = _strike_key(strike, side)
@@ -928,11 +1035,15 @@ def scan_chain_explosions(
                 symbol, strike, side, premium, hist,
                 v3=v3_probe, vol_surge=vol_surge_probe,
                 prior_close=prior_close,
+                day_low=day_low,
+                day_high=day_high,
             )
             peak_move = _session_peak_move_pct(
                 symbol, strike, side, premium, hist,
                 v3=v3_probe, vol_surge=vol_surge_probe,
                 prior_close=prior_close,
+                day_low=day_low,
+                day_high=day_high,
             )
             session_move = _effective_session_move(open_move, peak_move)
             if not _premium_ok_for_scan(premium, max(open_move, session_move), settings):
@@ -1171,6 +1282,13 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     from app.engines.explosion_entry_guards import effective_local_base_move_pct
 
     pad_move = effective_local_base_move_pct(e, ict)
+    off_low_move = session_low_relative_move_pct(e.symbol, e.strike, e.side, e.premium)
+    structure_pad = max(float(pad_move or 0), float(off_low_move or 0))
+    vol_awaken = (
+        "volAwaken" in (e.reason or "")
+        or ict.volume_awakening
+        or float(e.volume_surge or 0) >= 3.0
+    )
     # EXPLODING/ELITE still need a real rip — tiny displacement spikes are not tradeable.
     tradeable = (e.tier in ("EXPLODING", "ELITE") and move >= immature_floor) or capture
     # First print inside the near-base pad is tradeable even before the 28% immature floor.
@@ -1180,6 +1298,14 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         tradeable = True
     # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).
     if e.tier == "BUILDING" and ict.active and ict.flat_then_vertical:
+        tradeable = True
+    # BUILDING + volume awakening inside the early pad — Aug12 SENSEX 77800 PE
+    # stayed not_tradeable while volumeAwaken=true (ICT watch after missed trough).
+    if (
+        e.tier == "BUILDING"
+        and vol_awaken
+        and pad_floor <= structure_pad <= pad_ceil
+    ):
         tradeable = True
     # Near-base ATM/ITM top explosions must be tradeable even when day-move < floor
     # (Aug5 24500 PE ~10–65% off local base while session % still immature).
@@ -1206,11 +1332,6 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
                 tradeable = True
         except Exception:
             pass
-    vol_awaken = (
-        "volAwaken" in (e.reason or "")
-        or ict.volume_awakening
-        or float(e.volume_surge or 0) >= 3.0
-    )
     return {
         "symbol": e.symbol,
         "side": e.side.value,

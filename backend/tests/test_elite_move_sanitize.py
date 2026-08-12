@@ -34,8 +34,13 @@ def _settings(**overrides):
     s.explosion_entry_window_hard_enabled = True
     s.explosion_early_window_min_move_pct = 28.0
     s.explosion_early_window_max_move_pct = 55.0
+    s.elite_local_base_max_move_pct = 40.0
+    s.ict_structured_early_min_move_pct = 15.0
+    s.ict_structured_early_max_move_pct = 65.0
     s.explosion_chase_use_local_base = True
     s.explosion_local_base_trust_min_move_pct = 8.0
+    s.session_day_ohlc_extremes_enabled = True
+    s.session_day_ohlc_max_dev_mult = 8.0
     s.ict_breakout_monitor_enabled = True
     s.ict_fvg_min_gap_pct = 12.0
     s.ict_flat_base_max_range_pct = 8.0

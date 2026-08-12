@@ -69,7 +69,11 @@ def _analyze_explosion_gaps(
 
         blockers: list[str] = []
         if not alert.get("tradeable"):
-            blockers.append("not_tradeable_tier")
+            # Distinguish cold BUILDING from volume-awakened BUILDING still blocked.
+            if tier == "BUILDING" and alert.get("volumeAwaken"):
+                blockers.append("building_volume_awaken_not_tradeable")
+            else:
+                blockers.append("not_tradeable_tier")
         if score < effective_min:
             blockers.append(f"score_{score:.1f}<{effective_min:.0f}")
         prem = alert.get("premium")
@@ -175,6 +179,8 @@ def _fix_hint(blockers: list[str]) -> str:
         return "Enable all-day explosion window or wait for EXPLODING tier"
     if "put_vs_bullish_chart" in blockers:
         return "Premium-led bypass (PE rip vs bullish index chart)"
+    if "building_volume_awaken_not_tradeable" in blockers:
+        return "BUILDING+volAwaken but outside early pad — check day-OHLC session low / ICT base"
     if "not_tradeable_tier" in blockers:
         return "Velocity/volume spike needed for tradeable tier"
     if any("extended_chase_local" in b for b in blockers):
