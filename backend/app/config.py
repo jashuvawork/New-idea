@@ -407,6 +407,13 @@ class Settings(BaseSettings):
     explosion_peak_capture_max_premium_mom_pct: float = 0.15
     explosion_peak_capture_max_profit_min_best: float = 28.0
     explosion_peak_capture_max_profit_giveback_ratio: float = 0.35
+    # Large confirmed-rollover peaks bank near the top instead of giving back a
+    # third of a big rip. Aug12 NIFTY 24350 PE: +36.7pt peak (~₹135) rolled over
+    # (live vel -0.12) but the max-profit giveback 0.35 only booked ~₹122. Once a
+    # peak is genuinely large, keep ~78% of it — the rollover gate still requires
+    # the tape to confirm the top, so still-rising stage runners are never clipped.
+    explosion_peak_capture_big_peak_points: float = 25.0
+    explosion_peak_capture_big_peak_giveback_ratio: float = 0.22
     # Hold near-base top rips for the max move: an ELITE/EXPLODING entered very near the
     # local base (entry base-rel ≤ 20%) has the whole rip ahead, so don't soft-lock a
     # small early peak — require a bigger peak before peak-capture/peak-fade profit-lock.
