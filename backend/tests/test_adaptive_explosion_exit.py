@@ -188,3 +188,112 @@ def test_adaptive_stop_fires_when_momentum_fades(mock_settings):
 
     assert reason == "adaptive_stop_loss"
     assert pnl < 0
+
+
+@patch("app.engines.explosion_profit.evaluate_explosion_exit", return_value=(None, 0.0))
+@patch("app.engines.adaptive_exits.get_settings")
+def test_adaptive_trail_does_not_cut_stage_ladder_hc_runner(_mock_settings, _mock_exp):
+    """Aug12 NIFTY 24350 PE: best ~₹135 (+36.7) then adaptive_trail_sl at ~₹120.
+
+    Explosion/stage path held; fallback must not book via stamped keep 0.56.
+    """
+    trade = _trade(entry=98.32)
+    trade.bestPnlPoints = 36.74
+    trade.entryContext = {
+        "highConviction": True,
+        "maxProfitCapture": True,
+        "momentStageLadder": True,
+        "momentType": "flat_then_vertical",
+        "ictFlatThenVertical": True,
+        "stageSize": 75.0,
+        "projectedMaxTp": 800.0,
+        "psychologyExitBias": "LET_RUNNERS",
+        "chartConfidence": 89.2,
+        "breadth": {"bias": "BEARISH", "aligned": True},
+        "exitPlan": {
+            "trailKeepRatio": 0.561,
+            "momentStageLadder": True,
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+        },
+    }
+    plan = AdaptiveExitPlan(
+        stopPoints=23.54,
+        targetPoints=48.21,
+        trailArmPoints=13.53,
+        trailKeepRatio=0.561,
+        microTargetPoints=3.0,
+        exitBias="LET_RUNNERS",
+    )
+
+    with patch("app.engines.bullish_hold.get_settings") as bh, patch(
+        "app.engines.confidence_hold.get_settings"
+    ) as conf, patch(
+        "app.engines.ict_breakout_monitor.ict_trail_arm_multiplier", return_value=1.0,
+    ):
+        s = MagicMock()
+        s.bullish_hold_enabled = True
+        s.extreme_explosion_hold_min_best_points = 8.0
+        s.high_conviction_trail_keep_ratio = 0.30
+        s.runner_min_best_points = 6.0
+        s.chart_confidence_hold_enabled = True
+        s.chart_confidence_hold_min_confidence = 55.0
+        s.high_confidence_min_score = 90.0
+        bh.return_value = s
+        conf.return_value = s
+        _mock_settings.return_value = s
+
+        # +20.2pt is below plan keep 0.56×36.74≈20.6 — old bug exited adaptive_trail_sl.
+        reason, _ = evaluate_adaptive_explosion_exit(
+            trade, 118.5, plan, "ELITE", 65, current_velocity_3s=1.0,
+        )
+
+    assert reason is None
+
+
+@patch("app.engines.explosion_profit.evaluate_explosion_exit", return_value=(None, 0.0))
+@patch("app.engines.adaptive_exits.get_settings")
+def test_adaptive_trail_uses_hc_keep_when_no_stage_ladder(_mock_settings, _mock_exp):
+    """High-conviction without stage ladder uses wider HC keep (0.30), not 0.56."""
+    trade = _trade(entry=98.32)
+    trade.bestPnlPoints = 36.74
+    trade.entryContext = {
+        "highConviction": True,
+        "chartConfidence": 89.2,
+        "breadth": {"bias": "BEARISH", "aligned": True},
+        "selectionScore": 100.0,
+    }
+    plan = AdaptiveExitPlan(
+        stopPoints=23.54,
+        targetPoints=48.21,
+        trailArmPoints=13.53,
+        trailKeepRatio=0.561,
+        microTargetPoints=3.0,
+    )
+
+    with patch("app.engines.bullish_hold.get_settings") as bh, patch(
+        "app.engines.confidence_hold.should_defer_profit_lock", return_value=False,
+    ), patch(
+        "app.engines.confidence_hold.is_confidence_runner_hold", return_value=False,
+    ), patch(
+        "app.engines.ict_breakout_monitor.ict_trail_arm_multiplier", return_value=1.0,
+    ):
+        s = MagicMock()
+        s.bullish_hold_enabled = True
+        s.extreme_explosion_hold_min_best_points = 8.0
+        s.high_conviction_trail_keep_ratio = 0.30
+        s.runner_min_best_points = 6.0
+        bh.return_value = s
+        _mock_settings.return_value = s
+
+        # Still above HC floor 0.30×36.74≈11.0 → hold
+        reason_hold, _ = evaluate_adaptive_explosion_exit(
+            trade, 118.5, plan, "ELITE", 65, current_velocity_3s=1.0,
+        )
+        # Below HC floor → adaptive trail may fire
+        reason_cut, _ = evaluate_adaptive_explosion_exit(
+            trade, 108.0, plan, "ELITE", 65, current_velocity_3s=0.5,
+        )
+
+    assert reason_hold is None
+    assert reason_cut == "adaptive_trail_sl"
