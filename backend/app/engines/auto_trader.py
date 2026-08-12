@@ -1002,6 +1002,10 @@ async def _open_from_candidate(
         local_base_premium=local_base_prem if local_base_prem > 0 else None,
     )
     exit_plan = tune_exit_plan_for_position(exit_plan, lots, fill_premium, symbol)
+    # Size-tune may shrink lots so preserved natural SL fits the INR risk budget
+    # (Aug11 63-lot NIFTY claimed SL ≤₹15k while risking ~₹37k).
+    if exit_plan and int(exit_plan.get("lots") or 0) > 0:
+        lots = int(exit_plan["lots"])
     if exit_plan and settings.edge_engine_enabled:
         plan_obj = AdaptiveExitPlan.from_dict(exit_plan)
         # Jul30: edge_tighten crushed calculated ~20pt SL to 7.99 on max-lot ELITE.

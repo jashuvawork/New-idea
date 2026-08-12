@@ -251,3 +251,42 @@ def test_size_tune_prefers_natural_over_budget_crush(mock_settings, mock_cap, _m
     tuned = tune_exit_plan_for_position(plan, lots=80, premium=90.0, symbol="SENSEX")
     assert tuned["stopPoints"] >= natural * 0.85 - 0.05, tuned["stopPoints"]
     assert any("Keep calculated SL" in r for r in tuned["reasoning"])
+    # Preserve SL by shrinking size — don't claim SL ≤ budget while oversizing.
+    max_sl = 100_000.0 * 0.08
+    assert tuned["lots"] < 80
+    assert tuned["actualSlRiskInr"] <= max_sl + 1.0
+    assert any("Shrink lots" in r for r in tuned["reasoning"])
+    assert "SL ≤₹" in " ".join(tuned["reasoning"])
+
+
+@patch("app.engines.capital_allocator.lot_multiplier", return_value=75)
+@patch("app.engines.capital_allocator.get_capital_snapshot")
+@patch("app.engines.capital_allocator.get_settings")
+def test_size_tune_aug11_style_max_lots_over_budget(mock_settings, mock_cap, _mult):
+    """Aug11 NIFTY 63-lot kept ~9pt SL while message claimed SL ≤₹15.2k."""
+    s = _explosion_settings()
+    mock_settings.return_value = s
+    cap = MagicMock()
+    cap.perTradeCapitalInr = 190_000.0
+    cap.availableMarginInr = 220_000.0
+    mock_cap.return_value = cap
+
+    natural = 10.6
+    plan = {
+        "stopPoints": 9.02,
+        "targetPoints": 12.0,
+        "microTargetPoints": 3.0,
+        "trailArmPoints": 8.0,
+        "trailStepPoints": 3.5,
+        "naturalStopPoints": natural,
+        "reasoning": [],
+    }
+    tuned = tune_exit_plan_for_position(plan, lots=63, premium=45.7, symbol="NIFTY")
+    max_sl = 190_000.0 * 0.08
+    assert tuned["stopPoints"] >= natural * 0.85 - 0.05, tuned["stopPoints"]
+    assert tuned["lots"] < 63
+    assert tuned["actualSlRiskInr"] <= max_sl + 1.0
+    # Never advertise a false SL ceiling.
+    joined = " ".join(tuned["reasoning"])
+    assert "SL ≤₹" in joined
+    assert tuned["actualSlRiskInr"] <= tuned["maxSlBudgetInr"] + 1.0
