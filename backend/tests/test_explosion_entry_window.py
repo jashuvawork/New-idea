@@ -1,4 +1,6 @@
-"""Hard ELITE/EXPLODING entry window 28–55% (book: only profitable band)."""
+"""Hard ELITE/EXPLODING entry window: 28% floor, capped at the local-base
+ceiling (#262: ELITE/EXPLODING enter ≤40% off the local base — catch at the
+base, not on the late chase)."""
 
 from unittest.mock import MagicMock, patch
 
@@ -34,6 +36,7 @@ def _settings(**overrides):
     s.ict_structured_early_entry_enabled = True
     s.ict_structured_early_min_move_pct = 15.0
     s.ict_structured_early_max_move_pct = 45.0
+    s.elite_local_base_max_move_pct = 40.0
     s.explosion_chase_use_local_base = True
     s.explosion_local_base_entry_min_move_pct = 15.0
     s.explosion_local_base_trust_min_move_pct = 8.0
@@ -61,11 +64,22 @@ def _structured_ict(base_rel: float, *, session: float = 40.0) -> ICTBreakoutSig
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_window_allows_28_to_55(mock_settings):
+def test_window_allows_28_to_elite_cap(mock_settings):
+    """ELITE enters in-band up to the local-base cap (#262: ≤40% off base)."""
     mock_settings.return_value = _settings()
-    for move in (28.0, 35.0, 45.0, 54.9):
+    for move in (28.0, 35.0, 39.9):
         blocked, reason = explosion_entry_window_blocked(_event(move))
         assert blocked is False, (move, reason)
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_window_blocks_elite_above_local_base_cap(mock_settings):
+    """#262: ELITE beyond the local-base cap (40%) is a chase — refuse it."""
+    mock_settings.return_value = _settings()
+    for move in (45.0, 54.9):
+        blocked, reason = explosion_entry_window_blocked(_event(move))
+        assert blocked is True, (move, reason)
+        assert "entry_window_" in reason and "high" in reason
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
@@ -145,11 +159,22 @@ def test_unstructured_still_blocks_26pct(mock_settings):
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_structured_allows_42pct_inside_45_ceiling(mock_settings):
+def test_structured_allows_38pct_inside_elite_cap(mock_settings):
+    """Structured near-base ELITE enters inside the #262 local-base cap (≤40%)."""
+    mock_settings.return_value = _settings()
+    ict = _structured_ict(38.0, session=38.0)
+    blocked, reason = explosion_entry_window_blocked(_event(38.0), ict=ict)
+    assert blocked is False, reason
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_structured_blocks_42pct_above_elite_cap(mock_settings):
+    """#262: even structured ELITE past the 40% local-base cap is a chase."""
     mock_settings.return_value = _settings()
     ict = _structured_ict(42.0, session=42.0)
     blocked, reason = explosion_entry_window_blocked(_event(42.0), ict=ict)
-    assert blocked is False, reason
+    assert blocked is True, reason
+    assert "high" in reason
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")

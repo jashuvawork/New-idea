@@ -41,6 +41,8 @@ def _settings(**overrides):
     s.explosion_peak_capture_max_premium_mom_pct = 0.15
     s.explosion_peak_capture_max_profit_min_best = 28.0
     s.explosion_peak_capture_max_profit_giveback_ratio = 0.35
+    s.explosion_peak_capture_big_peak_points = 25.0
+    s.explosion_peak_capture_big_peak_giveback_ratio = 0.22
     s.explosion_faded_rip_no_green_exit_enabled = False
     s.bullish_hold_enabled = True
     s.explosion_stop_min_hold_seconds = 0
@@ -137,6 +139,51 @@ def test_peak_capture_near_12pt_top_when_rolling_over(mock_s):
         trade, best=12.0, pnl_pts=9.2, max_profit=False, live_velocity_3s=0.3,
     )
     assert reason == "explosion_peak_capture"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_big_peak_banks_near_top_on_max_profit_rollover(mock_s):
+    """Aug12 NIFTY 24350 PE: +36.7pt max-profit peak rolled over (cold tape).
+
+    Old max-profit giveback 0.35 held until ~+23.9 (gave back ~13pt). The big-peak
+    tighten keeps ~78%, so a ~9pt giveback (still +27.5) banks near the top.
+    """
+    mock_s.return_value = _settings()
+    ctx = {
+        "liveVelocity3s": -0.1,
+        "localBaseBaseRelPct": 33.1,
+        "ictFlatThenVertical": True,
+        "maxProfitCapture": True,
+        "psychologyLabel": "GREED",
+        "psychologyExitBias": "LET_RUNNERS",
+        "premiumChart": {"momentum3Pct": -0.1},
+    }
+    trade = _trade(entry=98.32, best=36.74, current=125.82, ctx=ctx)
+    # giveback 9.24 ≈ 25% of 36.74 — above the 22% big-peak threshold, still +27.5.
+    reason = peak_capture_profit_lock_reason(
+        trade, best=36.74, pnl_pts=27.5, max_profit=True, live_velocity_3s=-0.1,
+    )
+    assert reason == "explosion_peak_capture"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_big_peak_disabled_keeps_loose_max_profit_giveback(mock_s):
+    """Below the big-peak threshold the loose max-profit giveback (0.35) still
+    holds at +27.5 (giveback 9.24 < 0.35×36.74) — proving the new lock is what
+    banks near the top once the peak is large."""
+    mock_s.return_value = _settings(explosion_peak_capture_big_peak_points=999.0)
+    ctx = {
+        "liveVelocity3s": -0.1,
+        "localBaseBaseRelPct": 33.1,
+        "ictFlatThenVertical": True,
+        "maxProfitCapture": True,
+        "premiumChart": {"momentum3Pct": -0.1},
+    }
+    trade = _trade(entry=98.32, best=36.74, current=125.82, ctx=ctx)
+    reason = peak_capture_profit_lock_reason(
+        trade, best=36.74, pnl_pts=27.5, max_profit=True, live_velocity_3s=-0.1,
+    )
+    assert reason is None
 
 
 @patch("app.engines.explosion_profit.get_settings")

@@ -1003,6 +1003,25 @@ def peak_capture_profit_lock_reason(
             min_best = max(6.0, min_best * 0.85)
             giveback_ratio = min(giveback_ratio, 0.18)
 
+    # Large confirmed-rollover peak → bank near the top (keep ~78%) instead of
+    # giving back a third of a big rip (Aug12 NIFTY 24350 PE: +36.7pt peak → gave
+    # back to +20). Only tightens the giveback once the peak is genuinely large;
+    # the rollover gate below still requires the tape to confirm the top, so a
+    # still-rising stage/ladder runner is never clipped on a hot rip.
+    big_peak = float(
+        getattr(settings, "explosion_peak_capture_big_peak_points", 25.0) or 25.0
+    )
+    if big_peak > 0 and best >= big_peak:
+        giveback_ratio = min(
+            giveback_ratio,
+            float(
+                getattr(
+                    settings, "explosion_peak_capture_big_peak_giveback_ratio", 0.22
+                )
+                or 0.22
+            ),
+        )
+
     # Near-base top runner → hold for a bigger peak before capturing (base rip ahead).
     min_best = _near_base_hold_min_best(trade, min_best)
 
