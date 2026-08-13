@@ -96,6 +96,39 @@ def classify_vix_regime(
     )
 
 
+def vix_size_multiplier(snap: Any) -> tuple[float, dict[str, Any]]:
+    """Day-type lot multiplier from the India VIX regime + an observation context dict.
+
+    Default is a no-op (multiplier 1.0) — the caller only APPLIES it when
+    vix_regime_sizing_enabled is true. The context is always returned so the regime and
+    the *would-be* multiplier can be recorded on every trade for validation before it
+    influences sizing. Expansion = normal size; calm/contraction and VIX spikes shrink.
+    """
+    settings = get_settings()
+    r = vix_regime_from_snapshot(snap)
+    ctx: dict[str, Any] = {
+        "available": r.available,
+        "value": r.value,
+        "level": r.level,
+        "trend": r.trend,
+        "regime": r.regime,
+        "posture": r.posture,
+        "multiplier": 1.0,
+        "applied": False,
+    }
+    if not r.available:
+        return 1.0, ctx
+    posture_mult = {
+        "AGGRESSIVE": float(getattr(settings, "vix_size_mult_expansion", 1.0) or 1.0),
+        "NORMAL": 1.0,
+        "SIZE_DOWN": float(getattr(settings, "vix_size_mult_size_down", 0.5) or 0.5),
+        "STAND_DOWN": float(getattr(settings, "vix_size_mult_stand_down", 0.6) or 0.6),
+    }
+    mult = posture_mult.get(r.posture, 1.0)
+    ctx["multiplier"] = round(mult, 3)
+    return mult, ctx
+
+
 def vix_regime_from_snapshot(snap: Any) -> VixRegime:
     """Best-effort VIX regime from a snapshot that may carry an ``indiaVix`` value.
 

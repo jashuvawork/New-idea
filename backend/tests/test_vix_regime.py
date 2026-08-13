@@ -41,6 +41,23 @@ def test_normal_band_is_normal():
     assert r.posture == "NORMAL"
 
 
+def test_vix_size_multiplier_observe_and_apply():
+    from app.engines.vix_regime import vix_size_multiplier
+
+    # High VIX spike -> SIZE_DOWN -> shrink multiplier; context records it.
+    mult, ctx = vix_size_multiplier(SimpleNamespace(indiaVix=24.0, indiaVixRef=20.0))
+    assert ctx["posture"] == "SIZE_DOWN"
+    assert mult == 0.5 and ctx["multiplier"] == 0.5 and ctx["applied"] is False
+
+    # Expansion -> normal size.
+    m2, c2 = vix_size_multiplier(SimpleNamespace(indiaVix=16.0, indiaVixRef=15.0))
+    assert c2["posture"] == "AGGRESSIVE" and m2 == 1.0
+
+    # No VIX -> no-op, inert.
+    m3, c3 = vix_size_multiplier(SimpleNamespace())
+    assert m3 == 1.0 and c3["available"] is False
+
+
 def test_from_snapshot_reads_indiaVix():
     snap = SimpleNamespace(indiaVix=16.0, indiaVixRef=15.0)
     r = vix_regime_from_snapshot(snap)

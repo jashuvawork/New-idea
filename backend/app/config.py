@@ -1018,6 +1018,14 @@ class Settings(BaseSettings):
     india_vix_elevated_max: float = 20.0
     india_vix_rising_pct: float = 0.03
     india_vix_spike_pct: float = 0.10
+    # VIX-regime day-type sizing. Default OFF (observe-only): the regime + would-be
+    # multiplier are stamped on every trade for validation, but lots are unchanged until
+    # this is flipped on after confirming the live VIX trend. Expansion = normal size;
+    # calm/contraction (theta chop) and VIX spikes (event risk) shrink lots.
+    vix_regime_sizing_enabled: bool = False
+    vix_size_mult_expansion: float = 1.0
+    vix_size_mult_size_down: float = 0.5
+    vix_size_mult_stand_down: float = 0.6
 
     # Execution-time chart — fresh Upstox fetch right before order
     execution_chart_gate_enabled: bool = True
