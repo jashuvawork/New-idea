@@ -578,6 +578,26 @@ def build_chart_analysis(
     aligned = _mtf_aligned_count(mtf_reads, consensus)
     recent_closes = [round(c, 2) for c in closes[-30:]]
 
+    # Advanced indicators — squeeze (base->explosion), ADX (trend/chop), Supertrend, VWAP.
+    from dataclasses import asdict
+
+    from app.engines.advanced_indicators import (
+        compute_adx,
+        compute_squeeze,
+        compute_supertrend,
+        compute_vwap,
+    )
+
+    volumes = [
+        float(c[5]) if isinstance(c, list) and len(c) > 5
+        else float(c.get("volume", 0) or 0) if isinstance(c, dict) else 0.0
+        for c in primary_candles
+    ]
+    squeeze = asdict(compute_squeeze(highs, lows, closes))
+    adx = asdict(compute_adx(highs, lows, closes))
+    supertrend = asdict(compute_supertrend(highs, lows, closes))
+    vwap = asdict(compute_vwap(highs, lows, closes, volumes)) if any(volumes) else {}
+
     return ChartAnalysis(
         consensus=consensus,
         alignedCount=aligned,
@@ -594,6 +614,10 @@ def build_chart_analysis(
         institutional=smc,
         smtDivergence=smt,
         keySignals=_build_key_signals(fib, pivots, ichimoku, smc, patterns, consensus),
+        squeeze=squeeze,
+        adx=adx,
+        supertrend=supertrend,
+        vwap=vwap,
     )
 
 

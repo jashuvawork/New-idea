@@ -134,6 +134,11 @@ class ChartAnalysis(BaseModel):
     smtDivergence: Optional[dict[str, Any]] = None
     keySignals: list[str] = []
     recentCloses: list[float] = []
+    # Advanced indicators (squeeze / ADX / Supertrend / VWAP) — powerful capture + chop context.
+    squeeze: dict[str, Any] = {}
+    adx: dict[str, Any] = {}
+    supertrend: dict[str, Any] = {}
+    vwap: dict[str, Any] = {}
 
 
 class Greeks(BaseModel):
