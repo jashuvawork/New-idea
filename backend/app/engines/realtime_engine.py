@@ -678,6 +678,14 @@ async def build_symbol_snapshot(
             chartAnalysis=chart_analysis,
         )
         await attach_premarket_to_snapshot(snap, client, news_sentiment)
+        # Best-effort India VIX for the day-type regime — never break the snapshot on failure.
+        try:
+            vix = await client.get_india_vix()
+            if vix:
+                snap.indiaVix = float(vix.get("value") or 0.0)
+                snap.indiaVixRef = float(vix.get("ref") or 0.0)
+        except Exception:
+            pass
         return snap
 
     except UpstoxError as e:

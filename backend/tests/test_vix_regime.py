@@ -47,3 +47,27 @@ def test_from_snapshot_reads_indiaVix():
     assert r.available is True and r.posture == "AGGRESSIVE"
     # No field -> inert.
     assert vix_regime_from_snapshot(SimpleNamespace()).available is False
+
+
+def test_real_symbol_snapshot_carries_vix():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.models.schemas import MarketPhase, SymbolSnapshot
+
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(ZoneInfo("Asia/Kolkata")),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        indiaVix=16.0,
+        indiaVixRef=15.0,
+    )
+    r = vix_regime_from_snapshot(snap)
+    assert r.available is True and r.posture == "AGGRESSIVE"
+    # Default snapshot (no VIX) stays inert.
+    bare = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(ZoneInfo("Asia/Kolkata")),
+        marketPhase=MarketPhase.LIVE_MARKET,
+    )
+    assert vix_regime_from_snapshot(bare).available is False

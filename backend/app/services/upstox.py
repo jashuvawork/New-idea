@@ -24,6 +24,9 @@ INDEX_KEYS = {
     "SENSEX": "BSE_INDEX|SENSEX",
 }
 
+# India VIX — market-wide volatility gauge for the day-type regime.
+INDIA_VIX_KEY = "NSE_INDEX|India VIX"
+
 # Option chain segment mapping
 OPTION_SEGMENTS = {
     "NIFTY": "NSE_FO",
@@ -416,6 +419,35 @@ class UpstoxClient:
             raise UpstoxError(f"No LTP for {symbol}")
         _cache_set(cache_key, ltp)
         return float(ltp)
+
+    async def get_india_vix(self) -> Optional[dict[str, float]]:
+        """Best-effort India VIX LTP + prior close for the day-type regime.
+
+        Returns None on any failure so the snapshot never breaks — the VIX regime is
+        inert without a value.
+        """
+        cache_key = "india_vix"
+        cached = _cache_get(cache_key, self.settings.upstox_ltp_cache_seconds)
+        if cached is not None:
+            return cached
+        try:
+            data = await self._get(
+                "/market-quote/quotes", params={"instrument_key": INDIA_VIX_KEY}
+            )
+            if isinstance(data, dict):
+                data = normalize_quotes_map(data)
+            quote = resolve_quote_payload(data, INDIA_VIX_KEY)
+            if not quote:
+                return None
+            value = quote.get("last_price")
+            ref = quote.get("prev_close") or quote.get("close")
+            if value is None:
+                return None
+            out = {"value": float(value), "ref": float(ref) if ref else 0.0}
+            _cache_set(cache_key, out)
+            return out
+        except Exception:
+            return None
 
     async def get_index_quote(self, symbol: str, *, force_refresh: bool = False) -> dict[str, Any]:
         """Full index quote — prev close, OHLC, volume for premarket gap analysis."""
