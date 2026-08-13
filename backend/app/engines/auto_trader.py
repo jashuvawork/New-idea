@@ -1134,6 +1134,9 @@ async def _open_from_candidate(
             "localBaseBasePremium": round(float(getattr(ict, "base_premium", 0) or 0), 2),
         })
         ctx_extra["vixRegime"] = vix_ctx
+        from app.engines.advanced_indicators import build_entry_confluence
+
+        ctx_extra["signalConfluence"] = build_entry_confluence(snap, ev)
         from app.engines.local_base_chart_bypass import local_base_entry_window
 
         _lb_min, _lb_max = local_base_entry_window(

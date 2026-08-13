@@ -157,6 +157,38 @@ def test_index_vwap_confirms_side():
     assert index_vwap_confirms_side("CALL", none) is False    # position alone is not a reclaim
 
 
+def test_build_entry_confluence():
+    from types import SimpleNamespace
+
+    from app.engines.advanced_indicators import build_entry_confluence
+    from app.services.cvd_store import clear, record_cvd_tick
+
+    clear()
+    ce_key = "NSE_FO|CONF_CE"
+    record_cvd_tick(ce_key, 100.0, 40)
+    record_cvd_tick(ce_key, 101.0, 60)  # buying
+    snap = SimpleNamespace(
+        heatmap=[SimpleNamespace(strike=24000.0, callInstrumentKey=ce_key, putInstrumentKey="x")],
+        chartAnalysis=SimpleNamespace(
+            squeeze={"state": "FIRED", "direction": "BULLISH", "bars_since_fired": 1},
+            adx={"adx": 30.0, "regime": "TREND", "direction": "BULLISH"},
+            vwap={"position": "ABOVE", "reclaim": "BULLISH_RECLAIM"},
+            supertrend={"direction": "BULLISH"},
+        ),
+    )
+    event = SimpleNamespace(side="CALL", strike=24000.0, tier="ELITE", explosion_score=90.0, volume_surge=3.0)
+    conf = build_entry_confluence(snap, event)
+    # squeeze + adx + vwap + supertrend + cvd all aligned bullish -> high confluence.
+    assert conf["score"] >= 5
+    assert conf["squeeze"]["aligned"] and conf["adx"]["aligned"]
+    assert conf["vwap"]["aligned"] and conf["supertrend"]["aligned"] and conf["cvd"]["aligned"]
+
+    # A PUT on the same bullish tape has ~no aligned confirmations.
+    put_conf = build_entry_confluence(snap, SimpleNamespace(side="PUT", strike=24000.0, tier="ELITE", explosion_score=90.0, volume_surge=3.0))
+    assert put_conf["score"] <= 1
+    clear()
+
+
 def test_squeeze_early_base_active():
     from types import SimpleNamespace
 

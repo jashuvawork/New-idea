@@ -202,6 +202,59 @@ def option_cvd_confirms_buying(snap: Any, strike: Any, side: Any) -> bool:
     return read is not None and read.direction == "BUYING"
 
 
+def build_entry_confluence(snap: Any, event: Any) -> dict[str, Any]:
+    """One unified record of every confirmation signal for the side at entry, + a count.
+
+    Stamped on each trade so winners vs losers can be correlated to which signals fired
+    (squeeze at base, ADX trend, VWAP reclaim, Supertrend, option CVD buying, live turn) —
+    the data needed to tune the scattered rank bonuses instead of guessing. Read-only.
+    """
+    side = getattr(event, "side", "")
+    side_v = side.value if hasattr(side, "value") else str(side or "").upper()
+    target = "BULLISH" if side_v == "CALL" else "BEARISH" if side_v == "PUT" else ""
+    ca = getattr(snap, "chartAnalysis", None) if snap is not None else None
+    sq = (getattr(ca, "squeeze", None) or {}) if ca is not None else {}
+    adx = (getattr(ca, "adx", None) or {}) if ca is not None else {}
+    vw = (getattr(ca, "vwap", None) or {}) if ca is not None else {}
+    st = (getattr(ca, "supertrend", None) or {}) if ca is not None else {}
+
+    squeeze_ok = index_squeeze_confirms_side(side, snap)
+    adx_ok = index_adx_rank_adjust(side, snap) > 0
+    vwap_ok = index_vwap_confirms_side(side, snap)
+    cvd_ok = option_cvd_confirms_buying(snap, getattr(event, "strike", None), side)
+    st_ok = bool(target) and str(st.get("direction") or "").upper() == target
+    try:
+        from app.engines.local_base_chart_bypass import local_base_momentum_turn
+
+        turn_ok = bool(local_base_momentum_turn(side, snap, event=event))
+    except Exception:
+        turn_ok = False
+
+    score = int(sum([squeeze_ok, adx_ok, vwap_ok, cvd_ok, st_ok, turn_ok]))
+    return {
+        "score": score,
+        "squeeze": {
+            "state": sq.get("state"),
+            "direction": sq.get("direction"),
+            "aligned": bool(squeeze_ok),
+        },
+        "adx": {
+            "adx": adx.get("adx"),
+            "regime": adx.get("regime"),
+            "direction": adx.get("direction"),
+            "aligned": bool(adx_ok),
+        },
+        "vwap": {
+            "position": vw.get("position"),
+            "reclaim": vw.get("reclaim"),
+            "aligned": bool(vwap_ok),
+        },
+        "supertrend": {"direction": st.get("direction"), "aligned": bool(st_ok)},
+        "cvd": {"aligned": bool(cvd_ok)},
+        "turn": {"aligned": bool(turn_ok)},
+    }
+
+
 def squeeze_early_base_active(event: Any, snap: Any) -> bool:
     """True when a top-tier explosion has a fresh index-squeeze release toward its side —
     the caller uses this to let it enter closer to the local base (catch it at the base)."""
