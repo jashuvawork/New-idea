@@ -10,6 +10,7 @@ export function snapshotSignature(json: MultiSnapshot): string {
       const s = snaps[sym];
       if (!s) return `${sym}:x`;
       const chart = s.spotChart;
+      const sq = s.chartAnalysis?.squeeze;
       return [
         sym,
         s.spot?.toFixed(1) ?? '',
@@ -18,6 +19,11 @@ export function snapshotSignature(json: MultiSnapshot): string {
         s.regime ?? '',
         chart?.direction ?? '',
         chart?.momentum5Pct?.toFixed(2) ?? '',
+        // Advanced indicators so the terminal panel refreshes when they change.
+        sq?.state ?? '',
+        sq?.direction ?? '',
+        s.chartAnalysis?.adx?.regime ?? '',
+        s.indiaVix?.toFixed(2) ?? '',
       ].join(':');
     })
     .join('|');
