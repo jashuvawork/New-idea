@@ -30,6 +30,8 @@ export interface SymbolSnapshot {
   spot?: number;
   atmStrike?: number;
   optionExpiry?: string | null;
+  indiaVix?: number;
+  indiaVixRef?: number;
   heatmap: HeatmapStrike[];
   orderflow: Orderflow;
   greeks: Greeks;
@@ -289,6 +291,43 @@ export interface ChartAnalysis {
   institutional: Record<string, unknown>;
   smtDivergence?: { type: string; message: string; bias: string } | null;
   keySignals: string[];
+  squeeze?: SqueezeRead;
+  adx?: AdxRead;
+  supertrend?: SupertrendRead;
+  vwap?: VwapRead;
+}
+
+export interface SqueezeRead {
+  on?: boolean;
+  fired?: boolean;
+  bars_on?: number;
+  bars_since_fired?: number;
+  momentum?: number;
+  direction?: string; // BULLISH | BEARISH | NEUTRAL
+  state?: string; // SQUEEZE | FIRED | OFF | NONE
+}
+
+export interface AdxRead {
+  adx?: number;
+  plus_di?: number;
+  minus_di?: number;
+  regime?: string; // TREND | TRANSITION | CHOP
+  direction?: string;
+}
+
+export interface SupertrendRead {
+  value?: number;
+  direction?: string;
+  flipped?: boolean;
+}
+
+export interface VwapRead {
+  vwap?: number;
+  upper?: number;
+  lower?: number;
+  position?: string; // ABOVE | BELOW | AT
+  reclaim?: string; // BULLISH_RECLAIM | BEARISH_LOSS | NONE
+  volume_weighted?: boolean;
 }
 
 export interface ExplosiveRunner {

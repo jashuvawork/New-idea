@@ -159,7 +159,102 @@ function SymbolChartRow({
 
 const TF_ORDER = ['1m', '5m', '15m', '1h', '4h'];
 
-function ChartAnalysisSection({ symbol, analysis }: { symbol: string; analysis: ChartAnalysis }) {
+function AdvancedIndicatorsBlock({
+  squeeze,
+  adx,
+  supertrend,
+  vwap,
+  indiaVix,
+  indiaVixRef,
+}: {
+  squeeze?: ChartAnalysis['squeeze'];
+  adx?: ChartAnalysis['adx'];
+  supertrend?: ChartAnalysis['supertrend'];
+  vwap?: ChartAnalysis['vwap'];
+  indiaVix?: number;
+  indiaVixRef?: number;
+}) {
+  const hasSq = Boolean(squeeze?.state && squeeze.state !== 'NONE');
+  const hasAdx = (adx?.adx ?? 0) > 0;
+  const hasSt = Boolean(supertrend?.value);
+  const hasVwap = Boolean(vwap?.vwap);
+  const hasVix = indiaVix != null && indiaVix > 0;
+  if (!hasSq && !hasAdx && !hasSt && !hasVwap && !hasVix) return null;
+
+  const tone = (d?: string) =>
+    d === 'BULLISH' ? 'text-nexus-green' : d === 'BEARISH' ? 'text-nexus-red' : 'text-nexus-muted';
+  const freshFire = hasSq && (squeeze?.bars_since_fired ?? -1) >= 0 && (squeeze?.bars_since_fired ?? 99) <= 3;
+
+  return (
+    <div className="rounded border border-nexus-border/40 bg-black/25 px-1.5 py-1 space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[9px] font-semibold text-nexus-muted tracking-wide">
+          Squeeze · ADX · ST · VWAP
+        </span>
+        {hasVix ? (
+          <span className="text-[9px] font-mono text-white">
+            VIX {indiaVix!.toFixed(2)}
+            {indiaVixRef ? <span className="text-nexus-muted"> / {indiaVixRef.toFixed(2)}</span> : null}
+          </span>
+        ) : null}
+      </div>
+      <div className="grid grid-cols-2 gap-1 text-[8px] font-mono text-nexus-muted">
+        {hasSq ? (
+          <div className="col-span-2 flex flex-wrap items-center gap-1">
+            <span
+              className={`px-1 py-0.5 rounded border border-nexus-border/50 ${
+                squeeze?.on ? 'text-nexus-yellow' : 'text-nexus-muted'
+              }`}
+            >
+              {squeeze?.state}
+            </span>
+            {freshFire ? <span className="text-nexus-accent font-bold">FIRED +{squeeze?.bars_since_fired}b</span> : null}
+            <span className={tone(squeeze?.direction)}>{squeeze?.direction}</span>
+            <span>mom {squeeze?.momentum?.toFixed(2) ?? '—'}</span>
+          </div>
+        ) : null}
+        {hasAdx ? (
+          <>
+            <div>
+              ADX <span className="text-white">{adx!.adx!.toFixed(1)}</span> · {adx!.regime}
+            </div>
+            <div className={tone(adx!.direction)}>
+              +DI {adx!.plus_di?.toFixed(0)} / −DI {adx!.minus_di?.toFixed(0)}
+            </div>
+          </>
+        ) : null}
+        {hasSt ? (
+          <div className={tone(supertrend!.direction)}>
+            ST {supertrend!.value!.toFixed(0)} {supertrend!.flipped ? '↻' : ''}
+          </div>
+        ) : null}
+        {hasVwap ? (
+          <div>
+            VWAP <span className="text-white">{vwap!.vwap!.toFixed(0)}</span> · {vwap!.position}
+            {vwap!.reclaim && vwap!.reclaim !== 'NONE' ? (
+              <span className={vwap!.reclaim === 'BULLISH_RECLAIM' ? 'text-nexus-green' : 'text-nexus-red'}>
+                {' '}
+                · {vwap!.reclaim.replace(/_/g, ' ').toLowerCase()}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ChartAnalysisSection({
+  symbol,
+  analysis,
+  indiaVix,
+  indiaVixRef,
+}: {
+  symbol: string;
+  analysis: ChartAnalysis;
+  indiaVix?: number;
+  indiaVixRef?: number;
+}) {
   const inst = analysis.institutional || {};
   const ich = analysis.ichimoku || {};
   const fib = analysis.fibonacci as { zone?: string; nearestLevel?: string };
@@ -274,6 +369,15 @@ function ChartAnalysisSection({ symbol, analysis }: { symbol: string; analysis: 
           </div>
         ) : null}
       </div>
+
+      <AdvancedIndicatorsBlock
+        squeeze={analysis.squeeze}
+        adx={analysis.adx}
+        supertrend={analysis.supertrend}
+        vwap={analysis.vwap}
+        indiaVix={indiaVix}
+        indiaVixRef={indiaVixRef}
+      />
 
       <div className="grid grid-cols-2 gap-1 text-[8px] font-mono text-nexus-muted">
         <div>
@@ -531,7 +635,15 @@ export function DayModePanel({
               </div>
             );
           }
-          return <ChartAnalysisSection key={`mtf-${sym}`} symbol={sym} analysis={analysis} />;
+          return (
+            <ChartAnalysisSection
+              key={`mtf-${sym}`}
+              symbol={sym}
+              analysis={analysis}
+              indiaVix={snapshots[sym]?.indiaVix}
+              indiaVixRef={snapshots[sym]?.indiaVixRef}
+            />
+          );
         })}
       </div>
 
