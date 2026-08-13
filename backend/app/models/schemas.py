@@ -267,6 +267,8 @@ class SymbolSnapshot(BaseModel):
     spot: Optional[float] = None
     atmStrike: Optional[float] = None
     optionExpiry: Optional[str] = None
+    indiaVix: float = 0.0       # India VIX LTP (day-type regime); 0 = unavailable
+    indiaVixRef: float = 0.0    # prior close / baseline for RISING/FALLING
     heatmap: list[HeatmapStrike] = []
     orderflow: Orderflow = Field(default_factory=Orderflow)
     greeks: Greeks = Field(default_factory=Greeks)
