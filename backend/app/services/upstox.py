@@ -27,6 +27,40 @@ INDEX_KEYS = {
 # India VIX — market-wide volatility gauge for the day-type regime.
 INDIA_VIX_KEY = "NSE_INDEX|India VIX"
 
+
+def parse_india_vix_quote(quote: dict[str, Any]) -> Optional[dict[str, float]]:
+    """Extract {value, ref} from a resolved India VIX quote.
+
+    Upstox nests the prior session close in ohlc.close (top-level prev_close/close are
+    usually absent on index quotes); net_change is the last fallback for the reference.
+    Returns None when there is no last_price.
+    """
+    if not isinstance(quote, dict) or not quote:
+        return None
+    value = quote.get("last_price")
+    if value is None:
+        return None
+    ohlc = quote.get("ohlc") or quote.get("OHLC") or {}
+    ref = (
+        quote.get("prev_close")
+        or quote.get("prevClose")
+        or (ohlc.get("close") if isinstance(ohlc, dict) else None)
+        or quote.get("close")
+    )
+    if not ref:
+        nc = quote.get("net_change")
+        if nc is None:
+            nc = quote.get("change")
+        try:
+            if nc is not None:
+                ref = float(value) - float(nc)
+        except (TypeError, ValueError):
+            ref = None
+    try:
+        return {"value": float(value), "ref": float(ref) if ref else 0.0}
+    except (TypeError, ValueError):
+        return None
+
 # Option chain segment mapping
 OPTION_SEGMENTS = {
     "NIFTY": "NSE_FO",
@@ -444,15 +478,13 @@ class UpstoxClient:
                     list(data.keys())[:8] if isinstance(data, dict) else type(data).__name__,
                 )
                 return None
-            value = quote.get("last_price")
-            ref = quote.get("prev_close") or quote.get("close")
-            if value is None:
+            out = parse_india_vix_quote(quote)
+            if out is None:
                 logger.warning(
                     "India VIX: quote has no last_price (fields=%s)",
                     list(quote.keys()) if isinstance(quote, dict) else quote,
                 )
                 return None
-            out = {"value": float(value), "ref": float(ref) if ref else 0.0}
             _cache_set(cache_key, out)
             logger.info("India VIX = %.2f (ref %.2f)", out["value"], out["ref"])
             return out
