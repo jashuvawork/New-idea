@@ -40,6 +40,8 @@ def _settings(**overrides):
     s.explosion_chase_use_local_base = True
     s.explosion_local_base_entry_min_move_pct = 15.0
     s.explosion_local_base_trust_min_move_pct = 8.0
+    s.explosion_squeeze_early_base_enabled = True
+    s.explosion_squeeze_early_base_min_move_pct = 8.0
     s.session_move_max_credible_pct = 500.0
     s.session_move_min_baseline_premium = 5.0
     for k, v in overrides.items():
@@ -156,6 +158,20 @@ def test_unstructured_still_blocks_26pct(mock_settings):
     blocked, reason = explosion_entry_window_blocked(_event(26.0))
     assert blocked is True
     assert "entry_window_low" in reason
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_squeeze_early_base_lowers_floor(mock_settings):
+    """A squeeze-fired ELITE at 10% off base is below the 15% floor — normally blocked, but
+    a confirmed squeeze release lets it enter closer to the base."""
+    mock_settings.return_value = _settings()
+    ict = _structured_ict(10.0, session=10.0)
+    blocked_no_sq, reason = explosion_entry_window_blocked(_event(10.0), ict=ict)
+    assert blocked_no_sq is True and "low" in reason
+    blocked_sq, _ = explosion_entry_window_blocked(
+        _event(10.0), ict=ict, squeeze_early_base=True,
+    )
+    assert blocked_sq is False
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")

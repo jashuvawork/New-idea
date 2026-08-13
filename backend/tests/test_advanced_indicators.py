@@ -128,6 +128,21 @@ def test_index_squeeze_confirms_side():
     assert index_squeeze_confirms_side("CALL", empty) is False
 
 
+def test_squeeze_early_base_active():
+    from types import SimpleNamespace
+
+    from app.engines.advanced_indicators import squeeze_early_base_active
+
+    snap = SimpleNamespace(
+        chartAnalysis=SimpleNamespace(squeeze={"bars_since_fired": 1, "direction": "BULLISH"})
+    )
+    assert squeeze_early_base_active(SimpleNamespace(tier="ELITE", side="CALL"), snap) is True
+    # Non-top tier -> no early-base allowance.
+    assert squeeze_early_base_active(SimpleNamespace(tier="BUILDING", side="CALL"), snap) is False
+    # Opposite direction -> not confirmed.
+    assert squeeze_early_base_active(SimpleNamespace(tier="ELITE", side="PUT"), snap) is False
+
+
 def test_indicators_safe_on_thin_data():
     assert compute_squeeze([1, 2], [1, 2], [1, 2]).state == "NONE"
     assert compute_adx([1, 2], [1, 2], [1, 2]).adx == 0.0

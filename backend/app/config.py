@@ -1004,6 +1004,12 @@ class Settings(BaseSettings):
     squeeze_rank_bonus_enabled: bool = True
     squeeze_rank_bonus: float = 10.0
     squeeze_fresh_window_bars: int = 3
+    # Squeeze-fired ELITE/EXPLODING at a confirmed local base may enter closer to the base
+    # than the normal 15% floor — a Bollinger/Keltner release off the base is a confirmed
+    # coil break, not noise. Catch it AT the base. Only lowers the floor when the squeeze
+    # confirms; everything else keeps the 15% floor so chop stays blocked.
+    explosion_squeeze_early_base_enabled: bool = True
+    explosion_squeeze_early_base_min_move_pct: float = 8.0
     # India VIX regime (day-type context). Inert until a real India VIX value is wired in
     # (Upstox NSE_INDEX|India VIX); classification only, no hard gate by default.
     india_vix_enabled: bool = True

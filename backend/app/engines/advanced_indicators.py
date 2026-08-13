@@ -82,6 +82,7 @@ class VwapRead:
     lower: float = 0.0
     position: str = "AT"        # ABOVE | BELOW | AT
     reclaim: str = "NONE"       # BULLISH_RECLAIM | BEARISH_LOSS | NONE
+    volume_weighted: bool = False  # False = price-anchored fallback (index has no volume)
 
 
 def index_squeeze_confirms_side(side: Any, snap: Any) -> bool:
@@ -115,6 +116,20 @@ def index_squeeze_confirms_side(side: Any, snap: Any) -> bool:
     if side_v == "PUT":
         return direction == "BEARISH"
     return False
+
+
+def squeeze_early_base_active(event: Any, snap: Any) -> bool:
+    """True when a top-tier explosion has a fresh index-squeeze release toward its side —
+    the caller uses this to let it enter closer to the local base (catch it at the base)."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not bool(getattr(settings, "explosion_squeeze_early_base_enabled", True)):
+        return False
+    tier = str(getattr(event, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    return index_squeeze_confirms_side(getattr(event, "side", ""), snap)
 
 
 def _sma(values: list[float], period: int) -> float:
@@ -404,7 +419,10 @@ def compute_vwap(
     typ = [(float(highs[i]) + float(lows[i]) + float(closes[i])) / 3.0 for i in range(n)]
     vols = [max(0.0, float(volumes[i])) for i in range(n)]
     cum_v = sum(vols)
-    if cum_v <= 0:
+    volume_weighted = cum_v > 0
+    if not volume_weighted:
+        # Pure indices carry no candle volume — fall back to a price-anchored session mean.
+        # The reclaim/position signal (price crossing the session reference) still holds.
         vwap = sum(typ) / n
         var = sum((t - vwap) ** 2 for t in typ) / n
     else:
@@ -428,5 +446,5 @@ def compute_vwap(
         reclaim = "BEARISH_LOSS"
     return VwapRead(
         vwap=round(vwap, 2), upper=round(upper, 2), lower=round(lower, 2),
-        position=position, reclaim=reclaim,
+        position=position, reclaim=reclaim, volume_weighted=volume_weighted,
     )

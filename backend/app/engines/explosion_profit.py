@@ -363,8 +363,11 @@ def check_explosion_entry(
         )
         if not ichi_ok:
             return False, ichi_reason
+    from app.engines.advanced_indicators import squeeze_early_base_active
+
     window_blocked, window_reason = explosion_entry_window_blocked(
         event, ict=ict_live, top_must_take=must_take,
+        squeeze_early_base=squeeze_early_base_active(event, snap),
     )
     if window_blocked:
         return False, window_reason

@@ -482,8 +482,11 @@ def _explosion_candidates(
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the
         # hard window does not re-raise the unstructured 28% floor.
+        from app.engines.advanced_indicators import squeeze_early_base_active
+
         window_blocked, _window_reason = explosion_entry_window_blocked(
             event, ict=ict, top_must_take=must_take,
+            squeeze_early_base=squeeze_early_base_active(event, snap),
         )
         if window_blocked:
             continue
@@ -547,11 +550,19 @@ def _explosion_candidates(
         elif move_for_rank > early_max and not (ict.flat_then_vertical and ict.volume_awakening):
             rank -= min(35.0, (move_for_rank - early_max) * 0.6)
         # Squeeze (Bollinger-in-Keltner) release toward this side = fresh base->explosion.
+        # Weighted UP when it fires AT a confirmed local base, so the top-ranked signal is
+        # "squeeze releasing at the base" — exactly catch-it-at-the-base.
         if bool(getattr(settings, "squeeze_rank_bonus_enabled", True)):
             from app.engines.advanced_indicators import index_squeeze_confirms_side
 
             if index_squeeze_confirms_side(event.side, snap):
-                rank += float(getattr(settings, "squeeze_rank_bonus", 10.0) or 10.0)
+                sq_bonus = float(getattr(settings, "squeeze_rank_bonus", 10.0) or 10.0)
+                at_local_base = bool(
+                    ict.flat_then_vertical
+                    or getattr(ict, "local_swing_base", False)
+                    or float(getattr(ict, "base_relative_move_pct", 0) or 0) > 0
+                )
+                rank += sq_bonus * (1.5 if at_local_base else 1.0)
 
         out.append(EntryCandidate(
             symbol=symbol,
