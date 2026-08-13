@@ -1010,6 +1010,10 @@ class Settings(BaseSettings):
     cvd_window_seconds: float = 90.0
     cvd_min_recent_qty: float = 0.0
     cvd_rank_bonus: float = 5.0
+    # Flat->vertical setup quality (0-100) — grade the coil (tightness/duration/launch/heat/
+    # volume) and give a proportional rank bonus so the cleanest base rips jump the queue.
+    flat_vertical_quality_rank_enabled: bool = True
+    flat_vertical_quality_rank_max: float = 12.0
     # ADX regime + VWAP reclaim as additive selection-quality nudges (never a gate):
     # de-rank CHOP, boost a trend aligned with the side, and reward a fresh VWAP reclaim.
     adx_rank_enabled: bool = True

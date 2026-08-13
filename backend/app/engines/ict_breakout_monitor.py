@@ -30,6 +30,8 @@ class ICTBreakoutSignal:
     base_premium: float = 0.0
     base_relative_move_pct: float = 0.0
     local_swing_base: bool = False
+    flat_vertical_quality: float = 0.0   # 0-100 quality of the flat->vertical setup
+    flat_vertical_grade: str = ""        # A+ | A | B | C
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,6 +50,8 @@ class ICTBreakoutSignal:
             "basePremium": round(self.base_premium, 2),
             "baseRelativeMovePct": round(self.base_relative_move_pct, 1),
             "localSwingBase": self.local_swing_base,
+            "flatVerticalQuality": round(self.flat_vertical_quality, 1),
+            "flatVerticalGrade": self.flat_vertical_grade,
         }
 
 
@@ -85,6 +89,78 @@ def _detect_premium_fvg(history: list[tuple[datetime, float, float]], settings) 
             if jump >= min_gap * 1.5:
                 return True, jump
     return False, gap_pct
+
+
+def flat_vertical_quality(
+    *,
+    flat: bool,
+    flat_dev: float,
+    base_len: int,
+    base_rel_move: float,
+    local_swing_base: bool,
+    displacement: bool,
+    velocity_3s: float,
+    fvg: bool,
+    vol_awaken: bool,
+    volume_surge: float,
+    early_min: float,
+    settings: Any,
+) -> tuple[float, str]:
+    """Score the flat->vertical setup 0-100 + a letter grade.
+
+    A textbook flat->vertical is a TIGHT, LONG coil that releases with heat and volume in
+    the near-base launch window. We score each of those explicitly instead of a boolean:
+      - base tightness (tighter consolidation = more stored energy)
+      - base duration (longer coil = bigger release)
+      - launch window (fresh 15-40% off the base, not a late chase)
+      - break heat (displacement + velocity + FVG + volume awakening)
+      - volume expansion on the break (accumulation -> markup)
+    """
+    if not (flat or local_swing_base):
+        return 0.0, ""
+    max_range = float(getattr(settings, "ict_flat_base_max_range_pct", 8.0) or 8.0) or 8.0
+    q = 0.0
+    # 1) Base tightness (0-25). Ultra-tight flat coil scores highest; a V-base is decent.
+    if flat and flat_dev >= 0:
+        q += 25.0 * max(0.0, min(1.0, 1.0 - flat_dev / max_range))
+    elif local_swing_base:
+        q += 15.0
+    # 2) Base duration (0-15): ~10+ base samples = a real coil.
+    q += min(15.0, max(0, base_len) * 1.5)
+    # 3) Launch window (0-25): reward a fresh lift in the near-base band, decay a late chase.
+    lo = max(1.0, early_min * 0.5)
+    hi = float(getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0)
+    if base_rel_move <= 0:
+        pass
+    elif base_rel_move < lo:
+        q += 25.0 * 0.6 * (base_rel_move / lo)
+    elif base_rel_move <= hi:
+        q += 25.0
+    else:
+        q += max(0.0, 25.0 * (1.0 - (base_rel_move - hi) / max(hi, 1.0)))
+    # 4) Break heat (0-25).
+    heat = 0.0
+    if displacement:
+        heat += 8.0
+    heat += min(8.0, max(0.0, velocity_3s) * 2.0)
+    if fvg:
+        heat += 4.0
+    if vol_awaken:
+        heat += 5.0
+    q += min(25.0, heat)
+    # 5) Volume expansion on the break (0-10): 3x+ surge = full.
+    q += min(10.0, max(0.0, volume_surge - 1.0) * 4.0)
+
+    q = max(0.0, min(100.0, q))
+    if q >= 85:
+        grade = "A+"
+    elif q >= 70:
+        grade = "A"
+    elif q >= 55:
+        grade = "B"
+    else:
+        grade = "C"
+    return round(q, 1), grade
 
 
 def _detect_flat_base(history: list[tuple[datetime, float, float]], settings) -> tuple[bool, float, float]:
@@ -294,6 +370,26 @@ def analyze_ict_breakout(
         (flat and vertical and base_rel_move >= early_min * 0.5)
         or early_break
     )
+    # Rate the flat->vertical setup quality (0-100 + grade) from tightness, coil length,
+    # launch window, break heat and volume expansion — a graded read, not just a boolean.
+    trim = 4 if len(history) >= 10 else 3
+    base_len = max(0, len(history) - trim)
+    fv_quality, fv_grade = flat_vertical_quality(
+        flat=flat,
+        flat_dev=flat_dev,
+        base_len=base_len,
+        base_rel_move=base_rel_move,
+        local_swing_base=local_swing_base,
+        displacement=displacement,
+        velocity_3s=velocity_3s,
+        fvg=fvg,
+        vol_awaken=vol_awaken,
+        volume_surge=volume_surge,
+        early_min=early_min,
+        settings=settings,
+    )
+    if not flat_then_vertical:
+        fv_quality, fv_grade = 0.0, ""
     mega_floor = float(getattr(settings, "ict_mega_rip_min_session_move_pct", 200.0) or 200.0)
     try:
         max_credible = float(getattr(settings, "session_move_max_credible_pct", 500.0))
@@ -403,6 +499,8 @@ def analyze_ict_breakout(
         base_premium=base_level,
         base_relative_move_pct=base_rel_move,
         local_swing_base=local_swing_base,
+        flat_vertical_quality=fv_quality,
+        flat_vertical_grade=fv_grade,
     )
 
 

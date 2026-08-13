@@ -541,6 +541,13 @@ def _explosion_candidates(
                 rank += 12.0 if ict.volume_awakening or ict.displacement else 8.0
             elif ict.volume_awakening or ict.displacement:
                 rank += 16.0  # rare clean base rip on bad day — prioritize
+            # Grade the flat→vertical: a tight, long, heated coil (A/A+) jumps the queue.
+            if bool(getattr(settings, "flat_vertical_quality_rank_enabled", True)):
+                fvq = float(getattr(ict, "flat_vertical_quality", 0) or 0)
+                if fvq > 0:
+                    rank += float(
+                        getattr(settings, "flat_vertical_quality_rank_max", 12.0) or 12.0
+                    ) * (fvq / 100.0)
         # Prefer early expansion window; demote already-extended rips in ranking.
         early_min = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
         early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
