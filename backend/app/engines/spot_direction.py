@@ -55,20 +55,33 @@ def _patch_live_close(closes: list[float], spot: float) -> list[float]:
 
 
 def _indicator_closes(candles_5m: list, candles_1m: list | None) -> list[float]:
-    """RSI/MACD input — prefer extended 5m; fall back to 1m when session is still thin."""
+    """RSI/MACD input for the 5m spot chart.
+
+    Prefer TRUE 5m closes (resampled from 1m, or native 5m — whichever is longer) so the
+    spot chart's RSI/MACD match the real 5m / MTF panel. Only fall back to 1m closes when
+    the 5m series is genuinely too thin for a meaningful RSI (early open). The old code
+    required 35 resampled-5m bars before using them, which kept the "5m" chart on 1m data
+    until ~12:10 IST every day — diverging from the true 5m read all morning.
+    """
+    settings = get_settings()
+    native_5m = _candle_rows(candles_5m)[3]
+    ext_5m: list[float] = []
     if candles_1m:
         from app.engines.mtf_chart_analysis import resample_candles
 
-        settings = get_settings()
-        extended_5m = resample_candles(candles_1m, settings.spot_chart_timeframe_minutes)
-        closes_5m_ext = _candle_rows(extended_5m)[3]
-        if len(closes_5m_ext) >= 35:
-            return closes_5m_ext
-        _, _, _, closes_1m = _candle_rows(candles_1m)
+        ext_5m = _candle_rows(
+            resample_candles(candles_1m, settings.spot_chart_timeframe_minutes)
+        )[3]
+    best_5m = ext_5m if len(ext_5m) >= len(native_5m) else native_5m
+    min_bars = int(getattr(settings, "spot_chart_min_5m_indicator_bars", 20) or 20)
+    if len(best_5m) >= min_bars:
+        return best_5m
+    # Session still too thin for a meaningful 5m RSI — 1m as a last resort.
+    if candles_1m:
+        closes_1m = _candle_rows(candles_1m)[3]
         if len(closes_1m) >= 15:
             return closes_1m
-    _, _, _, closes_5m = _candle_rows(candles_5m)
-    return closes_5m
+    return best_5m
 
 
 def build_spot_chart(

@@ -980,6 +980,13 @@ class Settings(BaseSettings):
     local_base_overrides_bearish_breadth: bool = True
     spot_chart_timeframe_minutes: int = 5
     spot_chart_1m_bars: int = 300  # 1m history for 5m resample + RSI/MACD warmup
+    # Use true resampled-5m closes for the spot-chart RSI/MACD as soon as there are this
+    # many 5m bars; only fall back to 1m when the session is genuinely too thin. The old
+    # hardcoded 35 kept the "5m" chart on 1m data until ~12:10 IST every day, so the
+    # morning spot RSI/MACD (which drive the direction vote + CE/PE alignment) diverged
+    # from the true 5m / MTF panel (e.g. spot RSI 54 vs MTF 5m RSI 24). 20 bars is enough
+    # for a meaningful RSI(14) and keeps the chart 5m-consistent through the morning.
+    spot_chart_min_5m_indicator_bars: int = 20
 
     # Execution-time chart — fresh Upstox fetch right before order
     execution_chart_gate_enabled: bool = True
