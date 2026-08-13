@@ -372,6 +372,36 @@ def reconcile_spot_chart_with_mtf(
     if spot_dir == consensus:
         return spot_chart
 
+    # A CONFIRMED live 5m reversal is not a lone flicker — do not force it back to a stale
+    # MTF consensus (Aug13 SENSEX recovery). Requires an EMA flip + both momenta agreeing +
+    # MACD not opposing, so a shallow dead-cat bounce is still force-flipped below. Symmetric.
+    settings = get_settings()
+    ema_b = str(getattr(spot_chart, "emaBias", "") or "").upper()
+    min_mom15 = float(
+        getattr(settings, "chart_reconcile_confirmed_reversal_min_mom15_pct", 0.06) or 0.06
+    )
+    keeps_live = bool(
+        getattr(settings, "chart_reconcile_confirmed_reversal_keeps_live", True)
+    )
+    confirmed_up = (
+        keeps_live
+        and spot_dir == "BULLISH"
+        and ema_b == "BULLISH"
+        and mom5 > 0
+        and mom15 >= min_mom15
+        and macd_bias != "BEARISH"
+    )
+    confirmed_down = (
+        keeps_live
+        and spot_dir == "BEARISH"
+        and ema_b == "BEARISH"
+        and mom5 < 0
+        and mom15 <= -min_mom15
+        and macd_bias != "BULLISH"
+    )
+    if confirmed_up or confirmed_down:
+        return spot_chart
+
     tfs = getattr(chart_analysis, "timeframes", None) or {}
     bull = bear = 0
     for tf in tfs.values():

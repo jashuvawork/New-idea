@@ -424,6 +424,70 @@ def test_reconcile_spot_chart_overrides_bullish_5m_on_bearish_mtf():
     assert out.direction == "BEARISH"
 
 
+def _bearish_mtf():
+    from app.models.schemas import ChartAnalysis
+
+    return ChartAnalysis(
+        consensus="BEARISH", alignedCount=4, totalTimeframes=5,
+        timeframes={
+            "1m": {"direction": "BEARISH"}, "5m": {"direction": "BEARISH"},
+            "15m": {"direction": "BEARISH"}, "1h": {"direction": "BEARISH"},
+            "4h": {"direction": "NEUTRAL"},
+        },
+    )
+
+
+def _bullish_mtf():
+    from app.models.schemas import ChartAnalysis
+
+    return ChartAnalysis(
+        consensus="BULLISH", alignedCount=4, totalTimeframes=5,
+        timeframes={
+            "1m": {"direction": "BULLISH"}, "5m": {"direction": "BULLISH"},
+            "15m": {"direction": "BULLISH"}, "1h": {"direction": "BULLISH"},
+            "4h": {"direction": "NEUTRAL"},
+        },
+    )
+
+
+def test_reconcile_keeps_confirmed_bullish_recovery_over_stale_bearish_mtf():
+    """Aug13 SENSEX: confirmed V-recovery (EMA flip + both momenta + MACD ok) is kept
+    BULLISH instead of being force-flipped to a stale oversold-bearish MTF."""
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+
+    spot = SpotChart(
+        direction="BULLISH", emaBias="BULLISH", macdBias="NEUTRAL",
+        momentum5Pct=0.14, momentum15Pct=0.25, momentum30Pct=0.20, rsi=60,
+    )
+    out = reconcile_spot_chart_with_mtf(spot, _bearish_mtf(), breadth_bias="BEARISH", from_open_pct=-0.1)
+    assert out.direction == "BULLISH"
+
+
+def test_reconcile_keeps_confirmed_bearish_breakdown_over_stale_bullish_mtf():
+    """Symmetric PE mirror: a confirmed breakdown is kept BEARISH over a stale bullish MTF."""
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+
+    spot = SpotChart(
+        direction="BEARISH", emaBias="BEARISH", macdBias="NEUTRAL",
+        momentum5Pct=-0.14, momentum15Pct=-0.25, momentum30Pct=-0.20, rsi=40,
+    )
+    out = reconcile_spot_chart_with_mtf(spot, _bullish_mtf(), breadth_bias="BULLISH", from_open_pct=0.1)
+    assert out.direction == "BEARISH"
+
+
+def test_reconcile_still_flips_shallow_bounce_without_ema_turn():
+    """A shallow bounce (no EMA flip / weak 15m momentum) is still force-flipped — the
+    dead-cat-bounce protection stays intact."""
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+
+    spot = SpotChart(
+        direction="BULLISH", emaBias="BEARISH", macdBias="BEARISH",
+        momentum5Pct=0.1, momentum15Pct=0.02, momentum30Pct=-0.1, rsi=52,
+    )
+    out = reconcile_spot_chart_with_mtf(spot, _bearish_mtf(), breadth_bias="BEARISH", from_open_pct=-0.1)
+    assert out.direction == "BEARISH"
+
+
 def test_live_spot_patch_fixes_stale_rsi_on_afternoon_rally():
     """Morning dip leaves stale 5m close; live spot rally should lift RSI like broker charts."""
     from app.engines.spot_direction import build_spot_chart
