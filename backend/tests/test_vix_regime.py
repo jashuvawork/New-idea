@@ -66,6 +66,37 @@ def test_from_snapshot_reads_indiaVix():
     assert vix_regime_from_snapshot(SimpleNamespace()).available is False
 
 
+def test_parse_india_vix_quote_ref_from_ohlc():
+    from app.services.upstox import parse_india_vix_quote
+
+    # Prior close nested in ohlc.close (the real Upstox shape).
+    q = {"last_price": 11.41, "ohlc": {"open": 11.0, "high": 12.0, "low": 10.9, "close": 10.8}}
+    out = parse_india_vix_quote(q)
+    assert out == {"value": 11.41, "ref": 10.8}
+
+
+def test_parse_india_vix_quote_ref_from_net_change():
+    from app.services.upstox import parse_india_vix_quote
+
+    q = {"last_price": 12.0, "net_change": 1.5}  # prior close = 12.0 - 1.5
+    out = parse_india_vix_quote(q)
+    assert out["value"] == 12.0
+    assert abs(out["ref"] - 10.5) < 1e-9
+
+
+def test_parse_india_vix_quote_top_level_prev_close():
+    from app.services.upstox import parse_india_vix_quote
+
+    assert parse_india_vix_quote({"last_price": 13.0, "prev_close": 12.5})["ref"] == 12.5
+
+
+def test_parse_india_vix_quote_no_last_price():
+    from app.services.upstox import parse_india_vix_quote
+
+    assert parse_india_vix_quote({"ohlc": {"close": 10.0}}) is None
+    assert parse_india_vix_quote({}) is None
+
+
 def test_real_symbol_snapshot_carries_vix():
     from datetime import datetime
     from zoneinfo import ZoneInfo
