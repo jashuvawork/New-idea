@@ -290,6 +290,64 @@ def local_base_momentum_turn(
     return False
 
 
+def local_base_turn_debug(
+    side: Side | str,
+    snap: Optional[SymbolSnapshot],
+    *,
+    event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Structured record of the counter-breadth turn decision — every input and the
+    per-gate pass/fail — so real sessions can be replayed to tune the thresholds.
+
+    Stamped into entryContext for taken trades and surfaced on the missed-trade radar
+    for blocked candidates, so we can see exactly which gate a near-miss failed.
+    """
+    settings = get_settings()
+    chart = getattr(snap, "spotChart", None) if snap is not None else None
+    tier, score, vol = _top_tier_score_vol(event, alert)
+    side_v = _side_val(side)
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0) if chart else 0.0
+    mom10 = float(getattr(chart, "momentum10Pct", 0) or 0) if chart else 0.0
+    mom15 = float(getattr(chart, "momentum15Pct", 0) or 0) if chart else 0.0
+    min_score = float(getattr(settings, "local_base_turn_min_score", 62.0) or 62.0)
+    min_vol = float(getattr(settings, "local_base_turn_min_vol_surge", 2.0) or 2.0)
+    min_shift = float(
+        getattr(settings, "local_base_turn_min_mom_shift_pct", 0.05) or 0.05
+    )
+    cap = float(getattr(settings, "local_base_turn_max_adverse_mom5_pct", 0.12) or 0.12)
+    if side_v == "CALL":
+        shift_ok = mom5 >= mom15 + min_shift and mom5 >= mom10
+        within_cap = mom5 >= -cap
+    elif side_v == "PUT":
+        shift_ok = mom5 <= mom15 - min_shift and mom5 <= mom10
+        within_cap = mom5 <= cap
+    else:
+        shift_ok = within_cap = False
+    fired = bool(local_base_momentum_turn(side, snap, event=event, alert=alert))
+    return {
+        "enabled": bool(getattr(settings, "local_base_turn_bypass_enabled", True)),
+        "side": side_v,
+        "tier": tier,
+        "score": round(score, 1),
+        "volSurge": round(vol, 2),
+        "mom5": round(mom5, 3),
+        "mom10": round(mom10, 3),
+        "mom15": round(mom15, 3),
+        "minScore": min_score,
+        "minVolSurge": min_vol,
+        "minShift": min_shift,
+        "cap": cap,
+        "tierOk": tier in ("ELITE", "EXPLODING"),
+        "scoreOk": score >= min_score,
+        "volOk": vol >= min_vol,
+        "shiftOk": bool(shift_ok),
+        "withinCap": bool(within_cap),
+        "fired": fired,
+        "admitted": bool(fired and within_cap),
+    }
+
+
 def local_base_structure_active(
     side: Side | str,
     snap: Optional[SymbolSnapshot],

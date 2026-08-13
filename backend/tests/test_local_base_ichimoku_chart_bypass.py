@@ -11,6 +11,7 @@ from app.engines.local_base_chart_bypass import (
     local_base_entry_window,
     local_base_ichimoku_chart_bypass,
     local_base_momentum_turn,
+    local_base_turn_debug,
     local_base_overrides_session_chart,
     local_base_overrides_side_bias,
     local_base_structure_active,
@@ -667,3 +668,28 @@ def test_turn_disabled_reverts_to_strict_cap(mock_s):
     alert = _turn_alert("CALL")
     chart = _turn_chart("BEARISH", mom5=-0.08, mom10=-0.15, mom15=-0.30)
     assert local_base_structure_active(Side.CALL, _turn_snap(chart, alert), alert=alert) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_turn_debug_records_all_gates_for_fired(mock_s):
+    mock_s.return_value = _settings()
+    alert = _turn_alert("CALL")
+    chart = _turn_chart("BEARISH", mom5=-0.08, mom10=-0.15, mom15=-0.30)
+    dbg = local_base_turn_debug(Side.CALL, _turn_snap(chart, alert), alert=alert)
+    assert dbg["side"] == "CALL"
+    assert dbg["tierOk"] and dbg["scoreOk"] and dbg["volOk"]
+    assert dbg["shiftOk"] and dbg["withinCap"]
+    assert dbg["fired"] is True and dbg["admitted"] is True
+    assert dbg["mom5"] == -0.08 and dbg["mom15"] == -0.30
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_turn_debug_pinpoints_failed_gate(mock_s):
+    """Thin volume → volOk False, admitted False (shows exactly which gate failed)."""
+    mock_s.return_value = _settings()
+    alert = _turn_alert("CALL", vol=1.4)
+    chart = _turn_chart("BEARISH", mom5=-0.08, mom10=-0.15, mom15=-0.30)
+    dbg = local_base_turn_debug(Side.CALL, _turn_snap(chart, alert), alert=alert)
+    assert dbg["tierOk"] and dbg["scoreOk"] and dbg["shiftOk"]
+    assert dbg["volOk"] is False
+    assert dbg["fired"] is False and dbg["admitted"] is False

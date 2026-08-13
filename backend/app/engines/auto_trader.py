@@ -1131,6 +1131,11 @@ async def _open_from_candidate(
             str(ev.tier or ""), float(getattr(ev, "volume_surge", 0) or 0),
         )
         ctx_extra["localBaseEntryWindow"] = [round(_lb_min, 1), round(_lb_max, 1)]
+        # Counter-breadth TURN instrumentation — record the turn-decision inputs on every
+        # taken trade so real sessions can be replayed to tune the thresholds.
+        from app.engines.local_base_chart_bypass import local_base_turn_debug
+
+        ctx_extra["counterBreadthTurn"] = local_base_turn_debug(ev.side, snap, event=ev)
         if good_day_ict:
             ctx_extra["maxProfitCapture"] = bool(ict_meta.get("maxProfitCapture"))
             ctx_extra["goodDayIctCapture"] = bool(ict_meta.get("maxProfitCapture"))

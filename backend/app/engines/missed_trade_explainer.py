@@ -315,11 +315,20 @@ def _gate_checks(
         })
     elif hard_blocked and not all_in and not vertical_bypass:
         blockers.append(hard_reason)
+        from app.engines.local_base_chart_bypass import local_base_turn_debug
+
+        _turn = local_base_turn_debug(
+            candidate.side,
+            snap,
+            event=candidate.explosion_event,
+            alert=alert if isinstance(alert, dict) else None,
+        )
         gates.append({
             "gate": "breadth_hard_block",
             "passed": False,
             "detail": f"breadth {breadth_bias} vs {side_val}",
-            "fix": "Hard block — trade CALL on bullish / PUT on bearish breadth only",
+            "fix": "Hard block — counter-breadth; needs a confirmed turn (see counterBreadthTurn)",
+            "counterBreadthTurn": _turn,
         })
     elif br_blocked and not premium_bypass and not vertical_bypass:
         blockers.append(br_reason)
