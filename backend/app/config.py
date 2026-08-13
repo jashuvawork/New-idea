@@ -987,6 +987,15 @@ class Settings(BaseSettings):
     # from the true 5m / MTF panel (e.g. spot RSI 54 vs MTF 5m RSI 24). 20 bars is enough
     # for a meaningful RSI(14) and keeps the chart 5m-consistent through the morning.
     spot_chart_min_5m_indicator_bars: int = 20
+    # A CONFIRMED live 5m reversal (EMA flip + both momenta agreeing + MACD not opposing)
+    # is not a lone oversold flicker — keep the live direction instead of force-flipping it
+    # back to a stale MTF consensus. Aug13 SENSEX: the index V-recovered (emaBias BULLISH,
+    # mom5 +0.14 / mom15 +0.25) with ELITE volume-awakened CALLs, but the MTF was stuck
+    # oversold-bearish (RSI 23–30) and reconcile forced the chart BEARISH → chart_live_bearish
+    # _no_calls hard-blocked every CALL. A shallow bounce (no EMA flip / weak momentum) is
+    # still force-flipped, preserving the dead-cat-bounce protection. Symmetric CE/PE.
+    chart_reconcile_confirmed_reversal_keeps_live: bool = True
+    chart_reconcile_confirmed_reversal_min_mom15_pct: float = 0.06
 
     # Execution-time chart — fresh Upstox fetch right before order
     execution_chart_gate_enabled: bool = True
