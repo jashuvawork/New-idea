@@ -66,22 +66,31 @@ def test_from_snapshot_reads_indiaVix():
     assert vix_regime_from_snapshot(SimpleNamespace()).available is False
 
 
-def test_parse_india_vix_quote_ref_from_ohlc():
+def test_parse_india_vix_quote_prefers_net_change_over_stale_ohlc_close():
     from app.services.upstox import parse_india_vix_quote
 
-    # Prior close nested in ohlc.close (the real Upstox shape).
-    q = {"last_price": 11.41, "ohlc": {"open": 11.0, "high": 12.0, "low": 10.9, "close": 10.8}}
-    out = parse_india_vix_quote(q)
-    assert out == {"value": 11.41, "ref": 10.8}
-
-
-def test_parse_india_vix_quote_ref_from_net_change():
-    from app.services.upstox import parse_india_vix_quote
-
-    q = {"last_price": 12.0, "net_change": 1.5}  # prior close = 12.0 - 1.5
+    # Live index quote: ohlc.close == last_price (today's running close, useless for trend).
+    # net_change must win so the ref is the true prior close (12.0 - 1.5 = 10.5).
+    q = {"last_price": 12.0, "net_change": 1.5, "ohlc": {"close": 12.0}}
     out = parse_india_vix_quote(q)
     assert out["value"] == 12.0
     assert abs(out["ref"] - 10.5) < 1e-9
+
+
+def test_parse_india_vix_quote_ref_from_distinct_ohlc_close():
+    from app.services.upstox import parse_india_vix_quote
+
+    # No net_change; ohlc.close clearly differs from ltp -> a real prior close.
+    q = {"last_price": 11.41, "ohlc": {"open": 11.0, "high": 12.0, "low": 10.9, "close": 10.8}}
+    assert parse_india_vix_quote(q) == {"value": 11.41, "ref": 10.8}
+
+
+def test_parse_india_vix_quote_ignores_ohlc_close_equal_to_ltp():
+    from app.services.upstox import parse_india_vix_quote
+
+    # ohlc.close == ltp and no net_change -> ref stays 0 (FLAT) rather than a fake reference.
+    out = parse_india_vix_quote({"last_price": 11.42, "ohlc": {"close": 11.42}})
+    assert out == {"value": 11.42, "ref": 0.0}
 
 
 def test_parse_india_vix_quote_top_level_prev_close():

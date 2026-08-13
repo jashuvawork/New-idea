@@ -26,6 +26,7 @@ INDEX_KEYS = {
 
 # India VIX — market-wide volatility gauge for the day-type regime.
 INDIA_VIX_KEY = "NSE_INDEX|India VIX"
+_vix_fields_logged = False  # one-time raw-quote field log for diagnosing the ref source
 
 
 def parse_india_vix_quote(quote: dict[str, Any]) -> Optional[dict[str, float]]:
@@ -41,12 +42,11 @@ def parse_india_vix_quote(quote: dict[str, Any]) -> Optional[dict[str, float]]:
     if value is None:
         return None
     ohlc = quote.get("ohlc") or quote.get("OHLC") or {}
-    ref = (
-        quote.get("prev_close")
-        or quote.get("prevClose")
-        or (ohlc.get("close") if isinstance(ohlc, dict) else None)
-        or quote.get("close")
-    )
+    ohlc_close = ohlc.get("close") if isinstance(ohlc, dict) else None
+    # Prior session close, most-reliable first. On a live index quote Upstox's ohlc.close is
+    # often today's running close (== ltp), which gives a useless FLAT trend — so derive the
+    # true prior close from net_change (last_price - net_change) BEFORE trusting ohlc.close.
+    ref = quote.get("prev_close") or quote.get("prevClose")
     if not ref:
         nc = quote.get("net_change")
         if nc is None:
@@ -56,6 +56,15 @@ def parse_india_vix_quote(quote: dict[str, Any]) -> Optional[dict[str, float]]:
                 ref = float(value) - float(nc)
         except (TypeError, ValueError):
             ref = None
+    # ohlc.close only when it clearly differs from the live price (i.e. a real prior close).
+    if not ref and ohlc_close is not None:
+        try:
+            if abs(float(ohlc_close) - float(value)) > 1e-6:
+                ref = ohlc_close
+        except (TypeError, ValueError):
+            ref = None
+    if not ref:
+        ref = quote.get("close")
     try:
         return {"value": float(value), "ref": float(ref) if ref else 0.0}
     except (TypeError, ValueError):
@@ -485,6 +494,14 @@ class UpstoxClient:
                     list(quote.keys()) if isinstance(quote, dict) else quote,
                 )
                 return None
+            global _vix_fields_logged
+            if not _vix_fields_logged:
+                _vix_fields_logged = True
+                logger.info(
+                    "India VIX quote fields: last_price=%s net_change=%s prev_close=%s ohlc=%s",
+                    quote.get("last_price"), quote.get("net_change"),
+                    quote.get("prev_close"), quote.get("ohlc"),
+                )
             _cache_set(cache_key, out)
             logger.info("India VIX = %.2f (ref %.2f)", out["value"], out["ref"])
             return out
