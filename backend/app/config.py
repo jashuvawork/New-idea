@@ -996,6 +996,22 @@ class Settings(BaseSettings):
     # still force-flipped, preserving the dead-cat-bounce protection. Symmetric CE/PE.
     chart_reconcile_confirmed_reversal_keeps_live: bool = True
     chart_reconcile_confirmed_reversal_min_mom15_pct: float = 0.06
+    # Advanced indicators (squeeze / ADX / Supertrend / VWAP) computed on the index chart.
+    # The squeeze (Bollinger-in-Keltner compression -> release) is the canonical flat-base
+    # -> vertical-explosion signal: a fresh release with momentum toward the option side is
+    # the explosion starting AT the base. Additive rank bonus only (never a gate/loosener).
+    advanced_indicators_enabled: bool = True
+    squeeze_rank_bonus_enabled: bool = True
+    squeeze_rank_bonus: float = 10.0
+    squeeze_fresh_window_bars: int = 3
+    # India VIX regime (day-type context). Inert until a real India VIX value is wired in
+    # (Upstox NSE_INDEX|India VIX); classification only, no hard gate by default.
+    india_vix_enabled: bool = True
+    india_vix_calm_max: float = 11.0
+    india_vix_normal_max: float = 14.0
+    india_vix_elevated_max: float = 20.0
+    india_vix_rising_pct: float = 0.03
+    india_vix_spike_pct: float = 0.10
 
     # Execution-time chart — fresh Upstox fetch right before order
     execution_chart_gate_enabled: bool = True

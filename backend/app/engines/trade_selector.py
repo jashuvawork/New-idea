@@ -546,6 +546,12 @@ def _explosion_candidates(
             rank += 14.0
         elif move_for_rank > early_max and not (ict.flat_then_vertical and ict.volume_awakening):
             rank -= min(35.0, (move_for_rank - early_max) * 0.6)
+        # Squeeze (Bollinger-in-Keltner) release toward this side = fresh base->explosion.
+        if bool(getattr(settings, "squeeze_rank_bonus_enabled", True)):
+            from app.engines.advanced_indicators import index_squeeze_confirms_side
+
+            if index_squeeze_confirms_side(event.side, snap):
+                rank += float(getattr(settings, "squeeze_rank_bonus", 10.0) or 10.0)
 
         out.append(EntryCandidate(
             symbol=symbol,
