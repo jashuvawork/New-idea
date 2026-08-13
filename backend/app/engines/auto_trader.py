@@ -772,6 +772,14 @@ async def _open_from_candidate(
     )
 
     lots = clamp_lots(lots, symbol, fill_premium)
+    # India VIX day-type sizing — default OFF (observe-only). Always records the regime;
+    # only scales lots when vix_regime_sizing_enabled is on (calm/spike days shrink).
+    from app.engines.vix_regime import vix_size_multiplier
+
+    vix_mult, vix_ctx = vix_size_multiplier(snap)
+    if bool(getattr(settings, "vix_regime_sizing_enabled", False)) and vix_mult < 1.0:
+        lots = max(1, int(round(lots * vix_mult)))
+        vix_ctx["applied"] = True
     if candidate.mode == "explosion" and trap_meta:
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
@@ -1125,6 +1133,7 @@ async def _open_from_candidate(
             "localBaseBaseRelPct": round(float(getattr(ict, "base_relative_move_pct", 0) or 0), 1),
             "localBaseBasePremium": round(float(getattr(ict, "base_premium", 0) or 0), 2),
         })
+        ctx_extra["vixRegime"] = vix_ctx
         from app.engines.local_base_chart_bypass import local_base_entry_window
 
         _lb_min, _lb_max = local_base_entry_window(
