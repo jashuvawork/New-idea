@@ -1004,6 +1004,12 @@ class Settings(BaseSettings):
     squeeze_rank_bonus_enabled: bool = True
     squeeze_rank_bonus: float = 10.0
     squeeze_fresh_window_bars: int = 3
+    # Cumulative Volume Delta (trade authenticity) from WS ticks: net buying in the option
+    # we're buying = real demand behind the rip. Additive rank bonus only (never a gate).
+    cvd_confirm_enabled: bool = True
+    cvd_window_seconds: float = 90.0
+    cvd_min_recent_qty: float = 0.0
+    cvd_rank_bonus: float = 5.0
     # ADX regime + VWAP reclaim as additive selection-quality nudges (never a gate):
     # de-rank CHOP, boost a trend aligned with the side, and reward a fresh VWAP reclaim.
     adx_rank_enabled: bool = True

@@ -162,6 +162,46 @@ def index_vwap_confirms_side(side: Any, snap: Any) -> bool:
     return False
 
 
+def option_instrument_key(snap: Any, strike: Any, side: Any) -> Optional[str]:
+    """Resolve the CE/PE Upstox instrument key for a strike from the snapshot heatmap."""
+    hm = getattr(snap, "heatmap", None) if snap is not None else None
+    if not hm:
+        return None
+    side_v = side.value if hasattr(side, "value") else str(side or "").upper()
+    field = "callInstrumentKey" if side_v == "CALL" else "putInstrumentKey"
+    try:
+        target = float(strike)
+    except (TypeError, ValueError):
+        return None
+    for row in hm:
+        try:
+            if abs(float(getattr(row, "strike", 0) or 0) - target) < 0.5:
+                return getattr(row, field, None)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def option_cvd_confirms_buying(snap: Any, strike: Any, side: Any) -> bool:
+    """True when the option we're buying shows net BUYING on recent CVD — real demand
+    behind the rip (fade a hollow print). Additive confirmation, never a gate."""
+    from app.config import get_settings
+    from app.services.cvd_store import get_cvd
+
+    settings = get_settings()
+    if not bool(getattr(settings, "cvd_confirm_enabled", True)):
+        return False
+    ik = option_instrument_key(snap, strike, side)
+    if not ik:
+        return False
+    read = get_cvd(
+        str(ik),
+        window_seconds=float(getattr(settings, "cvd_window_seconds", 90.0) or 90.0),
+        min_recent_qty=float(getattr(settings, "cvd_min_recent_qty", 0.0) or 0.0),
+    )
+    return read is not None and read.direction == "BUYING"
+
+
 def squeeze_early_base_active(event: Any, snap: Any) -> bool:
     """True when a top-tier explosion has a fresh index-squeeze release toward its side —
     the caller uses this to let it enter closer to the local base (catch it at the base)."""
