@@ -1004,6 +1004,13 @@ class Settings(BaseSettings):
     squeeze_rank_bonus_enabled: bool = True
     squeeze_rank_bonus: float = 10.0
     squeeze_fresh_window_bars: int = 3
+    # ADX regime + VWAP reclaim as additive selection-quality nudges (never a gate):
+    # de-rank CHOP, boost a trend aligned with the side, and reward a fresh VWAP reclaim.
+    adx_rank_enabled: bool = True
+    adx_trend_rank_bonus: float = 6.0
+    adx_chop_rank_penalty: float = 8.0
+    vwap_reclaim_rank_bonus_enabled: bool = True
+    vwap_reclaim_rank_bonus: float = 6.0
     # Squeeze-fired ELITE/EXPLODING at a confirmed local base may enter closer to the base
     # than the normal 15% floor — a Bollinger/Keltner release off the base is a confirmed
     # coil break, not noise. Catch it AT the base. Only lowers the floor when the squeeze

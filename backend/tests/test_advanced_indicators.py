@@ -128,6 +128,35 @@ def test_index_squeeze_confirms_side():
     assert index_squeeze_confirms_side("CALL", empty) is False
 
 
+def test_index_adx_rank_adjust():
+    from types import SimpleNamespace
+
+    from app.engines.advanced_indicators import index_adx_rank_adjust
+
+    trend_up = SimpleNamespace(
+        chartAnalysis=SimpleNamespace(adx={"regime": "TREND", "direction": "BULLISH"})
+    )
+    assert index_adx_rank_adjust("CALL", trend_up) > 0        # aligned trend -> bonus
+    assert index_adx_rank_adjust("PUT", trend_up) == 0.0      # counter -> no bonus
+    chop = SimpleNamespace(chartAnalysis=SimpleNamespace(adx={"regime": "CHOP", "direction": "BULLISH"}))
+    assert index_adx_rank_adjust("CALL", chop) < 0            # chop -> penalty
+    assert index_adx_rank_adjust("CALL", SimpleNamespace(chartAnalysis=SimpleNamespace(adx={}))) == 0.0
+
+
+def test_index_vwap_confirms_side():
+    from types import SimpleNamespace
+
+    from app.engines.advanced_indicators import index_vwap_confirms_side
+
+    bull = SimpleNamespace(chartAnalysis=SimpleNamespace(vwap={"reclaim": "BULLISH_RECLAIM"}))
+    assert index_vwap_confirms_side("CALL", bull) is True
+    assert index_vwap_confirms_side("PUT", bull) is False
+    bear = SimpleNamespace(chartAnalysis=SimpleNamespace(vwap={"reclaim": "BEARISH_LOSS"}))
+    assert index_vwap_confirms_side("PUT", bear) is True
+    none = SimpleNamespace(chartAnalysis=SimpleNamespace(vwap={"reclaim": "NONE", "position": "ABOVE"}))
+    assert index_vwap_confirms_side("CALL", none) is False    # position alone is not a reclaim
+
+
 def test_squeeze_early_base_active():
     from types import SimpleNamespace
 
