@@ -1127,6 +1127,8 @@ async def _open_from_candidate(
             "ictMegaRip": ict.mega_rip,
             "ictPremiumFvg": ict.premium_fvg,
             "ictFlatThenVertical": ict.flat_then_vertical,
+            "ictFlatVerticalQuality": round(float(getattr(ict, "flat_vertical_quality", 0) or 0), 1),
+            "ictFlatVerticalGrade": getattr(ict, "flat_vertical_grade", ""),
             "ictReasons": ict.reasons,
             # Local-base entry instrumentation — correlate entry base-rel% + the adaptive
             # window used with the trade outcome to tune the 15–40 range from real data.
