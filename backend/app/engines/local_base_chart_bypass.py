@@ -228,6 +228,68 @@ def session_chart_conflicts_side(side: Side | str, snap: Optional[SymbolSnapshot
     return False
 
 
+def _top_tier_score_vol(
+    event: Any, alert: Optional[dict[str, Any]]
+) -> tuple[str, float, float]:
+    """Best-effort (tier, explosion_score, volume_surge) from an event or alert dict."""
+    if event is not None:
+        tier = str(getattr(event, "tier", "") or "").upper()
+        score = float(
+            getattr(event, "explosion_score", 0) or getattr(event, "score", 0) or 0
+        )
+        vol = float(getattr(event, "volume_surge", 0) or 0)
+        if tier or score:
+            return tier, score, vol
+    if isinstance(alert, dict):
+        tier = str(alert.get("tier") or "").upper()
+        score = float(alert.get("explosionScore") or alert.get("score") or 0)
+        vol = float(alert.get("volumeSurge") or alert.get("volume_surge") or 0)
+        return tier, score, vol
+    return "", 0.0, 0.0
+
+
+def local_base_momentum_turn(
+    side: Side | str,
+    snap: Optional[SymbolSnapshot],
+    *,
+    event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> bool:
+    """True when a high-volume top-tier base rip is a CONFIRMED reversal toward its side.
+
+    Symmetric for CALL and PUT: the counter-breadth turn the book must not miss (Aug13
+    SENSEX 77900 CE) — the index 5m momentum is turning toward the option side (5m better
+    than 15m by a margin AND 5m no worse than 10m) even before breadth/chart flip. A
+    steadily dumping / non-improving index, a low score, or thin volume is NOT a turn.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "local_base_turn_bypass_enabled", True)):
+        return False
+    chart = getattr(snap, "spotChart", None) if snap is not None else None
+    if chart is None:
+        return False
+    tier, score, vol = _top_tier_score_vol(event, alert)
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    if score < float(getattr(settings, "local_base_turn_min_score", 62.0) or 62.0):
+        return False
+    if vol < float(getattr(settings, "local_base_turn_min_vol_surge", 2.0) or 2.0):
+        return False
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
+    mom10 = float(getattr(chart, "momentum10Pct", 0) or 0)
+    mom15 = float(getattr(chart, "momentum15Pct", 0) or 0)
+    min_shift = float(
+        getattr(settings, "local_base_turn_min_mom_shift_pct", 0.05) or 0.05
+    )
+    side_v = _side_val(side)
+    if side_v == "CALL":
+        # 5m accelerating up vs 15m, and not worse than the 10m step (monotonic-ish turn).
+        return mom5 >= mom15 + min_shift and mom5 >= mom10
+    if side_v == "PUT":
+        return mom5 <= mom15 - min_shift and mom5 <= mom10
+    return False
+
+
 def local_base_structure_active(
     side: Side | str,
     snap: Optional[SymbolSnapshot],
@@ -259,6 +321,16 @@ def local_base_structure_active(
         max_against = min(
             max_against,
             float(getattr(settings, "local_base_aligned_momentum_max_adverse_pct", 0.05) or 0.05),
+        )
+    # Counter-breadth TURN: a confirmed high-volume top-tier reversal toward the side may
+    # run slightly ahead of the index — widen the adverse cap (bounded) so the turn is
+    # caught, while a steadily dumping / non-improving / low-quality event still fails below.
+    if local_base_momentum_turn(side, snap, event=event, alert=alert):
+        max_against = max(
+            max_against,
+            float(
+                getattr(settings, "local_base_turn_max_adverse_mom5_pct", 0.12) or 0.12
+            ),
         )
     mom5 = float(getattr(chart, "momentum5Pct", 0) or 0) if chart else 0.0
     if side_v == "CALL" and mom5 < -max_against:

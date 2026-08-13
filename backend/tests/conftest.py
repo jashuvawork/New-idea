@@ -8,7 +8,27 @@ brief later reads as `composer_stand_down`). Reset all of them around every test
 so the suite result is stable regardless of collection order.
 """
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import pytest
+
+_IST = ZoneInfo("Asia/Kolkata")
+# Deterministic "wall clock" for the suite. get_market_phase() and the capture/
+# session time-windows read app.services.upstox.datetime.now(IST); without a fixed
+# clock the suite result depends on the time of day it runs (e.g. incomplete settings
+# mocks only reach the live-market capture-window code between 09:15–15:30 IST and
+# crash). Freeze to a weekday mid-session time so time-windows are consistent, and
+# let any test that needs a different phase patch get_market_phase locally.
+_FROZEN_NOW = datetime(2026, 8, 12, 16, 30, 0, tzinfo=_IST)  # Wed 16:30 IST — CLOSED
+
+
+class _FrozenDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        if tz is not None:
+            return _FROZEN_NOW.astimezone(tz)
+        return _FROZEN_NOW.replace(tzinfo=None)
 
 
 def _reset_all_engine_globals() -> None:
@@ -53,6 +73,18 @@ def _reset_all_engine_globals() -> None:
     from app.engines import expiry_day_guards
 
     expiry_day_guards._expiry_session_active = False
+
+
+@pytest.fixture(autouse=True)
+def _freeze_market_clock(monkeypatch):
+    """Freeze the market wall-clock so time-of-day never changes suite results.
+
+    get_market_phase() (app/services/upstox.py) reads the module-level `datetime`;
+    freezing it there makes every caller deterministic. Tests that need a specific
+    phase still override get_market_phase locally.
+    """
+    monkeypatch.setattr("app.services.upstox.datetime", _FrozenDateTime, raising=False)
+    yield
 
 
 @pytest.fixture(autouse=True)
