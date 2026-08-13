@@ -574,6 +574,13 @@ def _explosion_candidates(
         if index_vwap_confirms_side(event.side, snap):
             rank += float(getattr(settings, "vwap_reclaim_rank_bonus", 6.0) or 6.0)
 
+        # CVD (trade authenticity) — net buying in the option we're buying = real demand.
+        if bool(getattr(settings, "cvd_confirm_enabled", True)):
+            from app.engines.advanced_indicators import option_cvd_confirms_buying
+
+            if option_cvd_confirms_buying(snap, event.strike, event.side):
+                rank += float(getattr(settings, "cvd_rank_bonus", 5.0) or 5.0)
+
         out.append(EntryCandidate(
             symbol=symbol,
             snap=snap,

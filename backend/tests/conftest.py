@@ -74,6 +74,8 @@ def _reset_all_engine_globals() -> None:
 
     expiry_day_guards._expiry_session_active = False
 
+    _safe(lambda: __import__("app.services.cvd_store", fromlist=["clear"]).clear())
+
 
 @pytest.fixture(autouse=True)
 def _freeze_market_clock(monkeypatch):

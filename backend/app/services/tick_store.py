@@ -78,6 +78,15 @@ def record_tick(
     )
     _tick_count += 1
     _last_tick_mono = now
+    # Accumulate CVD (trade authenticity) from the same tick stream — best-effort.
+    try:
+        from app.config import get_settings
+        from app.services.cvd_store import record_cvd_tick
+
+        cumulative = str(getattr(get_settings(), "upstox_ws_mode", "ltpc") or "ltpc") != "ltpc"
+        record_cvd_tick(key, float(ltp), float(volume or 0), cumulative=cumulative)
+    except Exception:
+        pass
     _signal_tick_wake()
 
 
