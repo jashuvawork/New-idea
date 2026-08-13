@@ -482,8 +482,11 @@ def _explosion_candidates(
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the
         # hard window does not re-raise the unstructured 28% floor.
+        from app.engines.advanced_indicators import squeeze_early_base_active
+
         window_blocked, _window_reason = explosion_entry_window_blocked(
             event, ict=ict, top_must_take=must_take,
+            squeeze_early_base=squeeze_early_base_active(event, snap),
         )
         if window_blocked:
             continue

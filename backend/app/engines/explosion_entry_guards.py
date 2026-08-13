@@ -290,6 +290,7 @@ def explosion_entry_window_blocked(
     *,
     ict: Any = None,
     top_must_take: bool = False,
+    squeeze_early_base: bool = False,
 ) -> tuple[bool, str]:
     """Hard-block EXPLOSIVE entries outside the active early window.
 
@@ -323,6 +324,17 @@ def explosion_entry_window_blocked(
             )
             if elite_hi > 0:
                 hi = min(hi, elite_hi)
+    # Squeeze-fired ELITE at a confirmed local base — a Bollinger/Keltner release off the
+    # base is a confirmed coil break, not noise, so allow entry closer to the base than the
+    # normal 15% floor (catch it AT the base). Gated by the caller to squeeze + ELITE + base.
+    if squeeze_early_base and getattr(
+        settings, "explosion_squeeze_early_base_enabled", True
+    ):
+        sq_floor = float(
+            getattr(settings, "explosion_squeeze_early_base_min_move_pct", 8.0) or 8.0
+        )
+        if sq_floor > 0:
+            lo = min(lo, sq_floor)
     try:
         max_credible = float(
             getattr(settings, "session_move_max_credible_pct", 500.0)

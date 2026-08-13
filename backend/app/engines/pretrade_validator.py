@@ -786,8 +786,11 @@ def validate_candidate(
             snap=snap,
             ict=trap_ict,
         )
+        from app.engines.advanced_indicators import squeeze_early_base_active
+
         window_blocked, window_reason = explosion_entry_window_blocked(
             explosion_event, ict=trap_ict, top_must_take=must_take,
+            squeeze_early_base=squeeze_early_base_active(explosion_event, snap),
         )
         if window_blocked:
             return False, window_reason, meta

@@ -596,7 +596,9 @@ def build_chart_analysis(
     squeeze = asdict(compute_squeeze(highs, lows, closes))
     adx = asdict(compute_adx(highs, lows, closes))
     supertrend = asdict(compute_supertrend(highs, lows, closes))
-    vwap = asdict(compute_vwap(highs, lows, closes, volumes)) if any(volumes) else {}
+    # Always compute VWAP — indices carry no candle volume, so it falls back to a
+    # price-anchored session mean (still gives position + reclaim for turn confirmation).
+    vwap = asdict(compute_vwap(highs, lows, closes, volumes))
 
     return ChartAnalysis(
         consensus=consensus,
