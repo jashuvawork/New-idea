@@ -780,6 +780,16 @@ async def _open_from_candidate(
     if bool(getattr(settings, "vix_regime_sizing_enabled", False)) and vix_mult < 1.0:
         lots = max(1, int(round(lots * vix_mult)))
         vix_ctx["applied"] = True
+    # Confluence-gated sizing — default OFF (observe-only). Records score + would-be
+    # multiplier; only scales when confluence_sizing_enabled (size up the best base rips).
+    conf_ctx: dict[str, Any] = {}
+    if candidate.mode == "explosion" and candidate.explosion_event is not None:
+        from app.engines.advanced_indicators import confluence_size_multiplier
+
+        conf_mult, conf_ctx = confluence_size_multiplier(snap, candidate.explosion_event)
+        if bool(getattr(settings, "confluence_sizing_enabled", False)) and conf_mult != 1.0:
+            lots = max(1, int(round(lots * conf_mult)))
+            conf_ctx["applied"] = True
     if candidate.mode == "explosion" and trap_meta:
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
@@ -1137,6 +1147,8 @@ async def _open_from_candidate(
         from app.engines.advanced_indicators import build_entry_confluence
 
         ctx_extra["signalConfluence"] = build_entry_confluence(snap, ev)
+        if conf_ctx:
+            ctx_extra["confluenceSizing"] = conf_ctx
         from app.engines.local_base_chart_bypass import local_base_entry_window
 
         _lb_min, _lb_max = local_base_entry_window(

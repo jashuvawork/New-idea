@@ -1010,6 +1010,14 @@ class Settings(BaseSettings):
     cvd_window_seconds: float = 90.0
     cvd_min_recent_qty: float = 0.0
     cvd_rank_bonus: float = 5.0
+    # Confluence-gated sizing (default OFF / observe-only): size up the best base rips
+    # (many aligned confirmations) and trim thin-confluence ones. Records the score +
+    # would-be multiplier on every trade; only applies when confluence_sizing_enabled.
+    confluence_sizing_enabled: bool = False
+    confluence_size_up_min_score: int = 4
+    confluence_size_up_mult: float = 1.25
+    confluence_size_down_max_score: int = 1
+    confluence_size_down_mult: float = 0.8
     # ADX regime + VWAP reclaim as additive selection-quality nudges (never a gate):
     # de-rank CHOP, boost a trend aligned with the side, and reward a fresh VWAP reclaim.
     adx_rank_enabled: bool = True

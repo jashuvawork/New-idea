@@ -255,6 +255,33 @@ def build_entry_confluence(snap: Any, event: Any) -> dict[str, Any]:
     }
 
 
+def confluence_size_multiplier(snap: Any, event: Any) -> tuple[float, dict[str, Any]]:
+    """Lot multiplier from signal confluence + an observation context.
+
+    High-confluence base rips (many aligned confirmations) are the 'double profits on the
+    best setups' trades — size up; thin-confluence setups size down. Default is a no-op
+    (multiplier 1.0); the caller only APPLIES it when confluence_sizing_enabled is on. The
+    context (score + would-be multiplier) is always returned so it can be recorded and
+    validated before it influences sizing.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    conf = build_entry_confluence(snap, event)
+    score = int(conf.get("score", 0))
+    up_min = int(getattr(settings, "confluence_size_up_min_score", 4) or 4)
+    down_max = int(getattr(settings, "confluence_size_down_max_score", 1) or 1)
+    up_mult = float(getattr(settings, "confluence_size_up_mult", 1.25) or 1.25)
+    down_mult = float(getattr(settings, "confluence_size_down_mult", 0.8) or 0.8)
+    if score >= up_min:
+        mult = up_mult
+    elif score <= down_max:
+        mult = down_mult
+    else:
+        mult = 1.0
+    return mult, {"score": score, "multiplier": round(mult, 3), "applied": False}
+
+
 def squeeze_early_base_active(event: Any, snap: Any) -> bool:
     """True when a top-tier explosion has a fresh index-squeeze release toward its side —
     the caller uses this to let it enter closer to the local base (catch it at the base)."""

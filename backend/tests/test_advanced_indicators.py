@@ -189,6 +189,36 @@ def test_build_entry_confluence():
     clear()
 
 
+def test_confluence_size_multiplier():
+    from types import SimpleNamespace
+
+    from app.engines.advanced_indicators import confluence_size_multiplier
+    from app.services.cvd_store import clear, record_cvd_tick
+
+    clear()
+    ce_key = "NSE_FO|CS_CE"
+    record_cvd_tick(ce_key, 100.0, 40)
+    record_cvd_tick(ce_key, 101.0, 60)
+    snap = SimpleNamespace(
+        heatmap=[SimpleNamespace(strike=24000.0, callInstrumentKey=ce_key, putInstrumentKey="x")],
+        chartAnalysis=SimpleNamespace(
+            squeeze={"state": "FIRED", "direction": "BULLISH", "bars_since_fired": 1},
+            adx={"adx": 30.0, "regime": "TREND", "direction": "BULLISH"},
+            vwap={"position": "ABOVE", "reclaim": "BULLISH_RECLAIM"},
+            supertrend={"direction": "BULLISH"},
+        ),
+    )
+    ce = SimpleNamespace(side="CALL", strike=24000.0, tier="ELITE", explosion_score=90.0, volume_surge=3.0)
+    mult, ctx = confluence_size_multiplier(snap, ce)
+    assert ctx["score"] >= 4 and mult == 1.25 and ctx["applied"] is False
+    # Thin confluence (PUT on a bullish tape) -> size down.
+    m2, c2 = confluence_size_multiplier(
+        snap, SimpleNamespace(side="PUT", strike=24000.0, tier="ELITE", explosion_score=90.0, volume_surge=3.0)
+    )
+    assert c2["score"] <= 1 and m2 == 0.8
+    clear()
+
+
 def test_squeeze_early_base_active():
     from types import SimpleNamespace
 
