@@ -10,6 +10,7 @@ from app.engines.local_base_chart_bypass import (
     is_top_explosion_local_base_bypass,
     local_base_entry_window,
     local_base_ichimoku_chart_bypass,
+    local_base_momentum_turn,
     local_base_overrides_session_chart,
     local_base_overrides_side_bias,
     local_base_structure_active,
@@ -40,6 +41,11 @@ def _settings(**overrides):
     s.local_base_ichimoku_max_adverse_mom5_pct = 0.12
     s.local_base_require_aligned_live_momentum = True
     s.local_base_aligned_momentum_max_adverse_pct = 0.05
+    s.local_base_turn_bypass_enabled = True
+    s.local_base_turn_min_score = 62.0
+    s.local_base_turn_min_vol_surge = 2.0
+    s.local_base_turn_min_mom_shift_pct = 0.05
+    s.local_base_turn_max_adverse_mom5_pct = 0.12
     s.local_base_chart_bypass_min_score = 38.0
     s.explosion_local_base_entry_min_move_pct = 15.0
     s.explosion_local_base_chase_max_move_pct = 40.0
@@ -542,3 +548,122 @@ def test_bad_day_and_worst_day_alignment_via_local_base(mock_lb):
     )
     assert bad_aligned(candidate, snap) is True
     assert worst_aligned(candidate, snap) is True
+
+
+# --- Counter-breadth TURN bypass (symmetric CE / PE) ---
+
+def _turn_chart(direction, mom5, mom10, mom15):
+    return SpotChart(
+        direction=direction,
+        momentum5Pct=mom5,
+        momentum10Pct=mom10,
+        momentum15Pct=mom15,
+        momentum30Pct=mom15,
+        trendStrength=70,
+        emaBias=direction,
+        candleBias="NEUTRAL",
+        macdBias=direction,
+        rsi=48,
+        spot=77800.0,
+    )
+
+
+def _turn_alert(side, *, tier="ELITE", score=90.0, vol=2.5):
+    return {
+        "side": side,
+        "strike": 77900.0,
+        "tier": tier,
+        "explosionScore": score,
+        "volumeSurge": vol,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 30.0,
+        "ictPattern": "flat_then_vertical",
+        "dailyMovePct": 30.0,
+        "peakMovePct": 30.0,
+        "premium": 150.0,
+        "tradeable": True,
+    }
+
+
+def _turn_snap(chart, alert):
+    return SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        regime=Regime.TREND_EXPANSION,
+        spot=77800.0,
+        atmStrike=77900.0,
+        tradeQualityScore=60,
+        breadth=Breadth(bias="BEARISH", score=30, aligned=False),
+        spotChart=chart,
+        explosionAlerts=[alert],
+    )
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_turn_allows_counter_breadth_elite_call(mock_s):
+    """Aug13 SENSEX 77900 CE: ELITE, high-volume base rip, index 5m still slightly red
+    (-0.08) but monotonically turning up (-0.30→-0.15→-0.08) → take the turn."""
+    mock_s.return_value = _settings()
+    alert = _turn_alert("CALL")
+    chart = _turn_chart("BEARISH", mom5=-0.08, mom10=-0.15, mom15=-0.30)
+    assert local_base_momentum_turn(Side.CALL, _turn_snap(chart, alert), alert=alert) is True
+    assert local_base_structure_active(Side.CALL, _turn_snap(chart, alert), alert=alert) is True
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_turn_allows_counter_breadth_elite_put_symmetric(mock_s):
+    """PE mirror: ELITE, high-volume base rip, index 5m still slightly green (+0.08) but
+    monotonically turning down (+0.30→+0.15→+0.08) → take the turn."""
+    mock_s.return_value = _settings()
+    alert = _turn_alert("PUT")
+    chart = _turn_chart("BULLISH", mom5=0.08, mom10=0.15, mom15=0.30)
+    assert local_base_momentum_turn(Side.PUT, _turn_snap(chart, alert), alert=alert) is True
+    assert local_base_structure_active(Side.PUT, _turn_snap(chart, alert), alert=alert) is True
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_turn_rejects_low_score(mock_s):
+    mock_s.return_value = _settings()
+    alert = _turn_alert("CALL", score=55.0)
+    chart = _turn_chart("BEARISH", mom5=-0.08, mom10=-0.15, mom15=-0.30)
+    assert local_base_momentum_turn(Side.CALL, _turn_snap(chart, alert), alert=alert) is False
+    assert local_base_structure_active(Side.CALL, _turn_snap(chart, alert), alert=alert) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_turn_rejects_thin_volume(mock_s):
+    mock_s.return_value = _settings()
+    alert = _turn_alert("CALL", vol=1.4)
+    chart = _turn_chart("BEARISH", mom5=-0.08, mom10=-0.15, mom15=-0.30)
+    assert local_base_momentum_turn(Side.CALL, _turn_snap(chart, alert), alert=alert) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_turn_rejects_hard_dump(mock_s):
+    """Index still falling hard (-0.20) is beyond the bounded turn cap → rejected."""
+    mock_s.return_value = _settings()
+    alert = _turn_alert("CALL")
+    chart = _turn_chart("BEARISH", mom5=-0.20, mom10=-0.28, mom15=-0.40)
+    assert local_base_momentum_turn(Side.CALL, _turn_snap(chart, alert), alert=alert) is True
+    # turn is monotonic, but -0.20 is beyond the 0.12 cap → structure still rejects.
+    assert local_base_structure_active(Side.CALL, _turn_snap(chart, alert), alert=alert) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_turn_rejects_non_monotonic(mock_s):
+    """5m worse than 10m (stalling, not turning) → not a confirmed turn."""
+    mock_s.return_value = _settings()
+    alert = _turn_alert("CALL")
+    chart = _turn_chart("BEARISH", mom5=-0.08, mom10=-0.05, mom15=-0.30)
+    assert local_base_momentum_turn(Side.CALL, _turn_snap(chart, alert), alert=alert) is False
+
+
+@patch("app.engines.local_base_chart_bypass.get_settings")
+def test_turn_disabled_reverts_to_strict_cap(mock_s):
+    mock_s.return_value = _settings(local_base_turn_bypass_enabled=False)
+    alert = _turn_alert("CALL")
+    chart = _turn_chart("BEARISH", mom5=-0.08, mom10=-0.15, mom15=-0.30)
+    assert local_base_structure_active(Side.CALL, _turn_snap(chart, alert), alert=alert) is False

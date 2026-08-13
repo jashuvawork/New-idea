@@ -958,6 +958,19 @@ class Settings(BaseSettings):
     # Symmetric for PUT. Tighter than the 0.12 hard cap above.
     local_base_require_aligned_live_momentum: bool = True
     local_base_aligned_momentum_max_adverse_pct: float = 0.05
+    # Counter-breadth TURN (symmetric CE/PE): a top-tier ELITE/EXPLODING base rip on the
+    # side OPPOSITE current breadth/chart is the reversal itself — the market is moving to
+    # the other side (Aug13 SENSEX 77900 CE ripped off its base while breadth/chart were
+    # still bearish). When the live 5m index momentum is CONFIRMED turning toward the option
+    # side (5m > 15m by a margin AND 5m no worse than 10m — monotonic-ish improvement) on a
+    # high-volume top-tier rip, widen the adverse-momentum cap so the turn is caught. A
+    # steadily dumping / non-improving index, a low score, or thin volume is still rejected,
+    # preserving the #261 counter-trend-fade protection. CALL mirrors PUT exactly.
+    local_base_turn_bypass_enabled: bool = True
+    local_base_turn_min_score: float = 62.0
+    local_base_turn_min_vol_surge: float = 2.0
+    local_base_turn_min_mom_shift_pct: float = 0.05
+    local_base_turn_max_adverse_mom5_pct: float = 0.12
     local_base_chart_bypass_min_score: float = 38.0
     # Radar-lag side-bias fallback (no ICT flags yet) — keep above entry floor so
     # bare ELITE+15% cannot lift counter-breadth locks.
