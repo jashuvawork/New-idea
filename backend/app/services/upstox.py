@@ -438,15 +438,26 @@ class UpstoxClient:
                 data = normalize_quotes_map(data)
             quote = resolve_quote_payload(data, INDIA_VIX_KEY)
             if not quote:
+                logger.warning(
+                    "India VIX: no quote resolved for key=%s (raw keys=%s)",
+                    INDIA_VIX_KEY,
+                    list(data.keys())[:8] if isinstance(data, dict) else type(data).__name__,
+                )
                 return None
             value = quote.get("last_price")
             ref = quote.get("prev_close") or quote.get("close")
             if value is None:
+                logger.warning(
+                    "India VIX: quote has no last_price (fields=%s)",
+                    list(quote.keys()) if isinstance(quote, dict) else quote,
+                )
                 return None
             out = {"value": float(value), "ref": float(ref) if ref else 0.0}
             _cache_set(cache_key, out)
+            logger.info("India VIX = %.2f (ref %.2f)", out["value"], out["ref"])
             return out
-        except Exception:
+        except Exception as e:
+            logger.warning("India VIX fetch failed (key=%s): %s", INDIA_VIX_KEY, e)
             return None
 
     async def get_index_quote(self, symbol: str, *, force_refresh: bool = False) -> dict[str, Any]:
