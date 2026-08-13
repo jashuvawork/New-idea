@@ -564,6 +564,16 @@ def _explosion_candidates(
                 )
                 rank += sq_bonus * (1.5 if at_local_base else 1.0)
 
+        # ADX regime + VWAP reclaim — selection-quality nudges (additive, never a gate).
+        from app.engines.advanced_indicators import (
+            index_adx_rank_adjust,
+            index_vwap_confirms_side,
+        )
+
+        rank += index_adx_rank_adjust(event.side, snap)
+        if index_vwap_confirms_side(event.side, snap):
+            rank += float(getattr(settings, "vwap_reclaim_rank_bonus", 6.0) or 6.0)
+
         out.append(EntryCandidate(
             symbol=symbol,
             snap=snap,

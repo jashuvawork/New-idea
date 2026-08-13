@@ -118,6 +118,50 @@ def index_squeeze_confirms_side(side: Any, snap: Any) -> bool:
     return False
 
 
+def index_adx_rank_adjust(side: Any, snap: Any) -> float:
+    """Rank delta from the index ADX regime: + when a real TREND is aligned with the side,
+    − on CHOP (nudge selection toward trend days, away from chop). Additive, never a gate."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not bool(getattr(settings, "adx_rank_enabled", True)):
+        return 0.0
+    ca = getattr(snap, "chartAnalysis", None) if snap is not None else None
+    adx = getattr(ca, "adx", None) if ca is not None else None
+    if not isinstance(adx, dict) or not adx:
+        return 0.0
+    regime = str(adx.get("regime") or "").upper()
+    direction = str(adx.get("direction") or "NEUTRAL").upper()
+    side_v = side.value if hasattr(side, "value") else str(side or "").upper()
+    target = "BULLISH" if side_v == "CALL" else "BEARISH" if side_v == "PUT" else ""
+    if regime == "CHOP":
+        return -float(getattr(settings, "adx_chop_rank_penalty", 8.0) or 8.0)
+    if regime == "TREND" and target and direction == target:
+        return float(getattr(settings, "adx_trend_rank_bonus", 6.0) or 6.0)
+    return 0.0
+
+
+def index_vwap_confirms_side(side: Any, snap: Any) -> bool:
+    """True when the index VWAP just reclaimed toward the side (bullish reclaim for CALL,
+    bearish loss for PUT) — a fast institutional turn confirmation for a rank bonus."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not bool(getattr(settings, "vwap_reclaim_rank_bonus_enabled", True)):
+        return False
+    ca = getattr(snap, "chartAnalysis", None) if snap is not None else None
+    vw = getattr(ca, "vwap", None) if ca is not None else None
+    if not isinstance(vw, dict) or not vw:
+        return False
+    reclaim = str(vw.get("reclaim") or "NONE").upper()
+    side_v = side.value if hasattr(side, "value") else str(side or "").upper()
+    if side_v == "CALL":
+        return reclaim == "BULLISH_RECLAIM"
+    if side_v == "PUT":
+        return reclaim == "BEARISH_LOSS"
+    return False
+
+
 def squeeze_early_base_active(event: Any, snap: Any) -> bool:
     """True when a top-tier explosion has a fresh index-squeeze release toward its side —
     the caller uses this to let it enter closer to the local base (catch it at the base)."""
