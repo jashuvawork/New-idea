@@ -30,6 +30,11 @@ def _settings(**overrides):
     settings.local_base_turn_min_vol_surge = 2.0
     settings.local_base_turn_min_mom_shift_pct = 0.05
     settings.explosion_entry_window_hard_enabled = True
+    settings.explosion_immature_block_enabled = True
+    settings.explosion_immature_min_session_move_pct = 22.0
+    settings.ict_early_vertical_min_session_move_pct = 28.0
+    settings.explosion_chase_use_local_base = True
+    settings.explosion_local_base_entry_min_move_pct = 15.0
     settings.explosion_early_window_min_move_pct = 28.0
     settings.explosion_early_window_max_move_pct = 65.0
     settings.ict_structured_early_entry_enabled = True
