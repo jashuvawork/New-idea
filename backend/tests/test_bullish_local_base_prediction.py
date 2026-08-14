@@ -76,8 +76,13 @@ def _event(*, side=Side.CALL, score=82.0, volume=3.0, v3=2.4, v9=0.8):
 
 def _ict(*, base_rel=12.0):
     return SimpleNamespace(
+        active=True,
+        pattern="flat_then_vertical",
+        score=82.0,
+        reasons=["local_base_turn"],
         flat_then_vertical=True,
         local_swing_base=False,
+        mega_rip=False,
         base_premium=90.0,
         base_relative_move_pct=base_rel,
         volume_awakening=True,
