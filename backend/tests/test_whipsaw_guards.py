@@ -47,6 +47,7 @@ def _settings():
     s.bearish_sideways_halt_enabled = True
     s.bearish_sideways_block_scalps = True
     s.bearish_sideways_explosion_min_score = 78.0
+    s.bearish_sideways_local_base_min_score = 75.0
     s.controlled_trading_enabled = True
     s.controlled_max_trades_per_day = 6
     s.min_seconds_between_entries = 240
@@ -160,6 +161,73 @@ def test_quick_sideways_allowed_in_bearish_chop(mock_settings):
     blocked, reason = check_bearish_sideways_entry(cand, {"NIFTY": _snap()})
     assert not blocked
     assert reason == "ok"
+
+
+@patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
+def test_bearish_sideways_uses_explosion_score_not_rank(mock_settings):
+    """Aug14 NIFTY 24200 CALL: rank≈38 but explosionScore 100 at local base ~29%."""
+    from types import SimpleNamespace
+
+    from app.engines.whipsaw_guards import check_bearish_sideways_entry
+
+    event = SimpleNamespace(
+        explosion_score=100.0,
+        tier="ELITE",
+        side=Side.CALL,
+        strike=24200.0,
+        premium=246.0,
+        daily_move_pct=29.9,
+        local_base_move_pct=29.3,
+    )
+    cand = EntryCandidate(
+        symbol="NIFTY",
+        snap=_snap("NIFTY"),
+        mode="explosion",
+        score=38.0,  # composite RANK (too low alone)
+        side=Side.CALL,
+        strike=24200.0,
+        premium=246.0,
+        strategy_type=StrategyType.EXPLOSIVE,
+        confidence=100.0,  # real explosion score
+        tqs=50.0,
+        tier="ELITE",
+        explosion_event=event,
+        alert={"explosionScore": 100.0, "tier": "ELITE", "localBaseMovePct": 29.3},
+    )
+    with patch(
+        "app.engines.local_base_chart_bypass.local_base_structure_active",
+        return_value=True,
+    ):
+        blocked, reason = check_bearish_sideways_entry(cand, {"NIFTY": cand.snap})
+    assert not blocked, reason
+    assert reason == "ok"
+
+
+@patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
+def test_bearish_sideways_still_blocks_weak_explosion(mock_settings):
+    from app.engines.whipsaw_guards import check_bearish_sideways_entry
+
+    cand = EntryCandidate(
+        symbol="NIFTY",
+        snap=_snap("NIFTY"),
+        mode="explosion",
+        score=40.0,
+        side=Side.CALL,
+        strike=24350.0,
+        premium=130.0,
+        strategy_type=StrategyType.EXPLOSIVE,
+        confidence=47.6,
+        tqs=50.0,
+        tier="ELITE",
+        alert={"explosionScore": 47.6, "tier": "ELITE"},
+    )
+    with patch(
+        "app.engines.local_base_chart_bypass.local_base_structure_active",
+        return_value=True,
+    ):
+        blocked, reason = check_bearish_sideways_entry(cand, {"NIFTY": cand.snap})
+    assert blocked
+    assert reason == "bearish_sideways_explosion_only"
 
 
 @patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
