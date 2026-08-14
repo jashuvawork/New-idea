@@ -15,6 +15,9 @@ from app.engines.instrument_cooldown import (
     instrument_daily_cap_reached,
     instrument_in_cooldown,
 )
+from app.engines.preorder_rejection_suppression import (
+    candidate_preorder_rejection_suppressed,
+)
 from app.engines.pretrade_validator import (
     collect_session_trades,
     compute_symbol_stats,
@@ -83,6 +86,17 @@ class EntryCandidate:
     suggestion: Any = None
     alert: Optional[dict] = None
     pretrade_meta: Optional[dict] = None
+
+
+def _exclude_preorder_rejected_candidates(
+    candidates: list[EntryCandidate],
+) -> list[EntryCandidate]:
+    """Keep a rejected leg out of ranking without bypassing fresh selector guards."""
+    return [
+        candidate
+        for candidate in candidates
+        if not candidate_preorder_rejection_suppressed(candidate)
+    ]
 
 
 def _building_aligned_ict_alert_ok(
@@ -1111,6 +1125,10 @@ def find_best_entry(
         if not explosion_only and swing_open < settings.swing_max_open:
             candidates.extend(_swing_candidates(symbol, snap, state, settings))
 
+    # A live premium fade is exact-leg and transient. Apply after fresh candidate
+    # generation, before every promotion/risk-quality filter and final ranking.
+    # Unlike the established loss cooldown, ELITE/high-mover paths cannot bypass it.
+    candidates = _exclude_preorder_rejected_candidates(candidates)
     if not candidates:
         return None
 

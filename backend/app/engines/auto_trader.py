@@ -41,6 +41,10 @@ from app.engines.capital_allocator import (
 )
 from app.engines.symbol_cooldown import record_symbol_result, reset_symbol_cooldowns
 from app.engines.instrument_cooldown import record_instrument_close, record_instrument_entry
+from app.engines.preorder_rejection_suppression import (
+    reset_preorder_rejection_suppressions,
+    suppress_after_preorder_rejection,
+)
 from app.engines.chop_day_guards import (
     apply_tiered_lot_cap,
     chop_guard_summary,
@@ -347,6 +351,14 @@ def _uses_paper_live_parity(settings) -> bool:
         and settings.paper_simulate_broker_orders
         and not is_live
     )
+
+
+def _record_deferred_candidate_fallback(
+    candidate: EntryCandidate,
+    reason: str,
+) -> bool:
+    """Record only typed failures emitted by the chart gate before order submission."""
+    return suppress_after_preorder_rejection(candidate, reason)
 
 
 async def _open_from_candidate(
@@ -886,6 +898,8 @@ async def _open_from_candidate(
                 explosion_event=candidate.explosion_event,
             )
             if not chart_ok:
+                # This is structurally before place_entry_order/simulate_entry_order.
+                _record_deferred_candidate_fallback(candidate, chart_reason)
                 return False, chart_reason
             if candidate.mode == "explosion" and candidate.explosion_event:
                 from app.engines.explosion_entry_guards import (
@@ -1420,6 +1434,7 @@ def reset_session_calibration() -> None:
     """Clear side blocks and per-symbol loss streaks without wiping trade history."""
     _calibration.reset()
     reset_symbol_cooldowns()
+    reset_preorder_rejection_suppressions()
     reset_session_guards()
     reset_session_profit_gate()
 
