@@ -345,6 +345,14 @@ class Settings(BaseSettings):
     ict_structured_early_entry_enabled: bool = True
     ict_structured_early_min_move_pct: float = 15.0
     ict_structured_early_max_move_pct: float = 65.0
+    # Measure flat→vertical from the lowest premium in the flat window (true local base),
+    # not the average — so the first lift appears at ~15% off the trough, not mid-chase.
+    ict_flat_base_use_lowest: bool = True
+    # Arm FTV / radar as soon as pad is in the structured entry band with heat.
+    ict_first_lift_appear_enabled: bool = True
+    ict_first_lift_min_velocity_3s: float = 1.2
+    explosion_first_lift_rank_bonus: float = 24.0
+    explosion_first_lift_sweet_max_move_pct: float = 25.0
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0

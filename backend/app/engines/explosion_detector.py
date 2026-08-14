@@ -1299,6 +1299,11 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         tradeable = True
     if ict.mega_rip or (ict.active and (ict.flat_then_vertical or ict.premium_fvg)):
         tradeable = True
+    # First lift off the lowest local base (15–40%) must appear as tradeable immediately —
+    # do not wait for day-move / chase tiers (Aug14 FTV only showed after ~47%).
+    first_lift = bool(getattr(ict, "first_lift", False))
+    if first_lift:
+        tradeable = True
     # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).
     if e.tier == "BUILDING" and ict.active and ict.flat_then_vertical:
         tradeable = True
@@ -1372,6 +1377,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictMegaRip": ict.mega_rip,
         "ictPremiumFvg": ict.premium_fvg,
         "ictFlatThenVertical": ict.flat_then_vertical,
+        "ictFirstLift": first_lift,
         "ictVolumeAwakening": ict.volume_awakening,
         "ictDisplacement": ict.displacement,
         "ictBaseRelativeMovePct": round(ict.base_relative_move_pct, 1),
@@ -1383,6 +1389,10 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "localBaseReversalActive": bool(bullish_base.get("active")),
         "localBaseReversalConfidence": float(bullish_base.get("confidence") or 0),
         "localBaseReversalSide": bullish_base.get("side") or e.side.value,
-        "momentType": ict.pattern if ict.active else ("volume_awaken" if vol_awaken else e.tier),
+        "momentType": (
+            "first_lift_local_base"
+            if first_lift
+            else (ict.pattern if ict.active else ("volume_awaken" if vol_awaken else e.tier))
+        ),
         "ictReasons": ict.reasons,
     }

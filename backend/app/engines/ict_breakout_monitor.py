@@ -32,6 +32,7 @@ class ICTBreakoutSignal:
     local_swing_base: bool = False
     flat_vertical_quality: float = 0.0   # 0-100 quality of the flat->vertical setup
     flat_vertical_grade: str = ""        # A+ | A | B | C
+    first_lift: bool = False             # appeared in 15–40% pad off lowest local base
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -52,6 +53,7 @@ class ICTBreakoutSignal:
             "localSwingBase": self.local_swing_base,
             "flatVerticalQuality": round(self.flat_vertical_quality, 1),
             "flatVerticalGrade": self.flat_vertical_grade,
+            "firstLift": self.first_lift,
         }
 
 
@@ -174,20 +176,23 @@ def _detect_flat_base(history: list[tuple[datetime, float, float]], settings) ->
     Excludes the last 3–4 polls (breakout candles) so the rip itself does not
     destroy the flat-base signal (e.g. 26–28 base then 32/38/45).
 
-    Returns (is_flat, max_dev_pct, base_level) — base_level is the consolidation
-    premium the breakout launched from (used for base-relative move measurement).
+    Returns (is_flat, max_dev_pct, base_level). ``base_level`` is the **lowest**
+    premium in the flat window (true local launch pad), not the average — so
+    first-lift % is measured from the trough and appears at ~15% off that low,
+    not after a chase measured from a higher mid-base.
     """
     if len(history) < 6:
         return False, 0.0, 0.0
     # Drop breakout tail; keep at least 4 base samples.
     trim = 4 if len(history) >= 10 else 3
-    base = [h[1] for h in list(history)[:-trim]]
+    base = [float(h[1]) for h in list(history)[:-trim] if float(h[1] or 0) > 0]
     if len(base) < 4:
         return False, 0.0, 0.0
     avg = sum(base) / len(base)
     if avg <= 0:
         return False, 0.0, 0.0
     max_dev = max(abs(p - avg) / avg * 100 for p in base)
+    use_lowest = bool(getattr(settings, "ict_flat_base_use_lowest", True))
     # Also accept a short rolling window of 5–6 bars with low range.
     if max_dev > settings.ict_flat_base_max_range_pct and len(base) >= 6:
         window = base[-6:]
@@ -195,8 +200,12 @@ def _detect_flat_base(history: list[tuple[datetime, float, float]], settings) ->
         if wavg > 0:
             wdev = max(abs(p - wavg) / wavg * 100 for p in window)
             if wdev <= settings.ict_flat_base_max_range_pct:
-                return True, wdev, wavg
-    return max_dev <= settings.ict_flat_base_max_range_pct, max_dev, avg
+                level = min(window) if use_lowest else wavg
+                return True, wdev, float(level)
+    if max_dev <= settings.ict_flat_base_max_range_pct:
+        level = min(base) if use_lowest else avg
+        return True, max_dev, float(level)
+    return False, max_dev, 0.0
 
 
 def _detect_local_swing_base(
@@ -306,8 +315,15 @@ def analyze_ict_breakout(
         history, premium, settings, symbol=symbol, strike=strike, side=side,
     )
     early_min = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
-    # Prefer local swing low after a dump (V-bottom) over flat-base average; otherwise
-    # use consolidation base. Day-open % is intentionally not used here.
+    # First-lift floor — appear at the structured local-base pad (~15%), not after chase.
+    first_lift_lo = float(
+        getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0
+    )
+    first_lift_hi = float(
+        getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0
+    )
+    # Prefer local swing low after a dump (V-bottom) over flat-base; otherwise
+    # use consolidation **lowest** pad. Day-open % is intentionally not used here.
     local_swing_base = False
     base_level = 0.0
     base_rel_move = 0.0
@@ -315,13 +331,21 @@ def analyze_ict_breakout(
         local_swing_base = True
         base_level = swing_low
         base_rel_move = swing_rel
-    elif flat and flat_base > 0 and premium > 0:
+    if flat and flat_base > 0 and premium > 0:
         cand_rel = (premium - flat_base) / flat_base * 100.0
         # Flat-at-the-highs after a rip is NOT a launch pad (Jul30 77700: baseRel=0
         # while session printed +1626% / fake mega). Require real lift off the base.
-        if cand_rel >= early_min * 0.5:
-            base_level = flat_base
-            base_rel_move = cand_rel
+        if cand_rel >= min(early_min, first_lift_lo) * 0.5:
+            if base_level <= 0:
+                base_level = flat_base
+                base_rel_move = cand_rel
+            else:
+                # Always keep the deeper trough so first-lift % is off the true low.
+                deep = min(base_level, flat_base)
+                base_level = deep
+                base_rel_move = (premium - deep) / deep * 100.0 if deep > 0 else cand_rel
+                if abs(flat_base - deep) <= 1e-9 and not swing_found:
+                    local_swing_base = False
 
     # Seed / deepen from detector session low. Prefer the deeper authentic low
     # so a morning dump (~233) is not replaced by a mid-morning consolidation
@@ -337,7 +361,7 @@ def analyze_ict_breakout(
             floor = session_move_min_baseline(settings)
             if sess_low >= floor and premium > sess_low:
                 off_low = (premium - sess_low) / sess_low * 100.0
-                if off_low >= early_min * 0.5:
+                if off_low >= min(early_min, first_lift_lo) * 0.5:
                     deepen = base_level <= 0 or sess_low < base_level * 0.97
                     if deepen:
                         local_swing_base = True
@@ -360,7 +384,7 @@ def analyze_ict_breakout(
     # Structure / early-window heat: prefer local-base move when we have one.
     structure_move = base_rel_move if base_rel_move > 0 else move
     vertical = move >= settings.ict_vertical_min_session_move_pct
-    # Early breakout: flat OR local V-base + heat + ≥28% from that base.
+    # Early breakout: flat OR local V-base + heat + ≥ early_min from that base.
     early_break = (
         (flat or local_swing_base)
         and structure_move >= early_min
@@ -371,6 +395,31 @@ def analyze_ict_breakout(
             or velocity_3s >= early_v3
         )
     )
+    # First lift off the lowest local base — appear in the 15–40% pad with heat,
+    # before day-% / chase tiers light up. Soft velocity OK when volume confirms.
+    first_lift_v3 = float(
+        getattr(settings, "ict_first_lift_min_velocity_3s", 1.2) or 1.2
+    )
+    first_lift_heat = (
+        displacement
+        or vol_awaken
+        or fvg
+        or velocity_3s >= first_lift_v3
+        or (velocity_3s >= early_v3 * 0.6 and volume_surge >= 1.6)
+    )
+    first_lift = bool(
+        getattr(settings, "ict_first_lift_appear_enabled", True)
+        and (flat or local_swing_base)
+        and base_level > 0
+        and (base_rel_move + 1e-6) >= first_lift_lo
+        and base_rel_move <= (first_lift_hi + 1e-6)
+        and first_lift_heat
+    )
+    if first_lift:
+        early_break = True
+        reasons.append(
+            f"first_lift_local_base_{base_level:.1f}_{base_rel_move:.0f}%"
+        )
     flat_then_vertical = (
         (flat and vertical and base_rel_move >= early_min * 0.5)
         or early_break
@@ -506,6 +555,7 @@ def analyze_ict_breakout(
         local_swing_base=local_swing_base,
         flat_vertical_quality=fv_quality,
         flat_vertical_grade=fv_grade,
+        first_lift=first_lift,
     )
 
 
