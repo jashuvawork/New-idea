@@ -496,7 +496,11 @@ def _explosion_candidates(
             live_explosion_confirmation_blocked,
         )
 
-        immature_blocked, _immature_reason = immature_explosion_blocked(event, ict=ict)
+        immature_blocked, _immature_reason = immature_explosion_blocked(
+            event,
+            ict=ict,
+            bullish_local_base=bool(bullish_base.get("active")),
+        )
         if immature_blocked and not must_take:
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the

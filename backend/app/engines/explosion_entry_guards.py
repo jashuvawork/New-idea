@@ -392,6 +392,7 @@ def immature_explosion_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
+    bullish_local_base: bool = False,
 ) -> tuple[bool, str]:
     """
     Block hot-velocity / displacement noise before a real premium rip prints.
@@ -441,6 +442,20 @@ def immature_explosion_blocked(
             local_floor = min(
                 local_floor,
                 float(getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0),
+            )
+        if bullish_local_base and getattr(
+            settings, "bullish_local_base_prediction_enabled", True
+        ):
+            local_floor = min(
+                local_floor,
+                float(
+                    getattr(
+                        settings,
+                        "bullish_local_base_prediction_min_move_pct",
+                        8.0,
+                    )
+                    or 8.0
+                ),
             )
         if base_move >= local_floor:
             return False, ""

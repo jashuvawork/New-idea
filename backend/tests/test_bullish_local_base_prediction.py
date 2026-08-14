@@ -6,7 +6,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.engines.bullish_local_base import bullish_local_base_prediction
-from app.engines.explosion_entry_guards import explosion_entry_window_blocked
+from app.engines.explosion_entry_guards import (
+    explosion_entry_window_blocked,
+    immature_explosion_blocked,
+)
 from app.engines.explosion_detector import ExplosionEvent, event_to_dict
 from app.models.schemas import MarketPhase, Side, SpotChart, SymbolSnapshot
 
@@ -163,9 +166,15 @@ def test_bullish_prediction_allows_first_lift_but_normal_window_does_not():
         blocked_with, _ = explosion_entry_window_blocked(
             event, ict=ict, bullish_local_base=True,
         )
+        immature_without, _ = immature_explosion_blocked(event, ict=ict)
+        immature_with, _ = immature_explosion_blocked(
+            event, ict=ict, bullish_local_base=True,
+        )
 
     assert blocked_without is True
     assert blocked_with is False
+    assert immature_without is True
+    assert immature_with is False
 
 
 def test_radar_marks_confirmed_first_lift_tradeable(prediction_context):

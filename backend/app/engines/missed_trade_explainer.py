@@ -518,8 +518,22 @@ def _gate_checks(
         else None
     )
     if candidate.explosion_event:
+        from app.engines.bullish_local_base import bullish_local_base_prediction
+
+        bullish_base = bullish_local_base_prediction(
+            snap,
+            candidate.explosion_event,
+            ict,
+            alert=(
+                candidate.alert
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            ),
+        )
         immature_blocked, immature_reason = immature_explosion_blocked(
-            candidate.explosion_event, ict=ict,
+            candidate.explosion_event,
+            ict=ict,
+            bullish_local_base=bool(bullish_base.get("active")),
         )
         if immature_blocked:
             blockers.append(immature_reason)
