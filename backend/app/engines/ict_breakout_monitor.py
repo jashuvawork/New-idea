@@ -67,10 +67,15 @@ def premium_poll_history(symbol: str, strike: float, side: Side | str) -> list[t
     return list(hist)
 
 
-def _detect_premium_fvg(history: list[tuple[datetime, float, float]], settings) -> tuple[bool, float]:
+def _detect_premium_fvg(
+    history: list[tuple[datetime, float, float]], settings
+) -> tuple[bool, float]:
     """
-    Bullish premium FVG — price gaps up between polls (ICT imbalance on option premium).
-    Uses 3-bar gap: low of newest > high of oldest by min gap %.
+    Option-premium FVG / imbalance — premium gaps UP between polls.
+
+    Works for both CALL and PUT explosions: the option premium itself is what
+    rips vertically. (Index-side bearish/bullish FVGs live in SMC analysis.)
+    Uses 3-bar gap: newest premium above prior by min gap %.
     """
     if len(history) < 3:
         return False, 0.0
@@ -79,7 +84,7 @@ def _detect_premium_fvg(history: list[tuple[datetime, float, float]], settings) 
         return False, 0.0
     gap_pct = ((premiums[-1] - premiums[0]) / premiums[0]) * 100
     min_gap = settings.ict_fvg_min_gap_pct
-    # Classic FVG: middle bar displaced — newest low above oldest high equivalent
+    # Classic FVG: middle bar displaced — newest above oldest by min gap.
     if premiums[-1] > premiums[-2] > premiums[0] and gap_pct >= min_gap:
         return True, gap_pct
     if len(history) >= 2:

@@ -973,6 +973,24 @@ class Settings(BaseSettings):
     local_base_turn_min_vol_surge: float = 2.0
     local_base_turn_min_mom_shift_pct: float = 0.05
     local_base_turn_max_adverse_mom5_pct: float = 0.12
+    # Local-base reversal prediction (CE + PE). Promotes a CALL or PUT leg only after a
+    # real premium base, live index momentum turn toward that side, premium acceleration
+    # and volume agree — plus optional ICT confirms (FVG / OTE / Judas / CHoCH).
+    # Never bypasses risk, fake-trap, chase or execution-chart safety.
+    bullish_local_base_prediction_enabled: bool = True
+    local_base_reversal_prediction_enabled: bool = True  # alias master switch
+    bullish_local_base_prediction_min_score: float = 62.0
+    bullish_local_base_prediction_min_vol_surge: float = 2.0
+    bullish_local_base_prediction_min_velocity_3s: float = 1.5
+    bullish_local_base_prediction_min_velocity_9s: float = 0.2
+    bullish_local_base_prediction_min_move_pct: float = 8.0
+    bullish_local_base_prediction_max_move_pct: float = 40.0
+    bullish_local_base_prediction_min_confidence: float = 70.0
+    bullish_local_base_prediction_rank_max: float = 18.0
+    # ICT confirm stack for local-base reversals (additive quality, not hard gates).
+    local_base_reversal_ict_bonus_max: float = 18.0
+    local_base_reversal_kill_zone_bonus_enabled: bool = True
+    local_base_reversal_require_ict_confirm: bool = False
     local_base_chart_bypass_min_score: float = 38.0
     # Radar-lag side-bias fallback (no ICT flags yet) — keep above entry floor so
     # bare ELITE+15% cannot lift counter-breadth locks.

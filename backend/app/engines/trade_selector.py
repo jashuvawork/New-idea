@@ -480,6 +480,11 @@ def _explosion_candidates(
         must_take = elite_never_block_active(
             event=event, candidate=cand_probe, alert=alert, snap=snap, ict=ict,
         )
+        from app.engines.bullish_local_base import bullish_local_base_prediction
+
+        bullish_base = bullish_local_base_prediction(
+            snap, event, ict, alert=alert,
+        )
         late_blocked, _late_reason = late_fade_chase_blocked(event, ict, snap=snap)
         if late_blocked:
             continue
@@ -491,7 +496,11 @@ def _explosion_candidates(
             live_explosion_confirmation_blocked,
         )
 
-        immature_blocked, _immature_reason = immature_explosion_blocked(event, ict=ict)
+        immature_blocked, _immature_reason = immature_explosion_blocked(
+            event,
+            ict=ict,
+            bullish_local_base=bool(bullish_base.get("active")),
+        )
         if immature_blocked and not must_take:
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the
@@ -501,6 +510,7 @@ def _explosion_candidates(
         window_blocked, _window_reason = explosion_entry_window_blocked(
             event, ict=ict, top_must_take=must_take,
             squeeze_early_base=squeeze_early_base_active(event, snap),
+            bullish_local_base=bool(bullish_base.get("active")),
         )
         if window_blocked:
             continue
@@ -601,6 +611,10 @@ def _explosion_candidates(
 
             if option_cvd_confirms_buying(snap, event.strike, event.side):
                 rank += float(getattr(settings, "cvd_rank_bonus", 5.0) or 5.0)
+        # Directional prediction at the local bottom is deliberately CALL-only and
+        # additive. It helps the confirmed bullish leg win selection; no safety gate is
+        # bypassed, and execution-time premium validation still has the final word.
+        rank += float(bullish_base.get("rankBonus") or 0.0)
 
         out.append(EntryCandidate(
             symbol=symbol,
@@ -616,6 +630,11 @@ def _explosion_candidates(
             tier=event.tier,
             explosion_event=event,
             alert=alert,
+            pretrade_meta=(
+                {"bullishLocalBasePrediction": bullish_base}
+                if event.side == Side.CALL
+                else None
+            ),
         ))
     return out
 
