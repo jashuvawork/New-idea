@@ -158,9 +158,15 @@ def test_bullish_prediction_allows_first_lift_but_normal_window_does_not():
     settings = _settings()
     event = _event()
     ict = _ict(base_rel=10.0)
-    with patch(
-        "app.engines.explosion_entry_guards.get_settings",
-        return_value=settings,
+    with (
+        patch(
+            "app.engines.explosion_entry_guards.get_settings",
+            return_value=settings,
+        ),
+        patch(
+            "app.engines.elite_never_block.elite_never_block_active",
+            return_value=False,
+        ),
     ):
         blocked_without, _ = explosion_entry_window_blocked(event, ict=ict)
         blocked_with, _ = explosion_entry_window_blocked(
