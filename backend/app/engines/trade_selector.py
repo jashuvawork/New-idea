@@ -1307,10 +1307,31 @@ def find_best_entry(
                     daily_move = peak
             early_min = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
             early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+            # Prefer first lift off local base (15–25%) over day-% chase windows.
+            alert = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
+            pad = float(
+                alert.get("ictBaseRelativeMovePct")
+                or alert.get("localBaseMovePct")
+                or 0
+            )
+            first_lift = bool(alert.get("ictFirstLift"))
+            pad_lo = float(getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0)
+            pad_sweet = float(
+                getattr(settings, "explosion_first_lift_sweet_max_move_pct", 25.0) or 25.0
+            )
+            pad_hi = float(getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0)
+            if first_lift or (pad_lo <= pad <= pad_sweet):
+                bonus += float(
+                    getattr(settings, "explosion_first_lift_rank_bonus", 24.0) or 24.0
+                )
+            elif pad_lo <= pad <= pad_hi:
+                bonus += 14
+            elif pad > pad_hi:
+                bonus -= min(40, (pad - pad_hi) * 0.9)
             # Reward early window only — do NOT boost already-extended % moves.
-            if early_min <= daily_move <= early_max:
-                bonus += 18
-            elif daily_move > early_max:
+            if early_min <= daily_move <= early_max and pad <= pad_hi:
+                bonus += 12
+            elif daily_move > early_max and pad > pad_hi:
                 bonus -= min(40, (daily_move - early_max) * 0.7)
             if is_extreme_explosion_all_in_bypass(candidate=c):
                 bonus += 20
