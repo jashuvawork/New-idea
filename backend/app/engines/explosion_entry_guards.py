@@ -336,9 +336,9 @@ def explosion_entry_window_blocked(
         )
         if sq_floor > 0:
             lo = min(lo, sq_floor)
-    # A confirmed CALL reversal at the measured local bottom receives the same early floor
-    # as a squeeze release. The predictor already requires a live bullish turn, positive
-    # option acceleration and volume; all remaining chase/fake-trap/risk gates still run.
+    # A confirmed CE/PE reversal at the measured local base receives the same early floor
+    # as a squeeze release. The predictor already requires a live momentum turn, positive
+    # option acceleration and volume (+ ICT confirms); chase/fake-trap/risk gates still run.
     if bullish_local_base and getattr(
         settings, "bullish_local_base_prediction_enabled", True
     ):

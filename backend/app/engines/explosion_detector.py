@@ -1302,9 +1302,9 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).
     if e.tier == "BUILDING" and ict.active and ict.flat_then_vertical:
         tradeable = True
-    # First confirmed bullish turn may occur at 8-15% off the local pad, before the normal
+    # First confirmed CE/PE turn may occur at 8-15% off the local pad, before the normal
     # structured floor. The predictor requires the actual base, index turn, premium
-    # acceleration and volume, so expose it to radar and let the normal selector revalidate.
+    # acceleration and volume (+ ICT confirms), so expose it to radar and revalidate.
     if bullish_base.get("active"):
         tradeable = True
     # BUILDING + volume awakening inside the early pad — Aug12 SENSEX 77800 PE
@@ -1379,6 +1379,10 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "bullishLocalBasePrediction": bullish_base,
         "bullishLocalBaseActive": bool(bullish_base.get("active")),
         "bullishLocalBaseConfidence": float(bullish_base.get("confidence") or 0),
+        "localBaseReversalPrediction": bullish_base,
+        "localBaseReversalActive": bool(bullish_base.get("active")),
+        "localBaseReversalConfidence": float(bullish_base.get("confidence") or 0),
+        "localBaseReversalSide": bullish_base.get("side") or e.side.value,
         "momentType": ict.pattern if ict.active else ("volume_awaken" if vol_awaken else e.tier),
         "ictReasons": ict.reasons,
     }
