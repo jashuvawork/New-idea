@@ -403,13 +403,25 @@ def check_bearish_sideways_entry(
     mode = str(getattr(candidate, "mode", "") or "")
     if mode == "explosion":
         tier = str(getattr(candidate, "tier", "") or "")
-        score = float(getattr(candidate, "score", 0) or 0)
-        min_score = float(settings.bearish_sideways_explosion_min_score)
-        # Jul24: local-base CE at ~77 sat one point under 78 — align with OTM bypass floor.
+        # EntryCandidate.score is the composite RANK (often ~30–70). Explosion
+        # quality lives on confidence / explosion_event / alert — Aug14 NIFTY
+        # 24200 CALL ELITE (explosionScore 100, local-base ~29%) was blocked as
+        # bearish_sideways_explosion_only because rank≈38 < 75.
         alert = getattr(candidate, "alert", None)
         if not isinstance(alert, dict):
             alert = None
         event = getattr(candidate, "explosion_event", None)
+        score_candidates = [
+            float(getattr(candidate, "score", 0) or 0),
+            float(getattr(candidate, "confidence", 0) or 0),
+        ]
+        if event is not None:
+            score_candidates.append(float(getattr(event, "explosion_score", 0) or 0))
+        if alert is not None:
+            score_candidates.append(float(alert.get("explosionScore") or 0))
+        score = max(score_candidates)
+        min_score = float(settings.bearish_sideways_explosion_min_score)
+        # Jul24: local-base CE at ~77 sat one point under 78 — align with OTM bypass floor.
         from app.engines.local_base_chart_bypass import local_base_structure_active
 
         if local_base_structure_active(
