@@ -7,6 +7,7 @@ import pytest
 
 from app.engines.bullish_local_base import bullish_local_base_prediction
 from app.engines.explosion_entry_guards import explosion_entry_window_blocked
+from app.engines.explosion_detector import ExplosionEvent, event_to_dict
 from app.models.schemas import MarketPhase, Side, SpotChart, SymbolSnapshot
 
 
@@ -160,3 +161,47 @@ def test_bullish_prediction_allows_first_lift_but_normal_window_does_not():
 
     assert blocked_without is True
     assert blocked_with is False
+
+
+def test_radar_marks_confirmed_first_lift_tradeable(prediction_context):
+    event = ExplosionEvent(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24350.0,
+        premium=100.0,
+        velocity_3s=2.4,
+        velocity_9s=0.8,
+        velocity_15s=0.4,
+        volume_surge=3.0,
+        explosion_score=82.0,
+        tier="ELITE",
+        reason="local_base_turn",
+        daily_move_pct=10.0,
+        peak_move_pct=10.0,
+    )
+    ict = _ict(base_rel=10.0)
+    predicted = {
+        "active": True,
+        "direction": "BULLISH",
+        "confidence": 91.0,
+        "rankBonus": 16.38,
+        "baseRelativeMovePct": 10.0,
+        "confluenceCount": 2,
+        "reasons": ["local_base", "bullish_momentum_turn"],
+    }
+    with (
+        patch(
+            "app.engines.ict_breakout_monitor.analyze_explosion_event_ict",
+            return_value=ict,
+        ),
+        patch(
+            "app.engines.bullish_local_base.bullish_local_base_prediction",
+            return_value=predicted,
+        ),
+    ):
+        radar = event_to_dict(event, _snap())
+
+    assert radar["tradeable"] is True
+    assert radar["bullishLocalBaseActive"] is True
+    assert radar["bullishLocalBaseConfidence"] == 91.0
+    assert radar["bullishLocalBasePrediction"]["direction"] == "BULLISH"

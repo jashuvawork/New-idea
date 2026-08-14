@@ -1265,6 +1265,9 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     all_day = is_all_day_explosion_event(e)
     capture = is_premium_capture_event(e)
     ict = analyze_explosion_event_ict(e, snap)
+    from app.engines.bullish_local_base import bullish_local_base_prediction
+
+    bullish_base = bullish_local_base_prediction(snap, e, ict)
     move = max(float(e.daily_move_pct or 0), float(e.peak_move_pct or 0), float(ict.session_move_pct or 0))
     from app.config import get_settings as _gs
 
@@ -1298,6 +1301,11 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         tradeable = True
     # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).
     if e.tier == "BUILDING" and ict.active and ict.flat_then_vertical:
+        tradeable = True
+    # First confirmed bullish turn may occur at 8-15% off the local pad, before the normal
+    # structured floor. The predictor requires the actual base, index turn, premium
+    # acceleration and volume, so expose it to radar and let the normal selector revalidate.
+    if bullish_base.get("active"):
         tradeable = True
     # BUILDING + volume awakening inside the early pad — Aug12 SENSEX 77800 PE
     # stayed not_tradeable while volumeAwaken=true (ICT watch after missed trough).
@@ -1368,6 +1376,9 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictDisplacement": ict.displacement,
         "ictBaseRelativeMovePct": round(ict.base_relative_move_pct, 1),
         "ictBasePremium": round(ict.base_premium, 2),
+        "bullishLocalBasePrediction": bullish_base,
+        "bullishLocalBaseActive": bool(bullish_base.get("active")),
+        "bullishLocalBaseConfidence": float(bullish_base.get("confidence") or 0),
         "momentType": ict.pattern if ict.active else ("volume_awaken" if vol_awaken else e.tier),
         "ictReasons": ict.reasons,
     }
