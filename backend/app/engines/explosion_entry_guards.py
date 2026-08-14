@@ -291,6 +291,7 @@ def explosion_entry_window_blocked(
     ict: Any = None,
     top_must_take: bool = False,
     squeeze_early_base: bool = False,
+    bullish_local_base: bool = False,
 ) -> tuple[bool, str]:
     """Hard-block EXPLOSIVE entries outside the active early window.
 
@@ -335,6 +336,17 @@ def explosion_entry_window_blocked(
         )
         if sq_floor > 0:
             lo = min(lo, sq_floor)
+    # A confirmed CALL reversal at the measured local bottom receives the same early floor
+    # as a squeeze release. The predictor already requires a live bullish turn, positive
+    # option acceleration and volume; all remaining chase/fake-trap/risk gates still run.
+    if bullish_local_base and getattr(
+        settings, "bullish_local_base_prediction_enabled", True
+    ):
+        bullish_floor = float(
+            getattr(settings, "bullish_local_base_prediction_min_move_pct", 8.0) or 8.0
+        )
+        if bullish_floor > 0:
+            lo = min(lo, bullish_floor)
     try:
         max_credible = float(
             getattr(settings, "session_move_max_credible_pct", 500.0)
