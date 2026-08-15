@@ -865,6 +865,11 @@ def run_detector_replay_isolated(date: str) -> dict[str, Any]:
     env = os.environ.copy()
     env["TRADE_STORE_DIR"] = str(settings.trade_store_dir)
     env["RADAR_ARCHIVE_DIR"] = str(settings.radar_archive_dir or "")
+    env["PYTHONPATH"] = os.pathsep.join(
+        value
+        for value in (str(backend_dir), env.get("PYTHONPATH", ""))
+        if value
+    )
     with tempfile.TemporaryDirectory(prefix="radar-replay-") as directory:
         output = Path(directory) / "report.json"
         completed = subprocess.run(
