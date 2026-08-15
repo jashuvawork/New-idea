@@ -294,6 +294,14 @@ def _attach_exit_plan(
 
 def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
     """Live premium velocity % for this leg — used to avoid adaptive SL during expansion."""
+    instrument_key = str((trade.entryContext or {}).get("instrumentKey") or "")
+    if instrument_key:
+        from app.services.tick_store import get_velocity_pct
+
+        ws_velocity = get_velocity_pct(instrument_key, window_seconds=3.0)
+        if ws_velocity is not None:
+            return float(ws_velocity)
+
     side_v = trade.side.value
     strike = trade.strike
     for entry in snap.explosiveRunnerWatchlist or []:
@@ -314,6 +322,33 @@ def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
         if abs(float(top.get("strike") or 0) - strike) <= near:
             return float(top.get("velocity3s") or 0)
     return 0.0
+
+
+def _record_observed_max_ltp(trade: PaperTrade, current_ltp: float) -> None:
+    """Persist the highest raw market LTP independently of simulated fill marks."""
+    try:
+        current = float(current_ltp)
+    except (TypeError, ValueError):
+        return
+    if current <= 0:
+        return
+
+    ctx = dict(trade.entryContext or {})
+    previous = max(
+        float(trade.maxLtp or 0),
+        float(ctx.get("maxLtp") or 0),
+        float(trade.entryPremium or 0),
+    )
+    if current > previous:
+        previous = current
+        trade.maxLtpAt = datetime.now(IST)
+        ctx["maxLtpAt"] = trade.maxLtpAt.isoformat()
+    trade.maxLtp = round(previous, 2)
+    ctx["maxLtp"] = trade.maxLtp
+    giveback = max(0.0, previous - current)
+    ctx["givebackFromMaxLtpPoints"] = round(giveback, 2)
+    ctx["givebackFromMaxLtpPct"] = round(giveback / previous * 100.0, 3)
+    trade.entryContext = ctx
 
 
 def _exit_plan_for_trade(
@@ -1540,6 +1575,8 @@ async def _process_open_trades(
             continue
 
         trade.currentPremium = current
+        _record_observed_max_ltp(trade, current)
+        broker_ctx = dict(trade.entryContext or {})
         eval_premium = exit_premium_for_trade(trade, current)
         if should_simulate_slippage(trade):
             mtm_pts, mtm_inr = mark_to_market(
@@ -1729,6 +1766,13 @@ async def _process_open_trades(
             record_explosion_stop(trade.symbol, cooldown_seconds=cooldown)
         from app.engines.entry_context import merge_close_context
 
+        peak_profit_points = max(0.0, float(trade.maxLtp or 0) - float(trade.entryPremium or 0))
+        capture_efficiency = (
+            max(0.0, float(trade.pnlPoints or 0)) / peak_profit_points * 100.0
+            if peak_profit_points > 0
+            else 0.0
+        )
+
         ctx = merge_close_context(broker_ctx, snap, {
             "exitReason": exit_reason,
             "instrumentKey": broker_ctx.get("instrumentKey"),
@@ -1740,6 +1784,9 @@ async def _process_open_trades(
             "selectionMode": broker_ctx.get("selectionMode"),
             "selectionScore": broker_ctx.get("selectionScore"),
             "bestPnlPoints": trade.bestPnlPoints,
+            "maxLtp": trade.maxLtp,
+            "maxLtpAt": trade.maxLtpAt.isoformat() if trade.maxLtpAt else None,
+            "peakCaptureEfficiencyPct": round(min(100.0, capture_efficiency), 1),
             "pnlPoints": trade.pnlPoints,
             "pnlInr": trade.pnlInr,
         })

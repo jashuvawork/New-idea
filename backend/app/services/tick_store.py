@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -28,8 +29,10 @@ class Tick:
 
 
 _ticks: dict[str, Tick] = {}
+_tick_history: dict[str, deque[Tick]] = defaultdict(deque)
 _tick_count: int = 0
 _last_tick_mono: float = 0.0
+_HISTORY_SECONDS = 15.0
 
 
 def _norm_key(key: str) -> str:
@@ -69,13 +72,19 @@ def record_tick(
         return
     key = _norm_key(instrument_key)
     now = time.monotonic()
-    _ticks[key] = Tick(
+    tick = Tick(
         instrument_key=key,
         ltp=float(ltp),
         received_mono=now,
         ltt_ms=ltt_ms,
         volume=volume,
     )
+    _ticks[key] = tick
+    history = _tick_history[key]
+    history.append(tick)
+    cutoff = now - _HISTORY_SECONDS
+    while history and history[0].received_mono < cutoff:
+        history.popleft()
     _tick_count += 1
     _last_tick_mono = now
     # Accumulate CVD (trade authenticity) from the same tick stream — best-effort.
@@ -103,6 +112,37 @@ def get_tick(instrument_key: str, max_age_seconds: float = 30.0) -> Optional[Tic
 def get_ltp(instrument_key: str, max_age_seconds: float = 30.0) -> Optional[float]:
     tick = get_tick(instrument_key, max_age_seconds)
     return tick.ltp if tick else None
+
+
+def get_velocity_pct(
+    instrument_key: str,
+    *,
+    window_seconds: float = 3.0,
+    max_age_seconds: float = 3.0,
+    min_span_seconds: float = 0.75,
+) -> Optional[float]:
+    """Return fresh option-tape velocity instead of a slow snapshot velocity.
+
+    Uses up to ``window_seconds`` of WebSocket ticks. A minimum observed span is
+    required so two near-simultaneous ticks cannot masquerade as a 3-second move.
+    """
+    key = _norm_key(instrument_key)
+    latest = get_tick(key, max_age_seconds=max_age_seconds)
+    history = _tick_history.get(key)
+    if latest is None or not history or len(history) < 2:
+        return None
+
+    target = latest.received_mono - max(0.1, float(window_seconds))
+    base = history[0]
+    for tick in history:
+        if tick.received_mono <= target:
+            base = tick
+        else:
+            break
+    span = latest.received_mono - base.received_mono
+    if span < max(0.1, float(min_span_seconds)) or base.ltp <= 0:
+        return None
+    return round((latest.ltp - base.ltp) / base.ltp * 100.0, 4)
 
 
 def get_index_spot(symbol: str, max_age_seconds: float = 30.0) -> Optional[float]:
@@ -185,5 +225,6 @@ def status() -> dict[str, Any]:
 def clear() -> None:
     global _tick_count, _last_tick_mono
     _ticks.clear()
+    _tick_history.clear()
     _tick_count = 0
     _last_tick_mono = 0.0
