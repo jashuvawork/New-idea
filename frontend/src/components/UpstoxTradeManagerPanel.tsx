@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  DeploymentReadiness,
+  DeploymentStatus,
   FtvAllocationRow,
   UpstoxBrokerOrder,
   UpstoxBrokerPosition,
@@ -46,7 +48,7 @@ function AllocationRow({ row }: { row: FtvAllocationRow }) {
         ? 'text-nexus-red'
         : 'text-nexus-accent';
   return (
-    <div className="grid grid-cols-[2rem_minmax(8rem,1fr)_5rem_6rem] items-center gap-2 rounded-lg border border-nexus-border/70 bg-black/20 px-2.5 py-2 text-[10px]">
+    <div className="grid min-w-[28rem] grid-cols-[2rem_minmax(8rem,1fr)_5rem_6rem] items-center gap-2 rounded-lg border border-nexus-border/70 bg-black/20 px-2.5 py-2 text-[10px]">
       <span className="font-mono text-nexus-accent">#{row.rank ?? '—'}</span>
       <div className="min-w-0">
         <div className="truncate font-semibold">
@@ -71,7 +73,7 @@ function AllocationRow({ row }: { row: FtvAllocationRow }) {
 
 function BrokerPositionRow({ row }: { row: UpstoxBrokerPosition }) {
   return (
-    <div className="grid grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
+    <div className="grid min-w-[32rem] grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
       <div className="min-w-0">
         <div className="truncate font-semibold">{row.tradingSymbol || row.instrumentKey || 'Position'}</div>
         <div className="text-[9px] text-nexus-muted">{row.exchange} · {row.product}</div>
@@ -87,7 +89,7 @@ function BrokerPositionRow({ row }: { row: UpstoxBrokerPosition }) {
 
 function StrategyTradeRow({ row }: { row: UpstoxManagerTrade }) {
   return (
-    <div className="grid grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
+    <div className="grid min-w-[32rem] grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
       <div className="min-w-0">
         <div className="truncate font-semibold">
           {row.symbol} {row.side} {row.strike}
@@ -110,7 +112,7 @@ function StrategyTradeRow({ row }: { row: UpstoxManagerTrade }) {
 function OrderRow({ row }: { row: UpstoxBrokerOrder }) {
   const ok = ['complete', 'completed', 'filled'].includes(String(row.status || '').toLowerCase());
   return (
-    <div className="grid grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
+    <div className="grid min-w-[32rem] grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
       <div className="min-w-0">
         <div className="truncate font-semibold">{row.tradingSymbol || row.orderId || 'Order'}</div>
         <div className="truncate text-[9px] text-nexus-muted">
@@ -126,10 +128,17 @@ function OrderRow({ row }: { row: UpstoxBrokerOrder }) {
   );
 }
 
-export function UpstoxTradeManagerPanel() {
+export function UpstoxTradeManagerPanel({
+  deployment,
+  readiness,
+}: {
+  deployment: DeploymentStatus | null;
+  readiness: DeploymentReadiness | null;
+}) {
   const [overview, setOverview] = useState<UpstoxTradeOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [stale, setStale] = useState(false);
   const [tab, setTab] = useState<Tab>('positions');
   const requestId = useRef(0);
 
@@ -148,9 +157,11 @@ export function UpstoxTradeManagerPanel() {
       if (id !== requestId.current) return;
       setOverview(payload);
       setError(null);
+      setStale(false);
     } catch (reason) {
       if (id !== requestId.current) return;
       setError(reason instanceof Error ? reason.message : 'Trade manager unavailable');
+      setStale(true);
     } finally {
       if (id === requestId.current) setLoading(false);
     }
@@ -197,6 +208,11 @@ export function UpstoxTradeManagerPanel() {
             }`}>
               {overview?.broker.connected ? 'UPSTOX CONNECTED' : 'BROKER OFFLINE'}
             </span>
+            {stale ? (
+              <span className="rounded border border-nexus-red/40 bg-nexus-red/10 px-1.5 py-0.5 text-[9px] font-bold text-nexus-red">
+                STALE
+              </span>
+            ) : null}
           </div>
           <p className="mt-1 text-[10px] text-nexus-muted">
             Ranked flat-to-vertical allocation: strongest approved setup first, then remaining capital to the next.
@@ -212,13 +228,28 @@ export function UpstoxTradeManagerPanel() {
       </div>
 
       {error ? (
-        <div role="alert" className="m-4 rounded-lg border border-nexus-yellow/30 bg-nexus-yellow/5 px-3 py-2 text-[10px] text-nexus-yellow">
-          {error}
+        <div role="alert" className={`m-4 rounded-lg border px-3 py-2 text-[10px] ${
+          stale && overview
+            ? 'border-nexus-red/40 bg-nexus-red/10 text-nexus-red'
+            : 'border-nexus-yellow/30 bg-nexus-yellow/5 text-nexus-yellow'
+        }`}>
+          {stale && overview ? `STALE DATA — ${error}. Do not rely on displayed positions or capital.` : error}
         </div>
       ) : null}
       {overview && !overview.broker.complete ? (
         <div role="status" className="mx-4 mt-4 rounded-lg border border-nexus-yellow/20 bg-nexus-yellow/5 px-3 py-2 text-[10px] text-nexus-yellow">
           Broker data is partial. Strategy trades and paper P&amp;L remain available; reconnect Upstox for live funds, positions, and orders.
+        </div>
+      ) : null}
+      {overview?.reconciliation.checked && !overview.reconciliation.safe ? (
+        <div role="alert" className="mx-4 mt-4 rounded-lg border border-nexus-red/40 bg-nexus-red/10 px-3 py-2 text-[10px] text-nexus-red">
+          {overview.reconciliation.message}. Pause live entries and reconcile broker positions before continuing.
+        </div>
+      ) : null}
+      {overview?.executionMode === 'LIVE' && (!deployment?.upstox.validToday || !readiness?.readyForLive) ? (
+        <div role="alert" className="mx-4 mt-4 rounded-lg border border-nexus-red/40 bg-nexus-red/10 px-3 py-2 text-[10px] text-nexus-red">
+          LIVE mode is not operationally ready: {!deployment?.upstox.validToday ? 'Upstox authentication is invalid. ' : ''}
+          {!readiness?.readyForLive ? 'Deployment readiness checks have not all passed.' : ''}
         </div>
       ) : null}
 
@@ -227,14 +258,49 @@ export function UpstoxTradeManagerPanel() {
           <CapitalCard label="Capital X" value={money(capitalBase)} detail={`${capital?.source || 'fallback'} sizing book`} tone="text-nexus-accent" />
           <CapitalCard label="Allocated Y" value={money(committed)} detail={`${allocation?.utilizationPct ?? 0}% deployed`} />
           <CapitalCard label="Left Z = X − Y − reserve" value={money(remaining)} detail={`${money(reserve)} protected cash`} tone="text-nexus-green" />
-          <CapitalCard label="Session P&L" value={money(netPnl)} detail={`${money(realized)} realized · ${money(unrealized)} live`} tone={pnlTone(netPnl)} />
+          <CapitalCard label="Session P&L" value={money(netPnl)} detail={`${money(realized)} realized · ${money(unrealized)} unrealized`} tone={pnlTone(netPnl)} />
+        </div>
+
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="rounded-lg border border-nexus-border bg-black/20 px-3 py-2 text-[10px]">
+            <div className="flex justify-between gap-3">
+              <span className="text-nexus-muted">Upstox funds</span>
+              <span className="font-mono text-nexus-accent">
+                {capital?.brokerAvailableMarginInr != null ? money(capital.brokerAvailableMarginInr) : 'Unavailable'}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-x-3 text-[9px] text-nexus-muted">
+              <span>used {capital?.brokerUsedMarginInr != null ? money(capital.brokerUsedMarginInr) : '—'}</span>
+              <span>equity {capital?.brokerTotalEquityInr != null ? money(capital.brokerTotalEquityInr) : '—'}</span>
+              {overview?.broker.errors.funds ? <span className="text-nexus-red">funds error</span> : null}
+            </div>
+          </div>
+          <div className="rounded-lg border border-nexus-border bg-black/20 px-3 py-2 text-[10px]">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <span className="text-nexus-muted">Broker P&amp;L</span>
+                <div className={`font-mono font-bold ${pnlTone(overview?.pnl.brokerNetInr ?? 0)}`}>
+                  {money(overview?.pnl.brokerNetInr)}
+                </div>
+              </div>
+              <div>
+                <span className="text-nexus-muted">Strategy P&amp;L</span>
+                <div className={`font-mono font-bold ${pnlTone(overview?.pnl.strategyNetInr ?? 0)}`}>
+                  {money(overview?.pnl.strategyNetInr)}
+                </div>
+              </div>
+            </div>
+            <div className="mt-1 text-[9px] text-nexus-muted">
+              Separate books · strategy W {overview?.pnl.wins ?? 0} / L {overview?.pnl.losses ?? 0} / PF {(overview?.pnl.profitFactor ?? 0).toFixed(2)}
+            </div>
+          </div>
         </div>
 
         <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.85fr)]">
           <div className="rounded-lg border border-nexus-border bg-black/15 p-3">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <h3 className="text-[11px] font-bold">Capital allocation queue</h3>
+                <h3 className="text-[11px] font-bold">Capital allocation activity</h3>
                 <p className="text-[9px] text-nexus-muted">
                   {(allocation?.weights || []).map((weight) => `${Math.round(weight * 100)}%`).join(' → ') || '60% → 25% → 10%'} · {money(reserve)} reserve
                 </p>
@@ -243,7 +309,7 @@ export function UpstoxTradeManagerPanel() {
                 max {allocation?.maxPositions ?? 3} positions
               </span>
             </div>
-            <div className="mt-2 space-y-1.5 max-h-56 overflow-y-auto">
+            <div className="mt-2 max-h-56 space-y-1.5 overflow-auto">
               {allocationRows.length ? (
                 allocationRows.map((row, index) => (
                   <AllocationRow key={`${row.tradeId || row.key || index}-${row.status}`} row={row} />
@@ -288,7 +354,7 @@ export function UpstoxTradeManagerPanel() {
               </div>
             </div>
 
-            <div className="grid grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 bg-black/25 px-2 py-1.5 text-[8px] uppercase tracking-wider text-nexus-muted">
+            <div className="grid min-w-[32rem] grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 bg-black/25 px-2 py-1.5 text-[8px] uppercase tracking-wider text-nexus-muted">
               <span>{tab === 'orders' ? 'Order' : tab === 'positions' ? 'Broker position' : 'Strategy trade'}</span>
               <span className="text-right">{tab === 'orders' ? 'Fill' : tab === 'positions' ? 'Qty' : 'Lots'}</span>
               <span className="text-right">{tab === 'orders' ? 'Price' : tab === 'positions' ? 'LTP' : 'Capital'}</span>

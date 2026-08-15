@@ -252,7 +252,7 @@ export default function App() {
           <WeeklyDashboardPanel data={weeklyDashboard} />
         </div>
 
-        <UpstoxTradeManagerPanel />
+        <UpstoxTradeManagerPanel deployment={deployment} readiness={readiness} />
 
         <RadarIntelligencePanel />
 

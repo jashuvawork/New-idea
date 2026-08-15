@@ -765,6 +765,13 @@ export interface UpstoxTradeOverview {
   };
   brokerPositions: UpstoxBrokerPosition[];
   brokerOrders: UpstoxBrokerOrder[];
+  reconciliation: {
+    safe: boolean;
+    checked: boolean;
+    untrackedBrokerInstrumentKeys: string[];
+    missingBrokerInstrumentKeys: string[];
+    message: string;
+  };
   strategyTrades: {
     open: UpstoxManagerTrade[];
     closed: UpstoxManagerTrade[];

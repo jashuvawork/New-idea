@@ -179,6 +179,19 @@ async def build_upstox_trade_overview(
         paper_unrealized = sum(float(trade.pnlInr or 0) for trade in state.openPaperTrades)
         broker_realized = sum(float(row["realizedPnlInr"]) for row in positions)
         broker_unrealized = sum(float(row["unrealizedPnlInr"]) for row in positions)
+        active_broker_keys = {
+            str(row.get("instrumentKey"))
+            for row in positions
+            if int(row.get("quantity") or 0) != 0 and row.get("instrumentKey")
+        }
+        strategy_live_keys = {
+            str((getattr(trade, "entryContext", None) or {}).get("instrumentKey"))
+            for trade in state.openPaperTrades
+            if (getattr(trade, "entryContext", None) or {}).get("executionMode") == "LIVE"
+            and (getattr(trade, "entryContext", None) or {}).get("instrumentKey")
+        }
+        untracked_broker = sorted(active_broker_keys - strategy_live_keys)
+        missing_at_broker = sorted(strategy_live_keys - active_broker_keys)
         report = state.dailyReport
         errors = {
             key: value
@@ -196,7 +209,9 @@ async def build_upstox_trade_overview(
             "autoTradingEnabled": state.autoTradingEnabled,
             "running": state.running,
             "broker": {
-                "connected": not bool(funds_error and positions_error),
+                # Funds are the capital authority. Positions-only success must not
+                # advertise a safe broker connection when margin is unavailable.
+                "connected": funds_error is None,
                 "complete": not bool(errors),
                 "errors": errors,
             },
@@ -220,6 +235,21 @@ async def build_upstox_trade_overview(
             },
             "brokerPositions": positions,
             "brokerOrders": orders[:50],
+            "reconciliation": {
+                "safe": positions_error is None
+                and not untracked_broker
+                and not missing_at_broker,
+                "checked": positions_error is None,
+                "untrackedBrokerInstrumentKeys": untracked_broker,
+                "missingBrokerInstrumentKeys": missing_at_broker,
+                "message": (
+                    "Broker and strategy live positions match"
+                    if positions_error is None
+                    and not untracked_broker
+                    and not missing_at_broker
+                    else "Broker and strategy live positions require reconciliation"
+                ),
+            },
             "strategyTrades": {
                 "open": [_paper_trade(trade) for trade in state.openPaperTrades],
                 "closed": [

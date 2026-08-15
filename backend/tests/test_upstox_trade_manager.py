@@ -60,6 +60,11 @@ class FakeUpstox:
         ]
 
 
+class FundsFailureUpstox(FakeUpstox):
+    async def get_funds(self):
+        raise RuntimeError("funds unavailable")
+
+
 def test_trade_manager_reconciles_broker_and_strategy_data():
     now = datetime.now(IST)
     open_trade = PaperTrade(
@@ -78,6 +83,7 @@ def test_trade_manager_reconciles_broker_and_strategy_data():
         entryContext={
             "executionMode": "LIVE",
             "brokerOrderId": "order-1",
+            "instrumentKey": "NSE_FO|NIFTY24500CE",
             "allocationRank": 1,
             "allocationBudgetInr": 120_000,
             "allocatedCostInr": 6_500,
@@ -159,3 +165,43 @@ def test_trade_manager_reconciles_broker_and_strategy_data():
     assert payload["pnl"]["brokerNetInr"] == 2_060
     assert payload["pnl"]["strategyNetInr"] == 1_760
     assert payload["strategyTrades"]["open"][0]["allocationRank"] == 1
+    assert payload["reconciliation"]["safe"] is True
+
+
+def test_positions_only_success_never_claims_broker_connected():
+    state = AutoTraderState()
+    capital = CapitalSnapshot(
+        availableMarginInr=200_000,
+        totalEquityInr=200_000,
+        source="fallback",
+    )
+    reset_upstox_trade_manager_cache_for_tests()
+    with (
+        patch("app.services.upstox_trade_manager.get_state", return_value=state),
+        patch(
+            "app.services.upstox_trade_manager.get_capital_snapshot",
+            return_value=capital,
+        ),
+        patch(
+            "app.services.upstox_trade_manager.get_lot_sizes_meta",
+            return_value={},
+        ),
+        patch(
+            "app.services.upstox_trade_manager.capital_book_summary",
+            return_value={
+                "capitalBaseInr": 200_000,
+                "committedInr": 0,
+                "remainingInr": 190_000,
+                "cashReserveInr": 10_000,
+                "activeAllocations": [],
+                "plannedAllocations": [],
+            },
+        ),
+    ):
+        payload = asyncio.run(
+            build_upstox_trade_overview(FundsFailureUpstox(), force=True)
+        )
+
+    assert payload["broker"]["connected"] is False
+    assert payload["broker"]["complete"] is False
+    assert payload["broker"]["errors"]["funds"] == "funds unavailable"
