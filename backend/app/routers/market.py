@@ -439,6 +439,12 @@ async def run_entry_scan_on_cache(
             overlays,
             source="ws_entry_scan",
         )
+        from app.services.radar_health import record_component_success
+
+        record_component_success(
+            "radarPipeline",
+            detail={"source": "ws_entry_scan"},
+        )
     except Exception as exc:
         logger.warning("Failed to archive refreshed radar snapshots: %s", exc)
         try:

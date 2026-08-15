@@ -9,9 +9,10 @@ import shutil
 import threading
 import zipfile
 from collections import Counter, defaultdict, deque
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
@@ -79,11 +80,28 @@ def funnel_path(date: str) -> Path:
     return _telemetry_dir() / f"{date}.funnel.jsonl"
 
 
+@contextmanager
+def _file_lock(path: Path) -> Iterator[None]:
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("a+") as handle:
+        try:
+            import fcntl
+        except ImportError:
+            yield
+            return
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def _append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
     line = json.dumps(payload, default=str, separators=(",", ":"))
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(line + "\n")
-        handle.flush()
+    with _file_lock(path):
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+            handle.flush()
 
 
 def _contract_key(symbol: str, side: str, strike: float) -> str:
@@ -294,7 +312,7 @@ def _premium_series(date: str) -> dict[str, list[tuple[datetime, float]]]:
     return series
 
 
-def _truth_event(
+def _truth_events(
     key: str,
     samples: list[tuple[datetime, float]],
     *,
@@ -302,9 +320,11 @@ def _truth_event(
     flat_range_pct: float,
     vertical_pct: float,
     lookahead_seconds: int,
-) -> dict[str, Any] | None:
+) -> list[dict[str, Any]]:
     if len(samples) < 5:
-        return None
+        return []
+    events: list[dict[str, Any]] = []
+    suppress_until: datetime | None = None
     base_start_index = 0
     future_right = 1
     future_max: deque[int] = deque()
@@ -324,6 +344,8 @@ def _truth_event(
         while future_max and future_max[0] <= index:
             future_max.popleft()
         base_end = samples[index][0]
+        if suppress_until and base_end <= suppress_until:
+            continue
         while (
             base_start_index < index
             and (base_end - samples[base_start_index][0]).total_seconds() > flat_seconds
@@ -348,7 +370,7 @@ def _truth_event(
         if crossing is None:
             continue
         peak = max(row[1] for row in future)
-        return {
+        event = {
             "key": key,
             "baseStartAt": base_rows[0][0].isoformat(),
             "baseEndAt": base_end.isoformat(),
@@ -358,7 +380,9 @@ def _truth_event(
             "peakPremium": round(peak, 4),
             "peakMovePct": round((peak - base_low) / base_low * 100.0, 2),
         }
-    return None
+        events.append(event)
+        suppress_until = crossing[0] + timedelta(seconds=flat_seconds)
+    return events
 
 
 def analyze_hindsight(
@@ -392,7 +416,7 @@ def analyze_hindsight(
     }
     truths: list[dict[str, Any]] = []
     for key, samples in series.items():
-        event = _truth_event(
+        events = _truth_events(
             key,
             samples,
             flat_seconds=int(settings.radar_hindsight_flat_window_seconds),
@@ -400,39 +424,38 @@ def analyze_hindsight(
             vertical_pct=vertical,
             lookahead_seconds=lookahead,
         )
-        if event is None:
-            continue
-        archive_row = archived.get(key)
-        vertical_at = _parse_ts(event["verticalAt"])
-        detection_at: datetime | None = None
-        if archive_row:
-            base_start = _parse_ts(event["baseStartAt"])
-            candidates = [
-                _parse_ts(item.get("seenAt"))
-                for item in archive_row.get("milestones") or []
-            ]
-            candidates = [
-                item for item in candidates
-                if item is not None
-                and (base_start is None or item >= base_start)
-            ]
-            detection_at = min(candidates) if candidates else None
-            if detection_at is None:
-                first_seen = _parse_ts(archive_row.get("firstSeenAt"))
-                if first_seen and (base_start is None or first_seen >= base_start):
-                    detection_at = first_seen
-        if detection_at and vertical_at:
-            lead = (vertical_at - detection_at).total_seconds()
-            capture = "EARLY" if lead >= 0 else "LATE"
-        else:
-            lead = None
-            capture = "MISSED"
-        event.update({
-            "capture": capture,
-            "detectionAt": detection_at.isoformat() if detection_at else None,
-            "leadSeconds": round(lead, 1) if lead is not None else None,
-        })
-        truths.append(event)
+        for event in events:
+            archive_row = archived.get(key)
+            vertical_at = _parse_ts(event["verticalAt"])
+            detection_at: datetime | None = None
+            if archive_row:
+                base_start = _parse_ts(event["baseStartAt"])
+                candidates = [
+                    _parse_ts(item.get("seenAt"))
+                    for item in archive_row.get("milestones") or []
+                ]
+                candidates = [
+                    item for item in candidates
+                    if item is not None
+                    and (base_start is None or item >= base_start)
+                ]
+                detection_at = min(candidates) if candidates else None
+                if detection_at is None:
+                    first_seen = _parse_ts(archive_row.get("firstSeenAt"))
+                    if first_seen and (base_start is None or first_seen >= base_start):
+                        detection_at = first_seen
+            if detection_at and vertical_at:
+                lead = (vertical_at - detection_at).total_seconds()
+                capture = "EARLY" if lead >= 0 else "LATE"
+            else:
+                lead = None
+                capture = "MISSED"
+            event.update({
+                "capture": capture,
+                "detectionAt": detection_at.isoformat() if detection_at else None,
+                "leadSeconds": round(lead, 1) if lead is not None else None,
+            })
+            truths.append(event)
 
     counts = Counter(event["capture"] for event in truths)
     truth_keys = {event["key"] for event in truths}
@@ -672,6 +695,7 @@ def _prune_learning_files(now: datetime | None = None) -> None:
             continue
         if parsed < cutoff:
             path.unlink(missing_ok=True)
+            path.with_suffix(path.suffix + ".lock").unlink(missing_ok=True)
 
 
 def finalize_daily_review(date: str) -> dict[str, Any]:

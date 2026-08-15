@@ -720,6 +720,12 @@ async def build_symbol_snapshot(
                 {symbol: snap},
                 source="rest_snapshot",
             )
+            from app.services.radar_health import record_component_success
+
+            record_component_success(
+                "radarPipeline",
+                detail={"source": "rest_snapshot", "symbol": symbol},
+            )
         except Exception as exc:
             logger.warning("Failed to archive %s radar snapshot: %s", symbol, exc)
             try:
