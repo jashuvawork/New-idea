@@ -1077,9 +1077,7 @@ def peak_capture_profit_lock_reason(
     min_give = float(
         getattr(settings, "explosion_peak_capture_min_giveback_points", 2.0) or 2.0
     )
-    max_give = float(
-        getattr(settings, "explosion_peak_capture_max_giveback_points", 8.0) or 8.0
-    )
+    max_give = _cfg_float(settings, "explosion_peak_capture_max_giveback_points", 8.0)
     min_remain = float(
         getattr(settings, "explosion_peak_capture_min_remain_points", 1.0) or 1.0
     )
@@ -1553,6 +1551,10 @@ def evaluate_explosion_exit(
                 return "explosion_trail_lock", pnl_inr
         # Once thesis has gone green: never time-exit — SL / trail / peak-capture only.
         if _skip_time_exit_for_green_thesis(trade, best=best, settings=settings):
+            return None, pnl_inr
+        # A green FTV stage runner exits on observed rollover / its ratcheting
+        # floor, never because a projection or generic hold clock expired.
+        if pnl_pts > 0 and stage_ladder:
             return None, pnl_inr
         # Jul29 77600 CE: explosion_time_profit @ +0.3pt while still far from TP 37 —
         # LTP later printed 290. Skip green time-exit on top explosions working to TP.

@@ -193,10 +193,8 @@ def test_large_vertical_caps_giveback_near_observed_top(mock_s):
 
 
 @patch("app.engines.explosion_profit.get_settings")
-def test_big_peak_disabled_keeps_loose_max_profit_giveback(mock_s):
-    """Below the big-peak threshold the loose max-profit giveback (0.35) still
-    holds at +27.5 (giveback 9.24 < 0.35×36.74) — proving the new lock is what
-    banks near the top once the peak is large."""
+def test_absolute_giveback_cap_still_protects_when_big_peak_tightening_is_off(mock_s):
+    """The 8pt ceiling independently prevents a large winner from fading deeply."""
     mock_s.return_value = _settings(explosion_peak_capture_big_peak_points=999.0)
     ctx = {
         "liveVelocity3s": -0.1,
@@ -209,7 +207,7 @@ def test_big_peak_disabled_keeps_loose_max_profit_giveback(mock_s):
     reason = peak_capture_profit_lock_reason(
         trade, best=36.74, pnl_pts=27.5, max_profit=True, live_velocity_3s=-0.1,
     )
-    assert reason is None
+    assert reason == "explosion_peak_capture"
 
 
 @patch("app.engines.explosion_profit.get_settings")
