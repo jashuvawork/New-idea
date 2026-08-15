@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import zipfile
 from contextlib import ExitStack
@@ -10,6 +11,8 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from app.routers.ai import radar_replay
 from app.models.schemas import PaperTrade, Side
@@ -22,6 +25,7 @@ from app.services.radar_health import (
     reset_health_for_tests,
 )
 from app.services.radar_learning import (
+    RadarOperationBusyError,
     analyze_hindsight,
     backup_archive,
     build_funnel_report,
@@ -35,6 +39,7 @@ from app.services.radar_learning import (
     reset_learning_state_for_tests,
     run_detector_replay_isolated,
 )
+from app.services import radar_learning
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -330,7 +335,14 @@ def test_finalize_bundles_learning_artifacts_and_copies_backup(tmp_path):
     assert {"scorecard.json", "funnel.json", "premium_tape.jsonl"} <= names
     assert scorecard["date"] == "2026-08-15"
     assert result["backup"]["success"] is True
-    assert (backup_dir / archive_path_value.name).exists()
+    backup_path = backup_dir / archive_path_value.name
+    assert backup_path.exists()
+    assert hashlib.sha256(backup_path.read_bytes()).hexdigest() == hashlib.sha256(
+        archive_path_value.read_bytes()
+    ).hexdigest()
+    assert result["backup"]["sha256"] == hashlib.sha256(
+        archive_path_value.read_bytes()
+    ).hexdigest()
 
 
 def test_health_reports_stale_sources_divergence_and_component_errors(tmp_path):
@@ -435,7 +447,7 @@ def test_s3_backup_and_startup_recovery_are_idempotent(tmp_path):
             source="rest_snapshot",
         )
         archive = tmp_path / "radar_archives" / "radar-2026-08-14.zip"
-        client = SimpleNamespace(upload_file=lambda *args: None)
+        client = SimpleNamespace(upload_file=lambda *args, **kwargs: None)
         with patch("boto3.client", return_value=client) as make_client:
             result = backup_archive(archive)
             recovered = finalize_pending_reviews(
@@ -461,13 +473,35 @@ def test_s3_backup_skips_matching_remote_object(tmp_path):
     archive = tmp_path / "radar.zip"
     archive.write_bytes(b"already-uploaded")
     client = MagicMock()
-    client.head_object.return_value = {"ContentLength": archive.stat().st_size}
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    client.head_object.return_value = {
+        "ContentLength": archive.stat().st_size,
+        "Metadata": {"sha256": digest},
+    }
     with _patch_settings(settings), patch("boto3.client", return_value=client):
         result = backup_archive(archive)
 
     assert result["success"] is True
     assert result["attempts"] == 0
     client.upload_file.assert_not_called()
+
+
+def test_local_backup_replaces_same_size_wrong_content(tmp_path):
+    backup_dir = tmp_path / "offbox"
+    backup_dir.mkdir()
+    settings = _settings(tmp_path, radar_backup_dir=str(backup_dir))
+    archive = tmp_path / "radar.zip"
+    archive.write_bytes(b"correct-archive")
+    target = backup_dir / archive.name
+    target.write_bytes(b"wrong--archive")
+    assert target.stat().st_size == archive.stat().st_size
+
+    with _patch_settings(settings):
+        result = backup_archive(archive)
+
+    assert result["success"] is True
+    assert target.read_bytes() == archive.read_bytes()
+    assert result["sha256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
 
 
 def test_trade_events_keep_exact_radar_key_and_outcome_link():
@@ -508,3 +542,12 @@ def test_trade_events_keep_exact_radar_key_and_outcome_link():
     assert entered["tradeId"] == "trade-1"
     assert closed["pnlInr"] == 1200.0
     assert closed["exitReason"] == "target"
+
+
+def test_duplicate_detector_replay_is_rejected_without_queueing():
+    assert radar_learning._detector_replay_lock.acquire(blocking=False)
+    try:
+        with pytest.raises(RadarOperationBusyError, match="already running"):
+            run_detector_replay_isolated("2026-08-15")
+    finally:
+        radar_learning._detector_replay_lock.release()

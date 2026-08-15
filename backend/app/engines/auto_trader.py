@@ -1307,7 +1307,7 @@ async def _open_from_candidate(
     ctx = annotate_breadth_bypass(ctx, side=candidate.side, snap=snap, score=candidate.score)
     paper.entryContext = ctx
     state.openPaperTrades.append(paper)
-    trade_store.record_trade_opened(paper, ctx)
+    await asyncio.to_thread(trade_store.record_trade_opened, paper, ctx)
     record_instrument_entry(symbol, candidate.side, candidate.strike)
     from app.engines.directional_lock import record_trade_side
 
@@ -1727,13 +1727,13 @@ async def _process_open_trades(
             pnl,
             exit_reason or "",
         )
-        trade_store.record_trade_closed(trade, ctx)
         from app.engines.snapshot_lag_analyzer import build_trade_close_report
         from app.services import trade_store as ts
 
         report = build_trade_close_report(trade, snapshots, state)
         report["sessionDate"] = trade.sessionDate or datetime.now(IST).strftime("%Y-%m-%d")
-        ts.record_trade_report(report)
+        await asyncio.to_thread(trade_store.record_trade_closed, trade, ctx)
+        await asyncio.to_thread(ts.record_trade_report, report)
         get_ai_learning().record_trade_close(trade)
         state.lastExit = {
             "tradeId": trade.id,

@@ -17,6 +17,7 @@ from app.routers.ai import download_radar_archive
 from app.services.radar_archive import (
     RadarArchiveCorruptError,
     list_archives,
+    read_archive_entries,
     record_top_radars,
 )
 
@@ -81,6 +82,7 @@ def _read_rows(path):
         assert set(archive.namelist()) == {
             "manifest.json",
             "top_radars.json",
+            "all_radars.json",
             "README.txt",
         }
         manifest = json.loads(archive.read("manifest.json"))
@@ -158,8 +160,14 @@ def test_top_n_and_retention_are_enforced(tmp_path):
 
     assert count == 2
     assert [row["date"] for row in archives] == ["2026-08-15"]
-    _, rows = _read_rows(tmp_path / "radar_archives" / "radar-2026-08-15.zip")
+    path = tmp_path / "radar_archives" / "radar-2026-08-15.zip"
+    manifest, rows = _read_rows(path)
     assert [row["strike"] for row in rows] == [24500.0, 24450.0]
+    with zipfile.ZipFile(path, "r") as archive:
+        all_rows = json.loads(archive.read("all_radars.json"))
+    assert manifest["totalDetectedCount"] == 3
+    assert len(all_rows) == 3
+    assert len(read_archive_entries("2026-08-15")) == 3
 
 
 def test_archive_can_be_listed_and_downloaded(tmp_path):
@@ -187,6 +195,18 @@ def test_disabled_archive_does_not_create_storage(tmp_path):
         ) == 0
 
     assert not (tmp_path / "radar_archives").exists()
+
+
+def test_no_qualifying_alert_does_not_create_empty_archive(tmp_path):
+    settings = _settings(tmp_path)
+    watch = _alert(strike=24500.0, score=20.0, tier="WATCH")
+    with patch("app.services.radar_archive.get_settings", return_value=settings):
+        assert record_top_radars(
+            {"NIFTY": _snap([watch])},
+            now=datetime(2026, 8, 15, 10, 0, tzinfo=IST),
+        ) == 0
+
+    assert not (tmp_path / "radar_archives" / "radar-2026-08-15.zip").exists()
 
 
 def test_corrupt_archive_is_never_silently_overwritten(tmp_path):

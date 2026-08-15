@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -124,6 +125,29 @@ def _append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
             handle.write(line + "\n")
             handle.flush()
             os.fsync(handle.fileno())
+
+
+def _read_bytes_locked(path: Path) -> bytes:
+    if not path.exists():
+        return b""
+    with _file_lock(path):
+        return path.read_bytes()
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    with _file_lock(path):
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(row, dict):
+                    out.append(row)
+    return out
 
 
 def _contract_key(symbol: str, side: str, strike: float) -> str:
@@ -304,18 +328,7 @@ def record_market_observations(
 
 
 def read_premium_tape(date: str) -> list[dict[str, Any]]:
-    path = premium_tape_path(date)
-    if not path.exists():
-        return []
-    rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
+    return _read_jsonl(premium_tape_path(date))
 
 
 def _premium_series(date: str) -> dict[str, list[tuple[datetime, float]]]:
@@ -669,20 +682,6 @@ def record_funnel_event(
     _append_jsonl(funnel_path(target_date), payload)
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    out: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(row, dict):
-            out.append(row)
-    return out
-
-
 def build_funnel_report(date: str) -> dict[str, Any]:
     from app.services import trade_store
 
@@ -781,6 +780,7 @@ def build_funnel_report(date: str) -> dict[str, Any]:
 def backup_archive(path: Path) -> dict[str, Any]:
     """Copy a finalized archive to a mounted backup dir and/or S3."""
     settings = get_settings()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
     destinations: list[str] = []
     errors: list[str] = []
     attempts = 0
@@ -790,8 +790,15 @@ def backup_archive(path: Path) -> dict[str, Any]:
             target_dir = Path(backup_dir)
             target_dir.mkdir(parents=True, exist_ok=True)
             target = target_dir / path.name
-            if not target.exists() or target.stat().st_size != path.stat().st_size:
+            target_matches = (
+                target.exists()
+                and target.stat().st_size == path.stat().st_size
+                and hashlib.sha256(target.read_bytes()).hexdigest() == digest
+            )
+            if not target_matches:
                 shutil.copy2(path, target)
+            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                raise OSError("Local backup checksum verification failed")
             destinations.append(str(target))
         except OSError as exc:
             errors.append(f"directory: {exc}")
@@ -812,7 +819,14 @@ def backup_archive(path: Path) -> dict[str, Any]:
             if verify_head and hasattr(client, "head_object"):
                 try:
                     head = client.head_object(Bucket=bucket, Key=key)
-                    already_uploaded = int(head.get("ContentLength") or -1) == path.stat().st_size
+                    metadata = {
+                        str(name).lower(): str(value)
+                        for name, value in (head.get("Metadata") or {}).items()
+                    }
+                    already_uploaded = (
+                        int(head.get("ContentLength") or -1) == path.stat().st_size
+                        and metadata.get("sha256") == digest
+                    )
                 except Exception:
                     already_uploaded = False
             if already_uploaded:
@@ -833,11 +847,23 @@ def backup_archive(path: Path) -> dict[str, Any]:
                 for attempt in range(1, retry_max + 1):
                     attempts = attempt
                     try:
-                        client.upload_file(str(path), bucket, key)
+                        client.upload_file(
+                            str(path),
+                            bucket,
+                            key,
+                            ExtraArgs={"Metadata": {"sha256": digest}},
+                        )
                         if verify_head and hasattr(client, "head_object"):
                             head = client.head_object(Bucket=bucket, Key=key)
-                            if int(head.get("ContentLength") or -1) != path.stat().st_size:
-                                raise OSError("S3 upload size verification failed")
+                            metadata = {
+                                str(name).lower(): str(value)
+                                for name, value in (head.get("Metadata") or {}).items()
+                            }
+                            if (
+                                int(head.get("ContentLength") or -1) != path.stat().st_size
+                                or metadata.get("sha256") != digest
+                            ):
+                                raise OSError("S3 upload checksum verification failed")
                         destinations.append(remote)
                         last_error = None
                         break
@@ -867,6 +893,7 @@ def backup_archive(path: Path) -> dict[str, Any]:
         "destinations": destinations,
         "errors": errors,
         "attempts": attempts,
+        "sha256": digest,
     }
 
 
@@ -885,6 +912,39 @@ def _prune_learning_files(now: datetime | None = None) -> None:
             path.with_suffix(path.suffix + ".lock").unlink(missing_ok=True)
 
 
+def _backup_status_path(date: str) -> Path:
+    return archive_path(date).with_suffix(".backup.json")
+
+
+def _write_backup_status(date: str, status: Mapping[str, Any]) -> None:
+    path = _backup_status_path(date)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    os.close(fd)
+    temporary = Path(temporary_name)
+    try:
+        temporary.write_text(json.dumps(dict(status), indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def radar_review_is_current(date: str) -> bool:
+    path = archive_path(date)
+    status_path = _backup_status_path(date)
+    if not path.exists() or not status_path.exists():
+        return False
+    try:
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        return bool(status.get("success") and status.get("sha256") == digest)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def finalize_daily_review(date: str) -> dict[str, Any]:
     with _exclusive_operation(_finalize_lock, "Radar finalization"):
         return _finalize_daily_review_unlocked(date)
@@ -900,15 +960,20 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     }
     tape = premium_tape_path(date)
     if tape.exists():
-        artifacts["premium_tape.jsonl"] = tape.read_bytes()
+        artifacts["premium_tape.jsonl"] = _read_bytes_locked(tape)
     funnel_file = funnel_path(date)
     if funnel_file.exists():
-        artifacts["funnel_events.jsonl"] = funnel_file.read_bytes()
+        artifacts["funnel_events.jsonl"] = _read_bytes_locked(funnel_file)
     path = add_archive_artifacts(date, artifacts)
     backup = backup_archive(path)
-    add_archive_artifacts(
+    _write_backup_status(
         date,
-        {"backup_status.json": json.dumps(backup, indent=2)},
+        {
+            **backup,
+            "date": date,
+            "archive": path.name,
+            "recordedAt": _now().isoformat(),
+        },
     )
     _prune_learning_files()
     try:
@@ -937,7 +1002,7 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
 def finalize_pending_reviews(
     *,
     now: datetime | None = None,
-    limit: int = 7,
+    limit: int = 365,
 ) -> list[dict[str, Any]]:
     """Crash recovery: finalize recent prior-session ZIPs missing their scorecard."""
     current_date = _aware(now).strftime("%Y-%m-%d")
@@ -948,12 +1013,16 @@ def finalize_pending_reviews(
             continue
         try:
             with zipfile.ZipFile(path, "r") as archive:
-                names = set(archive.namelist())
-                if "scorecard.json" in names and "backup_status.json" in names:
-                    backup_status = json.loads(archive.read("backup_status.json"))
-                    if backup_status.get("success"):
-                        continue
-        except (OSError, json.JSONDecodeError, zipfile.BadZipFile):
+                archive.testzip()
+            if radar_review_is_current(date):
+                continue
+        except (OSError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
+            try:
+                from app.services.radar_health import record_component_error
+
+                record_component_error("dailyRadarRecovery", exc)
+            except Exception:
+                pass
             continue
         pending.append(date)
         if len(pending) >= max(1, limit):

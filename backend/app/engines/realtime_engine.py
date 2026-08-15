@@ -91,10 +91,9 @@ def record_constituent_heatmap(symbol: str, heatmap) -> None:
 
 
 def _atm_strike(spot: float, symbol: str) -> float:
-    step = 100 if symbol in ("NIFTY", "BANKNIFTY") else 100
-    if symbol == "BANKNIFTY":
-        step = 100
-    return round(spot / step) * step
+    from app.engines.moneyness import atm_strike
+
+    return atm_strike(spot, symbol)
 
 
 def _detect_regime(candles: list, spot: float = 0.0) -> Regime:

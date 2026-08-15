@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
@@ -52,7 +53,7 @@ async def _background_monitor():
     last_composer_mono = 0.0
     last_analysis_mono = 0.0
     last_eod_playbook_date: Optional[str] = None
-    last_radar_finalize_date: Optional[str] = None
+    last_radar_finalize_attempt_mono = 0.0
 
     while True:
         # Yield so /health and heartbeat can interleave under heavy sync work.
@@ -108,7 +109,6 @@ async def _background_monitor():
                 settings.composer_monitor_enabled
                 and get_market_phase() == "LIVE_MARKET"
             ):
-                import time
                 from app.engines.composer_market_monitor import run_monitor_cycle
 
                 now_mono = time.monotonic()
@@ -127,7 +127,6 @@ async def _background_monitor():
                 settings.ai_analysis_monitor_enabled
                 and get_market_phase() == "LIVE_MARKET"
             ):
-                import time
                 from app.engines.ai_market_analysis_monitor import run_analysis_cycle
 
                 now_mono = time.monotonic()
@@ -143,7 +142,6 @@ async def _background_monitor():
                         logger.warning("AI analysis monitor cycle error: %s", exc)
 
             if settings.eod_playbook_enabled and settings.background_market_monitor_enabled:
-                import time
                 from app.engines.eod_playbook_engine import (
                     in_eod_playbook_window,
                     next_trading_day,
@@ -176,14 +174,23 @@ async def _background_monitor():
                     settings.radar_archive_finalize_hour,
                     settings.radar_archive_finalize_minute,
                 )
-                if finalize_due and last_radar_finalize_date != radar_date:
+                finalize_retry_due = (
+                    time.monotonic() - last_radar_finalize_attempt_mono >= 300.0
+                )
+                if finalize_due and finalize_retry_due:
+                    last_radar_finalize_attempt_mono = time.monotonic()
                     try:
                         from app.services.radar_archive import archive_path
-                        from app.services.radar_learning import finalize_daily_review
+                        from app.services.radar_learning import (
+                            finalize_daily_review,
+                            radar_review_is_current,
+                        )
 
-                        if archive_path(radar_date).exists():
+                        if (
+                            archive_path(radar_date).exists()
+                            and not radar_review_is_current(radar_date)
+                        ):
                             await asyncio.to_thread(finalize_daily_review, radar_date)
-                            last_radar_finalize_date = radar_date
                     except Exception as exc:
                         logger.warning("Daily radar finalization error: %s", exc)
                         try:

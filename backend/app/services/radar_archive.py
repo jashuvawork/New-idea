@@ -18,7 +18,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ARCHIVE_RE = re.compile(r"^radar-(\d{4}-\d{2}-\d{2})\.zip$")
 _TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
@@ -156,7 +156,9 @@ def _load_entries(path: Path) -> dict[str, dict[str, Any]]:
         return {}
     try:
         with zipfile.ZipFile(path, "r") as archive:
-            rows = json.loads(archive.read("top_radars.json"))
+            names = set(archive.namelist())
+            source = "all_radars.json" if "all_radars.json" in names else "top_radars.json"
+            rows = json.loads(archive.read(source))
         return {
             str(row["key"]): row
             for row in rows
@@ -197,12 +199,18 @@ def _write_archive(
     *,
     extra_artifacts: Mapping[str, bytes | str] | None = None,
 ) -> None:
+    top_n = max(
+        1,
+        int(getattr(get_settings(), "radar_archive_top_n_per_day", 100) or 100),
+    )
+    top_entries = entries[:top_n]
     manifest = {
         "schemaVersion": SCHEMA_VERSION,
         "date": date,
         "timezone": "Asia/Kolkata",
         "updatedAt": now.isoformat(),
-        "count": len(entries),
+        "count": len(top_entries),
+        "totalDetectedCount": len(entries),
         "selection": (
             "Best observation per symbol/side/strike, ordered by tier, tradeability, "
             "first-lift state, flat-to-vertical quality, score, and peak move."
@@ -211,6 +219,7 @@ def _write_archive(
     readme = (
         "NexusQuant daily top-radar archive\n"
         "top_radars.json contains the strongest saved observation for each option contract.\n"
+        "all_radars.json preserves every qualifying contract for complete funnel review.\n"
         "milestones preserves up to 20 improving observations for later review.\n"
     )
     fd, tmp_name = tempfile.mkstemp(
@@ -226,7 +235,13 @@ def _write_archive(
             try:
                 with zipfile.ZipFile(path, "r") as existing:
                     for name in existing.namelist():
-                        if name not in {"manifest.json", "top_radars.json", "README.txt"}:
+                        if name not in {
+                            "manifest.json",
+                            "top_radars.json",
+                            "all_radars.json",
+                            "backup_status.json",
+                            "README.txt",
+                        }:
                             preserved[name] = existing.read(name)
             except (OSError, zipfile.BadZipFile):
                 preserved = {}
@@ -234,11 +249,13 @@ def _write_archive(
             preserved[name] = payload.encode() if isinstance(payload, str) else payload
         with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("manifest.json", json.dumps(manifest, indent=2))
-            archive.writestr("top_radars.json", json.dumps(entries, indent=2))
+            archive.writestr("top_radars.json", json.dumps(top_entries, indent=2))
+            archive.writestr("all_radars.json", json.dumps(entries, indent=2))
             archive.writestr("README.txt", readme)
             for name, payload in preserved.items():
                 archive.writestr(name, payload)
         os.replace(tmp, path)
+        path.with_suffix(".backup.json").unlink(missing_ok=True)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -257,6 +274,7 @@ def _prune_old_archives(directory: Path, now: datetime, retention_days: int) -> 
             continue
         if archive_date < cutoff:
             path.unlink(missing_ok=True)
+            path.with_suffix(".backup.json").unlink(missing_ok=True)
 
 
 def record_top_radars(
@@ -286,7 +304,7 @@ def record_top_radars(
 
     with _archive_lock(directory, date):
         entries = _load_entries(path)
-        changed = not path.exists()
+        changed = False
         for symbol, snap in snapshots.items():
             if not bool(getattr(snap, "dataAvailable", False)):
                 continue
@@ -339,8 +357,8 @@ def record_top_radars(
             entries.values(),
             key=lambda row: tuple(row.get("_rank") or ()),
             reverse=True,
-        )[:top_n]
-        if changed or len(ordered) != len(entries):
+        )
+        if changed:
             _write_archive(path, date, ordered, current)
 
     _prune_old_archives(
@@ -355,17 +373,22 @@ def record_top_radars(
             record_source,
         )
 
-        record_source(source, snapshots, archive_count=len(ordered), now=current)
+        top_count = min(len(ordered), top_n)
+        record_source(source, snapshots, archive_count=top_count, now=current)
         record_component_success(
             "radarArchive",
-            detail={"date": date, "entryCount": len(ordered)},
+            detail={
+                "date": date,
+                "entryCount": top_count,
+                "totalDetectedCount": len(ordered),
+            },
             now=current,
         )
         for event in detected_events:
             record_funnel_event(event, now=current, date=date)
     except Exception:
         pass
-    return len(ordered)
+    return min(len(ordered), top_n)
 
 
 def read_archive_entries(date: str) -> list[dict[str, Any]]:
@@ -458,6 +481,11 @@ def list_archives(limit: int = 30) -> list[dict[str, Any]]:
                 manifest = json.loads(archive.read("manifest.json"))
             row.update({
                 "count": int(manifest.get("count") or 0),
+                "totalDetectedCount": int(
+                    manifest.get("totalDetectedCount")
+                    or manifest.get("count")
+                    or 0
+                ),
                 "updatedAt": manifest.get("updatedAt"),
                 "schemaVersion": manifest.get("schemaVersion"),
             })
