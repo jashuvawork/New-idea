@@ -36,6 +36,7 @@ class CapitalSizingTests(unittest.TestCase):
         return SimpleNamespace(
             fallback_capital_inr=200_000,
             max_sizing_capital_inr=200_000,
+            per_trade_capital_pct=0.95,
             ftv_ranked_allocation_enabled=True,
             ftv_allocation_weights_csv="0.60,0.25,0.10",
             ftv_allocation_cash_reserve_pct=0.05,

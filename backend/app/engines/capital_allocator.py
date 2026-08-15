@@ -348,10 +348,9 @@ def ranked_allocation_for_state(
     else:
         future_reserved = capital_base * sum(weights[index + 1 :])
         budget = max(0.0, remaining - future_reserved)
-        nominal = capital_base * weights[index]
         # Unused cash from a better-ranked sleeve rolls forward, but a slot never
         # borrows the capital explicitly reserved for lower-ranked opportunities.
-        budget = min(remaining, max(nominal, budget))
+        budget = min(remaining, budget)
         weight = weights[index]
 
     return RankedAllocation(
