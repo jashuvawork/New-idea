@@ -13,7 +13,7 @@ import tempfile
 import threading
 import time
 import zipfile
-from collections import Counter, defaultdict, deque
+from collections import Counter, defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -32,9 +32,25 @@ from app.services.radar_archive import (
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 _lock = threading.RLock()
+_finalize_lock = threading.Lock()
+_detector_replay_lock = threading.Lock()
 _last_tape_sample: dict[str, datetime] = {}
 _last_funnel_event: dict[str, datetime] = {}
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+class RadarOperationBusyError(RuntimeError):
+    """Raised instead of queueing duplicate heavy radar operations."""
+
+
+@contextmanager
+def _exclusive_operation(lock: threading.Lock, operation: str) -> Iterator[None]:
+    if not lock.acquire(blocking=False):
+        raise RadarOperationBusyError(f"{operation} is already running")
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def _now() -> datetime:
@@ -107,6 +123,7 @@ def _append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
             handle.flush()
+            os.fsync(handle.fileno())
 
 
 def _contract_key(symbol: str, side: str, strike: float) -> str:
@@ -317,6 +334,61 @@ def _premium_series(date: str) -> dict[str, list[tuple[datetime, float]]]:
     return series
 
 
+def _maximum_tree(values: list[float]) -> tuple[list[float], int]:
+    size = 1
+    while size < len(values):
+        size *= 2
+    tree = [float("-inf")] * (size * 2)
+    tree[size:size + len(values)] = values
+    for index in range(size - 1, 0, -1):
+        tree[index] = max(tree[index * 2], tree[index * 2 + 1])
+    return tree, size
+
+
+def _range_maximum(
+    tree: list[float],
+    size: int,
+    left: int,
+    right: int,
+) -> float:
+    """Return the inclusive range maximum in O(log n)."""
+    left += size
+    right += size
+    maximum = float("-inf")
+    while left <= right:
+        if left % 2 == 1:
+            maximum = max(maximum, tree[left])
+            left += 1
+        if right % 2 == 0:
+            maximum = max(maximum, tree[right])
+            right -= 1
+        left //= 2
+        right //= 2
+    return maximum
+
+
+def _first_at_least(
+    tree: list[float],
+    size: int,
+    left: int,
+    right: int,
+    target: float,
+) -> int | None:
+    """Find the first inclusive range index reaching target in O(log n)."""
+    def search(node: int, node_left: int, node_right: int) -> int | None:
+        if node_right < left or node_left > right or tree[node] < target:
+            return None
+        if node_left == node_right:
+            return node_left
+        midpoint = (node_left + node_right) // 2
+        found = search(node * 2, node_left, midpoint)
+        if found is not None:
+            return found
+        return search(node * 2 + 1, midpoint + 1, node_right)
+
+    return search(1, 0, size - 1)
+
+
 def _truth_events(
     key: str,
     samples: list[tuple[datetime, float]],
@@ -332,22 +404,16 @@ def _truth_events(
     suppress_until: datetime | None = None
     base_start_index = 0
     future_right = 1
-    future_max: deque[int] = deque()
+    premiums_all = [premium for _, premium in samples]
+    maximum_tree, maximum_tree_size = _maximum_tree(premiums_all)
     for index in range(3, len(samples) - 1):
+        future_right = max(future_right, index + 1)
         while (
             future_right < len(samples)
             and (samples[future_right][0] - samples[index][0]).total_seconds()
             <= lookahead_seconds
         ):
-            while (
-                future_max
-                and samples[future_max[-1]][1] <= samples[future_right][1]
-            ):
-                future_max.pop()
-            future_max.append(future_right)
             future_right += 1
-        while future_max and future_max[0] <= index:
-            future_max.popleft()
         base_end = samples[index][0]
         if suppress_until and base_end <= suppress_until:
             continue
@@ -365,16 +431,33 @@ def _truth_events(
         if base_low <= 0 or (base_high - base_low) / base_low * 100.0 > flat_range_pct:
             continue
         target = base_low * (1.0 + vertical_pct / 100.0)
-        if not future_max or samples[future_max[0]][1] < target:
+        future_last = future_right - 1
+        if (
+            future_last <= index
+            or _range_maximum(
+                maximum_tree,
+                maximum_tree_size,
+                index + 1,
+                future_last,
+            ) < target
+        ):
             continue
-        future = [
-            row for row in samples[index + 1:]
-            if (row[0] - base_end).total_seconds() <= lookahead_seconds
-        ]
-        crossing = next((row for row in future if row[1] >= target), None)
-        if crossing is None:
+        crossing_index = _first_at_least(
+            maximum_tree,
+            maximum_tree_size,
+            index + 1,
+            future_last,
+            target,
+        )
+        if crossing_index is None:
             continue
-        peak = max(row[1] for row in future)
+        crossing = samples[crossing_index]
+        peak = _range_maximum(
+            maximum_tree,
+            maximum_tree_size,
+            index + 1,
+            future_last,
+        )
         event = {
             "key": key,
             "baseStartAt": base_rows[0][0].isoformat(),
@@ -624,9 +707,26 @@ def build_funnel_report(date: str) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for radar in radars:
         key = str(radar.get("key") or "")
-        matched_trades = trades_by_key.get(key) or []
-        matched_blocks = blockers.get(key) or []
-        matched_events = events_by_key.get(key) or []
+        detected_at = _parse_ts(radar.get("firstSeenAt"))
+
+        def is_causal(row: Mapping[str, Any], timestamp_key: str) -> bool:
+            if detected_at is None:
+                return True
+            timestamp = _parse_ts(row.get(timestamp_key))
+            return timestamp is not None and timestamp >= detected_at
+
+        matched_trades = [
+            trade for trade in trades_by_key.get(key) or []
+            if is_causal(trade, "openedAt")
+        ]
+        matched_blocks = [
+            item for item in blockers.get(key) or []
+            if is_causal(item, "ts")
+        ]
+        matched_events = [
+            item for item in events_by_key.get(key) or []
+            if is_causal(item, "ts")
+        ]
         closed = [trade for trade in matched_trades if str(trade.get("status")) == "CLOSED"]
         rows.append({
             "key": key,
@@ -786,6 +886,11 @@ def _prune_learning_files(now: datetime | None = None) -> None:
 
 
 def finalize_daily_review(date: str) -> dict[str, Any]:
+    with _exclusive_operation(_finalize_lock, "Radar finalization"):
+        return _finalize_daily_review_unlocked(date)
+
+
+def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     """Bundle tape, scorecard, funnel, and replay inputs into the canonical daily ZIP."""
     scorecard = analyze_hindsight(date)
     funnel = build_funnel_report(date)
@@ -857,6 +962,11 @@ def finalize_pending_reviews(
 
 
 def run_detector_replay_isolated(date: str) -> dict[str, Any]:
+    with _exclusive_operation(_detector_replay_lock, "Detector replay"):
+        return _run_detector_replay_isolated_unlocked(date)
+
+
+def _run_detector_replay_isolated_unlocked(date: str) -> dict[str, Any]:
     """Replay via a subprocess so production detector globals cannot affect live state."""
     premium_tape_path(date)  # strict date validation
     backend_dir = Path(__file__).resolve().parents[2]

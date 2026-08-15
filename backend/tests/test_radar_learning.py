@@ -242,6 +242,7 @@ def test_funnel_maps_blocker_entry_and_trade_outcome(tmp_path):
                     "strike": 24500.0,
                     "status": "CLOSED",
                     "pnlInr": 1250.0,
+                    "openedAt": (start + timedelta(seconds=3)).isoformat(),
                 }]
             },
         ):
@@ -254,6 +255,54 @@ def test_funnel_maps_blocker_entry_and_trade_outcome(tmp_path):
     assert report["orderRejected"] == 1
     assert report["closedWins"] == 1
     assert report["rows"][0]["blockers"] == ["chart_alignment"]
+
+
+def test_funnel_never_attributes_pre_detection_events_or_trades(tmp_path):
+    settings = _settings(tmp_path)
+    detected = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+    key = "NIFTY:CALL:24500"
+    with _patch_settings(settings):
+        record_funnel_event(
+            {"event": "SELECTED", "key": key, "stage": "selector"},
+            now=detected - timedelta(minutes=1),
+        )
+        record_top_radars(
+            {"NIFTY": _snap(alerts=[_alert()])},
+            now=detected,
+            source="rest_snapshot",
+        )
+        record_funnel_event(
+            {"event": "SELECTED", "key": key, "stage": "selector"},
+            now=detected + timedelta(seconds=1),
+        )
+        prior_trade = {
+            "symbol": "NIFTY",
+            "side": "CALL",
+            "strike": 24500.0,
+            "status": "CLOSED",
+            "pnlInr": 5000.0,
+            "openedAt": (detected - timedelta(minutes=5)).isoformat(),
+        }
+        causal_trade = {
+            "symbol": "NIFTY",
+            "side": "CALL",
+            "strike": 24500.0,
+            "status": "CLOSED",
+            "pnlInr": -500.0,
+            "openedAt": (detected + timedelta(seconds=2)).isoformat(),
+        }
+        with patch(
+            "app.services.trade_store.get_day_detail",
+            return_value={"trades": [prior_trade, causal_trade]},
+        ):
+            report = build_funnel_report("2026-08-15")
+
+    row = report["rows"][0]
+    assert row["selected"] is True
+    assert row["tradeCount"] == 1
+    assert row["pnlInr"] == -500.0
+    assert row["tradeOutcome"] == "LOSS"
+    assert report["closedWins"] == 0
 
 
 def test_finalize_bundles_learning_artifacts_and_copies_backup(tmp_path):

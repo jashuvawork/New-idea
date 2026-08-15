@@ -24,6 +24,10 @@ _ARCHIVE_RE = re.compile(r"^radar-(\d{4}-\d{2}-\d{2})\.zip$")
 _TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
 
 
+class RadarArchiveCorruptError(RuntimeError):
+    """Raised when an existing archive cannot be read without risking data loss."""
+
+
 def get_archive_dir() -> Path:
     settings = get_settings()
     configured = str(getattr(settings, "radar_archive_dir", "") or "").strip()
@@ -160,7 +164,9 @@ def _load_entries(path: Path) -> dict[str, dict[str, Any]]:
         }
     except (OSError, KeyError, ValueError, zipfile.BadZipFile) as exc:
         logger.warning("Failed to read radar archive %s: %s", path, exc)
-        return {}
+        raise RadarArchiveCorruptError(
+            f"Radar archive is corrupt and was preserved: {path.name}"
+        ) from exc
 
 
 @contextmanager

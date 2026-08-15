@@ -10,10 +10,15 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+import pytest
 from fastapi.responses import FileResponse
 
 from app.routers.ai import download_radar_archive
-from app.services.radar_archive import list_archives, record_top_radars
+from app.services.radar_archive import (
+    RadarArchiveCorruptError,
+    list_archives,
+    record_top_radars,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -182,3 +187,23 @@ def test_disabled_archive_does_not_create_storage(tmp_path):
         ) == 0
 
     assert not (tmp_path / "radar_archives").exists()
+
+
+def test_corrupt_archive_is_never_silently_overwritten(tmp_path):
+    settings = _settings(tmp_path)
+    archive = tmp_path / "radar_archives" / "radar-2026-08-15.zip"
+    archive.parent.mkdir(parents=True)
+    original = b"not-a-zip-but-valuable-for-recovery"
+    archive.write_bytes(original)
+
+    with (
+        patch("app.services.radar_archive.get_settings", return_value=settings),
+        pytest.raises(RadarArchiveCorruptError),
+    ):
+        record_top_radars(
+            {"NIFTY": _snap([_alert(strike=24500.0, score=60.0)])},
+            now=datetime(2026, 8, 15, 10, 0, tzinfo=IST),
+        )
+
+    assert archive.read_bytes() == original
+    assert list_archives()[0]["corrupt"] is True
