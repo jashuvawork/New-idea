@@ -359,6 +359,48 @@ def _record_observed_max_ltp(trade: PaperTrade, current_ltp: float) -> None:
     trade.entryContext = ctx
 
 
+def _record_open_trade_tick_peak(instrument_key: str, ltp: float) -> None:
+    """Capture sub-200ms spikes before the throttled exit evaluator runs."""
+    state = _auto_trader_state
+    if state is None:
+        return
+    key = str(instrument_key or "").replace(":", "|")
+    for trade in state.openPaperTrades:
+        trade_key = str((trade.entryContext or {}).get("instrumentKey") or "").replace(
+            ":", "|",
+        )
+        if trade_key and trade_key == key:
+            _record_observed_max_ltp(trade, ltp)
+
+
+from app.services.tick_store import on_tick as _on_tick
+
+_on_tick(_record_open_trade_tick_peak)
+
+
+async def _checkpoint_open_trade_if_due(trade: PaperTrade, settings: Any) -> None:
+    """Durably checkpoint peak/trail state without blocking the tick-fast loop."""
+    ctx = trade.entryContext or {}
+    interval = max(
+        0.5,
+        float(getattr(settings, "trade_mark_persist_seconds", 2.0) or 2.0),
+    )
+    last_raw = ctx.get("tradeMarkPersistedAt")
+    if last_raw:
+        try:
+            last = datetime.fromisoformat(str(last_raw))
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=IST)
+            if (datetime.now(IST) - last.astimezone(IST)).total_seconds() < interval:
+                return
+        except (TypeError, ValueError):
+            pass
+    await asyncio.to_thread(trade_store.record_trade_mark, trade)
+    if trade.entryContext is None:
+        trade.entryContext = {}
+    trade.entryContext["tradeMarkPersistedAt"] = datetime.now(IST).isoformat()
+
+
 def _exit_plan_for_trade(
     trade: PaperTrade,
     snap: SymbolSnapshot,
@@ -1211,9 +1253,33 @@ async def _open_from_candidate(
         from app.engines.morning_premium_capture import is_afternoon_capture_event
 
         afternoon = is_afternoon_capture_event(ev, chart=snap.spotChart)
-        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+        from app.engines.ict_breakout_monitor import (
+            analyze_explosion_event_ict,
+            first_lift_entry_ready,
+        )
 
         ict = analyze_explosion_event_ict(ev, snap)
+        alert = candidate.alert if isinstance(candidate.alert, dict) else {}
+        first_lift_runner = first_lift_entry_ready(
+            snap=snap,
+            event=ev,
+            ict=ict,
+            alert=alert,
+        )
+        # Preserve the strict selector proof if live ICT re-analysis flickers at fill.
+        # Otherwise a valid WATCH first-lift falls back to the standard 12pt exit path.
+        ict_flat_vertical = bool(ict.flat_then_vertical or first_lift_runner)
+        base_rel = float(
+            getattr(ict, "base_relative_move_pct", 0)
+            or alert.get("ictBaseRelativeMovePct")
+            or 0
+        )
+        base_premium = float(
+            getattr(ict, "base_premium", 0)
+            or alert.get("ictBasePremium")
+            or local_base_prem
+            or 0
+        )
         ctx_extra.update({
             "explosionTier": ev.tier,
             "explosionScore": ev.explosion_score,
@@ -1225,14 +1291,16 @@ async def _open_from_candidate(
             "ictScore": round(ict.score, 1),
             "ictMegaRip": ict.mega_rip,
             "ictPremiumFvg": ict.premium_fvg,
-            "ictFlatThenVertical": ict.flat_then_vertical,
+            "ictFlatThenVertical": ict_flat_vertical,
+            "ictFirstLift": bool(first_lift_runner),
+            "firstLiftCapture": bool(first_lift_runner),
             "ictFlatVerticalQuality": round(float(getattr(ict, "flat_vertical_quality", 0) or 0), 1),
             "ictFlatVerticalGrade": getattr(ict, "flat_vertical_grade", ""),
             "ictReasons": ict.reasons,
             # Local-base entry instrumentation — correlate entry base-rel% + the adaptive
             # window used with the trade outcome to tune the 15–40 range from real data.
-            "localBaseBaseRelPct": round(float(getattr(ict, "base_relative_move_pct", 0) or 0), 1),
-            "localBaseBasePremium": round(float(getattr(ict, "base_premium", 0) or 0), 2),
+            "localBaseBaseRelPct": round(base_rel, 1),
+            "localBaseBasePremium": round(base_premium, 2),
         })
         ctx_extra["vixRegime"] = vix_ctx
         from app.engines.advanced_indicators import build_entry_confluence
@@ -1251,24 +1319,29 @@ async def _open_from_candidate(
             ctx_extra["defensiveBaseRip"] = bool(ict_meta.get("defensiveBaseRip"))
             ctx_extra["ictCapturePath"] = ict_meta.get("capturePath")
             ctx_extra["ictCaptureMeta"] = ict_meta
-            if ict.flat_then_vertical:
-                ctx_extra["momentType"] = "flat_then_vertical"
-            elif ict.mega_rip:
-                ctx_extra["momentType"] = "mega_rip"
-            elif ict.premium_fvg:
-                ctx_extra["momentType"] = "premium_fvg"
+        if first_lift_runner:
+            # Entry already passed strict quality, heat, volume and live-turn proof.
+            # Give it the same peak-managed exit semantics even before chart alignment.
+            ctx_extra["maxProfitCapture"] = True
+            ctx_extra["momentType"] = "first_lift_local_base"
+        elif ict_flat_vertical:
+            ctx_extra["momentType"] = "flat_then_vertical"
+        elif ict.mega_rip:
+            ctx_extra["momentType"] = "mega_rip"
+        elif ict.premium_fvg:
+            ctx_extra["momentType"] = "premium_fvg"
         # Stage trail ladder — project max TP + stage size for flat→vertical / FVG / mega.
         from app.engines.moment_stage_trail import build_moment_stage_plan
 
         _max_profit = bool(
             ctx_extra.get("maxProfitCapture")
             or ctx_extra.get("defensiveBaseRip")
-            or ict.flat_then_vertical
+            or ict_flat_vertical
             or ict.mega_rip
         )
         stage_plan = build_moment_stage_plan(
             entry_premium=float(fill_premium or candidate.premium or 50),
-            base_premium=float(getattr(ict, "base_premium", 0) or local_base_prem or 0),
+            base_premium=base_premium,
             exit_plan=exit_plan if isinstance(exit_plan, dict) else None,
             velocity_3s=float(
                 getattr(ict, "velocity_3s", 0)
@@ -1278,7 +1351,7 @@ async def _open_from_candidate(
             volume_surge=float(getattr(ict, "volume_surge", 0) or getattr(ev, "volume_surge", 0) or 1),
             session_move_pct=float(getattr(ict, "session_move_pct", 0) or getattr(ev, "daily_move_pct", 0) or 0),
             premium_fvg=bool(ict.premium_fvg),
-            flat_then_vertical=bool(ict.flat_then_vertical),
+            flat_then_vertical=ict_flat_vertical,
             mega_rip=bool(ict.mega_rip),
             max_profit=_max_profit,
         )
@@ -1701,6 +1774,10 @@ async def _process_open_trades(
             exit_reason, pnl = evaluate_exit(trade, eval_premium, profile, lot_mult)
 
         if not exit_reason:
+            try:
+                await _checkpoint_open_trade_if_due(trade, settings)
+            except Exception as exc:
+                logger.warning("Open-trade mark checkpoint failed for %s: %s", trade.id, exc)
             continue
 
         is_live = settings.enable_live_trading and settings.auto_trading_enabled

@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     snapshot_cache_interval_ms: int = 150
     tick_wake_debounce_ms: int = 15
     tick_fast_exit_enabled: bool = True
+    trade_mark_persist_seconds: float = 2.0
     entry_scan_interval_ms: int = 1000
     expiry_entry_scan_interval_ms: int = 500
     # Runner velocity compares consecutive snapshots only while the feed is fresh.

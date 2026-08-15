@@ -14,9 +14,11 @@ from app.services.upstox import INDEX_KEYS
 _SYMBOL_BY_INDEX_KEY = {v: k for k, v in INDEX_KEYS.items()}
 
 TickWakeCallback = Callable[[], None]
+TickObserver = Callable[[str, float], None]
 
 _tick_wake_event: Optional[asyncio.Event] = None
 _tick_wake_callbacks: list[TickWakeCallback] = []
+_tick_observers: list[TickObserver] = []
 
 
 @dataclass
@@ -47,6 +49,12 @@ def set_tick_wake_event(event: asyncio.Event) -> None:
 
 def on_tick_wake(callback: TickWakeCallback) -> None:
     _tick_wake_callbacks.append(callback)
+
+
+def on_tick(callback: TickObserver) -> None:
+    """Register a lightweight observer for every accepted LTP tick."""
+    if callback not in _tick_observers:
+        _tick_observers.append(callback)
 
 
 def _signal_tick_wake() -> None:
@@ -87,6 +95,11 @@ def record_tick(
         history.popleft()
     _tick_count += 1
     _last_tick_mono = now
+    for observer in _tick_observers:
+        try:
+            observer(key, float(ltp))
+        except Exception:
+            pass
     # Accumulate CVD (trade authenticity) from the same tick stream — best-effort.
     try:
         from app.config import get_settings

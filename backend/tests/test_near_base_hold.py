@@ -39,6 +39,13 @@ def test_near_base_top_runner_detected():
     assert _near_base_top_runner(_trade(14.5, "EXPLODING", psych="OVERCONFIDENCE")) is True
 
 
+def test_watch_first_lift_is_a_near_base_top_runner():
+    trade = _trade(15.0, "WATCH")
+    trade.entryContext["ictFirstLift"] = True
+    trade.entryContext["firstLiftCapture"] = True
+    assert _near_base_top_runner(trade) is True
+
+
 def test_near_base_holds_small_peak():
     """11% off base, peaked +11 now +7.5 → hold (no soft lock)."""
     reason = peak_fade_profit_lock_reason(_trade(11.0), best=11.0, pnl_pts=7.5)

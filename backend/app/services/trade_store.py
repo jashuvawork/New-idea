@@ -67,7 +67,9 @@ def _load_day(date: str) -> dict[str, Any]:
 
 def _save_day(date: str, data: dict[str, Any]) -> None:
     path = _day_file(date)
-    path.write_text(json.dumps(data, indent=2, default=str))
+    tmp = path.with_suffix(f"{path.suffix}.tmp")
+    tmp.write_text(json.dumps(data, indent=2, default=str))
+    os.replace(tmp, path)
 
 
 def _enum_val(value: Any) -> Any:
@@ -93,6 +95,8 @@ def _trade_payload(trade: PaperTrade, context: Optional[dict] = None) -> dict[st
         "pnlInr": trade.pnlInr,
         "pnlPoints": trade.pnlPoints,
         "bestPnlPoints": trade.bestPnlPoints,
+        "maxLtp": trade.maxLtp,
+        "maxLtpAt": trade.maxLtpAt.isoformat() if trade.maxLtpAt else None,
         "status": trade.status,
         "exitReason": trade.exitReason,
         "strategyType": _enum_val(trade.strategyType),
@@ -284,6 +288,25 @@ def record_trade_opened(trade: PaperTrade, context: Optional[dict] = None) -> No
     _append_log("TRADE_OPENED", {"trade": trade_payload, "context": event_ctx})
     _record_trade_funnel_event("ENTERED", trade, context, date=date)
     logger.info(_human_log_line("TRADE_OPENED", trade, context))
+
+
+def record_trade_mark(trade: PaperTrade) -> None:
+    """Checkpoint one open trade's peak and ratcheting exit state without log spam."""
+    if trade.status != "OPEN":
+        return
+    date = (
+        trade.openedAt.astimezone(IST).strftime("%Y-%m-%d")
+        if trade.openedAt.tzinfo
+        else _today()
+    )
+    data = _load_day(date)
+    existing = {t["id"]: i for i, t in enumerate(data.get("trades", []))}
+    if trade.id not in existing:
+        return
+    record = _trade_to_record(trade, trade.entryContext)
+    record["sessionDate"] = date
+    data["trades"][existing[trade.id]] = record
+    _save_day(date, data)
 
 
 def record_trade_closed(trade: PaperTrade, context: Optional[dict] = None) -> None:

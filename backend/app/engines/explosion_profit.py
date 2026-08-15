@@ -691,7 +691,9 @@ def _should_skip_no_progress(trade: PaperTrade, settings) -> bool:
     if is_faded_rip_caution_trade(trade):
         return False
     if (
-        ctx.get("ictMegaRip")
+        ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictMegaRip")
         or ctx.get("goodDayIctCapture")
         or ctx.get("allDayIctCapture")
         or ctx.get("maxProfitCapture")
@@ -948,7 +950,9 @@ def _near_base_top_runner(trade: PaperTrade) -> bool:
     )
     # ICT flat→vertical / max-profit: hold further into the pad toward max TP.
     ict_max = bool(
-        ctx.get("ictFlatThenVertical")
+        ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictFlatThenVertical")
         or ctx.get("maxProfitCapture")
         or ctx.get("defensiveBaseRip")
     )
@@ -1224,7 +1228,12 @@ def evaluate_explosion_exit(
     exit_params = params or default_explosion_exit_params(event_tier)
     pnl_pts = current_premium - trade.entryPremium
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
-    best = max(trade.bestPnlPoints, pnl_pts)
+    observed_best = (
+        float(trade.maxLtp) - float(trade.entryPremium)
+        if trade.maxLtp is not None
+        else 0.0
+    )
+    best = max(trade.bestPnlPoints, pnl_pts, observed_best)
     hold = _hold_seconds(trade)
 
     from app.engines.explosion_entry_guards import faded_rip_no_green_exit_reason
@@ -1584,7 +1593,9 @@ def _green_thesis_active(trade: Any, *, best: float, settings: Any) -> bool:
     ctx = getattr(trade, "entryContext", None) or {}
     pattern = str(ctx.get("ictPattern") or "").lower()
     structured = bool(
-        ctx.get("ictFlatThenVertical")
+        ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictFlatThenVertical")
         or ctx.get("ictMegaRip")
         or ctx.get("maxProfitCapture")
         or ctx.get("momentStageLadder")
@@ -1596,6 +1607,7 @@ def _green_thesis_active(trade: Any, *, best: float, settings: Any) -> bool:
             "mega_rip",
             "early_flat_break",
             "local_swing_base",
+            "first_lift_local_base",
             "premium_fvg",
         )
     )
@@ -1659,7 +1671,12 @@ def _skip_explosion_time_profit(
     )
     tiers = {t.strip().upper() for t in tiers_raw.split(",") if t.strip()}
     tier = str(event_tier or ctx.get("explosionTier") or "").upper()
-    top_size = bool(ctx.get("topExplosionMaxLots") or ctx.get("highConviction"))
+    top_size = bool(
+        ctx.get("topExplosionMaxLots")
+        or ctx.get("highConviction")
+        or ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+    )
     if tier not in tiers and not top_size:
         return False
     frac = float(

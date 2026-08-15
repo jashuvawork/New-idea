@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from app.engines.auto_trader import _record_observed_max_ltp, _trade_premium_velocity
 from app.engines.snapshot_fast import overlay_snapshot_ltps, resolve_trade_premium
 from app.models.schemas import (
+    AutoTraderState,
     Breadth,
     ChartAnalysis,
     HeatmapStrike,
@@ -118,6 +119,30 @@ def test_observed_max_ltp_ignores_corrupt_persisted_peak():
 
     _record_observed_max_ltp(trade, 125.0)
     assert trade.maxLtp == 125.0
+
+
+def test_every_websocket_tick_captures_open_trade_peak_before_exit_throttle():
+    import app.engines.auto_trader as auto_trader
+
+    clear()
+    trade = PaperTrade(
+        id="sub-cycle-peak",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24000,
+        entryPremium=100.0,
+        lots=1,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={"instrumentKey": "NSE_FO|67890"},
+    )
+    auto_trader._auto_trader_state = AutoTraderState(openPaperTrades=[trade])
+    try:
+        record_tick("NSE_FO|67890", 115.0)
+        record_tick("NSE_FO|67890", 102.0)
+        assert trade.maxLtp == 115.0
+    finally:
+        auto_trader._auto_trader_state = AutoTraderState()
 
 
 def test_overlay_snapshot_spot_charts_refreshes_rsi():

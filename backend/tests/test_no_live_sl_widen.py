@@ -99,6 +99,56 @@ def test_live_trail_cannot_widen_above_entry_stop(mock_settings, mock_conf, mock
     assert plan["entryStopPoints"] == 13.66
 
 
+@patch("app.engines.chart_exit_levels.compute_live_chart_trail_tuning")
+@patch("app.engines.chart_exit_levels.chart_trade_confidence")
+@patch("app.engines.chart_exit_levels.get_settings")
+def test_live_chart_cannot_tighten_first_lift_runner_trail(
+    mock_settings, mock_conf, mock_tuning,
+):
+    s = MagicMock()
+    s.chart_exit_levels_enabled = True
+    s.chart_confidence_trail_enabled = True
+    s.chart_trail_tune_seconds = 0
+    s.chart_confidence_half_tp_lock_pct = 0.5
+    s.explosion_trail_arm_points = 8.0
+    s.explosion_trail_keep_ratio = 0.42
+    s.explosion_micro_target_points = 3.0
+    mock_settings.return_value = s
+    mock_conf.return_value = (45.0, ["noise"])
+    tuning = MagicMock(
+        stopPoints=13.66,
+        targetPoints=50.0,
+        targetPoints2=60.0,
+        trailArmPoints=2.0,
+        trailKeepRatio=0.90,
+        confidenceDelta=-30.0,
+        tighten=True,
+        letRun=False,
+        sources=["chart_tighten"],
+    )
+    mock_tuning.return_value = tuning
+    trade = _trade(
+        entryTrailArmPoints=11.0,
+        entryTrailKeepRatio=0.42,
+    )
+    trade.entryContext.update({
+        "ictFirstLift": True,
+        "firstLiftCapture": True,
+    })
+    snap = SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=datetime.now(timezone.utc),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        breadth=Breadth(bias="NEUTRAL", score=50, aligned=False),
+    )
+
+    plan = update_live_chart_trail(trade, snap)
+    assert plan["trailArmPoints"] >= 11.0
+    assert plan["trailKeepRatio"] <= 0.42
+    assert plan["chartTrailTighten"] is False
+
+
 @patch("app.engines.chart_exit_levels.update_live_chart_trail")
 @patch("app.engines.chart_exit_levels.merge_chart_into_exit_plan")
 @patch("app.engines.chart_exit_levels.get_settings")

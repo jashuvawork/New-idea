@@ -376,6 +376,14 @@ def check_edge_realtime_exit(
 
     is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
     ctx = trade.entryContext or {}
+    if is_explosion:
+        from app.engines.ict_breakout_monitor import _ict_max_profit_trade
+        from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
+
+        if _ict_max_profit_trade(trade) or trade_uses_moment_stage_ladder(trade):
+            # FTV exits own rollover, peak-capture and stage floors. Running the
+            # generic edge engine first can close a still-expanding first lift.
+            return None, pnl_inr
     extreme_hold = bool(ctx.get("extremeAllInBypass"))
     breadth_hold = is_explosion and (direction_aligned_with_breadth(trade) or extreme_hold)
 

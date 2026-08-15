@@ -23,10 +23,17 @@ def trade_uses_moment_stage_ladder(trade: PaperTrade) -> bool:
     if ctx.get("momentStageLadder") or (ctx.get("exitPlan") or {}).get("momentStageLadder"):
         return True
     moment = str(ctx.get("momentType") or "").lower()
-    if moment in ("flat_then_vertical", "mega_rip", "premium_fvg"):
+    if moment in (
+        "first_lift_local_base",
+        "flat_then_vertical",
+        "mega_rip",
+        "premium_fvg",
+    ):
         return True
     return bool(
-        ctx.get("ictFlatThenVertical")
+        ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictFlatThenVertical")
         or ctx.get("ictMegaRip")
         or ctx.get("maxProfitCapture")
         or ctx.get("defensiveBaseRip")
