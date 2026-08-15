@@ -8,10 +8,12 @@ import zipfile
 from contextlib import ExitStack
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from app.routers.ai import radar_replay
+from app.models.schemas import PaperTrade, Side
+from app.services import trade_store
 from app.services.radar_archive import read_archive_entries, record_top_radars
 from app.services.radar_health import (
     health_status,
@@ -28,8 +30,10 @@ from app.services.radar_learning import (
     premium_tape_path,
     read_premium_tape,
     record_funnel_state,
+    record_funnel_event,
     record_market_observations,
     reset_learning_state_for_tests,
+    run_detector_replay_isolated,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -58,6 +62,9 @@ def _settings(tmp_path, **overrides):
         "radar_backup_dir": "",
         "radar_backup_s3_bucket": "",
         "radar_backup_s3_prefix": "nexusquant/radar",
+        "radar_backup_retry_max": 3,
+        "radar_backup_retry_base_seconds": 0.0,
+        "radar_backup_verify_head": True,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -208,6 +215,24 @@ def test_funnel_maps_blocker_entry_and_trade_outcome(tmp_path):
             }],
             now=start,
         ) == 1
+        record_funnel_event(
+            {
+                "event": "SELECTED",
+                "key": "NIFTY:CALL:24500",
+                "stage": "selector",
+                "selectionScore": 80.0,
+            },
+            now=start + timedelta(seconds=1),
+        )
+        record_funnel_event(
+            {
+                "event": "ORDER_REJECTED",
+                "key": "NIFTY:CALL:24500",
+                "stage": "preorder",
+                "reason": "premium_fading",
+            },
+            now=start + timedelta(seconds=2),
+        )
         with patch(
             "app.services.trade_store.get_day_detail",
             return_value={
@@ -225,6 +250,8 @@ def test_funnel_maps_blocker_entry_and_trade_outcome(tmp_path):
     assert report["detected"] == 1
     assert report["blocked"] == 1
     assert report["entered"] == 1
+    assert report["selected"] == 1
+    assert report["orderRejected"] == 1
     assert report["closedWins"] == 1
     assert report["rows"][0]["blockers"] == ["chart_alignment"]
 
@@ -274,7 +301,11 @@ def test_health_reports_stale_sources_divergence_and_component_errors(tmp_path):
         failed = health_status(now=start + timedelta(seconds=40))
 
     assert live["sourceDivergence"]["active"] is True
-    assert live["healthy"] is True
+    assert live["healthy"] is False
+    assert any(
+        alert["code"] == "REST_WS_DIVERGENCE"
+        for alert in live["alerts"]
+    )
     assert set(stale_live["staleSources"]) == {"rest_snapshot", "ws_entry_scan"}
     assert stale_live["healthy"] is False
     assert closed["healthy"] is True
@@ -307,10 +338,13 @@ def test_replay_api_accepts_threshold_overrides(tmp_path):
             )
         )
         tape_exists = premium_tape_path("2026-08-15").exists()
+        detector_replay = run_detector_replay_isolated("2026-08-15")
 
     assert result["thresholds"]["verticalMinMovePct"] == 25.0
     assert result["truthCount"] >= 1
     assert tape_exists
+    assert detector_replay["mode"] == "isolated_production_detector"
+    assert detector_replay["sampleBatches"] == 5
 
 
 def test_rest_sampling_keeps_each_symbol_when_snapshots_build_separately(tmp_path):
@@ -368,3 +402,60 @@ def test_s3_backup_and_startup_recovery_are_idempotent(tmp_path):
     assert make_client.called
     assert len(recovered) == 1
     assert recovered_again == []
+
+
+def test_s3_backup_skips_matching_remote_object(tmp_path):
+    settings = _settings(
+        tmp_path,
+        radar_backup_s3_bucket="radar-bucket",
+    )
+    archive = tmp_path / "radar.zip"
+    archive.write_bytes(b"already-uploaded")
+    client = MagicMock()
+    client.head_object.return_value = {"ContentLength": archive.stat().st_size}
+    with _patch_settings(settings), patch("boto3.client", return_value=client):
+        result = backup_archive(archive)
+
+    assert result["success"] is True
+    assert result["attempts"] == 0
+    client.upload_file.assert_not_called()
+
+
+def test_trade_events_keep_exact_radar_key_and_outcome_link():
+    opened = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+    trade = PaperTrade(
+        id="trade-1",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24500.0,
+        entryPremium=100.0,
+        currentPremium=112.0,
+        lots=1,
+        openedAt=opened,
+        closedAt=opened + timedelta(minutes=5),
+        status="CLOSED",
+        pnlInr=1200.0,
+        pnlPoints=12.0,
+        exitReason="target",
+        entryContext={"radarKey": "NIFTY:CALL:24500", "selectionScore": 82.0},
+    )
+    with patch("app.services.radar_learning.record_funnel_event") as emit:
+        trade_store._record_trade_funnel_event(
+            "ENTERED",
+            trade,
+            trade.entryContext,
+            date="2026-08-15",
+        )
+        trade_store._record_trade_funnel_event(
+            "CLOSED",
+            trade,
+            trade.entryContext,
+            date="2026-08-15",
+        )
+
+    entered = emit.call_args_list[0].args[0]
+    closed = emit.call_args_list[1].args[0]
+    assert entered["key"] == "NIFTY:CALL:24500"
+    assert entered["tradeId"] == "trade-1"
+    assert closed["pnlInr"] == 1200.0
+    assert closed["exitReason"] == "target"

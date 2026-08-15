@@ -1068,6 +1068,9 @@ async def _open_from_candidate(
     ctx_extra: dict[str, Any] = {
         "selectionScore": round(candidate.score, 2),
         "selectionMode": candidate.mode,
+        "radarKey": (
+            f"{symbol.upper()}:{candidate.side.value}:{float(candidate.strike):g}"
+        ),
         "lots": lots,
         "edgeScore": edge.to_dict(),
         "tradeBudgetInr": exit_plan.get("tradeBudgetInr"),
@@ -1772,6 +1775,22 @@ async def process_exits_only(
     return state
 
 
+async def _record_funnel_event_safe(event: dict[str, Any]) -> None:
+    """Keep observability failures from affecting order selection/execution."""
+    try:
+        from app.services.radar_learning import record_funnel_event
+
+        await asyncio.to_thread(record_funnel_event, event)
+    except Exception as exc:
+        logger.warning("Failed to persist radar funnel event: %s", exc)
+        try:
+            from app.services.radar_health import record_component_error
+
+            record_component_error("radarFunnel", exc)
+        except Exception:
+            pass
+
+
 async def process(
     snapshots: dict[str, SymbolSnapshot],
     news: Optional[list[dict[str, Any]]] = None,
@@ -1781,6 +1800,7 @@ async def process(
     state = get_state()
     settings = get_settings()
     skipped: list[dict[str, Any]] = []
+    cycle_id = uuid.uuid4().hex[:12]
 
     state.calibrationBlocks = _calibration.get_blocks()
     state.autoTradingEnabled = settings.auto_trading_enabled
@@ -1976,8 +1996,38 @@ async def process(
                 })
                 best = None
             if best:
+                await _record_funnel_event_safe({
+                        "event": "SELECTED",
+                        "key": (
+                            f"{best.symbol.upper()}:{best.side.value}:"
+                            f"{float(best.strike):g}"
+                        ),
+                        "symbol": best.symbol.upper(),
+                        "side": best.side.value,
+                        "strike": best.strike,
+                        "stage": "selector",
+                        "cycleId": cycle_id,
+                        "selectionMode": best.mode,
+                        "selectionScore": best.score,
+                        "tier": getattr(best, "tier", None),
+                    })
                 opened, reason = await _open_from_candidate(best, state, client, news, snapshots)
                 if not opened:
+                    await _record_funnel_event_safe({
+                            "event": "ORDER_REJECTED",
+                            "key": (
+                                f"{best.symbol.upper()}:{best.side.value}:"
+                                f"{float(best.strike):g}"
+                            ),
+                            "symbol": best.symbol.upper(),
+                            "side": best.side.value,
+                            "strike": best.strike,
+                            "stage": "preorder",
+                            "cycleId": cycle_id,
+                            "reason": reason,
+                            "selectionMode": best.mode,
+                            "selectionScore": best.score,
+                        })
                     skipped.append({
                         "symbol": best.symbol,
                         "side": best.side.value,
@@ -2000,6 +2050,7 @@ async def process(
             record_funnel_state,
             snapshots,
             list(state.skipped or []),
+            cycle_id=cycle_id,
         )
     except Exception as exc:
         logger.warning("Failed to persist radar funnel state: %s", exc)

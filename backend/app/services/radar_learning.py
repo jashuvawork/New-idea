@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
+import subprocess
+import sys
+import tempfile
 import threading
+import time
 import zipfile
 from collections import Counter, defaultdict, deque
 from contextlib import contextmanager
@@ -508,6 +513,7 @@ def record_funnel_state(
     skipped: list[Mapping[str, Any]],
     *,
     now: datetime | None = None,
+    cycle_id: str | None = None,
 ) -> int:
     """Persist deduplicated gate blockers for radar-to-order funnel review."""
     settings = get_settings()
@@ -546,10 +552,12 @@ def record_funnel_state(
                 {
                     "ts": current.isoformat(),
                     "key": key,
+                    "event": "GATED",
                     "symbol": symbol,
                     "side": side or None,
                     "strike": strike or None,
                     "stage": "SESSION_BLOCK" if symbol == "SESSION" else "GATE_BLOCK",
+                    "cycleId": cycle_id,
                     "reason": reason,
                     "message": row.get("message"),
                     "mode": row.get("mode"),
@@ -560,6 +568,22 @@ def record_funnel_state(
             _last_funnel_event[signature] = current
             written += 1
     return written
+
+
+def record_funnel_event(
+    event: Mapping[str, Any],
+    *,
+    now: datetime | None = None,
+    date: str | None = None,
+) -> None:
+    """Append one exact funnel transition such as DETECTED/SELECTED/ENTERED/CLOSED."""
+    current = _aware(now)
+    target_date = date or current.strftime("%Y-%m-%d")
+    payload = {
+        "ts": current.isoformat(),
+        **dict(event),
+    }
+    _append_jsonl(funnel_path(target_date), payload)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -583,8 +607,12 @@ def build_funnel_report(date: str) -> dict[str, Any]:
     blocked_rows = _read_jsonl(funnel_path(date))
     trades = list((trade_store.get_day_detail(date) or {}).get("trades") or [])
     blockers: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    events_by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in blocked_rows:
-        blockers[str(row.get("key") or "")].append(row)
+        key = str(row.get("key") or "")
+        events_by_key[key].append(row)
+        if row.get("event") == "GATED" or str(row.get("stage") or "").endswith("BLOCK"):
+            blockers[key].append(row)
     trades_by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for trade in trades:
         symbol = str(trade.get("symbol") or "").upper()
@@ -598,12 +626,17 @@ def build_funnel_report(date: str) -> dict[str, Any]:
         key = str(radar.get("key") or "")
         matched_trades = trades_by_key.get(key) or []
         matched_blocks = blockers.get(key) or []
+        matched_events = events_by_key.get(key) or []
         closed = [trade for trade in matched_trades if str(trade.get("status")) == "CLOSED"]
         rows.append({
             "key": key,
             "detectedAt": radar.get("firstSeenAt"),
             "bestTier": radar.get("tier"),
             "blocked": bool(matched_blocks),
+            "selected": any(item.get("event") == "SELECTED" for item in matched_events),
+            "orderRejected": any(
+                item.get("event") == "ORDER_REJECTED" for item in matched_events
+            ),
             "blockers": sorted({
                 str(item.get("reason") or "unknown")
                 for item in matched_blocks
@@ -617,17 +650,26 @@ def build_funnel_report(date: str) -> dict[str, Any]:
                 else ("LOSS" if closed else None)
             ),
             "radarOutcome": radar.get("outcome") or {},
+            "timeline": matched_events,
         })
     entered = sum(1 for row in rows if row["entered"])
     blocked = sum(1 for row in rows if row["blocked"])
+    selected = sum(1 for row in rows if row["selected"])
+    order_rejected = sum(1 for row in rows if row["orderRejected"])
     wins = sum(1 for row in rows if row["tradeOutcome"] == "WIN")
     return {
         "date": date,
         "detected": len(rows),
         "blocked": blocked,
+        "selected": selected,
+        "orderRejected": order_rejected,
         "entered": entered,
         "closedWins": wins,
         "detectionToEntryPct": round(entered / len(rows) * 100.0, 1) if rows else 0.0,
+        "detectionToSelectionPct": round(selected / len(rows) * 100.0, 1)
+        if rows else 0.0,
+        "selectionToEntryPct": round(entered / selected * 100.0, 1)
+        if selected else 0.0,
         "entryWinRatePct": round(wins / entered * 100.0, 1) if entered else 0.0,
         "sessionBlocks": [
             row for row in blocked_rows if row.get("key") == "SESSION"
@@ -641,13 +683,15 @@ def backup_archive(path: Path) -> dict[str, Any]:
     settings = get_settings()
     destinations: list[str] = []
     errors: list[str] = []
+    attempts = 0
     backup_dir = str(settings.radar_backup_dir or "").strip()
     if backup_dir:
         try:
             target_dir = Path(backup_dir)
             target_dir.mkdir(parents=True, exist_ok=True)
             target = target_dir / path.name
-            shutil.copy2(path, target)
+            if not target.exists() or target.stat().st_size != path.stat().st_size:
+                shutil.copy2(path, target)
             destinations.append(str(target))
         except OSError as exc:
             errors.append(f"directory: {exc}")
@@ -659,8 +703,50 @@ def backup_archive(path: Path) -> dict[str, Any]:
         try:
             import boto3
 
-            boto3.client("s3").upload_file(str(path), bucket, key)
-            destinations.append(f"s3://{bucket}/{key}")
+            client = boto3.client("s3")
+            remote = f"s3://{bucket}/{key}"
+            verify_head = bool(
+                getattr(settings, "radar_backup_verify_head", True)
+            )
+            already_uploaded = False
+            if verify_head and hasattr(client, "head_object"):
+                try:
+                    head = client.head_object(Bucket=bucket, Key=key)
+                    already_uploaded = int(head.get("ContentLength") or -1) == path.stat().st_size
+                except Exception:
+                    already_uploaded = False
+            if already_uploaded:
+                destinations.append(remote)
+            else:
+                retry_max = max(
+                    1,
+                    int(getattr(settings, "radar_backup_retry_max", 3) or 3),
+                )
+                retry_base = max(
+                    0.0,
+                    float(
+                        getattr(settings, "radar_backup_retry_base_seconds", 1.0)
+                        or 0.0
+                    ),
+                )
+                last_error: Exception | None = None
+                for attempt in range(1, retry_max + 1):
+                    attempts = attempt
+                    try:
+                        client.upload_file(str(path), bucket, key)
+                        if verify_head and hasattr(client, "head_object"):
+                            head = client.head_object(Bucket=bucket, Key=key)
+                            if int(head.get("ContentLength") or -1) != path.stat().st_size:
+                                raise OSError("S3 upload size verification failed")
+                        destinations.append(remote)
+                        last_error = None
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                        if attempt < retry_max and retry_base > 0:
+                            time.sleep(retry_base * (2 ** (attempt - 1)))
+                if last_error is not None:
+                    raise last_error
         except Exception as exc:
             errors.append(f"s3: {exc}")
 
@@ -680,6 +766,7 @@ def backup_archive(path: Path) -> dict[str, Any]:
         "configured": bool(backup_dir or bucket),
         "destinations": destinations,
         "errors": errors,
+        "attempts": attempts,
     }
 
 
@@ -714,6 +801,10 @@ def finalize_daily_review(date: str) -> dict[str, Any]:
         artifacts["funnel_events.jsonl"] = funnel_file.read_bytes()
     path = add_archive_artifacts(date, artifacts)
     backup = backup_archive(path)
+    add_archive_artifacts(
+        date,
+        {"backup_status.json": json.dumps(backup, indent=2)},
+    )
     _prune_learning_files()
     try:
         from app.services.radar_health import record_component_success
@@ -752,14 +843,50 @@ def finalize_pending_reviews(
             continue
         try:
             with zipfile.ZipFile(path, "r") as archive:
-                if "scorecard.json" in archive.namelist():
-                    continue
-        except (OSError, zipfile.BadZipFile):
+                names = set(archive.namelist())
+                if "scorecard.json" in names and "backup_status.json" in names:
+                    backup_status = json.loads(archive.read("backup_status.json"))
+                    if backup_status.get("success"):
+                        continue
+        except (OSError, json.JSONDecodeError, zipfile.BadZipFile):
             continue
         pending.append(date)
         if len(pending) >= max(1, limit):
             break
     return [finalize_daily_review(date) for date in reversed(pending)]
+
+
+def run_detector_replay_isolated(date: str) -> dict[str, Any]:
+    """Replay via a subprocess so production detector globals cannot affect live state."""
+    premium_tape_path(date)  # strict date validation
+    backend_dir = Path(__file__).resolve().parents[2]
+    script = backend_dir / "scripts" / "replay_radar_day.py"
+    settings = get_settings()
+    env = os.environ.copy()
+    env["TRADE_STORE_DIR"] = str(settings.trade_store_dir)
+    env["RADAR_ARCHIVE_DIR"] = str(settings.radar_archive_dir or "")
+    with tempfile.TemporaryDirectory(prefix="radar-replay-") as directory:
+        output = Path(directory) / "report.json"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--date",
+                date,
+                "--output",
+                str(output),
+            ],
+            cwd=backend_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=env,
+        )
+        if completed.returncode != 0:
+            error = completed.stderr.strip() or completed.stdout.strip()
+            raise RuntimeError(f"Detector replay failed: {error[:1000]}")
+        return json.loads(output.read_text(encoding="utf-8"))
 
 
 def reset_learning_state_for_tests() -> None:

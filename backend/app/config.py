@@ -1693,6 +1693,9 @@ class Settings(BaseSettings):
     radar_backup_dir: str = ""
     radar_backup_s3_bucket: str = ""
     radar_backup_s3_prefix: str = "nexusquant/radar"
+    radar_backup_retry_max: int = 3
+    radar_backup_retry_base_seconds: float = 1.0
+    radar_backup_verify_head: bool = True
     daily_token_once: bool = True
 
     # Swing trading (multi-day paper holds)

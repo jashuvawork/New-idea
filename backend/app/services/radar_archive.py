@@ -276,6 +276,7 @@ def record_top_radars(
         1,
         int(getattr(settings, "radar_archive_top_n_per_day", 100) or 100),
     )
+    detected_events: list[dict[str, Any]] = []
 
     with _archive_lock(directory, date):
         entries = _load_entries(path)
@@ -314,6 +315,18 @@ def record_top_radars(
                     "outcome": dict(previous.get("outcome") or {}) if previous else {},
                     "_rank": list(rank),
                 }
+                detected_events.append({
+                    "event": "DETECTED",
+                    "key": key,
+                    "symbol": symbol.upper(),
+                    "side": str(alert.get("side") or "").upper(),
+                    "strike": _number(alert.get("strike")),
+                    "stage": "radar",
+                    "source": source,
+                    "tier": alert.get("tier"),
+                    "score": alert.get("explosionScore"),
+                    "momentType": alert.get("momentType"),
+                })
                 changed = True
 
         ordered = sorted(
@@ -330,6 +343,7 @@ def record_top_radars(
         int(getattr(settings, "radar_archive_retention_days", 365) or 365),
     )
     try:
+        from app.services.radar_learning import record_funnel_event
         from app.services.radar_health import (
             record_component_success,
             record_source,
@@ -341,6 +355,8 @@ def record_top_radars(
             detail={"date": date, "entryCount": len(ordered)},
             now=current,
         )
+        for event in detected_events:
+            record_funnel_event(event, now=current, date=date)
     except Exception:
         pass
     return len(ordered)

@@ -189,7 +189,57 @@ def health_status(*, now: datetime | None = None) -> dict[str, Any]:
     except Exception:
         market_phase = "UNKNOWN"
     live_market = market_phase == "LIVE_MARKET"
-    healthy = (not live_market or not stale_sources) and not component_errors
+    try:
+        from app.routers.market import latency_stats
+        from app.services.upstox_ws import ws_status
+
+        websocket = ws_status()
+        cadence = latency_stats()
+    except Exception as exc:
+        websocket = {"statusError": str(exc)}
+        cadence = {"statusError": str(exc)}
+    alerts: list[dict[str, str]] = []
+    if live_market:
+        if websocket.get("streamStale"):
+            alerts.append({
+                "severity": "critical",
+                "code": "WS_STREAM_STALE",
+                "message": "WebSocket is connected but market messages are stale",
+            })
+        if websocket.get("connected") and not websocket.get("hasRecentTicks"):
+            alerts.append({
+                "severity": "critical",
+                "code": "TICK_FEED_STALE",
+                "message": "WebSocket has no recent option ticks",
+            })
+        for source in stale_sources:
+            alerts.append({
+                "severity": "warning",
+                "code": "RADAR_SCAN_STALE",
+                "message": f"{source} has exceeded its expected scan cadence",
+            })
+        if divergence:
+            alerts.append({
+                "severity": "warning",
+                "code": "REST_WS_DIVERGENCE",
+                "message": "Fresh REST and WS scans disagree on the top radar contract",
+            })
+        if cadence.get("fullRestRebuildRunning") and cadence.get("buildInProgress"):
+            alerts.append({
+                "severity": "info",
+                "code": "REST_REBUILD_ACTIVE",
+                "message": "A full REST chain rebuild is currently in progress",
+            })
+    for component in component_errors:
+        alerts.append({
+            "severity": "warning",
+            "code": "RADAR_COMPONENT_ERROR",
+            "message": f"{component} reported a persistence or analysis error",
+        })
+    healthy = not any(
+        alert["severity"] in {"critical", "warning"}
+        for alert in alerts
+    )
     return {
         "healthy": healthy,
         "at": current.isoformat(),
@@ -206,6 +256,9 @@ def health_status(*, now: datetime | None = None) -> dict[str, Any]:
         "components": components,
         "backup": backup,
         "counters": counters,
+        "feed": websocket,
+        "cadence": cadence,
+        "alerts": alerts,
     }
 
 

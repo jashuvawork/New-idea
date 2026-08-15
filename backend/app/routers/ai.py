@@ -213,6 +213,19 @@ async def finalize_radar_review(date: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/radar-detector-replay/{date}")
+async def radar_detector_replay(date: str):
+    """Replay premium tape through an isolated production-detector subprocess."""
+    from app.services.radar_learning import run_detector_replay_isolated
+
+    try:
+        return await asyncio.to_thread(run_detector_replay_isolated, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.get("/snapshot-analysis")
 async def snapshot_analysis_rules():
     """Rules-based gap report: radar vs entry gates, misleading UI flags."""

@@ -104,6 +104,7 @@ def _trade_payload(trade: PaperTrade, context: Optional[dict] = None) -> dict[st
     ctx = context or trade.entryContext or {}
     for key in (
         "instrumentKey",
+        "radarKey",
         "optionExpiry",
         "brokerOrderId",
         "brokerExitOrderId",
@@ -125,6 +126,45 @@ def _trade_payload(trade: PaperTrade, context: Optional[dict] = None) -> dict[st
         if key in ctx:
             payload[key] = ctx[key]
     return payload
+
+
+def _record_trade_funnel_event(
+    event: str,
+    trade: PaperTrade,
+    context: Optional[dict],
+    *,
+    date: str,
+) -> None:
+    try:
+        from app.services.radar_learning import record_funnel_event
+
+        ctx = context or trade.entryContext or {}
+        side = str(_enum_val(trade.side) or "").upper()
+        key = str(
+            ctx.get("radarKey")
+            or f"{trade.symbol.upper()}:{side}:{float(trade.strike):g}"
+        )
+        payload: dict[str, Any] = {
+            "event": event,
+            "key": key,
+            "symbol": trade.symbol.upper(),
+            "side": side,
+            "strike": trade.strike,
+            "stage": "execution" if event == "ENTERED" else "outcome",
+            "tradeId": trade.id,
+            "selectionMode": ctx.get("selectionMode"),
+            "selectionScore": ctx.get("selectionScore"),
+        }
+        if event == "CLOSED":
+            payload.update({
+                "pnlInr": trade.pnlInr,
+                "pnlPoints": trade.pnlPoints,
+                "exitReason": trade.exitReason,
+                "holdSeconds": _hold_seconds(trade),
+            })
+        record_funnel_event(payload, date=date)
+    except Exception as exc:
+        logger.warning("Failed to persist %s funnel event: %s", event, exc)
 
 
 def _trade_to_record(trade: PaperTrade, context: Optional[dict] = None) -> dict[str, Any]:
@@ -242,6 +282,7 @@ def record_trade_opened(trade: PaperTrade, context: Optional[dict] = None) -> No
 
     trade_payload = _trade_payload(trade, context)
     _append_log("TRADE_OPENED", {"trade": trade_payload, "context": event_ctx})
+    _record_trade_funnel_event("ENTERED", trade, context, date=date)
     logger.info(_human_log_line("TRADE_OPENED", trade, context))
 
 
@@ -282,6 +323,7 @@ def record_trade_closed(trade: PaperTrade, context: Optional[dict] = None) -> No
         "holdSeconds": _hold_seconds(trade),
         "context": event_ctx,
     })
+    _record_trade_funnel_event("CLOSED", trade, context, date=date)
     logger.info(_human_log_line("TRADE_CLOSED", trade, context))
     _maybe_archive_completed_batch()
 
