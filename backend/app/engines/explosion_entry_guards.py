@@ -408,15 +408,6 @@ def immature_explosion_blocked(
     if explosion_event is None:
         return False, ""
 
-    from app.engines.ict_breakout_monitor import first_lift_entry_ready
-
-    if first_lift_entry_ready(
-        snap=snap,
-        event=explosion_event,
-        ict=ict,
-    ):
-        return False, ""
-
     from app.engines.elite_never_block import elite_never_block_active
 
     if elite_never_block_active(event=explosion_event, ict=ict):
@@ -551,6 +542,15 @@ def live_explosion_confirmation_blocked(
     if not getattr(settings, "explosion_live_confirm_enabled", True):
         return False, ""
     if explosion_event is None:
+        return False, ""
+
+    from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+    if first_lift_entry_ready(
+        snap=snap,
+        event=explosion_event,
+        ict=ict,
+    ):
         return False, ""
 
     from app.engines.elite_never_block import elite_never_block_active
