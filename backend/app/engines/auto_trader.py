@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import math
 import uuid
 from datetime import datetime
 from typing import Any, Optional
@@ -326,18 +327,25 @@ def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
 
 def _record_observed_max_ltp(trade: PaperTrade, current_ltp: float) -> None:
     """Persist the highest raw market LTP independently of simulated fill marks."""
+    def _finite_positive(value: Any) -> float:
+        try:
+            parsed = float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return parsed if math.isfinite(parsed) and parsed > 0 else 0.0
+
     try:
         current = float(current_ltp)
     except (TypeError, ValueError):
         return
-    if current <= 0:
+    if not math.isfinite(current) or current <= 0:
         return
 
     ctx = dict(trade.entryContext or {})
     previous = max(
-        float(trade.maxLtp or 0),
-        float(ctx.get("maxLtp") or 0),
-        float(trade.entryPremium or 0),
+        _finite_positive(trade.maxLtp),
+        _finite_positive(ctx.get("maxLtp")),
+        _finite_positive(trade.entryPremium),
     )
     if current > previous:
         previous = current

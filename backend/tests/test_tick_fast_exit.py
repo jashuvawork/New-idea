@@ -103,6 +103,23 @@ def test_observed_max_ltp_is_sticky_across_pullback():
     assert trade.entryContext["givebackFromMaxLtpPoints"] == 8.0
 
 
+def test_observed_max_ltp_ignores_corrupt_persisted_peak():
+    trade = PaperTrade(
+        id="peak-recovery",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24000,
+        entryPremium=100.0,
+        lots=1,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={"maxLtp": "not-a-number"},
+    )
+
+    _record_observed_max_ltp(trade, 125.0)
+    assert trade.maxLtp == 125.0
+
+
 def test_overlay_snapshot_spot_charts_refreshes_rsi():
     from app.engines.snapshot_fast import overlay_snapshot_spot_charts
 
