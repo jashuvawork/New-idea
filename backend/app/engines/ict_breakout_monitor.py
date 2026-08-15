@@ -1078,6 +1078,8 @@ def _ict_max_profit_trade(trade: Any) -> bool:
     ctx = getattr(trade, "entryContext", None) or {}
     return bool(
         ctx.get("maxProfitCapture")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictFirstLift")
         or ctx.get("goodDayIctCapture")
         or ctx.get("allDayIctCapture")
         or ctx.get("ictMegaRip")

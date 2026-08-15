@@ -1185,6 +1185,13 @@ def update_live_chart_trail(
     entry_vel = float(ctx.get("entryVelocity3s") or ctx.get("velocity3s") or 0)
     is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
     breadth_aligned = direction_aligned_with_breadth(trade)
+    peak_managed = is_explosion and bool(
+        ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictFlatThenVertical")
+        or ctx.get("maxProfitCapture")
+        or ctx.get("momentStageLadder")
+    )
 
     # Breadth-aligned explosions: don't tighten exits on brief chart noise before +5pt
     if is_explosion and breadth_aligned and best_pts < 5.0:
@@ -1208,6 +1215,23 @@ def update_live_chart_trail(
         tuning.tighten = False
         tuning.trailArmPoints = max(tuning.trailArmPoints, settings.explosion_trail_arm_points)
         tuning.sources.append("explosion_velocity_hold")
+    if peak_managed:
+        # Entry-time runner geometry is the tightest allowed for an FTV trade.
+        # Live chart noise may widen it, but cannot tighten a runner mid-vertical.
+        entry_arm = float(
+            plan_dict.get("entryTrailArmPoints")
+            or plan_dict.get("trailArmPoints")
+            or settings.explosion_trail_arm_points
+        )
+        entry_keep = float(
+            plan_dict.get("entryTrailKeepRatio")
+            or plan_dict.get("trailKeepRatio")
+            or settings.explosion_trail_keep_ratio
+        )
+        tuning.trailArmPoints = max(tuning.trailArmPoints, entry_arm)
+        tuning.trailKeepRatio = min(tuning.trailKeepRatio, entry_keep)
+        tuning.tighten = False
+        tuning.sources.append("ftv_entry_trail_floor")
 
     merged = dict(plan_dict)
     # Jul30 77700 CE: live trail/refresh raised stop 13.7→40 then ×1.4 → −48pt.
@@ -1313,6 +1337,31 @@ def refresh_open_trade_chart_plan(
             float(ctx.get("localBaseBasePremium") or 0) or None
         ),
     )
+    if bool(
+        ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictFlatThenVertical")
+        or ctx.get("maxProfitCapture")
+        or ctx.get("momentStageLadder")
+    ):
+        entry_arm = float(
+            plan_dict.get("entryTrailArmPoints")
+            or plan_dict.get("trailArmPoints")
+            or 0
+        )
+        entry_keep = float(
+            plan_dict.get("entryTrailKeepRatio")
+            or plan_dict.get("trailKeepRatio")
+            or 0
+        )
+        if entry_arm > 0:
+            merged["trailArmPoints"] = max(
+                entry_arm, float(merged.get("trailArmPoints") or 0),
+            )
+        if entry_keep > 0:
+            merged["trailKeepRatio"] = min(
+                entry_keep, float(merged.get("trailKeepRatio") or entry_keep),
+            )
     # Freeze SL at entry risk — live structure refresh must not widen the stop
     # (Jul30 77700 CE: refresh grew 13.7→40 while the rip was already failing).
     entry_stop = float(plan_dict.get("entryStopPoints") or plan_dict.get("stopPoints") or 0)
