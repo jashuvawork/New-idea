@@ -2,6 +2,20 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 type Tab = 'scorecard' | 'moves' | 'funnel' | 'system';
 
+const API_BASE = import.meta.env.DEV
+  ? ''
+  : (import.meta.env.VITE_API_URL || '');
+
+class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 interface RadarArchive {
   date: string;
   fileName: string;
@@ -147,10 +161,13 @@ function istDate() {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+  const response = await fetch(`${API_BASE}${path}`, init);
   if (!response.ok) {
     const detail = await response.json().catch(() => null);
-    throw new Error(detail?.detail ?? `${response.status} ${response.statusText}`);
+    throw new ApiError(
+      response.status,
+      detail?.detail ?? `${response.status} ${response.statusText}`,
+    );
   }
   return response.json() as Promise<T>;
 }
@@ -213,44 +230,81 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
   const [selectedDate, setSelectedDate] = useState(istDate());
   const [tab, setTab] = useState<Tab>('scorecard');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [dayError, setDayError] = useState<string | null>(null);
+  const [backendUpdateRequired, setBackendUpdateRequired] = useState(false);
   const [action, setAction] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [detectorReplay, setDetectorReplay] = useState<DetectorReplay | null>(null);
 
   const loadOverview = useCallback(async () => {
-    try {
-      const [archivePayload, healthPayload] = await Promise.all([
-        fetchJson<{ archives?: RadarArchive[] }>('/api/ai/radar-archives?limit=90'),
-        fetchJson<RadarHealth>('/api/ai/radar-health'),
-      ]);
+    const [archiveResult, healthResult] = await Promise.allSettled([
+      fetchJson<{ archives?: RadarArchive[] }>('/api/ai/radar-archives?limit=90'),
+      fetchJson<RadarHealth>('/api/ai/radar-health'),
+    ]);
+
+    if (archiveResult.status === 'fulfilled') {
+      const archivePayload = archiveResult.value;
       const rows = archivePayload.archives ?? [];
       setArchives(rows);
-      setHealth(healthPayload);
       setSelectedDate((current) => (
         rows.some((row) => row.date === current) ? current : rows[0]?.date ?? current
       ));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to load radar intelligence');
-    } finally {
-      setLoading(false);
     }
+    if (healthResult.status === 'fulfilled') {
+      setHealth(healthResult.value);
+    }
+
+    const failures = [archiveResult, healthResult].filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    const missingBackend = failures.some(
+      (result) => result.reason instanceof ApiError && result.reason.status === 404,
+    );
+    const hardFailure = failures.find(
+      (result) => !(result.reason instanceof ApiError && result.reason.status === 404),
+    );
+    setBackendUpdateRequired(missingBackend);
+    setOverviewError(
+      hardFailure
+        ? (hardFailure.reason instanceof Error
+          ? hardFailure.reason.message
+          : 'Unable to load radar intelligence')
+        : null,
+    );
+    setLoading(false);
   }, []);
 
   const loadDay = useCallback(async (date: string) => {
-    try {
-      const [score, funnelReport] = await Promise.all([
-        fetchJson<RadarScorecard>(`/api/ai/radar-scorecard/${date}`),
-        fetchJson<FunnelReport>(`/api/ai/radar-funnel/${date}`),
-      ]);
-      setScorecard(score);
-      setFunnel(funnelReport);
-      setError(null);
-    } catch (e) {
+    const [scoreResult, funnelResult] = await Promise.allSettled([
+      fetchJson<RadarScorecard>(`/api/ai/radar-scorecard/${date}`),
+      fetchJson<FunnelReport>(`/api/ai/radar-funnel/${date}`),
+    ]);
+    if (scoreResult.status === 'fulfilled') setScorecard(scoreResult.value);
+    else setScorecard(null);
+    if (funnelResult.status === 'fulfilled') setFunnel(funnelResult.value);
+    else setFunnel(null);
+
+    const failures = [scoreResult, funnelResult].filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    const missingBackend = failures.some(
+      (result) => result.reason instanceof ApiError && result.reason.status === 404,
+    );
+    const hardFailure = failures.find(
+      (result) => !(result.reason instanceof ApiError && result.reason.status === 404),
+    );
+    if (missingBackend) setBackendUpdateRequired(true);
+    setDayError(
+      hardFailure
+        ? (hardFailure.reason instanceof Error
+          ? hardFailure.reason.message
+          : 'Unable to load daily review')
+        : null,
+    );
+    if (failures.length === 2 && !missingBackend && !hardFailure) {
       setScorecard(null);
       setFunnel(null);
-      setError(e instanceof Error ? e.message : 'Unable to load daily review');
     }
   }, []);
 
@@ -277,7 +331,11 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
       setActionMessage(success(payload));
       await Promise.all([loadOverview(), loadDay(selectedDate)]);
     } catch (e) {
-      setActionMessage(e instanceof Error ? e.message : 'Action failed');
+      setActionMessage(
+        e instanceof ApiError && e.status === 404
+          ? 'This control requires the radar-learning backend update.'
+          : e instanceof Error ? e.message : 'Action failed',
+      );
     } finally {
       setAction(null);
     }
@@ -297,7 +355,13 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
   }, [funnelRows]);
 
   const healthTone = health?.healthy ? 'good' : alerts.some((row) => row.severity === 'critical') ? 'bad' : 'warn';
-  const healthLabel = health?.healthy ? 'Healthy' : loading ? 'Loading' : alerts.length ? `${alerts.length} alerts` : 'Needs review';
+  const healthLabel = health?.healthy
+    ? 'Healthy'
+    : loading
+      ? 'Loading'
+      : backendUpdateRequired
+        ? 'Backend update'
+        : alerts.length ? `${alerts.length} alerts` : 'Needs review';
 
   return (
     <section className="panel-card">
@@ -342,7 +406,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
             />
             {selectedArchive ? (
               <a
-                href={selectedArchive.downloadUrl}
+                href={`${API_BASE}${selectedArchive.downloadUrl}`}
                 className="h-8 inline-flex items-center rounded-lg border border-nexus-accent/35 bg-nexus-accent/10 px-3 text-[10px] font-semibold text-nexus-accent hover:bg-nexus-accent/20"
               >
                 Download ZIP
@@ -397,9 +461,15 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
       </div>
 
       <div className="p-4">
-        {error ? (
+        {backendUpdateRequired ? (
+          <div className="mb-3 rounded-lg border border-nexus-yellow/30 bg-nexus-yellow/5 px-3 py-2 text-[10px] text-nexus-yellow">
+            Radar archive access is available, but learning and health APIs need the matching backend deployment.
+          </div>
+        ) : null}
+
+        {overviewError || dayError ? (
           <div className="mb-3 rounded-lg border border-nexus-red/30 bg-nexus-red/5 px-3 py-2 text-[10px] text-nexus-red">
-            {error}
+            {overviewError ?? dayError}
           </div>
         ) : null}
 
@@ -678,7 +748,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    disabled={action != null}
+                    disabled={action != null || backendUpdateRequired}
                     onClick={() => runAction('threshold-replay', `/api/ai/radar-replay/${selectedDate}`, (payload) => `Threshold replay: ${payload.truthCount ?? 0} FTV moves`)}
                     className="rounded-lg border border-purple-500/35 bg-purple-500/10 px-3 py-2 text-[10px] text-purple-300 hover:bg-purple-500/20 disabled:opacity-50"
                   >
@@ -686,7 +756,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
                   </button>
                   <button
                     type="button"
-                    disabled={action != null}
+                    disabled={action != null || backendUpdateRequired}
                     onClick={() => runAction('detector-replay', `/api/ai/radar-detector-replay/${selectedDate}`, (payload) => `Detector replay: ${payload.uniqueRadarKeys ?? 0} radar keys`)}
                     className="rounded-lg border border-nexus-accent/35 bg-nexus-accent/10 px-3 py-2 text-[10px] text-nexus-accent hover:bg-nexus-accent/20 disabled:opacity-50"
                   >
@@ -694,7 +764,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
                   </button>
                   <button
                     type="button"
-                    disabled={action != null}
+                    disabled={action != null || backendUpdateRequired}
                     onClick={() => runAction('finalize', `/api/ai/radar-finalize/${selectedDate}`, (payload) => payload.backup?.configured ? 'ZIP finalized and backed up' : 'ZIP finalized locally')}
                     className="rounded-lg border border-nexus-green/35 bg-nexus-green/10 px-3 py-2 text-[10px] text-nexus-green hover:bg-nexus-green/20 disabled:opacity-50"
                   >
