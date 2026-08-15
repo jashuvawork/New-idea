@@ -1364,12 +1364,14 @@ class Settings(BaseSettings):
     # strongest approved contracts first instead of spending the whole book on one leg.
     fallback_capital_inr: float = 200_000
     max_sizing_capital_inr: float = 200_000
-    per_trade_capital_pct: float = 0.95
+    per_trade_capital_pct: float = 0.90
     ftv_ranked_allocation_enabled: bool = True
     ftv_allocation_weights_csv: str = "0.60,0.25,0.10"
-    ftv_allocation_cash_reserve_pct: float = 0.05
+    ftv_allocation_remaining_pct: float = 0.90
+    ftv_allocation_cash_reserve_pct: float = 0.0
     ftv_allocation_max_positions: int = 3
     ftv_allocation_max_same_side: int = 2
+    ftv_allocation_require_ftv: bool = True
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
     aggressive_min_explosion_score: int = 45

@@ -1391,7 +1391,17 @@ def find_best_entry(
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty
 
-    best = max(candidates, key=sort_key)
+    # Stable leg identity breaks exact score ties so the capital-first slot cannot
+    # flip between otherwise identical snapshots because of collection order.
+    best = max(
+        candidates,
+        key=lambda candidate: (
+            sort_key(candidate),
+            candidate.symbol.upper(),
+            candidate.side.value,
+            float(candidate.strike),
+        ),
+    )
     floor = min_rank_for_entry(chop, snapshots)
     floor = max(floor, last_n_elevated_min_rank(state, snapshots))
 

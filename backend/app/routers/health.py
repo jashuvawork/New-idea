@@ -178,21 +178,25 @@ async def clear_upstox_rate_limit():
 @router.get("/api/deployment/readiness")
 async def deployment_readiness():
     """Live deployment checklist — paper log + broker + risk gates."""
-    from app.engines.auto_trader import get_state
-    from app.engines.risk_engine import RiskEngine
-    from app.routers.market import get_multi_snapshot
+    from app.engines.auto_trader import get_risk_engine, get_state
+    from app.loop_watchdog import watchdog_status
+    from app.routers.market import get_multi_snapshot_fast
 
     settings = get_settings()
     token_status = await get_daily_token_status()
     store_health = trade_store.check_store_health()
-    risk = RiskEngine()
+    risk = get_risk_engine()
     state = get_state()
+    watchdog = watchdog_status()
+    websocket = ws_status()
 
     market_live = False
     upstox_data = False
     snapshots = {}
     try:
-        snapshot = await get_multi_snapshot()
+        # Readiness is polled by the UI. It must never trigger a full broker REST
+        # rebuild or compete with the execution loop.
+        snapshot = await get_multi_snapshot_fast(overlay_ws=False)
         snapshots = snapshot.snapshots if snapshot else {}
         for sym in settings.symbols:
             snap = snapshots.get(sym)
@@ -206,6 +210,15 @@ async def deployment_readiness():
     if not market_live:
         market_live = get_market_phase() == "LIVE_MARKET"
 
+    beat_age = watchdog.get("lastBeatAgeSeconds")
+    loop_healthy = (
+        not watchdog.get("enabled")
+        or (
+            watchdog.get("threadAlive")
+            and beat_age is not None
+            and float(beat_age) <= float(watchdog.get("staleSeconds") or 20)
+        )
+    )
     checks = {
         "upstoxTokenValid": bool(token_status.get("validToday")),
         "upstoxDataReady": upstox_data,
@@ -216,6 +229,12 @@ async def deployment_readiness():
         "calibrationClear": not any(state.calibrationBlocks.values()),
         "liveTradingFlagSet": settings.enable_live_trading,
         "paperTradingActive": settings.paper_trading,
+        "eventLoopHealthy": bool(loop_healthy),
+        "upstoxRateLimitClear": not rate_limit_active(),
+        "websocketHealthy": bool(
+            not websocket.get("enabled")
+            or (websocket.get("connected") and not websocket.get("streamStale"))
+        ),
     }
 
     paper_ready = all([
@@ -223,6 +242,7 @@ async def deployment_readiness():
         checks["tradeStoreWritable"],
         checks["autoTradingEnabled"],
         checks["riskEngineOk"],
+        checks["eventLoopHealthy"],
     ])
 
     live_ready = all([
@@ -232,6 +252,9 @@ async def deployment_readiness():
         checks["autoTradingEnabled"],
         checks["riskEngineOk"],
         checks["calibrationClear"],
+        checks["marketLive"],
+        checks["eventLoopHealthy"],
+        checks["upstoxRateLimitClear"],
         settings.enable_live_trading,
     ])
 
@@ -240,12 +263,20 @@ async def deployment_readiness():
         arm_live_steps.append("Login to Upstox (valid IST-day token required)")
     if not checks["upstoxDataReady"]:
         arm_live_steps.append("Wait for market data snapshots to load")
+    if not checks["marketLive"]:
+        arm_live_steps.append("Wait for the configured exchange session to open")
     if not checks["tradeStoreWritable"]:
         arm_live_steps.append(f"Fix trade store permissions at {store_health['storeDir']}")
     if not checks["riskEngineOk"]:
         arm_live_steps.append("Clear risk engine safe mode")
     if not checks["calibrationClear"]:
         arm_live_steps.append("Clear calibration blocks or reset session")
+    if not checks["eventLoopHealthy"]:
+        arm_live_steps.append("Restore the event-loop watchdog heartbeat")
+    if not checks["upstoxRateLimitClear"]:
+        arm_live_steps.append("Wait for the Upstox API rate-limit cooldown to clear")
+    if not checks["autoTradingEnabled"]:
+        arm_live_steps.append("Set AUTO_TRADING_ENABLED=true")
     if not settings.enable_live_trading:
         arm_live_steps.append("Set ENABLE_LIVE_TRADING=true in env and redeploy")
 
@@ -275,8 +306,22 @@ async def deployment_readiness():
             and milestone["readyForLiveMilestone"]
             and checks.get("worstDayClear", True)
         ),
-        "executionMode": "LIVE" if settings.enable_live_trading else "PAPER",
+        "executionMode": (
+            "LIVE"
+            if settings.enable_live_trading and settings.auto_trading_enabled
+            else "PAPER"
+        ),
         "checks": checks,
+        "health": {
+            "api": "ok",
+            "loopWatchdog": watchdog,
+            "websocket": websocket,
+            "rateLimitActive": rate_limit_active(),
+            "rateLimitRemainingSeconds": round(
+                rate_limit_cooldown_remaining(), 1
+            ),
+            "latency": latency_stats(),
+        },
         "milestone": milestone,
         "tradeLog": {
             "storeDir": store_health["storeDir"],

@@ -703,11 +703,12 @@ class UpstoxClient:
             _cache_set(cache_key, result)
         return result
 
-    async def get_funds(self) -> dict[str, Any]:
+    async def get_funds(self, *, force: bool = False) -> dict[str, Any]:
         cache_key = "funds"
-        cached = _cache_get(cache_key, self.settings.upstox_funds_cache_seconds)
-        if cached is not None:
-            return cached
+        if not force:
+            cached = _cache_get(cache_key, self.settings.upstox_funds_cache_seconds)
+            if cached is not None:
+                return cached
         data = await self._get("/user/get-funds-and-margin")
         _cache_set(cache_key, data)
         return data

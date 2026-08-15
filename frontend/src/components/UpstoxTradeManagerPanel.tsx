@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  DeploymentReadiness,
+  DeploymentStatus,
   FtvAllocationRow,
   UpstoxBrokerOrder,
   UpstoxBrokerPosition,
@@ -16,6 +18,31 @@ function money(value: number | undefined): string {
 
 function pnlTone(value: number): string {
   return value >= 0 ? 'text-nexus-green' : 'text-nexus-red';
+}
+
+function HealthCheck({
+  label,
+  ok,
+  detail,
+}: {
+  label: string;
+  ok: boolean | null;
+  detail: string;
+}) {
+  const tone = ok == null
+    ? 'border-nexus-border text-nexus-muted'
+    : ok
+      ? 'border-nexus-green/30 bg-nexus-green/5 text-nexus-green'
+      : 'border-nexus-red/30 bg-nexus-red/5 text-nexus-red';
+  return (
+    <div className={`rounded-lg border px-2.5 py-2 ${tone}`}>
+      <div className="flex items-center justify-between gap-2 text-[9px] font-bold uppercase tracking-wide">
+        <span>{label}</span>
+        <span>{ok == null ? 'WAIT' : ok ? 'OK' : 'BLOCK'}</span>
+      </div>
+      <div className="mt-1 truncate text-[9px] opacity-75">{detail}</div>
+    </div>
+  );
 }
 
 function CapitalCard({
@@ -46,7 +73,7 @@ function AllocationRow({ row }: { row: FtvAllocationRow }) {
         ? 'text-nexus-red'
         : 'text-nexus-accent';
   return (
-    <div className="grid grid-cols-[2rem_minmax(8rem,1fr)_5rem_6rem] items-center gap-2 rounded-lg border border-nexus-border/70 bg-black/20 px-2.5 py-2 text-[10px]">
+    <div className="grid min-w-[28rem] grid-cols-[2rem_minmax(8rem,1fr)_5rem_6rem] items-center gap-2 rounded-lg border border-nexus-border/70 bg-black/20 px-2.5 py-2 text-[10px]">
       <span className="font-mono text-nexus-accent">#{row.rank ?? '—'}</span>
       <div className="min-w-0">
         <div className="truncate font-semibold">
@@ -71,7 +98,7 @@ function AllocationRow({ row }: { row: FtvAllocationRow }) {
 
 function BrokerPositionRow({ row }: { row: UpstoxBrokerPosition }) {
   return (
-    <div className="grid grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
+    <div className="grid min-w-[32rem] grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
       <div className="min-w-0">
         <div className="truncate font-semibold">{row.tradingSymbol || row.instrumentKey || 'Position'}</div>
         <div className="text-[9px] text-nexus-muted">{row.exchange} · {row.product}</div>
@@ -87,7 +114,7 @@ function BrokerPositionRow({ row }: { row: UpstoxBrokerPosition }) {
 
 function StrategyTradeRow({ row }: { row: UpstoxManagerTrade }) {
   return (
-    <div className="grid grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
+    <div className="grid min-w-[32rem] grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
       <div className="min-w-0">
         <div className="truncate font-semibold">
           {row.symbol} {row.side} {row.strike}
@@ -110,7 +137,7 @@ function StrategyTradeRow({ row }: { row: UpstoxManagerTrade }) {
 function OrderRow({ row }: { row: UpstoxBrokerOrder }) {
   const ok = ['complete', 'completed', 'filled'].includes(String(row.status || '').toLowerCase());
   return (
-    <div className="grid grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
+    <div className="grid min-w-[32rem] grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 border-b border-nexus-border/60 px-2 py-2 text-[10px] last:border-0">
       <div className="min-w-0">
         <div className="truncate font-semibold">{row.tradingSymbol || row.orderId || 'Order'}</div>
         <div className="truncate text-[9px] text-nexus-muted">
@@ -126,10 +153,17 @@ function OrderRow({ row }: { row: UpstoxBrokerOrder }) {
   );
 }
 
-export function UpstoxTradeManagerPanel() {
+export function UpstoxTradeManagerPanel({
+  deployment,
+  readiness,
+}: {
+  deployment: DeploymentStatus | null;
+  readiness: DeploymentReadiness | null;
+}) {
   const [overview, setOverview] = useState<UpstoxTradeOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [stale, setStale] = useState(false);
   const [tab, setTab] = useState<Tab>('positions');
   const requestId = useRef(0);
 
@@ -148,9 +182,11 @@ export function UpstoxTradeManagerPanel() {
       if (id !== requestId.current) return;
       setOverview(payload);
       setError(null);
+      setStale(false);
     } catch (reason) {
       if (id !== requestId.current) return;
       setError(reason instanceof Error ? reason.message : 'Trade manager unavailable');
+      setStale(true);
     } finally {
       if (id === requestId.current) setLoading(false);
     }
@@ -166,8 +202,9 @@ export function UpstoxTradeManagerPanel() {
   const capital = overview?.capital;
   const committed = allocation?.committedInr ?? 0;
   const remaining = allocation?.remainingInr ?? 0;
-  const reserve = allocation?.cashReserveInr ?? 0;
   const capitalBase = allocation?.capitalBaseInr ?? capital?.totalEquityInr ?? 0;
+  const remainingAllocationPct = allocation?.remainingAllocationPct ?? 0.9;
+  const nextTradeBudget = allocation?.nextTradeBudgetInr ?? remaining * remainingAllocationPct;
   const strategyMode = overview?.executionMode !== 'LIVE';
   const netPnl = strategyMode ? overview?.pnl.strategyNetInr ?? 0 : overview?.pnl.brokerNetInr ?? 0;
   const realized = strategyMode ? overview?.pnl.strategyRealizedInr ?? 0 : overview?.pnl.brokerRealizedInr ?? 0;
@@ -176,6 +213,17 @@ export function UpstoxTradeManagerPanel() {
     ...(allocation?.activeAllocations || []).map((row) => ({ ...row, status: 'OPENED' })),
     ...(allocation?.plannedAllocations || []).filter((row) => row.status !== 'OPENED'),
   ].sort((a, b) => Number(a.rank || 99) - Number(b.rank || 99));
+  const checks = readiness?.checks || {};
+  const liveFlag = deployment?.flags.enableLiveTrading === true;
+  const autoTrading = deployment?.flags.autoTradingEnabled === true;
+  const health = readiness?.health;
+  const liveOperational = Boolean(
+    readiness?.readyForLive
+    && overview?.broker.complete
+    && overview?.reconciliation.safe
+    && !stale,
+  );
+  const websocketHealthy = readiness ? Boolean(checks.websocketHealthy) : null;
 
   return (
     <section className="rounded-xl border border-nexus-border bg-nexus-panel shadow-panel overflow-hidden">
@@ -197,9 +245,14 @@ export function UpstoxTradeManagerPanel() {
             }`}>
               {overview?.broker.connected ? 'UPSTOX CONNECTED' : 'BROKER OFFLINE'}
             </span>
+            {stale ? (
+              <span className="rounded border border-nexus-red/40 bg-nexus-red/10 px-1.5 py-0.5 text-[9px] font-bold text-nexus-red">
+                STALE
+              </span>
+            ) : null}
           </div>
           <p className="mt-1 text-[10px] text-nexus-muted">
-            Ranked flat-to-vertical allocation: strongest approved setup first, then remaining capital to the next.
+            ₹2 lakh paper book · each approved FTV trade receives 90% of the capital still remaining.
           </p>
         </div>
         <button
@@ -212,8 +265,12 @@ export function UpstoxTradeManagerPanel() {
       </div>
 
       {error ? (
-        <div role="alert" className="m-4 rounded-lg border border-nexus-yellow/30 bg-nexus-yellow/5 px-3 py-2 text-[10px] text-nexus-yellow">
-          {error}
+        <div role="alert" className={`m-4 rounded-lg border px-3 py-2 text-[10px] ${
+          stale && overview
+            ? 'border-nexus-red/40 bg-nexus-red/10 text-nexus-red'
+            : 'border-nexus-yellow/30 bg-nexus-yellow/5 text-nexus-yellow'
+        }`}>
+          {stale && overview ? `STALE DATA — ${error}. Do not rely on displayed positions or capital.` : error}
         </div>
       ) : null}
       {overview && !overview.broker.complete ? (
@@ -221,29 +278,117 @@ export function UpstoxTradeManagerPanel() {
           Broker data is partial. Strategy trades and paper P&amp;L remain available; reconnect Upstox for live funds, positions, and orders.
         </div>
       ) : null}
+      {overview?.reconciliation.checked && !overview.reconciliation.safe ? (
+        <div role="alert" className="mx-4 mt-4 rounded-lg border border-nexus-red/40 bg-nexus-red/10 px-3 py-2 text-[10px] text-nexus-red">
+          {overview.reconciliation.message}. Pause live entries and reconcile broker positions before continuing.
+        </div>
+      ) : null}
+      {overview?.executionMode === 'LIVE' && (!deployment?.upstox.validToday || !readiness?.readyForLive) ? (
+        <div role="alert" className="mx-4 mt-4 rounded-lg border border-nexus-red/40 bg-nexus-red/10 px-3 py-2 text-[10px] text-nexus-red">
+          LIVE mode is not operationally ready: {!deployment?.upstox.validToday ? 'Upstox authentication is invalid. ' : ''}
+          {!readiness?.readyForLive ? 'Deployment readiness checks have not all passed.' : ''}
+        </div>
+      ) : null}
 
       <div className="p-4">
+        <div className="mb-3 rounded-lg border border-nexus-border bg-black/15 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-[11px] font-bold">Live readiness &amp; execution API health</h3>
+              <p className="mt-0.5 text-[9px] text-nexus-muted">
+                Live remains disabled until <span className="font-mono">ENABLE_LIVE_TRADING=true</span>. The system still applies every risk and reconciliation gate after activation.
+              </p>
+            </div>
+            <span className={`rounded border px-2 py-1 text-[9px] font-bold ${
+              liveOperational
+                ? 'border-nexus-green/40 bg-nexus-green/10 text-nexus-green'
+                : liveFlag
+                  ? 'border-nexus-red/40 bg-nexus-red/10 text-nexus-red'
+                  : 'border-nexus-accent/40 bg-nexus-accent/10 text-nexus-accent'
+            }`}>
+              {liveOperational ? 'LIVE READY' : liveFlag ? 'LIVE BLOCKED' : readiness?.readyForPaper ? 'PAPER READY' : 'PAPER CHECKS'}
+            </span>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-1.5 md:grid-cols-4 xl:grid-cols-8">
+            <HealthCheck label="API" ok={health ? health.api === 'ok' && !stale : null} detail={stale ? 'manager response stale' : 'readiness endpoint'} />
+            <HealthCheck label="Live flag" ok={liveFlag} detail={liveFlag ? 'live order route armed' : 'paper orders only'} />
+            <HealthCheck label="Auto trader" ok={autoTrading} detail={autoTrading ? 'entry loop enabled' : 'entry loop stopped'} />
+            <HealthCheck label="Upstox token" ok={readiness ? Boolean(checks.upstoxTokenValid) : null} detail={deployment?.upstox.message || 'daily token status'} />
+            <HealthCheck label="Market data" ok={readiness ? Boolean(checks.upstoxDataReady) : null} detail={checks.marketLive ? 'live exchange session' : 'waiting / market closed'} />
+            <HealthCheck label="Risk + loop" ok={readiness ? Boolean(checks.riskEngineOk && checks.eventLoopHealthy) : null} detail={checks.calibrationClear === false ? 'calibration blocked' : 'engine heartbeat'} />
+            <HealthCheck label="Rate limit" ok={readiness ? Boolean(checks.upstoxRateLimitClear) : null} detail={health?.rateLimitActive ? `${health.rateLimitRemainingSeconds}s cooldown` : 'broker API clear'} />
+            <HealthCheck label="WebSocket" ok={websocketHealthy} detail={health?.websocket.enabled ? `${health.websocket.lastMessageAgeMs ?? '—'}ms tick age` : 'REST fallback configured'} />
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-nexus-muted">
+            <span>entry scan <b className="font-mono text-white">{health?.latency.entryScanIntervalMs ?? deployment?.cadence?.entryScanIntervalMs ?? '—'} ms</b></span>
+            <span>last fast cycle <b className="font-mono text-white">{health?.latency.lastFastCycleMs ?? '—'} ms</b></span>
+            <span>broker request floor <b className="font-mono text-white">{deployment?.cadence?.upstoxMinRequestIntervalMs ?? '—'} ms</b></span>
+            <span>reconciliation <b className={overview?.reconciliation.safe ? 'text-nexus-green' : 'text-nexus-red'}>{overview?.reconciliation.safe ? 'matched' : 'blocked'}</b></span>
+          </div>
+          {readiness?.armLiveSteps.length ? (
+            <div className="mt-2 rounded border border-nexus-yellow/20 bg-nexus-yellow/5 px-2 py-1.5 text-[9px] text-nexus-yellow">
+              Before live: {readiness.armLiveSteps.slice(0, 3).join(' · ')}
+            </div>
+          ) : null}
+        </div>
+
         <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <CapitalCard label="Capital X" value={money(capitalBase)} detail={`${capital?.source || 'fallback'} sizing book`} tone="text-nexus-accent" />
           <CapitalCard label="Allocated Y" value={money(committed)} detail={`${allocation?.utilizationPct ?? 0}% deployed`} />
-          <CapitalCard label="Left Z = X − Y − reserve" value={money(remaining)} detail={`${money(reserve)} protected cash`} tone="text-nexus-green" />
-          <CapitalCard label="Session P&L" value={money(netPnl)} detail={`${money(realized)} realized · ${money(unrealized)} live`} tone={pnlTone(netPnl)} />
+          <CapitalCard label="Left Z = X − Y" value={money(remaining)} detail={`${money(nextTradeBudget)} available to next FTV`} tone="text-nexus-green" />
+          <CapitalCard label="Session P&L" value={money(netPnl)} detail={`${money(realized)} realized · ${money(unrealized)} unrealized`} tone={pnlTone(netPnl)} />
+        </div>
+
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="rounded-lg border border-nexus-border bg-black/20 px-3 py-2 text-[10px]">
+            <div className="flex justify-between gap-3">
+              <span className="text-nexus-muted">Upstox funds</span>
+              <span className="font-mono text-nexus-accent">
+                {capital?.brokerAvailableMarginInr != null ? money(capital.brokerAvailableMarginInr) : 'Unavailable'}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-x-3 text-[9px] text-nexus-muted">
+              <span>used {capital?.brokerUsedMarginInr != null ? money(capital.brokerUsedMarginInr) : '—'}</span>
+              <span>equity {capital?.brokerTotalEquityInr != null ? money(capital.brokerTotalEquityInr) : '—'}</span>
+              {overview?.broker.errors.funds ? <span className="text-nexus-red">funds error</span> : null}
+            </div>
+          </div>
+          <div className="rounded-lg border border-nexus-border bg-black/20 px-3 py-2 text-[10px]">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <span className="text-nexus-muted">Broker P&amp;L</span>
+                <div className={`font-mono font-bold ${pnlTone(overview?.pnl.brokerNetInr ?? 0)}`}>
+                  {money(overview?.pnl.brokerNetInr)}
+                </div>
+              </div>
+              <div>
+                <span className="text-nexus-muted">Strategy P&amp;L</span>
+                <div className={`font-mono font-bold ${pnlTone(overview?.pnl.strategyNetInr ?? 0)}`}>
+                  {money(overview?.pnl.strategyNetInr)}
+                </div>
+              </div>
+            </div>
+            <div className="mt-1 text-[9px] text-nexus-muted">
+              Separate books · strategy W {overview?.pnl.wins ?? 0} / L {overview?.pnl.losses ?? 0} / PF {(overview?.pnl.profitFactor ?? 0).toFixed(2)}
+            </div>
+          </div>
         </div>
 
         <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.85fr)]">
           <div className="rounded-lg border border-nexus-border bg-black/15 p-3">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <h3 className="text-[11px] font-bold">Capital allocation queue</h3>
+                <h3 className="text-[11px] font-bold">Capital allocation activity</h3>
                 <p className="text-[9px] text-nexus-muted">
-                  {(allocation?.weights || []).map((weight) => `${Math.round(weight * 100)}%`).join(' → ') || '60% → 25% → 10%'} · {money(reserve)} reserve
+                  {Math.round(remainingAllocationPct * 100)}% of remaining per trade · effective book shares{' '}
+                  {(allocation?.weights || [0.9, 0.09, 0.009]).map((weight) => `${(weight * 100).toFixed(weight < 0.1 ? 1 : 0)}%`).join(' → ')}
                 </p>
               </div>
               <span className="text-[9px] text-nexus-muted">
                 max {allocation?.maxPositions ?? 3} positions
               </span>
             </div>
-            <div className="mt-2 space-y-1.5 max-h-56 overflow-y-auto">
+            <div className="mt-2 max-h-56 space-y-1.5 overflow-auto">
               {allocationRows.length ? (
                 allocationRows.map((row, index) => (
                   <AllocationRow key={`${row.tradeId || row.key || index}-${row.status}`} row={row} />
@@ -288,7 +433,7 @@ export function UpstoxTradeManagerPanel() {
               </div>
             </div>
 
-            <div className="grid grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 bg-black/25 px-2 py-1.5 text-[8px] uppercase tracking-wider text-nexus-muted">
+            <div className="grid min-w-[32rem] grid-cols-[minmax(9rem,1fr)_4rem_6rem_6rem] gap-2 bg-black/25 px-2 py-1.5 text-[8px] uppercase tracking-wider text-nexus-muted">
               <span>{tab === 'orders' ? 'Order' : tab === 'positions' ? 'Broker position' : 'Strategy trade'}</span>
               <span className="text-right">{tab === 'orders' ? 'Fill' : tab === 'positions' ? 'Qty' : 'Lots'}</span>
               <span className="text-right">{tab === 'orders' ? 'Price' : tab === 'positions' ? 'LTP' : 'Capital'}</span>
