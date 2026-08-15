@@ -101,6 +101,7 @@ def test_archives_best_unique_radars_and_improvement_milestones(tmp_path):
         count = record_top_radars(
             {"NIFTY": _snap([_alert(strike=24500.0, score=45.0), first_lift, ignored])},
             now=now,
+            source="rest_snapshot",
         )
         assert count == 2
 
@@ -114,6 +115,7 @@ def test_archives_best_unique_radars_and_improvement_milestones(tmp_path):
         assert record_top_radars(
             {"NIFTY": _snap([improved])},
             now=now.replace(hour=11),
+            source="ws_entry_scan",
         ) == 2
 
         archive = tmp_path / "radar_archives" / "radar-2026-08-15.zip"
@@ -123,6 +125,10 @@ def test_archives_best_unique_radars_and_improvement_milestones(tmp_path):
     assert rows[0]["tier"] == "ELITE"
     assert rows[0]["alert"]["explosionScore"] == 70.0
     assert len(rows[0]["milestones"]) == 2
+    assert rows[0]["context"]["archiveSource"] == "ws_entry_scan"
+    assert rows[0]["context"]["volumeReliable"] is False
+    assert rows[0]["milestones"][0]["source"] == "rest_snapshot"
+    assert rows[0]["milestones"][1]["source"] == "ws_entry_scan"
     assert any(row["alert"].get("ictFirstLift") for row in rows)
 
 

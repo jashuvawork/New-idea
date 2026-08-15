@@ -45,6 +45,7 @@ import { PremarketPanel } from './components/PremarketPanel';
 import { SwingTrading } from './components/SwingTrading';
 import { PerformanceMilestone } from './components/PerformanceMilestone';
 import { WeeklyDashboardPanel } from './components/WeeklyDashboardPanel';
+import { RadarIntelligencePanel } from './components/RadarIntelligencePanel';
 import { deriveMarketSession } from './lib/marketSession';
 import type { MultiSnapshot, SymbolSnapshot } from './types';
 
@@ -249,6 +250,8 @@ export default function App() {
           <PerformanceMilestone stats={milestone} />
           <WeeklyDashboardPanel data={weeklyDashboard} />
         </div>
+
+        <RadarIntelligencePanel />
 
         {/* Fixed-height stats slot — never collapse when report briefly missing */}
         <div className="layout-stats-slot flex flex-wrap items-center gap-2">

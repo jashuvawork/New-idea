@@ -99,13 +99,15 @@ def _worth_archiving(alert: Mapping[str, Any]) -> bool:
     )
 
 
-def _snapshot_context(symbol: str, snap: Any) -> dict[str, Any]:
+def _snapshot_context(symbol: str, snap: Any, source: str) -> dict[str, Any]:
     breadth = getattr(snap, "breadth", None)
     chart = getattr(snap, "spotChart", None)
     regime = getattr(snap, "regime", None)
     phase = getattr(snap, "marketPhase", None)
     return _jsonable({
         "symbol": symbol.upper(),
+        "archiveSource": source,
+        "volumeReliable": source != "ws_entry_scan",
         "timestamp": getattr(snap, "timestamp", None),
         "marketPhase": getattr(phase, "value", phase),
         "spot": getattr(snap, "spot", None),
@@ -121,9 +123,15 @@ def _snapshot_context(symbol: str, snap: Any) -> dict[str, Any]:
     })
 
 
-def _milestone(alert: Mapping[str, Any], seen_at: str) -> dict[str, Any]:
+def _milestone(
+    alert: Mapping[str, Any],
+    seen_at: str,
+    source: str,
+) -> dict[str, Any]:
     return _jsonable({
         "seenAt": seen_at,
+        "source": source,
+        "volumeReliable": source != "ws_entry_scan",
         "tier": alert.get("tier"),
         "premium": alert.get("premium"),
         "explosionScore": alert.get("explosionScore"),
@@ -175,7 +183,14 @@ def _archive_lock(directory: Path, date: str) -> Iterator[None]:
                 pass
 
 
-def _write_archive(path: Path, date: str, entries: list[dict[str, Any]], now: datetime) -> None:
+def _write_archive(
+    path: Path,
+    date: str,
+    entries: list[dict[str, Any]],
+    now: datetime,
+    *,
+    extra_artifacts: Mapping[str, bytes | str] | None = None,
+) -> None:
     manifest = {
         "schemaVersion": SCHEMA_VERSION,
         "date": date,
@@ -200,10 +215,23 @@ def _write_archive(path: Path, date: str, entries: list[dict[str, Any]], now: da
     os.close(fd)
     tmp = Path(tmp_name)
     try:
+        preserved: dict[str, bytes] = {}
+        if path.exists():
+            try:
+                with zipfile.ZipFile(path, "r") as existing:
+                    for name in existing.namelist():
+                        if name not in {"manifest.json", "top_radars.json", "README.txt"}:
+                            preserved[name] = existing.read(name)
+            except (OSError, zipfile.BadZipFile):
+                preserved = {}
+        for name, payload in (extra_artifacts or {}).items():
+            preserved[name] = payload.encode() if isinstance(payload, str) else payload
         with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("manifest.json", json.dumps(manifest, indent=2))
             archive.writestr("top_radars.json", json.dumps(entries, indent=2))
             archive.writestr("README.txt", readme)
+            for name, payload in preserved.items():
+                archive.writestr(name, payload)
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
@@ -229,6 +257,7 @@ def record_top_radars(
     snapshots: Mapping[str, Any],
     *,
     now: datetime | None = None,
+    source: str = "snapshot",
 ) -> int:
     """Merge improved radar observations into today's ZIP; return saved entry count."""
     settings = get_settings()
@@ -247,6 +276,7 @@ def record_top_radars(
         1,
         int(getattr(settings, "radar_archive_top_n_per_day", 100) or 100),
     )
+    detected_events: list[dict[str, Any]] = []
 
     with _archive_lock(directory, date):
         entries = _load_entries(path)
@@ -254,7 +284,7 @@ def record_top_radars(
         for symbol, snap in snapshots.items():
             if not bool(getattr(snap, "dataAvailable", False)):
                 continue
-            context = _snapshot_context(symbol, snap)
+            context = _snapshot_context(symbol, snap, source)
             for raw_alert in getattr(snap, "explosionAlerts", None) or []:
                 if not isinstance(raw_alert, Mapping) or not _worth_archiving(raw_alert):
                     continue
@@ -266,7 +296,7 @@ def record_top_radars(
                 if previous and rank <= previous_rank:
                     continue
                 milestones = list(previous.get("milestones") or []) if previous else []
-                milestones.append(_milestone(alert, seen_at))
+                milestones.append(_milestone(alert, seen_at, source))
                 entries[key] = {
                     "key": key,
                     "firstSeenAt": (
@@ -282,8 +312,21 @@ def record_top_radars(
                     "alert": alert,
                     "context": context,
                     "milestones": milestones[-20:],
+                    "outcome": dict(previous.get("outcome") or {}) if previous else {},
                     "_rank": list(rank),
                 }
+                detected_events.append({
+                    "event": "DETECTED",
+                    "key": key,
+                    "symbol": symbol.upper(),
+                    "side": str(alert.get("side") or "").upper(),
+                    "strike": _number(alert.get("strike")),
+                    "stage": "radar",
+                    "source": source,
+                    "tier": alert.get("tier"),
+                    "score": alert.get("explosionScore"),
+                    "momentType": alert.get("momentType"),
+                })
                 changed = True
 
         ordered = sorted(
@@ -299,7 +342,97 @@ def record_top_radars(
         current,
         int(getattr(settings, "radar_archive_retention_days", 365) or 365),
     )
+    try:
+        from app.services.radar_learning import record_funnel_event
+        from app.services.radar_health import (
+            record_component_success,
+            record_source,
+        )
+
+        record_source(source, snapshots, archive_count=len(ordered), now=current)
+        record_component_success(
+            "radarArchive",
+            detail={"date": date, "entryCount": len(ordered)},
+            now=current,
+        )
+        for event in detected_events:
+            record_funnel_event(event, now=current, date=date)
+    except Exception:
+        pass
     return len(ordered)
+
+
+def read_archive_entries(date: str) -> list[dict[str, Any]]:
+    """Read one day's ordered radar entries."""
+    return list(_load_entries(archive_path(date)).values())
+
+
+def update_archive_outcomes(
+    date: str,
+    outcomes: Mapping[str, Mapping[str, Any]],
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Atomically merge forward outcomes into existing radar entries."""
+    if not outcomes:
+        return 0
+    current = now or _now()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=IST)
+    current = current.astimezone(IST)
+    directory = get_archive_dir()
+    path = archive_path(date)
+    if not path.exists():
+        return 0
+    changed = 0
+    with _archive_lock(directory, date):
+        entries = _load_entries(path)
+        for key, outcome in outcomes.items():
+            row = entries.get(key)
+            if row is None:
+                continue
+            normalized = _jsonable(dict(outcome))
+            if row.get("outcome") == normalized:
+                continue
+            row["outcome"] = normalized
+            changed += 1
+        if changed:
+            ordered = sorted(
+                entries.values(),
+                key=lambda row: tuple(row.get("_rank") or ()),
+                reverse=True,
+            )
+            _write_archive(path, date, ordered, current)
+    return changed
+
+
+def add_archive_artifacts(
+    date: str,
+    artifacts: Mapping[str, bytes | str],
+    *,
+    now: datetime | None = None,
+) -> Path:
+    """Atomically add analysis/tape artifacts to a day's canonical ZIP."""
+    current = now or _now()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=IST)
+    current = current.astimezone(IST)
+    directory = get_archive_dir()
+    path = archive_path(date)
+    with _archive_lock(directory, date):
+        entries = _load_entries(path)
+        _write_archive(
+            path,
+            date,
+            sorted(
+                entries.values(),
+                key=lambda row: tuple(row.get("_rank") or ()),
+                reverse=True,
+            ),
+            current,
+            extra_artifacts=artifacts,
+        )
+    return path
 
 
 def list_archives(limit: int = 30) -> list[dict[str, Any]]:

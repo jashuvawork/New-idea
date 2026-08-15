@@ -30,6 +30,7 @@ async def health():
 @router.get("/api/deployment/status")
 async def deployment_status():
     from app.loop_watchdog import watchdog_status
+    from app.services.radar_health import health_status
 
     settings = get_settings()
     token_status = await get_daily_token_status()
@@ -40,6 +41,7 @@ async def deployment_status():
         "commit": settings.commit_sha,
         "environment": settings.environment,
         "loopWatchdog": watchdog_status(),
+        "radarHealth": health_status(),
         "upstox": {
             "hasToken": await has_upstox_token(),
             "validToday": token_status.get("validToday", False),

@@ -1677,6 +1677,25 @@ class Settings(BaseSettings):
     radar_archive_dir: str = ""  # default: {trade_store_dir}/radar_archives
     radar_archive_top_n_per_day: int = 100
     radar_archive_retention_days: int = 365
+    radar_learning_enabled: bool = True
+    radar_premium_tape_sample_seconds: int = 15
+    radar_outcome_horizons_seconds_csv: str = "60,300,900,1800"
+    radar_outcome_target_pct: float = 20.0
+    radar_outcome_stop_pct: float = 10.0
+    radar_hindsight_flat_window_seconds: int = 120
+    radar_hindsight_flat_max_range_pct: float = 8.0
+    radar_hindsight_vertical_min_move_pct: float = 40.0
+    radar_hindsight_lookahead_seconds: int = 1800
+    radar_funnel_dedupe_seconds: int = 60
+    radar_health_stale_seconds: int = 45
+    radar_archive_finalize_hour: int = 16
+    radar_archive_finalize_minute: int = 0
+    radar_backup_dir: str = ""
+    radar_backup_s3_bucket: str = ""
+    radar_backup_s3_prefix: str = "nexusquant/radar"
+    radar_backup_retry_max: int = 3
+    radar_backup_retry_base_seconds: float = 1.0
+    radar_backup_verify_head: bool = True
     daily_token_once: bool = True
 
     # Swing trading (multi-day paper holds)

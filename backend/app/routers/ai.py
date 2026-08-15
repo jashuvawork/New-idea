@@ -1,5 +1,6 @@
 """AI/ML strategy and learning API."""
 
+import asyncio
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -141,6 +142,88 @@ async def download_radar_archive(date: str):
         media_type="application/zip",
         filename=path.name,
     )
+
+
+@router.get("/radar-health")
+async def radar_health():
+    """Detector sampling, archive, replay, funnel, and backup health."""
+    from app.services.radar_health import health_status
+
+    return health_status()
+
+
+@router.get("/radar-scorecard/{date}")
+async def radar_scorecard(date: str):
+    """Daily precision/recall, lead-time, missed-winner, and outcome scorecard."""
+    from app.services.radar_learning import analyze_hindsight
+
+    try:
+        return await asyncio.to_thread(analyze_hindsight, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/radar-funnel/{date}")
+async def radar_funnel(date: str):
+    """Detection → gate blocker → entry → outcome funnel for one session."""
+    from app.services.radar_learning import build_funnel_report
+
+    try:
+        return await asyncio.to_thread(build_funnel_report, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/radar-replay/{date}")
+async def radar_replay(
+    date: str,
+    flat_max_range_pct: float | None = None,
+    vertical_min_move_pct: float | None = None,
+    lookahead_seconds: int | None = None,
+):
+    """Replay archived premium tape with optional hindsight threshold overrides."""
+    from app.services.radar_learning import analyze_hindsight
+
+    if flat_max_range_pct is not None and not 0 < flat_max_range_pct <= 50:
+        raise HTTPException(status_code=400, detail="flat_max_range_pct must be in (0, 50]")
+    if vertical_min_move_pct is not None and not 1 <= vertical_min_move_pct <= 1000:
+        raise HTTPException(status_code=400, detail="vertical_min_move_pct must be in [1, 1000]")
+    if lookahead_seconds is not None and not 60 <= lookahead_seconds <= 14400:
+        raise HTTPException(status_code=400, detail="lookahead_seconds must be in [60, 14400]")
+    try:
+        return await asyncio.to_thread(
+            analyze_hindsight,
+            date,
+            flat_max_range_pct=flat_max_range_pct,
+            vertical_min_move_pct=vertical_min_move_pct,
+            lookahead_seconds=lookahead_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/radar-finalize/{date}")
+async def finalize_radar_review(date: str):
+    """Build scorecard/funnel artifacts and run configured durable backup."""
+    from app.services.radar_learning import finalize_daily_review
+
+    try:
+        return await asyncio.to_thread(finalize_daily_review, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/radar-detector-replay/{date}")
+async def radar_detector_replay(date: str):
+    """Replay premium tape through an isolated production-detector subprocess."""
+    from app.services.radar_learning import run_detector_replay_isolated
+
+    try:
+        return await asyncio.to_thread(run_detector_replay_isolated, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/snapshot-analysis")
