@@ -44,6 +44,7 @@ class RiskEngine:
         lot_multiplier: int = 25,
         strategy_type: StrategyType = StrategyType.SCALP,
         strike: float = 0.0,
+        stop_points: float = 3.0,
     ) -> tuple[bool, str]:
         settings = get_settings()
         cap = get_capital_snapshot()
@@ -96,7 +97,7 @@ class RiskEngine:
             return False, "total_margin_exceeded"
 
         max_loss = settings.swing_max_loss_inr if is_swing else settings.max_risk_per_trade_inr
-        stop_pts = 8.0 if is_swing else 3.0
+        stop_pts = max(0.0, float(stop_points or (8.0 if is_swing else 3.0)))
         potential_loss = profile_stop_points(lots, lot_multiplier, stop_pts)
         if potential_loss > max_loss:
             return False, "per_trade_risk_exceeded"

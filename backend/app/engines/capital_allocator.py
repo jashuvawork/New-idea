@@ -285,12 +285,10 @@ def ranked_allocation_weights() -> list[float]:
 
 
 def trade_exposure_inr(trade: Any) -> float:
-    """Current premium paid for one open long-option position."""
-    premium = float(
-        getattr(trade, "currentPremium", None)
-        or getattr(trade, "entryPremium", 0)
-        or 0
-    )
+    """Cash committed to a long option; a losing mark never frees entry capital."""
+    entry_premium = float(getattr(trade, "entryPremium", 0) or 0)
+    current_premium = float(getattr(trade, "currentPremium", 0) or 0)
+    premium = max(entry_premium, current_premium)
     lots = max(0, int(getattr(trade, "lots", 0) or 0))
     symbol = str(getattr(trade, "symbol", "") or "")
     return max(0.0, premium * lots * lot_multiplier(symbol))

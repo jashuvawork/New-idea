@@ -880,6 +880,7 @@ async def _open_from_candidate(
         state, symbol, candidate.side, lots, fill_premium, lot_mult,
         strategy_type=candidate.strategy_type,
         strike=candidate.strike,
+        stop_points=stop_pts,
     )
     if not ok:
         return False, risk_reason

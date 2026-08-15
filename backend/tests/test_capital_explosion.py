@@ -116,7 +116,7 @@ class CapitalSizingTests(unittest.TestCase):
                     side=Side.CALL,
                     strike=24_500,
                     entryPremium=50,
-                    currentPremium=50,
+                    currentPremium=40,
                     lots=36,
                     openedAt=datetime.now(IST),
                     strategyType=StrategyType.EXPLOSIVE,

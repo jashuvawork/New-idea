@@ -52,3 +52,29 @@ def test_blocks_same_leg_while_open(mock_settings, mock_capital):
     )
     assert not ok
     assert reason == "same_leg_already_open"
+
+
+@patch("app.engines.risk_engine.get_capital_snapshot")
+@patch("app.engines.risk_engine.get_settings")
+def test_risk_check_uses_actual_planned_stop(mock_settings, mock_capital):
+    mock_settings.return_value = _settings()
+    cap = MagicMock()
+    cap.availableMarginInr = 500_000
+    cap.perTradeCapitalInr = 200_000
+    mock_capital.return_value = cap
+    engine = RiskEngine()
+
+    ok, reason = engine.check_new_entry(
+        AutoTraderState(running=True),
+        "NIFTY",
+        Side.CALL,
+        50,
+        50,
+        lot_multiplier=65,
+        strategy_type=StrategyType.SCALP,
+        strike=24_500,
+        stop_points=10,
+    )
+
+    assert not ok
+    assert reason == "per_trade_risk_exceeded"
