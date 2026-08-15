@@ -425,6 +425,12 @@ async def run_entry_scan_on_cache(
             continue
         expiry_day = bool(snap.optionExpiry and str(snap.optionExpiry)[:10] == today)
         refresh_snapshot_explosion_alerts(snap, expiry_day=expiry_day)
+    try:
+        from app.services.radar_archive import record_top_radars
+
+        await asyncio.to_thread(record_top_radars, overlays)
+    except Exception as exc:
+        logger.warning("Failed to archive refreshed radar snapshots: %s", exc)
     news = await _fetch_news_cached()
     if run_trader:
         client = UpstoxClient()
