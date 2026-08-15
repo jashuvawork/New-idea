@@ -52,6 +52,7 @@ def _reset_all_engine_globals() -> None:
     from app.engines.directional_lock import reset_directional_lock
     from app.engines.chop_day_guards import reset_session_guards
     from app.engines.capital_allocator import reset_session_profit_gate
+    from app.engines.realtime_engine import reset_realtime_detector_state
     from app.engines.preorder_rejection_suppression import (
         reset_preorder_rejection_suppressions,
     )
@@ -65,6 +66,7 @@ def _reset_all_engine_globals() -> None:
         reset_directional_lock,
         reset_session_guards,
         reset_session_profit_gate,
+        reset_realtime_detector_state,
         reset_preorder_rejection_suppressions,
     ):
         _safe(fn)

@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     tick_fast_exit_enabled: bool = True
     entry_scan_interval_ms: int = 1000
     expiry_entry_scan_interval_ms: int = 500
+    # Runner velocity compares consecutive snapshots only while the feed is fresh.
+    runner_velocity_history_max_age_seconds: float = 15.0
     # Cap full REST rebuild so background monitor never stalls UI for minutes.
     full_rest_rebuild_timeout_seconds: float = 25.0
     full_rest_min_seconds: float = 45.0
