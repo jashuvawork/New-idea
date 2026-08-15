@@ -187,11 +187,13 @@ def test_soft_first_lift_reaches_radar_before_building_tier(_open, side, option_
     settings = Settings()
     symbol, strike = "NIFTY", 24300.0
     key = _strike_key(strike, side)
-    start = datetime.now(IST) - timedelta(seconds=120)
     premiums = [
         91.0, 89.0, 90.5, 89.5, 92.0, 90.0, 91.5, 89.0,
         93.0, 95.0, 97.0, 99.0, 100.0, 101.0, 101.0, 101.0, 101.0, 101.0,
     ]
+    # Keep the final seeded sample three seconds behind the live lift. A stale
+    # multi-minute gap must not be interpreted as 3s explosion velocity.
+    start = datetime.now(IST) - timedelta(seconds=(len(premiums) - 1) * 5 + 3)
     _history.setdefault(symbol, {})[key] = deque(
         (
             (start + timedelta(seconds=i * 5), premium, 1000.0)
