@@ -1077,12 +1077,18 @@ def peak_capture_profit_lock_reason(
     min_give = float(
         getattr(settings, "explosion_peak_capture_min_giveback_points", 2.0) or 2.0
     )
+    max_give = _cfg_float(settings, "explosion_peak_capture_max_giveback_points", 8.0)
     min_remain = float(
         getattr(settings, "explosion_peak_capture_min_remain_points", 1.0) or 1.0
     )
     if pnl_pts < min_remain:
         return None
-    if giveback < max(min_give, best * giveback_ratio):
+    ratio_giveback = best * giveback_ratio
+    required_giveback = max(
+        min_give,
+        min(ratio_giveback, max_give) if max_give > 0 else ratio_giveback,
+    )
+    if giveback < required_giveback:
         return None
     # Only capture when the tape shows rollover — not on a still-expanding rip.
     if not _premium_rolling_over(
@@ -1362,10 +1368,9 @@ def evaluate_explosion_exit(
         near = max(0.5, target * 0.04)
         if best >= target - near and best >= settings.explosion_trail_arm_points:
             return "explosion_target_hit", pnl_inr
-    else:
-        # Book hard TP at elevated ICT / projected moment target.
-        if best >= target:
-            return "explosion_target_hit", pnl_inr
+    # Max-profit / stage-ladder targets are projections, not clairvoyant tops.
+    # Once reached, keep following the observed LTP and let confirmed rollover,
+    # peak capture, or the ratcheting stage floor exit the move.
 
     from app.engines.confidence_hold import (
         chart_confidence_for_trade,
@@ -1546,6 +1551,10 @@ def evaluate_explosion_exit(
                 return "explosion_trail_lock", pnl_inr
         # Once thesis has gone green: never time-exit — SL / trail / peak-capture only.
         if _skip_time_exit_for_green_thesis(trade, best=best, settings=settings):
+            return None, pnl_inr
+        # A green FTV stage runner exits on observed rollover / its ratcheting
+        # floor, never because a projection or generic hold clock expired.
+        if pnl_pts > 0 and stage_ladder:
             return None, pnl_inr
         # Jul29 77600 CE: explosion_time_profit @ +0.3pt while still far from TP 37 —
         # LTP later printed 290. Skip green time-exit on top explosions working to TP.

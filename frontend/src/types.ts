@@ -872,6 +872,8 @@ export interface PaperTrade {
   exitReason?: string;
   strategyType: string;
   bestPnlPoints: number;
+  maxLtp?: number;
+  maxLtpAt?: string;
   entryContext?: Record<string, unknown>;
   context?: Record<string, unknown>;
 }

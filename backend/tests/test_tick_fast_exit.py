@@ -4,6 +4,7 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
+from app.engines.auto_trader import _record_observed_max_ltp, _trade_premium_velocity
 from app.engines.snapshot_fast import overlay_snapshot_ltps, resolve_trade_premium
 from app.models.schemas import (
     Breadth,
@@ -11,11 +12,13 @@ from app.models.schemas import (
     HeatmapStrike,
     MarketPhase,
     MarketProfile,
+    PaperTrade,
     Side,
     SpotChart,
+    StrategyType,
     SymbolSnapshot,
 )
-from app.services.tick_store import record_tick, clear
+from app.services.tick_store import clear, get_velocity_pct, record_tick
 from app.services.upstox import INDEX_KEYS
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -46,6 +49,75 @@ def test_resolve_trade_premium_prefers_ws_tick():
     snap = _snap()
     premium = resolve_trade_premium(snap, 24000, Side.PUT, "NSE_FO|67890")
     assert premium == 88.5
+
+
+@patch("app.services.tick_store.time.monotonic")
+def test_option_tick_velocity_uses_fresh_three_second_tape(mock_mono):
+    clear()
+    mock_mono.side_effect = [100.0, 101.5, 103.0, 103.1]
+    record_tick("NSE_FO|67890", 100.0)
+    record_tick("NSE_FO|67890", 110.0)
+    record_tick("NSE_FO|67890", 130.0)
+
+    assert get_velocity_pct("NSE_FO|67890", window_seconds=3.0) == 30.0
+
+
+@patch("app.services.tick_store.time.monotonic")
+def test_trade_velocity_prefers_websocket_leg_over_snapshot(mock_mono):
+    clear()
+    mock_mono.side_effect = [200.0, 203.0, 203.1]
+    record_tick("NSE_FO|67890", 120.0)
+    record_tick("NSE_FO|67890", 108.0)
+    trade = PaperTrade(
+        id="peak-put",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24000,
+        entryPremium=100.0,
+        lots=1,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={"instrumentKey": "NSE_FO|67890"},
+    )
+
+    assert _trade_premium_velocity(_snap(), trade) == -10.0
+
+
+def test_observed_max_ltp_is_sticky_across_pullback():
+    trade = PaperTrade(
+        id="peak-call",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24000,
+        entryPremium=100.0,
+        lots=1,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+    )
+    _record_observed_max_ltp(trade, 180.0)
+    peak_at = trade.maxLtpAt
+    _record_observed_max_ltp(trade, 172.0)
+
+    assert trade.maxLtp == 180.0
+    assert trade.maxLtpAt == peak_at
+    assert trade.entryContext["givebackFromMaxLtpPoints"] == 8.0
+
+
+def test_observed_max_ltp_ignores_corrupt_persisted_peak():
+    trade = PaperTrade(
+        id="peak-recovery",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24000,
+        entryPremium=100.0,
+        lots=1,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={"maxLtp": "not-a-number"},
+    )
+
+    _record_observed_max_ltp(trade, 125.0)
+    assert trade.maxLtp == 125.0
 
 
 def test_overlay_snapshot_spot_charts_refreshes_rsi():

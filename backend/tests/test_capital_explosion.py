@@ -326,7 +326,15 @@ class ExplosionExitTests(unittest.TestCase):
             }.items():
                 setattr(s, k, v)
             reason, pnl = evaluate_explosion_exit(trade, 85.38, "EXPLODING", 65)
-        self.assertIn(reason, ("explosion_runner_giveback", "explosion_trail_sl", "explosion_trail_lock"))
+            self.assertIn(
+                reason,
+                (
+                    "explosion_peak_capture",
+                    "explosion_runner_giveback",
+                    "explosion_trail_sl",
+                    "explosion_trail_lock",
+                ),
+            )
         self.assertGreater(pnl, 0)
         self.assertNotIn(reason, ("explosion_time_profit", "explosion_time_stop"))
 

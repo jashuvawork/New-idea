@@ -435,11 +435,13 @@ class Settings(BaseSettings):
     explosion_peak_fade_bullish_min_velocity_3s: float = 1.5
     # Peak capture — bank near the top once a real peak prints and premium rolls over.
     # Jul31 NIFTY 24500 CE: best ~+10–12pt, trailArm ~23 never armed, time-stop −0.6.
-    # After best ≥8pt, if giveback ≥22% AND live heat is dying → book (~keep 75–80%).
+    # After best ≥8pt, a small giveback + dying live tape confirms the observed top.
     explosion_peak_capture_enabled: bool = True
     explosion_peak_capture_min_best_points: float = 8.0
-    explosion_peak_capture_giveback_ratio: float = 0.22
-    explosion_peak_capture_min_giveback_points: float = 2.0
+    explosion_peak_capture_giveback_ratio: float = 0.12
+    explosion_peak_capture_min_giveback_points: float = 1.0
+    # Never wait through an unbounded percentage giveback on a large spike.
+    explosion_peak_capture_max_giveback_points: float = 8.0
     explosion_peak_capture_min_remain_points: float = 1.0
     explosion_peak_capture_max_live_velocity_3s: float = 1.0
     explosion_peak_capture_max_premium_mom_pct: float = 0.15
@@ -448,10 +450,10 @@ class Settings(BaseSettings):
     # Large confirmed-rollover peaks bank near the top instead of giving back a
     # third of a big rip. Aug12 NIFTY 24350 PE: +36.7pt peak (~₹135) rolled over
     # (live vel -0.12) but the max-profit giveback 0.35 only booked ~₹122. Once a
-    # peak is genuinely large, keep ~78% of it — the rollover gate still requires
-    # the tape to confirm the top, so still-rising stage runners are never clipped.
+    # peak is genuinely large, keep ~94% (and cap giveback at 8pt). The rollover
+    # gate still requires dying tape, so still-rising stage runners are not clipped.
     explosion_peak_capture_big_peak_points: float = 25.0
-    explosion_peak_capture_big_peak_giveback_ratio: float = 0.22
+    explosion_peak_capture_big_peak_giveback_ratio: float = 0.06
     # Hold near-base top rips for the max move: an ELITE/EXPLODING entered very near the
     # local base (entry base-rel ≤ 20%) has the whole rip ahead, so don't soft-lock a
     # small early peak — require a bigger peak before peak-capture/peak-fade profit-lock.

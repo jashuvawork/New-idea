@@ -309,6 +309,8 @@ class PaperTrade(BaseModel):
     exitReason: Optional[str] = None
     strategyType: StrategyType = StrategyType.SCALP
     bestPnlPoints: float = 0
+    maxLtp: Optional[float] = None
+    maxLtpAt: Optional[datetime] = None
     closedAt: Optional[datetime] = None
     sessionDate: Optional[str] = None
     entryContext: dict[str, Any] = {}
