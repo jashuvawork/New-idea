@@ -12,7 +12,10 @@ from app.engines.capital_allocator import (
     clamp_lots,
     get_capital_snapshot,
     max_lots_for_capital,
+    next_ranked_allocation_rank,
     ranked_allocation_for_state,
+    set_manual_capital_limit,
+    tune_exit_plan_for_position,
 )
 from app.engines.explosion_profit import (
     compute_explosion_lots,
@@ -20,6 +23,7 @@ from app.engines.explosion_profit import (
     explosion_in_cooldown,
     record_explosion_stop,
 )
+from app.engines.auto_trader import _is_ranked_ftv_candidate
 from app.models.schemas import AutoTraderState, PaperTrade, Side, StrategyType
 from zoneinfo import ZoneInfo
 
@@ -142,6 +146,101 @@ class CapitalSizingTests(unittest.TestCase):
         self.assertEqual(second.budgetInr, 53_000)
         self.assertEqual(summary["remainingInr"], 73_000)
         self.assertEqual(summary["activeAllocations"][0]["rank"], 1)
+
+    def test_closed_top_sleeve_reuses_vacant_rank_not_open_count(self):
+        state = AutoTraderState(
+            openPaperTrades=[
+                PaperTrade(
+                    id="rank-2",
+                    symbol="SENSEX",
+                    side=Side.PUT,
+                    strike=80_000,
+                    entryPremium=50,
+                    currentPremium=50,
+                    lots=52,
+                    openedAt=datetime.now(IST),
+                    strategyType=StrategyType.EXPLOSIVE,
+                    entryContext={"allocationRank": 2},
+                )
+            ]
+        )
+        snap = CapitalSnapshot(
+            availableMarginInr=200_000,
+            totalEquityInr=200_000,
+            source="fallback",
+        )
+        settings = self._ranked_settings()
+        with (
+            patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap),
+            patch("app.engines.capital_allocator.get_settings", return_value=settings),
+        ):
+            rank = next_ranked_allocation_rank(state)
+            allocation = ranked_allocation_for_state(state, rank or 0)
+
+        self.assertEqual(rank, 1)
+        self.assertEqual(allocation.committedInr, 52_000)
+        self.assertEqual(allocation.budgetInr, 68_000)
+
+    def test_exit_plan_uses_rank_sleeve_as_risk_budget(self):
+        settings = self._ranked_settings()
+        settings.position_sl_cap_pct = 0.08
+        settings.position_tp_target_pct = 0.12
+        settings.scalp_stop_points = 3.0
+        settings.scalp_stop_min_points = 1.0
+        settings.position_sl_preserve_natural_frac = 0.45
+        settings.explosion_sl_preserve_natural_frac = 0.85
+        settings.position_min_risk_reward = 1.2
+        settings.scalp_trail_step_points = 2.0
+        snap = CapitalSnapshot(
+            availableMarginInr=200_000,
+            perTradeCapitalInr=190_000,
+        )
+        with (
+            patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap),
+            patch("app.engines.capital_allocator.get_settings", return_value=settings),
+        ):
+            tuned = tune_exit_plan_for_position(
+                {
+                    "stopPoints": 10,
+                    "naturalStopPoints": 10,
+                    "targetPoints": 20,
+                    "microTargetPoints": 3,
+                    "trailArmPoints": 5,
+                },
+                lots=20,
+                premium=50,
+                symbol="NIFTY",
+                trade_budget_inr=60_000,
+            )
+
+        self.assertEqual(tuned["tradeBudgetInr"], 60_000)
+        self.assertLessEqual(tuned["actualSlRiskInr"], 60_000 * 0.08 + 0.01)
+
+    def test_manual_capital_limit_updates_sizing_snapshot(self):
+        settings = self._ranked_settings()
+        settings.per_trade_capital_pct = 0.95
+        settings.simple_min_lots = 1
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            snap = set_manual_capital_limit(100_000)
+
+        self.assertEqual(snap.availableMarginInr, 100_000)
+        self.assertEqual(snap.perTradeCapitalInr, 95_000)
+        self.assertEqual(snap.source, "manual")
+
+    def test_ranked_sleeve_requires_first_lift_or_flat_vertical(self):
+        first_lift = SimpleNamespace(
+            mode="explosion",
+            alert={"ictFirstLift": True},
+            explosion_event=None,
+        )
+        generic = SimpleNamespace(
+            mode="explosion",
+            alert={"tier": "ELITE"},
+            explosion_event=None,
+        )
+
+        self.assertTrue(_is_ranked_ftv_candidate(first_lift))
+        self.assertFalse(_is_ranked_ftv_candidate(generic))
 
 
 class ExplosionExitTests(unittest.TestCase):

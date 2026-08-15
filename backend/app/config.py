@@ -1370,6 +1370,7 @@ class Settings(BaseSettings):
     ftv_allocation_cash_reserve_pct: float = 0.05
     ftv_allocation_max_positions: int = 3
     ftv_allocation_max_same_side: int = 2
+    ftv_allocation_require_ftv: bool = True
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
     aggressive_min_explosion_score: int = 45

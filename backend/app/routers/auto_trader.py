@@ -11,14 +11,10 @@ from app.engines.auto_trader import (
     reset_session,
     set_capital,
 )
-from app.engines.risk_engine import RiskEngine
-from app.models.schemas import CapitalConfig, RiskProfile
+from app.models.schemas import CapitalConfig
 from app.services import trade_store
 
 router = APIRouter(prefix="/api/auto-trader", tags=["auto-trader"])
-
-_risk = RiskEngine()
-
 
 @router.get("/status")
 async def auto_trader_status():

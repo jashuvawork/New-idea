@@ -38,9 +38,11 @@ from app.engines.capital_allocator import (
     get_capital_snapshot,
     get_lot_sizes_meta,
     lot_multiplier,
+    next_ranked_allocation_rank,
     ranked_allocation_for_state,
     refresh_capital_from_upstox,
     reset_session_profit_gate,
+    set_manual_capital_limit,
     tune_exit_plan_for_position,
     update_daily_profit_gate,
 )
@@ -118,11 +120,11 @@ _calibration = DailyCalibration()
 _capital_inr: float = 500_000
 
 
-async def refresh_trading_capital(client) -> None:
+async def refresh_trading_capital(client, *, force: bool = False) -> None:
     """Pull Upstox margin and sync risk engine exposure limits."""
     settings = get_settings()
     if settings.use_upstox_capital_for_sizing:
-        snap = await refresh_capital_from_upstox(client)
+        snap = await refresh_capital_from_upstox(client, force=force)
     else:
         snap = get_capital_snapshot()
     global _capital_inr
@@ -876,15 +878,6 @@ async def _open_from_candidate(
 
     lot_mult = lot_multiplier(symbol)
 
-    ok, risk_reason = _risk_engine.check_new_entry(
-        state, symbol, candidate.side, lots, fill_premium, lot_mult,
-        strategy_type=candidate.strategy_type,
-        strike=candidate.strike,
-        stop_points=stop_pts,
-    )
-    if not ok:
-        return False, risk_reason
-
     from app.engines.snapshot_fast import _heatmap_instrument_key
 
     instrument_key = _heatmap_instrument_key(snap, candidate.strike, candidate.side)
@@ -1034,7 +1027,13 @@ async def _open_from_candidate(
         ),
         local_base_premium=local_base_prem if local_base_prem > 0 else None,
     )
-    exit_plan = tune_exit_plan_for_position(exit_plan, lots, fill_premium, symbol)
+    exit_plan = tune_exit_plan_for_position(
+        exit_plan,
+        lots,
+        fill_premium,
+        symbol,
+        trade_budget_inr=allocation.budgetInr if allocation else None,
+    )
     # Size-tune may shrink lots so preserved natural SL fits the INR risk budget
     # (Aug11 63-lot NIFTY claimed SL ≤₹15k while risking ~₹37k).
     if exit_plan and int(exit_plan.get("lots") or 0) > 0:
@@ -1069,6 +1068,21 @@ async def _open_from_candidate(
             exit_plan["naturalStopPoints"] = natural
         elif skip_edge_sl_tighten and exit_plan.get("entryStopPoints"):
             exit_plan["entryStopPoints"] = float(exit_plan.get("stopPoints") or exit_plan["entryStopPoints"])
+
+    final_stop_points = float(exit_plan.get("stopPoints") or stop_pts)
+    final_risk_ok, final_risk_reason = _risk_engine.check_new_entry(
+        state,
+        symbol,
+        candidate.side,
+        lots,
+        fill_premium,
+        lot_mult,
+        strategy_type=candidate.strategy_type,
+        strike=candidate.strike,
+        stop_points=final_stop_points,
+    )
+    if not final_risk_ok:
+        return False, final_risk_reason
 
     entry_chart_conf = float(exit_plan.get("chartConfidence") or 0)
     if entry_chart_conf <= 0:
@@ -1494,7 +1508,13 @@ def reset_session() -> None:
 
 def set_capital(amount: float) -> None:
     global _capital_inr
-    _capital_inr = amount
+    snap = set_manual_capital_limit(amount)
+    _capital_inr = snap.availableMarginInr
+
+
+def get_risk_engine() -> RiskEngine:
+    """Shared engine used by both HTTP controls and live entry checks."""
+    return _risk_engine
 
 
 async def _process_open_trades(
@@ -1819,6 +1839,31 @@ async def _record_funnel_event_safe(event: dict[str, Any]) -> None:
             pass
 
 
+def _is_ranked_ftv_candidate(candidate: EntryCandidate) -> bool:
+    """Only first-lift/flat-to-vertical explosions may consume ranked sleeves."""
+    if candidate.mode != "explosion":
+        return False
+    alert = candidate.alert if isinstance(candidate.alert, dict) else {}
+    if bool(alert.get("ictFirstLift") or alert.get("ictFlatThenVertical")):
+        return True
+    event = candidate.explosion_event
+    if event is None:
+        return False
+    try:
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+        ict = analyze_explosion_event_ict(event, candidate.snap)
+        return bool(
+            getattr(ict, "active", False)
+            and (
+                getattr(ict, "first_lift", False)
+                or getattr(ict, "flat_then_vertical", False)
+            )
+        )
+    except Exception:
+        return False
+
+
 async def process(
     snapshots: dict[str, SymbolSnapshot],
     news: Optional[list[dict[str, Any]]] = None,
@@ -2011,7 +2056,9 @@ async def process(
                 1,
                 int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
             )
-            attempt_limit = max_positions * 3 if allocation_enabled else 1
+            # Non-FTV explosions are skipped without consuming a sleeve; inspect
+            # enough ranked legs to reach genuine first-lift candidates farther down.
+            attempt_limit = max_positions * 10 if allocation_enabled else 1
             excluded_keys: set[str] = set()
             allocation_rows: list[dict[str, Any]] = []
             found_candidate = False
@@ -2039,6 +2086,25 @@ async def process(
                     f"{float(best.strike):g}"
                 )
                 excluded_keys.add(radar_key)
+
+                if (
+                    allocation_enabled
+                    and best.mode == "explosion"
+                    and getattr(settings, "ftv_allocation_require_ftv", True)
+                    and not _is_ranked_ftv_candidate(best)
+                ):
+                    skipped.append(
+                        {
+                            "symbol": best.symbol,
+                            "side": best.side.value,
+                            "strike": best.strike,
+                            "reason": "ranked_allocation_requires_ftv",
+                            "mode": best.mode,
+                            "score": best.score,
+                            "tier": getattr(best, "tier", None),
+                        }
+                    )
+                    continue
 
                 if explosion_early_ok and not entries_ok and best.mode != "explosion":
                     skipped.append(
@@ -2074,9 +2140,12 @@ async def process(
                 allocation = None
                 allocation_row: Optional[dict[str, Any]] = None
                 if allocation_enabled and best.mode == "explosion":
+                    allocation_rank = next_ranked_allocation_rank(state)
+                    if allocation_rank is None:
+                        break
                     allocation = ranked_allocation_for_state(
                         state,
-                        open_explosions + 1,
+                        allocation_rank,
                     )
                     allocation_row = {
                         **allocation.to_dict(),
@@ -2155,6 +2224,20 @@ async def process(
                         "score": best.score,
                         "tier": getattr(best, "tier", None),
                     })
+                elif settings.enable_live_trading and client is not None:
+                    # Re-read broker funds after every acknowledged live fill before
+                    # assigning the next sleeve in this same radar cycle.
+                    try:
+                        await refresh_trading_capital(client, force=True)
+                    except Exception as exc:
+                        skipped.append(
+                            {
+                                "symbol": "SESSION",
+                                "reason": "post_fill_capital_refresh_failed",
+                                "message": str(exc),
+                            }
+                        )
+                        break
                 if best.mode != "explosion" or not allocation_enabled:
                     break
 
