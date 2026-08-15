@@ -259,7 +259,8 @@ def structured_early_ict_ready(ict: Any) -> bool:
     if not structured:
         return False
     return bool(
-        getattr(ict, "volume_awakening", False)
+        getattr(ict, "first_lift", False)
+        or getattr(ict, "volume_awakening", False)
         or getattr(ict, "displacement", False)
         or getattr(ict, "premium_fvg", False)
     )
@@ -405,6 +406,15 @@ def immature_explosion_blocked(
     if not getattr(settings, "explosion_immature_block_enabled", True):
         return False, ""
     if explosion_event is None:
+        return False, ""
+
+    from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+    if first_lift_entry_ready(
+        snap=snap,
+        event=explosion_event,
+        ict=ict,
+    ):
         return False, ""
 
     from app.engines.elite_never_block import elite_never_block_active

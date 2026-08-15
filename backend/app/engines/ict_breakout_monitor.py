@@ -425,6 +425,108 @@ def _detect_local_swing_base(
     return True, local_low, base_rel
 
 
+def _detect_recent_window_base(
+    *,
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    premium: float,
+    settings: Any,
+) -> tuple[bool, float, float]:
+    """Confirm a durable base from the medium-horizon premium tape.
+
+    The fast ICT history is intentionally short for velocity, but a 5-minute
+    chart base often forms over 10–30 minutes. Require repeated support prints
+    around the low so one bad tick cannot become a first-lift launch pad.
+    """
+    if not symbol or side is None or strike <= 0 or premium <= 0:
+        return False, 0.0, 0.0
+    try:
+        from app.engines.explosion_detector import (
+            LOCAL_BASE_EXCLUDE_RECENT_SECONDS,
+            LOCAL_BASE_WINDOW_SECONDS,
+            _is_meaningful_premium,
+            _local_base_hist,
+            _open_key,
+        )
+
+        side_v = side if isinstance(side, Side) else Side(str(side).upper())
+        rows = list(_local_base_hist.get(_open_key(symbol, strike, side_v)) or [])
+    except Exception:
+        return False, 0.0, 0.0
+    if not rows:
+        return False, 0.0, 0.0
+
+    now = rows[-1][0]
+    window_seconds = int(
+        getattr(
+            settings,
+            "ict_recent_base_window_seconds",
+            LOCAL_BASE_WINDOW_SECONDS,
+        )
+        or LOCAL_BASE_WINDOW_SECONDS
+    )
+    exclude_seconds = int(
+        getattr(
+            settings,
+            "ict_recent_base_exclude_seconds",
+            LOCAL_BASE_EXCLUDE_RECENT_SECONDS,
+        )
+        or LOCAL_BASE_EXCLUDE_RECENT_SECONDS
+    )
+    lo_cut = now - timedelta(seconds=max(60, window_seconds))
+    hi_cut = now - timedelta(seconds=max(5, exclude_seconds))
+    samples = [
+        (ts, float(value))
+        for ts, value in rows
+        if lo_cut <= ts <= hi_cut and _is_meaningful_premium(value)
+    ]
+    min_samples = max(
+        3,
+        int(getattr(settings, "ict_recent_base_min_samples", 6) or 6),
+    )
+    if len(samples) < min_samples:
+        return False, 0.0, 0.0
+
+    base = min(value for _, value in samples)
+    support_band_pct = max(
+        1.0,
+        float(getattr(settings, "ict_recent_base_support_band_pct", 8.0) or 8.0),
+    )
+    support = [
+        (ts, value)
+        for ts, value in samples
+        if value <= base * (1.0 + support_band_pct / 100.0)
+    ]
+    min_support = max(
+        2,
+        int(getattr(settings, "ict_recent_base_min_support_samples", 3) or 3),
+    )
+    if len(support) < min_support:
+        return False, 0.0, 0.0
+    support_span = (support[-1][0] - support[0][0]).total_seconds()
+    min_span = max(
+        0.0,
+        float(getattr(settings, "ict_recent_base_min_support_span_seconds", 30.0) or 30.0),
+    )
+    if support_span < min_span:
+        return False, 0.0, 0.0
+    max_age = max(
+        60.0,
+        float(getattr(settings, "ict_recent_base_max_age_seconds", 900.0) or 900.0),
+    )
+    if (hi_cut - support[-1][0]).total_seconds() > max_age:
+        return False, 0.0, 0.0
+
+    base_rel = max(0.0, (premium - base) / base * 100.0)
+    early_max = float(
+        getattr(settings, "ict_structured_early_max_move_pct", 65.0) or 65.0
+    )
+    if base_rel <= 0 or base_rel > early_max:
+        return False, 0.0, 0.0
+    return True, base, base_rel
+
+
 def analyze_ict_breakout(
     *,
     symbol: str,
@@ -484,6 +586,19 @@ def analyze_ict_breakout(
         local_swing_base = True
         base_level = swing_low
         base_rel_move = swing_rel
+    if not trusted_flat and not local_swing_base:
+        recent_found, recent_base, recent_rel = _detect_recent_window_base(
+            symbol=symbol,
+            strike=strike,
+            side=side,
+            premium=premium,
+            settings=settings,
+        )
+        if recent_found:
+            local_swing_base = True
+            base_level = recent_base
+            base_rel_move = recent_rel
+            reasons.append(f"recent_window_base_{recent_base:.1f}")
 
     # Session-low fallback is only for V-shaped legs without a trusted flat coil.
     # Never replace a recent flat trough with an older session low.
@@ -499,8 +614,7 @@ def analyze_ict_breakout(
             if sess_low >= floor and premium > sess_low:
                 off_low = (premium - sess_low) / sess_low * 100.0
                 if off_low >= min(early_min, first_lift_lo) * 0.5:
-                    deepen = base_level <= 0 or sess_low < base_level * 0.97
-                    if deepen:
+                    if base_level <= 0:
                         local_swing_base = True
                         base_level = sess_low
                         base_rel_move = off_low
