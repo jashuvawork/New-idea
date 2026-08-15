@@ -691,7 +691,9 @@ def _should_skip_no_progress(trade: PaperTrade, settings) -> bool:
     if is_faded_rip_caution_trade(trade):
         return False
     if (
-        ctx.get("ictMegaRip")
+        ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictMegaRip")
         or ctx.get("goodDayIctCapture")
         or ctx.get("allDayIctCapture")
         or ctx.get("maxProfitCapture")
