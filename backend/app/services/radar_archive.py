@@ -99,13 +99,15 @@ def _worth_archiving(alert: Mapping[str, Any]) -> bool:
     )
 
 
-def _snapshot_context(symbol: str, snap: Any) -> dict[str, Any]:
+def _snapshot_context(symbol: str, snap: Any, source: str) -> dict[str, Any]:
     breadth = getattr(snap, "breadth", None)
     chart = getattr(snap, "spotChart", None)
     regime = getattr(snap, "regime", None)
     phase = getattr(snap, "marketPhase", None)
     return _jsonable({
         "symbol": symbol.upper(),
+        "archiveSource": source,
+        "volumeReliable": source != "ws_entry_scan",
         "timestamp": getattr(snap, "timestamp", None),
         "marketPhase": getattr(phase, "value", phase),
         "spot": getattr(snap, "spot", None),
@@ -121,9 +123,15 @@ def _snapshot_context(symbol: str, snap: Any) -> dict[str, Any]:
     })
 
 
-def _milestone(alert: Mapping[str, Any], seen_at: str) -> dict[str, Any]:
+def _milestone(
+    alert: Mapping[str, Any],
+    seen_at: str,
+    source: str,
+) -> dict[str, Any]:
     return _jsonable({
         "seenAt": seen_at,
+        "source": source,
+        "volumeReliable": source != "ws_entry_scan",
         "tier": alert.get("tier"),
         "premium": alert.get("premium"),
         "explosionScore": alert.get("explosionScore"),
@@ -229,6 +237,7 @@ def record_top_radars(
     snapshots: Mapping[str, Any],
     *,
     now: datetime | None = None,
+    source: str = "snapshot",
 ) -> int:
     """Merge improved radar observations into today's ZIP; return saved entry count."""
     settings = get_settings()
@@ -254,7 +263,7 @@ def record_top_radars(
         for symbol, snap in snapshots.items():
             if not bool(getattr(snap, "dataAvailable", False)):
                 continue
-            context = _snapshot_context(symbol, snap)
+            context = _snapshot_context(symbol, snap, source)
             for raw_alert in getattr(snap, "explosionAlerts", None) or []:
                 if not isinstance(raw_alert, Mapping) or not _worth_archiving(raw_alert):
                     continue
@@ -266,7 +275,7 @@ def record_top_radars(
                 if previous and rank <= previous_rank:
                     continue
                 milestones = list(previous.get("milestones") or []) if previous else []
-                milestones.append(_milestone(alert, seen_at))
+                milestones.append(_milestone(alert, seen_at, source))
                 entries[key] = {
                     "key": key,
                     "firstSeenAt": (

@@ -1311,7 +1311,9 @@ def scan_snapshot_explosions(
 def refresh_snapshot_explosion_alerts(snap: Any, *, expiry_day: bool = False) -> None:
     """Update explosionAlerts on a cached snapshot using fresh WS LTPs."""
     events = scan_snapshot_explosions(snap, expiry_day=expiry_day)
-    snap.explosionAlerts = [event_to_dict(e, snap) for e in events[:15]]
+    alerts = [event_to_dict(e, snap) for e in events[:15]]
+    snap.explosionAlerts = alerts
+    snap.topExplosion = alerts[0] if alerts else None
 
 
 def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, Any]:

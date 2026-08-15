@@ -94,3 +94,4 @@ def test_refresh_snapshot_explosion_alerts_updates_list(
     top = snap.explosionAlerts[0]
     assert top["side"] == "PUT"
     assert top["strike"] == 24100.0
+    assert snap.topExplosion == top

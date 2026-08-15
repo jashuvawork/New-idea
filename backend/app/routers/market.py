@@ -428,7 +428,11 @@ async def run_entry_scan_on_cache(
     try:
         from app.services.radar_archive import record_top_radars
 
-        await asyncio.to_thread(record_top_radars, overlays)
+        await asyncio.to_thread(
+            record_top_radars,
+            overlays,
+            source="ws_entry_scan",
+        )
     except Exception as exc:
         logger.warning("Failed to archive refreshed radar snapshots: %s", exc)
     news = await _fetch_news_cached()

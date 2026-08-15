@@ -709,7 +709,11 @@ async def build_symbol_snapshot(
         try:
             from app.services.radar_archive import record_top_radars
 
-            await asyncio.to_thread(record_top_radars, {symbol: snap})
+            await asyncio.to_thread(
+                record_top_radars,
+                {symbol: snap},
+                source="rest_snapshot",
+            )
         except Exception as exc:
             logger.warning("Failed to archive %s radar snapshot: %s", symbol, exc)
         return snap
