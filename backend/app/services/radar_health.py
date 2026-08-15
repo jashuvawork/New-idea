@@ -143,7 +143,13 @@ def health_status(*, now: datetime | None = None) -> dict[str, Any]:
     if current.tzinfo is None:
         current = current.replace(tzinfo=IST)
     current = current.astimezone(IST)
-    stale_after = max(1, int(get_settings().radar_health_stale_seconds))
+    settings = get_settings()
+    stale_after = max(1, int(settings.radar_health_stale_seconds))
+    rest_stale_after = max(
+        stale_after,
+        int(float(getattr(settings, "full_rest_min_seconds", 45.0) or 45.0) * 2),
+        int(float(getattr(settings, "full_rest_backoff_seconds", 75.0) or 75.0) + 30),
+    )
     with _lock:
         sources = {
             key: dict(value)
@@ -159,8 +165,10 @@ def health_status(*, now: datetime | None = None) -> dict[str, Any]:
     stale_sources: list[str] = []
     for source, row in sources.items():
         age = _age_seconds(row.get("lastSeenAt"), current)
+        source_stale_after = rest_stale_after if source == "rest_snapshot" else stale_after
         row["ageSeconds"] = round(age, 1) if age is not None else None
-        row["stale"] = bool(age is not None and age > stale_after)
+        row["staleAfterSeconds"] = source_stale_after
+        row["stale"] = bool(age is not None and age > source_stale_after)
         if row["stale"]:
             stale_sources.append(source)
 

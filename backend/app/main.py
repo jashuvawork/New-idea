@@ -220,6 +220,15 @@ async def lifespan(app: FastAPI):
     if settings.upstox_ws_enabled:
         await start_upstox_ws()
         logger.info("Upstox WebSocket feed enabled (mode=%s)", settings.upstox_ws_mode)
+    if settings.radar_archive_enabled:
+        try:
+            from app.services.radar_learning import finalize_pending_reviews
+
+            recovered = await asyncio.to_thread(finalize_pending_reviews)
+            if recovered:
+                logger.info("Finalized %d pending radar review archive(s)", len(recovered))
+        except Exception as exc:
+            logger.warning("Pending radar archive recovery error: %s", exc)
     if settings.background_market_monitor_enabled:
         _background_task = asyncio.create_task(_background_monitor())
         logger.info(

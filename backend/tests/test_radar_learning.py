@@ -21,8 +21,10 @@ from app.services.radar_health import (
 )
 from app.services.radar_learning import (
     analyze_hindsight,
+    backup_archive,
     build_funnel_report,
     finalize_daily_review,
+    finalize_pending_reviews,
     premium_tape_path,
     read_premium_tape,
     record_funnel_state,
@@ -51,6 +53,8 @@ def _settings(tmp_path, **overrides):
         "radar_hindsight_lookahead_seconds": 1800,
         "radar_funnel_dedupe_seconds": 60,
         "radar_health_stale_seconds": 45,
+        "full_rest_min_seconds": 5.0,
+        "full_rest_backoff_seconds": 5.0,
         "radar_backup_dir": "",
         "radar_backup_s3_bucket": "",
         "radar_backup_s3_prefix": "nexusquant/radar",
@@ -301,3 +305,60 @@ def test_replay_api_accepts_threshold_overrides(tmp_path):
     assert result["thresholds"]["verticalMinMovePct"] == 25.0
     assert result["truthCount"] >= 1
     assert tape_exists
+
+
+def test_rest_sampling_keeps_each_symbol_when_snapshots_build_separately(tmp_path):
+    settings = _settings(tmp_path)
+    now = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+    sensex = _snap()
+    sensex.symbol = "SENSEX"
+    sensex.heatmap[0].strike = 80500.0
+    with _patch_settings(settings):
+        first = record_market_observations(
+            {"NIFTY": _snap()},
+            source="rest_snapshot",
+            now=now,
+        )
+        second = record_market_observations(
+            {"SENSEX": sensex},
+            source="rest_snapshot",
+            now=now,
+        )
+        rows = read_premium_tape("2026-08-15")
+
+    assert first == 2
+    assert second == 2
+    assert len(rows) == 2
+    assert {row["contracts"][0]["symbol"] for row in rows} == {"NIFTY", "SENSEX"}
+
+
+def test_s3_backup_and_startup_recovery_are_idempotent(tmp_path):
+    settings = _settings(
+        tmp_path,
+        radar_backup_s3_bucket="radar-bucket",
+        radar_backup_s3_prefix="desk/archive",
+    )
+    old = datetime(2026, 8, 14, 10, 0, tzinfo=IST)
+    with _patch_settings(settings):
+        record_top_radars(
+            {"NIFTY": _snap(alerts=[_alert()])},
+            now=old,
+            source="rest_snapshot",
+        )
+        archive = tmp_path / "radar_archives" / "radar-2026-08-14.zip"
+        client = SimpleNamespace(upload_file=lambda *args: None)
+        with patch("boto3.client", return_value=client) as make_client:
+            result = backup_archive(archive)
+            recovered = finalize_pending_reviews(
+                now=datetime(2026, 8, 15, 9, 0, tzinfo=IST),
+            )
+            recovered_again = finalize_pending_reviews(
+                now=datetime(2026, 8, 15, 9, 1, tzinfo=IST),
+            )
+
+    assert result["destinations"] == [
+        "s3://radar-bucket/desk/archive/radar-2026-08-14.zip"
+    ]
+    assert make_client.called
+    assert len(recovered) == 1
+    assert recovered_again == []

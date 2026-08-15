@@ -7,6 +7,7 @@ import logging
 import re
 import shutil
 import threading
+import zipfile
 from collections import Counter, defaultdict, deque
 from datetime import datetime
 from pathlib import Path
@@ -227,8 +228,9 @@ def record_market_observations(
     contracts = _snapshot_contracts(snapshots)
     if not contracts:
         return 0
+    sample_key = f"{date}:{','.join(sorted(str(symbol).upper() for symbol in snapshots))}"
     with _lock:
-        previous = _last_tape_sample.get(date)
+        previous = _last_tape_sample.get(sample_key)
         if not force and previous and (current - previous).total_seconds() < interval:
             return 0
         _append_jsonl(
@@ -240,7 +242,7 @@ def record_market_observations(
                 "contracts": contracts,
             },
         )
-        _last_tape_sample[date] = current
+        _last_tape_sample[sample_key] = current
     contract_map = {str(row["key"]): row for row in contracts}
     updated = _forward_outcomes(date, contract_map, current)
     try:
@@ -414,9 +416,11 @@ def analyze_hindsight(
                 if item is not None
                 and (base_start is None or item >= base_start)
             ]
-            detection_at = min(candidates) if candidates else _parse_ts(
-                archive_row.get("firstSeenAt")
-            )
+            detection_at = min(candidates) if candidates else None
+            if detection_at is None:
+                first_seen = _parse_ts(archive_row.get("firstSeenAt"))
+                if first_seen and (base_start is None or first_seen >= base_start):
+                    detection_at = first_seen
         if detection_at and vertical_at:
             lead = (vertical_at - detection_at).total_seconds()
             capture = "EARLY" if lead >= 0 else "LATE"
@@ -693,6 +697,30 @@ def finalize_daily_review(date: str) -> dict[str, Any]:
         "funnel": funnel,
         "backup": backup,
     }
+
+
+def finalize_pending_reviews(
+    *,
+    now: datetime | None = None,
+    limit: int = 7,
+) -> list[dict[str, Any]]:
+    """Crash recovery: finalize recent prior-session ZIPs missing their scorecard."""
+    current_date = _aware(now).strftime("%Y-%m-%d")
+    pending: list[str] = []
+    for path in sorted(get_archive_dir().glob("radar-*.zip"), reverse=True):
+        date = path.stem.removeprefix("radar-")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or date >= current_date:
+            continue
+        try:
+            with zipfile.ZipFile(path, "r") as archive:
+                if "scorecard.json" in archive.namelist():
+                    continue
+        except (OSError, zipfile.BadZipFile):
+            continue
+        pending.append(date)
+        if len(pending) >= max(1, limit):
+            break
+    return [finalize_daily_review(date) for date in reversed(pending)]
 
 
 def reset_learning_state_for_tests() -> None:
