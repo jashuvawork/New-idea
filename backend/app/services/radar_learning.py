@@ -179,8 +179,50 @@ def _snapshot_contracts(snapshots: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "oi": int(_number(getattr(row, oi_name, None))),
                     "spot": _number(getattr(snap, "spot", None)),
                     "atmStrike": _number(getattr(snap, "atmStrike", None)),
+                    "instrumentKey": (
+                        getattr(row, "callInstrumentKey", None)
+                        if side == "CALL"
+                        else getattr(row, "putInstrumentKey", None)
+                    ),
                 })
     return contracts
+
+
+def _append_archived_tick_contracts(
+    date: str,
+    contracts: list[dict[str, Any]],
+    *,
+    max_age_seconds: float,
+) -> None:
+    """Keep tracking archived strikes after they rotate out of the live heatmap."""
+    from app.services.tick_store import get_ltp
+
+    current_keys = {str(row.get("key") or "") for row in contracts}
+    for archived in read_archive_entries(date):
+        key = str(archived.get("key") or "")
+        if not key or key in current_keys:
+            continue
+        alert = dict(archived.get("alert") or {})
+        instrument_key = str(alert.get("instrumentKey") or "")
+        if not instrument_key:
+            continue
+        premium = get_ltp(instrument_key, max_age_seconds=max_age_seconds)
+        if premium is None or premium <= 0:
+            continue
+        context = dict(archived.get("context") or {})
+        contracts.append({
+            "key": key,
+            "symbol": str(archived.get("symbol") or "").upper(),
+            "side": str(archived.get("side") or "").upper(),
+            "strike": _number(archived.get("strike")),
+            "premium": float(premium),
+            "oi": 0,
+            "spot": _number(context.get("spot")),
+            "atmStrike": _number(context.get("atmStrike")),
+            "instrumentKey": instrument_key,
+            "archivedTickFallback": True,
+        })
+        current_keys.add(key)
 
 
 def _outcome_horizons() -> list[int]:
@@ -290,6 +332,11 @@ def record_market_observations(
     date = current.strftime("%Y-%m-%d")
     interval = max(1, int(settings.radar_premium_tape_sample_seconds))
     contracts = _snapshot_contracts(snapshots)
+    _append_archived_tick_contracts(
+        date,
+        contracts,
+        max_age_seconds=max(5.0, interval * 2.0),
+    )
     if not contracts:
         return 0
     sample_key = f"{date}:{','.join(sorted(str(symbol).upper() for symbol in snapshots))}"

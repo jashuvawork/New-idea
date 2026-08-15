@@ -77,6 +77,21 @@ def _radar_key(symbol: str, alert: Mapping[str, Any]) -> str:
     return f"{symbol.upper()}:{side}:{strike:g}"
 
 
+def _instrument_key(snap: Any, alert: Mapping[str, Any]) -> str | None:
+    strike = _number(alert.get("strike"))
+    side = str(alert.get("side") or "").upper()
+    for row in getattr(snap, "heatmap", None) or []:
+        if abs(_number(getattr(row, "strike", None)) - strike) >= 1:
+            continue
+        value = (
+            getattr(row, "callInstrumentKey", None)
+            if side == "CALL"
+            else getattr(row, "putInstrumentKey", None)
+        )
+        return str(value) if value else None
+    return None
+
+
 def _review_rank(alert: Mapping[str, Any]) -> tuple[float, ...]:
     tier = str(alert.get("tier") or "WATCH").upper()
     return (
@@ -313,6 +328,7 @@ def record_top_radars(
                 if not isinstance(raw_alert, Mapping) or not _worth_archiving(raw_alert):
                     continue
                 alert = _jsonable(dict(raw_alert))
+                alert.setdefault("instrumentKey", _instrument_key(snap, alert))
                 key = _radar_key(symbol, alert)
                 rank = _review_rank(alert)
                 previous = entries.get(key)

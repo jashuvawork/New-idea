@@ -175,6 +175,46 @@ def test_forward_outcomes_capture_horizons_mfe_mae_and_order(tmp_path):
     assert len(tape_rows) == 2
 
 
+def test_forward_outcome_keeps_tracking_strike_after_heatmap_rotation(tmp_path):
+    settings = _settings(tmp_path)
+    start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+    initial = _snap(alerts=[_alert()])
+    initial.heatmap[0].callInstrumentKey = "NSE_FO|NIFTY24500CE"
+    rotated = _snap()
+    rotated.heatmap[0].strike = 24600.0
+    rotated.heatmap[0].callInstrumentKey = "NSE_FO|NIFTY24600CE"
+
+    with _patch_settings(settings):
+        record_top_radars(
+            {"NIFTY": initial},
+            now=start,
+            source="rest_snapshot",
+        )
+        with patch(
+            "app.services.tick_store.get_ltp",
+            side_effect=lambda key, **_: 125.0 if key == "NSE_FO|NIFTY24500CE" else None,
+        ):
+            record_market_observations(
+                {"NIFTY": rotated},
+                source="ws_entry_scan",
+                now=start + timedelta(seconds=60),
+                force=True,
+            )
+        archived = next(
+            row for row in read_archive_entries("2026-08-15")
+            if row["key"] == "NIFTY:CALL:24500"
+        )
+        tape = read_premium_tape("2026-08-15")
+
+    assert archived["outcome"]["status"] == "WINNER"
+    fallback = next(
+        contract for contract in tape[-1]["contracts"]
+        if contract["key"] == "NIFTY:CALL:24500"
+    )
+    assert fallback["archivedTickFallback"] is True
+    assert fallback["premium"] == 125.0
+
+
 def test_hindsight_scorecard_finds_early_and_missed_ftv_both_sides(tmp_path):
     settings = _settings(tmp_path)
     start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
