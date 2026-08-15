@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import zipfile
 from contextlib import ExitStack
@@ -10,6 +11,8 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from app.routers.ai import radar_replay
 from app.models.schemas import PaperTrade, Side
@@ -22,6 +25,7 @@ from app.services.radar_health import (
     reset_health_for_tests,
 )
 from app.services.radar_learning import (
+    RadarOperationBusyError,
     analyze_hindsight,
     backup_archive,
     build_funnel_report,
@@ -35,6 +39,7 @@ from app.services.radar_learning import (
     reset_learning_state_for_tests,
     run_detector_replay_isolated,
 )
+from app.services import radar_learning
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -170,6 +175,46 @@ def test_forward_outcomes_capture_horizons_mfe_mae_and_order(tmp_path):
     assert len(tape_rows) == 2
 
 
+def test_forward_outcome_keeps_tracking_strike_after_heatmap_rotation(tmp_path):
+    settings = _settings(tmp_path)
+    start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+    initial = _snap(alerts=[_alert()])
+    initial.heatmap[0].callInstrumentKey = "NSE_FO|NIFTY24500CE"
+    rotated = _snap()
+    rotated.heatmap[0].strike = 24600.0
+    rotated.heatmap[0].callInstrumentKey = "NSE_FO|NIFTY24600CE"
+
+    with _patch_settings(settings):
+        record_top_radars(
+            {"NIFTY": initial},
+            now=start,
+            source="rest_snapshot",
+        )
+        with patch(
+            "app.services.tick_store.get_ltp",
+            side_effect=lambda key, **_: 125.0 if key == "NSE_FO|NIFTY24500CE" else None,
+        ):
+            record_market_observations(
+                {"NIFTY": rotated},
+                source="ws_entry_scan",
+                now=start + timedelta(seconds=60),
+                force=True,
+            )
+        archived = next(
+            row for row in read_archive_entries("2026-08-15")
+            if row["key"] == "NIFTY:CALL:24500"
+        )
+        tape = read_premium_tape("2026-08-15")
+
+    assert archived["outcome"]["status"] == "WINNER"
+    fallback = next(
+        contract for contract in tape[-1]["contracts"]
+        if contract["key"] == "NIFTY:CALL:24500"
+    )
+    assert fallback["archivedTickFallback"] is True
+    assert fallback["premium"] == 125.0
+
+
 def test_hindsight_scorecard_finds_early_and_missed_ftv_both_sides(tmp_path):
     settings = _settings(tmp_path)
     start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
@@ -242,6 +287,7 @@ def test_funnel_maps_blocker_entry_and_trade_outcome(tmp_path):
                     "strike": 24500.0,
                     "status": "CLOSED",
                     "pnlInr": 1250.0,
+                    "openedAt": (start + timedelta(seconds=3)).isoformat(),
                 }]
             },
         ):
@@ -254,6 +300,54 @@ def test_funnel_maps_blocker_entry_and_trade_outcome(tmp_path):
     assert report["orderRejected"] == 1
     assert report["closedWins"] == 1
     assert report["rows"][0]["blockers"] == ["chart_alignment"]
+
+
+def test_funnel_never_attributes_pre_detection_events_or_trades(tmp_path):
+    settings = _settings(tmp_path)
+    detected = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+    key = "NIFTY:CALL:24500"
+    with _patch_settings(settings):
+        record_funnel_event(
+            {"event": "SELECTED", "key": key, "stage": "selector"},
+            now=detected - timedelta(minutes=1),
+        )
+        record_top_radars(
+            {"NIFTY": _snap(alerts=[_alert()])},
+            now=detected,
+            source="rest_snapshot",
+        )
+        record_funnel_event(
+            {"event": "SELECTED", "key": key, "stage": "selector"},
+            now=detected + timedelta(seconds=1),
+        )
+        prior_trade = {
+            "symbol": "NIFTY",
+            "side": "CALL",
+            "strike": 24500.0,
+            "status": "CLOSED",
+            "pnlInr": 5000.0,
+            "openedAt": (detected - timedelta(minutes=5)).isoformat(),
+        }
+        causal_trade = {
+            "symbol": "NIFTY",
+            "side": "CALL",
+            "strike": 24500.0,
+            "status": "CLOSED",
+            "pnlInr": -500.0,
+            "openedAt": (detected + timedelta(seconds=2)).isoformat(),
+        }
+        with patch(
+            "app.services.trade_store.get_day_detail",
+            return_value={"trades": [prior_trade, causal_trade]},
+        ):
+            report = build_funnel_report("2026-08-15")
+
+    row = report["rows"][0]
+    assert row["selected"] is True
+    assert row["tradeCount"] == 1
+    assert row["pnlInr"] == -500.0
+    assert row["tradeOutcome"] == "LOSS"
+    assert report["closedWins"] == 0
 
 
 def test_finalize_bundles_learning_artifacts_and_copies_backup(tmp_path):
@@ -281,7 +375,14 @@ def test_finalize_bundles_learning_artifacts_and_copies_backup(tmp_path):
     assert {"scorecard.json", "funnel.json", "premium_tape.jsonl"} <= names
     assert scorecard["date"] == "2026-08-15"
     assert result["backup"]["success"] is True
-    assert (backup_dir / archive_path_value.name).exists()
+    backup_path = backup_dir / archive_path_value.name
+    assert backup_path.exists()
+    assert hashlib.sha256(backup_path.read_bytes()).hexdigest() == hashlib.sha256(
+        archive_path_value.read_bytes()
+    ).hexdigest()
+    assert result["backup"]["sha256"] == hashlib.sha256(
+        archive_path_value.read_bytes()
+    ).hexdigest()
 
 
 def test_health_reports_stale_sources_divergence_and_component_errors(tmp_path):
@@ -386,7 +487,7 @@ def test_s3_backup_and_startup_recovery_are_idempotent(tmp_path):
             source="rest_snapshot",
         )
         archive = tmp_path / "radar_archives" / "radar-2026-08-14.zip"
-        client = SimpleNamespace(upload_file=lambda *args: None)
+        client = SimpleNamespace(upload_file=lambda *args, **kwargs: None)
         with patch("boto3.client", return_value=client) as make_client:
             result = backup_archive(archive)
             recovered = finalize_pending_reviews(
@@ -412,13 +513,35 @@ def test_s3_backup_skips_matching_remote_object(tmp_path):
     archive = tmp_path / "radar.zip"
     archive.write_bytes(b"already-uploaded")
     client = MagicMock()
-    client.head_object.return_value = {"ContentLength": archive.stat().st_size}
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    client.head_object.return_value = {
+        "ContentLength": archive.stat().st_size,
+        "Metadata": {"sha256": digest},
+    }
     with _patch_settings(settings), patch("boto3.client", return_value=client):
         result = backup_archive(archive)
 
     assert result["success"] is True
     assert result["attempts"] == 0
     client.upload_file.assert_not_called()
+
+
+def test_local_backup_replaces_same_size_wrong_content(tmp_path):
+    backup_dir = tmp_path / "offbox"
+    backup_dir.mkdir()
+    settings = _settings(tmp_path, radar_backup_dir=str(backup_dir))
+    archive = tmp_path / "radar.zip"
+    archive.write_bytes(b"correct-archive")
+    target = backup_dir / archive.name
+    target.write_bytes(b"wrong---archive")
+    assert target.stat().st_size == archive.stat().st_size
+
+    with _patch_settings(settings):
+        result = backup_archive(archive)
+
+    assert result["success"] is True
+    assert target.read_bytes() == archive.read_bytes()
+    assert result["sha256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
 
 
 def test_trade_events_keep_exact_radar_key_and_outcome_link():
@@ -459,3 +582,12 @@ def test_trade_events_keep_exact_radar_key_and_outcome_link():
     assert entered["tradeId"] == "trade-1"
     assert closed["pnlInr"] == 1200.0
     assert closed["exitReason"] == "target"
+
+
+def test_duplicate_detector_replay_is_rejected_without_queueing():
+    assert radar_learning._detector_replay_lock.acquire(blocking=False)
+    try:
+        with pytest.raises(RadarOperationBusyError, match="already running"):
+            run_detector_replay_isolated("2026-08-15")
+    finally:
+        radar_learning._detector_replay_lock.release()

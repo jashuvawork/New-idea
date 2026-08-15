@@ -29,12 +29,16 @@ from app.engines.adaptive_exits import (
 )
 from app.engines.chart_exit_levels import refresh_open_trade_chart_plan, update_live_chart_trail
 from app.engines.capital_allocator import (
+    RankedAllocation,
+    cap_lots_to_allocation,
+    capital_book_summary,
     clamp_lots,
     compute_lots,
     compute_session_pnl,
     get_capital_snapshot,
     get_lot_sizes_meta,
     lot_multiplier,
+    ranked_allocation_for_state,
     refresh_capital_from_upstox,
     reset_session_profit_gate,
     tune_exit_plan_for_position,
@@ -368,6 +372,7 @@ async def _open_from_candidate(
     client: Optional[UpstoxClient] = None,
     news: Optional[list[dict]] = None,
     snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+    allocation: Optional[RankedAllocation] = None,
 ) -> tuple[bool, str]:
     """Open one trade from best-ranked setup — paper journal + optional live broker order."""
     settings = get_settings()
@@ -865,6 +870,10 @@ async def _open_from_candidate(
         if post_win_cap_meta.get("applied") or flip_cap_meta.get("applied"):
             top_explosion_max = False
 
+    lots = cap_lots_to_allocation(lots, symbol, fill_premium, allocation)
+    if lots <= 0:
+        return False, "ftv_allocation_below_one_lot"
+
     lot_mult = lot_multiplier(symbol)
 
     ok, risk_reason = _risk_engine.check_new_entry(
@@ -1091,6 +1100,20 @@ async def _open_from_candidate(
         "sameStrikePostWinCap": post_win_cap_meta or None,
         "timingAssessment": timing_meta or None,
     }
+    if allocation is not None:
+        ctx_extra.update(
+            {
+                "allocationRank": allocation.rank,
+                "allocationBudgetInr": round(allocation.budgetInr, 2),
+                "allocationRemainingBeforeInr": round(
+                    allocation.remainingBeforeInr,
+                    2,
+                ),
+                "allocationCashReserveInr": round(allocation.cashReserveInr, 2),
+                "allocationWeight": round(allocation.weight, 4),
+                "allocatedCostInr": round(fill_premium * lots * lot_mult, 2),
+            }
+        )
     from app.engines.moneyness import classify_moneyness
 
     if snap.spot and snap.spot > 0:
@@ -1307,7 +1330,7 @@ async def _open_from_candidate(
     ctx = annotate_breadth_bypass(ctx, side=candidate.side, snap=snap, score=candidate.score)
     paper.entryContext = ctx
     state.openPaperTrades.append(paper)
-    trade_store.record_trade_opened(paper, ctx)
+    await asyncio.to_thread(trade_store.record_trade_opened, paper, ctx)
     record_instrument_entry(symbol, candidate.side, candidate.strike)
     from app.engines.directional_lock import record_trade_side
 
@@ -1727,13 +1750,13 @@ async def _process_open_trades(
             pnl,
             exit_reason or "",
         )
-        trade_store.record_trade_closed(trade, ctx)
         from app.engines.snapshot_lag_analyzer import build_trade_close_report
         from app.services import trade_store as ts
 
         report = build_trade_close_report(trade, snapshots, state)
         report["sessionDate"] = trade.sessionDate or datetime.now(IST).strftime("%Y-%m-%d")
-        ts.record_trade_report(report)
+        await asyncio.to_thread(trade_store.record_trade_closed, trade, ctx)
+        await asyncio.to_thread(ts.record_trade_report, report)
         get_ai_learning().record_trade_close(trade)
         state.lastExit = {
             "tradeId": trade.id,
@@ -1766,7 +1789,11 @@ async def process_exits_only(
     exit_skipped = await _process_open_trades(state, snapshots, client)
     profit_gate = update_daily_profit_gate(state)
     cap_snap = get_capital_snapshot()
-    state.capitalAllocation = {**cap_snap.to_dict(), **get_lot_sizes_meta()}
+    state.capitalAllocation = {
+        **cap_snap.to_dict(),
+        **get_lot_sizes_meta(),
+        **capital_book_summary(state),
+    }
     state.dailyProfitGate = profit_gate.to_dict()
     state.chopGuards = chop_guard_summary(state, snapshots)
     state.skipped = exit_skipped
@@ -1812,7 +1839,11 @@ async def process(
     market_live = get_market_phase() == "LIVE_MARKET"
     profit_gate = update_daily_profit_gate(state)
     cap_snap = get_capital_snapshot()
-    state.capitalAllocation = {**cap_snap.to_dict(), **get_lot_sizes_meta()}
+    state.capitalAllocation = {
+        **cap_snap.to_dict(),
+        **get_lot_sizes_meta(),
+        **capital_book_summary(state),
+    }
     state.dailyProfitGate = profit_gate.to_dict()
 
     from app.engines.pretrade_validator import collect_session_trades
@@ -1972,36 +2003,111 @@ async def process(
             and (not live_blocked or must_take_session)
         )
         if session_entries_ok:
-            best = find_best_entry(snapshots, state, trading_limits)
-            if best and explosion_early_ok and not entries_ok and best.mode != "explosion":
-                best = None
-            if best and loss_streak_elite_only and not is_loss_streak_elite_bypass_candidate(best):
-                skipped.append({
-                    "symbol": best.symbol,
-                    "reason": "loss_streak_elite_only",
-                    "message": "Loss streak pause — only high-confidence ELITE / top explosive allowed",
-                    "mode": best.mode,
-                    "score": best.score,
-                    "tier": getattr(best, "tier", None),
-                })
-                best = None
-            if best and cap_elite_only and not is_expiry_elite_top_candidate(best):
-                skipped.append({
-                    "symbol": best.symbol,
-                    "reason": "daily_trade_cap_elite_only",
-                    "message": "Daily trade cap — only ELITE / top explosive allowed",
-                    "mode": best.mode,
-                    "score": best.score,
-                    "tier": getattr(best, "tier", None),
-                })
-                best = None
-            if best:
+            allocation_enabled = bool(
+                getattr(settings, "ftv_ranked_allocation_enabled", True)
+            )
+            max_positions = max(
+                1,
+                int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+            )
+            attempt_limit = max_positions * 3 if allocation_enabled else 1
+            excluded_keys: set[str] = set()
+            allocation_rows: list[dict[str, Any]] = []
+            found_candidate = False
+
+            for _attempt in range(attempt_limit):
+                open_explosions = sum(
+                    1
+                    for trade in state.openPaperTrades
+                    if trade.strategyType == StrategyType.EXPLOSIVE
+                )
+                if allocation_enabled and open_explosions >= max_positions:
+                    break
+
+                best = find_best_entry(
+                    snapshots,
+                    state,
+                    trading_limits,
+                    excluded_keys=excluded_keys,
+                )
+                if best is None:
+                    break
+                found_candidate = True
+                radar_key = (
+                    f"{best.symbol.upper()}:{best.side.value}:"
+                    f"{float(best.strike):g}"
+                )
+                excluded_keys.add(radar_key)
+
+                if explosion_early_ok and not entries_ok and best.mode != "explosion":
+                    skipped.append(
+                        {
+                            "symbol": best.symbol,
+                            "reason": "outside_regular_entry_window",
+                            "mode": best.mode,
+                            "score": best.score,
+                        }
+                    )
+                    break
+                if loss_streak_elite_only and not is_loss_streak_elite_bypass_candidate(best):
+                    skipped.append({
+                        "symbol": best.symbol,
+                        "reason": "loss_streak_elite_only",
+                        "message": "Loss streak pause — only high-confidence ELITE / top explosive allowed",
+                        "mode": best.mode,
+                        "score": best.score,
+                        "tier": getattr(best, "tier", None),
+                    })
+                    continue
+                if cap_elite_only and not is_expiry_elite_top_candidate(best):
+                    skipped.append({
+                        "symbol": best.symbol,
+                        "reason": "daily_trade_cap_elite_only",
+                        "message": "Daily trade cap — only ELITE / top explosive allowed",
+                        "mode": best.mode,
+                        "score": best.score,
+                        "tier": getattr(best, "tier", None),
+                    })
+                    continue
+
+                allocation = None
+                allocation_row: Optional[dict[str, Any]] = None
+                if allocation_enabled and best.mode == "explosion":
+                    allocation = ranked_allocation_for_state(
+                        state,
+                        open_explosions + 1,
+                    )
+                    allocation_row = {
+                        **allocation.to_dict(),
+                        "key": radar_key,
+                        "symbol": best.symbol.upper(),
+                        "side": best.side.value,
+                        "strike": best.strike,
+                        "tier": getattr(best, "tier", None),
+                        "score": round(best.score, 2),
+                        "premium": round(float(best.premium or 0), 2),
+                        "status": "SELECTED",
+                    }
+                    allocation_rows.append(allocation_row)
+                    if allocation.budgetInr <= 0:
+                        allocation_row["status"] = "SKIPPED"
+                        allocation_row["reason"] = "ftv_capital_fully_allocated"
+                        skipped.append(
+                            {
+                                "symbol": best.symbol,
+                                "side": best.side.value,
+                                "strike": best.strike,
+                                "reason": "ftv_capital_fully_allocated",
+                                "mode": best.mode,
+                                "score": best.score,
+                                "tier": getattr(best, "tier", None),
+                            }
+                        )
+                        break
+
                 await _record_funnel_event_safe({
                         "event": "SELECTED",
-                        "key": (
-                            f"{best.symbol.upper()}:{best.side.value}:"
-                            f"{float(best.strike):g}"
-                        ),
+                        "key": radar_key,
                         "symbol": best.symbol.upper(),
                         "side": best.side.value,
                         "strike": best.strike,
@@ -2010,15 +2116,26 @@ async def process(
                         "selectionMode": best.mode,
                         "selectionScore": best.score,
                         "tier": getattr(best, "tier", None),
+                        "allocationRank": allocation.rank if allocation else None,
+                        "allocationBudgetInr": (
+                            round(allocation.budgetInr, 2) if allocation else None
+                        ),
                     })
-                opened, reason = await _open_from_candidate(best, state, client, news, snapshots)
+                opened, reason = await _open_from_candidate(
+                    best,
+                    state,
+                    client,
+                    news,
+                    snapshots,
+                    allocation=allocation,
+                )
+                if allocation_row is not None:
+                    allocation_row["status"] = "OPENED" if opened else "REJECTED"
+                    allocation_row["reason"] = reason
                 if not opened:
                     await _record_funnel_event_safe({
                             "event": "ORDER_REJECTED",
-                            "key": (
-                                f"{best.symbol.upper()}:{best.side.value}:"
-                                f"{float(best.strike):g}"
-                            ),
+                            "key": radar_key,
                             "symbol": best.symbol.upper(),
                             "side": best.side.value,
                             "strike": best.strike,
@@ -2037,7 +2154,15 @@ async def process(
                         "score": best.score,
                         "tier": getattr(best, "tier", None),
                     })
-            else:
+                if best.mode != "explosion" or not allocation_enabled:
+                    break
+
+            state.capitalAllocation = {
+                **cap_snap.to_dict(),
+                **get_lot_sizes_meta(),
+                **capital_book_summary(state, planned=allocation_rows),
+            }
+            if not found_candidate:
                 skipped.extend(diagnose_missed_entries(snapshots, state))
 
     state.skipped = skipped

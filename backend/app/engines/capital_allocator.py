@@ -4,7 +4,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
@@ -70,6 +70,28 @@ class CapitalSnapshot:
             "targetLots": self.targetLots,
             "maxLots": self.maxLots,
             "fetchedAt": self.fetchedAt,
+        }
+
+
+@dataclass(frozen=True)
+class RankedAllocation:
+    rank: int
+    budgetInr: float
+    remainingBeforeInr: float
+    cashReserveInr: float
+    capitalBaseInr: float
+    committedInr: float
+    weight: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rank": self.rank,
+            "budgetInr": round(self.budgetInr, 2),
+            "remainingBeforeInr": round(self.remainingBeforeInr, 2),
+            "cashReserveInr": round(self.cashReserveInr, 2),
+            "capitalBaseInr": round(self.capitalBaseInr, 2),
+            "committedInr": round(self.committedInr, 2),
+            "weight": round(self.weight, 4),
         }
 
 
@@ -228,6 +250,189 @@ def _effective_capital_inr(available: float) -> float:
     return available
 
 
+def ranked_allocation_weights() -> list[float]:
+    """Configured sequential capital sleeves, normalized to the deployable book."""
+    settings = get_settings()
+    raw = str(
+        getattr(settings, "ftv_allocation_weights_csv", "0.60,0.25,0.10")
+        or "0.60,0.25,0.10"
+    )
+    weights: list[float] = []
+    for item in raw.split(","):
+        try:
+            value = float(item.strip())
+        except ValueError:
+            continue
+        if value > 0:
+            weights.append(value)
+    max_positions = max(
+        1,
+        int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+    )
+    weights = weights[:max_positions] or [1.0]
+    reserve_pct = max(
+        0.0,
+        min(
+            0.50,
+            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
+        ),
+    )
+    deployable_pct = 1.0 - reserve_pct
+    total = sum(weights)
+    if total > deployable_pct and total > 0:
+        weights = [weight * deployable_pct / total for weight in weights]
+    return weights
+
+
+def trade_exposure_inr(trade: Any) -> float:
+    """Current premium paid for one open long-option position."""
+    premium = float(
+        getattr(trade, "currentPremium", None)
+        or getattr(trade, "entryPremium", 0)
+        or 0
+    )
+    lots = max(0, int(getattr(trade, "lots", 0) or 0))
+    symbol = str(getattr(trade, "symbol", "") or "")
+    return max(0.0, premium * lots * lot_multiplier(symbol))
+
+
+def open_exposure_inr(state: AutoTraderState) -> float:
+    return sum(trade_exposure_inr(trade) for trade in state.openPaperTrades)
+
+
+def _allocation_capital_base(cap: CapitalSnapshot) -> float:
+    total = float(cap.totalEquityInr or 0)
+    if total <= 0:
+        total = float(cap.availableMarginInr or 0) + float(cap.usedMarginInr or 0)
+    if total <= 0:
+        total = float(cap.availableMarginInr or 0)
+    return max(0.0, _effective_capital_inr(total))
+
+
+def ranked_allocation_for_state(
+    state: AutoTraderState,
+    rank: int,
+) -> RankedAllocation:
+    """Budget the next ranked FTV leg while preserving later sleeves and cash."""
+    cap = get_capital_snapshot()
+    settings = get_settings()
+    weights = ranked_allocation_weights()
+    rank = max(1, int(rank))
+    capital_base = _allocation_capital_base(cap)
+    reserve_pct = max(
+        0.0,
+        min(
+            0.50,
+            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
+        ),
+    )
+    cash_reserve = capital_base * reserve_pct
+    committed = open_exposure_inr(state)
+    strategy_remaining = max(0.0, capital_base - cash_reserve - committed)
+    broker_remaining = max(0.0, float(cap.availableMarginInr or 0))
+    if cap.source == "fallback":
+        broker_remaining = max(0.0, broker_remaining - committed)
+    remaining = min(strategy_remaining, broker_remaining)
+
+    index = rank - 1
+    if index >= len(weights):
+        budget = 0.0
+        weight = 0.0
+    else:
+        future_reserved = capital_base * sum(weights[index + 1 :])
+        budget = max(0.0, remaining - future_reserved)
+        nominal = capital_base * weights[index]
+        # Unused cash from a better-ranked sleeve rolls forward, but a slot never
+        # borrows the capital explicitly reserved for lower-ranked opportunities.
+        budget = min(remaining, max(nominal, budget))
+        weight = weights[index]
+
+    return RankedAllocation(
+        rank=rank,
+        budgetInr=budget,
+        remainingBeforeInr=remaining,
+        cashReserveInr=cash_reserve,
+        capitalBaseInr=capital_base,
+        committedInr=committed,
+        weight=weight,
+    )
+
+
+def cap_lots_to_allocation(
+    lots: int,
+    symbol: str,
+    premium: float,
+    allocation: RankedAllocation | None,
+) -> int:
+    """Apply the final cash sleeve after all strategy force-max sizing paths."""
+    if allocation is None:
+        return max(0, int(lots))
+    unit_cost = float(premium or 0) * lot_multiplier(symbol)
+    if unit_cost <= 0 or allocation.budgetInr <= 0:
+        return 0
+    affordable = int(allocation.budgetInr / unit_cost)
+    return max(0, min(int(lots), affordable))
+
+
+def capital_book_summary(
+    state: AutoTraderState,
+    *,
+    planned: Sequence[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """One reconciled view for execution state and the Upstox manager UI."""
+    cap = get_capital_snapshot()
+    settings = get_settings()
+    capital_base = _allocation_capital_base(cap)
+    committed = open_exposure_inr(state)
+    reserve_pct = max(
+        0.0,
+        min(
+            0.50,
+            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
+        ),
+    )
+    reserve = capital_base * reserve_pct
+    strategy_remaining = max(0.0, capital_base - reserve - committed)
+    broker_remaining = max(0.0, float(cap.availableMarginInr or 0))
+    if cap.source == "fallback":
+        broker_remaining = max(0.0, broker_remaining - committed)
+    remaining = min(strategy_remaining, broker_remaining)
+    active = []
+    for trade in state.openPaperTrades:
+        ctx = getattr(trade, "entryContext", None) or {}
+        active.append(
+            {
+                "tradeId": getattr(trade, "id", ""),
+                "symbol": getattr(trade, "symbol", ""),
+                "side": getattr(getattr(trade, "side", ""), "value", getattr(trade, "side", "")),
+                "strike": float(getattr(trade, "strike", 0) or 0),
+                "lots": int(getattr(trade, "lots", 0) or 0),
+                "rank": ctx.get("allocationRank"),
+                "budgetInr": ctx.get("allocationBudgetInr"),
+                "committedInr": round(trade_exposure_inr(trade), 2),
+            }
+        )
+    return {
+        "enabled": bool(getattr(settings, "ftv_ranked_allocation_enabled", True)),
+        "capitalBaseInr": round(capital_base, 2),
+        "committedInr": round(committed, 2),
+        "cashReserveInr": round(reserve, 2),
+        "remainingInr": round(remaining, 2),
+        "utilizationPct": round((committed / capital_base * 100) if capital_base else 0, 1),
+        "weights": ranked_allocation_weights(),
+        "maxPositions": max(
+            1,
+            int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+        ),
+        "maxSameSide": max(
+            1,
+            int(getattr(settings, "ftv_allocation_max_same_side", 2) or 2),
+        ),
+        "activeAllocations": active,
+        "plannedAllocations": list(planned or []),
+    }
+
+
 def max_lots_for_capital(symbol: str, premium: float) -> int:
     """Max lots affordably on 85% of sizing capital for this premium."""
     cap = get_capital_snapshot()
@@ -303,7 +508,7 @@ async def refresh_capital_from_upstox(client) -> CapitalSnapshot:
         if available <= 0:
             raise ValueError("zero margin from Upstox")
         available = _effective_capital_inr(available)
-        total = min(total, available) if total > 0 else available
+        total = _effective_capital_inr(total) if total > 0 else available
         source = "upstox"
     except Exception as e:
         logger.warning("Upstox capital fetch failed, using fallback: %s", e)

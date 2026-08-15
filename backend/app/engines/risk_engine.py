@@ -57,6 +57,14 @@ class RiskEngine:
         open_trades = state.openPaperTrades
         is_swing = strategy_type == StrategyType.SWING
         max_scalps = settings.aggressive_max_open_scalps if settings.aggressive_lot_sizing else self.profile.maxOpenTrades
+        if (
+            strategy_type == StrategyType.EXPLOSIVE
+            and getattr(settings, "ftv_ranked_allocation_enabled", True)
+        ):
+            max_scalps = max(
+                max_scalps,
+                int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+            )
 
         if is_swing:
             swing_open = sum(1 for t in open_trades if t.strategyType == StrategyType.SWING)
@@ -107,7 +115,27 @@ class RiskEngine:
             explosive_open = sum(
                 1 for t in open_trades if t.strategyType == StrategyType.EXPLOSIVE
             )
-            if explosive_open >= 1 and strategy_type == StrategyType.EXPLOSIVE:
+            same_side_open = sum(
+                1
+                for t in open_trades
+                if t.strategyType == StrategyType.EXPLOSIVE and t.side == side
+            )
+            max_same_side = max(
+                1,
+                int(getattr(settings, "ftv_allocation_max_same_side", 2) or 2),
+            )
+            if (
+                strategy_type == StrategyType.EXPLOSIVE
+                and same_side_open >= max_same_side
+            ):
+                return False, "ftv_same_side_cap"
+            explosion_lane_cap = 1
+            if getattr(settings, "ftv_ranked_allocation_enabled", True):
+                explosion_lane_cap = max(
+                    1,
+                    int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+                )
+            if explosive_open >= explosion_lane_cap and strategy_type == StrategyType.EXPLOSIVE:
                 return False, "explosive_lane_cap"
 
         return True, "passed"

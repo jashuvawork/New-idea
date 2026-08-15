@@ -1,7 +1,9 @@
 """AI/ML strategy and learning API."""
 
 import asyncio
+from datetime import datetime
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -18,6 +20,7 @@ from app.engines.strategy_orchestrator import ALL_STRATEGIES
 from app.services.cursor_composer_client import get_composer_client
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
+IST = ZoneInfo("Asia/Kolkata")
 
 
 @router.get("/strategies")
@@ -205,10 +208,37 @@ async def radar_replay(
 @router.post("/radar-finalize/{date}")
 async def finalize_radar_review(date: str):
     """Build scorecard/funnel artifacts and run configured durable backup."""
-    from app.services.radar_learning import finalize_daily_review
+    from app.config import get_settings
+    from app.services.radar_archive import archive_path
+    from app.services.radar_learning import (
+        RadarOperationBusyError,
+        finalize_daily_review,
+    )
 
     try:
+        target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        now = datetime.now(IST)
+        if target_date > now.date():
+            raise HTTPException(status_code=400, detail="Cannot finalize a future radar session")
+        if target_date == now.date():
+            settings = get_settings()
+            finalize_at = (
+                int(settings.radar_archive_finalize_hour),
+                int(settings.radar_archive_finalize_minute),
+            )
+            if (now.hour, now.minute) < finalize_at:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Current radar session is still active; finalize after "
+                        f"{finalize_at[0]:02d}:{finalize_at[1]:02d} IST"
+                    ),
+                )
+        if not archive_path(date).exists():
+            raise HTTPException(status_code=404, detail="Radar archive not found")
         return await asyncio.to_thread(finalize_daily_review, date)
+    except RadarOperationBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -216,10 +246,15 @@ async def finalize_radar_review(date: str):
 @router.post("/radar-detector-replay/{date}")
 async def radar_detector_replay(date: str):
     """Replay premium tape through an isolated production-detector subprocess."""
-    from app.services.radar_learning import run_detector_replay_isolated
+    from app.services.radar_learning import (
+        RadarOperationBusyError,
+        run_detector_replay_isolated,
+    )
 
     try:
         return await asyncio.to_thread(run_detector_replay_isolated, date)
+    except RadarOperationBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:

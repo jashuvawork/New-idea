@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -13,7 +14,7 @@ import tempfile
 import threading
 import time
 import zipfile
-from collections import Counter, defaultdict, deque
+from collections import Counter, defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -32,9 +33,25 @@ from app.services.radar_archive import (
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 _lock = threading.RLock()
+_finalize_lock = threading.Lock()
+_detector_replay_lock = threading.Lock()
 _last_tape_sample: dict[str, datetime] = {}
 _last_funnel_event: dict[str, datetime] = {}
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+class RadarOperationBusyError(RuntimeError):
+    """Raised instead of queueing duplicate heavy radar operations."""
+
+
+@contextmanager
+def _exclusive_operation(lock: threading.Lock, operation: str) -> Iterator[None]:
+    if not lock.acquire(blocking=False):
+        raise RadarOperationBusyError(f"{operation} is already running")
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def _now() -> datetime:
@@ -107,6 +124,30 @@ def _append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
             handle.flush()
+            os.fsync(handle.fileno())
+
+
+def _read_bytes_locked(path: Path) -> bytes:
+    if not path.exists():
+        return b""
+    with _file_lock(path):
+        return path.read_bytes()
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    with _file_lock(path):
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(row, dict):
+                    out.append(row)
+    return out
 
 
 def _contract_key(symbol: str, side: str, strike: float) -> str:
@@ -138,8 +179,50 @@ def _snapshot_contracts(snapshots: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "oi": int(_number(getattr(row, oi_name, None))),
                     "spot": _number(getattr(snap, "spot", None)),
                     "atmStrike": _number(getattr(snap, "atmStrike", None)),
+                    "instrumentKey": (
+                        getattr(row, "callInstrumentKey", None)
+                        if side == "CALL"
+                        else getattr(row, "putInstrumentKey", None)
+                    ),
                 })
     return contracts
+
+
+def _append_archived_tick_contracts(
+    date: str,
+    contracts: list[dict[str, Any]],
+    *,
+    max_age_seconds: float,
+) -> None:
+    """Keep tracking archived strikes after they rotate out of the live heatmap."""
+    from app.services.tick_store import get_ltp
+
+    current_keys = {str(row.get("key") or "") for row in contracts}
+    for archived in read_archive_entries(date):
+        key = str(archived.get("key") or "")
+        if not key or key in current_keys:
+            continue
+        alert = dict(archived.get("alert") or {})
+        instrument_key = str(alert.get("instrumentKey") or "")
+        if not instrument_key:
+            continue
+        premium = get_ltp(instrument_key, max_age_seconds=max_age_seconds)
+        if premium is None or premium <= 0:
+            continue
+        context = dict(archived.get("context") or {})
+        contracts.append({
+            "key": key,
+            "symbol": str(archived.get("symbol") or "").upper(),
+            "side": str(archived.get("side") or "").upper(),
+            "strike": _number(archived.get("strike")),
+            "premium": float(premium),
+            "oi": 0,
+            "spot": _number(context.get("spot")),
+            "atmStrike": _number(context.get("atmStrike")),
+            "instrumentKey": instrument_key,
+            "archivedTickFallback": True,
+        })
+        current_keys.add(key)
 
 
 def _outcome_horizons() -> list[int]:
@@ -249,6 +332,11 @@ def record_market_observations(
     date = current.strftime("%Y-%m-%d")
     interval = max(1, int(settings.radar_premium_tape_sample_seconds))
     contracts = _snapshot_contracts(snapshots)
+    _append_archived_tick_contracts(
+        date,
+        contracts,
+        max_age_seconds=max(5.0, interval * 2.0),
+    )
     if not contracts:
         return 0
     sample_key = f"{date}:{','.join(sorted(str(symbol).upper() for symbol in snapshots))}"
@@ -287,18 +375,7 @@ def record_market_observations(
 
 
 def read_premium_tape(date: str) -> list[dict[str, Any]]:
-    path = premium_tape_path(date)
-    if not path.exists():
-        return []
-    rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
+    return _read_jsonl(premium_tape_path(date))
 
 
 def _premium_series(date: str) -> dict[str, list[tuple[datetime, float]]]:
@@ -317,6 +394,61 @@ def _premium_series(date: str) -> dict[str, list[tuple[datetime, float]]]:
     return series
 
 
+def _maximum_tree(values: list[float]) -> tuple[list[float], int]:
+    size = 1
+    while size < len(values):
+        size *= 2
+    tree = [float("-inf")] * (size * 2)
+    tree[size:size + len(values)] = values
+    for index in range(size - 1, 0, -1):
+        tree[index] = max(tree[index * 2], tree[index * 2 + 1])
+    return tree, size
+
+
+def _range_maximum(
+    tree: list[float],
+    size: int,
+    left: int,
+    right: int,
+) -> float:
+    """Return the inclusive range maximum in O(log n)."""
+    left += size
+    right += size
+    maximum = float("-inf")
+    while left <= right:
+        if left % 2 == 1:
+            maximum = max(maximum, tree[left])
+            left += 1
+        if right % 2 == 0:
+            maximum = max(maximum, tree[right])
+            right -= 1
+        left //= 2
+        right //= 2
+    return maximum
+
+
+def _first_at_least(
+    tree: list[float],
+    size: int,
+    left: int,
+    right: int,
+    target: float,
+) -> int | None:
+    """Find the first inclusive range index reaching target in O(log n)."""
+    def search(node: int, node_left: int, node_right: int) -> int | None:
+        if node_right < left or node_left > right or tree[node] < target:
+            return None
+        if node_left == node_right:
+            return node_left
+        midpoint = (node_left + node_right) // 2
+        found = search(node * 2, node_left, midpoint)
+        if found is not None:
+            return found
+        return search(node * 2 + 1, midpoint + 1, node_right)
+
+    return search(1, 0, size - 1)
+
+
 def _truth_events(
     key: str,
     samples: list[tuple[datetime, float]],
@@ -332,22 +464,16 @@ def _truth_events(
     suppress_until: datetime | None = None
     base_start_index = 0
     future_right = 1
-    future_max: deque[int] = deque()
+    premiums_all = [premium for _, premium in samples]
+    maximum_tree, maximum_tree_size = _maximum_tree(premiums_all)
     for index in range(3, len(samples) - 1):
+        future_right = max(future_right, index + 1)
         while (
             future_right < len(samples)
             and (samples[future_right][0] - samples[index][0]).total_seconds()
             <= lookahead_seconds
         ):
-            while (
-                future_max
-                and samples[future_max[-1]][1] <= samples[future_right][1]
-            ):
-                future_max.pop()
-            future_max.append(future_right)
             future_right += 1
-        while future_max and future_max[0] <= index:
-            future_max.popleft()
         base_end = samples[index][0]
         if suppress_until and base_end <= suppress_until:
             continue
@@ -365,16 +491,33 @@ def _truth_events(
         if base_low <= 0 or (base_high - base_low) / base_low * 100.0 > flat_range_pct:
             continue
         target = base_low * (1.0 + vertical_pct / 100.0)
-        if not future_max or samples[future_max[0]][1] < target:
+        future_last = future_right - 1
+        if (
+            future_last <= index
+            or _range_maximum(
+                maximum_tree,
+                maximum_tree_size,
+                index + 1,
+                future_last,
+            ) < target
+        ):
             continue
-        future = [
-            row for row in samples[index + 1:]
-            if (row[0] - base_end).total_seconds() <= lookahead_seconds
-        ]
-        crossing = next((row for row in future if row[1] >= target), None)
-        if crossing is None:
+        crossing_index = _first_at_least(
+            maximum_tree,
+            maximum_tree_size,
+            index + 1,
+            future_last,
+            target,
+        )
+        if crossing_index is None:
             continue
-        peak = max(row[1] for row in future)
+        crossing = samples[crossing_index]
+        peak = _range_maximum(
+            maximum_tree,
+            maximum_tree_size,
+            index + 1,
+            future_last,
+        )
         event = {
             "key": key,
             "baseStartAt": base_rows[0][0].isoformat(),
@@ -586,20 +729,6 @@ def record_funnel_event(
     _append_jsonl(funnel_path(target_date), payload)
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    out: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(row, dict):
-            out.append(row)
-    return out
-
-
 def build_funnel_report(date: str) -> dict[str, Any]:
     from app.services import trade_store
 
@@ -624,9 +753,26 @@ def build_funnel_report(date: str) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for radar in radars:
         key = str(radar.get("key") or "")
-        matched_trades = trades_by_key.get(key) or []
-        matched_blocks = blockers.get(key) or []
-        matched_events = events_by_key.get(key) or []
+        detected_at = _parse_ts(radar.get("firstSeenAt"))
+
+        def is_causal(row: Mapping[str, Any], timestamp_key: str) -> bool:
+            if detected_at is None:
+                return True
+            timestamp = _parse_ts(row.get(timestamp_key))
+            return timestamp is not None and timestamp >= detected_at
+
+        matched_trades = [
+            trade for trade in trades_by_key.get(key) or []
+            if is_causal(trade, "openedAt")
+        ]
+        matched_blocks = [
+            item for item in blockers.get(key) or []
+            if is_causal(item, "ts")
+        ]
+        matched_events = [
+            item for item in events_by_key.get(key) or []
+            if is_causal(item, "ts")
+        ]
         closed = [trade for trade in matched_trades if str(trade.get("status")) == "CLOSED"]
         rows.append({
             "key": key,
@@ -681,6 +827,7 @@ def build_funnel_report(date: str) -> dict[str, Any]:
 def backup_archive(path: Path) -> dict[str, Any]:
     """Copy a finalized archive to a mounted backup dir and/or S3."""
     settings = get_settings()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
     destinations: list[str] = []
     errors: list[str] = []
     attempts = 0
@@ -690,8 +837,15 @@ def backup_archive(path: Path) -> dict[str, Any]:
             target_dir = Path(backup_dir)
             target_dir.mkdir(parents=True, exist_ok=True)
             target = target_dir / path.name
-            if not target.exists() or target.stat().st_size != path.stat().st_size:
+            target_matches = (
+                target.exists()
+                and target.stat().st_size == path.stat().st_size
+                and hashlib.sha256(target.read_bytes()).hexdigest() == digest
+            )
+            if not target_matches:
                 shutil.copy2(path, target)
+            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                raise OSError("Local backup checksum verification failed")
             destinations.append(str(target))
         except OSError as exc:
             errors.append(f"directory: {exc}")
@@ -712,7 +866,14 @@ def backup_archive(path: Path) -> dict[str, Any]:
             if verify_head and hasattr(client, "head_object"):
                 try:
                     head = client.head_object(Bucket=bucket, Key=key)
-                    already_uploaded = int(head.get("ContentLength") or -1) == path.stat().st_size
+                    metadata = {
+                        str(name).lower(): str(value)
+                        for name, value in (head.get("Metadata") or {}).items()
+                    }
+                    already_uploaded = (
+                        int(head.get("ContentLength") or -1) == path.stat().st_size
+                        and metadata.get("sha256") == digest
+                    )
                 except Exception:
                     already_uploaded = False
             if already_uploaded:
@@ -733,11 +894,23 @@ def backup_archive(path: Path) -> dict[str, Any]:
                 for attempt in range(1, retry_max + 1):
                     attempts = attempt
                     try:
-                        client.upload_file(str(path), bucket, key)
+                        client.upload_file(
+                            str(path),
+                            bucket,
+                            key,
+                            ExtraArgs={"Metadata": {"sha256": digest}},
+                        )
                         if verify_head and hasattr(client, "head_object"):
                             head = client.head_object(Bucket=bucket, Key=key)
-                            if int(head.get("ContentLength") or -1) != path.stat().st_size:
-                                raise OSError("S3 upload size verification failed")
+                            metadata = {
+                                str(name).lower(): str(value)
+                                for name, value in (head.get("Metadata") or {}).items()
+                            }
+                            if (
+                                int(head.get("ContentLength") or -1) != path.stat().st_size
+                                or metadata.get("sha256") != digest
+                            ):
+                                raise OSError("S3 upload checksum verification failed")
                         destinations.append(remote)
                         last_error = None
                         break
@@ -767,6 +940,7 @@ def backup_archive(path: Path) -> dict[str, Any]:
         "destinations": destinations,
         "errors": errors,
         "attempts": attempts,
+        "sha256": digest,
     }
 
 
@@ -785,7 +959,45 @@ def _prune_learning_files(now: datetime | None = None) -> None:
             path.with_suffix(path.suffix + ".lock").unlink(missing_ok=True)
 
 
+def _backup_status_path(date: str) -> Path:
+    return archive_path(date).with_suffix(".backup.json")
+
+
+def _write_backup_status(date: str, status: Mapping[str, Any]) -> None:
+    path = _backup_status_path(date)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    os.close(fd)
+    temporary = Path(temporary_name)
+    try:
+        temporary.write_text(json.dumps(dict(status), indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def radar_review_is_current(date: str) -> bool:
+    path = archive_path(date)
+    status_path = _backup_status_path(date)
+    if not path.exists() or not status_path.exists():
+        return False
+    try:
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        return bool(status.get("success") and status.get("sha256") == digest)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def finalize_daily_review(date: str) -> dict[str, Any]:
+    with _exclusive_operation(_finalize_lock, "Radar finalization"):
+        return _finalize_daily_review_unlocked(date)
+
+
+def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     """Bundle tape, scorecard, funnel, and replay inputs into the canonical daily ZIP."""
     scorecard = analyze_hindsight(date)
     funnel = build_funnel_report(date)
@@ -795,15 +1007,20 @@ def finalize_daily_review(date: str) -> dict[str, Any]:
     }
     tape = premium_tape_path(date)
     if tape.exists():
-        artifacts["premium_tape.jsonl"] = tape.read_bytes()
+        artifacts["premium_tape.jsonl"] = _read_bytes_locked(tape)
     funnel_file = funnel_path(date)
     if funnel_file.exists():
-        artifacts["funnel_events.jsonl"] = funnel_file.read_bytes()
+        artifacts["funnel_events.jsonl"] = _read_bytes_locked(funnel_file)
     path = add_archive_artifacts(date, artifacts)
     backup = backup_archive(path)
-    add_archive_artifacts(
+    _write_backup_status(
         date,
-        {"backup_status.json": json.dumps(backup, indent=2)},
+        {
+            **backup,
+            "date": date,
+            "archive": path.name,
+            "recordedAt": _now().isoformat(),
+        },
     )
     _prune_learning_files()
     try:
@@ -832,7 +1049,7 @@ def finalize_daily_review(date: str) -> dict[str, Any]:
 def finalize_pending_reviews(
     *,
     now: datetime | None = None,
-    limit: int = 7,
+    limit: int = 365,
 ) -> list[dict[str, Any]]:
     """Crash recovery: finalize recent prior-session ZIPs missing their scorecard."""
     current_date = _aware(now).strftime("%Y-%m-%d")
@@ -843,12 +1060,16 @@ def finalize_pending_reviews(
             continue
         try:
             with zipfile.ZipFile(path, "r") as archive:
-                names = set(archive.namelist())
-                if "scorecard.json" in names and "backup_status.json" in names:
-                    backup_status = json.loads(archive.read("backup_status.json"))
-                    if backup_status.get("success"):
-                        continue
-        except (OSError, json.JSONDecodeError, zipfile.BadZipFile):
+                archive.testzip()
+            if radar_review_is_current(date):
+                continue
+        except (OSError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
+            try:
+                from app.services.radar_health import record_component_error
+
+                record_component_error("dailyRadarRecovery", exc)
+            except Exception:
+                pass
             continue
         pending.append(date)
         if len(pending) >= max(1, limit):
@@ -857,6 +1078,11 @@ def finalize_pending_reviews(
 
 
 def run_detector_replay_isolated(date: str) -> dict[str, Any]:
+    with _exclusive_operation(_detector_replay_lock, "Detector replay"):
+        return _run_detector_replay_isolated_unlocked(date)
+
+
+def _run_detector_replay_isolated_unlocked(date: str) -> dict[str, Any]:
     """Replay via a subprocess so production detector globals cannot affect live state."""
     premium_tape_path(date)  # strict date validation
     backend_dir = Path(__file__).resolve().parents[2]

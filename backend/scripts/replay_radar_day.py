@@ -21,10 +21,10 @@ from app.models.schemas import (
     Side,
     SymbolSnapshot,
 )
+from app.services.radar_archive import _review_rank
 from app.services.radar_learning import read_premium_tape
 
 IST = ZoneInfo("Asia/Kolkata")
-_TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
 
 
 class _ReplayDateTime(datetime):
@@ -38,11 +38,7 @@ class _ReplayDateTime(datetime):
 
 
 def _rank(alert: dict[str, Any]) -> tuple[float, ...]:
-    return (
-        float(_TIER_RANK.get(str(alert.get("tier") or "WATCH"), 0)),
-        float(alert.get("explosionScore") or 0),
-        float(alert.get("peakMovePct") or 0),
-    )
+    return _review_rank(alert)
 
 
 def replay_radar_day(date: str) -> dict[str, Any]:
@@ -59,10 +55,12 @@ def replay_radar_day(date: str) -> dict[str, Any]:
         ict_breakout_monitor.datetime,
         session_timing.datetime,
     )
+    original_market_phase = session_timing.get_market_phase
     try:
         explosion_detector.datetime = _ReplayDateTime
         ict_breakout_monitor.datetime = _ReplayDateTime
         session_timing.datetime = _ReplayDateTime
+        session_timing.get_market_phase = lambda: "LIVE_MARKET"
         for batch in batches:
             ts = datetime.fromisoformat(str(batch["ts"]))
             if ts.tzinfo is None:
@@ -128,6 +126,7 @@ def replay_radar_day(date: str) -> dict[str, Any]:
             ict_breakout_monitor.datetime,
             session_timing.datetime,
         ) = original_datetimes
+        session_timing.get_market_phase = original_market_phase
         reset_detector_state_for_tests()
     return {
         "date": date,
