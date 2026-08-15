@@ -27,6 +27,20 @@ from app.models.schemas import AutoTraderState, Side, StrategyType, SymbolSnapsh
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def _alert_worth_explaining(alert: dict[str, Any]) -> bool:
+    """Keep early structured WATCH rows instead of hiding them below the old 20% floor."""
+    if str(alert.get("tier") or "").upper() != "WATCH":
+        return True
+    daily = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
+    return bool(
+        daily >= 20
+        or alert.get("allDayExplosion")
+        or alert.get("ictFirstLift")
+        or alert.get("ictBreakout")
+        or alert.get("tradeable")
+    )
+
+
 def _candidate_from_alert(symbol: str, snap: SymbolSnapshot, alert: dict) -> EntryCandidate:
     from app.engines.explosion_detector import ExplosionEvent
 
@@ -385,6 +399,13 @@ def _gate_checks(
             "score": score,
             "dailyMovePct": daily_move,
             "premium": prem,
+            "momentType": alert.get("momentType"),
+            "ictFirstLift": bool(alert.get("ictFirstLift")),
+            "localBaseMovePct": float(
+                alert.get("localBaseMovePct")
+                or alert.get("ictBaseRelativeMovePct")
+                or 0
+            ),
             "wouldPass": False,
             "primaryBlocker": blockers[0] if blockers else "not_in_candidate_pool",
             "blockers": blockers,
@@ -649,6 +670,12 @@ def _gate_checks(
         "allDayExplosion": bool(alert.get("allDayExplosion")),
         "volumeAwaken": bool(alert.get("volumeAwaken")),
         "momentType": moment_type,
+        "ictFirstLift": bool(alert.get("ictFirstLift")),
+        "localBaseMovePct": float(
+            alert.get("localBaseMovePct")
+            or alert.get("ictBaseRelativeMovePct")
+            or 0
+        ),
         "ictPattern": alert.get("ictPattern") or (ict.pattern if ict else None),
         "ictFlatThenVertical": bool(
             alert.get("ictFlatThenVertical") or (ict.flat_then_vertical if ict else False)
@@ -717,9 +744,7 @@ def build_missed_trade_report(
         if not snap.dataAvailable:
             continue
         for alert in snap.explosionAlerts or []:
-            tier = str(alert.get("tier") or "")
-            daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
-            if tier == "WATCH" and daily_move < 20 and not alert.get("allDayExplosion"):
+            if not _alert_worth_explaining(alert):
                 continue
             row = _gate_checks(sym, snap, alert, state, snapshots)
             if row.get("wouldPass"):
@@ -780,6 +805,8 @@ def _classify_moment_types(
     examples: dict[str, list[dict[str, Any]]] = {}
 
     def _bucket_alert(alert: dict, symbol: str) -> str:
+        if alert.get("ictFirstLift") or alert.get("momentType") == "first_lift_local_base":
+            return "first_lift_local_base"
         if alert.get("ictMegaRip") or float(alert.get("dailyMovePct") or 0) >= 200:
             return "mega_rip"
         if alert.get("ictFlatThenVertical") or alert.get("ictPattern") == "flat_then_vertical":
@@ -800,10 +827,10 @@ def _classify_moment_types(
         if not snap.dataAvailable:
             continue
         for alert in snap.explosionAlerts or []:
+            if not _alert_worth_explaining(alert):
+                continue
             tier = str(alert.get("tier") or "")
             daily = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
-            if tier == "WATCH" and daily < 20 and not alert.get("ictBreakout"):
-                continue
             kind = _bucket_alert(alert, sym)
             buckets[kind] += 1
             examples.setdefault(kind, []).append({
@@ -815,6 +842,8 @@ def _classify_moment_types(
                 "dailyMovePct": daily,
                 "peakMovePct": alert.get("peakMovePct"),
                 "ictPattern": alert.get("ictPattern"),
+                "ictFirstLift": bool(alert.get("ictFirstLift")),
+                "localBaseMovePct": alert.get("localBaseMovePct"),
             })
 
     missed_by_type: Counter[str] = Counter()
@@ -823,6 +852,7 @@ def _classify_moment_types(
         missed_by_type[kind] += 1
 
     priority = [
+        "first_lift_local_base",
         "flat_then_vertical",
         "volume_awakening",
         "premium_fvg",
@@ -851,6 +881,7 @@ def _classify_moment_types(
 
 def _moment_capture_hint(moment_type: str) -> str:
     return {
+        "first_lift_local_base": "Watch at ~15% off the recent flat trough; enter only after normal heat/chart gates",
         "flat_then_vertical": "Enter on base break + volume (early ICT) — do not wait for 80%+",
         "explosion_extended_chase": "Skip EXPLOSIVE after +70% session move — chase kills PF",
         "volume_awakening": "Trade volume surge on BUILDING/EXPLODING immediately",

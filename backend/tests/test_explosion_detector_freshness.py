@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 import app.engines.explosion_detector as detector
 from app.models.schemas import Side
+from app.engines.ict_breakout_monitor import premium_poll_history
 
 
 def test_first_record_of_new_session_drops_previous_day_history():
@@ -40,3 +41,24 @@ def test_velocity_keeps_fresh_poll_move():
     ])
 
     assert detector._velocity(history, 1) == 3.0
+
+
+def test_velocity_uses_elapsed_time_not_fast_ws_poll_count():
+    now = datetime.now(detector.IST)
+    history = deque(
+        (
+            now - timedelta(milliseconds=75 * (40 - i)),
+            100.0 + (3.0 * i / 40.0),
+            1000.0,
+        )
+        for i in range(41)
+    )
+
+    assert round(detector._velocity(history, 1), 2) == 3.0
+
+
+def test_detector_history_normalizes_symbol_case():
+    detector._record("nifty", 24300.0, Side.CALL, 100.0, 1000.0)
+
+    assert "nifty" not in detector._history
+    assert premium_poll_history("NIFTY", 24300.0, Side.CALL)

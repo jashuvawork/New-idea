@@ -30,7 +30,8 @@ _tier_sticky: dict[str, tuple[str, datetime]] = {}
 # flickering below the cutoff mid-move (missed SENSEX 76500 PE Jul23).
 _score_sticky: dict[str, tuple[float, datetime]] = {}
 _session_date: Optional[str] = None
-MAX_HISTORY = 40  # ~2 min at 3s poll
+MAX_HISTORY = 240
+PREMIUM_POLL_WINDOW_SECONDS = 120
 # Medium-horizon local base: the recent swing-low / support the current leg launched
 # from. The 2-min poll history + full-session low can't see it — the session low is the
 # far morning dip (overstates the move as a chase), and ICT flat-base needs a tight base.
@@ -41,6 +42,7 @@ _local_base_hist: dict[str, deque] = {}
 LOCAL_BASE_HIST_MAXLEN = 1200  # ~60 min at 3s
 LOCAL_BASE_WINDOW_SECONDS = 1800  # 30 min lookback for the local swing low
 LOCAL_BASE_EXCLUDE_RECENT_SECONDS = 45  # drop the live breakout tail so base != the rip
+LOCAL_BASE_SAMPLE_MIN_SECONDS = 1.5
 _TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
 
 
@@ -749,6 +751,7 @@ def _last_known_volume(history: deque) -> float:
 def _record(symbol: str, strike: float, side: Side, premium: float, volume: float = 0) -> None:
     if not premium or premium <= 0:
         return
+    symbol = symbol.upper()
     # Roll before reading/appending history so the first tick of a new session cannot
     # calculate "3s" velocity against yesterday's final premium.
     _roll_session()
@@ -780,7 +783,11 @@ def _record_local_base(full_key: str, ts: datetime, premium: float) -> None:
     if dq is None:
         dq = deque(maxlen=LOCAL_BASE_HIST_MAXLEN)
         _local_base_hist[full_key] = dq
-    dq.append((ts, float(premium)))
+    elapsed = (ts - dq[-1][0]).total_seconds() if dq else LOCAL_BASE_SAMPLE_MIN_SECONDS
+    if dq and 0 <= elapsed < LOCAL_BASE_SAMPLE_MIN_SECONDS:
+        dq[-1] = (ts, min(float(dq[-1][1]), float(premium)))
+    else:
+        dq.append((ts, float(premium)))
     cutoff = ts - timedelta(seconds=LOCAL_BASE_WINDOW_SECONDS + 300)
     while dq and dq[0][0] < cutoff:
         dq.popleft()
@@ -818,8 +825,9 @@ def local_base_premium(
     hi_cut = now - timedelta(seconds=excl)
     vals = [p for (ts, p) in dq if lo_cut <= ts <= hi_cut and _is_meaningful_premium(p)]
     if not vals:
-        # Not enough pre-breakout history yet — use the whole window.
-        vals = [p for (ts, p) in dq if ts >= lo_cut and _is_meaningful_premium(p)]
+        # The only samples are in the live breakout tail, so the launch pad is unknown.
+        # Treating the rip itself as its base understates chase distance.
+        return 0.0
     return min(vals) if vals else 0.0
 
 
@@ -845,10 +853,17 @@ def local_base_relative_move_pct(
 
 
 def _velocity(history: deque, polls_back: int) -> float:
-    if len(history) < polls_back + 1:
+    if len(history) < 2 or polls_back <= 0:
         return 0.0
     current_row = history[-1]
-    prior_row = history[-(polls_back + 1)]
+    try:
+        target = current_row[0] - timedelta(seconds=float(polls_back * 3))
+        prior_row = next(
+            row for row in reversed(list(history)[:-1])
+            if row[0] <= target
+        )
+    except (AttributeError, TypeError, StopIteration):
+        return 0.0
     current = current_row[1]
     prior = prior_row[1]
     if not prior or prior <= 0:
@@ -879,7 +894,14 @@ def _volume_surge_with_chain(volume: float, history: deque, settings) -> float:
     """Blend poll history with chain volume — catches flat-then-vertical rips at 14:00."""
     hist_surge = _volume_surge(history)
     min_vol = int(getattr(settings, "explosion_volume_awaken_min", 25000) or 25000)
-    if volume >= min_vol:
+    min_v3 = float(
+        getattr(settings, "explosion_volume_awaken_min_velocity_3s", 1.0) or 1.0
+    )
+    live_v3 = _velocity(history, 1)
+    # Option-chain volume is cumulative for the day. High absolute volume alone is not
+    # a new surge; require either measurable premium heat or expansion in poll history.
+    chain_volume_live = live_v3 >= min_v3 or hist_surge > 1.2
+    if volume >= min_vol and chain_volume_live:
         if hist_surge <= 1.2:
             return max(hist_surge, 2.5)
         return max(hist_surge, 1.8)
@@ -992,6 +1014,7 @@ def scan_chain_explosions(
     from app.engines.session_timing import in_open_premium_window
 
     settings = get_settings()
+    symbol = symbol.upper()
     open_window = in_open_premium_window()
     events: list[ExplosionEvent] = []
     step = 100
@@ -1313,7 +1336,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
 
     _settings = _gs()
     immature_floor = float(
-        getattr(_settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
+        getattr(_settings, "explosion_immature_min_session_move_pct", 28.0) or 28.0
     )
     # Pad floor — arm tradeable at the real base (₹40), not after the rip (₹160).
     pad_floor = float(
@@ -1420,8 +1443,11 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictFirstLift": first_lift,
         "ictVolumeAwakening": ict.volume_awakening,
         "ictDisplacement": ict.displacement,
+        "ictLocalSwingBase": ict.local_swing_base,
         "ictBaseRelativeMovePct": round(ict.base_relative_move_pct, 1),
         "ictBasePremium": round(ict.base_premium, 2),
+        "flatVerticalQuality": round(ict.flat_vertical_quality, 1),
+        "flatVerticalGrade": ict.flat_vertical_grade,
         "bullishLocalBasePrediction": bullish_base,
         "bullishLocalBaseActive": bool(bullish_base.get("active")),
         "bullishLocalBaseConfidence": float(bullish_base.get("confidence") or 0),

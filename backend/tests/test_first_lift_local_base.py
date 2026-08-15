@@ -222,3 +222,5 @@ def test_soft_first_lift_reaches_radar_before_building_tier(_open, side, option_
     assert radar["tradeable"] is True
     assert radar["momentType"] == "first_lift_local_base"
     assert 14.0 <= radar["ictBaseRelativeMovePct"] <= 16.5
+    assert radar["flatVerticalQuality"] > 0
+    assert radar["flatVerticalGrade"] in ("A+", "A", "B", "C")

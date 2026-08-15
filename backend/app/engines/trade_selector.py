@@ -474,6 +474,9 @@ def _explosion_candidates(
                 volume_surge=float(alert.get("volumeSurge") or 0),
                 base_relative_move_pct=float(alert.get("ictBaseRelativeMovePct") or 0),
                 base_premium=float(alert.get("ictBasePremium") or 0),
+                local_swing_base=bool(alert.get("ictLocalSwingBase")),
+                flat_vertical_quality=float(alert.get("flatVerticalQuality") or 0),
+                flat_vertical_grade=str(alert.get("flatVerticalGrade") or ""),
                 first_lift=bool(alert.get("ictFirstLift")),
             )
         from app.engines.elite_never_block import elite_never_block_active
@@ -612,8 +615,8 @@ def _explosion_candidates(
 
             if option_cvd_confirms_buying(snap, event.strike, event.side):
                 rank += float(getattr(settings, "cvd_rank_bonus", 5.0) or 5.0)
-        # Directional prediction at the local bottom is deliberately CALL-only and
-        # additive. It helps the confirmed bullish leg win selection; no safety gate is
+        # Directional prediction at the local bottom is symmetric for CE and PE and
+        # additive. It helps the confirmed reversal leg win selection; no safety gate is
         # bypassed, and execution-time premium validation still has the final word.
         rank += float(bullish_base.get("rankBonus") or 0.0)
 
@@ -631,11 +634,10 @@ def _explosion_candidates(
             tier=event.tier,
             explosion_event=event,
             alert=alert,
-            pretrade_meta=(
-                {"bullishLocalBasePrediction": bullish_base}
-                if event.side == Side.CALL
-                else None
-            ),
+            pretrade_meta={
+                "localBaseReversalPrediction": bullish_base,
+                "bullishLocalBasePrediction": bullish_base,
+            },
         ))
     return out
 

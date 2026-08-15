@@ -4,6 +4,8 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.explosion_entry_guards import (
     cap_fake_explosion_trap_lots,
@@ -41,6 +43,10 @@ def _settings(**overrides):
     s.fake_explosion_trap_min_session_move_pct = 28.0
     s.fake_explosion_trap_extended_move_pct = 55.0
     s.explosion_early_window_max_move_pct = 55.0
+    s.explosion_chase_use_local_base = True
+    s.explosion_local_base_trust_min_move_pct = 8.0
+    s.explosion_local_base_recent_window_enabled = False
+    s.explosion_local_base_chase_max_move_pct = 65.0
     s.fake_explosion_trap_max_premium_mom_pct = 0.15
     s.fake_explosion_trap_block_on_conflict = True
     s.fake_explosion_trap_min_conflict_flags = 3
@@ -161,6 +167,38 @@ def test_blocks_premium_flat_extension(mock_money_settings, mock_settings):
     assert blocked is True
     assert "premium_flat" in meta.get("conflictFlags", [])
     assert "premium_flat" in reason or meta.get("action") == "block"
+
+
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_fresh_local_pad_is_not_misclassified_as_session_extension(
+    mock_money_settings, mock_settings, side,
+):
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+    snap = _snap(or_pos="ABOVE")
+    event = _event(daily=67.0, strike=24200.0)
+    event.side = side
+    cand = _candidate(event, snap)
+    prem = {"direction": "NEUTRAL", "momentum3Pct": 0.0, "momentum5Pct": 0.0}
+
+    with patch(
+        "app.engines.explosion_entry_guards._midday_chop_active",
+        return_value=False,
+    ):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand,
+            snap,
+            premium_chart=prem,
+            ict=_confirmed_ict(20.0),
+        )
+
+    assert blocked is False
+    assert reason != "fake_explosion_trap_premium_flat_extension"
+    assert "session_extended" not in meta.get("conflictFlags", [])
+    assert meta["localBaseMovePct"] == 20.0
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")

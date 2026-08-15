@@ -417,7 +417,7 @@ def immature_explosion_blocked(
         move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
 
     min_move = float(
-        getattr(settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
+        getattr(settings, "explosion_immature_min_session_move_pct", 28.0) or 28.0
     )
     early_min = float(
         getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0
@@ -1086,8 +1086,14 @@ def detect_fake_explosion_trap(
         extended_move = float(
             getattr(settings, "explosion_early_window_max_move_pct", 65.0) or 65.0
         )
-    session_extended = move >= extended_move
-    in_base_window = min_move <= move < extended_move
+    local_pad = float(effective_local_base_move_pct(event, ict) or 0.0)
+    local_max = float(
+        getattr(settings, "explosion_local_base_chase_max_move_pct", 65.0) or 65.0
+    )
+    fresh_local_pad = 0 < local_pad <= local_max
+    timing_move = local_pad if fresh_local_pad else move
+    session_extended = move >= extended_move and not fresh_local_pad
+    in_base_window = min_move <= timing_move < extended_move
     premium_flat = _premium_mom_flat(premium_chart)
 
     depth, money, atm = _strike_depth(candidate.side, float(candidate.strike), snap)
@@ -1131,6 +1137,7 @@ def detect_fake_explosion_trap(
         "conflictCount": len(flags),
         "explosionTier": tier,
         "sessionMovePct": round(move, 2),
+        "localBaseMovePct": round(local_pad, 2),
         "velocity3s": round(v3, 2),
         "moneyness": money,
         "preferredMoneyness": preferred,
@@ -1186,11 +1193,16 @@ def detect_fake_explosion_trap(
                 "otm_inside_or",
                 "post_small_win",
             }
+            structural_conflicts = structural.intersection(flags)
+            if fresh_local_pad:
+                # Flat premium alone is not an extension when the option is still close
+                # to a confirmed local launch pad. OTM/post-win conflicts still apply.
+                structural_conflicts.discard("premium_flat")
             if (
                 len(flags) >= min_flags
                 and (chop_regime or midday)
                 and elite_hot
-                and structural.intersection(flags)
+                and structural_conflicts
             ):
                 hard_block = True
                 reason = "fake_explosion_trap_conflict"

@@ -59,14 +59,20 @@ class ICTBreakoutSignal:
 
 def premium_poll_history(symbol: str, strike: float, side: Side | str) -> list[tuple[datetime, float, float]]:
     """Read rolling premium poll history for ICT gap detection."""
-    from app.engines.explosion_detector import _history, _strike_key
+    from app.engines.explosion_detector import (
+        PREMIUM_POLL_WINDOW_SECONDS,
+        _history,
+        _strike_key,
+    )
 
     side_val = side.value if isinstance(side, Side) else str(side).upper()
     key = _strike_key(strike, Side(side_val))
     hist = _history.get(symbol.upper(), {}).get(key)
     if not hist:
         return []
-    return list(hist)
+    rows = list(hist)
+    cutoff = rows[-1][0] - timedelta(seconds=PREMIUM_POLL_WINDOW_SECONDS)
+    return [row for row in rows if row[0] >= cutoff]
 
 
 def _detect_premium_fvg(
@@ -234,7 +240,11 @@ def _detect_local_swing_base(
     lookback = int(getattr(settings, "ict_local_base_lookback_polls", 16) or 16)
     lookback = max(4, lookback)
     window = list(history)[-lookback:] if history else []
-    premiums = [float(h[1]) for h in window if float(h[1] or 0) > 0]
+    samples = [
+        (h[0], float(h[1]))
+        for h in window
+        if float(h[1] or 0) > 0
+    ]
 
     # Merge ~30m local-base hist so ICT still sees the trough after the rip.
     try:
@@ -253,10 +263,15 @@ def _detect_local_swing_base(
                 lo_cut = now - timedelta(seconds=int(LOCAL_BASE_WINDOW_SECONDS))
                 for ts, p in dq:
                     if ts >= lo_cut and _is_meaningful_premium(p):
-                        premiums.append(float(p))
+                        samples.append((ts, float(p)))
     except Exception:
         pass
 
+    try:
+        samples.sort(key=lambda item: item[0].timestamp())
+    except (AttributeError, TypeError, ValueError):
+        return False, 0.0, 0.0
+    premiums = [premium_value for _, premium_value in samples]
     if len(premiums) < 4:
         return False, 0.0, 0.0
     local_low = min(premiums)
@@ -511,7 +526,7 @@ def analyze_ict_breakout(
     # Displacement alone must not activate ICT on tiny session moves (Jul20 +1% noise).
     early_floor = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
     immature_floor = float(
-        getattr(settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
+        getattr(settings, "explosion_immature_min_session_move_pct", 28.0) or 28.0
     )
     displacement_only_ok = displacement and move >= immature_floor and (flat or vol_awaken or fvg)
     active = (
