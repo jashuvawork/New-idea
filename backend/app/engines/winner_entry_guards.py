@@ -90,6 +90,17 @@ def chop_weak_explosion_blocks_entry(
         ict_vol = ict_vol or bool(ict.volume_awakening)
         move = max(move, float(ict.session_move_pct or 0))
 
+    # A range-bound index is exactly where a coiled option base can launch. Admit
+    # only the strict first-lift proof; generic low-move explosions remain blocked.
+    from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+    if first_lift_entry_ready(
+        snap=snap,
+        event=event,
+        alert=alert,
+    ):
+        return False, "first_lift_local_base_confirmed"
+
     chop_min = float(
         getattr(settings, "explosion_chop_min_session_move_pct", 28.0) or 28.0
     )
