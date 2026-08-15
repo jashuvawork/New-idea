@@ -1,0 +1,201 @@
+"""Runtime health telemetry for detector sampling, archives, analysis, and backups."""
+
+from __future__ import annotations
+
+import threading
+from datetime import datetime
+from typing import Any, Mapping
+from zoneinfo import ZoneInfo
+
+from app.config import get_settings
+
+IST = ZoneInfo("Asia/Kolkata")
+_lock = threading.RLock()
+_state: dict[str, Any] = {
+    "sources": {},
+    "components": {},
+    "backup": {},
+    "counters": {},
+}
+
+
+def _now() -> datetime:
+    return datetime.now(IST)
+
+
+def _iso(now: datetime | None = None) -> str:
+    value = now or _now()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=IST)
+    return value.astimezone(IST).isoformat()
+
+
+def _top_keys(snapshots: Mapping[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for symbol, snap in snapshots.items():
+        alerts = getattr(snap, "explosionAlerts", None) or []
+        if not alerts:
+            continue
+        alert = alerts[0]
+        if not isinstance(alert, Mapping):
+            continue
+        side = str(alert.get("side") or "").upper()
+        try:
+            strike = f"{float(alert.get('strike') or 0):g}"
+        except (TypeError, ValueError):
+            strike = "0"
+        keys.append(f"{symbol.upper()}:{side}:{strike}")
+    return sorted(keys)
+
+
+def record_source(
+    source: str,
+    snapshots: Mapping[str, Any],
+    *,
+    archive_count: int | None = None,
+    now: datetime | None = None,
+) -> None:
+    with _lock:
+        row = {
+            "lastSeenAt": _iso(now),
+            "symbols": sorted(str(symbol).upper() for symbol in snapshots),
+            "topRadarKeys": _top_keys(snapshots),
+            "dataAvailableCount": sum(
+                1 for snap in snapshots.values()
+                if bool(getattr(snap, "dataAvailable", False))
+            ),
+        }
+        if archive_count is not None:
+            row["archiveEntryCount"] = archive_count
+        _state["sources"][source] = row
+        _state["counters"][source] = int(_state["counters"].get(source, 0)) + 1
+
+
+def record_component_success(
+    component: str,
+    *,
+    detail: Mapping[str, Any] | None = None,
+    now: datetime | None = None,
+) -> None:
+    with _lock:
+        _state["components"][component] = {
+            "healthy": True,
+            "lastSuccessAt": _iso(now),
+            "lastError": None,
+            **dict(detail or {}),
+        }
+        _state["counters"][f"{component}Success"] = (
+            int(_state["counters"].get(f"{component}Success", 0)) + 1
+        )
+
+
+def record_component_error(
+    component: str,
+    error: Exception | str,
+    *,
+    now: datetime | None = None,
+) -> None:
+    with _lock:
+        previous = dict(_state["components"].get(component) or {})
+        _state["components"][component] = {
+            **previous,
+            "healthy": False,
+            "lastErrorAt": _iso(now),
+            "lastError": str(error)[:500],
+        }
+        _state["counters"][f"{component}Error"] = (
+            int(_state["counters"].get(f"{component}Error", 0)) + 1
+        )
+
+
+def record_backup(
+    *,
+    destination: str,
+    file_name: str,
+    success: bool,
+    error: str | None = None,
+    now: datetime | None = None,
+) -> None:
+    with _lock:
+        _state["backup"] = {
+            "healthy": success,
+            "lastAttemptAt": _iso(now),
+            "destination": destination,
+            "fileName": file_name,
+            "lastError": error,
+        }
+
+
+def _age_seconds(raw: Any, now: datetime) -> float | None:
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=IST)
+        return max(0.0, (now - parsed.astimezone(IST)).total_seconds())
+    except (TypeError, ValueError):
+        return None
+
+
+def health_status(*, now: datetime | None = None) -> dict[str, Any]:
+    current = now or _now()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=IST)
+    current = current.astimezone(IST)
+    stale_after = max(1, int(get_settings().radar_health_stale_seconds))
+    with _lock:
+        sources = {
+            key: dict(value)
+            for key, value in _state["sources"].items()
+        }
+        components = {
+            key: dict(value)
+            for key, value in _state["components"].items()
+        }
+        backup = dict(_state["backup"])
+        counters = dict(_state["counters"])
+
+    stale_sources: list[str] = []
+    for source, row in sources.items():
+        age = _age_seconds(row.get("lastSeenAt"), current)
+        row["ageSeconds"] = round(age, 1) if age is not None else None
+        row["stale"] = bool(age is not None and age > stale_after)
+        if row["stale"]:
+            stale_sources.append(source)
+
+    rest = sources.get("rest_snapshot") or {}
+    ws = sources.get("ws_entry_scan") or {}
+    rest_keys = set(rest.get("topRadarKeys") or [])
+    ws_keys = set(ws.get("topRadarKeys") or [])
+    both_fresh = bool(rest and ws and not rest.get("stale") and not ws.get("stale"))
+    divergence = sorted(rest_keys.symmetric_difference(ws_keys)) if both_fresh else []
+    component_errors = [
+        name for name, row in components.items()
+        if row.get("healthy") is False
+    ]
+    healthy = not stale_sources and not component_errors
+    return {
+        "healthy": healthy,
+        "at": current.isoformat(),
+        "staleAfterSeconds": stale_after,
+        "staleSources": stale_sources,
+        "sourceDivergence": {
+            "active": bool(divergence),
+            "keys": divergence,
+            "restTopRadarKeys": sorted(rest_keys),
+            "wsTopRadarKeys": sorted(ws_keys),
+        },
+        "sources": sources,
+        "components": components,
+        "backup": backup,
+        "counters": counters,
+    }
+
+
+def reset_health_for_tests() -> None:
+    with _lock:
+        _state["sources"].clear()
+        _state["components"].clear()
+        _state["backup"].clear()
+        _state["counters"].clear()

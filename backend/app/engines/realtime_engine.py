@@ -708,14 +708,26 @@ async def build_symbol_snapshot(
             pass
         try:
             from app.services.radar_archive import record_top_radars
+            from app.services.radar_learning import record_market_observations
 
             await asyncio.to_thread(
                 record_top_radars,
                 {symbol: snap},
                 source="rest_snapshot",
             )
+            await asyncio.to_thread(
+                record_market_observations,
+                {symbol: snap},
+                source="rest_snapshot",
+            )
         except Exception as exc:
             logger.warning("Failed to archive %s radar snapshot: %s", symbol, exc)
+            try:
+                from app.services.radar_health import record_component_error
+
+                record_component_error("radarPipeline", exc)
+            except Exception:
+                pass
         return snap
 
     except UpstoxError as e:

@@ -3,7 +3,9 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +15,7 @@ from app.routers import ai, auto_trader, config, execution, health, market, play
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+IST = ZoneInfo("Asia/Kolkata")
 
 _background_task = None
 _tick_wake = asyncio.Event()
@@ -49,6 +52,7 @@ async def _background_monitor():
     last_composer_mono = 0.0
     last_analysis_mono = 0.0
     last_eod_playbook_date: Optional[str] = None
+    last_radar_finalize_date: Optional[str] = None
 
     while True:
         # Yield so /health and heartbeat can interleave under heavy sync work.
@@ -161,6 +165,33 @@ async def _background_monitor():
                                 last_eod_playbook_date = target
                         except Exception as exc:
                             logger.warning("EOD playbook cycle error: %s", exc)
+
+            if settings.radar_archive_enabled:
+                radar_now = datetime.now(IST)
+                radar_date = radar_now.strftime("%Y-%m-%d")
+                finalize_due = (
+                    radar_now.hour,
+                    radar_now.minute,
+                ) >= (
+                    settings.radar_archive_finalize_hour,
+                    settings.radar_archive_finalize_minute,
+                )
+                if finalize_due and last_radar_finalize_date != radar_date:
+                    try:
+                        from app.services.radar_archive import archive_path
+                        from app.services.radar_learning import finalize_daily_review
+
+                        if archive_path(radar_date).exists():
+                            await asyncio.to_thread(finalize_daily_review, radar_date)
+                            last_radar_finalize_date = radar_date
+                    except Exception as exc:
+                        logger.warning("Daily radar finalization error: %s", exc)
+                        try:
+                            from app.services.radar_health import record_component_error
+
+                            record_component_error("dailyRadarReview", exc)
+                        except Exception:
+                            pass
         except Exception as e:
             logger.warning("Background monitor error: %s", e)
 

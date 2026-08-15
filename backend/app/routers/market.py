@@ -427,14 +427,26 @@ async def run_entry_scan_on_cache(
         refresh_snapshot_explosion_alerts(snap, expiry_day=expiry_day)
     try:
         from app.services.radar_archive import record_top_radars
+        from app.services.radar_learning import record_market_observations
 
         await asyncio.to_thread(
             record_top_radars,
             overlays,
             source="ws_entry_scan",
         )
+        await asyncio.to_thread(
+            record_market_observations,
+            overlays,
+            source="ws_entry_scan",
+        )
     except Exception as exc:
         logger.warning("Failed to archive refreshed radar snapshots: %s", exc)
+        try:
+            from app.services.radar_health import record_component_error
+
+            record_component_error("radarPipeline", exc)
+        except Exception:
+            pass
     news = await _fetch_news_cached()
     if run_trader:
         client = UpstoxClient()

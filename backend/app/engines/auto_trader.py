@@ -1,5 +1,6 @@
 """Auto trader — paper execution with simple profit mode."""
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -1979,9 +1980,12 @@ async def process(
                 if not opened:
                     skipped.append({
                         "symbol": best.symbol,
+                        "side": best.side.value,
+                        "strike": best.strike,
                         "reason": reason,
                         "mode": best.mode,
                         "score": best.score,
+                        "tier": getattr(best, "tier", None),
                     })
             else:
                 skipped.extend(diagnose_missed_entries(snapshots, state))
@@ -1989,6 +1993,22 @@ async def process(
     state.skipped = skipped
     state.dailyReport = _calibration.build_report(state.closedPaperTrades)
     _risk_engine.update_daily_pnl(compute_session_pnl(state))
+    try:
+        from app.services.radar_learning import record_funnel_state
+
+        await asyncio.to_thread(
+            record_funnel_state,
+            snapshots,
+            list(state.skipped or []),
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist radar funnel state: %s", exc)
+        try:
+            from app.services.radar_health import record_component_error
+
+            record_component_error("radarFunnel", exc)
+        except Exception:
+            pass
 
     return state
 
