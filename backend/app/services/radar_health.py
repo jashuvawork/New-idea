@@ -182,10 +182,18 @@ def health_status(*, now: datetime | None = None) -> dict[str, Any]:
         name for name, row in components.items()
         if row.get("healthy") is False
     ]
-    healthy = not stale_sources and not component_errors
+    try:
+        from app.services.upstox import get_market_phase
+
+        market_phase = str(get_market_phase())
+    except Exception:
+        market_phase = "UNKNOWN"
+    live_market = market_phase == "LIVE_MARKET"
+    healthy = (not live_market or not stale_sources) and not component_errors
     return {
         "healthy": healthy,
         "at": current.isoformat(),
+        "marketPhase": market_phase,
         "staleAfterSeconds": stale_after,
         "staleSources": stale_sources,
         "sourceDivergence": {

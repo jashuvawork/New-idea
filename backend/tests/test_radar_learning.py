@@ -265,13 +265,19 @@ def test_health_reports_stale_sources_divergence_and_component_errors(tmp_path):
     with _patch_settings(settings):
         record_source("rest_snapshot", {"NIFTY": rest}, now=start)
         record_source("ws_entry_scan", {"NIFTY": ws}, now=start)
-        live = health_status(now=start + timedelta(seconds=10))
+        with patch("app.services.upstox.get_market_phase", return_value="LIVE_MARKET"):
+            live = health_status(now=start + timedelta(seconds=10))
+            stale_live = health_status(now=start + timedelta(seconds=40))
+        with patch("app.services.upstox.get_market_phase", return_value="CLOSED"):
+            closed = health_status(now=start + timedelta(seconds=40))
         record_component_error("premiumTape", "disk full", now=start)
         failed = health_status(now=start + timedelta(seconds=40))
 
     assert live["sourceDivergence"]["active"] is True
     assert live["healthy"] is True
-    assert set(failed["staleSources"]) == {"rest_snapshot", "ws_entry_scan"}
+    assert set(stale_live["staleSources"]) == {"rest_snapshot", "ws_entry_scan"}
+    assert stale_live["healthy"] is False
+    assert closed["healthy"] is True
     assert failed["components"]["premiumTape"]["lastError"] == "disk full"
     assert failed["healthy"] is False
 

@@ -9,7 +9,7 @@ import shutil
 import threading
 import zipfile
 from collections import Counter, defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
@@ -660,6 +660,20 @@ def backup_archive(path: Path) -> dict[str, Any]:
     }
 
 
+def _prune_learning_files(now: datetime | None = None) -> None:
+    current = _aware(now)
+    retention_days = max(1, int(get_settings().radar_archive_retention_days))
+    cutoff = current.date() - timedelta(days=retention_days)
+    for path in _telemetry_dir().glob("*.jsonl"):
+        date = path.name.split(".", 1)[0]
+        try:
+            parsed = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if parsed < cutoff:
+            path.unlink(missing_ok=True)
+
+
 def finalize_daily_review(date: str) -> dict[str, Any]:
     """Bundle tape, scorecard, funnel, and replay inputs into the canonical daily ZIP."""
     scorecard = analyze_hindsight(date)
@@ -676,6 +690,7 @@ def finalize_daily_review(date: str) -> dict[str, Any]:
         artifacts["funnel_events.jsonl"] = funnel_file.read_bytes()
     path = add_archive_artifacts(date, artifacts)
     backup = backup_archive(path)
+    _prune_learning_files()
     try:
         from app.services.radar_health import record_component_success
 
