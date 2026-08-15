@@ -2,6 +2,7 @@
 
 from collections import deque
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -17,8 +18,9 @@ from app.engines.explosion_detector import (
 from app.engines.ict_breakout_monitor import (
     _detect_flat_base,
     analyze_ict_breakout,
+    first_lift_entry_ready,
 )
-from app.models.schemas import Side
+from app.models.schemas import MarketPhase, Side, SpotChart, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -47,6 +49,14 @@ def _settings(**overrides):
     s.elite_local_base_max_move_pct = 40.0
     s.ict_first_lift_appear_enabled = True
     s.ict_first_lift_min_velocity_3s = 1.2
+    s.first_lift_trade_enabled = True
+    s.first_lift_trade_min_score = 45.0
+    s.first_lift_trade_min_quality = 55.0
+    s.first_lift_trade_min_volume_surge = 2.0
+    s.first_lift_trade_min_velocity_3s = 1.2
+    s.first_lift_trade_min_velocity_9s = 0.8
+    s.first_lift_trade_max_move_pct = 25.0
+    s.first_lift_trade_min_momentum_shift_pct = 0.03
     s.session_move_max_credible_pct = 500.0
     s.explosion_immature_min_session_move_pct = 28.0
     for k, v in overrides.items():
@@ -172,6 +182,89 @@ def test_chase_past_40pct_is_not_first_lift(mock_settings):
     assert ict.base_premium == 89.0
     assert ict.base_relative_move_pct >= 40.0
     assert ict.first_lift is False
+
+
+@pytest.mark.parametrize(
+    ("side", "mom5", "mom10", "mom15"),
+    [
+        (Side.CALL, 0.06, 0.01, -0.05),
+        (Side.PUT, -0.06, -0.01, 0.05),
+    ],
+)
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_high_quality_first_lift_is_actionable_before_tier_upgrade(
+    mock_settings, side, mom5, mom10, mom15,
+):
+    mock_settings.return_value = _settings()
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24300.0,
+        atmStrike=24300.0,
+        spotChart=SpotChart(
+            direction="NEUTRAL",
+            momentum5Pct=mom5,
+            momentum10Pct=mom10,
+            momentum15Pct=mom15,
+        ),
+    )
+    alert = {
+        "side": side.value,
+        "tier": "WATCH",
+        "ictFirstLift": True,
+        "ictBreakout": True,
+        "ictFlatThenVertical": True,
+        "ictBaseRelativeMovePct": 15.0,
+        "flatVerticalQuality": 61.0,
+        "explosionScore": 51.0,
+        "velocity3s": 1.35,
+        "velocity9s": 1.35,
+        "volumeSurge": 4.0,
+        "ictVolumeAwakening": True,
+    }
+
+    assert first_lift_entry_ready(snap=snap, alert=alert) is True
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_first_lift_does_not_trade_without_quality_and_live_turn(mock_settings):
+    mock_settings.return_value = _settings()
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24300.0,
+        atmStrike=24300.0,
+        spotChart=SpotChart(
+            direction="BEARISH",
+            momentum5Pct=-0.10,
+            momentum10Pct=-0.05,
+            momentum15Pct=0.0,
+        ),
+    )
+    event = SimpleNamespace(
+        side=Side.CALL,
+        explosion_score=51.0,
+        velocity_3s=1.35,
+        velocity_9s=1.35,
+        volume_surge=4.0,
+    )
+    ict = SimpleNamespace(
+        active=True,
+        first_lift=True,
+        flat_then_vertical=True,
+        base_relative_move_pct=15.0,
+        flat_vertical_quality=50.0,
+        volume_awakening=True,
+        volume_surge=4.0,
+    )
+
+    assert first_lift_entry_ready(
+        snap=snap, event=event, ict=ict,
+    ) is False
 
 
 @pytest.mark.parametrize(

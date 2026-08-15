@@ -254,6 +254,54 @@ def test_ict_flat_vertical_building_requires_elite_bars(mock_settings):
         assert _ict_flat_vertical_entry_ok(hot, _snap("BEARISH")) is True
 
 
+def test_watch_first_lift_enters_before_building_and_ichimoku():
+    """A strict PE first lift must not wait for lagging tier/cloud confirmation."""
+    settings = MagicMock()
+    settings.first_lift_trade_enabled = True
+    settings.first_lift_trade_min_score = 45.0
+    settings.first_lift_trade_min_quality = 55.0
+    settings.first_lift_trade_min_volume_surge = 2.0
+    settings.first_lift_trade_min_velocity_3s = 1.2
+    settings.first_lift_trade_min_velocity_9s = 0.8
+    settings.first_lift_trade_max_move_pct = 25.0
+    settings.first_lift_trade_min_momentum_shift_pct = 0.03
+    settings.ict_structured_early_min_move_pct = 15.0
+    event = _event(tier="WATCH")
+    event.explosion_score = 51.0
+    event.velocity_3s = 1.35
+    event.velocity_9s = 1.35
+    event.volume_surge = 4.0
+    ict = MagicMock()
+    ict.active = True
+    ict.first_lift = True
+    ict.flat_then_vertical = True
+    ict.base_relative_move_pct = 15.0
+    ict.flat_vertical_quality = 61.0
+    ict.volume_awakening = True
+    ict.volume_surge = 4.0
+
+    with (
+        patch("app.engines.explosion_profit.get_settings", return_value=settings),
+        patch(
+            "app.engines.ict_breakout_monitor.get_settings",
+            return_value=settings,
+        ),
+        patch(
+            "app.engines.ict_breakout_monitor.analyze_explosion_event_ict",
+            return_value=ict,
+        ),
+        patch(
+            "app.engines.smart_ichimoku.ichimoku_break_supports_side",
+            return_value=(False, "ichimoku_not_confirmed"),
+        ) as ichimoku,
+    ):
+        assert _ict_flat_vertical_entry_ok(
+            event, _snap("BEARISH"),
+        ) is True
+
+    ichimoku.assert_not_called()
+
+
 @patch("app.engines.explosion_profit.get_settings")
 def test_check_explosion_entry_requires_chart_align(mock_settings):
     s = MagicMock()

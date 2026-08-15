@@ -296,13 +296,19 @@ def _explosion_candidates(
                 )
                 if money == "OTM":
                     continue
+        from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+        first_lift_ready = first_lift_entry_ready(
+            snap=snap,
+            alert=alert,
+        )
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
         if elite_only:
             if tier_u not in ("ELITE", "EXPLODING"):
                 # Early BUILDING flat→vertical when chart-aligned — catch the base
                 # before ELITE prints (multiple flat→vertical moments per week).
-                if not _building_aligned_ict_alert_ok(
+                if not first_lift_ready and not _building_aligned_ict_alert_ok(
                     alert, snap, tier_u, state=state, snapshots={symbol: snap},
                 ):
                     continue
@@ -328,6 +334,7 @@ def _explosion_candidates(
                 side_v is not None
                 and snap.spotChart is not None
                 and not side_aligned_with_chart(side_v, snap.spotChart)
+                and not first_lift_ready
             ):
                 # A confirmed local base off which the side is breaking may survive the
                 # chart-align drop — mirror check_explosion_entry so a genuine base rip
@@ -361,10 +368,22 @@ def _explosion_candidates(
             peak_move_pct=peak_move,
             daily_move_pct=daily_move,
         )
+        if first_lift_ready:
+            min_explosion_score = min(
+                min_explosion_score,
+                float(
+                    getattr(settings, "first_lift_trade_min_score", 45.0)
+                    or 45.0
+                ),
+            )
         if score_val < min_explosion_score:
             continue
         # Explosion score is primary quality — don't block on low symbol TQS alone
-        if snap.tradeQualityScore < 25 and score_val < settings.aggressive_min_explosion_score + 10:
+        if (
+            not first_lift_ready
+            and snap.tradeQualityScore < 25
+            and score_val < settings.aggressive_min_explosion_score + 10
+        ):
             continue
 
         event = ExplosionEvent(
