@@ -32,24 +32,35 @@ def _ict_flat_vertical_entry_ok(
     event: ExplosionEvent,
     snap: Optional[SymbolSnapshot],
 ) -> bool:
-    """ICT flat→vertical entry — BUILDING only as elite-build (hot + high score).
+    """ICT flat→vertical entry, including a strictly confirmed first lift.
 
     EXPLODING/ELITE keep the structure+heat path. BUILDING must clear elite-build
-    bars (score/v3) so Aug7-style cold base prints wait for ELITE upgrade.
-    Chart must align (PUT↔BEARISH / CALL↔BULLISH) — no counter-trend base rips.
+    bars so Aug7-style cold prints wait. A WATCH/BUILDING first lift may precede
+    the chart-direction flip only when quality, sustained heat, volume and the
+    live momentum turn all pass ``first_lift_entry_ready``.
     """
     if event is None or snap is None:
         return False
     tier_u = str(getattr(event, "tier", "") or "").upper()
-    if tier_u not in ("BUILDING", "EXPLODING", "ELITE"):
-        return False
-    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+    from app.engines.ict_breakout_monitor import (
+        analyze_explosion_event_ict,
+        first_lift_entry_ready,
+    )
     from app.engines.spot_direction import side_aligned_with_chart
 
-    chart = getattr(snap, "spotChart", None)
-    if chart is not None and not side_aligned_with_chart(event.side, chart):
-        return False
     ict = analyze_explosion_event_ict(event, snap)
+    first_lift_ready = first_lift_entry_ready(
+        snap=snap,
+        event=event,
+        ict=ict,
+    )
+    chart = getattr(snap, "spotChart", None)
+    if (
+        chart is not None
+        and not side_aligned_with_chart(event.side, chart)
+        and not first_lift_ready
+    ):
+        return False
     if not bool(getattr(ict, "active", False)):
         return False
     if not bool(getattr(ict, "flat_then_vertical", False)):
@@ -60,6 +71,12 @@ def _ict_flat_vertical_entry_ok(
         or getattr(ict, "premium_fvg", False)
     )
     if not heat:
+        return False
+    # A high-quality first lift is deliberately earlier than BUILDING/Ichimoku.
+    # Its live momentum-turn and volume proof replace those lagging confirmations.
+    if first_lift_ready:
+        return True
+    if tier_u not in ("BUILDING", "EXPLODING", "ELITE"):
         return False
     settings = get_settings()
     if tier_u == "BUILDING":
@@ -207,6 +224,7 @@ def check_explosion_entry(
     # Require chart align — but honor the same capture/structure bypasses as
     # chart_blocks_explosion_side later (afternoon / all-day / premium-led / local-base).
     settings = get_settings()
+    early_ict_ok = _ict_flat_vertical_entry_ok(event, snap)
     if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
         from app.engines.spot_direction import side_aligned_with_chart
 
@@ -231,6 +249,7 @@ def check_explosion_entry(
             if not (
                 premium_bypass
                 or local_ichi_bypass
+                or early_ict_ok
                 or afternoon_capture_skips_chart_block(event, align_chart)
                 or is_all_day_explosion_event(event, chart=align_chart)
             ):
@@ -269,14 +288,18 @@ def check_explosion_entry(
 
         if is_premium_capture_event(event, chart=chart):
             pass  # premium-capture BUILDING continues through remaining gates
-        elif _ict_flat_vertical_entry_ok(event, snap):
-            pass  # early ICT flat→vertical BUILDING — enter in 28–40% window
+        elif early_ict_ok:
+            pass  # confirmed first-lift or elite-build ICT flat→vertical
         else:
             return False, f"tier_{event.tier}_not_tradeable"
 
     from app.engines.morning_premium_capture import is_afternoon_capture_event
 
-    if event.velocity_3s < 2.0 and event.velocity_9s < 3.0:
+    if (
+        not early_ict_ok
+        and event.velocity_3s < 2.0
+        and event.velocity_9s < 3.0
+    ):
         open_move = float(getattr(event, "daily_move_pct", 0) or 0)
         open_min = float(getattr(get_settings(), "open_premium_min_move_pct", 25.0) or 25.0)
         if not is_afternoon_capture_event(event, chart=chart) and open_move < open_min:
@@ -343,19 +366,30 @@ def check_explosion_entry(
         explosion_entry_window_blocked,
         live_explosion_confirmation_blocked,
     )
-    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+    from app.engines.ict_breakout_monitor import (
+        analyze_explosion_event_ict,
+        first_lift_entry_ready,
+    )
 
     # Analyze from event even when snap is missing — event carries move/velocity/tier
     # needed for ICT structure. Skipping analyze when snap is None falsely blocked
     # BUILDING+ICT flat→vertical entries (no structure → no_ict_structure_confirmation).
     ict_live = analyze_explosion_event_ict(event, snap)
+    first_lift_ready = first_lift_entry_ready(
+        snap=snap,
+        event=event,
+        ict=ict_live,
+    )
     from app.engines.elite_never_block import elite_never_block_active
 
     must_take = elite_never_block_active(
         event=event, snap=snap, ict=ict_live,
     )
     # Flat→vertical ELITE/EXPLODING/BUILDING — require GainzAlgo-style break-P.
-    if bool(getattr(ict_live, "flat_then_vertical", False)):
+    if (
+        bool(getattr(ict_live, "flat_then_vertical", False))
+        and not first_lift_ready
+    ):
         from app.engines.smart_ichimoku import ichimoku_break_supports_side
 
         ichi_ok, ichi_reason = ichimoku_break_supports_side(
@@ -458,8 +492,12 @@ def check_explosion_entry(
         and not afternoon_chart_skip
         and not premium_bypass
         and not all_day_capture
+        and not first_lift_ready
     ):
         return False, chart_reason
+
+    if first_lift_ready:
+        return True, "first_lift_local_base_confirmed"
 
     if event.tier == "ELITE":
         return True, "elite_explosion" if not premium_bypass else "premium_led_elite_explosion"

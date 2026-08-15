@@ -355,6 +355,17 @@ class Settings(BaseSettings):
     ict_first_lift_min_velocity_3s: float = 1.2
     explosion_first_lift_rank_bonus: float = 24.0
     explosion_first_lift_sweet_max_move_pct: float = 25.0
+    # Actionable first lift: a strict subset of radar first-lifts may enter before
+    # BUILDING upgrades when the base, volume, sustained premium lift and live index
+    # turn all agree. This closes the WATCH/BUILDING dead zone without trading every low.
+    first_lift_trade_enabled: bool = True
+    first_lift_trade_min_score: float = 45.0
+    first_lift_trade_min_quality: float = 55.0
+    first_lift_trade_min_volume_surge: float = 2.0
+    first_lift_trade_min_velocity_3s: float = 1.2
+    first_lift_trade_min_velocity_9s: float = 0.8
+    first_lift_trade_max_move_pct: float = 25.0
+    first_lift_trade_min_momentum_shift_pct: float = 0.03
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0

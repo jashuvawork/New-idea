@@ -57,6 +57,133 @@ class ICTBreakoutSignal:
         }
 
 
+def first_lift_entry_ready(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> bool:
+    """Strict early-entry proof for a local-base first lift.
+
+    Radar intentionally exposes softer first lifts. An order may use that early
+    signal only when the base quality, premium heat, volume and live index turn
+    agree. This is symmetric: CALL requires an improving bullish turn and PUT an
+    improving bearish turn.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "first_lift_trade_enabled", True)):
+        return False
+    if snap is None or getattr(snap, "spotChart", None) is None:
+        return False
+
+    row = alert if isinstance(alert, dict) else {}
+    first_lift = bool(
+        getattr(ict, "first_lift", False)
+        or row.get("ictFirstLift")
+    )
+    structured = bool(
+        getattr(ict, "active", False)
+        and getattr(ict, "flat_then_vertical", False)
+    ) or bool(row.get("ictBreakout") and row.get("ictFlatThenVertical"))
+    if not first_lift or not structured:
+        return False
+
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or 0
+    )
+    min_move = float(
+        getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0
+    )
+    max_move = float(
+        getattr(settings, "first_lift_trade_max_move_pct", 25.0) or 25.0
+    )
+    if not (min_move <= base_move <= max_move):
+        return False
+
+    quality = float(
+        getattr(ict, "flat_vertical_quality", 0)
+        or row.get("flatVerticalQuality")
+        or 0
+    )
+    min_quality = float(
+        getattr(settings, "first_lift_trade_min_quality", 55.0) or 55.0
+    )
+    if quality < min_quality:
+        return False
+
+    score = float(
+        getattr(event, "explosion_score", 0)
+        or row.get("explosionScore")
+        or row.get("score")
+        or 0
+    )
+    min_score = float(
+        getattr(settings, "first_lift_trade_min_score", 45.0) or 45.0
+    )
+    if score < min_score:
+        return False
+
+    v3 = float(
+        getattr(event, "velocity_3s", 0)
+        or row.get("velocity3s")
+        or row.get("velocity_3s")
+        or 0
+    )
+    v9 = float(
+        getattr(event, "velocity_9s", 0)
+        or row.get("velocity9s")
+        or row.get("velocity_9s")
+        or 0
+    )
+    min_v3 = float(
+        getattr(settings, "first_lift_trade_min_velocity_3s", 1.2) or 1.2
+    )
+    min_v9 = float(
+        getattr(settings, "first_lift_trade_min_velocity_9s", 0.8) or 0.8
+    )
+    if v3 < min_v3 or v9 < min_v9:
+        return False
+
+    volume_surge = float(
+        getattr(event, "volume_surge", 0)
+        or getattr(ict, "volume_surge", 0)
+        or row.get("volumeSurge")
+        or 0
+    )
+    volume_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
+    min_volume = float(
+        getattr(settings, "first_lift_trade_min_volume_surge", 2.0) or 2.0
+    )
+    if not volume_awake and volume_surge < min_volume:
+        return False
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False
+    chart = snap.spotChart
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
+    mom10 = float(getattr(chart, "momentum10Pct", 0) or 0)
+    mom15 = float(getattr(chart, "momentum15Pct", 0) or 0)
+    shift = float(
+        getattr(settings, "first_lift_trade_min_momentum_shift_pct", 0.03)
+        or 0.03
+    )
+    if side == "CALL":
+        return mom5 >= mom10 and mom5 >= mom15 + shift
+    return mom5 <= mom10 and mom5 <= mom15 - shift
+
+
 def premium_poll_history(symbol: str, strike: float, side: Side | str) -> list[tuple[datetime, float, float]]:
     """Read rolling premium poll history for ICT gap detection."""
     from app.engines.explosion_detector import (
