@@ -656,6 +656,8 @@ export interface CapitalAllocation {
   committedInr?: number;
   cashReserveInr?: number;
   remainingInr?: number;
+  remainingAllocationPct?: number;
+  nextTradeBudgetInr?: number;
   utilizationPct?: number;
   weights?: number[];
   maxPositions?: number;
@@ -926,6 +928,31 @@ export interface DeploymentReadiness {
   armLiveSteps: string[];
   openTrades: number;
   milestone?: PerformanceMilestone;
+  health?: {
+    api: string;
+    loopWatchdog: {
+      enabled?: boolean;
+      staleSeconds?: number;
+      lastBeatAgeSeconds?: number | null;
+      threadAlive?: boolean;
+    };
+    websocket: {
+      enabled?: boolean;
+      connected?: boolean;
+      streamStale?: boolean;
+      lastMessageAgeMs?: number | null;
+      lastError?: string | null;
+    };
+    rateLimitActive: boolean;
+    rateLimitRemainingSeconds: number;
+    latency: {
+      latencyMode?: string;
+      entryScanIntervalMs?: number;
+      lastFastCycleMs?: number | null;
+      lastFullCycleMs?: number | null;
+      buildInProgress?: boolean;
+    };
+  };
 }
 
 export interface TradeLogStatus {
@@ -944,6 +971,12 @@ export interface DeploymentStatus {
   upstox: DailyTokenStatus;
   flags: Record<string, boolean | number>;
   tradeLog?: TradeLogStatus;
+  cadence?: {
+    upstoxMinRequestIntervalMs?: number;
+    upstoxRateLimitActive?: boolean;
+    upstoxRateLimitRemainingSeconds?: number;
+    entryScanIntervalMs?: number;
+  };
 }
 
 export interface DailyTokenStatus {

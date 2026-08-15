@@ -20,6 +20,31 @@ function pnlTone(value: number): string {
   return value >= 0 ? 'text-nexus-green' : 'text-nexus-red';
 }
 
+function HealthCheck({
+  label,
+  ok,
+  detail,
+}: {
+  label: string;
+  ok: boolean | null;
+  detail: string;
+}) {
+  const tone = ok == null
+    ? 'border-nexus-border text-nexus-muted'
+    : ok
+      ? 'border-nexus-green/30 bg-nexus-green/5 text-nexus-green'
+      : 'border-nexus-red/30 bg-nexus-red/5 text-nexus-red';
+  return (
+    <div className={`rounded-lg border px-2.5 py-2 ${tone}`}>
+      <div className="flex items-center justify-between gap-2 text-[9px] font-bold uppercase tracking-wide">
+        <span>{label}</span>
+        <span>{ok == null ? 'WAIT' : ok ? 'OK' : 'BLOCK'}</span>
+      </div>
+      <div className="mt-1 truncate text-[9px] opacity-75">{detail}</div>
+    </div>
+  );
+}
+
 function CapitalCard({
   label,
   value,
@@ -177,8 +202,9 @@ export function UpstoxTradeManagerPanel({
   const capital = overview?.capital;
   const committed = allocation?.committedInr ?? 0;
   const remaining = allocation?.remainingInr ?? 0;
-  const reserve = allocation?.cashReserveInr ?? 0;
   const capitalBase = allocation?.capitalBaseInr ?? capital?.totalEquityInr ?? 0;
+  const remainingAllocationPct = allocation?.remainingAllocationPct ?? 0.9;
+  const nextTradeBudget = allocation?.nextTradeBudgetInr ?? remaining * remainingAllocationPct;
   const strategyMode = overview?.executionMode !== 'LIVE';
   const netPnl = strategyMode ? overview?.pnl.strategyNetInr ?? 0 : overview?.pnl.brokerNetInr ?? 0;
   const realized = strategyMode ? overview?.pnl.strategyRealizedInr ?? 0 : overview?.pnl.brokerRealizedInr ?? 0;
@@ -187,6 +213,17 @@ export function UpstoxTradeManagerPanel({
     ...(allocation?.activeAllocations || []).map((row) => ({ ...row, status: 'OPENED' })),
     ...(allocation?.plannedAllocations || []).filter((row) => row.status !== 'OPENED'),
   ].sort((a, b) => Number(a.rank || 99) - Number(b.rank || 99));
+  const checks = readiness?.checks || {};
+  const liveFlag = deployment?.flags.enableLiveTrading === true;
+  const autoTrading = deployment?.flags.autoTradingEnabled === true;
+  const health = readiness?.health;
+  const liveOperational = Boolean(
+    readiness?.readyForLive
+    && overview?.broker.complete
+    && overview?.reconciliation.safe
+    && !stale,
+  );
+  const websocketHealthy = readiness ? Boolean(checks.websocketHealthy) : null;
 
   return (
     <section className="rounded-xl border border-nexus-border bg-nexus-panel shadow-panel overflow-hidden">
@@ -215,7 +252,7 @@ export function UpstoxTradeManagerPanel({
             ) : null}
           </div>
           <p className="mt-1 text-[10px] text-nexus-muted">
-            Ranked flat-to-vertical allocation: strongest approved setup first, then remaining capital to the next.
+            ₹2 lakh paper book · each approved FTV trade receives 90% of the capital still remaining.
           </p>
         </div>
         <button
@@ -254,10 +291,51 @@ export function UpstoxTradeManagerPanel({
       ) : null}
 
       <div className="p-4">
+        <div className="mb-3 rounded-lg border border-nexus-border bg-black/15 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-[11px] font-bold">Live readiness &amp; execution API health</h3>
+              <p className="mt-0.5 text-[9px] text-nexus-muted">
+                Live remains disabled until <span className="font-mono">ENABLE_LIVE_TRADING=true</span>. The system still applies every risk and reconciliation gate after activation.
+              </p>
+            </div>
+            <span className={`rounded border px-2 py-1 text-[9px] font-bold ${
+              liveOperational
+                ? 'border-nexus-green/40 bg-nexus-green/10 text-nexus-green'
+                : liveFlag
+                  ? 'border-nexus-red/40 bg-nexus-red/10 text-nexus-red'
+                  : 'border-nexus-accent/40 bg-nexus-accent/10 text-nexus-accent'
+            }`}>
+              {liveOperational ? 'LIVE READY' : liveFlag ? 'LIVE BLOCKED' : readiness?.readyForPaper ? 'PAPER READY' : 'PAPER CHECKS'}
+            </span>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-1.5 md:grid-cols-4 xl:grid-cols-8">
+            <HealthCheck label="API" ok={health ? health.api === 'ok' && !stale : null} detail={stale ? 'manager response stale' : 'readiness endpoint'} />
+            <HealthCheck label="Live flag" ok={liveFlag} detail={liveFlag ? 'live order route armed' : 'paper orders only'} />
+            <HealthCheck label="Auto trader" ok={autoTrading} detail={autoTrading ? 'entry loop enabled' : 'entry loop stopped'} />
+            <HealthCheck label="Upstox token" ok={readiness ? Boolean(checks.upstoxTokenValid) : null} detail={deployment?.upstox.message || 'daily token status'} />
+            <HealthCheck label="Market data" ok={readiness ? Boolean(checks.upstoxDataReady) : null} detail={checks.marketLive ? 'live exchange session' : 'waiting / market closed'} />
+            <HealthCheck label="Risk + loop" ok={readiness ? Boolean(checks.riskEngineOk && checks.eventLoopHealthy) : null} detail={checks.calibrationClear === false ? 'calibration blocked' : 'engine heartbeat'} />
+            <HealthCheck label="Rate limit" ok={readiness ? Boolean(checks.upstoxRateLimitClear) : null} detail={health?.rateLimitActive ? `${health.rateLimitRemainingSeconds}s cooldown` : 'broker API clear'} />
+            <HealthCheck label="WebSocket" ok={websocketHealthy} detail={health?.websocket.enabled ? `${health.websocket.lastMessageAgeMs ?? '—'}ms tick age` : 'REST fallback configured'} />
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-nexus-muted">
+            <span>entry scan <b className="font-mono text-white">{health?.latency.entryScanIntervalMs ?? deployment?.cadence?.entryScanIntervalMs ?? '—'} ms</b></span>
+            <span>last fast cycle <b className="font-mono text-white">{health?.latency.lastFastCycleMs ?? '—'} ms</b></span>
+            <span>broker request floor <b className="font-mono text-white">{deployment?.cadence?.upstoxMinRequestIntervalMs ?? '—'} ms</b></span>
+            <span>reconciliation <b className={overview?.reconciliation.safe ? 'text-nexus-green' : 'text-nexus-red'}>{overview?.reconciliation.safe ? 'matched' : 'blocked'}</b></span>
+          </div>
+          {readiness?.armLiveSteps.length ? (
+            <div className="mt-2 rounded border border-nexus-yellow/20 bg-nexus-yellow/5 px-2 py-1.5 text-[9px] text-nexus-yellow">
+              Before live: {readiness.armLiveSteps.slice(0, 3).join(' · ')}
+            </div>
+          ) : null}
+        </div>
+
         <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <CapitalCard label="Capital X" value={money(capitalBase)} detail={`${capital?.source || 'fallback'} sizing book`} tone="text-nexus-accent" />
           <CapitalCard label="Allocated Y" value={money(committed)} detail={`${allocation?.utilizationPct ?? 0}% deployed`} />
-          <CapitalCard label="Left Z = X − Y − reserve" value={money(remaining)} detail={`${money(reserve)} protected cash`} tone="text-nexus-green" />
+          <CapitalCard label="Left Z = X − Y" value={money(remaining)} detail={`${money(nextTradeBudget)} available to next FTV`} tone="text-nexus-green" />
           <CapitalCard label="Session P&L" value={money(netPnl)} detail={`${money(realized)} realized · ${money(unrealized)} unrealized`} tone={pnlTone(netPnl)} />
         </div>
 
@@ -302,7 +380,8 @@ export function UpstoxTradeManagerPanel({
               <div>
                 <h3 className="text-[11px] font-bold">Capital allocation activity</h3>
                 <p className="text-[9px] text-nexus-muted">
-                  {(allocation?.weights || []).map((weight) => `${Math.round(weight * 100)}%`).join(' → ') || '60% → 25% → 10%'} · {money(reserve)} reserve
+                  {Math.round(remainingAllocationPct * 100)}% of remaining per trade · effective book shares{' '}
+                  {(allocation?.weights || [0.9, 0.09, 0.009]).map((weight) => `${(weight * 100).toFixed(weight < 0.1 ? 1 : 0)}%`).join(' → ')}
                 </p>
               </div>
               <span className="text-[9px] text-nexus-muted">

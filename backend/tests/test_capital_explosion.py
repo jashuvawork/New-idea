@@ -39,7 +39,8 @@ class CapitalSizingTests(unittest.TestCase):
             per_trade_capital_pct=0.95,
             ftv_ranked_allocation_enabled=True,
             ftv_allocation_weights_csv="0.60,0.25,0.10",
-            ftv_allocation_cash_reserve_pct=0.05,
+            ftv_allocation_remaining_pct=0.90,
+            ftv_allocation_cash_reserve_pct=0.0,
             ftv_allocation_max_positions=3,
             ftv_allocation_max_same_side=2,
             lot_size_nifty=65,
@@ -92,7 +93,7 @@ class CapitalSizingTests(unittest.TestCase):
                 clamped = clamp_lots(500, "SENSEX", 40.0)
                 self.assertEqual(clamped, 40)
 
-    def test_ranked_ftv_allocation_preserves_later_sleeves_and_cash(self):
+    def test_ranked_ftv_allocation_uses_90pct_of_remaining_capital(self):
         state = AutoTraderState()
         snap = CapitalSnapshot(
             availableMarginInr=200_000,
@@ -107,9 +108,9 @@ class CapitalSizingTests(unittest.TestCase):
             first = ranked_allocation_for_state(state, 1)
             lots = cap_lots_to_allocation(100, "NIFTY", 50.0, first)
 
-        self.assertEqual(first.cashReserveInr, 10_000)
-        self.assertEqual(first.budgetInr, 120_000)
-        self.assertEqual(lots, 36)
+        self.assertEqual(first.cashReserveInr, 0)
+        self.assertEqual(first.budgetInr, 180_000)
+        self.assertEqual(lots, 55)
         self.assertLessEqual(lots * 65 * 50, first.budgetInr)
 
     def test_unused_top_sleeve_rolls_into_second_rank(self):
@@ -143,9 +144,12 @@ class CapitalSizingTests(unittest.TestCase):
             summary = capital_book_summary(state)
 
         self.assertEqual(second.committedInr, 117_000)
-        self.assertEqual(second.remainingBeforeInr, 73_000)
-        self.assertEqual(second.budgetInr, 53_000)
-        self.assertEqual(summary["remainingInr"], 73_000)
+        self.assertEqual(second.remainingBeforeInr, 83_000)
+        self.assertEqual(second.budgetInr, 74_700)
+        self.assertEqual(summary["remainingInr"], 83_000)
+        self.assertEqual(summary["nextTradeBudgetInr"], 74_700)
+        for actual, expected in zip(summary["weights"], [0.9, 0.09, 0.009]):
+            self.assertAlmostEqual(actual, expected)
         self.assertEqual(summary["activeAllocations"][0]["rank"], 1)
 
     def test_closed_top_sleeve_reuses_vacant_rank_not_open_count(self):
@@ -180,7 +184,7 @@ class CapitalSizingTests(unittest.TestCase):
 
         self.assertEqual(rank, 1)
         self.assertEqual(allocation.committedInr, 52_000)
-        self.assertEqual(allocation.budgetInr, 68_000)
+        self.assertEqual(allocation.budgetInr, 133_200)
 
     def test_exit_plan_uses_rank_sleeve_as_risk_budget(self):
         settings = self._ranked_settings()

@@ -45,13 +45,13 @@ def _seed_lot_sizes_from_config() -> None:
 
 @dataclass
 class CapitalSnapshot:
-    availableMarginInr: float = 500_000.0
+    availableMarginInr: float = 200_000.0
     usedMarginInr: float = 0.0
-    totalEquityInr: float = 500_000.0
+    totalEquityInr: float = 200_000.0
     source: str = "fallback"
     perTradeRiskInr: float = 12_000.0
-    perTradeCapitalInr: float = 330_000.0
-    maxExposureInr: float = 330_000.0
+    perTradeCapitalInr: float = 180_000.0
+    maxExposureInr: float = 180_000.0
     minLots: int = 25
     targetLots: int = 60
     maxLots: int = 100
@@ -260,8 +260,25 @@ def _effective_capital_inr(available: float) -> float:
 
 
 def ranked_allocation_weights() -> list[float]:
-    """Configured sequential capital sleeves, normalized to the deployable book."""
+    """Effective book shares for the configured sequential allocation model."""
     settings = get_settings()
+    max_positions = max(
+        1,
+        int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+    )
+    remaining_pct = max(
+        0.0,
+        min(
+            1.0,
+            float(getattr(settings, "ftv_allocation_remaining_pct", 0) or 0),
+        ),
+    )
+    if remaining_pct > 0:
+        return [
+            remaining_pct * ((1.0 - remaining_pct) ** index)
+            for index in range(max_positions)
+        ]
+
     raw = str(
         getattr(settings, "ftv_allocation_weights_csv", "0.60,0.25,0.10")
         or "0.60,0.25,0.10"
@@ -274,10 +291,6 @@ def ranked_allocation_weights() -> list[float]:
             continue
         if value > 0:
             weights.append(value)
-    max_positions = max(
-        1,
-        int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
-    )
     weights = weights[:max_positions] or [1.0]
     reserve_pct = max(
         0.0,
@@ -320,7 +333,7 @@ def ranked_allocation_for_state(
     state: AutoTraderState,
     rank: int,
 ) -> RankedAllocation:
-    """Budget the next ranked FTV leg while preserving later sleeves and cash."""
+    """Budget the next ranked FTV leg from the currently remaining book."""
     cap = get_capital_snapshot()
     settings = get_settings()
     weights = ranked_allocation_weights()
@@ -342,9 +355,21 @@ def ranked_allocation_for_state(
     remaining = min(strategy_remaining, broker_remaining)
 
     index = rank - 1
+    remaining_pct = max(
+        0.0,
+        min(
+            1.0,
+            float(getattr(settings, "ftv_allocation_remaining_pct", 0) or 0),
+        ),
+    )
     if index >= len(weights):
         budget = 0.0
         weight = 0.0
+    elif remaining_pct > 0:
+        # Each approved ranked entry gets the configured share of capital that is
+        # still free at that moment. This cannot overspend the original book.
+        budget = remaining * remaining_pct
+        weight = remaining_pct
     else:
         future_reserved = capital_base * sum(weights[index + 1 :])
         budget = max(0.0, remaining - future_reserved)
@@ -459,6 +484,31 @@ def capital_book_summary(
         "committedInr": round(committed, 2),
         "cashReserveInr": round(reserve, 2),
         "remainingInr": round(remaining, 2),
+        "remainingAllocationPct": round(
+            max(
+                0.0,
+                min(
+                    1.0,
+                    float(
+                        getattr(settings, "ftv_allocation_remaining_pct", 0) or 0
+                    ),
+                ),
+            ),
+            4,
+        ),
+        "nextTradeBudgetInr": round(
+            remaining
+            * max(
+                0.0,
+                min(
+                    1.0,
+                    float(
+                        getattr(settings, "ftv_allocation_remaining_pct", 0) or 0
+                    ),
+                ),
+            ),
+            2,
+        ),
         "utilizationPct": round((committed / capital_base * 100) if capital_base else 0, 1),
         "weights": ranked_allocation_weights(),
         "maxPositions": max(
@@ -475,7 +525,7 @@ def capital_book_summary(
 
 
 def max_lots_for_capital(symbol: str, premium: float) -> int:
-    """Max lots affordably on 85% of sizing capital for this premium."""
+    """Max lots affordably within the configured per-trade capital budget."""
     cap = get_capital_snapshot()
     settings = get_settings()
     mult = lot_multiplier(symbol)
