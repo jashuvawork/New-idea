@@ -157,6 +157,7 @@ def test_top_n_and_retention_are_enforced(tmp_path):
         record_top_radars({"NIFTY": _snap(alerts[:1])}, now=old)
         count = record_top_radars({"NIFTY": _snap(alerts)}, now=current)
         archives = list_archives()
+        retained_rows = read_archive_entries("2026-08-15")
 
     assert count == 2
     assert [row["date"] for row in archives] == ["2026-08-15"]
@@ -167,7 +168,7 @@ def test_top_n_and_retention_are_enforced(tmp_path):
         all_rows = json.loads(archive.read("all_radars.json"))
     assert manifest["totalDetectedCount"] == 3
     assert len(all_rows) == 3
-    assert len(read_archive_entries("2026-08-15")) == 3
+    assert len(retained_rows) == 3
 
 
 def test_archive_can_be_listed_and_downloaded(tmp_path):

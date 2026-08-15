@@ -493,7 +493,7 @@ def test_local_backup_replaces_same_size_wrong_content(tmp_path):
     archive = tmp_path / "radar.zip"
     archive.write_bytes(b"correct-archive")
     target = backup_dir / archive.name
-    target.write_bytes(b"wrong--archive")
+    target.write_bytes(b"wrong---archive")
     assert target.stat().st_size == archive.stat().st_size
 
     with _patch_settings(settings):
