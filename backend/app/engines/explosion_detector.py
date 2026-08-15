@@ -49,6 +49,7 @@ def _roll_session() -> None:
     today = datetime.now(IST).strftime("%Y-%m-%d")
     if _session_date != today:
         _session_date = today
+        _history.clear()
         _session_open.clear()
         _session_low.clear()
         _session_peak.clear()
@@ -748,6 +749,9 @@ def _last_known_volume(history: deque) -> float:
 def _record(symbol: str, strike: float, side: Side, premium: float, volume: float = 0) -> None:
     if not premium or premium <= 0:
         return
+    # Roll before reading/appending history so the first tick of a new session cannot
+    # calculate "3s" velocity against yesterday's final premium.
+    _roll_session()
     if symbol not in _history:
         _history[symbol] = {}
     key = _strike_key(strike, side)
@@ -843,9 +847,20 @@ def local_base_relative_move_pct(
 def _velocity(history: deque, polls_back: int) -> float:
     if len(history) < polls_back + 1:
         return 0.0
-    current = history[-1][1]
-    prior = history[-(polls_back + 1)][1]
+    current_row = history[-1]
+    prior_row = history[-(polls_back + 1)]
+    current = current_row[1]
+    prior = prior_row[1]
     if not prior or prior <= 0:
+        return 0.0
+    # Poll-count velocity is only valid while samples are fresh. After a feed/network
+    # pause, treating a multi-minute move as 3s/9s heat creates false explosions.
+    try:
+        elapsed = (current_row[0] - prior_row[0]).total_seconds()
+    except (AttributeError, TypeError):
+        return 0.0
+    max_elapsed = max(12.0, float(polls_back * 6 + 6))
+    if elapsed < 0 or elapsed > max_elapsed:
         return 0.0
     return ((current - prior) / prior) * 100
 
