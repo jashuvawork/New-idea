@@ -56,6 +56,15 @@ def _settings(**overrides):
     s.explosion_volume_awaken_min = 25000
     s.ict_structured_early_min_move_pct = 15.0
     s.ict_structured_early_max_move_pct = 65.0
+    s.ict_local_base_lookback_polls = 16
+    s.ict_local_base_min_dump_pct = 25.0
+    s.ict_recent_base_window_seconds = 1800
+    s.ict_recent_base_exclude_seconds = 45
+    s.ict_recent_base_min_samples = 6
+    s.ict_recent_base_support_band_pct = 8.0
+    s.ict_recent_base_min_support_samples = 3
+    s.ict_recent_base_min_support_span_seconds = 30.0
+    s.ict_recent_base_max_age_seconds = 900.0
     s.elite_local_base_max_move_pct = 40.0
     s.ict_first_lift_appear_enabled = True
     s.ict_first_lift_min_velocity_3s = 1.2
