@@ -1446,8 +1446,11 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictLocalSwingBase": ict.local_swing_base,
         "ictBaseRelativeMovePct": round(ict.base_relative_move_pct, 1),
         "ictBasePremium": round(ict.base_premium, 2),
-        "flatVerticalQuality": round(ict.flat_vertical_quality, 1),
-        "flatVerticalGrade": ict.flat_vertical_grade,
+        "flatVerticalQuality": round(
+            float(getattr(ict, "flat_vertical_quality", 0) or 0),
+            1,
+        ),
+        "flatVerticalGrade": str(getattr(ict, "flat_vertical_grade", "") or ""),
         "bullishLocalBasePrediction": bullish_base,
         "bullishLocalBaseActive": bool(bullish_base.get("active")),
         "bullishLocalBaseConfidence": float(bullish_base.get("confidence") or 0),
