@@ -1152,7 +1152,32 @@ def scan_chain_explosions(
             tier = _apply_sticky_tier(f"{symbol}:{key_h}", tier)
 
             if tier == "WATCH" and score < 25 and not awakened:
-                if not (peak_move >= 20 and v3 >= 1.2):
+                keep_first_lift = False
+                if bool(getattr(settings, "ict_first_lift_appear_enabled", True)):
+                    # The ICT first-lift threshold is intentionally softer than BUILDING.
+                    # Probe before dropping WATCH so a slow 15% lift off a real flat/V base
+                    # reaches radar; selection still requires its normal score/tier/chart
+                    # gates before this can become an order.
+                    try:
+                        from app.engines.ict_breakout_monitor import analyze_ict_breakout
+
+                        keep_first_lift = analyze_ict_breakout(
+                            symbol=symbol,
+                            side=side,
+                            strike=float(strike),
+                            premium=float(premium),
+                            session_move_pct=float(session_move),
+                            peak_move_pct=float(peak_move),
+                            velocity_3s=float(v3),
+                            velocity_9s=float(v9),
+                            volume_surge=float(vol_surge),
+                            volume=float(volume or 0),
+                            tier=tier,
+                            reason=" ".join(reason_parts_open),
+                        ).first_lift
+                    except Exception:
+                        keep_first_lift = False
+                if not keep_first_lift and not (peak_move >= 20 and v3 >= 1.2):
                     continue
 
             # Reward ATM proximity; penalize deep OTM (delta + IV crush risk)

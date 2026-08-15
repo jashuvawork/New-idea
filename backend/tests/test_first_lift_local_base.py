@@ -5,7 +5,15 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
-from app.engines.explosion_detector import _history, _strike_key
+import pytest
+
+from app.config import Settings
+from app.engines.explosion_detector import (
+    _history,
+    _strike_key,
+    event_to_dict,
+    scan_chain_explosions,
+)
 from app.engines.ict_breakout_monitor import (
     _detect_flat_base,
     analyze_ict_breakout,
@@ -129,3 +137,51 @@ def test_chase_past_40pct_is_not_first_lift(mock_settings):
     assert ict.base_premium == 89.0
     assert ict.base_relative_move_pct >= 40.0
     assert ict.first_lift is False
+
+
+@pytest.mark.parametrize(
+    ("side", "option_key"),
+    [
+        (Side.CALL, "call_options"),
+        (Side.PUT, "put_options"),
+    ],
+)
+@patch("app.engines.session_timing.in_open_premium_window", return_value=False)
+def test_soft_first_lift_reaches_radar_before_building_tier(_open, side, option_key):
+    """A slow 15% lift must appear even while the raw detector still calls it WATCH."""
+    settings = Settings()
+    symbol, strike = "NIFTY", 24300.0
+    key = _strike_key(strike, side)
+    start = datetime.now(IST) - timedelta(seconds=120)
+    premiums = [
+        91.0, 89.0, 90.5, 89.5, 92.0, 90.0, 91.5, 89.0,
+        93.0, 95.0, 97.0, 99.0, 100.0, 101.0, 101.0, 101.0, 101.0, 101.0,
+    ]
+    _history.setdefault(symbol, {})[key] = deque(
+        (
+            (start + timedelta(seconds=i * 5), premium, 1000.0)
+            for i, premium in enumerate(premiums)
+        ),
+        maxlen=40,
+    )
+    chain = [{
+        "strike_price": strike,
+        option_key: {"ltp": 102.35, "volume": 1000},
+    }]
+
+    with (
+        patch("app.config.get_settings", return_value=settings),
+        patch("app.engines.ict_breakout_monitor.get_settings", return_value=settings),
+    ):
+        events = scan_chain_explosions(
+            symbol, chain, spot=strike, atm=strike,
+        )
+        matching = [event for event in events if event.side == side]
+        assert matching, "first lift was dropped before ICT/radar analysis"
+        assert matching[0].tier == "WATCH"
+        radar = event_to_dict(matching[0])
+
+    assert radar["ictFirstLift"] is True
+    assert radar["tradeable"] is True
+    assert radar["momentType"] == "first_lift_local_base"
+    assert 14.0 <= radar["ictBaseRelativeMovePct"] <= 16.5
