@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Tab = 'scorecard' | 'moves' | 'funnel' | 'system';
 
@@ -21,6 +21,7 @@ interface RadarArchive {
   fileName: string;
   sizeBytes: number;
   count?: number;
+  totalDetectedCount?: number;
   updatedAt?: string;
   downloadUrl: string;
   corrupt?: boolean;
@@ -232,24 +233,41 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
   const [loading, setLoading] = useState(true);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [dayError, setDayError] = useState<string | null>(null);
-  const [backendUpdateRequired, setBackendUpdateRequired] = useState(false);
+  const [overviewBackendMissing, setOverviewBackendMissing] = useState(false);
+  const [dayBackendMissing, setDayBackendMissing] = useState(false);
+  const [archiveApiAvailable, setArchiveApiAvailable] = useState<boolean | null>(null);
   const [action, setAction] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [detectorReplay, setDetectorReplay] = useState<DetectorReplay | null>(null);
+  const overviewRequest = useRef(0);
+  const dayRequest = useRef(0);
+  const initialArchiveSelectionDone = useRef(false);
+  const userPickedDate = useRef(false);
 
   const loadOverview = useCallback(async () => {
+    const requestId = ++overviewRequest.current;
     const [archiveResult, healthResult] = await Promise.allSettled([
       fetchJson<{ archives?: RadarArchive[] }>('/api/ai/radar-archives?limit=90'),
       fetchJson<RadarHealth>('/api/ai/radar-health'),
     ]);
+    if (requestId !== overviewRequest.current) return;
 
     if (archiveResult.status === 'fulfilled') {
+      setArchiveApiAvailable(true);
       const archivePayload = archiveResult.value;
       const rows = archivePayload.archives ?? [];
       setArchives(rows);
-      setSelectedDate((current) => (
-        rows.some((row) => row.date === current) ? current : rows[0]?.date ?? current
-      ));
+      if (!initialArchiveSelectionDone.current) {
+        initialArchiveSelectionDone.current = true;
+        if (!userPickedDate.current && rows[0]?.date) {
+          setSelectedDate(rows[0].date);
+        }
+      }
+    } else if (
+      archiveResult.reason instanceof ApiError
+      && archiveResult.reason.status === 404
+    ) {
+      setArchiveApiAvailable(false);
     }
     if (healthResult.status === 'fulfilled') {
       setHealth(healthResult.value);
@@ -264,7 +282,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
     const hardFailure = failures.find(
       (result) => !(result.reason instanceof ApiError && result.reason.status === 404),
     );
-    setBackendUpdateRequired(missingBackend);
+    setOverviewBackendMissing(missingBackend);
     setOverviewError(
       hardFailure
         ? (hardFailure.reason instanceof Error
@@ -276,10 +294,12 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
   }, []);
 
   const loadDay = useCallback(async (date: string) => {
+    const requestId = ++dayRequest.current;
     const [scoreResult, funnelResult] = await Promise.allSettled([
       fetchJson<RadarScorecard>(`/api/ai/radar-scorecard/${date}`),
       fetchJson<FunnelReport>(`/api/ai/radar-funnel/${date}`),
     ]);
+    if (requestId !== dayRequest.current) return;
     if (scoreResult.status === 'fulfilled') setScorecard(scoreResult.value);
     else setScorecard(null);
     if (funnelResult.status === 'fulfilled') setFunnel(funnelResult.value);
@@ -294,7 +314,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
     const hardFailure = failures.find(
       (result) => !(result.reason instanceof ApiError && result.reason.status === 404),
     );
-    if (missingBackend) setBackendUpdateRequired(true);
+    setDayBackendMissing(missingBackend);
     setDayError(
       hardFailure
         ? (hardFailure.reason instanceof Error
@@ -302,10 +322,6 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
           : 'Unable to load daily review')
         : null,
     );
-    if (failures.length === 2 && !missingBackend && !hardFailure) {
-      setScorecard(null);
-      setFunnel(null);
-    }
   }, []);
 
   useEffect(() => {
@@ -315,8 +331,19 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
   }, [loadOverview, pollMs]);
 
   useEffect(() => {
+    setActionMessage(null);
+    setDetectorReplay(null);
     loadDay(selectedDate);
   }, [loadDay, selectedDate]);
+
+  useEffect(() => {
+    if (
+      selectedDate !== istDate()
+      || health?.marketPhase !== 'LIVE_MARKET'
+    ) return;
+    const id = window.setInterval(() => loadDay(selectedDate), pollMs);
+    return () => window.clearInterval(id);
+  }, [health?.marketPhase, loadDay, pollMs, selectedDate]);
 
   const runAction = async (
     name: string,
@@ -342,6 +369,37 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
   };
 
   const selectedArchive = archives.find((row) => row.date === selectedDate);
+  const backendUpdateRequired = overviewBackendMissing || dayBackendMissing;
+  const currentSessionLive = (
+    selectedDate === istDate()
+    && health?.marketPhase === 'LIVE_MARKET'
+  );
+  const finalizeDisabled = (
+    backendUpdateRequired
+    || currentSessionLive
+    || !selectedArchive
+    || Boolean(selectedArchive.corrupt)
+  );
+  const finalizeSelectedDate = () => {
+    const confirmed = window.confirm(
+      `Finalize ${selectedDate}? This writes review artifacts, runs the configured backup, and may prune expired telemetry.`,
+    );
+    if (!confirmed) return;
+    void runAction(
+      'finalize',
+      `/api/ai/radar-finalize/${selectedDate}`,
+      (payload) => {
+        if (payload.backup?.success && payload.backup?.configured) {
+          return 'ZIP finalized and backup checksum verified';
+        }
+        if (payload.backup?.configured) {
+          const errors = (payload.backup?.errors ?? []).join(' · ');
+          return `ZIP finalized, but backup failed${errors ? `: ${errors}` : ''}`;
+        }
+        return 'ZIP finalized locally; durable backup is not configured';
+      },
+    );
+  };
   const alerts = health?.alerts ?? [];
   const events = scorecard?.events ?? [];
   const missedEvents = events.filter((event) => event.capture === 'MISSED');
@@ -362,6 +420,9 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
       : backendUpdateRequired
         ? 'Backend update'
         : alerts.length ? `${alerts.length} alerts` : 'Needs review';
+  const feedLabel = health?.feed?.streamStale
+    ? 'Connected (stale)'
+    : health?.feed?.connected ? 'Connected' : 'Offline';
 
   return (
     <section className="panel-card">
@@ -401,13 +462,17 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
               id="radar-review-date"
               type="date"
               value={selectedDate}
-              onChange={(event) => setSelectedDate(event.target.value)}
-              className="h-8 rounded-lg border border-nexus-border bg-black/30 px-2 text-[11px] font-mono text-white color-scheme-dark"
+              onChange={(event) => {
+                userPickedDate.current = true;
+                setSelectedDate(event.target.value);
+              }}
+              className="h-10 sm:h-8 rounded-lg border border-nexus-border bg-black/30 px-2 text-[11px] font-mono text-white color-scheme-dark"
             />
-            {selectedArchive ? (
+            {selectedArchive && !selectedArchive.corrupt ? (
               <a
                 href={`${API_BASE}${selectedArchive.downloadUrl}`}
-                className="h-8 inline-flex items-center rounded-lg border border-nexus-accent/35 bg-nexus-accent/10 px-3 text-[10px] font-semibold text-nexus-accent hover:bg-nexus-accent/20"
+                download={selectedArchive.fileName}
+                className="h-10 sm:h-8 inline-flex items-center rounded-lg border border-nexus-accent/35 bg-nexus-accent/10 px-3 text-[10px] font-semibold text-nexus-accent hover:bg-nexus-accent/20"
               >
                 Download ZIP
               </a>
@@ -415,7 +480,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
             <button
               type="button"
               onClick={() => Promise.all([loadOverview(), loadDay(selectedDate)])}
-              className="h-8 rounded-lg border border-nexus-border px-3 text-[10px] text-nexus-muted hover:text-white hover:border-nexus-border-light"
+              className="h-10 sm:h-8 rounded-lg border border-nexus-border px-3 text-[10px] text-nexus-muted hover:text-white hover:border-nexus-border-light"
             >
               Refresh
             </button>
@@ -443,10 +508,17 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
         </div>
       ) : null}
 
-      <div className="px-4 pt-3 border-b border-nexus-border flex gap-1 overflow-x-auto">
+      <div
+        role="tablist"
+        aria-label="Radar intelligence views"
+        className="px-4 pt-3 border-b border-nexus-border flex gap-1 overflow-x-auto"
+      >
         {(Object.keys(tabLabels) as Tab[]).map((key) => (
           <button
             type="button"
+            role="tab"
+            aria-selected={tab === key}
+            aria-controls={`radar-panel-${key}`}
             key={key}
             onClick={() => setTab(key)}
             className={`shrink-0 px-3 py-2 text-[10px] font-semibold border-b-2 transition-colors ${
@@ -462,19 +534,27 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
 
       <div className="p-4">
         {backendUpdateRequired ? (
-          <div className="mb-3 rounded-lg border border-nexus-yellow/30 bg-nexus-yellow/5 px-3 py-2 text-[10px] text-nexus-yellow">
-            Radar archive access is available, but learning and health APIs need the matching backend deployment.
+          <div role="status" className="mb-3 rounded-lg border border-nexus-yellow/30 bg-nexus-yellow/5 px-3 py-2 text-[10px] text-nexus-yellow">
+            {archiveApiAvailable
+              ? 'Radar archive access is available, but learning and health APIs need the matching backend deployment.'
+              : 'Deploy the radar-learning backend to enable archive, learning, and health review.'}
           </div>
         ) : null}
 
-        {overviewError || dayError ? (
-          <div className="mb-3 rounded-lg border border-nexus-red/30 bg-nexus-red/5 px-3 py-2 text-[10px] text-nexus-red">
-            {overviewError ?? dayError}
+        {selectedArchive?.corrupt ? (
+          <div role="alert" className="mb-3 rounded-lg border border-nexus-red/30 bg-nexus-red/5 px-3 py-2 text-[10px] text-nexus-red">
+            This archive failed ZIP validation. It has been preserved for recovery; download and review actions are disabled.
           </div>
         ) : null}
+
+        {[overviewError, dayError].filter(Boolean).map((message, index) => (
+          <div key={`${message}-${index}`} role="alert" className="mb-3 rounded-lg border border-nexus-red/30 bg-nexus-red/5 px-3 py-2 text-[10px] text-nexus-red">
+            {message}
+          </div>
+        ))}
 
         {tab === 'scorecard' ? (
-          <div className="space-y-4">
+          <div id="radar-panel-scorecard" role="tabpanel" className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
               <MetricCard
                 label="FTV recall"
@@ -566,7 +646,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
         ) : null}
 
         {tab === 'moves' ? (
-          <div className="space-y-3">
+          <div id="radar-panel-moves" role="tabpanel" className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-[11px] font-semibold text-white">Hindsight flat-to-vertical moves</h3>
@@ -618,7 +698,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
         ) : null}
 
         {tab === 'funnel' ? (
-          <div className="space-y-4">
+          <div id="radar-panel-funnel" role="tabpanel" className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
               <MetricCard label="Detected" value={String(funnel?.detected ?? 0)} />
               <MetricCard label="Blocked" value={String(funnel?.blocked ?? 0)} tone={(funnel?.blocked ?? 0) ? 'warn' : 'neutral'} />
@@ -692,12 +772,12 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
         ) : null}
 
         {tab === 'system' ? (
-          <div className="space-y-4">
+          <div id="radar-panel-system" role="tabpanel" className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
               <div className="rounded-xl border border-nexus-border bg-black/15 p-3">
                 <h3 className="text-[10px] uppercase tracking-[0.12em] text-gray-300 mb-2">Live feed</h3>
                 <div className="space-y-1.5 text-[10px]">
-                  <div className="flex justify-between"><span className="text-nexus-muted">WebSocket</span><span className={health?.feed?.connected ? 'text-nexus-green' : 'text-gray-400'}>{health?.feed?.connected ? 'Connected' : 'Offline'}</span></div>
+                  <div className="flex justify-between"><span className="text-nexus-muted">WebSocket</span><span className={health?.feed?.streamStale ? 'text-nexus-yellow' : health?.feed?.connected ? 'text-nexus-green' : 'text-gray-400'}>{feedLabel}</span></div>
                   <div className="flex justify-between"><span className="text-nexus-muted">Recent ticks</span><span className="font-mono">{health?.feed?.hasRecentTicks ? 'YES' : 'NO'}</span></div>
                   <div className="flex justify-between"><span className="text-nexus-muted">Message age</span><span className="font-mono">{compactNumber(health?.feed?.lastMessageAgeMs, 'ms')}</span></div>
                   <div className="flex justify-between"><span className="text-nexus-muted">Subscriptions</span><span className="font-mono">{health?.feed?.subscribedInstruments ?? 0}</span></div>
@@ -750,29 +830,42 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
                     type="button"
                     disabled={action != null || backendUpdateRequired}
                     onClick={() => runAction('threshold-replay', `/api/ai/radar-replay/${selectedDate}`, (payload) => `Threshold replay: ${payload.truthCount ?? 0} FTV moves`)}
-                    className="rounded-lg border border-purple-500/35 bg-purple-500/10 px-3 py-2 text-[10px] text-purple-300 hover:bg-purple-500/20 disabled:opacity-50"
+                    title={backendUpdateRequired ? 'Requires the radar-learning backend' : 'Recompute the hindsight scorecard'}
+                    className="min-h-10 rounded-lg border border-purple-500/35 bg-purple-500/10 px-3 py-2 text-[10px] text-purple-300 hover:bg-purple-500/20 disabled:opacity-50"
                   >
-                    {action === 'threshold-replay' ? 'Replaying…' : 'Threshold replay'}
+                    {action === 'threshold-replay' ? 'Recomputing…' : 'Recompute scorecard'}
                   </button>
                   <button
                     type="button"
                     disabled={action != null || backendUpdateRequired}
                     onClick={() => runAction('detector-replay', `/api/ai/radar-detector-replay/${selectedDate}`, (payload) => `Detector replay: ${payload.uniqueRadarKeys ?? 0} radar keys`)}
-                    className="rounded-lg border border-nexus-accent/35 bg-nexus-accent/10 px-3 py-2 text-[10px] text-nexus-accent hover:bg-nexus-accent/20 disabled:opacity-50"
+                    title={backendUpdateRequired ? 'Requires the radar-learning backend' : 'Replay through the production detector in isolation'}
+                    className="min-h-10 rounded-lg border border-nexus-accent/35 bg-nexus-accent/10 px-3 py-2 text-[10px] text-nexus-accent hover:bg-nexus-accent/20 disabled:opacity-50"
                   >
                     {action === 'detector-replay' ? 'Running detector…' : 'Production replay'}
                   </button>
                   <button
                     type="button"
-                    disabled={action != null || backendUpdateRequired}
-                    onClick={() => runAction('finalize', `/api/ai/radar-finalize/${selectedDate}`, (payload) => payload.backup?.configured ? 'ZIP finalized and backed up' : 'ZIP finalized locally')}
-                    className="rounded-lg border border-nexus-green/35 bg-nexus-green/10 px-3 py-2 text-[10px] text-nexus-green hover:bg-nexus-green/20 disabled:opacity-50"
+                    disabled={action != null || finalizeDisabled}
+                    onClick={finalizeSelectedDate}
+                    title={
+                      currentSessionLive
+                        ? 'Available after the live market session'
+                        : !selectedArchive
+                          ? 'No archive exists for this date'
+                          : selectedArchive.corrupt
+                            ? 'Corrupt archives are preserved and cannot be finalized'
+                            : backendUpdateRequired
+                              ? 'Requires the radar-learning backend'
+                              : 'Finalize review artifacts and verify durable backup'
+                    }
+                    className="min-h-10 rounded-lg border border-nexus-green/35 bg-nexus-green/10 px-3 py-2 text-[10px] text-nexus-green hover:bg-nexus-green/20 disabled:opacity-50"
                   >
                     {action === 'finalize' ? 'Finalizing…' : 'Finalize & backup'}
                   </button>
                 </div>
               </div>
-              {actionMessage ? <div className="mt-2 text-[9px] text-nexus-accent">{actionMessage}</div> : null}
+              {actionMessage ? <div aria-live="polite" className="mt-2 text-[9px] text-nexus-accent">{actionMessage}</div> : null}
               {detectorReplay ? (
                 <div className="mt-2 flex flex-wrap gap-3 text-[9px] font-mono text-nexus-muted">
                   <span>{detectorReplay.sampleBatches ?? 0} sample batches</span>
