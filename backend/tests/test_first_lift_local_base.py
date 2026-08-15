@@ -117,6 +117,41 @@ def test_first_lift_appears_at_15pct_off_lowest_base(mock_settings):
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
+def test_recent_flat_trough_wins_over_older_session_low(mock_settings):
+    """An earlier deep low must not turn a fresh 15% coil break into a 46% chase."""
+    mock_settings.return_value = _settings()
+    _seed_flat_then_lift(lift_premium=102.35)
+
+    with (
+        patch(
+            "app.engines.ict_breakout_monitor._detect_local_swing_base",
+            return_value=(True, 70.0, 46.2),
+        ),
+        patch(
+            "app.engines.explosion_detector.get_session_low_premium",
+            return_value=70.0,
+        ),
+    ):
+        ict = analyze_ict_breakout(
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=24350.0,
+            premium=102.35,
+            session_move_pct=46.2,
+            peak_move_pct=46.2,
+            velocity_3s=2.4,
+            volume_surge=3.5,
+            volume=160000,
+            tier="BUILDING",
+            reason="volAwaken",
+        )
+
+    assert ict.base_premium == 89.0
+    assert 14.0 <= ict.base_relative_move_pct <= 16.5
+    assert ict.first_lift is True
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
 def test_chase_past_40pct_is_not_first_lift(mock_settings):
     mock_settings.return_value = _settings()
     # 89 → 131 ≈ 47% — Aug14-style chase print
@@ -152,11 +187,13 @@ def test_soft_first_lift_reaches_radar_before_building_tier(_open, side, option_
     settings = Settings()
     symbol, strike = "NIFTY", 24300.0
     key = _strike_key(strike, side)
-    start = datetime.now(IST) - timedelta(seconds=120)
     premiums = [
         91.0, 89.0, 90.5, 89.5, 92.0, 90.0, 91.5, 89.0,
         93.0, 95.0, 97.0, 99.0, 100.0, 101.0, 101.0, 101.0, 101.0, 101.0,
     ]
+    # Keep the final seeded sample three seconds behind the live lift. A stale
+    # multi-minute gap must not be interpreted as 3s explosion velocity.
+    start = datetime.now(IST) - timedelta(seconds=(len(premiums) - 1) * 5 + 3)
     _history.setdefault(symbol, {})[key] = deque(
         (
             (start + timedelta(seconds=i * 5), premium, 1000.0)
@@ -185,3 +222,5 @@ def test_soft_first_lift_reaches_radar_before_building_tier(_open, side, option_
     assert radar["tradeable"] is True
     assert radar["momentType"] == "first_lift_local_base"
     assert 14.0 <= radar["ictBaseRelativeMovePct"] <= 16.5
+    assert radar["flatVerticalQuality"] > 0
+    assert radar["flatVerticalGrade"] in ("A+", "A", "B", "C")

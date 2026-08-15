@@ -71,3 +71,19 @@ def test_no_local_base_history_falls_back():
     )
     # No history recorded → recent path returns -1 → falls through (0.0 here, no off-low).
     assert effective_local_base_move_pct(event, ict=None) == 0.0
+
+
+def test_breakout_tail_alone_is_not_treated_as_local_base():
+    reset_detector_state_for_tests()
+    now = datetime.now(IST)
+    key = "NIFTY:PUT:24500.0"
+    ed._local_base_hist[key] = ed.deque(
+        [
+            (now - timedelta(seconds=30), 68.0),
+            (now - timedelta(seconds=15), 70.0),
+            (now, 72.0),
+        ],
+        maxlen=ed.LOCAL_BASE_HIST_MAXLEN,
+    )
+
+    assert local_base_premium("NIFTY", 24500.0, Side.PUT) == 0.0

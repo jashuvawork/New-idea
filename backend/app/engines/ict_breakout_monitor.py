@@ -59,14 +59,20 @@ class ICTBreakoutSignal:
 
 def premium_poll_history(symbol: str, strike: float, side: Side | str) -> list[tuple[datetime, float, float]]:
     """Read rolling premium poll history for ICT gap detection."""
-    from app.engines.explosion_detector import _history, _strike_key
+    from app.engines.explosion_detector import (
+        PREMIUM_POLL_WINDOW_SECONDS,
+        _history,
+        _strike_key,
+    )
 
     side_val = side.value if isinstance(side, Side) else str(side).upper()
     key = _strike_key(strike, Side(side_val))
     hist = _history.get(symbol.upper(), {}).get(key)
     if not hist:
         return []
-    return list(hist)
+    rows = list(hist)
+    cutoff = rows[-1][0] - timedelta(seconds=PREMIUM_POLL_WINDOW_SECONDS)
+    return [row for row in rows if row[0] >= cutoff]
 
 
 def _detect_premium_fvg(
@@ -234,7 +240,11 @@ def _detect_local_swing_base(
     lookback = int(getattr(settings, "ict_local_base_lookback_polls", 16) or 16)
     lookback = max(4, lookback)
     window = list(history)[-lookback:] if history else []
-    premiums = [float(h[1]) for h in window if float(h[1] or 0) > 0]
+    samples = [
+        (h[0], float(h[1]))
+        for h in window
+        if float(h[1] or 0) > 0
+    ]
 
     # Merge ~30m local-base hist so ICT still sees the trough after the rip.
     try:
@@ -253,10 +263,15 @@ def _detect_local_swing_base(
                 lo_cut = now - timedelta(seconds=int(LOCAL_BASE_WINDOW_SECONDS))
                 for ts, p in dq:
                     if ts >= lo_cut and _is_meaningful_premium(p):
-                        premiums.append(float(p))
+                        samples.append((ts, float(p)))
     except Exception:
         pass
 
+    try:
+        samples.sort(key=lambda item: item[0].timestamp())
+    except (AttributeError, TypeError, ValueError):
+        return False, 0.0, 0.0
+    premiums = [premium_value for _, premium_value in samples]
     if len(premiums) < 4:
         return False, 0.0, 0.0
     local_low = min(premiums)
@@ -322,35 +337,30 @@ def analyze_ict_breakout(
     first_lift_hi = float(
         getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0
     )
-    # Prefer local swing low after a dump (V-bottom) over flat-base; otherwise
-    # use consolidation **lowest** pad. Day-open % is intentionally not used here.
+    # A newly established flat consolidation is the launch pad even when an older,
+    # deeper session/V low exists. Otherwise the stale low turns a genuine 15% first
+    # lift off the coil into a 40%+ "chase". V-bottoms remain the fallback when there
+    # is no trustworthy flat.
     local_swing_base = False
     base_level = 0.0
     base_rel_move = 0.0
-    if swing_found and swing_low > 0:
-        local_swing_base = True
-        base_level = swing_low
-        base_rel_move = swing_rel
+    trusted_flat = False
     if flat and flat_base > 0 and premium > 0:
         cand_rel = (premium - flat_base) / flat_base * 100.0
         # Flat-at-the-highs after a rip is NOT a launch pad (Jul30 77700: baseRel=0
         # while session printed +1626% / fake mega). Require real lift off the base.
         if cand_rel >= min(early_min, first_lift_lo) * 0.5:
-            if base_level <= 0:
-                base_level = flat_base
-                base_rel_move = cand_rel
-            else:
-                # Always keep the deeper trough so first-lift % is off the true low.
-                deep = min(base_level, flat_base)
-                base_level = deep
-                base_rel_move = (premium - deep) / deep * 100.0 if deep > 0 else cand_rel
-                if abs(flat_base - deep) <= 1e-9 and not swing_found:
-                    local_swing_base = False
+            trusted_flat = True
+            base_level = flat_base
+            base_rel_move = cand_rel
+    if not trusted_flat and swing_found and swing_low > 0:
+        local_swing_base = True
+        base_level = swing_low
+        base_rel_move = swing_rel
 
-    # Seed / deepen from detector session low. Prefer the deeper authentic low
-    # so a morning dump (~233) is not replaced by a mid-morning consolidation
-    # average (~254) that delays the first legal lift off the true base.
-    if premium > 0:
+    # Session-low fallback is only for V-shaped legs without a trusted flat coil.
+    # Never replace a recent flat trough with an older session low.
+    if premium > 0 and not trusted_flat:
         try:
             from app.engines.explosion_detector import (
                 get_session_low_premium,
@@ -516,7 +526,7 @@ def analyze_ict_breakout(
     # Displacement alone must not activate ICT on tiny session moves (Jul20 +1% noise).
     early_floor = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
     immature_floor = float(
-        getattr(settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
+        getattr(settings, "explosion_immature_min_session_move_pct", 28.0) or 28.0
     )
     displacement_only_ok = displacement and move >= immature_floor and (flat or vol_awaken or fvg)
     active = (

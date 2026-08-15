@@ -1,7 +1,10 @@
 """WS volume=0 must not wipe REST volume history or drop ICT volume_awakening."""
 
+from collections import deque
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 from app.engines.explosion_detector import (
     ExplosionEvent,
@@ -10,10 +13,13 @@ from app.engines.explosion_detector import (
     _record,
     _strike_key,
     _volume_surge,
+    _volume_surge_with_chain,
     reset_detector_state_for_tests,
 )
 from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 from app.models.schemas import Side
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def setup_function(_):
@@ -40,6 +46,24 @@ def test_ws_zeros_do_not_collapse_volume_surge():
     assert hist[-1][2] == 55_000
     after = _volume_surge(hist)
     assert after > 0.5  # not collapsed to 0 by zero pollution
+
+
+def test_high_cumulative_volume_without_price_heat_is_not_synthetic_surge():
+    now = datetime.now(IST)
+    hist = deque(
+        [
+            (now - timedelta(seconds=12), 100.0, 50_000.0),
+            (now - timedelta(seconds=9), 100.0, 50_000.0),
+            (now - timedelta(seconds=6), 100.0, 50_000.0),
+            (now - timedelta(seconds=3), 100.0, 50_000.0),
+            (now, 100.0, 50_000.0),
+        ]
+    )
+    settings = MagicMock()
+    settings.explosion_volume_awaken_min = 25_000
+    settings.explosion_volume_awaken_min_velocity_3s = 1.0
+
+    assert _volume_surge_with_chain(50_000, hist, settings) < 2.0
 
 
 def _ict_settings(**overrides):

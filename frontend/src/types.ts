@@ -145,6 +145,28 @@ export interface ExplosionAlert {
   peakMovePct?: number;
   openPremiumMove?: number;
   volumeAwaken?: boolean;
+  offLowMovePct?: number;
+  localBaseMovePct?: number;
+  ictBreakout?: boolean;
+  ictPattern?: string;
+  ictScore?: number;
+  ictMegaRip?: boolean;
+  ictPremiumFvg?: boolean;
+  ictFlatThenVertical?: boolean;
+  ictFirstLift?: boolean;
+  ictVolumeAwakening?: boolean;
+  ictDisplacement?: boolean;
+  ictLocalSwingBase?: boolean;
+  ictBaseRelativeMovePct?: number;
+  ictBasePremium?: number;
+  ictReasons?: string[];
+  flatVerticalQuality?: number;
+  flatVerticalGrade?: string;
+  momentType?: string;
+  localBaseReversalPrediction?: Record<string, unknown>;
+  localBaseReversalActive?: boolean;
+  localBaseReversalConfidence?: number;
+  localBaseReversalSide?: string;
 }
 
 export interface StrategyMatrixEntry {

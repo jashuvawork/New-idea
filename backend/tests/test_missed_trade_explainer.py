@@ -4,7 +4,11 @@ from datetime import datetime
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from app.engines.missed_trade_explainer import build_missed_trade_report
+from app.engines.missed_trade_explainer import (
+    _alert_worth_explaining,
+    _classify_moment_types,
+    build_missed_trade_report,
+)
 from app.models.schemas import (
     AutoTraderState,
     Breadth,
@@ -16,6 +20,25 @@ from app.models.schemas import (
 )
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def test_first_lift_watch_is_kept_and_classified_for_postmortem():
+    alert = {
+        "tier": "WATCH",
+        "dailyMovePct": 15.0,
+        "tradeable": True,
+        "ictFirstLift": True,
+        "momentType": "first_lift_local_base",
+        "localBaseMovePct": 15.0,
+        "side": "CALL",
+        "strike": 24300.0,
+    }
+    snap = _snap()
+    snap.explosionAlerts = [alert]
+
+    assert _alert_worth_explaining(alert) is True
+    taxonomy = _classify_moment_types([], [], {"SENSEX": snap})
+    assert taxonomy["topMissedType"] == "first_lift_local_base"
 
 
 def _snap() -> SymbolSnapshot:
