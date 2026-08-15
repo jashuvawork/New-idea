@@ -520,7 +520,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
                   <tbody className="divide-y divide-nexus-border">
                     {events.slice(0, 30).map((event, index) => (
                       <tr key={`${event.key}-${event.verticalAt}-${index}`} className="text-[10px] hover:bg-white/[0.02]">
-                        <td className="px-3 py-2 font-mono text-white">{event.key.replaceAll(':', ' · ')}</td>
+                        <td className="px-3 py-2 font-mono text-white">{event.key.replace(/:/g, ' · ')}</td>
                         <td className="px-3 py-2">
                           <span className={`rounded-md border px-2 py-0.5 font-bold ${
                             event.capture === 'EARLY'
@@ -576,7 +576,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
                     <tbody className="divide-y divide-nexus-border">
                       {funnelRows.slice(0, 30).map((row) => (
                         <tr key={row.key} className="text-[10px] hover:bg-white/[0.02]">
-                          <td className="px-3 py-2 font-mono text-white">{row.key.replaceAll(':', ' · ')}</td>
+                          <td className="px-3 py-2 font-mono text-white">{row.key.replace(/:/g, ' · ')}</td>
                           <td className="px-3 py-2 text-nexus-accent">{row.bestTier ?? '—'}</td>
                           <td className="px-3 py-2 text-gray-300">
                             {row.entered ? 'Entered' : row.orderRejected ? 'Rejected' : row.selected ? 'Selected' : row.blocked ? 'Blocked' : 'Detected'}
