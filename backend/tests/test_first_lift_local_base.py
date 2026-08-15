@@ -20,7 +20,14 @@ from app.engines.ict_breakout_monitor import (
     analyze_ict_breakout,
     first_lift_entry_ready,
 )
-from app.models.schemas import MarketPhase, Side, SpotChart, SymbolSnapshot
+from app.engines.winner_entry_guards import chop_weak_explosion_blocks_entry
+from app.models.schemas import (
+    MarketPhase,
+    Regime,
+    Side,
+    SpotChart,
+    SymbolSnapshot,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -265,6 +272,65 @@ def test_first_lift_does_not_trade_without_quality_and_live_turn(mock_settings):
     assert first_lift_entry_ready(
         snap=snap, event=event, ict=ict,
     ) is False
+
+
+@patch("app.engines.winner_entry_guards.get_settings")
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_confirmed_first_lift_is_not_blocked_as_immature_chop(
+    mock_ict_settings, mock_guard_settings,
+):
+    settings = _settings()
+    mock_ict_settings.return_value = settings
+    mock_guard_settings.return_value = settings
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24300.0,
+        atmStrike=24300.0,
+        regime=Regime.RANGE_BOUND,
+        spotChart=SpotChart(
+            direction="NEUTRAL",
+            momentum5Pct=0.06,
+            momentum10Pct=0.01,
+            momentum15Pct=-0.05,
+            trendStrength=30.0,
+        ),
+    )
+    event = SimpleNamespace(
+        side=Side.CALL,
+        tier="WATCH",
+        explosion_score=51.0,
+        velocity_3s=1.35,
+        velocity_9s=1.35,
+        volume_surge=4.0,
+        daily_move_pct=15.0,
+        peak_move_pct=15.0,
+    )
+    candidate = SimpleNamespace(
+        mode="explosion",
+        tier="WATCH",
+        explosion_event=event,
+        alert={
+            "side": "CALL",
+            "ictFirstLift": True,
+            "ictBreakout": True,
+            "ictFlatThenVertical": True,
+            "ictBaseRelativeMovePct": 15.0,
+            "flatVerticalQuality": 61.0,
+            "explosionScore": 51.0,
+            "velocity3s": 1.35,
+            "velocity9s": 1.35,
+            "volumeSurge": 4.0,
+            "ictVolumeAwakening": True,
+        },
+    )
+
+    blocked, reason = chop_weak_explosion_blocks_entry(candidate, snap)
+
+    assert blocked is False
+    assert reason == "first_lift_local_base_confirmed"
 
 
 @pytest.mark.parametrize(
