@@ -46,6 +46,7 @@ import { SwingTrading } from './components/SwingTrading';
 import { PerformanceMilestone } from './components/PerformanceMilestone';
 import { WeeklyDashboardPanel } from './components/WeeklyDashboardPanel';
 import { RadarIntelligencePanel } from './components/RadarIntelligencePanel';
+import { UpstoxTradeManagerPanel } from './components/UpstoxTradeManagerPanel';
 import { deriveMarketSession } from './lib/marketSession';
 import type { MultiSnapshot, SymbolSnapshot } from './types';
 
@@ -250,6 +251,8 @@ export default function App() {
           <PerformanceMilestone stats={milestone} />
           <WeeklyDashboardPanel data={weeklyDashboard} />
         </div>
+
+        <UpstoxTradeManagerPanel />
 
         <RadarIntelligencePanel />
 

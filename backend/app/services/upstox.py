@@ -716,6 +716,10 @@ class UpstoxClient:
         data = await self._get("/portfolio/short-term-positions")
         return data if isinstance(data, list) else []
 
+    async def get_order_book(self) -> list[dict[str, Any]]:
+        data = await self._get("/order/retrieve-all")
+        return data if isinstance(data, list) else []
+
     async def place_order(self, order_payload: dict[str, Any]) -> dict[str, Any]:
         if not self.settings.enable_live_trading:
             raise UpstoxError("Live trading disabled — ENABLE_LIVE_TRADING=false")

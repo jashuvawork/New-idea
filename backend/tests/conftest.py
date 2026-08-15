@@ -58,6 +58,9 @@ def _reset_all_engine_globals() -> None:
     )
     from app.services.radar_health import reset_health_for_tests
     from app.services.radar_learning import reset_learning_state_for_tests
+    from app.services.upstox_trade_manager import (
+        reset_upstox_trade_manager_cache_for_tests,
+    )
 
     for fn in (
         reset_detector_state_for_tests,
@@ -72,6 +75,7 @@ def _reset_all_engine_globals() -> None:
         reset_preorder_rejection_suppressions,
         reset_health_for_tests,
         reset_learning_state_for_tests,
+        reset_upstox_trade_manager_cache_for_tests,
     ):
         _safe(fn)
 

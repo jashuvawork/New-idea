@@ -2,13 +2,17 @@
 
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.engines.capital_allocator import (
     CapitalSnapshot,
+    cap_lots_to_allocation,
+    capital_book_summary,
     clamp_lots,
     get_capital_snapshot,
     max_lots_for_capital,
+    ranked_allocation_for_state,
 )
 from app.engines.explosion_profit import (
     compute_explosion_lots,
@@ -16,13 +20,29 @@ from app.engines.explosion_profit import (
     explosion_in_cooldown,
     record_explosion_stop,
 )
-from app.models.schemas import PaperTrade, Side, StrategyType
+from app.models.schemas import AutoTraderState, PaperTrade, Side, StrategyType
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
 
 
 class CapitalSizingTests(unittest.TestCase):
+    @staticmethod
+    def _ranked_settings():
+        return SimpleNamespace(
+            fallback_capital_inr=200_000,
+            max_sizing_capital_inr=200_000,
+            ftv_ranked_allocation_enabled=True,
+            ftv_allocation_weights_csv="0.60,0.25,0.10",
+            ftv_allocation_cash_reserve_pct=0.05,
+            ftv_allocation_max_positions=3,
+            ftv_allocation_max_same_side=2,
+            lot_size_nifty=65,
+            lot_size_banknifty=30,
+            lot_size_sensex=20,
+            use_upstox_lot_sizes=False,
+        )
+
     def test_max_lots_from_85pct_2l_capital(self):
         snap = CapitalSnapshot(
             availableMarginInr=200_000,
@@ -66,6 +86,62 @@ class CapitalSizingTests(unittest.TestCase):
                 s.use_upstox_lot_sizes = False
                 clamped = clamp_lots(500, "SENSEX", 40.0)
                 self.assertEqual(clamped, 40)
+
+    def test_ranked_ftv_allocation_preserves_later_sleeves_and_cash(self):
+        state = AutoTraderState()
+        snap = CapitalSnapshot(
+            availableMarginInr=200_000,
+            totalEquityInr=200_000,
+            source="fallback",
+        )
+        settings = self._ranked_settings()
+        with (
+            patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap),
+            patch("app.engines.capital_allocator.get_settings", return_value=settings),
+        ):
+            first = ranked_allocation_for_state(state, 1)
+            lots = cap_lots_to_allocation(100, "NIFTY", 50.0, first)
+
+        self.assertEqual(first.cashReserveInr, 10_000)
+        self.assertEqual(first.budgetInr, 120_000)
+        self.assertEqual(lots, 36)
+        self.assertLessEqual(lots * 65 * 50, first.budgetInr)
+
+    def test_unused_top_sleeve_rolls_into_second_rank(self):
+        state = AutoTraderState(
+            openPaperTrades=[
+                PaperTrade(
+                    id="rank-1",
+                    symbol="NIFTY",
+                    side=Side.CALL,
+                    strike=24_500,
+                    entryPremium=50,
+                    currentPremium=50,
+                    lots=36,
+                    openedAt=datetime.now(IST),
+                    strategyType=StrategyType.EXPLOSIVE,
+                    entryContext={"allocationRank": 1},
+                )
+            ]
+        )
+        snap = CapitalSnapshot(
+            availableMarginInr=200_000,
+            totalEquityInr=200_000,
+            source="fallback",
+        )
+        settings = self._ranked_settings()
+        with (
+            patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap),
+            patch("app.engines.capital_allocator.get_settings", return_value=settings),
+        ):
+            second = ranked_allocation_for_state(state, 2)
+            summary = capital_book_summary(state)
+
+        self.assertEqual(second.committedInr, 117_000)
+        self.assertEqual(second.remainingBeforeInr, 73_000)
+        self.assertEqual(second.budgetInr, 53_000)
+        self.assertEqual(summary["remainingInr"], 73_000)
+        self.assertEqual(summary["activeAllocations"][0]["rank"], 1)
 
 
 class ExplosionExitTests(unittest.TestCase):

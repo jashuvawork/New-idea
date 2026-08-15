@@ -1101,8 +1101,9 @@ def find_best_entry(
     snapshots: dict[str, SymbolSnapshot],
     state: AutoTraderState,
     limits: Optional[Any] = None,
+    excluded_keys: Optional[set[str]] = None,
 ) -> Optional[EntryCandidate]:
-    """Return highest-ranked setup across all symbols — one best trade only."""
+    """Return the highest-ranked setup not already selected in this radar cycle."""
     settings = get_settings()
     from app.engines.chop_day_guards import (
         is_chop_session,
@@ -1117,6 +1118,12 @@ def find_best_entry(
     scalp_open = sum(1 for t in state.openPaperTrades if t.strategyType != StrategyType.SWING)
     swing_open = sum(1 for t in state.openPaperTrades if t.strategyType == StrategyType.SWING)
     chop = is_chop_session(snapshots)
+    max_scalp_slots = int(settings.aggressive_max_open_scalps)
+    if getattr(settings, "ftv_ranked_allocation_enabled", True):
+        max_scalp_slots = max(
+            max_scalp_slots,
+            int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+        )
 
     candidates: list[EntryCandidate] = []
     # ELITE/EXPLODING explosions; scalps off by default (Jul29 scalp sleeve bled).
@@ -1127,20 +1134,20 @@ def find_best_entry(
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
             continue
-        if settings.explosion_capture_mode and scalp_open < settings.aggressive_max_open_scalps:
+        if settings.explosion_capture_mode and scalp_open < max_scalp_slots:
             if not limits or getattr(limits, "allowExplosion", True):
                 candidates.extend(_explosion_candidates(symbol, snap, state, settings))
         if (
             scalp_entries
             and (not explosion_only or allow_guarded_scalp)
             and settings.paper_simple_profit_mode
-            and scalp_open < settings.aggressive_max_open_scalps
+            and scalp_open < max_scalp_slots
         ):
             candidates.extend(_scalp_candidates(symbol, snap, state, settings))
         if (
             not explosion_only
             and quick_sideways_enabled()
-            and scalp_open < settings.aggressive_max_open_scalps
+            and scalp_open < max_scalp_slots
         ):
             candidates.extend(_quick_sideways_candidates(symbol, snap, state, settings, snapshots))
             candidates.extend(_worst_day_candidates(symbol, snap, state, snapshots))
@@ -1151,6 +1158,16 @@ def find_best_entry(
     # generation, before every promotion/risk-quality filter and final ranking.
     # Unlike the established loss cooldown, ELITE/high-mover paths cannot bypass it.
     candidates = _exclude_preorder_rejected_candidates(candidates)
+    if excluded_keys:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if (
+                f"{candidate.symbol.upper()}:{candidate.side.value}:"
+                f"{float(candidate.strike):g}"
+            )
+            not in excluded_keys
+        ]
     if not candidates:
         return None
 

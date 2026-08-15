@@ -651,6 +651,124 @@ export interface CapitalAllocation {
   lotSizes?: Record<string, number>;
   lotSizesSource?: string;
   lotSizesFetchedAt?: string;
+  enabled?: boolean;
+  capitalBaseInr?: number;
+  committedInr?: number;
+  cashReserveInr?: number;
+  remainingInr?: number;
+  utilizationPct?: number;
+  weights?: number[];
+  maxPositions?: number;
+  maxSameSide?: number;
+  activeAllocations?: FtvAllocationRow[];
+  plannedAllocations?: FtvAllocationRow[];
+}
+
+export interface FtvAllocationRow {
+  key?: string;
+  tradeId?: string;
+  symbol: string;
+  side: string;
+  strike: number;
+  lots?: number;
+  rank?: number;
+  tier?: string;
+  score?: number;
+  premium?: number;
+  budgetInr?: number;
+  committedInr?: number;
+  status?: string;
+  reason?: string;
+}
+
+export interface UpstoxBrokerPosition {
+  instrumentKey?: string;
+  tradingSymbol?: string;
+  exchange?: string;
+  product?: string;
+  quantity: number;
+  averagePrice: number;
+  lastPrice: number;
+  realizedPnlInr: number;
+  unrealizedPnlInr: number;
+  pnlInr: number;
+}
+
+export interface UpstoxBrokerOrder {
+  orderId?: string;
+  tradingSymbol?: string;
+  transactionType?: string;
+  status?: string;
+  statusMessage?: string;
+  quantity: number;
+  filledQuantity: number;
+  pendingQuantity: number;
+  averagePrice: number;
+  price: number;
+  orderType?: string;
+  product?: string;
+  timestamp?: string;
+  tag?: string;
+}
+
+export interface UpstoxManagerTrade {
+  id: string;
+  symbol: string;
+  side: string;
+  strike: number;
+  lots: number;
+  entryPremium: number;
+  currentPremium: number;
+  pnlPoints: number;
+  pnlInr: number;
+  status: string;
+  openedAt?: string;
+  closedAt?: string;
+  exitReason?: string;
+  executionMode?: string;
+  brokerOrderId?: string;
+  allocationRank?: number;
+  allocationBudgetInr?: number;
+  allocatedCostInr?: number;
+  tier?: string;
+  score?: number;
+}
+
+export interface UpstoxTradeOverview {
+  generatedAt: string;
+  executionMode: string;
+  autoTradingEnabled: boolean;
+  running: boolean;
+  broker: {
+    connected: boolean;
+    complete: boolean;
+    errors: Record<string, string>;
+  };
+  capital: CapitalAllocation & {
+    brokerAvailableMarginInr?: number;
+    brokerUsedMarginInr?: number;
+    brokerTotalEquityInr?: number;
+  };
+  allocation: CapitalAllocation;
+  pnl: {
+    brokerRealizedInr: number;
+    brokerUnrealizedInr: number;
+    brokerNetInr: number;
+    strategyRealizedInr: number;
+    strategyUnrealizedInr: number;
+    strategyNetInr: number;
+    wins: number;
+    losses: number;
+    scratches: number;
+    winRate: number;
+    profitFactor: number;
+  };
+  brokerPositions: UpstoxBrokerPosition[];
+  brokerOrders: UpstoxBrokerOrder[];
+  strategyTrades: {
+    open: UpstoxManagerTrade[];
+    closed: UpstoxManagerTrade[];
+  };
 }
 
 export interface DailyStrategy {

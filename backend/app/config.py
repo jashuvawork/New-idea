@@ -1360,10 +1360,16 @@ class Settings(BaseSettings):
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
-    # Capital / risk — 85% per trade, max lots = floor(budget / premium×lot_size)
+    # Capital / risk — ranked FTV allocation keeps cash reserved and fills the
+    # strongest approved contracts first instead of spending the whole book on one leg.
     fallback_capital_inr: float = 200_000
     max_sizing_capital_inr: float = 200_000
     per_trade_capital_pct: float = 0.95
+    ftv_ranked_allocation_enabled: bool = True
+    ftv_allocation_weights_csv: str = "0.60,0.25,0.10"
+    ftv_allocation_cash_reserve_pct: float = 0.05
+    ftv_allocation_max_positions: int = 3
+    ftv_allocation_max_same_side: int = 2
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
     aggressive_min_explosion_score: int = 45
