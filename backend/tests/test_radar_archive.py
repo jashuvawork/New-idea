@@ -196,14 +196,13 @@ def test_corrupt_archive_is_never_silently_overwritten(tmp_path):
     original = b"not-a-zip-but-valuable-for-recovery"
     archive.write_bytes(original)
 
-    with (
-        patch("app.services.radar_archive.get_settings", return_value=settings),
-        pytest.raises(RadarArchiveCorruptError),
-    ):
-        record_top_radars(
-            {"NIFTY": _snap([_alert(strike=24500.0, score=60.0)])},
-            now=datetime(2026, 8, 15, 10, 0, tzinfo=IST),
-        )
+    with patch("app.services.radar_archive.get_settings", return_value=settings):
+        with pytest.raises(RadarArchiveCorruptError):
+            record_top_radars(
+                {"NIFTY": _snap([_alert(strike=24500.0, score=60.0)])},
+                now=datetime(2026, 8, 15, 10, 0, tzinfo=IST),
+            )
+        archives = list_archives()
 
     assert archive.read_bytes() == original
-    assert list_archives()[0]["corrupt"] is True
+    assert archives[0]["corrupt"] is True
