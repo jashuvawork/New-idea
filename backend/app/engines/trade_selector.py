@@ -474,6 +474,7 @@ def _explosion_candidates(
                 volume_surge=float(alert.get("volumeSurge") or 0),
                 base_relative_move_pct=float(alert.get("ictBaseRelativeMovePct") or 0),
                 base_premium=float(alert.get("ictBasePremium") or 0),
+                first_lift=bool(alert.get("ictFirstLift")),
             )
         from app.engines.elite_never_block import elite_never_block_active
 

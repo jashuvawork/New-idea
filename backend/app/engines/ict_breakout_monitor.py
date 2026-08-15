@@ -322,35 +322,30 @@ def analyze_ict_breakout(
     first_lift_hi = float(
         getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0
     )
-    # Prefer local swing low after a dump (V-bottom) over flat-base; otherwise
-    # use consolidation **lowest** pad. Day-open % is intentionally not used here.
+    # A newly established flat consolidation is the launch pad even when an older,
+    # deeper session/V low exists. Otherwise the stale low turns a genuine 15% first
+    # lift off the coil into a 40%+ "chase". V-bottoms remain the fallback when there
+    # is no trustworthy flat.
     local_swing_base = False
     base_level = 0.0
     base_rel_move = 0.0
-    if swing_found and swing_low > 0:
-        local_swing_base = True
-        base_level = swing_low
-        base_rel_move = swing_rel
+    trusted_flat = False
     if flat and flat_base > 0 and premium > 0:
         cand_rel = (premium - flat_base) / flat_base * 100.0
         # Flat-at-the-highs after a rip is NOT a launch pad (Jul30 77700: baseRel=0
         # while session printed +1626% / fake mega). Require real lift off the base.
         if cand_rel >= min(early_min, first_lift_lo) * 0.5:
-            if base_level <= 0:
-                base_level = flat_base
-                base_rel_move = cand_rel
-            else:
-                # Always keep the deeper trough so first-lift % is off the true low.
-                deep = min(base_level, flat_base)
-                base_level = deep
-                base_rel_move = (premium - deep) / deep * 100.0 if deep > 0 else cand_rel
-                if abs(flat_base - deep) <= 1e-9 and not swing_found:
-                    local_swing_base = False
+            trusted_flat = True
+            base_level = flat_base
+            base_rel_move = cand_rel
+    if not trusted_flat and swing_found and swing_low > 0:
+        local_swing_base = True
+        base_level = swing_low
+        base_rel_move = swing_rel
 
-    # Seed / deepen from detector session low. Prefer the deeper authentic low
-    # so a morning dump (~233) is not replaced by a mid-morning consolidation
-    # average (~254) that delays the first legal lift off the true base.
-    if premium > 0:
+    # Session-low fallback is only for V-shaped legs without a trusted flat coil.
+    # Never replace a recent flat trough with an older session low.
+    if premium > 0 and not trusted_flat:
         try:
             from app.engines.explosion_detector import (
                 get_session_low_premium,
