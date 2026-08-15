@@ -353,6 +353,15 @@ class Settings(BaseSettings):
     # Arm FTV / radar as soon as pad is in the structured entry band with heat.
     ict_first_lift_appear_enabled: bool = True
     ict_first_lift_min_velocity_3s: float = 1.2
+    # Durable 5m-style premium base confirmation from the 30-minute tape. Repeated
+    # support samples prevent a single bad tick from becoming a launch pad.
+    ict_recent_base_window_seconds: int = 1800
+    ict_recent_base_exclude_seconds: int = 45
+    ict_recent_base_min_samples: int = 6
+    ict_recent_base_support_band_pct: float = 8.0
+    ict_recent_base_min_support_samples: int = 3
+    ict_recent_base_min_support_span_seconds: float = 30.0
+    ict_recent_base_max_age_seconds: float = 900.0
     explosion_first_lift_rank_bonus: float = 24.0
     explosion_first_lift_sweet_max_move_pct: float = 25.0
     # Actionable first lift: a strict subset of radar first-lifts may enter before

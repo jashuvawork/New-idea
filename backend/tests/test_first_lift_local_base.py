@@ -11,12 +11,15 @@ import pytest
 from app.config import Settings
 from app.engines.explosion_detector import (
     _history,
+    _local_base_hist,
+    _open_key,
     _strike_key,
     event_to_dict,
     scan_chain_explosions,
 )
 from app.engines.ict_breakout_monitor import (
     _detect_flat_base,
+    _detect_recent_window_base,
     analyze_ict_breakout,
     first_lift_entry_ready,
 )
@@ -189,6 +192,91 @@ def test_chase_past_40pct_is_not_first_lift(mock_settings):
     assert ict.base_premium == 89.0
     assert ict.base_relative_move_pct >= 40.0
     assert ict.first_lift is False
+
+
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_long_five_minute_style_base_reaches_first_lift(
+    mock_settings, side,
+):
+    """A 10-minute U/flat base survives beyond the two-minute velocity tape."""
+    settings = _settings()
+    mock_settings.return_value = settings
+    symbol, strike = "SENSEX", 77900.0
+    now = datetime.now(IST)
+    base_rows = [
+            (now - timedelta(seconds=600 - i * 55), premium)
+            for i, premium in enumerate(
+                [92.0, 91.0, 90.0, 89.0, 89.5, 90.0, 89.0, 90.5, 91.0, 92.0]
+            )
+    ]
+    base_rows.append((now, 102.35))
+    _local_base_hist[_open_key(symbol, strike, side)] = deque(
+        base_rows,
+        maxlen=1200,
+    )
+    # Only the recent staircase is visible to the fast 120s history. It is too
+    # short/wide to qualify as a flat base on its own.
+    _history.setdefault(symbol, {})[_strike_key(strike, side)] = deque(
+        [
+            (now - timedelta(seconds=18), 94.0, 10_000),
+            (now - timedelta(seconds=12), 97.0, 20_000),
+            (now - timedelta(seconds=6), 100.0, 40_000),
+            (now, 102.35, 80_000),
+        ],
+        maxlen=240,
+    )
+
+    ict = analyze_ict_breakout(
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        premium=102.35,
+        session_move_pct=15.0,
+        peak_move_pct=15.0,
+        velocity_3s=1.4,
+        velocity_9s=1.0,
+        volume_surge=3.0,
+        volume=80_000,
+        tier="WATCH",
+    )
+
+    assert ict.local_swing_base is True
+    assert ict.base_premium == 89.0
+    assert 14.0 <= ict.base_relative_move_pct <= 16.5
+    assert ict.first_lift is True
+    assert ict.active is True
+    assert any("recent_window_base" in reason for reason in ict.reasons)
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_recent_window_base_rejects_single_bad_tick(mock_settings):
+    settings = _settings()
+    mock_settings.return_value = settings
+    symbol, strike, side = "NIFTY", 24350.0, Side.CALL
+    now = datetime.now(IST)
+    _local_base_hist[_open_key(symbol, strike, side)] = deque(
+        [
+            (now - timedelta(seconds=300), 89.0),
+            (now - timedelta(seconds=240), 100.0),
+            (now - timedelta(seconds=180), 101.0),
+            (now - timedelta(seconds=120), 100.5),
+            (now - timedelta(seconds=90), 101.5),
+            (now - timedelta(seconds=60), 102.0),
+            (now, 104.0),
+        ],
+        maxlen=1200,
+    )
+
+    found, _base, _move = _detect_recent_window_base(
+        symbol=symbol,
+        strike=strike,
+        side=side,
+        premium=104.0,
+        settings=settings,
+    )
+
+    assert found is False
 
 
 @pytest.mark.parametrize(

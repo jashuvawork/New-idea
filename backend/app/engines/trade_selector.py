@@ -1513,7 +1513,10 @@ def diagnose_missed_entries(
 
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
         for alert in snap.explosionAlerts or []:
-            if alert.get("tier") not in ("ELITE", "EXPLODING", "BUILDING"):
+            if (
+                alert.get("tier") not in ("ELITE", "EXPLODING", "BUILDING")
+                and not alert.get("ictFirstLift")
+            ):
                 continue
             score = float(alert.get("explosionScore", 0))
             prem = alert.get("premium")

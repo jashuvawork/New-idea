@@ -302,6 +302,73 @@ def test_watch_first_lift_enters_before_building_and_ichimoku():
     ichimoku.assert_not_called()
 
 
+def test_watch_first_lift_passes_real_entry_gate_stack():
+    """The early signal survives check_explosion_entry without mocking it green."""
+    event = _event(tier="WATCH")
+    event.explosion_score = 51.0
+    event.velocity_3s = 1.35
+    event.velocity_9s = 1.35
+    event.volume_surge = 4.0
+    event.daily_move_pct = 15.0
+    event.peak_move_pct = 15.0
+    ict = MagicMock()
+    ict.active = True
+    ict.first_lift = True
+    ict.flat_then_vertical = True
+    ict.local_swing_base = True
+    ict.base_premium = 174.0
+    ict.base_relative_move_pct = 15.0
+    ict.flat_vertical_quality = 61.0
+    ict.volume_awakening = True
+    ict.volume_surge = 4.0
+    ict.displacement = False
+    ict.premium_fvg = False
+    ict.mega_rip = False
+    ict.session_move_pct = 15.0
+    trade = SuggestedTrade(
+        id="first-lift",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=77200.0,
+        lastPremium=200.0,
+        tqs=55.0,
+        strategyType=StrategyType.EXPLOSIVE,
+        confidence=51.0,
+    )
+    snap = _snap("BEARISH")
+
+    with (
+        patch(
+            "app.engines.ict_breakout_monitor.analyze_explosion_event_ict",
+            return_value=ict,
+        ),
+        patch(
+            "app.engines.expiry_day_guards.check_expiry_explosion_open_block",
+            return_value=(False, "ok"),
+        ),
+        patch(
+            "app.engines.explosion_profit.explosion_in_cooldown",
+            return_value=False,
+        ),
+        patch(
+            "app.engines.smart_ichimoku.ichimoku_break_supports_side",
+            return_value=(False, "ichimoku_not_confirmed"),
+        ) as ichimoku,
+    ):
+        ok, reason = check_explosion_entry(
+            event,
+            trade,
+            snap.breadth,
+            False,
+            chart=snap.spotChart,
+            snap=snap,
+        )
+
+    assert ok is True
+    assert reason == "first_lift_local_base_confirmed"
+    ichimoku.assert_not_called()
+
+
 @patch("app.engines.explosion_profit.get_settings")
 def test_check_explosion_entry_requires_chart_align(mock_settings):
     s = MagicMock()
