@@ -1673,6 +1673,10 @@ class Settings(BaseSettings):
     # Persistence
     trade_store_dir: str = "/tmp/nexusquant/trades"
     trade_log_file: str = ""  # default: {trade_store_dir}/trades.log
+    radar_archive_enabled: bool = True
+    radar_archive_dir: str = ""  # default: {trade_store_dir}/radar_archives
+    radar_archive_top_n_per_day: int = 100
+    radar_archive_retention_days: int = 365
     daily_token_once: bool = True
 
     # Swing trading (multi-day paper holds)

@@ -3,6 +3,7 @@
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from app.engines.ai_learning import get_ai_learning
 from app.engines.composer_market_monitor import (
@@ -114,6 +115,32 @@ async def missed_trades_explainer():
 
     multi = await get_multi_snapshot_fast()
     return build_missed_trade_report(multi.snapshots, get_state())
+
+
+@router.get("/radar-archives")
+async def radar_archives(limit: int = 30):
+    """List compressed daily top-radar archives available for future review."""
+    from app.services.radar_archive import list_archives
+
+    return {"archives": list_archives(limit=min(max(limit, 1), 365))}
+
+
+@router.get("/radar-archives/{date}")
+async def download_radar_archive(date: str):
+    """Download one YYYY-MM-DD top-radar ZIP archive."""
+    from app.services.radar_archive import archive_path
+
+    try:
+        path = archive_path(date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Radar archive not found")
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=path.name,
+    )
 
 
 @router.get("/snapshot-analysis")

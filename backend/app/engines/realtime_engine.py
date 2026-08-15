@@ -1,5 +1,6 @@
 """Real-time market intelligence engine — full snapshot pipeline."""
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -705,6 +706,12 @@ async def build_symbol_snapshot(
                 snap.indiaVixRef = float(vix.get("ref") or 0.0)
         except Exception:
             pass
+        try:
+            from app.services.radar_archive import record_top_radars
+
+            await asyncio.to_thread(record_top_radars, {symbol: snap})
+        except Exception as exc:
+            logger.warning("Failed to archive %s radar snapshot: %s", symbol, exc)
         return snap
 
     except UpstoxError as e:
