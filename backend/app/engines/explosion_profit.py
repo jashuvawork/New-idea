@@ -427,7 +427,20 @@ def check_explosion_entry(
         premium_capture=is_premium_capture_event(event, chart=chart),
     )
     timing_blocked, timing_reason = timing_blocks_entry(timing)
-    if timing_blocked and not must_take:
+    if (
+        timing_blocked
+        and not must_take
+        and not (
+            first_lift_ready
+            and bool(
+                getattr(
+                    settings,
+                    "first_lift_bypasses_cold_timing_enabled",
+                    True,
+                )
+            )
+        )
+    ):
         return False, timing_reason
 
     from app.engines.chop_day_guards import neutral_breadth_blocks_entry
@@ -450,6 +463,14 @@ def check_explosion_entry(
                 if not side_aligned_with_breadth(side_val, breadth.bias) and event.tier != "ELITE":
                     if not (premium_bypass and event.tier in ("EXPLODING", "ELITE", "BUILDING")):
                         return False, "expiry_counter_breadth_elite_only"
+
+    # The strict first-lift proof already requires a measured 15–25% local pad,
+    # quality, sustained premium heat, volume and a live side-specific index turn.
+    # Do not wait for neutral breadth, a lagging cloud/chart flip or a 2% velocity
+    # threshold after those stronger early facts have passed. Expiry safety above,
+    # chase/window, live confirmation and cooldown checks still apply.
+    if first_lift_ready:
+        return True, "first_lift_local_base_confirmed"
 
     blocked, nb_reason = neutral_breadth_blocks_entry(
         breadth.bias,
@@ -495,9 +516,6 @@ def check_explosion_entry(
         and not first_lift_ready
     ):
         return False, chart_reason
-
-    if first_lift_ready:
-        return True, "first_lift_local_base_confirmed"
 
     if event.tier == "ELITE":
         return True, "elite_explosion" if not premium_bypass else "premium_led_elite_explosion"

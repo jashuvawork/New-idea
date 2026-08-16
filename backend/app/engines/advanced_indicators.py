@@ -202,6 +202,46 @@ def option_cvd_confirms_buying(snap: Any, strike: Any, side: Any) -> bool:
     return read is not None and read.direction == "BUYING"
 
 
+def option_cvd_acceleration_read(snap: Any, strike: Any, side: Any) -> Any:
+    """Return short-window option CVD acceleration, or None when unavailable."""
+    from app.config import get_settings
+    from app.services.cvd_store import get_cvd_acceleration
+
+    settings = get_settings()
+    if not bool(getattr(settings, "cvd_acceleration_enabled", True)):
+        return None
+    ik = option_instrument_key(snap, strike, side)
+    if not ik:
+        return None
+    return get_cvd_acceleration(
+        str(ik),
+        slice_seconds=float(
+            getattr(settings, "cvd_acceleration_slice_seconds", 15.0) or 15.0
+        ),
+        min_samples_per_slice=int(
+            getattr(settings, "cvd_acceleration_min_samples_per_slice", 2) or 2
+        ),
+        min_delta_qty_per_second=float(
+            getattr(
+                settings,
+                "cvd_acceleration_min_delta_qty_per_second",
+                0.25,
+            )
+            or 0.25
+        ),
+    )
+
+
+def option_cvd_acceleration_confirms_buying(
+    snap: Any,
+    strike: Any,
+    side: Any,
+) -> bool:
+    """True only when option buying CVD is accelerating on sufficiently dense ticks."""
+    read = option_cvd_acceleration_read(snap, strike, side)
+    return read is not None and read.direction == "BUYING_ACCELERATING"
+
+
 def build_entry_confluence(snap: Any, event: Any) -> dict[str, Any]:
     """One unified record of every confirmation signal for the side at entry, + a count.
 
@@ -222,6 +262,13 @@ def build_entry_confluence(snap: Any, event: Any) -> dict[str, Any]:
     adx_ok = index_adx_rank_adjust(side, snap) > 0
     vwap_ok = index_vwap_confirms_side(side, snap)
     cvd_ok = option_cvd_confirms_buying(snap, getattr(event, "strike", None), side)
+    cvd_acceleration = option_cvd_acceleration_read(
+        snap, getattr(event, "strike", None), side,
+    )
+    cvd_acceleration_ok = bool(
+        cvd_acceleration is not None
+        and cvd_acceleration.direction == "BUYING_ACCELERATING"
+    )
     st_ok = bool(target) and str(st.get("direction") or "").upper() == target
     try:
         from app.engines.local_base_chart_bypass import local_base_momentum_turn
@@ -230,7 +277,17 @@ def build_entry_confluence(snap: Any, event: Any) -> dict[str, Any]:
     except Exception:
         turn_ok = False
 
-    score = int(sum([squeeze_ok, adx_ok, vwap_ok, cvd_ok, st_ok, turn_ok]))
+    score = int(
+        sum([
+            squeeze_ok,
+            adx_ok,
+            vwap_ok,
+            cvd_ok,
+            cvd_acceleration_ok,
+            st_ok,
+            turn_ok,
+        ])
+    )
     return {
         "score": score,
         "squeeze": {
@@ -251,6 +308,27 @@ def build_entry_confluence(snap: Any, event: Any) -> dict[str, Any]:
         },
         "supertrend": {"direction": st.get("direction"), "aligned": bool(st_ok)},
         "cvd": {"aligned": bool(cvd_ok)},
+        "cvdAcceleration": {
+            "aligned": cvd_acceleration_ok,
+            "direction": (
+                cvd_acceleration.direction if cvd_acceleration is not None else "UNAVAILABLE"
+            ),
+            "currentRate": (
+                cvd_acceleration.current_rate if cvd_acceleration is not None else None
+            ),
+            "previousRate": (
+                cvd_acceleration.previous_rate if cvd_acceleration is not None else None
+            ),
+            "acceleration": (
+                cvd_acceleration.acceleration if cvd_acceleration is not None else None
+            ),
+            "currentSamples": (
+                cvd_acceleration.current_samples if cvd_acceleration is not None else 0
+            ),
+            "previousSamples": (
+                cvd_acceleration.previous_samples if cvd_acceleration is not None else 0
+            ),
+        },
         "turn": {"aligned": bool(turn_ok)},
     }
 

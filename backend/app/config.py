@@ -380,6 +380,14 @@ class Settings(BaseSettings):
     first_lift_trade_min_velocity_9s: float = 0.8
     first_lift_trade_max_move_pct: float = 25.0
     first_lift_trade_min_momentum_shift_pct: float = 0.03
+    # A strict first lift has stronger early evidence than the generic COLD timing
+    # classifier. Do not wait for lagging breadth/chart state after the measured
+    # local pad, quality, sustained velocity, volume and live momentum turn pass.
+    # Chase, fake-trap, expiry, risk and execution-price checks still apply.
+    first_lift_bypasses_cold_timing_enabled: bool = True
+    # Carry the same strict first-lift proof through the final live chart/MTF
+    # monitor. Premium fading and all non-chart execution checks remain active.
+    first_lift_bypasses_execution_chart_enabled: bool = True
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0
@@ -1088,6 +1096,13 @@ class Settings(BaseSettings):
     cvd_window_seconds: float = 90.0
     cvd_min_recent_qty: float = 0.0
     cvd_rank_bonus: float = 5.0
+    # Change in signed-volume rate across two short slices. Additive only: sparse
+    # or stable flow receives no bonus and can never bypass an entry safeguard.
+    cvd_acceleration_enabled: bool = True
+    cvd_acceleration_slice_seconds: float = 15.0
+    cvd_acceleration_min_samples_per_slice: int = 2
+    cvd_acceleration_min_delta_qty_per_second: float = 0.25
+    cvd_acceleration_rank_bonus: float = 4.0
     # Flat->vertical setup quality (0-100) — grade the coil (tightness/duration/launch/heat/
     # volume) and give a proportional rank bonus so the cleanest base rips jump the queue.
     flat_vertical_quality_rank_enabled: bool = True

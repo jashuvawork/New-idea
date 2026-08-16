@@ -556,7 +556,20 @@ def _explosion_candidates(
             premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
         )
         timing_blocked, _timing_reason = timing_blocks_entry(timing)
-        if timing_blocked and not must_take:
+        if (
+            timing_blocked
+            and not must_take
+            and not (
+                first_lift_ready
+                and bool(
+                    getattr(
+                        settings,
+                        "first_lift_bypasses_cold_timing_enabled",
+                        True,
+                    )
+                )
+            )
+        ):
             continue
         ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)
         if ext_blocked and not must_take:
@@ -628,12 +641,22 @@ def _explosion_candidates(
         if index_vwap_confirms_side(event.side, snap):
             rank += float(getattr(settings, "vwap_reclaim_rank_bonus", 6.0) or 6.0)
 
-        # CVD (trade authenticity) — net buying in the option we're buying = real demand.
-        if bool(getattr(settings, "cvd_confirm_enabled", True)):
-            from app.engines.advanced_indicators import option_cvd_confirms_buying
+        # CVD authenticity + acceleration — additive only, never an entry bypass.
+        from app.engines.advanced_indicators import (
+            option_cvd_acceleration_confirms_buying,
+            option_cvd_confirms_buying,
+        )
 
+        if bool(getattr(settings, "cvd_confirm_enabled", True)):
             if option_cvd_confirms_buying(snap, event.strike, event.side):
                 rank += float(getattr(settings, "cvd_rank_bonus", 5.0) or 5.0)
+        if bool(getattr(settings, "cvd_acceleration_enabled", True)):
+            if option_cvd_acceleration_confirms_buying(
+                snap, event.strike, event.side,
+            ):
+                rank += float(
+                    getattr(settings, "cvd_acceleration_rank_bonus", 4.0) or 4.0
+                )
         # Directional prediction at the local bottom is symmetric for CE and PE and
         # additive. It helps the confirmed reversal leg win selection; no safety gate is
         # bypassed, and execution-time premium validation still has the final word.

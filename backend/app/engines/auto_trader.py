@@ -541,7 +541,30 @@ async def _open_from_candidate(
             ),
         )
         timing_blocked, timing_reason = timing_blocks_entry(timing_meta)
-        if timing_blocked:
+        from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+        strict_first_lift = first_lift_entry_ready(
+            snap=snap,
+            event=candidate.explosion_event,
+            alert=(
+                candidate.alert
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            ),
+        )
+        if (
+            timing_blocked
+            and not (
+                strict_first_lift
+                and bool(
+                    getattr(
+                        settings,
+                        "first_lift_bypasses_cold_timing_enabled",
+                        True,
+                    )
+                )
+            )
+        ):
             from app.engines.elite_never_block import elite_never_block_active
 
             if not elite_never_block_active(
@@ -985,6 +1008,11 @@ async def _open_from_candidate(
                 instrument_key=instrument_key,
                 mode=candidate.mode or "",
                 explosion_event=candidate.explosion_event,
+                alert=(
+                    candidate.alert
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else None
+                ),
             )
             if not chart_ok:
                 # This is structurally before place_entry_order/simulate_entry_order.

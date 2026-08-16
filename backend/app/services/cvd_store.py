@@ -38,6 +38,20 @@ class CvdRead:
     samples: int = 0
 
 
+@dataclass(frozen=True)
+class CvdAccelerationRead:
+    """Change in signed-volume rate across two consecutive equal slices."""
+
+    current: float = 0.0
+    previous: float = 0.0
+    current_rate: float = 0.0
+    previous_rate: float = 0.0
+    acceleration: float = 0.0
+    direction: str = "STABLE"  # BUYING_ACCELERATING | SELLING_ACCELERATING | STABLE
+    current_samples: int = 0
+    previous_samples: int = 0
+
+
 def _norm_key(key: str) -> str:
     return key.replace(":", "|")
 
@@ -108,6 +122,68 @@ def get_cvd(
     else:
         direction = "NEUTRAL"
     return CvdRead(cvd=round(st.cvd, 1), recent=round(recent, 1), direction=direction, samples=samples)
+
+
+def get_cvd_acceleration(
+    instrument_key: str,
+    *,
+    slice_seconds: float = 15.0,
+    min_samples_per_slice: int = 2,
+    min_delta_qty_per_second: float = 0.25,
+) -> Optional[CvdAccelerationRead]:
+    """Compare signed-volume rates in the latest and preceding time slices.
+
+    Positive acceleration only confirms buying when the latest slice itself has
+    positive CVD. This prevents "selling less quickly" from being mislabeled as
+    accelerating demand. Sparse slices remain STABLE rather than manufacturing a
+    signal from one print.
+    """
+    key = _norm_key(instrument_key)
+    st = _states.get(key)
+    if st is None:
+        return None
+
+    span = max(1.0, float(slice_seconds))
+    now = time.monotonic()
+    current_cutoff = now - span
+    previous_cutoff = now - span * 2.0
+    current = previous = 0.0
+    current_samples = previous_samples = 0
+    for ts, signed in reversed(st.window):
+        if ts < previous_cutoff:
+            break
+        if ts >= current_cutoff:
+            current += signed
+            current_samples += 1
+        else:
+            previous += signed
+            previous_samples += 1
+
+    current_rate = current / span
+    previous_rate = previous / span
+    acceleration = current_rate - previous_rate
+    enough_samples = (
+        current_samples >= max(1, int(min_samples_per_slice))
+        and previous_samples >= max(1, int(min_samples_per_slice))
+    )
+    threshold = max(0.0, float(min_delta_qty_per_second))
+    if enough_samples and current_rate > 0 and acceleration > threshold:
+        direction = "BUYING_ACCELERATING"
+    elif enough_samples and current_rate < 0 and acceleration < -threshold:
+        direction = "SELLING_ACCELERATING"
+    else:
+        direction = "STABLE"
+
+    return CvdAccelerationRead(
+        current=round(current, 1),
+        previous=round(previous, 1),
+        current_rate=round(current_rate, 3),
+        previous_rate=round(previous_rate, 3),
+        acceleration=round(acceleration, 3),
+        direction=direction,
+        current_samples=current_samples,
+        previous_samples=previous_samples,
+    )
 
 
 def status() -> dict[str, int]:

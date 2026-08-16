@@ -76,7 +76,10 @@ def _chop_or_worst(snap: Optional[SymbolSnapshot], midday_chop: bool) -> bool:
         return True
     if snap is None:
         return False
-    regime = str(getattr(snap, "regime", "") or "").upper()
+    regime_value = getattr(snap, "regime", "") or ""
+    regime = str(
+        regime_value.value if hasattr(regime_value, "value") else regime_value
+    ).upper()
     if regime in ("CHOP", "RANGE_BOUND", "WORST"):
         return True
     return False

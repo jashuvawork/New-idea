@@ -18,6 +18,7 @@ from app.models.schemas import (
     Breadth,
     MarketPhase,
     PaperTrade,
+    Regime,
     Side,
     SpotChart,
     StrategyType,
@@ -364,6 +365,89 @@ def test_watch_first_lift_passes_real_entry_gate_stack():
             snap=snap,
         )
 
+    assert ok is True
+    assert reason == "first_lift_local_base_confirmed"
+    ichimoku.assert_not_called()
+
+
+def test_building_first_lift_does_not_wait_for_cold_chop_timing():
+    """Strict local-base proof outranks generic COLD timing on a lagging neutral chart."""
+    event = _event(tier="BUILDING")
+    event.explosion_score = 51.0
+    event.velocity_3s = 1.35
+    event.velocity_9s = 1.35
+    event.volume_surge = 4.0
+    event.daily_move_pct = 15.0
+    event.peak_move_pct = 15.0
+    event.strike = 76800.0  # outside the near-ATM soft timing floor
+    ict = MagicMock()
+    ict.active = True
+    ict.first_lift = True
+    ict.flat_then_vertical = True
+    ict.local_swing_base = True
+    ict.base_premium = 174.0
+    ict.base_relative_move_pct = 15.0
+    ict.flat_vertical_quality = 61.0
+    ict.volume_awakening = True
+    ict.volume_surge = 4.0
+    ict.displacement = False
+    ict.premium_fvg = False
+    ict.mega_rip = False
+    ict.session_move_pct = 15.0
+    trade = SuggestedTrade(
+        id="first-lift-cold",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=77200.0,
+        lastPremium=200.0,
+        tqs=55.0,
+        strategyType=StrategyType.EXPLOSIVE,
+        confidence=51.0,
+    )
+    snap = _snap("BEARISH")
+    snap.regime = Regime.RANGE_BOUND
+    snap.breadth = Breadth(bias="NEUTRAL", score=50, aligned=False)
+    snap.spotChart = SpotChart(
+        direction="NEUTRAL",
+        momentum5Pct=-0.06,
+        momentum10Pct=-0.01,
+        momentum15Pct=0.05,
+        trendStrength=20.0,
+    )
+
+    with (
+        patch(
+            "app.engines.ict_breakout_monitor.analyze_explosion_event_ict",
+            return_value=ict,
+        ),
+        patch(
+            "app.engines.expiry_day_guards.check_expiry_explosion_open_block",
+            return_value=(False, "ok"),
+        ),
+        patch(
+            "app.engines.explosion_profit.explosion_in_cooldown",
+            return_value=False,
+        ),
+        patch(
+            "app.engines.smart_ichimoku.ichimoku_break_supports_side",
+            return_value=(False, "ichimoku_not_confirmed"),
+        ) as ichimoku,
+    ):
+        from app.engines.entry_timing import assess_entry_timing, timing_blocks_entry
+
+        timing = assess_entry_timing(event, ict=ict, snap=snap)
+        blocked, _ = timing_blocks_entry(timing)
+        ok, reason = check_explosion_entry(
+            event,
+            trade,
+            snap.breadth,
+            False,
+            chart=snap.spotChart,
+            snap=snap,
+        )
+
+    assert blocked is True
+    assert timing["assessment"] == "COLD"
     assert ok is True
     assert reason == "first_lift_local_base_confirmed"
     ichimoku.assert_not_called()
