@@ -27,12 +27,14 @@ IST = ZoneInfo("Asia/Kolkata")
 HORIZONS = (1, 3, 5, 15)
 _profile_cache: dict[str, tuple[float, dict[str, Any], list[dict[str, Any]]]] = {}
 _profile_locks: dict[str, asyncio.Lock] = {}
+_option_feature_history: dict[tuple[str, str], tuple[float, float, float]] = {}
 
 
 def clear_ftv_probability_cache() -> None:
     """Clear fitted profiles (tests and explicit deployment resets)."""
     _profile_cache.clear()
     _profile_locks.clear()
+    _option_feature_history.clear()
 
 
 def _number(value: Any) -> float:
@@ -283,7 +285,12 @@ def _alert_support(snapshot: SymbolSnapshot, side: str) -> float:
         if str(alert.get("side") or "").upper() != side:
             continue
         score = _number(alert.get("explosionScore"))
-        if alert.get("ictFirstLift") or alert.get("firstLift") or alert.get("flatThenVertical"):
+        if (
+            alert.get("ictFirstLift")
+            or alert.get("firstLift")
+            or alert.get("ictFlatThenVertical")
+            or alert.get("flatThenVertical")
+        ):
             score += 8.0
         support = max(support, min(100.0, score))
     return support
@@ -321,13 +328,28 @@ def _option_live_features(snapshot: SymbolSnapshot, side: str) -> dict[str, Any]
     imbalance = _number(snapshot.orderflow.bidAskImbalance)
     side_imbalance = imbalance if side == "CALL" else 100.0 - imbalance
     liquidity = _number(getattr(row, "liquidityScore", 0)) if row else 0.0
-    iv_expansion = _number(snapshot.greeks.ivExpansion) or 1.0
+    history_key = (snapshot.symbol.upper(), side)
+    now_mono = time.monotonic()
+    previous = _option_feature_history.get(history_key)
+    iv_expansion: Optional[float] = None
+    oi_change_pct: Optional[float] = None
+    if previous and now_mono - previous[0] <= 1800:
+        prior_iv, prior_oi = previous[1], previous[2]
+        if iv > 0 and prior_iv > 0:
+            iv_expansion = iv / prior_iv
+        if oi > 0 and prior_oi > 0:
+            oi_change_pct = (oi - prior_oi) / prior_oi * 100.0
+    if iv > 0 or oi > 0:
+        _option_feature_history[history_key] = (now_mono, iv, oi)
 
     adjustment = 0.0
     adjustment += max(-4.0, min(7.0, velocity3 * 1.8))
     adjustment += max(0.0, min(5.0, (volume_surge - 1.0) * 2.0))
     adjustment += max(-4.0, min(4.0, (side_imbalance - 50.0) * 0.16))
-    adjustment += max(-2.0, min(5.0, (iv_expansion - 1.0) * 20.0))
+    if iv_expansion is not None:
+        adjustment += max(-2.0, min(5.0, (iv_expansion - 1.0) * 20.0))
+    if oi_change_pct is not None and velocity3 > 0:
+        adjustment += max(-2.0, min(4.0, oi_change_pct * 0.2))
     if spread_pct is not None:
         adjustment -= max(0.0, min(10.0, (spread_pct - 2.0) * 1.5))
     if ltp <= 0 or liquidity < 10:
@@ -339,8 +361,13 @@ def _option_live_features(snapshot: SymbolSnapshot, side: str) -> dict[str, Any]
         "ask": round(ask, 2) if ask else None,
         "spreadPct": round(spread_pct, 2) if spread_pct is not None else None,
         "iv": round(iv, 2) if iv else None,
-        "ivExpansion": round(iv_expansion, 3),
+        "ivExpansion": (
+            round(iv_expansion, 3) if iv_expansion is not None else None
+        ),
         "oi": int(oi),
+        "oiChangePct": (
+            round(oi_change_pct, 2) if oi_change_pct is not None else None
+        ),
         "volume": int(volume),
         "liquidityScore": round(liquidity, 1),
         "velocity3s": round(velocity3, 2),
@@ -645,9 +672,18 @@ async def build_ftv_probability_dashboard(
             build_and_persist_premium_calibration,
         )
 
-        premium_calibration = await asyncio.to_thread(
-            build_and_persist_premium_calibration, force=force,
-        )
+        try:
+            premium_calibration = await asyncio.to_thread(
+                build_and_persist_premium_calibration, force=force,
+            )
+        except Exception as exc:
+            premium_calibration = {
+                "status": "UNAVAILABLE",
+                "error": str(exc)[:240],
+                "symbols": {},
+                "walkForward": {"status": "UNAVAILABLE"},
+                "drift": {"status": "UNAVAILABLE"},
+            }
     else:
         premium_calibration = {
             "status": "DISABLED", "symbols": {},
@@ -761,6 +797,7 @@ async def build_ftv_probability_dashboard(
             "generatedAt": premium_calibration.get("generatedAt"),
             "sourceDates": premium_calibration.get("sourceDates", []),
             "observationCount": premium_calibration.get("observationCount", 0),
+            "error": premium_calibration.get("error"),
             "walkForward": premium_calibration.get("walkForward", {}),
             "drift": premium_calibration.get("drift", {}),
             "durablePath": str(

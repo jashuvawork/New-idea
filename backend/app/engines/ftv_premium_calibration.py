@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from bisect import bisect_right
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -88,6 +89,8 @@ def extract_premium_observations(
         if not parts or len(rows) < 5:
             continue
         symbol, side = parts
+        timestamps = [ts for ts, _ in rows]
+        all_premiums = [premium for _, premium in rows]
         left = 0
         last_anchor: Optional[datetime] = None
         for index in range(3, len(rows) - 1):
@@ -112,11 +115,11 @@ def extract_premium_observations(
             complete = True
             for minutes, seconds in zip(HORIZON_MINUTES, HORIZON_SECONDS):
                 horizon_end = anchor_ts + timedelta(seconds=seconds)
-                future = [
-                    premium for ts, premium in rows[index + 1 :]
-                    if ts <= horizon_end
-                ]
-                if not future or rows[-1][0] < horizon_end:
+                end_index = bisect_right(
+                    timestamps, horizon_end, lo=index + 1,
+                )
+                future = all_premiums[index + 1 : end_index]
+                if not future or timestamps[-1] < horizon_end:
                     complete = False
                     break
                 move_pct = (max(future) - anchor_premium) / anchor_premium * 100.0
@@ -172,13 +175,11 @@ def _materialize_rates(
     symbols: dict[str, Any] = {}
     for symbol, sides in raw_rates.items():
         symbol_rates: dict[str, Any] = {}
-        sample_count = 0
         for side, horizons in sides.items():
             symbol_rates[side] = {}
             for horizon, counts in horizons.items():
                 samples = int(counts["samples"])
                 wins = int(counts["wins"])
-                sample_count += samples
                 symbol_rates[side][horizon] = {
                     "wins": wins,
                     "samples": samples,
@@ -206,8 +207,12 @@ def _materialize_rates(
                             2,
                         ),
                     }
+        base_samples = sum(
+            int(horizons.get("5", {}).get("samples") or 0)
+            for horizons in sides.values()
+        )
         symbols[symbol] = {
-            "sampleCount": sample_count,
+            "sampleCount": base_samples,
             "rates": symbol_rates,
             "buckets": symbol_buckets,
         }
@@ -336,10 +341,16 @@ def build_premium_calibration(
     train = [row for row in observations if row["date"] not in validation_dates]
     validation = [row for row in observations if row["date"] in validation_dates]
     # With only one day, produce a learning profile but do not claim validation.
-    fit_rows = train or observations
-    raw_rates, raw_buckets = _counts(fit_rows)
+    validation_fit = train or observations
+    validation_rates, validation_buckets = _counts(validation_fit)
+    validation_profiles = _materialize_rates(
+        validation_rates, validation_buckets,
+    )
+    walk_forward = _walk_forward(train, validation, validation_profiles)
+    # After measuring strictly on later unseen dates, refit the served model on all
+    # completed sessions so recent regimes are not permanently discarded.
+    raw_rates, raw_buckets = _counts(observations)
     profiles = _materialize_rates(raw_rates, raw_buckets)
-    walk_forward = _walk_forward(train, validation, profiles)
     drift = _drift(
         train, validation, warn_pp=drift_warn_pp, critical_pp=drift_critical_pp,
     )
@@ -402,9 +413,17 @@ def build_and_persist_premium_calibration(
                 return existing
 
         history_days = max(1, int(settings.ftv_premium_calibration_history_days))
+        market_closed = (
+            current.hour > 15 or (current.hour == 15 and current.minute >= 30)
+        )
+        offsets = (
+            range(history_days - 1, -1, -1)
+            if force and market_closed
+            else range(history_days, 0, -1)
+        )
         dates = [
             (current.date() - timedelta(days=offset)).isoformat()
-            for offset in range(history_days, 0, -1)
+            for offset in offsets
             if premium_tape_path(
                 (current.date() - timedelta(days=offset)).isoformat()
             ).exists()

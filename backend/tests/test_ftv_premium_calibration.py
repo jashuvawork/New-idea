@@ -13,7 +13,10 @@ from app.engines.ftv_premium_calibration import (
     extract_premium_observations,
     load_premium_calibration,
 )
-from app.engines.ftv_probability import estimate_live_probabilities
+from app.engines.ftv_probability import (
+    clear_ftv_probability_cache,
+    estimate_live_probabilities,
+)
 from app.engines.scheduled_market_events import build_scheduled_event_context
 from app.models.schemas import (
     Breadth,
@@ -108,9 +111,9 @@ def test_calibration_is_atomically_persisted_and_reused(tmp_path, monkeypatch):
     monkeypatch.setattr(radar_learning, "get_settings", lambda: settings)
     monkeypatch.setattr(radar_archive, "get_settings", lambda: settings)
     current = datetime(2026, 8, 16, 16, 0, tzinfo=IST)
-    date = "2026-08-15"
+    date = "2026-08-16"
     path = radar_learning.premium_tape_path(date)
-    day = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+    day = datetime(2026, 8, 16, 10, 0, tzinfo=IST)
     batches = []
     for ts, premium in _premium_series(day, winner=True):
         batches.append({
@@ -129,6 +132,7 @@ def test_calibration_is_atomically_persisted_and_reused(tmp_path, monkeypatch):
     loaded = load_premium_calibration()
 
     assert built["observationCount"] > 0
+    assert date in built["sourceDates"]
     assert loaded == built
     assert (tmp_path / "ftv_probability" / "premium_calibration.json").exists()
     assert not list((tmp_path / "ftv_probability").glob("*.tmp"))
@@ -158,6 +162,7 @@ def _profile() -> dict:
 
 
 def test_live_probability_reports_spread_iv_oi_and_premium_source():
+    clear_ftv_probability_cache()
     day = datetime(2026, 8, 12, 9, 15, tzinfo=IST)
     candles = [
         [(day + timedelta(minutes=i)).isoformat(), 100, 100.02, 99.98, 100, 1000, 0]
@@ -178,8 +183,8 @@ def test_live_probability_reports_spread_iv_oi_and_premium_source():
             callLtp=100,
             callBid=99,
             callAsk=101,
-            callIv=18,
-            callOi=50_000,
+            callIv=15,
+            callOi=45_000,
             callVolume=20_000,
             liquidityScore=80,
         )],
@@ -192,6 +197,9 @@ def test_live_probability_reports_spread_iv_oi_and_premium_source():
         }],
     )
 
+    estimate_live_probabilities(_profile(), candles, snapshot)
+    snapshot.heatmap[0].callIv = 18
+    snapshot.heatmap[0].callOi = 50_000
     result = estimate_live_probabilities(_profile(), candles, snapshot)
     call = result["sides"]["CALL"]
 
@@ -199,6 +207,8 @@ def test_live_probability_reports_spread_iv_oi_and_premium_source():
     assert call["optionFeatures"]["spreadPct"] == 2.0
     assert call["optionFeatures"]["iv"] == 18.0
     assert call["optionFeatures"]["oi"] == 50_000
+    assert call["optionFeatures"]["ivExpansion"] == 1.2
+    assert call["optionFeatures"]["oiChangePct"] == 11.11
     assert result["modelQuality"]["driftStatus"] == "STABLE"
 
 
