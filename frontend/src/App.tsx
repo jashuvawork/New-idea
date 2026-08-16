@@ -247,6 +247,12 @@ export default function App() {
           />
         ) : null}
 
+        {auto ? (
+          <section aria-label="Auto trader overview" className="max-w-5xl">
+            <AutoTradingPanel auto={auto} />
+          </section>
+        ) : null}
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-5xl">
           <PerformanceMilestone stats={milestone} />
           <WeeklyDashboardPanel data={weeklyDashboard} />
@@ -339,7 +345,7 @@ export default function App() {
               <div className="col-span-12 lg:col-span-3"><ExplosionRadar snap={snap} /></div>
             </DashboardSection>
 
-            <DashboardSection title="Signals & Trades" subtitle="Day mode, router, auto-trader, heatmap, swing lane">
+            <DashboardSection title="Signals & Trades" subtitle="Day mode, router, heatmap, swing lane">
               <div className="col-span-12">
                 <TomorrowPlaybookPanel auto={auto} snapshots={data.snapshots} deployment={deployment} />
               </div>
@@ -370,7 +376,6 @@ export default function App() {
                 />
               </div>
               <div className="col-span-12 lg:col-span-3"><StrategyRouter snap={snap} /></div>
-              <div className="col-span-12 lg:col-span-3"><AutoTradingPanel auto={auto} /></div>
               <div className="col-span-12 lg:col-span-3"><MarketHeatmap symbol={activeSymbol} embedded={snap.constituentHeatmap} /></div>
               <div className="col-span-12 lg:col-span-3"><SwingTrading snap={snap} auto={auto} /></div>
             </DashboardSection>
