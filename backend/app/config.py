@@ -55,9 +55,13 @@ class Settings(BaseSettings):
     # Postgres (optional)
     postgres_url: str = ""
 
-    # News
-    news_provider: Literal["finnhub", "none"] = "finnhub"
+    # News intelligence. "auto" combines Upstox's instrument/position News API
+    # with Finnhub global cues when configured; either source can operate alone.
+    news_provider: Literal["auto", "upstox", "finnhub", "none"] = "auto"
     finnhub_api_key: str = ""
+    news_intraday_max_age_minutes: int = 360
+    news_next_session_max_age_hours: int = 36
+    news_upstox_positions_enabled: bool = True
 
     # Safety
     enable_live_trading: bool = False

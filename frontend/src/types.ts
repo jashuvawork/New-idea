@@ -1128,6 +1128,47 @@ export interface NewsItem {
   url?: string;
   indiaRelevant?: boolean;
   category?: string;
+  provider?: string;
+  sourceType?: 'BROKER_NEWS' | 'GLOBAL_NEWS' | 'SOCIAL';
+  verification?: 'VERIFIED' | 'AGGREGATED' | 'CORROBORATED' | 'UNVERIFIED';
+  horizon?: 'CURRENT_SESSION' | 'NEXT_SESSION' | 'BOTH' | 'BACKGROUND' | 'STALE';
+  impact?: 'HIGH' | 'MEDIUM' | 'LOW';
+  affectedSymbols?: string[];
+  sideBias?: 'CALL' | 'PUT' | 'NEUTRAL';
+  directionScore?: number;
+  themes?: string[];
+  actionable?: boolean;
+  tradeUse?: 'CONFIRMATION_ONLY' | 'DISPLAY_ONLY';
+  corroboratedBy?: string[];
+}
+
+export interface NewsSessionOutlook {
+  bias: string;
+  sideBias: string;
+  score: number;
+  confidence: string;
+  headlineCount: number;
+  highImpactCount: number;
+}
+
+export interface NewsAggregate {
+  bias: string;
+  score: number;
+  indiaHeadlines: number;
+  count?: number;
+  currentSession?: NewsSessionOutlook;
+  nextSession?: NewsSessionOutlook;
+  riskLevel?: string;
+  providerCoverage?: string[];
+  providerHealth?: Record<string, {
+    status: string;
+    itemCount: number;
+    error?: string | null;
+    lastFetchAt?: string;
+  }>;
+  unverifiedSocialCount?: number;
+  guardrail?: string;
+  generatedAt?: string;
 }
 
 export interface MarketNewsResponse {
@@ -1136,12 +1177,7 @@ export interface MarketNewsResponse {
   cacheSeconds: number;
   ageSeconds: number;
   nextRefreshInSeconds: number;
-  aggregate?: {
-    bias: string;
-    score: number;
-    indiaHeadlines: number;
-    count?: number;
-  };
+  aggregate?: NewsAggregate;
 }
 
 export interface DeploymentStatus {

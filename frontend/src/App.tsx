@@ -319,6 +319,9 @@ export default function App() {
 
             <DashboardSection title="Signals & Trades" subtitle="Day mode, router, auto-trader, heatmap, swing lane">
               <div className="col-span-12">
+                <NewsPanel news={data.news ?? []} />
+              </div>
+              <div className="col-span-12">
                 <TomorrowPlaybookPanel auto={auto} snapshots={data.snapshots} deployment={deployment} />
               </div>
               <div className="col-span-12">
@@ -369,7 +372,6 @@ export default function App() {
               <div className="col-span-12 lg:col-span-3"><StrategyMatrix snap={snap} /></div>
               <div className="col-span-12 md:col-span-6 xl:col-span-2"><TradeJournal data={data} history={tradeHistory} tradeLog={tradeLog} /></div>
               <div className="col-span-12 md:col-span-6 xl:col-span-2"><PsychologyPanel snap={snap} /></div>
-              <div className="col-span-12 md:col-span-6 xl:col-span-1"><NewsPanel news={data.news ?? []} /></div>
               <div className="col-span-12 md:col-span-6 xl:col-span-1"><LiveTradingGate status={deployment} readiness={readiness} /></div>
               <div className="col-span-12 md:col-span-6 xl:col-span-1"><MorningChecklist deployment={deployment} dataReady={data.dataReady} /></div>
             </DashboardSection>

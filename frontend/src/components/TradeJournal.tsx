@@ -3,6 +3,7 @@ import { Panel } from './Panel';
 import type {
   MarketNewsResponse,
   MultiSnapshot,
+  NewsAggregate,
   NewsItem,
   TradeHistoryResponse,
   TradeLogResponse,
@@ -180,7 +181,7 @@ function formatHeadlineTime(epochSec?: number): string {
 export function NewsPanel({ news: seedNews = [] }: { news?: NewsItem[] }) {
   const [items, setItems] = useState<NewsItem[]>(seedNews);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
-  const [bias, setBias] = useState<string | null>(null);
+  const [aggregate, setAggregate] = useState<NewsAggregate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [, setTick] = useState(0);
 
@@ -201,7 +202,7 @@ export function NewsPanel({ news: seedNews = [] }: { news?: NewsItem[] }) {
         if (cancelled) return;
         setItems(json.items ?? []);
         setRefreshedAt(json.refreshedAt ?? null);
-        setBias(json.aggregate?.bias ?? null);
+        setAggregate(json.aggregate ?? null);
         setError(null);
       } catch (e) {
         if (!cancelled) {
@@ -221,50 +222,110 @@ export function NewsPanel({ news: seedNews = [] }: { news?: NewsItem[] }) {
   }, []);
 
   const badge = [
-    bias && bias !== 'NEUTRAL' ? bias : null,
+    aggregate?.riskLevel ? `${aggregate.riskLevel} RISK` : null,
     `↻ ${formatNewsAge(refreshedAt)}`,
   ]
     .filter(Boolean)
     .join(' · ');
 
   return (
-    <Panel title="News & Events" badge={badge || undefined}>
+    <Panel title="India Market News Intelligence" badge={badge || undefined}>
       {error && items.length === 0 ? (
         <p className="text-xs text-nexus-muted">{error}</p>
       ) : items.length === 0 ? (
-        <p className="text-xs text-nexus-muted">No news feed configured</p>
+        <div className="text-xs text-nexus-muted">
+          No news feed available. Connect Upstox for instrument/position news or configure Finnhub for global cues.
+        </div>
       ) : (
-        <div className="max-h-40 overflow-y-auto space-y-2">
-          {items.slice(0, 8).map((n, i) => {
-            const when = formatHeadlineTime(n.datetime);
-            return (
-              <div key={`${n.headline.slice(0, 40)}-${i}`} className="text-[10px] border-b border-nexus-border/30 pb-1.5">
-                <div className="flex gap-2">
-                  <span
-                    className={`font-bold shrink-0 ${
-                      n.sentiment === 'BULLISH'
-                        ? 'text-nexus-green'
-                        : n.sentiment === 'BEARISH'
-                          ? 'text-nexus-red'
-                          : 'text-nexus-muted'
-                    }`}
-                  >
-                    {n.sentiment[0]}
-                  </span>
-                  <div className="min-w-0">
-                    <span className="text-gray-300 line-clamp-2">{n.headline}</span>
-                    <div className="mt-0.5 flex flex-wrap gap-x-2 text-[9px] text-nexus-muted">
-                      {n.source ? <span>{n.source}</span> : null}
-                      {when ? <span>{when}</span> : null}
-                      {n.indiaRelevant ? <span className="text-nexus-accent">IN</span> : null}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <NewsOutlookCard label="Current session" outlook={aggregate?.currentSession} />
+            <NewsOutlookCard label="Next session" outlook={aggregate?.nextSession} />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 text-[9px]">
+            {(aggregate?.providerCoverage ?? []).map((provider) => (
+              <span key={provider} className="rounded border border-nexus-border bg-black/20 px-1.5 py-0.5 uppercase text-nexus-muted">
+                {provider}
+              </span>
+            ))}
+            <span className="text-nexus-muted">
+              {aggregate?.guardrail ?? 'News is confirmation only — price and orderflow must agree.'}
+            </span>
+          </div>
+
+          <div className="max-h-64 overflow-y-auto grid grid-cols-1 xl:grid-cols-2 gap-2 pr-1">
+            {items.slice(0, 12).map((n, i) => (
+              <NewsRow key={`${n.headline.slice(0, 40)}-${i}`} item={n} />
+            ))}
+          </div>
         </div>
       )}
     </Panel>
+  );
+}
+
+function NewsOutlookCard({
+  label,
+  outlook,
+}: {
+  label: string;
+  outlook?: import('../types').NewsSessionOutlook;
+}) {
+  const side = outlook?.sideBias ?? 'NEUTRAL';
+  const tone =
+    side === 'CALL' ? 'text-nexus-green' : side === 'PUT' ? 'text-nexus-red' : 'text-nexus-muted';
+  return (
+    <div className="rounded-lg border border-nexus-border/70 bg-black/20 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-wide text-nexus-muted">{label}</span>
+        <span className={`font-mono text-sm font-bold ${tone}`}>{side}</span>
+      </div>
+      <div className="mt-1 flex flex-wrap gap-x-3 text-[9px] text-nexus-muted">
+        <span>{outlook?.confidence ?? 'LOW'} confidence</span>
+        <span>score {outlook?.score?.toFixed(1) ?? '0.0'}</span>
+        <span>{outlook?.headlineCount ?? 0} verified cues</span>
+        <span>{outlook?.highImpactCount ?? 0} high impact</span>
+      </div>
+    </div>
+  );
+}
+
+function NewsRow({ item }: { item: NewsItem }) {
+  const when = formatHeadlineTime(item.datetime);
+  const sideTone =
+    item.sideBias === 'CALL'
+      ? 'text-nexus-green border-nexus-green/30'
+      : item.sideBias === 'PUT'
+        ? 'text-nexus-red border-nexus-red/30'
+        : 'text-nexus-muted border-nexus-border';
+  const impactTone =
+    item.impact === 'HIGH' ? 'text-nexus-yellow' : item.impact === 'MEDIUM' ? 'text-nexus-accent' : 'text-nexus-muted';
+  const headline = item.url ? (
+    <a href={item.url} target="_blank" rel="noreferrer" className="text-gray-200 hover:text-white line-clamp-2">
+      {item.headline}
+    </a>
+  ) : (
+    <span className="text-gray-200 line-clamp-2">{item.headline}</span>
+  );
+  return (
+    <article className="rounded-lg border border-nexus-border/50 bg-black/20 p-2.5 text-[10px]">
+      <div className="flex items-start gap-2">
+        <span className={`shrink-0 rounded border px-1.5 py-0.5 font-bold ${sideTone}`}>
+          {item.sideBias ?? 'NEUTRAL'}
+        </span>
+        <div className="min-w-0 flex-1">
+          {headline}
+          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[9px] text-nexus-muted">
+            <span className={impactTone}>{item.impact ?? 'LOW'} IMPACT</span>
+            <span>{item.horizon?.replace('_', ' ') ?? 'BACKGROUND'}</span>
+            <span>{item.verification ?? 'UNVERIFIED'}</span>
+            {item.source ? <span>{item.source}</span> : null}
+            {when ? <span>{when}</span> : null}
+            {(item.affectedSymbols ?? []).length ? <span>{item.affectedSymbols?.join(' · ')}</span> : null}
+          </div>
+        </div>
+      </div>
+    </article>
   );
 }

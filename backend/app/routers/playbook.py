@@ -48,4 +48,6 @@ async def tomorrow_playbook_refresh():
 
     force_rest = not rate_limit_active() and not rate_limit_recovery_active()
     multi = await get_multi_snapshot(force=force_rest)
-    return await run_eod_playbook_cycle(multi.snapshots, get_state(), force=True)
+    return await run_eod_playbook_cycle(
+        multi.snapshots, get_state(), news=multi.news, force=True,
+    )

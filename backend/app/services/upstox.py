@@ -441,6 +441,37 @@ class UpstoxClient:
                 logger.warning("Empty Upstox quote batch (%d keys)", len(chunk))
         return results
 
+    async def get_news(
+        self,
+        *,
+        category: str = "instrument_keys",
+        instrument_keys: Optional[list[str]] = None,
+        page_number: int = 1,
+        page_size: int = 100,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Fetch Upstox v2 news for instruments, positions, or holdings."""
+        if category not in {"instrument_keys", "positions", "holdings"}:
+            raise ValueError(f"Unsupported Upstox news category: {category}")
+        params: dict[str, Any] = {
+            "category": category,
+            "page_number": max(1, min(100, int(page_number))),
+            "page_size": max(1, min(100, int(page_size))),
+        }
+        if category == "instrument_keys":
+            keys = list(dict.fromkeys(instrument_keys or []))[:30]
+            if not keys:
+                return {}
+            params["instrument_keys"] = ",".join(keys)
+
+        data = await self._get("/news", params=params)
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(key).replace(":", "|"): articles
+            for key, articles in data.items()
+            if isinstance(articles, list)
+        }
+
     async def get_index_ltp(self, symbol: str) -> float:
         cache_key = f"ltp:{symbol}"
         cached = _cache_get(cache_key, self.settings.upstox_ltp_cache_seconds)
