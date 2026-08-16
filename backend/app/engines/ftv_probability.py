@@ -17,7 +17,7 @@ from typing import Any, Iterable, Mapping, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
-from app.models.schemas import SymbolSnapshot
+from app.models.schemas import MarketPhase, SymbolSnapshot
 from app.services.upstox import INDEX_KEYS, UpstoxClient
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -454,10 +454,19 @@ async def build_ftv_probability_dashboard(
     if not settings.ftv_probability_enabled:
         return {"enabled": False, "status": "DISABLED", "symbols": {}}
     client = client or UpstoxClient()
-    symbols = [symbol for symbol in snapshots if symbol in INDEX_KEYS]
+    symbols = list(dict.fromkeys(
+        symbol.upper()
+        for symbol in [*snapshots.keys(), *settings.symbols]
+        if symbol.upper() in INDEX_KEYS
+    ))
 
     async def build_one(symbol: str) -> tuple[str, dict[str, Any]]:
-        snapshot = snapshots[symbol]
+        snapshot = snapshots.get(symbol) or SymbolSnapshot(
+            symbol=symbol,
+            timestamp=now,
+            marketPhase=MarketPhase.CLOSED,
+            dataAvailable=False,
+        )
         try:
             profile, intraday = await _load_symbol_profile(symbol, client, force=force)
             minimum = max(1, int(settings.ftv_probability_min_training_samples))

@@ -155,3 +155,25 @@ def test_dashboard_uses_upstox_history_and_reports_live_readiness():
     assert payload["symbols"]["NIFTY"]["source"] == "upstox_v3_index_1m"
     assert payload["symbols"]["NIFTY"]["live"]["liveReady"] is True
     assert "advisory only" in payload["guardrail"].lower()
+
+
+def test_dashboard_trains_configured_symbols_without_live_snapshots():
+    clear_ftv_probability_cache()
+    historical: list[list[object]] = []
+    for offset in range(10):
+        historical.extend(_session(
+            datetime(2026, 7, 20, tzinfo=IST) + timedelta(days=offset),
+        ))
+    client = AsyncMock(spec=UpstoxClient)
+    client.get_historical_candles_v3.return_value = historical
+    client.get_intraday_candles_v3.return_value = []
+
+    payload = asyncio.run(build_ftv_probability_dashboard(
+        {},
+        client=client,
+        force=True,
+    ))
+
+    assert {"NIFTY", "SENSEX"}.issubset(payload["symbols"])
+    assert payload["status"] == "HISTORICAL_READY"
+    assert all(row["historyReady"] for row in payload["symbols"].values())
