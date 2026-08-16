@@ -1096,6 +1096,13 @@ class Settings(BaseSettings):
     cvd_window_seconds: float = 90.0
     cvd_min_recent_qty: float = 0.0
     cvd_rank_bonus: float = 5.0
+    # Change in signed-volume rate across two short slices. Additive only: sparse
+    # or stable flow receives no bonus and can never bypass an entry safeguard.
+    cvd_acceleration_enabled: bool = True
+    cvd_acceleration_slice_seconds: float = 15.0
+    cvd_acceleration_min_samples_per_slice: int = 2
+    cvd_acceleration_min_delta_qty_per_second: float = 0.25
+    cvd_acceleration_rank_bonus: float = 4.0
     # Flat->vertical setup quality (0-100) — grade the coil (tightness/duration/launch/heat/
     # volume) and give a proportional rank bonus so the cleanest base rips jump the queue.
     flat_vertical_quality_rank_enabled: bool = True
