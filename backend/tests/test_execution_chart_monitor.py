@@ -1,7 +1,10 @@
 """Execution-time Upstox chart monitor — fresh fetch before order."""
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.engines.execution_chart_monitor import (
     fetch_live_trade_charts,
@@ -15,6 +18,7 @@ from app.models.schemas import (
     Side,
     SpotChart,
     SymbolSnapshot,
+    TimeframeChartRead,
 )
 from tests.test_spot_direction import _declining_candles, _rising_candles
 
@@ -52,6 +56,8 @@ def _settings():
     s.chart_min_momentum_pct = 0.04
     s.chart_override_min_score = 75
     s.chart_live_direction_hard_block = True
+    s.chart_counter_trend_bypass_block_enabled = True
+    s.first_lift_bypasses_execution_chart_enabled = True
     return s
 
 
@@ -90,6 +96,32 @@ def test_validate_execution_blocks_fading_premium():
         Side.CALL, index, premium_chart=premium, trade_score=60,
     )
     assert not ok
+    assert "premium" in reason
+
+
+def test_first_lift_bypass_does_not_waive_fading_premium():
+    index = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.06,
+        momentum10Pct=0.01,
+        momentum15Pct=-0.05,
+        trendStrength=40,
+    )
+    premium = PremiumChart(
+        direction="BEARISH",
+        momentum5Pct=-0.5,
+        momentum3Pct=-0.3,
+    )
+
+    ok, reason, _ = validate_execution_charts(
+        Side.CALL,
+        index,
+        premium_chart=premium,
+        trade_score=61,
+        first_lift_bypass=True,
+    )
+
+    assert ok is False
     assert "premium" in reason
 
 
@@ -166,6 +198,104 @@ def test_monitor_passes_aligned_put_on_decline():
         assert passed
         assert reason == "ok"
         assert meta["alignedWithChart"] is True
+
+
+@pytest.mark.parametrize(
+    ("side", "opposing_direction", "mom5", "mom10", "mom15"),
+    [
+        (Side.CALL, "BEARISH", 0.06, 0.01, -0.05),
+        (Side.PUT, "BULLISH", -0.06, -0.01, 0.05),
+    ],
+)
+def test_strict_first_lift_survives_final_countertrend_mtf_monitor(
+    side, opposing_direction, mom5, mom10, mom15,
+):
+    """Stale 5m/MTF state cannot revoke strict live local-base proof."""
+    chart = SpotChart(
+        direction=opposing_direction,
+        momentum5Pct=mom5,
+        momentum10Pct=mom10,
+        momentum15Pct=mom15,
+        trendStrength=40,
+        spot=24000,
+    )
+    snap = _snap(chart)
+    event = SimpleNamespace(
+        symbol="NIFTY",
+        side=side,
+        tier="BUILDING",
+        explosion_score=61.0,
+        velocity_3s=1.35,
+        velocity_9s=1.1,
+        volume_surge=4.0,
+        daily_move_pct=15.0,
+        peak_move_pct=15.0,
+        strike=24000.0,
+    )
+    alert = {
+        "side": side.value,
+        "ictFirstLift": True,
+        "ictBreakout": True,
+        "ictFlatThenVertical": True,
+        "ictBaseRelativeMovePct": 15.0,
+        "flatVerticalQuality": 61.0,
+        "explosionScore": 61.0,
+        "velocity3s": 1.35,
+        "velocity9s": 1.1,
+        "volumeSurge": 4.0,
+        "ictVolumeAwakening": True,
+    }
+    reads = {
+        label: TimeframeChartRead(
+            label=label,
+            direction=opposing_direction,
+            momentumPct=-0.2 if side == Side.CALL else 0.2,
+            trendStrength=40,
+            barCount=30,
+        )
+        for label in ("1m", "5m", "15m", "1h", "4h")
+    }
+    live_meta = {
+        "source": "upstox_live",
+        "indexChart": {"direction": opposing_direction},
+        "indexChartFull": chart.model_dump(),
+        "premiumChart": {},
+        "indexMtf": {},
+        "premiumMtf": {},
+        "snapshotDelta": {"directionChanged": False},
+        "alignedWithChart": False,
+        "_indexMtfReads": reads,
+        "_premiumMtfReads": None,
+    }
+
+    with (
+        patch(
+            "app.engines.execution_chart_monitor.get_settings",
+            return_value=_settings(),
+        ),
+        patch(
+            "app.engines.execution_chart_monitor.fetch_live_trade_charts",
+            AsyncMock(return_value=live_meta),
+        ),
+    ):
+        passed, reason, meta = asyncio.run(
+            monitor_trade_chart_before_execution(
+                AsyncMock(),
+                "NIFTY",
+                side,
+                24000,
+                snap,
+                trade_score=61,
+                mode="explosion",
+                explosion_event=event,
+                alert=alert,
+            )
+        )
+
+    assert passed is True
+    assert reason == "ok"
+    assert meta["firstLiftBypass"] is True
+    assert meta["mtfPreTest"]["firstLiftBypass"] is True
 
 
 def test_fetch_live_trade_charts_includes_quote_context():

@@ -1008,6 +1008,11 @@ async def _open_from_candidate(
                 instrument_key=instrument_key,
                 mode=candidate.mode or "",
                 explosion_event=candidate.explosion_event,
+                alert=(
+                    candidate.alert
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else None
+                ),
             )
             if not chart_ok:
                 # This is structurally before place_entry_order/simulate_entry_order.

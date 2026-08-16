@@ -385,6 +385,9 @@ class Settings(BaseSettings):
     # local pad, quality, sustained velocity, volume and live momentum turn pass.
     # Chase, fake-trap, expiry, risk and execution-price checks still apply.
     first_lift_bypasses_cold_timing_enabled: bool = True
+    # Carry the same strict first-lift proof through the final live chart/MTF
+    # monitor. Premium fading and all non-chart execution checks remain active.
+    first_lift_bypasses_execution_chart_enabled: bool = True
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0
