@@ -190,8 +190,16 @@ export interface HeatmapStrike {
   strike: number;
   callOi: number;
   putOi: number;
+  callVolume?: number;
+  putVolume?: number;
   callLtp?: number;
   putLtp?: number;
+  callBid?: number;
+  callAsk?: number;
+  putBid?: number;
+  putAsk?: number;
+  callIv?: number;
+  putIv?: number;
   gammaWall: boolean;
   liquidityScore: number;
   sweepRisk: number;

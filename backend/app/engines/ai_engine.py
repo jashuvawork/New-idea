@@ -175,6 +175,8 @@ def build_heatmap(
         put_oi = pe.get("oi", 0) or 0
         call_ltp = ce.get("ltp") or ce.get("last_price")
         put_ltp = pe.get("ltp") or pe.get("last_price")
+        call_iv = ce.get("implied_volatility") or (ce.get("greeks") or {}).get("iv")
+        put_iv = pe.get("implied_volatility") or (pe.get("greeks") or {}).get("iv")
 
         liq = ((call_oi + put_oi) / max_oi) * 100
         gamma_wall = abs(strike - atm) <= wall_near and (
@@ -187,8 +189,16 @@ def build_heatmap(
                 strike=strike,
                 callOi=call_oi,
                 putOi=put_oi,
+                callVolume=ce.get("volume", 0) or 0,
+                putVolume=pe.get("volume", 0) or 0,
                 callLtp=call_ltp,
                 putLtp=put_ltp,
+                callBid=ce.get("bid_price") or ce.get("bid"),
+                callAsk=ce.get("ask_price") or ce.get("ask"),
+                putBid=pe.get("bid_price") or pe.get("bid"),
+                putAsk=pe.get("ask_price") or pe.get("ask"),
+                callIv=call_iv,
+                putIv=put_iv,
                 callInstrumentKey=ce.get("instrument_key"),
                 putInstrumentKey=pe.get("instrument_key"),
                 gammaWall=gamma_wall,

@@ -1047,6 +1047,17 @@ class Settings(BaseSettings):
     ftv_probability_flat_max_range_pct: float = 0.22
     ftv_probability_vertical_move_pct: float = 0.18
     ftv_probability_min_training_samples: int = 100
+    ftv_premium_calibration_enabled: bool = True
+    ftv_premium_calibration_history_days: int = 30
+    ftv_premium_calibration_sample_seconds: int = 60
+    ftv_premium_vertical_move_pct: float = 20.0
+    ftv_premium_min_training_samples: int = 200
+    ftv_probability_drift_warn_pct_points: float = 8.0
+    ftv_probability_drift_critical_pct_points: float = 15.0
+    # Operator-supplied verified events only. JSON array fields:
+    # date, time, title, impact, symbols, sideBias, durationMinutes.
+    ftv_scheduled_events_json: str = "[]"
+    ftv_scheduled_event_lead_minutes: int = 30
     # Use true resampled-5m closes for the spot-chart RSI/MACD as soon as there are this
     # many 5m bars; only fall back to 1m when the session is genuinely too thin. The old
     # hardcoded 35 kept the "5m" chart on 1m data until ~12:10 IST every day, so the
@@ -1724,7 +1735,7 @@ class Settings(BaseSettings):
     radar_archive_retention_days: int = 365
     radar_learning_enabled: bool = True
     radar_premium_tape_sample_seconds: int = 15
-    radar_outcome_horizons_seconds_csv: str = "60,300,900,1800"
+    radar_outcome_horizons_seconds_csv: str = "60,180,300,900,1800"
     radar_outcome_target_pct: float = 20.0
     radar_outcome_stop_pct: float = 10.0
     radar_hindsight_flat_window_seconds: int = 120

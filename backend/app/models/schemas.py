@@ -37,8 +37,16 @@ class HeatmapStrike(BaseModel):
     strike: float
     callOi: int = 0
     putOi: int = 0
+    callVolume: float = 0
+    putVolume: float = 0
     callLtp: Optional[float] = None
     putLtp: Optional[float] = None
+    callBid: Optional[float] = None
+    callAsk: Optional[float] = None
+    putBid: Optional[float] = None
+    putAsk: Optional[float] = None
+    callIv: Optional[float] = None
+    putIv: Optional[float] = None
     callInstrumentKey: Optional[str] = None
     putInstrumentKey: Optional[str] = None
     gammaWall: bool = False
