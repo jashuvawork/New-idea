@@ -54,6 +54,50 @@ interface ForwardPayload {
   composer?: ForwardSignal;
 }
 
+interface FtvSideEstimate {
+  probabilities: Record<string, number>;
+  sampleCounts: Record<string, number>;
+  earliestLikelyMinutes: number;
+  radarSupport: number;
+}
+
+interface FtvSymbolEstimate {
+  status: string;
+  historyReady?: boolean;
+  error?: string;
+  profile?: {
+    sessionCount?: number;
+    baseSamples?: number;
+    fromDate?: string;
+    toDate?: string;
+    timeOfDayLeaders?: Record<string, Array<{
+      time: string;
+      probabilityPct: number;
+      samples: number;
+    }>>;
+  };
+  live?: {
+    status: string;
+    liveReady?: boolean;
+    dominantSide?: string;
+    confidence?: string;
+    estimatedWindow?: string | null;
+    baseRangePct?: number;
+    localBaseReady?: boolean;
+    sides?: Record<string, FtvSideEstimate>;
+    reason?: string;
+  };
+}
+
+interface FtvProbabilityPayload {
+  enabled: boolean;
+  status: string;
+  generatedAt?: string;
+  symbols: Record<string, FtvSymbolEstimate>;
+  guardrail?: string;
+  limitations?: string;
+}
+
 const HORIZON_TONE: Record<string, string> = {
   MOMENT: 'border-purple-500/40 text-purple-300',
   OPEN: 'border-blue-500/40 text-blue-300',
@@ -227,6 +271,103 @@ function mergeLiveExplosions(api: ForwardPayload | null, snapshots: Record<strin
   return out;
 }
 
+function FtvProbabilityBoard({
+  data,
+  error,
+}: {
+  data: FtvProbabilityPayload | null;
+  error: string | null;
+}) {
+  if (!data && !error) {
+    return <div className="mb-3 text-[10px] text-nexus-muted">Loading Upstox historical FTV profile…</div>;
+  }
+  return (
+    <div className="mb-3 rounded-lg border border-purple-500/30 bg-purple-950/10 p-2.5">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-purple-300">
+            Historical FTV timing · Upstox V3
+          </div>
+          <div className="text-[9px] text-nexus-muted">
+            Empirical CE/PE breakout probability after a compressed 5-minute base
+          </div>
+        </div>
+        <span className="rounded border border-purple-500/30 px-1.5 py-0.5 text-[9px] text-purple-200">
+          {data?.status?.replace('_', ' ') ?? 'UNAVAILABLE'}
+        </span>
+      </div>
+
+      {error ? <div className="mb-2 text-[9px] text-nexus-yellow">{error}</div> : null}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+        {Object.entries(data?.symbols ?? {}).map(([symbol, row]) => {
+          const live = row.live;
+          const leaders = row.profile?.timeOfDayLeaders ?? {};
+          return (
+            <div key={symbol} className="rounded border border-nexus-border/60 bg-black/20 p-2">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="font-mono text-[11px] font-bold text-white">{symbol}</span>
+                <span className={`text-[9px] font-bold ${
+                  live?.dominantSide === 'CALL'
+                    ? 'text-nexus-green'
+                    : live?.dominantSide === 'PUT'
+                      ? 'text-nexus-red'
+                      : 'text-nexus-muted'
+                }`}>
+                  {live?.liveReady
+                    ? `${live.dominantSide ?? 'NEUTRAL'} · ${live.confidence ?? 'LOW'}${live.estimatedWindow ? ` · ${live.estimatedWindow}` : ''}`
+                    : row.historyReady ? 'HISTORY READY · WAITING LIVE' : row.status}
+                </span>
+              </div>
+
+              {live?.liveReady && live.sides ? (
+                <div className="space-y-1.5">
+                  {(['CALL', 'PUT'] as const).map((side) => (
+                    <div key={side} className="grid grid-cols-[3rem_repeat(4,minmax(0,1fr))] items-center gap-1 text-[9px]">
+                      <span className={side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'}>{side}</span>
+                      {['1', '3', '5', '15'].map((horizon) => (
+                        <div key={horizon} className="rounded bg-black/30 px-1 py-1 text-center">
+                          <div className="text-[8px] text-nexus-muted">{horizon}m</div>
+                          <div className="font-mono text-white">
+                            {(live.sides?.[side]?.probabilities?.[horizon] ?? 0).toFixed(1)}%
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  <div className="text-[8px] text-nexus-muted">
+                    Base range {(live.baseRangePct ?? 0).toFixed(3)}% · local base {live.localBaseReady ? 'READY' : 'forming'}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2 text-[9px]">
+                  {(['CALL', 'PUT'] as const).map((side) => {
+                    const top = leaders[side]?.[0];
+                    return (
+                      <div key={side} className="rounded bg-black/25 p-1.5">
+                        <span className={side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'}>{side}</span>
+                        <span className="text-nexus-muted"> recurring window </span>
+                        <span className="font-mono text-white">{top?.time ?? '—'}</span>
+                        {top ? <span className="text-nexus-muted"> · {top.probabilityPct.toFixed(1)}%</span> : null}
+                      </div>
+                    );
+                  })}
+                  <div className="col-span-2 text-[8px] text-nexus-muted">
+                    {live?.reason ?? `${row.profile?.baseSamples ?? 0} compressed-base samples across ${row.profile?.sessionCount ?? 0} sessions`}
+                  </div>
+                </div>
+              )}
+              {row.error ? <div className="mt-1 text-[8px] text-nexus-red">{row.error}</div> : null}
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-2 text-[8px] leading-relaxed text-nexus-muted">
+        {data?.guardrail ?? 'Advisory only — live premium and orderflow confirmation remain mandatory.'}
+      </div>
+    </div>
+  );
+}
+
 export function FutureSignalsPanel({
   snapshots,
   auto,
@@ -241,6 +382,8 @@ export function FutureSignalsPanel({
   const [error, setError] = useState<string | null>(null);
   const [apiMissing, setApiMissing] = useState(false);
   const [apiDegraded, setApiDegraded] = useState(false);
+  const [ftvData, setFtvData] = useState<FtvProbabilityPayload | null>(null);
+  const [ftvError, setFtvError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -272,11 +415,28 @@ export function FutureSignalsPanel({
     }
   }, [snapshots, auto]);
 
+  const loadFtv = useCallback(async () => {
+    try {
+      const res = await fetch('/api/signals/ftv-probability');
+      if (!res.ok) throw new Error(`Historical probability API ${res.status}`);
+      setFtvData((await res.json()) as FtvProbabilityPayload);
+      setFtvError(null);
+    } catch (e) {
+      setFtvError(e instanceof Error ? e.message : 'Historical probability unavailable');
+    }
+  }, []);
+
   useEffect(() => {
     load();
     const id = setInterval(load, pollMs);
     return () => clearInterval(id);
   }, [load, pollMs]);
+
+  useEffect(() => {
+    void loadFtv();
+    const id = setInterval(() => void loadFtv(), 60_000);
+    return () => clearInterval(id);
+  }, [loadFtv]);
 
   const moments = (data?.moments?.length ? data.moments : localMoments()) as ForwardMoment[];
   const mergedExplosions = mergeLiveExplosions(data, snapshots);
@@ -328,6 +488,8 @@ export function FutureSignalsPanel({
           <span className="text-nexus-muted"> · Session bias {data.sessionBias}</span>
         ) : null}
       </div>
+
+      <FtvProbabilityBoard data={ftvData} error={ftvError} />
 
       <div className="flex flex-wrap gap-1 mb-2">
         {TABS.map((t) => (
@@ -437,7 +599,10 @@ export function FutureSignalsPanel({
 
       <button
         type="button"
-        onClick={load}
+        onClick={() => {
+          void load();
+          void loadFtv();
+        }}
         className="w-full mt-2 text-[10px] py-1.5 rounded border border-nexus-border text-nexus-muted hover:text-white"
       >
         Refresh forward scan

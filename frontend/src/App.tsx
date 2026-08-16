@@ -319,6 +319,17 @@ export default function App() {
           </DashboardSection>
         ) : null}
 
+        {data && auto ? (
+          <DashboardSection
+            title="Historical Timing"
+            subtitle="Upstox-backed flat-to-vertical probabilities and recurring session windows"
+          >
+            <div className="col-span-12">
+              <FutureSignalsPanel snapshots={data.snapshots} auto={auto} />
+            </div>
+          </DashboardSection>
+        ) : null}
+
         {canShowDashboard && snap && auto && data ? (
           <div className="space-y-6">
             <DashboardSection title="Execution" subtitle="Live context for the active symbol">
@@ -331,9 +342,6 @@ export default function App() {
             <DashboardSection title="Signals & Trades" subtitle="Day mode, router, auto-trader, heatmap, swing lane">
               <div className="col-span-12">
                 <TomorrowPlaybookPanel auto={auto} snapshots={data.snapshots} deployment={deployment} />
-              </div>
-              <div className="col-span-12">
-                <FutureSignalsPanel snapshots={data.snapshots} auto={auto} />
               </div>
               <div className="col-span-12">
                 <StrikeWatchlistPanel snapshots={data.snapshots} />

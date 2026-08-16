@@ -24,6 +24,20 @@ async def forward_signals():
         raise HTTPException(status_code=500, detail="forward_signals_build_failed")
 
 
+@router.get("/ftv-probability")
+async def ftv_probability():
+    """Upstox-backed historical and live CE/PE time-to-breakout advisory."""
+    from app.engines.ftv_probability import build_ftv_probability_dashboard
+    from app.routers.market import get_multi_snapshot_fast
+
+    try:
+        multi = await get_multi_snapshot_fast()
+        return await build_ftv_probability_dashboard(multi.snapshots)
+    except Exception:
+        logger.exception("ftv_probability failed")
+        raise HTTPException(status_code=500, detail="ftv_probability_build_failed")
+
+
 @router.get("/strike-watchlist")
 async def strike_watchlist(per_side: int = 3):
     """CE + PE priority strikes for NIFTY and SENSEX — live trade-priority board."""

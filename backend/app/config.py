@@ -1037,6 +1037,16 @@ class Settings(BaseSettings):
     local_base_overrides_bearish_breadth: bool = True
     spot_chart_timeframe_minutes: int = 5
     spot_chart_1m_bars: int = 300  # 1m history for 5m resample + RSI/MACD warmup
+    # Historical time-to-FTV advisory. V3 index candles train a time-of-day
+    # breakout prior; live premium/orderflow must still confirm every entry.
+    ftv_probability_enabled: bool = True
+    ftv_probability_history_days: int = 28
+    ftv_probability_profile_cache_seconds: int = 1800
+    ftv_probability_base_window_minutes: int = 5
+    ftv_probability_time_bucket_minutes: int = 15
+    ftv_probability_flat_max_range_pct: float = 0.22
+    ftv_probability_vertical_move_pct: float = 0.18
+    ftv_probability_min_training_samples: int = 100
     # Use true resampled-5m closes for the spot-chart RSI/MACD as soon as there are this
     # many 5m bars; only fall back to 1m when the session is genuinely too thin. The old
     # hardcoded 35 kept the "5m" chart on 1m data until ~12:10 IST every day, so the
