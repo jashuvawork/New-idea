@@ -1,10 +1,9 @@
 """News intelligence source, horizon, and trading-safety regressions."""
 
+import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
-
-import pytest
 
 from app.services.news_intelligence import (
     aggregate_news_intelligence,
@@ -98,16 +97,17 @@ def test_duplicate_headline_is_deduplicated_and_corroborated():
     assert len(items[0]["corroboratedBy"]) == 2
 
 
-@pytest.mark.asyncio
-async def test_upstox_news_client_sends_supported_v2_parameters(monkeypatch):
+def test_upstox_news_client_sends_supported_v2_parameters(monkeypatch):
     client = UpstoxClient()
     get = AsyncMock(return_value={"NSE_INDEX|Nifty 50": [{"heading": "Headline"}]})
     monkeypatch.setattr(client, "_get", get)
 
-    result = await client.get_news(
-        instrument_keys=["NSE_INDEX|Nifty 50", "BSE_INDEX|SENSEX"],
-        page_number=0,
-        page_size=500,
+    result = asyncio.run(
+        client.get_news(
+            instrument_keys=["NSE_INDEX|Nifty 50", "BSE_INDEX|SENSEX"],
+            page_number=0,
+            page_size=500,
+        )
     )
 
     assert "NSE_INDEX|Nifty 50" in result

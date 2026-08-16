@@ -162,9 +162,9 @@ def _direction_score(text: str, upstream_sentiment: str) -> int:
     # India is a major crude importer: an oil spike is bearish; an oil drop is bullish.
     if _contains(text, {"crude", "brent", "wti", "oil", "opec"}):
         if _contains(text, {"surge", "rises", "rise", "jumps", "spike", "higher"}):
-            score -= 2
+            score = min(score, -2)
         elif _contains(text, {"falls", "drop", "decline", "lower", "slips"}):
-            score += 2
+            score = max(score, 2)
     if "rupee" in text:
         if _contains(text, {"weakens", "falls", "record low", "depreciat"}):
             score -= 2
