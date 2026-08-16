@@ -9,10 +9,13 @@ must confirm a CE/PE trade.
 from __future__ import annotations
 
 import asyncio
+import json
 import math
+import os
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 from zoneinfo import ZoneInfo
 
@@ -115,6 +118,30 @@ def _posterior_rate(wins: int, samples: int, global_rate: float) -> float:
     # Eight pseudo-observations stabilize sparse 15-minute time buckets.
     prior = 8.0
     return (wins + global_rate * prior) / (samples + prior) if samples >= 0 else global_rate
+
+
+def _profile_path(symbol: str) -> Path:
+    directory = Path(get_settings().trade_store_dir) / "ftv_probability"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"index_{symbol.lower()}.json"
+
+
+def _save_profile(symbol: str, profile: Mapping[str, Any]) -> None:
+    path = _profile_path(symbol)
+    tmp = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(profile, indent=2, default=str), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _load_durable_profile(symbol: str) -> Optional[dict[str, Any]]:
+    path = _profile_path(symbol)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def build_historical_profile(
@@ -262,10 +289,99 @@ def _alert_support(snapshot: SymbolSnapshot, side: str) -> float:
     return support
 
 
+def _option_live_features(snapshot: SymbolSnapshot, side: str) -> dict[str, Any]:
+    """Read real option-chain execution quality and acceleration for one side."""
+    prefix = "call" if side == "CALL" else "put"
+    alerts = [
+        alert for alert in (snapshot.explosionAlerts or [])
+        if str(alert.get("side") or "").upper() == side
+    ]
+    best_alert = max(
+        alerts,
+        key=lambda alert: _number(alert.get("explosionScore")),
+        default={},
+    )
+    target_strike = _number(best_alert.get("strike")) or _number(snapshot.atmStrike)
+    row = min(
+        snapshot.heatmap or [],
+        key=lambda item: abs(_number(item.strike) - target_strike),
+        default=None,
+    )
+    ltp = _number(getattr(row, f"{prefix}Ltp", None)) if row else 0.0
+    bid = _number(getattr(row, f"{prefix}Bid", None)) if row else 0.0
+    ask = _number(getattr(row, f"{prefix}Ask", None)) if row else 0.0
+    oi = _number(getattr(row, f"{prefix}Oi", None)) if row else 0.0
+    volume = _number(getattr(row, f"{prefix}Volume", None)) if row else 0.0
+    iv = _number(getattr(row, f"{prefix}Iv", None)) if row else 0.0
+    spread_pct = (ask - bid) / ltp * 100.0 if ask >= bid > 0 and ltp > 0 else None
+    velocity3 = _number(
+        best_alert.get("velocity3s") or best_alert.get("premiumVelocityPct"),
+    )
+    volume_surge = _number(best_alert.get("volumeSurge"))
+    imbalance = _number(snapshot.orderflow.bidAskImbalance)
+    side_imbalance = imbalance if side == "CALL" else 100.0 - imbalance
+    liquidity = _number(getattr(row, "liquidityScore", 0)) if row else 0.0
+    iv_expansion = _number(snapshot.greeks.ivExpansion) or 1.0
+
+    adjustment = 0.0
+    adjustment += max(-4.0, min(7.0, velocity3 * 1.8))
+    adjustment += max(0.0, min(5.0, (volume_surge - 1.0) * 2.0))
+    adjustment += max(-4.0, min(4.0, (side_imbalance - 50.0) * 0.16))
+    adjustment += max(-2.0, min(5.0, (iv_expansion - 1.0) * 20.0))
+    if spread_pct is not None:
+        adjustment -= max(0.0, min(10.0, (spread_pct - 2.0) * 1.5))
+    if ltp <= 0 or liquidity < 10:
+        adjustment -= 5.0
+    return {
+        "strike": target_strike or None,
+        "ltp": round(ltp, 2) if ltp else None,
+        "bid": round(bid, 2) if bid else None,
+        "ask": round(ask, 2) if ask else None,
+        "spreadPct": round(spread_pct, 2) if spread_pct is not None else None,
+        "iv": round(iv, 2) if iv else None,
+        "ivExpansion": round(iv_expansion, 3),
+        "oi": int(oi),
+        "volume": int(volume),
+        "liquidityScore": round(liquidity, 1),
+        "velocity3s": round(velocity3, 2),
+        "volumeSurge": round(volume_surge, 2),
+        "sideImbalance": round(side_imbalance, 1),
+        "probabilityAdjustment": round(adjustment, 2),
+        "spreadAvailable": spread_pct is not None,
+    }
+
+
+def _event_adjustment(
+    events: Mapping[str, Any] | None,
+    symbol: str,
+    side: str,
+) -> tuple[float, list[str]]:
+    adjustment = 0.0
+    reasons: list[str] = []
+    for event in (events or {}).get("activeOrUpcoming", []):
+        symbols = event.get("symbols") or []
+        if symbols and symbol.upper() not in symbols:
+            continue
+        impact = str(event.get("impact") or "LOW").upper()
+        bias = str(event.get("sideBias") or "BOTH").upper()
+        if impact == "HIGH":
+            adjustment += 3.0
+        elif impact == "MEDIUM":
+            adjustment += 1.5
+        if bias == side:
+            adjustment += 3.0
+        elif bias not in {"BOTH", "NEUTRAL", side}:
+            adjustment -= 3.0
+        reasons.append(str(event.get("title") or "scheduled event"))
+    return adjustment, reasons
+
+
 def estimate_live_probabilities(
     profile: Mapping[str, Any],
     live_rows: Iterable[Any],
     snapshot: SymbolSnapshot,
+    *,
+    scheduled_events: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Blend historical priors with live base, chart, breadth, and radar proof."""
     settings = get_settings()
@@ -303,11 +419,19 @@ def estimate_live_probabilities(
     breadth_bias = str(snapshot.breadth.bias or "NEUTRAL").upper()
 
     estimates: dict[str, Any] = {}
+    premium_profile = profile.get("premiumCalibration") or {}
+    premium_quality = profile.get("premiumQuality") or {}
+    premium_minimum = max(1, int(settings.ftv_premium_min_training_samples))
     for side in ("CALL", "PUT"):
         side_direction = "BULLISH" if side == "CALL" else "BEARISH"
         support = _alert_support(snapshot, side)
+        option_features = _option_live_features(snapshot, side)
+        event_bonus, event_reasons = _event_adjustment(
+            scheduled_events, snapshot.symbol, side,
+        )
         probabilities: dict[str, float] = {}
         sample_counts: dict[str, int] = {}
+        probability_sources: dict[str, str] = {}
         for horizon in HORIZONS:
             bucket_row = (
                 (profile.get("buckets") or {}).get(bucket, {})
@@ -319,7 +443,30 @@ def estimate_live_probabilities(
             )
             source_row = bucket_row if bucket_row and bucket_row.get("samples", 0) >= 3 else global_row
             probability = _number(source_row.get("probabilityPct")) if source_row else 0.0
-            sample_counts[str(horizon)] = int(_number(source_row.get("samples"))) if source_row else 0
+            index_samples = int(_number(source_row.get("samples"))) if source_row else 0
+            premium_bucket_row = (
+                (premium_profile.get("buckets") or {}).get(bucket, {})
+                .get(side, {})
+                .get(str(horizon), {})
+            )
+            premium_global_row = (
+                (premium_profile.get("rates") or {}).get(side, {})
+                .get(str(horizon), {})
+            )
+            premium_row = (
+                premium_bucket_row
+                if int(premium_bucket_row.get("samples") or 0) >= 5
+                else premium_global_row
+            )
+            premium_samples = int(premium_row.get("samples") or 0)
+            if premium_samples >= premium_minimum:
+                premium_probability = _number(premium_row.get("probabilityPct"))
+                probability = probability * 0.3 + premium_probability * 0.7
+                probability_sources[str(horizon)] = "HYBRID_PREMIUM_70_INDEX_30"
+                sample_counts[str(horizon)] = premium_samples
+            else:
+                probability_sources[str(horizon)] = "INDEX_SPOT_PROXY"
+                sample_counts[str(horizon)] = index_samples
 
             probability *= 1.18 if local_base_ready else 0.62
             directional_momentum = momentum3 if side == "CALL" else -momentum3
@@ -334,6 +481,8 @@ def estimate_live_probabilities(
                 probability -= 4.0
             probability += max(0.0, min(6.0, (volume_ratio - 1.0) * 4.0))
             probability += support * 0.12
+            probability += _number(option_features.get("probabilityAdjustment"))
+            probability += event_bonus
             probabilities[str(horizon)] = round(max(1.0, min(95.0, probability)), 1)
 
         earliest = next(
@@ -343,8 +492,12 @@ def estimate_live_probabilities(
         estimates[side] = {
             "probabilities": probabilities,
             "sampleCounts": sample_counts,
+            "probabilitySources": probability_sources,
             "earliestLikelyMinutes": earliest,
             "radarSupport": round(support, 1),
+            "optionFeatures": option_features,
+            "scheduledEventAdjustment": round(event_bonus, 1),
+            "scheduledEventReasons": event_reasons,
         }
 
     call_peak = max(estimates["CALL"]["probabilities"].values())
@@ -364,6 +517,14 @@ def estimate_live_probabilities(
         else "MEDIUM" if max_samples >= 100
         else "LOW"
     )
+    drift_status = str(
+        (premium_quality.get("drift") or {}).get("status") or "INSUFFICIENT_DATA"
+    )
+    brier = (premium_quality.get("walkForward") or {}).get("brierScore")
+    if drift_status == "DRIFT" or (brier is not None and _number(brier) > 0.28):
+        confidence = "LOW"
+    elif drift_status == "WATCH" and confidence == "HIGH":
+        confidence = "MEDIUM"
     return {
         "status": "READY",
         "liveReady": True,
@@ -375,6 +536,17 @@ def estimate_live_probabilities(
         "volumeRatio": round(volume_ratio, 2),
         "dominantSide": dominant,
         "confidence": confidence,
+        "modelQuality": {
+            "premiumSampleCount": int(premium_profile.get("sampleCount") or 0),
+            "walkForwardBrierScore": brier,
+            "meanCalibrationErrorPct": (
+                premium_quality.get("walkForward") or {}
+            ).get("meanCalibrationErrorPct"),
+            "driftStatus": drift_status,
+            "driftMaxDeltaPctPoints": (
+                premium_quality.get("drift") or {}
+            ).get("maxDeltaPctPoints"),
+        },
         "estimatedWindow": (
             f"{estimates[dominant]['earliestLikelyMinutes']}m"
             if dominant in estimates else None
@@ -405,7 +577,7 @@ async def _load_symbol_profile(
         history_days = max(7, min(31, int(settings.ftv_probability_history_days)))
         to_date = now.date().isoformat()
         from_date = (now.date() - timedelta(days=history_days)).isoformat()
-        historical_raw, intraday_raw = await asyncio.gather(
+        historical_result, intraday_result = await asyncio.gather(
             client.get_historical_candles_v3(
                 instrument_key,
                 unit="minutes",
@@ -420,24 +592,38 @@ async def _load_symbol_profile(
                 interval=1,
                 force_refresh=force,
             ),
+            return_exceptions=True,
         )
-        historical = normalize_candles(historical_raw)
-        # Never train on today's partial session.
-        training = [c for c in historical if c["ts"].date() < now.date()]
-        profile = build_historical_profile(
-            training,
-            base_window=max(3, int(settings.ftv_probability_base_window_minutes)),
-            bucket_minutes=max(5, int(settings.ftv_probability_time_bucket_minutes)),
-            flat_max_range_pct=float(settings.ftv_probability_flat_max_range_pct),
-            vertical_move_pct=float(settings.ftv_probability_vertical_move_pct),
+        if isinstance(historical_result, Exception):
+            profile = _load_durable_profile(symbol)
+            if profile is None:
+                raise historical_result
+            profile = dict(profile)
+            profile["durableFallback"] = True
+            profile["historyRefreshError"] = str(historical_result)[:240]
+        else:
+            historical = normalize_candles(historical_result)
+            # Never train on today's partial session.
+            training = [c for c in historical if c["ts"].date() < now.date()]
+            profile = build_historical_profile(
+                training,
+                base_window=max(3, int(settings.ftv_probability_base_window_minutes)),
+                bucket_minutes=max(5, int(settings.ftv_probability_time_bucket_minutes)),
+                flat_max_range_pct=float(settings.ftv_probability_flat_max_range_pct),
+                vertical_move_pct=float(settings.ftv_probability_vertical_move_pct),
+            )
+            profile.update({
+                "symbol": symbol,
+                "instrumentKey": instrument_key,
+                "source": "upstox_v3_index_1m",
+                "trainedAt": now.isoformat(),
+                "durableFallback": False,
+            })
+            _save_profile(symbol, profile)
+        intraday = (
+            [] if isinstance(intraday_result, Exception)
+            else normalize_candles(intraday_result)
         )
-        profile.update({
-            "symbol": symbol,
-            "instrumentKey": instrument_key,
-            "source": "upstox_v3_index_1m",
-            "trainedAt": now.isoformat(),
-        })
-        intraday = normalize_candles(intraday_raw)
         _profile_cache[symbol] = (time.monotonic(), profile, intraday)
         return profile, intraday
 
@@ -454,6 +640,23 @@ async def build_ftv_probability_dashboard(
     if not settings.ftv_probability_enabled:
         return {"enabled": False, "status": "DISABLED", "symbols": {}}
     client = client or UpstoxClient()
+    if settings.ftv_premium_calibration_enabled:
+        from app.engines.ftv_premium_calibration import (
+            build_and_persist_premium_calibration,
+        )
+
+        premium_calibration = await asyncio.to_thread(
+            build_and_persist_premium_calibration, force=force,
+        )
+    else:
+        premium_calibration = {
+            "status": "DISABLED", "symbols": {},
+            "walkForward": {"status": "DISABLED"},
+            "drift": {"status": "DISABLED"},
+        }
+    from app.engines.scheduled_market_events import build_scheduled_event_context
+
+    scheduled_events = build_scheduled_event_context(snapshots, now=now)
     symbols = list(dict.fromkeys(
         symbol.upper()
         for symbol in [*snapshots.keys(), *settings.symbols]
@@ -469,22 +672,53 @@ async def build_ftv_probability_dashboard(
         )
         try:
             profile, intraday = await _load_symbol_profile(symbol, client, force=force)
+            profile = dict(profile)
+            profile["premiumCalibration"] = (
+                (premium_calibration.get("symbols") or {}).get(symbol) or {}
+            )
+            profile["premiumQuality"] = {
+                "walkForward": premium_calibration.get("walkForward") or {},
+                "drift": premium_calibration.get("drift") or {},
+            }
             minimum = max(1, int(settings.ftv_probability_min_training_samples))
             history_ready = int(profile.get("baseSamples") or 0) >= minimum
-            live = estimate_live_probabilities(profile, intraday, snapshot)
+            live = estimate_live_probabilities(
+                profile, intraday, snapshot, scheduled_events=scheduled_events,
+            )
+            premium_rows = profile["premiumCalibration"]
+            premium_ready = (
+                int(premium_rows.get("sampleCount") or 0)
+                >= int(settings.ftv_premium_min_training_samples)
+            )
             return symbol, {
                 "status": "READY" if history_ready else "LEARNING",
                 "historyReady": history_ready,
-                "source": profile.get("source"),
-                "instrumentBasis": "INDEX_SPOT_PROXY",
-                "optionHistory": "UPSTOX_PLUS_REQUIRED_FOR_EXPIRED_OPTIONS",
+                "premiumHistoryReady": premium_ready,
+                "source": (
+                    "upstox_v3_index_1m+local_option_premium_tape"
+                    if premium_ready else profile.get("source")
+                ),
+                "instrumentBasis": (
+                    "HYBRID_INDEX_AND_ACTUAL_OPTION_PREMIUM"
+                    if premium_ready else "INDEX_SPOT_PROXY"
+                ),
+                "optionHistory": (
+                    "LOCAL_LIVE_OPTION_PREMIUM_TAPE"
+                    if premium_ready
+                    else "LEARNING_FROM_LOCAL_OPTION_PREMIUM_TAPE"
+                ),
                 "profile": {
                     key: profile.get(key)
                     for key in (
                         "trainedAt", "sessionCount", "candleCount", "baseSamples",
                         "fromDate", "toDate", "averageBaseRangePct",
                         "flatMaxRangePct", "verticalMovePct", "timeOfDayLeaders",
+                        "durableFallback", "historyRefreshError",
                     )
+                },
+                "premiumCalibration": {
+                    "sampleCount": premium_rows.get("sampleCount", 0),
+                    "rates": premium_rows.get("rates", {}),
                 },
                 "live": live,
             }
@@ -521,12 +755,28 @@ async def build_ftv_probability_dashboard(
         "generatedAt": now.isoformat(),
         "symbols": payload,
         "topLiveSymbol": dominant[0] if dominant else None,
+        "calibration": {
+            "status": premium_calibration.get("status"),
+            "source": premium_calibration.get("source"),
+            "generatedAt": premium_calibration.get("generatedAt"),
+            "sourceDates": premium_calibration.get("sourceDates", []),
+            "observationCount": premium_calibration.get("observationCount", 0),
+            "walkForward": premium_calibration.get("walkForward", {}),
+            "drift": premium_calibration.get("drift", {}),
+            "durablePath": str(
+                Path(settings.trade_store_dir)
+                / "ftv_probability"
+                / "premium_calibration.json"
+            ),
+        },
+        "scheduledEvents": scheduled_events,
         "guardrail": (
             "Historical probability is advisory only; a trade still requires live "
             "premium, volume, orderflow, liquidity, and local-base confirmation."
         ),
         "limitations": (
-            "Standard Upstox V3 index history is the directional proxy. Exact expired "
-            "option-premium backtests require the Upstox Plus Expired Instruments APIs."
+            "Index history supplies the long prior and retained live CE/PE tape calibrates "
+            "actual premiums. Early deployments remain low-confidence until the local tape "
+            "has enough unseen sessions for walk-forward validation."
         ),
     }

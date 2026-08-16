@@ -57,13 +57,24 @@ interface ForwardPayload {
 interface FtvSideEstimate {
   probabilities: Record<string, number>;
   sampleCounts: Record<string, number>;
+  probabilitySources?: Record<string, string>;
   earliestLikelyMinutes: number;
   radarSupport: number;
+  optionFeatures?: {
+    strike?: number;
+    spreadPct?: number | null;
+    iv?: number | null;
+    oi?: number;
+    velocity3s?: number;
+    volumeSurge?: number;
+    liquidityScore?: number;
+  };
 }
 
 interface FtvSymbolEstimate {
   status: string;
   historyReady?: boolean;
+  premiumHistoryReady?: boolean;
   error?: string;
   profile?: {
     sessionCount?: number;
@@ -85,6 +96,12 @@ interface FtvSymbolEstimate {
     baseRangePct?: number;
     localBaseReady?: boolean;
     sides?: Record<string, FtvSideEstimate>;
+    modelQuality?: {
+      premiumSampleCount?: number;
+      walkForwardBrierScore?: number | null;
+      meanCalibrationErrorPct?: number | null;
+      driftStatus?: string;
+    };
     reason?: string;
   };
 }
@@ -94,6 +111,32 @@ interface FtvProbabilityPayload {
   status: string;
   generatedAt?: string;
   symbols: Record<string, FtvSymbolEstimate>;
+  calibration?: {
+    status?: string;
+    observationCount?: number;
+    sourceDates?: string[];
+    walkForward?: {
+      status?: string;
+      brierScore?: number | null;
+      meanCalibrationErrorPct?: number | null;
+      validationSamples?: number;
+    };
+    drift?: {
+      status?: string;
+      maxDeltaPctPoints?: number;
+    };
+  };
+  scheduledEvents?: {
+    riskLevel?: string;
+    activeOrUpcoming?: Array<{
+      id: string;
+      title: string;
+      status: string;
+      impact: string;
+      startsAt: string;
+      minutesTo?: number;
+    }>;
+  };
   guardrail?: string;
   limitations?: string;
 }
@@ -298,6 +341,39 @@ function FtvProbabilityBoard({
       </div>
 
       {error ? <div className="mb-2 text-[9px] text-nexus-yellow">{error}</div> : null}
+      {data?.calibration ? (
+        <div className="mb-2 flex flex-wrap gap-1 text-[8px]">
+          <span className="rounded border border-nexus-border/70 bg-black/25 px-1.5 py-0.5 text-nexus-muted">
+            Premium tape {data.calibration.observationCount ?? 0} bases
+          </span>
+          <span className="rounded border border-nexus-border/70 bg-black/25 px-1.5 py-0.5 text-nexus-muted">
+            Walk-forward {data.calibration.walkForward?.status ?? 'LEARNING'}
+            {data.calibration.walkForward?.brierScore != null
+              ? ` · Brier ${data.calibration.walkForward.brierScore.toFixed(3)}`
+              : ''}
+          </span>
+          <span className={`rounded border px-1.5 py-0.5 ${
+            data.calibration.drift?.status === 'DRIFT'
+              ? 'border-nexus-red/50 text-nexus-red'
+              : data.calibration.drift?.status === 'WATCH'
+                ? 'border-nexus-yellow/50 text-nexus-yellow'
+                : 'border-nexus-green/40 text-nexus-green'
+          }`}>
+            Drift {data.calibration.drift?.status ?? 'LEARNING'}
+          </span>
+          {data.scheduledEvents?.riskLevel && data.scheduledEvents.riskLevel !== 'NORMAL' ? (
+            <span className="rounded border border-orange-500/50 px-1.5 py-0.5 text-orange-300">
+              Event risk {data.scheduledEvents.riskLevel}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {(data?.scheduledEvents?.activeOrUpcoming ?? []).map((event) => (
+        <div key={event.id} className="mb-2 rounded border border-orange-500/30 bg-orange-950/10 px-2 py-1 text-[8px] text-orange-200">
+          {event.status} · {event.impact} · {event.title}
+          {event.status === 'UPCOMING' ? ` · ${event.minutesTo ?? 0}m` : ''}
+        </div>
+      ))}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
         {Object.entries(data?.symbols ?? {}).map(([symbol, row]) => {
           const live = row.live;
@@ -336,6 +412,24 @@ function FtvProbabilityBoard({
                   ))}
                   <div className="text-[8px] text-nexus-muted">
                     Base range {(live.baseRangePct ?? 0).toFixed(3)}% · local base {live.localBaseReady ? 'READY' : 'forming'}
+                  </div>
+                  <div className="grid grid-cols-2 gap-1 text-[8px] text-nexus-muted">
+                    {(['CALL', 'PUT'] as const).map((side) => {
+                      const option = live.sides?.[side]?.optionFeatures;
+                      return (
+                        <div key={`${side}-quality`} className="rounded bg-black/20 px-1.5 py-1">
+                          {side} premium · spread {option?.spreadPct != null ? `${option.spreadPct.toFixed(2)}%` : 'n/a'}
+                          {' · '}IV {option?.iv != null ? option.iv.toFixed(1) : 'n/a'}
+                          {' · '}v3 {(option?.velocity3s ?? 0).toFixed(2)}%
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="text-[8px] text-nexus-muted">
+                    Model {live.modelQuality?.driftStatus ?? 'LEARNING'} · premium samples {live.modelQuality?.premiumSampleCount ?? 0}
+                    {live.modelQuality?.walkForwardBrierScore != null
+                      ? ` · Brier ${live.modelQuality.walkForwardBrierScore.toFixed(3)}`
+                      : ''}
                   </div>
                 </div>
               ) : (

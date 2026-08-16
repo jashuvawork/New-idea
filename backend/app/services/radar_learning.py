@@ -1005,6 +1005,18 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
         "scorecard.json": json.dumps(scorecard, indent=2),
         "funnel.json": json.dumps(funnel, indent=2),
     }
+    if bool(getattr(get_settings(), "ftv_premium_calibration_enabled", False)):
+        try:
+            from app.engines.ftv_premium_calibration import (
+                build_and_persist_premium_calibration,
+            )
+
+            calibration = build_and_persist_premium_calibration(force=True)
+            artifacts["ftv_premium_calibration.json"] = json.dumps(
+                calibration, indent=2,
+            )
+        except Exception as exc:
+            logger.warning("FTV premium calibration refresh failed: %s", exc)
     tape = premium_tape_path(date)
     if tape.exists():
         artifacts["premium_tape.jsonl"] = _read_bytes_locked(tape)

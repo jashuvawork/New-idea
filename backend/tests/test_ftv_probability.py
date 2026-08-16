@@ -152,7 +152,7 @@ def test_dashboard_uses_upstox_history_and_reports_live_readiness():
 
     assert payload["enabled"] is True
     assert payload["status"] == "LIVE"
-    assert payload["symbols"]["NIFTY"]["source"] == "upstox_v3_index_1m"
+    assert payload["symbols"]["NIFTY"]["source"].startswith("upstox_v3_index_1m")
     assert payload["symbols"]["NIFTY"]["live"]["liveReady"] is True
     assert "advisory only" in payload["guardrail"].lower()
 
