@@ -64,7 +64,9 @@ interface FtvSideEstimate {
     strike?: number;
     spreadPct?: number | null;
     iv?: number | null;
+    ivExpansion?: number | null;
     oi?: number;
+    oiChangePct?: number | null;
     velocity3s?: number;
     volumeSurge?: number;
     liquidityScore?: number;
@@ -420,6 +422,8 @@ function FtvProbabilityBoard({
                         <div key={`${side}-quality`} className="rounded bg-black/20 px-1.5 py-1">
                           {side} premium · spread {option?.spreadPct != null ? `${option.spreadPct.toFixed(2)}%` : 'n/a'}
                           {' · '}IV {option?.iv != null ? option.iv.toFixed(1) : 'n/a'}
+                          {option?.ivExpansion != null ? ` (${option.ivExpansion.toFixed(2)}×)` : ''}
+                          {option?.oiChangePct != null ? ` · OI ${option.oiChangePct >= 0 ? '+' : ''}${option.oiChangePct.toFixed(1)}%` : ''}
                           {' · '}v3 {(option?.velocity3s ?? 0).toFixed(2)}%
                         </div>
                       );
