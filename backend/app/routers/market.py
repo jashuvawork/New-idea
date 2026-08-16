@@ -19,8 +19,7 @@ from app.engines.snapshot_fast import overlay_snapshot_live, overlay_snapshot_lt
 from app.engines.psychology_engine import analyze_psychology, psychology_to_dict
 from app.engines.adaptive_exits import compute_adaptive_exit_plan
 from app.models.schemas import MultiSnapshot, StrategyType
-from app.services.finnhub import aggregate_sentiment
-from app.services.finnhub import fetch_market_news
+from app.services.news_intelligence import aggregate_news_intelligence, fetch_market_news
 from app.services.redis_store import has_upstox_token
 from app.services.upstox import UpstoxClient, UpstoxError, rate_limit_active, rate_limit_cooldown_remaining
 from app.services.upstox_ws import is_ws_active
@@ -348,7 +347,7 @@ def _news_payload(news: list) -> dict[str, Any]:
         "cacheSeconds": settings.news_cache_seconds,
         "ageSeconds": round(age, 1),
         "nextRefreshInSeconds": round(remaining, 1),
-        "aggregate": aggregate_sentiment(news),
+        "aggregate": aggregate_news_intelligence(news),
     }
 
 
@@ -576,15 +575,9 @@ async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
         raise UpstoxError(f"Upstox cooling down — retry in {secs}s")
 
     news = await _fetch_news_cached()
-    news_sentiment = "NEUTRAL"
-    if news:
-        sentiments = [n.get("sentiment", "NEUTRAL") for n in news[:5]]
-        bullish = sentiments.count("BULLISH")
-        bearish = sentiments.count("BEARISH")
-        if bullish > bearish:
-            news_sentiment = "BULLISH"
-        elif bearish > bullish:
-            news_sentiment = "BEARISH"
+    # Only verified/corroborated, fresh India-relevant context reaches TQS.
+    # Unverified social posts remain display-only in the news panel.
+    news_sentiment = aggregate_news_intelligence(news).get("bias", "NEUTRAL")
 
     client = UpstoxClient()
     try:
@@ -638,7 +631,7 @@ async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
         errors = [s.error for s in snapshots.values() if s.error]
         waiting_reason = errors[0] if errors else "Waiting for real Upstox data"
 
-    news_sentiment_agg = aggregate_sentiment(news)
+    news_sentiment_agg = aggregate_news_intelligence(news)
     for sym, snap in snapshots.items():
         if not snap.dataAvailable:
             continue
@@ -989,7 +982,7 @@ async def get_premarket_analysis(symbol: str):
 
     client = UpstoxClient()
     news = await fetch_market_news()
-    news_sentiment = aggregate_sentiment(news).get("bias", "NEUTRAL")
+    news_sentiment = aggregate_news_intelligence(news).get("bias", "NEUTRAL")
     try:
         analysis = await build_premarket_analysis(symbol.upper(), client, news_sentiment)
         return {"dataAvailable": True, "symbol": symbol.upper(), "premarket": analysis.model_dump(mode="json")}

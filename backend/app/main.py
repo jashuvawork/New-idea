@@ -169,7 +169,7 @@ async def _background_monitor():
                             multi = await get_multi_snapshot_fast(overlay_ws=False)
                             if multi and multi.snapshots:
                                 await run_eod_playbook_cycle(
-                                    multi.snapshots, get_state(), force=False,
+                                    multi.snapshots, get_state(), news=multi.news, force=False,
                                 )
                                 last_eod_playbook_date = target
                         except Exception as exc:

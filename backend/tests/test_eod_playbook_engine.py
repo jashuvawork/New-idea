@@ -82,3 +82,30 @@ def test_build_eod_playbook_bearish_bias(_today):
     assert len(pb["strikeWatchlist"]["indexes"]) >= 1
     sensex = next(i for i in pb["strikeWatchlist"]["indexes"] if i["symbol"] == "SENSEX")
     assert sensex["puts"] or sensex["calls"]
+
+
+@patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-08")
+def test_next_session_verified_news_is_in_playbook_context(_today):
+    news = [{
+        "headline": "RBI rate cut supports Indian growth",
+        "sentiment": "BULLISH",
+        "directionScore": 2,
+        "indiaRelevant": True,
+        "verification": "VERIFIED",
+        "sourceType": "BROKER_NEWS",
+        "impact": "HIGH",
+        "horizon": "NEXT_SESSION",
+        "actionable": True,
+        "provider": "upstox",
+    }]
+    pb = build_eod_playbook(
+        {"SENSEX": _snap()},
+        AutoTraderState(),
+        news=news,
+        target_date="2026-07-09",
+    )
+
+    assert pb["newsOutlook"]["sideBias"] == "CALL"
+    assert pb["newsOutlook"]["highImpactCount"] == 1
+    assert pb["scenarios"][0]["id"] == "verified_news"
+    assert any("High-impact next-session news" in flag for flag in pb["riskFlags"])

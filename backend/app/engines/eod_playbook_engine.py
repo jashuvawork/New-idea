@@ -246,6 +246,7 @@ def build_eod_playbook(
     snapshots: dict[str, SymbolSnapshot],
     state: Optional[AutoTraderState] = None,
     *,
+    news: Optional[list[dict[str, Any]]] = None,
     target_date: Optional[str] = None,
 ) -> dict[str, Any]:
     """Rules-based next-day playbook from session close context."""
@@ -265,6 +266,21 @@ def build_eod_playbook(
 
     bias, confidence = _aggregate_bias(symbols_ctx)
     scenarios = _build_scenarios(symbols_ctx, expiry, bias, worst)
+    from app.services.news_intelligence import aggregate_news_intelligence
+
+    news_outlook = aggregate_news_intelligence(news or []).get("nextSession", {})
+    news_side = str(news_outlook.get("sideBias") or "NEUTRAL")
+    if news_outlook.get("headlineCount"):
+        scenarios.insert(0, {
+            "id": "verified_news",
+            "label": f"Verified news context favors {news_side}",
+            "probability": str(news_outlook.get("confidence") or "LOW"),
+            "action": (
+                f"Treat as confirmation only · validate {news_side} with price, breadth, "
+                "volume and local-base lift"
+            ),
+        })
+        scenarios = scenarios[:6]
     watchlist = _build_watchlist(symbols_ctx)
     from app.engines.strike_watchlist import build_strike_watchlist
 
@@ -282,6 +298,10 @@ def build_eod_playbook(
         risk_flags.append(f"Bad-day rank floor {chop['badDayRouting'].get('minRankFloor')}")
     if session_pnl < -5000:
         risk_flags.append(f"Session loss ₹{session_pnl:.0f} — tighter gates tomorrow")
+    if news_outlook.get("highImpactCount"):
+        risk_flags.append(
+            f"High-impact next-session news: {news_outlook['highImpactCount']} item(s)"
+        )
 
     near_txt = ", ".join(expiry.get("nearExpirySymbols") or []) or "none"
     summary = (
@@ -303,6 +323,7 @@ def build_eod_playbook(
         "symbols": symbols_ctx,
         "playbook": playbook_steps,
         "sessionPnlInr": round(session_pnl, 2),
+        "newsOutlook": news_outlook,
         "expiryGuards": {
             "nearExpirySymbols": expiry.get("nearExpirySymbols"),
             "expirySymbols": expiry.get("expirySymbols"),
@@ -325,7 +346,7 @@ async def enrich_eod_playbook_with_ai(playbook: dict[str, Any]) -> dict[str, Any
     prompt = f"""You are preparing TOMORROW's Indian index options trading playbook (EOD brief).
 Target session date: {playbook.get('targetDate')}
 Today's close context:
-{json.dumps({k: playbook.get(k) for k in ('summary', 'bias', 'symbols', 'riskFlags', 'scenarios', 'watchlist')}, default=str)[:10000]}
+{json.dumps({k: playbook.get(k) for k in ('summary', 'bias', 'newsOutlook', 'symbols', 'riskFlags', 'scenarios', 'watchlist')}, default=str)[:10000]}
 
 Respond JSON only:
 {{
@@ -365,6 +386,7 @@ async def run_eod_playbook_cycle(
     snapshots: dict[str, SymbolSnapshot],
     state: Optional[AutoTraderState] = None,
     *,
+    news: Optional[list[dict[str, Any]]] = None,
     force: bool = False,
 ) -> dict[str, Any]:
     """Build, optionally AI-enrich, and persist next-day playbook."""
@@ -382,7 +404,7 @@ async def run_eod_playbook_cycle(
             _last_eod_target = target
             return existing
 
-    playbook = build_eod_playbook(snapshots, state, target_date=target)
+    playbook = build_eod_playbook(snapshots, state, news=news, target_date=target)
     if get_settings().eod_playbook_use_ai:
         playbook = await enrich_eod_playbook_with_ai(playbook)
 
