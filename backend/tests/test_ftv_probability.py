@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 from app.engines.ftv_probability import (
+    _alert_support,
     build_ftv_probability_dashboard,
     build_historical_profile,
     clear_ftv_probability_cache,
@@ -108,6 +109,17 @@ def test_live_estimate_combines_flat_base_with_call_confirmation():
         estimate["sides"]["PUT"]["probabilities"]["5"]
     )
     assert estimate["dominantSide"] in {"CALL", "NEUTRAL"}
+
+
+def test_live_support_recognizes_serialized_ict_flat_vertical_key():
+    snapshot = _snap("BULLISH")
+    snapshot.explosionAlerts = [{
+        "side": "CALL",
+        "explosionScore": 20,
+        "ictFlatThenVertical": True,
+    }]
+
+    assert _alert_support(snapshot, "CALL") == 28.0
 
 
 def test_upstox_v3_historical_method_builds_encoded_bounded_path(monkeypatch):

@@ -285,7 +285,12 @@ def _alert_support(snapshot: SymbolSnapshot, side: str) -> float:
         if str(alert.get("side") or "").upper() != side:
             continue
         score = _number(alert.get("explosionScore"))
-        if alert.get("ictFirstLift") or alert.get("firstLift") or alert.get("flatThenVertical"):
+        if (
+            alert.get("ictFirstLift")
+            or alert.get("firstLift")
+            or alert.get("ictFlatThenVertical")
+            or alert.get("flatThenVertical")
+        ):
             score += 8.0
         support = max(support, min(100.0, score))
     return support
