@@ -380,6 +380,11 @@ class Settings(BaseSettings):
     first_lift_trade_min_velocity_9s: float = 0.8
     first_lift_trade_max_move_pct: float = 25.0
     first_lift_trade_min_momentum_shift_pct: float = 0.03
+    # A strict first lift has stronger early evidence than the generic COLD timing
+    # classifier. Do not wait for lagging breadth/chart state after the measured
+    # local pad, quality, sustained velocity, volume and live momentum turn pass.
+    # Chase, fake-trap, expiry, risk and execution-price checks still apply.
+    first_lift_bypasses_cold_timing_enabled: bool = True
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0
