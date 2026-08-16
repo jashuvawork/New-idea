@@ -308,6 +308,17 @@ export default function App() {
           />
         ) : null}
 
+        {data ? (
+          <DashboardSection
+            title="News Intelligence"
+            subtitle="Verified India and global cues for the current and next session"
+          >
+            <div className="col-span-12">
+              <NewsPanel news={data.news ?? []} />
+            </div>
+          </DashboardSection>
+        ) : null}
+
         {canShowDashboard && snap && auto && data ? (
           <div className="space-y-6">
             <DashboardSection title="Execution" subtitle="Live context for the active symbol">
@@ -318,9 +329,6 @@ export default function App() {
             </DashboardSection>
 
             <DashboardSection title="Signals & Trades" subtitle="Day mode, router, auto-trader, heatmap, swing lane">
-              <div className="col-span-12">
-                <NewsPanel news={data.news ?? []} />
-              </div>
               <div className="col-span-12">
                 <TomorrowPlaybookPanel auto={auto} snapshots={data.snapshots} deployment={deployment} />
               </div>
