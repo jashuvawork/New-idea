@@ -230,37 +230,37 @@ export function NewsPanel({ news: seedNews = [] }: { news?: NewsItem[] }) {
 
   return (
     <Panel title="India Market News Intelligence" badge={badge || undefined}>
-      {error && items.length === 0 ? (
-        <p className="text-xs text-nexus-muted">{error}</p>
-      ) : items.length === 0 ? (
-        <div className="text-xs text-nexus-muted">
-          No news feed available. Connect Upstox for instrument/position news or configure Finnhub for global cues.
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <NewsOutlookCard label="Current session" outlook={aggregate?.currentSession} />
+          <NewsOutlookCard label="Next session" outlook={aggregate?.nextSession} />
         </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <NewsOutlookCard label="Current session" outlook={aggregate?.currentSession} />
-            <NewsOutlookCard label="Next session" outlook={aggregate?.nextSession} />
-          </div>
 
-          <div className="flex flex-wrap items-center gap-1.5 text-[9px]">
-            {(aggregate?.providerCoverage ?? []).map((provider) => (
-              <span key={provider} className="rounded border border-nexus-border bg-black/20 px-1.5 py-0.5 uppercase text-nexus-muted">
-                {provider}
-              </span>
-            ))}
-            <span className="text-nexus-muted">
-              {aggregate?.guardrail ?? 'News is confirmation only — price and orderflow must agree.'}
+        <div className="flex flex-wrap items-center gap-1.5 text-[9px]">
+          {(aggregate?.providerCoverage ?? []).map((provider) => (
+            <span key={provider} className="rounded border border-nexus-border bg-black/20 px-1.5 py-0.5 uppercase text-nexus-muted">
+              {provider}
             </span>
-          </div>
+          ))}
+          <span className="text-nexus-muted">
+            {aggregate?.guardrail ?? 'News is confirmation only — price and orderflow must agree.'}
+          </span>
+        </div>
 
+        {error && items.length === 0 ? (
+          <p className="text-xs text-nexus-muted">{error}</p>
+        ) : items.length === 0 ? (
+          <div className="text-xs text-nexus-muted">
+            No fresh articles. Upstox instrument/position news and configured global cues will appear here automatically.
+          </div>
+        ) : (
           <div className="max-h-64 overflow-y-auto grid grid-cols-1 xl:grid-cols-2 gap-2 pr-1">
             {items.slice(0, 12).map((n, i) => (
               <NewsRow key={`${n.headline.slice(0, 40)}-${i}`} item={n} />
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </Panel>
   );
 }
