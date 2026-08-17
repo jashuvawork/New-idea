@@ -67,4 +67,4 @@ def test_near_base_still_books_big_peak_fade():
 def test_near_base_breakeven_still_protected():
     """Downside protection intact: near-base runner faded to breakeven still books BE."""
     reason = peak_fade_profit_lock_reason(_trade(11.0, best=11.0), best=11.0, pnl_pts=0.0)
-    assert reason == "explosion_peak_fade_breakeven"
+    assert reason == "explosion_early_green_breakeven"

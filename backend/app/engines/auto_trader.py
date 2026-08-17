@@ -544,7 +544,7 @@ async def _open_from_candidate(
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
     faded_rip_meta: dict[str, Any] = {}
     trap_meta: dict[str, Any] = {}
-    strict_first_lift = False
+    early_base_entry_ready = False
     if candidate.mode == "explosion" and candidate.explosion_event:
         from app.engines.explosion_entry_guards import (
             detect_fake_explosion_trap,
@@ -597,9 +597,6 @@ async def _open_from_candidate(
             candidate.alert
             if isinstance(getattr(candidate, "alert", None), dict)
             else {}
-        )
-        strict_first_lift = bool(
-            early_base_entry_ready and alert_row.get("ictFirstLift")
         )
         if (
             timing_blocked
@@ -944,11 +941,29 @@ async def _open_from_candidate(
         structured_cold_max = True
         top_explosion_max = True
 
-    force_max_size = bool(
-        high_conviction or top_explosion_max or base_window_full_lots or structured_cold_max
+    exceptional_full_sleeve = _exceptional_armed_launch_full_sleeve_allowed(
+        candidate=candidate,
+        snap=snap,
+        allocation=allocation,
+        early_base_entry_ready=early_base_entry_ready,
     )
+    force_max_size = exceptional_full_sleeve
 
     lots = clamp_lots(lots, symbol, fill_premium)
+    if timing_meta:
+        from app.engines.entry_timing import cap_lots_for_timing
+
+        lots = cap_lots_for_timing(lots, timing_meta)
+    if not exceptional_full_sleeve:
+        from app.engines.capital_allocator import max_lots_for_capital_pct
+
+        ordinary_pct = float(
+            getattr(settings, "ordinary_entry_max_capital_pct", 0.35) or 0.35
+        )
+        lots = min(
+            lots,
+            max_lots_for_capital_pct(symbol, fill_premium, ordinary_pct),
+        )
     # India VIX day-type sizing — default OFF (observe-only). Always records the regime;
     # only scales lots when vix_regime_sizing_enabled is on (calm/spike days shrink).
     from app.engines.vix_regime import vix_size_multiplier
@@ -961,7 +976,7 @@ async def _open_from_candidate(
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
         # Must run AFTER good-day ICT max-lot force (Jul20 49-lot FOMO hole).
-        bypass_soft = (
+        bypass_soft = exceptional_full_sleeve and (
             (bool(high_conviction) and bool(
                 getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
             ))
@@ -1088,7 +1103,7 @@ async def _open_from_candidate(
                 if trap_block or live_trap.get("action") == "block":
                     return False, trap_reason
                 if trap_meta.get("action") == "cut_size":
-                    bypass_soft = (
+                    bypass_soft = exceptional_full_sleeve and (
                         (bool(high_conviction) and bool(
                             getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
                         ))
@@ -1198,7 +1213,7 @@ async def _open_from_candidate(
             getattr(settings, "top_rank_first_lift_full_budget_lots_enabled", True)
         ),
         allocation=allocation,
-        strict_first_lift=strict_first_lift,
+        strict_first_lift=exceptional_full_sleeve,
         top_explosion_max=top_explosion_max,
         faded_rip=bool(faded_rip_meta),
         post_win_capped=bool(post_win_cap_meta.get("applied")),
@@ -1288,6 +1303,22 @@ async def _open_from_candidate(
         "elevatedSize": bool(elevated_size),
         "topExplosionMaxLots": bool(top_explosion_max),
         "topRankFullBudgetLots": top_rank_full_budget_lots,
+        "fullSleeveQualified": exceptional_full_sleeve,
+        "entryRiskCapInr": (
+            float(
+                getattr(
+                    settings,
+                    "explosion_exceptional_per_trade_max_loss_inr",
+                    4_000.0,
+                )
+                or 4_000.0
+            )
+            if exceptional_full_sleeve
+            else float(
+                getattr(settings, "explosion_per_trade_max_loss_inr", 2_000.0)
+                or 2_000.0
+            )
+        ),
         "baseWindowFullLots": bool(base_window_full_lots),
         "structuredColdMaxLots": bool(structured_cold_max),
         "sameStrikePostWinCap": post_win_cap_meta or None,
@@ -2150,6 +2181,76 @@ def _is_ranked_ftv_candidate(candidate: EntryCandidate) -> bool:
         )
     except Exception:
         return False
+
+
+def _exceptional_armed_launch_full_sleeve_allowed(
+    *,
+    candidate: EntryCandidate,
+    snap: SymbolSnapshot,
+    allocation: RankedAllocation | None,
+    early_base_entry_ready: bool,
+) -> bool:
+    """Reserve the 90% sleeve for a rank-1 armed launch with live tape proof."""
+    settings = get_settings()
+    if not bool(getattr(settings, "full_sleeve_requires_armed_launch", True)):
+        return bool(early_base_entry_ready and allocation and allocation.rank == 1)
+    if not early_base_entry_ready or allocation is None or allocation.rank != 1:
+        return False
+    event = getattr(candidate, "explosion_event", None)
+    alert = (
+        candidate.alert
+        if isinstance(getattr(candidate, "alert", None), dict)
+        else {}
+    )
+    if event is None or not bool(alert.get("ictArmedBaseLaunch")):
+        return False
+    min_v3 = float(
+        getattr(settings, "ict_armed_base_launch_min_velocity_3s", 1.5) or 1.5
+    )
+    min_v9 = float(
+        getattr(settings, "ict_armed_base_launch_min_velocity_9s", 1.5) or 1.5
+    )
+    if float(getattr(event, "velocity_3s", 0) or 0) < min_v3:
+        return False
+    if float(getattr(event, "velocity_9s", 0) or 0) < min_v9:
+        return False
+    volume_proof = bool(
+        alert.get("ictVolumeAwakening")
+        or alert.get("volumeAwaken")
+        or (
+            float(getattr(event, "volume", 0) or 0)
+            >= float(
+                getattr(
+                    settings,
+                    "ict_armed_base_launch_min_absolute_volume",
+                    25_000.0,
+                )
+                or 25_000.0
+            )
+            and float(getattr(event, "volume_surge", 0) or 0) >= 1.0
+        )
+    )
+    if not volume_proof:
+        return False
+    try:
+        from app.engines.advanced_indicators import (
+            option_cvd_acceleration_confirms_buying,
+            option_cvd_confirms_buying,
+        )
+
+        if bool(getattr(settings, "full_sleeve_requires_cvd", True)) and not (
+            option_cvd_confirms_buying(snap, candidate.strike, candidate.side)
+        ):
+            return False
+        if bool(
+            getattr(settings, "full_sleeve_requires_cvd_acceleration", True)
+        ) and not option_cvd_acceleration_confirms_buying(
+            snap, candidate.strike, candidate.side
+        ):
+            return False
+    except Exception:
+        return False
+    return True
 
 
 def _top_rank_full_budget_lots_allowed(

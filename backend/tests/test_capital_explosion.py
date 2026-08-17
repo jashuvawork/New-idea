@@ -13,6 +13,7 @@ from app.engines.capital_allocator import (
     clamp_lots,
     get_capital_snapshot,
     max_lots_for_capital,
+    max_lots_for_capital_pct,
     next_ranked_allocation_rank,
     ranked_allocation_for_state,
     set_manual_capital_limit,
@@ -25,6 +26,7 @@ from app.engines.explosion_profit import (
     record_explosion_stop,
 )
 from app.engines.auto_trader import (
+    _exceptional_armed_launch_full_sleeve_allowed,
     _is_ranked_ftv_candidate,
     _top_rank_full_budget_lots_allowed,
 )
@@ -63,6 +65,13 @@ class CapitalSizingTests(unittest.TestCase):
             self.assertEqual(lots, 212)
             lots_n = max_lots_for_capital("NIFTY", 50.0)
             self.assertEqual(lots_n, 52)
+
+    def test_ordinary_entry_cap_uses_only_35pct_capital(self):
+        snap = CapitalSnapshot(availableMarginInr=200_000)
+        with patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap):
+            lots = max_lots_for_capital_pct("NIFTY", 50.0, 0.35)
+        self.assertEqual(lots, 21)
+        self.assertLessEqual(lots * 65 * 50, 70_000)
 
     def test_compute_lots_aggressive_uses_full_85pct_budget(self):
         from app.engines.capital_allocator import compute_lots
@@ -311,6 +320,62 @@ class CapitalSizingTests(unittest.TestCase):
                 }
             )
         )
+
+    def test_full_sleeve_requires_armed_launch_velocity_cvd_and_acceleration(self):
+        settings = self._ranked_settings()
+        settings.full_sleeve_requires_armed_launch = True
+        settings.full_sleeve_requires_cvd = True
+        settings.full_sleeve_requires_cvd_acceleration = True
+        settings.ict_armed_base_launch_min_velocity_3s = 1.5
+        settings.ict_armed_base_launch_min_velocity_9s = 1.5
+        settings.ict_armed_base_launch_min_absolute_volume = 25_000
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=180_000,
+            remainingBeforeInr=200_000,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=0,
+            weight=0.9,
+        )
+        event = SimpleNamespace(
+            velocity_3s=2.0,
+            velocity_9s=1.8,
+            volume=30_000,
+            volume_surge=2.0,
+        )
+        candidate = SimpleNamespace(
+            explosion_event=event,
+            alert={"ictArmedBaseLaunch": True, "ictVolumeAwakening": True},
+            strike=24_500,
+            side=Side.CALL,
+        )
+        with (
+            patch("app.engines.auto_trader.get_settings", return_value=settings),
+            patch(
+                "app.engines.advanced_indicators.option_cvd_confirms_buying",
+                return_value=True,
+            ),
+            patch(
+                "app.engines.advanced_indicators.option_cvd_acceleration_confirms_buying",
+                return_value=True,
+            ),
+        ):
+            allowed = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+            event.velocity_9s = -0.1
+            rejected_cold_v9 = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+        self.assertTrue(allowed)
+        self.assertFalse(rejected_cold_v9)
 
     def test_manual_capital_limit_updates_sizing_snapshot(self):
         settings = self._ranked_settings()

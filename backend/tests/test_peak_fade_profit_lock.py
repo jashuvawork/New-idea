@@ -24,6 +24,10 @@ def _settings(**overrides):
     s.explosion_peak_fade_min_remain_points = 0.4
     s.explosion_peak_fade_breakeven_lock = True
     s.explosion_peak_fade_breakeven_buffer = 0.5
+    s.explosion_early_green_lock_enabled = True
+    s.explosion_early_green_lock_min_best_points = 3.5
+    s.explosion_early_green_lock_buffer_points = 0.5
+    s.explosion_early_green_lock_max_velocity_3s = 0.0
     s.explosion_peak_fade_max_profit_min_best = 28.0
     s.explosion_peak_fade_max_profit_giveback_ratio = 0.80
     s.explosion_peak_fade_defer_when_bullish = True
@@ -278,7 +282,41 @@ def test_breakeven_lock_after_peak(mock_s):
     reason = peak_fade_profit_lock_reason(
         _trade(current=42.4, best=12.53), best=12.53, pnl_pts=-0.15, max_profit=False,
     )
-    assert reason == "explosion_peak_fade_breakeven"
+    assert reason == "explosion_early_green_breakeven"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_small_ftv_winner_cannot_turn_into_loss_after_velocity_reverses(mock_s):
+    mock_s.return_value = _settings()
+    reason = peak_fade_profit_lock_reason(
+        _trade(
+            current=42.35,
+            best=4.0,
+            ctx={"maxProfitCapture": True, "ictFlatThenVertical": True},
+        ),
+        best=4.0,
+        pnl_pts=-0.2,
+        max_profit=True,
+        live_velocity_3s=-0.4,
+    )
+    assert reason == "explosion_early_green_breakeven"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_small_ftv_winner_keeps_running_while_velocity_is_positive(mock_s):
+    mock_s.return_value = _settings()
+    reason = peak_fade_profit_lock_reason(
+        _trade(
+            current=42.35,
+            best=4.0,
+            ctx={"maxProfitCapture": True, "ictFlatThenVertical": True},
+        ),
+        best=4.0,
+        pnl_pts=-0.2,
+        max_profit=True,
+        live_velocity_3s=1.0,
+    )
+    assert reason is None
 
 
 @patch("app.engines.explosion_profit.get_settings")
