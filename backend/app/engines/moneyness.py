@@ -53,6 +53,30 @@ def classify_moneyness(
     return "ITM" if strike > ref + tol else "OTM"
 
 
+def atm_itm_entry_allows(
+    side: Side | str,
+    strike: float,
+    snap: SymbolSnapshot,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Hard execution policy: every order must be ATM or ITM."""
+    spot = float(snap.spot or 0)
+    if spot <= 0:
+        return False, "moneyness_spot_required", {}
+    symbol = snap.symbol.upper()
+    atm = float(snap.atmStrike or atm_strike(spot, symbol))
+    if atm <= 0:
+        return False, "moneyness_atm_required", {}
+    money = classify_moneyness(side, strike, spot, symbol=symbol, atm=atm)
+    meta = {
+        "moneyness": money,
+        "atmStrike": atm,
+        "strikeStepsFromAtm": _depth_steps(side, strike, spot, symbol, atm),
+    }
+    if money == "OTM":
+        return False, "moneyness_atm_itm_only", meta
+    return True, "ok", meta
+
+
 def steps_from_atm(
     strike: float,
     spot: float,
@@ -109,11 +133,15 @@ def resolve_preferred_moneyness(
     """
     settings = get_settings()
     mode_key = (settings.trade_moneyness_mode or "AUTO").upper()
-    if mode_key in ("ITM", "OTM", "ATM"):
+    # Legacy OTM configuration is normalized to ATM; OTM is never executable.
+    if mode_key == "OTM":
+        return "ATM"
+    if mode_key in ("ITM", "ATM"):
         return mode_key
 
     if mode == "explosion":
-        return settings.moneyness_explosion_prefer.upper()
+        preferred = settings.moneyness_explosion_prefer.upper()
+        return "ATM" if preferred == "OTM" else preferred
 
     chop = is_chop_session(snapshots or {snap.symbol: snap})
     bearish_side = is_bearish_sideways(snap)
@@ -123,81 +151,6 @@ def resolve_preferred_moneyness(
         return settings.moneyness_scalp_chop_prefer.upper()
 
     return "ATM"
-
-
-def _local_base_otm_bypass(
-    side: Side | str,
-    depth: int,
-    snap: SymbolSnapshot,
-    *,
-    candidate_score: float = 0.0,
-    candidate: Any = None,
-) -> bool:
-    """Shallow OTM CE/PE with confirmed local base — ATM often missing on directional rips."""
-    settings = get_settings()
-    if not getattr(settings, "moneyness_local_base_otm_bypass_enabled", True):
-        return False
-    side_v = side.value if isinstance(side, Side) else str(side).upper()
-    if side_v not in ("CALL", "PUT"):
-        return False
-    max_steps = int(getattr(settings, "moneyness_local_base_max_otm_steps", 3) or 3)
-    if depth < 1 or depth > max_steps:
-        return False
-    min_score = float(
-        getattr(settings, "moneyness_local_base_otm_min_score", 75.0) or 75.0
-    )
-    if float(candidate_score or 0) < min_score:
-        return False
-    from app.engines.local_base_chart_bypass import local_base_structure_active
-
-    alert = getattr(candidate, "alert", None) if candidate is not None else None
-    if not isinstance(alert, dict):
-        alert = None
-    event = (
-        getattr(candidate, "explosion_event", None) if candidate is not None else None
-    )
-    return local_base_structure_active(side_v, snap, event=event, alert=alert)
-
-
-# Backward-compatible alias.
-_local_base_call_otm_bypass = _local_base_otm_bypass
-
-
-def strict_first_lift_shallow_otm_allows(
-    side: Side | str,
-    strike: float,
-    snap: SymbolSnapshot,
-    *,
-    alert: Optional[dict[str, Any]] = None,
-    candidate: Any = None,
-) -> bool:
-    """Allow only fully confirmed first lifts one listed step outside ATM."""
-    settings = get_settings()
-    if not bool(getattr(settings, "first_lift_shallow_otm_entry_enabled", True)):
-        return False
-    spot = float(snap.spot or 0)
-    atm = float(snap.atmStrike or (atm_strike(spot, snap.symbol) if spot > 0 else 0))
-    if spot <= 0 or atm <= 0:
-        return False
-    if classify_moneyness(side, strike, spot, symbol=snap.symbol, atm=atm) != "OTM":
-        return False
-    step = strike_step(snap.symbol)
-    tolerance = float(
-        getattr(settings, "moneyness_atm_tolerance_points", step) or step
-    )
-    max_steps = int(
-        getattr(settings, "first_lift_shallow_otm_max_steps", 1) or 1
-    )
-    if abs(float(strike) - atm) > tolerance + step * max(0, max_steps):
-        return False
-
-    row = alert
-    if row is None and candidate is not None:
-        candidate_alert = getattr(candidate, "alert", None)
-        row = candidate_alert if isinstance(candidate_alert, dict) else None
-    from app.engines.ict_breakout_monitor import first_lift_entry_ready
-
-    return first_lift_entry_ready(snap=snap, alert=row)
 
 
 def moneyness_allows(
@@ -212,13 +165,13 @@ def moneyness_allows(
     candidate: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     settings = get_settings()
+    hard_ok, hard_reason, hard_meta = atm_itm_entry_allows(side, strike, snap)
+    if not hard_ok:
+        return False, hard_reason, hard_meta
     if not settings.moneyness_selection_enabled:
-        return True, "ok", {}
+        return True, "ok", hard_meta
 
     spot = float(snap.spot or 0)
-    if spot <= 0:
-        return True, "ok", {}
-
     symbol = snap.symbol.upper()
     atm = float(snap.atmStrike or atm_strike(spot, symbol))
     money = classify_moneyness(side, strike, spot, symbol=symbol, atm=atm)
@@ -235,58 +188,10 @@ def moneyness_allows(
     }
 
     mode_key = (settings.trade_moneyness_mode or "AUTO").upper()
-    if mode_key in ("ITM", "OTM", "ATM") and money != mode_key:
+    if mode_key == "OTM":
+        mode_key = "ATM"
+    if mode_key in ("ITM", "ATM") and money != mode_key:
         return False, f"moneyness_mode_{mode_key.lower()}_required", meta
-
-    strict_shallow_first_lift = (
-        mode == "explosion"
-        and money == "OTM"
-        and strict_first_lift_shallow_otm_allows(
-            side, strike, snap, candidate=candidate,
-        )
-    )
-    if strict_shallow_first_lift:
-        meta["strictFirstLiftShallowOtm"] = True
-
-    # Explosion ATM+ITM only — drop OTM entirely so near-base ATM/ITM can win
-    # radar (Aug5 deep-OTM 24050 PE <₹18 drowned the 24500 base).
-    if (
-        mode == "explosion"
-        and money == "OTM"
-        and bool(getattr(settings, "moneyness_explosion_atm_itm_only", True))
-        and not strict_shallow_first_lift
-    ):
-        return False, "moneyness_explosion_atm_itm_only", meta
-
-    # Explosion ATM-first: OTM is a hard miss, not a soft rank penalty.
-    if (
-        mode == "explosion"
-        and money == "OTM"
-        and preferred == "ATM"
-        and bool(getattr(settings, "moneyness_explosion_block_otm", True))
-        and not strict_shallow_first_lift
-    ):
-        if _local_base_otm_bypass(
-            side, depth, snap, candidate_score=candidate_score, candidate=candidate,
-        ):
-            meta["localBaseOtmBypass"] = True
-        else:
-            return False, "moneyness_explosion_atm_only_otm_blocked", meta
-
-    if money == "OTM" and depth > settings.moneyness_max_otm_steps:
-        expiry_otm_ok = False
-        if mode == "explosion":
-            from app.engines.expiry_day_guards import is_symbol_expiry_day
-
-            max_depth = settings.moneyness_max_otm_steps
-            if is_symbol_expiry_day(snap):
-                max_depth = max(max_depth, int(getattr(settings, "expiry_explosion_max_otm_steps", 4) or 4))
-            if depth <= max_depth and candidate_score >= settings.aggressive_min_explosion_score:
-                expiry_otm_ok = True
-        if not expiry_otm_ok and (
-            mode != "explosion" or candidate_score < settings.bearish_sideways_explosion_min_score
-        ):
-            return False, f"moneyness_otm_too_deep_{depth}", meta
 
     if money == "ITM" and depth > settings.moneyness_max_itm_steps:
         from app.engines.expiry_day_guards import (
@@ -341,6 +246,8 @@ def moneyness_rank_adjustment(
     preferred = resolve_preferred_moneyness(
         mode, snap, candidate_score=candidate_score, side=side, snapshots=snapshots,
     )
+    if preferred == "OTM":
+        preferred = "ATM"
     bonus = settings.moneyness_rank_bonus
     penalty = settings.moneyness_mismatch_penalty
 
