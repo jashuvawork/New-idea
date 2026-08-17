@@ -245,6 +245,105 @@ def test_hindsight_scorecard_finds_early_and_missed_ftv_both_sides(tmp_path):
     assert all(event["baseToVerticalSeconds"] == 30.0 for event in report["events"])
 
 
+def test_hindsight_separates_visibility_executable_and_selected_precision(tmp_path):
+    settings = _settings(tmp_path)
+    start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+    truth_key = "NIFTY:CALL:24500"
+    visibility_key = "NIFTY:PUT:24500"
+    executable_false_key = "NIFTY:CALL:24450"
+    archives = [
+        {
+            "key": truth_key,
+            "firstSeenAt": start.isoformat(),
+            "alert": {"tradeable": False},
+            "milestones": [
+                {
+                    "seenAt": (start + timedelta(seconds=30)).isoformat(),
+                    "tradeable": True,
+                }
+            ],
+        },
+        {
+            "key": visibility_key,
+            "firstSeenAt": start.isoformat(),
+            "alert": {"tradeable": False},
+            "milestones": [
+                {"seenAt": start.isoformat(), "tradeable": False}
+            ],
+        },
+        {
+            "key": executable_false_key,
+            "firstSeenAt": start.isoformat(),
+            "alert": {"tradeable": True},
+            "milestones": [],
+        },
+    ]
+    samples = [
+        (start + timedelta(seconds=offset), premium)
+        for offset, premium in (
+            (0, 100.0),
+            (30, 102.0),
+            (60, 101.0),
+            (90, 100.0),
+            (120, 145.0),
+        )
+    ]
+    funnel_events = [
+        {
+            "event": "SELECTED",
+            "key": visibility_key,
+            "ts": (start - timedelta(seconds=1)).isoformat(),
+        },
+        {
+            "event": "SELECTED",
+            "key": truth_key,
+            "ts": (start + timedelta(seconds=31)).isoformat(),
+        },
+    ]
+    observation = {
+        "symbol": "NIFTY",
+        "side": "CALL",
+        "strike": 24500.0,
+        "spot": 24500.0,
+        "atmStrike": 24500.0,
+    }
+
+    with (
+        _patch_settings(settings),
+        patch(
+            "app.services.radar_learning.read_archive_entries",
+            return_value=archives,
+        ),
+        patch(
+            "app.services.radar_learning._premium_series",
+            return_value=(
+                {truth_key: samples},
+                {truth_key: {start + timedelta(seconds=90): observation}},
+            ),
+        ),
+        patch(
+            "app.services.radar_learning._read_jsonl",
+            return_value=funnel_events,
+        ),
+    ):
+        report = analyze_hindsight("2026-08-15")
+
+    assert report["truthCount"] == 1
+    assert report["radarAlertCount"] == 3
+    assert report["radarPrecisionPct"] == 33.3
+    assert report["radarFalseAlertCount"] == 2
+    assert report["precisionPct"] == report["radarPrecisionPct"]
+    assert report["executableRadarCount"] == 2
+    assert report["executablePrecisionPct"] == 50.0
+    assert report["executableFalseAlertCount"] == 1
+    assert report["visibilityOnlyCount"] == 1
+    assert report["selectedRadarCount"] == 1
+    assert report["selectedPrecisionPct"] == 100.0
+    assert report["selectedFalseAlertCount"] == 0
+    assert report["selectionEventCount"] == 2
+    assert report["selectedTelemetryAvailable"] is True
+
+
 def test_hindsight_excludes_penny_and_deep_otm_moves_from_recall(tmp_path):
     settings = _settings(tmp_path)
     start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)

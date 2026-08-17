@@ -749,6 +749,51 @@ def _truth_events(
     return events
 
 
+def _archive_was_tradeable(row: Mapping[str, Any]) -> bool:
+    """Whether retained causal radar evidence ever exposed this contract to selection."""
+    alert = row.get("alert")
+    if isinstance(alert, Mapping) and bool(alert.get("tradeable")):
+        return True
+    return any(
+        bool(item.get("tradeable"))
+        for item in (row.get("milestones") or [])
+        if isinstance(item, Mapping)
+    )
+
+
+def _causal_selected_keys(
+    date: str,
+    archived: Mapping[str, Mapping[str, Any]],
+) -> tuple[set[str], int]:
+    """Return archived contracts selected after their first retained detection."""
+    selected: set[str] = set()
+    event_count = 0
+    for event in _read_jsonl(funnel_path(date)):
+        if str(event.get("event") or "").upper() != "SELECTED":
+            continue
+        event_count += 1
+        key = str(event.get("key") or "")
+        archive_row = archived.get(key)
+        if archive_row is None:
+            continue
+        selected_at = _parse_ts(event.get("ts"))
+        first_seen_at = _parse_ts(archive_row.get("firstSeenAt"))
+        if first_seen_at is not None and (
+            selected_at is None or selected_at < first_seen_at
+        ):
+            continue
+        selected.add(key)
+    return selected, event_count
+
+
+def _precision_pct(candidate_keys: set[str], truth_keys: set[str]) -> float:
+    return (
+        round(len(candidate_keys & truth_keys) / len(candidate_keys) * 100.0, 1)
+        if candidate_keys
+        else 0.0
+    )
+
+
 def analyze_hindsight(
     date: str,
     *,
@@ -845,6 +890,11 @@ def analyze_hindsight(
     counts = Counter(event["capture"] for event in truths)
     truth_keys = {event["key"] for event in truths}
     archived_keys = set(archived)
+    executable_keys = {
+        key for key, row in archived.items()
+        if _archive_was_tradeable(row)
+    }
+    selected_keys, selection_event_count = _causal_selected_keys(date, archived)
     detected_truths = counts["EARLY"] + counts["LATE"]
     by_side: dict[str, dict[str, int]] = {}
     by_symbol: dict[str, dict[str, int]] = {}
@@ -880,10 +930,26 @@ def analyze_hindsight(
         "missed": counts["MISSED"],
         "recallPct": round(detected_truths / len(truths) * 100.0, 1) if truths else 0.0,
         "earlyRecallPct": round(counts["EARLY"] / len(truths) * 100.0, 1) if truths else 0.0,
-        "precisionPct": round(len(truth_keys & archived_keys) / len(archived_keys) * 100.0, 1)
-        if archived_keys else 0.0,
+        # Compatibility aliases retain the original all-archive visibility scope.
+        "precisionPct": _precision_pct(archived_keys, truth_keys),
         "falseAlertCount": len(archived_keys - truth_keys),
         "archivedRadarCount": len(archived_keys),
+        "radarPrecisionPct": _precision_pct(archived_keys, truth_keys),
+        "radarFalseAlertCount": len(archived_keys - truth_keys),
+        "radarAlertCount": len(archived_keys),
+        "executablePrecisionPct": _precision_pct(executable_keys, truth_keys),
+        "executableFalseAlertCount": len(executable_keys - truth_keys),
+        "executableRadarCount": len(executable_keys),
+        "executableDefinition": (
+            "contract had tradeable=true in its retained best alert or causal milestone"
+        ),
+        "visibilityOnlyCount": len(archived_keys - executable_keys),
+        "selectedPrecisionPct": _precision_pct(selected_keys, truth_keys),
+        "selectedFalseAlertCount": len(selected_keys - truth_keys),
+        "selectedRadarCount": len(selected_keys),
+        "selectionEventCount": selection_event_count,
+        "selectedTelemetryAvailable": selection_event_count > 0,
+        "precisionUnit": "unique option contract",
         "outcomes": dict(outcome_counts),
         "bySymbol": by_symbol,
         "bySide": by_side,
