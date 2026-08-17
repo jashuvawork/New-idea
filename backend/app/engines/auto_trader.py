@@ -1330,6 +1330,26 @@ async def _open_from_candidate(
         "sameStrikePostWinCap": post_win_cap_meta or None,
         "timingAssessment": timing_meta or None,
     }
+    from app.engines.trade_ranking import rank_entry_candidate
+
+    causal_ranking = dict(
+        (getattr(candidate, "pretrade_meta", None) or {}).get("causalRanking")
+        or rank_entry_candidate(candidate)
+    )
+    causal_ranking.setdefault(
+        "cycleRank",
+        allocation.rank if allocation is not None else 1,
+    )
+    ctx_extra.update(
+        {
+            "cycleRank": causal_ranking["cycleRank"],
+            "rankScore": causal_ranking.get("rankScore"),
+            "rankGrade": causal_ranking.get("grade"),
+            "rankReasons": list(causal_ranking.get("reasons") or []),
+            "rankPenalties": list(causal_ranking.get("penalties") or []),
+            "causalRanking": causal_ranking,
+        }
+    )
     if allocation is not None:
         ctx_extra.update(
             {
@@ -2227,6 +2247,13 @@ def _exceptional_armed_launch_full_sleeve_allowed(
         return bool(early_base_entry_ready and allocation and allocation.rank == 1)
     if not early_base_entry_ready or allocation is None or allocation.rank != 1:
         return False
+    from app.engines.trade_ranking import rank_entry_candidate
+
+    causal_ranking = (getattr(candidate, "pretrade_meta", None) or {}).get(
+        "causalRanking"
+    ) or rank_entry_candidate(candidate)
+    if not bool(causal_ranking.get("fullSleeveEligible")):
+        return False
     event = getattr(candidate, "explosion_event", None)
     alert = (
         candidate.alert
@@ -2527,6 +2554,13 @@ async def process(
                     f"{float(best.strike):g}"
                 )
                 excluded_keys.add(radar_key)
+                best.pretrade_meta = dict(best.pretrade_meta or {})
+                causal_ranking = dict(
+                    best.pretrade_meta.get("causalRanking") or {}
+                )
+                if causal_ranking:
+                    causal_ranking["cycleRank"] = _attempt + 1
+                    best.pretrade_meta["causalRanking"] = causal_ranking
 
                 if (
                     allocation_enabled
@@ -2588,6 +2622,12 @@ async def process(
                         state,
                         allocation_rank,
                     )
+                    causal_ranking = dict(
+                        (best.pretrade_meta or {}).get("causalRanking") or {}
+                    )
+                    if causal_ranking:
+                        causal_ranking["allocationRank"] = allocation.rank
+                        best.pretrade_meta["causalRanking"] = causal_ranking
                     allocation_row = {
                         **allocation.to_dict(),
                         "key": radar_key,

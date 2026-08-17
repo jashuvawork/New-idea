@@ -694,6 +694,7 @@ def _explosion_candidates(
             pretrade_meta={
                 "localBaseReversalPrediction": bullish_base,
                 "bullishLocalBasePrediction": bullish_base,
+                "timingAssessment": timing,
                 "ictBaseArmed": bool(alert.get("ictBaseArmed")),
                 "ictArmedBaseLaunch": bool(alert.get("ictArmedBaseLaunch")),
                 "ictBasePremium": float(alert.get("ictBasePremium") or 0),
@@ -1250,6 +1251,35 @@ def find_best_entry(
             edge = compute_entry_edge(c, c.snap, state)
             c.score += edge_rank_bonus(edge)
             c.pretrade_meta = {**(c.pretrade_meta or {}), "edgeScore": edge.total}
+        exhausted = False
+        if c.mode == "explosion":
+            from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
+
+            exhausted, _ = exhausted_ftv_reentry_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+                strike=float(c.strike or 0),
+                premium=float(c.premium or 0),
+                velocity_3s=float(
+                    getattr(c.explosion_event, "velocity_3s", 0) or 0
+                ),
+            )
+        from app.engines.trade_ranking import rank_entry_candidate
+
+        causal_ranking = rank_entry_candidate(c, exhausted_reentry=exhausted)
+        c.pretrade_meta = {
+            **(c.pretrade_meta or {}),
+            "causalRanking": causal_ranking,
+        }
+
+    candidates = [
+        c
+        for c in candidates
+        if (c.pretrade_meta or {}).get("causalRanking", {}).get("grade") != "REJECT"
+    ]
+    if not candidates:
+        return None
 
     pf_fb = session_pf_feedback(state) if settings.edge_engine_enabled else None
     from app.engines.session_mode_feedback import compute_mode_stats, mode_session_rank_bonus
@@ -1301,6 +1331,11 @@ def find_best_entry(
     ):
         from app.engines.explosion_confidence import high_confidence_explosion
 
+        top_causal = [
+            c
+            for c in candidates
+            if (c.pretrade_meta or {}).get("causalRanking", {}).get("grade") == "S"
+        ]
         preferred: list[EntryCandidate] = []
         for c in candidates:
             if c.mode != "explosion":
@@ -1317,7 +1352,9 @@ def find_best_entry(
             )
             if ok:
                 preferred.append(c)
-        if preferred:
+        if top_causal:
+            candidates = top_causal
+        elif preferred:
             candidates = preferred
 
     candidates = filter_candidates_pretrade(candidates, state, snapshots)
@@ -1457,9 +1494,14 @@ def find_best_entry(
 
     # Stable leg identity breaks exact score ties so the capital-first slot cannot
     # flip between otherwise identical snapshots because of collection order.
+    from app.engines.trade_ranking import ranking_sort_key
+
     best = max(
         candidates,
         key=lambda candidate: (
+            *ranking_sort_key(
+                (candidate.pretrade_meta or {}).get("causalRanking", {})
+            ),
             sort_key(candidate),
             candidate.symbol.upper(),
             candidate.side.value,
