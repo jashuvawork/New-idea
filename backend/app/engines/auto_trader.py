@@ -108,7 +108,11 @@ from app.engines.worst_day_itm_fade import (
 from app.engines.session_timing import entries_allowed_now, entry_window_label, explosion_entries_allowed_now
 from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
-from app.services.order_executor import place_entry_order, place_exit_order
+from app.services.order_executor import (
+    find_existing_exit_order,
+    place_entry_order,
+    place_exit_order,
+)
 from app.services.paper_broker import simulate_entry_order, simulate_exit_order
 from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase
 
@@ -174,11 +178,13 @@ def _ensure_state_loaded() -> None:
 
     saved = trade_store.load_open_trades()
     if saved:
+        seen_open_ids = {trade.id for trade in _auto_trader_state.openPaperTrades}
         for raw in saved:
             try:
                 trade = PaperTrade(**raw)
-                if trade.status == "OPEN":
+                if trade.status == "OPEN" and trade.id not in seen_open_ids:
                     _auto_trader_state.openPaperTrades.append(trade)
+                    seen_open_ids.add(trade.id)
             except Exception as e:
                 logger.warning("Failed to restore open trade: %s", e)
         if saved:
@@ -1752,10 +1758,25 @@ def reset_session_calibration() -> None:
     reset_session_profit_gate()
 
 
-def reset_session() -> None:
-    global _auto_trader_state
-    closed_ids = trade_store.close_open_trades_on_reset()
-    trade_store.record_session_reset(open_trade_ids=closed_ids)
+def reset_session(*, preserve_open_trades: bool = True) -> None:
+    """Reset calibration without converting active positions into synthetic exits."""
+    global _auto_trader_state, _state_loaded
+    current_state = get_state()
+    preserved: list[PaperTrade] = []
+    if preserve_open_trades:
+        preserved = [
+            trade for trade in current_state.openPaperTrades
+            if trade.status == "OPEN"
+        ]
+        for trade in preserved:
+            trade_store.record_trade_mark(trade)
+        trade_store.record_session_reset(
+            reason="manual_reset_preserved_open",
+            open_trade_ids=[trade.id for trade in preserved],
+        )
+    else:
+        closed_ids = trade_store.close_open_trades_on_reset()
+        trade_store.record_session_reset(open_trade_ids=closed_ids)
     reset_session_calibration()
     settings = get_settings()
     _auto_trader_state = AutoTraderState(
@@ -1774,7 +1795,9 @@ def reset_session() -> None:
             enhancedMode=True,
             adaptiveTargets=settings.adaptive_target_enabled,
         ),
+        openPaperTrades=preserved,
     )
+    _state_loaded = True
 
 
 def set_capital(amount: float) -> None:
@@ -1949,7 +1972,12 @@ async def _process_open_trades(
             try:
                 trade.exitReason = exit_reason
                 if is_live:
-                    exit_result = await place_exit_order(client, trade)
+                    existing_exit_id = await find_existing_exit_order(client, trade)
+                    exit_result = (
+                        {"order_id": existing_exit_id, "reconciled": True}
+                        if existing_exit_id
+                        else await place_exit_order(client, trade)
+                    )
                 else:
                     exit_result = await simulate_exit_order(client, trade, current)
                     sim_fill = exit_result.get("fill_premium", eval_premium)
@@ -1967,6 +1995,9 @@ async def _process_open_trades(
                 broker_ctx["brokerExitOrderId"] = exit_result.get("order_id")
                 broker_ctx["brokerExitSimulated"] = use_parity
                 trade.entryContext = broker_ctx
+                # Persist the broker acknowledgement while the trade is still OPEN.
+                # A crash after this checkpoint restores the exit id and cannot sell twice.
+                trade_store.record_trade_mark(trade)
                 if is_live:
                     state.liveOrdersPlaced += 1
             except UpstoxError as e:

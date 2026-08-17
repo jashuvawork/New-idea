@@ -68,7 +68,10 @@ async def reset_milestone_batch(reason: str = "manual_reset"):
 @router.post("/reset")
 async def reset_paper_session():
     reset_session()
-    return {"status": "reset", "message": "Paper session and calibration blocks cleared"}
+    return {
+        "status": "reset",
+        "message": "Calibration blocks cleared; open trades preserved",
+    }
 
 
 @router.post("/purge-logs")
@@ -78,7 +81,7 @@ async def purge_trade_logs():
     from app.engines.performance_milestone import compute_milestone_stats
 
     purge = trade_store.purge_all_trade_data()
-    reset_session()
+    reset_session(preserve_open_trades=False)
     reset_session_calibration()
     return {
         "status": "purged",

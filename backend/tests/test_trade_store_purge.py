@@ -22,6 +22,10 @@ def isolated_store(tmp_path):
     yield store
     trade_store._store_dir = None
     trade_store._log_path = None
+    from app.engines import auto_trader
+
+    auto_trader._auto_trader_state = None
+    auto_trader._state_loaded = False
 
 
 def test_purge_removes_day_files_and_clears_log(isolated_store):
@@ -75,3 +79,66 @@ def test_open_trade_mark_restores_peak_and_trail_after_restart(isolated_store):
     assert restored.maxLtp == 145.0
     assert restored.entryContext["explosionTrailFloorPts"] == 36.0
     assert restored.entryContext["stageTrailFloorPts"] == 30.0
+
+
+def test_process_restart_and_session_reset_preserve_open_trade(isolated_store):
+    from app.engines import auto_trader
+
+    trade = PaperTrade(
+        id="restart-open",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24350,
+        entryPremium=42.7,
+        currentPremium=49.45,
+        lots=2,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={
+            "instrumentKey": "NSE_FO|restart",
+            "brokerOrderId": "entry-1",
+        },
+    )
+    trade_store.record_trade_opened(trade, trade.entryContext)
+
+    auto_trader._auto_trader_state = None
+    auto_trader._state_loaded = False
+    state = auto_trader.get_state()
+    assert [row.id for row in state.openPaperTrades] == ["restart-open"]
+
+    auto_trader.reset_session()
+    reset_state = auto_trader.get_state()
+    persisted = trade_store.load_open_trades()
+
+    assert [row.id for row in reset_state.openPaperTrades] == ["restart-open"]
+    assert [row["id"] for row in persisted] == ["restart-open"]
+    assert persisted[0]["status"] == "OPEN"
+
+
+def test_trade_close_is_persisted_exactly_once(isolated_store):
+    trade = PaperTrade(
+        id="exactly-once-close",
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=77700,
+        entryPremium=378.05,
+        currentPremium=410.0,
+        lots=1,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+    )
+    trade_store.record_trade_opened(trade)
+    trade.status = "CLOSED"
+    trade.exitReason = "target"
+    trade.closedAt = datetime.now(IST)
+
+    assert trade_store.record_trade_closed(trade) is True
+    assert trade_store.record_trade_closed(trade) is False
+
+    day = trade_store.get_day_detail(datetime.now(IST).strftime("%Y-%m-%d"))
+    closes = [
+        event for event in day["events"]
+        if event.get("type") == "TRADE_CLOSED"
+        and event.get("tradeId") == trade.id
+    ]
+    assert len(closes) == 1
