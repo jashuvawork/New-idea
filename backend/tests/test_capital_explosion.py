@@ -377,6 +377,107 @@ class CapitalSizingTests(unittest.TestCase):
         self.assertTrue(allowed)
         self.assertFalse(rejected_cold_v9)
 
+    def test_full_sleeve_accepts_rank_one_s_preauthorized_base_only(self):
+        settings = self._ranked_settings()
+        settings.full_sleeve_requires_armed_launch = True
+        settings.full_sleeve_requires_cvd = True
+        settings.full_sleeve_requires_cvd_acceleration = True
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=180_000,
+            remainingBeforeInr=200_000,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=0,
+            weight=0.9,
+        )
+        event = SimpleNamespace(
+            velocity_3s=2.27,
+            velocity_9s=2.08,
+            volume=27_127_300,
+            volume_surge=2.5,
+            explosion_score=65.4,
+            tier="EXPLODING",
+        )
+        candidate = SimpleNamespace(
+            explosion_event=event,
+            alert={
+                "ictEliteBaseReady": True,
+                "ictBaseArmed": True,
+                "ictBaseRelativeMovePct": 2.3,
+                "ictArmedBaseLaunch": False,
+                "ictVolumeAwakening": True,
+                "tier": "EXPLODING",
+            },
+            mode="explosion",
+            tier="EXPLODING",
+            confidence=65.4,
+            tqs=70.0,
+            snap=SimpleNamespace(),
+            pretrade_meta={
+                "causalRanking": {
+                    "grade": "S",
+                    "executionAuthorization": "S_PREAUTHORIZED",
+                    "fullSleeveEligible": True,
+                },
+            },
+            strike=24_300,
+            side=Side.CALL,
+        )
+        rank_two = RankedAllocation(**{**allocation.__dict__, "rank": 2})
+        with (
+            patch("app.engines.auto_trader.get_settings", return_value=settings),
+            patch(
+                "app.engines.advanced_indicators.option_cvd_confirms_buying",
+                return_value=True,
+            ),
+            patch(
+                "app.engines.advanced_indicators.option_cvd_acceleration_confirms_buying",
+                return_value=True,
+            ),
+        ):
+            allowed = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+            rejected_rank_two = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=rank_two,
+                early_base_entry_ready=True,
+            )
+            event.velocity_9s = -0.1
+            rejected_cold_v9 = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+            event.velocity_9s = 2.08
+            candidate.alert["ictBaseArmed"] = False
+            rejected_unarmed = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+            candidate.alert["ictBaseArmed"] = True
+            candidate.alert["ictBaseRelativeMovePct"] = None
+            rejected_missing_move = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+
+        self.assertTrue(allowed)
+        self.assertFalse(rejected_rank_two)
+        self.assertFalse(rejected_cold_v9)
+        self.assertFalse(rejected_unarmed)
+        self.assertFalse(rejected_missing_move)
+
     def test_manual_capital_limit_updates_sizing_snapshot(self):
         settings = self._ranked_settings()
         settings.per_trade_capital_pct = 0.95

@@ -498,6 +498,7 @@ def _explosion_candidates(
                 flat_vertical_grade=str(alert.get("flatVerticalGrade") or ""),
                 first_lift=bool(alert.get("ictFirstLift")),
                 base_armed=bool(alert.get("ictBaseArmed")),
+                elite_base_ready=bool(alert.get("ictEliteBaseReady")),
                 armed_base_launch=bool(alert.get("ictArmedBaseLaunch")),
                 armed_base_samples=int(alert.get("ictArmedBaseSamples") or 0),
                 armed_base_span_seconds=float(
@@ -535,7 +536,7 @@ def _explosion_candidates(
             ict=ict,
             bullish_local_base=bool(bullish_base.get("active")),
         )
-        if immature_blocked and not must_take:
+        if immature_blocked and not must_take and not first_lift_ready:
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the
         # hard window does not re-raise the unstructured 28% floor.
@@ -546,7 +547,7 @@ def _explosion_candidates(
             squeeze_early_base=squeeze_early_base_active(event, snap),
             bullish_local_base=bool(bullish_base.get("active")),
         )
-        if window_blocked:
+        if window_blocked and not first_lift_ready:
             continue
         from app.engines.morning_premium_capture import is_premium_capture_event
 
@@ -605,7 +606,10 @@ def _explosion_candidates(
         ):
             continue
         rank += ict_explosion_rank_bonus(ict, trading_mode)
-        if first_lift_readiness_reason == "armed_base_option_led_ready":
+        if first_lift_readiness_reason in (
+            "armed_base_option_led_ready",
+            "elite_base_ready_s_preauthorized",
+        ):
             rank += float(
                 getattr(settings, "ict_armed_base_launch_rank_bonus", 16.0) or 16.0
             )
@@ -696,6 +700,7 @@ def _explosion_candidates(
                 "bullishLocalBasePrediction": bullish_base,
                 "timingAssessment": timing,
                 "ictBaseArmed": bool(alert.get("ictBaseArmed")),
+                "ictEliteBaseReady": bool(alert.get("ictEliteBaseReady")),
                 "ictArmedBaseLaunch": bool(alert.get("ictArmedBaseLaunch")),
                 "ictBasePremium": float(alert.get("ictBasePremium") or 0),
                 "ictBaseRelativeMovePct": float(

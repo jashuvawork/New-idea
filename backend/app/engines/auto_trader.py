@@ -2241,32 +2241,67 @@ def _exceptional_armed_launch_full_sleeve_allowed(
     allocation: RankedAllocation | None,
     early_base_entry_ready: bool,
 ) -> bool:
-    """Reserve the 90% sleeve for a rank-1 armed launch with live tape proof."""
+    """Reserve the 90% sleeve for a rank-1 proven launch or preauthorization."""
     settings = get_settings()
-    if not bool(getattr(settings, "full_sleeve_requires_armed_launch", True)):
-        return bool(early_base_entry_ready and allocation and allocation.rank == 1)
-    if not early_base_entry_ready or allocation is None or allocation.rank != 1:
-        return False
-    from app.engines.trade_ranking import rank_entry_candidate
-
-    causal_ranking = (getattr(candidate, "pretrade_meta", None) or {}).get(
-        "causalRanking"
-    ) or rank_entry_candidate(candidate)
-    if not bool(causal_ranking.get("fullSleeveEligible")):
-        return False
     event = getattr(candidate, "explosion_event", None)
     alert = (
         candidate.alert
         if isinstance(getattr(candidate, "alert", None), dict)
         else {}
     )
-    if event is None or not bool(alert.get("ictArmedBaseLaunch")):
+    if not bool(getattr(settings, "full_sleeve_requires_armed_launch", True)):
+        return bool(early_base_entry_ready and allocation and allocation.rank == 1)
+    if not early_base_entry_ready or allocation is None or allocation.rank != 1:
+        return False
+    from app.engines.trade_ranking import rank_entry_candidate
+
+    # Recompute at sizing time instead of trusting selector metadata: the latter
+    # is persisted for audit, but must not become an authorization token.
+    causal_ranking = rank_entry_candidate(candidate)
+    if not bool(causal_ranking.get("fullSleeveEligible")):
+        return False
+    elite_base_ready = bool(alert.get("ictEliteBaseReady"))
+    if elite_base_ready:
+        min_move = float(
+            getattr(settings, "ict_elite_base_ready_min_move_pct", 2.0) or 2.0
+        )
+        max_move = float(
+            getattr(settings, "ict_elite_base_ready_max_move_pct", 5.0) or 5.0
+        )
+        base_move = float(alert.get("ictBaseRelativeMovePct") or 0)
+        if (
+            not bool(alert.get("ictBaseArmed"))
+            or not (min_move <= base_move < max_move)
+            or causal_ranking.get("executionAuthorization") != "S_PREAUTHORIZED"
+        ):
+            return False
+    if event is None or not (
+        bool(alert.get("ictArmedBaseLaunch")) or elite_base_ready
+    ):
         return False
     min_v3 = float(
-        getattr(settings, "ict_armed_base_launch_min_velocity_3s", 1.5) or 1.5
+        getattr(
+            settings,
+            (
+                "ict_elite_base_ready_min_velocity_3s"
+                if elite_base_ready
+                else "ict_armed_base_launch_min_velocity_3s"
+            ),
+            1.5,
+        )
+        or 1.5
     )
     min_v9 = float(
-        getattr(settings, "ict_armed_base_launch_min_velocity_9s", 1.5) or 1.5
+        getattr(
+            settings,
+            (
+                "ict_elite_base_ready_min_velocity_9s"
+                if elite_base_ready
+                else "ict_armed_base_launch_min_velocity_9s"
+            ),
+            1.5,
+        )
+        or 1.5
     )
     if float(getattr(event, "velocity_3s", 0) or 0) < min_v3:
         return False

@@ -408,7 +408,7 @@ def check_explosion_entry(
         squeeze_early_base=squeeze_early_base_active(event, snap),
         bullish_local_base=bool(bullish_base.get("active")),
     )
-    if window_blocked:
+    if window_blocked and not first_lift_ready:
         return False, window_reason
     live_blocked, live_reason = live_explosion_confirmation_blocked(
         event,

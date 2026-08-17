@@ -35,6 +35,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     local_move = max(0.0, _number(evidence.get("localBaseMovePct")))
     first_lift = bool(evidence.get("firstLift"))
     armed_launch = bool(evidence.get("armedBaseLaunch"))
+    elite_base_ready = bool(evidence.get("eliteBaseReady"))
     flat_vertical = bool(evidence.get("flatThenVertical"))
     orderflow = bool(evidence.get("orderflowPositive"))
     exhausted = bool(evidence.get("exhaustedReentry"))
@@ -67,6 +68,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     if armed_launch:
         score += 12.0
         reasons.append("fresh_armed_base_launch")
+    elif elite_base_ready:
+        score += 12.0
+        reasons.append("elite_base_ready")
     elif first_lift:
         score += 8.0
         reasons.append("fresh_first_lift")
@@ -103,9 +107,16 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         penalties.append({"code": "exhausted_post_peak_reentry", "points": 60.0})
         score -= 60.0
 
+    elite_preauthorized = bool(
+        elite_base_ready
+        and tier in ("BUILDING", "EXPLODING", "ELITE")
+        and explosion_score >= 45.0
+        and tqs >= 50.0
+        and 2.0 <= local_move < 5.0
+    )
     s_quality = bool(
         mode == "explosion"
-        and armed_launch
+        and (armed_launch or elite_preauthorized)
         and v3 >= 1.5
         and v9 >= 1.5
         and orderflow
@@ -114,7 +125,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     )
     fresh_positive = bool(
         mode == "explosion"
-        and (first_lift or flat_vertical or armed_launch)
+        and (first_lift or flat_vertical or armed_launch or elite_base_ready)
         and v3 > 0
         and not rejected
         and local_move <= 40.0
@@ -142,12 +153,16 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         "penalties": penalties,
         "topRankEligible": s_quality,
         "fullSleeveEligible": s_quality,
+        "executionAuthorization": (
+            "S_PREAUTHORIZED" if elite_preauthorized and s_quality else None
+        ),
         "causalOnly": True,
         "evidence": {
             "velocity3s": round(v3, 3),
             "velocity9s": round(v9, 3),
             "localBaseMovePct": round(local_move, 2),
             "firstLift": first_lift,
+            "eliteBaseReady": elite_base_ready,
             "armedBaseLaunch": armed_launch,
             "flatThenVertical": flat_vertical,
             "orderflowPositive": orderflow,
@@ -195,6 +210,7 @@ def rank_entry_candidate(
             or pretrade.get("ictBaseRelativeMovePct")
         ),
         "firstLift": alert.get("ictFirstLift"),
+        "eliteBaseReady": alert.get("ictEliteBaseReady"),
         "armedBaseLaunch": alert.get("ictArmedBaseLaunch"),
         "flatThenVertical": alert.get("ictFlatThenVertical"),
         "orderflowPositive": bool(

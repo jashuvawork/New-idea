@@ -25,6 +25,7 @@ from app.engines.explosion_detector import (
 from app.engines.ict_breakout_monitor import first_lift_entry_readiness
 from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
 from app.engines.trade_selector import find_best_entry
+from app.engines.trade_ranking import rank_entry_candidate, rank_trade_evidence
 from app.models.schemas import (
     AutoTraderState,
     Breadth,
@@ -205,6 +206,133 @@ def test_aug17_real_selector_selects_armed_launch_only_at_57_without_full_budget
         faded_rip=False,
         post_win_capped=False,
     ) is False
+
+
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+@patch("app.engines.session_timing.in_open_premium_window", return_value=False)
+def test_aug17_elite_base_ready_is_s_preauthorized_at_54(_open, side):
+    settings = Settings(
+        best_trades_only_enabled=False,
+        edge_engine_enabled=False,
+    )
+    clock, scan, _advance = _scanner(side, settings)
+    snap = _snapshot(side)
+
+    with (
+        patch("app.config.get_settings", return_value=settings),
+        patch("app.engines.trade_selector.get_settings", return_value=settings),
+        patch("app.engines.ict_breakout_monitor.get_settings", return_value=settings),
+        patch.object(explosion_detector, "datetime", clock),
+    ):
+        _arm_base(scan)
+        ready_alert = scan(54.0, 0)
+        snap.explosionAlerts = [ready_alert]
+        ready, reason = first_lift_entry_readiness(
+            snap=snap,
+            alert=ready_alert,
+        )
+        selected = find_best_entry({"NIFTY": snap}, AutoTraderState())
+
+    assert ready_alert["ictBasePremium"] == pytest.approx(52.8)
+    assert ready_alert["ictBaseRelativeMovePct"] == pytest.approx(2.3, abs=0.1)
+    assert ready_alert["ictEliteBaseReady"] is True
+    assert ready_alert["ictArmedBaseLaunch"] is False
+    assert ready_alert["momentType"] == "ELITE_BASE_READY"
+    assert ready_alert["tradeable"] is True
+    assert ready is True
+    assert reason == "elite_base_ready_s_preauthorized"
+    assert selected is not None
+    assert selected.side == side
+    assert selected.premium == pytest.approx(54.0)
+    ranking = rank_entry_candidate(selected)
+    assert ranking["grade"] == "S"
+    assert ranking["executionAuthorization"] == "S_PREAUTHORIZED"
+    assert ranking["topRankEligible"] is True
+    assert ranking["fullSleeveEligible"] is True
+
+
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+@patch("app.engines.session_timing.in_open_premium_window", return_value=False)
+def test_elite_base_ready_cannot_bypass_missing_orderflow_or_otm(_open, side):
+    settings = Settings(
+        best_trades_only_enabled=False,
+        edge_engine_enabled=False,
+        explosion_shallow_otm_history_steps=1,
+    )
+    clock, scan, _advance = _scanner(side, settings)
+    snap = _snapshot(side)
+
+    with (
+        patch("app.config.get_settings", return_value=settings),
+        patch("app.engines.trade_selector.get_settings", return_value=settings),
+        patch("app.engines.ict_breakout_monitor.get_settings", return_value=settings),
+        patch.object(explosion_detector, "datetime", clock),
+    ):
+        _arm_base(scan)
+        ready_alert = scan(54.0, 0)
+        weak = {
+            **ready_alert,
+            "volume": 0,
+            "absoluteVolume": 0,
+            "ictVolumeAwakening": False,
+            "volumeAwaken": False,
+            "orderflowConfirmed": False,
+            "optionCvdBuying": False,
+        }
+        weak_ready, weak_reason = first_lift_entry_readiness(
+            snap=snap,
+            alert=weak,
+        )
+        snap.explosionAlerts = [weak]
+        weak_selected = find_best_entry({"NIFTY": snap}, AutoTraderState())
+
+        otm_spot = 24200.0 if side == Side.CALL else 24400.0
+        otm_snap = _snapshot(side, spot=otm_spot, atm=otm_spot)
+        otm_ready, otm_reason = first_lift_entry_readiness(
+            snap=otm_snap,
+            alert=ready_alert,
+        )
+
+    assert weak_ready is False
+    assert weak_reason.startswith("armed_base_orderflow_below_")
+    assert weak_selected is None
+    assert otm_ready is False
+    assert otm_reason == "armed_base_requires_atm_itm_otm"
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"velocity3s": 1.49},
+        {"velocity9s": 1.49},
+        {"orderflowPositive": False},
+        {"localBaseMovePct": 1.99},
+        {"localBaseMovePct": 5.0},
+        {"tier": "WATCH"},
+        {"explosionScore": 44.9},
+        {"tqs": 49.9},
+    ],
+)
+def test_s_preauthorized_ranking_requires_every_strict_guard(override):
+    evidence = {
+        "mode": "explosion",
+        "tier": "EXPLODING",
+        "explosionScore": 65.4,
+        "tqs": 70.0,
+        "velocity3s": 2.27,
+        "velocity9s": 2.08,
+        "localBaseMovePct": 2.3,
+        "eliteBaseReady": True,
+        "flatThenVertical": True,
+        "orderflowPositive": True,
+        **override,
+    }
+
+    ranking = rank_trade_evidence(evidence)
+
+    assert ranking["executionAuthorization"] is None
+    assert ranking["topRankEligible"] is False
+    assert ranking["fullSleeveEligible"] is False
 
 
 @pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
