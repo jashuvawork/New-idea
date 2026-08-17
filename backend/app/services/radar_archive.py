@@ -181,6 +181,29 @@ def _milestone(
     })
 
 
+def _should_append_detection_milestone(
+    previous: Mapping[str, Any],
+    alert: Mapping[str, Any],
+    seen_at: str,
+) -> bool:
+    """Retain causal tradeable moments even when an older alert has a higher rank."""
+    if not (
+        alert.get("tradeable")
+        or alert.get("ictFirstLift")
+        or alert.get("ictArmedBaseLaunch")
+    ):
+        return False
+    milestones = list(previous.get("milestones") or [])
+    if not milestones:
+        return True
+    try:
+        current = datetime.fromisoformat(seen_at)
+        prior = datetime.fromisoformat(str(milestones[-1].get("seenAt")))
+        return (current - prior).total_seconds() >= 30.0
+    except (TypeError, ValueError):
+        return True
+
+
 def _load_entries(path: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
         return {}
@@ -349,6 +372,23 @@ def record_top_radars(
                 previous = entries.get(key)
                 previous_rank = tuple(previous.get("_rank") or ()) if previous else ()
                 if previous and rank <= previous_rank:
+                    if _should_append_detection_milestone(previous, alert, seen_at):
+                        milestones = list(previous.get("milestones") or [])
+                        milestones.append(_milestone(alert, seen_at, source))
+                        previous["milestones"] = milestones[-20:]
+                        detected_events.append({
+                            "event": "DETECTED",
+                            "key": key,
+                            "symbol": symbol.upper(),
+                            "side": str(alert.get("side") or "").upper(),
+                            "strike": _number(alert.get("strike")),
+                            "stage": "radar",
+                            "source": source,
+                            "tier": alert.get("tier"),
+                            "score": alert.get("explosionScore"),
+                            "momentType": alert.get("momentType"),
+                        })
+                        changed = True
                     continue
                 milestones = list(previous.get("milestones") or []) if previous else []
                 milestones.append(_milestone(alert, seen_at, source))

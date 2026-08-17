@@ -35,6 +35,7 @@ class ICTBreakoutSignal:
     first_lift: bool = False             # appeared in 15–40% pad off lowest local base
     base_armed: bool = False             # causal stable base exists before launch
     armed_base_launch: bool = False       # strict 5–12% early launch band
+    armed_base_sustained_lift: bool = False  # slower causal lift when sparse ticks hide v3/v9
     armed_base_samples: int = 0
     armed_base_span_seconds: float = 0.0
     armed_base_range_pct: float = 0.0
@@ -63,6 +64,7 @@ class ICTBreakoutSignal:
             "firstLift": self.first_lift,
             "baseArmed": self.base_armed,
             "armedBaseLaunch": self.armed_base_launch,
+            "armedBaseSustainedLift": self.armed_base_sustained_lift,
             "armedBaseSamples": self.armed_base_samples,
             "armedBaseSpanSeconds": round(self.armed_base_span_seconds, 1),
             "armedBaseRangePct": round(self.armed_base_range_pct, 2),
@@ -115,6 +117,10 @@ def first_lift_entry_readiness(
     armed_launch = bool(
         getattr(ict, "armed_base_launch", False) is True
         or row.get("ictArmedBaseLaunch") is True
+    )
+    sustained_lift = bool(
+        getattr(ict, "armed_base_sustained_lift", False) is True
+        or row.get("ictArmedBaseSustainedLift") is True
     )
     structured = bool(
         getattr(ict, "active", False)
@@ -206,9 +212,9 @@ def first_lift_entry_readiness(
         )
         or (1.5 if armed_launch else 0.8)
     )
-    if v3 < min_v3:
+    if not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
-    if v9 < min_v9:
+    if not sustained_lift and v9 < min_v9:
         return False, f"first_lift_velocity9s<{min_v9:g}"
 
     volume_surge = float(
@@ -708,6 +714,58 @@ def _detect_recent_window_base(
     return True, base, base_rel
 
 
+def _sustained_armed_base_lift(
+    history: list[tuple],
+    *,
+    base_premium: float,
+    premium: float,
+    base_move_pct: float,
+    settings: Any,
+) -> bool:
+    """Confirm a causal lift when sparse-but-fresh samples cannot produce v3/v9."""
+    if not history or base_premium <= 0 or premium <= 0:
+        return False
+    min_move = float(
+        getattr(settings, "ict_armed_sustained_lift_min_move_pct", 8.0) or 8.0
+    )
+    max_move = float(
+        getattr(settings, "ict_armed_sustained_lift_max_move_pct", 25.0) or 25.0
+    )
+    if not min_move <= base_move_pct <= max_move:
+        return False
+    now = history[-1][0]
+    lookback = float(
+        getattr(settings, "ict_armed_sustained_lift_lookback_seconds", 120.0) or 120.0
+    )
+    rows = [
+        (ts, float(value))
+        for ts, value, *_ in history
+        if 0 <= (now - ts).total_seconds() <= lookback and float(value or 0) > 0
+    ]
+    min_samples = int(
+        getattr(settings, "ict_armed_sustained_lift_min_samples", 3) or 3
+    )
+    if len(rows) < min_samples:
+        return False
+    span = (rows[-1][0] - rows[0][0]).total_seconds()
+    min_span = float(
+        getattr(settings, "ict_armed_sustained_lift_min_span_seconds", 15.0) or 15.0
+    )
+    if span < min_span:
+        return False
+    prior_low = min(value for _, value in rows[:-1])
+    progress = (premium - prior_low) / prior_low * 100.0 if prior_low > 0 else 0.0
+    min_progress = float(
+        getattr(settings, "ict_armed_sustained_lift_min_progress_pct", 3.0) or 3.0
+    )
+    max_fade = float(
+        getattr(settings, "ict_armed_sustained_lift_max_fade_pct", 2.5) or 2.5
+    )
+    recent_high = max(value for _, value in rows)
+    fade = (recent_high - premium) / recent_high * 100.0 if recent_high > 0 else 100.0
+    return progress >= min_progress and fade <= max_fade
+
+
 def analyze_ict_breakout(
     *,
     symbol: str,
@@ -843,13 +901,24 @@ def analyze_ict_breakout(
     armed_launch_v9 = float(
         getattr(settings, "ict_armed_base_launch_min_velocity_9s", 1.5) or 1.5
     )
-    armed_launch = bool(
+    fast_armed_launch = bool(
         base_armed
         and armed_launch_lo <= base_rel_move <= armed_launch_hi
         and velocity_3s >= armed_launch_v3
         and velocity_9s >= armed_launch_v9
         and vol_awaken
     )
+    sustained_armed_lift = bool(
+        base_armed
+        and _sustained_armed_base_lift(
+            history,
+            base_premium=base_level,
+            premium=premium,
+            base_move_pct=base_rel_move,
+            settings=settings,
+        )
+    )
+    armed_launch = fast_armed_launch or sustained_armed_lift
     early_v3 = float(getattr(settings, "ict_early_vertical_min_velocity_3s", 2.0) or 2.0)
     # Structure / early-window heat: prefer local-base move when we have one.
     structure_move = base_rel_move if base_rel_move > 0 else move
@@ -870,6 +939,8 @@ def analyze_ict_breakout(
         reasons.append(
             f"armed_base_launch_{base_level:.1f}_{base_rel_move:.1f}%"
         )
+        if sustained_armed_lift:
+            reasons.append("armed_base_sustained_lift")
     # First lift off the lowest local base — appear in the 15–40% pad with heat,
     # before day-% / chase tiers light up. Soft velocity OK when volume confirms.
     first_lift_v3 = float(
@@ -919,6 +990,9 @@ def analyze_ict_breakout(
     )
     if not flat_then_vertical:
         fv_quality, fv_grade = 0.0, ""
+    elif sustained_armed_lift:
+        fv_quality = max(fv_quality, 65.0)
+        fv_grade = "B" if fv_grade not in ("A+", "A") else fv_grade
     mega_floor = float(getattr(settings, "ict_mega_rip_min_session_move_pct", 200.0) or 200.0)
     try:
         max_credible = float(getattr(settings, "session_move_max_credible_pct", 500.0))
@@ -1033,6 +1107,7 @@ def analyze_ict_breakout(
         first_lift=first_lift,
         base_armed=base_armed,
         armed_base_launch=armed_launch,
+        armed_base_sustained_lift=sustained_armed_lift,
         armed_base_samples=armed_samples,
         armed_base_span_seconds=armed_span,
         armed_base_range_pct=armed_range,
