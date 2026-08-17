@@ -155,6 +155,7 @@ def test_lower_rank_tradeable_moment_is_kept_as_causal_milestone(tmp_path):
         tier="BUILDING",
         side="PUT",
         tradeable=True,
+        ictEliteBaseReady=True,
         ictArmedBaseLaunch=True,
         ictArmedBaseSustainedLift=True,
     )
@@ -171,6 +172,7 @@ def test_lower_rank_tradeable_moment_is_kept_as_causal_milestone(tmp_path):
     assert row["alert"]["explosionScore"] == 90.0
     assert len(row["milestones"]) == 2
     assert row["milestones"][-1]["tradeable"] is True
+    assert row["milestones"][-1]["ictEliteBaseReady"] is True
     assert row["milestones"][-1]["ictArmedBaseLaunch"] is True
 
 

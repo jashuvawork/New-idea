@@ -28,6 +28,11 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["ENTRY_TIMING_STRUCTURED_COLD_MAX_LOTS"] == "false"
     assert env["EXPLOSION_FAILED_LAUNCH_EXIT_ENABLED"] == "true"
     assert env["EXPLOSION_EARLY_GREEN_LOCK_ENABLED"] == "true"
+    assert env["ICT_ELITE_BASE_READY_ENABLED"] == "true"
+    assert env["ICT_ELITE_BASE_READY_MIN_MOVE_PCT"] == "2"
+    assert env["ICT_ELITE_BASE_READY_MAX_MOVE_PCT"] == "5"
+    assert env["ICT_ELITE_BASE_READY_MIN_VELOCITY_3S"] == "1.5"
+    assert env["ICT_ELITE_BASE_READY_MIN_VELOCITY_9S"] == "1.5"
 
 
 def test_deploy_paths_sync_every_bounded_loss_setting():
@@ -48,6 +53,11 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
         "ENTRY_TIMING_STRUCTURED_COLD_MAX_LOTS",
         "EXPLOSION_FAILED_LAUNCH_EXIT_ENABLED",
         "EXPLOSION_EARLY_GREEN_LOCK_ENABLED",
+        "ICT_ELITE_BASE_READY_ENABLED",
+        "ICT_ELITE_BASE_READY_MIN_MOVE_PCT",
+        "ICT_ELITE_BASE_READY_MAX_MOVE_PCT",
+        "ICT_ELITE_BASE_READY_MIN_VELOCITY_3S",
+        "ICT_ELITE_BASE_READY_MIN_VELOCITY_9S",
         "ICT_ARMED_SUSTAINED_LIFT_MIN_MOVE_PCT",
         "ICT_ARMED_SUSTAINED_LIFT_MAX_MOVE_PCT",
         "ICT_ARMED_SUSTAINED_LIFT_LOOKBACK_SECONDS",
