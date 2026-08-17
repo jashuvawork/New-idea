@@ -298,6 +298,113 @@ def test_strict_first_lift_survives_final_countertrend_mtf_monitor(
     assert meta["mtfPreTest"]["firstLiftBypass"] is True
 
 
+@pytest.mark.parametrize(
+    ("side", "opposing_direction", "mom5", "mom10", "mom15"),
+    [
+        (Side.CALL, "BEARISH", -0.08, -0.048, -0.008),
+        (Side.PUT, "BULLISH", 0.08, 0.048, 0.008),
+    ],
+)
+@pytest.mark.parametrize("strong_orderflow", [True, False])
+def test_armed_base_execution_chart_bypass_requires_strong_orderflow(
+    side, opposing_direction, mom5, mom10, mom15, strong_orderflow,
+):
+    chart = SpotChart(
+        direction=opposing_direction,
+        momentum5Pct=mom5,
+        momentum10Pct=mom10,
+        momentum15Pct=mom15,
+        trendStrength=40,
+        spot=24000,
+    )
+    snap = _snap(chart)
+    volume = 27_127_300 if strong_orderflow else 0
+    event = SimpleNamespace(
+        symbol="NIFTY",
+        side=side,
+        tier="EXPLODING",
+        explosion_score=100.0,
+        velocity_3s=4.0,
+        velocity_9s=3.0,
+        volume_surge=1.0,
+        volume=volume,
+        daily_move_pct=8.0,
+        peak_move_pct=8.0,
+        strike=24000.0,
+    )
+    alert = {
+        "side": side.value,
+        "strike": 24000.0,
+        "ictFirstLift": False,
+        "ictArmedBaseLaunch": True,
+        "ictBreakout": True,
+        "ictFlatThenVertical": True,
+        "ictBaseRelativeMovePct": 8.0,
+        "ictArmedBaseSamples": 8,
+        "ictArmedBaseSpanSeconds": 21.0,
+        "flatVerticalQuality": 70.0,
+        "explosionScore": 100.0,
+        "velocity3s": 4.0,
+        "velocity9s": 3.0,
+        "volumeSurge": 1.0,
+        "volume": volume,
+    }
+    reads = {
+        label: TimeframeChartRead(
+            label=label,
+            direction=opposing_direction,
+            momentumPct=mom5,
+            trendStrength=40,
+            barCount=30,
+        )
+        for label in ("1m", "5m", "15m", "1h", "4h")
+    }
+    live_meta = {
+        "source": "upstox_live",
+        "indexChart": {"direction": opposing_direction},
+        "indexChartFull": chart.model_dump(),
+        "premiumChart": {},
+        "indexMtf": {},
+        "premiumMtf": {},
+        "snapshotDelta": {"directionChanged": False},
+        "alignedWithChart": False,
+        "_indexMtfReads": reads,
+        "_premiumMtfReads": None,
+    }
+
+    with (
+        patch(
+            "app.engines.execution_chart_monitor.get_settings",
+            return_value=_settings(),
+        ),
+        patch(
+            "app.engines.execution_chart_monitor.fetch_live_trade_charts",
+            AsyncMock(return_value=live_meta),
+        ),
+    ):
+        passed, reason, meta = asyncio.run(
+            monitor_trade_chart_before_execution(
+                AsyncMock(),
+                "NIFTY",
+                side,
+                24000,
+                snap,
+                trade_score=100,
+                mode="explosion",
+                explosion_event=event,
+                alert=alert,
+            )
+        )
+
+    assert passed is strong_orderflow
+    assert meta["firstLiftBypass"] is strong_orderflow
+    if strong_orderflow:
+        assert reason == "ok"
+        assert meta["mtfPreTest"]["firstLiftBypass"] is True
+    else:
+        assert reason.startswith("exec_")
+
+
 def test_fetch_live_trade_charts_includes_quote_context():
     with patch("app.engines.execution_chart_monitor.get_settings") as mock_settings:
         mock_settings.return_value = _settings()

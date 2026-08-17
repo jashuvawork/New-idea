@@ -150,14 +150,17 @@ def test_aug17_base_arms_then_launches_symmetrically_near_57(_open, side):
         assert reason == "armed_base_option_led_ready"
 
 
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
 @patch("app.engines.session_timing.in_open_premium_window", return_value=False)
-def test_aug17_real_selector_selects_armed_launch_only_at_57_without_full_budget(_open):
+def test_aug17_real_selector_selects_armed_launch_only_at_57_without_full_budget(
+    _open, side,
+):
     settings = Settings(
         best_trades_only_enabled=False,
         edge_engine_enabled=False,
     )
-    clock, scan, _advance = _scanner(Side.CALL, settings)
-    snap = _snapshot(Side.CALL)
+    clock, scan, _advance = _scanner(side, settings)
+    snap = _snapshot(side)
     # Reproduce the lagging bearish 5m chart from the live ₹57 launch. The stronger
     # ATM premium/base proof must pass the real selector without chart alignment.
     state = AutoTraderState()
@@ -182,7 +185,7 @@ def test_aug17_real_selector_selects_armed_launch_only_at_57_without_full_budget
     assert launch["ictFirstLift"] is False
     assert selected is not None
     assert selected.mode == "explosion"
-    assert selected.side == Side.CALL
+    assert selected.side == side
     assert selected.strike == 24300.0
     assert selected.premium == pytest.approx(57.0)
     assert selected.alert["ictArmedBaseLaunch"] is True
@@ -202,6 +205,41 @@ def test_aug17_real_selector_selects_armed_launch_only_at_57_without_full_budget
         faded_rip=False,
         post_win_capped=False,
     ) is False
+
+
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+@patch("app.engines.session_timing.in_open_premium_window", return_value=False)
+def test_weak_armed_launch_cannot_bypass_adverse_chart(_open, side):
+    settings = Settings(
+        best_trades_only_enabled=False,
+        edge_engine_enabled=False,
+    )
+    clock, scan, _advance = _scanner(side, settings)
+    snap = _snapshot(side)
+    state = AutoTraderState()
+
+    with (
+        patch("app.config.get_settings", return_value=settings),
+        patch("app.engines.trade_selector.get_settings", return_value=settings),
+        patch("app.engines.ict_breakout_monitor.get_settings", return_value=settings),
+        patch.object(explosion_detector, "datetime", clock),
+    ):
+        _arm_base(scan)
+        for premium in (53.8, 54.5, 55.2):
+            scan(premium, 0)
+        launch = scan(57.0, 0)
+        launch["volume"] = 0
+        launch["absoluteVolume"] = 0
+        launch["orderflowConfirmed"] = False
+        launch["optionCvdBuying"] = False
+        snap.explosionAlerts = [launch]
+        ready, reason = first_lift_entry_readiness(snap=snap, alert=launch)
+        selected = find_best_entry({"NIFTY": snap}, state)
+
+    assert launch["ictArmedBaseLaunch"] is True
+    assert ready is False
+    assert reason.startswith("armed_base_orderflow_below_")
+    assert selected is None
 
 
 @patch("app.engines.session_timing.in_open_premium_window", return_value=False)
