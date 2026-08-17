@@ -155,6 +155,17 @@ async def radar_health():
     return health_status()
 
 
+@router.get("/radar-pipeline/{date}")
+async def radar_pipeline(date: str):
+    """Durable startup, cache, option-subscription, and premium-sampling timeline."""
+    from app.services.radar_learning import pipeline_history_summary
+
+    try:
+        return await asyncio.to_thread(pipeline_history_summary, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/radar-scorecard/{date}")
 async def radar_scorecard(date: str):
     """Daily precision/recall, lead-time, missed-winner, and outcome scorecard."""

@@ -36,6 +36,7 @@ _lock = threading.RLock()
 _finalize_lock = threading.Lock()
 _detector_replay_lock = threading.Lock()
 _last_tape_sample: dict[str, datetime] = {}
+_last_pipeline_event: dict[str, datetime] = {}
 _last_funnel_event: dict[str, datetime] = {}
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -102,6 +103,12 @@ def funnel_path(date: str) -> Path:
     return _telemetry_dir() / f"{date}.funnel.jsonl"
 
 
+def pipeline_history_path(date: str) -> Path:
+    if not _DATE_RE.fullmatch(date):
+        raise ValueError("date must use YYYY-MM-DD")
+    return _telemetry_dir() / f"{date}.pipeline.jsonl"
+
+
 @contextmanager
 def _file_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_suffix(path.suffix + ".lock")
@@ -148,6 +155,58 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
                 if isinstance(row, dict):
                     out.append(row)
     return out
+
+
+def record_pipeline_event(
+    event: str,
+    *,
+    source: str,
+    detail: Mapping[str, Any] | None = None,
+    now: datetime | None = None,
+    throttle_key: str | None = None,
+    throttle_seconds: float = 0.0,
+) -> bool:
+    """Persist non-secret service/data availability evidence across restarts."""
+    current = _aware(now)
+    date = current.strftime("%Y-%m-%d")
+    key = throttle_key or ""
+    with _lock:
+        previous = _last_pipeline_event.get(key) if key else None
+        if (
+            key
+            and previous
+            and (current - previous).total_seconds() < max(0.0, throttle_seconds)
+        ):
+            return False
+        _append_jsonl(
+            pipeline_history_path(date),
+            {
+                "ts": current.isoformat(),
+                "event": str(event).upper(),
+                "source": source,
+                "detail": dict(detail or {}),
+            },
+        )
+        if key:
+            _last_pipeline_event[key] = current
+    return True
+
+
+def read_pipeline_history(date: str) -> list[dict[str, Any]]:
+    return _read_jsonl(pipeline_history_path(date))
+
+
+def pipeline_history_summary(date: str) -> dict[str, Any]:
+    rows = read_pipeline_history(date)
+    counts = Counter(str(row.get("event") or "UNKNOWN") for row in rows)
+    return {
+        "date": date,
+        "eventCount": len(rows),
+        "firstEventAt": rows[0].get("ts") if rows else None,
+        "lastEventAt": rows[-1].get("ts") if rows else None,
+        "byEvent": dict(counts),
+        "recent": rows[-20:],
+    }
 
 
 def _contract_key(symbol: str, side: str, strike: float) -> str:
@@ -338,6 +397,21 @@ def record_market_observations(
         max_age_seconds=max(5.0, interval * 2.0),
     )
     if not contracts:
+        record_pipeline_event(
+            "PREMIUM_SAMPLE_EMPTY",
+            source=source,
+            detail={
+                "symbols": sorted(str(symbol).upper() for symbol in snapshots),
+                "dataAvailableSymbols": sorted(
+                    str(symbol).upper()
+                    for symbol, snap in snapshots.items()
+                    if bool(getattr(snap, "dataAvailable", False))
+                ),
+            },
+            now=current,
+            throttle_key=f"premium-empty:{source}",
+            throttle_seconds=interval,
+        )
         return 0
     sample_key = f"{date}:{','.join(sorted(str(symbol).upper() for symbol in snapshots))}"
     with _lock:
@@ -354,6 +428,17 @@ def record_market_observations(
             },
         )
         _last_tape_sample[sample_key] = current
+    record_pipeline_event(
+        "PREMIUM_SAMPLE_WRITTEN",
+        source=source,
+        detail={
+            "symbols": sorted(str(symbol).upper() for symbol in snapshots),
+            "contractCount": len(contracts),
+        },
+        now=current,
+        throttle_key=f"premium-written:{source}",
+        throttle_seconds=interval,
+    )
     contract_map = {str(row["key"]): row for row in contracts}
     updated = _forward_outcomes(date, contract_map, current)
     try:
@@ -376,6 +461,47 @@ def record_market_observations(
 
 def read_premium_tape(date: str) -> list[dict[str, Any]]:
     return _read_jsonl(premium_tape_path(date))
+
+
+def restore_local_base_history(*, now: datetime | None = None) -> dict[str, Any]:
+    """Restore only medium-horizon bases; live ticks must still confirm a trigger."""
+    current = _aware(now)
+    date = current.strftime("%Y-%m-%d")
+    cutoff = current - timedelta(seconds=2100)
+    batches = read_premium_tape(date)
+    restored = 0
+    keys: set[str] = set()
+    from app.engines.explosion_detector import (
+        _open_key,
+        _record_local_base,
+        _roll_session,
+    )
+    from app.models.schemas import Side
+
+    # Initialize the detector's session before hydrating it. Otherwise its first live
+    # tick sees an unset session date and clears the bases restored moments earlier.
+    _roll_session(current)
+    for batch in batches:
+        ts = _parse_ts(batch.get("ts"))
+        if ts is None or ts < cutoff or ts > current + timedelta(minutes=1):
+            continue
+        for contract in batch.get("contracts") or []:
+            symbol = str(contract.get("symbol") or "").upper()
+            side = str(contract.get("side") or "").upper()
+            strike = _number(contract.get("strike"))
+            premium = _number(contract.get("premium"))
+            if not symbol or side not in {"CALL", "PUT"} or strike <= 0 or premium <= 0:
+                continue
+            full_key = _open_key(symbol, strike, Side(side))
+            _record_local_base(full_key, ts, premium)
+            keys.add(full_key)
+            restored += 1
+    return {
+        "date": date,
+        "sampleCount": restored,
+        "contractCount": len(keys),
+        "cutoff": cutoff.isoformat(),
+    }
 
 
 def _premium_series(
@@ -1141,6 +1267,9 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     tape = premium_tape_path(date)
     if tape.exists():
         artifacts["premium_tape.jsonl"] = _read_bytes_locked(tape)
+    pipeline_file = pipeline_history_path(date)
+    if pipeline_file.exists():
+        artifacts["pipeline_history.jsonl"] = _read_bytes_locked(pipeline_file)
     funnel_file = funnel_path(date)
     if funnel_file.exists():
         artifacts["funnel_events.jsonl"] = _read_bytes_locked(funnel_file)
@@ -1256,4 +1385,5 @@ def _run_detector_replay_isolated_unlocked(date: str) -> dict[str, Any]:
 def reset_learning_state_for_tests() -> None:
     with _lock:
         _last_tape_sample.clear()
+        _last_pipeline_event.clear()
         _last_funnel_event.clear()

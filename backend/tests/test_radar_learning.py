@@ -31,12 +31,15 @@ from app.services.radar_learning import (
     build_funnel_report,
     finalize_daily_review,
     finalize_pending_reviews,
+    pipeline_history_summary,
     premium_tape_path,
+    read_pipeline_history,
     read_premium_tape,
     record_funnel_state,
     record_funnel_event,
     record_market_observations,
     reset_learning_state_for_tests,
+    restore_local_base_history,
     run_detector_replay_isolated,
 )
 from app.services import radar_learning
@@ -552,6 +555,71 @@ def test_rest_sampling_keeps_each_symbol_when_snapshots_build_separately(tmp_pat
     assert second == 2
     assert len(rows) == 2
     assert {row["contracts"][0]["symbol"] for row in rows} == {"NIFTY", "SENSEX"}
+
+
+def test_pipeline_history_proves_empty_and_successful_sampling(tmp_path):
+    settings = _settings(tmp_path)
+    start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+    unavailable = _snap()
+    unavailable.dataAvailable = False
+    unavailable.heatmap = []
+
+    with _patch_settings(settings):
+        assert record_market_observations(
+            {"NIFTY": unavailable},
+            source="ws_entry_scan",
+            now=start,
+        ) == 0
+        assert record_market_observations(
+            {"NIFTY": _snap()},
+            source="ws_entry_scan",
+            now=start + timedelta(seconds=16),
+        ) == 2
+        rows = read_pipeline_history("2026-08-15")
+        summary = pipeline_history_summary("2026-08-15")
+
+    assert [row["event"] for row in rows] == [
+        "PREMIUM_SAMPLE_EMPTY",
+        "PREMIUM_SAMPLE_WRITTEN",
+    ]
+    assert rows[0]["detail"]["dataAvailableSymbols"] == []
+    assert rows[1]["detail"]["contractCount"] == 2
+    assert summary["firstEventAt"] == start.isoformat()
+    assert summary["byEvent"] == {
+        "PREMIUM_SAMPLE_EMPTY": 1,
+        "PREMIUM_SAMPLE_WRITTEN": 1,
+    }
+
+
+def test_restart_restores_symmetric_local_bases_without_velocity_trigger(tmp_path):
+    import app.engines.explosion_detector as detector
+
+    settings = _settings(tmp_path)
+    start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+    with _patch_settings(settings):
+        record_market_observations(
+            {"NIFTY": _snap(call=100.0, put=80.0)},
+            source="ws_entry_scan",
+            now=start,
+            force=True,
+        )
+        record_market_observations(
+            {"NIFTY": _snap(call=112.0, put=92.0)},
+            source="ws_entry_scan",
+            now=start + timedelta(minutes=10),
+            force=True,
+        )
+        detector.reset_detector_state_for_tests()
+        detector._session_date = None
+        restored = restore_local_base_history(now=start + timedelta(minutes=11))
+        detector._roll_session(start + timedelta(minutes=12))
+
+    assert restored["sampleCount"] == 4
+    assert restored["contractCount"] == 2
+    assert detector._session_date == "2026-08-15"
+    assert detector.local_base_premium("NIFTY", 24500, Side.CALL) == 100.0
+    assert detector.local_base_premium("NIFTY", 24500, Side.PUT) == 80.0
+    assert detector._history == {}
 
 
 def test_s3_backup_and_startup_recovery_are_idempotent(tmp_path):
