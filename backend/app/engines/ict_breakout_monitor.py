@@ -64,6 +64,22 @@ def first_lift_entry_ready(
     ict: Any = None,
     alert: Optional[dict[str, Any]] = None,
 ) -> bool:
+    """Return whether a radar first lift has strict order-entry confirmation."""
+    return first_lift_entry_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=alert,
+    )[0]
+
+
+def first_lift_entry_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
     """Strict early-entry proof for a local-base first lift.
 
     Radar intentionally exposes softer first lifts. An order may use that early
@@ -73,9 +89,9 @@ def first_lift_entry_ready(
     """
     settings = get_settings()
     if not bool(getattr(settings, "first_lift_trade_enabled", True)):
-        return False
+        return False, "first_lift_trading_disabled"
     if snap is None or getattr(snap, "spotChart", None) is None:
-        return False
+        return False, "first_lift_chart_missing"
 
     row = alert if isinstance(alert, dict) else {}
     first_lift = bool(
@@ -87,7 +103,7 @@ def first_lift_entry_ready(
         and getattr(ict, "flat_then_vertical", False)
     ) or bool(row.get("ictBreakout") and row.get("ictFlatThenVertical"))
     if not first_lift or not structured:
-        return False
+        return False, "first_lift_structure_not_confirmed"
 
     base_move = float(
         getattr(ict, "base_relative_move_pct", 0)
@@ -101,7 +117,7 @@ def first_lift_entry_ready(
         getattr(settings, "first_lift_trade_max_move_pct", 25.0) or 25.0
     )
     if not (min_move <= base_move <= max_move):
-        return False
+        return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
 
     quality = float(
         getattr(ict, "flat_vertical_quality", 0)
@@ -112,7 +128,7 @@ def first_lift_entry_ready(
         getattr(settings, "first_lift_trade_min_quality", 55.0) or 55.0
     )
     if quality < min_quality:
-        return False
+        return False, f"first_lift_quality<{min_quality:g}"
 
     score = float(
         getattr(event, "explosion_score", 0)
@@ -124,7 +140,7 @@ def first_lift_entry_ready(
         getattr(settings, "first_lift_trade_min_score", 45.0) or 45.0
     )
     if score < min_score:
-        return False
+        return False, f"first_lift_score<{min_score:g}"
 
     v3 = float(
         getattr(event, "velocity_3s", 0)
@@ -144,8 +160,10 @@ def first_lift_entry_ready(
     min_v9 = float(
         getattr(settings, "first_lift_trade_min_velocity_9s", 0.8) or 0.8
     )
-    if v3 < min_v3 or v9 < min_v9:
-        return False
+    if v3 < min_v3:
+        return False, f"first_lift_velocity3s<{min_v3:g}"
+    if v9 < min_v9:
+        return False, f"first_lift_velocity9s<{min_v9:g}"
 
     volume_surge = float(
         getattr(event, "volume_surge", 0)
@@ -162,7 +180,7 @@ def first_lift_entry_ready(
         getattr(settings, "first_lift_trade_min_volume_surge", 2.0) or 2.0
     )
     if not volume_awake and volume_surge < min_volume:
-        return False
+        return False, f"first_lift_volume_surge<{min_volume:g}"
 
     side = str(
         getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
@@ -170,7 +188,7 @@ def first_lift_entry_ready(
         or ""
     ).upper()
     if side not in ("CALL", "PUT"):
-        return False
+        return False, "first_lift_side_invalid"
     chart = snap.spotChart
     mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
     mom10 = float(getattr(chart, "momentum10Pct", 0) or 0)
@@ -180,8 +198,11 @@ def first_lift_entry_ready(
         or 0.03
     )
     if side == "CALL":
-        return mom5 >= mom10 and mom5 >= mom15 + shift
-    return mom5 <= mom10 and mom5 <= mom15 - shift
+        if mom5 >= mom10 and mom5 >= mom15 + shift:
+            return True, "first_lift_entry_ready"
+    elif mom5 <= mom10 and mom5 <= mom15 - shift:
+        return True, "first_lift_entry_ready"
+    return False, "first_lift_index_turn_not_confirmed"
 
 
 def premium_poll_history(symbol: str, strike: float, side: Side | str) -> list[tuple[datetime, float, float]]:

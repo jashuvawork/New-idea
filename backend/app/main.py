@@ -235,6 +235,26 @@ async def lifespan(app: FastAPI):
     from app.loop_watchdog import start_loop_watchdog, stop_loop_watchdog
     from app.services.upstox_ws import start_upstox_ws, stop_upstox_ws
 
+    try:
+        from app.services.radar_learning import (
+            record_pipeline_event,
+            restore_local_base_history,
+        )
+
+        restored = await asyncio.to_thread(restore_local_base_history)
+        await asyncio.to_thread(
+            record_pipeline_event,
+            "SERVICE_START",
+            source="lifespan",
+            detail={
+                "commit": str(getattr(settings, "commit_sha", "") or "")[:12],
+                "localBaseRestore": restored,
+                "backgroundMonitorEnabled": settings.background_market_monitor_enabled,
+                "upstoxWsEnabled": settings.upstox_ws_enabled,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Radar startup history recovery error: %s", exc)
     if settings.upstox_ws_enabled:
         await start_upstox_ws()
         logger.info("Upstox WebSocket feed enabled (mode=%s)", settings.upstox_ws_mode)

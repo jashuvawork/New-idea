@@ -1556,6 +1556,18 @@ def diagnose_missed_entries(
                 daily_move_pct=daily_move,
             )
             blockers: list[str] = []
+            first_lift_ready = False
+            if bool(alert.get("ictFirstLift")):
+                from app.engines.ict_breakout_monitor import (
+                    first_lift_entry_readiness,
+                )
+
+                first_lift_ready, readiness_reason = first_lift_entry_readiness(
+                    snap=snap,
+                    alert=alert,
+                )
+                if not first_lift_ready:
+                    blockers.append(readiness_reason)
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
                 if not _building_aligned_ict_alert_ok(
                     alert, snap, str(tier_str).upper(),
@@ -1567,7 +1579,10 @@ def diagnose_missed_entries(
 
                 side_raw = str(alert.get("side") or "").upper()
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
-                    if not side_aligned_with_chart(Side(side_raw), snap.spotChart):
+                    if (
+                        not side_aligned_with_chart(Side(side_raw), snap.spotChart)
+                        and not first_lift_ready
+                    ):
                         blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):
                 blockers.append("premium_out_of_band")

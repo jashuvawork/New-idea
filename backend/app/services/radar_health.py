@@ -55,18 +55,38 @@ def record_source(
     archive_count: int | None = None,
     now: datetime | None = None,
 ) -> None:
+    seen_at = _iso(now)
     with _lock:
+        previous = dict(_state["sources"].get(source) or {})
+        symbol_states = {
+            str(symbol).upper(): dict(value)
+            for symbol, value in (previous.get("symbolStates") or {}).items()
+        }
+        for symbol, snap in snapshots.items():
+            symbol_name = str(symbol).upper()
+            symbol_states[symbol_name] = {
+                "lastSeenAt": seen_at,
+                "topRadarKeys": _top_keys({symbol_name: snap}),
+                "dataAvailable": bool(getattr(snap, "dataAvailable", False)),
+            }
         row = {
-            "lastSeenAt": _iso(now),
-            "symbols": sorted(str(symbol).upper() for symbol in snapshots),
-            "topRadarKeys": _top_keys(snapshots),
+            "lastSeenAt": seen_at,
+            "symbols": sorted(symbol_states),
+            "topRadarKeys": sorted({
+                key
+                for state in symbol_states.values()
+                for key in state.get("topRadarKeys") or []
+            }),
             "dataAvailableCount": sum(
-                1 for snap in snapshots.values()
-                if bool(getattr(snap, "dataAvailable", False))
+                1 for state in symbol_states.values()
+                if state.get("dataAvailable")
             ),
+            "symbolStates": symbol_states,
         }
         if archive_count is not None:
             row["archiveEntryCount"] = archive_count
+        elif "archiveEntryCount" in previous:
+            row["archiveEntryCount"] = previous["archiveEntryCount"]
         _state["sources"][source] = row
         _state["counters"][source] = int(_state["counters"].get(source, 0)) + 1
 
@@ -152,7 +172,13 @@ def health_status(*, now: datetime | None = None) -> dict[str, Any]:
     )
     with _lock:
         sources = {
-            key: dict(value)
+            key: {
+                **dict(value),
+                "symbolStates": {
+                    symbol: dict(state)
+                    for symbol, state in (value.get("symbolStates") or {}).items()
+                },
+            }
             for key, value in _state["sources"].items()
         }
         components = {
@@ -166,6 +192,27 @@ def health_status(*, now: datetime | None = None) -> dict[str, Any]:
     for source, row in sources.items():
         age = _age_seconds(row.get("lastSeenAt"), current)
         source_stale_after = rest_stale_after if source == "rest_snapshot" else stale_after
+        symbol_states = row.pop("symbolStates", {})
+        if symbol_states:
+            active_states = {
+                symbol: state
+                for symbol, state in symbol_states.items()
+                if (
+                    (symbol_age := _age_seconds(state.get("lastSeenAt"), current))
+                    is not None
+                    and symbol_age <= source_stale_after
+                )
+            }
+            row["symbols"] = sorted(active_states)
+            row["topRadarKeys"] = sorted({
+                key
+                for state in active_states.values()
+                for key in state.get("topRadarKeys") or []
+            })
+            row["dataAvailableCount"] = sum(
+                1 for state in active_states.values()
+                if state.get("dataAvailable")
+            )
         row["ageSeconds"] = round(age, 1) if age is not None else None
         row["staleAfterSeconds"] = source_stale_after
         row["stale"] = bool(age is not None and age > source_stale_after)

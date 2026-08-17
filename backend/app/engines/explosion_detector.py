@@ -46,9 +46,12 @@ LOCAL_BASE_SAMPLE_MIN_SECONDS = 1.5
 _TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
 
 
-def _roll_session() -> None:
+def _roll_session(now: Optional[datetime] = None) -> None:
     global _session_date, _session_open, _session_low, _session_peak, _tier_sticky, _peak_velocity
-    today = datetime.now(IST).strftime("%Y-%m-%d")
+    current = now or datetime.now(IST)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=IST)
+    today = current.astimezone(IST).strftime("%Y-%m-%d")
     if _session_date != today:
         _session_date = today
         _history.clear()

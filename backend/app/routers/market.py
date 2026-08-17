@@ -407,6 +407,23 @@ async def run_entry_scan_on_cache(
     """Entry scan on WS-overlaid cache — skip expensive REST chain rebuild when WS is live."""
     global _last_fast_cycle_ms
     if not _cache or not _cache.dataReady:
+        try:
+            from app.services.radar_learning import record_pipeline_event
+
+            await asyncio.to_thread(
+                record_pipeline_event,
+                "ENTRY_SCAN_SKIPPED",
+                source="ws_entry_scan",
+                detail={
+                    "cachePresent": bool(_cache),
+                    "dataReady": bool(_cache and _cache.dataReady),
+                    "waitingReason": str(getattr(_cache, "waitingReason", "") or "")[:200],
+                },
+                throttle_key="entry-scan-skipped",
+                throttle_seconds=15.0,
+            )
+        except Exception as exc:
+            logger.debug("Failed to persist skipped entry scan telemetry: %s", exc)
         return None
 
     t0 = time.perf_counter()

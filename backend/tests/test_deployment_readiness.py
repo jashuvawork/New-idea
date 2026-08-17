@@ -1,11 +1,18 @@
 """Deployment readiness must be fast, truthful, and share execution state."""
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.models.schemas import AutoTraderState
 from app.routers.health import deployment_readiness
+
+
+def test_backend_image_includes_detector_replay_script():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY scripts/ ./scripts/" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_readiness_uses_cached_snapshot_and_shared_risk_engine():

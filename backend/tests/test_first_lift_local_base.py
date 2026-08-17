@@ -23,8 +23,10 @@ from app.engines.ict_breakout_monitor import (
     analyze_ict_breakout,
     first_lift_entry_ready,
 )
+from app.engines.trade_selector import diagnose_missed_entries
 from app.engines.winner_entry_guards import chop_weak_explosion_blocks_entry
 from app.models.schemas import (
+    AutoTraderState,
     MarketPhase,
     Regime,
     Side,
@@ -369,6 +371,67 @@ def test_first_lift_does_not_trade_without_quality_and_live_turn(mock_settings):
     assert first_lift_entry_ready(
         snap=snap, event=event, ict=ict,
     ) is False
+
+
+def test_near_miss_reports_strict_first_lift_velocity_before_chart_alignment():
+    settings = Settings(
+        explosion_elite_exploding_only=True,
+        explosion_require_chart_align_enabled=True,
+    )
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=70.0,
+        spot=24262.0,
+        atmStrike=24250.0,
+        spotChart=SpotChart(
+            direction="BEARISH",
+            momentum5Pct=0.10,
+            momentum10Pct=0.05,
+            momentum15Pct=0.0,
+        ),
+        explosionAlerts=[{
+            "symbol": "NIFTY",
+            "side": "CALL",
+            "strike": 24350.0,
+            "premium": 36.0,
+            "tier": "EXPLODING",
+            "explosionScore": 62.4,
+            "peakMovePct": 15.5,
+            "ictFirstLift": True,
+            "ictBreakout": True,
+            "ictFlatThenVertical": True,
+            "ictBaseRelativeMovePct": 15.5,
+            "flatVerticalQuality": 62.0,
+            "velocity3s": 1.37,
+            "velocity9s": 0.0,
+            "volumeSurge": 2.0,
+            "ictVolumeAwakening": True,
+        }],
+    )
+
+    with (
+        patch("app.engines.trade_selector.get_settings", return_value=settings),
+        patch("app.engines.ict_breakout_monitor.get_settings", return_value=settings),
+        patch("app.engines.premium_filter.get_settings", return_value=settings),
+        patch("app.config.get_settings", return_value=settings),
+    ):
+        notes = diagnose_missed_entries(
+            {"NIFTY": snap},
+            AutoTraderState(),
+        )
+        snap.explosionAlerts[0]["velocity9s"] = 1.0
+        ready_notes = diagnose_missed_entries(
+            {"NIFTY": snap},
+            AutoTraderState(),
+        )
+
+    assert notes[0]["message"] == (
+        "first_lift_velocity9s<0.8, chart_not_aligned"
+    )
+    assert ready_notes == []
 
 
 @patch("app.engines.winner_entry_guards.get_settings")
