@@ -39,6 +39,7 @@ from app.engines.moneyness import (
     classify_moneyness,
     heatmap_moneyness_candidates,
     moneyness_rank_adjustment,
+    strict_first_lift_shallow_otm_allows,
 )
 from app.engines.symbol_cooldown import (
     entry_score_penalty,
@@ -278,6 +279,12 @@ def _explosion_candidates(
             snap=snap,
         ):
             continue
+        from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+        first_lift_ready = first_lift_entry_ready(
+            snap=snap,
+            alert=alert,
+        )
         if atm_itm_only:
             side_v = str(alert.get("side") or "").upper()
             try:
@@ -294,14 +301,11 @@ def _explosion_candidates(
                     symbol=symbol,
                     atm=atm_v if atm_v > 0 else None,
                 )
-                if money == "OTM":
+                shallow_first_lift = strict_first_lift_shallow_otm_allows(
+                    Side(side_v), strike_v, snap, alert=alert,
+                )
+                if money == "OTM" and not shallow_first_lift:
                     continue
-        from app.engines.ict_breakout_monitor import first_lift_entry_ready
-
-        first_lift_ready = first_lift_entry_ready(
-            snap=snap,
-            alert=alert,
-        )
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
         if elite_only:

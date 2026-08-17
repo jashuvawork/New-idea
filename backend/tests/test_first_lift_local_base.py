@@ -480,3 +480,89 @@ def test_soft_first_lift_reaches_radar_before_building_tier(_open, side, option_
     assert 14.0 <= radar["ictBaseRelativeMovePct"] <= 16.5
     assert radar["flatVerticalQuality"] > 0
     assert radar["flatVerticalGrade"] in ("A+", "A", "B", "C")
+
+
+@pytest.mark.parametrize(
+    ("side", "option_key", "initial_atm"),
+    [
+        (Side.CALL, "call_options", 24100.0),
+        (Side.PUT, "put_options", 24300.0),
+    ],
+)
+@patch("app.engines.session_timing.in_open_premium_window", return_value=False)
+def test_shallow_otm_coil_is_retained_before_atm_first_lift(
+    _open, side, option_key, initial_atm,
+):
+    """A liquid one-step OTM coil keeps its ₹20 base before rotating ATM."""
+    from app.engines import explosion_detector
+
+    settings = Settings(
+        explosion_scan_atm_itm_only=True,
+        explosion_shallow_otm_history_steps=1,
+        explosion_shallow_otm_history_min_volume=25000,
+    )
+    symbol, strike = "NIFTY", 24200.0
+    key = _strike_key(strike, side)
+    current = datetime.now(IST)
+
+    class _Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return current.astimezone(tz) if tz is not None else current.replace(tzinfo=None)
+
+    def scan(premium, volume, atm):
+        chain = [{
+            "strike_price": strike,
+            option_key: {"ltp": premium, "volume": volume},
+        }]
+        return scan_chain_explosions(symbol, chain, spot=atm, atm=atm)
+
+    with (
+        patch("app.config.get_settings", return_value=settings),
+        patch("app.engines.ict_breakout_monitor.get_settings", return_value=settings),
+        patch.object(explosion_detector, "datetime", _Clock),
+    ):
+        for premium in (20.0, 20.4, 20.2, 20.6, 20.3, 20.7, 20.5, 20.8, 20.6, 20.9):
+            assert scan(premium, 50_000, initial_atm) == []
+            current += timedelta(seconds=3)
+
+        retained = list(_history[symbol][key])
+        assert len(retained) == 10
+        assert min(row[1] for row in retained) == 20.0
+
+        events = scan(24.0, 150_000, strike)
+        matching = [event for event in events if event.side == side and event.strike == strike]
+        assert matching, "ATM first lift must reach radar using the retained OTM base"
+        radar = event_to_dict(matching[0])
+
+    assert radar["ictFirstLift"] is True
+    assert radar["tradeable"] is True
+    assert radar["ictBasePremium"] == 20.0
+    assert 15.0 <= radar["ictBaseRelativeMovePct"] <= 25.0
+
+
+@pytest.mark.parametrize(
+    ("side", "option_key", "deep_atm"),
+    [
+        (Side.CALL, "call_options", 24050.0),
+        (Side.PUT, "put_options", 24350.0),
+    ],
+)
+@patch("app.engines.session_timing.in_open_premium_window", return_value=False)
+def test_deep_otm_never_enters_explosion_history_or_radar(
+    _open, side, option_key, deep_atm,
+):
+    settings = Settings(explosion_scan_atm_itm_only=True)
+    symbol, strike = "NIFTY", 24200.0
+    chain = [{
+        "strike_price": strike,
+        option_key: {"ltp": 24.0, "volume": 250_000},
+    }]
+
+    with patch("app.config.get_settings", return_value=settings):
+        events = scan_chain_explosions(
+            symbol, chain, spot=deep_atm, atm=deep_atm,
+        )
+
+    assert _strike_key(strike, side) not in _history.get(symbol, {})
+    assert not [event for event in events if event.side == side]

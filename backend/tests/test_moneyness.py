@@ -1,6 +1,9 @@
 """ITM / ATM / OTM strike selection tests."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.engines.moneyness import (
     classify_moneyness,
@@ -34,6 +37,8 @@ def _settings():
     s.moneyness_explosion_prefer = "OTM"
     s.moneyness_explosion_block_otm = True
     s.moneyness_explosion_atm_itm_only = False  # legacy tests exercise prefer/bypass paths
+    s.first_lift_shallow_otm_entry_enabled = True
+    s.first_lift_shallow_otm_max_steps = 1
     s.moneyness_local_base_otm_bypass_enabled = True
     s.moneyness_local_base_max_otm_steps = 3
     s.moneyness_local_base_otm_min_score = 75.0
@@ -161,6 +166,81 @@ def test_explosion_atm_itm_only_blocks_otm_even_when_prefer_otm(mock_settings):
     )
     assert ok_itm is True
     assert meta_itm["moneyness"] == "ITM"
+
+
+@pytest.mark.parametrize(
+    ("side", "shallow_strike", "deep_strike"),
+    [
+        (Side.CALL, 24300.0, 24350.0),
+        (Side.PUT, 24100.0, 24050.0),
+    ],
+)
+@patch("app.engines.moneyness.get_settings")
+def test_atm_itm_only_admits_only_strict_shallow_otm_first_lift(
+    mock_settings, side, shallow_strike, deep_strike,
+):
+    """CE/PE symmetry: strict first lift may pass one step, never deep OTM."""
+    s = _settings()
+    s.moneyness_explosion_prefer = "ATM"
+    s.moneyness_explosion_atm_itm_only = True
+    s.moneyness_local_base_otm_bypass_enabled = False
+    mock_settings.return_value = s
+    snap = _snap(spot=24200.0)
+    snap.atmStrike = 24200.0
+    snap.spotChart = MagicMock()
+
+    def candidate(strike):
+        return SimpleNamespace(
+            alert={
+                "side": side.value,
+                "strike": strike,
+                "ictFirstLift": True,
+                "ictBreakout": True,
+                "ictFlatThenVertical": True,
+            },
+        )
+
+    with patch(
+        "app.engines.ict_breakout_monitor.first_lift_entry_ready",
+        return_value=True,
+    ):
+        ok, reason, meta = moneyness_allows(
+            side,
+            shallow_strike,
+            snap,
+            mode="explosion",
+            candidate_score=90,
+            candidate=candidate(shallow_strike),
+        )
+        deep_ok, deep_reason, _ = moneyness_allows(
+            side,
+            deep_strike,
+            snap,
+            mode="explosion",
+            candidate_score=100,
+            candidate=candidate(deep_strike),
+        )
+
+    assert ok is True
+    assert reason == "ok"
+    assert meta["strictFirstLiftShallowOtm"] is True
+    assert deep_ok is False
+    assert deep_reason == "moneyness_explosion_atm_itm_only"
+
+    with patch(
+        "app.engines.ict_breakout_monitor.first_lift_entry_ready",
+        return_value=False,
+    ):
+        weak_ok, weak_reason, _ = moneyness_allows(
+            side,
+            shallow_strike,
+            snap,
+            mode="explosion",
+            candidate_score=100,
+            candidate=candidate(shallow_strike),
+        )
+    assert weak_ok is False
+    assert weak_reason == "moneyness_explosion_atm_itm_only"
 
 
 @patch("app.engines.moneyness.get_settings")

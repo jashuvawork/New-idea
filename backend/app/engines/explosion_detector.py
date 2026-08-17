@@ -998,6 +998,40 @@ def _premium_ok_for_scan(premium: float, open_move: float, settings) -> bool:
     return False
 
 
+def _shallow_otm_monitor_eligible(
+    side: Side,
+    strike: float,
+    spot: float,
+    atm: float,
+    premium: float,
+    volume: float,
+    symbol: str,
+    settings: Any,
+) -> bool:
+    """Retain liquid tape one listed strike beyond the configured ATM band."""
+    from app.engines.moneyness import classify_moneyness, strike_step
+
+    if classify_moneyness(side, strike, spot, symbol=symbol, atm=atm) != "OTM":
+        return False
+    step = strike_step(symbol)
+    tolerance = float(
+        getattr(settings, "moneyness_atm_tolerance_points", step) or step
+    )
+    max_steps = int(
+        getattr(settings, "explosion_shallow_otm_history_steps", 1) or 1
+    )
+    if abs(float(strike) - float(atm)) > tolerance + step * max(0, max_steps):
+        return False
+    if not premium_in_band(premium, mode="explosion"):
+        return False
+    min_volume = float(
+        getattr(settings, "explosion_shallow_otm_history_min_volume", 25000) or 25000
+    )
+    # WS heatmap overlays do not carry volume. Zero therefore means unknown, not
+    # illiquid; an explicit REST volume below the floor remains excluded.
+    return float(volume or 0) <= 0 or float(volume) >= min_volume
+
+
 def scan_chain_explosions(
     symbol: str,
     chain: list[dict[str, Any]],
@@ -1041,19 +1075,29 @@ def scan_chain_explosions(
             if not opt:
                 continue
 
+            premium = opt.get("ltp") or opt.get("last_price") or 0
+            volume = opt.get("volume", 0) or 0
+            if not premium or premium <= 0:
+                continue
+
             if atm_itm_only and spot and atm:
                 from app.engines.moneyness import classify_moneyness
 
                 money = classify_moneyness(
                     side, float(strike), float(spot), symbol=symbol, atm=float(atm),
                 )
-                if money == "OTM":
+                if money == "OTM" and not _shallow_otm_monitor_eligible(
+                    side,
+                    float(strike),
+                    float(spot),
+                    float(atm),
+                    float(premium),
+                    float(volume),
+                    symbol,
+                    settings,
+                ):
                     continue
 
-            premium = opt.get("ltp") or opt.get("last_price") or 0
-            volume = opt.get("volume", 0) or 0
-            if not premium or premium <= 0:
-                continue
             prior_close = prior_close_from_option_leg(opt)
             day_low, day_high = day_extremes_from_option_leg(opt)
 

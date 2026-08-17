@@ -638,9 +638,12 @@ class Settings(BaseSettings):
     # Sub-band deep-OTM scan bypass floor. With ATM+ITM-only scan this is inert;
     # keep aligned to min_option_premium so cheap OTM never re-enters radar.
     explosion_deep_otm_min_premium_inr: float = 18.0
-    # Monitor + enter ATM/ITM only — drop deep-OTM noise (Aug5 24050 PE <₹18).
-    # Near-base catch then applies on liquid ATM/ITM with premium ≥ min band.
+    # Enter ATM/ITM by default, but retain premium tape for one liquid listed strike
+    # beyond the ATM band so a contract that rotates ATM does not lose its real base.
+    # Deep OTM and sub-band premiums remain excluded.
     explosion_scan_atm_itm_only: bool = True
+    explosion_shallow_otm_history_steps: int = 1
+    explosion_shallow_otm_history_min_volume: int = 25000
     explosion_volume_awaken_min: int = 25000
     explosion_volume_awaken_min_velocity_3s: float = 1.0
     explosion_target_elite: float = 25.0
@@ -849,6 +852,11 @@ class Settings(BaseSettings):
     moneyness_explosion_block_otm: bool = True
     # Hard ATM+ITM-only for explosion entries (ignores prefer=OTM / local-base OTM bypass).
     moneyness_explosion_atm_itm_only: bool = True
+    # The sole exception is a strict first-lift setup at most one listed strike
+    # beyond the ATM tolerance band; all first-lift quality/velocity/volume/index
+    # turn checks still apply.
+    first_lift_shallow_otm_entry_enabled: bool = True
+    first_lift_shallow_otm_max_steps: int = 1
     # Confirmed local-base CE/PE rip: allow shallow OTM (≤3 steps) when ATM is absent.
     # Off by default — ATM/ITM-only near-base capture (Aug5); re-enable only if needed.
     moneyness_local_base_otm_bypass_enabled: bool = False

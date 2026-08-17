@@ -163,6 +163,43 @@ def _local_base_otm_bypass(
 _local_base_call_otm_bypass = _local_base_otm_bypass
 
 
+def strict_first_lift_shallow_otm_allows(
+    side: Side | str,
+    strike: float,
+    snap: SymbolSnapshot,
+    *,
+    alert: Optional[dict[str, Any]] = None,
+    candidate: Any = None,
+) -> bool:
+    """Allow only fully confirmed first lifts one listed step outside ATM."""
+    settings = get_settings()
+    if not bool(getattr(settings, "first_lift_shallow_otm_entry_enabled", True)):
+        return False
+    spot = float(snap.spot or 0)
+    atm = float(snap.atmStrike or (atm_strike(spot, snap.symbol) if spot > 0 else 0))
+    if spot <= 0 or atm <= 0:
+        return False
+    if classify_moneyness(side, strike, spot, symbol=snap.symbol, atm=atm) != "OTM":
+        return False
+    step = strike_step(snap.symbol)
+    tolerance = float(
+        getattr(settings, "moneyness_atm_tolerance_points", step) or step
+    )
+    max_steps = int(
+        getattr(settings, "first_lift_shallow_otm_max_steps", 1) or 1
+    )
+    if abs(float(strike) - atm) > tolerance + step * max(0, max_steps):
+        return False
+
+    row = alert
+    if row is None and candidate is not None:
+        candidate_alert = getattr(candidate, "alert", None)
+        row = candidate_alert if isinstance(candidate_alert, dict) else None
+    from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+    return first_lift_entry_ready(snap=snap, alert=row)
+
+
 def moneyness_allows(
     side: Side | str,
     strike: float,
@@ -201,12 +238,23 @@ def moneyness_allows(
     if mode_key in ("ITM", "OTM", "ATM") and money != mode_key:
         return False, f"moneyness_mode_{mode_key.lower()}_required", meta
 
+    strict_shallow_first_lift = (
+        mode == "explosion"
+        and money == "OTM"
+        and strict_first_lift_shallow_otm_allows(
+            side, strike, snap, candidate=candidate,
+        )
+    )
+    if strict_shallow_first_lift:
+        meta["strictFirstLiftShallowOtm"] = True
+
     # Explosion ATM+ITM only — drop OTM entirely so near-base ATM/ITM can win
     # radar (Aug5 deep-OTM 24050 PE <₹18 drowned the 24500 base).
     if (
         mode == "explosion"
         and money == "OTM"
         and bool(getattr(settings, "moneyness_explosion_atm_itm_only", True))
+        and not strict_shallow_first_lift
     ):
         return False, "moneyness_explosion_atm_itm_only", meta
 
@@ -216,6 +264,7 @@ def moneyness_allows(
         and money == "OTM"
         and preferred == "ATM"
         and bool(getattr(settings, "moneyness_explosion_block_otm", True))
+        and not strict_shallow_first_lift
     ):
         if _local_base_otm_bypass(
             side, depth, snap, candidate_score=candidate_score, candidate=candidate,
