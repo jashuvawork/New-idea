@@ -39,11 +39,44 @@ PREMIUM_POLL_WINDOW_SECONDS = 120
 # "local base" for entry/chase timing (Aug5 24500 PE: 72 vs ~66 local base = ~9%, not
 # ~80% off the ~40 session low).
 _local_base_hist: dict[str, deque] = {}
+_armed_base_anchors: dict[str, "ArmedBaseAnchor"] = {}
+_armed_base_reset_after: dict[str, datetime] = {}
 LOCAL_BASE_HIST_MAXLEN = 1200  # ~60 min at 3s
 LOCAL_BASE_WINDOW_SECONDS = 1800  # 30 min lookback for the local swing low
 LOCAL_BASE_EXCLUDE_RECENT_SECONDS = 45  # drop the live breakout tail so base != the rip
 LOCAL_BASE_SAMPLE_MIN_SECONDS = 1.5
 _TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
+
+
+@dataclass
+class ArmedBaseAnchor:
+    premium: float
+    armed_at: datetime
+    expires_at: datetime
+    first_sample_at: datetime
+    last_support_at: datetime
+    sample_count: int
+    span_seconds: float
+    range_pct: float
+
+    def to_dict(self, premium: float = 0.0) -> dict[str, Any]:
+        move = (
+            max(0.0, (float(premium) - self.premium) / self.premium * 100.0)
+            if premium > 0 and self.premium > 0
+            else 0.0
+        )
+        return {
+            "armed": True,
+            "basePremium": round(self.premium, 2),
+            "baseRelativeMovePct": round(move, 3),
+            "armedAt": self.armed_at.isoformat(),
+            "expiresAt": self.expires_at.isoformat(),
+            "firstSampleAt": self.first_sample_at.isoformat(),
+            "lastSupportAt": self.last_support_at.isoformat(),
+            "sampleCount": self.sample_count,
+            "spanSeconds": round(self.span_seconds, 1),
+            "rangePct": round(self.range_pct, 3),
+        }
 
 
 def _roll_session(now: Optional[datetime] = None) -> None:
@@ -62,6 +95,8 @@ def _roll_session(now: Optional[datetime] = None) -> None:
         _score_sticky.clear()
         _peak_velocity.clear()
         _local_base_hist.clear()
+        _armed_base_anchors.clear()
+        _armed_base_reset_after.clear()
 
 
 def reset_detector_state_for_tests() -> None:
@@ -75,6 +110,8 @@ def reset_detector_state_for_tests() -> None:
     _score_sticky.clear()
     _peak_velocity.clear()
     _local_base_hist.clear()
+    _armed_base_anchors.clear()
+    _armed_base_reset_after.clear()
     # Keep today's session date so seeded lows are not wiped by the next _roll_session().
     _session_date = datetime.now(IST).strftime("%Y-%m-%d")
 
@@ -796,6 +833,148 @@ def _record_local_base(full_key: str, ts: datetime, premium: float) -> None:
         dq.popleft()
 
 
+def armed_base_anchor(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    premium: float = 0.0,
+    *,
+    settings: Any = None,
+) -> dict[str, Any]:
+    """Return/update the causal sticky launch base for one contract and session.
+
+    A base is armed only from samples old enough to precede the current observation.
+    Once armed, it never moves upward; a repeatedly confirmed lower base may ratchet it
+    down. Session roll, explicit test reset, or horizon expiry clears the contract state.
+    Restored medium-horizon tape can causally rebuild this state after process startup.
+    """
+    settings = settings or __import__("app.config", fromlist=["get_settings"]).get_settings()
+    if not bool(getattr(settings, "ict_armed_base_enabled", True)):
+        return {"armed": False}
+    if not symbol or side is None or float(strike or 0) <= 0:
+        return {"armed": False}
+    side_v = side if isinstance(side, Side) else Side(str(side).upper())
+    key = _open_key(symbol, strike, side_v)
+    rows = list(_local_base_hist.get(key) or ())
+    if not rows:
+        return {"armed": False}
+
+    now = rows[-1][0]
+    horizon = max(
+        60.0,
+        float(getattr(settings, "ict_armed_base_horizon_seconds", 1800.0) or 1800.0),
+    )
+    current = _armed_base_anchors.get(key)
+    if current is not None and now >= current.expires_at:
+        _armed_base_anchors.pop(key, None)
+        _armed_base_reset_after[key] = current.expires_at
+        current = None
+
+    lookback = max(
+        60.0,
+        float(getattr(settings, "ict_armed_base_lookback_seconds", 900.0) or 900.0),
+    )
+    exclude = max(
+        0.0,
+        float(getattr(settings, "ict_armed_base_exclude_recent_seconds", 3.0) or 3.0),
+    )
+    lo_cut = now - timedelta(seconds=lookback)
+    reset_after = _armed_base_reset_after.get(key)
+    if reset_after is not None and reset_after > lo_cut:
+        lo_cut = reset_after
+    hi_cut = now - timedelta(seconds=exclude)
+    samples = [
+        (ts, float(value))
+        for ts, value in rows
+        if (
+            lo_cut <= ts <= hi_cut
+            and (reset_after is None or ts > reset_after)
+            and _is_meaningful_premium(value, settings)
+        )
+    ]
+    min_samples = max(
+        3,
+        int(getattr(settings, "ict_armed_base_min_samples", 6) or 6),
+    )
+    min_span = max(
+        0.0,
+        float(getattr(settings, "ict_armed_base_min_span_seconds", 15.0) or 15.0),
+    )
+    max_range = max(
+        0.5,
+        float(getattr(settings, "ict_armed_base_max_range_pct", 5.0) or 5.0),
+    )
+
+    candidate: Optional[ArmedBaseAnchor] = None
+    if len(samples) >= min_samples:
+        # Use the newest qualifying coil. This can establish a genuinely new base after
+        # horizon expiry without allowing an old low to contaminate the new session leg.
+        for start in range(len(samples) - min_samples, -1, -1):
+            cluster = samples[start:]
+            low = min(value for _, value in cluster)
+            high = max(value for _, value in cluster)
+            span = (cluster[-1][0] - cluster[0][0]).total_seconds()
+            range_pct = ((high - low) / low * 100.0) if low > 0 else 999.0
+            if span >= min_span and range_pct <= max_range:
+                candidate = ArmedBaseAnchor(
+                    premium=low,
+                    armed_at=now,
+                    expires_at=now + timedelta(seconds=horizon),
+                    first_sample_at=cluster[0][0],
+                    last_support_at=cluster[-1][0],
+                    sample_count=len(cluster),
+                    span_seconds=span,
+                    range_pct=range_pct,
+                )
+                break
+
+    if current is None and candidate is not None:
+        current = candidate
+        _armed_base_anchors[key] = current
+    elif current is not None and candidate is not None:
+        ratchet = max(
+            0.0,
+            float(getattr(settings, "ict_armed_base_min_ratchet_pct", 2.0) or 2.0),
+        )
+        if candidate.premium <= current.premium * (1.0 - ratchet / 100.0):
+            candidate.armed_at = current.armed_at
+            candidate.expires_at = now + timedelta(seconds=horizon)
+            current = candidate
+            _armed_base_anchors[key] = current
+
+    return current.to_dict(premium) if current is not None else {"armed": False}
+
+
+def consume_armed_base_anchor(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    *,
+    closed_at: datetime,
+) -> dict[str, Any]:
+    """Consume one contract anchor after its FTV trade closes.
+
+    The medium-horizon tape remains available to the exhausted-peak guard, but a
+    replacement anchor can only be built from samples strictly after the close.
+    """
+    side_v = side if isinstance(side, Side) else Side(str(side).upper())
+    key = _open_key(symbol, strike, side_v)
+    reset_after = closed_at
+    if reset_after.tzinfo is None:
+        reset_after = reset_after.replace(tzinfo=IST)
+    else:
+        reset_after = reset_after.astimezone(IST)
+    consumed = _armed_base_anchors.pop(key, None)
+    prior_reset = _armed_base_reset_after.get(key)
+    if prior_reset is None or reset_after > prior_reset:
+        _armed_base_reset_after[key] = reset_after
+    return {
+        "consumed": consumed is not None,
+        "key": key,
+        "resetAfter": _armed_base_reset_after[key].isoformat(),
+    }
+
+
 def local_base_premium(
     symbol: str,
     strike: float,
@@ -1314,6 +1493,7 @@ def scan_chain_explosions(
 
             if tier == "WATCH" and score < 25 and not awakened:
                 keep_first_lift = False
+                keep_armed_base = False
                 if bool(getattr(settings, "ict_first_lift_appear_enabled", True)):
                     # The ICT first-lift threshold is intentionally softer than BUILDING.
                     # Probe before dropping WATCH so a slow 15% lift off a real flat/V base
@@ -1322,7 +1502,7 @@ def scan_chain_explosions(
                     try:
                         from app.engines.ict_breakout_monitor import analyze_ict_breakout
 
-                        keep_first_lift = analyze_ict_breakout(
+                        ict_probe = analyze_ict_breakout(
                             symbol=symbol,
                             side=side,
                             strike=float(strike),
@@ -1335,10 +1515,17 @@ def scan_chain_explosions(
                             volume=float(effective_volume or 0),
                             tier=tier,
                             reason=" ".join(reason_parts_open),
-                        ).first_lift
+                        )
+                        keep_first_lift = ict_probe.first_lift
+                        keep_armed_base = ict_probe.base_armed
                     except Exception:
                         keep_first_lift = False
-                if not keep_first_lift and not (peak_move >= 20 and v3 >= 1.2):
+                        keep_armed_base = False
+                if (
+                    not keep_first_lift
+                    and not keep_armed_base
+                    and not (peak_move >= 20 and v3 >= 1.2)
+                ):
                     continue
 
             # Reward ATM proximity; penalize deep OTM (delta + IV crush risk)
@@ -1492,6 +1679,9 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     first_lift = bool(getattr(ict, "first_lift", False))
     if first_lift:
         tradeable = True
+    armed_launch = bool(getattr(ict, "armed_base_launch", False))
+    if armed_launch:
+        tradeable = True
     # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).
     if e.tier == "BUILDING" and ict.active and ict.flat_then_vertical:
         tradeable = True
@@ -1542,6 +1732,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "velocity9s": e.velocity_9s,
         "velocity15s": e.velocity_15s,
         "volumeSurge": e.volume_surge,
+        "volume": e.volume,
         "explosionScore": e.explosion_score,
         "tier": e.tier,
         "reason": e.reason,
@@ -1566,6 +1757,21 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictPremiumFvg": ict.premium_fvg,
         "ictFlatThenVertical": ict.flat_then_vertical,
         "ictFirstLift": first_lift,
+        "ictBaseArmed": bool(getattr(ict, "base_armed", False)),
+        "ictArmedBaseLaunch": armed_launch,
+        "ictArmedBaseSamples": int(getattr(ict, "armed_base_samples", 0) or 0),
+        "ictArmedBaseSpanSeconds": round(
+            float(getattr(ict, "armed_base_span_seconds", 0) or 0),
+            1,
+        ),
+        "ictArmedBaseRangePct": round(
+            float(getattr(ict, "armed_base_range_pct", 0) or 0),
+            2,
+        ),
+        "ictBaseArmedAt": str(getattr(ict, "armed_at", "") or ""),
+        "ictBaseExpiresAt": str(
+            getattr(ict, "armed_base_expires_at", "") or ""
+        ),
         "ictVolumeAwakening": ict.volume_awakening,
         "ictDisplacement": ict.displacement,
         "ictLocalSwingBase": ict.local_swing_base,
@@ -1584,9 +1790,13 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "localBaseReversalConfidence": float(bullish_base.get("confidence") or 0),
         "localBaseReversalSide": bullish_base.get("side") or e.side.value,
         "momentType": (
-            "first_lift_local_base"
-            if first_lift
-            else (ict.pattern if ict.active else ("volume_awaken" if vol_awaken else e.tier))
+            "armed_base_launch"
+            if armed_launch
+            else ("ict_base_armed" if getattr(ict, "base_armed", False) else (
+                "first_lift_local_base"
+                if first_lift
+                else (ict.pattern if ict.active else ("volume_awaken" if vol_awaken else e.tier))
+            ))
         ),
         "ictReasons": ict.reasons,
     }

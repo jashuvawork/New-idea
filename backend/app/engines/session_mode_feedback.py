@@ -367,9 +367,12 @@ def exhausted_ftv_reentry_blocked(
         ctx.get("ictFlatThenVertical")
         or ctx.get("ictFirstLift")
         or ctx.get("firstLiftCapture")
+        or ctx.get("ictArmedBaseLaunch")
+        or ctx.get("armedBaseCapture")
         or str(ctx.get("momentType") or "") in {
             "first_lift_local_base",
             "flat_then_vertical",
+            "armed_base_launch",
         }
     )
     entry = float(getattr(prior, "entryPremium", 0) or 0)

@@ -358,6 +358,27 @@ class Settings(BaseSettings):
     # Arm FTV / radar as soon as pad is in the structured entry band with heat.
     ict_first_lift_appear_enabled: bool = True
     ict_first_lift_min_velocity_3s: float = 1.2
+    # Causal pre-breakout base: repeated past samples arm a contract-local denominator.
+    # It is sticky upward across REST/WS observations and may only ratchet to a proven low.
+    ict_armed_base_enabled: bool = True
+    ict_armed_base_lookback_seconds: float = 900.0
+    ict_armed_base_exclude_recent_seconds: float = 3.0
+    ict_armed_base_min_samples: int = 6
+    ict_armed_base_min_span_seconds: float = 15.0
+    ict_armed_base_max_range_pct: float = 5.0
+    ict_armed_base_horizon_seconds: float = 1800.0
+    ict_armed_base_min_ratchet_pct: float = 2.0
+    # Conservative pre-first-lift launch. Absolute chain volume (or explicit CVD/
+    # orderflow proof) replaces the lagging 2x REST surge requirement.
+    ict_armed_base_launch_min_move_pct: float = 5.0
+    ict_armed_base_launch_max_move_pct: float = 12.0
+    ict_armed_base_launch_min_velocity_3s: float = 1.5
+    ict_armed_base_launch_min_velocity_9s: float = 1.5
+    ict_armed_base_launch_min_absolute_volume: float = 25000.0
+    ict_armed_base_launch_min_quality: float = 60.0
+    ict_armed_base_launch_min_score: float = 45.0
+    ict_armed_base_launch_min_tqs: float = 50.0
+    ict_armed_base_launch_rank_bonus: float = 16.0
     # Durable 5m-style premium base confirmation from the 30-minute tape. Repeated
     # support samples prevent a single bad tick from becoming a launch pad.
     ict_recent_base_window_seconds: int = 1800

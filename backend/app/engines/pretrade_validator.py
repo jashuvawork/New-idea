@@ -1014,6 +1014,27 @@ def validate_candidate(
     )
     if local_ichi_bypass:
         meta["localBaseIchimokuBypass"] = True
+    armed_base_chart_bypass = False
+    if (
+        getattr(candidate, "mode", "") == "explosion"
+        and getattr(candidate, "explosion_event", None) is not None
+    ):
+        from app.engines.ict_breakout_monitor import first_lift_entry_readiness
+
+        armed_ready, armed_reason = first_lift_entry_readiness(
+            snap=snap,
+            event=candidate.explosion_event,
+            alert=(
+                candidate.alert
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            ),
+        )
+        armed_base_chart_bypass = bool(
+            armed_ready and armed_reason == "armed_base_option_led_ready"
+        )
+        if armed_base_chart_bypass:
+            meta["armedBaseChartBypass"] = True
     blocked_chart, chart_reason = chart_blocks_side(
         candidate.side,
         snap.spotChart,
@@ -1021,6 +1042,7 @@ def validate_candidate(
         breadth_aligned_bypass=breadth_bypass,
         premium_led_bypass=premium_bypass or local_ichi_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
+        strict_first_lift_bypass=armed_base_chart_bypass,
     )
     if blocked_chart:
         meta["chartDirection"] = snap.spotChart.direction if snap.spotChart else "NEUTRAL"

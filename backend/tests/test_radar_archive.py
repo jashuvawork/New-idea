@@ -210,6 +210,42 @@ def test_no_qualifying_alert_does_not_create_empty_archive(tmp_path):
     assert not (tmp_path / "radar_archives" / "radar-2026-08-15.zip").exists()
 
 
+def test_armed_watch_state_alone_does_not_expand_full_archive(tmp_path):
+    settings = _settings(tmp_path)
+    armed_only = _alert(
+        strike=24500.0,
+        score=20.0,
+        tier="WATCH",
+        ictBaseArmed=True,
+        ictArmedBaseLaunch=False,
+        ictBreakout=False,
+        tradeable=False,
+    )
+    launch = _alert(
+        strike=24450.0,
+        score=48.0,
+        tier="WATCH",
+        side="PUT",
+        ictBaseArmed=True,
+        ictArmedBaseLaunch=True,
+        ictBreakout=True,
+        tradeable=True,
+    )
+    with patch("app.services.radar_archive.get_settings", return_value=settings):
+        assert record_top_radars(
+            {"NIFTY": _snap([armed_only, launch])},
+            now=datetime(2026, 8, 15, 10, 0, tzinfo=IST),
+        ) == 1
+
+    archive = tmp_path / "radar_archives" / "radar-2026-08-15.zip"
+    manifest, top_rows = _read_rows(archive)
+    with zipfile.ZipFile(archive, "r") as zipped:
+        all_rows = json.loads(zipped.read("all_radars.json"))
+    assert manifest["totalDetectedCount"] == 1
+    assert len(top_rows) == len(all_rows) == 1
+    assert all_rows[0]["alert"]["ictArmedBaseLaunch"] is True
+
+
 def test_corrupt_archive_is_never_silently_overwritten(tmp_path):
     settings = _settings(tmp_path)
     archive = tmp_path / "radar_archives" / "radar-2026-08-15.zip"

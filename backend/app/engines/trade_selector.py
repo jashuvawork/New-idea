@@ -395,6 +395,7 @@ def _explosion_candidates(
             reason=alert.get("reason", ""),
             daily_move_pct=daily_move,
             peak_move_pct=peak_move,
+            volume=float(alert.get("volume") or 0),
         )
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
@@ -496,6 +497,17 @@ def _explosion_candidates(
                 flat_vertical_quality=float(alert.get("flatVerticalQuality") or 0),
                 flat_vertical_grade=str(alert.get("flatVerticalGrade") or ""),
                 first_lift=bool(alert.get("ictFirstLift")),
+                base_armed=bool(alert.get("ictBaseArmed")),
+                armed_base_launch=bool(alert.get("ictArmedBaseLaunch")),
+                armed_base_samples=int(alert.get("ictArmedBaseSamples") or 0),
+                armed_base_span_seconds=float(
+                    alert.get("ictArmedBaseSpanSeconds") or 0
+                ),
+                armed_base_range_pct=float(
+                    alert.get("ictArmedBaseRangePct") or 0
+                ),
+                armed_at=str(alert.get("ictBaseArmedAt") or ""),
+                armed_base_expires_at=str(alert.get("ictBaseExpiresAt") or ""),
             )
         from app.engines.elite_never_block import elite_never_block_active
 
@@ -593,6 +605,10 @@ def _explosion_candidates(
         ):
             continue
         rank += ict_explosion_rank_bonus(ict, trading_mode)
+        if first_lift_readiness_reason == "armed_base_option_led_ready":
+            rank += float(
+                getattr(settings, "ict_armed_base_launch_rank_bonus", 16.0) or 16.0
+            )
         # Early flat→vertical breakouts (26→45 CE / 12→40 PE) jump the queue —
         # including DEFENSIVE days when volume/displacement confirms the base break.
         if ict.flat_then_vertical and ict.active:
@@ -678,6 +694,13 @@ def _explosion_candidates(
             pretrade_meta={
                 "localBaseReversalPrediction": bullish_base,
                 "bullishLocalBasePrediction": bullish_base,
+                "ictBaseArmed": bool(alert.get("ictBaseArmed")),
+                "ictArmedBaseLaunch": bool(alert.get("ictArmedBaseLaunch")),
+                "ictBasePremium": float(alert.get("ictBasePremium") or 0),
+                "ictBaseRelativeMovePct": float(
+                    alert.get("ictBaseRelativeMovePct") or 0
+                ),
+                "ictBaseArmedAt": alert.get("ictBaseArmedAt"),
             },
         ))
     return out

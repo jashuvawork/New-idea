@@ -98,6 +98,8 @@ def _review_rank(alert: Mapping[str, Any]) -> tuple[float, ...]:
         float(_TIER_RANK.get(tier, 0)),
         1.0 if alert.get("tradeable") else 0.0,
         1.0 if alert.get("ictFirstLift") else 0.0,
+        1.0 if alert.get("ictArmedBaseLaunch") else 0.0,
+        1.0 if alert.get("ictBaseArmed") else 0.0,
         _number(alert.get("flatVerticalQuality")),
         _number(alert.get("explosionScore")),
         _number(alert.get("ictScore")),
@@ -113,6 +115,7 @@ def _worth_archiving(alert: Mapping[str, Any]) -> bool:
         _TIER_RANK.get(tier, 0) >= _TIER_RANK["BUILDING"]
         or alert.get("tradeable")
         or alert.get("ictFirstLift")
+        or alert.get("ictArmedBaseLaunch")
         or alert.get("ictBreakout")
         or alert.get("allDayExplosion")
     )
@@ -163,6 +166,13 @@ def _milestone(
         "velocity9s": alert.get("velocity9s"),
         "volumeSurge": alert.get("volumeSurge"),
         "ictFirstLift": alert.get("ictFirstLift"),
+        "ictBaseArmed": alert.get("ictBaseArmed"),
+        "ictArmedBaseLaunch": alert.get("ictArmedBaseLaunch"),
+        "ictArmedBaseSamples": alert.get("ictArmedBaseSamples"),
+        "ictArmedBaseSpanSeconds": alert.get("ictArmedBaseSpanSeconds"),
+        "ictArmedBaseRangePct": alert.get("ictArmedBaseRangePct"),
+        "ictBaseArmedAt": alert.get("ictBaseArmedAt"),
+        "ictBaseExpiresAt": alert.get("ictBaseExpiresAt"),
         "ictVolumeAwakening": alert.get("ictVolumeAwakening"),
         "ictBasePremium": alert.get("ictBasePremium"),
         "ictBaseRelativeMovePct": alert.get("ictBaseRelativeMovePct"),
@@ -233,7 +243,7 @@ def _write_archive(
         "totalDetectedCount": len(entries),
         "selection": (
             "Best observation per symbol/side/strike, ordered by tier, tradeability, "
-            "first-lift state, flat-to-vertical quality, score, and peak move."
+            "first-lift/armed-launch state, flat-to-vertical quality, score, and peak move."
         ),
     }
     readme = (

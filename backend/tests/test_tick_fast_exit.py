@@ -327,6 +327,9 @@ def test_three_overlapping_cycles_close_one_trade_exactly_once():
         patch("app.services.trade_store.record_trade_report") as record_report,
         patch("app.services.radar_learning.record_funnel_state"),
         patch("app.engines.snapshot_lag_analyzer.build_trade_close_report", return_value={}),
+        patch(
+            "app.engines.explosion_detector.consume_armed_base_anchor",
+        ) as consume_anchor,
     ):
         asyncio.run(replay_overlap())
 
@@ -337,6 +340,9 @@ def test_three_overlapping_cycles_close_one_trade_exactly_once():
     assert state.openPaperTrades == []
     assert trade.entryContext["brokerExitOrderId"] == "exit-1"
     assert trade.entryContext["maxLtp"] == 105.80
+    consume_anchor.assert_called_once_with(
+        "NIFTY", 24300, Side.CALL, closed_at=trade.closedAt,
+    )
 
 
 def test_failed_broker_exit_releases_claim_for_next_cycle_retry():

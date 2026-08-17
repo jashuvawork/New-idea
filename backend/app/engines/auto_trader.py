@@ -584,7 +584,7 @@ async def _open_from_candidate(
         timing_blocked, timing_reason = timing_blocks_entry(timing_meta)
         from app.engines.ict_breakout_monitor import first_lift_entry_ready
 
-        strict_first_lift = first_lift_entry_ready(
+        early_base_entry_ready = first_lift_entry_ready(
             snap=snap,
             event=candidate.explosion_event,
             alert=(
@@ -593,10 +593,18 @@ async def _open_from_candidate(
                 else None
             ),
         )
+        alert_row = (
+            candidate.alert
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else {}
+        )
+        strict_first_lift = bool(
+            early_base_entry_ready and alert_row.get("ictFirstLift")
+        )
         if (
             timing_blocked
             and not (
-                strict_first_lift
+                early_base_entry_ready
                 and bool(
                     getattr(
                         settings,
@@ -1345,15 +1353,19 @@ async def _open_from_candidate(
 
         ict = analyze_explosion_event_ict(ev, snap)
         alert = candidate.alert if isinstance(candidate.alert, dict) else {}
-        first_lift_runner = first_lift_entry_ready(
+        early_base_runner = first_lift_entry_ready(
             snap=snap,
             event=ev,
             ict=ict,
             alert=alert,
         )
+        first_lift_runner = bool(
+            early_base_runner
+            and (alert.get("ictFirstLift") or getattr(ict, "first_lift", False))
+        )
         # Preserve the strict selector proof if live ICT re-analysis flickers at fill.
         # Otherwise a valid WATCH first-lift falls back to the standard 12pt exit path.
-        ict_flat_vertical = bool(ict.flat_then_vertical or first_lift_runner)
+        ict_flat_vertical = bool(ict.flat_then_vertical or early_base_runner)
         base_rel = float(
             getattr(ict, "base_relative_move_pct", 0)
             or alert.get("ictBaseRelativeMovePct")
@@ -1379,6 +1391,20 @@ async def _open_from_candidate(
             "ictFlatThenVertical": ict_flat_vertical,
             "ictFirstLift": bool(first_lift_runner),
             "firstLiftCapture": bool(first_lift_runner),
+            "ictBaseArmed": bool(
+                alert.get("ictBaseArmed") or getattr(ict, "base_armed", False)
+            ),
+            "ictArmedBaseLaunch": bool(
+                alert.get("ictArmedBaseLaunch")
+                or getattr(ict, "armed_base_launch", False)
+            ),
+            "armedBaseCapture": bool(
+                early_base_runner
+                and (
+                    alert.get("ictArmedBaseLaunch")
+                    or getattr(ict, "armed_base_launch", False)
+                )
+            ),
             "ictFlatVerticalQuality": round(float(getattr(ict, "flat_vertical_quality", 0) or 0), 1),
             "ictFlatVerticalGrade": getattr(ict, "flat_vertical_grade", ""),
             "ictReasons": ict.reasons,
@@ -1987,6 +2013,25 @@ async def _process_open_trades(
             "pnlInr": trade.pnlInr,
         })
         trade.entryContext = ctx
+        closed_ftv = bool(
+            trade.strategyType == StrategyType.EXPLOSIVE
+            and (
+                ctx.get("ictArmedBaseLaunch")
+                or ctx.get("armedBaseCapture")
+                or ctx.get("ictFlatThenVertical")
+                or ctx.get("ictFirstLift")
+                or ctx.get("firstLiftCapture")
+            )
+        )
+        if closed_ftv:
+            from app.engines.explosion_detector import consume_armed_base_anchor
+
+            consume_armed_base_anchor(
+                trade.symbol,
+                trade.strike,
+                trade.side,
+                closed_at=trade.closedAt,
+            )
         state.closedPaperTrades.append(trade)
         _calibration.record_trade(trade)
         record_symbol_result(trade.symbol, pnl, exit_reason or "")
