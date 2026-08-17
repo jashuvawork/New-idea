@@ -1,6 +1,6 @@
 """Session mode PF feedback + size-until-first-green."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -300,3 +300,102 @@ def test_same_strike_latest_loss_clears_prior_win_cap():
         )
     assert lots == 29
     assert meta.get("reason") == "latest_same_strike_not_a_win"
+
+
+def _peak_captured_ftv(side: Side, *, closed_at: datetime) -> PaperTrade:
+    return PaperTrade(
+        id=f"nifty-24300-{side.value.lower()}",
+        symbol="NIFTY",
+        side=side,
+        strike=24300,
+        entryPremium=75.05,
+        currentPremium=86.0,
+        lots=1,
+        openedAt=closed_at - timedelta(minutes=3),
+        closedAt=closed_at,
+        status="CLOSED",
+        exitReason="explosion_peak_capture",
+        strategyType=StrategyType.EXPLOSIVE,
+        pnlInr=10.95 * 65,
+        pnlPoints=10.95,
+        bestPnlPoints=30.75,
+        maxLtp=105.80,
+        entryContext={
+            "selectionMode": "explosion",
+            "ictFlatThenVertical": True,
+            "maxProfitCapture": True,
+        },
+    )
+
+
+def _post_peak_guard_settings():
+    return _settings(
+        explosion_post_peak_reentry_guard_enabled=True,
+        explosion_post_peak_reentry_lookback_seconds=1800,
+        explosion_post_peak_reentry_min_peak_points=20.0,
+        explosion_post_peak_reentry_near_peak_pct=15.0,
+        explosion_post_peak_reentry_base_samples=3,
+        explosion_post_peak_reentry_base_span_seconds=6.0,
+        explosion_post_peak_reentry_min_reacceleration_pct=8.0,
+        explosion_post_peak_reentry_min_velocity_3s=1.5,
+    )
+
+
+def test_peak_captured_ftv_blocks_exhausted_high_reentry_for_ce_and_pe():
+    from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
+
+    closed_at = datetime.now(IST) - timedelta(seconds=20)
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=_post_peak_guard_settings(),
+    ):
+        for side in (Side.CALL, Side.PUT):
+            state = AutoTraderState(
+                closedPaperTrades=[_peak_captured_ftv(side, closed_at=closed_at)]
+            )
+            blocked, meta = exhausted_ftv_reentry_blocked(
+                state,
+                symbol="NIFTY",
+                side=side,
+                strike=24300,
+                premium=108.02,
+                velocity_3s=3.0,
+            )
+            assert blocked is True
+            assert meta["nearExhaustedPeak"] is True
+            assert meta["newBaseReacceleration"] is False
+
+
+def test_peak_captured_ftv_allows_new_base_and_reacceleration_for_ce_and_pe():
+    import app.engines.explosion_detector as detector
+    from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
+
+    closed_at = datetime.now(IST) - timedelta(seconds=30)
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=_post_peak_guard_settings(),
+    ):
+        for side in (Side.CALL, Side.PUT):
+            detector.reset_detector_state_for_tests()
+            key = detector._open_key("NIFTY", 24300, side)
+            detector._record_local_base(key, closed_at + timedelta(seconds=3), 82.0)
+            detector._record_local_base(key, closed_at + timedelta(seconds=7), 83.0)
+            detector._record_local_base(key, closed_at + timedelta(seconds=11), 82.5)
+            detector._record_local_base(key, closed_at + timedelta(seconds=15), 108.02)
+            state = AutoTraderState(
+                closedPaperTrades=[_peak_captured_ftv(side, closed_at=closed_at)]
+            )
+
+            blocked, meta = exhausted_ftv_reentry_blocked(
+                state,
+                symbol="NIFTY",
+                side=side,
+                strike=24300,
+                premium=108.02,
+                velocity_3s=4.0,
+            )
+
+            assert blocked is False
+            assert meta["newBaseReacceleration"] is True
+            assert meta["baseSamples"] == 3
+            assert meta["baseSpanSeconds"] == 8.0
