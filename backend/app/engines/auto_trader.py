@@ -1483,6 +1483,19 @@ async def _open_from_candidate(
             if ik:
                 ctx_extra["instrumentKey"] = ik
 
+    # Defense in depth immediately before any paper/live order path. Candidate
+    # ranking and ELITE bypasses cannot make an OTM contract executable.
+    from app.engines.moneyness import atm_itm_entry_allows
+
+    hard_mn_ok, hard_mn_reason, hard_mn_meta = atm_itm_entry_allows(
+        candidate.side,
+        candidate.strike,
+        snap,
+    )
+    if not hard_mn_ok:
+        return False, hard_mn_reason
+    ctx_extra.update(hard_mn_meta)
+
     if is_live or use_parity:
         if not client:
             return False, "broker client required for live / paper-live-parity"

@@ -850,7 +850,18 @@ def validate_candidate(
     if not all_in and hc_blocked:
         return False, hc_reason, meta
 
-    from app.engines.moneyness import moneyness_allows
+    from app.engines.moneyness import atm_itm_entry_allows, moneyness_allows
+
+    # Hard execution policy: ELITE/must-take paths may bypass soft validators,
+    # but they can never bypass ATM/ITM-only selection.
+    hard_mn_ok, hard_mn_reason, hard_mn_meta = atm_itm_entry_allows(
+        candidate.side,
+        candidate.strike,
+        snap,
+    )
+    meta.update(hard_mn_meta)
+    if not hard_mn_ok:
+        return False, hard_mn_reason, meta
 
     if not all_in:
         mn_ok, mn_reason, mn_meta = moneyness_allows(

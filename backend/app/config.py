@@ -843,9 +843,10 @@ class Settings(BaseSettings):
     # Runner hold without breadth align (was all_day_min+16=78); rescale(78)≈54.2.
     chart_confidence_runner_hold_min: float = 54.2
 
-    # ITM / ATM / OTM strike selection (AUTO = regime-based)
+    # Executable strikes are always ATM/ITM. A legacy OTM mode value is normalized
+    # to ATM; shallow OTM may still be monitored for history but never ordered.
     moneyness_selection_enabled: bool = True
-    trade_moneyness_mode: str = "AUTO"  # AUTO | ITM | OTM | ATM
+    trade_moneyness_mode: str = "AUTO"  # AUTO | ITM | ATM
     moneyness_atm_tolerance_points: float = 50.0
     # Real listed strike intervals — NIFTY is 50, SENSEX/BANKNIFTY are 100. The old
     # hardcoded 100 for NIFTY halved its OTM-depth counting (deep-OTM guards too loose).
@@ -864,21 +865,9 @@ class Settings(BaseSettings):
     expiry_sensex_itm_scan_range: int = 1200
     expiry_itm_both_sides: bool = True
     moneyness_explosion_prefer: str = "ATM"
-    # When explosion prefer is ATM, hard-block OTM (Jul23 76100 PE −₹1.3k after ATM miss).
-    # ATM + shallow ITM still allowed; deep OTM FOMO is not a soft rank penalty.
+    # Legacy compatibility fields; execution enforces ATM/ITM independently.
     moneyness_explosion_block_otm: bool = True
-    # Hard ATM+ITM-only for explosion entries (ignores prefer=OTM / local-base OTM bypass).
     moneyness_explosion_atm_itm_only: bool = True
-    # The sole exception is a strict first-lift setup at most one listed strike
-    # beyond the ATM tolerance band; all first-lift quality/velocity/volume/index
-    # turn checks still apply.
-    first_lift_shallow_otm_entry_enabled: bool = True
-    first_lift_shallow_otm_max_steps: int = 1
-    # Confirmed local-base CE/PE rip: allow shallow OTM (≤3 steps) when ATM is absent.
-    # Off by default — ATM/ITM-only near-base capture (Aug5); re-enable only if needed.
-    moneyness_local_base_otm_bypass_enabled: bool = False
-    moneyness_local_base_max_otm_steps: int = 3
-    moneyness_local_base_otm_min_score: float = 75.0
     moneyness_scalp_chop_prefer: str = "ITM"
     moneyness_high_conf_prefer: str = "ITM"
     moneyness_rank_bonus: float = 12.0
