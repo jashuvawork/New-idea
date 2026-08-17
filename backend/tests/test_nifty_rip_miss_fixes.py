@@ -220,9 +220,9 @@ def test_high_conf_trail_stops_when_winner_gives_back_to_loss(mock_conf, mock_ex
     )
     plan = AdaptiveExitPlan(stopPoints=8.0, targetPoints=12.0, trailArmPoints=4.0, trailKeepRatio=0.65)
     params = explosion_exit_params_from_plan(plan, "ELITE")
-    # Peaked +8.5pt, now -1.67pt → peak-fade BE lock (before trail).
+    # Peaked +8.5pt, now -1.67pt → early-green BE lock (before trail).
     reason, _ = evaluate_explosion_exit(trade, 61.95, "ELITE", 25, params=params)
-    assert reason == "explosion_peak_fade_breakeven"
+    assert reason == "explosion_early_green_breakeven"
 
 
 def test_cross_index_elite_priority_bonus():

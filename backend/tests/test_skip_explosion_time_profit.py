@@ -126,7 +126,7 @@ def test_jul29_77600_holds_past_time_profit(mock_ep, mock_ch, mock_bh, mock_ict)
         trade, 252.12, "ELITE", 20, params=_params(),
     )
     assert reason != "explosion_time_profit", f"must hold toward TP, got {reason}"
-    assert reason is None
+        assert reason == "explosion_early_green_breakeven"
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
