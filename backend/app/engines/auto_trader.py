@@ -504,6 +504,7 @@ async def _open_from_candidate(
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
     faded_rip_meta: dict[str, Any] = {}
     trap_meta: dict[str, Any] = {}
+    strict_first_lift = False
     if candidate.mode == "explosion" and candidate.explosion_event:
         from app.engines.explosion_entry_guards import (
             detect_fake_explosion_trap,
@@ -1140,12 +1141,27 @@ async def _open_from_candidate(
         ),
         local_base_premium=local_base_prem if local_base_prem > 0 else None,
     )
+    # A rank-1 top explosion that also passed strict first-lift proof is the only
+    # setup allowed to keep every cash-affordable lot when its calculated stop
+    # exceeds the standard 8% sleeve-risk budget. Late/fading continuations,
+    # lower-ranked trades and post-win/whipsaw-capped entries remain risk-sized.
+    top_rank_full_budget_lots = _top_rank_full_budget_lots_allowed(
+        enabled=bool(
+            getattr(settings, "top_rank_first_lift_full_budget_lots_enabled", True)
+        ),
+        allocation=allocation,
+        strict_first_lift=strict_first_lift,
+        top_explosion_max=top_explosion_max,
+        faded_rip=bool(faded_rip_meta),
+        post_win_capped=bool(post_win_cap_meta.get("applied")),
+    )
     exit_plan = tune_exit_plan_for_position(
         exit_plan,
         lots,
         fill_premium,
         symbol,
         trade_budget_inr=allocation.budgetInr if allocation else None,
+        preserve_lots_over_sl_budget=top_rank_full_budget_lots,
     )
     # Size-tune may shrink lots so preserved natural SL fits the INR risk budget
     # (Aug11 63-lot NIFTY claimed SL ≤₹15k while risking ~₹37k).
@@ -1223,6 +1239,7 @@ async def _open_from_candidate(
         "highConviction": bool(high_conviction),
         "elevatedSize": bool(elevated_size),
         "topExplosionMaxLots": bool(top_explosion_max),
+        "topRankFullBudgetLots": top_rank_full_budget_lots,
         "baseWindowFullLots": bool(base_window_full_lots),
         "structuredColdMaxLots": bool(structured_cold_max),
         "sameStrikePostWinCap": post_win_cap_meta or None,
@@ -2022,6 +2039,27 @@ def _is_ranked_ftv_candidate(candidate: EntryCandidate) -> bool:
         )
     except Exception:
         return False
+
+
+def _top_rank_full_budget_lots_allowed(
+    *,
+    enabled: bool,
+    allocation: RankedAllocation | None,
+    strict_first_lift: bool,
+    top_explosion_max: bool,
+    faded_rip: bool,
+    post_win_capped: bool,
+) -> bool:
+    """Keep full sleeve lots only for the strongest fresh rank-1 moment."""
+    return bool(
+        enabled
+        and allocation is not None
+        and allocation.rank == 1
+        and strict_first_lift
+        and top_explosion_max
+        and not faded_rip
+        and not post_win_capped
+    )
 
 
 async def process(

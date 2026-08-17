@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from app.engines.capital_allocator import (
     CapitalSnapshot,
+    RankedAllocation,
     cap_lots_to_allocation,
     capital_book_summary,
     clamp_lots,
@@ -23,7 +24,10 @@ from app.engines.explosion_profit import (
     explosion_in_cooldown,
     record_explosion_stop,
 )
-from app.engines.auto_trader import _is_ranked_ftv_candidate
+from app.engines.auto_trader import (
+    _is_ranked_ftv_candidate,
+    _top_rank_full_budget_lots_allowed,
+)
 from app.models.schemas import AutoTraderState, PaperTrade, Side, StrategyType
 from zoneinfo import ZoneInfo
 
@@ -220,6 +224,93 @@ class CapitalSizingTests(unittest.TestCase):
 
         self.assertEqual(tuned["tradeBudgetInr"], 60_000)
         self.assertLessEqual(tuned["actualSlRiskInr"], 60_000 * 0.08 + 0.01)
+
+    def test_rank_one_first_lift_can_keep_all_cash_affordable_lots(self):
+        settings = self._ranked_settings()
+        settings.position_sl_cap_pct = 0.08
+        settings.position_tp_target_pct = 0.12
+        settings.scalp_stop_points = 3.0
+        settings.scalp_stop_min_points = 1.0
+        settings.position_sl_preserve_natural_frac = 0.45
+        settings.explosion_sl_preserve_natural_frac = 0.85
+        settings.position_min_risk_reward = 1.2
+        settings.scalp_trail_step_points = 2.0
+        snap = CapitalSnapshot(
+            availableMarginInr=200_000,
+            perTradeCapitalInr=180_000,
+        )
+        with (
+            patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap),
+            patch("app.engines.capital_allocator.get_settings", return_value=settings),
+        ):
+            tuned = tune_exit_plan_for_position(
+                {
+                    "stopPoints": 24,
+                    "naturalStopPoints": 24,
+                    "targetPoints": 40,
+                    "microTargetPoints": 6,
+                    "trailArmPoints": 10,
+                },
+                lots=26,
+                premium=103.6,
+                symbol="NIFTY",
+                trade_budget_inr=180_000,
+                preserve_lots_over_sl_budget=True,
+            )
+
+        self.assertEqual(tuned["lots"], 26)
+        self.assertTrue(tuned["slRiskBudgetOverride"])
+        self.assertGreater(tuned["actualSlRiskInr"], tuned["maxSlBudgetInr"])
+        self.assertTrue(
+            any("Rank-1 first-lift full-budget override" in row for row in tuned["reasoning"])
+        )
+
+    def test_full_budget_override_requires_fresh_rank_one_top_moment(self):
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=180_000,
+            remainingBeforeInr=200_000,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=0,
+            weight=0.9,
+        )
+        common = {
+            "enabled": True,
+            "allocation": allocation,
+            "strict_first_lift": True,
+            "top_explosion_max": True,
+            "faded_rip": False,
+            "post_win_capped": False,
+        }
+
+        self.assertTrue(_top_rank_full_budget_lots_allowed(**common))
+        for key in ("strict_first_lift", "top_explosion_max"):
+            self.assertFalse(
+                _top_rank_full_budget_lots_allowed(**{**common, key: False})
+            )
+        self.assertFalse(
+            _top_rank_full_budget_lots_allowed(**{**common, "faded_rip": True})
+        )
+        self.assertFalse(
+            _top_rank_full_budget_lots_allowed(**{**common, "post_win_capped": True})
+        )
+        self.assertFalse(
+            _top_rank_full_budget_lots_allowed(
+                **{
+                    **common,
+                    "allocation": RankedAllocation(
+                        rank=2,
+                        budgetInr=18_000,
+                        remainingBeforeInr=20_000,
+                        cashReserveInr=0,
+                        capitalBaseInr=200_000,
+                        committedInr=180_000,
+                        weight=0.9,
+                    ),
+                }
+            )
+        )
 
     def test_manual_capital_limit_updates_sizing_snapshot(self):
         settings = self._ranked_settings()
