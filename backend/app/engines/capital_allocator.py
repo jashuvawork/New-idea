@@ -990,6 +990,7 @@ def tune_exit_plan_for_position(
     premium: float,
     symbol: str,
     trade_budget_inr: float | None = None,
+    preserve_lots_over_sl_budget: bool = False,
 ) -> dict[str, Any]:
     """Tune TP/SL for position — INR risk caps on 85% trade capital.
 
@@ -1056,20 +1057,33 @@ def tune_exit_plan_for_position(
         )
 
     # Honor the comment above: when preserving SL over the pt-cap, reduce size.
+    # The one exception is an explicitly approved rank-1 first-lift. Its lot count
+    # has already been bounded by the cash sleeve and hard lot ceiling; preserving
+    # it here lets a genuine top local-base moment use the full allocated capital
+    # without disguising the resulting INR stop risk.
+    sl_risk_budget_override = False
     if stop > 0 and mult > 0 and max_sl_inr > 0:
         risk_at_size = stop * units
         if risk_at_size > max_sl_inr + 1e-6:
-            lots_fit = max(1, int(max_sl_inr / (stop * mult)))
-            if lots_fit < lots:
+            if preserve_lots_over_sl_budget:
+                sl_risk_budget_override = True
                 reasoning.append(
-                    f"Shrink lots {lots}→{lots_fit} so {stop:.1f}pt SL fits "
-                    f"₹{max_sl_inr:,.0f} risk budget (was ₹{risk_at_size:,.0f})"
+                    f"Rank-1 first-lift full-budget override: keep {lots} lots with "
+                    f"{stop:.1f}pt calculated SL (₹{risk_at_size:,.0f} risk vs "
+                    f"₹{max_sl_inr:,.0f} standard budget)"
                 )
-                lots = lots_fit
-                units = lots * mult
-                position_inr = premium * units
-                sl_pts_cap = max_sl_inr / units if units > 0 else sl_pts_cap
-                tp_pts_floor = target_inr / units if units > 0 else tp_pts_floor
+            else:
+                lots_fit = max(1, int(max_sl_inr / (stop * mult)))
+                if lots_fit < lots:
+                    reasoning.append(
+                        f"Shrink lots {lots}→{lots_fit} so {stop:.1f}pt SL fits "
+                        f"₹{max_sl_inr:,.0f} risk budget (was ₹{risk_at_size:,.0f})"
+                    )
+                    lots = lots_fit
+                    units = lots * mult
+                    position_inr = premium * units
+                    sl_pts_cap = max_sl_inr / units if units > 0 else sl_pts_cap
+                    tp_pts_floor = target_inr / units if units > 0 else tp_pts_floor
 
     target = max(plan_target, tp_pts_floor, settings.scalp_stop_points * 2)
     # Guard inverted R:R — a budget-capped stop can exceed the target floor.
@@ -1112,5 +1126,6 @@ def tune_exit_plan_for_position(
         "tradeBudgetInr": round(trade_budget, 2),
         "maxSlBudgetInr": round(max_sl_inr, 2),
         "actualSlRiskInr": round(actual_sl_inr, 2),
+        "slRiskBudgetOverride": sl_risk_budget_override,
         "reasoning": reasoning,
     }
