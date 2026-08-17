@@ -121,6 +121,12 @@ def _structured_cold_base_ok(
     # Only when live is actually cold — hot path uses GOOD/OK instead.
     if live_v >= good_min:
         return False
+    min_velocity = _f(
+        getattr(settings, "entry_timing_structured_cold_min_velocity_3s", 0.5),
+        0.5,
+    )
+    if live_v < min_velocity:
+        return False
     if bool(getattr(settings, "entry_timing_structured_cold_require_heat", True)) and not heat:
         return False
     if bool(getattr(settings, "entry_timing_structured_cold_require_aligned", True)):
@@ -201,7 +207,18 @@ def assess_entry_timing(
         snap=snap,
     )
 
-    # --- priority: CHASE > structured cold-base allow > LATE > COLD > GOOD/OK ---
+    structured_failed_launch = bool(
+        structured
+        and in_window
+        and local > 0
+        and live_v
+        < _f(
+            getattr(settings, "entry_timing_structured_cold_min_velocity_3s", 0.5),
+            0.5,
+        )
+    )
+
+    # --- priority: CHASE > failed launch > structured cold-base > LATE/COLD > GOOD/OK ---
     if local > chase_hi > 0:
         assessment = "CHASE"
         action = "block"
@@ -210,14 +227,23 @@ def assess_entry_timing(
         assessment = "CHASE"
         action = "block"
         reasons.append(f"session_{session:.0f}%>ceiling_{chase_hi:.0f}%")
+    elif structured_failed_launch:
+        assessment = "FAILED_LAUNCH"
+        action = "block"
+        reasons.append(f"structured_base_negative_v3_{live_v:.1f}")
+        reasons.append("wait_for_positive_reacceleration")
     elif cold_base:
-        # Aug4 24550 PE: session peak already huge but local base still early —
-        # cold pause before next leg. Worth taking → full/max lots; thesis-hold.
+        # Positive but sub-breakout velocity: take only a small probe. Full sleeve
+        # requires the separate armed-launch/CVD proof in auto_trader.
         assessment = "COLD_BASE"
-        action = "allow"
+        action = "lot_cap"
+        lot_cap = max(
+            1,
+            int(getattr(settings, "entry_timing_structured_cold_lot_cap", 3) or 3),
+        )
         reasons.append(f"structured_cold_base_v3_{live_v:.1f}")
         reasons.append(f"local_base_{local:.0f}%_in_window")
-        reasons.append("cold_base_max_lots")
+        reasons.append(f"cold_base_lot_cap_{lot_cap}")
     elif (
         session >= late_peak
         and live_v <= late_max_v
@@ -322,13 +348,13 @@ def cap_lots_for_timing(lots: int, timing: dict[str, Any]) -> int:
 
 
 def timing_allows_full_size(timing: dict[str, Any]) -> bool:
-    """Max-lot boosts when timing is GOOD, OK, or structured COLD_BASE."""
+    """Max-lot boosts require positive launch timing; COLD_BASE stays probe-sized."""
     if not timing:
         return True
     settings = get_settings()
     if not bool(getattr(settings, "entry_timing_assessment_enabled", True)):
         return True
-    return str(timing.get("assessment") or "").upper() in ("GOOD", "OK", "COLD_BASE")
+    return str(timing.get("assessment") or "").upper() in ("GOOD", "OK")
 
 
 def elite_bypass_allowed_for_timing(timing: dict[str, Any]) -> bool:

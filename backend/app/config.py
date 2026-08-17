@@ -246,15 +246,20 @@ class Settings(BaseSettings):
     entry_timing_cold_block_on_chop: bool = True
     entry_timing_cold_lot_cap: int = 3
     entry_timing_elite_bypass_requires_hot: bool = True
-    # Aug4 NIFTY 24550 PUT: structured ICT local-base still in window (28.8%) but
-    # live v3 cold (0.8) on chop → was hard-blocked as LATE/COLD, then LTP→120.
-    # Allow these "pause before next leg" moments at capital max lots (worth taking
-    # → full size). Elite never-block still requires GOOD (hot) timing.
-    # True LATE chase (no local base / past ceiling) stays blocked.
+    # A structured pause may be watched/taken small only while premium velocity remains
+    # positive. Negative velocity is a failed launch, not a max-size local-base entry.
     entry_timing_structured_cold_base_allow: bool = True
-    entry_timing_structured_cold_max_lots: bool = True
+    entry_timing_structured_cold_min_velocity_3s: float = 0.5
+    entry_timing_structured_cold_lot_cap: int = 3
+    entry_timing_structured_cold_max_lots: bool = False
     entry_timing_structured_cold_require_heat: bool = True
     entry_timing_structured_cold_require_aligned: bool = True
+    # Ordinary entries use at most 35% capital. The configured 90% sleeve is reserved
+    # for a proven armed-base launch with positive v3/v9, CVD buying and acceleration.
+    ordinary_entry_max_capital_pct: float = 0.35
+    full_sleeve_requires_armed_launch: bool = True
+    full_sleeve_requires_cvd: bool = True
+    full_sleeve_requires_cvd_acceleration: bool = True
     # Promote high-confidence radar explosions the missed-trade monitor flags as bullish/base-window.
     # Does NOT trade premium_out_of_band cheap OTM chases (Jul20 24550 @ ₹3 — correctly blocked).
     missed_explosion_promote_enabled: bool = True
@@ -463,6 +468,11 @@ class Settings(BaseSettings):
     explosion_peak_fade_min_remain_points: float = 0.4
     explosion_peak_fade_breakeven_lock: bool = True
     explosion_peak_fade_breakeven_buffer: float = 0.5
+    # Small winners must not become meaningful losses when live premium rolls over.
+    explosion_early_green_lock_enabled: bool = True
+    explosion_early_green_lock_min_best_points: float = 3.5
+    explosion_early_green_lock_buffer_points: float = 0.5
+    explosion_early_green_lock_max_velocity_3s: float = 0.0
     # ICT max-profit / flat→vertical runners: hold through early pullbacks.
     # Aug6 SENSEX 78700 CE: best +15 → soft-locked +6.5 (OVERCONFIDENCE tightened
     # giveback to 50%) then LTP ran to ~460. Require a real expansion peak first.
@@ -1206,7 +1216,7 @@ class Settings(BaseSettings):
     neutral_breadth_explosion_min_score: float = 55.0
     sensex_rank_bonus: float = 10.0
     nifty_rank_penalty_chop: float = 5.0
-    daily_loss_stop_inr: float = 100_000.0
+    daily_loss_stop_inr: float = 6_000.0
     daily_max_trades_chop: int = 20
     daily_max_trades_pre10_chop: int = 5
     pre10_chop_min_rank_score: float = 60.0
@@ -1482,7 +1492,7 @@ class Settings(BaseSettings):
     aggressive_max_open_scalps: int = 1
     max_lots_per_trade: int = 0  # 0 = no hard cap; size from 85% capital only
     min_lots_per_trade: int = 1
-    max_risk_per_trade_inr: float = 200_000
+    max_risk_per_trade_inr: float = 4_000
     min_per_trade_risk_inr: float = 3_000
     per_trade_risk_pct: float = 0.95
     max_exposure_pct: float = 0.95
@@ -1500,12 +1510,19 @@ class Settings(BaseSettings):
     #    directionally wrong; cut faster than the full adaptive stop.
     explosion_never_green_stop_enabled: bool = True
     explosion_never_green_min_green_points: float = 0.5
-    explosion_never_green_stop_points: float = 18.0  # min floor (below the thesis grind)
-    explosion_never_green_stop_pct: float = 6.0  # or % of entry premium, whichever larger
-    explosion_never_green_min_hold_seconds: int = 20
-    # 2) Hard per-trade ₹ loss cap — OFF (0). Point/adaptive stops + never-green still apply.
-    # Aug7: BUILDING ICT base rip hit the ₹12k cap at −₹12.8k before the thesis SL.
-    explosion_per_trade_max_loss_inr: float = 0.0
+    explosion_never_green_stop_points: float = 4.0
+    explosion_never_green_stop_pct: float = 8.0
+    explosion_never_green_min_hold_seconds: int = 10
+    # Scratch a launch that immediately loses both price and velocity confirmation.
+    explosion_failed_launch_exit_enabled: bool = True
+    explosion_failed_launch_min_hold_seconds: int = 15
+    explosion_failed_launch_max_hold_seconds: int = 45
+    explosion_failed_launch_max_best_points: float = 1.0
+    explosion_failed_launch_min_loss_points: float = 1.5
+    explosion_failed_launch_max_velocity_3s: float = 0.0
+    # 2) Hard INR ceilings: ~1% of ₹2L normally, ~2% only for a fully proven launch.
+    explosion_per_trade_max_loss_inr: float = 2_000.0
+    explosion_exceptional_per_trade_max_loss_inr: float = 4_000.0
     # 3) Whipsaw flip — after a same-session WIN on the opposite side, don't max-size the
     #    counter-flip (Aug6: CALLs won, then a max-size PUT flip lost). Cap flip size.
     explosion_whipsaw_flip_guard_enabled: bool = True

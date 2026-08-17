@@ -537,6 +537,17 @@ def max_lots_for_capital(symbol: str, premium: float) -> int:
     return max(1, int(budget / (premium * mult)))
 
 
+def max_lots_for_capital_pct(symbol: str, premium: float, capital_pct: float) -> int:
+    """Affordable lots for an explicit share of currently available capital."""
+    cap = get_capital_snapshot()
+    mult = lot_multiplier(symbol)
+    if premium <= 0 or mult <= 0:
+        return 1
+    pct = max(0.0, min(1.0, float(capital_pct or 0.0)))
+    budget = _effective_capital_inr(cap.availableMarginInr) * pct
+    return max(1, int(budget / (premium * mult)))
+
+
 def clamp_lots(lots: int, symbol: str = "", premium: float = 0.0) -> int:
     """Clamp to min lots and capital-derived max (optional hard ceiling)."""
     settings = get_settings()

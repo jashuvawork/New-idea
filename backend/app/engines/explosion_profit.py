@@ -1140,6 +1140,26 @@ def peak_fade_profit_lock_reason(
     """
     settings = get_settings()
 
+    # Even an FTV runner loses its free option once a small winner fully rolls over.
+    # This acts only near breakeven with non-positive live velocity, so a normal
+    # pullback that remains green or is already reaccelerating keeps running.
+    if bool(getattr(settings, "explosion_early_green_lock_enabled", True)):
+        early_min_best = _cfg_float(
+            settings, "explosion_early_green_lock_min_best_points", 3.5
+        )
+        early_buffer = _cfg_float(
+            settings, "explosion_early_green_lock_buffer_points", 0.5
+        )
+        early_max_v = _cfg_float(
+            settings, "explosion_early_green_lock_max_velocity_3s", 0.0
+        )
+        if (
+            best >= early_min_best
+            and pnl_pts <= early_buffer
+            and live_velocity_3s <= early_max_v
+        ):
+            return "explosion_early_green_breakeven"
+
     # Near-peak capture when rollover is confirmed (best +12 → book ~+9).
     # Own enable flag — runs even if deep peak-fade lock is disabled.
     capture = peak_capture_profit_lock_reason(
@@ -1254,12 +1274,46 @@ def evaluate_explosion_exit(
     )
     best = max(trade.bestPnlPoints, pnl_pts, observed_best)
     hold = _hold_seconds(trade)
+    try:
+        v3 = float(live_velocity_3s or 0.0)
+    except (TypeError, ValueError):
+        v3 = 0.0
+    if trade.entryContext is None:
+        trade.entryContext = {}
+    if v3 or "liveVelocity3s" not in trade.entryContext:
+        trade.entryContext["liveVelocity3s"] = round(v3, 3)
 
     from app.engines.explosion_entry_guards import faded_rip_no_green_exit_reason
 
     faded_exit = faded_rip_no_green_exit_reason(trade, hold_seconds=hold, best_points=best)
     if faded_exit:
         return faded_exit, pnl_inr
+
+    # The launch thesis failed immediately: it never established green and live
+    # premium is still contracting. Scratch before the wider structural stop.
+    if bool(getattr(settings, "explosion_failed_launch_exit_enabled", True)):
+        failed_min_hold = int(
+            _cfg_float(settings, "explosion_failed_launch_min_hold_seconds", 15)
+        )
+        failed_max_hold = int(
+            _cfg_float(settings, "explosion_failed_launch_max_hold_seconds", 45)
+        )
+        failed_max_best = _cfg_float(
+            settings, "explosion_failed_launch_max_best_points", 1.0
+        )
+        failed_min_loss = _cfg_float(
+            settings, "explosion_failed_launch_min_loss_points", 1.5
+        )
+        failed_max_v = _cfg_float(
+            settings, "explosion_failed_launch_max_velocity_3s", 0.0
+        )
+        if (
+            failed_min_hold <= hold <= failed_max_hold
+            and best <= failed_max_best
+            and pnl_pts <= -failed_min_loss
+            and v3 < failed_max_v
+        ):
+            return "explosion_failed_launch", pnl_inr
 
     # Never-green hard cut: a trade that printed NO green and is now down past a tight
     # floor is directionally wrong from entry (Aug6 78800 PE: best=0 → ran to −37pt).
@@ -1276,23 +1330,25 @@ def evaluate_explosion_exit(
 
     # Hard per-trade ₹ loss cap — optional (0 = disabled). Prefer never-green + point SL
     # so ICT/base runners are not clipped by a rupee ceiling before the thesis stop.
-    hard_cap = _cfg_float(settings, "explosion_per_trade_max_loss_inr", 0.0)
+    ctx = trade.entryContext or {}
+    if bool(ctx.get("fullSleeveQualified")):
+        hard_cap = _cfg_float(
+            settings,
+            "explosion_exceptional_per_trade_max_loss_inr",
+            4_000.0,
+        )
+    else:
+        hard_cap = _cfg_float(
+            settings,
+            "explosion_per_trade_max_loss_inr",
+            2_000.0,
+        )
     if hard_cap > 0 and pnl_inr <= -hard_cap:
         return "explosion_per_trade_risk_cap", pnl_inr
 
     from app.engines.ict_breakout_monitor import _ict_max_profit_trade
 
     max_profit = _ict_max_profit_trade(trade)
-
-    # Stamp live heat so peak-capture / bullish-defer see the same tape.
-    try:
-        v3 = float(live_velocity_3s or 0.0)
-    except (TypeError, ValueError):
-        v3 = 0.0
-    if trade.entryContext is None:
-        trade.entryContext = {}
-    if v3 or "liveVelocity3s" not in trade.entryContext:
-        trade.entryContext["liveVelocity3s"] = round(v3, 3)
 
     # Peak→fade toward losses: book remaining green / BE before hard SL.
     # Runs before trail-arm gates so unarmed trails cannot give winners back.

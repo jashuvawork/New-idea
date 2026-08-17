@@ -25,9 +25,10 @@ def _trade(entry, cur, *, best=0.0, lots=10, hold_s=60):
 
 
 def test_never_green_stop_cuts_faster():
-    """Never printed green (best=0) and down past the floor (346×6%≈21pt) → never-green cut.
-    Aug6 78800 PE ran to −37pt; this cuts it near −21."""
-    reason, _ = evaluate_explosion_exit(_trade(346.0, 320.0, best=0.0, lots=27), 320.0, "ELITE", 20)
+    """Never green and down past max(4pt, 8% premium) exits before a deep loss."""
+    reason, _ = evaluate_explosion_exit(
+        _trade(346.0, 315.0, best=0.0, lots=1), 315.0, "ELITE", 20,
+    )
     assert reason == "explosion_never_green_stop"
 
 
@@ -43,12 +44,12 @@ def test_never_green_skipped_once_green_printed():
     assert reason != "explosion_never_green_stop"
 
 
-def test_hard_per_trade_risk_cap_disabled_by_default():
-    """₹ risk cap is off (0) — large lot point losses are not force-exited by it."""
+def test_hard_per_trade_risk_cap_enabled_by_default():
+    """Ordinary trades cannot exceed the default ₹2k loss ceiling."""
     reason, pnl = evaluate_explosion_exit(
         _trade(500.0, 495.0, best=3.0, lots=200), 495.0, "ELITE", 20,
     )
-    assert reason != "explosion_per_trade_risk_cap"
+    assert reason == "explosion_per_trade_risk_cap"
     assert pnl <= -12000
 
 
@@ -70,6 +71,24 @@ def test_hard_per_trade_risk_cap_when_enabled():
         )
     assert reason == "explosion_per_trade_risk_cap"
     assert pnl <= -12000
+
+
+def test_exceptional_full_sleeve_uses_bounded_four_thousand_cap():
+    trade = _trade(100.0, 97.0, best=2.0, lots=75)
+    trade.entryContext = {"fullSleeveQualified": True}
+    reason, pnl = evaluate_explosion_exit(
+        trade, 97.0, "ELITE", 20, live_velocity_3s=0.5,
+    )
+    assert reason == "explosion_per_trade_risk_cap"
+    assert pnl <= -4_000
+
+
+def test_failed_launch_scratches_on_negative_velocity():
+    trade = _trade(51.0, 49.0, best=0.5, lots=1, hold_s=20)
+    reason, _ = evaluate_explosion_exit(
+        trade, 49.0, "ELITE", 65, live_velocity_3s=-1.0,
+    )
+    assert reason == "explosion_failed_launch"
 
 
 def _closed(side, pnl, symbol="SENSEX", mins_ago=10):
