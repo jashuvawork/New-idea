@@ -139,6 +139,41 @@ def test_archives_best_unique_radars_and_improvement_milestones(tmp_path):
     assert any(row["alert"].get("ictFirstLift") for row in rows)
 
 
+def test_lower_rank_tradeable_moment_is_kept_as_causal_milestone(tmp_path):
+    settings = _settings(tmp_path)
+    now = datetime(2026, 8, 17, 15, 0, tzinfo=IST)
+    prior_peak = _alert(
+        strike=24350.0,
+        score=90.0,
+        tier="ELITE",
+        side="PUT",
+        tradeable=False,
+    )
+    causal_launch = _alert(
+        strike=24350.0,
+        score=50.0,
+        tier="BUILDING",
+        side="PUT",
+        tradeable=True,
+        ictArmedBaseLaunch=True,
+        ictArmedBaseSustainedLift=True,
+    )
+
+    with patch("app.services.radar_archive.get_settings", return_value=settings):
+        record_top_radars({"NIFTY": _snap([prior_peak])}, now=now)
+        record_top_radars(
+            {"NIFTY": _snap([causal_launch])},
+            now=now.replace(minute=15),
+        )
+        row = read_archive_entries("2026-08-17")[0]
+
+    assert row["tier"] == "ELITE"
+    assert row["alert"]["explosionScore"] == 90.0
+    assert len(row["milestones"]) == 2
+    assert row["milestones"][-1]["tradeable"] is True
+    assert row["milestones"][-1]["ictArmedBaseLaunch"] is True
+
+
 def test_top_n_and_retention_are_enforced(tmp_path):
     settings = _settings(
         tmp_path,

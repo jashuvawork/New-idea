@@ -1640,6 +1640,13 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     all_day = is_all_day_explosion_event(e)
     capture = is_premium_capture_event(e)
     ict = analyze_explosion_event_ict(e, snap)
+    sustained_armed_lift = bool(
+        getattr(ict, "armed_base_sustained_lift", False)
+    )
+    if sustained_armed_lift:
+        if _TIER_RANK.get(e.tier, 0) < _TIER_RANK["BUILDING"]:
+            e.tier = "BUILDING"
+        e.explosion_score = max(50.0, float(e.explosion_score or 0))
     from app.engines.bullish_local_base import bullish_local_base_prediction
 
     bullish_base = bullish_local_base_prediction(snap, e, ict)
@@ -1759,6 +1766,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictFirstLift": first_lift,
         "ictBaseArmed": bool(getattr(ict, "base_armed", False)),
         "ictArmedBaseLaunch": armed_launch,
+        "ictArmedBaseSustainedLift": sustained_armed_lift,
         "ictArmedBaseSamples": int(getattr(ict, "armed_base_samples", 0) or 0),
         "ictArmedBaseSpanSeconds": round(
             float(getattr(ict, "armed_base_span_seconds", 0) or 0),

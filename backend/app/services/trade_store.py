@@ -309,16 +309,18 @@ def record_trade_mark(trade: PaperTrade) -> None:
     _save_day(date, data)
 
 
-def record_trade_closed(trade: PaperTrade, context: Optional[dict] = None) -> None:
-    """Persist trade close with full outcome to archive and log."""
+def record_trade_closed(trade: PaperTrade, context: Optional[dict] = None) -> bool:
+    """Persist a trade close once; duplicate exit callbacks are harmless."""
     date = trade.openedAt.astimezone(IST).strftime("%Y-%m-%d") if trade.openedAt.tzinfo else _today()
     data = _load_day(date)
+    existing = {t["id"]: i for i, t in enumerate(data["trades"])}
+    if trade.id in existing and data["trades"][existing[trade.id]].get("status") == "CLOSED":
+        return False
     record = _trade_to_record(trade, context)
     record["sessionDate"] = date
     record["closedAt"] = (trade.closedAt or _now()).isoformat()
     record["status"] = "CLOSED"
 
-    existing = {t["id"]: i for i, t in enumerate(data["trades"])}
     if trade.id in existing:
         data["trades"][existing[trade.id]] = record
     else:
@@ -349,6 +351,7 @@ def record_trade_closed(trade: PaperTrade, context: Optional[dict] = None) -> No
     _record_trade_funnel_event("CLOSED", trade, context, date=date)
     logger.info(_human_log_line("TRADE_CLOSED", trade, context))
     _maybe_archive_completed_batch()
+    return True
 
 
 def _reports_file(date: Optional[str] = None) -> Path:
@@ -926,7 +929,10 @@ def load_open_trades() -> list[dict[str, Any]]:
             data = json.loads(path.read_text())
             for t in data.get("trades", []):
                 if t.get("status") == "OPEN":
-                    open_by_id[t["id"]] = t
+                    row = dict(t)
+                    if not row.get("entryContext") and isinstance(row.get("context"), dict):
+                        row["entryContext"] = dict(row["context"])
+                    open_by_id[row["id"]] = row
         except Exception:
             continue
     return list(open_by_id.values())

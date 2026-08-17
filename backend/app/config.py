@@ -384,6 +384,15 @@ class Settings(BaseSettings):
     ict_armed_base_launch_min_score: float = 45.0
     ict_armed_base_launch_min_tqs: float = 50.0
     ict_armed_base_launch_rank_bonus: float = 16.0
+    # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
+    # premium progress even when 3s/9s velocity samples are unavailable.
+    ict_armed_sustained_lift_min_move_pct: float = 8.0
+    ict_armed_sustained_lift_max_move_pct: float = 25.0
+    ict_armed_sustained_lift_lookback_seconds: float = 120.0
+    ict_armed_sustained_lift_min_samples: int = 3
+    ict_armed_sustained_lift_min_span_seconds: float = 15.0
+    ict_armed_sustained_lift_min_progress_pct: float = 3.0
+    ict_armed_sustained_lift_max_fade_pct: float = 2.5
     # Durable 5m-style premium base confirmation from the 30-minute tape. Repeated
     # support samples prevent a single bad tick from becoming a launch pad.
     ict_recent_base_window_seconds: int = 1800
