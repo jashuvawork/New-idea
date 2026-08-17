@@ -522,13 +522,17 @@ def test_shallow_otm_coil_is_retained_before_atm_first_lift(
         patch("app.engines.ict_breakout_monitor.get_settings", return_value=settings),
         patch.object(explosion_detector, "datetime", _Clock),
     ):
+        early_radars = []
         for premium in (20.0, 20.4, 20.2, 20.6, 20.3, 20.7, 20.5, 20.8, 20.6, 20.9):
-            assert scan(premium, 50_000, initial_atm) == []
+            early_radars.extend(event_to_dict(event) for event in scan(premium, 50_000, initial_atm))
             current += timedelta(seconds=3)
 
         retained = list(_history[symbol][key])
         assert len(retained) == 10
         assert min(row[1] for row in retained) == 20.0
+        assert early_radars, "shallow OTM monitoring must reach radar before ATM rotation"
+        assert all(radar["tradeable"] is False for radar in early_radars)
+        assert all(radar["ictFirstLift"] is False for radar in early_radars)
 
         events = scan(24.0, 150_000, strike)
         matching = [event for event in events if event.side == side and event.strike == strike]
