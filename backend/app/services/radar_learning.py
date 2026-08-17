@@ -378,8 +378,14 @@ def read_premium_tape(date: str) -> list[dict[str, Any]]:
     return _read_jsonl(premium_tape_path(date))
 
 
-def _premium_series(date: str) -> dict[str, list[tuple[datetime, float]]]:
+def _premium_series(
+    date: str,
+) -> tuple[
+    dict[str, list[tuple[datetime, float]]],
+    dict[str, dict[datetime, dict[str, Any]]],
+]:
     series: dict[str, list[tuple[datetime, float]]] = defaultdict(list)
+    observations: dict[str, dict[datetime, dict[str, Any]]] = defaultdict(dict)
     for batch in read_premium_tape(date):
         ts = _parse_ts(batch.get("ts"))
         if ts is None:
@@ -389,9 +395,89 @@ def _premium_series(date: str) -> dict[str, list[tuple[datetime, float]]]:
             premium = _number(contract.get("premium"))
             if key and premium > 0:
                 series[key].append((ts, premium))
+                observations[key][ts] = dict(contract)
     for rows in series.values():
         rows.sort(key=lambda item: item[0])
-    return series
+    return series, observations
+
+
+def _hindsight_policy_eligibility(
+    event: Mapping[str, Any],
+    observation: Mapping[str, Any] | None,
+    settings: Any,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Apply scanner premium/moneyness policy at the hindsight event's base."""
+    contract = dict(observation or {})
+    key_parts = str(event.get("key") or "").split(":")
+    symbol = str(contract.get("symbol") or (key_parts[0] if key_parts else "")).upper()
+    side = str(contract.get("side") or (key_parts[1] if len(key_parts) > 1 else "")).upper()
+    strike = _number(
+        contract.get("strike")
+        or (key_parts[2] if len(key_parts) > 2 else 0)
+    )
+    premium = _number(event.get("basePremium"))
+    spot = _number(contract.get("spot"))
+    atm = _number(contract.get("atmStrike"))
+    policy = {
+        "symbol": symbol,
+        "side": side,
+        "strike": strike,
+        "basePremium": premium,
+        "spot": spot,
+        "atmStrike": atm,
+    }
+
+    minimum = float(getattr(settings, "min_option_premium_inr", 18.0) or 18.0)
+    maximum = max(
+        float(getattr(settings, "max_option_premium_inr", 300.0) or 300.0),
+        float(getattr(settings, "explosion_max_premium_inr", 650.0) or 650.0),
+    )
+    peak_move = _number(event.get("peakMovePct"))
+    cheap_minimum = float(
+        getattr(settings, "explosion_cheap_rip_min_premium_inr", 12.0) or 12.0
+    )
+    cheap_peak = float(
+        getattr(settings, "explosion_cheap_rip_min_peak_pct", 28.0) or 28.0
+    )
+    if peak_move >= cheap_peak:
+        minimum = min(minimum, cheap_minimum)
+        maximum = max(
+            maximum,
+            float(getattr(settings, "explosion_ict_max_premium_inr", 0.0) or 0.0),
+        )
+    policy["premiumBand"] = {"min": minimum, "max": maximum}
+    if premium < minimum:
+        return False, "premium_below_min", policy
+    if premium > maximum:
+        return False, "premium_above_max", policy
+    if side not in {"CALL", "PUT"} or strike <= 0 or spot <= 0 or atm <= 0:
+        return False, "missing_moneyness_context", policy
+
+    from app.engines.moneyness import (
+        classify_moneyness,
+        steps_from_atm,
+        strike_step,
+    )
+
+    money = classify_moneyness(side, strike, spot, symbol=symbol, atm=atm)
+    steps = abs(steps_from_atm(strike, spot, symbol, atm=atm))
+    policy.update({"moneyness": money, "strikeStepsFromAtm": steps})
+    if money != "OTM" or not bool(
+        getattr(settings, "explosion_scan_atm_itm_only", True)
+    ):
+        return True, "eligible", policy
+
+    step = strike_step(symbol)
+    tolerance = float(
+        getattr(settings, "moneyness_atm_tolerance_points", step) or step
+    )
+    shallow_steps = int(
+        getattr(settings, "explosion_shallow_otm_history_steps", 1) or 1
+    )
+    policy["maxShallowOtmDistance"] = tolerance + step * max(0, shallow_steps)
+    if abs(strike - atm) > policy["maxShallowOtmDistance"]:
+        return False, "deep_otm", policy
+    return True, "eligible_shallow_otm_history", policy
 
 
 def _maximum_tree(values: list[float]) -> tuple[list[float], int]:
@@ -525,6 +611,10 @@ def _truth_events(
             "basePremium": round(base_low, 4),
             "verticalAt": crossing[0].isoformat(),
             "verticalPremium": round(crossing[1], 4),
+            "baseToVerticalSeconds": round(
+                (crossing[0] - base_end).total_seconds(),
+                1,
+            ),
             "peakPremium": round(peak, 4),
             "peakMovePct": round((peak - base_low) / base_low * 100.0, 2),
         }
@@ -557,12 +647,14 @@ def analyze_hindsight(
         if lookahead_seconds is not None
         else int(settings.radar_hindsight_lookahead_seconds)
     )
-    series = _premium_series(date)
+    series, observations = _premium_series(date)
     archived = {
         str(row.get("key") or ""): row
         for row in read_archive_entries(date)
     }
     truths: list[dict[str, Any]] = []
+    excluded_truths: list[dict[str, Any]] = []
+    raw_truth_count = 0
     for key, samples in series.items():
         events = _truth_events(
             key,
@@ -573,6 +665,25 @@ def analyze_hindsight(
             lookahead_seconds=lookahead,
         )
         for event in events:
+            raw_truth_count += 1
+            base_end = _parse_ts(event.get("baseEndAt"))
+            observation = (
+                observations.get(key, {}).get(base_end)
+                if base_end is not None
+                else None
+            )
+            eligible, eligibility_reason, policy = _hindsight_policy_eligibility(
+                event,
+                observation,
+                settings,
+            )
+            event["policyEligible"] = eligible
+            event["policyEligibilityReason"] = eligibility_reason
+            event["policy"] = policy
+            if not eligible:
+                event["capture"] = "EXCLUDED"
+                excluded_truths.append(event)
+                continue
             archive_row = archived.get(key)
             vertical_at = _parse_ts(event["verticalAt"])
             detection_at: datetime | None = None
@@ -630,7 +741,13 @@ def analyze_hindsight(
             "flatMaxRangePct": flat_range,
             "verticalMinMovePct": vertical,
             "lookaheadSeconds": lookahead,
+            "policyScope": "explosion premium band plus ATM/ITM and shallow-OTM history",
         },
+        "rawTruthCount": raw_truth_count,
+        "excludedTruthCount": len(excluded_truths),
+        "excludedByReason": dict(Counter(
+            event["policyEligibilityReason"] for event in excluded_truths
+        )),
         "truthCount": len(truths),
         "earlyDetected": counts["EARLY"],
         "lateDetected": counts["LATE"],
@@ -647,6 +764,10 @@ def analyze_hindsight(
         "events": sorted(
             truths,
             key=lambda row: (row["capture"] == "MISSED", -_number(row["peakMovePct"])),
+        ),
+        "excludedEvents": sorted(
+            excluded_truths,
+            key=lambda row: -_number(row["peakMovePct"]),
         ),
     }
 

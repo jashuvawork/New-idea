@@ -239,6 +239,52 @@ def test_hindsight_scorecard_finds_early_and_missed_ftv_both_sides(tmp_path):
     assert report["recallPct"] == 50.0
     assert report["bySide"]["CALL"]["early"] == 1
     assert report["bySide"]["PUT"]["missed"] == 1
+    assert all(event["baseToVerticalSeconds"] == 30.0 for event in report["events"])
+
+
+def test_hindsight_excludes_penny_and_deep_otm_moves_from_recall(tmp_path):
+    settings = _settings(tmp_path)
+    start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+
+    def snapshot(atm_call: float, atm_put: float, deep_call: float):
+        snap = _snap(call=atm_call, put=atm_put)
+        snap.heatmap.append(SimpleNamespace(
+            strike=25000.0,
+            callLtp=deep_call,
+            putLtp=None,
+            callOi=10_000,
+            putOi=0,
+        ))
+        return snap
+
+    samples = (
+        (0, 100.0, 1.0, 20.0),
+        (30, 102.0, 1.0, 20.0),
+        (60, 101.0, 1.0, 20.0),
+        (90, 100.0, 1.0, 20.0),
+        (120, 145.0, 1.5, 30.0),
+    )
+    with _patch_settings(settings):
+        for offset, atm_call, atm_put, deep_call in samples:
+            record_market_observations(
+                {"NIFTY": snapshot(atm_call, atm_put, deep_call)},
+                source="ws_entry_scan",
+                now=start + timedelta(seconds=offset),
+                force=True,
+            )
+        report = analyze_hindsight("2026-08-15")
+
+    assert report["rawTruthCount"] == 3
+    assert report["truthCount"] == 1
+    assert report["excludedTruthCount"] == 2
+    assert report["excludedByReason"] == {
+        "premium_below_min": 1,
+        "deep_otm": 1,
+    }
+    assert report["events"][0]["key"] == "NIFTY:CALL:24500"
+    assert {
+        event["key"] for event in report["excludedEvents"]
+    } == {"NIFTY:PUT:24500", "NIFTY:CALL:25000"}
 
 
 def test_funnel_maps_blocker_entry_and_trade_outcome(tmp_path):
@@ -412,6 +458,41 @@ def test_health_reports_stale_sources_divergence_and_component_errors(tmp_path):
     assert closed["healthy"] is True
     assert failed["components"]["premiumTape"]["lastError"] == "disk full"
     assert failed["healthy"] is False
+
+
+def test_health_merges_separately_built_rest_symbols_before_divergence(tmp_path):
+    settings = _settings(tmp_path, radar_health_stale_seconds=30)
+    start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
+    nifty = _snap(alerts=[_alert(side="CALL")])
+    sensex = _snap(alerts=[])
+    sensex.symbol = "SENSEX"
+    ws_nifty = _snap(alerts=[_alert(side="CALL")])
+    ws_sensex = _snap(alerts=[])
+    ws_sensex.symbol = "SENSEX"
+
+    with _patch_settings(settings):
+        record_source("rest_snapshot", {"NIFTY": nifty}, now=start)
+        record_source(
+            "rest_snapshot",
+            {"SENSEX": sensex},
+            now=start + timedelta(seconds=2),
+        )
+        record_source(
+            "ws_entry_scan",
+            {"NIFTY": ws_nifty, "SENSEX": ws_sensex},
+            now=start + timedelta(seconds=2),
+        )
+        with patch("app.services.upstox.get_market_phase", return_value="LIVE_MARKET"):
+            live = health_status(now=start + timedelta(seconds=5))
+
+    assert live["sources"]["rest_snapshot"]["symbols"] == ["NIFTY", "SENSEX"]
+    assert live["sources"]["rest_snapshot"]["dataAvailableCount"] == 2
+    assert live["sources"]["rest_snapshot"]["topRadarKeys"] == ["NIFTY:CALL:24500"]
+    assert live["sourceDivergence"]["active"] is False
+    assert not any(
+        alert["code"] == "REST_WS_DIVERGENCE"
+        for alert in live["alerts"]
+    )
 
 
 def test_replay_api_accepts_threshold_overrides(tmp_path):
