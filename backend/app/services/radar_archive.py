@@ -160,7 +160,12 @@ def _milestone(
         "localBaseMovePct": alert.get("localBaseMovePct"),
         "flatVerticalQuality": alert.get("flatVerticalQuality"),
         "velocity3s": alert.get("velocity3s"),
+        "velocity9s": alert.get("velocity9s"),
         "volumeSurge": alert.get("volumeSurge"),
+        "ictFirstLift": alert.get("ictFirstLift"),
+        "ictVolumeAwakening": alert.get("ictVolumeAwakening"),
+        "ictBasePremium": alert.get("ictBasePremium"),
+        "ictBaseRelativeMovePct": alert.get("ictBaseRelativeMovePct"),
         "momentType": alert.get("momentType"),
         "tradeable": alert.get("tradeable"),
     })

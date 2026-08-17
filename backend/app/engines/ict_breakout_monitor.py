@@ -189,6 +189,51 @@ def first_lift_entry_readiness(
     ).upper()
     if side not in ("CALL", "PUT"):
         return False, "first_lift_side_invalid"
+
+    # A confirmed ATM/ITM option can lead the slower 5m spot chart. This path is
+    # deliberately stronger than normal first-lift readiness: it requires an A/B+
+    # base, faster sustained v3/v9, and both absolute-volume awakening and surge.
+    # It only replaces the lagging index-turn proof; all selector fade/chase,
+    # premium, moneyness, session, preorder, and risk guards still run.
+    strike = float(
+        getattr(event, "strike", 0)
+        or row.get("strike")
+        or 0
+    )
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0)
+    option_led_quality = float(
+        getattr(settings, "first_lift_option_led_min_quality", 65.0) or 65.0
+    )
+    option_led_v3 = float(
+        getattr(settings, "first_lift_option_led_min_velocity_3s", 1.5) or 1.5
+    )
+    option_led_v9 = float(
+        getattr(settings, "first_lift_option_led_min_velocity_9s", 1.5) or 1.5
+    )
+    if (
+        bool(getattr(settings, "first_lift_option_led_enabled", True))
+        and strike > 0
+        and spot > 0
+        and quality >= option_led_quality
+        and v3 >= max(min_v3, option_led_v3)
+        and v9 >= max(min_v9, option_led_v9)
+        and volume_awake
+        and volume_surge >= min_volume
+    ):
+        from app.engines.moneyness import classify_moneyness
+        from app.models.schemas import Side
+
+        money = classify_moneyness(
+            Side(side),
+            strike,
+            spot,
+            symbol=str(getattr(snap, "symbol", "") or ""),
+            atm=atm if atm > 0 else None,
+        )
+        if money in ("ATM", "ITM"):
+            return True, "first_lift_option_led_ready"
+
     chart = snap.spotChart
     mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
     mom10 = float(getattr(chart, "momentum10Pct", 0) or 0)

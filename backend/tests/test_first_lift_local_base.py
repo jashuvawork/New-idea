@@ -21,6 +21,7 @@ from app.engines.ict_breakout_monitor import (
     _detect_flat_base,
     _detect_recent_window_base,
     analyze_ict_breakout,
+    first_lift_entry_readiness,
     first_lift_entry_ready,
 )
 from app.engines.trade_selector import diagnose_missed_entries
@@ -371,6 +372,115 @@ def test_first_lift_does_not_trade_without_quality_and_live_turn(mock_settings):
     assert first_lift_entry_ready(
         snap=snap, event=event, ict=ict,
     ) is False
+
+
+@pytest.mark.parametrize(
+    ("side", "mom5", "mom10", "mom15"),
+    [
+        (Side.CALL, -0.08, -0.05, -0.01),
+        (Side.PUT, 0.08, 0.05, 0.01),
+    ],
+)
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_atm_option_led_first_lift_can_lead_adverse_spot_chart(
+    mock_settings, side, mom5, mom10, mom15,
+):
+    """Aug17 shape: strong ATM premium launch is actionable before spot-chart turn."""
+    mock_settings.return_value = _settings(
+        first_lift_option_led_enabled=True,
+        first_lift_option_led_min_quality=65.0,
+        first_lift_option_led_min_velocity_3s=1.5,
+        first_lift_option_led_min_velocity_9s=1.5,
+    )
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24285.0,
+        atmStrike=24300.0,
+        spotChart=SpotChart(
+            direction="BEARISH" if side == Side.CALL else "BULLISH",
+            momentum5Pct=mom5,
+            momentum10Pct=mom10,
+            momentum15Pct=mom15,
+        ),
+    )
+    alert = {
+        "side": side.value,
+        "strike": 24300.0,
+        "tier": "BUILDING",
+        "ictFirstLift": True,
+        "ictBreakout": True,
+        "ictFlatThenVertical": True,
+        "ictBasePremium": 51.6,
+        "ictBaseRelativeMovePct": 20.3,
+        "flatVerticalQuality": 69.9,
+        "explosionScore": 49.3,
+        "velocity3s": 1.87,
+        "velocity9s": 3.1,
+        "volumeSurge": 2.0,
+        "ictVolumeAwakening": True,
+    }
+
+    ready, reason = first_lift_entry_readiness(snap=snap, alert=alert)
+
+    assert ready is True
+    assert reason == "first_lift_option_led_ready"
+
+
+@pytest.mark.parametrize(
+    ("side", "strike", "v3", "v9"),
+    [
+        (Side.CALL, 24300.0, 1.87, 0.0),
+        (Side.PUT, 24300.0, -0.2, 3.1),
+        (Side.CALL, 24400.0, 1.87, 3.1),
+        (Side.PUT, 24200.0, 1.87, 3.1),
+    ],
+)
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_option_led_first_lift_keeps_sustained_velocity_and_moneyness_guards(
+    mock_settings, side, strike, v3, v9,
+):
+    mock_settings.return_value = _settings(
+        first_lift_option_led_enabled=True,
+        first_lift_option_led_min_quality=65.0,
+        first_lift_option_led_min_velocity_3s=1.5,
+        first_lift_option_led_min_velocity_9s=1.5,
+    )
+    adverse = -0.08 if side == Side.CALL else 0.08
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24285.0,
+        atmStrike=24300.0,
+        spotChart=SpotChart(
+            direction="BEARISH" if side == Side.CALL else "BULLISH",
+            momentum5Pct=adverse,
+            momentum10Pct=adverse * 0.6,
+            momentum15Pct=adverse * 0.1,
+        ),
+    )
+    alert = {
+        "side": side.value,
+        "strike": strike,
+        "ictFirstLift": True,
+        "ictBreakout": True,
+        "ictFlatThenVertical": True,
+        "ictBaseRelativeMovePct": 20.3,
+        "flatVerticalQuality": 69.9,
+        "explosionScore": 49.3,
+        "velocity3s": v3,
+        "velocity9s": v9,
+        "volumeSurge": 2.0,
+        "ictVolumeAwakening": True,
+    }
+
+    ready, _ = first_lift_entry_readiness(snap=snap, alert=alert)
+
+    assert ready is False
 
 
 def test_near_miss_reports_strict_first_lift_velocity_before_chart_alignment():
