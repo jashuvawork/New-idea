@@ -1687,7 +1687,10 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     if first_lift:
         tradeable = True
     armed_launch = bool(getattr(ict, "armed_base_launch", False))
+    elite_base_ready = bool(getattr(ict, "elite_base_ready", False))
     if armed_launch:
+        tradeable = True
+    if elite_base_ready:
         tradeable = True
     # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).
     if e.tier == "BUILDING" and ict.active and ict.flat_then_vertical:
@@ -1765,6 +1768,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictFlatThenVertical": ict.flat_then_vertical,
         "ictFirstLift": first_lift,
         "ictBaseArmed": bool(getattr(ict, "base_armed", False)),
+        "ictEliteBaseReady": elite_base_ready,
         "ictArmedBaseLaunch": armed_launch,
         "ictArmedBaseSustainedLift": sustained_armed_lift,
         "ictArmedBaseSamples": int(getattr(ict, "armed_base_samples", 0) or 0),
@@ -1800,11 +1804,12 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "momentType": (
             "armed_base_launch"
             if armed_launch
-            else ("ict_base_armed" if getattr(ict, "base_armed", False) else (
+            else ("ELITE_BASE_READY" if elite_base_ready else (
+                "ict_base_armed" if getattr(ict, "base_armed", False) else (
                 "first_lift_local_base"
                 if first_lift
                 else (ict.pattern if ict.active else ("volume_awaken" if vol_awaken else e.tier))
-            ))
+            )))
         ),
         "ictReasons": ict.reasons,
     }

@@ -98,6 +98,7 @@ def _review_rank(alert: Mapping[str, Any]) -> tuple[float, ...]:
         float(_TIER_RANK.get(tier, 0)),
         1.0 if alert.get("tradeable") else 0.0,
         1.0 if alert.get("ictFirstLift") else 0.0,
+        1.0 if alert.get("ictEliteBaseReady") else 0.0,
         1.0 if alert.get("ictArmedBaseLaunch") else 0.0,
         1.0 if alert.get("ictBaseArmed") else 0.0,
         _number(alert.get("flatVerticalQuality")),
@@ -115,6 +116,7 @@ def _worth_archiving(alert: Mapping[str, Any]) -> bool:
         _TIER_RANK.get(tier, 0) >= _TIER_RANK["BUILDING"]
         or alert.get("tradeable")
         or alert.get("ictFirstLift")
+        or alert.get("ictEliteBaseReady")
         or alert.get("ictArmedBaseLaunch")
         or alert.get("ictBreakout")
         or alert.get("allDayExplosion")
@@ -167,6 +169,7 @@ def _milestone(
         "volumeSurge": alert.get("volumeSurge"),
         "ictFirstLift": alert.get("ictFirstLift"),
         "ictBaseArmed": alert.get("ictBaseArmed"),
+        "ictEliteBaseReady": alert.get("ictEliteBaseReady"),
         "ictArmedBaseLaunch": alert.get("ictArmedBaseLaunch"),
         "ictArmedBaseSamples": alert.get("ictArmedBaseSamples"),
         "ictArmedBaseSpanSeconds": alert.get("ictArmedBaseSpanSeconds"),

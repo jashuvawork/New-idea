@@ -34,6 +34,7 @@ class ICTBreakoutSignal:
     flat_vertical_grade: str = ""        # A+ | A | B | C
     first_lift: bool = False             # appeared in 15–40% pad off lowest local base
     base_armed: bool = False             # causal stable base exists before launch
+    elite_base_ready: bool = False       # strict 2–5% preauthorized base acceleration
     armed_base_launch: bool = False       # strict 5–12% early launch band
     armed_base_sustained_lift: bool = False  # slower causal lift when sparse ticks hide v3/v9
     armed_base_samples: int = 0
@@ -63,6 +64,7 @@ class ICTBreakoutSignal:
             "flatVerticalGrade": self.flat_vertical_grade,
             "firstLift": self.first_lift,
             "baseArmed": self.base_armed,
+            "eliteBaseReady": self.elite_base_ready,
             "armedBaseLaunch": self.armed_base_launch,
             "armedBaseSustainedLift": self.armed_base_sustained_lift,
             "armedBaseSamples": self.armed_base_samples,
@@ -118,6 +120,10 @@ def first_lift_entry_readiness(
         getattr(ict, "armed_base_launch", False) is True
         or row.get("ictArmedBaseLaunch") is True
     )
+    elite_base_ready = bool(
+        getattr(ict, "elite_base_ready", False) is True
+        or row.get("ictEliteBaseReady") is True
+    )
     sustained_lift = bool(
         getattr(ict, "armed_base_sustained_lift", False) is True
         or row.get("ictArmedBaseSustainedLift") is True
@@ -126,7 +132,9 @@ def first_lift_entry_readiness(
         getattr(ict, "active", False)
         and getattr(ict, "flat_then_vertical", False)
     ) or bool(row.get("ictBreakout") and row.get("ictFlatThenVertical"))
-    if not (first_lift or armed_launch) or not structured:
+    if not (first_lift or armed_launch or elite_base_ready) or (
+        not structured and not elite_base_ready
+    ):
         return False, "first_lift_structure_not_confirmed"
 
     base_move = float(
@@ -134,7 +142,15 @@ def first_lift_entry_readiness(
         or row.get("ictBaseRelativeMovePct")
         or 0
     )
-    if armed_launch:
+    strict_armed_path = armed_launch or elite_base_ready
+    if elite_base_ready:
+        min_move = float(
+            getattr(settings, "ict_elite_base_ready_min_move_pct", 2.0) or 2.0
+        )
+        max_move = float(
+            getattr(settings, "ict_elite_base_ready_max_move_pct", 5.0) or 5.0
+        )
+    elif armed_launch:
         min_move = float(
             getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
         )
@@ -159,10 +175,10 @@ def first_lift_entry_readiness(
     min_quality = float(
         getattr(
             settings,
-            "ict_armed_base_launch_min_quality" if armed_launch else "first_lift_trade_min_quality",
-            60.0 if armed_launch else 55.0,
+            "ict_armed_base_launch_min_quality" if strict_armed_path else "first_lift_trade_min_quality",
+            60.0 if strict_armed_path else 55.0,
         )
-        or (60.0 if armed_launch else 55.0)
+        or (60.0 if strict_armed_path else 55.0)
     )
     if quality < min_quality:
         return False, f"first_lift_quality<{min_quality:g}"
@@ -176,7 +192,7 @@ def first_lift_entry_readiness(
     min_score = float(
         getattr(
             settings,
-            "ict_armed_base_launch_min_score" if armed_launch else "first_lift_trade_min_score",
+            "ict_armed_base_launch_min_score" if strict_armed_path else "first_lift_trade_min_score",
             45.0,
         )
         or 45.0
@@ -199,18 +215,30 @@ def first_lift_entry_readiness(
     min_v3 = float(
         getattr(
             settings,
-            "ict_armed_base_launch_min_velocity_3s" if armed_launch else "first_lift_trade_min_velocity_3s",
-            1.5 if armed_launch else 1.2,
+            (
+                "ict_elite_base_ready_min_velocity_3s"
+                if elite_base_ready
+                else "ict_armed_base_launch_min_velocity_3s"
+                if armed_launch
+                else "first_lift_trade_min_velocity_3s"
+            ),
+            1.5 if strict_armed_path else 1.2,
         )
-        or (1.5 if armed_launch else 1.2)
+        or (1.5 if strict_armed_path else 1.2)
     )
     min_v9 = float(
         getattr(
             settings,
-            "ict_armed_base_launch_min_velocity_9s" if armed_launch else "first_lift_trade_min_velocity_9s",
-            1.5 if armed_launch else 0.8,
+            (
+                "ict_elite_base_ready_min_velocity_9s"
+                if elite_base_ready
+                else "ict_armed_base_launch_min_velocity_9s"
+                if armed_launch
+                else "first_lift_trade_min_velocity_9s"
+            ),
+            1.5 if strict_armed_path else 0.8,
         )
-        or (1.5 if armed_launch else 0.8)
+        or (1.5 if strict_armed_path else 0.8)
     )
     if not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
@@ -237,7 +265,7 @@ def first_lift_entry_readiness(
         or row.get("absoluteVolume")
         or 0
     )
-    if armed_launch:
+    if strict_armed_path:
         min_absolute = float(
             getattr(settings, "ict_armed_base_launch_min_absolute_volume", 25000.0)
             or 25000.0
@@ -260,7 +288,7 @@ def first_lift_entry_readiness(
     if side not in ("CALL", "PUT"):
         return False, "first_lift_side_invalid"
 
-    if armed_launch:
+    if strict_armed_path:
         sample_count = int(
             getattr(ict, "armed_base_samples", 0)
             or row.get("ictArmedBaseSamples")
@@ -305,7 +333,11 @@ def first_lift_entry_readiness(
         )
         if money not in ("ATM", "ITM"):
             return False, f"armed_base_requires_atm_itm_{money.lower()}"
-        return True, "armed_base_option_led_ready"
+        return True, (
+            "elite_base_ready_s_preauthorized"
+            if elite_base_ready
+            else "armed_base_option_led_ready"
+        )
 
     # A confirmed ATM/ITM option can lead the slower 5m spot chart. This path is
     # deliberately stronger than normal first-lift readiness: it requires an A/B+
@@ -919,6 +951,27 @@ def analyze_ict_breakout(
         )
     )
     armed_launch = fast_armed_launch or sustained_armed_lift
+    elite_ready_lo = float(
+        getattr(settings, "ict_elite_base_ready_min_move_pct", 2.0) or 2.0
+    )
+    elite_ready_hi = float(
+        getattr(settings, "ict_elite_base_ready_max_move_pct", 5.0) or 5.0
+    )
+    elite_ready_v3 = float(
+        getattr(settings, "ict_elite_base_ready_min_velocity_3s", 1.5) or 1.5
+    )
+    elite_ready_v9 = float(
+        getattr(settings, "ict_elite_base_ready_min_velocity_9s", 1.5) or 1.5
+    )
+    elite_base_ready = bool(
+        getattr(settings, "ict_elite_base_ready_enabled", True)
+        and base_armed
+        and tier in ("BUILDING", "EXPLODING", "ELITE")
+        and elite_ready_lo <= base_rel_move < elite_ready_hi
+        and velocity_3s >= elite_ready_v3
+        and velocity_9s >= elite_ready_v9
+        and vol_awaken
+    )
     early_v3 = float(getattr(settings, "ict_early_vertical_min_velocity_3s", 2.0) or 2.0)
     # Structure / early-window heat: prefer local-base move when we have one.
     structure_move = base_rel_move if base_rel_move > 0 else move
@@ -941,6 +994,11 @@ def analyze_ict_breakout(
         )
         if sustained_armed_lift:
             reasons.append("armed_base_sustained_lift")
+    elif elite_base_ready:
+        early_break = True
+        reasons.append(
+            f"elite_base_ready_{base_level:.1f}_{base_rel_move:.1f}%"
+        )
     # First lift off the lowest local base — appear in the 15–40% pad with heat,
     # before day-% / chase tiers light up. Soft velocity OK when volume confirms.
     first_lift_v3 = float(
@@ -1106,6 +1164,7 @@ def analyze_ict_breakout(
         flat_vertical_grade=fv_grade,
         first_lift=first_lift,
         base_armed=base_armed,
+        elite_base_ready=elite_base_ready,
         armed_base_launch=armed_launch,
         armed_base_sustained_lift=sustained_armed_lift,
         armed_base_samples=armed_samples,

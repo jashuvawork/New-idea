@@ -384,6 +384,13 @@ class Settings(BaseSettings):
     ict_armed_base_launch_min_score: float = 45.0
     ict_armed_base_launch_min_tqs: float = 50.0
     ict_armed_base_launch_rank_bonus: float = 16.0
+    # Narrow pre-launch authorization: a stable ATM/ITM base may become executable
+    # before +5%, but only with the same live velocity/orderflow quality as a launch.
+    ict_elite_base_ready_enabled: bool = True
+    ict_elite_base_ready_min_move_pct: float = 2.0
+    ict_elite_base_ready_max_move_pct: float = 5.0
+    ict_elite_base_ready_min_velocity_3s: float = 1.5
+    ict_elite_base_ready_min_velocity_9s: float = 1.5
     # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
     # premium progress even when 3s/9s velocity samples are unavailable.
     ict_armed_sustained_lift_min_move_pct: float = 8.0

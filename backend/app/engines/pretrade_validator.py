@@ -775,6 +775,18 @@ def validate_candidate(
             if explosion_event is not None
             else None
         )
+        from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+        strict_base_ready = first_lift_entry_ready(
+            snap=snap,
+            event=explosion_event,
+            ict=trap_ict,
+            alert=(
+                getattr(candidate, "alert", None)
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            ),
+        )
         from app.engines.elite_never_block import elite_never_block_active
 
         must_take = elite_never_block_active(
@@ -805,7 +817,7 @@ def validate_candidate(
             squeeze_early_base=squeeze_early_base_active(explosion_event, snap),
             bullish_local_base=bool(bullish_base.get("active")),
         )
-        if window_blocked:
+        if window_blocked and not strict_base_ready:
             return False, window_reason, meta
         trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
             candidate, snap, state=state, ict=trap_ict,
@@ -1031,7 +1043,11 @@ def validate_candidate(
             ),
         )
         armed_base_chart_bypass = bool(
-            armed_ready and armed_reason == "armed_base_option_led_ready"
+            armed_ready
+            and armed_reason in (
+                "armed_base_option_led_ready",
+                "elite_base_ready_s_preauthorized",
+            )
         )
         if armed_base_chart_bypass:
             meta["armedBaseChartBypass"] = True
