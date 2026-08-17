@@ -706,6 +706,16 @@ class Settings(BaseSettings):
     explosion_thesis_hold_skip_time_exit: bool = True  # no time_stop once thesis is green
     explosion_reentry_cooldown_seconds: int = 180
     explosion_emergency_cooldown_seconds: int = 300
+    # A just-captured FTV peak remains exhausted until this exact CE/PE contract
+    # builds a fresh post-close base and accelerates again.
+    explosion_post_peak_reentry_guard_enabled: bool = True
+    explosion_post_peak_reentry_lookback_seconds: int = 1800
+    explosion_post_peak_reentry_min_peak_points: float = 20.0
+    explosion_post_peak_reentry_near_peak_pct: float = 15.0
+    explosion_post_peak_reentry_base_samples: int = 3
+    explosion_post_peak_reentry_base_span_seconds: float = 6.0
+    explosion_post_peak_reentry_min_reacceleration_pct: float = 8.0
+    explosion_post_peak_reentry_min_velocity_3s: float = 1.5
     explosion_breadth_alignment_enabled: bool = True
     # Hard block PUT on BULLISH / CALL on BEARISH — no ELITE or premium-led bypass
     breadth_hard_side_block_enabled: bool = True

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import math
+import threading
 import uuid
 from datetime import datetime
 from typing import Any, Optional
@@ -119,6 +120,28 @@ _auto_trader_state: Optional[AutoTraderState] = None
 _risk_engine = RiskEngine()
 _calibration = DailyCalibration()
 _capital_inr: float = 500_000
+_exit_claims: dict[str, object] = {}
+_exit_claims_guard = threading.Lock()
+
+
+def _release_exit_claim(trade_id: str, token: object) -> None:
+    """Release only the matching attempt, never a newer retry's claim."""
+    with _exit_claims_guard:
+        if _exit_claims.get(trade_id) is token:
+            _exit_claims.pop(trade_id, None)
+
+
+def _try_claim_exit(trade_id: str) -> object | None:
+    """Atomically claim one trade without awaiting or serializing other trades."""
+    token = object()
+    with _exit_claims_guard:
+        if trade_id in _exit_claims:
+            return None
+        _exit_claims[trade_id] = token
+    task = asyncio.current_task()
+    if task is not None:
+        task.add_done_callback(lambda _task: _release_exit_claim(trade_id, token))
+    return token
 
 
 async def refresh_trading_capital(client, *, force: bool = False) -> None:
@@ -473,6 +496,23 @@ async def _open_from_candidate(
         st_u = st.value if hasattr(st, "value") else str(st or "").upper()
         if mode == "scalp" or st_u in ("SCALP", "DUAL_SCALP"):
             return False, "scalp_entries_disabled"
+
+    if candidate.mode == "explosion":
+        from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
+
+        reentry_velocity = float(
+            getattr(candidate.explosion_event, "velocity_3s", 0) or 0
+        )
+        reentry_blocked, _ = exhausted_ftv_reentry_blocked(
+            state,
+            symbol=symbol,
+            side=candidate.side,
+            strike=float(candidate.strike or 0),
+            premium=float(candidate.premium or 0),
+            velocity_3s=reentry_velocity,
+        )
+        if reentry_blocked:
+            return False, "exhausted_ftv_requires_new_base_reacceleration"
 
     from app.engines.worst_day_guard import worst_day_blocks_live
 
@@ -1688,6 +1728,8 @@ async def _process_open_trades(
     skipped: list[dict[str, Any]] = []
 
     for trade in list(state.openPaperTrades):
+        if trade.status != "OPEN":
+            continue
         lot_mult = lot_multiplier(trade.symbol)
         snap = snapshots.get(trade.symbol)
         if not snap or not snap.dataAvailable:
@@ -1825,6 +1867,10 @@ async def _process_open_trades(
                 logger.warning("Open-trade mark checkpoint failed for %s: %s", trade.id, exc)
             continue
 
+        exit_claim = _try_claim_exit(trade.id)
+        if exit_claim is None:
+            continue
+
         is_live = settings.enable_live_trading and settings.auto_trading_enabled
         use_parity = _uses_paper_live_parity(settings)
         needs_broker_exit = (is_live or use_parity) and broker_ctx.get("instrumentKey")
@@ -1854,6 +1900,7 @@ async def _process_open_trades(
                 if is_live:
                     state.liveOrdersPlaced += 1
             except UpstoxError as e:
+                _release_exit_claim(trade.id, exit_claim)
                 logger.error(
                     "Exit failed for %s (%s): %s — will retry",
                     trade.id, _execution_mode(settings), e,
@@ -1865,6 +1912,9 @@ async def _process_open_trades(
                     "tradeId": trade.id,
                 })
                 continue
+            except Exception:
+                _release_exit_claim(trade.id, exit_claim)
+                raise
         elif should_simulate_slippage(trade):
             pnl = finalize_closed_pnl_inr(
                 pnl,
@@ -1880,6 +1930,9 @@ async def _process_open_trades(
         trade.pnlPoints = pnl / (trade.lots * lot_mult) if trade.lots else 0
         trade.closedAt = datetime.now(IST)
         trade.sessionDate = datetime.now(IST).strftime("%Y-%m-%d")
+        # The CLOSED mutation is synchronous: later cycles now skip this trade while
+        # persistence completes, so the in-flight claim can be cleaned immediately.
+        _release_exit_claim(trade.id, exit_claim)
         if trade.strategyType == StrategyType.EXPLOSIVE and exit_reason in (
             "explosion_stop_loss",
             "explosion_emergency_stop",
