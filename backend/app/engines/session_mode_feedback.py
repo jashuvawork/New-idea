@@ -341,3 +341,102 @@ def cap_same_strike_explosion_reentry_after_win(
     })
     return capped, meta
 
+
+def exhausted_ftv_reentry_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    velocity_3s: float,
+) -> tuple[bool, dict[str, Any]]:
+    """Block a spent FTV contract until a new post-close base accelerates."""
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "explosion_post_peak_reentry_guard_enabled", True):
+        return False, meta
+    prior = _latest_same_strike_explosion_close(
+        state, symbol=symbol, side=side, strike=strike,
+    )
+    if prior is None or getattr(prior, "closedAt", None) is None:
+        return False, meta
+
+    ctx = getattr(prior, "entryContext", None) or {}
+    ftv = bool(
+        ctx.get("ictFlatThenVertical")
+        or ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or str(ctx.get("momentType") or "") in {
+            "first_lift_local_base",
+            "flat_then_vertical",
+        }
+    )
+    entry = float(getattr(prior, "entryPremium", 0) or 0)
+    peak = max(
+        float(getattr(prior, "maxLtp", 0) or 0),
+        entry + float(getattr(prior, "bestPnlPoints", 0) or 0),
+    )
+    min_peak = float(
+        getattr(settings, "explosion_post_peak_reentry_min_peak_points", 20.0) or 20.0
+    )
+    peak_exit = str(getattr(prior, "exitReason", "") or "") in {
+        "explosion_peak_capture",
+        "explosion_peak_fade_profit_lock",
+        "explosion_runner_giveback",
+    }
+    if not ftv or peak - entry < min_peak or not peak_exit:
+        return False, meta
+
+    now = datetime.now(_IST)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    age_seconds = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
+    lookback = float(
+        getattr(settings, "explosion_post_peak_reentry_lookback_seconds", 1800) or 1800
+    )
+    if age_seconds > lookback:
+        return False, meta
+
+    from app.engines.explosion_detector import post_close_base_reacceleration
+
+    reset, reset_meta = post_close_base_reacceleration(
+        symbol,
+        strike,
+        side,
+        closed_at=closed_at,
+        current_premium=premium,
+        velocity_3s=velocity_3s,
+        min_base_samples=int(
+            getattr(settings, "explosion_post_peak_reentry_base_samples", 3) or 3
+        ),
+        min_base_span_seconds=float(
+            getattr(settings, "explosion_post_peak_reentry_base_span_seconds", 6.0) or 6.0
+        ),
+        min_reacceleration_pct=float(
+            getattr(settings, "explosion_post_peak_reentry_min_reacceleration_pct", 8.0)
+            or 8.0
+        ),
+        min_velocity_3s=float(
+            getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
+        ),
+    )
+    near_peak_pct = float(
+        getattr(settings, "explosion_post_peak_reentry_near_peak_pct", 15.0) or 15.0
+    )
+    meta.update(
+        {
+            "applied": not reset,
+            "priorTradeId": getattr(prior, "id", None),
+            "priorPeak": round(peak, 2),
+            "priorEntry": round(entry, 2),
+            "priorExitReason": getattr(prior, "exitReason", None),
+            "secondsSinceClose": round(age_seconds, 1),
+            "nearExhaustedPeak": float(premium or 0)
+            >= peak * (1.0 - max(0.0, near_peak_pct) / 100.0),
+            **reset_meta,
+        }
+    )
+    return not reset, meta
+

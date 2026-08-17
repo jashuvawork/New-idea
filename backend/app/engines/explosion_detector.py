@@ -834,6 +834,70 @@ def local_base_premium(
     return min(vals) if vals else 0.0
 
 
+def post_close_base_reacceleration(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    *,
+    closed_at: datetime,
+    current_premium: float,
+    velocity_3s: float,
+    min_base_samples: int = 3,
+    min_base_span_seconds: float = 6.0,
+    base_cluster_tolerance_pct: float = 5.0,
+    min_reacceleration_pct: float = 8.0,
+    min_velocity_3s: float = 1.5,
+) -> tuple[bool, dict[str, float | int | bool]]:
+    """Prove a fresh post-close base and renewed acceleration from detector history."""
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    samples = list(_local_base_hist.get(_open_key(symbol, strike, side_val)) or ())
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=IST)
+    fresh = [
+        (ts if ts.tzinfo else ts.replace(tzinfo=IST), float(premium))
+        for ts, premium in samples
+        if (ts if ts.tzinfo else ts.replace(tzinfo=IST)) > closed_at
+        and float(premium or 0) > 0
+    ]
+    meta: dict[str, float | int | bool] = {
+        "freshSamples": len(fresh),
+        "newBaseReacceleration": False,
+    }
+    if len(fresh) < max(2, int(min_base_samples)):
+        return False, meta
+
+    base = min(premium for _, premium in fresh)
+    tolerance = base * (1.0 + max(0.0, base_cluster_tolerance_pct) / 100.0)
+    base_samples = [(ts, premium) for ts, premium in fresh if premium <= tolerance]
+    base_span = (
+        (base_samples[-1][0] - base_samples[0][0]).total_seconds()
+        if len(base_samples) >= 2
+        else 0.0
+    )
+    reacceleration = (
+        (float(current_premium or 0) - base) / base * 100.0
+        if base > 0
+        else 0.0
+    )
+    proven = bool(
+        len(base_samples) >= max(2, int(min_base_samples))
+        and base_span >= max(0.0, float(min_base_span_seconds))
+        and reacceleration >= max(0.0, float(min_reacceleration_pct))
+        and float(velocity_3s or 0) >= float(min_velocity_3s)
+    )
+    meta.update(
+        {
+            "basePremium": round(base, 2),
+            "baseSamples": len(base_samples),
+            "baseSpanSeconds": round(base_span, 1),
+            "reaccelerationPct": round(reacceleration, 2),
+            "velocity3s": round(float(velocity_3s or 0), 3),
+            "newBaseReacceleration": proven,
+        }
+    )
+    return proven, meta
+
+
 def local_base_relative_move_pct(
     symbol: str,
     strike: float,
