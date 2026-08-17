@@ -102,6 +102,17 @@ interface RadarScorecard {
   precisionPct?: number;
   falseAlertCount?: number;
   archivedRadarCount?: number;
+  radarPrecisionPct?: number;
+  radarFalseAlertCount?: number;
+  radarAlertCount?: number;
+  executablePrecisionPct?: number;
+  executableFalseAlertCount?: number;
+  executableRadarCount?: number;
+  visibilityOnlyCount?: number;
+  selectedPrecisionPct?: number;
+  selectedFalseAlertCount?: number;
+  selectedRadarCount?: number;
+  selectedTelemetryAvailable?: boolean;
   outcomes?: Record<string, number>;
   bySymbol?: Record<string, { truth?: number; early?: number; late?: number; missed?: number }>;
   bySide?: Record<string, { truth?: number; early?: number; late?: number; missed?: number }>;
@@ -555,7 +566,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
 
         {tab === 'scorecard' ? (
           <div id="radar-panel-scorecard" role="tabpanel" className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-8 gap-2">
               <MetricCard
                 label="FTV recall"
                 value={compactNumber(scorecard?.recallPct, '%')}
@@ -569,10 +580,27 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
                 tone={(scorecard?.earlyRecallPct ?? 0) >= 70 ? 'good' : 'warn'}
               />
               <MetricCard
-                label="Precision"
-                value={compactNumber(scorecard?.precisionPct, '%')}
-                helper={`${scorecard?.falseAlertCount ?? 0} unconfirmed`}
-                tone={(scorecard?.precisionPct ?? 0) >= 60 ? 'good' : 'warn'}
+                label="Radar precision"
+                value={compactNumber(scorecard?.radarPrecisionPct ?? scorecard?.precisionPct, '%')}
+                helper={`${scorecard?.radarFalseAlertCount ?? scorecard?.falseAlertCount ?? 0} visibility false alerts`}
+                tone={(scorecard?.radarPrecisionPct ?? scorecard?.precisionPct ?? 0) >= 60 ? 'good' : 'warn'}
+              />
+              <MetricCard
+                label="Executable precision"
+                value={compactNumber(scorecard?.executablePrecisionPct, '%')}
+                helper={`${scorecard?.executableFalseAlertCount ?? 0}/${scorecard?.executableRadarCount ?? 0} tradeable false alerts`}
+                tone={(scorecard?.executablePrecisionPct ?? 0) >= 60 ? 'good' : 'warn'}
+              />
+              <MetricCard
+                label="Selected precision"
+                value={compactNumber(
+                  scorecard?.selectedTelemetryAvailable ? scorecard.selectedPrecisionPct : undefined,
+                  '%',
+                )}
+                helper={scorecard?.selectedTelemetryAvailable
+                  ? `${scorecard?.selectedFalseAlertCount ?? 0}/${scorecard?.selectedRadarCount ?? 0} selected false alerts`
+                  : 'selection telemetry unavailable'}
+                tone={(scorecard?.selectedPrecisionPct ?? 0) >= 60 ? 'good' : 'warn'}
               />
               <MetricCard
                 label="Missed"
