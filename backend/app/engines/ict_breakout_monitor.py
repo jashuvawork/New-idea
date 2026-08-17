@@ -33,6 +33,13 @@ class ICTBreakoutSignal:
     flat_vertical_quality: float = 0.0   # 0-100 quality of the flat->vertical setup
     flat_vertical_grade: str = ""        # A+ | A | B | C
     first_lift: bool = False             # appeared in 15–40% pad off lowest local base
+    base_armed: bool = False             # causal stable base exists before launch
+    armed_base_launch: bool = False       # strict 5–12% early launch band
+    armed_base_samples: int = 0
+    armed_base_span_seconds: float = 0.0
+    armed_base_range_pct: float = 0.0
+    armed_at: str = ""
+    armed_base_expires_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,6 +61,13 @@ class ICTBreakoutSignal:
             "flatVerticalQuality": round(self.flat_vertical_quality, 1),
             "flatVerticalGrade": self.flat_vertical_grade,
             "firstLift": self.first_lift,
+            "baseArmed": self.base_armed,
+            "armedBaseLaunch": self.armed_base_launch,
+            "armedBaseSamples": self.armed_base_samples,
+            "armedBaseSpanSeconds": round(self.armed_base_span_seconds, 1),
+            "armedBaseRangePct": round(self.armed_base_range_pct, 2),
+            "armedAt": self.armed_at,
+            "armedBaseExpiresAt": self.armed_base_expires_at,
         }
 
 
@@ -98,11 +112,15 @@ def first_lift_entry_readiness(
         getattr(ict, "first_lift", False)
         or row.get("ictFirstLift")
     )
+    armed_launch = bool(
+        getattr(ict, "armed_base_launch", False) is True
+        or row.get("ictArmedBaseLaunch") is True
+    )
     structured = bool(
         getattr(ict, "active", False)
         and getattr(ict, "flat_then_vertical", False)
     ) or bool(row.get("ictBreakout") and row.get("ictFlatThenVertical"))
-    if not first_lift or not structured:
+    if not (first_lift or armed_launch) or not structured:
         return False, "first_lift_structure_not_confirmed"
 
     base_move = float(
@@ -110,12 +128,20 @@ def first_lift_entry_readiness(
         or row.get("ictBaseRelativeMovePct")
         or 0
     )
-    min_move = float(
-        getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0
-    )
-    max_move = float(
-        getattr(settings, "first_lift_trade_max_move_pct", 25.0) or 25.0
-    )
+    if armed_launch:
+        min_move = float(
+            getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
+        )
+        max_move = float(
+            getattr(settings, "ict_armed_base_launch_max_move_pct", 12.0) or 12.0
+        )
+    else:
+        min_move = float(
+            getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0
+        )
+        max_move = float(
+            getattr(settings, "first_lift_trade_max_move_pct", 25.0) or 25.0
+        )
     if not (min_move <= base_move <= max_move):
         return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
 
@@ -125,7 +151,12 @@ def first_lift_entry_readiness(
         or 0
     )
     min_quality = float(
-        getattr(settings, "first_lift_trade_min_quality", 55.0) or 55.0
+        getattr(
+            settings,
+            "ict_armed_base_launch_min_quality" if armed_launch else "first_lift_trade_min_quality",
+            60.0 if armed_launch else 55.0,
+        )
+        or (60.0 if armed_launch else 55.0)
     )
     if quality < min_quality:
         return False, f"first_lift_quality<{min_quality:g}"
@@ -137,7 +168,12 @@ def first_lift_entry_readiness(
         or 0
     )
     min_score = float(
-        getattr(settings, "first_lift_trade_min_score", 45.0) or 45.0
+        getattr(
+            settings,
+            "ict_armed_base_launch_min_score" if armed_launch else "first_lift_trade_min_score",
+            45.0,
+        )
+        or 45.0
     )
     if score < min_score:
         return False, f"first_lift_score<{min_score:g}"
@@ -155,10 +191,20 @@ def first_lift_entry_readiness(
         or 0
     )
     min_v3 = float(
-        getattr(settings, "first_lift_trade_min_velocity_3s", 1.2) or 1.2
+        getattr(
+            settings,
+            "ict_armed_base_launch_min_velocity_3s" if armed_launch else "first_lift_trade_min_velocity_3s",
+            1.5 if armed_launch else 1.2,
+        )
+        or (1.5 if armed_launch else 1.2)
     )
     min_v9 = float(
-        getattr(settings, "first_lift_trade_min_velocity_9s", 0.8) or 0.8
+        getattr(
+            settings,
+            "ict_armed_base_launch_min_velocity_9s" if armed_launch else "first_lift_trade_min_velocity_9s",
+            1.5 if armed_launch else 0.8,
+        )
+        or (1.5 if armed_launch else 0.8)
     )
     if v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
@@ -179,7 +225,25 @@ def first_lift_entry_readiness(
     min_volume = float(
         getattr(settings, "first_lift_trade_min_volume_surge", 2.0) or 2.0
     )
-    if not volume_awake and volume_surge < min_volume:
+    absolute_volume = float(
+        getattr(event, "volume", 0)
+        or row.get("volume")
+        or row.get("absoluteVolume")
+        or 0
+    )
+    if armed_launch:
+        min_absolute = float(
+            getattr(settings, "ict_armed_base_launch_min_absolute_volume", 25000.0)
+            or 25000.0
+        )
+        orderflow_proof = bool(
+            absolute_volume >= min_absolute
+            or row.get("optionCvdBuying")
+            or row.get("orderflowConfirmed")
+        )
+        if not orderflow_proof:
+            return False, f"armed_base_orderflow_below_{min_absolute:g}"
+    elif not volume_awake and volume_surge < min_volume:
         return False, f"first_lift_volume_surge<{min_volume:g}"
 
     side = str(
@@ -189,6 +253,53 @@ def first_lift_entry_readiness(
     ).upper()
     if side not in ("CALL", "PUT"):
         return False, "first_lift_side_invalid"
+
+    if armed_launch:
+        sample_count = int(
+            getattr(ict, "armed_base_samples", 0)
+            or row.get("ictArmedBaseSamples")
+            or 0
+        )
+        span = float(
+            getattr(ict, "armed_base_span_seconds", 0)
+            or row.get("ictArmedBaseSpanSeconds")
+            or 0
+        )
+        min_samples = int(
+            getattr(settings, "ict_armed_base_min_samples", 6) or 6
+        )
+        min_span = float(
+            getattr(settings, "ict_armed_base_min_span_seconds", 15.0) or 15.0
+        )
+        if sample_count < min_samples or span < min_span:
+            return False, "armed_base_stability_not_confirmed"
+        min_tqs = float(
+            getattr(settings, "ict_armed_base_launch_min_tqs", 50.0) or 50.0
+        )
+        if float(getattr(snap, "tradeQualityScore", 0) or 0) < min_tqs:
+            return False, f"armed_base_tqs<{min_tqs:g}"
+        from app.engines.moneyness import classify_moneyness
+        from app.models.schemas import Side
+
+        strike = float(
+            getattr(event, "strike", 0)
+            or row.get("strike")
+            or 0
+        )
+        spot = float(getattr(snap, "spot", 0) or 0)
+        atm = float(getattr(snap, "atmStrike", 0) or 0)
+        if strike <= 0 or spot <= 0:
+            return False, "armed_base_moneyness_unavailable"
+        money = classify_moneyness(
+            Side(side),
+            strike,
+            spot,
+            symbol=str(getattr(snap, "symbol", "") or ""),
+            atm=atm if atm > 0 else None,
+        )
+        if money not in ("ATM", "ITM"):
+            return False, f"armed_base_requires_atm_itm_{money.lower()}"
+        return True, "armed_base_option_led_ready"
 
     # A confirmed ATM/ITM option can lead the slower 5m spot chart. This path is
     # deliberately stronger than normal first-lift readiness: it requires an A/B+
@@ -232,7 +343,11 @@ def first_lift_entry_readiness(
             atm=atm if atm > 0 else None,
         )
         if money in ("ATM", "ITM"):
-            return True, "first_lift_option_led_ready"
+            return True, (
+                "armed_base_option_led_ready"
+                if armed_launch
+                else "first_lift_option_led_ready"
+            )
 
     chart = snap.spotChart
     mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
@@ -624,6 +739,17 @@ def analyze_ict_breakout(
     swing_found, swing_low, swing_rel = _detect_local_swing_base(
         history, premium, settings, symbol=symbol, strike=strike, side=side,
     )
+    from app.engines.explosion_detector import armed_base_anchor
+
+    armed_meta = armed_base_anchor(
+        symbol, strike, side, premium, settings=settings,
+    )
+    base_armed = bool(armed_meta.get("armed"))
+    armed_samples = int(armed_meta.get("sampleCount") or 0)
+    armed_span = float(armed_meta.get("spanSeconds") or 0)
+    armed_range = float(armed_meta.get("rangePct") or 0)
+    armed_at = str(armed_meta.get("armedAt") or "")
+    armed_expires_at = str(armed_meta.get("expiresAt") or "")
     early_min = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
     # First-lift floor — appear at the structured local-base pad (~15%), not after chase.
     first_lift_lo = float(
@@ -666,6 +792,14 @@ def analyze_ict_breakout(
             base_rel_move = recent_rel
             reasons.append(f"recent_window_base_{recent_base:.1f}")
 
+    # The causal armed anchor is the shared REST/WS denominator. It supersedes
+    # observation-local flat/swing choices and is sticky upward for its horizon.
+    if base_armed:
+        base_level = float(armed_meta.get("basePremium") or 0)
+        base_rel_move = float(armed_meta.get("baseRelativeMovePct") or 0)
+        local_swing_base = True
+        reasons.append(f"armed_base_{base_level:.1f}")
+
     # Session-low fallback is only for V-shaped legs without a trusted flat coil.
     # Never replace a recent flat trough with an older session low.
     if premium > 0 and not trusted_flat:
@@ -697,6 +831,25 @@ def analyze_ict_breakout(
         or surge_awaken
     )
     displacement = velocity_3s >= settings.ict_displacement_min_velocity_3s
+    armed_launch_lo = float(
+        getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
+    )
+    armed_launch_hi = float(
+        getattr(settings, "ict_armed_base_launch_max_move_pct", 12.0) or 12.0
+    )
+    armed_launch_v3 = float(
+        getattr(settings, "ict_armed_base_launch_min_velocity_3s", 1.5) or 1.5
+    )
+    armed_launch_v9 = float(
+        getattr(settings, "ict_armed_base_launch_min_velocity_9s", 1.5) or 1.5
+    )
+    armed_launch = bool(
+        base_armed
+        and armed_launch_lo <= base_rel_move <= armed_launch_hi
+        and velocity_3s >= armed_launch_v3
+        and velocity_9s >= armed_launch_v9
+        and vol_awaken
+    )
     early_v3 = float(getattr(settings, "ict_early_vertical_min_velocity_3s", 2.0) or 2.0)
     # Structure / early-window heat: prefer local-base move when we have one.
     structure_move = base_rel_move if base_rel_move > 0 else move
@@ -712,6 +865,11 @@ def analyze_ict_breakout(
             or velocity_3s >= early_v3
         )
     )
+    if armed_launch:
+        early_break = True
+        reasons.append(
+            f"armed_base_launch_{base_level:.1f}_{base_rel_move:.1f}%"
+        )
     # First lift off the lowest local base — appear in the 15–40% pad with heat,
     # before day-% / chase tiers light up. Soft velocity OK when volume confirms.
     first_lift_v3 = float(
@@ -873,6 +1031,13 @@ def analyze_ict_breakout(
         flat_vertical_quality=fv_quality,
         flat_vertical_grade=fv_grade,
         first_lift=first_lift,
+        base_armed=base_armed,
+        armed_base_launch=armed_launch,
+        armed_base_samples=armed_samples,
+        armed_base_span_seconds=armed_span,
+        armed_base_range_pct=armed_range,
+        armed_at=armed_at,
+        armed_base_expires_at=armed_expires_at,
     )
 
 

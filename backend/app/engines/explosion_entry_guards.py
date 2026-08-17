@@ -283,6 +283,13 @@ def entry_window_bounds(
     if top_must_take or structured_early_ict_ready(ict):
         lo = float(getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0)
         hi = float(getattr(settings, "ict_structured_early_max_move_pct", 65.0) or 65.0)
+    if getattr(ict, "armed_base_launch", False) is True:
+        lo = float(
+            getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
+        )
+        hi = float(
+            getattr(settings, "ict_armed_base_launch_max_move_pct", 12.0) or 12.0
+        )
     return lo, hi
 
 
@@ -435,6 +442,8 @@ def immature_explosion_blocked(
         bool(getattr(ict, "local_swing_base", False))
         or bool(getattr(ict, "flat_then_vertical", False))
     )
+    if getattr(ict, "armed_base_launch", False) is True:
+        return False, ""
     if base_move > 0 and structured_pad:
         local_floor = float(
             getattr(settings, "explosion_local_base_entry_min_move_pct", 15.0) or 15.0

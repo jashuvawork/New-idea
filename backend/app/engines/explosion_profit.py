@@ -353,6 +353,7 @@ def check_explosion_entry(
         blocked
         and not premium_bypass
         and not local_ichi_bypass
+        and not early_ict_ok
         and not afternoon_capture_skips_chart_block(event, chart)
     ):
         if not is_all_day_explosion_event(event, chart=chart):
