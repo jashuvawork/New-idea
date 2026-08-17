@@ -1108,13 +1108,19 @@ def scan_chain_explosions(
             key_h = _strike_key(strike, side)
             hist = _history.get(symbol, {}).get(key_h)
             vel_key = _open_key(symbol, strike, side)
+            # WS heatmap rows carry volume=0 (unknown). _record preserves the latest
+            # authoritative REST volume in history; use that same effective value for
+            # volume awakening and ICT so price heat and volume proof coexist.
+            effective_volume = _last_known_volume(hist) if hist else float(volume or 0)
 
             if not hist or len(hist) < 2:
                 v3_probe = 0.0
                 vol_surge_probe = 1.0
             else:
                 v3_probe = _velocity(hist, 1)
-                vol_surge_probe = _volume_surge_with_chain(volume, hist, settings)
+                vol_surge_probe = _volume_surge_with_chain(
+                    effective_volume, hist, settings,
+                )
 
             open_move = _session_open_move_pct(
                 symbol, strike, side, premium, hist,
@@ -1152,7 +1158,9 @@ def scan_chain_explosions(
                 v15 = _velocity(hist, 5)
                 peak_v3 = _update_peak_velocity(vel_key, v3)
                 v3_score = max(v3, peak_v3)
-                vol_surge = _volume_surge_with_chain(volume, hist, settings)
+                vol_surge = _volume_surge_with_chain(
+                    effective_volume, hist, settings,
+                )
                 if open_window and open_move >= settings.open_premium_min_move_pct:
                     v3 = max(v3, open_move * 0.25)
                     v9 = max(v9, open_move * 0.65)
@@ -1222,7 +1230,9 @@ def scan_chain_explosions(
             else:
                 reason_parts_open = []
 
-            awakened = _volume_awakening(volume, v3, max(open_move, session_move), settings)
+            awakened = _volume_awakening(
+                effective_volume, v3, max(open_move, session_move), settings,
+            )
             if awakened:
                 vol_surge = max(vol_surge, 2.0)
                 score = min(100, score + 12)
@@ -1232,7 +1242,9 @@ def scan_chain_explosions(
                     tier = "EXPLODING" if _TIER_RANK.get(tier, 0) < _TIER_RANK["EXPLODING"] else tier
                 elif session_move >= settings.open_premium_min_move_pct:
                     tier = "EXPLODING" if tier == "BUILDING" else tier
-                reason_parts_open.append(f"volAwaken×{volume // 1000}k")
+                reason_parts_open.append(
+                    f"volAwaken×{effective_volume // 1000:.0f}k"
+                )
 
             tier = _apply_sticky_tier(f"{symbol}:{key_h}", tier)
 
@@ -1256,7 +1268,7 @@ def scan_chain_explosions(
                             velocity_3s=float(v3),
                             velocity_9s=float(v9),
                             volume_surge=float(vol_surge),
-                            volume=float(volume or 0),
+                            volume=float(effective_volume or 0),
                             tier=tier,
                             reason=" ".join(reason_parts_open),
                         ).first_lift
@@ -1314,7 +1326,7 @@ def scan_chain_explosions(
                 reason=" ".join(reason_parts) or "momentum building",
                 daily_move_pct=round(session_move, 2),
                 peak_move_pct=round(peak_move, 2),
-                volume=float(volume or 0),
+                volume=float(effective_volume or 0),
             ))
 
     events.sort(key=lambda e: ({"ELITE": 4, "EXPLODING": 3, "BUILDING": 2, "WATCH": 1}[e.tier], e.explosion_score), reverse=True)

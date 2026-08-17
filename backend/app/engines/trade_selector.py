@@ -279,9 +279,9 @@ def _explosion_candidates(
             snap=snap,
         ):
             continue
-        from app.engines.ict_breakout_monitor import first_lift_entry_ready
+        from app.engines.ict_breakout_monitor import first_lift_entry_readiness
 
-        first_lift_ready = first_lift_entry_ready(
+        first_lift_ready, first_lift_readiness_reason = first_lift_entry_readiness(
             snap=snap,
             alert=alert,
         )
@@ -456,6 +456,10 @@ def _explosion_candidates(
             continue
 
         rank = score_val * 0.55 + snap.tradeQualityScore * 0.25
+        if first_lift_readiness_reason == "first_lift_option_led_ready":
+            rank += float(
+                getattr(settings, "first_lift_option_led_rank_bonus", 12.0) or 12.0
+            )
         if event.tier == "ELITE":
             rank += 15
         rank += min(15, event.velocity_3s * 2)

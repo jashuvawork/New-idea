@@ -380,6 +380,13 @@ class Settings(BaseSettings):
     first_lift_trade_min_velocity_9s: float = 0.8
     first_lift_trade_max_move_pct: float = 25.0
     first_lift_trade_min_momentum_shift_pct: float = 0.03
+    # ATM/ITM premium-led first lift: stronger option evidence may lead a lagging
+    # bearish/bullish spot chart, symmetrically for CE/PE.
+    first_lift_option_led_enabled: bool = True
+    first_lift_option_led_min_quality: float = 65.0
+    first_lift_option_led_min_velocity_3s: float = 1.5
+    first_lift_option_led_min_velocity_9s: float = 1.5
+    first_lift_option_led_rank_bonus: float = 12.0
     # A strict first lift has stronger early evidence than the generic COLD timing
     # classifier. Do not wait for lagging breadth/chart state after the measured
     # local pad, quality, sustained velocity, volume and live momentum turn pass.
