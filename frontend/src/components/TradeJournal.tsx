@@ -113,6 +113,9 @@ function TradeRow({
   open?: boolean;
 }) {
   const mode = (trade.entryContext?.executionMode as string) || 'PAPER';
+  const rankGrade = trade.entryContext?.rankGrade as string | undefined;
+  const rankScore = trade.entryContext?.rankScore as number | undefined;
+  const cycleRank = trade.entryContext?.cycleRank as number | undefined;
   return (
     <div className="text-[10px] p-1.5 border border-nexus-border/50 rounded bg-black/20">
       <div className="flex justify-between">
@@ -122,6 +125,15 @@ function TradeRow({
           </span>
           {' · '}
           <span className={mode === 'LIVE' ? 'text-nexus-red' : 'text-nexus-accent'}>[{mode}]</span>
+          {rankGrade && (
+            <>
+              {' · '}
+              <span className="text-nexus-yellow">
+                {rankGrade} {rankScore?.toFixed(1)}
+                {cycleRank ? ` · #${cycleRank}` : ''}
+              </span>
+            </>
+          )}
           {!open && (
             <>
               {' · '}
