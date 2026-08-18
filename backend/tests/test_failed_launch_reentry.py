@@ -31,6 +31,10 @@ def test_failed_launch_blocks_same_strike_reentry(mock_settings):
     s = MagicMock()
     s.explosion_failed_launch_reentry_block_enabled = True
     s.explosion_failed_launch_reentry_cooldown_seconds = 1800
+    s.explosion_failed_launch_reentry_strike_steps = 1
+    s.explosion_failed_launch_reentry_exit_reasons_csv = (
+        "explosion_failed_launch,explosion_never_green_stop"
+    )
     mock_settings.return_value = s
     state = AutoTraderState()
     state.closedPaperTrades = [_closed_failed(minutes_ago=21)]
@@ -46,6 +50,10 @@ def test_failed_launch_cooldown_expires(mock_settings):
     s = MagicMock()
     s.explosion_failed_launch_reentry_block_enabled = True
     s.explosion_failed_launch_reentry_cooldown_seconds = 1800
+    s.explosion_failed_launch_reentry_strike_steps = 1
+    s.explosion_failed_launch_reentry_exit_reasons_csv = (
+        "explosion_failed_launch,explosion_never_green_stop"
+    )
     mock_settings.return_value = s
     state = AutoTraderState()
     state.closedPaperTrades = [_closed_failed(minutes_ago=40)]

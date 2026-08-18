@@ -573,6 +573,7 @@ def validate_candidate(
             ftv_authorization_policy,
             ftv_policy_settings,
             rank_entry_candidate,
+            resolve_policy_day_mode,
         )
 
         exhausted = False
@@ -609,6 +610,7 @@ def validate_candidate(
             causal_ranking,
             snapshot_available=policy_snap is not None,
             atm_itm_allowed=money_ok,
+            day_mode=resolve_policy_day_mode(state),
             **ftv_policy_settings(settings),
         )
         policy_ok = policy_decision.allowed

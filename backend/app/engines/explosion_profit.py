@@ -1130,6 +1130,26 @@ def peak_capture_profit_lock_reason(
         getattr(settings, "explosion_peak_capture_min_giveback_points", 2.0) or 2.0
     )
     max_give = _cfg_float(settings, "explosion_peak_capture_max_giveback_points", 8.0)
+    if max_profit:
+        # Mid-leg FTV (< big-peak threshold): ratio-only — an 8pt dip must not bank
+        # before 100%+. After a true expansion peak, allow a higher absolute ceiling
+        # so confirmed rollovers still bank near the top without waiting a full 28%.
+        mp_big = float(
+            getattr(
+                settings,
+                "explosion_peak_capture_max_profit_big_peak_points",
+                80.0,
+            )
+            or 80.0
+        )
+        if best < mp_big:
+            max_give = 0.0
+        else:
+            max_give = _cfg_float(
+                settings,
+                "explosion_peak_capture_max_profit_max_giveback_points",
+                24.0,
+            )
     min_remain = float(
         getattr(settings, "explosion_peak_capture_min_remain_points", 1.0) or 1.0
     )

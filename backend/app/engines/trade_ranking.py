@@ -38,6 +38,44 @@ def ranking_sort_key(ranking: Mapping[str, Any]) -> tuple[int, float]:
     )
 
 
+def resolve_policy_day_mode(state: Any = None, *, day_mode: str = "") -> str:
+    """Best-effort dayMode for policy gates (session limits → state → explicit)."""
+    if day_mode:
+        return str(day_mode)
+    try:
+        from app.engines.daily_18pct_strategy import get_session_limits
+
+        limits = get_session_limits()
+        if limits is not None:
+            dm = str(getattr(limits, "dayMode", "") or "")
+            if dm:
+                return dm
+    except Exception:
+        pass
+    if state is not None:
+        for attr in ("dayMode", "day_mode"):
+            raw = getattr(state, attr, None)
+            if raw:
+                return str(raw)
+        ds = getattr(state, "dailyStrategy", None) or {}
+        if isinstance(ds, dict):
+            dm = str(ds.get("dayMode") or "")
+            if dm:
+                return dm
+    return ""
+
+
+def _day_mode_is_expiry_worst(day_mode: str) -> bool:
+    joined = str(day_mode or "").upper()
+    if "EXPIRY WORST" in joined:
+        return True
+    return "EXPIRY" in joined and "WORST" in joined
+
+
+def _day_mode_is_worst(day_mode: str) -> bool:
+    return "WORST" in str(day_mode or "").upper()
+
+
 def ftv_authorization_policy(
     evidence: Mapping[str, Any],
     ranking: Mapping[str, Any],
@@ -46,6 +84,7 @@ def ftv_authorization_policy(
     atm_itm_allowed: bool = True,
     allocation_rank: int | None = None,
     require_allocation_rank_one: bool = False,
+    day_mode: str = "",
     top_ftv_a_enabled: bool = True,
     top_ftv_a_min_explosion_score: float = 90.0,
     top_ftv_a_min_quality: float = 70.0,
@@ -76,6 +115,12 @@ def ftv_authorization_policy(
     winner_local_base_min_local_base_move_pct: float = 5.0,
     winner_local_base_max_local_base_move_pct: float = 25.0,
     winner_local_base_max_capital_pct: float = 0.35,
+    winner_local_base_require_cvd_on_worst: bool = True,
+    ftv_policy_expiry_worst_block_enabled: bool = True,
+    ftv_policy_expiry_worst_min_tier: str = "ELITE",
+    ftv_policy_expiry_worst_min_quality: float = 85.0,
+    ftv_policy_expiry_worst_min_score: float = 90.0,
+    ftv_policy_expiry_worst_min_velocity_3s: float = 3.0,
 ) -> FtvAuthorization:
     """Pure causal authorization for strict S, top FTV A, and winner local-base."""
     blocked = lambda reason: FtvAuthorization(None, reason)
@@ -116,6 +161,33 @@ def ftv_authorization_policy(
     if snapshot_available and not atm_itm_allowed:
         return blocked("ftv_elite_top_only_requires_atm_itm")
 
+    def _expiry_worst_policy_ok(
+        *,
+        tier: str,
+        quality: float,
+        score: float,
+        v3: float,
+    ) -> FtvAuthorization | None:
+        """None = pass; FtvAuthorization = blocked."""
+        if not (
+            ftv_policy_expiry_worst_block_enabled
+            and _day_mode_is_expiry_worst(day_mode)
+        ):
+            return None
+        min_tier = str(ftv_policy_expiry_worst_min_tier or "ELITE").upper()
+        tier_rank = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
+        if tier_rank.get(str(tier or "").upper(), 0) < tier_rank.get(min_tier, 4):
+            return blocked(
+                f"ftv_expiry_worst_requires_{min_tier.lower()}"
+            )
+        if quality < float(ftv_policy_expiry_worst_min_quality or 85.0):
+            return blocked("ftv_expiry_worst_quality_below_floor")
+        if score < float(ftv_policy_expiry_worst_min_score or 90.0):
+            return blocked("ftv_expiry_worst_score_below_floor")
+        if v3 < float(ftv_policy_expiry_worst_min_velocity_3s or 3.0):
+            return blocked("ftv_expiry_worst_velocity_3s_below_floor")
+        return None
+
     grade = str(ranking.get("grade") or "").upper()
     if grade == "S":
         if not bool(ranking.get("topRankEligible")):
@@ -125,8 +197,11 @@ def ftv_authorization_policy(
         # Elite-base preauth (2–5% pad) is already structured; armed/first-lift
         # S must still clear top local-base floors so mid EXPLODING cannot slip in.
         preauthorized = str(ranking.get("executionAuthorization") or "") == "S_PREAUTHORIZED"
+        tier = str(evidence.get("tier") or "").upper()
+        explosion_score = _number(evidence.get("explosionScore"))
+        quality = _number(evidence.get("flatVerticalQuality"))
+        v3 = _number(evidence.get("velocity3s"))
         if not preauthorized:
-            tier = str(evidence.get("tier") or "").upper()
             if tier not in {"ELITE", "EXPLODING"}:
                 return blocked("ftv_s_strict_requires_elite_or_exploding")
             if not bool(
@@ -140,11 +215,11 @@ def ftv_authorization_policy(
                 return blocked("ftv_s_strict_local_base_too_early")
             if move > ftv_s_strict_max_local_base_move_pct:
                 return blocked("ftv_s_strict_local_base_chase")
-            if _number(evidence.get("explosionScore")) < ftv_s_strict_min_explosion_score:
+            if explosion_score < ftv_s_strict_min_explosion_score:
                 return blocked("ftv_s_strict_explosion_score_below_floor")
-            if _number(evidence.get("flatVerticalQuality")) < ftv_s_strict_min_quality:
+            if quality < ftv_s_strict_min_quality:
                 return blocked("ftv_s_strict_quality_below_floor")
-            if _number(evidence.get("velocity3s")) < ftv_s_strict_min_velocity_3s:
+            if v3 < ftv_s_strict_min_velocity_3s:
                 return blocked("ftv_s_strict_velocity_3s_below_floor")
             if _number(evidence.get("velocity9s")) < ftv_s_strict_min_velocity_9s:
                 return blocked("ftv_s_strict_velocity_9s_below_floor")
@@ -153,6 +228,11 @@ def ftv_authorization_policy(
                 or bool(evidence.get("orderflowPositive"))
             ):
                 return blocked("ftv_s_strict_requires_buying_confirmation")
+        expiry_block = _expiry_worst_policy_ok(
+            tier=tier, quality=quality, score=explosion_score, v3=v3,
+        )
+        if expiry_block is not None:
+            return expiry_block
         return FtvAuthorization("S_STRICT", "ok")
 
     move = _number(evidence.get("localBaseMovePct"))
@@ -211,6 +291,11 @@ def ftv_authorization_policy(
             elif require_allocation_rank_one and allocation_rank != 1:
                 top_ftv_a_reason = "top_ftv_a_requires_allocation_rank_1"
             else:
+                expiry_block = _expiry_worst_policy_ok(
+                    tier=tier, quality=quality, score=explosion_score, v3=v3,
+                )
+                if expiry_block is not None:
+                    return expiry_block
                 return FtvAuthorization(
                     "TOP_FTV_A",
                     "ok_exceptional_extension" if exceptional else "ok",
@@ -238,8 +323,19 @@ def ftv_authorization_policy(
             and v9 >= winner_local_base_min_velocity_9s
         )
         if winner_ok:
+            if (
+                winner_local_base_require_cvd_on_worst
+                and _day_mode_is_worst(day_mode)
+                and not bool(evidence.get("cvdBuying"))
+            ):
+                return blocked("winner_local_base_worst_requires_cvd_buying")
             if require_allocation_rank_one and allocation_rank != 1:
                 return blocked("winner_local_base_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
             return FtvAuthorization(
                 "WINNER_LOCAL_BASE",
                 "ok",
@@ -284,6 +380,12 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "winner_local_base_min_local_base_move_pct",
         "winner_local_base_max_local_base_move_pct",
         "winner_local_base_max_capital_pct",
+        "winner_local_base_require_cvd_on_worst",
+        "ftv_policy_expiry_worst_block_enabled",
+        "ftv_policy_expiry_worst_min_tier",
+        "ftv_policy_expiry_worst_min_quality",
+        "ftv_policy_expiry_worst_min_score",
+        "ftv_policy_expiry_worst_min_velocity_3s",
     )
     return {name: getattr(settings, name) for name in names}
 

@@ -342,6 +342,72 @@ def cap_same_strike_explosion_reentry_after_win(
     return capped, meta
 
 
+def _failed_launch_reentry_exit_reasons(settings: Any) -> set[str]:
+    raw = getattr(
+        settings,
+        "explosion_failed_launch_reentry_exit_reasons_csv",
+        "explosion_failed_launch,explosion_never_green_stop",
+    )
+    if not isinstance(raw, str) or not raw.strip():
+        raw = "explosion_failed_launch,explosion_never_green_stop"
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def _latest_failed_launch_nearby_close(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    strike_steps: int = 1,
+) -> Optional[Any]:
+    """Latest failed-launch / never-green close within ±strike_steps of strike."""
+    sym = str(symbol or "").upper()
+    side_v = _side_key(side)
+    strike_f = float(strike or 0)
+    try:
+        from app.engines.moneyness import strike_step
+
+        step = float(strike_step(sym) or 50.0)
+    except Exception:
+        step = 50.0
+    max_dist = max(0.0, float(strike_steps) * step) + 0.01
+    reasons = _failed_launch_reentry_exit_reasons(get_settings())
+    latest: Optional[Any] = None
+    latest_ts = None
+
+    def _is_explosion(t: Any) -> bool:
+        ctx = getattr(t, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
+        st = str(getattr(t, "strategyType", "") or "")
+        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+        return mode == "explosion" or st_u == "EXPLOSIVE"
+
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            continue
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if not _is_explosion(t):
+            continue
+        reason = str(getattr(t, "exitReason", "") or "")
+        if reason not in reasons:
+            continue
+        prior_strike = float(getattr(t, "strike", 0) or 0)
+        if abs(prior_strike - strike_f) > max_dist:
+            continue
+        prior_pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
+        best = float(getattr(t, "bestPnlPoints", 0) or 0)
+        # Only block true failed launches (never green / small loss).
+        if prior_pnl >= 0 and best > 1.0:
+            continue
+        ts = getattr(t, "closedAt", None) or getattr(t, "openedAt", None)
+        if latest is None or (ts is not None and (latest_ts is None or ts > latest_ts)):
+            latest = t
+            latest_ts = ts
+    return latest
+
+
 def failed_launch_reentry_blocked(
     state: AutoTraderState,
     *,
@@ -349,30 +415,36 @@ def failed_launch_reentry_blocked(
     side: Any,
     strike: float,
 ) -> tuple[bool, dict[str, Any]]:
-    """Block same-strike re-entry after an explosion_failed_launch (Aug18 24250 PUT).
+    """Block same/nearby-strike re-entry after failed launch or never-green stop.
 
     Failed launches that never went green are chop spikes — do not re-arm the same
-    contract until the cooldown expires. Peak-exhaustion guard does not cover these
-    because bestPnl was 0.
+    contract (or ATM±1) until the cooldown expires. Peak-exhaustion guard does not
+    cover these because bestPnl was 0. Never-green hard cuts often exit with flat
+    velocity, so they must arm the same cooldown.
     """
     settings = get_settings()
     meta: dict[str, Any] = {"applied": False}
     if not getattr(settings, "explosion_failed_launch_reentry_block_enabled", True):
         return False, meta
-    prior = _latest_same_strike_explosion_close(
-        state, symbol=symbol, side=side, strike=strike,
+    strike_steps_raw = getattr(
+        settings, "explosion_failed_launch_reentry_strike_steps", 1
+    )
+    try:
+        strike_steps = int(strike_steps_raw)
+    except (TypeError, ValueError):
+        strike_steps = 1
+    prior = _latest_failed_launch_nearby_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        strike_steps=max(0, strike_steps),
     )
     if prior is None or getattr(prior, "closedAt", None) is None:
         return False, meta
     reason = str(getattr(prior, "exitReason", "") or "")
-    if reason != "explosion_failed_launch":
-        return False, meta
     prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
     best = float(getattr(prior, "bestPnlPoints", 0) or 0)
-    # Only block true failed launches (never green / small loss). A green then
-    # failed-label exit is handled elsewhere.
-    if prior_pnl >= 0 and best > 1.0:
-        return False, meta
 
     now = datetime.now(_IST)
     closed_at = prior.closedAt
@@ -390,9 +462,12 @@ def failed_launch_reentry_blocked(
             "applied": True,
             "priorTradeId": getattr(prior, "id", None),
             "priorExitReason": reason,
+            "priorStrike": float(getattr(prior, "strike", 0) or 0),
             "priorPnlInr": round(prior_pnl, 2),
+            "priorBestPoints": round(best, 2),
             "ageSeconds": round(age_seconds, 1),
             "cooldownSeconds": cooldown,
+            "strikeSteps": strike_steps,
             "reason": "failed_launch_reentry_cooldown",
         }
     )

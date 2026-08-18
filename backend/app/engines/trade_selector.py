@@ -1316,6 +1316,7 @@ def find_best_entry(
             ftv_authorization_policy,
             ftv_policy_settings,
             rank_entry_candidate,
+            resolve_policy_day_mode,
         )
 
         causal_ranking = rank_entry_candidate(c, exhausted_reentry=exhausted)
@@ -1330,6 +1331,7 @@ def find_best_entry(
                 causal_ranking,
                 snapshot_available=True,
                 atm_itm_allowed=money_ok,
+                day_mode=resolve_policy_day_mode(state),
                 **ftv_policy_settings(settings),
             )
             policy_ok = policy_decision.allowed
