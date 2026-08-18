@@ -342,6 +342,63 @@ def cap_same_strike_explosion_reentry_after_win(
     return capped, meta
 
 
+def failed_launch_reentry_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+) -> tuple[bool, dict[str, Any]]:
+    """Block same-strike re-entry after an explosion_failed_launch (Aug18 24250 PUT).
+
+    Failed launches that never went green are chop spikes — do not re-arm the same
+    contract until the cooldown expires. Peak-exhaustion guard does not cover these
+    because bestPnl was 0.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "explosion_failed_launch_reentry_block_enabled", True):
+        return False, meta
+    prior = _latest_same_strike_explosion_close(
+        state, symbol=symbol, side=side, strike=strike,
+    )
+    if prior is None or getattr(prior, "closedAt", None) is None:
+        return False, meta
+    reason = str(getattr(prior, "exitReason", "") or "")
+    if reason != "explosion_failed_launch":
+        return False, meta
+    prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
+    best = float(getattr(prior, "bestPnlPoints", 0) or 0)
+    # Only block true failed launches (never green / small loss). A green then
+    # failed-label exit is handled elsewhere.
+    if prior_pnl >= 0 and best > 1.0:
+        return False, meta
+
+    now = datetime.now(_IST)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    age_seconds = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
+    cooldown = float(
+        getattr(settings, "explosion_failed_launch_reentry_cooldown_seconds", 1800)
+        or 1800
+    )
+    if age_seconds > cooldown:
+        return False, meta
+    meta.update(
+        {
+            "applied": True,
+            "priorTradeId": getattr(prior, "id", None),
+            "priorExitReason": reason,
+            "priorPnlInr": round(prior_pnl, 2),
+            "ageSeconds": round(age_seconds, 1),
+            "cooldownSeconds": cooldown,
+            "reason": "failed_launch_reentry_cooldown",
+        }
+    )
+    return True, meta
+
+
 def exhausted_ftv_reentry_blocked(
     state: AutoTraderState,
     *,
