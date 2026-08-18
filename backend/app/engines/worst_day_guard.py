@@ -476,6 +476,59 @@ def worst_day_allows_candidate(
                 and score >= settings.all_day_explosion_min_score - 8
                 and building_elite_ok
             ):
+                from app.engines.ict_breakout_monitor import (
+                    _expiry_worst_defensive_rip_allowed,
+                    _expiry_worst_session,
+                )
+
+                day_mode = ""
+                try:
+                    from app.engines.daily_18pct_strategy import get_session_limits
+
+                    limits = get_session_limits()
+                    day_mode = str(getattr(limits, "dayMode", "") or "") if limits else ""
+                except Exception:
+                    day_mode = ""
+                if not day_mode:
+                    day_mode = str(
+                        (getattr(state, "dailyStrategy", None) or {}).get("dayMode")
+                        or ""
+                    )
+                if _expiry_worst_session(day_mode=day_mode, state=state, meta=meta):
+                    quality = 0.0
+                    v3 = 0.0
+                    ict_local = None
+                    if event is not None:
+                        v3 = float(getattr(event, "velocity_3s", 0) or 0)
+                        try:
+                            from app.engines.ict_breakout_monitor import (
+                                analyze_explosion_event_ict,
+                            )
+
+                            ict_local = analyze_explosion_event_ict(event, snap)
+                        except Exception:
+                            ict_local = None
+                    if ict_local is not None:
+                        quality = float(getattr(ict_local, "flat_vertical_quality", 0) or 0)
+                        if v3 <= 0:
+                            v3 = float(getattr(ict_local, "velocity_3s", 0) or 0)
+                    for key in ("flatVerticalQuality", "ictFlatVerticalQuality"):
+                        if quality <= 0:
+                            try:
+                                quality = float(alert.get(key) or 0)
+                            except (TypeError, ValueError):
+                                quality = 0.0
+                    if v3 <= 0:
+                        v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+                    ok, deny = _expiry_worst_defensive_rip_allowed(
+                        tier=tier,
+                        quality=quality,
+                        score=score,
+                        velocity_3s=v3,
+                        settings=settings,
+                    )
+                    if not ok:
+                        return False, deny, meta
                 meta["defensiveBaseRip"] = True
                 meta["worstDayIctBaseRip"] = True
                 return True, "ok", meta
