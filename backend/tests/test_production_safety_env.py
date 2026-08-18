@@ -16,6 +16,9 @@ def _env_values() -> dict[str, str]:
 def test_production_template_uses_bounded_loss_policy():
     env = _env_values()
     assert env["FTV_ELITE_TOP_ONLY_ENABLED"] == "true"
+    assert env["TOP_FTV_A_ENABLED"] == "true"
+    assert env["TOP_FTV_A_MAX_CAPITAL_PCT"] == "0.35"
+    assert env["TOP_FTV_A_EXCEPTIONAL_MAX_MOVE_PCT"] == "40"
     assert env["DAILY_LOSS_STOP_INR"] == "6000"
     assert env["PER_TRADE_CAPITAL_PCT"] == "0.90"
     assert env["ORDINARY_ENTRY_MAX_CAPITAL_PCT"] == "0.35"
@@ -41,6 +44,20 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
     updater = (ROOT / "deploy/ec2-update.sh").read_text()
     required = {
         "FTV_ELITE_TOP_ONLY_ENABLED",
+        "TOP_FTV_A_ENABLED",
+        "TOP_FTV_A_MIN_EXPLOSION_SCORE",
+        "TOP_FTV_A_MIN_QUALITY",
+        "TOP_FTV_A_MIN_TQS",
+        "TOP_FTV_A_MIN_VELOCITY_3S",
+        "TOP_FTV_A_MIN_VELOCITY_9S",
+        "TOP_FTV_A_NORMAL_MAX_MOVE_PCT",
+        "TOP_FTV_A_MAX_CAPITAL_PCT",
+        "TOP_FTV_A_EXCEPTIONAL_MIN_EXPLOSION_SCORE",
+        "TOP_FTV_A_EXCEPTIONAL_MIN_QUALITY",
+        "TOP_FTV_A_EXCEPTIONAL_MIN_TQS",
+        "TOP_FTV_A_EXCEPTIONAL_MIN_VELOCITY_3S",
+        "TOP_FTV_A_EXCEPTIONAL_MIN_VELOCITY_9S",
+        "TOP_FTV_A_EXCEPTIONAL_MAX_MOVE_PCT",
         "DAILY_LOSS_STOP_INR",
         "PER_TRADE_CAPITAL_PCT",
         "ORDINARY_ENTRY_MAX_CAPITAL_PCT",

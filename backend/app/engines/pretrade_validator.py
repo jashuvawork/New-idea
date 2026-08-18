@@ -570,7 +570,8 @@ def validate_candidate(
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
         from app.engines.trade_ranking import (
-            ftv_elite_top_policy,
+            ftv_authorization_policy,
+            ftv_policy_settings,
             rank_entry_candidate,
         )
 
@@ -603,17 +604,22 @@ def validate_candidate(
                 candidate.strike,
                 policy_snap,
             )
-        policy_ok, policy_reason = ftv_elite_top_policy(
+        policy_decision = ftv_authorization_policy(
             causal_ranking.get("evidence") or {},
             causal_ranking,
             snapshot_available=policy_snap is not None,
             atm_itm_allowed=money_ok,
+            **ftv_policy_settings(settings),
         )
+        policy_ok = policy_decision.allowed
+        policy_reason = policy_decision.reason
         policy_meta = {
             "ftvEliteTopPolicy": {
                 "enabled": True,
                 "passed": policy_ok,
                 "reason": policy_reason,
+                "authorizationMode": policy_decision.mode,
+                "maxCapitalPct": policy_decision.max_capital_pct,
             },
             "causalRanking": causal_ranking,
         }

@@ -315,8 +315,26 @@ async def deployment_readiness():
             "ftvEliteTopOnlyEnabled": bool(
                 getattr(settings, "ftv_elite_top_only_enabled", True)
             ),
-            "requiredCausalGrade": "S",
-            "requiresTopRankEligible": True,
+            "topFtvAFallbackEnabled": bool(
+                getattr(settings, "top_ftv_a_enabled", True)
+            ),
+            "allowedAuthorizationModes": ["S_STRICT", "TOP_FTV_A"],
+            "allowedCausalGrades": ["S", "A"],
+            "strictS": {
+                "requiresTopRankEligible": True,
+                "fullSleeveEligible": True,
+                "maxCapitalPct": settings.per_trade_capital_pct,
+            },
+            "topFtvA": {
+                "tiers": ["ELITE", "EXPLODING"],
+                "requiresFreshCausalTrigger": True,
+                "requiresOptionCvdBuying": True,
+                "requiresOptionCvdAcceleration": True,
+                "normalMaxMovePct": settings.top_ftv_a_normal_max_move_pct,
+                "exceptionalMaxMovePct": settings.top_ftv_a_exceptional_max_move_pct,
+                "maxCapitalPct": settings.top_ftv_a_max_capital_pct,
+                "fullSleeveEligible": False,
+            },
             "requiresAtmItm": True,
             "requiredAllocationRank": 1,
         },

@@ -186,9 +186,25 @@ class Settings(BaseSettings):
     scalp_entries_enabled: bool = False
     # Explosion entries: only ELITE + EXPLODING (no soft BUILDING / premium-capture).
     explosion_elite_exploding_only: bool = True
-    # Hard execution policy: only causal S/top-eligible ATM/ITM flat→vertical
-    # explosions may pass selection, and only allocation rank 1 may execute.
+    # Master hard policy. Strict causal S remains the sole full-sleeve path.
     ftv_elite_top_only_enabled: bool = True
+    # Ordinary rank-1 fallback for winner-like ELITE/EXPLODING current-data FTV A.
+    # Historical profiles are not treated as proof because old rows lack v9/CVD.
+    top_ftv_a_enabled: bool = True
+    top_ftv_a_min_explosion_score: float = 90.0
+    top_ftv_a_min_quality: float = 70.0
+    top_ftv_a_min_tqs: float = 50.0
+    top_ftv_a_min_velocity_3s: float = 2.5
+    top_ftv_a_min_velocity_9s: float = 1.75
+    top_ftv_a_normal_max_move_pct: float = 25.0
+    top_ftv_a_max_capital_pct: float = 0.35
+    # Extension from 25–40% requires exceptional acceleration and stronger quality.
+    top_ftv_a_exceptional_min_explosion_score: float = 95.0
+    top_ftv_a_exceptional_min_quality: float = 85.0
+    top_ftv_a_exceptional_min_tqs: float = 55.0
+    top_ftv_a_exceptional_min_velocity_3s: float = 5.0
+    top_ftv_a_exceptional_min_velocity_9s: float = 2.5
+    top_ftv_a_exceptional_max_move_pct: float = 40.0
     # Exception: BUILDING only as "elite build" — chart-aligned ICT flat→vertical
     # with ELITE-grade score + hot velocity. Aug7 cold BUILDING (score 56, v3 1.7)
     # must wait for ELITE print or upgrade into these bars.
