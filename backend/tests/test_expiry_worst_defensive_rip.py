@@ -52,7 +52,7 @@ def _settings(**overrides):
     s.first_lift_trade_max_move_pct = 25.0
     s.ict_structured_early_min_move_pct = 15.0
     s.ict_armed_base_launch_min_move_pct = 5.0
-    s.ict_armed_base_launch_max_move_pct = 12.0
+    s.ict_armed_base_launch_max_move_pct = 15.0
     s.ict_armed_base_launch_min_quality = 65.0
     s.ict_armed_base_launch_min_score = 65.0
     s.ict_armed_base_launch_min_velocity_3s = 2.0

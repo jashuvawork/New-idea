@@ -116,6 +116,7 @@ def ftv_authorization_policy(
     winner_local_base_max_local_base_move_pct: float = 25.0,
     winner_local_base_max_capital_pct: float = 0.35,
     winner_local_base_require_cvd_on_worst: bool = True,
+    winner_local_base_early_ftv_fresh_enabled: bool = True,
     ftv_policy_expiry_worst_block_enabled: bool = True,
     ftv_policy_expiry_worst_min_tier: str = "ELITE",
     ftv_policy_expiry_worst_min_quality: float = 85.0,
@@ -204,13 +205,29 @@ def ftv_authorization_policy(
         if not preauthorized:
             if tier not in {"ELITE", "EXPLODING"}:
                 return blocked("ftv_s_strict_requires_elite_or_exploding")
+            move = _number(evidence.get("localBaseMovePct"))
+            s_early_ftv = bool(
+                winner_local_base_early_ftv_fresh_enabled
+                and evidence.get("flatThenVertical")
+                and evidence.get("activeBreakout")
+                and (
+                    evidence.get("orderflowPositive")
+                    or evidence.get("volumeAwaken")
+                    or evidence.get("displacement")
+                    or evidence.get("armedBaseSustainedLift")
+                )
+                and ftv_s_strict_min_local_base_move_pct
+                <= move
+                <= ftv_s_strict_max_local_base_move_pct
+            )
             if not bool(
                 evidence.get("armedBaseLaunch")
                 or evidence.get("firstLift")
                 or evidence.get("eliteBaseReady")
+                or evidence.get("armedBaseSustainedLift")
+                or s_early_ftv
             ):
                 return blocked("ftv_s_strict_requires_local_base_trigger")
-            move = _number(evidence.get("localBaseMovePct"))
             if move < ftv_s_strict_min_local_base_move_pct:
                 return blocked("ftv_s_strict_local_base_too_early")
             if move > ftv_s_strict_max_local_base_move_pct:
@@ -242,11 +259,31 @@ def ftv_authorization_policy(
     tqs = _number(evidence.get("tqs"))
     v3 = _number(evidence.get("velocity3s"))
     v9 = _number(evidence.get("velocity9s"))
-    fresh_trigger = bool(
+    # Armed / first-lift / elite are preferred. Early FTV + heat inside the
+    # catch pad also counts as fresh — closes the 12–15% dead zone where radar
+    # already shows the rip but flag continuity has gaps.
+    flag_fresh = bool(
         evidence.get("firstLift")
         or evidence.get("armedBaseLaunch")
         or evidence.get("eliteBaseReady")
+        or evidence.get("armedBaseSustainedLift")
     )
+    early_ftv_heat = bool(
+        evidence.get("orderflowPositive")
+        or evidence.get("volumeAwaken")
+        or evidence.get("displacement")
+        or evidence.get("armedBaseSustainedLift")
+    )
+    early_ftv_fresh = bool(
+        winner_local_base_early_ftv_fresh_enabled
+        and evidence.get("flatThenVertical")
+        and evidence.get("activeBreakout")
+        and early_ftv_heat
+        and winner_local_base_min_local_base_move_pct
+        <= move
+        <= winner_local_base_max_local_base_move_pct
+    )
+    fresh_trigger = flag_fresh or early_ftv_fresh
     timing_blocked = timing in {"CHASE", "CHASING", "LATE", "FAILED_LAUNCH"}
 
     top_ftv_a_reason = "top_ftv_a_disabled"
@@ -381,6 +418,7 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "winner_local_base_max_local_base_move_pct",
         "winner_local_base_max_capital_pct",
         "winner_local_base_require_cvd_on_worst",
+        "winner_local_base_early_ftv_fresh_enabled",
         "ftv_policy_expiry_worst_block_enabled",
         "ftv_policy_expiry_worst_min_tier",
         "ftv_policy_expiry_worst_min_quality",
@@ -555,9 +593,12 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "firstLift": first_lift,
             "eliteBaseReady": elite_base_ready,
             "armedBaseLaunch": armed_launch,
+            "armedBaseSustainedLift": bool(evidence.get("armedBaseSustainedLift")),
             "flatThenVertical": flat_vertical,
             "activeBreakout": active_breakout,
             "orderflowPositive": orderflow,
+            "volumeAwaken": bool(evidence.get("volumeAwaken")),
+            "displacement": bool(evidence.get("displacement")),
             "cvdBuying": cvd_buying,
             "cvdAcceleration": cvd_acceleration,
             "explosionScore": round(explosion_score, 2),
@@ -637,6 +678,7 @@ def rank_entry_candidate(
         "firstLift": alert.get("ictFirstLift"),
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
         "armedBaseLaunch": alert.get("ictArmedBaseLaunch"),
+        "armedBaseSustainedLift": alert.get("ictArmedBaseSustainedLift"),
         "flatThenVertical": alert.get("ictFlatThenVertical"),
         "activeBreakout": alert.get("ictBreakout"),
         "orderflowPositive": bool(
@@ -646,6 +688,10 @@ def rank_entry_candidate(
             or alert.get("cvdAcceleration")
             or volume_surge >= 1.2
         ),
+        "volumeAwaken": bool(
+            alert.get("ictVolumeAwakening") or alert.get("volumeAwaken")
+        ),
+        "displacement": bool(alert.get("ictDisplacement")),
         "cvdBuying": cvd_buying,
         "cvdAcceleration": cvd_acceleration,
         "timingAssessment": timing.get("assessment"),

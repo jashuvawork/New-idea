@@ -202,8 +202,23 @@ def first_lift_entry_readiness(
             getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
         )
         max_move = float(
-            getattr(settings, "ict_armed_base_launch_max_move_pct", 12.0) or 12.0
+            getattr(settings, "ict_armed_base_launch_max_move_pct", 15.0) or 15.0
         )
+        if sustained_lift:
+            min_move = min(
+                min_move,
+                float(
+                    getattr(settings, "ict_armed_sustained_lift_min_move_pct", 8.0)
+                    or 8.0
+                ),
+            )
+            max_move = max(
+                max_move,
+                float(
+                    getattr(settings, "ict_armed_sustained_lift_max_move_pct", 25.0)
+                    or 25.0
+                ),
+            )
     else:
         min_move = float(
             getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0
@@ -1101,8 +1116,21 @@ def analyze_ict_breakout(
     if not flat_then_vertical:
         fv_quality, fv_grade = 0.0, ""
     elif sustained_armed_lift:
-        fv_quality = max(fv_quality, 65.0)
+        # Sustained armed lift is early FTV — floor quality so WINNER (≥70) can
+        # authorize inside the pad before grade lags to A (still score-gated).
+        fv_quality = max(fv_quality, 70.0)
         fv_grade = "B" if fv_grade not in ("A+", "A") else fv_grade
+    elif (
+        early_break
+        and tier in ("EXPLODING", "ELITE")
+        and 5.0 <= base_rel_move <= 25.0
+        and (vol_awaken or displacement)
+    ):
+        # Early FTV heat in catch window — quality often prints B mid-60s while
+        # the rip is still near base; floor to WINNER bar without lowering score.
+        fv_quality = max(fv_quality, 70.0)
+        if fv_grade not in ("A+", "A"):
+            fv_grade = "B"
     mega_floor = float(getattr(settings, "ict_mega_rip_min_session_move_pct", 200.0) or 200.0)
     try:
         max_credible = float(getattr(settings, "session_move_max_credible_pct", 500.0))
