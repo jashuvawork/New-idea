@@ -210,6 +210,11 @@ class Settings(BaseSettings):
     winner_local_base_min_local_base_move_pct: float = 5.0
     winner_local_base_max_local_base_move_pct: float = 25.0
     winner_local_base_max_capital_pct: float = 0.35
+    # Early FTV in the 5–25% pad with heat counts as a fresh causal trigger for
+    # WINNER / TOP_FTV_A even when armed (≤15%) has expired and first-lift (≥15%)
+    # has not flipped yet — closes the radar-sees-it / auth-says-chase lag.
+    # Floors stay ≥75/70 so Aug18 mid EXPLODING (~71/B) stays blocked.
+    winner_local_base_early_ftv_fresh_enabled: bool = True
     # On WORST / EXPIRY WORST days, WINNER sleeve also needs real option CVD buying
     # (volume-surge alone is too soft for chop).
     winner_local_base_require_cvd_on_worst: bool = True
@@ -430,7 +435,8 @@ class Settings(BaseSettings):
     # Conservative pre-first-lift launch. Absolute chain volume (or explicit CVD/
     # orderflow proof) replaces the lagging 2x REST surge requirement.
     ict_armed_base_launch_min_move_pct: float = 5.0
-    ict_armed_base_launch_max_move_pct: float = 12.0
+    # Overlap first-lift floor (15%) so 12–15% early FTV is not a dead auth zone.
+    ict_armed_base_launch_max_move_pct: float = 15.0
     # Top-only at local base — mid EXPLODING armed spikes stay watch-only.
     # Floors stay above Aug18 mid losers but admit prior ELITE/EXPLODING winners.
     ict_armed_base_launch_min_velocity_3s: float = 2.0

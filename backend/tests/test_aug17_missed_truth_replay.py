@@ -36,7 +36,7 @@ def _ready_sustained_lift_alert(**overrides):
         "ictArmedBaseSamples": 6,
         "ictArmedBaseSpanSeconds": 15.0,
         "flatVerticalQuality": 70.0,
-        "explosionScore": 50.0,
+        "explosionScore": 70.0,
         "velocity3s": 0.0,
         "velocity9s": 0.0,
         "volume": 30_000.0,

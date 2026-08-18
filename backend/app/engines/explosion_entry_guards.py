@@ -153,6 +153,10 @@ def trustworthy_local_base_move(ict: Any) -> float:
     base = float(getattr(ict, "base_relative_move_pct", 0) or 0)
     if base <= 0:
         return 0.0
+    # Armed local base is the causal denominator — trust pad even below the
+    # generic 8% noise floor so elite/armed launches at 2–7% are not treated as 0.
+    if bool(getattr(ict, "base_armed", False)):
+        return base
     trust_min = float(
         getattr(settings, "explosion_local_base_trust_min_move_pct", 8.0) or 8.0
     )
@@ -288,8 +292,24 @@ def entry_window_bounds(
             getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
         )
         hi = float(
-            getattr(settings, "ict_armed_base_launch_max_move_pct", 12.0) or 12.0
+            getattr(settings, "ict_armed_base_launch_max_move_pct", 15.0) or 15.0
         )
+        # Sustained armed lift is the sparse-feed early FTV path through 25%.
+        if getattr(ict, "armed_base_sustained_lift", False) is True:
+            lo = min(
+                lo,
+                float(
+                    getattr(settings, "ict_armed_sustained_lift_min_move_pct", 8.0)
+                    or 8.0
+                ),
+            )
+            hi = max(
+                hi,
+                float(
+                    getattr(settings, "ict_armed_sustained_lift_max_move_pct", 25.0)
+                    or 25.0
+                ),
+            )
     return lo, hi
 
 

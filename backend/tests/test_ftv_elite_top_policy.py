@@ -326,14 +326,32 @@ def test_missing_cvd_still_admits_winner_local_base_ordinary_sleeve(mutation):
 
 
 def test_bare_raw_elite_and_non_ftv_are_blocked():
+    # No FTV structure and no armed/elite/first-lift → not auth-grade FTV.
     bare = _reconstructed_ftv_a(
-        firstLift=False, armedBaseLaunch=False, eliteBaseReady=False
+        firstLift=False,
+        armedBaseLaunch=False,
+        eliteBaseReady=False,
+        flatThenVertical=False,
+        activeBreakout=False,
     )
     non_ftv = _reconstructed_ftv_a(
         flatThenVertical=False, activeBreakout=False
     )
-    assert _decision(bare).reason == "top_ftv_a_requires_fresh_causal_trigger"
+    assert _decision(bare).reason == "ftv_elite_top_only_requires_ftv"
     assert _decision(non_ftv).reason == "ftv_elite_top_only_requires_ftv"
+
+
+def test_early_ftv_without_flag_triggers_is_now_fresh():
+    """FTV+heat in pad is fresh even when armed/first-lift flags are off."""
+    early = _reconstructed_ftv_a(
+        firstLift=False,
+        armedBaseLaunch=False,
+        eliteBaseReady=False,
+        localBaseMovePct=13.5,
+    )
+    decision = _decision(early, rank=1, require_rank=True)
+    assert decision.allowed is True
+    assert decision.mode in {"TOP_FTV_A", "WINNER_LOCAL_BASE", "S_STRICT"}
 
 
 def test_fallback_blocks_rank_two_and_more_than_40pct_extension():

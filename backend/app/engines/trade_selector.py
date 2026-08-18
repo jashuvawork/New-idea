@@ -1577,6 +1577,17 @@ def find_best_entry(
                     first_lift
                     or alert.get("ictArmedBaseLaunch")
                     or alert.get("ictEliteBaseReady")
+                    or alert.get("ictArmedBaseSustainedLift")
+                    or (
+                        bool(getattr(settings, "winner_local_base_early_ftv_fresh_enabled", True))
+                        and alert.get("ictFlatThenVertical")
+                        and alert.get("ictBreakout")
+                        and (
+                            alert.get("ictVolumeAwakening")
+                            or alert.get("volumeAwaken")
+                            or alert.get("ictDisplacement")
+                        )
+                    )
                 )
             ):
                 bonus += float(
