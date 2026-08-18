@@ -1280,7 +1280,27 @@ def find_best_entry(
             c.pretrade_meta = {**(c.pretrade_meta or {}), "edgeScore": edge.total}
         exhausted = False
         if c.mode == "explosion":
-            from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
+            from app.engines.session_mode_feedback import (
+                exhausted_ftv_reentry_blocked,
+                failed_launch_reentry_blocked,
+            )
+
+            fail_blocked, _ = failed_launch_reentry_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+                strike=float(c.strike or 0),
+            )
+            if fail_blocked:
+                c.pretrade_meta = {
+                    **(c.pretrade_meta or {}),
+                    "failedLaunchReentryBlocked": True,
+                    "causalRanking": {
+                        "grade": "REJECT",
+                        "reasons": ["failed_launch_reentry_cooldown"],
+                    },
+                }
+                continue
 
             exhausted, _ = exhausted_ftv_reentry_blocked(
                 state,

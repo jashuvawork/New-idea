@@ -1011,6 +1011,28 @@ def _premium_mom_flat(premium_chart: Any) -> bool:
     return flat_mom or direction == "NEUTRAL"
 
 
+def _worst_or_expiry_chop_day(snap: SymbolSnapshot, state: Any = None) -> bool:
+    """True only when the live session is labeled WORST / EXPIRY WORST.
+
+    Do not infer from RANGE_BOUND alone — that would hard-block valid Jul31-style
+    base-window EXPLODING entries on ordinary midday chop.
+    """
+    if state is None:
+        return False
+    for attr in ("dayMode", "day_mode", "dailyStrategy", "dayAdaptive"):
+        raw = getattr(state, attr, None)
+        if isinstance(raw, dict):
+            blob = " ".join(
+                str(raw.get(k) or "")
+                for k in ("dayMode", "dayType", "message", "mode")
+            ).upper()
+        else:
+            blob = str(raw or "").upper()
+        if "WORST" in blob or "EXPIRY WORST" in blob:
+            return True
+    return False
+
+
 def _post_small_win(state: Any) -> tuple[bool, dict[str, Any]]:
     """Last closed trade was a small green — size-up FOMO risk unless trail-proved."""
     settings = get_settings()
@@ -1201,6 +1223,19 @@ def detect_fake_explosion_trap(
         ):
             hard_block = True
             reason = "fake_explosion_trap_fomo_stack"
+        elif (
+            bool(getattr(settings, "fake_explosion_trap_block_worst_midday_chop", True))
+            and chop_regime
+            and midday
+            and elite_hot
+            and _worst_or_expiry_chop_day(snap, state)
+        ):
+            # Aug18 NIFTY 24250 PUT: armed-base EXPLODING on EXPIRY WORST + midday
+            # chop only soft-capped to 6 lots, then failed_launch. Previously these
+            # chop+elite stacks were stopped — restore hard block on worst/expiry.
+            hard_block = True
+            reason = "fake_explosion_trap_worst_midday_chop"
+            meta["worstMiddayChopBlock"] = True
         else:
             min_flags = int(
                 getattr(settings, "fake_explosion_trap_min_conflict_flags", 3) or 3

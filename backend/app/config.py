@@ -613,6 +613,8 @@ class Settings(BaseSettings):
     fake_explosion_trap_max_premium_mom_pct: float = 0.15
     fake_explosion_trap_block_on_conflict: bool = True
     fake_explosion_trap_min_conflict_flags: int = 3
+    # Aug18: EXPIRY WORST + midday chop + EXPLODING only soft-capped; restore hard block.
+    fake_explosion_trap_block_worst_midday_chop: bool = True
     fake_explosion_trap_chop_elite_lot_cap: int = 6
     fake_explosion_trap_otm_requires_or_breakout: bool = True
     fake_explosion_trap_post_win_lot_cap: int = 8
@@ -1556,6 +1558,9 @@ class Settings(BaseSettings):
     explosion_failed_launch_max_best_points: float = 1.0
     explosion_failed_launch_min_loss_points: float = 1.5
     explosion_failed_launch_max_velocity_3s: float = 0.0
+    # Same-strike cooldown after a failed launch (never-green chop spike).
+    explosion_failed_launch_reentry_block_enabled: bool = True
+    explosion_failed_launch_reentry_cooldown_seconds: int = 1800
     # 2) Hard INR ceilings: ~1% of ₹2L normally, ~2% only for a fully proven launch.
     explosion_per_trade_max_loss_inr: float = 2_000.0
     explosion_exceptional_per_trade_max_loss_inr: float = 4_000.0

@@ -505,7 +505,19 @@ async def _open_from_candidate(
             return False, "scalp_entries_disabled"
 
     if candidate.mode == "explosion":
-        from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
+        from app.engines.session_mode_feedback import (
+            exhausted_ftv_reentry_blocked,
+            failed_launch_reentry_blocked,
+        )
+
+        fail_blocked, _fail_meta = failed_launch_reentry_blocked(
+            state,
+            symbol=symbol,
+            side=candidate.side,
+            strike=float(candidate.strike or 0),
+        )
+        if fail_blocked:
+            return False, "failed_launch_reentry_cooldown"
 
         reentry_velocity = float(
             getattr(candidate.explosion_event, "velocity_3s", 0) or 0
