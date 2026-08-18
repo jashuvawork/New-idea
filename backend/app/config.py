@@ -1770,6 +1770,13 @@ class Settings(BaseSettings):
     ict_defensive_base_rip_max_move_pct: float = 55.0
     # Full lots only for top tiers on defensive rip (never BUILDING).
     ict_defensive_base_rip_full_lots_tiers_csv: str = "ELITE,EXPLODING"
+    # Aug18: EXPIRY WORST armed/defensive EXPLODING spikes failed — block unless
+    # a true ELITE high-quality base rip clears the raised bar.
+    ict_defensive_base_rip_block_expiry_worst: bool = True
+    ict_defensive_base_rip_expiry_worst_min_tier: str = "ELITE"
+    ict_defensive_base_rip_expiry_worst_min_quality: float = 85.0
+    ict_defensive_base_rip_expiry_worst_min_score: float = 90.0
+    ict_defensive_base_rip_expiry_worst_min_velocity_3s: float = 3.0
     # Max-profit trail — do not bank tiny TP on base→vertical ICT (25pt elite TP kills 12→392).
     ict_max_profit_skip_hard_target: bool = True
     ict_max_profit_target_points: float = 180.0

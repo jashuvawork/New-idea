@@ -81,6 +81,8 @@ def first_lift_entry_ready(
     event: Any = None,
     ict: Any = None,
     alert: Optional[dict[str, Any]] = None,
+    day_mode: str = "",
+    state: Any = None,
 ) -> bool:
     """Return whether a radar first lift has strict order-entry confirmation."""
     return first_lift_entry_readiness(
@@ -88,6 +90,8 @@ def first_lift_entry_ready(
         event=event,
         ict=ict,
         alert=alert,
+        day_mode=day_mode,
+        state=state,
     )[0]
 
 
@@ -97,6 +101,8 @@ def first_lift_entry_readiness(
     event: Any = None,
     ict: Any = None,
     alert: Optional[dict[str, Any]] = None,
+    day_mode: str = "",
+    state: Any = None,
 ) -> tuple[bool, str]:
     """Strict early-entry proof for a local-base first lift.
 
@@ -136,6 +142,47 @@ def first_lift_entry_readiness(
         not structured and not elite_base_ready
     ):
         return False, "first_lift_structure_not_confirmed"
+
+    # EXPIRY WORST: armed/first-lift must clear the same raised defensive bar.
+    if not day_mode and state is None:
+        try:
+            from app.engines.daily_18pct_strategy import get_session_limits
+
+            limits = get_session_limits()
+            day_mode = str(getattr(limits, "dayMode", "") or "") if limits else ""
+        except Exception:
+            day_mode = day_mode or ""
+    if _expiry_worst_session(day_mode=day_mode, state=state):
+        tier = str(
+            getattr(event, "tier", "")
+            or row.get("tier")
+            or ""
+        ).upper()
+        quality = float(
+            getattr(ict, "flat_vertical_quality", 0)
+            or row.get("flatVerticalQuality")
+            or 0
+        )
+        score = float(
+            getattr(event, "explosion_score", 0)
+            or row.get("explosionScore")
+            or row.get("score")
+            or 0
+        )
+        v3 = float(
+            getattr(event, "velocity_3s", 0)
+            or row.get("velocity3s")
+            or 0
+        )
+        ok, deny = _expiry_worst_defensive_rip_allowed(
+            tier=tier,
+            quality=quality,
+            score=score,
+            velocity_3s=v3,
+            settings=settings,
+        )
+        if not ok:
+            return False, deny
 
     base_move = float(
         getattr(ict, "base_relative_move_pct", 0)
@@ -1255,6 +1302,83 @@ def late_fade_chase_blocked(
     return False, ""
 
 
+def _expiry_worst_session(
+    *,
+    day_mode: str = "",
+    state: Any = None,
+    meta: Optional[dict[str, Any]] = None,
+) -> bool:
+    """True for EXPIRY WORST / expiry+worst day labels (Aug18 loss cluster)."""
+    blobs: list[str] = [str(day_mode or "")]
+    if isinstance(meta, dict):
+        for key in ("dayMode", "dayType", "mode", "message"):
+            blobs.append(str(meta.get(key) or ""))
+        day_adaptive = meta.get("dayAdaptive")
+        if isinstance(day_adaptive, dict):
+            blobs.append(str(day_adaptive.get("dayMode") or ""))
+            blobs.append(str(day_adaptive.get("dayType") or ""))
+    if state is not None:
+        for attr in ("dayMode", "day_mode", "dailyStrategy", "dayAdaptive"):
+            raw = getattr(state, attr, None)
+            if isinstance(raw, dict):
+                blobs.extend(
+                    str(raw.get(k) or "")
+                    for k in ("dayMode", "dayType", "message", "mode")
+                )
+                nested = raw.get("dayAdaptive")
+                if isinstance(nested, dict):
+                    blobs.append(str(nested.get("dayMode") or ""))
+                    blobs.append(str(nested.get("dayType") or ""))
+            else:
+                blobs.append(str(raw or ""))
+    joined = " ".join(blobs).upper()
+    if "EXPIRY WORST" in joined:
+        return True
+    # "EXPIRY DAY" + WORST dayType still counts (post-midday label drift).
+    if "EXPIRY" in joined and "WORST" in joined:
+        return True
+    return False
+
+
+def _expiry_worst_defensive_rip_allowed(
+    *,
+    tier: str,
+    quality: float,
+    score: float,
+    velocity_3s: float,
+    settings: Any,
+) -> tuple[bool, str]:
+    """Raised bar for defensive/armed base rips on EXPIRY WORST days."""
+    if not bool(getattr(settings, "ict_defensive_base_rip_block_expiry_worst", True)):
+        return True, "ok"
+    min_tier = str(
+        getattr(settings, "ict_defensive_base_rip_expiry_worst_min_tier", "ELITE")
+        or "ELITE"
+    ).upper()
+    tier_rank = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
+    if tier_rank.get(str(tier or "").upper(), 0) < tier_rank.get(min_tier, 4):
+        return False, f"expiry_worst_defensive_rip_tier_{str(tier or 'unknown').lower()}"
+    min_quality = float(
+        getattr(settings, "ict_defensive_base_rip_expiry_worst_min_quality", 85.0)
+        or 85.0
+    )
+    if float(quality or 0) < min_quality:
+        return False, f"expiry_worst_defensive_rip_quality<{min_quality:g}"
+    min_score = float(
+        getattr(settings, "ict_defensive_base_rip_expiry_worst_min_score", 90.0)
+        or 90.0
+    )
+    if float(score or 0) < min_score:
+        return False, f"expiry_worst_defensive_rip_score<{min_score:g}"
+    min_v3 = float(
+        getattr(settings, "ict_defensive_base_rip_expiry_worst_min_velocity_3s", 3.0)
+        or 3.0
+    )
+    if float(velocity_3s or 0) < min_v3:
+        return False, f"expiry_worst_defensive_rip_v3<{min_v3:g}"
+    return True, "ok"
+
+
 def good_day_ict_capture_active(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
@@ -1361,6 +1485,23 @@ def good_day_ict_capture_active(
                 else f"defensive_base_rip_tier_{tier_u.lower()}"
             )
             return False, meta
+        # Aug18: EXPIRY WORST defensive EXPLODING spikes (SENSEX 77400 PUT) — require
+        # ELITE + high quality/score/velocity or deny the capture path entirely.
+        if _expiry_worst_session(day_mode=day_mode, state=state, meta=meta):
+            score = float(getattr(event, "explosion_score", 0) or 0) if event else 0.0
+            v3 = float(getattr(event, "velocity_3s", 0) or 0) if event else float(ict.velocity_3s or 0)
+            quality = float(getattr(ict, "flat_vertical_quality", 0) or 0)
+            ok, deny = _expiry_worst_defensive_rip_allowed(
+                tier=tier_u,
+                quality=quality,
+                score=score,
+                velocity_3s=v3,
+                settings=settings,
+            )
+            if not ok:
+                meta["deniedReason"] = deny
+                meta["expiryWorstDefensiveRipBlocked"] = True
+                return False, meta
         max_move = float(getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0)
         # ELITE local-base gate uses pad % (not session/day %) — day% can be 50+
         # while LTP is still ~28% off the pad; those must still take.
