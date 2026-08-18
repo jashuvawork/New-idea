@@ -1,4 +1,4 @@
-"""Hard execution policy for causal S-grade flat-to-vertical launches."""
+"""Balanced causal policy for strict S and winner-like top FTV A."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from app.engines.auto_trader import _open_from_candidate
 from app.engines.capital_allocator import RankedAllocation
 from app.engines.pretrade_validator import validate_candidate
 from app.engines.trade_ranking import (
-    ftv_elite_top_policy,
+    ftv_authorization_policy,
     rank_trade_evidence,
 )
 from app.engines.trade_selector import EntryCandidate
@@ -44,122 +44,192 @@ def _s_evidence(**overrides):
         "flatThenVertical": True,
         "activeBreakout": True,
         "orderflowPositive": True,
+        "cvdBuying": True,
+        "cvdAcceleration": True,
+        "flatVerticalQuality": 90.0,
         "timingAssessment": "GOOD",
     }
     evidence.update(overrides)
     return evidence
 
 
-def _decision(evidence, *, ranking=None, atm_itm=True, rank=None, require_rank=False):
+def _decision(
+    evidence,
+    *,
+    ranking=None,
+    atm_itm=True,
+    rank=None,
+    require_rank=False,
+    fallback_enabled=True,
+):
     ranking = ranking or rank_trade_evidence(evidence)
-    return ftv_elite_top_policy(
+    return ftv_authorization_policy(
         ranking.get("evidence") or evidence,
         ranking,
         snapshot_available=True,
         atm_itm_allowed=atm_itm,
         allocation_rank=rank,
         require_allocation_rank_one=require_rank,
+        top_ftv_a_enabled=fallback_enabled,
     )
 
 
-AUG18_SIX_A_PATTERNS = [
-    ("NIFTY 24200 PE", 100.0, 1.20, 1.10, 18.0),
-    ("NIFTY 24250 PE", 96.0, 1.25, 1.20, 19.0),
-    ("NIFTY 24300 PE", 92.0, 1.30, 1.25, 20.0),
-    ("NIFTY 24200 CE", 94.0, 1.10, 1.05, 17.0),
-    ("NIFTY 24250 CE", 90.0, 1.35, 1.30, 21.0),
-    ("NIFTY 24300 CE", 88.0, 1.40, 1.35, 22.0),
-]
-
-
-@pytest.mark.parametrize(
-    ("name", "score", "v3", "v9", "base_move"),
-    AUG18_SIX_A_PATTERNS,
-)
-def test_aug18_six_a_grade_patterns_are_rejected(name, score, v3, v9, base_move):
+def _reconstructed_ftv_a(**overrides):
     evidence = _s_evidence(
-        explosionScore=score,
-        velocity3s=v3,
-        velocity9s=v9,
-        localBaseMovePct=base_move,
+        tier="EXPLODING",
+        explosionScore=96.0,
+        tqs=58.0,
+        velocity3s=3.11,
+        velocity9s=2.5,
+        localBaseMovePct=14.4,
+        firstLift=True,
+        armedBaseLaunch=False,
+        eliteBaseReady=False,
+        flatThenVertical=True,
+        activeBreakout=True,
+        flatVerticalQuality=82.0,
     )
+    evidence.update(overrides)
+    return evidence
+
+
+def test_strict_s_rank_one_authorization_and_full_sleeve_path_are_unchanged():
+    evidence = _s_evidence()
     ranking = rank_trade_evidence(evidence)
-
-    assert ranking["grade"] == "A", name
-    assert _decision(evidence, ranking=ranking) == (
-        False,
-        "ftv_elite_top_only_requires_s",
-    )
-
-
-def test_raw_elite_score_100_without_s_ranking_is_rejected():
-    evidence = _s_evidence(tier="ELITE", velocity3s=1.2, velocity9s=1.2)
-    ranking = rank_trade_evidence(evidence)
-
-    assert evidence["explosionScore"] == 100.0
-    assert ranking["signalTier"] == "ELITE"
-    assert ranking["grade"] == "A"
-    assert _decision(evidence, ranking=ranking)[1] == "ftv_elite_top_only_requires_s"
-
-
-@pytest.mark.parametrize("side", ["CALL", "PUT"])
-def test_24350_style_s_armed_ftv_is_symmetric_and_requires_rank_one(side):
-    evidence = _s_evidence(side=side)
-    ranking = rank_trade_evidence(evidence)
-
     assert ranking["grade"] == "S"
     assert ranking["topRankEligible"] is True
-    assert _decision(
+    assert ranking["fullSleeveEligible"] is True
+    decision = _decision(
         evidence,
         ranking=ranking,
         rank=1,
         require_rank=True,
-    ) == (True, "ok")
-    assert _decision(
-        evidence,
-        ranking=ranking,
-        rank=2,
-        require_rank=True,
-    )[1] == "ftv_elite_top_only_requires_allocation_rank_1"
-
-
-def test_s_without_actual_ftv_is_rejected():
-    evidence = _s_evidence(
-        armedBaseLaunch=False,
-        eliteBaseReady=False,
-        flatThenVertical=False,
-        activeBreakout=False,
     )
-    ranking = {"grade": "S", "topRankEligible": True}
+    assert (decision.mode, decision.reason) == ("S_STRICT", "ok")
+    assert decision.max_capital_pct is None
 
-    assert _decision(evidence, ranking=ranking)[1] == "ftv_elite_top_only_requires_ftv"
 
-
-def test_a_grade_ftv_and_otm_are_rejected():
-    a_evidence = _s_evidence(velocity3s=1.2, velocity9s=1.2)
-    assert _decision(a_evidence)[1] == "ftv_elite_top_only_requires_s"
-    assert _decision(_s_evidence(), atm_itm=False)[1] == (
-        "ftv_elite_top_only_requires_atm_itm"
+def test_reconstructed_aug6_winner_like_top_exploding_a_passes_ordinary_fallback():
+    # Reconstructed current-data profile: historical rows do not prove v9/CVD.
+    evidence = _reconstructed_ftv_a()
+    ranking = rank_trade_evidence(evidence)
+    decision = _decision(
+        evidence, ranking=ranking, rank=1, require_rank=True
     )
+    assert ranking["grade"] == "A"
+    assert ranking["fullSleeveEligible"] is False
+    assert decision.mode == "TOP_FTV_A"
+    assert decision.max_capital_pct == pytest.approx(0.35)
+    assert decision.exceptional_extension is False
+
+
+def test_reconstructed_aug12_extended_elite_a_requires_extreme_acceleration():
+    # Reconstructed current-data profile: v9/CVD are assumptions, not counterfactual proof.
+    base = _reconstructed_ftv_a(
+        tier="ELITE",
+        localBaseMovePct=33.1,
+        explosionScore=98.0,
+        flatVerticalQuality=92.0,
+        tqs=62.0,
+    )
+    weak = _decision({**base, "velocity3s": 4.9, "velocity9s": 2.5})
+    strong = _decision({**base, "velocity3s": 33.06, "velocity9s": 3.0})
+    assert weak.reason == "top_ftv_a_extended_requires_exceptional_acceleration"
+    assert strong.mode == "TOP_FTV_A"
+    assert strong.max_capital_pct == pytest.approx(0.35)
+    assert strong.exceptional_extension is True
+
+
+AUG18_SIX_A_PATTERNS = [
+    (
+        "SENSEX77600 A84 armed",
+        dict(localBaseMovePct=11.5, velocity3s=0.81, velocity9s=2.03,
+             firstLift=False, armedBaseLaunch=True),
+    ),
+    (
+        "NIFTY24250 A100 no armed base",
+        dict(localBaseMovePct=32.7, velocity3s=1.98, velocity9s=0.59,
+             firstLift=False, armedBaseLaunch=False),
+    ),
+    (
+        "NIFTY24200 A100 armed",
+        dict(localBaseMovePct=9.6, velocity3s=2.15, velocity9s=1.36,
+             firstLift=False, armedBaseLaunch=True),
+    ),
+    (
+        "SENSEX77400 A98 first lift",
+        dict(localBaseMovePct=28.7, velocity3s=1.45, velocity9s=2.09),
+    ),
+    (
+        "NIFTY24200 reentry A100",
+        dict(localBaseMovePct=28.7, velocity3s=0.75, exhaustedReentry=True),
+    ),
+    (
+        "NIFTY24200 A98.8 bare FTV",
+        dict(localBaseMovePct=2.1, velocity3s=2.32, velocity9s=2.5,
+             firstLift=False, armedBaseLaunch=False, eliteBaseReady=False),
+    ),
+]
+
+
+@pytest.mark.parametrize(("name", "overrides"), AUG18_SIX_A_PATTERNS)
+def test_all_six_supplied_aug18_loss_profiles_remain_blocked(name, overrides):
+    decision = _decision(_reconstructed_ftv_a(**overrides))
+    assert decision.allowed is False, name
+
+
+@pytest.mark.parametrize("side", ["CALL", "PUT"])
+def test_top_ftv_a_is_ce_pe_symmetric(side):
+    decision = _decision(
+        _reconstructed_ftv_a(side=side), rank=1, require_rank=True
+    )
+    assert decision.mode == "TOP_FTV_A"
 
 
 @pytest.mark.parametrize(
-    "mutation",
+    ("mutation", "reason"),
     [
-        {"faded": True},
-        {"exhaustedReentry": True},
-        {"timingAssessment": "FAILED_LAUNCH", "timingAction": "block"},
-        {"velocity3s": -0.1},
-        {"velocity9s": -0.1},
+        ({"cvdBuying": False}, "top_ftv_a_requires_option_cvd_buying"),
+        ({"cvdAcceleration": False}, "top_ftv_a_requires_option_cvd_acceleration"),
+        ({"timingAssessment": "CHASE"}, "top_ftv_a_timing_blocked"),
+        ({"faded": True}, "ftv_elite_top_only_timing_blocked"),
     ],
 )
-def test_faded_exhausted_or_failed_launch_is_rejected(mutation):
-    evidence = _s_evidence(**mutation)
-    ranking = {"grade": "S", "topRankEligible": True}
+def test_fallback_requires_live_cvd_and_clean_timing(mutation, reason):
+    assert _decision(_reconstructed_ftv_a(**mutation)).reason == reason
 
-    assert _decision(evidence, ranking=ranking)[1] == (
-        "ftv_elite_top_only_timing_blocked"
+
+def test_bare_raw_elite_and_non_ftv_are_blocked():
+    bare = _reconstructed_ftv_a(
+        firstLift=False, armedBaseLaunch=False, eliteBaseReady=False
     )
+    non_ftv = _reconstructed_ftv_a(
+        flatThenVertical=False, activeBreakout=False
+    )
+    assert _decision(bare).reason == "top_ftv_a_requires_fresh_causal_trigger"
+    assert _decision(non_ftv).reason == "ftv_elite_top_only_requires_ftv"
+
+
+def test_fallback_blocks_rank_two_and_more_than_40pct_extension():
+    rank_two = _decision(
+        _reconstructed_ftv_a(), rank=2, require_rank=True
+    )
+    too_extended = _decision(
+        _reconstructed_ftv_a(
+            localBaseMovePct=40.1,
+            velocity3s=8.0,
+            velocity9s=4.0,
+            flatVerticalQuality=95.0,
+        )
+    )
+    assert rank_two.reason == "top_ftv_a_requires_allocation_rank_1"
+    assert too_extended.reason == "top_ftv_a_extension_above_40pct"
+
+
+def test_disabling_fallback_restores_strict_s_only():
+    decision = _decision(_reconstructed_ftv_a(), fallback_enabled=False)
+    assert decision.mode is None
+    assert decision.reason == "ftv_elite_top_only_requires_s"
 
 
 def _snapshot(side: Side = Side.PUT) -> SymbolSnapshot:
@@ -222,7 +292,10 @@ def test_pretrade_policy_is_default_enabled_and_disable_restores_legacy():
     candidate.explosion_event.velocity_9s = 1.2
     candidate.alert["velocity9s"] = 1.2
 
-    enabled = Settings(controlled_trading_enabled=False)
+    enabled = Settings(
+        controlled_trading_enabled=False,
+        top_ftv_a_enabled=False,
+    )
     disabled = Settings(
         controlled_trading_enabled=False,
         ftv_elite_top_only_enabled=False,
@@ -235,6 +308,61 @@ def test_pretrade_policy_is_default_enabled_and_disable_restores_legacy():
 
     with patch("app.engines.pretrade_validator.get_settings", return_value=disabled):
         assert validate_candidate(candidate, AutoTraderState()) == (True, "ok", {})
+
+
+def test_missing_live_cvd_is_blocked_on_preorder_execution_recompute():
+    candidate = _candidate()
+    candidate.tqs = 58.0
+    candidate.explosion_event.explosion_score = 96.0
+    candidate.explosion_event.velocity_3s = 3.11
+    candidate.explosion_event.velocity_9s = 2.5
+    candidate.alert.update(
+        {
+            "ictBaseRelativeMovePct": 14.4,
+            "ictArmedBaseLaunch": False,
+            "ictFirstLift": True,
+            "flatVerticalQuality": 82.0,
+        }
+    )
+    allocation = RankedAllocation(
+        rank=1,
+        budgetInr=25_000,
+        remainingBeforeInr=100_000,
+        cashReserveInr=0,
+        capitalBaseInr=100_000,
+        committedInr=0,
+        weight=0.25,
+    )
+    settings = Settings(controlled_trading_enabled=False)
+    with (
+        patch("app.engines.auto_trader.get_settings", return_value=settings),
+        patch(
+            "app.engines.session_mode_feedback.exhausted_ftv_reentry_blocked",
+            return_value=(False, "ok"),
+        ),
+        patch(
+            "app.engines.explosion_entry_guards.detect_faded_vertical_rip",
+            return_value=(False, {}),
+        ),
+        patch(
+            "app.engines.advanced_indicators.option_cvd_confirms_buying",
+            return_value=False,
+        ),
+        patch(
+            "app.engines.advanced_indicators.option_cvd_acceleration_confirms_buying",
+            return_value=True,
+        ),
+    ):
+        opened, reason = asyncio.run(
+            _open_from_candidate(
+                candidate,
+                AutoTraderState(),
+                snapshots={"NIFTY": candidate.snap},
+                allocation=allocation,
+            )
+        )
+    assert opened is False
+    assert reason == "top_ftv_a_requires_option_cvd_buying"
 
 
 def test_allocation_rank_two_is_rejected_before_order_path():

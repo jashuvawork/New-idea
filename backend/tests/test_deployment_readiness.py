@@ -86,8 +86,24 @@ def test_readiness_uses_cached_snapshot_and_shared_risk_engine():
     assert payload["health"]["api"] == "ok"
     assert payload["tradingPolicy"] == {
         "ftvEliteTopOnlyEnabled": True,
-        "requiredCausalGrade": "S",
-        "requiresTopRankEligible": True,
+        "topFtvAFallbackEnabled": True,
+        "allowedAuthorizationModes": ["S_STRICT", "TOP_FTV_A"],
+        "allowedCausalGrades": ["S", "A"],
+        "strictS": {
+            "requiresTopRankEligible": True,
+            "fullSleeveEligible": True,
+            "maxCapitalPct": 0.9,
+        },
+        "topFtvA": {
+            "tiers": ["ELITE", "EXPLODING"],
+            "requiresFreshCausalTrigger": True,
+            "requiresOptionCvdBuying": True,
+            "requiresOptionCvdAcceleration": True,
+            "normalMaxMovePct": 25.0,
+            "exceptionalMaxMovePct": 40.0,
+            "maxCapitalPct": 0.35,
+            "fullSleeveEligible": False,
+        },
         "requiresAtmItm": True,
         "requiredAllocationRank": 1,
     }

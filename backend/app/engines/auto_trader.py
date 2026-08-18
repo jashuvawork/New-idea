@@ -494,6 +494,7 @@ async def _open_from_candidate(
     settings = get_settings()
     symbol = candidate.symbol
     snap = candidate.snap
+    policy_decision = None
 
     # Jul29: stop scalp entries — explosions only.
     if not getattr(settings, "scalp_entries_enabled", False):
@@ -523,7 +524,8 @@ async def _open_from_candidate(
     if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.trade_ranking import (
-            ftv_elite_top_policy,
+            ftv_authorization_policy,
+            ftv_policy_settings,
             rank_entry_candidate,
         )
 
@@ -541,22 +543,25 @@ async def _open_from_candidate(
             )
         # Recompute from current candidate evidence. Selector metadata is audit-only
         # and must never serve as an execution authorization token.
-        policy_ranking = rank_entry_candidate(candidate, faded=policy_faded)
+        policy_ranking = rank_entry_candidate(
+            candidate, faded=policy_faded, snapshot=policy_snap
+        )
         money_ok, _, _ = atm_itm_entry_allows(
             candidate.side,
             candidate.strike,
             policy_snap,
         )
-        policy_ok, policy_reason = ftv_elite_top_policy(
+        policy_decision = ftv_authorization_policy(
             policy_ranking.get("evidence") or {},
             policy_ranking,
             snapshot_available=True,
             atm_itm_allowed=money_ok,
             allocation_rank=allocation.rank if allocation is not None else None,
             require_allocation_rank_one=True,
+            **ftv_policy_settings(settings),
         )
-        if not policy_ok:
-            return False, policy_reason
+        if not policy_decision.allowed:
+            return False, policy_decision.reason
 
     from app.engines.worst_day_guard import worst_day_blocks_live
 
@@ -991,6 +996,8 @@ async def _open_from_candidate(
         allocation=allocation,
         early_base_entry_ready=early_base_entry_ready,
     )
+    if policy_decision is not None and policy_decision.mode != "S_STRICT":
+        exceptional_full_sleeve = False
     force_max_size = exceptional_full_sleeve
 
     lots = clamp_lots(lots, symbol, fill_premium)
@@ -1004,6 +1011,12 @@ async def _open_from_candidate(
         ordinary_pct = float(
             getattr(settings, "ordinary_entry_max_capital_pct", 0.35) or 0.35
         )
+        if (
+            policy_decision is not None
+            and policy_decision.mode == "TOP_FTV_A"
+            and policy_decision.max_capital_pct is not None
+        ):
+            ordinary_pct = min(ordinary_pct, policy_decision.max_capital_pct)
         lots = min(
             lots,
             max_lots_for_capital_pct(symbol, fill_premium, ordinary_pct),
@@ -1348,6 +1361,17 @@ async def _open_from_candidate(
         "topExplosionMaxLots": bool(top_explosion_max),
         "topRankFullBudgetLots": top_rank_full_budget_lots,
         "fullSleeveQualified": exceptional_full_sleeve,
+        "ftvAuthorizationMode": (
+            policy_decision.mode if policy_decision is not None else None
+        ),
+        "ftvAuthorizationReason": (
+            policy_decision.reason if policy_decision is not None else None
+        ),
+        "ftvMaxCapitalPct": (
+            policy_decision.max_capital_pct
+            if policy_decision is not None
+            else None
+        ),
         "entryRiskCapInr": (
             float(
                 getattr(
@@ -1616,6 +1640,49 @@ async def _open_from_candidate(
     if not hard_mn_ok:
         return False, hard_mn_reason
     ctx_extra.update(hard_mn_meta)
+
+    if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+        from app.engines.trade_ranking import (
+            ftv_authorization_policy,
+            ftv_policy_settings,
+            rank_entry_candidate,
+        )
+
+        latest_policy_snap = (
+            (snapshots or {}).get(str(symbol).upper())
+            or snap
+        )
+        final_faded = False
+        if candidate.mode == "explosion" and candidate.explosion_event is not None:
+            from app.engines.explosion_entry_guards import detect_faded_vertical_rip
+
+            final_faded, _ = detect_faded_vertical_rip(
+                candidate.explosion_event, latest_policy_snap
+            )
+        final_ranking = rank_entry_candidate(
+            candidate,
+            faded=final_faded,
+            snapshot=latest_policy_snap,
+        )
+        final_money_ok, _, _ = atm_itm_entry_allows(
+            candidate.side,
+            candidate.strike,
+            latest_policy_snap,
+        )
+        final_policy = ftv_authorization_policy(
+            final_ranking.get("evidence") or {},
+            final_ranking,
+            snapshot_available=True,
+            atm_itm_allowed=final_money_ok,
+            allocation_rank=allocation.rank if allocation is not None else None,
+            require_allocation_rank_one=True,
+            **ftv_policy_settings(settings),
+        )
+        if not final_policy.allowed:
+            return False, final_policy.reason
+        # Audit the actual authorization used at the order boundary.
+        ctx_extra["ftvAuthorizationMode"] = final_policy.mode
+        ctx_extra["ftvAuthorizationReason"] = final_policy.reason
 
     if is_live or use_parity:
         if not client:

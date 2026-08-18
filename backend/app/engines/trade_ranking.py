@@ -2,10 +2,25 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 
 GRADE_PRIORITY = {"REJECT": 0, "C": 1, "B": 2, "A": 3, "S": 4}
+
+
+@dataclass(frozen=True)
+class FtvAuthorization:
+    """Causal entry authorization plus its maximum sizing sleeve."""
+
+    mode: str | None
+    reason: str
+    max_capital_pct: float | None = None
+    exceptional_extension: bool = False
+
+    @property
+    def allowed(self) -> bool:
+        return self.mode is not None
 
 
 def _number(value: Any) -> float:
@@ -23,7 +38,7 @@ def ranking_sort_key(ranking: Mapping[str, Any]) -> tuple[int, float]:
     )
 
 
-def ftv_elite_top_policy(
+def ftv_authorization_policy(
     evidence: Mapping[str, Any],
     ranking: Mapping[str, Any],
     *,
@@ -31,10 +46,25 @@ def ftv_elite_top_policy(
     atm_itm_allowed: bool = True,
     allocation_rank: int | None = None,
     require_allocation_rank_one: bool = False,
-) -> tuple[bool, str]:
-    """Pure causal authorization for the hard FTV elite-top execution policy."""
+    top_ftv_a_enabled: bool = True,
+    top_ftv_a_min_explosion_score: float = 90.0,
+    top_ftv_a_min_quality: float = 70.0,
+    top_ftv_a_min_tqs: float = 50.0,
+    top_ftv_a_min_velocity_3s: float = 2.5,
+    top_ftv_a_min_velocity_9s: float = 1.75,
+    top_ftv_a_normal_max_move_pct: float = 25.0,
+    top_ftv_a_max_capital_pct: float = 0.35,
+    top_ftv_a_exceptional_min_explosion_score: float = 95.0,
+    top_ftv_a_exceptional_min_quality: float = 85.0,
+    top_ftv_a_exceptional_min_tqs: float = 55.0,
+    top_ftv_a_exceptional_min_velocity_3s: float = 5.0,
+    top_ftv_a_exceptional_min_velocity_9s: float = 2.5,
+    top_ftv_a_exceptional_max_move_pct: float = 40.0,
+) -> FtvAuthorization:
+    """Pure causal authorization for strict S and winner-like top FTV A."""
+    blocked = lambda reason: FtvAuthorization(None, reason)
     if str(evidence.get("mode") or "").lower() != "explosion":
-        return False, "ftv_elite_top_only_requires_explosion"
+        return blocked("ftv_elite_top_only_requires_explosion")
 
     actual_ftv = bool(
         (
@@ -45,7 +75,7 @@ def ftv_elite_top_policy(
         or evidence.get("armedBaseLaunch")
     )
     if not actual_ftv:
-        return False, "ftv_elite_top_only_requires_ftv"
+        return blocked("ftv_elite_top_only_requires_ftv")
 
     timing = str(evidence.get("timingAssessment") or "").upper()
     timing_action = str(evidence.get("timingAction") or "").lower()
@@ -66,17 +96,98 @@ def ftv_elite_top_policy(
             "BLOCKED",
         }
     ):
-        return False, "ftv_elite_top_only_timing_blocked"
-
-    if str(ranking.get("grade") or "").upper() != "S":
-        return False, "ftv_elite_top_only_requires_s"
-    if not bool(ranking.get("topRankEligible")):
-        return False, "ftv_elite_top_only_requires_top_rank_eligible"
+        return blocked("ftv_elite_top_only_timing_blocked")
     if snapshot_available and not atm_itm_allowed:
-        return False, "ftv_elite_top_only_requires_atm_itm"
+        return blocked("ftv_elite_top_only_requires_atm_itm")
+
+    grade = str(ranking.get("grade") or "").upper()
+    if grade == "S":
+        if not bool(ranking.get("topRankEligible")):
+            return blocked("ftv_elite_top_only_requires_top_rank_eligible")
+        if require_allocation_rank_one and allocation_rank != 1:
+            return blocked("ftv_elite_top_only_requires_allocation_rank_1")
+        return FtvAuthorization("S_STRICT", "ok")
+
+    if not top_ftv_a_enabled:
+        return blocked("ftv_elite_top_only_requires_s")
+    move = _number(evidence.get("localBaseMovePct"))
+    if move > top_ftv_a_exceptional_max_move_pct:
+        return blocked("top_ftv_a_extension_above_40pct")
+    if grade != "A":
+        return blocked("top_ftv_a_requires_a_grade")
+
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in {"ELITE", "EXPLODING"}:
+        return blocked("top_ftv_a_requires_elite_or_exploding")
+    if not bool(evidence.get("flatThenVertical") and evidence.get("activeBreakout")):
+        return blocked("top_ftv_a_requires_active_ftv")
+    if not bool(
+        evidence.get("firstLift")
+        or evidence.get("armedBaseLaunch")
+        or evidence.get("eliteBaseReady")
+    ):
+        return blocked("top_ftv_a_requires_fresh_causal_trigger")
+    timing_blocked = timing in {"CHASE", "CHASING", "LATE", "FAILED_LAUNCH"}
+    if timing_blocked:
+        return blocked("top_ftv_a_timing_blocked")
+    if not bool(evidence.get("cvdBuying")):
+        return blocked("top_ftv_a_requires_option_cvd_buying")
+    if not bool(evidence.get("cvdAcceleration")):
+        return blocked("top_ftv_a_requires_option_cvd_acceleration")
+
+    explosion_score = _number(evidence.get("explosionScore"))
+    quality = _number(evidence.get("flatVerticalQuality"))
+    tqs = _number(evidence.get("tqs"))
+    v3 = _number(evidence.get("velocity3s"))
+    v9 = _number(evidence.get("velocity9s"))
+    if explosion_score < top_ftv_a_min_explosion_score:
+        return blocked("top_ftv_a_explosion_score_below_floor")
+    if quality < top_ftv_a_min_quality:
+        return blocked("top_ftv_a_quality_below_floor")
+    if tqs < top_ftv_a_min_tqs:
+        return blocked("top_ftv_a_tqs_below_floor")
+    if v3 < top_ftv_a_min_velocity_3s:
+        return blocked("top_ftv_a_velocity_3s_below_floor")
+    if v9 < top_ftv_a_min_velocity_9s:
+        return blocked("top_ftv_a_velocity_9s_below_floor")
+    exceptional = move > top_ftv_a_normal_max_move_pct
+    if exceptional and not (
+        explosion_score >= top_ftv_a_exceptional_min_explosion_score
+        and quality >= top_ftv_a_exceptional_min_quality
+        and tqs >= top_ftv_a_exceptional_min_tqs
+        and v3 >= top_ftv_a_exceptional_min_velocity_3s
+        and v9 >= top_ftv_a_exceptional_min_velocity_9s
+    ):
+        return blocked("top_ftv_a_extended_requires_exceptional_acceleration")
     if require_allocation_rank_one and allocation_rank != 1:
-        return False, "ftv_elite_top_only_requires_allocation_rank_1"
-    return True, "ok"
+        return blocked("top_ftv_a_requires_allocation_rank_1")
+    return FtvAuthorization(
+        "TOP_FTV_A",
+        "ok_exceptional_extension" if exceptional else "ok",
+        max_capital_pct=top_ftv_a_max_capital_pct,
+        exceptional_extension=exceptional,
+    )
+
+
+def ftv_policy_settings(settings: Any) -> dict[str, Any]:
+    """Adapt Settings to pure-policy keyword arguments."""
+    names = (
+        "top_ftv_a_enabled",
+        "top_ftv_a_min_explosion_score",
+        "top_ftv_a_min_quality",
+        "top_ftv_a_min_tqs",
+        "top_ftv_a_min_velocity_3s",
+        "top_ftv_a_min_velocity_9s",
+        "top_ftv_a_normal_max_move_pct",
+        "top_ftv_a_max_capital_pct",
+        "top_ftv_a_exceptional_min_explosion_score",
+        "top_ftv_a_exceptional_min_quality",
+        "top_ftv_a_exceptional_min_tqs",
+        "top_ftv_a_exceptional_min_velocity_3s",
+        "top_ftv_a_exceptional_min_velocity_9s",
+        "top_ftv_a_exceptional_max_move_pct",
+    )
+    return {name: getattr(settings, name) for name in names}
 
 
 def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
@@ -95,6 +206,11 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     flat_vertical = bool(evidence.get("flatThenVertical"))
     active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
+    cvd_buying = bool(evidence.get("cvdBuying"))
+    cvd_acceleration = bool(evidence.get("cvdAcceleration"))
+    flat_vertical_quality = max(
+        0.0, min(100.0, _number(evidence.get("flatVerticalQuality")))
+    )
     exhausted = bool(evidence.get("exhaustedReentry"))
     faded = bool(evidence.get("faded"))
     timing = str(evidence.get("timingAssessment") or "").upper()
@@ -227,6 +343,11 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "flatThenVertical": flat_vertical,
             "activeBreakout": active_breakout,
             "orderflowPositive": orderflow,
+            "cvdBuying": cvd_buying,
+            "cvdAcceleration": cvd_acceleration,
+            "explosionScore": round(explosion_score, 2),
+            "flatVerticalQuality": round(flat_vertical_quality, 2),
+            "tqs": round(tqs, 2),
             "timingAssessment": timing or None,
             "timingAction": timing_action or None,
             "exhaustedReentry": exhausted,
@@ -240,11 +361,13 @@ def rank_entry_candidate(
     *,
     exhausted_reentry: bool = False,
     faded: bool = False,
+    snapshot: Any = None,
 ) -> dict[str, Any]:
     """Adapt a selector candidate to the pure causal scorecard."""
     alert = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
     event = getattr(candidate, "explosion_event", None)
     pretrade = getattr(candidate, "pretrade_meta", None) or {}
+    live_snapshot = snapshot or getattr(candidate, "snap", None)
     timing = pretrade.get("timingAssessment") or {}
     if not isinstance(timing, Mapping):
         timing = {"assessment": timing}
@@ -252,10 +375,26 @@ def rank_entry_candidate(
     try:
         from app.engines.chart_exit_levels import chart_trade_confidence
 
-        chart_confidence, _ = chart_trade_confidence(candidate.snap, candidate.side)
+        chart_confidence, _ = chart_trade_confidence(live_snapshot, candidate.side)
     except Exception:
         chart_confidence = 0.0
     volume_surge = _number(getattr(event, "volume_surge", 0) if event else 0)
+    cvd_buying = False
+    cvd_acceleration = False
+    try:
+        from app.engines.advanced_indicators import (
+            option_cvd_acceleration_confirms_buying,
+            option_cvd_confirms_buying,
+        )
+
+        cvd_buying = option_cvd_confirms_buying(
+            live_snapshot, candidate.strike, candidate.side
+        )
+        cvd_acceleration = option_cvd_acceleration_confirms_buying(
+            live_snapshot, candidate.strike, candidate.side
+        )
+    except Exception:
+        pass
     evidence = {
         "mode": getattr(candidate, "mode", "") or ("explosion" if event else ""),
         "tier": (
@@ -267,6 +406,11 @@ def rank_entry_candidate(
             getattr(event, "explosion_score", 0) if event else getattr(candidate, "confidence", 0)
         ),
         "tqs": getattr(candidate, "tqs", 0),
+        "flatVerticalQuality": (
+            alert.get("flatVerticalQuality")
+            or alert.get("ictFlatVerticalQuality")
+            or 0
+        ),
         "chartConfidence": chart_confidence,
         "velocity3s": getattr(event, "velocity_3s", 0) if event else alert.get("velocity3s"),
         "velocity9s": getattr(event, "velocity_9s", 0) if event else alert.get("velocity9s"),
@@ -287,6 +431,8 @@ def rank_entry_candidate(
             or alert.get("cvdAcceleration")
             or volume_surge >= 1.2
         ),
+        "cvdBuying": cvd_buying,
+        "cvdAcceleration": cvd_acceleration,
         "timingAssessment": timing.get("assessment"),
         "timingAction": timing.get("action"),
         "exhaustedReentry": exhausted_reentry,

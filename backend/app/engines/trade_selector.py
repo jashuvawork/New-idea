@@ -1293,7 +1293,8 @@ def find_best_entry(
                 ),
             )
         from app.engines.trade_ranking import (
-            ftv_elite_top_policy,
+            ftv_authorization_policy,
+            ftv_policy_settings,
             rank_entry_candidate,
         )
 
@@ -1304,12 +1305,20 @@ def find_best_entry(
             from app.engines.moneyness import atm_itm_entry_allows
 
             money_ok, _, _ = atm_itm_entry_allows(c.side, c.strike, c.snap)
-            policy_ok, policy_reason = ftv_elite_top_policy(
+            policy_decision = ftv_authorization_policy(
                 causal_ranking.get("evidence") or {},
                 causal_ranking,
                 snapshot_available=True,
                 atm_itm_allowed=money_ok,
+                **ftv_policy_settings(settings),
             )
+            policy_ok = policy_decision.allowed
+            policy_reason = policy_decision.reason
+            policy_mode = policy_decision.mode
+            policy_cap = policy_decision.max_capital_pct
+        else:
+            policy_mode = None
+            policy_cap = None
         c.pretrade_meta = {
             **(c.pretrade_meta or {}),
             "causalRanking": causal_ranking,
@@ -1319,6 +1328,8 @@ def find_best_entry(
                 ),
                 "passed": policy_ok,
                 "reason": policy_reason,
+                "authorizationMode": policy_mode,
+                "maxCapitalPct": policy_cap,
             },
         }
 
