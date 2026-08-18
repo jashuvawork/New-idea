@@ -94,16 +94,18 @@ def test_negative_velocity_extended_trade_cannot_beat_clean_fresh_launch():
         {
             "mode": "explosion",
             "tier": "ELITE",
-            "explosionScore": 82.0,
+            "explosionScore": 88.0,
             "tqs": 52.0,
             "chartConfidence": 74.0,
-            "velocity3s": 2.4,
+            "velocity3s": 2.6,
             "velocity9s": 2.0,
             "localBaseMovePct": 19.0,
             "firstLift": True,
             "armedBaseLaunch": True,
             "flatThenVertical": True,
             "orderflowPositive": True,
+            "cvdBuying": True,
+            "flatVerticalQuality": 80.0,
             "timingAssessment": "GOOD",
         }
     )
@@ -122,15 +124,17 @@ def test_causal_ranking_is_ce_pe_symmetric(side):
         "side": side,
         "mode": "explosion",
         "tier": "ELITE",
-        "explosionScore": 82.0,
+        "explosionScore": 88.0,
         "tqs": 52.0,
         "chartConfidence": 74.0,
-        "velocity3s": 2.4,
+        "velocity3s": 2.6,
         "velocity9s": 2.0,
         "localBaseMovePct": 19.0,
         "firstLift": True,
         "armedBaseLaunch": True,
         "orderflowPositive": True,
+        "cvdBuying": True,
+        "flatVerticalQuality": 80.0,
     }
     ranking = rank_trade_evidence(evidence)
     assert ranking["grade"] == "S"
@@ -166,6 +170,8 @@ def test_aug18_1040_cohort_prefers_24350_s_over_atm_a_candidates():
             "armedBaseLaunch": True,
             "flatThenVertical": True,
             "orderflowPositive": True,
+            "cvdBuying": True,
+            "flatVerticalQuality": 90.0,
         }
     )
     a_24200 = rank_trade_evidence(

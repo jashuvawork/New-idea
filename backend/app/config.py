@@ -189,6 +189,15 @@ class Settings(BaseSettings):
     # Master hard policy. Strict causal S and final-policy-authorized rank-1
     # TOP_FTV_A are the only full-sleeve paths.
     ftv_elite_top_only_enabled: bool = True
+    # S_STRICT = top ELITE/EXPLODING at local base only — mid armed prints must
+    # not auto-grade S from the +12 armed-launch boost alone (Aug18 mid EXPLODING).
+    ftv_s_strict_min_explosion_score: float = 85.0
+    ftv_s_strict_min_quality: float = 70.0
+    ftv_s_strict_min_velocity_3s: float = 2.5
+    ftv_s_strict_min_velocity_9s: float = 1.75
+    ftv_s_strict_require_cvd_buying: bool = True
+    ftv_s_strict_min_local_base_move_pct: float = 5.0
+    ftv_s_strict_max_local_base_move_pct: float = 25.0
     # Separate rank-1 authorization for winner-like ELITE/EXPLODING current-data FTV A.
     # Historical profiles are not treated as proof because old rows lack v9/CVD.
     top_ftv_a_enabled: bool = True
@@ -397,11 +406,12 @@ class Settings(BaseSettings):
     # orderflow proof) replaces the lagging 2x REST surge requirement.
     ict_armed_base_launch_min_move_pct: float = 5.0
     ict_armed_base_launch_max_move_pct: float = 12.0
-    ict_armed_base_launch_min_velocity_3s: float = 1.5
-    ict_armed_base_launch_min_velocity_9s: float = 1.5
+    # Top-only at local base — mid EXPLODING armed spikes stay watch-only.
+    ict_armed_base_launch_min_velocity_3s: float = 2.5
+    ict_armed_base_launch_min_velocity_9s: float = 1.75
     ict_armed_base_launch_min_absolute_volume: float = 25000.0
-    ict_armed_base_launch_min_quality: float = 60.0
-    ict_armed_base_launch_min_score: float = 45.0
+    ict_armed_base_launch_min_quality: float = 70.0
+    ict_armed_base_launch_min_score: float = 70.0
     ict_armed_base_launch_min_tqs: float = 50.0
     ict_armed_base_launch_rank_bonus: float = 16.0
     # Narrow pre-launch authorization: a stable ATM/ITM base may become executable
@@ -411,6 +421,8 @@ class Settings(BaseSettings):
     ict_elite_base_ready_max_move_pct: float = 5.0
     ict_elite_base_ready_min_velocity_3s: float = 1.5
     ict_elite_base_ready_min_velocity_9s: float = 1.5
+    ict_elite_base_ready_min_quality: float = 55.0
+    ict_elite_base_ready_min_score: float = 45.0
     # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
     # premium progress even when 3s/9s velocity samples are unavailable.
     ict_armed_sustained_lift_min_move_pct: float = 8.0
@@ -435,11 +447,12 @@ class Settings(BaseSettings):
     # BUILDING upgrades when the base, volume, sustained premium lift and live index
     # turn all agree. This closes the WATCH/BUILDING dead zone without trading every low.
     first_lift_trade_enabled: bool = True
-    first_lift_trade_min_score: float = 45.0
-    first_lift_trade_min_quality: float = 55.0
+    # Structured local-base first lift — only top ELITE/EXPLODING in the 15–25% pad.
+    first_lift_trade_min_score: float = 70.0
+    first_lift_trade_min_quality: float = 70.0
     first_lift_trade_min_volume_surge: float = 2.0
-    first_lift_trade_min_velocity_3s: float = 1.2
-    first_lift_trade_min_velocity_9s: float = 0.8
+    first_lift_trade_min_velocity_3s: float = 2.0
+    first_lift_trade_min_velocity_9s: float = 1.5
     first_lift_trade_max_move_pct: float = 25.0
     first_lift_trade_min_momentum_shift_pct: float = 0.03
     # ATM/ITM premium-led first lift: stronger option evidence may lead a lagging
@@ -1770,6 +1783,12 @@ class Settings(BaseSettings):
     ict_defensive_base_rip_max_move_pct: float = 55.0
     # Full lots only for top tiers on defensive rip (never BUILDING).
     ict_defensive_base_rip_full_lots_tiers_csv: str = "ELITE,EXPLODING"
+    # Always: defensive/worst base rip only for top ELITE/EXPLODING at local base —
+    # do not admit every EXPLODING FTV print (Aug18 mid-quality 71.5 / B).
+    ict_defensive_base_rip_require_top_quality: bool = True
+    ict_defensive_base_rip_min_score: float = 80.0
+    ict_defensive_base_rip_min_quality: float = 70.0
+    ict_defensive_base_rip_min_velocity_3s: float = 2.5
     # Aug18: EXPIRY WORST armed/defensive EXPLODING spikes failed — block unless
     # a true ELITE high-quality base rip clears the raised bar.
     ict_defensive_base_rip_block_expiry_worst: bool = True

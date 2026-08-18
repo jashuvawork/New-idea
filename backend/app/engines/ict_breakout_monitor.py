@@ -219,14 +219,27 @@ def first_lift_entry_readiness(
         or row.get("flatVerticalQuality")
         or 0
     )
-    min_quality = float(
-        getattr(
-            settings,
-            "ict_armed_base_launch_min_quality" if strict_armed_path else "first_lift_trade_min_quality",
-            60.0 if strict_armed_path else 55.0,
+    if elite_base_ready and not armed_launch:
+        min_quality = float(
+            getattr(settings, "ict_elite_base_ready_min_quality", 55.0) or 55.0
         )
-        or (60.0 if strict_armed_path else 55.0)
-    )
+        min_score = float(
+            getattr(settings, "ict_elite_base_ready_min_score", 45.0) or 45.0
+        )
+    elif armed_launch:
+        min_quality = float(
+            getattr(settings, "ict_armed_base_launch_min_quality", 70.0) or 70.0
+        )
+        min_score = float(
+            getattr(settings, "ict_armed_base_launch_min_score", 70.0) or 70.0
+        )
+    else:
+        min_quality = float(
+            getattr(settings, "first_lift_trade_min_quality", 70.0) or 70.0
+        )
+        min_score = float(
+            getattr(settings, "first_lift_trade_min_score", 70.0) or 70.0
+        )
     if quality < min_quality:
         return False, f"first_lift_quality<{min_quality:g}"
 
@@ -235,14 +248,6 @@ def first_lift_entry_readiness(
         or row.get("explosionScore")
         or row.get("score")
         or 0
-    )
-    min_score = float(
-        getattr(
-            settings,
-            "ict_armed_base_launch_min_score" if strict_armed_path else "first_lift_trade_min_score",
-            45.0,
-        )
-        or 45.0
     )
     if score < min_score:
         return False, f"first_lift_score<{min_score:g}"
@@ -269,9 +274,9 @@ def first_lift_entry_readiness(
                 if armed_launch
                 else "first_lift_trade_min_velocity_3s"
             ),
-            1.5 if strict_armed_path else 1.2,
+            1.5 if elite_base_ready else (2.5 if armed_launch else 2.0),
         )
-        or (1.5 if strict_armed_path else 1.2)
+        or (1.5 if elite_base_ready else (2.5 if armed_launch else 2.0))
     )
     min_v9 = float(
         getattr(
@@ -283,9 +288,9 @@ def first_lift_entry_readiness(
                 if armed_launch
                 else "first_lift_trade_min_velocity_9s"
             ),
-            1.5 if strict_armed_path else 0.8,
+            1.5 if elite_base_ready else (1.75 if armed_launch else 1.5),
         )
-        or (1.5 if strict_armed_path else 0.8)
+        or (1.5 if elite_base_ready else (1.75 if armed_launch else 1.5))
     )
     if not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
@@ -1340,6 +1345,38 @@ def _expiry_worst_session(
     return False
 
 
+def _defensive_base_rip_top_allowed(
+    *,
+    tier: str,
+    quality: float,
+    score: float,
+    velocity_3s: float,
+    settings: Any,
+) -> tuple[bool, str]:
+    """Always-on top floor for defensive/worst local-base rips (not every EXPLODING)."""
+    if not bool(getattr(settings, "ict_defensive_base_rip_require_top_quality", True)):
+        return True, "ok"
+    tier_u = str(tier or "").upper()
+    if tier_u not in {"ELITE", "EXPLODING"}:
+        return False, f"defensive_rip_top_tier_{tier_u.lower() or 'unknown'}"
+    min_quality = float(
+        getattr(settings, "ict_defensive_base_rip_min_quality", 70.0) or 70.0
+    )
+    if float(quality or 0) < min_quality:
+        return False, f"defensive_rip_top_quality<{min_quality:g}"
+    min_score = float(
+        getattr(settings, "ict_defensive_base_rip_min_score", 80.0) or 80.0
+    )
+    if float(score or 0) < min_score:
+        return False, f"defensive_rip_top_score<{min_score:g}"
+    min_v3 = float(
+        getattr(settings, "ict_defensive_base_rip_min_velocity_3s", 2.5) or 2.5
+    )
+    if float(velocity_3s or 0) < min_v3:
+        return False, f"defensive_rip_top_v3<{min_v3:g}"
+    return True, "ok"
+
+
 def _expiry_worst_defensive_rip_allowed(
     *,
     tier: str,
@@ -1485,12 +1522,11 @@ def good_day_ict_capture_active(
                 else f"defensive_base_rip_tier_{tier_u.lower()}"
             )
             return False, meta
-        # Aug18: EXPIRY WORST defensive EXPLODING spikes (SENSEX 77400 PUT) — require
-        # ELITE + high quality/score/velocity or deny the capture path entirely.
+        score = float(getattr(event, "explosion_score", 0) or 0) if event else 0.0
+        v3 = float(getattr(event, "velocity_3s", 0) or 0) if event else float(ict.velocity_3s or 0)
+        quality = float(getattr(ict, "flat_vertical_quality", 0) or 0)
+        # EXPIRY WORST: ELITE + high floors. Other defensive days: top ELITE/EXPLODING only.
         if _expiry_worst_session(day_mode=day_mode, state=state, meta=meta):
-            score = float(getattr(event, "explosion_score", 0) or 0) if event else 0.0
-            v3 = float(getattr(event, "velocity_3s", 0) or 0) if event else float(ict.velocity_3s or 0)
-            quality = float(getattr(ict, "flat_vertical_quality", 0) or 0)
             ok, deny = _expiry_worst_defensive_rip_allowed(
                 tier=tier_u,
                 quality=quality,
@@ -1501,6 +1537,18 @@ def good_day_ict_capture_active(
             if not ok:
                 meta["deniedReason"] = deny
                 meta["expiryWorstDefensiveRipBlocked"] = True
+                return False, meta
+        else:
+            ok_top, deny_top = _defensive_base_rip_top_allowed(
+                tier=tier_u,
+                quality=quality,
+                score=score,
+                velocity_3s=v3,
+                settings=settings,
+            )
+            if not ok_top:
+                meta["deniedReason"] = deny_top
+                meta["defensiveRipTopBlocked"] = True
                 return False, meta
         max_move = float(getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0)
         # ELITE local-base gate uses pad % (not session/day %) — day% can be 50+

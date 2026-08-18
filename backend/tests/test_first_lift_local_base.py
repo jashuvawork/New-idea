@@ -487,6 +487,11 @@ def test_near_miss_reports_strict_first_lift_velocity_before_chart_alignment():
     settings = Settings(
         explosion_elite_exploding_only=True,
         explosion_require_chart_align_enabled=True,
+        # Keep soft diagnostic floors so the near-miss names the velocity gap first.
+        first_lift_trade_min_score=45.0,
+        first_lift_trade_min_quality=55.0,
+        first_lift_trade_min_velocity_3s=1.2,
+        first_lift_trade_min_velocity_9s=0.8,
     )
     snap = SymbolSnapshot(
         symbol="NIFTY",
