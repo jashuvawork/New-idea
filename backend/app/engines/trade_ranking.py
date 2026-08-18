@@ -60,6 +60,13 @@ def ftv_authorization_policy(
     top_ftv_a_exceptional_min_velocity_3s: float = 5.0,
     top_ftv_a_exceptional_min_velocity_9s: float = 2.5,
     top_ftv_a_exceptional_max_move_pct: float = 40.0,
+    ftv_s_strict_min_explosion_score: float = 85.0,
+    ftv_s_strict_min_quality: float = 70.0,
+    ftv_s_strict_min_velocity_3s: float = 2.5,
+    ftv_s_strict_min_velocity_9s: float = 1.75,
+    ftv_s_strict_require_cvd_buying: bool = True,
+    ftv_s_strict_min_local_base_move_pct: float = 5.0,
+    ftv_s_strict_max_local_base_move_pct: float = 25.0,
 ) -> FtvAuthorization:
     """Pure causal authorization for strict S and winner-like top FTV A."""
     blocked = lambda reason: FtvAuthorization(None, reason)
@@ -106,6 +113,37 @@ def ftv_authorization_policy(
             return blocked("ftv_elite_top_only_requires_top_rank_eligible")
         if require_allocation_rank_one and allocation_rank != 1:
             return blocked("ftv_elite_top_only_requires_allocation_rank_1")
+        # Elite-base preauth (2–5% pad) is already structured; armed/first-lift
+        # S must still clear top local-base floors so mid EXPLODING cannot slip in.
+        preauthorized = str(ranking.get("executionAuthorization") or "") == "S_PREAUTHORIZED"
+        if not preauthorized:
+            tier = str(evidence.get("tier") or "").upper()
+            if tier not in {"ELITE", "EXPLODING"}:
+                return blocked("ftv_s_strict_requires_elite_or_exploding")
+            if not bool(
+                evidence.get("armedBaseLaunch")
+                or evidence.get("firstLift")
+                or evidence.get("eliteBaseReady")
+            ):
+                return blocked("ftv_s_strict_requires_local_base_trigger")
+            move = _number(evidence.get("localBaseMovePct"))
+            if move < ftv_s_strict_min_local_base_move_pct:
+                return blocked("ftv_s_strict_local_base_too_early")
+            if move > ftv_s_strict_max_local_base_move_pct:
+                return blocked("ftv_s_strict_local_base_chase")
+            if _number(evidence.get("explosionScore")) < ftv_s_strict_min_explosion_score:
+                return blocked("ftv_s_strict_explosion_score_below_floor")
+            if _number(evidence.get("flatVerticalQuality")) < ftv_s_strict_min_quality:
+                return blocked("ftv_s_strict_quality_below_floor")
+            if _number(evidence.get("velocity3s")) < ftv_s_strict_min_velocity_3s:
+                return blocked("ftv_s_strict_velocity_3s_below_floor")
+            if _number(evidence.get("velocity9s")) < ftv_s_strict_min_velocity_9s:
+                return blocked("ftv_s_strict_velocity_9s_below_floor")
+            if ftv_s_strict_require_cvd_buying and not (
+                bool(evidence.get("cvdBuying"))
+                or bool(evidence.get("orderflowPositive"))
+            ):
+                return blocked("ftv_s_strict_requires_buying_confirmation")
         return FtvAuthorization("S_STRICT", "ok")
 
     if not top_ftv_a_enabled:
@@ -186,6 +224,13 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "top_ftv_a_exceptional_min_velocity_3s",
         "top_ftv_a_exceptional_min_velocity_9s",
         "top_ftv_a_exceptional_max_move_pct",
+        "ftv_s_strict_min_explosion_score",
+        "ftv_s_strict_min_quality",
+        "ftv_s_strict_min_velocity_3s",
+        "ftv_s_strict_min_velocity_9s",
+        "ftv_s_strict_require_cvd_buying",
+        "ftv_s_strict_min_local_base_move_pct",
+        "ftv_s_strict_max_local_base_move_pct",
     )
     return {name: getattr(settings, name) for name in names}
 
@@ -283,19 +328,37 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
 
     elite_preauthorized = bool(
         elite_base_ready
-        and tier in ("BUILDING", "EXPLODING", "ELITE")
+        and tier in ("EXPLODING", "ELITE")
         and explosion_score >= 45.0
         and tqs >= 50.0
         and 2.0 <= local_move < 5.0
     )
+    # Top S at local base only — armed launch alone must not mint grade S for
+    # mid EXPLODING (score ~70, quality B). Elite-base preauth (2–5%) stays.
+    # CVD is preferred; absolute volume / orderflow proof is enough when the CVD
+    # tape is sparse (armed readiness already required one of those proofs).
+    armed_top_local = bool(
+        armed_launch
+        and tier in ("ELITE", "EXPLODING")
+        and explosion_score >= 85.0
+        and flat_vertical_quality >= 70.0
+        and v3 >= 2.5
+        and v9 >= 1.75
+        and orderflow
+        and (cvd_buying or orderflow)
+        and 5.0 <= local_move <= 25.0
+        and not rejected
+    )
     s_quality = bool(
         mode == "explosion"
-        and (armed_launch or elite_preauthorized)
-        and v3 >= 1.5
-        and v9 >= 1.5
+        and (armed_top_local or elite_preauthorized)
         and orderflow
         and not rejected
         and local_move <= 40.0
+        and (
+            armed_top_local
+            or (v3 >= 1.5 and v9 >= 1.5)
+        )
     )
     fresh_positive = bool(
         mode == "explosion"

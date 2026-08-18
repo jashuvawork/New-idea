@@ -415,6 +415,9 @@ def _candidate(side: Side = Side.PUT) -> EntryCandidate:
             "ictBreakout": True,
             "ictArmedBaseLaunch": True,
             "ictVolumeAwakening": True,
+            "flatVerticalQuality": 90.0,
+            "orderflowConfirmed": True,
+            "optionCvdBuying": True,
         },
     )
 
