@@ -2596,6 +2596,15 @@ async def process(
                 if causal_ranking:
                     causal_ranking["cycleRank"] = _attempt + 1
                     best.pretrade_meta["causalRanking"] = causal_ranking
+                for ranked_out in (best.pretrade_meta or {}).get("rankedOut", []):
+                    await _record_funnel_event_safe(
+                        {
+                            "event": "RANKED_OUT",
+                            "stage": "selector",
+                            "cycleId": cycle_id,
+                            **ranked_out,
+                        }
+                    )
 
                 if (
                     allocation_enabled
@@ -2691,6 +2700,9 @@ async def process(
                         )
                         break
 
+                selected_ranking = (
+                    (best.pretrade_meta or {}).get("causalRanking") or {}
+                )
                 await _record_funnel_event_safe({
                         "event": "SELECTED",
                         "key": radar_key,
@@ -2701,6 +2713,11 @@ async def process(
                         "cycleId": cycle_id,
                         "selectionMode": best.mode,
                         "selectionScore": best.score,
+                        "legacySelectionScore": (
+                            (best.pretrade_meta or {}).get("legacySelectionScore")
+                        ),
+                        "causalGrade": selected_ranking.get("grade"),
+                        "causalRankScore": selected_ranking.get("rankScore"),
                         "tier": getattr(best, "tier", None),
                         "allocationRank": allocation.rank if allocation else None,
                         "allocationBudgetInr": (

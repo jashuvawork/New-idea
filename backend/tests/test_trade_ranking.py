@@ -1,8 +1,12 @@
 """Deterministic causal ranking regressions for the 2026-08-17 trade patterns."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.engines.trade_ranking import rank_trade_evidence, ranking_sort_key
+from app.engines.trade_selector import EntryCandidate, rank_candidates_for_selection
+from app.models.schemas import Side, StrategyType
 
 
 AUG17_PATTERNS = [
@@ -146,3 +150,105 @@ def test_same_grade_candidates_are_ordered_by_causal_rank_score():
 
     assert lower["grade"] == higher["grade"] == "B"
     assert ranking_sort_key(higher) > ranking_sort_key(lower)
+
+
+def test_aug18_1040_cohort_prefers_24350_s_over_atm_a_candidates():
+    s_ranking = rank_trade_evidence(
+        {
+            "mode": "explosion",
+            "tier": "EXPLODING",
+            "explosionScore": 100.0,
+            "tqs": 55.6,
+            "velocity3s": 3.69,
+            "velocity9s": 4.13,
+            "localBaseMovePct": 24.4,
+            "firstLift": True,
+            "armedBaseLaunch": True,
+            "flatThenVertical": True,
+            "orderflowPositive": True,
+        }
+    )
+    a_24200 = rank_trade_evidence(
+        {
+            "mode": "explosion",
+            "tier": "ELITE",
+            "explosionScore": 92.0,
+            "tqs": 58.0,
+            "velocity3s": 1.2,
+            "velocity9s": 1.1,
+            "localBaseMovePct": 18.0,
+            "firstLift": True,
+            "flatThenVertical": True,
+            "orderflowPositive": True,
+        }
+    )
+    a_24250 = rank_trade_evidence(
+        {
+            "mode": "explosion",
+            "tier": "ELITE",
+            "explosionScore": 88.0,
+            "tqs": 56.0,
+            "velocity3s": 1.1,
+            "velocity9s": 1.0,
+            "localBaseMovePct": 17.0,
+            "firstLift": True,
+            "flatThenVertical": True,
+            "orderflowPositive": True,
+        }
+    )
+
+    def candidate(strike, score, ranking):
+        return EntryCandidate(
+            symbol="NIFTY",
+            snap=SimpleNamespace(),
+            mode="explosion",
+            score=score,
+            side=Side.PUT,
+            strike=strike,
+            premium=100.0,
+            strategy_type=StrategyType.EXPLOSIVE,
+            confidence=90.0,
+            tqs=55.0,
+            pretrade_meta={"causalRanking": ranking},
+        )
+
+    cohort = [
+        candidate(24200.0, 160.0, a_24200),
+        candidate(24250.0, 150.0, a_24250),
+        candidate(24350.0, 90.0, s_ranking),
+    ]
+    ranked = rank_candidates_for_selection(cohort, lambda item: item.score)
+
+    assert s_ranking["grade"] == "S"
+    assert a_24200["grade"] == a_24250["grade"] == "A"
+    assert [item.strike for item in ranked] == [24350.0, 24200.0, 24250.0]
+
+
+def test_final_sort_uses_rank_score_before_legacy_score_within_grade():
+    higher = {"grade": "A", "gradePriority": 3, "rankScore": 88.0}
+    lower = {"grade": "A", "gradePriority": 3, "rankScore": 80.0}
+
+    def candidate(strike, score, ranking):
+        return EntryCandidate(
+            symbol="NIFTY",
+            snap=SimpleNamespace(),
+            mode="explosion",
+            score=score,
+            side=Side.CALL,
+            strike=strike,
+            premium=100.0,
+            strategy_type=StrategyType.EXPLOSIVE,
+            confidence=80.0,
+            tqs=55.0,
+            pretrade_meta={"causalRanking": ranking},
+        )
+
+    ranked = rank_candidates_for_selection(
+        [
+            candidate(24200.0, 200.0, lower),
+            candidate(24150.0, 50.0, higher),
+        ],
+        lambda item: item.score,
+    )
+
+    assert [item.strike for item in ranked] == [24150.0, 24200.0]

@@ -8,6 +8,7 @@ from app.engines.pretrade_validator import (
     check_min_entry_interval,
     collect_session_trades,
     compute_symbol_stats,
+    filter_candidates_pretrade,
     index_rank_from_backtest,
     validate_candidate,
 )
@@ -183,6 +184,45 @@ def test_backtest_summary_recommends_index():
         summary = backtest_session_summary(trades)
     assert summary["recommendedIndex"] == "SENSEX"
     assert summary["symbolStats"]["NIFTY"]["profit_factor"] == 0.0
+
+
+def test_filter_preserves_earlier_evidence_on_pass_and_reject():
+    state = AutoTraderState()
+    passed = _candidate("NIFTY", Side.PUT, score=90.0)
+    rejected = _candidate("SENSEX", Side.PUT, score=50.0)
+    causal = {"grade": "S", "gradePriority": 4, "rankScore": 96.5}
+    passed.pretrade_meta = {
+        "causalRanking": causal,
+        "edgeScore": 81.0,
+        "timingAssessment": {"assessment": "EARLY"},
+    }
+    rejected.pretrade_meta = {
+        "causalRanking": {"grade": "A", "gradePriority": 3, "rankScore": 84.0},
+        "edgeScore": 62.0,
+        "timingAssessment": {"assessment": "FADING"},
+    }
+    with patch(
+        "app.engines.pretrade_validator.validate_candidate",
+        side_effect=[
+            (True, "ok", {"pretradePassed": True, "moneyness": "ITM"}),
+            (False, "pretrade_counter_breadth", {"moneyness": "ATM"}),
+        ],
+    ):
+        viable = filter_candidates_pretrade([passed, rejected], state, {})
+
+    assert viable == [passed]
+    assert passed.pretrade_meta == {
+        "causalRanking": causal,
+        "edgeScore": 81.0,
+        "timingAssessment": {"assessment": "EARLY"},
+        "pretradePassed": True,
+        "moneyness": "ITM",
+    }
+    assert rejected.pretrade_meta["causalRanking"]["grade"] == "A"
+    assert rejected.pretrade_meta["edgeScore"] == 62.0
+    assert rejected.pretrade_meta["timingAssessment"]["assessment"] == "FADING"
+    assert rejected.pretrade_meta["pretradePassed"] is False
+    assert rejected.pretrade_meta["pretradeBlock"] == "pretrade_counter_breadth"
 
 
 @patch("app.engines.bad_day_routing.get_settings")

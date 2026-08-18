@@ -5,6 +5,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from app.config import Settings
 from app.engines.capital_allocator import (
     CapitalSnapshot,
     RankedAllocation,
@@ -19,6 +20,7 @@ from app.engines.capital_allocator import (
     set_manual_capital_limit,
     tune_exit_plan_for_position,
 )
+from app.engines.risk_engine import RiskEngine
 from app.engines.explosion_profit import (
     compute_explosion_lots,
     evaluate_explosion_exit,
@@ -72,6 +74,66 @@ class CapitalSizingTests(unittest.TestCase):
             lots = max_lots_for_capital_pct("NIFTY", 50.0, 0.35)
         self.assertEqual(lots, 21)
         self.assertLessEqual(lots * 65 * 50, 70_000)
+
+    def test_ranked_fills_still_enforce_two_position_same_side_cap(self):
+        settings = Settings(
+            ftv_ranked_allocation_enabled=True,
+            ftv_allocation_max_positions=3,
+            ftv_allocation_max_same_side=2,
+            aggressive_lot_sizing=False,
+            emergency_stop_enabled=False,
+        )
+        open_puts = [
+            PaperTrade(
+                id=f"put-{strike}",
+                symbol="NIFTY",
+                side=Side.PUT,
+                strike=strike,
+                entryPremium=50.0,
+                currentPremium=50.0,
+                lots=1,
+                strategyType=StrategyType.EXPLOSIVE,
+                openedAt=datetime.now(IST),
+            )
+            for strike in (24250.0, 24350.0)
+        ]
+        state = AutoTraderState(running=True, openPaperTrades=open_puts)
+        capital = CapitalSnapshot(
+            availableMarginInr=1_000_000.0,
+            perTradeCapitalInr=500_000.0,
+        )
+        with (
+            patch("app.engines.risk_engine.get_settings", return_value=settings),
+            patch(
+                "app.engines.risk_engine.get_capital_snapshot",
+                return_value=capital,
+            ),
+        ):
+            engine = RiskEngine()
+            put_ok, put_reason = engine.check_new_entry(
+                state,
+                "NIFTY",
+                Side.PUT,
+                1,
+                50.0,
+                lot_multiplier=65,
+                strategy_type=StrategyType.EXPLOSIVE,
+                strike=24300.0,
+            )
+            call_ok, call_reason = engine.check_new_entry(
+                state,
+                "NIFTY",
+                Side.CALL,
+                1,
+                50.0,
+                lot_multiplier=65,
+                strategy_type=StrategyType.EXPLOSIVE,
+                strike=24200.0,
+            )
+
+        self.assertFalse(put_ok)
+        self.assertEqual(put_reason, "ftv_same_side_cap")
+        self.assertTrue(call_ok, call_reason)
 
     def test_compute_lots_aggressive_uses_full_85pct_budget(self):
         from app.engines.capital_allocator import compute_lots
