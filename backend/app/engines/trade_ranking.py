@@ -53,7 +53,7 @@ def ftv_authorization_policy(
     top_ftv_a_min_velocity_3s: float = 2.5,
     top_ftv_a_min_velocity_9s: float = 1.75,
     top_ftv_a_normal_max_move_pct: float = 25.0,
-    top_ftv_a_max_capital_pct: float = 0.35,
+    top_ftv_a_max_capital_pct: float = 0.90,
     top_ftv_a_exceptional_min_explosion_score: float = 95.0,
     top_ftv_a_exceptional_min_quality: float = 85.0,
     top_ftv_a_exceptional_min_tqs: float = 55.0,

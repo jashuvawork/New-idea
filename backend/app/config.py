@@ -186,9 +186,10 @@ class Settings(BaseSettings):
     scalp_entries_enabled: bool = False
     # Explosion entries: only ELITE + EXPLODING (no soft BUILDING / premium-capture).
     explosion_elite_exploding_only: bool = True
-    # Master hard policy. Strict causal S remains the sole full-sleeve path.
+    # Master hard policy. Strict causal S and final-policy-authorized rank-1
+    # TOP_FTV_A are the only full-sleeve paths.
     ftv_elite_top_only_enabled: bool = True
-    # Ordinary rank-1 fallback for winner-like ELITE/EXPLODING current-data FTV A.
+    # Separate rank-1 authorization for winner-like ELITE/EXPLODING current-data FTV A.
     # Historical profiles are not treated as proof because old rows lack v9/CVD.
     top_ftv_a_enabled: bool = True
     top_ftv_a_min_explosion_score: float = 90.0
@@ -197,7 +198,7 @@ class Settings(BaseSettings):
     top_ftv_a_min_velocity_3s: float = 2.5
     top_ftv_a_min_velocity_9s: float = 1.75
     top_ftv_a_normal_max_move_pct: float = 25.0
-    top_ftv_a_max_capital_pct: float = 0.35
+    top_ftv_a_max_capital_pct: float = 0.90
     # Extension from 25–40% requires exceptional acceleration and stronger quality.
     top_ftv_a_exceptional_min_explosion_score: float = 95.0
     top_ftv_a_exceptional_min_quality: float = 85.0
@@ -1515,8 +1516,8 @@ class Settings(BaseSettings):
     ftv_allocation_max_positions: int = 3
     ftv_allocation_max_same_side: int = 2
     ftv_allocation_require_ftv: bool = True
-    # Rank-1 ELITE/EXPLODING entries that also pass strict first-lift proof keep
-    # every cash-affordable lot instead of being reduced by the standard SL budget.
+    # Final-policy-authorized rank-1 ELITE/EXPLODING entries keep every
+    # cash-affordable sleeve lot instead of being reduced by the standard SL budget.
     top_rank_first_lift_full_budget_lots_enabled: bool = True
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50

@@ -17,7 +17,7 @@ def test_production_template_uses_bounded_loss_policy():
     env = _env_values()
     assert env["FTV_ELITE_TOP_ONLY_ENABLED"] == "true"
     assert env["TOP_FTV_A_ENABLED"] == "true"
-    assert env["TOP_FTV_A_MAX_CAPITAL_PCT"] == "0.35"
+    assert env["TOP_FTV_A_MAX_CAPITAL_PCT"] == "0.90"
     assert env["TOP_FTV_A_EXCEPTIONAL_MAX_MOVE_PCT"] == "40"
     assert env["DAILY_LOSS_STOP_INR"] == "6000"
     assert env["PER_TRADE_CAPITAL_PCT"] == "0.90"

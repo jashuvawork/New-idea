@@ -990,22 +990,32 @@ async def _open_from_candidate(
         structured_cold_max = True
         top_explosion_max = True
 
-    exceptional_full_sleeve = _exceptional_armed_launch_full_sleeve_allowed(
+    strict_s_full_sleeve = _exceptional_armed_launch_full_sleeve_allowed(
         candidate=candidate,
         snap=snap,
         allocation=allocation,
         early_base_entry_ready=early_base_entry_ready,
     )
     if policy_decision is not None and policy_decision.mode != "S_STRICT":
-        exceptional_full_sleeve = False
-    force_max_size = exceptional_full_sleeve
+        strict_s_full_sleeve = False
+    lots, top_ftv_a_full_sleeve = _top_ftv_a_policy_max_lots(
+        lots=lots,
+        symbol=symbol,
+        premium=fill_premium,
+        policy_decision=policy_decision,
+        allocation=allocation,
+    )
+    full_sleeve_authorized = strict_s_full_sleeve or top_ftv_a_full_sleeve
+    if top_ftv_a_full_sleeve:
+        top_explosion_max = True
+    force_max_size = full_sleeve_authorized
 
     lots = clamp_lots(lots, symbol, fill_premium)
     if timing_meta:
         from app.engines.entry_timing import cap_lots_for_timing
 
         lots = cap_lots_for_timing(lots, timing_meta)
-    if not exceptional_full_sleeve:
+    if not full_sleeve_authorized:
         from app.engines.capital_allocator import max_lots_for_capital_pct
 
         ordinary_pct = float(
@@ -1033,7 +1043,7 @@ async def _open_from_candidate(
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
         # Must run AFTER good-day ICT max-lot force (Jul20 49-lot FOMO hole).
-        bypass_soft = exceptional_full_sleeve and (
+        bypass_soft = full_sleeve_authorized and (
             (bool(high_conviction) and bool(
                 getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
             ))
@@ -1160,7 +1170,7 @@ async def _open_from_candidate(
                 if trap_block or live_trap.get("action") == "block":
                     return False, trap_reason
                 if trap_meta.get("action") == "cut_size":
-                    bypass_soft = exceptional_full_sleeve and (
+                    bypass_soft = full_sleeve_authorized and (
                         (bool(high_conviction) and bool(
                             getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
                         ))
@@ -1261,16 +1271,16 @@ async def _open_from_candidate(
         ),
         local_base_premium=local_base_prem if local_base_prem > 0 else None,
     )
-    # A rank-1 top explosion that also passed strict first-lift proof is the only
-    # setup allowed to keep every cash-affordable lot when its calculated stop
-    # exceeds the standard 8% sleeve-risk budget. Late/fading continuations,
-    # lower-ranked trades and post-win/whipsaw-capped entries remain risk-sized.
+    # A final-policy-authorized rank-1 top explosion may keep every cash-affordable
+    # sleeve lot when its calculated stop exceeds the standard 8% sleeve-risk budget.
+    # Late/fading continuations, lower-ranked trades and post-win/whipsaw-capped
+    # entries remain risk-sized.
     top_rank_full_budget_lots = _top_rank_full_budget_lots_allowed(
         enabled=bool(
             getattr(settings, "top_rank_first_lift_full_budget_lots_enabled", True)
         ),
         allocation=allocation,
-        strict_first_lift=exceptional_full_sleeve,
+        strict_first_lift=full_sleeve_authorized,
         top_explosion_max=top_explosion_max,
         faded_rip=bool(faded_rip_meta),
         post_win_capped=bool(post_win_cap_meta.get("applied")),
@@ -1360,7 +1370,7 @@ async def _open_from_candidate(
         "elevatedSize": bool(elevated_size),
         "topExplosionMaxLots": bool(top_explosion_max),
         "topRankFullBudgetLots": top_rank_full_budget_lots,
-        "fullSleeveQualified": exceptional_full_sleeve,
+        "fullSleeveQualified": full_sleeve_authorized,
         "ftvAuthorizationMode": (
             policy_decision.mode if policy_decision is not None else None
         ),
@@ -1381,7 +1391,7 @@ async def _open_from_candidate(
                 )
                 or 4_000.0
             )
-            if exceptional_full_sleeve
+            if full_sleeve_authorized
             else float(
                 getattr(settings, "explosion_per_trade_max_loss_inr", 2_000.0)
                 or 2_000.0
@@ -1680,9 +1690,20 @@ async def _open_from_candidate(
         )
         if not final_policy.allowed:
             return False, final_policy.reason
+        if (
+            full_sleeve_authorized
+            and (
+                policy_decision is None
+                or final_policy.mode != policy_decision.mode
+                or allocation is None
+                or allocation.rank != 1
+            )
+        ):
+            return False, "full_sleeve_policy_changed_before_order"
         # Audit the actual authorization used at the order boundary.
         ctx_extra["ftvAuthorizationMode"] = final_policy.mode
         ctx_extra["ftvAuthorizationReason"] = final_policy.reason
+        ctx_extra["ftvMaxCapitalPct"] = final_policy.max_capital_pct
 
     if is_live or use_parity:
         if not client:
@@ -2470,6 +2491,38 @@ def _top_rank_full_budget_lots_allowed(
         and not faded_rip
         and not post_win_capped
     )
+
+
+def _top_ftv_a_policy_max_lots(
+    *,
+    lots: int,
+    symbol: str,
+    premium: float,
+    policy_decision: Any,
+    allocation: RankedAllocation | None,
+) -> tuple[int, bool]:
+    """Apply max lots only from the current rank-1 TOP_FTV_A policy decision."""
+    authorized = bool(
+        policy_decision is not None
+        and policy_decision.mode == "TOP_FTV_A"
+        and policy_decision.allowed
+        and policy_decision.max_capital_pct is not None
+        and allocation is not None
+        and allocation.rank == 1
+    )
+    if not authorized:
+        return int(lots), False
+
+    from app.engines.capital_allocator import max_lots_for_capital_pct
+
+    # policy_decision was rebuilt from the current snapshot, including live CVD
+    # buying/acceleration. Cached causal A ranking is deliberately not accepted.
+    max_lots = max_lots_for_capital_pct(
+        symbol,
+        premium,
+        float(policy_decision.max_capital_pct),
+    )
+    return max(int(lots), max_lots), True
 
 
 async def process(
