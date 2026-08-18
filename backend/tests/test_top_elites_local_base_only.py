@@ -75,7 +75,7 @@ def test_s_strict_rejects_chase_past_local_base_pad():
 def test_defensive_rip_top_rejects_mid_exploding():
     settings = MagicMock()
     settings.ict_defensive_base_rip_require_top_quality = True
-    settings.ict_defensive_base_rip_min_score = 80.0
+    settings.ict_defensive_base_rip_min_score = 75.0
     settings.ict_defensive_base_rip_min_quality = 70.0
     settings.ict_defensive_base_rip_min_velocity_3s = 2.5
     ok, reason = _defensive_base_rip_top_allowed(
@@ -92,7 +92,7 @@ def test_defensive_rip_top_rejects_mid_exploding():
 def test_defensive_rip_top_allows_strong_exploding_at_base():
     settings = MagicMock()
     settings.ict_defensive_base_rip_require_top_quality = True
-    settings.ict_defensive_base_rip_min_score = 80.0
+    settings.ict_defensive_base_rip_min_score = 75.0
     settings.ict_defensive_base_rip_min_quality = 70.0
     settings.ict_defensive_base_rip_min_velocity_3s = 2.5
     ok, reason = _defensive_base_rip_top_allowed(

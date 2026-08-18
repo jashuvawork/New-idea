@@ -228,17 +228,17 @@ def first_lift_entry_readiness(
         )
     elif armed_launch:
         min_quality = float(
-            getattr(settings, "ict_armed_base_launch_min_quality", 70.0) or 70.0
+            getattr(settings, "ict_armed_base_launch_min_quality", 65.0) or 65.0
         )
         min_score = float(
-            getattr(settings, "ict_armed_base_launch_min_score", 70.0) or 70.0
+            getattr(settings, "ict_armed_base_launch_min_score", 65.0) or 65.0
         )
     else:
         min_quality = float(
-            getattr(settings, "first_lift_trade_min_quality", 70.0) or 70.0
+            getattr(settings, "first_lift_trade_min_quality", 65.0) or 65.0
         )
         min_score = float(
-            getattr(settings, "first_lift_trade_min_score", 70.0) or 70.0
+            getattr(settings, "first_lift_trade_min_score", 62.0) or 62.0
         )
     if quality < min_quality:
         return False, f"first_lift_quality<{min_quality:g}"
@@ -274,9 +274,9 @@ def first_lift_entry_readiness(
                 if armed_launch
                 else "first_lift_trade_min_velocity_3s"
             ),
-            1.5 if elite_base_ready else (2.5 if armed_launch else 2.0),
+            1.5 if elite_base_ready else (2.0 if armed_launch else 1.5),
         )
-        or (1.5 if elite_base_ready else (2.5 if armed_launch else 2.0))
+        or (1.5 if elite_base_ready else (2.0 if armed_launch else 1.5))
     )
     min_v9 = float(
         getattr(
@@ -288,9 +288,9 @@ def first_lift_entry_readiness(
                 if armed_launch
                 else "first_lift_trade_min_velocity_9s"
             ),
-            1.5 if elite_base_ready else (1.75 if armed_launch else 1.5),
+            1.5 if elite_base_ready else (1.5 if armed_launch else 1.0),
         )
-        or (1.5 if elite_base_ready else (1.75 if armed_launch else 1.5))
+        or (1.5 if elite_base_ready else (1.5 if armed_launch else 1.0))
     )
     if not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"

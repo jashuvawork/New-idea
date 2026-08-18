@@ -302,16 +302,27 @@ def test_top_ftv_a_is_ce_pe_symmetric(side):
 @pytest.mark.parametrize(
     ("mutation", "reason"),
     [
-        ({"cvdBuying": False}, "top_ftv_a_requires_option_cvd_buying"),
-        ({"cvdAcceleration": False}, "top_ftv_a_requires_option_cvd_acceleration"),
         ({"timingAssessment": "CHASE"}, "top_ftv_a_timing_blocked"),
         ({"timingAssessment": "FAILED_LAUNCH"}, "ftv_elite_top_only_timing_blocked"),
         ({"faded": True}, "ftv_elite_top_only_timing_blocked"),
         ({"exhaustedReentry": True}, "ftv_elite_top_only_timing_blocked"),
     ],
 )
-def test_fallback_requires_live_cvd_and_clean_timing(mutation, reason):
+def test_fallback_requires_clean_timing(mutation, reason):
     assert _decision(_reconstructed_ftv_a(**mutation)).reason == reason
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"cvdBuying": False},
+        {"cvdAcceleration": False},
+    ],
+)
+def test_missing_cvd_still_admits_winner_local_base_ordinary_sleeve(mutation):
+    decision = _decision(_reconstructed_ftv_a(**mutation), rank=1, require_rank=True)
+    assert decision.mode == "WINNER_LOCAL_BASE"
+    assert decision.max_capital_pct == pytest.approx(0.35)
 
 
 def test_bare_raw_elite_and_non_ftv_are_blocked():
@@ -337,7 +348,7 @@ def test_fallback_blocks_rank_two_and_more_than_40pct_extension():
             flatVerticalQuality=95.0,
         )
     )
-    assert rank_two.reason == "top_ftv_a_requires_allocation_rank_1"
+    assert rank_two.reason == "winner_local_base_requires_allocation_rank_1"
     assert too_extended.reason == "top_ftv_a_extension_above_40pct"
 
 
@@ -470,7 +481,10 @@ def test_missing_live_cvd_is_blocked_on_preorder_execution_recompute():
         committedInr=0,
         weight=0.25,
     )
-    settings = Settings(controlled_trading_enabled=False)
+    settings = Settings(
+        controlled_trading_enabled=False,
+        winner_local_base_enabled=False,
+    )
     with (
         patch("app.engines.auto_trader.get_settings", return_value=settings),
         patch(

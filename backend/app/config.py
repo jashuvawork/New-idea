@@ -198,6 +198,18 @@ class Settings(BaseSettings):
     ftv_s_strict_require_cvd_buying: bool = True
     ftv_s_strict_min_local_base_move_pct: float = 5.0
     ftv_s_strict_max_local_base_move_pct: float = 25.0
+    # Winner-like ELITE/EXPLODING at local base (historical book winners) — ordinary
+    # sleeve. Clears past winners that miss CVD-acceleration TOP_FTV_A / full S, while
+    # still rejecting Aug18 mid EXPLODING (~71 / quality B).
+    winner_local_base_enabled: bool = True
+    winner_local_base_min_explosion_score: float = 75.0
+    winner_local_base_min_quality: float = 70.0
+    winner_local_base_min_tqs: float = 50.0
+    winner_local_base_min_velocity_3s: float = 2.2
+    winner_local_base_min_velocity_9s: float = 1.5
+    winner_local_base_min_local_base_move_pct: float = 5.0
+    winner_local_base_max_local_base_move_pct: float = 25.0
+    winner_local_base_max_capital_pct: float = 0.35
     # Separate rank-1 authorization for winner-like ELITE/EXPLODING current-data FTV A.
     # Historical profiles are not treated as proof because old rows lack v9/CVD.
     top_ftv_a_enabled: bool = True
@@ -407,11 +419,12 @@ class Settings(BaseSettings):
     ict_armed_base_launch_min_move_pct: float = 5.0
     ict_armed_base_launch_max_move_pct: float = 12.0
     # Top-only at local base — mid EXPLODING armed spikes stay watch-only.
-    ict_armed_base_launch_min_velocity_3s: float = 2.5
-    ict_armed_base_launch_min_velocity_9s: float = 1.75
+    # Floors stay above Aug18 mid losers but admit prior ELITE/EXPLODING winners.
+    ict_armed_base_launch_min_velocity_3s: float = 2.0
+    ict_armed_base_launch_min_velocity_9s: float = 1.5
     ict_armed_base_launch_min_absolute_volume: float = 25000.0
-    ict_armed_base_launch_min_quality: float = 70.0
-    ict_armed_base_launch_min_score: float = 70.0
+    ict_armed_base_launch_min_quality: float = 65.0
+    ict_armed_base_launch_min_score: float = 65.0
     ict_armed_base_launch_min_tqs: float = 50.0
     ict_armed_base_launch_rank_bonus: float = 16.0
     # Narrow pre-launch authorization: a stable ATM/ITM base may become executable
@@ -447,12 +460,13 @@ class Settings(BaseSettings):
     # BUILDING upgrades when the base, volume, sustained premium lift and live index
     # turn all agree. This closes the WATCH/BUILDING dead zone without trading every low.
     first_lift_trade_enabled: bool = True
-    # Structured local-base first lift — only top ELITE/EXPLODING in the 15–25% pad.
-    first_lift_trade_min_score: float = 70.0
-    first_lift_trade_min_quality: float = 70.0
+    # Structured local-base first lift — ELITE/EXPLODING winners in the 15–25% pad
+    # (aligned with must-take min score 62; quality keeps mid B-grade out).
+    first_lift_trade_min_score: float = 62.0
+    first_lift_trade_min_quality: float = 65.0
     first_lift_trade_min_volume_surge: float = 2.0
-    first_lift_trade_min_velocity_3s: float = 2.0
-    first_lift_trade_min_velocity_9s: float = 1.5
+    first_lift_trade_min_velocity_3s: float = 1.5
+    first_lift_trade_min_velocity_9s: float = 1.0
     first_lift_trade_max_move_pct: float = 25.0
     first_lift_trade_min_momentum_shift_pct: float = 0.03
     # ATM/ITM premium-led first lift: stronger option evidence may lead a lagging
@@ -1786,7 +1800,7 @@ class Settings(BaseSettings):
     # Always: defensive/worst base rip only for top ELITE/EXPLODING at local base —
     # do not admit every EXPLODING FTV print (Aug18 mid-quality 71.5 / B).
     ict_defensive_base_rip_require_top_quality: bool = True
-    ict_defensive_base_rip_min_score: float = 80.0
+    ict_defensive_base_rip_min_score: float = 75.0
     ict_defensive_base_rip_min_quality: float = 70.0
     ict_defensive_base_rip_min_velocity_3s: float = 2.5
     # Aug18: EXPIRY WORST armed/defensive EXPLODING spikes failed — block unless
