@@ -1035,10 +1035,10 @@ async def _open_from_candidate(
         )
         if (
             policy_decision is not None
-            and policy_decision.mode == "TOP_FTV_A"
+            and policy_decision.mode in {"TOP_FTV_A", "WINNER_LOCAL_BASE"}
             and policy_decision.max_capital_pct is not None
         ):
-            ordinary_pct = min(ordinary_pct, policy_decision.max_capital_pct)
+            ordinary_pct = min(ordinary_pct, float(policy_decision.max_capital_pct))
         lots = min(
             lots,
             max_lots_for_capital_pct(symbol, fill_premium, ordinary_pct),

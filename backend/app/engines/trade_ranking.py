@@ -67,8 +67,17 @@ def ftv_authorization_policy(
     ftv_s_strict_require_cvd_buying: bool = True,
     ftv_s_strict_min_local_base_move_pct: float = 5.0,
     ftv_s_strict_max_local_base_move_pct: float = 25.0,
+    winner_local_base_enabled: bool = True,
+    winner_local_base_min_explosion_score: float = 75.0,
+    winner_local_base_min_quality: float = 70.0,
+    winner_local_base_min_tqs: float = 50.0,
+    winner_local_base_min_velocity_3s: float = 2.2,
+    winner_local_base_min_velocity_9s: float = 1.5,
+    winner_local_base_min_local_base_move_pct: float = 5.0,
+    winner_local_base_max_local_base_move_pct: float = 25.0,
+    winner_local_base_max_capital_pct: float = 0.35,
 ) -> FtvAuthorization:
-    """Pure causal authorization for strict S and winner-like top FTV A."""
+    """Pure causal authorization for strict S, top FTV A, and winner local-base."""
     blocked = lambda reason: FtvAuthorization(None, reason)
     if str(evidence.get("mode") or "").lower() != "explosion":
         return blocked("ftv_elite_top_only_requires_explosion")
@@ -146,65 +155,100 @@ def ftv_authorization_policy(
                 return blocked("ftv_s_strict_requires_buying_confirmation")
         return FtvAuthorization("S_STRICT", "ok")
 
-    if not top_ftv_a_enabled:
-        return blocked("ftv_elite_top_only_requires_s")
     move = _number(evidence.get("localBaseMovePct"))
-    if move > top_ftv_a_exceptional_max_move_pct:
-        return blocked("top_ftv_a_extension_above_40pct")
-    if grade != "A":
-        return blocked("top_ftv_a_requires_a_grade")
-
     tier = str(evidence.get("tier") or "").upper()
-    if tier not in {"ELITE", "EXPLODING"}:
-        return blocked("top_ftv_a_requires_elite_or_exploding")
-    if not bool(evidence.get("flatThenVertical") and evidence.get("activeBreakout")):
-        return blocked("top_ftv_a_requires_active_ftv")
-    if not bool(
-        evidence.get("firstLift")
-        or evidence.get("armedBaseLaunch")
-        or evidence.get("eliteBaseReady")
-    ):
-        return blocked("top_ftv_a_requires_fresh_causal_trigger")
-    timing_blocked = timing in {"CHASE", "CHASING", "LATE", "FAILED_LAUNCH"}
-    if timing_blocked:
-        return blocked("top_ftv_a_timing_blocked")
-    if not bool(evidence.get("cvdBuying")):
-        return blocked("top_ftv_a_requires_option_cvd_buying")
-    if not bool(evidence.get("cvdAcceleration")):
-        return blocked("top_ftv_a_requires_option_cvd_acceleration")
-
     explosion_score = _number(evidence.get("explosionScore"))
     quality = _number(evidence.get("flatVerticalQuality"))
     tqs = _number(evidence.get("tqs"))
     v3 = _number(evidence.get("velocity3s"))
     v9 = _number(evidence.get("velocity9s"))
-    if explosion_score < top_ftv_a_min_explosion_score:
-        return blocked("top_ftv_a_explosion_score_below_floor")
-    if quality < top_ftv_a_min_quality:
-        return blocked("top_ftv_a_quality_below_floor")
-    if tqs < top_ftv_a_min_tqs:
-        return blocked("top_ftv_a_tqs_below_floor")
-    if v3 < top_ftv_a_min_velocity_3s:
-        return blocked("top_ftv_a_velocity_3s_below_floor")
-    if v9 < top_ftv_a_min_velocity_9s:
-        return blocked("top_ftv_a_velocity_9s_below_floor")
-    exceptional = move > top_ftv_a_normal_max_move_pct
-    if exceptional and not (
-        explosion_score >= top_ftv_a_exceptional_min_explosion_score
-        and quality >= top_ftv_a_exceptional_min_quality
-        and tqs >= top_ftv_a_exceptional_min_tqs
-        and v3 >= top_ftv_a_exceptional_min_velocity_3s
-        and v9 >= top_ftv_a_exceptional_min_velocity_9s
-    ):
-        return blocked("top_ftv_a_extended_requires_exceptional_acceleration")
-    if require_allocation_rank_one and allocation_rank != 1:
-        return blocked("top_ftv_a_requires_allocation_rank_1")
-    return FtvAuthorization(
-        "TOP_FTV_A",
-        "ok_exceptional_extension" if exceptional else "ok",
-        max_capital_pct=top_ftv_a_max_capital_pct,
-        exceptional_extension=exceptional,
+    fresh_trigger = bool(
+        evidence.get("firstLift")
+        or evidence.get("armedBaseLaunch")
+        or evidence.get("eliteBaseReady")
     )
+    timing_blocked = timing in {"CHASE", "CHASING", "LATE", "FAILED_LAUNCH"}
+
+    top_ftv_a_reason = "top_ftv_a_disabled"
+    if top_ftv_a_enabled:
+        top_ftv_a_reason = "ok"
+        if move > top_ftv_a_exceptional_max_move_pct:
+            top_ftv_a_reason = "top_ftv_a_extension_above_40pct"
+        elif grade != "A":
+            top_ftv_a_reason = "top_ftv_a_requires_a_grade"
+        elif tier not in {"ELITE", "EXPLODING"}:
+            top_ftv_a_reason = "top_ftv_a_requires_elite_or_exploding"
+        elif not bool(evidence.get("flatThenVertical") and evidence.get("activeBreakout")):
+            top_ftv_a_reason = "top_ftv_a_requires_active_ftv"
+        elif not fresh_trigger:
+            top_ftv_a_reason = "top_ftv_a_requires_fresh_causal_trigger"
+        elif timing_blocked:
+            top_ftv_a_reason = "top_ftv_a_timing_blocked"
+        elif not bool(evidence.get("cvdBuying")):
+            top_ftv_a_reason = "top_ftv_a_requires_option_cvd_buying"
+        elif not bool(evidence.get("cvdAcceleration")):
+            top_ftv_a_reason = "top_ftv_a_requires_option_cvd_acceleration"
+        elif explosion_score < top_ftv_a_min_explosion_score:
+            top_ftv_a_reason = "top_ftv_a_explosion_score_below_floor"
+        elif quality < top_ftv_a_min_quality:
+            top_ftv_a_reason = "top_ftv_a_quality_below_floor"
+        elif tqs < top_ftv_a_min_tqs:
+            top_ftv_a_reason = "top_ftv_a_tqs_below_floor"
+        elif v3 < top_ftv_a_min_velocity_3s:
+            top_ftv_a_reason = "top_ftv_a_velocity_3s_below_floor"
+        elif v9 < top_ftv_a_min_velocity_9s:
+            top_ftv_a_reason = "top_ftv_a_velocity_9s_below_floor"
+        else:
+            exceptional = move > top_ftv_a_normal_max_move_pct
+            if exceptional and not (
+                explosion_score >= top_ftv_a_exceptional_min_explosion_score
+                and quality >= top_ftv_a_exceptional_min_quality
+                and tqs >= top_ftv_a_exceptional_min_tqs
+                and v3 >= top_ftv_a_exceptional_min_velocity_3s
+                and v9 >= top_ftv_a_exceptional_min_velocity_9s
+            ):
+                top_ftv_a_reason = "top_ftv_a_extended_requires_exceptional_acceleration"
+            elif require_allocation_rank_one and allocation_rank != 1:
+                top_ftv_a_reason = "top_ftv_a_requires_allocation_rank_1"
+            else:
+                return FtvAuthorization(
+                    "TOP_FTV_A",
+                    "ok_exceptional_extension" if exceptional else "ok",
+                    max_capital_pct=top_ftv_a_max_capital_pct,
+                    exceptional_extension=exceptional,
+                )
+
+    # Historical winner shape: ELITE/EXPLODING off local base with real heat.
+    # Ordinary sleeve only; does not require CVD acceleration. Disabled when the
+    # TOP_FTV_A fallback master switch is off (strict-S-only mode).
+    if winner_local_base_enabled and top_ftv_a_enabled:
+        winner_ok = (
+            grade in {"A", "B"}
+            and tier in {"ELITE", "EXPLODING"}
+            and fresh_trigger
+            and not timing_blocked
+            and bool(evidence.get("orderflowPositive"))
+            and winner_local_base_min_local_base_move_pct
+            <= move
+            <= winner_local_base_max_local_base_move_pct
+            and explosion_score >= winner_local_base_min_explosion_score
+            and quality >= winner_local_base_min_quality
+            and tqs >= winner_local_base_min_tqs
+            and v3 >= winner_local_base_min_velocity_3s
+            and v9 >= winner_local_base_min_velocity_9s
+        )
+        if winner_ok:
+            if require_allocation_rank_one and allocation_rank != 1:
+                return blocked("winner_local_base_requires_allocation_rank_1")
+            return FtvAuthorization(
+                "WINNER_LOCAL_BASE",
+                "ok",
+                max_capital_pct=winner_local_base_max_capital_pct,
+            )
+
+    if not top_ftv_a_enabled:
+        return blocked("ftv_elite_top_only_requires_s")
+    return blocked(top_ftv_a_reason)
 
 
 def ftv_policy_settings(settings: Any) -> dict[str, Any]:
@@ -231,6 +275,15 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "ftv_s_strict_require_cvd_buying",
         "ftv_s_strict_min_local_base_move_pct",
         "ftv_s_strict_max_local_base_move_pct",
+        "winner_local_base_enabled",
+        "winner_local_base_min_explosion_score",
+        "winner_local_base_min_quality",
+        "winner_local_base_min_tqs",
+        "winner_local_base_min_velocity_3s",
+        "winner_local_base_min_velocity_9s",
+        "winner_local_base_min_local_base_move_pct",
+        "winner_local_base_max_local_base_move_pct",
+        "winner_local_base_max_capital_pct",
     )
     return {name: getattr(settings, name) for name in names}
 

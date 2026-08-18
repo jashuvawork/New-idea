@@ -28,7 +28,7 @@ def _settings(**overrides):
     s.ict_defensive_base_rip_tiers_csv = "ELITE,EXPLODING"
     s.ict_defensive_base_rip_full_lots_tiers_csv = "ELITE,EXPLODING"
     s.ict_defensive_base_rip_require_top_quality = True
-    s.ict_defensive_base_rip_min_score = 80.0
+    s.ict_defensive_base_rip_min_score = 75.0
     s.ict_defensive_base_rip_min_quality = 70.0
     s.ict_defensive_base_rip_min_velocity_3s = 2.5
     s.ict_defensive_base_rip_block_expiry_worst = True
