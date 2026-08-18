@@ -1533,6 +1533,53 @@ def find_best_entry(
                 bonus += 14
             elif pad > pad_hi:
                 bonus -= min(40, (pad - pad_hi) * 0.9)
+            # Prioritize winner-shaped ELITE/EXPLODING still sitting on the local-base
+            # pad so they win rank-1 before the rip leaves the 5–25% catch window.
+            try:
+                quality = float(
+                    alert.get("flatVerticalQuality")
+                    or alert.get("ictFlatVerticalQuality")
+                    or 0
+                )
+            except (TypeError, ValueError):
+                quality = 0.0
+            score_v = float(
+                getattr(c, "confidence", 0)
+                or alert.get("explosionScore")
+                or 0
+            )
+            tier_u = str(
+                getattr(c, "tier", "") or alert.get("tier") or ""
+            ).upper()
+            winner_pad_lo = float(
+                getattr(settings, "winner_local_base_min_local_base_move_pct", 5.0)
+                or 5.0
+            )
+            winner_pad_hi = float(
+                getattr(settings, "winner_local_base_max_local_base_move_pct", 25.0)
+                or 25.0
+            )
+            if (
+                tier_u in {"ELITE", "EXPLODING"}
+                and winner_pad_lo <= pad <= winner_pad_hi
+                and score_v
+                >= float(
+                    getattr(settings, "winner_local_base_min_explosion_score", 75.0)
+                    or 75.0
+                )
+                and quality
+                >= float(
+                    getattr(settings, "winner_local_base_min_quality", 70.0) or 70.0
+                )
+                and (
+                    first_lift
+                    or alert.get("ictArmedBaseLaunch")
+                    or alert.get("ictEliteBaseReady")
+                )
+            ):
+                bonus += float(
+                    getattr(settings, "winner_local_base_rank_bonus", 28.0) or 28.0
+                )
             # Reward early window only — do NOT boost already-extended % moves.
             if early_min <= daily_move <= early_max and pad <= pad_hi:
                 bonus += 12

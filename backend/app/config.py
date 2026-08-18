@@ -210,6 +210,9 @@ class Settings(BaseSettings):
     winner_local_base_min_local_base_move_pct: float = 5.0
     winner_local_base_max_local_base_move_pct: float = 25.0
     winner_local_base_max_capital_pct: float = 0.35
+    # Prefer winner-shaped local-base prints in selector rank so they clear rank-1
+    # while still inside the 5–25% catch window (before 100%+ FTV leaves the pad).
+    winner_local_base_rank_bonus: float = 28.0
     # Separate rank-1 authorization for winner-like ELITE/EXPLODING current-data FTV A.
     # Historical profiles are not treated as proof because old rows lack v9/CVD.
     top_ftv_a_enabled: bool = True
@@ -562,12 +565,14 @@ class Settings(BaseSettings):
     explosion_peak_capture_max_profit_min_best: float = 28.0
     explosion_peak_capture_max_profit_giveback_ratio: float = 0.35
     # Large confirmed-rollover peaks bank near the top instead of giving back a
-    # third of a big rip. Aug12 NIFTY 24350 PE: +36.7pt peak (~₹135) rolled over
-    # (live vel -0.12) but the max-profit giveback 0.35 only booked ~₹122. Once a
-    # peak is genuinely large, keep ~94% (and cap giveback at 8pt). The rollover
-    # gate still requires dying tape, so still-rising stage runners are not clipped.
+    # third of a big rip. Ordinary trades tighten at +25pt (keep ~94%).
     explosion_peak_capture_big_peak_points: float = 25.0
     explosion_peak_capture_big_peak_giveback_ratio: float = 0.06
+    # Max-profit FTV / local-base winners: do NOT clip at +25pt — those rips often
+    # continue to 100%+ points. Only apply a soft near-top bank after a true
+    # expansion peak (≥80pt), and keep more room than the ordinary 6% band.
+    explosion_peak_capture_max_profit_big_peak_points: float = 80.0
+    explosion_peak_capture_max_profit_big_peak_giveback_ratio: float = 0.28
     # Hold near-base top rips for the max move: an ELITE/EXPLODING entered very near the
     # local base (entry base-rel ≤ 20%) has the whole rip ahead, so don't soft-lock a
     # small early peak — require a bigger peak before peak-capture/peak-fade profit-lock.
@@ -579,7 +584,9 @@ class Settings(BaseSettings):
     # base entries (e.g. 25–40% off) still ride toward max TP instead of soft-locking.
     explosion_near_base_hold_ict_max_entry_rel_pct: float = 40.0
     # Align with max-profit fade floor — small +10–15pt peaks are still the base leg.
-    explosion_near_base_hold_min_best_points: float = 28.0
+    # Local-base FTV aiming at 100%+ needs a higher soft-lock floor before banking.
+    explosion_near_base_hold_min_best_points: float = 40.0
+    explosion_near_base_hold_max_profit_min_best_points: float = 55.0
 
     # Moment stage trail ladder — flat→vertical / FVG / mega-rip projections.
     # Project max TP from fib/base-extension/heat, split into stages (~50pt on
