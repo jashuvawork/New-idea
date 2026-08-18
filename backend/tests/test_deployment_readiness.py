@@ -84,3 +84,10 @@ def test_readiness_uses_cached_snapshot_and_shared_risk_engine():
     assert payload["checks"]["eventLoopHealthy"] is True
     assert payload["checks"]["upstoxRateLimitClear"] is True
     assert payload["health"]["api"] == "ok"
+    assert payload["tradingPolicy"] == {
+        "ftvEliteTopOnlyEnabled": True,
+        "requiredCausalGrade": "S",
+        "requiresTopRankEligible": True,
+        "requiresAtmItm": True,
+        "requiredAllocationRank": 1,
+    }

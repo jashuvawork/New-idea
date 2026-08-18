@@ -520,6 +520,44 @@ async def _open_from_candidate(
         if reentry_blocked:
             return False, "exhausted_ftv_requires_new_base_reacceleration"
 
+    if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+        from app.engines.moneyness import atm_itm_entry_allows
+        from app.engines.trade_ranking import (
+            ftv_elite_top_policy,
+            rank_entry_candidate,
+        )
+
+        policy_snap = (
+            (snapshots or {}).get(str(symbol).upper())
+            or snap
+        )
+        policy_faded = False
+        if candidate.mode == "explosion" and candidate.explosion_event is not None:
+            from app.engines.explosion_entry_guards import detect_faded_vertical_rip
+
+            policy_faded, _ = detect_faded_vertical_rip(
+                candidate.explosion_event,
+                policy_snap,
+            )
+        # Recompute from current candidate evidence. Selector metadata is audit-only
+        # and must never serve as an execution authorization token.
+        policy_ranking = rank_entry_candidate(candidate, faded=policy_faded)
+        money_ok, _, _ = atm_itm_entry_allows(
+            candidate.side,
+            candidate.strike,
+            policy_snap,
+        )
+        policy_ok, policy_reason = ftv_elite_top_policy(
+            policy_ranking.get("evidence") or {},
+            policy_ranking,
+            snapshot_available=True,
+            atm_itm_allowed=money_ok,
+            allocation_rank=allocation.rank if allocation is not None else None,
+            require_allocation_rank_one=True,
+        )
+        if not policy_ok:
+            return False, policy_reason
+
     from app.engines.worst_day_guard import worst_day_blocks_live
 
     if snapshots:

@@ -23,6 +23,62 @@ def ranking_sort_key(ranking: Mapping[str, Any]) -> tuple[int, float]:
     )
 
 
+def ftv_elite_top_policy(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any],
+    *,
+    snapshot_available: bool = False,
+    atm_itm_allowed: bool = True,
+    allocation_rank: int | None = None,
+    require_allocation_rank_one: bool = False,
+) -> tuple[bool, str]:
+    """Pure causal authorization for the hard FTV elite-top execution policy."""
+    if str(evidence.get("mode") or "").lower() != "explosion":
+        return False, "ftv_elite_top_only_requires_explosion"
+
+    actual_ftv = bool(
+        (
+            evidence.get("flatThenVertical")
+            and evidence.get("activeBreakout")
+        )
+        or evidence.get("eliteBaseReady")
+        or evidence.get("armedBaseLaunch")
+    )
+    if not actual_ftv:
+        return False, "ftv_elite_top_only_requires_ftv"
+
+    timing = str(evidence.get("timingAssessment") or "").upper()
+    timing_action = str(evidence.get("timingAction") or "").lower()
+    if (
+        str(ranking.get("grade") or "").upper() == "REJECT"
+        or evidence.get("faded")
+        or evidence.get("exhaustedReentry")
+        or _number(evidence.get("velocity3s")) < 0
+        or _number(evidence.get("velocity9s")) < 0
+        or timing_action in {"block", "reject"}
+        or timing in {
+            "FAILED_LAUNCH",
+            "FADED",
+            "FADING",
+            "EXHAUSTED",
+            "NEGATIVE",
+            "REJECT",
+            "BLOCKED",
+        }
+    ):
+        return False, "ftv_elite_top_only_timing_blocked"
+
+    if str(ranking.get("grade") or "").upper() != "S":
+        return False, "ftv_elite_top_only_requires_s"
+    if not bool(ranking.get("topRankEligible")):
+        return False, "ftv_elite_top_only_requires_top_rank_eligible"
+    if snapshot_available and not atm_itm_allowed:
+        return False, "ftv_elite_top_only_requires_atm_itm"
+    if require_allocation_rank_one and allocation_rank != 1:
+        return False, "ftv_elite_top_only_requires_allocation_rank_1"
+    return True, "ok"
+
+
 def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     """Grade one trade without using outcomes, exits, or future P&L."""
     mode = str(evidence.get("mode") or "").lower()
@@ -37,8 +93,10 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     armed_launch = bool(evidence.get("armedBaseLaunch"))
     elite_base_ready = bool(evidence.get("eliteBaseReady"))
     flat_vertical = bool(evidence.get("flatThenVertical"))
+    active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
     exhausted = bool(evidence.get("exhaustedReentry"))
+    faded = bool(evidence.get("faded"))
     timing = str(evidence.get("timingAssessment") or "").upper()
     timing_action = str(evidence.get("timingAction") or "").lower()
 
@@ -158,6 +216,8 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "causalOnly": True,
         "evidence": {
+            "mode": mode,
+            "tier": tier or None,
             "velocity3s": round(v3, 3),
             "velocity9s": round(v9, 3),
             "localBaseMovePct": round(local_move, 2),
@@ -165,9 +225,12 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "eliteBaseReady": elite_base_ready,
             "armedBaseLaunch": armed_launch,
             "flatThenVertical": flat_vertical,
+            "activeBreakout": active_breakout,
             "orderflowPositive": orderflow,
             "timingAssessment": timing or None,
+            "timingAction": timing_action or None,
             "exhaustedReentry": exhausted,
+            "faded": faded,
         },
     }
 
@@ -176,12 +239,15 @@ def rank_entry_candidate(
     candidate: Any,
     *,
     exhausted_reentry: bool = False,
+    faded: bool = False,
 ) -> dict[str, Any]:
     """Adapt a selector candidate to the pure causal scorecard."""
     alert = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
     event = getattr(candidate, "explosion_event", None)
     pretrade = getattr(candidate, "pretrade_meta", None) or {}
     timing = pretrade.get("timingAssessment") or {}
+    if not isinstance(timing, Mapping):
+        timing = {"assessment": timing}
     chart_confidence = 0.0
     try:
         from app.engines.chart_exit_levels import chart_trade_confidence
@@ -213,6 +279,7 @@ def rank_entry_candidate(
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
         "armedBaseLaunch": alert.get("ictArmedBaseLaunch"),
         "flatThenVertical": alert.get("ictFlatThenVertical"),
+        "activeBreakout": alert.get("ictBreakout"),
         "orderflowPositive": bool(
             alert.get("ictVolumeAwakening")
             or alert.get("volumeAwaken")
@@ -223,5 +290,11 @@ def rank_entry_candidate(
         "timingAssessment": timing.get("assessment"),
         "timingAction": timing.get("action"),
         "exhaustedReentry": exhausted_reentry,
+        "faded": bool(
+            faded
+            or alert.get("fadedRip")
+            or alert.get("fadedVerticalRip")
+            or alert.get("fadedRipCaution")
+        ),
     }
     return rank_trade_evidence(evidence)

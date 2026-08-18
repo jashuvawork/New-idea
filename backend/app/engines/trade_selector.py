@@ -1292,18 +1292,44 @@ def find_best_entry(
                     getattr(c.explosion_event, "velocity_3s", 0) or 0
                 ),
             )
-        from app.engines.trade_ranking import rank_entry_candidate
+        from app.engines.trade_ranking import (
+            ftv_elite_top_policy,
+            rank_entry_candidate,
+        )
 
         causal_ranking = rank_entry_candidate(c, exhausted_reentry=exhausted)
+        policy_ok = True
+        policy_reason = "disabled"
+        if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+            from app.engines.moneyness import atm_itm_entry_allows
+
+            money_ok, _, _ = atm_itm_entry_allows(c.side, c.strike, c.snap)
+            policy_ok, policy_reason = ftv_elite_top_policy(
+                causal_ranking.get("evidence") or {},
+                causal_ranking,
+                snapshot_available=True,
+                atm_itm_allowed=money_ok,
+            )
         c.pretrade_meta = {
             **(c.pretrade_meta or {}),
             "causalRanking": causal_ranking,
+            "ftvEliteTopPolicy": {
+                "enabled": bool(
+                    getattr(settings, "ftv_elite_top_only_enabled", True)
+                ),
+                "passed": policy_ok,
+                "reason": policy_reason,
+            },
         }
 
     candidates = [
         c
         for c in candidates
         if (c.pretrade_meta or {}).get("causalRanking", {}).get("grade") != "REJECT"
+        and (
+            not bool(getattr(settings, "ftv_elite_top_only_enabled", True))
+            or (c.pretrade_meta or {}).get("ftvEliteTopPolicy", {}).get("passed")
+        )
     ]
     if not candidates:
         return None

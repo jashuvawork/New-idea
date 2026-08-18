@@ -565,11 +565,65 @@ def validate_candidate(
     Returns (passed, reason, metadata for entryContext.pretrade).
     """
     settings = get_settings()
+    policy_meta: dict[str, Any] = {}
+    if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+        from app.engines.moneyness import atm_itm_entry_allows
+        from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
+        from app.engines.trade_ranking import (
+            ftv_elite_top_policy,
+            rank_entry_candidate,
+        )
+
+        exhausted = False
+        if str(getattr(candidate, "mode", "") or "").lower() == "explosion":
+            exhausted, _ = exhausted_ftv_reentry_blocked(
+                state,
+                symbol=str(getattr(candidate, "symbol", "") or ""),
+                side=getattr(candidate, "side", ""),
+                strike=float(getattr(candidate, "strike", 0) or 0),
+                premium=float(getattr(candidate, "premium", 0) or 0),
+                velocity_3s=float(
+                    getattr(
+                        getattr(candidate, "explosion_event", None),
+                        "velocity_3s",
+                        0,
+                    )
+                    or 0
+                ),
+            )
+        causal_ranking = rank_entry_candidate(
+            candidate,
+            exhausted_reentry=exhausted,
+        )
+        policy_snap = getattr(candidate, "snap", None)
+        money_ok = True
+        if policy_snap is not None:
+            money_ok, _, _ = atm_itm_entry_allows(
+                candidate.side,
+                candidate.strike,
+                policy_snap,
+            )
+        policy_ok, policy_reason = ftv_elite_top_policy(
+            causal_ranking.get("evidence") or {},
+            causal_ranking,
+            snapshot_available=policy_snap is not None,
+            atm_itm_allowed=money_ok,
+        )
+        policy_meta = {
+            "ftvEliteTopPolicy": {
+                "enabled": True,
+                "passed": policy_ok,
+                "reason": policy_reason,
+            },
+            "causalRanking": causal_ranking,
+        }
+        if not policy_ok:
+            return False, policy_reason, policy_meta
     if not settings.controlled_trading_enabled:
-        return True, "ok", {}
+        return True, "ok", policy_meta
 
     trades = session_trades if session_trades is not None else collect_session_trades(state)
-    meta: dict[str, Any] = {"controlledTrading": True}
+    meta: dict[str, Any] = {**policy_meta, "controlledTrading": True}
 
     # Composer advisory → hard gate (standDown / opposing bias).
     if getattr(settings, "composer_hard_gate_enabled", True):

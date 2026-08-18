@@ -186,6 +186,9 @@ class Settings(BaseSettings):
     scalp_entries_enabled: bool = False
     # Explosion entries: only ELITE + EXPLODING (no soft BUILDING / premium-capture).
     explosion_elite_exploding_only: bool = True
+    # Hard execution policy: only causal S/top-eligible ATM/ITM flat→vertical
+    # explosions may pass selection, and only allocation rank 1 may execute.
+    ftv_elite_top_only_enabled: bool = True
     # Exception: BUILDING only as "elite build" — chart-aligned ICT flat→vertical
     # with ELITE-grade score + hot velocity. Aug7 cold BUILDING (score 56, v3 1.7)
     # must wait for ELITE print or upgrade into these bars.
