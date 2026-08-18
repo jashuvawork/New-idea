@@ -311,6 +311,15 @@ async def deployment_readiness():
             if settings.enable_live_trading and settings.auto_trading_enabled
             else "PAPER"
         ),
+        "tradingPolicy": {
+            "ftvEliteTopOnlyEnabled": bool(
+                getattr(settings, "ftv_elite_top_only_enabled", True)
+            ),
+            "requiredCausalGrade": "S",
+            "requiresTopRankEligible": True,
+            "requiresAtmItm": True,
+            "requiredAllocationRank": 1,
+        },
         "checks": checks,
         "health": {
             "api": "ok",

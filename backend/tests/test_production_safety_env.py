@@ -15,6 +15,7 @@ def _env_values() -> dict[str, str]:
 
 def test_production_template_uses_bounded_loss_policy():
     env = _env_values()
+    assert env["FTV_ELITE_TOP_ONLY_ENABLED"] == "true"
     assert env["DAILY_LOSS_STOP_INR"] == "6000"
     assert env["PER_TRADE_CAPITAL_PCT"] == "0.90"
     assert env["ORDINARY_ENTRY_MAX_CAPITAL_PCT"] == "0.35"
@@ -39,6 +40,7 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
     workflow = (ROOT / ".github/workflows/deploy-ec2.yml").read_text()
     updater = (ROOT / "deploy/ec2-update.sh").read_text()
     required = {
+        "FTV_ELITE_TOP_ONLY_ENABLED",
         "DAILY_LOSS_STOP_INR",
         "PER_TRADE_CAPITAL_PCT",
         "ORDINARY_ENTRY_MAX_CAPITAL_PCT",

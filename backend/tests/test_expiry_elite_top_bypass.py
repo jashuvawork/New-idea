@@ -431,6 +431,9 @@ def test_validate_candidate_composer_bypass_real_path(mock_p, mock_exp, mock_bri
     """Real validate_candidate: standDown must not block elite top; still blocks scalp."""
     cfg = _settings()
     cfg.dual_mode_enabled = False
+    # This regression isolates the legacy composer bypass; the hard S-only policy
+    # is covered separately with a fully causal armed-launch candidate.
+    cfg.ftv_elite_top_only_enabled = False
     mock_s.return_value = cfg
     mock_exp.return_value = cfg
     mock_p.return_value = cfg

@@ -31,6 +31,8 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def _settings():
     s = MagicMock()
+    # These tests isolate legacy controlled-trading gates.
+    s.ftv_elite_top_only_enabled = False
     s.controlled_trading_enabled = True
     s.controlled_max_trades_per_day = 10
     s.controlled_rally_trade_cap_bonus = 4

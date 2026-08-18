@@ -236,6 +236,7 @@ def test_composer_ict_flat_vertical_bypasses_bias(
     mock_brief, mock_settings, *_mocks,
 ):
     s = MagicMock()
+    s.ftv_elite_top_only_enabled = False
     s.controlled_trading_enabled = True
     s.composer_hard_gate_enabled = True
     s.composer_bias_gate_enabled = True
@@ -268,6 +269,7 @@ def test_composer_ict_flat_vertical_bypasses_bias(
 @patch("app.engines.composer_market_monitor.get_latest_brief")
 def test_composer_building_without_ict_still_blocked(mock_brief, mock_settings):
     s = MagicMock()
+    s.ftv_elite_top_only_enabled = False
     s.controlled_trading_enabled = True
     s.composer_hard_gate_enabled = True
     s.composer_bias_gate_enabled = True

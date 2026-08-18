@@ -8,6 +8,7 @@ from app.models.schemas import AutoTraderState, Side
 
 def _settings(**overrides):
     s = MagicMock()
+    s.ftv_elite_top_only_enabled = False
     s.controlled_trading_enabled = True
     s.composer_hard_gate_enabled = True
     s.composer_bias_gate_enabled = True

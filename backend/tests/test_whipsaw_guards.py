@@ -31,6 +31,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def _settings():
     s = MagicMock()
+    s.ftv_elite_top_only_enabled = False
     s.whipsaw_guards_enabled = True
     s.opposite_side_cooldown_seconds = 420
     s.opposite_side_cooldown_after_loss_seconds = 600
