@@ -335,8 +335,6 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     )
     # Top S at local base only — armed launch alone must not mint grade S for
     # mid EXPLODING (score ~70, quality B). Elite-base preauth (2–5%) stays.
-    # CVD is preferred; absolute volume / orderflow proof is enough when the CVD
-    # tape is sparse (armed readiness already required one of those proofs).
     armed_top_local = bool(
         armed_launch
         and tier in ("ELITE", "EXPLODING")
@@ -345,7 +343,6 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         and v3 >= 2.5
         and v9 >= 1.75
         and orderflow
-        and (cvd_buying or orderflow)
         and 5.0 <= local_move <= 25.0
         and not rejected
     )
