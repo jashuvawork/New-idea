@@ -1576,7 +1576,13 @@ async def _open_from_candidate(
             # Give it the same peak-managed exit semantics even before chart alignment.
             ctx_extra["maxProfitCapture"] = True
             ctx_extra["momentType"] = "first_lift_local_base"
+        elif bool(ctx_extra.get("armedBaseCapture")):
+            # Armed local-base launch — same hold-to-max path as first lift (100%+ FTV).
+            ctx_extra["maxProfitCapture"] = True
+            ctx_extra["momentType"] = "armed_base_local_base"
         elif ict_flat_vertical:
+            # Authorized FTV at local base — always ride toward max points.
+            ctx_extra["maxProfitCapture"] = True
             ctx_extra["momentType"] = "flat_then_vertical"
         elif ict.mega_rip:
             ctx_extra["momentType"] = "mega_rip"

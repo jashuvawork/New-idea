@@ -1001,15 +1001,32 @@ def _near_base_top_runner(trade: PaperTrade) -> bool:
     return bool(trade_is_high_conviction(trade))
 
 
-def _near_base_hold_min_best(trade: PaperTrade, base_min_best: float) -> float:
+def _near_base_hold_min_best(
+    trade: PaperTrade,
+    base_min_best: float,
+    *,
+    max_profit: bool = False,
+) -> float:
     """Raise the soft-lock min-best for a near-base top runner so a small early peak
     doesn't book before the base rip develops."""
     if not _near_base_top_runner(trade):
         return base_min_best
     settings = get_settings()
     hold_min = float(
-        getattr(settings, "explosion_near_base_hold_min_best_points", 28.0) or 28.0
+        getattr(settings, "explosion_near_base_hold_min_best_points", 40.0) or 40.0
     )
+    if max_profit:
+        hold_min = max(
+            hold_min,
+            float(
+                getattr(
+                    settings,
+                    "explosion_near_base_hold_max_profit_min_best_points",
+                    55.0,
+                )
+                or 55.0
+            ),
+        )
     return max(base_min_best, hold_min)
 
 
@@ -1071,27 +1088,39 @@ def peak_capture_profit_lock_reason(
             min_best = max(6.0, min_best * 0.85)
             giveback_ratio = min(giveback_ratio, 0.18)
 
-    # Large confirmed-rollover peak → bank near the top (keep ~78%) instead of
-    # giving back a third of a big rip (Aug12 NIFTY 24350 PE: +36.7pt peak → gave
-    # back to +20). Only tightens the giveback once the peak is genuinely large;
-    # the rollover gate below still requires the tape to confirm the top, so a
-    # still-rising stage/ladder runner is never clipped on a hot rip.
-    big_peak = float(
-        getattr(settings, "explosion_peak_capture_big_peak_points", 25.0) or 25.0
-    )
-    if big_peak > 0 and best >= big_peak:
-        giveback_ratio = min(
-            giveback_ratio,
-            float(
-                getattr(
-                    settings, "explosion_peak_capture_big_peak_giveback_ratio", 0.22
-                )
-                or 0.22
-            ),
+    # Large confirmed-rollover peak → bank near the top. Ordinary trades tighten at
+    # +25pt (6% giveback). Max-profit FTV / local-base winners wait for a true
+    # expansion peak (≥80pt) so 100%+ rips are not clipped on a mid-leg dip.
+    if max_profit:
+        big_peak = float(
+            getattr(
+                settings,
+                "explosion_peak_capture_max_profit_big_peak_points",
+                80.0,
+            )
+            or 80.0
         )
+        big_peak_ratio = float(
+            getattr(
+                settings,
+                "explosion_peak_capture_max_profit_big_peak_giveback_ratio",
+                0.28,
+            )
+            or 0.28
+        )
+    else:
+        big_peak = float(
+            getattr(settings, "explosion_peak_capture_big_peak_points", 25.0) or 25.0
+        )
+        big_peak_ratio = float(
+            getattr(settings, "explosion_peak_capture_big_peak_giveback_ratio", 0.22)
+            or 0.22
+        )
+    if big_peak > 0 and best >= big_peak:
+        giveback_ratio = min(giveback_ratio, big_peak_ratio)
 
     # Near-base top runner → hold for a bigger peak before capturing (base rip ahead).
-    min_best = _near_base_hold_min_best(trade, min_best)
+    min_best = _near_base_hold_min_best(trade, min_best, max_profit=max_profit)
 
     if best < min_best:
         return None
@@ -1236,7 +1265,7 @@ def peak_fade_profit_lock_reason(
     # Soft lock: still green, but most of the peak is gone.
     # Near-base top runner → require a bigger peak before the soft lock so a small early
     # fade doesn't book the base rip early (breakeven lock above still protects downside).
-    soft_min_best = _near_base_hold_min_best(trade, min_best)
+    soft_min_best = _near_base_hold_min_best(trade, min_best, max_profit=max_profit)
     if (
         pnl_pts >= min_remain
         and best >= soft_min_best

@@ -59,8 +59,8 @@ def test_mid_leg_still_books_on_fade():
 
 
 def test_near_base_still_books_big_peak_fade():
-    """Once a near-base runner prints a big peak (≥28) and gives it back, it books."""
-    reason = peak_fade_profit_lock_reason(_trade(11.0, best=32.0), best=32.0, pnl_pts=8.0)
+    """Once a near-base runner prints a big peak (≥40) and gives it back, it books."""
+    reason = peak_fade_profit_lock_reason(_trade(11.0, best=45.0), best=45.0, pnl_pts=8.0)
     assert reason is not None
 
 

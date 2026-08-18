@@ -35,7 +35,8 @@ def _settings(**overrides):
     s.explosion_peak_fade_bullish_min_velocity_3s = 1.5
     s.explosion_near_base_hold_enabled = True
     s.explosion_near_base_hold_max_entry_rel_pct = 20.0
-    s.explosion_near_base_hold_min_best_points = 28.0
+    s.explosion_near_base_hold_min_best_points = 40.0
+    s.explosion_near_base_hold_max_profit_min_best_points = 55.0
     s.explosion_peak_capture_enabled = True
     s.explosion_peak_capture_min_best_points = 8.0
     s.explosion_peak_capture_giveback_ratio = 0.12
@@ -48,6 +49,8 @@ def _settings(**overrides):
     s.explosion_peak_capture_max_profit_giveback_ratio = 0.35
     s.explosion_peak_capture_big_peak_points = 25.0
     s.explosion_peak_capture_big_peak_giveback_ratio = 0.06
+    s.explosion_peak_capture_max_profit_big_peak_points = 80.0
+    s.explosion_peak_capture_max_profit_big_peak_giveback_ratio = 0.28
     s.explosion_faded_rip_no_green_exit_enabled = False
     s.bullish_hold_enabled = True
     s.explosion_stop_min_hold_seconds = 0
@@ -148,27 +151,56 @@ def test_peak_capture_near_12pt_top_when_rolling_over(mock_s):
 
 @patch("app.engines.explosion_profit.get_settings")
 def test_big_peak_banks_near_top_on_max_profit_rollover(mock_s):
-    """Aug12 NIFTY 24350 PE: +36.7pt max-profit peak rolled over (cold tape).
+    """Confirmed rollover after a real expansion still banks via absolute giveback cap.
 
-    Old max-profit giveback 0.35 held until ~+23.9 (gave back ~13pt). The big-peak
-    tighten keeps ~78%, so a ~9pt giveback (still +27.5) banks near the top.
+    Near-base hold is intentionally out of scope here (pad > ICT hold window) so
+    we isolate the absolute 8pt giveback bank on dying tape.
     """
     mock_s.return_value = _settings()
     ctx = {
         "liveVelocity3s": -0.1,
-        "localBaseBaseRelPct": 33.1,
+        "localBaseBaseRelPct": 45.0,
         "ictFlatThenVertical": True,
         "maxProfitCapture": True,
         "psychologyLabel": "GREED",
         "psychologyExitBias": "LET_RUNNERS",
         "premiumChart": {"momentum3Pct": -0.1},
     }
-    trade = _trade(entry=98.32, best=36.74, current=125.82, ctx=ctx)
-    # giveback 9.24 ≈ 25% of 36.74 — above the 22% big-peak threshold, still +27.5.
+    trade = _trade(entry=98.32, best=60.0, current=150.0, ctx=ctx)
+    # giveback 9.0 ≥ absolute 8pt cap — bank near the top on confirmed rollover.
     reason = peak_capture_profit_lock_reason(
-        trade, best=36.74, pnl_pts=27.5, max_profit=True, live_velocity_3s=-0.1,
+        trade, best=60.0, pnl_pts=51.0, max_profit=True, live_velocity_3s=-0.1,
     )
     assert reason == "explosion_peak_capture"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_max_profit_ftv_holds_mid_leg_dip_before_100pct(mock_s):
+    """Local-base FTV at +42pt with a small dip must keep running toward 100%+."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=50.0,
+        best=42.0,
+        current=87.0,
+        ctx={
+            "liveVelocity3s": 0.4,
+            "localBaseBaseRelPct": 18.0,
+            "ictFlatThenVertical": True,
+            "maxProfitCapture": True,
+            "firstLiftCapture": True,
+            "premiumChart": {"momentum3Pct": 0.05},
+        },
+    )
+    # 5pt giveback on a +42pt peak — below absolute 8pt and below 0.35 ratio.
+    reason = peak_capture_profit_lock_reason(
+        trade, best=42.0, pnl_pts=37.0, max_profit=True, live_velocity_3s=0.4,
+    )
+    assert reason is None
+    # Soft fade lock also waits for the max-profit near-base floor (≥55).
+    soft = peak_fade_profit_lock_reason(
+        trade, best=42.0, pnl_pts=37.0, max_profit=True, live_velocity_3s=0.4,
+    )
+    assert soft is None
 
 
 @patch("app.engines.explosion_profit.get_settings")
@@ -199,17 +231,20 @@ def test_large_vertical_caps_giveback_near_observed_top(mock_s):
 @patch("app.engines.explosion_profit.get_settings")
 def test_absolute_giveback_cap_still_protects_when_big_peak_tightening_is_off(mock_s):
     """The 8pt ceiling independently prevents a large winner from fading deeply."""
-    mock_s.return_value = _settings(explosion_peak_capture_big_peak_points=999.0)
+    mock_s.return_value = _settings(
+        explosion_peak_capture_big_peak_points=999.0,
+        explosion_peak_capture_max_profit_big_peak_points=999.0,
+    )
     ctx = {
         "liveVelocity3s": -0.1,
-        "localBaseBaseRelPct": 33.1,
+        "localBaseBaseRelPct": 45.0,
         "ictFlatThenVertical": True,
         "maxProfitCapture": True,
         "premiumChart": {"momentum3Pct": -0.1},
     }
-    trade = _trade(entry=98.32, best=36.74, current=125.82, ctx=ctx)
+    trade = _trade(entry=98.32, best=60.0, current=150.0, ctx=ctx)
     reason = peak_capture_profit_lock_reason(
-        trade, best=36.74, pnl_pts=27.5, max_profit=True, live_velocity_3s=-0.1,
+        trade, best=60.0, pnl_pts=51.0, max_profit=True, live_velocity_3s=-0.1,
     )
     assert reason == "explosion_peak_capture"
 
@@ -370,7 +405,7 @@ def test_aug6_78700_max_profit_holds_first_pullback(mock_s):
     """Aug6 SENSEX 78700 CE: best +15.4 → +6.5 with OVERCONFIDENCE must HOLD.
 
     Old path tightened giveback to 50% and disabled near-base hold, booking before
-    the extension to ~460. Max-profit + near-base must wait for a ≥28pt peak.
+    the extension to ~460. Max-profit + near-base must wait for a ≥55pt peak.
     """
     mock_s.return_value = _settings()
     trade = _trade(
