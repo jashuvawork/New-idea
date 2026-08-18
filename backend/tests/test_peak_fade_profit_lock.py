@@ -51,6 +51,7 @@ def _settings(**overrides):
     s.explosion_peak_capture_big_peak_giveback_ratio = 0.06
     s.explosion_peak_capture_max_profit_big_peak_points = 80.0
     s.explosion_peak_capture_max_profit_big_peak_giveback_ratio = 0.28
+    s.explosion_peak_capture_max_profit_max_giveback_points = 24.0
     s.explosion_faded_rip_no_green_exit_enabled = False
     s.bullish_hold_enabled = True
     s.explosion_stop_min_hold_seconds = 0
@@ -151,10 +152,9 @@ def test_peak_capture_near_12pt_top_when_rolling_over(mock_s):
 
 @patch("app.engines.explosion_profit.get_settings")
 def test_big_peak_banks_near_top_on_max_profit_rollover(mock_s):
-    """Confirmed rollover after a real expansion still banks via absolute giveback cap.
+    """After a true expansion peak (≥80), confirmed rollover banks via absolute cap.
 
-    Near-base hold is intentionally out of scope here (pad > ICT hold window) so
-    we isolate the absolute 8pt giveback bank on dying tape.
+    Mid-leg peaks (<80) intentionally use ratio-only so 100%+ FTV is not clipped.
     """
     mock_s.return_value = _settings()
     ctx = {
@@ -166,10 +166,15 @@ def test_big_peak_banks_near_top_on_max_profit_rollover(mock_s):
         "psychologyExitBias": "LET_RUNNERS",
         "premiumChart": {"momentum3Pct": -0.1},
     }
-    trade = _trade(entry=98.32, best=60.0, current=150.0, ctx=ctx)
-    # giveback 9.0 ≥ absolute 8pt cap — bank near the top on confirmed rollover.
+    # Mid-leg 60pt / 9pt giveback — ratio-only (0.35 → need 21pt) → HOLD toward 100%+.
+    mid = _trade(entry=98.32, best=60.0, current=150.0, ctx=ctx)
+    assert peak_capture_profit_lock_reason(
+        mid, best=60.0, pnl_pts=51.0, max_profit=True, live_velocity_3s=-0.1,
+    ) is None
+    # True expansion ≥80 with ≥24pt giveback on dying tape → bank near top.
+    trade = _trade(entry=98.32, best=90.0, current=165.0, ctx=ctx)
     reason = peak_capture_profit_lock_reason(
-        trade, best=60.0, pnl_pts=51.0, max_profit=True, live_velocity_3s=-0.1,
+        trade, best=90.0, pnl_pts=66.0, max_profit=True, live_velocity_3s=-0.1,
     )
     assert reason == "explosion_peak_capture"
 
@@ -205,12 +210,12 @@ def test_max_profit_ftv_holds_mid_leg_dip_before_100pct(mock_s):
 
 @patch("app.engines.explosion_profit.get_settings")
 def test_large_vertical_caps_giveback_near_observed_top(mock_s):
-    """A +200pt spike should not wait for a percentage-based 12–70pt fade."""
+    """After ≥80pt expansion, absolute max-profit cap banks near the observed top."""
     mock_s.return_value = _settings()
     trade = _trade(
         entry=50.0,
         best=200.0,
-        current=241.0,
+        current=226.0,
         ctx={
             "liveVelocity3s": -1.5,
             "ictFlatThenVertical": True,
@@ -218,10 +223,11 @@ def test_large_vertical_caps_giveback_near_observed_top(mock_s):
             "premiumChart": {"momentum3Pct": -0.5},
         },
     )
+    # giveback 24 ≥ max-profit absolute ceiling — bank without waiting 0.28*200.
     reason = peak_capture_profit_lock_reason(
         trade,
         best=200.0,
-        pnl_pts=191.0,
+        pnl_pts=176.0,
         max_profit=True,
         live_velocity_3s=-1.5,
     )
@@ -230,7 +236,7 @@ def test_large_vertical_caps_giveback_near_observed_top(mock_s):
 
 @patch("app.engines.explosion_profit.get_settings")
 def test_absolute_giveback_cap_still_protects_when_big_peak_tightening_is_off(mock_s):
-    """The 8pt ceiling independently prevents a large winner from fading deeply."""
+    """Ordinary trades keep the 8pt ceiling even when big-peak tightening is off."""
     mock_s.return_value = _settings(
         explosion_peak_capture_big_peak_points=999.0,
         explosion_peak_capture_max_profit_big_peak_points=999.0,
@@ -238,13 +244,11 @@ def test_absolute_giveback_cap_still_protects_when_big_peak_tightening_is_off(mo
     ctx = {
         "liveVelocity3s": -0.1,
         "localBaseBaseRelPct": 45.0,
-        "ictFlatThenVertical": True,
-        "maxProfitCapture": True,
         "premiumChart": {"momentum3Pct": -0.1},
     }
     trade = _trade(entry=98.32, best=60.0, current=150.0, ctx=ctx)
     reason = peak_capture_profit_lock_reason(
-        trade, best=60.0, pnl_pts=51.0, max_profit=True, live_velocity_3s=-0.1,
+        trade, best=60.0, pnl_pts=51.0, max_profit=False, live_velocity_3s=-0.1,
     )
     assert reason == "explosion_peak_capture"
 

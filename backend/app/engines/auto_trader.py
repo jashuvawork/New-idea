@@ -555,6 +555,13 @@ async def _open_from_candidate(
             )
         # Recompute from current candidate evidence. Selector metadata is audit-only
         # and must never serve as an execution authorization token.
+        from app.engines.trade_ranking import (
+            ftv_authorization_policy,
+            ftv_policy_settings,
+            rank_entry_candidate,
+            resolve_policy_day_mode,
+        )
+
         policy_ranking = rank_entry_candidate(
             candidate, faded=policy_faded, snapshot=policy_snap
         )
@@ -570,6 +577,7 @@ async def _open_from_candidate(
             atm_itm_allowed=money_ok,
             allocation_rank=allocation.rank if allocation is not None else None,
             require_allocation_rank_one=True,
+            day_mode=resolve_policy_day_mode(state),
             **ftv_policy_settings(settings),
         )
         if not policy_decision.allowed:
@@ -1687,6 +1695,13 @@ async def _open_from_candidate(
             final_faded, _ = detect_faded_vertical_rip(
                 candidate.explosion_event, latest_policy_snap
             )
+        from app.engines.trade_ranking import (
+            ftv_authorization_policy,
+            ftv_policy_settings,
+            rank_entry_candidate,
+            resolve_policy_day_mode,
+        )
+
         final_ranking = rank_entry_candidate(
             candidate,
             faded=final_faded,
@@ -1704,6 +1719,7 @@ async def _open_from_candidate(
             atm_itm_allowed=final_money_ok,
             allocation_rank=allocation.rank if allocation is not None else None,
             require_allocation_rank_one=True,
+            day_mode=resolve_policy_day_mode(state),
             **ftv_policy_settings(settings),
         )
         if not final_policy.allowed:

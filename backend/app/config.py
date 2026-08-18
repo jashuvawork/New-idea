@@ -210,9 +210,19 @@ class Settings(BaseSettings):
     winner_local_base_min_local_base_move_pct: float = 5.0
     winner_local_base_max_local_base_move_pct: float = 25.0
     winner_local_base_max_capital_pct: float = 0.35
+    # On WORST / EXPIRY WORST days, WINNER sleeve also needs real option CVD buying
+    # (volume-surge alone is too soft for chop).
+    winner_local_base_require_cvd_on_worst: bool = True
     # Prefer winner-shaped local-base prints in selector rank so they clear rank-1
     # while still inside the 5–25% catch window (before 100%+ FTV leaves the pad).
     winner_local_base_rank_bonus: float = 28.0
+    # Final ftv_authorization_policy mirrors ICT #334 floors on EXPIRY WORST so
+    # afternoon mid-EXPLODING cannot clear WINNER / S_STRICT outside midday trap.
+    ftv_policy_expiry_worst_block_enabled: bool = True
+    ftv_policy_expiry_worst_min_tier: str = "ELITE"
+    ftv_policy_expiry_worst_min_quality: float = 85.0
+    ftv_policy_expiry_worst_min_score: float = 90.0
+    ftv_policy_expiry_worst_min_velocity_3s: float = 3.0
     # Separate rank-1 authorization for winner-like ELITE/EXPLODING current-data FTV A.
     # Historical profiles are not treated as proof because old rows lack v9/CVD.
     top_ftv_a_enabled: bool = True
@@ -573,6 +583,11 @@ class Settings(BaseSettings):
     # expansion peak (≥80pt), and keep more room than the ordinary 6% band.
     explosion_peak_capture_max_profit_big_peak_points: float = 80.0
     explosion_peak_capture_max_profit_big_peak_giveback_ratio: float = 0.28
+    # Absolute giveback ceiling for max-profit AFTER the big-peak threshold only.
+    # Mid-leg FTV (<80pt) uses ratio-only so an 8pt dip cannot bank before 100%+.
+    # 0 = uncapped (ratio-only even after big peak). Default keeps a near-top bank
+    # once the rip has fully expanded.
+    explosion_peak_capture_max_profit_max_giveback_points: float = 24.0
     # Hold near-base top rips for the max move: an ELITE/EXPLODING entered very near the
     # local base (entry base-rel ≤ 20%) has the whole rip ahead, so don't soft-lock a
     # small early peak — require a bigger peak before peak-capture/peak-fade profit-lock.
@@ -1592,9 +1607,15 @@ class Settings(BaseSettings):
     explosion_failed_launch_max_best_points: float = 1.0
     explosion_failed_launch_min_loss_points: float = 1.5
     explosion_failed_launch_max_velocity_3s: float = 0.0
-    # Same-strike cooldown after a failed launch (never-green chop spike).
+    # Same-chain cooldown after a failed launch / never-green chop spike.
     explosion_failed_launch_reentry_block_enabled: bool = True
     explosion_failed_launch_reentry_cooldown_seconds: int = 1800
+    # Block ATM±N adjacent strikes (1 = exact + one step each side).
+    explosion_failed_launch_reentry_strike_steps: int = 1
+    # Exit reasons that arm the cooldown (never-green hard cut often lacks v3<0).
+    explosion_failed_launch_reentry_exit_reasons_csv: str = (
+        "explosion_failed_launch,explosion_never_green_stop"
+    )
     # 2) Hard INR ceilings: ~1% of ₹2L normally, ~2% only for a fully proven launch.
     explosion_per_trade_max_loss_inr: float = 2_000.0
     explosion_exceptional_per_trade_max_loss_inr: float = 4_000.0
