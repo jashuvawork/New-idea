@@ -1109,11 +1109,17 @@ def filter_candidates_pretrade(
     viable: list[Any] = []
     for c in candidates:
         ok, reason, meta = validate_candidate(c, state, session_trades, snapshots)
+        prior_meta = dict(getattr(c, "pretrade_meta", None) or {})
         if ok:
-            c.pretrade_meta = meta
+            c.pretrade_meta = {**prior_meta, **meta}
             viable.append(c)
         else:
-            c.pretrade_meta = {"pretradePassed": False, "pretradeBlock": reason, **meta}
+            c.pretrade_meta = {
+                **prior_meta,
+                **meta,
+                "pretradePassed": False,
+                "pretradeBlock": reason,
+            }
     return viable
 
 

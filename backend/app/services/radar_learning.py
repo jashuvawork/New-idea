@@ -1031,15 +1031,35 @@ def record_funnel_event(
     *,
     now: datetime | None = None,
     date: str | None = None,
-) -> None:
+) -> bool:
     """Append one exact funnel transition such as DETECTED/SELECTED/ENTERED/CLOSED."""
     current = _aware(now)
     target_date = date or current.strftime("%Y-%m-%d")
+    row = dict(event)
+    if str(row.get("event") or "").upper() == "RANKED_OUT":
+        dedupe_seconds = max(
+            1,
+            int(getattr(get_settings(), "radar_funnel_dedupe_seconds", 60) or 60),
+        )
+        signature = (
+            f"{target_date}:RANKED_OUT:{row.get('key')}:{row.get('leaderKey')}"
+        )
+        with _lock:
+            previous = _last_funnel_event.get(signature)
+            if previous and (current - previous).total_seconds() < dedupe_seconds:
+                return False
+            _append_jsonl(
+                funnel_path(target_date),
+                {"ts": current.isoformat(), **row},
+            )
+            _last_funnel_event[signature] = current
+        return True
     payload = {
         "ts": current.isoformat(),
-        **dict(event),
+        **row,
     }
     _append_jsonl(funnel_path(target_date), payload)
+    return True
 
 
 def build_funnel_report(date: str) -> dict[str, Any]:
@@ -1093,6 +1113,9 @@ def build_funnel_report(date: str) -> dict[str, Any]:
             "bestTier": radar.get("tier"),
             "blocked": bool(matched_blocks),
             "selected": any(item.get("event") == "SELECTED" for item in matched_events),
+            "rankedOut": any(
+                item.get("event") == "RANKED_OUT" for item in matched_events
+            ),
             "orderRejected": any(
                 item.get("event") == "ORDER_REJECTED" for item in matched_events
             ),
@@ -1114,6 +1137,7 @@ def build_funnel_report(date: str) -> dict[str, Any]:
     entered = sum(1 for row in rows if row["entered"])
     blocked = sum(1 for row in rows if row["blocked"])
     selected = sum(1 for row in rows if row["selected"])
+    ranked_out = sum(1 for row in rows if row["rankedOut"])
     order_rejected = sum(1 for row in rows if row["orderRejected"])
     wins = sum(1 for row in rows if row["tradeOutcome"] == "WIN")
     return {
@@ -1121,6 +1145,7 @@ def build_funnel_report(date: str) -> dict[str, Any]:
         "detected": len(rows),
         "blocked": blocked,
         "selected": selected,
+        "rankedOut": ranked_out,
         "orderRejected": order_rejected,
         "entered": entered,
         "closedWins": wins,

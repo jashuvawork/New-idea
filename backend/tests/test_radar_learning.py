@@ -450,6 +450,69 @@ def test_funnel_maps_blocker_entry_and_trade_outcome(tmp_path):
     assert report["rows"][0]["blockers"] == ["chart_alignment"]
 
 
+def test_ranked_out_is_deduplicated_exposed_and_not_counted_selected(tmp_path):
+    settings = _settings(tmp_path)
+    start = datetime(2026, 8, 18, 10, 40, tzinfo=IST)
+    leader_key = "NIFTY:PUT:24350"
+    loser_key = "NIFTY:PUT:24250"
+    alerts = [
+        {**_alert(), "side": "PUT", "strike": 24350.0},
+        {**_alert(), "side": "PUT", "strike": 24250.0},
+    ]
+    with _patch_settings(settings):
+        record_top_radars(
+            {"NIFTY": _snap(alerts=alerts)},
+            now=start,
+            source="rest_snapshot",
+        )
+        event = {
+            "event": "RANKED_OUT",
+            "key": loser_key,
+            "symbol": "NIFTY",
+            "side": "PUT",
+            "strike": 24250.0,
+            "stage": "selector",
+            "cycleId": "aug18-1040",
+            "causalGrade": "A",
+            "causalRankScore": 82.0,
+            "legacySelectionScore": 155.0,
+            "finalRankPosition": 2,
+            "leaderKey": leader_key,
+            "leaderCausalGrade": "S",
+            "leaderCausalRankScore": 100.0,
+            "leaderLegacySelectionScore": 90.0,
+        }
+        assert record_funnel_event(event, now=start) is True
+        assert record_funnel_event(event, now=start + timedelta(seconds=1)) is False
+        record_funnel_event(
+            {"event": "SELECTED", "key": leader_key, "stage": "selector"},
+            now=start + timedelta(seconds=2),
+        )
+        with patch(
+            "app.services.trade_store.get_day_detail",
+            return_value={"trades": []},
+        ):
+            report = build_funnel_report("2026-08-18")
+        selected, event_count = radar_learning._causal_selected_keys(
+            "2026-08-18",
+            {
+                leader_key: {"firstSeenAt": start.isoformat()},
+                loser_key: {"firstSeenAt": start.isoformat()},
+            },
+        )
+
+    loser = next(row for row in report["rows"] if row["key"] == loser_key)
+    assert report["rankedOut"] == 1
+    assert report["selected"] == 1
+    assert loser["rankedOut"] is True
+    assert loser["selected"] is False
+    assert sum(
+        row["event"] == "RANKED_OUT" for row in loser["timeline"]
+    ) == 1
+    assert selected == {leader_key}
+    assert event_count == 1
+
+
 def test_funnel_never_attributes_pre_detection_events_or_trades(tmp_path):
     settings = _settings(tmp_path)
     detected = datetime(2026, 8, 15, 10, 0, tzinfo=IST)

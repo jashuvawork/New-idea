@@ -88,6 +88,28 @@ class EntryCandidate:
     pretrade_meta: Optional[dict] = None
 
 
+def rank_candidates_for_selection(
+    candidates: list[EntryCandidate],
+    legacy_score,
+) -> list[EntryCandidate]:
+    """Final causal-first ordering after every pretrade mutation."""
+    from app.engines.trade_ranking import ranking_sort_key
+
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            *ranking_sort_key(
+                (candidate.pretrade_meta or {}).get("causalRanking", {})
+            ),
+            legacy_score(candidate),
+            candidate.symbol.upper(),
+            candidate.side.value,
+            float(candidate.strike),
+        ),
+        reverse=True,
+    )
+
+
 def _exclude_preorder_rejected_candidates(
     candidates: list[EntryCandidate],
 ) -> list[EntryCandidate]:
@@ -1499,20 +1521,44 @@ def find_best_entry(
 
     # Stable leg identity breaks exact score ties so the capital-first slot cannot
     # flip between otherwise identical snapshots because of collection order.
-    from app.engines.trade_ranking import ranking_sort_key
-
-    best = max(
-        candidates,
-        key=lambda candidate: (
-            *ranking_sort_key(
-                (candidate.pretrade_meta or {}).get("causalRanking", {})
-            ),
-            sort_key(candidate),
-            candidate.symbol.upper(),
-            candidate.side.value,
-            float(candidate.strike),
-        ),
-    )
+    ranked_candidates = rank_candidates_for_selection(candidates, sort_key)
+    best = ranked_candidates[0]
+    leader_ranking = (best.pretrade_meta or {}).get("causalRanking", {})
+    best.pretrade_meta = {
+        **(best.pretrade_meta or {}),
+        "legacySelectionScore": round(sort_key(best), 3),
+        "rankedOut": [
+            {
+                "key": (
+                    f"{candidate.symbol.upper()}:{candidate.side.value}:"
+                    f"{float(candidate.strike):g}"
+                ),
+                "symbol": candidate.symbol.upper(),
+                "side": candidate.side.value,
+                "strike": float(candidate.strike),
+                "causalGrade": (
+                    (candidate.pretrade_meta or {})
+                    .get("causalRanking", {})
+                    .get("grade")
+                ),
+                "causalRankScore": (
+                    (candidate.pretrade_meta or {})
+                    .get("causalRanking", {})
+                    .get("rankScore")
+                ),
+                "legacySelectionScore": round(sort_key(candidate), 3),
+                "finalRankPosition": position,
+                "leaderKey": (
+                    f"{best.symbol.upper()}:{best.side.value}:"
+                    f"{float(best.strike):g}"
+                ),
+                "leaderCausalGrade": leader_ranking.get("grade"),
+                "leaderCausalRankScore": leader_ranking.get("rankScore"),
+                "leaderLegacySelectionScore": round(sort_key(best), 3),
+            }
+            for position, candidate in enumerate(ranked_candidates[1:], start=2)
+        ],
+    }
     floor = min_rank_for_entry(chop, snapshots)
     floor = max(floor, last_n_elevated_min_rank(state, snapshots))
 
