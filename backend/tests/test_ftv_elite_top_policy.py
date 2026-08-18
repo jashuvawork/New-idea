@@ -11,8 +11,15 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.config import Settings
-from app.engines.auto_trader import _open_from_candidate
-from app.engines.capital_allocator import RankedAllocation
+from app.engines.auto_trader import (
+    _open_from_candidate,
+    _top_ftv_a_policy_max_lots,
+)
+from app.engines.capital_allocator import (
+    CapitalSnapshot,
+    RankedAllocation,
+    max_lots_for_capital_pct,
+)
 from app.engines.pretrade_validator import validate_candidate
 from app.engines.trade_ranking import (
     ftv_authorization_policy,
@@ -119,7 +126,7 @@ def test_reconstructed_aug6_winner_like_top_exploding_a_passes_ordinary_fallback
     assert ranking["grade"] == "A"
     assert ranking["fullSleeveEligible"] is False
     assert decision.mode == "TOP_FTV_A"
-    assert decision.max_capital_pct == pytest.approx(0.35)
+    assert decision.max_capital_pct == pytest.approx(0.90)
     assert decision.exceptional_extension is False
 
 
@@ -136,8 +143,106 @@ def test_reconstructed_aug12_extended_elite_a_requires_extreme_acceleration():
     strong = _decision({**base, "velocity3s": 33.06, "velocity9s": 3.0})
     assert weak.reason == "top_ftv_a_extended_requires_exceptional_acceleration"
     assert strong.mode == "TOP_FTV_A"
-    assert strong.max_capital_pct == pytest.approx(0.35)
+    assert strong.max_capital_pct == pytest.approx(0.90)
     assert strong.exceptional_extension is True
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        _reconstructed_ftv_a(),
+        _reconstructed_ftv_a(
+            tier="ELITE",
+            localBaseMovePct=33.1,
+            explosionScore=98.0,
+            flatVerticalQuality=92.0,
+            tqs=62.0,
+            velocity3s=8.0,
+            velocity9s=3.0,
+        ),
+    ],
+)
+def test_top_ftv_a_rank_one_uses_policy_authorized_max_lots_and_exceptional_risk_context(
+    evidence,
+):
+    ranking = rank_trade_evidence(evidence)
+    decision = _decision(evidence, ranking=ranking, rank=1, require_rank=True)
+    allocation = RankedAllocation(
+        rank=1,
+        budgetInr=90_000,
+        remainingBeforeInr=100_000,
+        cashReserveInr=0,
+        capitalBaseInr=100_000,
+        committedInr=0,
+        weight=0.90,
+    )
+
+    # A causal grade is never itself a sizing token; only the final policy decision is.
+    assert ranking["fullSleeveEligible"] is False
+    with patch(
+        "app.engines.capital_allocator.max_lots_for_capital_pct",
+        return_value=31,
+    ) as max_lots:
+        lots, authorized = _top_ftv_a_policy_max_lots(
+            lots=4,
+            symbol="NIFTY",
+            premium=44.0,
+            policy_decision=decision,
+            allocation=allocation,
+        )
+
+    assert authorized is True
+    assert lots == 31
+    max_lots.assert_called_once_with("NIFTY", 44.0, pytest.approx(0.90))
+    assert Settings().explosion_exceptional_per_trade_max_loss_inr == 4_000
+
+
+def test_top_ftv_a_rank_two_and_cached_a_ranking_cannot_trigger_max_lots():
+    evidence = _reconstructed_ftv_a()
+    cached_ranking = rank_trade_evidence(evidence)
+    cached_ranking["fullSleeveEligible"] = True
+    blocked = _decision(evidence, rank=2, require_rank=True)
+    allocation = RankedAllocation(
+        rank=2,
+        budgetInr=25_000,
+        remainingBeforeInr=100_000,
+        cashReserveInr=0,
+        capitalBaseInr=100_000,
+        committedInr=0,
+        weight=0.25,
+    )
+
+    lots, authorized = _top_ftv_a_policy_max_lots(
+        lots=4,
+        symbol="NIFTY",
+        premium=44.0,
+        policy_decision=blocked,
+        allocation=allocation,
+    )
+
+    assert cached_ranking["fullSleeveEligible"] is True
+    assert blocked.allowed is False
+    assert (lots, authorized) == (4, False)
+
+
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+def test_max_lots_never_exceed_ninety_percent_of_available_capital(side):
+    premium = 44.0
+    lot_size = 65
+    available = 100_000.0
+    with (
+        patch(
+            "app.engines.capital_allocator.get_capital_snapshot",
+            return_value=CapitalSnapshot(availableMarginInr=available),
+        ),
+        patch("app.engines.capital_allocator._effective_capital_inr", side_effect=lambda value: value),
+        patch("app.engines.capital_allocator.lot_multiplier", return_value=lot_size),
+    ):
+        lots = max_lots_for_capital_pct("NIFTY", premium, 0.90)
+
+    assert side in {Side.CALL, Side.PUT}
+    assert lots * premium * lot_size <= available * 0.90
+    assert (lots + 1) * premium * lot_size > available * 0.90
 
 
 AUG18_SIX_A_PATTERNS = [
@@ -175,7 +280,15 @@ AUG18_SIX_A_PATTERNS = [
 @pytest.mark.parametrize(("name", "overrides"), AUG18_SIX_A_PATTERNS)
 def test_all_six_supplied_aug18_loss_profiles_remain_blocked(name, overrides):
     decision = _decision(_reconstructed_ftv_a(**overrides))
+    lots, max_sized = _top_ftv_a_policy_max_lots(
+        lots=4,
+        symbol="NIFTY",
+        premium=44.0,
+        policy_decision=decision,
+        allocation=RankedAllocation(1, 90_000, 100_000, 0, 100_000, 0, 0.90),
+    )
     assert decision.allowed is False, name
+    assert (lots, max_sized) == (4, False), name
 
 
 @pytest.mark.parametrize("side", ["CALL", "PUT"])
@@ -192,7 +305,9 @@ def test_top_ftv_a_is_ce_pe_symmetric(side):
         ({"cvdBuying": False}, "top_ftv_a_requires_option_cvd_buying"),
         ({"cvdAcceleration": False}, "top_ftv_a_requires_option_cvd_acceleration"),
         ({"timingAssessment": "CHASE"}, "top_ftv_a_timing_blocked"),
+        ({"timingAssessment": "FAILED_LAUNCH"}, "ftv_elite_top_only_timing_blocked"),
         ({"faded": True}, "ftv_elite_top_only_timing_blocked"),
+        ({"exhaustedReentry": True}, "ftv_elite_top_only_timing_blocked"),
     ],
 )
 def test_fallback_requires_live_cvd_and_clean_timing(mutation, reason):
@@ -224,6 +339,25 @@ def test_fallback_blocks_rank_two_and_more_than_40pct_extension():
     )
     assert rank_two.reason == "top_ftv_a_requires_allocation_rank_1"
     assert too_extended.reason == "top_ftv_a_extension_above_40pct"
+
+
+def test_otm_top_ftv_a_is_blocked_and_never_max_sized():
+    decision = _decision(
+        _reconstructed_ftv_a(),
+        atm_itm=False,
+        rank=1,
+        require_rank=True,
+    )
+    lots, max_sized = _top_ftv_a_policy_max_lots(
+        lots=4,
+        symbol="NIFTY",
+        premium=44.0,
+        policy_decision=decision,
+        allocation=RankedAllocation(1, 90_000, 100_000, 0, 100_000, 0, 0.90),
+    )
+
+    assert decision.reason == "ftv_elite_top_only_requires_atm_itm"
+    assert (lots, max_sized) == (4, False)
 
 
 def test_disabling_fallback_restores_strict_s_only():
