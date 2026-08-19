@@ -355,6 +355,19 @@ def building_rip_bullish_readiness(
         helpers.append("displacement")
     if volume_surge >= min_surge:
         helpers.append("volume_surge")
+    # Aug19 sudden-lift board — FTV structure + ICT confluence + LTP lift.
+    try:
+        from app.engines.building_lift_helpers import evaluate_building_lift_helpers
+
+        board = evaluate_building_lift_helpers(snap=snap, alert=row)
+        for h in board.helpers:
+            if h not in helpers:
+                helpers.append(h)
+        if board.helping:
+            # Something is actively helping — treat as option-led confirmation.
+            option_led = True
+    except Exception:
+        pass
     if not chart_ok and not option_led and not breadth_ok:
         return False, "building_rip_needs_chart_or_option_led"
     if not helpers:
@@ -365,6 +378,7 @@ def building_rip_bullish_readiness(
         alert["ictBuildingRipReady"] = True
         alert["buildingRipHelpers"] = list(helpers)
         alert["buildingRipHelpersOk"] = True
+        alert["buildingLiftHelping"] = True
         alert["ictBaseReadinessReason"] = (
             "building_local_base_lift_ready"
             if local_base_lift

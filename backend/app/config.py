@@ -510,6 +510,19 @@ class Settings(BaseSettings):
     building_ltp_best_pick_enabled: bool = True
     building_ltp_best_pick_rank_bonus: float = 48.0
     building_ltp_only_best_ready: bool = True
+    # Aug19 sudden-lift helper board — monitor what actually helps BUILDING move.
+    building_sudden_lift_monitor_enabled: bool = True
+    building_sudden_lift_min_helpers: int = 3
+    building_sudden_lift_min_pct: float = 0.4
+    building_sudden_lift_min_velocity_3s: float = 1.2
+    building_sudden_lift_min_peak_velocity_3s: float = 3.0
+    building_sudden_lift_min_ftv_quality: float = 55.0
+    building_sudden_lift_min_absolute_volume: float = 25_000.0
+    building_lift_helper_point: float = 3.5
+    building_lift_helping_bonus: float = 18.0
+    building_sudden_ltp_lift_bonus: float = 8.0
+    # Force an entry cycle when helpers flip on even without a large LTP tick.
+    building_helper_flip_triggers_cycle: bool = True
     # FTV sleeve for confirmed BUILDING lifts: when helpers prove something is
     # helping (vol / CVD / chart / breadth), authorize without waiting for ELITE.
     building_rip_ftv_enabled: bool = True

@@ -394,6 +394,7 @@ def ftv_authorization_policy(
     if building_rip_ftv_enabled and bool(evidence.get("buildingRipReady")):
         helpers_ok = bool(
             evidence.get("buildingRipHelpersOk")
+            or evidence.get("buildingLiftHelping")
             or evidence.get("cvdBuying")
             or evidence.get("cvdAcceleration")
             or evidence.get("orderflowPositive")
@@ -694,7 +695,11 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "eliteBaseReady": elite_base_ready,
             "vRipReady": v_rip_ready,
             "buildingRipReady": building_rip_ready,
-            "buildingRipHelpersOk": bool(evidence.get("buildingRipHelpersOk")),
+            "buildingRipHelpersOk": bool(
+                evidence.get("buildingRipHelpersOk")
+                or evidence.get("buildingLiftHelping")
+            ),
+            "buildingLiftHelping": bool(evidence.get("buildingLiftHelping")),
             "armedBaseLaunch": armed_launch,
             "armedBaseSustainedLift": bool(evidence.get("armedBaseSustainedLift")),
             "flatThenVertical": flat_vertical,
@@ -786,7 +791,10 @@ def rank_entry_candidate(
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
         "vRipReady": alert.get("ictVRipReady"),
         "buildingRipReady": alert.get("ictBuildingRipReady"),
-        "buildingRipHelpersOk": bool(alert.get("buildingRipHelpersOk")),
+        "buildingRipHelpersOk": bool(
+            alert.get("buildingRipHelpersOk") or alert.get("buildingLiftHelping")
+        ),
+        "buildingLiftHelping": bool(alert.get("buildingLiftHelping")),
         "armedBaseLaunch": alert.get("ictArmedBaseLaunch"),
         "armedBaseSustainedLift": alert.get("ictArmedBaseSustainedLift"),
         "flatThenVertical": alert.get("ictFlatThenVertical"),
