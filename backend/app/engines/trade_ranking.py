@@ -136,6 +136,7 @@ def ftv_authorization_policy(
         or evidence.get("eliteBaseReady")
         or evidence.get("armedBaseLaunch")
         or evidence.get("vRipReady")
+        or evidence.get("buildingRipReady")
     )
     if not actual_ftv:
         return blocked("ftv_elite_top_only_requires_ftv")
@@ -226,6 +227,7 @@ def ftv_authorization_policy(
                 or evidence.get("firstLift")
                 or evidence.get("eliteBaseReady")
                 or evidence.get("vRipReady")
+                or evidence.get("buildingRipReady")
                 or evidence.get("armedBaseSustainedLift")
                 or s_early_ftv
             ):
@@ -448,6 +450,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     v_rip_ready = bool(evidence.get("vRipReady")) and not bool(
         evidence.get("midRipCoil")
     )
+    building_rip_ready = bool(evidence.get("buildingRipReady")) and not bool(
+        evidence.get("midRipCoil")
+    )
     flat_vertical = bool(evidence.get("flatThenVertical"))
     active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
@@ -493,6 +498,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     elif v_rip_ready:
         score += 10.0
         reasons.append("v_rip_session_low")
+    elif building_rip_ready:
+        score += 9.0
+        reasons.append("building_rip_bullish")
     elif first_lift:
         score += 8.0
         reasons.append("fresh_first_lift")
@@ -506,12 +514,22 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     if 15.0 <= local_move <= 35.0:
         score += 6.0
         reasons.append(f"local_base_sweet_spot_{local_move:.1f}%")
-    elif local_move > 40.0:
+    elif local_move > 40.0 and not building_rip_ready:
         extension_penalty = min(45.0, (local_move - 40.0) * 1.4)
         score -= extension_penalty
         penalties.append(
             {
                 "code": "extended_from_local_base",
+                "points": round(extension_penalty, 1),
+                "value": round(local_move, 1),
+            }
+        )
+    elif building_rip_ready and local_move > 55.0:
+        extension_penalty = min(45.0, (local_move - 55.0) * 1.4)
+        score -= extension_penalty
+        penalties.append(
+            {
+                "code": "extended_building_rip",
                 "points": round(extension_penalty, 1),
                 "value": round(local_move, 1),
             }
@@ -585,10 +603,11 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             or armed_launch
             or elite_base_ready
             or v_rip_ready
+            or building_rip_ready
         )
         and v3 > 0
         and not rejected
-        and local_move <= 40.0
+        and local_move <= (55.0 if building_rip_ready else 40.0)
     )
     score = max(0.0, min(100.0, score))
     if rejected:
@@ -626,6 +645,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "firstLift": first_lift,
             "eliteBaseReady": elite_base_ready,
             "vRipReady": v_rip_ready,
+            "buildingRipReady": building_rip_ready,
             "armedBaseLaunch": armed_launch,
             "armedBaseSustainedLift": bool(evidence.get("armedBaseSustainedLift")),
             "flatThenVertical": flat_vertical,
@@ -716,6 +736,7 @@ def rank_entry_candidate(
         "firstLift": alert.get("ictFirstLift"),
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
         "vRipReady": alert.get("ictVRipReady"),
+        "buildingRipReady": alert.get("ictBuildingRipReady"),
         "armedBaseLaunch": alert.get("ictArmedBaseLaunch"),
         "armedBaseSustainedLift": alert.get("ictArmedBaseSustainedLift"),
         "flatThenVertical": alert.get("ictFlatThenVertical"),
