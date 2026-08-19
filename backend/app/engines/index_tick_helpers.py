@@ -30,9 +30,62 @@ _INDEX_SYMBOL_BY_KEY = {
 _last_spike: dict[str, dict[str, Any]] = {}
 # Per-symbol rolling history of recent spike moments: (monotonic_ts, v3).
 _spike_history: dict[str, deque[tuple[float, float]]] = defaultdict(deque)
+# Per-symbol rolling raw LTP history: (monotonic_ts, ltp) — every index tick, so a slow
+# sustained drift (below the sharp 3s spike bar) is still measurable over 30-60s.
+_ltp_history: dict[str, deque[tuple[float, float]]] = defaultdict(deque)
 # Pending wake flags — building_ltp_monitor_due consumes these.
 _pending_wake_symbols: set[str] = set()
 _observer_registered: bool = False
+
+
+def recent_index_drift(
+    symbol: str,
+    side: Any,
+    *,
+    window_seconds: Optional[float] = None,
+) -> dict[str, Any]:
+    """Net same-direction spot move over a window — catches steady grinds, not just spikes.
+
+    Some FTVs are driven by a slow index bleed rather than sharp 3s spikes (Aug19 SENSEX
+    76900 PE: ~-99pts/90s, each 3s step below the spike bar). The NET move over the window
+    naturally cancels chop (mean-reversion nets to ~0), so a modest threshold isolates a
+    genuine directional grind that lifts the aligned option side.
+    """
+    settings = get_settings()
+    out = {"net_pct": 0.0, "pts": 0.0, "aligned": False, "drift": False}
+    if not bool(getattr(settings, "index_drift_enabled", True)):
+        return out
+    sym = str(symbol or "").upper()
+    hist = _ltp_history.get(sym)
+    if not hist or len(hist) < 2:
+        return out
+    if window_seconds is None:
+        window_seconds = float(
+            getattr(settings, "index_drift_window_seconds", 45.0) or 45.0
+        )
+    now = hist[-1][0]
+    cutoff = now - float(window_seconds)
+    start_ltp = None
+    for ts, ltp in hist:
+        if ts >= cutoff:
+            start_ltp = ltp
+            break
+    last_ltp = hist[-1][1]
+    if not start_ltp or start_ltp <= 0 or last_ltp <= 0:
+        return out
+    net_pct = (last_ltp - start_ltp) / start_ltp * 100.0
+    out["net_pct"] = round(net_pct, 4)
+    out["pts"] = round(last_ltp - start_ltp, 1)
+    side_u = _side_str(side)
+    min_move = float(getattr(settings, "index_drift_min_move_pct", 0.05) or 0.05)
+    if side_u == "CALL":
+        out["aligned"] = net_pct >= min_move
+    elif side_u == "PUT":
+        out["aligned"] = net_pct <= -min_move
+    else:
+        out["aligned"] = abs(net_pct) >= min_move
+    out["drift"] = bool(out["aligned"])
+    return out
 
 
 def recent_index_spike_thrust(
@@ -92,6 +145,8 @@ class IndexTickHelpers:
     tick_spike: bool = False
     spike_burst: bool = False
     spike_burst_count: int = 0
+    drift_align: bool = False
+    drift_net_pct: float = 0.0
     mom_align: bool = False
     squeeze_align: bool = False
     breadth_align: bool = False
@@ -107,6 +162,7 @@ def reset_index_tick_helpers_for_tests() -> None:
     global _observer_registered
     _last_spike.clear()
     _spike_history.clear()
+    _ltp_history.clear()
     _pending_wake_symbols.clear()
     # Keep observer registered across tests once installed.
     _ = _observer_registered
@@ -138,6 +194,17 @@ def _on_index_tick(instrument_key: str, ltp: float) -> None:
     settings = get_settings()
     if not bool(getattr(settings, "index_tick_helpers_enabled", True)):
         return
+    # Record EVERY index tick into the longer LTP buffer first (drift needs the full grind,
+    # not only spikes). Bounded by the drift history window.
+    if bool(getattr(settings, "index_drift_enabled", True)):
+        lh = _ltp_history[symbol]
+        lh.append((time.monotonic(), float(ltp)))
+        hist_secs = float(
+            getattr(settings, "index_drift_history_seconds", 120.0) or 120.0
+        )
+        cutoff = time.monotonic() - hist_secs
+        while lh and lh[0][0] < cutoff:
+            lh.popleft()
     try:
         from app.services.tick_store import get_velocity_pct
 
@@ -324,6 +391,11 @@ def evaluate_index_tick_helpers(
     out.spike_burst = bool(thrust.get("burst"))
     out.spike_burst_count = int(thrust.get("aligned_count") or 0)
 
+    # Sustained drift — a steady same-direction grind below the sharp spike bar.
+    drift = recent_index_drift(symbol, side_u)
+    out.drift_align = bool(drift.get("drift"))
+    out.drift_net_pct = float(drift.get("net_pct") or 0.0)
+
     helpers: list[str] = []
     if out.tick_spike:
         helpers.append("index_tick_spike")
@@ -331,6 +403,8 @@ def evaluate_index_tick_helpers(
         helpers.append("index_tick_align")
     if out.spike_burst:
         helpers.append("index_spike_burst")
+    if out.drift_align:
+        helpers.append("index_drift")
     if out.mom_align:
         helpers.append("index_mom_turn")
     if out.squeeze_align:
@@ -343,9 +417,11 @@ def evaluate_index_tick_helpers(
     min_needed = int(
         getattr(settings, "index_tick_min_helpers_confirm", 2) or 2
     )
-    # Need tape or structure — never breadth alone. A spike burst counts as tape thrust.
+    # Need tape or structure — never breadth alone. Spike burst / sustained drift both
+    # count as tape thrust (the actual spot move behind a strike lift).
     has_tape = bool(
-        {"index_tick_spike", "index_tick_align", "index_spike_burst"} & set(helpers)
+        {"index_tick_spike", "index_tick_align", "index_spike_burst", "index_drift"}
+        & set(helpers)
     )
     has_structure = bool(
         {"index_mom_turn", "index_squeeze", "index_breadth"} & set(helpers)
@@ -358,6 +434,9 @@ def evaluate_index_tick_helpers(
         out.confirming = True
     # A confirmed same-direction spike burst plus any structure is a strong thrust.
     if out.spike_burst and has_structure:
+        out.confirming = True
+    # A sustained same-direction drift plus any structure confirms a grind-driven lift.
+    if out.drift_align and has_structure:
         out.confirming = True
     return out
 
@@ -374,6 +453,8 @@ def stamp_index_tick_helpers(
     out["indexTickSpike"] = bool(helpers.tick_spike)
     out["indexSpikeBurst"] = bool(helpers.spike_burst)
     out["indexSpikeBurstCount"] = int(helpers.spike_burst_count)
+    out["indexDrift"] = bool(helpers.drift_align)
+    out["indexDriftNetPct"] = round(float(helpers.drift_net_pct), 4)
     out["indexMomAlign"] = bool(helpers.mom_align)
     out["indexSqueezeAlign"] = bool(helpers.squeeze_align)
     out["indexHelpers"] = list(helpers.helpers)

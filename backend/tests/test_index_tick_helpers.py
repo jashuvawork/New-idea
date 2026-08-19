@@ -8,6 +8,7 @@ from app.engines.index_tick_helpers import (
     clear_index_spike_wake,
     evaluate_index_tick_helpers,
     peek_index_spike_wake,
+    recent_index_drift,
     recent_index_spike_thrust,
     reset_index_tick_helpers_for_tests,
     stamp_index_tick_helpers,
@@ -270,6 +271,56 @@ def test_spike_burst_becomes_index_helper():
     stamped = stamp_index_tick_helpers({}, board)
     assert stamped["indexSpikeBurst"] is True
     assert stamped["indexSpikeBurstCount"] >= 3
+
+
+def _seed_ltp(symbol: str, points: list[float], *, step: float = 1.0) -> None:
+    """Inject a raw index LTP history (oldest first), spaced `step` seconds apart."""
+    import time as _t
+
+    from app.engines import index_tick_helpers as ith
+
+    now = _t.monotonic()
+    ith._ltp_history[symbol.upper()].clear()
+    n = len(points)
+    for i, p in enumerate(points):
+        ith._ltp_history[symbol.upper()].append((now - (n - 1 - i) * step, float(p)))
+
+
+def test_recent_index_drift_detects_steady_down_grind():
+    reset_index_tick_helpers_for_tests()
+    # SENSEX bleeds ~76900 -> 76840 (-0.078%) over the window — a PUT-fuel grind.
+    pts = [76900 - i * 2.0 for i in range(31)]  # 31 ticks, -60 pts total
+    _seed_ltp("SENSEX", pts, step=1.5)
+    put = recent_index_drift("SENSEX", Side.PUT, window_seconds=45.0)
+    assert put["drift"] is True
+    assert put["net_pct"] < 0
+    # A CALL is NOT aligned with a falling index.
+    call = recent_index_drift("SENSEX", Side.CALL, window_seconds=45.0)
+    assert call["drift"] is False
+
+
+def test_recent_index_drift_ignores_chop():
+    reset_index_tick_helpers_for_tests()
+    # Oscillation that nets ~zero over the window — must not read as a drift.
+    pts = [76900 + (8.0 if i % 2 else -8.0) for i in range(31)]
+    _seed_ltp("SENSEX", pts, step=1.5)
+    assert recent_index_drift("SENSEX", Side.PUT, window_seconds=45.0)["drift"] is False
+    assert recent_index_drift("SENSEX", Side.CALL, window_seconds=45.0)["drift"] is False
+
+
+def test_index_drift_becomes_helper_and_confirms_with_structure():
+    reset_index_tick_helpers_for_tests()
+    clear_ticks()
+    pts = [76950 - i * 2.5 for i in range(31)]  # steady fall
+    _seed_ltp("SENSEX", pts, step=1.5)
+    snap = _snap_put()  # bearish chart + breadth = structure
+    board = evaluate_index_tick_helpers(snap=snap, side=Side.PUT)
+    assert board.drift_align is True
+    assert "index_drift" in board.helpers
+    assert board.confirming is True
+    stamped = stamp_index_tick_helpers({}, board)
+    assert stamped["indexDrift"] is True
+    assert stamped["indexDriftNetPct"] < 0
 
 
 def test_index_spike_wakes_building_ltp_cycle():
