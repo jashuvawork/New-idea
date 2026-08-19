@@ -1192,6 +1192,9 @@ def peak_fade_profit_lock_reason(
     # Even an FTV runner loses its free option once a small winner fully rolls over.
     # This acts only near breakeven with non-positive live velocity, so a normal
     # pullback that remains green or is already reaccelerating keeps running.
+    # Exception: near-base max-profit FTV must hold through tiny early +3–5pt
+    # fades (Aug19 76900 PE scratched at early_green after best +5) — require the
+    # same meaningful peak floor as near-base hold before BE-locking.
     if bool(getattr(settings, "explosion_early_green_lock_enabled", True)):
         early_min_best = _cfg_float(
             settings, "explosion_early_green_lock_min_best_points", 3.5
@@ -1202,6 +1205,16 @@ def peak_fade_profit_lock_reason(
         early_max_v = _cfg_float(
             settings, "explosion_early_green_lock_max_velocity_3s", 0.0
         )
+        if max_profit and _near_base_top_runner(trade):
+            early_min_best = max(
+                early_min_best,
+                _cfg_float(
+                    settings,
+                    "explosion_early_green_lock_near_base_max_profit_min_best_points",
+                    55.0,
+                ),
+                _near_base_hold_min_best(trade, early_min_best, max_profit=True),
+            )
         if (
             best >= early_min_best
             and pnl_pts <= early_buffer

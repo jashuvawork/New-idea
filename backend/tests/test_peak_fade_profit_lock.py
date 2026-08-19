@@ -28,6 +28,7 @@ def _settings(**overrides):
     s.explosion_early_green_lock_min_best_points = 3.5
     s.explosion_early_green_lock_buffer_points = 0.5
     s.explosion_early_green_lock_max_velocity_3s = 0.0
+    s.explosion_early_green_lock_near_base_max_profit_min_best_points = 55.0
     s.explosion_peak_fade_max_profit_min_best = 28.0
     s.explosion_peak_fade_max_profit_giveback_ratio = 0.80
     s.explosion_peak_fade_defer_when_bullish = True
@@ -35,6 +36,7 @@ def _settings(**overrides):
     s.explosion_peak_fade_bullish_min_velocity_3s = 1.5
     s.explosion_near_base_hold_enabled = True
     s.explosion_near_base_hold_max_entry_rel_pct = 20.0
+    s.explosion_near_base_hold_ict_max_entry_rel_pct = 40.0
     s.explosion_near_base_hold_min_best_points = 40.0
     s.explosion_near_base_hold_max_profit_min_best_points = 55.0
     s.explosion_peak_capture_enabled = True
@@ -337,6 +339,64 @@ def test_small_ftv_winner_cannot_turn_into_loss_after_velocity_reverses(mock_s):
         pnl_pts=-0.2,
         max_profit=True,
         live_velocity_3s=-0.4,
+    )
+    assert reason == "explosion_early_green_breakeven"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_near_base_max_profit_holds_tiny_early_green_fade(mock_s):
+    """Aug19 SENSEX 76900 PE: best +5 near base must NOT early-green scratch."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=168.15,
+        best=4.97,
+        current=166.7,
+        ctx={
+            "maxProfitCapture": True,
+            "ictFlatThenVertical": True,
+            "localBaseBaseRelPct": 2.6,
+            "explosionTier": "EXPLODING",
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+            "liveVelocity3s": -0.2,
+            "premiumChart": {"momentum3Pct": -0.1},
+        },
+    )
+    reason = peak_fade_profit_lock_reason(
+        trade,
+        best=4.97,
+        pnl_pts=-1.45,
+        max_profit=True,
+        live_velocity_3s=-0.2,
+    )
+    assert reason is None
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_near_base_max_profit_be_locks_after_meaningful_peak(mock_s):
+    """Once a near-base FTV has a real expansion peak, BE lock still protects."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=168.15,
+        best=60.0,
+        current=168.0,
+        ctx={
+            "maxProfitCapture": True,
+            "ictFlatThenVertical": True,
+            "localBaseBaseRelPct": 2.6,
+            "explosionTier": "EXPLODING",
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+            "liveVelocity3s": -0.5,
+            "premiumChart": {"momentum3Pct": -0.2},
+        },
+    )
+    reason = peak_fade_profit_lock_reason(
+        trade,
+        best=60.0,
+        pnl_pts=-0.2,
+        max_profit=True,
+        live_velocity_3s=-0.5,
     )
     assert reason == "explosion_early_green_breakeven"
 
