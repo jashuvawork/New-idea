@@ -555,6 +555,10 @@ class Settings(BaseSettings):
     explosion_early_green_lock_min_best_points: float = 3.5
     explosion_early_green_lock_buffer_points: float = 0.5
     explosion_early_green_lock_max_velocity_3s: float = 0.0
+    # Near-base max-profit FTV: do NOT scratch a tiny +3–5pt early fade to BE
+    # (Aug19 SENSEX 76900 PE: best +5 → early_green_breakeven in ~4m). Use the
+    # near-base hold floor so these runners can extend like prior max winners.
+    explosion_early_green_lock_near_base_max_profit_min_best_points: float = 55.0
     # ICT max-profit / flat→vertical runners: hold through early pullbacks.
     # Aug6 SENSEX 78700 CE: best +15 → soft-locked +6.5 (OVERCONFIDENCE tightened
     # giveback to 50%) then LTP ran to ~460. Require a real expansion peak first.
