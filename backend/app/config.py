@@ -467,6 +467,17 @@ class Settings(BaseSettings):
     ict_elite_base_ready_min_velocity_9s: float = 1.5
     ict_elite_base_ready_min_quality: float = 55.0
     ict_elite_base_ready_min_score: float = 45.0
+    # Continuous V-rip sleeve off the session/day trough. Sparse polls often skip
+    # the narrow 2–5% elite window (125→140); keep auth open through 2–25% so we
+    # do not fail to capture genuine V rips while mid-rip coils stay blocked.
+    ict_v_rip_ready_enabled: bool = True
+    ict_v_rip_min_move_pct: float = 2.0
+    ict_v_rip_max_move_pct: float = 25.0
+    ict_v_rip_min_velocity_3s: float = 1.2
+    ict_v_rip_min_velocity_9s: float = 0.8
+    ict_v_rip_min_quality: float = 50.0
+    ict_v_rip_min_score: float = 40.0
+    ict_v_rip_base_near_session_low_pct: float = 2.0
     # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
     # premium progress even when 3s/9s velocity samples are unavailable.
     ict_armed_sustained_lift_min_move_pct: float = 8.0

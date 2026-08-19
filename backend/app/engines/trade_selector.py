@@ -521,6 +521,7 @@ def _explosion_candidates(
                 first_lift=bool(alert.get("ictFirstLift")),
                 base_armed=bool(alert.get("ictBaseArmed")),
                 elite_base_ready=bool(alert.get("ictEliteBaseReady")),
+                v_rip_ready=bool(alert.get("ictVRipReady")),
                 armed_base_launch=bool(alert.get("ictArmedBaseLaunch")),
                 armed_base_samples=int(alert.get("ictArmedBaseSamples") or 0),
                 armed_base_span_seconds=float(
@@ -631,6 +632,7 @@ def _explosion_candidates(
         if first_lift_readiness_reason in (
             "armed_base_option_led_ready",
             "elite_base_ready_s_preauthorized",
+            "v_rip_session_low_ready",
         ):
             rank += float(
                 getattr(settings, "ict_armed_base_launch_rank_bonus", 16.0) or 16.0
@@ -1785,7 +1787,12 @@ def diagnose_missed_entries(
             )
             blockers: list[str] = []
             first_lift_ready = False
-            if bool(alert.get("ictFirstLift")):
+            if bool(
+                alert.get("ictFirstLift")
+                or alert.get("ictVRipReady")
+                or alert.get("ictEliteBaseReady")
+                or alert.get("ictArmedBaseLaunch")
+            ):
                 from app.engines.ict_breakout_monitor import (
                     first_lift_entry_readiness,
                 )
@@ -1797,7 +1804,7 @@ def diagnose_missed_entries(
                 if not first_lift_ready:
                     blockers.append(readiness_reason)
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
-                if not _building_aligned_ict_alert_ok(
+                if not first_lift_ready and not _building_aligned_ict_alert_ok(
                     alert, snap, str(tier_str).upper(),
                     state=state, snapshots=snapshots,
                 ):
