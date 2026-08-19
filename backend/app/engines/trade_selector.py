@@ -505,6 +505,13 @@ def _explosion_candidates(
             rank += float(
                 getattr(settings, "index_spike_burst_rank_bonus", 4.0) or 4.0
             )
+        # Sustained same-direction index drift is the grind-driven FTV fuel.
+        if bool(alert.get("indexDrift")) or (
+            "index_drift" in (alert.get("indexHelpers") or [])
+        ):
+            rank += float(
+                getattr(settings, "index_drift_rank_bonus", 3.0) or 3.0
+            )
         rank += chart_rank_adjustment(event.side, snap.spotChart)
         rank += moneyness_rank_adjustment(
             event.side, event.strike, snap, mode="explosion", candidate_score=rank,

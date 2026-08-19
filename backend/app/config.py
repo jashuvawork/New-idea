@@ -563,6 +563,17 @@ class Settings(BaseSettings):
     index_spike_history_max: int = 40
     index_spike_burst_min_count: int = 3
     index_spike_burst_rank_bonus: float = 4.0
+    # Sustained index DRIFT: some FTVs are driven by a steady grind in the spot (not sharp
+    # spikes), e.g. Aug19 SENSEX 76900 PE where the index bled ~-99pts/90s below the sharp
+    # 3s spike bar. Track a longer index LTP buffer and confirm when the NET same-direction
+    # spot move over a window clears a threshold. Net move cancels chop (mean-reversion), so
+    # a modest 0.05% clears only genuine directional grinds. Calibrated on Aug19 replay:
+    # a 45s net move of 0.05% fires ~6x/session (median chop 45s move ~0.003%).
+    index_drift_enabled: bool = True
+    index_drift_history_seconds: float = 120.0
+    index_drift_window_seconds: float = 45.0
+    index_drift_min_move_pct: float = 0.05
+    index_drift_rank_bonus: float = 3.0
     # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
     # premium progress even when 3s/9s velocity samples are unavailable.
     ict_armed_sustained_lift_min_move_pct: float = 8.0
