@@ -401,14 +401,28 @@ class CapitalSizingTests(unittest.TestCase):
             weight=0.9,
         )
         event = SimpleNamespace(
-            velocity_3s=2.0,
+            velocity_3s=2.6,
             velocity_9s=1.8,
             volume=30_000,
             volume_surge=2.0,
+            explosion_score=90.0,
+            tier="EXPLODING",
         )
+        # The 90% sleeve is the single biggest bet, so it demands a genuine top-S launch
+        # (armed launch + ELITE/EXPLODING tier + score >= 85 + flat->vertical structure at a
+        # 5-25% base) in addition to the live velocity / CVD / acceleration proof below.
         candidate = SimpleNamespace(
             explosion_event=event,
-            alert={"ictArmedBaseLaunch": True, "ictVolumeAwakening": True},
+            alert={
+                "ictArmedBaseLaunch": True,
+                "ictVolumeAwakening": True,
+                "tier": "EXPLODING",
+                "explosionScore": 90.0,
+                "ictFlatThenVertical": True,
+                "ictBaseRelativeMovePct": 15.0,
+                "velocity3s": 2.6,
+                "velocity9s": 1.8,
+            },
             strike=24_500,
             side=Side.CALL,
         )
