@@ -360,6 +360,10 @@ def elite_never_block_active(
     settings = get_settings()
     if not getattr(settings, "explosion_elite_never_block_enabled", True):
         return False
+    # NOTE: this legacy hot-timing FOMO bypass is intentionally ELITE-only. Top EXPLODING
+    # is taken at the base via top_explosion_must_take_active (checked above); it is
+    # deliberately NOT allowed to skip extended-chase on a runaway runner, since chasing
+    # extended EXPLODING is the oversized-loss behaviour we avoid.
     if _tier_from_sources(tier=tier, event=event, candidate=candidate, alert=alert) != "ELITE":
         return False
 

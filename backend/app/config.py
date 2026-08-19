@@ -555,6 +555,14 @@ class Settings(BaseSettings):
     index_tick_min_helpers_confirm: int = 2
     index_tick_confirm_bonus: float = 10.0
     top_explosion_force_max_allow_index_helpers: bool = True
+    # History of index spike MOMENTS: a burst of same-direction spot spikes in a short
+    # window is a much stronger "the index is thrusting" confirmation than a single blip,
+    # and is exactly what precedes a BUILDING strike suddenly going flat->vertical.
+    index_spike_history_enabled: bool = True
+    index_spike_history_window_seconds: float = 45.0
+    index_spike_history_max: int = 40
+    index_spike_burst_min_count: int = 3
+    index_spike_burst_rank_bonus: float = 4.0
     # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
     # premium progress even when 3s/9s velocity samples are unavailable.
     ict_armed_sustained_lift_min_move_pct: float = 8.0

@@ -497,6 +497,14 @@ def _explosion_candidates(
         rank += min(15, event.velocity_3s * 2)
         rank += min(10, event.velocity_9s)
         rank += index_moment_rank_bonus(snap, event.side)
+        # History of index spike moments: a same-direction spot spike burst is the causal
+        # thrust behind a sudden strike lift — rank those candidates a touch higher.
+        if bool(alert.get("indexSpikeBurst")) or (
+            "index_spike_burst" in (alert.get("indexHelpers") or [])
+        ):
+            rank += float(
+                getattr(settings, "index_spike_burst_rank_bonus", 4.0) or 4.0
+            )
         rank += chart_rank_adjustment(event.side, snap.spotChart)
         rank += moneyness_rank_adjustment(
             event.side, event.strike, snap, mode="explosion", candidate_score=rank,
