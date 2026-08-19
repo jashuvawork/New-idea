@@ -617,6 +617,7 @@ def _explosion_candidates(
         from app.engines.building_ftv_gates import (
             building_rip_bypasses_extended_chase,
             building_rip_bypasses_fake_trap,
+            top_must_take_bypasses_fake_trap,
         )
 
         if (
@@ -636,6 +637,12 @@ def _explosion_candidates(
             and not building_rip_bypasses_fake_trap(
                 alert=alert if isinstance(alert, dict) else None,
                 readiness_reason=first_lift_readiness_reason,
+            )
+            and not top_must_take_bypasses_fake_trap(
+                must_take=must_take,
+                alert=alert if isinstance(alert, dict) else None,
+                candidate=cand_probe,
+                snap=snap,
             )
         ):
             continue

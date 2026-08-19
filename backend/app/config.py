@@ -245,6 +245,11 @@ class Settings(BaseSettings):
     top_ftv_a_exceptional_min_velocity_3s: float = 5.0
     top_ftv_a_exceptional_min_velocity_9s: float = 2.5
     top_ftv_a_exceptional_max_move_pct: float = 40.0
+    # When index spot helpers confirm the lift, waive CVD-acceleration for TOP_FTV_A
+    # (accel often prints after the first take window — Aug19 shape).
+    top_ftv_a_index_helpers_waive_cvd_accel: bool = True
+    # WINNER sleeve → max lots when index helpers confirm (else stays 35%).
+    winner_local_base_index_helpers_max_lots: bool = True
     # Exception: BUILDING only as "elite build" — chart-aligned ICT flat→vertical
     # with ELITE-grade score + hot velocity. Aug7 cold BUILDING (score 56, v3 1.7)
     # must wait for ELITE print or upgrade into these bars.
@@ -295,6 +300,11 @@ class Settings(BaseSettings):
     explosion_top_must_take_min_score: float = 62.0
     explosion_top_must_take_require_atm_itm: bool = True
     explosion_top_must_take_require_chart_align: bool = True
+    # Soft: index tick helpers confirm side even when 5m chart label lags.
+    explosion_top_must_take_allow_index_helpers: bool = True
+    # Soft bypass fake-trap block for must-take ELITE/EXPLODING (still evaluates).
+    top_must_take_bypasses_fake_trap: bool = True
+    top_must_take_fake_trap_requires_index: bool = False
     # Per-trade timing quality (GOOD/OK/COLD/LATE/CHASE) — blocks cold ELITE fills.
     entry_timing_assessment_enabled: bool = True
     entry_timing_cold_max_velocity_3s: float = 1.5
@@ -536,6 +546,15 @@ class Settings(BaseSettings):
     building_rip_ftv_force_max_lots: bool = True
     building_rip_bypasses_extended_chase: bool = True
     building_rip_bypasses_fake_trap: bool = True
+    # Index tick helpers — NIFTY/SENSEX spot tape that drives strike lifts.
+    index_tick_helpers_enabled: bool = True
+    index_tick_wake_building_cycle: bool = True
+    index_tick_align_abs_velocity_3s: float = 0.02
+    index_tick_spike_abs_velocity_3s: float = 0.035
+    index_tick_mom_shift_pct: float = 0.03
+    index_tick_min_helpers_confirm: int = 2
+    index_tick_confirm_bonus: float = 10.0
+    top_explosion_force_max_allow_index_helpers: bool = True
     # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
     # premium progress even when 3s/9s velocity samples are unavailable.
     ict_armed_sustained_lift_min_move_pct: float = 8.0

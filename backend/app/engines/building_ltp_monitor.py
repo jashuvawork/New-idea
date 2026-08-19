@@ -748,6 +748,28 @@ def building_ltp_monitor_due(
     if helper_flip:
         return True
 
+    # Index spot spike (NIFTY/SENSEX tape) — wake BUILDING re-score so we catch
+    # the strike lift as the index moves, not after premium already ran.
+    try:
+        from app.engines.index_tick_helpers import (
+            clear_index_spike_wake,
+            peek_index_spike_wake,
+        )
+
+        watched_symbols = {
+            str(r.get("symbol") or "").upper()
+            for r in building_alerts_on_radar(snapshots)
+        }
+        # Also wake for symbols already on the LTP watch fingerprint.
+        for key in _building_ltp_watch:
+            watched_symbols.add(str(key).split(":", 1)[0].upper())
+        spiked, hit = peek_index_spike_wake(watched_symbols)
+        if spiked:
+            clear_index_spike_wake(set(hit))
+            return True
+    except Exception:
+        pass
+
     # First sighting: seed fingerprints and wait for the next LTP print.
     for key, ltp in live.items():
         _building_ltp_watch.setdefault(key, ltp)

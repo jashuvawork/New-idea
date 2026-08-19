@@ -78,6 +78,60 @@ def building_rip_bypasses_fake_trap(
     )
 
 
+def top_must_take_bypasses_fake_trap(
+    *,
+    must_take: bool = False,
+    alert: Optional[dict[str, Any]] = None,
+    candidate: Any = None,
+    snap: Any = None,
+) -> bool:
+    """Soft bypass for top ELITE/EXPLODING must-take when index helpers confirm.
+
+    Fake-trap still *evaluates* (meta stamps); selector/pretrade may continue.
+    Hard counter-trend / DEFENSIVE / mid-rip coil remain enforced elsewhere.
+    """
+    if not must_take:
+        return False
+    settings = get_settings()
+    if not bool(getattr(settings, "top_must_take_bypasses_fake_trap", True)):
+        return False
+    if candidate is not None and not isinstance(alert, dict):
+        raw = getattr(candidate, "alert", None)
+        alert = raw if isinstance(raw, dict) else None
+    try:
+        from app.engines.index_tick_helpers import (
+            evaluate_index_tick_helpers,
+            index_helpers_confirm_from_alert,
+        )
+
+        if index_helpers_confirm_from_alert(alert):
+            return True
+        # Always allow must-take soft bypass when setting is on — index helpers
+        # are preferred but near-base ATM/ITM ELITE already cleared must-take.
+        if bool(
+            getattr(settings, "top_must_take_fake_trap_requires_index", False)
+        ):
+            resolved_snap = snap
+            if resolved_snap is None and candidate is not None:
+                resolved_snap = getattr(candidate, "snap", None)
+            side = ""
+            if isinstance(alert, dict):
+                side = str(alert.get("side") or "")
+            if not side and candidate is not None:
+                side = str(getattr(candidate, "side", "") or "")
+            if resolved_snap is not None and side:
+                idx = evaluate_index_tick_helpers(
+                    snap=resolved_snap, side=side, alert=alert,
+                )
+                return bool(idx.confirming or idx.tick_align)
+            return False
+        return True
+    except Exception:
+        return bool(
+            not getattr(settings, "top_must_take_fake_trap_requires_index", False)
+        )
+
+
 def building_rip_bypasses_extended_chase(
     *,
     alert: Optional[dict[str, Any]] = None,

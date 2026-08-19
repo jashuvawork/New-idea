@@ -286,12 +286,42 @@ def top_explosion_must_take_active(
         return False
 
     # Only when chart aligns — never must-take a counter-trend flat→vertical.
+    # Soft path: index tick helpers confirm the side (spot already moving) even
+    # when the 5m chart label has not flipped yet — Aug19 local-base shape.
     if bool(getattr(settings, "explosion_top_must_take_require_chart_align", True)):
         chart = getattr(resolved_snap, "spotChart", None) if resolved_snap is not None else None
+        chart_ok = True
         if chart is not None:
             from app.engines.spot_direction import side_aligned_with_chart
 
-            if not side_aligned_with_chart(side, chart):
+            chart_ok = bool(side_aligned_with_chart(side, chart))
+        if not chart_ok:
+            index_ok = False
+            if bool(
+                getattr(
+                    settings,
+                    "explosion_top_must_take_allow_index_helpers",
+                    True,
+                )
+            ):
+                try:
+                    from app.engines.index_tick_helpers import (
+                        evaluate_index_tick_helpers,
+                        index_helpers_confirm_from_alert,
+                    )
+
+                    if index_helpers_confirm_from_alert(resolved_alert):
+                        index_ok = True
+                    elif resolved_snap is not None:
+                        idx = evaluate_index_tick_helpers(
+                            snap=resolved_snap,
+                            side=side,
+                            alert=resolved_alert,
+                        )
+                        index_ok = bool(idx.confirming or idx.tick_spike)
+                except Exception:
+                    index_ok = False
+            if not index_ok:
                 return False
 
     return True
