@@ -424,8 +424,11 @@ async def run_building_ltp_entry_cycle(
 
     from app.engines.building_ltp_monitor import (
         building_ltp_monitor_due,
+        clear_building_scoreboard,
+        evaluate_all_building_ltp,
         mark_building_ltp_cycle_done,
         mark_building_ltps_seen,
+        publish_building_scoreboard,
     )
 
     settings = get_settings()
@@ -448,10 +451,31 @@ async def run_building_ltp_entry_cycle(
         expiry_day = bool(snap.optionExpiry and str(snap.optionExpiry)[:10] == today)
         refresh_snapshot_explosion_alerts(snap, expiry_day=expiry_day)
 
+    # Score EVERY watched BUILDING name on this LTP cycle; take only the best.
+    auto_state = get_state()
+    try:
+        scores = evaluate_all_building_ltp(probe, state=auto_state)
+        board = publish_building_scoreboard(scores)
+        auto_state.buildingLtpMonitor = board
+    except Exception as exc:
+        logger.warning("BUILDING LTP scoreboard failed: %s", exc)
+        clear_building_scoreboard()
+        auto_state.buildingLtpMonitor = {"error": str(exc)[:200]}
+
     news = await _fetch_news_cached()
     if run_trader and not rate_limit_active():
         client = UpstoxClient()
         auto_state = await process(probe, news=news, client=client)
+        # Keep scoreboard visible on trader state after process mutates it.
+        try:
+            from app.engines.building_ltp_monitor import building_scoreboard_snapshot
+
+            auto_state.buildingLtpMonitor = {
+                **(auto_state.buildingLtpMonitor or {}),
+                **building_scoreboard_snapshot(),
+            }
+        except Exception:
+            pass
     else:
         auto_state = get_state()
 
@@ -463,6 +487,7 @@ async def run_building_ltp_entry_cycle(
     _update_cache_memory(snapshot)
     mark_building_ltps_seen(probe)
     mark_building_ltp_cycle_done()
+    clear_building_scoreboard()
     _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
 
     if ws_overlay_due():
