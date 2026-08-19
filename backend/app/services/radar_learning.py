@@ -97,6 +97,12 @@ def premium_tape_path(date: str) -> Path:
     return _telemetry_dir() / f"{date}.premium.jsonl"
 
 
+def alerts_tape_path(date: str) -> Path:
+    if not _DATE_RE.fullmatch(date):
+        raise ValueError("date must use YYYY-MM-DD")
+    return _telemetry_dir() / f"{date}.alerts.jsonl"
+
+
 def funnel_path(date: str) -> Path:
     if not _DATE_RE.fullmatch(date):
         raise ValueError("date must use YYYY-MM-DD")
@@ -215,9 +221,31 @@ def _contract_key(symbol: str, side: str, strike: float) -> str:
 
 def _snapshot_contracts(snapshots: Mapping[str, Any]) -> list[dict[str, Any]]:
     contracts: list[dict[str, Any]] = []
+    try:
+        from app.engines.explosion_detector import (
+            get_session_low_premium,
+            session_low_relative_move_pct,
+        )
+        from app.engines.explosion_detector import _session_peak, _open_key
+        from app.models.schemas import Side
+    except Exception:
+        get_session_low_premium = None  # type: ignore[assignment]
+        session_low_relative_move_pct = None  # type: ignore[assignment]
+        _session_peak = {}
+        _open_key = None  # type: ignore[assignment]
+        Side = None  # type: ignore[assignment]
+
     for symbol, snap in snapshots.items():
         if not bool(getattr(snap, "dataAvailable", False)):
             continue
+        alert_by_key: dict[str, dict[str, Any]] = {}
+        for alert in getattr(snap, "explosionAlerts", None) or []:
+            if not isinstance(alert, Mapping):
+                continue
+            side = str(alert.get("side") or "").upper()
+            strike = _number(alert.get("strike"))
+            if side and strike > 0:
+                alert_by_key[_contract_key(symbol, side, strike)] = dict(alert)
         for row in getattr(snap, "heatmap", None) or []:
             strike = _number(getattr(row, "strike", None))
             if strike <= 0:
@@ -229,8 +257,9 @@ def _snapshot_contracts(snapshots: Mapping[str, Any]) -> list[dict[str, Any]]:
                 premium = _number(getattr(row, ltp_name, None))
                 if premium <= 0:
                     continue
-                contracts.append({
-                    "key": _contract_key(symbol, side, strike),
+                key = _contract_key(symbol, side, strike)
+                contract: dict[str, Any] = {
+                    "key": key,
                     "symbol": symbol.upper(),
                     "side": side,
                     "strike": strike,
@@ -243,8 +272,83 @@ def _snapshot_contracts(snapshots: Mapping[str, Any]) -> list[dict[str, Any]]:
                         if side == "CALL"
                         else getattr(row, "putInstrumentKey", None)
                     ),
-                })
+                }
+                if get_session_low_premium is not None and Side is not None:
+                    try:
+                        side_e = Side(side)
+                        sess_low = float(
+                            get_session_low_premium(symbol, strike, side_e) or 0
+                        )
+                        if sess_low > 0:
+                            contract["sessionLow"] = round(sess_low, 4)
+                        if session_low_relative_move_pct is not None:
+                            contract["offLowMovePct"] = round(
+                                float(
+                                    session_low_relative_move_pct(
+                                        symbol, strike, side_e, premium
+                                    )
+                                    or 0
+                                ),
+                                2,
+                            )
+                        if _open_key is not None:
+                            peak = float(
+                                _session_peak.get(_open_key(symbol, strike, side_e))
+                                or 0
+                            )
+                            if peak > 0:
+                                contract["sessionPeak"] = round(peak, 4)
+                    except Exception:
+                        pass
+                alert = alert_by_key.get(key)
+                if alert:
+                    for field in (
+                        "tier",
+                        "tradeable",
+                        "explosionScore",
+                        "dailyMovePct",
+                        "peakMovePct",
+                        "localBaseMovePct",
+                        "velocity3s",
+                        "velocity9s",
+                        "volumeSurge",
+                        "volume",
+                        "ictBaseArmed",
+                        "ictEliteBaseReady",
+                        "ictArmedBaseLaunch",
+                        "ictFirstLift",
+                        "ictFlatThenVertical",
+                        "ictBasePremium",
+                        "ictBaseRelativeMovePct",
+                        "ictMidRipCoil",
+                        "flatVerticalQuality",
+                        "momentType",
+                        "offLowMovePct",
+                    ):
+                        if field in alert and alert.get(field) is not None:
+                            contract[field] = alert.get(field)
+                contracts.append(contract)
     return contracts
+
+
+def _snapshot_alerts(snapshots: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Flatten explosion alerts for the daily alerts tape / replay."""
+    rows: list[dict[str, Any]] = []
+    for symbol, snap in snapshots.items():
+        if not bool(getattr(snap, "dataAvailable", False)):
+            continue
+        for alert in getattr(snap, "explosionAlerts", None) or []:
+            if not isinstance(alert, Mapping):
+                continue
+            row = dict(alert)
+            row["symbol"] = str(alert.get("symbol") or symbol).upper()
+            row["spot"] = _number(getattr(snap, "spot", None))
+            row["atmStrike"] = _number(getattr(snap, "atmStrike", None))
+            row["tradeQualityScore"] = _number(
+                getattr(snap, "tradeQualityScore", None)
+            )
+            rows.append(row)
+    return rows
 
 
 def _append_archived_tick_contracts(
@@ -383,18 +487,22 @@ def record_market_observations(
     now: datetime | None = None,
     force: bool = False,
 ) -> int:
-    """Persist a throttled all-strike premium sample and refresh radar outcomes."""
+    """Persist an all-strike premium (+ alerts) sample and refresh radar outcomes.
+
+    Default sample interval is 0 → write every observation cycle so V-local-base
+    lifts can be reconstructed from the daily ZIP replay.
+    """
     settings = get_settings()
     if not settings.radar_learning_enabled:
         return 0
     current = _aware(now)
     date = current.strftime("%Y-%m-%d")
-    interval = max(1, int(settings.radar_premium_tape_sample_seconds))
+    interval = max(0, int(settings.radar_premium_tape_sample_seconds))
     contracts = _snapshot_contracts(snapshots)
     _append_archived_tick_contracts(
         date,
         contracts,
-        max_age_seconds=max(5.0, interval * 2.0),
+        max_age_seconds=max(5.0, float(interval or 1) * 2.0),
     )
     if not contracts:
         record_pipeline_event(
@@ -410,13 +518,18 @@ def record_market_observations(
             },
             now=current,
             throttle_key=f"premium-empty:{source}",
-            throttle_seconds=interval,
+            throttle_seconds=max(1, interval or 1),
         )
         return 0
     sample_key = f"{date}:{','.join(sorted(str(symbol).upper() for symbol in snapshots))}"
     with _lock:
         previous = _last_tape_sample.get(sample_key)
-        if not force and previous and (current - previous).total_seconds() < interval:
+        if (
+            not force
+            and interval > 0
+            and previous
+            and (current - previous).total_seconds() < interval
+        ):
             return 0
         _append_jsonl(
             premium_tape_path(date),
@@ -427,6 +540,17 @@ def record_market_observations(
                 "contracts": contracts,
             },
         )
+        if bool(getattr(settings, "radar_alerts_tape_enabled", True)):
+            alerts = _snapshot_alerts(snapshots)
+            if alerts:
+                _append_jsonl(
+                    alerts_tape_path(date),
+                    {
+                        "ts": current.isoformat(),
+                        "source": source,
+                        "alerts": alerts,
+                    },
+                )
         _last_tape_sample[sample_key] = current
     record_pipeline_event(
         "PREMIUM_SAMPLE_WRITTEN",
@@ -437,7 +561,7 @@ def record_market_observations(
         },
         now=current,
         throttle_key=f"premium-written:{source}",
-        throttle_seconds=interval,
+        throttle_seconds=max(1, interval or 1),
     )
     contract_map = {str(row["key"]): row for row in contracts}
     updated = _forward_outcomes(date, contract_map, current)
@@ -462,6 +586,9 @@ def record_market_observations(
 def read_premium_tape(date: str) -> list[dict[str, Any]]:
     return _read_jsonl(premium_tape_path(date))
 
+
+def read_alerts_tape(date: str) -> list[dict[str, Any]]:
+    return _read_jsonl(alerts_tape_path(date))
 
 def restore_local_base_history(*, now: datetime | None = None) -> dict[str, Any]:
     """Restore only medium-horizon bases; live ticks must still confirm a trigger."""
@@ -1358,6 +1485,9 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     tape = premium_tape_path(date)
     if tape.exists():
         artifacts["premium_tape.jsonl"] = _read_bytes_locked(tape)
+    alerts_file = alerts_tape_path(date)
+    if alerts_file.exists():
+        artifacts["alerts_tape.jsonl"] = _read_bytes_locked(alerts_file)
     pipeline_file = pipeline_history_path(date)
     if pipeline_file.exists():
         artifacts["pipeline_history.jsonl"] = _read_bytes_locked(pipeline_file)
