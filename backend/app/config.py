@@ -439,6 +439,11 @@ class Settings(BaseSettings):
     ict_armed_base_mid_rip_min_above_session_low_pct: float = 25.0
     ict_armed_base_mid_rip_min_off_low_pct: float = 30.0
     ict_armed_base_mid_rip_min_peak_pullback_pct: float = 35.0
+    # V-bottom: when day-OHLC / session low is known and live premium is still
+    # near that trough, arm it as the launch pad even if sparse LTP never formed
+    # a tight poll coil (Aug19 76900 PE V-base ~125 → 220).
+    ict_armed_base_session_low_arm_enabled: bool = True
+    ict_armed_base_session_low_arm_max_move_pct: float = 12.0
     # Conservative pre-first-lift launch. Absolute chain volume (or explicit CVD/
     # orderflow proof) replaces the lagging 2x REST surge requirement.
     ict_armed_base_launch_min_move_pct: float = 5.0
