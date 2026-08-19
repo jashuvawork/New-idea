@@ -153,6 +153,14 @@ def trustworthy_local_base_move(ict: Any) -> float:
     base = float(getattr(ict, "base_relative_move_pct", 0) or 0)
     if base <= 0:
         return 0.0
+    # Mid-rip coil rejection remounts pad onto session low — never trust a tiny
+    # armed pad that ICT already flagged as contaminated.
+    reasons = getattr(ict, "reasons", None) or []
+    if any(
+        isinstance(r, str) and r.startswith("mid_rip_coil_rejected_")
+        for r in reasons
+    ):
+        return base
     # Armed local base is the causal denominator — trust pad even below the
     # generic 8% noise floor so elite/armed launches at 2–7% are not treated as 0.
     if bool(getattr(ict, "base_armed", False)):

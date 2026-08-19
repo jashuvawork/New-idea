@@ -432,6 +432,13 @@ class Settings(BaseSettings):
     ict_armed_base_max_range_pct: float = 5.0
     ict_armed_base_horizon_seconds: float = 1800.0
     ict_armed_base_min_ratchet_pct: float = 2.0
+    # Reject mid-rip pause coils as a "new base" after a real trough expansion
+    # (Aug19 SENSEX 76900 PE: re-armed ~162 after ~90 trough, pad looked 2.6%
+    # "early" while session was already ~42% off the true base).
+    ict_armed_base_block_mid_rip_coil_enabled: bool = True
+    ict_armed_base_mid_rip_min_above_session_low_pct: float = 25.0
+    ict_armed_base_mid_rip_min_off_low_pct: float = 30.0
+    ict_armed_base_mid_rip_min_peak_pullback_pct: float = 35.0
     # Conservative pre-first-lift launch. Absolute chain volume (or explicit CVD/
     # orderflow proof) replaces the lagging 2x REST surge requirement.
     ict_armed_base_launch_min_move_pct: float = 5.0

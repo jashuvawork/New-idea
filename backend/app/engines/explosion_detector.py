@@ -833,6 +833,83 @@ def _record_local_base(full_key: str, ts: datetime, premium: float) -> None:
         dq.popleft()
 
 
+def mid_rip_armed_coil(
+    *,
+    session_low: float,
+    armed_base: float,
+    premium: float,
+    session_peak: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """True when an armed coil is a mid-move pause, not the true launch pad.
+
+    Aug19 SENSEX 76900 PE: chart base ~80–100 ripped toward ~240, then a tight
+    coil near ~162 re-armed after horizon expiry. ICT treated pad 2.6% as
+    elite_base_ready while session was already ~42% off the trough.
+    """
+    settings = settings or __import__("app.config", fromlist=["get_settings"]).get_settings()
+    if not bool(getattr(settings, "ict_armed_base_block_mid_rip_coil_enabled", True)):
+        return False
+    low = float(session_low or 0)
+    base = float(armed_base or 0)
+    live = float(premium or 0)
+    if low <= 0 or base <= 0 or live <= 0:
+        return False
+    min_above = float(
+        getattr(settings, "ict_armed_base_mid_rip_min_above_session_low_pct", 25.0)
+        or 25.0
+    )
+    min_off = float(
+        getattr(settings, "ict_armed_base_mid_rip_min_off_low_pct", 30.0) or 30.0
+    )
+    min_pullback = float(
+        getattr(settings, "ict_armed_base_mid_rip_min_peak_pullback_pct", 35.0)
+        or 35.0
+    )
+    above_low = (base - low) / low * 100.0
+    off_low = (live - low) / low * 100.0
+    if above_low < min_above or off_low < min_off:
+        return False
+    peak = float(session_peak or 0)
+    pullback = 0.0
+    if peak > live > 0:
+        pullback = (peak - live) / peak * 100.0
+    # Deep pullback after a completed rip can form a genuine higher base.
+    if pullback >= min_pullback:
+        return False
+    return True
+
+
+def mid_rip_false_early_pad(
+    *,
+    session_low: float,
+    armed_base: float,
+    premium: float,
+    armed_pad_pct: float,
+    session_peak: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """Tiny 'early' pad off a mid-rip coil while far above the session trough."""
+    settings = settings or __import__("app.config", fromlist=["get_settings"]).get_settings()
+    if not mid_rip_armed_coil(
+        session_low=session_low,
+        armed_base=armed_base,
+        premium=premium,
+        session_peak=session_peak,
+        settings=settings,
+    ):
+        return False
+    early_hi = float(
+        getattr(settings, "ict_elite_base_ready_max_move_pct", 5.0) or 5.0
+    )
+    # Also catch armed-launch band false early (≤15%) mid-rip.
+    launch_hi = float(
+        getattr(settings, "ict_armed_base_launch_max_move_pct", 15.0) or 15.0
+    )
+    pad = float(armed_pad_pct or 0)
+    return 0 < pad <= max(early_hi, launch_hi) + 1e-6
+
+
 def armed_base_anchor(
     symbol: str,
     strike: float,
@@ -928,6 +1005,33 @@ def armed_base_anchor(
                 )
                 break
 
+    sess_low = float(_session_low.get(key) or 0)
+    sess_peak = float(_session_peak.get(key) or 0)
+    mid_rip_rejected = False
+    if candidate is not None and mid_rip_armed_coil(
+        session_low=sess_low,
+        armed_base=candidate.premium,
+        premium=float(premium or candidate.premium),
+        session_peak=sess_peak,
+        settings=settings,
+    ):
+        # Mid-rip pause after a real trough expansion is not a launch pad.
+        candidate = None
+        mid_rip_rejected = True
+
+    # Already-armed mid-rip coils (horizon kept them sticky) must not keep minting
+    # false early entries — drop them so structure falls back to session/swing low.
+    if current is not None and mid_rip_armed_coil(
+        session_low=sess_low,
+        armed_base=current.premium,
+        premium=float(premium or current.premium),
+        session_peak=sess_peak,
+        settings=settings,
+    ):
+        _armed_base_anchors.pop(key, None)
+        current = None
+        mid_rip_rejected = True
+
     if current is None and candidate is not None:
         current = candidate
         _armed_base_anchors[key] = current
@@ -942,7 +1046,12 @@ def armed_base_anchor(
             current = candidate
             _armed_base_anchors[key] = current
 
-    return current.to_dict(premium) if current is not None else {"armed": False}
+    out = current.to_dict(premium) if current is not None else {"armed": False}
+    if sess_low > 0:
+        out["sessionLow"] = round(sess_low, 2)
+    if mid_rip_rejected:
+        out["midRipCoil"] = True
+    return out
 
 
 def consume_armed_base_anchor(
@@ -1771,6 +1880,12 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictEliteBaseReady": elite_base_ready,
         "ictArmedBaseLaunch": armed_launch,
         "ictArmedBaseSustainedLift": sustained_armed_lift,
+        "ictMidRipCoil": bool(
+            any(
+                isinstance(r, str) and r.startswith("mid_rip_coil_rejected_")
+                for r in (getattr(ict, "reasons", None) or [])
+            )
+        ),
         "ictArmedBaseSamples": int(getattr(ict, "armed_base_samples", 0) or 0),
         "ictArmedBaseSpanSeconds": round(
             float(getattr(ict, "armed_base_span_seconds", 0) or 0),

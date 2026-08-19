@@ -130,6 +130,8 @@ def first_lift_entry_readiness(
         getattr(ict, "elite_base_ready", False) is True
         or row.get("ictEliteBaseReady") is True
     )
+    if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
+        return False, "mid_rip_armed_coil_rejected"
     sustained_lift = bool(
         getattr(ict, "armed_base_sustained_lift", False) is True
         or row.get("ictArmedBaseSustainedLift") is True
@@ -951,6 +953,9 @@ def analyze_ict_breakout(
 
     # The causal armed anchor is the shared REST/WS denominator. It supersedes
     # observation-local flat/swing choices and is sticky upward for its horizon.
+    mid_rip_coil = bool(armed_meta.get("midRipCoil"))
+    if mid_rip_coil:
+        reasons.append("mid_rip_coil_rejected")
     if base_armed:
         base_level = float(armed_meta.get("basePremium") or 0)
         base_rel_move = float(armed_meta.get("baseRelativeMovePct") or 0)
@@ -959,14 +964,24 @@ def analyze_ict_breakout(
 
     # Session-low fallback is only for V-shaped legs without a trusted flat coil.
     # Never replace a recent flat trough with an older session low.
+    sess_low = 0.0
+    sess_peak = 0.0
     if premium > 0 and not trusted_flat:
         try:
             from app.engines.explosion_detector import (
                 get_session_low_premium,
                 session_move_min_baseline,
+                _session_peak,
+                _open_key,
             )
 
             sess_low = get_session_low_premium(symbol, strike, side)
+            try:
+                sess_peak = float(
+                    _session_peak.get(_open_key(symbol, strike, side)) or 0
+                )
+            except Exception:
+                sess_peak = 0.0
             floor = session_move_min_baseline(settings)
             if sess_low >= floor and premium > sess_low:
                 off_low = (premium - sess_low) / sess_low * 100.0
@@ -976,6 +991,38 @@ def analyze_ict_breakout(
                         base_level = sess_low
                         base_rel_move = off_low
                         reasons.append(f"session_low_base_{sess_low:.1f}")
+        except Exception:
+            pass
+
+    # Mid-rip pause coil (armed or recent-window) above a real trough must not
+    # mint a fake "2–5% early" pad. Remeasure from the session trough so chase
+    # gates see the true expansion (Aug19 SENSEX 76900 PE).
+    if (
+        premium > 0
+        and sess_low > 0
+        and base_level > 0
+        and not trusted_flat
+    ):
+        try:
+            from app.engines.explosion_detector import mid_rip_armed_coil
+
+            if mid_rip_armed_coil(
+                session_low=sess_low,
+                armed_base=base_level,
+                premium=premium,
+                session_peak=sess_peak,
+                settings=settings,
+            ):
+                off_low = (premium - sess_low) / sess_low * 100.0
+                reasons.append(
+                    f"mid_rip_coil_rejected_{base_level:.1f}_use_session_low_{sess_low:.1f}"
+                )
+                base_level = sess_low
+                base_rel_move = off_low
+                local_swing_base = True
+                mid_rip_coil = True
+                # Contaminated armed state cannot authorize elite/armed early entry.
+                base_armed = False
         except Exception:
             pass
 
@@ -1002,6 +1049,7 @@ def analyze_ict_breakout(
     )
     fast_armed_launch = bool(
         base_armed
+        and not mid_rip_coil
         and armed_launch_lo <= base_rel_move <= armed_launch_hi
         and velocity_3s >= armed_launch_v3
         and velocity_9s >= armed_launch_v9
@@ -1009,6 +1057,7 @@ def analyze_ict_breakout(
     )
     sustained_armed_lift = bool(
         base_armed
+        and not mid_rip_coil
         and _sustained_armed_base_lift(
             history,
             base_premium=base_level,
@@ -1033,6 +1082,7 @@ def analyze_ict_breakout(
     elite_base_ready = bool(
         getattr(settings, "ict_elite_base_ready_enabled", True)
         and base_armed
+        and not mid_rip_coil
         and tier in ("BUILDING", "EXPLODING", "ELITE")
         and elite_ready_lo <= base_rel_move < elite_ready_hi
         and velocity_3s >= elite_ready_v3
