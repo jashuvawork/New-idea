@@ -311,6 +311,12 @@ def latency_stats() -> dict[str, Any]:
         "buildLockHeld": _build_lock.locked(),
         "entryScanDue": entry_scan_due(),
         "canRunTickFast": can_run_tick_fast(),
+        "buildingLtpMonitorEnabled": bool(
+            getattr(settings, "building_ltp_monitor_enabled", True)
+        ),
+        "buildingLtpMonitorMinMs": float(
+            getattr(settings, "building_ltp_monitor_min_ms", 75.0) or 75.0
+        ),
         "fullRestMinSeconds": float(
             getattr(get_settings(), "full_rest_min_seconds", _FULL_REST_MIN_SECONDS) or _FULL_REST_MIN_SECONDS
         ),
@@ -399,6 +405,74 @@ async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnap
     return snapshot
 
 
+async def run_building_ltp_entry_cycle(
+    *,
+    broadcast: bool = False,
+    run_trader: bool = True,
+) -> Optional[MultiSnapshot]:
+    """On every meaningful BUILDING LTP move: refresh explosions and take if ready.
+
+    Entry-scan cadence alone is too sparse for V-base lifts. This path feeds each
+    WS LTP print into the explosion/ICT history and re-runs the trader so a
+    local-base BUILDING lift is not missed between full scans.
+    """
+    global _last_fast_cycle_ms, _last_ws_overlay_mono
+    if not _cache or not _cache.dataReady:
+        return None
+    if not is_ws_active():
+        return None
+
+    from app.engines.building_ltp_monitor import (
+        building_ltp_monitor_due,
+        mark_building_ltp_cycle_done,
+        mark_building_ltps_seen,
+    )
+
+    settings = get_settings()
+    # Peek on current cache overlays first (cheap).
+    probe = overlay_snapshot_live(
+        _cache.snapshots,
+        max_age_seconds=settings.tick_overlay_max_age_seconds,
+    )
+    if not building_ltp_monitor_due(probe):
+        return _cache
+
+    t0 = time.perf_counter()
+    from app.engines.expiry_day_guards import _today_str
+    from app.engines.explosion_detector import refresh_snapshot_explosion_alerts
+
+    today = _today_str()
+    for snap in probe.values():
+        if not snap.dataAvailable:
+            continue
+        expiry_day = bool(snap.optionExpiry and str(snap.optionExpiry)[:10] == today)
+        refresh_snapshot_explosion_alerts(snap, expiry_day=expiry_day)
+
+    news = await _fetch_news_cached()
+    if run_trader and not rate_limit_active():
+        client = UpstoxClient()
+        auto_state = await process(probe, news=news, client=client)
+    else:
+        auto_state = get_state()
+
+    snapshot = _shallow_cache_copy(
+        snapshots=probe,
+        auto_trader=auto_state,
+        news=news,
+    )
+    _update_cache_memory(snapshot)
+    mark_building_ltps_seen(probe)
+    mark_building_ltp_cycle_done()
+    _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    if ws_overlay_due():
+        await _store_cache_async(snapshot)
+        _last_ws_overlay_mono = time.monotonic()
+        if broadcast:
+            await broadcast_snapshot(snapshot)
+    return snapshot
+
+
 async def run_entry_scan_on_cache(
     *,
     broadcast: bool = False,
@@ -475,6 +549,13 @@ async def run_entry_scan_on_cache(
         auto_state = await process(overlays, news=news, client=client)
     else:
         auto_state = get_state()
+
+    try:
+        from app.engines.building_ltp_monitor import mark_building_ltps_seen
+
+        mark_building_ltps_seen(overlays)
+    except Exception:
+        pass
 
     snapshot = _shallow_cache_copy(
         snapshots=overlays,
