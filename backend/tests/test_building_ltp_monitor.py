@@ -130,14 +130,15 @@ def _building_alert(
 
 @patch("app.engines.building_ltp_monitor.get_settings")
 @patch("app.engines.building_ltp_monitor.resolve_trade_premium")
+@patch("app.engines.building_ltp_monitor.overlay_alert_tick_velocity", side_effect=lambda snap, alert, **_k: alert)
 @patch("app.engines.ict_breakout_monitor.first_lift_entry_readiness")
 def test_scores_all_building_and_picks_best_ready(
-    mock_ready, mock_prem, mock_settings,
+    mock_ready, _tick_vel, mock_prem, mock_settings,
 ):
     """X BUILDING names are all scored; only the best ready wins the pick."""
     from app.engines.building_ltp_monitor import (
-        apply_building_ltp_best_pick,
         evaluate_all_building_ltp,
+        filter_candidates_building_best_pick,
         publish_building_scoreboard,
     )
     from app.engines.trade_selector import EntryCandidate
@@ -224,7 +225,64 @@ def test_scores_all_building_and_picks_best_ready(
         tier="BUILDING",
         alert=snap.explosionAlerts[1],
     )
-    bonus_best, keep_best = apply_building_ltp_best_pick(best)
-    bonus_weak, keep_weak = apply_building_ltp_best_pick(weaker)
-    assert keep_best is True and bonus_best >= 40.0
-    assert keep_weak is False and bonus_weak == 0.0
+    kept = filter_candidates_building_best_pick([best, weaker])
+    assert len(kept) == 1
+    assert kept[0].strike == 76800.0
+    assert kept[0].score >= 90.0
+
+
+@patch("app.engines.building_ltp_monitor.get_settings")
+@patch("app.engines.building_ltp_monitor.resolve_trade_premium")
+@patch("app.engines.building_ltp_monitor.overlay_alert_tick_velocity", side_effect=lambda snap, alert, **_k: alert)
+@patch("app.engines.ict_breakout_monitor.first_lift_entry_readiness")
+def test_best_pick_fails_soft_when_top_not_selectable(
+    mock_ready, _tick_vel, mock_prem, mock_settings,
+):
+    """If absolute #1 ready is filtered out, next ready BUILDING still takes."""
+    from app.engines.building_ltp_monitor import (
+        evaluate_all_building_ltp,
+        filter_candidates_building_best_pick,
+        publish_building_scoreboard,
+    )
+    from app.engines.trade_selector import EntryCandidate
+    from app.models.schemas import StrategyType
+
+    reset_building_ltp_monitor_for_tests()
+    mock_settings.return_value = Settings()
+    mock_prem.return_value = 125.0
+
+    def _ready(*, alert=None, **_kwargs):
+        strike = float((alert or {}).get("strike") or 0)
+        if abs(strike - 76800) < 1 or abs(strike - 76900) < 1:
+            return True, "building_local_base_lift_ready"
+        return False, "cold"
+
+    mock_ready.side_effect = _ready
+    snap = _snap()
+    snap.explosionAlerts = [
+        _building_alert(strike=76800.0, premium=140.0, v3=2.5, score=70.0, pad=6.0),
+        _building_alert(strike=76900.0, premium=125.0, v3=2.0, score=55.0, pad=8.0),
+    ]
+    scores = evaluate_all_building_ltp({"SENSEX": snap})
+    publish_building_scoreboard(scores)
+    assert scores[0].key == "SENSEX:PUT:76800"
+
+    # Only the #2 ready name made it through selector filters.
+    second = EntryCandidate(
+        symbol="SENSEX",
+        snap=snap,
+        mode="explosion",
+        score=50.0,
+        side=Side.PUT,
+        strike=76900.0,
+        premium=125.0,
+        strategy_type=StrategyType.EXPLOSIVE,
+        confidence=55.0,
+        tqs=55.0,
+        tier="BUILDING",
+        alert=snap.explosionAlerts[1],
+    )
+    kept = filter_candidates_building_best_pick([second])
+    assert len(kept) == 1
+    assert kept[0].strike == 76900.0
+    assert (kept[0].pretrade_meta or {}).get("buildingLtpBestPick") is True

@@ -68,10 +68,8 @@ def building_alerts_on_radar(
             if not isinstance(alert, dict):
                 continue
             tier = str(alert.get("tier") or "").upper()
-            buildingish = tier == "BUILDING" or bool(
-                alert.get("ictBuildingRipReady")
-            )
-            if not buildingish:
+            # Only true BUILDING radar names — promoted EXPLODING/ELITE use normal path.
+            if tier != "BUILDING":
                 continue
             side = str(alert.get("side") or "").upper()
             try:
@@ -182,6 +180,8 @@ def evaluate_all_building_ltp(
         ltp = float(ltp or 0)
         if ltp > 0:
             alert["premium"] = ltp
+        # Prefer live WS tape velocity for this LTP print.
+        alert = overlay_alert_tick_velocity(snap, alert, max_age_seconds=max_age)
 
         ready = False
         ready_reason = "not_evaluated"
@@ -303,18 +303,28 @@ def building_scoreboard_snapshot() -> dict[str, Any]:
 def apply_building_ltp_best_pick(
     candidate: Any,
 ) -> tuple[float, bool]:
-    """Rank bonus / keep flag for a selector candidate vs the BUILDING scoreboard.
-
-    Returns (rank_bonus, keep). When only-best is on, non-best BUILDING legs are
-    dropped so the single best ready name is taken among all monitored.
-    """
+    """Deprecated single-candidate helper — prefer filter_candidates_building_best_pick."""
     settings = get_settings()
     if not _scoreboard_active:
         return 0.0, True
     if not bool(getattr(settings, "building_ltp_best_pick_enabled", True)):
         return 0.0, True
+    key = _candidate_key(candidate)
+    preferred = preferred_building_ready_key({key})
+    only_best = bool(getattr(settings, "building_ltp_only_best_ready", True))
+    is_buildingish = _is_buildingish_candidate(candidate)
+    if only_best and is_buildingish and preferred and key != preferred:
+        return 0.0, False
+    if preferred and key == preferred:
+        bonus = float(
+            getattr(settings, "building_ltp_best_pick_rank_bonus", 48.0) or 48.0
+        )
+        return bonus, True
+    return 0.0, True
 
-    key = _alert_key(
+
+def _candidate_key(candidate: Any) -> str:
+    return _alert_key(
         getattr(candidate, "symbol", ""),
         getattr(
             getattr(candidate, "side", None),
@@ -323,24 +333,123 @@ def apply_building_ltp_best_pick(
         ),
         float(getattr(candidate, "strike", 0) or 0),
     )
+
+
+def _is_buildingish_candidate(candidate: Any) -> bool:
     tier = str(getattr(candidate, "tier", "") or "").upper()
     alert = getattr(candidate, "alert", None)
     if isinstance(alert, dict) and not tier:
         tier = str(alert.get("tier") or "").upper()
+    return tier == "BUILDING"
 
-    best = _best_ready_key
+
+def preferred_building_ready_key(candidate_keys: set[str]) -> Optional[str]:
+    """Best scoreboard-ready BUILDING that actually made it into candidates.
+
+    Fail soft: if the absolute #1 ready name was filtered out (OTM/band/guards),
+    promote the next ready name that is selectable — never wipe all BUILDING takes.
+    """
+    if not _scoreboard_active or not _last_scoreboard:
+        return _best_ready_key if _best_ready_key in candidate_keys else None
+    for row in _last_scoreboard:
+        if not row.get("ready"):
+            continue
+        key = str(row.get("key") or "")
+        if key and key in candidate_keys:
+            return key
+    return None
+
+
+def filter_candidates_building_best_pick(candidates: list[Any]) -> list[Any]:
+    """Keep/boost only the best selectable BUILDING among monitored names."""
+    settings = get_settings()
+    if not _scoreboard_active:
+        return candidates
+    if not bool(getattr(settings, "building_ltp_best_pick_enabled", True)):
+        return candidates
+    if not candidates:
+        return candidates
+
+    key_map = {_candidate_key(c): c for c in candidates}
+    preferred = preferred_building_ready_key(set(key_map.keys()))
     only_best = bool(getattr(settings, "building_ltp_only_best_ready", True))
-    is_buildingish = tier == "BUILDING" or (
-        isinstance(alert, dict) and bool(alert.get("ictBuildingRipReady"))
+    bonus = float(
+        getattr(settings, "building_ltp_best_pick_rank_bonus", 48.0) or 48.0
     )
-    if only_best and is_buildingish and best and key != best:
-        return 0.0, False
-    if best and key == best:
-        bonus = float(
-            getattr(settings, "building_ltp_best_pick_rank_bonus", 48.0) or 48.0
-        )
-        return bonus, True
-    return 0.0, True
+
+    out: list[Any] = []
+    for c in candidates:
+        key = _candidate_key(c)
+        is_buildingish = _is_buildingish_candidate(c)
+        if only_best and is_buildingish and preferred and key != preferred:
+            continue
+        if preferred and key == preferred:
+            c.score = float(getattr(c, "score", 0) or 0) + bonus
+            c.pretrade_meta = {
+                **(getattr(c, "pretrade_meta", None) or {}),
+                "buildingLtpBestPick": True,
+                "buildingLtpBestPickBonus": bonus,
+                "buildingLtpPreferredKey": preferred,
+            }
+        out.append(c)
+    return out
+
+
+def overlay_alert_tick_velocity(
+    snap: SymbolSnapshot,
+    alert: dict[str, Any],
+    *,
+    max_age_seconds: float = 3.0,
+) -> dict[str, Any]:
+    """Prefer fresh WS tape velocity over sparse poll velocity for BUILDING scoring."""
+    from app.services.tick_store import get_velocity_pct
+
+    side = str(alert.get("side") or "").upper()
+    try:
+        strike = float(alert.get("strike") or 0)
+    except (TypeError, ValueError):
+        strike = 0.0
+    if side not in ("CALL", "PUT") or strike <= 0:
+        return alert
+
+    ik = None
+    for row in getattr(snap, "heatmap", None) or []:
+        if abs(float(getattr(row, "strike", 0) or 0) - strike) < 1:
+            ik = (
+                getattr(row, "callInstrumentKey", None)
+                if side == "CALL"
+                else getattr(row, "putInstrumentKey", None)
+            )
+            break
+    if not ik:
+        return alert
+
+    out = dict(alert)
+    v3 = get_velocity_pct(
+        ik, window_seconds=3.0, max_age_seconds=max_age_seconds,
+    )
+    v9 = get_velocity_pct(
+        ik, window_seconds=9.0, max_age_seconds=max_age_seconds,
+    )
+    if v3 is not None:
+        poll_v3 = float(out.get("velocity3s") or out.get("velocity_3s") or 0)
+        out["tickVelocity3s"] = float(v3)
+        out["velocity3s"] = max(poll_v3, float(v3))
+    if v9 is not None:
+        poll_v9 = float(out.get("velocity9s") or out.get("velocity_9s") or 0)
+        out["tickVelocity9s"] = float(v9)
+        out["velocity9s"] = max(poll_v9, float(v9))
+    return out
+
+
+def publish_scoreboard_for_snapshots(
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    state: Any = None,
+) -> dict[str, Any]:
+    """Score every BUILDING name and publish best-pick for the next selector pass."""
+    scores = evaluate_all_building_ltp(snapshots, state=state)
+    return publish_building_scoreboard(scores)
 
 
 def sync_building_ltp_watch(
