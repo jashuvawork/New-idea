@@ -1706,13 +1706,29 @@ def scan_chain_explosions(
 
             # Solid bullish BUILDING rip → promote to EXPLODING so radar is
             # tradeable while still expanding (mid-rip OK). Cold/negative v3 stays.
+            # Local-base little lift uses a softer live-velocity floor.
+            _rip_move = max(session_move, peak_move)
+            _local_lift_v3 = float(
+                getattr(settings, "building_rip_local_base_min_velocity_3s", 1.2)
+                or 1.2
+            )
+            _local_lift_hi = float(
+                getattr(settings, "building_rip_local_base_max_move_pct", 15.0)
+                or 15.0
+            )
+            _promote_v3 = float(
+                getattr(settings, "building_rip_min_velocity_3s", 1.5) or 1.5
+            )
+            if (
+                bool(getattr(settings, "building_rip_local_base_lift_enabled", True))
+                and _rip_move <= _local_lift_hi
+            ):
+                _promote_v3 = min(_promote_v3, _local_lift_v3)
             if (
                 bool(getattr(settings, "building_rip_promote_to_exploding", True))
                 and tier == "BUILDING"
                 and near_atm
-                and v3 >= float(
-                    getattr(settings, "building_rip_min_velocity_3s", 1.5) or 1.5
-                )
+                and v3 >= _promote_v3
                 and (
                     v9 >= float(
                         getattr(settings, "building_rip_min_velocity_9s", 0.8) or 0.8
@@ -1730,9 +1746,9 @@ def scan_chain_explosions(
                         getattr(settings, "building_rip_min_volume_surge", 1.8) or 1.8
                     )
                 )
-                and max(session_move, peak_move)
+                and _rip_move
                 >= float(getattr(settings, "building_rip_min_move_pct", 2.0) or 2.0)
-                and max(session_move, peak_move)
+                and _rip_move
                 <= float(getattr(settings, "building_rip_max_move_pct", 55.0) or 55.0)
             ):
                 tier = "EXPLODING"

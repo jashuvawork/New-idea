@@ -635,11 +635,15 @@ def _explosion_candidates(
             "elite_base_ready_s_preauthorized",
             "v_rip_session_low_ready",
             "building_rip_bullish_ready",
+            "building_local_base_lift_ready",
         ):
             rank += float(
                 getattr(settings, "ict_armed_base_launch_rank_bonus", 16.0) or 16.0
             )
-            if first_lift_readiness_reason == "building_rip_bullish_ready":
+            if first_lift_readiness_reason in (
+                "building_rip_bullish_ready",
+                "building_local_base_lift_ready",
+            ):
                 rank += float(
                     getattr(settings, "building_rip_rank_bonus", 14.0) or 14.0
                 )

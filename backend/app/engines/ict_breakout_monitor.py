@@ -89,9 +89,12 @@ def building_rip_bullish_readiness(
 ) -> tuple[bool, str]:
     """Solid bullish confirmation for BUILDING radar while still ripping.
 
-    Mid-rip is allowed when live velocity is positive and volume confirms
-    expansion toward max. Cold/negative-v3 BUILDING (Aug19 11:45) is rejected.
-    Unlike v_rip, this does not require the armed base to sit on the session trough.
+    Two paths:
+    1. Local-base early lift — radar already sees the local base; a measured
+       little lift off that base + positive live velocity authorizes the take.
+    2. Mid-rip expanding — still ripping toward max (trough arm not required).
+
+    Cold/negative-v3 BUILDING (Aug19 11:45) is rejected on both paths.
     """
     settings = get_settings()
     if not bool(getattr(settings, "building_rip_bullish_enabled", True)):
@@ -145,11 +148,6 @@ def building_rip_bullish_readiness(
         or row.get("velocity_9s")
         or 0
     )
-    min_v3 = float(getattr(settings, "building_rip_min_velocity_3s", 1.5) or 1.5)
-    min_v9 = float(getattr(settings, "building_rip_min_velocity_9s", 0.8) or 0.8)
-    if v3 < min_v3:
-        return False, f"building_rip_velocity3s<{min_v3:g}"
-
     volume_surge = float(
         getattr(event, "volume_surge", 0)
         or getattr(ict, "volume_surge", 0)
@@ -165,21 +163,12 @@ def building_rip_bullish_readiness(
     min_surge = float(
         getattr(settings, "building_rip_min_volume_surge", 1.8) or 1.8
     )
-    if not vol_awake and volume_surge < min_surge:
-        return False, f"building_rip_volume_surge<{min_surge:g}"
-    if v9 < min_v9 and not vol_awake:
-        return False, f"building_rip_velocity9s<{min_v9:g}"
-
     score = float(
         getattr(event, "explosion_score", 0)
         or row.get("explosionScore")
         or row.get("score")
         or 0
     )
-    min_score = float(getattr(settings, "building_rip_min_score", 48.0) or 48.0)
-    if score < min_score:
-        return False, f"building_rip_score<{min_score:g}"
-
     local_move = float(
         getattr(ict, "base_relative_move_pct", 0)
         or row.get("ictBaseRelativeMovePct")
@@ -199,17 +188,72 @@ def building_rip_bullish_readiness(
         or getattr(event, "peak_move_pct", 0)
         or 0
     )
+    has_local_base = bool(
+        getattr(ict, "local_swing_base", False)
+        or getattr(ict, "base_armed", False)
+        or row.get("ictLocalSwingBase")
+        or row.get("ictBaseArmed")
+        or local_move > 0
+    )
+    # Proper local-base lift measure — prefer pad off the known local base,
+    # not day-% alone (day-% can look quiet while the local pad is lifting).
+    measured_local_lift = local_move if local_move > 0 else (
+        off_low if has_local_base and off_low > 0 else 0.0
+    )
+    local_lift_lo = float(
+        getattr(settings, "building_rip_local_base_min_move_pct", 2.0) or 2.0
+    )
+    local_lift_hi = float(
+        getattr(settings, "building_rip_local_base_max_move_pct", 15.0) or 15.0
+    )
+    local_lift_v3 = float(
+        getattr(settings, "building_rip_local_base_min_velocity_3s", 1.2) or 1.2
+    )
+    local_lift_score = float(
+        getattr(settings, "building_rip_local_base_min_score", 42.0) or 42.0
+    )
+    local_base_lift = bool(
+        getattr(settings, "building_rip_local_base_lift_enabled", True)
+        and has_local_base
+        and local_lift_lo <= measured_local_lift <= local_lift_hi + 1e-6
+        and v3 >= local_lift_v3
+        and (vol_awake or volume_surge >= min_surge)
+        and (v9 >= 0.5 or vol_awake or v3 >= local_lift_v3 + 0.3)
+        and score >= local_lift_score
+    )
+
+    min_v3 = float(getattr(settings, "building_rip_min_velocity_3s", 1.5) or 1.5)
+    min_v9 = float(getattr(settings, "building_rip_min_velocity_9s", 0.8) or 0.8)
+    min_score = float(getattr(settings, "building_rip_min_score", 48.0) or 48.0)
     rip_move = max(local_move, off_low, session_move)
     min_move = float(getattr(settings, "building_rip_min_move_pct", 2.0) or 2.0)
     max_move = float(getattr(settings, "building_rip_max_move_pct", 55.0) or 55.0)
-    if not (min_move <= rip_move <= max_move):
+    mid_rip = bool(
+        not local_base_lift
+        and v3 >= min_v3
+        and (vol_awake or volume_surge >= min_surge)
+        and (v9 >= min_v9 or vol_awake)
+        and score >= min_score
+        and min_move <= rip_move <= max_move
+    )
+    if not local_base_lift and not mid_rip:
+        if has_local_base and measured_local_lift > 0 and v3 < local_lift_v3:
+            return False, f"building_rip_local_lift_velocity3s<{local_lift_v3:g}"
+        if v3 < min_v3:
+            return False, f"building_rip_velocity3s<{min_v3:g}"
+        if not vol_awake and volume_surge < min_surge:
+            return False, f"building_rip_volume_surge<{min_surge:g}"
+        if score < min_score and score < local_lift_score:
+            return False, f"building_rip_score<{min_score:g}"
         return False, f"building_rip_move_outside_{min_move:g}_{max_move:g}"
 
     # Reject faded tops: peak already ran away and live heat is soft.
     fade_gap = float(
         getattr(settings, "building_rip_fade_peak_gap_pct", 12.0) or 12.0
     )
-    if peak_move > rip_move + fade_gap and v3 < min_v3 + 0.5:
+    compare_move = measured_local_lift if local_base_lift else rip_move
+    fade_v3_floor = local_lift_v3 if local_base_lift else min_v3
+    if peak_move > compare_move + fade_gap and v3 < fade_v3_floor + 0.5:
         return False, "building_rip_faded_from_peak"
 
     side = str(
@@ -263,6 +307,8 @@ def building_rip_bullish_readiness(
     if not chart_ok and not option_led:
         return False, "building_rip_needs_chart_or_option_led"
 
+    if local_base_lift:
+        return True, "building_local_base_lift_ready"
     return True, "building_rip_bullish_ready"
 
 
@@ -1382,7 +1428,7 @@ def analyze_ict_breakout(
             or sustained_armed_lift
         )
     )
-    # BUILDING mid-rip bullish heat flag for radar — trough arm not required.
+    # BUILDING mid-rip / local-base early-lift flag for radar.
     building_rip_v3 = float(
         getattr(settings, "building_rip_min_velocity_3s", 1.5) or 1.5
     )
@@ -1395,8 +1441,17 @@ def analyze_ict_breakout(
     building_rip_hi = float(
         getattr(settings, "building_rip_max_move_pct", 55.0) or 55.0
     )
+    local_lift_lo = float(
+        getattr(settings, "building_rip_local_base_min_move_pct", 2.0) or 2.0
+    )
+    local_lift_hi = float(
+        getattr(settings, "building_rip_local_base_max_move_pct", 15.0) or 15.0
+    )
+    local_lift_v3 = float(
+        getattr(settings, "building_rip_local_base_min_velocity_3s", 1.2) or 1.2
+    )
     structure_for_rip = max(base_rel_move, float(move or 0))
-    building_rip_ready = bool(
+    mid_rip_ready = bool(
         getattr(settings, "building_rip_bullish_enabled", True)
         and not mid_rip_coil
         and tier == "BUILDING"
@@ -1407,7 +1462,24 @@ def analyze_ict_breakout(
         ))
         and building_rip_lo <= structure_for_rip <= building_rip_hi + 1e-6
     )
-    if building_rip_ready:
+    local_base_lift_ready = bool(
+        getattr(settings, "building_rip_bullish_enabled", True)
+        and getattr(settings, "building_rip_local_base_lift_enabled", True)
+        and not mid_rip_coil
+        and tier == "BUILDING"
+        and (local_swing_base or base_armed)
+        and local_lift_lo <= base_rel_move <= local_lift_hi + 1e-6
+        and velocity_3s >= local_lift_v3
+        and (vol_awaken or volume_surge >= float(
+            getattr(settings, "building_rip_min_volume_surge", 1.8) or 1.8
+        ))
+    )
+    building_rip_ready = mid_rip_ready or local_base_lift_ready
+    if local_base_lift_ready:
+        reasons.append(
+            f"building_local_base_lift_{base_rel_move:.1f}%_v3_{velocity_3s:.1f}"
+        )
+    elif mid_rip_ready:
         reasons.append(
             f"building_rip_bullish_{structure_for_rip:.1f}%_v3_{velocity_3s:.1f}"
         )

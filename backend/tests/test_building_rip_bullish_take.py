@@ -100,6 +100,67 @@ def test_building_rip_authorizes_mid_rip_while_expanding(
 @patch("app.engines.worst_day_itm_fade.worst_day_defensive_session_active", return_value=False)
 @patch("app.engines.worst_day_guard.session_entry_policy", return_value=("NORMAL", {}))
 @patch("app.engines.dual_mode_strategy.resolve_trading_session_mode", return_value=("NORMAL", {}))
+def test_local_base_little_lift_authorizes_take(
+    _mode, _policy, _worst, mock_settings,
+):
+    """Radar at local base BUILDING + measured little lift + positive v3 = take."""
+    mock_settings.return_value = Settings()
+    snap = _snap(Side.PUT)
+    alert = _ripping_alert(
+        velocity3s=1.35,
+        velocity9s=0.7,
+        explosionScore=45.0,
+        score=45.0,
+        dailyMovePct=4.0,
+        peakMovePct=4.5,
+        offLowMovePct=6.5,
+        localBaseMovePct=6.5,
+        ictBaseRelativeMovePct=6.5,
+        ictLocalSwingBase=True,
+        ictBaseArmed=True,
+    )
+    ok, reason = building_rip_bullish_readiness(snap=snap, alert=alert)
+    assert ok is True
+    assert reason == "building_local_base_lift_ready"
+
+    ready, ready_reason = first_lift_entry_readiness(snap=snap, alert=alert)
+    assert ready is True
+    assert ready_reason == "building_local_base_lift_ready"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+@patch("app.engines.worst_day_itm_fade.worst_day_defensive_session_active", return_value=False)
+@patch("app.engines.worst_day_guard.session_entry_policy", return_value=("NORMAL", {}))
+@patch("app.engines.dual_mode_strategy.resolve_trading_session_mode", return_value=("NORMAL", {}))
+def test_local_base_without_lift_does_not_take(
+    _mode, _policy, _worst, mock_settings,
+):
+    """Sitting on the local base with no measured lift must wait."""
+    mock_settings.return_value = Settings()
+    snap = _snap(Side.PUT)
+    ok, reason = building_rip_bullish_readiness(
+        snap=snap,
+        alert=_ripping_alert(
+            velocity3s=1.4,
+            velocity9s=0.6,
+            explosionScore=45.0,
+            score=45.0,
+            dailyMovePct=0.5,
+            peakMovePct=0.8,
+            offLowMovePct=0.4,
+            localBaseMovePct=0.4,
+            ictBaseRelativeMovePct=0.4,
+            ictLocalSwingBase=True,
+        ),
+    )
+    assert ok is False
+    assert "move_outside" in reason or "velocity" in reason or "local_lift" in reason
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+@patch("app.engines.worst_day_itm_fade.worst_day_defensive_session_active", return_value=False)
+@patch("app.engines.worst_day_guard.session_entry_policy", return_value=("NORMAL", {}))
+@patch("app.engines.dual_mode_strategy.resolve_trading_session_mode", return_value=("NORMAL", {}))
 def test_building_rip_rejects_cold_negative_velocity(
     _mode, _policy, _worst, mock_settings,
 ):
@@ -117,10 +178,11 @@ def test_building_rip_rejects_cold_negative_velocity(
             localBaseMovePct=6.2,
             ictBaseRelativeMovePct=6.2,
             peakMovePct=6.2,
+            ictLocalSwingBase=True,
         ),
     )
     assert ok is False
-    assert "velocity3s" in reason
+    assert "velocity3s" in reason or "local_lift_velocity" in reason
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
