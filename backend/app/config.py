@@ -510,6 +510,16 @@ class Settings(BaseSettings):
     building_ltp_best_pick_enabled: bool = True
     building_ltp_best_pick_rank_bonus: float = 48.0
     building_ltp_only_best_ready: bool = True
+    # FTV sleeve for confirmed BUILDING lifts: when helpers prove something is
+    # helping (vol / CVD / chart / breadth), authorize without waiting for ELITE.
+    building_rip_ftv_enabled: bool = True
+    building_rip_ftv_min_explosion_score: float = 48.0
+    building_rip_ftv_min_velocity_3s: float = 1.2
+    building_rip_ftv_min_local_base_move_pct: float = 2.0
+    building_rip_ftv_max_local_base_move_pct: float = 55.0
+    building_rip_ftv_max_capital_pct: float = 0.35
+    building_rip_bypasses_extended_chase: bool = True
+    building_rip_bypasses_fake_trap: bool = True
     # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
     # premium progress even when 3s/9s velocity samples are unavailable.
     ict_armed_sustained_lift_min_move_pct: float = 8.0

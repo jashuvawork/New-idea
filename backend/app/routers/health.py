@@ -318,8 +318,13 @@ async def deployment_readiness():
             "topFtvAFallbackEnabled": bool(
                 getattr(settings, "top_ftv_a_enabled", True)
             ),
-            "allowedAuthorizationModes": ["S_STRICT", "TOP_FTV_A"],
-            "allowedCausalGrades": ["S", "A"],
+            "allowedAuthorizationModes": [
+                "S_STRICT",
+                "TOP_FTV_A",
+                "WINNER_LOCAL_BASE",
+                "BUILDING_RIP_FTV",
+            ],
+            "allowedCausalGrades": ["S", "A", "B"],
             "strictS": {
                 "requiresTopRankEligible": True,
                 "fullSleeveEligible": True,
@@ -335,6 +340,18 @@ async def deployment_readiness():
                 "maxCapitalPct": settings.top_ftv_a_max_capital_pct,
                 "fullSleeveEligible": True,
                 "maxLotsEnabled": True,
+            },
+            "buildingRipFtv": {
+                "enabled": bool(
+                    getattr(settings, "building_rip_ftv_enabled", True)
+                ),
+                "tiers": ["BUILDING", "EXPLODING", "ELITE"],
+                "requiresHelpers": True,
+                "maxCapitalPct": float(
+                    getattr(settings, "building_rip_ftv_max_capital_pct", 0.35)
+                    or 0.35
+                ),
+                "fullSleeveEligible": False,
             },
             "requiresAtmItm": True,
             "requiredAllocationRank": 1,

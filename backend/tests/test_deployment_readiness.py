@@ -87,8 +87,13 @@ def test_readiness_uses_cached_snapshot_and_shared_risk_engine():
     assert payload["tradingPolicy"] == {
         "ftvEliteTopOnlyEnabled": True,
         "topFtvAFallbackEnabled": True,
-        "allowedAuthorizationModes": ["S_STRICT", "TOP_FTV_A"],
-        "allowedCausalGrades": ["S", "A"],
+        "allowedAuthorizationModes": [
+            "S_STRICT",
+            "TOP_FTV_A",
+            "WINNER_LOCAL_BASE",
+            "BUILDING_RIP_FTV",
+        ],
+        "allowedCausalGrades": ["S", "A", "B"],
         "strictS": {
             "requiresTopRankEligible": True,
             "fullSleeveEligible": True,
@@ -104,6 +109,13 @@ def test_readiness_uses_cached_snapshot_and_shared_risk_engine():
             "maxCapitalPct": 0.9,
             "fullSleeveEligible": True,
             "maxLotsEnabled": True,
+        },
+        "buildingRipFtv": {
+            "enabled": True,
+            "tiers": ["BUILDING", "EXPLODING", "ELITE"],
+            "requiresHelpers": True,
+            "maxCapitalPct": 0.35,
+            "fullSleeveEligible": False,
         },
         "requiresAtmItm": True,
         "requiredAllocationRank": 1,

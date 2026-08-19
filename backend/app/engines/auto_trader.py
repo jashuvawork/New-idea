@@ -1043,7 +1043,8 @@ async def _open_from_candidate(
         )
         if (
             policy_decision is not None
-            and policy_decision.mode in {"TOP_FTV_A", "WINNER_LOCAL_BASE"}
+            and policy_decision.mode
+            in {"TOP_FTV_A", "WINNER_LOCAL_BASE", "BUILDING_RIP_FTV"}
             and policy_decision.max_capital_pct is not None
         ):
             ordinary_pct = min(ordinary_pct, float(policy_decision.max_capital_pct))

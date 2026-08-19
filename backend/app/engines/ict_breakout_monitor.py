@@ -108,7 +108,14 @@ def building_rip_bullish_readiness(
         or row.get("tier")
         or ""
     ).upper()
-    if tier != "BUILDING":
+    if tier != "BUILDING" and not (
+        tier == "EXPLODING"
+        and (
+            bool(row.get("ictBuildingRipReady"))
+            or bool(getattr(ict, "building_rip_ready", False))
+            or "buildingRip" in str(row.get("reason") or "")
+        )
+    ):
         return False, "building_rip_tier_not_building"
 
     if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
@@ -282,17 +289,44 @@ def building_rip_bullish_readiness(
     if money not in ("ATM", "ITM"):
         return False, f"building_rip_requires_atm_itm_{money.lower()}"
 
-    # Chart align OR option-led confirmation (volume awaken + absolute size / CVD).
+    # Chart align OR option-led confirmation — prove something is helping the lift.
     from app.engines.spot_direction import side_aligned_with_chart
+    from app.engines.symbol_cooldown import side_aligned_with_breadth
 
     chart_ok = False
     if getattr(snap, "spotChart", None) is not None:
         chart_ok = bool(side_aligned_with_chart(_Side(side), snap.spotChart))
+    breadth_bias = str(
+        getattr(getattr(snap, "breadth", None), "bias", "") or ""
+    )
+    breadth_ok = bool(side_aligned_with_breadth(side, breadth_bias))
     absolute_volume = float(
         getattr(event, "volume", 0)
         or row.get("volume")
         or row.get("absoluteVolume")
         or 0
+    )
+    live_cvd = False
+    live_cvd_accel = False
+    try:
+        from app.engines.advanced_indicators import (
+            option_cvd_acceleration_confirms_buying,
+            option_cvd_confirms_buying,
+        )
+
+        live_cvd = bool(
+            option_cvd_confirms_buying(snap, strike, _Side(side))
+        )
+        live_cvd_accel = bool(
+            option_cvd_acceleration_confirms_buying(snap, strike, _Side(side))
+        )
+    except Exception:
+        live_cvd = False
+        live_cvd_accel = False
+    displacement = bool(
+        row.get("ictDisplacement")
+        or row.get("displacement")
+        or getattr(ict, "displacement", False)
     )
     option_led = bool(
         vol_awake
@@ -301,11 +335,41 @@ def building_rip_bullish_readiness(
             or row.get("optionCvdBuying")
             or row.get("orderflowConfirmed")
             or row.get("cvdBuying")
+            or live_cvd
+            or live_cvd_accel
             or volume_surge >= min_surge + 0.4
         )
     )
-    if not chart_ok and not option_led:
+    helpers: list[str] = []
+    if vol_awake:
+        helpers.append("vol_awaken")
+    if chart_ok:
+        helpers.append("chart_align")
+    if breadth_ok:
+        helpers.append("breadth_align")
+    if live_cvd or row.get("cvdBuying") or row.get("optionCvdBuying"):
+        helpers.append("cvd_buying")
+    if live_cvd_accel:
+        helpers.append("cvd_accel")
+    if displacement:
+        helpers.append("displacement")
+    if volume_surge >= min_surge:
+        helpers.append("volume_surge")
+    if not chart_ok and not option_led and not breadth_ok:
         return False, "building_rip_needs_chart_or_option_led"
+    if not helpers:
+        return False, "building_rip_needs_helper_confirmation"
+
+    # Stamp helpers onto the live alert so FTV policy / UI can see what helped.
+    if isinstance(alert, dict):
+        alert["ictBuildingRipReady"] = True
+        alert["buildingRipHelpers"] = list(helpers)
+        alert["buildingRipHelpersOk"] = True
+        alert["ictBaseReadinessReason"] = (
+            "building_local_base_lift_ready"
+            if local_base_lift
+            else "building_rip_bullish_ready"
+        )
 
     if local_base_lift:
         return True, "building_local_base_lift_ready"
