@@ -45,6 +45,15 @@ class BuildingLiftHelpers:
     flat_vertical_quality: float = 0.0
     cvd_buying: bool = False
     ict_confirms: list[str] = field(default_factory=list)
+    # Index-level helpers (actual NIFTY/SENSEX spot move — not strike premium).
+    index_velocity_3s: float = 0.0
+    index_velocity_9s: float = 0.0
+    index_tick_align: bool = False
+    index_tick_spike: bool = False
+    index_mom_align: bool = False
+    index_squeeze: bool = False
+    index_helpers: list[str] = field(default_factory=list)
+    index_confirming: bool = False
     score_bonus: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -157,6 +166,26 @@ def evaluate_building_lift_helpers(
         except Exception:
             out.breadth_align = False
 
+    # Index tick / mom / squeeze — actual spot move that lifts strikes.
+    if side in ("CALL", "PUT"):
+        try:
+            from app.engines.index_tick_helpers import evaluate_index_tick_helpers
+
+            idx = evaluate_index_tick_helpers(snap=snap, side=side, alert=row)
+            out.index_velocity_3s = float(idx.velocity_3s)
+            out.index_velocity_9s = float(idx.velocity_9s)
+            out.index_tick_align = bool(idx.tick_align)
+            out.index_tick_spike = bool(idx.tick_spike)
+            out.index_mom_align = bool(idx.mom_align)
+            out.index_squeeze = bool(idx.squeeze_align)
+            out.index_helpers = list(idx.helpers)
+            out.index_confirming = bool(idx.confirming)
+            # Breadth already counted above; index board may reaffirm it.
+            if idx.breadth_align and not out.breadth_align:
+                out.breadth_align = True
+        except Exception:
+            pass
+
     # ICT confluence from local-base prediction (judas / displacement / kill zone).
     pred = (
         row.get("bullishLocalBasePrediction")
@@ -246,6 +275,10 @@ def evaluate_building_lift_helpers(
         helpers.append("cvd_buying")
     if out.sudden_lift:
         helpers.append("sudden_ltp_lift")
+    # Index-level helpers (spot tape / mom / squeeze) — drive strike lifts.
+    for ih in out.index_helpers:
+        if ih not in helpers:
+            helpers.append(ih)
     # Named ICT confluence helpers from Aug19.
     confirm_blob = " ".join(out.ict_confirms).lower()
     if "judas" in confirm_blob:
@@ -270,7 +303,13 @@ def evaluate_building_lift_helpers(
     )
     # Need heat + at least one alignment/structure helper — never vol alone.
     has_heat = bool(
-        {"vol_awaken", "volume_surge", "velocity_spike", "displacement", "cvd_buying"}
+        {
+            "vol_awaken",
+            "volume_surge",
+            "velocity_spike",
+            "displacement",
+            "cvd_buying",
+        }
         & set(helpers)
     )
     has_structure = bool(
@@ -281,12 +320,21 @@ def evaluate_building_lift_helpers(
             "judas_reclaim",
             "index_displacement",
             "sudden_ltp_lift",
+            "index_tick_align",
+            "index_tick_spike",
+            "index_mom_turn",
+            "index_squeeze",
+            "index_breadth",
         }
         & set(helpers)
     )
     out.helping = (
         out.helper_count >= min_needed and has_heat and has_structure
     )
+    # Index confirming + option heat is enough even one helper short of min
+    # (spot move is the causal driver of the strike lift).
+    if out.index_confirming and has_heat and has_structure:
+        out.helping = True
 
     # Score bonus for ranking: each helper + extra when the board is helping.
     bonus = float(out.helper_count) * float(
@@ -299,6 +347,10 @@ def evaluate_building_lift_helpers(
     if out.sudden_lift:
         bonus += float(
             getattr(settings, "building_sudden_ltp_lift_bonus", 8.0) or 8.0
+        )
+    if out.index_confirming:
+        bonus += float(
+            getattr(settings, "index_tick_confirm_bonus", 10.0) or 10.0
         )
     out.score_bonus = round(min(40.0, bonus), 2)
     return out
@@ -318,6 +370,16 @@ def stamp_building_lift_helpers(
     out["buildingHelperCount"] = int(helpers.helper_count)
     out["buildingHelperBonus"] = float(helpers.score_bonus)
     out["buildingIctConfirms"] = list(helpers.ict_confirms)
+    # Index spot tape for archive replay / FTV evidence.
+    out["indexSpotMove3s"] = round(helpers.index_velocity_3s, 4)
+    out["indexSpotMove9s"] = round(helpers.index_velocity_9s, 4)
+    out["indexTickAlign"] = bool(helpers.index_tick_align)
+    out["indexTickSpike"] = bool(helpers.index_tick_spike)
+    out["indexMomAlign"] = bool(helpers.index_mom_align)
+    out["indexSqueezeAlign"] = bool(helpers.index_squeeze)
+    out["indexHelpers"] = list(helpers.index_helpers)
+    out["indexHelperCount"] = int(len(helpers.index_helpers))
+    out["indexHelpersConfirm"] = bool(helpers.index_confirming)
     if helpers.helping:
         out["ictBuildingRipReady"] = True
     return out

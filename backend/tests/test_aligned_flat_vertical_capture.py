@@ -485,6 +485,7 @@ def test_must_take_requires_chart_align(mock_settings):
     s.explosion_top_must_take_min_score = 62.0
     s.explosion_top_must_take_require_atm_itm = True
     s.explosion_top_must_take_require_chart_align = True
+    s.explosion_top_must_take_allow_index_helpers = False
     s.min_option_premium_inr = 18.0
     mock_settings.return_value = s
     snap_ok = _snap("BEARISH")

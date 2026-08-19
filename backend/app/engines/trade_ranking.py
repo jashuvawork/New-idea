@@ -99,6 +99,7 @@ def ftv_authorization_policy(
     top_ftv_a_exceptional_min_velocity_3s: float = 5.0,
     top_ftv_a_exceptional_min_velocity_9s: float = 2.5,
     top_ftv_a_exceptional_max_move_pct: float = 40.0,
+    top_ftv_a_index_helpers_waive_cvd_accel: bool = True,
     ftv_s_strict_min_explosion_score: float = 85.0,
     ftv_s_strict_min_quality: float = 70.0,
     ftv_s_strict_min_velocity_3s: float = 2.5,
@@ -313,7 +314,20 @@ def ftv_authorization_policy(
             top_ftv_a_reason = "top_ftv_a_timing_blocked"
         elif not bool(evidence.get("cvdBuying")):
             top_ftv_a_reason = "top_ftv_a_requires_option_cvd_buying"
-        elif not bool(evidence.get("cvdAcceleration")):
+        elif not bool(evidence.get("cvdAcceleration")) and not (
+            top_ftv_a_index_helpers_waive_cvd_accel
+            and bool(
+                evidence.get("indexHelpersConfirm")
+                or evidence.get("indexTickSpike")
+                or (
+                    evidence.get("indexTickAlign")
+                    and (
+                        evidence.get("indexMomAlign")
+                        or evidence.get("indexSqueezeAlign")
+                    )
+                )
+            )
+        ):
             top_ftv_a_reason = "top_ftv_a_requires_option_cvd_acceleration"
         elif explosion_score < top_ftv_a_min_explosion_score:
             top_ftv_a_reason = "top_ftv_a_explosion_score_below_floor"
@@ -448,6 +462,7 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "top_ftv_a_exceptional_min_velocity_3s",
         "top_ftv_a_exceptional_min_velocity_9s",
         "top_ftv_a_exceptional_max_move_pct",
+        "top_ftv_a_index_helpers_waive_cvd_accel",
         "ftv_s_strict_min_explosion_score",
         "ftv_s_strict_min_quality",
         "ftv_s_strict_min_velocity_3s",
@@ -709,6 +724,13 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "displacement": bool(evidence.get("displacement")),
             "cvdBuying": cvd_buying,
             "cvdAcceleration": cvd_acceleration,
+            "indexHelpersConfirm": bool(evidence.get("indexHelpersConfirm")),
+            "indexTickSpike": bool(evidence.get("indexTickSpike")),
+            "indexTickAlign": bool(evidence.get("indexTickAlign")),
+            "indexMomAlign": bool(evidence.get("indexMomAlign")),
+            "indexSqueezeAlign": bool(evidence.get("indexSqueezeAlign")),
+            "indexSpotMove3s": _number(evidence.get("indexSpotMove3s")),
+            "indexSpotMove9s": _number(evidence.get("indexSpotMove9s")),
             "explosionScore": round(explosion_score, 2),
             "flatVerticalQuality": round(flat_vertical_quality, 2),
             "tqs": round(tqs, 2),
@@ -815,6 +837,13 @@ def rank_entry_candidate(
         "displacement": bool(alert.get("ictDisplacement")),
         "cvdBuying": cvd_buying,
         "cvdAcceleration": cvd_acceleration,
+        "indexHelpersConfirm": bool(alert.get("indexHelpersConfirm")),
+        "indexTickSpike": bool(alert.get("indexTickSpike")),
+        "indexTickAlign": bool(alert.get("indexTickAlign")),
+        "indexMomAlign": bool(alert.get("indexMomAlign")),
+        "indexSqueezeAlign": bool(alert.get("indexSqueezeAlign")),
+        "indexSpotMove3s": alert.get("indexSpotMove3s"),
+        "indexSpotMove9s": alert.get("indexSpotMove9s"),
         "timingAssessment": timing.get("assessment"),
         "timingAction": timing.get("action"),
         "exhaustedReentry": exhausted_reentry,
@@ -825,4 +854,27 @@ def rank_entry_candidate(
             or alert.get("fadedRipCaution")
         ),
     }
+    # Live index helpers when alert not yet stamped (ELITE/EXPLODING path).
+    if live_snapshot is not None and not evidence.get("indexHelpersConfirm"):
+        try:
+            from app.engines.index_tick_helpers import (
+                evaluate_index_tick_helpers,
+                stamp_index_tick_helpers,
+            )
+
+            idx = evaluate_index_tick_helpers(
+                snap=live_snapshot,
+                side=getattr(candidate, "side", ""),
+                alert=alert,
+            )
+            stamp_index_tick_helpers(alert, idx)
+            evidence["indexHelpersConfirm"] = bool(idx.confirming)
+            evidence["indexTickSpike"] = bool(idx.tick_spike)
+            evidence["indexTickAlign"] = bool(idx.tick_align)
+            evidence["indexMomAlign"] = bool(idx.mom_align)
+            evidence["indexSqueezeAlign"] = bool(idx.squeeze_align)
+            evidence["indexSpotMove3s"] = idx.velocity_3s
+            evidence["indexSpotMove9s"] = idx.velocity_9s
+        except Exception:
+            pass
     return rank_trade_evidence(evidence)

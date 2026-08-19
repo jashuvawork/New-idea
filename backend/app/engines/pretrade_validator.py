@@ -886,9 +886,25 @@ def validate_candidate(
         )
         meta.update(trap_meta)
         if trap_block or trap_meta.get("action") == "block":
-            from app.engines.building_ftv_gates import building_rip_bypasses_fake_trap
+            from app.engines.building_ftv_gates import (
+                building_rip_bypasses_fake_trap,
+                top_must_take_bypasses_fake_trap,
+            )
+            from app.engines.elite_never_block import elite_never_block_active
 
-            if not building_rip_bypasses_fake_trap(candidate=candidate):
+            must_take = elite_never_block_active(
+                event=explosion_event,
+                candidate=candidate,
+                alert=getattr(candidate, "alert", None),
+                snap=snap,
+            )
+            if not building_rip_bypasses_fake_trap(candidate=candidate) and not (
+                top_must_take_bypasses_fake_trap(
+                    must_take=must_take,
+                    candidate=candidate,
+                    snap=snap,
+                )
+            ):
                 return False, trap_reason, meta
 
     if getattr(candidate, "mode", "") == "explosion" and explosion_event is not None:

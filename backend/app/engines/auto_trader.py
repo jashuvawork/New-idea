@@ -1036,10 +1036,22 @@ async def _open_from_candidate(
         allocation=allocation,
         candidate=candidate,
     )
-    full_sleeve_authorized = (
-        strict_s_full_sleeve or top_ftv_a_full_sleeve or building_rip_full_sleeve
+    lots, winner_index_full_sleeve = _winner_index_helpers_max_lots(
+        lots=lots,
+        symbol=symbol,
+        premium=fill_premium,
+        policy_decision=policy_decision,
+        allocation=allocation,
+        candidate=candidate,
+        snap=snap,
     )
-    if top_ftv_a_full_sleeve or building_rip_full_sleeve:
+    full_sleeve_authorized = (
+        strict_s_full_sleeve
+        or top_ftv_a_full_sleeve
+        or building_rip_full_sleeve
+        or winner_index_full_sleeve
+    )
+    if top_ftv_a_full_sleeve or building_rip_full_sleeve or winner_index_full_sleeve:
         top_explosion_max = True
     force_max_size = full_sleeve_authorized
 
@@ -1202,9 +1214,25 @@ async def _open_from_candidate(
                 if live_trap.get("fakeExplosionTrap"):
                     trap_meta = {**trap_meta, **live_trap}
                 if trap_block or live_trap.get("action") == "block":
-                    from app.engines.building_ftv_gates import building_rip_bypasses_fake_trap
+                    from app.engines.building_ftv_gates import (
+                        building_rip_bypasses_fake_trap,
+                        top_must_take_bypasses_fake_trap,
+                    )
+                    from app.engines.elite_never_block import elite_never_block_active
 
-                    if not building_rip_bypasses_fake_trap(candidate=candidate):
+                    must_take = elite_never_block_active(
+                        event=candidate.explosion_event,
+                        candidate=candidate,
+                        alert=getattr(candidate, "alert", None),
+                        snap=snap,
+                    )
+                    if not building_rip_bypasses_fake_trap(
+                        candidate=candidate
+                    ) and not top_must_take_bypasses_fake_trap(
+                        must_take=must_take,
+                        candidate=candidate,
+                        snap=snap,
+                    ):
                         return False, trap_reason
                 if trap_meta.get("action") == "cut_size":
                     bypass_soft = full_sleeve_authorized and (
@@ -2626,6 +2654,67 @@ def _building_rip_ftv_policy_max_lots(
     # Floor at per-trade capital so BUILDING helper takes match TOP_FTV_A sleeve.
     capital_pct = max(
         capital_pct,
+        float(getattr(settings, "per_trade_capital_pct", 0.90) or 0.90),
+    )
+    max_lots = max_lots_for_capital_pct(symbol, premium, capital_pct)
+    return max(int(lots), max_lots), True
+
+
+def _winner_index_helpers_max_lots(
+    *,
+    lots: int,
+    symbol: str,
+    premium: float,
+    policy_decision: Any,
+    allocation: RankedAllocation | None,
+    candidate: Any = None,
+    snap: Any = None,
+) -> tuple[int, bool]:
+    """Promote WINNER_LOCAL_BASE to max lots when index helpers confirm the lift."""
+    settings = get_settings()
+    if not bool(getattr(settings, "winner_local_base_index_helpers_max_lots", True)):
+        return int(lots), False
+    authorized = bool(
+        policy_decision is not None
+        and policy_decision.mode == "WINNER_LOCAL_BASE"
+        and policy_decision.allowed
+        and allocation is not None
+        and allocation.rank == 1
+    )
+    if not authorized:
+        return int(lots), False
+
+    alert = getattr(candidate, "alert", None) if candidate is not None else None
+    if not isinstance(alert, dict):
+        alert = {}
+    confirming = False
+    try:
+        from app.engines.index_tick_helpers import (
+            evaluate_index_tick_helpers,
+            index_helpers_confirm_from_alert,
+        )
+
+        if index_helpers_confirm_from_alert(alert):
+            confirming = True
+        else:
+            resolved_snap = snap
+            if resolved_snap is None and candidate is not None:
+                resolved_snap = getattr(candidate, "snap", None)
+            side = getattr(candidate, "side", "") if candidate is not None else ""
+            if resolved_snap is not None and side:
+                idx = evaluate_index_tick_helpers(
+                    snap=resolved_snap, side=side, alert=alert,
+                )
+                confirming = bool(idx.confirming or idx.tick_spike)
+    except Exception:
+        confirming = False
+    if not confirming:
+        return int(lots), False
+
+    from app.engines.capital_allocator import max_lots_for_capital_pct
+
+    capital_pct = max(
+        float(getattr(policy_decision, "max_capital_pct", 0) or 0),
         float(getattr(settings, "per_trade_capital_pct", 0.90) or 0.90),
     )
     max_lots = max_lots_for_capital_pct(symbol, premium, capital_pct)

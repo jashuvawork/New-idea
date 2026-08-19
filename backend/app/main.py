@@ -60,6 +60,12 @@ async def _background_monitor():
     )
 
     set_tick_wake_event(_tick_wake)
+    try:
+        from app.engines.index_tick_helpers import ensure_index_tick_observer
+
+        ensure_index_tick_observer()
+    except Exception:
+        pass
     settings = get_settings()
     tick_driven = False
     last_composer_mono = 0.0
