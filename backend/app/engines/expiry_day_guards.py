@@ -577,6 +577,7 @@ def alert_is_strict_rank_one_launch(
             "eliteBaseReady": elite_ready,
             "armedBaseLaunch": armed_launch,
             "flatThenVertical": alert.get("ictFlatThenVertical"),
+            "flatVerticalQuality": alert.get("flatVerticalQuality"),
             "orderflowPositive": orderflow,
             "timingAssessment": timing_assessment,
             "timingAction": timing_action,

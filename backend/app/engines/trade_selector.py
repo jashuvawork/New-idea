@@ -472,7 +472,23 @@ def _explosion_candidates(
             continue
 
         rank = score_val * 0.55 + snap.tradeQualityScore * 0.25
-        if first_lift_readiness_reason == "first_lift_option_led_ready":
+        # Option-led ATM/ITM lifts get first priority even when another lane (e.g. the
+        # BUILDING rip sleeve) admitted them — the promotion tracks the option-led shape,
+        # not which readiness reason won the race.
+        option_led_promote = first_lift_readiness_reason in (
+            "first_lift_option_led_ready",
+            "armed_base_option_led_ready",
+        )
+        if not option_led_promote and first_lift_ready:
+            try:
+                from app.engines.ict_breakout_monitor import _option_led_first_lift_ok
+
+                option_led_promote = _option_led_first_lift_ok(
+                    row=alert, ict=None, event=None, snap=snap, settings=settings,
+                )
+            except Exception:
+                option_led_promote = False
+        if option_led_promote:
             rank += float(
                 getattr(settings, "first_lift_option_led_rank_bonus", 12.0) or 12.0
             )
@@ -481,6 +497,21 @@ def _explosion_candidates(
         rank += min(15, event.velocity_3s * 2)
         rank += min(10, event.velocity_9s)
         rank += index_moment_rank_bonus(snap, event.side)
+        # History of index spike moments: a same-direction spot spike burst is the causal
+        # thrust behind a sudden strike lift — rank those candidates a touch higher.
+        if bool(alert.get("indexSpikeBurst")) or (
+            "index_spike_burst" in (alert.get("indexHelpers") or [])
+        ):
+            rank += float(
+                getattr(settings, "index_spike_burst_rank_bonus", 4.0) or 4.0
+            )
+        # Sustained same-direction index drift is the grind-driven FTV fuel.
+        if bool(alert.get("indexDrift")) or (
+            "index_drift" in (alert.get("indexHelpers") or [])
+        ):
+            rank += float(
+                getattr(settings, "index_drift_rank_bonus", 3.0) or 3.0
+            )
         rank += chart_rank_adjustment(event.side, snap.spotChart)
         rank += moneyness_rank_adjustment(
             event.side, event.strike, snap, mode="explosion", candidate_score=rank,

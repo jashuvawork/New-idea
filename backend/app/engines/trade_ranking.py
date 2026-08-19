@@ -641,7 +641,10 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         armed_launch
         and tier in ("ELITE", "EXPLODING")
         and explosion_score >= 85.0
-        and flat_vertical_quality >= 70.0
+        # Confirmed flat->vertical STRUCTURE, or an explicit high FTV quality score, proves
+        # the launch pad. Requiring the numeric quality alone dropped genuine S launches
+        # whose alert only stamped the structure flag (aug18 EXPLODING armed launch).
+        and (flat_vertical_quality >= 70.0 or flat_vertical)
         and v3 >= 2.5
         and v9 >= 1.75
         and orderflow

@@ -774,6 +774,9 @@ class ExplosionEvent:
     peak_move_pct: float = 0.0
     # Absolute chain volume at detection (0 when unknown). Forwarded to ICT analyze.
     volume: float = 0.0
+    # ATM | ITM | OTM ("" when spot/atm unknown). Shallow-OTM strikes are monitored on
+    # radar but must never be tradeable until they rotate to ATM/ITM.
+    moneyness: str = ""
 
 
 def _strike_key(strike: float, side: Side) -> str:
@@ -1541,12 +1544,14 @@ def scan_chain_explosions(
             if not premium or premium <= 0:
                 continue
 
-            if atm_itm_only and spot and atm:
+            money = ""
+            if spot and atm:
                 from app.engines.moneyness import classify_moneyness
 
                 money = classify_moneyness(
                     side, float(strike), float(spot), symbol=symbol, atm=float(atm),
                 )
+            if atm_itm_only and spot and atm:
                 if money == "OTM" and not _shallow_otm_monitor_eligible(
                     side,
                     float(strike),
@@ -1789,6 +1794,18 @@ def scan_chain_explosions(
                     except Exception:
                         keep_first_lift = False
                         keep_armed_base = False
+                # An armed base with no live lift yet needs no standalone radar row: the
+                # anchor persists in _armed_base_anchors and re-surfaces the event the moment
+                # the premium lifts. Emitting a dead-flat (0 move / 0 velocity) WATCH just
+                # adds noise, so only keep an armed base once something is actually moving.
+                if (
+                    keep_armed_base
+                    and not keep_first_lift
+                    and session_move <= 0
+                    and peak_move <= 0
+                    and v3 <= 0
+                ):
+                    keep_armed_base = False
                 if (
                     not keep_first_lift
                     and not keep_armed_base
@@ -1846,6 +1863,7 @@ def scan_chain_explosions(
                 daily_move_pct=round(session_move, 2),
                 peak_move_pct=round(peak_move, 2),
                 volume=float(effective_volume or 0),
+                moneyness=str(money or ""),
             ))
 
     events.sort(key=lambda e: ({"ELITE": 4, "EXPLODING": 3, "BUILDING": 2, "WATCH": 1}[e.tier], e.explosion_score), reverse=True)
@@ -1901,6 +1919,30 @@ def refresh_snapshot_explosion_alerts(snap: Any, *, expiry_day: bool = False) ->
     ]
     ordered = hot + cold
     alerts = [event_to_dict(e, snap) for e in ordered[:limit]]
+    # Stamp index-level (spot tape) confirmation onto hot alerts so the selector, must-take
+    # and UI all see the same "the index is thrusting" evidence — the causal driver behind a
+    # sudden strike lift. Bounded to BUILDING+ and wrapped so a tape hiccup never breaks scan.
+    try:
+        from app.config import get_settings as _gs2
+
+        if bool(getattr(_gs2(), "index_tick_helpers_enabled", True)):
+            from app.engines.index_tick_helpers import (
+                evaluate_index_tick_helpers,
+                stamp_index_tick_helpers,
+            )
+
+            for i, a in enumerate(alerts):
+                if str(a.get("tier") or "").upper() not in (
+                    "BUILDING", "EXPLODING", "ELITE",
+                ):
+                    continue
+                side = str(a.get("side") or "").upper()
+                if side not in ("CALL", "PUT"):
+                    continue
+                board = evaluate_index_tick_helpers(snap=snap, side=side, alert=a)
+                alerts[i] = stamp_index_tick_helpers(a, board)
+    except Exception:
+        pass
     snap.explosionAlerts = alerts
     snap.topExplosion = alerts[0] if alerts else None
 
@@ -2028,6 +2070,12 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
                 tradeable = True
         except Exception:
             pass
+    # A shallow-OTM strike is monitored on radar (so its base is retained for the eventual
+    # ATM rotation) but must never be tradeable or count as a first lift until it becomes
+    # ATM/ITM — only near-the-money strikes take. Guard keyed on scan-time moneyness.
+    if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
+        tradeable = False
+        first_lift = False
     return {
         "symbol": e.symbol,
         "side": e.side.value,
