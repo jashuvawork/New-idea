@@ -522,6 +522,7 @@ def _explosion_candidates(
                 base_armed=bool(alert.get("ictBaseArmed")),
                 elite_base_ready=bool(alert.get("ictEliteBaseReady")),
                 v_rip_ready=bool(alert.get("ictVRipReady")),
+                building_rip_ready=bool(alert.get("ictBuildingRipReady")),
                 armed_base_launch=bool(alert.get("ictArmedBaseLaunch")),
                 armed_base_samples=int(alert.get("ictArmedBaseSamples") or 0),
                 armed_base_span_seconds=float(
@@ -633,10 +634,19 @@ def _explosion_candidates(
             "armed_base_option_led_ready",
             "elite_base_ready_s_preauthorized",
             "v_rip_session_low_ready",
+            "building_rip_bullish_ready",
+            "building_local_base_lift_ready",
         ):
             rank += float(
                 getattr(settings, "ict_armed_base_launch_rank_bonus", 16.0) or 16.0
             )
+            if first_lift_readiness_reason in (
+                "building_rip_bullish_ready",
+                "building_local_base_lift_ready",
+            ):
+                rank += float(
+                    getattr(settings, "building_rip_rank_bonus", 14.0) or 14.0
+                )
         # Early flat→vertical breakouts (26→45 CE / 12→40 PE) jump the queue —
         # including DEFENSIVE days when volume/displacement confirms the base break.
         if ict.flat_then_vertical and ict.active:
@@ -1790,8 +1800,16 @@ def diagnose_missed_entries(
             if bool(
                 alert.get("ictFirstLift")
                 or alert.get("ictVRipReady")
+                or alert.get("ictBuildingRipReady")
                 or alert.get("ictEliteBaseReady")
                 or alert.get("ictArmedBaseLaunch")
+                or (
+                    str(alert.get("tier") or "").upper() == "BUILDING"
+                    and (
+                        alert.get("volumeAwaken")
+                        or alert.get("ictVolumeAwakening")
+                    )
+                )
             ):
                 from app.engines.ict_breakout_monitor import (
                     first_lift_entry_readiness,
@@ -1800,6 +1818,7 @@ def diagnose_missed_entries(
                 first_lift_ready, readiness_reason = first_lift_entry_readiness(
                     snap=snap,
                     alert=alert,
+                    state=state,
                 )
                 if not first_lift_ready:
                     blockers.append(readiness_reason)

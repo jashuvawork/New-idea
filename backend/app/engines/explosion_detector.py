@@ -1704,6 +1704,56 @@ def scan_chain_explosions(
                     f"volAwaken×{effective_volume // 1000:.0f}k"
                 )
 
+            # Solid bullish BUILDING rip → promote to EXPLODING so radar is
+            # tradeable while still expanding (mid-rip OK). Cold/negative v3 stays.
+            # Local-base little lift uses a softer live-velocity floor.
+            _rip_move = max(session_move, peak_move)
+            _local_lift_v3 = float(
+                getattr(settings, "building_rip_local_base_min_velocity_3s", 1.2)
+                or 1.2
+            )
+            _local_lift_hi = float(
+                getattr(settings, "building_rip_local_base_max_move_pct", 15.0)
+                or 15.0
+            )
+            _promote_v3 = float(
+                getattr(settings, "building_rip_min_velocity_3s", 1.5) or 1.5
+            )
+            if (
+                bool(getattr(settings, "building_rip_local_base_lift_enabled", True))
+                and _rip_move <= _local_lift_hi
+            ):
+                _promote_v3 = min(_promote_v3, _local_lift_v3)
+            if (
+                bool(getattr(settings, "building_rip_promote_to_exploding", True))
+                and tier == "BUILDING"
+                and near_atm
+                and v3 >= _promote_v3
+                and (
+                    v9 >= float(
+                        getattr(settings, "building_rip_min_velocity_9s", 0.8) or 0.8
+                    )
+                    or awakened
+                    or vol_surge
+                    >= float(
+                        getattr(settings, "building_rip_min_volume_surge", 1.8) or 1.8
+                    )
+                )
+                and (
+                    awakened
+                    or vol_surge
+                    >= float(
+                        getattr(settings, "building_rip_min_volume_surge", 1.8) or 1.8
+                    )
+                )
+                and _rip_move
+                >= float(getattr(settings, "building_rip_min_move_pct", 2.0) or 2.0)
+                and _rip_move
+                <= float(getattr(settings, "building_rip_max_move_pct", 55.0) or 55.0)
+            ):
+                tier = "EXPLODING"
+                reason_parts_open.append(f"buildingRip+v3_{v3:.1f}")
+
             tier = _apply_sticky_tier(f"{symbol}:{key_h}", tier)
 
             if tier == "WATCH" and score < 25 and not awakened:
@@ -1904,11 +1954,14 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     armed_launch = bool(getattr(ict, "armed_base_launch", False))
     elite_base_ready = bool(getattr(ict, "elite_base_ready", False))
     v_rip_ready = bool(getattr(ict, "v_rip_ready", False))
+    building_rip_ready = bool(getattr(ict, "building_rip_ready", False))
     if armed_launch:
         tradeable = True
     if elite_base_ready:
         tradeable = True
     if v_rip_ready:
+        tradeable = True
+    if building_rip_ready:
         tradeable = True
     # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).
     if e.tier == "BUILDING" and ict.active and ict.flat_then_vertical:
@@ -1924,6 +1977,16 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         e.tier == "BUILDING"
         and vol_awaken
         and pad_floor <= structure_pad <= pad_ceil
+    ):
+        tradeable = True
+    # BUILDING mid-rip with solid live bullish heat — expose as tradeable.
+    if (
+        e.tier == "BUILDING"
+        and building_rip_ready
+        and float(e.velocity_3s or 0)
+        >= float(
+            getattr(_settings, "building_rip_min_velocity_3s", 1.5) or 1.5
+        )
     ):
         tradeable = True
     # Near-base ATM/ITM top explosions must be tradeable even when day-move < floor
@@ -1988,6 +2051,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictBaseArmed": bool(getattr(ict, "base_armed", False)),
         "ictEliteBaseReady": elite_base_ready,
         "ictVRipReady": v_rip_ready,
+        "ictBuildingRipReady": building_rip_ready,
         "ictArmedBaseLaunch": armed_launch,
         "ictArmedBaseSustainedLift": sustained_armed_lift,
         "ictMidRipCoil": bool(
@@ -2040,15 +2104,19 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
                     "v_rip_session_low"
                     if v_rip_ready
                     else (
-                        "ict_base_armed"
-                        if getattr(ict, "base_armed", False)
+                        "building_rip_bullish"
+                        if building_rip_ready
                         else (
-                            "first_lift_local_base"
-                            if first_lift
+                            "ict_base_armed"
+                            if getattr(ict, "base_armed", False)
                             else (
-                                ict.pattern
-                                if ict.active
-                                else ("volume_awaken" if vol_awaken else e.tier)
+                                "first_lift_local_base"
+                                if first_lift
+                                else (
+                                    ict.pattern
+                                    if ict.active
+                                    else ("volume_awaken" if vol_awaken else e.tier)
+                                )
                             )
                         )
                     )

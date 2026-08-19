@@ -478,6 +478,26 @@ class Settings(BaseSettings):
     ict_v_rip_min_quality: float = 50.0
     ict_v_rip_min_score: float = 40.0
     ict_v_rip_base_near_session_low_pct: float = 2.0
+    # BUILDING bullish-rip sleeve: when radar is stuck BUILDING but premium is
+    # actively ripping (positive live velocity + volume), take mid-rip toward max.
+    # Cold/negative-v3 BUILDING stays blocked. Does not require session-trough arm.
+    building_rip_bullish_enabled: bool = True
+    building_rip_min_velocity_3s: float = 1.5
+    building_rip_min_velocity_9s: float = 0.8
+    building_rip_min_volume_surge: float = 1.8
+    building_rip_min_score: float = 48.0
+    building_rip_min_move_pct: float = 2.0
+    building_rip_max_move_pct: float = 55.0
+    building_rip_fade_peak_gap_pct: float = 12.0
+    building_rip_promote_to_exploding: bool = True
+    building_rip_rank_bonus: float = 14.0
+    # Local-base early lift: radar already sees the local base as BUILDING; a
+    # measured little lift off that base + positive live velocity = take.
+    building_rip_local_base_lift_enabled: bool = True
+    building_rip_local_base_min_move_pct: float = 2.0
+    building_rip_local_base_max_move_pct: float = 15.0
+    building_rip_local_base_min_velocity_3s: float = 1.2
+    building_rip_local_base_min_score: float = 42.0
     # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
     # premium progress even when 3s/9s velocity samples are unavailable.
     ict_armed_sustained_lift_min_move_pct: float = 8.0
