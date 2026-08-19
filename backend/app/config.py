@@ -505,6 +505,11 @@ class Settings(BaseSettings):
     building_ltp_monitor_min_ms: float = 75.0
     building_ltp_min_change_pct: float = 0.15
     building_ltp_min_change_abs: float = 0.05
+    # After scoring every watched BUILDING name on an LTP cycle, take only the
+    # single best ready name (not the first that happened to print).
+    building_ltp_best_pick_enabled: bool = True
+    building_ltp_best_pick_rank_bonus: float = 48.0
+    building_ltp_only_best_ready: bool = True
     # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
     # premium progress even when 3s/9s velocity samples are unavailable.
     ict_armed_sustained_lift_min_move_pct: float = 8.0

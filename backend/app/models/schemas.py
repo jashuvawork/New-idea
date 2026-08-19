@@ -364,6 +364,8 @@ class AutoTraderState(BaseModel):
     lastEntry: Optional[dict[str, Any]] = None
     lastExit: Optional[dict[str, Any]] = None
     liveOrdersPlaced: int = 0
+    # BUILDING LTP monitor scoreboard — every watched name scored; best ready wins.
+    buildingLtpMonitor: dict[str, Any] = {}
 
 
 class MultiSnapshot(BaseModel):

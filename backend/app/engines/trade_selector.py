@@ -1275,6 +1275,30 @@ def find_best_entry(
     if not candidates:
         return None
 
+    # BUILDING LTP scoreboard: among X monitored BUILDING names, keep/boost only
+    # the single best ready leg so we take the best — not the first that moved.
+    try:
+        from app.engines.building_ltp_monitor import apply_building_ltp_best_pick
+
+        filtered_building: list[EntryCandidate] = []
+        for c in candidates:
+            bonus, keep = apply_building_ltp_best_pick(c)
+            if not keep:
+                continue
+            if bonus:
+                c.score += bonus
+                c.pretrade_meta = {
+                    **(c.pretrade_meta or {}),
+                    "buildingLtpBestPick": True,
+                    "buildingLtpBestPickBonus": bonus,
+                }
+            filtered_building.append(c)
+        candidates = filtered_building
+    except Exception:
+        pass
+    if not candidates:
+        return None
+
     # SENSEX-first on chop days + session backtest index preference
     session_trades = collect_session_trades(state)
     index_adj = index_rank_from_backtest(compute_symbol_stats(session_trades))
