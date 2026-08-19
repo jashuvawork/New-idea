@@ -79,6 +79,121 @@ class ICTBreakoutSignal:
         }
 
 
+def _helper_confirmed_lift(
+    *,
+    row: dict[str, Any],
+    ict: Any,
+    snap: Optional[SymbolSnapshot],
+    event: Any,
+    settings: Any,
+) -> tuple[bool, int]:
+    """Count INDEPENDENT confirmations helping a base lift go vertical.
+
+    "BUILDING on radar + suddenly something is helping to go FTV." When enough distinct
+    signals agree (volume, displacement, FVG, flat->vertical structure, chart-align,
+    breadth-align) at a local base with positive live velocity, that is the confirmed FTV
+    — the caller may then take on a lower quality/score bar. Cold (v3<=0) never confirms.
+    """
+    if not bool(getattr(settings, "first_lift_helper_confirm_enabled", True)):
+        return False, 0
+    v3 = float(
+        getattr(event, "velocity_3s", 0)
+        or getattr(ict, "velocity_3s", 0)
+        or row.get("velocity3s")
+        or row.get("velocity_3s")
+        or 0
+    )
+    volume_surge = float(
+        getattr(event, "volume_surge", 0)
+        or getattr(ict, "volume_surge", 0)
+        or row.get("volumeSurge")
+        or 0
+    )
+    vol_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+        or "volAwaken" in str(row.get("reason") or "")
+    )
+    disp_floor = float(getattr(settings, "ict_displacement_min_velocity_3s", 2.2) or 2.2)
+    displacement = bool(
+        getattr(ict, "displacement", False)
+        or row.get("displacement")
+        or v3 >= disp_floor
+    )
+    fvg = bool(getattr(ict, "premium_fvg", False) or row.get("ictPremiumFvg"))
+    structured = bool(
+        (getattr(ict, "active", False) and getattr(ict, "flat_then_vertical", False))
+        or (row.get("ictBreakout") and row.get("ictFlatThenVertical"))
+    )
+    local_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    has_local_base = bool(
+        getattr(ict, "local_swing_base", False)
+        or getattr(ict, "base_armed", False)
+        or row.get("ictLocalSwingBase")
+        or row.get("ictBaseArmed")
+        or local_move > 0
+    )
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    strong_surge = float(getattr(settings, "first_lift_helper_strong_surge", 3.0) or 3.0)
+    # A DYNAMIC helper (strong volume, displacement, or FVG) is the "suddenly something is
+    # helping" spark — static structure/chart/breadth alignment alone is too common to count
+    # as confirmation. Require at least one dynamic helper (or a real stamped helper count).
+    has_dynamic = bool(volume_surge >= strong_surge or displacement or fvg)
+    count = 0
+    if volume_surge >= strong_surge or (vol_awake and volume_surge >= strong_surge * 0.6):
+        count += 1
+    if displacement:
+        count += 1
+    if fvg:
+        count += 1
+    if structured:
+        count += 1
+    if side in ("CALL", "PUT"):
+        from app.models.schemas import Side as _S
+
+        try:
+            from app.engines.spot_direction import side_aligned_with_chart
+
+            if getattr(snap, "spotChart", None) is not None and side_aligned_with_chart(
+                _S(side), snap.spotChart
+            ):
+                count += 1
+        except Exception:
+            pass
+        try:
+            from app.engines.symbol_cooldown import side_aligned_with_breadth
+
+            bbias = str(getattr(getattr(snap, "breadth", None), "bias", "") or "")
+            if side_aligned_with_breadth(side, bbias):
+                count += 1
+        except Exception:
+            pass
+    stamp = 0
+    try:
+        stamp = int(row.get("buildingHelperCount") or 0)
+    except (TypeError, ValueError):
+        stamp = 0
+    count = max(count, stamp)
+    min_h = int(getattr(settings, "first_lift_helper_confirm_min_helpers", 3) or 3)
+    ok = (
+        (has_dynamic or stamp >= min_h)
+        and count >= min_h
+        and v3 > 0
+        and has_local_base
+    )
+    return ok, count
+
+
 def building_rip_bullish_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -121,8 +236,18 @@ def building_rip_bullish_readiness(
     if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
         return False, "building_rip_mid_rip_coil_rejected"
 
+    # Strongly helper-confirmed BUILDING FTV — the "suddenly something is helping" catch.
+    # This overrides the worst-day / BREAKOUT_ONLY BUILDING block (those chop/expiry days
+    # are exactly where these FTVs were missed). Un-helped BUILDING still hits the block.
+    helper_confirmed, _helper_count = _helper_confirmed_lift(
+        row=row, ict=ict, snap=snap, event=event, settings=settings,
+    )
+    override_worst_day = helper_confirmed and bool(
+        getattr(settings, "building_rip_helper_override_worst_day", True)
+    )
+
     # Same worst-day / DEFENSIVE block as elite BUILDING ICT.
-    if bool(getattr(settings, "worst_day_block_building_ict", True)):
+    if bool(getattr(settings, "worst_day_block_building_ict", True)) and not override_worst_day:
         try:
             from app.engines.worst_day_itm_fade import worst_day_defensive_session_active
             from app.engines.worst_day_guard import session_entry_policy
@@ -603,6 +728,20 @@ def first_lift_entry_readiness(
         min_score = float(
             getattr(settings, "first_lift_trade_min_score", 62.0) or 62.0
         )
+    # Helper-confirmed lane: a base lift with enough independent confirmations may enter on
+    # a lower quality/score/velocity bar (the confirmations ARE the proof it's a real FTV).
+    helper_confirmed, _helper_ct = _helper_confirmed_lift(
+        row=row, ict=ict, snap=snap, event=event, settings=settings,
+    )
+    if helper_confirmed:
+        min_quality = min(
+            min_quality,
+            float(getattr(settings, "first_lift_helper_confirm_min_quality", 50.0) or 50.0),
+        )
+        min_score = min(
+            min_score,
+            float(getattr(settings, "first_lift_helper_confirm_min_score", 45.0) or 45.0),
+        )
     if quality < min_quality:
         return False, f"first_lift_quality<{min_quality:g}"
 
@@ -662,6 +801,15 @@ def first_lift_entry_readiness(
                 1.5 if elite_base_ready else (1.5 if armed_launch else 1.0),
             )
             or (1.5 if elite_base_ready else (1.5 if armed_launch else 1.0))
+        )
+    if helper_confirmed:
+        min_v3 = min(
+            min_v3,
+            float(getattr(settings, "first_lift_helper_confirm_min_velocity_3s", 1.2) or 1.2),
+        )
+        min_v9 = min(
+            min_v9,
+            float(getattr(settings, "first_lift_helper_confirm_min_velocity_9s", 0.6) or 0.6),
         )
     if not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
