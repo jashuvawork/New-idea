@@ -530,7 +530,9 @@ class Settings(BaseSettings):
     building_rip_ftv_min_velocity_3s: float = 1.2
     building_rip_ftv_min_local_base_move_pct: float = 2.0
     building_rip_ftv_max_local_base_move_pct: float = 55.0
-    building_rip_ftv_max_capital_pct: float = 0.35
+    # Max lots when helpers confirm the sudden BUILDING lift (same sleeve as TOP_FTV_A).
+    building_rip_ftv_max_capital_pct: float = 0.90
+    building_rip_ftv_force_max_lots: bool = True
     building_rip_bypasses_extended_chase: bool = True
     building_rip_bypasses_fake_trap: bool = True
     # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute

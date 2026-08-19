@@ -1025,8 +1025,18 @@ async def _open_from_candidate(
         policy_decision=policy_decision,
         allocation=allocation,
     )
-    full_sleeve_authorized = strict_s_full_sleeve or top_ftv_a_full_sleeve
-    if top_ftv_a_full_sleeve:
+    lots, building_rip_full_sleeve = _building_rip_ftv_policy_max_lots(
+        lots=lots,
+        symbol=symbol,
+        premium=fill_premium,
+        policy_decision=policy_decision,
+        allocation=allocation,
+        candidate=candidate,
+    )
+    full_sleeve_authorized = (
+        strict_s_full_sleeve or top_ftv_a_full_sleeve or building_rip_full_sleeve
+    )
+    if top_ftv_a_full_sleeve or building_rip_full_sleeve:
         top_explosion_max = True
     force_max_size = full_sleeve_authorized
 
@@ -2557,6 +2567,62 @@ def _top_ftv_a_policy_max_lots(
         premium,
         float(policy_decision.max_capital_pct),
     )
+    return max(int(lots), max_lots), True
+
+
+def _building_rip_ftv_policy_max_lots(
+    *,
+    lots: int,
+    symbol: str,
+    premium: float,
+    policy_decision: Any,
+    allocation: RankedAllocation | None,
+    candidate: Any = None,
+) -> tuple[int, bool]:
+    """Max lots when BUILDING sudden-lift helpers authorize the take."""
+    settings = get_settings()
+    if not bool(getattr(settings, "building_rip_ftv_force_max_lots", True)):
+        return int(lots), False
+    authorized = bool(
+        policy_decision is not None
+        and policy_decision.mode == "BUILDING_RIP_FTV"
+        and policy_decision.allowed
+        and policy_decision.max_capital_pct is not None
+        and allocation is not None
+        and allocation.rank == 1
+    )
+    if not authorized:
+        return int(lots), False
+
+    # Prefer live helper stamp from alert / pretrade / causal evidence.
+    alert = getattr(candidate, "alert", None) if candidate is not None else None
+    if not isinstance(alert, dict):
+        alert = {}
+    pretrade = (
+        getattr(candidate, "pretrade_meta", None) if candidate is not None else None
+    ) or {}
+    causal = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
+    evidence = (causal or {}).get("evidence") if isinstance(causal, dict) else {}
+    helping = bool(
+        alert.get("buildingLiftHelping")
+        or alert.get("buildingRipHelpersOk")
+        or alert.get("ictBuildingRipReady")
+        or (evidence or {}).get("buildingLiftHelping")
+        or (evidence or {}).get("buildingRipHelpersOk")
+        or (evidence or {}).get("buildingRipReady")
+    )
+    if not helping:
+        return int(lots), False
+
+    from app.engines.capital_allocator import max_lots_for_capital_pct
+
+    capital_pct = float(policy_decision.max_capital_pct)
+    # Floor at per-trade capital so BUILDING helper takes match TOP_FTV_A sleeve.
+    capital_pct = max(
+        capital_pct,
+        float(getattr(settings, "per_trade_capital_pct", 0.90) or 0.90),
+    )
+    max_lots = max_lots_for_capital_pct(symbol, premium, capital_pct)
     return max(int(lots), max_lots), True
 
 
