@@ -498,6 +498,13 @@ class Settings(BaseSettings):
     building_rip_local_base_max_move_pct: float = 15.0
     building_rip_local_base_min_velocity_3s: float = 1.2
     building_rip_local_base_min_score: float = 42.0
+    # Precise BUILDING radar LTP monitor: every meaningful WS LTP print on a
+    # BUILDING name re-scans explosions and may take — do not wait for the
+    # slower full entry-scan cadence.
+    building_ltp_monitor_enabled: bool = True
+    building_ltp_monitor_min_ms: float = 75.0
+    building_ltp_min_change_pct: float = 0.15
+    building_ltp_min_change_abs: float = 0.05
     # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
     # premium progress even when 3s/9s velocity samples are unavailable.
     ict_armed_sustained_lift_min_move_pct: float = 8.0
