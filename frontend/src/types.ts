@@ -566,6 +566,39 @@ export interface AutoTraderState {
   lastExit?: AutoTradeEvent | null;
   liveOrdersPlaced?: number;
   chopGuards?: ChopGuards;
+  /** BUILDING LTP monitor scoreboard — every watched name scored; best ready wins. */
+  buildingLtpMonitor?: BuildingLtpMonitorState;
+}
+
+export interface BuildingLtpScoreRow {
+  key: string;
+  symbol: string;
+  side: string;
+  strike: number;
+  ltp: number;
+  tier: string;
+  ready: boolean;
+  ready_reason: string;
+  score: number;
+  explosion_score: number;
+  velocity_3s: number;
+  velocity_9s: number;
+  local_move_pct: number;
+  off_low_move_pct: number;
+  volume_awaken: boolean;
+  rank: number;
+  is_best_ready: boolean;
+}
+
+export interface BuildingLtpMonitorState {
+  enabled?: boolean;
+  active?: boolean;
+  watchedCount?: number;
+  readyCount?: number;
+  bestKey?: string | null;
+  best?: BuildingLtpScoreRow | null;
+  scoreboard?: BuildingLtpScoreRow[];
+  error?: string;
 }
 
 export interface AutoTradeEvent {

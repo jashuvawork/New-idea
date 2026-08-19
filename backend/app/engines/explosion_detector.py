@@ -1886,7 +1886,18 @@ def scan_snapshot_explosions(
 def refresh_snapshot_explosion_alerts(snap: Any, *, expiry_day: bool = False) -> None:
     """Update explosionAlerts on a cached snapshot using fresh WS LTPs."""
     events = scan_snapshot_explosions(snap, expiry_day=expiry_day)
-    alerts = [event_to_dict(e, snap) for e in events[:15]]
+    # Keep BUILDING+ visible even when many WATCH rows compete for the top slice.
+    limit = 25
+    hot = [
+        e for e in events
+        if str(getattr(e, "tier", "") or "").upper() in ("BUILDING", "EXPLODING", "ELITE")
+    ]
+    cold = [
+        e for e in events
+        if str(getattr(e, "tier", "") or "").upper() not in ("BUILDING", "EXPLODING", "ELITE")
+    ]
+    ordered = hot + cold
+    alerts = [event_to_dict(e, snap) for e in ordered[:limit]]
     snap.explosionAlerts = alerts
     snap.topExplosion = alerts[0] if alerts else None
 

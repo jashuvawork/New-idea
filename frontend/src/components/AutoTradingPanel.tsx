@@ -69,6 +69,45 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
         </div>
       )}
 
+      {auto.buildingLtpMonitor && (auto.buildingLtpMonitor.watchedCount ?? 0) > 0 && (
+        <div className="mb-2 p-1.5 rounded border border-nexus-border/60 bg-black/20">
+          <div className="text-[10px] text-nexus-muted uppercase mb-1">
+            BUILDING LTP · {auto.buildingLtpMonitor.watchedCount} watched
+            {typeof auto.buildingLtpMonitor.readyCount === 'number'
+              ? ` · ${auto.buildingLtpMonitor.readyCount} ready`
+              : ''}
+          </div>
+          {auto.buildingLtpMonitor.best ? (
+            <div className="text-[10px] font-mono text-nexus-accent mb-1">
+              BEST {auto.buildingLtpMonitor.best.side} {auto.buildingLtpMonitor.best.strike}
+              {' · '}₹{auto.buildingLtpMonitor.best.ltp?.toFixed?.(1) ?? auto.buildingLtpMonitor.best.ltp}
+              {' · '}score {auto.buildingLtpMonitor.best.score}
+              {' · '}v3 {auto.buildingLtpMonitor.best.velocity_3s?.toFixed?.(1)}
+            </div>
+          ) : (
+            <div className="text-[9px] text-nexus-muted mb-1">Waiting for a ready local-base / rip lift</div>
+          )}
+          <div className="space-y-0.5 max-h-16 overflow-y-auto">
+            {(auto.buildingLtpMonitor.scoreboard ?? []).slice(0, 5).map((row) => (
+              <div
+                key={row.key}
+                className={`text-[9px] font-mono flex justify-between ${
+                  row.is_best_ready ? 'text-nexus-green' : row.ready ? 'text-nexus-yellow' : 'text-nexus-muted'
+                }`}
+              >
+                <span>
+                  #{row.rank} {row.side} {row.strike}
+                  {row.is_best_ready ? ' ★' : row.ready ? ' ✓' : ''}
+                </span>
+                <span>
+                  {row.score} · +{row.velocity_3s?.toFixed?.(1)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {auto.skipped.length > 0 && (
         <div className="mb-2">
           <div className="text-[10px] text-nexus-muted uppercase mb-1">Skipped / Pending</div>

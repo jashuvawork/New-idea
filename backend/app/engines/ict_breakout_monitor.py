@@ -1451,17 +1451,6 @@ def analyze_ict_breakout(
         getattr(settings, "building_rip_local_base_min_velocity_3s", 1.2) or 1.2
     )
     structure_for_rip = max(base_rel_move, float(move or 0))
-    mid_rip_ready = bool(
-        getattr(settings, "building_rip_bullish_enabled", True)
-        and not mid_rip_coil
-        and tier == "BUILDING"
-        and velocity_3s >= building_rip_v3
-        and (velocity_9s >= building_rip_v9 or vol_awaken)
-        and (vol_awaken or volume_surge >= float(
-            getattr(settings, "building_rip_min_volume_surge", 1.8) or 1.8
-        ))
-        and building_rip_lo <= structure_for_rip <= building_rip_hi + 1e-6
-    )
     local_base_lift_ready = bool(
         getattr(settings, "building_rip_bullish_enabled", True)
         and getattr(settings, "building_rip_local_base_lift_enabled", True)
@@ -1473,6 +1462,17 @@ def analyze_ict_breakout(
         and (vol_awaken or volume_surge >= float(
             getattr(settings, "building_rip_min_volume_surge", 1.8) or 1.8
         ))
+    )
+    mid_rip_ready = bool(
+        getattr(settings, "building_rip_bullish_enabled", True)
+        and not mid_rip_coil
+        and tier == "BUILDING"
+        and velocity_3s >= building_rip_v3
+        and (velocity_9s >= building_rip_v9 or vol_awaken)
+        and (vol_awaken or volume_surge >= float(
+            getattr(settings, "building_rip_min_volume_surge", 1.8) or 1.8
+        ))
+        and building_rip_lo <= structure_for_rip <= building_rip_hi + 1e-6
     )
     building_rip_ready = mid_rip_ready or local_base_lift_ready
     if local_base_lift_ready:

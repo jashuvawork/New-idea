@@ -425,10 +425,8 @@ async def run_building_ltp_entry_cycle(
     from app.engines.building_ltp_monitor import (
         building_ltp_monitor_due,
         clear_building_scoreboard,
-        evaluate_all_building_ltp,
         mark_building_ltp_cycle_done,
         mark_building_ltps_seen,
-        publish_building_scoreboard,
     )
 
     settings = get_settings()
@@ -454,8 +452,9 @@ async def run_building_ltp_entry_cycle(
     # Score EVERY watched BUILDING name on this LTP cycle; take only the best.
     auto_state = get_state()
     try:
-        scores = evaluate_all_building_ltp(probe, state=auto_state)
-        board = publish_building_scoreboard(scores)
+        from app.engines.building_ltp_monitor import publish_scoreboard_for_snapshots
+
+        board = publish_scoreboard_for_snapshots(probe, state=auto_state)
         auto_state.buildingLtpMonitor = board
     except Exception as exc:
         logger.warning("BUILDING LTP scoreboard failed: %s", exc)
@@ -569,16 +568,47 @@ async def run_entry_scan_on_cache(
         except Exception:
             pass
     news = await _fetch_news_cached()
+    auto_state = get_state()
+    try:
+        from app.engines.building_ltp_monitor import (
+            clear_building_scoreboard,
+            publish_scoreboard_for_snapshots,
+        )
+
+        board = publish_scoreboard_for_snapshots(overlays, state=auto_state)
+        auto_state.buildingLtpMonitor = board
+    except Exception as exc:
+        logger.warning("BUILDING entry-scan scoreboard failed: %s", exc)
+        try:
+            from app.engines.building_ltp_monitor import clear_building_scoreboard
+
+            clear_building_scoreboard()
+        except Exception:
+            pass
+
     if run_trader:
         client = UpstoxClient()
         auto_state = await process(overlays, news=news, client=client)
+        try:
+            from app.engines.building_ltp_monitor import building_scoreboard_snapshot
+
+            auto_state.buildingLtpMonitor = {
+                **(auto_state.buildingLtpMonitor or {}),
+                **building_scoreboard_snapshot(),
+            }
+        except Exception:
+            pass
     else:
         auto_state = get_state()
 
     try:
-        from app.engines.building_ltp_monitor import mark_building_ltps_seen
+        from app.engines.building_ltp_monitor import (
+            clear_building_scoreboard,
+            mark_building_ltps_seen,
+        )
 
         mark_building_ltps_seen(overlays)
+        clear_building_scoreboard()
     except Exception:
         pass
 

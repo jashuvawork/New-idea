@@ -301,6 +301,7 @@ def _explosion_candidates(
         first_lift_ready, first_lift_readiness_reason = first_lift_entry_readiness(
             snap=snap,
             alert=alert,
+            state=state,
         )
         side_v = str(alert.get("side") or "").upper()
         try:
@@ -1276,24 +1277,11 @@ def find_best_entry(
         return None
 
     # BUILDING LTP scoreboard: among X monitored BUILDING names, keep/boost only
-    # the single best ready leg so we take the best — not the first that moved.
+    # the best ready leg that is actually selectable (fail soft if #1 was filtered).
     try:
-        from app.engines.building_ltp_monitor import apply_building_ltp_best_pick
+        from app.engines.building_ltp_monitor import filter_candidates_building_best_pick
 
-        filtered_building: list[EntryCandidate] = []
-        for c in candidates:
-            bonus, keep = apply_building_ltp_best_pick(c)
-            if not keep:
-                continue
-            if bonus:
-                c.score += bonus
-                c.pretrade_meta = {
-                    **(c.pretrade_meta or {}),
-                    "buildingLtpBestPick": True,
-                    "buildingLtpBestPickBonus": bonus,
-                }
-            filtered_building.append(c)
-        candidates = filtered_building
+        candidates = filter_candidates_building_best_pick(candidates)
     except Exception:
         pass
     if not candidates:
