@@ -1109,6 +1109,8 @@ def validate_candidate(
             and armed_reason in (
                 "armed_base_option_led_ready",
                 "elite_base_ready_s_preauthorized",
+                "building_rip_bullish_ready",
+                "building_local_base_lift_ready",
             )
         )
         if armed_base_chart_bypass:

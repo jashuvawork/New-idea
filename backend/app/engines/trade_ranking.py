@@ -122,8 +122,14 @@ def ftv_authorization_policy(
     ftv_policy_expiry_worst_min_quality: float = 85.0,
     ftv_policy_expiry_worst_min_score: float = 90.0,
     ftv_policy_expiry_worst_min_velocity_3s: float = 3.0,
+    building_rip_ftv_enabled: bool = True,
+    building_rip_ftv_min_explosion_score: float = 48.0,
+    building_rip_ftv_min_velocity_3s: float = 1.2,
+    building_rip_ftv_min_local_base_move_pct: float = 2.0,
+    building_rip_ftv_max_local_base_move_pct: float = 55.0,
+    building_rip_ftv_max_capital_pct: float = 0.35,
 ) -> FtvAuthorization:
-    """Pure causal authorization for strict S, top FTV A, and winner local-base."""
+    """Pure causal authorization for strict S, top FTV A, winner, and BUILDING rip."""
     blocked = lambda reason: FtvAuthorization(None, reason)
     if str(evidence.get("mode") or "").lower() != "explosion":
         return blocked("ftv_elite_top_only_requires_explosion")
@@ -383,6 +389,42 @@ def ftv_authorization_policy(
                 max_capital_pct=winner_local_base_max_capital_pct,
             )
 
+    # BUILDING sudden lift with helpers — do not wait for ELITE/EXPLODING.
+    # Readiness already proved mid-rip/local-base heat; CHASE timing is OK here.
+    if building_rip_ftv_enabled and bool(evidence.get("buildingRipReady")):
+        helpers_ok = bool(
+            evidence.get("buildingRipHelpersOk")
+            or evidence.get("cvdBuying")
+            or evidence.get("cvdAcceleration")
+            or evidence.get("orderflowPositive")
+            or evidence.get("volumeAwaken")
+            or evidence.get("displacement")
+        )
+        building_rip_ok = (
+            grade in {"A", "B", "S"}
+            and tier in {"BUILDING", "EXPLODING", "ELITE"}
+            and building_rip_ftv_min_local_base_move_pct
+            <= move
+            <= building_rip_ftv_max_local_base_move_pct
+            and v3 >= building_rip_ftv_min_velocity_3s
+            and explosion_score >= building_rip_ftv_min_explosion_score
+            and helpers_ok
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        )
+        if building_rip_ok:
+            if require_allocation_rank_one and allocation_rank != 1:
+                return blocked("building_rip_ftv_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "BUILDING_RIP_FTV",
+                "ok",
+                max_capital_pct=building_rip_ftv_max_capital_pct,
+            )
+
     if not top_ftv_a_enabled:
         return blocked("ftv_elite_top_only_requires_s")
     return blocked(top_ftv_a_reason)
@@ -428,6 +470,12 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "ftv_policy_expiry_worst_min_quality",
         "ftv_policy_expiry_worst_min_score",
         "ftv_policy_expiry_worst_min_velocity_3s",
+        "building_rip_ftv_enabled",
+        "building_rip_ftv_min_explosion_score",
+        "building_rip_ftv_min_velocity_3s",
+        "building_rip_ftv_min_local_base_move_pct",
+        "building_rip_ftv_max_local_base_move_pct",
+        "building_rip_ftv_max_capital_pct",
     )
     return {name: getattr(settings, name) for name in names}
 
@@ -646,6 +694,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "eliteBaseReady": elite_base_ready,
             "vRipReady": v_rip_ready,
             "buildingRipReady": building_rip_ready,
+            "buildingRipHelpersOk": bool(evidence.get("buildingRipHelpersOk")),
             "armedBaseLaunch": armed_launch,
             "armedBaseSustainedLift": bool(evidence.get("armedBaseSustainedLift")),
             "flatThenVertical": flat_vertical,
@@ -737,6 +786,7 @@ def rank_entry_candidate(
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
         "vRipReady": alert.get("ictVRipReady"),
         "buildingRipReady": alert.get("ictBuildingRipReady"),
+        "buildingRipHelpersOk": bool(alert.get("buildingRipHelpersOk")),
         "armedBaseLaunch": alert.get("ictArmedBaseLaunch"),
         "armedBaseSustainedLift": alert.get("ictArmedBaseSustainedLift"),
         "flatThenVertical": alert.get("ictFlatThenVertical"),

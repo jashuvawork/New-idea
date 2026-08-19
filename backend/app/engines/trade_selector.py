@@ -609,12 +609,33 @@ def _explosion_candidates(
         ):
             continue
         ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)
-        if ext_blocked and not must_take:
+        building_rip_ready_take = first_lift_readiness_reason in (
+            "building_rip_bullish_ready",
+            "building_local_base_lift_ready",
+        )
+        if (
+            ext_blocked
+            and not must_take
+            and not (
+                building_rip_ready_take
+                and bool(
+                    getattr(settings, "building_rip_bypasses_extended_chase", True)
+                )
+            )
+        ):
             continue
         trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
             cand_probe, snap, state=state, ict=ict,
         )
-        if trap_block or trap_meta.get("action") == "block":
+        if (
+            (trap_block or trap_meta.get("action") == "block")
+            and not (
+                building_rip_ready_take
+                and bool(
+                    getattr(settings, "building_rip_bypasses_fake_trap", True)
+                )
+            )
+        ):
             continue
         # Displacement-only without flat base / FVG / real rip — skip (Jul20 noise).
         # Raised floor to early-window min (28%) so ~22% displacement spikes stay out.
