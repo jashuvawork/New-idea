@@ -83,25 +83,36 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
               {' · '}₹{auto.buildingLtpMonitor.best.ltp?.toFixed?.(1) ?? auto.buildingLtpMonitor.best.ltp}
               {' · '}score {auto.buildingLtpMonitor.best.score}
               {' · '}v3 {auto.buildingLtpMonitor.best.velocity_3s?.toFixed?.(1)}
+              {auto.buildingLtpMonitor.best.helping ? ' · HELPING' : ''}
+              {auto.buildingLtpMonitor.best.sudden_lift ? ' · LIFT' : ''}
             </div>
           ) : (
-            <div className="text-[9px] text-nexus-muted mb-1">Waiting for a ready local-base / rip lift</div>
+            <div className="text-[9px] text-nexus-muted mb-1">Waiting for helpers (vol / v3 / chart / breadth)</div>
           )}
-          <div className="space-y-0.5 max-h-16 overflow-y-auto">
+          <div className="space-y-0.5 max-h-20 overflow-y-auto">
             {(auto.buildingLtpMonitor.scoreboard ?? []).slice(0, 5).map((row) => (
               <div
                 key={row.key}
-                className={`text-[9px] font-mono flex justify-between ${
+                className={`text-[9px] font-mono ${
                   row.is_best_ready ? 'text-nexus-green' : row.ready ? 'text-nexus-yellow' : 'text-nexus-muted'
                 }`}
               >
-                <span>
-                  #{row.rank} {row.side} {row.strike}
-                  {row.is_best_ready ? ' ★' : row.ready ? ' ✓' : ''}
-                </span>
-                <span>
-                  {row.score} · +{row.velocity_3s?.toFixed?.(1)}%
-                </span>
+                <div className="flex justify-between">
+                  <span>
+                    #{row.rank} {row.side} {row.strike}
+                    {row.is_best_ready ? ' ★' : row.ready ? ' ✓' : ''}
+                    {row.helping ? ' ↑' : ''}
+                  </span>
+                  <span>
+                    {row.score} · +{row.velocity_3s?.toFixed?.(1)}%
+                    {typeof row.helper_count === 'number' ? ` · h${row.helper_count}` : ''}
+                  </span>
+                </div>
+                {row.helpers && row.helpers.length > 0 && (
+                  <div className="text-[8px] text-nexus-muted truncate pl-2">
+                    {row.helpers.slice(0, 6).join(' · ')}
+                  </div>
+                )}
               </div>
             ))}
           </div>

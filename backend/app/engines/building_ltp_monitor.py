@@ -11,6 +11,8 @@ from app.engines.snapshot_fast import resolve_trade_premium
 
 # key "SYMBOL:SIDE:STRIKE" -> last observed LTP
 _building_ltp_watch: dict[str, float] = {}
+# Previous helper fingerprint per key — detect helper flip (Aug19 sudden help).
+_building_helper_fp: dict[str, str] = {}
 _last_building_cycle_mono: float = 0.0
 # Latest full scoreboard + best ready key (published each LTP cycle).
 _last_scoreboard: list[dict[str, Any]] = []
@@ -21,6 +23,7 @@ _scoreboard_active: bool = False
 def reset_building_ltp_monitor_for_tests() -> None:
     global _last_building_cycle_mono, _best_ready_key, _scoreboard_active
     _building_ltp_watch.clear()
+    _building_helper_fp.clear()
     _last_building_cycle_mono = 0.0
     _last_scoreboard.clear()
     _best_ready_key = None
@@ -48,6 +51,10 @@ class BuildingLtpScore:
     local_move_pct: float
     off_low_move_pct: float
     volume_awaken: bool
+    helpers: list[str] = field(default_factory=list)
+    helper_count: int = 0
+    helping: bool = False
+    sudden_lift: bool = False
     rank: int = 0
     is_best_ready: bool = False
     meta: dict[str, Any] = field(default_factory=dict)
@@ -96,6 +103,8 @@ def _composite_building_score(
     ready: bool,
     ready_reason: str,
     ltp: float,
+    helper_bonus: float = 0.0,
+    helping: bool = False,
 ) -> float:
     """Full causal score for one watched BUILDING name on this LTP print."""
     explosion = float(alert.get("explosionScore") or alert.get("score") or 0)
@@ -134,6 +143,10 @@ def _composite_building_score(
         score += 8.0
     if quality > 0:
         score += quality * 0.12
+    # Aug19 helpers (vol / velocity / displacement / chart / breadth / FTV).
+    score += max(0.0, float(helper_bonus or 0))
+    if helping:
+        score += 6.0
     if ready:
         score += 30.0
         if ready_reason == "building_local_base_lift_ready":
@@ -154,6 +167,10 @@ def evaluate_all_building_ltp(
     max_age_seconds: float = 2.0,
 ) -> list[BuildingLtpScore]:
     """Calculate everything for every BUILDING name on radar (this LTP cycle)."""
+    from app.engines.building_lift_helpers import (
+        evaluate_building_lift_helpers,
+        stamp_building_lift_helpers,
+    )
     from app.engines.ict_breakout_monitor import (
         building_rip_bullish_readiness,
         first_lift_entry_readiness,
@@ -164,11 +181,15 @@ def evaluate_all_building_ltp(
         getattr(settings, "tick_overlay_max_age_seconds", max_age_seconds)
         or max_age_seconds
     )
+    helper_monitor = bool(
+        getattr(settings, "building_sudden_lift_monitor_enabled", True)
+    )
     scored: list[BuildingLtpScore] = []
     for row in building_alerts_on_radar(snapshots):
         alert = dict(row["alert"])
         snap = row["snap"]
         side = Side(row["side"])
+        key = _alert_key(row["symbol"], row["side"], row["strike"])
         ltp = resolve_trade_premium(
             snap, row["strike"], side, max_age_seconds=max_age,
         )
@@ -182,6 +203,27 @@ def evaluate_all_building_ltp(
             alert["premium"] = ltp
         # Prefer live WS tape velocity for this LTP print.
         alert = overlay_alert_tick_velocity(snap, alert, max_age_seconds=max_age)
+
+        helpers = None
+        helper_bonus = 0.0
+        helping = False
+        sudden = False
+        helper_names: list[str] = []
+        if helper_monitor:
+            helpers = evaluate_building_lift_helpers(
+                snap=snap,
+                alert=alert,
+                prev_ltp=_building_ltp_watch.get(key),
+                live_ltp=ltp,
+            )
+            alert = stamp_building_lift_helpers(alert, helpers)
+            helper_bonus = float(helpers.score_bonus)
+            helping = bool(helpers.helping)
+            sudden = bool(helpers.sudden_lift)
+            helper_names = list(helpers.helpers)
+            # Remember helper fingerprint for flip-triggered cycles.
+            fp = ",".join(helper_names)
+            _building_helper_fp[key] = fp
 
         ready = False
         ready_reason = "not_evaluated"
@@ -206,10 +248,12 @@ def evaluate_all_building_ltp(
             ready=ready,
             ready_reason=ready_reason,
             ltp=ltp,
+            helper_bonus=helper_bonus,
+            helping=helping,
         )
         scored.append(
             BuildingLtpScore(
-                key=_alert_key(row["symbol"], row["side"], row["strike"]),
+                key=key,
                 symbol=row["symbol"],
                 side=row["side"],
                 strike=float(row["strike"]),
@@ -236,16 +280,30 @@ def evaluate_all_building_ltp(
                 volume_awaken=bool(
                     alert.get("volumeAwaken") or alert.get("ictVolumeAwakening")
                 ),
+                helpers=helper_names,
+                helper_count=len(helper_names),
+                helping=helping,
+                sudden_lift=sudden,
                 meta={
                     "ictBuildingRipReady": bool(alert.get("ictBuildingRipReady")),
                     "ictLocalSwingBase": bool(alert.get("ictLocalSwingBase")),
                     "ictBaseArmed": bool(alert.get("ictBaseArmed")),
+                    "buildingRipHelpersOk": bool(alert.get("buildingRipHelpersOk")),
+                    "ltpLiftPct": float(alert.get("buildingLtpLiftPct") or 0),
+                    "ictConfirms": list(alert.get("buildingIctConfirms") or []),
                 },
             )
         )
 
     scored.sort(
-        key=lambda s: (s.ready, s.score, s.velocity_3s, s.explosion_score),
+        key=lambda s: (
+            s.ready,
+            s.helping,
+            s.score,
+            s.helper_count,
+            s.velocity_3s,
+            s.explosion_score,
+        ),
         reverse=True,
     )
     for idx, row in enumerate(scored, start=1):
@@ -283,6 +341,7 @@ def clear_building_scoreboard() -> None:
     _last_scoreboard.clear()
     _best_ready_key = None
     _scoreboard_active = False
+    # Keep helper fingerprints so the next cycle can still detect flips.
 
 
 def building_best_ready_key() -> Optional[str]:
@@ -487,6 +546,7 @@ def sync_building_ltp_watch(
     stale = [k for k in _building_ltp_watch if k not in live]
     for key in stale:
         _building_ltp_watch.pop(key, None)
+        _building_helper_fp.pop(key, None)
     for key, ltp in live.items():
         _building_ltp_watch.setdefault(key, ltp)
     return dict(live)
@@ -550,6 +610,65 @@ def mark_building_ltps_seen(snapshots: dict[str, SymbolSnapshot]) -> None:
     _building_ltp_watch.update(live)
 
 
+def peek_building_helper_flip(
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    max_age_seconds: float = 2.0,
+) -> tuple[bool, list[str]]:
+    """True when a BUILDING name's helper board just flipped to helping."""
+    from app.engines.building_lift_helpers import (
+        evaluate_building_lift_helpers,
+        stamp_building_lift_helpers,
+    )
+
+    settings = get_settings()
+    if not bool(getattr(settings, "building_sudden_lift_monitor_enabled", True)):
+        return False, []
+    if not bool(getattr(settings, "building_helper_flip_triggers_cycle", True)):
+        return False, []
+
+    max_age = float(
+        getattr(settings, "tick_overlay_max_age_seconds", max_age_seconds)
+        or max_age_seconds
+    )
+    flipped: list[str] = []
+    for row in building_alerts_on_radar(snapshots):
+        alert = dict(row["alert"])
+        snap = row["snap"]
+        side = Side(row["side"])
+        key = _alert_key(row["symbol"], row["side"], row["strike"])
+        ltp = resolve_trade_premium(
+            snap, row["strike"], side, max_age_seconds=max_age,
+        )
+        if ltp is None or float(ltp) <= 0:
+            try:
+                ltp = float(alert.get("premium") or 0)
+            except (TypeError, ValueError):
+                ltp = 0.0
+        ltp = float(ltp or 0)
+        if ltp > 0:
+            alert["premium"] = ltp
+        alert = overlay_alert_tick_velocity(snap, alert, max_age_seconds=max_age)
+        helpers = evaluate_building_lift_helpers(
+            snap=snap,
+            alert=alert,
+            prev_ltp=_building_ltp_watch.get(key),
+            live_ltp=ltp,
+        )
+        stamp_building_lift_helpers(alert, helpers)
+        fp = ",".join(helpers.helpers)
+        prev_fp = _building_helper_fp.get(key, "")
+        was_helping = bool(prev_fp) and len(prev_fp.split(",")) >= int(
+            getattr(settings, "building_sudden_lift_min_helpers", 3) or 3
+        )
+        if helpers.helping and (not was_helping or fp != prev_fp):
+            # New helping board or newly added helpers → force a take cycle.
+            if not was_helping or helpers.sudden_lift:
+                flipped.append(key)
+        _building_helper_fp[key] = fp
+    return bool(flipped), flipped
+
+
 def building_ltp_monitor_due(
     snapshots: Optional[dict[str, SymbolSnapshot]],
     *,
@@ -576,12 +695,18 @@ def building_ltp_monitor_due(
         return False
 
     moved, _, live = peek_building_ltp_moves(snapshots)
-    if not moved:
-        # First sighting: seed fingerprints and wait for the next LTP print.
-        for key, ltp in live.items():
-            _building_ltp_watch.setdefault(key, ltp)
-        return False
-    return True
+    if moved:
+        return True
+
+    # Aug19 lesson: helpers can flip on before a large LTP tick — still take.
+    helper_flip, _ = peek_building_helper_flip(snapshots)
+    if helper_flip:
+        return True
+
+    # First sighting: seed fingerprints and wait for the next LTP print.
+    for key, ltp in live.items():
+        _building_ltp_watch.setdefault(key, ltp)
+    return False
 
 
 def mark_building_ltp_cycle_done(*, now_mono: Optional[float] = None) -> None:

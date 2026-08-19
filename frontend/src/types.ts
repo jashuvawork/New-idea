@@ -586,6 +586,10 @@ export interface BuildingLtpScoreRow {
   local_move_pct: number;
   off_low_move_pct: number;
   volume_awaken: boolean;
+  helpers?: string[];
+  helper_count?: number;
+  helping?: boolean;
+  sudden_lift?: boolean;
   rank: number;
   is_best_ready: boolean;
 }
