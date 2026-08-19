@@ -127,7 +127,7 @@ def ftv_authorization_policy(
     building_rip_ftv_min_velocity_3s: float = 1.2,
     building_rip_ftv_min_local_base_move_pct: float = 2.0,
     building_rip_ftv_max_local_base_move_pct: float = 55.0,
-    building_rip_ftv_max_capital_pct: float = 0.35,
+    building_rip_ftv_max_capital_pct: float = 0.90,
 ) -> FtvAuthorization:
     """Pure causal authorization for strict S, top FTV A, winner, and BUILDING rip."""
     blocked = lambda reason: FtvAuthorization(None, reason)
