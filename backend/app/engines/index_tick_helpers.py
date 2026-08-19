@@ -13,6 +13,8 @@ from the V-base — premium tape alone was too late.
 
 from __future__ import annotations
 
+import time
+from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
@@ -26,9 +28,56 @@ _INDEX_SYMBOL_BY_KEY = {
 
 # Per-symbol last spike fingerprint (v3 at spike time).
 _last_spike: dict[str, dict[str, Any]] = {}
+# Per-symbol rolling history of recent spike moments: (monotonic_ts, v3).
+_spike_history: dict[str, deque[tuple[float, float]]] = defaultdict(deque)
 # Pending wake flags — building_ltp_monitor_due consumes these.
 _pending_wake_symbols: set[str] = set()
 _observer_registered: bool = False
+
+
+def recent_index_spike_thrust(
+    symbol: str,
+    side: Any,
+    *,
+    window_seconds: Optional[float] = None,
+) -> dict[str, Any]:
+    """Summarise the recent history of index spike MOMENTS for one side.
+
+    A cluster of same-direction spot spikes in a short window is a far stronger
+    "the index is thrusting" signal than a single blip — it is what typically drags a
+    coiled BUILDING strike into a flat->vertical lift. Returns the count of aligned
+    spikes, their net %, and whether they form a burst.
+    """
+    settings = get_settings()
+    out = {"count": 0, "aligned_count": 0, "net_pct": 0.0, "burst": False}
+    if not bool(getattr(settings, "index_spike_history_enabled", True)):
+        return out
+    sym = str(symbol or "").upper()
+    hist = _spike_history.get(sym)
+    if not hist:
+        return out
+    if window_seconds is None:
+        window_seconds = float(
+            getattr(settings, "index_spike_history_window_seconds", 45.0) or 45.0
+        )
+    now = time.monotonic()
+    cutoff = now - float(window_seconds)
+    recent = [(ts, v3) for ts, v3 in hist if ts >= cutoff]
+    if not recent:
+        return out
+    side_u = _side_str(side)
+    if side_u == "CALL":
+        aligned = [v3 for _ts, v3 in recent if v3 > 0]
+    elif side_u == "PUT":
+        aligned = [v3 for _ts, v3 in recent if v3 < 0]
+    else:
+        aligned = [v3 for _ts, v3 in recent]
+    out["count"] = len(recent)
+    out["aligned_count"] = len(aligned)
+    out["net_pct"] = round(sum(aligned), 4)
+    min_count = int(getattr(settings, "index_spike_burst_min_count", 3) or 3)
+    out["burst"] = len(aligned) >= min_count
+    return out
 
 
 @dataclass
@@ -41,6 +90,8 @@ class IndexTickHelpers:
     velocity_9s: float = 0.0
     tick_align: bool = False
     tick_spike: bool = False
+    spike_burst: bool = False
+    spike_burst_count: int = 0
     mom_align: bool = False
     squeeze_align: bool = False
     breadth_align: bool = False
@@ -55,6 +106,7 @@ class IndexTickHelpers:
 def reset_index_tick_helpers_for_tests() -> None:
     global _observer_registered
     _last_spike.clear()
+    _spike_history.clear()
     _pending_wake_symbols.clear()
     # Keep observer registered across tests once installed.
     _ = _observer_registered
@@ -118,6 +170,12 @@ def _on_index_tick(instrument_key: str, ltp: float) -> None:
         "v9": float(v9 or 0.0),
         "ltp": float(ltp),
     }
+    if bool(getattr(settings, "index_spike_history_enabled", True)):
+        hist = _spike_history[symbol]
+        hist.append((time.monotonic(), float(v3)))
+        max_len = int(getattr(settings, "index_spike_history_max", 40) or 40)
+        while len(hist) > max(1, max_len):
+            hist.popleft()
     if bool(getattr(settings, "index_tick_wake_building_cycle", True)):
         _pending_wake_symbols.add(symbol)
 
@@ -261,11 +319,18 @@ def evaluate_index_tick_helpers(
     except Exception:
         out.breadth_align = False
 
+    # History of spike moments — a burst of same-direction spot spikes is a strong thrust.
+    thrust = recent_index_spike_thrust(symbol, side_u)
+    out.spike_burst = bool(thrust.get("burst"))
+    out.spike_burst_count = int(thrust.get("aligned_count") or 0)
+
     helpers: list[str] = []
     if out.tick_spike:
         helpers.append("index_tick_spike")
     elif out.tick_align:
         helpers.append("index_tick_align")
+    if out.spike_burst:
+        helpers.append("index_spike_burst")
     if out.mom_align:
         helpers.append("index_mom_turn")
     if out.squeeze_align:
@@ -278,8 +343,10 @@ def evaluate_index_tick_helpers(
     min_needed = int(
         getattr(settings, "index_tick_min_helpers_confirm", 2) or 2
     )
-    # Need tape or structure — never breadth alone.
-    has_tape = bool({"index_tick_spike", "index_tick_align"} & set(helpers))
+    # Need tape or structure — never breadth alone. A spike burst counts as tape thrust.
+    has_tape = bool(
+        {"index_tick_spike", "index_tick_align", "index_spike_burst"} & set(helpers)
+    )
     has_structure = bool(
         {"index_mom_turn", "index_squeeze", "index_breadth"} & set(helpers)
     )
@@ -288,6 +355,9 @@ def evaluate_index_tick_helpers(
     )
     # Single strong spike + one structure helper is enough (Aug19 shape).
     if out.tick_spike and has_structure:
+        out.confirming = True
+    # A confirmed same-direction spike burst plus any structure is a strong thrust.
+    if out.spike_burst and has_structure:
         out.confirming = True
     return out
 
@@ -302,6 +372,8 @@ def stamp_index_tick_helpers(
     out["indexSpotMove9s"] = round(helpers.velocity_9s, 4)
     out["indexTickAlign"] = bool(helpers.tick_align)
     out["indexTickSpike"] = bool(helpers.tick_spike)
+    out["indexSpikeBurst"] = bool(helpers.spike_burst)
+    out["indexSpikeBurstCount"] = int(helpers.spike_burst_count)
     out["indexMomAlign"] = bool(helpers.mom_align)
     out["indexSqueezeAlign"] = bool(helpers.squeeze_align)
     out["indexHelpers"] = list(helpers.helpers)

@@ -8,6 +8,7 @@ from app.engines.index_tick_helpers import (
     clear_index_spike_wake,
     evaluate_index_tick_helpers,
     peek_index_spike_wake,
+    recent_index_spike_thrust,
     reset_index_tick_helpers_for_tests,
     stamp_index_tick_helpers,
 )
@@ -217,6 +218,58 @@ def test_top_ftv_a_waives_cvd_accel_when_index_confirms():
     )
     assert auth2.mode is None
     assert "cvd_acceleration" in auth2.reason
+
+
+def _seed_spikes(symbol: str, values: list[float]) -> None:
+    """Inject recent same-window spike moments directly into history."""
+    import time as _t
+
+    from app.engines import index_tick_helpers as ith
+
+    now = _t.monotonic()
+    ith._spike_history[symbol.upper()].clear()
+    for i, v in enumerate(values):
+        ith._spike_history[symbol.upper()].append((now - (len(values) - i) * 0.5, v))
+
+
+def test_recent_index_spike_thrust_detects_same_direction_burst():
+    reset_index_tick_helpers_for_tests()
+    # Three falling spikes → PUT burst; not a CALL burst.
+    _seed_spikes("SENSEX", [-0.05, -0.06, -0.04])
+    put = recent_index_spike_thrust("SENSEX", Side.PUT)
+    assert put["aligned_count"] == 3
+    assert put["burst"] is True
+    assert put["net_pct"] < 0
+    call = recent_index_spike_thrust("SENSEX", Side.CALL)
+    assert call["aligned_count"] == 0
+    assert call["burst"] is False
+
+
+def test_recent_index_spike_thrust_expires_old_moments():
+    reset_index_tick_helpers_for_tests()
+    import time as _t
+
+    from app.engines import index_tick_helpers as ith
+
+    old = _t.monotonic() - 120.0
+    ith._spike_history["SENSEX"].extend([(old, -0.05), (old, -0.06), (old, -0.07)])
+    res = recent_index_spike_thrust("SENSEX", Side.PUT, window_seconds=45.0)
+    assert res["count"] == 0
+    assert res["burst"] is False
+
+
+def test_spike_burst_becomes_index_helper():
+    reset_index_tick_helpers_for_tests()
+    clear_ticks()
+    _seed_spikes("SENSEX", [-0.05, -0.06, -0.05])
+    snap = _snap_put()
+    board = evaluate_index_tick_helpers(snap=snap, side=Side.PUT)
+    assert board.spike_burst is True
+    assert board.spike_burst_count >= 3
+    assert "index_spike_burst" in board.helpers
+    stamped = stamp_index_tick_helpers({}, board)
+    assert stamped["indexSpikeBurst"] is True
+    assert stamped["indexSpikeBurstCount"] >= 3
 
 
 def test_index_spike_wakes_building_ltp_cycle():

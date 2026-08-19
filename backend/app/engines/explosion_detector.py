@@ -1919,6 +1919,30 @@ def refresh_snapshot_explosion_alerts(snap: Any, *, expiry_day: bool = False) ->
     ]
     ordered = hot + cold
     alerts = [event_to_dict(e, snap) for e in ordered[:limit]]
+    # Stamp index-level (spot tape) confirmation onto hot alerts so the selector, must-take
+    # and UI all see the same "the index is thrusting" evidence — the causal driver behind a
+    # sudden strike lift. Bounded to BUILDING+ and wrapped so a tape hiccup never breaks scan.
+    try:
+        from app.config import get_settings as _gs2
+
+        if bool(getattr(_gs2(), "index_tick_helpers_enabled", True)):
+            from app.engines.index_tick_helpers import (
+                evaluate_index_tick_helpers,
+                stamp_index_tick_helpers,
+            )
+
+            for i, a in enumerate(alerts):
+                if str(a.get("tier") or "").upper() not in (
+                    "BUILDING", "EXPLODING", "ELITE",
+                ):
+                    continue
+                side = str(a.get("side") or "").upper()
+                if side not in ("CALL", "PUT"):
+                    continue
+                board = evaluate_index_tick_helpers(snap=snap, side=side, alert=a)
+                alerts[i] = stamp_index_tick_helpers(a, board)
+    except Exception:
+        pass
     snap.explosionAlerts = alerts
     snap.topExplosion = alerts[0] if alerts else None
 

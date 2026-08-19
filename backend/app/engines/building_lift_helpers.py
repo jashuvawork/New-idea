@@ -322,6 +322,7 @@ def evaluate_building_lift_helpers(
             "sudden_ltp_lift",
             "index_tick_align",
             "index_tick_spike",
+            "index_spike_burst",
             "index_mom_turn",
             "index_squeeze",
             "index_breadth",
