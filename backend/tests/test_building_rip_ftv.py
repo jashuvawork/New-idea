@@ -49,7 +49,89 @@ def test_building_rip_ftv_authorizes_helper_confirmed_lift():
     assert ranking["grade"] in {"A", "B", "S"}
     assert decision.mode == "BUILDING_RIP_FTV"
     assert decision.reason == "ok"
-    assert decision.max_capital_pct == pytest.approx(0.35)
+    assert decision.max_capital_pct == pytest.approx(0.90)
+
+
+def test_building_rip_ftv_rank_one_gets_max_lots():
+    from unittest.mock import patch
+
+    from app.engines.auto_trader import _building_rip_ftv_policy_max_lots
+    from app.engines.capital_allocator import RankedAllocation
+    from app.engines.trade_ranking import FtvAuthorization
+
+    decision = FtvAuthorization(
+        "BUILDING_RIP_FTV", "ok", max_capital_pct=0.90,
+    )
+    allocation = RankedAllocation(
+        rank=1,
+        budgetInr=90_000,
+        remainingBeforeInr=100_000,
+        cashReserveInr=0,
+        capitalBaseInr=100_000,
+        committedInr=0,
+        weight=0.90,
+    )
+    candidate = type(
+        "Cand",
+        (),
+        {
+            "alert": {
+                "buildingLiftHelping": True,
+                "buildingRipHelpersOk": True,
+                "ictBuildingRipReady": True,
+            },
+            "pretrade_meta": {},
+        },
+    )()
+    with patch(
+        "app.engines.capital_allocator.max_lots_for_capital_pct",
+        return_value=28,
+    ) as max_lots:
+        lots, authorized = _building_rip_ftv_policy_max_lots(
+            lots=4,
+            symbol="SENSEX",
+            premium=131.0,
+            policy_decision=decision,
+            allocation=allocation,
+            candidate=candidate,
+        )
+    assert authorized is True
+    assert lots == 28
+    max_lots.assert_called_once()
+    args = max_lots.call_args[0]
+    assert args[0] == "SENSEX"
+    assert args[1] == 131.0
+    assert float(args[2]) >= 0.90
+
+
+def test_building_rip_ftv_no_helpers_no_max_lots():
+    from app.engines.auto_trader import _building_rip_ftv_policy_max_lots
+    from app.engines.capital_allocator import RankedAllocation
+    from app.engines.trade_ranking import FtvAuthorization
+
+    decision = FtvAuthorization(
+        "BUILDING_RIP_FTV", "ok", max_capital_pct=0.90,
+    )
+    allocation = RankedAllocation(
+        rank=1,
+        budgetInr=90_000,
+        remainingBeforeInr=100_000,
+        cashReserveInr=0,
+        capitalBaseInr=100_000,
+        committedInr=0,
+        weight=0.90,
+    )
+    candidate = type("Cand", (), {"alert": {}, "pretrade_meta": {}})()
+    lots, authorized = _building_rip_ftv_policy_max_lots(
+        lots=4,
+        symbol="SENSEX",
+        premium=131.0,
+        policy_decision=decision,
+        allocation=allocation,
+        candidate=candidate,
+    )
+    assert authorized is False
+    assert lots == 4
 
 
 def test_building_rip_ftv_allows_chase_timing_while_ripping():

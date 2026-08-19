@@ -348,10 +348,13 @@ async def deployment_readiness():
                 "tiers": ["BUILDING", "EXPLODING", "ELITE"],
                 "requiresHelpers": True,
                 "maxCapitalPct": float(
-                    getattr(settings, "building_rip_ftv_max_capital_pct", 0.35)
-                    or 0.35
+                    getattr(settings, "building_rip_ftv_max_capital_pct", 0.90)
+                    or 0.90
                 ),
-                "fullSleeveEligible": False,
+                "fullSleeveEligible": True,
+                "maxLotsEnabled": bool(
+                    getattr(settings, "building_rip_ftv_force_max_lots", True)
+                ),
             },
             "requiresAtmItm": True,
             "requiredAllocationRank": 1,
