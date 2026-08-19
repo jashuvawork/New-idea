@@ -135,6 +135,7 @@ def ftv_authorization_policy(
         )
         or evidence.get("eliteBaseReady")
         or evidence.get("armedBaseLaunch")
+        or evidence.get("vRipReady")
     )
     if not actual_ftv:
         return blocked("ftv_elite_top_only_requires_ftv")
@@ -224,6 +225,7 @@ def ftv_authorization_policy(
                 evidence.get("armedBaseLaunch")
                 or evidence.get("firstLift")
                 or evidence.get("eliteBaseReady")
+                or evidence.get("vRipReady")
                 or evidence.get("armedBaseSustainedLift")
                 or s_early_ftv
             ):
@@ -443,6 +445,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     elite_base_ready = bool(evidence.get("eliteBaseReady"))
     if bool(evidence.get("midRipCoil")):
         elite_base_ready = False
+    v_rip_ready = bool(evidence.get("vRipReady")) and not bool(
+        evidence.get("midRipCoil")
+    )
     flat_vertical = bool(evidence.get("flatThenVertical"))
     active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
@@ -485,6 +490,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     elif elite_base_ready:
         score += 12.0
         reasons.append("elite_base_ready")
+    elif v_rip_ready:
+        score += 10.0
+        reasons.append("v_rip_session_low")
     elif first_lift:
         score += 8.0
         reasons.append("fresh_first_lift")
@@ -571,7 +579,13 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     )
     fresh_positive = bool(
         mode == "explosion"
-        and (first_lift or flat_vertical or armed_launch or elite_base_ready)
+        and (
+            first_lift
+            or flat_vertical
+            or armed_launch
+            or elite_base_ready
+            or v_rip_ready
+        )
         and v3 > 0
         and not rejected
         and local_move <= 40.0
@@ -611,6 +625,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "localBaseMovePct": round(local_move, 2),
             "firstLift": first_lift,
             "eliteBaseReady": elite_base_ready,
+            "vRipReady": v_rip_ready,
             "armedBaseLaunch": armed_launch,
             "armedBaseSustainedLift": bool(evidence.get("armedBaseSustainedLift")),
             "flatThenVertical": flat_vertical,
@@ -700,6 +715,7 @@ def rank_entry_candidate(
         ),
         "firstLift": alert.get("ictFirstLift"),
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
+        "vRipReady": alert.get("ictVRipReady"),
         "armedBaseLaunch": alert.get("ictArmedBaseLaunch"),
         "armedBaseSustainedLift": alert.get("ictArmedBaseSustainedLift"),
         "flatThenVertical": alert.get("ictFlatThenVertical"),
