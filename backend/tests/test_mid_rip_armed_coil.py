@@ -24,6 +24,7 @@ from app.engines.explosion_detector import (
 from app.engines.ict_breakout_monitor import analyze_ict_breakout
 from app.engines.trade_ranking import rank_trade_evidence
 from app.models.schemas import Side
+import pytest
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -151,6 +152,80 @@ def test_rank_rejects_mid_rip_false_early_s_preauth():
     assert ranking["topRankEligible"] is False
     codes = {p["code"] for p in ranking["penalties"]}
     assert "mid_rip_false_early_pad" in codes or ranking["grade"] == "REJECT"
+
+
+def test_session_low_arms_v_bottom_base_at_125():
+    """Aug19-style V-base ~125 must arm while live is still near the trough."""
+    reset_detector_state_for_tests()
+    settings = Settings()
+    side = Side.PUT
+    key = _open_key("SENSEX", 76900.0, side)
+    now = datetime(2026, 8, 19, 10, 15, tzinfo=IST)
+    # Sparse mid-coil polls only — no tight trough coil in lookback.
+    _local_base_hist[key] = deque(
+        [(now - timedelta(seconds=(5 - i) * 3), 126.0 + (i % 2) * 0.4) for i in range(6)],
+        maxlen=1200,
+    )
+    _session_low[key] = 125.0
+    _session_peak[key] = 128.0
+
+    armed = armed_base_anchor("SENSEX", 76900.0, side, 128.0, settings=settings)
+    assert armed["armed"] is True
+    assert armed["basePremium"] == 125.0
+    assert armed.get("sessionLowArmed") is True
+    assert 0.0 < armed["baseRelativeMovePct"] <= 12.0
+
+
+def test_session_low_does_not_arm_after_v_rip_already_extended():
+    reset_detector_state_for_tests()
+    settings = Settings()
+    side = Side.PUT
+    key = _open_key("SENSEX", 76900.0, side)
+    now = datetime(2026, 8, 19, 12, 45, tzinfo=IST)
+    _local_base_hist[key] = deque(
+        [(now - timedelta(seconds=(5 - i) * 3), 168.0 + (i % 2) * 0.3) for i in range(6)],
+        maxlen=1200,
+    )
+    _session_low[key] = 125.0
+    _session_peak[key] = 220.0
+
+    armed = armed_base_anchor("SENSEX", 76900.0, side, 168.15, settings=settings)
+    assert armed.get("armed") is False
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_ict_elite_ready_fires_off_v_base_125(mock_settings):
+    """Lift off V-base 125 → ~131 must mint elite_base_ready, not wait for 162."""
+    reset_detector_state_for_tests()
+    mock_settings.return_value = Settings()
+    side = Side.PUT
+    key = _open_key("SENSEX", 76900.0, side)
+    now = datetime(2026, 8, 19, 10, 20, tzinfo=IST)
+    _local_base_hist[key] = deque(
+        [(now - timedelta(seconds=(8 - i) * 3), 125.2 + (i % 2) * 0.3) for i in range(9)],
+        maxlen=1200,
+    )
+    _session_low[key] = 125.0
+    _session_peak[key] = 131.0
+
+    ict = analyze_ict_breakout(
+        symbol="SENSEX",
+        strike=76900.0,
+        side=side,
+        premium=131.0,
+        session_move_pct=4.8,
+        peak_move_pct=4.8,
+        velocity_3s=2.0,
+        velocity_9s=1.6,
+        volume=2_000_000,
+        volume_surge=2.5,
+        tier="BUILDING",
+        reason="volAwaken",
+    )
+    assert ict.base_armed is True
+    assert ict.base_premium == pytest.approx(125.0, abs=0.5)
+    assert 2.0 <= ict.base_relative_move_pct < 5.5
+    assert ict.elite_base_ready is True
 
 
 def test_rank_rejects_explicit_mid_rip_flag():

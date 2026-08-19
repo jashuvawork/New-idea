@@ -924,6 +924,10 @@ def armed_base_anchor(
     Once armed, it never moves upward; a repeatedly confirmed lower base may ratchet it
     down. Session roll, explicit test reset, or horizon expiry clears the contract state.
     Restored medium-horizon tape can causally rebuild this state after process startup.
+
+    When the session/day trough is known and live premium is still near it, the
+    trough itself may arm as a V-bottom pad — sparse LTP coils often miss the
+    chart base (Aug19 SENSEX 76900 PE ~125).
     """
     settings = settings or __import__("app.config", fromlist=["get_settings"]).get_settings()
     if not bool(getattr(settings, "ict_armed_base_enabled", True)):
@@ -933,10 +937,10 @@ def armed_base_anchor(
     side_v = side if isinstance(side, Side) else Side(str(side).upper())
     key = _open_key(symbol, strike, side_v)
     rows = list(_local_base_hist.get(key) or ())
-    if not rows:
-        return {"armed": False}
-
-    now = rows[-1][0]
+    sess_low = float(_session_low.get(key) or 0)
+    sess_peak = float(_session_peak.get(key) or 0)
+    live = float(premium or 0)
+    now = rows[-1][0] if rows else datetime.now(IST)
     horizon = max(
         60.0,
         float(getattr(settings, "ict_armed_base_horizon_seconds", 1800.0) or 1800.0),
@@ -1005,13 +1009,11 @@ def armed_base_anchor(
                 )
                 break
 
-    sess_low = float(_session_low.get(key) or 0)
-    sess_peak = float(_session_peak.get(key) or 0)
     mid_rip_rejected = False
     if candidate is not None and mid_rip_armed_coil(
         session_low=sess_low,
         armed_base=candidate.premium,
-        premium=float(premium or candidate.premium),
+        premium=live or candidate.premium,
         session_peak=sess_peak,
         settings=settings,
     ):
@@ -1024,7 +1026,7 @@ def armed_base_anchor(
     if current is not None and mid_rip_armed_coil(
         session_low=sess_low,
         armed_base=current.premium,
-        premium=float(premium or current.premium),
+        premium=live or current.premium,
         session_peak=sess_peak,
         settings=settings,
     ):
@@ -1032,7 +1034,71 @@ def armed_base_anchor(
         current = None
         mid_rip_rejected = True
 
+    # V-bottom session/day trough: arm while still near the low so elite/armed
+    # launch can fire off ~125 instead of waiting for a tight poll coil (or a
+    # later mid-rip pause).
+    if (
+        current is None
+        and candidate is None
+        and bool(getattr(settings, "ict_armed_base_session_low_arm_enabled", True))
+        and sess_low > 0
+        and live > 0
+        and _is_meaningful_premium(sess_low, settings)
+    ):
+        max_near = float(
+            getattr(settings, "ict_armed_base_session_low_arm_max_move_pct", 12.0)
+            or 12.0
+        )
+        off_low = (live - sess_low) / sess_low * 100.0
+        if 0.0 <= off_low <= max_near and not mid_rip_armed_coil(
+            session_low=sess_low,
+            armed_base=sess_low,
+            premium=live,
+            session_peak=sess_peak,
+            settings=settings,
+        ):
+            candidate = ArmedBaseAnchor(
+                premium=float(sess_low),
+                armed_at=now,
+                expires_at=now + timedelta(seconds=horizon),
+                first_sample_at=now - timedelta(seconds=max(min_span, 15.0)),
+                last_support_at=now - timedelta(seconds=exclude + 1.0),
+                sample_count=max(min_samples, 6),
+                span_seconds=max(min_span, 15.0),
+                range_pct=0.0,
+            )
+
     if current is None and candidate is not None:
+        # Prefer the deeper session trough over a higher poll coil while still
+        # near the V-base (chart 125 vs a noisy 126–128 coil).
+        max_near = float(
+            getattr(settings, "ict_armed_base_session_low_arm_max_move_pct", 12.0)
+            or 12.0
+        )
+        if (
+            bool(getattr(settings, "ict_armed_base_session_low_arm_enabled", True))
+            and sess_low > 0
+            and live > 0
+            and candidate.premium > sess_low
+            and (live - sess_low) / sess_low * 100.0 <= max_near
+            and not mid_rip_armed_coil(
+                session_low=sess_low,
+                armed_base=sess_low,
+                premium=live,
+                session_peak=sess_peak,
+                settings=settings,
+            )
+        ):
+            candidate = ArmedBaseAnchor(
+                premium=float(sess_low),
+                armed_at=candidate.armed_at,
+                expires_at=candidate.expires_at,
+                first_sample_at=candidate.first_sample_at,
+                last_support_at=candidate.last_support_at,
+                sample_count=max(candidate.sample_count, min_samples),
+                span_seconds=max(candidate.span_seconds, min_span),
+                range_pct=0.0,
+            )
         current = candidate
         _armed_base_anchors[key] = current
     elif current is not None and candidate is not None:
@@ -1046,11 +1112,51 @@ def armed_base_anchor(
             current = candidate
             _armed_base_anchors[key] = current
 
+    # Session/day trough can deepen after the first arm print — always pull the
+    # sticky base down to the true V-low while live is still near it.
+    if (
+        current is not None
+        and bool(getattr(settings, "ict_armed_base_session_low_arm_enabled", True))
+        and sess_low > 0
+        and live > 0
+        and sess_low < current.premium - 1e-9
+    ):
+        max_near = float(
+            getattr(settings, "ict_armed_base_session_low_arm_max_move_pct", 12.0)
+            or 12.0
+        )
+        off_low = (live - sess_low) / sess_low * 100.0
+        if 0.0 <= off_low <= max_near and not mid_rip_armed_coil(
+            session_low=sess_low,
+            armed_base=sess_low,
+            premium=live,
+            session_peak=sess_peak,
+            settings=settings,
+        ):
+            current = ArmedBaseAnchor(
+                premium=float(sess_low),
+                armed_at=current.armed_at,
+                expires_at=now + timedelta(seconds=horizon),
+                first_sample_at=current.first_sample_at,
+                last_support_at=now - timedelta(seconds=exclude + 1.0),
+                sample_count=max(current.sample_count, min_samples),
+                span_seconds=max(current.span_seconds, min_span),
+                range_pct=0.0,
+            )
+            _armed_base_anchors[key] = current
+
+    if current is None and not rows and not mid_rip_rejected:
+        return {"armed": False}
+
     out = current.to_dict(premium) if current is not None else {"armed": False}
     if sess_low > 0:
         out["sessionLow"] = round(sess_low, 2)
     if mid_rip_rejected:
         out["midRipCoil"] = True
+    if current is not None and sess_low > 0 and abs(
+        current.premium - sess_low
+    ) <= max(0.01, sess_low * 0.005):
+        out["sessionLowArmed"] = True
     return out
 
 
@@ -1882,7 +1988,11 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictArmedBaseSustainedLift": sustained_armed_lift,
         "ictMidRipCoil": bool(
             any(
-                isinstance(r, str) and r.startswith("mid_rip_coil_rejected_")
+                isinstance(r, str)
+                and (
+                    r == "mid_rip_coil_rejected"
+                    or r.startswith("mid_rip_coil_rejected_")
+                )
                 for r in (getattr(ict, "reasons", None) or [])
             )
         ),
