@@ -1935,7 +1935,11 @@ class Settings(BaseSettings):
     radar_archive_top_n_per_day: int = 100
     radar_archive_retention_days: int = 365
     radar_learning_enabled: bool = True
-    radar_premium_tape_sample_seconds: int = 15
+    # Persist a premium/alert sample on every observation cycle by default so
+    # V-base lifts (and mid-rip false bases) can be replayed from the daily ZIP.
+    # Set >0 to throttle (legacy 15s). 0 = write every record_market_observations call.
+    radar_premium_tape_sample_seconds: int = 0
+    radar_alerts_tape_enabled: bool = True
     radar_outcome_horizons_seconds_csv: str = "60,180,300,900,1800"
     radar_outcome_target_pct: float = 20.0
     radar_outcome_stop_pct: float = 10.0

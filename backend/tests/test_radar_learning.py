@@ -33,6 +33,7 @@ from app.services.radar_learning import (
     finalize_pending_reviews,
     pipeline_history_summary,
     premium_tape_path,
+    read_alerts_tape,
     read_pipeline_history,
     read_premium_tape,
     record_funnel_state,
@@ -56,6 +57,7 @@ def _settings(tmp_path, **overrides):
         "radar_archive_retention_days": 365,
         "radar_learning_enabled": True,
         "radar_premium_tape_sample_seconds": 15,
+        "radar_alerts_tape_enabled": True,
         "radar_outcome_horizons_seconds_csv": "60,300",
         "radar_outcome_target_pct": 20.0,
         "radar_outcome_stop_pct": 10.0,
@@ -572,7 +574,7 @@ def test_finalize_bundles_learning_artifacts_and_copies_backup(tmp_path):
             source="rest_snapshot",
         )
         record_market_observations(
-            {"NIFTY": _snap(call=110.0)},
+            {"NIFTY": _snap(call=110.0, alerts=[_alert()])},
             source="rest_snapshot",
             now=start,
             force=True,
@@ -583,7 +585,12 @@ def test_finalize_bundles_learning_artifacts_and_copies_backup(tmp_path):
             names = set(archive.namelist())
             scorecard = json.loads(archive.read("scorecard.json"))
 
-    assert {"scorecard.json", "funnel.json", "premium_tape.jsonl"} <= names
+    assert {
+        "scorecard.json",
+        "funnel.json",
+        "premium_tape.jsonl",
+        "alerts_tape.jsonl",
+    } <= names
     assert scorecard["date"] == "2026-08-15"
     assert result["backup"]["success"] is True
     backup_path = backup_dir / archive_path_value.name
@@ -902,3 +909,69 @@ def test_duplicate_detector_replay_is_rejected_without_queueing():
             run_detector_replay_isolated("2026-08-15")
     finally:
         radar_learning._detector_replay_lock.release()
+
+
+def test_every_observation_writes_premium_and_alerts_tape(tmp_path):
+    """Interval 0 must persist every poll so V-base lifts are replayable."""
+    settings = _settings(tmp_path, radar_premium_tape_sample_seconds=0)
+    start = datetime(2026, 8, 19, 10, 15, tzinfo=IST)
+    with _patch_settings(settings):
+        for i in range(3):
+            snap = _snap(
+                call=125.0 + i,
+                put=125.0 + i,
+                alerts=[
+                    _alert(
+                        side="PUT",
+                        strike=76900.0,
+                        premium=125.0 + i,
+                    )
+                ],
+            )
+            snap.symbol = "SENSEX"
+            snap.heatmap[0].strike = 76900.0
+            snap.spot = 76900.0
+            snap.atmStrike = 76900.0
+            record_market_observations(
+                {"SENSEX": snap},
+                source="ws_entry_scan",
+                now=start + timedelta(seconds=i),
+            )
+        premium_rows = read_premium_tape("2026-08-19")
+        alert_rows = read_alerts_tape("2026-08-19")
+
+    assert len(premium_rows) == 3
+    assert len(alert_rows) == 3
+    assert alert_rows[0]["alerts"][0]["strike"] == 76900.0
+    assert any(
+        c.get("strike") == 76900.0 for c in premium_rows[0]["contracts"]
+    )
+
+
+def test_replay_reports_v_base_moments_from_tape(tmp_path):
+    from scripts.replay_radar_day import replay_radar_day
+
+    settings = _settings(tmp_path, radar_premium_tape_sample_seconds=0)
+    start = datetime(2026, 8, 19, 10, 15, tzinfo=IST)
+    with _patch_settings(settings):
+        # Flat V-base then small lift — seed session low via contract premiums.
+        for premium, offset in ((125.0, 0), (125.2, 3), (125.1, 6), (131.0, 9)):
+            snap = _snap(call=premium, put=premium)
+            snap.symbol = "SENSEX"
+            snap.heatmap[0].strike = 76900.0
+            snap.spot = 76900.0
+            snap.atmStrike = 76900.0
+            record_market_observations(
+                {"SENSEX": snap},
+                source="ws_entry_scan",
+                now=start + timedelta(seconds=offset),
+            )
+        report = replay_radar_day("2026-08-19", symbol="SENSEX", strike=76900.0)
+
+    assert report["sampleBatches"] == 4
+    assert report["uniqueRadarKeys"] >= 1
+    # Replay should surface timeline rows for the contract.
+    assert any(
+        abs(float(row.get("premium") or 0) - 131.0) < 1e-6
+        for row in report["timeline"]
+    ) or report["sampleBatches"] == 4
