@@ -1753,6 +1753,9 @@ def scan_chain_explosions(
             ):
                 tier = "EXPLODING"
                 reason_parts_open.append(f"buildingRip+v3_{v3:.1f}")
+                # Sticky stamp so LTP monitor / FTV path keep the BUILDING sleeve
+                # after promote (Aug19: helpers still apply on EXPLODING).
+                # Consumers read via alert_has_building_rip_signal / ICT reason.
 
             tier = _apply_sticky_tier(f"{symbol}:{key_h}", tier)
 
@@ -2062,7 +2065,9 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictBaseArmed": bool(getattr(ict, "base_armed", False)),
         "ictEliteBaseReady": elite_base_ready,
         "ictVRipReady": v_rip_ready,
-        "ictBuildingRipReady": building_rip_ready,
+        "ictBuildingRipReady": bool(
+            building_rip_ready or "buildingRip" in str(e.reason or "")
+        ),
         "ictArmedBaseLaunch": armed_launch,
         "ictArmedBaseSustainedLift": sustained_armed_lift,
         "ictMidRipCoil": bool(

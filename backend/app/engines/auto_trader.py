@@ -630,7 +630,10 @@ async def _open_from_candidate(
             candidate, snap, state=state, ict=trap_ict,
         )
         if trap_block or trap_meta.get("action") == "block":
-            return False, trap_reason
+            from app.engines.building_ftv_gates import building_rip_bypasses_fake_trap
+
+            if not building_rip_bypasses_fake_trap(candidate=candidate):
+                return False, trap_reason
 
     # Per-trade timing quality — COLD/LATE/CHASE cannot open full-size on dead tape.
     timing_meta: dict[str, Any] = {}
@@ -1199,7 +1202,10 @@ async def _open_from_candidate(
                 if live_trap.get("fakeExplosionTrap"):
                     trap_meta = {**trap_meta, **live_trap}
                 if trap_block or live_trap.get("action") == "block":
-                    return False, trap_reason
+                    from app.engines.building_ftv_gates import building_rip_bypasses_fake_trap
+
+                    if not building_rip_bypasses_fake_trap(candidate=candidate):
+                        return False, trap_reason
                 if trap_meta.get("action") == "cut_size":
                     bypass_soft = full_sleeve_authorized and (
                         (bool(high_conviction) and bool(

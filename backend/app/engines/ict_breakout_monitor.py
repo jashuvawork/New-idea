@@ -1529,11 +1529,15 @@ def analyze_ict_breakout(
         getattr(settings, "building_rip_local_base_min_velocity_3s", 1.2) or 1.2
     )
     structure_for_rip = max(base_rel_move, float(move or 0))
+    # After promote BUILDING→EXPLODING, keep the rip sleeve if reason stamped it.
+    building_tier_ok = tier == "BUILDING" or (
+        tier == "EXPLODING" and "buildingRip" in str(reason or "")
+    )
     local_base_lift_ready = bool(
         getattr(settings, "building_rip_bullish_enabled", True)
         and getattr(settings, "building_rip_local_base_lift_enabled", True)
         and not mid_rip_coil
-        and tier == "BUILDING"
+        and building_tier_ok
         and (local_swing_base or base_armed)
         and local_lift_lo <= base_rel_move <= local_lift_hi + 1e-6
         and velocity_3s >= local_lift_v3
@@ -1544,7 +1548,7 @@ def analyze_ict_breakout(
     mid_rip_ready = bool(
         getattr(settings, "building_rip_bullish_enabled", True)
         and not mid_rip_coil
-        and tier == "BUILDING"
+        and building_tier_ok
         and velocity_3s >= building_rip_v3
         and (velocity_9s >= building_rip_v9 or vol_awaken)
         and (vol_awaken or volume_surge >= float(
