@@ -441,6 +441,8 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     first_lift = bool(evidence.get("firstLift"))
     armed_launch = bool(evidence.get("armedBaseLaunch"))
     elite_base_ready = bool(evidence.get("eliteBaseReady"))
+    if bool(evidence.get("midRipCoil")):
+        elite_base_ready = False
     flat_vertical = bool(evidence.get("flatThenVertical"))
     active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
@@ -518,6 +520,10 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         rejected = True
         penalties.append({"code": "exhausted_post_peak_reentry", "points": 60.0})
         score -= 60.0
+    if bool(evidence.get("midRipCoil")):
+        rejected = True
+        penalties.append({"code": "mid_rip_armed_coil", "points": 50.0})
+        score -= 50.0
 
     elite_preauthorized = bool(
         elite_base_ready
@@ -526,6 +532,19 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         and tqs >= 50.0
         and 2.0 <= local_move < 5.0
     )
+    # Aug19 76900 PE: elite_base_ready at 2.6% off a mid-rip coil while off-low
+    # was already ~42%. Never S-preauthorize when session-trough expansion says chase.
+    off_low = max(0.0, _number(evidence.get("offLowMovePct")))
+    if elite_preauthorized and off_low >= 30.0 and off_low > local_move + 10.0:
+        elite_preauthorized = False
+        penalties.append(
+            {
+                "code": "mid_rip_false_early_pad",
+                "points": 40.0,
+                "value": round(off_low, 1),
+            }
+        )
+        score -= 40.0
     # Top S at local base only — armed launch alone must not mint grade S for
     # mid EXPLODING (score ~70, quality B). Elite-base preauth (2–5%) stays.
     armed_top_local = bool(
@@ -675,12 +694,19 @@ def rank_entry_candidate(
             or alert.get("ictBaseRelativeMovePct")
             or pretrade.get("ictBaseRelativeMovePct")
         ),
+        "offLowMovePct": (
+            alert.get("offLowMovePct")
+            or pretrade.get("offLowMovePct")
+        ),
         "firstLift": alert.get("ictFirstLift"),
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
         "armedBaseLaunch": alert.get("ictArmedBaseLaunch"),
         "armedBaseSustainedLift": alert.get("ictArmedBaseSustainedLift"),
         "flatThenVertical": alert.get("ictFlatThenVertical"),
         "activeBreakout": alert.get("ictBreakout"),
+        "midRipCoil": bool(
+            alert.get("ictMidRipCoil") or alert.get("midRipCoil")
+        ),
         "orderflowPositive": bool(
             alert.get("ictVolumeAwakening")
             or alert.get("volumeAwaken")
