@@ -194,6 +194,102 @@ def _helper_confirmed_lift(
     return ok, count
 
 
+def _option_led_first_lift_ok(
+    *,
+    row: dict[str, Any],
+    ict: Any,
+    event: Any,
+    snap: Optional[SymbolSnapshot],
+    settings: Any,
+) -> bool:
+    """A confirmed ATM/ITM option leading the slower 5m spot chart.
+
+    This is a deliberately STRONG independent lane (high FTV quality + fast sustained
+    v3/v9 + volume awakening AND surge) that may lead before the index chart turns and
+    before the generic explosion-score floor is met — the option tape IS the signal.
+    All downstream selector/premium/moneyness/session/risk guards still run.
+    """
+    if not bool(getattr(settings, "first_lift_option_led_enabled", True)):
+        return False
+    if snap is None:
+        return False
+    quality = float(
+        getattr(ict, "flat_vertical_quality", 0)
+        or row.get("flatVerticalQuality")
+        or 0
+    )
+    v3 = float(
+        getattr(event, "velocity_3s", 0)
+        or getattr(ict, "velocity_3s", 0)
+        or row.get("velocity3s")
+        or row.get("velocity_3s")
+        or 0
+    )
+    v9 = float(
+        getattr(event, "velocity_9s", 0)
+        or getattr(ict, "velocity_9s", 0)
+        or row.get("velocity9s")
+        or row.get("velocity_9s")
+        or 0
+    )
+    volume_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
+    volume_surge = float(
+        getattr(event, "volume_surge", 0)
+        or getattr(ict, "volume_surge", 0)
+        or row.get("volumeSurge")
+        or 0
+    )
+    min_volume = float(
+        getattr(settings, "first_lift_trade_min_volume_surge", 2.0) or 2.0
+    )
+    base_v3 = float(getattr(settings, "first_lift_trade_min_velocity_3s", 1.5) or 1.5)
+    base_v9 = float(getattr(settings, "first_lift_trade_min_velocity_9s", 1.0) or 1.0)
+    option_led_quality = float(
+        getattr(settings, "first_lift_option_led_min_quality", 65.0) or 65.0
+    )
+    option_led_v3 = float(
+        getattr(settings, "first_lift_option_led_min_velocity_3s", 1.5) or 1.5
+    )
+    option_led_v9 = float(
+        getattr(settings, "first_lift_option_led_min_velocity_9s", 1.5) or 1.5
+    )
+    if not (
+        quality >= option_led_quality
+        and v3 >= max(base_v3, option_led_v3)
+        and v9 >= max(base_v9, option_led_v9)
+        and volume_awake
+        and volume_surge >= min_volume
+    ):
+        return False
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False
+    strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0)
+    if strike <= 0 or spot <= 0:
+        return False
+    from app.engines.moneyness import classify_moneyness
+    from app.models.schemas import Side as _Side
+
+    money = classify_moneyness(
+        _Side(side),
+        strike,
+        spot,
+        symbol=str(getattr(snap, "symbol", "") or ""),
+        atm=atm if atm > 0 else None,
+    )
+    return money in ("ATM", "ITM")
+
+
 def building_rip_bullish_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -694,6 +790,21 @@ def first_lift_entry_readiness(
         )
     if not (min_move <= base_move <= max_move):
         return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
+
+    # Option-led lane: a strong ATM/ITM option can lead before the 5m index chart turns
+    # and before the generic explosion-score floor is met. Evaluated here so it is not
+    # subordinate to that score floor; its own high quality/velocity/volume bar gates it.
+    # Only for a plain first lift — the armed/elite/v-rip paths keep their stricter
+    # orderflow/stability gates below and must not be short-circuited here.
+    if (
+        first_lift
+        and not strict_armed_path
+        and not v_rip_ready
+        and _option_led_first_lift_ok(
+            row=row, ict=ict, event=event, snap=snap, settings=settings,
+        )
+    ):
+        return True, "first_lift_option_led_ready"
 
     quality = float(
         getattr(ict, "flat_vertical_quality", 0)
