@@ -587,6 +587,20 @@ class Settings(BaseSettings):
     first_lift_trade_min_velocity_3s: float = 1.5
     first_lift_trade_min_velocity_9s: float = 1.0
     first_lift_trade_max_move_pct: float = 25.0
+    # Helper-confirmed lane: "on the radar as BUILDING and suddenly something is helping to
+    # go FTV." When enough INDEPENDENT confirmations agree (volume surge/awaken, displacement,
+    # premium FVG, flat->vertical structure, chart-align, breadth-align) on a name at its
+    # local base with positive live velocity, that IS the confirmed FTV — so it may enter on
+    # a LOWER quality/score/velocity bar than a bare first lift, and (BUILDING) may override
+    # the worst-day / BREAKOUT_ONLY block. Un-helped first lifts still hit the strict bar.
+    first_lift_helper_confirm_enabled: bool = True
+    first_lift_helper_confirm_min_helpers: int = 3
+    first_lift_helper_strong_surge: float = 3.0
+    first_lift_helper_confirm_min_quality: float = 50.0
+    first_lift_helper_confirm_min_score: float = 45.0
+    first_lift_helper_confirm_min_velocity_3s: float = 1.2
+    first_lift_helper_confirm_min_velocity_9s: float = 0.6
+    building_rip_helper_override_worst_day: bool = True
     first_lift_trade_min_momentum_shift_pct: float = 0.03
     # ATM/ITM premium-led first lift: stronger option evidence may lead a lagging
     # bearish/bullish spot chart, symmetrically for CE/PE.
