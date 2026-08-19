@@ -886,7 +886,10 @@ def validate_candidate(
         )
         meta.update(trap_meta)
         if trap_block or trap_meta.get("action") == "block":
-            return False, trap_reason, meta
+            from app.engines.building_ftv_gates import building_rip_bypasses_fake_trap
+
+            if not building_rip_bypasses_fake_trap(candidate=candidate):
+                return False, trap_reason, meta
 
     if getattr(candidate, "mode", "") == "explosion" and explosion_event is not None:
         from app.engines.morning_premium_capture import premium_led_explosion_bypass

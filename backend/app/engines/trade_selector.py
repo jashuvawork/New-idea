@@ -454,6 +454,7 @@ def _explosion_candidates(
             index_moment=moment_surge,
             chart=snap.spotChart,
             snap=snap,
+            alert=alert if isinstance(alert, dict) else None,
         )
         if not passed:
             continue
@@ -613,14 +614,17 @@ def _explosion_candidates(
             "building_rip_bullish_ready",
             "building_local_base_lift_ready",
         )
+        from app.engines.building_ftv_gates import (
+            building_rip_bypasses_extended_chase,
+            building_rip_bypasses_fake_trap,
+        )
+
         if (
             ext_blocked
             and not must_take
-            and not (
-                building_rip_ready_take
-                and bool(
-                    getattr(settings, "building_rip_bypasses_extended_chase", True)
-                )
+            and not building_rip_bypasses_extended_chase(
+                alert=alert if isinstance(alert, dict) else None,
+                readiness_reason=first_lift_readiness_reason,
             )
         ):
             continue
@@ -629,11 +633,9 @@ def _explosion_candidates(
         )
         if (
             (trap_block or trap_meta.get("action") == "block")
-            and not (
-                building_rip_ready_take
-                and bool(
-                    getattr(settings, "building_rip_bypasses_fake_trap", True)
-                )
+            and not building_rip_bypasses_fake_trap(
+                alert=alert if isinstance(alert, dict) else None,
+                readiness_reason=first_lift_readiness_reason,
             )
         ):
             continue

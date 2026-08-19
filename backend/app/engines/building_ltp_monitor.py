@@ -67,6 +67,8 @@ def building_alerts_on_radar(
     snapshots: dict[str, SymbolSnapshot],
 ) -> list[dict[str, Any]]:
     """Collect BUILDING (and building-rip ready) rows currently on radar."""
+    from app.engines.building_ftv_gates import alert_has_building_rip_signal
+
     rows: list[dict[str, Any]] = []
     for symbol, snap in (snapshots or {}).items():
         if not getattr(snap, "dataAvailable", False):
@@ -75,8 +77,10 @@ def building_alerts_on_radar(
             if not isinstance(alert, dict):
                 continue
             tier = str(alert.get("tier") or "").upper()
-            # Only true BUILDING radar names — promoted EXPLODING/ELITE use normal path.
-            if tier != "BUILDING":
+            # Keep true BUILDING plus promoted EXPLODING that still carry buildingRip.
+            if tier != "BUILDING" and not (
+                tier == "EXPLODING" and alert_has_building_rip_signal(alert)
+            ):
                 continue
             side = str(alert.get("side") or "").upper()
             try:
@@ -224,6 +228,31 @@ def evaluate_all_building_ltp(
             # Remember helper fingerprint for flip-triggered cycles.
             fp = ",".join(helper_names)
             _building_helper_fp[key] = fp
+            # Persist onto live radar alert so selector / order path see stamps.
+            live_alert = row["alert"]
+            if isinstance(live_alert, dict):
+                live_alert.update(
+                    {
+                        k: alert[k]
+                        for k in (
+                            "buildingRipHelpers",
+                            "buildingRipHelpersOk",
+                            "buildingLiftHelping",
+                            "buildingSuddenLift",
+                            "buildingLtpLiftPct",
+                            "buildingHelperCount",
+                            "buildingHelperBonus",
+                            "buildingIctConfirms",
+                            "ictBuildingRipReady",
+                            "premium",
+                            "velocity3s",
+                            "velocity9s",
+                            "tickVelocity3s",
+                            "tickVelocity9s",
+                        )
+                        if k in alert
+                    }
+                )
 
         ready = False
         ready_reason = "not_evaluated"
@@ -242,6 +271,16 @@ def evaluate_all_building_ltp(
                 )
             except Exception:
                 ready, ready_reason = False, "readiness_error"
+
+        if ready and isinstance(row["alert"], dict):
+            row["alert"]["ictBaseReadinessReason"] = str(ready_reason or "")
+            if str(ready_reason or "") in (
+                "building_rip_bullish_ready",
+                "building_local_base_lift_ready",
+            ):
+                row["alert"]["ictBuildingRipReady"] = True
+                alert["ictBuildingRipReady"] = True
+                alert["ictBaseReadinessReason"] = str(ready_reason or "")
 
         score = _composite_building_score(
             alert=alert,
@@ -395,11 +434,17 @@ def _candidate_key(candidate: Any) -> str:
 
 
 def _is_buildingish_candidate(candidate: Any) -> bool:
+    from app.engines.building_ftv_gates import alert_has_building_rip_signal
+
     tier = str(getattr(candidate, "tier", "") or "").upper()
     alert = getattr(candidate, "alert", None)
     if isinstance(alert, dict) and not tier:
         tier = str(alert.get("tier") or "").upper()
-    return tier == "BUILDING"
+    if tier == "BUILDING":
+        return True
+    return tier == "EXPLODING" and alert_has_building_rip_signal(
+        alert if isinstance(alert, dict) else None
+    )
 
 
 def preferred_building_ready_key(candidate_keys: set[str]) -> Optional[str]:

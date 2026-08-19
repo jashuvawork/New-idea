@@ -31,29 +31,41 @@ def _cfg_float(settings, name: str, default: float) -> float:
 def _ict_flat_vertical_entry_ok(
     event: ExplosionEvent,
     snap: Optional[SymbolSnapshot],
+    *,
+    alert: Optional[dict[str, Any]] = None,
 ) -> bool:
-    """ICT flat→vertical entry, including a strictly confirmed first lift.
+    """ICT flat→vertical entry, including BUILDING rip / first-lift readiness.
 
-    EXPLODING/ELITE keep the structure+heat path. BUILDING must clear elite-build
-    bars so Aug7-style cold prints wait. A WATCH/BUILDING first lift may precede
-    the chart-direction flip only when quality, sustained heat, volume and the
-    live momentum turn all pass ``first_lift_entry_ready``.
+    Helper-confirmed BUILDING (and promoted buildingRip EXPLODING) short-circuit
+    before elite-build / Ichimoku bars so Aug19-style V-rips can open.
     """
     if event is None or snap is None:
         return False
     tier_u = str(getattr(event, "tier", "") or "").upper()
+    from app.engines.building_ftv_gates import (
+        BUILDING_READY_REASONS,
+        alert_has_building_rip_signal,
+    )
     from app.engines.ict_breakout_monitor import (
         analyze_explosion_event_ict,
-        first_lift_entry_ready,
+        first_lift_entry_readiness,
     )
     from app.engines.spot_direction import side_aligned_with_chart
 
     ict = analyze_explosion_event_ict(event, snap)
-    first_lift_ready = first_lift_entry_ready(
+    first_lift_ready, ready_reason = first_lift_entry_readiness(
         snap=snap,
         event=event,
         ict=ict,
+        alert=alert,
     )
+    if first_lift_ready and (
+        ready_reason in BUILDING_READY_REASONS
+        or ready_reason.startswith("buildingRip")
+        or alert_has_building_rip_signal(alert)
+        or bool(getattr(ict, "building_rip_ready", False))
+    ):
+        return True
     chart = getattr(snap, "spotChart", None)
     if (
         chart is not None
@@ -61,6 +73,8 @@ def _ict_flat_vertical_entry_ok(
         and not first_lift_ready
     ):
         return False
+    if first_lift_ready:
+        return True
     if not bool(getattr(ict, "active", False)):
         return False
     if not bool(getattr(ict, "flat_then_vertical", False)):
@@ -72,10 +86,6 @@ def _ict_flat_vertical_entry_ok(
     )
     if not heat:
         return False
-    # A high-quality first lift is deliberately earlier than BUILDING/Ichimoku.
-    # Its live momentum-turn and volume proof replace those lagging confirmations.
-    if first_lift_ready:
-        return True
     if tier_u not in ("BUILDING", "EXPLODING", "ELITE"):
         return False
     settings = get_settings()
@@ -209,6 +219,7 @@ def check_explosion_entry(
     index_moment: bool = False,
     chart: Optional[SpotChart] = None,
     snap: Optional[SymbolSnapshot] = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str]:
     """Fast entry on explosion — minimal gates, speed is everything."""
     if calibration_blocked:
@@ -224,7 +235,7 @@ def check_explosion_entry(
     # Require chart align — but honor the same capture/structure bypasses as
     # chart_blocks_explosion_side later (afternoon / all-day / premium-led / local-base).
     settings = get_settings()
-    early_ict_ok = _ict_flat_vertical_entry_ok(event, snap)
+    early_ict_ok = _ict_flat_vertical_entry_ok(event, snap, alert=alert)
     if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
         from app.engines.spot_direction import side_aligned_with_chart
 
@@ -532,7 +543,7 @@ def check_explosion_entry(
         return True, "explosion_confirmed" if not premium_bypass else "premium_led_explosion_confirmed"
 
     if event.tier == "BUILDING" and event.explosion_score >= min_score:
-        ict_flat_ok = _ict_flat_vertical_entry_ok(event, snap)
+        ict_flat_ok = _ict_flat_vertical_entry_ok(event, snap, alert=alert)
         if (
             is_all_day_explosion_event(event, chart=chart)
             or is_premium_capture_event(event, chart=chart)

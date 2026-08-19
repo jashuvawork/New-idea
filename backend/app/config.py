@@ -497,7 +497,8 @@ class Settings(BaseSettings):
     building_rip_local_base_min_move_pct: float = 2.0
     building_rip_local_base_max_move_pct: float = 15.0
     building_rip_local_base_min_velocity_3s: float = 1.2
-    building_rip_local_base_min_score: float = 42.0
+    # Align with aggressive_min_explosion_score so ready lifts clear selector floor.
+    building_rip_local_base_min_score: float = 45.0
     # Precise BUILDING radar LTP monitor: every meaningful WS LTP print on a
     # BUILDING name re-scans explosions and may take — do not wait for the
     # slower full entry-scan cadence.
