@@ -127,19 +127,18 @@ class Settings(BaseSettings):
     eod_playbook_start_hour: int = 15
     eod_playbook_start_minute: int = 20
     eod_playbook_use_ai: bool = True
-    # Automated EOD learning for FTV / V-momentum moments: distil each day's ELITE/EXPLODING
-    # outcomes into a per (symbol,side,tier) knowledge profile (typical peak %, first-dig MAE,
-    # hit rate -> recommended near-base entry ceiling / trail keep / stop). Accumulates across
-    # days; the heavy raw archive is pruned only AFTER a day is learned (retention window).
-    eod_learning_enabled: bool = True
+    # EOD learning is DISABLED by default. It distilled radar OUTCOMES (mfe/mae) into a
+    # knowledge profile, but that pipeline did NOT re-run the live entry gate stack, so its
+    # numbers/recommendations did not reflect real live behaviour. Applying an unvalidated
+    # learning loop to live risk is off until it can be validated against the actual gates.
+    # The code remains, dormant, behind these flags. Trading runs purely on the deterministic
+    # detector + gates.
+    eod_learning_enabled: bool = False
     eod_learning_real_leg_min_mfe_pct: float = 50.0
-    eod_learning_cleanup_enabled: bool = True
+    eod_learning_cleanup_enabled: bool = False
     eod_learning_raw_retention_days: int = 7
-    # Closed loop: apply the accumulated knowledge to live exits. Once a moment type has
-    # enough samples, the runner trail uses the LEARNED keep-ratio (ride hard on high-hit
-    # movers like SENSEX ELITE ~0.85; tighten on low-hit buckets ~0.60). Bounded 0.60..0.85.
-    # Entry-side learned fields are stamped observe-only for now.
-    eod_learning_apply_enabled: bool = True
+    # Do NOT apply any learned value to live entries/exits/sizing.
+    eod_learning_apply_enabled: bool = False
     eod_learning_apply_min_samples: int = 5
     # Entry-side loop: tighten the ELITE/EXPLODING near-base entry ceiling toward the learned
     # per-moment value (tighten-only), but never below this floor so genuine near-base first
