@@ -370,6 +370,22 @@ def test_index_trend_breakout_rejects_new_high_without_thrust():
     assert index_trend_breakout("SENSEX", Side.CALL, snap)["breakout"] is False
 
 
+def test_trend_breakout_seeds_session_hilo_from_snapshot_when_ticks_cold():
+    """After a restart the tick tracker is cold — broker session H/L still enables the override."""
+    from app.engines.index_tick_helpers import index_trend_breakout
+    from app.models.schemas import ChartAnalysis
+    reset_index_tick_helpers_for_tests()  # no _session_extremes (cold start)
+    _seed_ltp("SENSEX", [77540 + i * 2.0 for i in range(31)], step=1.5)  # rising -> CALL drift
+    snap = _snap_put(direction="BULLISH", momentum5Pct=0.165)
+    snap.spot = 77590.0
+    snap.chartAnalysis = ChartAnalysis(
+        institutional={"sessionHigh": 77600.0, "sessionLow": 77440.0}
+    )
+    bo = index_trend_breakout("SENSEX", Side.CALL, snap)
+    assert bo["breakout"] is True
+    assert "near_session_high" in bo["reasons"]
+
+
 def test_index_trend_override_active_scans_symbols():
     from app.engines.index_tick_helpers import index_trend_override_active
     reset_index_tick_helpers_for_tests()
