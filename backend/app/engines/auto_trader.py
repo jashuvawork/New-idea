@@ -1091,24 +1091,47 @@ async def _open_from_candidate(
     # never-green / daily-loss guards still apply, and it carries a wider per-trade rupee stop.
     _alert_d = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
     _idx_helpers = _alert_d.get("indexHelpers") or []
-    index_confirmed_ftv = bool(
-        getattr(settings, "index_confirmed_ftv_size_up_enabled", True)
+    _idx_confirm = bool(
+        _alert_d.get("indexHelpersConfirm")
+        or _alert_d.get("indexDrift")
+        or _alert_d.get("indexSpikeBurst")
+        or "index_drift" in _idx_helpers
+        or "index_spike_burst" in _idx_helpers
+    )
+    _base_rel = float(
+        _alert_d.get("ictBaseRelativeMovePct")
+        or _alert_d.get("localBaseMovePct")
+        or 0
+    )
+    _tier_u = str(candidate.tier or "").upper()
+    _size_up_on = bool(getattr(settings, "index_confirmed_ftv_size_up_enabled", True))
+    _max_base_rel = float(
+        getattr(settings, "index_confirmed_ftv_max_base_rel_pct", 20.0) or 20.0
+    )
+    # The live trading-loop snapshot does not stamp the index-helper fields onto alerts
+    # (only the HTTP snapshot path does), so compute index confirmation DIRECTLY here — the
+    # same evaluate_index_tick_helpers used by must-take — rather than trusting the stamp.
+    if (
+        _size_up_on
         and candidate.mode == "explosion"
-        and str(candidate.tier or "").upper() in ("ELITE", "EXPLODING")
-        and (
-            _alert_d.get("indexHelpersConfirm")
-            or _alert_d.get("indexDrift")
-            or _alert_d.get("indexSpikeBurst")
-            or "index_drift" in _idx_helpers
-            or "index_spike_burst" in _idx_helpers
-        )
-        and 0
-        < float(
-            _alert_d.get("ictBaseRelativeMovePct")
-            or _alert_d.get("localBaseMovePct")
-            or 0
-        )
-        <= float(getattr(settings, "index_confirmed_ftv_max_base_rel_pct", 20.0) or 20.0)
+        and _tier_u in ("ELITE", "EXPLODING")
+        and not _idx_confirm
+    ):
+        try:
+            from app.engines.index_tick_helpers import evaluate_index_tick_helpers
+
+            _idx = evaluate_index_tick_helpers(
+                snap=snap, side=candidate.side, alert=_alert_d,
+            )
+            _idx_confirm = bool(_idx.confirming or _idx.drift_align or _idx.spike_burst)
+        except Exception:
+            pass
+    index_confirmed_ftv = bool(
+        _size_up_on
+        and candidate.mode == "explosion"
+        and _tier_u in ("ELITE", "EXPLODING")
+        and _idx_confirm
+        and 0 < _base_rel <= _max_base_rel
     )
     if candidate.mode == "explosion" and trap_meta:
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
