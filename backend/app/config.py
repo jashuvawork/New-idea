@@ -766,6 +766,15 @@ class Settings(BaseSettings):
     moment_stage_count: int = 8
     moment_stage_min_size: float = 5.0
     moment_stage_max_size: float = 55.0
+    # FTV runner %-of-peak-gain trailing floor. V/FTV moments run in big % from the local
+    # base (e.g. Rs68 -> Rs140 = +106%). The absolute stage ladder is tuned for mega point
+    # moves and under-protects modest-but-real % moves (a +40% peak can give back to +4%).
+    # This trails a consistent fraction BEHIND the peak GAIN (keep 72% => exit ~28% off the
+    # top) and is max'd WITH the stage ladder — so mega runners still ride the stages while
+    # every real % move locks in the best TP it reached. Arms only after a real move.
+    ftv_runner_pct_trail_enabled: bool = True
+    ftv_runner_pct_trail_arm_pct: float = 25.0
+    ftv_runner_pct_trail_keep_ratio: float = 0.72
     moment_stage_min_projected_tp: float = 40.0
     # Allow rare 50→650 LTP mega rips (+600pt); live extension ratchets toward this.
     moment_stage_max_projected_tp: float = 800.0

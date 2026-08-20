@@ -449,6 +449,37 @@ def pre_stage_hold_floor_pts(
     return round(floor_pts, 2)
 
 
+def ftv_runner_pct_floor(
+    trade: PaperTrade,
+    best: float,
+    *,
+    settings: Optional[Settings] = None,
+) -> Optional[float]:
+    """Trail a consistent fraction BEHIND the peak GAIN for V/FTV runners.
+
+    V/FTV moments run in large % off the local base. The absolute stage ladder is tuned for
+    mega POINT moves and under-protects modest-but-real % moves (a +40% peak can give back to
+    +4%). This locks in a fixed fraction of whatever peak the move reached (keep 72% => exit
+    ~28% off the top), so every real % move banks close to its best TP. Arms only after a
+    real move so it never clips the initial base pad.
+    """
+    s = settings or get_settings()
+    if not bool(getattr(s, "ftv_runner_pct_trail_enabled", True)):
+        return None
+    if not trade_uses_moment_stage_ladder(trade):
+        return None
+    entry = _safe_float(getattr(trade, "entryPremium", 0))
+    best = _safe_float(best)
+    if entry <= 0 or best <= 0:
+        return None
+    arm_pct = _cfg_float(s, "ftv_runner_pct_trail_arm_pct", 25.0)
+    if (best / entry * 100.0) < arm_pct:
+        return None
+    keep = _cfg_float(s, "ftv_runner_pct_trail_keep_ratio", 0.72)
+    keep = min(0.95, max(0.5, keep))
+    return round(best * keep, 2)
+
+
 def compose_trail_floor_with_stages(
     trade: PaperTrade,
     best: float,
@@ -464,11 +495,22 @@ def compose_trail_floor_with_stages(
 
     Before the first stage completes, a provisional pre-stage floor owns the
     trail so the micro step cannot cut a still-projecting vertical.
+
+    A %-of-peak-gain floor is max'd in so V/FTV % moves that fall between coarse
+    absolute stages still bank close to their best TP (the stage ladder keeps mega
+    runners riding; the pct floor locks modest-but-real moves).
     """
-    stage_floor = stage_trail_floor_pts(trade, best, settings=settings)
+    s = settings or get_settings()
+    pct_floor = ftv_runner_pct_floor(trade, best, settings=s)
+    stage_floor = stage_trail_floor_pts(trade, best, settings=s)
     if stage_floor is not None:
-        return stage_floor, stage_floor
-    pre_floor = pre_stage_hold_floor_pts(trade, best, settings=settings)
+        composed = stage_floor if pct_floor is None else max(stage_floor, pct_floor)
+        return composed, composed
+    pre_floor = pre_stage_hold_floor_pts(trade, best, settings=s)
     if pre_floor is not None:
-        return pre_floor, pre_floor
+        composed = pre_floor if pct_floor is None else max(pre_floor, pct_floor)
+        return composed, composed
+    if pct_floor is not None:
+        composed = pct_floor if base_floor is None else max(base_floor, pct_floor)
+        return composed, pct_floor
     return base_floor, None
