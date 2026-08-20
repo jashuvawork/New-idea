@@ -83,6 +83,21 @@ def test_exceptional_full_sleeve_uses_bounded_four_thousand_cap():
     assert pnl <= -4_000
 
 
+def test_index_confirmed_ftv_uses_wider_cap_not_two_thousand():
+    """Elevated index-confirmed FTV gets the ~4k stop, so a 2k-4k dip does NOT cut it."""
+    # ~₹2,400 loss (40 lots x20 x 3pt) would trip an ordinary 2k trade, but not this one.
+    survive = _trade(100.0, 97.0, best=2.0, lots=40)
+    survive.entryContext = {"indexConfirmedFtv": True}
+    reason, _ = evaluate_explosion_exit(survive, 97.0, "ELITE", 20, live_velocity_3s=0.5)
+    assert reason != "explosion_per_trade_risk_cap"
+    # Beyond ~₹4k it is still bounded and cut.
+    cut = _trade(100.0, 97.0, best=2.0, lots=75)
+    cut.entryContext = {"indexConfirmedFtv": True}
+    reason2, pnl2 = evaluate_explosion_exit(cut, 97.0, "ELITE", 20, live_velocity_3s=0.5)
+    assert reason2 == "explosion_per_trade_risk_cap"
+    assert pnl2 <= -4_000
+
+
 def test_failed_launch_scratches_on_negative_velocity():
     trade = _trade(51.0, 49.0, best=0.5, lots=1, hold_s=20)
     reason, _ = evaluate_explosion_exit(
