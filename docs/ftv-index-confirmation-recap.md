@@ -203,6 +203,23 @@ Config: `worst_day_intraday_trend_override_enabled=True`,
 `index_trend_override_near_extreme_pct=0.05`, `index_trend_override_min_mom5_pct=0.10`,
 `index_trend_override_min_range_pct=0.15`.
 
+## 6d. ELITE full-lot + ride-to-max-TP
+
+Intent (user): "Take full lots, if ELITE, trade to max TP." Implemented **risk-budgeted**,
+not literal full sleeve (a fixed rupee stop on 176 lots = ~1pt stop that churns out).
+
+- **Sizing**: an index-confirmed ELITE FTV takes as many lots as keep the stop within
+  `elite_full_lot_risk_inr` (₹10k = 5% of ₹200k, half the 10%/day budget). On the Aug 20
+  SENSEX CALL @₹50.95 that's **62 lots (~32% capital), ₹10k hard stop (~8pt room)** — vs 6
+  lots before. Also bounded by the 35%/trade capital ceiling and the full-sleeve cap.
+- **Ride to max TP**: ELITE always gets `maxProfitCapture` (peak-capture hold) so it rides
+  toward the peak instead of the initial +25pt target.
+- **Payoff on the Aug 20 ELITE CALL** (base ₹50.95 → peak ₹122): **~+₹88k at 62 lots** vs
+  ~+₹8.5k at 6 lots; bounded downside ₹10k/trade, ₹20k/day.
+- Guards: never-green, whipsaw, and the ₹20k/day stop still apply. Config:
+  `elite_full_lot_enabled`, `elite_full_lot_risk_inr=10000`, `elite_full_lot_est_stop_points=8`,
+  `elite_full_lot_requires_index_confirm=True`, `elite_ride_max_tp_enabled=True`.
+
 ## 7. Open items / how to prove it live
 
 1. **Merge PR #356 + deploy** (auto on merge to `main`). Confirm `deployment/status.commit` flips.

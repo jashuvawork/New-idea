@@ -83,6 +83,21 @@ def test_exceptional_full_sleeve_uses_bounded_four_thousand_cap():
     assert pnl <= -4_000
 
 
+def test_elite_full_lot_uses_ten_thousand_cap():
+    """ELITE full-lot rides to max TP on the risk-budgeted ~10k stop, not 2k/4k."""
+    # ~₹6,000 loss (100 lots x20 x 3pt) must NOT cut an ELITE full-lot (10k cap)...
+    survive = _trade(100.0, 97.0, best=2.0, lots=100)
+    survive.entryContext = {"eliteFullLot": True}
+    reason, _ = evaluate_explosion_exit(survive, 97.0, "ELITE", 20, live_velocity_3s=0.5)
+    assert reason != "explosion_per_trade_risk_cap"
+    # ...but beyond ~₹10k it is still bounded and cut.
+    cut = _trade(100.0, 94.0, best=2.0, lots=100)
+    cut.entryContext = {"eliteFullLot": True}
+    reason2, pnl2 = evaluate_explosion_exit(cut, 94.0, "ELITE", 20, live_velocity_3s=0.5)
+    assert reason2 == "explosion_per_trade_risk_cap"
+    assert pnl2 <= -10_000
+
+
 def test_index_confirmed_ftv_uses_wider_cap_not_two_thousand():
     """Elevated index-confirmed FTV gets the ~4k stop, so a 2k-4k dip does NOT cut it."""
     # ~₹2,400 loss (40 lots x20 x 3pt) would trip an ordinary 2k trade, but not this one.
