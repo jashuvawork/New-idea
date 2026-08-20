@@ -96,14 +96,32 @@ def test_hundred_pct_move_rides_and_banks_near_top():
 
 
 def test_learned_keep_ratio_overrides_default():
-    """A stamped learned keep-ratio (from EOD learning) drives the runner trail."""
+    """A stamped learned keep-ratio drives the trail ONLY when apply is explicitly enabled.
+
+    EOD-learning application is disabled by default (see config); enable it here to exercise
+    the code path.
+    """
+    from unittest.mock import MagicMock
+
+    s = MagicMock()
+    s.ftv_runner_pct_trail_enabled = True
+    s.ftv_runner_pct_trail_arm_pct = 25.0
+    s.ftv_runner_pct_trail_keep_ratio = 0.72
+    s.eod_learning_apply_enabled = True
+
     base = _runner_trade(best=72.0)
     base.entryContext["learnedTrailKeepRatio"] = 0.85  # high-hit mover: ride hard
-    floor_learned = ftv_runner_pct_floor(base, 72.0)
+    floor_learned = ftv_runner_pct_floor(base, 72.0, settings=s)
     assert abs(floor_learned - 72.0 * 0.85) < 0.5
 
     tight = _runner_trade(best=72.0)
     tight.entryContext["learnedTrailKeepRatio"] = 0.60  # low-hit: tighten
-    floor_tight = ftv_runner_pct_floor(tight, 72.0)
+    floor_tight = ftv_runner_pct_floor(tight, 72.0, settings=s)
     assert abs(floor_tight - 72.0 * 0.60) < 0.5
-    assert floor_learned > floor_tight  # ride-hard locks a higher floor near the peak
+    assert floor_learned > floor_tight
+
+    # With apply DISABLED (default), the learned override is ignored -> static default keep.
+    s.eod_learning_apply_enabled = False
+    off = _runner_trade(best=72.0)
+    off.entryContext["learnedTrailKeepRatio"] = 0.85
+    assert abs(ftv_runner_pct_floor(off, 72.0, settings=s) - 72.0 * 0.72) < 0.5
