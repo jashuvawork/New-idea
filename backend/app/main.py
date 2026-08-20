@@ -72,6 +72,7 @@ async def _background_monitor():
     last_analysis_mono = 0.0
     last_eod_playbook_date: Optional[str] = None
     last_radar_finalize_attempt_mono = 0.0
+    last_eod_learning_date: Optional[str] = None
 
     while True:
         # Yield so /health and heartbeat can interleave under heavy sync work.
@@ -242,6 +243,30 @@ async def _background_monitor():
                             record_component_error("dailyRadarReview", exc)
                         except Exception:
                             pass
+
+            # Automated EOD learning: distil today's FTV/V outcomes into the knowledge
+            # profile once the archive is finalized, then prune raw archives past retention
+            # (only for dates already learned). Runs once per day, after the finalize hour.
+            if settings.eod_learning_enabled:
+                learn_now = datetime.now(IST)
+                learn_date = learn_now.strftime("%Y-%m-%d")
+                learn_due = (learn_now.hour, learn_now.minute) >= (
+                    settings.radar_archive_finalize_hour,
+                    settings.radar_archive_finalize_minute,
+                )
+                if learn_due and last_eod_learning_date != learn_date:
+                    try:
+                        from app.engines.eod_ftv_learning import (
+                            cleanup_learned_eod_archives,
+                            run_eod_learning_cycle,
+                        )
+
+                        res = await asyncio.to_thread(run_eod_learning_cycle, learn_date)
+                        if res.get("status") in ("learned", "already_learned", "no_data"):
+                            last_eod_learning_date = learn_date
+                            await asyncio.to_thread(cleanup_learned_eod_archives)
+                    except Exception as exc:
+                        logger.warning("EOD FTV learning error: %s", exc)
         except Exception as e:
             logger.warning("Background monitor error: %s", e)
 

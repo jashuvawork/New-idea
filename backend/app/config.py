@@ -127,6 +127,14 @@ class Settings(BaseSettings):
     eod_playbook_start_hour: int = 15
     eod_playbook_start_minute: int = 20
     eod_playbook_use_ai: bool = True
+    # Automated EOD learning for FTV / V-momentum moments: distil each day's ELITE/EXPLODING
+    # outcomes into a per (symbol,side,tier) knowledge profile (typical peak %, first-dig MAE,
+    # hit rate -> recommended near-base entry ceiling / trail keep / stop). Accumulates across
+    # days; the heavy raw archive is pruned only AFTER a day is learned (retention window).
+    eod_learning_enabled: bool = True
+    eod_learning_real_leg_min_mfe_pct: float = 50.0
+    eod_learning_cleanup_enabled: bool = True
+    eod_learning_raw_retention_days: int = 7
     cursor_api_key: str = ""
     cursor_api_base_url: str = "https://api.cursor.com"
     cursor_chat_completions_path: str = "/v1/chat/completions"
