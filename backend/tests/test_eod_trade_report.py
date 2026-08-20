@@ -1,9 +1,13 @@
 """EOD would-have-traded report — replay a contract with re-entries."""
 
 from datetime import datetime, timedelta
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from app.engines.eod_trade_report import replay_contract_trades
+from app.engines.eod_trade_report import (
+    generate_eod_trade_report,
+    replay_contract_trades,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -34,6 +38,51 @@ def test_replay_captures_near_base_runner_with_reentry():
     assert first["offBasePct"] <= 25.0
     assert first["lots"] >= 1
     assert first["peakPct"] > 0
+
+
+def test_generate_report_unpacks_ranked_targets_and_takes_near_base():
+    """End-to-end guard: the ranked target 5-tuple must unpack cleanly (regression:
+    the ``want`` set previously unpacked 4 of 5 values and 500'd the live endpoint)."""
+    date = "2026-08-20"
+    entries = [
+        {
+            "symbol": "SENSEX", "side": "CALL", "strike": 77000.0, "tier": "ELITE",
+            "alert": {"tier": "ELITE"}, "outcome": {"mfePct": 140.0},
+        },
+    ]
+    t0 = datetime(2026, 8, 20, 10, 0, 0, tzinfo=IST)
+    prems = (
+        [60 + 2 * i for i in range(36)]        # 60 -> 130 near-base rip
+        + [130 - 3 * i for i in range(1, 16)]
+        + [85 + 2 * i for i in range(1, 30)]
+    )
+    batches = []
+    for i, p in enumerate(prems):
+        ts = (t0 + timedelta(seconds=3 * i)).isoformat()
+        batches.append({
+            "ts": ts,
+            "contracts": [{
+                "symbol": "SENSEX", "side": "CALL", "strike": 77000.0,
+                "premium": float(p), "spot": 77000.0 + i * 6.0,
+            }],
+        })
+
+    with (
+        patch(
+            "app.services.radar_archive.read_archive_entries",
+            return_value=entries,
+        ),
+        patch(
+            "app.services.radar_learning.read_premium_tape",
+            return_value=batches,
+        ),
+    ):
+        rep = generate_eod_trade_report(date)
+
+    assert rep["status"] == "ok"
+    assert rep["tradeCount"] >= 1
+    # Every taken entry is near the base (<=25% off base) — the near-base entry rule.
+    assert all(t["offBasePct"] <= 25.0 for t in rep["trades"])
 
 
 def test_replay_no_trade_on_flat_chop():

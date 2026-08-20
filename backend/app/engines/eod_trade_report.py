@@ -177,7 +177,7 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
         return {"date": date, "status": "no_tape", "trades": []}
 
     # Build per-contract premium series + the shared spot tape.
-    want = {(sym, side, strike) for _m, sym, side, strike in targets}
+    want = {(sym, side, strike) for _m, sym, side, strike, _tier in targets}
     series_map: dict[tuple, list] = {k: [] for k in want}
     spot_pairs: list[tuple[datetime, float]] = []
     seen_spot: set[str] = set()
