@@ -1446,7 +1446,9 @@ class Settings(BaseSettings):
     neutral_breadth_explosion_min_score: float = 55.0
     sensex_rank_bonus: float = 10.0
     nifty_rank_penalty_chop: float = 5.0
-    daily_loss_stop_inr: float = 6_000.0
+    # Daily risk budget = 10% of the ~200k sizing capital. This is a CEILING that halts
+    # new entries, not a target — selectivity + per-trade caps keep us far below it.
+    daily_loss_stop_inr: float = 20_000.0
     daily_max_trades_chop: int = 20
     daily_max_trades_pre10_chop: int = 5
     pre10_chop_min_rank_score: float = 60.0
@@ -1762,6 +1764,15 @@ class Settings(BaseSettings):
     # 2) Hard INR ceilings: ~1% of ₹2L normally, ~2% only for a fully proven launch.
     explosion_per_trade_max_loss_inr: float = 2_000.0
     explosion_exceptional_per_trade_max_loss_inr: float = 4_000.0
+    # Index-confirmed near-base FTV size-up: a genuine index thrust (drift/burst/index
+    # helpers) at a near-base ELITE/EXPLODING lift is NOT a premium-only fake trap, so it
+    # may keep its elevated (~2x) size even on a chop day (lifts the fake-trap chop cap) and
+    # gets a wider ~2% per-trade rupee stop so the bigger size survives the normal near-base
+    # shakeout instead of being clipped at a ~2pt stop. Still bounded: elevated (not full
+    # sleeve), whipsaw/never-green guards stay, and the 10%/day loss stop is the backstop.
+    index_confirmed_ftv_size_up_enabled: bool = True
+    index_confirmed_ftv_max_base_rel_pct: float = 20.0
+    index_confirmed_ftv_per_trade_max_loss_inr: float = 4_000.0
     # 3) Whipsaw flip — after a same-session WIN on the opposite side, don't max-size the
     #    counter-flip (Aug6: CALLs won, then a max-size PUT flip lost). Cap flip size.
     explosion_whipsaw_flip_guard_enabled: bool = True

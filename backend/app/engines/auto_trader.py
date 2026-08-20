@@ -1085,22 +1085,49 @@ async def _open_from_candidate(
     if bool(getattr(settings, "vix_regime_sizing_enabled", False)) and vix_mult < 1.0:
         lots = max(1, int(round(lots * vix_mult)))
         vix_ctx["applied"] = True
+    # Index-confirmed near-base FTV: a genuine index thrust means this is NOT a premium-only
+    # fake trap, so it keeps its elevated (~2x, still <= ordinary 35% cap) size on a chop day
+    # instead of being clipped to the fake-trap floor. Bounded: not full sleeve; whipsaw /
+    # never-green / daily-loss guards still apply, and it carries a wider per-trade rupee stop.
+    _alert_d = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
+    _idx_helpers = _alert_d.get("indexHelpers") or []
+    index_confirmed_ftv = bool(
+        getattr(settings, "index_confirmed_ftv_size_up_enabled", True)
+        and candidate.mode == "explosion"
+        and str(candidate.tier or "").upper() in ("ELITE", "EXPLODING")
+        and (
+            _alert_d.get("indexHelpersConfirm")
+            or _alert_d.get("indexDrift")
+            or _alert_d.get("indexSpikeBurst")
+            or "index_drift" in _idx_helpers
+            or "index_spike_burst" in _idx_helpers
+        )
+        and 0
+        < float(
+            _alert_d.get("ictBaseRelativeMovePct")
+            or _alert_d.get("localBaseMovePct")
+            or 0
+        )
+        <= float(getattr(settings, "index_confirmed_ftv_max_base_rel_pct", 20.0) or 20.0)
+    )
     if candidate.mode == "explosion" and trap_meta:
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
         # Must run AFTER good-day ICT max-lot force (Jul20 49-lot FOMO hole).
-        bypass_soft = full_sleeve_authorized and (
-            (bool(high_conviction) and bool(
-                getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
-            ))
-            or (bool(top_explosion_max) and bool(
-                getattr(settings, "top_explosion_force_max_bypasses_fake_trap_lot_cap", True)
-            ))
-            or (
-                base_window_full_lots
-                and bool(getattr(settings, "base_window_full_lots_enabled", True))
+        bypass_soft = (
+            full_sleeve_authorized and (
+                (bool(high_conviction) and bool(
+                    getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
+                ))
+                or (bool(top_explosion_max) and bool(
+                    getattr(settings, "top_explosion_force_max_bypasses_fake_trap_lot_cap", True)
+                ))
+                or (
+                    base_window_full_lots
+                    and bool(getattr(settings, "base_window_full_lots_enabled", True))
+                )
             )
-        )
+        ) or index_confirmed_ftv
         lots = cap_fake_explosion_trap_lots(
             lots, trap_meta, bypass_soft_cap=bypass_soft,
         )
@@ -1433,6 +1460,7 @@ async def _open_from_candidate(
         "executionChart": chart_meta,
         "highConviction": bool(high_conviction),
         "elevatedSize": bool(elevated_size),
+        "indexConfirmedFtv": bool(index_confirmed_ftv),
         "topExplosionMaxLots": bool(top_explosion_max),
         "topRankFullBudgetLots": top_rank_full_budget_lots,
         "fullSleeveQualified": full_sleeve_authorized,

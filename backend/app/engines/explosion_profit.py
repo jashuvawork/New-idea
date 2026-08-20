@@ -1410,6 +1410,15 @@ def evaluate_explosion_exit(
             "explosion_exceptional_per_trade_max_loss_inr",
             4_000.0,
         )
+    elif bool(ctx.get("indexConfirmedFtv")):
+        # Index-confirmed near-base FTV took elevated size — give it a proportionally wider
+        # rupee stop so the larger position survives the normal near-base shakeout instead of
+        # being clipped at a ~2pt stop. Still bounded (default ~2% of capital).
+        hard_cap = _cfg_float(
+            settings,
+            "index_confirmed_ftv_per_trade_max_loss_inr",
+            4_000.0,
+        )
     else:
         hard_cap = _cfg_float(
             settings,

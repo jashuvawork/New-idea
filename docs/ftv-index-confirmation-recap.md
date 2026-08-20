@@ -151,6 +151,33 @@ Pre-existing index tick monitor (already present): `index_tick_helpers_enabled`,
 
 ---
 
+## 6b. Sizing / risk policy (index-confirmed FTV size-up)
+
+Decision (user): **risk up to 10%/day, but avoid losses.** Capital base ≈ ₹200k.
+
+- **Daily loss stop raised 6k → ₹20,000 (10% of 200k)** — a ceiling that halts new entries,
+  not a target. Selectivity + per-trade caps keep us well below it.
+- **Bounded index-confirmed size-up**: a near-base (≤20% off base) ELITE/EXPLODING lift with
+  genuine index confirmation (`indexDrift` / `indexSpikeBurst` / `indexHelpersConfirm`) keeps
+  its **elevated ~2× size on a chop day** (bypasses the fake-trap chop cap — an index thrust
+  is not a premium-only fake trap) and carries a **wider ~₹4,000 per-trade stop** so the
+  bigger position survives the normal near-base shakeout. **Not full sleeve.**
+- **Why not literal max lots**: the per-trade ₹ cap is a *fixed rupee* stop, so full sleeve
+  (~53 lots) turns ₹2k into a ~2pt stop → the 14:14 entry's −2.5pt dip stops it out instantly
+  (−₹2,650) and misses the rip. Bounded 12 lots + ₹4k cap = 16.7pt room → survives.
+
+Replay on the 14:14 @₹152 entry:
+| sizing | outcome | worst case |
+|---|---|---|
+| OLD 6 lots / ₹2k | +₹3,276 | −₹2k |
+| **NEW 12 lots / ₹4k** | **+₹6,552** | −₹4k |
+| full sleeve 53 / ₹2k | −₹2,650 (stopped on the dip) | −₹2k |
+
+Guards still active: never-green cut, whipsaw-flip cap, first-green cap, and the ₹20k daily stop.
+
+Config: `index_confirmed_ftv_size_up_enabled=True`, `index_confirmed_ftv_max_base_rel_pct=20.0`,
+`index_confirmed_ftv_per_trade_max_loss_inr=4000.0`, `daily_loss_stop_inr=20000.0`.
+
 ## 7. Open items / how to prove it live
 
 1. **Merge PR #356 + deploy** (auto on merge to `main`). Confirm `deployment/status.commit` flips.
