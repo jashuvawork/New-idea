@@ -1152,16 +1152,24 @@ async def _open_from_candidate(
                 max_lots_for_capital,
             )
 
-            risk_inr = float(getattr(settings, "elite_full_lot_risk_inr", 10_000.0) or 10_000.0)
-            est_stop = float(
-                getattr(settings, "elite_full_lot_est_stop_points", 8.0) or 8.0
-            )
-            units = int(lot_multiplier(symbol) or 0)
-            risk_lots = (
-                int(risk_inr / max(1.0, est_stop * units)) if units > 0 else 0
-            )
             cap_full = max_lots_for_capital(symbol, fill_premium)
-            target_lots = max(1, min(cap_full, risk_lots))
+            if bool(getattr(settings, "elite_full_lot_use_full_capital", True)):
+                # Use the WHOLE per-trade capital sleeve. The natural % SL (preserved in the
+                # exit-plan tune below, not crushed to a toy point-stop) governs risk, bounded
+                # by the ₹20k per-trade backstop + the ₹20k/day stop.
+                target_lots = cap_full
+            else:
+                risk_inr = float(
+                    getattr(settings, "elite_full_lot_risk_inr", 10_000.0) or 10_000.0
+                )
+                est_stop = float(
+                    getattr(settings, "elite_full_lot_est_stop_points", 8.0) or 8.0
+                )
+                units = int(lot_multiplier(symbol) or 0)
+                risk_lots = (
+                    int(risk_inr / max(1.0, est_stop * units)) if units > 0 else 0
+                )
+                target_lots = max(1, min(cap_full, risk_lots))
             if target_lots > lots:
                 lots = target_lots
             # Bypass the defensive chop/fake-trap cap and ride to max TP.
@@ -1437,13 +1445,22 @@ async def _open_from_candidate(
         faded_rip=bool(faded_rip_meta),
         post_win_capped=bool(post_win_cap_meta.get("applied")),
     )
+    # ELITE full-lot on the full-capital sleeve keeps its lots + calculated natural SL too:
+    # size-tune must NOT shrink it back down or crush the SL to an 8%-budget toy stop. The
+    # ₹20k per-trade backstop (in evaluate_explosion_exit) is what bounds the downside.
+    elite_full_lot_preserve = bool(
+        elite_full_lot
+        and getattr(settings, "elite_full_lot_use_full_capital", True)
+    )
     exit_plan = tune_exit_plan_for_position(
         exit_plan,
         lots,
         fill_premium,
         symbol,
         trade_budget_inr=allocation.budgetInr if allocation else None,
-        preserve_lots_over_sl_budget=top_rank_full_budget_lots,
+        preserve_lots_over_sl_budget=bool(
+            top_rank_full_budget_lots or elite_full_lot_preserve
+        ),
     )
     # Size-tune may shrink lots so preserved natural SL fits the INR risk budget
     # (Aug11 63-lot NIFTY claimed SL ≤₹15k while risking ~₹37k).

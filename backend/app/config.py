@@ -1812,14 +1812,23 @@ class Settings(BaseSettings):
     index_confirmed_ftv_max_base_rel_pct: float = 20.0
     index_confirmed_ftv_per_trade_max_loss_inr: float = 4_000.0
     # ELITE full-lot + ride-to-max-TP: the top tier is rare and highest-conviction, so an
-    # index-confirmed ELITE FTV takes the biggest position and holds to the peak. "Full lots"
-    # is RISK-BUDGETED, not the literal 176-lot sleeve: a fixed rupee sleeve on max lots
-    # becomes a ~1pt stop that churns out on the first wiggle. Instead we take as many lots as
-    # keep the stop within elite_full_lot_risk_inr (default ₹10k = 5% of ₹200k, half the
-    # 10%/day budget → up to 2 losing ELITE trades before the daily halt). Then it rides to
-    # max TP (peak-capture hold), bounded by that rupee stop and the ₹20k/day stop.
+    # index-confirmed ELITE FTV takes the biggest position and holds to the peak.
+    #
+    # SIZING (elite_full_lot_use_full_capital, default ON): use the WHOLE per-trade capital
+    # sleeve (max_lots_for_capital ≈ 90% of ₹2L), not a small ₹10k/8pt risk budget that only
+    # deployed ~₹80k. The natural % SL (preserved, not crushed to a toy point-stop) governs
+    # risk, bounded by the per-trade backstop below and the ₹20k/day stop. When OFF it falls
+    # back to the old risk-budgeted sizing (elite_full_lot_risk_inr / est_stop).
+    #
+    # STOP: ride the calculated natural SL to max TP. The per-trade backstop is
+    # elite_full_lot_per_trade_max_loss_inr (default ₹20k = the daily budget) so a real base
+    # runner is NOT clipped by a small ₹2k/4k/10k ceiling before its thesis stop — repeatedly
+    # we saw tight caps stop a trade that then ran up. ₹20k stays the hard per-trade ceiling
+    # AND the daily halt, so one wrong ELITE trade caps the day (accepted 10%/day risk).
     elite_full_lot_enabled: bool = True
     elite_full_lot_requires_index_confirm: bool = True
+    elite_full_lot_use_full_capital: bool = True
+    elite_full_lot_per_trade_max_loss_inr: float = 20_000.0
     elite_full_lot_risk_inr: float = 10_000.0
     elite_full_lot_est_stop_points: float = 8.0
     elite_ride_max_tp_enabled: bool = True

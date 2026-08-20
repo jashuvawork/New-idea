@@ -83,19 +83,20 @@ def test_exceptional_full_sleeve_uses_bounded_four_thousand_cap():
     assert pnl <= -4_000
 
 
-def test_elite_full_lot_uses_ten_thousand_cap():
-    """ELITE full-lot rides to max TP on the risk-budgeted ~10k stop, not 2k/4k."""
-    # ~₹6,000 loss (100 lots x20 x 3pt) must NOT cut an ELITE full-lot (10k cap)...
-    survive = _trade(100.0, 97.0, best=2.0, lots=100)
+def test_elite_full_lot_uses_twenty_thousand_backstop():
+    """ELITE full-lot rides its natural SL to max TP; only the ₹20k backstop (= daily
+    budget) clips it — not the small ₹2k/4k/10k caps that stopped real base runners."""
+    # ~₹12,000 loss (100 lots x20 x 6pt) must NOT cut an ELITE full-lot (20k backstop)...
+    survive = _trade(100.0, 94.0, best=2.0, lots=100)
     survive.entryContext = {"eliteFullLot": True}
-    reason, _ = evaluate_explosion_exit(survive, 97.0, "ELITE", 20, live_velocity_3s=0.5)
+    reason, _ = evaluate_explosion_exit(survive, 94.0, "ELITE", 20, live_velocity_3s=0.5)
     assert reason != "explosion_per_trade_risk_cap"
-    # ...but beyond ~₹10k it is still bounded and cut.
-    cut = _trade(100.0, 94.0, best=2.0, lots=100)
+    # ...but beyond ~₹20k it is still bounded and cut.
+    cut = _trade(100.0, 88.0, best=2.0, lots=100)
     cut.entryContext = {"eliteFullLot": True}
-    reason2, pnl2 = evaluate_explosion_exit(cut, 94.0, "ELITE", 20, live_velocity_3s=0.5)
+    reason2, pnl2 = evaluate_explosion_exit(cut, 88.0, "ELITE", 20, live_velocity_3s=0.5)
     assert reason2 == "explosion_per_trade_risk_cap"
-    assert pnl2 <= -10_000
+    assert pnl2 <= -20_000
 
 
 def test_index_confirmed_ftv_uses_wider_cap_not_two_thousand():
