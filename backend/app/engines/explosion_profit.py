@@ -1404,7 +1404,16 @@ def evaluate_explosion_exit(
     # Hard per-trade ₹ loss cap — optional (0 = disabled). Prefer never-green + point SL
     # so ICT/base runners are not clipped by a rupee ceiling before the thesis stop.
     ctx = trade.entryContext or {}
-    if bool(ctx.get("fullSleeveQualified")):
+    if bool(ctx.get("eliteFullLot")):
+        # ELITE full-lot rides to max TP — give it the risk-budgeted rupee stop it was sized
+        # against so the big position isn't clipped at a tight point-stop before the runner
+        # runs. Still bounded (default ₹10k = 5% of capital) and below the ₹20k/day stop.
+        hard_cap = _cfg_float(
+            settings,
+            "elite_full_lot_risk_inr",
+            10_000.0,
+        )
+    elif bool(ctx.get("fullSleeveQualified")):
         hard_cap = _cfg_float(
             settings,
             "explosion_exceptional_per_trade_max_loss_inr",

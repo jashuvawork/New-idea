@@ -1773,6 +1773,18 @@ class Settings(BaseSettings):
     index_confirmed_ftv_size_up_enabled: bool = True
     index_confirmed_ftv_max_base_rel_pct: float = 20.0
     index_confirmed_ftv_per_trade_max_loss_inr: float = 4_000.0
+    # ELITE full-lot + ride-to-max-TP: the top tier is rare and highest-conviction, so an
+    # index-confirmed ELITE FTV takes the biggest position and holds to the peak. "Full lots"
+    # is RISK-BUDGETED, not the literal 176-lot sleeve: a fixed rupee sleeve on max lots
+    # becomes a ~1pt stop that churns out on the first wiggle. Instead we take as many lots as
+    # keep the stop within elite_full_lot_risk_inr (default ₹10k = 5% of ₹200k, half the
+    # 10%/day budget → up to 2 losing ELITE trades before the daily halt). Then it rides to
+    # max TP (peak-capture hold), bounded by that rupee stop and the ₹20k/day stop.
+    elite_full_lot_enabled: bool = True
+    elite_full_lot_requires_index_confirm: bool = True
+    elite_full_lot_risk_inr: float = 10_000.0
+    elite_full_lot_est_stop_points: float = 8.0
+    elite_ride_max_tp_enabled: bool = True
     # 3) Whipsaw flip — after a same-session WIN on the opposite side, don't max-size the
     #    counter-flip (Aug6: CALLs won, then a max-size PUT flip lost). Cap flip size.
     explosion_whipsaw_flip_guard_enabled: bool = True

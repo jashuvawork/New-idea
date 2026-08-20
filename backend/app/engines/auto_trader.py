@@ -1133,6 +1133,41 @@ async def _open_from_candidate(
         and _idx_confirm
         and 0 < _base_rel <= _max_base_rel
     )
+    # ELITE full-lot: the top tier gets the biggest RISK-BUDGETED position — as many lots as
+    # keep the stop within elite_full_lot_risk_inr (a fixed rupee sleeve on literal max lots
+    # would be a ~1pt stop that churns). It then rides to max TP (peak-capture hold).
+    elite_full_lot = bool(
+        getattr(settings, "elite_full_lot_enabled", True)
+        and candidate.mode == "explosion"
+        and _tier_u == "ELITE"
+        and (
+            index_confirmed_ftv
+            or not bool(getattr(settings, "elite_full_lot_requires_index_confirm", True))
+        )
+    )
+    if elite_full_lot:
+        try:
+            from app.engines.capital_allocator import (
+                lot_multiplier,
+                max_lots_for_capital,
+            )
+
+            risk_inr = float(getattr(settings, "elite_full_lot_risk_inr", 10_000.0) or 10_000.0)
+            est_stop = float(
+                getattr(settings, "elite_full_lot_est_stop_points", 8.0) or 8.0
+            )
+            units = int(lot_multiplier(symbol) or 0)
+            risk_lots = (
+                int(risk_inr / max(1.0, est_stop * units)) if units > 0 else 0
+            )
+            cap_full = max_lots_for_capital(symbol, fill_premium)
+            target_lots = max(1, min(cap_full, risk_lots))
+            if target_lots > lots:
+                lots = target_lots
+            # Bypass the defensive chop/fake-trap cap and ride to max TP.
+            top_explosion_max = True
+        except Exception:
+            elite_full_lot = False
     if candidate.mode == "explosion" and trap_meta:
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
@@ -1156,11 +1191,13 @@ async def _open_from_candidate(
         )
         if lots <= 0:
             return False, str(trap_meta.get("action") or "fake_explosion_trap")
-    skip_first_green = force_max_size and (
-        high_conviction
-        or base_window_full_lots
-        or bool(getattr(settings, "top_explosion_force_max_bypasses_first_green", True))
-    )
+    skip_first_green = (
+        force_max_size and (
+            high_conviction
+            or base_window_full_lots
+            or bool(getattr(settings, "top_explosion_force_max_bypasses_first_green", True))
+        )
+    ) or elite_full_lot
     if candidate.mode in ("explosion", "scalp") and not skip_first_green:
         from app.engines.session_mode_feedback import cap_lots_until_first_green
 
@@ -1484,6 +1521,7 @@ async def _open_from_candidate(
         "highConviction": bool(high_conviction),
         "elevatedSize": bool(elevated_size),
         "indexConfirmedFtv": bool(index_confirmed_ftv),
+        "eliteFullLot": bool(elite_full_lot),
         "topExplosionMaxLots": bool(top_explosion_max),
         "topRankFullBudgetLots": top_rank_full_budget_lots,
         "fullSleeveQualified": full_sleeve_authorized,
@@ -1688,6 +1726,12 @@ async def _open_from_candidate(
             # Authorized FTV at local base — always ride toward max points.
             ctx_extra["maxProfitCapture"] = True
             ctx_extra["momentType"] = "flat_then_vertical"
+        # ELITE always rides to max TP (peak-capture hold) when enabled — the top tier is
+        # exactly the runner we must not clip early.
+        if bool(getattr(settings, "elite_ride_max_tp_enabled", True)) and str(
+            getattr(ev, "tier", "") or ""
+        ).upper() == "ELITE":
+            ctx_extra["maxProfitCapture"] = True
         elif ict.mega_rip:
             ctx_extra["momentType"] = "mega_rip"
         elif ict.premium_fvg:
