@@ -1736,6 +1736,30 @@ async def _open_from_candidate(
             ctx_extra["momentType"] = "mega_rip"
         elif ict.premium_fvg:
             ctx_extra["momentType"] = "premium_fvg"
+        # Stamp V/FTV near-base runners so exits hold soft locks until ~100% of
+        # entry premium, then trail for multi-bagger extensions (68→140→220).
+        _vbase_rel = float(base_rel or 0)
+        _vbase_max_rel = float(
+            getattr(settings, "ftv_vbase_hundred_pct_max_entry_rel_pct", 25.0) or 25.0
+        )
+        if (
+            bool(getattr(settings, "ftv_vbase_hundred_pct_hold_enabled", True))
+            and bool(ctx_extra.get("maxProfitCapture"))
+            and 0 < _vbase_rel <= _vbase_max_rel
+            and (
+                first_lift_runner
+                or bool(ctx_extra.get("armedBaseCapture"))
+                or ict_flat_vertical
+                or bool(ctx_extra.get("ictFirstLift"))
+                or str(ctx_extra.get("momentType") or "")
+                in (
+                    "first_lift_local_base",
+                    "armed_base_local_base",
+                    "flat_then_vertical",
+                )
+            )
+        ):
+            ctx_extra["vBaseFtvRunner"] = True
         # Stage trail ladder — project max TP + stage size for flat→vertical / FVG / mega.
         from app.engines.moment_stage_trail import build_moment_stage_plan
 
