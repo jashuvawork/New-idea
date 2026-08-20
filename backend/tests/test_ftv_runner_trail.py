@@ -93,3 +93,17 @@ def test_hundred_pct_move_rides_and_banks_near_top():
     assert best >= 65  # rode the full ~106% move (not shaken out early)
     kept = (exit_p - entry) / best
     assert kept >= 0.6
+
+
+def test_learned_keep_ratio_overrides_default():
+    """A stamped learned keep-ratio (from EOD learning) drives the runner trail."""
+    base = _runner_trade(best=72.0)
+    base.entryContext["learnedTrailKeepRatio"] = 0.85  # high-hit mover: ride hard
+    floor_learned = ftv_runner_pct_floor(base, 72.0)
+    assert abs(floor_learned - 72.0 * 0.85) < 0.5
+
+    tight = _runner_trade(best=72.0)
+    tight.entryContext["learnedTrailKeepRatio"] = 0.60  # low-hit: tighten
+    floor_tight = ftv_runner_pct_floor(tight, 72.0)
+    assert abs(floor_tight - 72.0 * 0.60) < 0.5
+    assert floor_learned > floor_tight  # ride-hard locks a higher floor near the peak

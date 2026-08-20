@@ -135,6 +135,12 @@ class Settings(BaseSettings):
     eod_learning_real_leg_min_mfe_pct: float = 50.0
     eod_learning_cleanup_enabled: bool = True
     eod_learning_raw_retention_days: int = 7
+    # Closed loop: apply the accumulated knowledge to live exits. Once a moment type has
+    # enough samples, the runner trail uses the LEARNED keep-ratio (ride hard on high-hit
+    # movers like SENSEX ELITE ~0.85; tighten on low-hit buckets ~0.60). Bounded 0.60..0.85.
+    # Entry-side learned fields are stamped observe-only for now.
+    eod_learning_apply_enabled: bool = True
+    eod_learning_apply_min_samples: int = 5
     cursor_api_key: str = ""
     cursor_api_base_url: str = "https://api.cursor.com"
     cursor_chat_completions_path: str = "/v1/chat/completions"

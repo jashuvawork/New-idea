@@ -1736,6 +1736,29 @@ async def _open_from_candidate(
             ctx_extra["momentType"] = "mega_rip"
         elif ict.premium_fvg:
             ctx_extra["momentType"] = "premium_fvg"
+        # Closed loop: apply the accumulated EOD knowledge for THIS moment type. Once enough
+        # samples exist, stamp the LEARNED trail keep-ratio so the runner rides high-hit
+        # movers (e.g. SENSEX ELITE FTV, learned ~0.85) harder and tightens low-hit buckets
+        # (~0.60). Near-base / stop learned fields are stamped observe-only for now.
+        if bool(getattr(settings, "eod_learning_apply_enabled", True)):
+            try:
+                from app.engines.eod_ftv_learning import learned_ftv_profile
+
+                _tier_l = str(getattr(ev, "tier", "") or "").upper()
+                _side_l = str(
+                    getattr(candidate.side, "value", candidate.side) or ""
+                ).upper()
+                prof = learned_ftv_profile(symbol, _side_l, _tier_l)
+                min_n = int(getattr(settings, "eod_learning_apply_min_samples", 5) or 5)
+                if prof and int(prof.get("count", 0)) >= min_n:
+                    keep = float(prof.get("recommendedTrailKeepRatio") or 0)
+                    if keep > 0:
+                        ctx_extra["learnedTrailKeepRatio"] = max(0.60, min(0.85, keep))
+                    ctx_extra["learnedNearBaseMaxPct"] = prof.get("recommendedNearBaseMaxPct")
+                    ctx_extra["learnedStopPct"] = prof.get("recommendedStopPct")
+                    ctx_extra["learnedProfileCount"] = int(prof.get("count", 0))
+            except Exception:
+                pass
         # Stamp V/FTV near-base runners so exits hold soft locks until ~100% of
         # entry premium, then trail for multi-bagger extensions (68→140→220).
         _vbase_rel = float(base_rel or 0)
