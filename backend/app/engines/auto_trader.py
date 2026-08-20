@@ -1133,9 +1133,9 @@ async def _open_from_candidate(
         and _idx_confirm
         and 0 < _base_rel <= _max_base_rel
     )
-    # ELITE full-lot: the top tier gets the biggest RISK-BUDGETED position — as many lots as
-    # keep the stop within elite_full_lot_risk_inr (a fixed rupee sleeve on literal max lots
-    # would be a ~1pt stop that churns). It then rides to max TP (peak-capture hold).
+    # ELITE full-lot: deploy the full per-trade capital budget (~₹1.8L) and ride to max TP.
+    # Do not shrink to a ₹10k/8pt risk envelope — that under-sizes the sleeve and stop-outs
+    # V/FTV runners on a normal shakeout. Daily ₹20k loss stop remains the session backstop.
     elite_full_lot = bool(
         getattr(settings, "elite_full_lot_enabled", True)
         and candidate.mode == "explosion"
@@ -1152,16 +1152,21 @@ async def _open_from_candidate(
                 max_lots_for_capital,
             )
 
-            risk_inr = float(getattr(settings, "elite_full_lot_risk_inr", 10_000.0) or 10_000.0)
-            est_stop = float(
-                getattr(settings, "elite_full_lot_est_stop_points", 8.0) or 8.0
-            )
-            units = int(lot_multiplier(symbol) or 0)
-            risk_lots = (
-                int(risk_inr / max(1.0, est_stop * units)) if units > 0 else 0
-            )
             cap_full = max_lots_for_capital(symbol, fill_premium)
-            target_lots = max(1, min(cap_full, risk_lots))
+            if bool(getattr(settings, "elite_full_lot_use_full_capital", True)):
+                target_lots = max(1, cap_full)
+            else:
+                risk_inr = float(
+                    getattr(settings, "elite_full_lot_risk_inr", 10_000.0) or 10_000.0
+                )
+                est_stop = float(
+                    getattr(settings, "elite_full_lot_est_stop_points", 8.0) or 8.0
+                )
+                units = int(lot_multiplier(symbol) or 0)
+                risk_lots = (
+                    int(risk_inr / max(1.0, est_stop * units)) if units > 0 and risk_inr > 0 else 0
+                )
+                target_lots = max(1, min(cap_full, risk_lots) if risk_lots > 0 else cap_full)
             if target_lots > lots:
                 lots = target_lots
             # Bypass the defensive chop/fake-trap cap and ride to max TP.
@@ -1437,6 +1442,11 @@ async def _open_from_candidate(
         faded_rip=bool(faded_rip_meta),
         post_win_capped=bool(post_win_cap_meta.get("applied")),
     )
+    # ELITE full-capital sleeve: keep cash-affordable lots; do not shrink to fit an 8% SL INR budget.
+    if elite_full_lot and bool(
+        getattr(settings, "elite_full_lot_preserve_lots_over_sl_budget", True)
+    ):
+        top_rank_full_budget_lots = True
     exit_plan = tune_exit_plan_for_position(
         exit_plan,
         lots,
@@ -1457,6 +1467,7 @@ async def _open_from_candidate(
             or high_conviction
             or top_explosion_max
             or elevated_size
+            or elite_full_lot
         )
         plan_obj = tune_plan_with_edge(
             plan_obj, edge, snap.spotChart, entry_velocity_3s,
@@ -1480,6 +1491,27 @@ async def _open_from_candidate(
         elif skip_edge_sl_tighten and exit_plan.get("entryStopPoints"):
             exit_plan["entryStopPoints"] = float(exit_plan.get("stopPoints") or exit_plan["entryStopPoints"])
 
+    # ELITE full-capital FTV: floor SL to proper room (% of premium / min points) so a
+    # toy 8pt stop does not clip the runner before the vertical develops.
+    if elite_full_lot and exit_plan:
+        min_pts = float(
+            getattr(settings, "elite_full_lot_min_stop_points", 16.0) or 16.0
+        )
+        min_pct = float(
+            getattr(settings, "elite_full_lot_min_stop_pct_of_premium", 0.18) or 0.18
+        )
+        floor_sl = max(min_pts, float(fill_premium or 0) * max(0.0, min_pct))
+        cur_sl = float(exit_plan.get("stopPoints") or 0)
+        if floor_sl > 0 and cur_sl + 1e-9 < floor_sl:
+            exit_plan["stopPoints"] = round(floor_sl, 2)
+            exit_plan["entryStopPoints"] = round(floor_sl, 2)
+            reasons = list(exit_plan.get("reasoning") or [])
+            reasons.append(
+                f"ELITE full-lot SL floor {floor_sl:.1f}pt "
+                f"(min {min_pts:.0f}pt / {min_pct:.0%} of entry)"
+            )
+            exit_plan["reasoning"] = reasons
+
     final_stop_points = float(exit_plan.get("stopPoints") or stop_pts)
     final_risk_ok, final_risk_reason = _risk_engine.check_new_entry(
         state,
@@ -1491,6 +1523,7 @@ async def _open_from_candidate(
         strategy_type=candidate.strategy_type,
         strike=candidate.strike,
         stop_points=final_stop_points,
+        ignore_per_trade_risk_cap=bool(elite_full_lot),
     )
     if not final_risk_ok:
         return False, final_risk_reason

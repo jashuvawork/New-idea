@@ -1819,17 +1819,23 @@ class Settings(BaseSettings):
     index_confirmed_ftv_size_up_enabled: bool = True
     index_confirmed_ftv_max_base_rel_pct: float = 20.0
     index_confirmed_ftv_per_trade_max_loss_inr: float = 4_000.0
-    # ELITE full-lot + ride-to-max-TP: the top tier is rare and highest-conviction, so an
-    # index-confirmed ELITE FTV takes the biggest position and holds to the peak. "Full lots"
-    # is RISK-BUDGETED, not the literal 176-lot sleeve: a fixed rupee sleeve on max lots
-    # becomes a ~1pt stop that churns out on the first wiggle. Instead we take as many lots as
-    # keep the stop within elite_full_lot_risk_inr (default ₹10k = 5% of ₹200k, half the
-    # 10%/day budget → up to 2 losing ELITE trades before the daily halt). Then it rides to
-    # max TP (peak-capture hold), bounded by that rupee stop and the ₹20k/day stop.
+    # ELITE full-lot + ride-to-max-TP: index-confirmed ELITE FTV deploys the full per-trade
+    # capital budget (~₹1.8L = 90% of ₹2L) and holds to max TP. Do NOT shrink lots to a tiny
+    # ₹10k/8pt risk envelope — that caps size at ~half capital and stop-outs the runner on a
+    # normal base shakeout before the vertical. Structural SL is widened (% of premium); the
+    # ₹20k/day stop remains the session backstop. Per-trade INR clip is off by default (0)
+    # so a wide point SL can breathe without an early rupee kill.
     elite_full_lot_enabled: bool = True
     elite_full_lot_requires_index_confirm: bool = True
-    elite_full_lot_risk_inr: float = 10_000.0
+    elite_full_lot_use_full_capital: bool = True
+    # 0 = disabled (prefer point SL + daily loss stop). Set >0 only for a hard INR clip.
+    elite_full_lot_risk_inr: float = 0.0
+    # Legacy risk-budget sizing only when elite_full_lot_use_full_capital=False.
     elite_full_lot_est_stop_points: float = 8.0
+    # Proper room for V/FTV shakeouts — not a toy 8pt stop that clips then watches the rip.
+    elite_full_lot_min_stop_points: float = 16.0
+    elite_full_lot_min_stop_pct_of_premium: float = 0.18
+    elite_full_lot_preserve_lots_over_sl_budget: bool = True
     elite_ride_max_tp_enabled: bool = True
     # 3) Whipsaw flip — after a same-session WIN on the opposite side, don't max-size the
     #    counter-flip (Aug6: CALLs won, then a max-size PUT flip lost). Cap flip size.
