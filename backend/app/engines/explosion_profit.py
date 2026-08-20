@@ -1500,13 +1500,13 @@ def evaluate_explosion_exit(
     # so ICT/base runners are not clipped by a rupee ceiling before the thesis stop.
     ctx = trade.entryContext or {}
     if bool(ctx.get("eliteFullLot")):
-        # ELITE full-lot rides to max TP — give it the risk-budgeted rupee stop it was sized
-        # against so the big position isn't clipped at a tight point-stop before the runner
-        # runs. Still bounded (default ₹10k = 5% of capital) and below the ₹20k/day stop.
+        # ELITE full-capital sleeve: prefer structural point SL + daily loss stop.
+        # Per-trade INR clip defaults to off (0). If configured >0, use that ceiling
+        # (often aligned with the ₹20k/day stop) — never the old ₹10k early kill.
         hard_cap = _cfg_float(
             settings,
             "elite_full_lot_risk_inr",
-            10_000.0,
+            0.0,
         )
     elif bool(ctx.get("fullSleeveQualified")):
         hard_cap = _cfg_float(

@@ -83,20 +83,31 @@ def test_exceptional_full_sleeve_uses_bounded_four_thousand_cap():
     assert pnl <= -4_000
 
 
-def test_elite_full_lot_uses_ten_thousand_cap():
-    """ELITE full-lot rides to max TP on the risk-budgeted ~10k stop, not 2k/4k."""
-    # ~₹6,000 loss (100 lots x20 x 3pt) must NOT cut an ELITE full-lot (10k cap)...
-    survive = _trade(100.0, 97.0, best=2.0, lots=100)
-    survive.entryContext = {"eliteFullLot": True}
-    reason, _ = evaluate_explosion_exit(survive, 97.0, "ELITE", 20, live_velocity_3s=0.5)
+def test_elite_full_lot_disables_rupee_clip_by_default():
+    """ELITE full-lot prefers structural SL + daily stop — no early ₹10k kill."""
+    # ~₹12k open loss must NOT trip a per-trade INR clip when risk_inr defaults to 0.
+    deep = _trade(100.0, 94.0, best=2.0, lots=100)
+    deep.entryContext = {"eliteFullLot": True}
+    reason, pnl = evaluate_explosion_exit(deep, 94.0, "ELITE", 20, live_velocity_3s=0.5)
     assert reason != "explosion_per_trade_risk_cap"
-    # ...but beyond ~₹10k it is still bounded and cut.
-    cut = _trade(100.0, 94.0, best=2.0, lots=100)
-    cut.entryContext = {"eliteFullLot": True}
-    reason2, pnl2 = evaluate_explosion_exit(cut, 94.0, "ELITE", 20, live_velocity_3s=0.5)
-    assert reason2 == "explosion_per_trade_risk_cap"
-    assert pnl2 <= -10_000
+    assert pnl <= -10_000
 
+
+def test_elite_full_lot_optional_rupee_clip_when_configured(monkeypatch):
+    """If elite_full_lot_risk_inr is set, honor that ceiling."""
+    from app.config import get_settings
+
+    s = get_settings()
+    monkeypatch.setattr(s, "elite_full_lot_risk_inr", 20_000.0)
+    survive = _trade(100.0, 94.0, best=2.0, lots=100)  # −₹12k
+    survive.entryContext = {"eliteFullLot": True}
+    reason, _ = evaluate_explosion_exit(survive, 94.0, "ELITE", 20, live_velocity_3s=0.5)
+    assert reason != "explosion_per_trade_risk_cap"
+    cut = _trade(100.0, 88.0, best=2.0, lots=100)  # −₹24k
+    cut.entryContext = {"eliteFullLot": True}
+    reason2, pnl2 = evaluate_explosion_exit(cut, 88.0, "ELITE", 20, live_velocity_3s=0.5)
+    assert reason2 == "explosion_per_trade_risk_cap"
+    assert pnl2 <= -20_000
 
 def test_index_confirmed_ftv_uses_wider_cap_not_two_thousand():
     """Elevated index-confirmed FTV gets the ~4k stop, so a 2k-4k dip does NOT cut it."""
