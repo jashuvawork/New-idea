@@ -185,6 +185,7 @@ def validate_execution_charts(
     expiry_explosion_bypass: bool = False,
     explosion_event: Any = None,
     mode: str = "",
+    confirmed_ftv_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -219,6 +220,7 @@ def validate_execution_charts(
 
     blocked, reason = premium_blocks_entry(
         side, premium_chart, trade_score=trade_score, explosion_event=explosion_event,
+        confirmed_ftv_bypass=confirmed_ftv_bypass,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -330,6 +332,14 @@ async def monitor_trade_chart_before_execution(
         open_gap_mtf_bypass = False
         breadth_bypass = False
 
+    # A confirmed near-base FTV first-lift (ELITE/EXPLODING) may fill through a shallow
+    # base-retest dip instead of being blocked as "premium fading" — take it AT the base.
+    # Tied to first_lift_bypass so the hard counter-trend reset above disables it too.
+    _event_tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    confirmed_ftv_bypass = bool(
+        first_lift_bypass and _event_tier in ("ELITE", "EXPLODING")
+    )
+
     try:
         meta = await fetch_live_trade_charts(
             client, symbol, side, strike, snap, instrument_key=instrument_key,
@@ -375,10 +385,12 @@ async def monitor_trade_chart_before_execution(
         expiry_explosion_bypass=expiry_chart_bypass,
         explosion_event=explosion_event,
         mode=mode,
+        confirmed_ftv_bypass=confirmed_ftv_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
     meta["firstLiftBypass"] = first_lift_bypass
+    meta["ftvFadeFillBypass"] = confirmed_ftv_bypass
 
     delta = meta.get("snapshotDelta") or {}
     if delta.get("directionChanged"):
