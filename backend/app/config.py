@@ -1858,6 +1858,17 @@ class Settings(BaseSettings):
     worst_day_breakout_only_enabled: bool = True
     worst_day_breakout_min_rank: float = 68.0
     worst_day_breakout_min_velocity_3s: float = 2.5
+    # Intraday TREND-OVERRIDE: a morning "chop/worst day" verdict is stale once the index
+    # genuinely breaks out. When spot is at/near a fresh session extreme WITH aligned 5m
+    # momentum AND a confirmed index thrust (sustained drift or same-direction spike burst),
+    # lift the worst-day BREAKOUT_ONLY/full-pause so a top ELITE/EXPLODING can trade the real
+    # trend. Never lifts the SEVERE session-loss pause; still bounded by the daily loss stop.
+    # Requires sustained thrust (not a single spike) + a real session range, so chop can't
+    # trip it. (Aug20 SENSEX +0.82% breakout stood down all day under a stale chop verdict.)
+    worst_day_intraday_trend_override_enabled: bool = True
+    index_trend_override_near_extreme_pct: float = 0.05
+    index_trend_override_min_mom5_pct: float = 0.10
+    index_trend_override_min_range_pct: float = 0.15
     # Structured near-ATM CE/PE soft floor + peak-velocity carry (key name kept for compat).
     worst_day_structured_ce_min_velocity_3s: float = 1.5
     worst_day_breakout_peak_velocity_bypass_enabled: bool = True

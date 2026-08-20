@@ -759,6 +759,21 @@ def check_expiry_entry_allowed(
                     meta["expiryWorstDayStrictRankOneBypass"] = True
                     meta["expiryWorstDayStrictRankOneOnly"] = True
                     return True, "ok", meta
+                # A genuine intraday index breakout lifts the stale expiry chop halt too.
+                if bool(
+                    getattr(settings, "worst_day_intraday_trend_override_enabled", True)
+                ):
+                    try:
+                        from app.engines.index_tick_helpers import (
+                            index_trend_override_active,
+                        )
+
+                        trend_ok, trend_meta = index_trend_override_active(snapshots)
+                        if trend_ok:
+                            meta["expiryWorstDayTrendOverride"] = trend_meta
+                            return True, "ok", meta
+                    except Exception:
+                        pass
                 return False, "expiry_worst_day_declining_halt", meta
 
     return True, "ok", meta
