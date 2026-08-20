@@ -323,6 +323,65 @@ def test_index_drift_becomes_helper_and_confirms_with_structure():
     assert stamped["indexDriftNetPct"] < 0
 
 
+def _seed_extremes(symbol, hi, lo, last):
+    import datetime as _dt
+
+    from app.engines import index_tick_helpers as ith
+
+    ith._session_extremes[symbol.upper()] = {
+        "date": _dt.datetime.now(IST).date(),
+        "open": lo, "hi": hi, "lo": lo, "last": last,
+    }
+
+
+def test_index_trend_breakout_fires_on_call_new_high_with_thrust():
+    from app.engines.index_tick_helpers import index_trend_breakout
+    reset_index_tick_helpers_for_tests()
+    # SENSEX broke out: session 77440->77600, spot near the high, rising grind (CALL thrust).
+    _seed_extremes("SENSEX", hi=77600, lo=77440, last=77590)
+    _seed_ltp("SENSEX", [77540 + i * 2.0 for i in range(31)], step=1.5)  # +60pts up grind
+    snap = _snap_put(direction="BULLISH", momentum5Pct=0.165, momentum15Pct=0.05)
+    snap.spot = 77590.0
+    bo = index_trend_breakout("SENSEX", Side.CALL, snap)
+    assert bo["breakout"] is True
+    assert "near_session_high" in bo["reasons"]
+    assert "index_thrust" in bo["reasons"]
+
+
+def test_index_trend_breakout_rejects_flat_chop():
+    from app.engines.index_tick_helpers import index_trend_breakout
+    reset_index_tick_helpers_for_tests()
+    # Tiny session range + oscillation = chop → no breakout even near the "high".
+    _seed_extremes("SENSEX", hi=77460, lo=77440, last=77458)
+    _seed_ltp("SENSEX", [77450 + (5 if i % 2 else -5) for i in range(31)], step=1.5)
+    snap = _snap_put(direction="BULLISH", momentum5Pct=0.02)
+    snap.spot = 77458.0
+    assert index_trend_breakout("SENSEX", Side.CALL, snap)["breakout"] is False
+
+
+def test_index_trend_breakout_rejects_new_high_without_thrust():
+    from app.engines.index_tick_helpers import index_trend_breakout
+    reset_index_tick_helpers_for_tests()
+    # At the high with a real range but NO sustained thrust (flat buffer) → no breakout.
+    _seed_extremes("SENSEX", hi=77600, lo=77440, last=77595)
+    _seed_ltp("SENSEX", [77595.0 for _ in range(31)], step=1.5)  # flat = no drift/burst
+    snap = _snap_put(direction="BULLISH", momentum5Pct=0.165)
+    snap.spot = 77595.0
+    assert index_trend_breakout("SENSEX", Side.CALL, snap)["breakout"] is False
+
+
+def test_index_trend_override_active_scans_symbols():
+    from app.engines.index_tick_helpers import index_trend_override_active
+    reset_index_tick_helpers_for_tests()
+    _seed_extremes("SENSEX", hi=77600, lo=77440, last=77590)
+    _seed_ltp("SENSEX", [77540 + i * 2.0 for i in range(31)], step=1.5)
+    snap = _snap_put(direction="BULLISH", momentum5Pct=0.165)
+    snap.spot = 77590.0
+    ok, meta = index_trend_override_active({"SENSEX": snap})
+    assert ok is True
+    assert meta.get("side") == "CALL"
+
+
 def test_index_spike_wakes_building_ltp_cycle():
     reset_building_ltp_monitor_for_tests()
     reset_index_tick_helpers_for_tests()

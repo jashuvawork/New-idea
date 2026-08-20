@@ -96,8 +96,26 @@ def session_entry_policy(
 
     session_pnl = compute_session_pnl(state)
     if session_pnl <= settings.worst_day_full_pause_loss_inr:
+        # Severe daily loss (>= the 10%/day stop) — never overridden.
         meta["pauseReason"] = "worst_day_severe_session_loss"
         return "PAUSED", meta
+
+    # Intraday TREND-OVERRIDE: a stale morning "chop/worst" verdict must not veto a genuine
+    # index breakout. When the spot is at/near a fresh session extreme with aligned momentum
+    # and a confirmed sustained index thrust, lift the pause to NORMAL so a top ELITE/
+    # EXPLODING can trade the real trend. Re-evaluated live, so it reverts when the trend
+    # fades; still bounded by the severe-loss pause above and the daily loss stop.
+    if bool(getattr(settings, "worst_day_intraday_trend_override_enabled", True)):
+        try:
+            from app.engines.index_tick_helpers import index_trend_override_active
+
+            trend_ok, trend_meta = index_trend_override_active(snapshots)
+            if trend_ok:
+                meta["trendOverride"] = trend_meta
+                meta["worstDayLiftedByTrend"] = True
+                return "NORMAL", meta
+        except Exception:
+            pass
 
     if settings.worst_day_breakout_only_enabled:
         meta["pauseReason"] = "worst_day_breakout_only"

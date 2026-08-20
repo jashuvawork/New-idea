@@ -69,6 +69,37 @@ def test_breakout_only_policy(mock_identify):
     assert meta["pauseReason"] == "worst_day_breakout_only"
 
 
+@patch("app.engines.index_tick_helpers.index_trend_override_active")
+@patch("app.engines.worst_day_guard.identify_worst_day")
+def test_intraday_trend_override_lifts_worst_day(mock_identify, mock_trend):
+    """A genuine index breakout lifts the stale chop/worst BREAKOUT_ONLY to NORMAL."""
+    from app.engines.worst_day_guard import WorstDayVerdict
+
+    mock_identify.return_value = WorstDayVerdict(True, 45.0, ["chop_regime"])
+    mock_trend.return_value = (True, {"side": "CALL", "symbol": "SENSEX"})
+    policy, meta = session_entry_policy(AutoTraderState(), {"SENSEX": _snap()})
+    assert policy == "NORMAL"
+    assert meta.get("worstDayLiftedByTrend") is True
+
+
+@patch("app.engines.index_tick_helpers.index_trend_override_active")
+@patch("app.engines.worst_day_guard.identify_worst_day")
+def test_trend_override_does_not_lift_severe_loss_pause(mock_identify, mock_trend):
+    """Even a breakout must NOT lift the severe daily-loss (10%/day) pause."""
+    from app.engines.worst_day_guard import WorstDayVerdict
+
+    mock_identify.return_value = WorstDayVerdict(True, 60.0, ["chop_regime"])
+    mock_trend.return_value = (True, {"side": "CALL"})
+    state = AutoTraderState()
+    with patch(
+        "app.engines.worst_day_guard.compute_session_pnl", return_value=-25_000.0
+    ):
+        policy, meta = session_entry_policy(state, {"SENSEX": _snap()})
+    assert policy == "PAUSED"
+    assert meta["pauseReason"] == "worst_day_severe_session_loss"
+    mock_trend.assert_not_called()
+
+
 @patch("app.engines.worst_day_guard.session_entry_policy", return_value=("BREAKOUT_ONLY", {}))
 def test_allows_scalp_momentum_on_breakout_only(mock_policy):
     ok, reason, meta = worst_day_allows_candidate(

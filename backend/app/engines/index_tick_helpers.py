@@ -33,9 +33,17 @@ _spike_history: dict[str, deque[tuple[float, float]]] = defaultdict(deque)
 # Per-symbol rolling raw LTP history: (monotonic_ts, ltp) — every index tick, so a slow
 # sustained drift (below the sharp 3s spike bar) is still measurable over 30-60s.
 _ltp_history: dict[str, deque[tuple[float, float]]] = defaultdict(deque)
+# Per-symbol intraday session extremes from the live index tape (no REST lag). Reset daily.
+# {symbol: {"date": date, "open": float, "hi": float, "lo": float, "last": float}}
+_session_extremes: dict[str, dict[str, Any]] = {}
 # Pending wake flags — building_ltp_monitor_due consumes these.
 _pending_wake_symbols: set[str] = set()
 _observer_registered: bool = False
+
+
+def index_session_extremes(symbol: str) -> dict[str, Any]:
+    """Live intraday index session open/high/low/last for one symbol (tick-maintained)."""
+    return dict(_session_extremes.get(str(symbol or "").upper()) or {})
 
 
 def recent_index_drift(
@@ -163,6 +171,7 @@ def reset_index_tick_helpers_for_tests() -> None:
     _last_spike.clear()
     _spike_history.clear()
     _ltp_history.clear()
+    _session_extremes.clear()
     _pending_wake_symbols.clear()
     # Keep observer registered across tests once installed.
     _ = _observer_registered
@@ -205,6 +214,26 @@ def _on_index_tick(instrument_key: str, ltp: float) -> None:
         cutoff = time.monotonic() - hist_secs
         while lh and lh[0][0] < cutoff:
             lh.popleft()
+    # Maintain intraday session high/low from the live tape (reset on a new IST day).
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+        ext = _session_extremes.get(symbol)
+        if ext is None or ext.get("date") != today:
+            _session_extremes[symbol] = {
+                "date": today, "open": float(ltp),
+                "hi": float(ltp), "lo": float(ltp), "last": float(ltp),
+            }
+        else:
+            if float(ltp) > ext["hi"]:
+                ext["hi"] = float(ltp)
+            if float(ltp) < ext["lo"]:
+                ext["lo"] = float(ltp)
+            ext["last"] = float(ltp)
+    except Exception:
+        pass
     try:
         from app.services.tick_store import get_velocity_pct
 
@@ -472,3 +501,96 @@ def index_helpers_confirm_from_alert(alert: Optional[dict[str, Any]]) -> bool:
     if isinstance(helpers, list) and len(helpers) >= 2:
         return "index_tick_spike" in helpers or "index_tick_align" in helpers
     return False
+
+
+def index_trend_breakout(
+    symbol: str,
+    side: Any,
+    snap: Any = None,
+    *,
+    settings: Any = None,
+) -> dict[str, Any]:
+    """Is the INDEX genuinely breaking out on this side right now?
+
+    A morning "chop/worst day" verdict goes stale once the spot actually trends. This is
+    True only when ALL hold: spot at/near a fresh session extreme (new high for CALL / low
+    for PUT), aligned 5m momentum, AND a confirmed index thrust (sustained drift OR a
+    same-direction spike burst). It requires a real session range + sustained thrust, so a
+    single spike on a flat chop tape cannot trip it.
+    """
+    settings = settings or get_settings()
+    out: dict[str, Any] = {"breakout": False, "reasons": []}
+    if not bool(getattr(settings, "worst_day_intraday_trend_override_enabled", True)):
+        return out
+    sym = str(symbol or "").upper()
+    side_u = _side_str(side)
+    if side_u not in ("CALL", "PUT"):
+        return out
+    ext = _session_extremes.get(sym)
+    if not ext:
+        return out
+    hi = float(ext.get("hi") or 0)
+    lo = float(ext.get("lo") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0) or float(ext.get("last") or 0)
+    if spot <= 0 or hi <= 0 or lo <= 0:
+        return out
+    range_pct = (hi - lo) / lo * 100.0 if lo else 0.0
+    min_range = float(getattr(settings, "index_trend_override_min_range_pct", 0.15) or 0.15)
+    if range_pct < min_range:
+        out["reasons"].append("range_too_tight")
+        return out
+    near_pct = float(getattr(settings, "index_trend_override_near_extreme_pct", 0.05) or 0.05)
+    mom_min = float(getattr(settings, "index_trend_override_min_mom5_pct", 0.10) or 0.10)
+    chart = getattr(snap, "spotChart", None) if snap is not None else None
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0) if chart is not None else 0.0
+    drift = recent_index_drift(sym, side_u)
+    thrust = recent_index_spike_thrust(sym, side_u)
+    if side_u == "CALL":
+        near = spot >= hi * (1.0 - near_pct / 100.0)
+        mom_ok = mom5 >= mom_min
+    else:
+        near = spot <= lo * (1.0 + near_pct / 100.0)
+        mom_ok = mom5 <= -mom_min
+    thrust_ok = bool(drift.get("drift") or thrust.get("burst"))
+    reasons: list[str] = []
+    if near:
+        reasons.append("near_session_%s" % ("high" if side_u == "CALL" else "low"))
+    if mom_ok:
+        reasons.append("mom5_%.2f" % mom5)
+    if thrust_ok:
+        reasons.append("index_thrust")
+    out.update(
+        {
+            "breakout": bool(near and mom_ok and thrust_ok),
+            "reasons": reasons,
+            "side": side_u,
+            "symbol": sym,
+            "spot": round(spot, 2),
+            "hi": round(hi, 2),
+            "lo": round(lo, 2),
+            "rangePct": round(range_pct, 3),
+            "mom5": mom5,
+            "driftNetPct": drift.get("net_pct"),
+            "spikeBurst": bool(thrust.get("burst")),
+        }
+    )
+    return out
+
+
+def index_trend_override_active(
+    snapshots: Optional[dict[str, Any]],
+    *,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Session-level: any index breaking out (either side) lifts the stale worst-day pause."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "worst_day_intraday_trend_override_enabled", True)):
+        return False, {}
+    for sym, snap in (snapshots or {}).items():
+        if snap is None or not getattr(snap, "dataAvailable", True):
+            continue
+        for side in ("CALL", "PUT"):
+            bo = index_trend_breakout(sym, side, snap, settings=settings)
+            if bo.get("breakout"):
+                return True, bo
+    return False, {}

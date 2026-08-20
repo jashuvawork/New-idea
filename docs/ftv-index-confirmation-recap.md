@@ -178,6 +178,31 @@ Guards still active: never-green cut, whipsaw-flip cap, first-green cap, and the
 Config: `index_confirmed_ftv_size_up_enabled=True`, `index_confirmed_ftv_max_base_rel_pct=20.0`,
 `index_confirmed_ftv_per_trade_max_loss_inr=4000.0`, `daily_loss_stop_inr=20000.0`.
 
+## 6c. Intraday worst-day TREND-OVERRIDE (Aug 20 miss)
+
+Problem (Aug 20 SENSEX expiry): the day was pre-classified **chop/worst → BREAKOUT_ONLY**
+in the morning, then SENSEX ripped **+0.82% to new highs**. The CALL FTV was *detected*
+(SENSEX 77600 reached **ELITE, radar MFE +140.7%**, spot near session high, mom5 +0.213) but
+**0 trades all day** — the stale chop verdict vetoed the real breakout.
+
+Fix: an **intraday trend-override**. When the index is genuinely breaking out — spot at/near a
+fresh session extreme (new high for CALL / low for PUT) + aligned 5m momentum + a **confirmed
+index thrust** (sustained drift OR same-direction spike burst) — the worst-day
+`BREAKOUT_ONLY` / full-pause is lifted to `NORMAL`, so a top ELITE/EXPLODING can trade the
+trend. Guardrails:
+- **Never lifts the severe daily-loss pause** (≥ the 10%/day ₹20k stop).
+- Requires a **real session range** + **sustained thrust** (not a single spike), so chop can't trip it.
+- Re-evaluated live each cycle → reverts to BREAKOUT_ONLY when the trend fades.
+
+Wired into both `session_entry_policy` (worst_day_guard) and the parallel
+`expiry_worst_day_declining_halt` (expiry_day_guards). New tick-maintained index session
+high/low tracker in `index_tick_helpers` (`index_session_extremes`, `index_trend_breakout`,
+`index_trend_override_active`).
+
+Config: `worst_day_intraday_trend_override_enabled=True`,
+`index_trend_override_near_extreme_pct=0.05`, `index_trend_override_min_mom5_pct=0.10`,
+`index_trend_override_min_range_pct=0.15`.
+
 ## 7. Open items / how to prove it live
 
 1. **Merge PR #356 + deploy** (auto on merge to `main`). Confirm `deployment/status.commit` flips.
