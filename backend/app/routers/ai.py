@@ -54,6 +54,24 @@ async def learning_report():
     return get_ai_learning().get_learning_report()
 
 
+@router.get("/eod-learning")
+async def eod_learning():
+    """Accumulated EOD FTV/V knowledge profile (per symbol:side:tier) + learned dates."""
+    from app.engines.eod_ftv_learning import load_learned_params
+
+    return load_learned_params()
+
+
+@router.post("/eod-learning/run/{date}")
+async def eod_learning_run(date: str):
+    """Force-learn a specific date's archive (e.g. backfill)."""
+    import asyncio
+
+    from app.engines.eod_ftv_learning import run_eod_learning_cycle
+
+    return await asyncio.to_thread(run_eod_learning_cycle, date, force=True)
+
+
 @router.get("/composer/status")
 async def composer_status():
     from app.engines.auto_trader import get_state
