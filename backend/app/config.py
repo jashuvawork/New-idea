@@ -1456,6 +1456,14 @@ class Settings(BaseSettings):
     execution_chart_premium_check_enabled: bool = True
     execution_chart_min_premium_momentum_pct: float = -0.15
     execution_chart_candle_count: int = 60
+    # Confirmed near-base FTV first-lifts may fill THROUGH a shallow premium dip — that dip is
+    # the base retest right before the vertical, not a collapse. Without this the execution
+    # premium-fading gate blocked every confirmed FTV first-lift (they always ticked back a
+    # hair at the base). Bounded: only ELITE/EXPLODING first-lifts, and only while the dip is
+    # shallower than the floor below; a deeper collapse still blocks. This is what lets the
+    # system take these AT the local base instead of chasing them after they lift.
+    ftv_premium_fade_fill_enabled: bool = True
+    ftv_premium_fade_fill_max_drawdown_pct: float = -0.6
 
     # Multi-timeframe pre-test (1m/5m/15m/1h/4h) before execution
     execution_mtf_enabled: bool = True
