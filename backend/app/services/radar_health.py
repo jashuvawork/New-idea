@@ -259,9 +259,17 @@ def health_status(*, now: datetime | None = None) -> dict[str, Any]:
                 "code": "TICK_FEED_STALE",
                 "message": "WebSocket has no recent option ticks",
             })
+        # rest_snapshot is a BACKUP source; the live trading path runs off the WS entry
+        # scan. A lagging REST backup while the primary WS feed is fresh is a degraded-
+        # backup notice (info), NOT a radar-unhealthy condition — otherwise normal REST
+        # rebuild-cadence jitter flips the whole system unhealthy for no trading impact.
+        ws_fresh = bool(ws and not ws.get("stale"))
         for source in stale_sources:
+            severity = "warning"
+            if source == "rest_snapshot" and ws_fresh:
+                severity = "info"
             alerts.append({
-                "severity": "warning",
+                "severity": severity,
                 "code": "RADAR_SCAN_STALE",
                 "message": f"{source} has exceeded its expected scan cadence",
             })
