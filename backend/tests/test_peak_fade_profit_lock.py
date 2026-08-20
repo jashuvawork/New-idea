@@ -39,6 +39,13 @@ def _settings(**overrides):
     s.explosion_near_base_hold_ict_max_entry_rel_pct = 40.0
     s.explosion_near_base_hold_min_best_points = 40.0
     s.explosion_near_base_hold_max_profit_min_best_points = 55.0
+    s.ftv_vbase_hundred_pct_hold_enabled = True
+    s.ftv_vbase_hundred_pct_min_move_pct = 100.0
+    s.ftv_vbase_hundred_pct_max_entry_rel_pct = 25.0
+    s.ftv_vbase_hundred_pct_min_best_points_floor = 40.0
+    s.ftv_vbase_after_hundred_giveback_ratio = 0.32
+    s.ftv_vbase_after_hundred_max_giveback_points = 36.0
+    s.ftv_vbase_after_hundred_big_peak_points = 100.0
     s.explosion_peak_capture_enabled = True
     s.explosion_peak_capture_min_best_points = 8.0
     s.explosion_peak_capture_giveback_ratio = 0.12
@@ -559,3 +566,106 @@ def test_bullish_but_dead_premium_still_soft_locks(mock_s, _br, _ch):
         trade, best=12.53, pnl_pts=2.3, max_profit=False, live_velocity_3s=0.2,
     )
     assert reason == "explosion_peak_capture"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_vbase_ftv_holds_before_hundred_pct(mock_s):
+    """Aug20-style V-base: entry ~68, mid-leg +50 must NOT peak-capture yet.
+
+    Absolute 55pt near-base floor alone would allow banking ~74% of entry;
+    100%-of-premium hold waits until ~+68 before soft capture arms.
+    """
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=68.0,
+        best=50.0,
+        current=105.0,
+        ctx={
+            "selectionMode": "explosion",
+            "explosionTier": "ELITE",
+            "maxProfitCapture": True,
+            "ictFlatThenVertical": True,
+            "vBaseFtvRunner": True,
+            "localBaseBasePremium": 63.4,
+            "localBaseBaseRelPct": 7.3,
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+            "liveVelocity3s": 0.2,
+            "premiumChart": {"momentum3Pct": -0.2},
+        },
+    )
+    # Rolling over with ~13pt giveback from +50 — would capture under 55pt floor.
+    reason = peak_capture_profit_lock_reason(
+        trade,
+        best=50.0,
+        pnl_pts=37.0,
+        max_profit=True,
+        live_velocity_3s=0.2,
+    )
+    assert reason is None
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_vbase_ftv_trails_after_hundred_pct_rollover(mock_s):
+    """After 100% prints (68→+68), confirmed rollover may peak-capture."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=68.0,
+        best=78.0,
+        current=120.0,
+        ctx={
+            "selectionMode": "explosion",
+            "explosionTier": "ELITE",
+            "maxProfitCapture": True,
+            "ictFlatThenVertical": True,
+            "vBaseFtvRunner": True,
+            "localBaseBasePremium": 63.4,
+            "localBaseBaseRelPct": 7.3,
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+            "liveVelocity3s": 0.2,
+            "premiumChart": {"momentum3Pct": -0.2},
+        },
+    )
+    # best +78 (>= 100% of 68), giveback 32pt ≈ 41% > after-hundred 32% → capture
+    reason = peak_capture_profit_lock_reason(
+        trade,
+        best=78.0,
+        pnl_pts=46.0,
+        max_profit=True,
+        live_velocity_3s=0.2,
+    )
+    assert reason == "explosion_peak_capture"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_vbase_ftv_multibagger_not_clipped_mid_extension(mock_s):
+    """68→140→220 path: after 100%, a shallow mid-peak dip must keep riding."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=68.0,
+        best=110.0,
+        current=178.0,
+        ctx={
+            "selectionMode": "explosion",
+            "explosionTier": "ELITE",
+            "maxProfitCapture": True,
+            "ictFlatThenVertical": True,
+            "vBaseFtvRunner": True,
+            "localBaseBasePremium": 63.4,
+            "localBaseBaseRelPct": 7.3,
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+            "liveVelocity3s": 0.2,
+            "premiumChart": {"momentum3Pct": -0.2},
+        },
+    )
+    # best +110 (multi-bagger), giveback only 22pt (~20%) — under 32% trail → hold
+    reason = peak_capture_profit_lock_reason(
+        trade,
+        best=110.0,
+        pnl_pts=88.0,
+        max_profit=True,
+        live_velocity_3s=0.2,
+    )
+    assert reason is None

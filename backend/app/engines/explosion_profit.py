@@ -985,6 +985,7 @@ def _near_base_top_runner(trade: PaperTrade) -> bool:
         or ctx.get("ictFlatThenVertical")
         or ctx.get("maxProfitCapture")
         or ctx.get("defensiveBaseRip")
+        or ctx.get("vBaseFtvRunner")
     )
     if ict_max:
         max_rel = max(
@@ -1012,6 +1013,53 @@ def _near_base_top_runner(trade: PaperTrade) -> bool:
     return bool(trade_is_high_conviction(trade))
 
 
+def _is_vbase_ftv_runner(trade: PaperTrade) -> bool:
+    """V / flat→vertical taken near local base — expect ~100%+ premium expansion."""
+    settings = get_settings()
+    if not bool(getattr(settings, "ftv_vbase_hundred_pct_hold_enabled", True)):
+        return False
+    ctx = trade.entryContext or {}
+    if not (
+        ctx.get("vBaseFtvRunner")
+        or ctx.get("maxProfitCapture")
+        or ctx.get("ictFlatThenVertical")
+        or ctx.get("ictFirstLift")
+        or ctx.get("armedBaseCapture")
+    ):
+        return False
+    rel = ctx.get("localBaseBaseRelPct")
+    try:
+        rel_f = float(rel) if rel is not None else -1.0
+    except (TypeError, ValueError):
+        rel_f = -1.0
+    max_rel = float(
+        getattr(settings, "ftv_vbase_hundred_pct_max_entry_rel_pct", 25.0) or 25.0
+    )
+    # Explicit stamp always qualifies; otherwise require near-base entry pad.
+    if ctx.get("vBaseFtvRunner"):
+        return True
+    return 0 < rel_f <= max_rel
+
+
+def _ftv_vbase_hundred_pct_min_best(trade: PaperTrade, base_min: float) -> float:
+    """Hold soft locks until ~100% from entry on V-base FTV (68→136 before trailing)."""
+    if not _is_vbase_ftv_runner(trade):
+        return base_min
+    settings = get_settings()
+    entry = float(getattr(trade, "entryPremium", 0) or 0)
+    pct = float(
+        getattr(settings, "ftv_vbase_hundred_pct_min_move_pct", 100.0) or 100.0
+    )
+    floor = float(
+        getattr(settings, "ftv_vbase_hundred_pct_min_best_points_floor", 40.0)
+        or 40.0
+    )
+    need = floor
+    if entry > 0 and pct > 0:
+        need = max(need, entry * pct / 100.0)
+    return max(base_min, need)
+
+
 def _near_base_hold_min_best(
     trade: PaperTrade,
     base_min_best: float,
@@ -1021,6 +1069,9 @@ def _near_base_hold_min_best(
     """Raise the soft-lock min-best for a near-base top runner so a small early peak
     doesn't book before the base rip develops."""
     if not _near_base_top_runner(trade):
+        # Still apply 100% hold when explicitly stamped as V-base FTV runner.
+        if max_profit:
+            return _ftv_vbase_hundred_pct_min_best(trade, base_min_best)
         return base_min_best
     settings = get_settings()
     hold_min = float(
@@ -1038,6 +1089,7 @@ def _near_base_hold_min_best(
                 or 55.0
             ),
         )
+        hold_min = _ftv_vbase_hundred_pct_min_best(trade, hold_min)
     return max(base_min_best, hold_min)
 
 
@@ -1133,6 +1185,21 @@ def peak_capture_profit_lock_reason(
     # Near-base top runner → hold for a bigger peak before capturing (base rip ahead).
     min_best = _near_base_hold_min_best(trade, min_best, max_profit=max_profit)
 
+    # V/FTV from local base: after ~100% of entry prints, loosen trail so
+    # multi-baggers (68→140→220) are not banked on the first mid-peak dip.
+    vbase_after_hundred = False
+    hundred_need = 0.0
+    if max_profit and _is_vbase_ftv_runner(trade):
+        hundred_need = float(_ftv_vbase_hundred_pct_min_best(trade, 0.0) or 0.0)
+        if hundred_need > 0 and best + 1e-9 >= hundred_need:
+            vbase_after_hundred = True
+            after_ratio = float(
+                getattr(settings, "ftv_vbase_after_hundred_giveback_ratio", 0.32)
+                or 0.32
+            )
+            if after_ratio > 0:
+                giveback_ratio = max(giveback_ratio, after_ratio)
+
     if best < min_best:
         return None
 
@@ -1153,6 +1220,14 @@ def peak_capture_profit_lock_reason(
             )
             or 80.0
         )
+        # Hold ratio-only longer on V-base runners until a true multi-bagger peak.
+        if vbase_after_hundred:
+            after_big = float(
+                getattr(settings, "ftv_vbase_after_hundred_big_peak_points", 100.0)
+                or 100.0
+            )
+            if after_big > 0:
+                mp_big = max(mp_big, after_big)
         if best < mp_big:
             max_give = 0.0
         else:
@@ -1161,6 +1236,17 @@ def peak_capture_profit_lock_reason(
                 "explosion_peak_capture_max_profit_max_giveback_points",
                 24.0,
             )
+            if vbase_after_hundred:
+                after_max_gb = float(
+                    getattr(
+                        settings,
+                        "ftv_vbase_after_hundred_max_giveback_points",
+                        36.0,
+                    )
+                    or 36.0
+                )
+                if after_max_gb > 0:
+                    max_give = max(max_give, after_max_gb)
     min_remain = float(
         getattr(settings, "explosion_peak_capture_min_remain_points", 1.0) or 1.0
     )
@@ -1217,6 +1303,8 @@ def peak_fade_profit_lock_reason(
             settings, "explosion_early_green_lock_max_velocity_3s", 0.0
         )
         if max_profit and _near_base_top_runner(trade):
+            # Absolute near-base floor only — do NOT wait for 100%-of-premium before
+            # BE-locking a failed rip (e.g. +60 → red on a ₹168 entry).
             early_min_best = max(
                 early_min_best,
                 _cfg_float(
@@ -1224,7 +1312,14 @@ def peak_fade_profit_lock_reason(
                     "explosion_early_green_lock_near_base_max_profit_min_best_points",
                     55.0,
                 ),
-                _near_base_hold_min_best(trade, early_min_best, max_profit=True),
+                float(
+                    getattr(
+                        settings,
+                        "explosion_near_base_hold_max_profit_min_best_points",
+                        55.0,
+                    )
+                    or 55.0
+                ),
             )
         if (
             best >= early_min_best

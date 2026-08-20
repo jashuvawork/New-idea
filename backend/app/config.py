@@ -745,6 +745,18 @@ class Settings(BaseSettings):
     # Local-base FTV aiming at 100%+ needs a higher soft-lock floor before banking.
     explosion_near_base_hold_min_best_points: float = 40.0
     explosion_near_base_hold_max_profit_min_best_points: float = 55.0
+    # V / FTV from local base: expect ~100%+ premium expansion (e.g. 68→140).
+    # Soft peak-capture must wait until that expansion prints, then trail for max TP.
+    # Absolute point floors alone clip cheap ATM options too early (68→+28 is only ~41%).
+    ftv_vbase_hundred_pct_hold_enabled: bool = True
+    ftv_vbase_hundred_pct_min_move_pct: float = 100.0
+    ftv_vbase_hundred_pct_max_entry_rel_pct: float = 25.0
+    ftv_vbase_hundred_pct_min_best_points_floor: float = 40.0
+    # After the 100% leg prints, allow a wider giveback so multi-bagger extensions
+    # (68→220) are not banked on the first 28% dip off a mid peak.
+    ftv_vbase_after_hundred_giveback_ratio: float = 0.32
+    ftv_vbase_after_hundred_max_giveback_points: float = 36.0
+    ftv_vbase_after_hundred_big_peak_points: float = 100.0
 
     # Moment stage trail ladder — flat→vertical / FVG / mega-rip projections.
     # Project max TP from fib/base-extension/heat, split into stages (~50pt on
