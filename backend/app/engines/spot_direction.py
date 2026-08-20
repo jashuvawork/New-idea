@@ -754,6 +754,7 @@ def premium_blocks_entry(
     trade_score: float = 0.0,
     *,
     explosion_event: Any = None,
+    confirmed_ftv_bypass: bool = False,
 ) -> tuple[bool, str]:
     """Block when option premium is fading at execution — bad fill timing."""
     settings = get_settings()
@@ -767,6 +768,7 @@ def premium_blocks_entry(
         premium_momentum_5s=float(premium.momentum5Pct or 0),
         premium_direction=str(premium.direction or ""),
         explosion_event=explosion_event,
+        confirmed_ftv_bypass=confirmed_ftv_bypass,
     )
 
 

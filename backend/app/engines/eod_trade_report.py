@@ -1,7 +1,7 @@
 """EOD 'would-have-traded' report.
 
 Replays a completed day's premium tape through the strategy the live system now runs
-(near-base first-lift entry + index-drift confirmation + ELITE full-lot sizing + FTV
+(near-base first-lift entry + index-drift confirmation + ELITE full-capital sizing + FTV
 runner-trail exit) WITH RE-ENTRIES, and returns the trades it would have generated
 (entry, lots, SL/TP path, exit, P&L) plus a summary.
 
@@ -59,9 +59,6 @@ def replay_contract_trades(
 
     s = settings or get_settings()
     units = int(lot_multiplier(symbol) or 20)
-    risk = _f(getattr(s, "elite_full_lot_risk_inr", 10_000.0), 10_000.0)
-    est = _f(getattr(s, "elite_full_lot_est_stop_points", 8.0), 8.0)
-    cap = _f(getattr(s, "max_sizing_capital_inr", 200_000.0), 200_000.0)
     nb_min, nb_max = 0.10, 0.25
     cooldown = 90.0
 
@@ -86,13 +83,12 @@ def replay_contract_trades(
         if not entered:
             i += 1
             continue
-        # --- ENTER near the base ---
+        # --- ENTER near the base: full per-trade capital (~₹1.8L), proper SL room ---
         ep = p
-        lots = max(1, min(
-            max_lots_for_capital(symbol, ep),
-            int(risk / (est * units)),
-            int(0.35 * cap / (ep * units)),
-        ))
+        lots = max(1, max_lots_for_capital(symbol, ep))
+        min_sl_pts = _f(getattr(s, "elite_full_lot_min_stop_points", 16.0), 16.0)
+        min_sl_pct = _f(getattr(s, "elite_full_lot_min_stop_pct_of_premium", 0.18), 0.18)
+        stop_pts = max(min_sl_pts, ep * max(0.0, min_sl_pct))
         plan = build_moment_stage_plan(
             entry_premium=ep, base_premium=base, velocity_3s=3.0, volume_surge=2.5,
             session_move_pct=30.0, flat_then_vertical=True, max_profit=True,
@@ -100,7 +96,12 @@ def replay_contract_trades(
         ctx = {
             "momentType": "flat_then_vertical", "ictFlatThenVertical": True,
             "maxProfitCapture": True, "ictBasePremium": base, "eliteFullLot": True,
-            "velocity3s": 3.0,
+            "velocity3s": 3.0, "vBaseFtvRunner": True,
+            "exitPlan": {
+                "stopPoints": round(stop_pts, 2),
+                "entryStopPoints": round(stop_pts, 2),
+                "targetPoints": 180.0,
+            },
         }
         if plan:
             ctx.update(plan)
@@ -137,7 +138,10 @@ def replay_contract_trades(
             "symbol": symbol, "side": side, "strike": strike, "tier": tier,
             "entryAt": et.strftime("%H:%M:%S"), "entryPremium": round(ep, 1),
             "basePremium": round(base, 1), "offBasePct": round(off * 100, 1),
-            "lots": lots, "exitAt": xt.strftime("%H:%M:%S"), "exitPremium": round(xp, 1),
+            "lots": lots, "stopPoints": round(stop_pts, 2),
+            "slPremium": round(ep - stop_pts, 2),
+            "notionalInr": round(ep * lots * units, 0),
+            "exitAt": xt.strftime("%H:%M:%S"), "exitPremium": round(xp, 1),
             "movePct": round((xp - ep) / ep * 100, 1), "peakPct": round(best / ep * 100, 1),
             "pnlInr": round(pnl, 0), "exitReason": reason,
             "_entryDt": et, "_exitDt": xt,
@@ -177,7 +181,7 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
         return {"date": date, "status": "no_tape", "trades": []}
 
     # Build per-contract premium series + the shared spot tape.
-    want = {(sym, side, strike) for _m, sym, side, strike in targets}
+    want = {(sym, side, strike) for _m, sym, side, strike, _tier in targets}
     series_map: dict[tuple, list] = {k: [] for k in want}
     spot_pairs: list[tuple[datetime, float]] = []
     seen_spot: set[str] = set()

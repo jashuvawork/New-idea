@@ -1456,6 +1456,14 @@ class Settings(BaseSettings):
     execution_chart_premium_check_enabled: bool = True
     execution_chart_min_premium_momentum_pct: float = -0.15
     execution_chart_candle_count: int = 60
+    # Confirmed near-base FTV first-lifts may fill THROUGH a shallow premium dip — that dip is
+    # the base retest right before the vertical, not a collapse. Without this the execution
+    # premium-fading gate blocked every confirmed FTV first-lift (they always ticked back a
+    # hair at the base). Bounded: only ELITE/EXPLODING first-lifts, and only while the dip is
+    # shallower than the floor below; a deeper collapse still blocks. This is what lets the
+    # system take these AT the local base instead of chasing them after they lift.
+    ftv_premium_fade_fill_enabled: bool = True
+    ftv_premium_fade_fill_max_drawdown_pct: float = -0.6
 
     # Multi-timeframe pre-test (1m/5m/15m/1h/4h) before execution
     execution_mtf_enabled: bool = True
@@ -1811,26 +1819,23 @@ class Settings(BaseSettings):
     index_confirmed_ftv_size_up_enabled: bool = True
     index_confirmed_ftv_max_base_rel_pct: float = 20.0
     index_confirmed_ftv_per_trade_max_loss_inr: float = 4_000.0
-    # ELITE full-lot + ride-to-max-TP: the top tier is rare and highest-conviction, so an
-    # index-confirmed ELITE FTV takes the biggest position and holds to the peak.
-    #
-    # SIZING (elite_full_lot_use_full_capital, default ON): use the WHOLE per-trade capital
-    # sleeve (max_lots_for_capital ≈ 90% of ₹2L), not a small ₹10k/8pt risk budget that only
-    # deployed ~₹80k. The natural % SL (preserved, not crushed to a toy point-stop) governs
-    # risk, bounded by the per-trade backstop below and the ₹20k/day stop. When OFF it falls
-    # back to the old risk-budgeted sizing (elite_full_lot_risk_inr / est_stop).
-    #
-    # STOP: ride the calculated natural SL to max TP. The per-trade backstop is
-    # elite_full_lot_per_trade_max_loss_inr (default ₹20k = the daily budget) so a real base
-    # runner is NOT clipped by a small ₹2k/4k/10k ceiling before its thesis stop — repeatedly
-    # we saw tight caps stop a trade that then ran up. ₹20k stays the hard per-trade ceiling
-    # AND the daily halt, so one wrong ELITE trade caps the day (accepted 10%/day risk).
+    # ELITE full-lot + ride-to-max-TP: index-confirmed ELITE FTV deploys the full per-trade
+    # capital budget (~₹1.8L = 90% of ₹2L) and holds to max TP. Do NOT shrink lots to a tiny
+    # ₹10k/8pt risk envelope — that caps size at ~half capital and stop-outs the runner on a
+    # normal base shakeout before the vertical. Structural SL is widened (% of premium); the
+    # ₹20k/day stop remains the session backstop. Per-trade INR clip is off by default (0)
+    # so a wide point SL can breathe without an early rupee kill.
     elite_full_lot_enabled: bool = True
     elite_full_lot_requires_index_confirm: bool = True
     elite_full_lot_use_full_capital: bool = True
-    elite_full_lot_per_trade_max_loss_inr: float = 20_000.0
-    elite_full_lot_risk_inr: float = 10_000.0
+    # 0 = disabled (prefer point SL + daily loss stop). Set >0 only for a hard INR clip.
+    elite_full_lot_risk_inr: float = 0.0
+    # Legacy risk-budget sizing only when elite_full_lot_use_full_capital=False.
     elite_full_lot_est_stop_points: float = 8.0
+    # Proper room for V/FTV shakeouts — not a toy 8pt stop that clips then watches the rip.
+    elite_full_lot_min_stop_points: float = 16.0
+    elite_full_lot_min_stop_pct_of_premium: float = 0.18
+    elite_full_lot_preserve_lots_over_sl_budget: bool = True
     elite_ride_max_tp_enabled: bool = True
     # 3) Whipsaw flip — after a same-session WIN on the opposite side, don't max-size the
     #    counter-flip (Aug6: CALLs won, then a max-size PUT flip lost). Cap flip size.
