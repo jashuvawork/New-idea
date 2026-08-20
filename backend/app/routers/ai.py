@@ -72,6 +72,16 @@ async def eod_learning_run(date: str):
     return await asyncio.to_thread(run_eod_learning_cycle, date, force=True)
 
 
+@router.get("/eod-trade-report/{date}")
+async def eod_trade_report(date: str):
+    """Would-have-traded report: replay the day's tape with re-entries (hindsight sim)."""
+    import asyncio
+
+    from app.engines.eod_trade_report import generate_eod_trade_report
+
+    return await asyncio.to_thread(generate_eod_trade_report, date)
+
+
 @router.get("/composer/status")
 async def composer_status():
     from app.engines.auto_trader import get_state
