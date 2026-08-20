@@ -46,6 +46,35 @@ def index_session_extremes(symbol: str) -> dict[str, Any]:
     return dict(_session_extremes.get(str(symbol or "").upper()) or {})
 
 
+def _snap_session_extremes(snap: Any) -> tuple[float, float]:
+    """Broker candle-derived session high/low from the snapshot (available at open/restart).
+
+    Read from chartAnalysis.institutional (SMC sessionHigh/sessionLow), falling back to the
+    MarketProfile opening-range extremes. Returns (0.0, 0.0) when unavailable.
+    """
+    if snap is None:
+        return 0.0, 0.0
+    try:
+        ca = getattr(snap, "chartAnalysis", None)
+        inst = getattr(ca, "institutional", None) if ca is not None else None
+        if isinstance(inst, dict):
+            hi = float(inst.get("sessionHigh") or 0)
+            lo = float(inst.get("sessionLow") or 0)
+            if hi > 0 or lo > 0:
+                return hi, lo
+    except Exception:
+        pass
+    try:
+        prof = getattr(snap, "marketProfile", None)
+        if prof is not None:
+            hi = float(getattr(prof, "openingRangeHigh", 0) or 0)
+            lo = float(getattr(prof, "openingRangeLow", 0) or 0)
+            return hi, lo
+    except Exception:
+        pass
+    return 0.0, 0.0
+
+
 def recent_index_drift(
     symbol: str,
     side: Any,
@@ -526,12 +555,18 @@ def index_trend_breakout(
     side_u = _side_str(side)
     if side_u not in ("CALL", "PUT"):
         return out
-    ext = _session_extremes.get(sym)
-    if not ext:
-        return out
+    ext = _session_extremes.get(sym) or {}
     hi = float(ext.get("hi") or 0)
     lo = float(ext.get("lo") or 0)
     spot = float(getattr(snap, "spot", 0) or 0) or float(ext.get("last") or 0)
+    # Seed / widen from the broker candle-derived session high/low so the override is
+    # accurate IMMEDIATELY at open and after any restart (the tick tracker starts cold and
+    # would otherwise need to rebuild the full-session extremes from the first tick).
+    snap_hi, snap_lo = _snap_session_extremes(snap)
+    if snap_hi > 0:
+        hi = max(hi, snap_hi)
+    if snap_lo > 0:
+        lo = min(lo, snap_lo) if lo > 0 else snap_lo
     if spot <= 0 or hi <= 0 or lo <= 0:
         return out
     range_pct = (hi - lo) / lo * 100.0 if lo else 0.0
