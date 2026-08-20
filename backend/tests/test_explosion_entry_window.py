@@ -345,3 +345,34 @@ def test_weak_raw_ict_does_not_override_trusted_off_low(mock_settings, _off_low)
         _event(28.9), ict=ict, top_must_take=True,
     )
     assert blocked_mt is False, reason_mt
+
+
+@patch("app.engines.eod_ftv_learning.learned_ftv_profile")
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_learned_near_base_tightens_elite_ceiling(mock_settings, mock_prof):
+    """EOD-learned near-base max tightens the ELITE ceiling (tighten-only, floored)."""
+    mock_settings.return_value = _settings(
+        eod_learning_apply_enabled=True,
+        eod_learning_apply_min_samples=5,
+        eod_learning_near_base_floor_pct=25.0,
+    )
+    mock_prof.return_value = {"count": 10, "recommendedNearBaseMaxPct": 22.0}
+    # Learned ceiling = max(floor 25, learned 22) = 25: a 30% pad chase is now blocked...
+    b30, _ = explosion_entry_window_blocked(_event(30.0), ict=_structured_ict(30.0))
+    assert b30 is True
+    # ...but a genuine near-base 20% first lift still passes.
+    b20, _ = explosion_entry_window_blocked(_event(20.0), ict=_structured_ict(20.0))
+    assert b20 is False
+
+
+@patch("app.engines.eod_ftv_learning.learned_ftv_profile")
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_learned_tighten_skipped_below_min_samples(mock_settings, mock_prof):
+    """Not enough learned samples -> no tightening (falls back to the 40% cap)."""
+    mock_settings.return_value = _settings(
+        eod_learning_apply_enabled=True, eod_learning_apply_min_samples=5,
+        eod_learning_near_base_floor_pct=25.0,
+    )
+    mock_prof.return_value = {"count": 2, "recommendedNearBaseMaxPct": 22.0}
+    b30, _ = explosion_entry_window_blocked(_event(30.0), ict=_structured_ict(30.0))
+    assert b30 is False  # within the untightened 40% cap
