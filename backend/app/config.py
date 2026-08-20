@@ -135,6 +135,9 @@ class Settings(BaseSettings):
     eod_learning_real_leg_min_mfe_pct: float = 50.0
     eod_learning_cleanup_enabled: bool = True
     eod_learning_raw_retention_days: int = 7
+    # Auto-generate the daily 'would-have-traded' report (hindsight sim with re-entries +
+    # one-position + daily-stop limits) after the archive is finalized; persisted for review.
+    eod_trade_report_enabled: bool = True
     # Closed loop: apply the accumulated knowledge to live exits. Once a moment type has
     # enough samples, the runner trail uses the LEARNED keep-ratio (ride hard on high-hit
     # movers like SENSEX ELITE ~0.85; tighten on low-hit buckets ~0.60). Bounded 0.60..0.85.
@@ -145,6 +148,12 @@ class Settings(BaseSettings):
     # per-moment value (tighten-only), but never below this floor so genuine near-base first
     # lifts still qualify. Biases entries nearer the local base without over-blocking.
     eod_learning_near_base_floor_pct: float = 25.0
+    # Risk loop: down-size moment types the learning shows are historically LOW-HIT (whipsaw),
+    # so we don't repeatedly commit full size into buckets that mostly stop out. Shrink-only.
+    eod_learning_low_hit_guard_enabled: bool = True
+    eod_learning_low_hit_min_samples: int = 8
+    eod_learning_min_hit_rate: float = 0.35
+    eod_learning_low_hit_size_mult: float = 0.5
     cursor_api_key: str = ""
     cursor_api_base_url: str = "https://api.cursor.com"
     cursor_chat_completions_path: str = "/v1/chat/completions"

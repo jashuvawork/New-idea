@@ -1085,6 +1085,22 @@ async def _open_from_candidate(
     if bool(getattr(settings, "vix_regime_sizing_enabled", False)) and vix_mult < 1.0:
         lots = max(1, int(round(lots * vix_mult)))
         vix_ctx["applied"] = True
+    # Closed loop (risk): down-size moment types the EOD learning shows are historically
+    # LOW-HIT (whipsaw), so we don't repeatedly commit full size into buckets that mostly
+    # stop out. Only shrinks (never grows), gated + min-samples. This is what turns a
+    # whipsaw-day churn into a bounded, smaller loss.
+    if candidate.mode == "explosion" and bool(
+        getattr(settings, "eod_learning_low_hit_guard_enabled", True)
+    ):
+        try:
+            from app.engines.eod_ftv_learning import low_hit_size_multiplier
+
+            _lh_side = str(getattr(candidate.side, "value", candidate.side) or "").upper()
+            _lh_mult = low_hit_size_multiplier(symbol, _lh_side, str(candidate.tier or ""))
+            if _lh_mult < 1.0:
+                lots = max(1, int(round(lots * _lh_mult)))
+        except Exception:
+            pass
     # Index-confirmed near-base FTV: a genuine index thrust means this is NOT a premium-only
     # fake trap, so it keeps its elevated (~2x, still <= ordinary 35% cap) size on a chop day
     # instead of being clipped to the fake-trap floor. Bounded: not full sleeve; whipsaw /

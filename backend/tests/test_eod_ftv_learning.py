@@ -61,3 +61,24 @@ def test_merge_across_days_is_count_weighted():
     p = out["SENSEX:CALL:ELITE"]
     assert p["count"] == 4
     assert p["medianPeakPct"] == 200.0  # (100*2 + 300*2)/4
+
+
+def test_low_hit_size_multiplier(monkeypatch, tmp_path):
+    from app.engines import eod_ftv_learning as m
+    # Point the learned store at a temp file with a low-hit + a high-hit bucket.
+    store = {
+        "profiles": {
+            "NIFTY:PUT:EXPLODING": {"count": 14, "hitRate": 0.0},
+            "SENSEX:CALL:ELITE": {"count": 12, "hitRate": 0.58},
+            "SENSEX:PUT:OTHER": {"count": 3, "hitRate": 0.0},  # too few samples
+        }
+    }
+    monkeypatch.setattr(m, "load_learned_params", lambda: store)
+    # Low-hit with enough samples -> shrink.
+    assert m.low_hit_size_multiplier("NIFTY", "PUT", "EXPLODING") < 1.0
+    # High-hit -> no change.
+    assert m.low_hit_size_multiplier("SENSEX", "CALL", "ELITE") == 1.0
+    # Low hit but too few samples -> no change.
+    assert m.low_hit_size_multiplier("SENSEX", "PUT", "OTHER") == 1.0
+    # Unknown bucket -> no change.
+    assert m.low_hit_size_multiplier("NIFTY", "CALL", "WATCH") == 1.0

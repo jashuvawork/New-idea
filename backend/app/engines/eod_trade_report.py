@@ -237,6 +237,47 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
     }
 
 
+def _report_file(date: str):
+    from app.services.trade_store import get_store_dir
+
+    d = get_store_dir() / "eod_reports"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{date}.json"
+
+
+def run_eod_trade_report_cycle(date: str, *, force: bool = False) -> dict[str, Any]:
+    """Generate + persist the day's would-have-traded report. Idempotent per date."""
+    import json
+
+    settings = get_settings()
+    if not bool(getattr(settings, "eod_trade_report_enabled", True)):
+        return {"status": "disabled"}
+    path = _report_file(date)
+    if path.exists() and not force:
+        try:
+            return json.loads(path.read_text())
+        except Exception:
+            pass
+    report = generate_eod_trade_report(date)
+    try:
+        path.write_text(json.dumps(report, indent=2, default=str))
+    except Exception:
+        pass
+    return report
+
+
+def get_latest_eod_trade_report(date: str) -> dict[str, Any]:
+    import json
+
+    path = _report_file(date)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return {}
+
+
 def apply_portfolio_limits(
     candidates: list[dict[str, Any]],
     *,

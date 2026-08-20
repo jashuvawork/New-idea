@@ -265,6 +265,23 @@ async def _background_monitor():
                         if res.get("status") in ("learned", "already_learned", "no_data"):
                             last_eod_learning_date = learn_date
                             await asyncio.to_thread(cleanup_learned_eod_archives)
+                            # Auto would-have-traded report (persisted for review).
+                            if settings.eod_trade_report_enabled:
+                                try:
+                                    from app.engines.eod_trade_report import (
+                                        run_eod_trade_report_cycle,
+                                    )
+
+                                    rep = await asyncio.to_thread(
+                                        run_eod_trade_report_cycle, learn_date,
+                                    )
+                                    logger.info(
+                                        "EOD trade report %s: %s trades, net Rs %s",
+                                        learn_date, rep.get("tradeCount"),
+                                        rep.get("netPnlInr"),
+                                    )
+                                except Exception as exc:
+                                    logger.warning("EOD trade report error: %s", exc)
                     except Exception as exc:
                         logger.warning("EOD FTV learning error: %s", exc)
         except Exception as e:

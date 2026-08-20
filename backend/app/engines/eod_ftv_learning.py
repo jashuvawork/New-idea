@@ -247,3 +247,26 @@ def learned_ftv_profile(symbol: str, side: str, tier: str = "ELITE") -> dict[str
     store = load_learned_params()
     key = f"{str(symbol).upper()}:{str(side).upper()}:{str(tier).upper()}"
     return dict(store.get("profiles", {}).get(key) or {})
+
+
+def low_hit_size_multiplier(symbol: str, side: str, tier: str) -> float:
+    """Shrink factor for moment types the learning shows are historically LOW-HIT.
+
+    Returns 1.0 (no change) unless the bucket has enough samples AND a hit rate below the
+    configured floor, in which case the configured shrink multiplier is returned. Shrink-only.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "eod_learning_low_hit_guard_enabled", True)):
+        return 1.0
+    prof = learned_ftv_profile(symbol, side, tier)
+    if not prof:
+        return 1.0
+    min_n = int(getattr(settings, "eod_learning_low_hit_min_samples", 8) or 8)
+    if int(prof.get("count", 0)) < min_n:
+        return 1.0
+    min_hit = float(getattr(settings, "eod_learning_min_hit_rate", 0.35) or 0.35)
+    if float(prof.get("hitRate") or 0.0) >= min_hit:
+        return 1.0
+    return max(0.1, min(1.0, float(
+        getattr(settings, "eod_learning_low_hit_size_mult", 0.5) or 0.5
+    )))
