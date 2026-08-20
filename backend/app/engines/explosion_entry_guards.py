@@ -361,6 +361,32 @@ def explosion_entry_window_blocked(
             )
             if elite_hi > 0:
                 hi = min(hi, elite_hi)
+            # Closed loop (entry-side): tighten the near-base ceiling per moment type from
+            # the accumulated EOD knowledge — take nearer the local base, skip the milder
+            # off-base chases this moment type historically didn't sustain. TIGHTEN-ONLY and
+            # floored so genuine near-base first lifts (<= floor) are never blocked.
+            if bool(getattr(settings, "eod_learning_apply_enabled", True)):
+                try:
+                    from app.engines.eod_ftv_learning import learned_ftv_profile
+
+                    side_u = str(
+                        getattr(getattr(explosion_event, "side", None), "value",
+                                getattr(explosion_event, "side", "")) or ""
+                    ).upper()
+                    prof = learned_ftv_profile(
+                        str(getattr(explosion_event, "symbol", "") or ""), side_u, tier_u,
+                    )
+                    min_n = int(getattr(settings, "eod_learning_apply_min_samples", 5) or 5)
+                    if prof and int(prof.get("count", 0)) >= min_n:
+                        learned_max = float(prof.get("recommendedNearBaseMaxPct") or 0)
+                        floor = float(
+                            getattr(settings, "eod_learning_near_base_floor_pct", 25.0)
+                            or 25.0
+                        )
+                        if learned_max > 0:
+                            hi = min(hi, max(floor, learned_max))
+                except Exception:
+                    pass
     # Squeeze-fired ELITE at a confirmed local base — a Bollinger/Keltner release off the
     # base is a confirmed coil break, not noise, so allow entry closer to the base than the
     # normal 15% floor (catch it AT the base). Gated by the caller to squeeze + ELITE + base.

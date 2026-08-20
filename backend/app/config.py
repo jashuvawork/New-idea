@@ -141,6 +141,10 @@ class Settings(BaseSettings):
     # Entry-side learned fields are stamped observe-only for now.
     eod_learning_apply_enabled: bool = True
     eod_learning_apply_min_samples: int = 5
+    # Entry-side loop: tighten the ELITE/EXPLODING near-base entry ceiling toward the learned
+    # per-moment value (tighten-only), but never below this floor so genuine near-base first
+    # lifts still qualify. Biases entries nearer the local base without over-blocking.
+    eod_learning_near_base_floor_pct: float = 25.0
     cursor_api_key: str = ""
     cursor_api_base_url: str = "https://api.cursor.com"
     cursor_chat_completions_path: str = "/v1/chat/completions"
