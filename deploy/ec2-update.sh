@@ -869,4 +869,16 @@ fi
 
 echo ""
 docker compose -f "$COMPOSE_PATH" ps
+
+# Repair api.jashuvatrade.xyz nginx/HTTPS when local :80 proxy is unhealthy.
+# Idempotent — skips when Host-header health already passes. Non-fatal on failure.
+if [ -x "$REPO_DIR/deploy/fix-api-https.sh" ]; then
+  if curl -sf --max-time 3 -H "Host: api.jashuvatrade.xyz" http://127.0.0.1/health >/dev/null 2>&1; then
+    echo "api HTTPS proxy: OK"
+  else
+    echo "api HTTPS proxy: repairing (local :80 health failed)…"
+    bash "$REPO_DIR/deploy/fix-api-https.sh" || echo "WARN: api HTTPS repair failed (non-fatal)"
+  fi
+fi
+
 echo "=== Done $(date -Iseconds) — commit $COMMIT_SHA ==="
