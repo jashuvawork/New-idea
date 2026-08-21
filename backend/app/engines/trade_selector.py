@@ -322,11 +322,17 @@ def _explosion_candidates(
                 continue
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
+        top_only = bool(getattr(settings, "top_moments_only_enabled", True))
         if elite_only:
             if tier_u not in ("ELITE", "EXPLODING"):
                 # Early BUILDING flat→vertical when chart-aligned — catch the base
                 # before ELITE prints (multiple flat→vertical moments per week).
-                if not first_lift_ready and not _building_aligned_ict_alert_ok(
+                if top_only:
+                    from app.engines.top_moment_gate import explosion_alert_is_top_moment
+
+                    if not explosion_alert_is_top_moment(alert):
+                        continue
+                elif not first_lift_ready and not _building_aligned_ict_alert_ok(
                     alert, snap, tier_u, state=state, snapshots={symbol: snap},
                 ):
                     continue
@@ -1449,6 +1455,36 @@ def find_best_entry(
             or (c.pretrade_meta or {}).get("ftvEliteTopPolicy", {}).get("passed")
         )
     ]
+    if not candidates:
+        return None
+
+    if bool(getattr(settings, "top_moments_only_enabled", True)):
+        from app.engines.top_moment_gate import top_moment_entry_allowed
+
+        min_grade = str(getattr(settings, "top_moments_min_grade", "A") or "A")
+        filtered_top: list[EntryCandidate] = []
+        for c in candidates:
+            meta = c.pretrade_meta or {}
+            ranking = meta.get("causalRanking") or {}
+            evidence = ranking.get("evidence") or {}
+            ok, reason, moment = top_moment_entry_allowed(
+                evidence,
+                ranking,
+                top_moments_only_enabled=True,
+                min_grade=min_grade,
+            )
+            c.pretrade_meta = {
+                **meta,
+                "topMomentGate": {
+                    "enabled": True,
+                    "passed": ok,
+                    "reason": reason,
+                    "momentType": moment,
+                },
+            }
+            if ok:
+                filtered_top.append(c)
+        candidates = filtered_top
     if not candidates:
         return None
 

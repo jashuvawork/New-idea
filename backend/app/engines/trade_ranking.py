@@ -129,6 +129,8 @@ def ftv_authorization_policy(
     building_rip_ftv_min_local_base_move_pct: float = 2.0,
     building_rip_ftv_max_local_base_move_pct: float = 55.0,
     building_rip_ftv_max_capital_pct: float = 0.90,
+    top_moments_only_enabled: bool = True,
+    top_moments_min_grade: str = "A",
 ) -> FtvAuthorization:
     """Pure causal authorization for strict S, top FTV A, winner, and BUILDING rip."""
     blocked = lambda reason: FtvAuthorization(None, reason)
@@ -364,7 +366,7 @@ def ftv_authorization_policy(
                     exceptional_extension=exceptional,
                 )
 
-    # Historical winner shape: ELITE/EXPLODING off local base with real heat.
+    # Historical winner shape: ELITE/EXPLODING at local base with real heat.
     # Ordinary sleeve only; does not require CVD acceleration. Disabled when the
     # TOP_FTV_A fallback master switch is off (strict-S-only mode).
     if winner_local_base_enabled and top_ftv_a_enabled:
@@ -383,6 +385,8 @@ def ftv_authorization_policy(
             and v3 >= winner_local_base_min_velocity_3s
             and v9 >= winner_local_base_min_velocity_9s
         )
+        if top_moments_only_enabled and grade == "B":
+            winner_ok = False
         if winner_ok:
             if (
                 winner_local_base_require_cvd_on_worst
@@ -426,6 +430,8 @@ def ftv_authorization_policy(
             and helpers_ok
             and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
         )
+        if top_moments_only_enabled and grade == "B":
+            building_rip_ok = False
         if building_rip_ok:
             if require_allocation_rank_one and allocation_rank != 1:
                 return blocked("building_rip_ftv_requires_allocation_rank_1")
@@ -492,6 +498,8 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "building_rip_ftv_min_local_base_move_pct",
         "building_rip_ftv_max_local_base_move_pct",
         "building_rip_ftv_max_capital_pct",
+        "top_moments_only_enabled",
+        "top_moments_min_grade",
     )
     return {name: getattr(settings, name) for name in names}
 

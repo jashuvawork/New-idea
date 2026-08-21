@@ -206,6 +206,10 @@ class Settings(BaseSettings):
     # Master hard policy. Strict causal S and final-policy-authorized rank-1
     # TOP_FTV_A are the only full-sleeve paths.
     ftv_elite_top_only_enabled: bool = True
+    # Product focus: only top FTV, V-rip, ELITE, and EXPLODING moments (grade A/S).
+    # Blocks B/C sleeves, generic BUILDING without FTV/V triggers, and non-explosion modes.
+    top_moments_only_enabled: bool = True
+    top_moments_min_grade: str = "A"  # A or S; set S for strictest book
     # S_STRICT = top ELITE/EXPLODING at local base only — mid armed prints must
     # not auto-grade S from the +12 armed-launch boost alone (Aug18 mid EXPLODING).
     ftv_s_strict_min_explosion_score: float = 85.0
@@ -1262,7 +1266,7 @@ class Settings(BaseSettings):
     expiry_aligned_explosion_chart_bypass_enabled: bool = True
 
     # Slow bounce — expensive ITM mean-reversion (RSI/MACD recovery, low velocity)
-    quick_sideways_slow_bounce_enabled: bool = True
+    quick_sideways_slow_bounce_enabled: bool = False
     quick_sideways_slow_bounce_premium_min_inr: float = 90.0
     quick_sideways_slow_bounce_min_velocity_pct: float = 0.1
     quick_sideways_slow_bounce_min_tqs: float = 28.0
@@ -1679,7 +1683,7 @@ class Settings(BaseSettings):
     enhanced_tqs_entry: int = 50
     runner_alignment_override_score: int = 82
     rapid_scalp_mode_enabled: bool = False
-    quick_sideways_enabled: bool = True
+    quick_sideways_enabled: bool = False
     quick_sideways_min_rank_score: float = 58.0
     quick_sideways_min_velocity_pct: float = 0.5
     quick_sideways_chop_min_velocity_pct: float = 0.22
@@ -2167,7 +2171,7 @@ class Settings(BaseSettings):
     daily_token_once: bool = True
 
     # Swing trading (multi-day paper holds)
-    swing_trading_enabled: bool = True
+    swing_trading_enabled: bool = False
     swing_max_hold_days: int = 5
     swing_target_pct: float = 30.0
     swing_stop_pct: float = 12.0

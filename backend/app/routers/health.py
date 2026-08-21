@@ -315,6 +315,12 @@ async def deployment_readiness():
             "ftvEliteTopOnlyEnabled": bool(
                 getattr(settings, "ftv_elite_top_only_enabled", True)
             ),
+            "topMomentsOnlyEnabled": bool(
+                getattr(settings, "top_moments_only_enabled", True)
+            ),
+            "topMomentsMinGrade": str(
+                getattr(settings, "top_moments_min_grade", "A") or "A"
+            ),
             "topFtvAFallbackEnabled": bool(
                 getattr(settings, "top_ftv_a_enabled", True)
             ),
@@ -324,7 +330,12 @@ async def deployment_readiness():
                 "WINNER_LOCAL_BASE",
                 "BUILDING_RIP_FTV",
             ],
-            "allowedCausalGrades": ["S", "A", "B"],
+            "allowedCausalGrades": (
+                ["S", "A"]
+                if bool(getattr(settings, "top_moments_only_enabled", True))
+                else ["S", "A", "B"]
+            ),
+            "allowedMomentTypes": ["FTV", "V", "ELITE", "EXPLODING"],
             "strictS": {
                 "requiresTopRankEligible": True,
                 "fullSleeveEligible": True,

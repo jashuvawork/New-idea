@@ -583,6 +583,18 @@ async def _open_from_candidate(
         if not policy_decision.allowed:
             return False, policy_decision.reason
 
+        if bool(getattr(settings, "top_moments_only_enabled", True)):
+            from app.engines.top_moment_gate import top_moment_entry_allowed
+
+            top_ok, top_reason, _ = top_moment_entry_allowed(
+                policy_ranking.get("evidence") or {},
+                policy_ranking,
+                top_moments_only_enabled=True,
+                min_grade=str(getattr(settings, "top_moments_min_grade", "A") or "A"),
+            )
+            if not top_ok:
+                return False, top_reason
+
     from app.engines.worst_day_guard import worst_day_blocks_live
 
     if snapshots:
@@ -1944,6 +1956,17 @@ async def _open_from_candidate(
         )
         if not final_policy.allowed:
             return False, final_policy.reason
+        if bool(getattr(settings, "top_moments_only_enabled", True)):
+            from app.engines.top_moment_gate import top_moment_entry_allowed
+
+            top_ok, top_reason, _ = top_moment_entry_allowed(
+                final_ranking.get("evidence") or {},
+                final_ranking,
+                top_moments_only_enabled=True,
+                min_grade=str(getattr(settings, "top_moments_min_grade", "A") or "A"),
+            )
+            if not top_ok:
+                return False, top_reason
         if (
             full_sleeve_authorized
             and (
