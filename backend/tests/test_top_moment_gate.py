@@ -1,0 +1,132 @@
+"""Tests for top-moment entry gate (FTV / V / ELITE / EXPLODING only)."""
+
+from app.engines.top_moment_gate import (
+    classify_top_moment_type,
+    explosion_alert_is_top_moment,
+    top_moment_entry_allowed,
+)
+
+
+def _evidence(**kwargs):
+    base = {
+        "mode": "explosion",
+        "tier": "EXPLODING",
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "velocity3s": 3.0,
+        "velocity9s": 2.0,
+        "localBaseMovePct": 12.0,
+        "orderflowPositive": True,
+        "cvdBuying": True,
+    }
+    base.update(kwargs)
+    return base
+
+
+def _ranking(grade="A", **kwargs):
+    return {"grade": grade, "gradePriority": 3 if grade == "A" else 4, **kwargs}
+
+
+def test_classify_v_rip():
+    assert classify_top_moment_type(_evidence(tier="BUILDING", vRipReady=True)) == "V"
+
+
+def test_classify_ftv_building_helpers():
+    t = classify_top_moment_type(
+        _evidence(
+            tier="BUILDING",
+            buildingRipReady=True,
+            buildingRipHelpersOk=True,
+        )
+    )
+    assert t == "FTV"
+
+
+def test_classify_elite_at_base():
+    assert (
+        classify_top_moment_type(
+            _evidence(tier="ELITE", armedBaseLaunch=True)
+        )
+        == "ELITE"
+    )
+
+
+def test_classify_exploding_ftv():
+    assert (
+        classify_top_moment_type(
+            _evidence(tier="EXPLODING", flatThenVertical=True, activeBreakout=True)
+        )
+        == "EXPLODING"
+    )
+
+
+def test_generic_building_blocked():
+    assert (
+        classify_top_moment_type(
+            _evidence(
+                tier="BUILDING",
+                flatThenVertical=False,
+                activeBreakout=False,
+            )
+        )
+        is None
+    )
+
+
+def test_top_moment_allows_grade_a_elite():
+    ok, reason, moment = top_moment_entry_allowed(
+        _evidence(tier="ELITE", armedBaseLaunch=True),
+        _ranking("A"),
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert moment == "ELITE"
+
+
+def test_top_moment_blocks_grade_b():
+    ok, reason, _ = top_moment_entry_allowed(
+        _evidence(tier="EXPLODING", flatThenVertical=True, activeBreakout=True),
+        _ranking("B"),
+    )
+    assert ok is False
+    assert "grade" in reason
+
+
+def test_top_moment_blocks_without_moment_type():
+    ok, reason, _ = top_moment_entry_allowed(
+        _evidence(
+            tier="BUILDING",
+            flatThenVertical=False,
+            activeBreakout=False,
+        ),
+        _ranking("A"),
+    )
+    assert ok is False
+    assert reason == "top_moment_requires_ftv_v_elite_or_exploding"
+
+
+def test_explosion_alert_is_top_moment_building_helpers():
+    alert = {
+        "tier": "BUILDING",
+        "ictBuildingRipReady": True,
+        "buildingRipHelpersOk": True,
+    }
+    assert explosion_alert_is_top_moment(alert) is True
+
+
+def test_explosion_alert_is_top_moment_elite():
+    assert explosion_alert_is_top_moment({"tier": "ELITE"}) is True
+
+
+def test_explosion_alert_is_top_moment_cold_building():
+    assert explosion_alert_is_top_moment({"tier": "BUILDING"}) is False
+
+
+def test_disabled_gate_passes():
+    ok, reason, _ = top_moment_entry_allowed(
+        _evidence(tier="BUILDING"),
+        _ranking("C"),
+        top_moments_only_enabled=False,
+    )
+    assert ok is True
+    assert reason == "disabled"
