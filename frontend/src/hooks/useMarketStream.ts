@@ -15,7 +15,9 @@ const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS
 const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
 const SSE_STALE_POLL_MS = Number(import.meta.env.VITE_SSE_STALE_POLL_MS || 1000);
 const SNAPSHOT_URL = `${API_BASE}/api/market/snapshots/cached`;
-const SNAPSHOT_FALLBACK_URL = 'https://api.jashuvatrade.xyz/api/market/snapshots/cached';
+// Same-origin only — do NOT fall back to api.jashuvatrade.xyz (stale DNS → old EC2 IP
+// times out and makes the UI look "unreachable" while www→EIP proxy still works).
+const SNAPSHOT_FALLBACK_URL = SNAPSHOT_URL;
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   if (ms <= 0) return 'offline';

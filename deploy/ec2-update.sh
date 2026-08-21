@@ -5,7 +5,7 @@
 #   sudo bash deploy/ec2-update.sh
 #
 # Or one-liner from your laptop (after merge to main):
-#   ssh -i ~/.ssh/your-key.pem ec2-user@65.1.137.232 'curl -fsSL https://raw.githubusercontent.com/jashuvawork/New-idea/main/deploy/ec2-update.sh | sudo bash -s --'
+#   ssh -i ~/.ssh/your-key.pem ec2-user@65.0.136.146 'curl -fsSL https://raw.githubusercontent.com/jashuvawork/New-idea/main/deploy/ec2-update.sh | sudo bash -s --'
 #
 # Options:
 #   BRANCH=main          Git branch to deploy (default: main)
