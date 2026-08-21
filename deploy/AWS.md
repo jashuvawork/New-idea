@@ -35,6 +35,16 @@ State is written to `deploy/aws-infra.state` (gitignored).
 
 **Vercel** (`vercel.json`) proxies `www.jashuvatrade.xyz/api/*` to `http://<EIP>:8000`. Update the IP in `vercel.json` when the Elastic IP changes, then redeploy frontend.
 
+**If the site looks unreachable while the instance is running:** check DNS vs live IP.
+
+```bash
+dig +short api.jashuvatrade.xyz @8.8.8.8   # must equal current EIP
+curl -sS http://<EIP>:8000/health         # must be 200
+curl -sS https://www.jashuvatrade.xyz/api/deployment/status
+```
+
+A stale `api.` A-record (old EC2 IP) causes timeouts / `ROUTER_EXTERNAL_TARGET_CONNECTION_ERROR` even when `www` → Vercel → current EIP still works. Fix: update the A-record to the current Elastic IP (`65.0.136.146` as of Aug 2026) and wait for propagation.
+
 ## HTTPS on EC2
 
 After `api.jashuvatrade.xyz` DNS points to the Elastic IP:
