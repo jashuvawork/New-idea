@@ -344,6 +344,10 @@ async def deployment_readiness():
                 if getattr(settings, "local_base_audit_week_enabled", False)
                 else {}
             ),
+            "peakPredictionEnabled": bool(
+                getattr(settings, "peak_prediction_enabled", True)
+            ),
+            "peakPredictionSymbols": ["NIFTY", "SENSEX"],
             "strictS": {
                 "requiresTopRankEligible": True,
                 "fullSleeveEligible": True,

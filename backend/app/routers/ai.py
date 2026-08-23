@@ -244,6 +244,40 @@ async def local_base_audit_week(start_date: str, days: int = 5):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/peak-prediction/preview")
+async def peak_prediction_preview(
+    symbol: str,
+    side: str,
+    strike: float,
+    entry_premium: float,
+    tier: str = "BUILDING",
+    base_premium: float = 0.0,
+    base_rel_pct: float = 0.0,
+):
+    """Preview peak LTP / % forecast for a strike (NIFTY + SENSEX)."""
+    from app.engines.peak_prediction import predict_peak
+    from app.routers.market import get_multi_snapshot
+
+    sym = str(symbol or "").upper()
+    if sym not in ("NIFTY", "SENSEX"):
+        raise HTTPException(status_code=400, detail="symbol must be NIFTY or SENSEX")
+    multi = await get_multi_snapshot()
+    snap = (multi.snapshots or {}).get(sym)
+    if snap is None:
+        raise HTTPException(status_code=404, detail=f"No snapshot for {sym}")
+
+    return predict_peak(
+        symbol=sym,
+        side=side,
+        strike=strike,
+        entry_premium=entry_premium,
+        snap=snap,
+        tier=tier,
+        base_premium=base_premium,
+        base_rel_pct=base_rel_pct,
+    )
+
+
 @router.post("/radar-replay/{date}")
 async def radar_replay(
     date: str,

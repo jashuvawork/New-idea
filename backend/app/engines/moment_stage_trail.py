@@ -290,7 +290,10 @@ def maybe_extend_projected_max(trade: PaperTrade, best: float, settings: Optiona
         return 0.0
     best = _safe_float(best)
     if best <= projected * _cfg_float(s, "moment_stage_extend_trigger_frac", 0.92):
-        return projected
+        from app.engines.peak_prediction import ratchet_toward_predicted_peak
+
+        peak_pts = ratchet_toward_predicted_peak(trade, best, settings=s)
+        return max(projected, peak_pts)
 
     stage = max(_safe_float(fields.get("stageSize")), _cfg_float(s, "moment_stage_min_size", 5.0))
     # Grow stage size as the runner becomes a mega path.
@@ -318,7 +321,10 @@ def maybe_extend_projected_max(trade: PaperTrade, best: float, settings: Optiona
     if stage > _safe_float(fields.get("stageSize")):
         plan["stageSize"] = round(stage, 1)
     trade.entryContext["exitPlan"] = plan
-    return extended
+    from app.engines.peak_prediction import ratchet_toward_predicted_peak
+
+    peak_pts = ratchet_toward_predicted_peak(trade, best, settings=s)
+    return max(extended, peak_pts)
 
 
 def stage_trail_floor_pts(

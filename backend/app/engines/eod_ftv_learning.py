@@ -72,6 +72,13 @@ def _entry_fields(entry: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     )
     if not is_ftv:
         return None
+    moment = "V" if alert.get("ictVRipReady") else (
+        "FTV" if alert.get("ictFlatThenVertical") else (
+            "ARMED_BASE" if alert.get("ictArmedBaseLaunch") else (
+                "FIRST_LIFT" if alert.get("ictFirstLift") else tier
+            )
+        )
+    )
     mfe = _num(outcome.get("mfePct"))
     mae = _num(outcome.get("maePct"))
     if mfe <= 0 and mae == 0:
@@ -80,6 +87,7 @@ def _entry_fields(entry: Mapping[str, Any]) -> Optional[dict[str, Any]]:
         "symbol": symbol,
         "side": side,
         "tier": tier if tier in ("ELITE", "EXPLODING") else "OTHER",
+        "momentType": str(moment).upper(),
         "mfePct": mfe,
         "maePct": mae,
         "baseRelPct": _num(alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")),
@@ -101,6 +109,8 @@ def learn_ftv_profile(entries: list[Mapping[str, Any]]) -> dict[str, Any]:
             continue
         key = f"{f['symbol']}:{f['side']}:{f['tier']}"
         buckets.setdefault(key, []).append(f)
+        moment_key = f"{f['symbol']}:{f['side']}:{f['tier']}:{f.get('momentType', 'FTV')}"
+        buckets.setdefault(moment_key, []).append(f)
 
     profile: dict[str, Any] = {}
     for key, rows in buckets.items():
