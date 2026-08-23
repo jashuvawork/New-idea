@@ -82,6 +82,32 @@ async def eod_trade_report(date: str):
     return await asyncio.to_thread(generate_eod_trade_report, date)
 
 
+@router.get("/eod-local-base-replay/{date}")
+async def eod_local_base_replay(date: str):
+    """Replay EOD tape with production local-base gates (FTV/V/ELITE/EXPLODING + first-lift)."""
+    import asyncio
+
+    from app.engines.eod_local_base_replay import generate_eod_local_base_replay
+
+    return await asyncio.to_thread(generate_eod_local_base_replay, date)
+
+
+@router.get("/eod-local-base-replay/week/{start_date}")
+async def eod_local_base_replay_week(start_date: str, days: int = 5):
+    """Roll up local-base replays across a validation week."""
+    import asyncio
+
+    from app.engines.eod_local_base_replay import generate_eod_local_base_replay_week
+
+    if not 1 <= days <= 7:
+        raise HTTPException(status_code=400, detail="days must be in [1, 7]")
+    return await asyncio.to_thread(
+        generate_eod_local_base_replay_week,
+        start_date,
+        days=days,
+    )
+
+
 @router.get("/composer/status")
 async def composer_status():
     from app.engines.auto_trader import get_state
