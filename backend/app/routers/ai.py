@@ -216,6 +216,34 @@ async def radar_funnel(date: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/local-base-audit/{date}")
+async def local_base_audit(date: str):
+    """5-layer local-base proof scorecard for one session (detection → MFE capture)."""
+    from app.engines.local_base_week_audit import build_local_base_audit
+
+    try:
+        return await asyncio.to_thread(build_local_base_audit, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/local-base-audit/week/{start_date}")
+async def local_base_audit_week(start_date: str, days: int = 5):
+    """Roll up local-base audit scores across a validation week (default Mon–Fri)."""
+    from app.engines.local_base_week_audit import build_local_base_audit_week
+
+    if not 1 <= days <= 7:
+        raise HTTPException(status_code=400, detail="days must be in [1, 7]")
+    try:
+        return await asyncio.to_thread(
+            build_local_base_audit_week,
+            start_date,
+            days=days,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/radar-replay/{date}")
 async def radar_replay(
     date: str,
