@@ -270,6 +270,7 @@ async def local_base_audit_week(start_date: str, days: int = 5):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+
 @router.get("/peak-prediction/preview")
 async def peak_prediction_preview(
     symbol: str,
