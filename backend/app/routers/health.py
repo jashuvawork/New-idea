@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.config import get_settings
+from app.config import audit_week_local_base_overrides, get_settings
 from app.engines.capital_allocator import get_lot_sizes_meta
 from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.services import trade_store
@@ -336,6 +336,14 @@ async def deployment_readiness():
                 else ["S", "A", "B"]
             ),
             "allowedMomentTypes": ["FTV", "V", "ELITE", "EXPLODING"],
+            "localBaseAuditWeekEnabled": bool(
+                getattr(settings, "local_base_audit_week_enabled", False)
+            ),
+            "localBaseAuditWeekOverrides": (
+                audit_week_local_base_overrides()
+                if getattr(settings, "local_base_audit_week_enabled", False)
+                else {}
+            ),
             "strictS": {
                 "requiresTopRankEligible": True,
                 "fullSleeveEligible": True,

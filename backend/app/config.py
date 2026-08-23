@@ -210,6 +210,9 @@ class Settings(BaseSettings):
     # Blocks B/C sleeves, generic BUILDING without FTV/V triggers, and non-explosion modes.
     top_moments_only_enabled: bool = True
     top_moments_min_grade: str = "A"  # A or S; set S for strictest book
+    # One-week validation: lower local-base floors so detection, grading, and entry
+    # can fire at 2–15% pad. Use /api/ai/local-base-audit/{date} to score each day.
+    local_base_audit_week_enabled: bool = False
     # S_STRICT = top ELITE/EXPLODING at local base only — mid armed prints must
     # not auto-grade S from the +12 armed-launch boost alone (Aug18 mid EXPLODING).
     ftv_s_strict_min_explosion_score: float = 85.0
@@ -2200,6 +2203,53 @@ def _with_latency_presets(settings: Settings) -> Settings:
     return settings
 
 
+# Audit-week floors — only applied when local_base_audit_week_enabled=true.
+# Each value is the earliest (most aggressive) threshold we allow for validation.
+AUDIT_WEEK_LOCAL_BASE_OVERRIDES: dict[str, float] = {
+    "ftv_s_strict_min_local_base_move_pct": 2.0,
+    "winner_local_base_min_local_base_move_pct": 2.0,
+    "explosion_local_base_entry_min_move_pct": 8.0,
+    "local_base_exploding_entry_min_move_pct": 8.0,
+    "explosion_local_base_trust_min_move_pct": 5.0,
+    "building_rip_local_base_min_move_pct": 1.5,
+    "building_rip_ftv_min_local_base_move_pct": 1.5,
+    "building_ltp_monitor_min_ms": 50.0,
+    "ict_elite_base_ready_max_move_pct": 8.0,
+    "winner_local_base_min_explosion_score": 70.0,
+    "ftv_s_strict_min_explosion_score": 80.0,
+}
+
+
+def audit_week_local_base_overrides() -> dict[str, float]:
+    """Return the audit-week threshold map (for health / audit API exposure)."""
+    return dict(AUDIT_WEEK_LOCAL_BASE_OVERRIDES)
+
+
+def _with_audit_week_overrides(settings: Settings) -> Settings:
+    """Lower local-base entry/detection floors for the validation week."""
+    if not bool(getattr(settings, "local_base_audit_week_enabled", False)):
+        return settings
+    updates: dict[str, Any] = {}
+    for key, audit_value in AUDIT_WEEK_LOCAL_BASE_OVERRIDES.items():
+        current = getattr(settings, key, None)
+        if current is None:
+            continue
+        try:
+            current_f = float(current)
+            audit_f = float(audit_value)
+        except (TypeError, ValueError):
+            continue
+        if "max_" in key:
+            updates[key] = max(current_f, audit_f)
+        elif "min_" in key or key.endswith("_min_ms"):
+            updates[key] = min(current_f, audit_f)
+        else:
+            updates[key] = audit_f
+    if updates:
+        return settings.model_copy(update=updates)
+    return settings
+
+
 @lru_cache
 def get_settings() -> Settings:
-    return _with_latency_presets(Settings())
+    return _with_audit_week_overrides(_with_latency_presets(Settings()))
