@@ -782,6 +782,24 @@ class Settings(BaseSettings):
     ftv_vbase_after_hundred_max_giveback_points: float = 36.0
     ftv_vbase_after_hundred_big_peak_points: float = 100.0
 
+    # Peak prediction — index impulse × gamma + historical analogues + live ratchet.
+    # NIFTY and SENSEX only; stamps predictedMaxLtp on entry for stage-ladder exits.
+    peak_prediction_enabled: bool = True
+    peak_prediction_gamma_weight: float = 0.35
+    peak_prediction_analogue_weight: float = 0.40
+    peak_prediction_structure_weight: float = 0.25
+    peak_prediction_impulse_horizon_seconds: float = 90.0
+    peak_prediction_nifty_max_impulse_pts: float = 120.0
+    peak_prediction_sensex_max_impulse_pts: float = 180.0
+    peak_prediction_min_move_pct: float = 15.0
+    peak_prediction_max_move_pct: float = 250.0
+    peak_prediction_sensex_max_move_pct: float = 300.0
+    peak_prediction_analogue_min_samples: int = 3
+    peak_prediction_live_ratchet_enabled: bool = True
+    peak_prediction_ratchet_trigger_frac: float = 0.85
+    peak_prediction_ratchet_hot_velocity_3s: float = 2.0
+    peak_prediction_ratchet_hot_stretch: float = 1.12
+
     # Moment stage trail ladder — flat→vertical / FVG / mega-rip projections.
     # Project max TP from fib/base-extension/heat, split into stages (~50pt on
     # large moves), ratchet SL after each stage (250→225, 400→350) and hold

@@ -82,6 +82,32 @@ async def eod_trade_report(date: str):
     return await asyncio.to_thread(generate_eod_trade_report, date)
 
 
+@router.get("/eod-local-base-replay/{date}")
+async def eod_local_base_replay(date: str):
+    """Replay EOD tape with production local-base gates (FTV/V/ELITE/EXPLODING + first-lift)."""
+    import asyncio
+
+    from app.engines.eod_local_base_replay import generate_eod_local_base_replay
+
+    return await asyncio.to_thread(generate_eod_local_base_replay, date)
+
+
+@router.get("/eod-local-base-replay/week/{start_date}")
+async def eod_local_base_replay_week(start_date: str, days: int = 5):
+    """Roll up local-base replays across a validation week."""
+    import asyncio
+
+    from app.engines.eod_local_base_replay import generate_eod_local_base_replay_week
+
+    if not 1 <= days <= 7:
+        raise HTTPException(status_code=400, detail="days must be in [1, 7]")
+    return await asyncio.to_thread(
+        generate_eod_local_base_replay_week,
+        start_date,
+        days=days,
+    )
+
+
 @router.get("/composer/status")
 async def composer_status():
     from app.engines.auto_trader import get_state
@@ -242,6 +268,41 @@ async def local_base_audit_week(start_date: str, days: int = 5):
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+
+@router.get("/peak-prediction/preview")
+async def peak_prediction_preview(
+    symbol: str,
+    side: str,
+    strike: float,
+    entry_premium: float,
+    tier: str = "BUILDING",
+    base_premium: float = 0.0,
+    base_rel_pct: float = 0.0,
+):
+    """Preview peak LTP / % forecast for a strike (NIFTY + SENSEX)."""
+    from app.engines.peak_prediction import predict_peak
+    from app.routers.market import get_multi_snapshot
+
+    sym = str(symbol or "").upper()
+    if sym not in ("NIFTY", "SENSEX"):
+        raise HTTPException(status_code=400, detail="symbol must be NIFTY or SENSEX")
+    multi = await get_multi_snapshot()
+    snap = (multi.snapshots or {}).get(sym)
+    if snap is None:
+        raise HTTPException(status_code=404, detail=f"No snapshot for {sym}")
+
+    return predict_peak(
+        symbol=sym,
+        side=side,
+        strike=strike,
+        entry_premium=entry_premium,
+        snap=snap,
+        tier=tier,
+        base_premium=base_premium,
+        base_rel_pct=base_rel_pct,
+    )
 
 
 @router.post("/radar-replay/{date}")
