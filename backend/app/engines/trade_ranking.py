@@ -488,6 +488,8 @@ def ftv_authorization_policy(
                 or evidence.get("eliteBaseReady")
                 or evidence.get("vRipReady")
                 or evidence.get("buildingRipReady")
+                or evidence.get("slowGrindSuddenLift")
+                or evidence.get("fastBullishLocalBase")
                 or evidence.get("armedBaseSustainedLift")
                 or _pad_lane_pre_lift(evidence)
                 or s_early_ftv
