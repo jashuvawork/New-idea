@@ -126,6 +126,8 @@ _calibration = DailyCalibration()
 _capital_inr: float = 500_000
 _exit_claims: dict[str, object] = {}
 _exit_claims_guard = threading.Lock()
+_entry_claims: dict[str, object] = {}
+_entry_claims_guard = threading.Lock()
 
 
 def _release_exit_claim(trade_id: str, token: object) -> None:
@@ -145,6 +147,28 @@ def _try_claim_exit(trade_id: str) -> object | None:
     task = asyncio.current_task()
     if task is not None:
         task.add_done_callback(lambda _task: _release_exit_claim(trade_id, token))
+    return token
+
+
+def _release_entry_claim(candidate_key: str, token: object) -> None:
+    """Release only the matching selected-to-open attempt."""
+    with _entry_claims_guard:
+        if _entry_claims.get(candidate_key) is token:
+            _entry_claims.pop(candidate_key, None)
+
+
+def _try_claim_entry(candidate_key: str) -> object | None:
+    """Atomically allow one cycle through preorder for a contract."""
+    token = object()
+    with _entry_claims_guard:
+        if candidate_key in _entry_claims:
+            return None
+        _entry_claims[candidate_key] = token
+    task = asyncio.current_task()
+    if task is not None:
+        task.add_done_callback(
+            lambda _task: _release_entry_claim(candidate_key, token)
+        )
     return token
 
 
@@ -1160,7 +1184,7 @@ async def _open_from_candidate(
     if elite_full_lot:
         try:
             from app.engines.capital_allocator import (
-                lot_multiplier,
+                lot_multiplier as _lot_multiplier,
                 max_lots_for_capital,
             )
 
@@ -1174,7 +1198,7 @@ async def _open_from_candidate(
                 est_stop = float(
                     getattr(settings, "elite_full_lot_est_stop_points", 8.0) or 8.0
                 )
-                units = int(lot_multiplier(symbol) or 0)
+                units = int(_lot_multiplier(symbol) or 0)
                 risk_lots = (
                     int(risk_inr / max(1.0, est_stop * units)) if units > 0 and risk_inr > 0 else 0
                 )
@@ -3285,7 +3309,37 @@ async def process(
                 selected_ranking = (
                     (best.pretrade_meta or {}).get("causalRanking") or {}
                 )
-                await _record_funnel_event_safe({
+                entry_claim = _try_claim_entry(radar_key)
+                if entry_claim is None:
+                    reason = "entry_preorder_claim_conflict"
+                    if allocation_row is not None:
+                        allocation_row["status"] = "ABORTED"
+                        allocation_row["reason"] = reason
+                    await _record_funnel_event_safe({
+                        "event": "ENTRY_ABORTED",
+                        "key": radar_key,
+                        "symbol": best.symbol.upper(),
+                        "side": best.side.value,
+                        "strike": best.strike,
+                        "stage": "preorder",
+                        "cycleId": cycle_id,
+                        "reason": reason,
+                        "selectionMode": best.mode,
+                        "selectionScore": best.score,
+                    })
+                    skipped.append({
+                        "symbol": best.symbol,
+                        "side": best.side.value,
+                        "strike": best.strike,
+                        "reason": reason,
+                        "mode": best.mode,
+                        "score": best.score,
+                        "tier": getattr(best, "tier", None),
+                    })
+                    continue
+                entry_abort_recorded = False
+                try:
+                    await _record_funnel_event_safe({
                         "event": "SELECTED",
                         "key": radar_key,
                         "symbol": best.symbol.upper(),
@@ -3306,19 +3360,45 @@ async def process(
                             round(allocation.budgetInr, 2) if allocation else None
                         ),
                     })
-                opened, reason = await _open_from_candidate(
-                    best,
-                    state,
-                    client,
-                    news,
-                    snapshots,
-                    allocation=allocation,
-                )
-                if allocation_row is not None:
-                    allocation_row["status"] = "OPENED" if opened else "REJECTED"
-                    allocation_row["reason"] = reason
-                if not opened:
-                    await _record_funnel_event_safe({
+                    try:
+                        opened, reason = await _open_from_candidate(
+                            best,
+                            state,
+                            client,
+                            news,
+                            snapshots,
+                            allocation=allocation,
+                        )
+                    except BaseException as exc:
+                        cancelled = isinstance(exc, asyncio.CancelledError)
+                        reason = (
+                            "entry_cancelled"
+                            if cancelled
+                            else f"entry_exception_{type(exc).__name__}"
+                        )
+                        if allocation_row is not None:
+                            allocation_row["status"] = "ABORTED"
+                            allocation_row["reason"] = reason
+                        entry_abort_recorded = True
+                        await _record_funnel_event_safe({
+                            "event": "ENTRY_ABORTED",
+                            "key": radar_key,
+                            "symbol": best.symbol.upper(),
+                            "side": best.side.value,
+                            "strike": best.strike,
+                            "stage": "preorder",
+                            "cycleId": cycle_id,
+                            "reason": reason,
+                            "exceptionType": type(exc).__name__,
+                            "selectionMode": best.mode,
+                            "selectionScore": best.score,
+                        })
+                        raise
+                    if allocation_row is not None:
+                        allocation_row["status"] = "OPENED" if opened else "REJECTED"
+                        allocation_row["reason"] = reason
+                    if not opened:
+                        await _record_funnel_event_safe({
                             "event": "ORDER_REJECTED",
                             "key": radar_key,
                             "symbol": best.symbol.upper(),
@@ -3330,29 +3410,58 @@ async def process(
                             "selectionMode": best.mode,
                             "selectionScore": best.score,
                         })
-                    skipped.append({
-                        "symbol": best.symbol,
-                        "side": best.side.value,
-                        "strike": best.strike,
-                        "reason": reason,
-                        "mode": best.mode,
-                        "score": best.score,
-                        "tier": getattr(best, "tier", None),
-                    })
-                elif settings.enable_live_trading and client is not None:
-                    # Re-read broker funds after every acknowledged live fill before
-                    # assigning the next sleeve in this same radar cycle.
-                    try:
-                        await refresh_trading_capital(client, force=True)
-                    except Exception as exc:
                         skipped.append(
                             {
-                                "symbol": "SESSION",
-                                "reason": "post_fill_capital_refresh_failed",
-                                "message": str(exc),
+                                "symbol": best.symbol,
+                                "side": best.side.value,
+                                "strike": best.strike,
+                                "reason": reason,
+                                "mode": best.mode,
+                                "score": best.score,
+                                "tier": getattr(best, "tier", None),
                             }
                         )
-                        break
+                    elif settings.enable_live_trading and client is not None:
+                        # Re-read broker funds after every acknowledged live fill before
+                        # assigning the next sleeve in this same radar cycle.
+                        try:
+                            await refresh_trading_capital(client, force=True)
+                        except Exception as exc:
+                            skipped.append(
+                                {
+                                    "symbol": "SESSION",
+                                    "reason": "post_fill_capital_refresh_failed",
+                                    "message": str(exc),
+                                }
+                            )
+                            break
+                except BaseException as exc:
+                    if not entry_abort_recorded:
+                        cancelled = isinstance(exc, asyncio.CancelledError)
+                        reason = (
+                            "entry_cancelled"
+                            if cancelled
+                            else f"entry_exception_{type(exc).__name__}"
+                        )
+                        if allocation_row is not None:
+                            allocation_row["status"] = "ABORTED"
+                            allocation_row["reason"] = reason
+                        await _record_funnel_event_safe({
+                            "event": "ENTRY_ABORTED",
+                            "key": radar_key,
+                            "symbol": best.symbol.upper(),
+                            "side": best.side.value,
+                            "strike": best.strike,
+                            "stage": "preorder",
+                            "cycleId": cycle_id,
+                            "reason": reason,
+                            "exceptionType": type(exc).__name__,
+                            "selectionMode": best.mode,
+                            "selectionScore": best.score,
+                        })
+                    raise
+                finally:
+                    _release_entry_claim(radar_key, entry_claim)
                 if best.mode != "explosion" or not allocation_enabled:
                     break
 
