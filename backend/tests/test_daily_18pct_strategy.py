@@ -65,4 +65,4 @@ def test_accumulate_phase_low_confidence(_conf):
     assert limits.phase == "ACCUMULATE"
     assert limits.confidenceTier == "LOW"
     assert limits.allowExplosion is False
-    assert limits.allowQuickSideways is True
+    assert limits.allowQuickSideways is False

@@ -975,3 +975,27 @@ def test_replay_reports_v_base_moments_from_tape(tmp_path):
         abs(float(row.get("premium") or 0) - 131.0) < 1e-6
         for row in report["timeline"]
     ) or report["sampleBatches"] == 4
+
+
+def test_read_jsonl_tail_reads_only_recent_bytes(tmp_path):
+    """Tail-read must return the recent rows without parsing the whole (huge) tape."""
+    path = tmp_path / "tape.jsonl"
+    with path.open("w", encoding="utf-8") as handle:
+        for i in range(5000):
+            handle.write(json.dumps({"i": i, "pad": "x" * 200}) + "\n")
+
+    # Small cap → only the tail rows come back, and they parse cleanly (partial first
+    # line after the seek is discarded, so no JSONDecodeError leaks a bad row).
+    rows = radar_learning._read_jsonl_tail(path, max_bytes=8_000)
+    assert rows, "expected some tail rows"
+    assert rows[-1]["i"] == 4999
+    assert len(rows) < 5000  # did NOT read the whole file
+    assert all(isinstance(r.get("i"), int) for r in rows)
+
+    # max_bytes=0 falls back to reading everything.
+    all_rows = radar_learning._read_jsonl_tail(path, max_bytes=0)
+    assert len(all_rows) == 5000
+    assert all_rows[0]["i"] == 0
+
+    # Missing file → empty.
+    assert radar_learning._read_jsonl_tail(tmp_path / "nope.jsonl", max_bytes=1024) == []

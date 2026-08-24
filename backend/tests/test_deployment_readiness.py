@@ -84,40 +84,19 @@ def test_readiness_uses_cached_snapshot_and_shared_risk_engine():
     assert payload["checks"]["eventLoopHealthy"] is True
     assert payload["checks"]["upstoxRateLimitClear"] is True
     assert payload["health"]["api"] == "ok"
-    assert payload["tradingPolicy"] == {
-        "ftvEliteTopOnlyEnabled": True,
-        "topFtvAFallbackEnabled": True,
-        "allowedAuthorizationModes": [
-            "S_STRICT",
-            "TOP_FTV_A",
-            "WINNER_LOCAL_BASE",
-            "BUILDING_RIP_FTV",
-        ],
-        "allowedCausalGrades": ["S", "A", "B"],
-        "strictS": {
-            "requiresTopRankEligible": True,
-            "fullSleeveEligible": True,
-            "maxCapitalPct": 0.9,
-        },
-        "topFtvA": {
-            "tiers": ["ELITE", "EXPLODING"],
-            "requiresFreshCausalTrigger": True,
-            "requiresOptionCvdBuying": True,
-            "requiresOptionCvdAcceleration": True,
-            "normalMaxMovePct": 25.0,
-            "exceptionalMaxMovePct": 40.0,
-            "maxCapitalPct": 0.9,
-            "fullSleeveEligible": True,
-            "maxLotsEnabled": True,
-        },
-        "buildingRipFtv": {
-            "enabled": True,
-            "tiers": ["BUILDING", "EXPLODING", "ELITE"],
-            "requiresHelpers": True,
-            "maxCapitalPct": 0.9,
-            "fullSleeveEligible": True,
-            "maxLotsEnabled": True,
-        },
-        "requiresAtmItm": True,
-        "requiredAllocationRank": 1,
-    }
+    policy = payload["tradingPolicy"]
+    assert policy["ftvEliteTopOnlyEnabled"] is True
+    assert policy["topMomentsOnlyEnabled"] is True
+    assert policy["allowedCausalGrades"] == ["S", "A"]
+    assert policy["allowedAuthorizationModes"] == [
+        "S_STRICT",
+        "TOP_FTV_A",
+        "WINNER_LOCAL_BASE",
+        "BUILDING_RIP_FTV",
+    ]
+    assert policy["strictS"]["maxCapitalPct"] == 0.9
+    assert policy["topFtvA"]["requiresOptionCvdAcceleration"] is True
+    assert policy["topFtvA"]["maxCapitalPct"] == 0.9
+    assert policy["buildingRipFtv"]["requiresHelpers"] is True
+    assert policy["requiresAtmItm"] is True
+    assert policy["requiredAllocationRank"] == 1

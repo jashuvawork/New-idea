@@ -151,11 +151,9 @@ def test_worst_day_blocks_sensex_call_in_bearish_context(mock_policy):
 
 @patch("app.engines.expiry_day_guards.expiry_pm_itm_quick_active", return_value=True)
 @patch("app.engines.worst_day_guard.session_entry_policy", return_value=("BREAKOUT_ONLY", {}))
-def test_worst_day_allows_slow_bounce(mock_policy, mock_pm):
+def test_worst_day_blocks_slow_bounce_when_mode_disabled(mock_policy, mock_pm):
     snap = _sensex_snap()
-    # Worst-day scalp/slow-bounce now requires rank ≥ worst_day_scalp_min_rank (68);
-    # a genuine PM-ITM slow bounce clears it.
     cand = _Cand(snap=snap, score=70.0)
     ok, reason, _ = worst_day_allows_candidate(cand, AutoTraderState(), {"SENSEX": snap})
-    assert ok is True
-    assert reason == "ok"
+    assert ok is False
+    assert reason == "slow_bounce_disabled"

@@ -489,7 +489,8 @@ class Settings(BaseSettings):
     ict_armed_base_launch_min_velocity_9s: float = 1.5
     ict_armed_base_launch_min_absolute_volume: float = 25000.0
     ict_armed_base_launch_min_quality: float = 65.0
-    ict_armed_base_launch_min_score: float = 65.0
+    # Detector emits one-decimal scores; keep the 64.5 armed-launch boundary executable.
+    ict_armed_base_launch_min_score: float = 64.5
     ict_armed_base_launch_min_tqs: float = 50.0
     ict_armed_base_launch_rank_bonus: float = 16.0
     # Narrow pre-launch authorization: a stable ATM/ITM base may become executable
@@ -633,7 +634,8 @@ class Settings(BaseSettings):
     first_lift_trade_min_volume_surge: float = 2.0
     first_lift_trade_min_velocity_3s: float = 1.5
     first_lift_trade_min_velocity_9s: float = 1.0
-    first_lift_trade_max_move_pct: float = 25.0
+    # Match the detector's causal first-lift band; >40% remains a chase.
+    first_lift_trade_max_move_pct: float = 40.0
     # Helper-confirmed lane: "on the radar as BUILDING and suddenly something is helping to
     # go FTV." When enough INDEPENDENT confirmations agree (volume surge/awaken, displacement,
     # premium FVG, flat->vertical structure, chart-align, breadth-align) on a name at its
@@ -647,6 +649,11 @@ class Settings(BaseSettings):
     first_lift_helper_confirm_min_score: float = 45.0
     first_lift_helper_confirm_min_velocity_3s: float = 1.2
     first_lift_helper_confirm_min_velocity_9s: float = 0.6
+    # Shallow v3 dip on confirmed first-lift/V-rip at local base — ICT pad is
+    # proven; do not treat a micro pullback as FAILED_LAUNCH (Aug24 PUT 24450).
+    first_lift_local_base_micro_pullback_enabled: bool = True
+    first_lift_local_base_micro_pullback_min_velocity_3s: float = -1.2
+    first_lift_local_base_micro_pullback_min_velocity_9s: float = -0.5
     building_rip_helper_override_worst_day: bool = True
     first_lift_trade_min_momentum_shift_pct: float = 0.03
     # ATM/ITM premium-led first lift: stronger option evidence may lead a lagging
@@ -664,6 +671,9 @@ class Settings(BaseSettings):
     # Carry the same strict first-lift proof through the final live chart/MTF
     # monitor. Premium fading and all non-chart execution checks remain active.
     first_lift_bypasses_execution_chart_enabled: bool = True
+    # ICT-confirmed first lift at local base when v3 snapshot is flat (0) — volumeAwaken
+    # + flat→vertical structure already prove the pad; do not downgrade to B grade.
+    first_lift_local_base_flat_velocity_enabled: bool = True
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0
@@ -2169,12 +2179,21 @@ class Settings(BaseSettings):
     radar_archive_enabled: bool = True
     radar_archive_dir: str = ""  # default: {trade_store_dir}/radar_archives
     radar_archive_top_n_per_day: int = 100
-    radar_archive_retention_days: int = 365
+    # Keep ~1 month of daily archives, not a year. A 50GB disk cannot hold 365 days of
+    # premium tapes/zips; unbounded retention fills the disk and the backend starts hanging
+    # (writes stall, restarts fail). 30 days is ample for review/replay.
+    radar_archive_retention_days: int = 30
     radar_learning_enabled: bool = True
-    # Persist a premium/alert sample on every observation cycle by default so
-    # V-base lifts (and mid-rip false bases) can be replayed from the daily ZIP.
-    # Set >0 to throttle (legacy 15s). 0 = write every record_market_observations call.
-    radar_premium_tape_sample_seconds: int = 0
+    # Throttle the all-strike premium tape to one sample / N seconds. It used to write EVERY
+    # observation cycle (0), producing 1GB+/day tapes that (a) fill the disk and (b) make the
+    # startup restore read a multi-hundred-MB file — on a watchdog restart that becomes a
+    # slow/OOM restart loop. 10s granularity still replays FTV/V base lifts fine, and the LIVE
+    # trigger never uses the tape. Set 0 only for short debug windows.
+    radar_premium_tape_sample_seconds: int = 10
+    # Cap how much of the (append-only, time-ordered) premium tape the startup restore reads.
+    # It only needs the last ~35 min, so tail-read at most this many bytes instead of parsing
+    # the whole intraday file — bounds startup time/memory regardless of tape size.
+    radar_restore_tail_max_bytes: int = 67_108_864  # 64 MiB
     radar_alerts_tape_enabled: bool = True
     radar_outcome_horizons_seconds_csv: str = "60,180,300,900,1800"
     radar_outcome_target_pct: float = 20.0
