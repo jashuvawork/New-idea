@@ -233,6 +233,11 @@ def evaluate_local_base_entry(
             "building_rip_bullish_ready",
             "fast_bullish_local_base_ready",
             "slow_grind_sudden_lift_ready",
+            "squeeze_release_ready",
+            "index_led_option_lag_ready",
+            "stealth_cvd_coil_ready",
+            "micro_pullback_retest_ready",
+            "premium_fvg_pad_ready",
         ):
             return (
                 False,

@@ -176,6 +176,35 @@ def _day_mode_is_worst(day_mode: str) -> bool:
     return "WORST" in str(day_mode or "").upper()
 
 
+def _pad_lane_pre_lift(evidence: Mapping[str, Any]) -> bool:
+    return bool(
+        evidence.get("slowGrindSuddenLift")
+        or evidence.get("fastBullishLocalBase")
+        or evidence.get("squeezeRelease")
+        or evidence.get("indexLedOptionLag")
+        or evidence.get("stealthCvdCoil")
+        or evidence.get("microPullbackRetest")
+        or evidence.get("premiumFvgPad")
+    )
+
+
+def _pad_lane_cold_velocity_ok(evidence: Mapping[str, Any], v3: float, v9: float) -> bool:
+    """Pre-lift pad lanes that allow mildly negative / flat velocity snapshots."""
+    if evidence.get("slowGrindSuddenLift") and -0.8 <= v3 <= 1.5:
+        return True
+    if evidence.get("stealthCvdCoil") and -0.5 <= v3 <= 1.0:
+        return True
+    if evidence.get("microPullbackRetest") and -1.2 <= v3 <= 0.5 and v9 >= -0.5:
+        return True
+    if evidence.get("squeezeRelease") and v3 <= 1.5:
+        return True
+    if evidence.get("indexLedOptionLag") and v3 <= 1.2:
+        return True
+    if evidence.get("premiumFvgPad") and v3 <= 2.0:
+        return True
+    return False
+
+
 def _top_ftv_a_pad_capture_lane(
     evidence: Mapping[str, Any],
     *,
@@ -192,6 +221,11 @@ def _top_ftv_a_pad_capture_lane(
         or evidence.get("ictVolumeAwakening")
         or evidence.get("fastBullishLocalBase")
         or evidence.get("slowGrindSuddenLift")
+        or evidence.get("squeezeRelease")
+        or evidence.get("indexLedOptionLag")
+        or evidence.get("stealthCvdCoil")
+        or evidence.get("microPullbackRetest")
+        or evidence.get("premiumFvgPad")
     )
 
 
@@ -297,6 +331,21 @@ def ftv_authorization_policy(
     fast_bullish_ftv_min_explosion_score: float = 48.0,
     fast_bullish_ftv_min_velocity_3s: float = 0.5,
     fast_bullish_ftv_max_capital_pct: float = 0.90,
+    squeeze_release_ftv_enabled: bool = True,
+    squeeze_release_ftv_min_explosion_score: float = 48.0,
+    squeeze_release_ftv_max_capital_pct: float = 0.90,
+    index_led_option_lag_ftv_enabled: bool = True,
+    index_led_option_lag_ftv_min_explosion_score: float = 48.0,
+    index_led_option_lag_ftv_max_capital_pct: float = 0.90,
+    stealth_cvd_coil_ftv_enabled: bool = True,
+    stealth_cvd_coil_ftv_min_explosion_score: float = 48.0,
+    stealth_cvd_coil_ftv_max_capital_pct: float = 0.90,
+    micro_pullback_retest_ftv_enabled: bool = True,
+    micro_pullback_retest_ftv_min_explosion_score: float = 48.0,
+    micro_pullback_retest_ftv_max_capital_pct: float = 0.90,
+    premium_fvg_pad_ftv_enabled: bool = True,
+    premium_fvg_pad_ftv_min_explosion_score: float = 50.0,
+    premium_fvg_pad_ftv_max_capital_pct: float = 0.90,
     top_moments_only_enabled: bool = True,
     top_moments_min_grade: str = "A",
     first_lift_local_base_micro_pullback_enabled: bool = True,
@@ -320,8 +369,7 @@ def ftv_authorization_policy(
         or evidence.get("armedBaseLaunch")
         or evidence.get("vRipReady")
         or evidence.get("buildingRipReady")
-        or evidence.get("slowGrindSuddenLift")
-        or evidence.get("fastBullishLocalBase")
+        or _pad_lane_pre_lift(evidence)
     )
     if not actual_ftv:
         return blocked("ftv_elite_top_only_requires_ftv")
@@ -347,6 +395,11 @@ def ftv_authorization_policy(
         evidence.get("slowGrindSuddenLift")
         and -0.8 <= _number(evidence.get("velocity3s")) <= 1.5
     )
+    pad_lane_flat = _pad_lane_cold_velocity_ok(
+        evidence,
+        _number(evidence.get("velocity3s")),
+        _number(evidence.get("velocity9s")),
+    )
     cold_velocity = (
         _number(evidence.get("velocity3s")) < 0
         or _number(evidence.get("velocity9s")) < 0
@@ -355,7 +408,7 @@ def ftv_authorization_policy(
         str(ranking.get("grade") or "").upper() == "REJECT"
         or evidence.get("faded")
         or evidence.get("exhaustedReentry")
-        or (cold_velocity and not micro_pullback and not slow_grind_flat)
+        or (cold_velocity and not micro_pullback and not slow_grind_flat and not pad_lane_flat)
         or timing_action in {"block", "reject"}
         or timing in {
             "FAILED_LAUNCH",
@@ -435,9 +488,8 @@ def ftv_authorization_policy(
                 or evidence.get("eliteBaseReady")
                 or evidence.get("vRipReady")
                 or evidence.get("buildingRipReady")
-                or evidence.get("slowGrindSuddenLift")
-                or evidence.get("fastBullishLocalBase")
                 or evidence.get("armedBaseSustainedLift")
+                or _pad_lane_pre_lift(evidence)
                 or s_early_ftv
             ):
                 return blocked("ftv_s_strict_requires_local_base_trigger")
@@ -482,6 +534,11 @@ def ftv_authorization_policy(
         or evidence.get("armedBaseSustainedLift")
         or evidence.get("fastBullishLocalBase")
         or evidence.get("slowGrindSuddenLift")
+        or evidence.get("squeezeRelease")
+        or evidence.get("indexLedOptionLag")
+        or evidence.get("stealthCvdCoil")
+        or evidence.get("microPullbackRetest")
+        or evidence.get("premiumFvgPad")
     )
     early_ftv_heat = bool(
         evidence.get("orderflowPositive")
@@ -746,6 +803,94 @@ def ftv_authorization_policy(
                 max_capital_pct=fast_bullish_ftv_max_capital_pct,
             )
 
+    def _pad_lane_ftv_auth(
+        *,
+        enabled: bool,
+        flag: bool,
+        mode: str,
+        min_score: float,
+        max_capital: float,
+        min_v3: float | None = None,
+        max_v3: float | None = None,
+        block_prefix: str,
+    ) -> FtvAuthorization | None:
+        if not (enabled and flag):
+            return None
+        ok = (
+            grade in {"A", "B", "S"}
+            and tier in {"BUILDING", "EXPLODING", "ELITE"}
+            and explosion_score >= min_score
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        )
+        if min_v3 is not None and v3 < min_v3:
+            ok = False
+        if max_v3 is not None and v3 > max_v3:
+            ok = False
+        if top_moments_only_enabled and grade == "B":
+            ok = False
+        if not ok:
+            return None
+        if require_allocation_rank_one and allocation_rank != 1:
+            return blocked(f"{block_prefix}_requires_allocation_rank_1")
+        expiry_block = _expiry_worst_policy_ok(
+            tier=tier, quality=quality, score=explosion_score, v3=v3,
+        )
+        if expiry_block is not None:
+            return expiry_block
+        return FtvAuthorization(mode, "ok", max_capital_pct=max_capital)
+
+    for auth in (
+        _pad_lane_ftv_auth(
+            enabled=squeeze_release_ftv_enabled,
+            flag=bool(evidence.get("squeezeRelease")),
+            mode="SQUEEZE_RELEASE_FTV",
+            min_score=squeeze_release_ftv_min_explosion_score,
+            max_capital=squeeze_release_ftv_max_capital_pct,
+            max_v3=1.5,
+            block_prefix="squeeze_release_ftv",
+        ),
+        _pad_lane_ftv_auth(
+            enabled=index_led_option_lag_ftv_enabled,
+            flag=bool(evidence.get("indexLedOptionLag")),
+            mode="INDEX_LED_OPTION_LAG_FTV",
+            min_score=index_led_option_lag_ftv_min_explosion_score,
+            max_capital=index_led_option_lag_ftv_max_capital_pct,
+            max_v3=1.2,
+            block_prefix="index_led_option_lag_ftv",
+        ),
+        _pad_lane_ftv_auth(
+            enabled=stealth_cvd_coil_ftv_enabled,
+            flag=bool(evidence.get("stealthCvdCoil")),
+            mode="STEALTH_CVD_COIL_FTV",
+            min_score=stealth_cvd_coil_ftv_min_explosion_score,
+            max_capital=stealth_cvd_coil_ftv_max_capital_pct,
+            min_v3=-0.5,
+            max_v3=1.0,
+            block_prefix="stealth_cvd_coil_ftv",
+        ),
+        _pad_lane_ftv_auth(
+            enabled=micro_pullback_retest_ftv_enabled,
+            flag=bool(evidence.get("microPullbackRetest")),
+            mode="MICRO_PULLBACK_RETEST_FTV",
+            min_score=micro_pullback_retest_ftv_min_explosion_score,
+            max_capital=micro_pullback_retest_ftv_max_capital_pct,
+            min_v3=-1.2,
+            max_v3=0.5,
+            block_prefix="micro_pullback_retest_ftv",
+        ),
+        _pad_lane_ftv_auth(
+            enabled=premium_fvg_pad_ftv_enabled,
+            flag=bool(evidence.get("premiumFvgPad")),
+            mode="PREMIUM_FVG_PAD_FTV",
+            min_score=premium_fvg_pad_ftv_min_explosion_score,
+            max_capital=premium_fvg_pad_ftv_max_capital_pct,
+            max_v3=2.0,
+            block_prefix="premium_fvg_pad_ftv",
+        ),
+    ):
+        if auth is not None:
+            return auth
+
     # BUILDING sudden lift with helpers — do not wait for ELITE/EXPLODING.
     # Readiness already proved mid-rip/local-base heat; CHASE timing is OK here.
     if building_rip_ftv_enabled and bool(evidence.get("buildingRipReady")):
@@ -852,6 +997,21 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "fast_bullish_ftv_min_explosion_score",
         "fast_bullish_ftv_min_velocity_3s",
         "fast_bullish_ftv_max_capital_pct",
+        "squeeze_release_ftv_enabled",
+        "squeeze_release_ftv_min_explosion_score",
+        "squeeze_release_ftv_max_capital_pct",
+        "index_led_option_lag_ftv_enabled",
+        "index_led_option_lag_ftv_min_explosion_score",
+        "index_led_option_lag_ftv_max_capital_pct",
+        "stealth_cvd_coil_ftv_enabled",
+        "stealth_cvd_coil_ftv_min_explosion_score",
+        "stealth_cvd_coil_ftv_max_capital_pct",
+        "micro_pullback_retest_ftv_enabled",
+        "micro_pullback_retest_ftv_min_explosion_score",
+        "micro_pullback_retest_ftv_max_capital_pct",
+        "premium_fvg_pad_ftv_enabled",
+        "premium_fvg_pad_ftv_min_explosion_score",
+        "premium_fvg_pad_ftv_max_capital_pct",
         "top_moments_only_enabled",
         "top_moments_min_grade",
         "first_lift_local_base_micro_pullback_enabled",
@@ -939,6 +1099,21 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     slow_grind_sudden_lift = bool(evidence.get("slowGrindSuddenLift")) and not bool(
         evidence.get("midRipCoil")
     )
+    squeeze_release = bool(evidence.get("squeezeRelease")) and not bool(
+        evidence.get("midRipCoil")
+    )
+    index_led_option_lag = bool(evidence.get("indexLedOptionLag")) and not bool(
+        evidence.get("midRipCoil")
+    )
+    stealth_cvd_coil = bool(evidence.get("stealthCvdCoil")) and not bool(
+        evidence.get("midRipCoil")
+    )
+    micro_pullback_retest = bool(evidence.get("microPullbackRetest")) and not bool(
+        evidence.get("midRipCoil")
+    )
+    premium_fvg_pad = bool(evidence.get("premiumFvgPad")) and not bool(
+        evidence.get("midRipCoil")
+    )
     flat_vertical = bool(evidence.get("flatThenVertical"))
     active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
@@ -967,24 +1142,12 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         score += min(10.0, v3 * 3.0)
         reasons.append(f"positive_v3_{v3:.2f}")
     elif v3 < 0:
-        if micro_pullback or (
-            slow_grind_sudden_lift and v3 >= -0.8
-        ):
+        pad_flat = _pad_lane_cold_velocity_ok(evidence, v3, v9)
+        if micro_pullback or pad_flat:
             score -= 5.0
-            penalties.append(
-                {
-                    "code": "first_lift_micro_pullback"
-                    if micro_pullback
-                    else "slow_grind_flat_coil",
-                    "points": 5.0,
-                    "value": round(v3, 2),
-                }
-            )
-            reasons.append(
-                f"first_lift_micro_pullback_v3_{v3:.2f}"
-                if micro_pullback
-                else f"slow_grind_flat_coil_v3_{v3:.2f}"
-            )
+            code = "first_lift_micro_pullback" if micro_pullback else "pad_lane_flat_coil"
+            penalties.append({"code": code, "points": 5.0, "value": round(v3, 2)})
+            reasons.append(f"{code}_v3_{v3:.2f}")
         else:
             score -= 30.0
             penalties.append({"code": "negative_velocity", "points": 30.0, "value": round(v3, 2)})
@@ -1009,6 +1172,21 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     elif slow_grind_sudden_lift:
         score += 12.0
         reasons.append("slow_grind_sudden_lift")
+    elif squeeze_release:
+        score += 11.0
+        reasons.append("squeeze_release")
+    elif index_led_option_lag:
+        score += 11.0
+        reasons.append("index_led_option_lag")
+    elif stealth_cvd_coil:
+        score += 10.0
+        reasons.append("stealth_cvd_coil")
+    elif micro_pullback_retest:
+        score += 9.0
+        reasons.append("micro_pullback_retest")
+    elif premium_fvg_pad:
+        score += 11.0
+        reasons.append("premium_fvg_pad")
     elif building_rip_ready:
         score += 9.0
         reasons.append("building_rip_bullish")
@@ -1051,8 +1229,8 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         rejected = True
         penalties.append({"code": "failed_launch", "points": 45.0})
         score -= 45.0
-    if v3 < 0 and not micro_pullback and not (
-        slow_grind_sudden_lift and v3 >= -0.8
+    if v3 < 0 and not micro_pullback and not _pad_lane_cold_velocity_ok(
+        evidence, v3, v9
     ):
         rejected = True
     if exhausted:
@@ -1122,11 +1300,16 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             or building_rip_ready
             or slow_grind_sudden_lift
             or fast_bullish_local_base
+            or squeeze_release
+            or index_led_option_lag
+            or stealth_cvd_coil
+            or micro_pullback_retest
+            or premium_fvg_pad
         )
         and (
             v3 > 0
             or flat_velocity_lag
-            or (slow_grind_sudden_lift and v3 >= -0.8)
+            or _pad_lane_cold_velocity_ok(evidence, v3, v9)
             or (fast_bullish_local_base and v3 >= 0)
         )
         and not rejected
@@ -1170,6 +1353,11 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "vRipReady": v_rip_ready,
             "fastBullishLocalBase": fast_bullish_local_base,
             "slowGrindSuddenLift": slow_grind_sudden_lift,
+            "squeezeRelease": squeeze_release,
+            "indexLedOptionLag": index_led_option_lag,
+            "stealthCvdCoil": stealth_cvd_coil,
+            "microPullbackRetest": micro_pullback_retest,
+            "premiumFvgPad": premium_fvg_pad,
             "buildingRipReady": building_rip_ready,
             "buildingRipHelpersOk": bool(
                 evidence.get("buildingRipHelpersOk")
@@ -1282,6 +1470,21 @@ def rank_entry_candidate(
         "slowGrindSuddenLift": bool(
             alert.get("slowGrindSuddenLiftReady")
             or alert.get("ictSlowGrindSuddenLift")
+        ),
+        "squeezeRelease": bool(
+            alert.get("squeezeReleaseReady") or alert.get("ictSqueezeRelease")
+        ),
+        "indexLedOptionLag": bool(
+            alert.get("indexLedOptionLagReady") or alert.get("ictIndexLedOptionLag")
+        ),
+        "stealthCvdCoil": bool(
+            alert.get("stealthCvdCoilReady") or alert.get("ictStealthCvdCoil")
+        ),
+        "microPullbackRetest": bool(
+            alert.get("microPullbackRetestReady") or alert.get("ictMicroPullbackRetest")
+        ),
+        "premiumFvgPad": bool(
+            alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")
         ),
         "buildingRipReady": alert.get("ictBuildingRipReady"),
         "buildingRipHelpersOk": bool(

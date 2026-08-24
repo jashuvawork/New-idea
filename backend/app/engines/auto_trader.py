@@ -1114,7 +1114,18 @@ async def _open_from_candidate(
         if (
             policy_decision is not None
             and policy_decision.mode
-            in {"TOP_FTV_A", "WINNER_LOCAL_BASE", "BUILDING_RIP_FTV", "SLOW_GRIND_FTV", "FAST_BULLISH_FTV"}
+            in {
+                "TOP_FTV_A",
+                "WINNER_LOCAL_BASE",
+                "BUILDING_RIP_FTV",
+                "SLOW_GRIND_FTV",
+                "FAST_BULLISH_FTV",
+                "SQUEEZE_RELEASE_FTV",
+                "INDEX_LED_OPTION_LAG_FTV",
+                "STEALTH_CVD_COIL_FTV",
+                "MICRO_PULLBACK_RETEST_FTV",
+                "PREMIUM_FVG_PAD_FTV",
+            }
             and policy_decision.max_capital_pct is not None
         ):
             ordinary_pct = min(ordinary_pct, float(policy_decision.max_capital_pct))
@@ -1827,25 +1838,50 @@ async def _open_from_candidate(
             # Authorized FTV at local base — always ride toward max points.
             ctx_extra["maxProfitCapture"] = True
             ctx_extra["momentType"] = "flat_then_vertical"
-        _pad_lane_reasons = {
-            "slow_grind_sudden_lift_ready",
-            "fast_bullish_local_base_ready",
-            "v_rip_session_low_ready",
+        from app.engines.pad_lane_capture import ALL_PAD_LANE_REASONS
+
+        _pad_lane_reasons = set(ALL_PAD_LANE_REASONS) | {
             "building_local_base_lift_ready",
+        }
+        _pad_lane_moment_stamps = {
+            "slow_grind_sudden_lift_ready": (
+                "slow_grind_sudden_lift",
+                {"slowGrindSuddenLift": True},
+            ),
+            "fast_bullish_local_base_ready": (
+                "fast_bullish_local_base",
+                {"fastBullishLocalBase": True},
+            ),
+            "v_rip_session_low_ready": ("v_rip_session_local_base", {}),
+            "building_local_base_lift_ready": ("building_local_base_lift", {}),
+            "squeeze_release_ready": (
+                "squeeze_release",
+                {"squeezeRelease": True},
+            ),
+            "index_led_option_lag_ready": (
+                "index_led_option_lag",
+                {"indexLedOptionLag": True},
+            ),
+            "stealth_cvd_coil_ready": (
+                "stealth_cvd_coil",
+                {"stealthCvdCoil": True},
+            ),
+            "micro_pullback_retest_ready": (
+                "micro_pullback_retest",
+                {"microPullbackRetest": True},
+            ),
+            "premium_fvg_pad_ready": (
+                "premium_fvg_pad",
+                {"premiumFvgPad": True},
+            ),
         }
         if lift_readiness_reason in _pad_lane_reasons:
             ctx_extra["maxProfitCapture"] = True
             ctx_extra["vBaseFtvRunner"] = True
-            if lift_readiness_reason == "slow_grind_sudden_lift_ready":
-                ctx_extra["slowGrindSuddenLift"] = True
-                ctx_extra["momentType"] = "slow_grind_sudden_lift"
-            elif lift_readiness_reason == "fast_bullish_local_base_ready":
-                ctx_extra["fastBullishLocalBase"] = True
-                ctx_extra["momentType"] = "fast_bullish_local_base"
-            elif lift_readiness_reason == "v_rip_session_low_ready":
-                ctx_extra["momentType"] = "v_rip_session_local_base"
-            elif lift_readiness_reason == "building_local_base_lift_ready":
-                ctx_extra["momentType"] = "building_local_base_lift"
+            stamp = _pad_lane_moment_stamps.get(lift_readiness_reason)
+            if stamp is not None:
+                ctx_extra["momentType"] = stamp[0]
+                ctx_extra.update(stamp[1])
         # ELITE always rides to max TP (peak-capture hold) when enabled — the top tier is
         # exactly the runner we must not clip early.
         if bool(getattr(settings, "elite_ride_max_tp_enabled", True)) and str(
@@ -1906,6 +1942,11 @@ async def _open_from_candidate(
                             "fast_bullish_local_base",
                             "v_rip_session_local_base",
                             "building_local_base_lift",
+                            "squeeze_release",
+                            "index_led_option_lag",
+                            "stealth_cvd_coil",
+                            "micro_pullback_retest",
+                            "premium_fvg_pad",
                         )
                     )
                 )
@@ -3035,21 +3076,28 @@ def _pad_lane_ftv_policy_max_lots(
     policy_decision: Any,
     allocation: RankedAllocation | None,
 ) -> tuple[int, bool]:
-    """Max lots for pre-lift slow-grind / fast-bullish pad sleeves."""
+    """Max lots for pre-lift pad sleeves (slow-grind through premium FVG pad)."""
+    from app.engines.pad_lane_capture import PAD_LANE_FTV_MODES
+
     settings = get_settings()
     mode = str(getattr(policy_decision, "mode", "") or "")
-    if mode == "SLOW_GRIND_FTV":
-        if not bool(getattr(settings, "slow_grind_ftv_force_max_lots", True)):
-            return int(lots), False
-    elif mode == "FAST_BULLISH_FTV":
-        if not bool(getattr(settings, "fast_bullish_ftv_force_max_lots", True)):
-            return int(lots), False
-    else:
+    if mode not in PAD_LANE_FTV_MODES:
+        return int(lots), False
+
+    force_attr = {
+        "SLOW_GRIND_FTV": "slow_grind_ftv_force_max_lots",
+        "FAST_BULLISH_FTV": "fast_bullish_ftv_force_max_lots",
+        "SQUEEZE_RELEASE_FTV": "squeeze_release_ftv_force_max_lots",
+        "INDEX_LED_OPTION_LAG_FTV": "index_led_option_lag_ftv_force_max_lots",
+        "STEALTH_CVD_COIL_FTV": "stealth_cvd_coil_ftv_force_max_lots",
+        "MICRO_PULLBACK_RETEST_FTV": "micro_pullback_retest_ftv_force_max_lots",
+        "PREMIUM_FVG_PAD_FTV": "premium_fvg_pad_ftv_force_max_lots",
+    }.get(mode, "")
+    if force_attr and not bool(getattr(settings, force_attr, True)):
         return int(lots), False
 
     authorized = bool(
         policy_decision is not None
-        and mode in {"SLOW_GRIND_FTV", "FAST_BULLISH_FTV"}
         and policy_decision.allowed
         and policy_decision.max_capital_pct is not None
         and allocation is not None

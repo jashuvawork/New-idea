@@ -1027,6 +1027,11 @@ def _is_vbase_ftv_runner(trade: PaperTrade) -> bool:
         or ctx.get("armedBaseCapture")
         or ctx.get("slowGrindSuddenLift")
         or ctx.get("fastBullishLocalBase")
+        or ctx.get("squeezeRelease")
+        or ctx.get("indexLedOptionLag")
+        or ctx.get("stealthCvdCoil")
+        or ctx.get("microPullbackRetest")
+        or ctx.get("premiumFvgPad")
     ):
         return False
     rel = ctx.get("localBaseBaseRelPct")

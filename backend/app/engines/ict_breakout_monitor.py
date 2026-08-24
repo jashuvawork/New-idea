@@ -1066,6 +1066,18 @@ def first_lift_entry_readiness(
     if building_ok:
         return True, building_reason
 
+    from app.engines.pad_lane_capture import extended_pad_lane_readiness
+
+    ext_ok, ext_reason = extended_pad_lane_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=row,
+        settings=settings,
+    )
+    if ext_ok:
+        return True, ext_reason
+
     slow_ok, slow_reason = _slow_grind_sudden_lift_readiness(
         snap=snap,
         event=event,
