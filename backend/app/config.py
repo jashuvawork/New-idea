@@ -2180,6 +2180,13 @@ class Settings(BaseSettings):
     # It only needs the last ~35 min, so tail-read at most this many bytes instead of parsing
     # the whole intraday file — bounds startup time/memory regardless of tape size.
     radar_restore_tail_max_bytes: int = 67_108_864  # 64 MiB
+    # Hard periodic wipe: delete EVERY radar data file (archives, tapes, telemetry) every N
+    # days so the disk stays bounded no matter the per-day size. Runs once at the purge hour
+    # (pre-market, so the new session starts fresh). Scoped to the radar-archive dir only;
+    # trade records are untouched. First run seeds the timer (no surprise wipe on deploy).
+    radar_data_purge_enabled: bool = True
+    radar_data_purge_interval_days: int = 6
+    radar_data_purge_hour: int = 6  # IST, before market open
     radar_alerts_tape_enabled: bool = True
     radar_outcome_horizons_seconds_csv: str = "60,180,300,900,1800"
     radar_outcome_target_pct: float = 20.0

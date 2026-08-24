@@ -50,6 +50,94 @@ def _now() -> datetime:
     return datetime.now(IST)
 
 
+_DATA_PURGE_STATE_FILE = "data_purge.state"
+
+
+def _data_purge_state_path() -> Path:
+    return get_archive_dir() / _DATA_PURGE_STATE_FILE
+
+
+def _read_data_purge_date() -> "datetime.date | None":
+    try:
+        raw = _data_purge_state_path().read_text(encoding="utf-8").strip()[:10]
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except (OSError, ValueError):
+        return None
+
+
+def _write_data_purge_date(now: datetime) -> None:
+    try:
+        _data_purge_state_path().write_text(now.date().isoformat(), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def data_purge_due(
+    now: datetime | None = None,
+    *,
+    interval_days: int | None = None,
+) -> bool:
+    """True when >= interval_days have passed since the last full radar-data purge.
+
+    First run seeds the timer (writes the state file, returns False) so a deploy never
+    triggers a surprise wipe — the first purge lands one interval later.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "radar_data_purge_enabled", True)):
+        return False
+    interval = int(
+        interval_days
+        if interval_days is not None
+        else getattr(settings, "radar_data_purge_interval_days", 6) or 6
+    )
+    if interval <= 0:
+        return False
+    current = now or _now()
+    last = _read_data_purge_date()
+    if last is None:
+        _write_data_purge_date(current)
+        return False
+    return (current.date() - last).days >= interval
+
+
+def purge_all_radar_data(now: datetime | None = None) -> dict[str, Any]:
+    """Delete EVERY radar data file (archive zips, premium/alert tapes, telemetry).
+
+    The tapes/archives exist only for end-of-day replay & review — the LIVE detector never
+    reads them — so a periodic full wipe caps disk usage without affecting trading. Scoped
+    to the radar-archive directory only; trade records elsewhere are untouched. The purge
+    timer state file itself is preserved so the cadence keeps running.
+    """
+    current = now or _now()
+    directory = get_archive_dir()
+    state_path = _data_purge_state_path()
+    removed = 0
+    freed = 0
+    errors = 0
+    for path in directory.rglob("*"):
+        if path == state_path or not path.is_file():
+            continue
+        try:
+            freed += path.stat().st_size
+            path.unlink()
+            removed += 1
+        except OSError:
+            errors += 1
+    _write_data_purge_date(current)
+    logger.info(
+        "radar_data_purge: removed %d files, freed %.1f MB (%d errors)",
+        removed,
+        freed / 1_000_000.0,
+        errors,
+    )
+    return {
+        "removed": removed,
+        "freedBytes": freed,
+        "errors": errors,
+        "at": current.isoformat(),
+    }
+
+
 def _json_default(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")

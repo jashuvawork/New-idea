@@ -58,6 +58,55 @@ def _alert(
     }
 
 
+def test_data_purge_every_interval_days(tmp_path):
+    """Seed the timer on first run, then wipe every file once the interval elapses."""
+    from datetime import timedelta
+
+    import app.services.radar_archive as ra
+
+    settings = _settings(
+        tmp_path,
+        radar_data_purge_enabled=True,
+        radar_data_purge_interval_days=6,
+    )
+    with patch.object(ra, "get_settings", return_value=settings):
+        arch = ra.get_archive_dir()
+        telemetry = arch / "telemetry"
+        telemetry.mkdir(parents=True, exist_ok=True)
+        (arch / "radar-2026-08-18.zip").write_bytes(b"zipdata")
+        (telemetry / "2026-08-18.premium.jsonl").write_text("x" * 1000)
+        (telemetry / "2026-08-18.funnel.jsonl").write_text("y" * 500)
+
+        day0 = datetime(2026, 8, 24, 6, 0, tzinfo=IST)
+        # First run seeds the timer — nothing deleted yet.
+        assert ra.data_purge_due(day0) is False
+        assert (arch / "radar-2026-08-18.zip").exists()
+
+        # Not yet due at day 5.
+        assert ra.data_purge_due(day0 + timedelta(days=5)) is False
+
+        # Due at day 6 → purge removes every data file, keeps the state file.
+        due_day = day0 + timedelta(days=6)
+        assert ra.data_purge_due(due_day) is True
+        res = ra.purge_all_radar_data(due_day)
+        assert res["removed"] == 3
+        assert res["freedBytes"] >= 1500
+        assert not (arch / "radar-2026-08-18.zip").exists()
+        assert not (telemetry / "2026-08-18.premium.jsonl").exists()
+        assert ra._data_purge_state_path().exists()
+
+        # Timer reset after the purge — not due again the same day.
+        assert ra.data_purge_due(due_day) is False
+
+
+def test_data_purge_disabled_never_due(tmp_path):
+    import app.services.radar_archive as ra
+
+    settings = _settings(tmp_path, radar_data_purge_enabled=False)
+    with patch.object(ra, "get_settings", return_value=settings):
+        assert ra.data_purge_due(datetime(2026, 8, 24, 6, 0, tzinfo=IST)) is False
+
+
 def _snap(alerts):
     return SimpleNamespace(
         dataAvailable=True,

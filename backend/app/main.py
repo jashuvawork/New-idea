@@ -73,6 +73,7 @@ async def _background_monitor():
     last_eod_playbook_date: Optional[str] = None
     last_radar_finalize_attempt_mono = 0.0
     last_eod_learning_date: Optional[str] = None
+    last_data_purge_check_date: Optional[str] = None
 
     while True:
         # Yield so /health and heartbeat can interleave under heavy sync work.
@@ -243,6 +244,37 @@ async def _background_monitor():
                             record_component_error("dailyRadarReview", exc)
                         except Exception:
                             pass
+
+            # Hard periodic wipe: delete EVERY radar data file (archives, tapes, telemetry)
+            # every radar_data_purge_interval_days so the disk stays bounded no matter the
+            # per-day size. Runs pre-market (purge hour) so the new session starts fresh.
+            # data_purge_due self-guards the interval; the daily check-date avoids re-running.
+            if bool(getattr(settings, "radar_data_purge_enabled", True)):
+                purge_now = datetime.now(IST)
+                purge_check_date = purge_now.strftime("%Y-%m-%d")
+                purge_hour = int(getattr(settings, "radar_data_purge_hour", 6) or 6)
+                if (
+                    purge_now.hour >= purge_hour
+                    and last_data_purge_check_date != purge_check_date
+                ):
+                    last_data_purge_check_date = purge_check_date
+                    try:
+                        from app.services.radar_archive import (
+                            data_purge_due,
+                            purge_all_radar_data,
+                        )
+
+                        if await asyncio.to_thread(data_purge_due, purge_now):
+                            res = await asyncio.to_thread(
+                                purge_all_radar_data, purge_now,
+                            )
+                            logger.info(
+                                "radar data purge: removed %s files, freed %.1f MB",
+                                res.get("removed"),
+                                float(res.get("freedBytes") or 0) / 1_000_000.0,
+                            )
+                    except Exception as exc:
+                        logger.warning("radar data purge error: %s", exc)
 
             # Automated EOD learning: distil today's FTV/V outcomes into the knowledge
             # profile once the archive is finalized, then prune raw archives past retention
