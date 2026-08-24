@@ -18,8 +18,12 @@ from app.engines.explosion_detector import (
 )
 from app.engines.ict_breakout_monitor import (
     _defensive_base_rip_top_allowed,
+    _fast_bullish_local_base_readiness,
+    _slow_grind_impending_lift_signals,
+    _slow_grind_sudden_lift_readiness,
     first_lift_entry_readiness,
 )
+from app.models.schemas import Side
 from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
 from app.models.schemas import MarketPhase, Side, SpotChart, SymbolSnapshot
 
@@ -235,6 +239,340 @@ def test_pretrade_chart_bypass_includes_v_rip_session_low_ready():
 
     source = Path("app/engines/pretrade_validator.py").read_text()
     assert '"v_rip_session_low_ready"' in source
+    assert '"fast_bullish_local_base_ready"' in source
     assert source.index('"v_rip_session_low_ready"') > source.index(
         "armed_base_chart_bypass"
     )
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+@patch("app.engines.bullish_local_base.bullish_local_base_prediction")
+def test_fast_bullish_local_base_authorizes_below_30_ltp(mock_pred, mock_settings):
+    mock_settings.return_value = Settings()
+    mock_pred.return_value = {
+        "active": True,
+        "side": "PUT",
+        "confidence": 72.0,
+        "reasons": ["local_base", "bearish_momentum_turn"],
+    }
+    snap = _armed_replay_snapshot(spot=24180.0)
+    ict = MagicMock()
+    ict.flat_then_vertical = True
+    ict.active = True
+    ict.base_relative_move_pct = 10.4
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 27.0,
+        "tier": "EXPLODING",
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 10.4,
+        "volumeAwaken": True,
+        "velocity3s": 1.1,
+    }
+    ok, reason = _fast_bullish_local_base_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=27.0, velocity_3s=1.1, strike=24200.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == "fast_bullish_local_base_ready"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_fast_bullish_local_base_rejects_above_30_ltp(mock_settings):
+    mock_settings.return_value = Settings()
+    snap = _armed_replay_snapshot(spot=24200.0)
+    ict = MagicMock()
+    ict.flat_then_vertical = True
+    ict.active = True
+    ict.base_relative_move_pct = 22.7
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 35.0,
+        "tier": "EXPLODING",
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 22.7,
+        "bullishLocalBaseActive": True,
+    }
+    ok, reason = _fast_bullish_local_base_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=35.0, velocity_3s=2.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is False
+    assert reason == "fast_bullish_premium_above_30"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_fast_bullish_local_base_rejects_below_18_ltp(mock_settings):
+    mock_settings.return_value = Settings()
+    snap = _armed_replay_snapshot(spot=24200.0)
+    ict = MagicMock()
+    ict.flat_then_vertical = True
+    ict.active = True
+    ict.base_relative_move_pct = 12.0
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 15.0,
+        "tier": "EXPLODING",
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 12.0,
+        "bullishLocalBaseActive": True,
+    }
+    ok, reason = _fast_bullish_local_base_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=15.0, velocity_3s=1.2),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is False
+    assert reason == "fast_bullish_premium_below_18"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+@patch("app.engines.bullish_local_base.bullish_local_base_prediction")
+def test_fast_bullish_local_base_authorizes_at_18_ltp(mock_pred, mock_settings):
+    mock_settings.return_value = Settings()
+    mock_pred.return_value = {
+        "active": True,
+        "side": "PUT",
+        "confidence": 72.0,
+        "reasons": ["local_base", "bearish_momentum_turn"],
+    }
+    snap = _armed_replay_snapshot(spot=24180.0)
+    ict = MagicMock()
+    ict.flat_then_vertical = True
+    ict.active = True
+    ict.base_relative_move_pct = 10.4
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 18.0,
+        "tier": "EXPLODING",
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 10.4,
+        "volumeAwaken": True,
+        "velocity3s": 1.1,
+    }
+    ok, reason = _fast_bullish_local_base_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=18.0, velocity_3s=1.1, strike=24200.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == "fast_bullish_local_base_ready"
+
+
+def test_slow_grind_impending_signals_stack_for_put_coil():
+    snap = _armed_replay_snapshot(spot=24180.0)
+    snap.spotChart.rsi = 42.0
+    snap.spotChart.macdBias = "BEARISH"
+    snap.spotChart.macdHistogram = -0.2
+    snap.spotChart.macd = -0.1
+    snap.spotChart.macdSignal = 0.05
+    snap.spotChart.momentum5Pct = -0.02
+    snap.spotChart.momentum15Pct = 0.01
+    snap.chartAnalysis = type("CA", (), {"squeeze": {"bars_on": 5, "bars_since_fired": -1}})()
+    ict = MagicMock(
+        flat_then_vertical=True,
+        active=True,
+        base_armed=True,
+        base_relative_move_pct=10.0,
+        flat_vertical_quality=58.0,
+        armed_base_samples=8,
+        v_rip_ready=True,
+    )
+    count, signals = _slow_grind_impending_lift_signals(
+        side="PUT",
+        snap=snap,
+        ict=ict,
+        row={"ictBaseArmed": True, "ictVRipReady": True},
+        settings=Settings(),
+    )
+    assert count >= 2
+    assert "tight_armed_coil" in signals
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_slow_grind_authorizes_aug24_shape_below_30(mock_settings):
+    """Slow 18–23 coil: flat v3, MACD/RSI building, then sudden lift."""
+    mock_settings.return_value = Settings()
+    snap = _armed_replay_snapshot(spot=24180.0)
+    snap.spotChart.rsi = 40.0
+    snap.spotChart.macdBias = "BEARISH"
+    snap.spotChart.macdHistogram = -0.15
+    snap.spotChart.macd = -0.05
+    snap.spotChart.macdSignal = 0.02
+    snap.spotChart.momentum5Pct = -0.03
+    snap.spotChart.momentum15Pct = 0.02
+    snap.spotChart.direction = "BEARISH"
+    snap.chartAnalysis = type("CA", (), {"squeeze": {"bars_on": 6, "bars_since_fired": -1}})()
+    ict = MagicMock(
+        flat_then_vertical=True,
+        active=True,
+        base_armed=True,
+        base_relative_move_pct=10.0,
+        flat_vertical_quality=58.0,
+        armed_base_samples=8,
+        v_rip_ready=True,
+        velocity_3s=0.15,
+    )
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 22.0,
+        "tier": "BUILDING",
+        "ictBaseArmed": True,
+        "ictVRipReady": True,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 10.0,
+        "flatVerticalQuality": 58.0,
+        "ictArmedBaseSamples": 8,
+        "velocity3s": 0.15,
+    }
+    ok, reason = _slow_grind_sudden_lift_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=22.0, velocity_3s=0.15, strike=24200.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == "slow_grind_sudden_lift_ready"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_slow_grind_rejects_below_18_ltp(mock_settings):
+    mock_settings.return_value = Settings()
+    snap = _armed_replay_snapshot(spot=24180.0)
+    snap.spotChart.rsi = 40.0
+    snap.spotChart.macdBias = "BEARISH"
+    snap.spotChart.macdHistogram = -0.15
+    snap.spotChart.macd = -0.05
+    snap.spotChart.macdSignal = 0.02
+    snap.spotChart.momentum5Pct = -0.03
+    snap.spotChart.momentum15Pct = 0.02
+    snap.chartAnalysis = type("CA", (), {"squeeze": {"bars_on": 6, "bars_since_fired": -1}})()
+    ict = MagicMock(
+        flat_then_vertical=True,
+        active=True,
+        base_armed=True,
+        base_relative_move_pct=10.0,
+        flat_vertical_quality=58.0,
+        armed_base_samples=8,
+        v_rip_ready=True,
+    )
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 16.5,
+        "ictBaseArmed": True,
+        "ictVRipReady": True,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 10.0,
+        "velocity3s": 0.15,
+    }
+    ok, reason = _slow_grind_sudden_lift_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=16.5, velocity_3s=0.15, strike=24200.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is False
+    assert reason == "slow_grind_premium_below_18"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_slow_grind_authorizes_at_18_ltp(mock_settings):
+    mock_settings.return_value = Settings()
+    snap = _armed_replay_snapshot(spot=24180.0)
+    snap.spotChart.rsi = 40.0
+    snap.spotChart.macdBias = "BEARISH"
+    snap.spotChart.macdHistogram = -0.15
+    snap.spotChart.macd = -0.05
+    snap.spotChart.macdSignal = 0.02
+    snap.spotChart.momentum5Pct = -0.03
+    snap.spotChart.momentum15Pct = 0.02
+    snap.spotChart.direction = "BEARISH"
+    snap.chartAnalysis = type("CA", (), {"squeeze": {"bars_on": 6, "bars_since_fired": -1}})()
+    ict = MagicMock(
+        flat_then_vertical=True,
+        active=True,
+        base_armed=True,
+        base_relative_move_pct=10.0,
+        flat_vertical_quality=58.0,
+        armed_base_samples=8,
+        v_rip_ready=True,
+        velocity_3s=0.15,
+    )
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 18.0,
+        "tier": "BUILDING",
+        "ictBaseArmed": True,
+        "ictVRipReady": True,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 10.0,
+        "flatVerticalQuality": 58.0,
+        "ictArmedBaseSamples": 8,
+        "velocity3s": 0.15,
+    }
+    ok, reason = _slow_grind_sudden_lift_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=18.0, velocity_3s=0.15, strike=24200.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == "slow_grind_sudden_lift_ready"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_slow_grind_rejects_after_velocity_spike(mock_settings):
+    mock_settings.return_value = Settings()
+    snap = _armed_replay_snapshot(spot=24180.0)
+    ict = MagicMock(
+        flat_then_vertical=True,
+        active=True,
+        base_armed=True,
+        base_relative_move_pct=10.0,
+        flat_vertical_quality=58.0,
+        armed_base_samples=8,
+    )
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 28.0,
+        "ictBaseArmed": True,
+        "ictBaseRelativeMovePct": 10.0,
+        "velocity3s": 2.4,
+    }
+    ok, reason = _slow_grind_sudden_lift_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=28.0, velocity_3s=2.4, strike=24200.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is False
+    assert reason == "slow_grind_velocity3s>1.5"

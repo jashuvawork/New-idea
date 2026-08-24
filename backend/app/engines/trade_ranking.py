@@ -190,6 +190,8 @@ def _top_ftv_a_pad_capture_lane(
         evidence.get("vRipReady")
         or evidence.get("volumeAwaken")
         or evidence.get("ictVolumeAwakening")
+        or evidence.get("fastBullishLocalBase")
+        or evidence.get("slowGrindSuddenLift")
     )
 
 
@@ -462,6 +464,8 @@ def ftv_authorization_policy(
         or evidence.get("armedBaseLaunch")
         or evidence.get("eliteBaseReady")
         or evidence.get("armedBaseSustainedLift")
+        or evidence.get("fastBullishLocalBase")
+        or evidence.get("slowGrindSuddenLift")
     )
     early_ftv_heat = bool(
         evidence.get("orderflowPositive")
@@ -851,6 +855,12 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     building_rip_ready = bool(evidence.get("buildingRipReady")) and not bool(
         evidence.get("midRipCoil")
     )
+    fast_bullish_local_base = bool(evidence.get("fastBullishLocalBase")) and not bool(
+        evidence.get("midRipCoil")
+    )
+    slow_grind_sudden_lift = bool(evidence.get("slowGrindSuddenLift")) and not bool(
+        evidence.get("midRipCoil")
+    )
     flat_vertical = bool(evidence.get("flatThenVertical"))
     active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
@@ -907,6 +917,12 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     elif v_rip_ready:
         score += 10.0
         reasons.append("v_rip_session_low")
+    elif fast_bullish_local_base:
+        score += 11.0
+        reasons.append("fast_bullish_local_base")
+    elif slow_grind_sudden_lift:
+        score += 12.0
+        reasons.append("slow_grind_sudden_lift")
     elif building_rip_ready:
         score += 9.0
         reasons.append("building_rip_bullish")
@@ -1057,6 +1073,8 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "firstLift": first_lift,
             "eliteBaseReady": elite_base_ready,
             "vRipReady": v_rip_ready,
+            "fastBullishLocalBase": fast_bullish_local_base,
+            "slowGrindSuddenLift": slow_grind_sudden_lift,
             "buildingRipReady": building_rip_ready,
             "buildingRipHelpersOk": bool(
                 evidence.get("buildingRipHelpersOk")
@@ -1162,6 +1180,14 @@ def rank_entry_candidate(
         "firstLift": alert.get("ictFirstLift"),
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
         "vRipReady": alert.get("ictVRipReady"),
+        "fastBullishLocalBase": bool(
+            alert.get("bullishLocalBaseActive")
+            or alert.get("fastBullishLocalBaseReady")
+        ),
+        "slowGrindSuddenLift": bool(
+            alert.get("slowGrindSuddenLiftReady")
+            or alert.get("ictSlowGrindSuddenLift")
+        ),
         "buildingRipReady": alert.get("ictBuildingRipReady"),
         "buildingRipHelpersOk": bool(
             alert.get("buildingRipHelpersOk") or alert.get("buildingLiftHelping")

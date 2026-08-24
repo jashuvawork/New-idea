@@ -167,6 +167,22 @@ def local_base_reversal_prediction(
     min_score = _number(
         getattr(settings, "bullish_local_base_prediction_min_score", 62.0), 62.0
     )
+    premium = _number(getattr(event, "premium", 0) or alert.get("premium"))
+    soft_prem_min = _number(
+        getattr(settings, "local_base_pad_capture_min_premium_inr", 18.0), 18.0
+    )
+    soft_prem_cap = _number(
+        getattr(settings, "fast_bullish_local_base_max_premium_inr", 30.0), 30.0
+    )
+    in_pad_band = premium > 0 and soft_prem_min <= premium <= soft_prem_cap
+    if in_pad_band:
+        min_score = min(
+            min_score,
+            _number(
+                getattr(settings, "fast_bullish_local_base_soft_min_score", 45.0),
+                45.0,
+            ),
+        )
     if explosion_score < min_score:
         return _inactive(["weak_explosion_score"], side=side_v)
 
@@ -209,14 +225,22 @@ def local_base_reversal_prediction(
     volume_surge = _number(
         getattr(event, "volume_surge", 0) or alert.get("volumeSurge")
     )
+    min_volume = _number(
+        getattr(settings, "bullish_local_base_prediction_min_vol_surge", 2.0), 2.0
+    )
     min_v3 = _number(
         getattr(settings, "bullish_local_base_prediction_min_velocity_3s", 1.5), 1.5
     )
+    if in_pad_band and volume_surge >= min_volume:
+        min_v3 = min(
+            min_v3,
+            _number(
+                getattr(settings, "fast_bullish_local_base_min_velocity_3s", 0.8),
+                0.8,
+            ),
+        )
     min_v9 = _number(
         getattr(settings, "bullish_local_base_prediction_min_velocity_9s", 0.2), 0.2
-    )
-    min_volume = _number(
-        getattr(settings, "bullish_local_base_prediction_min_vol_surge", 2.0), 2.0
     )
     premium_accelerating = velocity_3s >= min_v3 and velocity_9s >= min_v9
     volume_confirmed = volume_surge >= min_volume
@@ -252,6 +276,18 @@ def local_base_reversal_prediction(
     min_confidence = _number(
         getattr(settings, "bullish_local_base_prediction_min_confidence", 70.0), 70.0
     )
+    if in_pad_band:
+        min_confidence = min(
+            min_confidence,
+            _number(
+                getattr(
+                    settings,
+                    "fast_bullish_local_base_soft_min_confidence",
+                    60.0,
+                ),
+                60.0,
+            ),
+        )
     # Optional: require at least one ICT confirm on choppiest days — off by default.
     require_ict = bool(
         getattr(settings, "local_base_reversal_require_ict_confirm", False)

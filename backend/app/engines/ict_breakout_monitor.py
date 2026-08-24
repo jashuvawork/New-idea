@@ -611,6 +611,356 @@ def building_rip_bullish_readiness(
     return True, "building_rip_bullish_ready"
 
 
+def _local_base_pad_premium_band_ok(
+    premium: float,
+    *,
+    settings: Any,
+    max_premium_setting: str,
+    reason_prefix: str,
+) -> tuple[bool, str]:
+    """Require LTP inside the slow-coil → fast-lift pad band (default ₹18–₹30)."""
+    if premium <= 0:
+        return False, f"{reason_prefix}_premium_missing"
+    min_prem = float(
+        getattr(settings, "local_base_pad_capture_min_premium_inr", 18.0) or 18.0
+    )
+    max_prem = float(
+        getattr(settings, max_premium_setting, 30.0)
+        or getattr(settings, "local_base_pad_capture_max_premium_inr", 30.0)
+        or 30.0
+    )
+    if premium < min_prem:
+        return False, f"{reason_prefix}_premium_below_{min_prem:g}"
+    if premium > max_prem:
+        return False, f"{reason_prefix}_premium_above_{max_prem:g}"
+    return True, ""
+
+
+def _fast_bullish_local_base_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Authorize fast-moving local-base lifts inside the ₹18–₹30 pad band."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "fast_bullish_local_base_capture_enabled", True)):
+        return False, ""
+    row = alert if isinstance(alert, dict) else {}
+    if snap is None:
+        return False, "fast_bullish_chart_missing"
+
+    premium = float(
+        getattr(event, "premium", 0) or row.get("premium") or 0
+    )
+    prem_ok, prem_reason = _local_base_pad_premium_band_ok(
+        premium,
+        settings=s,
+        max_premium_setting="fast_bullish_local_base_max_premium_inr",
+        reason_prefix="fast_bullish",
+    )
+    if not prem_ok:
+        return False, prem_reason
+
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    lo = float(getattr(s, "fast_bullish_local_base_min_move_pct", 5.0) or 5.0)
+    hi = float(getattr(s, "fast_bullish_local_base_max_move_pct", 25.0) or 25.0)
+    if not (lo <= base_move <= hi + 1e-6):
+        return False, f"fast_bullish_pad_outside_{lo:g}_{hi:g}"
+
+    structured = bool(
+        getattr(ict, "flat_then_vertical", False)
+        or getattr(ict, "active", False)
+        or row.get("ictFlatThenVertical")
+        or row.get("ictBreakout")
+    )
+    if not structured:
+        return False, "fast_bullish_structure_missing"
+
+    from app.engines.bullish_local_base import bullish_local_base_prediction
+
+    pred = bullish_local_base_prediction(snap, event, ict, alert=row)
+    predictor_active = bool(
+        pred.get("active") or row.get("bullishLocalBaseActive")
+    )
+    if not predictor_active:
+        volume_awake = bool(
+            getattr(ict, "volume_awakening", False)
+            or row.get("ictVolumeAwakening")
+            or row.get("volumeAwaken")
+        )
+        if not volume_awake:
+            return False, "fast_bullish_volume_not_awake"
+        from app.engines.local_base_chart_bypass import local_base_momentum_turn
+        from app.models.schemas import Side as _Side
+
+        side_v = str(
+            getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+            or row.get("side")
+            or ""
+        ).upper()
+        if side_v not in ("CALL", "PUT"):
+            return False, "fast_bullish_side_invalid"
+        if not local_base_momentum_turn(
+            _Side(side_v), snap, event=event, alert=row,
+        ):
+            return False, "fast_bullish_momentum_turn_missing"
+        v3 = float(
+            getattr(event, "velocity_3s", 0) or row.get("velocity3s") or 0
+        )
+        if v3 < 0:
+            return False, "fast_bullish_velocity_negative"
+        pad_floor = float(
+            getattr(s, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0
+        )
+        min_v3 = float(
+            getattr(s, "fast_bullish_local_base_min_velocity_3s", 0.8) or 0.8
+        )
+        if not (volume_awake and base_move + 1e-6 >= pad_floor):
+            if v3 < min_v3:
+                return False, f"fast_bullish_velocity3s<{min_v3:g}"
+
+    from app.engines.moneyness import classify_moneyness
+    from app.models.schemas import Side
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False, "fast_bullish_side_invalid"
+    strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0)
+    if strike <= 0 or spot <= 0:
+        return False, "fast_bullish_moneyness_unavailable"
+    money = classify_moneyness(
+        Side(side),
+        strike,
+        spot,
+        symbol=str(getattr(snap, "symbol", "") or ""),
+        atm=atm if atm > 0 else None,
+    )
+    if money not in ("ATM", "ITM"):
+        return False, f"fast_bullish_requires_atm_itm_{money.lower()}"
+    return True, "fast_bullish_local_base_ready"
+
+
+def _slow_grind_impending_lift_signals(
+    *,
+    side: str,
+    snap: SymbolSnapshot,
+    ict: Any,
+    row: dict[str, Any],
+    settings: Any,
+) -> tuple[int, list[str]]:
+    """Count pre-breakout lift hints during a slow sub-₹30 coil (no volume spike yet)."""
+    signals: list[str] = []
+    chart = getattr(snap, "spotChart", None)
+    if chart is None:
+        return 0, signals
+
+    side_u = str(side or "").upper()
+    macd_bias = str(getattr(chart, "macdBias", "") or "NEUTRAL").upper()
+    hist = float(getattr(chart, "macdHistogram", 0) or 0)
+    macd_line = float(getattr(chart, "macd", 0) or 0)
+    macd_sig = float(getattr(chart, "macdSignal", 0) or 0)
+    rsi = float(getattr(chart, "rsi", 50) or 50)
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
+    mom15 = float(getattr(chart, "momentum15Pct", 0) or 0)
+
+    if side_u == "PUT":
+        if macd_bias == "BEARISH" or hist < 0:
+            signals.append("macd_bearish_building")
+        if macd_line <= macd_sig + 0.05 and hist >= -1.0:
+            signals.append("macd_cross_imminent")
+        if 28.0 <= rsi <= 58.0:
+            signals.append("rsi_neutral_coil")
+        if mom5 <= mom15:
+            signals.append("momentum_soft_bearish")
+    elif side_u == "CALL":
+        if macd_bias == "BULLISH" or hist > 0:
+            signals.append("macd_bullish_building")
+        if macd_line >= macd_sig - 0.05 and hist <= 1.0:
+            signals.append("macd_cross_imminent")
+        if 42.0 <= rsi <= 72.0:
+            signals.append("rsi_neutral_coil")
+        if mom5 >= mom15:
+            signals.append("momentum_soft_bullish")
+
+    quality = float(
+        getattr(ict, "flat_vertical_quality", 0)
+        or row.get("flatVerticalQuality")
+        or 0
+    )
+    min_quality = float(
+        getattr(settings, "slow_grind_sudden_lift_min_flat_quality", 50.0) or 50.0
+    )
+    samples = int(
+        getattr(ict, "armed_base_samples", 0)
+        or row.get("ictArmedBaseSamples")
+        or 0
+    )
+    min_samples = int(
+        getattr(settings, "slow_grind_sudden_lift_min_coil_samples", 6) or 6
+    )
+    if quality >= min_quality and samples >= min_samples:
+        signals.append("tight_armed_coil")
+
+    ca = getattr(snap, "chartAnalysis", None)
+    sq = getattr(ca, "squeeze", None) if ca is not None else None
+    if isinstance(sq, dict) and sq:
+        bars_on = int(sq.get("bars_on") or 0)
+        bsf = int(sq.get("bars_since_fired") or -1)
+        direction = str(sq.get("direction") or "NEUTRAL").upper()
+        target = "BEARISH" if side_u == "PUT" else "BULLISH"
+        if bars_on >= 3:
+            signals.append("squeeze_compressed")
+        window = int(getattr(settings, "squeeze_fresh_window_bars", 3) or 3)
+        if 0 <= bsf <= window and direction == target:
+            signals.append("squeeze_fresh_release")
+
+    if bool(
+        getattr(ict, "v_rip_ready", False)
+        or row.get("ictVRipReady")
+        or getattr(ict, "base_armed", False)
+        or row.get("ictBaseArmed")
+    ):
+        signals.append("session_trough_armed")
+
+    from app.engines.spot_direction import side_aligned_with_chart
+
+    if side_u in ("CALL", "PUT"):
+        from app.models.schemas import Side as _Side
+
+        if side_aligned_with_chart(_Side(side_u), chart):
+            signals.append("chart_direction_aligned")
+
+    return len(signals), signals
+
+
+def _slow_grind_sudden_lift_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Authorize slow ₹18–₹30 coil when impending-lift signals stack before the spike."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "slow_grind_sudden_lift_enabled", True)):
+        return False, ""
+    row = alert if isinstance(alert, dict) else {}
+    if snap is None:
+        return False, "slow_grind_chart_missing"
+
+    premium = float(
+        getattr(event, "premium", 0) or row.get("premium") or 0
+    )
+    prem_ok, prem_reason = _local_base_pad_premium_band_ok(
+        premium,
+        settings=s,
+        max_premium_setting="slow_grind_sudden_lift_max_premium_inr",
+        reason_prefix="slow_grind",
+    )
+    if not prem_ok:
+        return False, prem_reason
+
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    lo = float(getattr(s, "slow_grind_sudden_lift_min_move_pct", 2.0) or 2.0)
+    hi = float(getattr(s, "slow_grind_sudden_lift_max_move_pct", 22.0) or 22.0)
+    if not (lo <= base_move <= hi + 1e-6):
+        return False, f"slow_grind_pad_outside_{lo:g}_{hi:g}"
+
+    v3 = float(
+        getattr(event, "velocity_3s", 0) or row.get("velocity3s") or 0
+    )
+    min_v3 = float(
+        getattr(s, "slow_grind_sudden_lift_min_velocity_3s", -0.8) or -0.8
+    )
+    max_v3 = float(
+        getattr(s, "slow_grind_sudden_lift_max_velocity_3s", 1.5) or 1.5
+    )
+    if v3 < min_v3:
+        return False, f"slow_grind_velocity3s<{min_v3:g}"
+    if v3 > max_v3:
+        return False, f"slow_grind_velocity3s>{max_v3:g}"
+
+    base_armed = bool(
+        getattr(ict, "base_armed", False)
+        or row.get("ictBaseArmed")
+        or getattr(ict, "local_swing_base", False)
+    )
+    if not base_armed:
+        return False, "slow_grind_base_not_armed"
+
+    structured = bool(
+        getattr(ict, "flat_then_vertical", False)
+        or getattr(ict, "active", False)
+        or row.get("ictFlatThenVertical")
+        or row.get("ictBreakout")
+        or float(getattr(ict, "flat_vertical_quality", 0) or 0) >= float(
+            getattr(s, "slow_grind_sudden_lift_min_flat_quality", 50.0) or 50.0
+        )
+    )
+    if not structured:
+        return False, "slow_grind_structure_missing"
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False, "slow_grind_side_invalid"
+
+    signal_ct, _signals = _slow_grind_impending_lift_signals(
+        side=side,
+        snap=snap,
+        ict=ict,
+        row=row,
+        settings=s,
+    )
+    min_signals = int(
+        getattr(s, "slow_grind_sudden_lift_min_impending_signals", 2) or 2
+    )
+    if signal_ct < min_signals:
+        return False, f"slow_grind_impending_signals<{min_signals}"
+
+    from app.engines.moneyness import classify_moneyness
+    from app.models.schemas import Side
+
+    strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0)
+    if strike <= 0 or spot <= 0:
+        return False, "slow_grind_moneyness_unavailable"
+    money = classify_moneyness(
+        Side(side),
+        strike,
+        spot,
+        symbol=str(getattr(snap, "symbol", "") or ""),
+        atm=atm if atm > 0 else None,
+    )
+    if money not in ("ATM", "ITM"):
+        return False, f"slow_grind_requires_atm_itm_{money.lower()}"
+    return True, "slow_grind_sudden_lift_ready"
+
+
 def _v_rip_lane_active(
     *,
     v_rip_ready: bool,
@@ -686,6 +1036,26 @@ def first_lift_entry_readiness(
     )
     if building_ok:
         return True, building_reason
+
+    slow_ok, slow_reason = _slow_grind_sudden_lift_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=row,
+        settings=settings,
+    )
+    if slow_ok:
+        return True, slow_reason
+
+    fast_ok, fast_reason = _fast_bullish_local_base_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=row,
+        settings=settings,
+    )
+    if fast_ok:
+        return True, fast_reason
 
     if not bool(getattr(settings, "first_lift_trade_enabled", True)):
         return False, "first_lift_trading_disabled"
