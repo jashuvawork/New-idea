@@ -19,8 +19,11 @@ from app.engines.explosion_detector import (
 from app.engines.ict_breakout_monitor import (
     _defensive_base_rip_top_allowed,
     _fast_bullish_local_base_readiness,
+    _slow_grind_impending_lift_signals,
+    _slow_grind_sudden_lift_readiness,
     first_lift_entry_readiness,
 )
+from app.models.schemas import Side
 from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
 from app.models.schemas import MarketPhase, Side, SpotChart, SymbolSnapshot
 
@@ -306,3 +309,113 @@ def test_fast_bullish_local_base_rejects_above_30_ltp(mock_settings):
     )
     assert ok is False
     assert reason == "fast_bullish_premium_above_30"
+
+
+def test_slow_grind_impending_signals_stack_for_put_coil():
+    snap = _armed_replay_snapshot(spot=24180.0)
+    snap.spotChart.rsi = 42.0
+    snap.spotChart.macdBias = "BEARISH"
+    snap.spotChart.macdHistogram = -0.2
+    snap.spotChart.macd = -0.1
+    snap.spotChart.macdSignal = 0.05
+    snap.spotChart.momentum5Pct = -0.02
+    snap.spotChart.momentum15Pct = 0.01
+    snap.chartAnalysis = type("CA", (), {"squeeze": {"bars_on": 5, "bars_since_fired": -1}})()
+    ict = MagicMock(
+        flat_then_vertical=True,
+        active=True,
+        base_armed=True,
+        base_relative_move_pct=10.0,
+        flat_vertical_quality=58.0,
+        armed_base_samples=8,
+        v_rip_ready=True,
+    )
+    count, signals = _slow_grind_impending_lift_signals(
+        side="PUT",
+        snap=snap,
+        ict=ict,
+        row={"ictBaseArmed": True, "ictVRipReady": True},
+        settings=Settings(),
+    )
+    assert count >= 2
+    assert "tight_armed_coil" in signals
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_slow_grind_authorizes_aug24_shape_below_30(mock_settings):
+    """Slow 18–23 coil: flat v3, MACD/RSI building, then sudden lift."""
+    mock_settings.return_value = Settings()
+    snap = _armed_replay_snapshot(spot=24180.0)
+    snap.spotChart.rsi = 40.0
+    snap.spotChart.macdBias = "BEARISH"
+    snap.spotChart.macdHistogram = -0.15
+    snap.spotChart.macd = -0.05
+    snap.spotChart.macdSignal = 0.02
+    snap.spotChart.momentum5Pct = -0.03
+    snap.spotChart.momentum15Pct = 0.02
+    snap.spotChart.direction = "BEARISH"
+    snap.chartAnalysis = type("CA", (), {"squeeze": {"bars_on": 6, "bars_since_fired": -1}})()
+    ict = MagicMock(
+        flat_then_vertical=True,
+        active=True,
+        base_armed=True,
+        base_relative_move_pct=10.0,
+        flat_vertical_quality=58.0,
+        armed_base_samples=8,
+        v_rip_ready=True,
+        velocity_3s=0.15,
+    )
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 22.0,
+        "tier": "BUILDING",
+        "ictBaseArmed": True,
+        "ictVRipReady": True,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 10.0,
+        "flatVerticalQuality": 58.0,
+        "ictArmedBaseSamples": 8,
+        "velocity3s": 0.15,
+    }
+    ok, reason = _slow_grind_sudden_lift_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=22.0, velocity_3s=0.15, strike=24200.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == "slow_grind_sudden_lift_ready"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_slow_grind_rejects_after_velocity_spike(mock_settings):
+    mock_settings.return_value = Settings()
+    snap = _armed_replay_snapshot(spot=24180.0)
+    ict = MagicMock(
+        flat_then_vertical=True,
+        active=True,
+        base_armed=True,
+        base_relative_move_pct=10.0,
+        flat_vertical_quality=58.0,
+        armed_base_samples=8,
+    )
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 28.0,
+        "ictBaseArmed": True,
+        "ictBaseRelativeMovePct": 10.0,
+        "velocity3s": 2.4,
+    }
+    ok, reason = _slow_grind_sudden_lift_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=28.0, velocity_3s=2.4, strike=24200.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is False
+    assert reason == "slow_grind_velocity3s>1.5"

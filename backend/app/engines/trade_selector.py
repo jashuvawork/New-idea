@@ -703,6 +703,7 @@ def _explosion_candidates(
             "elite_base_ready_s_preauthorized",
             "v_rip_session_low_ready",
             "fast_bullish_local_base_ready",
+            "slow_grind_sudden_lift_ready",
             "building_rip_bullish_ready",
             "building_local_base_lift_ready",
         ):
