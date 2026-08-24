@@ -81,6 +81,55 @@ def _first_lift_local_base_micro_pullback(
     return True
 
 
+def _first_lift_local_base_flat_velocity(
+    evidence: Mapping[str, Any],
+    *,
+    enabled: bool = True,
+    min_local_base_move_pct: float = 2.0,
+    max_local_base_move_pct: float = 25.0,
+) -> bool:
+    """ICT-confirmed first lift at local base when the velocity snapshot is flat.
+
+    Radar already stamped volumeAwaken + flat→vertical structure; v3=0 is snapshot
+    lag between ICT pad detection and the ranking tick — not a dead launch.
+    """
+    if not enabled:
+        return False
+    if _number(evidence.get("velocity3s")) != 0:
+        return False
+    move = _number(evidence.get("localBaseMovePct"))
+    if not (min_local_base_move_pct <= move <= max_local_base_move_pct):
+        return False
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in {"ELITE", "EXPLODING"}:
+        return False
+    if not bool(evidence.get("firstLift")):
+        return False
+    if bool(
+        evidence.get("midRipCoil")
+        or evidence.get("faded")
+        or evidence.get("exhaustedReentry")
+    ):
+        return False
+    timing = str(evidence.get("timingAssessment") or "").upper()
+    timing_action = str(evidence.get("timingAction") or "").lower()
+    if timing_action in {"block", "reject"} or timing in {
+        "FAILED_LAUNCH",
+        "FADED",
+        "FADING",
+        "EXHAUSTED",
+        "NEGATIVE",
+        "REJECT",
+        "BLOCKED",
+    }:
+        return False
+    if not bool(evidence.get("flatThenVertical") and evidence.get("activeBreakout")):
+        return False
+    if not bool(evidence.get("volumeAwaken") or evidence.get("orderflowPositive")):
+        return False
+    return True
+
+
 def ranking_sort_key(ranking: Mapping[str, Any]) -> tuple[int, float]:
     """Comparable causal ordering: grade first, then evidence score."""
     return (
@@ -185,6 +234,7 @@ def ftv_authorization_policy(
     first_lift_local_base_micro_pullback_enabled: bool = True,
     first_lift_local_base_micro_pullback_min_velocity_3s: float = -1.2,
     first_lift_local_base_micro_pullback_min_velocity_9s: float = -0.5,
+    first_lift_local_base_flat_velocity_enabled: bool = True,
     first_lift_trade_min_score: float = 62.0,
     first_lift_helper_confirm_min_quality: float = 50.0,
 ) -> FtvAuthorization:
@@ -211,6 +261,12 @@ def ftv_authorization_policy(
         enabled=first_lift_local_base_micro_pullback_enabled,
         min_velocity_3s=first_lift_local_base_micro_pullback_min_velocity_3s,
         min_velocity_9s=first_lift_local_base_micro_pullback_min_velocity_9s,
+        min_local_base_move_pct=winner_local_base_min_local_base_move_pct,
+        max_local_base_move_pct=winner_local_base_max_local_base_move_pct,
+    )
+    flat_velocity_lag = _first_lift_local_base_flat_velocity(
+        evidence,
+        enabled=first_lift_local_base_flat_velocity_enabled,
         min_local_base_move_pct=winner_local_base_min_local_base_move_pct,
         max_local_base_move_pct=winner_local_base_max_local_base_move_pct,
     )
@@ -498,6 +554,29 @@ def ftv_authorization_policy(
             max_capital_pct=winner_local_base_max_capital_pct,
         )
 
+    # First-lift at local base when velocity snapshot is flat — ICT pad already
+    # confirmed via volumeAwaken; do not wait for a hot v3 print on the next tick.
+    if (
+        first_lift_local_base_flat_velocity_enabled
+        and flat_velocity_lag
+        and grade in {"A", "B"}
+        and tier in {"ELITE", "EXPLODING"}
+        and explosion_score >= first_lift_trade_min_score
+        and quality >= first_lift_helper_confirm_min_quality
+    ):
+        if require_allocation_rank_one and allocation_rank != 1:
+            return blocked("first_lift_local_base_requires_allocation_rank_1")
+        expiry_block = _expiry_worst_policy_ok(
+            tier=tier, quality=quality, score=explosion_score, v3=v3,
+        )
+        if expiry_block is not None:
+            return expiry_block
+        return FtvAuthorization(
+            "FIRST_LIFT_LOCAL_BASE",
+            "ok_flat_velocity_lag",
+            max_capital_pct=winner_local_base_max_capital_pct,
+        )
+
     # BUILDING sudden lift with helpers — do not wait for ELITE/EXPLODING.
     # Readiness already proved mid-rip/local-base heat; CHASE timing is OK here.
     if building_rip_ftv_enabled and bool(evidence.get("buildingRipReady")):
@@ -594,6 +673,7 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "first_lift_local_base_micro_pullback_enabled",
         "first_lift_local_base_micro_pullback_min_velocity_3s",
         "first_lift_local_base_micro_pullback_min_velocity_9s",
+        "first_lift_local_base_flat_velocity_enabled",
         "first_lift_trade_min_score",
         "first_lift_helper_confirm_min_quality",
     )
@@ -634,8 +714,21 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
                 getattr(settings, "winner_local_base_max_local_base_move_pct", 25.0) or 25.0
             ),
         )
+        flat_velocity_lag = _first_lift_local_base_flat_velocity(
+            evidence,
+            enabled=bool(
+                getattr(settings, "first_lift_local_base_flat_velocity_enabled", True)
+            ),
+            min_local_base_move_pct=float(
+                getattr(settings, "winner_local_base_min_local_base_move_pct", 2.0) or 2.0
+            ),
+            max_local_base_move_pct=float(
+                getattr(settings, "winner_local_base_max_local_base_move_pct", 25.0) or 25.0
+            ),
+        )
     except Exception:
         micro_pullback = _first_lift_local_base_micro_pullback(evidence)
+        flat_velocity_lag = _first_lift_local_base_flat_velocity(evidence)
 
     mode = str(evidence.get("mode") or "").lower()
     tier = str(evidence.get("tier") or "").upper()
@@ -822,7 +915,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             or v_rip_ready
             or building_rip_ready
         )
-        and v3 > 0
+        and (v3 > 0 or flat_velocity_lag)
         and not rejected
         and local_move <= (55.0 if building_rip_ready else 40.0)
     )
@@ -890,6 +983,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "timingAssessment": timing or None,
             "timingAction": timing_action or None,
             "firstLiftLocalBaseMicroPullback": micro_pullback,
+            "firstLiftLocalBaseFlatVelocity": flat_velocity_lag,
             "exhaustedReentry": exhausted,
             "faded": faded,
         },

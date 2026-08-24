@@ -665,6 +665,9 @@ class Settings(BaseSettings):
     # Carry the same strict first-lift proof through the final live chart/MTF
     # monitor. Premium fading and all non-chart execution checks remain active.
     first_lift_bypasses_execution_chart_enabled: bool = True
+    # ICT-confirmed first lift at local base when v3 snapshot is flat (0) — volumeAwaken
+    # + flat→vertical structure already prove the pad; do not downgrade to B grade.
+    first_lift_local_base_flat_velocity_enabled: bool = True
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0
