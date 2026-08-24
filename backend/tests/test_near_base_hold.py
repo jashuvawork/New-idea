@@ -6,6 +6,7 @@ a bigger peak before the soft profit-lock; the breakeven lock still protects dow
 """
 
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from app.engines.explosion_profit import (
@@ -15,6 +16,36 @@ from app.engines.explosion_profit import (
 from app.models.schemas import PaperTrade, Side, StrategyType
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def _fade_lock_settings() -> MagicMock:
+    s = MagicMock()
+    s.explosion_early_green_lock_enabled = True
+    s.explosion_early_green_lock_min_best_points = 3.5
+    s.explosion_early_green_lock_buffer_points = 0.5
+    s.explosion_early_green_lock_max_velocity_3s = 0.0
+    s.explosion_early_green_lock_near_base_max_profit_min_best_points = 55.0
+    s.explosion_peak_fade_lock_enabled = True
+    s.explosion_peak_fade_min_best_points = 6.0
+    s.explosion_peak_fade_giveback_ratio = 0.55
+    s.explosion_peak_fade_min_giveback_points = 4.0
+    s.explosion_peak_fade_min_remain_points = 0.4
+    s.explosion_peak_fade_breakeven_lock = True
+    s.explosion_peak_fade_breakeven_buffer = 0.5
+    s.explosion_peak_fade_max_profit_min_best = 28.0
+    s.explosion_peak_fade_max_profit_giveback_ratio = 0.80
+    s.explosion_peak_fade_defer_when_bullish = True
+    s.explosion_peak_fade_bullish_min_remain_points = 3.0
+    s.explosion_peak_fade_bullish_min_velocity_3s = 1.5
+    s.explosion_peak_capture_enabled = True
+    s.explosion_peak_capture_min_best_points = 8.0
+    s.explosion_peak_capture_giveback_ratio = 0.12
+    s.explosion_peak_capture_min_giveback_points = 1.0
+    s.explosion_peak_capture_max_giveback_points = 8.0
+    s.explosion_peak_capture_min_remain_points = 1.0
+    s.explosion_peak_capture_max_live_velocity_3s = 1.0
+    s.explosion_peak_capture_max_premium_mom_pct = 0.15
+    return s
 
 
 def _trade(rel, tier="ELITE", *, best=11.0, psych=None):
@@ -54,17 +85,20 @@ def test_near_base_holds_small_peak():
 
 def test_mid_leg_still_books_on_fade():
     """40% off base (mid-leg), same fade → books (capture/fade lock fires)."""
-    reason = peak_fade_profit_lock_reason(_trade(40.0), best=11.0, pnl_pts=7.5)
+    with patch("app.engines.explosion_profit.get_settings", return_value=_fade_lock_settings()):
+        reason = peak_fade_profit_lock_reason(_trade(40.0), best=11.0, pnl_pts=7.5)
     assert reason in ("explosion_peak_capture", "explosion_peak_fade_profit_lock")
 
 
 def test_near_base_still_books_big_peak_fade():
     """Once a near-base runner prints a big peak (≥40) and gives it back, it books."""
-    reason = peak_fade_profit_lock_reason(_trade(11.0, best=45.0), best=45.0, pnl_pts=8.0)
+    with patch("app.engines.explosion_profit.get_settings", return_value=_fade_lock_settings()):
+        reason = peak_fade_profit_lock_reason(_trade(11.0, best=45.0), best=45.0, pnl_pts=8.0)
     assert reason is not None
 
 
 def test_near_base_breakeven_still_protected():
     """Downside protection intact: near-base runner faded to breakeven still books BE."""
-    reason = peak_fade_profit_lock_reason(_trade(11.0, best=11.0), best=11.0, pnl_pts=0.0)
+    with patch("app.engines.explosion_profit.get_settings", return_value=_fade_lock_settings()):
+        reason = peak_fade_profit_lock_reason(_trade(11.0, best=11.0), best=11.0, pnl_pts=0.0)
     assert reason == "explosion_early_green_breakeven"

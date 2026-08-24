@@ -662,7 +662,9 @@ def first_lift_entry_readiness(
     improving bearish turn.
     """
     settings = get_settings()
-    row = alert if isinstance(alert, dict) else {}
+    from app.engines.explosion_detector import enrich_alert_armed_evidence
+
+    row = enrich_alert_armed_evidence(alert if isinstance(alert, dict) else {})
     persisted = (
         dict(row.get("ictArmedEvidence") or {})
         if row.get("ictBaseArmed")
@@ -2290,6 +2292,9 @@ def _defensive_base_rip_top_allowed(
     score: float,
     velocity_3s: float,
     settings: Any,
+    base_move_pct: float = 0.0,
+    volume_awake: bool = False,
+    v_rip_ready: bool = False,
 ) -> tuple[bool, str]:
     """Always-on top floor for defensive/worst local-base rips (not every EXPLODING)."""
     if not bool(getattr(settings, "ict_defensive_base_rip_require_top_quality", True)):
@@ -2310,6 +2315,36 @@ def _defensive_base_rip_top_allowed(
     min_v3 = float(
         getattr(settings, "ict_defensive_base_rip_min_velocity_3s", 2.5) or 2.5
     )
+    pad_lo = float(
+        getattr(settings, "top_ftv_a_pad_velocity_min_move_pct", 8.0) or 8.0
+    )
+    pad_hi = float(
+        getattr(settings, "top_ftv_a_pad_velocity_max_move_pct", 25.0) or 25.0
+    )
+    move = float(base_move_pct or 0)
+    if pad_lo <= move <= pad_hi and (v_rip_ready or volume_awake):
+        pad_floor = float(
+            getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0
+        )
+        if volume_awake and move + 1e-6 >= pad_floor:
+            min_v3 = min(
+                min_v3,
+                float(
+                    getattr(
+                        settings,
+                        "ict_v_rip_volume_awake_min_velocity_3s",
+                        0.85,
+                    )
+                    or 0.85
+                ),
+            )
+        elif v_rip_ready:
+            min_v3 = min(
+                min_v3,
+                float(
+                    getattr(settings, "ict_v_rip_min_velocity_3s", 1.2) or 1.2
+                ),
+            )
     if float(velocity_3s or 0) < min_v3:
         return False, f"defensive_rip_top_v3<{min_v3:g}"
     return True, "ok"
@@ -2483,6 +2518,9 @@ def good_day_ict_capture_active(
                 score=score,
                 velocity_3s=v3,
                 settings=settings,
+                base_move_pct=float(getattr(ict, "base_relative_move_pct", 0) or 0),
+                volume_awake=bool(getattr(ict, "volume_awakening", False)),
+                v_rip_ready=bool(getattr(ict, "v_rip_ready", False)),
             )
             if not ok_top:
                 meta["deniedReason"] = deny_top

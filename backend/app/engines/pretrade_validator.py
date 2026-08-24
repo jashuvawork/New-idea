@@ -1130,6 +1130,7 @@ def validate_candidate(
                 "elite_base_ready_s_preauthorized",
                 "building_rip_bullish_ready",
                 "building_local_base_lift_ready",
+                "v_rip_session_low_ready",
             )
         )
         if armed_base_chart_bypass:

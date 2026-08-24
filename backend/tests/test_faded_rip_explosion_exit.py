@@ -19,9 +19,14 @@ def _settings() -> MagicMock:
     s.explosion_faded_rip_no_green_exit_enabled = True
     s.explosion_faded_rip_no_green_seconds = 60
     s.explosion_faded_rip_min_green_points = 0.5
+    s.explosion_failed_launch_exit_enabled = False
+    s.explosion_never_green_stop_enabled = False
+    s.explosion_early_green_lock_enabled = False
+    s.explosion_peak_fade_lock_enabled = False
+    s.explosion_peak_capture_enabled = False
+    s.explosion_no_progress_enabled = False
     s.emergency_stop_enabled = False
     s.explosion_stop_min_hold_seconds = 15
-    s.explosion_no_progress_enabled = True
     s.explosion_no_progress_skip_when_aligned = True
     s.explosion_no_progress_aligned_seconds = 420
     s.explosion_no_progress_seconds = 150
@@ -71,7 +76,7 @@ def test_is_faded_rip_caution_trade_explosion_only():
     assert is_faded_rip_caution_trade(scalp) is False
 
 
-@patch("app.config.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
 def test_faded_rip_no_green_exit_after_60s(mock_settings):
     mock_settings.return_value = _settings()
     trade = _explosion_trade()
@@ -87,10 +92,13 @@ def test_faded_rip_kept_when_went_green(mock_settings):
     assert reason is None
 
 
+@patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.explosion_profit._hold_seconds", return_value=70)
-@patch("app.config.get_settings")
-def test_evaluate_explosion_exit_faded_rip_no_green(mock_settings, _hold):
-    mock_settings.return_value = _settings()
+@patch("app.engines.explosion_profit.get_settings")
+def test_evaluate_explosion_exit_faded_rip_no_green(mock_settings, _hold, mock_guard_settings):
+    settings = _settings()
+    mock_settings.return_value = settings
+    mock_guard_settings.return_value = settings
     trade = _explosion_trade()
     reason, pnl = evaluate_explosion_exit(trade, 34.0, "ELITE", lot_multiplier=20)
     assert reason == "explosion_faded_rip_no_green"

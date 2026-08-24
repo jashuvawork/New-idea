@@ -1168,6 +1168,55 @@ def armed_base_anchor(
     return out
 
 
+def enrich_alert_armed_evidence(alert: dict[str, Any] | None) -> dict[str, Any]:
+    """Merge persisted armed-candidate tape into a live alert when fields are stale.
+
+    Radar alerts often carry ``volume=0`` on a later poll while ``ictArmedEvidence``
+    still holds the causal volume/velocity proof from the pre-arm window.
+    """
+    if not isinstance(alert, dict):
+        return {}
+    row = dict(alert)
+    persisted = (
+        dict(row.get("ictArmedEvidence") or {})
+        if row.get("ictBaseArmed")
+        and str((row.get("ictArmedEvidence") or {}).get("armedAt") or "")
+        == str(row.get("ictBaseArmedAt") or "")
+        else {}
+    )
+    if not persisted:
+        return row
+
+    vol = float(persisted.get("volume") or 0)
+    flow_denied = any(
+        name in row and row.get(name) is False
+        for name in ("orderflowConfirmed", "optionCvdBuying")
+    )
+    if vol > 0 and not flow_denied:
+        if float(row.get("volume") or 0) <= 0:
+            row["volume"] = vol
+        if float(row.get("absoluteVolume") or 0) <= 0:
+            row["absoluteVolume"] = vol
+    for field in ("velocity3s", "velocity9s", "explosionScore", "flatVerticalQuality"):
+        try:
+            persisted_val = float(persisted.get(field) or 0)
+        except (TypeError, ValueError):
+            persisted_val = 0.0
+        if persisted_val > 0:
+            try:
+                current_val = float(row.get(field) or 0)
+            except (TypeError, ValueError):
+                current_val = 0.0
+            if current_val < persisted_val:
+                row[field] = persisted_val
+    if persisted.get("orderflowConfirmed") and not flow_denied:
+        row["orderflowConfirmed"] = True
+    if persisted.get("volumeAwakening") and row.get("volumeAwaken") is not False:
+        row["ictVolumeAwakening"] = True
+        row["volumeAwaken"] = True
+    return row
+
+
 def align_armed_candidate_evidence(
     symbol: str,
     strike: float,
@@ -2182,6 +2231,12 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
         tradeable = False
         first_lift = False
+    reported_volume = float(e.volume or 0)
+    if reported_volume <= 0 and armed_evidence:
+        reported_volume = max(
+            reported_volume,
+            float(armed_evidence.get("volume") or 0),
+        )
     return {
         "symbol": e.symbol,
         "side": e.side.value,
@@ -2191,7 +2246,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "velocity9s": e.velocity_9s,
         "velocity15s": e.velocity_15s,
         "volumeSurge": e.volume_surge,
-        "volume": e.volume,
+        "volume": reported_volume,
         "explosionScore": e.explosion_score,
         "tier": e.tier,
         "reason": e.reason,

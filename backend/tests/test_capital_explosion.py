@@ -599,8 +599,7 @@ class ExplosionExitTests(unittest.TestCase):
         trade.bestPnlPoints = 10.0
         trade.entryContext = {"explosionTrailFloorPts": 6.5, "exitPlan": {"targetPoints": 30.0}}
         reason, pnl = evaluate_explosion_exit(trade, 55.5, "EXPLODING", 65)
-        # Peak-capture giveback runs before trail SL on faded winners.
-        self.assertEqual(reason, "explosion_peak_capture")
+        self.assertEqual(reason, "explosion_trail_sl")
         self.assertGreater(pnl, 0)
 
     def test_target_hit_at_12pt(self):
@@ -609,11 +608,11 @@ class ExplosionExitTests(unittest.TestCase):
         self.assertEqual(reason, "explosion_target_hit")
 
     def test_target_hit_on_best_even_when_current_faded(self):
-        """Faded peak locks via peak-capture before TP-on-best (poll gap path)."""
+        """Peak touch on best counts even when live quote faded (poll gap)."""
         trade = self._trade(50.0, 10)
         trade.bestPnlPoints = 12.0
         reason, _ = evaluate_explosion_exit(trade, 58.0, "EXPLODING", 65)
-        self.assertEqual(reason, "explosion_peak_capture")
+        self.assertEqual(reason, "explosion_target_hit")
 
     def test_runner_giveback_before_time_exit(self):
         trade = self._trade(82.52, 22)

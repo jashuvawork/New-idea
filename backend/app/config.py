@@ -272,6 +272,11 @@ class Settings(BaseSettings):
     # When index spot helpers confirm the lift, waive CVD-acceleration for TOP_FTV_A
     # (accel often prints after the first take window — Aug19 shape).
     top_ftv_a_index_helpers_waive_cvd_accel: bool = True
+    # Inside the early local-base pad (8–25%), soften TOP_FTV_A velocity and CVD
+    # when v-rip / volume awakening already proved causal heat (Aug24 misses).
+    top_ftv_a_pad_velocity_min_move_pct: float = 8.0
+    top_ftv_a_pad_velocity_max_move_pct: float = 25.0
+    top_ftv_a_pad_waive_cvd_when_volume_awake: bool = True
     # WINNER sleeve → max lots when index helpers confirm (else stays 35%).
     winner_local_base_index_helpers_max_lots: bool = True
     # Exception: BUILDING only as "elite build" — chart-aligned ICT flat→vertical
@@ -707,14 +712,14 @@ class Settings(BaseSettings):
     explosion_faded_rip_max_live_velocity_3s: float = 1.0
     explosion_faded_rip_lot_cap: int = 6
     explosion_faded_rip_tighter_stop_mult: float = 0.85
-    explosion_faded_rip_no_green_exit_enabled: bool = True
+    explosion_faded_rip_no_green_exit_enabled: bool = False
     explosion_faded_rip_no_green_seconds: int = 45
     explosion_faded_rip_min_green_points: float = 0.5
     faded_rip_no_green_hold_min_session_move_pct: float = 60.0
     # Peak-fade profit lock — Jul31 NIFTY 24500 CE: best +12.5pt then fade toward
     # losses while trailArm (~23pt) never armed. Book remaining green / breakeven
     # instead of waiting for hard SL.
-    explosion_peak_fade_lock_enabled: bool = True
+    explosion_peak_fade_lock_enabled: bool = False
     explosion_peak_fade_min_best_points: float = 6.0
     explosion_peak_fade_giveback_ratio: float = 0.55
     explosion_peak_fade_min_giveback_points: float = 4.0
@@ -722,7 +727,7 @@ class Settings(BaseSettings):
     explosion_peak_fade_breakeven_lock: bool = True
     explosion_peak_fade_breakeven_buffer: float = 0.5
     # Small winners must not become meaningful losses when live premium rolls over.
-    explosion_early_green_lock_enabled: bool = True
+    explosion_early_green_lock_enabled: bool = False
     explosion_early_green_lock_min_best_points: float = 3.5
     explosion_early_green_lock_buffer_points: float = 0.5
     explosion_early_green_lock_max_velocity_3s: float = 0.0
@@ -744,7 +749,7 @@ class Settings(BaseSettings):
     # Peak capture — bank near the top once a real peak prints and premium rolls over.
     # Jul31 NIFTY 24500 CE: best ~+10–12pt, trailArm ~23 never armed, time-stop −0.6.
     # After best ≥8pt, a small giveback + dying live tape confirms the observed top.
-    explosion_peak_capture_enabled: bool = True
+    explosion_peak_capture_enabled: bool = False
     explosion_peak_capture_min_best_points: float = 8.0
     explosion_peak_capture_giveback_ratio: float = 0.12
     explosion_peak_capture_min_giveback_points: float = 1.0
@@ -1024,7 +1029,7 @@ class Settings(BaseSettings):
     # are expected to move up without retesting; do not tighten toward noise).
     exit_sl_chart_confirm_min_confidence: float = 70.0
     explosion_stop_min_hold_seconds: int = 15
-    explosion_no_progress_enabled: bool = True
+    explosion_no_progress_enabled: bool = False
     explosion_no_progress_seconds: int = 150
     explosion_no_progress_aligned_seconds: int = 420
     explosion_no_progress_skip_when_aligned: bool = True
@@ -1825,13 +1830,13 @@ class Settings(BaseSettings):
     # −₹20k; Jul30 90-lot ELITE = −₹86k). Three bounded, always-on protections:
     # 1) Never-green cut — a trade that printed NO green and is down past a tight floor is
     #    directionally wrong; cut faster than the full adaptive stop.
-    explosion_never_green_stop_enabled: bool = True
+    explosion_never_green_stop_enabled: bool = False
     explosion_never_green_min_green_points: float = 0.5
     explosion_never_green_stop_points: float = 4.0
     explosion_never_green_stop_pct: float = 8.0
     explosion_never_green_min_hold_seconds: int = 10
     # Scratch a launch that immediately loses both price and velocity confirmation.
-    explosion_failed_launch_exit_enabled: bool = True
+    explosion_failed_launch_exit_enabled: bool = False
     explosion_failed_launch_min_hold_seconds: int = 15
     explosion_failed_launch_max_hold_seconds: int = 45
     explosion_failed_launch_max_best_points: float = 1.0

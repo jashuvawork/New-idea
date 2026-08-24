@@ -531,6 +531,11 @@ def worst_day_allows_candidate(
                     score=score,
                     velocity_3s=v3,
                     settings=settings,
+                    base_move_pct=float(move or 0),
+                    volume_awake=bool(
+                        alert.get("ictVolumeAwakening") or alert.get("volumeAwaken")
+                    ),
+                    v_rip_ready=bool(alert.get("ictVRipReady")),
                 )
                 day_mode = ""
                 try:

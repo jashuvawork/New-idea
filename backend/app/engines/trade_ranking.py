@@ -176,6 +176,57 @@ def _day_mode_is_worst(day_mode: str) -> bool:
     return "WORST" in str(day_mode or "").upper()
 
 
+def _top_ftv_a_pad_capture_lane(
+    evidence: Mapping[str, Any],
+    *,
+    move: float,
+    pad_min_move_pct: float,
+    pad_max_move_pct: float,
+) -> bool:
+    """Early local-base pad where v-rip / volume heat already proved causal lift."""
+    if not (pad_min_move_pct <= move <= pad_max_move_pct):
+        return False
+    return bool(
+        evidence.get("vRipReady")
+        or evidence.get("volumeAwaken")
+        or evidence.get("ictVolumeAwakening")
+    )
+
+
+def _top_ftv_a_effective_velocity_floors(
+    evidence: Mapping[str, Any],
+    *,
+    move: float,
+    default_min_v3: float,
+    default_min_v9: float,
+    pad_min_move_pct: float,
+    pad_max_move_pct: float,
+    v_rip_min_velocity_3s: float,
+    v_rip_min_velocity_9s: float,
+    v_rip_pad_min_move_pct: float,
+    v_rip_volume_awake_min_velocity_3s: float,
+) -> tuple[float, float]:
+    if not _top_ftv_a_pad_capture_lane(
+        evidence,
+        move=move,
+        pad_min_move_pct=pad_min_move_pct,
+        pad_max_move_pct=pad_max_move_pct,
+    ):
+        return default_min_v3, default_min_v9
+    min_v3 = default_min_v3
+    min_v9 = default_min_v9
+    volume_awake = bool(
+        evidence.get("volumeAwaken") or evidence.get("orderflowPositive")
+    )
+    if volume_awake and move + 1e-6 >= v_rip_pad_min_move_pct:
+        min_v3 = min(min_v3, v_rip_volume_awake_min_velocity_3s)
+        min_v9 = min(min_v9, v_rip_min_velocity_9s)
+    elif evidence.get("vRipReady"):
+        min_v3 = min(min_v3, v_rip_min_velocity_3s)
+        min_v9 = min(min_v9, v_rip_min_velocity_9s)
+    return min_v3, min_v9
+
+
 def ftv_authorization_policy(
     evidence: Mapping[str, Any],
     ranking: Mapping[str, Any],
@@ -200,6 +251,13 @@ def ftv_authorization_policy(
     top_ftv_a_exceptional_min_velocity_9s: float = 2.5,
     top_ftv_a_exceptional_max_move_pct: float = 40.0,
     top_ftv_a_index_helpers_waive_cvd_accel: bool = True,
+    top_ftv_a_pad_velocity_min_move_pct: float = 8.0,
+    top_ftv_a_pad_velocity_max_move_pct: float = 25.0,
+    top_ftv_a_pad_waive_cvd_when_volume_awake: bool = True,
+    ict_v_rip_min_velocity_3s: float = 1.2,
+    ict_v_rip_min_velocity_9s: float = 0.8,
+    ict_v_rip_pad_min_move_pct: float = 2.0,
+    ict_v_rip_volume_awake_min_velocity_3s: float = 0.85,
     ftv_s_strict_min_explosion_score: float = 85.0,
     ftv_s_strict_min_quality: float = 70.0,
     ftv_s_strict_min_velocity_3s: float = 2.5,
@@ -422,6 +480,43 @@ def ftv_authorization_policy(
     )
     fresh_trigger = flag_fresh or early_ftv_fresh
     timing_blocked = timing in {"CHASE", "CHASING", "LATE", "FAILED_LAUNCH"}
+    effective_min_v3, effective_min_v9 = _top_ftv_a_effective_velocity_floors(
+        evidence,
+        move=move,
+        default_min_v3=top_ftv_a_min_velocity_3s,
+        default_min_v9=top_ftv_a_min_velocity_9s,
+        pad_min_move_pct=top_ftv_a_pad_velocity_min_move_pct,
+        pad_max_move_pct=top_ftv_a_pad_velocity_max_move_pct,
+        v_rip_min_velocity_3s=ict_v_rip_min_velocity_3s,
+        v_rip_min_velocity_9s=ict_v_rip_min_velocity_9s,
+        v_rip_pad_min_move_pct=ict_v_rip_pad_min_move_pct,
+        v_rip_volume_awake_min_velocity_3s=ict_v_rip_volume_awake_min_velocity_3s,
+    )
+    pad_capture_lane = _top_ftv_a_pad_capture_lane(
+        evidence,
+        move=move,
+        pad_min_move_pct=top_ftv_a_pad_velocity_min_move_pct,
+        pad_max_move_pct=top_ftv_a_pad_velocity_max_move_pct,
+    )
+    cvd_buying_ok = bool(evidence.get("cvdBuying"))
+    if (
+        not cvd_buying_ok
+        and pad_capture_lane
+        and top_ftv_a_pad_waive_cvd_when_volume_awake
+        and bool(evidence.get("volumeAwaken") or evidence.get("ictVolumeAwakening"))
+        and bool(
+            evidence.get("indexHelpersConfirm")
+            or evidence.get("indexTickSpike")
+            or (
+                evidence.get("indexTickAlign")
+                and (
+                    evidence.get("indexMomAlign")
+                    or evidence.get("indexSqueezeAlign")
+                )
+            )
+        )
+    ):
+        cvd_buying_ok = True
 
     top_ftv_a_reason = "top_ftv_a_disabled"
     if top_ftv_a_enabled:
@@ -438,7 +533,7 @@ def ftv_authorization_policy(
             top_ftv_a_reason = "top_ftv_a_requires_fresh_causal_trigger"
         elif timing_blocked:
             top_ftv_a_reason = "top_ftv_a_timing_blocked"
-        elif not bool(evidence.get("cvdBuying")):
+        elif not cvd_buying_ok:
             top_ftv_a_reason = "top_ftv_a_requires_option_cvd_buying"
         elif not bool(evidence.get("cvdAcceleration")) and not (
             top_ftv_a_index_helpers_waive_cvd_accel
@@ -461,9 +556,9 @@ def ftv_authorization_policy(
             top_ftv_a_reason = "top_ftv_a_quality_below_floor"
         elif tqs < top_ftv_a_min_tqs:
             top_ftv_a_reason = "top_ftv_a_tqs_below_floor"
-        elif v3 < top_ftv_a_min_velocity_3s:
+        elif v3 < effective_min_v3:
             top_ftv_a_reason = "top_ftv_a_velocity_3s_below_floor"
-        elif v9 < top_ftv_a_min_velocity_9s:
+        elif v9 < effective_min_v9:
             top_ftv_a_reason = "top_ftv_a_velocity_9s_below_floor"
         else:
             exceptional = move > top_ftv_a_normal_max_move_pct
@@ -639,6 +734,13 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "top_ftv_a_exceptional_min_velocity_9s",
         "top_ftv_a_exceptional_max_move_pct",
         "top_ftv_a_index_helpers_waive_cvd_accel",
+        "top_ftv_a_pad_velocity_min_move_pct",
+        "top_ftv_a_pad_velocity_max_move_pct",
+        "top_ftv_a_pad_waive_cvd_when_volume_awake",
+        "ict_v_rip_min_velocity_3s",
+        "ict_v_rip_min_velocity_9s",
+        "ict_v_rip_pad_min_move_pct",
+        "ict_v_rip_volume_awake_min_velocity_3s",
         "ftv_s_strict_min_explosion_score",
         "ftv_s_strict_min_quality",
         "ftv_s_strict_min_velocity_3s",

@@ -391,3 +391,4 @@ def test_aug24_v_rip_early_pad_volume_awake_skips_velocity(mock_settings):
     ready, reason = first_lift_entry_readiness(snap=snap, ict=ict, alert=alert)
     assert ready is True
     assert reason == "v_rip_session_low_ready"
+
