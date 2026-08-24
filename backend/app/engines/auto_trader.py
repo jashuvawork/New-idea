@@ -1700,17 +1700,19 @@ async def _open_from_candidate(
         afternoon = is_afternoon_capture_event(ev, chart=snap.spotChart)
         from app.engines.ict_breakout_monitor import (
             analyze_explosion_event_ict,
-            first_lift_entry_ready,
+            first_lift_entry_readiness,
         )
 
         ict = analyze_explosion_event_ict(ev, snap)
         alert = candidate.alert if isinstance(candidate.alert, dict) else {}
-        early_base_runner = first_lift_entry_ready(
+        early_base_runner, lift_readiness_reason = first_lift_entry_readiness(
             snap=snap,
             event=ev,
             ict=ict,
             alert=alert,
         )
+        if lift_readiness_reason:
+            ctx_extra["ictBaseReadinessReason"] = lift_readiness_reason
         first_lift_runner = bool(
             early_base_runner
             and (alert.get("ictFirstLift") or getattr(ict, "first_lift", False))
@@ -1795,6 +1797,25 @@ async def _open_from_candidate(
             # Authorized FTV at local base — always ride toward max points.
             ctx_extra["maxProfitCapture"] = True
             ctx_extra["momentType"] = "flat_then_vertical"
+        _pad_lane_reasons = {
+            "slow_grind_sudden_lift_ready",
+            "fast_bullish_local_base_ready",
+            "v_rip_session_low_ready",
+            "building_local_base_lift_ready",
+        }
+        if lift_readiness_reason in _pad_lane_reasons:
+            ctx_extra["maxProfitCapture"] = True
+            ctx_extra["vBaseFtvRunner"] = True
+            if lift_readiness_reason == "slow_grind_sudden_lift_ready":
+                ctx_extra["slowGrindSuddenLift"] = True
+                ctx_extra["momentType"] = "slow_grind_sudden_lift"
+            elif lift_readiness_reason == "fast_bullish_local_base_ready":
+                ctx_extra["fastBullishLocalBase"] = True
+                ctx_extra["momentType"] = "fast_bullish_local_base"
+            elif lift_readiness_reason == "v_rip_session_low_ready":
+                ctx_extra["momentType"] = "v_rip_session_local_base"
+            elif lift_readiness_reason == "building_local_base_lift_ready":
+                ctx_extra["momentType"] = "building_local_base_lift"
         # ELITE always rides to max TP (peak-capture hold) when enabled — the top tier is
         # exactly the runner we must not clip early.
         if bool(getattr(settings, "elite_ride_max_tp_enabled", True)) and str(
@@ -1837,17 +1858,26 @@ async def _open_from_candidate(
         if (
             bool(getattr(settings, "ftv_vbase_hundred_pct_hold_enabled", True))
             and bool(ctx_extra.get("maxProfitCapture"))
-            and 0 < _vbase_rel <= _vbase_max_rel
             and (
-                first_lift_runner
-                or bool(ctx_extra.get("armedBaseCapture"))
-                or ict_flat_vertical
-                or bool(ctx_extra.get("ictFirstLift"))
-                or str(ctx_extra.get("momentType") or "")
-                in (
-                    "first_lift_local_base",
-                    "armed_base_local_base",
-                    "flat_then_vertical",
+                lift_readiness_reason in _pad_lane_reasons
+                or (
+                    0 < _vbase_rel <= _vbase_max_rel
+                    and (
+                        first_lift_runner
+                        or bool(ctx_extra.get("armedBaseCapture"))
+                        or ict_flat_vertical
+                        or bool(ctx_extra.get("ictFirstLift"))
+                        or str(ctx_extra.get("momentType") or "")
+                        in (
+                            "first_lift_local_base",
+                            "armed_base_local_base",
+                            "flat_then_vertical",
+                            "slow_grind_sudden_lift",
+                            "fast_bullish_local_base",
+                            "v_rip_session_local_base",
+                            "building_local_base_lift",
+                        )
+                    )
                 )
             )
         ):

@@ -836,6 +836,18 @@ def _slow_grind_impending_lift_signals(
     ):
         signals.append("session_trough_armed")
 
+    volume_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
+    v3 = float(getattr(ict, "velocity_3s", 0) or row.get("velocity3s") or 0)
+    max_v3 = float(
+        getattr(settings, "slow_grind_sudden_lift_max_velocity_3s", 1.5) or 1.5
+    )
+    if volume_awake and v3 <= max_v3:
+        signals.append("volume_awakening_pre_spike")
+
     from app.engines.spot_direction import side_aligned_with_chart
 
     if side_u in ("CALL", "PUT"):

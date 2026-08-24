@@ -1025,6 +1025,8 @@ def _is_vbase_ftv_runner(trade: PaperTrade) -> bool:
         or ctx.get("ictFlatThenVertical")
         or ctx.get("ictFirstLift")
         or ctx.get("armedBaseCapture")
+        or ctx.get("slowGrindSuddenLift")
+        or ctx.get("fastBullishLocalBase")
     ):
         return False
     rel = ctx.get("localBaseBaseRelPct")
