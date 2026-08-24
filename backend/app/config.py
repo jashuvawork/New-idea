@@ -1389,23 +1389,23 @@ class Settings(BaseSettings):
     bullish_local_base_prediction_max_move_pct: float = 40.0
     bullish_local_base_prediction_min_confidence: float = 70.0
     bullish_local_base_prediction_rank_max: float = 18.0
-    # Local-base pad capture band — slow coil → fast vertical lift only (not generic
-    # cheap options). Aug24 24200 PE: ₹18–23 coil, lift from ~₹23 to ₹50+.
+    # Local-base pad capture band — slow coil → fast vertical lift (not generic
+    # cheap options). Aug24 24200 PE: ₹18–23 coil, lift through ₹50+.
     local_base_pad_capture_min_premium_inr: float = 18.0
-    local_base_pad_capture_max_premium_inr: float = 30.0
+    local_base_pad_capture_max_premium_inr: float = 220.0
     # Fast-moving local-base capture — enter in the pad band when momentum turn +
-    # volume awakening prove the rip is starting (Aug24 24→30 shape).
+    # volume awakening prove the rip is starting.
     fast_bullish_local_base_capture_enabled: bool = True
-    fast_bullish_local_base_max_premium_inr: float = 30.0
+    fast_bullish_local_base_max_premium_inr: float = 220.0
     fast_bullish_local_base_min_move_pct: float = 5.0
     fast_bullish_local_base_max_move_pct: float = 25.0
     fast_bullish_local_base_min_velocity_3s: float = 0.8
     fast_bullish_local_base_soft_min_score: float = 45.0
     fast_bullish_local_base_soft_min_confidence: float = 60.0
-    # Slow-grind coil below ₹30 — catch the flat base before volume/velocity spike.
+    # Slow-grind coil in the pad band — catch the flat base before volume/velocity spike.
     # Aug24 24200 PE: 18–23 LTP for ~45min, then sudden lift at 11:15.
     slow_grind_sudden_lift_enabled: bool = True
-    slow_grind_sudden_lift_max_premium_inr: float = 30.0
+    slow_grind_sudden_lift_max_premium_inr: float = 220.0
     slow_grind_sudden_lift_min_move_pct: float = 2.0
     slow_grind_sudden_lift_max_move_pct: float = 22.0
     slow_grind_sudden_lift_min_velocity_3s: float = -0.8

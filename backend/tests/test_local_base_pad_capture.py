@@ -283,7 +283,7 @@ def test_fast_bullish_local_base_authorizes_below_30_ltp(mock_pred, mock_setting
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
-def test_fast_bullish_local_base_rejects_above_30_ltp(mock_settings):
+def test_fast_bullish_local_base_rejects_above_220_ltp(mock_settings):
     mock_settings.return_value = Settings()
     snap = _armed_replay_snapshot(spot=24200.0)
     ict = MagicMock()
@@ -293,7 +293,7 @@ def test_fast_bullish_local_base_rejects_above_30_ltp(mock_settings):
     alert = {
         "side": "PUT",
         "strike": 24200.0,
-        "premium": 35.0,
+        "premium": 250.0,
         "tier": "EXPLODING",
         "ictFlatThenVertical": True,
         "ictBreakout": True,
@@ -302,13 +302,13 @@ def test_fast_bullish_local_base_rejects_above_30_ltp(mock_settings):
     }
     ok, reason = _fast_bullish_local_base_readiness(
         snap=snap,
-        event=MagicMock(side=Side.PUT, premium=35.0, velocity_3s=2.0),
+        event=MagicMock(side=Side.PUT, premium=250.0, velocity_3s=2.0),
         ict=ict,
         alert=alert,
         settings=mock_settings.return_value,
     )
     assert ok is False
-    assert reason == "fast_bullish_premium_above_30"
+    assert reason == "fast_bullish_premium_above_220"
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")

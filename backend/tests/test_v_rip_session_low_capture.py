@@ -253,7 +253,11 @@ def test_v_rip_lane_prefers_softer_path_over_armed_launch(mock_settings):
     }
     ready, reason = first_lift_entry_readiness(snap=snap, ict=ict, alert=alert)
     assert ready is True
-    assert reason in {"v_rip_session_low_ready", "fast_bullish_local_base_ready"}
+    assert reason in {
+        "v_rip_session_low_ready",
+        "fast_bullish_local_base_ready",
+        "slow_grind_sudden_lift_ready",
+    }
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
@@ -321,7 +325,11 @@ def test_v_rip_slow_grind_at_30_with_volume_awake(mock_settings):
     }
     ready, reason = first_lift_entry_readiness(snap=snap, ict=ict, alert=alert)
     assert ready is True
-    assert reason in {"v_rip_session_low_ready", "fast_bullish_local_base_ready"}
+    assert reason in {
+        "v_rip_session_low_ready",
+        "fast_bullish_local_base_ready",
+        "slow_grind_sudden_lift_ready",
+    }
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
@@ -390,5 +398,9 @@ def test_aug24_v_rip_early_pad_volume_awake_skips_velocity(mock_settings):
     }
     ready, reason = first_lift_entry_readiness(snap=snap, ict=ict, alert=alert)
     assert ready is True
-    assert reason in {"v_rip_session_low_ready", "fast_bullish_local_base_ready"}
+    assert reason in {
+        "v_rip_session_low_ready",
+        "fast_bullish_local_base_ready",
+        "slow_grind_sudden_lift_ready",
+    }
 
