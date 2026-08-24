@@ -703,8 +703,14 @@ def _explosion_candidates(
             "elite_base_ready_s_preauthorized",
             "v_rip_session_low_ready",
             "fast_bullish_local_base_ready",
-            "slow_grind_sudden_lift_ready",
-            "building_rip_bullish_ready",
+                "slow_grind_sudden_lift_ready",
+                "fast_bullish_local_base_ready",
+                "squeeze_release_ready",
+                "index_led_option_lag_ready",
+                "stealth_cvd_coil_ready",
+                "micro_pullback_retest_ready",
+                "premium_fvg_pad_ready",
+                "building_rip_bullish_ready",
             "building_local_base_lift_ready",
         ):
             rank += float(

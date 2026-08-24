@@ -20,6 +20,11 @@ PAD_LANE_READY_REASONS = frozenset(
         "slow_grind_sudden_lift_ready",
         "fast_bullish_local_base_ready",
         "v_rip_session_low_ready",
+        "squeeze_release_ready",
+        "index_led_option_lag_ready",
+        "stealth_cvd_coil_ready",
+        "micro_pullback_retest_ready",
+        "premium_fvg_pad_ready",
     }
 )
 
@@ -82,6 +87,16 @@ def pad_lane_ready_reason(
             or alert.get("bullishLocalBaseActive")
         ):
             return "fast_bullish_local_base_ready"
+        if bool(alert.get("squeezeReleaseReady") or alert.get("ictSqueezeRelease")):
+            return "squeeze_release_ready"
+        if bool(alert.get("indexLedOptionLagReady") or alert.get("ictIndexLedOptionLag")):
+            return "index_led_option_lag_ready"
+        if bool(alert.get("stealthCvdCoilReady") or alert.get("ictStealthCvdCoil")):
+            return "stealth_cvd_coil_ready"
+        if bool(alert.get("microPullbackRetestReady") or alert.get("ictMicroPullbackRetest")):
+            return "micro_pullback_retest_ready"
+        if bool(alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")):
+            return "premium_fvg_pad_ready"
     return ""
 
 

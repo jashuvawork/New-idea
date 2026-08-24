@@ -1431,6 +1431,62 @@ class Settings(BaseSettings):
     slow_grind_sudden_lift_min_coil_samples: int = 6
     slow_grind_sudden_lift_min_flat_quality: float = 50.0
     slow_grind_sudden_lift_min_impending_signals: int = 2
+    # Squeeze release at pad — Bollinger-in-Keltner compression → fresh release.
+    squeeze_release_capture_enabled: bool = True
+    squeeze_release_max_premium_inr: float = 220.0
+    squeeze_release_min_move_pct: float = 2.0
+    squeeze_release_max_move_pct: float = 30.0
+    squeeze_release_max_velocity_3s: float = 1.5
+    squeeze_release_min_bars_on: int = 3
+    squeeze_release_ftv_enabled: bool = True
+    squeeze_release_ftv_min_explosion_score: float = 48.0
+    squeeze_release_ftv_max_capital_pct: float = 0.90
+    squeeze_release_ftv_force_max_lots: bool = True
+    # Index-led option lag — index thrusting, option premium still flat in pad.
+    index_led_option_lag_capture_enabled: bool = True
+    index_led_option_lag_max_premium_inr: float = 220.0
+    index_led_option_lag_min_move_pct: float = 2.0
+    index_led_option_lag_max_move_pct: float = 25.0
+    index_led_option_lag_max_option_velocity_3s: float = 1.2
+    index_led_option_lag_min_index_velocity_3s: float = 0.02
+    index_led_option_lag_ftv_enabled: bool = True
+    index_led_option_lag_ftv_min_explosion_score: float = 48.0
+    index_led_option_lag_ftv_max_capital_pct: float = 0.90
+    index_led_option_lag_ftv_force_max_lots: bool = True
+    # Stealth CVD coil — flat price, CVD buying+acceleration before volume spike.
+    stealth_cvd_coil_capture_enabled: bool = True
+    stealth_cvd_coil_max_premium_inr: float = 220.0
+    stealth_cvd_coil_min_move_pct: float = 2.0
+    stealth_cvd_coil_max_move_pct: float = 25.0
+    stealth_cvd_coil_min_velocity_3s: float = -0.5
+    stealth_cvd_coil_max_velocity_3s: float = 1.0
+    stealth_cvd_coil_max_volume_surge: float = 1.8
+    stealth_cvd_coil_ftv_enabled: bool = True
+    stealth_cvd_coil_ftv_min_explosion_score: float = 48.0
+    stealth_cvd_coil_ftv_max_capital_pct: float = 0.90
+    stealth_cvd_coil_ftv_force_max_lots: bool = True
+    # Micro-pullback retest on armed base before lift resumes.
+    micro_pullback_retest_capture_enabled: bool = True
+    micro_pullback_retest_max_premium_inr: float = 220.0
+    micro_pullback_retest_min_move_pct: float = 5.0
+    micro_pullback_retest_max_move_pct: float = 25.0
+    micro_pullback_retest_min_velocity_3s: float = -1.2
+    micro_pullback_retest_max_velocity_3s: float = 0.5
+    micro_pullback_retest_min_velocity_9s: float = -0.5
+    micro_pullback_retest_ftv_enabled: bool = True
+    micro_pullback_retest_ftv_min_explosion_score: float = 48.0
+    micro_pullback_retest_ftv_max_capital_pct: float = 0.90
+    micro_pullback_retest_ftv_force_max_lots: bool = True
+    # Premium FVG at local base before vertical extension.
+    premium_fvg_pad_capture_enabled: bool = True
+    premium_fvg_pad_max_premium_inr: float = 220.0
+    premium_fvg_pad_min_move_pct: float = 2.0
+    premium_fvg_pad_max_move_pct: float = 28.0
+    premium_fvg_pad_max_velocity_3s: float = 2.0
+    premium_fvg_pad_ftv_enabled: bool = True
+    premium_fvg_pad_ftv_min_explosion_score: float = 50.0
+    premium_fvg_pad_ftv_max_capital_pct: float = 0.90
+    premium_fvg_pad_ftv_force_max_lots: bool = True
     # ICT confirm stack for local-base reversals (additive quality, not hard gates).
     local_base_reversal_ict_bonus_max: float = 18.0
     local_base_reversal_kill_zone_bonus_enabled: bool = True

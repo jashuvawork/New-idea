@@ -24,7 +24,13 @@ def classify_top_moment_type(evidence: Mapping[str, Any]) -> Optional[str]:
     tier = str(evidence.get("tier") or "").upper()
 
     if bool(
-        evidence.get("slowGrindSuddenLift") or evidence.get("fastBullishLocalBase")
+        evidence.get("slowGrindSuddenLift")
+        or evidence.get("fastBullishLocalBase")
+        or evidence.get("squeezeRelease")
+        or evidence.get("indexLedOptionLag")
+        or evidence.get("stealthCvdCoil")
+        or evidence.get("microPullbackRetest")
+        or evidence.get("premiumFvgPad")
     ):
         return "FTV"
 
@@ -115,7 +121,13 @@ def top_moment_entry_allowed(
         return False, "top_moment_timing_blocked", moment
 
     if _number(evidence.get("velocity3s")) < (
-        -0.8 if evidence.get("slowGrindSuddenLift") else 0.0
+        -1.2
+        if evidence.get("microPullbackRetest")
+        else -0.8
+        if evidence.get("slowGrindSuddenLift")
+        else -0.5
+        if evidence.get("stealthCvdCoil")
+        else 0.0
     ):
         return False, "top_moment_negative_velocity", moment
 
@@ -162,6 +174,21 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
         "fastBullishLocalBase": bool(
             alert.get("fastBullishLocalBaseReady")
             or alert.get("bullishLocalBaseActive")
+        ),
+        "squeezeRelease": bool(
+            alert.get("squeezeReleaseReady") or alert.get("ictSqueezeRelease")
+        ),
+        "indexLedOptionLag": bool(
+            alert.get("indexLedOptionLagReady") or alert.get("ictIndexLedOptionLag")
+        ),
+        "stealthCvdCoil": bool(
+            alert.get("stealthCvdCoilReady") or alert.get("ictStealthCvdCoil")
+        ),
+        "microPullbackRetest": bool(
+            alert.get("microPullbackRetestReady") or alert.get("ictMicroPullbackRetest")
+        ),
+        "premiumFvgPad": bool(
+            alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")
         ),
         "buildingRipReady": bool(alert.get("ictBuildingRipReady")),
         "buildingRipHelpersOk": bool(
