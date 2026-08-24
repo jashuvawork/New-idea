@@ -167,6 +167,32 @@ def test_qualifies_for_top_moment_max_lots_blocks_generic_building():
     assert moment is None
 
 
+def test_explosion_alert_is_top_moment_slow_grind_stamp():
+    alert = {
+        "tier": "BUILDING",
+        "slowGrindSuddenLiftReady": True,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+    }
+    assert explosion_alert_is_top_moment(alert) is True
+
+
+def test_top_moment_allows_slow_grind_flat_velocity():
+    ok, reason, moment = top_moment_entry_allowed(
+        _evidence(
+            tier="BUILDING",
+            slowGrindSuddenLift=True,
+            velocity3s=-0.3,
+            flatThenVertical=True,
+            activeBreakout=True,
+        ),
+        _ranking("A"),
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert moment == "FTV"
+
+
 def test_qualifies_for_top_moment_max_lots_disabled():
     from app.engines.top_moment_gate import qualifies_for_top_moment_max_lots
 

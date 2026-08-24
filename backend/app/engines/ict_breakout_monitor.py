@@ -751,6 +751,10 @@ def _fast_bullish_local_base_readiness(
     )
     if money not in ("ATM", "ITM"):
         return False, f"fast_bullish_requires_atm_itm_{money.lower()}"
+    if isinstance(alert, dict):
+        alert["fastBullishLocalBaseReady"] = True
+        alert["bullishLocalBaseActive"] = True
+        alert["ictBaseReadinessReason"] = "fast_bullish_local_base_ready"
     return True, "fast_bullish_local_base_ready"
 
 
@@ -894,7 +898,23 @@ def _slow_grind_sudden_lift_readiness(
         or 0
     )
     lo = float(getattr(s, "slow_grind_sudden_lift_min_move_pct", 2.0) or 2.0)
-    hi = float(getattr(s, "slow_grind_sudden_lift_max_move_pct", 22.0) or 22.0)
+    hi = float(getattr(s, "slow_grind_sudden_lift_max_move_pct", 30.0) or 30.0)
+    signal_ct, signals = _slow_grind_impending_lift_signals(
+        side=str(
+            getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+            or row.get("side")
+            or ""
+        ).upper(),
+        snap=snap,
+        ict=ict,
+        row=row,
+        settings=s,
+    )
+    if "volume_awakening_pre_spike" in signals:
+        bonus = float(
+            getattr(s, "slow_grind_sudden_lift_handoff_move_bonus_pct", 8.0) or 8.0
+        )
+        hi = hi + bonus
     if not (lo <= base_move <= hi + 1e-6):
         return False, f"slow_grind_pad_outside_{lo:g}_{hi:g}"
 
@@ -940,13 +960,6 @@ def _slow_grind_sudden_lift_readiness(
     if side not in ("CALL", "PUT"):
         return False, "slow_grind_side_invalid"
 
-    signal_ct, _signals = _slow_grind_impending_lift_signals(
-        side=side,
-        snap=snap,
-        ict=ict,
-        row=row,
-        settings=s,
-    )
     min_signals = int(
         getattr(s, "slow_grind_sudden_lift_min_impending_signals", 2) or 2
     )
@@ -970,6 +983,10 @@ def _slow_grind_sudden_lift_readiness(
     )
     if money not in ("ATM", "ITM"):
         return False, f"slow_grind_requires_atm_itm_{money.lower()}"
+    if isinstance(alert, dict):
+        alert["slowGrindSuddenLiftReady"] = True
+        alert["ictSlowGrindSuddenLift"] = True
+        alert["ictBaseReadinessReason"] = "slow_grind_sudden_lift_ready"
     return True, "slow_grind_sudden_lift_ready"
 
 

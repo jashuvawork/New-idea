@@ -114,7 +114,9 @@ def top_moment_entry_allowed(
     }:
         return False, "top_moment_timing_blocked", moment
 
-    if _number(evidence.get("velocity3s")) < 0:
+    if _number(evidence.get("velocity3s")) < (
+        -0.8 if evidence.get("slowGrindSuddenLift") else 0.0
+    ):
         return False, "top_moment_negative_velocity", moment
 
     return True, "ok", moment
@@ -153,6 +155,14 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
     evidence = {
         "tier": tier,
         "vRipReady": bool(alert.get("ictVRipReady")),
+        "slowGrindSuddenLift": bool(
+            alert.get("slowGrindSuddenLiftReady")
+            or alert.get("ictSlowGrindSuddenLift")
+        ),
+        "fastBullishLocalBase": bool(
+            alert.get("fastBullishLocalBaseReady")
+            or alert.get("bullishLocalBaseActive")
+        ),
         "buildingRipReady": bool(alert.get("ictBuildingRipReady")),
         "buildingRipHelpersOk": bool(
             alert.get("buildingRipHelpersOk") or alert.get("buildingLiftHelping")
