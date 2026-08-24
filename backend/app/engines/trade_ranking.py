@@ -189,10 +189,7 @@ def _top_ftv_a_pad_capture_lane(
     return bool(
         evidence.get("vRipReady")
         or evidence.get("volumeAwaken")
-        or evidence.get("orderflowPositive")
-        or evidence.get("armedBaseLaunch")
-        or evidence.get("eliteBaseReady")
-        or evidence.get("firstLift")
+        or evidence.get("ictVolumeAwakening")
     )
 
 
@@ -259,7 +256,7 @@ def ftv_authorization_policy(
     top_ftv_a_pad_waive_cvd_when_volume_awake: bool = True,
     ict_v_rip_min_velocity_3s: float = 1.2,
     ict_v_rip_min_velocity_9s: float = 0.8,
-    ict_v_rip_pad_min_move_pct: float = 15.0,
+    ict_v_rip_pad_min_move_pct: float = 2.0,
     ict_v_rip_volume_awake_min_velocity_3s: float = 0.85,
     ftv_s_strict_min_explosion_score: float = 85.0,
     ftv_s_strict_min_quality: float = 70.0,
