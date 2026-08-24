@@ -33,6 +33,7 @@ def classify_top_moment_type(evidence: Mapping[str, Any]) -> Optional[str]:
         or evidence.get("stealthCvdCoil")
         or evidence.get("microPullbackRetest")
         or evidence.get("premiumFvgPad")
+        or evidence.get("doubleDipVbase")
     ):
         return "FTV"
 
@@ -185,6 +186,9 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
         ),
         "premiumFvgPad": bool(
             alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")
+        ),
+        "doubleDipVbase": bool(
+            alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")
         ),
         "buildingRipReady": bool(alert.get("ictBuildingRipReady")),
         "buildingRipHelpersOk": bool(

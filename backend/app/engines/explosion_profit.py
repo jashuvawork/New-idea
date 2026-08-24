@@ -1032,6 +1032,7 @@ def _is_vbase_ftv_runner(trade: PaperTrade) -> bool:
         or ctx.get("stealthCvdCoil")
         or ctx.get("microPullbackRetest")
         or ctx.get("premiumFvgPad")
+        or ctx.get("doubleDipVbase")
     ):
         return False
     rel = ctx.get("localBaseBaseRelPct")

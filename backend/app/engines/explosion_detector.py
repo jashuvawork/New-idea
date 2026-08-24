@@ -291,6 +291,16 @@ def get_session_low_premium(symbol: str, strike: float, side: Side | str) -> flo
     return low if _is_meaningful_premium(low) else 0.0
 
 
+def get_session_peak_premium(symbol: str, strike: float, side: Side | str) -> float:
+    _roll_session()
+    if side is None or not symbol:
+        return 0.0
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    key = _open_key(symbol, strike, side_val)
+    peak = float(_session_peak.get(key) or 0)
+    return peak if _is_meaningful_premium(peak) else 0.0
+
+
 def prior_close_from_option_leg(opt: dict[str, Any] | None) -> float:
     """Extract previous-session close / day open from a normalized option leg."""
     if not isinstance(opt, dict):

@@ -710,6 +710,7 @@ def _explosion_candidates(
                 "stealth_cvd_coil_ready",
                 "micro_pullback_retest_ready",
                 "premium_fvg_pad_ready",
+                "double_dip_vbase_ready",
                 "building_rip_bullish_ready",
             "building_local_base_lift_ready",
         ):

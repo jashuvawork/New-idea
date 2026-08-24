@@ -25,6 +25,7 @@ PAD_LANE_READY_REASONS = frozenset(
         "stealth_cvd_coil_ready",
         "micro_pullback_retest_ready",
         "premium_fvg_pad_ready",
+        "double_dip_vbase_ready",
     }
 )
 
@@ -97,6 +98,8 @@ def pad_lane_ready_reason(
             return "micro_pullback_retest_ready"
         if bool(alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")):
             return "premium_fvg_pad_ready"
+        if bool(alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")):
+            return "double_dip_vbase_ready"
     return ""
 
 

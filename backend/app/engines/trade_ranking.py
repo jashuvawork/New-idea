@@ -202,6 +202,7 @@ def _top_ftv_a_pad_capture_lane(
         or evidence.get("stealthCvdCoil")
         or evidence.get("microPullbackRetest")
         or evidence.get("premiumFvgPad")
+        or evidence.get("doubleDipVbase")
     )
 
 
@@ -322,6 +323,9 @@ def ftv_authorization_policy(
     premium_fvg_pad_ftv_enabled: bool = True,
     premium_fvg_pad_ftv_min_explosion_score: float = 50.0,
     premium_fvg_pad_ftv_max_capital_pct: float = 0.90,
+    double_dip_vbase_ftv_enabled: bool = True,
+    double_dip_vbase_ftv_min_explosion_score: float = 48.0,
+    double_dip_vbase_ftv_max_capital_pct: float = 0.90,
     top_moments_only_enabled: bool = True,
     top_moments_min_grade: str = "A",
     first_lift_local_base_micro_pullback_enabled: bool = True,
@@ -865,6 +869,16 @@ def ftv_authorization_policy(
             max_v3=2.0,
             block_prefix="premium_fvg_pad_ftv",
         ),
+        _pad_lane_ftv_auth(
+            enabled=double_dip_vbase_ftv_enabled,
+            flag=bool(evidence.get("doubleDipVbase")),
+            mode="DOUBLE_DIP_VBASE_FTV",
+            min_score=double_dip_vbase_ftv_min_explosion_score,
+            max_capital=double_dip_vbase_ftv_max_capital_pct,
+            min_v3=-0.8,
+            max_v3=1.5,
+            block_prefix="double_dip_vbase_ftv",
+        ),
     ):
         if auth is not None:
             return auth
@@ -990,6 +1004,9 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "premium_fvg_pad_ftv_enabled",
         "premium_fvg_pad_ftv_min_explosion_score",
         "premium_fvg_pad_ftv_max_capital_pct",
+        "double_dip_vbase_ftv_enabled",
+        "double_dip_vbase_ftv_min_explosion_score",
+        "double_dip_vbase_ftv_max_capital_pct",
         "top_moments_only_enabled",
         "top_moments_min_grade",
         "first_lift_local_base_micro_pullback_enabled",
@@ -1092,6 +1109,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     premium_fvg_pad = bool(evidence.get("premiumFvgPad")) and not bool(
         evidence.get("midRipCoil")
     )
+    double_dip_vbase = bool(evidence.get("doubleDipVbase")) and not bool(
+        evidence.get("midRipCoil")
+    )
     flat_vertical = bool(evidence.get("flatThenVertical"))
     active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
@@ -1144,6 +1164,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     elif v_rip_ready:
         score += 10.0
         reasons.append("v_rip_session_low")
+    elif double_dip_vbase:
+        score += 11.0
+        reasons.append("double_dip_vbase")
     elif fast_bullish_local_base:
         score += 11.0
         reasons.append("fast_bullish_local_base")
@@ -1283,6 +1306,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             or stealth_cvd_coil
             or micro_pullback_retest
             or premium_fvg_pad
+            or double_dip_vbase
         )
         and (
             v3 > 0
@@ -1336,6 +1360,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "stealthCvdCoil": stealth_cvd_coil,
             "microPullbackRetest": micro_pullback_retest,
             "premiumFvgPad": premium_fvg_pad,
+            "doubleDipVbase": double_dip_vbase,
             "buildingRipReady": building_rip_ready,
             "buildingRipHelpersOk": bool(
                 evidence.get("buildingRipHelpersOk")
@@ -1463,6 +1488,9 @@ def rank_entry_candidate(
         ),
         "premiumFvgPad": bool(
             alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")
+        ),
+        "doubleDipVbase": bool(
+            alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")
         ),
         "buildingRipReady": alert.get("ictBuildingRipReady"),
         "buildingRipHelpersOk": bool(

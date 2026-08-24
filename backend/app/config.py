@@ -1487,6 +1487,20 @@ class Settings(BaseSettings):
     premium_fvg_pad_ftv_min_explosion_score: float = 50.0
     premium_fvg_pad_ftv_max_capital_pct: float = 0.90
     premium_fvg_pad_ftv_force_max_lots: bool = True
+    # Double-dip V-base — session low → bounce → retest low → second lift.
+    double_dip_vbase_capture_enabled: bool = True
+    double_dip_vbase_max_premium_inr: float = 220.0
+    double_dip_vbase_min_move_pct: float = 2.0
+    double_dip_vbase_max_move_pct: float = 20.0
+    double_dip_vbase_min_first_bounce_pct: float = 8.0
+    double_dip_vbase_max_retest_off_low_pct: float = 12.0
+    double_dip_vbase_min_retrace_ratio: float = 0.55
+    double_dip_vbase_min_velocity_3s: float = -0.8
+    double_dip_vbase_max_velocity_3s: float = 1.5
+    double_dip_vbase_ftv_enabled: bool = True
+    double_dip_vbase_ftv_min_explosion_score: float = 48.0
+    double_dip_vbase_ftv_max_capital_pct: float = 0.90
+    double_dip_vbase_ftv_force_max_lots: bool = True
     # ICT confirm stack for local-base reversals (additive quality, not hard gates).
     local_base_reversal_ict_bonus_max: float = 18.0
     local_base_reversal_kill_zone_bonus_enabled: bool = True

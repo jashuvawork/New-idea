@@ -1125,6 +1125,7 @@ async def _open_from_candidate(
                 "STEALTH_CVD_COIL_FTV",
                 "MICRO_PULLBACK_RETEST_FTV",
                 "PREMIUM_FVG_PAD_FTV",
+                "DOUBLE_DIP_VBASE_FTV",
             }
             and policy_decision.max_capital_pct is not None
         ):
@@ -1874,6 +1875,10 @@ async def _open_from_candidate(
                 "premium_fvg_pad",
                 {"premiumFvgPad": True},
             ),
+            "double_dip_vbase_ready": (
+                "double_dip_vbase",
+                {"doubleDipVbase": True},
+            ),
         }
         if lift_readiness_reason in _pad_lane_reasons:
             ctx_extra["maxProfitCapture"] = True
@@ -1947,6 +1952,7 @@ async def _open_from_candidate(
                             "stealth_cvd_coil",
                             "micro_pullback_retest",
                             "premium_fvg_pad",
+                            "double_dip_vbase",
                         )
                     )
                 )
@@ -3092,6 +3098,7 @@ def _pad_lane_ftv_policy_max_lots(
         "STEALTH_CVD_COIL_FTV": "stealth_cvd_coil_ftv_force_max_lots",
         "MICRO_PULLBACK_RETEST_FTV": "micro_pullback_retest_ftv_force_max_lots",
         "PREMIUM_FVG_PAD_FTV": "premium_fvg_pad_ftv_force_max_lots",
+        "DOUBLE_DIP_VBASE_FTV": "double_dip_vbase_ftv_force_max_lots",
     }.get(mode, "")
     if force_attr and not bool(getattr(settings, force_attr, True)):
         return int(lots), False

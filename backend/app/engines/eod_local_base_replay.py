@@ -173,6 +173,9 @@ def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, An
         "premiumFvgPad": bool(
             alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")
         ),
+        "doubleDipVbase": bool(
+            alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")
+        ),
         "timingAssessment": str(alert.get("timingAssessment") or ""),
         "timingAction": str(alert.get("timingAction") or ""),
     }
@@ -261,6 +264,7 @@ def evaluate_local_base_entry(
             "stealth_cvd_coil_ready",
             "micro_pullback_retest_ready",
             "premium_fvg_pad_ready",
+            "double_dip_vbase_ready",
         ):
             return (
                 False,

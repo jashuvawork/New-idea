@@ -203,6 +203,7 @@ def test_top_moment_allows_slow_grind_flat_velocity():
         ("stealthCvdCoil", -0.3),
         ("microPullbackRetest", -0.8),
         ("premiumFvgPad", -0.5),
+        ("doubleDipVbase", -0.3),
     ],
 )
 def test_top_moment_allows_pad_lane_flat_velocity(flag, v3):
@@ -230,6 +231,7 @@ def test_top_moment_allows_pad_lane_flat_velocity(flag, v3):
         ("stealthCvdCoil", "stealthCvdCoilReady"),
         ("microPullbackRetest", "microPullbackRetestReady"),
         ("premiumFvgPad", "premiumFvgPadReady"),
+        ("doubleDipVbase", "doubleDipVbaseReady"),
     ],
 )
 def test_explosion_alert_is_top_moment_pad_lane_stamp(flag, stamp_key):

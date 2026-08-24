@@ -17,6 +17,7 @@ INDEX_LED_OPTION_LAG_READY = "index_led_option_lag_ready"
 STEALTH_CVD_COIL_READY = "stealth_cvd_coil_ready"
 MICRO_PULLBACK_RETEST_READY = "micro_pullback_retest_ready"
 PREMIUM_FVG_PAD_READY = "premium_fvg_pad_ready"
+DOUBLE_DIP_VBASE_READY = "double_dip_vbase_ready"
 
 ALL_PAD_LANE_REASONS = frozenset(
     {
@@ -29,6 +30,7 @@ ALL_PAD_LANE_REASONS = frozenset(
         STEALTH_CVD_COIL_READY,
         MICRO_PULLBACK_RETEST_READY,
         PREMIUM_FVG_PAD_READY,
+        DOUBLE_DIP_VBASE_READY,
     }
 )
 
@@ -41,6 +43,7 @@ PAD_LANE_FTV_MODES = frozenset(
         "STEALTH_CVD_COIL_FTV",
         "MICRO_PULLBACK_RETEST_FTV",
         "PREMIUM_FVG_PAD_FTV",
+        "DOUBLE_DIP_VBASE_FTV",
     }
 )
 
@@ -54,6 +57,7 @@ def pad_lane_pre_lift(evidence: Mapping[str, Any]) -> bool:
         or evidence.get("stealthCvdCoil")
         or evidence.get("microPullbackRetest")
         or evidence.get("premiumFvgPad")
+        or evidence.get("doubleDipVbase")
     )
 
 
@@ -72,6 +76,8 @@ def pad_lane_cold_velocity_ok(
     if evidence.get("indexLedOptionLag") and v3 <= 1.2:
         return True
     if evidence.get("premiumFvgPad") and v3 <= 2.0:
+        return True
+    if evidence.get("doubleDipVbase") and -0.8 <= v3 <= 1.5:
         return True
     return False
 
@@ -633,6 +639,158 @@ def premium_fvg_pad_readiness(
     return True, PREMIUM_FVG_PAD_READY
 
 
+def _double_dip_vbase_shape(
+    *,
+    symbol: str,
+    strike: float,
+    side: str,
+    premium: float,
+    ict: Any,
+    row: dict[str, Any],
+    settings: Any,
+) -> tuple[bool, str, dict[str, float]]:
+    """Session low → bounce → retest low (W at trough) before second lift."""
+    from app.engines.explosion_detector import (
+        get_session_low_premium,
+        get_session_peak_premium,
+        mid_rip_armed_coil,
+        session_low_relative_move_pct,
+    )
+
+    if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
+        return False, "double_dip_mid_rip_coil", {}
+
+    sess_low = get_session_low_premium(symbol, strike, side)
+    sess_peak = get_session_peak_premium(symbol, strike, side)
+    if sess_low <= 0 or sess_peak <= 0 or premium <= 0:
+        return False, "double_dip_session_missing", {}
+
+    min_bounce = float(
+        getattr(settings, "double_dip_vbase_min_first_bounce_pct", 8.0) or 8.0
+    )
+    first_bounce_pct = (sess_peak - sess_low) / sess_low * 100.0
+    if first_bounce_pct < min_bounce:
+        return False, "double_dip_first_bounce_too_small", {}
+
+    off_low = session_low_relative_move_pct(symbol, strike, side, premium)
+    max_retest = float(
+        getattr(settings, "double_dip_vbase_max_retest_off_low_pct", 12.0) or 12.0
+    )
+    if off_low > max_retest + 1e-6:
+        return False, "double_dip_not_near_low", {}
+
+    bounce = sess_peak - sess_low
+    if bounce <= 0:
+        return False, "double_dip_flat_bounce", {}
+    retrace_ratio = (sess_peak - premium) / bounce
+    min_retrace = float(
+        getattr(settings, "double_dip_vbase_min_retrace_ratio", 0.55) or 0.55
+    )
+    if retrace_ratio < min_retrace:
+        return False, "double_dip_shallow_retest", {}
+
+    armed_base = float(
+        getattr(ict, "base_premium", 0)
+        or row.get("ictBasePremium")
+        or premium
+        or 0
+    )
+    if mid_rip_armed_coil(
+        session_low=sess_low,
+        armed_base=armed_base,
+        premium=premium,
+        session_peak=sess_peak,
+        settings=settings,
+    ):
+        return False, "double_dip_mid_rip_armed", {}
+
+    return True, "", {
+        "offLowMovePct": off_low,
+        "firstBouncePct": first_bounce_pct,
+        "retraceRatio": retrace_ratio,
+        "sessionLowPremium": sess_low,
+        "sessionPeakPremium": sess_peak,
+    }
+
+
+def double_dip_vbase_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Session-trough W: bounce off low, retest low, lift on second touch."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "double_dip_vbase_capture_enabled", True)):
+        return False, ""
+    row = alert if isinstance(alert, dict) else {}
+    if snap is None:
+        return False, "double_dip_vbase_chart_missing"
+
+    premium = float(getattr(event, "premium", 0) or row.get("premium") or 0)
+    prem_ok, prem_reason = _pad_premium_band_ok(
+        premium,
+        settings=s,
+        max_premium_setting="double_dip_vbase_max_premium_inr",
+        reason_prefix="double_dip_vbase",
+    )
+    if not prem_ok:
+        return False, prem_reason
+
+    move = _base_move(ict, row)
+    lo = float(getattr(s, "double_dip_vbase_min_move_pct", 2.0) or 2.0)
+    hi = float(getattr(s, "double_dip_vbase_max_move_pct", 20.0) or 20.0)
+    if not (lo <= move <= hi + 1e-6):
+        return False, f"double_dip_vbase_pad_outside_{lo:g}_{hi:g}"
+
+    v3 = _velocity_3s(event, row, ict)
+    min_v3 = float(getattr(s, "double_dip_vbase_min_velocity_3s", -0.8) or -0.8)
+    max_v3 = float(getattr(s, "double_dip_vbase_max_velocity_3s", 1.5) or 1.5)
+    if v3 < min_v3:
+        return False, f"double_dip_vbase_velocity3s<{min_v3:g}"
+    if v3 > max_v3:
+        return False, f"double_dip_vbase_velocity3s>{max_v3:g}"
+
+    if not _base_armed(ict, row):
+        return False, "double_dip_vbase_base_not_armed"
+    if not _structured(ict, row, s):
+        return False, "double_dip_vbase_structure_missing"
+
+    side = _side_from_row(event, row)
+    symbol = str(getattr(snap, "symbol", "") or row.get("symbol") or "")
+    strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+    shape_ok, shape_reason, metrics = _double_dip_vbase_shape(
+        symbol=symbol,
+        strike=strike,
+        side=side,
+        premium=premium,
+        ict=ict,
+        row=row,
+        settings=s,
+    )
+    if not shape_ok:
+        return False, shape_reason
+
+    mn_ok, mn_reason = _atm_itm_ok(side=side, strike=strike, snap=snap)
+    if not mn_ok:
+        return False, f"double_dip_vbase_{mn_reason}"
+
+    if isinstance(alert, dict):
+        alert["offLowMovePct"] = metrics.get("offLowMovePct")
+        alert["doubleDipFirstBouncePct"] = metrics.get("firstBouncePct")
+        alert["doubleDipRetraceRatio"] = metrics.get("retraceRatio")
+
+    _stamp_pad_lane(
+        alert,
+        DOUBLE_DIP_VBASE_READY,
+        doubleDipVbaseReady=True,
+        ictDoubleDipVbase=True,
+    )
+    return True, DOUBLE_DIP_VBASE_READY
+
+
 def extended_pad_lane_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -645,6 +803,7 @@ def extended_pad_lane_readiness(
     s = settings or get_settings()
     row = alert if isinstance(alert, dict) else {}
     checks = (
+        double_dip_vbase_readiness,
         squeeze_release_readiness,
         premium_fvg_pad_readiness,
         index_led_option_lag_readiness,

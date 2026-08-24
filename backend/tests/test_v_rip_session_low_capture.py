@@ -37,6 +37,7 @@ _PAD_LANE_READINESS_REASONS = frozenset(
         "stealth_cvd_coil_ready",
         "micro_pullback_retest_ready",
         "premium_fvg_pad_ready",
+        "double_dip_vbase_ready",
     }
 )
 
