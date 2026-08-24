@@ -189,6 +189,10 @@ def test_high_conf_trail_stops_when_winner_gives_back_to_loss(mock_conf, mock_ex
     s.afternoon_capture_exit_max_hold_seconds = 600
     s.chart_confidence_hold_stop_mult = 1.35
     s.explosion_faded_rip_no_green_exit_enabled = True
+    s.explosion_early_green_lock_enabled = True
+    s.explosion_early_green_lock_min_best_points = 3.5
+    s.explosion_early_green_lock_buffer_points = 0.5
+    s.explosion_early_green_lock_max_velocity_3s = 0.0
     s.high_conviction_defer_profit_lock = True
     s.explosion_peak_fade_lock_enabled = True
     s.explosion_peak_fade_breakeven_lock = True

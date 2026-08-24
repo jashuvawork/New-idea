@@ -58,6 +58,10 @@ def _settings(**overrides):
         # Isolate time-profit hold — MagicMock would invent peak-fade flags.
         "explosion_peak_fade_lock_enabled": False,
         "explosion_peak_capture_enabled": False,
+        "explosion_early_green_lock_enabled": True,
+        "explosion_early_green_lock_min_best_points": 3.5,
+        "explosion_early_green_lock_buffer_points": 0.5,
+        "explosion_early_green_lock_max_velocity_3s": 0.0,
     }
     defaults.update(overrides)
     for k, v in defaults.items():

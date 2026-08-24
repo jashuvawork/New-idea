@@ -5,6 +5,7 @@ Aug6 SENSEX 78800 PE (never-green ELITE, 27 lots, −₹20k) and Jul30 (90-lot E
 """
 
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from app.engines.explosion_profit import evaluate_explosion_exit
@@ -12,6 +13,31 @@ from app.engines.session_mode_feedback import cap_opposite_side_flip_after_win
 from app.models.schemas import AutoTraderState, PaperTrade, Side, StrategyType
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def _scratch_guard_settings() -> MagicMock:
+    """Settings with scratch/early exits enabled (for unit tests of those guards)."""
+    s = MagicMock()
+    s.explosion_failed_launch_exit_enabled = True
+    s.explosion_failed_launch_min_hold_seconds = 15
+    s.explosion_failed_launch_max_hold_seconds = 45
+    s.explosion_failed_launch_max_best_points = 1.0
+    s.explosion_failed_launch_min_loss_points = 1.5
+    s.explosion_failed_launch_max_velocity_3s = 0.0
+    s.explosion_never_green_stop_enabled = True
+    s.explosion_never_green_min_green_points = 0.5
+    s.explosion_never_green_stop_points = 4.0
+    s.explosion_never_green_stop_pct = 8.0
+    s.explosion_never_green_min_hold_seconds = 10
+    s.explosion_faded_rip_no_green_exit_enabled = False
+    s.explosion_early_green_lock_enabled = False
+    s.explosion_peak_fade_lock_enabled = False
+    s.explosion_peak_capture_enabled = False
+    s.explosion_no_progress_enabled = False
+    s.explosion_per_trade_max_loss_inr = 2_000.0
+    s.explosion_exceptional_per_trade_max_loss_inr = 4_000.0
+    s.emergency_stop_enabled = False
+    return s
 
 
 def _trade(entry, cur, *, best=0.0, lots=10, hold_s=60):
@@ -26,9 +52,10 @@ def _trade(entry, cur, *, best=0.0, lots=10, hold_s=60):
 
 def test_never_green_stop_cuts_faster():
     """Never green and down past max(4pt, 8% premium) exits before a deep loss."""
-    reason, _ = evaluate_explosion_exit(
-        _trade(346.0, 315.0, best=0.0, lots=1), 315.0, "ELITE", 20,
-    )
+    with patch("app.engines.explosion_profit.get_settings", return_value=_scratch_guard_settings()):
+        reason, _ = evaluate_explosion_exit(
+            _trade(346.0, 315.0, best=0.0, lots=1), 315.0, "ELITE", 20,
+        )
     assert reason == "explosion_never_green_stop"
 
 
@@ -125,10 +152,11 @@ def test_index_confirmed_ftv_uses_wider_cap_not_two_thousand():
 
 
 def test_failed_launch_scratches_on_negative_velocity():
-    trade = _trade(51.0, 49.0, best=0.5, lots=1, hold_s=20)
-    reason, _ = evaluate_explosion_exit(
-        trade, 49.0, "ELITE", 65, live_velocity_3s=-1.0,
-    )
+    with patch("app.engines.explosion_profit.get_settings", return_value=_scratch_guard_settings()):
+        trade = _trade(51.0, 49.0, best=0.5, lots=1, hold_s=20)
+        reason, _ = evaluate_explosion_exit(
+            trade, 49.0, "ELITE", 65, live_velocity_3s=-1.0,
+        )
     assert reason == "explosion_failed_launch"
 
 
