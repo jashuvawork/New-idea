@@ -489,7 +489,8 @@ class Settings(BaseSettings):
     ict_armed_base_launch_min_velocity_9s: float = 1.5
     ict_armed_base_launch_min_absolute_volume: float = 25000.0
     ict_armed_base_launch_min_quality: float = 65.0
-    ict_armed_base_launch_min_score: float = 65.0
+    # Detector emits one-decimal scores; keep the 64.5 armed-launch boundary executable.
+    ict_armed_base_launch_min_score: float = 64.5
     ict_armed_base_launch_min_tqs: float = 50.0
     ict_armed_base_launch_rank_bonus: float = 16.0
     # Narrow pre-launch authorization: a stable ATM/ITM base may become executable
@@ -629,7 +630,8 @@ class Settings(BaseSettings):
     first_lift_trade_min_volume_surge: float = 2.0
     first_lift_trade_min_velocity_3s: float = 1.5
     first_lift_trade_min_velocity_9s: float = 1.0
-    first_lift_trade_max_move_pct: float = 25.0
+    # Match the detector's causal first-lift band; >40% remains a chase.
+    first_lift_trade_max_move_pct: float = 40.0
     # Helper-confirmed lane: "on the radar as BUILDING and suddenly something is helping to
     # go FTV." When enough INDEPENDENT confirmations agree (volume surge/awaken, displacement,
     # premium FVG, flat->vertical structure, chart-align, breadth-align) on a name at its

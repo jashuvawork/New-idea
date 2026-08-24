@@ -34,6 +34,10 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["ENTRY_TIMING_STRUCTURED_COLD_MAX_LOTS"] == "false"
     assert env["EXPLOSION_FAILED_LAUNCH_EXIT_ENABLED"] == "true"
     assert env["EXPLOSION_EARLY_GREEN_LOCK_ENABLED"] == "true"
+    assert env["ICT_ARMED_BASE_LAUNCH_MAX_MOVE_PCT"] == "15"
+    assert env["ICT_ARMED_BASE_LAUNCH_MIN_VELOCITY_3S"] == "2"
+    assert env["ICT_ARMED_BASE_LAUNCH_MIN_QUALITY"] == "65"
+    assert env["ICT_ARMED_BASE_LAUNCH_MIN_SCORE"] == "64.5"
     assert env["ICT_ELITE_BASE_READY_ENABLED"] == "true"
     assert env["ICT_ELITE_BASE_READY_MIN_MOVE_PCT"] == "2"
     assert env["ICT_ELITE_BASE_READY_MAX_MOVE_PCT"] == "5"
@@ -74,6 +78,14 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
         "ENTRY_TIMING_STRUCTURED_COLD_MAX_LOTS",
         "EXPLOSION_FAILED_LAUNCH_EXIT_ENABLED",
         "EXPLOSION_EARLY_GREEN_LOCK_ENABLED",
+        "ICT_ARMED_BASE_LAUNCH_MIN_MOVE_PCT",
+        "ICT_ARMED_BASE_LAUNCH_MAX_MOVE_PCT",
+        "ICT_ARMED_BASE_LAUNCH_MIN_VELOCITY_3S",
+        "ICT_ARMED_BASE_LAUNCH_MIN_VELOCITY_9S",
+        "ICT_ARMED_BASE_LAUNCH_MIN_ABSOLUTE_VOLUME",
+        "ICT_ARMED_BASE_LAUNCH_MIN_QUALITY",
+        "ICT_ARMED_BASE_LAUNCH_MIN_SCORE",
+        "ICT_ARMED_BASE_LAUNCH_MIN_TQS",
         "ICT_ELITE_BASE_READY_ENABLED",
         "ICT_ELITE_BASE_READY_MIN_MOVE_PCT",
         "ICT_ELITE_BASE_READY_MAX_MOVE_PCT",

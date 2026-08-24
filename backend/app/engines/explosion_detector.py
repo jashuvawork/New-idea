@@ -40,6 +40,7 @@ PREMIUM_POLL_WINDOW_SECONDS = 120
 # ~80% off the ~40 session low).
 _local_base_hist: dict[str, deque] = {}
 _armed_base_anchors: dict[str, "ArmedBaseAnchor"] = {}
+_armed_candidate_evidence: dict[str, dict[str, Any]] = {}
 _armed_base_reset_after: dict[str, datetime] = {}
 LOCAL_BASE_HIST_MAXLEN = 1200  # ~60 min at 3s
 LOCAL_BASE_WINDOW_SECONDS = 1800  # 30 min lookback for the local swing low
@@ -96,6 +97,7 @@ def _roll_session(now: Optional[datetime] = None) -> None:
         _peak_velocity.clear()
         _local_base_hist.clear()
         _armed_base_anchors.clear()
+        _armed_candidate_evidence.clear()
         _armed_base_reset_after.clear()
 
 
@@ -111,6 +113,7 @@ def reset_detector_state_for_tests() -> None:
     _peak_velocity.clear()
     _local_base_hist.clear()
     _armed_base_anchors.clear()
+    _armed_candidate_evidence.clear()
     _armed_base_reset_after.clear()
     # Keep today's session date so seeded lows are not wiped by the next _roll_session().
     _session_date = datetime.now(IST).strftime("%Y-%m-%d")
@@ -951,6 +954,7 @@ def armed_base_anchor(
     current = _armed_base_anchors.get(key)
     if current is not None and now >= current.expires_at:
         _armed_base_anchors.pop(key, None)
+        _armed_candidate_evidence.pop(key, None)
         _armed_base_reset_after[key] = current.expires_at
         current = None
 
@@ -1034,6 +1038,7 @@ def armed_base_anchor(
         settings=settings,
     ):
         _armed_base_anchors.pop(key, None)
+        _armed_candidate_evidence.pop(key, None)
         current = None
         mid_rip_rejected = True
 
@@ -1163,6 +1168,56 @@ def armed_base_anchor(
     return out
 
 
+def align_armed_candidate_evidence(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist causal prearmed proof while the same launch anchor is active."""
+    side_v = side if isinstance(side, Side) else Side(str(side).upper())
+    key = _open_key(symbol, strike, side_v)
+    anchor = _armed_base_anchors.get(key)
+    if anchor is None:
+        _armed_candidate_evidence.pop(key, None)
+        return {}
+    armed_at = anchor.armed_at.isoformat()
+    current = _armed_candidate_evidence.get(key)
+    if current is None or current.get("armedAt") != armed_at:
+        current = {"armedAt": armed_at}
+    numeric_fields = (
+        "explosionScore",
+        "flatVerticalQuality",
+        "tradeQualityScore",
+        "velocity3s",
+        "velocity9s",
+        "volume",
+        "helperCount",
+        "sampleCount",
+        "spanSeconds",
+    )
+    for name in numeric_fields:
+        try:
+            current[name] = max(
+                float(current.get(name) or 0),
+                float(evidence.get(name) or 0),
+            )
+        except (TypeError, ValueError):
+            continue
+    for name in (
+        "orderflowConfirmed",
+        "volumeAwakening",
+        "firstLift",
+        "armedLaunch",
+        "eliteBaseReady",
+        "flatThenVertical",
+        "activeBreakout",
+    ):
+        current[name] = bool(current.get(name) or evidence.get(name))
+    _armed_candidate_evidence[key] = current
+    return dict(current)
+
+
 def consume_armed_base_anchor(
     symbol: str,
     strike: float,
@@ -1183,6 +1238,7 @@ def consume_armed_base_anchor(
     else:
         reset_after = reset_after.astimezone(IST)
     consumed = _armed_base_anchors.pop(key, None)
+    _armed_candidate_evidence.pop(key, None)
     prior_reset = _armed_base_reset_after.get(key)
     if prior_reset is None or reset_after > prior_reset:
         _armed_base_reset_after[key] = reset_after
@@ -2011,6 +2067,56 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     elite_base_ready = bool(getattr(ict, "elite_base_ready", False))
     v_rip_ready = bool(getattr(ict, "v_rip_ready", False))
     building_rip_ready = bool(getattr(ict, "building_rip_ready", False))
+    armed_evidence: dict[str, Any] = {}
+    causal_band_max = float(
+        getattr(_settings, "elite_local_base_max_move_pct", 40.0) or 40.0
+    )
+    if (
+        bool(getattr(ict, "base_armed", False))
+        and 0 < float(getattr(ict, "base_relative_move_pct", 0) or 0)
+        <= causal_band_max
+        and (
+            first_lift
+            or armed_launch
+            or elite_base_ready
+            or v_rip_ready
+            or building_rip_ready
+        )
+    ):
+        armed_evidence = align_armed_candidate_evidence(
+            e.symbol,
+            e.strike,
+            e.side,
+            {
+                "explosionScore": e.explosion_score,
+                "flatVerticalQuality": getattr(ict, "flat_vertical_quality", 0),
+                "tradeQualityScore": getattr(snap, "tradeQualityScore", 0)
+                if snap is not None
+                else 0,
+                "velocity3s": e.velocity_3s,
+                "velocity9s": e.velocity_9s,
+                "volume": e.volume,
+                "sampleCount": getattr(ict, "armed_base_samples", 0),
+                "spanSeconds": getattr(ict, "armed_base_span_seconds", 0),
+                "orderflowConfirmed": bool(
+                    float(e.volume or 0)
+                    >= float(
+                        getattr(
+                            _settings,
+                            "ict_armed_base_launch_min_absolute_volume",
+                            25_000.0,
+                        )
+                        or 25_000.0
+                    )
+                ),
+                "volumeAwakening": bool(getattr(ict, "volume_awakening", False)),
+                "firstLift": first_lift,
+                "armedLaunch": armed_launch,
+                "eliteBaseReady": elite_base_ready,
+                "flatThenVertical": bool(getattr(ict, "flat_then_vertical", False)),
+                "activeBreakout": bool(getattr(ict, "active", False)),
+            },
+        )
     if armed_launch:
         tradeable = True
     if elite_base_ready:
@@ -2141,6 +2247,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "ictBaseExpiresAt": str(
             getattr(ict, "armed_base_expires_at", "") or ""
         ),
+        "ictArmedEvidence": armed_evidence,
         "ictVolumeAwakening": ict.volume_awakening,
         "ictDisplacement": ict.displacement,
         "ictLocalSwingBase": ict.local_swing_base,

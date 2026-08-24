@@ -273,8 +273,15 @@ def compute_trading_limits(
         limits.allowExplosion = False
         limits.allowFullLots = False
         limits.lotSizeMultiplier = min(limits.lotSizeMultiplier, 0.55)
-        limits.minRankScore = min(limits.minRankScore, settings.quick_sideways_min_rank_score)
-        playbook.append("Low confidence — quick sideways only, reduced size")
+        if settings.quick_sideways_enabled:
+            limits.minRankScore = min(
+                limits.minRankScore,
+                settings.quick_sideways_min_rank_score,
+            )
+            playbook.append("Low confidence — quick sideways only, reduced size")
+        else:
+            limits.allowQuickSideways = False
+            playbook.append("Low confidence — stand down; quick trades disabled")
     elif tier == "MEDIUM":
         limits.allowFullLots = False
         limits.lotSizeMultiplier = min(limits.lotSizeMultiplier, 0.85)
