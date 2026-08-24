@@ -512,6 +512,10 @@ class Settings(BaseSettings):
     ict_v_rip_min_quality: float = 50.0
     ict_v_rip_min_score: float = 40.0
     ict_v_rip_base_near_session_low_pct: float = 2.0
+    # Slow grind into the 15–25% pad (e.g. 24→30) may show volume awakening before
+    # v3 clears the default 1.2% bar — allow a softer floor when heat confirms.
+    ict_v_rip_pad_min_move_pct: float = 15.0
+    ict_v_rip_volume_awake_min_velocity_3s: float = 0.85
     # BUILDING bullish-rip sleeve: when radar is stuck BUILDING but premium is
     # actively ripping (positive live velocity + volume), take mid-rip toward max.
     # Cold/negative-v3 BUILDING stays blocked. Does not require session-trough arm.
@@ -2235,6 +2239,16 @@ AUDIT_WEEK_LOCAL_BASE_OVERRIDES: dict[str, float] = {
     "ict_elite_base_ready_max_move_pct": 8.0,
     "winner_local_base_min_explosion_score": 70.0,
     "ftv_s_strict_min_explosion_score": 80.0,
+    # Early local-base pad (e.g. 24→30) — soften velocity/TQS without opening chase.
+    "ict_v_rip_min_velocity_3s": 0.8,
+    "ict_v_rip_min_velocity_9s": 0.6,
+    "ict_v_rip_volume_awake_min_velocity_3s": 0.75,
+    "ict_v_rip_min_quality": 45.0,
+    "ict_armed_base_launch_min_tqs": 45.0,
+    "ict_armed_base_launch_min_score": 55.0,
+    "first_lift_trade_min_velocity_3s": 1.0,
+    "first_lift_trade_min_velocity_9s": 0.7,
+    "first_lift_helper_confirm_min_velocity_3s": 0.9,
 }
 
 

@@ -40,6 +40,8 @@ def test_audit_week_overrides_lower_floors():
     assert audit.ftv_s_strict_min_local_base_move_pct < base.ftv_s_strict_min_local_base_move_pct
     assert audit.explosion_local_base_entry_min_move_pct < base.explosion_local_base_entry_min_move_pct
     assert audit.building_ltp_monitor_min_ms <= base.building_ltp_monitor_min_ms
+    assert audit.ict_v_rip_min_velocity_3s < base.ict_v_rip_min_velocity_3s
+    assert audit.ict_armed_base_launch_min_tqs < base.ict_armed_base_launch_min_tqs
 
 
 def test_local_base_audit_scores_layers(tmp_path):
