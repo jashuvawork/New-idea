@@ -23,6 +23,11 @@ def classify_top_moment_type(evidence: Mapping[str, Any]) -> Optional[str]:
     """Return ELITE | EXPLODING | FTV | V when this is a focused top moment."""
     tier = str(evidence.get("tier") or "").upper()
 
+    if bool(
+        evidence.get("slowGrindSuddenLift") or evidence.get("fastBullishLocalBase")
+    ):
+        return "FTV"
+
     if bool(evidence.get("vRipReady")) and not bool(evidence.get("midRipCoil")):
         return "V"
 
@@ -109,9 +114,35 @@ def top_moment_entry_allowed(
     }:
         return False, "top_moment_timing_blocked", moment
 
-    if _number(evidence.get("velocity3s")) < 0:
+    if _number(evidence.get("velocity3s")) < (
+        -0.8 if evidence.get("slowGrindSuddenLift") else 0.0
+    ):
         return False, "top_moment_negative_velocity", moment
 
+    return True, "ok", moment
+
+
+def qualifies_for_top_moment_max_lots(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any],
+    *,
+    top_moments_max_lots_only_enabled: bool = True,
+    min_grade: str = "A",
+) -> tuple[bool, str, Optional[str]]:
+    """True when this explosion may use capital-max lots (FTV / V / ELITE / EXPLODING)."""
+    if not top_moments_max_lots_only_enabled:
+        return True, "disabled", classify_top_moment_type(evidence)
+
+    ok, reason, moment = top_moment_entry_allowed(
+        evidence,
+        ranking,
+        top_moments_only_enabled=True,
+        min_grade=min_grade,
+    )
+    if not ok:
+        return False, reason, moment
+    if moment not in TOP_MOMENT_TYPES:
+        return False, "top_moment_requires_ftv_v_elite_or_exploding", moment
     return True, "ok", moment
 
 
@@ -124,6 +155,14 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
     evidence = {
         "tier": tier,
         "vRipReady": bool(alert.get("ictVRipReady")),
+        "slowGrindSuddenLift": bool(
+            alert.get("slowGrindSuddenLiftReady")
+            or alert.get("ictSlowGrindSuddenLift")
+        ),
+        "fastBullishLocalBase": bool(
+            alert.get("fastBullishLocalBaseReady")
+            or alert.get("bullishLocalBaseActive")
+        ),
         "buildingRipReady": bool(alert.get("ictBuildingRipReady")),
         "buildingRipHelpersOk": bool(
             alert.get("buildingRipHelpersOk") or alert.get("buildingLiftHelping")

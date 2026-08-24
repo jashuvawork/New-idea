@@ -618,16 +618,16 @@ def _local_base_pad_premium_band_ok(
     max_premium_setting: str,
     reason_prefix: str,
 ) -> tuple[bool, str]:
-    """Require LTP inside the slow-coil → fast-lift pad band (default ₹18–₹30)."""
+    """Require LTP inside the slow-coil → fast-lift pad band (default ₹18–₹220)."""
     if premium <= 0:
         return False, f"{reason_prefix}_premium_missing"
     min_prem = float(
         getattr(settings, "local_base_pad_capture_min_premium_inr", 18.0) or 18.0
     )
     max_prem = float(
-        getattr(settings, max_premium_setting, 30.0)
-        or getattr(settings, "local_base_pad_capture_max_premium_inr", 30.0)
-        or 30.0
+        getattr(settings, max_premium_setting, 220.0)
+        or getattr(settings, "local_base_pad_capture_max_premium_inr", 220.0)
+        or 220.0
     )
     if premium < min_prem:
         return False, f"{reason_prefix}_premium_below_{min_prem:g}"
@@ -644,7 +644,7 @@ def _fast_bullish_local_base_readiness(
     alert: Optional[dict[str, Any]] = None,
     settings: Any = None,
 ) -> tuple[bool, str]:
-    """Authorize fast-moving local-base lifts inside the ₹18–₹30 pad band."""
+    """Authorize fast-moving local-base lifts inside the ₹18–₹220 pad band."""
     s = settings or get_settings()
     if not bool(getattr(s, "fast_bullish_local_base_capture_enabled", True)):
         return False, ""
@@ -751,6 +751,10 @@ def _fast_bullish_local_base_readiness(
     )
     if money not in ("ATM", "ITM"):
         return False, f"fast_bullish_requires_atm_itm_{money.lower()}"
+    if isinstance(alert, dict):
+        alert["fastBullishLocalBaseReady"] = True
+        alert["bullishLocalBaseActive"] = True
+        alert["ictBaseReadinessReason"] = "fast_bullish_local_base_ready"
     return True, "fast_bullish_local_base_ready"
 
 
@@ -762,7 +766,7 @@ def _slow_grind_impending_lift_signals(
     row: dict[str, Any],
     settings: Any,
 ) -> tuple[int, list[str]]:
-    """Count pre-breakout lift hints during a slow sub-₹30 coil (no volume spike yet)."""
+    """Count pre-breakout lift hints during a slow pad-band coil (no volume spike yet)."""
     signals: list[str] = []
     chart = getattr(snap, "spotChart", None)
     if chart is None:
@@ -836,6 +840,18 @@ def _slow_grind_impending_lift_signals(
     ):
         signals.append("session_trough_armed")
 
+    volume_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
+    v3 = float(getattr(ict, "velocity_3s", 0) or row.get("velocity3s") or 0)
+    max_v3 = float(
+        getattr(settings, "slow_grind_sudden_lift_max_velocity_3s", 1.5) or 1.5
+    )
+    if volume_awake and v3 <= max_v3:
+        signals.append("volume_awakening_pre_spike")
+
     from app.engines.spot_direction import side_aligned_with_chart
 
     if side_u in ("CALL", "PUT"):
@@ -855,7 +871,7 @@ def _slow_grind_sudden_lift_readiness(
     alert: Optional[dict[str, Any]] = None,
     settings: Any = None,
 ) -> tuple[bool, str]:
-    """Authorize slow ₹18–₹30 coil when impending-lift signals stack before the spike."""
+    """Authorize slow pad-band coil when impending-lift signals stack before the spike."""
     s = settings or get_settings()
     if not bool(getattr(s, "slow_grind_sudden_lift_enabled", True)):
         return False, ""
@@ -882,7 +898,23 @@ def _slow_grind_sudden_lift_readiness(
         or 0
     )
     lo = float(getattr(s, "slow_grind_sudden_lift_min_move_pct", 2.0) or 2.0)
-    hi = float(getattr(s, "slow_grind_sudden_lift_max_move_pct", 22.0) or 22.0)
+    hi = float(getattr(s, "slow_grind_sudden_lift_max_move_pct", 30.0) or 30.0)
+    signal_ct, signals = _slow_grind_impending_lift_signals(
+        side=str(
+            getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+            or row.get("side")
+            or ""
+        ).upper(),
+        snap=snap,
+        ict=ict,
+        row=row,
+        settings=s,
+    )
+    if "volume_awakening_pre_spike" in signals:
+        bonus = float(
+            getattr(s, "slow_grind_sudden_lift_handoff_move_bonus_pct", 8.0) or 8.0
+        )
+        hi = hi + bonus
     if not (lo <= base_move <= hi + 1e-6):
         return False, f"slow_grind_pad_outside_{lo:g}_{hi:g}"
 
@@ -928,13 +960,6 @@ def _slow_grind_sudden_lift_readiness(
     if side not in ("CALL", "PUT"):
         return False, "slow_grind_side_invalid"
 
-    signal_ct, _signals = _slow_grind_impending_lift_signals(
-        side=side,
-        snap=snap,
-        ict=ict,
-        row=row,
-        settings=s,
-    )
     min_signals = int(
         getattr(s, "slow_grind_sudden_lift_min_impending_signals", 2) or 2
     )
@@ -958,6 +983,10 @@ def _slow_grind_sudden_lift_readiness(
     )
     if money not in ("ATM", "ITM"):
         return False, f"slow_grind_requires_atm_itm_{money.lower()}"
+    if isinstance(alert, dict):
+        alert["slowGrindSuddenLiftReady"] = True
+        alert["ictSlowGrindSuddenLift"] = True
+        alert["ictBaseReadinessReason"] = "slow_grind_sudden_lift_ready"
     return True, "slow_grind_sudden_lift_ready"
 
 

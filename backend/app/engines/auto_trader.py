@@ -519,6 +519,7 @@ async def _open_from_candidate(
     symbol = candidate.symbol
     snap = candidate.snap
     policy_decision = None
+    policy_ranking = None
 
     # Jul29: stop scalp entries — explosions only.
     if not getattr(settings, "scalp_entries_enabled", False):
@@ -1072,6 +1073,13 @@ async def _open_from_candidate(
         allocation=allocation,
         candidate=candidate,
     )
+    lots, pad_lane_full_sleeve = _pad_lane_ftv_policy_max_lots(
+        lots=lots,
+        symbol=symbol,
+        premium=fill_premium,
+        policy_decision=policy_decision,
+        allocation=allocation,
+    )
     lots, winner_index_full_sleeve = _winner_index_helpers_max_lots(
         lots=lots,
         symbol=symbol,
@@ -1085,9 +1093,10 @@ async def _open_from_candidate(
         strict_s_full_sleeve
         or top_ftv_a_full_sleeve
         or building_rip_full_sleeve
+        or pad_lane_full_sleeve
         or winner_index_full_sleeve
     )
-    if top_ftv_a_full_sleeve or building_rip_full_sleeve or winner_index_full_sleeve:
+    if top_ftv_a_full_sleeve or building_rip_full_sleeve or pad_lane_full_sleeve or winner_index_full_sleeve:
         top_explosion_max = True
     force_max_size = full_sleeve_authorized
 
@@ -1105,7 +1114,7 @@ async def _open_from_candidate(
         if (
             policy_decision is not None
             and policy_decision.mode
-            in {"TOP_FTV_A", "WINNER_LOCAL_BASE", "BUILDING_RIP_FTV"}
+            in {"TOP_FTV_A", "WINNER_LOCAL_BASE", "BUILDING_RIP_FTV", "SLOW_GRIND_FTV", "FAST_BULLISH_FTV"}
             and policy_decision.max_capital_pct is not None
         ):
             ordinary_pct = min(ordinary_pct, float(policy_decision.max_capital_pct))
@@ -1209,6 +1218,24 @@ async def _open_from_candidate(
             top_explosion_max = True
         except Exception:
             elite_full_lot = False
+
+    lots, top_moment_lot_meta = _enforce_top_moment_max_lots_only(
+        lots=lots,
+        symbol=symbol,
+        premium=fill_premium,
+        candidate=candidate,
+        policy_ranking=policy_ranking,
+        settings=settings,
+    )
+    if not top_moment_lot_meta.get("topMomentMaxLots", True):
+        top_explosion_max = False
+        elite_full_lot = False
+        full_sleeve_authorized = False
+        base_window_full_lots = False
+        structured_cold_max = False
+        high_conviction = False
+        elevated_size = False
+
     if candidate.mode == "explosion" and trap_meta:
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
@@ -1622,6 +1649,9 @@ async def _open_from_candidate(
         ),
         "baseWindowFullLots": bool(base_window_full_lots),
         "structuredColdMaxLots": bool(structured_cold_max),
+        "topMomentMaxLots": top_moment_lot_meta.get("topMomentMaxLots"),
+        "topMomentType": top_moment_lot_meta.get("topMomentType"),
+        "topMomentMaxLotsCapReason": top_moment_lot_meta.get("topMomentMaxLotsCapReason"),
         "sameStrikePostWinCap": post_win_cap_meta or None,
         "timingAssessment": timing_meta or None,
     }
@@ -1700,17 +1730,19 @@ async def _open_from_candidate(
         afternoon = is_afternoon_capture_event(ev, chart=snap.spotChart)
         from app.engines.ict_breakout_monitor import (
             analyze_explosion_event_ict,
-            first_lift_entry_ready,
+            first_lift_entry_readiness,
         )
 
         ict = analyze_explosion_event_ict(ev, snap)
         alert = candidate.alert if isinstance(candidate.alert, dict) else {}
-        early_base_runner = first_lift_entry_ready(
+        early_base_runner, lift_readiness_reason = first_lift_entry_readiness(
             snap=snap,
             event=ev,
             ict=ict,
             alert=alert,
         )
+        if lift_readiness_reason:
+            ctx_extra["ictBaseReadinessReason"] = lift_readiness_reason
         first_lift_runner = bool(
             early_base_runner
             and (alert.get("ictFirstLift") or getattr(ict, "first_lift", False))
@@ -1795,6 +1827,25 @@ async def _open_from_candidate(
             # Authorized FTV at local base — always ride toward max points.
             ctx_extra["maxProfitCapture"] = True
             ctx_extra["momentType"] = "flat_then_vertical"
+        _pad_lane_reasons = {
+            "slow_grind_sudden_lift_ready",
+            "fast_bullish_local_base_ready",
+            "v_rip_session_low_ready",
+            "building_local_base_lift_ready",
+        }
+        if lift_readiness_reason in _pad_lane_reasons:
+            ctx_extra["maxProfitCapture"] = True
+            ctx_extra["vBaseFtvRunner"] = True
+            if lift_readiness_reason == "slow_grind_sudden_lift_ready":
+                ctx_extra["slowGrindSuddenLift"] = True
+                ctx_extra["momentType"] = "slow_grind_sudden_lift"
+            elif lift_readiness_reason == "fast_bullish_local_base_ready":
+                ctx_extra["fastBullishLocalBase"] = True
+                ctx_extra["momentType"] = "fast_bullish_local_base"
+            elif lift_readiness_reason == "v_rip_session_low_ready":
+                ctx_extra["momentType"] = "v_rip_session_local_base"
+            elif lift_readiness_reason == "building_local_base_lift_ready":
+                ctx_extra["momentType"] = "building_local_base_lift"
         # ELITE always rides to max TP (peak-capture hold) when enabled — the top tier is
         # exactly the runner we must not clip early.
         if bool(getattr(settings, "elite_ride_max_tp_enabled", True)) and str(
@@ -1837,17 +1888,26 @@ async def _open_from_candidate(
         if (
             bool(getattr(settings, "ftv_vbase_hundred_pct_hold_enabled", True))
             and bool(ctx_extra.get("maxProfitCapture"))
-            and 0 < _vbase_rel <= _vbase_max_rel
             and (
-                first_lift_runner
-                or bool(ctx_extra.get("armedBaseCapture"))
-                or ict_flat_vertical
-                or bool(ctx_extra.get("ictFirstLift"))
-                or str(ctx_extra.get("momentType") or "")
-                in (
-                    "first_lift_local_base",
-                    "armed_base_local_base",
-                    "flat_then_vertical",
+                lift_readiness_reason in _pad_lane_reasons
+                or (
+                    0 < _vbase_rel <= _vbase_max_rel
+                    and (
+                        first_lift_runner
+                        or bool(ctx_extra.get("armedBaseCapture"))
+                        or ict_flat_vertical
+                        or bool(ctx_extra.get("ictFirstLift"))
+                        or str(ctx_extra.get("momentType") or "")
+                        in (
+                            "first_lift_local_base",
+                            "armed_base_local_base",
+                            "flat_then_vertical",
+                            "slow_grind_sudden_lift",
+                            "fast_bullish_local_base",
+                            "v_rip_session_local_base",
+                            "building_local_base_lift",
+                        )
+                    )
                 )
             )
         ):
@@ -2820,8 +2880,63 @@ def _top_rank_full_budget_lots_allowed(
         and strict_first_lift
         and top_explosion_max
         and not faded_rip
-        and not post_win_capped
+        and not         post_win_capped
     )
+
+
+def _enforce_top_moment_max_lots_only(
+    *,
+    lots: int,
+    symbol: str,
+    premium: float,
+    candidate: Any,
+    policy_ranking: Any,
+    settings: Any,
+) -> tuple[int, dict[str, Any]]:
+    """Cap non-top moments to ordinary capital — max lots only for FTV/V/ELITE/EXPLODING."""
+    meta: dict[str, Any] = {}
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        meta["topMomentMaxLots"] = True
+        return int(lots), meta
+    if not bool(getattr(settings, "top_moments_max_lots_only_enabled", True)):
+        meta["topMomentMaxLots"] = True
+        meta["topMomentType"] = "disabled"
+        return int(lots), meta
+
+    from app.engines.capital_allocator import max_lots_for_capital_pct
+    from app.engines.top_moment_gate import qualifies_for_top_moment_max_lots
+    from app.engines.trade_ranking import rank_entry_candidate
+
+    ranking = policy_ranking if isinstance(policy_ranking, dict) else None
+    if not ranking:
+        ranking = rank_entry_candidate(candidate)
+    evidence = ranking.get("evidence") or {}
+    ok, reason, moment = qualifies_for_top_moment_max_lots(
+        evidence,
+        ranking,
+        top_moments_max_lots_only_enabled=True,
+        min_grade=str(getattr(settings, "top_moments_min_grade", "A") or "A"),
+    )
+    if ok:
+        meta["topMomentMaxLots"] = True
+        meta["topMomentType"] = moment
+        return int(lots), meta
+
+    ordinary_pct = float(
+        getattr(settings, "ordinary_entry_max_capital_pct", 0.35) or 0.35
+    )
+    capped = min(
+        int(lots),
+        max_lots_for_capital_pct(symbol, premium, ordinary_pct),
+    )
+    meta.update(
+        {
+            "topMomentMaxLots": False,
+            "topMomentMaxLotsCapReason": reason,
+            "topMomentType": moment,
+        }
+    )
+    return max(1, capped), meta
 
 
 def _top_ftv_a_policy_max_lots(
@@ -2906,6 +3021,47 @@ def _building_rip_ftv_policy_max_lots(
     # Floor at per-trade capital so BUILDING helper takes match TOP_FTV_A sleeve.
     capital_pct = max(
         capital_pct,
+        float(getattr(settings, "per_trade_capital_pct", 0.90) or 0.90),
+    )
+    max_lots = max_lots_for_capital_pct(symbol, premium, capital_pct)
+    return max(int(lots), max_lots), True
+
+
+def _pad_lane_ftv_policy_max_lots(
+    *,
+    lots: int,
+    symbol: str,
+    premium: float,
+    policy_decision: Any,
+    allocation: RankedAllocation | None,
+) -> tuple[int, bool]:
+    """Max lots for pre-lift slow-grind / fast-bullish pad sleeves."""
+    settings = get_settings()
+    mode = str(getattr(policy_decision, "mode", "") or "")
+    if mode == "SLOW_GRIND_FTV":
+        if not bool(getattr(settings, "slow_grind_ftv_force_max_lots", True)):
+            return int(lots), False
+    elif mode == "FAST_BULLISH_FTV":
+        if not bool(getattr(settings, "fast_bullish_ftv_force_max_lots", True)):
+            return int(lots), False
+    else:
+        return int(lots), False
+
+    authorized = bool(
+        policy_decision is not None
+        and mode in {"SLOW_GRIND_FTV", "FAST_BULLISH_FTV"}
+        and policy_decision.allowed
+        and policy_decision.max_capital_pct is not None
+        and allocation is not None
+        and allocation.rank == 1
+    )
+    if not authorized:
+        return int(lots), False
+
+    from app.engines.capital_allocator import max_lots_for_capital_pct
+
+    capital_pct = max(
+        float(policy_decision.max_capital_pct),
         float(getattr(settings, "per_trade_capital_pct", 0.90) or 0.90),
     )
     max_lots = max_lots_for_capital_pct(symbol, premium, capital_pct)

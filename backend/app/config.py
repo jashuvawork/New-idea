@@ -210,6 +210,8 @@ class Settings(BaseSettings):
     # Blocks B/C sleeves, generic BUILDING without FTV/V triggers, and non-explosion modes.
     top_moments_only_enabled: bool = True
     top_moments_min_grade: str = "A"  # A or S; set S for strictest book
+    # Reserve capital-max lots for grade-A+ FTV / V / ELITE / EXPLODING only.
+    top_moments_max_lots_only_enabled: bool = True
     # One-week validation: lower local-base floors so detection, grading, and entry
     # can fire at 2–15% pad. Use /api/ai/local-base-audit/{date} to score each day.
     local_base_audit_week_enabled: bool = False
@@ -578,6 +580,19 @@ class Settings(BaseSettings):
     # Max lots when helpers confirm the sudden BUILDING lift (same sleeve as TOP_FTV_A).
     building_rip_ftv_max_capital_pct: float = 0.90
     building_rip_ftv_force_max_lots: bool = True
+    # Pre-lift slow-coil pad sleeve — authorize BUILDING/EXPLODING flat base before
+    # velocity spikes (Aug24 24200 PE ₹18–23 coil → sudden lift).
+    slow_grind_ftv_enabled: bool = True
+    slow_grind_ftv_min_explosion_score: float = 45.0
+    slow_grind_ftv_min_flat_quality: float = 50.0
+    slow_grind_ftv_max_capital_pct: float = 0.90
+    slow_grind_ftv_force_max_lots: bool = True
+    # Fast-bullish pad sleeve — momentum turn + volume awakening as lift starts.
+    fast_bullish_ftv_enabled: bool = True
+    fast_bullish_ftv_min_explosion_score: float = 48.0
+    fast_bullish_ftv_min_velocity_3s: float = 0.5
+    fast_bullish_ftv_max_capital_pct: float = 0.90
+    fast_bullish_ftv_force_max_lots: bool = True
     building_rip_bypasses_extended_chase: bool = True
     building_rip_bypasses_fake_trap: bool = True
     # Index tick helpers — NIFTY/SENSEX spot tape that drives strike lifts.
@@ -1389,25 +1404,28 @@ class Settings(BaseSettings):
     bullish_local_base_prediction_max_move_pct: float = 40.0
     bullish_local_base_prediction_min_confidence: float = 70.0
     bullish_local_base_prediction_rank_max: float = 18.0
-    # Local-base pad capture band — slow coil → fast vertical lift only (not generic
-    # cheap options). Aug24 24200 PE: ₹18–23 coil, lift from ~₹23 to ₹50+.
+    # Local-base pad capture band — slow coil → fast vertical lift (not generic
+    # cheap options). Aug24 24200 PE: ₹18–23 coil, lift through ₹50+.
     local_base_pad_capture_min_premium_inr: float = 18.0
-    local_base_pad_capture_max_premium_inr: float = 30.0
+    local_base_pad_capture_max_premium_inr: float = 220.0
     # Fast-moving local-base capture — enter in the pad band when momentum turn +
-    # volume awakening prove the rip is starting (Aug24 24→30 shape).
+    # volume awakening prove the rip is starting.
     fast_bullish_local_base_capture_enabled: bool = True
-    fast_bullish_local_base_max_premium_inr: float = 30.0
-    fast_bullish_local_base_min_move_pct: float = 5.0
-    fast_bullish_local_base_max_move_pct: float = 25.0
+    fast_bullish_local_base_max_premium_inr: float = 220.0
+    fast_bullish_local_base_min_move_pct: float = 1.0
+    fast_bullish_local_base_max_move_pct: float = 30.0
     fast_bullish_local_base_min_velocity_3s: float = 0.8
     fast_bullish_local_base_soft_min_score: float = 45.0
     fast_bullish_local_base_soft_min_confidence: float = 60.0
-    # Slow-grind coil below ₹30 — catch the flat base before volume/velocity spike.
+    # Slow-grind coil in the pad band — catch the flat base before volume/velocity spike.
     # Aug24 24200 PE: 18–23 LTP for ~45min, then sudden lift at 11:15.
     slow_grind_sudden_lift_enabled: bool = True
-    slow_grind_sudden_lift_max_premium_inr: float = 30.0
+    slow_grind_sudden_lift_max_premium_inr: float = 220.0
     slow_grind_sudden_lift_min_move_pct: float = 2.0
-    slow_grind_sudden_lift_max_move_pct: float = 22.0
+    slow_grind_sudden_lift_max_move_pct: float = 30.0
+    # When volume awakens before the velocity spike, extend the pad ceiling so the
+    # handoff at ~25–30% base-rel (Aug24 24200 PE lift) does not fall through.
+    slow_grind_sudden_lift_handoff_move_bonus_pct: float = 8.0
     slow_grind_sudden_lift_min_velocity_3s: float = -0.8
     slow_grind_sudden_lift_max_velocity_3s: float = 1.5
     slow_grind_sudden_lift_min_coil_samples: int = 6

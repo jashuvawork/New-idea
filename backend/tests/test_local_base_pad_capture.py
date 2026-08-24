@@ -283,7 +283,7 @@ def test_fast_bullish_local_base_authorizes_below_30_ltp(mock_pred, mock_setting
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
-def test_fast_bullish_local_base_rejects_above_30_ltp(mock_settings):
+def test_fast_bullish_local_base_rejects_above_220_ltp(mock_settings):
     mock_settings.return_value = Settings()
     snap = _armed_replay_snapshot(spot=24200.0)
     ict = MagicMock()
@@ -293,7 +293,7 @@ def test_fast_bullish_local_base_rejects_above_30_ltp(mock_settings):
     alert = {
         "side": "PUT",
         "strike": 24200.0,
-        "premium": 35.0,
+        "premium": 250.0,
         "tier": "EXPLODING",
         "ictFlatThenVertical": True,
         "ictBreakout": True,
@@ -302,13 +302,13 @@ def test_fast_bullish_local_base_rejects_above_30_ltp(mock_settings):
     }
     ok, reason = _fast_bullish_local_base_readiness(
         snap=snap,
-        event=MagicMock(side=Side.PUT, premium=35.0, velocity_3s=2.0),
+        event=MagicMock(side=Side.PUT, premium=250.0, velocity_3s=2.0),
         ict=ict,
         alert=alert,
         settings=mock_settings.return_value,
     )
     assert ok is False
-    assert reason == "fast_bullish_premium_above_30"
+    assert reason == "fast_bullish_premium_above_220"
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
@@ -576,3 +576,118 @@ def test_slow_grind_rejects_after_velocity_spike(mock_settings):
     )
     assert ok is False
     assert reason == "slow_grind_velocity3s>1.5"
+
+
+def test_slow_grind_ftv_policy_authorizes_building_coil():
+    evidence = {
+        "mode": "explosion",
+        "tier": "BUILDING",
+        "explosionScore": 72.0,
+        "tqs": 62.0,
+        "velocity3s": 0.2,
+        "velocity9s": 0.1,
+        "localBaseMovePct": 10.0,
+        "slowGrindSuddenLift": True,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "flatVerticalQuality": 58.0,
+        "orderflowPositive": True,
+        "volumeAwaken": True,
+        "timingAssessment": "GOOD",
+    }
+    ranking = rank_trade_evidence(evidence)
+    assert ranking["grade"] == "A"
+    decision = ftv_authorization_policy(
+        evidence,
+        ranking,
+        snapshot_available=True,
+        allocation_rank=1,
+        require_allocation_rank_one=True,
+    )
+    assert decision.allowed is True
+    assert decision.mode == "SLOW_GRIND_FTV"
+    assert decision.max_capital_pct == 0.90
+
+
+def test_fast_bullish_ftv_policy_authorizes_building_lift():
+    evidence = {
+        "mode": "explosion",
+        "tier": "BUILDING",
+        "explosionScore": 72.0,
+        "tqs": 62.0,
+        "velocity3s": 1.0,
+        "velocity9s": 0.8,
+        "localBaseMovePct": 12.0,
+        "fastBullishLocalBase": True,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "flatVerticalQuality": 62.0,
+        "orderflowPositive": True,
+        "volumeAwaken": True,
+        "timingAssessment": "GOOD",
+    }
+    ranking = rank_trade_evidence(evidence)
+    assert ranking["grade"] == "A"
+    decision = ftv_authorization_policy(
+        evidence,
+        ranking,
+        snapshot_available=True,
+        allocation_rank=1,
+        require_allocation_rank_one=True,
+    )
+    assert decision.allowed is True
+    assert decision.mode == "FAST_BULLISH_FTV"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_slow_grind_handoff_extends_pad_at_volume_awakening(mock_settings):
+    """At lift handoff (~27% base-rel) volume awakening extends the pad ceiling."""
+    mock_settings.return_value = Settings()
+    snap = _armed_replay_snapshot(spot=24180.0)
+    snap.spotChart.rsi = 40.0
+    snap.spotChart.macdBias = "BEARISH"
+    snap.spotChart.macdHistogram = -0.15
+    snap.spotChart.macd = -0.05
+    snap.spotChart.macdSignal = 0.02
+    snap.spotChart.momentum5Pct = -0.03
+    snap.spotChart.momentum15Pct = 0.02
+    snap.spotChart.direction = "BEARISH"
+    snap.chartAnalysis = type("CA", (), {"squeeze": {"bars_on": 6, "bars_since_fired": -1}})()
+    ict = MagicMock(
+        flat_then_vertical=True,
+        active=True,
+        base_armed=True,
+        base_relative_move_pct=27.0,
+        flat_vertical_quality=58.0,
+        armed_base_samples=8,
+        v_rip_ready=True,
+        volume_awakening=True,
+        velocity_3s=1.2,
+    )
+    alert: dict = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 27.0,
+        "tier": "BUILDING",
+        "ictBaseArmed": True,
+        "ictVRipReady": True,
+        "ictVolumeAwakening": True,
+        "volumeAwaken": True,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 27.0,
+        "flatVerticalQuality": 58.0,
+        "ictArmedBaseSamples": 8,
+        "velocity3s": 1.2,
+    }
+    ok, reason = _slow_grind_sudden_lift_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=27.0, velocity_3s=1.2, strike=24200.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == "slow_grind_sudden_lift_ready"
+    assert alert.get("slowGrindSuddenLiftReady") is True
+    assert alert.get("ictBaseReadinessReason") == "slow_grind_sudden_lift_ready"

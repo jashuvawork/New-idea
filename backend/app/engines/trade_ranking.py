@@ -289,6 +289,14 @@ def ftv_authorization_policy(
     building_rip_ftv_min_local_base_move_pct: float = 2.0,
     building_rip_ftv_max_local_base_move_pct: float = 55.0,
     building_rip_ftv_max_capital_pct: float = 0.90,
+    slow_grind_ftv_enabled: bool = True,
+    slow_grind_ftv_min_explosion_score: float = 45.0,
+    slow_grind_ftv_min_flat_quality: float = 50.0,
+    slow_grind_ftv_max_capital_pct: float = 0.90,
+    fast_bullish_ftv_enabled: bool = True,
+    fast_bullish_ftv_min_explosion_score: float = 48.0,
+    fast_bullish_ftv_min_velocity_3s: float = 0.5,
+    fast_bullish_ftv_max_capital_pct: float = 0.90,
     top_moments_only_enabled: bool = True,
     top_moments_min_grade: str = "A",
     first_lift_local_base_micro_pullback_enabled: bool = True,
@@ -312,6 +320,8 @@ def ftv_authorization_policy(
         or evidence.get("armedBaseLaunch")
         or evidence.get("vRipReady")
         or evidence.get("buildingRipReady")
+        or evidence.get("slowGrindSuddenLift")
+        or evidence.get("fastBullishLocalBase")
     )
     if not actual_ftv:
         return blocked("ftv_elite_top_only_requires_ftv")
@@ -333,6 +343,10 @@ def ftv_authorization_policy(
 
     timing = str(evidence.get("timingAssessment") or "").upper()
     timing_action = str(evidence.get("timingAction") or "").lower()
+    slow_grind_flat = bool(
+        evidence.get("slowGrindSuddenLift")
+        and -0.8 <= _number(evidence.get("velocity3s")) <= 1.5
+    )
     cold_velocity = (
         _number(evidence.get("velocity3s")) < 0
         or _number(evidence.get("velocity9s")) < 0
@@ -341,7 +355,7 @@ def ftv_authorization_policy(
         str(ranking.get("grade") or "").upper() == "REJECT"
         or evidence.get("faded")
         or evidence.get("exhaustedReentry")
-        or (cold_velocity and not micro_pullback)
+        or (cold_velocity and not micro_pullback and not slow_grind_flat)
         or timing_action in {"block", "reject"}
         or timing in {
             "FAILED_LAUNCH",
@@ -421,6 +435,8 @@ def ftv_authorization_policy(
                 or evidence.get("eliteBaseReady")
                 or evidence.get("vRipReady")
                 or evidence.get("buildingRipReady")
+                or evidence.get("slowGrindSuddenLift")
+                or evidence.get("fastBullishLocalBase")
                 or evidence.get("armedBaseSustainedLift")
                 or s_early_ftv
             ):
@@ -676,6 +692,60 @@ def ftv_authorization_policy(
             max_capital_pct=winner_local_base_max_capital_pct,
         )
 
+    # Pre-lift slow-coil pad — flat velocity, impending signals, BUILDING tier OK.
+    slow_grind_pad = bool(evidence.get("slowGrindSuddenLift"))
+    if slow_grind_ftv_enabled and slow_grind_pad:
+        slow_grind_ok = (
+            grade in {"A", "B", "S"}
+            and tier in {"BUILDING", "EXPLODING", "ELITE"}
+            and explosion_score >= slow_grind_ftv_min_explosion_score
+            and quality >= slow_grind_ftv_min_flat_quality
+            and v3 >= -0.8
+            and v3 <= 1.5
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        )
+        if top_moments_only_enabled and grade == "B":
+            slow_grind_ok = False
+        if slow_grind_ok:
+            if require_allocation_rank_one and allocation_rank != 1:
+                return blocked("slow_grind_ftv_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "SLOW_GRIND_FTV",
+                "ok",
+                max_capital_pct=slow_grind_ftv_max_capital_pct,
+            )
+
+    # Fast-bullish pad — momentum turn + volume awakening as lift starts.
+    fast_bullish_pad = bool(evidence.get("fastBullishLocalBase"))
+    if fast_bullish_ftv_enabled and fast_bullish_pad:
+        fast_bullish_ok = (
+            grade in {"A", "B", "S"}
+            and tier in {"BUILDING", "EXPLODING", "ELITE"}
+            and explosion_score >= fast_bullish_ftv_min_explosion_score
+            and v3 >= fast_bullish_ftv_min_velocity_3s
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        )
+        if top_moments_only_enabled and grade == "B":
+            fast_bullish_ok = False
+        if fast_bullish_ok:
+            if require_allocation_rank_one and allocation_rank != 1:
+                return blocked("fast_bullish_ftv_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "FAST_BULLISH_FTV",
+                "ok",
+                max_capital_pct=fast_bullish_ftv_max_capital_pct,
+            )
+
     # BUILDING sudden lift with helpers — do not wait for ELITE/EXPLODING.
     # Readiness already proved mid-rip/local-base heat; CHASE timing is OK here.
     if building_rip_ftv_enabled and bool(evidence.get("buildingRipReady")):
@@ -774,6 +844,14 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "building_rip_ftv_min_local_base_move_pct",
         "building_rip_ftv_max_local_base_move_pct",
         "building_rip_ftv_max_capital_pct",
+        "slow_grind_ftv_enabled",
+        "slow_grind_ftv_min_explosion_score",
+        "slow_grind_ftv_min_flat_quality",
+        "slow_grind_ftv_max_capital_pct",
+        "fast_bullish_ftv_enabled",
+        "fast_bullish_ftv_min_explosion_score",
+        "fast_bullish_ftv_min_velocity_3s",
+        "fast_bullish_ftv_max_capital_pct",
         "top_moments_only_enabled",
         "top_moments_min_grade",
         "first_lift_local_base_micro_pullback_enabled",
@@ -889,16 +967,24 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         score += min(10.0, v3 * 3.0)
         reasons.append(f"positive_v3_{v3:.2f}")
     elif v3 < 0:
-        if micro_pullback:
+        if micro_pullback or (
+            slow_grind_sudden_lift and v3 >= -0.8
+        ):
             score -= 5.0
             penalties.append(
                 {
-                    "code": "first_lift_micro_pullback",
+                    "code": "first_lift_micro_pullback"
+                    if micro_pullback
+                    else "slow_grind_flat_coil",
                     "points": 5.0,
                     "value": round(v3, 2),
                 }
             )
-            reasons.append(f"first_lift_micro_pullback_v3_{v3:.2f}")
+            reasons.append(
+                f"first_lift_micro_pullback_v3_{v3:.2f}"
+                if micro_pullback
+                else f"slow_grind_flat_coil_v3_{v3:.2f}"
+            )
         else:
             score -= 30.0
             penalties.append({"code": "negative_velocity", "points": 30.0, "value": round(v3, 2)})
@@ -965,7 +1051,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         rejected = True
         penalties.append({"code": "failed_launch", "points": 45.0})
         score -= 45.0
-    if v3 < 0 and not micro_pullback:
+    if v3 < 0 and not micro_pullback and not (
+        slow_grind_sudden_lift and v3 >= -0.8
+    ):
         rejected = True
     if exhausted:
         rejected = True
@@ -1032,8 +1120,15 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             or elite_base_ready
             or v_rip_ready
             or building_rip_ready
+            or slow_grind_sudden_lift
+            or fast_bullish_local_base
         )
-        and (v3 > 0 or flat_velocity_lag)
+        and (
+            v3 > 0
+            or flat_velocity_lag
+            or (slow_grind_sudden_lift and v3 >= -0.8)
+            or (fast_bullish_local_base and v3 >= 0)
+        )
         and not rejected
         and local_move <= (55.0 if building_rip_ready else 40.0)
     )

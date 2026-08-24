@@ -172,7 +172,7 @@ def local_base_reversal_prediction(
         getattr(settings, "local_base_pad_capture_min_premium_inr", 18.0), 18.0
     )
     soft_prem_cap = _number(
-        getattr(settings, "fast_bullish_local_base_max_premium_inr", 30.0), 30.0
+        getattr(settings, "fast_bullish_local_base_max_premium_inr", 220.0), 220.0
     )
     in_pad_band = premium > 0 and soft_prem_min <= premium <= soft_prem_cap
     if in_pad_band:

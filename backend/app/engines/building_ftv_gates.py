@@ -15,6 +15,14 @@ BUILDING_READY_REASONS = frozenset(
     }
 )
 
+PAD_LANE_READY_REASONS = frozenset(
+    {
+        "slow_grind_sudden_lift_ready",
+        "fast_bullish_local_base_ready",
+        "v_rip_session_low_ready",
+    }
+)
+
 
 def alert_has_building_rip_signal(alert: Optional[dict[str, Any]]) -> bool:
     """True when radar stamped a BUILDING rip (including after EXPLODING promote)."""
@@ -52,6 +60,51 @@ def building_rip_ready_reason(
     return ""
 
 
+def pad_lane_ready_reason(
+    *,
+    alert: Optional[dict[str, Any]] = None,
+    readiness_reason: str = "",
+) -> str:
+    rr = str(readiness_reason or "")
+    if rr in PAD_LANE_READY_REASONS:
+        return rr
+    if isinstance(alert, dict):
+        stamped = str(alert.get("ictBaseReadinessReason") or "")
+        if stamped in PAD_LANE_READY_REASONS:
+            return stamped
+        if bool(
+            alert.get("slowGrindSuddenLiftReady")
+            or alert.get("ictSlowGrindSuddenLift")
+        ):
+            return "slow_grind_sudden_lift_ready"
+        if bool(
+            alert.get("fastBullishLocalBaseReady")
+            or alert.get("bullishLocalBaseActive")
+        ):
+            return "fast_bullish_local_base_ready"
+    return ""
+
+
+def pad_lane_bypasses_fake_trap(
+    *,
+    alert: Optional[dict[str, Any]] = None,
+    readiness_reason: str = "",
+    candidate: Any = None,
+) -> bool:
+    """Selector / pretrade — pad-lane pre-lift takes bypass fake-trap like BUILDING rip."""
+    if candidate is not None and not isinstance(alert, dict):
+        raw = getattr(candidate, "alert", None)
+        alert = raw if isinstance(raw, dict) else None
+        meta = getattr(candidate, "pretrade_meta", None) or {}
+        if isinstance(meta, dict) and not readiness_reason:
+            readiness_reason = str(
+                meta.get("ictBaseReadinessReason")
+                or meta.get("firstLiftReadinessReason")
+                or ""
+            )
+    return bool(pad_lane_ready_reason(alert=alert, readiness_reason=readiness_reason))
+
+
 def building_rip_bypasses_fake_trap(
     *,
     alert: Optional[dict[str, Any]] = None,
@@ -75,6 +128,7 @@ def building_rip_bypasses_fake_trap(
     return bool(
         building_rip_ready_reason(alert=alert, readiness_reason=readiness_reason)
         or alert_has_building_rip_signal(alert)
+        or pad_lane_ready_reason(alert=alert, readiness_reason=readiness_reason)
     )
 
 
@@ -142,6 +196,10 @@ def building_rip_bypasses_extended_chase(
     if not bool(getattr(settings, "building_rip_bypasses_extended_chase", True)):
         return False
     return building_rip_bypasses_fake_trap(
+        alert=alert,
+        readiness_reason=readiness_reason,
+        candidate=candidate,
+    ) or pad_lane_bypasses_fake_trap(
         alert=alert,
         readiness_reason=readiness_reason,
         candidate=candidate,
