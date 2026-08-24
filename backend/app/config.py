@@ -272,6 +272,11 @@ class Settings(BaseSettings):
     # When index spot helpers confirm the lift, waive CVD-acceleration for TOP_FTV_A
     # (accel often prints after the first take window — Aug19 shape).
     top_ftv_a_index_helpers_waive_cvd_accel: bool = True
+    # Inside the early local-base pad (8–25%), soften TOP_FTV_A velocity and CVD
+    # when v-rip / volume awakening already proved causal heat (Aug24 misses).
+    top_ftv_a_pad_velocity_min_move_pct: float = 8.0
+    top_ftv_a_pad_velocity_max_move_pct: float = 25.0
+    top_ftv_a_pad_waive_cvd_when_volume_awake: bool = True
     # WINNER sleeve → max lots when index helpers confirm (else stays 35%).
     winner_local_base_index_helpers_max_lots: bool = True
     # Exception: BUILDING only as "elite build" — chart-aligned ICT flat→vertical
