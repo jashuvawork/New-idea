@@ -2,7 +2,7 @@
 # Run NexusQuant EC2 update via SSH (one command from your laptop).
 #
 # Usage:
-#   EC2_HOST=65.1.137.232 EC2_KEY=~/.ssh/nexusquant.pem ./deploy/ec2-deploy-one-liner.sh
+#   EC2_HOST=65.0.136.146 EC2_KEY=~/.ssh/nexusquant.pem ./deploy/ec2-deploy-one-liner.sh
 #
 # After PR #11 is merged to main, this pulls and runs ec2-update.sh on the server.
 

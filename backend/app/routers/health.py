@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.config import get_settings
+from app.config import audit_week_local_base_overrides, get_settings
 from app.engines.capital_allocator import get_lot_sizes_meta
 from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.services import trade_store
@@ -30,6 +30,7 @@ async def health():
 @router.get("/api/deployment/status")
 async def deployment_status():
     from app.loop_watchdog import watchdog_status
+    from app.services.radar_health import health_status
 
     settings = get_settings()
     token_status = await get_daily_token_status()
@@ -40,6 +41,7 @@ async def deployment_status():
         "commit": settings.commit_sha,
         "environment": settings.environment,
         "loopWatchdog": watchdog_status(),
+        "radarHealth": health_status(),
         "upstox": {
             "hasToken": await has_upstox_token(),
             "validToday": token_status.get("validToday", False),
@@ -176,21 +178,25 @@ async def clear_upstox_rate_limit():
 @router.get("/api/deployment/readiness")
 async def deployment_readiness():
     """Live deployment checklist — paper log + broker + risk gates."""
-    from app.engines.auto_trader import get_state
-    from app.engines.risk_engine import RiskEngine
-    from app.routers.market import get_multi_snapshot
+    from app.engines.auto_trader import get_risk_engine, get_state
+    from app.loop_watchdog import watchdog_status
+    from app.routers.market import get_multi_snapshot_fast
 
     settings = get_settings()
     token_status = await get_daily_token_status()
     store_health = trade_store.check_store_health()
-    risk = RiskEngine()
+    risk = get_risk_engine()
     state = get_state()
+    watchdog = watchdog_status()
+    websocket = ws_status()
 
     market_live = False
     upstox_data = False
     snapshots = {}
     try:
-        snapshot = await get_multi_snapshot()
+        # Readiness is polled by the UI. It must never trigger a full broker REST
+        # rebuild or compete with the execution loop.
+        snapshot = await get_multi_snapshot_fast(overlay_ws=False)
         snapshots = snapshot.snapshots if snapshot else {}
         for sym in settings.symbols:
             snap = snapshots.get(sym)
@@ -204,6 +210,15 @@ async def deployment_readiness():
     if not market_live:
         market_live = get_market_phase() == "LIVE_MARKET"
 
+    beat_age = watchdog.get("lastBeatAgeSeconds")
+    loop_healthy = (
+        not watchdog.get("enabled")
+        or (
+            watchdog.get("threadAlive")
+            and beat_age is not None
+            and float(beat_age) <= float(watchdog.get("staleSeconds") or 20)
+        )
+    )
     checks = {
         "upstoxTokenValid": bool(token_status.get("validToday")),
         "upstoxDataReady": upstox_data,
@@ -214,6 +229,12 @@ async def deployment_readiness():
         "calibrationClear": not any(state.calibrationBlocks.values()),
         "liveTradingFlagSet": settings.enable_live_trading,
         "paperTradingActive": settings.paper_trading,
+        "eventLoopHealthy": bool(loop_healthy),
+        "upstoxRateLimitClear": not rate_limit_active(),
+        "websocketHealthy": bool(
+            not websocket.get("enabled")
+            or (websocket.get("connected") and not websocket.get("streamStale"))
+        ),
     }
 
     paper_ready = all([
@@ -221,6 +242,7 @@ async def deployment_readiness():
         checks["tradeStoreWritable"],
         checks["autoTradingEnabled"],
         checks["riskEngineOk"],
+        checks["eventLoopHealthy"],
     ])
 
     live_ready = all([
@@ -230,6 +252,9 @@ async def deployment_readiness():
         checks["autoTradingEnabled"],
         checks["riskEngineOk"],
         checks["calibrationClear"],
+        checks["marketLive"],
+        checks["eventLoopHealthy"],
+        checks["upstoxRateLimitClear"],
         settings.enable_live_trading,
     ])
 
@@ -238,12 +263,20 @@ async def deployment_readiness():
         arm_live_steps.append("Login to Upstox (valid IST-day token required)")
     if not checks["upstoxDataReady"]:
         arm_live_steps.append("Wait for market data snapshots to load")
+    if not checks["marketLive"]:
+        arm_live_steps.append("Wait for the configured exchange session to open")
     if not checks["tradeStoreWritable"]:
         arm_live_steps.append(f"Fix trade store permissions at {store_health['storeDir']}")
     if not checks["riskEngineOk"]:
         arm_live_steps.append("Clear risk engine safe mode")
     if not checks["calibrationClear"]:
         arm_live_steps.append("Clear calibration blocks or reset session")
+    if not checks["eventLoopHealthy"]:
+        arm_live_steps.append("Restore the event-loop watchdog heartbeat")
+    if not checks["upstoxRateLimitClear"]:
+        arm_live_steps.append("Wait for the Upstox API rate-limit cooldown to clear")
+    if not checks["autoTradingEnabled"]:
+        arm_live_steps.append("Set AUTO_TRADING_ENABLED=true")
     if not settings.enable_live_trading:
         arm_live_steps.append("Set ENABLE_LIVE_TRADING=true in env and redeploy")
 
@@ -273,8 +306,93 @@ async def deployment_readiness():
             and milestone["readyForLiveMilestone"]
             and checks.get("worstDayClear", True)
         ),
-        "executionMode": "LIVE" if settings.enable_live_trading else "PAPER",
+        "executionMode": (
+            "LIVE"
+            if settings.enable_live_trading and settings.auto_trading_enabled
+            else "PAPER"
+        ),
+        "tradingPolicy": {
+            "ftvEliteTopOnlyEnabled": bool(
+                getattr(settings, "ftv_elite_top_only_enabled", True)
+            ),
+            "topMomentsOnlyEnabled": bool(
+                getattr(settings, "top_moments_only_enabled", True)
+            ),
+            "topMomentsMinGrade": str(
+                getattr(settings, "top_moments_min_grade", "A") or "A"
+            ),
+            "topFtvAFallbackEnabled": bool(
+                getattr(settings, "top_ftv_a_enabled", True)
+            ),
+            "allowedAuthorizationModes": [
+                "S_STRICT",
+                "TOP_FTV_A",
+                "WINNER_LOCAL_BASE",
+                "BUILDING_RIP_FTV",
+            ],
+            "allowedCausalGrades": (
+                ["S", "A"]
+                if bool(getattr(settings, "top_moments_only_enabled", True))
+                else ["S", "A", "B"]
+            ),
+            "allowedMomentTypes": ["FTV", "V", "ELITE", "EXPLODING"],
+            "localBaseAuditWeekEnabled": bool(
+                getattr(settings, "local_base_audit_week_enabled", False)
+            ),
+            "localBaseAuditWeekOverrides": (
+                audit_week_local_base_overrides()
+                if getattr(settings, "local_base_audit_week_enabled", False)
+                else {}
+            ),
+            "peakPredictionEnabled": bool(
+                getattr(settings, "peak_prediction_enabled", True)
+            ),
+            "peakPredictionSymbols": ["NIFTY", "SENSEX"],
+            "strictS": {
+                "requiresTopRankEligible": True,
+                "fullSleeveEligible": True,
+                "maxCapitalPct": settings.per_trade_capital_pct,
+            },
+            "topFtvA": {
+                "tiers": ["ELITE", "EXPLODING"],
+                "requiresFreshCausalTrigger": True,
+                "requiresOptionCvdBuying": True,
+                "requiresOptionCvdAcceleration": True,
+                "normalMaxMovePct": settings.top_ftv_a_normal_max_move_pct,
+                "exceptionalMaxMovePct": settings.top_ftv_a_exceptional_max_move_pct,
+                "maxCapitalPct": settings.top_ftv_a_max_capital_pct,
+                "fullSleeveEligible": True,
+                "maxLotsEnabled": True,
+            },
+            "buildingRipFtv": {
+                "enabled": bool(
+                    getattr(settings, "building_rip_ftv_enabled", True)
+                ),
+                "tiers": ["BUILDING", "EXPLODING", "ELITE"],
+                "requiresHelpers": True,
+                "maxCapitalPct": float(
+                    getattr(settings, "building_rip_ftv_max_capital_pct", 0.90)
+                    or 0.90
+                ),
+                "fullSleeveEligible": True,
+                "maxLotsEnabled": bool(
+                    getattr(settings, "building_rip_ftv_force_max_lots", True)
+                ),
+            },
+            "requiresAtmItm": True,
+            "requiredAllocationRank": 1,
+        },
         "checks": checks,
+        "health": {
+            "api": "ok",
+            "loopWatchdog": watchdog,
+            "websocket": websocket,
+            "rateLimitActive": rate_limit_active(),
+            "rateLimitRemainingSeconds": round(
+                rate_limit_cooldown_remaining(), 1
+            ),
+            "latency": latency_stats(),
+        },
         "milestone": milestone,
         "tradeLog": {
             "storeDir": store_health["storeDir"],

@@ -60,6 +60,7 @@ def _settings(**overrides):
     s.ict_max_profit_trail_keep_ratio = 0.42
     s.explosion_peak_fade_lock_enabled = False
     s.explosion_peak_capture_enabled = False
+    s.explosion_peak_capture_max_giveback_points = 8.0
     s.explosion_faded_rip_no_green_exit_enabled = False
     s.explosion_stop_min_hold_seconds = 0
     s.emergency_stop_enabled = False
@@ -225,6 +226,36 @@ def test_evaluate_exit_holds_while_above_floor(mock_ms, mock_s, _hc, _mp):
     assert reason != "explosion_stage_trail"
     # Still below projected 440 — should not hard-TP yet.
     assert reason != "explosion_target_hit"
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_projected_max_is_not_forced_exit_while_ltp_is_at_peak(
+    mock_ms, mock_s, _hc, _mp,
+):
+    """At the projection cap, wait for observed rollover instead of guessing the top."""
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    trade = _trade(
+        entry=50.0,
+        best=800.0,
+        current=850.0,
+        projected=800.0,
+        stage=75.0,
+    )
+    trade.entryContext["liveVelocity3s"] = 4.0
+    reason, _ = evaluate_explosion_exit(
+        trade,
+        850.0,
+        "ELITE",
+        10,
+        params=_params(),
+        live_velocity_3s=4.0,
+    )
+    assert reason is None
 
 
 @patch("app.engines.moment_stage_trail.get_settings")

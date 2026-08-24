@@ -31,25 +31,50 @@ def _cfg_float(settings, name: str, default: float) -> float:
 def _ict_flat_vertical_entry_ok(
     event: ExplosionEvent,
     snap: Optional[SymbolSnapshot],
+    *,
+    alert: Optional[dict[str, Any]] = None,
 ) -> bool:
-    """ICT flat→vertical entry — BUILDING only as elite-build (hot + high score).
+    """ICT flat→vertical entry, including BUILDING rip / first-lift readiness.
 
-    EXPLODING/ELITE keep the structure+heat path. BUILDING must clear elite-build
-    bars (score/v3) so Aug7-style cold base prints wait for ELITE upgrade.
-    Chart must align (PUT↔BEARISH / CALL↔BULLISH) — no counter-trend base rips.
+    Helper-confirmed BUILDING (and promoted buildingRip EXPLODING) short-circuit
+    before elite-build / Ichimoku bars so Aug19-style V-rips can open.
     """
     if event is None or snap is None:
         return False
     tier_u = str(getattr(event, "tier", "") or "").upper()
-    if tier_u not in ("BUILDING", "EXPLODING", "ELITE"):
-        return False
-    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+    from app.engines.building_ftv_gates import (
+        BUILDING_READY_REASONS,
+        alert_has_building_rip_signal,
+    )
+    from app.engines.ict_breakout_monitor import (
+        analyze_explosion_event_ict,
+        first_lift_entry_readiness,
+    )
     from app.engines.spot_direction import side_aligned_with_chart
 
-    chart = getattr(snap, "spotChart", None)
-    if chart is not None and not side_aligned_with_chart(event.side, chart):
-        return False
     ict = analyze_explosion_event_ict(event, snap)
+    first_lift_ready, ready_reason = first_lift_entry_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=alert,
+    )
+    if first_lift_ready and (
+        ready_reason in BUILDING_READY_REASONS
+        or ready_reason.startswith("buildingRip")
+        or alert_has_building_rip_signal(alert)
+        or bool(getattr(ict, "building_rip_ready", False))
+    ):
+        return True
+    chart = getattr(snap, "spotChart", None)
+    if (
+        chart is not None
+        and not side_aligned_with_chart(event.side, chart)
+        and not first_lift_ready
+    ):
+        return False
+    if first_lift_ready:
+        return True
     if not bool(getattr(ict, "active", False)):
         return False
     if not bool(getattr(ict, "flat_then_vertical", False)):
@@ -60,6 +85,8 @@ def _ict_flat_vertical_entry_ok(
         or getattr(ict, "premium_fvg", False)
     )
     if not heat:
+        return False
+    if tier_u not in ("BUILDING", "EXPLODING", "ELITE"):
         return False
     settings = get_settings()
     if tier_u == "BUILDING":
@@ -192,6 +219,7 @@ def check_explosion_entry(
     index_moment: bool = False,
     chart: Optional[SpotChart] = None,
     snap: Optional[SymbolSnapshot] = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str]:
     """Fast entry on explosion — minimal gates, speed is everything."""
     if calibration_blocked:
@@ -207,6 +235,7 @@ def check_explosion_entry(
     # Require chart align — but honor the same capture/structure bypasses as
     # chart_blocks_explosion_side later (afternoon / all-day / premium-led / local-base).
     settings = get_settings()
+    early_ict_ok = _ict_flat_vertical_entry_ok(event, snap, alert=alert)
     if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
         from app.engines.spot_direction import side_aligned_with_chart
 
@@ -231,6 +260,7 @@ def check_explosion_entry(
             if not (
                 premium_bypass
                 or local_ichi_bypass
+                or early_ict_ok
                 or afternoon_capture_skips_chart_block(event, align_chart)
                 or is_all_day_explosion_event(event, chart=align_chart)
             ):
@@ -269,14 +299,18 @@ def check_explosion_entry(
 
         if is_premium_capture_event(event, chart=chart):
             pass  # premium-capture BUILDING continues through remaining gates
-        elif _ict_flat_vertical_entry_ok(event, snap):
-            pass  # early ICT flat→vertical BUILDING — enter in 28–40% window
+        elif early_ict_ok:
+            pass  # confirmed first-lift or elite-build ICT flat→vertical
         else:
             return False, f"tier_{event.tier}_not_tradeable"
 
     from app.engines.morning_premium_capture import is_afternoon_capture_event
 
-    if event.velocity_3s < 2.0 and event.velocity_9s < 3.0:
+    if (
+        not early_ict_ok
+        and event.velocity_3s < 2.0
+        and event.velocity_9s < 3.0
+    ):
         open_move = float(getattr(event, "daily_move_pct", 0) or 0)
         open_min = float(getattr(get_settings(), "open_premium_min_move_pct", 25.0) or 25.0)
         if not is_afternoon_capture_event(event, chart=chart) and open_move < open_min:
@@ -330,6 +364,7 @@ def check_explosion_entry(
         blocked
         and not premium_bypass
         and not local_ichi_bypass
+        and not early_ict_ok
         and not afternoon_capture_skips_chart_block(event, chart)
     ):
         if not is_all_day_explosion_event(event, chart=chart):
@@ -343,19 +378,30 @@ def check_explosion_entry(
         explosion_entry_window_blocked,
         live_explosion_confirmation_blocked,
     )
-    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+    from app.engines.ict_breakout_monitor import (
+        analyze_explosion_event_ict,
+        first_lift_entry_ready,
+    )
 
     # Analyze from event even when snap is missing — event carries move/velocity/tier
     # needed for ICT structure. Skipping analyze when snap is None falsely blocked
     # BUILDING+ICT flat→vertical entries (no structure → no_ict_structure_confirmation).
     ict_live = analyze_explosion_event_ict(event, snap)
+    first_lift_ready = first_lift_entry_ready(
+        snap=snap,
+        event=event,
+        ict=ict_live,
+    )
     from app.engines.elite_never_block import elite_never_block_active
 
     must_take = elite_never_block_active(
         event=event, snap=snap, ict=ict_live,
     )
     # Flat→vertical ELITE/EXPLODING/BUILDING — require GainzAlgo-style break-P.
-    if bool(getattr(ict_live, "flat_then_vertical", False)):
+    if (
+        bool(getattr(ict_live, "flat_then_vertical", False))
+        and not first_lift_ready
+    ):
         from app.engines.smart_ichimoku import ichimoku_break_supports_side
 
         ichi_ok, ichi_reason = ichimoku_break_supports_side(
@@ -373,7 +419,7 @@ def check_explosion_entry(
         squeeze_early_base=squeeze_early_base_active(event, snap),
         bullish_local_base=bool(bullish_base.get("active")),
     )
-    if window_blocked:
+    if window_blocked and not first_lift_ready:
         return False, window_reason
     live_blocked, live_reason = live_explosion_confirmation_blocked(
         event,
@@ -393,7 +439,20 @@ def check_explosion_entry(
         premium_capture=is_premium_capture_event(event, chart=chart),
     )
     timing_blocked, timing_reason = timing_blocks_entry(timing)
-    if timing_blocked and not must_take:
+    if (
+        timing_blocked
+        and not must_take
+        and not (
+            first_lift_ready
+            and bool(
+                getattr(
+                    settings,
+                    "first_lift_bypasses_cold_timing_enabled",
+                    True,
+                )
+            )
+        )
+    ):
         return False, timing_reason
 
     from app.engines.chop_day_guards import neutral_breadth_blocks_entry
@@ -416,6 +475,14 @@ def check_explosion_entry(
                 if not side_aligned_with_breadth(side_val, breadth.bias) and event.tier != "ELITE":
                     if not (premium_bypass and event.tier in ("EXPLODING", "ELITE", "BUILDING")):
                         return False, "expiry_counter_breadth_elite_only"
+
+    # The strict first-lift proof already requires a measured 15–25% local pad,
+    # quality, sustained premium heat, volume and a live side-specific index turn.
+    # Do not wait for neutral breadth, a lagging cloud/chart flip or a 2% velocity
+    # threshold after those stronger early facts have passed. Expiry safety above,
+    # chase/window, live confirmation and cooldown checks still apply.
+    if first_lift_ready:
+        return True, "first_lift_local_base_confirmed"
 
     blocked, nb_reason = neutral_breadth_blocks_entry(
         breadth.bias,
@@ -458,6 +525,7 @@ def check_explosion_entry(
         and not afternoon_chart_skip
         and not premium_bypass
         and not all_day_capture
+        and not first_lift_ready
     ):
         return False, chart_reason
 
@@ -475,7 +543,7 @@ def check_explosion_entry(
         return True, "explosion_confirmed" if not premium_bypass else "premium_led_explosion_confirmed"
 
     if event.tier == "BUILDING" and event.explosion_score >= min_score:
-        ict_flat_ok = _ict_flat_vertical_entry_ok(event, snap)
+        ict_flat_ok = _ict_flat_vertical_entry_ok(event, snap, alert=alert)
         if (
             is_all_day_explosion_event(event, chart=chart)
             or is_premium_capture_event(event, chart=chart)
@@ -653,7 +721,9 @@ def _should_skip_no_progress(trade: PaperTrade, settings) -> bool:
     if is_faded_rip_caution_trade(trade):
         return False
     if (
-        ctx.get("ictMegaRip")
+        ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictMegaRip")
         or ctx.get("goodDayIctCapture")
         or ctx.get("allDayIctCapture")
         or ctx.get("maxProfitCapture")
@@ -910,9 +980,12 @@ def _near_base_top_runner(trade: PaperTrade) -> bool:
     )
     # ICT flat→vertical / max-profit: hold further into the pad toward max TP.
     ict_max = bool(
-        ctx.get("ictFlatThenVertical")
+        ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictFlatThenVertical")
         or ctx.get("maxProfitCapture")
         or ctx.get("defensiveBaseRip")
+        or ctx.get("vBaseFtvRunner")
     )
     if ict_max:
         max_rel = max(
@@ -940,15 +1013,83 @@ def _near_base_top_runner(trade: PaperTrade) -> bool:
     return bool(trade_is_high_conviction(trade))
 
 
-def _near_base_hold_min_best(trade: PaperTrade, base_min_best: float) -> float:
+def _is_vbase_ftv_runner(trade: PaperTrade) -> bool:
+    """V / flat→vertical taken near local base — expect ~100%+ premium expansion."""
+    settings = get_settings()
+    if not bool(getattr(settings, "ftv_vbase_hundred_pct_hold_enabled", True)):
+        return False
+    ctx = trade.entryContext or {}
+    if not (
+        ctx.get("vBaseFtvRunner")
+        or ctx.get("maxProfitCapture")
+        or ctx.get("ictFlatThenVertical")
+        or ctx.get("ictFirstLift")
+        or ctx.get("armedBaseCapture")
+    ):
+        return False
+    rel = ctx.get("localBaseBaseRelPct")
+    try:
+        rel_f = float(rel) if rel is not None else -1.0
+    except (TypeError, ValueError):
+        rel_f = -1.0
+    max_rel = float(
+        getattr(settings, "ftv_vbase_hundred_pct_max_entry_rel_pct", 25.0) or 25.0
+    )
+    # Explicit stamp always qualifies; otherwise require near-base entry pad.
+    if ctx.get("vBaseFtvRunner"):
+        return True
+    return 0 < rel_f <= max_rel
+
+
+def _ftv_vbase_hundred_pct_min_best(trade: PaperTrade, base_min: float) -> float:
+    """Hold soft locks until ~100% from entry on V-base FTV (68→136 before trailing)."""
+    if not _is_vbase_ftv_runner(trade):
+        return base_min
+    settings = get_settings()
+    entry = float(getattr(trade, "entryPremium", 0) or 0)
+    pct = float(
+        getattr(settings, "ftv_vbase_hundred_pct_min_move_pct", 100.0) or 100.0
+    )
+    floor = float(
+        getattr(settings, "ftv_vbase_hundred_pct_min_best_points_floor", 40.0)
+        or 40.0
+    )
+    need = floor
+    if entry > 0 and pct > 0:
+        need = max(need, entry * pct / 100.0)
+    return max(base_min, need)
+
+
+def _near_base_hold_min_best(
+    trade: PaperTrade,
+    base_min_best: float,
+    *,
+    max_profit: bool = False,
+) -> float:
     """Raise the soft-lock min-best for a near-base top runner so a small early peak
     doesn't book before the base rip develops."""
     if not _near_base_top_runner(trade):
+        # Still apply 100% hold when explicitly stamped as V-base FTV runner.
+        if max_profit:
+            return _ftv_vbase_hundred_pct_min_best(trade, base_min_best)
         return base_min_best
     settings = get_settings()
     hold_min = float(
-        getattr(settings, "explosion_near_base_hold_min_best_points", 28.0) or 28.0
+        getattr(settings, "explosion_near_base_hold_min_best_points", 40.0) or 40.0
     )
+    if max_profit:
+        hold_min = max(
+            hold_min,
+            float(
+                getattr(
+                    settings,
+                    "explosion_near_base_hold_max_profit_min_best_points",
+                    55.0,
+                )
+                or 55.0
+            ),
+        )
+        hold_min = _ftv_vbase_hundred_pct_min_best(trade, hold_min)
     return max(base_min_best, hold_min)
 
 
@@ -1010,27 +1151,54 @@ def peak_capture_profit_lock_reason(
             min_best = max(6.0, min_best * 0.85)
             giveback_ratio = min(giveback_ratio, 0.18)
 
-    # Large confirmed-rollover peak → bank near the top (keep ~78%) instead of
-    # giving back a third of a big rip (Aug12 NIFTY 24350 PE: +36.7pt peak → gave
-    # back to +20). Only tightens the giveback once the peak is genuinely large;
-    # the rollover gate below still requires the tape to confirm the top, so a
-    # still-rising stage/ladder runner is never clipped on a hot rip.
-    big_peak = float(
-        getattr(settings, "explosion_peak_capture_big_peak_points", 25.0) or 25.0
-    )
-    if big_peak > 0 and best >= big_peak:
-        giveback_ratio = min(
-            giveback_ratio,
-            float(
-                getattr(
-                    settings, "explosion_peak_capture_big_peak_giveback_ratio", 0.22
-                )
-                or 0.22
-            ),
+    # Large confirmed-rollover peak → bank near the top. Ordinary trades tighten at
+    # +25pt (6% giveback). Max-profit FTV / local-base winners wait for a true
+    # expansion peak (≥80pt) so 100%+ rips are not clipped on a mid-leg dip.
+    if max_profit:
+        big_peak = float(
+            getattr(
+                settings,
+                "explosion_peak_capture_max_profit_big_peak_points",
+                80.0,
+            )
+            or 80.0
         )
+        big_peak_ratio = float(
+            getattr(
+                settings,
+                "explosion_peak_capture_max_profit_big_peak_giveback_ratio",
+                0.28,
+            )
+            or 0.28
+        )
+    else:
+        big_peak = float(
+            getattr(settings, "explosion_peak_capture_big_peak_points", 25.0) or 25.0
+        )
+        big_peak_ratio = float(
+            getattr(settings, "explosion_peak_capture_big_peak_giveback_ratio", 0.22)
+            or 0.22
+        )
+    if big_peak > 0 and best >= big_peak:
+        giveback_ratio = min(giveback_ratio, big_peak_ratio)
 
     # Near-base top runner → hold for a bigger peak before capturing (base rip ahead).
-    min_best = _near_base_hold_min_best(trade, min_best)
+    min_best = _near_base_hold_min_best(trade, min_best, max_profit=max_profit)
+
+    # V/FTV from local base: after ~100% of entry prints, loosen trail so
+    # multi-baggers (68→140→220) are not banked on the first mid-peak dip.
+    vbase_after_hundred = False
+    hundred_need = 0.0
+    if max_profit and _is_vbase_ftv_runner(trade):
+        hundred_need = float(_ftv_vbase_hundred_pct_min_best(trade, 0.0) or 0.0)
+        if hundred_need > 0 and best + 1e-9 >= hundred_need:
+            vbase_after_hundred = True
+            after_ratio = float(
+                getattr(settings, "ftv_vbase_after_hundred_giveback_ratio", 0.32)
+                or 0.32
+            )
+            if after_ratio > 0:
+                giveback_ratio = max(giveback_ratio, after_ratio)
 
     if best < min_best:
         return None
@@ -1039,12 +1207,57 @@ def peak_capture_profit_lock_reason(
     min_give = float(
         getattr(settings, "explosion_peak_capture_min_giveback_points", 2.0) or 2.0
     )
+    max_give = _cfg_float(settings, "explosion_peak_capture_max_giveback_points", 8.0)
+    if max_profit:
+        # Mid-leg FTV (< big-peak threshold): ratio-only — an 8pt dip must not bank
+        # before 100%+. After a true expansion peak, allow a higher absolute ceiling
+        # so confirmed rollovers still bank near the top without waiting a full 28%.
+        mp_big = float(
+            getattr(
+                settings,
+                "explosion_peak_capture_max_profit_big_peak_points",
+                80.0,
+            )
+            or 80.0
+        )
+        # Hold ratio-only longer on V-base runners until a true multi-bagger peak.
+        if vbase_after_hundred:
+            after_big = float(
+                getattr(settings, "ftv_vbase_after_hundred_big_peak_points", 100.0)
+                or 100.0
+            )
+            if after_big > 0:
+                mp_big = max(mp_big, after_big)
+        if best < mp_big:
+            max_give = 0.0
+        else:
+            max_give = _cfg_float(
+                settings,
+                "explosion_peak_capture_max_profit_max_giveback_points",
+                24.0,
+            )
+            if vbase_after_hundred:
+                after_max_gb = float(
+                    getattr(
+                        settings,
+                        "ftv_vbase_after_hundred_max_giveback_points",
+                        36.0,
+                    )
+                    or 36.0
+                )
+                if after_max_gb > 0:
+                    max_give = max(max_give, after_max_gb)
     min_remain = float(
         getattr(settings, "explosion_peak_capture_min_remain_points", 1.0) or 1.0
     )
     if pnl_pts < min_remain:
         return None
-    if giveback < max(min_give, best * giveback_ratio):
+    ratio_giveback = best * giveback_ratio
+    required_giveback = max(
+        min_give,
+        min(ratio_giveback, max_give) if max_give > 0 else ratio_giveback,
+    )
+    if giveback < required_giveback:
         return None
     # Only capture when the tape shows rollover — not on a still-expanding rip.
     if not _premium_rolling_over(
@@ -1072,6 +1285,48 @@ def peak_fade_profit_lock_reason(
     Bullish continuation can defer the deep soft lock only.
     """
     settings = get_settings()
+
+    # Even an FTV runner loses its free option once a small winner fully rolls over.
+    # This acts only near breakeven with non-positive live velocity, so a normal
+    # pullback that remains green or is already reaccelerating keeps running.
+    # Exception: near-base max-profit FTV must hold through tiny early +3–5pt
+    # fades (Aug19 76900 PE scratched at early_green after best +5) — require the
+    # same meaningful peak floor as near-base hold before BE-locking.
+    if bool(getattr(settings, "explosion_early_green_lock_enabled", True)):
+        early_min_best = _cfg_float(
+            settings, "explosion_early_green_lock_min_best_points", 3.5
+        )
+        early_buffer = _cfg_float(
+            settings, "explosion_early_green_lock_buffer_points", 0.5
+        )
+        early_max_v = _cfg_float(
+            settings, "explosion_early_green_lock_max_velocity_3s", 0.0
+        )
+        if max_profit and _near_base_top_runner(trade):
+            # Absolute near-base floor only — do NOT wait for 100%-of-premium before
+            # BE-locking a failed rip (e.g. +60 → red on a ₹168 entry).
+            early_min_best = max(
+                early_min_best,
+                _cfg_float(
+                    settings,
+                    "explosion_early_green_lock_near_base_max_profit_min_best_points",
+                    55.0,
+                ),
+                float(
+                    getattr(
+                        settings,
+                        "explosion_near_base_hold_max_profit_min_best_points",
+                        55.0,
+                    )
+                    or 55.0
+                ),
+            )
+        if (
+            best >= early_min_best
+            and pnl_pts <= early_buffer
+            and live_velocity_3s <= early_max_v
+        ):
+            return "explosion_early_green_breakeven"
 
     # Near-peak capture when rollover is confirmed (best +12 → book ~+9).
     # Own enable flag — runs even if deep peak-fade lock is disabled.
@@ -1149,7 +1404,7 @@ def peak_fade_profit_lock_reason(
     # Soft lock: still green, but most of the peak is gone.
     # Near-base top runner → require a bigger peak before the soft lock so a small early
     # fade doesn't book the base rip early (breakeven lock above still protects downside).
-    soft_min_best = _near_base_hold_min_best(trade, min_best)
+    soft_min_best = _near_base_hold_min_best(trade, min_best, max_profit=max_profit)
     if (
         pnl_pts >= min_remain
         and best >= soft_min_best
@@ -1180,14 +1435,53 @@ def evaluate_explosion_exit(
     exit_params = params or default_explosion_exit_params(event_tier)
     pnl_pts = current_premium - trade.entryPremium
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
-    best = max(trade.bestPnlPoints, pnl_pts)
+    observed_best = (
+        float(trade.maxLtp) - float(trade.entryPremium)
+        if trade.maxLtp is not None
+        else 0.0
+    )
+    best = max(trade.bestPnlPoints, pnl_pts, observed_best)
     hold = _hold_seconds(trade)
+    try:
+        v3 = float(live_velocity_3s or 0.0)
+    except (TypeError, ValueError):
+        v3 = 0.0
+    if trade.entryContext is None:
+        trade.entryContext = {}
+    if v3 or "liveVelocity3s" not in trade.entryContext:
+        trade.entryContext["liveVelocity3s"] = round(v3, 3)
 
     from app.engines.explosion_entry_guards import faded_rip_no_green_exit_reason
 
     faded_exit = faded_rip_no_green_exit_reason(trade, hold_seconds=hold, best_points=best)
     if faded_exit:
         return faded_exit, pnl_inr
+
+    # The launch thesis failed immediately: it never established green and live
+    # premium is still contracting. Scratch before the wider structural stop.
+    if bool(getattr(settings, "explosion_failed_launch_exit_enabled", True)):
+        failed_min_hold = int(
+            _cfg_float(settings, "explosion_failed_launch_min_hold_seconds", 15)
+        )
+        failed_max_hold = int(
+            _cfg_float(settings, "explosion_failed_launch_max_hold_seconds", 45)
+        )
+        failed_max_best = _cfg_float(
+            settings, "explosion_failed_launch_max_best_points", 1.0
+        )
+        failed_min_loss = _cfg_float(
+            settings, "explosion_failed_launch_min_loss_points", 1.5
+        )
+        failed_max_v = _cfg_float(
+            settings, "explosion_failed_launch_max_velocity_3s", 0.0
+        )
+        if (
+            failed_min_hold <= hold <= failed_max_hold
+            and best <= failed_max_best
+            and pnl_pts <= -failed_min_loss
+            and v3 < failed_max_v
+        ):
+            return "explosion_failed_launch", pnl_inr
 
     # Never-green hard cut: a trade that printed NO green and is now down past a tight
     # floor is directionally wrong from entry (Aug6 78800 PE: best=0 → ran to −37pt).
@@ -1204,23 +1498,43 @@ def evaluate_explosion_exit(
 
     # Hard per-trade ₹ loss cap — optional (0 = disabled). Prefer never-green + point SL
     # so ICT/base runners are not clipped by a rupee ceiling before the thesis stop.
-    hard_cap = _cfg_float(settings, "explosion_per_trade_max_loss_inr", 0.0)
+    ctx = trade.entryContext or {}
+    if bool(ctx.get("eliteFullLot")):
+        # ELITE full-capital sleeve: prefer structural point SL + daily loss stop.
+        # Per-trade INR clip defaults to off (0). If configured >0, use that ceiling
+        # (often aligned with the ₹20k/day stop) — never the old ₹10k early kill.
+        hard_cap = _cfg_float(
+            settings,
+            "elite_full_lot_risk_inr",
+            0.0,
+        )
+    elif bool(ctx.get("fullSleeveQualified")):
+        hard_cap = _cfg_float(
+            settings,
+            "explosion_exceptional_per_trade_max_loss_inr",
+            4_000.0,
+        )
+    elif bool(ctx.get("indexConfirmedFtv")):
+        # Index-confirmed near-base FTV took elevated size — give it a proportionally wider
+        # rupee stop so the larger position survives the normal near-base shakeout instead of
+        # being clipped at a ~2pt stop. Still bounded (default ~2% of capital).
+        hard_cap = _cfg_float(
+            settings,
+            "index_confirmed_ftv_per_trade_max_loss_inr",
+            4_000.0,
+        )
+    else:
+        hard_cap = _cfg_float(
+            settings,
+            "explosion_per_trade_max_loss_inr",
+            2_000.0,
+        )
     if hard_cap > 0 and pnl_inr <= -hard_cap:
         return "explosion_per_trade_risk_cap", pnl_inr
 
     from app.engines.ict_breakout_monitor import _ict_max_profit_trade
 
     max_profit = _ict_max_profit_trade(trade)
-
-    # Stamp live heat so peak-capture / bullish-defer see the same tape.
-    try:
-        v3 = float(live_velocity_3s or 0.0)
-    except (TypeError, ValueError):
-        v3 = 0.0
-    if trade.entryContext is None:
-        trade.entryContext = {}
-    if v3 or "liveVelocity3s" not in trade.entryContext:
-        trade.entryContext["liveVelocity3s"] = round(v3, 3)
 
     # Peak→fade toward losses: book remaining green / BE before hard SL.
     # Runs before trail-arm gates so unarmed trails cannot give winners back.
@@ -1324,10 +1638,9 @@ def evaluate_explosion_exit(
         near = max(0.5, target * 0.04)
         if best >= target - near and best >= settings.explosion_trail_arm_points:
             return "explosion_target_hit", pnl_inr
-    else:
-        # Book hard TP at elevated ICT / projected moment target.
-        if best >= target:
-            return "explosion_target_hit", pnl_inr
+    # Max-profit / stage-ladder targets are projections, not clairvoyant tops.
+    # Once reached, keep following the observed LTP and let confirmed rollover,
+    # peak capture, or the ratcheting stage floor exit the move.
 
     from app.engines.confidence_hold import (
         chart_confidence_for_trade,
@@ -1509,6 +1822,10 @@ def evaluate_explosion_exit(
         # Once thesis has gone green: never time-exit — SL / trail / peak-capture only.
         if _skip_time_exit_for_green_thesis(trade, best=best, settings=settings):
             return None, pnl_inr
+        # A green FTV stage runner exits on observed rollover / its ratcheting
+        # floor, never because a projection or generic hold clock expired.
+        if pnl_pts > 0 and stage_ladder:
+            return None, pnl_inr
         # Jul29 77600 CE: explosion_time_profit @ +0.3pt while still far from TP 37 —
         # LTP later printed 290. Skip green time-exit on top explosions working to TP.
         if pnl_pts > 0 and _skip_explosion_time_profit(
@@ -1537,7 +1854,9 @@ def _green_thesis_active(trade: Any, *, best: float, settings: Any) -> bool:
     ctx = getattr(trade, "entryContext", None) or {}
     pattern = str(ctx.get("ictPattern") or "").lower()
     structured = bool(
-        ctx.get("ictFlatThenVertical")
+        ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictFlatThenVertical")
         or ctx.get("ictMegaRip")
         or ctx.get("maxProfitCapture")
         or ctx.get("momentStageLadder")
@@ -1549,6 +1868,7 @@ def _green_thesis_active(trade: Any, *, best: float, settings: Any) -> bool:
             "mega_rip",
             "early_flat_break",
             "local_swing_base",
+            "first_lift_local_base",
             "premium_fvg",
         )
     )
@@ -1612,7 +1932,12 @@ def _skip_explosion_time_profit(
     )
     tiers = {t.strip().upper() for t in tiers_raw.split(",") if t.strip()}
     tier = str(event_tier or ctx.get("explosionTier") or "").upper()
-    top_size = bool(ctx.get("topExplosionMaxLots") or ctx.get("highConviction"))
+    top_size = bool(
+        ctx.get("topExplosionMaxLots")
+        or ctx.get("highConviction")
+        or ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+    )
     if tier not in tiers and not top_size:
         return False
     frac = float(

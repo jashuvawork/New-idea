@@ -133,6 +133,7 @@ async def _refresh_option_keys() -> list[str]:
     """Pull ATM±scan-range option keys from cached REST chain for WS subscription."""
     settings = get_settings()
     keys: list[str] = []
+    refresh_state: dict[str, dict[str, float | int]] = {}
     client = UpstoxClient()
     from app.engines.explosion_detector import resolve_explosion_scan_range
     from app.engines.moneyness import atm_strike
@@ -145,11 +146,25 @@ async def _refresh_option_keys() -> list[str]:
                 continue
             atm = atm_strike(float(spot or 0), sym)
             scan_range = resolve_explosion_scan_range(sym, settings)
-            keys.extend(
-                collect_option_keys_from_chain(chain, atm, scan_range)
-            )
+            option_keys = collect_option_keys_from_chain(chain, atm, scan_range)
+            keys.extend(option_keys)
+            refresh_state[sym] = {"spot": float(spot or 0), "atm": float(atm), "chainRows": len(chain), "optionKeys": len(option_keys)}
         except Exception as e:
             logger.debug("Option key refresh failed for %s: %s", sym, e)
+            refresh_state[sym] = {"spot": 0.0, "atm": 0.0, "chainRows": 0, "optionKeys": 0}
+    try:
+        from app.services.radar_learning import record_pipeline_event
+
+        await asyncio.to_thread(
+            record_pipeline_event,
+            "WS_OPTION_REFRESH",
+            source="upstox_ws",
+            detail={"symbols": refresh_state, "totalKeys": len(keys)},
+            throttle_key="ws-option-refresh",
+            throttle_seconds=max(1, settings.upstox_ws_resubscribe_seconds),
+        )
+    except Exception as exc:
+        logger.debug("Failed to persist WS option refresh telemetry: %s", exc)
     return keys
 
 

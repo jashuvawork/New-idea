@@ -4,6 +4,8 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.explosion_entry_guards import (
     cap_fake_explosion_trap_lots,
@@ -41,9 +43,14 @@ def _settings(**overrides):
     s.fake_explosion_trap_min_session_move_pct = 28.0
     s.fake_explosion_trap_extended_move_pct = 55.0
     s.explosion_early_window_max_move_pct = 55.0
+    s.explosion_chase_use_local_base = True
+    s.explosion_local_base_trust_min_move_pct = 8.0
+    s.explosion_local_base_recent_window_enabled = False
+    s.explosion_local_base_chase_max_move_pct = 65.0
     s.fake_explosion_trap_max_premium_mom_pct = 0.15
     s.fake_explosion_trap_block_on_conflict = True
     s.fake_explosion_trap_min_conflict_flags = 3
+    s.fake_explosion_trap_block_worst_midday_chop = True
     s.fake_explosion_trap_chop_elite_lot_cap = 6
     s.fake_explosion_trap_otm_requires_or_breakout = True
     s.fake_explosion_trap_post_win_lot_cap = 8
@@ -161,6 +168,38 @@ def test_blocks_premium_flat_extension(mock_money_settings, mock_settings):
     assert blocked is True
     assert "premium_flat" in meta.get("conflictFlags", [])
     assert "premium_flat" in reason or meta.get("action") == "block"
+
+
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_fresh_local_pad_is_not_misclassified_as_session_extension(
+    mock_money_settings, mock_settings, side,
+):
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+    snap = _snap(or_pos="ABOVE")
+    event = _event(daily=67.0, strike=24200.0)
+    event.side = side
+    cand = _candidate(event, snap)
+    prem = {"direction": "NEUTRAL", "momentum3Pct": 0.0, "momentum5Pct": 0.0}
+
+    with patch(
+        "app.engines.explosion_entry_guards._midday_chop_active",
+        return_value=False,
+    ):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand,
+            snap,
+            premium_chart=prem,
+            ict=_confirmed_ict(20.0),
+        )
+
+    assert blocked is False
+    assert reason != "fake_explosion_trap_premium_flat_extension"
+    assert "session_extended" not in meta.get("conflictFlags", [])
+    assert meta["localBaseMovePct"] == 20.0
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
@@ -324,3 +363,35 @@ def test_extended_chase_still_flags_session_extended(mock_money_settings, mock_s
 
 def test_cap_block_zeros_lots():
     assert cap_fake_explosion_trap_lots(49, {"fakeExplosionTrap": True, "action": "block"}) == 0
+
+
+@patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=True)
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_worst_midday_chop_elite_hard_blocks(
+    mock_money_settings, mock_settings, _midday,
+):
+    """Aug18: EXPIRY WORST midday + EXPLODING must hard-block, not soft-cap to 6."""
+    from app.models.schemas import Breadth
+
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+    snap = _snap(or_pos="BELOW")
+    snap.breadth = Breadth(bias="BEARISH", score=45.0, aligned=True)
+    # Armed-base style: early pad, not session-extended.
+    event = _event(daily=18.0, v3=2.4, tier="EXPLODING", strike=24250.0)
+    cand = _candidate(event, snap)
+    state = MagicMock()
+    state.dayMode = "EXPIRY WORST"
+    state.dailyStrategy = {"dayMode": "EXPIRY WORST", "dayType": "WORST"}
+    ict = _confirmed_ict(5.7)
+    blocked, reason, meta = detect_fake_explosion_trap(
+        cand, snap, state=state, ict=ict,
+    )
+    assert blocked is True
+    assert reason == "fake_explosion_trap_worst_midday_chop"
+    assert meta.get("action") == "block"
+    assert "midday_chop" in meta.get("conflictFlags", [])
+    assert "chop_regime" in meta.get("conflictFlags", [])
+    assert "elite_hot" in meta.get("conflictFlags", [])

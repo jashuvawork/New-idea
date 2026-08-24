@@ -145,6 +145,28 @@ export interface ExplosionAlert {
   peakMovePct?: number;
   openPremiumMove?: number;
   volumeAwaken?: boolean;
+  offLowMovePct?: number;
+  localBaseMovePct?: number;
+  ictBreakout?: boolean;
+  ictPattern?: string;
+  ictScore?: number;
+  ictMegaRip?: boolean;
+  ictPremiumFvg?: boolean;
+  ictFlatThenVertical?: boolean;
+  ictFirstLift?: boolean;
+  ictVolumeAwakening?: boolean;
+  ictDisplacement?: boolean;
+  ictLocalSwingBase?: boolean;
+  ictBaseRelativeMovePct?: number;
+  ictBasePremium?: number;
+  ictReasons?: string[];
+  flatVerticalQuality?: number;
+  flatVerticalGrade?: string;
+  momentType?: string;
+  localBaseReversalPrediction?: Record<string, unknown>;
+  localBaseReversalActive?: boolean;
+  localBaseReversalConfidence?: number;
+  localBaseReversalSide?: string;
 }
 
 export interface StrategyMatrixEntry {
@@ -168,8 +190,16 @@ export interface HeatmapStrike {
   strike: number;
   callOi: number;
   putOi: number;
+  callVolume?: number;
+  putVolume?: number;
   callLtp?: number;
   putLtp?: number;
+  callBid?: number;
+  callAsk?: number;
+  putBid?: number;
+  putAsk?: number;
+  callIv?: number;
+  putIv?: number;
   gammaWall: boolean;
   liquidityScore: number;
   sweepRisk: number;
@@ -536,6 +566,43 @@ export interface AutoTraderState {
   lastExit?: AutoTradeEvent | null;
   liveOrdersPlaced?: number;
   chopGuards?: ChopGuards;
+  /** BUILDING LTP monitor scoreboard — every watched name scored; best ready wins. */
+  buildingLtpMonitor?: BuildingLtpMonitorState;
+}
+
+export interface BuildingLtpScoreRow {
+  key: string;
+  symbol: string;
+  side: string;
+  strike: number;
+  ltp: number;
+  tier: string;
+  ready: boolean;
+  ready_reason: string;
+  score: number;
+  explosion_score: number;
+  velocity_3s: number;
+  velocity_9s: number;
+  local_move_pct: number;
+  off_low_move_pct: number;
+  volume_awaken: boolean;
+  helpers?: string[];
+  helper_count?: number;
+  helping?: boolean;
+  sudden_lift?: boolean;
+  rank: number;
+  is_best_ready: boolean;
+}
+
+export interface BuildingLtpMonitorState {
+  enabled?: boolean;
+  active?: boolean;
+  watchedCount?: number;
+  readyCount?: number;
+  bestKey?: string | null;
+  best?: BuildingLtpScoreRow | null;
+  scoreboard?: BuildingLtpScoreRow[];
+  error?: string;
 }
 
 export interface AutoTradeEvent {
@@ -629,6 +696,133 @@ export interface CapitalAllocation {
   lotSizes?: Record<string, number>;
   lotSizesSource?: string;
   lotSizesFetchedAt?: string;
+  enabled?: boolean;
+  capitalBaseInr?: number;
+  committedInr?: number;
+  cashReserveInr?: number;
+  remainingInr?: number;
+  remainingAllocationPct?: number;
+  nextTradeBudgetInr?: number;
+  utilizationPct?: number;
+  weights?: number[];
+  maxPositions?: number;
+  maxSameSide?: number;
+  activeAllocations?: FtvAllocationRow[];
+  plannedAllocations?: FtvAllocationRow[];
+}
+
+export interface FtvAllocationRow {
+  key?: string;
+  tradeId?: string;
+  symbol: string;
+  side: string;
+  strike: number;
+  lots?: number;
+  rank?: number;
+  tier?: string;
+  score?: number;
+  premium?: number;
+  budgetInr?: number;
+  committedInr?: number;
+  status?: string;
+  reason?: string;
+}
+
+export interface UpstoxBrokerPosition {
+  instrumentKey?: string;
+  tradingSymbol?: string;
+  exchange?: string;
+  product?: string;
+  quantity: number;
+  averagePrice: number;
+  lastPrice: number;
+  realizedPnlInr: number;
+  unrealizedPnlInr: number;
+  pnlInr: number;
+}
+
+export interface UpstoxBrokerOrder {
+  orderId?: string;
+  tradingSymbol?: string;
+  transactionType?: string;
+  status?: string;
+  statusMessage?: string;
+  quantity: number;
+  filledQuantity: number;
+  pendingQuantity: number;
+  averagePrice: number;
+  price: number;
+  orderType?: string;
+  product?: string;
+  timestamp?: string;
+  tag?: string;
+}
+
+export interface UpstoxManagerTrade {
+  id: string;
+  symbol: string;
+  side: string;
+  strike: number;
+  lots: number;
+  entryPremium: number;
+  currentPremium: number;
+  pnlPoints: number;
+  pnlInr: number;
+  status: string;
+  openedAt?: string;
+  closedAt?: string;
+  exitReason?: string;
+  executionMode?: string;
+  brokerOrderId?: string;
+  allocationRank?: number;
+  allocationBudgetInr?: number;
+  allocatedCostInr?: number;
+  tier?: string;
+  score?: number;
+}
+
+export interface UpstoxTradeOverview {
+  generatedAt: string;
+  executionMode: string;
+  autoTradingEnabled: boolean;
+  running: boolean;
+  broker: {
+    connected: boolean;
+    complete: boolean;
+    errors: Record<string, string>;
+  };
+  capital: CapitalAllocation & {
+    brokerAvailableMarginInr?: number;
+    brokerUsedMarginInr?: number;
+    brokerTotalEquityInr?: number;
+  };
+  allocation: CapitalAllocation;
+  pnl: {
+    brokerRealizedInr: number;
+    brokerUnrealizedInr: number;
+    brokerNetInr: number;
+    strategyRealizedInr: number;
+    strategyUnrealizedInr: number;
+    strategyNetInr: number;
+    wins: number;
+    losses: number;
+    scratches: number;
+    winRate: number;
+    profitFactor: number;
+  };
+  brokerPositions: UpstoxBrokerPosition[];
+  brokerOrders: UpstoxBrokerOrder[];
+  reconciliation: {
+    safe: boolean;
+    checked: boolean;
+    untrackedBrokerInstrumentKeys: string[];
+    missingBrokerInstrumentKeys: string[];
+    message: string;
+  };
+  strategyTrades: {
+    open: UpstoxManagerTrade[];
+    closed: UpstoxManagerTrade[];
+  };
 }
 
 export interface DailyStrategy {
@@ -723,6 +917,8 @@ export interface PaperTrade {
   exitReason?: string;
   strategyType: string;
   bestPnlPoints: number;
+  maxLtp?: number;
+  maxLtpAt?: string;
   entryContext?: Record<string, unknown>;
   context?: Record<string, unknown>;
 }
@@ -779,6 +975,31 @@ export interface DeploymentReadiness {
   armLiveSteps: string[];
   openTrades: number;
   milestone?: PerformanceMilestone;
+  health?: {
+    api: string;
+    loopWatchdog: {
+      enabled?: boolean;
+      staleSeconds?: number;
+      lastBeatAgeSeconds?: number | null;
+      threadAlive?: boolean;
+    };
+    websocket: {
+      enabled?: boolean;
+      connected?: boolean;
+      streamStale?: boolean;
+      lastMessageAgeMs?: number | null;
+      lastError?: string | null;
+    };
+    rateLimitActive: boolean;
+    rateLimitRemainingSeconds: number;
+    latency: {
+      latencyMode?: string;
+      entryScanIntervalMs?: number;
+      lastFastCycleMs?: number | null;
+      lastFullCycleMs?: number | null;
+      buildInProgress?: boolean;
+    };
+  };
 }
 
 export interface TradeLogStatus {
@@ -797,6 +1018,12 @@ export interface DeploymentStatus {
   upstox: DailyTokenStatus;
   flags: Record<string, boolean | number>;
   tradeLog?: TradeLogStatus;
+  cadence?: {
+    upstoxMinRequestIntervalMs?: number;
+    upstoxRateLimitActive?: boolean;
+    upstoxRateLimitRemainingSeconds?: number;
+    entryScanIntervalMs?: number;
+  };
 }
 
 export interface DailyTokenStatus {
@@ -946,6 +1173,47 @@ export interface NewsItem {
   url?: string;
   indiaRelevant?: boolean;
   category?: string;
+  provider?: string;
+  sourceType?: 'BROKER_NEWS' | 'GLOBAL_NEWS' | 'SOCIAL';
+  verification?: 'VERIFIED' | 'AGGREGATED' | 'CORROBORATED' | 'UNVERIFIED';
+  horizon?: 'CURRENT_SESSION' | 'NEXT_SESSION' | 'BOTH' | 'BACKGROUND' | 'STALE';
+  impact?: 'HIGH' | 'MEDIUM' | 'LOW';
+  affectedSymbols?: string[];
+  sideBias?: 'CALL' | 'PUT' | 'NEUTRAL';
+  directionScore?: number;
+  themes?: string[];
+  actionable?: boolean;
+  tradeUse?: 'CONFIRMATION_ONLY' | 'DISPLAY_ONLY';
+  corroboratedBy?: string[];
+}
+
+export interface NewsSessionOutlook {
+  bias: string;
+  sideBias: string;
+  score: number;
+  confidence: string;
+  headlineCount: number;
+  highImpactCount: number;
+}
+
+export interface NewsAggregate {
+  bias: string;
+  score: number;
+  indiaHeadlines: number;
+  count?: number;
+  currentSession?: NewsSessionOutlook;
+  nextSession?: NewsSessionOutlook;
+  riskLevel?: string;
+  providerCoverage?: string[];
+  providerHealth?: Record<string, {
+    status: string;
+    itemCount: number;
+    error?: string | null;
+    lastFetchAt?: string;
+  }>;
+  unverifiedSocialCount?: number;
+  guardrail?: string;
+  generatedAt?: string;
 }
 
 export interface MarketNewsResponse {
@@ -954,12 +1222,7 @@ export interface MarketNewsResponse {
   cacheSeconds: number;
   ageSeconds: number;
   nextRefreshInSeconds: number;
-  aggregate?: {
-    bias: string;
-    score: number;
-    indiaHeadlines: number;
-    count?: number;
-  };
+  aggregate?: NewsAggregate;
 }
 
 export interface DeploymentStatus {

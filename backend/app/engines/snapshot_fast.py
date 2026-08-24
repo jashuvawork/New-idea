@@ -121,6 +121,9 @@ def overlay_snapshot_spot_charts(
 
         cloned = snap.model_copy(deep=False)
         cloned.spot = live_spot
+        from app.engines.moneyness import atm_strike
+
+        cloned.atmStrike = atm_strike(live_spot, sym)
         breadth_bias = cloned.breadth.bias if cloned.breadth else "NEUTRAL"
         cloned.spotChart = refresh_spot_chart_live(
             cloned.spotChart,

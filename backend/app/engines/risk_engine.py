@@ -44,6 +44,8 @@ class RiskEngine:
         lot_multiplier: int = 25,
         strategy_type: StrategyType = StrategyType.SCALP,
         strike: float = 0.0,
+        stop_points: float = 3.0,
+        ignore_per_trade_risk_cap: bool = False,
     ) -> tuple[bool, str]:
         settings = get_settings()
         cap = get_capital_snapshot()
@@ -57,6 +59,14 @@ class RiskEngine:
         open_trades = state.openPaperTrades
         is_swing = strategy_type == StrategyType.SWING
         max_scalps = settings.aggressive_max_open_scalps if settings.aggressive_lot_sizing else self.profile.maxOpenTrades
+        if (
+            strategy_type == StrategyType.EXPLOSIVE
+            and getattr(settings, "ftv_ranked_allocation_enabled", True)
+        ):
+            max_scalps = max(
+                max_scalps,
+                int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+            )
 
         if is_swing:
             swing_open = sum(1 for t in open_trades if t.strategyType == StrategyType.SWING)
@@ -87,11 +97,15 @@ class RiskEngine:
         if exposure + new_exposure > cap.availableMarginInr * 0.98:
             return False, "total_margin_exceeded"
 
-        max_loss = settings.swing_max_loss_inr if is_swing else settings.max_risk_per_trade_inr
-        stop_pts = 8.0 if is_swing else 3.0
-        potential_loss = profile_stop_points(lots, lot_multiplier, stop_pts)
-        if potential_loss > max_loss:
-            return False, "per_trade_risk_exceeded"
+        # ELITE full-capital sleeves intentionally size to the cash budget with a wide
+        # structural SL; theoretical stop×lots may exceed max_risk_per_trade_inr (₹4k).
+        # Daily loss stop remains the session backstop — do not reject the entry here.
+        if not ignore_per_trade_risk_cap:
+            max_loss = settings.swing_max_loss_inr if is_swing else settings.max_risk_per_trade_inr
+            stop_pts = max(0.0, float(stop_points or (8.0 if is_swing else 3.0)))
+            potential_loss = profile_stop_points(lots, lot_multiplier, stop_pts)
+            if potential_loss > max_loss:
+                return False, "per_trade_risk_exceeded"
 
         if not is_swing and settings.block_duplicate_open_leg and strike > 0:
             for t in open_trades:
@@ -107,7 +121,27 @@ class RiskEngine:
             explosive_open = sum(
                 1 for t in open_trades if t.strategyType == StrategyType.EXPLOSIVE
             )
-            if explosive_open >= 1 and strategy_type == StrategyType.EXPLOSIVE:
+            same_side_open = sum(
+                1
+                for t in open_trades
+                if t.strategyType == StrategyType.EXPLOSIVE and t.side == side
+            )
+            max_same_side = max(
+                1,
+                int(getattr(settings, "ftv_allocation_max_same_side", 2) or 2),
+            )
+            if (
+                strategy_type == StrategyType.EXPLOSIVE
+                and same_side_open >= max_same_side
+            ):
+                return False, "ftv_same_side_cap"
+            explosion_lane_cap = 1
+            if getattr(settings, "ftv_ranked_allocation_enabled", True):
+                explosion_lane_cap = max(
+                    1,
+                    int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+                )
+            if explosive_open >= explosion_lane_cap and strategy_type == StrategyType.EXPLOSIVE:
                 return False, "explosive_lane_cap"
 
         return True, "passed"

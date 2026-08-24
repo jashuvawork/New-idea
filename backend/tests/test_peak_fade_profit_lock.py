@@ -24,6 +24,11 @@ def _settings(**overrides):
     s.explosion_peak_fade_min_remain_points = 0.4
     s.explosion_peak_fade_breakeven_lock = True
     s.explosion_peak_fade_breakeven_buffer = 0.5
+    s.explosion_early_green_lock_enabled = True
+    s.explosion_early_green_lock_min_best_points = 3.5
+    s.explosion_early_green_lock_buffer_points = 0.5
+    s.explosion_early_green_lock_max_velocity_3s = 0.0
+    s.explosion_early_green_lock_near_base_max_profit_min_best_points = 55.0
     s.explosion_peak_fade_max_profit_min_best = 28.0
     s.explosion_peak_fade_max_profit_giveback_ratio = 0.80
     s.explosion_peak_fade_defer_when_bullish = True
@@ -31,18 +36,31 @@ def _settings(**overrides):
     s.explosion_peak_fade_bullish_min_velocity_3s = 1.5
     s.explosion_near_base_hold_enabled = True
     s.explosion_near_base_hold_max_entry_rel_pct = 20.0
-    s.explosion_near_base_hold_min_best_points = 28.0
+    s.explosion_near_base_hold_ict_max_entry_rel_pct = 40.0
+    s.explosion_near_base_hold_min_best_points = 40.0
+    s.explosion_near_base_hold_max_profit_min_best_points = 55.0
+    s.ftv_vbase_hundred_pct_hold_enabled = True
+    s.ftv_vbase_hundred_pct_min_move_pct = 100.0
+    s.ftv_vbase_hundred_pct_max_entry_rel_pct = 25.0
+    s.ftv_vbase_hundred_pct_min_best_points_floor = 40.0
+    s.ftv_vbase_after_hundred_giveback_ratio = 0.32
+    s.ftv_vbase_after_hundred_max_giveback_points = 36.0
+    s.ftv_vbase_after_hundred_big_peak_points = 100.0
     s.explosion_peak_capture_enabled = True
     s.explosion_peak_capture_min_best_points = 8.0
-    s.explosion_peak_capture_giveback_ratio = 0.22
-    s.explosion_peak_capture_min_giveback_points = 2.0
+    s.explosion_peak_capture_giveback_ratio = 0.12
+    s.explosion_peak_capture_min_giveback_points = 1.0
+    s.explosion_peak_capture_max_giveback_points = 8.0
     s.explosion_peak_capture_min_remain_points = 1.0
     s.explosion_peak_capture_max_live_velocity_3s = 1.0
     s.explosion_peak_capture_max_premium_mom_pct = 0.15
     s.explosion_peak_capture_max_profit_min_best = 28.0
     s.explosion_peak_capture_max_profit_giveback_ratio = 0.35
     s.explosion_peak_capture_big_peak_points = 25.0
-    s.explosion_peak_capture_big_peak_giveback_ratio = 0.22
+    s.explosion_peak_capture_big_peak_giveback_ratio = 0.06
+    s.explosion_peak_capture_max_profit_big_peak_points = 80.0
+    s.explosion_peak_capture_max_profit_big_peak_giveback_ratio = 0.28
+    s.explosion_peak_capture_max_profit_max_giveback_points = 24.0
     s.explosion_faded_rip_no_green_exit_enabled = False
     s.bullish_hold_enabled = True
     s.explosion_stop_min_hold_seconds = 0
@@ -143,47 +161,105 @@ def test_peak_capture_near_12pt_top_when_rolling_over(mock_s):
 
 @patch("app.engines.explosion_profit.get_settings")
 def test_big_peak_banks_near_top_on_max_profit_rollover(mock_s):
-    """Aug12 NIFTY 24350 PE: +36.7pt max-profit peak rolled over (cold tape).
+    """After a true expansion peak (≥80), confirmed rollover banks via absolute cap.
 
-    Old max-profit giveback 0.35 held until ~+23.9 (gave back ~13pt). The big-peak
-    tighten keeps ~78%, so a ~9pt giveback (still +27.5) banks near the top.
+    Mid-leg peaks (<80) intentionally use ratio-only so 100%+ FTV is not clipped.
     """
     mock_s.return_value = _settings()
     ctx = {
         "liveVelocity3s": -0.1,
-        "localBaseBaseRelPct": 33.1,
+        "localBaseBaseRelPct": 45.0,
         "ictFlatThenVertical": True,
         "maxProfitCapture": True,
         "psychologyLabel": "GREED",
         "psychologyExitBias": "LET_RUNNERS",
         "premiumChart": {"momentum3Pct": -0.1},
     }
-    trade = _trade(entry=98.32, best=36.74, current=125.82, ctx=ctx)
-    # giveback 9.24 ≈ 25% of 36.74 — above the 22% big-peak threshold, still +27.5.
+    # Mid-leg 60pt / 9pt giveback — ratio-only (0.35 → need 21pt) → HOLD toward 100%+.
+    mid = _trade(entry=98.32, best=60.0, current=150.0, ctx=ctx)
+    assert peak_capture_profit_lock_reason(
+        mid, best=60.0, pnl_pts=51.0, max_profit=True, live_velocity_3s=-0.1,
+    ) is None
+    # True expansion ≥80 with ≥24pt giveback on dying tape → bank near top.
+    trade = _trade(entry=98.32, best=90.0, current=165.0, ctx=ctx)
     reason = peak_capture_profit_lock_reason(
-        trade, best=36.74, pnl_pts=27.5, max_profit=True, live_velocity_3s=-0.1,
+        trade, best=90.0, pnl_pts=66.0, max_profit=True, live_velocity_3s=-0.1,
     )
     assert reason == "explosion_peak_capture"
 
 
 @patch("app.engines.explosion_profit.get_settings")
-def test_big_peak_disabled_keeps_loose_max_profit_giveback(mock_s):
-    """Below the big-peak threshold the loose max-profit giveback (0.35) still
-    holds at +27.5 (giveback 9.24 < 0.35×36.74) — proving the new lock is what
-    banks near the top once the peak is large."""
-    mock_s.return_value = _settings(explosion_peak_capture_big_peak_points=999.0)
-    ctx = {
-        "liveVelocity3s": -0.1,
-        "localBaseBaseRelPct": 33.1,
-        "ictFlatThenVertical": True,
-        "maxProfitCapture": True,
-        "premiumChart": {"momentum3Pct": -0.1},
-    }
-    trade = _trade(entry=98.32, best=36.74, current=125.82, ctx=ctx)
+def test_max_profit_ftv_holds_mid_leg_dip_before_100pct(mock_s):
+    """Local-base FTV at +42pt with a small dip must keep running toward 100%+."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=50.0,
+        best=42.0,
+        current=87.0,
+        ctx={
+            "liveVelocity3s": 0.4,
+            "localBaseBaseRelPct": 18.0,
+            "ictFlatThenVertical": True,
+            "maxProfitCapture": True,
+            "firstLiftCapture": True,
+            "premiumChart": {"momentum3Pct": 0.05},
+        },
+    )
+    # 5pt giveback on a +42pt peak — below absolute 8pt and below 0.35 ratio.
     reason = peak_capture_profit_lock_reason(
-        trade, best=36.74, pnl_pts=27.5, max_profit=True, live_velocity_3s=-0.1,
+        trade, best=42.0, pnl_pts=37.0, max_profit=True, live_velocity_3s=0.4,
     )
     assert reason is None
+    # Soft fade lock also waits for the max-profit near-base floor (≥55).
+    soft = peak_fade_profit_lock_reason(
+        trade, best=42.0, pnl_pts=37.0, max_profit=True, live_velocity_3s=0.4,
+    )
+    assert soft is None
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_large_vertical_caps_giveback_near_observed_top(mock_s):
+    """After ≥80pt expansion, absolute max-profit cap banks near the observed top."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=50.0,
+        best=200.0,
+        current=226.0,
+        ctx={
+            "liveVelocity3s": -1.5,
+            "ictFlatThenVertical": True,
+            "maxProfitCapture": True,
+            "premiumChart": {"momentum3Pct": -0.5},
+        },
+    )
+    # giveback 24 ≥ max-profit absolute ceiling — bank without waiting 0.28*200.
+    reason = peak_capture_profit_lock_reason(
+        trade,
+        best=200.0,
+        pnl_pts=176.0,
+        max_profit=True,
+        live_velocity_3s=-1.5,
+    )
+    assert reason == "explosion_peak_capture"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_absolute_giveback_cap_still_protects_when_big_peak_tightening_is_off(mock_s):
+    """Ordinary trades keep the 8pt ceiling even when big-peak tightening is off."""
+    mock_s.return_value = _settings(
+        explosion_peak_capture_big_peak_points=999.0,
+        explosion_peak_capture_max_profit_big_peak_points=999.0,
+    )
+    ctx = {
+        "liveVelocity3s": -0.1,
+        "localBaseBaseRelPct": 45.0,
+        "premiumChart": {"momentum3Pct": -0.1},
+    }
+    trade = _trade(entry=98.32, best=60.0, current=150.0, ctx=ctx)
+    reason = peak_capture_profit_lock_reason(
+        trade, best=60.0, pnl_pts=51.0, max_profit=False, live_velocity_3s=-0.1,
+    )
+    assert reason == "explosion_peak_capture"
 
 
 @patch("app.engines.explosion_profit.get_settings")
@@ -254,7 +330,99 @@ def test_breakeven_lock_after_peak(mock_s):
     reason = peak_fade_profit_lock_reason(
         _trade(current=42.4, best=12.53), best=12.53, pnl_pts=-0.15, max_profit=False,
     )
-    assert reason == "explosion_peak_fade_breakeven"
+    assert reason == "explosion_early_green_breakeven"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_small_ftv_winner_cannot_turn_into_loss_after_velocity_reverses(mock_s):
+    mock_s.return_value = _settings()
+    reason = peak_fade_profit_lock_reason(
+        _trade(
+            current=42.35,
+            best=4.0,
+            ctx={"maxProfitCapture": True, "ictFlatThenVertical": True},
+        ),
+        best=4.0,
+        pnl_pts=-0.2,
+        max_profit=True,
+        live_velocity_3s=-0.4,
+    )
+    assert reason == "explosion_early_green_breakeven"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_near_base_max_profit_holds_tiny_early_green_fade(mock_s):
+    """Aug19 SENSEX 76900 PE: best +5 near base must NOT early-green scratch."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=168.15,
+        best=4.97,
+        current=166.7,
+        ctx={
+            "maxProfitCapture": True,
+            "ictFlatThenVertical": True,
+            "localBaseBaseRelPct": 2.6,
+            "explosionTier": "EXPLODING",
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+            "liveVelocity3s": -0.2,
+            "premiumChart": {"momentum3Pct": -0.1},
+        },
+    )
+    reason = peak_fade_profit_lock_reason(
+        trade,
+        best=4.97,
+        pnl_pts=-1.45,
+        max_profit=True,
+        live_velocity_3s=-0.2,
+    )
+    assert reason is None
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_near_base_max_profit_be_locks_after_meaningful_peak(mock_s):
+    """Once a near-base FTV has a real expansion peak, BE lock still protects."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=168.15,
+        best=60.0,
+        current=168.0,
+        ctx={
+            "maxProfitCapture": True,
+            "ictFlatThenVertical": True,
+            "localBaseBaseRelPct": 2.6,
+            "explosionTier": "EXPLODING",
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+            "liveVelocity3s": -0.5,
+            "premiumChart": {"momentum3Pct": -0.2},
+        },
+    )
+    reason = peak_fade_profit_lock_reason(
+        trade,
+        best=60.0,
+        pnl_pts=-0.2,
+        max_profit=True,
+        live_velocity_3s=-0.5,
+    )
+    assert reason == "explosion_early_green_breakeven"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_small_ftv_winner_keeps_running_while_velocity_is_positive(mock_s):
+    mock_s.return_value = _settings()
+    reason = peak_fade_profit_lock_reason(
+        _trade(
+            current=42.35,
+            best=4.0,
+            ctx={"maxProfitCapture": True, "ictFlatThenVertical": True},
+        ),
+        best=4.0,
+        pnl_pts=-0.2,
+        max_profit=True,
+        live_velocity_3s=1.0,
+    )
+    assert reason is None
 
 
 @patch("app.engines.explosion_profit.get_settings")
@@ -308,7 +476,7 @@ def test_aug6_78700_max_profit_holds_first_pullback(mock_s):
     """Aug6 SENSEX 78700 CE: best +15.4 → +6.5 with OVERCONFIDENCE must HOLD.
 
     Old path tightened giveback to 50% and disabled near-base hold, booking before
-    the extension to ~460. Max-profit + near-base must wait for a ≥28pt peak.
+    the extension to ~460. Max-profit + near-base must wait for a ≥55pt peak.
     """
     mock_s.return_value = _settings()
     trade = _trade(
@@ -398,3 +566,106 @@ def test_bullish_but_dead_premium_still_soft_locks(mock_s, _br, _ch):
         trade, best=12.53, pnl_pts=2.3, max_profit=False, live_velocity_3s=0.2,
     )
     assert reason == "explosion_peak_capture"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_vbase_ftv_holds_before_hundred_pct(mock_s):
+    """Aug20-style V-base: entry ~68, mid-leg +50 must NOT peak-capture yet.
+
+    Absolute 55pt near-base floor alone would allow banking ~74% of entry;
+    100%-of-premium hold waits until ~+68 before soft capture arms.
+    """
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=68.0,
+        best=50.0,
+        current=105.0,
+        ctx={
+            "selectionMode": "explosion",
+            "explosionTier": "ELITE",
+            "maxProfitCapture": True,
+            "ictFlatThenVertical": True,
+            "vBaseFtvRunner": True,
+            "localBaseBasePremium": 63.4,
+            "localBaseBaseRelPct": 7.3,
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+            "liveVelocity3s": 0.2,
+            "premiumChart": {"momentum3Pct": -0.2},
+        },
+    )
+    # Rolling over with ~13pt giveback from +50 — would capture under 55pt floor.
+    reason = peak_capture_profit_lock_reason(
+        trade,
+        best=50.0,
+        pnl_pts=37.0,
+        max_profit=True,
+        live_velocity_3s=0.2,
+    )
+    assert reason is None
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_vbase_ftv_trails_after_hundred_pct_rollover(mock_s):
+    """After 100% prints (68→+68), confirmed rollover may peak-capture."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=68.0,
+        best=78.0,
+        current=120.0,
+        ctx={
+            "selectionMode": "explosion",
+            "explosionTier": "ELITE",
+            "maxProfitCapture": True,
+            "ictFlatThenVertical": True,
+            "vBaseFtvRunner": True,
+            "localBaseBasePremium": 63.4,
+            "localBaseBaseRelPct": 7.3,
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+            "liveVelocity3s": 0.2,
+            "premiumChart": {"momentum3Pct": -0.2},
+        },
+    )
+    # best +78 (>= 100% of 68), giveback 32pt ≈ 41% > after-hundred 32% → capture
+    reason = peak_capture_profit_lock_reason(
+        trade,
+        best=78.0,
+        pnl_pts=46.0,
+        max_profit=True,
+        live_velocity_3s=0.2,
+    )
+    assert reason == "explosion_peak_capture"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_vbase_ftv_multibagger_not_clipped_mid_extension(mock_s):
+    """68→140→220 path: after 100%, a shallow mid-peak dip must keep riding."""
+    mock_s.return_value = _settings()
+    trade = _trade(
+        entry=68.0,
+        best=110.0,
+        current=178.0,
+        ctx={
+            "selectionMode": "explosion",
+            "explosionTier": "ELITE",
+            "maxProfitCapture": True,
+            "ictFlatThenVertical": True,
+            "vBaseFtvRunner": True,
+            "localBaseBasePremium": 63.4,
+            "localBaseBaseRelPct": 7.3,
+            "psychologyLabel": "NEUTRAL",
+            "psychologyExitBias": "BALANCED",
+            "liveVelocity3s": 0.2,
+            "premiumChart": {"momentum3Pct": -0.2},
+        },
+    )
+    # best +110 (multi-bagger), giveback only 22pt (~20%) — under 32% trail → hold
+    reason = peak_capture_profit_lock_reason(
+        trade,
+        best=110.0,
+        pnl_pts=88.0,
+        max_profit=True,
+        live_velocity_3s=0.2,
+    )
+    assert reason is None

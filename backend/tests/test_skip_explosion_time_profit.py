@@ -126,6 +126,32 @@ def test_jul29_77600_holds_past_time_profit(mock_ep, mock_ch, mock_bh, mock_ict)
         trade, 252.12, "ELITE", 20, params=_params(),
     )
     assert reason != "explosion_time_profit", f"must hold toward TP, got {reason}"
+    assert reason == "explosion_early_green_breakeven"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+@patch("app.engines.bullish_hold.get_settings")
+@patch("app.engines.confidence_hold.get_settings")
+@patch("app.engines.explosion_profit.get_settings")
+def test_watch_first_lift_holds_past_generic_time_profit(
+    mock_ep, mock_ch, mock_bh, mock_ict,
+):
+    s = _settings()
+    mock_ep.return_value = s
+    mock_ch.return_value = s
+    mock_bh.return_value = s
+    mock_ict.return_value = s
+    trade = _jul29_77600(hold_seconds=800, pnl_pts=3.0, best=5.5)
+    trade.entryContext.update({
+        "explosionTier": "WATCH",
+        "topExplosionMaxLots": False,
+        "ictFirstLift": True,
+        "firstLiftCapture": True,
+        "momentType": "first_lift_local_base",
+    })
+    reason, _ = evaluate_explosion_exit(
+        trade, trade.entryPremium + 3.0, "WATCH", 20, params=_params(),
+    )
     assert reason is None
 
 

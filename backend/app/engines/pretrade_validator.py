@@ -565,11 +565,73 @@ def validate_candidate(
     Returns (passed, reason, metadata for entryContext.pretrade).
     """
     settings = get_settings()
+    policy_meta: dict[str, Any] = {}
+    if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+        from app.engines.moneyness import atm_itm_entry_allows
+        from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
+        from app.engines.trade_ranking import (
+            ftv_authorization_policy,
+            ftv_policy_settings,
+            rank_entry_candidate,
+            resolve_policy_day_mode,
+        )
+
+        exhausted = False
+        if str(getattr(candidate, "mode", "") or "").lower() == "explosion":
+            exhausted, _ = exhausted_ftv_reentry_blocked(
+                state,
+                symbol=str(getattr(candidate, "symbol", "") or ""),
+                side=getattr(candidate, "side", ""),
+                strike=float(getattr(candidate, "strike", 0) or 0),
+                premium=float(getattr(candidate, "premium", 0) or 0),
+                velocity_3s=float(
+                    getattr(
+                        getattr(candidate, "explosion_event", None),
+                        "velocity_3s",
+                        0,
+                    )
+                    or 0
+                ),
+            )
+        causal_ranking = rank_entry_candidate(
+            candidate,
+            exhausted_reentry=exhausted,
+        )
+        policy_snap = getattr(candidate, "snap", None)
+        money_ok = True
+        if policy_snap is not None:
+            money_ok, _, _ = atm_itm_entry_allows(
+                candidate.side,
+                candidate.strike,
+                policy_snap,
+            )
+        policy_decision = ftv_authorization_policy(
+            causal_ranking.get("evidence") or {},
+            causal_ranking,
+            snapshot_available=policy_snap is not None,
+            atm_itm_allowed=money_ok,
+            day_mode=resolve_policy_day_mode(state),
+            **ftv_policy_settings(settings),
+        )
+        policy_ok = policy_decision.allowed
+        policy_reason = policy_decision.reason
+        policy_meta = {
+            "ftvEliteTopPolicy": {
+                "enabled": True,
+                "passed": policy_ok,
+                "reason": policy_reason,
+                "authorizationMode": policy_decision.mode,
+                "maxCapitalPct": policy_decision.max_capital_pct,
+            },
+            "causalRanking": causal_ranking,
+        }
+        if not policy_ok:
+            return False, policy_reason, policy_meta
     if not settings.controlled_trading_enabled:
-        return True, "ok", {}
+        return True, "ok", policy_meta
 
     trades = session_trades if session_trades is not None else collect_session_trades(state)
-    meta: dict[str, Any] = {"controlledTrading": True}
+    meta: dict[str, Any] = {**policy_meta, "controlledTrading": True}
 
     # Composer advisory → hard gate (standDown / opposing bias).
     if getattr(settings, "composer_hard_gate_enabled", True):
@@ -775,6 +837,18 @@ def validate_candidate(
             if explosion_event is not None
             else None
         )
+        from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+        strict_base_ready = first_lift_entry_ready(
+            snap=snap,
+            event=explosion_event,
+            ict=trap_ict,
+            alert=(
+                getattr(candidate, "alert", None)
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            ),
+        )
         from app.engines.elite_never_block import elite_never_block_active
 
         must_take = elite_never_block_active(
@@ -805,14 +879,33 @@ def validate_candidate(
             squeeze_early_base=squeeze_early_base_active(explosion_event, snap),
             bullish_local_base=bool(bullish_base.get("active")),
         )
-        if window_blocked:
+        if window_blocked and not strict_base_ready:
             return False, window_reason, meta
         trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
             candidate, snap, state=state, ict=trap_ict,
         )
         meta.update(trap_meta)
         if trap_block or trap_meta.get("action") == "block":
-            return False, trap_reason, meta
+            from app.engines.building_ftv_gates import (
+                building_rip_bypasses_fake_trap,
+                top_must_take_bypasses_fake_trap,
+            )
+            from app.engines.elite_never_block import elite_never_block_active
+
+            must_take = elite_never_block_active(
+                event=explosion_event,
+                candidate=candidate,
+                alert=getattr(candidate, "alert", None),
+                snap=snap,
+            )
+            if not building_rip_bypasses_fake_trap(candidate=candidate) and not (
+                top_must_take_bypasses_fake_trap(
+                    must_take=must_take,
+                    candidate=candidate,
+                    snap=snap,
+                )
+            ):
+                return False, trap_reason, meta
 
     if getattr(candidate, "mode", "") == "explosion" and explosion_event is not None:
         from app.engines.morning_premium_capture import premium_led_explosion_bypass
@@ -850,7 +943,18 @@ def validate_candidate(
     if not all_in and hc_blocked:
         return False, hc_reason, meta
 
-    from app.engines.moneyness import moneyness_allows
+    from app.engines.moneyness import atm_itm_entry_allows, moneyness_allows
+
+    # Hard execution policy: ELITE/must-take paths may bypass soft validators,
+    # but they can never bypass ATM/ITM-only selection.
+    hard_mn_ok, hard_mn_reason, hard_mn_meta = atm_itm_entry_allows(
+        candidate.side,
+        candidate.strike,
+        snap,
+    )
+    meta.update(hard_mn_meta)
+    if not hard_mn_ok:
+        return False, hard_mn_reason, meta
 
     if not all_in:
         mn_ok, mn_reason, mn_meta = moneyness_allows(
@@ -1003,6 +1107,33 @@ def validate_candidate(
     )
     if local_ichi_bypass:
         meta["localBaseIchimokuBypass"] = True
+    armed_base_chart_bypass = False
+    if (
+        getattr(candidate, "mode", "") == "explosion"
+        and getattr(candidate, "explosion_event", None) is not None
+    ):
+        from app.engines.ict_breakout_monitor import first_lift_entry_readiness
+
+        armed_ready, armed_reason = first_lift_entry_readiness(
+            snap=snap,
+            event=candidate.explosion_event,
+            alert=(
+                candidate.alert
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            ),
+        )
+        armed_base_chart_bypass = bool(
+            armed_ready
+            and armed_reason in (
+                "armed_base_option_led_ready",
+                "elite_base_ready_s_preauthorized",
+                "building_rip_bullish_ready",
+                "building_local_base_lift_ready",
+            )
+        )
+        if armed_base_chart_bypass:
+            meta["armedBaseChartBypass"] = True
     blocked_chart, chart_reason = chart_blocks_side(
         candidate.side,
         snap.spotChart,
@@ -1010,6 +1141,7 @@ def validate_candidate(
         breadth_aligned_bypass=breadth_bypass,
         premium_led_bypass=premium_bypass or local_ichi_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
+        strict_first_lift_bypass=armed_base_chart_bypass,
     )
     if blocked_chart:
         meta["chartDirection"] = snap.spotChart.direction if snap.spotChart else "NEUTRAL"
@@ -1060,11 +1192,17 @@ def filter_candidates_pretrade(
     viable: list[Any] = []
     for c in candidates:
         ok, reason, meta = validate_candidate(c, state, session_trades, snapshots)
+        prior_meta = dict(getattr(c, "pretrade_meta", None) or {})
         if ok:
-            c.pretrade_meta = meta
+            c.pretrade_meta = {**prior_meta, **meta}
             viable.append(c)
         else:
-            c.pretrade_meta = {"pretradePassed": False, "pretradeBlock": reason, **meta}
+            c.pretrade_meta = {
+                **prior_meta,
+                **meta,
+                "pretradePassed": False,
+                "pretradeBlock": reason,
+            }
     return viable
 
 

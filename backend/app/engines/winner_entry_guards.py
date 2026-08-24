@@ -17,10 +17,17 @@ def premium_fading_blocks_entry(
     premium_momentum_5s: float = 0.0,
     premium_direction: str = "",
     explosion_event: Any = None,
+    confirmed_ftv_bypass: bool = False,
 ) -> tuple[bool, str]:
     """
     Block entries when option premium is fading at execution.
     High explosion score does NOT bypass — score measures radar, not live fill timing.
+
+    Exception: a CONFIRMED near-base FTV first-lift (``confirmed_ftv_bypass``) may fill
+    through a *shallow* dip — that dip is the base retest right before the vertical, so
+    blocking it means chasing the move after it lifts instead of taking it at the base. The
+    bypass is bounded: only shallow dips (shallower than the configured floor) pass; a deeper
+    collapse still blocks, and only ELITE/EXPLODING events qualify.
     """
     settings = get_settings()
     if not settings.execution_chart_premium_check_enabled:
@@ -35,6 +42,19 @@ def premium_fading_blocks_entry(
     # Only extreme session rips may enter on briefly fading premium
     if tier == "ELITE" and daily_move >= settings.all_day_explosion_extreme_move_min_pct:
         return False, "ok"
+
+    # Confirmed near-base FTV first-lift: let a SHALLOW base-retest dip fill so we take it AT
+    # the base. A deeper collapse (below the floor) is a real fade and still blocks.
+    if (
+        confirmed_ftv_bypass
+        and bool(getattr(settings, "ftv_premium_fade_fill_enabled", True))
+        and tier in ("ELITE", "EXPLODING")
+    ):
+        shallow_floor = float(
+            getattr(settings, "ftv_premium_fade_fill_max_drawdown_pct", -0.6) or -0.6
+        )
+        if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
+            return False, "ftv_shallow_fade_ok"
 
     min_mom = settings.execution_chart_min_premium_momentum_pct
     if premium_momentum_5s < min_mom and premium_momentum_3s < 0:
@@ -89,6 +109,17 @@ def chop_weak_explosion_blocks_entry(
         ict_flat = bool(ict.flat_then_vertical and ict.active)
         ict_vol = ict_vol or bool(ict.volume_awakening)
         move = max(move, float(ict.session_move_pct or 0))
+
+    # A range-bound index is exactly where a coiled option base can launch. Admit
+    # only the strict first-lift proof; generic low-move explosions remain blocked.
+    from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+    if first_lift_entry_ready(
+        snap=snap,
+        event=event,
+        alert=alert,
+    ):
+        return False, "first_lift_local_base_confirmed"
 
     chop_min = float(
         getattr(settings, "explosion_chop_min_session_move_pct", 28.0) or 28.0

@@ -10,6 +10,8 @@ from app.engines.explosion_detector import (
     _session_peak,
     _tier_sticky,
 )
+from app.engines.realtime_engine import _atm_strike
+from app.engines.snapshot_fast import overlay_snapshot_spot_charts
 from app.models.schemas import HeatmapStrike, Side, SpotChart, SymbolSnapshot
 
 
@@ -94,3 +96,22 @@ def test_refresh_snapshot_explosion_alerts_updates_list(
     top = snap.explosionAlerts[0]
     assert top["side"] == "PUT"
     assert top["strike"] == 24100.0
+    assert snap.topExplosion == top
+
+
+def test_nifty_atm_uses_listed_50_point_step():
+    assert _atm_strike(24574.0, "NIFTY") == 24550.0
+    assert _atm_strike(24576.0, "NIFTY") == 24600.0
+    assert _atm_strike(80540.0, "SENSEX") == 80500.0
+
+
+@patch("app.engines.snapshot_fast.get_index_spot", return_value=24130.0)
+def test_ws_spot_overlay_refreshes_atm_strike(_live_spot):
+    snap = _snap(24100.0, 85.0)
+    snap.atmStrike = 24100.0
+
+    refreshed = overlay_snapshot_spot_charts({"NIFTY": snap})["NIFTY"]
+
+    assert refreshed.spot == 24130.0
+    assert refreshed.atmStrike == 24150.0
+    assert snap.atmStrike == 24100.0

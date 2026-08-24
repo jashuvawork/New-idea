@@ -11,14 +11,10 @@ from app.engines.auto_trader import (
     reset_session,
     set_capital,
 )
-from app.engines.risk_engine import RiskEngine
-from app.models.schemas import CapitalConfig, RiskProfile
+from app.models.schemas import CapitalConfig
 from app.services import trade_store
 
 router = APIRouter(prefix="/api/auto-trader", tags=["auto-trader"])
-
-_risk = RiskEngine()
-
 
 @router.get("/status")
 async def auto_trader_status():
@@ -72,7 +68,10 @@ async def reset_milestone_batch(reason: str = "manual_reset"):
 @router.post("/reset")
 async def reset_paper_session():
     reset_session()
-    return {"status": "reset", "message": "Paper session and calibration blocks cleared"}
+    return {
+        "status": "reset",
+        "message": "Calibration blocks cleared; open trades preserved",
+    }
 
 
 @router.post("/purge-logs")
@@ -82,7 +81,7 @@ async def purge_trade_logs():
     from app.engines.performance_milestone import compute_milestone_stats
 
     purge = trade_store.purge_all_trade_data()
-    reset_session()
+    reset_session(preserve_open_trades=False)
     reset_session_calibration()
     return {
         "status": "purged",

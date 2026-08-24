@@ -1,8 +1,12 @@
 """AI/ML strategy and learning API."""
 
+import asyncio
+from datetime import datetime
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from app.engines.ai_learning import get_ai_learning
 from app.engines.composer_market_monitor import (
@@ -16,6 +20,7 @@ from app.engines.strategy_orchestrator import ALL_STRATEGIES
 from app.services.cursor_composer_client import get_composer_client
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
+IST = ZoneInfo("Asia/Kolkata")
 
 
 @router.get("/strategies")
@@ -47,6 +52,60 @@ async def ml_status():
 @router.get("/learning/report")
 async def learning_report():
     return get_ai_learning().get_learning_report()
+
+
+@router.get("/eod-learning")
+async def eod_learning():
+    """Accumulated EOD FTV/V knowledge profile (per symbol:side:tier) + learned dates."""
+    from app.engines.eod_ftv_learning import load_learned_params
+
+    return load_learned_params()
+
+
+@router.post("/eod-learning/run/{date}")
+async def eod_learning_run(date: str):
+    """Force-learn a specific date's archive (e.g. backfill)."""
+    import asyncio
+
+    from app.engines.eod_ftv_learning import run_eod_learning_cycle
+
+    return await asyncio.to_thread(run_eod_learning_cycle, date, force=True)
+
+
+@router.get("/eod-trade-report/{date}")
+async def eod_trade_report(date: str):
+    """Would-have-traded report: replay the day's tape with re-entries (hindsight sim)."""
+    import asyncio
+
+    from app.engines.eod_trade_report import generate_eod_trade_report
+
+    return await asyncio.to_thread(generate_eod_trade_report, date)
+
+
+@router.get("/eod-local-base-replay/{date}")
+async def eod_local_base_replay(date: str):
+    """Replay EOD tape with production local-base gates (FTV/V/ELITE/EXPLODING + first-lift)."""
+    import asyncio
+
+    from app.engines.eod_local_base_replay import generate_eod_local_base_replay
+
+    return await asyncio.to_thread(generate_eod_local_base_replay, date)
+
+
+@router.get("/eod-local-base-replay/week/{start_date}")
+async def eod_local_base_replay_week(start_date: str, days: int = 5):
+    """Roll up local-base replays across a validation week."""
+    import asyncio
+
+    from app.engines.eod_local_base_replay import generate_eod_local_base_replay_week
+
+    if not 1 <= days <= 7:
+        raise HTTPException(status_code=400, detail="days must be in [1, 7]")
+    return await asyncio.to_thread(
+        generate_eod_local_base_replay_week,
+        start_date,
+        days=days,
+    )
 
 
 @router.get("/composer/status")
@@ -114,6 +173,220 @@ async def missed_trades_explainer():
 
     multi = await get_multi_snapshot_fast()
     return build_missed_trade_report(multi.snapshots, get_state())
+
+
+@router.get("/radar-archives")
+async def radar_archives(limit: int = 30):
+    """List compressed daily top-radar archives available for future review."""
+    from app.services.radar_archive import list_archives
+
+    return {"archives": list_archives(limit=min(max(limit, 1), 365))}
+
+
+@router.get("/radar-archives/{date}")
+async def download_radar_archive(date: str):
+    """Download one YYYY-MM-DD top-radar ZIP archive."""
+    from app.services.radar_archive import archive_path
+
+    try:
+        path = archive_path(date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Radar archive not found")
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=path.name,
+    )
+
+
+@router.get("/radar-health")
+async def radar_health():
+    """Detector sampling, archive, replay, funnel, and backup health."""
+    from app.services.radar_health import health_status
+
+    return health_status()
+
+
+@router.get("/radar-pipeline/{date}")
+async def radar_pipeline(date: str):
+    """Durable startup, cache, option-subscription, and premium-sampling timeline."""
+    from app.services.radar_learning import pipeline_history_summary
+
+    try:
+        return await asyncio.to_thread(pipeline_history_summary, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/radar-scorecard/{date}")
+async def radar_scorecard(date: str):
+    """Daily precision/recall, lead-time, missed-winner, and outcome scorecard."""
+    from app.services.radar_learning import analyze_hindsight
+
+    try:
+        return await asyncio.to_thread(analyze_hindsight, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/radar-funnel/{date}")
+async def radar_funnel(date: str):
+    """Detection → gate blocker → entry → outcome funnel for one session."""
+    from app.services.radar_learning import build_funnel_report
+
+    try:
+        return await asyncio.to_thread(build_funnel_report, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/local-base-audit/{date}")
+async def local_base_audit(date: str):
+    """5-layer local-base proof scorecard for one session (detection → MFE capture)."""
+    from app.engines.local_base_week_audit import build_local_base_audit
+
+    try:
+        return await asyncio.to_thread(build_local_base_audit, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/local-base-audit/week/{start_date}")
+async def local_base_audit_week(start_date: str, days: int = 5):
+    """Roll up local-base audit scores across a validation week (default Mon–Fri)."""
+    from app.engines.local_base_week_audit import build_local_base_audit_week
+
+    if not 1 <= days <= 7:
+        raise HTTPException(status_code=400, detail="days must be in [1, 7]")
+    try:
+        return await asyncio.to_thread(
+            build_local_base_audit_week,
+            start_date,
+            days=days,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+
+@router.get("/peak-prediction/preview")
+async def peak_prediction_preview(
+    symbol: str,
+    side: str,
+    strike: float,
+    entry_premium: float,
+    tier: str = "BUILDING",
+    base_premium: float = 0.0,
+    base_rel_pct: float = 0.0,
+):
+    """Preview peak LTP / % forecast for a strike (NIFTY + SENSEX)."""
+    from app.engines.peak_prediction import predict_peak
+    from app.routers.market import get_multi_snapshot
+
+    sym = str(symbol or "").upper()
+    if sym not in ("NIFTY", "SENSEX"):
+        raise HTTPException(status_code=400, detail="symbol must be NIFTY or SENSEX")
+    multi = await get_multi_snapshot()
+    snap = (multi.snapshots or {}).get(sym)
+    if snap is None:
+        raise HTTPException(status_code=404, detail=f"No snapshot for {sym}")
+
+    return predict_peak(
+        symbol=sym,
+        side=side,
+        strike=strike,
+        entry_premium=entry_premium,
+        snap=snap,
+        tier=tier,
+        base_premium=base_premium,
+        base_rel_pct=base_rel_pct,
+    )
+
+
+@router.post("/radar-replay/{date}")
+async def radar_replay(
+    date: str,
+    flat_max_range_pct: float | None = None,
+    vertical_min_move_pct: float | None = None,
+    lookahead_seconds: int | None = None,
+):
+    """Replay archived premium tape with optional hindsight threshold overrides."""
+    from app.services.radar_learning import analyze_hindsight
+
+    if flat_max_range_pct is not None and not 0 < flat_max_range_pct <= 50:
+        raise HTTPException(status_code=400, detail="flat_max_range_pct must be in (0, 50]")
+    if vertical_min_move_pct is not None and not 1 <= vertical_min_move_pct <= 1000:
+        raise HTTPException(status_code=400, detail="vertical_min_move_pct must be in [1, 1000]")
+    if lookahead_seconds is not None and not 60 <= lookahead_seconds <= 14400:
+        raise HTTPException(status_code=400, detail="lookahead_seconds must be in [60, 14400]")
+    try:
+        return await asyncio.to_thread(
+            analyze_hindsight,
+            date,
+            flat_max_range_pct=flat_max_range_pct,
+            vertical_min_move_pct=vertical_min_move_pct,
+            lookahead_seconds=lookahead_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/radar-finalize/{date}")
+async def finalize_radar_review(date: str):
+    """Build scorecard/funnel artifacts and run configured durable backup."""
+    from app.config import get_settings
+    from app.services.radar_archive import archive_path
+    from app.services.radar_learning import (
+        RadarOperationBusyError,
+        finalize_daily_review,
+    )
+
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        now = datetime.now(IST)
+        if target_date > now.date():
+            raise HTTPException(status_code=400, detail="Cannot finalize a future radar session")
+        if target_date == now.date():
+            settings = get_settings()
+            finalize_at = (
+                int(settings.radar_archive_finalize_hour),
+                int(settings.radar_archive_finalize_minute),
+            )
+            if (now.hour, now.minute) < finalize_at:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Current radar session is still active; finalize after "
+                        f"{finalize_at[0]:02d}:{finalize_at[1]:02d} IST"
+                    ),
+                )
+        if not archive_path(date).exists():
+            raise HTTPException(status_code=404, detail="Radar archive not found")
+        return await asyncio.to_thread(finalize_daily_review, date)
+    except RadarOperationBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/radar-detector-replay/{date}")
+async def radar_detector_replay(date: str):
+    """Replay premium tape through an isolated production-detector subprocess."""
+    from app.services.radar_learning import (
+        RadarOperationBusyError,
+        run_detector_replay_isolated,
+    )
+
+    try:
+        return await asyncio.to_thread(run_detector_replay_isolated, date)
+    except RadarOperationBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/snapshot-analysis")

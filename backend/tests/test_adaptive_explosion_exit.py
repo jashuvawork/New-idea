@@ -55,6 +55,7 @@ def test_wider_adaptive_stop_delays_explosion_stop_loss():
         settings.explosion_trail_arm_points = 4.0
         settings.explosion_initial_stop_points = 4.0
         settings.explosion_no_progress_seconds = 90
+        settings.explosion_per_trade_max_loss_inr = 0.0
         mock_settings.return_value = settings
 
         default_reason, _ = evaluate_explosion_exit(trade, 95.5, "EXPLODING", 65)
@@ -141,6 +142,7 @@ def test_adaptive_stop_fires_at_plan_stop_even_while_expanding(mock_settings):
         s.explosion_no_progress_seconds = 90
         s.explosion_no_progress_aligned_seconds = 420
         s.explosion_no_progress_skip_when_aligned = True
+        s.explosion_per_trade_max_loss_inr = 0.0
         exp_settings.return_value = s
 
         reason, _ = evaluate_adaptive_explosion_exit(
@@ -180,6 +182,7 @@ def test_adaptive_stop_fires_when_momentum_fades(mock_settings):
         s.explosion_trail_arm_points = 4.0
         s.explosion_initial_stop_points = 4.0
         s.explosion_no_progress_seconds = 90
+        s.explosion_per_trade_max_loss_inr = 0.0
         exp_settings.return_value = s
 
         reason, pnl = evaluate_adaptive_explosion_exit(

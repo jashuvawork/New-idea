@@ -5,7 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.engines.expiry_day_guards import (
+    alert_is_strict_rank_one_launch,
     alert_is_expiry_elite_top,
     check_expiry_candidate,
     check_expiry_entry_allowed,
@@ -49,6 +52,15 @@ def _settings(**overrides):
     s.controlled_trading_enabled = True
     s.composer_hard_gate_enabled = True
     s.composer_bias_gate_enabled = True
+    s.ict_armed_base_min_samples = 6
+    s.ict_armed_base_min_span_seconds = 15.0
+    s.ict_armed_base_max_range_pct = 5.0
+    s.ict_elite_base_ready_min_move_pct = 2.0
+    s.ict_elite_base_ready_max_move_pct = 5.0
+    s.ict_armed_base_launch_min_score = 45.0
+    s.ict_armed_base_launch_min_tqs = 50.0
+    s.moneyness_atm_tolerance_points = 50.0
+    s.nifty_strike_step = 50.0
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -64,7 +76,7 @@ def _snap(*, expiry: str = "2026-07-21", direction: str = "BEARISH") -> SymbolSn
         spot=24170.0,
         atmStrike=24200.0,
         regime=Regime.CHOP,
-        tradeQualityScore=48,
+        tradeQualityScore=55.6,
         breadth=Breadth(bias="BEARISH", score=40, aligned=True),
         spotChart=SpotChart(
             direction=direction,
@@ -84,6 +96,17 @@ def _snap(*, expiry: str = "2026-07-21", direction: str = "BEARISH") -> SymbolSn
                 "dailyMovePct": 35.0,
                 "peakMovePct": 42.0,
                 "tradeable": True,
+                "velocity3s": 3.69,
+                "velocity9s": 4.13,
+                "volumeSurge": 2.5,
+                "ictBaseArmed": True,
+                "ictArmedBaseLaunch": True,
+                "ictArmedBaseSamples": 6,
+                "ictArmedBaseSpanSeconds": 312.6,
+                "ictArmedBaseRangePct": 4.85,
+                "ictBaseRelativeMovePct": 24.4,
+                "ictFlatThenVertical": True,
+                "ictVolumeAwakening": True,
             }
         ],
     )
@@ -255,8 +278,8 @@ def test_declining_halt_lifts_when_elite_top_on_radar(mock_p, mock_s):
                             ok, reason, meta = check_expiry_entry_allowed(state, snaps)
     assert ok is True
     assert reason == "ok"
-    assert meta.get("expiryWorstDayEliteTopBypass") is True
-    assert meta.get("expiryWorstDayEliteTopOnly") is True
+    assert meta.get("expiryWorstDayStrictRankOneBypass") is True
+    assert meta.get("expiryWorstDayStrictRankOneOnly") is True
 
 
 @patch("app.engines.expiry_day_guards.get_settings")
@@ -296,6 +319,62 @@ def test_declining_halt_stays_when_only_chase_alerts(mock_p, mock_s):
     assert ok is False
     assert reason == "expiry_worst_day_declining_halt"
     assert snapshots_have_expiry_elite_top({"NIFTY": snap}) is False
+
+
+@pytest.mark.parametrize("side", ["CALL", "PUT"])
+@patch("app.engines.expiry_day_guards.get_settings")
+def test_aug18_strict_rank_one_launch_is_symmetric_and_itm(mock_s, side):
+    mock_s.return_value = _settings()
+    snap = _snap(direction="BULLISH" if side == "CALL" else "BEARISH")
+    snap.spot = 24201.7
+    snap.atmStrike = 24200.0
+    alert = {
+        **snap.explosionAlerts[0],
+        "side": side,
+        "strike": 24050.0 if side == "CALL" else 24350.0,
+        "tier": "EXPLODING",
+        "explosionScore": 100.0,
+        "ictBaseRelativeMovePct": 24.4,
+    }
+
+    assert alert_is_strict_rank_one_launch(alert, snap) is True
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"explosionScore": 44.9},
+        {"velocity3s": 0.0},
+        {"velocity9s": 1.49},
+        {"ictVolumeAwakening": False, "volumeSurge": 1.0},
+        {"ictBaseArmed": False},
+        {"ictArmedBaseSamples": 5},
+        {"ictArmedBaseRangePct": 5.1},
+        {"fadedRip": True},
+        {"timingAssessment": {"assessment": "FAILED_LAUNCH", "action": "block"}},
+        {"tier": "BUILDING"},
+    ],
+)
+@patch("app.engines.expiry_day_guards.get_settings")
+def test_strict_rank_one_halt_bypass_rejects_weak_flat_or_rank_two(mock_s, mutation):
+    mock_s.return_value = _settings()
+    snap = _snap()
+    alert = {**snap.explosionAlerts[0], **mutation}
+
+    assert alert_is_strict_rank_one_launch(alert, snap) is False
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+def test_strict_rank_one_halt_bypass_rejects_otm(mock_s):
+    mock_s.return_value = _settings()
+    snap = _snap()
+    alert = {
+        **snap.explosionAlerts[0],
+        "side": "PUT",
+        "strike": 24050.0,
+    }
+
+    assert alert_is_strict_rank_one_launch(alert, snap) is False
 
 
 @patch("app.engines.expiry_day_guards.get_settings")
@@ -338,9 +417,9 @@ def test_candidate_blocks_scalp_allows_elite_top(mock_p, mock_s):
                             scalp, AutoTraderState(), {"NIFTY": snap},
                         )
     assert ok_e is True
-    assert meta_e.get("expiryEliteTop") is True
+    assert meta_e.get("expiryStrictRankOneLaunch") is True
     assert ok_s is False
-    assert reason_s == "expiry_worst_day_elite_top_only"
+    assert reason_s == "expiry_worst_day_strict_rank_one_only"
     assert is_expiry_elite_top_candidate(elite) is True
 
 
@@ -352,6 +431,9 @@ def test_validate_candidate_composer_bypass_real_path(mock_p, mock_exp, mock_bri
     """Real validate_candidate: standDown must not block elite top; still blocks scalp."""
     cfg = _settings()
     cfg.dual_mode_enabled = False
+    # This regression isolates the legacy composer bypass; the hard S-only policy
+    # is covered separately with a fully causal armed-launch candidate.
+    cfg.ftv_elite_top_only_enabled = False
     mock_s.return_value = cfg
     mock_exp.return_value = cfg
     mock_p.return_value = cfg
@@ -392,7 +474,7 @@ def test_validate_candidate_composer_bypass_real_path(mock_p, mock_exp, mock_bri
                         scalp, AutoTraderState(), session_trades=[],
                         snapshots={"NIFTY": snap},
                     )
-    assert meta.get("composerStandDownBypass") == "elite_top"
+    assert meta.get("composerStandDownBypass") in ("elite_top", "elite_never_block")
     assert reason == "interval_sentinel"  # passed composer, hit next gate
     assert ok_s is False
     assert reason_s == "composer_stand_down"

@@ -281,7 +281,16 @@ def is_top_explosion_max_lots_entry(
             (side_v == "CALL" and breadth == "BULLISH")
             or (side_v == "PUT" and breadth == "BEARISH")
         )
-        if not (chart_ok or breadth_ok):
+        index_ok = False
+        if bool(getattr(settings, "top_explosion_force_max_allow_index_helpers", True)):
+            try:
+                from app.engines.index_tick_helpers import evaluate_index_tick_helpers
+
+                idx = evaluate_index_tick_helpers(snap=snap, side=side_v)
+                index_ok = bool(idx.confirming or idx.tick_spike or idx.tick_align)
+            except Exception:
+                index_ok = False
+        if not (chart_ok or breadth_ok or index_ok):
             return False
     return True
 

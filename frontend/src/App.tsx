@@ -45,6 +45,8 @@ import { PremarketPanel } from './components/PremarketPanel';
 import { SwingTrading } from './components/SwingTrading';
 import { PerformanceMilestone } from './components/PerformanceMilestone';
 import { WeeklyDashboardPanel } from './components/WeeklyDashboardPanel';
+import { RadarIntelligencePanel } from './components/RadarIntelligencePanel';
+import { UpstoxTradeManagerPanel } from './components/UpstoxTradeManagerPanel';
 import { deriveMarketSession } from './lib/marketSession';
 import type { MultiSnapshot, SymbolSnapshot } from './types';
 
@@ -245,10 +247,20 @@ export default function App() {
           />
         ) : null}
 
+        {auto ? (
+          <section aria-label="Auto trader overview" className="max-w-5xl">
+            <AutoTradingPanel auto={auto} />
+          </section>
+        ) : null}
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-5xl">
           <PerformanceMilestone stats={milestone} />
           <WeeklyDashboardPanel data={weeklyDashboard} />
         </div>
+
+        <UpstoxTradeManagerPanel deployment={deployment} readiness={readiness} />
+
+        <RadarIntelligencePanel />
 
         {/* Fixed-height stats slot — never collapse when report briefly missing */}
         <div className="layout-stats-slot flex flex-wrap items-center gap-2">
@@ -302,6 +314,28 @@ export default function App() {
           />
         ) : null}
 
+        {data ? (
+          <DashboardSection
+            title="News Intelligence"
+            subtitle="Verified India and global cues for the current and next session"
+          >
+            <div className="col-span-12">
+              <NewsPanel news={data.news ?? []} />
+            </div>
+          </DashboardSection>
+        ) : null}
+
+        {data && auto ? (
+          <DashboardSection
+            title="Historical Timing"
+            subtitle="Upstox-backed flat-to-vertical probabilities and recurring session windows"
+          >
+            <div className="col-span-12">
+              <FutureSignalsPanel snapshots={data.snapshots} auto={auto} />
+            </div>
+          </DashboardSection>
+        ) : null}
+
         {canShowDashboard && snap && auto && data ? (
           <div className="space-y-6">
             <DashboardSection title="Execution" subtitle="Live context for the active symbol">
@@ -311,12 +345,9 @@ export default function App() {
               <div className="col-span-12 lg:col-span-3"><ExplosionRadar snap={snap} /></div>
             </DashboardSection>
 
-            <DashboardSection title="Signals & Trades" subtitle="Day mode, router, auto-trader, heatmap, swing lane">
+            <DashboardSection title="Signals & Trades" subtitle="Day mode, router, heatmap, swing lane">
               <div className="col-span-12">
                 <TomorrowPlaybookPanel auto={auto} snapshots={data.snapshots} deployment={deployment} />
-              </div>
-              <div className="col-span-12">
-                <FutureSignalsPanel snapshots={data.snapshots} auto={auto} />
               </div>
               <div className="col-span-12">
                 <StrikeWatchlistPanel snapshots={data.snapshots} />
@@ -345,7 +376,6 @@ export default function App() {
                 />
               </div>
               <div className="col-span-12 lg:col-span-3"><StrategyRouter snap={snap} /></div>
-              <div className="col-span-12 lg:col-span-3"><AutoTradingPanel auto={auto} /></div>
               <div className="col-span-12 lg:col-span-3"><MarketHeatmap symbol={activeSymbol} embedded={snap.constituentHeatmap} /></div>
               <div className="col-span-12 lg:col-span-3"><SwingTrading snap={snap} auto={auto} /></div>
             </DashboardSection>
@@ -363,7 +393,6 @@ export default function App() {
               <div className="col-span-12 lg:col-span-3"><StrategyMatrix snap={snap} /></div>
               <div className="col-span-12 md:col-span-6 xl:col-span-2"><TradeJournal data={data} history={tradeHistory} tradeLog={tradeLog} /></div>
               <div className="col-span-12 md:col-span-6 xl:col-span-2"><PsychologyPanel snap={snap} /></div>
-              <div className="col-span-12 md:col-span-6 xl:col-span-1"><NewsPanel news={data.news ?? []} /></div>
               <div className="col-span-12 md:col-span-6 xl:col-span-1"><LiveTradingGate status={deployment} readiness={readiness} /></div>
               <div className="col-span-12 md:col-span-6 xl:col-span-1"><MorningChecklist deployment={deployment} dataReady={data.dataReady} /></div>
             </DashboardSection>

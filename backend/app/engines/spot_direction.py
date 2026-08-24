@@ -508,6 +508,7 @@ def live_direction_blocks_side(
     breadth_aligned_bypass: bool = False,
     premium_led_bypass: bool = False,
     expiry_explosion_bypass: bool = False,
+    strict_first_lift_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str]:
     """
@@ -523,8 +524,17 @@ def live_direction_blocks_side(
     side_val = side.value if isinstance(side, Side) else str(side).upper()
     bypass = expiry_explosion_bypass
     if not scalp_mode:
-        bypass = bypass or breadth_aligned_bypass or premium_led_bypass
-    if bypass and _counter_trend_bypass_blocked(side_val, chart):
+        bypass = (
+            bypass
+            or breadth_aligned_bypass
+            or premium_led_bypass
+            or strict_first_lift_bypass
+        )
+    if (
+        bypass
+        and _counter_trend_bypass_blocked(side_val, chart)
+        and not strict_first_lift_bypass
+    ):
         bypass = False
 
     if side_val == "CALL" and chart.direction == "BEARISH":
@@ -547,6 +557,7 @@ def chart_blocks_side(
     breadth_aligned_bypass: bool = False,
     premium_led_bypass: bool = False,
     expiry_explosion_bypass: bool = False,
+    strict_first_lift_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str]:
     settings = get_settings()
@@ -564,6 +575,7 @@ def chart_blocks_side(
         breadth_aligned_bypass=breadth_aligned_bypass,
         premium_led_bypass=premium_led_bypass,
         expiry_explosion_bypass=expiry_explosion_bypass,
+        strict_first_lift_bypass=strict_first_lift_bypass,
         scalp_mode=scalp_mode,
     )
     if live_blocked:
@@ -571,7 +583,10 @@ def chart_blocks_side(
 
     # Hard direction conflict — breadth-aligned / premium-led / expiry explosion bypass.
     # Aug6: counter-trend bypass block refuses to waive PUT+BULLISH / CALL+BEARISH.
-    counter_block = _counter_trend_bypass_blocked(side_val, chart)
+    counter_block = (
+        _counter_trend_bypass_blocked(side_val, chart)
+        and not strict_first_lift_bypass
+    )
     if side_val == "CALL" and chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
         if (
             not counter_block
@@ -739,6 +754,7 @@ def premium_blocks_entry(
     trade_score: float = 0.0,
     *,
     explosion_event: Any = None,
+    confirmed_ftv_bypass: bool = False,
 ) -> tuple[bool, str]:
     """Block when option premium is fading at execution — bad fill timing."""
     settings = get_settings()
@@ -752,6 +768,7 @@ def premium_blocks_entry(
         premium_momentum_5s=float(premium.momentum5Pct or 0),
         premium_direction=str(premium.direction or ""),
         explosion_event=explosion_event,
+        confirmed_ftv_bypass=confirmed_ftv_bypass,
     )
 
 

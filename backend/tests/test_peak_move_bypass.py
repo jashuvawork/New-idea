@@ -1,5 +1,6 @@
 """Peak-move explosion bypass — faded vertical rips still qualify."""
 
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from app.engines.explosion_detector import (
@@ -82,6 +83,9 @@ def test_scan_chain_boosts_score_after_vertical_fade(mock_settings, _open):
     # ATM put (scan skips OTM when explosion_scan_atm_itm_only=True).
     chain = _chain(24100.0, 80.0)
     scan_chain_explosions("NIFTY", chain, spot=24070.0, atm=24100.0)
+    hist = next(iter(_history["NIFTY"].values()))
+    ts, premium, volume = hist[-1]
+    hist[-1] = (ts - timedelta(seconds=3), premium, volume)
     chain[0]["put_options"]["ltp"] = 133.0
     events = scan_chain_explosions("NIFTY", chain, spot=24070.0, atm=24100.0)
     puts = [e for e in events if e.side == Side.PUT and e.strike == 24100.0]

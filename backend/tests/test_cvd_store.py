@@ -1,8 +1,14 @@
 """Cumulative Volume Delta accumulator + option-CVD confirmation."""
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from app.services.cvd_store import clear, get_cvd, record_cvd_tick
+from app.services.cvd_store import (
+    clear,
+    get_cvd,
+    get_cvd_acceleration,
+    record_cvd_tick,
+)
 
 
 def setup_function():
@@ -53,6 +59,62 @@ def test_get_cvd_none_when_unseen():
     assert get_cvd("NSE_FO|NOPE") is None
 
 
+def test_cvd_acceleration_compares_consecutive_signed_volume_rates():
+    key = "NSE_FO|ACCEL"
+    record_cvd_tick(key, 100.0, 1)  # prime
+    with patch(
+        "app.services.cvd_store.time.monotonic",
+        side_effect=[70.0, 75.0, 88.0, 92.0, 95.0],
+    ):
+        record_cvd_tick(key, 101.0, 5)
+        record_cvd_tick(key, 102.0, 5)
+        record_cvd_tick(key, 103.0, 30)
+        record_cvd_tick(key, 104.0, 40)
+        read = get_cvd_acceleration(key, slice_seconds=15.0)
+
+    assert read is not None
+    assert read.previous == 10.0
+    assert read.current == 70.0
+    assert read.acceleration == 4.0
+    assert read.direction == "BUYING_ACCELERATING"
+    assert read.previous_samples == 2
+    assert read.current_samples == 2
+
+
+def test_cvd_acceleration_rejects_sparse_ticks():
+    key = "NSE_FO|SPARSE"
+    record_cvd_tick(key, 100.0, 1)
+    with patch(
+        "app.services.cvd_store.time.monotonic",
+        side_effect=[75.0, 92.0, 95.0],
+    ):
+        record_cvd_tick(key, 101.0, 5)
+        record_cvd_tick(key, 102.0, 100)
+        read = get_cvd_acceleration(key, slice_seconds=15.0)
+
+    assert read is not None
+    assert read.acceleration > 0
+    assert read.direction == "STABLE"
+
+
+def test_cvd_acceleration_identifies_accelerating_selling():
+    key = "NSE_FO|SELL_ACCEL"
+    record_cvd_tick(key, 100.0, 1)
+    with patch(
+        "app.services.cvd_store.time.monotonic",
+        side_effect=[70.0, 75.0, 88.0, 92.0, 95.0],
+    ):
+        record_cvd_tick(key, 99.0, 5)
+        record_cvd_tick(key, 98.0, 5)
+        record_cvd_tick(key, 97.0, 30)
+        record_cvd_tick(key, 96.0, 40)
+        read = get_cvd_acceleration(key, slice_seconds=15.0)
+
+    assert read is not None
+    assert read.acceleration == -4.0
+    assert read.direction == "SELLING_ACCELERATING"
+
+
 def test_option_cvd_confirms_buying_via_heatmap():
     from app.engines.advanced_indicators import option_cvd_confirms_buying
 
@@ -68,3 +130,35 @@ def test_option_cvd_confirms_buying_via_heatmap():
     assert option_cvd_confirms_buying(snap, 24000.0, "PUT") is False
     # Unknown strike -> no key -> False.
     assert option_cvd_confirms_buying(snap, 25000.0, "CALL") is False
+
+
+def test_option_cvd_acceleration_confirms_buying_via_heatmap():
+    from app.engines.advanced_indicators import (
+        option_cvd_acceleration_confirms_buying,
+    )
+
+    key = "NSE_FO|ACCEL_CE"
+    record_cvd_tick(key, 100.0, 1)
+    with patch(
+        "app.services.cvd_store.time.monotonic",
+        side_effect=[70.0, 75.0, 88.0, 92.0, 95.0],
+    ):
+        record_cvd_tick(key, 101.0, 5)
+        record_cvd_tick(key, 102.0, 5)
+        record_cvd_tick(key, 103.0, 30)
+        record_cvd_tick(key, 104.0, 40)
+        snap = SimpleNamespace(
+            heatmap=[
+                SimpleNamespace(
+                    strike=24000.0,
+                    callInstrumentKey=key,
+                    putInstrumentKey="NSE_FO|ACCEL_PE",
+                )
+            ]
+        )
+        assert option_cvd_acceleration_confirms_buying(
+            snap, 24000.0, "CALL",
+        ) is True
+        assert option_cvd_acceleration_confirms_buying(
+            snap, 24000.0, "PUT",
+        ) is False

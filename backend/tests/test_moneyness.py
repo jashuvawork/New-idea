@@ -1,8 +1,12 @@
 """ITM / ATM / OTM strike selection tests."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.engines.moneyness import (
+    atm_itm_entry_allows,
     classify_moneyness,
     heatmap_moneyness_candidates,
     moneyness_allows,
@@ -34,6 +38,8 @@ def _settings():
     s.moneyness_explosion_prefer = "OTM"
     s.moneyness_explosion_block_otm = True
     s.moneyness_explosion_atm_itm_only = False  # legacy tests exercise prefer/bypass paths
+    s.first_lift_shallow_otm_entry_enabled = True
+    s.first_lift_shallow_otm_max_steps = 1
     s.moneyness_local_base_otm_bypass_enabled = True
     s.moneyness_local_base_max_otm_steps = 3
     s.moneyness_local_base_otm_min_score = 75.0
@@ -102,10 +108,10 @@ def test_chop_prefers_itm_scalp(mock_chop, mock_bs, mock_settings):
 
 
 @patch("app.engines.moneyness.get_settings", return_value=_settings())
-def test_explosion_prefers_otm(mock_settings):
+def test_legacy_explosion_otm_preference_is_normalized_to_atm(mock_settings):
     snap = _snap(bias="BULLISH")
     snap.regime = Regime.TREND_EXPANSION
-    assert resolve_preferred_moneyness("explosion", snap) == "OTM"
+    assert resolve_preferred_moneyness("explosion", snap) == "ATM"
 
 
 @patch("app.engines.moneyness.get_settings")
@@ -125,7 +131,7 @@ def test_explosion_atm_prefer_hard_blocks_otm(mock_settings):
         Side.PUT, 76100, snap, mode="explosion", candidate_score=100,
     )
     assert ok is False
-    assert reason == "moneyness_explosion_atm_only_otm_blocked"
+    assert reason == "moneyness_atm_itm_only"
     assert meta["moneyness"] == "OTM"
     # ATM still allowed
     ok_atm, _, meta_atm = moneyness_allows(
@@ -149,7 +155,7 @@ def test_explosion_atm_itm_only_blocks_otm_even_when_prefer_otm(mock_settings):
         Side.PUT, 24050, snap, mode="explosion", candidate_score=100,
     )
     assert ok is False
-    assert reason == "moneyness_explosion_atm_itm_only"
+    assert reason == "moneyness_atm_itm_only"
     assert meta["moneyness"] == "OTM"
     ok_atm, _, meta_atm = moneyness_allows(
         Side.PUT, 24500, snap, mode="explosion", candidate_score=100,
@@ -164,9 +170,93 @@ def test_explosion_atm_itm_only_blocks_otm_even_when_prefer_otm(mock_settings):
 
 
 @patch("app.engines.moneyness.get_settings")
+def test_hard_atm_itm_policy_survives_disabled_soft_selection(mock_settings):
+    s = _settings()
+    s.moneyness_selection_enabled = False
+    mock_settings.return_value = s
+    snap = _snap(spot=24200.0)
+    snap.atmStrike = 24200.0
+
+    blocked, reason, meta = moneyness_allows(
+        Side.CALL,
+        24300.0,
+        snap,
+        mode="scalp",
+        candidate_score=100,
+    )
+    allowed, _, allowed_meta = atm_itm_entry_allows(
+        Side.PUT,
+        24300.0,
+        snap,
+    )
+
+    assert blocked is False
+    assert reason == "moneyness_atm_itm_only"
+    assert meta["moneyness"] == "OTM"
+    assert allowed is True
+    assert allowed_meta["moneyness"] == "ITM"
+
+
+@pytest.mark.parametrize(
+    ("side", "shallow_strike", "deep_strike"),
+    [
+        (Side.CALL, 24300.0, 24350.0),
+        (Side.PUT, 24100.0, 24050.0),
+    ],
+)
+@patch("app.engines.moneyness.get_settings")
+def test_atm_itm_only_blocks_strict_shallow_and_deep_otm_first_lifts(
+    mock_settings, side, shallow_strike, deep_strike,
+):
+    """CE/PE symmetry: first-lift quality never makes OTM executable."""
+    s = _settings()
+    s.moneyness_explosion_prefer = "ATM"
+    s.moneyness_explosion_atm_itm_only = True
+    s.moneyness_local_base_otm_bypass_enabled = False
+    mock_settings.return_value = s
+    snap = _snap(spot=24200.0)
+    snap.atmStrike = 24200.0
+    snap.spotChart = MagicMock()
+
+    def candidate(strike):
+        return SimpleNamespace(
+            alert={
+                "side": side.value,
+                "strike": strike,
+                "ictFirstLift": True,
+                "ictBreakout": True,
+                "ictFlatThenVertical": True,
+            },
+        )
+
+    ok, reason, meta = moneyness_allows(
+        side,
+        shallow_strike,
+        snap,
+        mode="explosion",
+        candidate_score=90,
+        candidate=candidate(shallow_strike),
+    )
+    deep_ok, deep_reason, _ = moneyness_allows(
+        side,
+        deep_strike,
+        snap,
+        mode="explosion",
+        candidate_score=100,
+        candidate=candidate(deep_strike),
+    )
+
+    assert ok is False
+    assert reason == "moneyness_atm_itm_only"
+    assert meta["moneyness"] == "OTM"
+    assert deep_ok is False
+    assert deep_reason == "moneyness_atm_itm_only"
+
+
+@patch("app.engines.moneyness.get_settings")
 @patch("app.engines.local_base_chart_bypass.get_settings")
-def test_local_base_allows_shallow_otm_ce_and_pe(mock_lb, mock_mn):
-    """Confirmed local-base CE/PE within 3 OTM steps may bypass ATM-only."""
+def test_local_base_never_bypasses_otm_for_ce_or_pe(mock_lb, mock_mn):
+    """Even confirmed local-base structure remains ATM/ITM-only."""
     from types import SimpleNamespace
 
     s = _settings()
@@ -197,8 +287,9 @@ def test_local_base_allows_shallow_otm_ce_and_pe(mock_lb, mock_mn):
         Side.CALL, 23900, snap, mode="explosion", candidate_score=87.0,
         candidate=candidate,
     )
-    assert ok is True
-    assert meta.get("localBaseOtmBypass") is True
+    assert ok is False
+    assert reason == "moneyness_atm_itm_only"
+    assert meta["moneyness"] == "OTM"
 
     # 4 steps OTM still blocked
     alert4 = {**alert, "strike": 24000.0}
@@ -211,7 +302,7 @@ def test_local_base_allows_shallow_otm_ce_and_pe(mock_lb, mock_mn):
         candidate=cand4,
     )
     assert ok4 is False
-    assert reason4 == "moneyness_explosion_atm_only_otm_blocked"
+    assert reason4 == "moneyness_atm_itm_only"
 
     # Structured local-base PUT also gets shallow OTM bypass (2 steps).
     put_alert = {
@@ -234,8 +325,8 @@ def test_local_base_allows_shallow_otm_ce_and_pe(mock_lb, mock_mn):
         Side.PUT, 23700, snap, mode="explosion", candidate_score=87.0,
         candidate=put_cand,
     )
-    assert ok_put is True
-    assert meta_put.get("localBaseOtmBypass") is True
+    assert ok_put is False
+    assert meta_put["moneyness"] == "OTM"
 
     # Deep PUT OTM still blocked
     put_deep = {
@@ -251,7 +342,7 @@ def test_local_base_allows_shallow_otm_ce_and_pe(mock_lb, mock_mn):
         candidate=put_deep_cand,
     )
     assert ok_deep is False
-    assert reason_deep == "moneyness_explosion_atm_only_otm_blocked"
+    assert reason_deep == "moneyness_atm_itm_only"
 
 
 @patch("app.engines.moneyness.get_settings", return_value=_settings())
@@ -288,6 +379,6 @@ def test_heatmap_supplies_itm_puts(mock_bs, mock_chop, mock_settings):
 @patch("app.engines.moneyness.get_settings", return_value=_settings())
 def test_rank_bonus_for_aligned_moneyness(mock_settings):
     snap = _snap()
-    with patch("app.engines.moneyness.resolve_preferred_moneyness", return_value="OTM"):
-        bonus = moneyness_rank_adjustment(Side.CALL, 24100, snap, mode="explosion")
+    with patch("app.engines.moneyness.resolve_preferred_moneyness", return_value="ATM"):
+        bonus = moneyness_rank_adjustment(Side.CALL, 23950, snap, mode="explosion")
     assert bonus > 0

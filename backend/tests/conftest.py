@@ -51,13 +51,28 @@ def _reset_all_engine_globals() -> None:
     from app.engines.whipsaw_guards import reset_whipsaw_guards
     from app.engines.directional_lock import reset_directional_lock
     from app.engines.chop_day_guards import reset_session_guards
-    from app.engines.capital_allocator import reset_session_profit_gate
+    from app.engines.capital_allocator import (
+        reset_capital_for_tests,
+        reset_session_profit_gate,
+    )
+    from app.engines.realtime_engine import reset_realtime_detector_state
     from app.engines.preorder_rejection_suppression import (
         reset_preorder_rejection_suppressions,
     )
+    from app.services.radar_health import reset_health_for_tests
+    from app.services.radar_learning import reset_learning_state_for_tests
+    from app.services.upstox_trade_manager import (
+        reset_upstox_trade_manager_cache_for_tests,
+    )
+    from app.engines.building_ltp_monitor import reset_building_ltp_monitor_for_tests
+    from app.engines.index_tick_helpers import reset_index_tick_helpers_for_tests
+    from app.engines.instrument_cooldown import reset_instrument_cooldowns
 
     for fn in (
         reset_detector_state_for_tests,
+        reset_building_ltp_monitor_for_tests,
+        reset_index_tick_helpers_for_tests,
+        reset_instrument_cooldowns,
         reset_confidence_hold_state,
         reset_monitor_state,
         reset_symbol_cooldowns,
@@ -65,7 +80,12 @@ def _reset_all_engine_globals() -> None:
         reset_directional_lock,
         reset_session_guards,
         reset_session_profit_gate,
+        reset_capital_for_tests,
+        reset_realtime_detector_state,
         reset_preorder_rejection_suppressions,
+        reset_health_for_tests,
+        reset_learning_state_for_tests,
+        reset_upstox_trade_manager_cache_for_tests,
     ):
         _safe(fn)
 

@@ -19,8 +19,7 @@ from app.engines.snapshot_fast import overlay_snapshot_live, overlay_snapshot_lt
 from app.engines.psychology_engine import analyze_psychology, psychology_to_dict
 from app.engines.adaptive_exits import compute_adaptive_exit_plan
 from app.models.schemas import MultiSnapshot, StrategyType
-from app.services.finnhub import aggregate_sentiment
-from app.services.finnhub import fetch_market_news
+from app.services.news_intelligence import aggregate_news_intelligence, fetch_market_news
 from app.services.redis_store import has_upstox_token
 from app.services.upstox import UpstoxClient, UpstoxError, rate_limit_active, rate_limit_cooldown_remaining
 from app.services.upstox_ws import is_ws_active
@@ -312,6 +311,12 @@ def latency_stats() -> dict[str, Any]:
         "buildLockHeld": _build_lock.locked(),
         "entryScanDue": entry_scan_due(),
         "canRunTickFast": can_run_tick_fast(),
+        "buildingLtpMonitorEnabled": bool(
+            getattr(settings, "building_ltp_monitor_enabled", True)
+        ),
+        "buildingLtpMonitorMinMs": float(
+            getattr(settings, "building_ltp_monitor_min_ms", 75.0) or 75.0
+        ),
         "fullRestMinSeconds": float(
             getattr(get_settings(), "full_rest_min_seconds", _FULL_REST_MIN_SECONDS) or _FULL_REST_MIN_SECONDS
         ),
@@ -348,7 +353,7 @@ def _news_payload(news: list) -> dict[str, Any]:
         "cacheSeconds": settings.news_cache_seconds,
         "ageSeconds": round(age, 1),
         "nextRefreshInSeconds": round(remaining, 1),
-        "aggregate": aggregate_sentiment(news),
+        "aggregate": aggregate_news_intelligence(news),
     }
 
 
@@ -400,6 +405,98 @@ async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnap
     return snapshot
 
 
+async def run_building_ltp_entry_cycle(
+    *,
+    broadcast: bool = False,
+    run_trader: bool = True,
+) -> Optional[MultiSnapshot]:
+    """On every meaningful BUILDING LTP move: refresh explosions and take if ready.
+
+    Entry-scan cadence alone is too sparse for V-base lifts. This path feeds each
+    WS LTP print into the explosion/ICT history and re-runs the trader so a
+    local-base BUILDING lift is not missed between full scans.
+    """
+    global _last_fast_cycle_ms, _last_ws_overlay_mono
+    if not _cache or not _cache.dataReady:
+        return None
+    if not is_ws_active():
+        return None
+
+    from app.engines.building_ltp_monitor import (
+        building_ltp_monitor_due,
+        clear_building_scoreboard,
+        mark_building_ltp_cycle_done,
+        mark_building_ltps_seen,
+    )
+
+    settings = get_settings()
+    # Peek on current cache overlays first (cheap).
+    probe = overlay_snapshot_live(
+        _cache.snapshots,
+        max_age_seconds=settings.tick_overlay_max_age_seconds,
+    )
+    if not building_ltp_monitor_due(probe):
+        return _cache
+
+    t0 = time.perf_counter()
+    from app.engines.expiry_day_guards import _today_str
+    from app.engines.explosion_detector import refresh_snapshot_explosion_alerts
+
+    today = _today_str()
+    for snap in probe.values():
+        if not snap.dataAvailable:
+            continue
+        expiry_day = bool(snap.optionExpiry and str(snap.optionExpiry)[:10] == today)
+        refresh_snapshot_explosion_alerts(snap, expiry_day=expiry_day)
+
+    # Score EVERY watched BUILDING name on this LTP cycle; take only the best.
+    auto_state = get_state()
+    try:
+        from app.engines.building_ltp_monitor import publish_scoreboard_for_snapshots
+
+        board = publish_scoreboard_for_snapshots(probe, state=auto_state)
+        auto_state.buildingLtpMonitor = board
+    except Exception as exc:
+        logger.warning("BUILDING LTP scoreboard failed: %s", exc)
+        clear_building_scoreboard()
+        auto_state.buildingLtpMonitor = {"error": str(exc)[:200]}
+
+    news = await _fetch_news_cached()
+    if run_trader and not rate_limit_active():
+        client = UpstoxClient()
+        auto_state = await process(probe, news=news, client=client)
+        # Keep scoreboard visible on trader state after process mutates it.
+        try:
+            from app.engines.building_ltp_monitor import building_scoreboard_snapshot
+
+            auto_state.buildingLtpMonitor = {
+                **(auto_state.buildingLtpMonitor or {}),
+                **building_scoreboard_snapshot(),
+            }
+        except Exception:
+            pass
+    else:
+        auto_state = get_state()
+
+    snapshot = _shallow_cache_copy(
+        snapshots=probe,
+        auto_trader=auto_state,
+        news=news,
+    )
+    _update_cache_memory(snapshot)
+    mark_building_ltps_seen(probe)
+    mark_building_ltp_cycle_done()
+    clear_building_scoreboard()
+    _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    if ws_overlay_due():
+        await _store_cache_async(snapshot)
+        _last_ws_overlay_mono = time.monotonic()
+        if broadcast:
+            await broadcast_snapshot(snapshot)
+    return snapshot
+
+
 async def run_entry_scan_on_cache(
     *,
     broadcast: bool = False,
@@ -408,6 +505,23 @@ async def run_entry_scan_on_cache(
     """Entry scan on WS-overlaid cache — skip expensive REST chain rebuild when WS is live."""
     global _last_fast_cycle_ms
     if not _cache or not _cache.dataReady:
+        try:
+            from app.services.radar_learning import record_pipeline_event
+
+            await asyncio.to_thread(
+                record_pipeline_event,
+                "ENTRY_SCAN_SKIPPED",
+                source="ws_entry_scan",
+                detail={
+                    "cachePresent": bool(_cache),
+                    "dataReady": bool(_cache and _cache.dataReady),
+                    "waitingReason": str(getattr(_cache, "waitingReason", "") or "")[:200],
+                },
+                throttle_key="entry-scan-skipped",
+                throttle_seconds=15.0,
+            )
+        except Exception as exc:
+            logger.debug("Failed to persist skipped entry scan telemetry: %s", exc)
         return None
 
     t0 = time.perf_counter()
@@ -425,12 +539,78 @@ async def run_entry_scan_on_cache(
             continue
         expiry_day = bool(snap.optionExpiry and str(snap.optionExpiry)[:10] == today)
         refresh_snapshot_explosion_alerts(snap, expiry_day=expiry_day)
+    try:
+        from app.services.radar_archive import record_top_radars
+        from app.services.radar_learning import record_market_observations
+
+        await asyncio.to_thread(
+            record_top_radars,
+            overlays,
+            source="ws_entry_scan",
+        )
+        await asyncio.to_thread(
+            record_market_observations,
+            overlays,
+            source="ws_entry_scan",
+        )
+        from app.services.radar_health import record_component_success
+
+        record_component_success(
+            "radarPipeline",
+            detail={"source": "ws_entry_scan"},
+        )
+    except Exception as exc:
+        logger.warning("Failed to archive refreshed radar snapshots: %s", exc)
+        try:
+            from app.services.radar_health import record_component_error
+
+            record_component_error("radarPipeline", exc)
+        except Exception:
+            pass
     news = await _fetch_news_cached()
+    auto_state = get_state()
+    try:
+        from app.engines.building_ltp_monitor import (
+            clear_building_scoreboard,
+            publish_scoreboard_for_snapshots,
+        )
+
+        board = publish_scoreboard_for_snapshots(overlays, state=auto_state)
+        auto_state.buildingLtpMonitor = board
+    except Exception as exc:
+        logger.warning("BUILDING entry-scan scoreboard failed: %s", exc)
+        try:
+            from app.engines.building_ltp_monitor import clear_building_scoreboard
+
+            clear_building_scoreboard()
+        except Exception:
+            pass
+
     if run_trader:
         client = UpstoxClient()
         auto_state = await process(overlays, news=news, client=client)
+        try:
+            from app.engines.building_ltp_monitor import building_scoreboard_snapshot
+
+            auto_state.buildingLtpMonitor = {
+                **(auto_state.buildingLtpMonitor or {}),
+                **building_scoreboard_snapshot(),
+            }
+        except Exception:
+            pass
     else:
         auto_state = get_state()
+
+    try:
+        from app.engines.building_ltp_monitor import (
+            clear_building_scoreboard,
+            mark_building_ltps_seen,
+        )
+
+        mark_building_ltps_seen(overlays)
+        clear_building_scoreboard()
+    except Exception:
+        pass
 
     snapshot = _shallow_cache_copy(
         snapshots=overlays,
@@ -548,15 +728,9 @@ async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
         raise UpstoxError(f"Upstox cooling down — retry in {secs}s")
 
     news = await _fetch_news_cached()
-    news_sentiment = "NEUTRAL"
-    if news:
-        sentiments = [n.get("sentiment", "NEUTRAL") for n in news[:5]]
-        bullish = sentiments.count("BULLISH")
-        bearish = sentiments.count("BEARISH")
-        if bullish > bearish:
-            news_sentiment = "BULLISH"
-        elif bearish > bullish:
-            news_sentiment = "BEARISH"
+    # Only verified/corroborated, fresh India-relevant context reaches TQS.
+    # Unverified social posts remain display-only in the news panel.
+    news_sentiment = aggregate_news_intelligence(news).get("bias", "NEUTRAL")
 
     client = UpstoxClient()
     try:
@@ -610,7 +784,7 @@ async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
         errors = [s.error for s in snapshots.values() if s.error]
         waiting_reason = errors[0] if errors else "Waiting for real Upstox data"
 
-    news_sentiment_agg = aggregate_sentiment(news)
+    news_sentiment_agg = aggregate_news_intelligence(news)
     for sym, snap in snapshots.items():
         if not snap.dataAvailable:
             continue
@@ -961,7 +1135,7 @@ async def get_premarket_analysis(symbol: str):
 
     client = UpstoxClient()
     news = await fetch_market_news()
-    news_sentiment = aggregate_sentiment(news).get("bias", "NEUTRAL")
+    news_sentiment = aggregate_news_intelligence(news).get("bias", "NEUTRAL")
     try:
         analysis = await build_premarket_analysis(symbol.upper(), client, news_sentiment)
         return {"dataAvailable": True, "symbol": symbol.upper(), "premarket": analysis.model_dump(mode="json")}

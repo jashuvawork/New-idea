@@ -32,6 +32,18 @@ class ICTBreakoutSignal:
     local_swing_base: bool = False
     flat_vertical_quality: float = 0.0   # 0-100 quality of the flat->vertical setup
     flat_vertical_grade: str = ""        # A+ | A | B | C
+    first_lift: bool = False             # appeared in 15–40% pad off lowest local base
+    base_armed: bool = False             # causal stable base exists before launch
+    elite_base_ready: bool = False       # strict 2–5% preauthorized base acceleration
+    v_rip_ready: bool = False            # continuous 2–25% off session/day V-trough
+    building_rip_ready: bool = False     # BUILDING + live bullish rip (mid-rip OK)
+    armed_base_launch: bool = False       # strict 5–12% early launch band
+    armed_base_sustained_lift: bool = False  # slower causal lift when sparse ticks hide v3/v9
+    armed_base_samples: int = 0
+    armed_base_span_seconds: float = 0.0
+    armed_base_range_pct: float = 0.0
+    armed_at: str = ""
+    armed_base_expires_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -52,19 +64,1069 @@ class ICTBreakoutSignal:
             "localSwingBase": self.local_swing_base,
             "flatVerticalQuality": round(self.flat_vertical_quality, 1),
             "flatVerticalGrade": self.flat_vertical_grade,
+            "firstLift": self.first_lift,
+            "baseArmed": self.base_armed,
+            "eliteBaseReady": self.elite_base_ready,
+            "vRipReady": self.v_rip_ready,
+            "buildingRipReady": self.building_rip_ready,
+            "armedBaseLaunch": self.armed_base_launch,
+            "armedBaseSustainedLift": self.armed_base_sustained_lift,
+            "armedBaseSamples": self.armed_base_samples,
+            "armedBaseSpanSeconds": round(self.armed_base_span_seconds, 1),
+            "armedBaseRangePct": round(self.armed_base_range_pct, 2),
+            "armedAt": self.armed_at,
+            "armedBaseExpiresAt": self.armed_base_expires_at,
         }
+
+
+def _helper_confirmed_lift(
+    *,
+    row: dict[str, Any],
+    ict: Any,
+    snap: Optional[SymbolSnapshot],
+    event: Any,
+    settings: Any,
+) -> tuple[bool, int]:
+    """Count INDEPENDENT confirmations helping a base lift go vertical.
+
+    "BUILDING on radar + suddenly something is helping to go FTV." When enough distinct
+    signals agree (volume, displacement, FVG, flat->vertical structure, chart-align,
+    breadth-align) at a local base with positive live velocity, that is the confirmed FTV
+    — the caller may then take on a lower quality/score bar. Cold (v3<=0) never confirms.
+    """
+    if not bool(getattr(settings, "first_lift_helper_confirm_enabled", True)):
+        return False, 0
+    v3 = float(
+        getattr(event, "velocity_3s", 0)
+        or getattr(ict, "velocity_3s", 0)
+        or row.get("velocity3s")
+        or row.get("velocity_3s")
+        or 0
+    )
+    volume_surge = float(
+        getattr(event, "volume_surge", 0)
+        or getattr(ict, "volume_surge", 0)
+        or row.get("volumeSurge")
+        or 0
+    )
+    vol_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+        or "volAwaken" in str(row.get("reason") or "")
+    )
+    disp_floor = float(getattr(settings, "ict_displacement_min_velocity_3s", 2.2) or 2.2)
+    displacement = bool(
+        getattr(ict, "displacement", False)
+        or row.get("displacement")
+        or v3 >= disp_floor
+    )
+    fvg = bool(getattr(ict, "premium_fvg", False) or row.get("ictPremiumFvg"))
+    structured = bool(
+        (getattr(ict, "active", False) and getattr(ict, "flat_then_vertical", False))
+        or (row.get("ictBreakout") and row.get("ictFlatThenVertical"))
+    )
+    local_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    has_local_base = bool(
+        getattr(ict, "local_swing_base", False)
+        or getattr(ict, "base_armed", False)
+        or row.get("ictLocalSwingBase")
+        or row.get("ictBaseArmed")
+        or local_move > 0
+    )
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    strong_surge = float(getattr(settings, "first_lift_helper_strong_surge", 3.0) or 3.0)
+    # A DYNAMIC helper (strong volume, displacement, or FVG) is the "suddenly something is
+    # helping" spark — static structure/chart/breadth alignment alone is too common to count
+    # as confirmation. Require at least one dynamic helper (or a real stamped helper count).
+    has_dynamic = bool(volume_surge >= strong_surge or displacement or fvg)
+    count = 0
+    if volume_surge >= strong_surge or (vol_awake and volume_surge >= strong_surge * 0.6):
+        count += 1
+    if displacement:
+        count += 1
+    if fvg:
+        count += 1
+    if structured:
+        count += 1
+    if side in ("CALL", "PUT"):
+        from app.models.schemas import Side as _S
+
+        try:
+            from app.engines.spot_direction import side_aligned_with_chart
+
+            if getattr(snap, "spotChart", None) is not None and side_aligned_with_chart(
+                _S(side), snap.spotChart
+            ):
+                count += 1
+        except Exception:
+            pass
+        try:
+            from app.engines.symbol_cooldown import side_aligned_with_breadth
+
+            bbias = str(getattr(getattr(snap, "breadth", None), "bias", "") or "")
+            if side_aligned_with_breadth(side, bbias):
+                count += 1
+        except Exception:
+            pass
+    stamp = 0
+    try:
+        stamp = int(row.get("buildingHelperCount") or 0)
+    except (TypeError, ValueError):
+        stamp = 0
+    count = max(count, stamp)
+    min_h = int(getattr(settings, "first_lift_helper_confirm_min_helpers", 3) or 3)
+    ok = (
+        (has_dynamic or stamp >= min_h)
+        and count >= min_h
+        and v3 > 0
+        and has_local_base
+    )
+    return ok, count
+
+
+def _option_led_first_lift_ok(
+    *,
+    row: dict[str, Any],
+    ict: Any,
+    event: Any,
+    snap: Optional[SymbolSnapshot],
+    settings: Any,
+) -> bool:
+    """A confirmed ATM/ITM option leading the slower 5m spot chart.
+
+    This is a deliberately STRONG independent lane (high FTV quality + fast sustained
+    v3/v9 + volume awakening AND surge) that may lead before the index chart turns and
+    before the generic explosion-score floor is met — the option tape IS the signal.
+    All downstream selector/premium/moneyness/session/risk guards still run.
+    """
+    if not bool(getattr(settings, "first_lift_option_led_enabled", True)):
+        return False
+    if snap is None:
+        return False
+    quality = float(
+        getattr(ict, "flat_vertical_quality", 0)
+        or row.get("flatVerticalQuality")
+        or 0
+    )
+    v3 = float(
+        getattr(event, "velocity_3s", 0)
+        or getattr(ict, "velocity_3s", 0)
+        or row.get("velocity3s")
+        or row.get("velocity_3s")
+        or 0
+    )
+    v9 = float(
+        getattr(event, "velocity_9s", 0)
+        or getattr(ict, "velocity_9s", 0)
+        or row.get("velocity9s")
+        or row.get("velocity_9s")
+        or 0
+    )
+    volume_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
+    volume_surge = float(
+        getattr(event, "volume_surge", 0)
+        or getattr(ict, "volume_surge", 0)
+        or row.get("volumeSurge")
+        or 0
+    )
+    min_volume = float(
+        getattr(settings, "first_lift_trade_min_volume_surge", 2.0) or 2.0
+    )
+    base_v3 = float(getattr(settings, "first_lift_trade_min_velocity_3s", 1.5) or 1.5)
+    base_v9 = float(getattr(settings, "first_lift_trade_min_velocity_9s", 1.0) or 1.0)
+    option_led_quality = float(
+        getattr(settings, "first_lift_option_led_min_quality", 65.0) or 65.0
+    )
+    option_led_v3 = float(
+        getattr(settings, "first_lift_option_led_min_velocity_3s", 1.5) or 1.5
+    )
+    option_led_v9 = float(
+        getattr(settings, "first_lift_option_led_min_velocity_9s", 1.5) or 1.5
+    )
+    if not (
+        quality >= option_led_quality
+        and v3 >= max(base_v3, option_led_v3)
+        and v9 >= max(base_v9, option_led_v9)
+        and volume_awake
+        and volume_surge >= min_volume
+    ):
+        return False
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False
+    strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0)
+    if strike <= 0 or spot <= 0:
+        return False
+    from app.engines.moneyness import classify_moneyness
+    from app.models.schemas import Side as _Side
+
+    money = classify_moneyness(
+        _Side(side),
+        strike,
+        spot,
+        symbol=str(getattr(snap, "symbol", "") or ""),
+        atm=atm if atm > 0 else None,
+    )
+    return money in ("ATM", "ITM")
+
+
+def building_rip_bullish_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    state: Any = None,
+) -> tuple[bool, str]:
+    """Solid bullish confirmation for BUILDING radar while still ripping.
+
+    Two paths:
+    1. Local-base early lift — radar already sees the local base; a measured
+       little lift off that base + positive live velocity authorizes the take.
+    2. Mid-rip expanding — still ripping toward max (trough arm not required).
+
+    Cold/negative-v3 BUILDING (Aug19 11:45) is rejected on both paths.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "building_rip_bullish_enabled", True)):
+        return False, "building_rip_disabled"
+    if snap is None:
+        return False, "building_rip_snap_missing"
+
+    row = alert if isinstance(alert, dict) else {}
+    tier = str(
+        getattr(event, "tier", "")
+        or row.get("tier")
+        or ""
+    ).upper()
+    if tier != "BUILDING" and not (
+        tier == "EXPLODING"
+        and (
+            bool(row.get("ictBuildingRipReady"))
+            or bool(getattr(ict, "building_rip_ready", False))
+            or "buildingRip" in str(row.get("reason") or "")
+        )
+    ):
+        return False, "building_rip_tier_not_building"
+
+    if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
+        return False, "building_rip_mid_rip_coil_rejected"
+
+    # Strongly helper-confirmed BUILDING FTV — the "suddenly something is helping" catch.
+    # This overrides the worst-day / BREAKOUT_ONLY BUILDING block (those chop/expiry days
+    # are exactly where these FTVs were missed). Un-helped BUILDING still hits the block.
+    helper_confirmed, _helper_count = _helper_confirmed_lift(
+        row=row, ict=ict, snap=snap, event=event, settings=settings,
+    )
+    override_worst_day = helper_confirmed and bool(
+        getattr(settings, "building_rip_helper_override_worst_day", True)
+    )
+
+    # Same worst-day / DEFENSIVE block as elite BUILDING ICT.
+    if bool(getattr(settings, "worst_day_block_building_ict", True)) and not override_worst_day:
+        try:
+            from app.engines.worst_day_itm_fade import worst_day_defensive_session_active
+            from app.engines.worst_day_guard import session_entry_policy
+            from app.engines.dual_mode_strategy import resolve_trading_session_mode
+            from app.models.schemas import AutoTraderState as _ATS
+
+            st = state if state is not None else _ATS()
+            snaps = {str(getattr(snap, "symbol", "") or ""): snap}
+            if worst_day_defensive_session_active(st, snaps):
+                return False, "building_rip_worst_day_blocked"
+            policy, _ = session_entry_policy(st, snaps)
+            if policy in ("BREAKOUT_ONLY", "PAUSED"):
+                return False, "building_rip_policy_blocked"
+            mode, _ = resolve_trading_session_mode(st, snaps)
+            if mode == "DEFENSIVE":
+                return False, "building_rip_defensive_blocked"
+        except Exception:
+            return False, "building_rip_policy_unavailable"
+
+    v3 = float(
+        getattr(event, "velocity_3s", 0)
+        or row.get("velocity3s")
+        or row.get("velocity_3s")
+        or getattr(ict, "velocity_3s", 0)
+        or 0
+    )
+    v9 = float(
+        getattr(event, "velocity_9s", 0)
+        or row.get("velocity9s")
+        or row.get("velocity_9s")
+        or 0
+    )
+    volume_surge = float(
+        getattr(event, "volume_surge", 0)
+        or getattr(ict, "volume_surge", 0)
+        or row.get("volumeSurge")
+        or 0
+    )
+    vol_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+        or "volAwaken" in str(row.get("reason") or "")
+    )
+    min_surge = float(
+        getattr(settings, "building_rip_min_volume_surge", 1.8) or 1.8
+    )
+    score = float(
+        getattr(event, "explosion_score", 0)
+        or row.get("explosionScore")
+        or row.get("score")
+        or 0
+    )
+    local_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    off_low = float(row.get("offLowMovePct") or 0)
+    session_move = float(
+        getattr(ict, "session_move_pct", 0)
+        or row.get("dailyMovePct")
+        or row.get("openPremiumMove")
+        or getattr(event, "daily_move_pct", 0)
+        or 0
+    )
+    peak_move = float(
+        row.get("peakMovePct")
+        or getattr(event, "peak_move_pct", 0)
+        or 0
+    )
+    has_local_base = bool(
+        getattr(ict, "local_swing_base", False)
+        or getattr(ict, "base_armed", False)
+        or row.get("ictLocalSwingBase")
+        or row.get("ictBaseArmed")
+        or local_move > 0
+    )
+    # Proper local-base lift measure — prefer pad off the known local base,
+    # not day-% alone (day-% can look quiet while the local pad is lifting).
+    measured_local_lift = local_move if local_move > 0 else (
+        off_low if has_local_base and off_low > 0 else 0.0
+    )
+    local_lift_lo = float(
+        getattr(settings, "building_rip_local_base_min_move_pct", 2.0) or 2.0
+    )
+    local_lift_hi = float(
+        getattr(settings, "building_rip_local_base_max_move_pct", 15.0) or 15.0
+    )
+    local_lift_v3 = float(
+        getattr(settings, "building_rip_local_base_min_velocity_3s", 1.2) or 1.2
+    )
+    local_lift_score = float(
+        getattr(settings, "building_rip_local_base_min_score", 42.0) or 42.0
+    )
+    local_base_lift = bool(
+        getattr(settings, "building_rip_local_base_lift_enabled", True)
+        and has_local_base
+        and local_lift_lo <= measured_local_lift <= local_lift_hi + 1e-6
+        and v3 >= local_lift_v3
+        and (vol_awake or volume_surge >= min_surge)
+        and (v9 >= 0.5 or vol_awake or v3 >= local_lift_v3 + 0.3)
+        and score >= local_lift_score
+    )
+
+    min_v3 = float(getattr(settings, "building_rip_min_velocity_3s", 1.5) or 1.5)
+    min_v9 = float(getattr(settings, "building_rip_min_velocity_9s", 0.8) or 0.8)
+    min_score = float(getattr(settings, "building_rip_min_score", 48.0) or 48.0)
+    rip_move = max(local_move, off_low, session_move)
+    min_move = float(getattr(settings, "building_rip_min_move_pct", 2.0) or 2.0)
+    max_move = float(getattr(settings, "building_rip_max_move_pct", 55.0) or 55.0)
+    mid_rip = bool(
+        not local_base_lift
+        and v3 >= min_v3
+        and (vol_awake or volume_surge >= min_surge)
+        and (v9 >= min_v9 or vol_awake)
+        and score >= min_score
+        and min_move <= rip_move <= max_move
+    )
+    if not local_base_lift and not mid_rip:
+        if has_local_base and measured_local_lift > 0 and v3 < local_lift_v3:
+            return False, f"building_rip_local_lift_velocity3s<{local_lift_v3:g}"
+        if v3 < min_v3:
+            return False, f"building_rip_velocity3s<{min_v3:g}"
+        if not vol_awake and volume_surge < min_surge:
+            return False, f"building_rip_volume_surge<{min_surge:g}"
+        if score < min_score and score < local_lift_score:
+            return False, f"building_rip_score<{min_score:g}"
+        return False, f"building_rip_move_outside_{min_move:g}_{max_move:g}"
+
+    # Reject faded tops: peak already ran away and live heat is soft.
+    fade_gap = float(
+        getattr(settings, "building_rip_fade_peak_gap_pct", 12.0) or 12.0
+    )
+    compare_move = measured_local_lift if local_base_lift else rip_move
+    fade_v3_floor = local_lift_v3 if local_base_lift else min_v3
+    if peak_move > compare_move + fade_gap and v3 < fade_v3_floor + 0.5:
+        return False, "building_rip_faded_from_peak"
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False, "building_rip_side_invalid"
+
+    from app.engines.moneyness import classify_moneyness
+    from app.models.schemas import Side as _Side
+
+    strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0)
+    if strike <= 0 or spot <= 0:
+        return False, "building_rip_moneyness_unavailable"
+    money = classify_moneyness(
+        _Side(side),
+        strike,
+        spot,
+        symbol=str(getattr(snap, "symbol", "") or ""),
+        atm=atm if atm > 0 else None,
+    )
+    if money not in ("ATM", "ITM"):
+        return False, f"building_rip_requires_atm_itm_{money.lower()}"
+
+    # Chart align OR option-led confirmation — prove something is helping the lift.
+    from app.engines.spot_direction import side_aligned_with_chart
+    from app.engines.symbol_cooldown import side_aligned_with_breadth
+
+    chart_ok = False
+    if getattr(snap, "spotChart", None) is not None:
+        chart_ok = bool(side_aligned_with_chart(_Side(side), snap.spotChart))
+    breadth_bias = str(
+        getattr(getattr(snap, "breadth", None), "bias", "") or ""
+    )
+    breadth_ok = bool(side_aligned_with_breadth(side, breadth_bias))
+    absolute_volume = float(
+        getattr(event, "volume", 0)
+        or row.get("volume")
+        or row.get("absoluteVolume")
+        or 0
+    )
+    live_cvd = False
+    live_cvd_accel = False
+    try:
+        from app.engines.advanced_indicators import (
+            option_cvd_acceleration_confirms_buying,
+            option_cvd_confirms_buying,
+        )
+
+        live_cvd = bool(
+            option_cvd_confirms_buying(snap, strike, _Side(side))
+        )
+        live_cvd_accel = bool(
+            option_cvd_acceleration_confirms_buying(snap, strike, _Side(side))
+        )
+    except Exception:
+        live_cvd = False
+        live_cvd_accel = False
+    displacement = bool(
+        row.get("ictDisplacement")
+        or row.get("displacement")
+        or getattr(ict, "displacement", False)
+    )
+    option_led = bool(
+        vol_awake
+        and (
+            absolute_volume >= 25_000
+            or row.get("optionCvdBuying")
+            or row.get("orderflowConfirmed")
+            or row.get("cvdBuying")
+            or live_cvd
+            or live_cvd_accel
+            or volume_surge >= min_surge + 0.4
+        )
+    )
+    helpers: list[str] = []
+    if vol_awake:
+        helpers.append("vol_awaken")
+    if chart_ok:
+        helpers.append("chart_align")
+    if breadth_ok:
+        helpers.append("breadth_align")
+    if live_cvd or row.get("cvdBuying") or row.get("optionCvdBuying"):
+        helpers.append("cvd_buying")
+    if live_cvd_accel:
+        helpers.append("cvd_accel")
+    if displacement:
+        helpers.append("displacement")
+    if volume_surge >= min_surge:
+        helpers.append("volume_surge")
+    # Aug19 sudden-lift board — FTV structure + ICT confluence + LTP lift.
+    try:
+        from app.engines.building_lift_helpers import evaluate_building_lift_helpers
+
+        board = evaluate_building_lift_helpers(snap=snap, alert=row)
+        for h in board.helpers:
+            if h not in helpers:
+                helpers.append(h)
+        if board.helping:
+            # Something is actively helping — treat as option-led confirmation.
+            option_led = True
+    except Exception:
+        pass
+    if not chart_ok and not option_led and not breadth_ok:
+        return False, "building_rip_needs_chart_or_option_led"
+    if not helpers:
+        return False, "building_rip_needs_helper_confirmation"
+
+    # Stamp helpers onto the live alert so FTV policy / UI can see what helped.
+    if isinstance(alert, dict):
+        alert["ictBuildingRipReady"] = True
+        alert["buildingRipHelpers"] = list(helpers)
+        alert["buildingRipHelpersOk"] = True
+        alert["buildingLiftHelping"] = True
+        alert["ictBaseReadinessReason"] = (
+            "building_local_base_lift_ready"
+            if local_base_lift
+            else "building_rip_bullish_ready"
+        )
+
+    if local_base_lift:
+        return True, "building_local_base_lift_ready"
+    return True, "building_rip_bullish_ready"
+
+
+def first_lift_entry_ready(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    day_mode: str = "",
+    state: Any = None,
+) -> bool:
+    """Return whether a radar first lift has strict order-entry confirmation."""
+    return first_lift_entry_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=alert,
+        day_mode=day_mode,
+        state=state,
+    )[0]
+
+
+def first_lift_entry_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    day_mode: str = "",
+    state: Any = None,
+) -> tuple[bool, str]:
+    """Strict early-entry proof for a local-base first lift.
+
+    Radar intentionally exposes softer first lifts. An order may use that early
+    signal only when the base quality, premium heat, volume and live index turn
+    agree. This is symmetric: CALL requires an improving bullish turn and PUT an
+    improving bearish turn.
+    """
+    settings = get_settings()
+    row = alert if isinstance(alert, dict) else {}
+    if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
+        return False, "mid_rip_armed_coil_rejected"
+
+    # BUILDING bullish-rip sleeve — mid-rip OK while still expanding to max.
+    # Runs before first-lift chart gate so option-led BUILDING rips still authorize.
+    building_ok, building_reason = building_rip_bullish_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=alert,
+        state=state,
+    )
+    if building_ok:
+        return True, building_reason
+
+    if not bool(getattr(settings, "first_lift_trade_enabled", True)):
+        return False, "first_lift_trading_disabled"
+    if snap is None or getattr(snap, "spotChart", None) is None:
+        return False, "first_lift_chart_missing"
+
+    first_lift = bool(
+        getattr(ict, "first_lift", False)
+        or row.get("ictFirstLift")
+    )
+    armed_launch = bool(
+        getattr(ict, "armed_base_launch", False) is True
+        or row.get("ictArmedBaseLaunch") is True
+    )
+    elite_base_ready = bool(
+        getattr(ict, "elite_base_ready", False) is True
+        or row.get("ictEliteBaseReady") is True
+    )
+    v_rip_ready = bool(
+        getattr(ict, "v_rip_ready", False) is True
+        or row.get("ictVRipReady") is True
+    )
+    sustained_lift = bool(
+        getattr(ict, "armed_base_sustained_lift", False) is True
+        or row.get("ictArmedBaseSustainedLift") is True
+    )
+    structured = bool(
+        getattr(ict, "active", False)
+        and getattr(ict, "flat_then_vertical", False)
+    ) or bool(row.get("ictBreakout") and row.get("ictFlatThenVertical"))
+    if not (first_lift or armed_launch or elite_base_ready or v_rip_ready) or (
+        not structured and not elite_base_ready and not v_rip_ready
+    ):
+        return False, "first_lift_structure_not_confirmed"
+
+    # EXPIRY WORST: armed/first-lift must clear the same raised defensive bar.
+    if not day_mode and state is None:
+        try:
+            from app.engines.daily_18pct_strategy import get_session_limits
+
+            limits = get_session_limits()
+            day_mode = str(getattr(limits, "dayMode", "") or "") if limits else ""
+        except Exception:
+            day_mode = day_mode or ""
+    if _expiry_worst_session(day_mode=day_mode, state=state):
+        tier = str(
+            getattr(event, "tier", "")
+            or row.get("tier")
+            or ""
+        ).upper()
+        quality = float(
+            getattr(ict, "flat_vertical_quality", 0)
+            or row.get("flatVerticalQuality")
+            or 0
+        )
+        score = float(
+            getattr(event, "explosion_score", 0)
+            or row.get("explosionScore")
+            or row.get("score")
+            or 0
+        )
+        v3 = float(
+            getattr(event, "velocity_3s", 0)
+            or row.get("velocity3s")
+            or 0
+        )
+        ok, deny = _expiry_worst_defensive_rip_allowed(
+            tier=tier,
+            quality=quality,
+            score=score,
+            velocity_3s=v3,
+            settings=settings,
+        )
+        if not ok:
+            return False, deny
+
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or 0
+    )
+    strict_armed_path = armed_launch or elite_base_ready
+    if v_rip_ready and not (elite_base_ready or armed_launch or first_lift):
+        min_move = float(
+            getattr(settings, "ict_v_rip_min_move_pct", 2.0) or 2.0
+        )
+        max_move = float(
+            getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0
+        )
+    elif elite_base_ready:
+        min_move = float(
+            getattr(settings, "ict_elite_base_ready_min_move_pct", 2.0) or 2.0
+        )
+        max_move = float(
+            getattr(settings, "ict_elite_base_ready_max_move_pct", 5.0) or 5.0
+        )
+    elif armed_launch:
+        min_move = float(
+            getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
+        )
+        max_move = float(
+            getattr(settings, "ict_armed_base_launch_max_move_pct", 15.0) or 15.0
+        )
+        if sustained_lift:
+            min_move = min(
+                min_move,
+                float(
+                    getattr(settings, "ict_armed_sustained_lift_min_move_pct", 8.0)
+                    or 8.0
+                ),
+            )
+            max_move = max(
+                max_move,
+                float(
+                    getattr(settings, "ict_armed_sustained_lift_max_move_pct", 25.0)
+                    or 25.0
+                ),
+            )
+    else:
+        min_move = float(
+            getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0
+        )
+        max_move = float(
+            getattr(settings, "first_lift_trade_max_move_pct", 25.0) or 25.0
+        )
+    if not (min_move <= base_move <= max_move):
+        return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
+
+    # Option-led lane: a strong ATM/ITM option can lead before the 5m index chart turns
+    # and before the generic explosion-score floor is met. Evaluated here so it is not
+    # subordinate to that score floor; its own high quality/velocity/volume bar gates it.
+    # Only for a plain first lift — the armed/elite/v-rip paths keep their stricter
+    # orderflow/stability gates below and must not be short-circuited here.
+    if (
+        first_lift
+        and not strict_armed_path
+        and not v_rip_ready
+        and _option_led_first_lift_ok(
+            row=row, ict=ict, event=event, snap=snap, settings=settings,
+        )
+    ):
+        return True, "first_lift_option_led_ready"
+
+    quality = float(
+        getattr(ict, "flat_vertical_quality", 0)
+        or row.get("flatVerticalQuality")
+        or 0
+    )
+    if v_rip_ready and not (elite_base_ready or armed_launch):
+        min_quality = float(
+            getattr(settings, "ict_v_rip_min_quality", 50.0) or 50.0
+        )
+        min_score = float(
+            getattr(settings, "ict_v_rip_min_score", 40.0) or 40.0
+        )
+    elif elite_base_ready and not armed_launch:
+        min_quality = float(
+            getattr(settings, "ict_elite_base_ready_min_quality", 55.0) or 55.0
+        )
+        min_score = float(
+            getattr(settings, "ict_elite_base_ready_min_score", 45.0) or 45.0
+        )
+    elif armed_launch:
+        min_quality = float(
+            getattr(settings, "ict_armed_base_launch_min_quality", 65.0) or 65.0
+        )
+        min_score = float(
+            getattr(settings, "ict_armed_base_launch_min_score", 65.0) or 65.0
+        )
+    else:
+        min_quality = float(
+            getattr(settings, "first_lift_trade_min_quality", 65.0) or 65.0
+        )
+        min_score = float(
+            getattr(settings, "first_lift_trade_min_score", 62.0) or 62.0
+        )
+    # Helper-confirmed lane: a base lift with enough independent confirmations may enter on
+    # a lower quality/score/velocity bar (the confirmations ARE the proof it's a real FTV).
+    helper_confirmed, _helper_ct = _helper_confirmed_lift(
+        row=row, ict=ict, snap=snap, event=event, settings=settings,
+    )
+    if helper_confirmed:
+        min_quality = min(
+            min_quality,
+            float(getattr(settings, "first_lift_helper_confirm_min_quality", 50.0) or 50.0),
+        )
+        min_score = min(
+            min_score,
+            float(getattr(settings, "first_lift_helper_confirm_min_score", 45.0) or 45.0),
+        )
+    if quality < min_quality:
+        return False, f"first_lift_quality<{min_quality:g}"
+
+    score = float(
+        getattr(event, "explosion_score", 0)
+        or row.get("explosionScore")
+        or row.get("score")
+        or 0
+    )
+    if score < min_score:
+        return False, f"first_lift_score<{min_score:g}"
+
+    v3 = float(
+        getattr(event, "velocity_3s", 0)
+        or row.get("velocity3s")
+        or row.get("velocity_3s")
+        or 0
+    )
+    v9 = float(
+        getattr(event, "velocity_9s", 0)
+        or row.get("velocity9s")
+        or row.get("velocity_9s")
+        or 0
+    )
+    if v_rip_ready and not (elite_base_ready or armed_launch):
+        min_v3 = float(
+            getattr(settings, "ict_v_rip_min_velocity_3s", 1.2) or 1.2
+        )
+        min_v9 = float(
+            getattr(settings, "ict_v_rip_min_velocity_9s", 0.8) or 0.8
+        )
+    else:
+        min_v3 = float(
+            getattr(
+                settings,
+                (
+                    "ict_elite_base_ready_min_velocity_3s"
+                    if elite_base_ready
+                    else "ict_armed_base_launch_min_velocity_3s"
+                    if armed_launch
+                    else "first_lift_trade_min_velocity_3s"
+                ),
+                1.5 if elite_base_ready else (2.0 if armed_launch else 1.5),
+            )
+            or (1.5 if elite_base_ready else (2.0 if armed_launch else 1.5))
+        )
+        min_v9 = float(
+            getattr(
+                settings,
+                (
+                    "ict_elite_base_ready_min_velocity_9s"
+                    if elite_base_ready
+                    else "ict_armed_base_launch_min_velocity_9s"
+                    if armed_launch
+                    else "first_lift_trade_min_velocity_9s"
+                ),
+                1.5 if elite_base_ready else (1.5 if armed_launch else 1.0),
+            )
+            or (1.5 if elite_base_ready else (1.5 if armed_launch else 1.0))
+        )
+    if helper_confirmed:
+        min_v3 = min(
+            min_v3,
+            float(getattr(settings, "first_lift_helper_confirm_min_velocity_3s", 1.2) or 1.2),
+        )
+        min_v9 = min(
+            min_v9,
+            float(getattr(settings, "first_lift_helper_confirm_min_velocity_9s", 0.6) or 0.6),
+        )
+    if not sustained_lift and v3 < min_v3:
+        return False, f"first_lift_velocity3s<{min_v3:g}"
+    if not sustained_lift and v9 < min_v9:
+        return False, f"first_lift_velocity9s<{min_v9:g}"
+
+    volume_surge = float(
+        getattr(event, "volume_surge", 0)
+        or getattr(ict, "volume_surge", 0)
+        or row.get("volumeSurge")
+        or 0
+    )
+    volume_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
+    min_volume = float(
+        getattr(settings, "first_lift_trade_min_volume_surge", 2.0) or 2.0
+    )
+    absolute_volume = float(
+        getattr(event, "volume", 0)
+        or row.get("volume")
+        or row.get("absoluteVolume")
+        or 0
+    )
+    if strict_armed_path:
+        min_absolute = float(
+            getattr(settings, "ict_armed_base_launch_min_absolute_volume", 25000.0)
+            or 25000.0
+        )
+        orderflow_proof = bool(
+            absolute_volume >= min_absolute
+            or row.get("optionCvdBuying")
+            or row.get("orderflowConfirmed")
+        )
+        if not orderflow_proof:
+            return False, f"armed_base_orderflow_below_{min_absolute:g}"
+    elif not volume_awake and volume_surge < min_volume:
+        return False, f"first_lift_volume_surge<{min_volume:g}"
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False, "first_lift_side_invalid"
+
+    if v_rip_ready and not strict_armed_path:
+        if not volume_awake and volume_surge < min_volume:
+            return False, f"first_lift_volume_surge<{min_volume:g}"
+        from app.engines.moneyness import classify_moneyness
+        from app.models.schemas import Side
+
+        strike = float(
+            getattr(event, "strike", 0)
+            or row.get("strike")
+            or 0
+        )
+        spot = float(getattr(snap, "spot", 0) or 0)
+        atm = float(getattr(snap, "atmStrike", 0) or 0)
+        if strike <= 0 or spot <= 0:
+            return False, "v_rip_moneyness_unavailable"
+        money = classify_moneyness(
+            Side(side),
+            strike,
+            spot,
+            symbol=str(getattr(snap, "symbol", "") or ""),
+            atm=atm if atm > 0 else None,
+        )
+        if money not in ("ATM", "ITM"):
+            return False, f"v_rip_requires_atm_itm_{money.lower()}"
+        return True, "v_rip_session_low_ready"
+
+    if strict_armed_path:
+        sample_count = int(
+            getattr(ict, "armed_base_samples", 0)
+            or row.get("ictArmedBaseSamples")
+            or 0
+        )
+        span = float(
+            getattr(ict, "armed_base_span_seconds", 0)
+            or row.get("ictArmedBaseSpanSeconds")
+            or 0
+        )
+        min_samples = int(
+            getattr(settings, "ict_armed_base_min_samples", 6) or 6
+        )
+        min_span = float(
+            getattr(settings, "ict_armed_base_min_span_seconds", 15.0) or 15.0
+        )
+        if sample_count < min_samples or span < min_span:
+            return False, "armed_base_stability_not_confirmed"
+        min_tqs = float(
+            getattr(settings, "ict_armed_base_launch_min_tqs", 50.0) or 50.0
+        )
+        if float(getattr(snap, "tradeQualityScore", 0) or 0) < min_tqs:
+            return False, f"armed_base_tqs<{min_tqs:g}"
+        from app.engines.moneyness import classify_moneyness
+        from app.models.schemas import Side
+
+        strike = float(
+            getattr(event, "strike", 0)
+            or row.get("strike")
+            or 0
+        )
+        spot = float(getattr(snap, "spot", 0) or 0)
+        atm = float(getattr(snap, "atmStrike", 0) or 0)
+        if strike <= 0 or spot <= 0:
+            return False, "armed_base_moneyness_unavailable"
+        money = classify_moneyness(
+            Side(side),
+            strike,
+            spot,
+            symbol=str(getattr(snap, "symbol", "") or ""),
+            atm=atm if atm > 0 else None,
+        )
+        if money not in ("ATM", "ITM"):
+            return False, f"armed_base_requires_atm_itm_{money.lower()}"
+        return True, (
+            "elite_base_ready_s_preauthorized"
+            if elite_base_ready
+            else "armed_base_option_led_ready"
+        )
+
+    # A confirmed ATM/ITM option can lead the slower 5m spot chart. This path is
+    # deliberately stronger than normal first-lift readiness: it requires an A/B+
+    # base, faster sustained v3/v9, and both absolute-volume awakening and surge.
+    # It only replaces the lagging index-turn proof; all selector fade/chase,
+    # premium, moneyness, session, preorder, and risk guards still run.
+    strike = float(
+        getattr(event, "strike", 0)
+        or row.get("strike")
+        or 0
+    )
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0)
+    option_led_quality = float(
+        getattr(settings, "first_lift_option_led_min_quality", 65.0) or 65.0
+    )
+    option_led_v3 = float(
+        getattr(settings, "first_lift_option_led_min_velocity_3s", 1.5) or 1.5
+    )
+    option_led_v9 = float(
+        getattr(settings, "first_lift_option_led_min_velocity_9s", 1.5) or 1.5
+    )
+    if (
+        bool(getattr(settings, "first_lift_option_led_enabled", True))
+        and strike > 0
+        and spot > 0
+        and quality >= option_led_quality
+        and v3 >= max(min_v3, option_led_v3)
+        and v9 >= max(min_v9, option_led_v9)
+        and volume_awake
+        and volume_surge >= min_volume
+    ):
+        from app.engines.moneyness import classify_moneyness
+        from app.models.schemas import Side
+
+        money = classify_moneyness(
+            Side(side),
+            strike,
+            spot,
+            symbol=str(getattr(snap, "symbol", "") or ""),
+            atm=atm if atm > 0 else None,
+        )
+        if money in ("ATM", "ITM"):
+            return True, (
+                "armed_base_option_led_ready"
+                if armed_launch
+                else "first_lift_option_led_ready"
+            )
+
+    chart = snap.spotChart
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
+    mom10 = float(getattr(chart, "momentum10Pct", 0) or 0)
+    mom15 = float(getattr(chart, "momentum15Pct", 0) or 0)
+    shift = float(
+        getattr(settings, "first_lift_trade_min_momentum_shift_pct", 0.03)
+        or 0.03
+    )
+    if side == "CALL":
+        if mom5 >= mom10 and mom5 >= mom15 + shift:
+            return True, "first_lift_entry_ready"
+    elif mom5 <= mom10 and mom5 <= mom15 - shift:
+        return True, "first_lift_entry_ready"
+    return False, "first_lift_index_turn_not_confirmed"
 
 
 def premium_poll_history(symbol: str, strike: float, side: Side | str) -> list[tuple[datetime, float, float]]:
     """Read rolling premium poll history for ICT gap detection."""
-    from app.engines.explosion_detector import _history, _strike_key
+    from app.engines.explosion_detector import (
+        PREMIUM_POLL_WINDOW_SECONDS,
+        _history,
+        _strike_key,
+    )
 
     side_val = side.value if isinstance(side, Side) else str(side).upper()
     key = _strike_key(strike, Side(side_val))
     hist = _history.get(symbol.upper(), {}).get(key)
     if not hist:
         return []
-    return list(hist)
+    rows = list(hist)
+    cutoff = rows[-1][0] - timedelta(seconds=PREMIUM_POLL_WINDOW_SECONDS)
+    return [row for row in rows if row[0] >= cutoff]
 
 
 def _detect_premium_fvg(
@@ -174,20 +1236,23 @@ def _detect_flat_base(history: list[tuple[datetime, float, float]], settings) ->
     Excludes the last 3–4 polls (breakout candles) so the rip itself does not
     destroy the flat-base signal (e.g. 26–28 base then 32/38/45).
 
-    Returns (is_flat, max_dev_pct, base_level) — base_level is the consolidation
-    premium the breakout launched from (used for base-relative move measurement).
+    Returns (is_flat, max_dev_pct, base_level). ``base_level`` is the **lowest**
+    premium in the flat window (true local launch pad), not the average — so
+    first-lift % is measured from the trough and appears at ~15% off that low,
+    not after a chase measured from a higher mid-base.
     """
     if len(history) < 6:
         return False, 0.0, 0.0
     # Drop breakout tail; keep at least 4 base samples.
     trim = 4 if len(history) >= 10 else 3
-    base = [h[1] for h in list(history)[:-trim]]
+    base = [float(h[1]) for h in list(history)[:-trim] if float(h[1] or 0) > 0]
     if len(base) < 4:
         return False, 0.0, 0.0
     avg = sum(base) / len(base)
     if avg <= 0:
         return False, 0.0, 0.0
     max_dev = max(abs(p - avg) / avg * 100 for p in base)
+    use_lowest = bool(getattr(settings, "ict_flat_base_use_lowest", True))
     # Also accept a short rolling window of 5–6 bars with low range.
     if max_dev > settings.ict_flat_base_max_range_pct and len(base) >= 6:
         window = base[-6:]
@@ -195,8 +1260,12 @@ def _detect_flat_base(history: list[tuple[datetime, float, float]], settings) ->
         if wavg > 0:
             wdev = max(abs(p - wavg) / wavg * 100 for p in window)
             if wdev <= settings.ict_flat_base_max_range_pct:
-                return True, wdev, wavg
-    return max_dev <= settings.ict_flat_base_max_range_pct, max_dev, avg
+                level = min(window) if use_lowest else wavg
+                return True, wdev, float(level)
+    if max_dev <= settings.ict_flat_base_max_range_pct:
+        level = min(base) if use_lowest else avg
+        return True, max_dev, float(level)
+    return False, max_dev, 0.0
 
 
 def _detect_local_swing_base(
@@ -225,7 +1294,11 @@ def _detect_local_swing_base(
     lookback = int(getattr(settings, "ict_local_base_lookback_polls", 16) or 16)
     lookback = max(4, lookback)
     window = list(history)[-lookback:] if history else []
-    premiums = [float(h[1]) for h in window if float(h[1] or 0) > 0]
+    samples = [
+        (h[0], float(h[1]))
+        for h in window
+        if float(h[1] or 0) > 0
+    ]
 
     # Merge ~30m local-base hist so ICT still sees the trough after the rip.
     try:
@@ -244,10 +1317,15 @@ def _detect_local_swing_base(
                 lo_cut = now - timedelta(seconds=int(LOCAL_BASE_WINDOW_SECONDS))
                 for ts, p in dq:
                     if ts >= lo_cut and _is_meaningful_premium(p):
-                        premiums.append(float(p))
+                        samples.append((ts, float(p)))
     except Exception:
         pass
 
+    try:
+        samples.sort(key=lambda item: item[0].timestamp())
+    except (AttributeError, TypeError, ValueError):
+        return False, 0.0, 0.0
+    premiums = [premium_value for _, premium_value in samples]
     if len(premiums) < 4:
         return False, 0.0, 0.0
     local_low = min(premiums)
@@ -272,6 +1350,160 @@ def _detect_local_swing_base(
         if not near_low and not in_early_pad:
             return False, 0.0, 0.0
     return True, local_low, base_rel
+
+
+def _detect_recent_window_base(
+    *,
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    premium: float,
+    settings: Any,
+) -> tuple[bool, float, float]:
+    """Confirm a durable base from the medium-horizon premium tape.
+
+    The fast ICT history is intentionally short for velocity, but a 5-minute
+    chart base often forms over 10–30 minutes. Require repeated support prints
+    around the low so one bad tick cannot become a first-lift launch pad.
+    """
+    if not symbol or side is None or strike <= 0 or premium <= 0:
+        return False, 0.0, 0.0
+    try:
+        from app.engines.explosion_detector import (
+            LOCAL_BASE_EXCLUDE_RECENT_SECONDS,
+            LOCAL_BASE_WINDOW_SECONDS,
+            _is_meaningful_premium,
+            _local_base_hist,
+            _open_key,
+        )
+
+        side_v = side if isinstance(side, Side) else Side(str(side).upper())
+        rows = list(_local_base_hist.get(_open_key(symbol, strike, side_v)) or [])
+    except Exception:
+        return False, 0.0, 0.0
+    if not rows:
+        return False, 0.0, 0.0
+
+    now = rows[-1][0]
+    window_seconds = int(
+        getattr(
+            settings,
+            "ict_recent_base_window_seconds",
+            LOCAL_BASE_WINDOW_SECONDS,
+        )
+        or LOCAL_BASE_WINDOW_SECONDS
+    )
+    exclude_seconds = int(
+        getattr(
+            settings,
+            "ict_recent_base_exclude_seconds",
+            LOCAL_BASE_EXCLUDE_RECENT_SECONDS,
+        )
+        or LOCAL_BASE_EXCLUDE_RECENT_SECONDS
+    )
+    lo_cut = now - timedelta(seconds=max(60, window_seconds))
+    hi_cut = now - timedelta(seconds=max(5, exclude_seconds))
+    samples = [
+        (ts, float(value))
+        for ts, value in rows
+        if lo_cut <= ts <= hi_cut and _is_meaningful_premium(value)
+    ]
+    min_samples = max(
+        3,
+        int(getattr(settings, "ict_recent_base_min_samples", 6) or 6),
+    )
+    if len(samples) < min_samples:
+        return False, 0.0, 0.0
+
+    base = min(value for _, value in samples)
+    support_band_pct = max(
+        1.0,
+        float(getattr(settings, "ict_recent_base_support_band_pct", 8.0) or 8.0),
+    )
+    support = [
+        (ts, value)
+        for ts, value in samples
+        if value <= base * (1.0 + support_band_pct / 100.0)
+    ]
+    min_support = max(
+        2,
+        int(getattr(settings, "ict_recent_base_min_support_samples", 3) or 3),
+    )
+    if len(support) < min_support:
+        return False, 0.0, 0.0
+    support_span = (support[-1][0] - support[0][0]).total_seconds()
+    min_span = max(
+        0.0,
+        float(getattr(settings, "ict_recent_base_min_support_span_seconds", 30.0) or 30.0),
+    )
+    if support_span < min_span:
+        return False, 0.0, 0.0
+    max_age = max(
+        60.0,
+        float(getattr(settings, "ict_recent_base_max_age_seconds", 900.0) or 900.0),
+    )
+    if (hi_cut - support[-1][0]).total_seconds() > max_age:
+        return False, 0.0, 0.0
+
+    base_rel = max(0.0, (premium - base) / base * 100.0)
+    early_max = float(
+        getattr(settings, "ict_structured_early_max_move_pct", 65.0) or 65.0
+    )
+    if base_rel <= 0 or base_rel > early_max:
+        return False, 0.0, 0.0
+    return True, base, base_rel
+
+
+def _sustained_armed_base_lift(
+    history: list[tuple],
+    *,
+    base_premium: float,
+    premium: float,
+    base_move_pct: float,
+    settings: Any,
+) -> bool:
+    """Confirm a causal lift when sparse-but-fresh samples cannot produce v3/v9."""
+    if not history or base_premium <= 0 or premium <= 0:
+        return False
+    min_move = float(
+        getattr(settings, "ict_armed_sustained_lift_min_move_pct", 8.0) or 8.0
+    )
+    max_move = float(
+        getattr(settings, "ict_armed_sustained_lift_max_move_pct", 25.0) or 25.0
+    )
+    if not min_move <= base_move_pct <= max_move:
+        return False
+    now = history[-1][0]
+    lookback = float(
+        getattr(settings, "ict_armed_sustained_lift_lookback_seconds", 120.0) or 120.0
+    )
+    rows = [
+        (ts, float(value))
+        for ts, value, *_ in history
+        if 0 <= (now - ts).total_seconds() <= lookback and float(value or 0) > 0
+    ]
+    min_samples = int(
+        getattr(settings, "ict_armed_sustained_lift_min_samples", 3) or 3
+    )
+    if len(rows) < min_samples:
+        return False
+    span = (rows[-1][0] - rows[0][0]).total_seconds()
+    min_span = float(
+        getattr(settings, "ict_armed_sustained_lift_min_span_seconds", 15.0) or 15.0
+    )
+    if span < min_span:
+        return False
+    prior_low = min(value for _, value in rows[:-1])
+    progress = (premium - prior_low) / prior_low * 100.0 if prior_low > 0 else 0.0
+    min_progress = float(
+        getattr(settings, "ict_armed_sustained_lift_min_progress_pct", 3.0) or 3.0
+    )
+    max_fade = float(
+        getattr(settings, "ict_armed_sustained_lift_max_fade_pct", 2.5) or 2.5
+    )
+    recent_high = max(value for _, value in rows)
+    fade = (recent_high - premium) / recent_high * 100.0 if recent_high > 0 else 100.0
+    return progress >= min_progress and fade <= max_fade
 
 
 def analyze_ict_breakout(
@@ -305,45 +1537,131 @@ def analyze_ict_breakout(
     swing_found, swing_low, swing_rel = _detect_local_swing_base(
         history, premium, settings, symbol=symbol, strike=strike, side=side,
     )
+    from app.engines.explosion_detector import armed_base_anchor
+
+    armed_meta = armed_base_anchor(
+        symbol, strike, side, premium, settings=settings,
+    )
+    base_armed = bool(armed_meta.get("armed"))
+    armed_samples = int(armed_meta.get("sampleCount") or 0)
+    armed_span = float(armed_meta.get("spanSeconds") or 0)
+    armed_range = float(armed_meta.get("rangePct") or 0)
+    armed_at = str(armed_meta.get("armedAt") or "")
+    armed_expires_at = str(armed_meta.get("expiresAt") or "")
     early_min = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
-    # Prefer local swing low after a dump (V-bottom) over flat-base average; otherwise
-    # use consolidation base. Day-open % is intentionally not used here.
+    # First-lift floor — appear at the structured local-base pad (~15%), not after chase.
+    first_lift_lo = float(
+        getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0
+    )
+    first_lift_hi = float(
+        getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0
+    )
+    # A newly established flat consolidation is the launch pad even when an older,
+    # deeper session/V low exists. Otherwise the stale low turns a genuine 15% first
+    # lift off the coil into a 40%+ "chase". V-bottoms remain the fallback when there
+    # is no trustworthy flat.
     local_swing_base = False
     base_level = 0.0
     base_rel_move = 0.0
-    if swing_found and swing_low > 0:
-        local_swing_base = True
-        base_level = swing_low
-        base_rel_move = swing_rel
-    elif flat and flat_base > 0 and premium > 0:
+    trusted_flat = False
+    if flat and flat_base > 0 and premium > 0:
         cand_rel = (premium - flat_base) / flat_base * 100.0
         # Flat-at-the-highs after a rip is NOT a launch pad (Jul30 77700: baseRel=0
         # while session printed +1626% / fake mega). Require real lift off the base.
-        if cand_rel >= early_min * 0.5:
+        if cand_rel >= min(early_min, first_lift_lo) * 0.5:
+            trusted_flat = True
             base_level = flat_base
             base_rel_move = cand_rel
+    if not trusted_flat and swing_found and swing_low > 0:
+        local_swing_base = True
+        base_level = swing_low
+        base_rel_move = swing_rel
+    if not trusted_flat and not local_swing_base:
+        recent_found, recent_base, recent_rel = _detect_recent_window_base(
+            symbol=symbol,
+            strike=strike,
+            side=side,
+            premium=premium,
+            settings=settings,
+        )
+        if recent_found:
+            local_swing_base = True
+            base_level = recent_base
+            base_rel_move = recent_rel
+            reasons.append(f"recent_window_base_{recent_base:.1f}")
 
-    # Seed / deepen from detector session low. Prefer the deeper authentic low
-    # so a morning dump (~233) is not replaced by a mid-morning consolidation
-    # average (~254) that delays the first legal lift off the true base.
-    if premium > 0:
+    # The causal armed anchor is the shared REST/WS denominator. It supersedes
+    # observation-local flat/swing choices and is sticky upward for its horizon.
+    mid_rip_coil = bool(armed_meta.get("midRipCoil"))
+    if mid_rip_coil:
+        reasons.append("mid_rip_coil_rejected")
+    if base_armed:
+        base_level = float(armed_meta.get("basePremium") or 0)
+        base_rel_move = float(armed_meta.get("baseRelativeMovePct") or 0)
+        local_swing_base = True
+        reasons.append(f"armed_base_{base_level:.1f}")
+
+    # Session-low fallback is only for V-shaped legs without a trusted flat coil.
+    # Never replace a recent flat trough with an older session low.
+    sess_low = 0.0
+    sess_peak = 0.0
+    if premium > 0 and not trusted_flat:
         try:
             from app.engines.explosion_detector import (
                 get_session_low_premium,
                 session_move_min_baseline,
+                _session_peak,
+                _open_key,
             )
 
             sess_low = get_session_low_premium(symbol, strike, side)
+            try:
+                sess_peak = float(
+                    _session_peak.get(_open_key(symbol, strike, side)) or 0
+                )
+            except Exception:
+                sess_peak = 0.0
             floor = session_move_min_baseline(settings)
             if sess_low >= floor and premium > sess_low:
                 off_low = (premium - sess_low) / sess_low * 100.0
-                if off_low >= early_min * 0.5:
-                    deepen = base_level <= 0 or sess_low < base_level * 0.97
-                    if deepen:
+                if off_low >= min(early_min, first_lift_lo) * 0.5:
+                    if base_level <= 0:
                         local_swing_base = True
                         base_level = sess_low
                         base_rel_move = off_low
                         reasons.append(f"session_low_base_{sess_low:.1f}")
+        except Exception:
+            pass
+
+    # Mid-rip pause coil (armed or recent-window) above a real trough must not
+    # mint a fake "2–5% early" pad. Remeasure from the session trough so chase
+    # gates see the true expansion (Aug19 SENSEX 76900 PE).
+    if (
+        premium > 0
+        and sess_low > 0
+        and base_level > 0
+        and not trusted_flat
+    ):
+        try:
+            from app.engines.explosion_detector import mid_rip_armed_coil
+
+            if mid_rip_armed_coil(
+                session_low=sess_low,
+                armed_base=base_level,
+                premium=premium,
+                session_peak=sess_peak,
+                settings=settings,
+            ):
+                off_low = (premium - sess_low) / sess_low * 100.0
+                reasons.append(
+                    f"mid_rip_coil_rejected_{base_level:.1f}_use_session_low_{sess_low:.1f}"
+                )
+                base_level = sess_low
+                base_rel_move = off_low
+                local_swing_base = True
+                mid_rip_coil = True
+                # Contaminated armed state cannot authorize elite/armed early entry.
+                base_armed = False
         except Exception:
             pass
 
@@ -356,11 +1674,161 @@ def analyze_ict_breakout(
         or surge_awaken
     )
     displacement = velocity_3s >= settings.ict_displacement_min_velocity_3s
+    armed_launch_lo = float(
+        getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
+    )
+    armed_launch_hi = float(
+        getattr(settings, "ict_armed_base_launch_max_move_pct", 12.0) or 12.0
+    )
+    armed_launch_v3 = float(
+        getattr(settings, "ict_armed_base_launch_min_velocity_3s", 1.5) or 1.5
+    )
+    armed_launch_v9 = float(
+        getattr(settings, "ict_armed_base_launch_min_velocity_9s", 1.5) or 1.5
+    )
+    fast_armed_launch = bool(
+        base_armed
+        and not mid_rip_coil
+        and armed_launch_lo <= base_rel_move <= armed_launch_hi
+        and velocity_3s >= armed_launch_v3
+        and velocity_9s >= armed_launch_v9
+        and vol_awaken
+    )
+    sustained_armed_lift = bool(
+        base_armed
+        and not mid_rip_coil
+        and _sustained_armed_base_lift(
+            history,
+            base_premium=base_level,
+            premium=premium,
+            base_move_pct=base_rel_move,
+            settings=settings,
+        )
+    )
+    armed_launch = fast_armed_launch or sustained_armed_lift
+    elite_ready_lo = float(
+        getattr(settings, "ict_elite_base_ready_min_move_pct", 2.0) or 2.0
+    )
+    elite_ready_hi = float(
+        getattr(settings, "ict_elite_base_ready_max_move_pct", 5.0) or 5.0
+    )
+    elite_ready_v3 = float(
+        getattr(settings, "ict_elite_base_ready_min_velocity_3s", 1.5) or 1.5
+    )
+    elite_ready_v9 = float(
+        getattr(settings, "ict_elite_base_ready_min_velocity_9s", 1.5) or 1.5
+    )
+    elite_base_ready = bool(
+        getattr(settings, "ict_elite_base_ready_enabled", True)
+        and base_armed
+        and not mid_rip_coil
+        and tier in ("BUILDING", "EXPLODING", "ELITE")
+        and elite_ready_lo <= base_rel_move < elite_ready_hi
+        and velocity_3s >= elite_ready_v3
+        and velocity_9s >= elite_ready_v9
+        and vol_awaken
+    )
+    # Continuous V-rip off the session/day trough — sparse polls often skip the
+    # narrow 2–5% elite window (125→140 in one sample). Keep auth open 2–25%.
+    session_low_armed = bool(armed_meta.get("sessionLowArmed"))
+    near_low_pct = float(
+        getattr(settings, "ict_v_rip_base_near_session_low_pct", 2.0) or 2.0
+    )
+    base_is_v_trough = bool(
+        sess_low > 0
+        and base_level > 0
+        and abs(base_level - sess_low) / sess_low * 100.0 <= near_low_pct
+    )
+    v_rip_lo = float(getattr(settings, "ict_v_rip_min_move_pct", 2.0) or 2.0)
+    v_rip_hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    v_rip_v3 = float(getattr(settings, "ict_v_rip_min_velocity_3s", 1.2) or 1.2)
+    v_rip_v9 = float(getattr(settings, "ict_v_rip_min_velocity_9s", 0.8) or 0.8)
+    v_rip_ready = bool(
+        getattr(settings, "ict_v_rip_ready_enabled", True)
+        and not mid_rip_coil
+        and (base_armed or local_swing_base)
+        and (session_low_armed or base_is_v_trough)
+        and tier in ("BUILDING", "EXPLODING", "ELITE")
+        and v_rip_lo <= base_rel_move <= v_rip_hi + 1e-6
+        and (
+            vol_awaken
+            or displacement
+            or velocity_3s >= v_rip_v3
+        )
+        and (
+            velocity_3s >= v_rip_v3
+            or vol_awaken
+        )
+        and (
+            velocity_9s >= v_rip_v9
+            or vol_awaken
+            or sustained_armed_lift
+        )
+    )
+    # BUILDING mid-rip / local-base early-lift flag for radar.
+    building_rip_v3 = float(
+        getattr(settings, "building_rip_min_velocity_3s", 1.5) or 1.5
+    )
+    building_rip_v9 = float(
+        getattr(settings, "building_rip_min_velocity_9s", 0.8) or 0.8
+    )
+    building_rip_lo = float(
+        getattr(settings, "building_rip_min_move_pct", 2.0) or 2.0
+    )
+    building_rip_hi = float(
+        getattr(settings, "building_rip_max_move_pct", 55.0) or 55.0
+    )
+    local_lift_lo = float(
+        getattr(settings, "building_rip_local_base_min_move_pct", 2.0) or 2.0
+    )
+    local_lift_hi = float(
+        getattr(settings, "building_rip_local_base_max_move_pct", 15.0) or 15.0
+    )
+    local_lift_v3 = float(
+        getattr(settings, "building_rip_local_base_min_velocity_3s", 1.2) or 1.2
+    )
+    structure_for_rip = max(base_rel_move, float(move or 0))
+    # After promote BUILDING→EXPLODING, keep the rip sleeve if reason stamped it.
+    building_tier_ok = tier == "BUILDING" or (
+        tier == "EXPLODING" and "buildingRip" in str(reason or "")
+    )
+    local_base_lift_ready = bool(
+        getattr(settings, "building_rip_bullish_enabled", True)
+        and getattr(settings, "building_rip_local_base_lift_enabled", True)
+        and not mid_rip_coil
+        and building_tier_ok
+        and (local_swing_base or base_armed)
+        and local_lift_lo <= base_rel_move <= local_lift_hi + 1e-6
+        and velocity_3s >= local_lift_v3
+        and (vol_awaken or volume_surge >= float(
+            getattr(settings, "building_rip_min_volume_surge", 1.8) or 1.8
+        ))
+    )
+    mid_rip_ready = bool(
+        getattr(settings, "building_rip_bullish_enabled", True)
+        and not mid_rip_coil
+        and building_tier_ok
+        and velocity_3s >= building_rip_v3
+        and (velocity_9s >= building_rip_v9 or vol_awaken)
+        and (vol_awaken or volume_surge >= float(
+            getattr(settings, "building_rip_min_volume_surge", 1.8) or 1.8
+        ))
+        and building_rip_lo <= structure_for_rip <= building_rip_hi + 1e-6
+    )
+    building_rip_ready = mid_rip_ready or local_base_lift_ready
+    if local_base_lift_ready:
+        reasons.append(
+            f"building_local_base_lift_{base_rel_move:.1f}%_v3_{velocity_3s:.1f}"
+        )
+    elif mid_rip_ready:
+        reasons.append(
+            f"building_rip_bullish_{structure_for_rip:.1f}%_v3_{velocity_3s:.1f}"
+        )
     early_v3 = float(getattr(settings, "ict_early_vertical_min_velocity_3s", 2.0) or 2.0)
     # Structure / early-window heat: prefer local-base move when we have one.
     structure_move = base_rel_move if base_rel_move > 0 else move
     vertical = move >= settings.ict_vertical_min_session_move_pct
-    # Early breakout: flat OR local V-base + heat + ≥28% from that base.
+    # Early breakout: flat OR local V-base + heat + ≥ early_min from that base.
     early_break = (
         (flat or local_swing_base)
         and structure_move >= early_min
@@ -371,6 +1839,50 @@ def analyze_ict_breakout(
             or velocity_3s >= early_v3
         )
     )
+    if armed_launch:
+        early_break = True
+        reasons.append(
+            f"armed_base_launch_{base_level:.1f}_{base_rel_move:.1f}%"
+        )
+        if sustained_armed_lift:
+            reasons.append("armed_base_sustained_lift")
+    elif elite_base_ready:
+        early_break = True
+        reasons.append(
+            f"elite_base_ready_{base_level:.1f}_{base_rel_move:.1f}%"
+        )
+    elif v_rip_ready:
+        early_break = True
+        reasons.append(
+            f"v_rip_session_low_{base_level:.1f}_{base_rel_move:.1f}%"
+        )
+    elif building_rip_ready:
+        early_break = True
+    # First lift off the lowest local base — appear in the 15–40% pad with heat,
+    # before day-% / chase tiers light up. Soft velocity OK when volume confirms.
+    first_lift_v3 = float(
+        getattr(settings, "ict_first_lift_min_velocity_3s", 1.2) or 1.2
+    )
+    first_lift_heat = (
+        displacement
+        or vol_awaken
+        or fvg
+        or velocity_3s >= first_lift_v3
+        or (velocity_3s >= early_v3 * 0.6 and volume_surge >= 1.6)
+    )
+    first_lift = bool(
+        getattr(settings, "ict_first_lift_appear_enabled", True)
+        and (flat or local_swing_base)
+        and base_level > 0
+        and (base_rel_move + 1e-6) >= first_lift_lo
+        and base_rel_move <= (first_lift_hi + 1e-6)
+        and first_lift_heat
+    )
+    if first_lift:
+        early_break = True
+        reasons.append(
+            f"first_lift_local_base_{base_level:.1f}_{base_rel_move:.0f}%"
+        )
     flat_then_vertical = (
         (flat and vertical and base_rel_move >= early_min * 0.5)
         or early_break
@@ -395,6 +1907,22 @@ def analyze_ict_breakout(
     )
     if not flat_then_vertical:
         fv_quality, fv_grade = 0.0, ""
+    elif sustained_armed_lift:
+        # Sustained armed lift is early FTV — floor quality so WINNER (≥70) can
+        # authorize inside the pad before grade lags to A (still score-gated).
+        fv_quality = max(fv_quality, 70.0)
+        fv_grade = "B" if fv_grade not in ("A+", "A") else fv_grade
+    elif (
+        early_break
+        and tier in ("EXPLODING", "ELITE")
+        and 5.0 <= base_rel_move <= 25.0
+        and (vol_awaken or displacement)
+    ):
+        # Early FTV heat in catch window — quality often prints B mid-60s while
+        # the rip is still near base; floor to WINNER bar without lowering score.
+        fv_quality = max(fv_quality, 70.0)
+        if fv_grade not in ("A+", "A"):
+            fv_grade = "B"
     mega_floor = float(getattr(settings, "ict_mega_rip_min_session_move_pct", 200.0) or 200.0)
     try:
         max_credible = float(getattr(settings, "session_move_max_credible_pct", 500.0))
@@ -467,7 +1995,7 @@ def analyze_ict_breakout(
     # Displacement alone must not activate ICT on tiny session moves (Jul20 +1% noise).
     early_floor = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
     immature_floor = float(
-        getattr(settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
+        getattr(settings, "explosion_immature_min_session_move_pct", 28.0) or 28.0
     )
     displacement_only_ok = displacement and move >= immature_floor and (flat or vol_awaken or fvg)
     active = (
@@ -506,6 +2034,18 @@ def analyze_ict_breakout(
         local_swing_base=local_swing_base,
         flat_vertical_quality=fv_quality,
         flat_vertical_grade=fv_grade,
+        first_lift=first_lift,
+        base_armed=base_armed,
+        elite_base_ready=elite_base_ready,
+        v_rip_ready=v_rip_ready,
+        building_rip_ready=building_rip_ready,
+        armed_base_launch=armed_launch,
+        armed_base_sustained_lift=sustained_armed_lift,
+        armed_base_samples=armed_samples,
+        armed_base_span_seconds=armed_span,
+        armed_base_range_pct=armed_range,
+        armed_at=armed_at,
+        armed_base_expires_at=armed_expires_at,
     )
 
 
@@ -587,6 +2127,115 @@ def late_fade_chase_blocked(
     if move >= min_peak and v3 <= max_v3:
         return True, f"ict_late_fade_chase_peak_{move:.0f}%_v3_{v3:.1f}"
     return False, ""
+
+
+def _expiry_worst_session(
+    *,
+    day_mode: str = "",
+    state: Any = None,
+    meta: Optional[dict[str, Any]] = None,
+) -> bool:
+    """True for EXPIRY WORST / expiry+worst day labels (Aug18 loss cluster)."""
+    blobs: list[str] = [str(day_mode or "")]
+    if isinstance(meta, dict):
+        for key in ("dayMode", "dayType", "mode", "message"):
+            blobs.append(str(meta.get(key) or ""))
+        day_adaptive = meta.get("dayAdaptive")
+        if isinstance(day_adaptive, dict):
+            blobs.append(str(day_adaptive.get("dayMode") or ""))
+            blobs.append(str(day_adaptive.get("dayType") or ""))
+    if state is not None:
+        for attr in ("dayMode", "day_mode", "dailyStrategy", "dayAdaptive"):
+            raw = getattr(state, attr, None)
+            if isinstance(raw, dict):
+                blobs.extend(
+                    str(raw.get(k) or "")
+                    for k in ("dayMode", "dayType", "message", "mode")
+                )
+                nested = raw.get("dayAdaptive")
+                if isinstance(nested, dict):
+                    blobs.append(str(nested.get("dayMode") or ""))
+                    blobs.append(str(nested.get("dayType") or ""))
+            else:
+                blobs.append(str(raw or ""))
+    joined = " ".join(blobs).upper()
+    if "EXPIRY WORST" in joined:
+        return True
+    # "EXPIRY DAY" + WORST dayType still counts (post-midday label drift).
+    if "EXPIRY" in joined and "WORST" in joined:
+        return True
+    return False
+
+
+def _defensive_base_rip_top_allowed(
+    *,
+    tier: str,
+    quality: float,
+    score: float,
+    velocity_3s: float,
+    settings: Any,
+) -> tuple[bool, str]:
+    """Always-on top floor for defensive/worst local-base rips (not every EXPLODING)."""
+    if not bool(getattr(settings, "ict_defensive_base_rip_require_top_quality", True)):
+        return True, "ok"
+    tier_u = str(tier or "").upper()
+    if tier_u not in {"ELITE", "EXPLODING"}:
+        return False, f"defensive_rip_top_tier_{tier_u.lower() or 'unknown'}"
+    min_quality = float(
+        getattr(settings, "ict_defensive_base_rip_min_quality", 70.0) or 70.0
+    )
+    if float(quality or 0) < min_quality:
+        return False, f"defensive_rip_top_quality<{min_quality:g}"
+    min_score = float(
+        getattr(settings, "ict_defensive_base_rip_min_score", 80.0) or 80.0
+    )
+    if float(score or 0) < min_score:
+        return False, f"defensive_rip_top_score<{min_score:g}"
+    min_v3 = float(
+        getattr(settings, "ict_defensive_base_rip_min_velocity_3s", 2.5) or 2.5
+    )
+    if float(velocity_3s or 0) < min_v3:
+        return False, f"defensive_rip_top_v3<{min_v3:g}"
+    return True, "ok"
+
+
+def _expiry_worst_defensive_rip_allowed(
+    *,
+    tier: str,
+    quality: float,
+    score: float,
+    velocity_3s: float,
+    settings: Any,
+) -> tuple[bool, str]:
+    """Raised bar for defensive/armed base rips on EXPIRY WORST days."""
+    if not bool(getattr(settings, "ict_defensive_base_rip_block_expiry_worst", True)):
+        return True, "ok"
+    min_tier = str(
+        getattr(settings, "ict_defensive_base_rip_expiry_worst_min_tier", "ELITE")
+        or "ELITE"
+    ).upper()
+    tier_rank = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
+    if tier_rank.get(str(tier or "").upper(), 0) < tier_rank.get(min_tier, 4):
+        return False, f"expiry_worst_defensive_rip_tier_{str(tier or 'unknown').lower()}"
+    min_quality = float(
+        getattr(settings, "ict_defensive_base_rip_expiry_worst_min_quality", 85.0)
+        or 85.0
+    )
+    if float(quality or 0) < min_quality:
+        return False, f"expiry_worst_defensive_rip_quality<{min_quality:g}"
+    min_score = float(
+        getattr(settings, "ict_defensive_base_rip_expiry_worst_min_score", 90.0)
+        or 90.0
+    )
+    if float(score or 0) < min_score:
+        return False, f"expiry_worst_defensive_rip_score<{min_score:g}"
+    min_v3 = float(
+        getattr(settings, "ict_defensive_base_rip_expiry_worst_min_velocity_3s", 3.0)
+        or 3.0
+    )
+    if float(velocity_3s or 0) < min_v3:
+        return False, f"expiry_worst_defensive_rip_v3<{min_v3:g}"
+    return True, "ok"
 
 
 def good_day_ict_capture_active(
@@ -695,6 +2344,34 @@ def good_day_ict_capture_active(
                 else f"defensive_base_rip_tier_{tier_u.lower()}"
             )
             return False, meta
+        score = float(getattr(event, "explosion_score", 0) or 0) if event else 0.0
+        v3 = float(getattr(event, "velocity_3s", 0) or 0) if event else float(ict.velocity_3s or 0)
+        quality = float(getattr(ict, "flat_vertical_quality", 0) or 0)
+        # EXPIRY WORST: ELITE + high floors. Other defensive days: top ELITE/EXPLODING only.
+        if _expiry_worst_session(day_mode=day_mode, state=state, meta=meta):
+            ok, deny = _expiry_worst_defensive_rip_allowed(
+                tier=tier_u,
+                quality=quality,
+                score=score,
+                velocity_3s=v3,
+                settings=settings,
+            )
+            if not ok:
+                meta["deniedReason"] = deny
+                meta["expiryWorstDefensiveRipBlocked"] = True
+                return False, meta
+        else:
+            ok_top, deny_top = _defensive_base_rip_top_allowed(
+                tier=tier_u,
+                quality=quality,
+                score=score,
+                velocity_3s=v3,
+                settings=settings,
+            )
+            if not ok_top:
+                meta["deniedReason"] = deny_top
+                meta["defensiveRipTopBlocked"] = True
+                return False, meta
         max_move = float(getattr(settings, "ict_defensive_base_rip_max_move_pct", 55.0) or 55.0)
         # ELITE local-base gate uses pad % (not session/day %) — day% can be 50+
         # while LTP is still ~28% off the pad; those must still take.
@@ -777,6 +2454,8 @@ def _ict_max_profit_trade(trade: Any) -> bool:
     ctx = getattr(trade, "entryContext", None) or {}
     return bool(
         ctx.get("maxProfitCapture")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictFirstLift")
         or ctx.get("goodDayIctCapture")
         or ctx.get("allDayIctCapture")
         or ctx.get("ictMegaRip")

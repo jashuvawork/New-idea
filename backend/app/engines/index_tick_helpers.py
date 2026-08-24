@@ -1,0 +1,631 @@
+"""Index-level tick helpers — NIFTY/SENSEX spot moves that lift strike premiums.
+
+Strike LTP alone is lagging: sudden BUILDING/ELITE lifts are usually driven by
+the *index* ticking (spot spike / squeeze / momentum turn). This module:
+
+  1. Observes index WebSocket ticks (thin — not a second radar).
+  2. Scores whether the index move confirms an option side.
+  3. Wakes the BUILDING LTP cycle when the index spikes so we re-score helpers.
+
+Aug19 lesson: SENSEX spot ticks + bearish chart/breadth helped 76900 PE lift
+from the V-base — premium tape alone was too late.
+"""
+
+from __future__ import annotations
+
+import time
+from collections import defaultdict, deque
+from dataclasses import asdict, dataclass, field
+from typing import Any, Optional
+
+from app.config import get_settings
+from app.services.upstox import INDEX_KEYS
+
+# instrument_key -> symbol
+_INDEX_SYMBOL_BY_KEY = {
+    str(v).replace(":", "|"): k for k, v in INDEX_KEYS.items()
+}
+
+# Per-symbol last spike fingerprint (v3 at spike time).
+_last_spike: dict[str, dict[str, Any]] = {}
+# Per-symbol rolling history of recent spike moments: (monotonic_ts, v3).
+_spike_history: dict[str, deque[tuple[float, float]]] = defaultdict(deque)
+# Per-symbol rolling raw LTP history: (monotonic_ts, ltp) — every index tick, so a slow
+# sustained drift (below the sharp 3s spike bar) is still measurable over 30-60s.
+_ltp_history: dict[str, deque[tuple[float, float]]] = defaultdict(deque)
+# Per-symbol intraday session extremes from the live index tape (no REST lag). Reset daily.
+# {symbol: {"date": date, "open": float, "hi": float, "lo": float, "last": float}}
+_session_extremes: dict[str, dict[str, Any]] = {}
+# Pending wake flags — building_ltp_monitor_due consumes these.
+_pending_wake_symbols: set[str] = set()
+_observer_registered: bool = False
+
+
+def index_session_extremes(symbol: str) -> dict[str, Any]:
+    """Live intraday index session open/high/low/last for one symbol (tick-maintained)."""
+    return dict(_session_extremes.get(str(symbol or "").upper()) or {})
+
+
+def _snap_session_extremes(snap: Any) -> tuple[float, float]:
+    """Broker candle-derived session high/low from the snapshot (available at open/restart).
+
+    Read from chartAnalysis.institutional (SMC sessionHigh/sessionLow), falling back to the
+    MarketProfile opening-range extremes. Returns (0.0, 0.0) when unavailable.
+    """
+    if snap is None:
+        return 0.0, 0.0
+    try:
+        ca = getattr(snap, "chartAnalysis", None)
+        inst = getattr(ca, "institutional", None) if ca is not None else None
+        if isinstance(inst, dict):
+            hi = float(inst.get("sessionHigh") or 0)
+            lo = float(inst.get("sessionLow") or 0)
+            if hi > 0 or lo > 0:
+                return hi, lo
+    except Exception:
+        pass
+    try:
+        prof = getattr(snap, "marketProfile", None)
+        if prof is not None:
+            hi = float(getattr(prof, "openingRangeHigh", 0) or 0)
+            lo = float(getattr(prof, "openingRangeLow", 0) or 0)
+            return hi, lo
+    except Exception:
+        pass
+    return 0.0, 0.0
+
+
+def recent_index_drift(
+    symbol: str,
+    side: Any,
+    *,
+    window_seconds: Optional[float] = None,
+) -> dict[str, Any]:
+    """Net same-direction spot move over a window — catches steady grinds, not just spikes.
+
+    Some FTVs are driven by a slow index bleed rather than sharp 3s spikes (Aug19 SENSEX
+    76900 PE: ~-99pts/90s, each 3s step below the spike bar). The NET move over the window
+    naturally cancels chop (mean-reversion nets to ~0), so a modest threshold isolates a
+    genuine directional grind that lifts the aligned option side.
+    """
+    settings = get_settings()
+    out = {"net_pct": 0.0, "pts": 0.0, "aligned": False, "drift": False}
+    if not bool(getattr(settings, "index_drift_enabled", True)):
+        return out
+    sym = str(symbol or "").upper()
+    hist = _ltp_history.get(sym)
+    if not hist or len(hist) < 2:
+        return out
+    if window_seconds is None:
+        window_seconds = float(
+            getattr(settings, "index_drift_window_seconds", 45.0) or 45.0
+        )
+    now = hist[-1][0]
+    cutoff = now - float(window_seconds)
+    start_ltp = None
+    for ts, ltp in hist:
+        if ts >= cutoff:
+            start_ltp = ltp
+            break
+    last_ltp = hist[-1][1]
+    if not start_ltp or start_ltp <= 0 or last_ltp <= 0:
+        return out
+    net_pct = (last_ltp - start_ltp) / start_ltp * 100.0
+    out["net_pct"] = round(net_pct, 4)
+    out["pts"] = round(last_ltp - start_ltp, 1)
+    side_u = _side_str(side)
+    min_move = float(getattr(settings, "index_drift_min_move_pct", 0.05) or 0.05)
+    if side_u == "CALL":
+        out["aligned"] = net_pct >= min_move
+    elif side_u == "PUT":
+        out["aligned"] = net_pct <= -min_move
+    else:
+        out["aligned"] = abs(net_pct) >= min_move
+    out["drift"] = bool(out["aligned"])
+    return out
+
+
+def recent_index_spike_thrust(
+    symbol: str,
+    side: Any,
+    *,
+    window_seconds: Optional[float] = None,
+) -> dict[str, Any]:
+    """Summarise the recent history of index spike MOMENTS for one side.
+
+    A cluster of same-direction spot spikes in a short window is a far stronger
+    "the index is thrusting" signal than a single blip — it is what typically drags a
+    coiled BUILDING strike into a flat->vertical lift. Returns the count of aligned
+    spikes, their net %, and whether they form a burst.
+    """
+    settings = get_settings()
+    out = {"count": 0, "aligned_count": 0, "net_pct": 0.0, "burst": False}
+    if not bool(getattr(settings, "index_spike_history_enabled", True)):
+        return out
+    sym = str(symbol or "").upper()
+    hist = _spike_history.get(sym)
+    if not hist:
+        return out
+    if window_seconds is None:
+        window_seconds = float(
+            getattr(settings, "index_spike_history_window_seconds", 45.0) or 45.0
+        )
+    now = time.monotonic()
+    cutoff = now - float(window_seconds)
+    recent = [(ts, v3) for ts, v3 in hist if ts >= cutoff]
+    if not recent:
+        return out
+    side_u = _side_str(side)
+    if side_u == "CALL":
+        aligned = [v3 for _ts, v3 in recent if v3 > 0]
+    elif side_u == "PUT":
+        aligned = [v3 for _ts, v3 in recent if v3 < 0]
+    else:
+        aligned = [v3 for _ts, v3 in recent]
+    out["count"] = len(recent)
+    out["aligned_count"] = len(aligned)
+    out["net_pct"] = round(sum(aligned), 4)
+    min_count = int(getattr(settings, "index_spike_burst_min_count", 3) or 3)
+    out["burst"] = len(aligned) >= min_count
+    return out
+
+
+@dataclass
+class IndexTickHelpers:
+    """Index-level confirmation board for one symbol + option side."""
+
+    symbol: str = ""
+    side: str = ""
+    velocity_3s: float = 0.0
+    velocity_9s: float = 0.0
+    tick_align: bool = False
+    tick_spike: bool = False
+    spike_burst: bool = False
+    spike_burst_count: int = 0
+    drift_align: bool = False
+    drift_net_pct: float = 0.0
+    mom_align: bool = False
+    squeeze_align: bool = False
+    breadth_align: bool = False
+    helpers: list[str] = field(default_factory=list)
+    helper_count: int = 0
+    confirming: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def reset_index_tick_helpers_for_tests() -> None:
+    global _observer_registered
+    _last_spike.clear()
+    _spike_history.clear()
+    _ltp_history.clear()
+    _session_extremes.clear()
+    _pending_wake_symbols.clear()
+    # Keep observer registered across tests once installed.
+    _ = _observer_registered
+
+
+def ensure_index_tick_observer() -> None:
+    """Idempotent: register thin index-tick observer on the WS tape."""
+    global _observer_registered
+    if _observer_registered:
+        return
+    settings = get_settings()
+    if not bool(getattr(settings, "index_tick_helpers_enabled", True)):
+        return
+    from app.services.tick_store import on_tick
+
+    on_tick(_on_index_tick)
+    _observer_registered = True
+
+
+def _norm_key(key: str) -> str:
+    return str(key or "").replace(":", "|")
+
+
+def _on_index_tick(instrument_key: str, ltp: float) -> None:
+    """Lightweight: only act on NIFTY/SENSEX/BANKNIFTY index keys."""
+    symbol = _INDEX_SYMBOL_BY_KEY.get(_norm_key(instrument_key))
+    if not symbol:
+        return
+    settings = get_settings()
+    if not bool(getattr(settings, "index_tick_helpers_enabled", True)):
+        return
+    # Record EVERY index tick into the longer LTP buffer first (drift needs the full grind,
+    # not only spikes). Bounded by the drift history window.
+    if bool(getattr(settings, "index_drift_enabled", True)):
+        lh = _ltp_history[symbol]
+        lh.append((time.monotonic(), float(ltp)))
+        hist_secs = float(
+            getattr(settings, "index_drift_history_seconds", 120.0) or 120.0
+        )
+        cutoff = time.monotonic() - hist_secs
+        while lh and lh[0][0] < cutoff:
+            lh.popleft()
+    # Maintain intraday session high/low from the live tape (reset on a new IST day).
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+        ext = _session_extremes.get(symbol)
+        if ext is None or ext.get("date") != today:
+            _session_extremes[symbol] = {
+                "date": today, "open": float(ltp),
+                "hi": float(ltp), "lo": float(ltp), "last": float(ltp),
+            }
+        else:
+            if float(ltp) > ext["hi"]:
+                ext["hi"] = float(ltp)
+            if float(ltp) < ext["lo"]:
+                ext["lo"] = float(ltp)
+            ext["last"] = float(ltp)
+    except Exception:
+        pass
+    try:
+        from app.services.tick_store import get_velocity_pct
+
+        key = INDEX_KEYS.get(symbol)
+        if not key:
+            return
+        v3 = get_velocity_pct(
+            key,
+            window_seconds=3.0,
+            max_age_seconds=3.0,
+            min_span_seconds=0.5,
+        )
+        v9 = get_velocity_pct(
+            key,
+            window_seconds=9.0,
+            max_age_seconds=5.0,
+            min_span_seconds=1.0,
+        )
+    except Exception:
+        return
+    if v3 is None:
+        return
+    spike_abs = float(
+        getattr(settings, "index_tick_spike_abs_velocity_3s", 0.035) or 0.035
+    )
+    if abs(float(v3)) < spike_abs:
+        return
+    _last_spike[symbol] = {
+        "v3": float(v3),
+        "v9": float(v9 or 0.0),
+        "ltp": float(ltp),
+    }
+    if bool(getattr(settings, "index_spike_history_enabled", True)):
+        hist = _spike_history[symbol]
+        hist.append((time.monotonic(), float(v3)))
+        max_len = int(getattr(settings, "index_spike_history_max", 40) or 40)
+        while len(hist) > max(1, max_len):
+            hist.popleft()
+    if bool(getattr(settings, "index_tick_wake_building_cycle", True)):
+        _pending_wake_symbols.add(symbol)
+
+
+def peek_index_spike_wake(
+    symbols: Optional[set[str]] = None,
+) -> tuple[bool, list[str]]:
+    """True when an index spike should wake BUILDING re-score for watched symbols."""
+    if not _pending_wake_symbols:
+        return False, []
+    if symbols is None:
+        hit = sorted(_pending_wake_symbols)
+        return bool(hit), hit
+    hit = sorted(s for s in _pending_wake_symbols if s in symbols)
+    return bool(hit), hit
+
+
+def clear_index_spike_wake(symbols: Optional[set[str]] = None) -> None:
+    if symbols is None:
+        _pending_wake_symbols.clear()
+        return
+    for s in list(symbols):
+        _pending_wake_symbols.discard(s)
+
+
+def last_index_spike(symbol: str) -> dict[str, Any]:
+    return dict(_last_spike.get(str(symbol).upper()) or {})
+
+
+def _side_str(side: Any) -> str:
+    if hasattr(side, "value"):
+        return str(side.value).upper()
+    return str(side or "").upper()
+
+
+def evaluate_index_tick_helpers(
+    *,
+    snap: Any,
+    side: Any,
+    alert: Optional[dict[str, Any]] = None,
+) -> IndexTickHelpers:
+    """Score index-level helpers that typically precede a strike premium lift."""
+    settings = get_settings()
+    out = IndexTickHelpers()
+    if not bool(getattr(settings, "index_tick_helpers_enabled", True)):
+        return out
+
+    symbol = str(
+        getattr(snap, "symbol", "")
+        or (alert or {}).get("symbol")
+        or ""
+    ).upper()
+    side_u = _side_str(side) or _side_str((alert or {}).get("side"))
+    out.symbol = symbol
+    out.side = side_u
+    if not symbol or side_u not in ("CALL", "PUT"):
+        return out
+
+    # Live index tape velocity (actual spot move, not strike premium).
+    key = INDEX_KEYS.get(symbol)
+    if key:
+        try:
+            from app.services.tick_store import get_velocity_pct
+
+            v3 = get_velocity_pct(
+                key,
+                window_seconds=3.0,
+                max_age_seconds=5.0,
+                min_span_seconds=0.5,
+            )
+            v9 = get_velocity_pct(
+                key,
+                window_seconds=9.0,
+                max_age_seconds=8.0,
+                min_span_seconds=1.0,
+            )
+            if v3 is not None:
+                out.velocity_3s = float(v3)
+            if v9 is not None:
+                out.velocity_9s = float(v9)
+        except Exception:
+            pass
+    # Fall back to last spike stamp if live tape is quiet but we just saw a spike.
+    if out.velocity_3s == 0.0:
+        spike = last_index_spike(symbol)
+        if spike:
+            out.velocity_3s = float(spike.get("v3") or 0)
+            out.velocity_9s = float(spike.get("v9") or out.velocity_9s)
+
+    min_align = float(
+        getattr(settings, "index_tick_align_abs_velocity_3s", 0.02) or 0.02
+    )
+    spike_abs = float(
+        getattr(settings, "index_tick_spike_abs_velocity_3s", 0.035) or 0.035
+    )
+    if side_u == "CALL":
+        out.tick_align = out.velocity_3s >= min_align
+        out.tick_spike = out.velocity_3s >= spike_abs
+    else:
+        out.tick_align = out.velocity_3s <= -min_align
+        out.tick_spike = out.velocity_3s <= -spike_abs
+
+    # Chart momentum turn (5 vs 15) — index accelerating into the option side.
+    chart = getattr(snap, "spotChart", None) if snap is not None else None
+    if chart is not None:
+        mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
+        mom15 = float(getattr(chart, "momentum15Pct", 0) or 0)
+        shift = float(
+            getattr(settings, "index_tick_mom_shift_pct", 0.03) or 0.03
+        )
+        if side_u == "CALL":
+            out.mom_align = mom5 >= mom15 + shift and mom5 > 0
+        else:
+            out.mom_align = mom5 <= mom15 - shift and mom5 < 0
+        # Soft: chart already direction-aligned counts as mom helper too.
+        if not out.mom_align:
+            try:
+                from app.engines.spot_direction import side_aligned_with_chart
+
+                if side_aligned_with_chart(side_u, chart):
+                    direction = str(getattr(chart, "direction", "") or "").upper()
+                    if direction in ("BULLISH", "BEARISH"):
+                        out.mom_align = True
+            except Exception:
+                pass
+
+    # Squeeze release toward the side.
+    try:
+        from app.engines.advanced_indicators import index_squeeze_confirms_side
+
+        out.squeeze_align = bool(index_squeeze_confirms_side(side_u, snap))
+    except Exception:
+        out.squeeze_align = False
+
+    # Breadth bias (index constituents / session bias).
+    try:
+        from app.engines.symbol_cooldown import side_aligned_with_breadth
+
+        bias = str(getattr(getattr(snap, "breadth", None), "bias", "") or "")
+        out.breadth_align = bool(side_aligned_with_breadth(side_u, bias))
+    except Exception:
+        out.breadth_align = False
+
+    # History of spike moments — a burst of same-direction spot spikes is a strong thrust.
+    thrust = recent_index_spike_thrust(symbol, side_u)
+    out.spike_burst = bool(thrust.get("burst"))
+    out.spike_burst_count = int(thrust.get("aligned_count") or 0)
+
+    # Sustained drift — a steady same-direction grind below the sharp spike bar.
+    drift = recent_index_drift(symbol, side_u)
+    out.drift_align = bool(drift.get("drift"))
+    out.drift_net_pct = float(drift.get("net_pct") or 0.0)
+
+    helpers: list[str] = []
+    if out.tick_spike:
+        helpers.append("index_tick_spike")
+    elif out.tick_align:
+        helpers.append("index_tick_align")
+    if out.spike_burst:
+        helpers.append("index_spike_burst")
+    if out.drift_align:
+        helpers.append("index_drift")
+    if out.mom_align:
+        helpers.append("index_mom_turn")
+    if out.squeeze_align:
+        helpers.append("index_squeeze")
+    if out.breadth_align:
+        helpers.append("index_breadth")
+
+    out.helpers = helpers
+    out.helper_count = len(helpers)
+    min_needed = int(
+        getattr(settings, "index_tick_min_helpers_confirm", 2) or 2
+    )
+    # Need tape or structure — never breadth alone. Spike burst / sustained drift both
+    # count as tape thrust (the actual spot move behind a strike lift).
+    has_tape = bool(
+        {"index_tick_spike", "index_tick_align", "index_spike_burst", "index_drift"}
+        & set(helpers)
+    )
+    has_structure = bool(
+        {"index_mom_turn", "index_squeeze", "index_breadth"} & set(helpers)
+    )
+    out.confirming = (
+        out.helper_count >= min_needed and (has_tape or (has_structure and out.mom_align))
+    )
+    # Single strong spike + one structure helper is enough (Aug19 shape).
+    if out.tick_spike and has_structure:
+        out.confirming = True
+    # A confirmed same-direction spike burst plus any structure is a strong thrust.
+    if out.spike_burst and has_structure:
+        out.confirming = True
+    # A sustained same-direction drift plus any structure confirms a grind-driven lift.
+    if out.drift_align and has_structure:
+        out.confirming = True
+    return out
+
+
+def stamp_index_tick_helpers(
+    alert: dict[str, Any],
+    helpers: IndexTickHelpers,
+) -> dict[str, Any]:
+    """Attach index helper board onto live alert for FTV / UI / archive replay."""
+    out = dict(alert)
+    out["indexSpotMove3s"] = round(helpers.velocity_3s, 4)
+    out["indexSpotMove9s"] = round(helpers.velocity_9s, 4)
+    out["indexTickAlign"] = bool(helpers.tick_align)
+    out["indexTickSpike"] = bool(helpers.tick_spike)
+    out["indexSpikeBurst"] = bool(helpers.spike_burst)
+    out["indexSpikeBurstCount"] = int(helpers.spike_burst_count)
+    out["indexDrift"] = bool(helpers.drift_align)
+    out["indexDriftNetPct"] = round(float(helpers.drift_net_pct), 4)
+    out["indexMomAlign"] = bool(helpers.mom_align)
+    out["indexSqueezeAlign"] = bool(helpers.squeeze_align)
+    out["indexHelpers"] = list(helpers.helpers)
+    out["indexHelperCount"] = int(helpers.helper_count)
+    out["indexHelpersConfirm"] = bool(helpers.confirming)
+    return out
+
+
+def index_helpers_confirm_from_alert(alert: Optional[dict[str, Any]]) -> bool:
+    if not isinstance(alert, dict):
+        return False
+    if bool(alert.get("indexHelpersConfirm")):
+        return True
+    helpers = alert.get("indexHelpers") or []
+    if isinstance(helpers, list) and len(helpers) >= 2:
+        return "index_tick_spike" in helpers or "index_tick_align" in helpers
+    return False
+
+
+def index_trend_breakout(
+    symbol: str,
+    side: Any,
+    snap: Any = None,
+    *,
+    settings: Any = None,
+) -> dict[str, Any]:
+    """Is the INDEX genuinely breaking out on this side right now?
+
+    A morning "chop/worst day" verdict goes stale once the spot actually trends. This is
+    True only when ALL hold: spot at/near a fresh session extreme (new high for CALL / low
+    for PUT), aligned 5m momentum, AND a confirmed index thrust (sustained drift OR a
+    same-direction spike burst). It requires a real session range + sustained thrust, so a
+    single spike on a flat chop tape cannot trip it.
+    """
+    settings = settings or get_settings()
+    out: dict[str, Any] = {"breakout": False, "reasons": []}
+    if not bool(getattr(settings, "worst_day_intraday_trend_override_enabled", True)):
+        return out
+    sym = str(symbol or "").upper()
+    side_u = _side_str(side)
+    if side_u not in ("CALL", "PUT"):
+        return out
+    ext = _session_extremes.get(sym) or {}
+    hi = float(ext.get("hi") or 0)
+    lo = float(ext.get("lo") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0) or float(ext.get("last") or 0)
+    # Seed / widen from the broker candle-derived session high/low so the override is
+    # accurate IMMEDIATELY at open and after any restart (the tick tracker starts cold and
+    # would otherwise need to rebuild the full-session extremes from the first tick).
+    snap_hi, snap_lo = _snap_session_extremes(snap)
+    if snap_hi > 0:
+        hi = max(hi, snap_hi)
+    if snap_lo > 0:
+        lo = min(lo, snap_lo) if lo > 0 else snap_lo
+    if spot <= 0 or hi <= 0 or lo <= 0:
+        return out
+    range_pct = (hi - lo) / lo * 100.0 if lo else 0.0
+    min_range = float(getattr(settings, "index_trend_override_min_range_pct", 0.15) or 0.15)
+    if range_pct < min_range:
+        out["reasons"].append("range_too_tight")
+        return out
+    near_pct = float(getattr(settings, "index_trend_override_near_extreme_pct", 0.05) or 0.05)
+    mom_min = float(getattr(settings, "index_trend_override_min_mom5_pct", 0.10) or 0.10)
+    chart = getattr(snap, "spotChart", None) if snap is not None else None
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0) if chart is not None else 0.0
+    drift = recent_index_drift(sym, side_u)
+    thrust = recent_index_spike_thrust(sym, side_u)
+    if side_u == "CALL":
+        near = spot >= hi * (1.0 - near_pct / 100.0)
+        mom_ok = mom5 >= mom_min
+    else:
+        near = spot <= lo * (1.0 + near_pct / 100.0)
+        mom_ok = mom5 <= -mom_min
+    thrust_ok = bool(drift.get("drift") or thrust.get("burst"))
+    reasons: list[str] = []
+    if near:
+        reasons.append("near_session_%s" % ("high" if side_u == "CALL" else "low"))
+    if mom_ok:
+        reasons.append("mom5_%.2f" % mom5)
+    if thrust_ok:
+        reasons.append("index_thrust")
+    out.update(
+        {
+            "breakout": bool(near and mom_ok and thrust_ok),
+            "reasons": reasons,
+            "side": side_u,
+            "symbol": sym,
+            "spot": round(spot, 2),
+            "hi": round(hi, 2),
+            "lo": round(lo, 2),
+            "rangePct": round(range_pct, 3),
+            "mom5": mom5,
+            "driftNetPct": drift.get("net_pct"),
+            "spikeBurst": bool(thrust.get("burst")),
+        }
+    )
+    return out
+
+
+def index_trend_override_active(
+    snapshots: Optional[dict[str, Any]],
+    *,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Session-level: any index breaking out (either side) lifts the stale worst-day pause."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "worst_day_intraday_trend_override_enabled", True)):
+        return False, {}
+    for sym, snap in (snapshots or {}).items():
+        if snap is None or not getattr(snap, "dataAvailable", True):
+            continue
+        for side in ("CALL", "PUT"):
+            bo = index_trend_breakout(sym, side, snap, settings=settings)
+            if bo.get("breakout"):
+                return True, bo
+    return False, {}

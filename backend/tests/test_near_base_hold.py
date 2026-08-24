@@ -39,6 +39,13 @@ def test_near_base_top_runner_detected():
     assert _near_base_top_runner(_trade(14.5, "EXPLODING", psych="OVERCONFIDENCE")) is True
 
 
+def test_watch_first_lift_is_a_near_base_top_runner():
+    trade = _trade(15.0, "WATCH")
+    trade.entryContext["ictFirstLift"] = True
+    trade.entryContext["firstLiftCapture"] = True
+    assert _near_base_top_runner(trade) is True
+
+
 def test_near_base_holds_small_peak():
     """11% off base, peaked +11 now +7.5 → hold (no soft lock)."""
     reason = peak_fade_profit_lock_reason(_trade(11.0), best=11.0, pnl_pts=7.5)
@@ -52,12 +59,12 @@ def test_mid_leg_still_books_on_fade():
 
 
 def test_near_base_still_books_big_peak_fade():
-    """Once a near-base runner prints a big peak (≥28) and gives it back, it books."""
-    reason = peak_fade_profit_lock_reason(_trade(11.0, best=32.0), best=32.0, pnl_pts=8.0)
+    """Once a near-base runner prints a big peak (≥40) and gives it back, it books."""
+    reason = peak_fade_profit_lock_reason(_trade(11.0, best=45.0), best=45.0, pnl_pts=8.0)
     assert reason is not None
 
 
 def test_near_base_breakeven_still_protected():
     """Downside protection intact: near-base runner faded to breakeven still books BE."""
     reason = peak_fade_profit_lock_reason(_trade(11.0, best=11.0), best=11.0, pnl_pts=0.0)
-    assert reason == "explosion_peak_fade_breakeven"
+    assert reason == "explosion_early_green_breakeven"

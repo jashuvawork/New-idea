@@ -87,10 +87,10 @@ def test_scan_chain_keeps_atm_itm_with_premium_band(mock_get_settings, _open):
     reset_detector_state_for_tests()
     mock_get_settings.return_value = _settings(atm_itm_only=True)
 
-    # NIFTY ATM 24500 PUT + ITM 24550 PUT + OTM 24400 PUT
+    # NIFTY ATM 24500 PUT + ITM 24550 PUT + deep OTM 24350 PUT.
     chain = [
         {
-            "strike_price": 24400,
+            "strike_price": 24350,
             "put_options": {"ltp": 40.0, "volume": 100_000},
             "call_options": {"ltp": 80.0, "volume": 10_000},
         },
@@ -112,5 +112,5 @@ def test_scan_chain_keeps_atm_itm_with_premium_band(mock_get_settings, _open):
     chain[0]["put_options"]["ltp"] = 55.0
     events = scan_chain_explosions("NIFTY", chain, spot=24500.0, atm=24500.0)
     put_strikes = {e.strike for e in events if e.side == Side.PUT}
-    assert 24400.0 not in put_strikes, "OTM PUT must be excluded"
+    assert 24350.0 not in put_strikes, "Deep OTM PUT must be excluded"
     assert 24500.0 in put_strikes or 24550.0 in put_strikes, "ATM/ITM PUT should scan"

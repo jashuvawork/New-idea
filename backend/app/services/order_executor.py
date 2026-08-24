@@ -10,6 +10,39 @@ from app.services.upstox import INDEX_KEYS, UpstoxClient, UpstoxError
 logger = logging.getLogger(__name__)
 
 
+def exit_order_tag(trade_id: str) -> str:
+    """Stable broker tag used to reconcile an exit across process restarts."""
+    return f"nqx_{str(trade_id)[:12]}"
+
+
+async def find_existing_exit_order(
+    client: UpstoxClient,
+    trade: PaperTrade,
+) -> Optional[str]:
+    """Return an accepted matching SELL order, if one already exists."""
+    tag = exit_order_tag(trade.id)
+    instrument_key = str((trade.entryContext or {}).get("instrumentKey") or "")
+    for order in await client.get_order_book():
+        if not isinstance(order, dict):
+            continue
+        status = str(order.get("status") or "").lower()
+        if status in {"rejected", "cancelled", "canceled"}:
+            continue
+        if str(order.get("tag") or "") != tag:
+            continue
+        if str(order.get("transaction_type") or "").upper() != "SELL":
+            continue
+        order_instrument = str(
+            order.get("instrument_token") or order.get("instrument_key") or ""
+        )
+        if instrument_key and order_instrument and order_instrument != instrument_key:
+            continue
+        order_id = order.get("order_id")
+        if order_id:
+            return str(order_id)
+    return None
+
+
 def _instrument_from_heatmap(snap: SymbolSnapshot, strike: float, side: Side) -> Optional[str]:
     for row in snap.heatmap:
         if abs(row.strike - strike) < 1:
@@ -136,7 +169,7 @@ async def place_entry_order(
 async def place_exit_order(
     client: UpstoxClient,
     trade: PaperTrade,
-    tag: str = "nq_auto_exit",
+    tag: Optional[str] = None,
 ) -> dict[str, Any]:
     """Place intraday SELL to close an open option position."""
     ctx = trade.entryContext or {}
@@ -149,12 +182,13 @@ async def place_exit_order(
     if quantity <= 0:
         raise UpstoxError("Invalid exit quantity")
 
+    stable_tag = tag or exit_order_tag(trade.id)
     result = await client.place_order({
         "quantity": quantity,
         "product": "I",
         "validity": "DAY",
         "price": 0,
-        "tag": tag,
+        "tag": stable_tag,
         "instrument_token": instrument_key,
         "order_type": "MARKET",
         "transaction_type": "SELL",

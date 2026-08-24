@@ -55,9 +55,13 @@ class Settings(BaseSettings):
     # Postgres (optional)
     postgres_url: str = ""
 
-    # News
-    news_provider: Literal["finnhub", "none"] = "finnhub"
+    # News intelligence. "auto" combines Upstox's instrument/position News API
+    # with Finnhub global cues when configured; either source can operate alone.
+    news_provider: Literal["auto", "upstox", "finnhub", "none"] = "auto"
     finnhub_api_key: str = ""
+    news_intraday_max_age_minutes: int = 360
+    news_next_session_max_age_hours: int = 36
+    news_upstox_positions_enabled: bool = True
 
     # Safety
     enable_live_trading: bool = False
@@ -78,8 +82,11 @@ class Settings(BaseSettings):
     snapshot_cache_interval_ms: int = 150
     tick_wake_debounce_ms: int = 15
     tick_fast_exit_enabled: bool = True
+    trade_mark_persist_seconds: float = 2.0
     entry_scan_interval_ms: int = 1000
     expiry_entry_scan_interval_ms: int = 500
+    # Runner velocity compares consecutive snapshots only while the feed is fresh.
+    runner_velocity_history_max_age_seconds: float = 15.0
     # Cap full REST rebuild so background monitor never stalls UI for minutes.
     full_rest_rebuild_timeout_seconds: float = 25.0
     full_rest_min_seconds: float = 45.0
@@ -120,6 +127,23 @@ class Settings(BaseSettings):
     eod_playbook_start_hour: int = 15
     eod_playbook_start_minute: int = 20
     eod_playbook_use_ai: bool = True
+    # EOD learning is DISABLED by default. It distilled radar OUTCOMES (mfe/mae) into a
+    # knowledge profile, but that pipeline did NOT re-run the live entry gate stack, so its
+    # numbers/recommendations did not reflect real live behaviour. Applying an unvalidated
+    # learning loop to live risk is off until it can be validated against the actual gates.
+    # The code remains, dormant, behind these flags. Trading runs purely on the deterministic
+    # detector + gates.
+    eod_learning_enabled: bool = False
+    eod_learning_real_leg_min_mfe_pct: float = 50.0
+    eod_learning_cleanup_enabled: bool = False
+    eod_learning_raw_retention_days: int = 7
+    # Do NOT apply any learned value to live entries/exits/sizing.
+    eod_learning_apply_enabled: bool = False
+    eod_learning_apply_min_samples: int = 5
+    # Entry-side loop: tighten the ELITE/EXPLODING near-base entry ceiling toward the learned
+    # per-moment value (tighten-only), but never below this floor so genuine near-base first
+    # lifts still qualify. Biases entries nearer the local base without over-blocking.
+    eod_learning_near_base_floor_pct: float = 25.0
     cursor_api_key: str = ""
     cursor_api_base_url: str = "https://api.cursor.com"
     cursor_chat_completions_path: str = "/v1/chat/completions"
@@ -179,6 +203,77 @@ class Settings(BaseSettings):
     scalp_entries_enabled: bool = False
     # Explosion entries: only ELITE + EXPLODING (no soft BUILDING / premium-capture).
     explosion_elite_exploding_only: bool = True
+    # Master hard policy. Strict causal S and final-policy-authorized rank-1
+    # TOP_FTV_A are the only full-sleeve paths.
+    ftv_elite_top_only_enabled: bool = True
+    # Product focus: only top FTV, V-rip, ELITE, and EXPLODING moments (grade A/S).
+    # Blocks B/C sleeves, generic BUILDING without FTV/V triggers, and non-explosion modes.
+    top_moments_only_enabled: bool = True
+    top_moments_min_grade: str = "A"  # A or S; set S for strictest book
+    # One-week validation: lower local-base floors so detection, grading, and entry
+    # can fire at 2–15% pad. Use /api/ai/local-base-audit/{date} to score each day.
+    local_base_audit_week_enabled: bool = False
+    # S_STRICT = top ELITE/EXPLODING at local base only — mid armed prints must
+    # not auto-grade S from the +12 armed-launch boost alone (Aug18 mid EXPLODING).
+    ftv_s_strict_min_explosion_score: float = 85.0
+    ftv_s_strict_min_quality: float = 70.0
+    ftv_s_strict_min_velocity_3s: float = 2.5
+    ftv_s_strict_min_velocity_9s: float = 1.75
+    ftv_s_strict_require_cvd_buying: bool = True
+    ftv_s_strict_min_local_base_move_pct: float = 5.0
+    ftv_s_strict_max_local_base_move_pct: float = 25.0
+    # Winner-like ELITE/EXPLODING at local base (historical book winners) — ordinary
+    # sleeve. Clears past winners that miss CVD-acceleration TOP_FTV_A / full S, while
+    # still rejecting Aug18 mid EXPLODING (~71 / quality B).
+    winner_local_base_enabled: bool = True
+    winner_local_base_min_explosion_score: float = 75.0
+    winner_local_base_min_quality: float = 70.0
+    winner_local_base_min_tqs: float = 50.0
+    winner_local_base_min_velocity_3s: float = 2.2
+    winner_local_base_min_velocity_9s: float = 1.5
+    winner_local_base_min_local_base_move_pct: float = 5.0
+    winner_local_base_max_local_base_move_pct: float = 25.0
+    winner_local_base_max_capital_pct: float = 0.35
+    # Early FTV in the 5–25% pad with heat counts as a fresh causal trigger for
+    # WINNER / TOP_FTV_A even when armed (≤15%) has expired and first-lift (≥15%)
+    # has not flipped yet — closes the radar-sees-it / auth-says-chase lag.
+    # Floors stay ≥75/70 so Aug18 mid EXPLODING (~71/B) stays blocked.
+    winner_local_base_early_ftv_fresh_enabled: bool = True
+    # On WORST / EXPIRY WORST days, WINNER sleeve also needs real option CVD buying
+    # (volume-surge alone is too soft for chop).
+    winner_local_base_require_cvd_on_worst: bool = True
+    # Prefer winner-shaped local-base prints in selector rank so they clear rank-1
+    # while still inside the 5–25% catch window (before 100%+ FTV leaves the pad).
+    winner_local_base_rank_bonus: float = 28.0
+    # Final ftv_authorization_policy mirrors ICT #334 floors on EXPIRY WORST so
+    # afternoon mid-EXPLODING cannot clear WINNER / S_STRICT outside midday trap.
+    ftv_policy_expiry_worst_block_enabled: bool = True
+    ftv_policy_expiry_worst_min_tier: str = "ELITE"
+    ftv_policy_expiry_worst_min_quality: float = 85.0
+    ftv_policy_expiry_worst_min_score: float = 90.0
+    ftv_policy_expiry_worst_min_velocity_3s: float = 3.0
+    # Separate rank-1 authorization for winner-like ELITE/EXPLODING current-data FTV A.
+    # Historical profiles are not treated as proof because old rows lack v9/CVD.
+    top_ftv_a_enabled: bool = True
+    top_ftv_a_min_explosion_score: float = 90.0
+    top_ftv_a_min_quality: float = 70.0
+    top_ftv_a_min_tqs: float = 50.0
+    top_ftv_a_min_velocity_3s: float = 2.5
+    top_ftv_a_min_velocity_9s: float = 1.75
+    top_ftv_a_normal_max_move_pct: float = 25.0
+    top_ftv_a_max_capital_pct: float = 0.90
+    # Extension from 25–40% requires exceptional acceleration and stronger quality.
+    top_ftv_a_exceptional_min_explosion_score: float = 95.0
+    top_ftv_a_exceptional_min_quality: float = 85.0
+    top_ftv_a_exceptional_min_tqs: float = 55.0
+    top_ftv_a_exceptional_min_velocity_3s: float = 5.0
+    top_ftv_a_exceptional_min_velocity_9s: float = 2.5
+    top_ftv_a_exceptional_max_move_pct: float = 40.0
+    # When index spot helpers confirm the lift, waive CVD-acceleration for TOP_FTV_A
+    # (accel often prints after the first take window — Aug19 shape).
+    top_ftv_a_index_helpers_waive_cvd_accel: bool = True
+    # WINNER sleeve → max lots when index helpers confirm (else stays 35%).
+    winner_local_base_index_helpers_max_lots: bool = True
     # Exception: BUILDING only as "elite build" — chart-aligned ICT flat→vertical
     # with ELITE-grade score + hot velocity. Aug7 cold BUILDING (score 56, v3 1.7)
     # must wait for ELITE print or upgrade into these bars.
@@ -229,6 +324,11 @@ class Settings(BaseSettings):
     explosion_top_must_take_min_score: float = 62.0
     explosion_top_must_take_require_atm_itm: bool = True
     explosion_top_must_take_require_chart_align: bool = True
+    # Soft: index tick helpers confirm side even when 5m chart label lags.
+    explosion_top_must_take_allow_index_helpers: bool = True
+    # Soft bypass fake-trap block for must-take ELITE/EXPLODING (still evaluates).
+    top_must_take_bypasses_fake_trap: bool = True
+    top_must_take_fake_trap_requires_index: bool = False
     # Per-trade timing quality (GOOD/OK/COLD/LATE/CHASE) — blocks cold ELITE fills.
     entry_timing_assessment_enabled: bool = True
     entry_timing_cold_max_velocity_3s: float = 1.5
@@ -239,15 +339,20 @@ class Settings(BaseSettings):
     entry_timing_cold_block_on_chop: bool = True
     entry_timing_cold_lot_cap: int = 3
     entry_timing_elite_bypass_requires_hot: bool = True
-    # Aug4 NIFTY 24550 PUT: structured ICT local-base still in window (28.8%) but
-    # live v3 cold (0.8) on chop → was hard-blocked as LATE/COLD, then LTP→120.
-    # Allow these "pause before next leg" moments at capital max lots (worth taking
-    # → full size). Elite never-block still requires GOOD (hot) timing.
-    # True LATE chase (no local base / past ceiling) stays blocked.
+    # A structured pause may be watched/taken small only while premium velocity remains
+    # positive. Negative velocity is a failed launch, not a max-size local-base entry.
     entry_timing_structured_cold_base_allow: bool = True
-    entry_timing_structured_cold_max_lots: bool = True
+    entry_timing_structured_cold_min_velocity_3s: float = 0.5
+    entry_timing_structured_cold_lot_cap: int = 3
+    entry_timing_structured_cold_max_lots: bool = False
     entry_timing_structured_cold_require_heat: bool = True
     entry_timing_structured_cold_require_aligned: bool = True
+    # Ordinary entries use at most 35% capital. The configured 90% sleeve is reserved
+    # for a proven armed-base launch with positive v3/v9, CVD buying and acceleration.
+    ordinary_entry_max_capital_pct: float = 0.35
+    full_sleeve_requires_armed_launch: bool = True
+    full_sleeve_requires_cvd: bool = True
+    full_sleeve_requires_cvd_acceleration: bool = True
     # Promote high-confidence radar explosions the missed-trade monitor flags as bullish/base-window.
     # Does NOT trade premium_out_of_band cheap OTM chases (Jul20 24550 @ ₹3 — correctly blocked).
     missed_explosion_promote_enabled: bool = True
@@ -345,6 +450,216 @@ class Settings(BaseSettings):
     ict_structured_early_entry_enabled: bool = True
     ict_structured_early_min_move_pct: float = 15.0
     ict_structured_early_max_move_pct: float = 65.0
+    # Measure flat→vertical from the lowest premium in the flat window (true local base),
+    # not the average — so the first lift appears at ~15% off the trough, not mid-chase.
+    ict_flat_base_use_lowest: bool = True
+    # Arm FTV / radar as soon as pad is in the structured entry band with heat.
+    ict_first_lift_appear_enabled: bool = True
+    ict_first_lift_min_velocity_3s: float = 1.2
+    # Causal pre-breakout base: repeated past samples arm a contract-local denominator.
+    # It is sticky upward across REST/WS observations and may only ratchet to a proven low.
+    ict_armed_base_enabled: bool = True
+    ict_armed_base_lookback_seconds: float = 900.0
+    ict_armed_base_exclude_recent_seconds: float = 3.0
+    ict_armed_base_min_samples: int = 6
+    ict_armed_base_min_span_seconds: float = 15.0
+    ict_armed_base_max_range_pct: float = 5.0
+    ict_armed_base_horizon_seconds: float = 1800.0
+    ict_armed_base_min_ratchet_pct: float = 2.0
+    # Reject mid-rip pause coils as a "new base" after a real trough expansion
+    # (Aug19 SENSEX 76900 PE: re-armed ~162 after ~90 trough, pad looked 2.6%
+    # "early" while session was already ~42% off the true base).
+    ict_armed_base_block_mid_rip_coil_enabled: bool = True
+    ict_armed_base_mid_rip_min_above_session_low_pct: float = 25.0
+    ict_armed_base_mid_rip_min_off_low_pct: float = 30.0
+    ict_armed_base_mid_rip_min_peak_pullback_pct: float = 35.0
+    # V-bottom: when day-OHLC / session low is known and live premium is still
+    # near that trough, arm it as the launch pad even if sparse LTP never formed
+    # a tight poll coil (Aug19 76900 PE V-base ~125 → 220).
+    ict_armed_base_session_low_arm_enabled: bool = True
+    ict_armed_base_session_low_arm_max_move_pct: float = 12.0
+    # Conservative pre-first-lift launch. Absolute chain volume (or explicit CVD/
+    # orderflow proof) replaces the lagging 2x REST surge requirement.
+    ict_armed_base_launch_min_move_pct: float = 5.0
+    # Overlap first-lift floor (15%) so 12–15% early FTV is not a dead auth zone.
+    ict_armed_base_launch_max_move_pct: float = 15.0
+    # Top-only at local base — mid EXPLODING armed spikes stay watch-only.
+    # Floors stay above Aug18 mid losers but admit prior ELITE/EXPLODING winners.
+    ict_armed_base_launch_min_velocity_3s: float = 2.0
+    ict_armed_base_launch_min_velocity_9s: float = 1.5
+    ict_armed_base_launch_min_absolute_volume: float = 25000.0
+    ict_armed_base_launch_min_quality: float = 65.0
+    ict_armed_base_launch_min_score: float = 65.0
+    ict_armed_base_launch_min_tqs: float = 50.0
+    ict_armed_base_launch_rank_bonus: float = 16.0
+    # Narrow pre-launch authorization: a stable ATM/ITM base may become executable
+    # before +5%, but only with the same live velocity/orderflow quality as a launch.
+    ict_elite_base_ready_enabled: bool = True
+    ict_elite_base_ready_min_move_pct: float = 2.0
+    ict_elite_base_ready_max_move_pct: float = 5.0
+    ict_elite_base_ready_min_velocity_3s: float = 1.5
+    ict_elite_base_ready_min_velocity_9s: float = 1.5
+    ict_elite_base_ready_min_quality: float = 55.0
+    ict_elite_base_ready_min_score: float = 45.0
+    # Continuous V-rip sleeve off the session/day trough. Sparse polls often skip
+    # the narrow 2–5% elite window (125→140); keep auth open through 2–25% so we
+    # do not fail to capture genuine V rips while mid-rip coils stay blocked.
+    ict_v_rip_ready_enabled: bool = True
+    ict_v_rip_min_move_pct: float = 2.0
+    ict_v_rip_max_move_pct: float = 25.0
+    ict_v_rip_min_velocity_3s: float = 1.2
+    ict_v_rip_min_velocity_9s: float = 0.8
+    ict_v_rip_min_quality: float = 50.0
+    ict_v_rip_min_score: float = 40.0
+    ict_v_rip_base_near_session_low_pct: float = 2.0
+    # BUILDING bullish-rip sleeve: when radar is stuck BUILDING but premium is
+    # actively ripping (positive live velocity + volume), take mid-rip toward max.
+    # Cold/negative-v3 BUILDING stays blocked. Does not require session-trough arm.
+    building_rip_bullish_enabled: bool = True
+    building_rip_min_velocity_3s: float = 1.5
+    building_rip_min_velocity_9s: float = 0.8
+    building_rip_min_volume_surge: float = 1.8
+    building_rip_min_score: float = 48.0
+    building_rip_min_move_pct: float = 2.0
+    building_rip_max_move_pct: float = 55.0
+    building_rip_fade_peak_gap_pct: float = 12.0
+    building_rip_promote_to_exploding: bool = True
+    building_rip_rank_bonus: float = 14.0
+    # Local-base early lift: radar already sees the local base as BUILDING; a
+    # measured little lift off that base + positive live velocity = take.
+    building_rip_local_base_lift_enabled: bool = True
+    building_rip_local_base_min_move_pct: float = 2.0
+    building_rip_local_base_max_move_pct: float = 15.0
+    building_rip_local_base_min_velocity_3s: float = 1.2
+    # Align with aggressive_min_explosion_score so ready lifts clear selector floor.
+    building_rip_local_base_min_score: float = 45.0
+    # Precise BUILDING radar LTP monitor: every meaningful WS LTP print on a
+    # BUILDING name re-scans explosions and may take — do not wait for the
+    # slower full entry-scan cadence.
+    building_ltp_monitor_enabled: bool = True
+    building_ltp_monitor_min_ms: float = 75.0
+    building_ltp_min_change_pct: float = 0.15
+    building_ltp_min_change_abs: float = 0.05
+    # After scoring every watched BUILDING name on an LTP cycle, take only the
+    # single best ready name (not the first that happened to print).
+    building_ltp_best_pick_enabled: bool = True
+    building_ltp_best_pick_rank_bonus: float = 48.0
+    building_ltp_only_best_ready: bool = True
+    # Aug19 sudden-lift helper board — monitor what actually helps BUILDING move.
+    building_sudden_lift_monitor_enabled: bool = True
+    building_sudden_lift_min_helpers: int = 3
+    building_sudden_lift_min_pct: float = 0.4
+    building_sudden_lift_min_velocity_3s: float = 1.2
+    building_sudden_lift_min_peak_velocity_3s: float = 3.0
+    building_sudden_lift_min_ftv_quality: float = 55.0
+    building_sudden_lift_min_absolute_volume: float = 25_000.0
+    building_lift_helper_point: float = 3.5
+    building_lift_helping_bonus: float = 18.0
+    building_sudden_ltp_lift_bonus: float = 8.0
+    # Force an entry cycle when helpers flip on even without a large LTP tick.
+    building_helper_flip_triggers_cycle: bool = True
+    # FTV sleeve for confirmed BUILDING lifts: when helpers prove something is
+    # helping (vol / CVD / chart / breadth), authorize without waiting for ELITE.
+    building_rip_ftv_enabled: bool = True
+    building_rip_ftv_min_explosion_score: float = 48.0
+    building_rip_ftv_min_velocity_3s: float = 1.2
+    building_rip_ftv_min_local_base_move_pct: float = 2.0
+    building_rip_ftv_max_local_base_move_pct: float = 55.0
+    # Max lots when helpers confirm the sudden BUILDING lift (same sleeve as TOP_FTV_A).
+    building_rip_ftv_max_capital_pct: float = 0.90
+    building_rip_ftv_force_max_lots: bool = True
+    building_rip_bypasses_extended_chase: bool = True
+    building_rip_bypasses_fake_trap: bool = True
+    # Index tick helpers — NIFTY/SENSEX spot tape that drives strike lifts.
+    index_tick_helpers_enabled: bool = True
+    index_tick_wake_building_cycle: bool = True
+    index_tick_align_abs_velocity_3s: float = 0.02
+    index_tick_spike_abs_velocity_3s: float = 0.035
+    index_tick_mom_shift_pct: float = 0.03
+    index_tick_min_helpers_confirm: int = 2
+    index_tick_confirm_bonus: float = 10.0
+    top_explosion_force_max_allow_index_helpers: bool = True
+    # History of index spike MOMENTS: a burst of same-direction spot spikes in a short
+    # window is a much stronger "the index is thrusting" confirmation than a single blip,
+    # and is exactly what precedes a BUILDING strike suddenly going flat->vertical.
+    index_spike_history_enabled: bool = True
+    index_spike_history_window_seconds: float = 45.0
+    index_spike_history_max: int = 40
+    index_spike_burst_min_count: int = 3
+    index_spike_burst_rank_bonus: float = 4.0
+    # Sustained index DRIFT: some FTVs are driven by a steady grind in the spot (not sharp
+    # spikes), e.g. Aug19 SENSEX 76900 PE where the index bled ~-99pts/90s below the sharp
+    # 3s spike bar. Track a longer index LTP buffer and confirm when the NET same-direction
+    # spot move over a window clears a threshold. Net move cancels chop (mean-reversion), so
+    # a modest 0.05% clears only genuine directional grinds. Calibrated on Aug19 replay:
+    # a 45s net move of 0.05% fires ~6x/session (median chop 45s move ~0.003%).
+    index_drift_enabled: bool = True
+    index_drift_history_seconds: float = 120.0
+    index_drift_window_seconds: float = 45.0
+    index_drift_min_move_pct: float = 0.05
+    index_drift_rank_bonus: float = 3.0
+    # Sparse-feed fallback: a stable ATM/ITM base may launch on sustained 2-minute
+    # premium progress even when 3s/9s velocity samples are unavailable.
+    ict_armed_sustained_lift_min_move_pct: float = 8.0
+    ict_armed_sustained_lift_max_move_pct: float = 25.0
+    ict_armed_sustained_lift_lookback_seconds: float = 120.0
+    ict_armed_sustained_lift_min_samples: int = 3
+    ict_armed_sustained_lift_min_span_seconds: float = 15.0
+    ict_armed_sustained_lift_min_progress_pct: float = 3.0
+    ict_armed_sustained_lift_max_fade_pct: float = 2.5
+    # Durable 5m-style premium base confirmation from the 30-minute tape. Repeated
+    # support samples prevent a single bad tick from becoming a launch pad.
+    ict_recent_base_window_seconds: int = 1800
+    ict_recent_base_exclude_seconds: int = 45
+    ict_recent_base_min_samples: int = 6
+    ict_recent_base_support_band_pct: float = 8.0
+    ict_recent_base_min_support_samples: int = 3
+    ict_recent_base_min_support_span_seconds: float = 30.0
+    ict_recent_base_max_age_seconds: float = 900.0
+    explosion_first_lift_rank_bonus: float = 24.0
+    explosion_first_lift_sweet_max_move_pct: float = 25.0
+    # Actionable first lift: a strict subset of radar first-lifts may enter before
+    # BUILDING upgrades when the base, volume, sustained premium lift and live index
+    # turn all agree. This closes the WATCH/BUILDING dead zone without trading every low.
+    first_lift_trade_enabled: bool = True
+    # Structured local-base first lift — ELITE/EXPLODING winners in the 15–25% pad
+    # (aligned with must-take min score 62; quality keeps mid B-grade out).
+    first_lift_trade_min_score: float = 62.0
+    first_lift_trade_min_quality: float = 65.0
+    first_lift_trade_min_volume_surge: float = 2.0
+    first_lift_trade_min_velocity_3s: float = 1.5
+    first_lift_trade_min_velocity_9s: float = 1.0
+    first_lift_trade_max_move_pct: float = 25.0
+    # Helper-confirmed lane: "on the radar as BUILDING and suddenly something is helping to
+    # go FTV." When enough INDEPENDENT confirmations agree (volume surge/awaken, displacement,
+    # premium FVG, flat->vertical structure, chart-align, breadth-align) on a name at its
+    # local base with positive live velocity, that IS the confirmed FTV — so it may enter on
+    # a LOWER quality/score/velocity bar than a bare first lift, and (BUILDING) may override
+    # the worst-day / BREAKOUT_ONLY block. Un-helped first lifts still hit the strict bar.
+    first_lift_helper_confirm_enabled: bool = True
+    first_lift_helper_confirm_min_helpers: int = 3
+    first_lift_helper_strong_surge: float = 3.0
+    first_lift_helper_confirm_min_quality: float = 50.0
+    first_lift_helper_confirm_min_score: float = 45.0
+    first_lift_helper_confirm_min_velocity_3s: float = 1.2
+    first_lift_helper_confirm_min_velocity_9s: float = 0.6
+    building_rip_helper_override_worst_day: bool = True
+    first_lift_trade_min_momentum_shift_pct: float = 0.03
+    # ATM/ITM premium-led first lift: stronger option evidence may lead a lagging
+    # bearish/bullish spot chart, symmetrically for CE/PE.
+    first_lift_option_led_enabled: bool = True
+    first_lift_option_led_min_quality: float = 65.0
+    first_lift_option_led_min_velocity_3s: float = 1.5
+    first_lift_option_led_min_velocity_9s: float = 1.5
+    first_lift_option_led_rank_bonus: float = 12.0
+    # A strict first lift has stronger early evidence than the generic COLD timing
+    # classifier. Do not wait for lagging breadth/chart state after the measured
+    # local pad, quality, sustained velocity, volume and live momentum turn pass.
+    # Chase, fake-trap, expiry, risk and execution-price checks still apply.
+    first_lift_bypasses_cold_timing_enabled: bool = True
+    # Carry the same strict first-lift proof through the final live chart/MTF
+    # monitor. Premium fading and all non-chart execution checks remain active.
+    first_lift_bypasses_execution_chart_enabled: bool = True
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0
@@ -392,6 +707,15 @@ class Settings(BaseSettings):
     explosion_peak_fade_min_remain_points: float = 0.4
     explosion_peak_fade_breakeven_lock: bool = True
     explosion_peak_fade_breakeven_buffer: float = 0.5
+    # Small winners must not become meaningful losses when live premium rolls over.
+    explosion_early_green_lock_enabled: bool = True
+    explosion_early_green_lock_min_best_points: float = 3.5
+    explosion_early_green_lock_buffer_points: float = 0.5
+    explosion_early_green_lock_max_velocity_3s: float = 0.0
+    # Near-base max-profit FTV: do NOT scratch a tiny +3–5pt early fade to BE
+    # (Aug19 SENSEX 76900 PE: best +5 → early_green_breakeven in ~4m). Use the
+    # near-base hold floor so these runners can extend like prior max winners.
+    explosion_early_green_lock_near_base_max_profit_min_best_points: float = 55.0
     # ICT max-profit / flat→vertical runners: hold through early pullbacks.
     # Aug6 SENSEX 78700 CE: best +15 → soft-locked +6.5 (OVERCONFIDENCE tightened
     # giveback to 50%) then LTP ran to ~460. Require a real expansion peak first.
@@ -405,23 +729,32 @@ class Settings(BaseSettings):
     explosion_peak_fade_bullish_min_velocity_3s: float = 1.5
     # Peak capture — bank near the top once a real peak prints and premium rolls over.
     # Jul31 NIFTY 24500 CE: best ~+10–12pt, trailArm ~23 never armed, time-stop −0.6.
-    # After best ≥8pt, if giveback ≥22% AND live heat is dying → book (~keep 75–80%).
+    # After best ≥8pt, a small giveback + dying live tape confirms the observed top.
     explosion_peak_capture_enabled: bool = True
     explosion_peak_capture_min_best_points: float = 8.0
-    explosion_peak_capture_giveback_ratio: float = 0.22
-    explosion_peak_capture_min_giveback_points: float = 2.0
+    explosion_peak_capture_giveback_ratio: float = 0.12
+    explosion_peak_capture_min_giveback_points: float = 1.0
+    # Never wait through an unbounded percentage giveback on a large spike.
+    explosion_peak_capture_max_giveback_points: float = 8.0
     explosion_peak_capture_min_remain_points: float = 1.0
     explosion_peak_capture_max_live_velocity_3s: float = 1.0
     explosion_peak_capture_max_premium_mom_pct: float = 0.15
     explosion_peak_capture_max_profit_min_best: float = 28.0
     explosion_peak_capture_max_profit_giveback_ratio: float = 0.35
     # Large confirmed-rollover peaks bank near the top instead of giving back a
-    # third of a big rip. Aug12 NIFTY 24350 PE: +36.7pt peak (~₹135) rolled over
-    # (live vel -0.12) but the max-profit giveback 0.35 only booked ~₹122. Once a
-    # peak is genuinely large, keep ~78% of it — the rollover gate still requires
-    # the tape to confirm the top, so still-rising stage runners are never clipped.
+    # third of a big rip. Ordinary trades tighten at +25pt (keep ~94%).
     explosion_peak_capture_big_peak_points: float = 25.0
-    explosion_peak_capture_big_peak_giveback_ratio: float = 0.22
+    explosion_peak_capture_big_peak_giveback_ratio: float = 0.06
+    # Max-profit FTV / local-base winners: do NOT clip at +25pt — those rips often
+    # continue to 100%+ points. Only apply a soft near-top bank after a true
+    # expansion peak (≥80pt), and keep more room than the ordinary 6% band.
+    explosion_peak_capture_max_profit_big_peak_points: float = 80.0
+    explosion_peak_capture_max_profit_big_peak_giveback_ratio: float = 0.28
+    # Absolute giveback ceiling for max-profit AFTER the big-peak threshold only.
+    # Mid-leg FTV (<80pt) uses ratio-only so an 8pt dip cannot bank before 100%+.
+    # 0 = uncapped (ratio-only even after big peak). Default keeps a near-top bank
+    # once the rip has fully expanded.
+    explosion_peak_capture_max_profit_max_giveback_points: float = 24.0
     # Hold near-base top rips for the max move: an ELITE/EXPLODING entered very near the
     # local base (entry base-rel ≤ 20%) has the whole rip ahead, so don't soft-lock a
     # small early peak — require a bigger peak before peak-capture/peak-fade profit-lock.
@@ -433,7 +766,39 @@ class Settings(BaseSettings):
     # base entries (e.g. 25–40% off) still ride toward max TP instead of soft-locking.
     explosion_near_base_hold_ict_max_entry_rel_pct: float = 40.0
     # Align with max-profit fade floor — small +10–15pt peaks are still the base leg.
-    explosion_near_base_hold_min_best_points: float = 28.0
+    # Local-base FTV aiming at 100%+ needs a higher soft-lock floor before banking.
+    explosion_near_base_hold_min_best_points: float = 40.0
+    explosion_near_base_hold_max_profit_min_best_points: float = 55.0
+    # V / FTV from local base: expect ~100%+ premium expansion (e.g. 68→140).
+    # Soft peak-capture must wait until that expansion prints, then trail for max TP.
+    # Absolute point floors alone clip cheap ATM options too early (68→+28 is only ~41%).
+    ftv_vbase_hundred_pct_hold_enabled: bool = True
+    ftv_vbase_hundred_pct_min_move_pct: float = 100.0
+    ftv_vbase_hundred_pct_max_entry_rel_pct: float = 25.0
+    ftv_vbase_hundred_pct_min_best_points_floor: float = 40.0
+    # After the 100% leg prints, allow a wider giveback so multi-bagger extensions
+    # (68→220) are not banked on the first 28% dip off a mid peak.
+    ftv_vbase_after_hundred_giveback_ratio: float = 0.32
+    ftv_vbase_after_hundred_max_giveback_points: float = 36.0
+    ftv_vbase_after_hundred_big_peak_points: float = 100.0
+
+    # Peak prediction — index impulse × gamma + historical analogues + live ratchet.
+    # NIFTY and SENSEX only; stamps predictedMaxLtp on entry for stage-ladder exits.
+    peak_prediction_enabled: bool = True
+    peak_prediction_gamma_weight: float = 0.35
+    peak_prediction_analogue_weight: float = 0.40
+    peak_prediction_structure_weight: float = 0.25
+    peak_prediction_impulse_horizon_seconds: float = 90.0
+    peak_prediction_nifty_max_impulse_pts: float = 120.0
+    peak_prediction_sensex_max_impulse_pts: float = 180.0
+    peak_prediction_min_move_pct: float = 15.0
+    peak_prediction_max_move_pct: float = 250.0
+    peak_prediction_sensex_max_move_pct: float = 300.0
+    peak_prediction_analogue_min_samples: int = 3
+    peak_prediction_live_ratchet_enabled: bool = True
+    peak_prediction_ratchet_trigger_frac: float = 0.85
+    peak_prediction_ratchet_hot_velocity_3s: float = 2.0
+    peak_prediction_ratchet_hot_stretch: float = 1.12
 
     # Moment stage trail ladder — flat→vertical / FVG / mega-rip projections.
     # Project max TP from fib/base-extension/heat, split into stages (~50pt on
@@ -443,6 +808,15 @@ class Settings(BaseSettings):
     moment_stage_count: int = 8
     moment_stage_min_size: float = 5.0
     moment_stage_max_size: float = 55.0
+    # FTV runner %-of-peak-gain trailing floor. V/FTV moments run in big % from the local
+    # base (e.g. Rs68 -> Rs140 = +106%). The absolute stage ladder is tuned for mega point
+    # moves and under-protects modest-but-real % moves (a +40% peak can give back to +4%).
+    # This trails a consistent fraction BEHIND the peak GAIN (keep 72% => exit ~28% off the
+    # top) and is max'd WITH the stage ladder — so mega runners still ride the stages while
+    # every real % move locks in the best TP it reached. Arms only after a real move.
+    ftv_runner_pct_trail_enabled: bool = True
+    ftv_runner_pct_trail_arm_pct: float = 25.0
+    ftv_runner_pct_trail_keep_ratio: float = 0.72
     moment_stage_min_projected_tp: float = 40.0
     # Allow rare 50→650 LTP mega rips (+600pt); live extension ratchets toward this.
     moment_stage_max_projected_tp: float = 800.0
@@ -494,6 +868,8 @@ class Settings(BaseSettings):
     fake_explosion_trap_max_premium_mom_pct: float = 0.15
     fake_explosion_trap_block_on_conflict: bool = True
     fake_explosion_trap_min_conflict_flags: int = 3
+    # Aug18: EXPIRY WORST + midday chop + EXPLODING only soft-capped; restore hard block.
+    fake_explosion_trap_block_worst_midday_chop: bool = True
     fake_explosion_trap_chop_elite_lot_cap: int = 6
     fake_explosion_trap_otm_requires_or_breakout: bool = True
     fake_explosion_trap_post_win_lot_cap: int = 8
@@ -593,9 +969,12 @@ class Settings(BaseSettings):
     # Sub-band deep-OTM scan bypass floor. With ATM+ITM-only scan this is inert;
     # keep aligned to min_option_premium so cheap OTM never re-enters radar.
     explosion_deep_otm_min_premium_inr: float = 18.0
-    # Monitor + enter ATM/ITM only — drop deep-OTM noise (Aug5 24050 PE <₹18).
-    # Near-base catch then applies on liquid ATM/ITM with premium ≥ min band.
+    # Enter ATM/ITM by default, but retain premium tape for one liquid listed strike
+    # beyond the ATM band so a contract that rotates ATM does not lose its real base.
+    # Deep OTM and sub-band premiums remain excluded.
     explosion_scan_atm_itm_only: bool = True
+    explosion_shallow_otm_history_steps: int = 1
+    explosion_shallow_otm_history_min_volume: int = 25000
     explosion_volume_awaken_min: int = 25000
     explosion_volume_awaken_min_velocity_3s: float = 1.0
     explosion_target_elite: float = 25.0
@@ -651,6 +1030,16 @@ class Settings(BaseSettings):
     explosion_thesis_hold_skip_time_exit: bool = True  # no time_stop once thesis is green
     explosion_reentry_cooldown_seconds: int = 180
     explosion_emergency_cooldown_seconds: int = 300
+    # A just-captured FTV peak remains exhausted until this exact CE/PE contract
+    # builds a fresh post-close base and accelerates again.
+    explosion_post_peak_reentry_guard_enabled: bool = True
+    explosion_post_peak_reentry_lookback_seconds: int = 1800
+    explosion_post_peak_reentry_min_peak_points: float = 20.0
+    explosion_post_peak_reentry_near_peak_pct: float = 15.0
+    explosion_post_peak_reentry_base_samples: int = 3
+    explosion_post_peak_reentry_base_span_seconds: float = 6.0
+    explosion_post_peak_reentry_min_reacceleration_pct: float = 8.0
+    explosion_post_peak_reentry_min_velocity_3s: float = 1.5
     explosion_breadth_alignment_enabled: bool = True
     # Hard block PUT on BULLISH / CALL on BEARISH — no ELITE or premium-led bypass
     breadth_hard_side_block_enabled: bool = True
@@ -778,9 +1167,10 @@ class Settings(BaseSettings):
     # Runner hold without breadth align (was all_day_min+16=78); rescale(78)≈54.2.
     chart_confidence_runner_hold_min: float = 54.2
 
-    # ITM / ATM / OTM strike selection (AUTO = regime-based)
+    # Executable strikes are always ATM/ITM. A legacy OTM mode value is normalized
+    # to ATM; shallow OTM may still be monitored for history but never ordered.
     moneyness_selection_enabled: bool = True
-    trade_moneyness_mode: str = "AUTO"  # AUTO | ITM | OTM | ATM
+    trade_moneyness_mode: str = "AUTO"  # AUTO | ITM | ATM
     moneyness_atm_tolerance_points: float = 50.0
     # Real listed strike intervals — NIFTY is 50, SENSEX/BANKNIFTY are 100. The old
     # hardcoded 100 for NIFTY halved its OTM-depth counting (deep-OTM guards too loose).
@@ -799,16 +1189,9 @@ class Settings(BaseSettings):
     expiry_sensex_itm_scan_range: int = 1200
     expiry_itm_both_sides: bool = True
     moneyness_explosion_prefer: str = "ATM"
-    # When explosion prefer is ATM, hard-block OTM (Jul23 76100 PE −₹1.3k after ATM miss).
-    # ATM + shallow ITM still allowed; deep OTM FOMO is not a soft rank penalty.
+    # Legacy compatibility fields; execution enforces ATM/ITM independently.
     moneyness_explosion_block_otm: bool = True
-    # Hard ATM+ITM-only for explosion entries (ignores prefer=OTM / local-base OTM bypass).
     moneyness_explosion_atm_itm_only: bool = True
-    # Confirmed local-base CE/PE rip: allow shallow OTM (≤3 steps) when ATM is absent.
-    # Off by default — ATM/ITM-only near-base capture (Aug5); re-enable only if needed.
-    moneyness_local_base_otm_bypass_enabled: bool = False
-    moneyness_local_base_max_otm_steps: int = 3
-    moneyness_local_base_otm_min_score: float = 75.0
     moneyness_scalp_chop_prefer: str = "ITM"
     moneyness_high_conf_prefer: str = "ITM"
     moneyness_rank_bonus: float = 12.0
@@ -904,7 +1287,7 @@ class Settings(BaseSettings):
     expiry_aligned_explosion_chart_bypass_enabled: bool = True
 
     # Slow bounce — expensive ITM mean-reversion (RSI/MACD recovery, low velocity)
-    quick_sideways_slow_bounce_enabled: bool = True
+    quick_sideways_slow_bounce_enabled: bool = False
     quick_sideways_slow_bounce_premium_min_inr: float = 90.0
     quick_sideways_slow_bounce_min_velocity_pct: float = 0.1
     quick_sideways_slow_bounce_min_tqs: float = 28.0
@@ -1000,6 +1383,27 @@ class Settings(BaseSettings):
     local_base_overrides_bearish_breadth: bool = True
     spot_chart_timeframe_minutes: int = 5
     spot_chart_1m_bars: int = 300  # 1m history for 5m resample + RSI/MACD warmup
+    # Historical time-to-FTV advisory. V3 index candles train a time-of-day
+    # breakout prior; live premium/orderflow must still confirm every entry.
+    ftv_probability_enabled: bool = True
+    ftv_probability_history_days: int = 28
+    ftv_probability_profile_cache_seconds: int = 1800
+    ftv_probability_base_window_minutes: int = 5
+    ftv_probability_time_bucket_minutes: int = 15
+    ftv_probability_flat_max_range_pct: float = 0.22
+    ftv_probability_vertical_move_pct: float = 0.18
+    ftv_probability_min_training_samples: int = 100
+    ftv_premium_calibration_enabled: bool = True
+    ftv_premium_calibration_history_days: int = 30
+    ftv_premium_calibration_sample_seconds: int = 60
+    ftv_premium_vertical_move_pct: float = 20.0
+    ftv_premium_min_training_samples: int = 200
+    ftv_probability_drift_warn_pct_points: float = 8.0
+    ftv_probability_drift_critical_pct_points: float = 15.0
+    # Operator-supplied verified events only. JSON array fields:
+    # date, time, title, impact, symbols, sideBias, durationMinutes.
+    ftv_scheduled_events_json: str = "[]"
+    ftv_scheduled_event_lead_minutes: int = 30
     # Use true resampled-5m closes for the spot-chart RSI/MACD as soon as there are this
     # many 5m bars; only fall back to 1m when the session is genuinely too thin. The old
     # hardcoded 35 kept the "5m" chart on 1m data until ~12:10 IST every day, so the
@@ -1030,6 +1434,13 @@ class Settings(BaseSettings):
     cvd_window_seconds: float = 90.0
     cvd_min_recent_qty: float = 0.0
     cvd_rank_bonus: float = 5.0
+    # Change in signed-volume rate across two short slices. Additive only: sparse
+    # or stable flow receives no bonus and can never bypass an entry safeguard.
+    cvd_acceleration_enabled: bool = True
+    cvd_acceleration_slice_seconds: float = 15.0
+    cvd_acceleration_min_samples_per_slice: int = 2
+    cvd_acceleration_min_delta_qty_per_second: float = 0.25
+    cvd_acceleration_rank_bonus: float = 4.0
     # Flat->vertical setup quality (0-100) — grade the coil (tightness/duration/launch/heat/
     # volume) and give a proportional rank bonus so the cleanest base rips jump the queue.
     flat_vertical_quality_rank_enabled: bool = True
@@ -1070,6 +1481,14 @@ class Settings(BaseSettings):
     execution_chart_premium_check_enabled: bool = True
     execution_chart_min_premium_momentum_pct: float = -0.15
     execution_chart_candle_count: int = 60
+    # Confirmed near-base FTV first-lifts may fill THROUGH a shallow premium dip — that dip is
+    # the base retest right before the vertical, not a collapse. Without this the execution
+    # premium-fading gate blocked every confirmed FTV first-lift (they always ticked back a
+    # hair at the base). Bounded: only ELITE/EXPLODING first-lifts, and only while the dip is
+    # shallower than the floor below; a deeper collapse still blocks. This is what lets the
+    # system take these AT the local base instead of chasing them after they lift.
+    ftv_premium_fade_fill_enabled: bool = True
+    ftv_premium_fade_fill_max_drawdown_pct: float = -0.6
 
     # Multi-timeframe pre-test (1m/5m/15m/1h/4h) before execution
     execution_mtf_enabled: bool = True
@@ -1098,7 +1517,9 @@ class Settings(BaseSettings):
     neutral_breadth_explosion_min_score: float = 55.0
     sensex_rank_bonus: float = 10.0
     nifty_rank_penalty_chop: float = 5.0
-    daily_loss_stop_inr: float = 100_000.0
+    # Daily risk budget = 10% of the ~200k sizing capital. This is a CEILING that halts
+    # new entries, not a target — selectivity + per-trade caps keep us far below it.
+    daily_loss_stop_inr: float = 20_000.0
     daily_max_trades_chop: int = 20
     daily_max_trades_pre10_chop: int = 5
     pre10_chop_min_rank_score: float = 60.0
@@ -1283,7 +1704,7 @@ class Settings(BaseSettings):
     enhanced_tqs_entry: int = 50
     runner_alignment_override_score: int = 82
     rapid_scalp_mode_enabled: bool = False
-    quick_sideways_enabled: bool = True
+    quick_sideways_enabled: bool = False
     quick_sideways_min_rank_score: float = 58.0
     quick_sideways_min_velocity_pct: float = 0.5
     quick_sideways_chop_min_velocity_pct: float = 0.22
@@ -1350,10 +1771,21 @@ class Settings(BaseSettings):
     adaptive_target_enabled: bool = True
     tick_fusion_enabled: bool = True  # multi-timeframe momentum fusion
 
-    # Capital / risk — 85% per trade, max lots = floor(budget / premium×lot_size)
+    # Capital / risk — ranked FTV allocation keeps cash reserved and fills the
+    # strongest approved contracts first instead of spending the whole book on one leg.
     fallback_capital_inr: float = 200_000
     max_sizing_capital_inr: float = 200_000
-    per_trade_capital_pct: float = 0.95
+    per_trade_capital_pct: float = 0.90
+    ftv_ranked_allocation_enabled: bool = True
+    ftv_allocation_weights_csv: str = "0.60,0.25,0.10"
+    ftv_allocation_remaining_pct: float = 0.90
+    ftv_allocation_cash_reserve_pct: float = 0.0
+    ftv_allocation_max_positions: int = 3
+    ftv_allocation_max_same_side: int = 2
+    ftv_allocation_require_ftv: bool = True
+    # Final-policy-authorized rank-1 ELITE/EXPLODING entries keep every
+    # cash-affordable sleeve lot instead of being reduced by the standard SL budget.
+    top_rank_first_lift_full_budget_lots_enabled: bool = True
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
     aggressive_min_explosion_score: int = 45
@@ -1363,7 +1795,7 @@ class Settings(BaseSettings):
     aggressive_max_open_scalps: int = 1
     max_lots_per_trade: int = 0  # 0 = no hard cap; size from 85% capital only
     min_lots_per_trade: int = 1
-    max_risk_per_trade_inr: float = 200_000
+    max_risk_per_trade_inr: float = 4_000
     min_per_trade_risk_inr: float = 3_000
     per_trade_risk_pct: float = 0.95
     max_exposure_pct: float = 0.95
@@ -1381,12 +1813,55 @@ class Settings(BaseSettings):
     #    directionally wrong; cut faster than the full adaptive stop.
     explosion_never_green_stop_enabled: bool = True
     explosion_never_green_min_green_points: float = 0.5
-    explosion_never_green_stop_points: float = 18.0  # min floor (below the thesis grind)
-    explosion_never_green_stop_pct: float = 6.0  # or % of entry premium, whichever larger
-    explosion_never_green_min_hold_seconds: int = 20
-    # 2) Hard per-trade ₹ loss cap — OFF (0). Point/adaptive stops + never-green still apply.
-    # Aug7: BUILDING ICT base rip hit the ₹12k cap at −₹12.8k before the thesis SL.
-    explosion_per_trade_max_loss_inr: float = 0.0
+    explosion_never_green_stop_points: float = 4.0
+    explosion_never_green_stop_pct: float = 8.0
+    explosion_never_green_min_hold_seconds: int = 10
+    # Scratch a launch that immediately loses both price and velocity confirmation.
+    explosion_failed_launch_exit_enabled: bool = True
+    explosion_failed_launch_min_hold_seconds: int = 15
+    explosion_failed_launch_max_hold_seconds: int = 45
+    explosion_failed_launch_max_best_points: float = 1.0
+    explosion_failed_launch_min_loss_points: float = 1.5
+    explosion_failed_launch_max_velocity_3s: float = 0.0
+    # Same-chain cooldown after a failed launch / never-green chop spike.
+    explosion_failed_launch_reentry_block_enabled: bool = True
+    explosion_failed_launch_reentry_cooldown_seconds: int = 1800
+    # Block ATM±N adjacent strikes (1 = exact + one step each side).
+    explosion_failed_launch_reentry_strike_steps: int = 1
+    # Exit reasons that arm the cooldown (never-green hard cut often lacks v3<0).
+    explosion_failed_launch_reentry_exit_reasons_csv: str = (
+        "explosion_failed_launch,explosion_never_green_stop"
+    )
+    # 2) Hard INR ceilings: ~1% of ₹2L normally, ~2% only for a fully proven launch.
+    explosion_per_trade_max_loss_inr: float = 2_000.0
+    explosion_exceptional_per_trade_max_loss_inr: float = 4_000.0
+    # Index-confirmed near-base FTV size-up: a genuine index thrust (drift/burst/index
+    # helpers) at a near-base ELITE/EXPLODING lift is NOT a premium-only fake trap, so it
+    # may keep its elevated (~2x) size even on a chop day (lifts the fake-trap chop cap) and
+    # gets a wider ~2% per-trade rupee stop so the bigger size survives the normal near-base
+    # shakeout instead of being clipped at a ~2pt stop. Still bounded: elevated (not full
+    # sleeve), whipsaw/never-green guards stay, and the 10%/day loss stop is the backstop.
+    index_confirmed_ftv_size_up_enabled: bool = True
+    index_confirmed_ftv_max_base_rel_pct: float = 20.0
+    index_confirmed_ftv_per_trade_max_loss_inr: float = 4_000.0
+    # ELITE full-lot + ride-to-max-TP: index-confirmed ELITE FTV deploys the full per-trade
+    # capital budget (~₹1.8L = 90% of ₹2L) and holds to max TP. Do NOT shrink lots to a tiny
+    # ₹10k/8pt risk envelope — that caps size at ~half capital and stop-outs the runner on a
+    # normal base shakeout before the vertical. Structural SL is widened (% of premium); the
+    # ₹20k/day stop remains the session backstop. Per-trade INR clip is off by default (0)
+    # so a wide point SL can breathe without an early rupee kill.
+    elite_full_lot_enabled: bool = True
+    elite_full_lot_requires_index_confirm: bool = True
+    elite_full_lot_use_full_capital: bool = True
+    # 0 = disabled (prefer point SL + daily loss stop). Set >0 only for a hard INR clip.
+    elite_full_lot_risk_inr: float = 0.0
+    # Legacy risk-budget sizing only when elite_full_lot_use_full_capital=False.
+    elite_full_lot_est_stop_points: float = 8.0
+    # Proper room for V/FTV shakeouts — not a toy 8pt stop that clips then watches the rip.
+    elite_full_lot_min_stop_points: float = 16.0
+    elite_full_lot_min_stop_pct_of_premium: float = 0.18
+    elite_full_lot_preserve_lots_over_sl_budget: bool = True
+    elite_ride_max_tp_enabled: bool = True
     # 3) Whipsaw flip — after a same-session WIN on the opposite side, don't max-size the
     #    counter-flip (Aug6: CALLs won, then a max-size PUT flip lost). Cap flip size.
     explosion_whipsaw_flip_guard_enabled: bool = True
@@ -1472,6 +1947,17 @@ class Settings(BaseSettings):
     worst_day_breakout_only_enabled: bool = True
     worst_day_breakout_min_rank: float = 68.0
     worst_day_breakout_min_velocity_3s: float = 2.5
+    # Intraday TREND-OVERRIDE: a morning "chop/worst day" verdict is stale once the index
+    # genuinely breaks out. When spot is at/near a fresh session extreme WITH aligned 5m
+    # momentum AND a confirmed index thrust (sustained drift or same-direction spike burst),
+    # lift the worst-day BREAKOUT_ONLY/full-pause so a top ELITE/EXPLODING can trade the real
+    # trend. Never lifts the SEVERE session-loss pause; still bounded by the daily loss stop.
+    # Requires sustained thrust (not a single spike) + a real session range, so chop can't
+    # trip it. (Aug20 SENSEX +0.82% breakout stood down all day under a stale chop verdict.)
+    worst_day_intraday_trend_override_enabled: bool = True
+    index_trend_override_near_extreme_pct: float = 0.05
+    index_trend_override_min_mom5_pct: float = 0.10
+    index_trend_override_min_range_pct: float = 0.15
     # Structured near-ATM CE/PE soft floor + peak-velocity carry (key name kept for compat).
     worst_day_structured_ce_min_velocity_3s: float = 1.5
     worst_day_breakout_peak_velocity_bypass_enabled: bool = True
@@ -1593,6 +2079,19 @@ class Settings(BaseSettings):
     ict_defensive_base_rip_max_move_pct: float = 55.0
     # Full lots only for top tiers on defensive rip (never BUILDING).
     ict_defensive_base_rip_full_lots_tiers_csv: str = "ELITE,EXPLODING"
+    # Always: defensive/worst base rip only for top ELITE/EXPLODING at local base —
+    # do not admit every EXPLODING FTV print (Aug18 mid-quality 71.5 / B).
+    ict_defensive_base_rip_require_top_quality: bool = True
+    ict_defensive_base_rip_min_score: float = 75.0
+    ict_defensive_base_rip_min_quality: float = 70.0
+    ict_defensive_base_rip_min_velocity_3s: float = 2.5
+    # Aug18: EXPIRY WORST armed/defensive EXPLODING spikes failed — block unless
+    # a true ELITE high-quality base rip clears the raised bar.
+    ict_defensive_base_rip_block_expiry_worst: bool = True
+    ict_defensive_base_rip_expiry_worst_min_tier: str = "ELITE"
+    ict_defensive_base_rip_expiry_worst_min_quality: float = 85.0
+    ict_defensive_base_rip_expiry_worst_min_score: float = 90.0
+    ict_defensive_base_rip_expiry_worst_min_velocity_3s: float = 3.0
     # Max-profit trail — do not bank tiny TP on base→vertical ICT (25pt elite TP kills 12→392).
     ict_max_profit_skip_hard_target: bool = True
     ict_max_profit_target_points: float = 180.0
@@ -1663,10 +2162,46 @@ class Settings(BaseSettings):
     # Persistence
     trade_store_dir: str = "/tmp/nexusquant/trades"
     trade_log_file: str = ""  # default: {trade_store_dir}/trades.log
+    radar_archive_enabled: bool = True
+    radar_archive_dir: str = ""  # default: {trade_store_dir}/radar_archives
+    radar_archive_top_n_per_day: int = 100
+    # Keep ~1 month of daily archives, not a year. A 50GB disk cannot hold 365 days of
+    # premium tapes/zips; unbounded retention fills the disk and the backend starts hanging
+    # (writes stall, restarts fail). 30 days is ample for review/replay.
+    radar_archive_retention_days: int = 30
+    radar_learning_enabled: bool = True
+    # Throttle the all-strike premium tape to one sample / N seconds. It used to write EVERY
+    # observation cycle (0), producing 1GB+/day tapes that (a) fill the disk and (b) make the
+    # startup restore read a multi-hundred-MB file — on a watchdog restart that becomes a
+    # slow/OOM restart loop. 10s granularity still replays FTV/V base lifts fine, and the LIVE
+    # trigger never uses the tape. Set 0 only for short debug windows.
+    radar_premium_tape_sample_seconds: int = 10
+    # Cap how much of the (append-only, time-ordered) premium tape the startup restore reads.
+    # It only needs the last ~35 min, so tail-read at most this many bytes instead of parsing
+    # the whole intraday file — bounds startup time/memory regardless of tape size.
+    radar_restore_tail_max_bytes: int = 67_108_864  # 64 MiB
+    radar_alerts_tape_enabled: bool = True
+    radar_outcome_horizons_seconds_csv: str = "60,180,300,900,1800"
+    radar_outcome_target_pct: float = 20.0
+    radar_outcome_stop_pct: float = 10.0
+    radar_hindsight_flat_window_seconds: int = 120
+    radar_hindsight_flat_max_range_pct: float = 8.0
+    radar_hindsight_vertical_min_move_pct: float = 40.0
+    radar_hindsight_lookahead_seconds: int = 1800
+    radar_funnel_dedupe_seconds: int = 60
+    radar_health_stale_seconds: int = 45
+    radar_archive_finalize_hour: int = 16
+    radar_archive_finalize_minute: int = 0
+    radar_backup_dir: str = ""
+    radar_backup_s3_bucket: str = ""
+    radar_backup_s3_prefix: str = "nexusquant/radar"
+    radar_backup_retry_max: int = 3
+    radar_backup_retry_base_seconds: float = 1.0
+    radar_backup_verify_head: bool = True
     daily_token_once: bool = True
 
     # Swing trading (multi-day paper holds)
-    swing_trading_enabled: bool = True
+    swing_trading_enabled: bool = False
     swing_max_hold_days: int = 5
     swing_target_pct: float = 30.0
     swing_stop_pct: float = 12.0
@@ -1695,6 +2230,53 @@ def _with_latency_presets(settings: Settings) -> Settings:
     return settings
 
 
+# Audit-week floors — only applied when local_base_audit_week_enabled=true.
+# Each value is the earliest (most aggressive) threshold we allow for validation.
+AUDIT_WEEK_LOCAL_BASE_OVERRIDES: dict[str, float] = {
+    "ftv_s_strict_min_local_base_move_pct": 2.0,
+    "winner_local_base_min_local_base_move_pct": 2.0,
+    "explosion_local_base_entry_min_move_pct": 8.0,
+    "local_base_exploding_entry_min_move_pct": 8.0,
+    "explosion_local_base_trust_min_move_pct": 5.0,
+    "building_rip_local_base_min_move_pct": 1.5,
+    "building_rip_ftv_min_local_base_move_pct": 1.5,
+    "building_ltp_monitor_min_ms": 50.0,
+    "ict_elite_base_ready_max_move_pct": 8.0,
+    "winner_local_base_min_explosion_score": 70.0,
+    "ftv_s_strict_min_explosion_score": 80.0,
+}
+
+
+def audit_week_local_base_overrides() -> dict[str, float]:
+    """Return the audit-week threshold map (for health / audit API exposure)."""
+    return dict(AUDIT_WEEK_LOCAL_BASE_OVERRIDES)
+
+
+def _with_audit_week_overrides(settings: Settings) -> Settings:
+    """Lower local-base entry/detection floors for the validation week."""
+    if not bool(getattr(settings, "local_base_audit_week_enabled", False)):
+        return settings
+    updates: dict[str, Any] = {}
+    for key, audit_value in AUDIT_WEEK_LOCAL_BASE_OVERRIDES.items():
+        current = getattr(settings, key, None)
+        if current is None:
+            continue
+        try:
+            current_f = float(current)
+            audit_f = float(audit_value)
+        except (TypeError, ValueError):
+            continue
+        if "max_" in key:
+            updates[key] = max(current_f, audit_f)
+        elif "min_" in key or key.endswith("_min_ms"):
+            updates[key] = min(current_f, audit_f)
+        else:
+            updates[key] = audit_f
+    if updates:
+        return settings.model_copy(update=updates)
+    return settings
+
+
 @lru_cache
 def get_settings() -> Settings:
-    return _with_latency_presets(Settings())
+    return _with_audit_week_overrides(_with_latency_presets(Settings()))

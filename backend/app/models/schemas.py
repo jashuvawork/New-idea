@@ -37,8 +37,16 @@ class HeatmapStrike(BaseModel):
     strike: float
     callOi: int = 0
     putOi: int = 0
+    callVolume: float = 0
+    putVolume: float = 0
     callLtp: Optional[float] = None
     putLtp: Optional[float] = None
+    callBid: Optional[float] = None
+    callAsk: Optional[float] = None
+    putBid: Optional[float] = None
+    putAsk: Optional[float] = None
+    callIv: Optional[float] = None
+    putIv: Optional[float] = None
     callInstrumentKey: Optional[str] = None
     putInstrumentKey: Optional[str] = None
     gammaWall: bool = False
@@ -309,6 +317,8 @@ class PaperTrade(BaseModel):
     exitReason: Optional[str] = None
     strategyType: StrategyType = StrategyType.SCALP
     bestPnlPoints: float = 0
+    maxLtp: Optional[float] = None
+    maxLtpAt: Optional[datetime] = None
     closedAt: Optional[datetime] = None
     sessionDate: Optional[str] = None
     entryContext: dict[str, Any] = {}
@@ -354,6 +364,8 @@ class AutoTraderState(BaseModel):
     lastEntry: Optional[dict[str, Any]] = None
     lastExit: Optional[dict[str, Any]] = None
     liveOrdersPlaced: int = 0
+    # BUILDING LTP monitor scoreboard — every watched name scored; best ready wins.
+    buildingLtpMonitor: dict[str, Any] = {}
 
 
 class MultiSnapshot(BaseModel):

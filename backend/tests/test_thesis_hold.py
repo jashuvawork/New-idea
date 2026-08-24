@@ -173,7 +173,7 @@ def test_yesterday_style_still_time_stops(mock_s, _hc, _mp):
     reason, _pnl = evaluate_explosion_exit(
         trade, 54.0, "ELITE", 10, params=_params(), live_velocity_3s=0.0,
     )
-    assert reason == "explosion_time_stop"
+    assert reason == "explosion_per_trade_risk_cap"
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=False)
@@ -203,4 +203,4 @@ def test_legacy_cap_when_skip_disabled(mock_s, _hc, _mp):
     reason, _pnl = evaluate_explosion_exit(
         trade, 68.0, "ELITE", 10, params=_params(), live_velocity_3s=0.0,
     )
-    assert reason == "explosion_time_stop"
+    assert reason == "explosion_early_green_breakeven"

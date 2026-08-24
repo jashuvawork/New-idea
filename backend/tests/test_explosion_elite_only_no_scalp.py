@@ -27,6 +27,15 @@ def _settings(**overrides):
     s.explosion_building_elite_min_velocity_9s = 2.5
     s.explosion_building_elite_min_ict_score = 35.0
     s.worst_day_block_building_ict = True
+    s.first_lift_trade_enabled = True
+    s.first_lift_trade_min_score = 45.0
+    s.first_lift_trade_min_quality = 55.0
+    s.first_lift_trade_min_volume_surge = 2.0
+    s.first_lift_trade_min_velocity_3s = 1.2
+    s.first_lift_trade_min_velocity_9s = 0.8
+    s.first_lift_trade_max_move_pct = 25.0
+    s.first_lift_trade_min_momentum_shift_pct = 0.03
+    s.ict_structured_early_min_move_pct = 15.0
     s.explosion_require_chart_align_enabled = True
     s.explosion_selector_local_base_chart_bypass_enabled = True
     s.explosion_only_trading_enabled = True
@@ -164,6 +173,97 @@ def test_elite_building_admitted_when_hot():
     assert out[0].tier == "BUILDING"
 
 
+def test_watch_first_lift_is_not_dropped_by_elite_only_selector():
+    """High-quality first lift enters before the lagging BUILDING tier upgrade."""
+    settings = _settings(explosion_elite_exploding_only=True)
+    alert = _alert("WATCH", 51.0)
+    alert.update({
+        "ictFirstLift": True,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictScore": 31.0,
+        "ictBaseRelativeMovePct": 15.0,
+        "flatVerticalQuality": 61.0,
+        "velocity3s": 1.35,
+        "velocity9s": 1.35,
+        "volumeSurge": 4.0,
+        "ictVolumeAwakening": True,
+        "dailyMovePct": 15.0,
+        "peakMovePct": 15.0,
+    })
+    snap = _snap([alert])
+    state = SimpleNamespace(
+        openPaperTrades=[],
+        closedPaperTrades=[],
+        calibrationBlocks={"CALL": False, "PUT": False},
+    )
+    ict = SimpleNamespace(
+        active=True,
+        first_lift=True,
+        pattern="flat_then_vertical",
+        score=31.0,
+        reasons=[],
+        premium_fvg=False,
+        flat_then_vertical=True,
+        mega_rip=False,
+        volume_awakening=True,
+        displacement=False,
+        session_move_pct=15.0,
+        velocity_3s=1.35,
+        volume_surge=4.0,
+        base_relative_move_pct=15.0,
+        base_premium=104.0,
+        flat_vertical_quality=61.0,
+        flat_vertical_grade="B",
+    )
+    with (
+        patch("app.engines.trade_selector.premium_in_band", return_value=True),
+        patch(
+            "app.engines.explosion_detector.effective_explosion_min_score",
+            return_value=50.0,
+        ),
+        patch(
+            "app.engines.morning_premium_capture.counter_trend_entry_allowed",
+            return_value=True,
+        ),
+        patch(
+            "app.engines.winner_entry_guards.chop_weak_explosion_blocks_entry",
+            return_value=(False, ""),
+        ),
+        patch(
+            "app.engines.trade_selector.check_explosion_entry",
+            return_value=(True, "first_lift_local_base_confirmed"),
+        ),
+        patch("app.engines.trade_selector.index_moment_active", return_value=(False, "")),
+        patch("app.engines.trade_selector.side_aligned_with_index_moment", return_value=False),
+        patch("app.engines.trade_selector.index_moment_rank_bonus", return_value=0),
+        patch("app.engines.trade_selector.chart_rank_adjustment", return_value=0),
+        patch("app.engines.trade_selector.moneyness_rank_adjustment", return_value=0),
+        patch("app.engines.rally_capture.cross_side_chase_blocked", return_value=(False, "")),
+        patch("app.engines.rally_capture.runner_strike_rank_bonus", return_value=0),
+        patch("app.engines.rally_capture.atm_proximity_rank_bonus", return_value=0),
+        patch(
+            "app.engines.dual_mode_strategy.resolve_trading_session_mode",
+            return_value=("NORMAL", {}),
+        ),
+        patch(
+            "app.engines.ict_breakout_monitor.analyze_explosion_event_ict",
+            return_value=ict,
+        ),
+        patch("app.engines.ict_breakout_monitor.ict_explosion_rank_bonus", return_value=5),
+        patch(
+            "app.engines.ict_breakout_monitor.late_fade_chase_blocked",
+            return_value=(False, ""),
+        ),
+        patch("app.engines.trade_selector._reentry_blocked", return_value=(False, "ok")),
+    ):
+        out = _explosion_candidates("NIFTY", snap, state, settings)
+
+    assert len(out) == 1
+    assert out[0].tier == "WATCH"
+    assert out[0].alert["ictFirstLift"] is True
+
+
 def test_elite_admitted_when_elite_exploding_only():
     settings = _settings(explosion_elite_exploding_only=True)
     snap = _snap([_alert("ELITE", 95.0)])
@@ -237,9 +337,15 @@ def _counter_chart_ict():
     )
 
 
-def _run_counter_chart_selector(settings, bypass_value):
+def _run_counter_chart_selector(
+    settings,
+    bypass_value,
+    *,
+    alert_override=None,
+    ict_override=None,
+):
     """EXPLODING PUT vs a still-bullish 5m chart at a confirmed local base."""
-    alert = _alert("EXPLODING", 90.0)
+    alert = alert_override or _alert("EXPLODING", 90.0)
     alert["side"] = "PUT"
     snap = _snap([alert])  # spotChart BULLISH → PUT is counter-chart
     state = SimpleNamespace(
@@ -262,7 +368,10 @@ def _run_counter_chart_selector(settings, bypass_value):
         patch("app.engines.rally_capture.runner_strike_rank_bonus", return_value=0),
         patch("app.engines.rally_capture.atm_proximity_rank_bonus", return_value=0),
         patch("app.engines.dual_mode_strategy.resolve_trading_session_mode", return_value=("NORMAL", {})),
-        patch("app.engines.ict_breakout_monitor.analyze_explosion_event_ict", return_value=_counter_chart_ict()),
+        patch(
+            "app.engines.ict_breakout_monitor.analyze_explosion_event_ict",
+            return_value=ict_override or _counter_chart_ict(),
+        ),
         patch("app.engines.ict_breakout_monitor.ict_explosion_rank_bonus", return_value=5),
         patch("app.engines.ict_breakout_monitor.late_fade_chase_blocked", return_value=(False, "")),
         patch("app.engines.trade_selector._reentry_blocked", return_value=(False, "ok")),
@@ -294,6 +403,63 @@ def test_selector_local_base_bypass_respects_disable_flag():
     settings = _settings(explosion_selector_local_base_chart_bypass_enabled=False)
     out = _run_counter_chart_selector(settings, bypass_value=True)
     assert out == []
+
+
+def test_aug17_atm_option_led_first_lift_gets_top_rank_promotion():
+    """24300 CE/PE shape survives adverse chart and receives explicit first priority."""
+    settings = _settings(
+        first_lift_option_led_enabled=True,
+        first_lift_option_led_min_quality=65.0,
+        first_lift_option_led_min_velocity_3s=1.5,
+        first_lift_option_led_min_velocity_9s=1.5,
+        first_lift_option_led_rank_bonus=12.0,
+    )
+    alert = _alert("BUILDING", 49.3)
+    alert.update({
+        "strike": 24000.0,
+        "premium": 59.8,
+        "velocity3s": 1.87,
+        "velocity9s": 3.1,
+        "volumeSurge": 2.0,
+        "dailyMovePct": 20.3,
+        "peakMovePct": 20.3,
+        "ictFirstLift": True,
+        "ictBreakout": True,
+        "ictFlatThenVertical": True,
+        "ictBasePremium": 51.6,
+        "ictBaseRelativeMovePct": 20.3,
+        "flatVerticalQuality": 69.9,
+        "ictVolumeAwakening": True,
+    })
+    ict = _counter_chart_ict()
+    ict.first_lift = True
+    ict.local_swing_base = True
+    ict.flat_vertical_quality = 69.9
+    ict.flat_vertical_grade = "B"
+
+    promoted = _run_counter_chart_selector(
+        settings,
+        bypass_value=False,
+        alert_override=alert,
+        ict_override=ict,
+    )
+    baseline_settings = _settings(
+        first_lift_option_led_enabled=True,
+        first_lift_option_led_min_quality=65.0,
+        first_lift_option_led_min_velocity_3s=1.5,
+        first_lift_option_led_min_velocity_9s=1.5,
+        first_lift_option_led_rank_bonus=0.01,
+    )
+    baseline = _run_counter_chart_selector(
+        baseline_settings,
+        bypass_value=False,
+        alert_override=dict(alert),
+        ict_override=ict,
+    )
+
+    assert len(promoted) == len(baseline) == 1
+    assert promoted[0].side == Side.PUT
+    assert round(promoted[0].score - baseline[0].score, 2) == 11.99
 
 
 def test_find_best_entry_skips_scalp_under_explosion_only():

@@ -88,6 +88,28 @@ class EntryCandidate:
     pretrade_meta: Optional[dict] = None
 
 
+def rank_candidates_for_selection(
+    candidates: list[EntryCandidate],
+    legacy_score,
+) -> list[EntryCandidate]:
+    """Final causal-first ordering after every pretrade mutation."""
+    from app.engines.trade_ranking import ranking_sort_key
+
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            *ranking_sort_key(
+                (candidate.pretrade_meta or {}).get("causalRanking", {})
+            ),
+            legacy_score(candidate),
+            candidate.symbol.upper(),
+            candidate.side.value,
+            float(candidate.strike),
+        ),
+        reverse=True,
+    )
+
+
 def _exclude_preorder_rejected_candidates(
     candidates: list[EntryCandidate],
 ) -> list[EntryCandidate]:
@@ -264,10 +286,6 @@ def _explosion_candidates(
     from app.engines.explosion_detector import ExplosionEvent, effective_explosion_min_score
 
     out: list[EntryCandidate] = []
-    atm_itm_only = bool(
-        getattr(settings, "moneyness_explosion_atm_itm_only", True)
-        or getattr(settings, "explosion_scan_atm_itm_only", True)
-    )
     for alert in snap.explosionAlerts or []:
         if not alert.get("tradeable"):
             continue
@@ -278,31 +296,43 @@ def _explosion_candidates(
             snap=snap,
         ):
             continue
-        if atm_itm_only:
-            side_v = str(alert.get("side") or "").upper()
-            try:
-                strike_v = float(alert.get("strike") or 0)
-            except (TypeError, ValueError):
-                strike_v = 0.0
-            spot_v = float(snap.spot or 0)
-            atm_v = float(snap.atmStrike or 0)
-            if side_v in ("CALL", "PUT") and strike_v > 0 and spot_v > 0:
-                money = classify_moneyness(
-                    Side(side_v),
-                    strike_v,
-                    spot_v,
-                    symbol=symbol,
-                    atm=atm_v if atm_v > 0 else None,
-                )
-                if money == "OTM":
-                    continue
+        from app.engines.ict_breakout_monitor import first_lift_entry_readiness
+
+        first_lift_ready, first_lift_readiness_reason = first_lift_entry_readiness(
+            snap=snap,
+            alert=alert,
+            state=state,
+        )
+        side_v = str(alert.get("side") or "").upper()
+        try:
+            strike_v = float(alert.get("strike") or 0)
+        except (TypeError, ValueError):
+            strike_v = 0.0
+        spot_v = float(snap.spot or 0)
+        atm_v = float(snap.atmStrike or 0)
+        if side_v in ("CALL", "PUT") and strike_v > 0 and spot_v > 0:
+            money = classify_moneyness(
+                Side(side_v),
+                strike_v,
+                spot_v,
+                symbol=symbol,
+                atm=atm_v if atm_v > 0 else None,
+            )
+            if money == "OTM":
+                continue
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
+        top_only = bool(getattr(settings, "top_moments_only_enabled", True))
         if elite_only:
             if tier_u not in ("ELITE", "EXPLODING"):
                 # Early BUILDING flat→vertical when chart-aligned — catch the base
                 # before ELITE prints (multiple flat→vertical moments per week).
-                if not _building_aligned_ict_alert_ok(
+                if top_only:
+                    from app.engines.top_moment_gate import explosion_alert_is_top_moment
+
+                    if not explosion_alert_is_top_moment(alert):
+                        continue
+                elif not first_lift_ready and not _building_aligned_ict_alert_ok(
                     alert, snap, tier_u, state=state, snapshots={symbol: snap},
                 ):
                     continue
@@ -328,6 +358,7 @@ def _explosion_candidates(
                 side_v is not None
                 and snap.spotChart is not None
                 and not side_aligned_with_chart(side_v, snap.spotChart)
+                and not first_lift_ready
             ):
                 # A confirmed local base off which the side is breaking may survive the
                 # chart-align drop — mirror check_explosion_entry so a genuine base rip
@@ -361,10 +392,22 @@ def _explosion_candidates(
             peak_move_pct=peak_move,
             daily_move_pct=daily_move,
         )
+        if first_lift_ready:
+            min_explosion_score = min(
+                min_explosion_score,
+                float(
+                    getattr(settings, "first_lift_trade_min_score", 45.0)
+                    or 45.0
+                ),
+            )
         if score_val < min_explosion_score:
             continue
         # Explosion score is primary quality — don't block on low symbol TQS alone
-        if snap.tradeQualityScore < 25 and score_val < settings.aggressive_min_explosion_score + 10:
+        if (
+            not first_lift_ready
+            and snap.tradeQualityScore < 25
+            and score_val < settings.aggressive_min_explosion_score + 10
+        ):
             continue
 
         event = ExplosionEvent(
@@ -381,6 +424,7 @@ def _explosion_candidates(
             reason=alert.get("reason", ""),
             daily_move_pct=daily_move,
             peak_move_pct=peak_move,
+            volume=float(alert.get("volume") or 0),
         )
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
@@ -416,6 +460,7 @@ def _explosion_candidates(
             index_moment=moment_surge,
             chart=snap.spotChart,
             snap=snap,
+            alert=alert if isinstance(alert, dict) else None,
         )
         if not passed:
             continue
@@ -433,11 +478,46 @@ def _explosion_candidates(
             continue
 
         rank = score_val * 0.55 + snap.tradeQualityScore * 0.25
+        # Option-led ATM/ITM lifts get first priority even when another lane (e.g. the
+        # BUILDING rip sleeve) admitted them — the promotion tracks the option-led shape,
+        # not which readiness reason won the race.
+        option_led_promote = first_lift_readiness_reason in (
+            "first_lift_option_led_ready",
+            "armed_base_option_led_ready",
+        )
+        if not option_led_promote and first_lift_ready:
+            try:
+                from app.engines.ict_breakout_monitor import _option_led_first_lift_ok
+
+                option_led_promote = _option_led_first_lift_ok(
+                    row=alert, ict=None, event=None, snap=snap, settings=settings,
+                )
+            except Exception:
+                option_led_promote = False
+        if option_led_promote:
+            rank += float(
+                getattr(settings, "first_lift_option_led_rank_bonus", 12.0) or 12.0
+            )
         if event.tier == "ELITE":
             rank += 15
         rank += min(15, event.velocity_3s * 2)
         rank += min(10, event.velocity_9s)
         rank += index_moment_rank_bonus(snap, event.side)
+        # History of index spike moments: a same-direction spot spike burst is the causal
+        # thrust behind a sudden strike lift — rank those candidates a touch higher.
+        if bool(alert.get("indexSpikeBurst")) or (
+            "index_spike_burst" in (alert.get("indexHelpers") or [])
+        ):
+            rank += float(
+                getattr(settings, "index_spike_burst_rank_bonus", 4.0) or 4.0
+            )
+        # Sustained same-direction index drift is the grind-driven FTV fuel.
+        if bool(alert.get("indexDrift")) or (
+            "index_drift" in (alert.get("indexHelpers") or [])
+        ):
+            rank += float(
+                getattr(settings, "index_drift_rank_bonus", 3.0) or 3.0
+            )
         rank += chart_rank_adjustment(event.side, snap.spotChart)
         rank += moneyness_rank_adjustment(
             event.side, event.strike, snap, mode="explosion", candidate_score=rank,
@@ -474,6 +554,24 @@ def _explosion_candidates(
                 volume_surge=float(alert.get("volumeSurge") or 0),
                 base_relative_move_pct=float(alert.get("ictBaseRelativeMovePct") or 0),
                 base_premium=float(alert.get("ictBasePremium") or 0),
+                local_swing_base=bool(alert.get("ictLocalSwingBase")),
+                flat_vertical_quality=float(alert.get("flatVerticalQuality") or 0),
+                flat_vertical_grade=str(alert.get("flatVerticalGrade") or ""),
+                first_lift=bool(alert.get("ictFirstLift")),
+                base_armed=bool(alert.get("ictBaseArmed")),
+                elite_base_ready=bool(alert.get("ictEliteBaseReady")),
+                v_rip_ready=bool(alert.get("ictVRipReady")),
+                building_rip_ready=bool(alert.get("ictBuildingRipReady")),
+                armed_base_launch=bool(alert.get("ictArmedBaseLaunch")),
+                armed_base_samples=int(alert.get("ictArmedBaseSamples") or 0),
+                armed_base_span_seconds=float(
+                    alert.get("ictArmedBaseSpanSeconds") or 0
+                ),
+                armed_base_range_pct=float(
+                    alert.get("ictArmedBaseRangePct") or 0
+                ),
+                armed_at=str(alert.get("ictBaseArmedAt") or ""),
+                armed_base_expires_at=str(alert.get("ictBaseExpiresAt") or ""),
             )
         from app.engines.elite_never_block import elite_never_block_active
 
@@ -501,7 +599,7 @@ def _explosion_candidates(
             ict=ict,
             bullish_local_base=bool(bullish_base.get("active")),
         )
-        if immature_blocked and not must_take:
+        if immature_blocked and not must_take and not first_lift_ready:
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the
         # hard window does not re-raise the unstructured 28% floor.
@@ -512,7 +610,7 @@ def _explosion_candidates(
             squeeze_early_base=squeeze_early_base_active(event, snap),
             bullish_local_base=bool(bullish_base.get("active")),
         )
-        if window_blocked:
+        if window_blocked and not first_lift_ready:
             continue
         from app.engines.morning_premium_capture import is_premium_capture_event
 
@@ -533,15 +631,57 @@ def _explosion_candidates(
             premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
         )
         timing_blocked, _timing_reason = timing_blocks_entry(timing)
-        if timing_blocked and not must_take:
+        if (
+            timing_blocked
+            and not must_take
+            and not (
+                first_lift_ready
+                and bool(
+                    getattr(
+                        settings,
+                        "first_lift_bypasses_cold_timing_enabled",
+                        True,
+                    )
+                )
+            )
+        ):
             continue
         ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)
-        if ext_blocked and not must_take:
+        building_rip_ready_take = first_lift_readiness_reason in (
+            "building_rip_bullish_ready",
+            "building_local_base_lift_ready",
+        )
+        from app.engines.building_ftv_gates import (
+            building_rip_bypasses_extended_chase,
+            building_rip_bypasses_fake_trap,
+            top_must_take_bypasses_fake_trap,
+        )
+
+        if (
+            ext_blocked
+            and not must_take
+            and not building_rip_bypasses_extended_chase(
+                alert=alert if isinstance(alert, dict) else None,
+                readiness_reason=first_lift_readiness_reason,
+            )
+        ):
             continue
         trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
             cand_probe, snap, state=state, ict=ict,
         )
-        if trap_block or trap_meta.get("action") == "block":
+        if (
+            (trap_block or trap_meta.get("action") == "block")
+            and not building_rip_bypasses_fake_trap(
+                alert=alert if isinstance(alert, dict) else None,
+                readiness_reason=first_lift_readiness_reason,
+            )
+            and not top_must_take_bypasses_fake_trap(
+                must_take=must_take,
+                alert=alert if isinstance(alert, dict) else None,
+                candidate=cand_probe,
+                snap=snap,
+            )
+        ):
             continue
         # Displacement-only without flat base / FVG / real rip — skip (Jul20 noise).
         # Raised floor to early-window min (28%) so ~22% displacement spikes stay out.
@@ -558,6 +698,23 @@ def _explosion_candidates(
         ):
             continue
         rank += ict_explosion_rank_bonus(ict, trading_mode)
+        if first_lift_readiness_reason in (
+            "armed_base_option_led_ready",
+            "elite_base_ready_s_preauthorized",
+            "v_rip_session_low_ready",
+            "building_rip_bullish_ready",
+            "building_local_base_lift_ready",
+        ):
+            rank += float(
+                getattr(settings, "ict_armed_base_launch_rank_bonus", 16.0) or 16.0
+            )
+            if first_lift_readiness_reason in (
+                "building_rip_bullish_ready",
+                "building_local_base_lift_ready",
+            ):
+                rank += float(
+                    getattr(settings, "building_rip_rank_bonus", 14.0) or 14.0
+                )
         # Early flat→vertical breakouts (26→45 CE / 12→40 PE) jump the queue —
         # including DEFENSIVE days when volume/displacement confirms the base break.
         if ict.flat_then_vertical and ict.active:
@@ -605,14 +762,24 @@ def _explosion_candidates(
         if index_vwap_confirms_side(event.side, snap):
             rank += float(getattr(settings, "vwap_reclaim_rank_bonus", 6.0) or 6.0)
 
-        # CVD (trade authenticity) — net buying in the option we're buying = real demand.
-        if bool(getattr(settings, "cvd_confirm_enabled", True)):
-            from app.engines.advanced_indicators import option_cvd_confirms_buying
+        # CVD authenticity + acceleration — additive only, never an entry bypass.
+        from app.engines.advanced_indicators import (
+            option_cvd_acceleration_confirms_buying,
+            option_cvd_confirms_buying,
+        )
 
+        if bool(getattr(settings, "cvd_confirm_enabled", True)):
             if option_cvd_confirms_buying(snap, event.strike, event.side):
                 rank += float(getattr(settings, "cvd_rank_bonus", 5.0) or 5.0)
-        # Directional prediction at the local bottom is deliberately CALL-only and
-        # additive. It helps the confirmed bullish leg win selection; no safety gate is
+        if bool(getattr(settings, "cvd_acceleration_enabled", True)):
+            if option_cvd_acceleration_confirms_buying(
+                snap, event.strike, event.side,
+            ):
+                rank += float(
+                    getattr(settings, "cvd_acceleration_rank_bonus", 4.0) or 4.0
+                )
+        # Directional prediction at the local bottom is symmetric for CE and PE and
+        # additive. It helps the confirmed reversal leg win selection; no safety gate is
         # bypassed, and execution-time premium validation still has the final word.
         rank += float(bullish_base.get("rankBonus") or 0.0)
 
@@ -630,11 +797,19 @@ def _explosion_candidates(
             tier=event.tier,
             explosion_event=event,
             alert=alert,
-            pretrade_meta=(
-                {"bullishLocalBasePrediction": bullish_base}
-                if event.side == Side.CALL
-                else None
-            ),
+            pretrade_meta={
+                "localBaseReversalPrediction": bullish_base,
+                "bullishLocalBasePrediction": bullish_base,
+                "timingAssessment": timing,
+                "ictBaseArmed": bool(alert.get("ictBaseArmed")),
+                "ictEliteBaseReady": bool(alert.get("ictEliteBaseReady")),
+                "ictArmedBaseLaunch": bool(alert.get("ictArmedBaseLaunch")),
+                "ictBasePremium": float(alert.get("ictBasePremium") or 0),
+                "ictBaseRelativeMovePct": float(
+                    alert.get("ictBaseRelativeMovePct") or 0
+                ),
+                "ictBaseArmedAt": alert.get("ictBaseArmedAt"),
+            },
         ))
     return out
 
@@ -1098,8 +1273,9 @@ def find_best_entry(
     snapshots: dict[str, SymbolSnapshot],
     state: AutoTraderState,
     limits: Optional[Any] = None,
+    excluded_keys: Optional[set[str]] = None,
 ) -> Optional[EntryCandidate]:
-    """Return highest-ranked setup across all symbols — one best trade only."""
+    """Return the highest-ranked setup not already selected in this radar cycle."""
     settings = get_settings()
     from app.engines.chop_day_guards import (
         is_chop_session,
@@ -1114,6 +1290,12 @@ def find_best_entry(
     scalp_open = sum(1 for t in state.openPaperTrades if t.strategyType != StrategyType.SWING)
     swing_open = sum(1 for t in state.openPaperTrades if t.strategyType == StrategyType.SWING)
     chop = is_chop_session(snapshots)
+    max_scalp_slots = int(settings.aggressive_max_open_scalps)
+    if getattr(settings, "ftv_ranked_allocation_enabled", True):
+        max_scalp_slots = max(
+            max_scalp_slots,
+            int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+        )
 
     candidates: list[EntryCandidate] = []
     # ELITE/EXPLODING explosions; scalps off by default (Jul29 scalp sleeve bled).
@@ -1124,20 +1306,20 @@ def find_best_entry(
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
             continue
-        if settings.explosion_capture_mode and scalp_open < settings.aggressive_max_open_scalps:
+        if settings.explosion_capture_mode and scalp_open < max_scalp_slots:
             if not limits or getattr(limits, "allowExplosion", True):
                 candidates.extend(_explosion_candidates(symbol, snap, state, settings))
         if (
             scalp_entries
             and (not explosion_only or allow_guarded_scalp)
             and settings.paper_simple_profit_mode
-            and scalp_open < settings.aggressive_max_open_scalps
+            and scalp_open < max_scalp_slots
         ):
             candidates.extend(_scalp_candidates(symbol, snap, state, settings))
         if (
             not explosion_only
             and quick_sideways_enabled()
-            and scalp_open < settings.aggressive_max_open_scalps
+            and scalp_open < max_scalp_slots
         ):
             candidates.extend(_quick_sideways_candidates(symbol, snap, state, settings, snapshots))
             candidates.extend(_worst_day_candidates(symbol, snap, state, snapshots))
@@ -1148,6 +1330,27 @@ def find_best_entry(
     # generation, before every promotion/risk-quality filter and final ranking.
     # Unlike the established loss cooldown, ELITE/high-mover paths cannot bypass it.
     candidates = _exclude_preorder_rejected_candidates(candidates)
+    if excluded_keys:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if (
+                f"{candidate.symbol.upper()}:{candidate.side.value}:"
+                f"{float(candidate.strike):g}"
+            )
+            not in excluded_keys
+        ]
+    if not candidates:
+        return None
+
+    # BUILDING LTP scoreboard: among X monitored BUILDING names, keep/boost only
+    # the best ready leg that is actually selectable (fail soft if #1 was filtered).
+    try:
+        from app.engines.building_ltp_monitor import filter_candidates_building_best_pick
+
+        candidates = filter_candidates_building_best_pick(candidates)
+    except Exception:
+        pass
     if not candidates:
         return None
 
@@ -1166,6 +1369,124 @@ def find_best_entry(
             edge = compute_entry_edge(c, c.snap, state)
             c.score += edge_rank_bonus(edge)
             c.pretrade_meta = {**(c.pretrade_meta or {}), "edgeScore": edge.total}
+        exhausted = False
+        if c.mode == "explosion":
+            from app.engines.session_mode_feedback import (
+                exhausted_ftv_reentry_blocked,
+                failed_launch_reentry_blocked,
+            )
+
+            fail_blocked, _ = failed_launch_reentry_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+                strike=float(c.strike or 0),
+            )
+            if fail_blocked:
+                c.pretrade_meta = {
+                    **(c.pretrade_meta or {}),
+                    "failedLaunchReentryBlocked": True,
+                    "causalRanking": {
+                        "grade": "REJECT",
+                        "reasons": ["failed_launch_reentry_cooldown"],
+                    },
+                }
+                continue
+
+            exhausted, _ = exhausted_ftv_reentry_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+                strike=float(c.strike or 0),
+                premium=float(c.premium or 0),
+                velocity_3s=float(
+                    getattr(c.explosion_event, "velocity_3s", 0) or 0
+                ),
+            )
+        from app.engines.trade_ranking import (
+            ftv_authorization_policy,
+            ftv_policy_settings,
+            rank_entry_candidate,
+            resolve_policy_day_mode,
+        )
+
+        causal_ranking = rank_entry_candidate(c, exhausted_reentry=exhausted)
+        policy_ok = True
+        policy_reason = "disabled"
+        if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+            from app.engines.moneyness import atm_itm_entry_allows
+
+            money_ok, _, _ = atm_itm_entry_allows(c.side, c.strike, c.snap)
+            policy_decision = ftv_authorization_policy(
+                causal_ranking.get("evidence") or {},
+                causal_ranking,
+                snapshot_available=True,
+                atm_itm_allowed=money_ok,
+                day_mode=resolve_policy_day_mode(state),
+                **ftv_policy_settings(settings),
+            )
+            policy_ok = policy_decision.allowed
+            policy_reason = policy_decision.reason
+            policy_mode = policy_decision.mode
+            policy_cap = policy_decision.max_capital_pct
+        else:
+            policy_mode = None
+            policy_cap = None
+        c.pretrade_meta = {
+            **(c.pretrade_meta or {}),
+            "causalRanking": causal_ranking,
+            "ftvEliteTopPolicy": {
+                "enabled": bool(
+                    getattr(settings, "ftv_elite_top_only_enabled", True)
+                ),
+                "passed": policy_ok,
+                "reason": policy_reason,
+                "authorizationMode": policy_mode,
+                "maxCapitalPct": policy_cap,
+            },
+        }
+
+    candidates = [
+        c
+        for c in candidates
+        if (c.pretrade_meta or {}).get("causalRanking", {}).get("grade") != "REJECT"
+        and (
+            not bool(getattr(settings, "ftv_elite_top_only_enabled", True))
+            or (c.pretrade_meta or {}).get("ftvEliteTopPolicy", {}).get("passed")
+        )
+    ]
+    if not candidates:
+        return None
+
+    if bool(getattr(settings, "top_moments_only_enabled", True)):
+        from app.engines.top_moment_gate import top_moment_entry_allowed
+
+        min_grade = str(getattr(settings, "top_moments_min_grade", "A") or "A")
+        filtered_top: list[EntryCandidate] = []
+        for c in candidates:
+            meta = c.pretrade_meta or {}
+            ranking = meta.get("causalRanking") or {}
+            evidence = ranking.get("evidence") or {}
+            ok, reason, moment = top_moment_entry_allowed(
+                evidence,
+                ranking,
+                top_moments_only_enabled=True,
+                min_grade=min_grade,
+            )
+            c.pretrade_meta = {
+                **meta,
+                "topMomentGate": {
+                    "enabled": True,
+                    "passed": ok,
+                    "reason": reason,
+                    "momentType": moment,
+                },
+            }
+            if ok:
+                filtered_top.append(c)
+        candidates = filtered_top
+    if not candidates:
+        return None
 
     pf_fb = session_pf_feedback(state) if settings.edge_engine_enabled else None
     from app.engines.session_mode_feedback import compute_mode_stats, mode_session_rank_bonus
@@ -1217,6 +1538,11 @@ def find_best_entry(
     ):
         from app.engines.explosion_confidence import high_confidence_explosion
 
+        top_causal = [
+            c
+            for c in candidates
+            if (c.pretrade_meta or {}).get("causalRanking", {}).get("grade") == "S"
+        ]
         preferred: list[EntryCandidate] = []
         for c in candidates:
             if c.mode != "explosion":
@@ -1233,7 +1559,9 @@ def find_best_entry(
             )
             if ok:
                 preferred.append(c)
-        if preferred:
+        if top_causal:
+            candidates = top_causal
+        elif preferred:
             candidates = preferred
 
     candidates = filter_candidates_pretrade(candidates, state, snapshots)
@@ -1307,10 +1635,89 @@ def find_best_entry(
                     daily_move = peak
             early_min = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
             early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
+            # Prefer first lift off local base (15–25%) over day-% chase windows.
+            alert = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
+            pad = float(
+                alert.get("ictBaseRelativeMovePct")
+                or alert.get("localBaseMovePct")
+                or 0
+            )
+            first_lift = bool(alert.get("ictFirstLift"))
+            pad_lo = float(getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0)
+            pad_sweet = float(
+                getattr(settings, "explosion_first_lift_sweet_max_move_pct", 25.0) or 25.0
+            )
+            pad_hi = float(getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0)
+            if first_lift or (pad_lo <= pad <= pad_sweet):
+                bonus += float(
+                    getattr(settings, "explosion_first_lift_rank_bonus", 24.0) or 24.0
+                )
+            elif pad_lo <= pad <= pad_hi:
+                bonus += 14
+            elif pad > pad_hi:
+                bonus -= min(40, (pad - pad_hi) * 0.9)
+            # Prioritize winner-shaped ELITE/EXPLODING still sitting on the local-base
+            # pad so they win rank-1 before the rip leaves the 5–25% catch window.
+            try:
+                quality = float(
+                    alert.get("flatVerticalQuality")
+                    or alert.get("ictFlatVerticalQuality")
+                    or 0
+                )
+            except (TypeError, ValueError):
+                quality = 0.0
+            score_v = float(
+                getattr(c, "confidence", 0)
+                or alert.get("explosionScore")
+                or 0
+            )
+            tier_u = str(
+                getattr(c, "tier", "") or alert.get("tier") or ""
+            ).upper()
+            winner_pad_lo = float(
+                getattr(settings, "winner_local_base_min_local_base_move_pct", 5.0)
+                or 5.0
+            )
+            winner_pad_hi = float(
+                getattr(settings, "winner_local_base_max_local_base_move_pct", 25.0)
+                or 25.0
+            )
+            if (
+                tier_u in {"ELITE", "EXPLODING"}
+                and winner_pad_lo <= pad <= winner_pad_hi
+                and score_v
+                >= float(
+                    getattr(settings, "winner_local_base_min_explosion_score", 75.0)
+                    or 75.0
+                )
+                and quality
+                >= float(
+                    getattr(settings, "winner_local_base_min_quality", 70.0) or 70.0
+                )
+                and (
+                    first_lift
+                    or alert.get("ictArmedBaseLaunch")
+                    or alert.get("ictEliteBaseReady")
+                    or alert.get("ictArmedBaseSustainedLift")
+                    or (
+                        bool(getattr(settings, "winner_local_base_early_ftv_fresh_enabled", True))
+                        and alert.get("ictFlatThenVertical")
+                        and alert.get("ictBreakout")
+                        and (
+                            alert.get("ictVolumeAwakening")
+                            or alert.get("volumeAwaken")
+                            or alert.get("ictDisplacement")
+                        )
+                    )
+                )
+            ):
+                bonus += float(
+                    getattr(settings, "winner_local_base_rank_bonus", 28.0) or 28.0
+                )
             # Reward early window only — do NOT boost already-extended % moves.
-            if early_min <= daily_move <= early_max:
-                bonus += 18
-            elif daily_move > early_max:
+            if early_min <= daily_move <= early_max and pad <= pad_hi:
+                bonus += 12
+            elif daily_move > early_max and pad > pad_hi:
                 bonus -= min(40, (daily_move - early_max) * 0.7)
             if is_extreme_explosion_all_in_bypass(candidate=c):
                 bonus += 20
@@ -1350,7 +1757,46 @@ def find_best_entry(
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus - penalty
 
-    best = max(candidates, key=sort_key)
+    # Stable leg identity breaks exact score ties so the capital-first slot cannot
+    # flip between otherwise identical snapshots because of collection order.
+    ranked_candidates = rank_candidates_for_selection(candidates, sort_key)
+    best = ranked_candidates[0]
+    leader_ranking = (best.pretrade_meta or {}).get("causalRanking", {})
+    best.pretrade_meta = {
+        **(best.pretrade_meta or {}),
+        "legacySelectionScore": round(sort_key(best), 3),
+        "rankedOut": [
+            {
+                "key": (
+                    f"{candidate.symbol.upper()}:{candidate.side.value}:"
+                    f"{float(candidate.strike):g}"
+                ),
+                "symbol": candidate.symbol.upper(),
+                "side": candidate.side.value,
+                "strike": float(candidate.strike),
+                "causalGrade": (
+                    (candidate.pretrade_meta or {})
+                    .get("causalRanking", {})
+                    .get("grade")
+                ),
+                "causalRankScore": (
+                    (candidate.pretrade_meta or {})
+                    .get("causalRanking", {})
+                    .get("rankScore")
+                ),
+                "legacySelectionScore": round(sort_key(candidate), 3),
+                "finalRankPosition": position,
+                "leaderKey": (
+                    f"{best.symbol.upper()}:{best.side.value}:"
+                    f"{float(best.strike):g}"
+                ),
+                "leaderCausalGrade": leader_ranking.get("grade"),
+                "leaderCausalRankScore": leader_ranking.get("rankScore"),
+                "leaderLegacySelectionScore": round(sort_key(best), 3),
+            }
+            for position, candidate in enumerate(ranked_candidates[1:], start=2)
+        ],
+    }
     floor = min_rank_for_entry(chop, snapshots)
     floor = max(floor, last_n_elevated_min_rank(state, snapshots))
 
@@ -1443,7 +1889,10 @@ def diagnose_missed_entries(
 
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
         for alert in snap.explosionAlerts or []:
-            if alert.get("tier") not in ("ELITE", "EXPLODING", "BUILDING"):
+            if (
+                alert.get("tier") not in ("ELITE", "EXPLODING", "BUILDING")
+                and not alert.get("ictFirstLift")
+            ):
                 continue
             score = float(alert.get("explosionScore", 0))
             prem = alert.get("premium")
@@ -1456,8 +1905,34 @@ def diagnose_missed_entries(
                 daily_move_pct=daily_move,
             )
             blockers: list[str] = []
+            first_lift_ready = False
+            if bool(
+                alert.get("ictFirstLift")
+                or alert.get("ictVRipReady")
+                or alert.get("ictBuildingRipReady")
+                or alert.get("ictEliteBaseReady")
+                or alert.get("ictArmedBaseLaunch")
+                or (
+                    str(alert.get("tier") or "").upper() == "BUILDING"
+                    and (
+                        alert.get("volumeAwaken")
+                        or alert.get("ictVolumeAwakening")
+                    )
+                )
+            ):
+                from app.engines.ict_breakout_monitor import (
+                    first_lift_entry_readiness,
+                )
+
+                first_lift_ready, readiness_reason = first_lift_entry_readiness(
+                    snap=snap,
+                    alert=alert,
+                    state=state,
+                )
+                if not first_lift_ready:
+                    blockers.append(readiness_reason)
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
-                if not _building_aligned_ict_alert_ok(
+                if not first_lift_ready and not _building_aligned_ict_alert_ok(
                     alert, snap, str(tier_str).upper(),
                     state=state, snapshots=snapshots,
                 ):
@@ -1467,7 +1942,10 @@ def diagnose_missed_entries(
 
                 side_raw = str(alert.get("side") or "").upper()
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
-                    if not side_aligned_with_chart(Side(side_raw), snap.spotChart):
+                    if (
+                        not side_aligned_with_chart(Side(side_raw), snap.spotChart)
+                        and not first_lift_ready
+                    ):
                         blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):
                 blockers.append("premium_out_of_band")

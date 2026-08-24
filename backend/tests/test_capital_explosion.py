@@ -2,27 +2,61 @@
 
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from app.config import Settings
 from app.engines.capital_allocator import (
     CapitalSnapshot,
+    RankedAllocation,
+    cap_lots_to_allocation,
+    capital_book_summary,
     clamp_lots,
     get_capital_snapshot,
     max_lots_for_capital,
+    max_lots_for_capital_pct,
+    next_ranked_allocation_rank,
+    ranked_allocation_for_state,
+    set_manual_capital_limit,
+    tune_exit_plan_for_position,
 )
+from app.engines.risk_engine import RiskEngine
 from app.engines.explosion_profit import (
     compute_explosion_lots,
     evaluate_explosion_exit,
     explosion_in_cooldown,
     record_explosion_stop,
 )
-from app.models.schemas import PaperTrade, Side, StrategyType
+from app.engines.auto_trader import (
+    _exceptional_armed_launch_full_sleeve_allowed,
+    _is_ranked_ftv_candidate,
+    _top_rank_full_budget_lots_allowed,
+)
+from app.models.schemas import AutoTraderState, PaperTrade, Side, StrategyType
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
 
 
 class CapitalSizingTests(unittest.TestCase):
+    @staticmethod
+    def _ranked_settings():
+        return SimpleNamespace(
+            fallback_capital_inr=200_000,
+            max_sizing_capital_inr=200_000,
+            per_trade_capital_pct=0.95,
+            ftv_ranked_allocation_enabled=True,
+            ftv_allocation_weights_csv="0.60,0.25,0.10",
+            ftv_allocation_remaining_pct=0.90,
+            ftv_allocation_cash_reserve_pct=0.0,
+            ftv_allocation_max_positions=3,
+            ftv_allocation_max_same_side=2,
+            lot_size_nifty=65,
+            lot_size_banknifty=30,
+            lot_size_sensex=20,
+            use_upstox_lot_sizes=False,
+        )
+
     def test_max_lots_from_85pct_2l_capital(self):
         snap = CapitalSnapshot(
             availableMarginInr=200_000,
@@ -33,6 +67,73 @@ class CapitalSizingTests(unittest.TestCase):
             self.assertEqual(lots, 212)
             lots_n = max_lots_for_capital("NIFTY", 50.0)
             self.assertEqual(lots_n, 52)
+
+    def test_ordinary_entry_cap_uses_only_35pct_capital(self):
+        snap = CapitalSnapshot(availableMarginInr=200_000)
+        with patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap):
+            lots = max_lots_for_capital_pct("NIFTY", 50.0, 0.35)
+        self.assertEqual(lots, 21)
+        self.assertLessEqual(lots * 65 * 50, 70_000)
+
+    def test_ranked_fills_still_enforce_two_position_same_side_cap(self):
+        settings = Settings(
+            ftv_ranked_allocation_enabled=True,
+            ftv_allocation_max_positions=3,
+            ftv_allocation_max_same_side=2,
+            aggressive_lot_sizing=False,
+            emergency_stop_enabled=False,
+        )
+        open_puts = [
+            PaperTrade(
+                id=f"put-{strike}",
+                symbol="NIFTY",
+                side=Side.PUT,
+                strike=strike,
+                entryPremium=50.0,
+                currentPremium=50.0,
+                lots=1,
+                strategyType=StrategyType.EXPLOSIVE,
+                openedAt=datetime.now(IST),
+            )
+            for strike in (24250.0, 24350.0)
+        ]
+        state = AutoTraderState(running=True, openPaperTrades=open_puts)
+        capital = CapitalSnapshot(
+            availableMarginInr=1_000_000.0,
+            perTradeCapitalInr=500_000.0,
+        )
+        with (
+            patch("app.engines.risk_engine.get_settings", return_value=settings),
+            patch(
+                "app.engines.risk_engine.get_capital_snapshot",
+                return_value=capital,
+            ),
+        ):
+            engine = RiskEngine()
+            put_ok, put_reason = engine.check_new_entry(
+                state,
+                "NIFTY",
+                Side.PUT,
+                1,
+                50.0,
+                lot_multiplier=65,
+                strategy_type=StrategyType.EXPLOSIVE,
+                strike=24300.0,
+            )
+            call_ok, call_reason = engine.check_new_entry(
+                state,
+                "NIFTY",
+                Side.CALL,
+                1,
+                50.0,
+                lot_multiplier=65,
+                strategy_type=StrategyType.EXPLOSIVE,
+                strike=24200.0,
+            )
+
+        self.assertFalse(put_ok)
+        self.assertEqual(put_reason, "ftv_same_side_cap")
+        self.assertTrue(call_ok, call_reason)
 
     def test_compute_lots_aggressive_uses_full_85pct_budget(self):
         from app.engines.capital_allocator import compute_lots
@@ -66,6 +167,418 @@ class CapitalSizingTests(unittest.TestCase):
                 s.use_upstox_lot_sizes = False
                 clamped = clamp_lots(500, "SENSEX", 40.0)
                 self.assertEqual(clamped, 40)
+
+    def test_ranked_ftv_allocation_uses_90pct_of_remaining_capital(self):
+        state = AutoTraderState()
+        snap = CapitalSnapshot(
+            availableMarginInr=200_000,
+            totalEquityInr=200_000,
+            source="fallback",
+        )
+        settings = self._ranked_settings()
+        with (
+            patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap),
+            patch("app.engines.capital_allocator.get_settings", return_value=settings),
+        ):
+            first = ranked_allocation_for_state(state, 1)
+            lots = cap_lots_to_allocation(100, "NIFTY", 50.0, first)
+
+        self.assertEqual(first.cashReserveInr, 0)
+        self.assertEqual(first.budgetInr, 180_000)
+        self.assertEqual(lots, 55)
+        self.assertLessEqual(lots * 65 * 50, first.budgetInr)
+
+    def test_unused_top_sleeve_rolls_into_second_rank(self):
+        state = AutoTraderState(
+            openPaperTrades=[
+                PaperTrade(
+                    id="rank-1",
+                    symbol="NIFTY",
+                    side=Side.CALL,
+                    strike=24_500,
+                    entryPremium=50,
+                    currentPremium=40,
+                    lots=36,
+                    openedAt=datetime.now(IST),
+                    strategyType=StrategyType.EXPLOSIVE,
+                    entryContext={"allocationRank": 1},
+                )
+            ]
+        )
+        snap = CapitalSnapshot(
+            availableMarginInr=200_000,
+            totalEquityInr=200_000,
+            source="fallback",
+        )
+        settings = self._ranked_settings()
+        with (
+            patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap),
+            patch("app.engines.capital_allocator.get_settings", return_value=settings),
+        ):
+            second = ranked_allocation_for_state(state, 2)
+            summary = capital_book_summary(state)
+
+        self.assertEqual(second.committedInr, 117_000)
+        self.assertEqual(second.remainingBeforeInr, 83_000)
+        self.assertEqual(second.budgetInr, 74_700)
+        self.assertEqual(summary["remainingInr"], 83_000)
+        self.assertEqual(summary["nextTradeBudgetInr"], 74_700)
+        for actual, expected in zip(summary["weights"], [0.9, 0.09, 0.009]):
+            self.assertAlmostEqual(actual, expected)
+        self.assertEqual(summary["activeAllocations"][0]["rank"], 1)
+
+    def test_closed_top_sleeve_reuses_vacant_rank_not_open_count(self):
+        state = AutoTraderState(
+            openPaperTrades=[
+                PaperTrade(
+                    id="rank-2",
+                    symbol="SENSEX",
+                    side=Side.PUT,
+                    strike=80_000,
+                    entryPremium=50,
+                    currentPremium=50,
+                    lots=52,
+                    openedAt=datetime.now(IST),
+                    strategyType=StrategyType.EXPLOSIVE,
+                    entryContext={"allocationRank": 2},
+                )
+            ]
+        )
+        snap = CapitalSnapshot(
+            availableMarginInr=200_000,
+            totalEquityInr=200_000,
+            source="fallback",
+        )
+        settings = self._ranked_settings()
+        with (
+            patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap),
+            patch("app.engines.capital_allocator.get_settings", return_value=settings),
+        ):
+            rank = next_ranked_allocation_rank(state)
+            allocation = ranked_allocation_for_state(state, rank or 0)
+
+        self.assertEqual(rank, 1)
+        self.assertEqual(allocation.committedInr, 52_000)
+        self.assertEqual(allocation.budgetInr, 133_200)
+
+    def test_exit_plan_uses_rank_sleeve_as_risk_budget(self):
+        settings = self._ranked_settings()
+        settings.position_sl_cap_pct = 0.08
+        settings.position_tp_target_pct = 0.12
+        settings.scalp_stop_points = 3.0
+        settings.scalp_stop_min_points = 1.0
+        settings.position_sl_preserve_natural_frac = 0.45
+        settings.explosion_sl_preserve_natural_frac = 0.85
+        settings.position_min_risk_reward = 1.2
+        settings.scalp_trail_step_points = 2.0
+        snap = CapitalSnapshot(
+            availableMarginInr=200_000,
+            perTradeCapitalInr=190_000,
+        )
+        with (
+            patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap),
+            patch("app.engines.capital_allocator.get_settings", return_value=settings),
+        ):
+            tuned = tune_exit_plan_for_position(
+                {
+                    "stopPoints": 10,
+                    "naturalStopPoints": 10,
+                    "targetPoints": 20,
+                    "microTargetPoints": 3,
+                    "trailArmPoints": 5,
+                },
+                lots=20,
+                premium=50,
+                symbol="NIFTY",
+                trade_budget_inr=60_000,
+            )
+
+        self.assertEqual(tuned["tradeBudgetInr"], 60_000)
+        self.assertLessEqual(tuned["actualSlRiskInr"], 60_000 * 0.08 + 0.01)
+
+    def test_rank_one_first_lift_can_keep_all_cash_affordable_lots(self):
+        settings = self._ranked_settings()
+        settings.position_sl_cap_pct = 0.08
+        settings.position_tp_target_pct = 0.12
+        settings.scalp_stop_points = 3.0
+        settings.scalp_stop_min_points = 1.0
+        settings.position_sl_preserve_natural_frac = 0.45
+        settings.explosion_sl_preserve_natural_frac = 0.85
+        settings.position_min_risk_reward = 1.2
+        settings.scalp_trail_step_points = 2.0
+        snap = CapitalSnapshot(
+            availableMarginInr=200_000,
+            perTradeCapitalInr=180_000,
+        )
+        with (
+            patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap),
+            patch("app.engines.capital_allocator.get_settings", return_value=settings),
+        ):
+            tuned = tune_exit_plan_for_position(
+                {
+                    "stopPoints": 24,
+                    "naturalStopPoints": 24,
+                    "targetPoints": 40,
+                    "microTargetPoints": 6,
+                    "trailArmPoints": 10,
+                },
+                lots=26,
+                premium=103.6,
+                symbol="NIFTY",
+                trade_budget_inr=180_000,
+                preserve_lots_over_sl_budget=True,
+            )
+
+        self.assertEqual(tuned["lots"], 26)
+        self.assertTrue(tuned["slRiskBudgetOverride"])
+        self.assertGreater(tuned["actualSlRiskInr"], tuned["maxSlBudgetInr"])
+        self.assertTrue(
+            any("Rank-1 first-lift full-budget override" in row for row in tuned["reasoning"])
+        )
+
+    def test_full_budget_override_requires_fresh_rank_one_top_moment(self):
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=180_000,
+            remainingBeforeInr=200_000,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=0,
+            weight=0.9,
+        )
+        common = {
+            "enabled": True,
+            "allocation": allocation,
+            "strict_first_lift": True,
+            "top_explosion_max": True,
+            "faded_rip": False,
+            "post_win_capped": False,
+        }
+
+        self.assertTrue(_top_rank_full_budget_lots_allowed(**common))
+        for key in ("strict_first_lift", "top_explosion_max"):
+            self.assertFalse(
+                _top_rank_full_budget_lots_allowed(**{**common, key: False})
+            )
+        self.assertFalse(
+            _top_rank_full_budget_lots_allowed(**{**common, "faded_rip": True})
+        )
+        self.assertFalse(
+            _top_rank_full_budget_lots_allowed(**{**common, "post_win_capped": True})
+        )
+        self.assertFalse(
+            _top_rank_full_budget_lots_allowed(
+                **{
+                    **common,
+                    "allocation": RankedAllocation(
+                        rank=2,
+                        budgetInr=18_000,
+                        remainingBeforeInr=20_000,
+                        cashReserveInr=0,
+                        capitalBaseInr=200_000,
+                        committedInr=180_000,
+                        weight=0.9,
+                    ),
+                }
+            )
+        )
+
+    def test_full_sleeve_requires_armed_launch_velocity_cvd_and_acceleration(self):
+        settings = self._ranked_settings()
+        settings.full_sleeve_requires_armed_launch = True
+        settings.full_sleeve_requires_cvd = True
+        settings.full_sleeve_requires_cvd_acceleration = True
+        settings.ict_armed_base_launch_min_velocity_3s = 1.5
+        settings.ict_armed_base_launch_min_velocity_9s = 1.5
+        settings.ict_armed_base_launch_min_absolute_volume = 25_000
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=180_000,
+            remainingBeforeInr=200_000,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=0,
+            weight=0.9,
+        )
+        event = SimpleNamespace(
+            velocity_3s=2.6,
+            velocity_9s=1.8,
+            volume=30_000,
+            volume_surge=2.0,
+            explosion_score=90.0,
+            tier="EXPLODING",
+        )
+        # The 90% sleeve is the single biggest bet, so it demands a genuine top-S launch
+        # (armed launch + ELITE/EXPLODING tier + score >= 85 + flat->vertical structure at a
+        # 5-25% base) in addition to the live velocity / CVD / acceleration proof below.
+        candidate = SimpleNamespace(
+            explosion_event=event,
+            alert={
+                "ictArmedBaseLaunch": True,
+                "ictVolumeAwakening": True,
+                "tier": "EXPLODING",
+                "explosionScore": 90.0,
+                "ictFlatThenVertical": True,
+                "ictBaseRelativeMovePct": 15.0,
+                "velocity3s": 2.6,
+                "velocity9s": 1.8,
+            },
+            strike=24_500,
+            side=Side.CALL,
+        )
+        with (
+            patch("app.engines.auto_trader.get_settings", return_value=settings),
+            patch(
+                "app.engines.advanced_indicators.option_cvd_confirms_buying",
+                return_value=True,
+            ),
+            patch(
+                "app.engines.advanced_indicators.option_cvd_acceleration_confirms_buying",
+                return_value=True,
+            ),
+        ):
+            allowed = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+            event.velocity_9s = -0.1
+            rejected_cold_v9 = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+        self.assertTrue(allowed)
+        self.assertFalse(rejected_cold_v9)
+
+    def test_full_sleeve_accepts_rank_one_s_preauthorized_base_only(self):
+        settings = self._ranked_settings()
+        settings.full_sleeve_requires_armed_launch = True
+        settings.full_sleeve_requires_cvd = True
+        settings.full_sleeve_requires_cvd_acceleration = True
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=180_000,
+            remainingBeforeInr=200_000,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=0,
+            weight=0.9,
+        )
+        event = SimpleNamespace(
+            velocity_3s=2.27,
+            velocity_9s=2.08,
+            volume=27_127_300,
+            volume_surge=2.5,
+            explosion_score=65.4,
+            tier="EXPLODING",
+        )
+        candidate = SimpleNamespace(
+            explosion_event=event,
+            alert={
+                "ictEliteBaseReady": True,
+                "ictBaseArmed": True,
+                "ictBaseRelativeMovePct": 2.3,
+                "ictArmedBaseLaunch": False,
+                "ictVolumeAwakening": True,
+                "tier": "EXPLODING",
+            },
+            mode="explosion",
+            tier="EXPLODING",
+            confidence=65.4,
+            tqs=70.0,
+            snap=SimpleNamespace(),
+            pretrade_meta={
+                "causalRanking": {
+                    "grade": "S",
+                    "executionAuthorization": "S_PREAUTHORIZED",
+                    "fullSleeveEligible": True,
+                },
+            },
+            strike=24_300,
+            side=Side.CALL,
+        )
+        rank_two = RankedAllocation(**{**allocation.__dict__, "rank": 2})
+        with (
+            patch("app.engines.auto_trader.get_settings", return_value=settings),
+            patch(
+                "app.engines.advanced_indicators.option_cvd_confirms_buying",
+                return_value=True,
+            ),
+            patch(
+                "app.engines.advanced_indicators.option_cvd_acceleration_confirms_buying",
+                return_value=True,
+            ),
+        ):
+            allowed = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+            rejected_rank_two = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=rank_two,
+                early_base_entry_ready=True,
+            )
+            event.velocity_9s = -0.1
+            rejected_cold_v9 = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+            event.velocity_9s = 2.08
+            candidate.alert["ictBaseArmed"] = False
+            rejected_unarmed = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+            candidate.alert["ictBaseArmed"] = True
+            candidate.alert["ictBaseRelativeMovePct"] = None
+            rejected_missing_move = _exceptional_armed_launch_full_sleeve_allowed(
+                candidate=candidate,
+                snap=SimpleNamespace(),
+                allocation=allocation,
+                early_base_entry_ready=True,
+            )
+
+        self.assertTrue(allowed)
+        self.assertFalse(rejected_rank_two)
+        self.assertFalse(rejected_cold_v9)
+        self.assertFalse(rejected_unarmed)
+        self.assertFalse(rejected_missing_move)
+
+    def test_manual_capital_limit_updates_sizing_snapshot(self):
+        settings = self._ranked_settings()
+        settings.per_trade_capital_pct = 0.95
+        settings.simple_min_lots = 1
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            snap = set_manual_capital_limit(100_000)
+
+        self.assertEqual(snap.availableMarginInr, 100_000)
+        self.assertEqual(snap.perTradeCapitalInr, 95_000)
+        self.assertEqual(snap.source, "manual")
+
+    def test_ranked_sleeve_requires_first_lift_or_flat_vertical(self):
+        first_lift = SimpleNamespace(
+            mode="explosion",
+            alert={"ictFirstLift": True},
+            explosion_event=None,
+        )
+        generic = SimpleNamespace(
+            mode="explosion",
+            alert={"tier": "ELITE"},
+            explosion_event=None,
+        )
+
+        self.assertTrue(_is_ranked_ftv_candidate(first_lift))
+        self.assertFalse(_is_ranked_ftv_candidate(generic))
 
 
 class ExplosionExitTests(unittest.TestCase):
@@ -146,7 +659,15 @@ class ExplosionExitTests(unittest.TestCase):
             }.items():
                 setattr(s, k, v)
             reason, pnl = evaluate_explosion_exit(trade, 85.38, "EXPLODING", 65)
-        self.assertIn(reason, ("explosion_runner_giveback", "explosion_trail_sl", "explosion_trail_lock"))
+            self.assertIn(
+                reason,
+                (
+                    "explosion_peak_capture",
+                    "explosion_runner_giveback",
+                    "explosion_trail_sl",
+                    "explosion_trail_lock",
+                ),
+            )
         self.assertGreater(pnl, 0)
         self.assertNotIn(reason, ("explosion_time_profit", "explosion_time_stop"))
 

@@ -1,5 +1,6 @@
 """Real-time market intelligence engine — full snapshot pipeline."""
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -53,6 +54,13 @@ _constituent_cache: dict[str, tuple[float, Any]] = {}
 
 # Premium history for velocity calc
 _premium_history: dict[str, dict[float, float]] = {}
+_premium_history_updated_at: dict[str, float] = {}
+
+
+def reset_realtime_detector_state() -> None:
+    """Clear cached runner premiums so tests/restarts never inherit stale velocity."""
+    _premium_history.clear()
+    _premium_history_updated_at.clear()
 
 
 def constituents_due(symbol: str) -> bool:
@@ -83,10 +91,9 @@ def record_constituent_heatmap(symbol: str, heatmap) -> None:
 
 
 def _atm_strike(spot: float, symbol: str) -> float:
-    step = 100 if symbol in ("NIFTY", "BANKNIFTY") else 100
-    if symbol == "BANKNIFTY":
-        step = 100
-    return round(spot / step) * step
+    from app.engines.moneyness import atm_strike
+
+    return atm_strike(spot, symbol)
 
 
 def _detect_regime(candles: list, spot: float = 0.0) -> Regime:
@@ -275,6 +282,9 @@ def _build_greeks(chain: list, atm: float, spot: float, *, symbol: str = "") -> 
 def _scan_runners(
     chain: list, spot: float, atm: float, symbol: str
 ) -> tuple[ExplosiveRunner, list[dict[str, Any]]]:
+    import time
+
+    settings = get_settings()
     watchlist: list[dict[str, Any]] = []
     best_score = 0.0
     best_side = None
@@ -282,7 +292,16 @@ def _scan_runners(
     best_premium = None
     best_vel = 0.0
 
-    hist_key = f"{symbol}"
+    hist_key = symbol.upper()
+    now_mono = time.monotonic()
+    last_update = _premium_history_updated_at.get(hist_key)
+    max_age = float(
+        getattr(settings, "runner_velocity_history_max_age_seconds", 15.0) or 15.0
+    )
+    if last_update is not None and (
+        now_mono < last_update or now_mono - last_update > max_age
+    ):
+        _premium_history.pop(hist_key, None)
     if hist_key not in _premium_history:
         _premium_history[hist_key] = {}
 
@@ -331,9 +350,9 @@ def _scan_runners(
             hist_key_strike = strike if side == Side.CALL else -strike
             _premium_history[hist_key][hist_key_strike] = ltp
 
+    _premium_history_updated_at[hist_key] = now_mono
     watchlist.sort(key=lambda x: x["score"], reverse=True)
 
-    settings = get_settings()
     candidate = best_score >= settings.enhanced_tqs_entry and best_vel >= settings.enhanced_velocity_threshold
 
     return (
@@ -686,6 +705,34 @@ async def build_symbol_snapshot(
                 snap.indiaVixRef = float(vix.get("ref") or 0.0)
         except Exception:
             pass
+        try:
+            from app.services.radar_archive import record_top_radars
+            from app.services.radar_learning import record_market_observations
+
+            await asyncio.to_thread(
+                record_top_radars,
+                {symbol: snap},
+                source="rest_snapshot",
+            )
+            await asyncio.to_thread(
+                record_market_observations,
+                {symbol: snap},
+                source="rest_snapshot",
+            )
+            from app.services.radar_health import record_component_success
+
+            record_component_success(
+                "radarPipeline",
+                detail={"source": "rest_snapshot", "symbol": symbol},
+            )
+        except Exception as exc:
+            logger.warning("Failed to archive %s radar snapshot: %s", symbol, exc)
+            try:
+                from app.services.radar_health import record_component_error
+
+                record_component_error("radarPipeline", exc)
+            except Exception:
+                pass
         return snap
 
     except UpstoxError as e:

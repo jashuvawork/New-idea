@@ -441,6 +441,37 @@ class UpstoxClient:
                 logger.warning("Empty Upstox quote batch (%d keys)", len(chunk))
         return results
 
+    async def get_news(
+        self,
+        *,
+        category: str = "instrument_keys",
+        instrument_keys: Optional[list[str]] = None,
+        page_number: int = 1,
+        page_size: int = 100,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Fetch Upstox v2 news for instruments, positions, or holdings."""
+        if category not in {"instrument_keys", "positions", "holdings"}:
+            raise ValueError(f"Unsupported Upstox news category: {category}")
+        params: dict[str, Any] = {
+            "category": category,
+            "page_number": max(1, min(100, int(page_number))),
+            "page_size": max(1, min(100, int(page_size))),
+        }
+        if category == "instrument_keys":
+            keys = list(dict.fromkeys(instrument_keys or []))[:30]
+            if not keys:
+                return {}
+            params["instrument_keys"] = ",".join(keys)
+
+        data = await self._get("/news", params=params)
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(key).replace(":", "|"): articles
+            for key, articles in data.items()
+            if isinstance(articles, list)
+        }
+
     async def get_index_ltp(self, symbol: str) -> float:
         cache_key = f"ltp:{symbol}"
         cached = _cache_get(cache_key, self.settings.upstox_ltp_cache_seconds)
@@ -703,17 +734,72 @@ class UpstoxClient:
             _cache_set(cache_key, result)
         return result
 
-    async def get_funds(self) -> dict[str, Any]:
+    async def get_historical_candles_v3(
+        self,
+        instrument_key: str,
+        *,
+        unit: str = "minutes",
+        interval: int = 1,
+        to_date: str,
+        from_date: Optional[str] = None,
+        force_refresh: bool = False,
+    ) -> list[Any]:
+        """V3 historical OHLCV with Upstox retrieval-limit validation."""
+        allowed_units = {
+            "minutes": range(1, 301),
+            "hours": range(1, 6),
+            "days": (1,),
+            "weeks": (1,),
+            "months": (1,),
+        }
+        if unit not in allowed_units or interval not in allowed_units[unit]:
+            raise ValueError(f"Unsupported V3 candle interval: {unit}/{interval}")
+        try:
+            end = datetime.strptime(to_date, "%Y-%m-%d").date()
+            start = datetime.strptime(from_date, "%Y-%m-%d").date() if from_date else None
+        except ValueError as exc:
+            raise ValueError("Historical candle dates must use YYYY-MM-DD") from exc
+        if start and start > end:
+            raise ValueError("from_date cannot be after to_date")
+        if start and unit == "minutes" and interval <= 15 and (end - start).days > 31:
+            raise ValueError("Upstox V3 minute candles support at most one month per request")
+
+        cache_key = (
+            f"v3history:{instrument_key}:{unit}:{interval}:"
+            f"{to_date}:{from_date or ''}"
+        )
+        if not force_refresh:
+            cached = _cache_get(cache_key, self.settings.upstox_candles_cache_seconds)
+            if cached is not None:
+                return cached
+
+        encoded_key = quote(instrument_key, safe="")
+        path = f"/historical-candle/{encoded_key}/{unit}/{interval}/{to_date}"
+        if from_date:
+            path += f"/{from_date}"
+        data = await self._get_v3(path)
+        candles = data.get("candles", []) if isinstance(data, dict) else data
+        result = candles if isinstance(candles, list) else []
+        if result and not force_refresh:
+            _cache_set(cache_key, result)
+        return result
+
+    async def get_funds(self, *, force: bool = False) -> dict[str, Any]:
         cache_key = "funds"
-        cached = _cache_get(cache_key, self.settings.upstox_funds_cache_seconds)
-        if cached is not None:
-            return cached
+        if not force:
+            cached = _cache_get(cache_key, self.settings.upstox_funds_cache_seconds)
+            if cached is not None:
+                return cached
         data = await self._get("/user/get-funds-and-margin")
         _cache_set(cache_key, data)
         return data
 
     async def get_positions(self) -> list[dict[str, Any]]:
         data = await self._get("/portfolio/short-term-positions")
+        return data if isinstance(data, list) else []
+
+    async def get_order_book(self) -> list[dict[str, Any]]:
+        data = await self._get("/order/retrieve-all")
         return data if isinstance(data, list) else []
 
     async def place_order(self, order_payload: dict[str, Any]) -> dict[str, Any]:

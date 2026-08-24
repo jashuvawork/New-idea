@@ -181,9 +181,11 @@ def validate_execution_charts(
     breadth_aligned_bypass: bool = False,
     premium_led_bypass: bool = False,
     vertical_rip_bypass: bool = False,
+    first_lift_bypass: bool = False,
     expiry_explosion_bypass: bool = False,
     explosion_event: Any = None,
     mode: str = "",
+    confirmed_ftv_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -193,8 +195,11 @@ def validate_execution_charts(
         side,
         index_chart,
         breadth_aligned_bypass=breadth_aligned_bypass,
-        premium_led_bypass=premium_led_bypass or vertical_rip_bypass,
+        premium_led_bypass=(
+            premium_led_bypass or vertical_rip_bypass or first_lift_bypass
+        ),
         expiry_explosion_bypass=expiry_explosion_bypass,
+        strict_first_lift_bypass=first_lift_bypass,
         scalp_mode=scalp_mode,
     )
     if blocked:
@@ -203,8 +208,11 @@ def validate_execution_charts(
     blocked, reason = chart_blocks_side(
         side, index_chart, trade_score=trade_score,
         breadth_aligned_bypass=breadth_aligned_bypass,
-        premium_led_bypass=premium_led_bypass or vertical_rip_bypass,
+        premium_led_bypass=(
+            premium_led_bypass or vertical_rip_bypass or first_lift_bypass
+        ),
         expiry_explosion_bypass=expiry_explosion_bypass,
+        strict_first_lift_bypass=first_lift_bypass,
         scalp_mode=scalp_mode,
     )
     if blocked:
@@ -212,6 +220,7 @@ def validate_execution_charts(
 
     blocked, reason = premium_blocks_entry(
         side, premium_chart, trade_score=trade_score, explosion_event=explosion_event,
+        confirmed_ftv_bypass=confirmed_ftv_bypass,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -224,6 +233,7 @@ def validate_execution_charts(
             trade_score=trade_score,
             premium_led_bypass=premium_led_bypass,
             vertical_rip_bypass=vertical_rip_bypass,
+            first_lift_bypass=first_lift_bypass,
             scalp_mode=scalp_mode,
         )
         if not passed:
@@ -243,6 +253,7 @@ async def monitor_trade_chart_before_execution(
     instrument_key: Optional[str] = None,
     mode: str = "",
     explosion_event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Fetch live Upstox charts (1m–4h) for this trade and block if misaligned.
@@ -265,6 +276,24 @@ async def monitor_trade_chart_before_execution(
     vertical_bypass = vertical_rip_bypass_for_snap(
         side, snap, explosion_event=explosion_event,
     )
+    first_lift_bypass = False
+    if (
+        explosion_event is not None
+        and bool(
+            getattr(
+                settings,
+                "first_lift_bypasses_execution_chart_enabled",
+                True,
+            )
+        )
+    ):
+        from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+        first_lift_bypass = first_lift_entry_ready(
+            snap=snap,
+            event=explosion_event,
+            alert=alert,
+        )
     from app.engines.local_base_chart_bypass import local_base_ichimoku_bypass_for_snap
     from app.engines.open_gap_capture import elite_open_gap_mtf_bypass
 
@@ -280,7 +309,11 @@ async def monitor_trade_chart_before_execution(
         else False
     )
     structure_chart_bypass = (
-        premium_bypass or vertical_bypass or local_ichi_bypass or open_gap_mtf_bypass
+        premium_bypass
+        or vertical_bypass
+        or local_ichi_bypass
+        or open_gap_mtf_bypass
+        or first_lift_bypass
     )
     # Aug6 78800 PE: counter-trend PUT filled via expiry/local-base bypasses.
     from app.engines.spot_direction import hard_counter_trend_chart
@@ -288,14 +321,24 @@ async def monitor_trade_chart_before_execution(
     if (
         getattr(settings, "chart_counter_trend_bypass_block_enabled", True)
         and hard_counter_trend_chart(side, snap.spotChart)
+        and not first_lift_bypass
     ):
         expiry_chart_bypass = False
         structure_chart_bypass = False
         premium_bypass = False
         vertical_bypass = False
+        first_lift_bypass = False
         local_ichi_bypass = False
         open_gap_mtf_bypass = False
         breadth_bypass = False
+
+    # A confirmed near-base FTV first-lift (ELITE/EXPLODING) may fill through a shallow
+    # base-retest dip instead of being blocked as "premium fading" — take it AT the base.
+    # Tied to first_lift_bypass so the hard counter-trend reset above disables it too.
+    _event_tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    confirmed_ftv_bypass = bool(
+        first_lift_bypass and _event_tier in ("ELITE", "EXPLODING")
+    )
 
     try:
         meta = await fetch_live_trade_charts(
@@ -308,6 +351,7 @@ async def monitor_trade_chart_before_execution(
             breadth_aligned_bypass=breadth_bypass,
             premium_led_bypass=structure_chart_bypass,
             expiry_explosion_bypass=expiry_chart_bypass,
+            strict_first_lift_bypass=first_lift_bypass,
         )
         fallback = {
             "enabled": True,
@@ -315,6 +359,7 @@ async def monitor_trade_chart_before_execution(
             "error": str(exc)[:200],
             "indexChart": chart_summary_dict(snap.spotChart),
             "alignedWithChart": side_aligned_with_chart(side, snap.spotChart),
+            "firstLiftBypass": first_lift_bypass,
         }
         if blocked:
             return False, f"exec_{reason}", fallback
@@ -336,12 +381,16 @@ async def monitor_trade_chart_before_execution(
         breadth_aligned_bypass=breadth_bypass,
         premium_led_bypass=structure_chart_bypass,
         vertical_rip_bypass=vertical_bypass,
+        first_lift_bypass=first_lift_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
         explosion_event=explosion_event,
         mode=mode,
+        confirmed_ftv_bypass=confirmed_ftv_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
+    meta["firstLiftBypass"] = first_lift_bypass
+    meta["ftvFadeFillBypass"] = confirmed_ftv_bypass
 
     delta = meta.get("snapshotDelta") or {}
     if delta.get("directionChanged"):
@@ -354,6 +403,7 @@ async def monitor_trade_chart_before_execution(
         if flip_blocks and not (
             expiry_chart_bypass
             or vertical_bypass
+            or first_lift_bypass
             or (premium_bypass and not scalp_mode)
             or (breadth_bypass and not scalp_mode)
         ):

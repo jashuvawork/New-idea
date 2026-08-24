@@ -27,6 +27,15 @@ def _settings(**overrides):
     s.ict_defensive_base_rip_max_move_pct = 55.0
     s.ict_defensive_base_rip_tiers_csv = "ELITE,EXPLODING"
     s.ict_defensive_base_rip_full_lots_tiers_csv = "ELITE,EXPLODING"
+    s.ict_defensive_base_rip_require_top_quality = True
+    s.ict_defensive_base_rip_min_score = 75.0
+    s.ict_defensive_base_rip_min_quality = 70.0
+    s.ict_defensive_base_rip_min_velocity_3s = 2.5
+    s.ict_defensive_base_rip_block_expiry_worst = True
+    s.ict_defensive_base_rip_expiry_worst_min_tier = "ELITE"
+    s.ict_defensive_base_rip_expiry_worst_min_quality = 85.0
+    s.ict_defensive_base_rip_expiry_worst_min_score = 90.0
+    s.ict_defensive_base_rip_expiry_worst_min_velocity_3s = 3.0
     s.elite_local_base_max_move_pct = 40.0
     s.worst_day_block_building_ict = True
     s.ict_max_profit_skip_hard_target = True
@@ -78,6 +87,9 @@ def _ict_flat(**kwargs):
         session_move_pct=40.0,
         velocity_3s=3.5,
         volume_surge=4.0,
+        flat_vertical_quality=85.0,
+        flat_vertical_grade="A",
+        base_relative_move_pct=18.0,
     )
     base.update(kwargs)
     return ICTBreakoutSignal(**base)

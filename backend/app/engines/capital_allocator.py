@@ -4,7 +4,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
@@ -45,13 +45,13 @@ def _seed_lot_sizes_from_config() -> None:
 
 @dataclass
 class CapitalSnapshot:
-    availableMarginInr: float = 500_000.0
+    availableMarginInr: float = 200_000.0
     usedMarginInr: float = 0.0
-    totalEquityInr: float = 500_000.0
+    totalEquityInr: float = 200_000.0
     source: str = "fallback"
     perTradeRiskInr: float = 12_000.0
-    perTradeCapitalInr: float = 330_000.0
-    maxExposureInr: float = 330_000.0
+    perTradeCapitalInr: float = 180_000.0
+    maxExposureInr: float = 180_000.0
     minLots: int = 25
     targetLots: int = 60
     maxLots: int = 100
@@ -70,6 +70,28 @@ class CapitalSnapshot:
             "targetLots": self.targetLots,
             "maxLots": self.maxLots,
             "fetchedAt": self.fetchedAt,
+        }
+
+
+@dataclass(frozen=True)
+class RankedAllocation:
+    rank: int
+    budgetInr: float
+    remainingBeforeInr: float
+    cashReserveInr: float
+    capitalBaseInr: float
+    committedInr: float
+    weight: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rank": self.rank,
+            "budgetInr": round(self.budgetInr, 2),
+            "remainingBeforeInr": round(self.remainingBeforeInr, 2),
+            "cashReserveInr": round(self.cashReserveInr, 2),
+            "capitalBaseInr": round(self.capitalBaseInr, 2),
+            "committedInr": round(self.committedInr, 2),
+            "weight": round(self.weight, 4),
         }
 
 
@@ -134,6 +156,7 @@ class DailyProfitGate:
 
 
 _capital: Optional[CapitalSnapshot] = None
+_manual_capital_limit_inr: Optional[float] = None
 _session_date: str = ""
 _best_pnl: float = 0.0
 _highest_stage: int = 0
@@ -145,6 +168,12 @@ def reset_session_profit_gate() -> None:
     _session_date = ""
     _best_pnl = 0.0
     _highest_stage = 0
+
+
+def reset_capital_for_tests() -> None:
+    global _capital, _manual_capital_limit_inr
+    _capital = None
+    _manual_capital_limit_inr = None
 
 
 def lot_multiplier(symbol: str) -> int:
@@ -223,13 +252,280 @@ def _effective_capital_inr(available: float) -> float:
     """Cap sizing book at configured max (e.g. ₹2L) for realistic live deployment."""
     settings = get_settings()
     cap = settings.max_sizing_capital_inr or settings.fallback_capital_inr
+    if _manual_capital_limit_inr is not None:
+        cap = min(cap, _manual_capital_limit_inr) if cap > 0 else _manual_capital_limit_inr
     if cap > 0:
         return min(available, cap)
     return available
 
 
+def ranked_allocation_weights() -> list[float]:
+    """Effective book shares for the configured sequential allocation model."""
+    settings = get_settings()
+    max_positions = max(
+        1,
+        int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+    )
+    remaining_pct = max(
+        0.0,
+        min(
+            1.0,
+            float(getattr(settings, "ftv_allocation_remaining_pct", 0) or 0),
+        ),
+    )
+    if remaining_pct > 0:
+        return [
+            remaining_pct * ((1.0 - remaining_pct) ** index)
+            for index in range(max_positions)
+        ]
+
+    raw = str(
+        getattr(settings, "ftv_allocation_weights_csv", "0.60,0.25,0.10")
+        or "0.60,0.25,0.10"
+    )
+    weights: list[float] = []
+    for item in raw.split(","):
+        try:
+            value = float(item.strip())
+        except ValueError:
+            continue
+        if value > 0:
+            weights.append(value)
+    weights = weights[:max_positions] or [1.0]
+    reserve_pct = max(
+        0.0,
+        min(
+            0.50,
+            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
+        ),
+    )
+    deployable_pct = 1.0 - reserve_pct
+    total = sum(weights)
+    if total > deployable_pct and total > 0:
+        weights = [weight * deployable_pct / total for weight in weights]
+    return weights
+
+
+def trade_exposure_inr(trade: Any) -> float:
+    """Cash committed to a long option; a losing mark never frees entry capital."""
+    entry_premium = float(getattr(trade, "entryPremium", 0) or 0)
+    current_premium = float(getattr(trade, "currentPremium", 0) or 0)
+    premium = max(entry_premium, current_premium)
+    lots = max(0, int(getattr(trade, "lots", 0) or 0))
+    symbol = str(getattr(trade, "symbol", "") or "")
+    return max(0.0, premium * lots * lot_multiplier(symbol))
+
+
+def open_exposure_inr(state: AutoTraderState) -> float:
+    return sum(trade_exposure_inr(trade) for trade in state.openPaperTrades)
+
+
+def _allocation_capital_base(cap: CapitalSnapshot) -> float:
+    total = float(cap.totalEquityInr or 0)
+    if total <= 0:
+        total = float(cap.availableMarginInr or 0) + float(cap.usedMarginInr or 0)
+    if total <= 0:
+        total = float(cap.availableMarginInr or 0)
+    return max(0.0, _effective_capital_inr(total))
+
+
+def ranked_allocation_for_state(
+    state: AutoTraderState,
+    rank: int,
+) -> RankedAllocation:
+    """Budget the next ranked FTV leg from the currently remaining book."""
+    cap = get_capital_snapshot()
+    settings = get_settings()
+    weights = ranked_allocation_weights()
+    rank = max(1, int(rank))
+    capital_base = _allocation_capital_base(cap)
+    reserve_pct = max(
+        0.0,
+        min(
+            0.50,
+            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
+        ),
+    )
+    cash_reserve = capital_base * reserve_pct
+    committed = open_exposure_inr(state)
+    strategy_remaining = max(0.0, capital_base - cash_reserve - committed)
+    broker_remaining = max(0.0, float(cap.availableMarginInr or 0))
+    if cap.source == "fallback":
+        broker_remaining = max(0.0, broker_remaining - committed)
+    remaining = min(strategy_remaining, broker_remaining)
+
+    index = rank - 1
+    remaining_pct = max(
+        0.0,
+        min(
+            1.0,
+            float(getattr(settings, "ftv_allocation_remaining_pct", 0) or 0),
+        ),
+    )
+    if index >= len(weights):
+        budget = 0.0
+        weight = 0.0
+    elif remaining_pct > 0:
+        # Each approved ranked entry gets the configured share of capital that is
+        # still free at that moment. This cannot overspend the original book.
+        budget = remaining * remaining_pct
+        weight = remaining_pct
+    else:
+        future_reserved = capital_base * sum(weights[index + 1 :])
+        budget = max(0.0, remaining - future_reserved)
+        # Unused cash from a better-ranked sleeve rolls forward, but a slot never
+        # borrows the capital explicitly reserved for lower-ranked opportunities.
+        budget = min(remaining, budget)
+        weight = weights[index]
+
+    return RankedAllocation(
+        rank=rank,
+        budgetInr=budget,
+        remainingBeforeInr=remaining,
+        cashReserveInr=cash_reserve,
+        capitalBaseInr=capital_base,
+        committedInr=committed,
+        weight=weight,
+    )
+
+
+def next_ranked_allocation_rank(state: AutoTraderState) -> int | None:
+    """Return the first vacant sleeve; never infer rank from open-position count."""
+    settings = get_settings()
+    max_positions = max(
+        1,
+        int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+    )
+    occupied: set[int] = set()
+    unranked = 0
+    for trade in state.openPaperTrades:
+        if getattr(trade, "strategyType", None) != StrategyType.EXPLOSIVE:
+            continue
+        ctx = getattr(trade, "entryContext", None) or {}
+        try:
+            rank = int(ctx.get("allocationRank") or 0)
+        except (TypeError, ValueError):
+            rank = 0
+        if 1 <= rank <= max_positions:
+            occupied.add(rank)
+        else:
+            unranked += 1
+    # Legacy/restored explosive positions without allocation metadata consume the
+    # lowest free sleeves so they cannot be ignored by a new ranked entry.
+    for rank in range(1, max_positions + 1):
+        if unranked <= 0:
+            break
+        if rank not in occupied:
+            occupied.add(rank)
+            unranked -= 1
+    return next(
+        (rank for rank in range(1, max_positions + 1) if rank not in occupied),
+        None,
+    )
+
+
+def cap_lots_to_allocation(
+    lots: int,
+    symbol: str,
+    premium: float,
+    allocation: RankedAllocation | None,
+) -> int:
+    """Apply the final cash sleeve after all strategy force-max sizing paths."""
+    if allocation is None:
+        return max(0, int(lots))
+    unit_cost = float(premium or 0) * lot_multiplier(symbol)
+    if unit_cost <= 0 or allocation.budgetInr <= 0:
+        return 0
+    affordable = int(allocation.budgetInr / unit_cost)
+    return max(0, min(int(lots), affordable))
+
+
+def capital_book_summary(
+    state: AutoTraderState,
+    *,
+    planned: Sequence[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """One reconciled view for execution state and the Upstox manager UI."""
+    cap = get_capital_snapshot()
+    settings = get_settings()
+    capital_base = _allocation_capital_base(cap)
+    committed = open_exposure_inr(state)
+    reserve_pct = max(
+        0.0,
+        min(
+            0.50,
+            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
+        ),
+    )
+    reserve = capital_base * reserve_pct
+    strategy_remaining = max(0.0, capital_base - reserve - committed)
+    broker_remaining = max(0.0, float(cap.availableMarginInr or 0))
+    if cap.source == "fallback":
+        broker_remaining = max(0.0, broker_remaining - committed)
+    remaining = min(strategy_remaining, broker_remaining)
+    active = []
+    for trade in state.openPaperTrades:
+        ctx = getattr(trade, "entryContext", None) or {}
+        active.append(
+            {
+                "tradeId": getattr(trade, "id", ""),
+                "symbol": getattr(trade, "symbol", ""),
+                "side": getattr(getattr(trade, "side", ""), "value", getattr(trade, "side", "")),
+                "strike": float(getattr(trade, "strike", 0) or 0),
+                "lots": int(getattr(trade, "lots", 0) or 0),
+                "rank": ctx.get("allocationRank"),
+                "budgetInr": ctx.get("allocationBudgetInr"),
+                "committedInr": round(trade_exposure_inr(trade), 2),
+            }
+        )
+    return {
+        "enabled": bool(getattr(settings, "ftv_ranked_allocation_enabled", True)),
+        "capitalBaseInr": round(capital_base, 2),
+        "committedInr": round(committed, 2),
+        "cashReserveInr": round(reserve, 2),
+        "remainingInr": round(remaining, 2),
+        "remainingAllocationPct": round(
+            max(
+                0.0,
+                min(
+                    1.0,
+                    float(
+                        getattr(settings, "ftv_allocation_remaining_pct", 0) or 0
+                    ),
+                ),
+            ),
+            4,
+        ),
+        "nextTradeBudgetInr": round(
+            remaining
+            * max(
+                0.0,
+                min(
+                    1.0,
+                    float(
+                        getattr(settings, "ftv_allocation_remaining_pct", 0) or 0
+                    ),
+                ),
+            ),
+            2,
+        ),
+        "utilizationPct": round((committed / capital_base * 100) if capital_base else 0, 1),
+        "weights": ranked_allocation_weights(),
+        "maxPositions": max(
+            1,
+            int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
+        ),
+        "maxSameSide": max(
+            1,
+            int(getattr(settings, "ftv_allocation_max_same_side", 2) or 2),
+        ),
+        "activeAllocations": active,
+        "plannedAllocations": list(planned or []),
+    }
+
+
 def max_lots_for_capital(symbol: str, premium: float) -> int:
-    """Max lots affordably on 85% of sizing capital for this premium."""
+    """Max lots affordably within the configured per-trade capital budget."""
     cap = get_capital_snapshot()
     settings = get_settings()
     mult = lot_multiplier(symbol)
@@ -238,6 +534,17 @@ def max_lots_for_capital(symbol: str, premium: float) -> int:
     budget = cap.perTradeCapitalInr
     if budget <= 0:
         budget = _effective_capital_inr(cap.availableMarginInr) * settings.per_trade_capital_pct
+    return max(1, int(budget / (premium * mult)))
+
+
+def max_lots_for_capital_pct(symbol: str, premium: float, capital_pct: float) -> int:
+    """Affordable lots for an explicit share of currently available capital."""
+    cap = get_capital_snapshot()
+    mult = lot_multiplier(symbol)
+    if premium <= 0 or mult <= 0:
+        return 1
+    pct = max(0.0, min(1.0, float(capital_pct or 0.0)))
+    budget = _effective_capital_inr(cap.availableMarginInr) * pct
     return max(1, int(budget / (premium * mult)))
 
 
@@ -287,7 +594,11 @@ def _parse_upstox_funds(data: dict[str, Any]) -> tuple[float, float, float]:
     return available, used, total
 
 
-async def refresh_capital_from_upstox(client) -> CapitalSnapshot:
+async def refresh_capital_from_upstox(
+    client,
+    *,
+    force: bool = False,
+) -> CapitalSnapshot:
     """Pull live margin from Upstox and derive static risk/lot tiers."""
     settings = get_settings()
     now = datetime.now(IST).isoformat()
@@ -296,16 +607,22 @@ async def refresh_capital_from_upstox(client) -> CapitalSnapshot:
     await refresh_lot_sizes(client)
 
     try:
-        funds = await client.get_funds()
+        funds = (
+            await client.get_funds(force=True)
+            if force
+            else await client.get_funds()
+        )
         available, used, total = _parse_upstox_funds(funds if isinstance(funds, dict) else {})
         if available <= 0 and total > 0:
             available = total - used
         if available <= 0:
             raise ValueError("zero margin from Upstox")
         available = _effective_capital_inr(available)
-        total = min(total, available) if total > 0 else available
+        total = _effective_capital_inr(total) if total > 0 else available
         source = "upstox"
     except Exception as e:
+        if force:
+            raise
         logger.warning("Upstox capital fetch failed, using fallback: %s", e)
         available = settings.fallback_capital_inr
         available = _effective_capital_inr(available)
@@ -354,6 +671,32 @@ def get_capital_snapshot() -> CapitalSnapshot:
         targetLots=tgt_l,
         maxLots=max_l,
     )
+
+
+def set_manual_capital_limit(amount: float) -> CapitalSnapshot:
+    """Set the operator sizing ceiling used by every capital calculation."""
+    value = float(amount)
+    if value <= 0:
+        raise ValueError("Capital allocation must be positive")
+    global _capital, _manual_capital_limit_inr
+    _manual_capital_limit_inr = value
+    effective = _effective_capital_inr(value)
+    settings = get_settings()
+    min_l, tgt_l, max_l = _lot_tiers(effective)
+    budget = effective * settings.per_trade_capital_pct
+    _capital = CapitalSnapshot(
+        availableMarginInr=effective,
+        totalEquityInr=effective,
+        source="manual",
+        perTradeRiskInr=budget,
+        perTradeCapitalInr=budget,
+        maxExposureInr=budget,
+        minLots=min_l,
+        targetLots=tgt_l,
+        maxLots=max_l,
+        fetchedAt=datetime.now(IST).isoformat(),
+    )
+    return _capital
 
 
 def compute_session_pnl(state: AutoTraderState) -> float:
@@ -657,6 +1000,8 @@ def tune_exit_plan_for_position(
     lots: int,
     premium: float,
     symbol: str,
+    trade_budget_inr: float | None = None,
+    preserve_lots_over_sl_budget: bool = False,
 ) -> dict[str, Any]:
     """Tune TP/SL for position — INR risk caps on 85% trade capital.
 
@@ -667,7 +1012,11 @@ def tune_exit_plan_for_position(
     settings = get_settings()
     cap = get_capital_snapshot()
     mult = lot_multiplier(symbol)
-    trade_budget = cap.perTradeCapitalInr or (cap.availableMarginInr * settings.per_trade_capital_pct)
+    trade_budget = float(trade_budget_inr or 0)
+    if trade_budget <= 0:
+        trade_budget = cap.perTradeCapitalInr or (
+            cap.availableMarginInr * settings.per_trade_capital_pct
+        )
     lots = max(1, int(lots or 1))
     units = lots * mult
     if units <= 0 or premium <= 0:
@@ -719,20 +1068,33 @@ def tune_exit_plan_for_position(
         )
 
     # Honor the comment above: when preserving SL over the pt-cap, reduce size.
+    # The one exception is an explicitly approved rank-1 first-lift. Its lot count
+    # has already been bounded by the cash sleeve and hard lot ceiling; preserving
+    # it here lets a genuine top local-base moment use the full allocated capital
+    # without disguising the resulting INR stop risk.
+    sl_risk_budget_override = False
     if stop > 0 and mult > 0 and max_sl_inr > 0:
         risk_at_size = stop * units
         if risk_at_size > max_sl_inr + 1e-6:
-            lots_fit = max(1, int(max_sl_inr / (stop * mult)))
-            if lots_fit < lots:
+            if preserve_lots_over_sl_budget:
+                sl_risk_budget_override = True
                 reasoning.append(
-                    f"Shrink lots {lots}→{lots_fit} so {stop:.1f}pt SL fits "
-                    f"₹{max_sl_inr:,.0f} risk budget (was ₹{risk_at_size:,.0f})"
+                    f"Rank-1 first-lift full-budget override: keep {lots} lots with "
+                    f"{stop:.1f}pt calculated SL (₹{risk_at_size:,.0f} risk vs "
+                    f"₹{max_sl_inr:,.0f} standard budget)"
                 )
-                lots = lots_fit
-                units = lots * mult
-                position_inr = premium * units
-                sl_pts_cap = max_sl_inr / units if units > 0 else sl_pts_cap
-                tp_pts_floor = target_inr / units if units > 0 else tp_pts_floor
+            else:
+                lots_fit = max(1, int(max_sl_inr / (stop * mult)))
+                if lots_fit < lots:
+                    reasoning.append(
+                        f"Shrink lots {lots}→{lots_fit} so {stop:.1f}pt SL fits "
+                        f"₹{max_sl_inr:,.0f} risk budget (was ₹{risk_at_size:,.0f})"
+                    )
+                    lots = lots_fit
+                    units = lots * mult
+                    position_inr = premium * units
+                    sl_pts_cap = max_sl_inr / units if units > 0 else sl_pts_cap
+                    tp_pts_floor = target_inr / units if units > 0 else tp_pts_floor
 
     target = max(plan_target, tp_pts_floor, settings.scalp_stop_points * 2)
     # Guard inverted R:R — a budget-capped stop can exceed the target floor.
@@ -775,5 +1137,6 @@ def tune_exit_plan_for_position(
         "tradeBudgetInr": round(trade_budget, 2),
         "maxSlBudgetInr": round(max_sl_inr, 2),
         "actualSlRiskInr": round(actual_sl_inr, 2),
+        "slRiskBudgetOverride": sl_risk_budget_override,
         "reasoning": reasoning,
     }

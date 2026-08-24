@@ -163,8 +163,13 @@ def test_faded_24150_style_rip_qualifies_after_boosts(mock_settings, _open):
 
     chain = _chain(24150.0, 118.0)
     scan_chain_explosions("NIFTY", chain, spot=24159.0, atm=24150.0)
+    hist = next(iter(_history["NIFTY"].values()))
+    ts, premium, volume = hist[-1]
+    hist[-1] = (ts - timedelta(seconds=3), premium, volume)
     chain[0]["call_options"]["ltp"] = 165.0
     scan_chain_explosions("NIFTY", chain, spot=24159.0, atm=24150.0)
+    ts, premium, volume = hist[-1]
+    hist[-1] = (ts - timedelta(seconds=3), premium, volume)
     chain[0]["call_options"]["ltp"] = 137.0
     events = scan_chain_explosions("NIFTY", chain, spot=24159.0, atm=24150.0)
     calls = [e for e in events if e.side == Side.CALL and e.strike == 24150.0]

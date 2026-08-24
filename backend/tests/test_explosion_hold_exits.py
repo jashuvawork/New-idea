@@ -55,6 +55,31 @@ def test_edge_skips_early_exit_on_breadth_aligned_explosion(mock_bh, mock_edge):
     assert reason is None
 
 
+@patch("app.engines.edge_engine.get_settings")
+def test_edge_never_preempts_first_lift_peak_manager(mock_settings):
+    settings = MagicMock()
+    settings.edge_engine_enabled = True
+    settings.edge_velocity_exhaustion_ratio = 0.35
+    settings.edge_rsi_overbought_exit = 72.0
+    settings.edge_macd_fade_exit_enabled = True
+    mock_settings.return_value = settings
+    trade = _explosion_trade(
+        ictFirstLift=True,
+        firstLiftCapture=True,
+        explosionTier="WATCH",
+    )
+    trade.bestPnlPoints = 20.0
+
+    reason, _ = check_edge_realtime_exit(
+        trade,
+        172.0,
+        None,
+        current_velocity_3s=0.1,
+        lot_multiplier=20,
+    )
+    assert reason is None
+
+
 @patch("app.engines.bullish_hold.get_settings")
 def test_adaptive_trail_waits_for_5pt_on_breadth_hold(mock_bh):
     mock_bh.return_value = MagicMock(bullish_hold_enabled=True)

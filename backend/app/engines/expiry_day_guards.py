@@ -479,6 +479,133 @@ def snapshots_have_expiry_elite_top(snapshots: dict[str, SymbolSnapshot]) -> boo
     return False
 
 
+def alert_is_strict_rank_one_launch(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+) -> bool:
+    """Whether one snapshot alert has enough causal proof to evaluate through the halt."""
+    if not bool(alert.get("tradeable")):
+        return False
+    if not bool(alert.get("ictBaseArmed")):
+        return False
+    armed_launch = bool(alert.get("ictArmedBaseLaunch"))
+    elite_ready = bool(alert.get("ictEliteBaseReady"))
+    if not (armed_launch or elite_ready):
+        return False
+
+    settings = get_settings()
+    if str(alert.get("tier") or "").upper() not in ("EXPLODING", "ELITE"):
+        return False
+    if float(alert.get("explosionScore") or 0) < float(
+        getattr(settings, "ict_armed_base_launch_min_score", 45.0) or 45.0
+    ):
+        return False
+    if float(snap.tradeQualityScore or 0) < float(
+        getattr(settings, "ict_armed_base_launch_min_tqs", 50.0) or 50.0
+    ):
+        return False
+    samples = int(alert.get("ictArmedBaseSamples") or 0)
+    span = float(alert.get("ictArmedBaseSpanSeconds") or 0)
+    base_range = float(alert.get("ictArmedBaseRangePct") or 0)
+    if (
+        samples < int(getattr(settings, "ict_armed_base_min_samples", 6) or 6)
+        or span < float(getattr(settings, "ict_armed_base_min_span_seconds", 15.0) or 15.0)
+        or base_range
+        > float(getattr(settings, "ict_armed_base_max_range_pct", 5.0) or 5.0)
+    ):
+        return False
+
+    base_move = float(
+        alert.get("ictBaseRelativeMovePct")
+        or alert.get("localBaseMovePct")
+        or 0
+    )
+    if elite_ready and not (
+        float(getattr(settings, "ict_elite_base_ready_min_move_pct", 2.0) or 2.0)
+        <= base_move
+        < float(getattr(settings, "ict_elite_base_ready_max_move_pct", 5.0) or 5.0)
+    ):
+        return False
+    if armed_launch and not (0 < base_move <= 40.0):
+        return False
+
+    side = str(alert.get("side") or "").upper()
+    strike = float(alert.get("strike") or 0)
+    from app.engines.moneyness import atm_itm_entry_allows
+    from app.models.schemas import Side
+
+    if side not in ("CALL", "PUT") or strike <= 0:
+        return False
+    if not atm_itm_entry_allows(Side(side), strike, snap)[0]:
+        return False
+
+    timing = alert.get("timingAssessment") or {}
+    timing_assessment = str(
+        timing.get("assessment") if isinstance(timing, dict) else timing
+    ).upper()
+    timing_action = str(
+        timing.get("action") if isinstance(timing, dict) else ""
+    ).lower()
+    if (
+        alert.get("fadedRip")
+        or alert.get("faded")
+        or alert.get("exhaustedReentry")
+        or timing_assessment in ("FAILED_LAUNCH", "FADING", "EXHAUSTED")
+        or timing_action == "block"
+    ):
+        return False
+
+    orderflow = bool(
+        alert.get("ictVolumeAwakening")
+        or alert.get("volumeAwaken")
+        or alert.get("orderflowConfirmed")
+        or alert.get("optionCvdBuying")
+        or float(alert.get("volumeSurge") or 0) >= 1.2
+    )
+    from app.engines.trade_ranking import rank_trade_evidence
+
+    ranking = rank_trade_evidence(
+        {
+            "mode": "explosion",
+            "tier": alert.get("tier"),
+            "explosionScore": alert.get("explosionScore"),
+            "tqs": snap.tradeQualityScore,
+            "velocity3s": alert.get("velocity3s"),
+            "velocity9s": alert.get("velocity9s"),
+            "localBaseMovePct": base_move,
+            "firstLift": alert.get("ictFirstLift"),
+            "eliteBaseReady": elite_ready,
+            "armedBaseLaunch": armed_launch,
+            "flatThenVertical": alert.get("ictFlatThenVertical"),
+            "flatVerticalQuality": alert.get("flatVerticalQuality"),
+            "orderflowPositive": orderflow,
+            "timingAssessment": timing_assessment,
+            "timingAction": timing_action,
+            "exhaustedReentry": alert.get("exhaustedReentry"),
+        }
+    )
+    return bool(
+        ranking.get("grade") == "S"
+        and ranking.get("topRankEligible")
+        and (
+            armed_launch
+            or ranking.get("executionAuthorization") == "S_PREAUTHORIZED"
+        )
+    )
+
+
+def snapshots_have_strict_rank_one_launch(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """Snapshot-only session-halt escape; candidate gates still run afterward."""
+    return any(
+        alert_is_strict_rank_one_launch(alert, snap)
+        for snap in snapshots.values()
+        if snap.dataAvailable
+        for alert in (snap.explosionAlerts or [])
+    )
+
+
 def is_expiry_elite_top_candidate(candidate: Any) -> bool:
     """Per-candidate elite-top check used under expiry-worst declining sessions."""
     settings = get_settings()
@@ -627,11 +754,26 @@ def check_expiry_entry_allowed(
             if _session_declining(state, snapshots):
                 if (
                     getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True)
-                    and snapshots_have_expiry_elite_top(snapshots)
+                    and snapshots_have_strict_rank_one_launch(snapshots)
                 ):
-                    meta["expiryWorstDayEliteTopBypass"] = True
-                    meta["expiryWorstDayEliteTopOnly"] = True
+                    meta["expiryWorstDayStrictRankOneBypass"] = True
+                    meta["expiryWorstDayStrictRankOneOnly"] = True
                     return True, "ok", meta
+                # A genuine intraday index breakout lifts the stale expiry chop halt too.
+                if bool(
+                    getattr(settings, "worst_day_intraday_trend_override_enabled", True)
+                ):
+                    try:
+                        from app.engines.index_tick_helpers import (
+                            index_trend_override_active,
+                        )
+
+                        trend_ok, trend_meta = index_trend_override_active(snapshots)
+                        if trend_ok:
+                            meta["expiryWorstDayTrendOverride"] = trend_meta
+                            return True, "ok", meta
+                    except Exception:
+                        pass
                 return False, "expiry_worst_day_declining_halt", meta
 
     return True, "ok", meta
@@ -686,10 +828,23 @@ def check_expiry_candidate(
         and (declining or cap_hit)
     )
     if elite_only:
-        # Declining / post-cap expiry-worst: only early-window ELITE tops.
-        if not is_expiry_elite_top_candidate(candidate):
+        # The declining halt uses the strict rank-one launch proof. The existing
+        # broader elite-top policy remains unchanged for post-cap handling.
+        strict_declining = bool(
+            declining
+            and alert_is_strict_rank_one_launch(
+                getattr(candidate, "alert", None)
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else {},
+                snap,
+            )
+        )
+        if declining and not strict_declining:
+            return False, "expiry_worst_day_strict_rank_one_only", meta
+        if cap_hit and not is_expiry_elite_top_candidate(candidate):
             return False, "expiry_worst_day_elite_top_only", meta
-        meta["expiryEliteTop"] = True
+        meta["expiryEliteTop"] = bool(cap_hit)
+        meta["expiryStrictRankOneLaunch"] = strict_declining
         # Still run open-block + aligned checks below for explosions.
 
     if mode == "explosion":
@@ -711,7 +866,7 @@ def check_expiry_candidate(
 
     # Qualified base-window elite top already cleared tier/score/move/premium/chart —
     # let it skip the expiry worst-day rank floor (72) that would otherwise re-block it.
-    if meta.get("expiryEliteTop"):
+    if meta.get("expiryEliteTop") or meta.get("expiryStrictRankOneLaunch"):
         return True, "ok", meta
 
     from app.engines.pretrade_validator import candidate_trade_score

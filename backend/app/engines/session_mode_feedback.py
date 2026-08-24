@@ -341,3 +341,237 @@ def cap_same_strike_explosion_reentry_after_win(
     })
     return capped, meta
 
+
+def _failed_launch_reentry_exit_reasons(settings: Any) -> set[str]:
+    raw = getattr(
+        settings,
+        "explosion_failed_launch_reentry_exit_reasons_csv",
+        "explosion_failed_launch,explosion_never_green_stop",
+    )
+    if not isinstance(raw, str) or not raw.strip():
+        raw = "explosion_failed_launch,explosion_never_green_stop"
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def _latest_failed_launch_nearby_close(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    strike_steps: int = 1,
+) -> Optional[Any]:
+    """Latest failed-launch / never-green close within ±strike_steps of strike."""
+    sym = str(symbol or "").upper()
+    side_v = _side_key(side)
+    strike_f = float(strike or 0)
+    try:
+        from app.engines.moneyness import strike_step
+
+        step = float(strike_step(sym) or 50.0)
+    except Exception:
+        step = 50.0
+    max_dist = max(0.0, float(strike_steps) * step) + 0.01
+    reasons = _failed_launch_reentry_exit_reasons(get_settings())
+    latest: Optional[Any] = None
+    latest_ts = None
+
+    def _is_explosion(t: Any) -> bool:
+        ctx = getattr(t, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
+        st = str(getattr(t, "strategyType", "") or "")
+        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+        return mode == "explosion" or st_u == "EXPLOSIVE"
+
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            continue
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if not _is_explosion(t):
+            continue
+        reason = str(getattr(t, "exitReason", "") or "")
+        if reason not in reasons:
+            continue
+        prior_strike = float(getattr(t, "strike", 0) or 0)
+        if abs(prior_strike - strike_f) > max_dist:
+            continue
+        prior_pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
+        best = float(getattr(t, "bestPnlPoints", 0) or 0)
+        # Only block true failed launches (never green / small loss).
+        if prior_pnl >= 0 and best > 1.0:
+            continue
+        ts = getattr(t, "closedAt", None) or getattr(t, "openedAt", None)
+        if latest is None or (ts is not None and (latest_ts is None or ts > latest_ts)):
+            latest = t
+            latest_ts = ts
+    return latest
+
+
+def failed_launch_reentry_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+) -> tuple[bool, dict[str, Any]]:
+    """Block same/nearby-strike re-entry after failed launch or never-green stop.
+
+    Failed launches that never went green are chop spikes — do not re-arm the same
+    contract (or ATM±1) until the cooldown expires. Peak-exhaustion guard does not
+    cover these because bestPnl was 0. Never-green hard cuts often exit with flat
+    velocity, so they must arm the same cooldown.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "explosion_failed_launch_reentry_block_enabled", True):
+        return False, meta
+    strike_steps_raw = getattr(
+        settings, "explosion_failed_launch_reentry_strike_steps", 1
+    )
+    try:
+        strike_steps = int(strike_steps_raw)
+    except (TypeError, ValueError):
+        strike_steps = 1
+    prior = _latest_failed_launch_nearby_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        strike_steps=max(0, strike_steps),
+    )
+    if prior is None or getattr(prior, "closedAt", None) is None:
+        return False, meta
+    reason = str(getattr(prior, "exitReason", "") or "")
+    prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
+    best = float(getattr(prior, "bestPnlPoints", 0) or 0)
+
+    now = datetime.now(_IST)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    age_seconds = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
+    cooldown = float(
+        getattr(settings, "explosion_failed_launch_reentry_cooldown_seconds", 1800)
+        or 1800
+    )
+    if age_seconds > cooldown:
+        return False, meta
+    meta.update(
+        {
+            "applied": True,
+            "priorTradeId": getattr(prior, "id", None),
+            "priorExitReason": reason,
+            "priorStrike": float(getattr(prior, "strike", 0) or 0),
+            "priorPnlInr": round(prior_pnl, 2),
+            "priorBestPoints": round(best, 2),
+            "ageSeconds": round(age_seconds, 1),
+            "cooldownSeconds": cooldown,
+            "strikeSteps": strike_steps,
+            "reason": "failed_launch_reentry_cooldown",
+        }
+    )
+    return True, meta
+
+
+def exhausted_ftv_reentry_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    velocity_3s: float,
+) -> tuple[bool, dict[str, Any]]:
+    """Block a spent FTV contract until a new post-close base accelerates."""
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "explosion_post_peak_reentry_guard_enabled", True):
+        return False, meta
+    prior = _latest_same_strike_explosion_close(
+        state, symbol=symbol, side=side, strike=strike,
+    )
+    if prior is None or getattr(prior, "closedAt", None) is None:
+        return False, meta
+
+    ctx = getattr(prior, "entryContext", None) or {}
+    ftv = bool(
+        ctx.get("ictFlatThenVertical")
+        or ctx.get("ictFirstLift")
+        or ctx.get("firstLiftCapture")
+        or ctx.get("ictArmedBaseLaunch")
+        or ctx.get("armedBaseCapture")
+        or str(ctx.get("momentType") or "") in {
+            "first_lift_local_base",
+            "flat_then_vertical",
+            "armed_base_launch",
+        }
+    )
+    entry = float(getattr(prior, "entryPremium", 0) or 0)
+    peak = max(
+        float(getattr(prior, "maxLtp", 0) or 0),
+        entry + float(getattr(prior, "bestPnlPoints", 0) or 0),
+    )
+    min_peak = float(
+        getattr(settings, "explosion_post_peak_reentry_min_peak_points", 20.0) or 20.0
+    )
+    peak_exit = str(getattr(prior, "exitReason", "") or "") in {
+        "explosion_peak_capture",
+        "explosion_peak_fade_profit_lock",
+        "explosion_runner_giveback",
+    }
+    if not ftv or peak - entry < min_peak or not peak_exit:
+        return False, meta
+
+    now = datetime.now(_IST)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    age_seconds = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
+    lookback = float(
+        getattr(settings, "explosion_post_peak_reentry_lookback_seconds", 1800) or 1800
+    )
+    if age_seconds > lookback:
+        return False, meta
+
+    from app.engines.explosion_detector import post_close_base_reacceleration
+
+    reset, reset_meta = post_close_base_reacceleration(
+        symbol,
+        strike,
+        side,
+        closed_at=closed_at,
+        current_premium=premium,
+        velocity_3s=velocity_3s,
+        min_base_samples=int(
+            getattr(settings, "explosion_post_peak_reentry_base_samples", 3) or 3
+        ),
+        min_base_span_seconds=float(
+            getattr(settings, "explosion_post_peak_reentry_base_span_seconds", 6.0) or 6.0
+        ),
+        min_reacceleration_pct=float(
+            getattr(settings, "explosion_post_peak_reentry_min_reacceleration_pct", 8.0)
+            or 8.0
+        ),
+        min_velocity_3s=float(
+            getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
+        ),
+    )
+    near_peak_pct = float(
+        getattr(settings, "explosion_post_peak_reentry_near_peak_pct", 15.0) or 15.0
+    )
+    meta.update(
+        {
+            "applied": not reset,
+            "priorTradeId": getattr(prior, "id", None),
+            "priorPeak": round(peak, 2),
+            "priorEntry": round(entry, 2),
+            "priorExitReason": getattr(prior, "exitReason", None),
+            "secondsSinceClose": round(age_seconds, 1),
+            "nearExhaustedPeak": float(premium or 0)
+            >= peak * (1.0 - max(0.0, near_peak_pct) / 100.0),
+            **reset_meta,
+        }
+    )
+    return not reset, meta
+

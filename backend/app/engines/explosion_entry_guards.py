@@ -153,6 +153,18 @@ def trustworthy_local_base_move(ict: Any) -> float:
     base = float(getattr(ict, "base_relative_move_pct", 0) or 0)
     if base <= 0:
         return 0.0
+    # Mid-rip coil rejection remounts pad onto session low — never trust a tiny
+    # armed pad that ICT already flagged as contaminated.
+    reasons = getattr(ict, "reasons", None) or []
+    if any(
+        isinstance(r, str) and r.startswith("mid_rip_coil_rejected_")
+        for r in reasons
+    ):
+        return base
+    # Armed local base is the causal denominator — trust pad even below the
+    # generic 8% noise floor so elite/armed launches at 2–7% are not treated as 0.
+    if bool(getattr(ict, "base_armed", False)):
+        return base
     trust_min = float(
         getattr(settings, "explosion_local_base_trust_min_move_pct", 8.0) or 8.0
     )
@@ -259,7 +271,8 @@ def structured_early_ict_ready(ict: Any) -> bool:
     if not structured:
         return False
     return bool(
-        getattr(ict, "volume_awakening", False)
+        getattr(ict, "first_lift", False)
+        or getattr(ict, "volume_awakening", False)
         or getattr(ict, "displacement", False)
         or getattr(ict, "premium_fvg", False)
     )
@@ -282,6 +295,29 @@ def entry_window_bounds(
     if top_must_take or structured_early_ict_ready(ict):
         lo = float(getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0)
         hi = float(getattr(settings, "ict_structured_early_max_move_pct", 65.0) or 65.0)
+    if getattr(ict, "armed_base_launch", False) is True:
+        lo = float(
+            getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
+        )
+        hi = float(
+            getattr(settings, "ict_armed_base_launch_max_move_pct", 15.0) or 15.0
+        )
+        # Sustained armed lift is the sparse-feed early FTV path through 25%.
+        if getattr(ict, "armed_base_sustained_lift", False) is True:
+            lo = min(
+                lo,
+                float(
+                    getattr(settings, "ict_armed_sustained_lift_min_move_pct", 8.0)
+                    or 8.0
+                ),
+            )
+            hi = max(
+                hi,
+                float(
+                    getattr(settings, "ict_armed_sustained_lift_max_move_pct", 25.0)
+                    or 25.0
+                ),
+            )
     return lo, hi
 
 
@@ -325,6 +361,32 @@ def explosion_entry_window_blocked(
             )
             if elite_hi > 0:
                 hi = min(hi, elite_hi)
+            # Closed loop (entry-side): tighten the near-base ceiling per moment type from
+            # the accumulated EOD knowledge — take nearer the local base, skip the milder
+            # off-base chases this moment type historically didn't sustain. TIGHTEN-ONLY and
+            # floored so genuine near-base first lifts (<= floor) are never blocked.
+            if bool(getattr(settings, "eod_learning_apply_enabled", True)):
+                try:
+                    from app.engines.eod_ftv_learning import learned_ftv_profile
+
+                    side_u = str(
+                        getattr(getattr(explosion_event, "side", None), "value",
+                                getattr(explosion_event, "side", "")) or ""
+                    ).upper()
+                    prof = learned_ftv_profile(
+                        str(getattr(explosion_event, "symbol", "") or ""), side_u, tier_u,
+                    )
+                    min_n = int(getattr(settings, "eod_learning_apply_min_samples", 5) or 5)
+                    if prof and int(prof.get("count", 0)) >= min_n:
+                        learned_max = float(prof.get("recommendedNearBaseMaxPct") or 0)
+                        floor = float(
+                            getattr(settings, "eod_learning_near_base_floor_pct", 25.0)
+                            or 25.0
+                        )
+                        if learned_max > 0:
+                            hi = min(hi, max(floor, learned_max))
+                except Exception:
+                    pass
     # Squeeze-fired ELITE at a confirmed local base — a Bollinger/Keltner release off the
     # base is a confirmed coil break, not noise, so allow entry closer to the base than the
     # normal 15% floor (catch it AT the base). Gated by the caller to squeeze + ELITE + base.
@@ -417,7 +479,7 @@ def immature_explosion_blocked(
         move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
 
     min_move = float(
-        getattr(settings, "explosion_immature_min_session_move_pct", 22.0) or 22.0
+        getattr(settings, "explosion_immature_min_session_move_pct", 28.0) or 28.0
     )
     early_min = float(
         getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0
@@ -434,6 +496,8 @@ def immature_explosion_blocked(
         bool(getattr(ict, "local_swing_base", False))
         or bool(getattr(ict, "flat_then_vertical", False))
     )
+    if getattr(ict, "armed_base_launch", False) is True:
+        return False, ""
     if base_move > 0 and structured_pad:
         local_floor = float(
             getattr(settings, "explosion_local_base_entry_min_move_pct", 15.0) or 15.0
@@ -541,6 +605,15 @@ def live_explosion_confirmation_blocked(
     if not getattr(settings, "explosion_live_confirm_enabled", True):
         return False, ""
     if explosion_event is None:
+        return False, ""
+
+    from app.engines.ict_breakout_monitor import first_lift_entry_ready
+
+    if first_lift_entry_ready(
+        snap=snap,
+        event=explosion_event,
+        ict=ict,
+    ):
         return False, ""
 
     from app.engines.elite_never_block import elite_never_block_active
@@ -992,6 +1065,28 @@ def _premium_mom_flat(premium_chart: Any) -> bool:
     return flat_mom or direction == "NEUTRAL"
 
 
+def _worst_or_expiry_chop_day(snap: SymbolSnapshot, state: Any = None) -> bool:
+    """True only when the live session is labeled WORST / EXPIRY WORST.
+
+    Do not infer from RANGE_BOUND alone — that would hard-block valid Jul31-style
+    base-window EXPLODING entries on ordinary midday chop.
+    """
+    if state is None:
+        return False
+    for attr in ("dayMode", "day_mode", "dailyStrategy", "dayAdaptive"):
+        raw = getattr(state, attr, None)
+        if isinstance(raw, dict):
+            blob = " ".join(
+                str(raw.get(k) or "")
+                for k in ("dayMode", "dayType", "message", "mode")
+            ).upper()
+        else:
+            blob = str(raw or "").upper()
+        if "WORST" in blob or "EXPIRY WORST" in blob:
+            return True
+    return False
+
+
 def _post_small_win(state: Any) -> tuple[bool, dict[str, Any]]:
     """Last closed trade was a small green — size-up FOMO risk unless trail-proved."""
     settings = get_settings()
@@ -1086,8 +1181,14 @@ def detect_fake_explosion_trap(
         extended_move = float(
             getattr(settings, "explosion_early_window_max_move_pct", 65.0) or 65.0
         )
-    session_extended = move >= extended_move
-    in_base_window = min_move <= move < extended_move
+    local_pad = float(effective_local_base_move_pct(event, ict) or 0.0)
+    local_max = float(
+        getattr(settings, "explosion_local_base_chase_max_move_pct", 65.0) or 65.0
+    )
+    fresh_local_pad = 0 < local_pad <= local_max
+    timing_move = local_pad if fresh_local_pad else move
+    session_extended = move >= extended_move and not fresh_local_pad
+    in_base_window = min_move <= timing_move < extended_move
     premium_flat = _premium_mom_flat(premium_chart)
 
     depth, money, atm = _strike_depth(candidate.side, float(candidate.strike), snap)
@@ -1131,6 +1232,7 @@ def detect_fake_explosion_trap(
         "conflictCount": len(flags),
         "explosionTier": tier,
         "sessionMovePct": round(move, 2),
+        "localBaseMovePct": round(local_pad, 2),
         "velocity3s": round(v3, 2),
         "moneyness": money,
         "preferredMoneyness": preferred,
@@ -1175,6 +1277,19 @@ def detect_fake_explosion_trap(
         ):
             hard_block = True
             reason = "fake_explosion_trap_fomo_stack"
+        elif (
+            bool(getattr(settings, "fake_explosion_trap_block_worst_midday_chop", True))
+            and chop_regime
+            and midday
+            and elite_hot
+            and _worst_or_expiry_chop_day(snap, state)
+        ):
+            # Aug18 NIFTY 24250 PUT: armed-base EXPLODING on EXPIRY WORST + midday
+            # chop only soft-capped to 6 lots, then failed_launch. Previously these
+            # chop+elite stacks were stopped — restore hard block on worst/expiry.
+            hard_block = True
+            reason = "fake_explosion_trap_worst_midday_chop"
+            meta["worstMiddayChopBlock"] = True
         else:
             min_flags = int(
                 getattr(settings, "fake_explosion_trap_min_conflict_flags", 3) or 3
@@ -1186,11 +1301,16 @@ def detect_fake_explosion_trap(
                 "otm_inside_or",
                 "post_small_win",
             }
+            structural_conflicts = structural.intersection(flags)
+            if fresh_local_pad:
+                # Flat premium alone is not an extension when the option is still close
+                # to a confirmed local launch pad. OTM/post-win conflicts still apply.
+                structural_conflicts.discard("premium_flat")
             if (
                 len(flags) >= min_flags
                 and (chop_regime or midday)
                 and elite_hot
-                and structural.intersection(flags)
+                and structural_conflicts
             ):
                 hard_block = True
                 reason = "fake_explosion_trap_conflict"

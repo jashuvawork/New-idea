@@ -26,9 +26,9 @@ _INDIA_TAGS = (
 )
 
 
-async def fetch_market_news() -> list[dict[str, Any]]:
+async def fetch_finnhub_news() -> list[dict[str, Any]]:
     settings = get_settings()
-    if settings.news_provider != "finnhub" or not settings.finnhub_api_key:
+    if settings.news_provider not in ("auto", "finnhub") or not settings.finnhub_api_key:
         return []
 
     items: list[dict[str, Any]] = []
@@ -57,6 +57,7 @@ async def fetch_market_news() -> list[dict[str, Any]]:
                         "sentiment": sentiment,
                         "indiaRelevant": _is_india_relevant(headline, summary),
                         "category": category,
+                        "provider": "finnhub",
                     })
 
             # India company news sample (Reliance as market bellwether)
@@ -83,6 +84,7 @@ async def fetch_market_news() -> list[dict[str, Any]]:
                         "sentiment": _estimate_sentiment(headline, item.get("summary", "")),
                         "indiaRelevant": True,
                         "category": "company",
+                        "provider": "finnhub",
                     })
     except Exception as e:
         logger.warning("Finnhub fetch failed: %s", e)
@@ -109,15 +111,20 @@ async def fetch_market_news() -> list[dict[str, Any]]:
     return unique[:20]
 
 
+async def fetch_market_news() -> list[dict[str, Any]]:
+    """Backward-compatible global-news adapter.
+
+    New application code should use ``news_intelligence.fetch_market_news`` so
+    Upstox instrument news and impact classification are also included.
+    """
+    return await fetch_finnhub_news()
+
+
 def aggregate_sentiment(news: list[dict[str, Any]]) -> dict[str, Any]:
-    if not news:
-        return {"bias": "NEUTRAL", "score": 0, "indiaHeadlines": 0}
-    scores = {"BULLISH": 1, "NEUTRAL": 0, "BEARISH": -1}
-    total = sum(scores.get(n.get("sentiment", "NEUTRAL"), 0) for n in news[:12])
-    india = sum(1 for n in news if n.get("indiaRelevant"))
-    avg = total / min(12, len(news))
-    bias = "BULLISH" if avg > 0.2 else "BEARISH" if avg < -0.2 else "NEUTRAL"
-    return {"bias": bias, "score": round(avg * 100, 1), "indiaHeadlines": india, "count": len(news)}
+    """Backward-compatible alias for the guarded news aggregate."""
+    from app.services.news_intelligence import aggregate_news_intelligence
+
+    return aggregate_news_intelligence(news)
 
 
 def _estimate_sentiment(headline: str, summary: str = "") -> str:
