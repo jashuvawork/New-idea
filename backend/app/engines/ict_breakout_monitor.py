@@ -954,20 +954,13 @@ def first_lift_entry_readiness(
             getattr(settings, "ict_v_rip_min_velocity_9s", 0.8) or 0.8
         )
         pad_lo = float(
-            getattr(settings, "ict_v_rip_pad_min_move_pct", 15.0) or 15.0
+            getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0
         )
         if volume_awake and base_move + 1e-6 >= pad_lo:
-            min_v3 = min(
-                min_v3,
-                float(
-                    getattr(
-                        settings,
-                        "ict_v_rip_volume_awake_min_velocity_3s",
-                        0.85,
-                    )
-                    or 0.85
-                ),
-            )
+            # Volume awakening at the session trough IS the lift trigger — do not
+            # require v3 to spike first (Aug24 NIFTY PUT 24250/24300 at ~7% pad).
+            min_v3 = 0.0
+            min_v9 = 0.0
     else:
         min_v3 = float(
             getattr(
@@ -1046,6 +1039,11 @@ def first_lift_entry_readiness(
             or (
                 persisted_orderflow_allowed
                 and persisted.get("orderflowConfirmed")
+            )
+            or volume_awake
+            or (
+                persisted_orderflow_allowed
+                and bool(persisted.get("volumeAwakening"))
             )
         )
         if not orderflow_proof:
@@ -2326,7 +2324,7 @@ def _defensive_base_rip_top_allowed(
     move = float(base_move_pct or 0)
     if pad_lo <= move <= pad_hi and (v_rip_ready or volume_awake):
         pad_floor = float(
-            getattr(settings, "ict_v_rip_pad_min_move_pct", 15.0) or 15.0
+            getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0
         )
         if volume_awake and move + 1e-6 >= pad_floor:
             min_v3 = min(

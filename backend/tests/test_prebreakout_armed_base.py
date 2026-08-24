@@ -360,6 +360,8 @@ def test_weak_armed_launch_cannot_bypass_adverse_chart(_open, side):
         launch["absoluteVolume"] = 0
         launch["orderflowConfirmed"] = False
         launch["optionCvdBuying"] = False
+        launch["ictVolumeAwakening"] = False
+        launch["volumeAwaken"] = False
         snap.explosionAlerts = [launch]
         ready, reason = first_lift_entry_readiness(snap=snap, alert=launch)
         selected = find_best_entry({"NIFTY": snap}, state)

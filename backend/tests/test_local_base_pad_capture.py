@@ -213,7 +213,7 @@ def test_defensive_rip_top_softens_velocity_in_pad_lane():
     settings.ict_defensive_base_rip_min_velocity_3s = 2.5
     settings.top_ftv_a_pad_velocity_min_move_pct = 8.0
     settings.top_ftv_a_pad_velocity_max_move_pct = 25.0
-    settings.ict_v_rip_pad_min_move_pct = 15.0
+    settings.ict_v_rip_pad_min_move_pct = 2.0
     settings.ict_v_rip_volume_awake_min_velocity_3s = 0.85
     settings.ict_v_rip_min_velocity_3s = 1.2
     ok, reason = _defensive_base_rip_top_allowed(
