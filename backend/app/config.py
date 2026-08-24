@@ -1389,7 +1389,11 @@ class Settings(BaseSettings):
     bullish_local_base_prediction_max_move_pct: float = 40.0
     bullish_local_base_prediction_min_confidence: float = 70.0
     bullish_local_base_prediction_rank_max: float = 18.0
-    # Fast-moving local-base capture — enter below ₹30 LTP when momentum turn +
+    # Local-base pad capture band — slow coil → fast vertical lift only (not generic
+    # cheap options). Aug24 24200 PE: ₹18–23 coil, lift from ~₹23 to ₹50+.
+    local_base_pad_capture_min_premium_inr: float = 18.0
+    local_base_pad_capture_max_premium_inr: float = 30.0
+    # Fast-moving local-base capture — enter in the pad band when momentum turn +
     # volume awakening prove the rip is starting (Aug24 24→30 shape).
     fast_bullish_local_base_capture_enabled: bool = True
     fast_bullish_local_base_max_premium_inr: float = 30.0

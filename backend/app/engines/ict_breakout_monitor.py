@@ -611,6 +611,31 @@ def building_rip_bullish_readiness(
     return True, "building_rip_bullish_ready"
 
 
+def _local_base_pad_premium_band_ok(
+    premium: float,
+    *,
+    settings: Any,
+    max_premium_setting: str,
+    reason_prefix: str,
+) -> tuple[bool, str]:
+    """Require LTP inside the slow-coil → fast-lift pad band (default ₹18–₹30)."""
+    if premium <= 0:
+        return False, f"{reason_prefix}_premium_missing"
+    min_prem = float(
+        getattr(settings, "local_base_pad_capture_min_premium_inr", 18.0) or 18.0
+    )
+    max_prem = float(
+        getattr(settings, max_premium_setting, 30.0)
+        or getattr(settings, "local_base_pad_capture_max_premium_inr", 30.0)
+        or 30.0
+    )
+    if premium < min_prem:
+        return False, f"{reason_prefix}_premium_below_{min_prem:g}"
+    if premium > max_prem:
+        return False, f"{reason_prefix}_premium_above_{max_prem:g}"
+    return True, ""
+
+
 def _fast_bullish_local_base_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -619,7 +644,7 @@ def _fast_bullish_local_base_readiness(
     alert: Optional[dict[str, Any]] = None,
     settings: Any = None,
 ) -> tuple[bool, str]:
-    """Authorize fast-moving local-base lifts while LTP is still below the pad ceiling."""
+    """Authorize fast-moving local-base lifts inside the ₹18–₹30 pad band."""
     s = settings or get_settings()
     if not bool(getattr(s, "fast_bullish_local_base_capture_enabled", True)):
         return False, ""
@@ -630,11 +655,14 @@ def _fast_bullish_local_base_readiness(
     premium = float(
         getattr(event, "premium", 0) or row.get("premium") or 0
     )
-    max_prem = float(
-        getattr(s, "fast_bullish_local_base_max_premium_inr", 30.0) or 30.0
+    prem_ok, prem_reason = _local_base_pad_premium_band_ok(
+        premium,
+        settings=s,
+        max_premium_setting="fast_bullish_local_base_max_premium_inr",
+        reason_prefix="fast_bullish",
     )
-    if premium <= 0 or premium > max_prem:
-        return False, f"fast_bullish_premium_above_{max_prem:g}"
+    if not prem_ok:
+        return False, prem_reason
 
     base_move = float(
         getattr(ict, "base_relative_move_pct", 0)
@@ -827,7 +855,7 @@ def _slow_grind_sudden_lift_readiness(
     alert: Optional[dict[str, Any]] = None,
     settings: Any = None,
 ) -> tuple[bool, str]:
-    """Authorize slow sub-₹30 coil when impending-lift signals stack before the spike."""
+    """Authorize slow ₹18–₹30 coil when impending-lift signals stack before the spike."""
     s = settings or get_settings()
     if not bool(getattr(s, "slow_grind_sudden_lift_enabled", True)):
         return False, ""
@@ -838,11 +866,14 @@ def _slow_grind_sudden_lift_readiness(
     premium = float(
         getattr(event, "premium", 0) or row.get("premium") or 0
     )
-    max_prem = float(
-        getattr(s, "slow_grind_sudden_lift_max_premium_inr", 30.0) or 30.0
+    prem_ok, prem_reason = _local_base_pad_premium_band_ok(
+        premium,
+        settings=s,
+        max_premium_setting="slow_grind_sudden_lift_max_premium_inr",
+        reason_prefix="slow_grind",
     )
-    if premium <= 0 or premium > max_prem:
-        return False, f"slow_grind_premium_above_{max_prem:g}"
+    if not prem_ok:
+        return False, prem_reason
 
     base_move = float(
         getattr(ict, "base_relative_move_pct", 0)
