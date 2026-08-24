@@ -643,6 +643,11 @@ class Settings(BaseSettings):
     first_lift_helper_confirm_min_score: float = 45.0
     first_lift_helper_confirm_min_velocity_3s: float = 1.2
     first_lift_helper_confirm_min_velocity_9s: float = 0.6
+    # Shallow v3 dip on confirmed first-lift/V-rip at local base — ICT pad is
+    # proven; do not treat a micro pullback as FAILED_LAUNCH (Aug24 PUT 24450).
+    first_lift_local_base_micro_pullback_enabled: bool = True
+    first_lift_local_base_micro_pullback_min_velocity_3s: float = -1.2
+    first_lift_local_base_micro_pullback_min_velocity_9s: float = -0.5
     building_rip_helper_override_worst_day: bool = True
     first_lift_trade_min_momentum_shift_pct: float = 0.03
     # ATM/ITM premium-led first lift: stronger option evidence may lead a lagging
