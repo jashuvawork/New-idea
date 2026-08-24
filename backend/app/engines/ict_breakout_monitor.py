@@ -611,6 +611,20 @@ def building_rip_bullish_readiness(
     return True, "building_rip_bullish_ready"
 
 
+def _v_rip_lane_active(
+    *,
+    v_rip_ready: bool,
+    base_move_pct: float,
+    settings: Any,
+) -> bool:
+    """V-rip sleeve is active when move is inside the 2–25% session-trough pad."""
+    if not v_rip_ready:
+        return False
+    lo = float(getattr(settings, "ict_v_rip_min_move_pct", 2.0) or 2.0)
+    hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    return lo <= float(base_move_pct or 0) <= hi + 1e-6
+
+
 def first_lift_entry_ready(
     *,
     snap: Optional[SymbolSnapshot],
@@ -712,6 +726,20 @@ def first_lift_entry_readiness(
     ):
         return False, "first_lift_structure_not_confirmed"
 
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or 0
+    )
+    # V-rip pad relaxes quality/score/velocity floors but does not bypass armed/elite
+    # orderflow, TQS, stability, or reason tagging when those stamps are present.
+    v_rip_lane = _v_rip_lane_active(
+        v_rip_ready=v_rip_ready,
+        base_move_pct=base_move,
+        settings=settings,
+    )
+    strict_armed_path = armed_launch or elite_base_ready
+
     # EXPIRY WORST: armed/first-lift must clear the same raised defensive bar.
     if not day_mode and state is None:
         try:
@@ -753,13 +781,7 @@ def first_lift_entry_readiness(
         if not ok:
             return False, deny
 
-    base_move = float(
-        getattr(ict, "base_relative_move_pct", 0)
-        or row.get("ictBaseRelativeMovePct")
-        or 0
-    )
-    strict_armed_path = armed_launch or elite_base_ready
-    if v_rip_ready and not (elite_base_ready or armed_launch or first_lift):
+    if v_rip_lane:
         min_move = float(
             getattr(settings, "ict_v_rip_min_move_pct", 2.0) or 2.0
         )
@@ -821,7 +843,7 @@ def first_lift_entry_readiness(
     if (
         first_lift
         and not strict_armed_path
-        and not v_rip_ready
+        and not v_rip_lane
         and _option_led_first_lift_ok(
             row=row, ict=ict, event=event, snap=snap, settings=settings,
         )
@@ -834,7 +856,7 @@ def first_lift_entry_readiness(
         or 0
     )
     quality = max(quality, float(persisted.get("flatVerticalQuality") or 0))
-    if v_rip_ready and not (elite_base_ready or armed_launch):
+    if v_rip_lane:
         min_quality = float(
             getattr(settings, "ict_v_rip_min_quality", 50.0) or 50.0
         )
@@ -906,18 +928,44 @@ def first_lift_entry_readiness(
         or row.get("velocity_9s")
         or 0
     )
+    volume_surge = float(
+        getattr(event, "volume_surge", 0)
+        or getattr(ict, "volume_surge", 0)
+        or row.get("volumeSurge")
+        or 0
+    )
+    volume_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
     live_v3 = v3
     v3 = max(v3, float(persisted.get("velocity3s") or 0))
     v9 = max(v9, float(persisted.get("velocity9s") or 0))
     if live_v3 < 0:
         return False, "first_lift_live_velocity_negative"
-    if v_rip_ready and not (elite_base_ready or armed_launch):
+    if v_rip_lane:
         min_v3 = float(
             getattr(settings, "ict_v_rip_min_velocity_3s", 1.2) or 1.2
         )
         min_v9 = float(
             getattr(settings, "ict_v_rip_min_velocity_9s", 0.8) or 0.8
         )
+        pad_lo = float(
+            getattr(settings, "ict_v_rip_pad_min_move_pct", 15.0) or 15.0
+        )
+        if volume_awake and base_move + 1e-6 >= pad_lo:
+            min_v3 = min(
+                min_v3,
+                float(
+                    getattr(
+                        settings,
+                        "ict_v_rip_volume_awake_min_velocity_3s",
+                        0.85,
+                    )
+                    or 0.85
+                ),
+            )
     else:
         min_v3 = float(
             getattr(
@@ -961,17 +1009,6 @@ def first_lift_entry_readiness(
     if not sustained_lift and v9 < min_v9:
         return False, f"first_lift_velocity9s<{min_v9:g}"
 
-    volume_surge = float(
-        getattr(event, "volume_surge", 0)
-        or getattr(ict, "volume_surge", 0)
-        or row.get("volumeSurge")
-        or 0
-    )
-    volume_awake = bool(
-        getattr(ict, "volume_awakening", False)
-        or row.get("ictVolumeAwakening")
-        or row.get("volumeAwaken")
-    )
     min_volume = float(
         getattr(settings, "first_lift_trade_min_volume_surge", 2.0) or 2.0
     )
@@ -1027,7 +1064,7 @@ def first_lift_entry_readiness(
     if side not in ("CALL", "PUT"):
         return False, "first_lift_side_invalid"
 
-    if v_rip_ready and not strict_armed_path:
+    if v_rip_lane and not strict_armed_path:
         if not volume_awake and volume_surge < min_volume:
             return False, f"first_lift_volume_surge<{min_volume:g}"
         from app.engines.moneyness import classify_moneyness
@@ -1080,6 +1117,13 @@ def first_lift_entry_readiness(
         min_tqs = float(
             getattr(settings, "ict_armed_base_launch_min_tqs", 50.0) or 50.0
         )
+        if v_rip_lane:
+            min_tqs = min(
+                min_tqs,
+                float(
+                    getattr(settings, "ict_v_rip_armed_min_tqs", 45.0) or 45.0
+                ),
+            )
         aligned_tqs = max(
             float(getattr(snap, "tradeQualityScore", 0) or 0),
             float(persisted.get("tradeQualityScore") or 0),
@@ -1107,10 +1151,23 @@ def first_lift_entry_readiness(
         )
         if money not in ("ATM", "ITM"):
             return False, f"armed_base_requires_atm_itm_{money.lower()}"
+        armed_min_tqs = float(
+            getattr(settings, "ict_armed_base_launch_min_tqs", 50.0) or 50.0
+        )
+        use_v_rip_reason = (
+            v_rip_lane
+            and armed_launch
+            and not elite_base_ready
+            and aligned_tqs < armed_min_tqs
+        )
         return True, (
             "elite_base_ready_s_preauthorized"
             if elite_base_ready
-            else "armed_base_option_led_ready"
+            else (
+                "v_rip_session_low_ready"
+                if use_v_rip_reason
+                else "armed_base_option_led_ready"
+            )
         )
 
     # A confirmed ATM/ITM option can lead the slower 5m spot chart. This path is
