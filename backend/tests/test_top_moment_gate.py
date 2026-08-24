@@ -130,3 +130,50 @@ def test_disabled_gate_passes():
     )
     assert ok is True
     assert reason == "disabled"
+
+
+def test_classify_slow_grind_as_ftv():
+    assert (
+        classify_top_moment_type(_evidence(tier="BUILDING", slowGrindSuddenLift=True))
+        == "FTV"
+    )
+
+
+def test_qualifies_for_top_moment_max_lots_elite():
+    from app.engines.top_moment_gate import qualifies_for_top_moment_max_lots
+
+    ok, reason, moment = qualifies_for_top_moment_max_lots(
+        _evidence(tier="ELITE", armedBaseLaunch=True),
+        _ranking("A"),
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert moment == "ELITE"
+
+
+def test_qualifies_for_top_moment_max_lots_blocks_generic_building():
+    from app.engines.top_moment_gate import qualifies_for_top_moment_max_lots
+
+    ok, reason, moment = qualifies_for_top_moment_max_lots(
+        _evidence(
+            tier="BUILDING",
+            flatThenVertical=False,
+            activeBreakout=False,
+        ),
+        _ranking("A"),
+    )
+    assert ok is False
+    assert reason == "top_moment_requires_ftv_v_elite_or_exploding"
+    assert moment is None
+
+
+def test_qualifies_for_top_moment_max_lots_disabled():
+    from app.engines.top_moment_gate import qualifies_for_top_moment_max_lots
+
+    ok, reason, _ = qualifies_for_top_moment_max_lots(
+        _evidence(tier="BUILDING"),
+        _ranking("C"),
+        top_moments_max_lots_only_enabled=False,
+    )
+    assert ok is True
+    assert reason == "disabled"

@@ -210,6 +210,8 @@ class Settings(BaseSettings):
     # Blocks B/C sleeves, generic BUILDING without FTV/V triggers, and non-explosion modes.
     top_moments_only_enabled: bool = True
     top_moments_min_grade: str = "A"  # A or S; set S for strictest book
+    # Reserve capital-max lots for grade-A+ FTV / V / ELITE / EXPLODING only.
+    top_moments_max_lots_only_enabled: bool = True
     # One-week validation: lower local-base floors so detection, grading, and entry
     # can fire at 2–15% pad. Use /api/ai/local-base-audit/{date} to score each day.
     local_base_audit_week_enabled: bool = False

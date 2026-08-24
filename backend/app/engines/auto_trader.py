@@ -519,6 +519,7 @@ async def _open_from_candidate(
     symbol = candidate.symbol
     snap = candidate.snap
     policy_decision = None
+    policy_ranking = None
 
     # Jul29: stop scalp entries — explosions only.
     if not getattr(settings, "scalp_entries_enabled", False):
@@ -1209,6 +1210,24 @@ async def _open_from_candidate(
             top_explosion_max = True
         except Exception:
             elite_full_lot = False
+
+    lots, top_moment_lot_meta = _enforce_top_moment_max_lots_only(
+        lots=lots,
+        symbol=symbol,
+        premium=fill_premium,
+        candidate=candidate,
+        policy_ranking=policy_ranking,
+        settings=settings,
+    )
+    if not top_moment_lot_meta.get("topMomentMaxLots", True):
+        top_explosion_max = False
+        elite_full_lot = False
+        full_sleeve_authorized = False
+        base_window_full_lots = False
+        structured_cold_max = False
+        high_conviction = False
+        elevated_size = False
+
     if candidate.mode == "explosion" and trap_meta:
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
@@ -1622,6 +1641,9 @@ async def _open_from_candidate(
         ),
         "baseWindowFullLots": bool(base_window_full_lots),
         "structuredColdMaxLots": bool(structured_cold_max),
+        "topMomentMaxLots": top_moment_lot_meta.get("topMomentMaxLots"),
+        "topMomentType": top_moment_lot_meta.get("topMomentType"),
+        "topMomentMaxLotsCapReason": top_moment_lot_meta.get("topMomentMaxLotsCapReason"),
         "sameStrikePostWinCap": post_win_cap_meta or None,
         "timingAssessment": timing_meta or None,
     }
@@ -2850,8 +2872,63 @@ def _top_rank_full_budget_lots_allowed(
         and strict_first_lift
         and top_explosion_max
         and not faded_rip
-        and not post_win_capped
+        and not         post_win_capped
     )
+
+
+def _enforce_top_moment_max_lots_only(
+    *,
+    lots: int,
+    symbol: str,
+    premium: float,
+    candidate: Any,
+    policy_ranking: Any,
+    settings: Any,
+) -> tuple[int, dict[str, Any]]:
+    """Cap non-top moments to ordinary capital — max lots only for FTV/V/ELITE/EXPLODING."""
+    meta: dict[str, Any] = {}
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        meta["topMomentMaxLots"] = True
+        return int(lots), meta
+    if not bool(getattr(settings, "top_moments_max_lots_only_enabled", True)):
+        meta["topMomentMaxLots"] = True
+        meta["topMomentType"] = "disabled"
+        return int(lots), meta
+
+    from app.engines.capital_allocator import max_lots_for_capital_pct
+    from app.engines.top_moment_gate import qualifies_for_top_moment_max_lots
+    from app.engines.trade_ranking import rank_entry_candidate
+
+    ranking = policy_ranking if isinstance(policy_ranking, dict) else None
+    if not ranking:
+        ranking = rank_entry_candidate(candidate)
+    evidence = ranking.get("evidence") or {}
+    ok, reason, moment = qualifies_for_top_moment_max_lots(
+        evidence,
+        ranking,
+        top_moments_max_lots_only_enabled=True,
+        min_grade=str(getattr(settings, "top_moments_min_grade", "A") or "A"),
+    )
+    if ok:
+        meta["topMomentMaxLots"] = True
+        meta["topMomentType"] = moment
+        return int(lots), meta
+
+    ordinary_pct = float(
+        getattr(settings, "ordinary_entry_max_capital_pct", 0.35) or 0.35
+    )
+    capped = min(
+        int(lots),
+        max_lots_for_capital_pct(symbol, premium, ordinary_pct),
+    )
+    meta.update(
+        {
+            "topMomentMaxLots": False,
+            "topMomentMaxLotsCapReason": reason,
+            "topMomentType": moment,
+        }
+    )
+    return max(1, capped), meta
 
 
 def _top_ftv_a_policy_max_lots(
