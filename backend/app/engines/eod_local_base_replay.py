@@ -150,6 +150,29 @@ def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, An
         ),
         "indexHelpersConfirm": bool(alert.get("indexHelpersConfirm")),
         "indexTickSpike": bool(alert.get("indexTickSpike")),
+        "slowGrindSuddenLift": bool(
+            alert.get("slowGrindSuddenLiftReady")
+            or alert.get("ictSlowGrindSuddenLift")
+        ),
+        "fastBullishLocalBase": bool(
+            alert.get("fastBullishLocalBaseReady")
+            or alert.get("bullishLocalBaseActive")
+        ),
+        "squeezeRelease": bool(
+            alert.get("squeezeReleaseReady") or alert.get("ictSqueezeRelease")
+        ),
+        "indexLedOptionLag": bool(
+            alert.get("indexLedOptionLagReady") or alert.get("ictIndexLedOptionLag")
+        ),
+        "stealthCvdCoil": bool(
+            alert.get("stealthCvdCoilReady") or alert.get("ictStealthCvdCoil")
+        ),
+        "microPullbackRetest": bool(
+            alert.get("microPullbackRetestReady") or alert.get("ictMicroPullbackRetest")
+        ),
+        "premiumFvgPad": bool(
+            alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")
+        ),
         "timingAssessment": str(alert.get("timingAssessment") or ""),
         "timingAction": str(alert.get("timingAction") or ""),
     }

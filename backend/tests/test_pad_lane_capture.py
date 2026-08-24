@@ -13,12 +13,15 @@ from app.engines.pad_lane_capture import (
     PREMIUM_FVG_PAD_READY,
     SQUEEZE_RELEASE_READY,
     STEALTH_CVD_COIL_READY,
+    extended_pad_lane_readiness,
     index_led_option_lag_readiness,
     micro_pullback_retest_readiness,
+    pad_lane_cold_velocity_ok,
     premium_fvg_pad_readiness,
     squeeze_release_readiness,
     stealth_cvd_coil_readiness,
 )
+from app.engines.ict_breakout_monitor import first_lift_entry_readiness
 from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
 from app.models.schemas import MarketPhase, Side, SpotChart, SymbolSnapshot
 
@@ -221,3 +224,53 @@ def test_pad_lane_ftv_policies_authorize_building(flag, mode):
     assert decision.allowed is True
     assert decision.mode == mode
     assert decision.max_capital_pct == 0.90
+
+
+@pytest.mark.parametrize(
+    "flag,v3,v9,expected",
+    [
+        ("slowGrindSuddenLift", -0.3, 0.1, True),
+        ("slowGrindSuddenLift", -1.0, 0.1, False),
+        ("squeezeRelease", -0.4, 0.0, True),
+        ("indexLedOptionLag", -0.2, 0.0, True),
+        ("stealthCvdCoil", -0.3, 0.0, True),
+        ("stealthCvdCoil", -0.8, 0.0, False),
+        ("microPullbackRetest", -0.8, 0.0, True),
+        ("microPullbackRetest", -0.8, -0.8, False),
+        ("premiumFvgPad", -0.5, 0.0, True),
+        ("fastBullishLocalBase", -0.1, 0.0, False),
+    ],
+)
+def test_pad_lane_cold_velocity_ok(flag, v3, v9, expected):
+    evidence = {flag: True}
+    assert pad_lane_cold_velocity_ok(evidence, v3, v9) is expected
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_extended_pad_lane_wins_first_lift_chain(mock_settings):
+    """Squeeze release routes through first_lift_entry_readiness before slow-grind."""
+    mock_settings.return_value = Settings()
+    alert = _alert()
+    snap = _snap()
+    ict = _ict()
+    ready, reason = first_lift_entry_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=22.0, velocity_3s=0.2, strike=24200.0),
+        ict=ict,
+        alert=alert,
+    )
+    assert ready is True
+    assert reason == SQUEEZE_RELEASE_READY
+
+@patch("app.engines.pad_lane_capture.get_settings")
+def test_extended_pad_lane_readiness_orchestrator(mock_settings):
+    mock_settings.return_value = Settings()
+    alert = _alert()
+    ok, reason = extended_pad_lane_readiness(
+        snap=_snap(),
+        event=MagicMock(side=Side.PUT, premium=22.0, velocity_3s=0.2, strike=24200.0),
+        ict=_ict(),
+        alert=alert,
+    )
+    assert ok is True
+    assert reason == SQUEEZE_RELEASE_READY

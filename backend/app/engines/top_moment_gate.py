@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
+from app.engines.pad_lane_capture import pad_lane_cold_velocity_ok
+
 TOP_MOMENT_TYPES = frozenset({"ELITE", "EXPLODING", "FTV", "V"})
 TOP_MOMENT_GRADES = frozenset({"S", "A"})
 
@@ -120,15 +122,9 @@ def top_moment_entry_allowed(
     }:
         return False, "top_moment_timing_blocked", moment
 
-    if _number(evidence.get("velocity3s")) < (
-        -1.2
-        if evidence.get("microPullbackRetest")
-        else -0.8
-        if evidence.get("slowGrindSuddenLift")
-        else -0.5
-        if evidence.get("stealthCvdCoil")
-        else 0.0
-    ):
+    v3 = _number(evidence.get("velocity3s"))
+    v9 = _number(evidence.get("velocity9s"))
+    if v3 < 0 and not pad_lane_cold_velocity_ok(evidence, v3, v9):
         return False, "top_moment_negative_velocity", moment
 
     return True, "ok", moment

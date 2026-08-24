@@ -6,7 +6,7 @@ FTV policy → max lots → 100% trail. All lanes share the ₹18–₹220 pad b
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from app.config import get_settings
 from app.models.schemas import Side, SymbolSnapshot
@@ -43,6 +43,37 @@ PAD_LANE_FTV_MODES = frozenset(
         "PREMIUM_FVG_PAD_FTV",
     }
 )
+
+
+def pad_lane_pre_lift(evidence: Mapping[str, Any]) -> bool:
+    return bool(
+        evidence.get("slowGrindSuddenLift")
+        or evidence.get("fastBullishLocalBase")
+        or evidence.get("squeezeRelease")
+        or evidence.get("indexLedOptionLag")
+        or evidence.get("stealthCvdCoil")
+        or evidence.get("microPullbackRetest")
+        or evidence.get("premiumFvgPad")
+    )
+
+
+def pad_lane_cold_velocity_ok(
+    evidence: Mapping[str, Any], v3: float, v9: float
+) -> bool:
+    """Pre-lift pad lanes that allow mildly negative / flat velocity snapshots."""
+    if evidence.get("slowGrindSuddenLift") and -0.8 <= v3 <= 1.5:
+        return True
+    if evidence.get("stealthCvdCoil") and -0.5 <= v3 <= 1.0:
+        return True
+    if evidence.get("microPullbackRetest") and -1.2 <= v3 <= 0.5 and v9 >= -0.5:
+        return True
+    if evidence.get("squeezeRelease") and v3 <= 1.5:
+        return True
+    if evidence.get("indexLedOptionLag") and v3 <= 1.2:
+        return True
+    if evidence.get("premiumFvgPad") and v3 <= 2.0:
+        return True
+    return False
 
 
 def _pad_premium_band_ok(
