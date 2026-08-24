@@ -18,6 +18,7 @@ from app.engines.explosion_detector import (
 )
 from app.engines.ict_breakout_monitor import (
     _defensive_base_rip_top_allowed,
+    _fast_bullish_local_base_readiness,
     first_lift_entry_readiness,
 )
 from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
@@ -235,6 +236,73 @@ def test_pretrade_chart_bypass_includes_v_rip_session_low_ready():
 
     source = Path("app/engines/pretrade_validator.py").read_text()
     assert '"v_rip_session_low_ready"' in source
+    assert '"fast_bullish_local_base_ready"' in source
     assert source.index('"v_rip_session_low_ready"') > source.index(
         "armed_base_chart_bypass"
     )
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+@patch("app.engines.bullish_local_base.bullish_local_base_prediction")
+def test_fast_bullish_local_base_authorizes_below_30_ltp(mock_pred, mock_settings):
+    mock_settings.return_value = Settings()
+    mock_pred.return_value = {
+        "active": True,
+        "side": "PUT",
+        "confidence": 72.0,
+        "reasons": ["local_base", "bearish_momentum_turn"],
+    }
+    snap = _armed_replay_snapshot(spot=24180.0)
+    ict = MagicMock()
+    ict.flat_then_vertical = True
+    ict.active = True
+    ict.base_relative_move_pct = 10.4
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 27.0,
+        "tier": "EXPLODING",
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 10.4,
+        "volumeAwaken": True,
+        "velocity3s": 1.1,
+    }
+    ok, reason = _fast_bullish_local_base_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=27.0, velocity_3s=1.1, strike=24200.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == "fast_bullish_local_base_ready"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_fast_bullish_local_base_rejects_above_30_ltp(mock_settings):
+    mock_settings.return_value = Settings()
+    snap = _armed_replay_snapshot(spot=24200.0)
+    ict = MagicMock()
+    ict.flat_then_vertical = True
+    ict.active = True
+    ict.base_relative_move_pct = 22.7
+    alert = {
+        "side": "PUT",
+        "strike": 24200.0,
+        "premium": 35.0,
+        "tier": "EXPLODING",
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 22.7,
+        "bullishLocalBaseActive": True,
+    }
+    ok, reason = _fast_bullish_local_base_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=35.0, velocity_3s=2.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is False
+    assert reason == "fast_bullish_premium_above_30"

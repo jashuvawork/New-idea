@@ -611,6 +611,121 @@ def building_rip_bullish_readiness(
     return True, "building_rip_bullish_ready"
 
 
+def _fast_bullish_local_base_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Authorize fast-moving local-base lifts while LTP is still below the pad ceiling."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "fast_bullish_local_base_capture_enabled", True)):
+        return False, ""
+    row = alert if isinstance(alert, dict) else {}
+    if snap is None:
+        return False, "fast_bullish_chart_missing"
+
+    premium = float(
+        getattr(event, "premium", 0) or row.get("premium") or 0
+    )
+    max_prem = float(
+        getattr(s, "fast_bullish_local_base_max_premium_inr", 30.0) or 30.0
+    )
+    if premium <= 0 or premium > max_prem:
+        return False, f"fast_bullish_premium_above_{max_prem:g}"
+
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    lo = float(getattr(s, "fast_bullish_local_base_min_move_pct", 5.0) or 5.0)
+    hi = float(getattr(s, "fast_bullish_local_base_max_move_pct", 25.0) or 25.0)
+    if not (lo <= base_move <= hi + 1e-6):
+        return False, f"fast_bullish_pad_outside_{lo:g}_{hi:g}"
+
+    structured = bool(
+        getattr(ict, "flat_then_vertical", False)
+        or getattr(ict, "active", False)
+        or row.get("ictFlatThenVertical")
+        or row.get("ictBreakout")
+    )
+    if not structured:
+        return False, "fast_bullish_structure_missing"
+
+    from app.engines.bullish_local_base import bullish_local_base_prediction
+
+    pred = bullish_local_base_prediction(snap, event, ict, alert=row)
+    predictor_active = bool(
+        pred.get("active") or row.get("bullishLocalBaseActive")
+    )
+    if not predictor_active:
+        volume_awake = bool(
+            getattr(ict, "volume_awakening", False)
+            or row.get("ictVolumeAwakening")
+            or row.get("volumeAwaken")
+        )
+        if not volume_awake:
+            return False, "fast_bullish_volume_not_awake"
+        from app.engines.local_base_chart_bypass import local_base_momentum_turn
+        from app.models.schemas import Side as _Side
+
+        side_v = str(
+            getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+            or row.get("side")
+            or ""
+        ).upper()
+        if side_v not in ("CALL", "PUT"):
+            return False, "fast_bullish_side_invalid"
+        if not local_base_momentum_turn(
+            _Side(side_v), snap, event=event, alert=row,
+        ):
+            return False, "fast_bullish_momentum_turn_missing"
+        v3 = float(
+            getattr(event, "velocity_3s", 0) or row.get("velocity3s") or 0
+        )
+        if v3 < 0:
+            return False, "fast_bullish_velocity_negative"
+        pad_floor = float(
+            getattr(s, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0
+        )
+        min_v3 = float(
+            getattr(s, "fast_bullish_local_base_min_velocity_3s", 0.8) or 0.8
+        )
+        if not (volume_awake and base_move + 1e-6 >= pad_floor):
+            if v3 < min_v3:
+                return False, f"fast_bullish_velocity3s<{min_v3:g}"
+
+    from app.engines.moneyness import classify_moneyness
+    from app.models.schemas import Side
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False, "fast_bullish_side_invalid"
+    strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0)
+    if strike <= 0 or spot <= 0:
+        return False, "fast_bullish_moneyness_unavailable"
+    money = classify_moneyness(
+        Side(side),
+        strike,
+        spot,
+        symbol=str(getattr(snap, "symbol", "") or ""),
+        atm=atm if atm > 0 else None,
+    )
+    if money not in ("ATM", "ITM"):
+        return False, f"fast_bullish_requires_atm_itm_{money.lower()}"
+    return True, "fast_bullish_local_base_ready"
+
+
 def _v_rip_lane_active(
     *,
     v_rip_ready: bool,
@@ -686,6 +801,16 @@ def first_lift_entry_readiness(
     )
     if building_ok:
         return True, building_reason
+
+    fast_ok, fast_reason = _fast_bullish_local_base_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=row,
+        settings=settings,
+    )
+    if fast_ok:
+        return True, fast_reason
 
     if not bool(getattr(settings, "first_lift_trade_enabled", True)):
         return False, "first_lift_trading_disabled"

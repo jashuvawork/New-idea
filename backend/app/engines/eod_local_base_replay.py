@@ -231,6 +231,7 @@ def evaluate_local_base_entry(
             "armed_base_option_led_ready",
             "building_local_base_lift_ready",
             "building_rip_bullish_ready",
+            "fast_bullish_local_base_ready",
         ):
             return (
                 False,
