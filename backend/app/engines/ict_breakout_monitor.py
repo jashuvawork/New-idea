@@ -1008,6 +1008,11 @@ def first_lift_entry_readiness(
                 persisted_orderflow_allowed
                 and persisted.get("orderflowConfirmed")
             )
+            or volume_awake
+            or (
+                persisted_orderflow_allowed
+                and bool(persisted.get("volumeAwakening"))
+            )
         )
         if not orderflow_proof:
             return False, f"armed_base_orderflow_below_{min_absolute:g}"
