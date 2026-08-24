@@ -2165,12 +2165,21 @@ class Settings(BaseSettings):
     radar_archive_enabled: bool = True
     radar_archive_dir: str = ""  # default: {trade_store_dir}/radar_archives
     radar_archive_top_n_per_day: int = 100
-    radar_archive_retention_days: int = 365
+    # Keep ~1 month of daily archives, not a year. A 50GB disk cannot hold 365 days of
+    # premium tapes/zips; unbounded retention fills the disk and the backend starts hanging
+    # (writes stall, restarts fail). 30 days is ample for review/replay.
+    radar_archive_retention_days: int = 30
     radar_learning_enabled: bool = True
-    # Persist a premium/alert sample on every observation cycle by default so
-    # V-base lifts (and mid-rip false bases) can be replayed from the daily ZIP.
-    # Set >0 to throttle (legacy 15s). 0 = write every record_market_observations call.
-    radar_premium_tape_sample_seconds: int = 0
+    # Throttle the all-strike premium tape to one sample / N seconds. It used to write EVERY
+    # observation cycle (0), producing 1GB+/day tapes that (a) fill the disk and (b) make the
+    # startup restore read a multi-hundred-MB file — on a watchdog restart that becomes a
+    # slow/OOM restart loop. 10s granularity still replays FTV/V base lifts fine, and the LIVE
+    # trigger never uses the tape. Set 0 only for short debug windows.
+    radar_premium_tape_sample_seconds: int = 10
+    # Cap how much of the (append-only, time-ordered) premium tape the startup restore reads.
+    # It only needs the last ~35 min, so tail-read at most this many bytes instead of parsing
+    # the whole intraday file — bounds startup time/memory regardless of tape size.
+    radar_restore_tail_max_bytes: int = 67_108_864  # 64 MiB
     radar_alerts_tape_enabled: bool = True
     radar_outcome_horizons_seconds_csv: str = "60,180,300,900,1800"
     radar_outcome_target_pct: float = 20.0

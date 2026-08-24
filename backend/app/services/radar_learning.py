@@ -163,6 +163,39 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _read_jsonl_tail(path: Path, *, max_bytes: int) -> list[dict[str, Any]]:
+    """Parse only the last ``max_bytes`` of an append-only, time-ordered JSONL tape.
+
+    Intraday tapes grow to hundreds of MB; a recent-window restore only needs the tail.
+    Reading (and JSON-parsing) the whole file stalls startup and spikes memory — on a
+    watchdog restart that turns into a restart loop that worsens as the tape grows. Seeking
+    to the tail bounds the work regardless of file size. A generous cap keeps well more than
+    the ~35-min restore window even at fast sampling.
+    """
+    if not path.exists():
+        return []
+    if max_bytes <= 0:
+        return _read_jsonl(path)
+    out: list[dict[str, Any]] = []
+    with _file_lock(path):
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            if size > max_bytes:
+                handle.seek(size - max_bytes)
+                handle.readline()  # discard the partial first line after the seek
+            data = handle.read()
+    for raw in data.split(b"\n"):
+        if not raw:
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            out.append(row)
+    return out
+
+
 def record_pipeline_event(
     event: str,
     *,
@@ -595,7 +628,13 @@ def restore_local_base_history(*, now: datetime | None = None) -> dict[str, Any]
     current = _aware(now)
     date = current.strftime("%Y-%m-%d")
     cutoff = current - timedelta(seconds=2100)
-    batches = read_premium_tape(date)
+    # Tail-read only: this runs on every startup and only needs the last ~35 min. Parsing the
+    # whole intraday tape (which can be hundreds of MB late in the day) stalled startup and,
+    # on a watchdog restart, produced a restart loop. The tail cap bounds it to a fixed size.
+    tail_bytes = int(
+        getattr(get_settings(), "radar_restore_tail_max_bytes", 67_108_864) or 0
+    )
+    batches = _read_jsonl_tail(premium_tape_path(date), max_bytes=tail_bytes)
     restored = 0
     keys: set[str] = set()
     from app.engines.explosion_detector import (

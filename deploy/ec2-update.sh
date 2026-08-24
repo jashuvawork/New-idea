@@ -85,6 +85,9 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
   # Sync operational defaults from template (overwrites stale server values on deploy)
   SYNC_ENV_KEYS=(
     SYMBOLS
+    RADAR_PREMIUM_TAPE_SAMPLE_SECONDS
+    RADAR_ARCHIVE_RETENTION_DAYS
+    RADAR_RESTORE_TAIL_MAX_BYTES
     MIN_OPTION_PREMIUM_INR
     MAX_OPTION_PREMIUM_INR
     EXPLOSION_MAX_PREMIUM_INR
