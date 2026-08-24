@@ -685,11 +685,57 @@ def is_premium_capture_event(
     )
 
 
+def _alert_local_base_pad(alert: dict[str, Any]) -> float:
+    for key in (
+        "localBaseMovePct",
+        "ictBaseRelativeMovePct",
+        "baseRelativeMovePct",
+        "offLowMovePct",
+    ):
+        try:
+            value = float(alert.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            return value
+    return 0.0
+
+
+def is_v_rip_local_base_capture_alert(
+    alert: dict[str, Any],
+    chart: Optional[SpotChart] = None,
+) -> bool:
+    """BUILDING V-rip off session low inside the 2–25% local-base pad."""
+    settings = get_settings()
+    if not bool(getattr(settings, "ict_v_rip_ready_enabled", True)):
+        return False
+    if not in_premium_capture_window():
+        return False
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+    v_rip = bool(alert.get("ictVRipReady"))
+    moment = str(alert.get("momentType") or alert.get("reason") or "")
+    if not v_rip and "v_rip" not in moment.lower():
+        return False
+    if bool(alert.get("ictMidRipCoil") or alert.get("midRipCoil")):
+        return False
+    pad = _alert_local_base_pad(alert)
+    lo = float(getattr(settings, "ict_v_rip_min_move_pct", 2.0) or 2.0)
+    hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    if pad < lo or pad > hi:
+        return False
+    score = float(alert.get("explosionScore") or 0)
+    min_score = float(getattr(settings, "ict_v_rip_min_score", 40.0) or 40.0)
+    return score >= min_score
+
+
 def is_premium_capture_alert(alert: dict[str, Any], chart: Optional[SpotChart] = None) -> bool:
     return (
         is_morning_capture_alert(alert, chart)
         or is_afternoon_capture_alert(alert, chart)
         or is_all_day_explosion_alert(alert, chart)
+        or is_v_rip_local_base_capture_alert(alert, chart)
     )
 
 

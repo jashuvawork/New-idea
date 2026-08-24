@@ -322,3 +322,72 @@ def test_v_rip_slow_grind_at_30_with_volume_awake(mock_settings):
     ready, reason = first_lift_entry_readiness(snap=snap, ict=ict, alert=alert)
     assert ready is True
     assert reason == "v_rip_session_low_ready"
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_aug24_v_rip_early_pad_volume_awake_skips_velocity(mock_settings):
+    """Aug24 NIFTY PUT 24250 — ~7% local-base pad, v3<1.2, volume awakening (mfe 86%)."""
+    reset_detector_state_for_tests()
+    mock_settings.return_value = Settings()
+    side = Side.PUT
+    key = _open_key("NIFTY", 24250.0, side)
+    now = datetime(2026, 8, 24, 11, 5, tzinfo=IST)
+    _local_base_hist[key] = deque(
+        [(now - timedelta(seconds=(8 - i) * 3), 47.95 + (i % 2) * 0.15) for i in range(9)],
+        maxlen=1200,
+    )
+    _session_low[key] = 47.95
+    _session_peak[key] = 52.0
+
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=now,
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=56.0,
+        spot=24250.0,
+        atmStrike=24250.0,
+        breadth=Breadth(bias="BEARISH", score=70.0, aligned=True),
+        spotChart=SpotChart(
+            direction="BEARISH",
+            momentum5Pct=-0.08,
+            momentum10Pct=-0.05,
+            momentum15Pct=-0.02,
+        ),
+    )
+    ict = analyze_ict_breakout(
+        symbol="NIFTY",
+        strike=24250.0,
+        side=side,
+        premium=51.5,
+        session_move_pct=7.4,
+        peak_move_pct=7.4,
+        velocity_3s=0.65,
+        velocity_9s=0.55,
+        volume=120_000,
+        volume_surge=2.1,
+        tier="BUILDING",
+        reason="volAwaken",
+    )
+    alert = {
+        "side": "PUT",
+        "strike": 24250.0,
+        "premium": 51.5,
+        "explosionScore": 55.6,
+        "tier": "BUILDING",
+        "velocity3s": 0.65,
+        "velocity9s": 0.55,
+        "volumeSurge": 2.1,
+        "volume": 120_000,
+        "volumeAwaken": True,
+        "ictVolumeAwakening": True,
+        "ictVRipReady": True,
+        "ictBreakout": True,
+        "ictFlatThenVertical": True,
+        "ictBaseRelativeMovePct": 7.3,
+        "localBaseMovePct": 7.3,
+        "flatVerticalQuality": 52.0,
+    }
+    ready, reason = first_lift_entry_readiness(snap=snap, ict=ict, alert=alert)
+    assert ready is True
+    assert reason == "v_rip_session_low_ready"

@@ -513,9 +513,9 @@ class Settings(BaseSettings):
     ict_v_rip_min_quality: float = 50.0
     ict_v_rip_min_score: float = 40.0
     ict_v_rip_base_near_session_low_pct: float = 2.0
-    # Slow grind into the 15–25% pad (e.g. 24→30) may show volume awakening before
-    # v3 clears the default 1.2% bar — allow a softer floor when heat confirms.
-    ict_v_rip_pad_min_move_pct: float = 15.0
+    # Slow grind anywhere in the 2–25% V-rip pad may show volume awakening before
+    # v3 clears the default 1.2% bar — align pad floor with ict_v_rip_min_move_pct.
+    ict_v_rip_pad_min_move_pct: float = 2.0
     ict_v_rip_volume_awake_min_velocity_3s: float = 0.85
     # BUILDING bullish-rip sleeve: when radar is stuck BUILDING but premium is
     # actively ripping (positive live velocity + volume), take mid-rip toward max.
