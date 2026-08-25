@@ -681,6 +681,86 @@ def is_expiry_elite_top_candidate(candidate: Any) -> bool:
     return True
 
 
+def candidate_is_expiry_pm_local_base_explosion_bypass(
+    candidate: Any,
+    snap: SymbolSnapshot,
+) -> bool:
+    """Allow ELITE/EXPLODING local-base explosion on expiry symbol during PM ITM window.
+
+    Aug25 NIFTY CALL 24200: ELITE first-lift at lb=16.5%, funnel MFE=138%, blocked
+    by expiry_pm_itm_quick_only while all other gates passed. PM ITM routing to
+    SENSEX quick scalps must not suppress a genuine expiry-symbol base rip.
+    """
+    settings = get_settings()
+    if not getattr(settings, "expiry_pm_itm_local_base_explosion_bypass_enabled", True):
+        return False
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+    if not is_near_expiry_day(snap):
+        return False
+
+    alert = getattr(candidate, "alert", None) if isinstance(getattr(candidate, "alert", None), dict) else {}
+    event = getattr(candidate, "explosion_event", None)
+    tier = str(getattr(candidate, "tier", "") or alert.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+
+    score = float(
+        getattr(candidate, "confidence", 0)
+        or alert.get("explosionScore")
+        or getattr(event, "explosion_score", 0)
+        or 0
+    )
+    min_score = float(
+        getattr(settings, "expiry_pm_itm_local_base_min_explosion_score", 75.0) or 75.0
+    )
+    if score < min_score:
+        return False
+
+    local_move = float(
+        alert.get("localBaseMovePct")
+        or alert.get("ictBaseRelativeMovePct")
+        or getattr(event, "local_base_move_pct", 0)
+        or 0
+    )
+    min_lb = float(getattr(settings, "expiry_pm_itm_local_base_min_move_pct", 2.0) or 2.0)
+    max_lb = float(getattr(settings, "expiry_pm_itm_local_base_max_move_pct", 25.0) or 25.0)
+    if not (min_lb <= local_move <= max_lb):
+        return False
+
+    daily_move = max(
+        float(getattr(event, "daily_move_pct", 0) or 0) if event is not None else 0.0,
+        float(getattr(event, "peak_move_pct", 0) or 0) if event is not None else 0.0,
+        _alert_session_move(alert) if alert else 0.0,
+    )
+    if daily_move >= 25.0 and local_move < 5.0:
+        return False
+
+    if bool(alert.get("midRipCoil") or alert.get("faded") or alert.get("exhaustedReentry")):
+        return False
+
+    has_base_trigger = bool(
+        alert.get("ictFirstLift")
+        or alert.get("ictVRipReady")
+        or alert.get("vRipReady")
+        or alert.get("ictArmedBaseLaunch")
+        or alert.get("ictEliteBaseReady")
+        or (
+            alert.get("ictFlatThenVertical")
+            and alert.get("ictBreakout")
+        )
+    )
+    if not has_base_trigger:
+        return False
+
+    prem = float(getattr(candidate, "premium", 0) or alert.get("premium") or 0)
+    from app.engines.premium_filter import premium_in_band
+
+    if not premium_in_band(prem, mode="explosion", peak_move_pct=daily_move):
+        return False
+    return True
+
+
 def check_expiry_entry_allowed(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
@@ -796,6 +876,11 @@ def check_expiry_candidate(
 
     if pm_itm:
         if mode not in ("quick_sideways", "slow_bounce", "worst_day_itm_fade"):
+            if (
+                candidate_is_expiry_pm_local_base_explosion_bypass(candidate, snap)
+            ):
+                meta["expiryPmItmLocalBaseBypass"] = True
+                return True, "ok", meta
             return False, "expiry_pm_itm_quick_only", meta
         from app.engines.moneyness import classify_moneyness
 
