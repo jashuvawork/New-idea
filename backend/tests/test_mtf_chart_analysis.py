@@ -65,3 +65,32 @@ def test_mtf_summary_counts():
     assert summary["total"] == 5
     assert "1m" in summary["timeframes"]
     assert summary["alignedCount"] >= 3
+
+
+def test_pad_lane_bypass_allows_shallow_premium_5m_fade_on_put():
+    from app.config import Settings
+    from app.models.schemas import TimeframeChartRead
+    from unittest.mock import patch
+
+    candles = _declining_candles(steps=300)
+    price = candles[-1][4]
+    reads = _reads_from_1m(candles, price)
+    premium_reads = {
+        "1m": TimeframeChartRead(
+            label="1m", price=30.0, direction="BEARISH", momentumPct=-0.5,
+        ),
+        "5m": TimeframeChartRead(
+            label="5m", price=30.0, direction="BEARISH", momentumPct=-0.8,
+        ),
+    }
+    settings = Settings()
+    with patch("app.engines.mtf_chart_analysis.get_settings", return_value=settings):
+        blocked, reason, _ = validate_mtf_scalp(
+            Side.PUT,
+            reads,
+            premium_reads,
+            trade_score=65,
+            pad_lane_bypass=True,
+        )
+    assert blocked is True
+    assert reason == "ok"

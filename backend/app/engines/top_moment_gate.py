@@ -103,6 +103,11 @@ def top_moment_entry_allowed(
     elif min_grade_u == "B":
         allowed_grades = TOP_MOMENT_GRADES | {"B"}
 
+    from app.engines.pad_lane_capture import pad_lane_grade_floor_applies
+
+    if pad_lane_grade_floor_applies(evidence) and grade in {"REJECT", "C"}:
+        grade = "A"
+
     if grade == "REJECT":
         return False, "top_moment_grade_reject", None
     if grade not in allowed_grades:
@@ -114,7 +119,9 @@ def top_moment_entry_allowed(
 
     timing = str(evidence.get("timingAssessment") or "").upper()
     timing_action = str(evidence.get("timingAction") or "").lower()
-    if timing_action in {"block", "reject"} or timing in {
+    from app.engines.pad_lane_capture import pad_lane_ftv_waives_timing_block
+
+    timing_blocked = timing_action in {"block", "reject"} or timing in {
         "FAILED_LAUNCH",
         "FADED",
         "FADING",
@@ -122,13 +129,15 @@ def top_moment_entry_allowed(
         "NEGATIVE",
         "REJECT",
         "BLOCKED",
-    }:
+    }
+    if timing_blocked and not pad_lane_ftv_waives_timing_block(evidence):
         return False, "top_moment_timing_blocked", moment
 
     v3 = _number(evidence.get("velocity3s"))
     v9 = _number(evidence.get("velocity9s"))
     if v3 < 0 and not pad_lane_cold_velocity_ok(evidence, v3, v9):
-        return False, "top_moment_negative_velocity", moment
+        if not pad_lane_ftv_waives_timing_block(evidence):
+            return False, "top_moment_negative_velocity", moment
 
     return True, "ok", moment
 

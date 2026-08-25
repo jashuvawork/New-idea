@@ -236,6 +236,7 @@ def validate_execution_charts(
             premium_led_bypass=premium_led_bypass,
             vertical_rip_bypass=vertical_rip_bypass,
             first_lift_bypass=first_lift_bypass,
+            pad_lane_bypass=pad_lane_bypass,
             scalp_mode=scalp_mode,
         )
         if not passed:
