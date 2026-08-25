@@ -18,6 +18,7 @@ def premium_fading_blocks_entry(
     premium_direction: str = "",
     explosion_event: Any = None,
     confirmed_ftv_bypass: bool = False,
+    pad_lane_bypass: bool = False,
 ) -> tuple[bool, str]:
     """
     Block entries when option premium is fading at execution.
@@ -55,6 +56,19 @@ def premium_fading_blocks_entry(
         )
         if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
             return False, "ftv_shallow_fade_ok"
+
+    # Pad-lane local-base retest — cold/flat velocity before the vertical is normal.
+    if (
+        pad_lane_bypass
+        and bool(getattr(settings, "pad_lane_premium_fade_fill_enabled", True))
+        and tier in ("ELITE", "EXPLODING", "BUILDING", "WATCH")
+    ):
+        shallow_floor = float(
+            getattr(settings, "pad_lane_premium_fade_fill_max_drawdown_pct", -1.2)
+            or -1.2
+        )
+        if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
+            return False, "pad_lane_shallow_fade_ok"
 
     min_mom = settings.execution_chart_min_premium_momentum_pct
     if premium_momentum_5s < min_mom and premium_momentum_3s < 0:

@@ -1565,6 +1565,14 @@ class Settings(BaseSettings):
     pad_lane_chart_bypass_max_peak_move_pct: float = 38.0
     pad_lane_chart_bypass_max_adverse_index_mom5_pct: float = 0.25
     pad_lane_chart_bypass_min_premium_velocity_9s: float = -0.3
+    # Pad-lane FTV may authorize on rank 2+ sleeves — the moment is contract-specific
+    # (Aug25 CALL 24150 blocked by early_radar_pad_ftv_requires_allocation_rank_1).
+    pad_lane_ftv_waives_allocation_rank_one: bool = True
+    # Boost pad-lane local-base legs in selector so they win rank over stale leaders.
+    pad_lane_selector_rank_bonus: float = 18.0
+    # Pad-lane base retest may fill through shallow premium fade at execution.
+    pad_lane_premium_fade_fill_enabled: bool = True
+    pad_lane_premium_fade_fill_max_drawdown_pct: float = -1.2
     # ICT confirm stack for local-base reversals (additive quality, not hard gates).
     local_base_reversal_ict_bonus_max: float = 18.0
     local_base_reversal_kill_zone_bonus_enabled: bool = True

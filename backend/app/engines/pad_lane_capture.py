@@ -1006,6 +1006,36 @@ def pad_lane_turnaround_chart_bypass_for_snap(
     return False
 
 
+def pad_lane_ftv_waives_allocation_rank_one(
+    evidence: Mapping[str, Any],
+) -> bool:
+    """Pad-lane local-base captures may authorize on rank 2+ FTV sleeves.
+
+    The V-rip / slow-grind moment is contract-specific — waiting for the global
+    rank-1 slot means missing the lift while another leg holds the sleeve.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "pad_lane_ftv_waives_allocation_rank_one", True)):
+        return False
+    max_off = float(
+        getattr(settings, "pad_lane_chart_bypass_max_off_low_pct", 30.0) or 30.0
+    )
+    off_low = max(
+        float(evidence.get("offLowMovePct") or 0),
+        float(evidence.get("localBaseMovePct") or 0),
+        float(evidence.get("ictBaseRelativeMovePct") or 0),
+    )
+    if off_low > max_off + 1e-6:
+        return False
+    if pad_lane_pre_lift(evidence):
+        return True
+    if bool(evidence.get("vRipReady") or evidence.get("earlyRadarPadCapture")):
+        return True
+    if bool(evidence.get("firstLift") or evidence.get("buildingRipReady")):
+        return off_low >= 2.0
+    return False
+
+
 def extended_pad_lane_readiness(
     *,
     snap: Optional[SymbolSnapshot],
