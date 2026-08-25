@@ -1317,6 +1317,13 @@ class Settings(BaseSettings):
     expiry_pm_itm_min_rank_score: float = 52.0
     expiry_pm_itm_chart_bypass_breadth: bool = True
     expiry_pm_itm_alternate_index_enabled: bool = True
+    # PM ITM window normally restricts to quick ITM scalps on alternates; allow
+    # ELITE/EXPLODING local-base explosion on the expiry symbol itself (Aug25
+    # NIFTY CALL 24200 +138% MFE blocked by expiry_pm_itm_quick_only).
+    expiry_pm_itm_local_base_explosion_bypass_enabled: bool = True
+    expiry_pm_itm_local_base_min_explosion_score: float = 75.0
+    expiry_pm_itm_local_base_min_move_pct: float = 2.0
+    expiry_pm_itm_local_base_max_move_pct: float = 25.0
     # Legacy pre-expiry alternate routing — disabled in favor of near-expiry priority
     # when expiry_day_prefer_same_day_enabled (nearest expiry index wins).
     pre_expiry_cross_index_enabled: bool = True
