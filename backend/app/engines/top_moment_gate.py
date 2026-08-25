@@ -27,6 +27,7 @@ def classify_top_moment_type(evidence: Mapping[str, Any]) -> Optional[str]:
 
     if bool(
         evidence.get("slowGrindSuddenLift")
+        or evidence.get("slowGrindConsolidationBase")
         or evidence.get("fastBullishLocalBase")
         or evidence.get("squeezeRelease")
         or evidence.get("indexLedOptionLag")

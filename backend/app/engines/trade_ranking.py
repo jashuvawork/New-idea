@@ -304,6 +304,8 @@ def ftv_authorization_policy(
     slow_grind_ftv_min_explosion_score: float = 45.0,
     slow_grind_ftv_min_flat_quality: float = 50.0,
     slow_grind_ftv_armed_trough_min_explosion_score: float = 5.0,
+    slow_grind_ftv_consolidation_base_min_explosion_score: float = 24.0,
+    slow_grind_ftv_consolidation_base_min_flat_quality: float = 35.0,
     slow_grind_ftv_max_capital_pct: float = 0.90,
     fast_bullish_ftv_enabled: bool = True,
     fast_bullish_ftv_min_explosion_score: float = 48.0,
@@ -753,12 +755,23 @@ def ftv_authorization_policy(
     # Pre-lift slow-coil pad — flat velocity, impending signals, BUILDING tier OK.
     slow_grind_pad = bool(evidence.get("slowGrindSuddenLift"))
     slow_grind_armed_trough = bool(evidence.get("slowGrindArmedTrough"))
+    slow_grind_consolidation = bool(evidence.get("slowGrindConsolidationBase"))
     if slow_grind_ftv_enabled and slow_grind_pad:
         if slow_grind_armed_trough:
             slow_grind_ok = (
                 str(ranking.get("grade") or "").upper() != "REJECT"
                 and tier in {"WATCH", "BUILDING", "EXPLODING", "ELITE"}
                 and explosion_score >= slow_grind_ftv_armed_trough_min_explosion_score
+                and v3 >= -0.8
+                and v3 <= 1.5
+                and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+            )
+        elif slow_grind_consolidation:
+            slow_grind_ok = (
+                str(ranking.get("grade") or "").upper() != "REJECT"
+                and tier in {"WATCH", "BUILDING"}
+                and explosion_score >= slow_grind_ftv_consolidation_base_min_explosion_score
+                and quality >= slow_grind_ftv_consolidation_base_min_flat_quality
                 and v3 >= -0.8
                 and v3 <= 1.5
                 and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
@@ -1049,6 +1062,8 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "slow_grind_ftv_min_explosion_score",
         "slow_grind_ftv_min_flat_quality",
         "slow_grind_ftv_armed_trough_min_explosion_score",
+        "slow_grind_ftv_consolidation_base_min_explosion_score",
+        "slow_grind_ftv_consolidation_base_min_flat_quality",
         "slow_grind_ftv_max_capital_pct",
         "fast_bullish_ftv_enabled",
         "fast_bullish_ftv_min_explosion_score",
@@ -1561,6 +1576,10 @@ def rank_entry_candidate(
         "slowGrindArmedTrough": bool(
             alert.get("slowGrindArmedTrough")
             or alert.get("ictSlowGrindArmedTrough")
+        ),
+        "slowGrindConsolidationBase": bool(
+            alert.get("slowGrindConsolidationBase")
+            or alert.get("ictSlowGrindConsolidationBase")
         ),
         "squeezeRelease": bool(
             alert.get("squeezeReleaseReady") or alert.get("ictSqueezeRelease")

@@ -19,6 +19,7 @@ PAD_LANE_READY_REASONS = frozenset(
     {
         "slow_grind_sudden_lift_ready",
         "slow_grind_armed_trough_ready",
+        "slow_grind_consolidation_base_ready",
         "fast_bullish_local_base_ready",
         "v_rip_session_low_ready",
         "squeeze_release_ready",
@@ -87,6 +88,8 @@ def pad_lane_ready_reason(
             stamped = str(alert.get("ictBaseReadinessReason") or "")
             if stamped == "slow_grind_armed_trough_ready":
                 return "slow_grind_armed_trough_ready"
+            if stamped == "slow_grind_consolidation_base_ready":
+                return "slow_grind_consolidation_base_ready"
             return "slow_grind_sudden_lift_ready"
         if bool(
             alert.get("fastBullishLocalBaseReady")
