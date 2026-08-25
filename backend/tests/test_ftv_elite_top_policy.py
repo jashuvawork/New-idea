@@ -201,7 +201,8 @@ def test_top_ftv_a_rank_two_and_cached_a_ranking_cannot_trigger_max_lots():
     evidence = _reconstructed_ftv_a()
     cached_ranking = rank_trade_evidence(evidence)
     cached_ranking["fullSleeveEligible"] = True
-    blocked = _decision(evidence, rank=2, require_rank=True)
+    # Pad-lane first-lift at local base may authorize on rank 2+ sleeves.
+    decision = _decision(evidence, rank=2, require_rank=True)
     allocation = RankedAllocation(
         rank=2,
         budgetInr=25_000,
@@ -216,12 +217,13 @@ def test_top_ftv_a_rank_two_and_cached_a_ranking_cannot_trigger_max_lots():
         lots=4,
         symbol="NIFTY",
         premium=44.0,
-        policy_decision=blocked,
+        policy_decision=decision,
         allocation=allocation,
     )
 
     assert cached_ranking["fullSleeveEligible"] is True
-    assert blocked.allowed is False
+    assert decision.allowed is True
+    assert decision.mode == "TOP_FTV_A"
     assert (lots, authorized) == (4, False)
 
 
@@ -355,8 +357,14 @@ def test_early_ftv_without_flag_triggers_is_now_fresh():
 
 
 def test_fallback_blocks_rank_two_and_more_than_40pct_extension():
+    # Pad-lane first-lift waives rank-1 for local-base captures.
     rank_two = _decision(
         _reconstructed_ftv_a(), rank=2, require_rank=True
+    )
+    rank_two_no_pad = _decision(
+        _reconstructed_ftv_a(firstLift=False, armedBaseLaunch=True),
+        rank=2,
+        require_rank=True,
     )
     too_extended = _decision(
         _reconstructed_ftv_a(
@@ -366,7 +374,10 @@ def test_fallback_blocks_rank_two_and_more_than_40pct_extension():
             flatVerticalQuality=95.0,
         )
     )
-    assert rank_two.reason == "winner_local_base_requires_allocation_rank_1"
+    assert rank_two.allowed is True
+    assert rank_two.mode == "TOP_FTV_A"
+    assert rank_two_no_pad.allowed is False
+    assert rank_two_no_pad.reason == "ftv_elite_top_only_requires_allocation_rank_1"
     assert too_extended.reason == "top_ftv_a_extension_above_40pct"
 
 

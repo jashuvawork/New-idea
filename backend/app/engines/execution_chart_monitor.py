@@ -186,6 +186,7 @@ def validate_execution_charts(
     explosion_event: Any = None,
     mode: str = "",
     confirmed_ftv_bypass: bool = False,
+    pad_lane_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -221,6 +222,7 @@ def validate_execution_charts(
     blocked, reason = premium_blocks_entry(
         side, premium_chart, trade_score=trade_score, explosion_event=explosion_event,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
+        pad_lane_bypass=pad_lane_bypass,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -349,7 +351,7 @@ async def monitor_trade_chart_before_execution(
     _event_tier = str(getattr(explosion_event, "tier", "") or "").upper()
     confirmed_ftv_bypass = bool(
         first_lift_bypass and _event_tier in ("ELITE", "EXPLODING")
-    )
+    ) or pad_lane_chart_bypass
 
     try:
         meta = await fetch_live_trade_charts(
@@ -398,6 +400,7 @@ async def monitor_trade_chart_before_execution(
         explosion_event=explosion_event,
         mode=mode,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
+        pad_lane_bypass=pad_lane_chart_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta

@@ -28,6 +28,20 @@ class FtvAuthorization:
         return self.mode is not None
 
 
+def _allocation_rank_blocks_ftv(
+    *,
+    require_allocation_rank_one: bool,
+    allocation_rank: int | None,
+    evidence: Mapping[str, Any],
+) -> bool:
+    """True when rank-1 is required and pad-lane waiver does not apply."""
+    if not require_allocation_rank_one or allocation_rank == 1:
+        return False
+    from app.engines.pad_lane_capture import pad_lane_ftv_waives_allocation_rank_one
+
+    return not pad_lane_ftv_waives_allocation_rank_one(evidence)
+
+
 def _number(value: Any) -> float:
     try:
         return float(value or 0)
@@ -442,7 +456,11 @@ def ftv_authorization_policy(
     if grade == "S":
         if not bool(ranking.get("topRankEligible")):
             return blocked("ftv_elite_top_only_requires_top_rank_eligible")
-        if require_allocation_rank_one and allocation_rank != 1:
+        if _allocation_rank_blocks_ftv(
+            require_allocation_rank_one=require_allocation_rank_one,
+            allocation_rank=allocation_rank,
+            evidence=evidence,
+        ):
             return blocked("ftv_elite_top_only_requires_allocation_rank_1")
         # Elite-base preauth (2–5% pad) is already structured; armed/first-lift
         # S must still clear top local-base floors so mid EXPLODING cannot slip in.
@@ -636,7 +654,11 @@ def ftv_authorization_policy(
                 and v9 >= top_ftv_a_exceptional_min_velocity_9s
             ):
                 top_ftv_a_reason = "top_ftv_a_extended_requires_exceptional_acceleration"
-            elif require_allocation_rank_one and allocation_rank != 1:
+            elif _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
                 top_ftv_a_reason = "top_ftv_a_requires_allocation_rank_1"
             else:
                 expiry_block = _expiry_worst_policy_ok(
@@ -679,7 +701,11 @@ def ftv_authorization_policy(
                 and not bool(evidence.get("cvdBuying"))
             ):
                 return blocked("winner_local_base_worst_requires_cvd_buying")
-            if require_allocation_rank_one and allocation_rank != 1:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
                 return blocked("winner_local_base_requires_allocation_rank_1")
             expiry_block = _expiry_worst_policy_ok(
                 tier=tier, quality=quality, score=explosion_score, v3=v3,
@@ -716,7 +742,11 @@ def ftv_authorization_policy(
         and explosion_score >= effective_first_lift_min
         and quality >= first_lift_helper_confirm_min_quality
     ):
-        if require_allocation_rank_one and allocation_rank != 1:
+        if _allocation_rank_blocks_ftv(
+            require_allocation_rank_one=require_allocation_rank_one,
+            allocation_rank=allocation_rank,
+            evidence=evidence,
+        ):
             return blocked("first_lift_local_base_requires_allocation_rank_1")
         expiry_block = _expiry_worst_policy_ok(
             tier=tier, quality=quality, score=explosion_score, v3=v3,
@@ -739,7 +769,11 @@ def ftv_authorization_policy(
         and explosion_score >= effective_first_lift_min
         and quality >= first_lift_helper_confirm_min_quality
     ):
-        if require_allocation_rank_one and allocation_rank != 1:
+        if _allocation_rank_blocks_ftv(
+            require_allocation_rank_one=require_allocation_rank_one,
+            allocation_rank=allocation_rank,
+            evidence=evidence,
+        ):
             return blocked("first_lift_local_base_requires_allocation_rank_1")
         expiry_block = _expiry_worst_policy_ok(
             tier=tier, quality=quality, score=explosion_score, v3=v3,
@@ -789,7 +823,11 @@ def ftv_authorization_policy(
             if top_moments_only_enabled and grade == "B":
                 slow_grind_ok = False
         if slow_grind_ok:
-            if require_allocation_rank_one and allocation_rank != 1:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
                 return blocked("slow_grind_ftv_requires_allocation_rank_1")
             expiry_block = _expiry_worst_policy_ok(
                 tier=tier, quality=quality, score=explosion_score, v3=v3,
@@ -815,7 +853,11 @@ def ftv_authorization_policy(
         if top_moments_only_enabled and grade == "B":
             fast_bullish_ok = False
         if fast_bullish_ok:
-            if require_allocation_rank_one and allocation_rank != 1:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
                 return blocked("fast_bullish_ftv_requires_allocation_rank_1")
             expiry_block = _expiry_worst_policy_ok(
                 tier=tier, quality=quality, score=explosion_score, v3=v3,
@@ -855,7 +897,11 @@ def ftv_authorization_policy(
             ok = False
         if not ok:
             return None
-        if require_allocation_rank_one and allocation_rank != 1:
+        if _allocation_rank_blocks_ftv(
+            require_allocation_rank_one=require_allocation_rank_one,
+            allocation_rank=allocation_rank,
+            evidence=evidence,
+        ):
             return blocked(f"{block_prefix}_requires_allocation_rank_1")
         expiry_block = _expiry_worst_policy_ok(
             tier=tier, quality=quality, score=explosion_score, v3=v3,
@@ -947,7 +993,11 @@ def ftv_authorization_policy(
             and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
         )
         if early_pad_ok:
-            if require_allocation_rank_one and allocation_rank != 1:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
                 return blocked("early_radar_pad_ftv_requires_allocation_rank_1")
             expiry_block = _expiry_worst_policy_ok(
                 tier=tier, quality=quality, score=explosion_score, v3=v3,
@@ -986,7 +1036,11 @@ def ftv_authorization_policy(
         if top_moments_only_enabled and grade == "B":
             building_rip_ok = False
         if building_rip_ok:
-            if require_allocation_rank_one and allocation_rank != 1:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
                 return blocked("building_rip_ftv_requires_allocation_rank_1")
             expiry_block = _expiry_worst_policy_ok(
                 tier=tier, quality=quality, score=explosion_score, v3=v3,

@@ -1447,6 +1447,20 @@ def find_best_entry(
 
         c.score += cross_index_rank_adjustment(c, state, snapshots)
         c.score += cross_index_elite_priority_bonus(c, snapshots)
+        if c.mode == "explosion":
+            ranking = (c.pretrade_meta or {}).get("causalRanking") or {}
+            evidence = ranking.get("evidence") or {}
+            from app.engines.pad_lane_capture import (
+                pad_lane_ftv_waives_allocation_rank_one,
+                pad_lane_pre_lift,
+            )
+
+            if pad_lane_pre_lift(evidence) or pad_lane_ftv_waives_allocation_rank_one(
+                evidence,
+            ):
+                c.score += float(
+                    getattr(settings, "pad_lane_selector_rank_bonus", 18.0) or 18.0
+                )
         if settings.edge_engine_enabled:
             edge = compute_entry_edge(c, c.snap, state)
             c.score += edge_rank_bonus(edge)
@@ -2104,10 +2118,20 @@ def diagnose_missed_entries(
 
                 side_raw = str(alert.get("side") or "").upper()
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
+                    pad_lane_chart_ok = False
+                    if not first_lift_ready and not early_pad:
+                        from app.engines.pad_lane_capture import (
+                            pad_lane_turnaround_chart_bypass,
+                        )
+
+                        pad_lane_chart_ok = pad_lane_turnaround_chart_bypass(
+                            Side(side_raw), snap, alert=alert,
+                        )
                     if (
                         not side_aligned_with_chart(Side(side_raw), snap.spotChart)
                         and not first_lift_ready
                         and not early_pad
+                        and not pad_lane_chart_ok
                     ):
                         blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):
