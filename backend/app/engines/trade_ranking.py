@@ -87,15 +87,19 @@ def _first_lift_local_base_flat_velocity(
     enabled: bool = True,
     min_local_base_move_pct: float = 2.0,
     max_local_base_move_pct: float = 25.0,
+    max_velocity_3s: float = 0.85,
 ) -> bool:
     """ICT-confirmed first lift or V-rip at local base when the velocity snapshot is flat.
 
-    Radar already stamped volumeAwaken + flat→vertical structure; v3=0 is snapshot
-    lag between ICT pad detection and the ranking tick — not a dead launch.
+    Radar already stamped volumeAwaken + flat→vertical structure; v3 below the
+    volume-awake floor is snapshot lag / slow lift start at the pad — not a dead
+    launch. Aug25 SENSEX PUT 77200 (v3=0.65) and NIFTY PUT 24300 (v3=0.32) were
+    blocked by top_ftv_a_velocity_3s_below_floor despite peak ≥25% at lb 20–25%.
     """
     if not enabled:
         return False
-    if _number(evidence.get("velocity3s")) != 0:
+    v3 = _number(evidence.get("velocity3s"))
+    if v3 < 0 or v3 >= max_velocity_3s:
         return False
     move = _number(evidence.get("localBaseMovePct"))
     if not (min_local_base_move_pct <= move <= max_local_base_move_pct):
@@ -387,6 +391,7 @@ def ftv_authorization_policy(
         enabled=first_lift_local_base_flat_velocity_enabled,
         min_local_base_move_pct=winner_local_base_min_local_base_move_pct,
         max_local_base_move_pct=winner_local_base_max_local_base_move_pct,
+        max_velocity_3s=ict_v_rip_volume_awake_min_velocity_3s,
     )
 
     timing = str(evidence.get("timingAssessment") or "").upper()
@@ -1084,6 +1089,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             ),
             max_local_base_move_pct=float(
                 getattr(settings, "winner_local_base_max_local_base_move_pct", 25.0) or 25.0
+            ),
+            max_velocity_3s=float(
+                getattr(settings, "ict_v_rip_volume_awake_min_velocity_3s", 0.85) or 0.85
             ),
         )
     except Exception:
