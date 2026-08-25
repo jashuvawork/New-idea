@@ -2138,17 +2138,25 @@ def diagnose_missed_entries(
                 side_raw = str(alert.get("side") or "").upper()
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
                     pad_lane_chart_ok = False
+                    local_base_chart_ok = False
                     if not lift_ready:
+                        from app.engines.local_base_chart_bypass import (
+                            local_base_ichimoku_chart_bypass,
+                        )
                         from app.engines.pad_lane_capture import (
                             pad_lane_turnaround_chart_bypass,
                         )
 
+                        local_base_chart_ok = local_base_ichimoku_chart_bypass(
+                            Side(side_raw), snap, alert=alert,
+                        )
                         pad_lane_chart_ok = pad_lane_turnaround_chart_bypass(
                             Side(side_raw), snap, alert=alert,
                         )
                     if (
                         not side_aligned_with_chart(Side(side_raw), snap.spotChart)
                         and not lift_ready
+                        and not local_base_chart_ok
                         and not pad_lane_chart_ok
                     ):
                         blockers.append("chart_not_aligned")

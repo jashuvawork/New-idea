@@ -141,6 +141,7 @@ def chart_blocks_explosion_side(
     event: Optional[ExplosionEvent] = None,
     breadth_bias: str = "NEUTRAL",
     snap: Optional[SymbolSnapshot] = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str]:
     """Block counter-trend explosion legs when index chart has clear bias."""
     from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
@@ -157,7 +158,9 @@ def chart_blocks_explosion_side(
     if snap is not None:
         from app.engines.local_base_chart_bypass import local_base_ichimoku_chart_bypass
 
-        if local_base_ichimoku_chart_bypass(side, snap, event=event):
+        if local_base_ichimoku_chart_bypass(
+            side, snap, event=event, alert=alert,
+        ):
             return False, "ok"
 
     if chart is None:

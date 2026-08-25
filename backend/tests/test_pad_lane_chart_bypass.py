@@ -240,3 +240,100 @@ def test_pad_lane_chart_bypass_accepts_pad_lane_reasons(
         )
         is True
     )
+
+
+@patch("app.engines.pad_lane_capture.get_settings")
+def test_pad_lane_chart_bypass_accepts_elite_ftv_after_v_rip_stamp_clears(mock_settings):
+    mock_settings.return_value = _settings(
+        pad_lane_elite_ftv_chart_bypass_enabled=True,
+        pad_lane_elite_ftv_chart_bypass_min_score=45.0,
+    )
+    snap = _snap(direction="BEARISH", mom5=-0.18)
+    alert = {
+        "side": "CALL",
+        "strike": 24200.0,
+        "premium": 42.0,
+        "tier": "ELITE",
+        "explosionScore": 50.0,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 18.0,
+        "offLowMovePct": 18.0,
+        "peakMovePct": 22.0,
+        "velocity3s": 0.35,
+        "velocity9s": 0.2,
+        "volumeAwaken": True,
+        "volumeSurge": 2.5,
+    }
+
+    assert pad_lane_turnaround_chart_bypass(Side.CALL, snap, alert=alert) is True
+
+
+@patch("app.engines.pad_lane_capture.get_settings")
+def test_pad_lane_chart_bypass_rejects_elite_ftv_outside_base_window(mock_settings):
+    mock_settings.return_value = _settings(
+        pad_lane_elite_ftv_chart_bypass_enabled=True,
+    )
+    snap = _snap(direction="BEARISH", mom5=-0.08)
+    alert = {
+        "side": "CALL",
+        "strike": 24200.0,
+        "tier": "ELITE",
+        "explosionScore": 50.0,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "ictBaseRelativeMovePct": 55.0,
+        "peakMovePct": 55.0,
+        "velocity3s": 1.0,
+        "velocity9s": 0.5,
+        "volumeAwaken": True,
+    }
+
+    assert pad_lane_turnaround_chart_bypass(Side.CALL, snap, alert=alert) is False
+
+
+@patch("app.engines.pad_lane_capture.get_settings")
+@patch("app.engines.trade_selector.get_settings")
+@patch("app.engines.ict_breakout_monitor.first_lift_entry_readiness")
+def test_diagnose_skips_chart_near_miss_for_elite_ftv_on_bearish_chart(
+    mock_first_lift,
+    mock_selector_settings,
+    mock_pad_settings,
+):
+    from app.engines.auto_trader import AutoTraderState
+    from app.engines.trade_selector import diagnose_missed_entries
+    from app.config import Settings
+
+    settings = Settings()
+    mock_selector_settings.return_value = settings
+    mock_pad_settings.return_value = settings
+    mock_first_lift.return_value = (False, "first_lift_structure_not_confirmed")
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime(2026, 8, 25, 11, 58, tzinfo=IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=55.0,
+        spot=24180.0,
+        atmStrike=24200.0,
+        spotChart=SpotChart(direction="BEARISH", momentum5Pct=-0.18),
+        explosionAlerts=[{
+            "symbol": "NIFTY",
+            "side": "CALL",
+            "strike": 24200.0,
+            "premium": 42.0,
+            "tier": "ELITE",
+            "tradeable": True,
+            "explosionScore": 50.0,
+            "ictFirstLift": True,
+            "ictFlatThenVertical": True,
+            "ictBreakout": True,
+            "ictBaseRelativeMovePct": 18.0,
+            "peakMovePct": 22.0,
+            "velocity3s": 0.35,
+            "velocity9s": 0.2,
+            "volumeAwaken": True,
+        }],
+    )
+    notes = diagnose_missed_entries({"NIFTY": snap}, AutoTraderState())
+    assert all("chart_not_aligned" not in n.get("message", "") for n in notes)
