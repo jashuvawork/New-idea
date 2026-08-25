@@ -165,6 +165,14 @@ def trustworthy_local_base_move(ict: Any) -> float:
     # generic 8% noise floor so elite/armed launches at 2–7% are not treated as 0.
     if bool(getattr(ict, "base_armed", False)):
         return base
+    # V-rip off session low: ICT stamps v_rip_ready inside 2–25% — trust the pad.
+    if bool(getattr(ict, "v_rip_ready", False)) and bool(
+        getattr(settings, "ict_v_rip_ready_enabled", True)
+    ):
+        v_lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+        v_hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+        if v_lo <= base <= v_hi:
+            return base
     trust_min = float(
         getattr(settings, "explosion_local_base_trust_min_move_pct", 8.0) or 8.0
     )
@@ -521,6 +529,19 @@ def immature_explosion_blocked(
                     or 8.0
                 ),
             )
+        # V-rip off session low: pad window is 2–25% (ict_v_rip_*), not the 15% structured floor.
+        # Aug25 NIFTY PUT 24250 EXPLODING v_rip at 7.1% was blocked immature_local_base despite
+        # flat→vertical + volumeAwaken and radar mfe 26%.
+        if bool(getattr(ict, "v_rip_ready", False)) and bool(
+            getattr(settings, "ict_v_rip_ready_enabled", True)
+        ):
+            v_lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+            v_hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+            if (
+                v_lo <= base_move <= v_hi
+                and bool(getattr(ict, "volume_awakening", False))
+            ):
+                local_floor = min(local_floor, v_lo)
         if base_move >= local_floor:
             return False, ""
         return True, f"immature_local_base_{base_move:.1f}%"
