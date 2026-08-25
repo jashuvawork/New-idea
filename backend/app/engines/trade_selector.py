@@ -392,12 +392,14 @@ def _explosion_candidates(
             or alert.get("ictBaseRelativeMovePct")
             or 0
         )
+        v_rip_ready = bool(alert.get("ictVRipReady") or alert.get("vRipReady"))
         min_explosion_score = effective_explosion_min_score(
             tier=tier_str,
             peak_move_pct=peak_move,
             daily_move_pct=daily_move,
             first_lift_ready=first_lift_ready,
             local_base_move_pct=local_base_move,
+            v_rip_ready=v_rip_ready,
         )
         if first_lift_ready:
             min_explosion_score = min(
@@ -1946,12 +1948,14 @@ def diagnose_missed_entries(
                 or alert.get("ictBaseRelativeMovePct")
                 or 0
             )
+            v_rip_ready = bool(alert.get("ictVRipReady") or alert.get("vRipReady"))
             min_score = effective_explosion_min_score(
                 tier=tier_str,
                 peak_move_pct=peak_move,
                 daily_move_pct=daily_move,
                 first_lift_ready=first_lift_ready,
                 local_base_move_pct=local_base_move,
+                v_rip_ready=v_rip_ready,
             )
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
                 if not first_lift_ready and not _building_aligned_ict_alert_ok(

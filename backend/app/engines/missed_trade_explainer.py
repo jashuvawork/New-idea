@@ -209,12 +209,14 @@ def _gate_checks(
         alert=alert,
         state=state,
     )
+    v_rip_ready = bool(alert.get("ictVRipReady") or alert.get("vRipReady"))
     min_score = effective_explosion_min_score(
         tier=str(alert.get("tier") or "WATCH"),
         peak_move_pct=peak_move,
         daily_move_pct=daily_move,
         first_lift_ready=first_lift_ready,
         local_base_move_pct=local_base_move,
+        v_rip_ready=v_rip_ready,
     )
     if score < min_score:
         blockers.append(f"score_{score:.0f}<{min_score:.0f}")
@@ -223,7 +225,7 @@ def _gate_checks(
         )
         min_peak = float(getattr(settings, "peak_move_explosion_min_pct", 35.0) or 35.0)
         if (
-            first_lift_ready
+            (first_lift_ready or v_rip_ready)
             and local_base_move >= float(
                 getattr(settings, "first_lift_pad_local_base_min_pct", 2.0) or 2.0
             )
@@ -232,7 +234,7 @@ def _gate_checks(
             )
             and peak_move < pad_peak
         ):
-            fix = f"First-lift pad bypass needs peak ≥{pad_peak:.0f}%"
+            fix = f"First-lift/V-rip pad bypass needs peak ≥{pad_peak:.0f}%"
         elif peak_move < min_peak:
             fix = f"Peak-move bypass needs session peak ≥{min_peak:.0f}%"
         else:

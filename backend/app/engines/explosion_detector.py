@@ -744,14 +744,15 @@ def first_lift_pad_capture_lane(
     peak_move_pct: float,
     first_lift_ready: bool,
     local_base_move_pct: float,
+    v_rip_ready: bool = False,
 ) -> bool:
-    """ICT-confirmed first lift at 2–25% local base with peak ≥25%."""
+    """ICT-confirmed first-lift or V-rip at 2–25% local base with peak ≥25%."""
     from app.config import get_settings
 
     settings = get_settings()
     if not bool(getattr(settings, "first_lift_pad_explosion_bypass_enabled", True)):
         return False
-    if not first_lift_ready:
+    if not (first_lift_ready or v_rip_ready):
         return False
     tier_u = str(tier or "").upper()
     if tier_u not in ("ELITE", "EXPLODING"):
@@ -773,6 +774,7 @@ def effective_first_lift_trade_min_score(
     first_lift_ready: bool,
     local_base_move_pct: float,
     default_min: float,
+    v_rip_ready: bool = False,
 ) -> float:
     """Align FTV first-lift sleeve with explosion pad bypass floors."""
     from app.config import get_settings
@@ -782,6 +784,7 @@ def effective_first_lift_trade_min_score(
         peak_move_pct=peak_move_pct,
         first_lift_ready=first_lift_ready,
         local_base_move_pct=local_base_move_pct,
+        v_rip_ready=v_rip_ready,
     ):
         return default_min
     settings = get_settings()
@@ -798,6 +801,7 @@ def effective_explosion_min_score(
     daily_move_pct: float = 0.0,
     first_lift_ready: bool = False,
     local_base_move_pct: float = 0.0,
+    v_rip_ready: bool = False,
 ) -> float:
     """Lower min score when a material session peak rip qualifies for bypass."""
     from app.config import get_settings
@@ -811,6 +815,7 @@ def effective_explosion_min_score(
         peak_move_pct=float(peak_move_pct or 0.0),
         first_lift_ready=first_lift_ready,
         local_base_move_pct=float(local_base_move_pct or 0.0),
+        v_rip_ready=v_rip_ready,
     ):
         base = min(
             base,

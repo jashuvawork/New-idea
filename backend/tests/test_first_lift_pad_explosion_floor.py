@@ -111,6 +111,29 @@ def test_first_lift_pad_capture_lane_helper():
         first_lift_ready=False,
         local_base_move_pct=19.3,
     )
+    assert first_lift_pad_capture_lane(
+        tier="EXPLODING",
+        peak_move_pct=58.0,
+        first_lift_ready=False,
+        v_rip_ready=True,
+        local_base_move_pct=12.4,
+    )
+
+
+@patch("app.config.get_settings")
+def test_v_rip_pad_lowers_min_without_first_lift(mock_settings):
+    mock_settings.return_value = _settings()
+    assert (
+        effective_explosion_min_score(
+            tier="EXPLODING",
+            peak_move_pct=58.57,
+            daily_move_pct=58.57,
+            first_lift_ready=False,
+            v_rip_ready=True,
+            local_base_move_pct=12.4,
+        )
+        == 24.0
+    )
 
 
 @patch("app.config.get_settings")
@@ -131,7 +154,7 @@ def test_effective_first_lift_trade_min_score_at_pad(mock_settings):
 
 
 def test_aug25_put_24150_admits_first_lift_local_base_sleeve():
-    """Live miss: score 41, peak 59%, lb 19.3% — FTV sleeve not explosion gate."""
+    """Live miss: score 41, peak 59%, lb 12.4% — V-rip without firstLift flag."""
     from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
 
     evidence = {
@@ -142,18 +165,20 @@ def test_aug25_put_24150_admits_first_lift_local_base_sleeve():
         "chartConfidence": 84.0,
         "velocity3s": 0.0,
         "velocity9s": 0.0,
-        "localBaseMovePct": 19.3,
+        "localBaseMovePct": 12.4,
         "peakMovePct": 58.57,
-        "firstLift": True,
+        "firstLift": False,
+        "vRipReady": True,
         "flatThenVertical": True,
         "activeBreakout": True,
         "orderflowPositive": True,
         "volumeAwaken": True,
-        "flatVerticalQuality": 72.1,
+        "flatVerticalQuality": 70.0,
         "timingAssessment": "GOOD",
     }
     ranking = rank_trade_evidence(evidence)
     assert ranking["grade"] == "A"
+    assert ranking["evidence"]["firstLiftLocalBaseFlatVelocity"] is True
     decision = ftv_authorization_policy(
         evidence,
         ranking,

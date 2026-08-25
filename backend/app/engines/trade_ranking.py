@@ -88,7 +88,7 @@ def _first_lift_local_base_flat_velocity(
     min_local_base_move_pct: float = 2.0,
     max_local_base_move_pct: float = 25.0,
 ) -> bool:
-    """ICT-confirmed first lift at local base when the velocity snapshot is flat.
+    """ICT-confirmed first lift or V-rip at local base when the velocity snapshot is flat.
 
     Radar already stamped volumeAwaken + flat→vertical structure; v3=0 is snapshot
     lag between ICT pad detection and the ranking tick — not a dead launch.
@@ -103,7 +103,7 @@ def _first_lift_local_base_flat_velocity(
     tier = str(evidence.get("tier") or "").upper()
     if tier not in {"ELITE", "EXPLODING"}:
         return False
-    if not bool(evidence.get("firstLift")):
+    if not bool(evidence.get("firstLift") or evidence.get("vRipReady")):
         return False
     if bool(
         evidence.get("midRipCoil")
@@ -714,6 +714,7 @@ def ftv_authorization_policy(
         tier=tier,
         peak_move_pct=peak_move_pct,
         first_lift_ready=bool(evidence.get("firstLift")),
+        v_rip_ready=bool(evidence.get("vRipReady")),
         local_base_move_pct=move,
         default_min=first_lift_trade_min_score,
     )
