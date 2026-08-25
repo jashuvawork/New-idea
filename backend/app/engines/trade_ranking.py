@@ -93,7 +93,7 @@ def _first_lift_local_base_flat_velocity(
     min_local_base_move_pct: float = 2.0,
     max_local_base_move_pct: float = 25.0,
 ) -> bool:
-    """ICT-confirmed first lift at local base when the velocity snapshot is flat.
+    """ICT-confirmed first lift or V-rip at local base when the velocity snapshot is flat.
 
     Radar already stamped volumeAwaken + flat→vertical structure; v3=0 is snapshot
     lag between ICT pad detection and the ranking tick — not a dead launch.
@@ -108,7 +108,7 @@ def _first_lift_local_base_flat_velocity(
     tier = str(evidence.get("tier") or "").upper()
     if tier not in {"ELITE", "EXPLODING"}:
         return False
-    if not bool(evidence.get("firstLift")):
+    if not bool(evidence.get("firstLift") or evidence.get("vRipReady")):
         return False
     if bool(
         evidence.get("midRipCoil")
@@ -690,6 +690,20 @@ def ftv_authorization_policy(
                 max_capital_pct=winner_local_base_max_capital_pct,
             )
 
+    from app.engines.explosion_detector import effective_first_lift_trade_min_score
+
+    peak_move_pct = _number(
+        evidence.get("peakMovePct") or evidence.get("dailyMovePct") or 0
+    )
+    effective_first_lift_min = effective_first_lift_trade_min_score(
+        tier=tier,
+        peak_move_pct=peak_move_pct,
+        first_lift_ready=bool(evidence.get("firstLift")),
+        v_rip_ready=bool(evidence.get("vRipReady")),
+        local_base_move_pct=move,
+        default_min=first_lift_trade_min_score,
+    )
+
     # First-lift / V-rip at local base with micro velocity pullback — ICT pad
     # already confirmed; shallow dip is base retest, not failed launch.
     if (
@@ -697,7 +711,7 @@ def ftv_authorization_policy(
         and micro_pullback
         and str(ranking.get("grade") or "").upper() in {"A", "B"}
         and tier in {"ELITE", "EXPLODING"}
-        and explosion_score >= first_lift_trade_min_score
+        and explosion_score >= effective_first_lift_min
         and quality >= first_lift_helper_confirm_min_quality
     ):
         if require_allocation_rank_one and allocation_rank != 1:
@@ -720,7 +734,7 @@ def ftv_authorization_policy(
         and flat_velocity_lag
         and grade in {"A", "B"}
         and tier in {"ELITE", "EXPLODING"}
-        and explosion_score >= first_lift_trade_min_score
+        and explosion_score >= effective_first_lift_min
         and quality >= first_lift_helper_confirm_min_quality
     ):
         if require_allocation_rank_one and allocation_rank != 1:
@@ -1522,6 +1536,13 @@ def rank_entry_candidate(
             or alert.get("ictBaseRelativeMovePct")
             or pretrade.get("ictBaseRelativeMovePct")
         ),
+        "peakMovePct": (
+            alert.get("peakMovePct")
+            or (getattr(event, "peak_move_pct", 0) if event else 0)
+            or alert.get("dailyMovePct")
+            or 0
+        ),
+        "dailyMovePct": alert.get("dailyMovePct") or 0,
         "offLowMovePct": (
             alert.get("offLowMovePct")
             or pretrade.get("offLowMovePct")

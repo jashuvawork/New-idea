@@ -395,10 +395,19 @@ def _explosion_candidates(
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
         peak_move = float(alert.get("peakMovePct") or 0)
         tier_str = str(alert.get("tier") or "WATCH")
+        local_base_move = float(
+            alert.get("localBaseMovePct")
+            or alert.get("ictBaseRelativeMovePct")
+            or 0
+        )
+        v_rip_ready = bool(alert.get("ictVRipReady") or alert.get("vRipReady"))
         min_explosion_score = effective_explosion_min_score(
             tier=tier_str,
             peak_move_pct=peak_move,
             daily_move_pct=daily_move,
+            first_lift_ready=first_lift_ready,
+            local_base_move_pct=local_base_move,
+            v_rip_ready=v_rip_ready,
         )
         if first_lift_ready or early_pad:
             min_explosion_score = min(
@@ -1935,11 +1944,6 @@ def diagnose_missed_entries(
             daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
             peak_move = float(alert.get("peakMovePct") or 0)
             tier_str = str(alert.get("tier") or "WATCH")
-            min_score = effective_explosion_min_score(
-                tier=tier_str,
-                peak_move_pct=peak_move,
-                daily_move_pct=daily_move,
-            )
             blockers: list[str] = []
             first_lift_ready = False
             early_pad = False
@@ -1972,6 +1976,44 @@ def diagnose_missed_entries(
             from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
 
             early_pad = alert_has_early_radar_pad_capture(alert)
+            slow_grind_trough = bool(
+                alert.get("slowGrindArmedTrough")
+                or alert.get("ictSlowGrindArmedTrough")
+            )
+            local_base_move = float(
+                alert.get("localBaseMovePct")
+                or alert.get("ictBaseRelativeMovePct")
+                or 0
+            )
+            v_rip_ready = bool(alert.get("ictVRipReady") or alert.get("vRipReady"))
+            min_score = effective_explosion_min_score(
+                tier=tier_str,
+                peak_move_pct=peak_move,
+                daily_move_pct=daily_move,
+                first_lift_ready=first_lift_ready,
+                local_base_move_pct=local_base_move,
+                v_rip_ready=v_rip_ready,
+            )
+            if early_pad:
+                min_score = min(
+                    min_score,
+                    float(
+                        getattr(settings, "early_radar_pad_min_explosion_score", 5.0)
+                        or 5.0
+                    ),
+                )
+            if slow_grind_trough:
+                min_score = min(
+                    min_score,
+                    float(
+                        getattr(
+                            settings,
+                            "slow_grind_armed_trough_min_explosion_score",
+                            5.0,
+                        )
+                        or 5.0
+                    ),
+                )
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
                 if not first_lift_ready and not early_pad and not _building_aligned_ict_alert_ok(
                     alert, snap, str(tier_str).upper(),

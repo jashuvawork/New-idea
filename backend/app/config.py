@@ -695,6 +695,13 @@ class Settings(BaseSettings):
     # ICT-confirmed first lift at local base when v3 snapshot is flat (0) — volumeAwaken
     # + flat→vertical structure already prove the pad; do not downgrade to B grade.
     first_lift_local_base_flat_velocity_enabled: bool = True
+    # First-lift pad cold score — first-lift or V-rip at 2–25% lb with peak ≥25% but
+    # composite score still warming (Aug25 NIFTY PUT 24250: score 26; PUT 24150: grade B).
+    first_lift_pad_explosion_bypass_enabled: bool = True
+    first_lift_pad_explosion_min_peak_pct: float = 25.0
+    first_lift_pad_explosion_min_score: float = 24.0
+    first_lift_pad_local_base_min_pct: float = 2.0
+    first_lift_pad_local_base_max_pct: float = 25.0
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
     explosion_immature_block_enabled: bool = True
     explosion_immature_min_session_move_pct: float = 28.0
