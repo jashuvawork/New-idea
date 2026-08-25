@@ -31,6 +31,7 @@ from app.services.radar_learning import (
     build_funnel_report,
     finalize_daily_review,
     finalize_pending_reviews,
+    funnel_path,
     pipeline_history_summary,
     premium_tape_path,
     read_alerts_tape,
@@ -54,10 +55,13 @@ def _settings(tmp_path, **overrides):
         "radar_archive_enabled": True,
         "radar_archive_dir": "",
         "radar_archive_top_n_per_day": 100,
-        "radar_archive_retention_days": 365,
+        "radar_archive_retention_days": 7,
         "radar_learning_enabled": True,
         "radar_premium_tape_sample_seconds": 15,
-        "radar_alerts_tape_enabled": True,
+        "radar_analysis_only_storage": True,
+        "radar_purge_telemetry_after_finalize": True,
+        "radar_alerts_tape_enabled": False,
+        "radar_pipeline_history_enabled": False,
         "radar_outcome_horizons_seconds_csv": "60,300",
         "radar_outcome_target_pct": 20.0,
         "radar_outcome_stop_pct": 10.0,
@@ -565,7 +569,12 @@ def test_funnel_never_attributes_pre_detection_events_or_trades(tmp_path):
 
 def test_finalize_bundles_learning_artifacts_and_copies_backup(tmp_path):
     backup_dir = tmp_path / "offbox"
-    settings = _settings(tmp_path, radar_backup_dir=str(backup_dir))
+    settings = _settings(
+        tmp_path,
+        radar_backup_dir=str(backup_dir),
+        radar_analysis_only_storage=False,
+        radar_alerts_tape_enabled=True,
+    )
     start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
     with _patch_settings(settings):
         record_top_radars(
@@ -601,6 +610,47 @@ def test_finalize_bundles_learning_artifacts_and_copies_backup(tmp_path):
     assert result["backup"]["sha256"] == hashlib.sha256(
         archive_path_value.read_bytes()
     ).hexdigest()
+
+
+def test_finalize_analysis_only_omits_optional_tapes_and_purges_telemetry(tmp_path):
+    settings = _settings(
+        tmp_path,
+        radar_analysis_only_storage=True,
+        radar_purge_telemetry_after_finalize=True,
+        radar_alerts_tape_enabled=True,
+        radar_pipeline_history_enabled=True,
+    )
+    start = datetime(2026, 8, 16, 10, 0, tzinfo=IST)
+    with _patch_settings(settings):
+        record_top_radars(
+            {"NIFTY": _snap(alerts=[_alert()])},
+            now=start,
+            source="rest_snapshot",
+        )
+        record_market_observations(
+            {"NIFTY": _snap(call=110.0, alerts=[_alert()])},
+            source="rest_snapshot",
+            now=start,
+            force=True,
+        )
+        assert premium_tape_path("2026-08-16").exists()
+        result = finalize_daily_review("2026-08-16")
+        archive_path_value = tmp_path / "radar_archives" / "radar-2026-08-16.zip"
+        with zipfile.ZipFile(archive_path_value, "r") as archive:
+            names = set(archive.namelist())
+
+    assert {
+        "scorecard.json",
+        "funnel.json",
+        "premium_tape.jsonl",
+        "funnel_events.jsonl",
+    } <= names
+    assert "alerts_tape.jsonl" not in names
+    assert "pipeline_history.jsonl" not in names
+    assert result["analysisOnly"] is True
+    assert premium_tape_path("2026-08-16").exists() is False
+    assert funnel_path("2026-08-16").exists() is False
+    assert "2026-08-16.premium.jsonl" in result["purgedTelemetry"]
 
 
 def test_health_reports_stale_sources_divergence_and_component_errors(tmp_path):
@@ -727,7 +777,7 @@ def test_rest_sampling_keeps_each_symbol_when_snapshots_build_separately(tmp_pat
 
 
 def test_pipeline_history_proves_empty_and_successful_sampling(tmp_path):
-    settings = _settings(tmp_path)
+    settings = _settings(tmp_path, radar_pipeline_history_enabled=True)
     start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
     unavailable = _snap()
     unavailable.dataAvailable = False
@@ -913,7 +963,11 @@ def test_duplicate_detector_replay_is_rejected_without_queueing():
 
 def test_every_observation_writes_premium_and_alerts_tape(tmp_path):
     """Interval 0 must persist every poll so V-base lifts are replayable."""
-    settings = _settings(tmp_path, radar_premium_tape_sample_seconds=0)
+    settings = _settings(
+        tmp_path,
+        radar_premium_tape_sample_seconds=0,
+        radar_alerts_tape_enabled=True,
+    )
     start = datetime(2026, 8, 19, 10, 15, tzinfo=IST)
     with _patch_settings(settings):
         for i in range(3):

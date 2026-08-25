@@ -21,3 +21,9 @@ NexusQuant v2.0 is a single product split into two dev services (run both for en
 ### Gotcha: trade-store path
 - `.env.example` ships the production path `TRADE_STORE_DIR=/opt/nexusquant/data/trades`, which is NOT writable in this VM and makes `/api/deployment/status` 500. If you create a `.env` from the example, override it to a writable path (the code default is fine): `TRADE_STORE_DIR=/tmp/nexusquant/trades`. Running with no `.env` at all also works because that default is already dev-safe.
 - Redis is optional: `redis_store.py` falls back to in-memory storage when Redis is unavailable, so no Redis server is needed for local dev. PostgreSQL is declared in deps but unused.
+
+### Radar / EOD storage (analysis-only from Aug 26+)
+- Intraday telemetry lives under `{TRADE_STORE_DIR}/radar_archives/telemetry/` (`*.premium.jsonl`, `*.funnel.jsonl`).
+- At **16:00 IST finalize**, the daily ZIP (`radar-YYYY-MM-DD.zip`) keeps only what EOD replay needs: **premium tape**, **funnel events**, **scorecard**, and radar entries. Alerts tape and pipeline history are **not** stored by default.
+- After finalize, intraday telemetry JSONL is **purged** (data remains in the ZIP). Retention is **7 days** of ZIPs.
+- EOD replay reads `premium_tape.jsonl` from telemetry during the session, or from the ZIP after finalize (`/api/ai/eod-local-base-replay/{DATE}`).

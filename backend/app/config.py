@@ -2392,10 +2392,15 @@ class Settings(BaseSettings):
     radar_archive_enabled: bool = True
     radar_archive_dir: str = ""  # default: {trade_store_dir}/radar_archives
     radar_archive_top_n_per_day: int = 100
-    # Keep ~1 month of daily archives, not a year. A 50GB disk cannot hold 365 days of
-    # premium tapes/zips; unbounded retention fills the disk and the backend starts hanging
-    # (writes stall, restarts fail). 30 days is ample for review/replay.
-    radar_archive_retention_days: int = 30
+    # Keep one trading week of daily archives for EOD replay / tradeability review.
+    # Premium tapes are large; unbounded retention fills the disk and stalls the backend.
+    radar_archive_retention_days: int = 7
+    # When true, daily finalize ZIPs only bundle artifacts needed for EOD replay and
+    # funnel/scorecard analysis (premium tape, funnel, scorecard). Skips alerts tape,
+    # pipeline history, and per-day FTV calibration blobs.
+    radar_analysis_only_storage: bool = True
+    # Delete intraday telemetry JSONL after a successful daily finalize (data lives in ZIP).
+    radar_purge_telemetry_after_finalize: bool = True
     radar_learning_enabled: bool = True
     # Throttle the all-strike premium tape to one sample / N seconds. It used to write EVERY
     # observation cycle (0), producing 1GB+/day tapes that (a) fill the disk and (b) make the
@@ -2407,7 +2412,9 @@ class Settings(BaseSettings):
     # It only needs the last ~35 min, so tail-read at most this many bytes instead of parsing
     # the whole intraday file — bounds startup time/memory regardless of tape size.
     radar_restore_tail_max_bytes: int = 67_108_864  # 64 MiB
-    radar_alerts_tape_enabled: bool = True
+    radar_alerts_tape_enabled: bool = False
+    # Pipeline health JSONL — useful for ops debug, not required for EOD trade replay.
+    radar_pipeline_history_enabled: bool = False
     radar_outcome_horizons_seconds_csv: str = "60,180,300,900,1800"
     radar_outcome_target_pct: float = 20.0
     radar_outcome_stop_pct: float = 10.0
