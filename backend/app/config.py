@@ -1772,6 +1772,11 @@ class Settings(BaseSettings):
     afternoon_capture_exit_trail_arm_points: float = 6.0
     afternoon_capture_exit_max_hold_seconds: int = 480
     afternoon_capture_exit_trail_keep_ratio: float = 0.55
+    # Book when peak profit halves (peak ₹121 → exit ~₹111 on a ₹100 entry).
+    afternoon_capture_peak_halve_lock_enabled: bool = True
+    afternoon_capture_peak_halve_min_best_points: float = 10.0
+    afternoon_capture_peak_halve_giveback_ratio: float = 0.50
+    afternoon_capture_peak_halve_min_remain_points: float = 1.0
 
     # All-day explosive capture — 9:20–15:25 session rips (e.g. NIFTY 23850 PE 14:00 +1360%)
     all_day_explosion_capture_enabled: bool = True

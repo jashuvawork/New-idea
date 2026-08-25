@@ -59,6 +59,10 @@ def _settings():
     s.afternoon_capture_exit_trail_arm_points = 6.0
     s.afternoon_capture_exit_max_hold_seconds = 480
     s.afternoon_capture_exit_trail_keep_ratio = 0.55
+    s.afternoon_capture_peak_halve_lock_enabled = True
+    s.afternoon_capture_peak_halve_min_best_points = 10.0
+    s.afternoon_capture_peak_halve_giveback_ratio = 0.50
+    s.afternoon_capture_peak_halve_min_remain_points = 1.0
     s.explosion_target_elite = 25.0
     s.premium_led_counter_breadth_enabled = True
     s.premium_led_min_velocity_3s = 2.8
@@ -213,3 +217,47 @@ def test_afternoon_exit_params_wider_target(mock_settings):
     assert params.target_points == 18.0
     assert params.stop_points == 4.0
     assert params.trail_arm_points == 6.0
+
+
+@patch("app.engines.explosion_profit.get_settings", return_value=_settings())
+def test_afternoon_capture_peak_halve_lock_books_half_peak(mock_settings):
+    from app.engines.explosion_profit import (
+        afternoon_capture_peak_halve_lock_reason,
+        evaluate_explosion_exit,
+    )
+    from app.models.schemas import PaperTrade, Side, StrategyType
+
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    trade = PaperTrade(
+        id="t1",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24250.0,
+        entryPremium=100.5,
+        currentPremium=109.5,
+        lots=3,
+        pnlPoints=9.0,
+        pnlInr=1755.0,
+        bestPnlPoints=19.92,
+        maxLtp=121.85,
+        openedAt=datetime.now(ZoneInfo("Asia/Kolkata")),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={"afternoonCapture": True, "explosionTier": "EXPLODING"},
+    )
+    assert afternoon_capture_peak_halve_lock_reason(
+        trade, best=19.92, pnl_pts=9.0,
+    ) == "afternoon_capture_peak_halve_lock"
+    assert afternoon_capture_peak_halve_lock_reason(
+        trade, best=19.92, pnl_pts=12.0,
+    ) is None
+
+    reason, _ = evaluate_explosion_exit(
+        trade,
+        109.5,
+        "EXPLODING",
+        65,
+        live_velocity_3s=0.0,
+    )
+    assert reason == "afternoon_capture_peak_halve_lock"

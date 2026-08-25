@@ -173,6 +173,63 @@ def explosion_exit_params_from_plan(plan, event_tier: str = "EXPLODING") -> Expl
     )
 
 
+def _merge_afternoon_capture_exit_params(
+    params: ExplosionExitParams,
+    event_tier: str,
+) -> ExplosionExitParams:
+    """Afternoon breakouts use tighter trail arms than chart adaptive plans."""
+    from app.engines.morning_premium_capture import afternoon_capture_exit_params
+
+    afternoon = afternoon_capture_exit_params(event_tier)
+
+    def _f(value: Any, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    return ExplosionExitParams(
+        stop_points=min(_f(params.stop_points, 8.0), afternoon.stop_points),
+        target_points=min(_f(params.target_points, 18.0), afternoon.target_points),
+        trail_arm_points=min(_f(params.trail_arm_points, 10.0), afternoon.trail_arm_points),
+        trail_keep_ratio=min(_f(params.trail_keep_ratio, 0.65), afternoon.trail_keep_ratio),
+        micro_target_points=min(_f(params.micro_target_points, 3.0), afternoon.micro_target_points),
+        adaptive_stop=params.adaptive_stop,
+    )
+
+
+def afternoon_capture_peak_halve_lock_reason(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+) -> Optional[str]:
+    """Book afternoon momentum when peak profit has halved (₹121 peak → ~₹111 exit)."""
+    ctx = trade.entryContext or {}
+    if not ctx.get("afternoonCapture"):
+        return None
+    settings = get_settings()
+    if not bool(getattr(settings, "afternoon_capture_peak_halve_lock_enabled", True)):
+        return None
+    min_best = float(
+        getattr(settings, "afternoon_capture_peak_halve_min_best_points", 10.0) or 10.0
+    )
+    if best < min_best:
+        return None
+    min_remain = float(
+        getattr(settings, "afternoon_capture_peak_halve_min_remain_points", 1.0) or 1.0
+    )
+    if pnl_pts < min_remain:
+        return None
+    ratio = float(
+        getattr(settings, "afternoon_capture_peak_halve_giveback_ratio", 0.50) or 0.50
+    )
+    giveback = best - pnl_pts
+    if giveback + 1e-9 >= best * ratio:
+        return "afternoon_capture_peak_halve_lock"
+    return None
+
+
 def record_explosion_stop(symbol: str, cooldown_seconds: Optional[int] = None) -> None:
     sym = symbol.upper()
     _explosion_stop_at[sym] = datetime.now(IST)
@@ -691,6 +748,8 @@ def _defer_explosion_trail_while_continuing(
     if pnl_pts <= 0:
         return False
     if not bool(getattr(settings, "explosion_trail_hot_defer_enabled", True)):
+        return False
+    if (trade.entryContext or {}).get("afternoonCapture"):
         return False
     if not (stage_ladder or max_profit):
         return False
@@ -1460,6 +1519,9 @@ def evaluate_explosion_exit(
     """
     settings = get_settings()
     exit_params = params or default_explosion_exit_params(event_tier)
+    ctx = trade.entryContext or {}
+    if ctx.get("afternoonCapture"):
+        exit_params = _merge_afternoon_capture_exit_params(exit_params, event_tier)
     pnl_pts = current_premium - trade.entryPremium
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
     observed_best = (
@@ -1562,6 +1624,12 @@ def evaluate_explosion_exit(
     from app.engines.ict_breakout_monitor import _ict_max_profit_trade
 
     max_profit = _ict_max_profit_trade(trade)
+
+    halve_lock = afternoon_capture_peak_halve_lock_reason(
+        trade, best=best, pnl_pts=pnl_pts,
+    )
+    if halve_lock:
+        return halve_lock, pnl_inr
 
     # Peak→fade toward losses: book remaining green / BE before hard SL.
     # Runs before trail-arm gates so unarmed trails cannot give winners back.
