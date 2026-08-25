@@ -1475,6 +1475,9 @@ class Settings(BaseSettings):
     slow_grind_consolidation_base_min_flat_quality: float = 35.0
     slow_grind_consolidation_base_min_impending_signals: int = 2
     slow_grind_consolidation_base_min_explosion_score: float = 24.0
+    # ITM SENSEX/NIFTY afternoon bases often sit above the ₹220 pad lane (Aug25
+    # SENSEX CALL 77100 @ ₹397 base missed L1 before 53% vertical).
+    slow_grind_consolidation_base_max_premium_inr: float = 800.0
     # Squeeze release at pad — Bollinger-in-Keltner compression → fresh release.
     squeeze_release_capture_enabled: bool = True
     squeeze_release_max_premium_inr: float = 220.0
@@ -1580,6 +1583,7 @@ class Settings(BaseSettings):
     # waive ICT first-lift quality / BUILDING→ELITE lag near-miss blockers so the
     # selector admits the leg at the local base before flatVerticalQuality warms.
     pad_lane_early_near_miss_waive_enabled: bool = True
+    # ICT confirm stack for local-base reversals (additive quality, not hard gates).
     local_base_reversal_ict_bonus_max: float = 18.0
     local_base_reversal_kill_zone_bonus_enabled: bool = True
     local_base_reversal_require_ict_confirm: bool = False

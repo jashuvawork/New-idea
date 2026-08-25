@@ -807,7 +807,7 @@ def _slow_grind_consolidation_base_readiness(
     prem_ok, prem_reason = _local_base_pad_premium_band_ok(
         premium,
         settings=s,
-        max_premium_setting="slow_grind_sudden_lift_max_premium_inr",
+        max_premium_setting="slow_grind_consolidation_base_max_premium_inr",
         reason_prefix="slow_grind_consolidation",
     )
     if not prem_ok:

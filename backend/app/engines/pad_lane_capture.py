@@ -1006,6 +1006,7 @@ def pad_lane_turnaround_chart_bypass_for_snap(
     return False
 
 
+
 def pad_lane_expiry_worst_waive(evidence: Mapping[str, Any]) -> bool:
     """EXPIRY WORST quality/score floors may waive for stamped pad-lane local-base FTV."""
     settings = get_settings()
