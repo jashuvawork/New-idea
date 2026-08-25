@@ -126,12 +126,17 @@ def chop_weak_explosion_blocks_entry(
 
     # A range-bound index is exactly where a coiled option base can launch. Admit
     # only the strict first-lift proof; generic low-move explosions remain blocked.
-    from app.engines.ict_breakout_monitor import first_lift_entry_ready
+    from app.engines.ict_breakout_monitor import first_lift_entry_readiness
 
-    if first_lift_entry_ready(
+    first_lift_ready, readiness_reason = first_lift_entry_readiness(
         snap=snap,
         event=event,
         alert=alert,
+    )
+    from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
+
+    if first_lift_ready or pad_lane_early_near_miss_waive(
+        alert, readiness_reason=readiness_reason,
     ):
         return False, "first_lift_local_base_confirmed"
 

@@ -443,6 +443,10 @@ def ftv_authorization_policy(
             and _day_mode_is_expiry_worst(day_mode)
         ):
             return None
+        from app.engines.pad_lane_capture import pad_lane_expiry_worst_waive
+
+        if pad_lane_expiry_worst_waive(evidence):
+            return None
         min_tier = str(ftv_policy_expiry_worst_min_tier or "ELITE").upper()
         tier_rank = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
         if tier_rank.get(str(tier or "").upper(), 0) < tier_rank.get(min_tier, 4):

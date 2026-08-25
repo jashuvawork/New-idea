@@ -296,6 +296,12 @@ def _explosion_candidates(
             state=state,
         )
         early_pad = alert_has_early_radar_pad_capture(alert)
+        from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
+
+        pad_lane_waive = pad_lane_early_near_miss_waive(
+            alert, readiness_reason=first_lift_readiness_reason,
+        )
+        lift_ready = first_lift_ready or early_pad or pad_lane_waive
         slow_grind_trough = bool(
             alert.get("slowGrindArmedTrough")
             or alert.get("ictSlowGrindArmedTrough")
@@ -306,7 +312,7 @@ def _explosion_candidates(
             or alert.get("ictSlowGrindConsolidationBase")
             or first_lift_readiness_reason == "slow_grind_consolidation_base_ready"
         )
-        if not alert.get("tradeable") and not early_pad and not first_lift_ready:
+        if not alert.get("tradeable") and not lift_ready:
             continue
         if not premium_in_band(
             alert.get("premium"),
@@ -342,9 +348,9 @@ def _explosion_candidates(
                 if top_only:
                     from app.engines.top_moment_gate import explosion_alert_is_top_moment
 
-                    if not explosion_alert_is_top_moment(alert):
+                    if not explosion_alert_is_top_moment(alert) and not pad_lane_waive:
                         continue
-                elif not first_lift_ready and not _building_aligned_ict_alert_ok(
+                elif not lift_ready and not _building_aligned_ict_alert_ok(
                     alert, snap, tier_u, state=state, snapshots={symbol: snap},
                 ):
                     continue
@@ -370,8 +376,7 @@ def _explosion_candidates(
                 side_v is not None
                 and snap.spotChart is not None
                 and not side_aligned_with_chart(side_v, snap.spotChart)
-                and not first_lift_ready
-                and not early_pad
+                and not lift_ready
             ):
                 # A confirmed local base off which the side is breaking may survive the
                 # chart-align drop — mirror check_explosion_entry so a genuine base rip
@@ -421,7 +426,7 @@ def _explosion_candidates(
             local_base_move_pct=local_base_move,
             v_rip_ready=v_rip_ready,
         )
-        if first_lift_ready or early_pad:
+        if lift_ready:
             min_explosion_score = min(
                 min_explosion_score,
                 float(
@@ -429,7 +434,7 @@ def _explosion_candidates(
                     or 45.0
                 ),
             )
-        if early_pad:
+        if early_pad or pad_lane_waive:
             min_explosion_score = min(
                 min_explosion_score,
                 float(
@@ -461,7 +466,7 @@ def _explosion_candidates(
             continue
         # Explosion score is primary quality — don't block on low symbol TQS alone
         if (
-            not first_lift_ready
+            not lift_ready
             and snap.tradeQualityScore < 25
             and score_val < settings.aggressive_min_explosion_score + 10
         ):
@@ -2024,6 +2029,8 @@ def diagnose_missed_entries(
             blockers: list[str] = []
             first_lift_ready = False
             early_pad = False
+            pad_lane_waive = False
+            readiness_reason = ""
             if bool(
                 alert.get("ictFirstLift")
                 or alert.get("ictVRipReady")
@@ -2048,11 +2055,23 @@ def diagnose_missed_entries(
                     alert=alert,
                     state=state,
                 )
-                if not first_lift_ready:
+                from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
+
+                pad_lane_waive = pad_lane_early_near_miss_waive(
+                    alert, readiness_reason=readiness_reason,
+                )
+                if not first_lift_ready and not pad_lane_waive:
                     blockers.append(readiness_reason)
+            if not pad_lane_waive:
+                from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
+
+                pad_lane_waive = pad_lane_early_near_miss_waive(
+                    alert, readiness_reason=readiness_reason,
+                )
             from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
 
             early_pad = alert_has_early_radar_pad_capture(alert)
+            lift_ready = first_lift_ready or early_pad or pad_lane_waive
             slow_grind_trough = bool(
                 alert.get("slowGrindArmedTrough")
                 or alert.get("ictSlowGrindArmedTrough")
@@ -2075,7 +2094,7 @@ def diagnose_missed_entries(
                 local_base_move_pct=local_base_move,
                 v_rip_ready=v_rip_ready,
             )
-            if early_pad:
+            if early_pad or pad_lane_waive:
                 min_score = min(
                     min_score,
                     float(
@@ -2108,7 +2127,7 @@ def diagnose_missed_entries(
                     ),
                 )
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
-                if not first_lift_ready and not early_pad and not _building_aligned_ict_alert_ok(
+                if not lift_ready and not _building_aligned_ict_alert_ok(
                     alert, snap, str(tier_str).upper(),
                     state=state, snapshots=snapshots,
                 ):
@@ -2119,7 +2138,7 @@ def diagnose_missed_entries(
                 side_raw = str(alert.get("side") or "").upper()
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
                     pad_lane_chart_ok = False
-                    if not first_lift_ready and not early_pad:
+                    if not lift_ready:
                         from app.engines.pad_lane_capture import (
                             pad_lane_turnaround_chart_bypass,
                         )
@@ -2129,8 +2148,7 @@ def diagnose_missed_entries(
                         )
                     if (
                         not side_aligned_with_chart(Side(side_raw), snap.spotChart)
-                        and not first_lift_ready
-                        and not early_pad
+                        and not lift_ready
                         and not pad_lane_chart_ok
                     ):
                         blockers.append("chart_not_aligned")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
@@ -1551,6 +1551,21 @@ def first_lift_entry_readiness(
             score=score,
             velocity_3s=v3,
             settings=settings,
+            evidence={
+                "mode": "explosion",
+                "tier": tier,
+                "explosionScore": score,
+                "flatVerticalQuality": quality,
+                "velocity3s": v3,
+                "localBaseMovePct": base_move,
+                "offLowMovePct": row.get("offLowMovePct"),
+                "vRipReady": v_rip_ready,
+                "firstLift": first_lift,
+                "earlyRadarPadCapture": row.get("earlyRadarPadCapture"),
+                "slowGrindSuddenLift": row.get("slowGrindSuddenLift"),
+                "fastBullishLocalBase": row.get("fastBullishLocalBase"),
+                "buildingRipReady": row.get("buildingRipReady"),
+            },
         )
         if not ok:
             return False, deny
@@ -3129,8 +3144,14 @@ def _expiry_worst_defensive_rip_allowed(
     score: float,
     velocity_3s: float,
     settings: Any,
+    evidence: Optional[Mapping[str, Any]] = None,
 ) -> tuple[bool, str]:
     """Raised bar for defensive/armed base rips on EXPIRY WORST days."""
+    if evidence is not None:
+        from app.engines.pad_lane_capture import pad_lane_expiry_worst_waive
+
+        if pad_lane_expiry_worst_waive(evidence):
+            return True, "pad_lane_expiry_worst_waive"
     if not bool(getattr(settings, "ict_defensive_base_rip_block_expiry_worst", True)):
         return True, "ok"
     min_tier = str(
@@ -3278,6 +3299,16 @@ def good_day_ict_capture_active(
                 score=score,
                 velocity_3s=v3,
                 settings=settings,
+                evidence={
+                    "mode": "explosion",
+                    "tier": tier_u,
+                    "explosionScore": score,
+                    "flatVerticalQuality": quality,
+                    "velocity3s": v3,
+                    "localBaseMovePct": getattr(ict, "base_relative_move_pct", 0),
+                    "vRipReady": getattr(ict, "v_rip_ready", False),
+                    "firstLift": getattr(ict, "first_lift", False),
+                },
             )
             if not ok:
                 meta["deniedReason"] = deny
