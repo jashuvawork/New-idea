@@ -1568,6 +1568,11 @@ class Settings(BaseSettings):
     pad_lane_chart_bypass_max_peak_move_pct: float = 38.0
     pad_lane_chart_bypass_max_adverse_index_mom5_pct: float = 0.25
     pad_lane_chart_bypass_min_premium_velocity_9s: float = -0.3
+    # ELITE/EXPLODING flat→vertical off local base may bypass bearish chart even after
+    # the v_rip_session_low stamp clears (Aug25 NIFTY 24200 CE chart_not_aligned at ELITE).
+    pad_lane_elite_ftv_chart_bypass_enabled: bool = True
+    pad_lane_elite_ftv_chart_bypass_min_score: float = 45.0
+    pad_lane_elite_ftv_chart_bypass_max_peak_move_pct: float = 45.0
     # Pad-lane FTV may authorize on rank 2+ sleeves — the moment is contract-specific
     # (Aug25 CALL 24150 blocked by early_radar_pad_ftv_requires_allocation_rank_1).
     pad_lane_ftv_waives_allocation_rank_one: bool = True

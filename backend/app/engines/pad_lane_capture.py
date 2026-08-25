@@ -888,6 +888,53 @@ def _pad_lane_turnaround_signal(
     )
 
 
+def _pad_lane_elite_ftv_chart_signal(
+    alert: Optional[dict[str, Any]],
+    event: Any = None,
+) -> bool:
+    """ELITE/EXPLODING flat→vertical in the local-base entry window.
+
+    Aug25 24200 CE: promoted ELITE while 5m chart stayed bearish and the v_rip stamp
+    had cleared — chart_not_aligned + exec_premium_fading_at_execution until bypass.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "pad_lane_elite_ftv_chart_bypass_enabled", True)):
+        return False
+    row = alert if isinstance(alert, dict) else {}
+    tier = str(row.get("tier") or getattr(event, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    score = float(
+        row.get("explosionScore")
+        or getattr(event, "explosion_score", 0)
+        or 0
+    )
+    min_score = float(
+        getattr(settings, "pad_lane_elite_ftv_chart_bypass_min_score", 45.0) or 45.0
+    )
+    if score < min_score:
+        return False
+    if not bool(row.get("ictFlatThenVertical") or row.get("ictBreakout")):
+        return False
+    base_rel = float(
+        row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or row.get("offLowMovePct")
+        or 0
+    )
+    if base_rel <= 0:
+        return False
+    from app.engines.local_base_chart_bypass import local_base_entry_window
+
+    vol = float(
+        row.get("volumeSurge")
+        or getattr(event, "volume_surge", 0)
+        or 0
+    )
+    entry_min, chase_max = local_base_entry_window(tier, vol)
+    return entry_min <= base_rel <= chase_max
+
+
 def pad_lane_turnaround_chart_bypass(
     side: Side | str,
     snap: Optional[SymbolSnapshot],
@@ -909,7 +956,8 @@ def pad_lane_turnaround_chart_bypass(
         return False
     if snap is None or not session_chart_conflicts_side(side, snap):
         return False
-    if not _pad_lane_turnaround_signal(alert, readiness_reason):
+    elite_ftv = _pad_lane_elite_ftv_chart_signal(alert, event)
+    if not _pad_lane_turnaround_signal(alert, readiness_reason) and not elite_ftv:
         return False
 
     v3, v9, base_move, peak_move, volume_awake = _pad_lane_chart_metrics(
@@ -927,6 +975,8 @@ def pad_lane_turnaround_chart_bypass(
         )
         or 0.2
     )
+    if elite_ftv:
+        min_v3 = min(min_v3, awake_min_v3)
     min_v9 = float(
         getattr(settings, "pad_lane_chart_bypass_min_premium_velocity_9s", -0.3)
         or -0.3
@@ -941,6 +991,18 @@ def pad_lane_turnaround_chart_bypass(
     max_peak = float(
         getattr(settings, "pad_lane_chart_bypass_max_peak_move_pct", 38.0) or 38.0
     )
+    if elite_ftv:
+        max_peak = max(
+            max_peak,
+            float(
+                getattr(
+                    settings,
+                    "pad_lane_elite_ftv_chart_bypass_max_peak_move_pct",
+                    45.0,
+                )
+                or 45.0
+            ),
+        )
     move = max(base_move, float((alert or {}).get("offLowMovePct") or 0))
     if move > max_off_low + 1e-6:
         return False

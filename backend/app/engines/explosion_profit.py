@@ -434,6 +434,7 @@ def check_explosion_entry(
     )
     blocked, reason = chart_blocks_explosion_side(
         event.side, chart, event.tier, event=event, breadth_bias=breadth_bias, snap=snap,
+        alert=alert if isinstance(alert, dict) else None,
     )
     if (
         blocked

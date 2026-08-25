@@ -543,9 +543,7 @@ def test_near_miss_reports_strict_first_lift_velocity_before_chart_alignment():
             AutoTraderState(),
         )
 
-    assert notes[0]["message"] == (
-        "first_lift_velocity9s<0.8, chart_not_aligned"
-    )
+    assert notes[0]["message"] == "first_lift_velocity9s<0.8"
     assert ready_notes == []
 
 
