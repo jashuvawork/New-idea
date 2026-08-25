@@ -94,3 +94,74 @@ def test_elite_peak_bypass_still_applies_after_pad(mock_settings):
         )
         == 24.0
     )
+
+
+def test_first_lift_pad_capture_lane_helper():
+    from app.engines.explosion_detector import first_lift_pad_capture_lane
+
+    assert first_lift_pad_capture_lane(
+        tier="EXPLODING",
+        peak_move_pct=58.0,
+        first_lift_ready=True,
+        local_base_move_pct=19.3,
+    )
+    assert not first_lift_pad_capture_lane(
+        tier="EXPLODING",
+        peak_move_pct=58.0,
+        first_lift_ready=False,
+        local_base_move_pct=19.3,
+    )
+
+
+@patch("app.config.get_settings")
+def test_effective_first_lift_trade_min_score_at_pad(mock_settings):
+    from app.engines.explosion_detector import effective_first_lift_trade_min_score
+
+    mock_settings.return_value = _settings()
+    assert (
+        effective_first_lift_trade_min_score(
+            tier="EXPLODING",
+            peak_move_pct=58.57,
+            first_lift_ready=True,
+            local_base_move_pct=19.3,
+            default_min=62.0,
+        )
+        == 24.0
+    )
+
+
+def test_aug25_put_24150_admits_first_lift_local_base_sleeve():
+    """Live miss: score 41, peak 59%, lb 19.3% — FTV sleeve not explosion gate."""
+    from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
+
+    evidence = {
+        "mode": "explosion",
+        "tier": "EXPLODING",
+        "explosionScore": 41.1,
+        "tqs": 61.0,
+        "chartConfidence": 84.0,
+        "velocity3s": 0.0,
+        "velocity9s": 0.0,
+        "localBaseMovePct": 19.3,
+        "peakMovePct": 58.57,
+        "firstLift": True,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "orderflowPositive": True,
+        "volumeAwaken": True,
+        "flatVerticalQuality": 72.1,
+        "timingAssessment": "GOOD",
+    }
+    ranking = rank_trade_evidence(evidence)
+    assert ranking["grade"] == "A"
+    decision = ftv_authorization_policy(
+        evidence,
+        ranking,
+        snapshot_available=True,
+        allocation_rank=1,
+        require_allocation_rank_one=True,
+        day_mode="EXPIRY DAY",
+    )
+    assert decision.allowed is True
+    assert decision.mode == "FIRST_LIFT_LOCAL_BASE"
+    assert decision.reason == "ok_flat_velocity_lag"

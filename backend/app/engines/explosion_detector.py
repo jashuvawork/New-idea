@@ -738,6 +738,59 @@ def apply_velocity_peak_score_boost(
     return max(score, min(100.0, max(boosted, floor)))
 
 
+def first_lift_pad_capture_lane(
+    *,
+    tier: str,
+    peak_move_pct: float,
+    first_lift_ready: bool,
+    local_base_move_pct: float,
+) -> bool:
+    """ICT-confirmed first lift at 2–25% local base with peak ≥25%."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not bool(getattr(settings, "first_lift_pad_explosion_bypass_enabled", True)):
+        return False
+    if not first_lift_ready:
+        return False
+    tier_u = str(tier or "").upper()
+    if tier_u not in ("ELITE", "EXPLODING"):
+        return False
+    lb = float(local_base_move_pct or 0.0)
+    if lb < float(getattr(settings, "first_lift_pad_local_base_min_pct", 2.0) or 2.0):
+        return False
+    if lb > float(getattr(settings, "first_lift_pad_local_base_max_pct", 25.0) or 25.0):
+        return False
+    return peak_move_pct >= float(
+        getattr(settings, "first_lift_pad_explosion_min_peak_pct", 25.0) or 25.0
+    )
+
+
+def effective_first_lift_trade_min_score(
+    *,
+    tier: str,
+    peak_move_pct: float,
+    first_lift_ready: bool,
+    local_base_move_pct: float,
+    default_min: float,
+) -> float:
+    """Align FTV first-lift sleeve with explosion pad bypass floors."""
+    from app.config import get_settings
+
+    if not first_lift_pad_capture_lane(
+        tier=tier,
+        peak_move_pct=peak_move_pct,
+        first_lift_ready=first_lift_ready,
+        local_base_move_pct=local_base_move_pct,
+    ):
+        return default_min
+    settings = get_settings()
+    return min(
+        default_min,
+        float(getattr(settings, "first_lift_pad_explosion_min_score", 24.0) or 24.0),
+    )
+
+
 def effective_explosion_min_score(
     *,
     tier: str,
@@ -753,18 +806,11 @@ def effective_explosion_min_score(
     base = float(settings.aggressive_min_explosion_score)
     if daily_move_pct >= settings.all_day_explosion_session_move_min_pct:
         base = min(base, float(settings.all_day_explosion_min_score))
-    tier_u = str(tier or "").upper()
-    lb = float(local_base_move_pct or 0.0)
-    if (
-        first_lift_ready
-        and bool(getattr(settings, "first_lift_pad_explosion_bypass_enabled", True))
-        and tier_u in ("ELITE", "EXPLODING")
-        and lb
-        >= float(getattr(settings, "first_lift_pad_local_base_min_pct", 2.0) or 2.0)
-        and lb
-        <= float(getattr(settings, "first_lift_pad_local_base_max_pct", 25.0) or 25.0)
-        and peak_move_pct
-        >= float(getattr(settings, "first_lift_pad_explosion_min_peak_pct", 25.0) or 25.0)
+    if first_lift_pad_capture_lane(
+        tier=str(tier or ""),
+        peak_move_pct=float(peak_move_pct or 0.0),
+        first_lift_ready=first_lift_ready,
+        local_base_move_pct=float(local_base_move_pct or 0.0),
     ):
         base = min(
             base,

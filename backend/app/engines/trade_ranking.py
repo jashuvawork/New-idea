@@ -705,6 +705,19 @@ def ftv_authorization_policy(
                 max_capital_pct=winner_local_base_max_capital_pct,
             )
 
+    from app.engines.explosion_detector import effective_first_lift_trade_min_score
+
+    peak_move_pct = _number(
+        evidence.get("peakMovePct") or evidence.get("dailyMovePct") or 0
+    )
+    effective_first_lift_min = effective_first_lift_trade_min_score(
+        tier=tier,
+        peak_move_pct=peak_move_pct,
+        first_lift_ready=bool(evidence.get("firstLift")),
+        local_base_move_pct=move,
+        default_min=first_lift_trade_min_score,
+    )
+
     # First-lift / V-rip at local base with micro velocity pullback — ICT pad
     # already confirmed; shallow dip is base retest, not failed launch.
     if (
@@ -712,7 +725,7 @@ def ftv_authorization_policy(
         and micro_pullback
         and str(ranking.get("grade") or "").upper() in {"A", "B"}
         and tier in {"ELITE", "EXPLODING"}
-        and explosion_score >= first_lift_trade_min_score
+        and explosion_score >= effective_first_lift_min
         and quality >= first_lift_helper_confirm_min_quality
     ):
         if require_allocation_rank_one and allocation_rank != 1:
@@ -735,7 +748,7 @@ def ftv_authorization_policy(
         and flat_velocity_lag
         and grade in {"A", "B"}
         and tier in {"ELITE", "EXPLODING"}
-        and explosion_score >= first_lift_trade_min_score
+        and explosion_score >= effective_first_lift_min
         and quality >= first_lift_helper_confirm_min_quality
     ):
         if require_allocation_rank_one and allocation_rank != 1:
@@ -1458,6 +1471,13 @@ def rank_entry_candidate(
             or alert.get("ictBaseRelativeMovePct")
             or pretrade.get("ictBaseRelativeMovePct")
         ),
+        "peakMovePct": (
+            alert.get("peakMovePct")
+            or (getattr(event, "peak_move_pct", 0) if event else 0)
+            or alert.get("dailyMovePct")
+            or 0
+        ),
+        "dailyMovePct": alert.get("dailyMovePct") or 0,
         "offLowMovePct": (
             alert.get("offLowMovePct")
             or pretrade.get("offLowMovePct")
