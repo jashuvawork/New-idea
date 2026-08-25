@@ -18,6 +18,7 @@ def premium_fading_blocks_entry(
     premium_direction: str = "",
     explosion_event: Any = None,
     confirmed_ftv_bypass: bool = False,
+    early_pad_bypass: bool = False,
 ) -> tuple[bool, str]:
     """
     Block entries when option premium is fading at execution.
@@ -55,6 +56,17 @@ def premium_fading_blocks_entry(
         )
         if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
             return False, "ftv_shallow_fade_ok"
+
+    if (
+        early_pad_bypass
+        and bool(getattr(settings, "early_radar_pad_fade_fill_enabled", True))
+    ):
+        pad_floor = float(
+            getattr(settings, "early_radar_pad_fade_fill_max_drawdown_pct", -1.5)
+            or -1.5
+        )
+        if premium_momentum_5s >= pad_floor and premium_momentum_3s >= pad_floor:
+            return False, "early_pad_shallow_fade_ok"
 
     min_mom = settings.execution_chart_min_premium_momentum_pct
     if premium_momentum_5s < min_mom and premium_momentum_3s < 0:

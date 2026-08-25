@@ -13,9 +13,10 @@ from app.engines.early_radar_pad_capture import (
     EARLY_RADAR_PAD_READY,
     early_radar_pad_capture_active,
     early_radar_pad_entry_readiness,
+    early_radar_pad_fade_fill_active,
     stamp_early_radar_pad_capture,
 )
-from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
+from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence, ftv_policy_settings
 from app.models.schemas import MarketPhase, Side, SpotChart, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -80,6 +81,61 @@ def test_early_pad_blocks_when_off_low_too_extended(mock_settings):
         "explosionScore": 60.0,
     }
     assert early_radar_pad_capture_active(alert, _snap()) is False
+
+
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_early_pad_stamps_on_watch_flat_vertical_at_trough(mock_settings):
+    mock_settings.return_value = Settings()
+    alert = {
+        "tier": "WATCH",
+        "side": "CALL",
+        "strike": 24150.0,
+        "premium": 33.0,
+        "offLowMovePct": 0.0,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+        "volumeAwaken": True,
+        "explosionScore": 8.0,
+        "peakMovePct": 4.0,
+    }
+    snap = _snap()
+    assert early_radar_pad_capture_active(alert, snap) is True
+    stamped = dict(alert)
+    assert stamp_early_radar_pad_capture(stamped, snap) is True
+    assert stamped["earlyRadarPadCapture"] is True
+
+
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_early_pad_ftv_policy_authorizes_low_watch_score(mock_settings):
+    mock_settings.return_value = Settings()
+    evidence = {
+        "mode": "explosion",
+        "tier": "WATCH",
+        "explosionScore": 8.0,
+        "tqs": 55.0,
+        "earlyRadarPadCapture": True,
+        "offLowMovePct": 0.0,
+        "velocity3s": 0.2,
+        "velocity9s": 0.1,
+        "localBaseMovePct": 4.0,
+        "flatThenVertical": False,
+        "activeBreakout": False,
+        "orderflowPositive": True,
+        "volumeAwaken": True,
+        "timingAssessment": "GOOD",
+        "timingAction": "allow",
+    }
+    ranking = rank_trade_evidence(evidence)
+    decision = ftv_authorization_policy(
+        evidence,
+        ranking,
+        snapshot_available=True,
+        allocation_rank=1,
+        require_allocation_rank_one=True,
+        **ftv_policy_settings(Settings()),
+    )
+    assert decision.allowed is True
+    assert decision.mode == "EARLY_RADAR_PAD_FTV"
 
 
 @patch("app.engines.early_radar_pad_capture.get_settings")
@@ -176,3 +232,92 @@ def test_explosion_selector_allows_early_pad_despite_bearish_chart(
         candidates = _explosion_candidates("NIFTY", snap, state, settings)
     assert len(candidates) == 1
     assert candidates[0].strike == 24150.0
+
+
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_check_explosion_entry_allows_watch_base_armed_early_pad(
+    mock_early_settings,
+    mock_entry_settings,
+):
+    settings = Settings()
+    mock_early_settings.return_value = settings
+    mock_entry_settings.return_value = settings
+    from app.engines.explosion_detector import ExplosionEvent
+    from app.engines.explosion_profit import check_explosion_entry
+    from app.models.schemas import Breadth, Side, SuggestedTrade, StrategyType
+
+    alert = {
+        "tier": "WATCH",
+        "side": "CALL",
+        "strike": 24150.0,
+        "premium": 33.0,
+        "offLowMovePct": 0.0,
+        "ictBaseArmed": True,
+        "earlyRadarPadCapture": True,
+        "ictEarlyRadarPadCapture": True,
+        "ictBaseReadinessReason": EARLY_RADAR_PAD_READY,
+        "explosionScore": 8.0,
+        "peakMovePct": 4.0,
+        "velocity3s": 0.2,
+        "velocity9s": 0.1,
+    }
+    event = ExplosionEvent(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24150.0,
+        premium=33.0,
+        velocity_3s=0.2,
+        velocity_9s=0.1,
+        velocity_15s=0.0,
+        volume_surge=1.0,
+        explosion_score=8.0,
+        tier="WATCH",
+        reason="ict_base_armed",
+        daily_move_pct=4.0,
+        peak_move_pct=4.0,
+    )
+    trade = SuggestedTrade(
+        id="x",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24150.0,
+        lastPremium=33.0,
+        tqs=55.0,
+        strategyType=StrategyType.EXPLOSIVE,
+        confidence=8.0,
+    )
+    snap = _snap(direction="BEARISH")
+    ok, reason = check_explosion_entry(
+        event,
+        trade,
+        Breadth(score=50, bias="BEARISH", aligned=False),
+        False,
+        chart=snap.spotChart,
+        snap=snap,
+        alert=alert,
+    )
+    assert ok is True
+    assert reason in {"early_radar_pad_ftv_confirmed", "first_lift_local_base_confirmed"}
+
+
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_early_pad_fade_fill_active_when_stamped_near_trough(mock_settings):
+    mock_settings.return_value = Settings()
+    alert = {
+        "earlyRadarPadCapture": True,
+        "offLowMovePct": 8.0,
+        "localBaseMovePct": 6.0,
+    }
+    assert early_radar_pad_fade_fill_active(alert) is True
+
+
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_early_pad_fade_fill_blocks_when_off_low_extended(mock_settings):
+    mock_settings.return_value = Settings()
+    alert = {
+        "earlyRadarPadCapture": True,
+        "offLowMovePct": 35.0,
+        "localBaseMovePct": 30.0,
+    }
+    assert early_radar_pad_fade_fill_active(alert) is False

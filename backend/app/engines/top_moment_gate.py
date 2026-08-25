@@ -164,6 +164,25 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
     if tier in ("ELITE", "EXPLODING"):
         return True
 
+    from app.config import get_settings
+
+    settings = get_settings()
+    max_off = float(
+        getattr(settings, "early_radar_pad_max_off_low_pct", 15.0) or 15.0
+    )
+    off_low = _number(alert.get("offLowMovePct"))
+    if (
+        tier in ("WATCH", "BUILDING")
+        and bool(alert.get("ictFlatThenVertical"))
+        and off_low <= max_off + 1e-6
+        and bool(
+            alert.get("volumeAwaken")
+            or alert.get("ictVolumeAwakening")
+            or alert.get("ictBreakout")
+        )
+    ):
+        return True
+
     evidence = {
         "tier": tier,
         "vRipReady": bool(alert.get("ictVRipReady")),

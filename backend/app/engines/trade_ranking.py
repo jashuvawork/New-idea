@@ -327,8 +327,9 @@ def ftv_authorization_policy(
     double_dip_vbase_ftv_min_explosion_score: float = 48.0,
     double_dip_vbase_ftv_max_capital_pct: float = 0.90,
     early_radar_pad_ftv_enabled: bool = True,
-    early_radar_pad_ftv_min_explosion_score: float = 45.0,
+    early_radar_pad_ftv_min_explosion_score: float = 5.0,
     early_radar_pad_ftv_max_capital_pct: float = 0.90,
+    early_radar_pad_max_off_low_pct: float = 15.0,
     top_moments_only_enabled: bool = True,
     top_moments_min_grade: str = "A",
     first_lift_local_base_micro_pullback_enabled: bool = True,
@@ -896,6 +897,30 @@ def ftv_authorization_policy(
         if auth is not None:
             return auth
 
+    if early_radar_pad_ftv_enabled and bool(evidence.get("earlyRadarPadCapture")):
+        off_low = _number(evidence.get("offLowMovePct"))
+        early_pad_ok = (
+            str(ranking.get("grade") or "").upper() != "REJECT"
+            and tier in {"WATCH", "BUILDING", "EXPLODING", "ELITE"}
+            and explosion_score >= early_radar_pad_ftv_min_explosion_score
+            and off_low <= early_radar_pad_max_off_low_pct + 5.0
+            and -0.8 <= v3 <= 1.5
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        )
+        if early_pad_ok:
+            if require_allocation_rank_one and allocation_rank != 1:
+                return blocked("early_radar_pad_ftv_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "EARLY_RADAR_PAD_FTV",
+                "ok",
+                max_capital_pct=early_radar_pad_ftv_max_capital_pct,
+            )
+
     # BUILDING sudden lift with helpers — do not wait for ELITE/EXPLODING.
     # Readiness already proved mid-rip/local-base heat; CHASE timing is OK here.
     if building_rip_ftv_enabled and bool(evidence.get("buildingRipReady")):
@@ -1023,6 +1048,7 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "early_radar_pad_ftv_enabled",
         "early_radar_pad_ftv_min_explosion_score",
         "early_radar_pad_ftv_max_capital_pct",
+        "early_radar_pad_max_off_low_pct",
         "top_moments_only_enabled",
         "top_moments_min_grade",
         "first_lift_local_base_micro_pullback_enabled",

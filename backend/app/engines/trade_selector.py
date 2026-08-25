@@ -403,6 +403,14 @@ def _explosion_candidates(
                     or 45.0
                 ),
             )
+        if early_pad:
+            min_explosion_score = min(
+                min_explosion_score,
+                float(
+                    getattr(settings, "early_radar_pad_min_explosion_score", 5.0)
+                    or 5.0
+                ),
+            )
         if score_val < min_explosion_score:
             continue
         # Explosion score is primary quality — don't block on low symbol TQS alone
@@ -431,7 +439,9 @@ def _explosion_candidates(
         )
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
-        if not counter_trend_entry_allowed(event.side, snap, explosion_event=event):
+        if not counter_trend_entry_allowed(
+            event.side, snap, explosion_event=event, alert=alert if isinstance(alert, dict) else None,
+        ):
             continue
         from app.engines.winner_entry_guards import chop_weak_explosion_blocks_entry
 
@@ -1925,6 +1935,7 @@ def diagnose_missed_entries(
                 or alert.get("ictBuildingRipReady")
                 or alert.get("ictEliteBaseReady")
                 or alert.get("ictArmedBaseLaunch")
+                or alert.get("ictBaseArmed")
                 or (
                     str(alert.get("tier") or "").upper() == "BUILDING"
                     and (

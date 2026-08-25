@@ -159,6 +159,50 @@ def test_ftv_fade_fill_only_for_elite_exploding(mock_settings):
 
 
 @patch("app.engines.winner_entry_guards.get_settings")
+def test_early_pad_fills_through_shallow_dip(mock_settings):
+    s = MagicMock()
+    s.execution_chart_premium_check_enabled = True
+    s.all_day_explosion_extreme_move_min_pct = 80.0
+    s.execution_chart_min_premium_momentum_pct = -0.35
+    s.early_radar_pad_fade_fill_enabled = True
+    s.early_radar_pad_fade_fill_max_drawdown_pct = -1.5
+    mock_settings.return_value = s
+
+    blocked, reason = premium_fading_blocks_entry(
+        trade_score=80.0,
+        premium_momentum_3s=-0.90,
+        premium_momentum_5s=-1.20,
+        premium_direction="BEARISH",
+        explosion_event=_event(daily_move=12.0, tier="BUILDING"),
+        early_pad_bypass=True,
+    )
+    assert not blocked
+    assert reason == "early_pad_shallow_fade_ok"
+
+
+@patch("app.engines.winner_entry_guards.get_settings")
+def test_early_pad_still_blocks_deep_collapse(mock_settings):
+    s = MagicMock()
+    s.execution_chart_premium_check_enabled = True
+    s.all_day_explosion_extreme_move_min_pct = 80.0
+    s.execution_chart_min_premium_momentum_pct = -0.35
+    s.early_radar_pad_fade_fill_enabled = True
+    s.early_radar_pad_fade_fill_max_drawdown_pct = -1.5
+    mock_settings.return_value = s
+
+    blocked, reason = premium_fading_blocks_entry(
+        trade_score=80.0,
+        premium_momentum_3s=-1.80,
+        premium_momentum_5s=-2.35,
+        premium_direction="BEARISH",
+        explosion_event=_event(daily_move=12.0, tier="BUILDING"),
+        early_pad_bypass=True,
+    )
+    assert blocked
+    assert reason == "premium_fading_at_execution"
+
+
+@patch("app.engines.winner_entry_guards.get_settings")
 def test_chop_weak_explosion_blocked(mock_settings):
     s = MagicMock()
     s.all_day_explosion_session_move_min_pct = 40.0

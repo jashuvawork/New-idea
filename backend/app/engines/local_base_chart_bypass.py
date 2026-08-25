@@ -469,9 +469,12 @@ def local_base_ichimoku_bypass_for_snap(
     snap: SymbolSnapshot,
     *,
     explosion_event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> bool:
     """Snap helper — also scans matching explosionAlerts when event is absent."""
-    if local_base_overrides_session_chart(side, snap, event=explosion_event):
+    if local_base_overrides_session_chart(
+        side, snap, event=explosion_event, alert=alert,
+    ):
         return True
     side_v = _side_val(side)
     for alert in snap.explosionAlerts or []:

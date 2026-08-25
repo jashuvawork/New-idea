@@ -1505,10 +1505,14 @@ class Settings(BaseSettings):
     early_radar_pad_capture_enabled: bool = True
     early_radar_pad_max_off_low_pct: float = 15.0
     early_radar_pad_max_local_move_pct: float = 20.0
+    early_radar_pad_min_explosion_score: float = 5.0
     early_radar_pad_ftv_enabled: bool = True
-    early_radar_pad_ftv_min_explosion_score: float = 45.0
+    early_radar_pad_ftv_min_explosion_score: float = 5.0
     early_radar_pad_ftv_max_capital_pct: float = 0.90
     early_radar_pad_ftv_force_max_lots: bool = True
+    early_radar_pad_fade_fill_enabled: bool = True
+    early_radar_pad_fade_fill_max_drawdown_pct: float = -1.5
+    early_radar_pad_fade_fill_max_off_low_pct: float = 22.0
     # ICT confirm stack for local-base reversals (additive quality, not hard gates).
     local_base_reversal_ict_bonus_max: float = 18.0
     local_base_reversal_kill_zone_bonus_enabled: bool = True
