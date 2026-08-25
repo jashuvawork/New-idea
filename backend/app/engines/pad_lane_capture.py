@@ -22,6 +22,7 @@ DOUBLE_DIP_VBASE_READY = "double_dip_vbase_ready"
 ALL_PAD_LANE_REASONS = frozenset(
     {
         "slow_grind_sudden_lift_ready",
+        "slow_grind_armed_trough_ready",
         "fast_bullish_local_base_ready",
         "v_rip_session_low_ready",
         "building_local_base_lift_ready",

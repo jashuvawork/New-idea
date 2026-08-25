@@ -585,6 +585,7 @@ class Settings(BaseSettings):
     slow_grind_ftv_enabled: bool = True
     slow_grind_ftv_min_explosion_score: float = 45.0
     slow_grind_ftv_min_flat_quality: float = 50.0
+    slow_grind_ftv_armed_trough_min_explosion_score: float = 5.0
     slow_grind_ftv_max_capital_pct: float = 0.90
     slow_grind_ftv_force_max_lots: bool = True
     # Fast-bullish pad sleeve — momentum turn + volume awakening as lift starts.
@@ -1431,6 +1432,14 @@ class Settings(BaseSettings):
     slow_grind_sudden_lift_min_coil_samples: int = 6
     slow_grind_sudden_lift_min_flat_quality: float = 50.0
     slow_grind_sudden_lift_min_impending_signals: int = 2
+    # Armed-base at session trough — catch WATCH-tier coils before flat-quality confirms
+    # (Aug25 NIFTY 24150 CE ₹33 armed base before slow-grind structure matures).
+    slow_grind_armed_trough_enabled: bool = True
+    slow_grind_armed_trough_max_off_low_pct: float = 2.0
+    slow_grind_armed_trough_min_move_pct: float = 0.0
+    slow_grind_armed_trough_max_move_pct: float = 20.0
+    slow_grind_armed_trough_min_impending_signals: int = 1
+    slow_grind_armed_trough_min_explosion_score: float = 5.0
     # Squeeze release at pad — Bollinger-in-Keltner compression → fresh release.
     squeeze_release_capture_enabled: bool = True
     squeeze_release_max_premium_inr: float = 220.0

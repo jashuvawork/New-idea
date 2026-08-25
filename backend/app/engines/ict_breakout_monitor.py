@@ -758,6 +758,148 @@ def _fast_bullish_local_base_readiness(
     return True, "fast_bullish_local_base_ready"
 
 
+SLOW_GRIND_ARMED_TROUGH_READY = "slow_grind_armed_trough_ready"
+
+
+def _slow_grind_armed_trough_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Authorize slow-coil at the session trough when base is armed but coil is still immature."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "slow_grind_armed_trough_enabled", True)):
+        return False, ""
+    row = alert if isinstance(alert, dict) else {}
+    if snap is None:
+        return False, "slow_grind_armed_trough_chart_missing"
+    if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
+        return False, "slow_grind_armed_trough_mid_rip_coil"
+    if bool(
+        row.get("ictArmedBaseLaunch")
+        or row.get("ictEliteBaseReady")
+        or row.get("ictFirstLift")
+    ):
+        return False, "slow_grind_armed_trough_strict_path_active"
+
+    premium = float(
+        getattr(event, "premium", 0) or row.get("premium") or 0
+    )
+    prem_ok, prem_reason = _local_base_pad_premium_band_ok(
+        premium,
+        settings=s,
+        max_premium_setting="slow_grind_sudden_lift_max_premium_inr",
+        reason_prefix="slow_grind_armed_trough",
+    )
+    if not prem_ok:
+        return False, prem_reason
+
+    off_low = max(0.0, float(row.get("offLowMovePct") or 0))
+    max_off = float(
+        getattr(s, "slow_grind_armed_trough_max_off_low_pct", 15.0) or 15.0
+    )
+    base_armed = bool(
+        getattr(ict, "base_armed", False)
+        or row.get("ictBaseArmed")
+        or getattr(ict, "local_swing_base", False)
+    )
+    v_rip_ready = bool(
+        getattr(ict, "v_rip_ready", False)
+        or row.get("ictVRipReady")
+    )
+    if not base_armed:
+        return False, "slow_grind_armed_trough_base_not_armed"
+
+    quality = float(
+        getattr(ict, "flat_vertical_quality", 0)
+        or row.get("flatVerticalQuality")
+        or 0
+    )
+    min_quality = float(
+        getattr(s, "slow_grind_sudden_lift_min_flat_quality", 50.0) or 50.0
+    )
+    if quality >= min_quality:
+        return False, "slow_grind_armed_trough_quality_mature"
+    if bool(row.get("ictFlatThenVertical") and row.get("ictBreakout")):
+        return False, "slow_grind_armed_trough_ftv_confirmed"
+
+    if not (v_rip_ready or off_low <= max_off + 1e-6):
+        return False, "slow_grind_armed_trough_not_at_trough"
+
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    lo = float(getattr(s, "slow_grind_armed_trough_min_move_pct", 0.0) or 0.0)
+    hi = float(getattr(s, "slow_grind_armed_trough_max_move_pct", 20.0) or 20.0)
+    if not (lo <= base_move <= hi + 1e-6):
+        return False, f"slow_grind_armed_trough_pad_outside_{lo:g}_{hi:g}"
+
+    v3 = float(
+        getattr(event, "velocity_3s", 0) or row.get("velocity3s") or 0
+    )
+    min_v3 = float(
+        getattr(s, "slow_grind_sudden_lift_min_velocity_3s", -0.8) or -0.8
+    )
+    max_v3 = float(
+        getattr(s, "slow_grind_sudden_lift_max_velocity_3s", 1.5) or 1.5
+    )
+    if v3 < min_v3:
+        return False, f"slow_grind_armed_trough_velocity3s<{min_v3:g}"
+    if v3 > max_v3:
+        return False, f"slow_grind_armed_trough_velocity3s>{max_v3:g}"
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    signal_ct, _signals = _slow_grind_impending_lift_signals(
+        side=side,
+        snap=snap,
+        ict=ict,
+        row=row,
+        settings=s,
+    )
+    min_signals = int(
+        getattr(s, "slow_grind_armed_trough_min_impending_signals", 1) or 1
+    )
+    if signal_ct < min_signals:
+        return False, f"slow_grind_armed_trough_impending_signals<{min_signals}"
+
+    from app.engines.moneyness import classify_moneyness
+    from app.models.schemas import Side
+
+    if side not in ("CALL", "PUT"):
+        return False, "slow_grind_armed_trough_side_invalid"
+    strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0)
+    if strike <= 0 or spot <= 0:
+        return False, "slow_grind_armed_trough_moneyness_unavailable"
+    money = classify_moneyness(
+        Side(side),
+        strike,
+        spot,
+        symbol=str(getattr(snap, "symbol", "") or ""),
+        atm=atm if atm > 0 else None,
+    )
+    if money not in ("ATM", "ITM"):
+        return False, f"slow_grind_armed_trough_requires_atm_itm_{money.lower()}"
+    if isinstance(alert, dict):
+        alert["slowGrindSuddenLiftReady"] = True
+        alert["ictSlowGrindSuddenLift"] = True
+        alert["slowGrindArmedTrough"] = True
+        alert["ictSlowGrindArmedTrough"] = True
+        alert["ictBaseReadinessReason"] = SLOW_GRIND_ARMED_TROUGH_READY
+    return True, SLOW_GRIND_ARMED_TROUGH_READY
+
+
 def _slow_grind_impending_lift_signals(
     *,
     side: str,
@@ -875,6 +1017,15 @@ def _slow_grind_sudden_lift_readiness(
     s = settings or get_settings()
     if not bool(getattr(s, "slow_grind_sudden_lift_enabled", True)):
         return False, ""
+    armed_trough_ok, armed_trough_reason = _slow_grind_armed_trough_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=alert,
+        settings=s,
+    )
+    if armed_trough_ok:
+        return True, armed_trough_reason
     row = alert if isinstance(alert, dict) else {}
     if snap is None:
         return False, "slow_grind_chart_missing"

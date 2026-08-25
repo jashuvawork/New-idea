@@ -1133,6 +1133,7 @@ def validate_candidate(
                 "v_rip_session_low_ready",
                 "fast_bullish_local_base_ready",
                 "slow_grind_sudden_lift_ready",
+                "slow_grind_armed_trough_ready",
                 "fast_bullish_local_base_ready",
                 "squeeze_release_ready",
                 "index_led_option_lag_ready",
