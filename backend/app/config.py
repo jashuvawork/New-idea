@@ -1475,6 +1475,9 @@ class Settings(BaseSettings):
     slow_grind_consolidation_base_min_flat_quality: float = 35.0
     slow_grind_consolidation_base_min_impending_signals: int = 2
     slow_grind_consolidation_base_min_explosion_score: float = 24.0
+    # ITM SENSEX/NIFTY afternoon bases often sit above the ₹220 pad lane (Aug25
+    # SENSEX CALL 77100 @ ₹397 base missed L1 before 53% vertical).
+    slow_grind_consolidation_base_max_premium_inr: float = 800.0
     # Squeeze release at pad — Bollinger-in-Keltner compression → fresh release.
     squeeze_release_capture_enabled: bool = True
     squeeze_release_max_premium_inr: float = 220.0
