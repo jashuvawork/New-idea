@@ -86,7 +86,66 @@ def pad_lane_cold_velocity_ok(
         return True
     if evidence.get("earlyRadarPadCapture") and -0.8 <= v3 <= 1.5:
         return True
+    if evidence.get("vRipReady") and -1.2 <= v3 <= 1.5 and v9 >= -0.8:
+        return True
+    tier = str(evidence.get("tier") or "").upper()
+    local_move = float(evidence.get("localBaseMovePct") or 0)
+    if (
+        tier in ("ELITE", "EXPLODING")
+        and bool(evidence.get("flatThenVertical") and evidence.get("activeBreakout"))
+        and 2.0 <= local_move <= 40.0
+        and -1.2 <= v3 <= 1.5
+        and v9 >= -0.8
+    ):
+        return True
     return False
+
+
+def pad_lane_ftv_waives_timing_block(evidence: Mapping[str, Any]) -> bool:
+    """Pad-lane local-base FTV may waive cold-velocity / FAILED_LAUNCH timing blocks."""
+    settings = get_settings()
+    if not bool(getattr(settings, "pad_lane_ftv_waives_timing_block_enabled", True)):
+        return False
+    if evidence.get("faded") or evidence.get("exhaustedReentry"):
+        return False
+    timing = str(evidence.get("timingAssessment") or "").upper()
+    if timing in ("FADED", "FADING", "EXHAUSTED", "NEGATIVE", "REJECT", "BLOCKED"):
+        return False
+    v3 = float(evidence.get("velocity3s") or 0)
+    v9 = float(evidence.get("velocity9s") or 0)
+    return pad_lane_cold_velocity_ok(evidence, v3, v9)
+
+
+def pad_lane_grade_floor_applies(evidence: Mapping[str, Any]) -> bool:
+    """True when rank/top-moment grading should floor to A for pad-lane FTV."""
+    settings = get_settings()
+    if not bool(getattr(settings, "pad_lane_grade_floor_enabled", True)):
+        return False
+    if evidence.get("faded") or evidence.get("exhaustedReentry") or evidence.get("midRipCoil"):
+        return False
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    if evidence.get("vRipReady") or evidence.get("earlyRadarPadCapture"):
+        if not pad_lane_ftv_waives_allocation_rank_one(evidence):
+            return False
+        v3 = float(evidence.get("velocity3s") or 0)
+        v9 = float(evidence.get("velocity9s") or 0)
+        return pad_lane_cold_velocity_ok(evidence, v3, v9)
+    if not bool(evidence.get("flatThenVertical") and evidence.get("activeBreakout")):
+        return False
+    if not bool(evidence.get("volumeAwaken") or evidence.get("orderflowPositive")):
+        return False
+    score = float(evidence.get("explosionScore") or 0)
+    if score < float(
+        getattr(settings, "pad_lane_elite_ftv_chart_bypass_min_score", 45.0) or 45.0
+    ):
+        return False
+    local_move = max(
+        float(evidence.get("localBaseMovePct") or 0),
+        float(evidence.get("offLowMovePct") or 0),
+    )
+    return 2.0 <= local_move <= 40.0
 
 
 def _pad_premium_band_ok(

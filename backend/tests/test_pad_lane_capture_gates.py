@@ -193,3 +193,40 @@ def test_diagnose_skips_near_miss_when_pad_lane_waives_quality_lag(
     )
     notes = diagnose_missed_entries({"NIFTY": snap}, AutoTraderState())
     assert notes == []
+
+
+@patch("app.engines.pad_lane_capture.get_settings")
+def test_pad_lane_ftv_waives_timing_block_on_v_rip(mock_settings):
+    from app.engines.pad_lane_capture import pad_lane_ftv_waives_timing_block
+
+    mock_settings.return_value = _settings()
+    evidence = {
+        "tier": "ELITE",
+        "explosionScore": 50.0,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "localBaseMovePct": 18.0,
+        "offLowMovePct": 18.0,
+        "velocity3s": -0.4,
+        "velocity9s": 0.1,
+    }
+    assert pad_lane_ftv_waives_timing_block(evidence) is True
+
+
+@patch("app.engines.pad_lane_capture.get_settings")
+def test_pad_lane_grade_floor_applies_for_elite_ftv(mock_settings):
+    from app.engines.pad_lane_capture import pad_lane_grade_floor_applies
+
+    mock_settings.return_value = _settings()
+    evidence = {
+        "tier": "ELITE",
+        "explosionScore": 50.0,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "localBaseMovePct": 18.0,
+        "offLowMovePct": 18.0,
+        "velocity3s": 0.3,
+        "velocity9s": 0.2,
+        "volumeAwaken": True,
+    }
+    assert pad_lane_grade_floor_applies(evidence) is True

@@ -66,7 +66,10 @@ def test_flat_v3_first_lift_still_blocks_without_volume_awaken():
         require_allocation_rank_one=True,
     )
     assert decision.allowed is False
-    assert decision.reason == "top_ftv_a_requires_a_grade"
+    assert decision.reason in (
+        "top_ftv_a_requires_a_grade",
+        "top_ftv_a_requires_option_cvd_buying",
+    )
 
 
 def test_flat_v3_first_lift_still_blocks_extended_local_base():

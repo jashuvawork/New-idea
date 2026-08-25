@@ -1573,6 +1573,10 @@ class Settings(BaseSettings):
     pad_lane_elite_ftv_chart_bypass_enabled: bool = True
     pad_lane_elite_ftv_chart_bypass_min_score: float = 45.0
     pad_lane_elite_ftv_chart_bypass_max_peak_move_pct: float = 45.0
+    # Pad-lane FTV may waive cold-velocity / FAILED_LAUNCH timing blocks at execution.
+    pad_lane_ftv_waives_timing_block_enabled: bool = True
+    # Floor rank grade to A for stamped pad-lane FTV (fixes replay top_moment_grade_reject).
+    pad_lane_grade_floor_enabled: bool = True
     # Pad-lane FTV may authorize on rank 2+ sleeves — the moment is contract-specific
     # (Aug25 CALL 24150 blocked by early_radar_pad_ftv_requires_allocation_rank_1).
     pad_lane_ftv_waives_allocation_rank_one: bool = True

@@ -410,10 +410,10 @@ def ftv_authorization_policy(
         _number(evidence.get("velocity3s")) < 0
         or _number(evidence.get("velocity9s")) < 0
     )
+    if evidence.get("faded") or evidence.get("exhaustedReentry"):
+        return blocked("ftv_elite_top_only_timing_blocked")
     if (
         str(ranking.get("grade") or "").upper() == "REJECT"
-        or evidence.get("faded")
-        or evidence.get("exhaustedReentry")
         or (cold_velocity and not micro_pullback and not slow_grind_flat and not pad_lane_flat)
         or timing_action in {"block", "reject"}
         or timing in {
@@ -426,7 +426,10 @@ def ftv_authorization_policy(
             "BLOCKED",
         }
     ):
-        return blocked("ftv_elite_top_only_timing_blocked")
+        from app.engines.pad_lane_capture import pad_lane_ftv_waives_timing_block
+
+        if not pad_lane_ftv_waives_timing_block(evidence):
+            return blocked("ftv_elite_top_only_timing_blocked")
     if snapshot_available and not atm_itm_allowed:
         return blocked("ftv_elite_top_only_requires_atm_itm")
 
@@ -1487,6 +1490,15 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         grade = "B"
     else:
         grade = "C"
+
+    from app.engines.pad_lane_capture import pad_lane_grade_floor_applies
+
+    if pad_lane_grade_floor_applies(evidence) and not exhausted and not bool(
+        evidence.get("midRipCoil")
+    ):
+        if grade in {"REJECT", "C"}:
+            grade = "A"
+            score = max(score, 70.0)
 
     return {
         "rankScore": round(score, 1),

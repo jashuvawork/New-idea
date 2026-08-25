@@ -262,6 +262,7 @@ def validate_mtf_scalp(
     premium_led_bypass: bool = False,
     vertical_rip_bypass: bool = False,
     first_lift_bypass: bool = False,
+    pad_lane_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
@@ -275,22 +276,45 @@ def validate_mtf_scalp(
     if not settings.execution_mtf_enabled or not index_mtf:
         return True, "ok", {}
 
-    if premium_led_bypass or vertical_rip_bypass or first_lift_bypass:
+    if premium_led_bypass or vertical_rip_bypass or first_lift_bypass or pad_lane_bypass:
         meta = {
             "index": mtf_summary(index_mtf, side),
             "passed": True,
             "premiumLedBypass": premium_led_bypass,
             "verticalRipBypass": vertical_rip_bypass,
             "firstLiftBypass": first_lift_bypass,
+            "padLaneBypass": pad_lane_bypass,
             # open-gap ELITE also arrives via premium_led_bypass from execution monitor
             "openGapEliteBypass": bool(premium_led_bypass or vertical_rip_bypass),
         }
         if premium_mtf:
             meta["premium"] = mtf_summary(premium_mtf, side)
-        if premium_mtf and settings.execution_chart_premium_check_enabled:
+        if (
+            premium_mtf
+            and settings.execution_chart_premium_check_enabled
+            and not pad_lane_bypass
+            and not first_lift_bypass
+        ):
             for req in ("1m", "5m"):
                 pt = premium_mtf.get(req)
                 if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
+                    meta["passed"] = False
+                    return False, f"exec_mtf_premium_{req}_fading", meta
+        if premium_mtf and settings.execution_chart_premium_check_enabled and (
+            pad_lane_bypass or first_lift_bypass
+        ):
+            shallow_floor = float(
+                getattr(settings, "pad_lane_premium_fade_fill_max_drawdown_pct", -1.2)
+                or -1.2
+            )
+            for req in ("1m", "5m"):
+                pt = premium_mtf.get(req)
+                if (
+                    pt
+                    and pt.direction == "BEARISH"
+                    and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct
+                    and pt.momentumPct < shallow_floor
+                ):
                     meta["passed"] = False
                     return False, f"exec_mtf_premium_{req}_fading", meta
         return True, "ok", meta
