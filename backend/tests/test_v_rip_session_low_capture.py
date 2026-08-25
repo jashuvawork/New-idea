@@ -27,6 +27,20 @@ from app.models.schemas import (
 
 IST = ZoneInfo("Asia/Kolkata")
 
+_PAD_LANE_READINESS_REASONS = frozenset(
+    {
+        "v_rip_session_low_ready",
+        "fast_bullish_local_base_ready",
+        "slow_grind_sudden_lift_ready",
+        "squeeze_release_ready",
+        "index_led_option_lag_ready",
+        "stealth_cvd_coil_ready",
+        "micro_pullback_retest_ready",
+        "premium_fvg_pad_ready",
+        "double_dip_vbase_ready",
+    }
+)
+
 
 def _snap(side: Side = Side.PUT) -> SymbolSnapshot:
     adverse = 0.08 if side == Side.PUT else -0.08
@@ -253,11 +267,7 @@ def test_v_rip_lane_prefers_softer_path_over_armed_launch(mock_settings):
     }
     ready, reason = first_lift_entry_readiness(snap=snap, ict=ict, alert=alert)
     assert ready is True
-    assert reason in {
-        "v_rip_session_low_ready",
-        "fast_bullish_local_base_ready",
-        "slow_grind_sudden_lift_ready",
-    }
+    assert reason in _PAD_LANE_READINESS_REASONS
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
@@ -325,11 +335,7 @@ def test_v_rip_slow_grind_at_30_with_volume_awake(mock_settings):
     }
     ready, reason = first_lift_entry_readiness(snap=snap, ict=ict, alert=alert)
     assert ready is True
-    assert reason in {
-        "v_rip_session_low_ready",
-        "fast_bullish_local_base_ready",
-        "slow_grind_sudden_lift_ready",
-    }
+    assert reason in _PAD_LANE_READINESS_REASONS
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
@@ -398,9 +404,5 @@ def test_aug24_v_rip_early_pad_volume_awake_skips_velocity(mock_settings):
     }
     ready, reason = first_lift_entry_readiness(snap=snap, ict=ict, alert=alert)
     assert ready is True
-    assert reason in {
-        "v_rip_session_low_ready",
-        "fast_bullish_local_base_ready",
-        "slow_grind_sudden_lift_ready",
-    }
+    assert reason in _PAD_LANE_READINESS_REASONS
 

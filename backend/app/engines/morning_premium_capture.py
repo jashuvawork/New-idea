@@ -209,8 +209,13 @@ def counter_trend_entry_allowed(
     snap: SymbolSnapshot,
     *,
     explosion_event: Optional[ExplosionEvent] = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> bool:
     """Block counter-trend legs — extreme ALL-IN rips bypass."""
+    from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+
+    if isinstance(alert, dict) and alert_has_early_radar_pad_capture(alert):
+        return True
     if explosion_event is not None:
         from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
         from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
@@ -227,15 +232,19 @@ def counter_trend_entry_allowed(
         local_base_overrides_side_bias,
     )
 
-    if local_base_ichimoku_bypass_for_snap(side, snap, explosion_event=explosion_event):
+    if local_base_ichimoku_bypass_for_snap(
+        side, snap, explosion_event=explosion_event, alert=alert,
+    ):
         return True
-    if local_base_overrides_side_bias(side, snap, event=explosion_event):
+    if local_base_overrides_side_bias(
+        side, snap, event=explosion_event, alert=alert,
+    ):
         return True
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
 
     hard_blocked, _ = breadth_hard_blocks_side(
-        side, bias, event=explosion_event, snap=snap,
+        side, bias, event=explosion_event, snap=snap, alert=alert,
     )
     if hard_blocked:
         return False

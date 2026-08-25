@@ -287,7 +287,21 @@ def _explosion_candidates(
 
     out: list[EntryCandidate] = []
     for alert in snap.explosionAlerts or []:
-        if not alert.get("tradeable"):
+        from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+        from app.engines.ict_breakout_monitor import first_lift_entry_readiness
+
+        first_lift_ready, first_lift_readiness_reason = first_lift_entry_readiness(
+            snap=snap,
+            alert=alert,
+            state=state,
+        )
+        early_pad = alert_has_early_radar_pad_capture(alert)
+        slow_grind_trough = bool(
+            alert.get("slowGrindArmedTrough")
+            or alert.get("ictSlowGrindArmedTrough")
+            or first_lift_readiness_reason == "slow_grind_armed_trough_ready"
+        )
+        if not alert.get("tradeable") and not early_pad and not first_lift_ready:
             continue
         if not premium_in_band(
             alert.get("premium"),
@@ -296,13 +310,6 @@ def _explosion_candidates(
             snap=snap,
         ):
             continue
-        from app.engines.ict_breakout_monitor import first_lift_entry_readiness
-
-        first_lift_ready, first_lift_readiness_reason = first_lift_entry_readiness(
-            snap=snap,
-            alert=alert,
-            state=state,
-        )
         side_v = str(alert.get("side") or "").upper()
         try:
             strike_v = float(alert.get("strike") or 0)
@@ -359,6 +366,7 @@ def _explosion_candidates(
                 and snap.spotChart is not None
                 and not side_aligned_with_chart(side_v, snap.spotChart)
                 and not first_lift_ready
+                and not early_pad
             ):
                 # A confirmed local base off which the side is breaking may survive the
                 # chart-align drop — mirror check_explosion_entry so a genuine base rip
@@ -401,12 +409,28 @@ def _explosion_candidates(
             local_base_move_pct=local_base_move,
             v_rip_ready=v_rip_ready,
         )
-        if first_lift_ready:
+        if first_lift_ready or early_pad:
             min_explosion_score = min(
                 min_explosion_score,
                 float(
                     getattr(settings, "first_lift_trade_min_score", 45.0)
                     or 45.0
+                ),
+            )
+        if early_pad:
+            min_explosion_score = min(
+                min_explosion_score,
+                float(
+                    getattr(settings, "early_radar_pad_min_explosion_score", 5.0)
+                    or 5.0
+                ),
+            )
+        if slow_grind_trough:
+            min_explosion_score = min(
+                min_explosion_score,
+                float(
+                    getattr(settings, "slow_grind_armed_trough_min_explosion_score", 5.0)
+                    or 5.0
                 ),
             )
         if score_val < min_explosion_score:
@@ -437,7 +461,9 @@ def _explosion_candidates(
         )
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
-        if not counter_trend_entry_allowed(event.side, snap, explosion_event=event):
+        if not counter_trend_entry_allowed(
+            event.side, snap, explosion_event=event, alert=alert if isinstance(alert, dict) else None,
+        ):
             continue
         from app.engines.winner_entry_guards import chop_weak_explosion_blocks_entry
 
@@ -593,7 +619,7 @@ def _explosion_candidates(
             snap, event, ict, alert=alert,
         )
         late_blocked, _late_reason = late_fade_chase_blocked(event, ict, snap=snap)
-        if late_blocked:
+        if late_blocked and not first_lift_ready:
             continue
         from app.engines.explosion_entry_guards import (
             detect_fake_explosion_trap,
@@ -629,7 +655,7 @@ def _explosion_candidates(
             premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
             snap=snap,
         )
-        if live_blocked and not must_take:
+        if live_blocked and not must_take and not first_lift_ready:
             continue
         from app.engines.entry_timing import assess_entry_timing, timing_blocks_entry
 
@@ -713,12 +739,14 @@ def _explosion_candidates(
             "v_rip_session_low_ready",
             "fast_bullish_local_base_ready",
                 "slow_grind_sudden_lift_ready",
+                "slow_grind_armed_trough_ready",
                 "fast_bullish_local_base_ready",
                 "squeeze_release_ready",
                 "index_led_option_lag_ready",
                 "stealth_cvd_coil_ready",
                 "micro_pullback_retest_ready",
                 "premium_fvg_pad_ready",
+                "double_dip_vbase_ready",
                 "building_rip_bullish_ready",
             "building_local_base_lift_ready",
         ):
@@ -1918,12 +1946,14 @@ def diagnose_missed_entries(
             tier_str = str(alert.get("tier") or "WATCH")
             blockers: list[str] = []
             first_lift_ready = False
+            early_pad = False
             if bool(
                 alert.get("ictFirstLift")
                 or alert.get("ictVRipReady")
                 or alert.get("ictBuildingRipReady")
                 or alert.get("ictEliteBaseReady")
                 or alert.get("ictArmedBaseLaunch")
+                or alert.get("ictBaseArmed")
                 or (
                     str(alert.get("tier") or "").upper() == "BUILDING"
                     and (
@@ -1943,6 +1973,13 @@ def diagnose_missed_entries(
                 )
                 if not first_lift_ready:
                     blockers.append(readiness_reason)
+            from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+
+            early_pad = alert_has_early_radar_pad_capture(alert)
+            slow_grind_trough = bool(
+                alert.get("slowGrindArmedTrough")
+                or alert.get("ictSlowGrindArmedTrough")
+            )
             local_base_move = float(
                 alert.get("localBaseMovePct")
                 or alert.get("ictBaseRelativeMovePct")
@@ -1957,8 +1994,28 @@ def diagnose_missed_entries(
                 local_base_move_pct=local_base_move,
                 v_rip_ready=v_rip_ready,
             )
+            if early_pad:
+                min_score = min(
+                    min_score,
+                    float(
+                        getattr(settings, "early_radar_pad_min_explosion_score", 5.0)
+                        or 5.0
+                    ),
+                )
+            if slow_grind_trough:
+                min_score = min(
+                    min_score,
+                    float(
+                        getattr(
+                            settings,
+                            "slow_grind_armed_trough_min_explosion_score",
+                            5.0,
+                        )
+                        or 5.0
+                    ),
+                )
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
-                if not first_lift_ready and not _building_aligned_ict_alert_ok(
+                if not first_lift_ready and not early_pad and not _building_aligned_ict_alert_ok(
                     alert, snap, str(tier_str).upper(),
                     state=state, snapshots=snapshots,
                 ):
@@ -1971,6 +2028,7 @@ def diagnose_missed_entries(
                     if (
                         not side_aligned_with_chart(Side(side_raw), snap.spotChart)
                         and not first_lift_ready
+                        and not early_pad
                     ):
                         blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):

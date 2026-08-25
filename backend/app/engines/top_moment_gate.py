@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
+from app.engines.pad_lane_capture import pad_lane_cold_velocity_ok
+
 TOP_MOMENT_TYPES = frozenset({"ELITE", "EXPLODING", "FTV", "V"})
 TOP_MOMENT_GRADES = frozenset({"S", "A"})
 
@@ -31,6 +33,8 @@ def classify_top_moment_type(evidence: Mapping[str, Any]) -> Optional[str]:
         or evidence.get("stealthCvdCoil")
         or evidence.get("microPullbackRetest")
         or evidence.get("premiumFvgPad")
+        or evidence.get("doubleDipVbase")
+        or evidence.get("earlyRadarPadCapture")
     ):
         return "FTV"
 
@@ -120,15 +124,9 @@ def top_moment_entry_allowed(
     }:
         return False, "top_moment_timing_blocked", moment
 
-    if _number(evidence.get("velocity3s")) < (
-        -1.2
-        if evidence.get("microPullbackRetest")
-        else -0.8
-        if evidence.get("slowGrindSuddenLift")
-        else -0.5
-        if evidence.get("stealthCvdCoil")
-        else 0.0
-    ):
+    v3 = _number(evidence.get("velocity3s"))
+    v9 = _number(evidence.get("velocity9s"))
+    if v3 < 0 and not pad_lane_cold_velocity_ok(evidence, v3, v9):
         return False, "top_moment_negative_velocity", moment
 
     return True, "ok", moment
@@ -160,8 +158,29 @@ def qualifies_for_top_moment_max_lots(
 
 def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
     """Pre-selector radar filter: BUILDING must show FTV/V shape before candidacy."""
+    if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
+        return True
     tier = str(alert.get("tier") or "").upper()
     if tier in ("ELITE", "EXPLODING"):
+        return True
+
+    from app.config import get_settings
+
+    settings = get_settings()
+    max_off = float(
+        getattr(settings, "early_radar_pad_max_off_low_pct", 15.0) or 15.0
+    )
+    off_low = _number(alert.get("offLowMovePct"))
+    if (
+        tier in ("WATCH", "BUILDING")
+        and bool(alert.get("ictFlatThenVertical"))
+        and off_low <= max_off + 1e-6
+        and bool(
+            alert.get("volumeAwaken")
+            or alert.get("ictVolumeAwakening")
+            or alert.get("ictBreakout")
+        )
+    ):
         return True
 
     evidence = {
@@ -189,6 +208,9 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
         ),
         "premiumFvgPad": bool(
             alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")
+        ),
+        "doubleDipVbase": bool(
+            alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")
         ),
         "buildingRipReady": bool(alert.get("ictBuildingRipReady")),
         "buildingRipHelpersOk": bool(

@@ -150,6 +150,35 @@ def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, An
         ),
         "indexHelpersConfirm": bool(alert.get("indexHelpersConfirm")),
         "indexTickSpike": bool(alert.get("indexTickSpike")),
+        "slowGrindSuddenLift": bool(
+            alert.get("slowGrindSuddenLiftReady")
+            or alert.get("ictSlowGrindSuddenLift")
+        ),
+        "fastBullishLocalBase": bool(
+            alert.get("fastBullishLocalBaseReady")
+            or alert.get("bullishLocalBaseActive")
+        ),
+        "squeezeRelease": bool(
+            alert.get("squeezeReleaseReady") or alert.get("ictSqueezeRelease")
+        ),
+        "indexLedOptionLag": bool(
+            alert.get("indexLedOptionLagReady") or alert.get("ictIndexLedOptionLag")
+        ),
+        "stealthCvdCoil": bool(
+            alert.get("stealthCvdCoilReady") or alert.get("ictStealthCvdCoil")
+        ),
+        "microPullbackRetest": bool(
+            alert.get("microPullbackRetestReady") or alert.get("ictMicroPullbackRetest")
+        ),
+        "premiumFvgPad": bool(
+            alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")
+        ),
+        "doubleDipVbase": bool(
+            alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")
+        ),
+        "earlyRadarPadCapture": bool(
+            alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
+        ),
         "timingAssessment": str(alert.get("timingAssessment") or ""),
         "timingAction": str(alert.get("timingAction") or ""),
     }
@@ -238,6 +267,7 @@ def evaluate_local_base_entry(
             "stealth_cvd_coil_ready",
             "micro_pullback_retest_ready",
             "premium_fvg_pad_ready",
+            "double_dip_vbase_ready",
         ):
             return (
                 False,

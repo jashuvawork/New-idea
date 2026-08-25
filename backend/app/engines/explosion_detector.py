@@ -291,6 +291,16 @@ def get_session_low_premium(symbol: str, strike: float, side: Side | str) -> flo
     return low if _is_meaningful_premium(low) else 0.0
 
 
+def get_session_peak_premium(symbol: str, strike: float, side: Side | str) -> float:
+    _roll_session()
+    if side is None or not symbol:
+        return 0.0
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    key = _open_key(symbol, strike, side_val)
+    peak = float(_session_peak.get(key) or 0)
+    return peak if _is_meaningful_premium(peak) else 0.0
+
+
 def prior_close_from_option_leg(opt: dict[str, Any] | None) -> float:
     """Extract previous-session close / day open from a normalized option leg."""
     if not isinstance(opt, dict):
@@ -2295,19 +2305,13 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
                 tradeable = True
         except Exception:
             pass
-    # A shallow-OTM strike is monitored on radar (so its base is retained for the eventual
-    # ATM rotation) but must never be tradeable or count as a first lift until it becomes
-    # ATM/ITM — only near-the-money strikes take. Guard keyed on scan-time moneyness.
-    if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
-        tradeable = False
-        first_lift = False
     reported_volume = float(e.volume or 0)
     if reported_volume <= 0 and armed_evidence:
         reported_volume = max(
             reported_volume,
             float(armed_evidence.get("volume") or 0),
         )
-    return {
+    alert_out = {
         "symbol": e.symbol,
         "side": e.side.value,
         "strike": e.strike,
@@ -2421,3 +2425,15 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         ),
         "ictReasons": ict.reasons,
     }
+    from app.engines.early_radar_pad_capture import stamp_early_radar_pad_capture
+
+    if stamp_early_radar_pad_capture(alert_out, snap):
+        tradeable = True
+        alert_out["tradeable"] = True
+    # A shallow-OTM strike is monitored on radar but must never be tradeable.
+    if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
+        tradeable = False
+        first_lift = False
+        alert_out["tradeable"] = False
+        alert_out["ictFirstLift"] = False
+    return alert_out

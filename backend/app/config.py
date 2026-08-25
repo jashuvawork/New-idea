@@ -585,6 +585,7 @@ class Settings(BaseSettings):
     slow_grind_ftv_enabled: bool = True
     slow_grind_ftv_min_explosion_score: float = 45.0
     slow_grind_ftv_min_flat_quality: float = 50.0
+    slow_grind_ftv_armed_trough_min_explosion_score: float = 5.0
     slow_grind_ftv_max_capital_pct: float = 0.90
     slow_grind_ftv_force_max_lots: bool = True
     # Fast-bullish pad sleeve — momentum turn + volume awakening as lift starts.
@@ -1438,6 +1439,14 @@ class Settings(BaseSettings):
     slow_grind_sudden_lift_min_coil_samples: int = 6
     slow_grind_sudden_lift_min_flat_quality: float = 50.0
     slow_grind_sudden_lift_min_impending_signals: int = 2
+    # Armed-base at session trough — catch WATCH-tier coils before flat-quality confirms
+    # (Aug25 NIFTY 24150 CE ₹33 armed base before slow-grind structure matures).
+    slow_grind_armed_trough_enabled: bool = True
+    slow_grind_armed_trough_max_off_low_pct: float = 2.0
+    slow_grind_armed_trough_min_move_pct: float = 0.0
+    slow_grind_armed_trough_max_move_pct: float = 20.0
+    slow_grind_armed_trough_min_impending_signals: int = 1
+    slow_grind_armed_trough_min_explosion_score: float = 5.0
     # Squeeze release at pad — Bollinger-in-Keltner compression → fresh release.
     squeeze_release_capture_enabled: bool = True
     squeeze_release_max_premium_inr: float = 220.0
@@ -1494,6 +1503,29 @@ class Settings(BaseSettings):
     premium_fvg_pad_ftv_min_explosion_score: float = 50.0
     premium_fvg_pad_ftv_max_capital_pct: float = 0.90
     premium_fvg_pad_ftv_force_max_lots: bool = True
+    # Double-dip V-base — session low → bounce → retest low → second lift.
+    double_dip_vbase_capture_enabled: bool = True
+    double_dip_vbase_max_premium_inr: float = 220.0
+    double_dip_vbase_min_move_pct: float = 2.0
+    double_dip_vbase_max_move_pct: float = 20.0
+    double_dip_vbase_min_first_bounce_pct: float = 8.0
+    double_dip_vbase_max_retest_off_low_pct: float = 12.0
+    double_dip_vbase_min_retrace_ratio: float = 0.55
+    double_dip_vbase_min_velocity_3s: float = -0.8
+    double_dip_vbase_max_velocity_3s: float = 1.5
+    double_dip_vbase_ftv_enabled: bool = True
+    double_dip_vbase_ftv_min_explosion_score: float = 48.0
+    double_dip_vbase_ftv_max_capital_pct: float = 0.90
+    double_dip_vbase_ftv_force_max_lots: bool = True
+    # Early radar pad — take FTV/V/ELITE/EXPLODING at session trough (e.g. ₹33→48).
+    early_radar_pad_capture_enabled: bool = True
+    early_radar_pad_max_off_low_pct: float = 15.0
+    early_radar_pad_max_local_move_pct: float = 20.0
+    early_radar_pad_min_explosion_score: float = 5.0
+    early_radar_pad_ftv_enabled: bool = True
+    early_radar_pad_ftv_min_explosion_score: float = 5.0
+    early_radar_pad_ftv_max_capital_pct: float = 0.90
+    early_radar_pad_ftv_force_max_lots: bool = True
     # ICT confirm stack for local-base reversals (additive quality, not hard gates).
     local_base_reversal_ict_bonus_max: float = 18.0
     local_base_reversal_kill_zone_bonus_enabled: bool = True

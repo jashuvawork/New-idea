@@ -7,18 +7,29 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.config import Settings
+from app.engines.explosion_detector import (
+    _open_key,
+    _session_low,
+    _session_peak,
+    reset_detector_state_for_tests,
+)
 from app.engines.pad_lane_capture import (
+    DOUBLE_DIP_VBASE_READY,
     INDEX_LED_OPTION_LAG_READY,
     MICRO_PULLBACK_RETEST_READY,
     PREMIUM_FVG_PAD_READY,
     SQUEEZE_RELEASE_READY,
     STEALTH_CVD_COIL_READY,
+    extended_pad_lane_readiness,
     index_led_option_lag_readiness,
     micro_pullback_retest_readiness,
+    pad_lane_cold_velocity_ok,
     premium_fvg_pad_readiness,
     squeeze_release_readiness,
     stealth_cvd_coil_readiness,
+    double_dip_vbase_readiness,
 )
+from app.engines.ict_breakout_monitor import first_lift_entry_readiness
 from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
 from app.models.schemas import MarketPhase, Side, SpotChart, SymbolSnapshot
 
@@ -182,6 +193,47 @@ def test_premium_fvg_pad_authorizes_at_base(mock_settings):
     assert alert["premiumFvgPadReady"] is True
 
 
+@patch("app.engines.pad_lane_capture.get_settings")
+def test_double_dip_vbase_authorizes_w_retest(mock_settings):
+    """Session low 22 → peak 30 → retest 23 before second lift."""
+    reset_detector_state_for_tests()
+    mock_settings.return_value = Settings()
+    key = _open_key("NIFTY", 24200.0, Side.PUT)
+    _session_low[key] = 22.0
+    _session_peak[key] = 30.0
+    alert = _alert(velocity3s=0.15)
+    ok, reason = double_dip_vbase_readiness(
+        snap=_snap(),
+        event=MagicMock(side=Side.PUT, premium=23.0, velocity_3s=0.15, strike=24200.0),
+        ict=_ict(base_relative_move_pct=8.0, velocity_3s=0.15),
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == DOUBLE_DIP_VBASE_READY
+    assert alert["doubleDipVbaseReady"] is True
+    assert alert["doubleDipRetraceRatio"] >= 0.55
+
+
+@patch("app.engines.pad_lane_capture.get_settings")
+def test_double_dip_vbase_rejects_first_touch_only(mock_settings):
+    """No retest when premium is still near the first-bounce peak."""
+    reset_detector_state_for_tests()
+    mock_settings.return_value = Settings()
+    key = _open_key("NIFTY", 24200.0, Side.PUT)
+    _session_low[key] = 22.0
+    _session_peak[key] = 30.0
+    ok, reason = double_dip_vbase_readiness(
+        snap=_snap(),
+        event=MagicMock(side=Side.PUT, premium=29.0, velocity_3s=0.5, strike=24200.0),
+        ict=_ict(base_relative_move_pct=8.0, velocity_3s=0.5),
+        alert=_alert(premium=29.0, velocity3s=0.5),
+        settings=mock_settings.return_value,
+    )
+    assert ok is False
+    assert reason in {"double_dip_shallow_retest", "double_dip_not_near_low"}
+
+
 @pytest.mark.parametrize(
     "flag,mode",
     [
@@ -190,6 +242,7 @@ def test_premium_fvg_pad_authorizes_at_base(mock_settings):
         ("stealthCvdCoil", "STEALTH_CVD_COIL_FTV"),
         ("microPullbackRetest", "MICRO_PULLBACK_RETEST_FTV"),
         ("premiumFvgPad", "PREMIUM_FVG_PAD_FTV"),
+        ("doubleDipVbase", "DOUBLE_DIP_VBASE_FTV"),
     ],
 )
 def test_pad_lane_ftv_policies_authorize_building(flag, mode):
@@ -221,3 +274,54 @@ def test_pad_lane_ftv_policies_authorize_building(flag, mode):
     assert decision.allowed is True
     assert decision.mode == mode
     assert decision.max_capital_pct == 0.90
+
+
+@pytest.mark.parametrize(
+    "flag,v3,v9,expected",
+    [
+        ("slowGrindSuddenLift", -0.3, 0.1, True),
+        ("slowGrindSuddenLift", -1.0, 0.1, False),
+        ("squeezeRelease", -0.4, 0.0, True),
+        ("indexLedOptionLag", -0.2, 0.0, True),
+        ("stealthCvdCoil", -0.3, 0.0, True),
+        ("stealthCvdCoil", -0.8, 0.0, False),
+        ("microPullbackRetest", -0.8, 0.0, True),
+        ("microPullbackRetest", -0.8, -0.8, False),
+        ("premiumFvgPad", -0.5, 0.0, True),
+        ("doubleDipVbase", -0.3, 0.0, True),
+        ("fastBullishLocalBase", -0.1, 0.0, False),
+    ],
+)
+def test_pad_lane_cold_velocity_ok(flag, v3, v9, expected):
+    evidence = {flag: True}
+    assert pad_lane_cold_velocity_ok(evidence, v3, v9) is expected
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_extended_pad_lane_wins_first_lift_chain(mock_settings):
+    """Squeeze release routes through first_lift_entry_readiness before slow-grind."""
+    mock_settings.return_value = Settings()
+    alert = _alert()
+    snap = _snap()
+    ict = _ict()
+    ready, reason = first_lift_entry_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.PUT, premium=22.0, velocity_3s=0.2, strike=24200.0),
+        ict=ict,
+        alert=alert,
+    )
+    assert ready is True
+    assert reason == SQUEEZE_RELEASE_READY
+
+@patch("app.engines.pad_lane_capture.get_settings")
+def test_extended_pad_lane_readiness_orchestrator(mock_settings):
+    mock_settings.return_value = Settings()
+    alert = _alert()
+    ok, reason = extended_pad_lane_readiness(
+        snap=_snap(),
+        event=MagicMock(side=Side.PUT, premium=22.0, velocity_3s=0.2, strike=24200.0),
+        ict=_ict(),
+        alert=alert,
+    )
+    assert ok is True
+    assert reason == SQUEEZE_RELEASE_READY

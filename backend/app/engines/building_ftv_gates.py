@@ -18,6 +18,7 @@ BUILDING_READY_REASONS = frozenset(
 PAD_LANE_READY_REASONS = frozenset(
     {
         "slow_grind_sudden_lift_ready",
+        "slow_grind_armed_trough_ready",
         "fast_bullish_local_base_ready",
         "v_rip_session_low_ready",
         "squeeze_release_ready",
@@ -25,6 +26,8 @@ PAD_LANE_READY_REASONS = frozenset(
         "stealth_cvd_coil_ready",
         "micro_pullback_retest_ready",
         "premium_fvg_pad_ready",
+        "double_dip_vbase_ready",
+        "early_radar_pad_ready",
     }
 )
 
@@ -81,6 +84,9 @@ def pad_lane_ready_reason(
             alert.get("slowGrindSuddenLiftReady")
             or alert.get("ictSlowGrindSuddenLift")
         ):
+            stamped = str(alert.get("ictBaseReadinessReason") or "")
+            if stamped == "slow_grind_armed_trough_ready":
+                return "slow_grind_armed_trough_ready"
             return "slow_grind_sudden_lift_ready"
         if bool(
             alert.get("fastBullishLocalBaseReady")
@@ -97,6 +103,10 @@ def pad_lane_ready_reason(
             return "micro_pullback_retest_ready"
         if bool(alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")):
             return "premium_fvg_pad_ready"
+        if bool(alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")):
+            return "double_dip_vbase_ready"
+        if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
+            return "early_radar_pad_ready"
     return ""
 
 

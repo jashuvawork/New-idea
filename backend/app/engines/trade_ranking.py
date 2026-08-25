@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from app.engines.pad_lane_capture import (
+    pad_lane_cold_velocity_ok as _pad_lane_cold_velocity_ok,
+    pad_lane_pre_lift as _pad_lane_pre_lift,
+)
+
 
 GRADE_PRIORITY = {"REJECT": 0, "C": 1, "B": 2, "A": 3, "S": 4}
 
@@ -176,35 +181,6 @@ def _day_mode_is_worst(day_mode: str) -> bool:
     return "WORST" in str(day_mode or "").upper()
 
 
-def _pad_lane_pre_lift(evidence: Mapping[str, Any]) -> bool:
-    return bool(
-        evidence.get("slowGrindSuddenLift")
-        or evidence.get("fastBullishLocalBase")
-        or evidence.get("squeezeRelease")
-        or evidence.get("indexLedOptionLag")
-        or evidence.get("stealthCvdCoil")
-        or evidence.get("microPullbackRetest")
-        or evidence.get("premiumFvgPad")
-    )
-
-
-def _pad_lane_cold_velocity_ok(evidence: Mapping[str, Any], v3: float, v9: float) -> bool:
-    """Pre-lift pad lanes that allow mildly negative / flat velocity snapshots."""
-    if evidence.get("slowGrindSuddenLift") and -0.8 <= v3 <= 1.5:
-        return True
-    if evidence.get("stealthCvdCoil") and -0.5 <= v3 <= 1.0:
-        return True
-    if evidence.get("microPullbackRetest") and -1.2 <= v3 <= 0.5 and v9 >= -0.5:
-        return True
-    if evidence.get("squeezeRelease") and v3 <= 1.5:
-        return True
-    if evidence.get("indexLedOptionLag") and v3 <= 1.2:
-        return True
-    if evidence.get("premiumFvgPad") and v3 <= 2.0:
-        return True
-    return False
-
-
 def _top_ftv_a_pad_capture_lane(
     evidence: Mapping[str, Any],
     *,
@@ -226,6 +202,7 @@ def _top_ftv_a_pad_capture_lane(
         or evidence.get("stealthCvdCoil")
         or evidence.get("microPullbackRetest")
         or evidence.get("premiumFvgPad")
+        or evidence.get("doubleDipVbase")
     )
 
 
@@ -326,6 +303,7 @@ def ftv_authorization_policy(
     slow_grind_ftv_enabled: bool = True,
     slow_grind_ftv_min_explosion_score: float = 45.0,
     slow_grind_ftv_min_flat_quality: float = 50.0,
+    slow_grind_ftv_armed_trough_min_explosion_score: float = 5.0,
     slow_grind_ftv_max_capital_pct: float = 0.90,
     fast_bullish_ftv_enabled: bool = True,
     fast_bullish_ftv_min_explosion_score: float = 48.0,
@@ -346,6 +324,13 @@ def ftv_authorization_policy(
     premium_fvg_pad_ftv_enabled: bool = True,
     premium_fvg_pad_ftv_min_explosion_score: float = 50.0,
     premium_fvg_pad_ftv_max_capital_pct: float = 0.90,
+    double_dip_vbase_ftv_enabled: bool = True,
+    double_dip_vbase_ftv_min_explosion_score: float = 48.0,
+    double_dip_vbase_ftv_max_capital_pct: float = 0.90,
+    early_radar_pad_ftv_enabled: bool = True,
+    early_radar_pad_ftv_min_explosion_score: float = 5.0,
+    early_radar_pad_ftv_max_capital_pct: float = 0.90,
+    early_radar_pad_max_off_low_pct: float = 15.0,
     top_moments_only_enabled: bool = True,
     top_moments_min_grade: str = "A",
     first_lift_local_base_micro_pullback_enabled: bool = True,
@@ -767,18 +752,29 @@ def ftv_authorization_policy(
 
     # Pre-lift slow-coil pad — flat velocity, impending signals, BUILDING tier OK.
     slow_grind_pad = bool(evidence.get("slowGrindSuddenLift"))
+    slow_grind_armed_trough = bool(evidence.get("slowGrindArmedTrough"))
     if slow_grind_ftv_enabled and slow_grind_pad:
-        slow_grind_ok = (
-            grade in {"A", "B", "S"}
-            and tier in {"BUILDING", "EXPLODING", "ELITE"}
-            and explosion_score >= slow_grind_ftv_min_explosion_score
-            and quality >= slow_grind_ftv_min_flat_quality
-            and v3 >= -0.8
-            and v3 <= 1.5
-            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
-        )
-        if top_moments_only_enabled and grade == "B":
-            slow_grind_ok = False
+        if slow_grind_armed_trough:
+            slow_grind_ok = (
+                str(ranking.get("grade") or "").upper() != "REJECT"
+                and tier in {"WATCH", "BUILDING", "EXPLODING", "ELITE"}
+                and explosion_score >= slow_grind_ftv_armed_trough_min_explosion_score
+                and v3 >= -0.8
+                and v3 <= 1.5
+                and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+            )
+        else:
+            slow_grind_ok = (
+                grade in {"A", "B", "S"}
+                and tier in {"BUILDING", "EXPLODING", "ELITE"}
+                and explosion_score >= slow_grind_ftv_min_explosion_score
+                and quality >= slow_grind_ftv_min_flat_quality
+                and v3 >= -0.8
+                and v3 <= 1.5
+                and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+            )
+            if top_moments_only_enabled and grade == "B":
+                slow_grind_ok = False
         if slow_grind_ok:
             if require_allocation_rank_one and allocation_rank != 1:
                 return blocked("slow_grind_ftv_requires_allocation_rank_1")
@@ -903,9 +899,53 @@ def ftv_authorization_policy(
             max_v3=2.0,
             block_prefix="premium_fvg_pad_ftv",
         ),
+        _pad_lane_ftv_auth(
+            enabled=double_dip_vbase_ftv_enabled,
+            flag=bool(evidence.get("doubleDipVbase")),
+            mode="DOUBLE_DIP_VBASE_FTV",
+            min_score=double_dip_vbase_ftv_min_explosion_score,
+            max_capital=double_dip_vbase_ftv_max_capital_pct,
+            min_v3=-0.8,
+            max_v3=1.5,
+            block_prefix="double_dip_vbase_ftv",
+        ),
+        _pad_lane_ftv_auth(
+            enabled=early_radar_pad_ftv_enabled,
+            flag=bool(evidence.get("earlyRadarPadCapture")),
+            mode="EARLY_RADAR_PAD_FTV",
+            min_score=early_radar_pad_ftv_min_explosion_score,
+            max_capital=early_radar_pad_ftv_max_capital_pct,
+            min_v3=-0.8,
+            max_v3=1.5,
+            block_prefix="early_radar_pad_ftv",
+        ),
     ):
         if auth is not None:
             return auth
+
+    if early_radar_pad_ftv_enabled and bool(evidence.get("earlyRadarPadCapture")):
+        off_low = _number(evidence.get("offLowMovePct"))
+        early_pad_ok = (
+            str(ranking.get("grade") or "").upper() != "REJECT"
+            and tier in {"WATCH", "BUILDING", "EXPLODING", "ELITE"}
+            and explosion_score >= early_radar_pad_ftv_min_explosion_score
+            and off_low <= early_radar_pad_max_off_low_pct + 5.0
+            and -0.8 <= v3 <= 1.5
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        )
+        if early_pad_ok:
+            if require_allocation_rank_one and allocation_rank != 1:
+                return blocked("early_radar_pad_ftv_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "EARLY_RADAR_PAD_FTV",
+                "ok",
+                max_capital_pct=early_radar_pad_ftv_max_capital_pct,
+            )
 
     # BUILDING sudden lift with helpers — do not wait for ELITE/EXPLODING.
     # Readiness already proved mid-rip/local-base heat; CHASE timing is OK here.
@@ -1008,6 +1048,7 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "slow_grind_ftv_enabled",
         "slow_grind_ftv_min_explosion_score",
         "slow_grind_ftv_min_flat_quality",
+        "slow_grind_ftv_armed_trough_min_explosion_score",
         "slow_grind_ftv_max_capital_pct",
         "fast_bullish_ftv_enabled",
         "fast_bullish_ftv_min_explosion_score",
@@ -1028,6 +1069,13 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "premium_fvg_pad_ftv_enabled",
         "premium_fvg_pad_ftv_min_explosion_score",
         "premium_fvg_pad_ftv_max_capital_pct",
+        "double_dip_vbase_ftv_enabled",
+        "double_dip_vbase_ftv_min_explosion_score",
+        "double_dip_vbase_ftv_max_capital_pct",
+        "early_radar_pad_ftv_enabled",
+        "early_radar_pad_ftv_min_explosion_score",
+        "early_radar_pad_ftv_max_capital_pct",
+        "early_radar_pad_max_off_low_pct",
         "top_moments_only_enabled",
         "top_moments_min_grade",
         "first_lift_local_base_micro_pullback_enabled",
@@ -1130,6 +1178,12 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     premium_fvg_pad = bool(evidence.get("premiumFvgPad")) and not bool(
         evidence.get("midRipCoil")
     )
+    double_dip_vbase = bool(evidence.get("doubleDipVbase")) and not bool(
+        evidence.get("midRipCoil")
+    )
+    early_radar_pad = bool(evidence.get("earlyRadarPadCapture")) and not bool(
+        evidence.get("midRipCoil")
+    )
     flat_vertical = bool(evidence.get("flatThenVertical"))
     active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
@@ -1182,6 +1236,12 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     elif v_rip_ready:
         score += 10.0
         reasons.append("v_rip_session_low")
+    elif double_dip_vbase:
+        score += 11.0
+        reasons.append("double_dip_vbase")
+    elif early_radar_pad:
+        score += 12.0
+        reasons.append("early_radar_pad_ftv")
     elif fast_bullish_local_base:
         score += 11.0
         reasons.append("fast_bullish_local_base")
@@ -1321,6 +1381,8 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             or stealth_cvd_coil
             or micro_pullback_retest
             or premium_fvg_pad
+            or double_dip_vbase
+            or early_radar_pad
         )
         and (
             v3 > 0
@@ -1374,6 +1436,8 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "stealthCvdCoil": stealth_cvd_coil,
             "microPullbackRetest": micro_pullback_retest,
             "premiumFvgPad": premium_fvg_pad,
+            "doubleDipVbase": double_dip_vbase,
+            "earlyRadarPadCapture": early_radar_pad,
             "buildingRipReady": building_rip_ready,
             "buildingRipHelpersOk": bool(
                 evidence.get("buildingRipHelpersOk")
@@ -1494,6 +1558,10 @@ def rank_entry_candidate(
             alert.get("slowGrindSuddenLiftReady")
             or alert.get("ictSlowGrindSuddenLift")
         ),
+        "slowGrindArmedTrough": bool(
+            alert.get("slowGrindArmedTrough")
+            or alert.get("ictSlowGrindArmedTrough")
+        ),
         "squeezeRelease": bool(
             alert.get("squeezeReleaseReady") or alert.get("ictSqueezeRelease")
         ),
@@ -1508,6 +1576,12 @@ def rank_entry_candidate(
         ),
         "premiumFvgPad": bool(
             alert.get("premiumFvgPadReady") or alert.get("ictPremiumFvgPad")
+        ),
+        "doubleDipVbase": bool(
+            alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")
+        ),
+        "earlyRadarPadCapture": bool(
+            alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
         ),
         "buildingRipReady": alert.get("ictBuildingRipReady"),
         "buildingRipHelpersOk": bool(

@@ -1,5 +1,7 @@
 """Tests for top-moment entry gate (FTV / V / ELITE / EXPLODING only)."""
 
+import pytest
+
 from app.engines.top_moment_gate import (
     classify_top_moment_type,
     explosion_alert_is_top_moment,
@@ -191,6 +193,55 @@ def test_top_moment_allows_slow_grind_flat_velocity():
     assert ok is True
     assert reason == "ok"
     assert moment == "FTV"
+
+
+@pytest.mark.parametrize(
+    "flag,v3",
+    [
+        ("squeezeRelease", -0.4),
+        ("indexLedOptionLag", -0.2),
+        ("stealthCvdCoil", -0.3),
+        ("microPullbackRetest", -0.8),
+        ("premiumFvgPad", -0.5),
+        ("doubleDipVbase", -0.3),
+    ],
+)
+def test_top_moment_allows_pad_lane_flat_velocity(flag, v3):
+    ok, reason, moment = top_moment_entry_allowed(
+        _evidence(
+            tier="BUILDING",
+            velocity3s=v3,
+            velocity9s=0.1,
+            flatThenVertical=True,
+            activeBreakout=True,
+            **{flag: True},
+        ),
+        _ranking("A"),
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert moment == "FTV"
+
+
+@pytest.mark.parametrize(
+    "flag,stamp_key",
+    [
+        ("squeezeRelease", "squeezeReleaseReady"),
+        ("indexLedOptionLag", "indexLedOptionLagReady"),
+        ("stealthCvdCoil", "stealthCvdCoilReady"),
+        ("microPullbackRetest", "microPullbackRetestReady"),
+        ("premiumFvgPad", "premiumFvgPadReady"),
+        ("doubleDipVbase", "doubleDipVbaseReady"),
+    ],
+)
+def test_explosion_alert_is_top_moment_pad_lane_stamp(flag, stamp_key):
+    alert = {
+        "tier": "BUILDING",
+        stamp_key: True,
+        "ictFlatThenVertical": True,
+        "ictBreakout": True,
+    }
+    assert explosion_alert_is_top_moment(alert) is True
 
 
 def test_qualifies_for_top_moment_max_lots_disabled():

@@ -101,6 +101,10 @@ def local_base_entry_window(tier: str = "", volume_surge: float = 0.0) -> tuple[
 
 def _alert_has_local_base(alert: dict[str, Any]) -> bool:
     """Local premium launch pad — ICT structure OR strong early-window explosion."""
+    from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+
+    if alert_has_early_radar_pad_capture(alert):
+        return True
     settings = get_settings()
     if alert.get("ictFlatThenVertical") or alert.get("localSwingBase"):
         return True
@@ -465,9 +469,12 @@ def local_base_ichimoku_bypass_for_snap(
     snap: SymbolSnapshot,
     *,
     explosion_event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> bool:
     """Snap helper — also scans matching explosionAlerts when event is absent."""
-    if local_base_overrides_session_chart(side, snap, event=explosion_event):
+    if local_base_overrides_session_chart(
+        side, snap, event=explosion_event, alert=alert,
+    ):
         return True
     side_v = _side_val(side)
     for alert in snap.explosionAlerts or []:

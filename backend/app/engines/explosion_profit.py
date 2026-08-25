@@ -44,6 +44,7 @@ def _ict_flat_vertical_entry_ok(
     tier_u = str(getattr(event, "tier", "") or "").upper()
     from app.engines.building_ftv_gates import (
         BUILDING_READY_REASONS,
+        PAD_LANE_READY_REASONS,
         alert_has_building_rip_signal,
     )
     from app.engines.ict_breakout_monitor import (
@@ -61,6 +62,7 @@ def _ict_flat_vertical_entry_ok(
     )
     if first_lift_ready and (
         ready_reason in BUILDING_READY_REASONS
+        or ready_reason in PAD_LANE_READY_REASONS
         or ready_reason.startswith("buildingRip")
         or alert_has_building_rip_signal(alert)
         or bool(getattr(ict, "building_rip_ready", False))
@@ -235,7 +237,10 @@ def check_explosion_entry(
     # Require chart align — but honor the same capture/structure bypasses as
     # chart_blocks_explosion_side later (afternoon / all-day / premium-led / local-base).
     settings = get_settings()
-    early_ict_ok = _ict_flat_vertical_entry_ok(event, snap, alert=alert)
+    from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+
+    early_pad = isinstance(alert, dict) and alert_has_early_radar_pad_capture(alert)
+    early_ict_ok = _ict_flat_vertical_entry_ok(event, snap, alert=alert) or early_pad
     if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
         from app.engines.spot_direction import side_aligned_with_chart
 
@@ -253,7 +258,9 @@ def check_explosion_entry(
                 event, align_chart, breadth_bias, snap=snap,
             )
             local_ichi_bypass = (
-                local_base_ichimoku_chart_bypass(event.side, snap, event=event)
+                local_base_ichimoku_chart_bypass(
+                    event.side, snap, event=event, alert=alert,
+                )
                 if snap is not None
                 else False
             )
@@ -261,6 +268,7 @@ def check_explosion_entry(
                 premium_bypass
                 or local_ichi_bypass
                 or early_ict_ok
+                or early_pad
                 or afternoon_capture_skips_chart_block(event, align_chart)
                 or is_all_day_explosion_event(event, chart=align_chart)
             ):
@@ -272,11 +280,16 @@ def check_explosion_entry(
 
         bias = (snap.breadth.bias if snap.breadth else breadth.bias or "NEUTRAL") or "NEUTRAL"
         hard_blocked, hard_reason = breadth_hard_blocks_side(
-            event.side, bias, event=event, snap=snap,
+            event.side, bias, event=event, snap=snap, alert=alert,
         )
         if hard_blocked:
             return False, hard_reason
-        if not counter_trend_entry_allowed(event.side, snap, explosion_event=event):
+        if not counter_trend_entry_allowed(
+            event.side,
+            snap,
+            explosion_event=event,
+            alert=alert if isinstance(alert, dict) else None,
+        ):
             return False, "counter_trend_requires_elite"
 
     if snap is not None:
@@ -299,8 +312,8 @@ def check_explosion_entry(
 
         if is_premium_capture_event(event, chart=chart):
             pass  # premium-capture BUILDING continues through remaining gates
-        elif early_ict_ok:
-            pass  # confirmed first-lift or elite-build ICT flat→vertical
+        elif early_ict_ok or early_pad:
+            pass  # confirmed first-lift, elite-build ICT flat→vertical, or early pad FTV
         else:
             return False, f"tier_{event.tier}_not_tradeable"
 
@@ -308,6 +321,7 @@ def check_explosion_entry(
 
     if (
         not early_ict_ok
+        and not early_pad
         and event.velocity_3s < 2.0
         and event.velocity_9s < 3.0
     ):
@@ -334,7 +348,7 @@ def check_explosion_entry(
     from app.engines.aligned_side_guard import breadth_hard_blocks_side
 
     hard_blocked, hard_reason = breadth_hard_blocks_side(
-        event.side, breadth_bias, event=event, snap=snap,
+        event.side, breadth_bias, event=event, snap=snap, alert=alert,
     )
     if hard_blocked:
         return False, hard_reason
@@ -344,7 +358,7 @@ def check_explosion_entry(
     blocked, reason = breadth_blocks_explosion_side(
         event.side, breadth.bias, event.tier, event=event, snap=snap,
     )
-    if blocked and not premium_bypass:
+    if blocked and not premium_bypass and not early_pad:
         return False, reason
 
     if snap is not None:
@@ -355,7 +369,7 @@ def check_explosion_entry(
     from app.engines.local_base_chart_bypass import local_base_ichimoku_chart_bypass
 
     local_ichi_bypass = local_base_ichimoku_chart_bypass(
-        event.side, snap, event=event,
+        event.side, snap, event=event, alert=alert if isinstance(alert, dict) else None,
     )
     blocked, reason = chart_blocks_explosion_side(
         event.side, chart, event.tier, event=event, breadth_bias=breadth_bias, snap=snap,
@@ -365,6 +379,7 @@ def check_explosion_entry(
         and not premium_bypass
         and not local_ichi_bypass
         and not early_ict_ok
+        and not early_pad
         and not afternoon_capture_skips_chart_block(event, chart)
     ):
         if not is_all_day_explosion_event(event, chart=chart):
@@ -391,6 +406,7 @@ def check_explosion_entry(
         snap=snap,
         event=event,
         ict=ict_live,
+        alert=alert if isinstance(alert, dict) else None,
     )
     from app.engines.elite_never_block import elite_never_block_active
 
@@ -419,7 +435,7 @@ def check_explosion_entry(
         squeeze_early_base=squeeze_early_base_active(event, snap),
         bullish_local_base=bool(bullish_base.get("active")),
     )
-    if window_blocked and not first_lift_ready:
+    if window_blocked and not first_lift_ready and not early_pad:
         return False, window_reason
     live_blocked, live_reason = live_explosion_confirmation_blocked(
         event,
@@ -427,7 +443,7 @@ def check_explosion_entry(
         premium_capture=is_premium_capture_event(event, chart=chart),
         snap=snap,
     )
-    if live_blocked and not must_take:
+    if live_blocked and not must_take and not first_lift_ready and not early_pad:
         return False, live_reason
 
     from app.engines.entry_timing import assess_entry_timing, timing_blocks_entry
@@ -442,6 +458,7 @@ def check_explosion_entry(
     if (
         timing_blocked
         and not must_take
+        and not early_pad
         and not (
             first_lift_ready
             and bool(
@@ -483,6 +500,8 @@ def check_explosion_entry(
     # chase/window, live confirmation and cooldown checks still apply.
     if first_lift_ready:
         return True, "first_lift_local_base_confirmed"
+    if early_pad:
+        return True, "early_radar_pad_ftv_confirmed"
 
     blocked, nb_reason = neutral_breadth_blocks_entry(
         breadth.bias,
@@ -1032,6 +1051,7 @@ def _is_vbase_ftv_runner(trade: PaperTrade) -> bool:
         or ctx.get("stealthCvdCoil")
         or ctx.get("microPullbackRetest")
         or ctx.get("premiumFvgPad")
+        or ctx.get("doubleDipVbase")
     ):
         return False
     rel = ctx.get("localBaseBaseRelPct")
