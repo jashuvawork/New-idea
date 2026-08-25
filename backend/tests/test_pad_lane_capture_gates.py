@@ -5,7 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.engines.pad_lane_capture import pad_lane_ftv_waives_allocation_rank_one
+from app.engines.pad_lane_capture import (
+    pad_lane_expiry_worst_waive,
+    pad_lane_ftv_waives_allocation_rank_one,
+)
 from app.engines.trade_ranking import ftv_authorization_policy, ftv_policy_settings
 from app.engines.winner_entry_guards import premium_fading_blocks_entry
 from app.config import Settings
@@ -104,3 +107,14 @@ def test_pad_lane_premium_fade_still_blocks_deep_collapse(mock_settings):
     )
     assert blocked is True
     assert reason == "premium_fading_at_execution"
+
+
+@patch("app.engines.pad_lane_capture.get_settings")
+def test_pad_lane_expiry_worst_waive_on_v_rip(mock_settings):
+    mock_settings.return_value = _settings()
+    evidence = {
+        "vRipReady": True,
+        "offLowMovePct": 18.0,
+        "localBaseMovePct": 18.0,
+    }
+    assert pad_lane_expiry_worst_waive(evidence) is True

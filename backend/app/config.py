@@ -822,7 +822,7 @@ class Settings(BaseSettings):
     ftv_vbase_hundred_pct_min_best_points_floor: float = 40.0
     # After the 100% leg prints, allow a wider giveback so multi-bagger extensions
     # (68→220) are not banked on the first 28% dip off a mid peak.
-    ftv_vbase_after_hundred_giveback_ratio: float = 0.32
+    ftv_vbase_after_hundred_giveback_ratio: float = 0.25
     ftv_vbase_after_hundred_max_giveback_points: float = 36.0
     ftv_vbase_after_hundred_big_peak_points: float = 100.0
 
@@ -860,7 +860,7 @@ class Settings(BaseSettings):
     # every real % move locks in the best TP it reached. Arms only after a real move.
     ftv_runner_pct_trail_enabled: bool = True
     ftv_runner_pct_trail_arm_pct: float = 25.0
-    ftv_runner_pct_trail_keep_ratio: float = 0.72
+    ftv_runner_pct_trail_keep_ratio: float = 0.75
     moment_stage_min_projected_tp: float = 40.0
     # Allow rare 50→650 LTP mega rips (+600pt); live extension ratchets toward this.
     moment_stage_max_projected_tp: float = 800.0
@@ -1573,7 +1573,9 @@ class Settings(BaseSettings):
     # Pad-lane base retest may fill through shallow premium fade at execution.
     pad_lane_premium_fade_fill_enabled: bool = True
     pad_lane_premium_fade_fill_max_drawdown_pct: float = -1.2
-    # ICT confirm stack for local-base reversals (additive quality, not hard gates).
+    # Pad-lane local-base FTV on EXPIRY WORST may waive quality/score floors when
+    # stamped readiness proves the lift (Aug25 24250 CE afternoon block).
+    pad_lane_expiry_worst_waive_enabled: bool = True
     local_base_reversal_ict_bonus_max: float = 18.0
     local_base_reversal_kill_zone_bonus_enabled: bool = True
     local_base_reversal_require_ict_confirm: bool = False

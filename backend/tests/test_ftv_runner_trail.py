@@ -42,8 +42,8 @@ def test_pct_floor_keeps_fraction_of_peak_gain():
     t = _runner_trade(best=72.0)  # +106% peak on a Rs68 entry
     floor = ftv_runner_pct_floor(t, 72.0)
     assert floor is not None
-    # keep 72% of the 72pt peak gain
-    assert abs(floor - 72.0 * 0.72) < 0.5
+    # keep 75% of the 72pt peak gain (~25% giveback from peak)
+    assert abs(floor - 72.0 * 0.75) < 0.5
 
 
 def test_pct_floor_not_armed_below_threshold():

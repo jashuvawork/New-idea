@@ -1006,6 +1006,14 @@ def pad_lane_turnaround_chart_bypass_for_snap(
     return False
 
 
+def pad_lane_expiry_worst_waive(evidence: Mapping[str, Any]) -> bool:
+    """EXPIRY WORST quality/score floors may waive for stamped pad-lane local-base FTV."""
+    settings = get_settings()
+    if not bool(getattr(settings, "pad_lane_expiry_worst_waive_enabled", True)):
+        return False
+    return pad_lane_ftv_waives_allocation_rank_one(evidence)
+
+
 def pad_lane_ftv_waives_allocation_rank_one(
     evidence: Mapping[str, Any],
 ) -> bool:
@@ -1030,6 +1038,12 @@ def pad_lane_ftv_waives_allocation_rank_one(
     if pad_lane_pre_lift(evidence):
         return True
     if bool(evidence.get("vRipReady") or evidence.get("earlyRadarPadCapture")):
+        return True
+    if bool(
+        evidence.get("ictVRipReady")
+        or evidence.get("ictEarlyRadarPadCapture")
+        or evidence.get("ictSlowGrindSuddenLift")
+    ):
         return True
     if bool(evidence.get("firstLift") or evidence.get("buildingRipReady")):
         return off_low >= 2.0
