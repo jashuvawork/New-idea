@@ -115,6 +115,29 @@ def pipeline_history_path(date: str) -> Path:
     return _telemetry_dir() / f"{date}.pipeline.jsonl"
 
 
+def session_telemetry_paths(date: str) -> list[Path]:
+    """Intraday JSONL files for one session (premium tape, funnel, optional tapes)."""
+    if not _DATE_RE.fullmatch(date):
+        raise ValueError("date must use YYYY-MM-DD")
+    return [
+        premium_tape_path(date),
+        funnel_path(date),
+        alerts_tape_path(date),
+        pipeline_history_path(date),
+    ]
+
+
+def purge_session_telemetry(date: str) -> list[str]:
+    """Remove intraday telemetry for a finalized session. Returns deleted filenames."""
+    removed: list[str] = []
+    for path in session_telemetry_paths(date):
+        if path.exists():
+            path.unlink()
+            removed.append(path.name)
+        path.with_suffix(path.suffix + ".lock").unlink(missing_ok=True)
+    return removed
+
+
 @contextmanager
 def _file_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_suffix(path.suffix + ".lock")
@@ -206,6 +229,8 @@ def record_pipeline_event(
     throttle_seconds: float = 0.0,
 ) -> bool:
     """Persist non-secret service/data availability evidence across restarts."""
+    if not bool(getattr(get_settings(), "radar_pipeline_history_enabled", False)):
+        return False
     current = _aware(now)
     date = current.strftime("%Y-%m-%d")
     key = throttle_key or ""
@@ -1503,13 +1528,20 @@ def finalize_daily_review(date: str) -> dict[str, Any]:
 
 def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     """Bundle tape, scorecard, funnel, and replay inputs into the canonical daily ZIP."""
+    settings = get_settings()
+    analysis_only = bool(
+        getattr(settings, "radar_analysis_only_storage", True)
+    )
     scorecard = analyze_hindsight(date)
     funnel = build_funnel_report(date)
     artifacts: dict[str, bytes | str] = {
         "scorecard.json": json.dumps(scorecard, indent=2),
         "funnel.json": json.dumps(funnel, indent=2),
     }
-    if bool(getattr(get_settings(), "ftv_premium_calibration_enabled", False)):
+    if (
+        not analysis_only
+        and bool(getattr(settings, "ftv_premium_calibration_enabled", False))
+    ):
         try:
             from app.engines.ftv_premium_calibration import (
                 build_and_persist_premium_calibration,
@@ -1524,12 +1556,13 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     tape = premium_tape_path(date)
     if tape.exists():
         artifacts["premium_tape.jsonl"] = _read_bytes_locked(tape)
-    alerts_file = alerts_tape_path(date)
-    if alerts_file.exists():
-        artifacts["alerts_tape.jsonl"] = _read_bytes_locked(alerts_file)
-    pipeline_file = pipeline_history_path(date)
-    if pipeline_file.exists():
-        artifacts["pipeline_history.jsonl"] = _read_bytes_locked(pipeline_file)
+    if not analysis_only:
+        alerts_file = alerts_tape_path(date)
+        if alerts_file.exists():
+            artifacts["alerts_tape.jsonl"] = _read_bytes_locked(alerts_file)
+        pipeline_file = pipeline_history_path(date)
+        if pipeline_file.exists():
+            artifacts["pipeline_history.jsonl"] = _read_bytes_locked(pipeline_file)
     funnel_file = funnel_path(date)
     if funnel_file.exists():
         artifacts["funnel_events.jsonl"] = _read_bytes_locked(funnel_file)
@@ -1544,6 +1577,9 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
             "recordedAt": _now().isoformat(),
         },
     )
+    purged: list[str] = []
+    if bool(getattr(settings, "radar_purge_telemetry_after_finalize", True)):
+        purged = purge_session_telemetry(date)
     _prune_learning_files()
     try:
         from app.services.radar_health import record_component_success
@@ -1565,6 +1601,8 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
         "scorecard": scorecard,
         "funnel": funnel,
         "backup": backup,
+        "analysisOnly": analysis_only,
+        "purgedTelemetry": purged,
     }
 
 
