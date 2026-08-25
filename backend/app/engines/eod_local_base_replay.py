@@ -243,10 +243,19 @@ def evaluate_local_base_entry(
         return False, reason, moment, ranking
 
     from app.engines.ict_breakout_monitor import first_lift_entry_readiness
+    from app.engines.building_ftv_gates import pad_lane_ready_reason
+    from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
     ready, lift_reason = first_lift_entry_readiness(snap=snap, alert=alert)
-    if not ready:
+    pad_lane_waive = pad_lane_early_near_miss_waive(
+        alert, readiness_reason=lift_reason,
+    )
+    if not ready and not pad_lane_waive:
         return False, lift_reason, moment, ranking
+    if pad_lane_waive:
+        lift_reason = pad_lane_ready_reason(
+            alert=alert, readiness_reason=lift_reason,
+        ) or lift_reason
 
     base_rel = _f(alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct"))
     tier = str(alert.get("tier") or "")

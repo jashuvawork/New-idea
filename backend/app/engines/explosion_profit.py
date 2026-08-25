@@ -60,6 +60,10 @@ def _ict_flat_vertical_entry_ok(
         ict=ict,
         alert=alert,
     )
+    from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
+
+    if pad_lane_early_near_miss_waive(alert, readiness_reason=ready_reason):
+        return True
     if first_lift_ready and (
         ready_reason in BUILDING_READY_REASONS
         or ready_reason in PAD_LANE_READY_REASONS

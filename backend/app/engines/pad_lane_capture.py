@@ -1014,6 +1014,37 @@ def pad_lane_expiry_worst_waive(evidence: Mapping[str, Any]) -> bool:
     return pad_lane_ftv_waives_allocation_rank_one(evidence)
 
 
+def pad_lane_early_near_miss_waive(
+    alert: Optional[Mapping[str, Any]],
+    *,
+    readiness_reason: str = "",
+) -> bool:
+    """Stamped pad-lane readiness waives ICT first-lift quality / tier-lag near-miss blockers.
+
+    Aug25 24150 CE at 10:47: v_rip_session_low_ready was stamping while
+    first_lift_entry_readiness still returned first_lift_quality<65 and tier was
+    BUILDING — explosion_near_miss for 60–90s before ELITE/quality caught up.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "pad_lane_early_near_miss_waive_enabled", True)):
+        return False
+    from app.engines.building_ftv_gates import (
+        PAD_LANE_READY_REASONS,
+        pad_lane_ready_reason,
+    )
+
+    rr = pad_lane_ready_reason(
+        alert=alert if isinstance(alert, dict) else None,
+        readiness_reason=readiness_reason,
+    )
+    if rr in PAD_LANE_READY_REASONS or rr.startswith("v_rip_session_low"):
+        return True
+    return _pad_lane_turnaround_signal(
+        alert if isinstance(alert, dict) else None,
+        readiness_reason,
+    )
+
+
 def pad_lane_ftv_waives_allocation_rank_one(
     evidence: Mapping[str, Any],
 ) -> bool:

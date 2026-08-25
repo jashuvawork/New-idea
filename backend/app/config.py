@@ -1576,6 +1576,10 @@ class Settings(BaseSettings):
     # Pad-lane local-base FTV on EXPIRY WORST may waive quality/score floors when
     # stamped readiness proves the lift (Aug25 24250 CE afternoon block).
     pad_lane_expiry_worst_waive_enabled: bool = True
+    # Stamped pad-lane readiness (v_rip_session_low_ready, slow-grind pad, etc.) may
+    # waive ICT first-lift quality / BUILDING→ELITE lag near-miss blockers so the
+    # selector admits the leg at the local base before flatVerticalQuality warms.
+    pad_lane_early_near_miss_waive_enabled: bool = True
     local_base_reversal_ict_bonus_max: float = 18.0
     local_base_reversal_kill_zone_bonus_enabled: bool = True
     local_base_reversal_require_ict_confirm: bool = False
