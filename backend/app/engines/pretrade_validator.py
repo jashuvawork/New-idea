@@ -1135,6 +1135,20 @@ def validate_candidate(
     )
     if local_ichi_bypass:
         meta["localBaseIchimokuBypass"] = True
+    from app.engines.pad_lane_capture import pad_lane_turnaround_chart_bypass_for_snap
+
+    pad_lane_chart_bypass = pad_lane_turnaround_chart_bypass_for_snap(
+        candidate.side,
+        snap,
+        explosion_event=getattr(candidate, "explosion_event", None),
+        alert=(
+            candidate.alert
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None
+        ),
+    )
+    if pad_lane_chart_bypass:
+        meta["padLaneChartBypass"] = True
     armed_base_chart_bypass = False
     if (
         getattr(candidate, "mode", "") == "explosion"
@@ -1180,9 +1194,9 @@ def validate_candidate(
         snap.spotChart,
         trade_score=trade_score,
         breadth_aligned_bypass=breadth_bypass,
-        premium_led_bypass=premium_bypass or local_ichi_bypass,
+        premium_led_bypass=premium_bypass or local_ichi_bypass or pad_lane_chart_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
-        strict_first_lift_bypass=armed_base_chart_bypass,
+        strict_first_lift_bypass=armed_base_chart_bypass or pad_lane_chart_bypass,
     )
     if blocked_chart:
         meta["chartDirection"] = snap.spotChart.direction if snap.spotChart else "NEUTRAL"

@@ -380,6 +380,7 @@ def _explosion_candidates(
                 # bypass runs. local_base_ichimoku_chart_bypass still requires a confirmed
                 # base AND non-adverse live momentum, so this cannot admit chop FOMO.
                 local_base_ok = False
+                pad_lane_ok = False
                 if bool(
                     getattr(
                         settings,
@@ -390,11 +391,17 @@ def _explosion_candidates(
                     from app.engines.local_base_chart_bypass import (
                         local_base_ichimoku_chart_bypass,
                     )
+                    from app.engines.pad_lane_capture import (
+                        pad_lane_turnaround_chart_bypass,
+                    )
 
                     local_base_ok = local_base_ichimoku_chart_bypass(
                         side_v, snap, alert=alert,
                     )
-                if not local_base_ok:
+                    pad_lane_ok = pad_lane_turnaround_chart_bypass(
+                        side_v, snap, alert=alert,
+                    )
+                if not local_base_ok and not pad_lane_ok:
                     continue
         score_val = float(alert.get("explosionScore", 0))
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)

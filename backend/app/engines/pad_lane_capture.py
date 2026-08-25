@@ -798,6 +798,214 @@ def double_dip_vbase_readiness(
     return True, DOUBLE_DIP_VBASE_READY
 
 
+def _side_val(side: Side | str) -> str:
+    return side.value if isinstance(side, Side) else str(side).upper()
+
+
+def _pad_lane_chart_metrics(
+    *,
+    event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[float, float, float, float, bool]:
+    row = alert if isinstance(alert, dict) else {}
+    v3 = float(
+        getattr(event, "velocity_3s", 0)
+        or row.get("velocity3s")
+        or row.get("velocity_3s")
+        or 0
+    )
+    v9 = float(
+        getattr(event, "velocity_9s", 0)
+        or row.get("velocity9s")
+        or row.get("velocity_9s")
+        or 0
+    )
+    base_move = float(
+        row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or row.get("offLowMovePct")
+        or getattr(event, "daily_move_pct", 0)
+        or 0
+    )
+    peak_move = float(
+        row.get("peakMovePct")
+        or getattr(event, "peak_move_pct", 0)
+        or 0
+    )
+    volume_awake = bool(
+        row.get("volumeAwaken")
+        or row.get("ictVolumeAwakening")
+        or row.get("optionCvdBuying")
+        or row.get("orderflowConfirmed")
+    )
+    if not volume_awake:
+        vol_surge = float(
+            getattr(event, "volume_surge", 0)
+            or row.get("volumeSurge")
+            or row.get("volume_surge")
+            or 0
+        )
+        volume_awake = vol_surge >= 2.0
+    return v3, v9, base_move, peak_move, volume_awake
+
+
+def _pad_lane_turnaround_signal(
+    alert: Optional[dict[str, Any]],
+    readiness_reason: str = "",
+) -> bool:
+    from app.engines.building_ftv_gates import (
+        BUILDING_READY_REASONS,
+        PAD_LANE_READY_REASONS,
+        pad_lane_ready_reason,
+    )
+
+    if pad_lane_ready_reason(alert=alert, readiness_reason=readiness_reason):
+        return True
+    if not isinstance(alert, dict):
+        return False
+    stamped = str(
+        alert.get("ictBaseReadinessReason")
+        or alert.get("readyReason")
+        or readiness_reason
+        or ""
+    )
+    if stamped in BUILDING_READY_REASONS:
+        return True
+    if stamped in PAD_LANE_READY_REASONS or stamped.startswith("v_rip_session_low"):
+        return True
+    if bool(alert.get("ictVRipReady") or alert.get("vRipReady")):
+        return stamped.startswith("v_rip")
+    return bool(
+        alert.get("slowGrindSuddenLiftReady")
+        or alert.get("ictSlowGrindSuddenLift")
+        or alert.get("slowGrindArmedTroughReady")
+        or alert.get("slowGrindConsolidationBaseReady")
+        or alert.get("fastBullishLocalBaseReady")
+        or alert.get("bullishLocalBaseActive")
+        or alert.get("buildingLiftHelping")
+        or alert.get("buildingRipReady")
+        or alert.get("ictBuildingRipReady")
+    )
+
+
+def pad_lane_turnaround_chart_bypass(
+    side: Side | str,
+    snap: Optional[SymbolSnapshot],
+    *,
+    event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    readiness_reason: str = "",
+) -> bool:
+    """Bypass chart_live_bearish_no_calls for premium-led pad-lane turnarounds.
+
+    The option can V-rip off session low before the 5m index chart flips. Uses a
+    wider adverse index-momentum cap than local_base_structure_active while still
+    rejecting extended chases and hard index dumps.
+    """
+    from app.engines.local_base_chart_bypass import session_chart_conflicts_side
+
+    settings = get_settings()
+    if not bool(getattr(settings, "pad_lane_chart_bypass_enabled", True)):
+        return False
+    if snap is None or not session_chart_conflicts_side(side, snap):
+        return False
+    if not _pad_lane_turnaround_signal(alert, readiness_reason):
+        return False
+
+    v3, v9, base_move, peak_move, volume_awake = _pad_lane_chart_metrics(
+        event=event,
+        alert=alert,
+    )
+    min_v3 = float(
+        getattr(settings, "pad_lane_chart_bypass_min_velocity_3s", 0.5) or 0.5
+    )
+    awake_min_v3 = float(
+        getattr(
+            settings,
+            "pad_lane_chart_bypass_volume_awaken_min_velocity_3s",
+            0.2,
+        )
+        or 0.2
+    )
+    min_v9 = float(
+        getattr(settings, "pad_lane_chart_bypass_min_premium_velocity_9s", -0.3)
+        or -0.3
+    )
+    velocity_ok = v3 >= min_v3 or (volume_awake and v3 >= awake_min_v3)
+    if not velocity_ok or v9 < min_v9:
+        return False
+
+    max_off_low = float(
+        getattr(settings, "pad_lane_chart_bypass_max_off_low_pct", 30.0) or 30.0
+    )
+    max_peak = float(
+        getattr(settings, "pad_lane_chart_bypass_max_peak_move_pct", 38.0) or 38.0
+    )
+    move = max(base_move, float((alert or {}).get("offLowMovePct") or 0))
+    if move > max_off_low + 1e-6:
+        return False
+    if peak_move > max_peak + 1e-6:
+        return False
+
+    chart = getattr(snap, "spotChart", None)
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0) if chart else 0.0
+    max_adverse = float(
+        getattr(
+            settings,
+            "pad_lane_chart_bypass_max_adverse_index_mom5_pct",
+            0.25,
+        )
+        or 0.25
+    )
+    side_v = _side_val(side)
+    if side_v == "CALL" and mom5 < -max_adverse:
+        return False
+    if side_v == "PUT" and mom5 > max_adverse:
+        return False
+    return True
+
+
+def pad_lane_turnaround_chart_bypass_for_snap(
+    side: Side | str,
+    snap: SymbolSnapshot,
+    *,
+    explosion_event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    readiness_reason: str = "",
+) -> bool:
+    """Snap helper — also scans matching explosionAlerts when alert is absent."""
+    if pad_lane_turnaround_chart_bypass(
+        side,
+        snap,
+        event=explosion_event,
+        alert=alert,
+        readiness_reason=readiness_reason,
+    ):
+        return True
+    side_v = _side_val(side)
+    strike = float(getattr(explosion_event, "strike", 0) or 0) if explosion_event else 0.0
+    for row in snap.explosionAlerts or []:
+        if str(row.get("side") or "").upper() != side_v:
+            continue
+        if strike and abs(float(row.get("strike") or 0) - strike) > 0.1:
+            continue
+        rr = str(
+            row.get("ictBaseReadinessReason")
+            or row.get("readyReason")
+            or readiness_reason
+            or ""
+        )
+        if pad_lane_turnaround_chart_bypass(
+            side,
+            snap,
+            event=explosion_event,
+            alert=row,
+            readiness_reason=rr,
+        ):
+            return True
+    return False
+
+
 def extended_pad_lane_readiness(
     *,
     snap: Optional[SymbolSnapshot],

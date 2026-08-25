@@ -1547,6 +1547,17 @@ class Settings(BaseSettings):
     early_radar_pad_ftv_min_explosion_score: float = 5.0
     early_radar_pad_ftv_max_capital_pct: float = 0.90
     early_radar_pad_ftv_force_max_lots: bool = True
+    # Pad-lane turnaround chart bypass — premium-led V-rip / slow-grind / FTV lifts off
+    # session low while the 5m index chart is still counter-trend (Aug25 NIFTY 24150 CE
+    # ₹20→90 V-reversal blocked by chart_live_bearish_no_calls). Wider adverse-momentum
+    # cap than local_base_structure_active; still bounded so extended chases fail.
+    pad_lane_chart_bypass_enabled: bool = True
+    pad_lane_chart_bypass_min_velocity_3s: float = 0.5
+    pad_lane_chart_bypass_volume_awaken_min_velocity_3s: float = 0.2
+    pad_lane_chart_bypass_max_off_low_pct: float = 30.0
+    pad_lane_chart_bypass_max_peak_move_pct: float = 38.0
+    pad_lane_chart_bypass_max_adverse_index_mom5_pct: float = 0.25
+    pad_lane_chart_bypass_min_premium_velocity_9s: float = -0.3
     # ICT confirm stack for local-base reversals (additive quality, not hard gates).
     local_base_reversal_ict_bonus_max: float = 18.0
     local_base_reversal_kill_zone_bonus_enabled: bool = True
