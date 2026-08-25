@@ -31,6 +31,7 @@ ALL_PAD_LANE_REASONS = frozenset(
         MICRO_PULLBACK_RETEST_READY,
         PREMIUM_FVG_PAD_READY,
         DOUBLE_DIP_VBASE_READY,
+        "early_radar_pad_ready",
     }
 )
 
@@ -44,6 +45,7 @@ PAD_LANE_FTV_MODES = frozenset(
         "MICRO_PULLBACK_RETEST_FTV",
         "PREMIUM_FVG_PAD_FTV",
         "DOUBLE_DIP_VBASE_FTV",
+        "EARLY_RADAR_PAD_FTV",
     }
 )
 
@@ -58,6 +60,7 @@ def pad_lane_pre_lift(evidence: Mapping[str, Any]) -> bool:
         or evidence.get("microPullbackRetest")
         or evidence.get("premiumFvgPad")
         or evidence.get("doubleDipVbase")
+        or evidence.get("earlyRadarPadCapture")
     )
 
 
@@ -78,6 +81,8 @@ def pad_lane_cold_velocity_ok(
     if evidence.get("premiumFvgPad") and v3 <= 2.0:
         return True
     if evidence.get("doubleDipVbase") and -0.8 <= v3 <= 1.5:
+        return True
+    if evidence.get("earlyRadarPadCapture") and -0.8 <= v3 <= 1.5:
         return True
     return False
 

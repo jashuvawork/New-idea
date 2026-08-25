@@ -101,6 +101,10 @@ def local_base_entry_window(tier: str = "", volume_surge: float = 0.0) -> tuple[
 
 def _alert_has_local_base(alert: dict[str, Any]) -> bool:
     """Local premium launch pad — ICT structure OR strong early-window explosion."""
+    from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+
+    if alert_has_early_radar_pad_capture(alert):
+        return True
     settings = get_settings()
     if alert.get("ictFlatThenVertical") or alert.get("localSwingBase"):
         return True

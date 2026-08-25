@@ -2235,19 +2235,13 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
                 tradeable = True
         except Exception:
             pass
-    # A shallow-OTM strike is monitored on radar (so its base is retained for the eventual
-    # ATM rotation) but must never be tradeable or count as a first lift until it becomes
-    # ATM/ITM — only near-the-money strikes take. Guard keyed on scan-time moneyness.
-    if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
-        tradeable = False
-        first_lift = False
     reported_volume = float(e.volume or 0)
     if reported_volume <= 0 and armed_evidence:
         reported_volume = max(
             reported_volume,
             float(armed_evidence.get("volume") or 0),
         )
-    return {
+    alert_out = {
         "symbol": e.symbol,
         "side": e.side.value,
         "strike": e.strike,
@@ -2361,3 +2355,15 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         ),
         "ictReasons": ict.reasons,
     }
+    from app.engines.early_radar_pad_capture import stamp_early_radar_pad_capture
+
+    if stamp_early_radar_pad_capture(alert_out, snap):
+        tradeable = True
+        alert_out["tradeable"] = True
+    # A shallow-OTM strike is monitored on radar but must never be tradeable.
+    if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
+        tradeable = False
+        first_lift = False
+        alert_out["tradeable"] = False
+        alert_out["ictFirstLift"] = False
+    return alert_out

@@ -176,6 +176,9 @@ def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, An
         "doubleDipVbase": bool(
             alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")
         ),
+        "earlyRadarPadCapture": bool(
+            alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
+        ),
         "timingAssessment": str(alert.get("timingAssessment") or ""),
         "timingAction": str(alert.get("timingAction") or ""),
     }

@@ -1140,6 +1140,7 @@ def validate_candidate(
                 "micro_pullback_retest_ready",
                 "premium_fvg_pad_ready",
                 "double_dip_vbase_ready",
+                "early_radar_pad_ready",
             )
         )
         if armed_base_chart_bypass:

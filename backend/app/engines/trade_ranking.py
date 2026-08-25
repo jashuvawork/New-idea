@@ -326,6 +326,9 @@ def ftv_authorization_policy(
     double_dip_vbase_ftv_enabled: bool = True,
     double_dip_vbase_ftv_min_explosion_score: float = 48.0,
     double_dip_vbase_ftv_max_capital_pct: float = 0.90,
+    early_radar_pad_ftv_enabled: bool = True,
+    early_radar_pad_ftv_min_explosion_score: float = 45.0,
+    early_radar_pad_ftv_max_capital_pct: float = 0.90,
     top_moments_only_enabled: bool = True,
     top_moments_min_grade: str = "A",
     first_lift_local_base_micro_pullback_enabled: bool = True,
@@ -879,6 +882,16 @@ def ftv_authorization_policy(
             max_v3=1.5,
             block_prefix="double_dip_vbase_ftv",
         ),
+        _pad_lane_ftv_auth(
+            enabled=early_radar_pad_ftv_enabled,
+            flag=bool(evidence.get("earlyRadarPadCapture")),
+            mode="EARLY_RADAR_PAD_FTV",
+            min_score=early_radar_pad_ftv_min_explosion_score,
+            max_capital=early_radar_pad_ftv_max_capital_pct,
+            min_v3=-0.8,
+            max_v3=1.5,
+            block_prefix="early_radar_pad_ftv",
+        ),
     ):
         if auth is not None:
             return auth
@@ -1007,6 +1020,9 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "double_dip_vbase_ftv_enabled",
         "double_dip_vbase_ftv_min_explosion_score",
         "double_dip_vbase_ftv_max_capital_pct",
+        "early_radar_pad_ftv_enabled",
+        "early_radar_pad_ftv_min_explosion_score",
+        "early_radar_pad_ftv_max_capital_pct",
         "top_moments_only_enabled",
         "top_moments_min_grade",
         "first_lift_local_base_micro_pullback_enabled",
@@ -1112,6 +1128,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     double_dip_vbase = bool(evidence.get("doubleDipVbase")) and not bool(
         evidence.get("midRipCoil")
     )
+    early_radar_pad = bool(evidence.get("earlyRadarPadCapture")) and not bool(
+        evidence.get("midRipCoil")
+    )
     flat_vertical = bool(evidence.get("flatThenVertical"))
     active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
@@ -1167,6 +1186,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     elif double_dip_vbase:
         score += 11.0
         reasons.append("double_dip_vbase")
+    elif early_radar_pad:
+        score += 12.0
+        reasons.append("early_radar_pad_ftv")
     elif fast_bullish_local_base:
         score += 11.0
         reasons.append("fast_bullish_local_base")
@@ -1307,6 +1329,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             or micro_pullback_retest
             or premium_fvg_pad
             or double_dip_vbase
+            or early_radar_pad
         )
         and (
             v3 > 0
@@ -1361,6 +1384,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "microPullbackRetest": micro_pullback_retest,
             "premiumFvgPad": premium_fvg_pad,
             "doubleDipVbase": double_dip_vbase,
+            "earlyRadarPadCapture": early_radar_pad,
             "buildingRipReady": building_rip_ready,
             "buildingRipHelpersOk": bool(
                 evidence.get("buildingRipHelpersOk")
@@ -1491,6 +1515,9 @@ def rank_entry_candidate(
         ),
         "doubleDipVbase": bool(
             alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")
+        ),
+        "earlyRadarPadCapture": bool(
+            alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
         ),
         "buildingRipReady": alert.get("ictBuildingRipReady"),
         "buildingRipHelpersOk": bool(

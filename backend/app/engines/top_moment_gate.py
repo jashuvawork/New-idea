@@ -34,6 +34,7 @@ def classify_top_moment_type(evidence: Mapping[str, Any]) -> Optional[str]:
         or evidence.get("microPullbackRetest")
         or evidence.get("premiumFvgPad")
         or evidence.get("doubleDipVbase")
+        or evidence.get("earlyRadarPadCapture")
     ):
         return "FTV"
 
@@ -157,6 +158,8 @@ def qualifies_for_top_moment_max_lots(
 
 def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
     """Pre-selector radar filter: BUILDING must show FTV/V shape before candidacy."""
+    if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
+        return True
     tier = str(alert.get("tier") or "").upper()
     if tier in ("ELITE", "EXPLODING"):
         return True

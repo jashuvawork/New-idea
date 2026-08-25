@@ -26,6 +26,7 @@ PAD_LANE_READY_REASONS = frozenset(
         "micro_pullback_retest_ready",
         "premium_fvg_pad_ready",
         "double_dip_vbase_ready",
+        "early_radar_pad_ready",
     }
 )
 
@@ -100,6 +101,8 @@ def pad_lane_ready_reason(
             return "premium_fvg_pad_ready"
         if bool(alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")):
             return "double_dip_vbase_ready"
+        if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
+            return "early_radar_pad_ready"
     return ""
 
 

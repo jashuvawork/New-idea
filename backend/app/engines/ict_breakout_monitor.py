@@ -1054,6 +1054,14 @@ def first_lift_entry_readiness(
     if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
         return False, "mid_rip_armed_coil_rejected"
 
+    from app.engines.early_radar_pad_capture import (
+        EARLY_RADAR_PAD_READY,
+        alert_has_early_radar_pad_capture,
+    )
+
+    if isinstance(alert, dict) and alert_has_early_radar_pad_capture(alert):
+        return True, EARLY_RADAR_PAD_READY
+
     # BUILDING bullish-rip sleeve — mid-rip OK while still expanding to max.
     # Runs before first-lift chart gate so option-led BUILDING rips still authorize.
     building_ok, building_reason = building_rip_bullish_readiness(

@@ -44,6 +44,7 @@ def _ict_flat_vertical_entry_ok(
     tier_u = str(getattr(event, "tier", "") or "").upper()
     from app.engines.building_ftv_gates import (
         BUILDING_READY_REASONS,
+        PAD_LANE_READY_REASONS,
         alert_has_building_rip_signal,
     )
     from app.engines.ict_breakout_monitor import (
@@ -61,6 +62,7 @@ def _ict_flat_vertical_entry_ok(
     )
     if first_lift_ready and (
         ready_reason in BUILDING_READY_REASONS
+        or ready_reason in PAD_LANE_READY_REASONS
         or ready_reason.startswith("buildingRip")
         or alert_has_building_rip_signal(alert)
         or bool(getattr(ict, "building_rip_ready", False))
@@ -253,7 +255,9 @@ def check_explosion_entry(
                 event, align_chart, breadth_bias, snap=snap,
             )
             local_ichi_bypass = (
-                local_base_ichimoku_chart_bypass(event.side, snap, event=event)
+                local_base_ichimoku_chart_bypass(
+                    event.side, snap, event=event, alert=alert,
+                )
                 if snap is not None
                 else False
             )
@@ -391,6 +395,7 @@ def check_explosion_entry(
         snap=snap,
         event=event,
         ict=ict_live,
+        alert=alert if isinstance(alert, dict) else None,
     )
     from app.engines.elite_never_block import elite_never_block_active
 
@@ -427,7 +432,7 @@ def check_explosion_entry(
         premium_capture=is_premium_capture_event(event, chart=chart),
         snap=snap,
     )
-    if live_blocked and not must_take:
+    if live_blocked and not must_take and not first_lift_ready:
         return False, live_reason
 
     from app.engines.entry_timing import assess_entry_timing, timing_blocks_entry

@@ -1501,6 +1501,14 @@ class Settings(BaseSettings):
     double_dip_vbase_ftv_min_explosion_score: float = 48.0
     double_dip_vbase_ftv_max_capital_pct: float = 0.90
     double_dip_vbase_ftv_force_max_lots: bool = True
+    # Early radar pad — take FTV/V/ELITE/EXPLODING at session trough (e.g. ₹33→48).
+    early_radar_pad_capture_enabled: bool = True
+    early_radar_pad_max_off_low_pct: float = 15.0
+    early_radar_pad_max_local_move_pct: float = 20.0
+    early_radar_pad_ftv_enabled: bool = True
+    early_radar_pad_ftv_min_explosion_score: float = 45.0
+    early_radar_pad_ftv_max_capital_pct: float = 0.90
+    early_radar_pad_ftv_force_max_lots: bool = True
     # ICT confirm stack for local-base reversals (additive quality, not hard gates).
     local_base_reversal_ict_bonus_max: float = 18.0
     local_base_reversal_kill_zone_bonus_enabled: bool = True

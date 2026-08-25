@@ -287,7 +287,16 @@ def _explosion_candidates(
 
     out: list[EntryCandidate] = []
     for alert in snap.explosionAlerts or []:
-        if not alert.get("tradeable"):
+        from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+        from app.engines.ict_breakout_monitor import first_lift_entry_readiness
+
+        first_lift_ready, first_lift_readiness_reason = first_lift_entry_readiness(
+            snap=snap,
+            alert=alert,
+            state=state,
+        )
+        early_pad = alert_has_early_radar_pad_capture(alert)
+        if not alert.get("tradeable") and not early_pad and not first_lift_ready:
             continue
         if not premium_in_band(
             alert.get("premium"),
@@ -296,13 +305,6 @@ def _explosion_candidates(
             snap=snap,
         ):
             continue
-        from app.engines.ict_breakout_monitor import first_lift_entry_readiness
-
-        first_lift_ready, first_lift_readiness_reason = first_lift_entry_readiness(
-            snap=snap,
-            alert=alert,
-            state=state,
-        )
         side_v = str(alert.get("side") or "").upper()
         try:
             strike_v = float(alert.get("strike") or 0)
@@ -359,6 +361,7 @@ def _explosion_candidates(
                 and snap.spotChart is not None
                 and not side_aligned_with_chart(side_v, snap.spotChart)
                 and not first_lift_ready
+                and not early_pad
             ):
                 # A confirmed local base off which the side is breaking may survive the
                 # chart-align drop — mirror check_explosion_entry so a genuine base rip
@@ -392,7 +395,7 @@ def _explosion_candidates(
             peak_move_pct=peak_move,
             daily_move_pct=daily_move,
         )
-        if first_lift_ready:
+        if first_lift_ready or early_pad:
             min_explosion_score = min(
                 min_explosion_score,
                 float(
@@ -584,7 +587,7 @@ def _explosion_candidates(
             snap, event, ict, alert=alert,
         )
         late_blocked, _late_reason = late_fade_chase_blocked(event, ict, snap=snap)
-        if late_blocked:
+        if late_blocked and not first_lift_ready:
             continue
         from app.engines.explosion_entry_guards import (
             detect_fake_explosion_trap,
@@ -620,7 +623,7 @@ def _explosion_candidates(
             premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
             snap=snap,
         )
-        if live_blocked and not must_take:
+        if live_blocked and not must_take and not first_lift_ready:
             continue
         from app.engines.entry_timing import assess_entry_timing, timing_blocks_entry
 
@@ -1915,6 +1918,7 @@ def diagnose_missed_entries(
             )
             blockers: list[str] = []
             first_lift_ready = False
+            early_pad = False
             if bool(
                 alert.get("ictFirstLift")
                 or alert.get("ictVRipReady")
@@ -1940,8 +1944,11 @@ def diagnose_missed_entries(
                 )
                 if not first_lift_ready:
                     blockers.append(readiness_reason)
+            from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+
+            early_pad = alert_has_early_radar_pad_capture(alert)
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
-                if not first_lift_ready and not _building_aligned_ict_alert_ok(
+                if not first_lift_ready and not early_pad and not _building_aligned_ict_alert_ok(
                     alert, snap, str(tier_str).upper(),
                     state=state, snapshots=snapshots,
                 ):
@@ -1954,6 +1961,7 @@ def diagnose_missed_entries(
                     if (
                         not side_aligned_with_chart(Side(side_raw), snap.spotChart)
                         and not first_lift_ready
+                        and not early_pad
                     ):
                         blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):
