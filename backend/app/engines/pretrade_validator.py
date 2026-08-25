@@ -568,7 +568,10 @@ def validate_candidate(
     policy_meta: dict[str, Any] = {}
     if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
         from app.engines.moneyness import atm_itm_entry_allows
-        from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
+        from app.engines.session_mode_feedback import (
+            exhausted_ftv_reentry_blocked,
+            session_peak_late_reentry_blocked,
+        )
         from app.engines.trade_ranking import (
             ftv_authorization_policy,
             ftv_policy_settings,
@@ -593,6 +596,31 @@ def validate_candidate(
                     or 0
                 ),
             )
+            if not exhausted:
+                alert_d = (
+                    candidate.alert
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else {}
+                )
+                late_peak, late_reason = session_peak_late_reentry_blocked(
+                    symbol=str(getattr(candidate, "symbol", "") or ""),
+                    side=getattr(candidate, "side", ""),
+                    strike=float(getattr(candidate, "strike", 0) or 0),
+                    premium=float(getattr(candidate, "premium", 0) or 0),
+                    velocity_3s=float(
+                        getattr(
+                            getattr(candidate, "explosion_event", None),
+                            "velocity_3s",
+                            0,
+                        )
+                        or 0
+                    ),
+                    alert=alert_d,
+                )
+                if late_peak:
+                    return False, late_reason or "late_reentry_near_session_peak", {
+                        "lateReentryBlocked": True,
+                    }
         causal_ranking = rank_entry_candidate(
             candidate,
             exhausted_reentry=exhausted,

@@ -1084,6 +1084,13 @@ class Settings(BaseSettings):
     explosion_post_peak_reentry_base_span_seconds: float = 6.0
     explosion_post_peak_reentry_min_reacceleration_pct: float = 8.0
     explosion_post_peak_reentry_min_velocity_3s: float = 1.5
+    # Block re-entry on a strike that already ripped to session peak and is still
+    # trading near the top on weak velocity (Aug25 24250 PE ₹121 peak → ₹110 chase).
+    explosion_late_reentry_block_enabled: bool = True
+    explosion_late_reentry_min_peak_points: float = 15.0
+    explosion_late_reentry_near_peak_pct: float = 12.0
+    explosion_late_reentry_pullback_ok_pct: float = 22.0
+    explosion_late_reentry_min_velocity_3s: float = 1.2
     explosion_breadth_alignment_enabled: bool = True
     # Hard block PUT on BULLISH / CALL on BEARISH — no ELITE or premium-led bypass
     breadth_hard_side_block_enabled: bool = True
