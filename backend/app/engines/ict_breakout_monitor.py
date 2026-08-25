@@ -761,6 +761,199 @@ def _fast_bullish_local_base_readiness(
 SLOW_GRIND_ARMED_TROUGH_READY = "slow_grind_armed_trough_ready"
 
 
+SLOW_GRIND_CONSOLIDATION_BASE_READY = "slow_grind_consolidation_base_ready"
+
+
+def _slow_grind_consolidation_base_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Authorize slow-coil on a mid-day consolidation base before the afternoon breakout."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "slow_grind_consolidation_base_enabled", True)):
+        return False, ""
+    row = alert if isinstance(alert, dict) else {}
+    if snap is None:
+        return False, "slow_grind_consolidation_chart_missing"
+    if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
+        return False, "slow_grind_consolidation_mid_rip_coil"
+    if bool(
+        row.get("ictArmedBaseLaunch")
+        or row.get("ictEliteBaseReady")
+        or row.get("ictFirstLift")
+    ):
+        return False, "slow_grind_consolidation_strict_path_active"
+
+    from app.engines.morning_premium_capture import in_afternoon_premium_capture_window
+
+    if not in_afternoon_premium_capture_window():
+        return False, "slow_grind_consolidation_outside_afternoon_window"
+
+    tier = str(
+        getattr(event, "tier", "")
+        or row.get("tier")
+        or ""
+    ).upper()
+    if tier not in ("WATCH", "BUILDING"):
+        return False, f"slow_grind_consolidation_tier_{tier.lower() or 'missing'}"
+
+    premium = float(
+        getattr(event, "premium", 0) or row.get("premium") or 0
+    )
+    prem_ok, prem_reason = _local_base_pad_premium_band_ok(
+        premium,
+        settings=s,
+        max_premium_setting="slow_grind_sudden_lift_max_premium_inr",
+        reason_prefix="slow_grind_consolidation",
+    )
+    if not prem_ok:
+        return False, prem_reason
+
+    off_low = max(0.0, float(row.get("offLowMovePct") or 0))
+    trough_max = float(
+        getattr(s, "slow_grind_armed_trough_max_off_low_pct", 2.0) or 2.0
+    )
+    min_off = float(
+        getattr(s, "slow_grind_consolidation_base_min_off_low_pct", 3.0) or 3.0
+    )
+    max_off = float(
+        getattr(s, "slow_grind_consolidation_base_max_off_low_pct", 30.0) or 30.0
+    )
+    if off_low <= trough_max + 1e-6:
+        return False, "slow_grind_consolidation_at_session_trough"
+    if not (min_off <= off_low <= max_off + 1e-6):
+        return False, f"slow_grind_consolidation_off_low_outside_{min_off:g}_{max_off:g}"
+
+    peak_move = float(
+        getattr(event, "peak_move_pct", 0)
+        or row.get("peakMovePct")
+        or 0
+    )
+    max_peak = float(
+        getattr(s, "slow_grind_consolidation_base_max_peak_move_pct", 24.0) or 24.0
+    )
+    if peak_move > max_peak + 1e-6:
+        return False, f"slow_grind_consolidation_peak>{max_peak:g}"
+
+    base_armed = bool(
+        getattr(ict, "base_armed", False)
+        or row.get("ictBaseArmed")
+        or getattr(ict, "local_swing_base", False)
+    )
+    if not base_armed:
+        return False, "slow_grind_consolidation_base_not_armed"
+
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    lo = float(
+        getattr(s, "slow_grind_consolidation_base_min_move_pct", 2.0) or 2.0
+    )
+    hi = float(
+        getattr(s, "slow_grind_consolidation_base_max_move_pct", 22.0) or 22.0
+    )
+    if not (lo <= base_move <= hi + 1e-6):
+        return False, f"slow_grind_consolidation_pad_outside_{lo:g}_{hi:g}"
+
+    v3 = float(
+        getattr(event, "velocity_3s", 0) or row.get("velocity3s") or 0
+    )
+    min_v3 = float(
+        getattr(s, "slow_grind_sudden_lift_min_velocity_3s", -0.8) or -0.8
+    )
+    max_v3 = float(
+        getattr(s, "slow_grind_sudden_lift_max_velocity_3s", 1.5) or 1.5
+    )
+    if v3 < min_v3:
+        return False, f"slow_grind_consolidation_velocity3s<{min_v3:g}"
+    if v3 > max_v3:
+        return False, f"slow_grind_consolidation_velocity3s>{max_v3:g}"
+
+    quality = float(
+        getattr(ict, "flat_vertical_quality", 0)
+        or row.get("flatVerticalQuality")
+        or 0
+    )
+    min_quality = float(
+        getattr(s, "slow_grind_consolidation_base_min_flat_quality", 35.0) or 35.0
+    )
+    if quality < min_quality:
+        return False, f"slow_grind_consolidation_quality<{min_quality:g}"
+
+    samples = int(
+        getattr(ict, "armed_base_samples", 0)
+        or row.get("ictArmedBaseSamples")
+        or 0
+    )
+    min_samples = int(
+        getattr(s, "slow_grind_consolidation_base_min_coil_samples", 6) or 6
+    )
+    if samples < min_samples:
+        return False, f"slow_grind_consolidation_samples<{min_samples}"
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    signal_ct, _signals = _slow_grind_impending_lift_signals(
+        side=side,
+        snap=snap,
+        ict=ict,
+        row=row,
+        settings=s,
+    )
+    min_signals = int(
+        getattr(s, "slow_grind_consolidation_base_min_impending_signals", 2) or 2
+    )
+    if signal_ct < min_signals:
+        return False, f"slow_grind_consolidation_impending_signals<{min_signals}"
+
+    structured = bool(
+        getattr(ict, "flat_then_vertical", False)
+        or getattr(ict, "active", False)
+        or row.get("ictFlatThenVertical")
+        or row.get("ictBreakout")
+        or quality >= min_quality
+    )
+    if not structured:
+        return False, "slow_grind_consolidation_structure_missing"
+
+    from app.engines.moneyness import classify_moneyness
+    from app.models.schemas import Side
+
+    if side not in ("CALL", "PUT"):
+        return False, "slow_grind_consolidation_side_invalid"
+    strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0)
+    if strike <= 0 or spot <= 0:
+        return False, "slow_grind_consolidation_moneyness_unavailable"
+    money = classify_moneyness(
+        Side(side),
+        strike,
+        spot,
+        symbol=str(getattr(snap, "symbol", "") or ""),
+        atm=atm if atm > 0 else None,
+    )
+    if money not in ("ATM", "ITM"):
+        return False, f"slow_grind_consolidation_requires_atm_itm_{money.lower()}"
+    if isinstance(alert, dict):
+        alert["slowGrindSuddenLiftReady"] = True
+        alert["ictSlowGrindSuddenLift"] = True
+        alert["slowGrindConsolidationBase"] = True
+        alert["ictSlowGrindConsolidationBase"] = True
+        alert["ictBaseReadinessReason"] = SLOW_GRIND_CONSOLIDATION_BASE_READY
+    return True, SLOW_GRIND_CONSOLIDATION_BASE_READY
+
+
 def _slow_grind_armed_trough_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -1026,6 +1219,15 @@ def _slow_grind_sudden_lift_readiness(
     )
     if armed_trough_ok:
         return True, armed_trough_reason
+    consolidation_ok, consolidation_reason = _slow_grind_consolidation_base_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=alert,
+        settings=s,
+    )
+    if consolidation_ok:
+        return True, consolidation_reason
     row = alert if isinstance(alert, dict) else {}
     if snap is None:
         return False, "slow_grind_chart_missing"

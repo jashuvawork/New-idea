@@ -301,6 +301,11 @@ def _explosion_candidates(
             or alert.get("ictSlowGrindArmedTrough")
             or first_lift_readiness_reason == "slow_grind_armed_trough_ready"
         )
+        slow_grind_consolidation = bool(
+            alert.get("slowGrindConsolidationBase")
+            or alert.get("ictSlowGrindConsolidationBase")
+            or first_lift_readiness_reason == "slow_grind_consolidation_base_ready"
+        )
         if not alert.get("tradeable") and not early_pad and not first_lift_ready:
             continue
         if not premium_in_band(
@@ -431,6 +436,18 @@ def _explosion_candidates(
                 float(
                     getattr(settings, "slow_grind_armed_trough_min_explosion_score", 5.0)
                     or 5.0
+                ),
+            )
+        if slow_grind_consolidation:
+            min_explosion_score = min(
+                min_explosion_score,
+                float(
+                    getattr(
+                        settings,
+                        "slow_grind_consolidation_base_min_explosion_score",
+                        24.0,
+                    )
+                    or 24.0
                 ),
             )
         if score_val < min_explosion_score:
@@ -740,6 +757,7 @@ def _explosion_candidates(
             "fast_bullish_local_base_ready",
                 "slow_grind_sudden_lift_ready",
                 "slow_grind_armed_trough_ready",
+                "slow_grind_consolidation_base_ready",
                 "fast_bullish_local_base_ready",
                 "squeeze_release_ready",
                 "index_led_option_lag_ready",
@@ -1980,6 +1998,10 @@ def diagnose_missed_entries(
                 alert.get("slowGrindArmedTrough")
                 or alert.get("ictSlowGrindArmedTrough")
             )
+            slow_grind_consolidation = bool(
+                alert.get("slowGrindConsolidationBase")
+                or alert.get("ictSlowGrindConsolidationBase")
+            )
             local_base_move = float(
                 alert.get("localBaseMovePct")
                 or alert.get("ictBaseRelativeMovePct")
@@ -2012,6 +2034,18 @@ def diagnose_missed_entries(
                             5.0,
                         )
                         or 5.0
+                    ),
+                )
+            if slow_grind_consolidation:
+                min_score = min(
+                    min_score,
+                    float(
+                        getattr(
+                            settings,
+                            "slow_grind_consolidation_base_min_explosion_score",
+                            24.0,
+                        )
+                        or 24.0
                     ),
                 )
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
