@@ -387,10 +387,17 @@ def _explosion_candidates(
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
         peak_move = float(alert.get("peakMovePct") or 0)
         tier_str = str(alert.get("tier") or "WATCH")
+        local_base_move = float(
+            alert.get("localBaseMovePct")
+            or alert.get("ictBaseRelativeMovePct")
+            or 0
+        )
         min_explosion_score = effective_explosion_min_score(
             tier=tier_str,
             peak_move_pct=peak_move,
             daily_move_pct=daily_move,
+            first_lift_ready=first_lift_ready,
+            local_base_move_pct=local_base_move,
         )
         if first_lift_ready:
             min_explosion_score = min(
@@ -1907,11 +1914,6 @@ def diagnose_missed_entries(
             daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
             peak_move = float(alert.get("peakMovePct") or 0)
             tier_str = str(alert.get("tier") or "WATCH")
-            min_score = effective_explosion_min_score(
-                tier=tier_str,
-                peak_move_pct=peak_move,
-                daily_move_pct=daily_move,
-            )
             blockers: list[str] = []
             first_lift_ready = False
             if bool(
@@ -1939,6 +1941,18 @@ def diagnose_missed_entries(
                 )
                 if not first_lift_ready:
                     blockers.append(readiness_reason)
+            local_base_move = float(
+                alert.get("localBaseMovePct")
+                or alert.get("ictBaseRelativeMovePct")
+                or 0
+            )
+            min_score = effective_explosion_min_score(
+                tier=tier_str,
+                peak_move_pct=peak_move,
+                daily_move_pct=daily_move,
+                first_lift_ready=first_lift_ready,
+                local_base_move_pct=local_base_move,
+            )
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
                 if not first_lift_ready and not _building_aligned_ict_alert_ok(
                     alert, snap, str(tier_str).upper(),

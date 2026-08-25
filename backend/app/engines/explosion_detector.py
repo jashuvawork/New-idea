@@ -743,6 +743,8 @@ def effective_explosion_min_score(
     tier: str,
     peak_move_pct: float = 0.0,
     daily_move_pct: float = 0.0,
+    first_lift_ready: bool = False,
+    local_base_move_pct: float = 0.0,
 ) -> float:
     """Lower min score when a material session peak rip qualifies for bypass."""
     from app.config import get_settings
@@ -751,6 +753,23 @@ def effective_explosion_min_score(
     base = float(settings.aggressive_min_explosion_score)
     if daily_move_pct >= settings.all_day_explosion_session_move_min_pct:
         base = min(base, float(settings.all_day_explosion_min_score))
+    tier_u = str(tier or "").upper()
+    lb = float(local_base_move_pct or 0.0)
+    if (
+        first_lift_ready
+        and bool(getattr(settings, "first_lift_pad_explosion_bypass_enabled", True))
+        and tier_u in ("ELITE", "EXPLODING")
+        and lb
+        >= float(getattr(settings, "first_lift_pad_local_base_min_pct", 2.0) or 2.0)
+        and lb
+        <= float(getattr(settings, "first_lift_pad_local_base_max_pct", 25.0) or 25.0)
+        and peak_move_pct
+        >= float(getattr(settings, "first_lift_pad_explosion_min_peak_pct", 25.0) or 25.0)
+    ):
+        base = min(
+            base,
+            float(getattr(settings, "first_lift_pad_explosion_min_score", 24.0) or 24.0),
+        )
     if not getattr(settings, "peak_move_explosion_bypass_enabled", True):
         return base
     if peak_move_pct < float(getattr(settings, "peak_move_explosion_min_pct", 35.0) or 35.0):
