@@ -88,3 +88,83 @@ def test_positive_v3_does_not_use_flat_velocity_stamp():
     ranking = rank_trade_evidence(evidence)
     assert ranking["evidence"]["firstLiftLocalBaseFlatVelocity"] is False
 
+
+def _aug25_v_rip_upper_pad_miss(**overrides):
+    """Aug25 SENSEX PUT 77200: v_rip_session_low, lb=23.7%, peak=29.8%, v3=0.65."""
+    evidence = {
+        "mode": "explosion",
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "tqs": 59.0,
+        "chartConfidence": 84.0,
+        "velocity3s": 0.65,
+        "velocity9s": 0.5,
+        "localBaseMovePct": 23.7,
+        "peakMovePct": 29.78,
+        "dailyMovePct": 23.69,
+        "firstLift": True,
+        "vRipReady": True,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "orderflowPositive": True,
+        "volumeAwaken": True,
+        "flatVerticalQuality": 75.0,
+        "timingAssessment": "GOOD",
+        "cvdBuying": True,
+        "cvdAcceleration": True,
+    }
+    evidence.update(overrides)
+    return evidence
+
+
+def test_slow_v3_v_rip_upper_pad_gets_flat_velocity_stamp():
+    evidence = _aug25_v_rip_upper_pad_miss()
+    ranking = rank_trade_evidence(evidence)
+    assert ranking["grade"] == "A"
+    assert ranking["evidence"]["firstLiftLocalBaseFlatVelocity"] is True
+
+
+def test_slow_v3_v_rip_upper_pad_admits_first_lift_local_base_sleeve():
+    evidence = _aug25_v_rip_upper_pad_miss()
+    ranking = rank_trade_evidence(evidence)
+    decision = ftv_authorization_policy(
+        evidence,
+        ranking,
+        snapshot_available=True,
+        allocation_rank=1,
+        require_allocation_rank_one=True,
+        day_mode="EXPIRY DAY · ELITE dual-mode AGGRESSIVE",
+    )
+    assert decision.allowed is True
+    assert decision.mode == "FIRST_LIFT_LOCAL_BASE"
+    assert decision.reason == "ok_flat_velocity_lag"
+
+
+def test_nifty_put_24300_slow_v3_miss_admitted():
+    evidence = _aug25_v_rip_upper_pad_miss(
+        tier="EXPLODING",
+        localBaseMovePct=20.3,
+        peakMovePct=25.1,
+        dailyMovePct=20.34,
+        velocity3s=0.32,
+        flatVerticalQuality=70.0,
+    )
+    ranking = rank_trade_evidence(evidence)
+    assert ranking["evidence"]["firstLiftLocalBaseFlatVelocity"] is True
+    decision = ftv_authorization_policy(
+        evidence,
+        ranking,
+        snapshot_available=True,
+        allocation_rank=1,
+        require_allocation_rank_one=True,
+        day_mode="EXPIRY DAY",
+    )
+    assert decision.allowed is True
+    assert decision.reason == "ok_flat_velocity_lag"
+
+
+def test_slow_v3_at_volume_awake_floor_still_blocks():
+    evidence = _aug25_v_rip_upper_pad_miss(velocity3s=0.86)
+    ranking = rank_trade_evidence(evidence)
+    assert ranking["evidence"]["firstLiftLocalBaseFlatVelocity"] is False
+
