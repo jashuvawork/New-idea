@@ -250,3 +250,187 @@ def test_consolidation_routes_through_first_lift_readiness(mock_settings, _after
     assert ready is True
     assert reason == SLOW_GRIND_CONSOLIDATION_BASE_READY
     assert explosion_alert_is_top_moment(alert) is True
+
+
+def _sensex_afternoon_snap(*, spot: float = 77226.0, atm: float = 77200.0):
+    return SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=datetime(2026, 8, 25, 14, 1, tzinfo=IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=58.0,
+        spot=spot,
+        atmStrike=atm,
+        spotChart=SpotChart(
+            direction="BULLISH",
+            rsi=52.0,
+            macdBias="BULLISH",
+            macdHistogram=0.04,
+            macd=0.03,
+            macdSignal=-0.01,
+            momentum5Pct=0.02,
+            momentum15Pct=0.01,
+        ),
+    )
+
+
+def _sensex_consolidation_alert() -> dict:
+    return {
+        "tier": "BUILDING",
+        "side": "CALL",
+        "strike": 77100.0,
+        "premium": 396.75,
+        "offLowMovePct": 12.0,
+        "peakMovePct": 14.0,
+        "ictBaseArmed": True,
+        "ictVRipReady": False,
+        "ictFlatThenVertical": True,
+        "ictBreakout": False,
+        "ictBaseRelativeMovePct": 8.0,
+        "flatVerticalQuality": 40.0,
+        "ictArmedBaseSamples": 10,
+        "velocity3s": 0.15,
+        "velocity9s": 0.12,
+        "volumeSurge": 1.2,
+        "explosionScore": 28.0,
+        "volumeAwaken": False,
+    }
+
+
+@patch("app.engines.morning_premium_capture.in_afternoon_premium_capture_window", return_value=True)
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_consolidation_authorizes_sensex_itm_afternoon_base(mock_settings, _afternoon):
+    """Aug25 SENSEX CALL 77100 — ₹397 ITM base before 53% vertical (L1 miss)."""
+    mock_settings.return_value = Settings()
+    snap = _sensex_afternoon_snap()
+    ict = MagicMock(
+        base_armed=True,
+        v_rip_ready=False,
+        base_relative_move_pct=8.0,
+        flat_vertical_quality=40.0,
+        armed_base_samples=10,
+        velocity_3s=0.15,
+        flat_then_vertical=True,
+        active=True,
+    )
+    alert = _sensex_consolidation_alert()
+    ok, reason = _slow_grind_consolidation_base_readiness(
+        snap=snap,
+        event=MagicMock(
+            side=Side.CALL,
+            premium=396.75,
+            velocity_3s=0.15,
+            strike=77100.0,
+            tier="BUILDING",
+            peak_move_pct=14.0,
+        ),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == SLOW_GRIND_CONSOLIDATION_BASE_READY
+
+
+@patch("app.engines.morning_premium_capture.in_afternoon_premium_capture_window", return_value=True)
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_consolidation_rejects_premium_above_800(mock_settings, _afternoon):
+    mock_settings.return_value = Settings()
+    snap = _sensex_afternoon_snap()
+    ict = MagicMock(
+        base_armed=True,
+        base_relative_move_pct=8.0,
+        flat_vertical_quality=40.0,
+        armed_base_samples=10,
+        velocity_3s=0.15,
+        flat_then_vertical=True,
+        active=True,
+    )
+    alert = {**_sensex_consolidation_alert(), "premium": 850.0}
+    ok, reason = _slow_grind_consolidation_base_readiness(
+        snap=snap,
+        event=MagicMock(
+            side=Side.CALL,
+            premium=850.0,
+            velocity_3s=0.15,
+            strike=77100.0,
+            tier="BUILDING",
+            peak_move_pct=14.0,
+        ),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is False
+    assert reason == "slow_grind_consolidation_premium_above_800"
+
+
+@patch("app.engines.morning_premium_capture.in_afternoon_premium_capture_window", return_value=True)
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_sudden_lift_routes_sensex_itm_through_consolidation(mock_settings, _afternoon):
+    """Live first_lift path delegates to consolidation before the ₹220 sudden-lift cap."""
+    mock_settings.return_value = Settings()
+    snap = _sensex_afternoon_snap()
+    ict = MagicMock(
+        base_armed=True,
+        base_relative_move_pct=8.0,
+        flat_vertical_quality=40.0,
+        armed_base_samples=10,
+        velocity_3s=0.15,
+        flat_then_vertical=True,
+        active=True,
+    )
+    alert = _sensex_consolidation_alert()
+    ok, reason = _slow_grind_sudden_lift_readiness(
+        snap=snap,
+        event=MagicMock(
+            side=Side.CALL,
+            premium=396.75,
+            velocity_3s=0.15,
+            strike=77100.0,
+            tier="BUILDING",
+            peak_move_pct=14.0,
+        ),
+        ict=ict,
+        alert=alert,
+    )
+    assert ok is True
+    assert reason == SLOW_GRIND_CONSOLIDATION_BASE_READY
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_armed_trough_still_caps_premium_at_220(mock_settings):
+    """Armed-trough pad lane stays on ₹220 — consolidation widening is isolated."""
+    from app.engines.ict_breakout_monitor import _slow_grind_armed_trough_readiness
+
+    mock_settings.return_value = Settings()
+    snap = _sensex_afternoon_snap()
+    ict = MagicMock(
+        base_armed=True,
+        v_rip_ready=True,
+        base_relative_move_pct=0.0,
+        flat_vertical_quality=12.0,
+        armed_base_samples=3,
+        velocity_3s=0.1,
+    )
+    alert = {
+        "tier": "WATCH",
+        "side": "CALL",
+        "strike": 77100.0,
+        "premium": 396.75,
+        "offLowMovePct": 0.5,
+        "ictBaseArmed": True,
+        "ictVRipReady": True,
+        "ictBaseRelativeMovePct": 0.0,
+        "explosionScore": 8.0,
+        "velocity3s": 0.1,
+    }
+    ok, reason = _slow_grind_armed_trough_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.CALL, premium=396.75, velocity_3s=0.1, strike=77100.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is False
+    assert reason == "slow_grind_armed_trough_premium_above_220"
