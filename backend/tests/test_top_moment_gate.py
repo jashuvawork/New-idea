@@ -134,11 +134,51 @@ def test_disabled_gate_passes():
     assert reason == "disabled"
 
 
-def test_classify_slow_grind_as_ftv():
+def test_classify_slow_grind_building_without_structure_blocked():
     assert (
-        classify_top_moment_type(_evidence(tier="BUILDING", slowGrindSuddenLift=True))
+        classify_top_moment_type(
+            _evidence(
+                tier="BUILDING",
+                slowGrindSuddenLift=True,
+                flatThenVertical=False,
+                activeBreakout=False,
+            )
+        )
+        is None
+    )
+
+
+def test_classify_slow_grind_building_with_flat_vertical_at_base_is_ftv():
+    assert (
+        classify_top_moment_type(
+            _evidence(
+                tier="BUILDING",
+                slowGrindSuddenLift=True,
+                flatThenVertical=True,
+                armedBaseLaunch=True,
+            )
+        )
         == "FTV"
     )
+
+
+def test_classify_slow_grind_elite_still_ftv():
+    assert (
+        classify_top_moment_type(
+            _evidence(tier="ELITE", slowGrindSuddenLift=True)
+        )
+        == "FTV"
+    )
+
+
+def test_explosion_alert_blocks_building_slow_grind_coil_only():
+    alert = {
+        "tier": "BUILDING",
+        "slowGrindSuddenLiftReady": True,
+        "ictFlatThenVertical": False,
+        "ictBreakout": False,
+    }
+    assert explosion_alert_is_top_moment(alert) is False
 
 
 def test_qualifies_for_top_moment_max_lots_elite():

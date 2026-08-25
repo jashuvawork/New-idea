@@ -2,6 +2,10 @@
 
 Product focus: take the highest-quality explosion moments only. Blocks B/C-grade
 sleeves, generic BUILDING without a causal FTV/V trigger, and non-explosion modes.
+
+BUILDING-tier FTV/V requires a causal stamp (v-rip, flat→vertical at base, building
+rip + helpers, or early pad capture) — slow-grind coil alone on chop days is not
+a tradeable moment.
 """
 
 from __future__ import annotations
@@ -21,11 +25,8 @@ def _number(value: Any) -> float:
         return 0.0
 
 
-def classify_top_moment_type(evidence: Mapping[str, Any]) -> Optional[str]:
-    """Return ELITE | EXPLODING | FTV | V when this is a focused top moment."""
-    tier = str(evidence.get("tier") or "").upper()
-
-    if bool(
+def _pad_lane_lift_evidence(evidence: Mapping[str, Any]) -> bool:
+    return bool(
         evidence.get("slowGrindSuddenLift")
         or evidence.get("slowGrindConsolidationBase")
         or evidence.get("fastBullishLocalBase")
@@ -35,12 +36,50 @@ def classify_top_moment_type(evidence: Mapping[str, Any]) -> Optional[str]:
         or evidence.get("microPullbackRetest")
         or evidence.get("premiumFvgPad")
         or evidence.get("doubleDipVbase")
-        or evidence.get("earlyRadarPadCapture")
+    )
+
+
+def building_has_causal_ftv_v_structure(evidence: Mapping[str, Any]) -> bool:
+    """True when BUILDING shows a real FTV/V shape at local base — not coil alone."""
+    if bool(evidence.get("vRipReady")) and not bool(evidence.get("midRipCoil")):
+        return True
+    flat_vert = bool(evidence.get("flatThenVertical"))
+    if flat_vert and bool(evidence.get("activeBreakout")):
+        return True
+    if flat_vert and bool(
+        evidence.get("armedBaseLaunch")
+        or evidence.get("armedBaseSustainedLift")
+        or evidence.get("eliteBaseReady")
+        or evidence.get("firstLift")
+        or evidence.get("baseArmed")
     ):
-        return "FTV"
+        return True
+    building_rip = bool(evidence.get("buildingRipReady"))
+    helpers_ok = bool(
+        evidence.get("buildingRipHelpersOk")
+        or evidence.get("buildingLiftHelping")
+        or evidence.get("indexHelpersConfirm")
+        or evidence.get("indexTickSpike")
+    )
+    if building_rip and helpers_ok:
+        return True
+    if bool(evidence.get("earlyRadarPadCapture")):
+        return True
+    return False
+
+
+def classify_top_moment_type(evidence: Mapping[str, Any]) -> Optional[str]:
+    """Return ELITE | EXPLODING | FTV | V when this is a focused top moment."""
+    tier = str(evidence.get("tier") or "").upper()
 
     if bool(evidence.get("vRipReady")) and not bool(evidence.get("midRipCoil")):
         return "V"
+
+    if _pad_lane_lift_evidence(evidence) or bool(evidence.get("earlyRadarPadCapture")):
+        if tier in ("ELITE", "EXPLODING"):
+            return "FTV"
+        if building_has_causal_ftv_v_structure(evidence):
+            return "FTV"
 
     building_rip = bool(evidence.get("buildingRipReady")) and not bool(
         evidence.get("midRipCoil")
@@ -69,10 +108,14 @@ def classify_top_moment_type(evidence: Mapping[str, Any]) -> Optional[str]:
             return "ELITE"
         if tier == "EXPLODING":
             return "EXPLODING"
-        if tier == "BUILDING" and (building_rip or helpers_ok):
-            return "FTV"
-        if tier in ("ELITE", "EXPLODING"):
-            return tier
+        if tier == "BUILDING":
+            if not building_has_causal_ftv_v_structure(evidence):
+                return None
+            if building_rip or helpers_ok:
+                return "FTV"
+            if has_ftv_structure:
+                return "FTV"
+            return None
         if has_ftv_structure:
             return "FTV"
 
@@ -200,6 +243,10 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
             alert.get("slowGrindSuddenLiftReady")
             or alert.get("ictSlowGrindSuddenLift")
         ),
+        "slowGrindConsolidationBase": bool(
+            alert.get("slowGrindConsolidationBaseReady")
+            or alert.get("ictSlowGrindConsolidationBase")
+        ),
         "fastBullishLocalBase": bool(
             alert.get("fastBullishLocalBaseReady")
             or alert.get("bullishLocalBaseActive")
@@ -222,6 +269,9 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
         "doubleDipVbase": bool(
             alert.get("doubleDipVbaseReady") or alert.get("ictDoubleDipVbase")
         ),
+        "earlyRadarPadCapture": bool(
+            alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
+        ),
         "buildingRipReady": bool(alert.get("ictBuildingRipReady")),
         "buildingRipHelpersOk": bool(
             alert.get("buildingRipHelpersOk") or alert.get("buildingLiftHelping")
@@ -229,7 +279,9 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
         "buildingLiftHelping": bool(alert.get("buildingLiftHelping")),
         "flatThenVertical": bool(alert.get("ictFlatThenVertical")),
         "activeBreakout": bool(alert.get("ictBreakout")),
-        "armedBaseLaunch": bool(alert.get("ictArmedBaseLaunch")),
+        "armedBaseLaunch": bool(
+            alert.get("ictArmedBaseLaunch") or alert.get("ictBaseArmed")
+        ),
         "eliteBaseReady": bool(alert.get("ictEliteBaseReady")),
         "firstLift": bool(alert.get("ictFirstLift")),
         "armedBaseSustainedLift": bool(alert.get("ictArmedBaseSustainedLift")),
