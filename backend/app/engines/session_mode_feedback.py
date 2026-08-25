@@ -474,6 +474,80 @@ def failed_launch_reentry_blocked(
     return True, meta
 
 
+def session_peak_late_reentry_blocked(
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    velocity_3s: float,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
+    """Block chasing a strike still near its session peak after a real rip.
+
+    Uses live session peak/low from the premium tape — not only prior closed trades.
+    Fresh first-lift launches with real velocity may still pass.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "explosion_late_reentry_block_enabled", True)):
+        return False, ""
+
+    from app.engines.explosion_detector import (
+        get_session_low_premium,
+        get_session_peak_premium,
+    )
+
+    sess_peak = float(get_session_peak_premium(symbol, strike, side) or 0)
+    sess_low = float(get_session_low_premium(symbol, strike, side) or 0)
+    prem = float(premium or 0)
+    if sess_peak <= 0 or prem <= 0:
+        return False, ""
+
+    min_peak_pts = float(
+        getattr(settings, "explosion_late_reentry_min_peak_points", 15.0) or 15.0
+    )
+    peak_gain = sess_peak - sess_low if sess_low > 0 else 0.0
+    if peak_gain < min_peak_pts:
+        return False, ""
+
+    pullback_ok_pct = float(
+        getattr(settings, "explosion_late_reentry_pullback_ok_pct", 22.0) or 22.0
+    )
+    pullback_pct = ((sess_peak - prem) / sess_peak * 100.0) if sess_peak > 0 else 0.0
+    if pullback_pct >= pullback_ok_pct:
+        return False, ""
+
+    near_peak_pct = float(
+        getattr(settings, "explosion_late_reentry_near_peak_pct", 12.0) or 12.0
+    )
+    if prem < sess_peak * (1.0 - near_peak_pct / 100.0):
+        return False, ""
+
+    alert_d = alert if isinstance(alert, dict) else {}
+    first_lift = bool(
+        alert_d.get("ictFirstLift")
+        or alert_d.get("firstLiftCapture")
+        or alert_d.get("firstLiftReadinessReason")
+        in {
+            "first_lift_local_base_ready",
+            "first_lift_option_led_ready",
+            "armed_base_option_led_ready",
+            "armed_base_launch_ready",
+        }
+    )
+    min_v3 = float(
+        getattr(settings, "explosion_late_reentry_min_velocity_3s", 1.2) or 1.2
+    )
+    v3 = float(velocity_3s or 0)
+    if first_lift and v3 >= min_v3:
+        return False, ""
+
+    return True, (
+        f"late_reentry_near_session_peak_{sess_peak:.1f}"
+        f"_pullback_{pullback_pct:.1f}pct_v3_{v3:.1f}"
+    )
+
+
 def exhausted_ftv_reentry_blocked(
     state: AutoTraderState,
     *,
@@ -515,12 +589,8 @@ def exhausted_ftv_reentry_blocked(
     min_peak = float(
         getattr(settings, "explosion_post_peak_reentry_min_peak_points", 20.0) or 20.0
     )
-    peak_exit = str(getattr(prior, "exitReason", "") or "") in {
-        "explosion_peak_capture",
-        "explosion_peak_fade_profit_lock",
-        "explosion_runner_giveback",
-    }
-    if not ftv or peak - entry < min_peak or not peak_exit:
+    material_peak = peak - entry >= min_peak
+    if not ftv or not material_peak:
         return False, meta
 
     now = datetime.now(_IST)

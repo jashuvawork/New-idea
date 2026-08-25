@@ -638,6 +638,18 @@ def _explosion_candidates(
         late_blocked, _late_reason = late_fade_chase_blocked(event, ict, snap=snap)
         if late_blocked and not first_lift_ready:
             continue
+        from app.engines.session_mode_feedback import session_peak_late_reentry_blocked
+
+        late_reentry, _late_reentry_reason = session_peak_late_reentry_blocked(
+            symbol=symbol,
+            side=event.side,
+            strike=float(event.strike or 0),
+            premium=float(event.premium or 0),
+            velocity_3s=float(event.velocity_3s or 0),
+            alert=alert,
+        )
+        if late_reentry and not first_lift_ready:
+            continue
         from app.engines.explosion_entry_guards import (
             detect_fake_explosion_trap,
             explosion_entry_window_blocked,
@@ -1466,6 +1478,32 @@ def find_best_entry(
                     getattr(c.explosion_event, "velocity_3s", 0) or 0
                 ),
             )
+            if not exhausted:
+                from app.engines.session_mode_feedback import (
+                    session_peak_late_reentry_blocked,
+                )
+
+                alert_d = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
+                late_peak, late_reason = session_peak_late_reentry_blocked(
+                    symbol=c.symbol,
+                    side=c.side,
+                    strike=float(c.strike or 0),
+                    premium=float(c.premium or 0),
+                    velocity_3s=float(
+                        getattr(c.explosion_event, "velocity_3s", 0) or 0
+                    ),
+                    alert=alert_d,
+                )
+                if late_peak:
+                    c.pretrade_meta = {
+                        **(c.pretrade_meta or {}),
+                        "lateReentryBlocked": True,
+                        "causalRanking": {
+                            "grade": "REJECT",
+                            "reasons": [late_reason or "late_reentry_near_session_peak"],
+                        },
+                    }
+                    continue
         from app.engines.trade_ranking import (
             ftv_authorization_policy,
             ftv_policy_settings,

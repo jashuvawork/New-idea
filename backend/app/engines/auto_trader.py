@@ -533,6 +533,7 @@ async def _open_from_candidate(
         from app.engines.session_mode_feedback import (
             exhausted_ftv_reentry_blocked,
             failed_launch_reentry_blocked,
+            session_peak_late_reentry_blocked,
         )
 
         fail_blocked, _fail_meta = failed_launch_reentry_blocked(
@@ -557,6 +558,18 @@ async def _open_from_candidate(
         )
         if reentry_blocked:
             return False, "exhausted_ftv_requires_new_base_reacceleration"
+
+        alert_d = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
+        late_peak_blocked, late_peak_reason = session_peak_late_reentry_blocked(
+            symbol=symbol,
+            side=candidate.side,
+            strike=float(candidate.strike or 0),
+            premium=float(candidate.premium or 0),
+            velocity_3s=reentry_velocity,
+            alert=alert_d,
+        )
+        if late_peak_blocked:
+            return False, late_peak_reason or "late_reentry_near_session_peak"
 
     if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
         from app.engines.moneyness import atm_itm_entry_allows
