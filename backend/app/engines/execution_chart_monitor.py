@@ -186,7 +186,6 @@ def validate_execution_charts(
     explosion_event: Any = None,
     mode: str = "",
     confirmed_ftv_bypass: bool = False,
-    early_pad_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -222,7 +221,6 @@ def validate_execution_charts(
     blocked, reason = premium_blocks_entry(
         side, premium_chart, trade_score=trade_score, explosion_event=explosion_event,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
-        early_pad_bypass=early_pad_bypass,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -341,9 +339,6 @@ async def monitor_trade_chart_before_execution(
     confirmed_ftv_bypass = bool(
         first_lift_bypass and _event_tier in ("ELITE", "EXPLODING")
     )
-    from app.engines.early_radar_pad_capture import early_radar_pad_fade_fill_active
-
-    early_pad_bypass = early_radar_pad_fade_fill_active(alert)
 
     try:
         meta = await fetch_live_trade_charts(
@@ -391,13 +386,11 @@ async def monitor_trade_chart_before_execution(
         explosion_event=explosion_event,
         mode=mode,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
-        early_pad_bypass=early_pad_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
     meta["firstLiftBypass"] = first_lift_bypass
     meta["ftvFadeFillBypass"] = confirmed_ftv_bypass
-    meta["earlyPadFadeFillBypass"] = early_pad_bypass
 
     delta = meta.get("snapshotDelta") or {}
     if delta.get("directionChanged"):

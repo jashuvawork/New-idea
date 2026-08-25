@@ -125,22 +125,6 @@ def test_first_lift_bypass_does_not_waive_fading_premium():
     assert "premium" in reason
 
 
-def test_validate_execution_allows_early_pad_shallow_fade():
-    index = SpotChart(direction="NEUTRAL", momentum5Pct=0.01, momentum15Pct=0.0, trendStrength=10)
-    premium = PremiumChart(direction="BEARISH", momentum5Pct=-1.1, momentum3Pct=-0.9)
-
-    ok, reason, _ = validate_execution_charts(
-        Side.CALL,
-        index,
-        premium_chart=premium,
-        trade_score=80,
-        early_pad_bypass=True,
-    )
-
-    assert ok is True
-    assert reason == "ok"
-
-
 def test_monitor_fetches_upstox_and_blocks_counter_chart():
     with patch("app.engines.execution_chart_monitor.get_settings") as mock_settings:
         mock_settings.return_value = _settings()

@@ -225,31 +225,3 @@ def alert_has_early_radar_pad_capture(alert: Mapping[str, Any]) -> bool:
         alert.get("earlyRadarPadCapture")
         or alert.get("ictEarlyRadarPadCapture")
     )
-
-
-def early_radar_pad_fade_fill_active(alert: Optional[Mapping[str, Any]]) -> bool:
-    """True when a stamped early-pad alert may fill through a shallow execution dip."""
-    if not isinstance(alert, Mapping):
-        return False
-    settings = get_settings()
-    if not bool(getattr(settings, "early_radar_pad_fade_fill_enabled", True)):
-        return False
-    if not alert_has_early_radar_pad_capture(alert):
-        return False
-
-    max_off = float(
-        getattr(settings, "early_radar_pad_fade_fill_max_off_low_pct", 22.0) or 22.0
-    )
-    if early_radar_pad_off_low_pct(alert) > max_off + 1e-6:
-        return False
-
-    local_move = max(
-        _number(alert.get("localBaseMovePct")),
-        _number(alert.get("ictBaseRelativeMovePct")),
-    )
-    max_local = float(
-        getattr(settings, "early_radar_pad_max_local_move_pct", 20.0) or 20.0
-    ) + 5.0
-    if local_move > max_local + 1e-6 and not bool(alert.get("ictVRipReady")):
-        return False
-    return True

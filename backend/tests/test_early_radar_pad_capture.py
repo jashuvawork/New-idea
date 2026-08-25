@@ -13,7 +13,6 @@ from app.engines.early_radar_pad_capture import (
     EARLY_RADAR_PAD_READY,
     early_radar_pad_capture_active,
     early_radar_pad_entry_readiness,
-    early_radar_pad_fade_fill_active,
     stamp_early_radar_pad_capture,
 )
 from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence, ftv_policy_settings
@@ -299,25 +298,3 @@ def test_check_explosion_entry_allows_watch_base_armed_early_pad(
     )
     assert ok is True
     assert reason in {"early_radar_pad_ftv_confirmed", "first_lift_local_base_confirmed"}
-
-
-@patch("app.engines.early_radar_pad_capture.get_settings")
-def test_early_pad_fade_fill_active_when_stamped_near_trough(mock_settings):
-    mock_settings.return_value = Settings()
-    alert = {
-        "earlyRadarPadCapture": True,
-        "offLowMovePct": 8.0,
-        "localBaseMovePct": 6.0,
-    }
-    assert early_radar_pad_fade_fill_active(alert) is True
-
-
-@patch("app.engines.early_radar_pad_capture.get_settings")
-def test_early_pad_fade_fill_blocks_when_off_low_extended(mock_settings):
-    mock_settings.return_value = Settings()
-    alert = {
-        "earlyRadarPadCapture": True,
-        "offLowMovePct": 35.0,
-        "localBaseMovePct": 30.0,
-    }
-    assert early_radar_pad_fade_fill_active(alert) is False
