@@ -300,6 +300,15 @@ async def monitor_trade_chart_before_execution(
     local_ichi_bypass = local_base_ichimoku_bypass_for_snap(
         side, snap, explosion_event=explosion_event,
     )
+    from app.engines.pad_lane_capture import pad_lane_turnaround_chart_bypass_for_snap
+
+    pad_lane_chart_bypass = pad_lane_turnaround_chart_bypass_for_snap(
+        side,
+        snap,
+        explosion_event=explosion_event,
+        alert=alert,
+    )
+    strict_chart_bypass = first_lift_bypass or pad_lane_chart_bypass
     open_gap_mtf_bypass = elite_open_gap_mtf_bypass(
         side, snap, explosion_event=explosion_event, mode=mode,
     )
@@ -314,6 +323,7 @@ async def monitor_trade_chart_before_execution(
         or local_ichi_bypass
         or open_gap_mtf_bypass
         or first_lift_bypass
+        or pad_lane_chart_bypass
     )
     # Aug6 78800 PE: counter-trend PUT filled via expiry/local-base bypasses.
     from app.engines.spot_direction import hard_counter_trend_chart
@@ -322,6 +332,7 @@ async def monitor_trade_chart_before_execution(
         getattr(settings, "chart_counter_trend_bypass_block_enabled", True)
         and hard_counter_trend_chart(side, snap.spotChart)
         and not first_lift_bypass
+        and not pad_lane_chart_bypass
     ):
         expiry_chart_bypass = False
         structure_chart_bypass = False
@@ -351,7 +362,7 @@ async def monitor_trade_chart_before_execution(
             breadth_aligned_bypass=breadth_bypass,
             premium_led_bypass=structure_chart_bypass,
             expiry_explosion_bypass=expiry_chart_bypass,
-            strict_first_lift_bypass=first_lift_bypass,
+            strict_first_lift_bypass=strict_chart_bypass,
         )
         fallback = {
             "enabled": True,
@@ -360,6 +371,7 @@ async def monitor_trade_chart_before_execution(
             "indexChart": chart_summary_dict(snap.spotChart),
             "alignedWithChart": side_aligned_with_chart(side, snap.spotChart),
             "firstLiftBypass": first_lift_bypass,
+            "padLaneChartBypass": pad_lane_chart_bypass,
         }
         if blocked:
             return False, f"exec_{reason}", fallback
@@ -381,7 +393,7 @@ async def monitor_trade_chart_before_execution(
         breadth_aligned_bypass=breadth_bypass,
         premium_led_bypass=structure_chart_bypass,
         vertical_rip_bypass=vertical_bypass,
-        first_lift_bypass=first_lift_bypass,
+        first_lift_bypass=strict_chart_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
         explosion_event=explosion_event,
         mode=mode,
@@ -390,6 +402,7 @@ async def monitor_trade_chart_before_execution(
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
     meta["firstLiftBypass"] = first_lift_bypass
+    meta["padLaneChartBypass"] = pad_lane_chart_bypass
     meta["ftvFadeFillBypass"] = confirmed_ftv_bypass
 
     delta = meta.get("snapshotDelta") or {}
@@ -403,7 +416,7 @@ async def monitor_trade_chart_before_execution(
         if flip_blocks and not (
             expiry_chart_bypass
             or vertical_bypass
-            or first_lift_bypass
+            or strict_chart_bypass
             or (premium_bypass and not scalp_mode)
             or (breadth_bypass and not scalp_mode)
         ):

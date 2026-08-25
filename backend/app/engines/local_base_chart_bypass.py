@@ -378,7 +378,13 @@ def local_base_overrides_session_chart(
     """
     if not session_chart_conflicts_side(side, snap):
         return False
-    return local_base_structure_active(side, snap, event=event, alert=alert)
+    if local_base_structure_active(side, snap, event=event, alert=alert):
+        return True
+    from app.engines.pad_lane_capture import pad_lane_turnaround_chart_bypass
+
+    return pad_lane_turnaround_chart_bypass(
+        side, snap, event=event, alert=alert,
+    )
 
 
 # Backward-compatible names used across the codebase.

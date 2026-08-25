@@ -110,6 +110,10 @@ def pad_lane_ready_reason(
             return "double_dip_vbase_ready"
         if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
             return "early_radar_pad_ready"
+        stamped = str(alert.get("ictBaseReadinessReason") or alert.get("readyReason") or "")
+        if bool(alert.get("ictVRipReady") or alert.get("vRipReady")):
+            if stamped.startswith("v_rip_session_low") or stamped == "v_rip_session_low_ready":
+                return stamped or "v_rip_session_low_ready"
     return ""
 
 
