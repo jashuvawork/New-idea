@@ -1592,6 +1592,16 @@ class Settings(BaseSettings):
     # waive ICT first-lift quality / BUILDING→ELITE lag near-miss blockers so the
     # selector admits the leg at the local base before flatVerticalQuality warms.
     pad_lane_early_near_miss_waive_enabled: bool = True
+    # Link stamped pad-lane / BUILDING FTV readiness directly to trade execution.
+    # Aug26 SENSEX 77700 PE: EARLY at ~₹120 on radar but chart/timing/rank blocked
+    # until the vertical reached ~₹200 — must-take path only covered ELITE/EXPLODING.
+    ftv_direct_trade_enabled: bool = True
+    ftv_direct_trade_max_off_low_pct: float = 35.0
+    ftv_direct_trade_max_local_move_pct: float = 45.0
+    ftv_direct_trade_max_peak_move_pct: float = 50.0
+    ftv_direct_trade_min_off_low_pct: float = 2.0
+    ftv_direct_trade_selector_rank_bonus: float = 55.0
+    ftv_direct_trade_require_atm_itm: bool = True
     # ICT confirm stack for local-base reversals (additive quality, not hard gates).
     local_base_reversal_ict_bonus_max: float = 18.0
     local_base_reversal_kill_zone_bonus_enabled: bool = True
