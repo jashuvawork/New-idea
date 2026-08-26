@@ -865,6 +865,14 @@ def validate_candidate(
             if explosion_event is not None
             else None
         )
+        from app.engines.ict_breakout_monitor import merge_alert_ict_stamps
+
+        trap_ict = merge_alert_ict_stamps(
+            trap_ict,
+            getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None,
+        )
         from app.engines.ict_breakout_monitor import first_lift_entry_ready
 
         strict_base_ready = first_lift_entry_ready(

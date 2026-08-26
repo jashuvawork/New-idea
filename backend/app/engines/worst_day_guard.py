@@ -535,7 +535,11 @@ def worst_day_allows_candidate(
                     volume_awake=bool(
                         alert.get("ictVolumeAwakening") or alert.get("volumeAwaken")
                     ),
-                    v_rip_ready=bool(alert.get("ictVRipReady")),
+                    v_rip_ready=bool(
+                        alert.get("ictVRipReady")
+                        or "v_rip"
+                        in str(alert.get("momentType") or alert.get("reason") or "").lower()
+                    ),
                     armed_base_launch=bool(
                         alert.get("ictArmedBaseLaunch")
                         or str(alert.get("momentType") or "") == "armed_base_launch"
