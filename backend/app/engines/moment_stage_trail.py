@@ -486,7 +486,7 @@ def ftv_runner_pct_floor(
     # (ride high-hit movers harder, tighten low-hit buckets). Bounded to a safe band.
     ctx = getattr(trade, "entryContext", None) or {}
     learned = _safe_float(ctx.get("learnedTrailKeepRatio"))
-    if learned > 0 and bool(getattr(s, "eod_learning_apply_enabled", True)):
+    if learned > 0 and bool(getattr(s, "eod_learning_apply_enabled", False)):
         keep = learned
     keep = min(0.95, max(0.5, keep))
     return round(best * keep, 2)

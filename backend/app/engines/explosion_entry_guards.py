@@ -373,7 +373,7 @@ def explosion_entry_window_blocked(
             # the accumulated EOD knowledge — take nearer the local base, skip the milder
             # off-base chases this moment type historically didn't sustain. TIGHTEN-ONLY and
             # floored so genuine near-base first lifts (<= floor) are never blocked.
-            if bool(getattr(settings, "eod_learning_apply_enabled", True)):
+            if bool(getattr(settings, "eod_learning_apply_enabled", False)):
                 try:
                     from app.engines.eod_ftv_learning import learned_ftv_profile
 

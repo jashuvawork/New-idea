@@ -58,6 +58,7 @@ def _settings(**overrides):
     s.explosion_volume_awaken_min = 25000
     s.ict_local_base_lookback_polls = 16
     s.ict_local_base_min_dump_pct = 25.0
+    s.eod_learning_apply_enabled = False
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
