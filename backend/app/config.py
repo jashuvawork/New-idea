@@ -2023,6 +2023,11 @@ class Settings(BaseSettings):
     ftv_allocation_max_positions: int = 3
     ftv_allocation_max_same_side: int = 2
     ftv_allocation_require_ftv: bool = True
+    # Rank-1 sleeve: when 90% budget cannot afford 1 lot but remaining margin can,
+    # deploy full remaining for that entry (Aug26 ftv_allocation_below_one_lot @ ₹573).
+    ftv_allocation_rank_one_min_one_lot_enabled: bool = True
+    # Pad-lane / FTV-direct / full-sleeve rank-1 uses 100% of remaining, not 90%.
+    ftv_allocation_full_remaining_on_full_sleeve_enabled: bool = True
     # Final-policy-authorized rank-1 ELITE/EXPLODING entries keep every
     # cash-affordable sleeve lot instead of being reduced by the standard SL budget.
     top_rank_first_lift_full_budget_lots_enabled: bool = True

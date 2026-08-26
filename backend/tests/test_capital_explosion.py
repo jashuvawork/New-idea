@@ -12,6 +12,7 @@ from app.engines.capital_allocator import (
     cap_lots_to_allocation,
     capital_book_summary,
     clamp_lots,
+    effective_ranked_allocation,
     get_capital_snapshot,
     max_lots_for_capital,
     max_lots_for_capital_pct,
@@ -187,6 +188,67 @@ class CapitalSizingTests(unittest.TestCase):
         self.assertEqual(first.budgetInr, 180_000)
         self.assertEqual(lots, 55)
         self.assertLessEqual(lots * 65 * 50, first.budgetInr)
+
+    def test_rank_one_min_one_lot_floor_when_sleeve_pct_too_small(self):
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=3_240.0,
+            remainingBeforeInr=3_600.0,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=196_400,
+            weight=0.9,
+        )
+        settings = self._ranked_settings()
+        settings.ftv_allocation_rank_one_min_one_lot_enabled = True
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            lots = cap_lots_to_allocation(5, "NIFTY", 52.9, allocation)
+        self.assertEqual(lots, 1)
+
+    def test_rank_one_full_remaining_on_pad_lane_sleeve(self):
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=3_240.0,
+            remainingBeforeInr=3_600.0,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=196_400,
+            weight=0.9,
+        )
+        settings = self._ranked_settings()
+        settings.ftv_allocation_full_remaining_on_full_sleeve_enabled = True
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            bumped = effective_ranked_allocation(allocation, use_full_remaining=True)
+            lots = cap_lots_to_allocation(
+                5,
+                "NIFTY",
+                52.9,
+                bumped,
+                use_full_remaining=True,
+            )
+        self.assertEqual(bumped.budgetInr, 3_600.0)
+        self.assertEqual(lots, 1)
+
+    def test_capital_below_one_lot_stays_zero(self):
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=573.0,
+            remainingBeforeInr=637.0,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=199_363,
+            weight=0.9,
+        )
+        settings = self._ranked_settings()
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            lots = cap_lots_to_allocation(
+                5,
+                "NIFTY",
+                52.9,
+                allocation,
+                use_full_remaining=True,
+            )
+        self.assertEqual(lots, 0)
 
     def test_unused_top_sleeve_rolls_into_second_rank(self):
         state = AutoTraderState(

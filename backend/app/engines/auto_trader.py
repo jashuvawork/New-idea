@@ -33,6 +33,8 @@ from app.engines.chart_exit_levels import refresh_open_trade_chart_plan, update_
 from app.engines.capital_allocator import (
     RankedAllocation,
     cap_lots_to_allocation,
+    effective_ranked_allocation,
+    one_lot_unit_cost_inr,
     capital_book_summary,
     clamp_lots,
     compute_lots,
@@ -1338,8 +1340,44 @@ async def _open_from_candidate(
         if post_win_cap_meta.get("applied") or flip_cap_meta.get("applied"):
             top_explosion_max = False
 
-    lots = cap_lots_to_allocation(lots, symbol, fill_premium, allocation)
+    allocation_for_cap = allocation
+    use_full_remaining = False
+    if allocation is not None and allocation.rank == 1:
+        _cap_alert = (
+            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
+        )
+        try:
+            from app.engines.pad_lane_capture import ftv_direct_trade_active
+
+            use_full_remaining = bool(
+                full_sleeve_authorized
+                or ftv_direct_trade_active(
+                    candidate=candidate,
+                    alert=_cap_alert,
+                    snap=snap,
+                )
+            )
+        except Exception:
+            use_full_remaining = bool(full_sleeve_authorized)
+        if use_full_remaining:
+            allocation_for_cap = effective_ranked_allocation(
+                allocation,
+                use_full_remaining=True,
+            )
+
+    lots = cap_lots_to_allocation(
+        lots,
+        symbol,
+        fill_premium,
+        allocation_for_cap,
+        use_full_remaining=use_full_remaining,
+    )
     if lots <= 0:
+        unit_cost = one_lot_unit_cost_inr(symbol, fill_premium)
+        alloc_ref = allocation_for_cap or allocation
+        remaining = float(getattr(alloc_ref, "remainingBeforeInr", 0) or 0)
+        if unit_cost > 0 and remaining < unit_cost:
+            return False, "ftv_capital_insufficient_for_one_lot"
         return False, "ftv_allocation_below_one_lot"
 
     lot_mult = lot_multiplier(symbol)
