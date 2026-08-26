@@ -124,6 +124,12 @@ def classify_top_moment_type(evidence: Mapping[str, Any]) -> Optional[str]:
     if tier == "EXPLODING" and (has_base_trigger or has_ftv_structure):
         return "EXPLODING"
 
+    if tier == "WATCH":
+        from app.engines.early_radar_pad_capture import watch_local_base_pad_structure
+
+        if watch_local_base_pad_structure(evidence):
+            return "FTV"
+
     return None
 
 
@@ -234,6 +240,11 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
             or alert.get("ictBreakout")
         )
     ):
+        return True
+
+    from app.engines.early_radar_pad_capture import watch_local_base_pad_structure
+
+    if watch_local_base_pad_structure(alert):
         return True
 
     evidence = {

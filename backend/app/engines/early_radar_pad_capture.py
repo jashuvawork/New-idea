@@ -53,12 +53,96 @@ def early_radar_pad_off_low_pct(alert: Mapping[str, Any]) -> float:
     return max(0.0, _number(alert.get("offLowMovePct")))
 
 
+def _alert_tier(alert: Mapping[str, Any]) -> str:
+    return str(alert.get("tier") or "").upper()
+
+
+def _alert_explosion_score(alert: Mapping[str, Any]) -> float:
+    return _number(alert.get("explosionScore") or alert.get("score"))
+
+
+def _alert_local_base_move(alert: Mapping[str, Any]) -> float:
+    return max(
+        _number(alert.get("localBaseMovePct")),
+        _number(alert.get("ictBaseRelativeMovePct")),
+    )
+
+
+def watch_local_base_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None) -> bool:
+    """True when WATCH shows an early lift off session/local base without ELITE heat."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "watch_local_base_pad_entry_enabled", True)):
+        return False
+    if _alert_tier(alert) != "WATCH":
+        return False
+
+    max_off = float(
+        getattr(s, "watch_local_base_pad_max_off_low_pct", 18.0) or 18.0
+    )
+    if early_radar_pad_off_low_pct(alert) > max_off + 1e-6:
+        return False
+
+    max_score = float(
+        getattr(s, "watch_local_base_pad_max_explosion_score", 35.0) or 35.0
+    )
+    if _alert_explosion_score(alert) > max_score + 1e-6:
+        return False
+
+    max_local = float(
+        getattr(s, "watch_local_base_pad_max_local_move_pct", 15.0) or 15.0
+    )
+    local_move = _alert_local_base_move(alert)
+    if local_move > max_local + 1e-6:
+        return False
+
+    min_v3 = float(
+        getattr(s, "watch_local_base_pad_min_velocity_3s", 0.05) or 0.05
+    )
+    min_v9 = float(
+        getattr(s, "watch_local_base_pad_min_velocity_9s", 0.03) or 0.03
+    )
+    v3 = _number(alert.get("velocity3s"))
+    v9 = _number(alert.get("velocity9s"))
+
+    if bool(alert.get("ictBaseArmed") or alert.get("baseArmed")):
+        return True
+    if bool(
+        alert.get("volumeAwaken")
+        or alert.get("ictVolumeAwakening")
+        or alert.get("volumeAwakening")
+    ):
+        return True
+    if v3 >= min_v3 or v9 >= min_v9:
+        return True
+    if bool(
+        alert.get("buildingLiftHelping")
+        or alert.get("buildingRipHelpersOk")
+        or alert.get("buildingRipReady")
+        or alert.get("ictBuildingRipReady")
+    ):
+        return True
+    if local_move > 0 and (v3 > 0 or v9 > 0):
+        return True
+    return False
+
+
+def watch_local_base_pad_structure(alert: Mapping[str, Any], settings: Any = None) -> bool:
+    """WATCH at session/local trough with early lift — trade before tier promotion."""
+    if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
+        return True
+    return watch_local_base_pad_lift_signal(alert, settings)
+
+
 def early_radar_pad_top_structure(alert: Mapping[str, Any]) -> bool:
     """True when radar shows FTV / V / ELITE / EXPLODING shape at the pad."""
     if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
         return True
 
-    tier = str(alert.get("tier") or "").upper()
+    tier = _alert_tier(alert)
+    settings = get_settings()
+
+    if watch_local_base_pad_structure(alert, settings):
+        return True
 
     if tier == "WATCH" and bool(alert.get("ictFlatThenVertical")):
         if bool(

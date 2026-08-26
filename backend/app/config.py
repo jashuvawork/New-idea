@@ -1563,6 +1563,15 @@ class Settings(BaseSettings):
     early_radar_pad_ftv_min_explosion_score: float = 5.0
     early_radar_pad_ftv_max_capital_pct: float = 0.90
     early_radar_pad_ftv_force_max_lots: bool = True
+    # WATCH-tier local-base pad — enter at session trough with low scores before ELITE/EXPLODING.
+    # Aug26 SENSEX 77600 CE: WATCH ~12.8 at ₹240 pad was DETECTED but not SELECTED until
+    # score hit 100 and explosion_near_miss fired after the rip to ₹306.
+    watch_local_base_pad_entry_enabled: bool = True
+    watch_local_base_pad_max_off_low_pct: float = 18.0
+    watch_local_base_pad_max_local_move_pct: float = 15.0
+    watch_local_base_pad_max_explosion_score: float = 35.0
+    watch_local_base_pad_min_velocity_3s: float = 0.05
+    watch_local_base_pad_min_velocity_9s: float = 0.03
     # Pad-lane turnaround chart bypass — premium-led V-rip / slow-grind / FTV lifts off
     # session low while the 5m index chart is still counter-trend (Aug25 NIFTY 24150 CE
     # ₹20→90 V-reversal blocked by chart_live_bearish_no_calls). Wider adverse-momentum

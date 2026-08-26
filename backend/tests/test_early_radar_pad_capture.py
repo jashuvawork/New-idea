@@ -14,6 +14,8 @@ from app.engines.early_radar_pad_capture import (
     early_radar_pad_capture_active,
     early_radar_pad_entry_readiness,
     stamp_early_radar_pad_capture,
+    watch_local_base_pad_lift_signal,
+    watch_local_base_pad_structure,
 )
 from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence, ftv_policy_settings
 from app.models.schemas import MarketPhase, Side, SpotChart, SymbolSnapshot
@@ -298,3 +300,114 @@ def test_check_explosion_entry_allows_watch_base_armed_early_pad(
     )
     assert ok is True
     assert reason in {"early_radar_pad_ftv_confirmed", "first_lift_local_base_confirmed"}
+
+
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_watch_local_base_pad_active_without_flat_vertical(mock_settings):
+    """WATCH at session trough with low score + velocity — no ictFlatThenVertical needed."""
+    mock_settings.return_value = Settings()
+    alert = {
+        "tier": "WATCH",
+        "side": "CALL",
+        "strike": 77600.0,
+        "premium": 240.0,
+        "offLowMovePct": 3.0,
+        "localBaseMovePct": 5.0,
+        "explosionScore": 12.8,
+        "velocity3s": 0.15,
+        "velocity9s": 0.08,
+        "volumeAwaken": True,
+        "peakMovePct": 8.0,
+    }
+    snap = _snap(spot=77600.0, atm=77600.0, direction="BEARISH")
+    assert watch_local_base_pad_lift_signal(alert) is True
+    assert watch_local_base_pad_structure(alert) is True
+    assert early_radar_pad_capture_active(alert, snap) is True
+    stamped = dict(alert)
+    assert stamp_early_radar_pad_capture(stamped, snap) is True
+    assert stamped["earlyRadarPadCapture"] is True
+
+
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_watch_local_base_pad_blocks_when_score_too_hot(mock_settings):
+    mock_settings.return_value = Settings()
+    alert = {
+        "tier": "WATCH",
+        "side": "CALL",
+        "strike": 77600.0,
+        "premium": 280.0,
+        "offLowMovePct": 5.0,
+        "localBaseMovePct": 12.0,
+        "explosionScore": 55.0,
+        "velocity3s": 0.2,
+        "velocity9s": 0.1,
+        "volumeAwaken": True,
+    }
+    assert watch_local_base_pad_lift_signal(alert) is False
+
+
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_watch_local_base_first_lift_readiness_before_structure_gate(mock_settings):
+    """first_lift_entry_readiness authorizes WATCH pad before structure_not_confirmed."""
+    mock_settings.return_value = Settings()
+    from app.engines.ict_breakout_monitor import first_lift_entry_readiness
+
+    alert = {
+        "tier": "WATCH",
+        "side": "CALL",
+        "strike": 77600.0,
+        "premium": 240.0,
+        "offLowMovePct": 2.0,
+        "localBaseMovePct": 4.0,
+        "explosionScore": 12.8,
+        "velocity3s": 0.12,
+        "velocity9s": 0.06,
+        "volumeAwaken": True,
+        "peakMovePct": 6.0,
+        "ictBaseArmed": True,
+    }
+    snap = _snap(spot=77600.0, atm=77600.0, direction="BEARISH")
+    ok, reason = first_lift_entry_readiness(snap=snap, alert=alert)
+    assert ok is True
+    assert reason == EARLY_RADAR_PAD_READY
+    assert alert.get("earlyRadarPadCapture") is True
+
+
+@patch("app.engines.trade_selector.get_settings")
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_explosion_selector_allows_watch_local_base_low_score(
+    mock_early_settings,
+    mock_selector_settings,
+):
+    settings = Settings()
+    mock_early_settings.return_value = settings
+    mock_selector_settings.return_value = settings
+    from app.engines.auto_trader import AutoTraderState
+    from app.engines.trade_selector import _explosion_candidates
+
+    alert = {
+        "tradeable": True,
+        "tier": "WATCH",
+        "side": "CALL",
+        "strike": 77600.0,
+        "premium": 240.0,
+        "offLowMovePct": 2.0,
+        "localBaseMovePct": 4.0,
+        "explosionScore": 12.8,
+        "peakMovePct": 6.0,
+        "velocity3s": 0.12,
+        "velocity9s": 0.06,
+        "volumeAwaken": True,
+        "ictBaseArmed": True,
+        "earlyRadarPadCapture": True,
+        "ictEarlyRadarPadCapture": True,
+        "ictBaseReadinessReason": EARLY_RADAR_PAD_READY,
+    }
+    snap = _snap(spot=77600.0, atm=77600.0, direction="BEARISH")
+    snap.explosionAlerts = [alert]
+    snap.tradeQualityScore = 55.0
+    state = AutoTraderState()
+    candidates = _explosion_candidates("SENSEX", snap, state, settings)
+    assert len(candidates) == 1
+    assert candidates[0].strike == 77600.0
+    assert candidates[0].tier == "WATCH"
