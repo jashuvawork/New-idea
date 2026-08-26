@@ -503,6 +503,8 @@ class Settings(BaseSettings):
     # Pre-lift pad: volume awakening + first lift can show flat/negative v3 before
     # the vertical leg — chart/defensive gates must not demand spike velocity yet.
     ict_armed_base_launch_cold_velocity_3s: float = -0.5
+    # first_lift_local_base at the 2–25% pad may show cold v3 pre-vertical (Aug26 SENSEX PUT 77800).
+    ict_first_lift_local_base_cold_velocity_3s: float = -1.5
     # Narrow pre-launch authorization: a stable ATM/ITM base may become executable
     # before +5%, but only with the same live velocity/orderflow quality as a launch.
     ict_elite_base_ready_enabled: bool = True
@@ -1576,6 +1578,9 @@ class Settings(BaseSettings):
     pad_lane_elite_ftv_chart_bypass_enabled: bool = True
     pad_lane_elite_ftv_chart_bypass_min_score: float = 45.0
     pad_lane_elite_ftv_chart_bypass_max_peak_move_pct: float = 45.0
+    # first_lift_local_base at the pad may bypass counter-trend chart when session peak
+    # is high but LTP is still inside the 2–25% local-base window (Aug26 SENSEX PUT 77800).
+    pad_lane_first_lift_local_base_chart_bypass_enabled: bool = True
     # Pad-lane FTV may waive cold-velocity / FAILED_LAUNCH timing blocks at execution.
     pad_lane_ftv_waives_timing_block_enabled: bool = True
     # Floor rank grade to A for stamped pad-lane FTV (fixes replay top_moment_grade_reject).

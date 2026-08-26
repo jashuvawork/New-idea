@@ -88,6 +88,8 @@ def pad_lane_cold_velocity_ok(
         return True
     if evidence.get("vRipReady") and -1.2 <= v3 <= 1.5 and v9 >= -0.8:
         return True
+    if evidence.get("firstLiftLocalBase") and -1.5 <= v3 <= 1.5 and v9 >= -1.0:
+        return True
     tier = str(evidence.get("tier") or "").upper()
     local_move = float(evidence.get("localBaseMovePct") or 0)
     if (
@@ -1037,6 +1039,60 @@ def _armed_base_launch_pad_chart_signal(
     return lo <= base_rel <= hi + 1e-6
 
 
+def _first_lift_local_base_pad_chart_signal(
+    alert: Optional[dict[str, Any]],
+    event: Any = None,
+) -> bool:
+    """first_lift_local_base + volume awaken in the 2–25% local pad window.
+
+    Aug26 SENSEX PUT 77800: ELITE first_lift at ~16% lb while session peak was ~53%
+    — chart_live_bullish_no_puts survived because pad-lane peak cap used session peak.
+    """
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "pad_lane_first_lift_local_base_chart_bypass_enabled", True)
+    ):
+        return False
+    row = alert if isinstance(alert, dict) else {}
+    moment = str(row.get("momentType") or "").lower()
+    first_lift = moment == "first_lift_local_base" or bool(
+        row.get("ictFirstLift")
+        or (event is not None and getattr(event, "first_lift", False))
+    )
+    if not first_lift:
+        return False
+    tier = str(row.get("tier") or getattr(event, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    if not bool(row.get("ictFlatThenVertical") or row.get("ictBreakout")):
+        return False
+    if not bool(row.get("volumeAwaken") or row.get("ictVolumeAwakening")):
+        return False
+    base_rel = float(
+        row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or row.get("offLowMovePct")
+        or (getattr(event, "daily_move_pct", 0) if event is not None else 0)
+        or 0
+    )
+    lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+    hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    return lo <= base_rel <= hi + 1e-6
+
+
+def _pad_lane_peak_for_cap(
+    base_move: float,
+    peak_move: float,
+    settings: Any,
+) -> float:
+    """When LTP is still at the local pad, session peak must not block chart bypass."""
+    pad_lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+    pad_hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    if pad_lo <= base_move <= pad_hi + 1e-6:
+        return min(float(peak_move or 0), float(base_move or 0))
+    return float(peak_move or 0)
+
+
 def pad_lane_turnaround_chart_bypass(
     side: Side | str,
     snap: Optional[SymbolSnapshot],
@@ -1060,10 +1116,12 @@ def pad_lane_turnaround_chart_bypass(
         return False
     elite_ftv = _pad_lane_elite_ftv_chart_signal(alert, event)
     armed_launch = _armed_base_launch_pad_chart_signal(alert, event)
+    first_lift_pad = _first_lift_local_base_pad_chart_signal(alert, event)
     if (
         not _pad_lane_turnaround_signal(alert, readiness_reason)
         and not elite_ftv
         and not armed_launch
+        and not first_lift_pad
     ):
         return False
 
@@ -1082,13 +1140,13 @@ def pad_lane_turnaround_chart_bypass(
         )
         or 0.2
     )
-    if elite_ftv or armed_launch:
+    if elite_ftv or armed_launch or first_lift_pad:
         min_v3 = min(min_v3, awake_min_v3)
     min_v9 = float(
         getattr(settings, "pad_lane_chart_bypass_min_premium_velocity_9s", -0.3)
         or -0.3
     )
-    if armed_launch:
+    if armed_launch or first_lift_pad:
         row = alert if isinstance(alert, dict) else {}
         evidence = {
             "tier": row.get("tier") or getattr(event, "tier", ""),
@@ -1098,6 +1156,7 @@ def pad_lane_turnaround_chart_bypass(
             ),
             "activeBreakout": bool(row.get("ictBreakout") or row.get("ictFirstLift")),
             "volumeAwaken": volume_awake,
+            "firstLiftLocalBase": first_lift_pad,
         }
         velocity_ok = pad_lane_cold_velocity_ok(evidence, v3, v9)
     else:
@@ -1111,7 +1170,7 @@ def pad_lane_turnaround_chart_bypass(
     max_peak = float(
         getattr(settings, "pad_lane_chart_bypass_max_peak_move_pct", 38.0) or 38.0
     )
-    if elite_ftv:
+    if elite_ftv or first_lift_pad:
         max_peak = max(
             max_peak,
             float(
@@ -1126,7 +1185,8 @@ def pad_lane_turnaround_chart_bypass(
     move = max(base_move, float((alert or {}).get("offLowMovePct") or 0))
     if move > max_off_low + 1e-6:
         return False
-    if peak_move > max_peak + 1e-6:
+    peak_for_cap = _pad_lane_peak_for_cap(base_move, peak_move, settings)
+    if peak_for_cap > max_peak + 1e-6:
         return False
 
     chart = getattr(snap, "spotChart", None)
