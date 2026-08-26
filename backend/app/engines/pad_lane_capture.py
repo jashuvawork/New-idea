@@ -994,6 +994,49 @@ def _pad_lane_elite_ftv_chart_signal(
     return entry_min <= base_rel <= chase_max
 
 
+def _armed_base_launch_pad_chart_signal(
+    alert: Optional[dict[str, Any]],
+    event: Any = None,
+) -> bool:
+    """armed_base_launch + first lift + volume awaken in the 2–25% local pad window.
+
+    Aug26 NIFTY PUT 24250/24300: EXPLODING armed_base_launch at ~22–24% lb was blocked
+    chart_live_bullish_no_puts because v3 was still flat/negative pre-vertical.
+    """
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "pad_lane_armed_base_launch_chart_bypass_enabled", True)
+    ):
+        return False
+    row = alert if isinstance(alert, dict) else {}
+    moment = str(row.get("momentType") or "").lower()
+    armed = moment == "armed_base_launch" or bool(
+        row.get("ictArmedBaseLaunch")
+        or (event is not None and getattr(event, "armed_base_launch", False))
+    )
+    if not armed:
+        return False
+    tier = str(row.get("tier") or getattr(event, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    if not bool(row.get("ictFirstLift") or row.get("ictArmedBaseLaunch")):
+        return False
+    if not bool(row.get("ictFlatThenVertical") or row.get("ictBreakout")):
+        return False
+    if not bool(row.get("volumeAwaken") or row.get("ictVolumeAwakening")):
+        return False
+    base_rel = float(
+        row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or row.get("offLowMovePct")
+        or (getattr(event, "daily_move_pct", 0) if event is not None else 0)
+        or 0
+    )
+    lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+    hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    return lo <= base_rel <= hi + 1e-6
+
+
 def pad_lane_turnaround_chart_bypass(
     side: Side | str,
     snap: Optional[SymbolSnapshot],
@@ -1016,7 +1059,12 @@ def pad_lane_turnaround_chart_bypass(
     if snap is None or not session_chart_conflicts_side(side, snap):
         return False
     elite_ftv = _pad_lane_elite_ftv_chart_signal(alert, event)
-    if not _pad_lane_turnaround_signal(alert, readiness_reason) and not elite_ftv:
+    armed_launch = _armed_base_launch_pad_chart_signal(alert, event)
+    if (
+        not _pad_lane_turnaround_signal(alert, readiness_reason)
+        and not elite_ftv
+        and not armed_launch
+    ):
         return False
 
     v3, v9, base_move, peak_move, volume_awake = _pad_lane_chart_metrics(
@@ -1034,13 +1082,26 @@ def pad_lane_turnaround_chart_bypass(
         )
         or 0.2
     )
-    if elite_ftv:
+    if elite_ftv or armed_launch:
         min_v3 = min(min_v3, awake_min_v3)
     min_v9 = float(
         getattr(settings, "pad_lane_chart_bypass_min_premium_velocity_9s", -0.3)
         or -0.3
     )
-    velocity_ok = v3 >= min_v3 or (volume_awake and v3 >= awake_min_v3)
+    if armed_launch:
+        row = alert if isinstance(alert, dict) else {}
+        evidence = {
+            "tier": row.get("tier") or getattr(event, "tier", ""),
+            "localBaseMovePct": base_move,
+            "flatThenVertical": bool(
+                row.get("ictFlatThenVertical") or row.get("ictBreakout")
+            ),
+            "activeBreakout": bool(row.get("ictBreakout") or row.get("ictFirstLift")),
+            "volumeAwaken": volume_awake,
+        }
+        velocity_ok = pad_lane_cold_velocity_ok(evidence, v3, v9)
+    else:
+        velocity_ok = v3 >= min_v3 or (volume_awake and v3 >= awake_min_v3)
     if not velocity_ok or v9 < min_v9:
         return False
 

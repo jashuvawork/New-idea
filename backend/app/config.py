@@ -500,6 +500,9 @@ class Settings(BaseSettings):
     ict_armed_base_launch_min_score: float = 64.5
     ict_armed_base_launch_min_tqs: float = 50.0
     ict_armed_base_launch_rank_bonus: float = 16.0
+    # Pre-lift pad: volume awakening + first lift can show flat/negative v3 before
+    # the vertical leg — chart/defensive gates must not demand spike velocity yet.
+    ict_armed_base_launch_cold_velocity_3s: float = -0.5
     # Narrow pre-launch authorization: a stable ATM/ITM base may become executable
     # before +5%, but only with the same live velocity/orderflow quality as a launch.
     ict_elite_base_ready_enabled: bool = True
