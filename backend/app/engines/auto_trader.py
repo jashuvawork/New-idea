@@ -1975,7 +1975,7 @@ async def _open_from_candidate(
         # samples exist, stamp the LEARNED trail keep-ratio so the runner rides high-hit
         # movers (e.g. SENSEX ELITE FTV, learned ~0.85) harder and tightens low-hit buckets
         # (~0.60). Near-base / stop learned fields are stamped observe-only for now.
-        if bool(getattr(settings, "eod_learning_apply_enabled", True)):
+        if bool(getattr(settings, "eod_learning_apply_enabled", False)):
             try:
                 from app.engines.eod_ftv_learning import learned_ftv_profile
 
