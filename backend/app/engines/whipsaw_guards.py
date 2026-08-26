@@ -433,8 +433,15 @@ def check_bearish_sideways_entry(
             min_score = min(min_score, soft)
         if tier in ("ELITE", "EXPLODING") and score >= min_score:
             return False, "ok"
-        from app.engines.morning_premium_capture import is_premium_capture_event
+        from app.engines.morning_premium_capture import (
+            is_premium_capture_event,
+            is_v_rip_local_base_capture_alert,
+        )
 
+        if alert is not None and is_v_rip_local_base_capture_alert(
+            alert, chart=snap.spotChart,
+        ):
+            return False, "ok"
         if event and is_premium_capture_event(event, chart=snap.spotChart):
             return False, "ok"
         return True, "bearish_sideways_explosion_only"

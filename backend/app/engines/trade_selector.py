@@ -599,7 +599,9 @@ def _explosion_candidates(
         )
 
         trading_mode, _ = resolve_trading_session_mode(state, {symbol: snap})
-        ict = analyze_explosion_event_ict(event, snap)
+        from app.engines.ict_breakout_monitor import merge_alert_ict_stamps
+
+        ict = merge_alert_ict_stamps(analyze_explosion_event_ict(event, snap), alert)
         if not ict.active and alert.get("ictBreakout"):
             from app.engines.ict_breakout_monitor import ICTBreakoutSignal
 

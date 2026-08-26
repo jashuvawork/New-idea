@@ -522,6 +522,7 @@ class Settings(BaseSettings):
     ict_v_rip_max_move_pct: float = 25.0
     ict_v_rip_min_velocity_3s: float = 1.2
     ict_v_rip_min_velocity_9s: float = 0.8
+    ict_v_rip_cold_velocity_3s: float = -1.5
     ict_v_rip_min_quality: float = 50.0
     ict_v_rip_min_score: float = 40.0
     ict_v_rip_base_near_session_low_pct: float = 2.0

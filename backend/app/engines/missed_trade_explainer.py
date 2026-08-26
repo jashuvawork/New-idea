@@ -581,6 +581,10 @@ def _gate_checks(
         if candidate.explosion_event
         else None
     )
+    if ict is not None and isinstance(getattr(candidate, "alert", None), dict):
+        from app.engines.ict_breakout_monitor import merge_alert_ict_stamps
+
+        ict = merge_alert_ict_stamps(ict, candidate.alert)
     if candidate.explosion_event:
         from app.engines.bullish_local_base import bullish_local_base_prediction
 

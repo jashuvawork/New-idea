@@ -2954,6 +2954,39 @@ def analyze_ict_breakout(
     )
 
 
+def merge_alert_ict_stamps(
+    ict: ICTBreakoutSignal,
+    alert: Optional[Mapping[str, Any]],
+) -> ICTBreakoutSignal:
+    """Carry radar ICT stamps when live re-analyze drops v_rip / volume flags."""
+    if not alert:
+        return ict
+    moment = str(alert.get("momentType") or alert.get("reason") or "").lower()
+    if bool(alert.get("ictVRipReady") or alert.get("vRipReady")) or "v_rip" in moment:
+        ict.v_rip_ready = True
+    if bool(alert.get("volumeAwaken") or alert.get("ictVolumeAwakening")):
+        ict.volume_awakening = True
+    for alert_key, ict_attr in (
+        ("ictFlatThenVertical", "flat_then_vertical"),
+        ("ictLocalSwingBase", "local_swing_base"),
+        ("ictBaseArmed", "base_armed"),
+        ("ictFirstLift", "first_lift"),
+    ):
+        if bool(alert.get(alert_key)):
+            setattr(ict, ict_attr, True)
+    try:
+        pad = float(
+            alert.get("ictBaseRelativeMovePct")
+            or alert.get("localBaseMovePct")
+            or 0
+        )
+    except (TypeError, ValueError):
+        pad = 0.0
+    if pad > 0 and float(getattr(ict, "base_relative_move_pct", 0) or 0) <= 0:
+        ict.base_relative_move_pct = pad
+    return ict
+
+
 def analyze_explosion_event_ict(event: Any, snap: Optional[SymbolSnapshot] = None) -> ICTBreakoutSignal:
     volume = float(getattr(event, "volume", 0) or 0)
     # Event path used to drop absolute volume (always 0) → ICT never saw abs awaken.
@@ -3094,13 +3127,9 @@ def _defensive_base_rip_top_allowed(
     min_quality = float(
         getattr(settings, "ict_defensive_base_rip_min_quality", 70.0) or 70.0
     )
-    if float(quality or 0) < min_quality:
-        return False, f"defensive_rip_top_quality<{min_quality:g}"
     min_score = float(
         getattr(settings, "ict_defensive_base_rip_min_score", 80.0) or 80.0
     )
-    if float(score or 0) < min_score:
-        return False, f"defensive_rip_top_score<{min_score:g}"
     min_v3 = float(
         getattr(settings, "ict_defensive_base_rip_min_velocity_3s", 2.5) or 2.5
     )
@@ -3111,6 +3140,23 @@ def _defensive_base_rip_top_allowed(
         getattr(settings, "top_ftv_a_pad_velocity_max_move_pct", 25.0) or 25.0
     )
     move = float(base_move_pct or 0)
+    v_pad_lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+    v_pad_hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    # Aug26 SENSEX PUT 77600/77700: v_rip_session_low at 7–10% lb had explosionScore
+    # ~40–42 (passes ict_v_rip_min_score) but defensive_rip_top still demanded ≥75.
+    if v_pad_lo <= move <= v_pad_hi and (v_rip_ready or volume_awake):
+        min_score = min(
+            min_score,
+            float(getattr(settings, "ict_v_rip_min_score", 40.0) or 40.0),
+        )
+        min_quality = min(
+            min_quality,
+            float(getattr(settings, "ict_v_rip_min_quality", 50.0) or 50.0),
+        )
+    if float(quality or 0) < min_quality:
+        return False, f"defensive_rip_top_quality<{min_quality:g}"
+    if float(score or 0) < min_score:
+        return False, f"defensive_rip_top_score<{min_score:g}"
     if pad_lo <= move <= pad_hi and (v_rip_ready or volume_awake):
         pad_floor = float(
             getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0
@@ -3169,6 +3215,20 @@ def _defensive_base_rip_top_allowed(
                         -1.5,
                     )
                     or -1.5
+                ),
+            )
+        # Aug26 SENSEX PUT 77600 v_rip_session_low at ~9% lb: v3≈0 at lift off trough.
+        if (
+            v_rip_ready
+            and volume_awake
+            and not first_lift
+            and not armed_base_launch
+            and v_pad_lo <= move <= v_pad_hi
+        ):
+            min_v3 = min(
+                min_v3,
+                float(
+                    getattr(settings, "ict_v_rip_cold_velocity_3s", -1.5) or -1.5
                 ),
             )
     if float(velocity_3s or 0) < min_v3:
