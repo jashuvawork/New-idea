@@ -1916,6 +1916,13 @@ class Settings(BaseSettings):
     # between sparse LTP polls (Aug12 SENSEX 77800 PE ~120 trough / ~238 peak).
     session_day_ohlc_extremes_enabled: bool = True
     session_day_ohlc_max_dev_mult: float = 8.0
+    # Expiry trough first-tick scan — detect V-lift off chain day-low before velocity
+    # history builds (Aug26 SENSEX 77800 PE: ₹95 trough, lift to ₹100+ at 10:00 but
+    # radar waited until 10:55 ELITE @ ₹153 because open_move floor was 25%).
+    expiry_trough_scan_enabled: bool = True
+    expiry_trough_first_tick_min_off_low_pct: float = 3.0
+    expiry_trough_first_tick_max_off_low_pct: float = 18.0
+    expiry_trough_first_tick_min_score_boost: float = 10.0
     # Breadth-aligned ELITE/EXPLODING open-gap: bypass stale 5m MTF oppose.
     open_gap_elite_mtf_bypass_enabled: bool = True
     open_gap_elite_mtf_min_move_pct: float = 40.0

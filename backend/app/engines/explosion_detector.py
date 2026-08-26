@@ -418,6 +418,30 @@ def apply_day_extremes_baseline(
     return changed
 
 
+def _seed_session_baseline_from_first_poll(
+    key: str,
+    premium: float,
+    *,
+    day_low: float = 0.0,
+    day_high: float = 0.0,
+) -> None:
+    """First poll for a strike — keep chain OHLC trough/peak if already seeded."""
+    ohlc_low = _session_low.get(key)
+    ohlc_peak = _session_peak.get(key)
+    if ohlc_low is not None and ohlc_low < premium:
+        _session_open[key] = float(ohlc_low)
+        _session_low[key] = float(ohlc_low)
+    else:
+        _session_open[key] = premium
+        if ohlc_low is None or premium < float(ohlc_low):
+            _session_low[key] = premium
+    if ohlc_peak is not None and ohlc_peak > premium:
+        _session_peak[key] = float(ohlc_peak)
+    else:
+        _session_peak[key] = max(premium, float(ohlc_peak or premium))
+    apply_day_extremes_baseline(key, premium, day_low, day_high)
+
+
 def apply_prior_close_baseline(
     key: str,
     premium: float,
@@ -503,12 +527,9 @@ def _session_open_move_pct(
         # Never seed open/low from illiquid micro-ticks.
         if not _is_meaningful_premium(premium):
             return 0.0
-        _session_open[key] = premium
-        _session_peak[key] = premium
-        _session_low[key] = premium
-        # Re-apply day extremes after first seed so a mid-rip first LTP still
-        # deepens to the chain trough / raises to the chain peak.
-        apply_day_extremes_baseline(key, premium, day_low, day_high)
+        _seed_session_baseline_from_first_poll(
+            key, premium, day_low=day_low, day_high=day_high,
+        )
         # First sample with no prior-close seed → 0% until next tick unless
         # day-low backfilled the open (then report live vs trough immediately).
         baseline = float(_session_open.get(key) or premium)
@@ -555,10 +576,9 @@ def _session_peak_move_pct(
     if key not in _session_open and premium > 0:
         if not _is_meaningful_premium(premium):
             return 0.0
-        _session_open[key] = premium
-        _session_peak[key] = premium
-        _session_low[key] = premium
-        apply_day_extremes_baseline(key, premium, day_low, day_high)
+        _seed_session_baseline_from_first_poll(
+            key, premium, day_low=day_low, day_high=day_high,
+        )
         baseline = float(_session_open.get(key) or premium)
         peak = max(_session_peak.get(key, premium), premium)
         _session_peak[key] = peak
@@ -1682,6 +1702,57 @@ def _premium_ok_for_scan(
     return False
 
 
+def _expiry_trough_first_tick_scan_ok(
+    *,
+    symbol: str,
+    strike: float,
+    side: Side,
+    premium: float,
+    hist: Optional[deque],
+    expiry_day: bool,
+    near_atm: bool,
+    moneyness: str,
+    day_low: float,
+    settings: Any,
+) -> tuple[bool, float]:
+    """First-tick radar when chain day-low seeds a trough and LTP lifts off it.
+
+    Aug26 SENSEX 77800 PE: V from ~₹95 at 10:00 was invisible until 10:55 because
+    hist < 2 required open_move >= 25% while off-low was only ~5–12%.
+    """
+    if not bool(getattr(settings, "expiry_trough_scan_enabled", True)):
+        return False, 0.0
+    if not expiry_day or not near_atm:
+        return False, 0.0
+    if str(moneyness or "").upper() == "OTM":
+        return False, 0.0
+    if hist and len(hist) >= 2:
+        return False, 0.0
+
+    chain_low = float(day_low or 0)
+    key = _open_key(symbol, strike, side)
+    if chain_low <= 0:
+        chain_low = float(_session_low.get(key) or 0)
+    if chain_low <= 0:
+        return False, 0.0
+
+    apply_day_extremes_baseline(key, premium, float(day_low or 0), 0.0)
+    trough = float(_session_low.get(key) or chain_low)
+    if trough <= 0 or premium <= trough:
+        return False, 0.0
+
+    off_low = ((float(premium) - trough) / trough) * 100.0
+    min_off = float(
+        getattr(settings, "expiry_trough_first_tick_min_off_low_pct", 3.0) or 3.0
+    )
+    max_off = float(
+        getattr(settings, "expiry_trough_first_tick_max_off_low_pct", 18.0) or 18.0
+    )
+    if not (min_off <= off_low <= max_off + 1e-6):
+        return False, 0.0
+    return True, off_low
+
+
 def _shallow_otm_monitor_eligible(
     side: Side,
     strike: float,
@@ -1820,9 +1891,21 @@ def scan_chain_explosions(
                 day_high=day_high,
             )
             session_move = _effective_session_move(open_move, peak_move)
+            trough_scan_ok, trough_off_low = _expiry_trough_first_tick_scan_ok(
+                symbol=symbol,
+                strike=float(strike),
+                side=side,
+                premium=float(premium),
+                hist=hist,
+                expiry_day=expiry_day,
+                near_atm=near_atm,
+                moneyness=money,
+                day_low=float(day_low or 0),
+                settings=settings,
+            )
             if not _premium_ok_for_scan(
                 premium,
-                max(open_move, session_move),
+                max(open_move, session_move, trough_off_low if trough_scan_ok else 0.0),
                 settings,
                 expiry_day=expiry_day,
                 moneyness=money,
@@ -1830,17 +1913,27 @@ def scan_chain_explosions(
                 continue
 
             if not hist or len(hist) < 2:
-                if not (
+                open_gate = (
                     settings.open_premium_explosion_enabled
                     and open_move >= settings.open_premium_min_move_pct
-                ):
+                )
+                if not open_gate and not trough_scan_ok:
                     continue
-                v3 = open_move * 0.35
-                v9 = open_move * 0.65
-                v15 = min(open_move * 0.35, 12.0)
-                vol_surge = 1.5
-                peak_v3 = _update_peak_velocity(vel_key, v3)
-                v3_score = max(v3, peak_v3)
+                if trough_scan_ok:
+                    lift_pct = max(trough_off_low, open_move, 0.0)
+                    v3 = max(lift_pct * 0.35, 0.15)
+                    v9 = max(lift_pct * 0.55, 0.08)
+                    v15 = min(lift_pct * 0.25, 8.0)
+                    vol_surge = 1.5
+                    peak_v3 = _update_peak_velocity(vel_key, v3)
+                    v3_score = max(v3, peak_v3)
+                else:
+                    v3 = open_move * 0.35
+                    v9 = open_move * 0.65
+                    v15 = min(open_move * 0.35, 12.0)
+                    vol_surge = 1.5
+                    peak_v3 = _update_peak_velocity(vel_key, v3)
+                    v3_score = max(v3, peak_v3)
             else:
                 v3 = _velocity(hist, 1)
                 v9 = _velocity(hist, 3)
@@ -1865,6 +1958,12 @@ def scan_chain_explosions(
             )
             if session_move >= settings.open_premium_min_move_pct:
                 score = min(100, score + min(30, session_move * 0.35))
+            elif trough_scan_ok:
+                boost = float(
+                    getattr(settings, "expiry_trough_first_tick_min_score_boost", 10.0)
+                    or 10.0
+                )
+                score = min(100, max(score, boost + trough_off_low * 1.8))
             elif peak_move >= 20:
                 score = min(100, score + min(18, peak_move * 0.22))
 
@@ -1916,6 +2015,8 @@ def scan_chain_explosions(
                 reason_parts_open = [f"open+{session_move:.0f}%"]
                 if peak_move > session_move + 5:
                     reason_parts_open.append(f"peak+{peak_move:.0f}%")
+            elif trough_scan_ok:
+                reason_parts_open = [f"trough+{trough_off_low:.0f}%"]
             else:
                 reason_parts_open = []
 
@@ -2035,6 +2136,7 @@ def scan_chain_explosions(
                 if (
                     not keep_first_lift
                     and not keep_armed_base
+                    and not trough_scan_ok
                     and not (peak_move >= 20 and v3 >= 1.2)
                 ):
                     continue
@@ -2074,6 +2176,9 @@ def scan_chain_explosions(
                 reason_parts.append(f"vol×{vol_surge:.1f}")
             reason_parts.extend(reason_parts_open)
 
+            report_move = session_move
+            if trough_scan_ok:
+                report_move = max(session_move, trough_off_low, open_move)
             events.append(ExplosionEvent(
                 symbol=symbol,
                 side=side,
@@ -2086,8 +2191,8 @@ def scan_chain_explosions(
                 explosion_score=round(score, 1),
                 tier=tier,
                 reason=" ".join(reason_parts) or "momentum building",
-                daily_move_pct=round(session_move, 2),
-                peak_move_pct=round(peak_move, 2),
+                daily_move_pct=round(report_move, 2),
+                peak_move_pct=round(max(peak_move, report_move), 2),
                 volume=float(effective_volume or 0),
                 moneyness=str(money or ""),
             ))
