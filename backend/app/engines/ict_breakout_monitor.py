@@ -3153,6 +3153,24 @@ def _defensive_base_rip_top_allowed(
                     or -0.5
                 ),
             )
+        # Aug26 SENSEX PUT 77800 first_lift_local_base at ~16% lb with session peak 53%.
+        if (
+            first_lift
+            and not armed_base_launch
+            and volume_awake
+            and pad_floor <= move <= pad_hi
+        ):
+            min_v3 = min(
+                min_v3,
+                float(
+                    getattr(
+                        settings,
+                        "ict_first_lift_local_base_cold_velocity_3s",
+                        -1.5,
+                    )
+                    or -1.5
+                ),
+            )
     if float(velocity_3s or 0) < min_v3:
         return False, f"defensive_rip_top_v3<{min_v3:g}"
     return True, "ok"
