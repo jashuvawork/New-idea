@@ -1655,6 +1655,10 @@ class Settings(BaseSettings):
     # still force-flipped, preserving the dead-cat-bounce protection. Symmetric CE/PE.
     chart_reconcile_confirmed_reversal_keeps_live: bool = True
     chart_reconcile_confirmed_reversal_min_mom15_pct: float = 0.06
+    # Ichimoku / micro-bounce chart flips must not override directional breadth
+    # (Aug26: bearish breadth + bearish broker chart but spotChart showed BULLISH →
+    # chart_live_bullish_no_puts blocked every PUT).
+    chart_reconcile_respects_breadth_enabled: bool = True
     # Advanced indicators (squeeze / ADX / Supertrend / VWAP) computed on the index chart.
     # The squeeze (Bollinger-in-Keltner compression -> release) is the canonical flat-base
     # -> vertical-explosion signal: a fresh release with momentum toward the option side is
