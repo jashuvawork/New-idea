@@ -279,39 +279,23 @@ async def monitor_trade_chart_before_execution(
     vertical_bypass = vertical_rip_bypass_for_snap(
         side, snap, explosion_event=explosion_event,
     )
-    first_lift_bypass = False
-    if (
-        explosion_event is not None
-        and bool(
-            getattr(
-                settings,
-                "first_lift_bypasses_execution_chart_enabled",
-                True,
-            )
-        )
-    ):
-        from app.engines.ict_breakout_monitor import first_lift_entry_ready
+    from app.engines.pad_lane_capture import resolve_strict_pad_lane_for_entry
 
-        first_lift_bypass = first_lift_entry_ready(
-            snap=snap,
-            event=explosion_event,
-            alert=alert,
-        )
+    pad_lane_chart_bypass, strict_first_lift_bypass = resolve_strict_pad_lane_for_entry(
+        side,
+        snap,
+        mode=mode or "",
+        explosion_event=explosion_event,
+        alert=alert if isinstance(alert, dict) else None,
+    )
+    first_lift_bypass = strict_first_lift_bypass
     from app.engines.local_base_chart_bypass import local_base_ichimoku_bypass_for_snap
     from app.engines.open_gap_capture import elite_open_gap_mtf_bypass
 
     local_ichi_bypass = local_base_ichimoku_bypass_for_snap(
         side, snap, explosion_event=explosion_event,
     )
-    from app.engines.pad_lane_capture import pad_lane_turnaround_chart_bypass_for_snap
-
-    pad_lane_chart_bypass = pad_lane_turnaround_chart_bypass_for_snap(
-        side,
-        snap,
-        explosion_event=explosion_event,
-        alert=alert,
-    )
-    strict_chart_bypass = first_lift_bypass or pad_lane_chart_bypass
+    strict_chart_bypass = strict_first_lift_bypass
     open_gap_mtf_bypass = elite_open_gap_mtf_bypass(
         side, snap, explosion_event=explosion_event, mode=mode,
     )
@@ -325,7 +309,7 @@ async def monitor_trade_chart_before_execution(
         or vertical_bypass
         or local_ichi_bypass
         or open_gap_mtf_bypass
-        or first_lift_bypass
+        or strict_first_lift_bypass
         or pad_lane_chart_bypass
     )
     # Aug6 78800 PE: counter-trend PUT filled via expiry/local-base bypasses.
@@ -334,8 +318,7 @@ async def monitor_trade_chart_before_execution(
     if (
         getattr(settings, "chart_counter_trend_bypass_block_enabled", True)
         and hard_counter_trend_chart(side, snap.spotChart)
-        and not first_lift_bypass
-        and not pad_lane_chart_bypass
+        and not strict_first_lift_bypass
     ):
         expiry_chart_bypass = False
         structure_chart_bypass = False
@@ -345,13 +328,15 @@ async def monitor_trade_chart_before_execution(
         local_ichi_bypass = False
         open_gap_mtf_bypass = False
         breadth_bypass = False
+        pad_lane_chart_bypass = False
 
     # A confirmed near-base FTV first-lift (ELITE/EXPLODING) may fill through a shallow
     # base-retest dip instead of being blocked as "premium fading" — take it AT the base.
-    # Tied to first_lift_bypass so the hard counter-trend reset above disables it too.
+    # strict_first_lift_bypass covers v_rip/armed_base stamps even when chart aligns.
     _event_tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    premium_fade_pad_lane = strict_first_lift_bypass or pad_lane_chart_bypass
     confirmed_ftv_bypass = bool(
-        first_lift_bypass and _event_tier in ("ELITE", "EXPLODING")
+        strict_first_lift_bypass and _event_tier in ("ELITE", "EXPLODING")
     ) or pad_lane_chart_bypass
 
     try:
@@ -401,13 +386,15 @@ async def monitor_trade_chart_before_execution(
         explosion_event=explosion_event,
         mode=mode,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
-        pad_lane_bypass=pad_lane_chart_bypass,
+        pad_lane_bypass=premium_fade_pad_lane,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
     meta["firstLiftBypass"] = first_lift_bypass
+    meta["strictFirstLiftBypass"] = strict_first_lift_bypass
     meta["padLaneChartBypass"] = pad_lane_chart_bypass
     meta["ftvFadeFillBypass"] = confirmed_ftv_bypass
+    meta["premiumFadePadLaneBypass"] = premium_fade_pad_lane
 
     delta = meta.get("snapshotDelta") or {}
     if delta.get("directionChanged"):

@@ -1302,26 +1302,42 @@ def resolve_strict_pad_lane_chart_bypass(
     Aug26 SENSEX PUT 77600 v_rip_session_low: pad_lane bypass passed in isolation but
     auto_trader zeroed all counter-trend waivers and never passed strict_first_lift.
     """
-    alert = (
-        candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
-    )
-    pad_lane_chart_bypass = pad_lane_turnaround_chart_bypass_for_snap(
+    return resolve_strict_pad_lane_for_entry(
         candidate.side,
         snap,
+        mode=str(getattr(candidate, "mode", "") or ""),
         explosion_event=getattr(candidate, "explosion_event", None),
-        alert=alert,
+        alert=(
+            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+        ),
+    )
+
+
+def resolve_strict_pad_lane_for_entry(
+    side: Side | str,
+    snap: SymbolSnapshot,
+    *,
+    mode: str = "",
+    explosion_event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, bool]:
+    """Strict pad-lane bypass from side/snap/alert — shared by auto_trader and live chart monitor."""
+    row = alert if isinstance(alert, dict) else None
+    side_obj = side if isinstance(side, Side) else Side(str(side).upper())
+    pad_lane_chart_bypass = pad_lane_turnaround_chart_bypass_for_snap(
+        side_obj,
+        snap,
+        explosion_event=explosion_event,
+        alert=row,
     )
     armed_base_chart_bypass = False
-    if (
-        getattr(candidate, "mode", "") == "explosion"
-        and getattr(candidate, "explosion_event", None) is not None
-    ):
+    if (mode or "").lower() == "explosion" and explosion_event is not None:
         from app.engines.ict_breakout_monitor import first_lift_entry_readiness
 
         armed_ready, armed_reason = first_lift_entry_readiness(
             snap=snap,
-            event=candidate.explosion_event,
-            alert=alert,
+            event=explosion_event,
+            alert=row,
         )
         armed_base_chart_bypass = bool(
             armed_ready and armed_reason in _STRICT_PAD_CHART_BYPASS_REASONS
