@@ -682,6 +682,28 @@ def afternoon_capture_active(snapshots: Optional[dict[str, SymbolSnapshot]]) -> 
     return False
 
 
+def is_v_rip_local_base_capture_event(
+    event: ExplosionEvent,
+    *,
+    chart: Optional[SpotChart] = None,
+) -> bool:
+    """Event-path mirror of is_v_rip_local_base_capture_alert (pad unknown → score+tier only)."""
+    settings = get_settings()
+    if not bool(getattr(settings, "ict_v_rip_ready_enabled", True)):
+        return False
+    if not in_premium_capture_window():
+        return False
+    tier = str(event.tier or "").upper()
+    if tier not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+    reason = str(event.reason or "").lower()
+    if "v_rip" not in reason:
+        return False
+    score = float(event.explosion_score or 0)
+    min_score = float(getattr(settings, "ict_v_rip_min_score", 40.0) or 40.0)
+    return score >= min_score
+
+
 def is_premium_capture_event(
     event: ExplosionEvent,
     *,
@@ -691,6 +713,7 @@ def is_premium_capture_event(
         is_morning_capture_event(event, chart=chart)
         or is_afternoon_capture_event(event, chart=chart)
         or is_all_day_explosion_event(event, chart=chart)
+        or is_v_rip_local_base_capture_event(event, chart=chart)
     )
 
 
