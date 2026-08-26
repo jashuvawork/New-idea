@@ -1319,6 +1319,9 @@ class Settings(BaseSettings):
     expiry_pm_itm_window_end_minute: int = 25
     expiry_pm_itm_premium_max_inr: float = 280.0
     expiry_near_expiry_premium_max_inr: float = 300.0
+    # Deep ITM on expiry — resting LTP can exceed ₹650 before the vertical prints.
+    # Aug26 SENSEX 78200–78400 PUT (42–44% peaks) never reached radar when scan clipped at 500pt.
+    expiry_itm_explosion_scan_max_premium_inr: float = 900.0
     expiry_pm_itm_min_velocity_pct: float = 0.35
     expiry_pm_itm_min_rank_score: float = 52.0
     expiry_pm_itm_chart_bypass_breadth: bool = True

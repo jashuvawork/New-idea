@@ -1578,6 +1578,7 @@ def resolve_explosion_scan_range(
     settings=None,
     *,
     tight_scan: bool | None = None,
+    expiry_day: bool | None = None,
 ) -> float:
     """
     ATM ± range for chain scan — wider on SENSEX.
@@ -1585,10 +1586,29 @@ def resolve_explosion_scan_range(
     On expiry with ITM monitor enabled, keep a wide enough band to cover most
     ITM CE/PE (not the old worst-day 500pt clamp that missed deep ITM rips).
     Worst-day tight scan only applies when expiry ITM monitor is off.
+
+    When ``expiry_day`` is True for a symbol, always use the ITM monitor band
+    for that scan — do not rely on the global ``any_expiry_session_active`` cache
+    (Aug26 afternoon: ATM 77600 detected 77600–77800 but 78200+ clipped at 500pt).
     """
     from app.config import get_settings
 
     settings = settings or get_settings()
+    if expiry_day:
+        itm_monitor = bool(getattr(settings, "expiry_itm_monitor_enabled", True))
+        if itm_monitor:
+            try:
+                from app.engines.expiry_day_guards import resolve_expiry_itm_scan_range
+
+                return resolve_expiry_itm_scan_range(symbol)
+            except Exception:
+                if symbol.upper() == "SENSEX":
+                    return float(getattr(settings, "expiry_sensex_itm_scan_range", 1200) or 1200)
+                return float(getattr(settings, "expiry_itm_scan_range", 800) or 800)
+        if symbol.upper() == "SENSEX":
+            return float(getattr(settings, "explosion_sensex_worst_day_scan_range", 500) or 500)
+        return float(getattr(settings, "explosion_worst_day_scan_range", 500) or 500)
+
     if tight_scan is None:
         try:
             from app.engines.expiry_day_guards import any_expiry_session_active
@@ -1626,14 +1646,29 @@ def resolve_explosion_scan_range(
     return base
 
 
-def _premium_ok_for_scan(premium: float, open_move: float, settings) -> bool:
+def _premium_ok_for_scan(
+    premium: float,
+    open_move: float,
+    settings,
+    *,
+    expiry_day: bool = False,
+    moneyness: str = "",
+) -> bool:
     """Allow sub-min premium when session move is explosive (deep OTM rips).
 
     When ATM+ITM-only scan is on, never bypass the main premium band — cheap
     deep-OTM noise must not dominate radar over near-base ATM/ITM.
     """
-    if premium_in_band(premium, mode="explosion"):
+    if premium_in_band(premium, mode="explosion", peak_move_pct=open_move):
         return True
+    # Expiry deep ITM — intrinsic premium exceeds ₹650 before the vertical prints.
+    if expiry_day and str(moneyness or "").upper() == "ITM":
+        itm_ceil = float(
+            getattr(settings, "expiry_itm_explosion_scan_max_premium_inr", 900.0) or 900.0
+        )
+        floor = float(getattr(settings, "expiry_day_min_option_premium_inr", 15.0) or 15.0)
+        if floor <= premium <= itm_ceil:
+            return True
     if bool(getattr(settings, "explosion_scan_atm_itm_only", True)):
         return False
     min_deep = float(getattr(settings, "explosion_deep_otm_min_premium_inr", 18.0))
@@ -1701,7 +1736,7 @@ def scan_chain_explosions(
     open_window = in_open_premium_window()
     events: list[ExplosionEvent] = []
     step = 100
-    scan_range = resolve_explosion_scan_range(symbol, settings)
+    scan_range = resolve_explosion_scan_range(symbol, settings, expiry_day=expiry_day)
     atm_mult = float(settings.expiry_atm_tier_velocity_mult) if expiry_day else 1.0
 
     chain_rows = list(chain)
@@ -1785,7 +1820,13 @@ def scan_chain_explosions(
                 day_high=day_high,
             )
             session_move = _effective_session_move(open_move, peak_move)
-            if not _premium_ok_for_scan(premium, max(open_move, session_move), settings):
+            if not _premium_ok_for_scan(
+                premium,
+                max(open_move, session_move),
+                settings,
+                expiry_day=expiry_day,
+                moneyness=money,
+            ):
                 continue
 
             if not hist or len(hist) < 2:
