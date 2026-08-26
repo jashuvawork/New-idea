@@ -2358,7 +2358,7 @@ class Settings(BaseSettings):
     def daily_profit_stage_target_mults(self) -> list[float]:
         return [float(x.strip()) for x in self.daily_profit_stage_target_mults_csv.split(",") if x.strip()]
 
-    use_upstox_capital_for_sizing: bool = True  # paper parity uses real margin when token present
+    use_upstox_capital_for_sizing: bool = False  # paper uses fallback_capital_inr unless live trading
 
     # Quantity per lot (units) — NSE/BSE contract sizes
     lot_size_nifty: int = 65

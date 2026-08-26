@@ -738,7 +738,9 @@ async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
     except Exception as e:
         logger.warning("Lot size refresh failed: %s", e)
 
-    if settings.use_upstox_capital_for_sizing or settings.paper_live_parity_enabled:
+    from app.engines.capital_allocator import ensure_paper_sizing_capital, should_use_live_broker_capital
+
+    if should_use_live_broker_capital():
         refresh_due = (
             _capital_refresh_at is None
             or (now - _capital_refresh_at).total_seconds() >= settings.capital_refresh_seconds
@@ -749,6 +751,8 @@ async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
                 _capital_refresh_at = now
             except Exception as e:
                 logger.warning("Capital refresh failed: %s", e)
+    else:
+        ensure_paper_sizing_capital()
 
     snapshots = {}
     # Parallel symbol builds — throttle lock still serializes Upstox HTTP per request

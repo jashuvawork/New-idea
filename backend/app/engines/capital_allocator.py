@@ -320,6 +320,62 @@ def open_exposure_inr(state: AutoTraderState) -> float:
     return sum(trade_exposure_inr(trade) for trade in state.openPaperTrades)
 
 
+def _allocation_reserve_inr(capital_base: float) -> float:
+    settings = get_settings()
+    reserve_pct = max(
+        0.0,
+        min(
+            0.50,
+            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
+        ),
+    )
+    return capital_base * reserve_pct
+
+
+def _book_remaining_inr(
+    state: AutoTraderState,
+    cap: CapitalSnapshot,
+) -> float:
+    """Free cash in the sizing book for the next ranked FTV leg."""
+    capital_base = _allocation_capital_base(cap)
+    cash_reserve = _allocation_reserve_inr(capital_base)
+    committed = open_exposure_inr(state)
+    strategy_remaining = max(0.0, capital_base - cash_reserve - committed)
+    if should_use_live_broker_capital():
+        broker_remaining = max(0.0, float(cap.availableMarginInr or 0))
+        if str(cap.source or "").lower() in ("fallback", "manual"):
+            broker_remaining = max(0.0, broker_remaining - committed)
+        return min(strategy_remaining, broker_remaining)
+    # Paper / book sizing — never cap by broker leftover margin.
+    return strategy_remaining
+
+
+def ensure_paper_sizing_capital() -> CapitalSnapshot:
+    """Initialize or refresh the paper trading book (default ₹2L)."""
+    settings = get_settings()
+    if should_use_live_broker_capital():
+        return get_capital_snapshot()
+    global _capital
+    target = float(
+        _manual_capital_limit_inr
+        if _manual_capital_limit_inr is not None
+        else getattr(settings, "fallback_capital_inr", 200_000) or 200_000
+    )
+    if (
+        _capital is not None
+        and str(_capital.source or "").lower() in ("fallback", "manual")
+        and abs(float(_capital.availableMarginInr or 0) - target) < 1.0
+    ):
+        return _capital
+    _capital = _build_fallback_capital_snapshot()
+    logger.info(
+        "Paper sizing capital set to ₹%.0f (source=%s)",
+        _capital.availableMarginInr,
+        _capital.source,
+    )
+    return _capital
+
+
 def _allocation_capital_base(cap: CapitalSnapshot) -> float:
     total = float(cap.totalEquityInr or 0)
     if total <= 0:
@@ -339,20 +395,9 @@ def ranked_allocation_for_state(
     weights = ranked_allocation_weights()
     rank = max(1, int(rank))
     capital_base = _allocation_capital_base(cap)
-    reserve_pct = max(
-        0.0,
-        min(
-            0.50,
-            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
-        ),
-    )
-    cash_reserve = capital_base * reserve_pct
+    cash_reserve = _allocation_reserve_inr(capital_base)
     committed = open_exposure_inr(state)
-    strategy_remaining = max(0.0, capital_base - cash_reserve - committed)
-    broker_remaining = max(0.0, float(cap.availableMarginInr or 0))
-    if cap.source == "fallback":
-        broker_remaining = max(0.0, broker_remaining - committed)
-    remaining = min(strategy_remaining, broker_remaining)
+    remaining = _book_remaining_inr(state, cap)
 
     index = rank - 1
     remaining_pct = max(
@@ -504,19 +549,8 @@ def capital_book_summary(
     settings = get_settings()
     capital_base = _allocation_capital_base(cap)
     committed = open_exposure_inr(state)
-    reserve_pct = max(
-        0.0,
-        min(
-            0.50,
-            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
-        ),
-    )
-    reserve = capital_base * reserve_pct
-    strategy_remaining = max(0.0, capital_base - reserve - committed)
-    broker_remaining = max(0.0, float(cap.availableMarginInr or 0))
-    if cap.source == "fallback":
-        broker_remaining = max(0.0, broker_remaining - committed)
-    remaining = min(strategy_remaining, broker_remaining)
+    reserve = _allocation_reserve_inr(capital_base)
+    remaining = _book_remaining_inr(state, cap)
     active = []
     for trade in state.openPaperTrades:
         ctx = getattr(trade, "entryContext", None) or {}
@@ -654,6 +688,8 @@ async def refresh_capital_from_upstox(
     force: bool = False,
 ) -> CapitalSnapshot:
     """Pull live margin from Upstox and derive static risk/lot tiers."""
+    if not should_use_live_broker_capital():
+        return ensure_paper_sizing_capital()
     settings = get_settings()
     now = datetime.now(IST).isoformat()
     min_l, tgt_l, max_l = _lot_tiers(settings.fallback_capital_inr)
@@ -707,17 +743,34 @@ async def refresh_capital_from_upstox(
     return snap
 
 
-def get_capital_snapshot() -> CapitalSnapshot:
-    global _capital
-    if _capital is not None:
-        return _capital
+def should_use_live_broker_capital() -> bool:
+    """Only size from Upstox margin when live trading is enabled.
+
+    Paper mode always uses fallback_capital_inr (default ₹2L) or a manual book cap —
+    never the broker's leftover live margin (which caused ftv_allocation_below_one_lot
+    at ~₹573 while the paper book was ₹2L).
+    """
     settings = get_settings()
-    min_l, tgt_l, max_l = _lot_tiers(settings.fallback_capital_inr)
-    budget = settings.fallback_capital_inr * settings.per_trade_capital_pct
+    return bool(
+        getattr(settings, "use_upstox_capital_for_sizing", False)
+        and getattr(settings, "enable_live_trading", False)
+    )
+
+
+def _build_fallback_capital_snapshot() -> CapitalSnapshot:
+    settings = get_settings()
+    base = (
+        float(_manual_capital_limit_inr)
+        if _manual_capital_limit_inr is not None
+        else float(settings.fallback_capital_inr)
+    )
+    effective = _effective_capital_inr(base)
+    min_l, tgt_l, max_l = _lot_tiers(effective)
+    budget = effective * settings.per_trade_capital_pct
     return CapitalSnapshot(
-        availableMarginInr=settings.fallback_capital_inr,
-        totalEquityInr=settings.fallback_capital_inr,
-        source="fallback",
+        availableMarginInr=effective,
+        totalEquityInr=effective,
+        source="manual" if _manual_capital_limit_inr is not None else "fallback",
         perTradeRiskInr=budget,
         perTradeCapitalInr=budget,
         maxExposureInr=budget,
@@ -725,6 +778,17 @@ def get_capital_snapshot() -> CapitalSnapshot:
         targetLots=tgt_l,
         maxLots=max_l,
     )
+
+
+def get_capital_snapshot() -> CapitalSnapshot:
+    global _capital
+    if not should_use_live_broker_capital():
+        if _capital is None or str(_capital.source or "").lower() == "upstox":
+            _capital = _build_fallback_capital_snapshot()
+        return _capital
+    if _capital is not None:
+        return _capital
+    return _build_fallback_capital_snapshot()
 
 
 def set_manual_capital_limit(amount: float) -> CapitalSnapshot:
