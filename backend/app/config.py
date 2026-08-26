@@ -523,8 +523,8 @@ class Settings(BaseSettings):
     ict_v_rip_min_velocity_3s: float = 1.2
     ict_v_rip_min_velocity_9s: float = 0.8
     ict_v_rip_cold_velocity_3s: float = -1.5
-    ict_v_rip_min_quality: float = 50.0
-    ict_v_rip_min_score: float = 40.0
+    ict_v_rip_min_quality: float = 45.0
+    ict_v_rip_min_score: float = 12.0
     ict_v_rip_base_near_session_low_pct: float = 2.0
     # Slow grind anywhere in the 2–25% V-rip pad may show volume awakening before
     # v3 clears the default 1.2% bar — align pad floor with ict_v_rip_min_move_pct.
@@ -537,7 +537,7 @@ class Settings(BaseSettings):
     building_rip_min_velocity_3s: float = 1.5
     building_rip_min_velocity_9s: float = 0.8
     building_rip_min_volume_surge: float = 1.8
-    building_rip_min_score: float = 48.0
+    building_rip_min_score: float = 28.0
     building_rip_min_move_pct: float = 2.0
     building_rip_max_move_pct: float = 55.0
     building_rip_fade_peak_gap_pct: float = 12.0
@@ -550,7 +550,7 @@ class Settings(BaseSettings):
     building_rip_local_base_max_move_pct: float = 15.0
     building_rip_local_base_min_velocity_3s: float = 1.2
     # Align with aggressive_min_explosion_score so ready lifts clear selector floor.
-    building_rip_local_base_min_score: float = 45.0
+    building_rip_local_base_min_score: float = 12.0
     # Precise BUILDING radar LTP monitor: every meaningful WS LTP print on a
     # BUILDING name re-scans explosions and may take — do not wait for the
     # slower full entry-scan cadence.
@@ -579,7 +579,7 @@ class Settings(BaseSettings):
     # FTV sleeve for confirmed BUILDING lifts: when helpers prove something is
     # helping (vol / CVD / chart / breadth), authorize without waiting for ELITE.
     building_rip_ftv_enabled: bool = True
-    building_rip_ftv_min_explosion_score: float = 48.0
+    building_rip_ftv_min_explosion_score: float = 12.0
     building_rip_ftv_min_velocity_3s: float = 1.2
     building_rip_ftv_min_local_base_move_pct: float = 2.0
     building_rip_ftv_max_local_base_move_pct: float = 55.0
@@ -589,16 +589,16 @@ class Settings(BaseSettings):
     # Pre-lift slow-coil pad sleeve — authorize BUILDING/EXPLODING flat base before
     # velocity spikes (Aug24 24200 PE ₹18–23 coil → sudden lift).
     slow_grind_ftv_enabled: bool = True
-    slow_grind_ftv_min_explosion_score: float = 45.0
-    slow_grind_ftv_min_flat_quality: float = 50.0
+    slow_grind_ftv_min_explosion_score: float = 12.0
+    slow_grind_ftv_min_flat_quality: float = 40.0
     slow_grind_ftv_armed_trough_min_explosion_score: float = 5.0
-    slow_grind_ftv_consolidation_base_min_explosion_score: float = 24.0
+    slow_grind_ftv_consolidation_base_min_explosion_score: float = 12.0
     slow_grind_ftv_consolidation_base_min_flat_quality: float = 35.0
     slow_grind_ftv_max_capital_pct: float = 0.90
     slow_grind_ftv_force_max_lots: bool = True
     # Fast-bullish pad sleeve — momentum turn + volume awakening as lift starts.
     fast_bullish_ftv_enabled: bool = True
-    fast_bullish_ftv_min_explosion_score: float = 48.0
+    fast_bullish_ftv_min_explosion_score: float = 12.0
     fast_bullish_ftv_min_velocity_3s: float = 0.5
     fast_bullish_ftv_max_capital_pct: float = 0.90
     fast_bullish_ftv_force_max_lots: bool = True
@@ -674,8 +674,8 @@ class Settings(BaseSettings):
     first_lift_helper_confirm_enabled: bool = True
     first_lift_helper_confirm_min_helpers: int = 3
     first_lift_helper_strong_surge: float = 3.0
-    first_lift_helper_confirm_min_quality: float = 50.0
-    first_lift_helper_confirm_min_score: float = 45.0
+    first_lift_helper_confirm_min_quality: float = 45.0
+    first_lift_helper_confirm_min_score: float = 12.0
     first_lift_helper_confirm_min_velocity_3s: float = 1.2
     first_lift_helper_confirm_min_velocity_9s: float = 0.6
     # Shallow v3 dip on confirmed first-lift/V-rip at local base — ICT pad is
@@ -707,7 +707,7 @@ class Settings(BaseSettings):
     # composite score still warming (Aug25 NIFTY PUT 24250: score 26; PUT 24150: grade B).
     first_lift_pad_explosion_bypass_enabled: bool = True
     first_lift_pad_explosion_min_peak_pct: float = 25.0
-    first_lift_pad_explosion_min_score: float = 24.0
+    first_lift_pad_explosion_min_score: float = 12.0
     first_lift_pad_local_base_min_pct: float = 2.0
     first_lift_pad_local_base_max_pct: float = 25.0
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
@@ -1495,7 +1495,7 @@ class Settings(BaseSettings):
     squeeze_release_max_velocity_3s: float = 1.5
     squeeze_release_min_bars_on: int = 3
     squeeze_release_ftv_enabled: bool = True
-    squeeze_release_ftv_min_explosion_score: float = 48.0
+    squeeze_release_ftv_min_explosion_score: float = 12.0
     squeeze_release_ftv_max_capital_pct: float = 0.90
     squeeze_release_ftv_force_max_lots: bool = True
     # Index-led option lag — index thrusting, option premium still flat in pad.
@@ -1506,7 +1506,7 @@ class Settings(BaseSettings):
     index_led_option_lag_max_option_velocity_3s: float = 1.2
     index_led_option_lag_min_index_velocity_3s: float = 0.02
     index_led_option_lag_ftv_enabled: bool = True
-    index_led_option_lag_ftv_min_explosion_score: float = 48.0
+    index_led_option_lag_ftv_min_explosion_score: float = 12.0
     index_led_option_lag_ftv_max_capital_pct: float = 0.90
     index_led_option_lag_ftv_force_max_lots: bool = True
     # Stealth CVD coil — flat price, CVD buying+acceleration before volume spike.
@@ -1518,7 +1518,7 @@ class Settings(BaseSettings):
     stealth_cvd_coil_max_velocity_3s: float = 1.0
     stealth_cvd_coil_max_volume_surge: float = 1.8
     stealth_cvd_coil_ftv_enabled: bool = True
-    stealth_cvd_coil_ftv_min_explosion_score: float = 48.0
+    stealth_cvd_coil_ftv_min_explosion_score: float = 12.0
     stealth_cvd_coil_ftv_max_capital_pct: float = 0.90
     stealth_cvd_coil_ftv_force_max_lots: bool = True
     # Micro-pullback retest on armed base before lift resumes.
@@ -1530,7 +1530,7 @@ class Settings(BaseSettings):
     micro_pullback_retest_max_velocity_3s: float = 0.5
     micro_pullback_retest_min_velocity_9s: float = -0.5
     micro_pullback_retest_ftv_enabled: bool = True
-    micro_pullback_retest_ftv_min_explosion_score: float = 48.0
+    micro_pullback_retest_ftv_min_explosion_score: float = 12.0
     micro_pullback_retest_ftv_max_capital_pct: float = 0.90
     micro_pullback_retest_ftv_force_max_lots: bool = True
     # Premium FVG at local base before vertical extension.
@@ -1540,7 +1540,7 @@ class Settings(BaseSettings):
     premium_fvg_pad_max_move_pct: float = 28.0
     premium_fvg_pad_max_velocity_3s: float = 2.0
     premium_fvg_pad_ftv_enabled: bool = True
-    premium_fvg_pad_ftv_min_explosion_score: float = 50.0
+    premium_fvg_pad_ftv_min_explosion_score: float = 12.0
     premium_fvg_pad_ftv_max_capital_pct: float = 0.90
     premium_fvg_pad_ftv_force_max_lots: bool = True
     # Double-dip V-base — session low → bounce → retest low → second lift.
@@ -1554,9 +1554,15 @@ class Settings(BaseSettings):
     double_dip_vbase_min_velocity_3s: float = -0.8
     double_dip_vbase_max_velocity_3s: float = 1.5
     double_dip_vbase_ftv_enabled: bool = True
-    double_dip_vbase_ftv_min_explosion_score: float = 48.0
+    double_dip_vbase_ftv_min_explosion_score: float = 12.0
     double_dip_vbase_ftv_max_capital_pct: float = 0.90
     double_dip_vbase_ftv_force_max_lots: bool = True
+    # Unified early-pad floors — WATCH/BUILDING/FTV/V trough sleeves share these so
+    # entries fire before composite score warms to ELITE/EXPLODING (Aug26 77600 CE @12.8).
+    early_pad_min_explosion_score: float = 12.0
+    early_pad_min_quality: float = 45.0
+    first_lift_early_pad_min_score: float = 12.0
+    first_lift_early_pad_min_quality: float = 45.0
     # Early radar pad — take FTV/V/ELITE/EXPLODING at session trough (e.g. ₹33→48).
     early_radar_pad_capture_enabled: bool = True
     early_radar_pad_max_off_low_pct: float = 15.0
@@ -1572,7 +1578,7 @@ class Settings(BaseSettings):
     watch_local_base_pad_entry_enabled: bool = True
     watch_local_base_pad_max_off_low_pct: float = 18.0
     watch_local_base_pad_max_local_move_pct: float = 15.0
-    watch_local_base_pad_max_explosion_score: float = 35.0
+    watch_local_base_pad_max_explosion_score: float = 50.0
     watch_local_base_pad_min_velocity_3s: float = 0.05
     watch_local_base_pad_min_velocity_9s: float = 0.03
     # Pad-lane turnaround chart bypass — premium-led V-rip / slow-grind / FTV lifts off
@@ -1589,7 +1595,7 @@ class Settings(BaseSettings):
     # ELITE/EXPLODING flat→vertical off local base may bypass bearish chart even after
     # the v_rip_session_low stamp clears (Aug25 NIFTY 24200 CE chart_not_aligned at ELITE).
     pad_lane_elite_ftv_chart_bypass_enabled: bool = True
-    pad_lane_elite_ftv_chart_bypass_min_score: float = 45.0
+    pad_lane_elite_ftv_chart_bypass_min_score: float = 12.0
     pad_lane_elite_ftv_chart_bypass_max_peak_move_pct: float = 45.0
     # first_lift_local_base at the pad may bypass counter-trend chart when session peak
     # is high but LTP is still inside the 2–25% local-base window (Aug26 SENSEX PUT 77800).

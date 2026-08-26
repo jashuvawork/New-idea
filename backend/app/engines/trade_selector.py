@@ -430,8 +430,8 @@ def _explosion_candidates(
             min_explosion_score = min(
                 min_explosion_score,
                 float(
-                    getattr(settings, "first_lift_trade_min_score", 45.0)
-                    or 45.0
+                    getattr(settings, "first_lift_early_pad_min_score", 12.0)
+                    or 12.0
                 ),
             )
         if early_pad or pad_lane_waive:
@@ -2106,6 +2106,14 @@ def diagnose_missed_entries(
                 local_base_move_pct=local_base_move,
                 v_rip_ready=v_rip_ready,
             )
+            if lift_ready:
+                min_score = min(
+                    min_score,
+                    float(
+                        getattr(settings, "first_lift_early_pad_min_score", 12.0)
+                        or 12.0
+                    ),
+                )
             if early_pad or pad_lane_waive:
                 min_score = min(
                     min_score,
