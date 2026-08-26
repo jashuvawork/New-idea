@@ -9,10 +9,12 @@ from app.config import Settings
 from app.engines.capital_allocator import (
     CapitalSnapshot,
     RankedAllocation,
+    _book_remaining_inr,
     cap_lots_to_allocation,
     capital_book_summary,
     clamp_lots,
     effective_ranked_allocation,
+    ensure_paper_sizing_capital,
     get_capital_snapshot,
     max_lots_for_capital,
     max_lots_for_capital_pct,
@@ -58,6 +60,9 @@ class CapitalSizingTests(unittest.TestCase):
             lot_size_banknifty=30,
             lot_size_sensex=20,
             use_upstox_lot_sizes=False,
+            simple_min_lots=1,
+            use_upstox_capital_for_sizing=False,
+            enable_live_trading=False,
         )
 
     def test_max_lots_from_85pct_2l_capital(self):
@@ -639,6 +644,41 @@ class CapitalSizingTests(unittest.TestCase):
             snap = get_capital_snapshot()
         self.assertEqual(snap.source, "fallback")
         self.assertEqual(snap.availableMarginInr, 200_000)
+
+    def test_ensure_paper_sizing_capital_rebuilds_stale_upstox_margin(self):
+        reset_capital_for_tests()
+        import app.engines.capital_allocator as ca
+
+        ca._capital = CapitalSnapshot(
+            availableMarginInr=573.0,
+            totalEquityInr=573.0,
+            source="upstox",
+        )
+        settings = self._ranked_settings()
+        settings.use_upstox_capital_for_sizing = True
+        settings.enable_live_trading = False
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            snap = ensure_paper_sizing_capital()
+        self.assertEqual(snap.source, "fallback")
+        self.assertEqual(snap.availableMarginInr, 200_000)
+
+    def test_book_remaining_ignores_broker_margin_in_paper_mode(self):
+        reset_capital_for_tests()
+        import app.engines.capital_allocator as ca
+
+        ca._capital = CapitalSnapshot(
+            availableMarginInr=573.0,
+            totalEquityInr=200_000.0,
+            source="upstox",
+        )
+        settings = self._ranked_settings()
+        settings.use_upstox_capital_for_sizing = True
+        settings.enable_live_trading = False
+        settings.ftv_allocation_cash_reserve_pct = 0.10
+        state = AutoTraderState(openPaperTrades=[])
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            remaining = _book_remaining_inr(state, ensure_paper_sizing_capital())
+        self.assertEqual(remaining, 180_000)
 
     def test_manual_capital_limit_updates_sizing_snapshot(self):
         settings = self._ranked_settings()

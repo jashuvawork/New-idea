@@ -181,7 +181,9 @@ async def refresh_trading_capital(client, *, force: bool = False) -> None:
     if should_use_live_broker_capital():
         snap = await refresh_capital_from_upstox(client, force=force)
     else:
-        snap = get_capital_snapshot()
+        from app.engines.capital_allocator import ensure_paper_sizing_capital
+
+        snap = ensure_paper_sizing_capital()
     global _capital_inr
     _capital_inr = snap.availableMarginInr
     settings = get_settings()

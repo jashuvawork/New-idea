@@ -312,6 +312,23 @@ async def lifespan(app: FastAPI):
         )
     except Exception as exc:
         logger.warning("Radar startup history recovery error: %s", exc)
+    try:
+        from app.engines.capital_allocator import (
+            ensure_paper_sizing_capital,
+            should_use_live_broker_capital,
+        )
+
+        if should_use_live_broker_capital():
+            logger.info("Live broker capital sizing enabled — Upstox margin on first refresh")
+        else:
+            snap = ensure_paper_sizing_capital()
+            logger.info(
+                "Paper sizing capital initialized: ₹%.0f (source=%s)",
+                snap.availableMarginInr,
+                snap.source,
+            )
+    except Exception as exc:
+        logger.warning("Capital sizing initialization error: %s", exc)
     if settings.upstox_ws_enabled:
         await start_upstox_ws()
         logger.info("Upstox WebSocket feed enabled (mode=%s)", settings.upstox_ws_mode)
