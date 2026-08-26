@@ -536,6 +536,11 @@ def worst_day_allows_candidate(
                         alert.get("ictVolumeAwakening") or alert.get("volumeAwaken")
                     ),
                     v_rip_ready=bool(alert.get("ictVRipReady")),
+                    armed_base_launch=bool(
+                        alert.get("ictArmedBaseLaunch")
+                        or str(alert.get("momentType") or "") == "armed_base_launch"
+                    ),
+                    first_lift=bool(alert.get("ictFirstLift")),
                 )
                 day_mode = ""
                 try:
