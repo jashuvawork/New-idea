@@ -50,7 +50,15 @@ def _number(value: Any) -> float:
 
 
 def early_radar_pad_off_low_pct(alert: Mapping[str, Any]) -> float:
-    return max(0.0, _number(alert.get("offLowMovePct")))
+    if "offLowMovePct" in alert:
+        return max(0.0, _number(alert.get("offLowMovePct")))
+    # Minimal/test alerts omit off-low — infer distance from session trough.
+    return max(
+        0.0,
+        _number(alert.get("peakMovePct")),
+        _number(alert.get("dailyMovePct")),
+        _alert_local_base_move(alert),
+    )
 
 
 def _alert_tier(alert: Mapping[str, Any]) -> str:
@@ -105,6 +113,10 @@ def watch_local_base_pad_lift_signal(alert: Mapping[str, Any], settings: Any = N
     v9 = _number(alert.get("velocity9s"))
 
     if bool(alert.get("ictBaseArmed") or alert.get("baseArmed")):
+        armed_samples = int(alert.get("ictArmedBaseSamples") or 0)
+        min_samples = int(getattr(s, "ict_armed_base_min_samples", 6) or 6)
+        if armed_samples >= min_samples and not bool(alert.get("ictArmedBaseLaunch")):
+            return False
         return True
     if bool(
         alert.get("volumeAwaken")
@@ -222,6 +234,11 @@ def early_radar_pad_capture_active(
         or alert.get("ictEliteBaseReady")
         or alert.get("ictFirstLift")
     ):
+        return False
+
+    armed_samples = int(alert.get("ictArmedBaseSamples") or 0)
+    min_samples = int(getattr(settings, "ict_armed_base_min_samples", 6) or 6)
+    if armed_samples >= min_samples and not bool(alert.get("ictArmedBaseLaunch")):
         return False
 
     premium = _number(alert.get("premium"))

@@ -1375,10 +1375,9 @@ def _ftv_direct_resolve(
 
     if resolved_event is not None:
         if not side:
-            side = str(
-                getattr(getattr(resolved_event, "side", None), "value", resolved_event.side)
-                or ""
-            ).upper()
+            raw_side = getattr(resolved_event, "side", None)
+            if raw_side is not None:
+                side = str(getattr(raw_side, "value", raw_side) or "").upper()
         if strike <= 0:
             try:
                 strike = float(getattr(resolved_event, "strike", 0) or 0)

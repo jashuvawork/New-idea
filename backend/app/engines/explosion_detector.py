@@ -2441,6 +2441,8 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
             "volumeAwaken": vol_awaken,
             "ictVolumeAwakening": bool(getattr(ict, "volume_awakening", False)),
             "ictBaseArmed": bool(getattr(ict, "base_armed", False)),
+            "ictArmedBaseSamples": int(getattr(ict, "armed_base_samples", 0) or 0),
+            "ictArmedBaseLaunch": armed_launch,
             "ictBuildingRipReady": building_rip_ready,
             "buildingRipHelpersOk": building_rip_ready,
         }

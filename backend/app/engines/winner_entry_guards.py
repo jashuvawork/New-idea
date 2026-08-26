@@ -107,13 +107,18 @@ def chop_weak_explosion_blocks_entry(
         return False, "ok"
 
     event = getattr(candidate, "explosion_event", None)
+    alert = getattr(candidate, "alert", None) or {}
     daily_move = float(getattr(event, "daily_move_pct", 0) or 0) if event else 0.0
     peak_move = float(getattr(event, "peak_move_pct", 0) or 0) if event else 0.0
     move = max(daily_move, peak_move)
-    tier = str(getattr(event, "tier", "") or getattr(candidate, "tier", "") or "").upper()
+    tier = str(
+        getattr(event, "tier", "")
+        or alert.get("tier")
+        or getattr(candidate, "tier", "")
+        or ""
+    ).upper()
     exp_score = float(getattr(event, "explosion_score", 0) or 0) if event else 0.0
 
-    alert = getattr(candidate, "alert", None) or {}
     ict_flat = bool(alert.get("ictFlatThenVertical"))
     ict_vol = bool(alert.get("volumeAwaken") or alert.get("ictVolumeAwakening"))
     if event is not None and not ict_flat:
@@ -133,10 +138,20 @@ def chop_weak_explosion_blocks_entry(
         event=event,
         alert=alert,
     )
+    from app.engines.early_radar_pad_capture import EARLY_RADAR_PAD_READY
     from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
-    if first_lift_ready or pad_lane_early_near_miss_waive(
+    waive = pad_lane_early_near_miss_waive(
         alert, readiness_reason=readiness_reason,
+    )
+    early_pad_chop_bypass = (
+        readiness_reason == EARLY_RADAR_PAD_READY
+        and tier in ("WATCH", "BUILDING")
+        and (first_lift_ready or waive)
+    )
+    if early_pad_chop_bypass or (
+        readiness_reason != EARLY_RADAR_PAD_READY
+        and (first_lift_ready or waive)
     ):
         return False, "first_lift_local_base_confirmed"
 
