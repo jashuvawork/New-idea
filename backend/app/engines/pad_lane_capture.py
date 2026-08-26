@@ -1271,6 +1271,65 @@ def pad_lane_turnaround_chart_bypass_for_snap(
     return False
 
 
+_STRICT_PAD_CHART_BYPASS_REASONS = frozenset(
+    {
+        "armed_base_option_led_ready",
+        "elite_base_ready_s_preauthorized",
+        "building_rip_bullish_ready",
+        "building_local_base_lift_ready",
+        "v_rip_session_low_ready",
+        "fast_bullish_local_base_ready",
+        "slow_grind_sudden_lift_ready",
+        "slow_grind_armed_trough_ready",
+        "slow_grind_consolidation_base_ready",
+        "squeeze_release_ready",
+        "index_led_option_lag_ready",
+        "stealth_cvd_coil_ready",
+        "micro_pullback_retest_ready",
+        "premium_fvg_pad_ready",
+        "double_dip_vbase_ready",
+        "early_radar_pad_ready",
+    }
+)
+
+
+def resolve_strict_pad_lane_chart_bypass(
+    candidate: Any,
+    snap: SymbolSnapshot,
+) -> tuple[bool, bool]:
+    """Return (pad_lane_chart_bypass, strict_first_lift_bypass) for live chart gates.
+
+    Aug26 SENSEX PUT 77600 v_rip_session_low: pad_lane bypass passed in isolation but
+    auto_trader zeroed all counter-trend waivers and never passed strict_first_lift.
+    """
+    alert = (
+        candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+    )
+    pad_lane_chart_bypass = pad_lane_turnaround_chart_bypass_for_snap(
+        candidate.side,
+        snap,
+        explosion_event=getattr(candidate, "explosion_event", None),
+        alert=alert,
+    )
+    armed_base_chart_bypass = False
+    if (
+        getattr(candidate, "mode", "") == "explosion"
+        and getattr(candidate, "explosion_event", None) is not None
+    ):
+        from app.engines.ict_breakout_monitor import first_lift_entry_readiness
+
+        armed_ready, armed_reason = first_lift_entry_readiness(
+            snap=snap,
+            event=candidate.explosion_event,
+            alert=alert,
+        )
+        armed_base_chart_bypass = bool(
+            armed_ready and armed_reason in _STRICT_PAD_CHART_BYPASS_REASONS
+        )
+    strict_bypass = armed_base_chart_bypass or pad_lane_chart_bypass
+    return pad_lane_chart_bypass, strict_bypass
+
+
 
 def pad_lane_expiry_worst_waive(evidence: Mapping[str, Any]) -> bool:
     """EXPIRY WORST quality/score floors may waive for stamped pad-lane local-base FTV."""
