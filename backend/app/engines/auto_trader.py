@@ -1496,23 +1496,34 @@ async def _open_from_candidate(
             local_ichi_bypass = local_base_ichimoku_bypass_for_snap(
                 candidate.side, snap, explosion_event=candidate.explosion_event,
             )
+            from app.engines.pad_lane_capture import resolve_strict_pad_lane_chart_bypass
+
+            pad_lane_chart_bypass, strict_first_lift_bypass = (
+                resolve_strict_pad_lane_chart_bypass(candidate, snap)
+            )
             expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
             from app.engines.spot_direction import hard_counter_trend_chart
 
             if (
                 getattr(settings, "chart_counter_trend_bypass_block_enabled", True)
                 and hard_counter_trend_chart(candidate.side, snap.spotChart)
+                and not strict_first_lift_bypass
             ):
                 expiry_chart_bypass = False
                 premium_bypass = False
                 vertical_bypass = False
                 local_ichi_bypass = False
                 breadth_bypass = False
+                pad_lane_chart_bypass = False
             blocked, chart_reason = chart_blocks_side(
                 candidate.side, snap.spotChart, trade_score=trade_score,
                 breadth_aligned_bypass=breadth_bypass,
-                premium_led_bypass=premium_bypass or vertical_bypass or local_ichi_bypass,
+                premium_led_bypass=(
+                    premium_bypass or vertical_bypass or local_ichi_bypass
+                    or pad_lane_chart_bypass
+                ),
                 expiry_explosion_bypass=expiry_chart_bypass,
+                strict_first_lift_bypass=strict_first_lift_bypass,
                 scalp_mode=(candidate.mode or "").lower() in {"scalp", "quick_sideways", "slow_bounce"},
             )
             if blocked:
@@ -1526,11 +1537,14 @@ async def _open_from_candidate(
                 "alignedWithChart": side_aligned_with_chart(candidate.side, snap.spotChart),
                 "chartBypassUsed": bool(
                     premium_bypass or vertical_bypass or expiry_chart_bypass
-                    or breadth_bypass or local_ichi_bypass
+                    or breadth_bypass or local_ichi_bypass or pad_lane_chart_bypass
+                    or strict_first_lift_bypass
                 ),
                 "premiumLedBypass": premium_bypass,
                 "verticalRipBypass": vertical_bypass,
                 "localBaseIchimokuBypass": local_ichi_bypass,
+                "padLaneChartBypass": pad_lane_chart_bypass,
+                "strictFirstLiftBypass": strict_first_lift_bypass,
                 "expiryExplosionBypass": expiry_chart_bypass,
             }
     else:
