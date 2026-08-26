@@ -126,6 +126,8 @@ def test_expiry_scan_uses_itm_range_not_worst_day_clamp():
     ):
         assert resolve_explosion_scan_range("NIFTY", s, tight_scan=None) == 800
         assert resolve_explosion_scan_range("SENSEX", s, tight_scan=None) == 1200
+        # Per-symbol expiry_day must widen even when session cache is stale/off.
+        assert resolve_explosion_scan_range("SENSEX", s, expiry_day=True) == 1200
 
 
 def test_expiry_scan_falls_back_to_worst_day_when_itm_monitor_off():
