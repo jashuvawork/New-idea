@@ -304,6 +304,50 @@ def refresh_spot_chart_live(
     return refreshed
 
 
+def _confirmed_reversal_up(
+    spot_chart: SpotChart,
+    *,
+    min_mom15: float,
+    keeps_live: bool,
+    breadth: str = "NEUTRAL",
+) -> bool:
+    ema_b = str(getattr(spot_chart, "emaBias", "") or "").upper()
+    mom5 = float(spot_chart.momentum5Pct or 0)
+    mom15 = float(spot_chart.momentum15Pct or 0)
+    macd_bias = str(spot_chart.macdBias or "NEUTRAL").upper()
+    spot_dir = (spot_chart.direction or "NEUTRAL").upper()
+    return bool(
+        keeps_live
+        and spot_dir == "BULLISH"
+        and ema_b == "BULLISH"
+        and mom5 > 0
+        and mom15 >= min_mom15
+        and macd_bias != "BEARISH"
+    )
+
+
+def _confirmed_reversal_down(
+    spot_chart: SpotChart,
+    *,
+    min_mom15: float,
+    keeps_live: bool,
+    breadth: str = "NEUTRAL",
+) -> bool:
+    ema_b = str(getattr(spot_chart, "emaBias", "") or "").upper()
+    mom5 = float(spot_chart.momentum5Pct or 0)
+    mom15 = float(spot_chart.momentum15Pct or 0)
+    macd_bias = str(spot_chart.macdBias or "NEUTRAL").upper()
+    spot_dir = (spot_chart.direction or "NEUTRAL").upper()
+    return bool(
+        keeps_live
+        and spot_dir == "BEARISH"
+        and ema_b == "BEARISH"
+        and mom5 < 0
+        and mom15 <= -min_mom15
+        and macd_bias != "BULLISH"
+    )
+
+
 def reconcile_spot_chart_with_mtf(
     spot_chart: SpotChart,
     chart_analysis: Optional[Any],
@@ -335,72 +379,23 @@ def reconcile_spot_chart_with_mtf(
 
     mom5 = float(spot_chart.momentum5Pct or 0)
     mom15 = float(spot_chart.momentum15Pct or 0)
+    mom30 = float(spot_chart.momentum30Pct or 0)
     rsi = float(spot_chart.rsi or 50)
     macd_bias = str(spot_chart.macdBias or "NEUTRAL").upper()
-    # Prefer composite smartBias when it agrees with classic cloud read.
-    ichi_bull = cloud_bias == "BULLISH" or smart_bias == "BULLISH"
-    ichi_bear = cloud_bias == "BEARISH" or smart_bias == "BEARISH"
-
-    # Smart Ichimoku + live momentum — broker charts often agree here when MTF is thin.
-    if spot_dir == "BEARISH" and ichi_bull and price_vs == "ABOVE":
-        if mom5 > 0.01 and (mom15 >= 0 or rsi >= 55) and macd_bias != "BEARISH":
-            return spot_chart.model_copy(update={"direction": "BULLISH"})
-    if spot_dir == "BULLISH" and ichi_bear and price_vs == "BELOW":
-        if mom5 < -0.01 and (mom15 <= 0 or rsi <= 45) and macd_bias != "BULLISH":
-            return spot_chart.model_copy(update={"direction": "BEARISH"})
-
-    if consensus not in ("BULLISH", "BEARISH"):
-        if (
-            ichi_bull
-            and price_vs == "ABOVE"
-            and mom5 > 0.01
-            and rsi >= 52
-            and macd_bias == "BULLISH"
-            and spot_dir != "BULLISH"
-        ):
-            return spot_chart.model_copy(update={"direction": "BULLISH"})
-        if (
-            ichi_bear
-            and price_vs == "BELOW"
-            and mom5 < -0.01
-            and rsi <= 48
-            and macd_bias == "BEARISH"
-            and spot_dir != "BEARISH"
-        ):
-            return spot_chart.model_copy(update={"direction": "BEARISH"})
-        return spot_chart
-    if spot_dir == consensus:
-        return spot_chart
-
-    # A CONFIRMED live 5m reversal is not a lone flicker — do not force it back to a stale
-    # MTF consensus (Aug13 SENSEX recovery). Requires an EMA flip + both momenta agreeing +
-    # MACD not opposing, so a shallow dead-cat bounce is still force-flipped below. Symmetric.
+    breadth = (breadth_bias or "NEUTRAL").upper()
     settings = get_settings()
-    ema_b = str(getattr(spot_chart, "emaBias", "") or "").upper()
+    respect_breadth = bool(
+        getattr(settings, "chart_reconcile_respects_breadth_enabled", True)
+    )
     min_mom15 = float(
         getattr(settings, "chart_reconcile_confirmed_reversal_min_mom15_pct", 0.06) or 0.06
     )
     keeps_live = bool(
         getattr(settings, "chart_reconcile_confirmed_reversal_keeps_live", True)
     )
-    confirmed_up = (
-        keeps_live
-        and spot_dir == "BULLISH"
-        and ema_b == "BULLISH"
-        and mom5 > 0
-        and mom15 >= min_mom15
-        and macd_bias != "BEARISH"
-    )
-    confirmed_down = (
-        keeps_live
-        and spot_dir == "BEARISH"
-        and ema_b == "BEARISH"
-        and mom5 < 0
-        and mom15 <= -min_mom15
-        and macd_bias != "BULLISH"
-    )
-    if confirmed_up or confirmed_down:
-        return spot_chart
+    # Prefer composite smartBias when it agrees with classic cloud read.
+    ichi_bull = cloud_bias == "BULLISH" or smart_bias == "BULLISH"
+    ichi_bear = cloud_bias == "BEARISH" or smart_bias == "BEARISH"
 
     tfs = getattr(chart_analysis, "timeframes", None) or {}
     bull = bear = 0
@@ -412,8 +407,91 @@ def reconcile_spot_chart_with_mtf(
         elif d == "BEARISH":
             bear += 1
 
+    if respect_breadth and breadth == "BEARISH":
+        if _confirmed_reversal_up(
+            spot_chart,
+            min_mom15=min_mom15,
+            keeps_live=keeps_live,
+            breadth=breadth,
+        ):
+            return spot_chart
+        if consensus == "BEARISH" and bear >= 1:
+            return spot_chart.model_copy(update={"direction": "BEARISH"})
+        if spot_dir == "BEARISH":
+            return spot_chart
+        if spot_dir == "BULLISH":
+            if bear >= 1 or mom15 <= 0 or mom30 <= 0:
+                return spot_chart.model_copy(update={"direction": "BEARISH"})
+    if respect_breadth and breadth == "BULLISH":
+        if _confirmed_reversal_down(
+            spot_chart,
+            min_mom15=min_mom15,
+            keeps_live=keeps_live,
+            breadth=breadth,
+        ):
+            return spot_chart
+        if consensus == "BULLISH" and bull >= 1:
+            return spot_chart.model_copy(update={"direction": "BULLISH"})
+        if spot_dir == "BULLISH":
+            return spot_chart
+        if spot_dir == "BEARISH":
+            if bull >= 1 or mom15 >= 0 or mom30 >= 0:
+                return spot_chart.model_copy(update={"direction": "BULLISH"})
+
+    # Smart Ichimoku + live momentum — broker charts often agree here when MTF is thin.
+    if spot_dir == "BEARISH" and ichi_bull and price_vs == "ABOVE":
+        if mom5 > 0.01 and (mom15 >= 0 or rsi >= 55) and macd_bias != "BEARISH":
+            if not (respect_breadth and breadth == "BEARISH"):
+                return spot_chart.model_copy(update={"direction": "BULLISH"})
+    if spot_dir == "BULLISH" and ichi_bear and price_vs == "BELOW":
+        if mom5 < -0.01 and (mom15 <= 0 or rsi <= 45) and macd_bias != "BULLISH":
+            if not (respect_breadth and breadth == "BULLISH"):
+                return spot_chart.model_copy(update={"direction": "BEARISH"})
+
+    if consensus not in ("BULLISH", "BEARISH"):
+        if (
+            ichi_bull
+            and price_vs == "ABOVE"
+            and mom5 > 0.01
+            and rsi >= 52
+            and macd_bias == "BULLISH"
+            and spot_dir != "BULLISH"
+        ):
+            if not (respect_breadth and breadth == "BEARISH"):
+                return spot_chart.model_copy(update={"direction": "BULLISH"})
+        if (
+            ichi_bear
+            and price_vs == "BELOW"
+            and mom5 < -0.01
+            and rsi <= 48
+            and macd_bias == "BEARISH"
+            and spot_dir != "BEARISH"
+        ):
+            if not (respect_breadth and breadth == "BULLISH"):
+                return spot_chart.model_copy(update={"direction": "BEARISH"})
+        return spot_chart
+    if spot_dir == consensus:
+        return spot_chart
+
+    # A CONFIRMED live 5m reversal is not a lone flicker — do not force it back to a stale
+    # MTF consensus (Aug13 SENSEX recovery). Requires an EMA flip + both momenta agreeing +
+    # MACD not opposing, so a shallow dead-cat bounce is still force-flipped below. Symmetric.
+    confirmed_up = _confirmed_reversal_up(
+        spot_chart,
+        min_mom15=min_mom15,
+        keeps_live=keeps_live,
+        breadth=breadth,
+    )
+    confirmed_down = _confirmed_reversal_down(
+        spot_chart,
+        min_mom15=min_mom15,
+        keeps_live=keeps_live,
+        breadth=breadth,
+    )
+    if confirmed_up or confirmed_down:
+        return spot_chart
+
     consensus_ct = bear if consensus == "BEARISH" else bull
-    breadth = (breadth_bias or "NEUTRAL").upper()
     total = int(getattr(chart_analysis, "totalTimeframes", 0) or len(tfs) or 0)
 
     # MTF + breadth agree — always trust over lone 5m oversold bounce

@@ -429,15 +429,69 @@ def cap_lots_to_allocation(
     symbol: str,
     premium: float,
     allocation: RankedAllocation | None,
+    *,
+    use_full_remaining: bool = False,
 ) -> int:
     """Apply the final cash sleeve after all strategy force-max sizing paths."""
     if allocation is None:
         return max(0, int(lots))
     unit_cost = float(premium or 0) * lot_multiplier(symbol)
-    if unit_cost <= 0 or allocation.budgetInr <= 0:
+    if unit_cost <= 0:
         return 0
-    affordable = int(allocation.budgetInr / unit_cost)
+
+    settings = get_settings()
+    budget = float(allocation.budgetInr or 0)
+    remaining = float(allocation.remainingBeforeInr or 0)
+    if (
+        use_full_remaining
+        and allocation.rank == 1
+        and bool(
+            getattr(settings, "ftv_allocation_full_remaining_on_full_sleeve_enabled", True)
+        )
+    ):
+        budget = max(budget, remaining)
+    if (
+        allocation.rank == 1
+        and bool(getattr(settings, "ftv_allocation_rank_one_min_one_lot_enabled", True))
+        and budget < unit_cost <= remaining
+    ):
+        budget = remaining
+
+    if budget <= 0:
+        return 0
+    affordable = int(budget / unit_cost)
     return max(0, min(int(lots), affordable))
+
+
+def effective_ranked_allocation(
+    allocation: RankedAllocation,
+    *,
+    use_full_remaining: bool = False,
+) -> RankedAllocation:
+    """Bump rank-1 budget to full remaining when pad-lane / FTV sleeve authorizes."""
+    if allocation.rank != 1 or not use_full_remaining:
+        return allocation
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "ftv_allocation_full_remaining_on_full_sleeve_enabled", True)
+    ):
+        return allocation
+    remaining = float(allocation.remainingBeforeInr or 0)
+    if remaining <= allocation.budgetInr + 1e-6:
+        return allocation
+    return RankedAllocation(
+        rank=allocation.rank,
+        budgetInr=remaining,
+        remainingBeforeInr=allocation.remainingBeforeInr,
+        cashReserveInr=allocation.cashReserveInr,
+        capitalBaseInr=allocation.capitalBaseInr,
+        committedInr=allocation.committedInr,
+        weight=allocation.weight,
+    )
+
+
+def one_lot_unit_cost_inr(symbol: str, premium: float) -> float:
+    return max(0.0, float(premium or 0) * lot_multiplier(symbol))
 
 
 def capital_book_summary(

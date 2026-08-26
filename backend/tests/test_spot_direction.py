@@ -538,4 +538,64 @@ def test_reconcile_ichimoku_flips_bearish_spot_on_live_rally():
         },
     )
     out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="BEARISH")
+    assert out.direction == "BEARISH"
+
+
+def test_reconcile_ichimoku_can_flip_when_breadth_neutral():
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+    from app.models.schemas import ChartAnalysis
+
+    spot = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.02,
+        momentum15Pct=0.01,
+        momentum30Pct=-0.05,
+        rsi=58.0,
+        macdBias="BULLISH",
+    )
+    analysis = ChartAnalysis(
+        consensus="NEUTRAL",
+        alignedCount=0,
+        totalTimeframes=0,
+        timeframes={},
+        ichimoku={
+            "cloudBias": "BULLISH",
+            "priceVsCloud": "ABOVE",
+            "tkCross": "BEARISH",
+        },
+    )
+    out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="NEUTRAL")
     assert out.direction == "BULLISH"
+
+
+def test_bearish_breadth_corrects_weak_bullish_spot_chart():
+    """Aug26: micro-bounce + ichimoku must not show BULLISH when breadth is BEARISH."""
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+    from app.models.schemas import ChartAnalysis
+
+    spot = SpotChart(
+        direction="BULLISH",
+        emaBias="BEARISH",
+        momentum5Pct=0.03,
+        momentum15Pct=-0.05,
+        momentum30Pct=-0.12,
+        rsi=54.0,
+        macdBias="NEUTRAL",
+    )
+    analysis = ChartAnalysis(
+        consensus="BEARISH",
+        alignedCount=3,
+        totalTimeframes=4,
+        timeframes={
+            "5m": {"direction": "BEARISH"},
+            "15m": {"direction": "BEARISH"},
+            "1h": {"direction": "NEUTRAL"},
+        },
+        ichimoku={
+            "cloudBias": "BULLISH",
+            "priceVsCloud": "ABOVE",
+            "smartBias": "BULLISH",
+        },
+    )
+    out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="BEARISH")
+    assert out.direction == "BEARISH"
