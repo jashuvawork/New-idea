@@ -2280,6 +2280,26 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         )
     ):
         tradeable = True
+    # WATCH at session trough — expose as tradeable before ELITE/EXPLODING promotion.
+    if e.tier == "WATCH":
+        from app.engines.early_radar_pad_capture import watch_local_base_pad_structure
+
+        watch_probe = {
+            "tier": e.tier,
+            "offLowMovePct": round(off_low_move, 1),
+            "localBaseMovePct": round(float(pad_move or 0), 1),
+            "ictBaseRelativeMovePct": round(float(pad_move or 0), 1),
+            "explosionScore": e.explosion_score,
+            "velocity3s": e.velocity_3s,
+            "velocity9s": e.velocity_9s,
+            "volumeAwaken": vol_awaken,
+            "ictVolumeAwakening": bool(getattr(ict, "volume_awakening", False)),
+            "ictBaseArmed": bool(getattr(ict, "base_armed", False)),
+            "ictBuildingRipReady": building_rip_ready,
+            "buildingRipHelpersOk": building_rip_ready,
+        }
+        if watch_local_base_pad_structure(watch_probe):
+            tradeable = True
     # Near-base ATM/ITM top explosions must be tradeable even when day-move < floor
     # (Aug5 24500 PE ~10–65% off local base while session % still immature).
     if not tradeable and e.tier in ("ELITE", "EXPLODING"):

@@ -1409,11 +1409,19 @@ def first_lift_entry_readiness(
 
     from app.engines.early_radar_pad_capture import (
         EARLY_RADAR_PAD_READY,
-        alert_has_early_radar_pad_capture,
+        early_radar_pad_entry_readiness,
     )
 
-    if isinstance(alert, dict) and alert_has_early_radar_pad_capture(alert):
-        return True, EARLY_RADAR_PAD_READY
+    if isinstance(alert, dict):
+        pad_ok, pad_reason = early_radar_pad_entry_readiness(
+            snap=snap,
+            event=event,
+            ict=ict,
+            alert=alert,
+            settings=settings,
+        )
+        if pad_ok:
+            return True, pad_reason
 
     # BUILDING bullish-rip sleeve — mid-rip OK while still expanding to max.
     # Runs before first-lift chart gate so option-led BUILDING rips still authorize.

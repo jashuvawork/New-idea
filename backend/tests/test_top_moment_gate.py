@@ -124,6 +124,38 @@ def test_explosion_alert_is_top_moment_cold_building():
     assert explosion_alert_is_top_moment({"tier": "BUILDING"}) is False
 
 
+def test_explosion_alert_is_top_moment_watch_local_base_low_score():
+    alert = {
+        "tier": "WATCH",
+        "offLowMovePct": 3.0,
+        "localBaseMovePct": 5.0,
+        "explosionScore": 12.8,
+        "velocity3s": 0.15,
+        "velocity9s": 0.08,
+        "volumeAwaken": True,
+        "ictBaseArmed": True,
+    }
+    assert explosion_alert_is_top_moment(alert) is True
+
+
+def test_classify_watch_local_base_pad_is_ftv():
+    assert (
+        classify_top_moment_type(
+            {
+                "tier": "WATCH",
+                "offLowMovePct": 3.0,
+                "localBaseMovePct": 5.0,
+                "explosionScore": 12.8,
+                "velocity3s": 0.15,
+                "velocity9s": 0.08,
+                "volumeAwakening": True,
+                "baseArmed": True,
+            }
+        )
+        == "FTV"
+    )
+
+
 def test_disabled_gate_passes():
     ok, reason, _ = top_moment_entry_allowed(
         _evidence(tier="BUILDING"),
