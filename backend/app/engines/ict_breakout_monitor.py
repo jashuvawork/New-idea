@@ -3082,6 +3082,8 @@ def _defensive_base_rip_top_allowed(
     base_move_pct: float = 0.0,
     volume_awake: bool = False,
     v_rip_ready: bool = False,
+    armed_base_launch: bool = False,
+    first_lift: bool = False,
 ) -> tuple[bool, str]:
     """Always-on top floor for defensive/worst local-base rips (not every EXPLODING)."""
     if not bool(getattr(settings, "ict_defensive_base_rip_require_top_quality", True)):
@@ -3130,6 +3132,25 @@ def _defensive_base_rip_top_allowed(
                 min_v3,
                 float(
                     getattr(settings, "ict_v_rip_min_velocity_3s", 1.2) or 1.2
+                ),
+            )
+        # Aug26 NIFTY PUT 24250 armed_base_launch at ~24% lb: volumeAwaken + first
+        # lift showed v3≈-0.3 while chart/defensive gates still demanded ≥0.85.
+        if (
+            armed_base_launch
+            and first_lift
+            and volume_awake
+            and pad_floor <= move <= pad_hi
+        ):
+            min_v3 = min(
+                min_v3,
+                float(
+                    getattr(
+                        settings,
+                        "ict_armed_base_launch_cold_velocity_3s",
+                        -0.5,
+                    )
+                    or -0.5
                 ),
             )
     if float(velocity_3s or 0) < min_v3:
@@ -3324,6 +3345,8 @@ def good_day_ict_capture_active(
                 base_move_pct=float(getattr(ict, "base_relative_move_pct", 0) or 0),
                 volume_awake=bool(getattr(ict, "volume_awakening", False)),
                 v_rip_ready=bool(getattr(ict, "v_rip_ready", False)),
+                armed_base_launch=bool(getattr(ict, "armed_base_launch", False)),
+                first_lift=bool(getattr(ict, "first_lift", False)),
             )
             if not ok_top:
                 meta["deniedReason"] = deny_top
