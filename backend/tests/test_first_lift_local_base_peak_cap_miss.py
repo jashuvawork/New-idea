@@ -165,3 +165,23 @@ def test_first_lift_local_base_chart_bypass_rejects_extended_chase(mock_settings
     )
 
     assert pad_lane_turnaround_chart_bypass(Side.PUT, snap, alert=alert) is False
+
+
+@patch("app.engines.pad_lane_capture.get_settings")
+def test_armed_base_launch_chart_bypass_allows_put_with_high_session_peak(mock_settings):
+    """Aug26 SENSEX PUT 77800 armed_base_launch at ~23% lb, session peak 223%."""
+    mock_settings.return_value = _settings(
+        pad_lane_armed_base_launch_chart_bypass_enabled=True,
+    )
+    snap = _bullish_snap()
+    alert = _aug26_sensex_put_77800_alert(
+        momentType="armed_base_launch",
+        ictArmedBaseLaunch=True,
+        ictBaseRelativeMovePct=23.5,
+        localBaseMovePct=23.5,
+        offLowMovePct=23.5,
+        peakMovePct=223.1,
+        velocity3s=0.1,
+    )
+
+    assert pad_lane_turnaround_chart_bypass(Side.PUT, snap, alert=alert) is True
