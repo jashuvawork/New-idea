@@ -326,3 +326,44 @@ def alert_has_early_radar_pad_capture(alert: Mapping[str, Any]) -> bool:
         alert.get("earlyRadarPadCapture")
         or alert.get("ictEarlyRadarPadCapture")
     )
+
+
+def early_pad_score_floor(settings: Any = None) -> float:
+    s = settings or get_settings()
+    return float(getattr(s, "early_pad_min_explosion_score", 12.0) or 12.0)
+
+
+def early_pad_quality_floor(settings: Any = None) -> float:
+    s = settings or get_settings()
+    return float(getattr(s, "early_pad_min_quality", 45.0) or 45.0)
+
+
+def early_pad_context_active(
+    row: Mapping[str, Any],
+    *,
+    local_base_move_pct: float | None = None,
+    settings: Any = None,
+) -> bool:
+    """True when the contract is still at the session/local trough pad."""
+    s = settings or get_settings()
+    if bool(row.get("earlyRadarPadCapture") or row.get("ictEarlyRadarPadCapture")):
+        return True
+    lb = local_base_move_pct
+    if lb is None:
+        lb = max(
+            _number(row.get("localBaseMovePct")),
+            _number(row.get("ictBaseRelativeMovePct")),
+        )
+    off_low = early_radar_pad_off_low_pct(row)
+    max_off = float(
+        getattr(s, "watch_local_base_pad_max_off_low_pct", 18.0) or 18.0
+    )
+    max_lb = float(
+        getattr(s, "early_radar_pad_max_local_move_pct", 20.0) or 20.0
+    )
+    tier = _alert_tier(row)
+    if tier in ("WATCH", "BUILDING") and off_low <= max_off + 1e-6:
+        return True
+    if 2.0 <= lb <= max_lb + 1e-6:
+        return True
+    return watch_local_base_pad_lift_signal(row, s)

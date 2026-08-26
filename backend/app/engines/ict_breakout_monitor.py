@@ -438,7 +438,7 @@ def building_rip_bullish_readiness(
         getattr(settings, "building_rip_local_base_min_velocity_3s", 1.2) or 1.2
     )
     local_lift_score = float(
-        getattr(settings, "building_rip_local_base_min_score", 42.0) or 42.0
+        getattr(settings, "building_rip_local_base_min_score", 12.0) or 12.0
     )
     local_base_lift = bool(
         getattr(settings, "building_rip_local_base_lift_enabled", True)
@@ -1678,6 +1678,15 @@ def first_lift_entry_readiness(
         min_score = float(
             getattr(settings, "first_lift_trade_min_score", 62.0) or 62.0
         )
+    from app.engines.early_radar_pad_capture import (
+        early_pad_context_active,
+        early_pad_quality_floor,
+        early_pad_score_floor,
+    )
+
+    if early_pad_context_active(row, local_base_move_pct=base_move, settings=settings):
+        min_score = min(min_score, early_pad_score_floor(settings))
+        min_quality = min(min_quality, early_pad_quality_floor(settings))
     # Helper-confirmed lane: a base lift with enough independent confirmations may enter on
     # a lower quality/score/velocity bar (the confirmations ARE the proof it's a real FTV).
     helper_row = dict(row)
