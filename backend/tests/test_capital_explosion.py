@@ -18,7 +18,9 @@ from app.engines.capital_allocator import (
     max_lots_for_capital_pct,
     next_ranked_allocation_rank,
     ranked_allocation_for_state,
+    reset_capital_for_tests,
     set_manual_capital_limit,
+    should_use_live_broker_capital,
     tune_exit_plan_for_position,
 )
 from app.engines.risk_engine import RiskEngine
@@ -615,6 +617,28 @@ class CapitalSizingTests(unittest.TestCase):
         self.assertFalse(rejected_cold_v9)
         self.assertFalse(rejected_unarmed)
         self.assertFalse(rejected_missing_move)
+
+    def test_paper_mode_ignores_stale_upstox_capital_snapshot(self):
+        reset_capital_for_tests()
+        import app.engines.capital_allocator as ca
+
+        ca._capital = CapitalSnapshot(
+            availableMarginInr=573.0,
+            totalEquityInr=50_000.0,
+            source="upstox",
+        )
+        settings = self._ranked_settings()
+        settings.use_upstox_capital_for_sizing = True
+        settings.enable_live_trading = False
+        settings.fallback_capital_inr = 200_000
+        settings.max_sizing_capital_inr = 200_000
+        settings.simple_min_lots = 1
+        settings.per_trade_capital_pct = 0.90
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            self.assertFalse(should_use_live_broker_capital())
+            snap = get_capital_snapshot()
+        self.assertEqual(snap.source, "fallback")
+        self.assertEqual(snap.availableMarginInr, 200_000)
 
     def test_manual_capital_limit_updates_sizing_snapshot(self):
         settings = self._ranked_settings()

@@ -707,17 +707,34 @@ async def refresh_capital_from_upstox(
     return snap
 
 
-def get_capital_snapshot() -> CapitalSnapshot:
-    global _capital
-    if _capital is not None:
-        return _capital
+def should_use_live_broker_capital() -> bool:
+    """Only size from Upstox margin when live trading is enabled.
+
+    Paper mode always uses fallback_capital_inr (default ₹2L) or a manual book cap —
+    never the broker's leftover live margin (which caused ftv_allocation_below_one_lot
+    at ~₹573 while the paper book was ₹2L).
+    """
     settings = get_settings()
-    min_l, tgt_l, max_l = _lot_tiers(settings.fallback_capital_inr)
-    budget = settings.fallback_capital_inr * settings.per_trade_capital_pct
+    return bool(
+        getattr(settings, "use_upstox_capital_for_sizing", False)
+        and getattr(settings, "enable_live_trading", False)
+    )
+
+
+def _build_fallback_capital_snapshot() -> CapitalSnapshot:
+    settings = get_settings()
+    base = (
+        float(_manual_capital_limit_inr)
+        if _manual_capital_limit_inr is not None
+        else float(settings.fallback_capital_inr)
+    )
+    effective = _effective_capital_inr(base)
+    min_l, tgt_l, max_l = _lot_tiers(effective)
+    budget = effective * settings.per_trade_capital_pct
     return CapitalSnapshot(
-        availableMarginInr=settings.fallback_capital_inr,
-        totalEquityInr=settings.fallback_capital_inr,
-        source="fallback",
+        availableMarginInr=effective,
+        totalEquityInr=effective,
+        source="manual" if _manual_capital_limit_inr is not None else "fallback",
         perTradeRiskInr=budget,
         perTradeCapitalInr=budget,
         maxExposureInr=budget,
@@ -725,6 +742,17 @@ def get_capital_snapshot() -> CapitalSnapshot:
         targetLots=tgt_l,
         maxLots=max_l,
     )
+
+
+def get_capital_snapshot() -> CapitalSnapshot:
+    global _capital
+    if not should_use_live_broker_capital():
+        if _capital is None or str(_capital.source or "").lower() == "upstox":
+            _capital = _build_fallback_capital_snapshot()
+        return _capital
+    if _capital is not None:
+        return _capital
+    return _build_fallback_capital_snapshot()
 
 
 def set_manual_capital_limit(amount: float) -> CapitalSnapshot:

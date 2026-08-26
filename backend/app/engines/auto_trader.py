@@ -176,13 +176,15 @@ def _try_claim_entry(candidate_key: str) -> object | None:
 
 async def refresh_trading_capital(client, *, force: bool = False) -> None:
     """Pull Upstox margin and sync risk engine exposure limits."""
-    settings = get_settings()
-    if settings.use_upstox_capital_for_sizing:
+    from app.engines.capital_allocator import should_use_live_broker_capital
+
+    if should_use_live_broker_capital():
         snap = await refresh_capital_from_upstox(client, force=force)
     else:
         snap = get_capital_snapshot()
     global _capital_inr
     _capital_inr = snap.availableMarginInr
+    settings = get_settings()
     from app.models.schemas import RiskProfile
     profile = _risk_engine.profile
     profile.maxExposureInr = snap.maxExposureInr
