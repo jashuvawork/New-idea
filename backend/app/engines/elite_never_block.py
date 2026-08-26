@@ -347,6 +347,17 @@ def elite_never_block_active(
     Does NOT authorize skipping fake-explosion-trap or ICT late-fade — callers
     must still enforce those gates.
     """
+    from app.engines.pad_lane_capture import ftv_direct_trade_active
+
+    if ftv_direct_trade_active(
+        tier=tier,
+        event=event,
+        candidate=candidate,
+        alert=alert,
+        snap=snap,
+    ):
+        return True
+
     if top_explosion_must_take_active(
         tier=tier,
         event=event,

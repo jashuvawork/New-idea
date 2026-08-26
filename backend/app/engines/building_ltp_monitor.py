@@ -281,6 +281,16 @@ def evaluate_all_building_ltp(
                 row["alert"]["ictBuildingRipReady"] = True
                 alert["ictBuildingRipReady"] = True
                 alert["ictBaseReadinessReason"] = str(ready_reason or "")
+            try:
+                from app.engines.pad_lane_capture import stamp_ftv_direct_trade_on_alert
+
+                stamp_ftv_direct_trade_on_alert(
+                    alert,
+                    snap=snap,
+                    readiness_reason=str(ready_reason or ""),
+                )
+            except Exception:
+                pass
 
         score = _composite_building_score(
             alert=alert,
