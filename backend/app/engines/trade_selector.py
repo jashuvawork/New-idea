@@ -1456,11 +1456,21 @@ def find_best_entry(
             ranking = (c.pretrade_meta or {}).get("causalRanking") or {}
             evidence = ranking.get("evidence") or {}
             from app.engines.pad_lane_capture import (
+                ftv_direct_trade_active,
                 pad_lane_ftv_waives_allocation_rank_one,
                 pad_lane_pre_lift,
             )
 
-            if pad_lane_pre_lift(evidence) or pad_lane_ftv_waives_allocation_rank_one(
+            if ftv_direct_trade_active(
+                candidate=c,
+                alert=getattr(c, "alert", None),
+                snap=c.snap,
+            ):
+                c.score += float(
+                    getattr(settings, "ftv_direct_trade_selector_rank_bonus", 55.0)
+                    or 55.0
+                )
+            elif pad_lane_pre_lift(evidence) or pad_lane_ftv_waives_allocation_rank_one(
                 evidence,
             ):
                 c.score += float(
