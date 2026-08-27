@@ -451,3 +451,71 @@ def alert_bullish_local_base_active(
     snap: Optional[SymbolSnapshot],
 ) -> bool:
     return bool(alert_bullish_local_base_prediction(alert, snap).get("active"))
+
+
+def _pad_move_band(
+    alert: Mapping[str, Any],
+    *,
+    settings: Any | None = None,
+) -> tuple[float, float, float]:
+    s = settings or get_settings()
+    base_rel = _number(
+        alert.get("localBaseMovePct")
+        or alert.get("ictBaseRelativeMovePct")
+        or alert.get("offLowMovePct")
+    )
+    lo = _number(getattr(s, "ict_v_rip_pad_min_move_pct", 2.0), 2.0)
+    hi = _number(getattr(s, "bullish_local_base_pad_max_move_pct", 45.0), 45.0)
+    return base_rel, lo, hi
+
+
+def alert_is_bullish_local_base_pad_entry(
+    alert: Mapping[str, Any],
+    snap: Optional[SymbolSnapshot] = None,
+) -> bool:
+    """True when bullish local-base prediction is live at a measured session pad.
+
+    Lifts session halts (expiry afternoon wait, declining halt, worst-day pause)
+    for Aug27-style afternoon armed_base_launch pads that radar already graded A+.
+    """
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "bullish_local_base_pad_session_bypass_enabled", True)
+    ):
+        return False
+    if not bool(alert.get("tradeable", True)):
+        return False
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False
+    base_rel, lo, hi = _pad_move_band(alert, settings=settings)
+    if not (lo <= base_rel <= hi + 1e-6):
+        return False
+    structure = bool(
+        alert.get("ictFirstLift")
+        or alert.get("ictArmedBaseLaunch")
+        or alert.get("ictFlatThenVertical")
+        or alert.get("ictBreakout")
+        or alert.get("ictBaseArmed")
+    )
+    if not structure:
+        return False
+    if bool(alert.get("bullishLocalBaseActive")):
+        return True
+    if snap is None:
+        return False
+    return alert_bullish_local_base_active(alert, snap)
+
+
+def snapshots_have_bullish_local_base_pad(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    for snap in snapshots.values():
+        if not getattr(snap, "dataAvailable", False):
+            continue
+        for alert in snap.explosionAlerts or []:
+            merged = dict(alert)
+            merged.setdefault("symbol", snap.symbol)
+            if alert_is_bullish_local_base_pad_entry(merged, snap):
+                return True
+    return False

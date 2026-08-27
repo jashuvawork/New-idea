@@ -164,6 +164,7 @@ def _in_near_base_window(
     alert: dict,
     *,
     ict: Any = None,
+    snap: Any = None,
 ) -> bool:
     """True when move is inside the structured near-base band (default 10–65%).
 
@@ -178,6 +179,22 @@ def _in_near_base_window(
     move = _near_base_move_pct(event, alert, ict=ict)
     if move <= 0:
         return False
+    pad_lo = float(
+        getattr(settings, "bullish_local_base_pad_must_take_min_move_pct", 8.0) or 8.0
+    )
+    if alert and (
+        alert.get("bullishLocalBaseActive")
+        or alert.get("localBaseReversalActive")
+    ):
+        lo = min(lo, pad_lo)
+    elif alert and snap is not None:
+        try:
+            from app.engines.bullish_local_base import alert_bullish_local_base_active
+
+            if alert_bullish_local_base_active(alert, snap):
+                lo = min(lo, pad_lo)
+        except Exception:
+            pass
     return lo <= move <= hi
 
 
@@ -282,7 +299,9 @@ def top_explosion_must_take_active(
         except Exception:
             resolved_ict = None
 
-    if not _in_near_base_window(resolved_event, resolved_alert, ict=resolved_ict):
+    if not _in_near_base_window(
+        resolved_event, resolved_alert, ict=resolved_ict, snap=resolved_snap,
+    ):
         return False
 
     # Only when chart aligns — never must-take a counter-trend flat→vertical.

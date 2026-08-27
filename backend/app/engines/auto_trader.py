@@ -3410,6 +3410,7 @@ async def process(
             is_top_ftv_or_v_candidate,
             snapshots_have_top_ftv_or_v,
         )
+        from app.engines.bullish_local_base import snapshots_have_bullish_local_base_pad
         from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
 
         policy, policy_meta = session_entry_policy(state, snapshots)
@@ -3419,14 +3420,21 @@ async def process(
         extreme_session = snapshots_have_all_in_explosion(snapshots)
         must_take_session = snapshots_have_top_must_take(snapshots)
         top_ftv_v_session = snapshots_have_top_ftv_or_v(snapshots)
-        if policy == "PAUSED" and not extreme_session and not must_take_session and not top_ftv_v_session:
+        bullish_pad_session = snapshots_have_bullish_local_base_pad(snapshots)
+        session_lift = (
+            extreme_session
+            or must_take_session
+            or top_ftv_v_session
+            or bullish_pad_session
+        )
+        if policy == "PAUSED" and not session_lift:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": policy_meta.get("pauseReason", "worst_day_paused"),
                 "message": f"Worst day — trading paused ({', '.join(policy_meta.get('worstDay', {}).get('reasons', []))})",
             })
         live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
-        if live_blocked and not must_take_session and not top_ftv_v_session:
+        if live_blocked and not session_lift:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": live_reason,
@@ -3434,7 +3442,7 @@ async def process(
             })
 
         expiry_ok, expiry_reason, expiry_meta = check_expiry_entry_allowed(state, snapshots)
-        if not expiry_ok and not must_take_session and not top_ftv_v_session:
+        if not expiry_ok and not session_lift:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": expiry_reason,
@@ -3445,9 +3453,9 @@ async def process(
         session_entries_ok = (
             not paused and not cap_hit and not ctrl_cap and not last_n_paused
             and not whipsaw_paused
-            and (expiry_ok or must_take_session or top_ftv_v_session)
-            and (policy != "PAUSED" or extreme_session or must_take_session or top_ftv_v_session)
-            and (not live_blocked or must_take_session or top_ftv_v_session)
+            and (expiry_ok or session_lift)
+            and (policy != "PAUSED" or session_lift)
+            and (not live_blocked or session_lift)
         )
         if session_entries_ok:
             allocation_enabled = bool(
@@ -3544,15 +3552,19 @@ async def process(
                     })
                     continue
                 if cap_elite_only and not is_expiry_elite_top_candidate(best) and not is_grade_a_ftv_first_lift_candidate(best) and not is_top_ftv_or_v_candidate(best):
-                    skipped.append({
-                        "symbol": best.symbol,
-                        "reason": "daily_trade_cap_elite_only",
-                        "message": "Daily trade cap — only ELITE / top explosive allowed",
-                        "mode": best.mode,
-                        "score": best.score,
-                        "tier": getattr(best, "tier", None),
-                    })
-                    continue
+                    from app.engines.bullish_local_base import alert_is_bullish_local_base_pad_entry
+
+                    alert_row = best.alert if isinstance(best.alert, dict) else {}
+                    if not alert_is_bullish_local_base_pad_entry(alert_row, best.snap):
+                        skipped.append({
+                            "symbol": best.symbol,
+                            "reason": "daily_trade_cap_elite_only",
+                            "message": "Daily trade cap — only ELITE / top explosive allowed",
+                            "mode": best.mode,
+                            "score": best.score,
+                            "tier": getattr(best, "tier", None),
+                        })
+                        continue
 
                 allocation = None
                 allocation_row: Optional[dict[str, Any]] = None
