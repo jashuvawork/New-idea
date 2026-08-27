@@ -189,3 +189,58 @@ def test_nifty_also_qualifies(mock_settings):
     assert snapshots_have_grade_a_ftv_first_lift({"NIFTY": snap}) is False
     snap.explosionAlerts = [alert]
     assert snapshots_have_grade_a_ftv_first_lift({"NIFTY": snap}) is True
+
+
+def test_rank_entry_candidate_preserves_grade_a_ftv_sleeve():
+    """Regression: flatVerticalGrade must reach ftv_authorization_policy via rank_entry_candidate."""
+    from types import SimpleNamespace
+
+    from app.engines.missed_trade_explainer import _candidate_from_alert
+    from app.engines.trade_ranking import (
+        ftv_authorization_policy,
+        ftv_policy_settings,
+        rank_entry_candidate,
+    )
+    from app.models.schemas import Breadth, MarketPhase, Side, SpotChart, SymbolSnapshot
+
+    alert = _aug27_put_77300_alert()
+    snap = SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=_snap().timestamp,
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=77350.0,
+        atmStrike=77300.0,
+        tradeQualityScore=55.0,
+        breadth=Breadth(bias="BEARISH", score=40, aligned=True),
+        spotChart=SpotChart(direction="BEARISH", spot=77350.0, recommendedSide="PUT"),
+        explosionAlerts=[alert],
+    )
+    candidate = _candidate_from_alert("SENSEX", snap, alert)
+    candidate.explosion_event = SimpleNamespace(
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=77300.0,
+        tier="ELITE",
+        explosion_score=100.0,
+        velocity_3s=4.2,
+        velocity_9s=2.0,
+        volume_surge=2.5,
+        daily_move_pct=21.0,
+        peak_move_pct=21.0,
+    )
+
+    from app.config import Settings
+
+    ranking = rank_entry_candidate(candidate)
+    evidence = ranking.get("evidence") or {}
+    assert evidence.get("flatVerticalGrade") in ("A", "A+")
+    decision = ftv_authorization_policy(
+        evidence,
+        ranking,
+        snapshot_available=True,
+        atm_itm_allowed=True,
+        **ftv_policy_settings(Settings()),
+    )
+    assert decision.allowed is True
+    assert decision.mode == "GRADE_A_FTV_FIRST_LIFT"

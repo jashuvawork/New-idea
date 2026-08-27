@@ -1743,6 +1743,13 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "indexSpotMove9s": _number(evidence.get("indexSpotMove9s")),
             "explosionScore": round(explosion_score, 2),
             "flatVerticalQuality": round(flat_vertical_quality, 2),
+            "flatVerticalGrade": str(
+                evidence.get("flatVerticalGrade") or evidence.get("ictFlatVerticalGrade") or ""
+            ),
+            "symbol": str(evidence.get("symbol") or ""),
+            "bullishLocalBaseActive": bool(
+                evidence.get("bullishLocalBaseActive") or evidence.get("fastBullishLocalBase")
+            ),
             "tqs": round(tqs, 2),
             "timingAssessment": timing or None,
             "timingAction": timing_action or None,
@@ -1812,6 +1819,11 @@ def rank_entry_candidate(
             or alert.get("ictFlatVerticalQuality")
             or 0
         ),
+        "flatVerticalGrade": str(
+            alert.get("flatVerticalGrade") or alert.get("ictFlatVerticalGrade") or ""
+        ),
+        "symbol": str(getattr(candidate, "symbol", "") or alert.get("symbol") or ""),
+        "bullishLocalBaseActive": bool(alert.get("bullishLocalBaseActive")),
         "chartConfidence": chart_confidence,
         "velocity3s": getattr(event, "velocity_3s", 0) if event else alert.get("velocity3s"),
         "velocity9s": getattr(event, "velocity_9s", 0) if event else alert.get("velocity9s"),
