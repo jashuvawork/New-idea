@@ -428,6 +428,7 @@ def check_bad_day_candidate(
         if _extreme_explosion_bypass(candidate):
             return True, "ok", meta
         from app.engines.grade_a_ftv_capture import is_grade_a_ftv_first_lift_candidate
+        from app.engines.top_ftv_v_expiry_bypass import is_top_ftv_or_v_candidate
 
         if is_grade_a_ftv_first_lift_candidate(candidate):
             min_req = float(
@@ -437,6 +438,14 @@ def check_bad_day_candidate(
             if score >= min_req:
                 return True, "ok", meta
             return False, f"grade_a_ftv_rank_below_{min_req:.0f}", meta
+        if is_top_ftv_or_v_candidate(candidate):
+            min_req = float(
+                getattr(settings, "top_ftv_v_expiry_bypass_min_rank", 0.0) or 0.0
+            )
+            meta["topFtvVBypass"] = True
+            if score >= min_req:
+                return True, "ok", meta
+            return False, f"top_ftv_v_rank_below_{min_req:.0f}", meta
         from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
 
         event = getattr(candidate, "explosion_event", None)

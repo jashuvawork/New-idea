@@ -1317,6 +1317,17 @@ class Settings(BaseSettings):
     grade_a_ftv_first_lift_max_base_move_pct: float = 45.0
     expiry_worst_day_grade_a_ftv_bypass_enabled: bool = True
     grade_a_ftv_chart_bypass_enabled: bool = True
+    # Broader top FTV/V/ELITE/EXPLODING bypass on NIFTY/SENSEX expiry worst days —
+    # lifts declining halt, trade cap, worst-day pause, score/rank/chart floors.
+    top_ftv_v_expiry_bypass_enabled: bool = True
+    top_ftv_v_expiry_bypass_symbols_csv: str = "NIFTY,SENSEX"
+    top_ftv_v_expiry_bypass_min_explosion_score: float = 12.0
+    top_ftv_v_expiry_bypass_min_rank: float = 0.0
+    top_ftv_v_expiry_bypass_min_base_move_pct: float = 5.0
+    top_ftv_v_expiry_bypass_max_base_move_pct: float = 55.0
+    top_ftv_v_expiry_chart_bypass_enabled: bool = True
+    expiry_worst_day_top_ftv_v_bypass_enabled: bool = True
+    expiry_worst_day_top_ftv_v_bypasses_trade_cap: bool = True
     expiry_dual_scalp_mode: bool = True
     expiry_dual_scalp_relax_whipsaw: bool = True
     expiry_dual_scalp_opposite_cooldown_seconds: int = 90
