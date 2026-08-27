@@ -1313,6 +1313,45 @@ def resolve_strict_pad_lane_chart_bypass(
     )
 
 
+def shallow_otm_local_base_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+) -> bool:
+    """Shallow OTM ELITE flat→vertical at local base — allow shallow exec premium retest.
+
+    Aug27 SENSEX PUT 77200: ``shallowOtmLocalBaseTradeable`` stamped and SELECTED at
+    rank-1, but ``first_lift_structure_not_confirmed`` left strict pad false so
+    ``exec_premium_fading_at_execution`` blocked the fill."""
+    if not isinstance(alert, dict) or not alert.get("shallowOtmLocalBaseTradeable"):
+        return False
+    settings = get_settings()
+    min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
+    max_lb = float(getattr(settings, "shallow_otm_local_base_max_move_pct", 25.0) or 25.0)
+    lb = float(
+        alert.get("localBaseMovePct")
+        or alert.get("ictBaseRelativeMovePct")
+        or alert.get("offLowMovePct")
+        or 0
+    )
+    if not (min_lb <= lb <= max_lb):
+        return False
+    tier = str(
+        alert.get("tier") or getattr(explosion_event, "tier", "") or ""
+    ).upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False
+    moment = str(alert.get("momentType") or "").lower()
+    if not (
+        alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or alert.get("ictFlatThenVertical")
+        or moment
+        in ("armed_base_launch", "v_rip_session_low", "first_lift_local_base")
+    ):
+        return False
+    return True
+
+
 def resolve_strict_pad_lane_for_entry(
     side: Side | str,
     snap: SymbolSnapshot,
@@ -1342,7 +1381,13 @@ def resolve_strict_pad_lane_for_entry(
         armed_base_chart_bypass = bool(
             armed_ready and armed_reason in _STRICT_PAD_CHART_BYPASS_REASONS
         )
-    strict_bypass = armed_base_chart_bypass or pad_lane_chart_bypass
+    shallow_otm_bypass = shallow_otm_local_base_premium_fade_bypass(
+        row,
+        explosion_event,
+    )
+    strict_bypass = (
+        armed_base_chart_bypass or pad_lane_chart_bypass or shallow_otm_bypass
+    )
     return pad_lane_chart_bypass, strict_bypass
 
 
