@@ -233,6 +233,46 @@ def test_shallow_otm_armed_launch_passes_strict_rank_one(mock_cfg, mock_expiry):
 
 
 @patch("app.config.get_settings")
+def test_shallow_otm_stamp_enables_exec_premium_fade_bypass(mock_settings):
+    """Aug27 14:58 — SELECTED then exec_premium_fading when strict pad stayed false."""
+    from app.engines.pad_lane_capture import (
+        resolve_strict_pad_lane_for_entry,
+        shallow_otm_local_base_premium_fade_bypass,
+    )
+    from app.engines.winner_entry_guards import premium_fading_blocks_entry
+
+    settings = Settings(
+        pad_lane_premium_fade_fill_enabled=True,
+        pad_lane_premium_fade_fill_max_drawdown_pct=-1.2,
+        execution_chart_premium_check_enabled=True,
+        execution_chart_min_premium_momentum_pct=0.0,
+    )
+    mock_settings.return_value = settings
+    snap = _sensex_snap()
+    event = _aug27_event(lb=8.5)
+    alert = _aug27_armed_launch_alert(lb=8.5)
+
+    assert shallow_otm_local_base_premium_fade_bypass(alert, event) is True
+    _pad, strict = resolve_strict_pad_lane_for_entry(
+        Side.PUT,
+        snap,
+        mode="explosion",
+        explosion_event=event,
+        alert=alert,
+    )
+    assert strict is True
+
+    blocked, reason = premium_fading_blocks_entry(
+        premium_momentum_3s=-0.8,
+        premium_momentum_5s=-0.7,
+        explosion_event=event,
+        pad_lane_bypass=strict,
+    )
+    assert blocked is False
+    assert reason == "pad_lane_shallow_fade_ok"
+
+
+@patch("app.config.get_settings")
 def test_shallow_otm_local_base_waives_expiry_worst_defensive_rip_quality(mock_settings):
     from app.engines.ict_breakout_monitor import _expiry_worst_defensive_rip_allowed
 
