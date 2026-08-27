@@ -1306,6 +1306,17 @@ class Settings(BaseSettings):
     # daily_trade_cap_N>=3_expiry_worst must not skip ELITE / top EXPLODING —
     # lift the hard session cap and restrict to elite-top only (same gates).
     expiry_worst_day_elite_top_bypasses_trade_cap: bool = True
+    # Grade-A FTV first-lift on NIFTY/SENSEX — lifts expiry worst-day declining halt and
+    # lowers score/rank floors (Aug27 SENSEX 77300 PUT: EXPLODING grade A, score 33).
+    grade_a_ftv_first_lift_enabled: bool = True
+    grade_a_ftv_first_lift_symbols_csv: str = "NIFTY,SENSEX"
+    grade_a_ftv_first_lift_min_explosion_score: float = 28.0
+    grade_a_ftv_first_lift_min_quality: float = 65.0
+    grade_a_ftv_first_lift_min_rank: float = 40.0
+    grade_a_ftv_first_lift_min_base_move_pct: float = 8.0
+    grade_a_ftv_first_lift_max_base_move_pct: float = 45.0
+    expiry_worst_day_grade_a_ftv_bypass_enabled: bool = True
+    grade_a_ftv_chart_bypass_enabled: bool = True
     expiry_dual_scalp_mode: bool = True
     expiry_dual_scalp_relax_whipsaw: bool = True
     expiry_dual_scalp_opposite_cooldown_seconds: int = 90
@@ -1568,6 +1579,8 @@ class Settings(BaseSettings):
     early_radar_pad_max_off_low_pct: float = 15.0
     early_radar_pad_max_local_move_pct: float = 20.0
     early_radar_pad_min_explosion_score: float = 5.0
+    # EXPLODING/ELITE at local base before armed_base_launch stamp (Aug27 PUT 77300).
+    early_radar_pad_exploding_prelaunch_min_score: float = 25.0
     early_radar_pad_ftv_enabled: bool = True
     early_radar_pad_ftv_min_explosion_score: float = 5.0
     early_radar_pad_ftv_max_capital_pct: float = 0.90
