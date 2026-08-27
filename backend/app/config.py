@@ -1459,6 +1459,12 @@ class Settings(BaseSettings):
     bullish_local_base_prediction_max_move_pct: float = 40.0
     bullish_local_base_prediction_min_confidence: float = 70.0
     bullish_local_base_prediction_rank_max: float = 18.0
+    # Pad-capture lane — low-score FTV at local base with volume awake (Aug27 SENSEX
+    # 77300 PUT: score 33, v3=0 at trough, +338% MFE missed).
+    bullish_local_base_pad_min_explosion_score: float = 12.0
+    bullish_local_base_pad_max_move_pct: float = 45.0
+    bullish_local_base_pad_min_confidence: float = 55.0
+    local_base_turn_pad_min_score: float = 28.0
     # Local-base pad capture band — slow coil → fast vertical lift (not generic
     # cheap options). Aug24 24200 PE: ₹18–23 coil, lift through ₹50+.
     local_base_pad_capture_min_premium_inr: float = 18.0
@@ -1468,7 +1474,7 @@ class Settings(BaseSettings):
     fast_bullish_local_base_capture_enabled: bool = True
     fast_bullish_local_base_max_premium_inr: float = 220.0
     fast_bullish_local_base_min_move_pct: float = 1.0
-    fast_bullish_local_base_max_move_pct: float = 30.0
+    fast_bullish_local_base_max_move_pct: float = 45.0
     fast_bullish_local_base_min_velocity_3s: float = 0.8
     fast_bullish_local_base_soft_min_score: float = 45.0
     fast_bullish_local_base_soft_min_confidence: float = 60.0

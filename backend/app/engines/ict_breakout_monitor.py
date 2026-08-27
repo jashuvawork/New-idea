@@ -671,7 +671,7 @@ def _fast_bullish_local_base_readiness(
         or 0
     )
     lo = float(getattr(s, "fast_bullish_local_base_min_move_pct", 5.0) or 5.0)
-    hi = float(getattr(s, "fast_bullish_local_base_max_move_pct", 25.0) or 25.0)
+    hi = float(getattr(s, "fast_bullish_local_base_max_move_pct", 45.0) or 45.0)
     if not (lo <= base_move <= hi + 1e-6):
         return False, f"fast_bullish_pad_outside_{lo:g}_{hi:g}"
 
@@ -723,9 +723,13 @@ def _fast_bullish_local_base_readiness(
         min_v3 = float(
             getattr(s, "fast_bullish_local_base_min_velocity_3s", 0.8) or 0.8
         )
-        if not (volume_awake and base_move + 1e-6 >= pad_floor):
-            if v3 < min_v3:
-                return False, f"fast_bullish_velocity3s<{min_v3:g}"
+        trough_eps = float(
+            getattr(s, "bullish_local_base_trough_velocity_eps", 0.05) or 0.05
+        )
+        at_pad_with_volume = volume_awake and base_move + 1e-6 >= pad_floor
+        trough_awakening = at_pad_with_volume and 0 <= v3 <= trough_eps
+        if not trough_awakening and v3 < min_v3:
+            return False, f"fast_bullish_velocity3s<{min_v3:g}"
 
     from app.engines.moneyness import classify_moneyness
     from app.models.schemas import Side
