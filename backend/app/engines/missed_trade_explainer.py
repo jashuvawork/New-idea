@@ -142,6 +142,15 @@ def _effective_rank_floor(
     if candidate.mode == "explosion" and is_high_mover_elite_bypass(candidate=candidate):
         notes.append("high_mover_rank_bypass")
 
+    from app.engines.early_catch_gates import early_catch_pretrade_min_rank
+
+    early_rank = early_catch_pretrade_min_rank(candidate, settings=settings)
+    if early_rank is not None:
+        reduced = min(floor, early_rank)
+        if reduced < floor:
+            floor = reduced
+            notes.append(f"early_catch_floor={reduced:.0f}")
+
     return floor, notes
 
 

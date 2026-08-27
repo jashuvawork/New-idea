@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import urllib.request
 import zipfile
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from app.config import Settings
 from app.engines.bullish_local_base import alert_bullish_local_base_prediction
@@ -28,10 +31,21 @@ from app.models.schemas import (
 
 IST = ZoneInfo("Asia/Kolkata")
 ARCHIVE = Path("/tmp/radar/radar-2026-08-27.zip")
+ARCHIVE_URL = "https://jashuvatrade.xyz/api/ai/radar-archives/2026-08-27"
 
 
-def _load_77300() -> dict:
-    with zipfile.ZipFile(ARCHIVE) as zf:
+@pytest.fixture(scope="module")
+def aug27_archive() -> Path:
+    ARCHIVE.parent.mkdir(parents=True, exist_ok=True)
+    if not ARCHIVE.exists() or ARCHIVE.stat().st_size < 1000:
+        urllib.request.urlretrieve(ARCHIVE_URL, ARCHIVE)
+    if not ARCHIVE.exists():
+        pytest.skip("Aug27 radar archive unavailable")
+    return ARCHIVE
+
+
+def _load_77300(archive: Path) -> dict:
+    with zipfile.ZipFile(archive) as zf:
         row = next(
             r
             for r in json.loads(zf.read("all_radars.json"))
@@ -62,8 +76,8 @@ def _snap(ctx: dict) -> SymbolSnapshot:
 
 @patch("app.engines.bullish_local_base.get_settings")
 @patch("app.engines.ict_breakout_monitor.get_settings")
-def test_afternoon_pad_gates_active_at_1243(mock_ict, mock_bull):
-    row = _load_77300()
+def test_afternoon_pad_gates_active_at_1243(mock_ict, mock_bull, aug27_archive):
+    row = _load_77300(aug27_archive)
     alert = dict(row["alert"])
     snap = _snap(row.get("context") or {})
     settings = Settings()
@@ -102,9 +116,9 @@ def test_afternoon_pad_gates_active_at_1243(mock_ict, mock_bull):
     assert float(alert["localBaseMovePct"]) >= 20.0
 
 
-def test_afternoon_session_pnl_replay_to_chart_peak():
+def test_afternoon_session_pnl_replay_to_chart_peak(aug27_archive):
     """Replay 12:43 pad entry → chart afternoon spike (~₹200)."""
-    row = _load_77300()
+    row = _load_77300(aug27_archive)
     alert = row["alert"]
     entry_prem = 83.95  # afternoon local-base pad (chart ~₹80 zone)
     peak_prem = 200.0  # user chart peak
