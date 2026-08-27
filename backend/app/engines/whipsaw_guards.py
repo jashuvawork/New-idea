@@ -301,6 +301,12 @@ def check_session_whipsaw_pause(
     if momentum_rally_bypass_whipsaw(snapshots):
         return False, "momentum_rally_bypass", {"momentumRallyBypass": True}
 
+    if bool(getattr(settings, "whipsaw_top_signal_bypass_enabled", True)):
+        from app.engines.top_signal_session_lift import snapshots_have_top_signal_session_lift
+
+        if snapshots_have_top_signal_session_lift(snapshots):
+            return False, "top_signal_session_lift_bypass", {"topSignalSessionLiftBypass": True}
+
     from app.engines.expiry_day_guards import expiry_pm_itm_quick_session_active
 
     if expiry_pm_itm_quick_session_active(snapshots, state):

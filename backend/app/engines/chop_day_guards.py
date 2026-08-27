@@ -374,9 +374,9 @@ def resolve_daily_trade_cap(
     if not getattr(settings, "expiry_worst_day_elite_top_bypasses_trade_cap", True):
         return True, reason, meta
 
-    from app.engines.expiry_day_guards import snapshots_have_expiry_elite_top
+    from app.engines.top_signal_session_lift import snapshots_have_top_signal_session_lift
 
-    if not snapshots_have_expiry_elite_top(snapshots):
+    if not snapshots_have_top_signal_session_lift(snapshots):
         return True, reason, meta
 
     meta["dailyCapEliteOnly"] = True

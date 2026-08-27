@@ -644,7 +644,16 @@ async def _open_from_candidate(
     if snapshots:
         live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
         if live_blocked and settings.enable_live_trading:
-            return False, live_reason
+            from app.engines.top_signal_session_lift import (
+                candidate_qualifies_top_signal_session_lift,
+                snapshots_have_top_signal_session_lift,
+            )
+
+            if not (
+                snapshots_have_top_signal_session_lift(snapshots)
+                or candidate_qualifies_top_signal_session_lift(candidate)
+            ):
+                return False, live_reason
 
         from app.engines.worst_day_guard import worst_day_allows_candidate
         from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
@@ -3377,13 +3386,20 @@ async def process(
                 "reason": "daily_trade_cap_elite_bypass",
                 "message": "Daily trade cap lifted — ELITE / top explosive only",
             })
-        from app.engines.pretrade_validator import controlled_daily_cap_reached, check_last_n_trades_pause
-        ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state, snapshots)
+        from app.engines.pretrade_validator import check_last_n_trades_pause, resolve_controlled_daily_cap
+        ctrl_cap, ctrl_reason, ctrl_meta = resolve_controlled_daily_cap(state, snapshots)
+        ctrl_elite_only = bool(ctrl_meta.get("controlledCapEliteOnly"))
         if ctrl_cap:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": ctrl_reason,
                 "message": "Controlled trading daily cap",
+            })
+        elif ctrl_elite_only:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": ctrl_reason,
+                "message": "Controlled cap lifted — ELITE / top explosive only",
             })
         last_n_paused, last_n_reason, last_n_meta = check_last_n_trades_pause(state, snapshots)
         if last_n_paused:
@@ -3403,30 +3419,16 @@ async def process(
             })
         from app.engines.expiry_day_guards import (
             check_expiry_entry_allowed,
-            is_expiry_elite_top_candidate,
         )
-        from app.engines.grade_a_ftv_capture import is_grade_a_ftv_first_lift_candidate
-        from app.engines.top_ftv_v_expiry_bypass import (
-            is_top_ftv_or_v_candidate,
-            snapshots_have_top_ftv_or_v,
+        from app.engines.top_signal_session_lift import (
+            candidate_qualifies_daily_cap_elite_bypass,
+            snapshots_have_top_signal_session_lift,
         )
-        from app.engines.bullish_local_base import snapshots_have_bullish_local_base_pad
         from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
 
         policy, policy_meta = session_entry_policy(state, snapshots)
-        from app.engines.elite_never_block import snapshots_have_top_must_take
-        from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
-
-        extreme_session = snapshots_have_all_in_explosion(snapshots)
-        must_take_session = snapshots_have_top_must_take(snapshots)
-        top_ftv_v_session = snapshots_have_top_ftv_or_v(snapshots)
-        bullish_pad_session = snapshots_have_bullish_local_base_pad(snapshots)
-        session_lift = (
-            extreme_session
-            or must_take_session
-            or top_ftv_v_session
-            or bullish_pad_session
-        )
+        extreme_session = snapshots_have_top_signal_session_lift(snapshots)
+        session_lift = extreme_session
         if policy == "PAUSED" and not session_lift:
             skipped.append({
                 "symbol": "SESSION",
@@ -3551,20 +3553,26 @@ async def process(
                         "tier": getattr(best, "tier", None),
                     })
                     continue
-                if cap_elite_only and not is_expiry_elite_top_candidate(best) and not is_grade_a_ftv_first_lift_candidate(best) and not is_top_ftv_or_v_candidate(best):
-                    from app.engines.bullish_local_base import alert_is_bullish_local_base_pad_entry
-
-                    alert_row = best.alert if isinstance(best.alert, dict) else {}
-                    if not alert_is_bullish_local_base_pad_entry(alert_row, best.snap):
-                        skipped.append({
-                            "symbol": best.symbol,
-                            "reason": "daily_trade_cap_elite_only",
-                            "message": "Daily trade cap — only ELITE / top explosive allowed",
-                            "mode": best.mode,
-                            "score": best.score,
-                            "tier": getattr(best, "tier", None),
-                        })
-                        continue
+                if cap_elite_only and not candidate_qualifies_daily_cap_elite_bypass(best):
+                    skipped.append({
+                        "symbol": best.symbol,
+                        "reason": "daily_trade_cap_elite_only",
+                        "message": "Daily trade cap — only ELITE / top explosive allowed",
+                        "mode": best.mode,
+                        "score": best.score,
+                        "tier": getattr(best, "tier", None),
+                    })
+                    continue
+                if ctrl_elite_only and not candidate_qualifies_daily_cap_elite_bypass(best):
+                    skipped.append({
+                        "symbol": best.symbol,
+                        "reason": "controlled_cap_elite_only",
+                        "message": "Controlled cap — only ELITE / top explosive allowed",
+                        "mode": best.mode,
+                        "score": best.score,
+                        "tier": getattr(best, "tier", None),
+                    })
+                    continue
 
                 allocation = None
                 allocation_row: Optional[dict[str, Any]] = None
