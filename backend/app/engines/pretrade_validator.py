@@ -1108,6 +1108,11 @@ def validate_candidate(
             min_rank = min(min_rank, settings.worst_day_itm_fade_min_rank)
         elif mode == "quick_sideways" and (getattr(candidate, "pretrade_meta", None) or {}).get("worstDayQuick"):
             min_rank = min(min_rank, settings.worst_day_quick_min_rank)
+        from app.engines.early_catch_gates import early_catch_pretrade_min_rank
+
+        early_rank = early_catch_pretrade_min_rank(candidate, settings=settings)
+        if early_rank is not None:
+            min_rank = min(min_rank, early_rank)
         if not expiry_aligned and candidate.score < min_rank:
             return False, f"pretrade_rank_below_{min_rank:.0f}", meta
 

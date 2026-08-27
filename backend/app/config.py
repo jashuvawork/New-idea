@@ -328,7 +328,7 @@ class Settings(BaseSettings):
     # Top ELITE/EXPLODING ATM/ITM inside near-base window → never block (Aug5 24500).
     explosion_top_must_take_enabled: bool = True
     explosion_top_must_take_tiers_csv: str = "ELITE,EXPLODING"
-    explosion_top_must_take_min_score: float = 62.0
+    explosion_top_must_take_min_score: float = 55.0
     explosion_top_must_take_require_atm_itm: bool = True
     explosion_top_must_take_require_chart_align: bool = True
     # Soft: index tick helpers confirm side even when 5m chart label lags.
@@ -658,8 +658,8 @@ class Settings(BaseSettings):
     first_lift_trade_enabled: bool = True
     # Structured local-base first lift — ELITE/EXPLODING winners in the 15–25% pad
     # (aligned with must-take min score 62; quality keeps mid B-grade out).
-    first_lift_trade_min_score: float = 62.0
-    first_lift_trade_min_quality: float = 65.0
+    first_lift_trade_min_score: float = 35.0
+    first_lift_trade_min_quality: float = 55.0
     first_lift_trade_min_volume_surge: float = 2.0
     first_lift_trade_min_velocity_3s: float = 1.5
     first_lift_trade_min_velocity_9s: float = 1.0
@@ -707,7 +707,7 @@ class Settings(BaseSettings):
     # composite score still warming (Aug25 NIFTY PUT 24250: score 26; PUT 24150: grade B).
     first_lift_pad_explosion_bypass_enabled: bool = True
     first_lift_pad_explosion_min_peak_pct: float = 25.0
-    first_lift_pad_explosion_min_score: float = 12.0
+    first_lift_pad_explosion_min_score: float = 8.0
     first_lift_pad_local_base_min_pct: float = 2.0
     first_lift_pad_local_base_max_pct: float = 25.0
     # Immature floor matches unstructured early-window min (was 22% — still let noise through).
@@ -716,7 +716,7 @@ class Settings(BaseSettings):
     # Live confirmation — sticky ELITE / displacement spikes without live heat+structure
     # (Jul23 NIFTY 23900 PE v3=0.26 watch, SENSEX 76200 PE midday displacement-only).
     explosion_live_confirm_enabled: bool = True
-    explosion_live_confirm_min_velocity_3s: float = 2.0
+    explosion_live_confirm_min_velocity_3s: float = 1.5
     explosion_live_confirm_ict_min_velocity_3s: float = 1.5
     # Structured near-ATM CE/PE may use softer live/peak velocity (key name kept for compat).
     explosion_live_confirm_structured_ce_min_velocity_3s: float = 1.0
@@ -1150,7 +1150,7 @@ class Settings(BaseSettings):
     controlled_max_trades_per_day: int = 10
     controlled_rally_trade_cap_bonus: int = 4
     min_seconds_between_entries: int = 240
-    pretrade_min_rank_score: float = 65.0
+    pretrade_min_rank_score: float = 52.0
     pretrade_min_symbol_trades_for_stats: int = 3
     pretrade_block_symbol_pf_below: float = 0.5
     pretrade_block_symbol_net_inr_below: float = -15_000.0
@@ -1172,7 +1172,7 @@ class Settings(BaseSettings):
 
     # Best trades only — fewer, higher-quality entries
     best_trades_only_enabled: bool = True
-    best_trades_min_rank_score: float = 62.0
+    best_trades_min_rank_score: float = 52.0
     best_trades_explosion_only_after_losses: int = 3
 
     # Whipsaw / churn — CE↔PE flip-flops in bearish sideways chop
@@ -1310,8 +1310,8 @@ class Settings(BaseSettings):
     # lowers score/rank floors (Aug27 SENSEX 77300 PUT: EXPLODING grade A, score 33).
     grade_a_ftv_first_lift_enabled: bool = True
     grade_a_ftv_first_lift_symbols_csv: str = "NIFTY,SENSEX"
-    grade_a_ftv_first_lift_min_explosion_score: float = 28.0
-    grade_a_ftv_first_lift_min_quality: float = 65.0
+    grade_a_ftv_first_lift_min_explosion_score: float = 20.0
+    grade_a_ftv_first_lift_min_quality: float = 55.0
     grade_a_ftv_first_lift_min_rank: float = 40.0
     grade_a_ftv_first_lift_min_base_move_pct: float = 8.0
     grade_a_ftv_first_lift_max_base_move_pct: float = 45.0
@@ -1466,13 +1466,13 @@ class Settings(BaseSettings):
     bullish_local_base_prediction_rank_max: float = 18.0
     # Pad-capture lane — low-score FTV at local base with volume awake (Aug27 SENSEX
     # 77300 PUT: score 33, v3=0 at trough, +338% MFE missed).
-    bullish_local_base_pad_min_explosion_score: float = 12.0
+    bullish_local_base_pad_min_explosion_score: float = 8.0
     bullish_local_base_pad_max_move_pct: float = 45.0
     bullish_local_base_pad_min_confidence: float = 55.0
     bullish_local_base_trough_velocity_eps: float = 0.05
     bullish_local_base_pad_session_bypass_enabled: bool = True
     bullish_local_base_pad_must_take_min_move_pct: float = 8.0
-    local_base_turn_pad_min_score: float = 28.0
+    local_base_turn_pad_min_score: float = 20.0
     # Local-base pad capture band — slow coil → fast vertical lift (not generic
     # cheap options). Aug24 24200 PE: ₹18–23 coil, lift through ₹50+.
     local_base_pad_capture_min_premium_inr: float = 18.0
@@ -1597,7 +1597,9 @@ class Settings(BaseSettings):
     # entries fire before composite score warms to ELITE/EXPLODING (Aug26 77600 CE @12.8).
     early_pad_min_explosion_score: float = 12.0
     early_pad_min_quality: float = 45.0
-    first_lift_early_pad_min_score: float = 12.0
+    first_lift_early_pad_min_score: float = 8.0
+    first_lift_early_pad_min_rank: float = 38.0
+    early_catch_pad_min_rank: float = 35.0
     first_lift_early_pad_min_quality: float = 45.0
     # Early radar pad — take FTV/V/ELITE/EXPLODING at session trough (e.g. ₹33→48).
     early_radar_pad_capture_enabled: bool = True
@@ -1605,7 +1607,7 @@ class Settings(BaseSettings):
     early_radar_pad_max_local_move_pct: float = 20.0
     early_radar_pad_min_explosion_score: float = 5.0
     # EXPLODING/ELITE at local base before armed_base_launch stamp (Aug27 PUT 77300).
-    early_radar_pad_exploding_prelaunch_min_score: float = 25.0
+    early_radar_pad_exploding_prelaunch_min_score: float = 18.0
     early_radar_pad_ftv_enabled: bool = True
     early_radar_pad_ftv_min_explosion_score: float = 5.0
     early_radar_pad_ftv_max_capital_pct: float = 0.90
@@ -2106,7 +2108,7 @@ class Settings(BaseSettings):
     top_rank_first_lift_full_budget_lots_enabled: bool = True
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
-    aggressive_min_explosion_score: int = 45
+    aggressive_min_explosion_score: int = 38
     explosion_confirmed_min_score: int = 45
     explosion_max_lots: int = 0  # 0 = capital-derived max on 85% per trade
     aggressive_min_swing_confidence: int = 65
