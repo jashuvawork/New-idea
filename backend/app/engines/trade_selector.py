@@ -386,6 +386,7 @@ def _explosion_candidates(
                 # base AND non-adverse live momentum, so this cannot admit chop FOMO.
                 local_base_ok = False
                 pad_lane_ok = False
+                grade_a_ok = False
                 if bool(
                     getattr(
                         settings,
@@ -399,6 +400,7 @@ def _explosion_candidates(
                     from app.engines.pad_lane_capture import (
                         pad_lane_turnaround_chart_bypass,
                     )
+                    from app.engines.grade_a_ftv_capture import grade_a_ftv_chart_bypass
 
                     local_base_ok = local_base_ichimoku_chart_bypass(
                         side_v, snap, alert=alert,
@@ -406,7 +408,8 @@ def _explosion_candidates(
                     pad_lane_ok = pad_lane_turnaround_chart_bypass(
                         side_v, snap, alert=alert,
                     )
-                if not local_base_ok and not pad_lane_ok:
+                    grade_a_ok = grade_a_ftv_chart_bypass(alert, snap)
+                if not local_base_ok and not pad_lane_ok and not grade_a_ok:
                     continue
         score_val = float(alert.get("explosionScore", 0))
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
@@ -2119,6 +2122,14 @@ def diagnose_missed_entries(
                         or 12.0
                     ),
                 )
+            from app.engines.grade_a_ftv_capture import (
+                alert_is_grade_a_ftv_first_lift,
+                grade_a_ftv_first_lift_floors,
+            )
+
+            if alert_is_grade_a_ftv_first_lift(alert, snap):
+                floors = grade_a_ftv_first_lift_floors(settings)
+                min_score = min(min_score, float(floors.get("minScore", 28.0) or 28.0))
             if early_pad or pad_lane_waive:
                 min_score = min(
                     min_score,
@@ -2159,11 +2170,13 @@ def diagnose_missed_entries(
                     blockers.append("tier_not_elite_exploding")
             if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
                 from app.engines.spot_direction import side_aligned_with_chart
+                from app.engines.grade_a_ftv_capture import grade_a_ftv_chart_bypass
 
                 side_raw = str(alert.get("side") or "").upper()
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
                     pad_lane_chart_ok = False
                     local_base_chart_ok = False
+                    grade_a_chart_ok = grade_a_ftv_chart_bypass(alert, snap)
                     if not lift_ready:
                         from app.engines.local_base_chart_bypass import (
                             local_base_ichimoku_chart_bypass,
@@ -2183,6 +2196,7 @@ def diagnose_missed_entries(
                         and not lift_ready
                         and not local_base_chart_ok
                         and not pad_lane_chart_ok
+                        and not grade_a_chart_ok
                     ):
                         blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):

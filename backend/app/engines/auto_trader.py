@@ -3405,6 +3405,7 @@ async def process(
             check_expiry_entry_allowed,
             is_expiry_elite_top_candidate,
         )
+        from app.engines.grade_a_ftv_capture import is_grade_a_ftv_first_lift_candidate
         from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
 
         policy, policy_meta = session_entry_policy(state, snapshots)
@@ -3537,7 +3538,7 @@ async def process(
                         "tier": getattr(best, "tier", None),
                     })
                     continue
-                if cap_elite_only and not is_expiry_elite_top_candidate(best):
+                if cap_elite_only and not is_expiry_elite_top_candidate(best) and not is_grade_a_ftv_first_lift_candidate(best):
                     skipped.append({
                         "symbol": best.symbol,
                         "reason": "daily_trade_cap_elite_only",
