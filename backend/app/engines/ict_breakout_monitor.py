@@ -3339,6 +3339,27 @@ def _expiry_worst_defensive_rip_allowed(
 
         if top_ftv_v_expiry_worst_waive(evidence):
             return True, "top_ftv_v_expiry_worst_waive"
+        if bool(evidence.get("shallowOtmLocalBaseTradeable")):
+            base_move = max(
+                float(evidence.get("localBaseMovePct") or 0),
+                float(evidence.get("ictBaseRelativeMovePct") or 0),
+            )
+            min_lb = float(
+                getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0
+            )
+            max_lb = float(
+                getattr(settings, "shallow_otm_local_base_max_move_pct", 25.0) or 25.0
+            )
+            tier_u = str(evidence.get("tier") or tier or "").upper()
+            if (
+                tier_u in ("ELITE", "EXPLODING")
+                and min_lb <= base_move <= max_lb + 1e-6
+                and bool(
+                    evidence.get("armedBaseLaunch")
+                    or evidence.get("ictArmedBaseLaunch")
+                )
+            ):
+                return True, "shallow_otm_local_base_expiry_worst_waive"
     if not bool(getattr(settings, "ict_defensive_base_rip_block_expiry_worst", True)):
         return True, "ok"
     min_tier = str(

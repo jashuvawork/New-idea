@@ -1590,6 +1590,8 @@ class Settings(BaseSettings):
     early_radar_pad_max_off_low_pct: float = 15.0
     early_radar_pad_max_local_move_pct: float = 20.0
     early_radar_pad_min_explosion_score: float = 5.0
+    # EXPLODING/ELITE at local base before armed_base_launch stamp (Aug27 PUT 77300).
+    early_radar_pad_exploding_prelaunch_min_score: float = 25.0
     early_radar_pad_ftv_enabled: bool = True
     early_radar_pad_ftv_min_explosion_score: float = 5.0
     early_radar_pad_ftv_max_capital_pct: float = 0.90

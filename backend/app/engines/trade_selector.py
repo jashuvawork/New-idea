@@ -337,7 +337,29 @@ def _explosion_candidates(
                 atm=atm_v if atm_v > 0 else None,
             )
             if money == "OTM":
-                continue
+                from app.engines.early_radar_pad_capture import (
+                    alert_has_early_radar_pad_capture,
+                    early_radar_pad_shallow_otm_ok,
+                )
+                from app.engines.moneyness import _depth_steps
+
+                depth = _depth_steps(
+                    Side(side_v),
+                    strike_v,
+                    spot_v,
+                    symbol,
+                    atm_v if atm_v > 0 else spot_v,
+                )
+                max_steps = int(
+                    getattr(settings, "explosion_shallow_otm_history_steps", 1) or 1
+                )
+                pad_shallow_ok = early_radar_pad_shallow_otm_ok(alert, snap)
+                if not (
+                    (lift_ready or alert_has_early_radar_pad_capture(alert))
+                    and pad_shallow_ok
+                    and depth <= max_steps
+                ):
+                    continue
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
         top_only = bool(getattr(settings, "top_moments_only_enabled", True))
