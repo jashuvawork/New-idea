@@ -218,6 +218,33 @@ def _atm_itm_ok(
     return money in ("ATM", "ITM")
 
 
+def early_radar_pad_shallow_otm_ok(
+    alert: Mapping[str, Any],
+    snap: Optional[SymbolSnapshot],
+) -> bool:
+    """One-step shallow OTM may pad-capture when tier/score prove a base lift."""
+    settings = get_settings()
+    if snap is None:
+        return False
+    side = str(alert.get("side") or "").upper()
+    strike = _number(alert.get("strike"))
+    spot = _number(getattr(snap, "spot", 0))
+    atm = _number(getattr(snap, "atmStrike", 0)) or spot
+    symbol = str(getattr(snap, "symbol", "") or "")
+    if side not in ("CALL", "PUT") or strike <= 0 or spot <= 0:
+        return False
+    from app.engines.moneyness import classify_moneyness, _depth_steps
+
+    money = classify_moneyness(
+        Side(side), strike, spot, symbol=symbol, atm=atm if atm > 0 else None,
+    )
+    if money != "OTM":
+        return True
+    max_steps = int(getattr(settings, "explosion_shallow_otm_history_steps", 1) or 1)
+    depth = _depth_steps(Side(side), strike, spot, symbol, atm)
+    return depth <= max_steps
+
+
 def early_radar_pad_capture_active(
     alert: Mapping[str, Any],
     snap: Optional[SymbolSnapshot] = None,
@@ -239,7 +266,29 @@ def early_radar_pad_capture_active(
     armed_samples = int(alert.get("ictArmedBaseSamples") or 0)
     min_samples = int(getattr(settings, "ict_armed_base_min_samples", 6) or 6)
     if armed_samples >= min_samples and not bool(alert.get("ictArmedBaseLaunch")):
-        return False
+        # Aug27 SENSEX PUT 77300: EXPLODING at ~10% local base while ict_base_armed
+        # samples were full but armed_base_launch had not stamped — pad capture was
+        # disabled and first_lift_score<40 blocked the entry for a +40% runner.
+        tier = _alert_tier(alert)
+        local_move = _alert_local_base_move(alert)
+        pad_max = float(
+            getattr(settings, "early_radar_pad_max_local_move_pct", 20.0) or 20.0
+        )
+        min_score = float(
+            getattr(
+                settings,
+                "early_radar_pad_exploding_prelaunch_min_score",
+                25.0,
+            )
+            or 25.0
+        )
+        if not (
+            tier in ("EXPLODING", "ELITE")
+            and bool(alert.get("ictBaseArmed") or alert.get("baseArmed"))
+            and local_move <= pad_max + 1e-6
+            and _alert_explosion_score(alert) >= min_score
+        ):
+            return False
 
     premium = _number(alert.get("premium"))
     peak_move = _number(alert.get("peakMovePct"))
@@ -272,7 +321,9 @@ def early_radar_pad_capture_active(
 
     side = str(alert.get("side") or "").upper()
     strike = _number(alert.get("strike"))
-    if not _atm_itm_ok(side=side, strike=strike, snap=snap):
+    if not _atm_itm_ok(side=side, strike=strike, snap=snap) and not early_radar_pad_shallow_otm_ok(
+        alert, snap,
+    ):
         return False
     return True
 

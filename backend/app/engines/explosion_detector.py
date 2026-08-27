@@ -2598,10 +2598,11 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     if stamp_early_radar_pad_capture(alert_out, snap):
         tradeable = True
         alert_out["tradeable"] = True
-    # A shallow-OTM strike is monitored on radar but must never be tradeable.
+    # Shallow OTM is history-only unless early pad capture stamped the lift.
     if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
-        tradeable = False
-        first_lift = False
-        alert_out["tradeable"] = False
-        alert_out["ictFirstLift"] = False
+        if not alert_out.get("earlyRadarPadCapture"):
+            tradeable = False
+            first_lift = False
+            alert_out["tradeable"] = False
+            alert_out["ictFirstLift"] = False
     return alert_out
