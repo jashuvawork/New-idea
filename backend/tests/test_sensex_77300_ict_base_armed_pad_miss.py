@@ -110,3 +110,102 @@ def test_shallow_otm_one_step_put_passes_pad_moneyness(mock_settings):
     alert = _aug27_prelaunch_alert()
     assert early_radar_pad_shallow_otm_ok(alert, snap) is True
     assert early_radar_pad_capture_active(alert, snap) is True
+
+
+def _aug27_elite_first_lift_prelaunch_alert():
+    """10:45 IST live shape — ELITE first_lift at 20% lb, blocked strict_rank_one_only."""
+    return {
+        "symbol": "SENSEX",
+        "side": "PUT",
+        "strike": 77300.0,
+        "premium": 85.25,
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "dailyMovePct": 20.0,
+        "peakMovePct": 26.0,
+        "localBaseMovePct": 20.0,
+        "ictBaseRelativeMovePct": 20.0,
+        "tradeable": True,
+        "ictBaseArmed": True,
+        "ictArmedBaseSamples": 6,
+        "ictArmedBaseSpanSeconds": 15.0,
+        "ictArmedBaseRangePct": 0.0,
+        "ictArmedBaseLaunch": False,
+        "ictFirstLift": True,
+        "ictFlatThenVertical": True,
+        "ictVolumeAwakening": True,
+        "volumeAwaken": True,
+        "earlyRadarPadCapture": True,
+        "velocity3s": 0.35,
+        "velocity9s": 0.2,
+    }
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.premium_filter.get_settings")
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_prelaunch_pad_passes_expiry_strict_rank_one_declining_halt(
+    mock_pad_settings,
+    mock_premium_settings,
+    mock_expiry_settings,
+):
+    """Aug27 10:45 — expiry_worst_day_strict_rank_one_only after pad stamp."""
+    from types import SimpleNamespace
+
+    from app.engines.expiry_day_guards import (
+        alert_is_early_pad_prelaunch_strict_launch,
+        alert_is_strict_rank_one_launch,
+        check_expiry_candidate,
+    )
+    from app.models.schemas import AutoTraderState
+
+    cfg = Settings(explosion_shallow_otm_history_steps=1)
+    mock_pad_settings.return_value = cfg
+    mock_premium_settings.return_value = cfg
+    mock_expiry_settings.return_value = cfg
+
+    snap = _sensex_snap()
+    snap.tradeQualityScore = 50.0
+    snap.optionExpiry = "2026-08-27"
+    alert = _aug27_elite_first_lift_prelaunch_alert()
+    assert alert_is_early_pad_prelaunch_strict_launch(alert, snap) is True
+    assert alert_is_strict_rank_one_launch(alert, snap) is True
+
+    event = SimpleNamespace(
+        daily_move_pct=20.0,
+        peak_move_pct=26.0,
+        explosion_score=100.0,
+        tier="ELITE",
+        side=Side.PUT,
+    )
+    candidate = SimpleNamespace(
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=77300.0,
+        score=120.0,
+        mode="explosion",
+        snap=snap,
+        tier="ELITE",
+        confidence=100.0,
+        premium=85.25,
+        explosion_event=event,
+        alert=alert,
+    )
+    with patch(
+        "app.engines.expiry_day_guards.predict_worst_expiry_day",
+        return_value=(True, 65.0, ["chop_regime", "declining_session"]),
+    ):
+        with patch("app.engines.expiry_day_guards._session_declining", return_value=True):
+            with patch(
+                "app.engines.expiry_day_guards.check_expiry_explosion_open_block",
+                return_value=(False, "ok"),
+            ):
+                with patch(
+                    "app.engines.aligned_explosion_bypass.expiry_aligned_explosion_trade_allowed",
+                    return_value=(True, "ok"),
+                ):
+                    ok, reason, meta = check_expiry_candidate(
+                        candidate, AutoTraderState(), {"SENSEX": snap},
+                    )
+    assert ok is True, reason
+    assert meta.get("expiryStrictRankOneLaunch") is True
