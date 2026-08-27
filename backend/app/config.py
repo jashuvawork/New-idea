@@ -1328,6 +1328,11 @@ class Settings(BaseSettings):
     top_ftv_v_expiry_chart_bypass_enabled: bool = True
     expiry_worst_day_top_ftv_v_bypass_enabled: bool = True
     expiry_worst_day_top_ftv_v_bypasses_trade_cap: bool = True
+    # Master switch for session-lift when top FTV/V / ELITE / explosive is on radar.
+    top_signal_session_lift_enabled: bool = True
+    last_n_top_signal_bypass_enabled: bool = True
+    whipsaw_top_signal_bypass_enabled: bool = True
+    controlled_cap_top_signal_bypass_enabled: bool = True
     expiry_dual_scalp_mode: bool = True
     expiry_dual_scalp_relax_whipsaw: bool = True
     expiry_dual_scalp_opposite_cooldown_seconds: int = 90

@@ -370,16 +370,37 @@ def controlled_daily_cap_reached(
     state: AutoTraderState,
     snapshots: Optional[dict] = None,
 ) -> tuple[bool, str]:
+    """Backward-compatible wrapper — prefer resolve_controlled_daily_cap for meta."""
+    hit, reason, _ = resolve_controlled_daily_cap(state, snapshots)
+    return hit, reason
+
+
+def resolve_controlled_daily_cap(
+    state: AutoTraderState,
+    snapshots: Optional[dict] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Controlled daily cap with top-signal elite-only lift."""
+    meta: dict[str, Any] = {}
     settings = get_settings()
     if not settings.controlled_trading_enabled:
-        return False, "ok"
+        return False, "ok", meta
     cap, _ = resolve_effective_daily_trade_cap(state, snapshots)
     if cap <= 0:
-        return False, "ok"
+        return False, "ok", meta
     closed = len(collect_session_trades(state))
-    if closed >= cap:
-        return True, f"controlled_daily_cap_{cap}"
-    return False, "ok"
+    if closed < cap:
+        return False, "ok", meta
+    if (
+        snapshots
+        and bool(getattr(settings, "controlled_cap_top_signal_bypass_enabled", True))
+    ):
+        from app.engines.top_signal_session_lift import snapshots_have_top_signal_session_lift
+
+        if snapshots_have_top_signal_session_lift(snapshots):
+            meta["controlledCapEliteOnly"] = True
+            meta["controlledCapTopSignalBypass"] = True
+            return False, "controlled_cap_top_signal_bypass", meta
+    return True, f"controlled_daily_cap_{cap}", meta
 
 
 def analyze_last_n_trades(trades: list[TradeRecord], n: int = 5) -> dict[str, Any]:
@@ -454,6 +475,17 @@ def check_last_n_trades_pause(
 
     if momentum_rally_bypass_last_n(snapshots):
         return False, "momentum_rally_bypass", summary
+
+    if (
+        snapshots
+        and bool(getattr(settings, "last_n_top_signal_bypass_enabled", True))
+    ):
+        from app.engines.top_signal_session_lift import snapshots_have_top_signal_session_lift
+
+        if snapshots_have_top_signal_session_lift(snapshots):
+            summary = summary or last_n_trades_summary(state)
+            summary["topSignalSessionLiftBypass"] = True
+            return False, "top_signal_session_lift_bypass", summary
 
     from app.engines.morning_premium_capture import premium_capture_active
 
@@ -790,9 +822,15 @@ def validate_candidate(
         ):
             return False, "counter_trend_requires_elite", meta
 
-    cap_hit, cap_reason = controlled_daily_cap_reached(state, snap_map)
+    cap_hit, cap_reason, cap_meta = resolve_controlled_daily_cap(state, snap_map)
+    meta.update(cap_meta)
     if cap_hit:
         return False, cap_reason, meta
+    if cap_meta.get("controlledCapEliteOnly"):
+        from app.engines.top_signal_session_lift import candidate_qualifies_top_signal_session_lift
+
+        if not candidate_qualifies_top_signal_session_lift(candidate):
+            return False, "controlled_cap_elite_only", meta
 
     ln_ok, ln_reason, ln_meta = check_last_n_candidate_gate(candidate, state, trades)
     meta.update(ln_meta)
