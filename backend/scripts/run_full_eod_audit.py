@@ -49,12 +49,30 @@ OLD_SETTINGS = {
     "controlled_cap_top_signal_bypass_enabled": False,
 }
 
+# Modules bind ``get_settings`` at import time — patch each copy, not only app.config.
 PATCH_TARGETS = (
     "app.config.get_settings",
     "app.engines.eod_local_base_replay.get_settings",
     "app.services.radar_archive.get_settings",
     "app.services.radar_learning.get_settings",
     "app.engines.missed_trade_explainer.get_settings",
+    "app.engines.pretrade_validator.get_settings",
+    "app.engines.ict_breakout_monitor.get_settings",
+    "app.engines.bullish_local_base.get_settings",
+    "app.engines.early_catch_gates.get_settings",
+    "app.engines.top_signal_session_lift.get_settings",
+    "app.engines.chop_day_guards.get_settings",
+    "app.engines.whipsaw_guards.get_settings",
+    "app.engines.worst_day_guard.get_settings",
+    "app.engines.expiry_day_guards.get_settings",
+    "app.engines.elite_never_block.get_settings",
+    "app.engines.top_ftv_v_expiry_bypass.get_settings",
+    "app.engines.grade_a_ftv_capture.get_settings",
+    "app.engines.pad_lane_capture.get_settings",
+    "app.engines.building_ftv_gates.get_settings",
+    "app.engines.local_base_chart_bypass.get_settings",
+    "app.engines.explosion_profit.get_settings",
+    "app.engines.capital_allocator.get_settings",
 )
 
 
