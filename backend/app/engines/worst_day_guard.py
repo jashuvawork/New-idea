@@ -117,6 +117,17 @@ def session_entry_policy(
         except Exception:
             pass
 
+    if bool(getattr(settings, "expiry_worst_day_top_ftv_v_bypass_enabled", True)):
+        try:
+            from app.engines.expiry_day_guards import is_expiry_session
+            from app.engines.top_ftv_v_expiry_bypass import snapshots_have_top_ftv_or_v
+
+            if is_expiry_session(snapshots) and snapshots_have_top_ftv_or_v(snapshots):
+                meta["worstDayLiftedByTopFtvV"] = True
+                return "NORMAL", meta
+        except Exception:
+            pass
+
     if settings.worst_day_breakout_only_enabled:
         meta["pauseReason"] = "worst_day_breakout_only"
         return "BREAKOUT_ONLY", meta
@@ -374,6 +385,14 @@ def worst_day_allows_candidate(
             return False, quick_reason, meta
 
     if mode == "explosion":
+        from app.engines.top_ftv_v_expiry_bypass import is_top_ftv_or_v_candidate
+
+        breakout_floor = float(
+            getattr(settings, "worst_day_breakout_min_rank", 65.0) or 65.0
+        )
+        if is_top_ftv_or_v_candidate(candidate) and score < breakout_floor:
+            meta["worstDayBypass"] = "top_ftv_v_expiry"
+            return True, "ok", meta
         from app.engines.bad_day_routing import _extreme_explosion_bypass
 
         if _extreme_explosion_bypass(candidate):

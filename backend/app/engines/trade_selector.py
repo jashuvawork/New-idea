@@ -2148,10 +2148,17 @@ def diagnose_missed_entries(
                 alert_is_grade_a_ftv_first_lift,
                 grade_a_ftv_first_lift_floors,
             )
+            from app.engines.top_ftv_v_expiry_bypass import (
+                alert_is_top_ftv_or_v,
+                top_ftv_v_expiry_floors,
+            )
 
             if alert_is_grade_a_ftv_first_lift(alert, snap):
                 floors = grade_a_ftv_first_lift_floors(settings)
                 min_score = min(min_score, float(floors.get("minScore", 28.0) or 28.0))
+            if alert_is_top_ftv_or_v(alert, snap):
+                floors = top_ftv_v_expiry_floors(settings)
+                min_score = min(min_score, float(floors.get("minScore", 12.0) or 12.0))
             if early_pad or pad_lane_waive:
                 min_score = min(
                     min_score,
@@ -2193,12 +2200,14 @@ def diagnose_missed_entries(
             if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
                 from app.engines.spot_direction import side_aligned_with_chart
                 from app.engines.grade_a_ftv_capture import grade_a_ftv_chart_bypass
+                from app.engines.top_ftv_v_expiry_bypass import top_ftv_v_chart_bypass
 
                 side_raw = str(alert.get("side") or "").upper()
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
                     pad_lane_chart_ok = False
                     local_base_chart_ok = False
                     grade_a_chart_ok = grade_a_ftv_chart_bypass(alert, snap)
+                    top_ftv_v_chart_ok = top_ftv_v_chart_bypass(alert, snap)
                     if not lift_ready:
                         from app.engines.local_base_chart_bypass import (
                             local_base_ichimoku_chart_bypass,
@@ -2219,6 +2228,7 @@ def diagnose_missed_entries(
                         and not local_base_chart_ok
                         and not pad_lane_chart_ok
                         and not grade_a_chart_ok
+                        and not top_ftv_v_chart_ok
                     ):
                         blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):

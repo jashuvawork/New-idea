@@ -1510,9 +1510,26 @@ def first_lift_entry_readiness(
         or row.get("ictBaseRelativeMovePct")
         or 0
     )
+    if not day_mode and state is None:
+        try:
+            from app.engines.daily_18pct_strategy import get_session_limits
+
+            limits = get_session_limits()
+            day_mode = str(getattr(limits, "dayMode", "") or "") if limits else ""
+        except Exception:
+            day_mode = day_mode or ""
+    if not day_mode and state is not None:
+        day_mode = str(
+            (getattr(state, "dailyStrategy", None) or {}).get("dayMode")
+            or ""
+        )
     from app.engines.grade_a_ftv_capture import (
         alert_is_grade_a_ftv_first_lift,
         grade_a_ftv_first_lift_floors,
+    )
+    from app.engines.top_ftv_v_expiry_bypass import (
+        alert_is_top_ftv_or_v,
+        top_ftv_v_expiry_floors,
     )
 
     grade_a_alert = row if isinstance(row, dict) else (
@@ -1520,6 +1537,11 @@ def first_lift_entry_readiness(
     )
     grade_a_lane = alert_is_grade_a_ftv_first_lift(grade_a_alert, snap)
     grade_a_floors = grade_a_ftv_first_lift_floors(settings) if grade_a_lane else {}
+    top_ftv_v_lane = (
+        alert_is_top_ftv_or_v(grade_a_alert, snap)
+        and _expiry_worst_session(day_mode=day_mode, state=state)
+    )
+    top_ftv_v_floors = top_ftv_v_expiry_floors(settings) if top_ftv_v_lane else {}
     # V-rip pad relaxes quality/score/velocity floors but does not bypass armed/elite
     # orderflow, TQS, stability, or reason tagging when those stamps are present.
     v_rip_lane = _v_rip_lane_active(
@@ -1600,6 +1622,9 @@ def first_lift_entry_readiness(
     elif grade_a_lane:
         min_move = float(grade_a_floors.get("minBaseMove", 8.0) or 8.0)
         max_move = float(grade_a_floors.get("maxBaseMove", 45.0) or 45.0)
+    elif top_ftv_v_lane:
+        min_move = float(top_ftv_v_floors.get("minBaseMove", 5.0) or 5.0)
+        max_move = float(top_ftv_v_floors.get("maxBaseMove", 55.0) or 55.0)
     elif elite_base_ready:
         min_move = float(
             getattr(settings, "ict_elite_base_ready_min_move_pct", 2.0) or 2.0
@@ -1685,6 +1710,9 @@ def first_lift_entry_readiness(
     elif grade_a_lane:
         min_quality = float(grade_a_floors.get("minQuality", 65.0) or 65.0)
         min_score = float(grade_a_floors.get("minScore", 28.0) or 28.0)
+    elif top_ftv_v_lane:
+        min_quality = 0.0
+        min_score = float(top_ftv_v_floors.get("minScore", 12.0) or 12.0)
     elif armed_launch:
         min_quality = float(
             getattr(settings, "ict_armed_base_launch_min_quality", 65.0) or 65.0
@@ -1822,6 +1850,9 @@ def first_lift_entry_readiness(
             float(getattr(settings, "first_lift_helper_confirm_min_velocity_9s", 0.6) or 0.6),
         )
     if grade_a_lane and volume_awake:
+        min_v3 = 0.0
+        min_v9 = 0.0
+    if top_ftv_v_lane and volume_awake:
         min_v3 = 0.0
         min_v9 = 0.0
     if not sustained_lift and v3 < min_v3:
@@ -2055,6 +2086,13 @@ def first_lift_entry_readiness(
         row.get("indexMomAlign") or row.get("indexHelpersConfirm")
     ):
         return True, "first_lift_grade_a_index_aligned"
+    if top_ftv_v_lane and bool(
+        row.get("indexMomAlign")
+        or row.get("indexHelpersConfirm")
+        or row.get("ictVRipReady")
+        or row.get("vRipReady")
+    ):
+        return True, "first_lift_top_ftv_v_index_aligned"
     return False, "first_lift_index_turn_not_confirmed"
 
 
@@ -3297,6 +3335,10 @@ def _expiry_worst_defensive_rip_allowed(
 
         if grade_a_ftv_expiry_worst_waive(evidence):
             return True, "grade_a_ftv_expiry_worst_waive"
+        from app.engines.top_ftv_v_expiry_bypass import top_ftv_v_expiry_worst_waive
+
+        if top_ftv_v_expiry_worst_waive(evidence):
+            return True, "top_ftv_v_expiry_worst_waive"
         if bool(evidence.get("shallowOtmLocalBaseTradeable")):
             base_move = max(
                 float(evidence.get("localBaseMovePct") or 0),

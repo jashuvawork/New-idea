@@ -803,6 +803,14 @@ def snapshots_have_grade_a_ftv_first_lift(
     return _have(snapshots)
 
 
+def snapshots_have_top_ftv_or_v(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    from app.engines.top_ftv_v_expiry_bypass import snapshots_have_top_ftv_or_v as _have
+
+    return _have(snapshots)
+
+
 def is_expiry_elite_top_candidate(candidate: Any) -> bool:
     """Per-candidate elite-top check used under expiry-worst declining sessions."""
     settings = get_settings()
@@ -1025,6 +1033,17 @@ def check_expiry_entry_allowed(
                 meta["dailyCapEliteBypass"] = True
                 meta["rawCapReason"] = cap_reason
                 return True, "ok", meta
+            if (
+                is_worst
+                and getattr(settings, "expiry_worst_day_top_ftv_v_bypass_enabled", True)
+                and getattr(settings, "expiry_worst_day_top_ftv_v_bypasses_trade_cap", True)
+                and snapshots_have_top_ftv_or_v(snapshots)
+            ):
+                meta["expiryWorstDayTopFtvVBypass"] = True
+                meta["expiryWorstDayTopFtvVOnly"] = True
+                meta["dailyCapTopFtvVBypass"] = True
+                meta["rawCapReason"] = cap_reason
+                return True, "ok", meta
             return False, cap_reason, meta
 
         if is_worst and settings.expiry_worst_day_halt_entries:
@@ -1042,6 +1061,13 @@ def check_expiry_entry_allowed(
                 ):
                     meta["expiryWorstDayGradeAFtvBypass"] = True
                     meta["expiryWorstDayGradeAFtvOnly"] = True
+                    return True, "ok", meta
+                if (
+                    getattr(settings, "expiry_worst_day_top_ftv_v_bypass_enabled", True)
+                    and snapshots_have_top_ftv_or_v(snapshots)
+                ):
+                    meta["expiryWorstDayTopFtvVBypass"] = True
+                    meta["expiryWorstDayTopFtvVOnly"] = True
                     return True, "ok", meta
                 # A genuine intraday index breakout lifts the stale expiry chop halt too.
                 if bool(
@@ -1120,6 +1146,7 @@ def check_expiry_candidate(
         # The declining halt uses the strict rank-one launch proof. The existing
         # broader elite-top policy remains unchanged for post-cap handling.
         from app.engines.grade_a_ftv_capture import is_grade_a_ftv_first_lift_candidate
+        from app.engines.top_ftv_v_expiry_bypass import is_top_ftv_or_v_candidate
 
         strict_declining = bool(
             declining
@@ -1131,6 +1158,7 @@ def check_expiry_candidate(
                     snap,
                 )
                 or is_grade_a_ftv_first_lift_candidate(candidate)
+                or is_top_ftv_or_v_candidate(candidate)
             )
         )
         if declining and not strict_declining:
@@ -1139,11 +1167,13 @@ def check_expiry_candidate(
             cap_hit
             and not is_expiry_elite_top_candidate(candidate)
             and not is_grade_a_ftv_first_lift_candidate(candidate)
+            and not is_top_ftv_or_v_candidate(candidate)
         ):
             return False, "expiry_worst_day_elite_top_only", meta
         meta["expiryEliteTop"] = bool(cap_hit)
         meta["expiryStrictRankOneLaunch"] = strict_declining
         meta["expiryGradeAFtv"] = is_grade_a_ftv_first_lift_candidate(candidate)
+        meta["expiryTopFtvV"] = is_top_ftv_or_v_candidate(candidate)
         # Still run open-block + aligned checks below for explosions.
 
     if mode == "explosion":
