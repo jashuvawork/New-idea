@@ -1753,6 +1753,49 @@ def _expiry_trough_first_tick_scan_ok(
     return True, off_low
 
 
+def _shallow_otm_local_base_tradeable(
+    e: ExplosionEvent,
+    ict: Any,
+    *,
+    structure_pad: float,
+    snap: Optional[Any],
+    settings: Any,
+) -> bool:
+    """1-step OTM may trade on ELITE flat→vertical lift at the local base pad.
+
+    Aug27 SENSEX PUT 77200: ELITE +8.5% off base, peak +54%, blocked not_tradeable_tier.
+    """
+    if str(getattr(e, "moneyness", "") or "").upper() != "OTM":
+        return False
+    if e.tier not in ("ELITE", "EXPLODING"):
+        return False
+    if not bool(
+        getattr(ict, "flat_then_vertical", False) and getattr(ict, "active", False)
+    ):
+        return False
+    min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
+    max_lb = float(getattr(settings, "shallow_otm_local_base_max_move_pct", 25.0) or 25.0)
+    pad = float(structure_pad or 0)
+    if not (min_lb <= pad <= max_lb + 1e-6):
+        return False
+    if snap is None:
+        return False
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0) or spot
+    if spot <= 0:
+        return False
+    return _shallow_otm_monitor_eligible(
+        e.side,
+        e.strike,
+        spot,
+        atm,
+        e.premium,
+        e.volume,
+        e.symbol,
+        settings,
+    )
+
+
 def _shallow_otm_monitor_eligible(
     side: Side,
     strike: float,
@@ -2598,10 +2641,24 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     if stamp_early_radar_pad_capture(alert_out, snap):
         tradeable = True
         alert_out["tradeable"] = True
-    # A shallow-OTM strike is monitored on radar but must never be tradeable.
+    if _shallow_otm_local_base_tradeable(
+        e,
+        ict,
+        structure_pad=structure_pad,
+        snap=snap,
+        settings=_settings,
+    ):
+        tradeable = True
+        alert_out["tradeable"] = True
+        alert_out["shallowOtmLocalBaseTradeable"] = True
+    # Shallow OTM is history-only unless pad capture or local-base lift stamped.
     if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
-        tradeable = False
-        first_lift = False
-        alert_out["tradeable"] = False
-        alert_out["ictFirstLift"] = False
+        if not (
+            alert_out.get("earlyRadarPadCapture")
+            or alert_out.get("shallowOtmLocalBaseTradeable")
+        ):
+            tradeable = False
+            first_lift = False
+            alert_out["tradeable"] = False
+            alert_out["ictFirstLift"] = False
     return alert_out
