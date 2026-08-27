@@ -450,6 +450,10 @@ def ftv_authorization_policy(
 
         if pad_lane_expiry_worst_waive(evidence):
             return None
+        from app.engines.grade_a_ftv_capture import grade_a_ftv_expiry_worst_waive
+
+        if grade_a_ftv_expiry_worst_waive(evidence):
+            return None
         min_tier = str(ftv_policy_expiry_worst_min_tier or "ELITE").upper()
         tier_rank = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
         if tier_rank.get(str(tier or "").upper(), 0) < tier_rank.get(min_tier, 4):
