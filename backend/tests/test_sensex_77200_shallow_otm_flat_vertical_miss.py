@@ -142,6 +142,47 @@ def test_event_to_dict_marks_shallow_otm_elite_flat_vertical_tradeable(
     assert 2.0 <= radar["localBaseMovePct"] <= 25.0
 
 
+def test_shallow_otm_stamp_waives_ftv_atm_itm_requirement():
+    from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
+
+    base = {
+        "mode": "explosion",
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "tqs": 46.0,
+        "velocity3s": 1.2,
+        "velocity9s": 0.8,
+        "localBaseMovePct": 8.5,
+        "armedBaseLaunch": True,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "orderflowPositive": True,
+        "flatVerticalQuality": 70.0,
+        "timingAssessment": "GOOD",
+    }
+    blocked = ftv_authorization_policy(
+        rank_trade_evidence(base).get("evidence") or base,
+        rank_trade_evidence(base),
+        snapshot_available=True,
+        atm_itm_allowed=False,
+        allocation_rank=1,
+        require_allocation_rank_one=True,
+    )
+    assert blocked.reason == "ftv_elite_top_only_requires_atm_itm"
+
+    stamped = {**base, "shallowOtmLocalBaseTradeable": True}
+    ranking = rank_trade_evidence(stamped)
+    decision = ftv_authorization_policy(
+        ranking.get("evidence") or stamped,
+        ranking,
+        snapshot_available=True,
+        atm_itm_allowed=False,
+        allocation_rank=1,
+        require_allocation_rank_one=True,
+    )
+    assert decision.reason != "ftv_elite_top_only_requires_atm_itm"
+
+
 def _aug27_armed_launch_alert(*, lb: float = 8.5):
     return {
         "symbol": "SENSEX",
