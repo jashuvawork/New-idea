@@ -1464,6 +1464,9 @@ class Settings(BaseSettings):
     bullish_local_base_pad_min_explosion_score: float = 12.0
     bullish_local_base_pad_max_move_pct: float = 45.0
     bullish_local_base_pad_min_confidence: float = 55.0
+    bullish_local_base_trough_velocity_eps: float = 0.05
+    bullish_local_base_pad_session_bypass_enabled: bool = True
+    bullish_local_base_pad_must_take_min_move_pct: float = 8.0
     local_base_turn_pad_min_score: float = 28.0
     # Local-base pad capture band — slow coil → fast vertical lift (not generic
     # cheap options). Aug24 24200 PE: ₹18–23 coil, lift through ₹50+.

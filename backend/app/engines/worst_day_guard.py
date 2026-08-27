@@ -128,6 +128,17 @@ def session_entry_policy(
         except Exception:
             pass
 
+    if bool(getattr(settings, "bullish_local_base_pad_session_bypass_enabled", True)):
+        try:
+            from app.engines.expiry_day_guards import is_expiry_session
+            from app.engines.bullish_local_base import snapshots_have_bullish_local_base_pad
+
+            if is_expiry_session(snapshots) and snapshots_have_bullish_local_base_pad(snapshots):
+                meta["worstDayLiftedByBullishLocalBasePad"] = True
+                return "NORMAL", meta
+        except Exception:
+            pass
+
     if settings.worst_day_breakout_only_enabled:
         meta["pauseReason"] = "worst_day_breakout_only"
         return "BREAKOUT_ONLY", meta

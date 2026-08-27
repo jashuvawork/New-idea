@@ -1011,10 +1011,24 @@ def check_expiry_entry_allowed(
     if not in_expiry_morning_window() and settings.expiry_morning_only and has_expiry_today:
         if pm_itm:
             return True, "ok", meta
-        from app.engines.morning_premium_capture import in_all_day_explosion_window
+        from app.engines.morning_premium_capture import (
+            in_afternoon_premium_capture_window,
+            in_all_day_explosion_window,
+        )
 
         if in_all_day_explosion_window():
             meta["expiryAfternoonExplosionAllowed"] = True
+            return True, "ok", meta
+        from app.engines.bullish_local_base import snapshots_have_bullish_local_base_pad
+
+        if snapshots_have_bullish_local_base_pad(snapshots):
+            meta["expiryAfternoonLocalBasePad"] = True
+            return True, "ok", meta
+        if (
+            in_afternoon_premium_capture_window()
+            and snapshots_have_top_ftv_or_v(snapshots)
+        ):
+            meta["expiryAfternoonTopFtvV"] = True
             return True, "ok", meta
         return False, "expiry_afternoon_wait", meta
 
@@ -1068,6 +1082,14 @@ def check_expiry_entry_allowed(
                 ):
                     meta["expiryWorstDayTopFtvVBypass"] = True
                     meta["expiryWorstDayTopFtvVOnly"] = True
+                    return True, "ok", meta
+                from app.engines.bullish_local_base import (
+                    snapshots_have_bullish_local_base_pad,
+                )
+
+                if snapshots_have_bullish_local_base_pad(snapshots):
+                    meta["expiryWorstDayBullishLocalBasePad"] = True
+                    meta["expiryWorstDayBullishLocalBasePadOnly"] = True
                     return True, "ok", meta
                 # A genuine intraday index breakout lifts the stale expiry chop halt too.
                 if bool(
