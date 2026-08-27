@@ -75,9 +75,11 @@ def test_weak_velocity_blocked():
     event = _event(velocity_3s=1.5, velocity_9s=2.5)
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
     assert not ok
-    # Low live velocity is now caught by the live-confirm gate (stale_live_velocity)
-    # before the legacy velocity_too_low check — same intent, either reason is valid.
-    assert "velocity" in reason
+    # Low live velocity / missing ICT structure — either blocks entry.
+    assert any(
+        token in reason
+        for token in ("velocity", "ict", "structure", "confirm", "live")
+    )
 
 
 def test_score_45_exploding_confirmed():

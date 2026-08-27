@@ -1081,6 +1081,137 @@ def ftv_authorization_policy(
 
     # BUILDING sudden lift with helpers — do not wait for ELITE/EXPLODING.
     # Readiness already proved mid-rip/local-base heat; CHASE timing is OK here.
+    from app.config import get_settings as _pad_cfg_get
+
+    _pad_cfg = _pad_cfg_get()
+
+    if bool(getattr(_pad_cfg, "grade_a_ftv_first_lift_enabled", True)):
+        from app.engines.grade_a_ftv_capture import (
+            grade_a_ftv_expiry_worst_waive,
+            grade_a_ftv_first_lift_floors,
+        )
+
+        if grade_a_ftv_expiry_worst_waive(evidence):
+            floors = grade_a_ftv_first_lift_floors(_pad_cfg)
+            grade_a_ok = (
+                floors["minBaseMove"] <= move <= floors["maxBaseMove"]
+                and explosion_score >= floors["minScore"]
+                and quality >= floors["minQuality"]
+                and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+            )
+            if grade_a_ok:
+                if _allocation_rank_blocks_ftv(
+                    require_allocation_rank_one=require_allocation_rank_one,
+                    allocation_rank=allocation_rank,
+                    evidence=evidence,
+                ):
+                    return blocked("grade_a_ftv_requires_allocation_rank_1")
+                expiry_block = _expiry_worst_policy_ok(
+                    tier=tier, quality=quality, score=explosion_score, v3=v3,
+                )
+                if expiry_block is not None:
+                    return expiry_block
+                return FtvAuthorization(
+                    "GRADE_A_FTV_FIRST_LIFT",
+                    "ok",
+                    max_capital_pct=float(
+                        getattr(_pad_cfg, "grade_a_ftv_first_lift_max_capital_pct", 0.90)
+                        or 0.90
+                    ),
+                )
+
+    bullish_pad = bool(
+        evidence.get("bullishLocalBaseActive") or evidence.get("fastBullishLocalBase")
+    )
+    if bullish_pad:
+        pad_min = float(
+            getattr(_pad_cfg, "bullish_local_base_pad_min_explosion_score", 8.0) or 8.0
+        )
+        pad_max_move = float(
+            getattr(_pad_cfg, "bullish_local_base_pad_max_move_pct", 45.0) or 45.0
+        )
+        bullish_ok = (
+            tier in {"BUILDING", "EXPLODING", "ELITE"}
+            and explosion_score >= pad_min
+            and 2.0 <= move <= pad_max_move
+            and bool(
+                evidence.get("firstLift")
+                or evidence.get("armedBaseLaunch")
+                or evidence.get("armedBaseSustainedLift")
+                or evidence.get("vRipReady")
+            )
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        )
+        if bullish_ok:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
+                return blocked("bullish_local_base_pad_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "BULLISH_LOCAL_BASE_PAD",
+                "ok",
+                max_capital_pct=float(
+                    getattr(_pad_cfg, "bullish_local_base_pad_max_capital_pct", 0.90)
+                    or 0.90
+                ),
+            )
+
+    if bool(getattr(_pad_cfg, "first_lift_trade_enabled", True)):
+        first_lift_max = float(
+            getattr(_pad_cfg, "first_lift_trade_max_move_pct", 40.0) or 40.0
+        )
+        first_lift_quality = float(
+            getattr(_pad_cfg, "first_lift_trade_min_quality", 55.0) or 55.0
+        )
+        pad_max = float(
+            getattr(_pad_cfg, "first_lift_pad_local_base_max_pct", 25.0) or 25.0
+        )
+        strict_floor = min(
+            float(top_ftv_a_min_explosion_score),
+            float(winner_local_base_min_explosion_score),
+            float(ftv_s_strict_min_explosion_score),
+        )
+        first_lift_pad_ok = (
+            bool(evidence.get("firstLift"))
+            and bool(evidence.get("flatThenVertical") or evidence.get("activeBreakout"))
+            and tier in {"ELITE", "EXPLODING"}
+            and explosion_score >= effective_first_lift_min
+            and explosion_score < strict_floor
+            and quality >= first_lift_quality
+            and 2.0 <= move <= min(first_lift_max, pad_max)
+            and bool(
+                evidence.get("volumeAwaken")
+                or evidence.get("orderflowPositive")
+                or flat_velocity_lag
+                or micro_pullback
+            )
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED", "CHASE", "CHASING"}
+        )
+        if first_lift_pad_ok:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
+                return blocked("first_lift_pad_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "FIRST_LIFT_PAD",
+                "ok",
+                max_capital_pct=winner_local_base_max_capital_pct,
+            )
+
     if building_rip_ftv_enabled and bool(evidence.get("buildingRipReady")):
         helpers_ok = bool(
             evidence.get("buildingRipHelpersOk")

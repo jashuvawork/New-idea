@@ -63,7 +63,7 @@ def alert_is_grade_a_ftv_first_lift(
     sym = str(alert.get("symbol") or "").upper()
     if sym not in grade_a_ftv_symbols(settings):
         return False
-    if str(alert.get("tier") or "").upper() != "EXPLODING":
+    if str(alert.get("tier") or "").upper() not in ("EXPLODING", "ELITE"):
         return False
     if not (bool(alert.get("ictFlatThenVertical")) and bool(alert.get("ictFirstLift"))):
         return False
@@ -128,7 +128,7 @@ def grade_a_ftv_expiry_worst_waive(evidence: Mapping[str, Any]) -> bool:
     sym = str(evidence.get("symbol") or "").upper()
     if sym and sym not in grade_a_ftv_symbols(settings):
         return False
-    if str(evidence.get("tier") or "").upper() != "EXPLODING":
+    if str(evidence.get("tier") or "").upper() not in ("EXPLODING", "ELITE"):
         return False
     if not (bool(evidence.get("flatThenVertical")) and bool(evidence.get("firstLift"))):
         return False
