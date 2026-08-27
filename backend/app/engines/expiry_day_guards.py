@@ -570,12 +570,105 @@ def alert_is_early_pad_prelaunch_strict_launch(
     )
 
 
+def _shallow_otm_local_base_strict_rank_one_launch(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+) -> bool:
+    """#427 tradeable stamp — armed_base_launch at 1-step OTM local base (Aug27 PUT 77200)."""
+    settings = get_settings()
+    from app.engines.early_radar_pad_capture import early_radar_pad_shallow_otm_ok
+
+    if not bool(alert.get("shallowOtmLocalBaseTradeable")):
+        return False
+    if not early_radar_pad_shallow_otm_ok(alert, snap):
+        return False
+    if not bool(alert.get("tradeable")):
+        return False
+    if not bool(alert.get("ictBaseArmed")) or not bool(alert.get("ictArmedBaseLaunch")):
+        return False
+    if str(alert.get("tier") or "").upper() not in ("EXPLODING", "ELITE"):
+        return False
+    if float(alert.get("explosionScore") or 0) < float(
+        getattr(settings, "ict_armed_base_launch_min_score", 45.0) or 45.0
+    ):
+        return False
+    min_tqs = float(
+        getattr(settings, "shallow_otm_local_base_min_tqs", 45.0) or 45.0
+    )
+    if float(snap.tradeQualityScore or 0) < min_tqs:
+        return False
+    samples = int(alert.get("ictArmedBaseSamples") or 0)
+    span = float(alert.get("ictArmedBaseSpanSeconds") or 0)
+    base_range = float(alert.get("ictArmedBaseRangePct") or 0)
+    if (
+        samples < int(getattr(settings, "ict_armed_base_min_samples", 6) or 6)
+        or span < float(getattr(settings, "ict_armed_base_min_span_seconds", 15.0) or 15.0)
+        or base_range
+        > float(getattr(settings, "ict_armed_base_max_range_pct", 5.0) or 5.0)
+    ):
+        return False
+    base_move = float(
+        alert.get("ictBaseRelativeMovePct")
+        or alert.get("localBaseMovePct")
+        or 0
+    )
+    min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
+    max_lb = float(getattr(settings, "shallow_otm_local_base_max_move_pct", 25.0) or 25.0)
+    if not (min_lb <= base_move <= max_lb + 1e-6):
+        return False
+    timing = alert.get("timingAssessment") or {}
+    timing_assessment = str(
+        timing.get("assessment") if isinstance(timing, dict) else timing
+    ).upper()
+    timing_action = str(
+        timing.get("action") if isinstance(timing, dict) else ""
+    ).lower()
+    if (
+        alert.get("fadedRip")
+        or alert.get("faded")
+        or alert.get("exhaustedReentry")
+        or timing_assessment in ("FAILED_LAUNCH", "FADING", "EXHAUSTED")
+        or timing_action == "block"
+    ):
+        return False
+    orderflow = bool(
+        alert.get("ictVolumeAwakening")
+        or alert.get("volumeAwaken")
+        or alert.get("orderflowConfirmed")
+        or alert.get("optionCvdBuying")
+        or float(alert.get("volumeSurge") or 0) >= 1.2
+    )
+    if not bool(alert.get("ictFlatThenVertical")) or not orderflow:
+        return False
+    from app.engines.trade_ranking import rank_trade_evidence
+
+    ranking = rank_trade_evidence(
+        {
+            "mode": "explosion",
+            "tier": alert.get("tier"),
+            "explosionScore": alert.get("explosionScore"),
+            "tqs": snap.tradeQualityScore,
+            "velocity3s": alert.get("velocity3s"),
+            "velocity9s": alert.get("velocity9s"),
+            "localBaseMovePct": base_move,
+            "armedBaseLaunch": True,
+            "flatThenVertical": alert.get("ictFlatThenVertical"),
+            "flatVerticalQuality": alert.get("flatVerticalQuality"),
+            "orderflowPositive": orderflow,
+            "shallowOtmLocalBaseTradeable": True,
+        }
+    )
+    return str(ranking.get("grade") or "").upper() in ("S", "A")
+
+
 def alert_is_strict_rank_one_launch(
     alert: dict[str, Any],
     snap: SymbolSnapshot,
 ) -> bool:
     """Whether one snapshot alert has enough causal proof to evaluate through the halt."""
     if alert_is_early_pad_prelaunch_strict_launch(alert, snap):
+        return True
+    if _shallow_otm_local_base_strict_rank_one_launch(alert, snap):
         return True
     if not bool(alert.get("tradeable")):
         return False
@@ -629,7 +722,10 @@ def alert_is_strict_rank_one_launch(
 
     if side not in ("CALL", "PUT") or strike <= 0:
         return False
-    if not atm_itm_entry_allows(Side(side), strike, snap)[0]:
+    from app.engines.early_radar_pad_capture import early_radar_pad_shallow_otm_ok
+
+    shallow_otm_ok = early_radar_pad_shallow_otm_ok(alert, snap)
+    if not atm_itm_entry_allows(Side(side), strike, snap)[0] and not shallow_otm_ok:
         return False
 
     timing = alert.get("timingAssessment") or {}
