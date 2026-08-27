@@ -140,3 +140,118 @@ def test_event_to_dict_marks_shallow_otm_elite_flat_vertical_tradeable(
     assert radar["tradeable"] is True
     assert radar["shallowOtmLocalBaseTradeable"] is True
     assert 2.0 <= radar["localBaseMovePct"] <= 25.0
+
+
+def test_shallow_otm_stamp_waives_ftv_atm_itm_requirement():
+    from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
+
+    base = {
+        "mode": "explosion",
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "tqs": 46.0,
+        "velocity3s": 1.2,
+        "velocity9s": 0.8,
+        "localBaseMovePct": 8.5,
+        "armedBaseLaunch": True,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "orderflowPositive": True,
+        "flatVerticalQuality": 70.0,
+        "timingAssessment": "GOOD",
+    }
+    blocked = ftv_authorization_policy(
+        rank_trade_evidence(base).get("evidence") or base,
+        rank_trade_evidence(base),
+        snapshot_available=True,
+        atm_itm_allowed=False,
+        allocation_rank=1,
+        require_allocation_rank_one=True,
+    )
+    assert blocked.reason == "ftv_elite_top_only_requires_atm_itm"
+
+    stamped = {**base, "shallowOtmLocalBaseTradeable": True}
+    ranking = rank_trade_evidence(stamped)
+    decision = ftv_authorization_policy(
+        ranking.get("evidence") or stamped,
+        ranking,
+        snapshot_available=True,
+        atm_itm_allowed=False,
+        allocation_rank=1,
+        require_allocation_rank_one=True,
+    )
+    assert decision.reason != "ftv_elite_top_only_requires_atm_itm"
+
+
+def _aug27_armed_launch_alert(*, lb: float = 8.5):
+    return {
+        "symbol": "SENSEX",
+        "side": "PUT",
+        "strike": 77200.0,
+        "premium": 63.75,
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "dailyMovePct": lb,
+        "peakMovePct": lb,
+        "localBaseMovePct": lb,
+        "ictBaseRelativeMovePct": lb,
+        "tradeable": True,
+        "shallowOtmLocalBaseTradeable": True,
+        "ictBaseArmed": True,
+        "ictArmedBaseLaunch": True,
+        "ictArmedBaseSamples": 8,
+        "ictArmedBaseSpanSeconds": 163.0,
+        "ictArmedBaseRangePct": 3.0,
+        "ictFlatThenVertical": True,
+        "ictVolumeAwakening": True,
+        "volumeAwaken": True,
+        "flatVerticalQuality": 70.0,
+        "velocity3s": 2.81,
+        "velocity9s": 1.0,
+    }
+
+
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.config.get_settings")
+def test_shallow_otm_armed_launch_passes_strict_rank_one(mock_cfg, mock_expiry):
+    """Aug27 10:51 — #427 tradeable stamp still blocked strict_rank_one on shallow OTM."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.engines.expiry_day_guards import alert_is_strict_rank_one_launch
+
+    settings = Settings(
+        explosion_shallow_otm_history_steps=1,
+        explosion_shallow_otm_history_min_volume=25000,
+    )
+    mock_cfg.return_value = settings
+    mock_expiry.return_value = settings
+    snap = _sensex_snap()
+    snap.tradeQualityScore = 46.0
+    alert = _aug27_armed_launch_alert(lb=8.5)
+    assert alert_is_strict_rank_one_launch(alert, snap) is True
+
+
+@patch("app.config.get_settings")
+def test_shallow_otm_local_base_waives_expiry_worst_defensive_rip_quality(mock_settings):
+    from app.engines.ict_breakout_monitor import _expiry_worst_defensive_rip_allowed
+
+    settings = Settings()
+    mock_settings.return_value = settings
+    evidence = {
+        "shallowOtmLocalBaseTradeable": True,
+        "armedBaseLaunch": True,
+        "localBaseMovePct": 8.5,
+        "tier": "ELITE",
+    }
+    ok, reason = _expiry_worst_defensive_rip_allowed(
+        tier="ELITE",
+        quality=70.0,
+        score=100.0,
+        velocity_3s=2.81,
+        settings=settings,
+        evidence=evidence,
+    )
+    assert ok is True
+    assert reason == "shallow_otm_local_base_expiry_worst_waive"
+

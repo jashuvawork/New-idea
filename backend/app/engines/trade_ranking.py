@@ -153,6 +153,54 @@ def _first_lift_local_base_flat_velocity(
     return True
 
 
+def _shallow_otm_local_base_ftv_waives_atm_itm(evidence: Mapping[str, Any]) -> bool:
+    """#428 shallow OTM stamp — ELITE flat→vertical at local base may execute 1-step OTM."""
+    if not bool(evidence.get("shallowOtmLocalBaseTradeable")):
+        return False
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in {"ELITE", "EXPLODING"}:
+        return False
+    move = max(
+        _number(evidence.get("localBaseMovePct")),
+        _number(evidence.get("ictBaseRelativeMovePct")),
+    )
+    if not (2.0 <= move <= 25.0 + 1e-6):
+        return False
+    top_moment = bool(
+        evidence.get("armedBaseLaunch")
+        or evidence.get("ictArmedBaseLaunch")
+        or (
+            evidence.get("flatThenVertical")
+            and (
+                evidence.get("activeBreakout")
+                or evidence.get("volumeAwaken")
+                or evidence.get("orderflowPositive")
+            )
+        )
+    )
+    if not top_moment:
+        return False
+    if bool(
+        evidence.get("faded")
+        or evidence.get("exhaustedReentry")
+        or evidence.get("midRipCoil")
+    ):
+        return False
+    timing = str(evidence.get("timingAssessment") or "").upper()
+    timing_action = str(evidence.get("timingAction") or "").lower()
+    if timing_action in {"block", "reject"} or timing in {
+        "FAILED_LAUNCH",
+        "FADED",
+        "FADING",
+        "EXHAUSTED",
+        "NEGATIVE",
+        "REJECT",
+        "BLOCKED",
+    }:
+        return False
+    return True
+
+
 def ranking_sort_key(ranking: Mapping[str, Any]) -> tuple[int, float]:
     """Comparable causal ordering: grade first, then evidence score."""
     return (
@@ -431,7 +479,8 @@ def ftv_authorization_policy(
         if not pad_lane_ftv_waives_timing_block(evidence):
             return blocked("ftv_elite_top_only_timing_blocked")
     if snapshot_available and not atm_itm_allowed:
-        return blocked("ftv_elite_top_only_requires_atm_itm")
+        if not _shallow_otm_local_base_ftv_waives_atm_itm(evidence):
+            return blocked("ftv_elite_top_only_requires_atm_itm")
 
     def _expiry_worst_policy_ok(
         *,
@@ -1566,6 +1615,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "firstLiftLocalBaseFlatVelocity": flat_velocity_lag,
             "exhaustedReentry": exhausted,
             "faded": faded,
+            "shallowOtmLocalBaseTradeable": bool(
+                evidence.get("shallowOtmLocalBaseTradeable")
+            ),
         },
     }
 
@@ -1724,6 +1776,9 @@ def rank_entry_candidate(
             or alert.get("fadedRip")
             or alert.get("fadedVerticalRip")
             or alert.get("fadedRipCaution")
+        ),
+        "shallowOtmLocalBaseTradeable": bool(
+            alert.get("shallowOtmLocalBaseTradeable")
         ),
     }
     # Live index helpers when alert not yet stamped (ELITE/EXPLODING path).
