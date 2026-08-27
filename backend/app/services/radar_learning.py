@@ -1566,7 +1566,14 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     funnel_file = funnel_path(date)
     if funnel_file.exists():
         artifacts["funnel_events.jsonl"] = _read_bytes_locked(funnel_file)
+    tape_present = tape.exists()
     path = add_archive_artifacts(date, artifacts)
+    tape_bundled = False
+    try:
+        with zipfile.ZipFile(path, "r") as archive:
+            tape_bundled = "premium_tape.jsonl" in archive.namelist()
+    except (OSError, zipfile.BadZipFile):
+        tape_bundled = False
     backup = backup_archive(path)
     _write_backup_status(
         date,
@@ -1579,7 +1586,18 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     )
     purged: list[str] = []
     if bool(getattr(settings, "radar_purge_telemetry_after_finalize", True)):
-        purged = purge_session_telemetry(date)
+        require_tape = bool(
+            getattr(settings, "radar_purge_requires_bundled_premium_tape", True)
+        )
+        if require_tape and tape_present and not tape_bundled:
+            logger.warning(
+                "Skipping telemetry purge for %s: premium tape exists on disk "
+                "but was not bundled into %s",
+                date,
+                path.name,
+            )
+        else:
+            purged = purge_session_telemetry(date)
     _prune_learning_files()
     try:
         from app.services.radar_health import record_component_success
@@ -1602,6 +1620,7 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
         "funnel": funnel,
         "backup": backup,
         "analysisOnly": analysis_only,
+        "premiumTapeBundled": tape_bundled,
         "purgedTelemetry": purged,
     }
 

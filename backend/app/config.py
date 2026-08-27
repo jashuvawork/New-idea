@@ -2484,6 +2484,9 @@ class Settings(BaseSettings):
     radar_analysis_only_storage: bool = True
     # Delete intraday telemetry JSONL after a successful daily finalize (data lives in ZIP).
     radar_purge_telemetry_after_finalize: bool = True
+    # When true, refuse to purge session telemetry unless premium_tape.jsonl was bundled
+    # into the daily ZIP (prevents losing the only replay tape on partial finalize).
+    radar_purge_requires_bundled_premium_tape: bool = True
     radar_learning_enabled: bool = True
     # Throttle the all-strike premium tape to one sample / N seconds. It used to write EVERY
     # observation cycle (0), producing 1GB+/day tapes that (a) fill the disk and (b) make the
