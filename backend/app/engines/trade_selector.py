@@ -1457,6 +1457,11 @@ def find_best_entry(
         if c.mode == "explosion":
             ranking = (c.pretrade_meta or {}).get("causalRanking") or {}
             evidence = ranking.get("evidence") or {}
+            alert_d = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
+            if not evidence and alert_d:
+                from app.engines.pad_lane_capture import _ftv_direct_evidence_from_alert
+
+                evidence = _ftv_direct_evidence_from_alert(alert_d)
             from app.engines.pad_lane_capture import (
                 ftv_direct_trade_active,
                 pad_lane_ftv_waives_allocation_rank_one,

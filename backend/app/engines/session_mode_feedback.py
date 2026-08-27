@@ -539,7 +539,36 @@ def session_peak_late_reentry_blocked(
         getattr(settings, "explosion_late_reentry_min_velocity_3s", 1.2) or 1.2
     )
     v3 = float(velocity_3s or 0)
+    v9 = float(alert_d.get("velocity9s") or alert_d.get("velocity_9s") or 0)
     if first_lift and v3 >= min_v3:
+        return False, ""
+
+    # Aug27 SENSEX PUT 77400: v_rip/first_lift at local-base pad with flat v3 is the
+    # initial lift off trough — premium near session peak is expected, not a chase.
+    from app.engines.explosion_detector import first_lift_pad_capture_lane
+    from app.engines.pad_lane_capture import (
+        _ftv_direct_evidence_from_alert,
+        pad_lane_cold_velocity_ok,
+    )
+
+    pad_evidence = _ftv_direct_evidence_from_alert(alert_d)
+    pad_evidence["firstLift"] = first_lift
+    tier_u = str(alert_d.get("tier") or "").upper()
+    peak_move = float(
+        alert_d.get("peakMovePct") or alert_d.get("dailyMovePct") or 0
+    )
+    local_base = float(pad_evidence.get("localBaseMovePct") or 0)
+    v_rip_ready = bool(pad_evidence.get("vRipReady"))
+    if (
+        first_lift_pad_capture_lane(
+            tier=tier_u,
+            peak_move_pct=peak_move,
+            first_lift_ready=first_lift,
+            local_base_move_pct=local_base,
+            v_rip_ready=v_rip_ready,
+        )
+        and pad_lane_cold_velocity_ok(pad_evidence, v3, v9)
+    ):
         return False, ""
 
     return True, (
