@@ -653,6 +653,48 @@ def test_finalize_analysis_only_omits_optional_tapes_and_purges_telemetry(tmp_pa
     assert "2026-08-16.premium.jsonl" in result["purgedTelemetry"]
 
 
+def test_finalize_skips_purge_when_premium_tape_not_bundled(tmp_path, monkeypatch):
+  """Keep intraday tape on disk if finalize ZIP omits premium_tape.jsonl."""
+  from app.services import radar_learning
+
+  settings = _settings(
+      tmp_path,
+      radar_analysis_only_storage=True,
+      radar_purge_telemetry_after_finalize=True,
+      radar_purge_requires_bundled_premium_tape=True,
+  )
+  start = datetime(2026, 8, 26, 10, 0, tzinfo=IST)
+  original_add = radar_learning.add_archive_artifacts
+
+  def _add_without_tape(date, artifacts, **kwargs):
+      stripped = {
+          key: value
+          for key, value in artifacts.items()
+          if key != "premium_tape.jsonl"
+      }
+      return original_add(date, stripped, **kwargs)
+
+  monkeypatch.setattr(radar_learning, "add_archive_artifacts", _add_without_tape)
+  with _patch_settings(settings):
+      record_top_radars(
+          {"NIFTY": _snap(alerts=[_alert()])},
+          now=start,
+          source="rest_snapshot",
+      )
+      record_market_observations(
+          {"NIFTY": _snap(call=110.0, alerts=[_alert()])},
+          source="rest_snapshot",
+          now=start,
+          force=True,
+      )
+      assert premium_tape_path("2026-08-26").exists()
+      result = finalize_daily_review("2026-08-26")
+      assert result["premiumTapeBundled"] is False
+      assert result["purgedTelemetry"] == []
+      assert premium_tape_path("2026-08-26").exists()
+      assert funnel_path("2026-08-26").exists()
+
+
 def test_health_reports_stale_sources_divergence_and_component_errors(tmp_path):
     settings = _settings(tmp_path, radar_health_stale_seconds=30)
     start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
