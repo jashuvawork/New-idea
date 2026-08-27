@@ -484,6 +484,69 @@ def worst_day_allows_candidate(
                 building_elite_ok = (
                     score >= min_build and v3 >= min_v3 and v9 >= min_v9
                 )
+            min_rip_score = float(settings.all_day_explosion_min_score) - 8.0
+            pad_for_lane = 0.0
+            for key in (
+                "localBaseMovePct",
+                "ictBaseRelativeMovePct",
+                "baseRelativeMovePct",
+            ):
+                try:
+                    pad_for_lane = float(alert.get(key) or 0)
+                except (TypeError, ValueError):
+                    pad_for_lane = 0.0
+                if pad_for_lane > 0:
+                    break
+            if pad_for_lane <= 0 and event is not None:
+                try:
+                    from app.engines.explosion_entry_guards import (
+                        effective_local_base_move_pct,
+                    )
+                    from app.engines.ict_breakout_monitor import (
+                        analyze_explosion_event_ict,
+                    )
+
+                    ict_pad = analyze_explosion_event_ict(event, snap)
+                    pad_for_lane = float(
+                        effective_local_base_move_pct(event, ict_pad) or 0
+                    )
+                except Exception:
+                    pad_for_lane = 0.0
+            peak_for_lane = float(
+                alert.get("peakMovePct")
+                or (getattr(event, "peak_move_pct", 0) if event is not None else 0)
+                or move
+                or 0
+            )
+            first_lift_lane = bool(alert.get("ictFirstLift"))
+            v_rip_lane = bool(
+                alert.get("ictVRipReady")
+                or "v_rip" in str(alert.get("momentType") or "").lower()
+            )
+            from app.engines.explosion_detector import (
+                effective_first_lift_trade_min_score,
+                first_lift_pad_capture_lane,
+            )
+
+            if first_lift_pad_capture_lane(
+                tier=tier,
+                peak_move_pct=peak_for_lane,
+                first_lift_ready=first_lift_lane,
+                local_base_move_pct=pad_for_lane,
+                v_rip_ready=v_rip_lane,
+            ):
+                min_rip_score = min(
+                    min_rip_score,
+                    effective_first_lift_trade_min_score(
+                        tier=tier,
+                        peak_move_pct=peak_for_lane,
+                        first_lift_ready=first_lift_lane,
+                        local_base_move_pct=pad_for_lane,
+                        default_min=float(settings.all_day_explosion_min_score),
+                        v_rip_ready=v_rip_lane,
+                    )
+                    - 4.0,
+                )
             if (
                 getattr(settings, "ict_defensive_base_rip_enabled", True)
                 and tier in rip_tiers
@@ -491,7 +554,7 @@ def worst_day_allows_candidate(
                 and ict_vol
                 and move <= early_max
                 and elite_pad_ok
-                and score >= settings.all_day_explosion_min_score - 8
+                and score >= min_rip_score
                 and building_elite_ok
             ):
                 from app.engines.ict_breakout_monitor import (
