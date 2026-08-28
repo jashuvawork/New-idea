@@ -346,11 +346,31 @@ def _failed_launch_reentry_exit_reasons(settings: Any) -> set[str]:
     raw = getattr(
         settings,
         "explosion_failed_launch_reentry_exit_reasons_csv",
-        "explosion_failed_launch,explosion_never_green_stop",
+        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss",
     )
     if not isinstance(raw, str) or not raw.strip():
-        raw = "explosion_failed_launch,explosion_never_green_stop"
+        raw = "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
     return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def _failed_launch_reentry_qualifies(
+    *,
+    exit_reason: str,
+    prior_pnl: float,
+    best_points: float,
+    settings: Any,
+) -> bool:
+    """True when a prior close should arm the failed-launch re-entry cooldown."""
+    reason = str(exit_reason or "").strip()
+    max_best = float(
+        getattr(settings, "explosion_failed_launch_max_best_points", 1.0) or 1.0
+    )
+    if reason == "adaptive_stop_loss":
+        # Aug28 24050 PE: adaptive SL after best +0.3pt must not re-arm 17m later.
+        return prior_pnl < 0 and best_points <= max_best
+    if prior_pnl >= 0 and best_points > 1.0:
+        return False
+    return True
 
 
 def _latest_failed_launch_nearby_close(
@@ -372,7 +392,8 @@ def _latest_failed_launch_nearby_close(
     except Exception:
         step = 50.0
     max_dist = max(0.0, float(strike_steps) * step) + 0.01
-    reasons = _failed_launch_reentry_exit_reasons(get_settings())
+    settings = get_settings()
+    reasons = _failed_launch_reentry_exit_reasons(settings)
     latest: Optional[Any] = None
     latest_ts = None
 
@@ -398,8 +419,12 @@ def _latest_failed_launch_nearby_close(
             continue
         prior_pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
         best = float(getattr(t, "bestPnlPoints", 0) or 0)
-        # Only block true failed launches (never green / small loss).
-        if prior_pnl >= 0 and best > 1.0:
+        if not _failed_launch_reentry_qualifies(
+            exit_reason=reason,
+            prior_pnl=prior_pnl,
+            best_points=best,
+            settings=settings,
+        ):
             continue
         ts = getattr(t, "closedAt", None) or getattr(t, "openedAt", None)
         if latest is None or (ts is not None and (latest_ts is None or ts > latest_ts)):

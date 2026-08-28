@@ -139,8 +139,9 @@ def test_never_green_stop_arms_failed_launch_cooldown(mock_settings):
     s.explosion_failed_launch_reentry_cooldown_seconds = 1800
     s.explosion_failed_launch_reentry_strike_steps = 1
     s.explosion_failed_launch_reentry_exit_reasons_csv = (
-        "explosion_failed_launch,explosion_never_green_stop"
+        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
     )
+    s.explosion_failed_launch_max_best_points = 1.0
     mock_settings.return_value = s
     state = AutoTraderState()
     state.closedPaperTrades = [
@@ -160,8 +161,9 @@ def test_failed_launch_blocks_adjacent_atm_strike(mock_settings):
     s.explosion_failed_launch_reentry_cooldown_seconds = 1800
     s.explosion_failed_launch_reentry_strike_steps = 1
     s.explosion_failed_launch_reentry_exit_reasons_csv = (
-        "explosion_failed_launch,explosion_never_green_stop"
+        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
     )
+    s.explosion_failed_launch_max_best_points = 1.0
     mock_settings.return_value = s
     state = AutoTraderState()
     state.closedPaperTrades = [
