@@ -265,6 +265,22 @@ def test_expiry_evening_allows_top_signal_bypass():
     assert meta.get("expiryEveningTopSignalBypass") is True
 
 
+def test_expiry_evening_allows_top_signal_bypass():
+    state = AutoTraderState()
+    snaps = {"NIFTY": _snap()}
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-06-30"):
+        with patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=True):
+            with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=False):
+                with patch(
+                    "app.engines.expiry_day_guards.snapshots_have_afternoon_top_signal",
+                    return_value=True,
+                ):
+                    ok, reason, meta = check_expiry_entry_allowed(state, snaps)
+    assert ok is True
+    assert reason == "ok"
+    assert meta.get("expiryEveningTopSignalBypass") is True
+
+
 @dataclass
 class _Cand:
     symbol: str
