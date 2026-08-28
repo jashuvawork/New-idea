@@ -1247,6 +1247,31 @@ def detect_fake_explosion_trap(
     if post_win:
         flags.append("post_small_win")
 
+    if post_win and getattr(
+        settings, "fake_explosion_trap_post_win_velocity_block_enabled", True
+    ):
+        min_v3 = float(
+            getattr(settings, "fake_explosion_trap_post_win_min_velocity_3s", 0.0) or 0.0
+        )
+        if chopish:
+            chop_min = float(
+                getattr(
+                    settings, "fake_explosion_trap_post_win_midday_min_velocity_3s", 1.0
+                )
+                or 1.0
+            )
+            min_v3 = max(min_v3, chop_min)
+        if v3 <= min_v3:
+            meta.update({
+                "fakeExplosionTrap": True,
+                "action": "block",
+                "psychologyEscalate": "FOMO",
+                "postWinVelocityBlock": True,
+                "requiredMinVelocity3s": round(min_v3, 3),
+                "liveVelocity3s": round(v3, 3),
+            })
+            return True, "fake_explosion_trap_post_win_cold_velocity", meta
+
     meta.update({
         "fakeExplosionTrap": False,
         "conflictFlags": flags,

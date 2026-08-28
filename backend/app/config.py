@@ -925,6 +925,11 @@ class Settings(BaseSettings):
     fake_explosion_trap_post_win_lot_cap: int = 8
     fake_explosion_trap_post_win_max_pnl_inr: float = 3_000.0
     fake_explosion_trap_post_win_lookback: int = 1
+    # Aug28: post-win 8-lot probe on v3=-0.38 micro-pullback → adaptive SL −₹3.5k.
+    # Hard-block re-entry when live v3 is dead; midday chop needs hot re-acceleration.
+    fake_explosion_trap_post_win_velocity_block_enabled: bool = True
+    fake_explosion_trap_post_win_min_velocity_3s: float = 0.0
+    fake_explosion_trap_post_win_midday_min_velocity_3s: float = 1.0
     fake_explosion_trap_psychology_escalate: bool = True
     # Midday/chop ELITE without ICT structure → hard block (not soft lot-cap).
     fake_explosion_trap_midday_require_structure: bool = True
