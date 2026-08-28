@@ -2169,8 +2169,9 @@ class Settings(BaseSettings):
     # Block ATM±N adjacent strikes (1 = exact + one step each side).
     explosion_failed_launch_reentry_strike_steps: int = 1
     # Exit reasons that arm the cooldown (never-green hard cut often lacks v3<0).
+    # adaptive_stop_loss counts only when best ≤ explosion_failed_launch_max_best_points.
     explosion_failed_launch_reentry_exit_reasons_csv: str = (
-        "explosion_failed_launch,explosion_never_green_stop"
+        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
     )
     # 2) Hard INR ceilings: ~1% of ₹2L normally, ~2% only for a fully proven launch.
     explosion_per_trade_max_loss_inr: float = 2_000.0
