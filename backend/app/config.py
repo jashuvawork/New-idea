@@ -1275,12 +1275,16 @@ class Settings(BaseSettings):
     expiry_morning_only: bool = True
     expiry_morning_end_hour: int = 13
     expiry_morning_end_minute: int = 30
-    # Hard stop for new expiry entries — disabled so FTV/V/ELITE/explosives can
-    # fire through power hour (Aug27 SENSEX PUT 77300). When re-enabled, blocks
-    # only at market close (15:30), not 15:00.
-    expiry_evening_block_enabled: bool = False
+    # Hard stop for generic expiry entries after 15:00 — top FTV/V/ELITE/explosives bypass.
+    expiry_evening_block_enabled: bool = True
     expiry_evening_block_hour: int = 15
-    expiry_evening_block_minute: int = 30
+    expiry_evening_block_minute: int = 0
+    # Power hour on all sessions — only top trades after 15:00 until 15:30 close.
+    power_hour_top_only_enabled: bool = True
+    power_hour_start_hour: int = 15
+    power_hour_start_minute: int = 0
+    power_hour_end_hour: int = 15
+    power_hour_end_minute: int = 30
     expiry_min_rank_score: float = 62.0
     expiry_cheap_premium_threshold_inr: float = 55.0
     expiry_cheap_premium_lot_cap: int = 55

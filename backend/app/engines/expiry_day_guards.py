@@ -294,15 +294,10 @@ def in_expiry_evening_block() -> bool:
 def snapshots_have_afternoon_top_signal(
     snapshots: dict[str, SymbolSnapshot],
 ) -> bool:
-    """FTV/V/ELITE/explosive radar on tape — allow power-hour entries on expiry."""
-    from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
+    """Alias — expiry evening bypass uses the same top-signal detector."""
+    from app.engines.power_hour_guards import snapshots_have_power_hour_top_signal
 
-    return (
-        snapshots_have_expiry_elite_top(snapshots)
-        or snapshots_have_top_ftv_or_v(snapshots)
-        or snapshots_have_grade_a_ftv_first_lift(snapshots)
-        or snapshots_have_all_in_explosion(snapshots)
-    )
+    return snapshots_have_power_hour_top_signal(snapshots)
 
 
 def _session_declining(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> bool:
@@ -1012,13 +1007,11 @@ def check_expiry_entry_allowed(
             return True, "ok", meta
 
     if in_expiry_evening_block() and has_expiry_today:
-        if pm_itm:
-            return True, "ok", meta
-        from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
-
         if snapshots_have_afternoon_top_signal(snapshots):
             meta["expiryEveningTopSignalBypass"] = True
             return True, "ok", meta
+        from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
+
         if (
             settings.expiry_evening_all_in_explosion_bypass
             and snapshots_have_all_in_explosion(snapshots)
