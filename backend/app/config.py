@@ -1275,8 +1275,12 @@ class Settings(BaseSettings):
     expiry_morning_only: bool = True
     expiry_morning_end_hour: int = 13
     expiry_morning_end_minute: int = 30
+    # Hard stop for new expiry entries — disabled so FTV/V/ELITE/explosives can
+    # fire through power hour (Aug27 SENSEX PUT 77300). When re-enabled, blocks
+    # only at market close (15:30), not 15:00.
+    expiry_evening_block_enabled: bool = False
     expiry_evening_block_hour: int = 15
-    expiry_evening_block_minute: int = 0
+    expiry_evening_block_minute: int = 30
     expiry_min_rank_score: float = 62.0
     expiry_cheap_premium_threshold_inr: float = 55.0
     expiry_cheap_premium_lot_cap: int = 55
@@ -1338,12 +1342,12 @@ class Settings(BaseSettings):
     expiry_dual_scalp_opposite_cooldown_seconds: int = 90
     expiry_explosion_open_block_minutes: int = 5
 
-    # Expiry PM ITM quick scalps — day-of / next-day expiry, 14:00–15:25 IST
+    # Expiry PM ITM quick scalps — day-of / next-day expiry, 14:00–15:30 IST
     expiry_pm_itm_quick_enabled: bool = True
     expiry_pm_itm_window_start_hour: int = 14
     expiry_pm_itm_window_start_minute: int = 0
     expiry_pm_itm_window_end_hour: int = 15
-    expiry_pm_itm_window_end_minute: int = 25
+    expiry_pm_itm_window_end_minute: int = 30
     expiry_pm_itm_premium_max_inr: float = 280.0
     expiry_near_expiry_premium_max_inr: float = 300.0
     # Deep ITM on expiry — resting LTP can exceed ₹650 before the vertical prints.
@@ -1849,7 +1853,7 @@ class Settings(BaseSettings):
     momentum_rally_start_hour: int = 10
     momentum_rally_start_minute: int = 0
     momentum_rally_end_hour: int = 15
-    momentum_rally_end_minute: int = 25
+    momentum_rally_end_minute: int = 30
     morning_premium_capture_enabled: bool = True
     morning_capture_start_hour: int = 9
     morning_capture_start_minute: int = 15
@@ -1911,12 +1915,12 @@ class Settings(BaseSettings):
     afternoon_capture_peak_halve_giveback_ratio: float = 0.50
     afternoon_capture_peak_halve_min_remain_points: float = 1.0
 
-    # All-day explosive capture — 9:20–15:25 session rips (e.g. NIFTY 23850 PE 14:00 +1360%)
+    # All-day explosive capture — 9:20–15:30 session rips (e.g. NIFTY 23850 PE 14:00 +1360%)
     all_day_explosion_capture_enabled: bool = True
     all_day_explosion_start_hour: int = 9
     all_day_explosion_start_minute: int = 20
     all_day_explosion_end_hour: int = 15
-    all_day_explosion_end_minute: int = 25
+    all_day_explosion_end_minute: int = 30
     all_day_explosion_min_score: float = 38.0
     all_day_explosion_session_move_min_pct: float = 40.0
     all_day_explosion_extreme_move_min_pct: float = 80.0

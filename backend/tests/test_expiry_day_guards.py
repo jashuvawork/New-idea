@@ -70,9 +70,21 @@ def test_morning_vs_evening_windows():
         assert in_expiry_evening_block() is False
 
     with patch("app.engines.expiry_day_guards.datetime") as mock_dt:
-        mock_dt.now.return_value = datetime(2026, 6, 30, 15, 30, tzinfo=IST)
-        assert in_expiry_morning_window() is False
-        assert in_expiry_evening_block() is True
+        mock_dt.now.return_value = datetime(2026, 6, 30, 15, 15, tzinfo=IST)
+        assert in_expiry_evening_block() is False
+
+    with patch("app.engines.expiry_day_guards.get_settings") as mock_settings:
+        s = mock_settings.return_value
+        s.expiry_day_guards_enabled = True
+        s.expiry_evening_block_enabled = True
+        s.expiry_evening_block_hour = 15
+        s.expiry_evening_block_minute = 30
+        with patch("app.engines.expiry_day_guards.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 6, 30, 15, 15, tzinfo=IST)
+            assert in_expiry_evening_block() is False
+        with patch("app.engines.expiry_day_guards.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 6, 30, 15, 30, tzinfo=IST)
+            assert in_expiry_evening_block() is True
 
 
 def test_evening_block_summary_only_when_expiry_today():
@@ -83,7 +95,7 @@ def test_evening_block_summary_only_when_expiry_today():
         with patch("app.engines.expiry_day_guards._minutes_now", return_value=15 * 60 + 30):
             summary = expiry_guard_summary(state, non_expiry)
     assert summary["expirySession"] is False
-    assert summary["pastEveningBlockTime"] is True
+    assert summary["pastEveningBlockTime"] is False
     assert summary["eveningBlock"] is False
     assert summary["eveningBlockActive"] is False
 
@@ -92,9 +104,9 @@ def test_evening_block_summary_only_when_expiry_today():
         with patch("app.engines.expiry_day_guards._minutes_now", return_value=15 * 60 + 30):
             summary = expiry_guard_summary(state, expiry_today)
     assert summary["expirySession"] is True
-    assert summary["pastEveningBlockTime"] is True
-    assert summary["eveningBlock"] is True
-    assert summary["eveningBlockActive"] is True
+    assert summary["pastEveningBlockTime"] is False
+    assert summary["eveningBlock"] is False
+    assert summary["eveningBlockActive"] is False
 
 
 def test_predict_worst_expiry_day():
@@ -146,7 +158,11 @@ def test_expiry_evening_block_entries():
     with patch("app.engines.expiry_day_guards._today_str", return_value="2026-06-30"):
         with patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=True):
             with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=False):
-                ok, reason, meta = check_expiry_entry_allowed(state, snaps)
+                with patch(
+                    "app.engines.expiry_day_guards.snapshots_have_afternoon_top_signal",
+                    return_value=False,
+                ):
+                    ok, reason, meta = check_expiry_entry_allowed(state, snaps)
     assert ok is False
     assert reason == "expiry_evening_block"
     assert meta["expirySymbols"] == ["NIFTY"]
@@ -225,6 +241,22 @@ def test_pm_itm_evening_block_allows_quick_entries():
     assert reason == "ok"
     assert meta.get("expiryPmItmQuickActive") is True
     assert meta.get("expiryPmItmQuickOnly") is True
+
+
+def test_expiry_evening_allows_top_signal_bypass():
+    state = AutoTraderState()
+    snaps = {"NIFTY": _snap()}
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-06-30"):
+        with patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=True):
+            with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=False):
+                with patch(
+                    "app.engines.expiry_day_guards.snapshots_have_afternoon_top_signal",
+                    return_value=True,
+                ):
+                    ok, reason, meta = check_expiry_entry_allowed(state, snaps)
+    assert ok is True
+    assert reason == "ok"
+    assert meta.get("expiryEveningTopSignalBypass") is True
 
 
 @dataclass
