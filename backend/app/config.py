@@ -1666,6 +1666,15 @@ class Settings(BaseSettings):
     # (Aug28 NIFTY 24250 CE 10:17 ELITE @ 8.4% baseRel after micro-rip, not cold trough).
     tier_promotion_pad_chase_block_enabled: bool = True
     tier_promotion_pad_chase_min_base_rel_pct: float = 8.0
+    # Grade-A BUILDING armed_base_option_led_ready on live selector — enter at local
+    # base before ELITE/EXPLODING promote (Aug28 NIFTY PUT 24200/24100 ~1h late).
+    # Archive week in-window false-start rate ~7.5% (3/40); win rate ~75%.
+    building_armed_base_grade_a_live_enabled: bool = True
+    building_armed_base_grade_a_min_grade: str = "A"
+    building_armed_base_grade_a_max_base_rel_pct: float = 0.0
+    building_armed_base_grade_a_use_local_base_window: bool = True
+    building_armed_base_grade_a_ftv_enabled: bool = True
+    building_armed_base_grade_a_ftv_max_capital_pct: float = 0.90
     # Pad-lane turnaround chart bypass — premium-led V-rip / slow-grind / FTV lifts off
     # session low while the 5m index chart is still counter-trend (Aug25 NIFTY 24150 CE
     # ₹20→90 V-reversal blocked by chart_live_bearish_no_calls). Wider adverse-momentum
