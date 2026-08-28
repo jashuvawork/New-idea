@@ -83,6 +83,7 @@ def _settings(**overrides):
     s.ftv_runner_pct_trail_arm_pct = 25.0
     s.ftv_runner_pct_trail_keep_ratio = 0.75
     s.ftv_runner_pct_trail_min_best_points = 6.0
+    s.explosion_stage_trail_min_hold_seconds = 90.0
     for k, v in overrides.items():
         setattr(s, k, v)
     return s

@@ -1,6 +1,6 @@
 """Afternoon premium capture — 1pm consolidation breakouts (NIFTY 24250 PE style)."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -63,6 +63,10 @@ def _settings():
     s.afternoon_capture_peak_halve_min_best_points = 10.0
     s.afternoon_capture_peak_halve_giveback_ratio = 0.50
     s.afternoon_capture_peak_halve_min_remain_points = 1.0
+    s.afternoon_capture_peak_halve_min_hold_seconds = 120
+    s.afternoon_capture_peak_halve_skip_stage_ladder_min_projected_tp = 80.0
+    s.afternoon_capture_skip_exit_tighten_on_stage_ladder = True
+    s.explosion_stage_trail_min_hold_seconds = 90.0
     s.explosion_target_elite = 25.0
     s.premium_led_counter_breadth_enabled = True
     s.premium_led_min_velocity_3s = 2.8
@@ -84,6 +88,43 @@ def _settings():
     s.all_day_explosion_capture_enabled = False
     s.all_day_explosion_session_move_min_pct = 40.0
     s.all_day_explosion_min_score = 38.0
+    s.runner_min_best_points = 25.0
+    s.runner_trail_keep_ratio = 0.55
+    s.explosion_failed_launch_exit_enabled = False
+    s.explosion_never_green_stop_enabled = False
+    s.explosion_peak_fade_lock_enabled = False
+    s.explosion_early_green_lock_enabled = False
+    s.emergency_stop_enabled = False
+    s.explosion_stop_min_hold_seconds = 0
+    s.explosion_per_trade_max_loss_inr = 0
+    s.elite_full_lot_risk_inr = 0
+    s.adaptive_exits_enabled = True
+    s.moment_stage_trail_enabled = True
+    s.explosion_trail_pre_stage_suppress_step = True
+    s.ftv_runner_pct_trail_enabled = True
+    s.ftv_runner_pct_trail_arm_pct = 25.0
+    s.ftv_runner_pct_trail_keep_ratio = 0.75
+    s.ftv_runner_pct_trail_min_best_points = 6.0
+    s.explosion_trail_arm_points = 4.0
+    s.explosion_trail_keep_ratio = 0.61
+    s.explosion_initial_stop_points = 8.0
+    s.explosion_target_standard = 18.0
+    s.explosion_trail_step_points = 2.0
+    s.explosion_trail_tight_arm = 12.0
+    s.explosion_trail_tight_points = 5.0
+    s.explosion_micro_target_points = 3.0
+    s.explosion_stop_pct_of_premium = 0.10
+    s.scalp_stop_min_points = 3.0
+    s.runner_micro_giveback_points = 4.0
+    s.high_conviction_defer_profit_lock = True
+    s.high_conviction_trail_keep_ratio = 0.30
+    s.chart_confidence_defer_tp_min = 90.0
+    s.ict_max_profit_skip_hard_target = True
+    s.moment_stage_giveback_ratio = 0.50
+    s.moment_stage_late_giveback_ratio = 1.0
+    s.moment_stage_late_progress = 0.70
+    s.moment_stage_min_remain_points = 1.0
+    s.moment_stage_hot_hold_velocity_3s = 2.5
     return s
 
 
@@ -242,7 +283,7 @@ def test_afternoon_capture_peak_halve_lock_books_half_peak(mock_settings):
         pnlInr=1755.0,
         bestPnlPoints=19.92,
         maxLtp=121.85,
-        openedAt=datetime.now(ZoneInfo("Asia/Kolkata")),
+        openedAt=datetime.now(ZoneInfo("Asia/Kolkata")) - timedelta(minutes=3),
         strategyType=StrategyType.EXPLOSIVE,
         entryContext={"afternoonCapture": True, "explosionTier": "EXPLODING"},
     )
@@ -261,3 +302,61 @@ def test_afternoon_capture_peak_halve_lock_books_half_peak(mock_settings):
         live_velocity_3s=0.0,
     )
     assert reason == "afternoon_capture_peak_halve_lock"
+
+
+@patch("app.engines.explosion_profit.get_settings", return_value=_settings())
+def test_afternoon_halve_lock_skips_fresh_stage_ladder_runner(mock_settings):
+    """Aug28 SENSEX 77300/77200 — no halve-lock in first 2m on projected 800+ runner."""
+    from app.engines.explosion_profit import (
+        afternoon_capture_peak_halve_lock_reason,
+        evaluate_explosion_exit,
+    )
+    from app.models.schemas import PaperTrade, Side, StrategyType
+    from app.engines.adaptive_exits import AdaptiveExitPlan
+    from app.engines.explosion_profit import explosion_exit_params_from_plan
+
+    opened = datetime.now(IST) - timedelta(seconds=16)
+    trade = PaperTrade(
+        id="sensex-77300",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=77300.0,
+        entryPremium=387.53,
+        lots=23,
+        openedAt=opened,
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=12.07,
+        maxLtp=399.6,
+        entryContext={
+            "afternoonCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 811.18,
+            "stageSize": 75.0,
+            "exitPlan": {
+                "momentStageLadder": True,
+                "projectedMaxTp": 811.18,
+                "stageSize": 75.0,
+                "trailArmPoints": 16.43,
+            },
+        },
+    )
+    assert afternoon_capture_peak_halve_lock_reason(
+        trade, best=12.07, pnl_pts=2.02, hold_seconds=16.0,
+    ) is None
+
+    plan = AdaptiveExitPlan(
+        stopPoints=40.0,
+        targetPoints=54.72,
+        trailArmPoints=16.43,
+        trailKeepRatio=0.61,
+        microTargetPoints=3.32,
+    )
+    params = explosion_exit_params_from_plan(plan, "ELITE")
+    reason, _ = evaluate_explosion_exit(
+        trade, 389.55, "ELITE", 20, params=params, live_velocity_3s=4.5,
+    )
+    assert reason is None or reason not in (
+        "afternoon_capture_peak_halve_lock",
+        "explosion_stage_trail",
+        "explosion_peak_keep_trail",
+    )
