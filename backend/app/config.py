@@ -1150,6 +1150,8 @@ class Settings(BaseSettings):
     best_side_counter_rank_penalty: float = 18.0
     best_side_global_rank_bonus: float = 15.0
     best_side_fading_waive_bonus: float = 20.0
+    # EOD replay — apply live session gates (power hour, directional lock, best-side).
+    eod_replay_live_session_gates_enabled: bool = True
 
     # Symbol / instrument cooldown — stop same-strike churn after losses
     symbol_loss_cooldown_seconds: int = 180

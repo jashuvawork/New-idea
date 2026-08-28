@@ -7,13 +7,17 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.engines.eod_local_base_replay import (
+    _ReplayDateTime,
     _enrich_alert_from_contract,
+    _install_replay_clock,
+    _restore_replay_clock,
     evaluate_local_base_entry,
+    evaluate_replay_live_gates,
     generate_eod_local_base_replay,
     replay_local_base_day,
     _spot_chart_from_history,
 )
-from app.models.schemas import MarketPhase, SpotChart, SymbolSnapshot
+from app.models.schemas import Breadth, MarketPhase, Side, SpotChart, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -176,3 +180,126 @@ def test_generate_eod_local_base_replay_includes_comparison():
         rep = generate_eod_local_base_replay(date)
     assert rep["comparison"]["deltaPnlInr"] == 500
     assert rep["comparison"]["legacyEodReport"]["tradeCount"] == 2
+
+
+@patch("app.engines.eod_local_base_replay.get_settings")
+@patch("app.engines.directional_lock.get_settings")
+@patch("app.engines.best_side_selection.get_settings")
+def test_replay_live_gates_block_call_flip_without_dominance(
+    mock_best_settings,
+    mock_dir_settings,
+    mock_replay_settings,
+):
+    from app.config import Settings
+    from app.engines.directional_lock import record_trade_side, reset_directional_lock
+
+    settings = Settings(
+        eod_replay_live_session_gates_enabled=True,
+        best_side_selection_enabled=True,
+        directional_side_lock_enabled=True,
+    )
+    mock_replay_settings.return_value = settings
+    mock_dir_settings.return_value = settings
+    mock_best_settings.return_value = settings
+
+    reset_directional_lock()
+    bearish = _bearish_chart()
+    put_snap = _snap(side="PUT", chart=bearish)
+    put_snap.breadth = Breadth(bias="NEUTRAL", aligned=False)
+    record_trade_side("SENSEX", Side.PUT, put_snap)
+
+    call_snap = _snap(side="CALL", chart=bearish)
+    call_snap.breadth = Breadth(bias="NEUTRAL", aligned=False)
+    call_snap.explosionAlerts = [
+        {
+            "side": "CALL",
+            "strike": 77000.0,
+            "tier": "BUILDING",
+            "explosionScore": 40.0,
+            "velocity3s": 0.8,
+            "premium": 100.0,
+        }
+    ]
+    alert = call_snap.explosionAlerts[0]
+    allowed, reason = evaluate_replay_live_gates(
+        alert,
+        call_snap,
+        {"SENSEX": call_snap},
+        settings=settings,
+        skip_session_gate=True,
+    )
+    assert allowed is False
+    assert "directional" in reason or "switch" in reason
+
+
+@patch("app.engines.eod_local_base_replay.get_settings")
+@patch("app.engines.directional_lock.get_settings")
+@patch("app.engines.best_side_selection.get_settings")
+def test_replay_live_gates_allow_dominant_call_flip(
+    mock_best_settings,
+    mock_dir_settings,
+    mock_replay_settings,
+):
+    from app.config import Settings
+    from app.engines.directional_lock import record_trade_side, reset_directional_lock
+
+    settings = Settings(
+        eod_replay_live_session_gates_enabled=True,
+        best_side_selection_enabled=True,
+        directional_side_lock_enabled=True,
+        best_side_power_hour_min_velocity_3s=1.8,
+        best_side_power_hour_min_velocity_ratio=1.3,
+    )
+    mock_replay_settings.return_value = settings
+    mock_dir_settings.return_value = settings
+    mock_best_settings.return_value = settings
+
+    reset_directional_lock()
+    bearish = _bearish_chart()
+    put_snap = _snap(side="PUT", chart=bearish)
+    put_snap.breadth = Breadth(bias="NEUTRAL", aligned=False)
+    record_trade_side("SENSEX", Side.PUT, put_snap)
+
+    call_snap = _snap(side="CALL", chart=bearish)
+    call_snap.breadth = Breadth(bias="NEUTRAL", aligned=False)
+    call_snap.explosiveRunnerWatchlist = [
+        {"side": "CALL", "premiumVelocityPct": 2.5, "score": 52.0},
+        {"side": "PUT", "premiumVelocityPct": 0.2, "score": 30.0},
+    ]
+    call_snap.explosionAlerts = [
+        {
+            "side": "CALL",
+            "strike": 77000.0,
+            "tier": "BUILDING",
+            "explosionScore": 52.0,
+            "velocity3s": 2.5,
+            "premium": 115.0,
+        }
+    ]
+    alert = call_snap.explosionAlerts[0]
+    allowed, reason = evaluate_replay_live_gates(
+        alert,
+        call_snap,
+        {"SENSEX": call_snap},
+        settings=settings,
+        skip_session_gate=True,
+    )
+    assert allowed is True, reason
+
+
+def test_replay_clock_drives_power_hour_window():
+    import app.engines.power_hour_guards as power_hour
+
+    original = power_hour._minutes_now
+    original_phase = power_hour.get_market_phase
+    try:
+        power_hour.get_market_phase = lambda: "LIVE_MARKET"
+        _ReplayDateTime.current = datetime(2026, 8, 28, 15, 10, 0, tzinfo=IST)
+        saved = _install_replay_clock(_ReplayDateTime)
+        assert power_hour.in_power_hour_window() is True
+        _ReplayDateTime.current = datetime(2026, 8, 28, 14, 30, 0, tzinfo=IST)
+        assert power_hour.in_power_hour_window() is False
+        _restore_replay_clock(saved)
+    finally:
+        power_hour._minutes_now = original
+        power_hour.get_market_phase = original_phase
