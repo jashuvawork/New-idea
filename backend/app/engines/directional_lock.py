@@ -268,6 +268,20 @@ def check_directional_side_lock(
     if premium_led_bypass:
         return False, "ok"
 
+    from app.engines.best_side_selection import dominant_side_flip_bypass
+    from app.engines.power_hour_guards import in_power_hour_window
+
+    power_hour = in_power_hour_window()
+    flip_ok, _flip_reason, _flip_meta = dominant_side_flip_bypass(
+        symbol,
+        side_v,
+        snap,
+        candidate=candidate,
+        power_hour=power_hour,
+    )
+    if flip_ok:
+        return False, "ok"
+
     if candidate is not None:
         from app.engines.aligned_explosion_bypass import (
             expiry_aligned_explosion_trade_allowed,

@@ -1137,6 +1137,19 @@ class Settings(BaseSettings):
     directional_switch_min_explosion_score: float = 55.0
     directional_switch_min_runner_score: float = 60.0
     directional_switch_min_trend_strength: float = 50.0
+    # Best-side selection — follow dominant CE/PE leg all session (incl. power-hour flip).
+    best_side_selection_enabled: bool = True
+    best_side_min_velocity_3s: float = 2.0
+    best_side_min_velocity_ratio: float = 1.4
+    best_side_min_explosion_score: float = 45.0
+    best_side_power_hour_min_velocity_3s: float = 1.8
+    best_side_power_hour_min_velocity_ratio: float = 1.3
+    best_side_directional_lock_bypass_enabled: bool = True
+    best_side_power_hour_bypass_enabled: bool = True
+    best_side_rank_bonus: float = 25.0
+    best_side_counter_rank_penalty: float = 18.0
+    best_side_global_rank_bonus: float = 15.0
+    best_side_fading_waive_bonus: float = 20.0
 
     # Symbol / instrument cooldown — stop same-strike churn after losses
     symbol_loss_cooldown_seconds: int = 180

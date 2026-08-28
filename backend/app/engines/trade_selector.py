@@ -1479,6 +1479,12 @@ def find_best_entry(
 
         c.score += cross_index_rank_adjustment(c, state, snapshots)
         c.score += cross_index_elite_priority_bonus(c, snapshots)
+        from app.engines.best_side_selection import best_side_rank_adjustment
+        from app.engines.power_hour_guards import in_power_hour_window
+
+        c.score += best_side_rank_adjustment(
+            c, snapshots, power_hour=in_power_hour_window(),
+        )
         if c.mode == "explosion":
             ranking = (c.pretrade_meta or {}).get("causalRanking") or {}
             evidence = ranking.get("evidence") or {}

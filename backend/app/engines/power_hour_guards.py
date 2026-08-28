@@ -41,11 +41,14 @@ def snapshots_have_power_hour_top_signal(
     from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
     from app.engines.top_ftv_v_expiry_bypass import snapshots_have_top_ftv_or_v
 
+    from app.engines.best_side_selection import snapshots_have_dominant_side_surge
+
     return (
         snapshots_have_expiry_elite_top(snapshots)
         or snapshots_have_top_ftv_or_v(snapshots)
         or snapshots_have_grade_a_ftv_first_lift(snapshots)
         or snapshots_have_all_in_explosion(snapshots)
+        or snapshots_have_dominant_side_surge(snapshots, power_hour=True)
     )
 
 
@@ -56,6 +59,11 @@ def candidate_qualifies_power_hour_top_trade(candidate: Any) -> bool:
     from app.engines.trade_ranking import rank_entry_candidate
 
     if is_top_ftv_or_v_candidate(candidate):
+        return True
+
+    from app.engines.best_side_selection import dominant_side_qualifies_power_hour
+
+    if dominant_side_qualifies_power_hour(candidate):
         return True
 
     ranking = rank_entry_candidate(candidate)
