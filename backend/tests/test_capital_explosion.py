@@ -422,13 +422,25 @@ class CapitalSizingTests(unittest.TestCase):
             "top_explosion_max": True,
             "faded_rip": False,
             "post_win_capped": False,
+            "explosion_always_max": False,
         }
 
         self.assertTrue(_top_rank_full_budget_lots_allowed(**common))
-        for key in ("strict_first_lift", "top_explosion_max"):
-            self.assertFalse(
-                _top_rank_full_budget_lots_allowed(**{**common, key: False})
+        self.assertFalse(
+            _top_rank_full_budget_lots_allowed(
+                **{**common, "strict_first_lift": False}
             )
+        )
+        self.assertTrue(
+            _top_rank_full_budget_lots_allowed(
+                **{**common, "strict_first_lift": False, "explosion_always_max": True}
+            )
+        )
+        self.assertFalse(
+            _top_rank_full_budget_lots_allowed(
+                **{**common, "top_explosion_max": False}
+            )
+        )
         self.assertFalse(
             _top_rank_full_budget_lots_allowed(**{**common, "faded_rip": True})
         )
@@ -447,6 +459,24 @@ class CapitalSizingTests(unittest.TestCase):
                         capitalBaseInr=200_000,
                         committedInr=180_000,
                         weight=0.9,
+                    ),
+                }
+            )
+        )
+        self.assertTrue(
+            _top_rank_full_budget_lots_allowed(
+                **{
+                    **common,
+                    "strict_first_lift": False,
+                    "explosion_always_max": True,
+                    "allocation": RankedAllocation(
+                        rank=2,
+                        budgetInr=175_000,
+                        remainingBeforeInr=180_000,
+                        cashReserveInr=0,
+                        capitalBaseInr=200_000,
+                        committedInr=5_000,
+                        weight=0.25,
                     ),
                 }
             )

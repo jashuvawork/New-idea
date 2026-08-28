@@ -2,7 +2,13 @@
 
 from unittest.mock import MagicMock, patch
 
-from app.engines.capital_allocator import apply_explosion_always_max_lots
+from app.engines.auto_trader import _top_rank_full_budget_lots_allowed
+from app.engines.capital_allocator import (
+    CapitalSnapshot,
+    RankedAllocation,
+    apply_explosion_always_max_lots,
+    tune_exit_plan_for_position,
+)
 from app.engines.session_mode_feedback import cap_lots_until_first_green
 from app.models.schemas import AutoTraderState
 
@@ -37,3 +43,68 @@ def test_first_green_skipped_when_always_max_config(mock_settings):
     state = AutoTraderState()
     # When always-max bypasses first-green in auto_trader, cap helper still caps if called.
     assert cap_lots_until_first_green(40, state, mode="explosion") == 6
+
+
+def test_always_max_preserves_lots_without_ftv_full_sleeve():
+    """Aug28 morning EXPLODING: max lots must survive SL size-tune without FTV stamp."""
+    allocation = RankedAllocation(
+        rank=1,
+        budgetInr=180_000,
+        remainingBeforeInr=200_000,
+        cashReserveInr=0,
+        capitalBaseInr=200_000,
+        committedInr=0,
+        weight=0.9,
+    )
+    assert _top_rank_full_budget_lots_allowed(
+        enabled=True,
+        allocation=allocation,
+        strict_first_lift=False,
+        top_explosion_max=True,
+        faded_rip=False,
+        post_win_capped=False,
+        explosion_always_max=True,
+    )
+
+    settings = MagicMock()
+    settings.position_sl_cap_pct = 0.08
+    settings.position_tp_target_pct = 0.12
+    settings.scalp_stop_points = 3.0
+    settings.scalp_stop_min_points = 1.0
+    settings.position_sl_preserve_natural_frac = 0.45
+    settings.explosion_sl_preserve_natural_frac = 0.85
+    settings.position_min_risk_reward = 1.2
+    settings.scalp_trail_step_points = 2.0
+    settings.per_trade_capital_pct = 0.9
+    snap = CapitalSnapshot(
+        availableMarginInr=200_000,
+        perTradeCapitalInr=180_000,
+    )
+    with (
+        patch("app.engines.capital_allocator.get_capital_snapshot", return_value=snap),
+        patch("app.engines.capital_allocator.get_settings", return_value=settings),
+        patch("app.engines.capital_allocator.lot_multiplier", return_value=65),
+        patch(
+            "app.engines.capital_allocator.max_lots_for_capital",
+            return_value=33,
+        ),
+    ):
+        lots = apply_explosion_always_max_lots(1, "NIFTY", 81.9, mode="explosion")
+        assert lots == 33
+        tuned = tune_exit_plan_for_position(
+            {
+                "stopPoints": 18,
+                "naturalStopPoints": 18,
+                "targetPoints": 36,
+                "microTargetPoints": 6,
+                "trailArmPoints": 10,
+            },
+            lots=lots,
+            premium=81.9,
+            symbol="NIFTY",
+            trade_budget_inr=180_000,
+            preserve_lots_over_sl_budget=True,
+        )
+
+    assert tuned["lots"] == 33
+    assert tuned["slRiskBudgetOverride"] is True
