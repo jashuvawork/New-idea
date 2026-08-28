@@ -1781,6 +1781,24 @@ def evaluate_explosion_exit(
 
     # Stage ladder (incl. pre-stage provisional floor): pullback through the
     # stage floor books profit; otherwise hold toward projectedMaxTp.
+    from app.engines.moment_stage_trail import ftv_runner_pct_floor
+
+    pct_keep_floor = (
+        ftv_runner_pct_floor(trade, best, settings=settings)
+        if stage_ladder
+        and bool(getattr(settings, "ftv_runner_pct_trail_enabled", True))
+        else None
+    )
+    min_pct_best = _cfg_float(settings, "ftv_runner_pct_trail_min_best_points", 6.0)
+    if (
+        pct_keep_floor is not None
+        and best >= min_pct_best
+        and pnl_pts <= pct_keep_floor
+    ):
+        # Aug28 24100 PE: peaked +31pt, faded to +10 — stage_armed waits for +45pt
+        # so the 75% peak-keep floor must exit even before stage 1 completes.
+        return "explosion_peak_keep_trail", pnl_inr
+
     stage_armed = stage_floor is not None and (
         best >= exit_params.trail_arm_points
         or (stage_size > 0 and best >= stage_size)

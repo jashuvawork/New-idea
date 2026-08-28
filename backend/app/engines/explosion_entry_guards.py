@@ -1150,6 +1150,53 @@ def _post_small_win(state: Any) -> tuple[bool, dict[str, Any]]:
     return False, meta
 
 
+def _post_win_top_confidence_allows(
+    candidate: Any,
+    *,
+    v3: float,
+    snap: SymbolSnapshot,
+) -> bool:
+    """Post-win re-entry requires top rank, full sleeve, or hot live re-acceleration."""
+    settings = get_settings()
+    if not getattr(settings, "fake_explosion_trap_post_win_require_top_confidence", True):
+        return True
+
+    pre = getattr(candidate, "pretrade_meta", None) or {}
+    causal = pre.get("causalRanking") or {}
+    if causal.get("topRankEligible") or causal.get("fullSleeveEligible"):
+        return True
+
+    hot_v3 = float(
+        getattr(settings, "fake_explosion_trap_post_win_hc_min_velocity_3s", 2.0) or 2.0
+    )
+    if v3 >= hot_v3:
+        return True
+
+    from app.engines.explosion_confidence import is_high_conviction_entry
+    from app.engines.chart_exit_levels import chart_trade_confidence
+
+    tier = str(
+        getattr(getattr(candidate, "explosion_event", None), "tier", None)
+        or getattr(candidate, "tier", "")
+        or ""
+    ).upper()
+    move = float(getattr(getattr(candidate, "explosion_event", None), "daily_move_pct", 0) or 0)
+    chart_conf, _ = chart_trade_confidence(
+        snap, getattr(candidate, "side", None),
+    )
+    if is_high_conviction_entry(
+        side=getattr(candidate, "side", None),
+        snap=snap,
+        tier=tier,
+        score=float(getattr(candidate, "score", 0) or 0),
+        move_pct=move,
+        chart_confidence=chart_conf,
+        velocity_3s=v3,
+    ):
+        return True
+    return False
+
+
 def detect_fake_explosion_trap(
     candidate: Any,
     snap: SymbolSnapshot,
@@ -1271,6 +1318,16 @@ def detect_fake_explosion_trap(
                 "liveVelocity3s": round(v3, 3),
             })
             return True, "fake_explosion_trap_post_win_cold_velocity", meta
+
+    if post_win and not _post_win_top_confidence_allows(candidate, v3=v3, snap=snap):
+        meta.update({
+            "fakeExplosionTrap": True,
+            "action": "block",
+            "psychologyEscalate": "FOMO",
+            "postWinTopConfidenceBlock": True,
+            "liveVelocity3s": round(v3, 3),
+        })
+        return True, "fake_explosion_trap_post_win_not_top_confidence", meta
 
     meta.update({
         "fakeExplosionTrap": False,

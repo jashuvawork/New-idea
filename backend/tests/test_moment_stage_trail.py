@@ -79,6 +79,10 @@ def _settings(**overrides):
     s.chart_confidence_defer_tp_min = 90.0
     s.chart_confidence_half_tp_giveback_ratio = 0.40
     s.bullish_hold_enabled = True
+    s.ftv_runner_pct_trail_enabled = True
+    s.ftv_runner_pct_trail_arm_pct = 25.0
+    s.ftv_runner_pct_trail_keep_ratio = 0.75
+    s.ftv_runner_pct_trail_min_best_points = 6.0
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -256,6 +260,66 @@ def test_projected_max_is_not_forced_exit_while_ltp_is_at_peak(
         live_velocity_3s=4.0,
     )
     assert reason is None
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=False)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_peak_keep_75_exits_before_stage_one(mock_ms, mock_s, _hc, _mp):
+    """Aug28 24100 PE — peak +31pt, fade to +10pt exits at 75% keep before stage +45."""
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    entry = 47.95
+    best = 30.93
+    trade = PaperTrade(
+        id="nifty-24100",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24100.0,
+        entryPremium=entry,
+        currentPremium=61.85,
+        lots=1,
+        openedAt=datetime.now(IST) - timedelta(minutes=120),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        pnlPoints=13.9,
+        entryContext={
+            "momentStageLadder": True,
+            "maxProfitCapture": True,
+            "projectedMaxTp": 323.3,
+            "stageSize": 45.0,
+            "exitPlan": {
+                "stopPoints": 11.06,
+                "targetPoints": 31.17,
+                "trailArmPoints": 113.15,
+                "trailKeepRatio": 0.61,
+                "momentStageLadder": True,
+                "projectedMaxTp": 323.3,
+                "stageSize": 45.0,
+            },
+        },
+    )
+    params = ExplosionExitParams(
+        stop_points=11.06,
+        target_points=31.17,
+        trail_arm_points=113.15,
+        trail_keep_ratio=0.61,
+        micro_target_points=3.0,
+        adaptive_stop=True,
+    )
+    reason, pnl = evaluate_explosion_exit(
+        trade, 61.85, "EXPLODING", 65, params=params, live_velocity_3s=0.0,
+    )
+    assert reason == "explosion_peak_keep_trail"
+    assert pnl > 0
+
+    reason_hold, _ = evaluate_explosion_exit(
+        trade, entry + best * 0.76, "EXPLODING", 65, params=params, live_velocity_3s=0.0,
+    )
+    assert reason_hold is None
 
 
 @patch("app.engines.moment_stage_trail.get_settings")

@@ -867,6 +867,7 @@ class Settings(BaseSettings):
     ftv_runner_pct_trail_enabled: bool = True
     ftv_runner_pct_trail_arm_pct: float = 25.0
     ftv_runner_pct_trail_keep_ratio: float = 0.75
+    ftv_runner_pct_trail_min_best_points: float = 6.0
     moment_stage_min_projected_tp: float = 40.0
     # Allow rare 50→650 LTP mega rips (+600pt); live extension ratchets toward this.
     moment_stage_max_projected_tp: float = 800.0
@@ -930,6 +931,9 @@ class Settings(BaseSettings):
     fake_explosion_trap_post_win_velocity_block_enabled: bool = True
     fake_explosion_trap_post_win_min_velocity_3s: float = 0.0
     fake_explosion_trap_post_win_midday_min_velocity_3s: float = 1.0
+    # Post-win re-entry only when top-rank / full-sleeve OR hot re-acceleration — no 8-lot FOMO probes.
+    fake_explosion_trap_post_win_require_top_confidence: bool = True
+    fake_explosion_trap_post_win_hc_min_velocity_3s: float = 2.0
     fake_explosion_trap_psychology_escalate: bool = True
     # Midday/chop ELITE without ICT structure → hard block (not soft lot-cap).
     fake_explosion_trap_midday_require_structure: bool = True

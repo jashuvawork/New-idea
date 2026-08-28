@@ -481,7 +481,7 @@ def ftv_runner_pct_floor(
     arm_pct = _cfg_float(s, "ftv_runner_pct_trail_arm_pct", 25.0)
     if (best / entry * 100.0) < arm_pct:
         return None
-    keep = _cfg_float(s, "ftv_runner_pct_trail_keep_ratio", 0.72)
+    keep = _cfg_float(s, "ftv_runner_pct_trail_keep_ratio", 0.75)
     # Closed loop: prefer the LEARNED per-moment keep-ratio when EOD learning stamped one
     # (ride high-hit movers harder, tighten low-hit buckets). Bounded to a safe band.
     ctx = getattr(trade, "entryContext", None) or {}
