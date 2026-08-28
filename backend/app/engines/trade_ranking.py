@@ -366,6 +366,8 @@ def ftv_authorization_policy(
     building_rip_ftv_min_local_base_move_pct: float = 2.0,
     building_rip_ftv_max_local_base_move_pct: float = 55.0,
     building_rip_ftv_max_capital_pct: float = 0.90,
+    building_armed_base_grade_a_ftv_enabled: bool = True,
+    building_armed_base_grade_a_ftv_max_capital_pct: float = 0.90,
     slow_grind_ftv_enabled: bool = True,
     slow_grind_ftv_min_explosion_score: float = 12.0,
     slow_grind_ftv_min_flat_quality: float = 50.0,
@@ -1253,6 +1255,35 @@ def ftv_authorization_policy(
                 max_capital_pct=building_rip_ftv_max_capital_pct,
             )
 
+    if building_armed_base_grade_a_ftv_enabled:
+        readiness = str(evidence.get("firstLiftReadinessReason") or "")
+        from app.engines.building_ftv_gates import building_armed_base_grade_a_top_moment_ok
+
+        armed_base_ok = (
+            readiness == "armed_base_option_led_ready"
+            and building_armed_base_grade_a_top_moment_ok(
+                evidence, ranking, readiness_reason=readiness,
+            )
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        )
+        if armed_base_ok:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
+                return blocked("building_armed_base_grade_a_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "BUILDING_ARMED_BASE_GRADE_A",
+                "ok",
+                max_capital_pct=building_armed_base_grade_a_ftv_max_capital_pct,
+            )
+
     if not top_ftv_a_enabled:
         return blocked("ftv_elite_top_only_requires_s")
     return blocked(top_ftv_a_reason)
@@ -1312,6 +1343,8 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "building_rip_ftv_min_local_base_move_pct",
         "building_rip_ftv_max_local_base_move_pct",
         "building_rip_ftv_max_capital_pct",
+        "building_armed_base_grade_a_ftv_enabled",
+        "building_armed_base_grade_a_ftv_max_capital_pct",
         "slow_grind_ftv_enabled",
         "slow_grind_ftv_min_explosion_score",
         "slow_grind_ftv_min_flat_quality",
@@ -1760,6 +1793,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "shallowOtmLocalBaseTradeable": bool(
                 evidence.get("shallowOtmLocalBaseTradeable")
             ),
+            "firstLiftReadinessReason": str(
+                evidence.get("firstLiftReadinessReason") or ""
+            ),
         },
     }
 
@@ -1926,6 +1962,12 @@ def rank_entry_candidate(
         ),
         "shallowOtmLocalBaseTradeable": bool(
             alert.get("shallowOtmLocalBaseTradeable")
+        ),
+        "firstLiftReadinessReason": str(
+            pretrade.get("firstLiftReadinessReason")
+            or alert.get("ictBaseReadinessReason")
+            or alert.get("readyReason")
+            or ""
         ),
     }
     # Live index helpers when alert not yet stamped (ELITE/EXPLODING path).

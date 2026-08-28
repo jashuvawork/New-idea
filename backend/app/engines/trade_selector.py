@@ -368,14 +368,39 @@ def _explosion_candidates(
                 # Early BUILDING flat→vertical when chart-aligned — catch the base
                 # before ELITE prints (multiple flat→vertical moments per week).
                 if top_only:
+                    from app.engines.building_ftv_gates import (
+                        building_armed_base_grade_a_live_ok,
+                    )
                     from app.engines.top_moment_gate import explosion_alert_is_top_moment
 
-                    if not explosion_alert_is_top_moment(alert) and not pad_lane_waive:
+                    armed_base_live_ok = building_armed_base_grade_a_live_ok(
+                        alert,
+                        snap,
+                        readiness_reason=first_lift_readiness_reason,
+                        state=state,
+                        snapshots={symbol: snap},
+                    )
+                    if (
+                        not explosion_alert_is_top_moment(alert)
+                        and not pad_lane_waive
+                        and not armed_base_live_ok
+                    ):
                         continue
                 elif not lift_ready and not _building_aligned_ict_alert_ok(
                     alert, snap, tier_u, state=state, snapshots={symbol: snap},
                 ):
-                    continue
+                    from app.engines.building_ftv_gates import (
+                        building_armed_base_grade_a_live_ok,
+                    )
+
+                    if not building_armed_base_grade_a_live_ok(
+                        alert,
+                        snap,
+                        readiness_reason=first_lift_readiness_reason,
+                        state=state,
+                        snapshots={symbol: snap},
+                    ):
+                        continue
         elif tier_u not in ("ELITE", "EXPLODING"):
             from app.engines.morning_premium_capture import is_premium_capture_alert
 
@@ -830,6 +855,26 @@ def _explosion_candidates(
             rank += float(
                 getattr(settings, "ict_armed_base_launch_rank_bonus", 16.0) or 16.0
             )
+            if first_lift_readiness_reason == "armed_base_option_led_ready":
+                from app.engines.building_ftv_gates import (
+                    building_armed_base_grade_a_live_ok,
+                )
+
+                if building_armed_base_grade_a_live_ok(
+                    alert if isinstance(alert, dict) else None,
+                    snap,
+                    readiness_reason=first_lift_readiness_reason,
+                    state=state,
+                    snapshots={symbol: snap},
+                ):
+                    rank += float(
+                        getattr(
+                            settings,
+                            "building_armed_base_grade_a_selector_rank_bonus",
+                            20.0,
+                        )
+                        or 20.0
+                    )
             if first_lift_readiness_reason in (
                 "building_rip_bullish_ready",
                 "building_local_base_lift_ready",
@@ -923,6 +968,7 @@ def _explosion_candidates(
                 "localBaseReversalPrediction": bullish_base,
                 "bullishLocalBasePrediction": bullish_base,
                 "timingAssessment": timing,
+                "firstLiftReadinessReason": first_lift_readiness_reason,
                 "ictBaseArmed": bool(alert.get("ictBaseArmed")),
                 "ictEliteBaseReady": bool(alert.get("ictEliteBaseReady")),
                 "ictArmedBaseLaunch": bool(alert.get("ictArmedBaseLaunch")),
@@ -1676,6 +1722,7 @@ def find_best_entry(
                 ranking,
                 top_moments_only_enabled=True,
                 min_grade=min_grade,
+                readiness_reason=str(meta.get("firstLiftReadinessReason") or ""),
             )
             c.pretrade_meta = {
                 **meta,
@@ -2242,9 +2289,24 @@ def diagnose_missed_entries(
                     ),
                 )
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
-                if not lift_ready and not _building_aligned_ict_alert_ok(
-                    alert, snap, str(tier_str).upper(),
-                    state=state, snapshots=snapshots,
+                from app.engines.building_ftv_gates import (
+                    building_armed_base_grade_a_live_ok,
+                )
+
+                armed_base_live_ok = building_armed_base_grade_a_live_ok(
+                    alert,
+                    snap,
+                    readiness_reason=readiness_reason,
+                    state=state,
+                    snapshots=snapshots,
+                )
+                if (
+                    not lift_ready
+                    and not _building_aligned_ict_alert_ok(
+                        alert, snap, str(tier_str).upper(),
+                        state=state, snapshots=snapshots,
+                    )
+                    and not armed_base_live_ok
                 ):
                     blockers.append("tier_not_elite_exploding")
             if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from app.config import get_settings
 
@@ -31,6 +31,168 @@ PAD_LANE_READY_REASONS = frozenset(
         "early_radar_pad_ready",
     }
 )
+
+ARMED_BASE_GRADE_A_READY_REASONS = frozenset({"armed_base_option_led_ready"})
+
+
+def _number(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _building_armed_base_worst_day_blocked(
+    *,
+    state: Any = None,
+    snapshots: Optional[dict[str, Any]] = None,
+) -> bool:
+    """Block BUILDING armed-base on DEFENSIVE / BREAKOUT_ONLY / PAUSED sessions."""
+    settings = get_settings()
+    if not bool(getattr(settings, "worst_day_block_building_ict", True)):
+        return False
+    try:
+        from app.engines.worst_day_itm_fade import worst_day_defensive_session_active
+        from app.engines.worst_day_guard import session_entry_policy
+        from app.engines.dual_mode_strategy import resolve_trading_session_mode
+        from app.models.schemas import AutoTraderState as _ATS
+
+        snaps = snapshots or {}
+        st = state if state is not None else _ATS()
+        if snaps:
+            if worst_day_defensive_session_active(st, snaps):
+                return True
+            policy, _ = session_entry_policy(st, snaps)
+            if policy in ("BREAKOUT_ONLY", "PAUSED"):
+                return True
+            mode, _ = resolve_trading_session_mode(st, snaps)
+            if mode == "DEFENSIVE":
+                return True
+    except Exception:
+        return True
+    return False
+
+
+def building_armed_base_grade_a_live_ok(
+    alert: Optional[dict[str, Any]],
+    snap: Any = None,
+    *,
+    readiness_reason: str = "",
+    ranking: Optional[dict[str, Any]] = None,
+    state: Any = None,
+    snapshots: Optional[dict[str, Any]] = None,
+) -> bool:
+    """Allow grade-A BUILDING through live selector when option-led armed base is ready.
+
+    Aug28 NIFTY PUT 24200/24100: armed_base_option_led_ready + grade A at ~10–15%
+    baseRel blocked by tier_not_elite_exploding until EXPLODING ~11:20. Archive week
+    (Aug24–28): in-window BUILDING grade-A early paths ~75% MFE winners, 3/40 false starts.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "building_armed_base_grade_a_live_enabled", True)):
+        return False
+    if not isinstance(alert, dict):
+        return False
+    if str(alert.get("tier") or "").upper() != "BUILDING":
+        return False
+    rr = str(
+        readiness_reason
+        or alert.get("ictBaseReadinessReason")
+        or alert.get("readyReason")
+        or ""
+    )
+    if rr not in ARMED_BASE_GRADE_A_READY_REASONS:
+        return False
+    if _building_armed_base_worst_day_blocked(state=state, snapshots=snapshots):
+        return False
+    base_rel = _number(
+        alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")
+    )
+    grade = ""
+    if isinstance(ranking, dict):
+        grade = str(ranking.get("grade") or "").upper()
+    if not grade:
+        try:
+            from app.engines.trade_ranking import rank_trade_evidence
+
+            evidence = {
+                "mode": "explosion",
+                "tier": str(alert.get("tier") or "").upper(),
+                "explosionScore": _number(
+                    alert.get("explosionScore") or alert.get("score")
+                ),
+                "tqs": _number(getattr(snap, "tradeQualityScore", 0) if snap else 0),
+                "velocity3s": _number(alert.get("velocity3s")),
+                "velocity9s": _number(alert.get("velocity9s")),
+                "localBaseMovePct": base_rel,
+                "flatThenVertical": bool(alert.get("ictFlatThenVertical")),
+                "activeBreakout": bool(alert.get("ictBreakout")),
+                "armedBaseLaunch": bool(
+                    alert.get("ictArmedBaseLaunch") or alert.get("ictBaseArmed")
+                ),
+                "firstLift": bool(alert.get("ictFirstLift")),
+                "vRipReady": bool(alert.get("ictVRipReady")),
+                "buildingRipReady": bool(alert.get("ictBuildingRipReady")),
+                "orderflowPositive": bool(
+                    alert.get("volumeAwaken")
+                    or alert.get("ictVolumeAwakening")
+                    or alert.get("optionCvdBuying")
+                ),
+            }
+            ranking = rank_trade_evidence(evidence)
+            grade = str(ranking.get("grade") or "").upper()
+        except Exception:
+            grade = ""
+    min_grade = str(
+        getattr(settings, "building_armed_base_grade_a_min_grade", "A") or "A"
+    ).upper()
+    allowed_grades = {"S"} if min_grade == "S" else {"S", "A"}
+    if grade not in allowed_grades:
+        return False
+    vol = _number(alert.get("volumeSurge"))
+    from app.engines.local_base_chart_bypass import local_base_entry_window
+
+    entry_min = float(
+        getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
+    )
+    chase_max = float(
+        getattr(settings, "ict_armed_base_launch_max_move_pct", 15.0) or 15.0
+    )
+    if bool(getattr(settings, "building_armed_base_grade_a_use_local_base_window", True)):
+        lb_min, lb_max = local_base_entry_window("BUILDING", vol)
+        entry_min = min(entry_min, lb_min)
+        chase_max = max(chase_max, lb_max)
+    max_rel = float(
+        getattr(settings, "building_armed_base_grade_a_max_base_rel_pct", 0.0) or 0.0
+    )
+    if max_rel > 0:
+        chase_max = min(chase_max, max_rel)
+    if base_rel <= 0 or not (entry_min <= base_rel <= chase_max):
+        return False
+    return True
+
+
+def building_armed_base_grade_a_top_moment_ok(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any],
+    *,
+    readiness_reason: str = "",
+) -> bool:
+    """Top-moment gate companion — FTV moment for grade-A BUILDING armed-base live."""
+    alert_like = {
+        "tier": evidence.get("tier"),
+        "ictBaseRelativeMovePct": evidence.get("localBaseMovePct"),
+        "localBaseMovePct": evidence.get("localBaseMovePct"),
+        "volumeSurge": evidence.get("volumeSurge"),
+        "ictBaseReadinessReason": readiness_reason
+        or evidence.get("ictBaseReadinessReason")
+        or evidence.get("firstLiftReadinessReason"),
+    }
+    return building_armed_base_grade_a_live_ok(
+        alert_like,
+        readiness_reason=readiness_reason,
+        ranking=dict(ranking),
+    )
 
 
 def alert_has_building_rip_signal(alert: Optional[dict[str, Any]]) -> bool:

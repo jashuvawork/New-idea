@@ -139,10 +139,18 @@ def top_moment_entry_allowed(
     *,
     top_moments_only_enabled: bool = True,
     min_grade: str = "A",
+    readiness_reason: str = "",
 ) -> tuple[bool, str, Optional[str]]:
     """True when candidate is a top FTV / V / ELITE / EXPLODING moment."""
     if not top_moments_only_enabled:
         return True, "disabled", None
+
+    from app.engines.building_ftv_gates import building_armed_base_grade_a_top_moment_ok
+
+    if building_armed_base_grade_a_top_moment_ok(
+        evidence, ranking, readiness_reason=readiness_reason,
+    ):
+        return True, "ok", "FTV"
 
     grade = str(ranking.get("grade") or "").upper()
     allowed_grades = set(TOP_MOMENT_GRADES)
