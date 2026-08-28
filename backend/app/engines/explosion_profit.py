@@ -207,6 +207,7 @@ def afternoon_capture_peak_halve_lock_reason(
     *,
     best: float,
     pnl_pts: float,
+    hold_seconds: Optional[float] = None,
 ) -> Optional[str]:
     """Book afternoon momentum when peak profit has halved (₹121 peak → ~₹111 exit)."""
     ctx = trade.entryContext or {}
@@ -215,6 +216,36 @@ def afternoon_capture_peak_halve_lock_reason(
     settings = get_settings()
     if not bool(getattr(settings, "afternoon_capture_peak_halve_lock_enabled", True)):
         return None
+
+    from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
+
+    if trade_uses_moment_stage_ladder(trade):
+        try:
+            projected = float(
+                ctx.get("projectedMaxTp")
+                or ((ctx.get("exitPlan") or {}).get("projectedMaxTp"))
+                or 0
+            )
+        except (TypeError, ValueError):
+            projected = 0.0
+        skip_tp = float(
+            getattr(
+                settings,
+                "afternoon_capture_peak_halve_skip_stage_ladder_min_projected_tp",
+                80.0,
+            )
+            or 80.0
+        )
+        if projected >= skip_tp:
+            return None
+
+    hold = _hold_seconds(trade) if hold_seconds is None else float(hold_seconds)
+    min_hold = float(
+        getattr(settings, "afternoon_capture_peak_halve_min_hold_seconds", 120) or 120
+    )
+    if hold < min_hold:
+        return None
+
     min_best = float(
         getattr(settings, "afternoon_capture_peak_halve_min_best_points", 10.0) or 10.0
     )
@@ -1526,7 +1557,13 @@ def evaluate_explosion_exit(
     exit_params = params or default_explosion_exit_params(event_tier)
     ctx = trade.entryContext or {}
     if ctx.get("afternoonCapture"):
-        exit_params = _merge_afternoon_capture_exit_params(exit_params, event_tier)
+        from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
+
+        skip_tighten = bool(
+            getattr(settings, "afternoon_capture_skip_exit_tighten_on_stage_ladder", True)
+        )
+        if not (skip_tighten and trade_uses_moment_stage_ladder(trade)):
+            exit_params = _merge_afternoon_capture_exit_params(exit_params, event_tier)
     pnl_pts = current_premium - trade.entryPremium
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
     observed_best = (
@@ -1631,7 +1668,7 @@ def evaluate_explosion_exit(
     max_profit = _ict_max_profit_trade(trade)
 
     halve_lock = afternoon_capture_peak_halve_lock_reason(
-        trade, best=best, pnl_pts=pnl_pts,
+        trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold,
     )
     if halve_lock:
         return halve_lock, pnl_inr
@@ -1790,10 +1827,12 @@ def evaluate_explosion_exit(
         else None
     )
     min_pct_best = _cfg_float(settings, "ftv_runner_pct_trail_min_best_points", 6.0)
+    stage_min_hold = _cfg_float(settings, "explosion_stage_trail_min_hold_seconds", 90.0)
     if (
         pct_keep_floor is not None
         and best >= min_pct_best
         and pnl_pts <= pct_keep_floor
+        and hold >= stage_min_hold
     ):
         # Aug28 24100 PE: peaked +31pt, faded to +10 — stage_armed waits for +45pt
         # so the 75% peak-keep floor must exit even before stage 1 completes.
@@ -1803,7 +1842,7 @@ def evaluate_explosion_exit(
         best >= exit_params.trail_arm_points
         or (stage_size > 0 and best >= stage_size)
     )
-    if stage_armed and pnl_pts <= stage_floor:
+    if stage_armed and pnl_pts <= stage_floor and hold >= stage_min_hold:
         return "explosion_stage_trail", pnl_inr
 
     # When stage ladder owns the trail, skip micro step / keep-ratio locks —

@@ -1930,6 +1930,14 @@ class Settings(BaseSettings):
     afternoon_capture_peak_halve_min_best_points: float = 10.0
     afternoon_capture_peak_halve_giveback_ratio: float = 0.50
     afternoon_capture_peak_halve_min_remain_points: float = 1.0
+    # Aug28 SENSEX 77300/77200 — halve-lock fired ~16s after entry on a +12pt spike
+    # while projectedMaxTp was 800+. Stage-ladder runners need time to expand.
+    afternoon_capture_peak_halve_min_hold_seconds: int = 120
+    afternoon_capture_peak_halve_skip_stage_ladder_min_projected_tp: float = 80.0
+    # Do not tighten afternoon trail arm onto stage-ladder trades (6pt arm clips rips).
+    afternoon_capture_skip_exit_tighten_on_stage_ladder: bool = True
+    # Stage-ladder / peak-keep exits need a minimum hold — avoid 15s scratch on noise.
+    explosion_stage_trail_min_hold_seconds: float = 90.0
 
     # All-day explosive capture — 9:20–15:30 session rips (e.g. NIFTY 23850 PE 14:00 +1360%)
     all_day_explosion_capture_enabled: bool = True
