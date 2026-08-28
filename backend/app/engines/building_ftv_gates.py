@@ -195,7 +195,6 @@ def building_armed_base_grade_a_top_moment_ok(
         ranking=dict(ranking),
     )
 
-
 def building_coil_pad_grade_a_live_ok(
     alert: Optional[dict[str, Any]],
     snap: Any = None,
@@ -297,7 +296,6 @@ def building_coil_pad_grade_a_top_moment_ok(
         readiness_reason=readiness_reason,
         ranking=dict(ranking),
     )
-
 
 def alert_has_building_rip_signal(alert: Optional[dict[str, Any]]) -> bool:
     """True when radar stamped a BUILDING rip (including after EXPLODING promote)."""
