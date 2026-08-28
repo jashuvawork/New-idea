@@ -1627,6 +1627,10 @@ async def _open_from_candidate(
         top_explosion_max=top_explosion_max,
         faded_rip=bool(faded_rip_meta),
         post_win_capped=bool(post_win_cap_meta.get("applied")),
+        explosion_always_max=(
+            candidate.mode == "explosion"
+            and bool(getattr(settings, "explosion_always_force_max_lots", True))
+        ),
     )
     # ELITE full-capital sleeve: keep cash-affordable lots; do not shrink to fit an 8% SL INR budget.
     if elite_full_lot and bool(
@@ -3033,17 +3037,23 @@ def _top_rank_full_budget_lots_allowed(
     top_explosion_max: bool,
     faded_rip: bool,
     post_win_capped: bool,
+    explosion_always_max: bool = False,
 ) -> bool:
-    """Keep full sleeve lots only for the strongest fresh rank-1 moment."""
-    return bool(
+    """Keep cash-affordable lots — do not SL-shrink fresh top / always-max entries."""
+    if not (
         enabled
         and allocation is not None
-        and allocation.rank == 1
-        and strict_first_lift
         and top_explosion_max
         and not faded_rip
-        and not         post_win_capped
-    )
+        and not post_win_capped
+    ):
+        return False
+    if allocation.rank == 1 and strict_first_lift:
+        return True
+    # Aug28 NIFTY 24200/24100: explosion_always_force_max_lots raised lots to
+    # capital max, then tune_exit_plan_for_position shrank to 1 lot because FTV
+    # full-sleeve was not stamped (strict_first_lift=False).
+    return bool(explosion_always_max)
 
 
 def _enforce_top_moment_max_lots_only(
