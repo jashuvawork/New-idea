@@ -499,6 +499,114 @@ def failed_launch_reentry_blocked(
     return True, meta
 
 
+def _prior_session_explosion_closes(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+) -> list[Any]:
+    """Closed explosion trades today on symbol+side (any strike)."""
+    sym = str(symbol or "").upper()
+    side_v = _side_key(side)
+    closes: list[Any] = []
+
+    def _is_explosion(t: Any) -> bool:
+        ctx = getattr(t, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
+        st = str(getattr(t, "strategyType", "") or "")
+        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+        return mode == "explosion" or st_u == "EXPLOSIVE"
+
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            continue
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if not _is_explosion(t):
+            continue
+        if getattr(t, "closedAt", None) is None:
+            continue
+        closes.append(t)
+    return closes
+
+
+def reentry_ml_win_prob_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    snap: Any,
+    confidence: float = 70.0,
+) -> tuple[bool, dict[str, Any]]:
+    """Block session / same-strike re-entries when ML win probability is too low.
+
+    Aug28: winners ~56% ML, 24050 post-win/post-loss re-entries ~41-43%.
+    First entries (no prior closes on symbol+side) are not gated.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "explosion_reentry_ml_win_prob_gate_enabled", True):
+        return False, meta
+
+    prior_closes = _prior_session_explosion_closes(state, symbol=symbol, side=side)
+    same_strike_prior = _latest_same_strike_explosion_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+    )
+    if not prior_closes and same_strike_prior is None:
+        return False, meta
+
+    session_min = float(
+        getattr(settings, "explosion_reentry_ml_win_prob_min", 0.52) or 0.52
+    )
+    same_strike_min = float(
+        getattr(
+            settings,
+            "explosion_reentry_ml_win_prob_same_strike_min",
+            0.55,
+        )
+        or 0.55
+    )
+    if same_strike_prior is not None:
+        required = same_strike_min
+        reentry_kind = "same_strike"
+        prior = same_strike_prior
+    else:
+        required = session_min
+        reentry_kind = "session"
+        prior = prior_closes[-1]
+
+    side_val = side.value if hasattr(side, "value") else str(side or "PUT").upper()
+    from app.engines.adaptive_exits import predict_entry_ml_win_prob
+
+    ml_prob = predict_entry_ml_win_prob(
+        snap,
+        side=side_val,
+        confidence=float(confidence or 70.0),
+    )
+    meta.update(
+        {
+            "applied": True,
+            "reentryKind": reentry_kind,
+            "mlWinProb": round(ml_prob, 3),
+            "requiredMlWinProb": round(required, 3),
+            "priorTradeId": getattr(prior, "id", None),
+            "priorExitReason": str(getattr(prior, "exitReason", "") or ""),
+            "priorPnlInr": round(
+                float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0),
+                2,
+            ),
+            "reason": "reentry_ml_win_prob_low",
+        }
+    )
+    if ml_prob + 1e-9 < required:
+        return True, meta
+    return False, meta
+
+
 def session_peak_late_reentry_blocked(
     *,
     symbol: str,

@@ -297,6 +297,48 @@ def _swing_plan(settings, psychology: PsychologyState, win_prob: float, reasonin
     )
 
 
+def predict_entry_ml_win_prob(
+    snap: SymbolSnapshot,
+    *,
+    side: str,
+    confidence: float = 70.0,
+    news: Optional[list[dict[str, Any]]] = None,
+) -> float:
+    """ML win probability for a candidate entry (same features as adaptive exit plan)."""
+    settings = get_settings()
+    if not getattr(settings, "adaptive_exits_enabled", True):
+        return 0.5
+
+    from app.engines.psychology_engine import PsychologyState, analyze_psychology
+    from app.models.schemas import get_session_targets
+
+    ps_data = snap.psychology or {}
+    if ps_data:
+        psychology = PsychologyState(
+            score=ps_data.get("score", 0),
+            label=ps_data.get("label", "NEUTRAL"),
+            exit_bias=ps_data.get("exitBias", "BALANCED"),
+            news_bias=ps_data.get("newsBias", "NEUTRAL"),
+            breadth_bias=ps_data.get("breadthBias", "NEUTRAL"),
+        )
+    else:
+        psychology = analyze_psychology(snap, news)
+
+    profile = snap.optimizedProfile or get_session_targets()
+    ml = get_ml_engine()
+    ctx = _build_ml_context(snap, psychology, profile, side, confidence)
+    sig = type(
+        "Sig",
+        (),
+        {
+            "side": type("S", (), {"value": side})(),
+            "confidence": confidence,
+        },
+    )()
+    features = ml.extract_features(sig, ctx)
+    return float(ml.predict_win_probability(features))
+
+
 def _build_ml_context(
     snap: SymbolSnapshot,
     psychology: PsychologyState,

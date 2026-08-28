@@ -2173,6 +2173,10 @@ class Settings(BaseSettings):
     explosion_failed_launch_reentry_exit_reasons_csv: str = (
         "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
     )
+    # Re-entry ML gate — Aug28 winners ~56% ML, 24050 losses ~41-43%.
+    explosion_reentry_ml_win_prob_gate_enabled: bool = True
+    explosion_reentry_ml_win_prob_min: float = 0.52
+    explosion_reentry_ml_win_prob_same_strike_min: float = 0.55
     # 2) Hard INR ceilings: ~1% of ₹2L normally, ~2% only for a fully proven launch.
     explosion_per_trade_max_loss_inr: float = 2_000.0
     explosion_exceptional_per_trade_max_loss_inr: float = 4_000.0

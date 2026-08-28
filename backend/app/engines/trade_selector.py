@@ -1517,6 +1517,7 @@ def find_best_entry(
             from app.engines.session_mode_feedback import (
                 exhausted_ftv_reentry_blocked,
                 failed_launch_reentry_blocked,
+                reentry_ml_win_prob_blocked,
             )
 
             fail_blocked, _ = failed_launch_reentry_blocked(
@@ -1532,6 +1533,26 @@ def find_best_entry(
                     "causalRanking": {
                         "grade": "REJECT",
                         "reasons": ["failed_launch_reentry_cooldown"],
+                    },
+                }
+                continue
+
+            ml_blocked, ml_meta = reentry_ml_win_prob_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+                strike=float(c.strike or 0),
+                snap=c.snap,
+                confidence=float(c.score or 0),
+            )
+            if ml_blocked:
+                c.pretrade_meta = {
+                    **(c.pretrade_meta or {}),
+                    "reentryMlWinProbBlocked": True,
+                    **ml_meta,
+                    "causalRanking": {
+                        "grade": "REJECT",
+                        "reasons": ["reentry_ml_win_prob_low"],
                     },
                 }
                 continue
