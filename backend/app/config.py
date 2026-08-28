@@ -1656,6 +1656,16 @@ class Settings(BaseSettings):
     watch_local_base_pad_max_explosion_score: float = 50.0
     watch_local_base_pad_min_velocity_3s: float = 0.05
     watch_local_base_pad_min_velocity_9s: float = 0.03
+    # Cold-trough pad — WATCH/BUILDING at session low with v3=0 and armed/coil signals
+    # (Aug28 NIFTY 24150 CE 15:03–15:05 at ₹104 pad before 3pm rip; v3=0 blocked watch pad).
+    cold_trough_pad_entry_enabled: bool = True
+    cold_trough_pad_max_off_low_pct: float = 5.0
+    cold_trough_pad_max_local_move_pct: float = 8.0
+    cold_trough_pad_max_explosion_score: float = 35.0
+    # Anti-chase — block ELITE/EXPLODING tier promotion when baseRel > floor without pad stamp
+    # (Aug28 NIFTY 24250 CE 10:17 ELITE @ 8.4% baseRel after micro-rip, not cold trough).
+    tier_promotion_pad_chase_block_enabled: bool = True
+    tier_promotion_pad_chase_min_base_rel_pct: float = 8.0
     # Pad-lane turnaround chart bypass — premium-led V-rip / slow-grind / FTV lifts off
     # session low while the 5m index chart is still counter-trend (Aug25 NIFTY 24150 CE
     # ₹20→90 V-reversal blocked by chart_live_bearish_no_calls). Wider adverse-momentum

@@ -695,6 +695,7 @@ def _explosion_candidates(
             extended_session_chase_blocked,
             immature_explosion_blocked,
             live_explosion_confirmation_blocked,
+            tier_promotion_pad_chase_blocked,
         )
 
         immature_blocked, _immature_reason = immature_explosion_blocked(
@@ -703,6 +704,13 @@ def _explosion_candidates(
             bullish_local_base=bool(bullish_base.get("active")),
         )
         if immature_blocked and not must_take and not first_lift_ready:
+            continue
+        chase_blocked, _chase_reason = tier_promotion_pad_chase_blocked(
+            event,
+            ict=ict,
+            alert=alert,
+        )
+        if chase_blocked and not first_lift_ready and not early_pad:
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the
         # hard window does not re-raise the unstructured 28% floor.

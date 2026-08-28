@@ -485,6 +485,7 @@ def check_explosion_entry(
     from app.engines.explosion_entry_guards import (
         explosion_entry_window_blocked,
         live_explosion_confirmation_blocked,
+        tier_promotion_pad_chase_blocked,
     )
     from app.engines.ict_breakout_monitor import (
         analyze_explosion_event_ict,
@@ -530,6 +531,13 @@ def check_explosion_entry(
     )
     if window_blocked and not first_lift_ready and not early_pad:
         return False, window_reason
+    chase_blocked, chase_reason = tier_promotion_pad_chase_blocked(
+        event,
+        ict=ict_live,
+        alert=alert if isinstance(alert, dict) else None,
+    )
+    if chase_blocked and not first_lift_ready and not early_pad:
+        return False, chase_reason
     live_blocked, live_reason = live_explosion_confirmation_blocked(
         event,
         ict=ict_live,

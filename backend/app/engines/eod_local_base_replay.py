@@ -181,6 +181,7 @@ def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, An
         "earlyRadarPadCapture": bool(
             alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
         ),
+        "coldTroughPad": bool(alert.get("coldTroughPad")),
         "timingAssessment": str(alert.get("timingAssessment") or ""),
         "timingAction": str(alert.get("timingAction") or ""),
     }
@@ -259,6 +260,22 @@ def evaluate_local_base_entry(
             alert=alert, readiness_reason=lift_reason,
         ) or lift_reason
 
+    from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+    from app.engines.explosion_entry_guards import tier_promotion_pad_chase_blocked
+
+    if not alert_has_early_radar_pad_capture(alert):
+        candidate = _candidate_from_alert(alert, snap)
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+        ict_ev = analyze_explosion_event_ict(candidate.explosion_event, snap)
+        chase_blocked, chase_reason = tier_promotion_pad_chase_blocked(
+            candidate.explosion_event,
+            ict=ict_ev,
+            alert=alert,
+        )
+        if chase_blocked:
+            return False, chase_reason, moment, ranking
+
     base_rel = _f(alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct"))
     tier = str(alert.get("tier") or "")
     vol = _f(alert.get("volumeSurge"))
@@ -273,6 +290,8 @@ def evaluate_local_base_entry(
             "building_rip_bullish_ready",
             "fast_bullish_local_base_ready",
             "slow_grind_sudden_lift_ready",
+            "slow_grind_armed_trough_ready",
+            "early_radar_pad_ready",
             "squeeze_release_ready",
             "index_led_option_lag_ready",
             "stealth_cvd_coil_ready",
