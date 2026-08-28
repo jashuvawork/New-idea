@@ -704,6 +704,15 @@ def session_peak_late_reentry_blocked(
     ):
         return False, ""
 
+    # Aug28 SENSEX PUT 77500: fresh ict_base_armed re-base near session peak with cold v3.
+    from app.engines.early_radar_pad_capture import ict_base_armed_prelaunch_pad_lane
+
+    if (
+        ict_base_armed_prelaunch_pad_lane(alert_d)
+        and pad_lane_cold_velocity_ok(pad_evidence, v3, v9)
+    ):
+        return False, ""
+
     return True, (
         f"late_reentry_near_session_peak_{sess_peak:.1f}"
         f"_pullback_{pullback_pct:.1f}pct_v3_{v3:.1f}"
