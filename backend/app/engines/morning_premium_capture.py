@@ -58,7 +58,7 @@ def _best_surge_for_side(
 
 
 def in_afternoon_premium_capture_window() -> bool:
-    """11:45–15:25 IST — afternoon momentum / consolidation breakouts."""
+    """11:45–15:30 IST — afternoon momentum / consolidation breakouts."""
     if get_market_phase() != "LIVE_MARKET":
         return False
     settings = get_settings()
@@ -70,7 +70,7 @@ def in_afternoon_premium_capture_window() -> bool:
 
 
 def in_all_day_explosion_window() -> bool:
-    """09:20–15:25 IST — monitor explosive premium moves all session."""
+    """09:20–15:30 IST — monitor explosive premium moves all session."""
     if get_market_phase() != "LIVE_MARKET":
         return False
     settings = get_settings()

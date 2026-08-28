@@ -113,7 +113,7 @@ def is_near_expiry_day(snap: SymbolSnapshot) -> bool:
 
 
 def in_expiry_pm_itm_window() -> bool:
-    """14:00–15:25 IST window for small ITM quick scalps near expiry."""
+    """14:00–15:30 IST window for small ITM quick scalps near expiry."""
     from app.services.upstox import get_market_phase
 
     settings = get_settings()
@@ -280,13 +280,29 @@ def check_expiry_explosion_open_block(
 
 
 def in_expiry_evening_block() -> bool:
-    """Block new entries in expiry afternoon/evening — gamma + pin risk."""
+    """Optional hard stop for expiry entries — default off through market close."""
     settings = get_settings()
     if not settings.expiry_day_guards_enabled:
+        return False
+    if not getattr(settings, "expiry_evening_block_enabled", False):
         return False
     current = _minutes_now()
     block_from = settings.expiry_evening_block_hour * 60 + settings.expiry_evening_block_minute
     return current >= block_from
+
+
+def snapshots_have_afternoon_top_signal(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """FTV/V/ELITE/explosive radar on tape — allow power-hour entries on expiry."""
+    from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
+
+    return (
+        snapshots_have_expiry_elite_top(snapshots)
+        or snapshots_have_top_ftv_or_v(snapshots)
+        or snapshots_have_grade_a_ftv_first_lift(snapshots)
+        or snapshots_have_all_in_explosion(snapshots)
+    )
 
 
 def _session_declining(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> bool:
@@ -1000,6 +1016,9 @@ def check_expiry_entry_allowed(
             return True, "ok", meta
         from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
 
+        if snapshots_have_afternoon_top_signal(snapshots):
+            meta["expiryEveningTopSignalBypass"] = True
+            return True, "ok", meta
         if (
             settings.expiry_evening_all_in_explosion_bypass
             and snapshots_have_all_in_explosion(snapshots)

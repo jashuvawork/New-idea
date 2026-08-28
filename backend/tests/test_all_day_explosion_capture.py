@@ -88,6 +88,12 @@ def _snap_with_alerts() -> SymbolSnapshot:
 
 
 @patch("app.engines.morning_premium_capture.get_market_phase", return_value="LIVE_MARKET")
+@patch("app.engines.chop_day_guards._minutes_now", return_value=15 * 60 + 20)
+def test_all_day_window_covers_power_hour(mock_min, mock_phase):
+    assert in_all_day_explosion_window() is True
+
+
+@patch("app.engines.morning_premium_capture.get_market_phase", return_value="LIVE_MARKET")
 @patch("app.engines.chop_day_guards._minutes_now", return_value=14 * 60 + 10)
 def test_all_day_window_covers_14_00(mock_min, mock_phase):
     assert in_all_day_explosion_window() is True
