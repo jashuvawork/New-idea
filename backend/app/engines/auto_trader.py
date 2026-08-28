@@ -3452,10 +3452,20 @@ async def process(
                 and f"Expiry guard — {', '.join(expiry_meta.get('worstDayReasons', []))}"
                 or "Expiry-day entry blocked",
             })
+        from app.engines.power_hour_guards import check_power_hour_session_allowed
+
+        power_ok, power_reason, power_meta = check_power_hour_session_allowed(state, snapshots)
+        if not power_ok and not session_lift:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": power_reason,
+                "message": "Power hour (15:00+) — top FTV/V/ELITE/explosives only",
+            })
         session_entries_ok = (
             not paused and not cap_hit and not ctrl_cap and not last_n_paused
             and not whipsaw_paused
             and (expiry_ok or session_lift)
+            and (power_ok or session_lift)
             and (policy != "PAUSED" or session_lift)
             and (not live_blocked or session_lift)
         )

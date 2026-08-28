@@ -598,6 +598,13 @@ def validate_candidate(
     """
     settings = get_settings()
     policy_meta: dict[str, Any] = {}
+    from app.engines.power_hour_guards import (
+        candidate_qualifies_power_hour_top_trade,
+        in_power_hour_window,
+    )
+
+    if in_power_hour_window() and not candidate_qualifies_power_hour_top_trade(candidate):
+        return False, "power_hour_top_only", policy_meta
     if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.session_mode_feedback import (

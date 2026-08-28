@@ -71,7 +71,7 @@ def test_morning_vs_evening_windows():
 
     with patch("app.engines.expiry_day_guards.datetime") as mock_dt:
         mock_dt.now.return_value = datetime(2026, 6, 30, 15, 15, tzinfo=IST)
-        assert in_expiry_evening_block() is False
+        assert in_expiry_evening_block() is True
 
     with patch("app.engines.expiry_day_guards.get_settings") as mock_settings:
         s = mock_settings.return_value
@@ -92,21 +92,21 @@ def test_evening_block_summary_only_when_expiry_today():
     state = AutoTraderState()
     non_expiry = {"NIFTY": _snap(expiry="2026-07-17")}
     with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-15"):
-        with patch("app.engines.expiry_day_guards._minutes_now", return_value=15 * 60 + 30):
+        with patch("app.engines.expiry_day_guards._minutes_now", return_value=15 * 60 + 15):
             summary = expiry_guard_summary(state, non_expiry)
     assert summary["expirySession"] is False
-    assert summary["pastEveningBlockTime"] is False
+    assert summary["pastEveningBlockTime"] is True
     assert summary["eveningBlock"] is False
     assert summary["eveningBlockActive"] is False
 
     expiry_today = {"NIFTY": _snap(expiry="2026-07-15")}
     with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-15"):
-        with patch("app.engines.expiry_day_guards._minutes_now", return_value=15 * 60 + 30):
+        with patch("app.engines.expiry_day_guards._minutes_now", return_value=15 * 60 + 15):
             summary = expiry_guard_summary(state, expiry_today)
     assert summary["expirySession"] is True
-    assert summary["pastEveningBlockTime"] is False
-    assert summary["eveningBlock"] is False
-    assert summary["eveningBlockActive"] is False
+    assert summary["pastEveningBlockTime"] is True
+    assert summary["eveningBlock"] is True
+    assert summary["eveningBlockActive"] is True
 
 
 def test_predict_worst_expiry_day():
@@ -230,17 +230,23 @@ def test_in_expiry_pm_itm_window(mock_phase):
         assert in_expiry_pm_itm_window() is False
 
 
-def test_pm_itm_evening_block_allows_quick_entries():
+def test_pm_itm_evening_block_requires_top_signal():
     state = AutoTraderState()
-    snaps = {"NIFTY": _snap(expiry="2026-07-07")}
+    snaps = {"NIFTY": _snap(expiry="2026-07-06")}
     with patch("app.engines.expiry_day_guards._today_str", return_value="2026-07-06"):
         with patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=True):
             with patch("app.engines.expiry_day_guards.in_expiry_pm_itm_window", return_value=True):
-                ok, reason, meta = check_expiry_entry_allowed(state, snaps)
-    assert ok is True
-    assert reason == "ok"
-    assert meta.get("expiryPmItmQuickActive") is True
-    assert meta.get("expiryPmItmQuickOnly") is True
+                with patch(
+                    "app.engines.expiry_day_guards.snapshots_have_afternoon_top_signal",
+                    return_value=False,
+                ):
+                    with patch(
+                        "app.engines.extreme_explosion_moment.snapshots_have_all_in_explosion",
+                        return_value=False,
+                    ):
+                        ok, reason, _meta = check_expiry_entry_allowed(state, snaps)
+    assert ok is False
+    assert reason == "expiry_evening_block"
 
 
 def test_expiry_evening_allows_top_signal_bypass():
