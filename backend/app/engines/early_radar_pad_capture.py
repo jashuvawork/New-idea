@@ -76,6 +76,72 @@ def _alert_local_base_move(alert: Mapping[str, Any]) -> float:
     )
 
 
+def _cold_trough_coil_signal(alert: Mapping[str, Any]) -> bool:
+    """Coil / armed-base proof at session trough — velocity may still be zero."""
+    if bool(
+        alert.get("ictBaseArmed")
+        or alert.get("baseArmed")
+        or alert.get("ictVRipReady")
+        or alert.get("vRipReady")
+    ):
+        return True
+    if bool(
+        alert.get("volumeAwaken")
+        or alert.get("ictVolumeAwakening")
+        or alert.get("volumeAwakening")
+    ):
+        return True
+    if bool(
+        alert.get("buildingLiftHelping")
+        or alert.get("buildingRipHelpersOk")
+        or alert.get("buildingRipReady")
+        or alert.get("ictBuildingRipReady")
+    ):
+        return True
+    if bool(alert.get("ictFlatThenVertical") or alert.get("flatThenVertical")):
+        return True
+    rsi = _number(alert.get("rsi") or alert.get("optionRsi"))
+    side = str(alert.get("side") or "").upper()
+    if side == "CALL" and 0 < rsi <= 45.0:
+        return True
+    if side == "PUT" and rsi >= 55.0:
+        return True
+    macd_hist = _number(alert.get("macdHistogram"))
+    if side == "CALL" and macd_hist > -0.05:
+        return True
+    if side == "PUT" and macd_hist < 0.05:
+        return True
+    return False
+
+
+def cold_trough_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None) -> bool:
+    """WATCH/BUILDING at session trough — enter before v3 lifts (cold velocity OK)."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "cold_trough_pad_entry_enabled", True)):
+        return False
+    tier = _alert_tier(alert)
+    if tier not in ("WATCH", "BUILDING"):
+        return False
+
+    max_off = float(getattr(s, "cold_trough_pad_max_off_low_pct", 5.0) or 5.0)
+    off_low = early_radar_pad_off_low_pct(alert)
+    if off_low > max_off + 1e-6:
+        return False
+
+    max_local = float(getattr(s, "cold_trough_pad_max_local_move_pct", 8.0) or 8.0)
+    local_move = _alert_local_base_move(alert)
+    if local_move > max_local + 1e-6:
+        return False
+
+    max_score = float(getattr(s, "cold_trough_pad_max_explosion_score", 35.0) or 35.0)
+    if _alert_explosion_score(alert) > max_score + 1e-6:
+        return False
+
+    if not _cold_trough_coil_signal(alert):
+        return False
+    return True
+
+
 def watch_local_base_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None) -> bool:
     """True when WATCH shows an early lift off session/local base without ELITE heat."""
     s = settings or get_settings()
@@ -141,6 +207,8 @@ def watch_local_base_pad_lift_signal(alert: Mapping[str, Any], settings: Any = N
 def watch_local_base_pad_structure(alert: Mapping[str, Any], settings: Any = None) -> bool:
     """WATCH at session/local trough with early lift — trade before tier promotion."""
     if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
+        return True
+    if cold_trough_pad_lift_signal(alert, settings):
         return True
     return watch_local_base_pad_lift_signal(alert, settings)
 
@@ -287,7 +355,7 @@ def early_radar_pad_capture_active(
             and bool(alert.get("ictBaseArmed") or alert.get("baseArmed"))
             and local_move <= pad_max + 1e-6
             and _alert_explosion_score(alert) >= min_score
-        ):
+        ) and not cold_trough_pad_lift_signal(alert, settings):
             return False
 
     premium = _number(alert.get("premium"))
@@ -338,6 +406,8 @@ def stamp_early_radar_pad_capture(
     if early_radar_pad_capture_active(alert, snap):
         alert["earlyRadarPadCapture"] = True
         alert["ictEarlyRadarPadCapture"] = True
+        if cold_trough_pad_lift_signal(alert):
+            alert["coldTroughPad"] = True
         alert.setdefault("ictBaseReadinessReason", EARLY_RADAR_PAD_READY)
         return True
     alert.pop("earlyRadarPadCapture", None)

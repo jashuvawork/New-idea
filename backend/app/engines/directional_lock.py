@@ -262,6 +262,10 @@ def check_directional_side_lock(
     if not isinstance(alert, dict):
         alert = None
     ev = getattr(candidate, "explosion_event", None) if candidate is not None else None
+    from app.engines.early_radar_pad_capture import watch_local_base_pad_structure
+
+    if isinstance(alert, dict) and watch_local_base_pad_structure(alert):
+        return False, "ok"
     if local_base_overrides_side_bias(side_v, snap, event=ev, alert=alert):
         return False, "ok"
 

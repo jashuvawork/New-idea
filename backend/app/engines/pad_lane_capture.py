@@ -86,6 +86,8 @@ def pad_lane_cold_velocity_ok(
         return True
     if evidence.get("earlyRadarPadCapture") and -0.8 <= v3 <= 1.5:
         return True
+    if evidence.get("coldTroughPad") and -0.8 <= v3 <= 1.5:
+        return True
     if evidence.get("vRipReady") and -1.2 <= v3 <= 1.5 and v9 >= -0.8:
         return True
     if evidence.get("firstLiftLocalBase") and -1.5 <= v3 <= 1.5 and v9 >= -1.0:
@@ -125,10 +127,14 @@ def pad_lane_grade_floor_applies(evidence: Mapping[str, Any]) -> bool:
         return False
     if evidence.get("faded") or evidence.get("exhaustedReentry") or evidence.get("midRipCoil"):
         return False
+    if evidence.get("earlyRadarPadCapture") or evidence.get("coldTroughPad"):
+        v3 = float(evidence.get("velocity3s") or 0)
+        v9 = float(evidence.get("velocity9s") or 0)
+        return pad_lane_cold_velocity_ok(evidence, v3, v9)
     tier = str(evidence.get("tier") or "").upper()
     if tier not in ("ELITE", "EXPLODING"):
         return False
-    if evidence.get("vRipReady") or evidence.get("earlyRadarPadCapture"):
+    if evidence.get("vRipReady"):
         if not pad_lane_ftv_waives_allocation_rank_one(evidence):
             return False
         v3 = float(evidence.get("velocity3s") or 0)
