@@ -15,6 +15,8 @@ from app.models.schemas import Side, SymbolSnapshot
 
 EARLY_RADAR_PAD_READY = "early_radar_pad_ready"
 BUILDING_COIL_PAD_READY = "building_coil_pad_ready"
+BUILDING_COIL_PAD_ARMED = "building_coil_pad_armed"
+BUILDING_COIL_PAD_UNCONFIRMED = "building_coil_pad_unconfirmed"
 
 
 def _enrich_row_from_event(
@@ -149,8 +151,61 @@ def building_coil_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None
     return True
 
 
+def building_coil_pad_lift_confirmed(
+    alert: Mapping[str, Any], settings: Any = None,
+) -> bool:
+    """Live entry requires lift confirmation — armed coil alone is watch-only."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "building_coil_pad_confirm_entry_enabled", True)):
+        return True
+    if not building_coil_pad_lift_signal(alert, s):
+        return False
+
+    tier = _alert_tier(alert)
+    if tier in ("ELITE", "EXPLODING"):
+        return True
+
+    v3 = _number(alert.get("velocity3s"))
+    v9 = _number(alert.get("velocity9s"))
+    min_v3 = float(
+        getattr(s, "building_coil_pad_confirm_min_velocity_3s", 0.5) or 0.5
+    )
+    min_v9 = float(
+        getattr(s, "building_coil_pad_confirm_min_velocity_9s", 0.25) or 0.25
+    )
+    if v3 >= min_v3 or v9 >= min_v9:
+        return True
+
+    flat_vert = bool(
+        alert.get("ictFlatThenVertical") or alert.get("flatThenVertical")
+    )
+    breakout = bool(alert.get("ictBreakout") or alert.get("activeBreakout"))
+    vol_awake = bool(
+        alert.get("volumeAwaken")
+        or alert.get("ictVolumeAwakening")
+        or alert.get("volumeAwakening")
+    )
+    vol_surge = _number(alert.get("volumeSurge"))
+    min_surge = float(
+        getattr(s, "building_coil_pad_confirm_min_volume_surge", 1.2) or 1.2
+    )
+    if bool(getattr(s, "building_coil_pad_confirm_allow_flat_vertical", True)):
+        if flat_vert and breakout and (vol_awake or vol_surge >= min_surge):
+            return True
+
+    if bool(
+        alert.get("indexHelpersConfirm")
+        or alert.get("indexTickSpike")
+        or alert.get("indexTickAlign")
+    ):
+        if v3 > 0 or v9 > 0:
+            return True
+
+    return False
+
+
 def building_coil_pad_structure(alert: Mapping[str, Any], settings: Any = None) -> bool:
-    if bool(alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")):
+    if bool(alert.get("buildingCoilPadReady")):
         return True
     return building_coil_pad_lift_signal(alert, settings)
 
@@ -158,15 +213,24 @@ def building_coil_pad_structure(alert: Mapping[str, Any], settings: Any = None) 
 def stamp_building_coil_pad(alert: dict[str, Any], settings: Any = None) -> bool:
     if not isinstance(alert, dict):
         return False
-    if building_coil_pad_lift_signal(alert, settings):
-        alert["buildingCoilPad"] = True
-        alert["buildingCoilPadReady"] = True
-        if str(alert.get("ictBaseReadinessReason") or "") != BUILDING_COIL_PAD_READY:
-            alert.setdefault("ictBaseReadinessReason", BUILDING_COIL_PAD_READY)
-        return True
-    alert.pop("buildingCoilPad", None)
-    alert.pop("buildingCoilPadReady", None)
-    return False
+    s = settings or get_settings()
+    if not building_coil_pad_lift_signal(alert, s):
+        alert.pop("buildingCoilPad", None)
+        alert.pop("buildingCoilPadArmed", None)
+        alert.pop("buildingCoilPadReady", None)
+        return False
+    alert["buildingCoilPadArmed"] = True
+    if not building_coil_pad_lift_confirmed(alert, s):
+        alert.pop("buildingCoilPad", None)
+        alert.pop("buildingCoilPadReady", None)
+        if str(alert.get("ictBaseReadinessReason") or "") == BUILDING_COIL_PAD_READY:
+            alert.pop("ictBaseReadinessReason", None)
+        return False
+    alert["buildingCoilPad"] = True
+    alert["buildingCoilPadReady"] = True
+    if str(alert.get("ictBaseReadinessReason") or "") != BUILDING_COIL_PAD_READY:
+        alert.setdefault("ictBaseReadinessReason", BUILDING_COIL_PAD_READY)
+    return True
 
 
 def building_coil_pad_moneyness_ok(
@@ -211,6 +275,10 @@ def building_coil_pad_entry_readiness(
     s = settings or get_settings()
     if not building_coil_pad_lift_signal(row, s):
         return False, ""
+    if isinstance(alert, dict):
+        stamp_building_coil_pad(alert, s)
+    if not building_coil_pad_lift_confirmed(row, s):
+        return False, BUILDING_COIL_PAD_UNCONFIRMED
     if not building_coil_pad_moneyness_ok(row, snap, s):
         return False, "building_coil_pad_moneyness_blocked"
     premium = _number(row.get("premium"))
@@ -222,13 +290,16 @@ def building_coil_pad_entry_readiness(
         snap=snap,
     ):
         return False, "building_coil_pad_premium_out_of_band"
-    if isinstance(alert, dict):
-        stamp_building_coil_pad(alert, s)
     return True, BUILDING_COIL_PAD_READY
 
 
 def alert_has_building_coil_pad(alert: Mapping[str, Any]) -> bool:
-    return bool(alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady"))
+    """True only when coil pad is confirmed for live entry (not watch/armed)."""
+    return bool(alert.get("buildingCoilPadReady"))
+
+
+def alert_has_building_coil_pad_armed(alert: Mapping[str, Any]) -> bool:
+    return bool(alert.get("buildingCoilPadArmed"))
 
 
 def cold_trough_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None) -> bool:

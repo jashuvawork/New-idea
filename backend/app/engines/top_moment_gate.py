@@ -238,7 +238,7 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
     """Pre-selector radar filter: BUILDING must show FTV/V shape before candidacy."""
     if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
         return True
-    if bool(alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")):
+    if bool(alert.get("buildingCoilPadReady")):
         return True
     tier = str(alert.get("tier") or "").upper()
     if tier in ("ELITE", "EXPLODING"):

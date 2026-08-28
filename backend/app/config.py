@@ -1685,6 +1685,12 @@ class Settings(BaseSettings):
     building_coil_pad_ftv_max_capital_pct: float = 0.90
     building_coil_pad_ftv_force_max_lots: bool = True
     building_coil_pad_max_otm_steps: int = 4
+    # Require lift confirmation before coil-pad live entry (armed coil is watch-only).
+    building_coil_pad_confirm_entry_enabled: bool = True
+    building_coil_pad_confirm_min_velocity_3s: float = 0.5
+    building_coil_pad_confirm_min_velocity_9s: float = 0.25
+    building_coil_pad_confirm_min_volume_surge: float = 1.2
+    building_coil_pad_confirm_allow_flat_vertical: bool = True
     # Prefer deeper ITM expansion strikes over ATM when coil pad is active
     # (Aug28 24050 ITM over 24200/24100 ATM on the same lift).
     expansion_strike_rank_bonus_enabled: bool = True

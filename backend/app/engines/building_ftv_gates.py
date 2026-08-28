@@ -222,12 +222,10 @@ def building_coil_pad_grade_a_live_ok(
     from app.engines.early_radar_pad_capture import (
         BUILDING_COIL_PAD_READY,
         alert_has_building_coil_pad,
-        building_coil_pad_lift_signal,
     )
 
     if rr != BUILDING_COIL_PAD_READY and not alert_has_building_coil_pad(alert):
-        if not building_coil_pad_lift_signal(alert, settings):
-            return False
+        return False
     if _building_armed_base_worst_day_blocked(state=state, snapshots=snapshots):
         return False
     local_move = _number(

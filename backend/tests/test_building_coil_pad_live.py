@@ -13,8 +13,11 @@ from app.engines.building_ftv_gates import (
 )
 from app.engines.early_radar_pad_capture import (
     BUILDING_COIL_PAD_READY,
+    BUILDING_COIL_PAD_UNCONFIRMED,
     alert_has_building_coil_pad,
+    alert_has_building_coil_pad_armed,
     building_coil_pad_entry_readiness,
+    building_coil_pad_lift_confirmed,
     building_coil_pad_lift_signal,
     stamp_building_coil_pad,
 )
@@ -215,3 +218,91 @@ def test_selector_admits_building_coil_pad_without_elite_tier(mock_ready, _open)
     assert selected.tier == "BUILDING"
     assert selected.side == Side.PUT
     assert selected.strike == 24050.0
+
+
+def test_building_coil_pad_armed_without_confirmation_blocks_entry():
+    settings = Settings(building_coil_pad_entry_enabled=True)
+    alert = _aug28_24050_alert(
+        ictFlatThenVertical=False,
+        flatThenVertical=False,
+        ictBreakout=False,
+        volumeAwaken=False,
+        volumeSurge=0.5,
+        velocity3s=0.0,
+        velocity9s=0.0,
+    )
+    snap = _snap()
+    with patch("app.engines.early_radar_pad_capture.get_settings", return_value=settings):
+        assert building_coil_pad_lift_signal(alert, settings) is True
+        assert building_coil_pad_lift_confirmed(alert, settings) is False
+        ok, reason = building_coil_pad_entry_readiness(snap=snap, alert=alert, settings=settings)
+    assert ok is False
+    assert reason == BUILDING_COIL_PAD_UNCONFIRMED
+    assert alert_has_building_coil_pad_armed(alert)
+    assert not alert_has_building_coil_pad(alert)
+
+
+def test_building_coil_pad_confirmed_via_velocity():
+    settings = Settings(building_coil_pad_entry_enabled=True)
+    alert = _aug28_24050_alert(
+        ictFlatThenVertical=False,
+        flatThenVertical=False,
+        ictBreakout=False,
+        volumeAwaken=False,
+        volumeSurge=0.5,
+        velocity3s=0.55,
+        velocity9s=0.0,
+    )
+    snap = _snap()
+    with patch("app.engines.early_radar_pad_capture.get_settings", return_value=settings):
+        ok, reason = building_coil_pad_entry_readiness(snap=snap, alert=alert, settings=settings)
+    assert ok is True
+    assert reason == BUILDING_COIL_PAD_READY
+    assert alert_has_building_coil_pad(alert)
+
+
+def test_building_coil_pad_confirmed_via_flat_vertical_volume():
+    settings = Settings(building_coil_pad_entry_enabled=True)
+    alert = _aug28_24050_alert(
+        velocity3s=0.0,
+        velocity9s=0.0,
+    )
+    snap = _snap()
+    with patch("app.engines.early_radar_pad_capture.get_settings", return_value=settings):
+        ok, reason = building_coil_pad_entry_readiness(snap=snap, alert=alert, settings=settings)
+    assert ok is True
+    assert reason == BUILDING_COIL_PAD_READY
+
+
+def test_grade_a_live_ok_requires_confirmed_coil_pad():
+    settings = Settings(building_coil_pad_entry_enabled=True)
+    alert = _aug28_24050_alert(
+        ictFlatThenVertical=False,
+        flatThenVertical=False,
+        ictBreakout=False,
+        volumeAwaken=False,
+        volumeSurge=0.5,
+        velocity3s=0.0,
+        velocity9s=0.0,
+    )
+    snap = _snap()
+    with patch("app.engines.building_ftv_gates.get_settings", return_value=settings):
+        assert building_coil_pad_grade_a_live_ok(alert, snap) is False
+
+
+def test_explosion_alert_armed_only_not_top_moment():
+    settings = Settings(building_coil_pad_entry_enabled=True)
+    alert = _aug28_24050_alert(
+        ictFlatThenVertical=False,
+        flatThenVertical=False,
+        ictBreakout=False,
+        volumeAwaken=False,
+        volumeSurge=0.5,
+        velocity3s=0.0,
+        velocity9s=0.0,
+    )
+    with patch("app.engines.early_radar_pad_capture.get_settings", return_value=settings):
+        stamp_building_coil_pad(alert, settings)
+    assert alert_has_building_coil_pad_armed(alert)
+    assert not alert_has_building_coil_pad(alert)
+    assert explosion_alert_is_top_moment(alert) is False
