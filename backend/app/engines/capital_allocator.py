@@ -636,6 +636,22 @@ def max_lots_for_capital_pct(symbol: str, premium: float, capital_pct: float) ->
     return max(1, int(budget / (premium * mult)))
 
 
+def apply_explosion_always_max_lots(
+    lots: int,
+    symbol: str,
+    premium: float,
+    *,
+    mode: str = "",
+) -> int:
+    """Floor explosion entries at capital max lots when enabled."""
+    settings = get_settings()
+    if str(mode or "").lower() != "explosion":
+        return int(lots)
+    if not bool(getattr(settings, "explosion_always_force_max_lots", True)):
+        return int(lots)
+    return max(int(lots), max_lots_for_capital(symbol, premium))
+
+
 def clamp_lots(lots: int, symbol: str = "", premium: float = 0.0) -> int:
     """Clamp to min lots and capital-derived max (optional hard ceiling)."""
     settings = get_settings()

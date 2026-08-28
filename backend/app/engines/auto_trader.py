@@ -806,7 +806,10 @@ async def _open_from_candidate(
         lots = cap_extended_chase_lots(lots, candidate.explosion_event, ict=chase_ict)
         if faded_rip_meta:
             lots = cap_faded_rip_lots(lots)
-        if timing_meta:
+        always_max_explosion = (
+            bool(getattr(settings, "explosion_always_force_max_lots", True))
+        )
+        if timing_meta and not always_max_explosion:
             from app.engines.entry_timing import cap_lots_for_timing
 
             lots = cap_lots_for_timing(lots, timing_meta)
@@ -1306,7 +1309,10 @@ async def _open_from_candidate(
             or base_window_full_lots
             or bool(getattr(settings, "top_explosion_force_max_bypasses_first_green", True))
         )
-    ) or elite_full_lot
+    ) or elite_full_lot or (
+        candidate.mode == "explosion"
+        and bool(getattr(settings, "explosion_always_force_max_lots", True))
+    )
     if candidate.mode in ("explosion", "scalp") and not skip_first_green:
         from app.engines.session_mode_feedback import cap_lots_until_first_green
 
@@ -1352,6 +1358,20 @@ async def _open_from_candidate(
         # Force-max stamp is misleading if post-win cut the size back down.
         if post_win_cap_meta.get("applied") or flip_cap_meta.get("applied"):
             top_explosion_max = False
+
+    from app.engines.capital_allocator import apply_explosion_always_max_lots
+
+    lots = apply_explosion_always_max_lots(
+        lots,
+        symbol,
+        fill_premium,
+        mode=str(candidate.mode or ""),
+    )
+    if (
+        candidate.mode == "explosion"
+        and bool(getattr(settings, "explosion_always_force_max_lots", True))
+    ):
+        top_explosion_max = True
 
     allocation_for_cap = allocation
     use_full_remaining = False
@@ -3027,6 +3047,10 @@ def _enforce_top_moment_max_lots_only(
     meta: dict[str, Any] = {}
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         meta["topMomentMaxLots"] = True
+        return int(lots), meta
+    if bool(getattr(settings, "explosion_always_force_max_lots", True)):
+        meta["topMomentMaxLots"] = True
+        meta["explosionAlwaysMaxLots"] = True
         return int(lots), meta
     if not bool(getattr(settings, "top_moments_max_lots_only_enabled", True)):
         meta["topMomentMaxLots"] = True
