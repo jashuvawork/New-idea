@@ -36,6 +36,7 @@ def _pad_lane_lift_evidence(evidence: Mapping[str, Any]) -> bool:
         or evidence.get("microPullbackRetest")
         or evidence.get("premiumFvgPad")
         or evidence.get("doubleDipVbase")
+        or evidence.get("buildingCoilPad")
     )
 
 
@@ -64,6 +65,8 @@ def building_has_causal_ftv_v_structure(evidence: Mapping[str, Any]) -> bool:
     if building_rip and helpers_ok:
         return True
     if bool(evidence.get("earlyRadarPadCapture")):
+        return True
+    if bool(evidence.get("buildingCoilPad")):
         return True
     return False
 
@@ -145,9 +148,17 @@ def top_moment_entry_allowed(
     if not top_moments_only_enabled:
         return True, "disabled", None
 
-    from app.engines.building_ftv_gates import building_armed_base_grade_a_top_moment_ok
+    from app.engines.building_ftv_gates import (
+        building_armed_base_grade_a_top_moment_ok,
+        building_coil_pad_grade_a_top_moment_ok,
+    )
 
     if building_armed_base_grade_a_top_moment_ok(
+        evidence, ranking, readiness_reason=readiness_reason,
+    ):
+        return True, "ok", "FTV"
+
+    if building_coil_pad_grade_a_top_moment_ok(
         evidence, ranking, readiness_reason=readiness_reason,
     ):
         return True, "ok", "FTV"
@@ -227,6 +238,8 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
     """Pre-selector radar filter: BUILDING must show FTV/V shape before candidacy."""
     if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
         return True
+    if bool(alert.get("buildingCoilPadReady")):
+        return True
     tier = str(alert.get("tier") or "").upper()
     if tier in ("ELITE", "EXPLODING"):
         return True
@@ -290,6 +303,9 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
         ),
         "earlyRadarPadCapture": bool(
             alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
+        ),
+        "buildingCoilPad": bool(
+            alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
         ),
         "buildingRipReady": bool(alert.get("ictBuildingRipReady")),
         "buildingRipHelpersOk": bool(

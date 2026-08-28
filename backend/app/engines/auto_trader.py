@@ -3229,6 +3229,7 @@ def _pad_lane_ftv_policy_max_lots(
         "PREMIUM_FVG_PAD_FTV": "premium_fvg_pad_ftv_force_max_lots",
         "DOUBLE_DIP_VBASE_FTV": "double_dip_vbase_ftv_force_max_lots",
         "EARLY_RADAR_PAD_FTV": "early_radar_pad_ftv_force_max_lots",
+        "BUILDING_COIL_PAD_FTV": "building_coil_pad_ftv_force_max_lots",
     }.get(mode, "")
     if force_attr and not bool(getattr(settings, force_attr, True)):
         return int(lots), False

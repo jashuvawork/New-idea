@@ -401,6 +401,10 @@ def ftv_authorization_policy(
     early_radar_pad_ftv_min_explosion_score: float = 5.0,
     early_radar_pad_ftv_max_capital_pct: float = 0.90,
     early_radar_pad_max_off_low_pct: float = 15.0,
+    building_coil_pad_ftv_enabled: bool = True,
+    building_coil_pad_ftv_max_capital_pct: float = 0.90,
+    building_coil_pad_min_local_move_pct: float = 10.0,
+    building_coil_pad_max_local_move_pct: float = 25.0,
     top_moments_only_enabled: bool = True,
     top_moments_min_grade: str = "A",
     first_lift_local_base_micro_pullback_enabled: bool = True,
@@ -482,7 +486,8 @@ def ftv_authorization_policy(
             return blocked("ftv_elite_top_only_timing_blocked")
     if snapshot_available and not atm_itm_allowed:
         if not _shallow_otm_local_base_ftv_waives_atm_itm(evidence):
-            return blocked("ftv_elite_top_only_requires_atm_itm")
+            if not bool(evidence.get("buildingCoilPad")):
+                return blocked("ftv_elite_top_only_requires_atm_itm")
 
     def _expiry_worst_policy_ok(
         *,
@@ -958,8 +963,13 @@ def ftv_authorization_policy(
             grade in {"A", "B", "S"}
             and tier in {"BUILDING", "EXPLODING", "ELITE"}
             and explosion_score >= min_score
-            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
         )
+        timing_blocked = timing in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        if timing_blocked:
+            from app.engines.pad_lane_capture import pad_lane_ftv_waives_timing_block
+
+            if not pad_lane_ftv_waives_timing_block(evidence):
+                ok = False
         if min_v3 is not None and v3 < min_v3:
             ok = False
         if max_v3 is not None and v3 > max_v3:
@@ -1048,6 +1058,16 @@ def ftv_authorization_policy(
             min_v3=-0.8,
             max_v3=1.5,
             block_prefix="early_radar_pad_ftv",
+        ),
+        _pad_lane_ftv_auth(
+            enabled=building_coil_pad_ftv_enabled,
+            flag=bool(evidence.get("buildingCoilPad")),
+            mode="BUILDING_COIL_PAD_FTV",
+            min_score=5.0,
+            max_capital=building_coil_pad_ftv_max_capital_pct,
+            min_v3=-0.8,
+            max_v3=1.5,
+            block_prefix="building_coil_pad_ftv",
         ),
     ):
         if auth is not None:
@@ -1284,6 +1304,43 @@ def ftv_authorization_policy(
                 max_capital_pct=building_armed_base_grade_a_ftv_max_capital_pct,
             )
 
+    if building_coil_pad_ftv_enabled:
+        from app.engines.building_ftv_gates import building_coil_pad_grade_a_top_moment_ok
+
+        readiness = str(evidence.get("firstLiftReadinessReason") or "")
+        local_move = _number(evidence.get("localBaseMovePct"))
+        coil_pad_ok = (
+            bool(evidence.get("buildingCoilPad"))
+            and building_coil_pad_grade_a_top_moment_ok(
+                evidence, ranking, readiness_reason=readiness,
+            )
+            and building_coil_pad_min_local_move_pct
+            <= local_move
+            <= building_coil_pad_max_local_move_pct + 1e-6
+        )
+        if coil_pad_ok and timing in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}:
+            from app.engines.pad_lane_capture import pad_lane_ftv_waives_timing_block
+
+            if not pad_lane_ftv_waives_timing_block(evidence):
+                coil_pad_ok = False
+        if coil_pad_ok:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
+                return blocked("building_coil_pad_ftv_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "BUILDING_COIL_PAD_FTV",
+                "ok",
+                max_capital_pct=building_coil_pad_ftv_max_capital_pct,
+            )
+
     if not top_ftv_a_enabled:
         return blocked("ftv_elite_top_only_requires_s")
     return blocked(top_ftv_a_reason)
@@ -1378,6 +1435,10 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "early_radar_pad_ftv_min_explosion_score",
         "early_radar_pad_ftv_max_capital_pct",
         "early_radar_pad_max_off_low_pct",
+        "building_coil_pad_ftv_enabled",
+        "building_coil_pad_ftv_max_capital_pct",
+        "building_coil_pad_min_local_move_pct",
+        "building_coil_pad_max_local_move_pct",
         "top_moments_only_enabled",
         "top_moments_min_grade",
         "first_lift_local_base_micro_pullback_enabled",
@@ -1489,6 +1550,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     early_radar_pad = bool(evidence.get("earlyRadarPadCapture")) and not bool(
         evidence.get("midRipCoil")
     )
+    building_coil_pad = bool(evidence.get("buildingCoilPad")) and not bool(
+        evidence.get("midRipCoil")
+    )
     flat_vertical = bool(evidence.get("flatThenVertical"))
     active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
@@ -1547,6 +1611,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     elif early_radar_pad:
         score += 12.0
         reasons.append("early_radar_pad_ftv")
+    elif building_coil_pad:
+        score += 13.0
+        reasons.append("building_coil_pad_ftv")
     elif fast_bullish_local_base:
         score += 11.0
         reasons.append("fast_bullish_local_base")
@@ -1688,6 +1755,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             or premium_fvg_pad
             or double_dip_vbase
             or early_radar_pad
+            or building_coil_pad
         )
         and (
             v3 > 0
@@ -1752,6 +1820,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "premiumFvgPad": premium_fvg_pad,
             "doubleDipVbase": double_dip_vbase,
             "earlyRadarPadCapture": early_radar_pad,
+            "buildingCoilPad": building_coil_pad,
             "buildingRipReady": building_rip_ready,
             "buildingRipHelpersOk": bool(
                 evidence.get("buildingRipHelpersOk")
@@ -1918,6 +1987,9 @@ def rank_entry_candidate(
         ),
         "earlyRadarPadCapture": bool(
             alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
+        ),
+        "buildingCoilPad": bool(
+            alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
         ),
         "buildingRipReady": alert.get("ictBuildingRipReady"),
         "buildingRipHelpersOk": bool(

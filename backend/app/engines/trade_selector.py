@@ -287,7 +287,10 @@ def _explosion_candidates(
 
     out: list[EntryCandidate] = []
     for alert in snap.explosionAlerts or []:
-        from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+        from app.engines.early_radar_pad_capture import (
+            alert_has_building_coil_pad,
+            alert_has_early_radar_pad_capture,
+        )
         from app.engines.ict_breakout_monitor import first_lift_entry_readiness
 
         first_lift_ready, first_lift_readiness_reason = first_lift_entry_readiness(
@@ -296,12 +299,13 @@ def _explosion_candidates(
             state=state,
         )
         early_pad = alert_has_early_radar_pad_capture(alert)
+        coil_pad = alert_has_building_coil_pad(alert)
         from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
         pad_lane_waive = pad_lane_early_near_miss_waive(
             alert, readiness_reason=first_lift_readiness_reason,
         )
-        lift_ready = first_lift_ready or early_pad or pad_lane_waive
+        lift_ready = first_lift_ready or early_pad or coil_pad or pad_lane_waive
         slow_grind_trough = bool(
             alert.get("slowGrindArmedTrough")
             or alert.get("ictSlowGrindArmedTrough")
@@ -339,6 +343,7 @@ def _explosion_candidates(
             if money == "OTM":
                 from app.engines.early_radar_pad_capture import (
                     alert_has_early_radar_pad_capture,
+                    building_coil_pad_moneyness_ok,
                     early_radar_pad_shallow_otm_ok,
                 )
                 from app.engines.moneyness import _depth_steps
@@ -354,10 +359,14 @@ def _explosion_candidates(
                     getattr(settings, "explosion_shallow_otm_history_steps", 1) or 1
                 )
                 pad_shallow_ok = early_radar_pad_shallow_otm_ok(alert, snap)
+                coil_moneyness_ok = building_coil_pad_moneyness_ok(alert, snap, settings)
                 if not (
-                    (lift_ready or alert_has_early_radar_pad_capture(alert))
-                    and pad_shallow_ok
-                    and depth <= max_steps
+                    coil_moneyness_ok
+                    or (
+                        (lift_ready or alert_has_early_radar_pad_capture(alert))
+                        and pad_shallow_ok
+                        and depth <= max_steps
+                    )
                 ):
                     continue
         tier_u = str(alert.get("tier") or "").upper()
@@ -370,6 +379,7 @@ def _explosion_candidates(
                 if top_only:
                     from app.engines.building_ftv_gates import (
                         building_armed_base_grade_a_live_ok,
+                        building_coil_pad_grade_a_live_ok,
                     )
                     from app.engines.top_moment_gate import explosion_alert_is_top_moment
 
@@ -380,10 +390,18 @@ def _explosion_candidates(
                         state=state,
                         snapshots={symbol: snap},
                     )
+                    coil_pad_live_ok = building_coil_pad_grade_a_live_ok(
+                        alert,
+                        snap,
+                        readiness_reason=first_lift_readiness_reason,
+                        state=state,
+                        snapshots={symbol: snap},
+                    )
                     if (
                         not explosion_alert_is_top_moment(alert)
                         and not pad_lane_waive
                         and not armed_base_live_ok
+                        and not coil_pad_live_ok
                     ):
                         continue
                 elif not lift_ready and not _building_aligned_ict_alert_ok(
@@ -391,14 +409,24 @@ def _explosion_candidates(
                 ):
                     from app.engines.building_ftv_gates import (
                         building_armed_base_grade_a_live_ok,
+                        building_coil_pad_grade_a_live_ok,
                     )
 
-                    if not building_armed_base_grade_a_live_ok(
-                        alert,
-                        snap,
-                        readiness_reason=first_lift_readiness_reason,
-                        state=state,
-                        snapshots={symbol: snap},
+                    if not (
+                        building_armed_base_grade_a_live_ok(
+                            alert,
+                            snap,
+                            readiness_reason=first_lift_readiness_reason,
+                            state=state,
+                            snapshots={symbol: snap},
+                        )
+                        or building_coil_pad_grade_a_live_ok(
+                            alert,
+                            snap,
+                            readiness_reason=first_lift_readiness_reason,
+                            state=state,
+                            snapshots={symbol: snap},
+                        )
                     ):
                         continue
         elif tier_u not in ("ELITE", "EXPLODING"):
@@ -484,7 +512,7 @@ def _explosion_candidates(
                     or 12.0
                 ),
             )
-        if early_pad or pad_lane_waive:
+        if early_pad or coil_pad or pad_lane_waive:
             min_explosion_score = min(
                 min_explosion_score,
                 float(
@@ -641,6 +669,30 @@ def _explosion_candidates(
 
         rank += runner_strike_rank_bonus(event, snap)
         rank += atm_proximity_rank_bonus(event, snap)
+        if bool(
+            getattr(settings, "expansion_strike_rank_bonus_enabled", True)
+        ) and bool(alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")):
+            from app.engines.moneyness import classify_moneyness as _classify_money
+            from app.engines.moneyness import _depth_steps
+
+            spot_v = float(snap.spot or 0)
+            atm_v = float(snap.atmStrike or spot_v or 0)
+            money = _classify_money(
+                event.side,
+                event.strike,
+                spot_v,
+                symbol=symbol,
+                atm=atm_v,
+            )
+            bonus = float(
+                getattr(settings, "expansion_strike_rank_bonus", 15.0) or 15.0
+            )
+            if money == "ITM":
+                rank += bonus
+            elif money == "OTM":
+                depth = _depth_steps(event.side, event.strike, spot_v, symbol, atm_v)
+                if depth >= 2:
+                    rank += bonus
         from app.engines.dual_mode_strategy import resolve_trading_session_mode
         from app.engines.ict_breakout_monitor import (
             analyze_explosion_event_ict,
@@ -735,7 +787,7 @@ def _explosion_candidates(
             ict=ict,
             alert=alert,
         )
-        if chase_blocked and not first_lift_ready and not early_pad:
+        if chase_blocked and not first_lift_ready and not early_pad and not coil_pad:
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the
         # hard window does not re-raise the unstructured 28% floor.

@@ -1455,9 +1455,19 @@ def first_lift_entry_readiness(
     if fast_ok:
         return True, fast_reason
 
-    from app.engines.early_radar_pad_capture import early_radar_pad_entry_readiness
+    from app.engines.early_radar_pad_capture import (
+        building_coil_pad_entry_readiness,
+        early_radar_pad_entry_readiness,
+    )
 
     if isinstance(alert, dict):
+        coil_ok, coil_reason = building_coil_pad_entry_readiness(
+            snap=snap,
+            alert=alert,
+            settings=settings,
+        )
+        if coil_ok:
+            return True, coil_reason
         pad_ok, pad_reason = early_radar_pad_entry_readiness(
             snap=snap,
             event=event,
