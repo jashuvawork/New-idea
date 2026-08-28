@@ -14,6 +14,7 @@ from app.engines.premium_filter import premium_in_band
 from app.models.schemas import Side, SymbolSnapshot
 
 EARLY_RADAR_PAD_READY = "early_radar_pad_ready"
+BUILDING_COIL_PAD_READY = "building_coil_pad_ready"
 
 
 def _enrich_row_from_event(
@@ -114,6 +115,122 @@ def _cold_trough_coil_signal(alert: Mapping[str, Any]) -> bool:
     return False
 
 
+def building_coil_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None) -> bool:
+    """BUILDING armed coil at 10–25% local base — matches EOD hindsight entry window.
+
+    Aug28 NIFTY PUT 24050 @ 11:12: BUILDING, baseRel 20.7%, v3=0, +₹78k hindsight sim.
+    """
+    s = settings or get_settings()
+    if not bool(getattr(s, "building_coil_pad_entry_enabled", True)):
+        return False
+    if _alert_tier(alert) != "BUILDING":
+        return False
+    if bool(alert.get("ictMidRipCoil") or alert.get("midRipCoil")):
+        return False
+
+    min_local = float(
+        getattr(s, "building_coil_pad_min_local_move_pct", 10.0) or 10.0
+    )
+    max_local = float(
+        getattr(s, "building_coil_pad_max_local_move_pct", 25.0) or 25.0
+    )
+    local_move = _alert_local_base_move(alert)
+    if local_move <= 0 or not (min_local <= local_move <= max_local + 1e-6):
+        return False
+
+    max_score = float(
+        getattr(s, "building_coil_pad_max_explosion_score", 65.0) or 65.0
+    )
+    if _alert_explosion_score(alert) > max_score + 1e-6:
+        return False
+
+    if not _cold_trough_coil_signal(alert):
+        return False
+    return True
+
+
+def building_coil_pad_structure(alert: Mapping[str, Any], settings: Any = None) -> bool:
+    if bool(alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")):
+        return True
+    return building_coil_pad_lift_signal(alert, settings)
+
+
+def stamp_building_coil_pad(alert: dict[str, Any], settings: Any = None) -> bool:
+    if not isinstance(alert, dict):
+        return False
+    if building_coil_pad_lift_signal(alert, settings):
+        alert["buildingCoilPad"] = True
+        alert["buildingCoilPadReady"] = True
+        if str(alert.get("ictBaseReadinessReason") or "") != BUILDING_COIL_PAD_READY:
+            alert.setdefault("ictBaseReadinessReason", BUILDING_COIL_PAD_READY)
+        return True
+    alert.pop("buildingCoilPad", None)
+    alert.pop("buildingCoilPadReady", None)
+    return False
+
+
+def building_coil_pad_moneyness_ok(
+    alert: Mapping[str, Any],
+    snap: Optional[SymbolSnapshot],
+    settings: Any = None,
+) -> bool:
+    """Expansion strikes may sit 2–3 steps OTM during BUILDING coil pad (Aug28 24050)."""
+    s = settings or get_settings()
+    side = str(alert.get("side") or "").upper()
+    strike = _number(alert.get("strike"))
+    if _atm_itm_ok(side=side, strike=strike, snap=snap):
+        return True
+    if early_radar_pad_shallow_otm_ok(alert, snap):
+        return True
+    if snap is None or side not in ("CALL", "PUT") or strike <= 0:
+        return False
+    spot = _number(getattr(snap, "spot", 0))
+    atm = _number(getattr(snap, "atmStrike", 0)) or spot
+    symbol = str(getattr(snap, "symbol", "") or alert.get("symbol") or "")
+    if spot <= 0:
+        return False
+    from app.engines.moneyness import classify_moneyness, _depth_steps
+
+    money = classify_moneyness(
+        Side(side), strike, spot, symbol=symbol, atm=atm if atm > 0 else None,
+    )
+    if money != "OTM":
+        return True
+    max_steps = int(getattr(s, "building_coil_pad_max_otm_steps", 4) or 4)
+    depth = _depth_steps(Side(side), strike, spot, symbol, atm)
+    return depth <= max_steps
+
+
+def building_coil_pad_entry_readiness(
+    *,
+    snap: Optional[SymbolSnapshot] = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    row = alert if isinstance(alert, dict) else {}
+    s = settings or get_settings()
+    if not building_coil_pad_lift_signal(row, s):
+        return False, ""
+    if not building_coil_pad_moneyness_ok(row, snap, s):
+        return False, "building_coil_pad_moneyness_blocked"
+    premium = _number(row.get("premium"))
+    peak_move = _number(row.get("peakMovePct"))
+    if not premium_in_band(
+        premium,
+        mode="explosion",
+        peak_move_pct=peak_move,
+        snap=snap,
+    ):
+        return False, "building_coil_pad_premium_out_of_band"
+    if isinstance(alert, dict):
+        stamp_building_coil_pad(alert, s)
+    return True, BUILDING_COIL_PAD_READY
+
+
+def alert_has_building_coil_pad(alert: Mapping[str, Any]) -> bool:
+    return bool(alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady"))
+
+
 def cold_trough_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None) -> bool:
     """WATCH/BUILDING at session trough — enter before v3 lifts (cold velocity OK)."""
     s = settings or get_settings()
@@ -210,6 +327,8 @@ def watch_local_base_pad_structure(alert: Mapping[str, Any], settings: Any = Non
         return True
     if cold_trough_pad_lift_signal(alert, settings):
         return True
+    if alert_has_building_coil_pad(alert):
+        return True
     return watch_local_base_pad_lift_signal(alert, settings)
 
 
@@ -233,6 +352,9 @@ def early_radar_pad_top_structure(alert: Mapping[str, Any]) -> bool:
             return True
 
     if tier in ("ELITE", "EXPLODING"):
+        return True
+
+    if alert_has_building_coil_pad(alert):
         return True
 
     if bool(alert.get("ictVRipReady")):

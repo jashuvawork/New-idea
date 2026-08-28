@@ -666,11 +666,15 @@ def validate_candidate(
         )
         policy_snap = getattr(candidate, "snap", None)
         money_ok = True
+        alert_d = (
+            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+        )
         if policy_snap is not None:
             money_ok, _, _ = atm_itm_entry_allows(
                 candidate.side,
                 candidate.strike,
                 policy_snap,
+                alert=alert_d,
             )
         policy_decision = ftv_authorization_policy(
             causal_ranking.get("evidence") or {},
@@ -1026,12 +1030,14 @@ def validate_candidate(
 
     from app.engines.moneyness import atm_itm_entry_allows, moneyness_allows
 
-    # Hard execution policy: ELITE/must-take paths may bypass soft validators,
-    # but they can never bypass ATM/ITM-only selection.
+    alert_d = (
+        candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+    )
     hard_mn_ok, hard_mn_reason, hard_mn_meta = atm_itm_entry_allows(
         candidate.side,
         candidate.strike,
         snap,
+        alert=alert_d,
     )
     meta.update(hard_mn_meta)
     if not hard_mn_ok:

@@ -1675,6 +1675,20 @@ class Settings(BaseSettings):
     building_armed_base_grade_a_use_local_base_window: bool = True
     building_armed_base_grade_a_ftv_enabled: bool = True
     building_armed_base_grade_a_ftv_max_capital_pct: float = 0.90
+    # BUILDING coil pad at 10–25% local base — EOD hindsight entry window live
+    # (Aug28 NIFTY PUT 24050 @ 11:12: BUILDING baseRel 20.7%, v3=0, +₹78k hindsight).
+    building_coil_pad_entry_enabled: bool = True
+    building_coil_pad_min_local_move_pct: float = 10.0
+    building_coil_pad_max_local_move_pct: float = 25.0
+    building_coil_pad_max_explosion_score: float = 65.0
+    building_coil_pad_ftv_enabled: bool = True
+    building_coil_pad_ftv_max_capital_pct: float = 0.90
+    building_coil_pad_ftv_force_max_lots: bool = True
+    building_coil_pad_max_otm_steps: int = 4
+    # Prefer deeper ITM expansion strikes over ATM when coil pad is active
+    # (Aug28 24050 ITM over 24200/24100 ATM on the same lift).
+    expansion_strike_rank_bonus_enabled: bool = True
+    expansion_strike_rank_bonus: float = 15.0
     # Pad-lane turnaround chart bypass — premium-led V-rip / slow-grind / FTV lifts off
     # session low while the 5m index chart is still counter-trend (Aug25 NIFTY 24150 CE
     # ₹20→90 V-reversal blocked by chart_live_bearish_no_calls). Wider adverse-momentum

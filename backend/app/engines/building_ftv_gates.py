@@ -29,6 +29,7 @@ PAD_LANE_READY_REASONS = frozenset(
         "premium_fvg_pad_ready",
         "double_dip_vbase_ready",
         "early_radar_pad_ready",
+        "building_coil_pad_ready",
     }
 )
 
@@ -195,6 +196,111 @@ def building_armed_base_grade_a_top_moment_ok(
     )
 
 
+def building_coil_pad_grade_a_live_ok(
+    alert: Optional[dict[str, Any]],
+    snap: Any = None,
+    *,
+    readiness_reason: str = "",
+    ranking: Optional[dict[str, Any]] = None,
+    state: Any = None,
+    snapshots: Optional[dict[str, Any]] = None,
+) -> bool:
+    """Allow grade-A BUILDING coil pad (10–25% local base) through live selector."""
+    settings = get_settings()
+    if not bool(getattr(settings, "building_coil_pad_entry_enabled", True)):
+        return False
+    if not isinstance(alert, dict):
+        return False
+    if str(alert.get("tier") or "").upper() != "BUILDING":
+        return False
+    rr = str(
+        readiness_reason
+        or alert.get("ictBaseReadinessReason")
+        or alert.get("readyReason")
+        or ""
+    )
+    from app.engines.early_radar_pad_capture import (
+        BUILDING_COIL_PAD_READY,
+        alert_has_building_coil_pad,
+        building_coil_pad_lift_signal,
+    )
+
+    if rr != BUILDING_COIL_PAD_READY and not alert_has_building_coil_pad(alert):
+        if not building_coil_pad_lift_signal(alert, settings):
+            return False
+    if _building_armed_base_worst_day_blocked(state=state, snapshots=snapshots):
+        return False
+    local_move = _number(
+        alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")
+    )
+    min_local = float(
+        getattr(settings, "building_coil_pad_min_local_move_pct", 10.0) or 10.0
+    )
+    max_local = float(
+        getattr(settings, "building_coil_pad_max_local_move_pct", 25.0) or 25.0
+    )
+    if local_move <= 0 or not (min_local <= local_move <= max_local + 1e-6):
+        return False
+    grade = ""
+    if isinstance(ranking, dict):
+        grade = str(ranking.get("grade") or "").upper()
+    if not grade:
+        try:
+            from app.engines.trade_ranking import rank_trade_evidence
+
+            evidence = {
+                "mode": "explosion",
+                "tier": "BUILDING",
+                "localBaseMovePct": local_move,
+                "velocity3s": _number(alert.get("velocity3s")),
+                "velocity9s": _number(alert.get("velocity9s")),
+                "buildingCoilPad": True,
+                "volumeAwaken": bool(
+                    alert.get("volumeAwaken") or alert.get("ictVolumeAwakening")
+                ),
+                "explosionScore": _number(
+                    alert.get("explosionScore") or alert.get("score")
+                ),
+            }
+            grade = str(rank_trade_evidence(evidence).get("grade") or "").upper()
+        except Exception:
+            grade = ""
+    min_grade = str(
+        getattr(settings, "top_moments_min_grade", "A") or "A"
+    ).upper()
+    grade_order = {"S": 4, "A": 3, "B": 2, "C": 1, "REJECT": 0}
+    if grade_order.get(grade, 0) < grade_order.get(min_grade, 3):
+        return False
+    return True
+
+
+def building_coil_pad_grade_a_top_moment_ok(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any],
+    *,
+    readiness_reason: str = "",
+) -> bool:
+    """Top-moment gate companion — FTV moment for BUILDING coil pad."""
+    alert_like = {
+        "tier": evidence.get("tier"),
+        "ictBaseRelativeMovePct": evidence.get("localBaseMovePct"),
+        "localBaseMovePct": evidence.get("localBaseMovePct"),
+        "buildingCoilPad": evidence.get("buildingCoilPad"),
+        "buildingCoilPadReady": evidence.get("buildingCoilPad"),
+        "velocity3s": evidence.get("velocity3s"),
+        "velocity9s": evidence.get("velocity9s"),
+        "volumeAwaken": evidence.get("volumeAwaken"),
+        "explosionScore": evidence.get("explosionScore"),
+        "ictBaseReadinessReason": readiness_reason
+        or evidence.get("firstLiftReadinessReason"),
+    }
+    return building_coil_pad_grade_a_live_ok(
+        alert_like,
+        readiness_reason=readiness_reason,
+        ranking=dict(ranking),
+    )
+
+
 def alert_has_building_rip_signal(alert: Optional[dict[str, Any]]) -> bool:
     """True when radar stamped a BUILDING rip (including after EXPLODING promote)."""
     if not isinstance(alert, dict):
@@ -272,6 +378,8 @@ def pad_lane_ready_reason(
             return "double_dip_vbase_ready"
         if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
             return "early_radar_pad_ready"
+        if bool(alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")):
+            return "building_coil_pad_ready"
         stamped = str(alert.get("ictBaseReadinessReason") or alert.get("readyReason") or "")
         if bool(alert.get("ictVRipReady") or alert.get("vRipReady")):
             if stamped.startswith("v_rip_session_low") or stamped == "v_rip_session_low_ready":
