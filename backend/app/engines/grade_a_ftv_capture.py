@@ -32,6 +32,93 @@ def _session_move(alert: Mapping[str, Any]) -> float:
     )
 
 
+def _base_rel_pct(alert: Mapping[str, Any]) -> float:
+    try:
+        return float(
+            alert.get("ictBaseRelativeMovePct")
+            or alert.get("localBaseMovePct")
+            or 0
+        )
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _breadth_bias(snap: Optional[SymbolSnapshot]) -> str:
+    if snap is None or snap.breadth is None:
+        return "NEUTRAL"
+    return str(snap.breadth.bias or "NEUTRAL").upper()
+
+
+def grade_a_ftv_breadth_chase_blocked(
+    alert: Mapping[str, Any],
+    snap: Optional[SymbolSnapshot] = None,
+    *,
+    settings: Any | None = None,
+    breadth_bias: Optional[str] = None,
+    entry_hour_ist: Optional[int] = None,
+) -> tuple[bool, str]:
+    """Block grade-A FTV first-lift on counter-breadth / non-aligned chase pads.
+
+    Aug17 NIFTY CALL cluster (−₹16k): BEARISH or NEUTRAL breadth with baseRel
+    21–64% passed via chart-align bypass on GRADE_A_FTV_FIRST_LIFT.
+    """
+    s = settings or get_settings()
+    side = str(alert.get("side") or "").upper()
+    if side not in ("CALL", "PUT"):
+        return False, ""
+    base_rel = _base_rel_pct(alert)
+    max_move = float(
+        getattr(s, "grade_a_ftv_first_lift_max_base_move_pct", 45.0) or 45.0
+    )
+    if base_rel > max_move + 1e-6:
+        return True, f"grade_a_ftv_base_rel_chase_{base_rel:.0f}%"
+
+    min_rel = float(
+        getattr(s, "grade_a_ftv_counter_breadth_min_base_rel_pct", 20.0) or 20.0
+    )
+    if base_rel <= min_rel + 1e-6:
+        return False, ""
+
+    bias = str(breadth_bias or _breadth_bias(snap)).upper()
+    if bool(getattr(s, "grade_a_ftv_counter_breadth_block_enabled", True)):
+        if side == "CALL" and bias == "BEARISH":
+            return True, f"grade_a_ftv_call_vs_bearish_breadth_{base_rel:.0f}%"
+        if side == "PUT" and bias == "BULLISH":
+            return True, f"grade_a_ftv_put_vs_bullish_breadth_{base_rel:.0f}%"
+
+    if bool(getattr(s, "grade_a_ftv_non_aligned_breadth_block_enabled", False)):
+        if side == "CALL" and bias != "BULLISH":
+            return True, f"grade_a_ftv_call_non_bullish_breadth_{base_rel:.0f}%"
+        if side == "PUT" and bias != "BEARISH":
+            return True, f"grade_a_ftv_put_non_bearish_breadth_{base_rel:.0f}%"
+
+    if (
+        bool(getattr(s, "grade_a_ftv_afternoon_neutral_chase_block_enabled", True))
+        and bias == "NEUTRAL"
+    ):
+        hour = entry_hour_ist
+        if hour is None and snap is not None and getattr(snap, "timestamp", None):
+            try:
+                from zoneinfo import ZoneInfo
+
+                hour = snap.timestamp.astimezone(ZoneInfo("Asia/Kolkata")).hour
+            except Exception:
+                hour = None
+        if hour is not None:
+            start = int(
+                getattr(s, "grade_a_ftv_afternoon_neutral_start_hour", 12) or 12
+            )
+            if hour >= start:
+                call_only = bool(
+                    getattr(s, "grade_a_ftv_afternoon_neutral_call_only", True)
+                )
+                if side == "CALL" or not call_only:
+                    suffix = "call" if side == "CALL" else "put"
+                    return True, f"grade_a_ftv_afternoon_neutral_{suffix}_{base_rel:.0f}%"
+
+    return False, ""
+
+
 def grade_a_ftv_index_aligned(alert: Mapping[str, Any], snap: Optional[SymbolSnapshot]) -> bool:
     if bool(alert.get("indexMomAlign") or alert.get("indexHelpersConfirm")):
         return True
@@ -86,6 +173,9 @@ def alert_is_grade_a_ftv_first_lift(
     if score < min_score:
         return False
     if bool(alert.get("faded") or alert.get("exhaustedReentry")):
+        return False
+    blocked, _ = grade_a_ftv_breadth_chase_blocked(alert, snap, settings=settings)
+    if blocked:
         return False
     if not grade_a_ftv_index_aligned(alert, snap):
         return False

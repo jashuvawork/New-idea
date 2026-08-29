@@ -7,11 +7,12 @@ from zoneinfo import ZoneInfo
 from app.engines.expiry_day_guards import check_expiry_entry_allowed
 from app.engines.grade_a_ftv_capture import (
     alert_is_grade_a_ftv_first_lift,
+    grade_a_ftv_breadth_chase_blocked,
     grade_a_ftv_expiry_worst_waive,
     snapshots_have_grade_a_ftv_first_lift,
 )
 from app.engines.ict_breakout_monitor import first_lift_entry_readiness
-from app.models.schemas import AutoTraderState, MarketPhase, Side, SpotChart, SymbolSnapshot
+from app.models.schemas import AutoTraderState, Breadth, MarketPhase, Side, SpotChart, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -27,6 +28,12 @@ def _settings(**overrides):
     s.grade_a_ftv_first_lift_max_base_move_pct = 45.0
     s.expiry_worst_day_grade_a_ftv_bypass_enabled = True
     s.grade_a_ftv_chart_bypass_enabled = True
+    s.grade_a_ftv_counter_breadth_block_enabled = True
+    s.grade_a_ftv_counter_breadth_min_base_rel_pct = 20.0
+    s.grade_a_ftv_non_aligned_breadth_block_enabled = False
+    s.grade_a_ftv_afternoon_neutral_chase_block_enabled = True
+    s.grade_a_ftv_afternoon_neutral_start_hour = 12
+    s.grade_a_ftv_afternoon_neutral_call_only = True
     s.expiry_day_guards_enabled = True
     s.expiry_worst_day_halt_entries = True
     s.expiry_worst_day_elite_top_bypass_enabled = True
@@ -244,3 +251,103 @@ def test_rank_entry_candidate_preserves_grade_a_ftv_sleeve():
     )
     assert decision.allowed is True
     assert decision.mode == "GRADE_A_FTV_FIRST_LIFT"
+
+
+def _aug17_call_alert(**overrides) -> dict:
+    base = {
+        "symbol": "NIFTY",
+        "side": "CALL",
+        "strike": 24400.0,
+        "premium": 51.38,
+        "tier": "ELITE",
+        "tradeable": True,
+        "explosionScore": 100.0,
+        "flatVerticalGrade": "A",
+        "flatVerticalQuality": 72.0,
+        "ictFlatThenVertical": True,
+        "ictFirstLift": True,
+        "ictBaseRelativeMovePct": 64.4,
+        "localBaseMovePct": 64.4,
+        "dailyMovePct": 63.09,
+        "peakMovePct": 63.09,
+        "volumeAwaken": True,
+        "ictVolumeAwakening": True,
+        "velocity3s": -1.0,
+        "ictBreakout": True,
+    }
+    base.update(overrides)
+    return base
+
+
+def _nifty_call_snap(breadth_bias: str = "BEARISH") -> SymbolSnapshot:
+    return SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24400.0,
+        atmStrike=24400.0,
+        tradeQualityScore=55,
+        breadth=Breadth(bias=breadth_bias),
+        spotChart=SpotChart(
+            direction="BULLISH",
+            spot=24400.0,
+            momentum5Pct=0.12,
+            recommendedSide="CALL",
+        ),
+    )
+
+
+@patch("app.engines.grade_a_ftv_capture.get_settings")
+def test_grade_a_ftv_blocks_aug17_bearish_call_chase(mock_settings):
+    """Aug17 ac612bc1: BEARISH breadth + 64% baseRel grade-A CALL must not pass."""
+    mock_settings.return_value = _settings()
+    alert = _aug17_call_alert()
+    snap = _nifty_call_snap("BEARISH")
+    blocked, reason = grade_a_ftv_breadth_chase_blocked(alert, snap)
+    assert blocked is True
+    assert "grade_a_ftv" in reason
+    assert alert_is_grade_a_ftv_first_lift(alert, snap) is False
+    assert alert_is_grade_a_ftv_first_lift(alert, snap) is False
+
+
+@patch("app.engines.grade_a_ftv_capture.get_settings")
+def test_grade_a_ftv_blocks_aug17_neutral_call_21pct_afternoon(mock_settings):
+    """Aug17 fee039db: afternoon NEUTRAL CALL at 21% baseRel must not pass."""
+    mock_settings.return_value = _settings()
+    alert = _aug17_call_alert(
+        strike=24350.0,
+        premium=80.6,
+        tier="EXPLODING",
+        explosionScore=79.8,
+        ictBaseRelativeMovePct=21.04,
+        localBaseMovePct=21.04,
+        dailyMovePct=21.04,
+        peakMovePct=21.04,
+        velocity3s=2.46,
+    )
+    snap = _nifty_call_snap("NEUTRAL")
+    snap.timestamp = datetime(2026, 8, 17, 13, 1, 47, tzinfo=IST)
+    blocked, reason = grade_a_ftv_breadth_chase_blocked(alert, snap)
+    assert blocked is True
+    assert "afternoon_neutral" in reason
+    assert alert_is_grade_a_ftv_first_lift(alert, snap) is False
+
+
+@patch("app.engines.grade_a_ftv_capture.get_settings")
+def test_grade_a_ftv_bullish_call_at_pad_still_allowed(mock_settings):
+    """Aligned BULLISH CALL at 25% baseRel must still qualify for grade-A FTV."""
+    mock_settings.return_value = _settings()
+    alert = _aug17_call_alert(
+        strike=24300.0,
+        ictBaseRelativeMovePct=25.0,
+        localBaseMovePct=25.0,
+        dailyMovePct=25.0,
+        peakMovePct=25.0,
+        velocity3s=2.0,
+        indexMomAlign=True,
+    )
+    snap = _nifty_call_snap("BULLISH")
+    blocked, _ = grade_a_ftv_breadth_chase_blocked(alert, snap)
+    assert blocked is False
+    assert alert_is_grade_a_ftv_first_lift(alert, snap) is True

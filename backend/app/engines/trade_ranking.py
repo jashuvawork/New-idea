@@ -1114,6 +1114,22 @@ def ftv_authorization_policy(
         )
 
         if grade_a_ftv_expiry_worst_waive(evidence):
+            from app.engines.grade_a_ftv_capture import grade_a_ftv_breadth_chase_blocked
+
+            breadth_alert = {
+                "side": evidence.get("side") or ranking.get("side"),
+                "localBaseMovePct": move,
+                "ictBaseRelativeMovePct": move,
+            }
+            breadth_blocked, breadth_reason = grade_a_ftv_breadth_chase_blocked(
+                breadth_alert,
+                None,
+                settings=_pad_cfg,
+                breadth_bias=str(evidence.get("breadthBias") or "NEUTRAL"),
+                entry_hour_ist=evidence.get("entryHourIst"),
+            )
+            if breadth_blocked:
+                return blocked(breadth_reason)
             floors = grade_a_ftv_first_lift_floors(_pad_cfg)
             grade_a_ok = (
                 floors["minBaseMove"] <= move <= floors["maxBaseMove"]
@@ -1908,8 +1924,26 @@ def rank_entry_candidate(
         )
     except Exception:
         pass
+    from zoneinfo import ZoneInfo
+
+    entry_hour_ist = None
+    if live_snapshot is not None and getattr(live_snapshot, "timestamp", None):
+        try:
+            entry_hour_ist = live_snapshot.timestamp.astimezone(ZoneInfo("Asia/Kolkata")).hour
+        except Exception:
+            entry_hour_ist = None
     evidence = {
         "mode": getattr(candidate, "mode", "") or ("explosion" if event else ""),
+        "side": (
+            getattr(getattr(candidate, "side", None), "value", None)
+            or str(getattr(candidate, "side", "") or alert.get("side") or "")
+        ).upper(),
+        "breadthBias": str(
+            getattr(getattr(live_snapshot, "breadth", None), "bias", None)
+            or alert.get("breadthBias")
+            or "NEUTRAL"
+        ).upper(),
+        "entryHourIst": entry_hour_ist,
         "tier": (
             getattr(candidate, "tier", "")
             or alert.get("tier")

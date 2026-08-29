@@ -59,6 +59,7 @@ def _settings(**overrides):
     s.fake_explosion_trap_post_win_velocity_block_enabled = True
     s.fake_explosion_trap_post_win_min_velocity_3s = 0.0
     s.fake_explosion_trap_post_win_midday_min_velocity_3s = 1.0
+    s.fake_explosion_trap_post_win_armed_base_bypass_enabled = False
     s.fake_explosion_trap_post_win_require_top_confidence = True
     s.fake_explosion_trap_post_win_hc_min_velocity_3s = 2.0
     s.high_conviction_sizing_enabled = True
@@ -284,6 +285,49 @@ def test_post_win_blocks_negative_v3_midday(mock_collect, mock_money_settings, m
     assert meta.get("action") == "block"
     assert meta.get("postWinVelocityBlock") is True
     assert meta.get("requiredMinVelocity3s") == 1.0
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+@patch("app.engines.explosion_entry_guards.collect_session_trades", create=True)
+def test_post_win_armed_base_does_not_bypass_cold_velocity(
+    mock_collect, mock_money_settings, mock_settings,
+):
+    """Aug28 12:55 — ictBaseArmed must not skip post-win cold-velocity hard block."""
+    cfg = _settings(fake_explosion_trap_post_win_armed_base_bypass_enabled=False)
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
+    cand = _candidate(
+        _event(daily=8.0, v3=-0.38, tier="EXPLODING", strike=24050.0),
+        snap,
+    )
+    cand.side = Side.PUT
+    cand.alert = {
+        "ictBaseArmed": True,
+        "ictArmedBaseLaunch": False,
+        "localBaseMovePct": 7.93,
+    }
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side="PUT",
+                pnl_inr=2346.27,
+                exit_reason="explosion_stage_trail",
+                strike=24200.0,
+            )
+        ],
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=True):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(), ict=_confirmed_ict(8.0),
+        )
+
+    assert blocked is True
+    assert reason == "fake_explosion_trap_post_win_cold_velocity"
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")

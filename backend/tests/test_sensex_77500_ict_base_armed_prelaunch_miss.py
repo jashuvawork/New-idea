@@ -178,11 +178,52 @@ def test_live_confirmation_waived_for_prelaunch_cold_v3(mock_settings):
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
-def test_fake_trap_post_win_skipped_on_prelaunch_pad(mock_settings):
+def test_fake_trap_post_win_blocks_prelaunch_pad_by_default(mock_settings):
+    """Aug28 12:55 regression — armed prelaunch must not bypass post-win cold velocity."""
     mock_settings.return_value = Settings(
         fake_explosion_trap_post_win_velocity_block_enabled=True,
         fake_explosion_trap_post_win_min_velocity_3s=0.0,
         fake_explosion_trap_post_win_midday_min_velocity_3s=1.0,
+        fake_explosion_trap_post_win_armed_base_bypass_enabled=False,
+    )
+    snap = _sensex_snap()
+    event = SimpleNamespace(
+        tier="ELITE",
+        velocity_3s=0.0,
+        daily_move_pct=68.71,
+        peak_move_pct=68.71,
+        volume_surge=0.0,
+    )
+    candidate = SimpleNamespace(
+        mode="explosion",
+        tier="ELITE",
+        side=Side.PUT,
+        strike=77500.0,
+        score=44.6,
+        explosion_event=event,
+        alert=_aug28_77500_alert(),
+    )
+    with patch(
+        "app.engines.explosion_entry_guards._post_small_win",
+        return_value=(True, {"postWin": True}),
+    ):
+        blocked, reason, _ = detect_fake_explosion_trap(
+            candidate,
+            snap,
+            state=None,
+            ict=SimpleNamespace(base_relative_move_pct=5.4),
+        )
+    assert blocked is True, reason
+    assert reason == "fake_explosion_trap_post_win_cold_velocity"
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_fake_trap_post_win_skipped_on_prelaunch_pad_when_bypass_enabled(mock_settings):
+    mock_settings.return_value = Settings(
+        fake_explosion_trap_post_win_velocity_block_enabled=True,
+        fake_explosion_trap_post_win_min_velocity_3s=0.0,
+        fake_explosion_trap_post_win_midday_min_velocity_3s=1.0,
+        fake_explosion_trap_post_win_armed_base_bypass_enabled=True,
     )
     snap = _sensex_snap()
     event = SimpleNamespace(
