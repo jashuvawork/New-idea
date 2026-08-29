@@ -1371,16 +1371,17 @@ class Settings(BaseSettings):
     grade_a_ftv_first_lift_min_rank: float = 40.0
     grade_a_ftv_first_lift_min_base_move_pct: float = 8.0
     grade_a_ftv_first_lift_max_base_move_pct: float = 45.0
-    # Aug17 afternoon CALL cluster: BEARISH breadth + 64% baseRel grade-A FTV → −₹7.3k.
-    # Block counter-breadth grade-A FTV when baseRel is past the early pad (not a fresh lift).
-    grade_a_ftv_counter_breadth_block_enabled: bool = True
-    grade_a_ftv_counter_breadth_min_base_rel_pct: float = 20.0
+    # Aug17 afternoon CALL cluster: keep rank-1 BEARISH winners @ 28–31% baseRel;
+    # max baseRel cap catches 50–64% chase; rank-2 afternoon NEUTRAL catches fee039db.
+    grade_a_ftv_counter_breadth_block_enabled: bool = False
+    grade_a_ftv_counter_breadth_min_base_rel_pct: float = 45.0
     # Also block when breadth is not side-aligned (NEUTRAL) above the same floor.
     grade_a_ftv_non_aligned_breadth_block_enabled: bool = False
-    # Aug17 afternoon NEUTRAL-breadth CALL at 21% baseRel after lunch.
     grade_a_ftv_afternoon_neutral_chase_block_enabled: bool = True
     grade_a_ftv_afternoon_neutral_start_hour: int = 12
     grade_a_ftv_afternoon_neutral_call_only: bool = True
+    grade_a_ftv_afternoon_neutral_rank2_only: bool = True
+    grade_a_ftv_afternoon_neutral_min_base_rel_pct: float = 20.0
     expiry_worst_day_grade_a_ftv_bypass_enabled: bool = True
     grade_a_ftv_chart_bypass_enabled: bool = True
     # Broader top FTV/V/ELITE/EXPLODING bypass on NIFTY/SENSEX expiry worst days —

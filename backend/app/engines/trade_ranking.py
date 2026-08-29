@@ -1127,6 +1127,7 @@ def ftv_authorization_policy(
                 settings=_pad_cfg,
                 breadth_bias=str(evidence.get("breadthBias") or "NEUTRAL"),
                 entry_hour_ist=evidence.get("entryHourIst"),
+                allocation_rank=allocation_rank,
             )
             if breadth_blocked:
                 return blocked(breadth_reason)
