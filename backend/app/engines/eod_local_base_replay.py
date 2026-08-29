@@ -7,6 +7,8 @@ premium tape through the live explosion detector and only enters when:
 - ``first_lift_entry_readiness`` (V-base / armed / elite / building-rip paths)
 - ``top_moment_entry_allowed`` (grade + timing)
 - ``local_base_entry_window`` (tier-adaptive base-relative move band)
+- Live session gates when ``eod_replay_live_session_gates_enabled`` (power hour,
+  directional lock with best-side bypass, best-side rank adjustment)
 
 Exits reuse the production explosion exit stack. Portfolio limits (one position at a
 time, daily loss stop) match ``eod_trade_report.apply_portfolio_limits``.
@@ -179,6 +181,7 @@ def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, An
         "earlyRadarPadCapture": bool(
             alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
         ),
+        "coldTroughPad": bool(alert.get("coldTroughPad")),
         "timingAssessment": str(alert.get("timingAssessment") or ""),
         "timingAction": str(alert.get("timingAction") or ""),
     }
@@ -257,6 +260,22 @@ def evaluate_local_base_entry(
             alert=alert, readiness_reason=lift_reason,
         ) or lift_reason
 
+    from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+    from app.engines.explosion_entry_guards import tier_promotion_pad_chase_blocked
+
+    if not alert_has_early_radar_pad_capture(alert):
+        candidate = _candidate_from_alert(alert, snap)
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+        ict_ev = analyze_explosion_event_ict(candidate.explosion_event, snap)
+        chase_blocked, chase_reason = tier_promotion_pad_chase_blocked(
+            candidate.explosion_event,
+            ict=ict_ev,
+            alert=alert,
+        )
+        if chase_blocked:
+            return False, chase_reason, moment, ranking
+
     base_rel = _f(alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct"))
     tier = str(alert.get("tier") or "")
     vol = _f(alert.get("volumeSurge"))
@@ -271,6 +290,8 @@ def evaluate_local_base_entry(
             "building_rip_bullish_ready",
             "fast_bullish_local_base_ready",
             "slow_grind_sudden_lift_ready",
+            "slow_grind_armed_trough_ready",
+            "early_radar_pad_ready",
             "squeeze_release_ready",
             "index_led_option_lag_ready",
             "stealth_cvd_coil_ready",
@@ -291,6 +312,141 @@ def evaluate_local_base_entry(
         return False, f"premium_below_{min_prem:g}", moment, ranking
 
     return True, lift_reason, moment, ranking
+
+
+def _install_replay_clock(replay_dt_class: type) -> list[tuple[Any, Any]]:
+    """Point power-hour / chop minute helpers at the replay clock."""
+    import app.engines.chop_day_guards as chop_guards
+    import app.engines.power_hour_guards as power_hour
+
+    def _minutes_from_replay() -> int:
+        ts = replay_dt_class.current
+        if ts.tzinfo:
+            ts = ts.astimezone(IST)
+        return ts.hour * 60 + ts.minute
+
+    saved: list[tuple[Any, Any]] = []
+    for module in (power_hour, chop_guards):
+        saved.append((module, module._minutes_now))
+        module._minutes_now = _minutes_from_replay
+    return saved
+
+
+def _restore_replay_clock(saved: list[tuple[Any, Any]]) -> None:
+    for module, original in saved:
+        module._minutes_now = original
+
+
+def _candidate_from_alert(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+) -> Any:
+    from types import SimpleNamespace
+
+    from app.engines.explosion_detector import ExplosionEvent
+
+    sym = str(snap.symbol or alert.get("symbol") or "").upper()
+    side_str = str(alert.get("side") or "").upper()
+    side = Side(side_str)
+    strike_v = _f(alert.get("strike"))
+    prem = _f(alert.get("premium"))
+    event = ExplosionEvent(
+        symbol=sym,
+        side=side,
+        strike=strike_v,
+        premium=prem,
+        velocity_3s=_f(alert.get("velocity3s")),
+        velocity_9s=_f(alert.get("velocity9s")),
+        velocity_15s=_f(alert.get("velocity15s")),
+        volume_surge=_f(alert.get("volumeSurge"), 1.0),
+        explosion_score=_f(alert.get("explosionScore")),
+        tier=str(alert.get("tier") or ""),
+        reason=str(alert.get("reason") or "replay"),
+        daily_move_pct=_f(alert.get("dailyMovePct") or alert.get("openPremiumMove")),
+        peak_move_pct=_f(alert.get("peakMovePct")),
+        volume=_f(alert.get("volume")),
+    )
+    return SimpleNamespace(
+        symbol=sym,
+        side=side,
+        strike=strike_v,
+        premium=prem,
+        snap=snap,
+        mode="explosion",
+        tier=event.tier,
+        score=event.explosion_score,
+        explosion_event=event,
+        alert=alert,
+    )
+
+
+def evaluate_replay_live_gates(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    settings: Any = None,
+    skip_session_gate: bool = False,
+) -> tuple[bool, str]:
+    """Production session gates: power hour + directional lock (+ best-side bypass)."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "eod_replay_live_session_gates_enabled", True)):
+        return True, "ok"
+
+    from app.engines.directional_lock import check_directional_side_lock
+    from app.engines.power_hour_guards import (
+        candidate_qualifies_power_hour_top_trade,
+        check_power_hour_session_allowed,
+        in_power_hour_window,
+    )
+    from app.models.schemas import AutoTraderState
+
+    candidate = _candidate_from_alert(alert, snap)
+
+    if in_power_hour_window():
+        if not skip_session_gate:
+            session_ok, session_reason, _ = check_power_hour_session_allowed(
+                AutoTraderState(),
+                snapshots,
+            )
+            if not session_ok:
+                return False, session_reason
+        if not candidate_qualifies_power_hour_top_trade(candidate):
+            return False, "power_hour_top_only"
+
+    blocked, dir_reason = check_directional_side_lock(
+        snap.symbol,
+        candidate.side,
+        snap,
+        tier=candidate.tier,
+        candidate=candidate,
+    )
+    if blocked:
+        return False, dir_reason
+
+    return True, "ok"
+
+
+def _replay_selection_rank(
+    ranking: dict[str, Any],
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    settings: Any = None,
+) -> float:
+    score = _f(ranking.get("rankScore"))
+    s = settings or get_settings()
+    if bool(getattr(s, "eod_replay_live_session_gates_enabled", True)):
+        from app.engines.best_side_selection import best_side_rank_adjustment
+        from app.engines.power_hour_guards import in_power_hour_window
+
+        score += best_side_rank_adjustment(
+            _candidate_from_alert(alert, snap),
+            snapshots,
+            power_hour=in_power_hour_window(),
+        )
+    return score
 
 
 def _contract_key(symbol: str, side: str, strike: float) -> str:
@@ -464,12 +620,16 @@ def replay_local_base_day(
                 premium_series[_contract_key(sym, side, strike_v)].append((ts, prem))
 
     reset_detector_state_for_tests()
+    from app.engines.directional_lock import record_trade_side, reset_directional_lock
+
+    reset_directional_lock()
     original_datetimes = (
         explosion_detector.datetime,
         ict_breakout_monitor.datetime,
         session_timing.datetime,
     )
     original_market_phase = session_timing.get_market_phase
+    replay_clock_saved: list[tuple[Any, Any]] = []
 
     state: dict[str, dict[tuple[float, str], dict[str, Any]]] = {}
     spot_hist: dict[str, list[tuple[datetime, float]]] = defaultdict(list)
@@ -486,6 +646,9 @@ def replay_local_base_day(
         ict_breakout_monitor.datetime = _ReplayDateTime
         session_timing.datetime = _ReplayDateTime
         session_timing.get_market_phase = lambda: "LIVE_MARKET"
+        replay_clock_saved = _install_replay_clock(_ReplayDateTime)
+
+        live_gates = bool(getattr(s, "eod_replay_live_session_gates_enabled", True))
 
         for batch in batches:
             ts_raw = batch.get("ts")
@@ -507,6 +670,7 @@ def replay_local_base_day(
                 if sym:
                     grouped.setdefault(sym, []).append(contract)
 
+            batch_snapshots: dict[str, SymbolSnapshot] = {}
             for sym, contracts in grouped.items():
                 symbol_state = state.setdefault(sym, {})
                 for contract in contracts:
@@ -529,19 +693,19 @@ def replay_local_base_day(
                     sess_peak = _f(contract.get("sessionPeak"))
                     prem = _f(contract.get("premium"))
                     if sess_low > 0 or sess_peak > 0:
-                        key = explosion_detector._open_key(
+                        det_key = explosion_detector._open_key(
                             sym, strike_v, Side(side_name)
                         )
                         if sess_low > 0:
-                            cur = explosion_detector._session_low.get(key)
+                            cur = explosion_detector._session_low.get(det_key)
                             if cur is None or sess_low < cur:
-                                explosion_detector._session_low[key] = sess_low
+                                explosion_detector._session_low[det_key] = sess_low
                         if sess_peak > 0:
-                            cur_p = explosion_detector._session_peak.get(key)
+                            cur_p = explosion_detector._session_peak.get(det_key)
                             if cur_p is None or sess_peak > cur_p:
-                                explosion_detector._session_peak[key] = sess_peak
+                                explosion_detector._session_peak[det_key] = sess_peak
                         if prem > 0:
-                            explosion_detector._record_local_base(key, ts, prem)
+                            explosion_detector._record_local_base(det_key, ts, prem)
 
                 strikes = sorted({stk for stk, _ in symbol_state})
                 heatmap: list[HeatmapStrike] = []
@@ -571,11 +735,37 @@ def replay_local_base_day(
                     tradeQualityScore=55.0,
                 )
                 refresh_snapshot_explosion_alerts(snap)
+                batch_snapshots[sym] = snap
 
-                if next_ok_after is not None and ts < next_ok_after:
-                    continue
+            if not batch_snapshots:
+                continue
 
-                ranked_alerts: list[tuple[float, dict[str, Any]]] = []
+            if next_ok_after is not None and ts < next_ok_after:
+                continue
+
+            session_gate_blocked = False
+            if live_gates:
+                from app.engines.power_hour_guards import (
+                    check_power_hour_session_allowed,
+                    in_power_hour_window,
+                )
+                from app.models.schemas import AutoTraderState
+
+                if in_power_hour_window():
+                    session_ok, session_reason, _ = check_power_hour_session_allowed(
+                        AutoTraderState(),
+                        batch_snapshots,
+                    )
+                    if not session_ok:
+                        gate_stats[session_reason] += 1
+                        session_gate_blocked = True
+
+            if session_gate_blocked:
+                continue
+
+            ranked_candidates: list[tuple[float, str, SymbolSnapshot, dict[str, Any], str, Optional[str], dict[str, Any]]] = []
+            for sym, snap in batch_snapshots.items():
+                symbol_state = state[sym]
                 for alert in snap.explosionAlerts or []:
                     strike_v = _f(alert.get("strike"))
                     side = str(alert.get("side") or "").upper()
@@ -596,8 +786,8 @@ def replay_local_base_day(
                     allowed, reason, moment, ranking = evaluate_local_base_entry(
                         alert_eval, snap, settings=s,
                     )
-                    gate_stats[reason if not allowed else "entry_allowed"] += 1
                     if not allowed:
+                        gate_stats[reason] += 1
                         if len(signal_rows) < 500:
                             signal_rows.append({
                                 "ts": ts.isoformat(),
@@ -610,81 +800,112 @@ def replay_local_base_day(
                             })
                         continue
 
-                    rank_score = _f(ranking.get("rankScore"))
-                    ranked_alerts.append((rank_score, alert_eval))
+                    gate_stats["entry_allowed"] += 1
+                    if live_gates:
+                        live_ok, live_reason = evaluate_replay_live_gates(
+                            alert_eval,
+                            snap,
+                            batch_snapshots,
+                            settings=s,
+                            skip_session_gate=True,
+                        )
+                        if not live_ok:
+                            gate_stats[live_reason] += 1
+                            if len(signal_rows) < 500:
+                                signal_rows.append({
+                                    "ts": ts.isoformat(),
+                                    "key": key,
+                                    "tier": alert.get("tier"),
+                                    "premium": alert.get("premium"),
+                                    "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                                    "allowed": False,
+                                    "reason": live_reason,
+                                })
+                            continue
 
-                if not ranked_alerts:
-                    continue
+                    rank_score = _replay_selection_rank(
+                        ranking,
+                        alert_eval,
+                        snap,
+                        batch_snapshots,
+                        settings=s,
+                    )
+                    ranked_candidates.append(
+                        (rank_score, sym, snap, alert_eval, key, moment, ranking),
+                    )
 
-                ranked_alerts.sort(key=lambda row: row[0], reverse=True)
-                alert = ranked_alerts[0][1]
-                strike_v = _f(alert.get("strike"))
-                side = str(alert.get("side") or "").upper()
-                tier = str(alert.get("tier") or "").upper()
-                key = _contract_key(sym, side, strike_v)
-                ep = _f(alert.get("premium"))
-                base = _f(alert.get("ictBasePremium") or alert.get("basePremium"))
-                if base <= 0:
-                    hist = [
-                        p for t, p in premium_series.get(key, [])
-                        if (ts - t).total_seconds() <= 1200 and p > 0
-                    ]
-                    base = min(hist) if hist else ep
+            if not ranked_candidates:
+                continue
 
-                _, entry_reason, moment, ranking = evaluate_local_base_entry(
-                    alert, snap, settings=s,
-                )
-                forward = [
-                    (t, p)
-                    for t, p in premium_series.get(key, [])
-                    if t >= ts
+            ranked_candidates.sort(key=lambda row: row[0], reverse=True)
+            _, sym, snap, alert, key, moment, ranking = ranked_candidates[0]
+            strike_v = _f(alert.get("strike"))
+            side = str(alert.get("side") or "").upper()
+            tier = str(alert.get("tier") or "").upper()
+            ep = _f(alert.get("premium"))
+            base = _f(alert.get("ictBasePremium") or alert.get("basePremium"))
+            if base <= 0:
+                hist = [
+                    p for t, p in premium_series.get(key, [])
+                    if (ts - t).total_seconds() <= 1200 and p > 0
                 ]
-                entry_ctx = {
-                    "topMomentType": moment,
-                    "entryReason": entry_reason,
+                base = min(hist) if hist else ep
+
+            _, entry_reason, moment, ranking = evaluate_local_base_entry(
+                alert, snap, settings=s,
+            )
+            forward = [
+                (t, p)
+                for t, p in premium_series.get(key, [])
+                if t >= ts
+            ]
+            entry_ctx = {
+                "topMomentType": moment,
+                "entryReason": entry_reason,
+                "grade": ranking.get("grade"),
+                "explosionTier": tier,
+                "velocity3s": alert.get("velocity3s"),
+                "volumeSurge": alert.get("volumeSurge"),
+                "ictFlatThenVertical": alert.get("ictFlatThenVertical"),
+                "ictFirstLift": alert.get("ictFirstLift"),
+                "ictArmedBaseLaunch": alert.get("ictArmedBaseLaunch"),
+                "ictEliteBaseReady": alert.get("ictEliteBaseReady"),
+                "ictVRipReady": alert.get("ictVRipReady"),
+                "momentType": classify_top_moment_type(_alert_evidence(alert, snap)),
+            }
+            trade = _simulate_trade_from_entry(
+                symbol=sym,
+                side=side,
+                strike=strike_v,
+                tier=tier,
+                entry_ts=ts,
+                entry_premium=ep,
+                base_premium=base,
+                forward=forward,
+                settings=s,
+                entry_ctx=entry_ctx,
+            )
+            raw_candidates.append(trade)
+            trades_per_key[key] += 1
+            record_trade_side(sym, Side(side), snap)
+            cooldown_until[key] = trade["_exitDt"] + timedelta(
+                seconds=entry_cooldown_seconds
+            )
+            next_ok_after = trade["_exitDt"] + timedelta(
+                seconds=entry_cooldown_seconds
+            )
+            if len(signal_rows) < 500:
+                signal_rows.append({
+                    "ts": ts.isoformat(),
+                    "key": key,
+                    "tier": tier,
+                    "premium": ep,
+                    "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                    "allowed": True,
+                    "reason": entry_reason,
+                    "momentType": moment,
                     "grade": ranking.get("grade"),
-                    "explosionTier": tier,
-                    "velocity3s": alert.get("velocity3s"),
-                    "volumeSurge": alert.get("volumeSurge"),
-                    "ictFlatThenVertical": alert.get("ictFlatThenVertical"),
-                    "ictFirstLift": alert.get("ictFirstLift"),
-                    "ictArmedBaseLaunch": alert.get("ictArmedBaseLaunch"),
-                    "ictEliteBaseReady": alert.get("ictEliteBaseReady"),
-                    "ictVRipReady": alert.get("ictVRipReady"),
-                    "momentType": classify_top_moment_type(_alert_evidence(alert, snap)),
-                }
-                trade = _simulate_trade_from_entry(
-                    symbol=sym,
-                    side=side,
-                    strike=strike_v,
-                    tier=tier,
-                    entry_ts=ts,
-                    entry_premium=ep,
-                    base_premium=base,
-                    forward=forward,
-                    settings=s,
-                    entry_ctx=entry_ctx,
-                )
-                raw_candidates.append(trade)
-                trades_per_key[key] += 1
-                cooldown_until[key] = trade["_exitDt"] + timedelta(
-                    seconds=entry_cooldown_seconds
-                )
-                next_ok_after = trade["_exitDt"] + timedelta(
-                    seconds=entry_cooldown_seconds
-                )
-                if len(signal_rows) < 500:
-                    signal_rows.append({
-                        "ts": ts.isoformat(),
-                        "key": key,
-                        "tier": tier,
-                        "premium": ep,
-                        "baseRelPct": alert.get("ictBaseRelativeMovePct"),
-                        "allowed": True,
-                        "reason": entry_reason,
-                        "momentType": moment,
-                        "grade": ranking.get("grade"),
-                    })
+                })
 
     finally:
         (
@@ -693,6 +914,8 @@ def replay_local_base_day(
             session_timing.datetime,
         ) = original_datetimes
         session_timing.get_market_phase = original_market_phase
+        if replay_clock_saved:
+            _restore_replay_clock(replay_clock_saved)
         reset_detector_state_for_tests()
 
     taken = apply_portfolio_limits(raw_candidates, settings=s)
@@ -719,7 +942,9 @@ def replay_local_base_day(
         "signals": signal_rows[:100],
         "note": (
             "Full-tape replay with production top-moment + first-lift + "
-            "local-base window gates. One position at a time + daily loss stop."
+            "local-base window gates + live session gates (power hour, "
+            "directional lock, best-side rank). One position at a time + "
+            "daily loss stop."
         ),
         "trades": taken,
     }

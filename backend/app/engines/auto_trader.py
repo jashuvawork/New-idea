@@ -760,9 +760,9 @@ async def _open_from_candidate(
                 )
             )
         ):
-            from app.engines.elite_never_block import elite_never_block_active
+            from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-            if not elite_never_block_active(
+            if not elite_must_take_bypass_allowed(
                 candidate=candidate,
                 event=candidate.explosion_event,
                 alert=getattr(candidate, "alert", None)
@@ -1482,9 +1482,9 @@ async def _open_from_candidate(
                         building_rip_bypasses_fake_trap,
                         top_must_take_bypasses_fake_trap,
                     )
-                    from app.engines.elite_never_block import elite_never_block_active
+                    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-                    must_take = elite_never_block_active(
+                    must_take = elite_must_take_bypass_allowed(
                         event=candidate.explosion_event,
                         candidate=candidate,
                         alert=getattr(candidate, "alert", None),
@@ -1542,6 +1542,18 @@ async def _open_from_candidate(
             pad_lane_chart_bypass, strict_first_lift_bypass = (
                 resolve_strict_pad_lane_chart_bypass(candidate, snap)
             )
+            from app.engines.ftv_candlestick_confirm import ftv_candlestick_bypass_for_snap
+
+            candlestick_bypass = ftv_candlestick_bypass_for_snap(
+                candidate.side,
+                snap,
+                explosion_event=candidate.explosion_event,
+                alert=(
+                    candidate.alert
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else None
+                ),
+            )
             expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
             from app.engines.spot_direction import hard_counter_trend_chart
 
@@ -1556,12 +1568,13 @@ async def _open_from_candidate(
                 local_ichi_bypass = False
                 breadth_bypass = False
                 pad_lane_chart_bypass = False
+                candlestick_bypass = False
             blocked, chart_reason = chart_blocks_side(
                 candidate.side, snap.spotChart, trade_score=trade_score,
                 breadth_aligned_bypass=breadth_bypass,
                 premium_led_bypass=(
                     premium_bypass or vertical_bypass or local_ichi_bypass
-                    or pad_lane_chart_bypass
+                    or pad_lane_chart_bypass or candlestick_bypass
                 ),
                 expiry_explosion_bypass=expiry_chart_bypass,
                 strict_first_lift_bypass=strict_first_lift_bypass,
@@ -1579,12 +1592,13 @@ async def _open_from_candidate(
                 "chartBypassUsed": bool(
                     premium_bypass or vertical_bypass or expiry_chart_bypass
                     or breadth_bypass or local_ichi_bypass or pad_lane_chart_bypass
-                    or strict_first_lift_bypass
+                    or candlestick_bypass or strict_first_lift_bypass
                 ),
                 "premiumLedBypass": premium_bypass,
                 "verticalRipBypass": vertical_bypass,
                 "localBaseIchimokuBypass": local_ichi_bypass,
                 "padLaneChartBypass": pad_lane_chart_bypass,
+                "ftvCandlestickBypass": candlestick_bypass,
                 "strictFirstLiftBypass": strict_first_lift_bypass,
                 "expiryExplosionBypass": expiry_chart_bypass,
             }
@@ -1627,6 +1641,10 @@ async def _open_from_candidate(
         top_explosion_max=top_explosion_max,
         faded_rip=bool(faded_rip_meta),
         post_win_capped=bool(post_win_cap_meta.get("applied")),
+        explosion_always_max=(
+            candidate.mode == "explosion"
+            and bool(getattr(settings, "explosion_always_force_max_lots", True))
+        ),
     )
     # ELITE full-capital sleeve: keep cash-affordable lots; do not shrink to fit an 8% SL INR budget.
     if elite_full_lot and bool(
@@ -3033,17 +3051,23 @@ def _top_rank_full_budget_lots_allowed(
     top_explosion_max: bool,
     faded_rip: bool,
     post_win_capped: bool,
+    explosion_always_max: bool = False,
 ) -> bool:
-    """Keep full sleeve lots only for the strongest fresh rank-1 moment."""
-    return bool(
+    """Keep cash-affordable lots — do not SL-shrink fresh top / always-max entries."""
+    if not (
         enabled
         and allocation is not None
-        and allocation.rank == 1
-        and strict_first_lift
         and top_explosion_max
         and not faded_rip
-        and not         post_win_capped
-    )
+        and not post_win_capped
+    ):
+        return False
+    if allocation.rank == 1 and strict_first_lift:
+        return True
+    # Aug28 NIFTY 24200/24100: explosion_always_force_max_lots raised lots to
+    # capital max, then tune_exit_plan_for_position shrank to 1 lot because FTV
+    # full-sleeve was not stamped (strict_first_lift=False).
+    return bool(explosion_always_max)
 
 
 def _enforce_top_moment_max_lots_only(
@@ -3219,6 +3243,7 @@ def _pad_lane_ftv_policy_max_lots(
         "PREMIUM_FVG_PAD_FTV": "premium_fvg_pad_ftv_force_max_lots",
         "DOUBLE_DIP_VBASE_FTV": "double_dip_vbase_ftv_force_max_lots",
         "EARLY_RADAR_PAD_FTV": "early_radar_pad_ftv_force_max_lots",
+        "BUILDING_COIL_PAD_FTV": "building_coil_pad_ftv_force_max_lots",
     }.get(mode, "")
     if force_attr and not bool(getattr(settings, force_attr, True)):
         return int(lots), False
@@ -3509,13 +3534,19 @@ async def process(
             allocation_enabled = bool(
                 getattr(settings, "ftv_ranked_allocation_enabled", True)
             )
+            best_only = bool(getattr(settings, "selector_best_only_enabled", True))
             max_positions = max(
                 1,
                 int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
             )
+            if best_only:
+                max_positions = 1
             # Non-FTV explosions are skipped without consuming a sleeve; inspect
             # enough ranked legs to reach genuine first-lift candidates farther down.
-            attempt_limit = max_positions * 10 if allocation_enabled else 1
+            if best_only:
+                attempt_limit = 1
+            else:
+                attempt_limit = max_positions * 10 if allocation_enabled else 1
             excluded_keys: set[str] = set()
             allocation_rows: list[dict[str, Any]] = []
             found_candidate = False

@@ -522,7 +522,10 @@ def cross_index_rank_adjustment(
         if sym in nearest:
             bonus += float(getattr(settings, "expiry_day_symbol_rank_bonus", 22.0) or 22.0)
             if sym in fading_map:
+                from app.engines.best_side_selection import best_side_fading_rank_waive
+
                 bonus -= settings.bad_day_fading_symbol_penalty
+                bonus += best_side_fading_rank_waive(candidate, snap)
             return bonus
         if sym in nxt:
             bonus += float(
@@ -556,7 +559,10 @@ def cross_index_rank_adjustment(
         alt = alternate_index_for(restricted_sym, snapshots)
         if sym == restricted_sym:
             if restricted_sym in fading_map:
+                from app.engines.best_side_selection import best_side_fading_rank_waive
+
                 bonus -= settings.bad_day_fading_symbol_penalty
+                bonus += best_side_fading_rank_waive(candidate, snap)
             elif settings.pre_expiry_cross_index_enabled:
                 bonus -= settings.pre_expiry_symbol_rank_penalty
             continue

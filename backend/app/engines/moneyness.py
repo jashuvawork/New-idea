@@ -57,6 +57,8 @@ def atm_itm_entry_allows(
     side: Side | str,
     strike: float,
     snap: SymbolSnapshot,
+    *,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Hard execution policy: every order must be ATM or ITM."""
     spot = float(snap.spot or 0)
@@ -73,6 +75,14 @@ def atm_itm_entry_allows(
         "strikeStepsFromAtm": _depth_steps(side, strike, spot, symbol, atm),
     }
     if money == "OTM":
+        if isinstance(alert, dict) and bool(
+            alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
+        ):
+            from app.engines.early_radar_pad_capture import building_coil_pad_moneyness_ok
+
+            if building_coil_pad_moneyness_ok(alert, snap):
+                meta["buildingCoilPadExpansion"] = True
+                return True, "ok", meta
         return False, "moneyness_atm_itm_only", meta
     return True, "ok", meta
 
@@ -165,7 +175,14 @@ def moneyness_allows(
     candidate: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     settings = get_settings()
-    hard_ok, hard_reason, hard_meta = atm_itm_entry_allows(side, strike, snap)
+    alert_d = None
+    if candidate is not None:
+        raw = getattr(candidate, "alert", None)
+        if isinstance(raw, dict):
+            alert_d = raw
+    hard_ok, hard_reason, hard_meta = atm_itm_entry_allows(
+        side, strike, snap, alert=alert_d,
+    )
     if not hard_ok:
         return False, hard_reason, hard_meta
     if not settings.moneyness_selection_enabled:

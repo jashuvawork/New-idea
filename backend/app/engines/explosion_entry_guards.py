@@ -329,6 +329,42 @@ def entry_window_bounds(
     return lo, hi
 
 
+def tier_promotion_pad_chase_blocked(
+    explosion_event: Any,
+    *,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
+    """Block ELITE/EXPLODING entries promoted off the pad without a pad stamp.
+
+    Aug28 NIFTY 24250 CE 10:17: ELITE at 8.4% baseRel after a micro-rip — chase,
+    not cold-trough entry. Pad-stamped cold-trough lanes may still enter.
+    """
+    settings = get_settings()
+    if not getattr(settings, "tier_promotion_pad_chase_block_enabled", True):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+
+    tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False, ""
+
+    from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+
+    resolved = alert if isinstance(alert, dict) else {}
+    if alert_has_early_radar_pad_capture(resolved):
+        return False, ""
+
+    threshold = float(
+        getattr(settings, "tier_promotion_pad_chase_min_base_rel_pct", 8.0) or 8.0
+    )
+    base_rel = effective_local_base_move_pct(explosion_event, ict)
+    if base_rel > threshold + 1e-6:
+        return True, f"tier_promotion_pad_chase_blocked_{base_rel:.1f}%"
+    return False, ""
+
+
 def explosion_entry_window_blocked(
     explosion_event: Any,
     *,
@@ -462,6 +498,7 @@ def immature_explosion_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
     bullish_local_base: bool = False,
 ) -> tuple[bool, str]:
     """
@@ -477,9 +514,9 @@ def immature_explosion_blocked(
     if explosion_event is None:
         return False, ""
 
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    if elite_never_block_active(event=explosion_event, ict=ict):
+    if elite_must_take_bypass_allowed(event=explosion_event, ict=ict, alert=alert):
         return False, ""
 
     move = _session_peak_move(explosion_event)
@@ -631,6 +668,7 @@ def live_explosion_confirmation_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
     midday_chop: Optional[bool] = None,
     premium_capture: bool = False,
     snap: Optional[SymbolSnapshot] = None,
@@ -686,9 +724,11 @@ def live_explosion_confirmation_blocked(
         if pad_min <= base_rel <= pad_max + 1e-6 and score >= min_score:
             return False, ""
 
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    if elite_never_block_active(event=explosion_event, ict=ict, snap=snap):
+    if elite_must_take_bypass_allowed(
+        event=explosion_event, ict=ict, snap=snap, alert=alert,
+    ):
         return False, ""
 
     if tier not in ("ELITE", "EXPLODING", "BUILDING"):
@@ -793,6 +833,7 @@ def extended_session_chase_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str]:
     """
     Hard-block EXPLOSIVE entries after the move is already mostly done.
@@ -809,10 +850,12 @@ def extended_session_chase_blocked(
     if explosion_event is None:
         return False, ""
 
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
     # Near-base top ELITE/EXPLODING must never be chase-blocked — take at the pad.
-    if elite_never_block_active(event=explosion_event, ict=ict):
+    if elite_must_take_bypass_allowed(
+        event=explosion_event, ict=ict, alert=alert,
+    ):
         return False, ""
 
     move = _session_peak_move(explosion_event)
@@ -920,9 +963,9 @@ def check_explosion_macd_alignment(
     if not settings.explosion_macd_alignment_required:
         return True, "ok"
 
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    if elite_never_block_active(
+    if elite_must_take_bypass_allowed(
         event=event, candidate=candidate, alert=alert, snap=snap,
     ):
         return True, "ok"

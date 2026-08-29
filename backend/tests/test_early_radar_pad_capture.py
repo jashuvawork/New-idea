@@ -11,6 +11,7 @@ import pytest
 from app.config import Settings
 from app.engines.early_radar_pad_capture import (
     EARLY_RADAR_PAD_READY,
+    cold_trough_pad_lift_signal,
     early_radar_pad_capture_active,
     early_radar_pad_entry_readiness,
     stamp_early_radar_pad_capture,
@@ -411,3 +412,130 @@ def test_explosion_selector_allows_watch_local_base_low_score(
     assert len(candidates) == 1
     assert candidates[0].strike == 77600.0
     assert candidates[0].tier == "WATCH"
+
+
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_cold_trough_pad_v3_zero_base_armed(mock_settings):
+    """Aug28 NIFTY 24150 CE 15:05 — WATCH v3=0 at armed session trough."""
+    mock_settings.return_value = Settings()
+    alert = {
+        "tier": "WATCH",
+        "side": "CALL",
+        "strike": 24150.0,
+        "premium": 107.35,
+        "offLowMovePct": 5.0,
+        "localBaseMovePct": 5.0,
+        "ictBaseArmed": True,
+        "ictArmedBaseSamples": 8,
+        "explosionScore": 20.1,
+        "velocity3s": 0.0,
+        "velocity9s": 0.0,
+        "peakMovePct": 5.0,
+    }
+    assert cold_trough_pad_lift_signal(alert) is True
+    assert watch_local_base_pad_structure(alert) is True
+    snap = _snap()
+    assert early_radar_pad_capture_active(alert, snap) is True
+    stamped = dict(alert)
+    assert stamp_early_radar_pad_capture(stamped, snap) is True
+    assert stamped.get("coldTroughPad") is True
+
+
+@patch("app.engines.early_radar_pad_capture.get_settings")
+def test_cold_trough_pad_blocks_when_local_move_extended(mock_settings):
+    mock_settings.return_value = Settings()
+    alert = {
+        "tier": "WATCH",
+        "side": "CALL",
+        "strike": 24150.0,
+        "premium": 115.0,
+        "offLowMovePct": 12.5,
+        "localBaseMovePct": 12.5,
+        "ictBaseArmed": True,
+        "explosionScore": 20.0,
+        "velocity3s": 0.0,
+    }
+    assert cold_trough_pad_lift_signal(alert) is False
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_tier_promotion_pad_chase_blocks_elite_without_stamp(mock_settings):
+    from app.engines.explosion_detector import ExplosionEvent
+    from app.engines.explosion_entry_guards import tier_promotion_pad_chase_blocked
+
+    mock_settings.return_value = Settings()
+    event = ExplosionEvent(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24250.0,
+        premium=104.55,
+        velocity_3s=0.87,
+        velocity_9s=0.5,
+        velocity_15s=0.0,
+        volume_surge=1.0,
+        explosion_score=100.0,
+        tier="ELITE",
+        reason="test",
+        daily_move_pct=8.4,
+        peak_move_pct=8.4,
+    )
+    ict = MagicMock(base_relative_move_pct=8.4, base_armed=True, active=True)
+    blocked, reason = tier_promotion_pad_chase_blocked(event, ict=ict, alert={})
+    assert blocked is True
+    assert "tier_promotion_pad_chase_blocked" in reason
+
+
+@patch("app.engines.elite_never_block.elite_never_block_active", return_value=True)
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_tier_promotion_pad_chase_blocks_elite_even_when_must_take(
+    mock_settings, _must_take,
+):
+    from app.engines.explosion_detector import ExplosionEvent
+    from app.engines.explosion_entry_guards import tier_promotion_pad_chase_blocked
+
+    mock_settings.return_value = Settings()
+    event = ExplosionEvent(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24250.0,
+        premium=104.55,
+        velocity_3s=0.87,
+        velocity_9s=0.5,
+        velocity_15s=0.0,
+        volume_surge=1.0,
+        explosion_score=100.0,
+        tier="ELITE",
+        reason="test",
+        daily_move_pct=8.4,
+        peak_move_pct=8.4,
+    )
+    ict = MagicMock(base_relative_move_pct=8.4, base_armed=True, active=True)
+    blocked, reason = tier_promotion_pad_chase_blocked(event, ict=ict, alert={})
+    assert blocked is True
+    assert "tier_promotion_pad_chase_blocked" in reason
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_tier_promotion_pad_chase_allows_pad_stamp(mock_settings):
+    from app.engines.explosion_detector import ExplosionEvent
+    from app.engines.explosion_entry_guards import tier_promotion_pad_chase_blocked
+
+    mock_settings.return_value = Settings()
+    event = ExplosionEvent(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24250.0,
+        premium=104.55,
+        velocity_3s=0.87,
+        velocity_9s=0.5,
+        velocity_15s=0.0,
+        volume_surge=1.0,
+        explosion_score=100.0,
+        tier="ELITE",
+        reason="test",
+        daily_move_pct=8.4,
+        peak_move_pct=8.4,
+    )
+    alert = {"earlyRadarPadCapture": True, "ictEarlyRadarPadCapture": True}
+    blocked, _ = tier_promotion_pad_chase_blocked(event, ict=None, alert=alert)
+    assert blocked is False

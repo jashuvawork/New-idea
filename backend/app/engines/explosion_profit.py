@@ -409,6 +409,13 @@ def check_explosion_entry(
         else:
             return False, f"tier_{event.tier}_not_tradeable"
 
+    if isinstance(alert, dict):
+        from app.engines.early_radar_pad_capture import building_coil_pad_live_blocked
+
+        coil_blocked, coil_reason = building_coil_pad_live_blocked(alert)
+        if coil_blocked:
+            return False, coil_reason
+
     from app.engines.morning_premium_capture import is_afternoon_capture_event
 
     if (
@@ -485,6 +492,7 @@ def check_explosion_entry(
     from app.engines.explosion_entry_guards import (
         explosion_entry_window_blocked,
         live_explosion_confirmation_blocked,
+        tier_promotion_pad_chase_blocked,
     )
     from app.engines.ict_breakout_monitor import (
         analyze_explosion_event_ict,
@@ -501,10 +509,13 @@ def check_explosion_entry(
         ict=ict_live,
         alert=alert if isinstance(alert, dict) else None,
     )
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    must_take = elite_never_block_active(
-        event=event, snap=snap, ict=ict_live,
+    must_take = elite_must_take_bypass_allowed(
+        event=event,
+        snap=snap,
+        ict=ict_live,
+        alert=alert if isinstance(alert, dict) else None,
     )
     # Flat→vertical ELITE/EXPLODING/BUILDING — require GainzAlgo-style break-P.
     if (
@@ -530,9 +541,17 @@ def check_explosion_entry(
     )
     if window_blocked and not first_lift_ready and not early_pad:
         return False, window_reason
+    chase_blocked, chase_reason = tier_promotion_pad_chase_blocked(
+        event,
+        ict=ict_live,
+        alert=alert if isinstance(alert, dict) else None,
+    )
+    if chase_blocked and not first_lift_ready and not early_pad:
+        return False, chase_reason
     live_blocked, live_reason = live_explosion_confirmation_blocked(
         event,
         ict=ict_live,
+        alert=alert if isinstance(alert, dict) else None,
         premium_capture=is_premium_capture_event(event, chart=chart),
         snap=snap,
     )

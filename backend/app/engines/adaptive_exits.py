@@ -310,7 +310,7 @@ def predict_entry_ml_win_prob(
         return 0.5
 
     from app.engines.psychology_engine import PsychologyState, analyze_psychology
-    from app.models.schemas import get_session_targets
+    from app.engines.simple_profit import get_session_targets
 
     ps_data = snap.psychology or {}
     if ps_data:

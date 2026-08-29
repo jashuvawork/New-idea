@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import urllib.request
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -29,19 +28,15 @@ from app.models.schemas import (
     SymbolSnapshot,
 )
 
+from tests.fixtures.radar_archives import ensure_aug27_archive
+
 IST = ZoneInfo("Asia/Kolkata")
 ARCHIVE = Path("/tmp/radar/radar-2026-08-27.zip")
-ARCHIVE_URL = "https://jashuvatrade.xyz/api/ai/radar-archives/2026-08-27"
 
 
 @pytest.fixture(scope="module")
 def aug27_archive() -> Path:
-    ARCHIVE.parent.mkdir(parents=True, exist_ok=True)
-    if not ARCHIVE.exists() or ARCHIVE.stat().st_size < 1000:
-        urllib.request.urlretrieve(ARCHIVE_URL, ARCHIVE)
-    if not ARCHIVE.exists():
-        pytest.skip("Aug27 radar archive unavailable")
-    return ARCHIVE
+    return ensure_aug27_archive(ARCHIVE)
 
 
 def _load_77300(archive: Path) -> dict:
@@ -150,6 +145,7 @@ def test_afternoon_session_pnl_replay_to_chart_peak(aug27_archive):
     }
     if plan:
         ctx.update(plan)
+    start = datetime(2026, 8, 27, 12, 43, 41, tzinfo=IST)
     trade = PaperTrade(
         id="SENSEX:PUT:77300",
         symbol="SENSEX",
@@ -159,7 +155,7 @@ def test_afternoon_session_pnl_replay_to_chart_peak(aug27_archive):
         currentPremium=entry_prem,
         lots=lots,
         strategyType=StrategyType.EXPLOSIVE,
-        openedAt=datetime.now(IST),
+        openedAt=start,
         bestPnlPoints=0.0,
         entryContext=ctx,
     )
@@ -174,15 +170,25 @@ def test_afternoon_session_pnl_replay_to_chart_peak(aug27_archive):
     ]
     exit_rec = None
     peak_seen = entry_prem
+
+    class _Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            current = _Clock._sim_now
+            return current.astimezone(tz) if tz is not None else current.replace(tzinfo=None)
+
+    _Clock._sim_now = start
     for elapsed, prem in path:
+        _Clock._sim_now = start + timedelta(seconds=elapsed)
         trade.currentPremium = prem
         trade.bestPnlPoints = max(trade.bestPnlPoints, prem - entry_prem)
         peak_seen = max(peak_seen, prem)
         v = 3.0 if prem >= peak_seen * 0.98 else 0.5
         trade.entryContext["liveVelocity3s"] = v
-        reason, _ = evaluate_explosion_exit(
-            trade, prem, "ELITE", units, live_velocity_3s=v,
-        )
+        with patch("app.engines.explosion_profit.datetime", _Clock):
+            reason, _ = evaluate_explosion_exit(
+                trade, prem, "ELITE", units, live_velocity_3s=v,
+            )
         if reason:
             exit_rec = (elapsed, prem, reason)
             break

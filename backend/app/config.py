@@ -305,6 +305,17 @@ class Settings(BaseSettings):
     smart_ichimoku_break_min_probability: float = 0.60
     smart_ichimoku_continuation_min_probability: float = 0.55
     smart_ichimoku_flat_vertical_confirm_enabled: bool = True
+    # Index candlestick patterns (engulfing, marubozu, pin bar, stars, soldiers/crows)
+    # confirm FTV/V premium structure when the 5m spot chart label lags the turn.
+    ftv_candlestick_confirm_enabled: bool = True
+    ftv_candlestick_min_pattern_strength: float = 68.0
+    ftv_candlestick_require_ftv_structure: bool = True
+    ftv_candlestick_min_flat_vertical_quality: float = 50.0
+    ftv_candlestick_chart_bypass_enabled: bool = True
+    ftv_candlestick_chart_bypass_min_score: float = 25.0
+    ftv_candlestick_max_adverse_mom5_pct: float = 0.08
+    ftv_candlestick_rank_bonus_enabled: bool = True
+    ftv_candlestick_rank_bonus_max: float = 10.0
     smart_ichimoku_weight_rsi: float = 0.85
     smart_ichimoku_weight_stoch: float = 0.65
     smart_ichimoku_weight_zscore: float = 0.90
@@ -333,6 +344,8 @@ class Settings(BaseSettings):
     explosion_top_must_take_require_chart_align: bool = True
     # Soft: index tick helpers confirm side even when 5m chart label lags.
     explosion_top_must_take_allow_index_helpers: bool = True
+    # Must-take may skip window/live/timing/composer only after anti-chase + coil confirm.
+    explosion_top_must_take_require_expansion_confirm_enabled: bool = True
     # Soft bypass fake-trap block for must-take ELITE/EXPLODING (still evaluates).
     top_must_take_bypasses_fake_trap: bool = True
     top_must_take_fake_trap_requires_index: bool = False
@@ -1137,6 +1150,21 @@ class Settings(BaseSettings):
     directional_switch_min_explosion_score: float = 55.0
     directional_switch_min_runner_score: float = 60.0
     directional_switch_min_trend_strength: float = 50.0
+    # Best-side selection — follow dominant CE/PE leg all session (incl. power-hour flip).
+    best_side_selection_enabled: bool = True
+    best_side_min_velocity_3s: float = 2.0
+    best_side_min_velocity_ratio: float = 1.4
+    best_side_min_explosion_score: float = 45.0
+    best_side_power_hour_min_velocity_3s: float = 1.8
+    best_side_power_hour_min_velocity_ratio: float = 1.3
+    best_side_directional_lock_bypass_enabled: bool = True
+    best_side_power_hour_bypass_enabled: bool = True
+    best_side_rank_bonus: float = 25.0
+    best_side_counter_rank_penalty: float = 18.0
+    best_side_global_rank_bonus: float = 15.0
+    best_side_fading_waive_bonus: float = 20.0
+    # EOD replay — apply live session gates (power hour, directional lock, best-side).
+    eod_replay_live_session_gates_enabled: bool = True
 
     # Symbol / instrument cooldown — stop same-strike churn after losses
     symbol_loss_cooldown_seconds: int = 180
@@ -1641,6 +1669,47 @@ class Settings(BaseSettings):
     watch_local_base_pad_max_explosion_score: float = 50.0
     watch_local_base_pad_min_velocity_3s: float = 0.05
     watch_local_base_pad_min_velocity_9s: float = 0.03
+    # Cold-trough pad — WATCH/BUILDING at session low with v3=0 and armed/coil signals
+    # (Aug28 NIFTY 24150 CE 15:03–15:05 at ₹104 pad before 3pm rip; v3=0 blocked watch pad).
+    cold_trough_pad_entry_enabled: bool = True
+    cold_trough_pad_max_off_low_pct: float = 5.0
+    cold_trough_pad_max_local_move_pct: float = 8.0
+    cold_trough_pad_max_explosion_score: float = 35.0
+    # Anti-chase — block ELITE/EXPLODING tier promotion when baseRel > floor without pad stamp
+    # (Aug28 NIFTY 24250 CE 10:17 ELITE @ 8.4% baseRel after micro-rip, not cold trough).
+    tier_promotion_pad_chase_block_enabled: bool = True
+    tier_promotion_pad_chase_min_base_rel_pct: float = 8.0
+    # Best-only selector — one top-ranked explosion per radar cycle; rank-1 at selection.
+    selector_best_only_enabled: bool = True
+    # Grade-A BUILDING armed_base_option_led_ready on live selector — enter at local
+    # base before ELITE/EXPLODING promote (Aug28 NIFTY PUT 24200/24100 ~1h late).
+    # Archive week in-window false-start rate ~7.5% (3/40); win rate ~75%.
+    building_armed_base_grade_a_live_enabled: bool = True
+    building_armed_base_grade_a_min_grade: str = "A"
+    building_armed_base_grade_a_max_base_rel_pct: float = 0.0
+    building_armed_base_grade_a_use_local_base_window: bool = True
+    building_armed_base_grade_a_ftv_enabled: bool = True
+    building_armed_base_grade_a_ftv_max_capital_pct: float = 0.90
+    # BUILDING coil pad at 10–25% local base — EOD hindsight entry window live
+    # (Aug28 NIFTY PUT 24050 @ 11:12: BUILDING baseRel 20.7%, v3=0, +₹78k hindsight).
+    building_coil_pad_entry_enabled: bool = True
+    building_coil_pad_min_local_move_pct: float = 10.0
+    building_coil_pad_max_local_move_pct: float = 25.0
+    building_coil_pad_max_explosion_score: float = 65.0
+    building_coil_pad_ftv_enabled: bool = True
+    building_coil_pad_ftv_max_capital_pct: float = 0.90
+    building_coil_pad_ftv_force_max_lots: bool = True
+    building_coil_pad_max_otm_steps: int = 4
+    # Require lift confirmation before coil-pad live entry (armed coil is watch-only).
+    building_coil_pad_confirm_entry_enabled: bool = True
+    building_coil_pad_confirm_min_velocity_3s: float = 0.5
+    building_coil_pad_confirm_min_velocity_9s: float = 0.25
+    building_coil_pad_confirm_min_volume_surge: float = 1.2
+    building_coil_pad_confirm_allow_flat_vertical: bool = True
+    # Prefer deeper ITM expansion strikes over ATM when coil pad is active
+    # (Aug28 24050 ITM over 24200/24100 ATM on the same lift).
+    expansion_strike_rank_bonus_enabled: bool = True
+    expansion_strike_rank_bonus: float = 15.0
     # Pad-lane turnaround chart bypass — premium-led V-rip / slow-grind / FTV lifts off
     # session low while the 5m index chart is still counter-trend (Aug25 NIFTY 24150 CE
     # ₹20→90 V-reversal blocked by chart_live_bearish_no_calls). Wider adverse-momentum

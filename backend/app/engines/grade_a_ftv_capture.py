@@ -35,6 +35,10 @@ def _session_move(alert: Mapping[str, Any]) -> float:
 def grade_a_ftv_index_aligned(alert: Mapping[str, Any], snap: Optional[SymbolSnapshot]) -> bool:
     if bool(alert.get("indexMomAlign") or alert.get("indexHelpersConfirm")):
         return True
+    from app.engines.ftv_candlestick_confirm import ftv_candlestick_index_aligned
+
+    if ftv_candlestick_index_aligned(alert, snap):
+        return True
     if snap is None:
         return False
     side = str(alert.get("side") or "").upper()

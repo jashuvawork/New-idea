@@ -666,11 +666,15 @@ def validate_candidate(
         )
         policy_snap = getattr(candidate, "snap", None)
         money_ok = True
+        alert_d = (
+            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+        )
         if policy_snap is not None:
             money_ok, _, _ = atm_itm_entry_allows(
                 candidate.side,
                 candidate.strike,
                 policy_snap,
+                alert=alert_d,
             )
         policy_decision = ftv_authorization_policy(
             causal_ranking.get("evidence") or {},
@@ -711,9 +715,9 @@ def validate_candidate(
                 meta["composerBias"] = brief.get("tradeBias")
                 # Session stand-aside must not bury high-confidence base-rip explosions.
                 stand_down_bypass = False
-                from app.engines.elite_never_block import elite_never_block_active
+                from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-                if elite_never_block_active(candidate=candidate):
+                if elite_must_take_bypass_allowed(candidate=candidate):
                     stand_down_bypass = True
                     meta["composerStandDownBypass"] = "elite_never_block"
                 # (1) Expiry early-window ELITE top.
@@ -930,9 +934,9 @@ def validate_candidate(
                 else None
             ),
         )
-        from app.engines.elite_never_block import elite_never_block_active
+        from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-        must_take = elite_never_block_active(
+        must_take = elite_must_take_bypass_allowed(
             event=explosion_event,
             candidate=candidate,
             alert=getattr(candidate, "alert", None)
@@ -971,13 +975,14 @@ def validate_candidate(
                 building_rip_bypasses_fake_trap,
                 top_must_take_bypasses_fake_trap,
             )
-            from app.engines.elite_never_block import elite_never_block_active
+            from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-            must_take = elite_never_block_active(
+            must_take = elite_must_take_bypass_allowed(
                 event=explosion_event,
                 candidate=candidate,
                 alert=getattr(candidate, "alert", None),
                 snap=snap,
+                ict=trap_ict,
             )
             if not building_rip_bypasses_fake_trap(candidate=candidate) and not (
                 top_must_take_bypasses_fake_trap(
@@ -1026,12 +1031,14 @@ def validate_candidate(
 
     from app.engines.moneyness import atm_itm_entry_allows, moneyness_allows
 
-    # Hard execution policy: ELITE/must-take paths may bypass soft validators,
-    # but they can never bypass ATM/ITM-only selection.
+    alert_d = (
+        candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+    )
     hard_mn_ok, hard_mn_reason, hard_mn_meta = atm_itm_entry_allows(
         candidate.side,
         candidate.strike,
         snap,
+        alert=alert_d,
     )
     meta.update(hard_mn_meta)
     if not hard_mn_ok:
@@ -1207,6 +1214,20 @@ def validate_candidate(
     )
     if pad_lane_chart_bypass:
         meta["padLaneChartBypass"] = True
+    from app.engines.ftv_candlestick_confirm import ftv_candlestick_bypass_for_snap
+
+    candlestick_bypass = ftv_candlestick_bypass_for_snap(
+        candidate.side,
+        snap,
+        explosion_event=getattr(candidate, "explosion_event", None),
+        alert=(
+            candidate.alert
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None
+        ),
+    )
+    if candlestick_bypass:
+        meta["ftvCandlestickBypass"] = True
     armed_base_chart_bypass = False
     if (
         getattr(candidate, "mode", "") == "explosion"
@@ -1252,7 +1273,7 @@ def validate_candidate(
         snap.spotChart,
         trade_score=trade_score,
         breadth_aligned_bypass=breadth_bypass,
-        premium_led_bypass=premium_bypass or local_ichi_bypass or pad_lane_chart_bypass,
+        premium_led_bypass=premium_bypass or local_ichi_bypass or pad_lane_chart_bypass or candlestick_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
         strict_first_lift_bypass=armed_base_chart_bypass or pad_lane_chart_bypass,
     )

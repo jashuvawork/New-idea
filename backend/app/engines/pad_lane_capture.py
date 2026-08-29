@@ -34,6 +34,7 @@ ALL_PAD_LANE_REASONS = frozenset(
         PREMIUM_FVG_PAD_READY,
         DOUBLE_DIP_VBASE_READY,
         "early_radar_pad_ready",
+        "building_coil_pad_ready",
     }
 )
 
@@ -48,6 +49,7 @@ PAD_LANE_FTV_MODES = frozenset(
         "PREMIUM_FVG_PAD_FTV",
         "DOUBLE_DIP_VBASE_FTV",
         "EARLY_RADAR_PAD_FTV",
+        "BUILDING_COIL_PAD_FTV",
     }
 )
 
@@ -63,6 +65,7 @@ def pad_lane_pre_lift(evidence: Mapping[str, Any]) -> bool:
         or evidence.get("premiumFvgPad")
         or evidence.get("doubleDipVbase")
         or evidence.get("earlyRadarPadCapture")
+        or evidence.get("buildingCoilPad")
     )
 
 
@@ -95,6 +98,10 @@ def pad_lane_cold_velocity_ok(
         and 2.0 <= local_move <= 25.0
         and -1.5 <= v3 <= 1.5
     ):
+        return True
+    if evidence.get("buildingCoilPad") and -0.8 <= v3 <= 1.5:
+        return True
+    if evidence.get("coldTroughPad") and -0.8 <= v3 <= 1.5:
         return True
     if evidence.get("vRipReady") and -1.2 <= v3 <= 1.5 and v9 >= -0.8:
         return True
@@ -133,10 +140,18 @@ def pad_lane_grade_floor_applies(evidence: Mapping[str, Any]) -> bool:
         return False
     if evidence.get("faded") or evidence.get("exhaustedReentry") or evidence.get("midRipCoil"):
         return False
+    if evidence.get("earlyRadarPadCapture") or evidence.get("coldTroughPad"):
+        v3 = float(evidence.get("velocity3s") or 0)
+        v9 = float(evidence.get("velocity9s") or 0)
+        return pad_lane_cold_velocity_ok(evidence, v3, v9)
+    if evidence.get("buildingCoilPad"):
+        v3 = float(evidence.get("velocity3s") or 0)
+        v9 = float(evidence.get("velocity9s") or 0)
+        return pad_lane_cold_velocity_ok(evidence, v3, v9)
     tier = str(evidence.get("tier") or "").upper()
     if tier not in ("ELITE", "EXPLODING"):
         return False
-    if evidence.get("vRipReady") or evidence.get("earlyRadarPadCapture"):
+    if evidence.get("vRipReady"):
         if not pad_lane_ftv_waives_allocation_rank_one(evidence):
             return False
         v3 = float(evidence.get("velocity3s") or 0)
