@@ -262,6 +262,36 @@ def building_coil_pad_lift_confirmed(
     if bool(getattr(s, "building_coil_pad_confirm_allow_flat_vertical", True)):
         if flat_vert and breakout and (vol_awake or vol_surge >= min_surge):
             return True
+        # Flat coil with heat but breakout stamp lagging on quiet polls.
+        if flat_vert and (vol_awake or vol_surge >= min_surge):
+            local_move = _number(
+                alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")
+            )
+            pad_lo = float(
+                getattr(s, "building_coil_pad_min_local_move_pct", 10.0) or 10.0
+            )
+            pad_hi = float(
+                getattr(s, "building_coil_pad_max_local_move_pct", 25.0) or 25.0
+            )
+            if pad_lo <= local_move <= pad_hi + 1e-6:
+                return True
+
+    if bool(getattr(s, "building_coil_pad_confirm_armed_volume_ok", True)):
+        if bool(alert.get("ictBaseArmed")) and not bool(alert.get("ictArmedBaseLaunch")):
+            local_move = _number(
+                alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")
+            )
+            pad_lo = float(
+                getattr(s, "building_coil_pad_min_local_move_pct", 10.0) or 10.0
+            )
+            pad_hi = float(
+                getattr(s, "building_coil_pad_max_local_move_pct", 25.0) or 25.0
+            )
+            if (
+                pad_lo <= local_move <= pad_hi + 1e-6
+                and (vol_awake or vol_surge >= min_surge)
+            ):
+                return True
 
     if bool(
         alert.get("indexHelpersConfirm")
@@ -366,6 +396,8 @@ def building_coil_pad_entry_readiness(
 
 def alert_has_building_coil_pad(alert: Mapping[str, Any]) -> bool:
     """True only when coil pad is confirmed for live entry (not watch/armed)."""
+    if not isinstance(alert, Mapping):
+        return False
     return bool(alert.get("buildingCoilPadReady"))
 
 

@@ -317,13 +317,43 @@ def _auto_trader_blocks(
         return True, f"live_confirm:{live_reason}", meta
 
     if settings.execution_chart_gate_enabled:
-        from app.engines.spot_direction import chart_blocks_side
+        from app.engines.spot_direction import (
+            chart_blocks_side,
+            hard_counter_trend_chart,
+        )
+        from app.engines.local_base_chart_bypass import local_base_ichimoku_chart_bypass
+        from app.engines.pad_lane_capture import (
+            pad_lane_turnaround_chart_bypass,
+            resolve_strict_pad_lane_chart_bypass,
+        )
+        from app.engines.ftv_candlestick_confirm import ftv_candlestick_chart_bypass
 
+        pad_lane_ok, strict_first_lift_ok = resolve_strict_pad_lane_chart_bypass(
+            candidate, snap,
+        )
+        local_base_ok = local_base_ichimoku_chart_bypass(
+            candidate.side, snap, event=event, alert=alert,
+        )
+        candlestick_ok = ftv_candlestick_chart_bypass(
+            candidate.side, snap, alert=alert, event=event,
+        )
+        premium_bypass = pad_lane_ok or local_base_ok or candlestick_ok
+        if (
+            getattr(settings, "chart_counter_trend_bypass_block_enabled", True)
+            and hard_counter_trend_chart(candidate.side, snap.spotChart)
+            and not strict_first_lift_ok
+        ):
+            premium_bypass = False
+            pad_lane_ok = False
         blocked, chart_reason = chart_blocks_side(
             candidate.side, snap.spotChart,
+            premium_led_bypass=premium_bypass,
+            strict_first_lift_bypass=strict_first_lift_ok,
         )
         meta["executionChartBlocked"] = blocked
         meta["executionChartReason"] = chart_reason
+        meta["padLaneChartBypass"] = pad_lane_ok
+        meta["strictFirstLiftBypass"] = strict_first_lift_ok
         if blocked:
             return True, f"execution_chart:{chart_reason}", meta
 
@@ -568,7 +598,7 @@ def main() -> None:
 
     out = {
         "date": date,
-        "branch": "cursor/cold-trough-pad-entry-f5cb",
+        "branch": "cursor/aug28-win-entry-gates-f5cb",
         "liveTradesNote": LIVE_TRADES,
         "eodLocalBaseReplay": {
             "status": replay_day.get("status"),

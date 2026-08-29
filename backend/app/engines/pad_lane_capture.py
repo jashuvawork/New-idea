@@ -1140,11 +1140,22 @@ def pad_lane_turnaround_chart_bypass(
     elite_ftv = _pad_lane_elite_ftv_chart_signal(alert, event)
     armed_launch = _armed_base_launch_pad_chart_signal(alert, event)
     first_lift_pad = _first_lift_local_base_pad_chart_signal(alert, event)
+    from app.engines.early_radar_pad_capture import (
+        BUILDING_COIL_PAD_READY,
+        alert_has_building_coil_pad,
+    )
+
+    coil_pad = (
+        str(readiness_reason or "") == BUILDING_COIL_PAD_READY
+        or alert_has_building_coil_pad(alert)
+        or bool((alert or {}).get("buildingCoilPad"))
+    )
     if (
         not _pad_lane_turnaround_signal(alert, readiness_reason)
         and not elite_ftv
         and not armed_launch
         and not first_lift_pad
+        and not coil_pad
     ):
         return False
 
@@ -1176,7 +1187,7 @@ def pad_lane_turnaround_chart_bypass(
         readiness_reason=readiness_reason,
         tier=str((alert or {}).get("tier") or getattr(event, "tier", "") or ""),
     )
-    if armed_launch or first_lift_pad:
+    if armed_launch or first_lift_pad or coil_pad:
         row = alert if isinstance(alert, dict) else {}
         evidence = {
             "tier": row.get("tier") or getattr(event, "tier", ""),
@@ -1187,6 +1198,7 @@ def pad_lane_turnaround_chart_bypass(
             "activeBreakout": bool(row.get("ictBreakout") or row.get("ictFirstLift")),
             "volumeAwaken": volume_awake,
             "firstLiftLocalBase": first_lift_pad,
+            "buildingCoilPad": coil_pad,
         }
         velocity_ok = pad_lane_cold_velocity_ok(evidence, v3, v9)
     elif ftv_direct:
@@ -1312,6 +1324,7 @@ _STRICT_PAD_CHART_BYPASS_REASONS = frozenset(
         "premium_fvg_pad_ready",
         "double_dip_vbase_ready",
         "early_radar_pad_ready",
+        "building_coil_pad_ready",
     }
 )
 

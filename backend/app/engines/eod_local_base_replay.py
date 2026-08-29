@@ -181,6 +181,16 @@ def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, An
         "earlyRadarPadCapture": bool(
             alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
         ),
+        "buildingCoilPad": bool(
+            alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
+        ),
+        "volumeAwaken": bool(
+            alert.get("volumeAwaken")
+            or alert.get("ictVolumeAwakening")
+            or _f(alert.get("volumeSurge")) >= 1.0
+        ),
+        "volumeSurge": _f(alert.get("volumeSurge")),
+        "ictBaseArmed": bool(alert.get("ictBaseArmed")),
         "coldTroughPad": bool(alert.get("coldTroughPad")),
         "timingAssessment": str(alert.get("timingAssessment") or ""),
         "timingAction": str(alert.get("timingAction") or ""),
@@ -234,17 +244,6 @@ def evaluate_local_base_entry(
     if not explosion_alert_is_top_moment(alert):
         return False, "not_top_moment_radar", None, {}
 
-    evidence = _alert_evidence(alert, snap)
-    ranking = rank_trade_evidence(evidence)
-    allowed, reason, moment = top_moment_entry_allowed(
-        evidence,
-        ranking,
-        top_moments_only_enabled=bool(getattr(s, "top_moments_only_enabled", True)),
-        min_grade=str(getattr(s, "top_moments_min_grade", "A") or "A"),
-    )
-    if not allowed:
-        return False, reason, moment, ranking
-
     from app.engines.ict_breakout_monitor import first_lift_entry_readiness
     from app.engines.building_ftv_gates import pad_lane_ready_reason
     from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
@@ -253,6 +252,19 @@ def evaluate_local_base_entry(
     pad_lane_waive = pad_lane_early_near_miss_waive(
         alert, readiness_reason=lift_reason,
     )
+
+    evidence = _alert_evidence(alert, snap)
+    ranking = rank_trade_evidence(evidence)
+    allowed, reason, moment = top_moment_entry_allowed(
+        evidence,
+        ranking,
+        top_moments_only_enabled=bool(getattr(s, "top_moments_only_enabled", True)),
+        min_grade=str(getattr(s, "top_moments_min_grade", "A") or "A"),
+        readiness_reason=lift_reason if (ready or pad_lane_waive) else "",
+    )
+    if not allowed:
+        return False, reason, moment, ranking
+
     if not ready and not pad_lane_waive:
         return False, lift_reason, moment, ranking
     if pad_lane_waive:
@@ -298,6 +310,7 @@ def evaluate_local_base_entry(
             "micro_pullback_retest_ready",
             "premium_fvg_pad_ready",
             "double_dip_vbase_ready",
+            "building_coil_pad_ready",
         ):
             return (
                 False,
