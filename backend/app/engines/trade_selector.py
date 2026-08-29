@@ -787,7 +787,7 @@ def _explosion_candidates(
             ict=ict,
             alert=alert,
         )
-        if chase_blocked and not first_lift_ready and not early_pad and not coil_pad:
+        if chase_blocked and not first_lift_ready and not early_pad:
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the
         # hard window does not re-raise the unstructured 28% floor.
@@ -1719,13 +1719,16 @@ def find_best_entry(
             from app.engines.moneyness import atm_itm_entry_allows
 
             money_ok, _, _ = atm_itm_entry_allows(c.side, c.strike, c.snap)
+            policy_kwargs = ftv_policy_settings(settings)
+            if bool(getattr(settings, "selector_best_only_enabled", True)):
+                policy_kwargs["require_allocation_rank_one"] = True
             policy_decision = ftv_authorization_policy(
                 causal_ranking.get("evidence") or {},
                 causal_ranking,
                 snapshot_available=True,
                 atm_itm_allowed=money_ok,
                 day_mode=resolve_policy_day_mode(state),
-                **ftv_policy_settings(settings),
+                **policy_kwargs,
             )
             policy_ok = policy_decision.allowed
             policy_reason = policy_decision.reason

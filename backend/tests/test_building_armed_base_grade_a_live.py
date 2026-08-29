@@ -161,6 +161,7 @@ def test_selector_admits_building_armed_base_without_elite_tier(
         top_moments_only_enabled=True,
         explosion_elite_exploding_only=True,
         building_armed_base_grade_a_live_enabled=True,
+        selector_best_only_enabled=False,
     )
     alert = _building_armed_alert()
     snap = _snap()

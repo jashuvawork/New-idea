@@ -3520,13 +3520,19 @@ async def process(
             allocation_enabled = bool(
                 getattr(settings, "ftv_ranked_allocation_enabled", True)
             )
+            best_only = bool(getattr(settings, "selector_best_only_enabled", True))
             max_positions = max(
                 1,
                 int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
             )
+            if best_only:
+                max_positions = 1
             # Non-FTV explosions are skipped without consuming a sleeve; inspect
             # enough ranked legs to reach genuine first-lift candidates farther down.
-            attempt_limit = max_positions * 10 if allocation_enabled else 1
+            if best_only:
+                attempt_limit = 1
+            else:
+                attempt_limit = max_positions * 10 if allocation_enabled else 1
             excluded_keys: set[str] = set()
             allocation_rows: list[dict[str, Any]] = []
             found_candidate = False

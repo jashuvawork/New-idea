@@ -356,11 +356,6 @@ def tier_promotion_pad_chase_blocked(
     if alert_has_early_radar_pad_capture(resolved):
         return False, ""
 
-    from app.engines.elite_never_block import elite_never_block_active
-
-    if elite_never_block_active(event=explosion_event, ict=ict):
-        return False, ""
-
     threshold = float(
         getattr(settings, "tier_promotion_pad_chase_min_base_rel_pct", 8.0) or 8.0
     )
