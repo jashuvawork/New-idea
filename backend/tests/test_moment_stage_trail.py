@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
+
+import pytest
 from zoneinfo import ZoneInfo
 
 from app.engines.explosion_profit import ExplosionExitParams, evaluate_explosion_exit
@@ -53,6 +55,9 @@ def _settings(**overrides):
     s.moment_stage_extend_hot_stages = 4.0
     s.moment_stage_extend_hot_velocity_3s = 2.5
     s.moment_stage_hot_hold_velocity_3s = 2.5
+    s.moment_stage_near_complete_frac = 0.82
+    s.cycle_moment_peak_sync_enabled = True
+    s.cycle_moment_peak_sync_min_gain_pct = 50.0
     s.explosion_trail_pre_stage_suppress_step = True
     s.explosion_trail_hot_defer_enabled = True
     s.ict_max_profit_target_points = 180.0
@@ -491,3 +496,141 @@ def test_pre_stage_deep_fade_still_books(mock_ms, mock_s, _hc, _mp):
     )
     assert reason == "explosion_stage_trail"
     assert pnl > 0
+
+
+def test_near_stage_floor_aug28_24100_otm_sibling():
+    """Aug28 24100 PE +33 vs stage 40 — near-complete arms pct-keep stage floor."""
+    from app.engines.moment_stage_trail import (
+        build_moment_stage_plan,
+        moment_stage_near_complete,
+        stage_trail_floor_pts,
+    )
+
+    entry = 46.45
+    plan = build_moment_stage_plan(
+        entry_premium=entry,
+        base_premium=40.0,
+        exit_plan={"targetPoints": 31.0},
+        velocity_3s=5.0,
+        volume_surge=2.0,
+        flat_then_vertical=True,
+        max_profit=True,
+    )
+    trade = PaperTrade(
+        id="nifty-24100",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24100.0,
+        entryPremium=entry,
+        currentPremium=entry + 33.0,
+        lots=1,
+        openedAt=datetime.now(IST) - timedelta(minutes=40),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=33.35,
+        entryContext={"maxProfitCapture": True, **(plan or {})},
+    )
+    stage = float(plan["stageSize"])
+    assert moment_stage_near_complete(trade, 33.35, stage)
+    floor = stage_trail_floor_pts(trade, 33.35)
+    assert floor is not None
+    assert floor >= 24.0
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=False)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_near_stage_otm_sibling_exits_on_pullback(mock_ms, mock_s, _hc, _mp):
+    """OTM same-cycle leg exits on moment-top pullback once rank-1 peak is synced."""
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    entry = 46.45
+    plan = build_moment_stage_plan(
+        entry_premium=entry,
+        base_premium=40.0,
+        exit_plan={"targetPoints": 31.0, "trailArmPoints": 113.0},
+        velocity_3s=5.0,
+        volume_surge=2.0,
+        flat_then_vertical=True,
+        max_profit=True,
+    )
+    trade = PaperTrade(
+        id="nifty-24100",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24100.0,
+        entryPremium=entry,
+        currentPremium=entry + 24.6,
+        lots=1,
+        openedAt=datetime.now(IST) - timedelta(minutes=43),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=24.25,
+        maxLtp=entry + 24.25,
+        entryContext={
+            "maxProfitCapture": True,
+            "entryCycleId": "5c85ce0def3f",
+            "cycleMomentBestGainPct": (33.35 / entry) * 100.0,
+            "exitPlan": plan or {},
+            **(plan or {}),
+        },
+    )
+    params = ExplosionExitParams(
+        stop_points=11.06,
+        target_points=31.17,
+        trail_arm_points=113.15,
+        trail_keep_ratio=0.61,
+        micro_target_points=3.0,
+        adaptive_stop=True,
+    )
+    with patch("app.engines.explosion_profit._hold_seconds", return_value=2600):
+        reason, pnl = evaluate_explosion_exit(
+            trade, entry + 24.6, "EXPLODING", 65, params=params, live_velocity_3s=0.0,
+        )
+    assert reason in ("explosion_peak_keep_trail", "explosion_stage_trail")
+    assert pnl > 0
+
+
+def test_sync_cycle_moment_peaks_shares_rank_one_best():
+    from app.engines.moment_stage_trail import effective_best_pnl, sync_cycle_moment_peaks
+
+    common = {
+        "entryCycleId": "cycle-a",
+        "maxProfitCapture": True,
+        "momentStageLadder": True,
+    }
+    rank1 = PaperTrade(
+        id="rank1",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24200.0,
+        entryPremium=81.9,
+        currentPremium=131.0,
+        lots=1,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=49.0,
+        maxLtp=130.9,
+        entryContext=dict(common),
+    )
+    rank2 = PaperTrade(
+        id="rank2",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24100.0,
+        entryPremium=46.45,
+        currentPremium=70.0,
+        lots=1,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=24.25,
+        maxLtp=70.7,
+        entryContext=dict(common),
+    )
+    sync_cycle_moment_peaks([rank1, rank2])
+    # Rank-1 +49pt on ₹81.9 ≈ 59.8% — rank-2 effective best ≈ ₹27.8pt not ₹49pt.
+    expected_pct = 49.0 / 81.9 * 100.0
+    assert float(rank2.entryContext["cycleMomentBestGainPct"]) == round(expected_pct, 3)
+    assert effective_best_pnl(rank2, 24.25) == pytest.approx(
+        round(46.45 * expected_pct / 100.0, 2), abs=0.02
+    )
