@@ -760,9 +760,9 @@ async def _open_from_candidate(
                 )
             )
         ):
-            from app.engines.elite_never_block import elite_never_block_active
+            from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-            if not elite_never_block_active(
+            if not elite_must_take_bypass_allowed(
                 candidate=candidate,
                 event=candidate.explosion_event,
                 alert=getattr(candidate, "alert", None)
@@ -1482,9 +1482,9 @@ async def _open_from_candidate(
                         building_rip_bypasses_fake_trap,
                         top_must_take_bypasses_fake_trap,
                     )
-                    from app.engines.elite_never_block import elite_never_block_active
+                    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-                    must_take = elite_never_block_active(
+                    must_take = elite_must_take_bypass_allowed(
                         event=candidate.explosion_event,
                         candidate=candidate,
                         alert=getattr(candidate, "alert", None),

@@ -333,6 +333,8 @@ class Settings(BaseSettings):
     explosion_top_must_take_require_chart_align: bool = True
     # Soft: index tick helpers confirm side even when 5m chart label lags.
     explosion_top_must_take_allow_index_helpers: bool = True
+    # Must-take may skip window/live/timing/composer only after anti-chase + coil confirm.
+    explosion_top_must_take_require_expansion_confirm_enabled: bool = True
     # Soft bypass fake-trap block for must-take ELITE/EXPLODING (still evaluates).
     top_must_take_bypasses_fake_trap: bool = True
     top_must_take_fake_trap_requires_index: bool = False

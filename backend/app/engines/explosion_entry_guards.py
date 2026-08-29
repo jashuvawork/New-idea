@@ -498,6 +498,7 @@ def immature_explosion_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
     bullish_local_base: bool = False,
 ) -> tuple[bool, str]:
     """
@@ -513,9 +514,9 @@ def immature_explosion_blocked(
     if explosion_event is None:
         return False, ""
 
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    if elite_never_block_active(event=explosion_event, ict=ict):
+    if elite_must_take_bypass_allowed(event=explosion_event, ict=ict, alert=alert):
         return False, ""
 
     move = _session_peak_move(explosion_event)
@@ -642,6 +643,7 @@ def live_explosion_confirmation_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
     midday_chop: Optional[bool] = None,
     premium_capture: bool = False,
     snap: Optional[SymbolSnapshot] = None,
@@ -673,9 +675,11 @@ def live_explosion_confirmation_blocked(
     ):
         return False, ""
 
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    if elite_never_block_active(event=explosion_event, ict=ict, snap=snap):
+    if elite_must_take_bypass_allowed(
+        event=explosion_event, ict=ict, snap=snap, alert=alert,
+    ):
         return False, ""
 
     tier = str(getattr(explosion_event, "tier", "") or "").upper()
@@ -781,6 +785,7 @@ def extended_session_chase_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str]:
     """
     Hard-block EXPLOSIVE entries after the move is already mostly done.
@@ -797,10 +802,12 @@ def extended_session_chase_blocked(
     if explosion_event is None:
         return False, ""
 
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
     # Near-base top ELITE/EXPLODING must never be chase-blocked — take at the pad.
-    if elite_never_block_active(event=explosion_event, ict=ict):
+    if elite_must_take_bypass_allowed(
+        event=explosion_event, ict=ict, alert=alert,
+    ):
         return False, ""
 
     move = _session_peak_move(explosion_event)
@@ -908,9 +915,9 @@ def check_explosion_macd_alignment(
     if not settings.explosion_macd_alignment_required:
         return True, "ok"
 
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    if elite_never_block_active(
+    if elite_must_take_bypass_allowed(
         event=event, candidate=candidate, alert=alert, snap=snap,
     ):
         return True, "ok"

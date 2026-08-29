@@ -715,9 +715,9 @@ def validate_candidate(
                 meta["composerBias"] = brief.get("tradeBias")
                 # Session stand-aside must not bury high-confidence base-rip explosions.
                 stand_down_bypass = False
-                from app.engines.elite_never_block import elite_never_block_active
+                from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-                if elite_never_block_active(candidate=candidate):
+                if elite_must_take_bypass_allowed(candidate=candidate):
                     stand_down_bypass = True
                     meta["composerStandDownBypass"] = "elite_never_block"
                 # (1) Expiry early-window ELITE top.
@@ -934,9 +934,9 @@ def validate_candidate(
                 else None
             ),
         )
-        from app.engines.elite_never_block import elite_never_block_active
+        from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-        must_take = elite_never_block_active(
+        must_take = elite_must_take_bypass_allowed(
             event=explosion_event,
             candidate=candidate,
             alert=getattr(candidate, "alert", None)
@@ -975,13 +975,14 @@ def validate_candidate(
                 building_rip_bypasses_fake_trap,
                 top_must_take_bypasses_fake_trap,
             )
-            from app.engines.elite_never_block import elite_never_block_active
+            from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-            must_take = elite_never_block_active(
+            must_take = elite_must_take_bypass_allowed(
                 event=explosion_event,
                 candidate=candidate,
                 alert=getattr(candidate, "alert", None),
                 snap=snap,
+                ict=trap_ict,
             )
             if not building_rip_bypasses_fake_trap(candidate=candidate) and not (
                 top_must_take_bypasses_fake_trap(

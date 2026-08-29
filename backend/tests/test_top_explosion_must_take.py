@@ -294,7 +294,7 @@ def test_timing_block_still_fires_without_must_take_context(mock_s):
 def test_must_take_bypasses_chase_but_not_trap_or_late_fade(
     mock_mny, mock_ict_s, mock_g, mock_enb,
 ):
-    """Near-base must-take skips extended-chase; fake-trap + late-fade still bind."""
+    """Near-base must-take skips extended-chase only with expansion confirm; trap + late-fade still bind."""
     from app.engines.explosion_entry_guards import (
         detect_fake_explosion_trap,
         extended_session_chase_blocked,
@@ -350,8 +350,10 @@ def test_must_take_bypasses_chase_but_not_trap_or_late_fade(
     assert late_blocked is True
     assert "late_fade" in late_reason
 
-    chase_blocked, _ = extended_session_chase_blocked(event, ict=ict)
-    assert chase_blocked is False
+    chase_blocked, _ = extended_session_chase_blocked(
+        event, ict=ict, alert=getattr(cand, "alert", None),
+    )
+    assert chase_blocked is True
 
 
 @patch("app.engines.elite_never_block.get_settings")
