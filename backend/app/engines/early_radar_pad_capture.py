@@ -325,6 +325,28 @@ def cold_trough_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None) 
     if _alert_explosion_score(alert) > max_score + 1e-6:
         return False
 
+    if bool(alert.get("ictBaseArmed") or alert.get("baseArmed")):
+        armed_samples = int(alert.get("ictArmedBaseSamples") or 0)
+        min_samples = int(getattr(s, "ict_armed_base_min_samples", 6) or 6)
+        if armed_samples >= min_samples and not bool(alert.get("ictArmedBaseLaunch")):
+            min_trough = float(
+                getattr(s, "cold_trough_armed_min_local_move_pct", 2.0) or 2.0
+            )
+            # Base coil armed-only (Aug17) — wait for launch; session trough lift OK.
+            if local_move < min_trough - 1e-6:
+                return False
+            v3 = _number(alert.get("velocity3s"))
+            v9 = _number(alert.get("velocity9s"))
+            max_v3 = float(
+                getattr(s, "cold_trough_pad_max_velocity_3s", 0.05) or 0.05
+            )
+            max_v9 = float(
+                getattr(s, "cold_trough_pad_max_velocity_9s", 0.05) or 0.05
+            )
+            # Ramping premium off armed base — wait for armed_base_launch, not cold pad.
+            if v3 > max_v3 + 1e-6 or v9 > max_v9 + 1e-6:
+                return False
+
     if not _cold_trough_coil_signal(alert):
         return False
     return True

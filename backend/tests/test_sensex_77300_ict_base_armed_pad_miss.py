@@ -191,21 +191,22 @@ def test_prelaunch_pad_passes_expiry_strict_rank_one_declining_halt(
         explosion_event=event,
         alert=alert,
     )
-    with patch(
-        "app.engines.expiry_day_guards.predict_worst_expiry_day",
-        return_value=(True, 65.0, ["chop_regime", "declining_session"]),
-    ):
-        with patch("app.engines.expiry_day_guards._session_declining", return_value=True):
-            with patch(
-                "app.engines.expiry_day_guards.check_expiry_explosion_open_block",
-                return_value=(False, "ok"),
-            ):
+    with patch("app.engines.expiry_day_guards._today_str", return_value="2026-08-27"):
+        with patch(
+            "app.engines.expiry_day_guards.predict_worst_expiry_day",
+            return_value=(True, 65.0, ["chop_regime", "declining_session"]),
+        ):
+            with patch("app.engines.expiry_day_guards._session_declining", return_value=True):
                 with patch(
-                    "app.engines.aligned_explosion_bypass.expiry_aligned_explosion_trade_allowed",
-                    return_value=(True, "ok"),
+                    "app.engines.expiry_day_guards.check_expiry_explosion_open_block",
+                    return_value=(False, "ok"),
                 ):
-                    ok, reason, meta = check_expiry_candidate(
-                        candidate, AutoTraderState(), {"SENSEX": snap},
-                    )
+                    with patch(
+                        "app.engines.aligned_explosion_bypass.expiry_aligned_explosion_trade_allowed",
+                        return_value=(True, "ok"),
+                    ):
+                        ok, reason, meta = check_expiry_candidate(
+                            candidate, AutoTraderState(), {"SENSEX": snap},
+                        )
     assert ok is True, reason
     assert meta.get("expiryStrictRankOneLaunch") is True

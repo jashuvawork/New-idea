@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 import zipfile
 from datetime import datetime
@@ -38,7 +39,10 @@ ARCHIVE_URL = "https://jashuvatrade.xyz/api/ai/radar-archives/2026-08-27"
 def aug27_archive() -> Path:
     ARCHIVE.parent.mkdir(parents=True, exist_ok=True)
     if not ARCHIVE.exists() or ARCHIVE.stat().st_size < 1000:
-        urllib.request.urlretrieve(ARCHIVE_URL, ARCHIVE)
+        try:
+            urllib.request.urlretrieve(ARCHIVE_URL, ARCHIVE)
+        except urllib.error.HTTPError:
+            pytest.skip("Aug27 radar archive download failed (API unavailable)")
     if not ARCHIVE.exists():
         pytest.skip("Aug27 radar archive unavailable")
     return ARCHIVE
