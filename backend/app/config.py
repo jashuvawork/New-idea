@@ -915,6 +915,12 @@ class Settings(BaseSettings):
     moment_stage_extend_hot_velocity_3s: float = 2.5
     # While live heat is still expanding, do not squeeze late-stage giveback.
     moment_stage_hot_hold_velocity_3s: float = 2.5
+    # Max-profit OTM sibling legs (Aug28 24100 PE +33 vs stage 40): arm stage trail
+    # when best reaches this fraction of stageSize so same-cycle legs exit together.
+    moment_stage_near_complete_frac: float = 0.82
+    # Share observed peak PnL across open legs from the same entry cycle (symbol+side).
+    cycle_moment_peak_sync_enabled: bool = True
+    cycle_moment_peak_sync_min_gain_pct: float = 50.0
     # Before the first stage completes, suppress the micro step trail (best−3.5pt)
     # so a normal dip cannot cut a still-projecting ICT rip (e.g. 392→500).
     explosion_trail_pre_stage_suppress_step: bool = True

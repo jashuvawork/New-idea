@@ -412,6 +412,11 @@ def _record_observed_max_ltp(trade: PaperTrade, current_ltp: float) -> None:
         ctx["maxLtpAt"] = trade.maxLtpAt.isoformat()
     trade.maxLtp = round(previous, 2)
     ctx["maxLtp"] = trade.maxLtp
+    entry = _finite_positive(trade.entryPremium)
+    if entry > 0 and previous > entry:
+        best_pts = round(previous - entry, 2)
+        if best_pts > _finite_positive(trade.bestPnlPoints):
+            trade.bestPnlPoints = best_pts
     giveback = max(0.0, previous - current)
     ctx["givebackFromMaxLtpPoints"] = round(giveback, 2)
     ctx["givebackFromMaxLtpPct"] = round(giveback / previous * 100.0, 3)
@@ -519,6 +524,7 @@ async def _open_from_candidate(
     news: Optional[list[dict]] = None,
     snapshots: Optional[dict[str, SymbolSnapshot]] = None,
     allocation: Optional[RankedAllocation] = None,
+    entry_cycle_id: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Open one trade from best-ranked setup — paper journal + optional live broker order."""
     settings = get_settings()
@@ -2182,6 +2188,9 @@ async def _open_from_candidate(
         ctx_extra["regime"] = regime.value if hasattr(regime, "value") else str(regime)
         ctx_extra.update(candidate.pretrade_meta or {})
 
+    if entry_cycle_id:
+        ctx_extra["entryCycleId"] = str(entry_cycle_id)
+
     if not ctx_extra.get("instrumentKey"):
         if instrument_key:
             ctx_extra["instrumentKey"] = instrument_key
@@ -2536,6 +2545,10 @@ async def _process_open_trades(
     """Evaluate exits on open trades — safe for tick-fast path."""
     settings = get_settings()
     skipped: list[dict[str, Any]] = []
+
+    from app.engines.moment_stage_trail import sync_cycle_moment_peaks
+
+    sync_cycle_moment_peaks(state.openPaperTrades, settings=settings)
 
     for trade in list(state.openPaperTrades):
         if trade.status != "OPEN":
@@ -3757,6 +3770,7 @@ async def process(
                             news,
                             snapshots,
                             allocation=allocation,
+                            entry_cycle_id=cycle_id,
                         )
                     except BaseException as exc:
                         cancelled = isinstance(exc, asyncio.CancelledError)

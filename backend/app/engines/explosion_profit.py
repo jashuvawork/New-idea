@@ -1585,12 +1585,9 @@ def evaluate_explosion_exit(
             exit_params = _merge_afternoon_capture_exit_params(exit_params, event_tier)
     pnl_pts = current_premium - trade.entryPremium
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
-    observed_best = (
-        float(trade.maxLtp) - float(trade.entryPremium)
-        if trade.maxLtp is not None
-        else 0.0
-    )
-    best = max(trade.bestPnlPoints, pnl_pts, observed_best)
+    from app.engines.moment_stage_trail import effective_best_pnl
+
+    best = effective_best_pnl(trade, pnl_pts)
     hold = _hold_seconds(trade)
     try:
         v3 = float(live_velocity_3s or 0.0)
@@ -1706,7 +1703,9 @@ def evaluate_explosion_exit(
 
     from app.engines.moment_stage_trail import (
         compose_trail_floor_with_stages,
+        effective_best_pnl,
         maybe_extend_projected_max,
+        moment_stage_near_complete,
         trade_uses_moment_stage_ladder,
     )
 
@@ -1860,6 +1859,7 @@ def evaluate_explosion_exit(
     stage_armed = stage_floor is not None and (
         best >= exit_params.trail_arm_points
         or (stage_size > 0 and best >= stage_size)
+        or moment_stage_near_complete(trade, best, stage_size, settings=settings)
     )
     if stage_armed and pnl_pts <= stage_floor and hold >= stage_min_hold:
         return "explosion_stage_trail", pnl_inr
