@@ -579,6 +579,31 @@ def immature_explosion_blocked(
                 and bool(getattr(ict, "volume_awakening", False))
             ):
                 local_floor = min(local_floor, v_lo)
+        # Aug28 SENSEX PUT 77500: ict_base_armed prelaunch at 5.4% lb blocked as immature.
+        if (
+            bool(getattr(ict, "base_armed", False))
+            and not bool(getattr(ict, "armed_base_launch", False))
+            and str(getattr(explosion_event, "tier", "") or "").upper()
+            in ("ELITE", "EXPLODING")
+        ):
+            pad_min = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+            pad_max = float(
+                getattr(settings, "early_radar_pad_max_local_move_pct", 20.0) or 20.0
+            )
+            min_score = float(
+                getattr(
+                    settings,
+                    "early_radar_pad_exploding_prelaunch_min_score",
+                    25.0,
+                )
+                or 25.0
+            )
+            score = float(getattr(explosion_event, "explosion_score", 0) or 0)
+            if (
+                pad_min <= base_move <= pad_max + 1e-6
+                and score >= min_score
+            ):
+                local_floor = min(local_floor, pad_min)
         if base_move >= local_floor:
             return False, ""
         return True, f"immature_local_base_{base_move:.1f}%"
@@ -675,6 +700,30 @@ def live_explosion_confirmation_blocked(
     ):
         return False, ""
 
+    tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    if (
+        ict is not None
+        and bool(getattr(ict, "base_armed", False))
+        and not bool(getattr(ict, "armed_base_launch", False))
+        and tier in ("ELITE", "EXPLODING")
+    ):
+        base_rel = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+        pad_min = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+        pad_max = float(
+            getattr(settings, "early_radar_pad_max_local_move_pct", 20.0) or 20.0
+        )
+        min_score = float(
+            getattr(
+                settings,
+                "early_radar_pad_exploding_prelaunch_min_score",
+                25.0,
+            )
+            or 25.0
+        )
+        score = float(getattr(explosion_event, "explosion_score", 0) or 0)
+        if pad_min <= base_rel <= pad_max + 1e-6 and score >= min_score:
+            return False, ""
+
     from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
     if elite_must_take_bypass_allowed(
@@ -682,7 +731,6 @@ def live_explosion_confirmation_blocked(
     ):
         return False, ""
 
-    tier = str(getattr(explosion_event, "tier", "") or "").upper()
     if tier not in ("ELITE", "EXPLODING", "BUILDING"):
         return False, ""
 
@@ -1340,6 +1388,11 @@ def detect_fake_explosion_trap(
     if post_win and getattr(
         settings, "fake_explosion_trap_post_win_velocity_block_enabled", True
     ):
+        alert = getattr(candidate, "alert", None)
+        from app.engines.early_radar_pad_capture import ict_base_armed_prelaunch_pad_lane
+
+        if isinstance(alert, dict) and ict_base_armed_prelaunch_pad_lane(alert):
+            return False, "ok", meta
         min_v3 = float(
             getattr(settings, "fake_explosion_trap_post_win_min_velocity_3s", 0.0) or 0.0
         )

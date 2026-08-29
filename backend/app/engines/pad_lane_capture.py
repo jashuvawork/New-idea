@@ -73,6 +73,8 @@ def pad_lane_cold_velocity_ok(
     evidence: Mapping[str, Any], v3: float, v9: float
 ) -> bool:
     """Pre-lift pad lanes that allow mildly negative / flat velocity snapshots."""
+    tier = str(evidence.get("tier") or "").upper()
+    local_move = float(evidence.get("localBaseMovePct") or 0)
     if evidence.get("slowGrindSuddenLift") and -0.8 <= v3 <= 1.5:
         return True
     if evidence.get("stealthCvdCoil") and -0.5 <= v3 <= 1.0:
@@ -89,6 +91,14 @@ def pad_lane_cold_velocity_ok(
         return True
     if evidence.get("earlyRadarPadCapture") and -0.8 <= v3 <= 1.5:
         return True
+    if (
+        bool(evidence.get("ictBaseArmed"))
+        and not bool(evidence.get("armedBaseLaunch"))
+        and tier in ("ELITE", "EXPLODING")
+        and 2.0 <= local_move <= 25.0
+        and -1.5 <= v3 <= 1.5
+    ):
+        return True
     if evidence.get("buildingCoilPad") and -0.8 <= v3 <= 1.5:
         return True
     if evidence.get("coldTroughPad") and -0.8 <= v3 <= 1.5:
@@ -97,8 +107,6 @@ def pad_lane_cold_velocity_ok(
         return True
     if evidence.get("firstLiftLocalBase") and -1.5 <= v3 <= 1.5 and v9 >= -1.0:
         return True
-    tier = str(evidence.get("tier") or "").upper()
-    local_move = float(evidence.get("localBaseMovePct") or 0)
     if (
         tier in ("ELITE", "EXPLODING")
         and bool(evidence.get("flatThenVertical") and evidence.get("activeBreakout"))
@@ -1540,6 +1548,10 @@ def _ftv_direct_evidence_from_alert(alert: dict[str, Any]) -> dict[str, Any]:
         ),
         "localBaseMovePct": float(
             alert.get("localBaseMovePct") or alert.get("ictBaseRelativeMovePct") or 0
+        ),
+        "ictBaseArmed": bool(alert.get("ictBaseArmed") or alert.get("baseArmed")),
+        "armedBaseLaunch": bool(
+            alert.get("ictArmedBaseLaunch") or alert.get("armedBaseLaunch")
         ),
         "offLowMovePct": float(alert.get("offLowMovePct") or 0),
         "velocity3s": float(alert.get("velocity3s") or alert.get("velocity_3s") or 0),

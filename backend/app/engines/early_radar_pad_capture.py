@@ -52,9 +52,46 @@ def _number(value: Any) -> float:
         return 0.0
 
 
+def ict_base_armed_prelaunch_pad_lane(
+    alert: Mapping[str, Any],
+    settings: Any = None,
+) -> bool:
+    """ELITE/EXPLODING ict_base_armed at local pad before armed_base_launch stamps."""
+    s = settings or get_settings()
+    if bool(
+        alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or alert.get("ictFirstLift")
+        or alert.get("ictEliteBaseReady")
+    ):
+        return False
+    tier = _alert_tier(alert)
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    if not bool(alert.get("ictBaseArmed") or alert.get("baseArmed")):
+        return False
+    armed_samples = int(alert.get("ictArmedBaseSamples") or 0)
+    min_samples = int(getattr(s, "ict_armed_base_min_samples", 6) or 6)
+    if armed_samples < min_samples:
+        return False
+    local_move = _alert_local_base_move(alert)
+    pad_min = float(getattr(s, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+    pad_max = float(getattr(s, "early_radar_pad_max_local_move_pct", 20.0) or 20.0)
+    if not (pad_min <= local_move <= pad_max + 1e-6):
+        return False
+    min_score = float(
+        getattr(s, "early_radar_pad_exploding_prelaunch_min_score", 25.0) or 25.0
+    )
+    return _alert_explosion_score(alert) >= min_score
+
+
 def early_radar_pad_off_low_pct(alert: Mapping[str, Any]) -> float:
     if "offLowMovePct" in alert:
         return max(0.0, _number(alert.get("offLowMovePct")))
+    # Aug28 SENSEX PUT 77500: session peakMovePct inflated off-low and disabled pad
+    # capture at 5.4% local base while ict_base_armed samples were full.
+    if ict_base_armed_prelaunch_pad_lane(alert):
+        return max(0.0, _alert_local_base_move(alert))
     # Minimal/test alerts omit off-low — infer distance from session trough.
     return max(
         0.0,
