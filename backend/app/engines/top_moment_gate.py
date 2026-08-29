@@ -176,6 +176,15 @@ def top_moment_entry_allowed(
     if pad_lane_grade_floor_applies(evidence) and grade in {"REJECT", "C"}:
         grade = "A"
 
+    from app.engines.early_radar_pad_capture import building_armed_prelaunch_pad_lane
+    from app.config import get_settings
+
+    if grade in {"REJECT", "C"} and building_armed_prelaunch_pad_lane(
+        evidence if isinstance(evidence, dict) else {},
+        get_settings(),
+    ):
+        grade = "B"
+
     if grade == "REJECT":
         return False, "top_moment_grade_reject", None
     if grade not in allowed_grades:
@@ -241,9 +250,14 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
     if bool(alert.get("buildingCoilPadReady")):
         return True
     from app.config import get_settings
-    from app.engines.early_radar_pad_capture import building_coil_pad_lift_signal
+    from app.engines.early_radar_pad_capture import (
+        building_armed_prelaunch_pad_lane,
+        building_coil_pad_lift_signal,
+    )
 
     settings = get_settings()
+    if building_armed_prelaunch_pad_lane(alert, settings):
+        return True
     tier = str(alert.get("tier") or "").upper()
     base_rel = _number(
         alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")

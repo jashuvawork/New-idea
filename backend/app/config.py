@@ -1712,11 +1712,21 @@ class Settings(BaseSettings):
     building_coil_pad_confirm_entry_enabled: bool = True
     building_coil_pad_confirm_min_velocity_3s: float = 0.5
     building_coil_pad_confirm_min_velocity_9s: float = 0.25
-    building_coil_pad_confirm_min_volume_surge: float = 1.2
+    building_coil_pad_confirm_min_volume_surge: float = 1.0
     building_coil_pad_confirm_allow_flat_vertical: bool = True
     # Quiet armed coil at pad — volume awake before v3 lifts (Aug28 PUT 24050 @ 11:12).
     building_coil_pad_confirm_armed_volume_ok: bool = True
     building_coil_pad_worst_day_waive_enabled: bool = True
+    # WATCH/BUILDING armed base at 5–18% local pad before vertical lift (Aug28 10:30 PUTs).
+    building_armed_prelaunch_pad_enabled: bool = True
+    building_armed_prelaunch_min_base_rel_pct: float = 5.0
+    building_armed_prelaunch_max_base_rel_pct: float = 18.0
+    building_armed_prelaunch_min_explosion_score: float = 5.0
+    building_armed_prelaunch_max_explosion_score: float = 55.0
+    building_armed_prelaunch_min_volume_surge: float = 1.0
+    building_armed_prelaunch_min_grade: str = "C"
+    eod_replay_early_pad_rank_penalty: float = 12.0
+    eod_replay_counter_side_rank_penalty: float = 35.0
     # Prefer deeper ITM expansion strikes over ATM when coil pad is active
     # (Aug28 24050 ITM over 24200/24100 ATM on the same lift).
     expansion_strike_rank_bonus_enabled: bool = True
