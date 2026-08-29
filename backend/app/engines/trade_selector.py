@@ -741,9 +741,9 @@ def _explosion_candidates(
                 armed_at=str(alert.get("ictBaseArmedAt") or ""),
                 armed_base_expires_at=str(alert.get("ictBaseExpiresAt") or ""),
             )
-        from app.engines.elite_never_block import elite_never_block_active
+        from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-        must_take = elite_never_block_active(
+        must_take = elite_must_take_bypass_allowed(
             event=event, candidate=cand_probe, alert=alert, snap=snap, ict=ict,
         )
         from app.engines.bullish_local_base import bullish_local_base_prediction
@@ -778,6 +778,7 @@ def _explosion_candidates(
         immature_blocked, _immature_reason = immature_explosion_blocked(
             event,
             ict=ict,
+            alert=alert,
             bullish_local_base=bool(bullish_base.get("active")),
         )
         if immature_blocked and not must_take and not first_lift_ready:
@@ -805,6 +806,7 @@ def _explosion_candidates(
         live_blocked, _live_reason = live_explosion_confirmation_blocked(
             event,
             ict=ict,
+            alert=alert,
             premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
             snap=snap,
         )
@@ -834,7 +836,9 @@ def _explosion_candidates(
             )
         ):
             continue
-        ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)
+        ext_blocked, _ext_reason = extended_session_chase_blocked(
+            event, ict=ict, alert=alert,
+        )
         building_rip_ready_take = first_lift_readiness_reason in (
             "building_rip_bullish_ready",
             "building_local_base_lift_ready",

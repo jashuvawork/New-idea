@@ -509,10 +509,13 @@ def check_explosion_entry(
         ict=ict_live,
         alert=alert if isinstance(alert, dict) else None,
     )
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    must_take = elite_never_block_active(
-        event=event, snap=snap, ict=ict_live,
+    must_take = elite_must_take_bypass_allowed(
+        event=event,
+        snap=snap,
+        ict=ict_live,
+        alert=alert if isinstance(alert, dict) else None,
     )
     # Flat→vertical ELITE/EXPLODING/BUILDING — require GainzAlgo-style break-P.
     if (
@@ -548,6 +551,7 @@ def check_explosion_entry(
     live_blocked, live_reason = live_explosion_confirmation_blocked(
         event,
         ict=ict_live,
+        alert=alert if isinstance(alert, dict) else None,
         premium_capture=is_premium_capture_event(event, chart=chart),
         snap=snap,
     )
