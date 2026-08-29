@@ -13,7 +13,6 @@ from app.routers.health import deployment_readiness
 
 IST = ZoneInfo("Asia/Kolkata")
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
