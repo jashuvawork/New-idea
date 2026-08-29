@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from tests.fixtures.radar_archives import aug25_funnel_path
 from scripts.analyze_funnel_contract import analyze_contract
 
 
 def test_analyze_aug25_sensex_77800_pe_miss():
-    funnel = Path("/opt/cursor/artifacts/radar-aug25/extracted/funnel_events.jsonl")
+    funnel = aug25_funnel_path()
     rows = [json.loads(line) for line in funnel.read_text().splitlines() if line.strip()]
     report = analyze_contract(
         rows,

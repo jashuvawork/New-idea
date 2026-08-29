@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.config import Settings
+from tests.fixtures.radar_archives import ensure_aug27_archive
 from app.engines.bullish_local_base import (
     alert_is_bullish_local_base_pad_entry,
     snapshots_have_bullish_local_base_pad,
@@ -25,6 +26,10 @@ IST = ZoneInfo("Asia/Kolkata")
 ARCHIVE = "/tmp/radar/radar-2026-08-27.zip"
 
 
+def _aug27_archive_path() -> Path:
+    return ensure_aug27_archive(ARCHIVE)
+
+
 def _settings(**overrides) -> Settings:
     cfg = Settings()
     for key, value in overrides.items():
@@ -33,9 +38,8 @@ def _settings(**overrides) -> Settings:
 
 
 def _load_afternoon_alert() -> tuple[dict, dict]:
-    if not Path(ARCHIVE).exists():
-        pytest.skip(f"Aug27 radar archive unavailable at {ARCHIVE}")
-    with zipfile.ZipFile(ARCHIVE) as zf:
+    archive = _aug27_archive_path()
+    with zipfile.ZipFile(archive) as zf:
         row = next(
             r
             for r in json.loads(zf.read("all_radars.json"))
