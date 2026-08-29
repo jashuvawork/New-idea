@@ -176,6 +176,15 @@ def top_moment_entry_allowed(
     if pad_lane_grade_floor_applies(evidence) and grade in {"REJECT", "C"}:
         grade = "A"
 
+    from app.engines.early_radar_pad_capture import building_armed_prelaunch_pad_lane
+    from app.config import get_settings
+
+    if grade in {"REJECT", "C"} and building_armed_prelaunch_pad_lane(
+        evidence if isinstance(evidence, dict) else {},
+        get_settings(),
+    ):
+        grade = "B"
+
     if grade == "REJECT":
         return False, "top_moment_grade_reject", None
     if grade not in allowed_grades:
@@ -240,13 +249,58 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
         return True
     if bool(alert.get("buildingCoilPadReady")):
         return True
+    from app.config import get_settings
+    from app.engines.early_radar_pad_capture import (
+        building_armed_prelaunch_pad_lane,
+        building_coil_pad_lift_signal,
+    )
+
+    settings = get_settings()
+    if building_armed_prelaunch_pad_lane(alert, settings):
+        return True
     tier = str(alert.get("tier") or "").upper()
+    base_rel = _number(
+        alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")
+    )
+    pad_lo = float(
+        getattr(settings, "building_coil_pad_min_local_move_pct", 10.0) or 10.0
+    )
+    pad_hi = float(
+        getattr(settings, "building_coil_pad_max_local_move_pct", 25.0) or 25.0
+    )
+    vol_awake = bool(
+        alert.get("volumeAwaken")
+        or alert.get("ictVolumeAwakening")
+        or float(alert.get("volumeSurge") or 0) >= 1.2
+    )
+    if (
+        tier == "BUILDING"
+        and pad_lo <= base_rel <= pad_hi + 1e-6
+        and bool(alert.get("ictBaseArmed"))
+        and vol_awake
+        and building_coil_pad_lift_signal(alert, settings)
+    ):
+        return True
+    if (
+        tier == "BUILDING"
+        and bool(getattr(settings, "building_armed_base_grade_a_live_enabled", True))
+        and bool(alert.get("ictBaseArmed"))
+        and base_rel > 0
+    ):
+        from app.engines.building_ftv_gates import building_armed_base_grade_a_live_ok
+
+        if building_armed_base_grade_a_live_ok(
+            alert,
+            readiness_reason=str(
+                alert.get("ictBaseReadinessReason")
+                or alert.get("readyReason")
+                or "armed_base_option_led_ready"
+            ),
+        ):
+            return True
     if tier in ("ELITE", "EXPLODING"):
         return True
 
-    from app.config import get_settings
-
-    settings = get_settings()
     max_off = float(
         getattr(settings, "early_radar_pad_max_off_low_pct", 15.0) or 15.0
     )

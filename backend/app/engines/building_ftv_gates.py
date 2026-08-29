@@ -33,7 +33,9 @@ PAD_LANE_READY_REASONS = frozenset(
     }
 )
 
-ARMED_BASE_GRADE_A_READY_REASONS = frozenset({"armed_base_option_led_ready"})
+ARMED_BASE_GRADE_A_READY_REASONS = frozenset(
+    {"armed_base_option_led_ready", "building_armed_prelaunch_ready"}
+)
 
 
 def _number(value: Any) -> float:
@@ -41,6 +43,59 @@ def _number(value: Any) -> float:
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _building_armed_base_worst_day_waived(alert: dict[str, Any]) -> bool:
+    """Local-base pad on WORST days — Aug28 morning PUT winners."""
+    settings = get_settings()
+    if not bool(getattr(settings, "building_armed_base_worst_day_waive_enabled", True)):
+        return False
+    base_rel = _number(
+        alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")
+    )
+    lo = float(
+        getattr(settings, "building_armed_base_worst_day_waive_min_base_rel_pct", 10.0)
+        or 10.0
+    )
+    hi = float(
+        getattr(settings, "building_armed_base_worst_day_waive_max_base_rel_pct", 25.0)
+        or 25.0
+    )
+    vol = _number(alert.get("volumeSurge"))
+    min_vol = float(
+        getattr(settings, "building_armed_base_worst_day_waive_min_volume_surge", 2.0)
+        or 2.0
+    )
+    return (
+        lo <= base_rel <= hi + 1e-6
+        and vol >= min_vol
+        and bool(alert.get("ictBaseArmed"))
+    )
+
+
+def _building_coil_pad_worst_day_waived(alert: dict[str, Any]) -> bool:
+    settings = get_settings()
+    if not bool(getattr(settings, "building_coil_pad_worst_day_waive_enabled", True)):
+        return False
+    from app.engines.early_radar_pad_capture import building_coil_pad_lift_signal
+
+    if not building_coil_pad_lift_signal(alert, settings):
+        return False
+    base_rel = _number(
+        alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")
+    )
+    lo = float(
+        getattr(settings, "building_coil_pad_min_local_move_pct", 10.0) or 10.0
+    )
+    hi = float(
+        getattr(settings, "building_coil_pad_max_local_move_pct", 25.0) or 25.0
+    )
+    vol_awake = bool(
+        alert.get("volumeAwaken")
+        or alert.get("ictVolumeAwakening")
+        or _number(alert.get("volumeSurge")) >= 1.0
+    )
+    return lo <= base_rel <= hi + 1e-6 and vol_awake and bool(alert.get("ictBaseArmed"))
 
 
 def _building_armed_base_worst_day_blocked(
@@ -94,8 +149,14 @@ def building_armed_base_grade_a_live_ok(
         return False
     if not isinstance(alert, dict):
         return False
-    if str(alert.get("tier") or "").upper() != "BUILDING":
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in ("BUILDING", "WATCH"):
         return False
+    if tier == "WATCH":
+        from app.engines.early_radar_pad_capture import building_armed_prelaunch_pad_lane
+
+        if not building_armed_prelaunch_pad_lane(alert, settings):
+            return False
     rr = str(
         readiness_reason
         or alert.get("ictBaseReadinessReason")
@@ -105,7 +166,14 @@ def building_armed_base_grade_a_live_ok(
     if rr not in ARMED_BASE_GRADE_A_READY_REASONS:
         return False
     if _building_armed_base_worst_day_blocked(state=state, snapshots=snapshots):
-        return False
+        if not (
+            isinstance(alert, dict)
+            and (
+                _building_armed_base_worst_day_waived(alert)
+                or _building_coil_pad_worst_day_waived(alert)
+            )
+        ):
+            return False
     base_rel = _number(
         alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")
     )
@@ -145,29 +213,41 @@ def building_armed_base_grade_a_live_ok(
         except Exception:
             grade = ""
     min_grade = str(
-        getattr(settings, "building_armed_base_grade_a_min_grade", "A") or "A"
+        getattr(settings, "building_armed_base_grade_a_min_grade", "B") or "B"
     ).upper()
-    allowed_grades = {"S"} if min_grade == "S" else {"S", "A"}
-    if grade not in allowed_grades:
+    if tier == "WATCH":
+        min_grade = str(
+            getattr(settings, "building_armed_prelaunch_min_grade", "C") or "C"
+        ).upper()
+    grade_order = {"S": 4, "A": 3, "B": 2, "C": 1, "REJECT": 0}
+    if grade_order.get(grade, 0) < grade_order.get(min_grade, 2):
         return False
     vol = _number(alert.get("volumeSurge"))
     from app.engines.local_base_chart_bypass import local_base_entry_window
 
-    entry_min = float(
-        getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
-    )
-    chase_max = float(
-        getattr(settings, "ict_armed_base_launch_max_move_pct", 15.0) or 15.0
-    )
-    if bool(getattr(settings, "building_armed_base_grade_a_use_local_base_window", True)):
-        lb_min, lb_max = local_base_entry_window("BUILDING", vol)
-        entry_min = min(entry_min, lb_min)
-        chase_max = max(chase_max, lb_max)
-    max_rel = float(
-        getattr(settings, "building_armed_base_grade_a_max_base_rel_pct", 0.0) or 0.0
-    )
-    if max_rel > 0:
-        chase_max = min(chase_max, max_rel)
+    if tier == "WATCH":
+        entry_min = float(
+            getattr(settings, "building_armed_prelaunch_min_base_rel_pct", 5.0) or 5.0
+        )
+        chase_max = float(
+            getattr(settings, "building_armed_prelaunch_max_base_rel_pct", 18.0) or 18.0
+        )
+    else:
+        entry_min = float(
+            getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
+        )
+        chase_max = float(
+            getattr(settings, "ict_armed_base_launch_max_move_pct", 15.0) or 15.0
+        )
+        if bool(getattr(settings, "building_armed_base_grade_a_use_local_base_window", True)):
+            lb_min, lb_max = local_base_entry_window("BUILDING", vol)
+            entry_min = min(entry_min, lb_min)
+            chase_max = max(chase_max, lb_max)
+        max_rel = float(
+            getattr(settings, "building_armed_base_grade_a_max_base_rel_pct", 0.0) or 0.0
+        )
+        if max_rel > 0:
+            chase_max = min(chase_max, max_rel)
     if base_rel <= 0 or not (entry_min <= base_rel <= chase_max):
         return False
     return True
@@ -185,6 +265,13 @@ def building_armed_base_grade_a_top_moment_ok(
         "ictBaseRelativeMovePct": evidence.get("localBaseMovePct"),
         "localBaseMovePct": evidence.get("localBaseMovePct"),
         "volumeSurge": evidence.get("volumeSurge"),
+        "explosionScore": evidence.get("explosionScore"),
+        "ictBaseArmed": bool(
+            evidence.get("ictBaseArmed") or evidence.get("baseArmed")
+        ),
+        "volumeAwaken": bool(
+            evidence.get("volumeAwaken") or evidence.get("ictVolumeAwakening")
+        ),
         "ictBaseReadinessReason": readiness_reason
         or evidence.get("ictBaseReadinessReason")
         or evidence.get("firstLiftReadinessReason"),
@@ -226,7 +313,14 @@ def building_coil_pad_grade_a_live_ok(
     if rr != BUILDING_COIL_PAD_READY and not alert_has_building_coil_pad(alert):
         return False
     if _building_armed_base_worst_day_blocked(state=state, snapshots=snapshots):
-        return False
+        if not (
+            isinstance(alert, dict)
+            and (
+                _building_armed_base_worst_day_waived(alert)
+                or _building_coil_pad_worst_day_waived(alert)
+            )
+        ):
+            return False
     local_move = _number(
         alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")
     )
@@ -263,10 +357,22 @@ def building_coil_pad_grade_a_live_ok(
         except Exception:
             grade = ""
     min_grade = str(
-        getattr(settings, "top_moments_min_grade", "A") or "A"
+        getattr(settings, "building_coil_pad_min_grade", "B") or "B"
     ).upper()
+    if bool(getattr(settings, "building_coil_pad_floor_grade_enabled", True)):
+        vol_awake = bool(
+            alert.get("volumeAwaken")
+            or alert.get("ictVolumeAwakening")
+            or _number(alert.get("volumeSurge")) >= 1.0
+        )
+        if (
+            (rr == BUILDING_COIL_PAD_READY or bool(alert.get("buildingCoilPadReady")))
+            and vol_awake
+            and grade == "C"
+        ):
+            grade = "B"
     grade_order = {"S": 4, "A": 3, "B": 2, "C": 1, "REJECT": 0}
-    if grade_order.get(grade, 0) < grade_order.get(min_grade, 3):
+    if grade_order.get(grade, 0) < grade_order.get(min_grade, 2):
         return False
     return True
 
@@ -278,15 +384,24 @@ def building_coil_pad_grade_a_top_moment_ok(
     readiness_reason: str = "",
 ) -> bool:
     """Top-moment gate companion — FTV moment for BUILDING coil pad."""
+    from app.engines.early_radar_pad_capture import BUILDING_COIL_PAD_READY
+
     alert_like = {
         "tier": evidence.get("tier"),
         "ictBaseRelativeMovePct": evidence.get("localBaseMovePct"),
         "localBaseMovePct": evidence.get("localBaseMovePct"),
         "buildingCoilPad": evidence.get("buildingCoilPad"),
-        "buildingCoilPadReady": evidence.get("buildingCoilPad"),
+        "buildingCoilPadReady": bool(
+            evidence.get("buildingCoilPad")
+            or readiness_reason == BUILDING_COIL_PAD_READY
+        ),
+        "ictBaseArmed": bool(evidence.get("ictBaseArmed") or evidence.get("armedBaseLaunch")),
         "velocity3s": evidence.get("velocity3s"),
         "velocity9s": evidence.get("velocity9s"),
-        "volumeAwaken": evidence.get("volumeAwaken"),
+        "volumeAwaken": bool(
+            evidence.get("volumeAwaken") or evidence.get("orderflowPositive")
+        ),
+        "volumeSurge": evidence.get("volumeSurge"),
         "explosionScore": evidence.get("explosionScore"),
         "ictBaseReadinessReason": readiness_reason
         or evidence.get("firstLiftReadinessReason"),

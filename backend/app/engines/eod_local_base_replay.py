@@ -181,6 +181,16 @@ def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, An
         "earlyRadarPadCapture": bool(
             alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
         ),
+        "buildingCoilPad": bool(
+            alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
+        ),
+        "volumeAwaken": bool(
+            alert.get("volumeAwaken")
+            or alert.get("ictVolumeAwakening")
+            or _f(alert.get("volumeSurge")) >= 1.0
+        ),
+        "volumeSurge": _f(alert.get("volumeSurge")),
+        "ictBaseArmed": bool(alert.get("ictBaseArmed")),
         "coldTroughPad": bool(alert.get("coldTroughPad")),
         "timingAssessment": str(alert.get("timingAssessment") or ""),
         "timingAction": str(alert.get("timingAction") or ""),
@@ -234,17 +244,6 @@ def evaluate_local_base_entry(
     if not explosion_alert_is_top_moment(alert):
         return False, "not_top_moment_radar", None, {}
 
-    evidence = _alert_evidence(alert, snap)
-    ranking = rank_trade_evidence(evidence)
-    allowed, reason, moment = top_moment_entry_allowed(
-        evidence,
-        ranking,
-        top_moments_only_enabled=bool(getattr(s, "top_moments_only_enabled", True)),
-        min_grade=str(getattr(s, "top_moments_min_grade", "A") or "A"),
-    )
-    if not allowed:
-        return False, reason, moment, ranking
-
     from app.engines.ict_breakout_monitor import first_lift_entry_readiness
     from app.engines.building_ftv_gates import pad_lane_ready_reason
     from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
@@ -253,6 +252,19 @@ def evaluate_local_base_entry(
     pad_lane_waive = pad_lane_early_near_miss_waive(
         alert, readiness_reason=lift_reason,
     )
+
+    evidence = _alert_evidence(alert, snap)
+    ranking = rank_trade_evidence(evidence)
+    allowed, reason, moment = top_moment_entry_allowed(
+        evidence,
+        ranking,
+        top_moments_only_enabled=bool(getattr(s, "top_moments_only_enabled", True)),
+        min_grade=str(getattr(s, "top_moments_min_grade", "A") or "A"),
+        readiness_reason=lift_reason if (ready or pad_lane_waive) else "",
+    )
+    if not allowed:
+        return False, reason, moment, ranking
+
     if not ready and not pad_lane_waive:
         return False, lift_reason, moment, ranking
     if pad_lane_waive:
@@ -298,6 +310,8 @@ def evaluate_local_base_entry(
             "micro_pullback_retest_ready",
             "premium_fvg_pad_ready",
             "double_dip_vbase_ready",
+            "building_coil_pad_ready",
+            "building_armed_prelaunch_ready",
         ):
             return (
                 False,
@@ -434,11 +448,47 @@ def _replay_selection_rank(
     snapshots: dict[str, SymbolSnapshot],
     *,
     settings: Any = None,
+    lift_reason: str = "",
 ) -> float:
     score = _f(ranking.get("rankScore"))
     s = settings or get_settings()
+    reason = str(
+        lift_reason
+        or alert.get("ictBaseReadinessReason")
+        or alert.get("readyReason")
+        or ""
+    )
+    pad_lane_reasons = {
+        "armed_base_option_led_ready",
+        "building_coil_pad_ready",
+        "building_armed_prelaunch_ready",
+        "slow_grind_sudden_lift_ready",
+        "early_radar_pad_ready",
+        "v_rip_session_low_ready",
+    }
+    if reason in pad_lane_reasons or bool(
+        alert.get("buildingCoilPad") or alert.get("earlyRadarPadCapture")
+    ):
+        score += float(getattr(s, "pad_lane_selector_rank_bonus", 18.0) or 18.0)
+    if reason in {
+        "armed_base_option_led_ready",
+        "building_coil_pad_ready",
+        "building_armed_prelaunch_ready",
+    }:
+        score += float(
+            getattr(s, "ftv_direct_trade_selector_rank_bonus", 55.0) or 55.0
+        ) * 0.5
+    if bool(getattr(s, "expansion_strike_rank_bonus_enabled", True)) and (
+        alert.get("buildingCoilPad") or reason == "building_coil_pad_ready"
+    ):
+        score += float(getattr(s, "expansion_strike_rank_bonus", 15.0) or 15.0)
+    if reason == "early_radar_pad_ready":
+        score -= float(getattr(s, "eod_replay_early_pad_rank_penalty", 12.0) or 12.0)
     if bool(getattr(s, "eod_replay_live_session_gates_enabled", True)):
-        from app.engines.best_side_selection import best_side_rank_adjustment
+        from app.engines.best_side_selection import (
+            best_side_rank_adjustment,
+            resolve_global_best_side,
+        )
         from app.engines.power_hour_guards import in_power_hour_window
 
         score += best_side_rank_adjustment(
@@ -446,6 +496,20 @@ def _replay_selection_rank(
             snapshots,
             power_hour=in_power_hour_window(),
         )
+        global_sym, global_side, _, _ = resolve_global_best_side(
+            snapshots,
+            power_hour=in_power_hour_window(),
+        )
+        side_val = str(alert.get("side") or "").upper()
+        sym_u = str(snap.symbol or alert.get("symbol") or "").upper()
+        if (
+            global_side
+            and global_side != side_val
+            and sym_u == (global_sym or sym_u)
+        ):
+            score -= float(
+                getattr(s, "eod_replay_counter_side_rank_penalty", 35.0) or 35.0
+            )
     return score
 
 
@@ -829,6 +893,7 @@ def replay_local_base_day(
                         snap,
                         batch_snapshots,
                         settings=s,
+                        lift_reason=reason,
                     )
                     ranked_candidates.append(
                         (rank_score, sym, snap, alert_eval, key, moment, ranking),

@@ -267,6 +267,29 @@ def test_building_coil_pad_confirmed_via_velocity():
     assert alert_has_building_coil_pad(alert)
 
 
+def test_building_coil_pad_confirmed_quiet_armed_volume():
+    settings = Settings(
+        building_coil_pad_entry_enabled=True,
+        building_coil_pad_confirm_armed_volume_ok=True,
+    )
+    alert = _aug28_24050_alert(
+        ictFlatThenVertical=False,
+        flatThenVertical=False,
+        ictBreakout=False,
+        velocity3s=0.0,
+        velocity9s=0.0,
+        volumeAwaken=True,
+        volumeSurge=2.5,
+        ictArmedBaseLaunch=False,
+    )
+    snap = _snap()
+    with patch("app.engines.early_radar_pad_capture.get_settings", return_value=settings):
+        assert building_coil_pad_lift_confirmed(alert, settings) is True
+        ok, reason = building_coil_pad_entry_readiness(snap=snap, alert=alert, settings=settings)
+    assert ok is True
+    assert reason == BUILDING_COIL_PAD_READY
+
+
 def test_building_coil_pad_confirmed_via_flat_vertical_volume():
     settings = Settings(building_coil_pad_entry_enabled=True)
     alert = _aug28_24050_alert(

@@ -101,14 +101,34 @@ def test_building_armed_base_grade_a_live_ok_blocks_extended_base_rel():
         ) is False
 
 
-def test_building_armed_base_grade_a_live_ok_blocks_grade_b():
-    settings = Settings(building_armed_base_grade_a_live_enabled=True)
+def test_building_armed_base_grade_a_live_ok_blocks_grade_b_when_min_a():
+    settings = Settings(
+        building_armed_base_grade_a_live_enabled=True,
+        building_armed_base_grade_a_min_grade="A",
+    )
     alert = _building_armed_alert(explosionScore=20.0, velocity3s=0.1, velocity9s=0.1)
     snap = _snap()
     with patch("app.engines.building_ftv_gates.get_settings", return_value=settings):
         assert building_armed_base_grade_a_live_ok(
             alert, snap, readiness_reason="armed_base_option_led_ready",
         ) is False
+
+
+def test_building_armed_base_grade_a_live_ok_allows_grade_b_at_pad():
+    settings = Settings(building_armed_base_grade_a_live_enabled=True)
+    alert = _building_armed_alert(
+        explosionScore=48.0,
+        velocity3s=1.2,
+        velocity9s=0.8,
+        ictBaseRelativeMovePct=14.9,
+        ictArmedBaseLaunch=False,
+    )
+    snap = _snap()
+    with patch("app.engines.building_ftv_gates.get_settings", return_value=settings):
+        with patch("app.engines.trade_ranking.rank_trade_evidence", return_value={"grade": "B"}):
+            assert building_armed_base_grade_a_live_ok(
+                alert, snap, readiness_reason="armed_base_option_led_ready",
+            ) is True
 
 
 def test_top_moment_allows_building_armed_base_grade_a():

@@ -15,6 +15,7 @@ from app.models.schemas import Side, SymbolSnapshot
 
 EARLY_RADAR_PAD_READY = "early_radar_pad_ready"
 BUILDING_COIL_PAD_READY = "building_coil_pad_ready"
+BUILDING_ARMED_PRELAUNCH_READY = "building_armed_prelaunch_ready"
 BUILDING_COIL_PAD_ARMED = "building_coil_pad_armed"
 BUILDING_COIL_PAD_UNCONFIRMED = "building_coil_pad_unconfirmed"
 
@@ -83,6 +84,96 @@ def ict_base_armed_prelaunch_pad_lane(
         getattr(s, "early_radar_pad_exploding_prelaunch_min_score", 25.0) or 25.0
     )
     return _alert_explosion_score(alert) >= min_score
+
+
+def building_armed_prelaunch_pad_lane(
+    alert: Mapping[str, Any],
+    settings: Any = None,
+) -> bool:
+    """WATCH/BUILDING ict_base_armed at quiet local pad — flat score before vertical lift.
+
+    Aug28 NIFTY PUT 24200/24100 @ 10:30–10:40: armed base, baseRel ~8–13%, explosion
+    score ~10–30, v3=0. Live winners entered near ₹70–83 base; move ran to ~₹130.
+    """
+    s = settings or get_settings()
+    if not bool(getattr(s, "building_armed_prelaunch_pad_enabled", True)):
+        return False
+    if bool(alert.get("ictFirstLift") or alert.get("ictEliteBaseReady")):
+        return False
+    tier = _alert_tier(alert)
+    if tier not in ("WATCH", "BUILDING"):
+        return False
+    if not bool(alert.get("ictBaseArmed") or alert.get("baseArmed")):
+        return False
+    local_move = _alert_local_base_move(alert)
+    lo = float(
+        getattr(s, "building_armed_prelaunch_min_base_rel_pct", 5.0) or 5.0
+    )
+    hi = float(
+        getattr(s, "building_armed_prelaunch_max_base_rel_pct", 18.0) or 18.0
+    )
+    if not (lo <= local_move <= hi + 1e-6):
+        return False
+    score = _alert_explosion_score(alert)
+    min_score = float(
+        getattr(s, "building_armed_prelaunch_min_explosion_score", 5.0) or 5.0
+    )
+    max_score = float(
+        getattr(s, "building_armed_prelaunch_max_explosion_score", 55.0) or 55.0
+    )
+    if score < min_score or score > max_score + 1e-6:
+        return False
+    min_surge = float(
+        getattr(s, "building_armed_prelaunch_min_volume_surge", 1.0) or 1.0
+    )
+    vol_ok = bool(
+        alert.get("volumeAwaken")
+        or alert.get("ictVolumeAwakening")
+        or _number(alert.get("volumeSurge")) >= min_surge
+    )
+    return vol_ok
+
+
+def building_armed_prelaunch_entry_readiness(
+    *,
+    snap: Optional[SymbolSnapshot] = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    row = alert if isinstance(alert, dict) else {}
+    s = settings or get_settings()
+    if not building_armed_prelaunch_pad_lane(row, s):
+        return False, ""
+    side = str(row.get("side") or "").upper()
+    strike = _number(row.get("strike"))
+    if side in ("CALL", "PUT") and strike > 0 and snap is not None:
+        from app.engines.moneyness import classify_moneyness
+
+        spot = _number(getattr(snap, "spot", 0))
+        atm = _number(getattr(snap, "atmStrike", 0)) or spot
+        if spot > 0:
+            money = classify_moneyness(
+                Side(side),
+                strike,
+                spot,
+                symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
+                atm=atm if atm > 0 else None,
+            )
+            if money not in ("ATM", "ITM"):
+                if not building_coil_pad_moneyness_ok(row, snap, s):
+                    return False, "building_armed_prelaunch_moneyness_blocked"
+    premium = _number(row.get("premium"))
+    peak_move = _number(row.get("peakMovePct"))
+    if not premium_in_band(
+        premium,
+        mode="explosion",
+        peak_move_pct=peak_move,
+        snap=snap,
+    ):
+        return False, "building_armed_prelaunch_premium_out_of_band"
+    if isinstance(alert, dict):
+        alert.setdefault("ictBaseReadinessReason", BUILDING_ARMED_PRELAUNCH_READY)
+    return True, "armed_base_option_led_ready"
 
 
 def early_radar_pad_off_low_pct(alert: Mapping[str, Any]) -> float:
@@ -196,7 +287,8 @@ def building_coil_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None
 def building_coil_pad_lane_active(alert: Mapping[str, Any], settings: Any = None) -> bool:
     """Coil-pad lane — quiet BUILDING base, promoted coil with arm stamp, or fresh ELITE chase."""
     s = settings or get_settings()
-    if bool(alert.get("ictArmedBaseLaunch")):
+    # OTM expansion (Aug28 24050) keeps coil lane after armed launch until first lift.
+    if bool(alert.get("ictArmedBaseLaunch")) and bool(alert.get("ictFirstLift")):
         return False
     if not _building_coil_pad_shape(alert, s):
         return False
@@ -262,6 +354,36 @@ def building_coil_pad_lift_confirmed(
     if bool(getattr(s, "building_coil_pad_confirm_allow_flat_vertical", True)):
         if flat_vert and breakout and (vol_awake or vol_surge >= min_surge):
             return True
+        # Flat coil with heat but breakout stamp lagging on quiet polls.
+        if flat_vert and (vol_awake or vol_surge >= min_surge):
+            local_move = _number(
+                alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")
+            )
+            pad_lo = float(
+                getattr(s, "building_coil_pad_min_local_move_pct", 10.0) or 10.0
+            )
+            pad_hi = float(
+                getattr(s, "building_coil_pad_max_local_move_pct", 25.0) or 25.0
+            )
+            if pad_lo <= local_move <= pad_hi + 1e-6:
+                return True
+
+    if bool(getattr(s, "building_coil_pad_confirm_armed_volume_ok", True)):
+        if bool(alert.get("ictBaseArmed")) and not bool(alert.get("ictArmedBaseLaunch")):
+            local_move = _number(
+                alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct")
+            )
+            pad_lo = float(
+                getattr(s, "building_coil_pad_min_local_move_pct", 10.0) or 10.0
+            )
+            pad_hi = float(
+                getattr(s, "building_coil_pad_max_local_move_pct", 25.0) or 25.0
+            )
+            if (
+                pad_lo <= local_move <= pad_hi + 1e-6
+                and (vol_awake or vol_surge >= min_surge)
+            ):
+                return True
 
     if bool(
         alert.get("indexHelpersConfirm")
@@ -366,6 +488,8 @@ def building_coil_pad_entry_readiness(
 
 def alert_has_building_coil_pad(alert: Mapping[str, Any]) -> bool:
     """True only when coil pad is confirmed for live entry (not watch/armed)."""
+    if not isinstance(alert, Mapping):
+        return False
     return bool(alert.get("buildingCoilPadReady"))
 
 

@@ -1456,10 +1456,19 @@ def first_lift_entry_readiness(
         return True, fast_reason
 
     from app.engines.early_radar_pad_capture import (
+        building_armed_prelaunch_entry_readiness,
         building_coil_pad_entry_readiness,
         building_coil_pad_live_blocked,
         early_radar_pad_entry_readiness,
     )
+
+    prelaunch_ok, prelaunch_reason = building_armed_prelaunch_entry_readiness(
+        snap=snap,
+        alert=alert if isinstance(alert, dict) else None,
+        settings=settings,
+    )
+    if prelaunch_ok:
+        return True, prelaunch_reason
 
     coil_blocked, coil_block_reason = building_coil_pad_live_blocked(row, settings)
     if coil_blocked:
@@ -2020,7 +2029,21 @@ def first_lift_entry_readiness(
             atm=atm if atm > 0 else None,
         )
         if money not in ("ATM", "ITM"):
-            return False, f"armed_base_requires_atm_itm_{money.lower()}"
+            from app.engines.early_radar_pad_capture import (
+                alert_has_building_coil_pad,
+                building_coil_pad_lane_active,
+                building_coil_pad_moneyness_ok,
+            )
+
+            coil_context = (
+                alert_has_building_coil_pad(row)
+                or building_coil_pad_lane_active(row, settings)
+            )
+            if not (
+                coil_context
+                and building_coil_pad_moneyness_ok(row, snap, settings)
+            ):
+                return False, f"armed_base_requires_atm_itm_{money.lower()}"
         armed_min_tqs = float(
             getattr(settings, "ict_armed_base_launch_min_tqs", 50.0) or 50.0
         )
