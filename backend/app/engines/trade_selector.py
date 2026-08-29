@@ -462,6 +462,7 @@ def _explosion_candidates(
                 local_base_ok = False
                 pad_lane_ok = False
                 grade_a_ok = False
+                candlestick_ok = False
                 if bool(
                     getattr(
                         settings,
@@ -484,7 +485,12 @@ def _explosion_candidates(
                         side_v, snap, alert=alert,
                     )
                     grade_a_ok = grade_a_ftv_chart_bypass(alert, snap)
-                if not local_base_ok and not pad_lane_ok and not grade_a_ok:
+                from app.engines.ftv_candlestick_confirm import ftv_candlestick_chart_bypass
+
+                candlestick_ok = ftv_candlestick_chart_bypass(
+                    side_v, snap, alert=alert,
+                )
+                if not local_base_ok and not pad_lane_ok and not grade_a_ok and not candlestick_ok:
                     continue
         score_val = float(alert.get("explosionScore", 0))
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
@@ -952,6 +958,9 @@ def _explosion_candidates(
                     rank += float(
                         getattr(settings, "flat_vertical_quality_rank_max", 12.0) or 12.0
                     ) * (fvq / 100.0)
+            from app.engines.ftv_candlestick_confirm import ftv_candlestick_rank_bonus
+
+            rank += ftv_candlestick_rank_bonus(snap, alert, event.side)
         # Prefer early expansion window; demote already-extended rips in ranking.
         early_min = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
         early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
@@ -2373,6 +2382,7 @@ def diagnose_missed_entries(
                 from app.engines.grade_a_ftv_capture import grade_a_ftv_chart_bypass
                 from app.engines.top_ftv_v_expiry_bypass import top_ftv_v_chart_bypass
                 from app.engines.bullish_local_base import alert_bullish_local_base_active
+                from app.engines.ftv_candlestick_confirm import ftv_candlestick_chart_bypass
 
                 side_raw = str(alert.get("side") or "").upper()
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
@@ -2380,6 +2390,9 @@ def diagnose_missed_entries(
                     local_base_chart_ok = False
                     grade_a_chart_ok = grade_a_ftv_chart_bypass(alert, snap)
                     top_ftv_v_chart_ok = top_ftv_v_chart_bypass(alert, snap)
+                    candlestick_chart_ok = ftv_candlestick_chart_bypass(
+                        Side(side_raw), snap, alert=alert,
+                    )
                     bullish_base_chart_ok = alert_bullish_local_base_active(alert, snap)
                     if not lift_ready:
                         from app.engines.local_base_chart_bypass import (
@@ -2402,6 +2415,7 @@ def diagnose_missed_entries(
                         and not pad_lane_chart_ok
                         and not grade_a_chart_ok
                         and not top_ftv_v_chart_ok
+                        and not candlestick_chart_ok
                         and not bullish_base_chart_ok
                     ):
                         blockers.append("chart_not_aligned")

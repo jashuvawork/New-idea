@@ -1542,6 +1542,18 @@ async def _open_from_candidate(
             pad_lane_chart_bypass, strict_first_lift_bypass = (
                 resolve_strict_pad_lane_chart_bypass(candidate, snap)
             )
+            from app.engines.ftv_candlestick_confirm import ftv_candlestick_bypass_for_snap
+
+            candlestick_bypass = ftv_candlestick_bypass_for_snap(
+                candidate.side,
+                snap,
+                explosion_event=candidate.explosion_event,
+                alert=(
+                    candidate.alert
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else None
+                ),
+            )
             expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
             from app.engines.spot_direction import hard_counter_trend_chart
 
@@ -1556,12 +1568,13 @@ async def _open_from_candidate(
                 local_ichi_bypass = False
                 breadth_bypass = False
                 pad_lane_chart_bypass = False
+                candlestick_bypass = False
             blocked, chart_reason = chart_blocks_side(
                 candidate.side, snap.spotChart, trade_score=trade_score,
                 breadth_aligned_bypass=breadth_bypass,
                 premium_led_bypass=(
                     premium_bypass or vertical_bypass or local_ichi_bypass
-                    or pad_lane_chart_bypass
+                    or pad_lane_chart_bypass or candlestick_bypass
                 ),
                 expiry_explosion_bypass=expiry_chart_bypass,
                 strict_first_lift_bypass=strict_first_lift_bypass,
@@ -1579,12 +1592,13 @@ async def _open_from_candidate(
                 "chartBypassUsed": bool(
                     premium_bypass or vertical_bypass or expiry_chart_bypass
                     or breadth_bypass or local_ichi_bypass or pad_lane_chart_bypass
-                    or strict_first_lift_bypass
+                    or candlestick_bypass or strict_first_lift_bypass
                 ),
                 "premiumLedBypass": premium_bypass,
                 "verticalRipBypass": vertical_bypass,
                 "localBaseIchimokuBypass": local_ichi_bypass,
                 "padLaneChartBypass": pad_lane_chart_bypass,
+                "ftvCandlestickBypass": candlestick_bypass,
                 "strictFirstLiftBypass": strict_first_lift_bypass,
                 "expiryExplosionBypass": expiry_chart_bypass,
             }
