@@ -37,6 +37,8 @@ def _scratch_guard_settings() -> MagicMock:
     s.explosion_per_trade_max_loss_inr = 2_000.0
     s.explosion_exceptional_per_trade_max_loss_inr = 4_000.0
     s.emergency_stop_enabled = False
+    s.enable_live_trading = False
+    s.live_hold_to_structural_sl = True
     return s
 
 
@@ -92,6 +94,8 @@ def test_hard_per_trade_risk_cap_when_enabled():
     s.explosion_never_green_stop_pct = 6.0
     s.explosion_never_green_min_hold_seconds = 20
     s.explosion_per_trade_max_loss_inr = 12_000.0
+    s.enable_live_trading = False
+    s.live_hold_to_structural_sl = True
     with patch("app.engines.explosion_profit.get_settings", return_value=s):
         reason, pnl = evaluate_explosion_exit(
             _trade(500.0, 495.0, best=3.0, lots=200), 495.0, "ELITE", 20,

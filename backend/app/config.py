@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     paper_trading: bool = True
     auto_trading_enabled: bool = True
     shadow_trade_all_signals: bool = True
+    # Live: skip INR force-stops / scratch exits — let open trades hit structural SL.
+    live_hold_to_structural_sl: bool = True
     # When false, /api/deployment/readiness skips the 50-trade paper milestone (small-cap live).
     live_milestone_required: bool = True
 

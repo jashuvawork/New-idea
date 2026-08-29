@@ -1573,6 +1573,9 @@ def evaluate_explosion_exit(
     Lets runners extend; locks profit as peak builds.
     """
     settings = get_settings()
+    from app.engines.risk_stops import live_hold_to_structural_sl
+
+    hold_to_sl = live_hold_to_structural_sl(settings)
     exit_params = params or default_explosion_exit_params(event_tier)
     ctx = trade.entryContext or {}
     if ctx.get("afternoonCapture"):
@@ -1601,12 +1604,15 @@ def evaluate_explosion_exit(
     from app.engines.explosion_entry_guards import faded_rip_no_green_exit_reason
 
     faded_exit = faded_rip_no_green_exit_reason(trade, hold_seconds=hold, best_points=best)
-    if faded_exit:
+    if faded_exit and not hold_to_sl:
         return faded_exit, pnl_inr
 
     # The launch thesis failed immediately: it never established green and live
     # premium is still contracting. Scratch before the wider structural stop.
-    if bool(getattr(settings, "explosion_failed_launch_exit_enabled", True)):
+    if (
+        not hold_to_sl
+        and bool(getattr(settings, "explosion_failed_launch_exit_enabled", True))
+    ):
         failed_min_hold = int(
             _cfg_float(settings, "explosion_failed_launch_min_hold_seconds", 15)
         )
@@ -1634,7 +1640,10 @@ def evaluate_explosion_exit(
     # floor is directionally wrong from entry (Aug6 78800 PE: best=0 → ran to −37pt).
     # Cut it faster than the full adaptive stop. Threshold = max(points floor, % of entry
     # premium) so cheap and expensive options are both handled sensibly.
-    if bool(getattr(settings, "explosion_never_green_stop_enabled", True)):
+    if (
+        not hold_to_sl
+        and bool(getattr(settings, "explosion_never_green_stop_enabled", True))
+    ):
         ng_min_green = _cfg_float(settings, "explosion_never_green_min_green_points", 0.5)
         ng_floor = _cfg_float(settings, "explosion_never_green_stop_points", 18.0)
         ng_pct = _cfg_float(settings, "explosion_never_green_stop_pct", 6.0)
@@ -1646,38 +1655,39 @@ def evaluate_explosion_exit(
     # Hard per-trade ₹ loss cap — optional (0 = disabled). Prefer never-green + point SL
     # so ICT/base runners are not clipped by a rupee ceiling before the thesis stop.
     ctx = trade.entryContext or {}
-    if bool(ctx.get("eliteFullLot")):
-        # ELITE full-capital sleeve: prefer structural point SL + daily loss stop.
-        # Per-trade INR clip defaults to off (0). If configured >0, use that ceiling
-        # (often aligned with the ₹20k/day stop) — never the old ₹10k early kill.
-        hard_cap = _cfg_float(
-            settings,
-            "elite_full_lot_risk_inr",
-            0.0,
-        )
-    elif bool(ctx.get("fullSleeveQualified")):
-        hard_cap = _cfg_float(
-            settings,
-            "explosion_exceptional_per_trade_max_loss_inr",
-            4_000.0,
-        )
-    elif bool(ctx.get("indexConfirmedFtv")):
-        # Index-confirmed near-base FTV took elevated size — give it a proportionally wider
-        # rupee stop so the larger position survives the normal near-base shakeout instead of
-        # being clipped at a ~2pt stop. Still bounded (default ~2% of capital).
-        hard_cap = _cfg_float(
-            settings,
-            "index_confirmed_ftv_per_trade_max_loss_inr",
-            4_000.0,
-        )
-    else:
-        hard_cap = _cfg_float(
-            settings,
-            "explosion_per_trade_max_loss_inr",
-            2_000.0,
-        )
-    if hard_cap > 0 and pnl_inr <= -hard_cap:
-        return "explosion_per_trade_risk_cap", pnl_inr
+    if not hold_to_sl:
+        if bool(ctx.get("eliteFullLot")):
+            # ELITE full-capital sleeve: prefer structural point SL + daily loss stop.
+            # Per-trade INR clip defaults to off (0). If configured >0, use that ceiling
+            # (often aligned with the ₹20k/day stop) — never the old ₹10k early kill.
+            hard_cap = _cfg_float(
+                settings,
+                "elite_full_lot_risk_inr",
+                0.0,
+            )
+        elif bool(ctx.get("fullSleeveQualified")):
+            hard_cap = _cfg_float(
+                settings,
+                "explosion_exceptional_per_trade_max_loss_inr",
+                4_000.0,
+            )
+        elif bool(ctx.get("indexConfirmedFtv")):
+            # Index-confirmed near-base FTV took elevated size — give it a proportionally wider
+            # rupee stop so the larger position survives the normal near-base shakeout instead of
+            # being clipped at a ~2pt stop. Still bounded (default ~2% of capital).
+            hard_cap = _cfg_float(
+                settings,
+                "index_confirmed_ftv_per_trade_max_loss_inr",
+                4_000.0,
+            )
+        else:
+            hard_cap = _cfg_float(
+                settings,
+                "explosion_per_trade_max_loss_inr",
+                2_000.0,
+            )
+        if hard_cap > 0 and pnl_inr <= -hard_cap:
+            return "explosion_per_trade_risk_cap", pnl_inr
 
     from app.engines.ict_breakout_monitor import _ict_max_profit_trade
 
@@ -1778,7 +1788,11 @@ def evaluate_explosion_exit(
     ):
         return "explosion_stop_loss", pnl_inr
 
-    if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
+    if (
+        not hold_to_sl
+        and settings.emergency_stop_enabled
+        and pnl_inr <= -settings.emergency_stop_inr
+    ):
         return "explosion_emergency_stop", pnl_inr
 
     # Base→vertical ICT (12→392 PE): skip tiny hard TP — trail toward max.
