@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import zipfile
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from app.config import Settings
 from app.engines.bullish_local_base import (
@@ -30,6 +33,8 @@ def _settings(**overrides) -> Settings:
 
 
 def _load_afternoon_alert() -> tuple[dict, dict]:
+    if not Path(ARCHIVE).exists():
+        pytest.skip(f"Aug27 radar archive unavailable at {ARCHIVE}")
     with zipfile.ZipFile(ARCHIVE) as zf:
         row = next(
             r

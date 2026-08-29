@@ -9,6 +9,7 @@ flat→vertical ICT structure (the legitimate live-confirmed path).
 from contextlib import contextmanager
 from unittest.mock import patch
 
+from app.config import Settings
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.explosion_profit import check_explosion_entry
 from app.engines.ict_breakout_monitor import ICTBreakoutSignal
@@ -82,7 +83,10 @@ def test_weak_velocity_blocked():
     )
 
 
-def test_score_45_exploding_confirmed():
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_score_45_exploding_confirmed(mock_settings):
+    # Isolate score/tier/breadth logic — anti-chase pad guard is covered elsewhere.
+    mock_settings.return_value = Settings(tier_promotion_pad_chase_block_enabled=False)
     event = _event(explosion_score=48.0, velocity_3s=3.0, velocity_9s=4.0)
     with _live_confirmed():
         ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
