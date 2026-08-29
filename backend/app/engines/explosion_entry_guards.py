@@ -1391,7 +1391,18 @@ def detect_fake_explosion_trap(
         alert = getattr(candidate, "alert", None)
         from app.engines.early_radar_pad_capture import ict_base_armed_prelaunch_pad_lane
 
-        if isinstance(alert, dict) and ict_base_armed_prelaunch_pad_lane(alert):
+        armed_bypass = bool(
+            getattr(
+                settings,
+                "fake_explosion_trap_post_win_armed_base_bypass_enabled",
+                False,
+            )
+        )
+        if (
+            armed_bypass
+            and isinstance(alert, dict)
+            and ict_base_armed_prelaunch_pad_lane(alert)
+        ):
             return False, "ok", meta
         min_v3 = float(
             getattr(settings, "fake_explosion_trap_post_win_min_velocity_3s", 0.0) or 0.0
