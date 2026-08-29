@@ -409,6 +409,13 @@ def check_explosion_entry(
         else:
             return False, f"tier_{event.tier}_not_tradeable"
 
+    if isinstance(alert, dict):
+        from app.engines.early_radar_pad_capture import building_coil_pad_live_blocked
+
+        coil_blocked, coil_reason = building_coil_pad_live_blocked(alert)
+        if coil_blocked:
+            return False, coil_reason
+
     from app.engines.morning_premium_capture import is_afternoon_capture_event
 
     if (

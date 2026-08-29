@@ -117,15 +117,10 @@ def _cold_trough_coil_signal(alert: Mapping[str, Any]) -> bool:
     return False
 
 
-def building_coil_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None) -> bool:
-    """BUILDING armed coil at 10–25% local base — matches EOD hindsight entry window.
-
-    Aug28 NIFTY PUT 24050 @ 11:12: BUILDING, baseRel 20.7%, v3=0, +₹78k hindsight sim.
-    """
+def _building_coil_pad_shape(alert: Mapping[str, Any], settings: Any = None) -> bool:
+    """Quiet local-base coil window (10–25%) — tier-agnostic for promotion checks."""
     s = settings or get_settings()
     if not bool(getattr(s, "building_coil_pad_entry_enabled", True)):
-        return False
-    if _alert_tier(alert) != "BUILDING":
         return False
     if bool(alert.get("ictMidRipCoil") or alert.get("midRipCoil")):
         return False
@@ -143,12 +138,49 @@ def building_coil_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None
     max_score = float(
         getattr(s, "building_coil_pad_max_explosion_score", 65.0) or 65.0
     )
-    if _alert_explosion_score(alert) > max_score + 1e-6:
-        return False
+    tier = _alert_tier(alert)
+    if tier not in ("ELITE", "EXPLODING"):
+        if _alert_explosion_score(alert) > max_score + 1e-6:
+            return False
 
     if not _cold_trough_coil_signal(alert):
         return False
     return True
+
+
+def building_coil_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None) -> bool:
+    """BUILDING armed coil at 10–25% local base — matches EOD hindsight entry window.
+
+    Aug28 NIFTY PUT 24050 @ 11:12: BUILDING, baseRel 20.7%, v3=0, +₹78k hindsight sim.
+    """
+    return _alert_tier(alert) == "BUILDING" and _building_coil_pad_shape(alert, settings)
+
+
+def building_coil_pad_lane_active(alert: Mapping[str, Any], settings: Any = None) -> bool:
+    """Coil-pad lane applies — quiet BUILDING base, or promoted tier with armed stamp."""
+    s = settings or get_settings()
+    if bool(alert.get("ictArmedBaseLaunch")):
+        return False
+    if not _building_coil_pad_shape(alert, s):
+        return False
+    tier = _alert_tier(alert)
+    if tier == "BUILDING":
+        return True
+    if tier in ("ELITE", "EXPLODING"):
+        return bool(alert.get("buildingCoilPadArmed"))
+    return bool(alert.get("buildingCoilPadArmed"))
+
+
+def building_coil_pad_live_blocked(
+    alert: Mapping[str, Any], settings: Any = None,
+) -> tuple[bool, str]:
+    """Block live entry when coil base is armed but expansion is not confirmed."""
+    s = settings or get_settings()
+    if not building_coil_pad_lane_active(alert, s):
+        return False, ""
+    if building_coil_pad_lift_confirmed(alert, s):
+        return False, ""
+    return True, BUILDING_COIL_PAD_UNCONFIRMED
 
 
 def building_coil_pad_lift_confirmed(
@@ -158,12 +190,8 @@ def building_coil_pad_lift_confirmed(
     s = settings or get_settings()
     if not bool(getattr(s, "building_coil_pad_confirm_entry_enabled", True)):
         return True
-    if not building_coil_pad_lift_signal(alert, s):
+    if not building_coil_pad_lane_active(alert, s):
         return False
-
-    tier = _alert_tier(alert)
-    if tier in ("ELITE", "EXPLODING"):
-        return True
 
     v3 = _number(alert.get("velocity3s"))
     v9 = _number(alert.get("velocity9s"))
@@ -207,19 +235,20 @@ def building_coil_pad_lift_confirmed(
 def building_coil_pad_structure(alert: Mapping[str, Any], settings: Any = None) -> bool:
     if bool(alert.get("buildingCoilPadReady")):
         return True
-    return building_coil_pad_lift_signal(alert, settings)
+    return building_coil_pad_lane_active(alert, settings)
 
 
 def stamp_building_coil_pad(alert: dict[str, Any], settings: Any = None) -> bool:
     if not isinstance(alert, dict):
         return False
     s = settings or get_settings()
-    if not building_coil_pad_lift_signal(alert, s):
+    if not building_coil_pad_lane_active(alert, s):
         alert.pop("buildingCoilPad", None)
         alert.pop("buildingCoilPadArmed", None)
         alert.pop("buildingCoilPadReady", None)
         return False
-    alert["buildingCoilPadArmed"] = True
+    if building_coil_pad_lift_signal(alert, s) or bool(alert.get("buildingCoilPadArmed")):
+        alert["buildingCoilPadArmed"] = True
     if not building_coil_pad_lift_confirmed(alert, s):
         alert.pop("buildingCoilPad", None)
         alert.pop("buildingCoilPadReady", None)
@@ -273,7 +302,7 @@ def building_coil_pad_entry_readiness(
 ) -> tuple[bool, str]:
     row = alert if isinstance(alert, dict) else {}
     s = settings or get_settings()
-    if not building_coil_pad_lift_signal(row, s):
+    if not building_coil_pad_lane_active(row, s):
         return False, ""
     if isinstance(alert, dict):
         stamp_building_coil_pad(alert, s)

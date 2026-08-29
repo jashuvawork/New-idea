@@ -17,10 +17,14 @@ from app.engines.early_radar_pad_capture import (
     alert_has_building_coil_pad,
     alert_has_building_coil_pad_armed,
     building_coil_pad_entry_readiness,
+    building_coil_pad_lane_active,
     building_coil_pad_lift_confirmed,
     building_coil_pad_lift_signal,
+    building_coil_pad_live_blocked,
     stamp_building_coil_pad,
 )
+from app.engines.explosion_profit import check_explosion_entry
+from app.engines.explosion_detector import ExplosionEvent
 from app.engines.top_moment_gate import (
     explosion_alert_is_top_moment,
     top_moment_entry_allowed,
@@ -34,6 +38,8 @@ from app.models.schemas import (
     Regime,
     Side,
     SpotChart,
+    StrategyType,
+    SuggestedTrade,
     SymbolSnapshot,
 )
 
@@ -306,3 +312,113 @@ def test_explosion_alert_armed_only_not_top_moment():
     assert alert_has_building_coil_pad_armed(alert)
     assert not alert_has_building_coil_pad(alert)
     assert explosion_alert_is_top_moment(alert) is False
+
+
+def test_promoted_elite_in_coil_window_requires_confirmation():
+    settings = Settings(building_coil_pad_entry_enabled=True)
+    alert = _aug28_24050_alert(
+        tier="ELITE",
+        explosionScore=72.0,
+        buildingCoilPadArmed=True,
+        ictFlatThenVertical=False,
+        flatThenVertical=False,
+        ictBreakout=False,
+        volumeAwaken=False,
+        volumeSurge=0.5,
+        velocity3s=0.0,
+        velocity9s=0.0,
+    )
+    with patch("app.engines.early_radar_pad_capture.get_settings", return_value=settings):
+        assert building_coil_pad_lane_active(alert, settings) is True
+        assert building_coil_pad_lift_confirmed(alert, settings) is False
+        blocked, reason = building_coil_pad_live_blocked(alert, settings)
+    assert blocked is True
+    assert reason == BUILDING_COIL_PAD_UNCONFIRMED
+
+
+def test_promoted_exploding_confirmed_via_flat_vertical_volume():
+    settings = Settings(building_coil_pad_entry_enabled=True)
+    alert = _aug28_24050_alert(
+        tier="EXPLODING",
+        explosionScore=58.0,
+        buildingCoilPadArmed=True,
+        velocity3s=0.0,
+        velocity9s=0.0,
+    )
+    snap = _snap()
+    with patch("app.engines.early_radar_pad_capture.get_settings", return_value=settings):
+        ok, reason = building_coil_pad_entry_readiness(snap=snap, alert=alert, settings=settings)
+        blocked, _ = building_coil_pad_live_blocked(alert, settings)
+    assert ok is True
+    assert reason == BUILDING_COIL_PAD_READY
+    assert blocked is False
+    assert alert_has_building_coil_pad(alert)
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_explosion_entry_blocks_promoted_elite_unconfirmed_coil(mock_settings):
+    settings = Settings(
+        building_coil_pad_entry_enabled=True,
+        tier_promotion_pad_chase_block_enabled=False,
+    )
+    mock_settings.return_value = settings
+    alert = _aug28_24050_alert(
+        tier="ELITE",
+        explosionScore=72.0,
+        buildingCoilPadArmed=True,
+        ictFlatThenVertical=False,
+        flatThenVertical=False,
+        ictBreakout=False,
+        volumeAwaken=False,
+        volumeSurge=0.5,
+        velocity3s=0.0,
+        velocity9s=0.0,
+    )
+    event = ExplosionEvent(
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24050.0,
+        premium=95.0,
+        velocity_3s=0.0,
+        velocity_9s=0.0,
+        velocity_15s=0.0,
+        volume_surge=0.5,
+        explosion_score=72.0,
+        tier="ELITE",
+        reason="test",
+        daily_move_pct=22.0,
+        peak_move_pct=24.0,
+    )
+    trade = SuggestedTrade(
+        id="t1",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24050.0,
+        lastPremium=95.0,
+        tqs=70,
+        strategyType=StrategyType.EXPLOSIVE,
+        confidence=72,
+    )
+    with patch(
+        "app.engines.ict_breakout_monitor.analyze_explosion_event_ict",
+        return_value=type(
+            "ICT",
+            (),
+            {
+                "active": False,
+                "flat_then_vertical": False,
+                "base_relative_move_pct": 20.7,
+                "session_move_pct": 20.7,
+                "volume_awakening": False,
+            },
+        )(),
+    ):
+        ok, reason = check_explosion_entry(
+            event,
+            trade,
+            Breadth(score=70, bias="BEARISH", aligned=True),
+            False,
+            alert=alert,
+        )
+    assert ok is False
+    assert reason == BUILDING_COIL_PAD_UNCONFIRMED
