@@ -314,6 +314,27 @@ def test_explosion_alert_armed_only_not_top_moment():
     assert explosion_alert_is_top_moment(alert) is False
 
 
+def test_fresh_elite_in_coil_window_requires_confirmation_without_prior_stamp():
+    settings = Settings(building_coil_pad_entry_enabled=True)
+    alert = _aug28_24050_alert(
+        tier="ELITE",
+        explosionScore=72.0,
+        ictFlatThenVertical=False,
+        flatThenVertical=False,
+        ictBreakout=False,
+        volumeAwaken=False,
+        volumeSurge=0.5,
+        velocity3s=0.0,
+        velocity9s=0.0,
+    )
+    with patch("app.engines.early_radar_pad_capture.get_settings", return_value=settings):
+        assert building_coil_pad_lane_active(alert, settings) is True
+        assert building_coil_pad_lift_confirmed(alert, settings) is False
+        blocked, reason = building_coil_pad_live_blocked(alert, settings)
+    assert blocked is True
+    assert reason == BUILDING_COIL_PAD_UNCONFIRMED
+
+
 def test_promoted_elite_in_coil_window_requires_confirmation():
     settings = Settings(building_coil_pad_entry_enabled=True)
     alert = _aug28_24050_alert(

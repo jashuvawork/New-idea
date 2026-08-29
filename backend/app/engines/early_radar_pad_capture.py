@@ -157,7 +157,7 @@ def building_coil_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None
 
 
 def building_coil_pad_lane_active(alert: Mapping[str, Any], settings: Any = None) -> bool:
-    """Coil-pad lane applies — quiet BUILDING base, or promoted tier with armed stamp."""
+    """Coil-pad lane — quiet BUILDING base, promoted coil with arm stamp, or fresh ELITE chase."""
     s = settings or get_settings()
     if bool(alert.get("ictArmedBaseLaunch")):
         return False
@@ -167,7 +167,12 @@ def building_coil_pad_lane_active(alert: Mapping[str, Any], settings: Any = None
     if tier == "BUILDING":
         return True
     if tier in ("ELITE", "EXPLODING"):
-        return bool(alert.get("buildingCoilPadArmed"))
+        if bool(alert.get("buildingCoilPadArmed")):
+            return True
+        # first-lift / armed-base lanes own confirmed expansion off the pad.
+        if bool(alert.get("ictFirstLift")):
+            return False
+        return True
     return bool(alert.get("buildingCoilPadArmed"))
 
 

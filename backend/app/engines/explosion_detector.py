@@ -2636,7 +2636,13 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         ),
         "ictReasons": ict.reasons,
     }
-    from app.engines.early_radar_pad_capture import stamp_early_radar_pad_capture
+    from app.engines.early_radar_pad_capture import (
+        building_coil_pad_lift_signal,
+        stamp_early_radar_pad_capture,
+    )
+
+    if building_coil_pad_lift_signal(alert_out, _settings):
+        alert_out["buildingCoilPadArmed"] = True
 
     if stamp_early_radar_pad_capture(alert_out, snap):
         tradeable = True
