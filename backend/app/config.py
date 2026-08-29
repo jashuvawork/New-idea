@@ -1696,6 +1696,7 @@ class Settings(BaseSettings):
     building_armed_base_grade_a_use_local_base_window: bool = True
     building_armed_base_grade_a_ftv_enabled: bool = True
     building_armed_base_grade_a_ftv_max_capital_pct: float = 0.90
+    building_armed_base_grade_a_ftv_force_max_lots: bool = True
     # WORST/BREAKOUT_ONLY days still take grade-B armed base at the local pad
     # (Aug28 NIFTY PUT 24100/24200 @ 10:45–11:00).
     building_armed_base_worst_day_waive_enabled: bool = True

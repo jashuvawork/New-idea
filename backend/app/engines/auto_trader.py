@@ -1122,6 +1122,13 @@ async def _open_from_candidate(
         allocation=allocation,
         candidate=candidate,
     )
+    lots, armed_base_full_sleeve = _building_armed_base_grade_a_policy_max_lots(
+        lots=lots,
+        symbol=symbol,
+        premium=fill_premium,
+        policy_decision=policy_decision,
+        allocation=allocation,
+    )
     lots, pad_lane_full_sleeve = _pad_lane_ftv_policy_max_lots(
         lots=lots,
         symbol=symbol,
@@ -1142,10 +1149,17 @@ async def _open_from_candidate(
         strict_s_full_sleeve
         or top_ftv_a_full_sleeve
         or building_rip_full_sleeve
+        or armed_base_full_sleeve
         or pad_lane_full_sleeve
         or winner_index_full_sleeve
     )
-    if top_ftv_a_full_sleeve or building_rip_full_sleeve or pad_lane_full_sleeve or winner_index_full_sleeve:
+    if (
+        top_ftv_a_full_sleeve
+        or building_rip_full_sleeve
+        or armed_base_full_sleeve
+        or pad_lane_full_sleeve
+        or winner_index_full_sleeve
+    ):
         top_explosion_max = True
     force_max_size = full_sleeve_authorized
 
@@ -1176,6 +1190,8 @@ async def _open_from_candidate(
                 "PREMIUM_FVG_PAD_FTV",
                 "DOUBLE_DIP_VBASE_FTV",
                 "EARLY_RADAR_PAD_FTV",
+                "BUILDING_ARMED_BASE_GRADE_A",
+                "BUILDING_COIL_PAD_FTV",
             }
             and policy_decision.max_capital_pct is not None
         ):
@@ -3171,6 +3187,41 @@ def _top_ftv_a_policy_max_lots(
         premium,
         float(policy_decision.max_capital_pct),
     )
+    return max(int(lots), max_lots), True
+
+
+def _building_armed_base_grade_a_policy_max_lots(
+    *,
+    lots: int,
+    symbol: str,
+    premium: float,
+    policy_decision: Any,
+    allocation: RankedAllocation | None,
+) -> tuple[int, bool]:
+    """Max lots for grade-B/C armed-base pad entries at local base."""
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "building_armed_base_grade_a_ftv_force_max_lots", True)
+    ):
+        return int(lots), False
+    authorized = bool(
+        policy_decision is not None
+        and policy_decision.mode == "BUILDING_ARMED_BASE_GRADE_A"
+        and policy_decision.allowed
+        and policy_decision.max_capital_pct is not None
+        and allocation is not None
+        and allocation.rank == 1
+    )
+    if not authorized:
+        return int(lots), False
+
+    from app.engines.capital_allocator import max_lots_for_capital_pct
+
+    capital_pct = max(
+        float(policy_decision.max_capital_pct),
+        float(getattr(settings, "per_trade_capital_pct", 0.90) or 0.90),
+    )
+    max_lots = max_lots_for_capital_pct(symbol, premium, capital_pct)
     return max(int(lots), max_lots), True
 
 
