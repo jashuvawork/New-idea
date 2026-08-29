@@ -1666,6 +1666,8 @@ class Settings(BaseSettings):
     # (Aug28 NIFTY 24250 CE 10:17 ELITE @ 8.4% baseRel after micro-rip, not cold trough).
     tier_promotion_pad_chase_block_enabled: bool = True
     tier_promotion_pad_chase_min_base_rel_pct: float = 8.0
+    # Best-only selector — one top-ranked explosion per radar cycle; rank-1 at selection.
+    selector_best_only_enabled: bool = True
     # Grade-A BUILDING armed_base_option_led_ready on live selector — enter at local
     # base before ELITE/EXPLODING promote (Aug28 NIFTY PUT 24200/24100 ~1h late).
     # Archive week in-window false-start rate ~7.5% (3/40); win rate ~75%.

@@ -485,6 +485,36 @@ def test_tier_promotion_pad_chase_blocks_elite_without_stamp(mock_settings):
     assert "tier_promotion_pad_chase_blocked" in reason
 
 
+@patch("app.engines.elite_never_block.elite_never_block_active", return_value=True)
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_tier_promotion_pad_chase_blocks_elite_even_when_must_take(
+    mock_settings, _must_take,
+):
+    from app.engines.explosion_detector import ExplosionEvent
+    from app.engines.explosion_entry_guards import tier_promotion_pad_chase_blocked
+
+    mock_settings.return_value = Settings()
+    event = ExplosionEvent(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24250.0,
+        premium=104.55,
+        velocity_3s=0.87,
+        velocity_9s=0.5,
+        velocity_15s=0.0,
+        volume_surge=1.0,
+        explosion_score=100.0,
+        tier="ELITE",
+        reason="test",
+        daily_move_pct=8.4,
+        peak_move_pct=8.4,
+    )
+    ict = MagicMock(base_relative_move_pct=8.4, base_armed=True, active=True)
+    blocked, reason = tier_promotion_pad_chase_blocked(event, ict=ict, alert={})
+    assert blocked is True
+    assert "tier_promotion_pad_chase_blocked" in reason
+
+
 @patch("app.engines.explosion_entry_guards.get_settings")
 def test_tier_promotion_pad_chase_allows_pad_stamp(mock_settings):
     from app.engines.explosion_detector import ExplosionEvent
