@@ -1457,8 +1457,13 @@ def first_lift_entry_readiness(
 
     from app.engines.early_radar_pad_capture import (
         building_coil_pad_entry_readiness,
+        building_coil_pad_live_blocked,
         early_radar_pad_entry_readiness,
     )
+
+    coil_blocked, coil_block_reason = building_coil_pad_live_blocked(row, settings)
+    if coil_blocked:
+        return False, coil_block_reason
 
     if isinstance(alert, dict):
         coil_ok, coil_reason = building_coil_pad_entry_readiness(
