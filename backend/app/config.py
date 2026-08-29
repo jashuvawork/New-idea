@@ -305,6 +305,17 @@ class Settings(BaseSettings):
     smart_ichimoku_break_min_probability: float = 0.60
     smart_ichimoku_continuation_min_probability: float = 0.55
     smart_ichimoku_flat_vertical_confirm_enabled: bool = True
+    # Index candlestick patterns (engulfing, marubozu, pin bar, stars, soldiers/crows)
+    # confirm FTV/V premium structure when the 5m spot chart label lags the turn.
+    ftv_candlestick_confirm_enabled: bool = True
+    ftv_candlestick_min_pattern_strength: float = 68.0
+    ftv_candlestick_require_ftv_structure: bool = True
+    ftv_candlestick_min_flat_vertical_quality: float = 50.0
+    ftv_candlestick_chart_bypass_enabled: bool = True
+    ftv_candlestick_chart_bypass_min_score: float = 25.0
+    ftv_candlestick_max_adverse_mom5_pct: float = 0.08
+    ftv_candlestick_rank_bonus_enabled: bool = True
+    ftv_candlestick_rank_bonus_max: float = 10.0
     smart_ichimoku_weight_rsi: float = 0.85
     smart_ichimoku_weight_stoch: float = 0.65
     smart_ichimoku_weight_zscore: float = 0.90

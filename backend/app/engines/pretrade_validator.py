@@ -1214,6 +1214,20 @@ def validate_candidate(
     )
     if pad_lane_chart_bypass:
         meta["padLaneChartBypass"] = True
+    from app.engines.ftv_candlestick_confirm import ftv_candlestick_bypass_for_snap
+
+    candlestick_bypass = ftv_candlestick_bypass_for_snap(
+        candidate.side,
+        snap,
+        explosion_event=getattr(candidate, "explosion_event", None),
+        alert=(
+            candidate.alert
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None
+        ),
+    )
+    if candlestick_bypass:
+        meta["ftvCandlestickBypass"] = True
     armed_base_chart_bypass = False
     if (
         getattr(candidate, "mode", "") == "explosion"
@@ -1259,7 +1273,7 @@ def validate_candidate(
         snap.spotChart,
         trade_score=trade_score,
         breadth_aligned_bypass=breadth_bypass,
-        premium_led_bypass=premium_bypass or local_ichi_bypass or pad_lane_chart_bypass,
+        premium_led_bypass=premium_bypass or local_ichi_bypass or pad_lane_chart_bypass or candlestick_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
         strict_first_lift_bypass=armed_base_chart_bypass or pad_lane_chart_bypass,
     )
