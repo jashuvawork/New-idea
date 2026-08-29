@@ -28,12 +28,14 @@ def _settings(**overrides):
     s.grade_a_ftv_first_lift_max_base_move_pct = 45.0
     s.expiry_worst_day_grade_a_ftv_bypass_enabled = True
     s.grade_a_ftv_chart_bypass_enabled = True
-    s.grade_a_ftv_counter_breadth_block_enabled = True
-    s.grade_a_ftv_counter_breadth_min_base_rel_pct = 20.0
+    s.grade_a_ftv_counter_breadth_block_enabled = False
+    s.grade_a_ftv_counter_breadth_min_base_rel_pct = 45.0
     s.grade_a_ftv_non_aligned_breadth_block_enabled = False
     s.grade_a_ftv_afternoon_neutral_chase_block_enabled = True
     s.grade_a_ftv_afternoon_neutral_start_hour = 12
     s.grade_a_ftv_afternoon_neutral_call_only = True
+    s.grade_a_ftv_afternoon_neutral_rank2_only = True
+    s.grade_a_ftv_afternoon_neutral_min_base_rel_pct = 20.0
     s.expiry_day_guards_enabled = True
     s.expiry_worst_day_halt_entries = True
     s.expiry_worst_day_elite_top_bypass_enabled = True
@@ -299,21 +301,42 @@ def _nifty_call_snap(breadth_bias: str = "BEARISH") -> SymbolSnapshot:
 
 
 @patch("app.engines.grade_a_ftv_capture.get_settings")
-def test_grade_a_ftv_blocks_aug17_bearish_call_chase(mock_settings):
-    """Aug17 ac612bc1: BEARISH breadth + 64% baseRel grade-A CALL must not pass."""
+def test_grade_a_ftv_blocks_aug17_extreme_base_rel_chase(mock_settings):
+    """Aug17 ac612bc1: 64% baseRel grade-A CALL must not pass (max chase cap)."""
     mock_settings.return_value = _settings()
     alert = _aug17_call_alert()
     snap = _nifty_call_snap("BEARISH")
     blocked, reason = grade_a_ftv_breadth_chase_blocked(alert, snap)
     assert blocked is True
-    assert "grade_a_ftv" in reason
-    assert alert_is_grade_a_ftv_first_lift(alert, snap) is False
+    assert "base_rel_chase" in reason
     assert alert_is_grade_a_ftv_first_lift(alert, snap) is False
 
 
 @patch("app.engines.grade_a_ftv_capture.get_settings")
-def test_grade_a_ftv_blocks_aug17_neutral_call_21pct_afternoon(mock_settings):
-    """Aug17 fee039db: afternoon NEUTRAL CALL at 21% baseRel must not pass."""
+def test_grade_a_ftv_allows_aug17_bearish_winner_pad(mock_settings):
+    """Aug17 24250 winner: rank-1 BEARISH CALL @ ~31% baseRel must still pass."""
+    mock_settings.return_value = _settings()
+    alert = _aug17_call_alert(
+        strike=24250.0,
+        ictBaseRelativeMovePct=31.36,
+        localBaseMovePct=31.36,
+        dailyMovePct=31.36,
+        peakMovePct=31.36,
+        velocity3s=2.0,
+        indexMomAlign=True,
+    )
+    snap = _nifty_call_snap("BEARISH")
+    snap.timestamp = datetime(2026, 8, 17, 12, 34, 0, tzinfo=IST)
+    blocked, reason = grade_a_ftv_breadth_chase_blocked(
+        alert, snap, allocation_rank=1,
+    )
+    assert blocked is False, reason
+    assert alert_is_grade_a_ftv_first_lift(alert, snap) is True
+
+
+@patch("app.engines.grade_a_ftv_capture.get_settings")
+def test_grade_a_ftv_blocks_aug17_neutral_call_21pct_afternoon_rank2(mock_settings):
+    """Aug17 fee039db: rank-2 afternoon NEUTRAL CALL at 21% baseRel must not pass."""
     mock_settings.return_value = _settings()
     alert = _aug17_call_alert(
         strike=24350.0,
@@ -325,13 +348,36 @@ def test_grade_a_ftv_blocks_aug17_neutral_call_21pct_afternoon(mock_settings):
         dailyMovePct=21.04,
         peakMovePct=21.04,
         velocity3s=2.46,
+        allocationRank=2,
     )
     snap = _nifty_call_snap("NEUTRAL")
     snap.timestamp = datetime(2026, 8, 17, 13, 1, 47, tzinfo=IST)
-    blocked, reason = grade_a_ftv_breadth_chase_blocked(alert, snap)
+    blocked, reason = grade_a_ftv_breadth_chase_blocked(
+        alert, snap, allocation_rank=2,
+    )
     assert blocked is True
     assert "afternoon_neutral" in reason
     assert alert_is_grade_a_ftv_first_lift(alert, snap) is False
+
+
+@patch("app.engines.grade_a_ftv_capture.get_settings")
+def test_grade_a_ftv_allows_afternoon_neutral_rank1(mock_settings):
+    """Rank-1 afternoon NEUTRAL CALL below max baseRel is not auto-blocked."""
+    mock_settings.return_value = _settings()
+    alert = _aug17_call_alert(
+        strike=24300.0,
+        ictBaseRelativeMovePct=25.0,
+        localBaseMovePct=25.0,
+        dailyMovePct=25.0,
+        peakMovePct=25.0,
+        velocity3s=2.0,
+    )
+    snap = _nifty_call_snap("NEUTRAL")
+    snap.timestamp = datetime(2026, 8, 17, 12, 44, 0, tzinfo=IST)
+    blocked, reason = grade_a_ftv_breadth_chase_blocked(
+        alert, snap, allocation_rank=1,
+    )
+    assert blocked is False, reason
 
 
 @patch("app.engines.grade_a_ftv_capture.get_settings")
