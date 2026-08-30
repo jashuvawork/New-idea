@@ -1833,6 +1833,12 @@ class Settings(BaseSettings):
     ftv_premium_min_training_samples: int = 200
     ftv_probability_drift_warn_pct_points: float = 8.0
     ftv_probability_drift_critical_pct_points: float = 15.0
+    # Advisory soft alert when FTV live timing, local base, chart side, and
+    # tradeable radar all align. Never wired to auto_trader entry.
+    ftv_focus_alerts_enabled: bool = True
+    ftv_focus_min_confidence: str = "MEDIUM"
+    ftv_focus_min_peak_probability_pct: float = 35.0
+    ftv_focus_cooldown_seconds: int = 300
     # Operator-supplied verified events only. JSON array fields:
     # date, time, title, impact, symbols, sideBias, durationMinutes.
     ftv_scheduled_events_json: str = "[]"
