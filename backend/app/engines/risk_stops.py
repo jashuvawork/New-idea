@@ -15,6 +15,8 @@ def live_hold_to_structural_sl(settings=None) -> bool:
     s = settings or get_settings()
     if not _strict_bool(getattr(s, "enable_live_trading", False)):
         return False
+    if not _strict_bool(getattr(s, "auto_trading_enabled", True), True):
+        return False
     return _strict_bool(getattr(s, "live_hold_to_structural_sl", True), True)
 
 
