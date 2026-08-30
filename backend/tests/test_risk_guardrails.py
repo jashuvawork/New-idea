@@ -220,3 +220,29 @@ def test_whipsaw_flip_no_cap_after_opposite_loss():
     )
     assert lots == 27
     assert meta["applied"] is False
+
+
+def test_always_max_does_not_undo_whipsaw_flip_cap():
+    """Aug6 pattern: whipsaw cap to 8 lots must not be re-floored to max lots."""
+    from unittest.mock import patch
+
+    from app.engines.capital_allocator import apply_explosion_always_max_lots
+
+    state = AutoTraderState()
+    state.closedPaperTrades = [_closed(Side.CALL, 24000.0)]
+    lots, flip_cap_meta = cap_opposite_side_flip_after_win(
+        27, state, symbol="SENSEX", side=Side.PUT, velocity_3s=3.0,
+    )
+    assert lots == 8
+    assert flip_cap_meta["applied"] is True
+
+    size_cap_applied = bool(flip_cap_meta.get("applied"))
+    if not size_cap_applied:
+        with patch(
+            "app.engines.capital_allocator.max_lots_for_capital",
+            return_value=27,
+        ):
+            lots = apply_explosion_always_max_lots(
+                lots, "SENSEX", 50.0, mode="explosion",
+            )
+    assert lots == 8

@@ -1356,6 +1356,7 @@ async def _open_from_candidate(
 
     # AFTER force-max: same-strike explosive win → cut next entry (Jul29 77500 CE).
     post_win_cap_meta: dict[str, Any] = {}
+    flip_cap_meta: dict[str, Any] = {}
     if candidate.mode == "explosion":
         from app.engines.session_mode_feedback import (
             cap_same_strike_explosion_reentry_after_win,
@@ -1393,19 +1394,23 @@ async def _open_from_candidate(
         if post_win_cap_meta.get("applied") or flip_cap_meta.get("applied"):
             top_explosion_max = False
 
+    size_cap_applied = bool(
+        post_win_cap_meta.get("applied") or flip_cap_meta.get("applied")
+    )
     from app.engines.capital_allocator import apply_explosion_always_max_lots
 
-    lots = apply_explosion_always_max_lots(
-        lots,
-        symbol,
-        fill_premium,
-        mode=str(candidate.mode or ""),
-    )
-    if (
-        candidate.mode == "explosion"
-        and bool(getattr(settings, "explosion_always_force_max_lots", True))
-    ):
-        top_explosion_max = True
+    if not size_cap_applied:
+        lots = apply_explosion_always_max_lots(
+            lots,
+            symbol,
+            fill_premium,
+            mode=str(candidate.mode or ""),
+        )
+        if (
+            candidate.mode == "explosion"
+            and bool(getattr(settings, "explosion_always_force_max_lots", True))
+        ):
+            top_explosion_max = True
 
     allocation_for_cap = allocation
     use_full_remaining = False
@@ -3864,6 +3869,21 @@ async def process(
                             "selectionMode": best.mode,
                             "selectionScore": best.score,
                         })
+                        from app.services.operator_event_log import append_operator_event
+
+                        append_operator_event(
+                            "entry_blocked",
+                            {
+                                "symbol": best.symbol.upper(),
+                                "side": best.side.value,
+                                "strike": best.strike,
+                                "reason": reason,
+                                "mode": best.mode,
+                                "score": round(float(best.score or 0), 2),
+                                "tier": getattr(best, "tier", None),
+                                "cycleId": cycle_id,
+                            },
+                        )
                         skipped.append(
                             {
                                 "symbol": best.symbol,

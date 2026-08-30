@@ -38,6 +38,7 @@ interface ForwardSignal {
   peakMovePct?: number;
   blockers?: string[];
   primaryBlocker?: string | null;
+  gateFixHint?: string;
   tradeBias?: string;
   targets?: Record<string, number | undefined>;
 }
@@ -317,6 +318,46 @@ function localMoments(): ForwardMoment[] {
     : items.map((m) => ({ ...m, status: m.active ? 'LIVE' : 'ENDED' as const }));
 }
 
+function missedTradeKey(symbol: string, side?: string, strike?: number) {
+  return `${symbol.toUpperCase()}:${String(side ?? '').toUpperCase()}:${Number(strike ?? 0)}`;
+}
+
+interface MissedTradeBrief {
+  symbol: string;
+  side: string;
+  strike: number;
+  primaryBlocker?: string;
+  blockers?: string[];
+  fix?: string;
+  wouldPass?: boolean;
+}
+
+interface MissedTradeReportBrief {
+  missed?: MissedTradeBrief[];
+  wouldPass?: MissedTradeBrief[];
+}
+
+function enrichSignalsWithMissedExplainer(
+  signals: ForwardSignal[],
+  report: MissedTradeReportBrief | null,
+): ForwardSignal[] {
+  if (!report) return signals;
+  const lookup = new Map<string, MissedTradeBrief>();
+  for (const row of [...(report.wouldPass ?? []), ...(report.missed ?? [])]) {
+    lookup.set(missedTradeKey(row.symbol, row.side, row.strike), row);
+  }
+  return signals.map((signal) => {
+    const match = lookup.get(missedTradeKey(signal.symbol, signal.side, signal.strike));
+    if (!match) return signal;
+    return {
+      ...signal,
+      primaryBlocker: signal.primaryBlocker ?? match.primaryBlocker ?? match.blockers?.[0] ?? null,
+      blockers: signal.blockers?.length ? signal.blockers : match.blockers,
+      gateFixHint: match.fix,
+    };
+  });
+}
+
 function mergeLiveExplosions(api: ForwardPayload | null, snapshots: Record<string, SymbolSnapshot>): ForwardSignal[] {
   const local = buildLocalForwardPayload(snapshots, { dailyProfitGate: { newEntriesAllowed: true } } as AutoTraderState);
   const localExplosions = (local.signals ?? []).filter((s) => s.horizon === 'EXPLOSION');
@@ -570,6 +611,7 @@ export function FutureSignalsPanel({
   const [apiDegraded, setApiDegraded] = useState(false);
   const [ftvData, setFtvData] = useState<FtvProbabilityPayload | null>(null);
   const [ftvError, setFtvError] = useState<string | null>(null);
+  const [missedReport, setMissedReport] = useState<MissedTradeReportBrief | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -612,6 +654,16 @@ export function FutureSignalsPanel({
     }
   }, []);
 
+  const loadMissed = useCallback(async () => {
+    try {
+      const res = await fetch('/api/ai/missed-trades');
+      if (!res.ok) return;
+      setMissedReport((await res.json()) as MissedTradeReportBrief);
+    } catch {
+      /* optional enrichment */
+    }
+  }, []);
+
   useEffect(() => {
     load();
     const id = setInterval(load, pollMs);
@@ -624,8 +676,17 @@ export function FutureSignalsPanel({
     return () => clearInterval(id);
   }, [loadFtv]);
 
+  useEffect(() => {
+    void loadMissed();
+    const id = setInterval(() => void loadMissed(), 15_000);
+    return () => clearInterval(id);
+  }, [loadMissed]);
+
   const moments = (data?.moments?.length ? data.moments : localMoments()) as ForwardMoment[];
-  const mergedExplosions = mergeLiveExplosions(data, snapshots);
+  const mergedExplosions = enrichSignalsWithMissedExplainer(
+    mergeLiveExplosions(data, snapshots),
+    missedReport,
+  );
   const signals =
     tab === 'EXPLOSION'
       ? mergedExplosions
@@ -755,8 +816,11 @@ export function FutureSignalsPanel({
                 ) : null}
                 {s.blockers?.length || s.primaryBlocker ? (
                   <div className="text-[8px] text-nexus-red font-mono mt-0.5">
-                    {s.primaryBlocker ?? s.blockers?.slice(0, 2).join(' · ')}
+                    Blocked: {s.primaryBlocker ?? s.blockers?.slice(0, 2).join(' · ')}
                   </div>
+                ) : null}
+                {s.gateFixHint && !s.tradeable ? (
+                  <div className="text-[8px] text-nexus-yellow mt-0.5">{s.gateFixHint}</div>
                 ) : null}
               </div>
             ))
@@ -788,6 +852,7 @@ export function FutureSignalsPanel({
         onClick={() => {
           void load();
           void loadFtv();
+          void loadMissed();
         }}
         className="w-full mt-2 text-[10px] py-1.5 rounded border border-nexus-border text-nexus-muted hover:text-white"
       >
