@@ -108,11 +108,36 @@ interface FtvSymbolEstimate {
   };
 }
 
+interface FtvFocusAlert {
+  id: string;
+  symbol: string;
+  side: string;
+  status: 'ACTIVE' | 'COOLDOWN';
+  confidence: string;
+  message: string;
+  detail?: string;
+  localBaseReady?: boolean;
+  chartAligned?: boolean;
+  radarTradeable?: boolean;
+  peakProbabilityPct?: number;
+  estimatedWindow?: string | null;
+  radarStrike?: number;
+  radarTier?: string;
+  radarScore?: number;
+  cooldownSecRemaining?: number;
+}
+
 interface FtvProbabilityPayload {
   enabled: boolean;
   status: string;
   generatedAt?: string;
   symbols: Record<string, FtvSymbolEstimate>;
+  focusAlerts?: {
+    enabled?: boolean;
+    status?: string;
+    active?: FtvFocusAlert[];
+    guardrail?: string;
+  };
   calibration?: {
     status?: string;
     observationCount?: number;
@@ -316,6 +341,68 @@ function mergeLiveExplosions(api: ForwardPayload | null, snapshots: Record<strin
   return out;
 }
 
+function FtvFocusAlertBanner({
+  alerts,
+}: {
+  alerts: FtvFocusAlert[];
+}) {
+  if (!alerts.length) return null;
+  return (
+    <div className="mb-2 space-y-1">
+      {alerts.map((alert) => (
+        <div
+          key={alert.id}
+          className={`rounded-lg border px-2.5 py-2 ${
+            alert.status === 'ACTIVE'
+              ? 'border-nexus-green/50 bg-nexus-green/10'
+              : 'border-nexus-yellow/40 bg-nexus-yellow/5'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-white">
+              {alert.status === 'ACTIVE' ? 'FTV focus clock' : 'FTV focus cooling'}
+            </div>
+            <span className={`text-[9px] font-bold uppercase ${
+              alert.side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'
+            }`}>
+              {alert.symbol} {alert.side}
+            </span>
+          </div>
+          <div className="mt-1 text-[10px] text-white">{alert.message}</div>
+          <div className="mt-1 flex flex-wrap gap-1 text-[8px] text-nexus-muted">
+            <span className="rounded border border-nexus-border/60 px-1 py-0.5">
+              {alert.confidence} confidence
+            </span>
+            {alert.peakProbabilityPct != null ? (
+              <span className="rounded border border-nexus-border/60 px-1 py-0.5">
+                peak {alert.peakProbabilityPct.toFixed(1)}%
+              </span>
+            ) : null}
+            {alert.estimatedWindow ? (
+              <span className="rounded border border-nexus-border/60 px-1 py-0.5">
+                window {alert.estimatedWindow}
+              </span>
+            ) : null}
+            {alert.radarStrike != null ? (
+              <span className="rounded border border-nexus-border/60 px-1 py-0.5">
+                radar {alert.radarStrike} · {alert.radarTier ?? 'TRADEABLE'}
+              </span>
+            ) : null}
+            {alert.cooldownSecRemaining ? (
+              <span className="rounded border border-nexus-yellow/40 px-1 py-0.5 text-nexus-yellow">
+                {alert.cooldownSecRemaining}s cooldown
+              </span>
+            ) : null}
+          </div>
+          {alert.detail ? (
+            <div className="mt-1 text-[8px] text-nexus-muted">{alert.detail}</div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function FtvProbabilityBoard({
   data,
   error,
@@ -343,6 +430,7 @@ function FtvProbabilityBoard({
       </div>
 
       {error ? <div className="mb-2 text-[9px] text-nexus-yellow">{error}</div> : null}
+      <FtvFocusAlertBanner alerts={data?.focusAlerts?.active ?? []} />
       {data?.calibration ? (
         <div className="mb-2 flex flex-wrap gap-1 text-[8px]">
           <span className="rounded border border-nexus-border/70 bg-black/25 px-1.5 py-0.5 text-nexus-muted">

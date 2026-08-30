@@ -781,7 +781,7 @@ async def build_ftv_probability_dashboard(
         ),
         default=None,
     )
-    return {
+    dashboard = {
         "enabled": True,
         "status": (
             "LIVE" if live_rows
@@ -817,3 +817,7 @@ async def build_ftv_probability_dashboard(
             "has enough unseen sessions for walk-forward validation."
         ),
     }
+    from app.engines.ftv_focus_alerts import build_ftv_focus_alerts
+
+    dashboard["focusAlerts"] = build_ftv_focus_alerts(snapshots, dashboard)
+    return dashboard
