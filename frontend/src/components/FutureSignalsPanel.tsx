@@ -117,6 +117,7 @@ interface FtvFocusAlert {
   message: string;
   detail?: string;
   localBaseReady?: boolean;
+  radarLocalBase?: boolean;
   chartAligned?: boolean;
   radarTradeable?: boolean;
   peakProbabilityPct?: number;
@@ -370,6 +371,14 @@ function FtvFocusAlertBanner({
           </div>
           <div className="mt-1 text-[10px] text-white">{alert.message}</div>
           <div className="mt-1 flex flex-wrap gap-1 text-[8px] text-nexus-muted">
+            <span className="rounded border border-nexus-border/60 px-1 py-0.5">
+              index base {alert.localBaseReady ? 'ready' : 'forming'}
+            </span>
+            {alert.radarLocalBase ? (
+              <span className="rounded border border-nexus-green/40 px-1 py-0.5 text-nexus-green">
+                radar local-base pad
+              </span>
+            ) : null}
             <span className="rounded border border-nexus-border/60 px-1 py-0.5">
               {alert.confidence} confidence
             </span>

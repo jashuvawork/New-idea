@@ -36,6 +36,17 @@ def _side_peak_probability(live: Mapping[str, Any], side: str) -> float:
     return max(float(value) for value in probabilities.values())
 
 
+def _radar_at_local_base(alert: Mapping[str, Any]) -> bool:
+    """True when tradeable radar is sitting on an option premium local-base pad."""
+    from app.engines.early_radar_pad_capture import watch_local_base_pad_structure
+    from app.engines.local_base_chart_bypass import _alert_has_local_base
+
+    row = dict(alert)
+    if _alert_has_local_base(row):
+        return True
+    return watch_local_base_pad_structure(row)
+
+
 def _best_radar_alert(snapshot: SymbolSnapshot, side: str) -> Optional[dict[str, Any]]:
     side_u = side.upper()
     best: Optional[dict[str, Any]] = None
@@ -95,6 +106,8 @@ def evaluate_ftv_focus_alert(
     radar = _best_radar_alert(snapshot, dominant)
     if radar is None:
         return None
+    if not _radar_at_local_base(radar):
+        return None
 
     alert_id = f"ftv-focus:{symbol.upper()}:{dominant}"
     now = now_mono if now_mono is not None else time.monotonic()
@@ -116,6 +129,7 @@ def evaluate_ftv_focus_alert(
             "status": "COOLDOWN",
             "confidence": confidence,
             "localBaseReady": True,
+            "radarLocalBase": True,
             "chartAligned": True,
             "radarTradeable": True,
             "dominantSide": dominant,
@@ -141,6 +155,7 @@ def evaluate_ftv_focus_alert(
         "status": "ACTIVE",
         "confidence": confidence,
         "localBaseReady": True,
+        "radarLocalBase": True,
         "chartAligned": True,
         "radarTradeable": True,
         "dominantSide": dominant,
@@ -152,7 +167,7 @@ def evaluate_ftv_focus_alert(
         "radarScore": round(float(radar.get("explosionScore") or 0), 1),
         "cooldownSecRemaining": 0,
         "message": (
-            f"FTV focus · {symbol.upper()} {dominant} · compressed base + "
+            f"FTV focus · {symbol.upper()} {dominant} · local base pad + "
             f"chart-aligned radar ({confidence.lower()} confidence)"
         ),
         "detail": (
@@ -198,7 +213,7 @@ def build_ftv_focus_alerts(
         "active": active,
         "recent": alerts,
         "guardrail": (
-            "Soft focus alert only — never auto-enters. Radar tradeable plus "
-            "FTV timing alignment is a watchlist cue, not a GO signal."
+            "Soft focus alert only — never auto-enters. Fires at confirmed "
+            "option local-base pads when FTV timing and chart-aligned radar agree."
         ),
     }

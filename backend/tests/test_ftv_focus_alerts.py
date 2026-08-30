@@ -34,6 +34,9 @@ def _snap(
             "explosionScore": 72,
             "tradeable": tradeable,
             "tier": tier,
+            "ictFlatThenVertical": True,
+            "localBaseMovePct": 12.0,
+            "ictBaseRelativeMovePct": 12.0,
         }],
     )
 
@@ -99,6 +102,22 @@ def test_focus_alert_blocks_without_tradeable_radar():
         _snap(tradeable=False),
         _live(),
     )
+    assert alert is None
+
+
+def test_focus_alert_blocks_radar_not_at_local_base():
+    clear_ftv_focus_alert_state()
+    snap = _snap()
+    snap.explosionAlerts = [{
+        "side": "CALL",
+        "strike": 24_500,
+        "explosionScore": 72,
+        "tradeable": True,
+        "tier": "ELITE",
+        "dailyMovePct": 8.0,
+        "peakMovePct": 8.0,
+    }]
+    alert = evaluate_ftv_focus_alert("NIFTY", snap, _live())
     assert alert is None
 
 
