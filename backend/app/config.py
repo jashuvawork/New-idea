@@ -480,6 +480,18 @@ class Settings(BaseSettings):
     # Arm FTV / radar as soon as pad is in the structured entry band with heat.
     ict_first_lift_appear_enabled: bool = True
     ict_first_lift_min_velocity_3s: float = 1.2
+    # Early momentum-ignition at the LOCAL BASE — catch the FTV as it ignites (1-10% off the
+    # confirmed base) instead of waiting for the ~15% structured first-lift floor, which is why
+    # entries land late (Aug31 24150 CE only caught at ~18% off base). Fires only for a top-tier
+    # ELITE/EXPLODING contract at a confirmed base with a genuine ignition: v3 >= floor AND
+    # accelerating (v3 >= v9) AND volume/CVD confirmation AND ATM/ITM. OPT-IN (default off) — it
+    # admits earlier entries on the live path, so validate on replay before enabling live. All
+    # downstream selector/chart/fake-trap/session/risk gates still apply after it.
+    early_momentum_ignition_enabled: bool = False
+    early_momentum_ignition_min_move_pct: float = 1.0
+    early_momentum_ignition_max_move_pct: float = 10.0
+    early_momentum_ignition_min_velocity_3s: float = 1.0
+    early_momentum_ignition_min_vol_surge: float = 2.0
     # Causal pre-breakout base: repeated past samples arm a contract-local denominator.
     # It is sticky upward across REST/WS observations and may only ratchet to a proven low.
     ict_armed_base_enabled: bool = True

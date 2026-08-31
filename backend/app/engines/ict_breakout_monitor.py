@@ -1381,6 +1381,104 @@ def first_lift_entry_ready(
     )[0]
 
 
+def _early_momentum_ignition_at_base_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Catch the FTV as momentum IGNITES right at the local base (1-10% off), not at ~15%.
+
+    The structured first-lift floor (``ict_structured_early_min_move_pct`` ~15%) plus a base
+    that arms late on fast risers means entries land after the move already ran (Aug31 24150
+    CE only caught ~18% off base). This lane admits the entry EARLY when a top-tier
+    ELITE/EXPLODING contract is still within a few % of its CONFIRMED local base and shows a
+    genuine ignition — rising velocity (v3 >= v9, i.e. accelerating, not a fading blip) above
+    a floor, with volume/CVD confirmation, ATM/ITM. Opt-in; all downstream gates still run.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "early_momentum_ignition_enabled", False)):
+        return False, ""
+    row = alert if isinstance(alert, dict) else {}
+    tier = str(getattr(event, "tier", "") or row.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False, ""
+
+    base_confirmed = bool(
+        (ict is not None and (
+            getattr(ict, "base_armed", False) or getattr(ict, "local_swing_base", False)
+        ))
+        or row.get("ictBaseArmed")
+        or row.get("ictLocalSwingBase")
+        or float(row.get("ictBasePremium") or 0) > 0
+    )
+    if not base_confirmed:
+        return False, ""
+
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    lo = float(getattr(settings, "early_momentum_ignition_min_move_pct", 1.0) or 1.0)
+    hi = float(getattr(settings, "early_momentum_ignition_max_move_pct", 10.0) or 10.0)
+    if not (lo <= base_move <= hi):
+        return False, ""
+
+    v3 = float(getattr(event, "velocity_3s", 0) or row.get("velocity3s") or 0)
+    v9 = float(getattr(event, "velocity_9s", 0) or row.get("velocity9s") or 0)
+    ign_v3 = float(
+        getattr(settings, "early_momentum_ignition_min_velocity_3s", 1.0) or 1.0
+    )
+    if v3 < ign_v3:
+        return False, ""
+    # Ignition = recent 3s rate at least the 9s rate → accelerating / sustained, not fading.
+    if v3 < v9:
+        return False, ""
+
+    vol_surge = float(
+        getattr(event, "volume_surge", 0) or row.get("volumeSurge") or 0
+    )
+    vol_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
+    cvd = bool(row.get("optionCvdBuying") or row.get("optionCvdAccelerating"))
+    min_vol = float(
+        getattr(settings, "early_momentum_ignition_min_vol_surge", 2.0) or 2.0
+    )
+    if not (vol_awake or vol_surge >= min_vol or cvd):
+        return False, ""
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False, ""
+    if snap is not None:
+        strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+        spot = float(getattr(snap, "spot", 0) or 0)
+        atm = float(getattr(snap, "atmStrike", 0) or 0)
+        if strike > 0 and spot > 0:
+            from app.engines.moneyness import classify_moneyness
+            from app.models.schemas import Side as _Side
+
+            money = classify_moneyness(
+                _Side(side), strike, spot,
+                symbol=str(getattr(snap, "symbol", "") or ""),
+                atm=atm if atm > 0 else None,
+            )
+            if money not in ("ATM", "ITM"):
+                return False, "early_ignition_requires_atm_itm"
+    return True, "early_momentum_ignition_at_base"
+
+
 def first_lift_entry_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -1454,6 +1552,19 @@ def first_lift_entry_readiness(
     )
     if fast_ok:
         return True, fast_reason
+
+    # Early momentum ignition AT the local base (opt-in) — catch the FTV as it ignites,
+    # before the ~15% structured first-lift floor. Gated: top tier, near base, accelerating
+    # velocity + volume, ATM/ITM. Downstream selector/chart/fake-trap/risk gates still run.
+    ign_ok, ign_reason = _early_momentum_ignition_at_base_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=row,
+        settings=settings,
+    )
+    if ign_ok:
+        return True, ign_reason
 
     from app.engines.early_radar_pad_capture import (
         building_armed_prelaunch_entry_readiness,
