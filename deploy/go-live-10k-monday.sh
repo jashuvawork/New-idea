@@ -37,6 +37,8 @@ OVERLAY="${REPO_DIR}/deploy/env.live-10k.overlay"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
 READINESS_URL="${READINESS_URL:-http://127.0.0.1:8000/api/deployment/readiness}"
 CAPITAL_URL="${CAPITAL_URL:-http://127.0.0.1:8000/api/auto-trader/capital}"
+PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-200000}"
+LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-10000}"
 
 MODE=""
 DRY_RUN=0
@@ -106,6 +108,9 @@ if [ "$MODE" = "paper" ]; then
   _set_env_key PAPER_SLIPPAGE_ENABLED true
   _set_env_key PAPER_SIMULATE_BROKER_ORDERS true
   _set_env_key SHADOW_TRADE_ALL_SIGNALS true
+  echo "Restoring paper capital to ₹${PAPER_CAPITAL_INR}..."
+  _set_env_key FALLBACK_CAPITAL_INR "$PAPER_CAPITAL_INR"
+  _set_env_key MAX_SIZING_CAPITAL_INR "$PAPER_CAPITAL_INR"
 fi
 
 if [ "$MODE" = "arm-live" ]; then
@@ -138,10 +143,18 @@ if [ -d "$REPO_DIR" ] && command -v docker >/dev/null 2>&1; then
   done
 fi
 
-echo "Setting runtime capital ceiling to ₹10,000..."
+if [ "$MODE" = "arm-live" ]; then
+  CAPITAL_INR="$LIVE_CAPITAL_INR"
+elif [ "$MODE" = "paper" ]; then
+  CAPITAL_INR="$PAPER_CAPITAL_INR"
+else
+  CAPITAL_INR="$PAPER_CAPITAL_INR"
+fi
+
+echo "Setting runtime capital ceiling to ₹${CAPITAL_INR}..."
 curl -sf -X POST "$CAPITAL_URL" \
   -H 'Content-Type: application/json' \
-  -d '{"allocatedInr": 10000}' || echo "WARN: capital API failed — set manually in UI"
+  -d "{\"allocatedInr\": ${CAPITAL_INR}}" || echo "WARN: capital API failed — set manually in UI"
 
 if [ "$MODE" = "arm-live" ]; then
   echo "Resuming auto-trader in LIVE mode..."
@@ -173,7 +186,7 @@ if [ "$MODE" = "prepare" ]; then
   echo "  sudo bash deploy/go-live-10k-monday.sh --arm-live"
   echo "Also: complete Upstox OAuth if token is stale (/api/upstox/login-url)."
 elif [ "$MODE" = "paper" ]; then
-  echo "Back on paper trading. To arm live again:"
+  echo "Back on paper trading at ₹${PAPER_CAPITAL_INR}. To arm live again:"
   echo "  sudo bash deploy/go-live-10k-monday.sh --arm-live"
 else
   echo "Live armed at ₹10k. Confirm Upstox token + readiness before session open."

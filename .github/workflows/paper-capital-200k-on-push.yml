@@ -1,0 +1,111 @@
+name: Set paper capital to ₹2L on push
+
+# Runs when a push to main includes [paper-capital-200k] in the commit message.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: paper-capital-200k-ec2
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  EC2_INSTANCE_ID: i-0f3f9e5e67815c21b
+  REPO_DIR: /opt/nexusquant/New-idea
+
+jobs:
+  paper-capital:
+    if: contains(github.event.head_commit.message, '[paper-capital-200k]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set paper capital via SSM
+        id: cap
+        run: |
+          set -euo pipefail
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Set paper capital to 200k" \
+            --parameters 'commands=[
+              "set -euo pipefail",
+              "cd ${{ env.REPO_DIR }}",
+              "git fetch origin main",
+              "git checkout main",
+              "git pull --ff-only origin main || git reset --hard origin/main",
+              "if [ -f deploy/set-paper-capital.sh ]; then",
+              "  sudo bash deploy/set-paper-capital.sh",
+              "else",
+              "  ENV=/opt/nexusquant/env",
+              "  touch $ENV",
+              "  for kv in FALLBACK_CAPITAL_INR=200000 MAX_SIZING_CAPITAL_INR=200000; do",
+              "    k=${kv%%=*}; v=${kv#*=}",
+              "    if grep -q \"^${k}=\" $ENV; then sed -i \"s|^${k}=.*|${k}=${v}|\" $ENV; else echo ${k}=${v} >> $ENV; fi",
+              "  done",
+              "  docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps backend",
+              "  sleep 8",
+              "  curl -sf -X POST http://127.0.0.1:8000/api/auto-trader/capital -H \"Content-Type: application/json\" -d \"{\\\"allocatedInr\\\": 200000}\"",
+              "fi",
+              "curl -sf http://127.0.0.1:8000/api/deployment/status | python3 -m json.tool | head -30"
+            ]' \
+            --query Command.CommandId \
+            --output text)
+          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM command
+        run: |
+          set -euo pipefail
+          CMD_ID="${{ steps.cap.outputs.command_id }}"
+          for i in $(seq 1 30); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+              --query Status \
+              --output text 2>/dev/null || echo Pending)
+            echo "Attempt $i: $STATUS"
+            if [ "$STATUS" = "Success" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                --query StandardOutputContent \
+                --output text | tail -40
+              exit 0
+            fi
+            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                --output json
+              exit 1
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Verify paper capital
+        run: |
+          set -euo pipefail
+          curl -sf https://www.jashuvatrade.xyz/api/deployment/status | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          f = d.get('flags') or {}
+          fb = float(f.get('fallbackCapitalInr') or 0)
+          mx = float(f.get('maxSizingCapitalInr') or 0)
+          paper = bool(f.get('paperTrading'))
+          print('fallbackCapitalInr:', fb)
+          print('maxSizingCapitalInr:', mx)
+          print('paperTrading:', paper)
+          if not paper:
+              raise SystemExit('Not in paper mode')
+          if fb < 199_000 or mx < 199_000:
+              raise SystemExit(f'Capital still below 200k (fallback={fb}, max={mx})')
+          "
