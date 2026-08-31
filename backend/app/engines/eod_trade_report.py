@@ -197,6 +197,7 @@ def replay_contract_trades(
             strategyType=StrategyType.EXPLOSIVE, openedAt=wnow, bestPnlPoints=0.0,
             entryContext=ctx,
         )
+        per_trade_cap = _f(getattr(s, "eod_replay_per_trade_max_loss_inr", 0.0), 0.0)
         best = 0.0
         peak = ep
         et = t
@@ -211,6 +212,10 @@ def replay_contract_trades(
             peak = max(peak, pj)
             v = 2.0 if pj >= peak else -0.8
             tr.entryContext["liveVelocity3s"] = v
+            # Hard per-trade INR loss backstop (mirror live) — bounds cold-entry blowups.
+            if per_trade_cap > 0 and (pj - ep) * lots * units <= -per_trade_cap:
+                exit_rec = (tj, pj, "explosion_per_trade_loss_cap")
+                break
             reason, _pnl = evaluate_explosion_exit(tr, pj, tier, units, live_velocity_3s=v)
             if reason:
                 exit_rec = (tj, pj, reason)

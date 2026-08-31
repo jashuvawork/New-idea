@@ -139,6 +139,34 @@ def test_scorecard_measures_early_recall_and_added_losers():
     assert sc["byLane"]["EXPLODING"]["opportunities"] == 0
 
 
+def test_per_trade_loss_cap_bounds_cold_entry():
+    from app.config import get_settings
+
+    # A flat base, a brief lift (to trigger entry), then a hard collapse (cold entry that
+    # never ignites). With the per-trade cap on, the exit reason is the cap and the loss is
+    # bounded to roughly the cap (not the full collapse).
+    t0 = datetime(2026, 8, 20, 10, 0, 0, tzinfo=IST)
+    prems = (
+        [40] * 22                              # flat base
+        + [40 + 0.6 * i for i in range(12)]    # small lift -> enters near base
+        + [46 - 3 * i for i in range(1, 15)]   # hard collapse
+    )
+    series = _series(prems, t0)
+    spot_rel = [(3.0 * i, 77000.0 + i * 6.0) for i in range(len(prems))]
+    settings = get_settings()
+    trades = replay_contract_trades(
+        symbol="SENSEX", side="CALL", strike=77000.0, tier="ELITE",
+        series=series, spot_rel=spot_rel, t0=t0, settings=settings,
+    )
+    assert trades
+    cap = float(getattr(settings, "eod_replay_per_trade_max_loss_inr", 0.0))
+    if cap > 0:
+        capped = [t for t in trades if t["exitReason"] == "explosion_per_trade_loss_cap"]
+        assert capped, "expected a per-trade cap exit on the cold collapse"
+        # Loss is bounded near the cap (allow one bar of overshoot past the trigger).
+        assert capped[0]["pnlInr"] >= -cap * 1.6
+
+
 def test_post_peak_guard_rejects_chase_after_completed_run():
     t0 = datetime(2026, 8, 20, 11, 40, 0, tzinfo=IST)
     # A run 78 -> 133 (the real move), then a fade/consolidation to ~125 near the top.
