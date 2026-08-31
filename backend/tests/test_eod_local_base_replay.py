@@ -8,8 +8,10 @@ import pytest
 
 from app.engines.eod_local_base_replay import (
     _ReplayDateTime,
+    _chart_analysis_from_spot_history,
     _enrich_alert_from_contract,
     _install_replay_clock,
+    _replay_selection_rank,
     _restore_replay_clock,
     evaluate_local_base_entry,
     evaluate_replay_live_gates,
@@ -68,6 +70,52 @@ def test_spot_chart_from_history_builds_momentum():
     hist = [(t0 + timedelta(seconds=30 * i), 77000.0 + i * 8.0) for i in range(20)]
     chart = _spot_chart_from_history(hist, 77160.0)
     assert chart.momentum5Pct > 0
+
+
+def test_spot_chart_from_history_builds_momentum():
+    t0 = datetime(2026, 8, 19, 10, 0, 0, tzinfo=IST)
+    hist = [(t0 + timedelta(seconds=30 * i), 77000.0 + i * 8.0) for i in range(20)]
+    chart = _spot_chart_from_history(hist, 77160.0)
+    assert chart.momentum5Pct > 0
+
+
+def test_chart_analysis_from_spot_history_includes_gainzalgo_fields():
+    t0 = datetime(2026, 8, 19, 10, 0, 0, tzinfo=IST)
+    hist = [(t0 + timedelta(seconds=20 * i), 77000.0 + i * 5.0) for i in range(40)]
+    analysis = _chart_analysis_from_spot_history(hist, 77200.0, symbol="NIFTY")
+    assert analysis is not None
+    assert isinstance(analysis.decisiveCandle, dict)
+    assert "decisive" in analysis.decisiveCandle
+    assert isinstance(analysis.squeeze, dict)
+    assert "on" in analysis.squeeze
+    assert isinstance(analysis.vwap, dict)
+
+
+def test_chart_analysis_from_spot_history_returns_none_when_too_short():
+    t0 = datetime(2026, 8, 19, 10, 0, 0, tzinfo=IST)
+    hist = [(t0, 77000.0), (t0 + timedelta(seconds=30), 77010.0)]
+    assert _chart_analysis_from_spot_history(hist, 77010.0) is None
+
+
+@patch("app.engines.eod_local_base_replay.get_settings")
+def test_replay_selection_rank_includes_coil_prediction_bonus(mock_settings):
+    mock_settings.return_value = MagicMock(
+        pad_lane_selector_rank_bonus=18.0,
+        ftv_direct_trade_selector_rank_bonus=55.0,
+        expansion_strike_rank_bonus_enabled=True,
+        expansion_strike_rank_bonus=15.0,
+        eod_replay_early_pad_rank_penalty=12.0,
+        eod_replay_live_session_gates_enabled=False,
+    )
+    snap = _snap()
+    alert = {
+        "side": "CALL",
+        "coilCoiling": True,
+        "coilReadinessScore": 72.0,
+        "coilPredictedSide": "CALL",
+    }
+    base = _replay_selection_rank({"rankScore": 80.0}, alert, snap, {"SENSEX": snap})
+    assert base == 90.0
 
 
 def test_evaluate_local_base_entry_blocks_non_top_moment():

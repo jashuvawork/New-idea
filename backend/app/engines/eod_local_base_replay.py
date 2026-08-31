@@ -12,6 +12,9 @@ premium tape through the live explosion detector and only enters when:
 
 Exits reuse the production explosion exit stack. Portfolio limits (one position at a
 time, daily loss stop) match ``eod_trade_report.apply_portfolio_limits``.
+
+Index ``chartAnalysis`` (squeeze, VWAP, GainzAlgo V2 decisive candle) is rebuilt from
+the rolling spot tape so coil-breakout prediction matches live detection/ranking.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from app.engines.top_moment_gate import (
 )
 from app.engines.trade_ranking import rank_trade_evidence
 from app.models.schemas import (
+    ChartAnalysis,
     HeatmapStrike,
     MarketPhase,
     MarketProfile,
@@ -84,6 +88,27 @@ def _load_batches(date: str) -> list[dict[str, Any]]:
         return rows
 
 
+def _sample_spot_closes_from_history(
+    spot_hist: list[tuple[datetime, float]],
+    spot: float,
+    *,
+    max_points: int = 400,
+    min_interval_seconds: float = 15.0,
+) -> list[float]:
+    """Down-sample rolling tape spot ticks for synthetic OHLC (one point per ~15s)."""
+    if spot <= 0:
+        return []
+    sampled: list[float] = []
+    last_ts: Optional[datetime] = None
+    for ts, px in spot_hist[-max_points:]:
+        if last_ts is None or (ts - last_ts).total_seconds() >= min_interval_seconds:
+            sampled.append(px)
+            last_ts = ts
+    if spot not in sampled:
+        sampled.append(spot)
+    return sampled
+
+
 def _spot_chart_from_history(
     spot_hist: list[tuple[datetime, float]],
     spot: float,
@@ -93,17 +118,9 @@ def _spot_chart_from_history(
 
     if spot <= 0:
         return SpotChart(direction="NEUTRAL", spot=0)
-    if len(spot_hist) < 3:
+    sampled = _sample_spot_closes_from_history(spot_hist, spot)
+    if len(sampled) < 3:
         return SpotChart(direction="NEUTRAL", spot=round(spot, 2))
-    # Sample at most one point per ~15s to avoid overweighting dense polls.
-    sampled: list[float] = []
-    last_ts: Optional[datetime] = None
-    for ts, px in spot_hist[-400:]:
-        if last_ts is None or (ts - last_ts).total_seconds() >= 15:
-            sampled.append(px)
-            last_ts = ts
-    if spot not in sampled:
-        sampled.append(spot)
     candles = _closes_to_synthetic_candles(sampled)
     profile = MarketProfile(
         poc=spot,
@@ -113,6 +130,47 @@ def _spot_chart_from_history(
         openingRangeLow=spot * 0.997,
     )
     return build_spot_chart(candles, spot, profile)
+
+
+def _chart_analysis_from_spot_history(
+    spot_hist: list[tuple[datetime, float]],
+    spot: float,
+    *,
+    symbol: str = "",
+) -> Optional[ChartAnalysis]:
+    """Build index chartAnalysis (squeeze, VWAP, GainzAlgo V2 decisive candle) for EOD replay."""
+    from app.engines.chart_advanced_analysis import build_chart_analysis
+    from app.engines.spot_direction import _closes_to_synthetic_candles
+
+    if spot <= 0:
+        return None
+    sampled = _sample_spot_closes_from_history(spot_hist, spot)
+    if len(sampled) < 16:
+        return None
+    candles_5m = _closes_to_synthetic_candles(sampled)
+    profile = MarketProfile(
+        poc=spot,
+        vah=spot * 1.002,
+        val=spot * 0.998,
+        openingRangeHigh=spot * 1.003,
+        openingRangeLow=spot * 0.997,
+    )
+    prev_close = sampled[0]
+    day_high = max(sampled)
+    day_low = min(sampled)
+    try:
+        return build_chart_analysis(
+            [],
+            candles_5m,
+            spot,
+            profile,
+            prev_close=prev_close,
+            day_high=day_high,
+            day_low=day_low,
+            symbol=symbol,
+        )
+    except Exception:
+        return None
 
 
 def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, Any]:
@@ -484,6 +542,13 @@ def _replay_selection_rank(
         score += float(getattr(s, "expansion_strike_rank_bonus", 15.0) or 15.0)
     if reason == "early_radar_pad_ready":
         score -= float(getattr(s, "eod_replay_early_pad_rank_penalty", 12.0) or 12.0)
+    from app.engines.coil_breakout_predictor import coil_prediction_rank_delta
+    from app.models.schemas import Side as SideEnum
+
+    side_raw = str(alert.get("side") or "").upper()
+    side_enum = SideEnum.CALL if side_raw == "CALL" else SideEnum.PUT if side_raw == "PUT" else None
+    if side_enum is not None:
+        score += coil_prediction_rank_delta(alert, side_enum)
     if bool(getattr(s, "eod_replay_live_session_gates_enabled", True)):
         from app.engines.best_side_selection import (
             best_side_rank_adjustment,
@@ -787,6 +852,9 @@ def replay_local_base_day(
                     )
 
                 chart = _spot_chart_from_history(spot_hist[sym], spot)
+                chart_analysis = _chart_analysis_from_spot_history(
+                    spot_hist[sym], spot, symbol=sym,
+                )
                 snap = SymbolSnapshot(
                     symbol=sym,
                     timestamp=ts,
@@ -796,6 +864,7 @@ def replay_local_base_day(
                     atmStrike=_f(sample.get("atmStrike")),
                     heatmap=heatmap,
                     spotChart=chart,
+                    chartAnalysis=chart_analysis,
                     tradeQualityScore=55.0,
                 )
                 refresh_snapshot_explosion_alerts(snap)
