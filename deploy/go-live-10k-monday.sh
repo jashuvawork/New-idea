@@ -91,6 +91,9 @@ else
 fi
 
 if [ "$MODE" = "arm-live" ]; then
+  echo "Stopping auto-trader and clearing paper session before live arm..."
+  curl -sf -X POST "http://127.0.0.1:8000/api/execution/stop" >/dev/null 2>&1 || true
+  curl -sf -X POST "http://127.0.0.1:8000/api/auto-trader/purge-logs" >/dev/null 2>&1 || true
   echo "Arming live execution..."
   _set_env_key ENABLE_LIVE_TRADING true
   _set_env_key PAPER_TRADING false
@@ -121,6 +124,11 @@ echo "Setting runtime capital ceiling to ₹10,000..."
 curl -sf -X POST "$CAPITAL_URL" \
   -H 'Content-Type: application/json' \
   -d '{"allocatedInr": 10000}' || echo "WARN: capital API failed — set manually in UI"
+
+if [ "$MODE" = "arm-live" ]; then
+  echo "Resuming auto-trader in LIVE mode..."
+  curl -sf -X POST "http://127.0.0.1:8000/api/execution/resume" >/dev/null 2>&1 || true
+fi
 
 echo ""
 echo "Readiness:"
