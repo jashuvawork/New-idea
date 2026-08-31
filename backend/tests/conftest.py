@@ -67,12 +67,14 @@ def _reset_all_engine_globals() -> None:
     from app.engines.building_ltp_monitor import reset_building_ltp_monitor_for_tests
     from app.engines.index_tick_helpers import reset_index_tick_helpers_for_tests
     from app.engines.instrument_cooldown import reset_instrument_cooldowns
+    from app.engines.side_regime import reset_side_regime_for_tests
 
     for fn in (
         reset_detector_state_for_tests,
         reset_building_ltp_monitor_for_tests,
         reset_index_tick_helpers_for_tests,
         reset_instrument_cooldowns,
+        reset_side_regime_for_tests,
         reset_confidence_hold_state,
         reset_monitor_state,
         reset_symbol_cooldowns,

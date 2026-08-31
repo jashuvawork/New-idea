@@ -1536,6 +1536,16 @@ def find_best_entry(
     allow_guarded_scalp = bool(getattr(settings, "explosion_only_allow_guarded_scalp", False))
     scalp_entries = bool(getattr(settings, "scalp_entries_enabled", False))
 
+    if bool(getattr(settings, "side_regime_enabled", True)):
+        from app.engines.side_regime import observe_side_regime
+
+        for _sym, _snap in snapshots.items():
+            if getattr(_snap, "dataAvailable", False):
+                try:
+                    observe_side_regime(_sym, _snap)
+                except Exception:
+                    pass
+
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
             continue
@@ -1604,6 +1614,10 @@ def find_best_entry(
         c.score += best_side_rank_adjustment(
             c, snapshots, power_hour=in_power_hour_window(),
         )
+        # Session side-regime: prefer the side the market is confirmed on / flipping toward.
+        from app.engines.side_regime import side_regime_rank_delta
+
+        c.score += side_regime_rank_delta(c.symbol, c.side)
         if c.mode == "explosion":
             ranking = (c.pretrade_meta or {}).get("causalRanking") or {}
             evidence = ranking.get("evidence") or {}
@@ -2081,8 +2095,15 @@ def find_best_entry(
     ranked_candidates = rank_candidates_for_selection(candidates, sort_key)
     best = ranked_candidates[0]
     leader_ranking = (best.pretrade_meta or {}).get("causalRanking", {})
+    try:
+        from app.engines.side_regime import side_regime_state
+
+        _side_regime_meta = side_regime_state(best.symbol)
+    except Exception:
+        _side_regime_meta = {}
     best.pretrade_meta = {
         **(best.pretrade_meta or {}),
+        "sideRegime": _side_regime_meta,
         "legacySelectionScore": round(sort_key(best), 3),
         "rankedOut": [
             {
