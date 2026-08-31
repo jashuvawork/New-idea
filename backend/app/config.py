@@ -563,6 +563,15 @@ class Settings(BaseSettings):
     coil_armed_session_lift_enabled: bool = False
     coil_armed_session_lift_min_readiness: float = 75.0
     coil_armed_session_lift_max_base_move_pct: float = 12.0
+    # OTM reversal entry — the #1 cause of explosion_near_miss on today's CALL winners was
+    # armed_base_requires_atm_itm_otm: they were 2-3 strikes OTM (spot below the strike on the
+    # 'bearish' day) and the 1-step shallow allowance rejected them, then spot rallied UP
+    # through them (24150 CE +105%). This lifts the OTM depth to otm_reversal_max_steps ONLY
+    # when the index is CONFIRMED reversing toward that side (side-regime / drift / breakout) —
+    # so it catches the reversal-rally winner, not an OTM lottery ticket. OPT-IN, default off;
+    # highest OTM-exposure lever — validate on replay before live.
+    otm_reversal_entry_enabled: bool = False
+    otm_reversal_max_steps: int = 2
     # Causal pre-breakout base: repeated past samples arm a contract-local denominator.
     # It is sticky upward across REST/WS observations and may only ratchet to a proven low.
     ict_armed_base_enabled: bool = True

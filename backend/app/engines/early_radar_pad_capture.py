@@ -696,6 +696,66 @@ def _atm_itm_ok(
     return money in ("ATM", "ITM")
 
 
+def otm_reversal_entry_allowed(
+    alert: Mapping[str, Any],
+    snap: Optional[SymbolSnapshot],
+) -> bool:
+    """Allow a slightly-deeper OTM entry — but ONLY when the index is CONFIRMED reversing
+    toward that side.
+
+    On a reversal rally the OTM CALLs just above a bottoming spot (or OTM PUTs below a topping
+    spot) are exactly what explode as spot travels up/down through them — Aug31 NIFTY 24150 CE
+    was 2-3 steps OTM and went +105% as the index rallied through it, but the 1-step shallow
+    allowance rejected it as `armed_base_requires_atm_itm_otm`. This lifts the depth to
+    ``otm_reversal_max_steps`` (2) ONLY with a confirmed index turn (side-regime on that side,
+    or sustained index drift / trend breakout toward it) — so it is NOT a blanket OTM-lottery
+    allowance. Opt-in, default off.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "otm_reversal_entry_enabled", False)):
+        return False
+    if snap is None:
+        return False
+    side = str(alert.get("side") or "").upper()
+    strike = _number(alert.get("strike"))
+    spot = _number(getattr(snap, "spot", 0))
+    atm = _number(getattr(snap, "atmStrike", 0)) or spot
+    symbol = str(getattr(snap, "symbol", "") or "")
+    if side not in ("CALL", "PUT") or strike <= 0 or spot <= 0:
+        return False
+    from app.engines.moneyness import _depth_steps, classify_moneyness
+
+    money = classify_moneyness(
+        Side(side), strike, spot, symbol=symbol, atm=atm if atm > 0 else None,
+    )
+    if money != "OTM":
+        return True
+    max_steps = int(getattr(settings, "otm_reversal_max_steps", 2) or 2)
+    if _depth_steps(Side(side), strike, spot, symbol, atm) > max_steps:
+        return False
+    # Require a CONFIRMED index turn toward this side — never a stale-bias lottery guess.
+    try:
+        from app.engines.side_regime import session_trade_side
+
+        if session_trade_side(symbol) == side:
+            return True
+    except Exception:
+        pass
+    try:
+        from app.engines.index_tick_helpers import (
+            index_trend_breakout,
+            recent_index_drift,
+        )
+
+        if recent_index_drift(symbol, side).get("drift"):
+            return True
+        if index_trend_breakout(symbol, side, snap).get("breakout"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def early_radar_pad_shallow_otm_ok(
     alert: Mapping[str, Any],
     snap: Optional[SymbolSnapshot],

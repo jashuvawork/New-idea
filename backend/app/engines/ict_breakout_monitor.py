@@ -1475,7 +1475,12 @@ def _early_momentum_ignition_at_base_readiness(
                 atm=atm if atm > 0 else None,
             )
             if money not in ("ATM", "ITM"):
-                return False, "early_ignition_requires_atm_itm"
+                from app.engines.early_radar_pad_capture import (
+                    otm_reversal_entry_allowed,
+                )
+
+                if not otm_reversal_entry_allowed(row, snap):
+                    return False, "early_ignition_requires_atm_itm"
     return True, "early_momentum_ignition_at_base"
 
 
@@ -1582,7 +1587,12 @@ def _coil_armed_low_score_readiness(
                 atm=atm if atm > 0 else None,
             )
             if money not in ("ATM", "ITM"):
-                return False, "coil_armed_requires_atm_itm"
+                from app.engines.early_radar_pad_capture import (
+                    otm_reversal_entry_allowed,
+                )
+
+                if not otm_reversal_entry_allowed(row, snap):
+                    return False, "coil_armed_requires_atm_itm"
     return True, "coil_armed_low_score_base_entry"
 
 
@@ -2265,6 +2275,7 @@ def first_lift_entry_readiness(
                 alert_has_building_coil_pad,
                 building_coil_pad_lane_active,
                 building_coil_pad_moneyness_ok,
+                otm_reversal_entry_allowed,
             )
 
             coil_context = (
@@ -2272,8 +2283,14 @@ def first_lift_entry_readiness(
                 or building_coil_pad_lane_active(row, settings)
             )
             if not (
-                coil_context
-                and building_coil_pad_moneyness_ok(row, snap, settings)
+                (
+                    coil_context
+                    and building_coil_pad_moneyness_ok(row, snap, settings)
+                )
+                # Confirmed index reversal → a slightly-deeper OTM CALL/PUT above/below the
+                # turning spot is the reversal-rally winner (Aug31 24150 CE +105%), not a
+                # lottery ticket. Opt-in, gated to a confirmed index turn.
+                or otm_reversal_entry_allowed(row, snap)
             ):
                 return False, f"armed_base_requires_atm_itm_{money.lower()}"
         armed_min_tqs = float(
