@@ -382,8 +382,10 @@ def expiry_trades_cap_reached(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
 ) -> tuple[bool, str]:
+    from app.engines.session_trade_integrity import real_session_closed_count
+
     cap, label = expiry_trade_cap(state, snapshots)
-    closed = len(state.closedPaperTrades)
+    closed = real_session_closed_count(state)
     if closed >= cap:
         return True, f"expiry_trade_cap_{closed}>={cap}_{label}"
     return False, "ok"

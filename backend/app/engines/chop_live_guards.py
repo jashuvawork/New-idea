@@ -440,15 +440,9 @@ def chop_live_early_fail_exit_reason(
 
 def broker_adopted_trade_exit_blocked(trade: Any) -> bool:
     """Bad adoption rows must not generate fake target-hit P&L."""
-    ctx = getattr(trade, "entryContext", None) or {}
-    if not ctx.get("brokerAdopted"):
-        return False
-    entry = float(getattr(trade, "entryPremium", 0) or 0)
-    strike = float(getattr(trade, "strike", 0) or 0)
-    symbol = str(getattr(trade, "symbol", "") or "").upper()
-    if entry <= 0 or not _strike_sane(symbol, strike):
-        return True
-    return False
+    from app.engines.session_trade_integrity import is_phantom_session_trade
+
+    return is_phantom_session_trade(trade)
 
 
 async def adopt_untracked_broker_legs(

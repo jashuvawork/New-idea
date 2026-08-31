@@ -835,12 +835,20 @@ def set_manual_capital_limit(amount: float) -> CapitalSnapshot:
 
 def compute_session_pnl(state: AutoTraderState) -> float:
     """Realtime session PnL = closed today + open unrealized."""
+    from app.engines.session_trade_integrity import (
+        is_phantom_session_trade,
+        real_session_closed_trades,
+    )
+
     today = datetime.now(IST).strftime("%Y-%m-%d")
     closed = sum(
-        t.pnlInr for t in state.closedPaperTrades
+        t.pnlInr
+        for t in real_session_closed_trades(state)
         if (t.sessionDate or today) == today
     )
-    open_pnl = sum(t.pnlInr for t in state.openPaperTrades)
+    open_pnl = sum(
+        t.pnlInr for t in state.openPaperTrades if not is_phantom_session_trade(t)
+    )
     return closed + open_pnl
 
 

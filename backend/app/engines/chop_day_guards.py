@@ -342,8 +342,10 @@ def daily_trade_cap(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]
 
 
 def trades_cap_reached(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> tuple[bool, str]:
+    from app.engines.session_trade_integrity import real_session_closed_count
+
     cap, label = daily_trade_cap(state, snapshots)
-    closed = len(state.closedPaperTrades)
+    closed = real_session_closed_count(state)
     if closed >= cap:
         return True, f"daily_trade_cap_{closed}>={cap}_{label}"
     return False, "ok"
@@ -607,11 +609,13 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     )
 
     effective_cap, cap_source = resolve_effective_daily_trade_cap(state, snapshots)
+    from app.engines.session_trade_integrity import real_session_closed_count
+
     return {
         "chopSession": chop,
         "dailyTradeCap": cap,
         "dailyTradeCapLabel": cap_label,
-        "closedTrades": len(state.closedPaperTrades),
+        "closedTrades": real_session_closed_count(state),
         "tradeCapReached": cap_hit,
         "tradeCapMessage": cap_msg if cap_hit else None,
         "lossStreak": _session_loss_streak,
