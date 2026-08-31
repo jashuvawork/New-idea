@@ -641,7 +641,16 @@ def record_market_observations(
     return len(contracts)
 
 
-def read_premium_tape(date: str) -> list[dict[str, Any]]:
+def read_premium_tape(date: str, *, max_bytes: int = 0) -> list[dict[str, Any]]:
+    """Read a day's premium tape. ``max_bytes>0`` tail-caps the parse.
+
+    Pre-throttle tapes reach 1GB+; a full parse of one takes ~8s and the downstream replay
+    another ~13s, which blows the EOD-report request timeout. A generous tail cap keeps
+    replay endpoints responsive on pathological historical tapes and is a no-op for the
+    (now 10s-sampled) tapes produced going forward.
+    """
+    if max_bytes and max_bytes > 0:
+        return _read_jsonl_tail(premium_tape_path(date), max_bytes=max_bytes)
     return _read_jsonl(premium_tape_path(date))
 
 
