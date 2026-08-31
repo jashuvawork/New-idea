@@ -2379,6 +2379,12 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     from app.engines.bullish_local_base import bullish_local_base_prediction
 
     bullish_base = bullish_local_base_prediction(snap, e, ict)
+    from app.engines.coil_breakout_predictor import coil_breakout_prediction
+
+    try:
+        _coil_pred = coil_breakout_prediction(snap, e, ict)
+    except Exception:
+        _coil_pred = {"coiling": False, "readinessScore": 0.0, "predictedSide": None}
     move = max(float(e.daily_move_pct or 0), float(e.peak_move_pct or 0), float(ict.session_move_pct or 0))
     from app.config import get_settings as _gs
 
@@ -2635,6 +2641,10 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "bullishLocalBasePrediction": bullish_base,
         "bullishLocalBaseActive": bool(bullish_base.get("active")),
         "bullishLocalBaseConfidence": float(bullish_base.get("confidence") or 0),
+        "coilBreakoutPrediction": _coil_pred,
+        "coilCoiling": bool(_coil_pred.get("coiling")),
+        "coilReadinessScore": float(_coil_pred.get("readinessScore") or 0),
+        "coilPredictedSide": _coil_pred.get("predictedSide"),
         "localBaseReversalPrediction": bullish_base,
         "localBaseReversalActive": bool(bullish_base.get("active")),
         "localBaseReversalConfidence": float(bullish_base.get("confidence") or 0),

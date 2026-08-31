@@ -1618,6 +1618,12 @@ def find_best_entry(
         from app.engines.side_regime import side_regime_rank_delta
 
         c.score += side_regime_rank_delta(c.symbol, c.side)
+        # Flat-base coil predictor: surface a ripe coil (predicted side) before it fires.
+        from app.engines.coil_breakout_predictor import coil_prediction_rank_delta
+
+        c.score += coil_prediction_rank_delta(
+            c.alert if isinstance(getattr(c, "alert", None), dict) else None, c.side,
+        )
         if c.mode == "explosion":
             ranking = (c.pretrade_meta or {}).get("causalRanking") or {}
             evidence = ranking.get("evidence") or {}
