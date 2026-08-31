@@ -14,6 +14,8 @@ def _settings(**over):
         coil_armed_low_score_max_base_move_pct=12.0,
         coil_armed_low_score_min_score=40.0,
         coil_armed_low_score_min_vol_surge=1.5,
+        near_base_lane_min_quality=70.0,
+        near_base_lane_strong_score=90.0,
     )
     for k, v in over.items():
         setattr(s, k, v)
@@ -27,9 +29,12 @@ def _event(side="CALL", score=45.0, strike=24200.0, vol_surge=2.0):
     )
 
 
-def _ict(base_move=6.0):
+def _ict(base_move=6.0, quality=82.0):
+    # A genuine coil-armed base setup carries strong FTV quality (the proven separator on the
+    # 11-day data) — that's what lets a LOW score enter at the base without taking a dud.
     return SimpleNamespace(
         base_relative_move_pct=base_move, volume_awakening=True,
+        flat_vertical_quality=quality,
     )
 
 
@@ -55,6 +60,21 @@ def test_low_score_entry_fires_when_coil_ripe_and_directional():
         )
     assert ok is True
     assert reason == "coil_armed_low_score_base_entry"
+
+
+def test_low_quality_low_score_near_base_dud_is_blocked():
+    """Data-calibrated: a ripe coil with a LOW score AND weak FTV quality is the near-base
+    dud bucket — block it. Low score is only allowed when quality is strong."""
+    with patch(
+        "app.engines.coil_breakout_predictor.coil_breakout_prediction",
+        return_value=_pred(),
+    ):
+        ok, reason = _coil_armed_low_score_readiness(
+            snap=_snap(), event=_event(score=45.0), ict=_ict(quality=40.0),
+            alert={"tier": "EXPLODING"}, settings=_settings(),
+        )
+    assert ok is False
+    assert reason == "coil_armed_below_quality_score_floor"
 
 
 def test_disabled_by_default_is_noop():

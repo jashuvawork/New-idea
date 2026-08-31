@@ -575,6 +575,14 @@ class Settings(BaseSettings):
     coil_armed_low_score_max_base_move_pct: float = 12.0
     coil_armed_low_score_min_score: float = 40.0
     coil_armed_low_score_min_vol_surge: float = 1.5
+    # Near-base loss filter (data-calibrated on 11 days). The base zone is where DUDS cluster:
+    # near-base signals are ~50-59% duds unfiltered. FTV quality is the proven separator
+    # (Q>=70: 42% win vs Q<50: 6%), and near-base winners carried score ~100 / Q ~70 while
+    # duds were score ~76 / Q <50. So the near-base lanes (coil-armed, early-ignition) require
+    # EITHER strong FTV quality OR a strong score — blocking the low-Q + low-score dud bucket
+    # while keeping the genuine base winners. Applies only near the base (where duds live).
+    near_base_lane_min_quality: float = 70.0
+    near_base_lane_strong_score: float = 90.0
     # Let a strongly-ripe coil-armed top setup LIFT a chop/worst-day session halt (to
     # elite-only mode) so the early lanes can fire on a chop day instead of the session block
     # vetoing the near-base winner. Session-level — ENABLED so a chop/worst-day halt never

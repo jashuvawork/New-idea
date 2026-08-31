@@ -1381,6 +1381,30 @@ def first_lift_entry_ready(
     )[0]
 
 
+def _near_base_quality_or_score_ok(
+    *, event: Any = None, ict: Any = None,
+    row: Optional[dict[str, Any]] = None, settings: Any = None,
+) -> bool:
+    """Data-calibrated near-base dud filter: pass only strong FTV quality OR strong score.
+
+    On 11 days the near-base zone was ~50-59% duds; FTV quality is the proven separator
+    (Q>=70: 42% win vs Q<50: 6%) and near-base winners carried score ~100 / Q ~70 while duds
+    were score ~76 / Q <50. Requiring quality>=min OR score>=strong keeps the genuine base
+    winners and drops the low-Q + low-score dud bucket. Used by the aggressive near-base lanes.
+    """
+    settings = settings or get_settings()
+    row = row if isinstance(row, dict) else {}
+    q = float(
+        getattr(ict, "flat_vertical_quality", 0)
+        or row.get("flatVerticalQuality")
+        or 0
+    )
+    score = float(getattr(event, "explosion_score", 0) or row.get("explosionScore") or 0)
+    min_q = float(getattr(settings, "near_base_lane_min_quality", 70.0) or 70.0)
+    strong_score = float(getattr(settings, "near_base_lane_strong_score", 90.0) or 90.0)
+    return q >= min_q or score >= strong_score
+
+
 def _early_momentum_ignition_at_base_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -1453,6 +1477,11 @@ def _early_momentum_ignition_at_base_readiness(
     )
     if not (vol_awake or vol_surge >= min_vol or cvd):
         return False, ""
+
+    # Near-base loss filter: the 1-10% base zone is where duds cluster. Require strong FTV
+    # quality OR a strong score (data-calibrated on 11 days) to skip the low-Q/low-score duds.
+    if not _near_base_quality_or_score_ok(event=event, ict=ict, row=row, settings=settings):
+        return False, "early_ignition_below_quality_score_floor"
 
     side = str(
         getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
@@ -1557,6 +1586,11 @@ def _coil_armed_low_score_readiness(
     )
     if score < noise_floor:
         return False, ""
+
+    # Near-base loss filter: the base zone is ~50% duds. Require strong FTV quality OR a strong
+    # score (near-base winners carried Q~70 / score~100; duds Q<50 / score<76). Data-calibrated.
+    if not _near_base_quality_or_score_ok(event=event, ict=ict, row=row, settings=settings):
+        return False, "coil_armed_below_quality_score_floor"
 
     vol_surge = float(
         getattr(event, "volume_surge", 0) or row.get("volumeSurge") or 0
