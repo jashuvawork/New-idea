@@ -2137,6 +2137,7 @@ def scan_chain_explosions(
             if tier == "WATCH" and score < 25 and not awakened:
                 keep_first_lift = False
                 keep_armed_base = False
+                ict_probe = None
                 if bool(getattr(settings, "ict_first_lift_appear_enabled", True)):
                     # The ICT first-lift threshold is intentionally softer than BUILDING.
                     # Probe before dropping WATCH so a slow 15% lift off a real flat/V base
@@ -2168,6 +2169,7 @@ def scan_chain_explosions(
                 # anchor persists in _armed_base_anchors and re-surfaces the event the moment
                 # the premium lifts. Emitting a dead-flat (0 move / 0 velocity) WATCH just
                 # adds noise, so only keep an armed base once something is actually moving.
+                # Exception: momentum-rally cold coil (Aug31 NIFTY 24200 CE @ ₹25–27).
                 if (
                     keep_armed_base
                     and not keep_first_lift
@@ -2175,7 +2177,39 @@ def scan_chain_explosions(
                     and peak_move <= 0
                     and v3 <= 0
                 ):
-                    keep_armed_base = False
+                    retain_coil = False
+                    if bool(getattr(settings, "momentum_rally_armed_coil_radar_enabled", True)):
+                        from app.engines.chop_day_guards import in_momentum_rally_window
+
+                        if in_momentum_rally_window():
+                            prem_lo = float(
+                                getattr(settings, "momentum_rally_armed_coil_min_premium", 18.0)
+                                or 18.0
+                            )
+                            prem_hi = float(
+                                getattr(settings, "momentum_rally_armed_coil_max_premium", 45.0)
+                                or 45.0
+                            )
+                            min_samples = int(
+                                getattr(settings, "momentum_rally_armed_coil_min_samples", 4)
+                                or 4
+                            )
+                            armed_samples = int(
+                                getattr(ict_probe, "armed_base_samples", 0) or 0
+                            ) if ict_probe is not None else 0
+                            if (
+                                prem_lo <= float(premium) <= prem_hi
+                                and armed_samples >= min_samples
+                            ):
+                                retain_coil = True
+                                tier = "BUILDING"
+                                score = max(score, float(
+                                    getattr(settings, "momentum_rally_armed_coil_min_score", 18.0)
+                                    or 18.0
+                                ))
+                                reason_parts_open.append("momentumRallyArmedCoil")
+                    if not retain_coil:
+                        keep_armed_base = False
                 if (
                     not keep_first_lift
                     and not keep_armed_base

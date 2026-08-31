@@ -54,8 +54,12 @@ def _profit_factor(trades: list[TradeRecord]) -> float:
 
 
 def _paper_trade_records(state: AutoTraderState, reset_at: Optional[datetime] = None) -> list[TradeRecord]:
+    from app.engines.session_trade_integrity import is_phantom_session_trade
+
     out: list[TradeRecord] = []
     for t in state.closedPaperTrades:
+        if is_phantom_session_trade(t):
+            continue
         if reset_at:
             closed_at = t.closedAt
             if closed_at is None:
@@ -115,6 +119,10 @@ def collect_session_trades(state: AutoTraderState) -> list[TradeRecord]:
                     pass
             tid = str(row.get("id", ""))
             if tid and tid in seen:
+                continue
+            from app.engines.session_trade_integrity import is_phantom_trade_row
+
+            if is_phantom_trade_row(row):
                 continue
             ctx = row.get("entryContext") or {}
             mode = str(

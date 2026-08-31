@@ -235,6 +235,10 @@ def _ensure_state_loaded() -> None:
             tid = str(row.get("id", ""))
             if tid and tid in seen_ids:
                 continue
+            from app.engines.session_trade_integrity import is_phantom_trade_row
+
+            if is_phantom_trade_row(row):
+                continue
             closed_raw = row.get("closedAt")
             if reset_at and closed_raw:
                 try:
@@ -261,13 +265,22 @@ def _ensure_state_loaded() -> None:
                     exitReason=exit_reason,
                     strategyType=StrategyType(str(row.get("strategyType") or "EXPLOSIVE")),
                     sessionDate=today,
+                    entryContext=row.get("entryContext") if isinstance(row.get("entryContext"), dict) else {},
                 ))
                 restored_closed += 1
             except Exception as e:
                 logger.warning("Failed to restore closed trade %s: %s", tid, e)
         if restored_closed:
             logger.info("Restored %d closed paper trades for %s", restored_closed, today)
-            _auto_trader_state.dailyReport = _calibration.build_report(_auto_trader_state.closedPaperTrades)
+        from app.engines.session_trade_integrity import purge_phantom_trades_from_state
+
+        purged = purge_phantom_trades_from_state(_auto_trader_state)
+        if purged:
+            logger.warning("Purged %d phantom trades from session state", purged)
+        if restored_closed or purged:
+            _auto_trader_state.dailyReport = _calibration.build_report(
+                _auto_trader_state.closedPaperTrades
+            )
     except Exception as e:
         logger.warning("Failed to hydrate closed trades: %s", e)
 
@@ -2775,6 +2788,19 @@ async def _process_open_trades(
                 await _checkpoint_open_trade_if_due(trade, settings)
             except Exception as exc:
                 logger.warning("Open-trade mark checkpoint failed for %s: %s", trade.id, exc)
+            continue
+
+        from app.engines.session_trade_integrity import is_phantom_session_trade
+
+        if is_phantom_session_trade(trade):
+            logger.warning(
+                "Dropped phantom trade exit: %s %s strike=%s id=%s",
+                trade.symbol,
+                trade.side,
+                trade.strike,
+                trade.id,
+            )
+            state.openPaperTrades = [t for t in state.openPaperTrades if t.id != trade.id]
             continue
 
         exit_claim = _try_claim_exit(trade.id)

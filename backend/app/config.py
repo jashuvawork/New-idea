@@ -1790,6 +1790,12 @@ class Settings(BaseSettings):
     building_armed_prelaunch_max_explosion_score: float = 55.0
     building_armed_prelaunch_min_volume_surge: float = 1.0
     building_armed_prelaunch_min_grade: str = "C"
+    # Momentum-rally window: keep armed-base coils on radar before vertical lift.
+    momentum_rally_armed_coil_radar_enabled: bool = True
+    momentum_rally_armed_coil_min_premium: float = 18.0
+    momentum_rally_armed_coil_max_premium: float = 45.0
+    momentum_rally_armed_coil_min_samples: int = 4
+    momentum_rally_armed_coil_min_score: float = 18.0
     eod_replay_early_pad_rank_penalty: float = 12.0
     eod_replay_counter_side_rank_penalty: float = 35.0
     # Prefer deeper ITM expansion strikes over ATM when coil pad is active
