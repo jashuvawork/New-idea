@@ -129,6 +129,61 @@ jobs:
           echo "SSM command timed out"
           exit 1
 
+      - name: Arm live on EC2 via SSM
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[arm-live]')
+        id: arm
+        run: |
+          set -euo pipefail
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Arm live execution after deploy" \
+            --parameters 'commands=[
+              "set -euo pipefail",
+              "REPO=/opt/nexusquant/New-idea",
+              "cd $REPO",
+              "curl -sf -X POST http://127.0.0.1:8000/api/execution/stop || true",
+              "curl -sf -X POST http://127.0.0.1:8000/api/auto-trader/purge-logs || true",
+              "sudo bash deploy/go-live-10k-monday.sh --arm-live",
+              "curl -sf http://127.0.0.1:8000/api/deployment/status | python3 -m json.tool | head -40",
+              "curl -sf -X POST http://127.0.0.1:8000/api/execution/resume || true"
+            ]' \
+            --query Command.CommandId \
+            --output text)
+          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+          echo "SSM arm-live command: $CMD_ID"
+
+      - name: Wait for arm-live
+        if: steps.arm.outputs.command_id != ''
+        run: |
+          set -euo pipefail
+          CMD_ID="${{ steps.arm.outputs.command_id }}"
+          for i in $(seq 1 30); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+              --query Status \
+              --output text 2>/dev/null || echo Pending)
+            echo "Attempt $i: $STATUS"
+            if [ "$STATUS" = "Success" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                --query StandardOutputContent \
+                --output text | tail -60
+              exit 0
+            fi
+            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                --output json
+              exit 1
+            fi
+            sleep 10
+          done
+          exit 1
+
       - name: Verify public deployment status
         run: |
           set -euo pipefail
@@ -145,3 +200,20 @@ jobs:
             https://www.jashuvatrade.xyz/health | python3 -m json.tool
           curl -sf --connect-timeout 5 --max-time 20 \
             https://www.jashuvatrade.xyz/api/deployment/status | python3 -m json.tool
+
+      - name: Verify live armed
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[arm-live]')
+        run: |
+          set -euo pipefail
+          curl -sf https://www.jashuvatrade.xyz/api/deployment/status | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          f = d.get('flags') or {}
+          live = bool(f.get('enableLiveTrading'))
+          paper = bool(f.get('paperTrading'))
+          print('enableLiveTrading:', live)
+          print('paperTrading:', paper)
+          print('fallbackCapitalInr:', f.get('fallbackCapitalInr'))
+          if not live or paper:
+              raise SystemExit('Live not armed on public API')
+          "
