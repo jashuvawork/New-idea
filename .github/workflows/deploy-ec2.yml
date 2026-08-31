@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: deploy-ec2
+  cancel-in-progress: false
+
 env:
   AWS_REGION: ap-south-1
   EC2_INSTANCE_ID: i-0f3f9e5e67815c21b
