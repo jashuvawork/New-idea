@@ -1809,9 +1809,13 @@ def evaluate_explosion_exit(
 
     # Base→vertical ICT (12→392 PE): skip tiny hard TP — trail toward max.
     # Stage-ladder trades also skip tiny TP and ride stages to projectedMaxTp.
+    from app.engines.chop_live_guards import broker_adopted_trade_exit_blocked
+
     skip_hard_tp = (max_profit or stage_ladder) and bool(
         getattr(settings, "ict_max_profit_skip_hard_target", True)
     )
+    if broker_adopted_trade_exit_blocked(trade):
+        skip_hard_tp = True
     if not skip_hard_tp:
         # Peak touch counts — polling can miss the exact TP tick (e.g. best 12pt, current 8pt)
         if best >= target:

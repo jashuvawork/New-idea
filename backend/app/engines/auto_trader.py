@@ -662,6 +662,11 @@ async def _open_from_candidate(
     if snapshots:
         live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
         if live_blocked and settings.enable_live_trading:
+            from app.engines.chop_live_guards import chop_live_session_lift_allowed
+
+            if not chop_live_session_lift_allowed(state, snap, snapshots):
+                return False, "chop_live_worst_day_no_session_lift"
+
             from app.engines.top_signal_session_lift import (
                 candidate_qualifies_top_signal_session_lift,
                 snapshots_have_top_signal_session_lift,
@@ -2541,6 +2546,9 @@ def reset_session_calibration() -> None:
     reset_preorder_rejection_suppressions()
     reset_session_guards()
     reset_session_profit_gate()
+    from app.engines.chop_live_guards import reset_chop_live_adoption_cache
+
+    reset_chop_live_adoption_cache()
 
 
 def reset_session(*, preserve_open_trades: bool = True) -> None:
@@ -3611,6 +3619,12 @@ async def process(
         policy, policy_meta = session_entry_policy(state, snapshots)
         extreme_session = snapshots_have_top_signal_session_lift(snapshots)
         session_lift = extreme_session
+        if settings.enable_live_trading and extreme_session and snapshots:
+            from app.engines.chop_live_guards import chop_live_session_lift_allowed
+
+            ref_snap = next(iter(snapshots.values()))
+            if not chop_live_session_lift_allowed(state, ref_snap, snapshots):
+                session_lift = False
         if policy == "PAUSED" and not session_lift:
             skipped.append({
                 "symbol": "SESSION",
