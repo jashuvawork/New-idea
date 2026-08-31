@@ -28,6 +28,55 @@ def _f(v: Any, d: float = 0.0) -> float:
         return d
 
 
+def _ignition_ok(
+    series: list[tuple[datetime, float, float]], i: int, *, window_s: float, min_rise: float
+) -> bool:
+    """True when the premium is actively LIFTING over the last ``window_s`` (not flat chop).
+
+    Approximates the live early-ignition velocity/acceleration confirmation the simple
+    near-base+drift rule lacks — a cold entry that never ignites (morning chop) has ~0 rise
+    here and is dropped, while a genuine base lift shows a clear recent rise.
+    """
+    t_now, p_now, _ = series[i]
+    if p_now <= 0:
+        return False
+    p_ref = None
+    for j in range(i, -1, -1):
+        if (t_now - series[j][0]).total_seconds() >= window_s:
+            p_ref = series[j][1]
+            break
+    if p_ref is None or p_ref <= 0:
+        return False  # not enough history to prove a lift
+    return (p_now - p_ref) / p_ref >= min_rise
+
+
+def _not_post_peak_chase(
+    series: list[tuple[datetime, float, float]], i: int, *,
+    lookback_s: float, min_run: float, near_top_frac: float
+) -> bool:
+    """False (reject) when we'd be buying near the TOP of a run that already happened.
+
+    Looks back ``lookback_s``: if a real run-up occurred (peak >= min_run above the window
+    low) AND the current premium is within ``near_top_frac`` of that peak, the move is spent
+    and this is a late second-leg chase (e.g. 24050 CE at 125 after the 133 peak) — reject.
+    """
+    t_now, p_now, _ = series[i]
+    lo = p_now
+    hi = p_now
+    for j in range(i, -1, -1):
+        if (t_now - series[j][0]).total_seconds() > lookback_s:
+            break
+        pj = series[j][1]
+        lo = min(lo, pj)
+        hi = max(hi, pj)
+    if lo <= 0:
+        return True
+    run = (hi - lo) / lo
+    if run >= min_run and p_now >= hi * (1.0 - near_top_frac):
+        return False  # a big run already happened and we're near its top — spent move
+    return True
+
+
 def _drift_ok(spot_rel: list[tuple[float, float]], now_s: float, side: str) -> bool:
     """Index sustained-drift confirmation for one side, from the spot tape up to now."""
     import app.engines.index_tick_helpers as ith
@@ -66,6 +115,13 @@ def replay_contract_trades(
     units = int(lot_multiplier(symbol) or 20)
     nb_min = _f(getattr(s, "eod_near_base_min_off_pct", 0.10), 0.10)
     nb_max = _f(getattr(s, "eod_near_base_max_off_pct", 0.15), 0.15)
+    pp_on = bool(getattr(s, "eod_replay_post_peak_enabled", True))
+    pp_lookback = _f(getattr(s, "eod_replay_post_peak_lookback_s", 900.0), 900.0)
+    pp_min_run = _f(getattr(s, "eod_replay_post_peak_min_run_pct", 0.25), 0.25)
+    pp_near_top = _f(getattr(s, "eod_replay_post_peak_near_top_frac", 0.12), 0.12)
+    ign_on = bool(getattr(s, "eod_replay_ignition_enabled", False))
+    ign_window = _f(getattr(s, "eod_replay_ignition_window_s", 45.0), 45.0)
+    ign_min_rise = _f(getattr(s, "eod_replay_ignition_min_rise_pct", 0.012), 0.012)
     cooldown = 90.0
 
     trades: list[dict[str, Any]] = []
@@ -85,6 +141,17 @@ def replay_contract_trades(
             base > 0 and nb_min <= off <= nb_max and p >= 15
             and (next_ok_after is None or t >= next_ok_after)
             and _drift_ok(spot_rel, (t - t0).total_seconds(), side)
+            and (
+                not pp_on
+                or _not_post_peak_chase(
+                    series, i, lookback_s=pp_lookback,
+                    min_run=pp_min_run, near_top_frac=pp_near_top,
+                )
+            )
+            and (
+                not ign_on
+                or _ignition_ok(series, i, window_s=ign_window, min_rise=ign_min_rise)
+            )
         )
         if not entered:
             i += 1

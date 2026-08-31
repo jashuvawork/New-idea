@@ -595,6 +595,22 @@ class Settings(BaseSettings):
     # late/chase-ier cold entries that fade — the dominant EOD loss bucket.
     eod_near_base_min_off_pct: float = 0.10
     eod_near_base_max_off_pct: float = 0.15
+    # EOD replay entry realism — approximate the live confirmation the simple near-base+drift
+    # rule lacks, so the report stops taking entries live would reject.
+    #  - post-peak guard (ON): reject buying near the top of a run that already happened in the
+    #    recent window — drops late second-leg chases (e.g. 24050 CE at 125 after the 133 peak).
+    #    Validated across 11 days: net +50.4k -> +61.1k, fewer losers, winners preserved.
+    #  - ignition gate (OFF): "premium actively lifting" is too coarse on the sampled tape — it
+    #    also rejects genuine winners that enter on a slow/flat base lift (11-day net collapsed
+    #    to -32k, winners 20 -> 9). The live early-ignition lane uses velocity accel + volume +
+    #    CVD, which the tape lacks, so this proxy can't reproduce it. Kept opt-in, default off.
+    eod_replay_post_peak_enabled: bool = True
+    eod_replay_post_peak_lookback_s: float = 900.0
+    eod_replay_post_peak_min_run_pct: float = 0.25
+    eod_replay_post_peak_near_top_frac: float = 0.12
+    eod_replay_ignition_enabled: bool = False
+    eod_replay_ignition_window_s: float = 45.0
+    eod_replay_ignition_min_rise_pct: float = 0.012
     # EOD replay concurrency: how many positions may run at once, splitting capital into that
     # many slots (each position sized to capital/slots). 1 = one full-capital position at a time
     # (rides one runner to max TP but skips concurrent winners). The 11-day replay shows 2 slots
