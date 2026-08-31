@@ -498,6 +498,44 @@ def _elite_momentum_flip_bypass(candidate: Any, snap: SymbolSnapshot) -> bool:
         return True
     if tier == "ELITE" and score >= min_score and move >= 35.0:
         return True
+    # Aug31 NIFTY CALL 24150: armed_base_launch at ~10% lb after PUT loss — session
+    # move is still ~12% so the 28%/35% floors never fire even though scorecard MFE
+    # ran 84%. Allow flip on confirmed local-base ELITE/EXPLODING armed launches.
+    local_pad = 0.0
+    for key in ("localBaseMovePct", "ictBaseRelativeMovePct", "offLowMovePct"):
+        try:
+            local_pad = max(local_pad, float(alert.get(key) or 0))
+        except (TypeError, ValueError):
+            pass
+    if event is not None:
+        try:
+            local_pad = max(
+                local_pad,
+                float(getattr(event, "base_relative_move_pct", 0) or 0),
+            )
+        except (TypeError, ValueError):
+            pass
+    moment = str(alert.get("momentType") or "")
+    armed_launch = moment == "armed_base_launch" or bool(
+        alert.get("ictArmedBaseLaunch")
+    )
+    pad_lo = float(
+        getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0
+    )
+    pad_hi = float(
+        getattr(settings, "top_ftv_a_pad_velocity_max_move_pct", 25.0) or 25.0
+    )
+    vol_awake = bool(
+        alert.get("volumeAwaken") or alert.get("ictVolumeAwakening")
+    )
+    if (
+        tier in ("ELITE", "EXPLODING")
+        and score >= min_score
+        and pad_lo <= local_pad <= pad_hi
+        and (armed_launch or ict_flat)
+        and vol_awake
+    ):
+        return True
     try:
         from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
 
