@@ -8,9 +8,13 @@
 #   # Step 2 — Monday before 9:15 IST: flip live execution + restart
 #   sudo bash deploy/go-live-10k-monday.sh --arm-live
 #
+#   # After session / when done with live: back to paper
+#   sudo bash deploy/go-live-10k-monday.sh --paper
+#
 # Options:
 #   --prepare     Apply env.live-10k.overlay (capital ₹10k, scaled risk; paper mode)
 #   --arm-live    Apply overlay + ENABLE_LIVE_TRADING=true, PAPER_TRADING=false, restart backend
+#   --paper       Stop auto-trader, flip back to paper mode, restart backend, resume auto-trader
 #   --dry-run     Print actions without writing env or restarting
 #   ENV_FILE=     Override env path (default /opt/nexusquant/env)
 #   REPO_DIR=     Override repo path (default /opt/nexusquant/New-idea)
@@ -33,6 +37,8 @@ OVERLAY="${REPO_DIR}/deploy/env.live-10k.overlay"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
 READINESS_URL="${READINESS_URL:-http://127.0.0.1:8000/api/deployment/readiness}"
 CAPITAL_URL="${CAPITAL_URL:-http://127.0.0.1:8000/api/auto-trader/capital}"
+PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-200000}"
+LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-10000}"
 
 MODE=""
 DRY_RUN=0
@@ -40,17 +46,18 @@ for arg in "$@"; do
   case "$arg" in
     --prepare) MODE=prepare ;;
     --arm-live) MODE=arm-live ;;
+    --paper) MODE=paper ;;
     --dry-run) DRY_RUN=1 ;;
     *)
       echo "Unknown option: $arg" >&2
-      echo "Usage: $0 --prepare | --arm-live [--dry-run]" >&2
+      echo "Usage: $0 --prepare | --arm-live | --paper [--dry-run]" >&2
       exit 1
       ;;
   esac
 done
 
 if [ -z "$MODE" ]; then
-  echo "Usage: $0 --prepare | --arm-live [--dry-run]" >&2
+  echo "Usage: $0 --prepare | --arm-live | --paper [--dry-run]" >&2
   exit 1
 fi
 
@@ -82,12 +89,28 @@ _set_env_key() {
 echo "=== NexusQuant ₹10k go-live ($MODE) $(date -Iseconds) ==="
 echo "Env: $ENV_FILE | Repo: $REPO_DIR"
 
-if [ "$DRY_RUN" -eq 0 ]; then
-  mkdir -p "$(dirname "$ENV_FILE")"
-  touch "$ENV_FILE"
-  ENV_FILE="$ENV_FILE" bash "$REPO_DIR/deploy/apply-env-overlay.sh" "$OVERLAY"
-else
-  echo "[dry-run] apply overlay $OVERLAY"
+if [ "$MODE" != "paper" ]; then
+  if [ "$DRY_RUN" -eq 0 ]; then
+    mkdir -p "$(dirname "$ENV_FILE")"
+    touch "$ENV_FILE"
+    ENV_FILE="$ENV_FILE" bash "$REPO_DIR/deploy/apply-env-overlay.sh" "$OVERLAY"
+  else
+    echo "[dry-run] apply overlay $OVERLAY"
+  fi
+fi
+
+if [ "$MODE" = "paper" ]; then
+  echo "Stopping auto-trader before returning to paper mode..."
+  curl -sf -X POST "http://127.0.0.1:8000/api/execution/stop" >/dev/null 2>&1 || true
+  echo "Disarming live execution (paper mode)..."
+  _set_env_key ENABLE_LIVE_TRADING false
+  _set_env_key PAPER_TRADING true
+  _set_env_key PAPER_SLIPPAGE_ENABLED true
+  _set_env_key PAPER_SIMULATE_BROKER_ORDERS true
+  _set_env_key SHADOW_TRADE_ALL_SIGNALS true
+  echo "Restoring paper capital to ₹${PAPER_CAPITAL_INR}..."
+  _set_env_key FALLBACK_CAPITAL_INR "$PAPER_CAPITAL_INR"
+  _set_env_key MAX_SIZING_CAPITAL_INR "$PAPER_CAPITAL_INR"
 fi
 
 if [ "$MODE" = "arm-live" ]; then
@@ -120,13 +143,24 @@ if [ -d "$REPO_DIR" ] && command -v docker >/dev/null 2>&1; then
   done
 fi
 
-echo "Setting runtime capital ceiling to ₹10,000..."
+if [ "$MODE" = "arm-live" ]; then
+  CAPITAL_INR="$LIVE_CAPITAL_INR"
+elif [ "$MODE" = "paper" ]; then
+  CAPITAL_INR="$PAPER_CAPITAL_INR"
+else
+  CAPITAL_INR="$PAPER_CAPITAL_INR"
+fi
+
+echo "Setting runtime capital ceiling to ₹${CAPITAL_INR}..."
 curl -sf -X POST "$CAPITAL_URL" \
   -H 'Content-Type: application/json' \
-  -d '{"allocatedInr": 10000}' || echo "WARN: capital API failed — set manually in UI"
+  -d "{\"allocatedInr\": ${CAPITAL_INR}}" || echo "WARN: capital API failed — set manually in UI"
 
 if [ "$MODE" = "arm-live" ]; then
   echo "Resuming auto-trader in LIVE mode..."
+  curl -sf -X POST "http://127.0.0.1:8000/api/execution/resume" >/dev/null 2>&1 || true
+elif [ "$MODE" = "paper" ]; then
+  echo "Resuming auto-trader in PAPER mode..."
   curl -sf -X POST "http://127.0.0.1:8000/api/execution/resume" >/dev/null 2>&1 || true
 fi
 
@@ -151,6 +185,9 @@ if [ "$MODE" = "prepare" ]; then
   echo "Prepared — still PAPER. Before 9:15 IST Monday run:"
   echo "  sudo bash deploy/go-live-10k-monday.sh --arm-live"
   echo "Also: complete Upstox OAuth if token is stale (/api/upstox/login-url)."
+elif [ "$MODE" = "paper" ]; then
+  echo "Back on paper trading at ₹${PAPER_CAPITAL_INR}. To arm live again:"
+  echo "  sudo bash deploy/go-live-10k-monday.sh --arm-live"
 else
   echo "Live armed at ₹10k. Confirm Upstox token + readiness before session open."
 fi

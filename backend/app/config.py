@@ -543,6 +543,14 @@ class Settings(BaseSettings):
     coil_breakout_prediction_enabled: bool = True
     coil_prediction_influences_ranking: bool = True
     coil_prediction_max_range_pct: float = 5.0
+    # GainzAlgo V2 Alpha-style decisive breakout candle — a strong-bodied engulfing bar with
+    # RSI agreeing after a pullback (a genuine turn off the base, not chop). Non-repainting,
+    # fires right as the coil breaks (earlier than the 45s smoothed drift on a grind-then-pop).
+    # Used as a coil-predictor direction vote; additive selection signal, never a hard gate.
+    decisive_candle_enabled: bool = True
+    decisive_candle_body_ratio_min: float = 0.6
+    decisive_candle_rsi_ceiling: float = 80.0
+    decisive_candle_pullback_lookback: int = 5
     coil_prediction_min_direction_votes: int = 2
     coil_prediction_min_readiness_for_rank: float = 60.0
     coil_prediction_rank_bonus: float = 10.0

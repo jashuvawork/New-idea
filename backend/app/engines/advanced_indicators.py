@@ -18,7 +18,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from app.engines.chart_indicators import _ema_series
+from app.engines.chart_indicators import _ema_series, compute_rsi
 
 
 @dataclass(frozen=True)
@@ -83,6 +83,23 @@ class VwapRead:
     position: str = "AT"        # ABOVE | BELOW | AT
     reclaim: str = "NONE"       # BULLISH_RECLAIM | BEARISH_LOSS | NONE
     volume_weighted: bool = False  # False = price-anchored fallback (index has no volume)
+
+
+@dataclass(frozen=True)
+class DecisiveCandleRead:
+    """GainzAlgo-style decisive reversal bar — a fast, non-repainting ignition confirm.
+
+    The last CLOSED bar is a strong-bodied engulfing candle (body/range high = conviction,
+    not a wick), RSI agrees and is not exhausted, and it follows a recent counter move (a
+    genuine turn off a base, not chop continuation). Fires right as the coil breaks — earlier
+    than the 45s smoothed index drift on a modest grind-then-pop move.
+    """
+    direction: str = "NEUTRAL"  # BULLISH | BEARISH | NEUTRAL
+    decisive: bool = False      # all conditions aligned on the latest closed bar
+    body_ratio: float = 0.0     # |close-open| / (high-low) of the latest bar
+    engulfing: bool = False
+    after_pullback: bool = False
+    rsi: float = 50.0
 
 
 def index_squeeze_confirms_side(side: Any, snap: Any) -> bool:
@@ -621,6 +638,85 @@ def compute_supertrend(
     direction = "BULLISH" if dir_up[-1] else "BEARISH"
     flipped = n >= 2 and dir_up[-1] != dir_up[-2]
     return SupertrendRead(value=round(st[-1], 2), direction=direction, flipped=flipped)
+
+
+def compute_decisive_candle(
+    opens: list[float], highs: list[float], lows: list[float], closes: list[float],
+    *,
+    body_ratio_min: float = 0.6,
+    rsi_period: int = 14,
+    rsi_ceiling: float = 80.0,
+    pullback_lookback: int = 5,
+) -> DecisiveCandleRead:
+    """GainzAlgo V2 Alpha-style decisive reversal bar on the latest CLOSED candle.
+
+    Bullish: bullish engulfing + strong body (body/range >= body_ratio_min) + RSI below the
+    ceiling (not exhausted) + price came DOWN over the last ``pullback_lookback`` bars (a real
+    turn, not continuation). Bearish is the mirror. Non-repainting: uses the last closed bar.
+    """
+    n = min(len(opens), len(highs), len(lows), len(closes))
+    if n < max(pullback_lookback + 1, rsi_period + 2):
+        return DecisiveCandleRead()
+    o = [float(x) for x in opens[:n]]
+    h = [float(x) for x in highs[:n]]
+    low = [float(x) for x in lows[:n]]
+    c = [float(x) for x in closes[:n]]
+
+    rng = max(1e-9, h[-1] - low[-1])
+    body_ratio = abs(c[-1] - o[-1]) / rng
+    decisive_body = body_ratio >= body_ratio_min
+    rsi = compute_rsi(c, rsi_period).value
+
+    bull_engulf = c[-2] < o[-2] and c[-1] > o[-1] and c[-1] > o[-2]
+    bear_engulf = c[-2] > o[-2] and c[-1] < o[-1] and c[-1] < o[-2]
+    came_down = c[-1] < c[-1 - pullback_lookback]
+    came_up = c[-1] > c[-1 - pullback_lookback]
+
+    bull = bull_engulf and decisive_body and rsi < rsi_ceiling and came_down
+    bear = bear_engulf and decisive_body and rsi > (100.0 - rsi_ceiling) and came_up
+
+    if bull:
+        direction, after_pullback, engulfing = "BULLISH", came_down, True
+    elif bear:
+        direction, after_pullback, engulfing = "BEARISH", came_up, True
+    else:
+        direction = "NEUTRAL"
+        after_pullback = came_down or came_up
+        engulfing = bull_engulf or bear_engulf
+    return DecisiveCandleRead(
+        direction=direction,
+        decisive=bool(bull or bear),
+        body_ratio=round(body_ratio, 3),
+        engulfing=engulfing,
+        after_pullback=after_pullback,
+        rsi=round(rsi, 2),
+    )
+
+
+def index_decisive_breakout_confirms_side(side: Any, snap: Any) -> bool:
+    """True when the index printed a decisive reversal bar toward the option side.
+
+    Reads the pre-computed chartAnalysis.decisiveCandle dict (no recompute). Additive only —
+    a coil-predictor direction vote / rank input, never a hard gate.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not bool(getattr(settings, "decisive_candle_enabled", True)):
+        return False
+    ca = getattr(snap, "chartAnalysis", None) if snap is not None else None
+    dc = getattr(ca, "decisiveCandle", None) if ca is not None else None
+    if not isinstance(dc, dict) or not dc:
+        return False
+    if not bool(dc.get("decisive")):
+        return False
+    direction = str(dc.get("direction") or "NEUTRAL").upper()
+    side_v = side.value if hasattr(side, "value") else str(side or "").upper()
+    if side_v == "CALL":
+        return direction == "BULLISH"
+    if side_v == "PUT":
+        return direction == "BEARISH"
+    return False
 
 
 def compute_vwap(

@@ -6,7 +6,8 @@ name: Arm/Disarm ₹10k live trading
 #
 # arm-live  -> runs deploy/go-live-10k-monday.sh --arm-live (overlay + ENABLE_LIVE_TRADING=true
 #              + PAPER_TRADING=false, restart, set ₹10k capital ceiling).
-# disarm    -> sets ENABLE_LIVE_TRADING=false + PAPER_TRADING=true and restarts (back to paper).
+# disarm    -> runs deploy/go-live-10k-monday.sh --paper (ENABLE_LIVE_TRADING=false
+#              + PAPER_TRADING=true + paper slippage/shadow flags, restart, resume auto-trader).
 #
 # Safety: you MUST type the exact confirm phrase or the run aborts before touching the box.
 
@@ -88,13 +89,8 @@ jobs:
             --comment "Disarm live trading (back to paper)" \
             --parameters 'commands=[
               "set -euo pipefail",
-              "ENV=/opt/nexusquant/env",
-              "COMPOSE=${{ env.REPO_DIR }}/docker-compose.prod.yml",
-              "touch $ENV",
-              "if grep -q \"^ENABLE_LIVE_TRADING=\" $ENV; then sed -i \"s|^ENABLE_LIVE_TRADING=.*|ENABLE_LIVE_TRADING=false|\" $ENV; else echo ENABLE_LIVE_TRADING=false >> $ENV; fi",
-              "if grep -q \"^PAPER_TRADING=\" $ENV; then sed -i \"s|^PAPER_TRADING=.*|PAPER_TRADING=true|\" $ENV; else echo PAPER_TRADING=true >> $ENV; fi",
               "cd ${{ env.REPO_DIR }}",
-              "docker compose -f $COMPOSE up -d --force-recreate --no-deps backend",
+              "bash ${{ env.REPO_DIR }}/deploy/go-live-10k-monday.sh --paper",
               "sleep 6",
               "curl -sf --max-time 5 http://127.0.0.1:8000/api/deployment/readiness || true"
             ]' \
@@ -136,5 +132,9 @@ jobs:
           echo "Public readiness reports: $MODE"
           if [ "${{ inputs.action }}" = "arm-live" ] && ! echo "$MODE" | grep -q "LIVE"; then
             echo "::error::arm-live ran but executionMode is not LIVE — check Upstox token + env"
+            exit 1
+          fi
+          if [ "${{ inputs.action }}" = "disarm" ] && echo "$MODE" | grep -q "LIVE"; then
+            echo "::error::disarm ran but executionMode is still LIVE — check env + backend restart"
             exit 1
           fi

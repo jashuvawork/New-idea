@@ -164,6 +164,7 @@ function AdvancedIndicatorsBlock({
   adx,
   supertrend,
   vwap,
+  decisiveCandle,
   indiaVix,
   indiaVixRef,
 }: {
@@ -171,6 +172,7 @@ function AdvancedIndicatorsBlock({
   adx?: ChartAnalysis['adx'];
   supertrend?: ChartAnalysis['supertrend'];
   vwap?: ChartAnalysis['vwap'];
+  decisiveCandle?: ChartAnalysis['decisiveCandle'];
   indiaVix?: number;
   indiaVixRef?: number;
 }) {
@@ -178,8 +180,9 @@ function AdvancedIndicatorsBlock({
   const hasAdx = (adx?.adx ?? 0) > 0;
   const hasSt = Boolean(supertrend?.value);
   const hasVwap = Boolean(vwap?.vwap);
+  const hasDecisive = Boolean(decisiveCandle?.decisive);
   const hasVix = indiaVix != null && indiaVix > 0;
-  if (!hasSq && !hasAdx && !hasSt && !hasVwap && !hasVix) return null;
+  if (!hasSq && !hasAdx && !hasSt && !hasVwap && !hasDecisive && !hasVix) return null;
 
   const tone = (d?: string) =>
     d === 'BULLISH' ? 'text-nexus-green' : d === 'BEARISH' ? 'text-nexus-red' : 'text-nexus-muted';
@@ -237,6 +240,13 @@ function AdvancedIndicatorsBlock({
                 · {vwap!.reclaim.replace(/_/g, ' ').toLowerCase()}
               </span>
             ) : null}
+          </div>
+        ) : null}
+        {hasDecisive ? (
+          <div className={`col-span-2 ${tone(decisiveCandle!.direction)}`}>
+            Decisive {decisiveCandle!.direction} bar
+            <span className="text-nexus-muted"> · body {((decisiveCandle!.body_ratio ?? 0) * 100).toFixed(0)}%</span>
+            {decisiveCandle!.engulfing ? <span className="text-nexus-muted"> · engulf</span> : null}
           </div>
         ) : null}
       </div>
@@ -375,6 +385,7 @@ function ChartAnalysisSection({
         adx={analysis.adx}
         supertrend={analysis.supertrend}
         vwap={analysis.vwap}
+        decisiveCandle={analysis.decisiveCandle}
         indiaVix={indiaVix}
         indiaVixRef={indiaVixRef}
       />

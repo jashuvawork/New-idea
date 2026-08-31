@@ -325,6 +325,7 @@ export interface ChartAnalysis {
   adx?: AdxRead;
   supertrend?: SupertrendRead;
   vwap?: VwapRead;
+  decisiveCandle?: DecisiveCandleRead;
 }
 
 export interface SqueezeRead {
@@ -358,6 +359,15 @@ export interface VwapRead {
   position?: string; // ABOVE | BELOW | AT
   reclaim?: string; // BULLISH_RECLAIM | BEARISH_LOSS | NONE
   volume_weighted?: boolean;
+}
+
+export interface DecisiveCandleRead {
+  direction?: string; // BULLISH | BEARISH | NEUTRAL
+  decisive?: boolean;
+  body_ratio?: number;
+  engulfing?: boolean;
+  after_pullback?: boolean;
+  rsi?: number;
 }
 
 export interface ExplosiveRunner {

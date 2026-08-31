@@ -147,6 +147,7 @@ class ChartAnalysis(BaseModel):
     adx: dict[str, Any] = {}
     supertrend: dict[str, Any] = {}
     vwap: dict[str, Any] = {}
+    decisiveCandle: dict[str, Any] = {}
 
 
 class Greeks(BaseModel):

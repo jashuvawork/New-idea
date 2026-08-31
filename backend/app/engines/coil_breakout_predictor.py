@@ -139,6 +139,16 @@ def coil_breakout_prediction(
     except Exception:
         pass
 
+    try:
+        from app.engines.advanced_indicators import index_decisive_breakout_confirms_side
+        from app.models.schemas import Side as _S
+
+        if index_decisive_breakout_confirms_side(_S(side), snap):
+            votes += 1
+            reasons.append("decisive_candle")
+    except Exception:
+        pass
+
     # Readiness score (0-100): coil tightness + maturity + compression + pre-awakening + votes.
     score = 0.0
     if range_pct > 0:
