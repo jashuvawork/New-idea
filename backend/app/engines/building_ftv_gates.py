@@ -30,6 +30,12 @@ PAD_LANE_READY_REASONS = frozenset(
         "double_dip_vbase_ready",
         "early_radar_pad_ready",
         "building_coil_pad_ready",
+        # Early base-entry lanes (enabled): let a BUILDING coil/ignition through the
+        # elite-only tier gate when its lane fires — otherwise these lanes only take effect
+        # once the contract is already ELITE/EXPLODING, which defeats catching it while it is
+        # still slow/building. Each lane already carries its own quality/score dud filter.
+        "coil_armed_low_score_base_entry",
+        "early_momentum_ignition_at_base",
     }
 )
 
