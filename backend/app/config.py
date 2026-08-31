@@ -470,6 +470,16 @@ class Settings(BaseSettings):
     explosion_extended_chase_min_move_pct: float = 65.0
     # Soft zone: shrink size approaching the hard ceiling.
     explosion_extended_soft_min_move_pct: float = 55.0
+    # Don't chase the EXHAUSTION of a completed move (symmetric CE/PE). If the contract's
+    # premium already ran >= min_run in the recent window AND we'd enter within near_top_frac
+    # of that window's peak, the leg is spent — block (today's live PUT 23950: bought near the
+    # low at 10:47 as the down-move exhausted, V-reversed, stopped). Near-base entries are
+    # exempt by construction (current sits at the window low, not its peak), so this never
+    # blocks a genuine base entry — only the late/mid-rip chase.
+    explosion_post_peak_chase_guard_enabled: bool = True
+    explosion_post_peak_chase_lookback_seconds: float = 900.0
+    explosion_post_peak_chase_min_run_pct: float = 0.25
+    explosion_post_peak_chase_near_top_frac: float = 0.12
     # Base-relative chase bypass — a fresh flat→vertical break off a consolidation base
     # (SENSEX 76300 PE: 30-100 range then 100-144 break) reads as high day-move but the
     # move FROM THE BASE is still early. Allow it when volume is rising + base move in window.

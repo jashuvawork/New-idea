@@ -831,6 +831,55 @@ def live_explosion_confirmation_blocked(
     return False, ""
 
 
+def post_peak_chase_blocked(
+    explosion_event: Any,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Don't chase the EXHAUSTION of a completed move — block buying near the top of a run
+    that already happened (symmetric for CE and PE, since we always buy the option premium).
+
+    Reads the contract's recent premium history: if a run of >= min_run occurred in the
+    lookback window AND the current premium is within near_top_frac of that window's peak,
+    the leg is spent and this is a late chase (today's live PUT 23950: bought near the low
+    at 10:47 as the down-move exhausted, then the market V-reversed and stopped it). A genuine
+    near-base entry is exempt by construction — current sits near the window LOW, not its peak.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "explosion_post_peak_chase_guard_enabled", True)):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+    sym = str(getattr(explosion_event, "symbol", "") or "")
+    side = getattr(explosion_event, "side", None)
+    strike = float(getattr(explosion_event, "strike", 0) or 0)
+    if not sym or side is None:
+        return False, ""
+    lookback = float(
+        getattr(settings, "explosion_post_peak_chase_lookback_seconds", 900.0) or 900.0
+    )
+    min_run = float(
+        getattr(settings, "explosion_post_peak_chase_min_run_pct", 0.25) or 0.25
+    )
+    near_top = float(
+        getattr(settings, "explosion_post_peak_chase_near_top_frac", 0.12) or 0.12
+    )
+    try:
+        from app.engines.explosion_detector import recent_premium_run
+
+        r = recent_premium_run(sym, strike, side, lookback_seconds=lookback)
+    except Exception:
+        return False, ""
+    high = float(r.get("high") or 0)
+    current = float(r.get("current") or 0)
+    run = float(r.get("run") or 0)
+    if high <= 0 or current <= 0:
+        return False, ""
+    if run >= min_run and current >= high * (1.0 - near_top):
+        return True, "explosion_post_peak_chase"
+    return False, ""
+
+
 def extended_session_chase_blocked(
     explosion_event: Any,
     *,

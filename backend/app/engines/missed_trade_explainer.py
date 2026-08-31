@@ -579,6 +579,7 @@ def _gate_checks(
         extended_session_chase_blocked,
         immature_explosion_blocked,
         live_explosion_confirmation_blocked,
+        post_peak_chase_blocked,
     )
     from app.engines.ict_breakout_monitor import (
         analyze_explosion_event_ict,
@@ -642,6 +643,21 @@ def _gate_checks(
                 "gate": "live_explosion_confirmation",
                 "passed": True,
                 "detail": "live velocity + structure confirmed",
+            })
+        pp_blocked, pp_reason = post_peak_chase_blocked(candidate.explosion_event)
+        if pp_blocked:
+            blockers.append(pp_reason)
+            gates.append({
+                "gate": "explosion_post_peak_chase",
+                "passed": False,
+                "detail": pp_reason,
+                "fix": "Enter at the base — don't buy near the top of a run that already happened",
+            })
+        else:
+            gates.append({
+                "gate": "explosion_post_peak_chase",
+                "passed": True,
+                "detail": "not chasing a completed run's top",
             })
         ext_blocked, ext_reason = extended_session_chase_blocked(
             candidate.explosion_event, ict=ict,

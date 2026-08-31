@@ -1436,6 +1436,45 @@ def local_base_premium(
     return min(vals) if vals else 0.0
 
 
+def recent_premium_run(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    *,
+    lookback_seconds: float,
+) -> dict[str, float]:
+    """Recent premium run over ``lookback_seconds`` from detector history.
+
+    Returns {run, low, high, current, off_low}: the fraction the premium ran (high-low)/low
+    within the window, the window low/high, the latest premium, and how far the latest is off
+    the window low. Used to detect chasing the EXHAUSTION of a completed move — a near-base
+    entry has current≈low (off_low≈0), a chase has current near the window high after a big run.
+    """
+    out = {"run": 0.0, "low": 0.0, "high": 0.0, "current": 0.0, "off_low": 0.0}
+    if side is None or not symbol:
+        return out
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    dq = _local_base_hist.get(_open_key(symbol, strike, side_val))
+    if not dq:
+        return out
+    now = dq[-1][0]
+    lo_cut = now - timedelta(seconds=float(lookback_seconds))
+    vals = [p for (ts, p) in dq if ts >= lo_cut and _is_meaningful_premium(p)]
+    if len(vals) < 2:
+        return out
+    low = min(vals)
+    high = max(vals)
+    current = float(dq[-1][1])
+    if low <= 0:
+        return out
+    out["low"] = low
+    out["high"] = high
+    out["current"] = current
+    out["run"] = (high - low) / low
+    out["off_low"] = (current - low) / low
+    return out
+
+
 def post_close_base_reacceleration(
     symbol: str,
     strike: float,
