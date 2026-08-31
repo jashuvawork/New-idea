@@ -15,17 +15,22 @@ def _settings(**over):
         early_momentum_ignition_max_move_pct=10.0,
         early_momentum_ignition_min_velocity_3s=1.0,
         early_momentum_ignition_min_vol_surge=2.0,
+        near_base_lane_min_quality=70.0,
+        near_base_lane_strong_score=90.0,
     )
     for k, v in over.items():
         setattr(s, k, v)
     return s
 
 
-def _event(side="CALL", tier="ELITE", v3=2.0, v9=1.4, vol_surge=2.5, strike=24150.0):
+def _event(side="CALL", tier="ELITE", v3=2.0, v9=1.4, vol_surge=2.5, strike=24150.0,
+           explosion_score=92.0):
+    # score>=90 clears the near-base quality/score dud filter (a genuine base winner
+    # carried score ~100 on the 11-day data; duds were ~76).
     return SimpleNamespace(
         side=side, tier=tier, velocity_3s=v3, velocity_9s=v9,
         volume_surge=vol_surge, strike=strike,
-        base_relative_move_pct=6.0,
+        base_relative_move_pct=6.0, explosion_score=explosion_score,
     )
 
 
@@ -114,6 +119,33 @@ def test_symmetric_for_put():
             snap=_snap(spot=24200.0, atm=24200.0),
             event=_event(side="PUT", strike=24200.0, v3=2.0, v9=1.4),
             ict=_ict(6.0), alert={"tier": "EXPLODING"}, settings=_settings(),
+        )
+    assert ok is True
+    assert reason == "early_momentum_ignition_at_base"
+
+
+def test_low_quality_low_score_near_base_dud_is_blocked():
+    """Data-calibrated: a near-base signal with weak quality AND weak score is the dud
+    bucket (~50% of near-base) — block it even with acceleration + volume."""
+    ev = _event(explosion_score=76.0)  # dud-level score, no FTV quality
+    with patch("app.engines.ict_breakout_monitor.get_settings", return_value=_settings()):
+        ok, reason = _early_momentum_ignition_at_base_readiness(
+            snap=_snap(), event=ev, ict=_ict(6.0),
+            alert={"tier": "ELITE"}, settings=_settings(),
+        )
+    assert ok is False
+    assert reason == "early_ignition_below_quality_score_floor"
+
+
+def test_strong_quality_passes_even_with_low_score():
+    """A strong FTV quality (Q>=70) clears the filter even when score is dud-level."""
+    ev = _event(explosion_score=76.0)
+    ict = _ict(6.0)
+    ict.flat_vertical_quality = 82.0
+    with patch("app.engines.ict_breakout_monitor.get_settings", return_value=_settings()):
+        ok, reason = _early_momentum_ignition_at_base_readiness(
+            snap=_snap(), event=ev, ict=ict,
+            alert={"tier": "ELITE"}, settings=_settings(),
         )
     assert ok is True
     assert reason == "early_momentum_ignition_at_base"
