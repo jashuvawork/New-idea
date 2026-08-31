@@ -583,6 +583,7 @@ def build_chart_analysis(
 
     from app.engines.advanced_indicators import (
         compute_adx,
+        compute_decisive_candle,
         compute_squeeze,
         compute_supertrend,
         compute_vwap,
@@ -596,6 +597,15 @@ def build_chart_analysis(
     squeeze = asdict(compute_squeeze(highs, lows, closes))
     adx = asdict(compute_adx(highs, lows, closes))
     supertrend = asdict(compute_supertrend(highs, lows, closes))
+    from app.config import get_settings as _gs
+
+    _s = _gs()
+    decisive_candle = asdict(compute_decisive_candle(
+        opens, highs, lows, closes,
+        body_ratio_min=float(getattr(_s, "decisive_candle_body_ratio_min", 0.6) or 0.6),
+        rsi_ceiling=float(getattr(_s, "decisive_candle_rsi_ceiling", 80.0) or 80.0),
+        pullback_lookback=int(getattr(_s, "decisive_candle_pullback_lookback", 5) or 5),
+    ))
     # Always compute VWAP — indices carry no candle volume, so it falls back to a
     # price-anchored session mean (still gives position + reclaim for turn confirmation).
     vwap = asdict(compute_vwap(highs, lows, closes, volumes))
@@ -620,6 +630,7 @@ def build_chart_analysis(
         adx=adx,
         supertrend=supertrend,
         vwap=vwap,
+        decisiveCandle=decisive_candle,
     )
 
 
