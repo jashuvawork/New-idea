@@ -533,6 +533,18 @@ class Settings(BaseSettings):
     early_momentum_ignition_max_move_pct: float = 10.0
     early_momentum_ignition_min_velocity_3s: float = 1.0
     early_momentum_ignition_min_vol_surge: float = 2.0
+    # Flat-base coil breakout PREDICTOR — flag the setup while it's still flat (before the
+    # tier/grade upgrades, which lag). Composes armed-base tightness + index squeeze/VWAP +
+    # option CVD accumulation + side-regime into {coiling, readinessScore, predictedSide}.
+    # Stamped on every alert (coilBreakoutPrediction) for radar visibility; a ripe coil whose
+    # predicted side matches gets a soft rank nudge so the ignition lane can take it at the
+    # first real move. Selection-only; never gates the live trigger/exit.
+    coil_breakout_prediction_enabled: bool = True
+    coil_prediction_influences_ranking: bool = True
+    coil_prediction_max_range_pct: float = 5.0
+    coil_prediction_min_direction_votes: int = 2
+    coil_prediction_min_readiness_for_rank: float = 60.0
+    coil_prediction_rank_bonus: float = 10.0
     # Causal pre-breakout base: repeated past samples arm a contract-local denominator.
     # It is sticky upward across REST/WS observations and may only ratchet to a proven low.
     ict_armed_base_enabled: bool = True
