@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from types import SimpleNamespace
 
 from app.engines.eod_trade_report import (
+    _not_post_peak_chase,
     apply_portfolio_limits,
     build_scorecard,
     generate_eod_trade_report,
@@ -136,6 +137,31 @@ def test_scorecard_measures_early_recall_and_added_losers():
     assert elite["addedLoserInr"] == -1200.0
     assert sc["overall"]["opportunities"] == 2
     assert sc["byLane"]["EXPLODING"]["opportunities"] == 0
+
+
+def test_post_peak_guard_rejects_chase_after_completed_run():
+    t0 = datetime(2026, 8, 20, 11, 40, 0, tzinfo=IST)
+    # A run 78 -> 133 (the real move), then a fade/consolidation to ~125 near the top.
+    prems = (
+        [78 + i * 2 for i in range(28)]        # 78 -> 132 run
+        + [132, 130, 128, 126, 125, 125, 125]  # fade + consolidate near the top
+    )
+    series = [(t0 + timedelta(seconds=20 * i), float(p), 24000.0) for i, p in enumerate(prems)]
+    last = len(series) - 1  # entering here = buying 125 near the 132 peak after a +69% run
+    assert _not_post_peak_chase(
+        series, last, lookback_s=900.0, min_run=0.25, near_top_frac=0.12
+    ) is False
+
+
+def test_post_peak_guard_allows_entry_as_run_starts():
+    t0 = datetime(2026, 8, 20, 11, 40, 0, tzinfo=IST)
+    # A flat base then just the first ticks up — no completed run in the window yet.
+    prems = [70, 70, 71, 70, 71, 72, 73, 74]  # gentle start, <25% run
+    series = [(t0 + timedelta(seconds=20 * i), float(p), 24000.0) for i, p in enumerate(prems)]
+    last = len(series) - 1
+    assert _not_post_peak_chase(
+        series, last, lookback_s=900.0, min_run=0.25, near_top_frac=0.12
+    ) is True
 
 
 def _pos(entry_h, exit_h, side, pnl):
