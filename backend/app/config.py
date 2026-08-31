@@ -84,6 +84,15 @@ class Settings(BaseSettings):
     chop_live_early_fail_min_loss_points: float = 3.0
     chop_live_early_fail_max_velocity_3s: float = 0.0
     live_broker_reconciliation_enabled: bool = True
+    # Live worst/chop: session lift must NOT bypass worst-day live blocks.
+    chop_live_disable_session_lift: bool = True
+    # Hard block all live explosion entries on identified worst/chop days (₹10k live).
+    chop_live_hard_block_worst_day: bool = True
+    # Block faded-vertical-rip and extended session chase at live order wire.
+    chop_live_block_faded_rip: bool = True
+    chop_live_block_extended_chase: bool = True
+    chop_live_extended_chase_min_session_move_pct: float = 28.0
+    chop_live_min_trusted_local_base_pct: float = 15.0
     # Legacy flag — milestone is advisory-only and never blocks live arming.
     live_milestone_required: bool = False
 
