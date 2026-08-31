@@ -652,6 +652,51 @@ def apply_explosion_always_max_lots(
     return max(int(lots), max_lots_for_capital(symbol, premium))
 
 
+def cap_lots_for_base_retest(
+    lots: int,
+    symbol: str,
+    entry_premium: float,
+    base_premium: float,
+) -> int:
+    """Cap lots so a normal retest to the LOCAL BASE can't exceed a % of capital.
+
+    A near-base entry (entry a few % above its base) will usually retest the base before it
+    runs. With full-capital sizing on a cheap option that ordinary dip can be huge in rupees —
+    the +185% Aug31 24150 CE would have been stopped at −₹21k on the retest at ₹2L capital
+    before the rally. This sizes the position so (entry − base) × units stays within
+    size_to_base_retest_max_pct_of_capital, so the base retest cannot trip the per-trade / daily
+    stop and shake the winner out. Only ever REDUCES lots (protective); no-op if disabled or the
+    base is unknown.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "size_to_base_retest_enabled", True)):
+        return int(lots)
+    mult = lot_multiplier(symbol)
+    if float(entry_premium or 0) <= float(base_premium or 0):
+        return int(lots)  # not a near-base long above its base — rule doesn't apply
+    # Size for a modest break BELOW the base, not just a touch of it — winners often wick a few
+    # % under the base before running (Aug31 24150 CE broke ~1pt under its base, then +185%).
+    buffer = float(
+        getattr(settings, "size_to_base_retest_break_buffer_pct", 0.15) or 0.15
+    )
+    stop_floor = float(base_premium or 0) * (1.0 - max(0.0, buffer))
+    risk_pts = float(entry_premium or 0) - stop_floor
+    if mult <= 0 or risk_pts <= 0 or base_premium <= 0:
+        return int(lots)
+    cap = get_capital_snapshot()
+    capital = _effective_capital_inr(cap.availableMarginInr or 0) or float(
+        getattr(settings, "fallback_capital_inr", 200_000.0) or 200_000.0
+    )
+    pct = float(
+        getattr(settings, "size_to_base_retest_max_pct_of_capital", 0.10) or 0.10
+    )
+    max_retest_loss = capital * max(0.0, pct)
+    if max_retest_loss <= 0:
+        return int(lots)
+    max_lots = int(max_retest_loss / (risk_pts * mult))
+    return max(1, min(int(lots), max_lots))
+
+
 def clamp_lots(lots: int, symbol: str = "", premium: float = 0.0) -> int:
     """Clamp to min lots and capital-derived max (optional hard ceiling)."""
     settings = get_settings()

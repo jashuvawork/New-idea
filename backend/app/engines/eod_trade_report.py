@@ -86,6 +86,16 @@ def replay_contract_trades(
         # --- ENTER near the base: full per-trade capital (~₹1.8L), proper SL room ---
         ep = p
         lots = max(1, max_lots_for_capital(symbol, ep))
+        # Size so the base retest can't shake the winner out before it runs (mirror live).
+        if bool(getattr(s, "size_to_base_retest_enabled", True)) and base > 0 and ep > base:
+            cap_inr = _f(getattr(s, "max_sizing_capital_inr", 200_000.0), 200_000.0)
+            pct = _f(getattr(s, "size_to_base_retest_max_pct_of_capital", 0.10), 0.10)
+            buf = _f(getattr(s, "size_to_base_retest_break_buffer_pct", 0.15), 0.15)
+            risk_pts = ep - base * (1.0 - max(0.0, buf))
+            if risk_pts > 0:
+                retest_lots = int((cap_inr * pct) / (risk_pts * units))
+                if retest_lots >= 1:
+                    lots = min(lots, retest_lots)
         min_sl_pts = _f(getattr(s, "elite_full_lot_min_stop_points", 16.0), 16.0)
         min_sl_pct = _f(getattr(s, "elite_full_lot_min_stop_pct_of_premium", 0.18), 0.18)
         stop_pts = max(min_sl_pts, ep * max(0.0, min_sl_pct))

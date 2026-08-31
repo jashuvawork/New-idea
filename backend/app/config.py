@@ -572,6 +572,13 @@ class Settings(BaseSettings):
     # highest OTM-exposure lever — validate on replay before live.
     otm_reversal_entry_enabled: bool = False
     otm_reversal_max_steps: int = 2
+    # Size so a normal retest to the local base cannot exceed this % of capital — otherwise a
+    # full-capital near-base entry on a cheap option gets shaken out on the ordinary base retest
+    # before the move runs (Aug31 24150 CE: −₹21k on the retest at ₹2L before +185%). Protective
+    # (only reduces lots); on by default. Matters most as capital scales up.
+    size_to_base_retest_enabled: bool = True
+    size_to_base_retest_max_pct_of_capital: float = 0.10
+    size_to_base_retest_break_buffer_pct: float = 0.15
     # Causal pre-breakout base: repeated past samples arm a contract-local denominator.
     # It is sticky upward across REST/WS observations and may only ratchet to a proven low.
     ict_armed_base_enabled: bool = True
