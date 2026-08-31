@@ -20,7 +20,6 @@ export function LiveTradingGate({
     { label: 'Live trading', ok: status.flags.enableLiveTrading as boolean },
     { label: 'Risk engine', ok: readiness?.checks.riskEngineOk ?? true },
     { label: 'Paper ready', ok: readiness?.readyForPaper ?? false },
-    { label: '50-trade milestone', ok: readiness?.milestone?.readyForLiveMilestone ?? readiness?.checks.milestonePassed ?? false },
     { label: 'Live ready', ok: readiness?.readyForLive ?? false },
   ];
 

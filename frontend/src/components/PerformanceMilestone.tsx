@@ -22,7 +22,8 @@ function isMilestoneStats(stats: MilestoneStats | null): stats is MilestoneStats
 export function PerformanceMilestone({ stats }: { stats: MilestoneStats | null }) {
   if (!isMilestoneStats(stats)) {
     return (
-      <Panel title="50-Trade Milestone">
+      <Panel title="50-Trade Track Record">
+        <p className="text-[10px] text-nexus-muted mb-2">Advisory batch review — does not block live arming.</p>
         <p className="text-xs text-nexus-muted text-center py-4">Loading track record… (requires backend milestone API)</p>
       </Panel>
     );
@@ -30,17 +31,18 @@ export function PerformanceMilestone({ stats }: { stats: MilestoneStats | null }
 
   const batchLabel = stats.batchNumber > 1 || stats.completedBatches > 0
     ? `Batch ${stats.batchNumber}`
-    : '50-Trade Milestone';
+    : '50-Trade Track Record';
   const badge = stats.readyForLiveMilestone
-    ? 'LIVE READY'
+    ? 'BATCH OK'
     : `${stats.tradeCount}/${stats.targetTrades}`;
   const badgeColor = stats.readyForLiveMilestone ? 'bg-nexus-green' : 'bg-nexus-accent/80';
 
   return (
     <Panel title={batchLabel} badge={badge} badgeColor={badgeColor}>
+      <p className="text-[10px] text-nexus-muted mb-2">Advisory batch review — does not block live arming.</p>
       <div className="mb-3">
         <div className="flex justify-between text-[10px] text-nexus-muted mb-1">
-          <span>Current batch toward live review</span>
+          <span>Current batch progress</span>
           <span className="font-mono">
             {stats.tradeCount} / {stats.targetTrades}
             {stats.lifetimeTradeCount > stats.tradeCount && (
