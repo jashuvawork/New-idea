@@ -1175,6 +1175,21 @@ class Settings(BaseSettings):
     best_side_counter_rank_penalty: float = 18.0
     best_side_global_rank_bonus: float = 15.0
     best_side_fading_waive_bonus: float = 20.0
+    # Session side-regime & flip detector — one confirmed CALL/PUT regime per symbol that
+    # only flips after sustained confirmation (min_confirms consecutive confident votes over
+    # min_seconds). A confident vote needs >= min_vote_confidence of {index chart+mom5,
+    # dominant option leg, tape-confirmed index drift} agreeing. Ranking prefers the confirmed
+    # side and helps (not fights) the in-progress flip target. Selection-only; never gates the
+    # live trigger/exit. Observe-only if side_regime_influences_ranking=false.
+    side_regime_enabled: bool = True
+    side_regime_influences_ranking: bool = True
+    side_regime_min_chart_mom5_pct: float = 0.05
+    side_regime_min_vote_confidence: int = 2
+    side_regime_flip_min_confirms: int = 3
+    side_regime_flip_min_seconds: float = 20.0
+    side_regime_rank_bonus: float = 15.0
+    side_regime_counter_penalty: float = 15.0
+    side_regime_flip_target_bonus: float = 6.0
     # EOD replay — apply live session gates (power hour, directional lock, best-side).
     eod_replay_live_session_gates_enabled: bool = True
 
