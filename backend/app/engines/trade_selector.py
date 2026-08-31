@@ -778,6 +778,7 @@ def _explosion_candidates(
             extended_session_chase_blocked,
             immature_explosion_blocked,
             live_explosion_confirmation_blocked,
+            post_peak_chase_blocked,
             tier_promotion_pad_chase_blocked,
         )
 
@@ -863,6 +864,12 @@ def _explosion_candidates(
                 readiness_reason=first_lift_readiness_reason,
             )
         ):
+            continue
+        # Don't chase the exhaustion of a completed move (symmetric CE/PE). Surgical: a
+        # genuine near-base entry is exempt by construction (current sits at the window low),
+        # so this only blocks the late/mid-rip chase — even for must-take/first-lift.
+        pp_blocked, _pp_reason = post_peak_chase_blocked(event)
+        if pp_blocked:
             continue
         trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
             cand_probe, snap, state=state, ict=ict,
