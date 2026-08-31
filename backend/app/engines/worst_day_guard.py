@@ -624,7 +624,11 @@ def worst_day_allows_candidate(
                     score=score,
                     velocity_3s=v3,
                     settings=settings,
-                    base_move_pct=float(move or 0),
+                    # Pad % for velocity floors — session peak can exceed 25% while
+                    # local base is still inside the 8–25% defensive pad window.
+                    base_move_pct=float(
+                        pad_for_lane if pad_for_lane > 0 else (move or 0)
+                    ),
                     volume_awake=bool(
                         alert.get("ictVolumeAwakening") or alert.get("volumeAwaken")
                     ),
