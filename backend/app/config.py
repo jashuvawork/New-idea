@@ -70,6 +70,20 @@ class Settings(BaseSettings):
     shadow_trade_all_signals: bool = True
     # Live: skip INR force-stops / scratch exits — let open trades hit structural SL.
     live_hold_to_structural_sl: bool = True
+    # Live chop guards — hard blocks at order wire + early-fail exits on worst/chop days.
+    chop_live_guards_enabled: bool = True
+    chop_live_block_immature_local_base: bool = True
+    chop_live_block_premium_5m_fade: bool = True
+    chop_live_premium_5m_fade_min_mom_pct: float = -0.12
+    chop_live_second_leg_block_enabled: bool = True
+    chop_live_second_leg_cooldown_seconds: int = 900
+    chop_live_early_fail_exit_enabled: bool = True
+    chop_live_early_fail_min_hold_seconds: int = 30
+    chop_live_early_fail_max_hold_seconds: int = 180
+    chop_live_early_fail_max_best_points: float = 0.5
+    chop_live_early_fail_min_loss_points: float = 3.0
+    chop_live_early_fail_max_velocity_3s: float = 0.0
+    live_broker_reconciliation_enabled: bool = True
     # Legacy flag — milestone is advisory-only and never blocks live arming.
     live_milestone_required: bool = False
 

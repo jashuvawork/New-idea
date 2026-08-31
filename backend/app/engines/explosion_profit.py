@@ -1607,6 +1607,18 @@ def evaluate_explosion_exit(
     if faded_exit and not hold_to_sl:
         return faded_exit, pnl_inr
 
+    from app.engines.chop_live_guards import chop_live_early_fail_exit_reason
+
+    chop_exit = chop_live_early_fail_exit_reason(
+        trade,
+        hold_seconds=hold,
+        best_points=best,
+        pnl_points=pnl_pts,
+        live_velocity_3s=v3,
+    )
+    if chop_exit:
+        return chop_exit, pnl_inr
+
     # The launch thesis failed immediately: it never established green and live
     # premium is still contracting. Scratch before the wider structural stop.
     if (

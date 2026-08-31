@@ -500,6 +500,7 @@ def immature_explosion_blocked(
     ict: Any = None,
     alert: Optional[dict[str, Any]] = None,
     bullish_local_base: bool = False,
+    skip_elite_bypass: bool = False,
 ) -> tuple[bool, str]:
     """
     Block hot-velocity / displacement noise before a real premium rip prints.
@@ -514,10 +515,11 @@ def immature_explosion_blocked(
     if explosion_event is None:
         return False, ""
 
-    from app.engines.elite_never_block import elite_must_take_bypass_allowed
+    if not skip_elite_bypass:
+        from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    if elite_must_take_bypass_allowed(event=explosion_event, ict=ict, alert=alert):
-        return False, ""
+        if elite_must_take_bypass_allowed(event=explosion_event, ict=ict, alert=alert):
+            return False, ""
 
     move = _session_peak_move(explosion_event)
     if ict is not None:

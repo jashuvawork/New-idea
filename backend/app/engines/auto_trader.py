@@ -2314,6 +2314,36 @@ async def _open_from_candidate(
         ctx_extra["ftvAuthorizationReason"] = final_policy.reason
         ctx_extra["ftvMaxCapitalPct"] = final_policy.max_capital_pct
 
+    from app.engines.chop_live_guards import (
+        chop_live_entry_blocked,
+        chop_live_guard_day_active,
+        chop_second_same_side_leg_blocked,
+    )
+
+    if candidate.mode == "explosion" and (
+        is_live or chop_live_guard_day_active(state, snap, snapshots)
+    ):
+        chop_blocked, chop_reason, chop_meta = chop_live_entry_blocked(
+            candidate,
+            snap,
+            state,
+            snapshots=snapshots,
+            chart_meta=chart_meta if chart_meta else None,
+        )
+        if chop_blocked:
+            return False, chop_reason
+        leg_blocked, leg_reason, leg_meta = chop_second_same_side_leg_blocked(
+            candidate,
+            state,
+            snap,
+            snapshots=snapshots,
+        )
+        if leg_blocked:
+            return False, leg_reason
+        if chop_live_guard_day_active(state, snap, snapshots):
+            ctx_extra["chopLiveGuard"] = True
+            ctx_extra.update({k: v for k, v in chop_meta.items() if k != "chopLiveGuard"})
+
     if is_live or use_parity:
         if not client:
             return False, "broker client required for live / paper-live-parity"
@@ -3471,6 +3501,20 @@ async def process(
     set_session_limits(trading_limits)
 
     state.chopGuards = chop_guard_summary(state, snapshots)
+
+    if settings.enable_live_trading and client is not None:
+        from app.engines.chop_live_guards import adopt_untracked_broker_legs
+
+        adopted = await adopt_untracked_broker_legs(state, client, snapshots)
+        for row in adopted:
+            skipped.append({
+                "symbol": row.get("symbol"),
+                "reason": "broker_leg_adopted",
+                "message": (
+                    f"Adopted untracked broker leg {row.get('side')} "
+                    f"{row.get('strike')} for exit management"
+                ),
+            })
 
     if not profit_gate.newEntriesAllowed:
         skipped.append({
