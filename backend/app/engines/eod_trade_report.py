@@ -50,8 +50,13 @@ def replay_contract_trades(
     t0: datetime,
     settings: Any = None,
     max_trades: int = 4,
+    capital_slots: int = 1,
 ) -> list[dict[str, Any]]:
-    """Replay one contract with RE-ENTRIES → list of would-have-traded records."""
+    """Replay one contract with RE-ENTRIES → list of would-have-traded records.
+
+    ``capital_slots`` splits the sizing book into that many concurrent slots (each position
+    sized to ~capital/slots), so a multi-position book stays within the same total capital.
+    """
     from app.engines.capital_allocator import lot_multiplier, max_lots_for_capital
     from app.engines.explosion_profit import evaluate_explosion_exit
     from app.engines.moment_stage_trail import build_moment_stage_plan
@@ -84,12 +89,15 @@ def replay_contract_trades(
         if not entered:
             i += 1
             continue
-        # --- ENTER near the base: full per-trade capital (~₹1.8L), proper SL room ---
+        # --- ENTER near the base: per-slot capital (capital/slots), proper SL room ---
         ep = p
         lots = max(1, max_lots_for_capital(symbol, ep))
+        slots = max(1, int(capital_slots))
+        if slots > 1:
+            lots = max(1, lots // slots)  # split the book so N can run within one capital pool
         # Size so the base retest can't shake the winner out before it runs (mirror live).
         if bool(getattr(s, "size_to_base_retest_enabled", True)) and base > 0 and ep > base:
-            cap_inr = _f(getattr(s, "max_sizing_capital_inr", 200_000.0), 200_000.0)
+            cap_inr = _f(getattr(s, "max_sizing_capital_inr", 200_000.0), 200_000.0) / slots
             pct = _f(getattr(s, "size_to_base_retest_max_pct_of_capital", 0.10), 0.10)
             buf = _f(getattr(s, "size_to_base_retest_break_buffer_pct", 0.15), 0.15)
             risk_pts = ep - base * (1.0 - max(0.0, buf))
@@ -299,6 +307,7 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
     t0 = spot_pairs[0][0]
     spot_rel = [((t - t0).total_seconds(), sp) for t, sp in spot_pairs]
 
+    slots = max(1, int(_f(getattr(settings, "eod_report_max_concurrent", 1), 1)))
     candidates: list[dict[str, Any]] = []
     for _m, sym, side, strike, tier in targets:
         ser = sorted(x for x in series_map.get((sym, side, strike), []) if x[1] > 0)
@@ -307,6 +316,7 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
         candidates.extend(replay_contract_trades(
             symbol=sym, side=side, strike=strike, tier=tier,
             series=ser, spot_rel=spot_rel, t0=t0, settings=settings,
+            capital_slots=slots,
         ))
 
     taken = apply_portfolio_limits(candidates, settings=settings)
@@ -325,6 +335,7 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
         "losses": len(taken) - wins,
         "netPnlInr": total,
         "dailyLossStopInr": daily_stop,
+        "maxConcurrent": slots,
         "tapeTruncated": tape_truncated,
         "scorecard": build_scorecard(targets, taken, settings=settings),
         "note": (
@@ -344,27 +355,36 @@ def apply_portfolio_limits(
     *,
     settings: Any = None,
 ) -> list[dict[str, Any]]:
-    """Model the live book: one position at a time, halt for the day at the loss stop.
+    """Model the live book: up to N concurrent positions, halt for the day at the loss stop.
 
-    The per-contract replay generates every candidate leg independently; live trading holds
-    ONE position at a time and stops taking new entries once the day's loss stop is hit.
-    Applying those turns an unbounded 'take everything' number into a realistic one.
+    The per-contract replay generates every candidate leg independently; live trading runs a
+    bounded number of positions at once (``eod_report_max_concurrent`` slots, ``eod_report_
+    same_side_cap`` per side — mirroring the live risk engine) and stops taking new entries
+    once the day's loss stop is hit. With 1 slot this is the old one-at-a-time behaviour.
     """
     s = settings or get_settings()
     daily_stop = _f(getattr(s, "daily_loss_stop_inr", 20_000.0), 20_000.0)
+    max_conc = max(1, int(_f(getattr(s, "eod_report_max_concurrent", 1), 1)))
+    same_side_cap = max(1, int(_f(getattr(s, "eod_report_same_side_cap", 2), 2)))
     ordered = sorted(candidates, key=lambda t: t.get("_entryDt") or datetime.now(IST))
     taken: list[dict[str, Any]] = []
     cum = 0.0
-    open_until: Optional[datetime] = None
+    # open positions as (exit_time, side); prune those that have closed by the new entry time
+    open_positions: list[tuple[datetime, str]] = []
     for t in ordered:
         edt = t.get("_entryDt")
         xdt = t.get("_exitDt")
+        side = str(t.get("side") or "").upper()
         if daily_stop > 0 and cum <= -abs(daily_stop):
             break  # daily loss stop hit — no more entries today
-        if open_until is not None and edt is not None and edt < open_until:
-            continue  # a position is already open — one at a time
+        if edt is not None:
+            open_positions = [(xu, sd) for (xu, sd) in open_positions if xu is None or xu > edt]
+        if len(open_positions) >= max_conc:
+            continue  # all slots occupied
+        if sum(1 for _xu, sd in open_positions if sd == side) >= same_side_cap:
+            continue  # same-side concurrency cap
         taken.append(t)
         cum += _f(t.get("pnlInr"))
-        open_until = xdt
+        open_positions.append((xdt, side))
     return taken
 
