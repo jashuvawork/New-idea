@@ -1262,7 +1262,7 @@ async def _open_from_candidate(
     elite_full_lot = bool(
         getattr(settings, "elite_full_lot_enabled", True)
         and candidate.mode == "explosion"
-        and _tier_u == "ELITE"
+        and _tier_u in ("ELITE", "EXPLODING")
         and (
             index_confirmed_ftv
             or not bool(getattr(settings, "elite_full_lot_requires_index_confirm", True))
@@ -1673,10 +1673,18 @@ async def _open_from_candidate(
             and bool(getattr(settings, "explosion_always_force_max_lots", True))
         ),
     )
-    # ELITE full-capital sleeve: keep cash-affordable lots; do not shrink to fit an 8% SL INR budget.
+    # ELITE / EXPLODING full-capital sleeve: keep cash-affordable lots; do not shrink
+    # to fit an 8% SL INR budget.
     if elite_full_lot and bool(
         getattr(settings, "elite_full_lot_preserve_lots_over_sl_budget", True)
     ):
+        top_rank_full_budget_lots = True
+    live_structural_hold = (
+        bool(getattr(settings, "enable_live_trading", False))
+        and bool(getattr(settings, "live_hold_to_structural_sl", False))
+        and candidate.mode == "explosion"
+    )
+    if live_structural_hold:
         top_rank_full_budget_lots = True
     exit_plan = tune_exit_plan_for_position(
         exit_plan,

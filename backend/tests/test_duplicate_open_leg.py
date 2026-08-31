@@ -21,6 +21,11 @@ def _settings():
     s.emergency_stop_enabled = False
     s.daily_loss_stop_inr = 0
     s.block_duplicate_open_leg = True
+    s.enable_live_trading = False
+    s.live_hold_to_structural_sl = False
+    s.ftv_ranked_allocation_enabled = True
+    s.ftv_allocation_max_positions = 3
+    s.ftv_allocation_max_same_side = 2
     return s
 
 

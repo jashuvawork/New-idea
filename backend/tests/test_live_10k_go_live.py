@@ -35,7 +35,7 @@ def test_live_10k_overlay_scales_capital_and_risk():
     assert env["EMERGENCY_STOP_ENABLED"] == "false"
     assert env["EMERGENCY_STOP_INR"] == "1000"
     assert env["LIVE_HOLD_TO_STRUCTURAL_SL"] == "true"
-    assert env["MAX_RISK_PER_TRADE_INR"] == "200"
+    assert env["MAX_RISK_PER_TRADE_INR"] == "0"
     assert env["EXPLOSION_PER_TRADE_MAX_LOSS_INR"] == "0"
     assert env["EXPLOSION_EXCEPTIONAL_PER_TRADE_MAX_LOSS_INR"] == "0"
     assert env["INDEX_CONFIRMED_FTV_PER_TRADE_MAX_LOSS_INR"] == "0"
@@ -156,3 +156,54 @@ def test_live_hold_skips_inr_force_stop_and_rides_to_adaptive_sl():
     ):
         reason2, _ = evaluate_explosion_exit(trade, 43.0, "ELITE", 65, live_velocity_3s=-1.0)
     assert reason2 in ("adaptive_stop_loss", "explosion_stop_loss")
+
+
+def test_live_structural_hold_bypasses_entry_per_trade_risk_cap():
+    """₹10k live: full sleeve + structural SL must not die on pre-entry INR clip."""
+    from unittest.mock import MagicMock, patch
+
+    from app.engines.risk_engine import RiskEngine
+    from app.models.schemas import AutoTraderState, Side, StrategyType
+
+    settings = MagicMock()
+    settings.aggressive_lot_sizing = False
+    settings.aggressive_max_open_scalps = 3
+    settings.swing_max_open = 1
+    settings.per_trade_capital_pct = 0.9
+    settings.max_risk_per_trade_inr = 200
+    settings.swing_max_loss_inr = 20_000
+    settings.emergency_stop_enabled = False
+    settings.daily_loss_stop_inr = 1000
+    settings.block_duplicate_open_leg = True
+    settings.enable_live_trading = True
+    settings.live_hold_to_structural_sl = True
+    settings.ftv_ranked_allocation_enabled = True
+    settings.ftv_allocation_max_positions = 3
+    settings.ftv_allocation_max_same_side = 2
+
+    cap = MagicMock()
+    cap.availableMarginInr = 10_000
+    cap.perTradeCapitalInr = 9_000
+
+    engine = RiskEngine()
+    state = AutoTraderState(running=True)
+
+    with (
+        patch("app.engines.risk_engine.get_settings", return_value=settings),
+        patch("app.engines.risk_engine.get_capital_snapshot", return_value=cap),
+    ):
+        ok, reason = engine.check_new_entry(
+            state,
+            "NIFTY",
+            Side.PUT,
+            lots=2,
+            premium=68.0,
+            lot_multiplier=65,
+            strategy_type=StrategyType.EXPLOSIVE,
+            strike=24050.0,
+            stop_points=8.0,
+            ignore_per_trade_risk_cap=False,
+        )
+
+    assert ok is True
+    assert reason == "passed"
