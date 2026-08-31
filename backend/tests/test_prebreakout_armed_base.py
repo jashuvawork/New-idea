@@ -214,6 +214,12 @@ def test_aug17_elite_base_ready_is_s_preauthorized_at_54(_open, side):
     settings = Settings(
         best_trades_only_enabled=False,
         edge_engine_enabled=False,
+        # Isolate the STRICT ELITE_BASE_READY path — the opt-in coil/ignition lanes are a
+        # separate (intentional) structure-based bypass and are validated elsewhere.
+        coil_armed_low_score_entry_enabled=False,
+        early_momentum_ignition_enabled=False,
+        coil_armed_session_lift_enabled=False,
+        otm_reversal_entry_enabled=False,
     )
     clock, scan, _advance = _scanner(side, settings)
     snap = _snapshot(side)
@@ -258,6 +264,12 @@ def test_elite_base_ready_cannot_bypass_missing_orderflow_or_otm(_open, side):
         best_trades_only_enabled=False,
         edge_engine_enabled=False,
         explosion_shallow_otm_history_steps=1,
+        # Isolate the STRICT armed path: the opt-in coil/ignition lanes are a separate
+        # structure-based bypass (validated in their own tests), not this contract.
+        coil_armed_low_score_entry_enabled=False,
+        early_momentum_ignition_enabled=False,
+        coil_armed_session_lift_enabled=False,
+        otm_reversal_entry_enabled=False,
     )
     clock, scan, _advance = _scanner(side, settings)
     snap = _snapshot(side)

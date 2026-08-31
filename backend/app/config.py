@@ -526,9 +526,10 @@ class Settings(BaseSettings):
     # entries land late (Aug31 24150 CE only caught at ~18% off base). Fires only for a top-tier
     # ELITE/EXPLODING contract at a confirmed base with a genuine ignition: v3 >= floor AND
     # accelerating (v3 >= v9) AND volume/CVD confirmation AND ATM/ITM. OPT-IN (default off) — it
-    # admits earlier entries on the live path, so validate on replay before enabling live. All
-    # downstream selector/chart/fake-trap/session/risk gates still apply after it.
-    early_momentum_ignition_enabled: bool = False
+    # admits earlier entries on the live path. ENABLED — the sole purpose is to catch these
+    # ignitions at the base; the size/loss backstops (per-trade INR cap, daily stop, base-retest
+    # sizing, fake-trap size caps) still bound each trade, they just don't block the entry.
+    early_momentum_ignition_enabled: bool = True
     early_momentum_ignition_min_move_pct: float = 1.0
     early_momentum_ignition_max_move_pct: float = 10.0
     early_momentum_ignition_min_velocity_3s: float = 1.0
@@ -556,9 +557,9 @@ class Settings(BaseSettings):
     # Coil-armed LOW-SCORE base entry — take a top FTV/V/ELITE/EXPLODING at the local base
     # while its score/grade is still LOW (they lag the move), when the coil predictor is
     # strongly ripe + directional + near-base. Bounded by a hard noise floor (never trades
-    # junk). HIGHEST-RISK lane (it lowers the score bar on the live path) — OPT-IN, default
-    # off; validate on replay/paper before enabling live.
-    coil_armed_low_score_entry_enabled: bool = False
+    # junk). ENABLED — this is the lane that takes CE/PE AT the flat base before the score/thrust
+    # catches up. Size/loss backstops still apply (they cap size, not entry).
+    coil_armed_low_score_entry_enabled: bool = True
     coil_armed_low_score_min_readiness: float = 72.0
     coil_armed_low_score_min_direction_votes: int = 3
     coil_armed_low_score_max_base_move_pct: float = 12.0
@@ -566,9 +567,10 @@ class Settings(BaseSettings):
     coil_armed_low_score_min_vol_surge: float = 1.5
     # Let a strongly-ripe coil-armed top setup LIFT a chop/worst-day session halt (to
     # elite-only mode) so the early lanes can fire on a chop day instead of the session block
-    # vetoing the near-base winner. Session-level — OPT-IN, default off; requires a HIGH coil
-    # readiness so ordinary chop coils never re-open the session. Validate before live.
-    coil_armed_session_lift_enabled: bool = False
+    # vetoing the near-base winner. Session-level — ENABLED so a chop/worst-day halt never
+    # blocks a genuinely ripe near-base setup; the HIGH readiness floor keeps ordinary chop
+    # coils from re-opening the session.
+    coil_armed_session_lift_enabled: bool = True
     coil_armed_session_lift_min_readiness: float = 75.0
     coil_armed_session_lift_max_base_move_pct: float = 12.0
     # OTM reversal entry — the #1 cause of explosion_near_miss on today's CALL winners was
@@ -576,9 +578,9 @@ class Settings(BaseSettings):
     # 'bearish' day) and the 1-step shallow allowance rejected them, then spot rallied UP
     # through them (24150 CE +105%). This lifts the OTM depth to otm_reversal_max_steps ONLY
     # when the index is CONFIRMED reversing toward that side (side-regime / drift / breakout) —
-    # so it catches the reversal-rally winner, not an OTM lottery ticket. OPT-IN, default off;
-    # highest OTM-exposure lever — validate on replay before live.
-    otm_reversal_entry_enabled: bool = False
+    # so it catches the reversal-rally winner, not an OTM lottery ticket. ENABLED — gated on a
+    # confirmed index reversal, so it only opens depth for the real reversal-rally moment.
+    otm_reversal_entry_enabled: bool = True
     otm_reversal_max_steps: int = 2
     # Size so a normal retest to the local base cannot exceed this % of capital — otherwise a
     # full-capital near-base entry on a cheap option gets shaken out on the ordinary base retest
