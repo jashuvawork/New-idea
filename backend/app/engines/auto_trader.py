@@ -1667,6 +1667,14 @@ async def _open_from_candidate(
         top = snap.topExplosion or {}
         local_base_prem = float(top.get("ictBasePremium") or 0)
 
+    # Size so a normal retest to the local base can't trip the per-trade/daily stop and shake
+    # the winner out (Aug31 24150 CE: full-capital size → the ₹37→₹33.6 base retest hit the
+    # ₹20k cap BEFORE the +185% rally). Protective: only reduces lots, never raises them.
+    if candidate.mode == "explosion" and local_base_prem > 0 and fill_premium > 0:
+        from app.engines.capital_allocator import cap_lots_for_base_retest
+
+        lots = cap_lots_for_base_retest(lots, symbol, fill_premium, local_base_prem)
+
     exit_plan = _attach_exit_plan(
         snap, candidate.strategy_type, candidate.side.value,
         candidate.confidence, news,
