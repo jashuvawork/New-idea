@@ -532,6 +532,7 @@ async def _open_from_candidate(
     snap = candidate.snap
     policy_decision = None
     policy_ranking = None
+    final_ranking = None
 
     # Jul29: stop scalp entries — explosions only.
     if not getattr(settings, "scalp_entries_enabled", False):
@@ -662,6 +663,9 @@ async def _open_from_candidate(
     if snapshots:
         live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
         if live_blocked and settings.enable_live_trading:
+            if bool(getattr(settings, "live_disable_session_lift", True)):
+                return False, "live_no_session_lift"
+
             from app.engines.chop_live_guards import chop_live_session_lift_allowed
 
             if not chop_live_session_lift_allowed(state, snap, snapshots):
@@ -2319,6 +2323,22 @@ async def _open_from_candidate(
         ctx_extra["ftvAuthorizationReason"] = final_policy.reason
         ctx_extra["ftvMaxCapitalPct"] = final_policy.max_capital_pct
 
+    if is_live and candidate.mode == "explosion":
+        from app.engines.live_best_trades import live_best_trade_entry_blocked
+
+        live_blocked, live_reason, live_meta = live_best_trade_entry_blocked(
+            candidate,
+            snap,
+            state,
+            snapshots=snapshots,
+            ranking=final_ranking or policy_ranking,
+            chart_meta=chart_meta if chart_meta else None,
+        )
+        if live_blocked:
+            return False, live_reason
+        ctx_extra["liveBestTradeGate"] = True
+        ctx_extra.update({k: v for k, v in live_meta.items() if k != "liveBestTradeGate"})
+
     from app.engines.chop_live_guards import (
         chop_live_entry_blocked,
         chop_live_guard_day_active,
@@ -3623,7 +3643,8 @@ async def process(
             from app.engines.chop_live_guards import chop_live_session_lift_allowed
 
             ref_snap = next(iter(snapshots.values()))
-            if not chop_live_session_lift_allowed(state, ref_snap, snapshots):
+            lift_ok = chop_live_session_lift_allowed(state, ref_snap, snapshots)
+            if not lift_ok or bool(getattr(settings, "live_disable_session_lift", True)):
                 session_lift = False
         if policy == "PAUSED" and not session_lift:
             skipped.append({
