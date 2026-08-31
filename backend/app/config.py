@@ -93,6 +93,24 @@ class Settings(BaseSettings):
     chop_live_block_extended_chase: bool = True
     chop_live_extended_chase_min_session_move_pct: float = 28.0
     chop_live_min_trusted_local_base_pct: float = 15.0
+    # Live best-trades-only — strict real-money quality bar (₹10k book).
+    live_best_trades_only_enabled: bool = True
+    live_best_trades_min_grade: str = "S"
+    live_best_trades_min_explosion_score: float = 200.0
+    live_best_trades_tiers_csv: str = "ELITE,EXPLODING"
+    live_best_trades_require_first_lift: bool = True
+    live_best_trades_min_local_base_pct: float = 15.0
+    live_best_trades_require_chart_aligned: bool = True
+    live_max_open_positions: int = 1
+    live_max_same_side_positions: int = 1
+    live_pause_after_session_losses: int = 1
+    live_disable_session_lift: bool = True
+    live_early_fail_exit_enabled: bool = True
+    live_early_fail_min_hold_seconds: int = 45
+    live_early_fail_max_hold_seconds: int = 240
+    live_early_fail_max_best_points: float = 1.0
+    live_early_fail_min_loss_points: float = 2.5
+    live_early_fail_max_velocity_3s: float = 0.5
     # Legacy flag — milestone is advisory-only and never blocks live arming.
     live_milestone_required: bool = False
 
