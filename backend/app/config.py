@@ -556,6 +556,13 @@ class Settings(BaseSettings):
     coil_armed_low_score_max_base_move_pct: float = 12.0
     coil_armed_low_score_min_score: float = 40.0
     coil_armed_low_score_min_vol_surge: float = 1.5
+    # Let a strongly-ripe coil-armed top setup LIFT a chop/worst-day session halt (to
+    # elite-only mode) so the early lanes can fire on a chop day instead of the session block
+    # vetoing the near-base winner. Session-level — OPT-IN, default off; requires a HIGH coil
+    # readiness so ordinary chop coils never re-open the session. Validate before live.
+    coil_armed_session_lift_enabled: bool = False
+    coil_armed_session_lift_min_readiness: float = 75.0
+    coil_armed_session_lift_max_base_move_pct: float = 12.0
     # Causal pre-breakout base: repeated past samples arm a contract-local denominator.
     # It is sticky upward across REST/WS observations and may only ratchet to a proven low.
     ict_armed_base_enabled: bool = True
