@@ -641,7 +641,35 @@ def worst_day_allows_candidate(
                         alert.get("ictArmedBaseLaunch")
                         or str(alert.get("momentType") or "") == "armed_base_launch"
                     ),
-                    first_lift=bool(alert.get("ictFirstLift")),
+                    first_lift=(
+                        bool(alert.get("ictFirstLift"))
+                        or (
+                            bool(alert.get("ictFlatThenVertical"))
+                            and (
+                                alert.get("ictArmedBaseLaunch")
+                                or str(alert.get("momentType") or "")
+                                == "armed_base_launch"
+                            )
+                            and pad_for_lane > 0
+                            and float(
+                                getattr(
+                                    settings,
+                                    "ict_v_rip_pad_min_move_pct",
+                                    2.0,
+                                )
+                                or 2.0
+                            )
+                            <= pad_for_lane
+                            <= float(
+                                getattr(
+                                    settings,
+                                    "top_ftv_a_pad_velocity_max_move_pct",
+                                    25.0,
+                                )
+                                or 25.0
+                            )
+                        )
+                    ),
                 )
                 day_mode = ""
                 try:
