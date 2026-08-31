@@ -1479,6 +1479,113 @@ def _early_momentum_ignition_at_base_readiness(
     return True, "early_momentum_ignition_at_base"
 
 
+def _coil_armed_low_score_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Take a top FTV/V/ELITE/EXPLODING at the local base while its SCORE is still low.
+
+    Score and causal grade LAG the move — requiring a high score means entering after the
+    run. This lane authorizes an entry at the base on a LOW score when the flat-coil predictor
+    is strongly ripe AND directional AND near-base — i.e. the *structure and prediction* are
+    strong even though the *score* hasn't caught up. Bounded by a hard noise floor (never
+    trades genuine junk), near-base only, volume/CVD confirmation, ATM/ITM. Highest-risk lane;
+    opt-in (default off) — validate on replay before enabling live.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "coil_armed_low_score_entry_enabled", False)):
+        return False, ""
+    row = alert if isinstance(alert, dict) else {}
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False, ""
+
+    from app.engines.coil_breakout_predictor import coil_breakout_prediction
+
+    try:
+        pred = coil_breakout_prediction(snap, event, ict, settings=settings)
+    except Exception:
+        return False, ""
+    if not pred.get("coiling"):
+        return False, ""
+    if str(pred.get("predictedSide") or "") != side:
+        return False, ""
+
+    readiness = float(pred.get("readinessScore") or 0)
+    votes = int(pred.get("directionVotes") or 0)
+    min_readiness = float(
+        getattr(settings, "coil_armed_low_score_min_readiness", 72.0) or 72.0
+    )
+    min_votes = int(
+        getattr(settings, "coil_armed_low_score_min_direction_votes", 3) or 3
+    )
+    if readiness < min_readiness or votes < min_votes:
+        return False, ""
+
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    max_base = float(
+        getattr(settings, "coil_armed_low_score_max_base_move_pct", 12.0) or 12.0
+    )
+    if base_move > max_base:
+        return False, ""
+
+    # Never trade genuine noise: a hard score floor below which even a ripe coil is skipped.
+    score = float(
+        getattr(event, "explosion_score", 0) or row.get("explosionScore") or 0
+    )
+    noise_floor = float(
+        getattr(settings, "coil_armed_low_score_min_score", 40.0) or 40.0
+    )
+    if score < noise_floor:
+        return False, ""
+
+    vol_surge = float(
+        getattr(event, "volume_surge", 0) or row.get("volumeSurge") or 0
+    )
+    vol_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
+    cvd = bool(row.get("optionCvdBuying") or row.get("optionCvdAccelerating"))
+    min_vol = float(
+        getattr(settings, "coil_armed_low_score_min_vol_surge", 1.5) or 1.5
+    )
+    if not (vol_awake or vol_surge >= min_vol or cvd):
+        return False, ""
+
+    if snap is not None:
+        strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+        spot = float(getattr(snap, "spot", 0) or 0)
+        atm = float(getattr(snap, "atmStrike", 0) or 0)
+        if strike > 0 and spot > 0:
+            from app.engines.moneyness import classify_moneyness
+            from app.models.schemas import Side as _Side
+
+            money = classify_moneyness(
+                _Side(side), strike, spot,
+                symbol=str(getattr(snap, "symbol", "") or ""),
+                atm=atm if atm > 0 else None,
+            )
+            if money not in ("ATM", "ITM"):
+                return False, "coil_armed_requires_atm_itm"
+    return True, "coil_armed_low_score_base_entry"
+
+
 def first_lift_entry_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -1565,6 +1672,20 @@ def first_lift_entry_readiness(
     )
     if ign_ok:
         return True, ign_reason
+
+    # Coil-armed LOW-SCORE base entry (opt-in) — take a top FTV/V/ELITE/EXPLODING at the local
+    # base while its score/grade is still LOW (they lag), when the coil predictor is strongly
+    # ripe + directional at the base. Never below a hard noise floor. Highest-risk lane —
+    # default off; validate on replay before live.
+    coil_ok, coil_reason = _coil_armed_low_score_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=row,
+        settings=settings,
+    )
+    if coil_ok:
+        return True, coil_reason
 
     from app.engines.early_radar_pad_capture import (
         building_armed_prelaunch_entry_readiness,

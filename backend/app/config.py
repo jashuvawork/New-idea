@@ -545,6 +545,24 @@ class Settings(BaseSettings):
     coil_prediction_min_direction_votes: int = 2
     coil_prediction_min_readiness_for_rank: float = 60.0
     coil_prediction_rank_bonus: float = 10.0
+    # Coil-armed LOW-SCORE base entry — take a top FTV/V/ELITE/EXPLODING at the local base
+    # while its score/grade is still LOW (they lag the move), when the coil predictor is
+    # strongly ripe + directional + near-base. Bounded by a hard noise floor (never trades
+    # junk). HIGHEST-RISK lane (it lowers the score bar on the live path) — OPT-IN, default
+    # off; validate on replay/paper before enabling live.
+    coil_armed_low_score_entry_enabled: bool = False
+    coil_armed_low_score_min_readiness: float = 72.0
+    coil_armed_low_score_min_direction_votes: int = 3
+    coil_armed_low_score_max_base_move_pct: float = 12.0
+    coil_armed_low_score_min_score: float = 40.0
+    coil_armed_low_score_min_vol_surge: float = 1.5
+    # Let a strongly-ripe coil-armed top setup LIFT a chop/worst-day session halt (to
+    # elite-only mode) so the early lanes can fire on a chop day instead of the session block
+    # vetoing the near-base winner. Session-level — OPT-IN, default off; requires a HIGH coil
+    # readiness so ordinary chop coils never re-open the session. Validate before live.
+    coil_armed_session_lift_enabled: bool = False
+    coil_armed_session_lift_min_readiness: float = 75.0
+    coil_armed_session_lift_max_base_move_pct: float = 12.0
     # Causal pre-breakout base: repeated past samples arm a contract-local denominator.
     # It is sticky upward across REST/WS observations and may only ratchet to a proven low.
     ict_armed_base_enabled: bool = True

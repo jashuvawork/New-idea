@@ -17,6 +17,67 @@ def _lift_enabled() -> bool:
     return bool(getattr(get_settings(), "top_signal_session_lift_enabled", True))
 
 
+def _alert_is_coil_armed_top(
+    alert: Optional[Mapping[str, Any]],
+    settings: Any = None,
+) -> bool:
+    """A strongly-ripe, directional, near-base coil (from the coil predictor) counts as a
+    top signal that may lift a chop/worst-day session halt.
+
+    This is what lets the early-ignition / low-score lanes actually fire on a chop day —
+    otherwise the session block vetoes the very near-base winner we want. Opt-in and gated
+    to a HIGH coil readiness so ordinary chop coils do NOT re-open the session.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "coil_armed_session_lift_enabled", False)):
+        return False
+    if not isinstance(alert, Mapping):
+        return False
+    if not bool(alert.get("coilCoiling")):
+        return False
+    side = str(alert.get("side") or "").upper()
+    predicted = str(alert.get("coilPredictedSide") or "")
+    if not predicted or predicted != side:
+        return False
+    readiness = float(alert.get("coilReadinessScore") or 0)
+    if readiness < float(
+        getattr(settings, "coil_armed_session_lift_min_readiness", 75.0) or 75.0
+    ):
+        return False
+    base_move = float(
+        alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct") or 0
+    )
+    if base_move > float(
+        getattr(settings, "coil_armed_session_lift_max_base_move_pct", 12.0) or 12.0
+    ):
+        return False
+    tier = str(alert.get("tier") or "").upper()
+    # Top moment intent only: ELITE/EXPLODING, or FTV/V structure present.
+    if tier not in ("ELITE", "EXPLODING") and not (
+        alert.get("ictFlatThenVertical") or alert.get("ictVRipReady")
+    ):
+        return False
+    return True
+
+
+def snapshots_have_coil_armed_top_signal(
+    snapshots: Optional[dict[str, SymbolSnapshot]],
+) -> bool:
+    """True when any radar alert is a strongly-ripe coil-armed top setup (opt-in)."""
+    settings = get_settings()
+    if not snapshots or not bool(
+        getattr(settings, "coil_armed_session_lift_enabled", False)
+    ):
+        return False
+    for snap in snapshots.values():
+        if not getattr(snap, "dataAvailable", False):
+            continue
+        for alert in getattr(snap, "explosionAlerts", None) or []:
+            if _alert_is_coil_armed_top(alert, settings):
+                return True
+    return False
+
+
 def snapshots_have_top_signal_session_lift(
     snapshots: Optional[dict[str, SymbolSnapshot]],
 ) -> bool:
@@ -42,6 +103,9 @@ def snapshots_have_top_signal_session_lift(
     from app.engines.bullish_local_base import snapshots_have_bullish_local_base_pad
 
     if snapshots_have_bullish_local_base_pad(snapshots):
+        return True
+
+    if snapshots_have_coil_armed_top_signal(snapshots):
         return True
 
     return False
@@ -92,6 +156,8 @@ def candidate_qualifies_top_signal_session_lift(
         from app.engines.bullish_local_base import alert_is_bullish_local_base_pad_entry
 
         if alert_is_bullish_local_base_pad_entry(alert_row, snap_v):
+            return True
+        if _alert_is_coil_armed_top(alert_row):
             return True
 
     return False
