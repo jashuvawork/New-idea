@@ -5,6 +5,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from app.engines.eod_trade_report import (
+    build_scorecard,
     generate_eod_trade_report,
     replay_contract_trades,
 )
@@ -18,9 +19,11 @@ def _series(prems, t0):
 
 def test_replay_captures_near_base_runner_with_reentry():
     t0 = datetime(2026, 8, 20, 10, 0, 0, tzinfo=IST)
-    # Rip 60 -> 130 (near-base entry ~10-25% off base), pull back, then a 2nd leg.
+    # Flat base ~66s (so the 45s index drift can confirm while premium is still at the base),
+    # then a rip 60 -> 130, a pullback, and a 2nd leg. The near-base window is <=15% off base.
     prems = (
-        [60 + 2 * i for i in range(36)]      # 60 -> 130
+        [60] * 22                              # flat base — drift builds, premium at base
+        + [60 + 2 * i for i in range(36)]      # 60 -> 130 rip (enters ~10-15% off base)
         + [130 - 3 * i for i in range(1, 16)]  # -> ~85
         + [85 + 2 * i for i in range(1, 30)]   # 2nd leg 85 -> ~143
         + [143 - 4 * i for i in range(1, 12)]
@@ -33,9 +36,9 @@ def test_replay_captures_near_base_runner_with_reentry():
         series=series, spot_rel=spot_rel, t0=t0,
     )
     assert trades, "expected at least one generated trade"
-    # Entry near the base (<=25% off base), a real captured move, and a lot count.
+    # Entry near the base (<=15% off base), a real captured move, and a lot count.
     first = trades[0]
-    assert first["offBasePct"] <= 25.0
+    assert first["offBasePct"] <= 15.0
     assert first["lots"] >= 1
     assert first["peakPct"] > 0
 
@@ -52,7 +55,8 @@ def test_generate_report_unpacks_ranked_targets_and_takes_near_base():
     ]
     t0 = datetime(2026, 8, 20, 10, 0, 0, tzinfo=IST)
     prems = (
-        [60 + 2 * i for i in range(36)]        # 60 -> 130 near-base rip
+        [60] * 22                              # flat base so drift confirms at the base
+        + [60 + 2 * i for i in range(36)]      # 60 -> 130 near-base rip
         + [130 - 3 * i for i in range(1, 16)]
         + [85 + 2 * i for i in range(1, 30)]
     )
@@ -81,8 +85,11 @@ def test_generate_report_unpacks_ranked_targets_and_takes_near_base():
 
     assert rep["status"] == "ok"
     assert rep["tradeCount"] >= 1
-    # Every taken entry is near the base (<=25% off base) — the near-base entry rule.
-    assert all(t["offBasePct"] <= 25.0 for t in rep["trades"])
+    # Every taken entry is near the base (<=15% off base) — the near-base entry rule.
+    assert all(t["offBasePct"] <= 15.0 for t in rep["trades"])
+    # The scorecard is present and measures the ELITE lane's near-base recall.
+    assert "scorecard" in rep
+    assert rep["scorecard"]["byLane"]["ELITE"]["capturedNearBase"] >= 1
 
 
 def test_replay_no_trade_on_flat_chop():
@@ -96,3 +103,33 @@ def test_replay_no_trade_on_flat_chop():
     )
     # A flat chop with no sustained drift/base-lift should not generate a runner trade.
     assert all(t["peakPct"] < 30 for t in trades)
+
+
+def test_scorecard_measures_early_recall_and_added_losers():
+    # Two ELITE opportunities that day (MFE >= 30%); one EXPLODING that did not clear the bar.
+    targets = [
+        (140.0, "SENSEX", "CALL", 77000.0, "ELITE"),
+        (55.0, "NIFTY", "PUT", 24000.0, "ELITE"),
+        (12.0, "SENSEX", "CALL", 78000.0, "EXPLODING"),  # below opportunity bar
+    ]
+    taken = [
+        # captured the first opportunity NEAR the base (early) and it won
+        {"symbol": "SENSEX", "side": "CALL", "strike": 77000.0, "tier": "ELITE",
+         "offBasePct": 11.0, "pnlInr": 5000.0},
+        # captured the second opportunity but LATE (off base) — not counted as early recall
+        {"symbol": "NIFTY", "side": "PUT", "strike": 24000.0, "tier": "ELITE",
+         "offBasePct": 22.0, "pnlInr": 800.0},
+        # an added loser that was not one of the opportunities
+        {"symbol": "SENSEX", "side": "CALL", "strike": 78000.0, "tier": "ELITE",
+         "offBasePct": 13.0, "pnlInr": -1200.0},
+    ]
+    sc = build_scorecard(targets, taken)
+    elite = sc["byLane"]["ELITE"]
+    assert elite["opportunities"] == 2
+    assert elite["captured"] == 2
+    assert elite["capturedNearBase"] == 1  # only the 11%-off entry counts as early
+    assert elite["earlyRecall"] == 0.5
+    assert elite["addedLosers"] == 1
+    assert elite["addedLoserInr"] == -1200.0
+    assert sc["overall"]["opportunities"] == 2
+    assert sc["byLane"]["EXPLODING"]["opportunities"] == 0

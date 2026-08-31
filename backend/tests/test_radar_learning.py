@@ -184,6 +184,30 @@ def test_forward_outcomes_capture_horizons_mfe_mae_and_order(tmp_path):
     assert len(tape_rows) == 2
 
 
+def test_read_premium_tape_max_bytes_tail_caps_large_tape(tmp_path):
+    settings = _settings(tmp_path)
+    date = "2026-08-15"
+    with _patch_settings(settings):
+        path = premium_tape_path(date)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [{"ts": f"row{i}", "contracts": []} for i in range(2000)]
+        with path.open("w", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r) + "\n")
+        size = path.stat().st_size
+
+        full = read_premium_tape(date)
+        capped = read_premium_tape(date, max_bytes=size // 4)
+
+    # Full read returns everything; the tail cap returns only a recent slice, in order.
+    assert len(full) == 2000
+    assert 0 < len(capped) < 2000
+    assert capped[-1]["ts"] == "row1999"
+    # The returned rows are a contiguous tail (no earlier rows leak in).
+    tail_start = int(capped[0]["ts"].removeprefix("row"))
+    assert [r["ts"] for r in capped] == [f"row{i}" for i in range(tail_start, 2000)]
+
+
 def test_forward_outcome_keeps_tracking_strike_after_heatmap_rotation(tmp_path):
     settings = _settings(tmp_path)
     start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)

@@ -579,6 +579,12 @@ class Settings(BaseSettings):
     size_to_base_retest_enabled: bool = True
     size_to_base_retest_max_pct_of_capital: float = 0.10
     size_to_base_retest_break_buffer_pct: float = 0.15
+    # EOD "would-have-traded" replay near-base entry window (fraction off the local base).
+    # Winners across the 11-day replay cluster ≤~13% off base; losers that never ignite cluster
+    # later (~17%+). Tightening the ceiling to 15% keeps the near-base winners while dropping the
+    # late/chase-ier cold entries that fade — the dominant EOD loss bucket.
+    eod_near_base_min_off_pct: float = 0.10
+    eod_near_base_max_off_pct: float = 0.15
     # Causal pre-breakout base: repeated past samples arm a contract-local denominator.
     # It is sticky upward across REST/WS observations and may only ratchet to a proven low.
     ict_armed_base_enabled: bool = True
@@ -2781,6 +2787,11 @@ class Settings(BaseSettings):
     # It only needs the last ~35 min, so tail-read at most this many bytes instead of parsing
     # the whole intraday file — bounds startup time/memory regardless of tape size.
     radar_restore_tail_max_bytes: int = 67_108_864  # 64 MiB
+    # EOD trade-report replay: tail-cap the premium-tape parse. Pre-throttle tapes reach 1GB+
+    # and a full parse + replay takes ~21s, blowing the report request timeout. 256 MiB keeps
+    # the endpoint responsive on pathological historical tapes and is a no-op for the (now
+    # 10s-sampled) tapes going forward. 0 disables the cap (full read).
+    radar_report_tape_max_bytes: int = 268_435_456  # 256 MiB
     radar_alerts_tape_enabled: bool = False
     # Pipeline health JSONL — useful for ops debug, not required for EOD trade replay.
     radar_pipeline_history_enabled: bool = False

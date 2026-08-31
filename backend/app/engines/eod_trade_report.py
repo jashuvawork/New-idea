@@ -59,7 +59,8 @@ def replay_contract_trades(
 
     s = settings or get_settings()
     units = int(lot_multiplier(symbol) or 20)
-    nb_min, nb_max = 0.10, 0.25
+    nb_min = _f(getattr(s, "eod_near_base_min_off_pct", 0.10), 0.10)
+    nb_max = _f(getattr(s, "eod_near_base_max_off_pct", 0.15), 0.15)
     cooldown = 90.0
 
     trades: list[dict[str, Any]] = []
@@ -162,11 +163,88 @@ def replay_contract_trades(
     return trades
 
 
+def build_scorecard(
+    targets: list[tuple[float, str, str, float, str]],
+    taken: list[dict[str, Any]],
+    *,
+    settings: Any = None,
+    opportunity_min_mfe_pct: float = 30.0,
+) -> dict[str, Any]:
+    """Per-lane earlyRecall + added-loser scorecard so the paper trial stays measurable.
+
+    Lanes are the live sizing lanes (tier: ELITE / EXPLODING). For each lane we report:
+      - opportunities: real FTV/V moves that day (top ELITE/EXPLODING whose realised MFE
+        cleared ``opportunity_min_mfe_pct``);
+      - earlyRecall: fraction of those opportunities we entered NEAR the base (early), i.e.
+        offBasePct within the near-base ceiling — the whole point is catching them at the base;
+      - addedLosers / addedLoserInr: losing trades the lane produced (its cost).
+    A lane earns its keep when earlyRecall is high and added-loser cost stays low.
+    """
+    s = settings or get_settings()
+    nb_max_pct = _f(getattr(s, "eod_near_base_max_off_pct", 0.15), 0.15) * 100.0
+
+    def _empty() -> dict[str, Any]:
+        return {
+            "opportunities": 0, "captured": 0, "capturedNearBase": 0,
+            "earlyRecall": 0.0, "addedLosers": 0, "addedLoserInr": 0.0,
+        }
+
+    lanes: dict[str, dict[str, Any]] = {"ELITE": _empty(), "EXPLODING": _empty()}
+    overall = _empty()
+
+    opp_keys: dict[str, set[tuple]] = {"ELITE": set(), "EXPLODING": set()}
+    for mfe, sym, side, strike, tier in targets:
+        if tier in lanes and mfe >= opportunity_min_mfe_pct:
+            opp_keys.setdefault(tier, set()).add((sym, side, strike))
+    for tier, keys in opp_keys.items():
+        lanes[tier]["opportunities"] = len(keys)
+        overall["opportunities"] += len(keys)
+
+    captured_keys: dict[str, set[tuple]] = {"ELITE": set(), "EXPLODING": set()}
+    near_keys: dict[str, set[tuple]] = {"ELITE": set(), "EXPLODING": set()}
+    for t in taken:
+        tier = str(t.get("tier") or "").upper()
+        lane = lanes.get(tier)
+        if lane is None:
+            continue
+        key = (str(t.get("symbol") or "").upper(), str(t.get("side") or "").upper(),
+               _f(t.get("strike")))
+        if key in opp_keys.get(tier, set()):
+            captured_keys[tier].add(key)
+            if _f(t.get("offBasePct")) <= nb_max_pct:
+                near_keys[tier].add(key)
+        if _f(t.get("pnlInr")) <= 0:
+            lane["addedLosers"] += 1
+            lane["addedLoserInr"] += _f(t.get("pnlInr"))
+            overall["addedLosers"] += 1
+            overall["addedLoserInr"] += _f(t.get("pnlInr"))
+
+    for tier, lane in lanes.items():
+        lane["captured"] = len(captured_keys[tier])
+        lane["capturedNearBase"] = len(near_keys[tier])
+        opp = lane["opportunities"]
+        lane["earlyRecall"] = round(lane["capturedNearBase"] / opp, 3) if opp else 0.0
+        lane["addedLoserInr"] = round(lane["addedLoserInr"], 0)
+        overall["captured"] += lane["captured"]
+        overall["capturedNearBase"] += lane["capturedNearBase"]
+
+    opp = overall["opportunities"]
+    overall["earlyRecall"] = round(overall["capturedNearBase"] / opp, 3) if opp else 0.0
+    overall["addedLoserInr"] = round(overall["addedLoserInr"], 0)
+
+    return {
+        "nearBaseCeilingPct": round(nb_max_pct, 1),
+        "opportunityMinMfePct": opportunity_min_mfe_pct,
+        "overall": overall,
+        "byLane": lanes,
+    }
+
+
 def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
     """Read the day's tape, pick the strongest contracts, replay with re-entries."""
     settings = get_settings()
     from app.services.radar_archive import read_archive_entries
-    from app.services.radar_learning import read_premium_tape
+    from app.services.radar_learning import premium_tape_path, read_premium_tape
 
     entries = read_archive_entries(date)
     # Rank candidates by realised max favourable excursion (the real opportunities).
@@ -186,7 +264,11 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
     if not targets:
         return {"date": date, "status": "no_top_candidates", "trades": []}
 
-    batches = read_premium_tape(date)
+    tape_cap = int(_f(getattr(settings, "radar_report_tape_max_bytes", 268_435_456), 268_435_456))
+    tape_path = premium_tape_path(date)
+    tape_bytes = tape_path.stat().st_size if tape_path.exists() else 0
+    tape_truncated = bool(tape_cap > 0 and tape_bytes > tape_cap)
+    batches = read_premium_tape(date, max_bytes=tape_cap)
     if not batches:
         return {"date": date, "status": "no_tape", "trades": []}
 
@@ -243,9 +325,15 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
         "losses": len(taken) - wins,
         "netPnlInr": total,
         "dailyLossStopInr": daily_stop,
+        "tapeTruncated": tape_truncated,
+        "scorecard": build_scorecard(targets, taken, settings=settings),
         "note": (
             "Hindsight simulation (approximate). Applies one-position-at-a-time + the "
             "daily loss stop; still does not re-run every live gate."
+            + (
+                " Tape exceeded the read cap; replayed the day's tail only "
+                "(morning may be missing)." if tape_truncated else ""
+            )
         ),
         "trades": taken,
     }
