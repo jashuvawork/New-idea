@@ -629,6 +629,13 @@ class Settings(BaseSettings):
     eod_replay_ignition_enabled: bool = False
     eod_replay_ignition_window_s: float = 45.0
     eod_replay_ignition_min_rise_pct: float = 0.012
+    # Per-trade INR loss cap for the replay. The EOD loss is ~99% cold near-base entries that
+    # never ignite (peak ~3%); at ₹2L full-lot a single cold entry can lose 40k+. Capping does
+    # two things (11-day validated): bounds the blowup AND frees the one-position slot fast so
+    # the day's later winners get taken instead of being blocked by a slow bleeder — net
+    # +59k->+148k, worst single -44k->-19k, winners 18->23. 0 = off. Mirrors a live per-trade
+    # backstop; the same slot-bleed cost applies live, so this is also a live tuning signal.
+    eod_replay_per_trade_max_loss_inr: float = 15_000.0
     # EOD replay concurrency: how many positions may run at once, splitting capital into that
     # many slots (each position sized to capital/slots). 1 = one full-capital position at a time
     # (rides one runner to max TP but skips concurrent winners). The 11-day replay shows 2 slots
