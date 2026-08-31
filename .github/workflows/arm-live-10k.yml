@@ -1,0 +1,140 @@
+name: Arm/Disarm ₹10k live trading
+
+# One-click lever to flip the production backend between LIVE and PAPER via SSM.
+# There is no runtime API for this — ENABLE_LIVE_TRADING is read from /opt/nexusquant/env
+# at startup, so arming means editing that env file and restarting the backend container.
+#
+# arm-live  -> runs deploy/go-live-10k-monday.sh --arm-live (overlay + ENABLE_LIVE_TRADING=true
+#              + PAPER_TRADING=false, restart, set ₹10k capital ceiling).
+# disarm    -> sets ENABLE_LIVE_TRADING=false + PAPER_TRADING=true and restarts (back to paper).
+#
+# Safety: you MUST type the exact confirm phrase or the run aborts before touching the box.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "arm-live or disarm"
+        type: choice
+        options:
+          - disarm
+          - arm-live
+        default: disarm
+      confirm:
+        description: "Type ARM-LIVE-10K to arm, or DISARM to go back to paper"
+        type: string
+        required: true
+
+env:
+  AWS_REGION: ap-south-1
+  EC2_INSTANCE_ID: i-0f3f9e5e67815c21b
+  REPO_DIR: /opt/nexusquant/New-idea
+
+jobs:
+  flip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Guard — confirm phrase must match the action
+        run: |
+          set -euo pipefail
+          ACTION="${{ inputs.action }}"
+          CONFIRM="${{ inputs.confirm }}"
+          if [ "$ACTION" = "arm-live" ] && [ "$CONFIRM" != "ARM-LIVE-10K" ]; then
+            echo "::error::To arm live you must type confirm=ARM-LIVE-10K (got '$CONFIRM')"
+            exit 1
+          fi
+          if [ "$ACTION" = "disarm" ] && [ "$CONFIRM" != "DISARM" ]; then
+            echo "::error::To disarm you must type confirm=DISARM (got '$CONFIRM')"
+            exit 1
+          fi
+          echo "Confirmed action=$ACTION"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Arm live via SSM
+        if: ${{ inputs.action == 'arm-live' }}
+        id: arm
+        run: |
+          set -euo pipefail
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Arm 10k live trading" \
+            --parameters 'commands=[
+              "set -euo pipefail",
+              "cd ${{ env.REPO_DIR }}",
+              "bash ${{ env.REPO_DIR }}/deploy/go-live-10k-monday.sh --arm-live",
+              "sleep 6",
+              "curl -sf --max-time 5 http://127.0.0.1:8000/api/deployment/readiness || true"
+            ]' \
+            --query Command.CommandId \
+            --output text)
+          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Disarm (back to paper) via SSM
+        if: ${{ inputs.action == 'disarm' }}
+        id: disarm
+        run: |
+          set -euo pipefail
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Disarm live trading (back to paper)" \
+            --parameters 'commands=[
+              "set -euo pipefail",
+              "ENV=/opt/nexusquant/env",
+              "COMPOSE=${{ env.REPO_DIR }}/docker-compose.prod.yml",
+              "touch $ENV",
+              "if grep -q \"^ENABLE_LIVE_TRADING=\" $ENV; then sed -i \"s|^ENABLE_LIVE_TRADING=.*|ENABLE_LIVE_TRADING=false|\" $ENV; else echo ENABLE_LIVE_TRADING=false >> $ENV; fi",
+              "if grep -q \"^PAPER_TRADING=\" $ENV; then sed -i \"s|^PAPER_TRADING=.*|PAPER_TRADING=true|\" $ENV; else echo PAPER_TRADING=true >> $ENV; fi",
+              "cd ${{ env.REPO_DIR }}",
+              "docker compose -f $COMPOSE up -d --force-recreate --no-deps backend",
+              "sleep 6",
+              "curl -sf --max-time 5 http://127.0.0.1:8000/api/deployment/readiness || true"
+            ]' \
+            --query Command.CommandId \
+            --output text)
+          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM command + print output
+        run: |
+          set -euo pipefail
+          CMD_ID="${{ steps.arm.outputs.command_id || steps.disarm.outputs.command_id }}"
+          if [ -z "$CMD_ID" ]; then echo "No command id"; exit 1; fi
+          for i in $(seq 1 24); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            echo "Attempt $i: $STATUS"
+            if [ "$STATUS" = "Success" ]; then
+              aws ssm get-command-invocation --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                --query StandardOutputContent --output text
+              exit 0
+            fi
+            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+              aws ssm get-command-invocation --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" --output json
+              exit 1
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Verify execution mode
+        run: |
+          set -euo pipefail
+          MODE=$(curl -sf --max-time 30 https://www.jashuvatrade.xyz/api/deployment/readiness \
+            | grep -o '"executionMode":"[A-Z_]*"' || echo "unknown")
+          echo "Public readiness reports: $MODE"
+          if [ "${{ inputs.action }}" = "arm-live" ] && ! echo "$MODE" | grep -q "LIVE"; then
+            echo "::error::arm-live ran but executionMode is not LIVE — check Upstox token + env"
+            exit 1
+          fi
