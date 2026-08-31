@@ -4,7 +4,10 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+from types import SimpleNamespace
+
 from app.engines.eod_trade_report import (
+    apply_portfolio_limits,
     build_scorecard,
     generate_eod_trade_report,
     replay_contract_trades,
@@ -133,3 +136,49 @@ def test_scorecard_measures_early_recall_and_added_losers():
     assert elite["addedLoserInr"] == -1200.0
     assert sc["overall"]["opportunities"] == 2
     assert sc["byLane"]["EXPLODING"]["opportunities"] == 0
+
+
+def _pos(entry_h, exit_h, side, pnl):
+    d = datetime(2026, 8, 20, tzinfo=IST)
+    return {
+        "symbol": "SENSEX", "side": side, "pnlInr": float(pnl),
+        "_entryDt": d.replace(hour=entry_h), "_exitDt": d.replace(hour=exit_h),
+    }
+
+
+def test_portfolio_limit_one_slot_is_one_at_a_time():
+    # Two overlapping winners (10-12 and 11-13). With 1 slot only the first is taken.
+    cands = [_pos(10, 12, "CALL", 5000), _pos(11, 13, "PUT", 4000)]
+    s = SimpleNamespace(daily_loss_stop_inr=20_000.0, eod_report_max_concurrent=1,
+                        eod_report_same_side_cap=2)
+    taken = apply_portfolio_limits(cands, settings=s)
+    assert len(taken) == 1
+
+
+def test_portfolio_limit_two_slots_takes_concurrent_winners():
+    cands = [_pos(10, 12, "CALL", 5000), _pos(11, 13, "PUT", 4000)]
+    s = SimpleNamespace(daily_loss_stop_inr=20_000.0, eod_report_max_concurrent=2,
+                        eod_report_same_side_cap=2)
+    taken = apply_portfolio_limits(cands, settings=s)
+    assert len(taken) == 2
+
+
+def test_portfolio_limit_same_side_cap_blocks_third_same_side():
+    # Three overlapping CALLs; same-side cap of 2 admits only two even with 3 slots.
+    cands = [_pos(10, 14, "CALL", 5000), _pos(11, 14, "CALL", 4000),
+             _pos(12, 14, "CALL", 3000)]
+    s = SimpleNamespace(daily_loss_stop_inr=20_000.0, eod_report_max_concurrent=3,
+                        eod_report_same_side_cap=2)
+    taken = apply_portfolio_limits(cands, settings=s)
+    assert len(taken) == 2
+
+
+def test_portfolio_limit_halts_at_daily_loss_stop():
+    cands = [_pos(10, 11, "CALL", -6000), _pos(11, 12, "PUT", -6000),
+             _pos(12, 13, "CALL", 9000)]
+    s = SimpleNamespace(daily_loss_stop_inr=10_000.0, eod_report_max_concurrent=1,
+                        eod_report_same_side_cap=2)
+    taken = apply_portfolio_limits(cands, settings=s)
+    # After two -6000 legs (cum -12000 <= -10000) the day halts; the later winner is skipped.
+    assert len(taken) == 2
+    assert sum(t["pnlInr"] for t in taken) == -12_000

@@ -585,6 +585,14 @@ class Settings(BaseSettings):
     # late/chase-ier cold entries that fade — the dominant EOD loss bucket.
     eod_near_base_min_off_pct: float = 0.10
     eod_near_base_max_off_pct: float = 0.15
+    # EOD replay concurrency: how many positions may run at once, splitting capital into that
+    # many slots (each position sized to capital/slots). 1 = one full-capital position at a time
+    # (rides one runner to max TP but skips concurrent winners). The 11-day replay shows 2 slots
+    # captures ~2x the winners for ~+40% net vs 1; 3+ slots decays as per-slot size shrinks and
+    # losers scale up. Mirrors the live risk engine's ftv_allocation_max_positions concurrency,
+    # but ties it to capital slots so per-trade size stays honest. Default 1 = today's behaviour.
+    eod_report_max_concurrent: int = 1
+    eod_report_same_side_cap: int = 2
     # Causal pre-breakout base: repeated past samples arm a contract-local denominator.
     # It is sticky upward across REST/WS observations and may only ratchet to a proven low.
     ict_armed_base_enabled: bool = True
