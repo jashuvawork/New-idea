@@ -1028,8 +1028,11 @@ def _slow_grind_armed_trough_readiness(
             if v_rip_ready or off_low <= trough_max_off + 1e-6:
                 index_trough_ok = True
                 if isinstance(alert, dict):
-                    alert["ictIndexTroughSlowV"] = True
-                    alert["indexTroughSlowV"] = True
+                    from app.engines.index_confirmed_local_base import (
+                        stamp_index_confirmed_local_base,
+                    )
+
+                    stamp_index_confirmed_local_base(alert, snap, side=side)
     if not base_armed and not index_trough_ok:
         return False, "slow_grind_armed_trough_base_not_armed"
 

@@ -616,6 +616,14 @@ class Settings(BaseSettings):
     coil_armed_session_lift_enabled: bool = True
     coil_armed_session_lift_min_readiness: float = 75.0
     coil_armed_session_lift_max_base_move_pct: float = 12.0
+    index_confirmed_local_base_enabled: bool = True
+    index_confirmed_local_base_max_off_low_pct: float = 22.0
+    index_confirmed_local_base_min_explosion_score_floor: float = 5.0
+    index_confirmed_local_base_waives_near_miss: bool = True
+    index_confirmed_local_base_waives_timing: bool = True
+    index_confirmed_local_base_premium_fade: bool = True
+    # Armed first-lift at pad + agreeing breadth — index mom5 turn may lag mom15 (Sep01).
+    index_confirmed_local_base_armed_pad_bypass: bool = True
     # OTM reversal entry — the #1 cause of explosion_near_miss on today's CALL winners was
     # armed_base_requires_atm_itm_otm: they were 2-3 strikes OTM (spot below the strike on the
     # 'bearish' day) and the 1-step shallow allowance rejected them, then spot rallied UP

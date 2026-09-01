@@ -47,7 +47,7 @@ def early_catch_pretrade_min_rank(
 
     from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
-    if pad_lane_early_near_miss_waive(alert_row):
+    if pad_lane_early_near_miss_waive(alert_row, snap=snap):
         return float(getattr(s, "early_catch_pad_min_rank", 35.0) or 35.0)
 
     return None

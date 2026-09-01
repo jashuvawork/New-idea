@@ -213,17 +213,31 @@ def _gate_checks(
         or alert.get("ictBaseRelativeMovePct")
         or 0
     )
-    first_lift_ready, _ = first_lift_entry_readiness(
+    first_lift_ready, readiness_reason = first_lift_entry_readiness(
         snap=snap,
         alert=alert,
         state=state,
     )
+    from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
+    from app.engines.index_confirmed_local_base import (
+        index_confirmed_near_miss_waive,
+        stamp_index_confirmed_local_base,
+    )
+
+    stamp_index_confirmed_local_base(alert, snap)
+    pad_lane_waive = pad_lane_early_near_miss_waive(
+        alert, readiness_reason=readiness_reason, snap=snap,
+    )
+    index_confirmed_waive = index_confirmed_near_miss_waive(
+        alert, snap, readiness_reason=readiness_reason,
+    )
+    lift_ready = first_lift_ready or pad_lane_waive or index_confirmed_waive
     v_rip_ready = bool(alert.get("ictVRipReady") or alert.get("vRipReady"))
     min_score = effective_explosion_min_score(
         tier=str(alert.get("tier") or "WATCH"),
         peak_move_pct=peak_move,
         daily_move_pct=daily_move,
-        first_lift_ready=first_lift_ready,
+        first_lift_ready=lift_ready,
         local_base_move_pct=local_base_move,
         v_rip_ready=v_rip_ready,
     )
@@ -234,7 +248,7 @@ def _gate_checks(
         )
         min_peak = float(getattr(settings, "peak_move_explosion_min_pct", 35.0) or 35.0)
         if (
-            (first_lift_ready or v_rip_ready)
+            (lift_ready or v_rip_ready)
             and local_base_move >= float(
                 getattr(settings, "first_lift_pad_local_base_min_pct", 2.0) or 2.0
             )
@@ -298,6 +312,13 @@ def _gate_checks(
         resolve_strict_pad_lane_chart_bypass(candidate, snap)
     )
     expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    index_trough_bypass = bool(
+        alert.get("ictIndexConfirmedLocalBase")
+        or alert.get("indexConfirmedLocalBase")
+        or index_trough_momentum_turn(candidate.side, chart)
+    )
     blocked, chart_reason = chart_blocks_side(
         candidate.side, chart, trade_score=score, momentum_surge=daily_move >= 40,
         premium_led_bypass=(
@@ -306,6 +327,7 @@ def _gate_checks(
         ),
         expiry_explosion_bypass=expiry_chart_bypass,
         strict_first_lift_bypass=strict_first_lift_bypass,
+        index_trough_bypass=index_trough_bypass,
     )
     if blocked:
         blockers.append(chart_reason)

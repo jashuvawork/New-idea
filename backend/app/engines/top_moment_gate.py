@@ -64,6 +64,8 @@ def building_has_causal_ftv_v_structure(evidence: Mapping[str, Any]) -> bool:
     )
     if building_rip and helpers_ok:
         return True
+    if bool(evidence.get("indexConfirmedLocalBase")):
+        return True
     if bool(evidence.get("earlyRadarPadCapture")):
         return True
     if bool(evidence.get("buildingCoilPad")):
@@ -301,6 +303,12 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
     if tier in ("ELITE", "EXPLODING"):
         return True
 
+    if bool(
+        alert.get("ictIndexConfirmedLocalBase")
+        or alert.get("indexConfirmedLocalBase")
+    ):
+        return True
+
     max_off = float(
         getattr(settings, "early_radar_pad_max_off_low_pct", 15.0) or 15.0
     )
@@ -375,6 +383,10 @@ def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
         "firstLift": bool(alert.get("ictFirstLift")),
         "armedBaseSustainedLift": bool(alert.get("ictArmedBaseSustainedLift")),
         "indexHelpersConfirm": bool(alert.get("indexHelpersConfirm")),
+        "indexConfirmedLocalBase": bool(
+            alert.get("indexConfirmedLocalBase")
+            or alert.get("ictIndexConfirmedLocalBase")
+        ),
         "indexTickSpike": bool(alert.get("indexTickSpike")),
         "midRipCoil": bool(alert.get("ictMidRipCoil") or alert.get("midRipCoil")),
     }

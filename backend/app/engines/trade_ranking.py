@@ -2104,4 +2104,12 @@ def rank_entry_candidate(
             evidence["indexSpotMove9s"] = idx.velocity_9s
         except Exception:
             pass
+    from app.engines.index_confirmed_local_base import enrich_evidence_index_confirmed
+
+    enrich_evidence_index_confirmed(
+        evidence,
+        live_snapshot,
+        alert,
+        getattr(candidate, "side", ""),
+    )
     return rank_trade_evidence(evidence)

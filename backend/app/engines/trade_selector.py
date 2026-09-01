@@ -2284,7 +2284,7 @@ def diagnose_missed_entries(
                 from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
                 pad_lane_waive = pad_lane_early_near_miss_waive(
-                    alert, readiness_reason=readiness_reason,
+                    alert, readiness_reason=readiness_reason, snap=snap,
                 )
                 if not first_lift_ready and not pad_lane_waive:
                     blockers.append(readiness_reason)
@@ -2292,7 +2292,7 @@ def diagnose_missed_entries(
                 from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
                 pad_lane_waive = pad_lane_early_near_miss_waive(
-                    alert, readiness_reason=readiness_reason,
+                    alert, readiness_reason=readiness_reason, snap=snap,
                 )
             from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
 
@@ -2417,8 +2417,13 @@ def diagnose_missed_entries(
                 from app.engines.top_ftv_v_expiry_bypass import top_ftv_v_chart_bypass
                 from app.engines.bullish_local_base import alert_bullish_local_base_active
                 from app.engines.ftv_candlestick_confirm import ftv_candlestick_chart_bypass
+                from app.engines.spot_direction import index_trough_momentum_turn
 
                 side_raw = str(alert.get("side") or "").upper()
+                index_turn_ok = (
+                    side_raw in ("CALL", "PUT")
+                    and index_trough_momentum_turn(side_raw, snap.spotChart)
+                )
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
                     pad_lane_chart_ok = False
                     local_base_chart_ok = False
@@ -2451,6 +2456,7 @@ def diagnose_missed_entries(
                         and not top_ftv_v_chart_ok
                         and not candlestick_chart_ok
                         and not bullish_base_chart_ok
+                        and not index_turn_ok
                     ):
                         blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):
