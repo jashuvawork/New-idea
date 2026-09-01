@@ -719,6 +719,80 @@ def index_decisive_breakout_confirms_side(side: Any, snap: Any) -> bool:
     return False
 
 
+def _bucket_ohlc(
+    series: list[tuple[float, float]], *, bucket_seconds: float
+) -> tuple[list[float], list[float], list[float], list[float]]:
+    """Bucket a (epoch, value) series into OHLC bars of ``bucket_seconds``."""
+    opens: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    closes: list[float] = []
+    if not series:
+        return opens, highs, lows, closes
+    cur_bucket = None
+    o = h = low = c = 0.0
+    for ts, v in series:
+        b = int(ts // bucket_seconds)
+        if cur_bucket is None:
+            cur_bucket = b
+            o = h = low = c = v
+        elif b != cur_bucket:
+            opens.append(o); highs.append(h); lows.append(low); closes.append(c)
+            cur_bucket = b
+            o = h = low = c = v
+        else:
+            h = max(h, v); low = min(low, v); c = v
+    opens.append(o); highs.append(h); lows.append(low); closes.append(c)
+    return opens, highs, lows, closes
+
+
+def option_decisive_breakout_confirms(
+    symbol: Any, strike: Any, side: Any, *, settings: Any = None,
+) -> bool:
+    """GainzAlgo V2 Alpha on the OPTION premium — a decisive breakout bar off the base.
+
+    The index-level decisive candle barely registers a huge option rip (₹15->100 is a small %
+    on the index). Bucketing the contract's own premium tape into OHLC and running the same
+    strong-bodied-engulfing-after-pullback detector gives a real "the option just broke
+    decisively" confirmation. We always BUY the option, so a BULLISH decisive bar on the
+    premium confirms the break for either CE or PE. Additive — a coil-predictor vote, not a gate.
+    """
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "option_decisive_breakout_enabled", True)):
+        return False
+    try:
+        from app.engines.explosion_detector import option_premium_series
+    except Exception:
+        return False
+    lookback = float(
+        getattr(settings, "option_decisive_breakout_lookback_seconds", 900.0) or 900.0
+    )
+    bucket = float(
+        getattr(settings, "option_decisive_breakout_bucket_seconds", 30.0) or 30.0
+    )
+    try:
+        series = option_premium_series(
+            str(symbol or ""), float(strike or 0), side, lookback_seconds=lookback
+        )
+    except Exception:
+        return False
+    opens, highs, lows, closes = _bucket_ohlc(series, bucket_seconds=bucket)
+    read = compute_decisive_candle(
+        opens, highs, lows, closes,
+        body_ratio_min=float(
+            getattr(settings, "decisive_candle_body_ratio_min", 0.6) or 0.6
+        ),
+        rsi_ceiling=float(getattr(settings, "decisive_candle_rsi_ceiling", 80.0) or 80.0),
+        pullback_lookback=int(
+            getattr(settings, "decisive_candle_pullback_lookback", 5) or 5
+        ),
+    )
+    # Premium rises for the side we buy → a BULLISH decisive bar on the premium = the break.
+    return bool(read.decisive and read.direction == "BULLISH")
+
+
 def compute_vwap(
     highs: list[float], lows: list[float], closes: list[float], volumes: list[float],
     band_mult: float = 1.5,

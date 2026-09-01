@@ -149,6 +149,18 @@ def coil_breakout_prediction(
     except Exception:
         pass
 
+    try:
+        from app.engines.advanced_indicators import option_decisive_breakout_confirms
+
+        strike = float(getattr(event, "strike", 0) or 0)
+        if strike > 0 and option_decisive_breakout_confirms(
+            getattr(snap, "symbol", ""), strike, side, settings=settings
+        ):
+            votes += 1
+            reasons.append("option_decisive_break")
+    except Exception:
+        pass
+
     # Readiness score (0-100): coil tightness + maturity + compression + pre-awakening + votes.
     score = 0.0
     if range_pct > 0:

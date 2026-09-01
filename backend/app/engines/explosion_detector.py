@@ -1475,6 +1475,33 @@ def recent_premium_run(
     return out
 
 
+def option_premium_series(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    *,
+    lookback_seconds: float = 900.0,
+) -> list[tuple[float, float]]:
+    """Recent (epoch_seconds, premium) samples for one contract, for OHLC bucketing.
+
+    Used by the option-level decisive-breakout (GainzAlgo) signal — the premium tape is the
+    only per-contract candle source we have (indices carry no option-level candles).
+    """
+    if side is None or not symbol:
+        return []
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    dq = _local_base_hist.get(_open_key(symbol, strike, side_val))
+    if not dq:
+        return []
+    now = dq[-1][0]
+    lo_cut = now - timedelta(seconds=float(lookback_seconds))
+    return [
+        (ts.timestamp(), float(p))
+        for (ts, p) in dq
+        if ts >= lo_cut and _is_meaningful_premium(p)
+    ]
+
+
 def post_close_base_reacceleration(
     symbol: str,
     strike: float,
