@@ -1056,7 +1056,13 @@ def _armed_base_launch_pad_chart_signal(
         return False
     if not bool(row.get("ictFirstLift") or row.get("ictArmedBaseLaunch")):
         return False
-    if not bool(row.get("ictFlatThenVertical") or row.get("ictBreakout")):
+    # armed_base_launch is the pre-structure pad signal — flat→vertical may lag.
+    if not (
+        row.get("ictArmedBaseLaunch")
+        or row.get("armedBaseLaunch")
+        or row.get("ictFlatThenVertical")
+        or row.get("ictBreakout")
+    ):
         return False
     if not bool(row.get("volumeAwaken") or row.get("ictVolumeAwakening")):
         return False
@@ -1493,8 +1499,12 @@ def resolve_strict_pad_lane_for_entry(
         row,
         explosion_event,
     )
+    armed_pad_strict = _armed_base_launch_pad_chart_signal(row, explosion_event)
     strict_bypass = (
-        armed_base_chart_bypass or pad_lane_chart_bypass or shallow_otm_bypass
+        armed_base_chart_bypass
+        or pad_lane_chart_bypass
+        or shallow_otm_bypass
+        or armed_pad_strict
     )
     return pad_lane_chart_bypass, strict_bypass
 
