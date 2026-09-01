@@ -15,6 +15,10 @@ def _settings(**over):
         early_momentum_ignition_max_move_pct=10.0,
         early_momentum_ignition_min_velocity_3s=1.0,
         early_momentum_ignition_min_vol_surge=2.0,
+        early_momentum_ignition_allow_building=True,
+        early_momentum_ignition_strong_velocity_3s=2.5,
+        early_momentum_ignition_strong_vol_surge=2.5,
+        early_momentum_ignition_tight_base_range_pct=5.0,
         near_base_lane_min_quality=70.0,
         near_base_lane_strong_score=90.0,
     )
@@ -83,11 +87,69 @@ def test_does_not_fire_past_max_move_band():
     assert ok is False
 
 
-def test_requires_top_tier():
+def test_watch_tier_rejected():
+    """WATCH is still excluded (BUILDING is now allowed with a strong ignition)."""
     ok, _ = _early_momentum_ignition_at_base_readiness(
-        snap=_snap(), event=_event(tier="BUILDING"), ict=_ict(6.0),
-        alert={"tier": "BUILDING"}, settings=_settings(),
+        snap=_snap(), event=_event(tier="WATCH"), ict=_ict(6.0),
+        alert={"tier": "WATCH"}, settings=_settings(),
     )
+    assert ok is False
+
+
+def test_building_fast_ftv_caught_with_cvd_confirmed_ignition():
+    """A fast FTV grades BUILDING at the base (score/quality still low). A strong,
+    CVD-confirmed accelerating ignition off a tight base catches it there."""
+    ev = _event(tier="BUILDING", v3=3.0, v9=1.5, vol_surge=3.0, explosion_score=55.0)
+    ict = _ict(6.0)
+    ict.armed_base_range_pct = 3.0  # tight coil
+    alert = {"tier": "BUILDING", "optionCvdBuying": True}  # real order flow
+    with patch("app.engines.ict_breakout_monitor.get_settings", return_value=_settings()):
+        ok, reason = _early_momentum_ignition_at_base_readiness(
+            snap=_snap(), event=ev, ict=ict, alert=alert, settings=_settings(),
+        )
+    assert ok is True
+    assert reason == "early_momentum_ignition_at_base"
+
+
+def test_building_hollow_spike_without_cvd_rejected():
+    """A BUILDING v3-spike with volume but NO CVD buying is a hollow print (Aug10 blip
+    pattern) — rejected even though velocity + volume look strong."""
+    ev = _event(tier="BUILDING", v3=3.0, v9=0.3, vol_surge=3.0, explosion_score=55.0)
+    ict = _ict(6.0)
+    ict.armed_base_range_pct = 3.0
+    alert = {"tier": "BUILDING"}  # no optionCvdBuying
+    with patch("app.engines.ict_breakout_monitor.get_settings", return_value=_settings()):
+        ok, reason = _early_momentum_ignition_at_base_readiness(
+            snap=_snap(), event=ev, ict=ict, alert=alert, settings=_settings(),
+        )
+    assert ok is False
+    assert reason == "early_ignition_below_quality_score_floor"
+
+
+def test_building_weak_blip_rejected():
+    """A BUILDING blip without a strong ignition is rejected (chop-dud bucket)."""
+    ev = _event(tier="BUILDING", v3=1.2, v9=1.0, vol_surge=2.0, explosion_score=55.0)
+    ict = _ict(6.0)
+    ict.armed_base_range_pct = 3.0
+    with patch("app.engines.ict_breakout_monitor.get_settings", return_value=_settings()):
+        ok, reason = _early_momentum_ignition_at_base_readiness(
+            snap=_snap(), event=ev, ict=ict, alert={"tier": "BUILDING", "optionCvdBuying": True},
+            settings=_settings(),
+        )
+    assert ok is False
+    assert reason == "early_ignition_below_quality_score_floor"
+
+
+def test_building_disallowed_when_flag_off():
+    ev = _event(tier="BUILDING", v3=3.0, v9=1.5, vol_surge=3.0, explosion_score=55.0)
+    ict = _ict(6.0)
+    ict.armed_base_range_pct = 3.0
+    s = _settings(early_momentum_ignition_allow_building=False)
+    with patch("app.engines.ict_breakout_monitor.get_settings", return_value=s):
+        ok, _ = _early_momentum_ignition_at_base_readiness(
+            snap=_snap(), event=ev, ict=ict,
+            alert={"tier": "BUILDING", "optionCvdBuying": True}, settings=s,
+        )
     assert ok is False
 
 
