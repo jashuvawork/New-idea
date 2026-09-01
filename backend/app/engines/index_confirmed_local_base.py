@@ -260,16 +260,46 @@ def index_confirmed_moneyness_bypass(
         or (alert or {}).get("offLowMovePct")
         or 0
     )
-    max_off = float(
-        getattr(settings, "index_confirmed_local_base_max_off_low_pct", 22.0) or 22.0
+    max_lb = float(
+        getattr(settings, "index_confirmed_ftv_max_local_base_move_pct", 25.0) or 25.0
     )
-    if lb < 2.0 or lb > max_off + 1e-6:
+    if lb < 2.0 or lb > max_lb + 1e-6:
         return False
     if money == "ITM":
         max_itm = int(getattr(settings, "index_confirmed_max_itm_steps", 12) or 12)
         return depth <= max_itm
     max_otm = int(getattr(settings, "index_confirmed_max_otm_steps", 2) or 2)
     return depth <= max_otm
+
+
+def index_confirmed_grade_floor_applies(evidence: Mapping[str, Any]) -> bool:
+    """Floor rank grade to A for index-confirmed pad captures with flat velocity."""
+    settings = get_settings()
+    if not bool(getattr(settings, "index_confirmed_ftv_auth_enabled", True)):
+        return False
+    if not bool(evidence.get("indexConfirmedLocalBase")):
+        return False
+    if evidence.get("faded") or evidence.get("exhaustedReentry") or evidence.get("midRipCoil"):
+        return False
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False
+    local_move = max(
+        float(evidence.get("localBaseMovePct") or 0),
+        float(evidence.get("offLowMovePct") or 0),
+    )
+    min_lb = float(
+        getattr(settings, "index_confirmed_ftv_min_local_base_move_pct", 4.0) or 4.0
+    )
+    max_lb = float(
+        getattr(settings, "index_confirmed_ftv_max_local_base_move_pct", 25.0) or 25.0
+    )
+    if local_move < min_lb or local_move > max_lb:
+        return False
+    off_low = float(evidence.get("offLowMovePct") or 0)
+    if off_low > local_move + 15.0:
+        return False
+    return True
 
 
 def index_confirmed_waives_timing_block(evidence: Mapping[str, Any]) -> bool:

@@ -644,7 +644,11 @@ def ftv_authorization_policy(
         <= move
         <= winner_local_base_max_local_base_move_pct
     )
-    fresh_trigger = flag_fresh or early_ftv_fresh
+    fresh_trigger = (
+        flag_fresh
+        or early_ftv_fresh
+        or bool(evidence.get("indexConfirmedLocalBase"))
+    )
     timing_blocked = timing in {"CHASE", "CHASING", "LATE", "FAILED_LAUNCH"}
     effective_min_v3, effective_min_v9 = _top_ftv_a_effective_velocity_floors(
         evidence,
@@ -1369,7 +1373,7 @@ def ftv_authorization_policy(
     if (
         index_confirmed_ftv_auth_enabled
         and bool(evidence.get("indexConfirmedLocalBase"))
-        and str(ranking.get("grade") or "").upper() in {"A", "B", "S"}
+        and str(ranking.get("grade") or "").upper() in {"A", "B", "C", "S"}
         and tier in {"ELITE", "EXPLODING"}
         and not timing_blocked
         and index_confirmed_ftv_min_local_base_move_pct
@@ -1853,6 +1857,15 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     from app.engines.pad_lane_capture import pad_lane_grade_floor_applies
 
     if pad_lane_grade_floor_applies(evidence) and not exhausted and not bool(
+        evidence.get("midRipCoil")
+    ):
+        if grade in {"REJECT", "C"}:
+            grade = "A"
+            score = max(score, 70.0)
+
+    from app.engines.index_confirmed_local_base import index_confirmed_grade_floor_applies
+
+    if index_confirmed_grade_floor_applies(evidence) and not exhausted and not bool(
         evidence.get("midRipCoil")
     ):
         if grade in {"REJECT", "C"}:

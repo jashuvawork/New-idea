@@ -20,10 +20,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.engines.eod_local_base_replay import replay_local_base_day
 from app.engines.missed_trade_explainer import _gate_checks
-from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
+from app.engines.trade_ranking import (
+    ftv_authorization_policy,
+    ftv_policy_settings,
+    rank_entry_candidate,
+)
 from app.models.schemas import AutoTraderState, Breadth, MarketPhase, SpotChart, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -135,30 +139,30 @@ def _snap(row: dict) -> SymbolSnapshot:
     )
 
 
-def _ftv(alert: dict) -> tuple[bool, str]:
-    ev = {
-        "mode": "explosion",
-        "tier": str(alert.get("tier") or "").upper(),
-        "explosionScore": float(alert.get("explosionScore") or 0),
-        "flatVerticalQuality": float(alert.get("flatVerticalQuality") or 55),
-        "velocity3s": float(alert.get("velocity3s") or 0),
-        "velocity9s": float(alert.get("velocity9s") or 0),
-        "localBaseMovePct": float(alert.get("localBaseMovePct") or alert.get("ictBaseRelativeMovePct") or 0),
-        "firstLift": bool(alert.get("ictFirstLift")),
-        "flatThenVertical": bool(alert.get("ictFlatThenVertical")),
-        "activeBreakout": bool(alert.get("ictBreakout")),
-        "armedBaseLaunch": bool(alert.get("ictArmedBaseLaunch")),
-        "bullishLocalBaseActive": bool(alert.get("bullishLocalBaseActive")),
-        "fastBullishLocalBase": bool(alert.get("fastBullishLocalBaseReady")),
-        "volumeAwaken": bool(alert.get("volumeAwaken")),
-        "orderflowPositive": bool(alert.get("optionCvdBuying")),
-        "vRipReady": bool(alert.get("ictVRipReady")),
-        "buildingRipReady": bool(alert.get("ictBuildingRipReady")),
-        "earlyRadarPadCapture": bool(alert.get("earlyRadarPadCapture")),
-        "flatVerticalGrade": str(alert.get("flatVerticalGrade") or ""),
-    }
-    ranking = rank_trade_evidence(ev)
-    d = ftv_authorization_policy(ev, ranking, snapshot_available=True, atm_itm_allowed=True, require_allocation_rank_one=False)
+def _ftv(alert: dict, *, snap=None, symbol: str = "") -> tuple[bool, str]:
+    from app.engines.missed_trade_explainer import _candidate_from_alert
+    from app.engines.moneyness import atm_itm_entry_allows
+
+    sym = symbol or str(alert.get("symbol") or "SENSEX")
+    if snap is None:
+        return False, "snapshot_required"
+    candidate = _candidate_from_alert(sym, snap, alert)
+    ranking = rank_entry_candidate(candidate)
+    ev = ranking.get("evidence") or {}
+    money_ok, _, _ = atm_itm_entry_allows(
+        candidate.side,
+        candidate.strike,
+        snap,
+        alert=alert,
+    )
+    d = ftv_authorization_policy(
+        ev,
+        ranking,
+        snapshot_available=True,
+        atm_itm_allowed=money_ok,
+        require_allocation_rank_one=False,
+        **ftv_policy_settings(get_settings()),
+    )
     return d.allowed, str(d.mode or d.reason)
 
 
@@ -179,7 +183,7 @@ def audit_radar(date: str, path: Path, *, old: bool) -> dict[str, Any]:
         snap = _snap(row)
         with _with_cfg(cfg):
             gate = _gate_checks(sym, snap, alert, state, {sym: snap})
-            ok_ftv, ftv_mode = _ftv(alert)
+            ok_ftv, ftv_mode = _ftv(alert, snap=snap, symbol=sym)
         g_ok = bool(gate.get("wouldPass"))
         if g_ok:
             gp += 1

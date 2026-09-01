@@ -631,7 +631,7 @@ class Settings(BaseSettings):
     index_confirmed_ftv_auth_enabled: bool = True
     index_confirmed_ftv_min_explosion_score: float = 35.0
     index_confirmed_ftv_min_quality: float = 55.0
-    index_confirmed_ftv_min_local_base_move_pct: float = 5.0
+    index_confirmed_ftv_min_local_base_move_pct: float = 4.0
     index_confirmed_ftv_max_local_base_move_pct: float = 25.0
     index_confirmed_ftv_max_capital_pct: float = 0.90
     # Index-confirmed pad capture — deep ITM at trough/peak and shallow OTM reversal (Sep01).
