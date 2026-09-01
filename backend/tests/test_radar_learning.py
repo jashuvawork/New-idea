@@ -184,6 +184,34 @@ def test_forward_outcomes_capture_horizons_mfe_mae_and_order(tmp_path):
     assert len(tape_rows) == 2
 
 
+def test_read_premium_tape_falls_back_to_finalized_zip_after_purge(tmp_path):
+    """After the 16:00 finalize purges the intraday JSONL, read_premium_tape must read the
+    tape from radar-<date>.zip — else the just-closed day's EOD report reads no_tape (Sep 1)."""
+    from app.services.radar_archive import archive_path, get_archive_dir
+
+    settings = _settings(tmp_path)
+    date = "2026-08-15"
+    rows = [
+        {"ts": "2026-08-15T11:00:00+05:30",
+         "contracts": [{"symbol": "NIFTY", "side": "CALL", "strike": 24000.0,
+                        "premium": 50.0, "spot": 24000.0}]},
+        {"ts": "2026-08-15T11:00:10+05:30",
+         "contracts": [{"symbol": "NIFTY", "side": "CALL", "strike": 24000.0,
+                        "premium": 55.0, "spot": 24010.0}]},
+    ]
+    with _patch_settings(settings):
+        # No telemetry JSONL exists (purged). Build the finalized ZIP with the tape bundled.
+        assert not premium_tape_path(date).exists()
+        get_archive_dir().mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive_path(date), "w") as z:
+            z.writestr("premium_tape.jsonl", "\n".join(json.dumps(r) for r in rows))
+
+        out = read_premium_tape(date)
+
+    assert len(out) == 2
+    assert out[0]["ts"] == "2026-08-15T11:00:00+05:30"
+
+
 def test_read_premium_tape_max_bytes_tail_caps_large_tape(tmp_path):
     settings = _settings(tmp_path)
     date = "2026-08-15"

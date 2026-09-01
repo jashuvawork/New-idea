@@ -641,6 +641,41 @@ def record_market_observations(
     return len(contracts)
 
 
+def _read_premium_tape_from_zip(date: str) -> list[dict[str, Any]]:
+    """Read premium_tape.jsonl from the finalized daily ZIP (after telemetry purge).
+
+    The 16:00 IST finalize bundles the tape into radar-<date>.zip and PURGES the intraday
+    JSONL, so post-finalize the telemetry file is gone. EOD replay must then read the ZIP —
+    otherwise generate_eod_trade_report returns no_tape for the day that just closed.
+    """
+    from app.services.radar_archive import archive_path
+
+    try:
+        zip_path = archive_path(date)
+    except ValueError:
+        return []
+    if not zip_path.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            if "premium_tape.jsonl" not in archive.namelist():
+                return []
+            data = archive.read("premium_tape.jsonl")
+    except (OSError, zipfile.BadZipFile):
+        return []
+    for raw in data.split(b"\n"):
+        if not raw:
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            out.append(row)
+    return out
+
+
 def read_premium_tape(date: str, *, max_bytes: int = 0) -> list[dict[str, Any]]:
     """Read a day's premium tape. ``max_bytes>0`` tail-caps the parse.
 
@@ -648,10 +683,16 @@ def read_premium_tape(date: str, *, max_bytes: int = 0) -> list[dict[str, Any]]:
     another ~13s, which blows the EOD-report request timeout. A generous tail cap keeps
     replay endpoints responsive on pathological historical tapes and is a no-op for the
     (now 10s-sampled) tapes produced going forward.
+
+    After the 16:00 finalize purges the intraday JSONL, fall back to the finalized ZIP so the
+    EOD report for the just-closed day still works (regression: Sep 1 EOD read no_tape at 4pm).
     """
-    if max_bytes and max_bytes > 0:
-        return _read_jsonl_tail(premium_tape_path(date), max_bytes=max_bytes)
-    return _read_jsonl(premium_tape_path(date))
+    tape = premium_tape_path(date)
+    if tape.exists():
+        if max_bytes and max_bytes > 0:
+            return _read_jsonl_tail(tape, max_bytes=max_bytes)
+        return _read_jsonl(tape)
+    return _read_premium_tape_from_zip(date)
 
 
 def read_alerts_tape(date: str) -> list[dict[str, Any]]:
