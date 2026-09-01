@@ -480,6 +480,12 @@ class Settings(BaseSettings):
     explosion_post_peak_chase_lookback_seconds: float = 900.0
     explosion_post_peak_chase_min_run_pct: float = 0.25
     explosion_post_peak_chase_near_top_frac: float = 0.12
+    # Session-level post-peak: a slow-grind rip (PE 15->100 over hours) shows only a small run
+    # in the short window, so buying near the top slips through. Also reject entries within
+    # near_top_frac of the SESSION peak after a big session run (Sep 1 live PUT 24050: entry
+    # 94.8 vs ~100 session peak, +500% -> never green -> -19k). Near-base entries sit near the
+    # session LOW, so this only blocks the exhausted-top chase.
+    explosion_post_peak_chase_session_enabled: bool = True
     # Base-relative chase bypass — a fresh flat→vertical break off a consolidation base
     # (SENSEX 76300 PE: 30-100 range then 100-144 break) reads as high day-move but the
     # move FROM THE BASE is still early. Allow it when volume is rising + base move in window.

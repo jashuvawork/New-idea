@@ -1404,6 +1404,62 @@ def shallow_otm_local_base_premium_fade_bypass(
     return True
 
 
+def atm_armed_local_base_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+) -> bool:
+    """ATM ELITE armed-base at local pad — allow shallow exec premium retest fills.
+
+    Sep01 NIFTY PUT 23950: SELECTED at PM flat base (18.3) then
+    ``exec_premium_fading_at_execution`` blocked the 509% mfe rip when
+    ``first_lift_structure_not_confirmed`` kept strict pad false (no OTM stamp).
+    """
+    if not isinstance(alert, dict):
+        return False
+    settings = get_settings()
+    min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
+    max_lb = float(getattr(settings, "shallow_otm_local_base_max_move_pct", 25.0) or 25.0)
+    lb = float(
+        alert.get("localBaseMovePct")
+        or alert.get("ictBaseRelativeMovePct")
+        or alert.get("offLowMovePct")
+        or 0
+    )
+    if not (min_lb <= lb <= max_lb):
+        return False
+    tier = str(
+        alert.get("tier") or getattr(explosion_event, "tier", "") or ""
+    ).upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    moment = str(alert.get("momentType") or "").lower()
+    if not (
+        alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or moment in ("armed_base_launch", "ict_base_armed", "v_rip_session_low")
+    ):
+        return False
+    moneyness = str(
+        alert.get("moneyness")
+        or getattr(explosion_event, "moneyness", "")
+        or ""
+    ).upper()
+    if moneyness and moneyness not in ("ATM",):
+        return False
+    return True
+
+
+def local_base_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+) -> bool:
+    """Shallow OTM stamp or ATM armed-base may fill through a base-retest premium dip."""
+    return (
+        shallow_otm_local_base_premium_fade_bypass(alert, explosion_event)
+        or atm_armed_local_base_premium_fade_bypass(alert, explosion_event)
+    )
+
+
 def resolve_strict_pad_lane_for_entry(
     side: Side | str,
     snap: SymbolSnapshot,
@@ -1433,7 +1489,7 @@ def resolve_strict_pad_lane_for_entry(
         armed_base_chart_bypass = bool(
             armed_ready and armed_reason in _STRICT_PAD_CHART_BYPASS_REASONS
         )
-    shallow_otm_bypass = shallow_otm_local_base_premium_fade_bypass(
+    shallow_otm_bypass = local_base_premium_fade_bypass(
         row,
         explosion_event,
     )
