@@ -604,3 +604,18 @@ def test_worst_midday_chop_elite_hard_blocks(
     assert "midday_chop" in meta.get("conflictFlags", [])
     assert "chop_regime" in meta.get("conflictFlags", [])
     assert "elite_hot" in meta.get("conflictFlags", [])
+
+
+def test_trap_soft_cap_honor_bypassed_for_index_confirmed_ftv():
+    from app.engines.explosion_entry_guards import _trap_soft_cap_must_honor
+
+    meta = {
+        "action": "cut_size",
+        "chopRegime": True,
+        "eliteHot": True,
+        "indexConfirmedFtv": True,
+        "localBaseStructure": True,
+        "lotCap": 6,
+    }
+    assert _trap_soft_cap_must_honor(meta) is False
+    assert cap_fake_explosion_trap_lots(17, meta, bypass_soft_cap=True) == 17

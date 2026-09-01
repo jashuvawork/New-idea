@@ -1007,7 +1007,30 @@ def _slow_grind_armed_trough_readiness(
         getattr(ict, "v_rip_ready", False)
         or row.get("ictVRipReady")
     )
-    if not base_armed:
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    index_trough_ok = False
+    if not base_armed and bool(
+        getattr(s, "slow_grind_armed_trough_index_trough_enabled", True)
+    ):
+        from app.engines.spot_direction import index_trough_momentum_turn
+
+        trough_max_off = float(
+            getattr(s, "slow_grind_armed_trough_index_trough_max_off_low_pct", 8.0)
+            or 8.0
+        )
+        if side in ("CALL", "PUT") and index_trough_momentum_turn(
+            side, getattr(snap, "spotChart", None), settings=s,
+        ):
+            if v_rip_ready or off_low <= trough_max_off + 1e-6:
+                index_trough_ok = True
+                if isinstance(alert, dict):
+                    alert["ictIndexTroughSlowV"] = True
+                    alert["indexTroughSlowV"] = True
+    if not base_armed and not index_trough_ok:
         return False, "slow_grind_armed_trough_base_not_armed"
 
     quality = float(
@@ -1024,7 +1047,11 @@ def _slow_grind_armed_trough_readiness(
         return False, "slow_grind_armed_trough_ftv_confirmed"
 
     if not (v_rip_ready or off_low <= max_off + 1e-6):
-        return False, "slow_grind_armed_trough_not_at_trough"
+        if not (index_trough_ok and off_low <= float(
+            getattr(s, "slow_grind_armed_trough_index_trough_max_off_low_pct", 8.0)
+            or 8.0
+        ) + 1e-6):
+            return False, "slow_grind_armed_trough_not_at_trough"
 
     base_move = float(
         getattr(ict, "base_relative_move_pct", 0)
@@ -1191,13 +1218,15 @@ def _slow_grind_impending_lift_signals(
     if volume_awake and v3 <= max_v3:
         signals.append("volume_awakening_pre_spike")
 
-    from app.engines.spot_direction import side_aligned_with_chart
+    from app.engines.spot_direction import index_trough_momentum_turn, side_aligned_with_chart
 
     if side_u in ("CALL", "PUT"):
         from app.models.schemas import Side as _Side
 
         if side_aligned_with_chart(_Side(side_u), chart):
             signals.append("chart_direction_aligned")
+        elif index_trough_momentum_turn(_Side(side_u), chart, settings=settings):
+            signals.append("index_trough_momentum_turn")
 
     return len(signals), signals
 

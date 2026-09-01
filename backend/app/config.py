@@ -1492,6 +1492,9 @@ class Settings(BaseSettings):
     # Aug6: chop+elite_hot cut_size(6) was restored to 27 by baseWindowFullLots /
     # top_explosion soft-cap bypass. On chop/worst conflict stacks, honor the soft cap.
     fake_explosion_trap_honor_soft_cap_on_chop: bool = True
+    # Index-confirmed FTV + structured local-base rip keeps capital max lots on chop/worst
+    # days (Sep1 NIFTY 23950 CE: eliteFullLot authorized but chop+elite soft cap → 6).
+    index_confirmed_ftv_bypasses_fake_trap_lot_cap: bool = True
     # High-conviction max lots win over fake-trap soft cap (hard block still applies).
     high_conviction_bypasses_fake_trap_lot_cap: bool = True
     # Structured base-window explosions take capital max lots (no first-green 6-lot throttle).
@@ -1758,6 +1761,14 @@ class Settings(BaseSettings):
     slow_grind_armed_trough_max_move_pct: float = 20.0
     slow_grind_armed_trough_min_impending_signals: int = 1
     slow_grind_armed_trough_min_explosion_score: float = 5.0
+    # Index slow-V at session trough — fire before option premium coil arms (~10:30 vs ~11:06).
+    slow_grind_armed_trough_index_trough_enabled: bool = True
+    slow_grind_armed_trough_index_trough_max_off_low_pct: float = 8.0
+    # BEARISH 5m chart may still block CALLs at the index trough; waive when 5m turns.
+    index_trough_chart_bypass_enabled: bool = True
+    index_trough_chart_bypass_min_mom5_pct: float = 0.015
+    index_trough_chart_bypass_min_mom_shift_pct: float = 0.03
+    index_trough_chart_bypass_max_adverse_mom15_pct: float = -0.20
     # Mid-day consolidation base — armed coil off session low before afternoon breakout
     # (Aug25 NIFTY 24250 PE ₹70–80 base 12:15–12:45 before 1pm rip).
     slow_grind_consolidation_base_enabled: bool = True

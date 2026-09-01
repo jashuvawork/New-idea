@@ -1671,6 +1671,12 @@ def detect_fake_explosion_trap(
 def _trap_soft_cap_must_honor(trap_meta: dict[str, Any]) -> bool:
     """Chop/worst conflict stacks must keep cut_size lotCap (Aug6 27→6 restore hole)."""
     settings = get_settings()
+    if bool(getattr(settings, "index_confirmed_ftv_bypasses_fake_trap_lot_cap", True)):
+        if trap_meta.get("indexConfirmedFtv") and (
+            trap_meta.get("localBaseStructure")
+            or trap_meta.get("defensiveBaseRip")
+        ):
+            return False
     if not getattr(settings, "fake_explosion_trap_honor_soft_cap_on_chop", True):
         return False
     if trap_meta.get("action") != "cut_size":

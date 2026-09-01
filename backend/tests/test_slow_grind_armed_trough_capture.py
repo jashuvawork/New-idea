@@ -82,7 +82,59 @@ def test_slow_grind_armed_trough_authorizes_aug25_24150_watch_trough(mock_settin
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")
-def test_slow_grind_standard_path_still_rejects_immature_coil(mock_settings):
+def test_slow_grind_armed_trough_index_trough_without_base_armed(mock_settings):
+    """Sep1-style slow V: index 5m turning at option session low before premium coil arms."""
+    mock_settings.return_value = Settings(
+        slow_grind_armed_trough_index_trough_enabled=True,
+        slow_grind_armed_trough_index_trough_max_off_low_pct=8.0,
+    )
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=55.0,
+        spot=24020.0,
+        atmStrike=24000.0,
+        spotChart=SpotChart(
+            direction="BEARISH",
+            rsi=48.0,
+            macdBias="BEARISH",
+            macdHistogram=-0.2,
+            momentum5Pct=0.05,
+            momentum10Pct=0.02,
+            momentum15Pct=-0.10,
+        ),
+    )
+    ict = MagicMock(
+        base_armed=False,
+        local_swing_base=False,
+        v_rip_ready=True,
+        base_relative_move_pct=2.0,
+        flat_vertical_quality=12.0,
+        armed_base_samples=2,
+        velocity_3s=0.1,
+    )
+    alert = {
+        "tier": "WATCH",
+        "side": "CALL",
+        "strike": 24000.0,
+        "premium": 120.0,
+        "offLowMovePct": 3.0,
+        "ictVRipReady": True,
+        "ictBaseRelativeMovePct": 2.0,
+        "velocity3s": 0.1,
+    }
+    ok, reason = _slow_grind_armed_trough_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.CALL, premium=120.0, velocity_3s=0.1, strike=24000.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == SLOW_GRIND_ARMED_TROUGH_READY
+    assert alert["ictIndexTroughSlowV"] is True
     mock_settings.return_value = Settings()
     snap = _snap()
     ict = MagicMock(
