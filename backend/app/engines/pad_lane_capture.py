@@ -107,12 +107,22 @@ def pad_lane_cold_velocity_ok(
         return True
     if evidence.get("firstLiftLocalBase") and -1.5 <= v3 <= 1.5 and v9 >= -1.0:
         return True
+    settings = get_settings()
+    peak = float(evidence.get("peakMovePct") or evidence.get("dailyMovePct") or 0)
+    min_peak = float(
+        getattr(settings, "first_lift_pad_explosion_min_peak_pct", 25.0) or 25.0
+    )
+    peak_confirmed_pad = (
+        tier in ("ELITE", "EXPLODING")
+        and peak >= min_peak
+        and 2.0 <= local_move <= 25.0
+    )
     if (
         tier in ("ELITE", "EXPLODING")
         and bool(evidence.get("flatThenVertical") and evidence.get("activeBreakout"))
         and 2.0 <= local_move <= 40.0
-        and -1.2 <= v3 <= 1.5
-        and v9 >= -0.8
+        and (-2.0 if peak_confirmed_pad else -1.2) <= v3 <= 1.5
+        and (v9 >= -1.0 if peak_confirmed_pad else v9 >= -0.8)
     ):
         return True
     return False

@@ -1985,7 +1985,11 @@ def rank_entry_candidate(
         ),
         "firstLift": alert.get("ictFirstLift"),
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
-        "vRipReady": alert.get("ictVRipReady"),
+        "vRipReady": bool(
+            alert.get("ictVRipReady")
+            or alert.get("vRipReady")
+            or "v_rip" in str(alert.get("momentType") or alert.get("reason") or "").lower()
+        ),
         "fastBullishLocalBase": bool(
             alert.get("bullishLocalBaseActive")
             or alert.get("fastBullishLocalBaseReady")
