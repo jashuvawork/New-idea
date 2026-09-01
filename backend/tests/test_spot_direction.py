@@ -425,6 +425,17 @@ def test_live_direction_index_trough_bypass():
     assert reason == "ok"
 
 
+def test_index_trough_detects_subtle_early_turn():
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    subtle = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.01,
+        momentum10Pct=-0.01,
+        momentum15Pct=-0.30,
+    )
+    assert index_trough_momentum_turn(Side.CALL, subtle) is True
+
 def test_reconcile_spot_chart_overrides_bullish_5m_on_bearish_mtf():
     from app.engines.spot_direction import reconcile_spot_chart_with_mtf
     from app.models.schemas import ChartAnalysis
