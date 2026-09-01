@@ -235,6 +235,43 @@ def enrich_evidence_index_confirmed(
         evidence["indexHelpersConfirm"] = True
 
 
+def index_confirmed_moneyness_bypass(
+    side: Side | str,
+    snap: Optional[SymbolSnapshot],
+    alert: Optional[Mapping[str, Any]],
+    *,
+    money: str,
+    depth: int,
+) -> bool:
+    """Allow deep ITM / shallow OTM when index turn + option at pad is confirmed."""
+    settings = get_settings()
+    if not bool(getattr(settings, "index_confirmed_moneyness_bypass_enabled", True)):
+        return False
+    if money not in ("ITM", "OTM") or depth <= 0:
+        return False
+    if not index_confirmed_local_base(side, snap, alert):
+        return False
+    tier = str((alert or {}).get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False
+    lb = float(
+        (alert or {}).get("localBaseMovePct")
+        or (alert or {}).get("ictBaseRelativeMovePct")
+        or (alert or {}).get("offLowMovePct")
+        or 0
+    )
+    max_off = float(
+        getattr(settings, "index_confirmed_local_base_max_off_low_pct", 22.0) or 22.0
+    )
+    if lb < 2.0 or lb > max_off + 1e-6:
+        return False
+    if money == "ITM":
+        max_itm = int(getattr(settings, "index_confirmed_max_itm_steps", 12) or 12)
+        return depth <= max_itm
+    max_otm = int(getattr(settings, "index_confirmed_max_otm_steps", 2) or 2)
+    return depth <= max_otm
+
+
 def index_confirmed_waives_timing_block(evidence: Mapping[str, Any]) -> bool:
     settings = get_settings()
     if not bool(getattr(settings, "index_confirmed_local_base_waives_timing", True)):

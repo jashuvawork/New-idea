@@ -723,6 +723,18 @@ def otm_reversal_entry_allowed(
     symbol = str(getattr(snap, "symbol", "") or "")
     if side not in ("CALL", "PUT") or strike <= 0 or spot <= 0:
         return False
+    from app.engines.index_confirmed_local_base import _alert_index_confirmed_stamped
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    if isinstance(alert, Mapping) and (
+        _alert_index_confirmed_stamped(alert)
+        or index_trough_momentum_turn(side, getattr(snap, "spotChart", None))
+    ):
+        from app.engines.moneyness import _depth_steps
+
+        max_steps = int(getattr(settings, "index_confirmed_max_otm_steps", 2) or 2)
+        if _depth_steps(Side(side), strike, spot, symbol, atm) <= max_steps:
+            return True
     from app.engines.moneyness import _depth_steps, classify_moneyness
 
     money = classify_moneyness(

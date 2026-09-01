@@ -437,6 +437,12 @@ def check_bearish_sideways_entry(
                 getattr(settings, "bearish_sideways_local_base_min_score", 75.0) or 75.0
             )
             min_score = min(min_score, soft)
+        from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+        if alert is not None and snap is not None and index_confirmed_local_base(
+            candidate.side, snap, alert,
+        ):
+            return False, "ok"
         if tier in ("ELITE", "EXPLODING") and score >= min_score:
             return False, "ok"
         from app.engines.morning_premium_capture import (

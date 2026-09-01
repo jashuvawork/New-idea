@@ -634,6 +634,10 @@ class Settings(BaseSettings):
     index_confirmed_ftv_min_local_base_move_pct: float = 5.0
     index_confirmed_ftv_max_local_base_move_pct: float = 25.0
     index_confirmed_ftv_max_capital_pct: float = 0.90
+    # Index-confirmed pad capture — deep ITM at trough/peak and shallow OTM reversal (Sep01).
+    index_confirmed_moneyness_bypass_enabled: bool = True
+    index_confirmed_max_itm_steps: int = 12
+    index_confirmed_max_otm_steps: int = 2
     # OTM reversal entry — the #1 cause of explosion_near_miss on today's CALL winners was
     # armed_base_requires_atm_itm_otm: they were 2-3 strikes OTM (spot below the strike on the
     # 'bearish' day) and the 1-step shallow allowance rejected them, then spot rallied UP
