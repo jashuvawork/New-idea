@@ -2462,7 +2462,9 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         tradeable = True
     armed_launch = bool(getattr(ict, "armed_base_launch", False))
     elite_base_ready = bool(getattr(ict, "elite_base_ready", False))
-    v_rip_ready = bool(getattr(ict, "v_rip_ready", False))
+    v_rip_ready = bool(getattr(ict, "v_rip_ready", False)) or (
+        "v_rip_session_low" in str(e.reason or "")
+    )
     building_rip_ready = bool(getattr(ict, "building_rip_ready", False))
     armed_evidence: dict[str, Any] = {}
     causal_band_max = float(

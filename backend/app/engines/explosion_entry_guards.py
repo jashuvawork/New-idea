@@ -576,9 +576,17 @@ def immature_explosion_blocked(
         ):
             v_lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
             v_hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
-            if (
-                v_lo <= base_move <= v_hi
-                and bool(getattr(ict, "volume_awakening", False))
+            from app.engines.explosion_detector import first_lift_pad_capture_lane
+
+            peak_pad = first_lift_pad_capture_lane(
+                tier=str(getattr(explosion_event, "tier", "") or ""),
+                peak_move_pct=_session_peak_move(explosion_event),
+                first_lift_ready=bool(getattr(ict, "first_lift", False)),
+                local_base_move_pct=base_move,
+                v_rip_ready=True,
+            )
+            if v_lo <= base_move <= v_hi and (
+                bool(getattr(ict, "volume_awakening", False)) or peak_pad
             ):
                 local_floor = min(local_floor, v_lo)
         # Aug28 SENSEX PUT 77500: ict_base_armed prelaunch at 5.4% lb blocked as immature.
