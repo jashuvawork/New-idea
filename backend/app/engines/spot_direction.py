@@ -407,6 +407,14 @@ def reconcile_spot_chart_with_mtf(
         elif d == "BEARISH":
             bear += 1
 
+    mom5_rollover = bool(getattr(settings, "chart_breadth_mom5_rollover_enabled", True))
+    bearish_mom5_flip = float(
+        getattr(settings, "chart_breadth_bearish_mom5_rollover_pct", 0.008) or 0.008
+    )
+    bullish_mom5_flip = float(
+        getattr(settings, "chart_breadth_bullish_mom5_rollover_pct", 0.008) or 0.008
+    )
+
     if respect_breadth and breadth == "BEARISH":
         if _confirmed_reversal_up(
             spot_chart,
@@ -420,7 +428,12 @@ def reconcile_spot_chart_with_mtf(
         if spot_dir == "BEARISH":
             return spot_chart
         if spot_dir == "BULLISH":
-            if bear >= 1 or mom15 <= 0 or mom30 <= 0:
+            if (
+                bear >= 1
+                or mom15 <= 0
+                or mom30 <= 0
+                or (mom5_rollover and mom5 <= -bearish_mom5_flip)
+            ):
                 return spot_chart.model_copy(update={"direction": "BEARISH"})
     if respect_breadth and breadth == "BULLISH":
         if _confirmed_reversal_down(
@@ -435,7 +448,12 @@ def reconcile_spot_chart_with_mtf(
         if spot_dir == "BULLISH":
             return spot_chart
         if spot_dir == "BEARISH":
-            if bull >= 1 or mom15 >= 0 or mom30 >= 0:
+            if (
+                bull >= 1
+                or mom15 >= 0
+                or mom30 >= 0
+                or (mom5_rollover and mom5 >= bullish_mom5_flip)
+            ):
                 return spot_chart.model_copy(update={"direction": "BULLISH"})
 
     # Smart Ichimoku + live momentum — broker charts often agree here when MTF is thin.

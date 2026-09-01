@@ -1770,6 +1770,12 @@ class Settings(BaseSettings):
     index_trough_chart_bypass_min_mom5_pct: float = 0.008
     index_trough_chart_bypass_min_mom_shift_pct: float = 0.02
     index_trough_chart_bypass_max_adverse_mom15_pct: float = -0.35
+    # Sep 1 afternoon: composite 5m stayed BULLISH (mom15/mom30 lagging the morning rally)
+    # while live 5m rolled over at the session high — PUTs blocked as chart_live_bullish_no_puts.
+    # When breadth agrees with the rollover, trust negative mom5 over lagging mom15/mom30.
+    chart_breadth_mom5_rollover_enabled: bool = True
+    chart_breadth_bearish_mom5_rollover_pct: float = 0.008
+    chart_breadth_bullish_mom5_rollover_pct: float = 0.008
     # Mid-day consolidation base — armed coil off session low before afternoon breakout
     # (Aug25 NIFTY 24250 PE ₹70–80 base 12:15–12:45 before 1pm rip).
     slow_grind_consolidation_base_enabled: bool = True
