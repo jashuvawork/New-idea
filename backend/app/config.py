@@ -2672,6 +2672,12 @@ class Settings(BaseSettings):
     worst_day_dead_zone_bypass_min_peak_pct: float = 30.0
     worst_day_dead_zone_bypass_min_velocity_3s: float = 2.0
     worst_day_dead_zone_bypass_min_session_move_pct: float = 35.0
+    # Narrow 11:00–12:00 bypass for ELITE/EXPLODING armed_base at 2–25% local pad + ≥25% peak
+    worst_day_dead_zone_local_base_bypass_enabled: bool = True
+    worst_day_dead_zone_local_base_bypass_min_tier: str = "EXPLODING"
+    worst_day_dead_zone_local_base_min_peak_pct: float = 25.0
+    worst_day_dead_zone_local_base_min_lb_pct: float = 2.0
+    worst_day_dead_zone_local_base_max_lb_pct: float = 25.0
     day_adaptive_chop_rank_cap: float = 70.0
     day_adaptive_good_day_rank_relief: float = 3.0
 

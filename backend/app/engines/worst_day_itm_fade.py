@@ -46,6 +46,92 @@ def in_worst_day_dead_zone() -> bool:
 
 _TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
 
+_LOCAL_BASE_MOMENT_MARKERS = (
+    "armed_base",
+    "first_lift",
+    "v_rip",
+    "flat_then_vertical",
+    "ict_base_armed",
+    "elite_base",
+    "slow_grind_armed",
+    "double_dip_vbase",
+)
+
+
+def _candidate_alert(candidate: Any) -> dict[str, Any]:
+    alert = getattr(candidate, "alert", None)
+    return alert if isinstance(alert, dict) else {}
+
+
+def _candidate_local_base_move(candidate: Any, event: Any = None) -> float:
+    alert = _candidate_alert(candidate)
+    for key in ("localBaseMovePct", "ictBaseRelativeMovePct"):
+        raw = alert.get(key)
+        if raw is not None:
+            return float(raw or 0.0)
+    snap = getattr(candidate, "snap", None)
+    if event is not None and snap is not None:
+        try:
+            from app.engines.explosion_entry_guards import effective_local_base_move_pct
+            from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+            ict = analyze_explosion_event_ict(event, snap)
+            return float(effective_local_base_move_pct(event, ict) or 0.0)
+        except Exception:
+            pass
+    return 0.0
+
+
+def _candidate_local_base_moment(candidate: Any) -> bool:
+    alert = _candidate_alert(candidate)
+    if bool(alert.get("ictFirstLift")):
+        return True
+    moment = str(
+        alert.get("momentType") or alert.get("ictPattern") or alert.get("reason") or "",
+    ).lower()
+    if any(marker in moment for marker in _LOCAL_BASE_MOMENT_MARKERS):
+        return True
+    event = getattr(candidate, "explosion_event", None)
+    if event is not None:
+        reason = str(getattr(event, "reason", "") or "").lower()
+        return any(marker in reason for marker in _LOCAL_BASE_MOMENT_MARKERS)
+    return False
+
+
+def _local_base_dead_zone_bypass(
+    candidate: Any,
+    settings: Any,
+    *,
+    tier: str,
+    peak_move: float,
+    daily_move: float,
+    event: Any = None,
+) -> bool:
+    """Narrow bypass: confirmed local-base armed/first-lift at 2–25% pad with winner floor."""
+    if not getattr(settings, "worst_day_dead_zone_local_base_bypass_enabled", True):
+        return False
+    min_tier = str(
+        getattr(settings, "worst_day_dead_zone_local_base_bypass_min_tier", "EXPLODING")
+        or "EXPLODING",
+    ).upper()
+    if _TIER_RANK.get(tier.upper(), 0) < _TIER_RANK.get(min_tier, 3):
+        return False
+    if not _candidate_local_base_moment(candidate):
+        return False
+
+    lb = _candidate_local_base_move(candidate, event)
+    lb_min = float(getattr(settings, "worst_day_dead_zone_local_base_min_lb_pct", 2.0) or 2.0)
+    lb_max = float(getattr(settings, "worst_day_dead_zone_local_base_max_lb_pct", 25.0) or 25.0)
+    if not (lb_min <= lb <= lb_max):
+        return False
+    if daily_move >= 20.0 and lb < 5.0:
+        return False
+
+    min_peak = float(
+        getattr(settings, "worst_day_dead_zone_local_base_min_peak_pct", 25.0) or 25.0,
+    )
+    return peak_move >= min_peak or daily_move >= min_peak
+
 
 def dead_zone_allows_candidate(candidate: Any) -> tuple[bool, str]:
     """
@@ -87,6 +173,15 @@ def dead_zone_allows_candidate(candidate: Any) -> tuple[bool, str]:
     if peak_move >= min_peak or daily_move >= min_session or vel3 >= min_vel:
         return True, "ok"
     if vel3 < min_vel and peak_move >= min_peak * 0.85:
+        return True, "ok"
+    if _local_base_dead_zone_bypass(
+        candidate,
+        settings,
+        tier=tier,
+        peak_move=peak_move,
+        daily_move=daily_move,
+        event=event,
+    ):
         return True, "ok"
     return False, "worst_day_dead_zone"
 
