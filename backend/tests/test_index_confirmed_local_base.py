@@ -220,3 +220,4 @@ def test_index_confirmed_grade_floor(mock_settings):
     assert index_confirmed_grade_floor_applies(evidence) is True
     ranking = rank_trade_evidence(evidence)
     assert ranking["grade"] == "A"
+
