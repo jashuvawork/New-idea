@@ -1879,8 +1879,13 @@ def first_lift_entry_readiness(
     ) or bool(
         persisted.get("activeBreakout") and persisted.get("flatThenVertical")
     )
+    # armed_base_launch stamps before flat→vertical confirms — do not require structured
+    # when the armed launch lane is active (Sep01 NIFTY PUT 23950 ELITE 100 at ~₹18 base).
     if not (first_lift or armed_launch or elite_base_ready or v_rip_ready) or (
-        not structured and not elite_base_ready and not v_rip_ready
+        not structured
+        and not elite_base_ready
+        and not v_rip_ready
+        and not armed_launch
     ):
         return False, "first_lift_structure_not_confirmed"
 
