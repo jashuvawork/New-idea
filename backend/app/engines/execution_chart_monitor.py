@@ -356,9 +356,21 @@ async def monitor_trade_chart_before_execution(
     # base-retest dip instead of being blocked as "premium fading" — take it AT the base.
     # strict_first_lift_bypass covers v_rip/armed_base stamps even when chart aligns.
     _event_tier = str(getattr(explosion_event, "tier", "") or "").upper()
-    premium_fade_pad_lane = strict_first_lift_bypass or pad_lane_chart_bypass
+    # The ATM armed-base premium-fade bypass waives the premium-fade check ONLY (not the chart
+    # gate) — an ATM ELITE/EXPLODING armed base may fill through a shallow base-retest dip
+    # (Sep01 NIFTY PUT 23950). Applied here, not in the chart strict_bypass, so it can't skip
+    # the chart-direction gate on a counter-trend setup.
+    from app.engines.pad_lane_capture import atm_armed_local_base_premium_fade_bypass
+
+    atm_armed_fade_bypass = atm_armed_local_base_premium_fade_bypass(
+        alert if isinstance(alert, dict) else None, explosion_event
+    )
+    premium_fade_pad_lane = (
+        strict_first_lift_bypass or pad_lane_chart_bypass or atm_armed_fade_bypass
+    )
     confirmed_ftv_bypass = bool(
-        strict_first_lift_bypass and _event_tier in ("ELITE", "EXPLODING")
+        (strict_first_lift_bypass or atm_armed_fade_bypass)
+        and _event_tier in ("ELITE", "EXPLODING")
     ) or pad_lane_chart_bypass
 
     try:

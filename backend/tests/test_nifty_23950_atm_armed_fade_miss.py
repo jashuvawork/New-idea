@@ -82,7 +82,10 @@ def test_atm_armed_bypass_rejects_deep_itm(mock_settings):
 
 @patch("app.engines.pad_lane_capture.get_settings")
 @patch("app.engines.ict_breakout_monitor.get_settings")
-def test_strict_pad_resolves_when_first_lift_unconfirmed(mock_ict, mock_pad):
+def test_atm_armed_grants_premium_fade_not_chart_bypass_when_unconfirmed(mock_ict, mock_pad):
+    """An unconfirmed ATM armed-base (no OTM stamp, first-lift not confirmed) must grant the
+    PREMIUM-FADE bypass but NOT the chart-direction strict bypass — folding the two together
+    let a counter-trend ATM armed-base skip the chart gate without orderflow (regression)."""
     mock_pad.return_value = _settings()
     mock_ict.return_value = _settings()
     snap = SymbolSnapshot(
@@ -110,8 +113,11 @@ def test_strict_pad_resolves_when_first_lift_unconfirmed(mock_ict, mock_pad):
             alert=alert,
         )
 
+    # No chart strict bypass (unconfirmed, no OTM stamp) — chart gate still applies...
     assert pad_lane is False
-    assert strict is True
+    assert strict is False
+    # ...but the premium-fade bypass IS granted, which is what actually let the Sep01 PUT fill.
+    assert atm_armed_local_base_premium_fade_bypass(alert, event) is True
 
 
 @patch("app.engines.winner_entry_guards.get_settings")
