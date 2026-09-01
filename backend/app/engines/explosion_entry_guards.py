@@ -865,7 +865,11 @@ def post_peak_chase_blocked(
         getattr(settings, "explosion_post_peak_chase_near_top_frac", 0.12) or 0.12
     )
     try:
-        from app.engines.explosion_detector import recent_premium_run
+        from app.engines.explosion_detector import (
+            get_session_low_premium,
+            get_session_peak_premium,
+            recent_premium_run,
+        )
 
         r = recent_premium_run(sym, strike, side, lookback_seconds=lookback)
     except Exception:
@@ -877,6 +881,23 @@ def post_peak_chase_blocked(
         return False, ""
     if run >= min_run and current >= high * (1.0 - near_top):
         return True, "explosion_post_peak_chase"
+
+    # Session-level post-peak: a SLOW-GRIND rip (e.g. PE 15->100 over hours) shows only a small
+    # run inside the short window, so the window check misses it — but the SESSION run is huge.
+    # Buying within near_top_frac of the SESSION peak after a big session run is chasing the top
+    # regardless of grind speed (Sep 1 live: PUT 24050 entry 94.8 vs ~100 session peak after
+    # +500% -> never green -> -19k). A genuine near-base entry sits near the session LOW, far
+    # below the peak, so it is unaffected — this only fires near the exhausted top.
+    if bool(getattr(settings, "explosion_post_peak_chase_session_enabled", True)):
+        try:
+            sp = float(get_session_peak_premium(sym, strike, side) or 0)
+            sl = float(get_session_low_premium(sym, strike, side) or 0)
+        except Exception:
+            sp = sl = 0.0
+        if sp > 0 and sl > 0:
+            session_run = (sp - sl) / sl
+            if session_run >= min_run and current >= sp * (1.0 - near_top):
+                return True, "explosion_post_peak_chase_session"
     return False, ""
 
 

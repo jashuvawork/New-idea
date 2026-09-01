@@ -26,6 +26,7 @@ def _settings(**overrides):
         explosion_post_peak_chase_lookback_seconds=900.0,
         explosion_post_peak_chase_min_run_pct=0.25,
         explosion_post_peak_chase_near_top_frac=0.12,
+        explosion_post_peak_chase_session_enabled=True,
     )
     for k, v in overrides.items():
         setattr(s, k, v)
@@ -43,8 +44,20 @@ def _seed(symbol, strike, side, prems, *, step_s=20.0):
     )
 
 
+def _seed_session(symbol, strike, side, low, peak):
+    """Seed session low/peak and pin the session date so _roll_session won't clear them."""
+    from datetime import datetime as _dt
+
+    key = _open_key(symbol, strike, side)
+    ed._session_low[key] = float(low)
+    ed._session_peak[key] = float(peak)
+    ed._session_date = _dt.now(IST).astimezone(IST).strftime("%Y-%m-%d")
+
+
 def teardown_function(_):
     ed._local_base_hist.clear()
+    ed._session_low.clear()
+    ed._session_peak.clear()
 
 
 def test_blocks_chase_near_top_of_completed_run():
@@ -96,6 +109,31 @@ def test_disabled_is_noop():
         "app.engines.explosion_entry_guards.get_settings",
         return_value=_settings(explosion_post_peak_chase_guard_enabled=False),
     ):
+        blocked, _ = post_peak_chase_blocked(ev)
+    assert blocked is False
+
+
+def test_blocks_slow_grind_session_post_peak_chase():
+    """Sep 1 live PUT 24050: PE slow-ground 15 -> 100 over hours (small run inside the 900s
+    window) then the entry at 94.8 is near the SESSION peak — must be blocked as a chase."""
+    # Recent 15-min window only shows ~85 -> 100 (+18%, under the 25% window floor)...
+    _seed("NIFTY", 24050.0, Side.PUT, [85 + i * 0.4 for i in range(30)] + [100, 98, 94.8])
+    # ...but the SESSION low/peak span the full slow grind (15 -> 100 = +567%).
+    _seed_session("NIFTY", 24050.0, Side.PUT, 15.0, 100.0)
+    ev = SimpleNamespace(symbol="NIFTY", side=Side.PUT, strike=24050.0, premium=94.8)
+    with patch("app.engines.explosion_entry_guards.get_settings", return_value=_settings()):
+        blocked, reason = post_peak_chase_blocked(ev)
+    assert blocked is True
+    assert reason == "explosion_post_peak_chase_session"
+
+
+def test_session_post_peak_allows_entry_near_session_low():
+    """A re-entry at a fresh local base (near the session LOW) after a prior rip+pullback is
+    NOT a chase — current sits far below the session peak."""
+    _seed("NIFTY", 24050.0, Side.CALL, [40 + (i % 2) * 0.5 for i in range(30)] + [42.0])
+    _seed_session("NIFTY", 24050.0, Side.CALL, 38.0, 120.0)  # prior rip in session peak
+    ev = SimpleNamespace(symbol="NIFTY", side=Side.CALL, strike=24050.0, premium=42.0)
+    with patch("app.engines.explosion_entry_guards.get_settings", return_value=_settings()):
         blocked, _ = post_peak_chase_blocked(ev)
     assert blocked is False
 
