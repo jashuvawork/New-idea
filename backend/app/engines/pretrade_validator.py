@@ -1286,6 +1286,24 @@ def validate_candidate(
         )
         if armed_base_chart_bypass:
             meta["armedBaseChartBypass"] = True
+    alert_d = (
+        candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+    )
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    index_trough_bypass = bool(
+        alert_d
+        and (
+            alert_d.get("ictIndexConfirmedLocalBase")
+            or alert_d.get("indexConfirmedLocalBase")
+        )
+    )
+    if not index_trough_bypass and snap.spotChart is not None:
+        index_trough_bypass = index_trough_momentum_turn(
+            candidate.side, snap.spotChart,
+        )
+    if index_trough_bypass:
+        meta["indexTroughChartBypass"] = True
     blocked_chart, chart_reason = chart_blocks_side(
         candidate.side,
         snap.spotChart,
@@ -1294,6 +1312,7 @@ def validate_candidate(
         premium_led_bypass=premium_bypass or local_ichi_bypass or pad_lane_chart_bypass or candlestick_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
         strict_first_lift_bypass=armed_base_chart_bypass or pad_lane_chart_bypass,
+        index_trough_bypass=index_trough_bypass,
     )
     if blocked_chart:
         meta["chartDirection"] = snap.spotChart.direction if snap.spotChart else "NEUTRAL"

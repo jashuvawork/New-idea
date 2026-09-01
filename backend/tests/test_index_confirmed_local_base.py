@@ -80,6 +80,9 @@ def mock_settings(monkeypatch):
         index_trough_chart_bypass_min_mom5_pct=0.008,
         index_trough_chart_bypass_min_mom_shift_pct=0.02,
         index_trough_chart_bypass_max_adverse_mom15_pct=-0.35,
+        index_confirmed_moneyness_bypass_enabled=True,
+        index_confirmed_max_itm_steps=12,
+        index_confirmed_max_otm_steps=2,
         pad_lane_early_near_miss_waive_enabled=True,
         pad_lane_ftv_waives_timing_block_enabled=True,
         shallow_otm_local_base_min_move_pct=2.0,
@@ -165,3 +168,33 @@ def test_premium_fade_bypass_at_itm_put_base(mock_settings):
     alert = _put_alert(moneyness="ITM")
     assert index_confirmed_premium_fade_bypass(alert, snap) is True
     assert local_base_premium_fade_bypass(alert, snap=snap) is True
+
+
+def test_index_confirmed_moneyness_bypass_deep_itm(mock_settings):
+    from app.engines.index_confirmed_local_base import index_confirmed_moneyness_bypass
+    from app.engines.moneyness import atm_itm_entry_allows, moneyness_allows
+
+    snap = _snap("BEARISH", mom5=0.10, mom15=0.0, breadth="NEUTRAL")
+    alert = _put_alert(
+        side="CALL",
+        strike=23400.0,
+        explosionScore=100,
+        tier="ELITE",
+        localBaseMovePct=8.0,
+        ictBaseRelativeMovePct=8.0,
+        offLowMovePct=8.0,
+        ictFirstLift=True,
+        ictFlatThenVertical=True,
+    )
+    alert["side"] = "CALL"
+    stamp_index_confirmed_local_base(alert, snap)
+    assert index_confirmed_moneyness_bypass(
+        Side.CALL, snap, alert, money="ITM", depth=11,
+    ) is True
+    ok, reason, _ = atm_itm_entry_allows(Side.CALL, 23400.0, snap, alert=alert)
+    assert ok is True, reason
+    ok2, reason2, _ = moneyness_allows(
+        Side.CALL, 23400.0, snap, mode="explosion", candidate_score=100,
+        candidate=type("C", (), {"alert": alert})(),
+    )
+    assert ok2 is True, reason2

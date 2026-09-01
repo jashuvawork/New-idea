@@ -268,6 +268,10 @@ def check_directional_side_lock(
         return False, "ok"
     if local_base_overrides_side_bias(side_v, snap, event=ev, alert=alert):
         return False, "ok"
+    from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+    if index_confirmed_local_base(side_v, snap, alert):
+        return False, "ok"
 
     if premium_led_bypass:
         return False, "ok"

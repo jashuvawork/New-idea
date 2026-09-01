@@ -451,7 +451,12 @@ def _gate_checks(
         })
 
     # 7 — Would enter candidate pool (tier filter for explosions)
-    in_pool = tradeable and score >= min_score and premium_in_band(prem, mode="explosion")
+    peak_for_pool = float(alert.get("peakMovePct") or daily_move or 0)
+    in_pool = (
+        tradeable
+        and score >= min_score
+        and premium_in_band(prem, mode="explosion", peak_move_pct=peak_for_pool)
+    )
     if tier not in ("ELITE", "EXPLODING") and in_pool:
         from app.engines.morning_premium_capture import is_premium_capture_alert
 
@@ -515,6 +520,7 @@ def _gate_checks(
         float(alert.get("strike") or 0),
         snap,
         explosion_event=candidate.explosion_event,
+        alert=alert,
     )
     if reentry_blocked and not high_mover:
         blockers.append(reentry_reason)

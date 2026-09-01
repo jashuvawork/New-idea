@@ -665,6 +665,8 @@ def ftv_authorization_policy(
         pad_max_move_pct=top_ftv_a_pad_velocity_max_move_pct,
     )
     cvd_buying_ok = bool(evidence.get("cvdBuying"))
+    if not cvd_buying_ok and bool(evidence.get("indexConfirmedLocalBase")):
+        cvd_buying_ok = True
     if (
         not cvd_buying_ok
         and pad_capture_lane
@@ -1904,6 +1906,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "displacement": bool(evidence.get("displacement")),
             "cvdBuying": cvd_buying,
             "cvdAcceleration": cvd_acceleration,
+            "indexConfirmedLocalBase": bool(evidence.get("indexConfirmedLocalBase")),
             "indexHelpersConfirm": bool(evidence.get("indexHelpersConfirm")),
             "indexTickSpike": bool(evidence.get("indexTickSpike")),
             "indexTickAlign": bool(evidence.get("indexTickAlign")),

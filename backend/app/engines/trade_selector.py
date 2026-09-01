@@ -220,6 +220,7 @@ def _reentry_blocked(
     *,
     explosion_event: Any = None,
     mode: str = "",
+    alert: Any = None,
 ) -> tuple[bool, str]:
     blocked, reason = symbol_in_cooldown(symbol)
     if blocked:
@@ -238,11 +239,13 @@ def _reentry_blocked(
 
         bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
         hard_blocked, hard_reason = breadth_hard_blocks_side(
-            side, bias, event=explosion_event, snap=snap,
+            side, bias, event=explosion_event, snap=snap, alert=alert,
         )
         if hard_blocked:
             return True, hard_reason
-        if not counter_trend_entry_allowed(side, snap, explosion_event=explosion_event):
+        if not counter_trend_entry_allowed(
+            side, snap, explosion_event=explosion_event, alert=alert,
+        ):
             return True, "counter_trend_requires_elite"
     from app.engines.directional_lock import check_directional_side_lock
     from app.engines.morning_premium_capture import premium_led_bypass_for_snap
@@ -261,6 +264,7 @@ def _reentry_blocked(
             score=float(getattr(explosion_event, "explosion_score", 0) or 0),
             tier=tier,
             explosion_event=explosion_event,
+            alert=alert if isinstance(alert, dict) else None,
         )
     blocked, reason = check_directional_side_lock(
         symbol, side, snap, tier=tier, premium_led_bypass=premium_bypass,
