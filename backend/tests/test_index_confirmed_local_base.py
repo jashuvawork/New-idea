@@ -198,3 +198,26 @@ def test_index_confirmed_moneyness_bypass_deep_itm(mock_settings):
         candidate=type("C", (), {"alert": alert})(),
     )
     assert ok2 is True, reason2
+
+
+def test_index_confirmed_grade_floor(mock_settings):
+    from app.engines.index_confirmed_local_base import index_confirmed_grade_floor_applies
+    from app.engines.trade_ranking import rank_trade_evidence
+
+    evidence = {
+        "tier": "ELITE",
+        "indexConfirmedLocalBase": True,
+        "localBaseMovePct": 12.0,
+        "offLowMovePct": 12.0,
+        "velocity3s": 0.0,
+        "velocity9s": 0.0,
+        "explosionScore": 38.0,
+        "firstLift": True,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "orderflowPositive": True,
+    }
+    assert index_confirmed_grade_floor_applies(evidence) is True
+    ranking = rank_trade_evidence(evidence)
+    assert ranking["grade"] == "A"
+

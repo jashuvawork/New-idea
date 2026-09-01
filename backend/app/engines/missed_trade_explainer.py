@@ -200,7 +200,12 @@ def _gate_checks(
 
     # 3 — Premium band
     peak_for_prem = float(alert.get("peakMovePct") or daily_move or 0)
-    if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_for_prem):
+    from app.engines.index_confirmed_local_base import index_confirmed_premium_fade_bypass
+
+    prem_ok = premium_in_band(prem, mode="explosion", peak_move_pct=peak_for_prem)
+    if not prem_ok and index_confirmed_premium_fade_bypass(alert, snap):
+        prem_ok = True
+    if not prem_ok:
         blockers.append("premium_out_of_band")
         gates.append({"gate": "premium_band", "passed": False, "detail": f"premium ₹{prem}", "fix": "Sub-min bypass on extreme session move"})
     else:
@@ -452,11 +457,10 @@ def _gate_checks(
 
     # 7 — Would enter candidate pool (tier filter for explosions)
     peak_for_pool = float(alert.get("peakMovePct") or daily_move or 0)
-    in_pool = (
-        tradeable
-        and score >= min_score
-        and premium_in_band(prem, mode="explosion", peak_move_pct=peak_for_pool)
-    )
+    pool_prem_ok = premium_in_band(prem, mode="explosion", peak_move_pct=peak_for_pool)
+    if not pool_prem_ok and index_confirmed_premium_fade_bypass(alert, snap):
+        pool_prem_ok = True
+    in_pool = tradeable and score >= min_score and pool_prem_ok
     if tier not in ("ELITE", "EXPLODING") and in_pool:
         from app.engines.morning_premium_capture import is_premium_capture_alert
 
