@@ -143,6 +143,11 @@ def full_rest_rebuild_running() -> bool:
     return _full_rest_task is not None and not _full_rest_task.done()
 
 
+def rebuild_load_active() -> bool:
+    """True while a full REST rebuild holds the build lock or runs in background."""
+    return _build_in_progress or full_rest_rebuild_running() or _build_lock.locked()
+
+
 def schedule_full_rest_rebuild(*, broadcast: bool = True, run_trader: bool = True) -> bool:
     """
     Start a full REST rebuild as a background task.
@@ -260,9 +265,11 @@ def _effective_cache_seconds() -> float:
     return settings.snapshot_cache_interval_ms / 1000.0
 
 
-def invalidate_snapshot_cache() -> None:
+def invalidate_snapshot_cache(*, force: bool = False) -> None:
     """Force next snapshot build — used on WebSocket tick wake."""
     global _cache_time, _cache_json
+    if not force and rebuild_load_active():
+        return
     _cache_time = None
     _cache_json = None
 
@@ -309,6 +316,7 @@ def latency_stats() -> dict[str, Any]:
         "buildInProgress": _build_in_progress,
         "fullRestRebuildRunning": full_rest_rebuild_running(),
         "buildLockHeld": _build_lock.locked(),
+        "rebuildLoadActive": rebuild_load_active(),
         "entryScanDue": entry_scan_due(),
         "canRunTickFast": can_run_tick_fast(),
         "buildingLtpMonitorEnabled": bool(
@@ -685,6 +693,34 @@ async def _serve_stale_during_cooldown(*, broadcast: bool = False) -> Optional[M
     return stale
 
 
+def _enrich_snapshots_cpu(snapshots: dict, news: list) -> tuple[dict, bool, Optional[str]]:
+    """Sync post-build enrichment — run off the event loop during full REST rebuild."""
+    news_sentiment_agg = aggregate_news_intelligence(news).get("bias", "NEUTRAL")
+    for sym, snap in snapshots.items():
+        if not snap.dataAvailable:
+            continue
+        ps = analyze_psychology(snap, news)
+        snap.psychology = psychology_to_dict(ps)
+        hint = compute_adaptive_exit_plan(
+            snap, StrategyType.SCALP, ps, snap.optimizedProfile, confidence=snap.tradeQualityScore, news=news,
+        )
+        snap.adaptiveExitHint = hint.to_dict()
+        snap.psychology["newsAggregate"] = news_sentiment_agg
+
+    _enrich_smt_divergence(snapshots)
+
+    from app.engines.expiry_day_guards import refresh_expiry_session
+
+    refresh_expiry_session(snapshots)
+
+    data_ready = any(s.dataAvailable for s in snapshots.values())
+    waiting_reason = None
+    if not data_ready:
+        errors = [s.error for s in snapshots.values() if s.error]
+        waiting_reason = errors[0] if errors else "Waiting for real Upstox data"
+    return snapshots, data_ready, waiting_reason
+
+
 def _enrich_smt_divergence(snapshots: dict) -> None:
     """Cross-index SMT divergence between first two available symbols."""
     from app.engines.chart_advanced_analysis import detect_smt_divergence
@@ -764,6 +800,7 @@ async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
             return sym, e
 
     results = await asyncio.gather(*[_build_one(sym) for sym in settings.symbols])
+    await asyncio.sleep(0)
     for sym, result in results:
         if isinstance(result, Exception):
             err_msg = str(result)
@@ -782,29 +819,10 @@ async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
         else:
             snapshots[sym] = result
 
-    data_ready = any(s.dataAvailable for s in snapshots.values())
-    waiting_reason = None
-    if not data_ready:
-        errors = [s.error for s in snapshots.values() if s.error]
-        waiting_reason = errors[0] if errors else "Waiting for real Upstox data"
-
-    news_sentiment_agg = aggregate_news_intelligence(news)
-    for sym, snap in snapshots.items():
-        if not snap.dataAvailable:
-            continue
-        ps = analyze_psychology(snap, news)
-        snap.psychology = psychology_to_dict(ps)
-        hint = compute_adaptive_exit_plan(
-            snap, StrategyType.SCALP, ps, snap.optimizedProfile, confidence=snap.tradeQualityScore, news=news,
-        )
-        snap.adaptiveExitHint = hint.to_dict()
-        snap.psychology["newsAggregate"] = news_sentiment_agg
-
-    _enrich_smt_divergence(snapshots)
-
-    from app.engines.expiry_day_guards import refresh_expiry_session
-
-    refresh_expiry_session(snapshots)
+    snapshots, data_ready, waiting_reason = await asyncio.to_thread(
+        _enrich_snapshots_cpu, snapshots, news,
+    )
+    await asyncio.sleep(0)
 
     if data_ready and run_trader:
         auto_state = await process(snapshots, news=news, client=client)
@@ -892,7 +910,7 @@ async def get_multi_snapshot(
     now = datetime.now(IST)
     trader_pass = entry_scan_due() if run_trader is None else bool(run_trader)
 
-    if _build_in_progress and _cache and _cache.dataReady:
+    if rebuild_load_active() and _cache and _cache.dataReady:
         stale = _serve_stale_cache(reason="Refresh in progress — serving last good data")
         if broadcast:
             await broadcast_snapshot(stale)
@@ -1063,10 +1081,16 @@ async def get_snapshots_cached():
             except Exception:
                 pass
         return Response(content=_cache_json, media_type="application/json")
+    if rebuild_load_active() and _cache and _cache.snapshots:
+        stale = _serve_stale_cache(reason="Refresh in progress — serving last good data")
+        raw = await asyncio.to_thread(_serialize_snapshot, stale)
+        return Response(content=raw, media_type="application/json")
     fast = await get_multi_snapshot_fast(overlay_ws=False)
     if fast.snapshots:
         await _store_cache_async(fast)
         return Response(content=_cache_json or b"{}", media_type="application/json")
+    if rebuild_load_active():
+        return Response(content=b"{}", media_type="application/json")
     return await get_multi_snapshot()
 
 
