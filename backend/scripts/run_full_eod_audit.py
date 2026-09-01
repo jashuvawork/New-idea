@@ -69,6 +69,7 @@ PATCH_TARGETS = (
     "app.engines.top_ftv_v_expiry_bypass.get_settings",
     "app.engines.grade_a_ftv_capture.get_settings",
     "app.engines.pad_lane_capture.get_settings",
+    "app.engines.index_confirmed_local_base.get_settings",
     "app.engines.building_ftv_gates.get_settings",
     "app.engines.local_base_chart_bypass.get_settings",
     "app.engines.explosion_profit.get_settings",
@@ -111,6 +112,16 @@ def _has_tape(path: Path) -> bool:
 def _snap(row: dict) -> SymbolSnapshot:
     ctx, alert = row.get("context") or {}, row.get("alert") or {}
     sc = ctx.get("spotChart") or {}
+    sc = ctx.get("spotChart") or {}
+    if sc:
+        spot_chart = SpotChart(
+            **{k: sc[k] for k in sc if k in SpotChart.model_fields}
+        )
+    else:
+        spot_chart = SpotChart(
+            direction="NEUTRAL",
+            spot=float(ctx.get("spot") or 0),
+        )
     return SymbolSnapshot(
         symbol=str(row.get("symbol") or alert.get("symbol") or "SENSEX"),
         timestamp=datetime.fromisoformat(str(row.get("ts") or "2026-08-27T12:00:00+05:30")),
@@ -118,7 +129,7 @@ def _snap(row: dict) -> SymbolSnapshot:
         dataAvailable=True,
         spot=float(ctx.get("spot") or 0),
         breadth=Breadth(bias=str((ctx.get("breadth") or {}).get("bias") or "NEUTRAL")),
-        spotChart=SpotChart(direction=str(sc.get("direction") or "NEUTRAL"), spot=float(ctx.get("spot") or 0)),
+        spotChart=spot_chart,
         tradeQualityScore=float(ctx.get("tradeQualityScore") or 55),
         explosionAlerts=[alert],
     )

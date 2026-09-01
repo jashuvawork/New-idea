@@ -138,6 +138,10 @@ def pad_lane_ftv_waives_timing_block(evidence: Mapping[str, Any]) -> bool:
     timing = str(evidence.get("timingAssessment") or "").upper()
     if timing in ("FADED", "FADING", "EXHAUSTED", "NEGATIVE", "REJECT", "BLOCKED"):
         return False
+    from app.engines.index_confirmed_local_base import index_confirmed_waives_timing_block
+
+    if index_confirmed_waives_timing_block(evidence):
+        return True
     v3 = float(evidence.get("velocity3s") or 0)
     v9 = float(evidence.get("velocity9s") or 0)
     return pad_lane_cold_velocity_ok(evidence, v3, v9)
@@ -1452,11 +1456,15 @@ def atm_armed_local_base_premium_fade_bypass(
 def local_base_premium_fade_bypass(
     alert: Optional[dict[str, Any]],
     explosion_event: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
 ) -> bool:
-    """Shallow OTM stamp or ATM armed-base may fill through a base-retest premium dip."""
+    """Shallow OTM stamp, ATM armed-base, or index-confirmed pad may fill through retest dip."""
+    from app.engines.index_confirmed_local_base import index_confirmed_premium_fade_bypass
+
     return (
         shallow_otm_local_base_premium_fade_bypass(alert, explosion_event)
         or atm_armed_local_base_premium_fade_bypass(alert, explosion_event)
+        or index_confirmed_premium_fade_bypass(alert, snap, explosion_event)
     )
 
 
@@ -1788,6 +1796,7 @@ def pad_lane_early_near_miss_waive(
     alert: Optional[Mapping[str, Any]],
     *,
     readiness_reason: str = "",
+    snap: Optional[SymbolSnapshot] = None,
 ) -> bool:
     """Stamped pad-lane readiness waives ICT first-lift quality / tier-lag near-miss blockers.
 
@@ -1808,6 +1817,14 @@ def pad_lane_early_near_miss_waive(
         readiness_reason=readiness_reason,
     )
     if rr in PAD_LANE_READY_REASONS or rr.startswith("v_rip_session_low"):
+        return True
+    from app.engines.index_confirmed_local_base import index_confirmed_near_miss_waive
+
+    if snap is not None and index_confirmed_near_miss_waive(
+        alert if isinstance(alert, dict) else None,
+        snap,
+        readiness_reason=readiness_reason,
+    ):
         return True
     return _pad_lane_turnaround_signal(
         alert if isinstance(alert, dict) else None,

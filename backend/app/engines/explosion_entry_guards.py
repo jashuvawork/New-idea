@@ -707,8 +707,16 @@ def live_explosion_confirmation_blocked(
         snap=snap,
         event=explosion_event,
         ict=ict,
+        alert=alert,
     ):
         return False, ""
+
+    if snap is not None and isinstance(alert, dict):
+        from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+        side = getattr(explosion_event, "side", None)
+        if index_confirmed_local_base(side, snap, alert):
+            return False, ""
 
     tier = str(getattr(explosion_event, "tier", "") or "").upper()
     if (

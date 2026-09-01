@@ -360,10 +360,15 @@ async def monitor_trade_chart_before_execution(
     # gate) — an ATM ELITE/EXPLODING armed base may fill through a shallow base-retest dip
     # (Sep01 NIFTY PUT 23950). Applied here, not in the chart strict_bypass, so it can't skip
     # the chart-direction gate on a counter-trend setup.
-    from app.engines.pad_lane_capture import atm_armed_local_base_premium_fade_bypass
+    from app.engines.pad_lane_capture import (
+        atm_armed_local_base_premium_fade_bypass,
+        local_base_premium_fade_bypass,
+    )
 
-    atm_armed_fade_bypass = atm_armed_local_base_premium_fade_bypass(
-        alert if isinstance(alert, dict) else None, explosion_event
+    atm_armed_fade_bypass = local_base_premium_fade_bypass(
+        alert if isinstance(alert, dict) else None,
+        explosion_event,
+        snap=snap,
     )
     premium_fade_pad_lane = (
         strict_first_lift_bypass or pad_lane_chart_bypass or atm_armed_fade_bypass

@@ -142,7 +142,7 @@ def chop_weak_explosion_blocks_entry(
     from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
     waive = pad_lane_early_near_miss_waive(
-        alert, readiness_reason=readiness_reason,
+        alert, readiness_reason=readiness_reason, snap=snap,
     )
     early_pad_chop_bypass = (
         readiness_reason == EARLY_RADAR_PAD_READY

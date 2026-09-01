@@ -209,7 +209,10 @@ def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, An
             or _f(alert.get("volumeSurge")) >= 1.2
         ),
         "indexHelpersConfirm": bool(alert.get("indexHelpersConfirm")),
-        "indexTickSpike": bool(alert.get("indexTickSpike")),
+        "indexConfirmedLocalBase": bool(
+            alert.get("indexConfirmedLocalBase")
+            or alert.get("ictIndexConfirmedLocalBase")
+        ),
         "slowGrindSuddenLift": bool(
             alert.get("slowGrindSuddenLiftReady")
             or alert.get("ictSlowGrindSuddenLift")
@@ -308,10 +311,15 @@ def evaluate_local_base_entry(
 
     ready, lift_reason = first_lift_entry_readiness(snap=snap, alert=alert)
     pad_lane_waive = pad_lane_early_near_miss_waive(
-        alert, readiness_reason=lift_reason,
+        alert, readiness_reason=lift_reason, snap=snap,
     )
 
     evidence = _alert_evidence(alert, snap)
+    from app.engines.index_confirmed_local_base import enrich_evidence_index_confirmed
+
+    enrich_evidence_index_confirmed(
+        evidence, snap, alert, str(alert.get("side") or ""),
+    )
     ranking = rank_trade_evidence(evidence)
     allowed, reason, moment = top_moment_entry_allowed(
         evidence,
