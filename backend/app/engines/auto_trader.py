@@ -1339,6 +1339,11 @@ async def _open_from_candidate(
     if candidate.mode == "explosion" and trap_meta:
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
+        if index_confirmed_ftv:
+            trap_meta["indexConfirmedFtv"] = True
+        if good_day_ict and ict_meta.get("defensiveBaseRip"):
+            trap_meta["defensiveBaseRip"] = True
+
         # Must run AFTER good-day ICT max-lot force (Jul20 49-lot FOMO hole).
         bypass_soft = (
             full_sleeve_authorized and (
@@ -1548,18 +1553,24 @@ async def _open_from_candidate(
                     ):
                         return False, trap_reason
                 if trap_meta.get("action") == "cut_size":
-                    bypass_soft = full_sleeve_authorized and (
-                        (bool(high_conviction) and bool(
-                            getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
-                        ))
-                        or (bool(top_explosion_max) and bool(
-                            getattr(settings, "top_explosion_force_max_bypasses_fake_trap_lot_cap", True)
-                        ))
-                        or (
-                            base_window_full_lots
-                            or bool(trap_meta.get("baseWindowFullLots"))
+                    if index_confirmed_ftv:
+                        trap_meta["indexConfirmedFtv"] = True
+                    if good_day_ict and ict_meta.get("defensiveBaseRip"):
+                        trap_meta["defensiveBaseRip"] = True
+                    bypass_soft = (
+                        full_sleeve_authorized and (
+                            (bool(high_conviction) and bool(
+                                getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
+                            ))
+                            or (bool(top_explosion_max) and bool(
+                                getattr(settings, "top_explosion_force_max_bypasses_fake_trap_lot_cap", True)
+                            ))
+                            or (
+                                base_window_full_lots
+                                or bool(trap_meta.get("baseWindowFullLots"))
+                            )
                         )
-                    )
+                    ) or index_confirmed_ftv
                     lots = cap_fake_explosion_trap_lots(
                         lots, trap_meta, bypass_soft_cap=bypass_soft,
                     )
@@ -1591,6 +1602,18 @@ async def _open_from_candidate(
             pad_lane_chart_bypass, strict_first_lift_bypass = (
                 resolve_strict_pad_lane_chart_bypass(candidate, snap)
             )
+            from app.engines.spot_direction import index_trough_momentum_turn
+
+            _alert_row = (
+                candidate.alert
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            )
+            index_trough_bypass = bool(
+                (_alert_row or {}).get("ictIndexTroughSlowV")
+                or (_alert_row or {}).get("indexTroughSlowV")
+                or index_trough_momentum_turn(candidate.side, snap.spotChart)
+            )
             from app.engines.ftv_candlestick_confirm import ftv_candlestick_bypass_for_snap
 
             candlestick_bypass = ftv_candlestick_bypass_for_snap(
@@ -1610,6 +1633,7 @@ async def _open_from_candidate(
                 getattr(settings, "chart_counter_trend_bypass_block_enabled", True)
                 and hard_counter_trend_chart(candidate.side, snap.spotChart)
                 and not strict_first_lift_bypass
+                and not index_trough_bypass
             ):
                 expiry_chart_bypass = False
                 premium_bypass = False
@@ -1627,6 +1651,7 @@ async def _open_from_candidate(
                 ),
                 expiry_explosion_bypass=expiry_chart_bypass,
                 strict_first_lift_bypass=strict_first_lift_bypass,
+                index_trough_bypass=index_trough_bypass,
                 scalp_mode=(candidate.mode or "").lower() in {"scalp", "quick_sideways", "slow_bounce"},
             )
             if blocked:
@@ -1642,6 +1667,7 @@ async def _open_from_candidate(
                     premium_bypass or vertical_bypass or expiry_chart_bypass
                     or breadth_bypass or local_ichi_bypass or pad_lane_chart_bypass
                     or candlestick_bypass or strict_first_lift_bypass
+                    or index_trough_bypass
                 ),
                 "premiumLedBypass": premium_bypass,
                 "verticalRipBypass": vertical_bypass,

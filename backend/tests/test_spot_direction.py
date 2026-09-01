@@ -398,6 +398,33 @@ def test_side_aligned_with_chart():
     assert not side_aligned_with_chart(Side.PUT, bull)
 
 
+def test_side_aligned_with_chart_index_trough_turn():
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    trough = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.05,
+        momentum10Pct=0.02,
+        momentum15Pct=-0.08,
+    )
+    assert index_trough_momentum_turn(Side.CALL, trough) is True
+    assert side_aligned_with_chart(Side.CALL, trough) is True
+
+
+def test_live_direction_index_trough_bypass():
+    from app.engines.spot_direction import live_direction_blocks_side
+
+    trough = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.05,
+        momentum10Pct=0.02,
+        momentum15Pct=-0.08,
+    )
+    blocked, reason = live_direction_blocks_side(Side.CALL, trough)
+    assert blocked is False
+    assert reason == "ok"
+
+
 def test_reconcile_spot_chart_overrides_bullish_5m_on_bearish_mtf():
     from app.engines.spot_direction import reconcile_spot_chart_with_mtf
     from app.models.schemas import ChartAnalysis

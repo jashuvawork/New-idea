@@ -538,6 +538,52 @@ def analyze_spot_chart(
     return build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=candles)
 
 
+def index_trough_momentum_turn(
+    side: Side | str,
+    chart: Optional[SpotChart],
+    *,
+    settings: Any = None,
+) -> bool:
+    """True when index 5m momentum is turning at the session trough (slow V).
+
+    Allows CALL entries while the composite 5m chart may still read BEARISH because
+    mom15/mom30 lag the visible trough recovery on the broker chart.
+    """
+    s = settings or get_settings()
+    if not bool(getattr(s, "index_trough_chart_bypass_enabled", True)):
+        return False
+    if chart is None:
+        return False
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
+    mom10 = float(getattr(chart, "momentum10Pct", 0) or 0)
+    mom15 = float(getattr(chart, "momentum15Pct", 0) or 0)
+    min_mom5 = float(
+        getattr(s, "index_trough_chart_bypass_min_mom5_pct", 0.015) or 0.015
+    )
+    min_shift = float(
+        getattr(s, "index_trough_chart_bypass_min_mom_shift_pct", 0.03) or 0.03
+    )
+    max_adverse_m15 = float(
+        getattr(s, "index_trough_chart_bypass_max_adverse_mom15_pct", -0.20) or -0.20
+    )
+    side_val = side.value if isinstance(side, Side) else str(side).upper()
+    if side_val == "CALL":
+        return (
+            mom5 >= min_mom5
+            and mom5 >= mom15 + min_shift
+            and mom5 >= mom10 - 0.01
+            and mom15 >= max_adverse_m15
+        )
+    if side_val == "PUT":
+        return (
+            mom5 <= -min_mom5
+            and mom5 <= mom15 - min_shift
+            and mom5 <= mom10 + 0.01
+            and mom15 <= -max_adverse_m15
+        )
+    return False
+
+
 def side_aligned_with_chart(side: Side | str, chart: Optional[SpotChart]) -> bool:
     if not chart:
         return True
@@ -548,8 +594,16 @@ def side_aligned_with_chart(side: Side | str, chart: Optional[SpotChart]) -> boo
             return chart.momentum5Pct >= -0.02
         return chart.momentum5Pct <= 0.02
     if side_val == "CALL":
-        return direction == "BULLISH"
-    return direction == "BEARISH"
+        if direction == "BULLISH":
+            return True
+        if direction == "BEARISH" and index_trough_momentum_turn(side_val, chart):
+            return True
+        return False
+    if direction == "BEARISH":
+        return True
+    if direction == "BULLISH" and index_trough_momentum_turn(side_val, chart):
+        return True
+    return False
 
 
 def hard_counter_trend_chart(
@@ -587,6 +641,7 @@ def live_direction_blocks_side(
     premium_led_bypass: bool = False,
     expiry_explosion_bypass: bool = False,
     strict_first_lift_bypass: bool = False,
+    index_trough_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str]:
     """
@@ -600,6 +655,8 @@ def live_direction_blocks_side(
         return False, "ok"
 
     side_val = side.value if isinstance(side, Side) else str(side).upper()
+    if not index_trough_bypass and index_trough_momentum_turn(side_val, chart, settings=settings):
+        index_trough_bypass = True
     bypass = expiry_explosion_bypass
     if not scalp_mode:
         bypass = (
@@ -607,11 +664,13 @@ def live_direction_blocks_side(
             or breadth_aligned_bypass
             or premium_led_bypass
             or strict_first_lift_bypass
+            or index_trough_bypass
         )
     if (
         bypass
         and _counter_trend_bypass_blocked(side_val, chart)
         and not strict_first_lift_bypass
+        and not index_trough_bypass
     ):
         bypass = False
 
@@ -636,6 +695,7 @@ def chart_blocks_side(
     premium_led_bypass: bool = False,
     expiry_explosion_bypass: bool = False,
     strict_first_lift_bypass: bool = False,
+    index_trough_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str]:
     settings = get_settings()
@@ -654,6 +714,7 @@ def chart_blocks_side(
         premium_led_bypass=premium_led_bypass,
         expiry_explosion_bypass=expiry_explosion_bypass,
         strict_first_lift_bypass=strict_first_lift_bypass,
+        index_trough_bypass=index_trough_bypass,
         scalp_mode=scalp_mode,
     )
     if live_blocked:
@@ -664,18 +725,29 @@ def chart_blocks_side(
     counter_block = (
         _counter_trend_bypass_blocked(side_val, chart)
         and not strict_first_lift_bypass
+        and not index_trough_bypass
     )
     if side_val == "CALL" and chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
         if (
             not counter_block
-            and (breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass)
+            and (
+                breadth_aligned_bypass
+                or premium_led_bypass
+                or expiry_explosion_bypass
+                or index_trough_bypass
+            )
         ):
             return False, "ok"
         return True, "chart_bearish_no_calls"
     if side_val == "PUT" and chart.direction == "BULLISH" and chart.trendStrength >= min_strength:
         if (
             not counter_block
-            and (breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass)
+            and (
+                breadth_aligned_bypass
+                or premium_led_bypass
+                or expiry_explosion_bypass
+                or index_trough_bypass
+            )
         ):
             return False, "ok"
         return True, "chart_bullish_no_puts"
