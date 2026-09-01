@@ -1763,12 +1763,13 @@ class Settings(BaseSettings):
     slow_grind_armed_trough_min_explosion_score: float = 5.0
     # Index slow-V at session trough — fire before option premium coil arms (~10:30 vs ~11:06).
     slow_grind_armed_trough_index_trough_enabled: bool = True
-    slow_grind_armed_trough_index_trough_max_off_low_pct: float = 8.0
+    # Wider than armed-trough 2% — catch slow grind off session low while index V forms.
+    slow_grind_armed_trough_index_trough_max_off_low_pct: float = 15.0
     # BEARISH 5m chart may still block CALLs at the index trough; waive when 5m turns.
     index_trough_chart_bypass_enabled: bool = True
-    index_trough_chart_bypass_min_mom5_pct: float = 0.015
-    index_trough_chart_bypass_min_mom_shift_pct: float = 0.03
-    index_trough_chart_bypass_max_adverse_mom15_pct: float = -0.20
+    index_trough_chart_bypass_min_mom5_pct: float = 0.008
+    index_trough_chart_bypass_min_mom_shift_pct: float = 0.02
+    index_trough_chart_bypass_max_adverse_mom15_pct: float = -0.35
     # Mid-day consolidation base — armed coil off session low before afternoon breakout
     # (Aug25 NIFTY 24250 PE ₹70–80 base 12:15–12:45 before 1pm rip).
     slow_grind_consolidation_base_enabled: bool = True

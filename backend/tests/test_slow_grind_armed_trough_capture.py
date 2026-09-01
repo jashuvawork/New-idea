@@ -135,6 +135,47 @@ def test_slow_grind_armed_trough_index_trough_without_base_armed(mock_settings):
     assert ok is True
     assert reason == SLOW_GRIND_ARMED_TROUGH_READY
     assert alert["ictIndexTroughSlowV"] is True
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_slow_grind_index_trough_allows_wider_off_low_at_defaults(mock_settings):
+    """Default 15% off-low window catches lifts that start before option coil arms."""
+    mock_settings.return_value = Settings()
+    snap = _snap(spot=24100.0, atm=24050.0, direction="BEARISH")
+    snap.spotChart.momentum5Pct = 0.012
+    snap.spotChart.momentum10Pct = 0.005
+    snap.spotChart.momentum15Pct = -0.25
+    ict = MagicMock(
+        base_armed=False,
+        local_swing_base=False,
+        v_rip_ready=False,
+        base_relative_move_pct=10.0,
+        flat_vertical_quality=18.0,
+        armed_base_samples=2,
+        velocity_3s=0.2,
+    )
+    alert = {
+        "tier": "WATCH",
+        "side": "CALL",
+        "strike": 24050.0,
+        "premium": 95.0,
+        "offLowMovePct": 12.0,
+        "ictBaseRelativeMovePct": 10.0,
+        "velocity3s": 0.2,
+    }
+    ok, reason = _slow_grind_armed_trough_readiness(
+        snap=snap,
+        event=MagicMock(side=Side.CALL, premium=95.0, velocity_3s=0.2, strike=24050.0),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == SLOW_GRIND_ARMED_TROUGH_READY
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_slow_grind_standard_path_still_rejects_immature_coil(mock_settings):
     mock_settings.return_value = Settings()
     snap = _snap()
     ict = MagicMock(
