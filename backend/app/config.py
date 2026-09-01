@@ -577,6 +577,15 @@ class Settings(BaseSettings):
     decisive_candle_body_ratio_min: float = 0.6
     decisive_candle_rsi_ceiling: float = 80.0
     decisive_candle_pullback_lookback: int = 5
+    # GainzAlgo V2 Alpha on the OPTION premium (not just the index). An index-level candle
+    # barely registers a huge option rip (₹15->100 is a small % on the index), so run the same
+    # decisive-breakout detector on the contract's own premium tape (bucketed into OHLC bars).
+    # A decisive BULLISH bar on the premium = the option broke decisively off its base. Added
+    # as a coil-predictor direction vote (additive; the coil-armed lane still needs readiness +
+    # quality + CVD), so it strengthens base-catch without loosening any gate.
+    option_decisive_breakout_enabled: bool = True
+    option_decisive_breakout_lookback_seconds: float = 900.0
+    option_decisive_breakout_bucket_seconds: float = 30.0
     coil_prediction_min_direction_votes: int = 2
     coil_prediction_min_readiness_for_rank: float = 60.0
     coil_prediction_rank_bonus: float = 10.0
