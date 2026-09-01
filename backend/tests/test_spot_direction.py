@@ -9,6 +9,7 @@ from app.engines.spot_direction import (
     analyze_spot_chart,
     chart_blocks_side,
     chart_rank_adjustment,
+    live_direction_blocks_side,
     side_aligned_with_chart,
 )
 from app.models.schemas import Breadth, MarketProfile, Side, SpotChart, StrategyType, SuggestedTrade
@@ -51,6 +52,13 @@ def _settings():
     s.midday_chop_block_scalps = False
     s.neutral_breadth_min_score = 60
     s.counter_breadth_min_score = 70
+    s.index_trough_chart_bypass_enabled = True
+    s.index_trough_chart_bypass_min_mom5_pct = 0.008
+    s.index_trough_chart_bypass_min_mom_shift_pct = 0.02
+    s.index_trough_chart_bypass_max_adverse_mom15_pct = -0.35
+    s.chart_breadth_mom5_rollover_enabled = True
+    s.chart_breadth_bearish_mom5_rollover_pct = 0.008
+    s.chart_breadth_bullish_mom5_rollover_pct = 0.008
     return s
 
 
@@ -637,3 +645,48 @@ def test_bearish_breadth_corrects_weak_bullish_spot_chart():
     )
     out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="BEARISH")
     assert out.direction == "BEARISH"
+
+
+def test_bearish_breadth_flips_bullish_chart_on_mom5_rollover():
+    """Sep 1 afternoon: mom15/mom30 still positive from morning rally but 5m rolling over."""
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+    from app.models.schemas import ChartAnalysis
+
+    spot = SpotChart(
+        direction="BULLISH",
+        emaBias="BULLISH",
+        momentum5Pct=-0.03,
+        momentum15Pct=0.22,
+        momentum30Pct=0.35,
+        rsi=58.0,
+        macdBias="BULLISH",
+    )
+    analysis = ChartAnalysis(
+        consensus="NEUTRAL",
+        alignedCount=2,
+        totalTimeframes=4,
+        timeframes={
+            "5m": {"direction": "NEUTRAL"},
+            "15m": {"direction": "BULLISH"},
+            "1h": {"direction": "BULLISH"},
+        },
+    )
+    out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="BEARISH")
+    assert out.direction == "BEARISH"
+
+
+@patch("app.engines.spot_direction.get_settings")
+def test_put_peak_rollover_bypasses_live_bullish_block(mock_settings):
+    """Afternoon selloff — PUT allowed when 5m turns down at session peak."""
+    mock_settings.return_value = _settings()
+    peak = SpotChart(
+        direction="BULLISH",
+        momentum5Pct=-0.03,
+        momentum10Pct=-0.01,
+        momentum15Pct=0.22,
+        momentum30Pct=0.35,
+        trendStrength=72.0,
+    )
+    blocked, reason = live_direction_blocks_side(Side.PUT, peak)
+    assert blocked is False
+    assert reason == "ok"
