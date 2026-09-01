@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import zipfile
 from bisect import bisect_right
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -56,9 +57,54 @@ def _bucket(ts: datetime, minutes: int) -> str:
     return f"{floor // 60:02d}:{floor % 60:02d}"
 
 
+def _read_premium_tape_batches(date: str) -> list[dict[str, Any]]:
+    """Load premium tape from live file or bundled radar archive."""
+    batches = read_premium_tape(date)
+    if batches:
+        return batches
+    settings = get_settings()
+    if not bool(getattr(settings, "ftv_premium_calibration_use_archived_tape", True)):
+        return []
+    from app.services.radar_archive import archive_path
+
+    zip_path = archive_path(date)
+    if not zip_path.exists():
+        return []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            if "premium_tape.jsonl" not in archive.namelist():
+                return []
+            rows: list[dict[str, Any]] = []
+            for line in archive.read("premium_tape.jsonl").decode("utf-8").splitlines():
+                line = line.strip()
+                if line:
+                    rows.append(json.loads(line))
+            return rows
+    except (OSError, json.JSONDecodeError, zipfile.BadZipFile):
+        return []
+
+
+def _premium_tape_available(date: str) -> bool:
+    if premium_tape_path(date).exists():
+        return True
+    settings = get_settings()
+    if not bool(getattr(settings, "ftv_premium_calibration_use_archived_tape", True)):
+        return False
+    from app.services.radar_archive import archive_path
+
+    zip_path = archive_path(date)
+    if not zip_path.exists():
+        return False
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            return "premium_tape.jsonl" in archive.namelist()
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+
 def _series_for_date(date: str) -> dict[str, list[tuple[datetime, float]]]:
     series: dict[str, list[tuple[datetime, float]]] = defaultdict(list)
-    for batch in read_premium_tape(date):
+    for batch in _read_premium_tape_batches(date):
         ts = _timestamp(batch.get("ts"))
         if ts is None:
             continue
@@ -424,9 +470,9 @@ def build_and_persist_premium_calibration(
         dates = [
             (current.date() - timedelta(days=offset)).isoformat()
             for offset in offsets
-            if premium_tape_path(
+            if _premium_tape_available(
                 (current.date() - timedelta(days=offset)).isoformat()
-            ).exists()
+            )
         ]
         observations: list[dict[str, Any]] = []
         for date in dates:

@@ -1,6 +1,7 @@
 """Advisory FTV soft focus alert regressions."""
 
 from datetime import datetime
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from app.engines.ftv_focus_alerts import (
@@ -79,8 +80,18 @@ def test_focus_alert_fires_when_all_gates_align():
 
 def test_focus_alert_blocks_without_local_base():
     clear_ftv_focus_alert_state()
+    snap = _snap()
+    snap.explosionAlerts = [{
+        "side": "CALL",
+        "strike": 24_500,
+        "explosionScore": 72,
+        "tradeable": True,
+        "tier": "ELITE",
+        "dailyMovePct": 8.0,
+        "peakMovePct": 8.0,
+    }]
     alert = evaluate_ftv_focus_alert(
-        "NIFTY", _snap(), _live(local_base_ready=False),
+        "NIFTY", snap, _live(local_base_ready=False),
     )
     assert alert is None
 
@@ -97,9 +108,19 @@ def test_focus_alert_blocks_counter_chart_side():
 
 def test_focus_alert_blocks_without_tradeable_radar():
     clear_ftv_focus_alert_state()
+    snap = _snap(tradeable=False, tier="WATCH")
+    snap.explosionAlerts = [{
+        "side": "CALL",
+        "strike": 24_500,
+        "explosionScore": 12,
+        "tradeable": False,
+        "tier": "WATCH",
+        "dailyMovePct": 8.0,
+        "peakMovePct": 8.0,
+    }]
     alert = evaluate_ftv_focus_alert(
         "NIFTY",
-        _snap(tradeable=False),
+        snap,
         _live(),
     )
     assert alert is None
@@ -165,3 +186,81 @@ def test_build_focus_alerts_payload_sorts_active_first():
     assert payload["status"] == "LIVE"
     assert len(payload["active"]) == 1
     assert payload["active"][0]["symbol"] == "NIFTY"
+
+
+def test_focus_alert_fires_with_index_momentum_bypass_on_counter_chart():
+    clear_ftv_focus_alert_state()
+    snap = _snap(direction="BEARISH", side="CALL")
+    with patch(
+        "app.engines.ftv_focus_alerts.index_trough_momentum_turn",
+        return_value=True,
+    ):
+        alert = evaluate_ftv_focus_alert("NIFTY", snap, _live(dominant="CALL"))
+
+    assert alert is not None
+    assert alert["status"] == "ACTIVE"
+    assert alert["indexMomentumBypass"] is True
+
+
+def test_focus_alert_fires_with_option_led_base_when_index_not_compressed():
+    clear_ftv_focus_alert_state()
+    snap = _snap()
+    live = _live(local_base_ready=False)
+    live["effectiveLocalBaseReady"] = True
+    live["optionLocalBaseReady"] = True
+    live["baseRangePct"] = 0.35
+
+    alert = evaluate_ftv_focus_alert("NIFTY", snap, live)
+
+    assert alert is not None
+    assert alert["status"] == "ACTIVE"
+    assert alert["optionLedBase"] is True
+
+
+def test_focus_alert_allows_building_radar_before_tradeable():
+    clear_ftv_focus_alert_state()
+    snap = _snap()
+    snap.explosionAlerts = [{
+        "side": "CALL",
+        "strike": 24_500,
+        "explosionScore": 42,
+        "tradeable": False,
+        "tier": "BUILDING",
+        "ictFlatThenVertical": True,
+        "localBaseMovePct": 12.0,
+        "ictBaseRelativeMovePct": 12.0,
+    }]
+    alert = evaluate_ftv_focus_alert("NIFTY", snap, _live())
+
+    assert alert is not None
+    assert alert["status"] == "ACTIVE"
+    assert alert["radarTradeable"] is False
+    assert alert["radarTier"] == "BUILDING"
+
+
+def test_focus_alert_low_confidence_with_strong_radar_and_momentum_bypass():
+    clear_ftv_focus_alert_state()
+    snap = _snap(direction="BEARISH", side="CALL")
+    snap.explosionAlerts = [{
+        "side": "CALL",
+        "strike": 24_500,
+        "explosionScore": 62,
+        "tradeable": True,
+        "tier": "ELITE",
+        "ictFlatThenVertical": True,
+        "localBaseMovePct": 12.0,
+        "ictBaseRelativeMovePct": 12.0,
+    }]
+    with patch(
+        "app.engines.ftv_focus_alerts.index_trough_momentum_turn",
+        return_value=True,
+    ):
+        alert = evaluate_ftv_focus_alert(
+            "NIFTY",
+            snap,
+            _live(confidence="LOW", call_peak=40.0),
+        )
+
+    assert alert is not None
+    assert alert["status"] == "ACTIVE"
+    assert alert["confidence"] == "LOW"

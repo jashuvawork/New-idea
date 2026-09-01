@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from app.engines.ftv_premium_calibration import (
+    _premium_tape_available,
     build_and_persist_premium_calibration,
     build_premium_calibration,
     extract_premium_observations,
@@ -242,3 +244,50 @@ def test_verified_event_and_upstox_expiry_are_exposed(monkeypatch):
         "operator_verified", "upstox_option_expiry",
     }
     assert "operator-verified" in result["guardrail"]
+
+
+def test_premium_calibration_reads_bundled_archive_tape(tmp_path, monkeypatch):
+    settings = SimpleNamespace(
+        trade_store_dir=str(tmp_path),
+        radar_archive_dir=str(tmp_path / "radar_archives"),
+        ftv_probability_profile_cache_seconds=1800,
+        ftv_premium_calibration_history_days=30,
+        ftv_premium_calibration_use_archived_tape=True,
+        radar_hindsight_flat_window_seconds=120,
+        radar_hindsight_flat_max_range_pct=8.0,
+        ftv_premium_vertical_move_pct=20.0,
+        ftv_premium_calibration_sample_seconds=60,
+        ftv_probability_time_bucket_minutes=15,
+        ftv_probability_drift_warn_pct_points=8.0,
+        ftv_probability_drift_critical_pct_points=15.0,
+    )
+    monkeypatch.setattr(
+        "app.engines.ftv_premium_calibration.get_settings", lambda: settings,
+    )
+    monkeypatch.setattr(radar_learning, "get_settings", lambda: settings)
+    monkeypatch.setattr(radar_archive, "get_settings", lambda: settings)
+    archive_dir = tmp_path / "radar_archives"
+    archive_dir.mkdir(parents=True)
+    date = "2026-08-16"
+    day = datetime(2026, 8, 16, 10, 0, tzinfo=IST)
+    batches = []
+    for ts, premium in _premium_series(day, winner=True):
+        batches.append({
+            "ts": ts.isoformat(),
+            "contracts": [{
+                "key": "NIFTY:CALL:24500",
+                "premium": premium,
+            }],
+        })
+    tape_payload = "".join(json.dumps(batch) + "\n" for batch in batches)
+    archive_path = archive_dir / f"radar-{date}.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("premium_tape.jsonl", tape_payload)
+
+    assert _premium_tape_available(date) is True
+    built = build_and_persist_premium_calibration(
+        force=True,
+        now=datetime(2026, 8, 16, 16, 0, tzinfo=IST),
+    )
+    assert built["observationCount"] > 0
+    assert date in built["sourceDates"]
