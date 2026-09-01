@@ -436,7 +436,6 @@ def test_index_trough_detects_subtle_early_turn():
     )
     assert index_trough_momentum_turn(Side.CALL, subtle) is True
 
-
 def test_reconcile_spot_chart_overrides_bullish_5m_on_bearish_mtf():
     from app.engines.spot_direction import reconcile_spot_chart_with_mtf
     from app.models.schemas import ChartAnalysis
