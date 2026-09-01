@@ -135,6 +135,23 @@ def test_timing_block_waived_with_index_confirmed_evidence(mock_settings):
     assert pad_lane_ftv_waives_timing_block(evidence) is True
 
 
+def test_near_miss_waive_skips_velocity_failures(mock_settings):
+    snap = _snap("BEARISH", mom5=0.10, mom15=0.0, breadth="NEUTRAL")
+    alert = _put_alert(
+        side="CALL",
+        explosionScore=62,
+        tier="EXPLODING",
+        ictFirstLift=True,
+        ictFlatThenVertical=True,
+        localBaseMovePct=15.5,
+        ictBaseRelativeMovePct=15.5,
+    )
+    alert["side"] = "CALL"
+    assert index_confirmed_near_miss_waive(
+        alert, snap, readiness_reason="first_lift_velocity9s<0.8",
+    ) is False
+
+
 def test_armed_pad_bypass_when_index_turn_lags(mock_settings):
     """Sep01 PUT 24050: bearish breadth + armed pad while mom5 shift lags mom15."""
     snap = _snap("BEARISH", mom5=-0.02, mom15=-0.133, breadth="BEARISH")

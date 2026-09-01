@@ -93,14 +93,26 @@ def _armed_pad_breadth_aligned(
         return False
     if not alert_has_local_base_structure(alert):
         return False
+    breadth_obj = getattr(snap, "breadth", None)
     breadth = (
-        (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+        (getattr(breadth_obj, "bias", None) if breadth_obj is not None else None)
+        or "NEUTRAL"
     ).upper()
     if side_u == "CALL" and breadth not in ("BULLISH", "NEUTRAL"):
         return False
     if side_u == "PUT" and breadth not in ("BEARISH", "NEUTRAL"):
         return False
     return True
+
+
+def _readiness_blocks_index_waive(readiness_reason: str) -> bool:
+    """Do not waive near-miss when first-lift still fails velocity/quality/score floors."""
+    rr = str(readiness_reason or "").lower()
+    if not rr:
+        return False
+    return rr.startswith(
+        ("first_lift_velocity", "first_lift_quality", "first_lift_score")
+    )
 
 
 def index_confirmed_local_base(
@@ -113,7 +125,8 @@ def index_confirmed_local_base(
     s = settings or get_settings()
     if not bool(getattr(s, "index_confirmed_local_base_enabled", True)):
         return False
-    if snap is None or snap.spotChart is None:
+    spot_chart = getattr(snap, "spotChart", None) if snap is not None else None
+    if snap is None or spot_chart is None:
         return False
     side_u = side.value if isinstance(side, Side) else str(side).upper()
     if side_u not in ("CALL", "PUT"):
@@ -122,7 +135,7 @@ def index_confirmed_local_base(
         return True
     from app.engines.spot_direction import index_trough_momentum_turn
 
-    if index_trough_momentum_turn(side_u, snap.spotChart, settings=s):
+    if index_trough_momentum_turn(side_u, spot_chart, settings=s):
         return alert_has_local_base_structure(alert)
     if isinstance(alert, dict) and _armed_pad_breadth_aligned(
         side_u, alert, snap, settings=s,
@@ -162,6 +175,8 @@ def index_confirmed_near_miss_waive(
 ) -> bool:
     settings = get_settings()
     if not bool(getattr(settings, "index_confirmed_local_base_waives_near_miss", True)):
+        return False
+    if _readiness_blocks_index_waive(readiness_reason):
         return False
     if not isinstance(alert, dict) or snap is None:
         return False
