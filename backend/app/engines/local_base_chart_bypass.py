@@ -371,6 +371,10 @@ def local_base_overrides_side_bias(
     settings = get_settings()
     if not getattr(settings, "local_base_overrides_bearish_breadth", True):
         return False
+    from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+    if index_confirmed_local_base(side, snap, alert):
+        return True
     return local_base_structure_active(side, snap, event=event, alert=alert)
 
 

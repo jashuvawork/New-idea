@@ -830,14 +830,24 @@ def validate_candidate(
 
         snap_pre = snap_map.get(candidate.symbol.upper()) or candidate.snap
         bias = (snap_pre.breadth.bias if snap_pre.breadth else "NEUTRAL") or "NEUTRAL"
+        alert_d = (
+            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+        )
         hard_blocked, hard_reason = breadth_hard_blocks_side(
-            candidate.side, bias, candidate=candidate, snap=snap_pre,
+            candidate.side,
+            bias,
+            candidate=candidate,
+            snap=snap_pre,
+            alert=alert_d,
         )
         if hard_blocked:
             return False, hard_reason, meta
         explosion_event = getattr(candidate, "explosion_event", None)
         if explosion_event is not None and not counter_trend_entry_allowed(
-            candidate.side, snap_pre, explosion_event=explosion_event,
+            candidate.side,
+            snap_pre,
+            explosion_event=explosion_event,
+            alert=alert_d,
         ):
             return False, "counter_trend_requires_elite", meta
 

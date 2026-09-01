@@ -127,6 +127,10 @@ def _market_opposes_side(
 
         if local_base_overrides_side_bias(side, snap, event=event, alert=alert):
             return False
+        from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+        if index_confirmed_local_base(side, snap, alert):
+            return False
 
     settings = get_settings()
     side_v = _side_str(side)
@@ -215,6 +219,10 @@ def counter_trend_entry_allowed(
     from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
 
     if isinstance(alert, dict) and alert_has_early_radar_pad_capture(alert):
+        return True
+    from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+    if index_confirmed_local_base(side, snap, alert):
         return True
     if explosion_event is not None:
         from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass

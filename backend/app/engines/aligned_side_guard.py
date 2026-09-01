@@ -222,6 +222,10 @@ def breadth_hard_blocks_side(
             side_v, resolved_snap, event=ev, alert=resolved_alert,
         ):
             return False, "ok"
+        from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+        if index_confirmed_local_base(side_v, resolved_snap, resolved_alert):
+            return False, "ok"
     if bias == "BULLISH" and side_v == "PUT":
         if _live_chart_supports_put(resolved_snap):
             return False, "ok"

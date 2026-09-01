@@ -624,6 +624,16 @@ class Settings(BaseSettings):
     index_confirmed_local_base_premium_fade: bool = True
     # Armed first-lift at pad + agreeing breadth — index mom5 turn may lag mom15 (Sep01).
     index_confirmed_local_base_armed_pad_bypass: bool = True
+    # Deep session trough — mom5 still negative but recovering vs mom15 (Sep01 morning CALLs).
+    index_trough_deep_recovery_enabled: bool = True
+    index_trough_deep_recovery_max_mom15_pct: float = -0.20
+    # FTV authorization sleeve for index-confirmed pad captures (grade B flat-velocity lag).
+    index_confirmed_ftv_auth_enabled: bool = True
+    index_confirmed_ftv_min_explosion_score: float = 35.0
+    index_confirmed_ftv_min_quality: float = 55.0
+    index_confirmed_ftv_min_local_base_move_pct: float = 5.0
+    index_confirmed_ftv_max_local_base_move_pct: float = 25.0
+    index_confirmed_ftv_max_capital_pct: float = 0.90
     # OTM reversal entry — the #1 cause of explosion_near_miss on today's CALL winners was
     # armed_base_requires_atm_itm_otm: they were 2-3 strikes OTM (spot below the strike on the
     # 'bearish' day) and the 1-step shallow allowance rejected them, then spot rallied UP

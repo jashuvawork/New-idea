@@ -1638,6 +1638,12 @@ def detect_fake_explosion_trap(
         )
         if structure_ok:
             meta["localBaseStructure"] = True
+        elif snap is not None and isinstance(alert, dict):
+            from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+            if index_confirmed_local_base(candidate.side, snap, alert):
+                structure_ok = True
+                meta["indexConfirmedStructure"] = True
     if (
         getattr(settings, "fake_explosion_trap_midday_require_structure", True)
         and chopish

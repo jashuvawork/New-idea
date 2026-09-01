@@ -690,3 +690,17 @@ def test_put_peak_rollover_bypasses_live_bullish_block(mock_settings):
     blocked, reason = live_direction_blocks_side(Side.PUT, peak)
     assert blocked is False
     assert reason == "ok"
+
+
+def test_deep_trough_call_recovery_before_mom5_crosses_zero():
+    """Sep01 morning CALL — mom5 still negative but recovering vs deep mom15."""
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    trough = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=-0.279,
+        momentum10Pct=-0.32,
+        momentum15Pct=-0.391,
+        trendStrength=55.0,
+    )
+    assert index_trough_momentum_turn(Side.CALL, trough, settings=_settings()) is True
