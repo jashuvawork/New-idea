@@ -2065,8 +2065,20 @@ class Settings(BaseSettings):
     # tradeable radar all align. Never wired to auto_trader entry.
     ftv_focus_alerts_enabled: bool = True
     ftv_focus_min_confidence: str = "MEDIUM"
-    ftv_focus_min_peak_probability_pct: float = 35.0
+    ftv_focus_min_peak_probability_pct: float = 28.0
     ftv_focus_cooldown_seconds: int = 300
+    # Sep01: index base often expands before option coil arms — accept option local-base
+    # when index range is still within this ceiling (advisory only).
+    ftv_focus_option_local_base_enabled: bool = True
+    ftv_focus_option_local_base_max_index_range_pct: float = 0.45
+    # Mirror index-trough / session-peak chart bypass (#502) for focus alerts.
+    ftv_focus_index_momentum_chart_bypass_enabled: bool = True
+    # Include BUILDING/WATCH radar at local base before tradeable promotion.
+    ftv_focus_allow_building_radar: bool = True
+    ftv_focus_min_radar_score: float = 35.0
+    ftv_focus_low_confidence_min_radar_score: float = 55.0
+    # Bootstrap premium calibration from finalized radar archives when live tape purged.
+    ftv_premium_calibration_use_archived_tape: bool = True
     # Operator-supplied verified events only. JSON array fields:
     # date, time, title, impact, symbols, sideBias, durationMinutes.
     ftv_scheduled_events_json: str = "[]"
