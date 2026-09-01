@@ -1456,7 +1456,16 @@ def _early_momentum_ignition_at_base_readiness(
         return False, ""
     row = alert if isinstance(alert, dict) else {}
     tier = str(getattr(event, "tier", "") or row.get("tier") or "").upper()
-    if tier not in ("ELITE", "EXPLODING"):
+    # A fast FTV grades BUILDING at 1-10% off base and only prints ELITE after it has already
+    # run (a chase). Allow BUILDING here so we can catch the ignition at the base; the strong-
+    # ignition gate below keeps chop duds out. WATCH is still excluded.
+    allow_building = bool(
+        getattr(settings, "early_momentum_ignition_allow_building", True)
+    )
+    allowed_tiers = (
+        ("ELITE", "EXPLODING", "BUILDING") if allow_building else ("ELITE", "EXPLODING")
+    )
+    if tier not in allowed_tiers:
         return False, ""
 
     base_confirmed = bool(
@@ -1507,9 +1516,46 @@ def _early_momentum_ignition_at_base_readiness(
     if not (vol_awake or vol_surge >= min_vol or cvd):
         return False, ""
 
-    # Near-base loss filter: the 1-10% base zone is where duds cluster. Require strong FTV
-    # quality OR a strong score (data-calibrated on 11 days) to skip the low-Q/low-score duds.
-    if not _near_base_quality_or_score_ok(event=event, ict=ict, row=row, settings=settings):
+    # Dud filter at the base. Quality/score LAG a fast ignition (they rise WITH the move), so
+    # requiring them alone would block the very fast FTVs we want. Accept EITHER the calibrated
+    # quality/score floor OR a STRONG, volume-backed accelerating ignition off a TIGHT base —
+    # the signature a genuine fast FTV has at the base and a chop dud does not.
+    strong_v3 = float(
+        getattr(settings, "early_momentum_ignition_strong_velocity_3s", 2.5) or 2.5
+    )
+    strong_vol = float(
+        getattr(settings, "early_momentum_ignition_strong_vol_surge", 2.5) or 2.5
+    )
+    base_range = float(
+        getattr(ict, "armed_base_range_pct", 0) or row.get("ictArmedBaseRangePct") or 0
+    )
+    tight_base = base_range <= 0 or base_range <= float(
+        getattr(settings, "early_momentum_ignition_tight_base_range_pct", 5.0) or 5.0
+    )
+    strong_ignition = (
+        v3 >= strong_v3 and v3 >= v9 and (vol_surge >= strong_vol or cvd) and tight_base
+    )
+    if tier == "BUILDING":
+        # A BUILDING contract (tier lags a fast FTV) may enter ONLY on a genuine, order-flow-
+        # confirmed ignition. On velocity+volume alone a hollow v3-spike that then cools looks
+        # identical to a real ignition at the base (the Aug10 CE loss). CVD BUYING is the
+        # differentiator a hollow print lacks — require it plus a strong accelerating move,
+        # real volume, and a tight base. This catches the fast FTV without re-taking the blip.
+        dud_ok = (
+            v3 >= strong_v3
+            and v3 >= v9
+            and cvd
+            and vol_surge >= strong_vol
+            and tight_base
+        )
+    else:
+        dud_ok = (
+            _near_base_quality_or_score_ok(
+                event=event, ict=ict, row=row, settings=settings
+            )
+            or strong_ignition
+        )
+    if not dud_ok:
         return False, "early_ignition_below_quality_score_floor"
 
     side = str(

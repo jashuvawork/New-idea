@@ -544,6 +544,16 @@ class Settings(BaseSettings):
     early_momentum_ignition_max_move_pct: float = 10.0
     early_momentum_ignition_min_velocity_3s: float = 1.0
     early_momentum_ignition_min_vol_surge: float = 2.0
+    # Catch FAST FTVs at the base: a 20->60 rip grades BUILDING at 1-10% off base and only
+    # prints ELITE after it has already run 25%+ (a chase). Allow the ignition lane on BUILDING
+    # too — but only on a STRONG, volume-backed accelerating ignition off a TIGHT base (the
+    # signature a real fast FTV has at the base and a chop dud does not). This substitutes for
+    # the quality/score floor, which lags at the base (score/quality rise WITH the move). Chase
+    # guards (post-peak, timing, extended-chase) are untouched — this only opens the base window.
+    early_momentum_ignition_allow_building: bool = True
+    early_momentum_ignition_strong_velocity_3s: float = 2.5
+    early_momentum_ignition_strong_vol_surge: float = 2.5
+    early_momentum_ignition_tight_base_range_pct: float = 5.0
     # Flat-base coil breakout PREDICTOR — flag the setup while it's still flat (before the
     # tier/grade upgrades, which lag). Composes armed-base tightness + index squeeze/VWAP +
     # option CVD accumulation + side-regime into {coiling, readinessScore, predictedSide}.
