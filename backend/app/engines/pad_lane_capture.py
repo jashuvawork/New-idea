@@ -1483,7 +1483,13 @@ def resolve_strict_pad_lane_for_entry(
         armed_base_chart_bypass = bool(
             armed_ready and armed_reason in _STRICT_PAD_CHART_BYPASS_REASONS
         )
-    shallow_otm_bypass = local_base_premium_fade_bypass(
+    # CHART strict bypass = only chart-legit reasons: an armed-base structural launch, a
+    # pad-lane chart turnaround, or a shallow-OTM local-base STAMP. The ATM-armed premium-fade
+    # bypass is deliberately NOT here — it waives the premium-fade check, not the chart-direction
+    # gate. Folding it in let a counter-trend ATM armed-base skip the chart gate without
+    # orderflow (regression caught by test_armed_base_execution_chart_bypass_requires_strong_
+    # orderflow). Premium-fade callers apply atm_armed_local_base_premium_fade_bypass separately.
+    shallow_otm_bypass = shallow_otm_local_base_premium_fade_bypass(
         row,
         explosion_event,
     )
