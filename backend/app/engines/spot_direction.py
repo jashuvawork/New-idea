@@ -585,20 +585,42 @@ def index_trough_momentum_turn(
         getattr(s, "index_trough_chart_bypass_max_adverse_mom15_pct", -0.20) or -0.20
     )
     side_val = side.value if isinstance(side, Side) else str(side).upper()
+    deep_recovery = bool(getattr(s, "index_trough_deep_recovery_enabled", True))
+    deep_m15 = float(
+        getattr(s, "index_trough_deep_recovery_max_mom15_pct", -0.20) or -0.20
+    )
     if side_val == "CALL":
-        return (
+        if (
             mom5 >= min_mom5
             and mom5 >= mom15 + min_shift
             and mom5 >= mom10 - 0.01
             and mom15 >= max_adverse_m15
-        )
+        ):
+            return True
+        if (
+            deep_recovery
+            and mom15 <= deep_m15
+            and mom5 >= mom15 + min_shift
+            and mom5 >= mom10 - 0.01
+        ):
+            return True
+        return False
     if side_val == "PUT":
-        return (
+        if (
             mom5 <= -min_mom5
             and mom5 <= mom15 - min_shift
             and mom5 <= mom10 + 0.01
             and mom15 <= -max_adverse_m15
-        )
+        ):
+            return True
+        if (
+            deep_recovery
+            and mom15 >= -deep_m15
+            and mom5 <= mom15 - min_shift
+            and mom5 <= mom10 + 0.01
+        ):
+            return True
+        return False
     return False
 
 

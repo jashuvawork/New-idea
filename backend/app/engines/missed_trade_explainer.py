@@ -169,6 +169,9 @@ def _gate_checks(
     settings = get_settings()
     gates: list[dict[str, Any]] = []
     blockers: list[str] = []
+    from app.engines.index_confirmed_local_base import stamp_index_confirmed_local_base
+
+    stamp_index_confirmed_local_base(alert, snap)
     candidate = _candidate_from_alert(symbol, snap, alert)
 
     tier = str(alert.get("tier") or "")
@@ -650,7 +653,7 @@ def _gate_checks(
                 "detail": "session move mature enough",
             })
         live_blocked, live_reason = live_explosion_confirmation_blocked(
-            candidate.explosion_event, ict=ict, snap=snap,
+            candidate.explosion_event, ict=ict, snap=snap, alert=alert,
         )
         if live_blocked:
             blockers.append(live_reason)

@@ -413,6 +413,12 @@ def ftv_authorization_policy(
     first_lift_local_base_flat_velocity_enabled: bool = True,
     first_lift_trade_min_score: float = 62.0,
     first_lift_helper_confirm_min_quality: float = 50.0,
+    index_confirmed_ftv_auth_enabled: bool = True,
+    index_confirmed_ftv_min_explosion_score: float = 35.0,
+    index_confirmed_ftv_min_quality: float = 55.0,
+    index_confirmed_ftv_min_local_base_move_pct: float = 5.0,
+    index_confirmed_ftv_max_local_base_move_pct: float = 25.0,
+    index_confirmed_ftv_max_capital_pct: float = 0.90,
 ) -> FtvAuthorization:
     """Pure causal authorization for strict S, top FTV A, winner, and BUILDING rip."""
     blocked = lambda reason: FtvAuthorization(None, reason)
@@ -1358,6 +1364,45 @@ def ftv_authorization_policy(
                 max_capital_pct=building_coil_pad_ftv_max_capital_pct,
             )
 
+    if (
+        index_confirmed_ftv_auth_enabled
+        and bool(evidence.get("indexConfirmedLocalBase"))
+        and str(ranking.get("grade") or "").upper() in {"A", "B", "S"}
+        and tier in {"ELITE", "EXPLODING"}
+        and not timing_blocked
+        and index_confirmed_ftv_min_local_base_move_pct
+        <= move
+        <= index_confirmed_ftv_max_local_base_move_pct
+        and explosion_score >= index_confirmed_ftv_min_explosion_score
+        and quality >= index_confirmed_ftv_min_quality
+        and (
+            flat_velocity_lag
+            or pad_lane_flat
+            or micro_pullback
+            or bool(
+                evidence.get("firstLift")
+                or evidence.get("armedBaseLaunch")
+                or evidence.get("vRipReady")
+            )
+        )
+    ):
+        if _allocation_rank_blocks_ftv(
+            require_allocation_rank_one=require_allocation_rank_one,
+            allocation_rank=allocation_rank,
+            evidence=evidence,
+        ):
+            return blocked("index_confirmed_ftv_requires_allocation_rank_1")
+        expiry_block = _expiry_worst_policy_ok(
+            tier=tier, quality=quality, score=explosion_score, v3=v3,
+        )
+        if expiry_block is not None:
+            return expiry_block
+        return FtvAuthorization(
+            "INDEX_CONFIRMED_FTV",
+            "ok",
+            max_capital_pct=index_confirmed_ftv_max_capital_pct,
+        )
+
     if not top_ftv_a_enabled:
         return blocked("ftv_elite_top_only_requires_s")
     return blocked(top_ftv_a_reason)
@@ -1464,6 +1509,12 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "first_lift_local_base_flat_velocity_enabled",
         "first_lift_trade_min_score",
         "first_lift_helper_confirm_min_quality",
+        "index_confirmed_ftv_auth_enabled",
+        "index_confirmed_ftv_min_explosion_score",
+        "index_confirmed_ftv_min_quality",
+        "index_confirmed_ftv_min_local_base_move_pct",
+        "index_confirmed_ftv_max_local_base_move_pct",
+        "index_confirmed_ftv_max_capital_pct",
     )
     return {name: getattr(settings, name) for name in names}
 
