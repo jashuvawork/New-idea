@@ -5,14 +5,14 @@ from unittest.mock import patch
 
 import pytest
 
-from app.config import get_settings
+from app.config import get_settings, reset_settings_for_tests
 
 
 @pytest.fixture(autouse=True)
 def _clear_settings_cache():
-    get_settings.cache_clear()
+    reset_settings_for_tests()
     yield
-    get_settings.cache_clear()
+    reset_settings_for_tests()
 
 
 def test_aggressive_latency_preset_applied():
@@ -26,7 +26,7 @@ def test_aggressive_latency_preset_applied():
 
 
 def test_explicit_env_overrides_latency_preset():
-    get_settings.cache_clear()
+    reset_settings_for_tests()
     with patch.dict(
         os.environ,
         {"LATENCY_MODE": "aggressive", "ENTRY_SCAN_INTERVAL_MS": "900"},
@@ -38,7 +38,7 @@ def test_explicit_env_overrides_latency_preset():
 
 
 def test_normal_latency_keeps_defaults():
-    get_settings.cache_clear()
+    reset_settings_for_tests()
     with patch.dict(os.environ, {"LATENCY_MODE": "normal"}, clear=False):
         os.environ.pop("ENTRY_SCAN_INTERVAL_MS", None)
         s = get_settings()

@@ -764,6 +764,7 @@ def replay_local_base_day(
     window_start: Optional[str] = None,
     window_end: Optional[str] = None,
     side_filter: Optional[str] = None,
+    seed_session_loss_inr: float = 0.0,
 ) -> dict[str, Any]:
     """Replay one session's premium tape with production local-base entry gates."""
     from app.engines import explosion_detector, ict_breakout_monitor, session_timing
@@ -773,6 +774,9 @@ def replay_local_base_day(
     )
 
     s = settings or get_settings()
+    from app.config import set_settings_override
+
+    set_settings_override(s)
     batches = sorted(_load_batches(date, settings=s), key=lambda row: str(row.get("ts") or ""))
     if not batches:
         return {
@@ -852,6 +856,9 @@ def replay_local_base_day(
         session_pause_enabled = bool(
             getattr(s, "session_loss_pause_enabled", False)
         ) and live_gates
+
+        if session_pause_enabled and float(seed_session_loss_inr or 0) > 0:
+            record_session_trade_close(-abs(float(seed_session_loss_inr)))
 
         for batch in batches:
             ts_raw = batch.get("ts")
@@ -990,6 +997,10 @@ def replay_local_base_day(
                     continue
                 elite_only = bool(pause_meta.get("lossStreakEliteOnly"))
                 large_loss_elite_only = bool(pause_meta.get("largeLossPauseBypass"))
+                if large_loss_elite_only:
+                    gate_stats["large_loss_pause_bypass_active"] += 1
+                elif elite_only:
+                    gate_stats["loss_streak_elite_bypass_active"] += 1
 
             ranked_candidates: list[tuple[float, str, SymbolSnapshot, dict[str, Any], str, Optional[str], dict[str, Any]]] = []
             for sym, snap in batch_snapshots.items():
@@ -1154,6 +1165,9 @@ def replay_local_base_day(
                 })
 
     finally:
+        from app.config import set_settings_override
+
+        set_settings_override(None)
         (
             explosion_detector.datetime,
             ict_breakout_monitor.datetime,
