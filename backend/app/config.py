@@ -1376,6 +1376,18 @@ class Settings(BaseSettings):
     directional_switch_min_explosion_score: float = 55.0
     directional_switch_min_runner_score: float = 60.0
     directional_switch_min_trend_strength: float = 50.0
+    # Index-rally side-flip — after a morning PUT session, a sustained spot rip off the
+    # session low with bullish RSI/MACD unlocks CALL entries (directional lock bypass).
+    # Sep2: SENSEX 76380→76513 (+133pts) blocked by sticky PUT lock + bearish breadth.
+    index_rally_side_flip_enabled: bool = True
+    index_rally_side_flip_min_pts: float = 130.0
+    index_rally_side_flip_min_pts_nifty: float = 45.0
+    index_rally_side_flip_min_pts_banknifty: float = 80.0
+    index_rally_side_flip_min_rsi: float = 50.0
+    index_rally_side_flip_require_macd_bullish: bool = True
+    index_rally_side_flip_min_mom5_pct: float = 0.05
+    index_rally_side_flip_require_put_session: bool = True
+    index_rally_side_flip_symbols_csv: str = "SENSEX,NIFTY,BANKNIFTY"
     # Best-side selection — follow dominant CE/PE leg all session (incl. power-hour flip).
     best_side_selection_enabled: bool = True
     best_side_min_velocity_3s: float = 2.0
