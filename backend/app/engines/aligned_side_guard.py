@@ -229,6 +229,13 @@ def breadth_hard_blocks_side(
     if bias == "BULLISH" and side_v == "PUT":
         if _live_chart_supports_put(resolved_snap):
             return False, "ok"
+        if resolved_snap is not None:
+            from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
+
+            sym = str(getattr(resolved_snap, "symbol", "") or "")
+            slide_ok, _, _ = index_rally_side_flip_bypass(sym, side_v, resolved_snap)
+            if slide_ok:
+                return False, "ok"
         return True, "hard_block_put_vs_bullish_breadth"
     if bias == "BEARISH" and side_v == "CALL":
         if resolved_snap is not None:

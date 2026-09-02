@@ -392,7 +392,9 @@ def directional_lock_summary(snapshots: dict[str, SymbolSnapshot]) -> dict[str, 
         call_ok, _, call_meta = side_switch_confirmed(Side.CALL, snap)
         put_ok, _, put_meta = side_switch_confirmed(Side.PUT, snap)
         rally_meta: dict[str, Any] = {}
+        slide_meta: dict[str, Any] = {}
         rally_active = False
+        slide_active = False
         try:
             from app.engines.index_rally_side_flip import (
                 index_rally_metrics,
@@ -402,8 +404,12 @@ def directional_lock_summary(snapshots: dict[str, SymbolSnapshot]) -> dict[str, 
             rally_ok, _, rally_meta = index_rally_side_flip_bypass(
                 sym, Side.CALL, snap, settings=settings,
             )
+            slide_ok, _, slide_meta = index_rally_side_flip_bypass(
+                sym, Side.PUT, snap, settings=settings,
+            )
             rally_active = rally_ok
-            if not rally_meta:
+            slide_active = slide_ok
+            if not rally_meta and not slide_meta:
                 rally_meta = index_rally_metrics(sym, snap, settings=settings)
         except Exception:
             pass
@@ -417,7 +423,9 @@ def directional_lock_summary(snapshots: dict[str, SymbolSnapshot]) -> dict[str, 
             "callSignals": call_meta.get("signals", []),
             "putSignals": put_meta.get("signals", []),
             "indexRallySideFlip": rally_active,
+            "indexSlideSideFlip": slide_active,
             "indexRally": rally_meta,
+            "indexSlide": slide_meta,
         }
     return {
         "enabled": settings.directional_side_lock_enabled,
