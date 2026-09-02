@@ -103,8 +103,8 @@ export function RiskEngine({ auto }: { auto: AutoTraderState }) {
         </div>
         <div className="flex justify-between">
           <span className="text-nexus-muted">Auto Trader</span>
-          <span className={auto.running ? 'text-nexus-green' : 'text-nexus-red'}>
-            {auto.running ? 'Running' : 'Stopped'}
+          <span className={auto.autoTradingEnabled ? 'text-nexus-green' : 'text-nexus-red'}>
+            {auto.autoTradingEnabled ? 'Running' : 'Stopped'}
           </span>
         </div>
       </div>

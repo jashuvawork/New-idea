@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from fastapi import HTTPException
 
 from app.engines.auto_trader import (
+    entries_execution_active,
     get_performance_analysis,
     get_readiness,
     get_state,
@@ -18,7 +19,10 @@ router = APIRouter(prefix="/api/auto-trader", tags=["auto-trader"])
 
 @router.get("/status")
 async def auto_trader_status():
-    return get_state()
+    state = get_state()
+    payload = state.model_dump(mode="json")
+    payload["running"] = entries_execution_active(state)
+    return payload
 
 
 @router.get("/daily-report")

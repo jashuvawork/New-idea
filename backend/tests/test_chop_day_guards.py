@@ -75,6 +75,7 @@ def test_sensex_rank_bonus_on_chop(mock_settings):
 def test_loss_streak_pause(mock_settings):
     s = MagicMock()
     s.chop_day_guards_enabled = True
+    s.session_loss_pause_enabled = True
     s.loss_streak_pause_count = 3
     s.loss_streak_pause_seconds = 1200
     s.session_large_loss_pause_inr = 15_000.0
@@ -94,6 +95,7 @@ def test_loss_streak_pause(mock_settings):
 def test_large_single_loss_pauses_entries(mock_settings):
     s = MagicMock()
     s.chop_day_guards_enabled = True
+    s.session_loss_pause_enabled = True
     s.loss_streak_pause_count = 3
     s.loss_streak_pause_seconds = 1200
     s.session_large_loss_pause_inr = 15_000.0
@@ -109,6 +111,7 @@ def test_large_single_loss_pauses_entries(mock_settings):
 def _elite_bypass_settings(**overrides):
     s = MagicMock()
     s.chop_day_guards_enabled = True
+    s.session_loss_pause_enabled = True
     s.loss_streak_pause_count = 2
     s.loss_streak_pause_seconds = 1200
     s.session_large_loss_pause_inr = 15_000.0

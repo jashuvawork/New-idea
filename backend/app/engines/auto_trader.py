@@ -2598,8 +2598,21 @@ def get_state() -> AutoTraderState:
     return _auto_trader_state
 
 
+def entries_execution_active(state: Optional[AutoTraderState] = None) -> bool:
+    """Whether the entry loop may place new trades (ignores manual stop by default)."""
+    settings = get_settings()
+    if not settings.auto_trading_enabled:
+        return False
+    if getattr(settings, "execution_stop_endpoint_pauses_entries", False):
+        st = state if state is not None else _auto_trader_state
+        return bool(st and st.running)
+    return True
+
+
 def stop_trading() -> None:
-    get_state().running = False
+    settings = get_settings()
+    if getattr(settings, "execution_stop_endpoint_pauses_entries", False):
+        get_state().running = False
 
 
 def resume_trading() -> None:
@@ -3622,8 +3635,7 @@ async def process(
         })
 
     if (
-        state.running
-        and settings.auto_trading_enabled
+        settings.auto_trading_enabled
         and market_live
         and profit_gate.newEntriesAllowed
         and (entries_ok or explosion_early_ok)

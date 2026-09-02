@@ -53,7 +53,11 @@ class RiskEngine:
         if self.safe_mode:
             return False, "safe_mode_active"
 
-        if not state.running:
+        if not settings.auto_trading_enabled:
+            return False, "auto_trading_disabled"
+        if state.running is False and getattr(
+            settings, "execution_stop_endpoint_pauses_entries", False
+        ):
             return False, "auto_trader_stopped"
 
         open_trades = state.openPaperTrades
