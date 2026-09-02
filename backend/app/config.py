@@ -260,6 +260,15 @@ class Settings(BaseSettings):
     top_moments_momentum_rally_min_grade: str = "B"
     # ELITE/EXPLODING causal top moments at local-base pad may enter at grade B.
     top_moments_exploding_elite_grade_b_enabled: bool = True
+    # Day-type min grade map (BEARISH/BULLISH/MOMENTUM RALLY → B; CHOP/EXPIRY → A).
+    top_moments_day_type_grade_policy_enabled: bool = True
+    # Fast-moving day types may admit grade-C ELITE/EXPLODING with strong v3 + causal shape.
+    top_moments_fast_day_grade_c_enabled: bool = True
+    top_moments_fast_day_grade_c_modes_csv: str = (
+        "MOMENTUM RALLY,CHOP + RALLY,BULLISH DAY,BEARISH DAY"
+    )
+    top_moments_fast_day_min_velocity_3s: float = 2.0
+    top_moments_fast_day_min_rank_score: float = 50.0
     # Reserve capital-max lots for grade-A+ FTV / V / ELITE / EXPLODING only.
     top_moments_max_lots_only_enabled: bool = True
     # One-week validation: lower local-base floors so detection, grading, and entry

@@ -56,17 +56,21 @@ def test_grade_b_exploding_blocked_off_allowed_on():
     off = Settings(
         top_moments_exploding_elite_grade_b_enabled=False,
         top_moments_momentum_rally_grade_b_enabled=False,
+        top_moments_day_type_grade_policy_enabled=False,
+        top_moments_fast_day_grade_c_enabled=False,
     )
     on = Settings(
         top_moments_exploding_elite_grade_b_enabled=True,
         top_moments_momentum_rally_grade_b_enabled=True,
+        top_moments_day_type_grade_policy_enabled=True,
+        top_moments_fast_day_grade_c_enabled=True,
     )
 
     with patch("app.config.get_settings", return_value=off):
-        blocked, reason, _ = top_moment_entry_allowed(
+        ok, reason, _ = top_moment_entry_allowed(
             evidence, ranking, min_grade="A", day_mode="MOMENTUM RALLY",
         )
-    assert blocked is False
+    assert ok is False
     assert "grade" in reason
 
     with patch("app.config.get_settings", return_value=on):
