@@ -1819,6 +1819,18 @@ def find_best_entry(
     if not candidates:
         return None
 
+    from app.engines.trade_ranking import resolve_policy_day_mode
+
+    if limits:
+        day_mode = str(getattr(limits, "dayMode", "") or "")
+    else:
+        from app.engines.chop_day_guards import chop_guard_summary
+
+        chop_meta = chop_guard_summary(state, snapshots)
+        day_mode = str(chop_meta.get("dayMode") or "NORMAL")
+    if not day_mode:
+        day_mode = resolve_policy_day_mode(state)
+
     if bool(getattr(settings, "top_moments_only_enabled", True)):
         from app.engines.top_moment_gate import top_moment_entry_allowed
 
@@ -1833,6 +1845,7 @@ def find_best_entry(
                 ranking,
                 top_moments_only_enabled=True,
                 min_grade=min_grade,
+                day_mode=day_mode,
                 readiness_reason=str(meta.get("firstLiftReadinessReason") or ""),
             )
             c.pretrade_meta = {
@@ -1856,14 +1869,9 @@ def find_best_entry(
     mode_stats = compute_mode_stats(session_trades)
 
     if limits:
-        day_mode = str(getattr(limits, "dayMode", "") or "")
         conf_tier = str(getattr(limits, "confidenceTier", "") or "MEDIUM")
         phase = str(getattr(limits, "phase", "") or "ACCUMULATE")
     else:
-        from app.engines.chop_day_guards import chop_guard_summary
-
-        chop_meta = chop_guard_summary(state, snapshots)
-        day_mode = str(chop_meta.get("dayMode") or "NORMAL")
         conf_tier = "MEDIUM"
         phase = "ACCUMULATE"
     adaptive = resolve_day_adaptive(

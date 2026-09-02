@@ -299,6 +299,7 @@ def evaluate_local_base_entry(
     snap: SymbolSnapshot,
     *,
     settings: Any = None,
+    day_mode: str = "",
 ) -> tuple[bool, str, Optional[str], dict[str, Any]]:
     """Return (allowed, reason, moment_type, ranking) for one radar alert."""
     s = settings or get_settings()
@@ -326,6 +327,7 @@ def evaluate_local_base_entry(
         ranking,
         top_moments_only_enabled=bool(getattr(s, "top_moments_only_enabled", True)),
         min_grade=str(getattr(s, "top_moments_min_grade", "A") or "A"),
+        day_mode=day_mode,
         readiness_reason=lift_reason if (ready or pad_lane_waive) else "",
     )
     if not allowed:

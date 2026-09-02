@@ -120,15 +120,24 @@ def _call_rally_bypass(
     if rsi < min_rsi:
         return False, f"rsi_{rsi:.1f}<{min_rsi:.1f}", metrics
 
+    min_mom5 = float(getattr(settings, "index_rally_side_flip_min_mom5_pct", 0.05) or 0.05)
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
     if bool(getattr(settings, "index_rally_side_flip_require_macd_bullish", True)):
         macd_bias = str(getattr(chart, "macdBias", "") or "NEUTRAL").upper()
         macd_hist = float(getattr(chart, "macdHistogram", 0) or 0)
         macd_ok = macd_bias == "BULLISH" or (macd_bias == "NEUTRAL" and macd_hist > 0)
+        if (
+            not macd_ok
+            and bool(
+                getattr(settings, "index_rally_side_flip_neutral_macd_mom5_waiver_enabled", True)
+            )
+            and macd_bias == "NEUTRAL"
+            and mom5 >= min_mom5
+        ):
+            macd_ok = True
         if not macd_ok:
             return False, f"macd_{macd_bias.lower()}", metrics
 
-    min_mom5 = float(getattr(settings, "index_rally_side_flip_min_mom5_pct", 0.05) or 0.05)
-    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
     if mom5 < min_mom5:
         return False, f"mom5_{mom5:.2f}<{min_mom5:.2f}", metrics
 
@@ -165,15 +174,24 @@ def _put_slide_bypass(
     if rsi > max_rsi:
         return False, f"rsi_{rsi:.1f}>{max_rsi:.1f}", metrics
 
+    min_mom5 = float(getattr(settings, "index_rally_side_flip_min_mom5_pct", 0.05) or 0.05)
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
     if bool(getattr(settings, "index_rally_side_flip_require_macd_bearish", True)):
         macd_bias = str(getattr(chart, "macdBias", "") or "NEUTRAL").upper()
         macd_hist = float(getattr(chart, "macdHistogram", 0) or 0)
         macd_ok = macd_bias == "BEARISH" or (macd_bias == "NEUTRAL" and macd_hist < 0)
+        if (
+            not macd_ok
+            and bool(
+                getattr(settings, "index_rally_side_flip_neutral_macd_mom5_waiver_enabled", True)
+            )
+            and macd_bias == "NEUTRAL"
+            and mom5 <= -min_mom5
+        ):
+            macd_ok = True
         if not macd_ok:
             return False, f"macd_{macd_bias.lower()}", metrics
 
-    min_mom5 = float(getattr(settings, "index_rally_side_flip_min_mom5_pct", 0.05) or 0.05)
-    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
     if mom5 > -min_mom5:
         return False, f"mom5_{mom5:.2f}>-{min_mom5:.2f}", metrics
 

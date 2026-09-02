@@ -667,6 +667,7 @@ async def _open_from_candidate(
                 policy_ranking,
                 top_moments_only_enabled=True,
                 min_grade=str(getattr(settings, "top_moments_min_grade", "A") or "A"),
+                day_mode=resolve_policy_day_mode(state),
             )
             if not top_ok:
                 return False, top_reason
@@ -2352,6 +2353,7 @@ async def _open_from_candidate(
                 final_ranking,
                 top_moments_only_enabled=True,
                 min_grade=str(getattr(settings, "top_moments_min_grade", "A") or "A"),
+                day_mode=resolve_policy_day_mode(state),
             )
             if not top_ok:
                 return False, top_reason
