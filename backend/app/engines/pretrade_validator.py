@@ -611,7 +611,9 @@ def validate_candidate(
         in_power_hour_window,
     )
 
-    if in_power_hour_window() and not candidate_qualifies_power_hour_top_trade(candidate):
+    if in_power_hour_window() and not candidate_qualifies_power_hour_top_trade(
+        candidate, snapshots=snapshots,
+    ):
         return False, "power_hour_top_only", policy_meta
     if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
         from app.engines.moneyness import atm_itm_entry_allows
