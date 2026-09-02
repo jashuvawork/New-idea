@@ -35,6 +35,9 @@ def reset_whipsaw_guards() -> None:
     _whipsaw_pause_until = None
     _whipsaw_dual_cooldown_until = None
     _session_date = None
+    from app.engines.loss_triggered_side_flip import reset_loss_triggered_side_flip
+
+    reset_loss_triggered_side_flip()
 
 
 def momentum_rally_bypass_whipsaw(snapshots: Optional[dict[str, SymbolSnapshot]]) -> bool:
@@ -203,6 +206,9 @@ def check_opposite_side_cooldown(
     symbol: str,
     side: Side | str,
     snap: SymbolSnapshot,
+    *,
+    state: Optional[AutoTraderState] = None,
+    candidate: Any = None,
 ) -> tuple[bool, str]:
     """Block CE after PE exit (and vice versa) in bearish sideways chop."""
     settings = get_settings()
@@ -217,13 +223,22 @@ def check_opposite_side_cooldown(
     if last["side"] == side_val:
         return False, "ok"
 
+    from app.engines.loss_triggered_side_flip import loss_triggered_opposite_flip_ready
+
+    flip_ok, _, _ = loss_triggered_opposite_flip_ready(
+        sym, side_val, snap, state, candidate=candidate,
+    )
+    if flip_ok:
+        return False, "ok"
+
     if not is_bearish_sideways(snap):
         return False, "ok"
 
     elapsed = _seconds_since_close(sym)
     cooldown = settings.opposite_side_cooldown_seconds
-    if last.get("pnlInr", 0) < 0:
-        cooldown = max(cooldown, settings.opposite_side_cooldown_after_loss_seconds)
+    after_loss_secs = int(getattr(settings, "opposite_side_cooldown_after_loss_seconds", 0) or 0)
+    if last.get("pnlInr", 0) < 0 and after_loss_secs > 0:
+        cooldown = max(cooldown, after_loss_secs)
 
     from app.engines.expiry_day_guards import relax_opposite_side_for_expiry_dual
 
@@ -579,12 +594,23 @@ def check_whipsaw_candidate(
             if last.pnl_inr < 0:
                 # Jul20 NIFTY 24200 CE ELITE flat→vertical (~102 LTP) was blocked
                 # after a PUT loss — allow true momentum flips.
-                if _elite_momentum_flip_bypass(candidate, snap):
+                from app.engines.loss_triggered_side_flip import (
+                    loss_triggered_opposite_flip_ready,
+                )
+
+                flip_ok, _, flip_meta = loss_triggered_opposite_flip_ready(
+                    symbol, side, snap, state, candidate=candidate,
+                )
+                if flip_ok:
+                    meta["lossTriggeredSideFlip"] = flip_meta
+                elif _elite_momentum_flip_bypass(candidate, snap):
                     meta["eliteMomentumFlipBypass"] = True
                 else:
                     return False, f"no_flip_after_{last.side}_loss", meta
 
-    blocked, reason = check_opposite_side_cooldown(symbol, side, snap)
+    blocked, reason = check_opposite_side_cooldown(
+        symbol, side, snap, state=state, candidate=candidate,
+    )
     if blocked:
         return False, reason, meta
 

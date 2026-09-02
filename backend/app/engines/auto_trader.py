@@ -2487,6 +2487,16 @@ async def _open_from_candidate(
     from app.engines.directional_lock import record_trade_side
 
     record_trade_side(symbol, candidate.side, snap)
+    from app.engines.loss_triggered_side_flip import (
+        loss_triggered_opposite_flip_ready,
+        mark_loss_triggered_flip_used,
+    )
+
+    flip_ok, _, _ = loss_triggered_opposite_flip_ready(
+        symbol, candidate.side, snap, state, candidate=candidate,
+    )
+    if flip_ok:
+        mark_loss_triggered_flip_used(symbol, candidate.side)
     # Full 18-dim ML features — 3-float stub broke online retrain.
     try:
         from app.engines.ml_engine import get_ml_engine

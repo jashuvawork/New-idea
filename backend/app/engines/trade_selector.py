@@ -655,6 +655,20 @@ def _explosion_candidates(
         rank += min(15, event.velocity_3s * 2)
         rank += min(10, event.velocity_9s)
         rank += index_moment_rank_bonus(snap, event.side)
+        from app.engines.loss_triggered_side_flip import loss_triggered_side_flip_rank_bonus
+        from types import SimpleNamespace
+
+        rank += loss_triggered_side_flip_rank_bonus(
+            symbol,
+            event.side,
+            snap,
+            state,
+            candidate=SimpleNamespace(
+                tier=event.tier,
+                score=score_val,
+                confidence=score_val,
+            ),
+        )
         # History of index spike moments: a same-direction spot spike burst is the causal
         # thrust behind a sudden strike lift — rank those candidates a touch higher.
         if bool(alert.get("indexSpikeBurst")) or (
