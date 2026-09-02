@@ -1,5 +1,24 @@
 # AGENTS.md
 
+## CE / PE symmetry (session gates & bypasses)
+
+When changing **session gates, directional lock, breadth blocks, bypasses, or side-specific entry/exit rules**, implement **both CALL (CE) and PUT (PE)** unless there is an explicit, documented market reason not to.
+
+| CALL (CE) | PUT (PE) mirror |
+|-----------|-----------------|
+| Rally off session **low** | Slide off session **high** |
+| Bullish RSI / MACD / mom5 | Bearish RSI / MACD / mom5 |
+| Unlock after PUT / bearish session | Unlock after CALL / bullish session |
+| `hard_block_call_vs_bearish_breadth` | `hard_block_put_vs_bullish_breadth` |
+
+**Checklist for new side logic:**
+1. Add config for both sides (or one threshold with mirrored semantics, e.g. `min_rsi` / `max_rsi`).
+2. Wire into `check_directional_side_lock` and `breadth_hard_blocks_side` for **both** directions.
+3. Add paired tests (CE + PE) in `backend/tests/`.
+4. Expose both in `directional_lock_summary` / deployment HUD when observability matters.
+
+Reference: `backend/app/engines/index_rally_side_flip.py` (`_call_rally_bypass` / `_put_slide_bypass`).
+
 ## Cursor Cloud specific instructions
 
 NexusQuant v2.0 is a single product split into two dev services (run both for end-to-end work). Standard commands live in `README.md`; the notes below are the non-obvious caveats for this environment.
