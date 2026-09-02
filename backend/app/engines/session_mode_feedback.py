@@ -965,6 +965,9 @@ def session_same_side_loss_reentry_blocked(
     2. Elevated bar (default 15m–60m): allow only if candidate re-earns min grade
        (default S) via full causal ranking — not bypassable by aligned_rip.
     After elevated window, normal gates apply.
+
+    Covers cross-index stacking (Sep 2 SENSEX PE → NIFTY PE). Opposite-side entries
+    unaffected.
     """
     settings = get_settings()
     meta: dict[str, Any] = {"applied": False}
