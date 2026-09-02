@@ -1927,6 +1927,19 @@ class Settings(BaseSettings):
     early_radar_pad_ftv_min_explosion_score: float = 5.0
     early_radar_pad_ftv_max_capital_pct: float = 0.90
     early_radar_pad_ftv_force_max_lots: bool = True
+    # Live pad entry requires expansion — armed base alone is watch-only (Sep2 gap-day chop).
+    early_radar_pad_confirm_entry_enabled: bool = True
+    early_radar_pad_confirm_min_velocity_3s: float = 0.5
+    early_radar_pad_confirm_min_velocity_9s: float = 0.25
+    early_radar_pad_confirm_min_volume_surge: float = 1.0
+    early_radar_pad_confirm_trough_off_low_max_pct: float = 3.0
+    # Post-open impulse done — index consolidating; pad lanes need fresh lift (Sep2 09:30).
+    post_impulse_consolidation_guard_enabled: bool = True
+    post_impulse_consolidation_min_index_momentum15_pct: float = 0.12
+    post_impulse_consolidation_max_index_momentum5_pct: float = 0.04
+    post_impulse_consolidation_max_index_momentum10_pct: float = 0.05
+    post_impulse_consolidation_min_velocity_3s: float = 0.8
+    post_impulse_consolidation_min_velocity_9s: float = 0.5
     # WATCH-tier local-base pad — enter at session trough with low scores before ELITE/EXPLODING.
     # Aug26 SENSEX 77600 CE: WATCH ~12.8 at ₹240 pad was DETECTED but not SELECTED until
     # score hit 100 and explosion_near_miss fired after the rip to ₹306.

@@ -329,6 +329,44 @@ def entry_window_bounds(
     return lo, hi
 
 
+def post_impulse_consolidation_entry_blocked(
+    explosion_event: Any = None,
+    *,
+    alert: Optional[dict[str, Any]] = None,
+    snap: Any = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block armed-base entries during post-open consolidation without fresh expansion."""
+    from app.engines.early_radar_pad_capture import (
+        POST_IMPULSE_CONSOLIDATION_BLOCKED,
+        post_impulse_consolidation_active,
+    )
+
+    s = settings or get_settings()
+    row = alert if isinstance(alert, dict) else {}
+    side = str(
+        row.get("side")
+        or getattr(getattr(explosion_event, "side", None), "value", "")
+        or getattr(explosion_event, "side", "")
+        or ""
+    ).upper()
+    if not post_impulse_consolidation_active(snap, side, s):
+        return False, ""
+    if bool(
+        row.get("ictFirstLift")
+        or row.get("ictArmedBaseLaunch")
+        or row.get("armedBaseLaunch")
+    ):
+        return False, ""
+    v3 = float(row.get("velocity3s") or getattr(explosion_event, "velocity_3s", 0) or 0)
+    v9 = float(row.get("velocity9s") or getattr(explosion_event, "velocity_9s", 0) or 0)
+    hot_v3 = float(getattr(s, "post_impulse_consolidation_min_velocity_3s", 0.8) or 0.8)
+    hot_v9 = float(getattr(s, "post_impulse_consolidation_min_velocity_9s", 0.5) or 0.5)
+    if v3 >= hot_v3 or v9 >= hot_v9:
+        return False, ""
+    return True, POST_IMPULSE_CONSOLIDATION_BLOCKED
+
+
 def tier_promotion_pad_chase_blocked(
     explosion_event: Any,
     *,
@@ -354,7 +392,10 @@ def tier_promotion_pad_chase_blocked(
 
     resolved = alert if isinstance(alert, dict) else {}
     if alert_has_early_radar_pad_capture(resolved):
-        return False, ""
+        from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_ready
+
+        if alert_has_early_radar_pad_ready(resolved):
+            return False, ""
 
     threshold = float(
         getattr(settings, "tier_promotion_pad_chase_min_base_rel_pct", 8.0) or 8.0
