@@ -80,6 +80,10 @@ def _levers_on_settings(base: Settings) -> Settings:
     data = deepcopy(base.model_dump())
     data["top_moments_exploding_elite_grade_b_enabled"] = True
     data["top_moments_momentum_rally_grade_b_enabled"] = True
+    data["top_moments_day_type_grade_policy_enabled"] = True
+    data["top_moments_fast_day_grade_c_enabled"] = True
+    data["session_loss_pause_enabled"] = True
+    data["session_large_loss_pause_bypass_enabled"] = True
     data["index_rally_side_flip_neutral_macd_mom5_waiver_enabled"] = True
     return Settings(**data)
 

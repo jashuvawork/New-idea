@@ -251,8 +251,9 @@ def test_exploding_needs_ict_structure(mock_settings):
     assert alert_is_loss_streak_elite_bypass(structured.explosionAlerts[0], structured) is True
 
 
+@patch("app.engines.chop_day_guards.resolve_session_day_mode", return_value="BEARISH DAY")
 @patch("app.engines.chop_day_guards.get_settings")
-def test_loss_streak_pause_lifts_for_elite_only(mock_settings):
+def test_loss_streak_pause_lifts_for_elite_only(mock_settings, _mode):
     mock_settings.return_value = _elite_bypass_settings()
     reset_session_guards()
     record_session_trade_close(-1000)
@@ -274,6 +275,19 @@ def test_loss_streak_pause_lifts_for_elite_only(mock_settings):
     assert meta.get("lossStreakEliteOnly") is True
     # Raw pause flag remains for UI / streak accounting.
     assert session_pause_active()[0] is True
+
+
+@patch("app.engines.chop_day_guards.resolve_session_day_mode", return_value="EXPIRY WORST")
+@patch("app.engines.chop_day_guards.get_settings")
+def test_loss_streak_pause_blocked_on_expiry_worst(mock_settings, _mode):
+    mock_settings.return_value = _elite_bypass_settings()
+    reset_session_guards()
+    record_session_trade_close(-1000)
+    record_session_trade_close(-1000)
+    blocked, reason, meta = resolve_session_entry_pause({"SENSEX": _elite_snap()})
+    assert blocked is True
+    assert "loss_streak_pause" in reason
+    assert meta.get("lossStreakBypassReject")
 
 
 @patch("app.engines.chop_day_guards.resolve_session_day_mode", return_value="BEARISH DAY")
@@ -329,6 +343,28 @@ def test_large_loss_pause_chop_day_requires_elite_only(mock_settings, _mode):
     assert blocked2 is False
     assert reason2 == "large_loss_pause_bypass"
     assert meta2.get("strict") is True
+
+
+@patch(
+    "app.engines.chop_day_guards.resolve_session_day_mode",
+    side_effect=["CHOP DAY", "MOMENTUM RALLY"],
+)
+@patch("app.engines.chop_day_guards.get_settings")
+def test_large_loss_pause_re_evaluates_on_day_mode_flip(mock_settings, _mode):
+    mock_settings.return_value = _elite_bypass_settings()
+    reset_session_guards()
+    record_session_trade_close(-30_000)
+    exploding = _elite_snap(_elite_alert(tier="EXPLODING", explosionScore=100.0))
+    snaps = {"SENSEX": exploding}
+
+    blocked, _, meta = resolve_session_entry_pause(snaps)
+    assert blocked is True
+    assert meta.get("dayMode") == "CHOP DAY"
+
+    blocked2, reason2, meta2 = resolve_session_entry_pause(snaps)
+    assert blocked2 is False
+    assert reason2 == "large_loss_pause_bypass"
+    assert meta2.get("dayMode") == "MOMENTUM RALLY"
 
 
 @patch("app.engines.chop_day_guards.get_settings")

@@ -3866,7 +3866,7 @@ async def process(
                     elite_ok = (
                         is_large_loss_pause_elite_candidate(best, snapshots)
                         if large_loss_elite_only
-                        else is_loss_streak_elite_bypass_candidate(best)
+                        else is_loss_streak_elite_bypass_candidate(best, snapshots=snapshots)
                     )
                 else:
                     elite_ok = True
