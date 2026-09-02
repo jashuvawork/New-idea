@@ -60,6 +60,7 @@ from app.engines.chop_day_guards import (
     apply_tiered_lot_cap,
     chop_guard_summary,
     is_loss_streak_elite_bypass_candidate,
+    is_large_loss_pause_elite_candidate,
     record_session_trade_close,
     reset_session_guards,
     resolve_daily_trade_cap,
@@ -3644,6 +3645,7 @@ async def process(
     ):
         paused, pause_reason, pause_meta = resolve_session_entry_pause(snapshots)
         loss_streak_elite_only = bool(pause_meta.get("lossStreakEliteOnly"))
+        large_loss_elite_only = bool(pause_meta.get("largeLossPauseBypass"))
         if paused:
             skipped.append({
                 "symbol": "SESSION",
@@ -3651,10 +3653,20 @@ async def process(
                 "message": "Loss streak pause — no new entries",
             })
         elif loss_streak_elite_only:
+            bypass_msg = (
+                f"Large loss pause lifted — elite only ({pause_meta.get('dayMode') or 'session'})"
+                if large_loss_elite_only
+                else "Loss streak pause lifted — high-confidence ELITE / top explosive only"
+            )
+            bypass_reason = (
+                "large_loss_pause_bypass"
+                if large_loss_elite_only
+                else "loss_streak_elite_bypass"
+            )
             skipped.append({
                 "symbol": "SESSION",
-                "reason": "loss_streak_elite_bypass",
-                "message": "Loss streak pause lifted — high-confidence ELITE / top explosive only",
+                "reason": bypass_reason,
+                "message": bypass_msg,
             })
         cap_hit, cap_reason, cap_meta = resolve_daily_trade_cap(state, snapshots)
         cap_elite_only = bool(cap_meta.get("dailyCapEliteOnly"))
@@ -3850,7 +3862,15 @@ async def process(
                         }
                     )
                     break
-                if loss_streak_elite_only and not is_loss_streak_elite_bypass_candidate(best):
+                if loss_streak_elite_only:
+                    elite_ok = (
+                        is_large_loss_pause_elite_candidate(best, snapshots)
+                        if large_loss_elite_only
+                        else is_loss_streak_elite_bypass_candidate(best)
+                    )
+                else:
+                    elite_ok = True
+                if loss_streak_elite_only and not elite_ok:
                     skipped.append({
                         "symbol": best.symbol,
                         "reason": "loss_streak_elite_only",

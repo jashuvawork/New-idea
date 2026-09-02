@@ -790,6 +790,15 @@ def replay_local_base_day(
     from app.engines.directional_lock import record_trade_side, reset_directional_lock
 
     reset_directional_lock()
+    from app.engines.chop_day_guards import (
+        is_large_loss_pause_elite_candidate,
+        is_loss_streak_elite_bypass_candidate,
+        record_session_trade_close,
+        reset_session_guards,
+        resolve_session_entry_pause,
+    )
+
+    reset_session_guards()
     original_datetimes = (
         explosion_detector.datetime,
         ict_breakout_monitor.datetime,
@@ -816,6 +825,9 @@ def replay_local_base_day(
         replay_clock_saved = _install_replay_clock(_ReplayDateTime)
 
         live_gates = bool(getattr(s, "eod_replay_live_session_gates_enabled", True))
+        session_pause_enabled = bool(
+            getattr(s, "session_loss_pause_enabled", False)
+        ) and live_gates
 
         for batch in batches:
             ts_raw = batch.get("ts")
@@ -939,6 +951,18 @@ def replay_local_base_day(
             if session_gate_blocked:
                 continue
 
+            elite_only = False
+            large_loss_elite_only = False
+            if session_pause_enabled:
+                entry_paused, pause_reason, pause_meta = resolve_session_entry_pause(
+                    batch_snapshots,
+                )
+                if entry_paused:
+                    gate_stats[pause_reason] += 1
+                    continue
+                elite_only = bool(pause_meta.get("lossStreakEliteOnly"))
+                large_loss_elite_only = bool(pause_meta.get("largeLossPauseBypass"))
+
             ranked_candidates: list[tuple[float, str, SymbolSnapshot, dict[str, Any], str, Optional[str], dict[str, Any]]] = []
             for sym, snap in batch_snapshots.items():
                 symbol_state = state[sym]
@@ -977,6 +1001,17 @@ def replay_local_base_day(
                                 "reason": reason,
                             })
                         continue
+
+                    if elite_only:
+                        candidate = _candidate_from_alert(alert_eval, snap)
+                        elite_ok = (
+                            is_large_loss_pause_elite_candidate(candidate, batch_snapshots)
+                            if large_loss_elite_only
+                            else is_loss_streak_elite_bypass_candidate(candidate)
+                        )
+                        if not elite_ok:
+                            gate_stats["session_pause_elite_only"] += 1
+                            continue
 
                     gate_stats["entry_allowed"] += 1
                     if live_gates:
@@ -1065,6 +1100,8 @@ def replay_local_base_day(
                 entry_ctx=entry_ctx,
             )
             raw_candidates.append(trade)
+            if session_pause_enabled:
+                record_session_trade_close(float(trade.get("pnlInr") or 0))
             trades_per_key[key] += 1
             record_trade_side(sym, Side(side), snap)
             cooldown_until[key] = trade["_exitDt"] + timedelta(
@@ -1096,6 +1133,7 @@ def replay_local_base_day(
         if replay_clock_saved:
             _restore_replay_clock(replay_clock_saved)
         reset_detector_state_for_tests()
+        reset_session_guards()
 
     taken = apply_portfolio_limits(raw_candidates, settings=s)
     for t in taken:
@@ -1153,6 +1191,7 @@ def generate_lever_replay_compare(
     off_data["top_moments_momentum_rally_grade_b_enabled"] = False
     off_data["top_moments_day_type_grade_policy_enabled"] = False
     off_data["top_moments_fast_day_grade_c_enabled"] = False
+    off_data["session_large_loss_pause_bypass_enabled"] = False
     off_data["index_rally_side_flip_neutral_macd_mom5_waiver_enabled"] = False
     off_settings = Settings(**off_data)
 

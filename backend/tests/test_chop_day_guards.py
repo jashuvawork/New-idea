@@ -122,6 +122,10 @@ def _elite_bypass_settings(**overrides):
     s.loss_streak_elite_bypass_tiers_csv = "ELITE,EXPLODING"
     s.loss_streak_elite_bypass_min_move_pct = 28.0
     s.loss_streak_elite_bypass_max_move_pct = 70.0
+    s.session_large_loss_pause_bypass_enabled = True
+    s.session_large_loss_pause_bypass_block_modes_csv = "EXPIRY WORST"
+    s.session_large_loss_pause_chop_min_score = 95.0
+    s.session_large_loss_pause_chop_tiers_csv = "ELITE"
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -272,16 +276,59 @@ def test_loss_streak_pause_lifts_for_elite_only(mock_settings):
     assert session_pause_active()[0] is True
 
 
+@patch("app.engines.chop_day_guards.resolve_session_day_mode", return_value="BEARISH DAY")
 @patch("app.engines.chop_day_guards.get_settings")
-def test_large_loss_pause_never_bypassed_by_elite(mock_settings):
+def test_large_loss_pause_bypass_all_sessions_bearish_day(mock_settings, _mode):
     mock_settings.return_value = _elite_bypass_settings()
     reset_session_guards()
     record_session_trade_close(-30_000)
-    snaps = {"SENSEX": _elite_snap()}
-    blocked, reason, meta = resolve_session_entry_pause(snaps)
+    blocked, reason, meta = resolve_session_entry_pause({"SENSEX": _elite_snap()})
+    assert blocked is False
+    assert reason == "large_loss_pause_bypass"
+    assert meta.get("lossStreakEliteOnly") is True
+    assert meta.get("largeLossPauseBypass") is True
+    assert meta.get("dayMode") == "BEARISH DAY"
+
+
+@patch("app.engines.chop_day_guards.get_settings")
+def test_large_loss_pause_bypass_disabled_stays_blocked(mock_settings):
+    mock_settings.return_value = _elite_bypass_settings(
+        session_large_loss_pause_bypass_enabled=False,
+    )
+    reset_session_guards()
+    record_session_trade_close(-30_000)
+    blocked, reason, _ = resolve_session_entry_pause({"SENSEX": _elite_snap()})
     assert blocked is True
     assert "large_loss_pause" in reason
-    assert not meta.get("lossStreakEliteBypass")
+
+
+@patch("app.engines.chop_day_guards.resolve_session_day_mode", return_value="EXPIRY WORST")
+@patch("app.engines.chop_day_guards.get_settings")
+def test_large_loss_pause_never_bypassed_on_expiry_worst(mock_settings, _mode):
+    mock_settings.return_value = _elite_bypass_settings()
+    reset_session_guards()
+    record_session_trade_close(-30_000)
+    blocked, reason, meta = resolve_session_entry_pause({"SENSEX": _elite_snap()})
+    assert blocked is True
+    assert "large_loss_pause" in reason
+    assert meta.get("largeLossBypassReject")
+
+
+@patch("app.engines.chop_day_guards.resolve_session_day_mode", return_value="CHOP DAY")
+@patch("app.engines.chop_day_guards.get_settings")
+def test_large_loss_pause_chop_day_requires_elite_only(mock_settings, _mode):
+    mock_settings.return_value = _elite_bypass_settings()
+    reset_session_guards()
+    record_session_trade_close(-30_000)
+    exploding = _elite_snap(_elite_alert(tier="EXPLODING", explosionScore=100.0))
+    blocked, reason, meta = resolve_session_entry_pause({"SENSEX": exploding})
+    assert blocked is True
+    assert meta.get("largeLossBypassReject") == "large_loss_pause_no_elite_on_radar"
+    elite = _elite_snap(_elite_alert(tier="ELITE", explosionScore=96.0))
+    blocked2, reason2, meta2 = resolve_session_entry_pause({"SENSEX": elite})
+    assert blocked2 is False
+    assert reason2 == "large_loss_pause_bypass"
+    assert meta2.get("strict") is True
 
 
 @patch("app.engines.chop_day_guards.get_settings")

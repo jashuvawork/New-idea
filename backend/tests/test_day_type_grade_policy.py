@@ -5,6 +5,7 @@ from unittest.mock import patch
 from app.config import Settings
 from app.engines.day_type_grade_policy import (
     fast_moving_grade_c_waiver,
+    large_loss_pause_bypass_for_day_mode,
     resolve_day_type_min_grade,
 )
 from app.engines.top_moment_gate import (
@@ -110,3 +111,26 @@ def test_top_moment_blocks_grade_c_on_chop_day():
         )
     assert ok is False
     assert "grade" in reason
+
+
+def test_large_loss_pause_bypass_expiry_worst_blocked():
+    s = _settings()
+    policy = large_loss_pause_bypass_for_day_mode("EXPIRY WORST", settings=s)
+    assert policy["allowed"] is False
+
+
+def test_large_loss_pause_bypass_momentum_rally_standard():
+    s = _settings()
+    policy = large_loss_pause_bypass_for_day_mode("MOMENTUM RALLY", settings=s)
+    assert policy["allowed"] is True
+    assert policy["strict"] is False
+    assert policy["minScore"] == 90.0
+
+
+def test_large_loss_pause_bypass_chop_day_strict():
+    s = _settings()
+    policy = large_loss_pause_bypass_for_day_mode("CHOP DAY", settings=s)
+    assert policy["allowed"] is True
+    assert policy["strict"] is True
+    assert policy["minScore"] == 95.0
+    assert policy["tiersCsv"] == "ELITE"
