@@ -1699,6 +1699,7 @@ def find_best_entry(
             from app.engines.session_mode_feedback import (
                 exhausted_ftv_reentry_blocked,
                 failed_launch_reentry_blocked,
+                peak_fade_same_side_reentry_blocked,
                 reentry_ml_win_prob_blocked,
             )
 
@@ -1715,6 +1716,23 @@ def find_best_entry(
                     "causalRanking": {
                         "grade": "REJECT",
                         "reasons": ["failed_launch_reentry_cooldown"],
+                    },
+                }
+                continue
+
+            peak_fade_blocked, peak_fade_meta = peak_fade_same_side_reentry_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+            )
+            if peak_fade_blocked:
+                c.pretrade_meta = {
+                    **(c.pretrade_meta or {}),
+                    "peakFadeSameSideReentryBlocked": True,
+                    **peak_fade_meta,
+                    "causalRanking": {
+                        "grade": "REJECT",
+                        "reasons": ["peak_fade_same_side_reentry_cooldown"],
                     },
                 }
                 continue

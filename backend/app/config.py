@@ -2628,6 +2628,10 @@ class Settings(BaseSettings):
     explosion_failed_launch_reentry_exit_reasons_csv: str = (
         "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
     )
+    # Same symbol+side cooldown after a red close that had a material peak (trail giveback).
+    peak_fade_same_side_reentry_enabled: bool = True
+    peak_fade_same_side_reentry_min_peak_points: float = 30.0
+    peak_fade_same_side_reentry_cooldown_seconds: int = 900
     # Re-entry ML gate — Aug28 winners ~56% ML, 24050 losses ~41-43%.
     explosion_reentry_ml_win_prob_gate_enabled: bool = True
     explosion_reentry_ml_win_prob_min: float = 0.52

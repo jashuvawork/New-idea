@@ -826,6 +826,18 @@ def validate_candidate(
     if not ok:
         return False, reason, meta
 
+    if getattr(candidate, "mode", "") == "explosion":
+        from app.engines.session_mode_feedback import peak_fade_same_side_reentry_blocked
+
+        peak_fade_blocked, peak_fade_meta = peak_fade_same_side_reentry_blocked(
+            state,
+            symbol=str(getattr(candidate, "symbol", "") or ""),
+            side=getattr(candidate, "side", ""),
+        )
+        if peak_fade_blocked:
+            meta.update({"peakFadeSameSideReentryBlocked": True, **peak_fade_meta})
+            return False, "peak_fade_same_side_reentry_cooldown", meta
+
     if getattr(candidate, "mode", "") == "explosion" and not all_in:
         from app.engines.aligned_side_guard import breadth_hard_blocks_side
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
