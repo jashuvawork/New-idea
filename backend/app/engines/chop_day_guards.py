@@ -32,7 +32,9 @@ def record_session_trade_close(pnl_inr: float) -> None:
     """Global loss streak — pause new entries after N consecutive losses or one large hit."""
     global _session_loss_streak, _pause_until, _large_loss_pause_until
     settings = get_settings()
-    if not settings.chop_day_guards_enabled:
+    if not settings.chop_day_guards_enabled or not getattr(
+        settings, "session_loss_pause_enabled", False
+    ):
         return
     _reset_session_if_new_day()
     now = datetime.now(IST)
@@ -48,7 +50,9 @@ def record_session_trade_close(pnl_inr: float) -> None:
 
 def session_pause_active() -> tuple[bool, str]:
     settings = get_settings()
-    if not settings.chop_day_guards_enabled:
+    if not settings.chop_day_guards_enabled or not getattr(
+        settings, "session_loss_pause_enabled", False
+    ):
         return False, "ok"
     _reset_session_if_new_day()
     now = datetime.now(IST)

@@ -2234,6 +2234,10 @@ class Settings(BaseSettings):
 
     # Chop-day guardrails (Jun 25 playbook for RANGE_BOUND / NEUTRAL days)
     chop_day_guards_enabled: bool = True
+    # When False, skip loss-streak / large-loss session pauses — keep scanning entries all day.
+    session_loss_pause_enabled: bool = False
+    # Manual /api/execution/stop must not halt entries; only auto_trading_enabled controls the loop.
+    execution_stop_endpoint_pauses_entries: bool = False
     neutral_breadth_min_score: float = 60.0
     neutral_breadth_explosion_min_score: float = 55.0
     sensex_rank_bonus: float = 10.0

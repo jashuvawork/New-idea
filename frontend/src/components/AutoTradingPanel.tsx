@@ -13,8 +13,8 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
       <div className="grid grid-cols-3 gap-2 mb-3">
         <Metric
           label="Status"
-          value={auto.running && auto.autoTradingEnabled ? 'ACTIVE' : 'PAUSED'}
-          color={auto.running && auto.autoTradingEnabled ? 'text-nexus-green' : 'text-nexus-red'}
+          value={auto.autoTradingEnabled ? 'ACTIVE' : 'PAUSED'}
+          color={auto.autoTradingEnabled ? 'text-nexus-green' : 'text-nexus-red'}
         />
         <Metric label="Open" value={auto.openPaperTrades.length} />
         <Metric label="Broker Orders" value={auto.liveOrdersPlaced ?? 0} />

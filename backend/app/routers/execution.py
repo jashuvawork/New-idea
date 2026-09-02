@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.engines.auto_trader import get_state, resume_trading, stop_trading
+from app.engines.auto_trader import entries_execution_active, get_state, resume_trading, stop_trading
 from app.engines.realtime_engine import build_symbol_snapshot
 from app.models.schemas import Side
 from app.services.order_executor import place_entry_order
@@ -23,8 +23,15 @@ class ScalpOrderRequest(BaseModel):
 
 @router.post("/stop")
 async def stop_auto_trading():
-    stop_trading()
-    return {"status": "stopped", "message": "Auto-trading halted — no new entries"}
+    settings = get_settings()
+    if getattr(settings, "execution_stop_endpoint_pauses_entries", False):
+        stop_trading()
+        return {"status": "stopped", "message": "Auto-trading halted — no new entries"}
+    resume_trading()
+    return {
+        "status": "ignored",
+        "message": "Stop ignored — entries stay active while auto_trading_enabled is on",
+    }
 
 
 @router.post("/resume")
@@ -37,8 +44,9 @@ async def resume_auto_trading():
 async def execution_status():
     state = get_state()
     settings = get_settings()
+    entries_active = entries_execution_active(state)
     return {
-        "running": state.running,
+        "running": entries_active,
         "autoTradingEnabled": settings.auto_trading_enabled,
         "liveTradingEnabled": settings.enable_live_trading,
         "paperTrading": settings.paper_trading,
