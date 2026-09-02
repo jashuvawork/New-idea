@@ -604,12 +604,16 @@ def ftv_runner_pct_floor(
     if entry <= 0 or best <= 0:
         return None
     arm_pct = _cfg_float(s, "ftv_runner_pct_trail_arm_pct", 25.0)
-    if (best / entry * 100.0) < arm_pct:
+    gain_pct = best / entry * 100.0
+    ctx = getattr(trade, "entryContext", None) or {}
+    arm_min_pts = _cfg_float(s, "ftv_runner_pct_trail_arm_min_best_points", 20.0)
+    max_profit = bool(ctx.get("maxProfitCapture"))
+    armed = gain_pct >= arm_pct or (max_profit and best >= arm_min_pts)
+    if not armed:
         return None
     keep = _cfg_float(s, "ftv_runner_pct_trail_keep_ratio", 0.75)
     # Closed loop: prefer the LEARNED per-moment keep-ratio when EOD learning stamped one
     # (ride high-hit movers harder, tighten low-hit buckets). Bounded to a safe band.
-    ctx = getattr(trade, "entryContext", None) or {}
     learned = _safe_float(ctx.get("learnedTrailKeepRatio"))
     if learned > 0 and bool(getattr(s, "eod_learning_apply_enabled", False)):
         keep = learned
