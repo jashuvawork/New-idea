@@ -331,6 +331,31 @@ def test_large_loss_pause_chop_day_requires_elite_only(mock_settings, _mode):
     assert meta2.get("strict") is True
 
 
+@patch(
+    "app.engines.chop_day_guards.resolve_session_day_mode",
+    side_effect=["CHOP DAY", "MOMENTUM RALLY"],
+)
+@patch("app.engines.chop_day_guards.get_settings")
+def test_large_loss_pause_re_evaluates_on_day_mode_flip(mock_settings, _mode):
+    """Bypass bar follows live dayMode — flips re-resolve each entry tick."""
+    mock_settings.return_value = _elite_bypass_settings()
+    reset_session_guards()
+    record_session_trade_close(-30_000)
+    exploding = _elite_snap(_elite_alert(tier="EXPLODING", explosionScore=100.0))
+    snaps = {"SENSEX": exploding}
+
+    blocked, _, meta = resolve_session_entry_pause(snaps)
+    assert blocked is True
+    assert meta.get("dayMode") == "CHOP DAY"
+    assert meta.get("largeLossBypassReject") == "large_loss_pause_no_elite_on_radar"
+
+    blocked2, reason2, meta2 = resolve_session_entry_pause(snaps)
+    assert blocked2 is False
+    assert reason2 == "large_loss_pause_bypass"
+    assert meta2.get("dayMode") == "MOMENTUM RALLY"
+    assert meta2.get("strict") is False
+
+
 @patch("app.engines.chop_day_guards.get_settings")
 def test_elite_only_candidate_gate(mock_settings):
     mock_settings.return_value = _elite_bypass_settings()

@@ -1,5 +1,6 @@
 """Tests for day-type min grade policy and fast-day grade-C waiver."""
 
+import pytest
 from unittest.mock import patch
 
 from app.config import Settings
@@ -134,3 +135,54 @@ def test_large_loss_pause_bypass_chop_day_strict():
     assert policy["strict"] is True
     assert policy["minScore"] == 95.0
     assert policy["tiersCsv"] == "ELITE"
+
+
+# Canonical day modes from chop_day_guards._day_mode_label (complete set — no others at runtime).
+_ALL_DAY_MODES = (
+    "EXPIRY WORST",
+    "EXPIRY DAY",
+    "CHOP + RALLY",
+    "MOMENTUM RALLY",
+    "CHOP (PRE-10)",
+    "CHOP DAY",
+    "BULLISH DAY",
+    "BEARISH DAY",
+    "MIXED DAY",
+    "LEAN BULLISH",
+    "LEAN BEARISH",
+    "NORMAL",
+)
+_STANDARD_BYPASS_MODES = frozenset(_ALL_DAY_MODES) - frozenset(
+    {"EXPIRY WORST", "CHOP DAY", "CHOP (PRE-10)"}
+)
+_STRICT_BYPASS_MODES = frozenset({"CHOP DAY", "CHOP (PRE-10)"})
+
+
+@pytest.mark.parametrize("day_mode", sorted(_STANDARD_BYPASS_MODES))
+def test_large_loss_pause_bypass_all_standard_modes(day_mode: str):
+    s = _settings()
+    policy = large_loss_pause_bypass_for_day_mode(day_mode, settings=s)
+    assert policy["allowed"] is True
+    assert policy["strict"] is False
+    assert policy["minScore"] == 90.0
+    assert policy["tiersCsv"] == "ELITE,EXPLODING"
+
+
+@pytest.mark.parametrize("day_mode", sorted(_STRICT_BYPASS_MODES))
+def test_large_loss_pause_bypass_all_strict_modes(day_mode: str):
+    s = _settings()
+    policy = large_loss_pause_bypass_for_day_mode(day_mode, settings=s)
+    assert policy["allowed"] is True
+    assert policy["strict"] is True
+    assert policy["minScore"] == 95.0
+    assert policy["tiersCsv"] == "ELITE"
+
+
+def test_large_loss_pause_bypass_unknown_mode_defaults_standard():
+    """Empty/unknown modes fail open to standard bar (not blocked)."""
+    s = _settings()
+    for mode in ("", "NO_DATA", "UNKNOWN MODE"):
+        policy = large_loss_pause_bypass_for_day_mode(mode, settings=s)
+        assert policy["allowed"] is True
+        assert policy["strict"] is False
+        assert policy["minScore"] == 90.0
