@@ -1094,6 +1094,9 @@ class Settings(BaseSettings):
     # every real % move locks in the best TP it reached. Arms only after a real move.
     ftv_runner_pct_trail_enabled: bool = True
     ftv_runner_pct_trail_arm_pct: float = 25.0
+    # Also arm %-keep when best gain hits this many points on max-profit legs — ITM
+    # premiums (Sep2 SENSEX PUT 76300 +31pt = +11.7%) never reach 25% arm otherwise.
+    ftv_runner_pct_trail_arm_min_best_points: float = 20.0
     ftv_runner_pct_trail_keep_ratio: float = 0.75
     ftv_runner_pct_trail_min_best_points: float = 6.0
     moment_stage_min_projected_tp: float = 40.0

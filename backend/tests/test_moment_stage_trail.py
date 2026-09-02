@@ -86,6 +86,7 @@ def _settings(**overrides):
     s.bullish_hold_enabled = True
     s.ftv_runner_pct_trail_enabled = True
     s.ftv_runner_pct_trail_arm_pct = 25.0
+    s.ftv_runner_pct_trail_arm_min_best_points = 20.0
     s.ftv_runner_pct_trail_keep_ratio = 0.75
     s.ftv_runner_pct_trail_min_best_points = 6.0
     s.explosion_stage_trail_min_hold_seconds = 90.0
@@ -328,6 +329,92 @@ def test_peak_keep_75_exits_before_stage_one(mock_ms, mock_s, _hc, _mp):
     assert reason_hold is None
 
 
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_ftv_pct_floor_arms_on_absolute_points_for_max_profit(mock_ms, mock_s):
+    """Sep2 SENSEX PUT 76300: +31pt is only +11.7% — still arms 75% keep."""
+    from app.engines.moment_stage_trail import ftv_runner_pct_floor
+
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    trade = PaperTrade(
+        id="sensex-76300",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=76300.0,
+        entryPremium=269.45,
+        currentPremium=300.95,
+        lots=19,
+        openedAt=datetime.now(IST) - timedelta(minutes=6),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=31.5,
+        maxLtp=300.95,
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+        },
+    )
+    floor = ftv_runner_pct_floor(trade, 31.5, settings=s)
+    assert floor is not None
+    assert floor == pytest.approx(31.5 * 0.75, rel=0.01)
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_sep2_sensex_modest_peak_books_peak_keep_not_scratch(mock_ms, mock_s, _hc, _mp):
+    """Sep2 first trade: +31.5pt peak on ITM PUT must book ~75% keep, not scratch."""
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    entry = 269.45
+    best = 31.5
+    trade = PaperTrade(
+        id="sensex-76300",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=76300.0,
+        entryPremium=entry,
+        currentPremium=entry + 1.0,
+        lots=19,
+        openedAt=datetime.now(IST) - timedelta(minutes=6),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        pnlPoints=1.0,
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+            "exitPlan": {
+                "trailArmPoints": 22.36,
+                "trailKeepRatio": 0.517,
+                "momentStageLadder": True,
+                "projectedMaxTp": 800.0,
+                "stageSize": 75.0,
+            },
+        },
+    )
+    params = ExplosionExitParams(
+        stop_points=40.0,
+        target_points=71.36,
+        trail_arm_points=22.36,
+        trail_keep_ratio=0.517,
+        micro_target_points=7.71,
+        adaptive_stop=True,
+    )
+    reason, pnl = evaluate_explosion_exit(
+        trade, entry + 1.0, "EXPLODING", 360, params=params, live_velocity_3s=0.0,
+    )
+    assert reason == "explosion_peak_keep_trail"
+    assert pnl > 15.0
+
+
 @patch("app.engines.moment_stage_trail.get_settings")
 def test_build_plan_for_flat_then_vertical(mock_s):
     mock_s.return_value = _settings()
@@ -429,13 +516,14 @@ def test_pre_stage_floor_owns_trail_before_first_stage(mock_s):
     trade.pnlPoints = 37.46
     pre = pre_stage_hold_floor_pts(trade, 43.22, settings=_settings())
     assert pre is not None
-    assert pre < 37.46  # +37 pullback still above provisional floor
     composed, stage_floor = compose_trail_floor_with_stages(
         trade, 43.22, base_floor=39.72, settings=_settings()
     )
-    assert stage_floor == pre
-    assert composed == pre
-    assert composed < 37.46
+    pct_keep = 43.22 * 0.75
+    assert stage_floor == pytest.approx(pct_keep, rel=0.01)
+    assert composed == pytest.approx(pct_keep, rel=0.01)
+    assert composed > pre
+    assert composed < 37.46  # +37 pullback still above pct-keep floor
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
@@ -494,7 +582,7 @@ def test_pre_stage_deep_fade_still_books(mock_ms, mock_s, _hc, _mp):
     reason, pnl = evaluate_explosion_exit(
         trade, 393.05, "EXPLODING", 10, params=_params(), live_velocity_3s=4.4,
     )
-    assert reason == "explosion_stage_trail"
+    assert reason == "explosion_peak_keep_trail"
     assert pnl > 0
 
 
