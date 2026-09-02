@@ -956,11 +956,18 @@ def session_same_side_loss_reentry_blocked(
     *,
     symbol: str,
     side: Any,
+    candidate: Any = None,
 ) -> tuple[bool, dict[str, Any]]:
-    """Block same-side re-entry on any symbol after a session explosion loss.
+    """Block or re-qualify same-side re-entry after a session explosion loss.
 
-    Covers cross-index stacking (Sep 2 SENSEX PE → NIFTY PE). Not bypassable by
-    aligned_rip or post-loss interval waivers. Opposite-side entries unaffected.
+    Two-tier policy (Sep 2 live history):
+    1. Hard cooldown (default 15m): block all same-side entries on any symbol.
+    2. Elevated bar (default 15m–60m): allow only if candidate re-earns min grade
+       (default S) via full causal ranking — not bypassable by aligned_rip.
+    After elevated window, normal gates apply.
+
+    Covers cross-index stacking (Sep 2 SENSEX PE → NIFTY PE). Opposite-side entries
+    unaffected.
     """
     settings = get_settings()
     meta: dict[str, Any] = {"applied": False}
@@ -975,25 +982,58 @@ def session_same_side_loss_reentry_blocked(
     if closed_at.tzinfo is None:
         closed_at = closed_at.replace(tzinfo=_IST)
     age_seconds = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
-    cooldown = float(
+    hard_cooldown = float(
         getattr(settings, "session_same_side_loss_reentry_cooldown_seconds", 900) or 900
     )
-    if age_seconds > cooldown:
-        return False, meta
-
+    elevated_bar = float(
+        getattr(settings, "session_same_side_loss_reentry_elevated_bar_seconds", 3600)
+        or 3600
+    )
     prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
     prior_sym = str(getattr(prior, "symbol", "") or "").upper()
+    meta_base = {
+        "priorTradeId": getattr(prior, "id", None),
+        "priorSymbol": prior_sym,
+        "priorStrike": float(getattr(prior, "strike", 0) or 0),
+        "priorExitReason": str(getattr(prior, "exitReason", "") or ""),
+        "priorPnlInr": round(prior_pnl, 2),
+        "ageSeconds": round(age_seconds, 1),
+        "hardCooldownSeconds": hard_cooldown,
+        "elevatedBarSeconds": elevated_bar,
+        "crossSymbol": prior_sym != str(symbol or "").upper(),
+    }
+
+    if age_seconds > max(hard_cooldown, elevated_bar):
+        return False, meta
+
+    if age_seconds > hard_cooldown:
+        min_grade = str(
+            getattr(settings, "session_same_side_loss_reentry_elevated_min_grade", "S")
+            or "S"
+        ).upper()
+        if candidate is not None and min_grade:
+            from app.engines.trade_ranking import rank_entry_candidate
+
+            ranking = rank_entry_candidate(candidate)
+            grade = str(ranking.get("grade") or "").upper()
+            meta_base["causalGrade"] = grade
+            meta_base["requiredGrade"] = min_grade
+            if grade == min_grade:
+                return False, meta
+        meta.update(
+            {
+                **meta_base,
+                "applied": True,
+                "reason": "session_same_side_loss_elevated_bar",
+            }
+        )
+        return True, meta
+
     meta.update(
         {
+            **meta_base,
             "applied": True,
-            "priorTradeId": getattr(prior, "id", None),
-            "priorSymbol": prior_sym,
-            "priorStrike": float(getattr(prior, "strike", 0) or 0),
-            "priorExitReason": str(getattr(prior, "exitReason", "") or ""),
-            "priorPnlInr": round(prior_pnl, 2),
-            "ageSeconds": round(age_seconds, 1),
-            "cooldownSeconds": cooldown,
-            "crossSymbol": prior_sym != str(symbol or "").upper(),
+            "cooldownSeconds": hard_cooldown,
             "reason": "session_same_side_loss_reentry_cooldown",
         }
     )

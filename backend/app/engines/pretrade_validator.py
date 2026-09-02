@@ -845,10 +845,12 @@ def validate_candidate(
             state,
             symbol=str(getattr(candidate, "symbol", "") or ""),
             side=getattr(candidate, "side", ""),
+            candidate=candidate,
         )
         if session_loss_blocked:
+            reason = session_loss_meta.get("reason") or "session_same_side_loss_reentry_cooldown"
             meta.update({"sessionSameSideLossReentryBlocked": True, **session_loss_meta})
-            return False, "session_same_side_loss_reentry_cooldown", meta
+            return False, reason, meta
 
     if getattr(candidate, "mode", "") == "explosion" and not all_in:
         from app.engines.aligned_side_guard import breadth_hard_blocks_side

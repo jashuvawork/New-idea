@@ -587,9 +587,11 @@ async def _open_from_candidate(
             state,
             symbol=symbol,
             side=candidate.side,
+            candidate=candidate,
         )
         if session_loss_blocked:
-            return False, "session_same_side_loss_reentry_cooldown"
+            reason = _session_loss_meta.get("reason") or "session_same_side_loss_reentry_cooldown"
+            return False, reason
 
         ml_blocked, _ml_meta = reentry_ml_win_prob_blocked(
             state,
