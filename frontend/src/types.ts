@@ -426,6 +426,15 @@ export interface ChopGuards {
   lossStreak?: number;
   sessionPaused?: boolean;
   pauseReason?: string | null;
+  entriesBlockedByPause?: boolean;
+  entryPauseReason?: string | null;
+  lossStreakEliteBypass?: boolean;
+  lossStreakEliteOnly?: boolean;
+  lossStreakBypassReject?: string | null;
+  largeLossPauseBypass?: boolean;
+  largeLossBypassReject?: string | null;
+  largeLossBypassDayMode?: string | null;
+  sessionPauseEliteDayMode?: string | null;
   beforePrimaryWindow?: boolean;
   momentumRallyWindow?: boolean;
   openCautionWindow?: boolean;

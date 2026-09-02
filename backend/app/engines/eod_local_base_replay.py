@@ -23,6 +23,7 @@ import json
 import zipfile
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -65,14 +66,27 @@ class _ReplayDateTime(datetime):
         return cls.current.astimezone(tz)
 
 
-def _load_batches(date: str) -> list[dict[str, Any]]:
+def _load_batches(date: str, *, settings: Any = None) -> list[dict[str, Any]]:
+    from app.config import get_settings
     from app.services.radar_archive import archive_path
     from app.services.radar_learning import premium_tape_path, read_premium_tape
 
-    tape = premium_tape_path(date)
+    s = settings or get_settings()
+    configured = str(getattr(s, "radar_archive_dir", "") or "").strip()
+    if configured:
+        zip_path = Path(configured) / f"radar-{date}.zip"
+        tape_root = Path(getattr(s, "trade_store_dir", "") or "") / "radar_archives" / "telemetry"
+        tape = tape_root / f"{date}.premium.jsonl"
+        if not tape.exists():
+            tape = premium_tape_path(date)
+    else:
+        zip_path = archive_path(date)
+        tape = premium_tape_path(date)
+
     if tape.exists():
+        if configured:
+            return _read_premium_jsonl(tape)
         return read_premium_tape(date)
-    zip_path = archive_path(date)
     if not zip_path.exists():
         return []
     with zipfile.ZipFile(zip_path, "r") as archive:
@@ -80,12 +94,22 @@ def _load_batches(date: str) -> list[dict[str, Any]]:
         member = "premium_tape.jsonl" if "premium_tape.jsonl" in names else None
         if member is None:
             return []
-        rows: list[dict[str, Any]] = []
-        for line in archive.read(member).decode("utf-8").splitlines():
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-        return rows
+        return _read_premium_jsonl_lines(
+            archive.read(member).decode("utf-8").splitlines()
+        )
+
+
+def _read_premium_jsonl_lines(lines: list[str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        line = line.strip()
+        if line:
+            rows.append(json.loads(line))
+    return rows
+
+
+def _read_premium_jsonl(path: Path) -> list[dict[str, Any]]:
+    return _read_premium_jsonl_lines(path.read_text(encoding="utf-8").splitlines())
 
 
 def _sample_spot_closes_from_history(
@@ -749,7 +773,7 @@ def replay_local_base_day(
     )
 
     s = settings or get_settings()
-    batches = sorted(_load_batches(date), key=lambda row: str(row.get("ts") or ""))
+    batches = sorted(_load_batches(date, settings=s), key=lambda row: str(row.get("ts") or ""))
     if not batches:
         return {
             "date": date,
@@ -923,6 +947,10 @@ def replay_local_base_day(
             if not batch_snapshots:
                 continue
 
+            from app.engines.chop_day_guards import resolve_session_day_mode
+
+            batch_day_mode = resolve_session_day_mode(batch_snapshots)
+
             if next_ok_after is not None and ts < next_ok_after:
                 continue
 
@@ -986,7 +1014,7 @@ def replay_local_base_day(
                     alert_eval = _enrich_alert_from_contract(alert, contract)
 
                     allowed, reason, moment, ranking = evaluate_local_base_entry(
-                        alert_eval, snap, settings=s,
+                        alert_eval, snap, settings=s, day_mode=batch_day_mode,
                     )
                     if not allowed:
                         gate_stats[reason] += 1
@@ -1007,7 +1035,9 @@ def replay_local_base_day(
                         elite_ok = (
                             is_large_loss_pause_elite_candidate(candidate, batch_snapshots)
                             if large_loss_elite_only
-                            else is_loss_streak_elite_bypass_candidate(candidate)
+                            else is_loss_streak_elite_bypass_candidate(
+                                candidate, snapshots=batch_snapshots,
+                            )
                         )
                         if not elite_ok:
                             gate_stats["session_pause_elite_only"] += 1
@@ -1066,7 +1096,7 @@ def replay_local_base_day(
                 base = min(hist) if hist else ep
 
             _, entry_reason, moment, ranking = evaluate_local_base_entry(
-                alert, snap, settings=s,
+                alert, snap, settings=s, day_mode=batch_day_mode,
             )
             forward = [
                 (t, p)

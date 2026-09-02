@@ -268,7 +268,7 @@ class Settings(BaseSettings):
         "MOMENTUM RALLY,CHOP + RALLY,BULLISH DAY,BEARISH DAY"
     )
     top_moments_fast_day_min_velocity_3s: float = 2.0
-    top_moments_fast_day_min_rank_score: float = 50.0
+    top_moments_fast_day_min_rank_score: float = 48.0
     # Reserve capital-max lots for grade-A+ FTV / V / ELITE / EXPLODING only.
     top_moments_max_lots_only_enabled: bool = True
     # One-week validation: lower local-base floors so detection, grading, and entry
