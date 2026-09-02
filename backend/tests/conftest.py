@@ -32,9 +32,9 @@ class _FrozenDateTime(datetime):
 
 
 def _reset_all_engine_globals() -> None:
-    from app.config import get_settings
+    from app.config import reset_settings_for_tests
 
-    get_settings.cache_clear()
+    reset_settings_for_tests()
 
     # Each reset is guarded so an import/signature change in one engine can't
     # disable isolation for all the others.

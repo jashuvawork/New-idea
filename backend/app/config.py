@@ -3099,6 +3099,28 @@ def _with_audit_week_overrides(settings: Settings) -> Settings:
     return settings
 
 
+_settings_override: Settings | None = None
+
+
+def set_settings_override(settings: Settings | None) -> None:
+    """Replay/tests: route get_settings() to a specific Settings instance."""
+    global _settings_override
+    _settings_override = settings
+
+
+def reset_settings_for_tests() -> None:
+    """Clear cached Settings and any replay override between tests."""
+    global _settings_override
+    _settings_override = None
+    _cached_get_settings.cache_clear()
+
+
 @lru_cache
-def get_settings() -> Settings:
+def _cached_get_settings() -> Settings:
     return _with_audit_week_overrides(_with_latency_presets(Settings()))
+
+
+def get_settings() -> Settings:
+    if _settings_override is not None:
+        return _settings_override
+    return _cached_get_settings()
