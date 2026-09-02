@@ -116,6 +116,30 @@ async def window_replay(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/lever-replay-compare/{date}")
+async def lever_replay_compare(
+    date: str,
+    start: str | None = None,
+    end: str | None = None,
+    side: str | None = None,
+):
+    """Replay premium tape twice — production levers OFF vs ON."""
+    import asyncio
+
+    from app.engines.eod_local_base_replay import generate_lever_replay_compare
+
+    try:
+        return await asyncio.to_thread(
+            generate_lever_replay_compare,
+            date,
+            start=start,
+            end=end,
+            side=side,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/eod-local-base-replay/week/{start_date}")
 async def eod_local_base_replay_week(start_date: str, days: int = 5):
     """Roll up local-base replays across a validation week."""
