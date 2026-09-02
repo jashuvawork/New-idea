@@ -715,7 +715,8 @@ def test_finalize_skips_purge_when_premium_tape_not_bundled(tmp_path, monkeypatc
       radar_purge_telemetry_after_finalize=True,
       radar_purge_requires_bundled_premium_tape=True,
   )
-  start = datetime(2026, 8, 26, 10, 0, tzinfo=IST)
+  start = datetime.now(IST).replace(hour=10, minute=0, second=0, microsecond=0) - timedelta(days=1)
+  session_date = start.date().isoformat()
   original_add = radar_learning.add_archive_artifacts
 
   def _add_without_tape(date, artifacts, **kwargs):
@@ -739,12 +740,12 @@ def test_finalize_skips_purge_when_premium_tape_not_bundled(tmp_path, monkeypatc
           now=start,
           force=True,
       )
-      assert premium_tape_path("2026-08-26").exists()
-      result = finalize_daily_review("2026-08-26")
+      assert premium_tape_path(session_date).exists()
+      result = finalize_daily_review(session_date)
       assert result["premiumTapeBundled"] is False
       assert result["purgedTelemetry"] == []
-      assert premium_tape_path("2026-08-26").exists()
-      assert funnel_path("2026-08-26").exists()
+      assert premium_tape_path(session_date).exists()
+      assert funnel_path(session_date).exists()
 
 
 def test_health_reports_stale_sources_divergence_and_component_errors(tmp_path):

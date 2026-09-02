@@ -1523,12 +1523,19 @@ def backup_archive(path: Path) -> dict[str, Any]:
     }
 
 
-def _prune_learning_files(now: datetime | None = None) -> None:
+def _prune_learning_files(
+    now: datetime | None = None,
+    *,
+    protect_dates: frozenset[str] | None = None,
+) -> None:
     current = _aware(now)
     retention_days = max(1, int(get_settings().radar_archive_retention_days))
     cutoff = current.date() - timedelta(days=retention_days)
+    protected = protect_dates or frozenset()
     for path in _telemetry_dir().glob("*.jsonl"):
         date = path.name.split(".", 1)[0]
+        if date in protected:
+            continue
         try:
             parsed = datetime.strptime(date, "%Y-%m-%d").date()
         except ValueError:
@@ -1635,6 +1642,7 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
         },
     )
     purged: list[str] = []
+    protect_from_prune = False
     if bool(getattr(settings, "radar_purge_telemetry_after_finalize", True)):
         require_tape = bool(
             getattr(settings, "radar_purge_requires_bundled_premium_tape", True)
@@ -1646,9 +1654,12 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
                 date,
                 path.name,
             )
+            protect_from_prune = True
         else:
             purged = purge_session_telemetry(date)
-    _prune_learning_files()
+    _prune_learning_files(
+        protect_dates=frozenset({date}) if protect_from_prune else None,
+    )
     try:
         from app.services.radar_health import record_component_success
 
