@@ -1408,6 +1408,15 @@ class Settings(BaseSettings):
     index_rally_side_flip_require_put_session: bool = True
     index_rally_side_flip_require_call_session: bool = True
     index_rally_side_flip_symbols_csv: str = "SENSEX,NIFTY,BANKNIFTY"
+
+    # Loss-triggered opposite flip — same-side losses + index rally/slide + RSI/MACD → elite opposite
+    loss_triggered_side_flip_enabled: bool = True
+    loss_triggered_side_flip_min_same_side_losses: int = 1
+    loss_triggered_side_flip_elite_only: bool = True
+    loss_triggered_side_flip_elite_tiers_csv: str = "ELITE,EXPLODING"
+    loss_triggered_side_flip_min_elite_score: float = 90.0
+    loss_triggered_side_flip_rank_bonus: float = 25.0
+    loss_triggered_side_flip_one_shot: bool = True
     # Best-side selection — follow dominant CE/PE leg all session (incl. power-hour flip).
     best_side_selection_enabled: bool = True
     best_side_min_velocity_3s: float = 2.0
@@ -1494,7 +1503,7 @@ class Settings(BaseSettings):
     post_loss_exit_min_seconds: int = 300
     chop_session_entry_interval_seconds: int = 300
     opposite_side_cooldown_seconds: int = 420
-    opposite_side_cooldown_after_loss_seconds: int = 600
+    opposite_side_cooldown_after_loss_seconds: int = 0
     ce_pe_whipsaw_velocity_threshold: float = 1.2
     ce_pe_whipsaw_pause_seconds: int = 900
     flip_flop_lookback_trades: int = 6
