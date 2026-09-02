@@ -1135,6 +1135,75 @@ def replay_local_base_day(
     }
 
 
+def generate_lever_replay_compare(
+    date: str,
+    *,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    side: Optional[str] = None,
+) -> dict[str, Any]:
+    """Run premium-tape replay twice — levers OFF vs ON (Sep2 afternoon miss analysis)."""
+    from copy import deepcopy
+
+    from app.config import Settings
+
+    base = get_settings()
+    off_data = deepcopy(base.model_dump())
+    off_data["top_moments_exploding_elite_grade_b_enabled"] = False
+    off_data["top_moments_momentum_rally_grade_b_enabled"] = False
+    off_data["index_rally_side_flip_neutral_macd_mom5_waiver_enabled"] = False
+    off_settings = Settings(**off_data)
+
+    on_data = deepcopy(base.model_dump())
+    on_data["top_moments_exploding_elite_grade_b_enabled"] = True
+    on_data["top_moments_momentum_rally_grade_b_enabled"] = True
+    on_data["index_rally_side_flip_neutral_macd_mom5_waiver_enabled"] = True
+    on_settings = Settings(**on_data)
+
+    kwargs = {
+        "window_start": start,
+        "window_end": end,
+        "side_filter": side,
+    }
+    off = replay_local_base_day(date, settings=off_settings, **kwargs)
+    on = replay_local_base_day(date, settings=on_settings, **kwargs)
+
+    def _trade_key(row: dict[str, Any]) -> str:
+        return "|".join(
+            [
+                str(row.get("entryAt") or ""),
+                str(row.get("symbol") or ""),
+                str(row.get("side") or ""),
+                str(row.get("strike") or ""),
+            ]
+        )
+
+    off_trades = list(off.get("trades") or [])
+    on_trades = list(on.get("trades") or [])
+    off_keys = {_trade_key(t) for t in off_trades}
+    unlocked = [t for t in on_trades if _trade_key(t) not in off_keys]
+
+    return {
+        "date": date,
+        "window": {"start": start, "end": end, "side": side},
+        "leversOff": off,
+        "leversOn": on,
+        "delta": {
+            "tradeCount": int(on.get("tradeCount") or len(on_trades))
+            - int(off.get("tradeCount") or len(off_trades)),
+            "netPnlInr": round(
+                float(on.get("netPnlInr") or 0) - float(off.get("netPnlInr") or 0),
+                0,
+            ),
+        },
+        "tradesUnlockedByLevers": unlocked,
+        "note": (
+            "OFF disables grade-B EXPLODING pad waiver, MOMENTUM RALLY grade loosening, "
+            "and NEUTRAL MACD+mom5 index side-flip waiver."
+        ),
+    }
+
+
 def generate_window_replay(
     date: str,
     *,
