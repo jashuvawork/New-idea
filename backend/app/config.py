@@ -255,6 +255,11 @@ class Settings(BaseSettings):
     # Blocks B/C sleeves, generic BUILDING without FTV/V triggers, and non-explosion modes.
     top_moments_only_enabled: bool = True
     top_moments_min_grade: str = "A"  # A or S; set S for strictest book
+    # MOMENTUM RALLY day mode may loosen min grade (Sep2 afternoon EXPLODING grade-B pads).
+    top_moments_momentum_rally_grade_b_enabled: bool = True
+    top_moments_momentum_rally_min_grade: str = "B"
+    # ELITE/EXPLODING causal top moments at local-base pad may enter at grade B.
+    top_moments_exploding_elite_grade_b_enabled: bool = True
     # Reserve capital-max lots for grade-A+ FTV / V / ELITE / EXPLODING only.
     top_moments_max_lots_only_enabled: bool = True
     # One-week validation: lower local-base floors so detection, grading, and entry
@@ -1388,6 +1393,8 @@ class Settings(BaseSettings):
     index_rally_side_flip_max_rsi: float = 50.0
     index_rally_side_flip_require_macd_bullish: bool = True
     index_rally_side_flip_require_macd_bearish: bool = True
+    # NEUTRAL MACD + confirming mom5 may pass side-flip (Sep2 SENSEX +379pt rip, hist 0).
+    index_rally_side_flip_neutral_macd_mom5_waiver_enabled: bool = True
     index_rally_side_flip_min_mom5_pct: float = 0.05
     index_rally_side_flip_require_put_session: bool = True
     index_rally_side_flip_require_call_session: bool = True

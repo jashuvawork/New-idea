@@ -16,6 +16,59 @@ from app.engines.pad_lane_capture import pad_lane_cold_velocity_ok
 
 TOP_MOMENT_TYPES = frozenset({"ELITE", "EXPLODING", "FTV", "V"})
 TOP_MOMENT_GRADES = frozenset({"S", "A"})
+MOMENTUM_RALLY_DAY_MODE = "MOMENTUM RALLY"
+
+
+def resolve_top_moment_min_grade(
+    *,
+    min_grade: str = "A",
+    day_mode: str = "",
+    settings: Any = None,
+) -> str:
+    """Effective min grade — may loosen on MOMENTUM RALLY days."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    effective = str(
+        min_grade or getattr(settings, "top_moments_min_grade", "A") or "A"
+    ).upper()
+    if not bool(getattr(settings, "top_moments_momentum_rally_grade_b_enabled", True)):
+        return effective
+    if str(day_mode or "").strip().upper() != MOMENTUM_RALLY_DAY_MODE:
+        return effective
+    rally_min = str(
+        getattr(settings, "top_moments_momentum_rally_min_grade", "B") or "B"
+    ).upper()
+    if rally_min == "B" and effective in {"A", "S"}:
+        return "B"
+    if rally_min == "A" and effective == "S":
+        return "A"
+    return effective
+
+
+def exploding_elite_grade_b_waiver(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any],
+    moment: Optional[str],
+    *,
+    settings: Any = None,
+) -> bool:
+    """Grade-B ELITE/EXPLODING causal pad moments may pass top-moment gate."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "top_moments_exploding_elite_grade_b_enabled", True)):
+        return False
+    if str(ranking.get("grade") or "").upper() != "B":
+        return False
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    if moment not in TOP_MOMENT_TYPES:
+        return False
+    if _pad_lane_lift_evidence(evidence) or bool(evidence.get("vRipReady")):
+        return True
+    return bool(evidence.get("flatThenVertical") and evidence.get("activeBreakout"))
 
 
 def _number(value: Any) -> float:
@@ -144,6 +197,7 @@ def top_moment_entry_allowed(
     *,
     top_moments_only_enabled: bool = True,
     min_grade: str = "A",
+    day_mode: str = "",
     readiness_reason: str = "",
 ) -> tuple[bool, str, Optional[str]]:
     """True when candidate is a top FTV / V / ELITE / EXPLODING moment."""
@@ -166,8 +220,14 @@ def top_moment_entry_allowed(
         return True, "ok", "FTV"
 
     grade = str(ranking.get("grade") or "").upper()
+    from app.config import get_settings
+
+    settings = get_settings()
+    effective_min = resolve_top_moment_min_grade(
+        min_grade=min_grade, day_mode=day_mode, settings=settings,
+    )
     allowed_grades = set(TOP_MOMENT_GRADES)
-    min_grade_u = str(min_grade or "A").upper()
+    min_grade_u = str(effective_min or "A").upper()
     if min_grade_u == "S":
         allowed_grades = {"S"}
     elif min_grade_u == "B":
@@ -179,20 +239,23 @@ def top_moment_entry_allowed(
         grade = "A"
 
     from app.engines.early_radar_pad_capture import building_armed_prelaunch_pad_lane
-    from app.config import get_settings
 
     if grade in {"REJECT", "C"} and building_armed_prelaunch_pad_lane(
         evidence if isinstance(evidence, dict) else {},
-        get_settings(),
+        settings,
     ):
         grade = "B"
 
     if grade == "REJECT":
         return False, "top_moment_grade_reject", None
-    if grade not in allowed_grades:
-        return False, f"top_moment_requires_grade_{min_grade_u}_or_better", None
 
     moment = classify_top_moment_type(evidence)
+    if grade not in allowed_grades:
+        if not exploding_elite_grade_b_waiver(
+            evidence, ranking, moment, settings=settings,
+        ):
+            return False, f"top_moment_requires_grade_{min_grade_u}_or_better", None
+
     if moment not in TOP_MOMENT_TYPES:
         return False, "top_moment_requires_ftv_v_elite_or_exploding", None
 
@@ -227,6 +290,7 @@ def qualifies_for_top_moment_max_lots(
     *,
     top_moments_max_lots_only_enabled: bool = True,
     min_grade: str = "A",
+    day_mode: str = "",
 ) -> tuple[bool, str, Optional[str]]:
     """True when this explosion may use capital-max lots (FTV / V / ELITE / EXPLODING)."""
     if not top_moments_max_lots_only_enabled:
@@ -237,6 +301,7 @@ def qualifies_for_top_moment_max_lots(
         ranking,
         top_moments_only_enabled=True,
         min_grade=min_grade,
+        day_mode=day_mode,
     )
     if not ok:
         return False, reason, moment
