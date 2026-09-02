@@ -293,7 +293,7 @@ def _explosion_candidates(
     for alert in snap.explosionAlerts or []:
         from app.engines.early_radar_pad_capture import (
             alert_has_building_coil_pad,
-            alert_has_early_radar_pad_capture,
+            alert_has_early_radar_pad_ready,
         )
         from app.engines.ict_breakout_monitor import first_lift_entry_readiness
 
@@ -302,7 +302,7 @@ def _explosion_candidates(
             alert=alert,
             state=state,
         )
-        early_pad = alert_has_early_radar_pad_capture(alert)
+        early_pad = alert_has_early_radar_pad_ready(alert)
         coil_pad = alert_has_building_coil_pad(alert)
         from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
@@ -782,6 +782,7 @@ def _explosion_candidates(
             extended_session_chase_blocked,
             immature_explosion_blocked,
             live_explosion_confirmation_blocked,
+            post_impulse_consolidation_entry_blocked,
             post_peak_chase_blocked,
             tier_promotion_pad_chase_blocked,
         )
@@ -800,6 +801,17 @@ def _explosion_candidates(
             alert=alert,
         )
         if chase_blocked and not first_lift_ready and not early_pad:
+            continue
+        pi_blocked, _pi_reason = post_impulse_consolidation_entry_blocked(
+            event,
+            alert=alert,
+            snap=snap,
+        )
+        if pi_blocked and not bool(
+            alert.get("ictFirstLift")
+            or alert.get("ictArmedBaseLaunch")
+            or alert.get("armedBaseLaunch")
+        ):
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the
         # hard window does not re-raise the unstructured 28% floor.
@@ -2298,9 +2310,9 @@ def diagnose_missed_entries(
                 pad_lane_waive = pad_lane_early_near_miss_waive(
                     alert, readiness_reason=readiness_reason, snap=snap,
                 )
-            from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+            from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_ready
 
-            early_pad = alert_has_early_radar_pad_capture(alert)
+            early_pad = alert_has_early_radar_pad_ready(alert)
             lift_ready = first_lift_ready or early_pad or pad_lane_waive
             slow_grind_trough = bool(
                 alert.get("slowGrindArmedTrough")

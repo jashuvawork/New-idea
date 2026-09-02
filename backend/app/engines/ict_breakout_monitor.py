@@ -1814,6 +1814,7 @@ def first_lift_entry_readiness(
         building_coil_pad_entry_readiness,
         building_coil_pad_live_blocked,
         early_radar_pad_entry_readiness,
+        early_radar_pad_live_blocked,
     )
 
     prelaunch_ok, prelaunch_reason = building_armed_prelaunch_entry_readiness(
@@ -1836,6 +1837,9 @@ def first_lift_entry_readiness(
         )
         if coil_ok:
             return True, coil_reason
+        pad_blocked, pad_block_reason = early_radar_pad_live_blocked(row, snap, settings)
+        if pad_blocked:
+            return False, pad_block_reason
         pad_ok, pad_reason = early_radar_pad_entry_readiness(
             snap=snap,
             event=event,
@@ -2419,6 +2423,16 @@ def first_lift_entry_readiness(
             and not elite_base_ready
             and aligned_tqs < armed_min_tqs
         )
+        from app.engines.explosion_entry_guards import post_impulse_consolidation_entry_blocked
+
+        pi_blocked, pi_reason = post_impulse_consolidation_entry_blocked(
+            event,
+            alert=row,
+            snap=snap,
+            settings=settings,
+        )
+        if pi_blocked:
+            return False, pi_reason
         return True, (
             "elite_base_ready_s_preauthorized"
             if elite_base_ready

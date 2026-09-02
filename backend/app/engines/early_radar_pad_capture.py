@@ -14,6 +14,8 @@ from app.engines.premium_filter import premium_in_band
 from app.models.schemas import Side, SymbolSnapshot
 
 EARLY_RADAR_PAD_READY = "early_radar_pad_ready"
+EARLY_RADAR_PAD_UNCONFIRMED = "early_radar_pad_unconfirmed"
+POST_IMPULSE_CONSOLIDATION_BLOCKED = "post_impulse_consolidation_blocked"
 BUILDING_COIL_PAD_READY = "building_coil_pad_ready"
 BUILDING_ARMED_PRELAUNCH_READY = "building_armed_prelaunch_ready"
 BUILDING_COIL_PAD_ARMED = "building_coil_pad_armed"
@@ -134,6 +136,137 @@ def building_armed_prelaunch_pad_lane(
     return vol_ok
 
 
+def post_impulse_consolidation_active(
+    snap: Optional[SymbolSnapshot],
+    side: str,
+    settings: Any = None,
+) -> bool:
+    """Index completed the opening impulse and is consolidating in a chop band."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "post_impulse_consolidation_guard_enabled", True)):
+        return False
+    from app.engines.session_timing import in_open_caution_window
+
+    if not in_open_caution_window():
+        return False
+    if snap is None:
+        return False
+    chart = getattr(snap, "spotChart", None)
+    if chart is None:
+        return False
+
+    side_u = str(side or "").upper()
+    direction = str(getattr(chart, "direction", "") or "").upper()
+    if side_u == "PUT" and direction != "BEARISH":
+        return False
+    if side_u == "CALL" and direction != "BULLISH":
+        return False
+
+    m15 = abs(_number(getattr(chart, "momentum15Pct", 0)))
+    m5 = abs(_number(getattr(chart, "momentum5Pct", 0)))
+    m10 = abs(_number(getattr(chart, "momentum10Pct", 0)))
+
+    min_impulse = float(
+        getattr(s, "post_impulse_consolidation_min_index_momentum15_pct", 0.12) or 0.12
+    )
+    max_flat_m5 = float(
+        getattr(s, "post_impulse_consolidation_max_index_momentum5_pct", 0.04) or 0.04
+    )
+    max_flat_m10 = float(
+        getattr(s, "post_impulse_consolidation_max_index_momentum10_pct", 0.05) or 0.05
+    )
+    return (
+        m15 >= min_impulse
+        and m5 <= max_flat_m5 + 1e-9
+        and m10 <= max_flat_m10 + 1e-9
+    )
+
+
+def early_radar_pad_expansion_confirmed(
+    alert: Mapping[str, Any],
+    settings: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+) -> bool:
+    """Live pad entry requires displacement — armed coil/structure alone is watch-only."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "early_radar_pad_confirm_entry_enabled", True)):
+        return True
+
+    if bool(
+        alert.get("ictFirstLift")
+        or alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+    ):
+        return True
+
+    v3 = _number(alert.get("velocity3s"))
+    v9 = _number(alert.get("velocity9s"))
+    min_v3 = float(getattr(s, "early_radar_pad_confirm_min_velocity_3s", 0.5) or 0.5)
+    min_v9 = float(getattr(s, "early_radar_pad_confirm_min_velocity_9s", 0.25) or 0.25)
+    if v3 >= min_v3 or v9 >= min_v9:
+        return True
+
+    off_low = early_radar_pad_off_low_pct(alert)
+    trough_max = float(
+        getattr(s, "early_radar_pad_confirm_trough_off_low_max_pct", 3.0) or 3.0
+    )
+    if off_low <= trough_max + 1e-6:
+        flat_vert = bool(
+            alert.get("ictFlatThenVertical") or alert.get("flatThenVertical")
+        )
+        breakout = bool(alert.get("ictBreakout") or alert.get("activeBreakout"))
+        vol_awake = bool(
+            alert.get("volumeAwaken")
+            or alert.get("ictVolumeAwakening")
+            or alert.get("volumeAwakening")
+        )
+        vol_surge = _number(alert.get("volumeSurge"))
+        min_surge = float(
+            getattr(s, "early_radar_pad_confirm_min_volume_surge", 1.0) or 1.0
+        )
+        if flat_vert and breakout and (vol_awake or vol_surge >= min_surge):
+            return True
+        if cold_trough_pad_lift_signal(alert, s):
+            return True
+
+    return False
+
+
+def early_radar_pad_live_blocked(
+    alert: Mapping[str, Any],
+    snap: Optional[SymbolSnapshot] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block live pad entry when structure is armed but expansion is not confirmed."""
+    s = settings or get_settings()
+    if not early_radar_pad_capture_active(alert, snap):
+        return False, ""
+    if not bool(getattr(s, "early_radar_pad_confirm_entry_enabled", True)):
+        return False, ""
+
+    side = str(alert.get("side") or "").upper()
+    if post_impulse_consolidation_active(snap, side, s):
+        has_stamp = bool(
+            alert.get("ictFirstLift")
+            or alert.get("ictArmedBaseLaunch")
+            or alert.get("armedBaseLaunch")
+        )
+        v3 = _number(alert.get("velocity3s"))
+        v9 = _number(alert.get("velocity9s"))
+        hot_v3 = float(
+            getattr(s, "post_impulse_consolidation_min_velocity_3s", 0.8) or 0.8
+        )
+        hot_v9 = float(
+            getattr(s, "post_impulse_consolidation_min_velocity_9s", 0.5) or 0.5
+        )
+        if not has_stamp and v3 < hot_v3 and v9 < hot_v9:
+            return True, POST_IMPULSE_CONSOLIDATION_BLOCKED
+
+    if not early_radar_pad_expansion_confirmed(alert, s, snap):
+        return True, EARLY_RADAR_PAD_UNCONFIRMED
+    return False, ""
+
+
 def building_armed_prelaunch_entry_readiness(
     *,
     snap: Optional[SymbolSnapshot] = None,
@@ -144,6 +277,9 @@ def building_armed_prelaunch_entry_readiness(
     s = settings or get_settings()
     if not building_armed_prelaunch_pad_lane(row, s):
         return False, ""
+    blocked, block_reason = early_radar_pad_live_blocked(row, snap, s)
+    if blocked:
+        return False, block_reason
     side = str(row.get("side") or "").upper()
     strike = _number(row.get("strike"))
     if side in ("CALL", "PUT") and strike > 0 and snap is not None:
@@ -890,10 +1026,17 @@ def stamp_early_radar_pad_capture(
         alert["ictEarlyRadarPadCapture"] = True
         if cold_trough_pad_lift_signal(alert):
             alert["coldTroughPad"] = True
-        alert.setdefault("ictBaseReadinessReason", EARLY_RADAR_PAD_READY)
+        if early_radar_pad_expansion_confirmed(alert, snap=snap):
+            alert["earlyRadarPadReady"] = True
+            alert.setdefault("ictBaseReadinessReason", EARLY_RADAR_PAD_READY)
+        else:
+            alert.pop("earlyRadarPadReady", None)
+            if str(alert.get("ictBaseReadinessReason") or "") == EARLY_RADAR_PAD_READY:
+                alert.pop("ictBaseReadinessReason", None)
         return True
     alert.pop("earlyRadarPadCapture", None)
     alert.pop("ictEarlyRadarPadCapture", None)
+    alert.pop("earlyRadarPadReady", None)
     return False
 
 
@@ -906,22 +1049,42 @@ def early_radar_pad_entry_readiness(
     settings: Any = None,
 ) -> tuple[bool, str]:
     row = _enrich_row_from_event(alert if isinstance(alert, dict) else {}, event)
-    if stamp_early_radar_pad_capture(row, snap):
-        if isinstance(alert, dict):
-            alert.update(
-                {
-                    key: row[key]
-                    for key in ("earlyRadarPadCapture", "ictEarlyRadarPadCapture", "ictBaseReadinessReason")
-                    if key in row
-                }
-            )
-        return True, EARLY_RADAR_PAD_READY
-    if early_radar_pad_capture_active(row, snap):
-        if isinstance(alert, dict):
-            alert["earlyRadarPadCapture"] = True
-            alert["ictEarlyRadarPadCapture"] = True
-        return True, EARLY_RADAR_PAD_READY
-    return False, ""
+    s = settings or get_settings()
+    if not early_radar_pad_capture_active(row, snap):
+        return False, ""
+    if isinstance(alert, dict):
+        stamp_early_radar_pad_capture(row, snap)
+        alert.update(
+            {
+                key: row[key]
+                for key in (
+                    "earlyRadarPadCapture",
+                    "ictEarlyRadarPadCapture",
+                    "earlyRadarPadReady",
+                    "ictBaseReadinessReason",
+                    "coldTroughPad",
+                )
+                if key in row
+            }
+        )
+    blocked, block_reason = early_radar_pad_live_blocked(row, snap, s)
+    if blocked:
+        return False, block_reason
+    if isinstance(alert, dict):
+        alert["earlyRadarPadReady"] = True
+        alert.setdefault("ictBaseReadinessReason", EARLY_RADAR_PAD_READY)
+    return True, EARLY_RADAR_PAD_READY
+
+
+def alert_has_early_radar_pad_ready(alert: Mapping[str, Any]) -> bool:
+    """True only when pad capture is confirmed for live entry (not watch/structure)."""
+    if not isinstance(alert, Mapping):
+        return False
+    if bool(alert.get("earlyRadarPadReady")):
+        return True
+    return alert_has_early_radar_pad_capture(alert) and early_radar_pad_expansion_confirmed(
+        alert,
+    )
 
 
 def alert_has_early_radar_pad_capture(alert: Mapping[str, Any]) -> bool:
