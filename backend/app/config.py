@@ -2632,6 +2632,11 @@ class Settings(BaseSettings):
     peak_fade_same_side_reentry_enabled: bool = True
     peak_fade_same_side_reentry_min_peak_points: float = 30.0
     peak_fade_same_side_reentry_cooldown_seconds: int = 900
+    # Session-wide same-side cooldown after any explosion loss (any symbol).
+    # Sep 2: SENSEX PE loss → NIFTY PE 6m later (−₹15k). Aug 28 afternoon cross-index
+    # PE (+89m) stays allowed. CE/PE symmetric.
+    session_same_side_loss_reentry_enabled: bool = True
+    session_same_side_loss_reentry_cooldown_seconds: int = 900
     # Re-entry ML gate — Aug28 winners ~56% ML, 24050 losses ~41-43%.
     explosion_reentry_ml_win_prob_gate_enabled: bool = True
     explosion_reentry_ml_win_prob_min: float = 0.52

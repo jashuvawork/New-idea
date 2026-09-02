@@ -1701,6 +1701,7 @@ def find_best_entry(
                 failed_launch_reentry_blocked,
                 peak_fade_same_side_reentry_blocked,
                 reentry_ml_win_prob_blocked,
+                session_same_side_loss_reentry_blocked,
             )
 
             fail_blocked, _ = failed_launch_reentry_blocked(
@@ -1733,6 +1734,23 @@ def find_best_entry(
                     "causalRanking": {
                         "grade": "REJECT",
                         "reasons": ["peak_fade_same_side_reentry_cooldown"],
+                    },
+                }
+                continue
+
+            session_loss_blocked, session_loss_meta = session_same_side_loss_reentry_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+            )
+            if session_loss_blocked:
+                c.pretrade_meta = {
+                    **(c.pretrade_meta or {}),
+                    "sessionSameSideLossReentryBlocked": True,
+                    **session_loss_meta,
+                    "causalRanking": {
+                        "grade": "REJECT",
+                        "reasons": ["session_same_side_loss_reentry_cooldown"],
                     },
                 }
                 continue

@@ -915,3 +915,87 @@ def peak_fade_same_side_reentry_blocked(
     )
     return True, meta
 
+
+def _is_explosion_trade(t: Any) -> bool:
+    ctx = getattr(t, "entryContext", None) or {}
+    mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
+    st = str(getattr(t, "strategyType", "") or "")
+    st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+    return mode == "explosion" or st_u == "EXPLOSIVE"
+
+
+def _latest_same_side_loss_close(
+    state: AutoTraderState,
+    *,
+    side: Any,
+) -> Optional[Any]:
+    """Latest closed explosion loss today on any symbol for this side."""
+    side_v = _side_key(side)
+    latest: Optional[Any] = None
+    latest_ts = None
+
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if not _is_explosion_trade(t):
+            continue
+        if getattr(t, "closedAt", None) is None:
+            continue
+        prior_pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
+        if prior_pnl >= 0:
+            continue
+        ts = t.closedAt
+        if latest is None or (ts is not None and (latest_ts is None or ts > latest_ts)):
+            latest = t
+            latest_ts = ts
+    return latest
+
+
+def session_same_side_loss_reentry_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+) -> tuple[bool, dict[str, Any]]:
+    """Block same-side re-entry on any symbol after a session explosion loss.
+
+    Covers cross-index stacking (Sep 2 SENSEX PE → NIFTY PE). Not bypassable by
+    aligned_rip or post-loss interval waivers. Opposite-side entries unaffected.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "session_same_side_loss_reentry_enabled", True):
+        return False, meta
+    prior = _latest_same_side_loss_close(state, side=side)
+    if prior is None or getattr(prior, "closedAt", None) is None:
+        return False, meta
+
+    now = datetime.now(_IST)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    age_seconds = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
+    cooldown = float(
+        getattr(settings, "session_same_side_loss_reentry_cooldown_seconds", 900) or 900
+    )
+    if age_seconds > cooldown:
+        return False, meta
+
+    prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
+    prior_sym = str(getattr(prior, "symbol", "") or "").upper()
+    meta.update(
+        {
+            "applied": True,
+            "priorTradeId": getattr(prior, "id", None),
+            "priorSymbol": prior_sym,
+            "priorStrike": float(getattr(prior, "strike", 0) or 0),
+            "priorExitReason": str(getattr(prior, "exitReason", "") or ""),
+            "priorPnlInr": round(prior_pnl, 2),
+            "ageSeconds": round(age_seconds, 1),
+            "cooldownSeconds": cooldown,
+            "crossSymbol": prior_sym != str(symbol or "").upper(),
+            "reason": "session_same_side_loss_reentry_cooldown",
+        }
+    )
+    return True, meta
+
