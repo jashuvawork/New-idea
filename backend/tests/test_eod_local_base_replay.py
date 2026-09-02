@@ -11,11 +11,13 @@ from app.engines.eod_local_base_replay import (
     _chart_analysis_from_spot_history,
     _enrich_alert_from_contract,
     _install_replay_clock,
+    _parse_window_bound,
     _replay_selection_rank,
     _restore_replay_clock,
     evaluate_local_base_entry,
     evaluate_replay_live_gates,
     generate_eod_local_base_replay,
+    generate_window_replay,
     replay_local_base_day,
     _spot_chart_from_history,
 )
@@ -199,6 +201,36 @@ def test_replay_local_base_day_no_tape():
     ):
         rep = replay_local_base_day("2026-08-22")
     assert rep["status"] == "no_tape"
+
+
+def test_parse_window_bound_accepts_hhmmss():
+    start = _parse_window_bound("2026-09-02", "12:07:00")
+    end = _parse_window_bound("2026-09-02", "13:40:00", end_of_day=True)
+    end_inclusive = _parse_window_bound("2026-09-02", "13:40", end_of_day=True)
+    assert start.hour == 12 and start.minute == 7 and start.second == 0
+    assert end.hour == 13 and end.minute == 40 and end.second == 0
+    assert end_inclusive.second == 59
+
+
+def test_generate_window_replay_delegates_to_day_replay():
+    with patch(
+        "app.engines.eod_local_base_replay.replay_local_base_day",
+        return_value={"date": "2026-09-02", "status": "ok", "trades": [], "netPnlInr": 0},
+    ) as mock_replay:
+        rep = generate_window_replay(
+            "2026-09-02",
+            start="12:07:00",
+            end="13:40:00",
+            side="CALL",
+        )
+    mock_replay.assert_called_once_with(
+        "2026-09-02",
+        window_start="12:07:00",
+        window_end="13:40:00",
+        side_filter="CALL",
+    )
+    assert rep["status"] == "ok"
+    assert "12:07:00" in rep["note"]
 
 
 def test_generate_eod_local_base_replay_includes_comparison():

@@ -710,12 +710,34 @@ def _simulate_trade_from_entry(
     }
 
 
+def _parse_window_bound(
+    date: str,
+    hhmmss: Optional[str],
+    *,
+    end_of_day: bool = False,
+) -> Optional[datetime]:
+    if not hhmmss:
+        return None
+    raw = str(hhmmss).strip()
+    parts = raw.split(":")
+    if len(parts) < 2:
+        raise ValueError("window time must be HH:MM or HH:MM:SS")
+    hour = int(parts[0])
+    minute = int(parts[1])
+    second = int(float(parts[2])) if len(parts) > 2 else (59 if end_of_day else 0)
+    day = datetime.strptime(date, "%Y-%m-%d").date()
+    return datetime(day.year, day.month, day.day, hour, minute, second, tzinfo=IST)
+
+
 def replay_local_base_day(
     date: str,
     *,
     settings: Any = None,
     max_trades_per_contract: int = 3,
     entry_cooldown_seconds: float = 90.0,
+    window_start: Optional[str] = None,
+    window_end: Optional[str] = None,
+    side_filter: Optional[str] = None,
 ) -> dict[str, Any]:
     """Replay one session's premium tape with production local-base entry gates."""
     from app.engines import explosion_detector, ict_breakout_monitor, session_timing
@@ -733,6 +755,12 @@ def replay_local_base_day(
             "trades": [],
             "gateStats": {},
         }
+
+    win_start = _parse_window_bound(date, window_start)
+    win_end = _parse_window_bound(date, window_end, end_of_day=True)
+    side_filter_v = str(side_filter or "").upper() or None
+    if side_filter_v and side_filter_v not in {"CALL", "PUT"}:
+        raise ValueError("side_filter must be CALL or PUT")
 
     # Pre-index the full premium tape so exit simulation can walk forward from entry.
     premium_series: dict[str, list[tuple[datetime, float]]] = defaultdict(list)
@@ -884,6 +912,11 @@ def replay_local_base_day(
             if next_ok_after is not None and ts < next_ok_after:
                 continue
 
+            if win_start is not None and ts < win_start:
+                continue
+            if win_end is not None and ts > win_end:
+                continue
+
             session_gate_blocked = False
             if live_gates:
                 from app.engines.power_hour_guards import (
@@ -911,6 +944,8 @@ def replay_local_base_day(
                     strike_v = _f(alert.get("strike"))
                     side = str(alert.get("side") or "").upper()
                     if strike_v <= 0 or side not in {"CALL", "PUT"}:
+                        continue
+                    if side_filter_v and side != side_filter_v:
                         continue
                     key = _contract_key(sym, side, strike_v)
                     if trades_per_key[key] >= max_trades_per_contract:
@@ -1069,10 +1104,16 @@ def replay_local_base_day(
     wins = sum(1 for t in taken if _f(t.get("pnlInr")) > 0)
     daily_stop = _f(getattr(s, "daily_loss_stop_inr", 20_000.0), 20_000.0)
 
+    mode = "local_base_system_params"
+    if win_start or win_end or side_filter_v:
+        mode = "window_replay"
     return {
         "date": date,
         "status": "ok",
-        "mode": "local_base_system_params",
+        "mode": mode,
+        "windowStart": win_start.isoformat() if win_start else None,
+        "windowEnd": win_end.isoformat() if win_end else None,
+        "sideFilter": side_filter_v,
         "sampleBatches": len(batches),
         "tradeCount": len(taken),
         "candidateCount": len(raw_candidates),
@@ -1090,6 +1131,30 @@ def replay_local_base_day(
         ),
         "trades": taken,
     }
+
+
+def generate_window_replay(
+    date: str,
+    *,
+    start: str,
+    end: str,
+    side: Optional[str] = None,
+) -> dict[str, Any]:
+    """Replay a premium-tape window with production entry/exit gates."""
+    report = replay_local_base_day(
+        date,
+        window_start=start,
+        window_end=end,
+        side_filter=side,
+    )
+    if report.get("status") != "ok":
+        return report
+    report["note"] = (
+        f"Premium-tape replay {start}–{end} IST"
+        + (f" ({side} only)" if side else "")
+        + " with production gates + exit stack."
+    )
+    return report
 
 
 def generate_eod_local_base_replay(date: str) -> dict[str, Any]:

@@ -1,0 +1,118 @@
+name: Window replay on EC2
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: Session date (YYYY-MM-DD)
+        required: true
+        default: "2026-09-02"
+      start:
+        description: IST window start (HH:MM:SS)
+        required: true
+        default: "12:07:00"
+      end:
+        description: IST window end (HH:MM:SS)
+        required: true
+        default: "13:40:00"
+      side:
+        description: CALL, PUT, or empty for both
+        required: false
+        default: "CALL"
+      branch:
+        description: Git branch to run (must include window-replay code)
+        required: true
+        default: "cursor/window-replay-pause-estimate-f5cb"
+
+env:
+  AWS_REGION: ap-south-1
+  EC2_INSTANCE_ID: i-0f3f9e5e67815c21b
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Run window replay on EC2 via SSM
+        id: replay
+        run: |
+          set -euo pipefail
+          DATE="${{ github.event.inputs.date }}"
+          START="${{ github.event.inputs.start }}"
+          END="${{ github.event.inputs.end }}"
+          SIDE="${{ github.event.inputs.side }}"
+          BRANCH="${{ github.event.inputs.branch }}"
+          SIDE_ARG=""
+          if [ -n "$SIDE" ]; then
+            SIDE_ARG=", side='${SIDE}'"
+          fi
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Window replay ${DATE} ${START}-${END} ${SIDE}" \
+            --parameters "commands=[
+              \"set -euo pipefail\",
+              \"export HOME=/root\",
+              \"git config --global --add safe.directory /opt/nexusquant/New-idea\",
+              \"REPO=/opt/nexusquant/New-idea\",
+              \"cd \\\$REPO\",
+              \"git fetch origin ${BRANCH}\",
+              \"git checkout ${BRANCH}\",
+              \"cd backend\",
+              \"export TRADE_STORE_DIR=/opt/nexusquant/data/trades\",
+              \"export RADAR_ARCHIVE_DIR=/opt/nexusquant/data/trades/radar_archives\",
+              \".venv/bin/python - <<'PY'\",
+              \"import json\",
+              \"from app.engines.eod_local_base_replay import generate_window_replay\",
+              \"rep = generate_window_replay('${DATE}', start='${START}', end='${END}'${SIDE_ARG})\",
+              \"print(json.dumps(rep, indent=2))\",
+              \"PY\"
+            ]" \
+            --query Command.CommandId \
+            --output text)
+          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+          echo "SSM command: $CMD_ID"
+
+      - name: Wait for replay
+        run: |
+          set -euo pipefail
+          CMD_ID="${{ steps.replay.outputs.command_id }}"
+          for i in $(seq 1 40); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+              --query Status \
+              --output text 2>/dev/null || echo Pending)
+            echo "Attempt $i: $STATUS"
+            if [ "$STATUS" = "Success" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                --query StandardOutputContent \
+                --output text | tee replay-output.json
+              exit 0
+            fi
+            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                --output json
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "SSM command timed out"
+          exit 1
+
+      - name: Upload replay artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: window-replay-${{ github.event.inputs.date }}
+          path: replay-output.json
