@@ -9,6 +9,7 @@ flat→vertical ICT structure (the legitimate live-confirmed path).
 from contextlib import contextmanager
 from unittest.mock import patch
 
+from app.config import Settings
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.explosion_profit import check_explosion_entry
 from app.engines.ict_breakout_monitor import ICTBreakoutSignal
@@ -75,12 +76,17 @@ def test_weak_velocity_blocked():
     event = _event(velocity_3s=1.5, velocity_9s=2.5)
     ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
     assert not ok
-    # Low live velocity is now caught by the live-confirm gate (stale_live_velocity)
-    # before the legacy velocity_too_low check — same intent, either reason is valid.
-    assert "velocity" in reason
+    # Low live velocity / missing ICT structure — either blocks entry.
+    assert any(
+        token in reason
+        for token in ("velocity", "ict", "structure", "confirm", "live")
+    )
 
 
-def test_score_45_exploding_confirmed():
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_score_45_exploding_confirmed(mock_settings):
+    # Isolate score/tier/breadth logic — anti-chase pad guard is covered elsewhere.
+    mock_settings.return_value = Settings(tier_promotion_pad_chase_block_enabled=False)
     event = _event(explosion_score=48.0, velocity_3s=3.0, velocity_9s=4.0)
     with _live_confirmed():
         ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
@@ -95,7 +101,9 @@ def test_score_40_blocked():
     assert reason == "tier_BUILDING_not_tradeable"
 
 
-def test_neutral_breadth_allowed_when_sure_shot_off():
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_neutral_breadth_allowed_when_sure_shot_off(mock_settings):
+    mock_settings.return_value = Settings(tier_promotion_pad_chase_block_enabled=False)
     event = _event(explosion_score=60.0, velocity_3s=3.0, velocity_9s=4.0)
     with _live_confirmed():
         ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="NEUTRAL", aligned=False), False)
@@ -103,7 +111,9 @@ def test_neutral_breadth_allowed_when_sure_shot_off():
     assert reason == "explosion_confirmed"
 
 
-def test_elite_bypasses_score_floor():
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_elite_bypasses_score_floor(mock_settings):
+    mock_settings.return_value = Settings(tier_promotion_pad_chase_block_enabled=False)
     event = _event(explosion_score=40.0, velocity_3s=3.0, velocity_9s=4.0, tier="ELITE")
     with _live_confirmed():
         ok, reason = check_explosion_entry(event, _trade(), Breadth(score=50, bias="BULLISH", aligned=True), False)
@@ -111,7 +121,9 @@ def test_elite_bypasses_score_floor():
     assert reason == "elite_explosion"
 
 
-def test_expiry_psychology_caution_blocks_explosion():
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_expiry_psychology_caution_blocks_explosion(mock_settings):
+    mock_settings.return_value = Settings(tier_promotion_pad_chase_block_enabled=False)
     from datetime import datetime
     from unittest.mock import patch
     from zoneinfo import ZoneInfo

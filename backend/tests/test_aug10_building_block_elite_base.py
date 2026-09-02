@@ -130,6 +130,7 @@ def test_elite_entry_window_prefers_local_base_pad(mock_settings):
     s.explosion_local_base_trust_min_move_pct = 8.0
     s.explosion_local_base_recent_window_enabled = False
     s.session_move_max_credible_pct = 500.0
+    s.eod_learning_apply_enabled = False
     mock_settings.return_value = s
 
     event = ExplosionEvent(

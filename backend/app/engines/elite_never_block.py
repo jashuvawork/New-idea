@@ -164,6 +164,7 @@ def _in_near_base_window(
     alert: dict,
     *,
     ict: Any = None,
+    snap: Any = None,
 ) -> bool:
     """True when move is inside the structured near-base band (default 10–65%).
 
@@ -178,6 +179,22 @@ def _in_near_base_window(
     move = _near_base_move_pct(event, alert, ict=ict)
     if move <= 0:
         return False
+    pad_lo = float(
+        getattr(settings, "bullish_local_base_pad_must_take_min_move_pct", 8.0) or 8.0
+    )
+    if alert and (
+        alert.get("bullishLocalBaseActive")
+        or alert.get("localBaseReversalActive")
+    ):
+        lo = min(lo, pad_lo)
+    elif alert and snap is not None:
+        try:
+            from app.engines.bullish_local_base import alert_bullish_local_base_active
+
+            if alert_bullish_local_base_active(alert, snap):
+                lo = min(lo, pad_lo)
+        except Exception:
+            pass
     return lo <= move <= hi
 
 
@@ -282,7 +299,9 @@ def top_explosion_must_take_active(
         except Exception:
             resolved_ict = None
 
-    if not _in_near_base_window(resolved_event, resolved_alert, ict=resolved_ict):
+    if not _in_near_base_window(
+        resolved_event, resolved_alert, ict=resolved_ict, snap=resolved_snap,
+    ):
         return False
 
     # Only when chart aligns — never must-take a counter-trend flat→vertical.
@@ -347,6 +366,17 @@ def elite_never_block_active(
     Does NOT authorize skipping fake-explosion-trap or ICT late-fade — callers
     must still enforce those gates.
     """
+    from app.engines.pad_lane_capture import ftv_direct_trade_active
+
+    if ftv_direct_trade_active(
+        tier=tier,
+        event=event,
+        candidate=candidate,
+        alert=alert,
+        snap=snap,
+    ):
+        return True
+
     if top_explosion_must_take_active(
         tier=tier,
         event=event,
@@ -399,6 +429,115 @@ def elite_never_block_active(
     from app.engines.entry_timing import elite_bypass_allowed_for_timing
 
     return elite_bypass_allowed_for_timing(resolved_timing)
+
+
+def _alert_probe_from_sources(
+    *,
+    event: Any = None,
+    candidate: Any = None,
+    alert: Optional[dict] = None,
+    ict: Any = None,
+) -> dict[str, Any]:
+    """Merge event/ICT fields into an alert-shaped probe for pad/coil gates."""
+    _, resolved_alert, _, _, _, _ = _resolve_sources(
+        event=event, candidate=candidate, alert=alert,
+    )
+    probe = dict(resolved_alert)
+    if event is not None:
+        side = getattr(event, "side", "")
+        if hasattr(side, "value"):
+            side = side.value
+        probe.setdefault("tier", str(getattr(event, "tier", "") or ""))
+        probe.setdefault("side", str(side or ""))
+        probe.setdefault("strike", getattr(event, "strike", 0))
+        probe.setdefault("premium", getattr(event, "premium", 0))
+        probe.setdefault("explosionScore", getattr(event, "explosion_score", 0))
+        probe.setdefault("velocity3s", getattr(event, "velocity_3s", 0))
+        probe.setdefault("velocity9s", getattr(event, "velocity_9s", 0))
+        probe.setdefault("peakMovePct", getattr(event, "peak_move_pct", 0))
+        probe.setdefault("dailyMovePct", getattr(event, "daily_move_pct", 0))
+    if ict is not None:
+        base_rel = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+        probe.setdefault("ictBaseRelativeMovePct", base_rel)
+        probe.setdefault("localBaseMovePct", probe.get("localBaseMovePct") or base_rel)
+        probe.setdefault("ictFlatThenVertical", bool(getattr(ict, "flat_then_vertical", False)))
+        probe.setdefault("flatThenVertical", bool(getattr(ict, "flat_then_vertical", False)))
+        probe.setdefault("ictBreakout", bool(getattr(ict, "active", False)))
+        probe.setdefault("ictBaseArmed", bool(getattr(ict, "base_armed", False)))
+        probe.setdefault("volumeAwakening", bool(getattr(ict, "volume_awakening", False)))
+        probe.setdefault("ictVolumeAwakening", bool(getattr(ict, "volume_awakening", False)))
+        probe.setdefault("ictFirstLift", bool(getattr(ict, "first_lift", False)))
+    return probe
+
+
+def elite_must_take_bypass_allowed(
+    *,
+    tier: Optional[str] = None,
+    event: Any = None,
+    candidate: Any = None,
+    alert: Optional[dict] = None,
+    timing: Optional[dict] = None,
+    snap: Any = None,
+    ict: Any = None,
+) -> bool:
+    """Must-take gate bypass only when anti-chase and coil-pad expansion are clear."""
+    if not elite_never_block_active(
+        tier=tier,
+        event=event,
+        candidate=candidate,
+        alert=alert,
+        timing=timing,
+        snap=snap,
+        ict=ict,
+    ):
+        return False
+
+    settings = get_settings()
+    if not bool(
+        getattr(
+            settings,
+            "explosion_top_must_take_require_expansion_confirm_enabled",
+            True,
+        )
+    ):
+        return True
+
+    resolved_event, _, resolved_snap, _, _, _ = _resolve_sources(
+        event=event, candidate=candidate, alert=alert, snap=snap,
+    )
+    resolved_ict = ict
+    if resolved_ict is None and resolved_event is not None:
+        try:
+            from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+            resolved_ict = analyze_explosion_event_ict(resolved_event, resolved_snap)
+        except Exception:
+            resolved_ict = None
+
+    probe = _alert_probe_from_sources(
+        event=resolved_event,
+        candidate=candidate,
+        alert=alert,
+        ict=resolved_ict,
+    )
+
+    from app.engines.explosion_entry_guards import tier_promotion_pad_chase_blocked
+
+    chase_blocked, _ = tier_promotion_pad_chase_blocked(
+        resolved_event,
+        ict=resolved_ict,
+        alert=probe,
+    )
+    if chase_blocked:
+        return False
+
+    from app.engines.early_radar_pad_capture import building_coil_pad_live_blocked
+
+    coil_blocked, _ = building_coil_pad_live_blocked(probe)
+    if coil_blocked:
+        return False
+
+    return True
 
 
 def snapshots_have_top_must_take(snapshots: dict[str, Any]) -> bool:

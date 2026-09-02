@@ -7,9 +7,14 @@ premium tape through the live explosion detector and only enters when:
 - ``first_lift_entry_readiness`` (V-base / armed / elite / building-rip paths)
 - ``top_moment_entry_allowed`` (grade + timing)
 - ``local_base_entry_window`` (tier-adaptive base-relative move band)
+- Live session gates when ``eod_replay_live_session_gates_enabled`` (power hour,
+  directional lock with best-side bypass, best-side rank adjustment)
 
 Exits reuse the production explosion exit stack. Portfolio limits (one position at a
 time, daily loss stop) match ``eod_trade_report.apply_portfolio_limits``.
+
+Index ``chartAnalysis`` (squeeze, VWAP, GainzAlgo V2 decisive candle) is rebuilt from
+the rolling spot tape so coil-breakout prediction matches live detection/ranking.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from app.engines.top_moment_gate import (
 )
 from app.engines.trade_ranking import rank_trade_evidence
 from app.models.schemas import (
+    ChartAnalysis,
     HeatmapStrike,
     MarketPhase,
     MarketProfile,
@@ -82,6 +88,27 @@ def _load_batches(date: str) -> list[dict[str, Any]]:
         return rows
 
 
+def _sample_spot_closes_from_history(
+    spot_hist: list[tuple[datetime, float]],
+    spot: float,
+    *,
+    max_points: int = 400,
+    min_interval_seconds: float = 15.0,
+) -> list[float]:
+    """Down-sample rolling tape spot ticks for synthetic OHLC (one point per ~15s)."""
+    if spot <= 0:
+        return []
+    sampled: list[float] = []
+    last_ts: Optional[datetime] = None
+    for ts, px in spot_hist[-max_points:]:
+        if last_ts is None or (ts - last_ts).total_seconds() >= min_interval_seconds:
+            sampled.append(px)
+            last_ts = ts
+    if spot not in sampled:
+        sampled.append(spot)
+    return sampled
+
+
 def _spot_chart_from_history(
     spot_hist: list[tuple[datetime, float]],
     spot: float,
@@ -91,17 +118,9 @@ def _spot_chart_from_history(
 
     if spot <= 0:
         return SpotChart(direction="NEUTRAL", spot=0)
-    if len(spot_hist) < 3:
+    sampled = _sample_spot_closes_from_history(spot_hist, spot)
+    if len(sampled) < 3:
         return SpotChart(direction="NEUTRAL", spot=round(spot, 2))
-    # Sample at most one point per ~15s to avoid overweighting dense polls.
-    sampled: list[float] = []
-    last_ts: Optional[datetime] = None
-    for ts, px in spot_hist[-400:]:
-        if last_ts is None or (ts - last_ts).total_seconds() >= 15:
-            sampled.append(px)
-            last_ts = ts
-    if spot not in sampled:
-        sampled.append(spot)
     candles = _closes_to_synthetic_candles(sampled)
     profile = MarketProfile(
         poc=spot,
@@ -111,6 +130,47 @@ def _spot_chart_from_history(
         openingRangeLow=spot * 0.997,
     )
     return build_spot_chart(candles, spot, profile)
+
+
+def _chart_analysis_from_spot_history(
+    spot_hist: list[tuple[datetime, float]],
+    spot: float,
+    *,
+    symbol: str = "",
+) -> Optional[ChartAnalysis]:
+    """Build index chartAnalysis (squeeze, VWAP, GainzAlgo V2 decisive candle) for EOD replay."""
+    from app.engines.chart_advanced_analysis import build_chart_analysis
+    from app.engines.spot_direction import _closes_to_synthetic_candles
+
+    if spot <= 0:
+        return None
+    sampled = _sample_spot_closes_from_history(spot_hist, spot)
+    if len(sampled) < 16:
+        return None
+    candles_5m = _closes_to_synthetic_candles(sampled)
+    profile = MarketProfile(
+        poc=spot,
+        vah=spot * 1.002,
+        val=spot * 0.998,
+        openingRangeHigh=spot * 1.003,
+        openingRangeLow=spot * 0.997,
+    )
+    prev_close = sampled[0]
+    day_high = max(sampled)
+    day_low = min(sampled)
+    try:
+        return build_chart_analysis(
+            [],
+            candles_5m,
+            spot,
+            profile,
+            prev_close=prev_close,
+            day_high=day_high,
+            day_low=day_low,
+            symbol=symbol,
+        )
+    except Exception:
+        return None
 
 
 def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, Any]:
@@ -149,7 +209,10 @@ def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, An
             or _f(alert.get("volumeSurge")) >= 1.2
         ),
         "indexHelpersConfirm": bool(alert.get("indexHelpersConfirm")),
-        "indexTickSpike": bool(alert.get("indexTickSpike")),
+        "indexConfirmedLocalBase": bool(
+            alert.get("indexConfirmedLocalBase")
+            or alert.get("ictIndexConfirmedLocalBase")
+        ),
         "slowGrindSuddenLift": bool(
             alert.get("slowGrindSuddenLiftReady")
             or alert.get("ictSlowGrindSuddenLift")
@@ -179,6 +242,17 @@ def _alert_evidence(alert: dict[str, Any], snap: SymbolSnapshot) -> dict[str, An
         "earlyRadarPadCapture": bool(
             alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
         ),
+        "buildingCoilPad": bool(
+            alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
+        ),
+        "volumeAwaken": bool(
+            alert.get("volumeAwaken")
+            or alert.get("ictVolumeAwakening")
+            or _f(alert.get("volumeSurge")) >= 1.0
+        ),
+        "volumeSurge": _f(alert.get("volumeSurge")),
+        "ictBaseArmed": bool(alert.get("ictBaseArmed")),
+        "coldTroughPad": bool(alert.get("coldTroughPad")),
         "timingAssessment": str(alert.get("timingAssessment") or ""),
         "timingAction": str(alert.get("timingAction") or ""),
     }
@@ -231,31 +305,54 @@ def evaluate_local_base_entry(
     if not explosion_alert_is_top_moment(alert):
         return False, "not_top_moment_radar", None, {}
 
-    evidence = _alert_evidence(alert, snap)
-    ranking = rank_trade_evidence(evidence)
-    allowed, reason, moment = top_moment_entry_allowed(
-        evidence,
-        ranking,
-        top_moments_only_enabled=bool(getattr(s, "top_moments_only_enabled", True)),
-        min_grade=str(getattr(s, "top_moments_min_grade", "A") or "A"),
-    )
-    if not allowed:
-        return False, reason, moment, ranking
-
     from app.engines.ict_breakout_monitor import first_lift_entry_readiness
     from app.engines.building_ftv_gates import pad_lane_ready_reason
     from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
     ready, lift_reason = first_lift_entry_readiness(snap=snap, alert=alert)
     pad_lane_waive = pad_lane_early_near_miss_waive(
-        alert, readiness_reason=lift_reason,
+        alert, readiness_reason=lift_reason, snap=snap,
     )
+
+    evidence = _alert_evidence(alert, snap)
+    from app.engines.index_confirmed_local_base import enrich_evidence_index_confirmed
+
+    enrich_evidence_index_confirmed(
+        evidence, snap, alert, str(alert.get("side") or ""),
+    )
+    ranking = rank_trade_evidence(evidence)
+    allowed, reason, moment = top_moment_entry_allowed(
+        evidence,
+        ranking,
+        top_moments_only_enabled=bool(getattr(s, "top_moments_only_enabled", True)),
+        min_grade=str(getattr(s, "top_moments_min_grade", "A") or "A"),
+        readiness_reason=lift_reason if (ready or pad_lane_waive) else "",
+    )
+    if not allowed:
+        return False, reason, moment, ranking
+
     if not ready and not pad_lane_waive:
         return False, lift_reason, moment, ranking
     if pad_lane_waive:
         lift_reason = pad_lane_ready_reason(
             alert=alert, readiness_reason=lift_reason,
         ) or lift_reason
+
+    from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+    from app.engines.explosion_entry_guards import tier_promotion_pad_chase_blocked
+
+    if not alert_has_early_radar_pad_capture(alert):
+        candidate = _candidate_from_alert(alert, snap)
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+        ict_ev = analyze_explosion_event_ict(candidate.explosion_event, snap)
+        chase_blocked, chase_reason = tier_promotion_pad_chase_blocked(
+            candidate.explosion_event,
+            ict=ict_ev,
+            alert=alert,
+        )
+        if chase_blocked:
+            return False, chase_reason, moment, ranking
 
     base_rel = _f(alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct"))
     tier = str(alert.get("tier") or "")
@@ -271,12 +368,16 @@ def evaluate_local_base_entry(
             "building_rip_bullish_ready",
             "fast_bullish_local_base_ready",
             "slow_grind_sudden_lift_ready",
+            "slow_grind_armed_trough_ready",
+            "early_radar_pad_ready",
             "squeeze_release_ready",
             "index_led_option_lag_ready",
             "stealth_cvd_coil_ready",
             "micro_pullback_retest_ready",
             "premium_fvg_pad_ready",
             "double_dip_vbase_ready",
+            "building_coil_pad_ready",
+            "building_armed_prelaunch_ready",
         ):
             return (
                 False,
@@ -291,6 +392,198 @@ def evaluate_local_base_entry(
         return False, f"premium_below_{min_prem:g}", moment, ranking
 
     return True, lift_reason, moment, ranking
+
+
+def _install_replay_clock(replay_dt_class: type) -> list[tuple[Any, Any]]:
+    """Point power-hour / chop minute helpers at the replay clock."""
+    import app.engines.chop_day_guards as chop_guards
+    import app.engines.power_hour_guards as power_hour
+
+    def _minutes_from_replay() -> int:
+        ts = replay_dt_class.current
+        if ts.tzinfo:
+            ts = ts.astimezone(IST)
+        return ts.hour * 60 + ts.minute
+
+    saved: list[tuple[Any, Any]] = []
+    for module in (power_hour, chop_guards):
+        saved.append((module, module._minutes_now))
+        module._minutes_now = _minutes_from_replay
+    return saved
+
+
+def _restore_replay_clock(saved: list[tuple[Any, Any]]) -> None:
+    for module, original in saved:
+        module._minutes_now = original
+
+
+def _candidate_from_alert(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+) -> Any:
+    from types import SimpleNamespace
+
+    from app.engines.explosion_detector import ExplosionEvent
+
+    sym = str(snap.symbol or alert.get("symbol") or "").upper()
+    side_str = str(alert.get("side") or "").upper()
+    side = Side(side_str)
+    strike_v = _f(alert.get("strike"))
+    prem = _f(alert.get("premium"))
+    event = ExplosionEvent(
+        symbol=sym,
+        side=side,
+        strike=strike_v,
+        premium=prem,
+        velocity_3s=_f(alert.get("velocity3s")),
+        velocity_9s=_f(alert.get("velocity9s")),
+        velocity_15s=_f(alert.get("velocity15s")),
+        volume_surge=_f(alert.get("volumeSurge"), 1.0),
+        explosion_score=_f(alert.get("explosionScore")),
+        tier=str(alert.get("tier") or ""),
+        reason=str(alert.get("reason") or "replay"),
+        daily_move_pct=_f(alert.get("dailyMovePct") or alert.get("openPremiumMove")),
+        peak_move_pct=_f(alert.get("peakMovePct")),
+        volume=_f(alert.get("volume")),
+    )
+    return SimpleNamespace(
+        symbol=sym,
+        side=side,
+        strike=strike_v,
+        premium=prem,
+        snap=snap,
+        mode="explosion",
+        tier=event.tier,
+        score=event.explosion_score,
+        explosion_event=event,
+        alert=alert,
+    )
+
+
+def evaluate_replay_live_gates(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    settings: Any = None,
+    skip_session_gate: bool = False,
+) -> tuple[bool, str]:
+    """Production session gates: power hour + directional lock (+ best-side bypass)."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "eod_replay_live_session_gates_enabled", True)):
+        return True, "ok"
+
+    from app.engines.directional_lock import check_directional_side_lock
+    from app.engines.power_hour_guards import (
+        candidate_qualifies_power_hour_top_trade,
+        check_power_hour_session_allowed,
+        in_power_hour_window,
+    )
+    from app.models.schemas import AutoTraderState
+
+    candidate = _candidate_from_alert(alert, snap)
+
+    if in_power_hour_window():
+        if not skip_session_gate:
+            session_ok, session_reason, _ = check_power_hour_session_allowed(
+                AutoTraderState(),
+                snapshots,
+            )
+            if not session_ok:
+                return False, session_reason
+        if not candidate_qualifies_power_hour_top_trade(candidate):
+            return False, "power_hour_top_only"
+
+    blocked, dir_reason = check_directional_side_lock(
+        snap.symbol,
+        candidate.side,
+        snap,
+        tier=candidate.tier,
+        candidate=candidate,
+    )
+    if blocked:
+        return False, dir_reason
+
+    return True, "ok"
+
+
+def _replay_selection_rank(
+    ranking: dict[str, Any],
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    settings: Any = None,
+    lift_reason: str = "",
+) -> float:
+    score = _f(ranking.get("rankScore"))
+    s = settings or get_settings()
+    reason = str(
+        lift_reason
+        or alert.get("ictBaseReadinessReason")
+        or alert.get("readyReason")
+        or ""
+    )
+    pad_lane_reasons = {
+        "armed_base_option_led_ready",
+        "building_coil_pad_ready",
+        "building_armed_prelaunch_ready",
+        "slow_grind_sudden_lift_ready",
+        "early_radar_pad_ready",
+        "v_rip_session_low_ready",
+    }
+    if reason in pad_lane_reasons or bool(
+        alert.get("buildingCoilPad") or alert.get("earlyRadarPadCapture")
+    ):
+        score += float(getattr(s, "pad_lane_selector_rank_bonus", 18.0) or 18.0)
+    if reason in {
+        "armed_base_option_led_ready",
+        "building_coil_pad_ready",
+        "building_armed_prelaunch_ready",
+    }:
+        score += float(
+            getattr(s, "ftv_direct_trade_selector_rank_bonus", 55.0) or 55.0
+        ) * 0.5
+    if bool(getattr(s, "expansion_strike_rank_bonus_enabled", True)) and (
+        alert.get("buildingCoilPad") or reason == "building_coil_pad_ready"
+    ):
+        score += float(getattr(s, "expansion_strike_rank_bonus", 15.0) or 15.0)
+    if reason == "early_radar_pad_ready":
+        score -= float(getattr(s, "eod_replay_early_pad_rank_penalty", 12.0) or 12.0)
+    from app.engines.coil_breakout_predictor import coil_prediction_rank_delta
+    from app.models.schemas import Side as SideEnum
+
+    side_raw = str(alert.get("side") or "").upper()
+    side_enum = SideEnum.CALL if side_raw == "CALL" else SideEnum.PUT if side_raw == "PUT" else None
+    if side_enum is not None:
+        score += coil_prediction_rank_delta(alert, side_enum)
+    if bool(getattr(s, "eod_replay_live_session_gates_enabled", True)):
+        from app.engines.best_side_selection import (
+            best_side_rank_adjustment,
+            resolve_global_best_side,
+        )
+        from app.engines.power_hour_guards import in_power_hour_window
+
+        score += best_side_rank_adjustment(
+            _candidate_from_alert(alert, snap),
+            snapshots,
+            power_hour=in_power_hour_window(),
+        )
+        global_sym, global_side, _, _ = resolve_global_best_side(
+            snapshots,
+            power_hour=in_power_hour_window(),
+        )
+        side_val = str(alert.get("side") or "").upper()
+        sym_u = str(snap.symbol or alert.get("symbol") or "").upper()
+        if (
+            global_side
+            and global_side != side_val
+            and sym_u == (global_sym or sym_u)
+        ):
+            score -= float(
+                getattr(s, "eod_replay_counter_side_rank_penalty", 35.0) or 35.0
+            )
+    return score
 
 
 def _contract_key(symbol: str, side: str, strike: float) -> str:
@@ -417,12 +710,34 @@ def _simulate_trade_from_entry(
     }
 
 
+def _parse_window_bound(
+    date: str,
+    hhmmss: Optional[str],
+    *,
+    end_of_day: bool = False,
+) -> Optional[datetime]:
+    if not hhmmss:
+        return None
+    raw = str(hhmmss).strip()
+    parts = raw.split(":")
+    if len(parts) < 2:
+        raise ValueError("window time must be HH:MM or HH:MM:SS")
+    hour = int(parts[0])
+    minute = int(parts[1])
+    second = int(float(parts[2])) if len(parts) > 2 else (59 if end_of_day else 0)
+    day = datetime.strptime(date, "%Y-%m-%d").date()
+    return datetime(day.year, day.month, day.day, hour, minute, second, tzinfo=IST)
+
+
 def replay_local_base_day(
     date: str,
     *,
     settings: Any = None,
     max_trades_per_contract: int = 3,
     entry_cooldown_seconds: float = 90.0,
+    window_start: Optional[str] = None,
+    window_end: Optional[str] = None,
+    side_filter: Optional[str] = None,
 ) -> dict[str, Any]:
     """Replay one session's premium tape with production local-base entry gates."""
     from app.engines import explosion_detector, ict_breakout_monitor, session_timing
@@ -440,6 +755,12 @@ def replay_local_base_day(
             "trades": [],
             "gateStats": {},
         }
+
+    win_start = _parse_window_bound(date, window_start)
+    win_end = _parse_window_bound(date, window_end, end_of_day=True)
+    side_filter_v = str(side_filter or "").upper() or None
+    if side_filter_v and side_filter_v not in {"CALL", "PUT"}:
+        raise ValueError("side_filter must be CALL or PUT")
 
     # Pre-index the full premium tape so exit simulation can walk forward from entry.
     premium_series: dict[str, list[tuple[datetime, float]]] = defaultdict(list)
@@ -464,12 +785,16 @@ def replay_local_base_day(
                 premium_series[_contract_key(sym, side, strike_v)].append((ts, prem))
 
     reset_detector_state_for_tests()
+    from app.engines.directional_lock import record_trade_side, reset_directional_lock
+
+    reset_directional_lock()
     original_datetimes = (
         explosion_detector.datetime,
         ict_breakout_monitor.datetime,
         session_timing.datetime,
     )
     original_market_phase = session_timing.get_market_phase
+    replay_clock_saved: list[tuple[Any, Any]] = []
 
     state: dict[str, dict[tuple[float, str], dict[str, Any]]] = {}
     spot_hist: dict[str, list[tuple[datetime, float]]] = defaultdict(list)
@@ -486,6 +811,9 @@ def replay_local_base_day(
         ict_breakout_monitor.datetime = _ReplayDateTime
         session_timing.datetime = _ReplayDateTime
         session_timing.get_market_phase = lambda: "LIVE_MARKET"
+        replay_clock_saved = _install_replay_clock(_ReplayDateTime)
+
+        live_gates = bool(getattr(s, "eod_replay_live_session_gates_enabled", True))
 
         for batch in batches:
             ts_raw = batch.get("ts")
@@ -507,6 +835,7 @@ def replay_local_base_day(
                 if sym:
                     grouped.setdefault(sym, []).append(contract)
 
+            batch_snapshots: dict[str, SymbolSnapshot] = {}
             for sym, contracts in grouped.items():
                 symbol_state = state.setdefault(sym, {})
                 for contract in contracts:
@@ -529,19 +858,19 @@ def replay_local_base_day(
                     sess_peak = _f(contract.get("sessionPeak"))
                     prem = _f(contract.get("premium"))
                     if sess_low > 0 or sess_peak > 0:
-                        key = explosion_detector._open_key(
+                        det_key = explosion_detector._open_key(
                             sym, strike_v, Side(side_name)
                         )
                         if sess_low > 0:
-                            cur = explosion_detector._session_low.get(key)
+                            cur = explosion_detector._session_low.get(det_key)
                             if cur is None or sess_low < cur:
-                                explosion_detector._session_low[key] = sess_low
+                                explosion_detector._session_low[det_key] = sess_low
                         if sess_peak > 0:
-                            cur_p = explosion_detector._session_peak.get(key)
+                            cur_p = explosion_detector._session_peak.get(det_key)
                             if cur_p is None or sess_peak > cur_p:
-                                explosion_detector._session_peak[key] = sess_peak
+                                explosion_detector._session_peak[det_key] = sess_peak
                         if prem > 0:
-                            explosion_detector._record_local_base(key, ts, prem)
+                            explosion_detector._record_local_base(det_key, ts, prem)
 
                 strikes = sorted({stk for stk, _ in symbol_state})
                 heatmap: list[HeatmapStrike] = []
@@ -559,6 +888,9 @@ def replay_local_base_day(
                     )
 
                 chart = _spot_chart_from_history(spot_hist[sym], spot)
+                chart_analysis = _chart_analysis_from_spot_history(
+                    spot_hist[sym], spot, symbol=sym,
+                )
                 snap = SymbolSnapshot(
                     symbol=sym,
                     timestamp=ts,
@@ -568,18 +900,52 @@ def replay_local_base_day(
                     atmStrike=_f(sample.get("atmStrike")),
                     heatmap=heatmap,
                     spotChart=chart,
+                    chartAnalysis=chart_analysis,
                     tradeQualityScore=55.0,
                 )
                 refresh_snapshot_explosion_alerts(snap)
+                batch_snapshots[sym] = snap
 
-                if next_ok_after is not None and ts < next_ok_after:
-                    continue
+            if not batch_snapshots:
+                continue
 
-                ranked_alerts: list[tuple[float, dict[str, Any]]] = []
+            if next_ok_after is not None and ts < next_ok_after:
+                continue
+
+            if win_start is not None and ts < win_start:
+                continue
+            if win_end is not None and ts > win_end:
+                continue
+
+            session_gate_blocked = False
+            if live_gates:
+                from app.engines.power_hour_guards import (
+                    check_power_hour_session_allowed,
+                    in_power_hour_window,
+                )
+                from app.models.schemas import AutoTraderState
+
+                if in_power_hour_window():
+                    session_ok, session_reason, _ = check_power_hour_session_allowed(
+                        AutoTraderState(),
+                        batch_snapshots,
+                    )
+                    if not session_ok:
+                        gate_stats[session_reason] += 1
+                        session_gate_blocked = True
+
+            if session_gate_blocked:
+                continue
+
+            ranked_candidates: list[tuple[float, str, SymbolSnapshot, dict[str, Any], str, Optional[str], dict[str, Any]]] = []
+            for sym, snap in batch_snapshots.items():
+                symbol_state = state[sym]
                 for alert in snap.explosionAlerts or []:
                     strike_v = _f(alert.get("strike"))
                     side = str(alert.get("side") or "").upper()
                     if strike_v <= 0 or side not in {"CALL", "PUT"}:
+                        continue
+                    if side_filter_v and side != side_filter_v:
                         continue
                     key = _contract_key(sym, side, strike_v)
                     if trades_per_key[key] >= max_trades_per_contract:
@@ -596,8 +962,8 @@ def replay_local_base_day(
                     allowed, reason, moment, ranking = evaluate_local_base_entry(
                         alert_eval, snap, settings=s,
                     )
-                    gate_stats[reason if not allowed else "entry_allowed"] += 1
                     if not allowed:
+                        gate_stats[reason] += 1
                         if len(signal_rows) < 500:
                             signal_rows.append({
                                 "ts": ts.isoformat(),
@@ -610,81 +976,113 @@ def replay_local_base_day(
                             })
                         continue
 
-                    rank_score = _f(ranking.get("rankScore"))
-                    ranked_alerts.append((rank_score, alert_eval))
+                    gate_stats["entry_allowed"] += 1
+                    if live_gates:
+                        live_ok, live_reason = evaluate_replay_live_gates(
+                            alert_eval,
+                            snap,
+                            batch_snapshots,
+                            settings=s,
+                            skip_session_gate=True,
+                        )
+                        if not live_ok:
+                            gate_stats[live_reason] += 1
+                            if len(signal_rows) < 500:
+                                signal_rows.append({
+                                    "ts": ts.isoformat(),
+                                    "key": key,
+                                    "tier": alert.get("tier"),
+                                    "premium": alert.get("premium"),
+                                    "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                                    "allowed": False,
+                                    "reason": live_reason,
+                                })
+                            continue
 
-                if not ranked_alerts:
-                    continue
+                    rank_score = _replay_selection_rank(
+                        ranking,
+                        alert_eval,
+                        snap,
+                        batch_snapshots,
+                        settings=s,
+                        lift_reason=reason,
+                    )
+                    ranked_candidates.append(
+                        (rank_score, sym, snap, alert_eval, key, moment, ranking),
+                    )
 
-                ranked_alerts.sort(key=lambda row: row[0], reverse=True)
-                alert = ranked_alerts[0][1]
-                strike_v = _f(alert.get("strike"))
-                side = str(alert.get("side") or "").upper()
-                tier = str(alert.get("tier") or "").upper()
-                key = _contract_key(sym, side, strike_v)
-                ep = _f(alert.get("premium"))
-                base = _f(alert.get("ictBasePremium") or alert.get("basePremium"))
-                if base <= 0:
-                    hist = [
-                        p for t, p in premium_series.get(key, [])
-                        if (ts - t).total_seconds() <= 1200 and p > 0
-                    ]
-                    base = min(hist) if hist else ep
+            if not ranked_candidates:
+                continue
 
-                _, entry_reason, moment, ranking = evaluate_local_base_entry(
-                    alert, snap, settings=s,
-                )
-                forward = [
-                    (t, p)
-                    for t, p in premium_series.get(key, [])
-                    if t >= ts
+            ranked_candidates.sort(key=lambda row: row[0], reverse=True)
+            _, sym, snap, alert, key, moment, ranking = ranked_candidates[0]
+            strike_v = _f(alert.get("strike"))
+            side = str(alert.get("side") or "").upper()
+            tier = str(alert.get("tier") or "").upper()
+            ep = _f(alert.get("premium"))
+            base = _f(alert.get("ictBasePremium") or alert.get("basePremium"))
+            if base <= 0:
+                hist = [
+                    p for t, p in premium_series.get(key, [])
+                    if (ts - t).total_seconds() <= 1200 and p > 0
                 ]
-                entry_ctx = {
-                    "topMomentType": moment,
-                    "entryReason": entry_reason,
+                base = min(hist) if hist else ep
+
+            _, entry_reason, moment, ranking = evaluate_local_base_entry(
+                alert, snap, settings=s,
+            )
+            forward = [
+                (t, p)
+                for t, p in premium_series.get(key, [])
+                if t >= ts
+            ]
+            entry_ctx = {
+                "topMomentType": moment,
+                "entryReason": entry_reason,
+                "grade": ranking.get("grade"),
+                "explosionTier": tier,
+                "velocity3s": alert.get("velocity3s"),
+                "volumeSurge": alert.get("volumeSurge"),
+                "ictFlatThenVertical": alert.get("ictFlatThenVertical"),
+                "ictFirstLift": alert.get("ictFirstLift"),
+                "ictArmedBaseLaunch": alert.get("ictArmedBaseLaunch"),
+                "ictEliteBaseReady": alert.get("ictEliteBaseReady"),
+                "ictVRipReady": alert.get("ictVRipReady"),
+                "momentType": classify_top_moment_type(_alert_evidence(alert, snap)),
+            }
+            trade = _simulate_trade_from_entry(
+                symbol=sym,
+                side=side,
+                strike=strike_v,
+                tier=tier,
+                entry_ts=ts,
+                entry_premium=ep,
+                base_premium=base,
+                forward=forward,
+                settings=s,
+                entry_ctx=entry_ctx,
+            )
+            raw_candidates.append(trade)
+            trades_per_key[key] += 1
+            record_trade_side(sym, Side(side), snap)
+            cooldown_until[key] = trade["_exitDt"] + timedelta(
+                seconds=entry_cooldown_seconds
+            )
+            next_ok_after = trade["_exitDt"] + timedelta(
+                seconds=entry_cooldown_seconds
+            )
+            if len(signal_rows) < 500:
+                signal_rows.append({
+                    "ts": ts.isoformat(),
+                    "key": key,
+                    "tier": tier,
+                    "premium": ep,
+                    "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                    "allowed": True,
+                    "reason": entry_reason,
+                    "momentType": moment,
                     "grade": ranking.get("grade"),
-                    "explosionTier": tier,
-                    "velocity3s": alert.get("velocity3s"),
-                    "volumeSurge": alert.get("volumeSurge"),
-                    "ictFlatThenVertical": alert.get("ictFlatThenVertical"),
-                    "ictFirstLift": alert.get("ictFirstLift"),
-                    "ictArmedBaseLaunch": alert.get("ictArmedBaseLaunch"),
-                    "ictEliteBaseReady": alert.get("ictEliteBaseReady"),
-                    "ictVRipReady": alert.get("ictVRipReady"),
-                    "momentType": classify_top_moment_type(_alert_evidence(alert, snap)),
-                }
-                trade = _simulate_trade_from_entry(
-                    symbol=sym,
-                    side=side,
-                    strike=strike_v,
-                    tier=tier,
-                    entry_ts=ts,
-                    entry_premium=ep,
-                    base_premium=base,
-                    forward=forward,
-                    settings=s,
-                    entry_ctx=entry_ctx,
-                )
-                raw_candidates.append(trade)
-                trades_per_key[key] += 1
-                cooldown_until[key] = trade["_exitDt"] + timedelta(
-                    seconds=entry_cooldown_seconds
-                )
-                next_ok_after = trade["_exitDt"] + timedelta(
-                    seconds=entry_cooldown_seconds
-                )
-                if len(signal_rows) < 500:
-                    signal_rows.append({
-                        "ts": ts.isoformat(),
-                        "key": key,
-                        "tier": tier,
-                        "premium": ep,
-                        "baseRelPct": alert.get("ictBaseRelativeMovePct"),
-                        "allowed": True,
-                        "reason": entry_reason,
-                        "momentType": moment,
-                        "grade": ranking.get("grade"),
-                    })
+                })
 
     finally:
         (
@@ -693,6 +1091,8 @@ def replay_local_base_day(
             session_timing.datetime,
         ) = original_datetimes
         session_timing.get_market_phase = original_market_phase
+        if replay_clock_saved:
+            _restore_replay_clock(replay_clock_saved)
         reset_detector_state_for_tests()
 
     taken = apply_portfolio_limits(raw_candidates, settings=s)
@@ -704,10 +1104,16 @@ def replay_local_base_day(
     wins = sum(1 for t in taken if _f(t.get("pnlInr")) > 0)
     daily_stop = _f(getattr(s, "daily_loss_stop_inr", 20_000.0), 20_000.0)
 
+    mode = "local_base_system_params"
+    if win_start or win_end or side_filter_v:
+        mode = "window_replay"
     return {
         "date": date,
         "status": "ok",
-        "mode": "local_base_system_params",
+        "mode": mode,
+        "windowStart": win_start.isoformat() if win_start else None,
+        "windowEnd": win_end.isoformat() if win_end else None,
+        "sideFilter": side_filter_v,
         "sampleBatches": len(batches),
         "tradeCount": len(taken),
         "candidateCount": len(raw_candidates),
@@ -719,10 +1125,36 @@ def replay_local_base_day(
         "signals": signal_rows[:100],
         "note": (
             "Full-tape replay with production top-moment + first-lift + "
-            "local-base window gates. One position at a time + daily loss stop."
+            "local-base window gates + live session gates (power hour, "
+            "directional lock, best-side rank). One position at a time + "
+            "daily loss stop."
         ),
         "trades": taken,
     }
+
+
+def generate_window_replay(
+    date: str,
+    *,
+    start: str,
+    end: str,
+    side: Optional[str] = None,
+) -> dict[str, Any]:
+    """Replay a premium-tape window with production entry/exit gates."""
+    report = replay_local_base_day(
+        date,
+        window_start=start,
+        window_end=end,
+        side_filter=side,
+    )
+    if report.get("status") != "ok":
+        return report
+    report["note"] = (
+        f"Premium-tape replay {start}–{end} IST"
+        + (f" ({side} only)" if side else "")
+        + " with production gates + exit stack."
+    )
+    return report
 
 
 def generate_eod_local_base_replay(date: str) -> dict[str, Any]:

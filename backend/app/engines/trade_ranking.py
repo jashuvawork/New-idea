@@ -153,6 +153,54 @@ def _first_lift_local_base_flat_velocity(
     return True
 
 
+def _shallow_otm_local_base_ftv_waives_atm_itm(evidence: Mapping[str, Any]) -> bool:
+    """#428 shallow OTM stamp — ELITE flat→vertical at local base may execute 1-step OTM."""
+    if not bool(evidence.get("shallowOtmLocalBaseTradeable")):
+        return False
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in {"ELITE", "EXPLODING"}:
+        return False
+    move = max(
+        _number(evidence.get("localBaseMovePct")),
+        _number(evidence.get("ictBaseRelativeMovePct")),
+    )
+    if not (2.0 <= move <= 25.0 + 1e-6):
+        return False
+    top_moment = bool(
+        evidence.get("armedBaseLaunch")
+        or evidence.get("ictArmedBaseLaunch")
+        or (
+            evidence.get("flatThenVertical")
+            and (
+                evidence.get("activeBreakout")
+                or evidence.get("volumeAwaken")
+                or evidence.get("orderflowPositive")
+            )
+        )
+    )
+    if not top_moment:
+        return False
+    if bool(
+        evidence.get("faded")
+        or evidence.get("exhaustedReentry")
+        or evidence.get("midRipCoil")
+    ):
+        return False
+    timing = str(evidence.get("timingAssessment") or "").upper()
+    timing_action = str(evidence.get("timingAction") or "").lower()
+    if timing_action in {"block", "reject"} or timing in {
+        "FAILED_LAUNCH",
+        "FADED",
+        "FADING",
+        "EXHAUSTED",
+        "NEGATIVE",
+        "REJECT",
+        "BLOCKED",
+    }:
+        return False
+    return True
+
+
 def ranking_sort_key(ranking: Mapping[str, Any]) -> tuple[int, float]:
     """Comparable causal ordering: grade first, then evidence score."""
     return (
@@ -313,44 +361,50 @@ def ftv_authorization_policy(
     ftv_policy_expiry_worst_min_score: float = 90.0,
     ftv_policy_expiry_worst_min_velocity_3s: float = 3.0,
     building_rip_ftv_enabled: bool = True,
-    building_rip_ftv_min_explosion_score: float = 48.0,
+    building_rip_ftv_min_explosion_score: float = 12.0,
     building_rip_ftv_min_velocity_3s: float = 1.2,
     building_rip_ftv_min_local_base_move_pct: float = 2.0,
     building_rip_ftv_max_local_base_move_pct: float = 55.0,
     building_rip_ftv_max_capital_pct: float = 0.90,
+    building_armed_base_grade_a_ftv_enabled: bool = True,
+    building_armed_base_grade_a_ftv_max_capital_pct: float = 0.90,
     slow_grind_ftv_enabled: bool = True,
-    slow_grind_ftv_min_explosion_score: float = 45.0,
+    slow_grind_ftv_min_explosion_score: float = 12.0,
     slow_grind_ftv_min_flat_quality: float = 50.0,
     slow_grind_ftv_armed_trough_min_explosion_score: float = 5.0,
-    slow_grind_ftv_consolidation_base_min_explosion_score: float = 24.0,
+    slow_grind_ftv_consolidation_base_min_explosion_score: float = 12.0,
     slow_grind_ftv_consolidation_base_min_flat_quality: float = 35.0,
     slow_grind_ftv_max_capital_pct: float = 0.90,
     fast_bullish_ftv_enabled: bool = True,
-    fast_bullish_ftv_min_explosion_score: float = 48.0,
+    fast_bullish_ftv_min_explosion_score: float = 12.0,
     fast_bullish_ftv_min_velocity_3s: float = 0.5,
     fast_bullish_ftv_max_capital_pct: float = 0.90,
     squeeze_release_ftv_enabled: bool = True,
-    squeeze_release_ftv_min_explosion_score: float = 48.0,
+    squeeze_release_ftv_min_explosion_score: float = 12.0,
     squeeze_release_ftv_max_capital_pct: float = 0.90,
     index_led_option_lag_ftv_enabled: bool = True,
-    index_led_option_lag_ftv_min_explosion_score: float = 48.0,
+    index_led_option_lag_ftv_min_explosion_score: float = 12.0,
     index_led_option_lag_ftv_max_capital_pct: float = 0.90,
     stealth_cvd_coil_ftv_enabled: bool = True,
-    stealth_cvd_coil_ftv_min_explosion_score: float = 48.0,
+    stealth_cvd_coil_ftv_min_explosion_score: float = 12.0,
     stealth_cvd_coil_ftv_max_capital_pct: float = 0.90,
     micro_pullback_retest_ftv_enabled: bool = True,
-    micro_pullback_retest_ftv_min_explosion_score: float = 48.0,
+    micro_pullback_retest_ftv_min_explosion_score: float = 12.0,
     micro_pullback_retest_ftv_max_capital_pct: float = 0.90,
     premium_fvg_pad_ftv_enabled: bool = True,
-    premium_fvg_pad_ftv_min_explosion_score: float = 50.0,
+    premium_fvg_pad_ftv_min_explosion_score: float = 12.0,
     premium_fvg_pad_ftv_max_capital_pct: float = 0.90,
     double_dip_vbase_ftv_enabled: bool = True,
-    double_dip_vbase_ftv_min_explosion_score: float = 48.0,
+    double_dip_vbase_ftv_min_explosion_score: float = 12.0,
     double_dip_vbase_ftv_max_capital_pct: float = 0.90,
     early_radar_pad_ftv_enabled: bool = True,
     early_radar_pad_ftv_min_explosion_score: float = 5.0,
     early_radar_pad_ftv_max_capital_pct: float = 0.90,
     early_radar_pad_max_off_low_pct: float = 15.0,
+    building_coil_pad_ftv_enabled: bool = True,
+    building_coil_pad_ftv_max_capital_pct: float = 0.90,
+    building_coil_pad_min_local_move_pct: float = 10.0,
+    building_coil_pad_max_local_move_pct: float = 25.0,
     top_moments_only_enabled: bool = True,
     top_moments_min_grade: str = "A",
     first_lift_local_base_micro_pullback_enabled: bool = True,
@@ -359,6 +413,12 @@ def ftv_authorization_policy(
     first_lift_local_base_flat_velocity_enabled: bool = True,
     first_lift_trade_min_score: float = 62.0,
     first_lift_helper_confirm_min_quality: float = 50.0,
+    index_confirmed_ftv_auth_enabled: bool = True,
+    index_confirmed_ftv_min_explosion_score: float = 35.0,
+    index_confirmed_ftv_min_quality: float = 55.0,
+    index_confirmed_ftv_min_local_base_move_pct: float = 5.0,
+    index_confirmed_ftv_max_local_base_move_pct: float = 25.0,
+    index_confirmed_ftv_max_capital_pct: float = 0.90,
 ) -> FtvAuthorization:
     """Pure causal authorization for strict S, top FTV A, winner, and BUILDING rip."""
     blocked = lambda reason: FtvAuthorization(None, reason)
@@ -431,7 +491,9 @@ def ftv_authorization_policy(
         if not pad_lane_ftv_waives_timing_block(evidence):
             return blocked("ftv_elite_top_only_timing_blocked")
     if snapshot_available and not atm_itm_allowed:
-        return blocked("ftv_elite_top_only_requires_atm_itm")
+        if not _shallow_otm_local_base_ftv_waives_atm_itm(evidence):
+            if not bool(evidence.get("buildingCoilPad")):
+                return blocked("ftv_elite_top_only_requires_atm_itm")
 
     def _expiry_worst_policy_ok(
         *,
@@ -449,6 +511,14 @@ def ftv_authorization_policy(
         from app.engines.pad_lane_capture import pad_lane_expiry_worst_waive
 
         if pad_lane_expiry_worst_waive(evidence):
+            return None
+        from app.engines.grade_a_ftv_capture import grade_a_ftv_expiry_worst_waive
+
+        if grade_a_ftv_expiry_worst_waive(evidence):
+            return None
+        from app.engines.top_ftv_v_expiry_bypass import top_ftv_v_expiry_worst_waive
+
+        if top_ftv_v_expiry_worst_waive(evidence):
             return None
         min_tier = str(ftv_policy_expiry_worst_min_tier or "ELITE").upper()
         tier_rank = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
@@ -574,7 +644,11 @@ def ftv_authorization_policy(
         <= move
         <= winner_local_base_max_local_base_move_pct
     )
-    fresh_trigger = flag_fresh or early_ftv_fresh
+    fresh_trigger = (
+        flag_fresh
+        or early_ftv_fresh
+        or bool(evidence.get("indexConfirmedLocalBase"))
+    )
     timing_blocked = timing in {"CHASE", "CHASING", "LATE", "FAILED_LAUNCH"}
     effective_min_v3, effective_min_v9 = _top_ftv_a_effective_velocity_floors(
         evidence,
@@ -595,6 +669,8 @@ def ftv_authorization_policy(
         pad_max_move_pct=top_ftv_a_pad_velocity_max_move_pct,
     )
     cvd_buying_ok = bool(evidence.get("cvdBuying"))
+    if not cvd_buying_ok and bool(evidence.get("indexConfirmedLocalBase")):
+        cvd_buying_ok = True
     if (
         not cvd_buying_ok
         and pad_capture_lane
@@ -899,8 +975,13 @@ def ftv_authorization_policy(
             grade in {"A", "B", "S"}
             and tier in {"BUILDING", "EXPLODING", "ELITE"}
             and explosion_score >= min_score
-            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
         )
+        timing_blocked = timing in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        if timing_blocked:
+            from app.engines.pad_lane_capture import pad_lane_ftv_waives_timing_block
+
+            if not pad_lane_ftv_waives_timing_block(evidence):
+                ok = False
         if min_v3 is not None and v3 < min_v3:
             ok = False
         if max_v3 is not None and v3 > max_v3:
@@ -990,6 +1071,16 @@ def ftv_authorization_policy(
             max_v3=1.5,
             block_prefix="early_radar_pad_ftv",
         ),
+        _pad_lane_ftv_auth(
+            enabled=building_coil_pad_ftv_enabled,
+            flag=bool(evidence.get("buildingCoilPad")),
+            mode="BUILDING_COIL_PAD_FTV",
+            min_score=5.0,
+            max_capital=building_coil_pad_ftv_max_capital_pct,
+            min_v3=-0.8,
+            max_v3=1.5,
+            block_prefix="building_coil_pad_ftv",
+        ),
     ):
         if auth is not None:
             return auth
@@ -1024,6 +1115,154 @@ def ftv_authorization_policy(
 
     # BUILDING sudden lift with helpers — do not wait for ELITE/EXPLODING.
     # Readiness already proved mid-rip/local-base heat; CHASE timing is OK here.
+    from app.config import get_settings as _pad_cfg_get
+
+    _pad_cfg = _pad_cfg_get()
+
+    if bool(getattr(_pad_cfg, "grade_a_ftv_first_lift_enabled", True)):
+        from app.engines.grade_a_ftv_capture import (
+            grade_a_ftv_expiry_worst_waive,
+            grade_a_ftv_first_lift_floors,
+        )
+
+        if grade_a_ftv_expiry_worst_waive(evidence):
+            from app.engines.grade_a_ftv_capture import grade_a_ftv_breadth_chase_blocked
+
+            breadth_alert = {
+                "side": evidence.get("side") or ranking.get("side"),
+                "localBaseMovePct": move,
+                "ictBaseRelativeMovePct": move,
+            }
+            breadth_blocked, breadth_reason = grade_a_ftv_breadth_chase_blocked(
+                breadth_alert,
+                None,
+                settings=_pad_cfg,
+                breadth_bias=str(evidence.get("breadthBias") or "NEUTRAL"),
+                entry_hour_ist=evidence.get("entryHourIst"),
+                allocation_rank=allocation_rank,
+            )
+            if breadth_blocked:
+                return blocked(breadth_reason)
+            floors = grade_a_ftv_first_lift_floors(_pad_cfg)
+            grade_a_ok = (
+                floors["minBaseMove"] <= move <= floors["maxBaseMove"]
+                and explosion_score >= floors["minScore"]
+                and quality >= floors["minQuality"]
+                and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+            )
+            if grade_a_ok:
+                if _allocation_rank_blocks_ftv(
+                    require_allocation_rank_one=require_allocation_rank_one,
+                    allocation_rank=allocation_rank,
+                    evidence=evidence,
+                ):
+                    return blocked("grade_a_ftv_requires_allocation_rank_1")
+                expiry_block = _expiry_worst_policy_ok(
+                    tier=tier, quality=quality, score=explosion_score, v3=v3,
+                )
+                if expiry_block is not None:
+                    return expiry_block
+                return FtvAuthorization(
+                    "GRADE_A_FTV_FIRST_LIFT",
+                    "ok",
+                    max_capital_pct=float(
+                        getattr(_pad_cfg, "grade_a_ftv_first_lift_max_capital_pct", 0.90)
+                        or 0.90
+                    ),
+                )
+
+    bullish_pad = bool(
+        evidence.get("bullishLocalBaseActive") or evidence.get("fastBullishLocalBase")
+    )
+    if bullish_pad:
+        pad_min = float(
+            getattr(_pad_cfg, "bullish_local_base_pad_min_explosion_score", 8.0) or 8.0
+        )
+        pad_max_move = float(
+            getattr(_pad_cfg, "bullish_local_base_pad_max_move_pct", 45.0) or 45.0
+        )
+        bullish_ok = (
+            tier in {"BUILDING", "EXPLODING", "ELITE"}
+            and explosion_score >= pad_min
+            and 2.0 <= move <= pad_max_move
+            and bool(
+                evidence.get("firstLift")
+                or evidence.get("armedBaseLaunch")
+                or evidence.get("armedBaseSustainedLift")
+                or evidence.get("vRipReady")
+            )
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        )
+        if bullish_ok:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
+                return blocked("bullish_local_base_pad_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "BULLISH_LOCAL_BASE_PAD",
+                "ok",
+                max_capital_pct=float(
+                    getattr(_pad_cfg, "bullish_local_base_pad_max_capital_pct", 0.90)
+                    or 0.90
+                ),
+            )
+
+    if bool(getattr(_pad_cfg, "first_lift_trade_enabled", True)):
+        first_lift_max = float(
+            getattr(_pad_cfg, "first_lift_trade_max_move_pct", 40.0) or 40.0
+        )
+        first_lift_quality = float(
+            getattr(_pad_cfg, "first_lift_trade_min_quality", 55.0) or 55.0
+        )
+        pad_max = float(
+            getattr(_pad_cfg, "first_lift_pad_local_base_max_pct", 25.0) or 25.0
+        )
+        strict_floor = min(
+            float(top_ftv_a_min_explosion_score),
+            float(winner_local_base_min_explosion_score),
+            float(ftv_s_strict_min_explosion_score),
+        )
+        first_lift_pad_ok = (
+            bool(evidence.get("firstLift"))
+            and bool(evidence.get("flatThenVertical") or evidence.get("activeBreakout"))
+            and tier in {"ELITE", "EXPLODING"}
+            and explosion_score >= effective_first_lift_min
+            and explosion_score < strict_floor
+            and quality >= first_lift_quality
+            and 2.0 <= move <= min(first_lift_max, pad_max)
+            and bool(
+                evidence.get("volumeAwaken")
+                or evidence.get("orderflowPositive")
+                or flat_velocity_lag
+                or micro_pullback
+            )
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED", "CHASE", "CHASING"}
+        )
+        if first_lift_pad_ok:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
+                return blocked("first_lift_pad_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "FIRST_LIFT_PAD",
+                "ok",
+                max_capital_pct=winner_local_base_max_capital_pct,
+            )
+
     if building_rip_ftv_enabled and bool(evidence.get("buildingRipReady")):
         helpers_ok = bool(
             evidence.get("buildingRipHelpersOk")
@@ -1064,6 +1303,111 @@ def ftv_authorization_policy(
                 "ok",
                 max_capital_pct=building_rip_ftv_max_capital_pct,
             )
+
+    if building_armed_base_grade_a_ftv_enabled:
+        readiness = str(evidence.get("firstLiftReadinessReason") or "")
+        from app.engines.building_ftv_gates import building_armed_base_grade_a_top_moment_ok
+
+        armed_base_ok = (
+            readiness == "armed_base_option_led_ready"
+            and building_armed_base_grade_a_top_moment_ok(
+                evidence, ranking, readiness_reason=readiness,
+            )
+            and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
+        )
+        if armed_base_ok:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
+                return blocked("building_armed_base_grade_a_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "BUILDING_ARMED_BASE_GRADE_A",
+                "ok",
+                max_capital_pct=building_armed_base_grade_a_ftv_max_capital_pct,
+            )
+
+    if building_coil_pad_ftv_enabled:
+        from app.engines.building_ftv_gates import building_coil_pad_grade_a_top_moment_ok
+
+        readiness = str(evidence.get("firstLiftReadinessReason") or "")
+        local_move = _number(evidence.get("localBaseMovePct"))
+        coil_pad_ok = (
+            bool(evidence.get("buildingCoilPad"))
+            and building_coil_pad_grade_a_top_moment_ok(
+                evidence, ranking, readiness_reason=readiness,
+            )
+            and building_coil_pad_min_local_move_pct
+            <= local_move
+            <= building_coil_pad_max_local_move_pct + 1e-6
+        )
+        if coil_pad_ok and timing in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}:
+            from app.engines.pad_lane_capture import pad_lane_ftv_waives_timing_block
+
+            if not pad_lane_ftv_waives_timing_block(evidence):
+                coil_pad_ok = False
+        if coil_pad_ok:
+            if _allocation_rank_blocks_ftv(
+                require_allocation_rank_one=require_allocation_rank_one,
+                allocation_rank=allocation_rank,
+                evidence=evidence,
+            ):
+                return blocked("building_coil_pad_ftv_requires_allocation_rank_1")
+            expiry_block = _expiry_worst_policy_ok(
+                tier=tier, quality=quality, score=explosion_score, v3=v3,
+            )
+            if expiry_block is not None:
+                return expiry_block
+            return FtvAuthorization(
+                "BUILDING_COIL_PAD_FTV",
+                "ok",
+                max_capital_pct=building_coil_pad_ftv_max_capital_pct,
+            )
+
+    if (
+        index_confirmed_ftv_auth_enabled
+        and bool(evidence.get("indexConfirmedLocalBase"))
+        and str(ranking.get("grade") or "").upper() in {"A", "B", "C", "S"}
+        and tier in {"ELITE", "EXPLODING"}
+        and not timing_blocked
+        and index_confirmed_ftv_min_local_base_move_pct
+        <= move
+        <= index_confirmed_ftv_max_local_base_move_pct
+        and explosion_score >= index_confirmed_ftv_min_explosion_score
+        and quality >= index_confirmed_ftv_min_quality
+        and (
+            flat_velocity_lag
+            or pad_lane_flat
+            or micro_pullback
+            or bool(
+                evidence.get("firstLift")
+                or evidence.get("armedBaseLaunch")
+                or evidence.get("vRipReady")
+            )
+        )
+    ):
+        if _allocation_rank_blocks_ftv(
+            require_allocation_rank_one=require_allocation_rank_one,
+            allocation_rank=allocation_rank,
+            evidence=evidence,
+        ):
+            return blocked("index_confirmed_ftv_requires_allocation_rank_1")
+        expiry_block = _expiry_worst_policy_ok(
+            tier=tier, quality=quality, score=explosion_score, v3=v3,
+        )
+        if expiry_block is not None:
+            return expiry_block
+        return FtvAuthorization(
+            "INDEX_CONFIRMED_FTV",
+            "ok",
+            max_capital_pct=index_confirmed_ftv_max_capital_pct,
+        )
 
     if not top_ftv_a_enabled:
         return blocked("ftv_elite_top_only_requires_s")
@@ -1124,6 +1468,8 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "building_rip_ftv_min_local_base_move_pct",
         "building_rip_ftv_max_local_base_move_pct",
         "building_rip_ftv_max_capital_pct",
+        "building_armed_base_grade_a_ftv_enabled",
+        "building_armed_base_grade_a_ftv_max_capital_pct",
         "slow_grind_ftv_enabled",
         "slow_grind_ftv_min_explosion_score",
         "slow_grind_ftv_min_flat_quality",
@@ -1157,6 +1503,10 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "early_radar_pad_ftv_min_explosion_score",
         "early_radar_pad_ftv_max_capital_pct",
         "early_radar_pad_max_off_low_pct",
+        "building_coil_pad_ftv_enabled",
+        "building_coil_pad_ftv_max_capital_pct",
+        "building_coil_pad_min_local_move_pct",
+        "building_coil_pad_max_local_move_pct",
         "top_moments_only_enabled",
         "top_moments_min_grade",
         "first_lift_local_base_micro_pullback_enabled",
@@ -1165,6 +1515,12 @@ def ftv_policy_settings(settings: Any) -> dict[str, Any]:
         "first_lift_local_base_flat_velocity_enabled",
         "first_lift_trade_min_score",
         "first_lift_helper_confirm_min_quality",
+        "index_confirmed_ftv_auth_enabled",
+        "index_confirmed_ftv_min_explosion_score",
+        "index_confirmed_ftv_min_quality",
+        "index_confirmed_ftv_min_local_base_move_pct",
+        "index_confirmed_ftv_max_local_base_move_pct",
+        "index_confirmed_ftv_max_capital_pct",
     )
     return {name: getattr(settings, name) for name in names}
 
@@ -1268,6 +1624,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     early_radar_pad = bool(evidence.get("earlyRadarPadCapture")) and not bool(
         evidence.get("midRipCoil")
     )
+    building_coil_pad = bool(evidence.get("buildingCoilPad")) and not bool(
+        evidence.get("midRipCoil")
+    )
     flat_vertical = bool(evidence.get("flatThenVertical"))
     active_breakout = bool(evidence.get("activeBreakout"))
     orderflow = bool(evidence.get("orderflowPositive"))
@@ -1326,6 +1685,9 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     elif early_radar_pad:
         score += 12.0
         reasons.append("early_radar_pad_ftv")
+    elif building_coil_pad:
+        score += 13.0
+        reasons.append("building_coil_pad_ftv")
     elif fast_bullish_local_base:
         score += 11.0
         reasons.append("fast_bullish_local_base")
@@ -1467,6 +1829,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             or premium_fvg_pad
             or double_dip_vbase
             or early_radar_pad
+            or building_coil_pad
         )
         and (
             v3 > 0
@@ -1494,6 +1857,15 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     from app.engines.pad_lane_capture import pad_lane_grade_floor_applies
 
     if pad_lane_grade_floor_applies(evidence) and not exhausted and not bool(
+        evidence.get("midRipCoil")
+    ):
+        if grade in {"REJECT", "C"}:
+            grade = "A"
+            score = max(score, 70.0)
+
+    from app.engines.index_confirmed_local_base import index_confirmed_grade_floor_applies
+
+    if index_confirmed_grade_floor_applies(evidence) and not exhausted and not bool(
         evidence.get("midRipCoil")
     ):
         if grade in {"REJECT", "C"}:
@@ -1531,6 +1903,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "premiumFvgPad": premium_fvg_pad,
             "doubleDipVbase": double_dip_vbase,
             "earlyRadarPadCapture": early_radar_pad,
+            "buildingCoilPad": building_coil_pad,
             "buildingRipReady": building_rip_ready,
             "buildingRipHelpersOk": bool(
                 evidence.get("buildingRipHelpersOk")
@@ -1546,6 +1919,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "displacement": bool(evidence.get("displacement")),
             "cvdBuying": cvd_buying,
             "cvdAcceleration": cvd_acceleration,
+            "indexConfirmedLocalBase": bool(evidence.get("indexConfirmedLocalBase")),
             "indexHelpersConfirm": bool(evidence.get("indexHelpersConfirm")),
             "indexTickSpike": bool(evidence.get("indexTickSpike")),
             "indexTickAlign": bool(evidence.get("indexTickAlign")),
@@ -1555,6 +1929,13 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "indexSpotMove9s": _number(evidence.get("indexSpotMove9s")),
             "explosionScore": round(explosion_score, 2),
             "flatVerticalQuality": round(flat_vertical_quality, 2),
+            "flatVerticalGrade": str(
+                evidence.get("flatVerticalGrade") or evidence.get("ictFlatVerticalGrade") or ""
+            ),
+            "symbol": str(evidence.get("symbol") or ""),
+            "bullishLocalBaseActive": bool(
+                evidence.get("bullishLocalBaseActive") or evidence.get("fastBullishLocalBase")
+            ),
             "tqs": round(tqs, 2),
             "timingAssessment": timing or None,
             "timingAction": timing_action or None,
@@ -1562,6 +1943,12 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "firstLiftLocalBaseFlatVelocity": flat_velocity_lag,
             "exhaustedReentry": exhausted,
             "faded": faded,
+            "shallowOtmLocalBaseTradeable": bool(
+                evidence.get("shallowOtmLocalBaseTradeable")
+            ),
+            "firstLiftReadinessReason": str(
+                evidence.get("firstLiftReadinessReason") or ""
+            ),
         },
     }
 
@@ -1605,8 +1992,26 @@ def rank_entry_candidate(
         )
     except Exception:
         pass
+    from zoneinfo import ZoneInfo
+
+    entry_hour_ist = None
+    if live_snapshot is not None and getattr(live_snapshot, "timestamp", None):
+        try:
+            entry_hour_ist = live_snapshot.timestamp.astimezone(ZoneInfo("Asia/Kolkata")).hour
+        except Exception:
+            entry_hour_ist = None
     evidence = {
         "mode": getattr(candidate, "mode", "") or ("explosion" if event else ""),
+        "side": (
+            getattr(getattr(candidate, "side", None), "value", None)
+            or str(getattr(candidate, "side", "") or alert.get("side") or "")
+        ).upper(),
+        "breadthBias": str(
+            getattr(getattr(live_snapshot, "breadth", None), "bias", None)
+            or alert.get("breadthBias")
+            or "NEUTRAL"
+        ).upper(),
+        "entryHourIst": entry_hour_ist,
         "tier": (
             getattr(candidate, "tier", "")
             or alert.get("tier")
@@ -1621,6 +2026,11 @@ def rank_entry_candidate(
             or alert.get("ictFlatVerticalQuality")
             or 0
         ),
+        "flatVerticalGrade": str(
+            alert.get("flatVerticalGrade") or alert.get("ictFlatVerticalGrade") or ""
+        ),
+        "symbol": str(getattr(candidate, "symbol", "") or alert.get("symbol") or ""),
+        "bullishLocalBaseActive": bool(alert.get("bullishLocalBaseActive")),
         "chartConfidence": chart_confidence,
         "velocity3s": getattr(event, "velocity_3s", 0) if event else alert.get("velocity3s"),
         "velocity9s": getattr(event, "velocity_9s", 0) if event else alert.get("velocity9s"),
@@ -1642,7 +2052,11 @@ def rank_entry_candidate(
         ),
         "firstLift": alert.get("ictFirstLift"),
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
-        "vRipReady": alert.get("ictVRipReady"),
+        "vRipReady": bool(
+            alert.get("ictVRipReady")
+            or alert.get("vRipReady")
+            or "v_rip" in str(alert.get("momentType") or alert.get("reason") or "").lower()
+        ),
         "fastBullishLocalBase": bool(
             alert.get("bullishLocalBaseActive")
             or alert.get("fastBullishLocalBaseReady")
@@ -1679,6 +2093,9 @@ def rank_entry_candidate(
         ),
         "earlyRadarPadCapture": bool(
             alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
+        ),
+        "buildingCoilPad": bool(
+            alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
         ),
         "buildingRipReady": alert.get("ictBuildingRipReady"),
         "buildingRipHelpersOk": bool(
@@ -1721,6 +2138,15 @@ def rank_entry_candidate(
             or alert.get("fadedVerticalRip")
             or alert.get("fadedRipCaution")
         ),
+        "shallowOtmLocalBaseTradeable": bool(
+            alert.get("shallowOtmLocalBaseTradeable")
+        ),
+        "firstLiftReadinessReason": str(
+            pretrade.get("firstLiftReadinessReason")
+            or alert.get("ictBaseReadinessReason")
+            or alert.get("readyReason")
+            or ""
+        ),
     }
     # Live index helpers when alert not yet stamped (ELITE/EXPLODING path).
     if live_snapshot is not None and not evidence.get("indexHelpersConfirm"):
@@ -1745,4 +2171,12 @@ def rank_entry_candidate(
             evidence["indexSpotMove9s"] = idx.velocity_9s
         except Exception:
             pass
+    from app.engines.index_confirmed_local_base import enrich_evidence_index_confirmed
+
+    enrich_evidence_index_confirmed(
+        evidence,
+        live_snapshot,
+        alert,
+        getattr(candidate, "side", ""),
+    )
     return rank_trade_evidence(evidence)

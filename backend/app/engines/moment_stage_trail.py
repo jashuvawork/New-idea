@@ -12,10 +12,117 @@ Uses FVG / fib TP2 / base→entry extension / velocity·volume to project max TP
 from __future__ import annotations
 
 import math
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from app.config import Settings, get_settings
-from app.models.schemas import PaperTrade
+from app.models.schemas import PaperTrade, Side, StrategyType
+
+
+def _trade_side_value(trade: PaperTrade) -> str:
+    side = trade.side
+    return str(getattr(side, "value", side) or "").upper()
+
+
+def _local_observed_best(trade: PaperTrade, pnl_pts: float = 0.0) -> float:
+    entry = _safe_float(getattr(trade, "entryPremium", 0))
+    max_ltp = _safe_float(getattr(trade, "maxLtp", 0))
+    observed = max(0.0, max_ltp - entry) if max_ltp > 0 and entry > 0 else 0.0
+    return max(_safe_float(getattr(trade, "bestPnlPoints", 0)), _safe_float(pnl_pts), observed)
+
+
+def _best_gain_pct(trade: PaperTrade, best_pts: float) -> float:
+    entry = _safe_float(getattr(trade, "entryPremium", 0))
+    best_pts = _safe_float(best_pts)
+    if entry <= 0 or best_pts <= 0:
+        return 0.0
+    return best_pts / entry * 100.0
+
+
+def _best_pts_from_gain_pct(trade: PaperTrade, gain_pct: float) -> float:
+    entry = _safe_float(getattr(trade, "entryPremium", 0))
+    gain_pct = _safe_float(gain_pct)
+    if entry <= 0 or gain_pct <= 0:
+        return 0.0
+    return entry * gain_pct / 100.0
+
+
+def cycle_moment_group_key(trade: PaperTrade) -> tuple[str, str, str] | None:
+    ctx = trade.entryContext or {}
+    cycle_id = str(ctx.get("entryCycleId") or "").strip()
+    if not cycle_id:
+        return None
+    symbol = str(trade.symbol or "").upper()
+    side = _trade_side_value(trade)
+    if not symbol or not side:
+        return None
+    return cycle_id, symbol, side
+
+
+def sync_cycle_moment_peaks(trades: Iterable[PaperTrade], *, settings: Settings | None = None) -> None:
+    """Share the best observed peak across same-cycle max-profit explosion legs."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "cycle_moment_peak_sync_enabled", True)):
+        return
+
+    groups: dict[tuple[str, str, str], list[PaperTrade]] = {}
+    for trade in trades:
+        if getattr(trade, "status", "OPEN") != "OPEN":
+            continue
+        if trade.strategyType != StrategyType.EXPLOSIVE:
+            continue
+        key = cycle_moment_group_key(trade)
+        if key is None:
+            continue
+        ctx = trade.entryContext or {}
+        if not (
+            ctx.get("maxProfitCapture")
+            or trade_uses_moment_stage_ladder(trade)
+        ):
+            continue
+        groups.setdefault(key, []).append(trade)
+
+    for group in groups.values():
+        peak_pct = max(
+            _best_gain_pct(trade, _local_observed_best(trade)) for trade in group
+        )
+        min_sync = _cfg_float(s, "cycle_moment_peak_sync_min_gain_pct", 50.0)
+        if peak_pct < min_sync:
+            continue
+        for trade in group:
+            ctx = dict(trade.entryContext or {})
+            prev = _safe_float(ctx.get("cycleMomentBestGainPct"))
+            if peak_pct + 1e-9 >= prev:
+                ctx["cycleMomentBestGainPct"] = round(peak_pct, 3)
+                trade.entryContext = ctx
+
+
+def effective_best_pnl(trade: PaperTrade, pnl_pts: float = 0.0) -> float:
+    """Best gain for exit floors — local peak plus same-cycle sibling %-gain peak."""
+    ctx = trade.entryContext or {}
+    cycle_pts = _best_pts_from_gain_pct(
+        trade, _safe_float(ctx.get("cycleMomentBestGainPct"))
+    )
+    return max(_local_observed_best(trade, pnl_pts), cycle_pts)
+
+
+def moment_stage_near_complete(
+    trade: PaperTrade,
+    best: float,
+    stage_size: float,
+    *,
+    settings: Settings | None = None,
+) -> bool:
+    """True when a max-profit leg reached most of stage 1 without clearing absolute stageSize."""
+    s = settings or get_settings()
+    stage = _safe_float(stage_size)
+    best = _safe_float(best)
+    if stage <= 0 or best <= 0:
+        return False
+    ctx = trade.entryContext or {}
+    if not bool(ctx.get("maxProfitCapture")):
+        return False
+    frac = _cfg_float(s, "moment_stage_near_complete_frac", 0.82)
+    return best < stage and best >= stage * max(0.0, min(1.0, frac))
 
 
 def trade_uses_moment_stage_ladder(trade: PaperTrade) -> bool:
@@ -349,7 +456,25 @@ def stage_trail_floor_pts(
         return None
 
     best = _safe_float(best)
+    ctx = trade.entryContext or {}
     if best < stage:
+        if moment_stage_near_complete(trade, best, stage, settings=s):
+            keep = _cfg_float(s, "ftv_runner_pct_trail_keep_ratio", 0.75)
+            floor_pts = round(max(_cfg_float(s, "moment_stage_min_remain_points", 1.0), best * keep), 2)
+            prev = _safe_float(ctx.get("stageTrailFloorPts"))
+            if prev > 0:
+                floor_pts = max(floor_pts, prev)
+            ctx = dict(ctx)
+            ctx["stageTrailFloorPts"] = floor_pts
+            ctx["stageLevelPts"] = round(stage, 2)
+            ctx["projectedMaxTp"] = round(projected, 1)
+            plan = dict(ctx.get("exitPlan") or {})
+            plan["stageTrailFloorPts"] = floor_pts
+            plan["stageLevelPts"] = round(stage, 2)
+            plan["projectedMaxTp"] = round(projected, 1)
+            ctx["exitPlan"] = plan
+            trade.entryContext = ctx
+            return floor_pts
         return None
 
     stages_hit = int(best // stage)
@@ -479,14 +604,18 @@ def ftv_runner_pct_floor(
     if entry <= 0 or best <= 0:
         return None
     arm_pct = _cfg_float(s, "ftv_runner_pct_trail_arm_pct", 25.0)
-    if (best / entry * 100.0) < arm_pct:
+    gain_pct = best / entry * 100.0
+    ctx = getattr(trade, "entryContext", None) or {}
+    arm_min_pts = _cfg_float(s, "ftv_runner_pct_trail_arm_min_best_points", 20.0)
+    max_profit = bool(ctx.get("maxProfitCapture"))
+    armed = gain_pct >= arm_pct or (max_profit and best >= arm_min_pts)
+    if not armed:
         return None
-    keep = _cfg_float(s, "ftv_runner_pct_trail_keep_ratio", 0.72)
+    keep = _cfg_float(s, "ftv_runner_pct_trail_keep_ratio", 0.75)
     # Closed loop: prefer the LEARNED per-moment keep-ratio when EOD learning stamped one
     # (ride high-hit movers harder, tighten low-hit buckets). Bounded to a safe band.
-    ctx = getattr(trade, "entryContext", None) or {}
     learned = _safe_float(ctx.get("learnedTrailKeepRatio"))
-    if learned > 0 and bool(getattr(s, "eod_learning_apply_enabled", True)):
+    if learned > 0 and bool(getattr(s, "eod_learning_apply_enabled", False)):
         keep = learned
     keep = min(0.95, max(0.5, keep))
     return round(best * keep, 2)

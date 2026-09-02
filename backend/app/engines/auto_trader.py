@@ -33,6 +33,8 @@ from app.engines.chart_exit_levels import refresh_open_trade_chart_plan, update_
 from app.engines.capital_allocator import (
     RankedAllocation,
     cap_lots_to_allocation,
+    effective_ranked_allocation,
+    one_lot_unit_cost_inr,
     capital_book_summary,
     clamp_lots,
     compute_lots,
@@ -174,13 +176,17 @@ def _try_claim_entry(candidate_key: str) -> object | None:
 
 async def refresh_trading_capital(client, *, force: bool = False) -> None:
     """Pull Upstox margin and sync risk engine exposure limits."""
-    settings = get_settings()
-    if settings.use_upstox_capital_for_sizing:
+    from app.engines.capital_allocator import should_use_live_broker_capital
+
+    if should_use_live_broker_capital():
         snap = await refresh_capital_from_upstox(client, force=force)
     else:
-        snap = get_capital_snapshot()
+        from app.engines.capital_allocator import ensure_paper_sizing_capital
+
+        snap = ensure_paper_sizing_capital()
     global _capital_inr
     _capital_inr = snap.availableMarginInr
+    settings = get_settings()
     from app.models.schemas import RiskProfile
     profile = _risk_engine.profile
     profile.maxExposureInr = snap.maxExposureInr
@@ -229,6 +235,10 @@ def _ensure_state_loaded() -> None:
             tid = str(row.get("id", ""))
             if tid and tid in seen_ids:
                 continue
+            from app.engines.session_trade_integrity import is_phantom_trade_row
+
+            if is_phantom_trade_row(row):
+                continue
             closed_raw = row.get("closedAt")
             if reset_at and closed_raw:
                 try:
@@ -255,13 +265,22 @@ def _ensure_state_loaded() -> None:
                     exitReason=exit_reason,
                     strategyType=StrategyType(str(row.get("strategyType") or "EXPLOSIVE")),
                     sessionDate=today,
+                    entryContext=row.get("entryContext") if isinstance(row.get("entryContext"), dict) else {},
                 ))
                 restored_closed += 1
             except Exception as e:
                 logger.warning("Failed to restore closed trade %s: %s", tid, e)
         if restored_closed:
             logger.info("Restored %d closed paper trades for %s", restored_closed, today)
-            _auto_trader_state.dailyReport = _calibration.build_report(_auto_trader_state.closedPaperTrades)
+        from app.engines.session_trade_integrity import purge_phantom_trades_from_state
+
+        purged = purge_phantom_trades_from_state(_auto_trader_state)
+        if purged:
+            logger.warning("Purged %d phantom trades from session state", purged)
+        if restored_closed or purged:
+            _auto_trader_state.dailyReport = _calibration.build_report(
+                _auto_trader_state.closedPaperTrades
+            )
     except Exception as e:
         logger.warning("Failed to hydrate closed trades: %s", e)
 
@@ -406,6 +425,11 @@ def _record_observed_max_ltp(trade: PaperTrade, current_ltp: float) -> None:
         ctx["maxLtpAt"] = trade.maxLtpAt.isoformat()
     trade.maxLtp = round(previous, 2)
     ctx["maxLtp"] = trade.maxLtp
+    entry = _finite_positive(trade.entryPremium)
+    if entry > 0 and previous > entry:
+        best_pts = round(previous - entry, 2)
+        if best_pts > _finite_positive(trade.bestPnlPoints):
+            trade.bestPnlPoints = best_pts
     giveback = max(0.0, previous - current)
     ctx["givebackFromMaxLtpPoints"] = round(giveback, 2)
     ctx["givebackFromMaxLtpPct"] = round(giveback / previous * 100.0, 3)
@@ -513,6 +537,7 @@ async def _open_from_candidate(
     news: Optional[list[dict]] = None,
     snapshots: Optional[dict[str, SymbolSnapshot]] = None,
     allocation: Optional[RankedAllocation] = None,
+    entry_cycle_id: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Open one trade from best-ranked setup — paper journal + optional live broker order."""
     settings = get_settings()
@@ -520,6 +545,7 @@ async def _open_from_candidate(
     snap = candidate.snap
     policy_decision = None
     policy_ranking = None
+    final_ranking = None
 
     # Jul29: stop scalp entries — explosions only.
     if not getattr(settings, "scalp_entries_enabled", False):
@@ -533,6 +559,7 @@ async def _open_from_candidate(
         from app.engines.session_mode_feedback import (
             exhausted_ftv_reentry_blocked,
             failed_launch_reentry_blocked,
+            reentry_ml_win_prob_blocked,
             session_peak_late_reentry_blocked,
         )
 
@@ -544,6 +571,17 @@ async def _open_from_candidate(
         )
         if fail_blocked:
             return False, "failed_launch_reentry_cooldown"
+
+        ml_blocked, _ml_meta = reentry_ml_win_prob_blocked(
+            state,
+            symbol=symbol,
+            side=candidate.side,
+            strike=float(candidate.strike or 0),
+            snap=snap,
+            confidence=float(candidate.score or 0),
+        )
+        if ml_blocked:
+            return False, "reentry_ml_win_prob_low"
 
         reentry_velocity = float(
             getattr(candidate.explosion_event, "velocity_3s", 0) or 0
@@ -638,7 +676,24 @@ async def _open_from_candidate(
     if snapshots:
         live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
         if live_blocked and settings.enable_live_trading:
-            return False, live_reason
+            if bool(getattr(settings, "live_disable_session_lift", True)):
+                return False, "live_no_session_lift"
+
+            from app.engines.chop_live_guards import chop_live_session_lift_allowed
+
+            if not chop_live_session_lift_allowed(state, snap, snapshots):
+                return False, "chop_live_worst_day_no_session_lift"
+
+            from app.engines.top_signal_session_lift import (
+                candidate_qualifies_top_signal_session_lift,
+                snapshots_have_top_signal_session_lift,
+            )
+
+            if not (
+                snapshots_have_top_signal_session_lift(snapshots)
+                or candidate_qualifies_top_signal_session_lift(candidate)
+            ):
+                return False, live_reason
 
         from app.engines.worst_day_guard import worst_day_allows_candidate
         from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
@@ -733,9 +788,9 @@ async def _open_from_candidate(
                 )
             )
         ):
-            from app.engines.elite_never_block import elite_never_block_active
+            from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-            if not elite_never_block_active(
+            if not elite_must_take_bypass_allowed(
                 candidate=candidate,
                 event=candidate.explosion_event,
                 alert=getattr(candidate, "alert", None)
@@ -791,7 +846,10 @@ async def _open_from_candidate(
         lots = cap_extended_chase_lots(lots, candidate.explosion_event, ict=chase_ict)
         if faded_rip_meta:
             lots = cap_faded_rip_lots(lots)
-        if timing_meta:
+        always_max_explosion = (
+            bool(getattr(settings, "explosion_always_force_max_lots", True))
+        )
+        if timing_meta and not always_max_explosion:
             from app.engines.entry_timing import cap_lots_for_timing
 
             lots = cap_lots_for_timing(lots, timing_meta)
@@ -1086,6 +1144,13 @@ async def _open_from_candidate(
         allocation=allocation,
         candidate=candidate,
     )
+    lots, armed_base_full_sleeve = _building_armed_base_grade_a_policy_max_lots(
+        lots=lots,
+        symbol=symbol,
+        premium=fill_premium,
+        policy_decision=policy_decision,
+        allocation=allocation,
+    )
     lots, pad_lane_full_sleeve = _pad_lane_ftv_policy_max_lots(
         lots=lots,
         symbol=symbol,
@@ -1106,10 +1171,17 @@ async def _open_from_candidate(
         strict_s_full_sleeve
         or top_ftv_a_full_sleeve
         or building_rip_full_sleeve
+        or armed_base_full_sleeve
         or pad_lane_full_sleeve
         or winner_index_full_sleeve
     )
-    if top_ftv_a_full_sleeve or building_rip_full_sleeve or pad_lane_full_sleeve or winner_index_full_sleeve:
+    if (
+        top_ftv_a_full_sleeve
+        or building_rip_full_sleeve
+        or armed_base_full_sleeve
+        or pad_lane_full_sleeve
+        or winner_index_full_sleeve
+    ):
         top_explosion_max = True
     force_max_size = full_sleeve_authorized
 
@@ -1140,6 +1212,8 @@ async def _open_from_candidate(
                 "PREMIUM_FVG_PAD_FTV",
                 "DOUBLE_DIP_VBASE_FTV",
                 "EARLY_RADAR_PAD_FTV",
+                "BUILDING_ARMED_BASE_GRADE_A",
+                "BUILDING_COIL_PAD_FTV",
             }
             and policy_decision.max_capital_pct is not None
         ):
@@ -1210,7 +1284,7 @@ async def _open_from_candidate(
     elite_full_lot = bool(
         getattr(settings, "elite_full_lot_enabled", True)
         and candidate.mode == "explosion"
-        and _tier_u == "ELITE"
+        and _tier_u in ("ELITE", "EXPLODING")
         and (
             index_confirmed_ftv
             or not bool(getattr(settings, "elite_full_lot_requires_index_confirm", True))
@@ -1265,6 +1339,11 @@ async def _open_from_candidate(
     if candidate.mode == "explosion" and trap_meta:
         from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
+        if index_confirmed_ftv:
+            trap_meta["indexConfirmedFtv"] = True
+        if good_day_ict and ict_meta.get("defensiveBaseRip"):
+            trap_meta["defensiveBaseRip"] = True
+
         # Must run AFTER good-day ICT max-lot force (Jul20 49-lot FOMO hole).
         bypass_soft = (
             full_sleeve_authorized and (
@@ -1291,7 +1370,10 @@ async def _open_from_candidate(
             or base_window_full_lots
             or bool(getattr(settings, "top_explosion_force_max_bypasses_first_green", True))
         )
-    ) or elite_full_lot
+    ) or elite_full_lot or (
+        candidate.mode == "explosion"
+        and bool(getattr(settings, "explosion_always_force_max_lots", True))
+    )
     if candidate.mode in ("explosion", "scalp") and not skip_first_green:
         from app.engines.session_mode_feedback import cap_lots_until_first_green
 
@@ -1301,6 +1383,7 @@ async def _open_from_candidate(
 
     # AFTER force-max: same-strike explosive win → cut next entry (Jul29 77500 CE).
     post_win_cap_meta: dict[str, Any] = {}
+    flip_cap_meta: dict[str, Any] = {}
     if candidate.mode == "explosion":
         from app.engines.session_mode_feedback import (
             cap_same_strike_explosion_reentry_after_win,
@@ -1338,8 +1421,62 @@ async def _open_from_candidate(
         if post_win_cap_meta.get("applied") or flip_cap_meta.get("applied"):
             top_explosion_max = False
 
-    lots = cap_lots_to_allocation(lots, symbol, fill_premium, allocation)
+    size_cap_applied = bool(
+        post_win_cap_meta.get("applied") or flip_cap_meta.get("applied")
+    )
+    from app.engines.capital_allocator import apply_explosion_always_max_lots
+
+    if not size_cap_applied:
+        lots = apply_explosion_always_max_lots(
+            lots,
+            symbol,
+            fill_premium,
+            mode=str(candidate.mode or ""),
+        )
+        if (
+            candidate.mode == "explosion"
+            and bool(getattr(settings, "explosion_always_force_max_lots", True))
+        ):
+            top_explosion_max = True
+
+    allocation_for_cap = allocation
+    use_full_remaining = False
+    if allocation is not None and allocation.rank == 1:
+        _cap_alert = (
+            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
+        )
+        try:
+            from app.engines.pad_lane_capture import ftv_direct_trade_active
+
+            use_full_remaining = bool(
+                full_sleeve_authorized
+                or ftv_direct_trade_active(
+                    candidate=candidate,
+                    alert=_cap_alert,
+                    snap=snap,
+                )
+            )
+        except Exception:
+            use_full_remaining = bool(full_sleeve_authorized)
+        if use_full_remaining:
+            allocation_for_cap = effective_ranked_allocation(
+                allocation,
+                use_full_remaining=True,
+            )
+
+    lots = cap_lots_to_allocation(
+        lots,
+        symbol,
+        fill_premium,
+        allocation_for_cap,
+        use_full_remaining=use_full_remaining,
+    )
     if lots <= 0:
+        unit_cost = one_lot_unit_cost_inr(symbol, fill_premium)
+        alloc_ref = allocation_for_cap or allocation
+        remaining = float(getattr(alloc_ref, "remainingBeforeInr", 0) or 0)
+        if unit_cost > 0 and remaining < unit_cost:
+            return False, "ftv_capital_insufficient_for_one_lot"
         return False, "ftv_allocation_below_one_lot"
 
     lot_mult = lot_multiplier(symbol)
@@ -1399,9 +1536,9 @@ async def _open_from_candidate(
                         building_rip_bypasses_fake_trap,
                         top_must_take_bypasses_fake_trap,
                     )
-                    from app.engines.elite_never_block import elite_never_block_active
+                    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-                    must_take = elite_never_block_active(
+                    must_take = elite_must_take_bypass_allowed(
                         event=candidate.explosion_event,
                         candidate=candidate,
                         alert=getattr(candidate, "alert", None),
@@ -1416,18 +1553,24 @@ async def _open_from_candidate(
                     ):
                         return False, trap_reason
                 if trap_meta.get("action") == "cut_size":
-                    bypass_soft = full_sleeve_authorized and (
-                        (bool(high_conviction) and bool(
-                            getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
-                        ))
-                        or (bool(top_explosion_max) and bool(
-                            getattr(settings, "top_explosion_force_max_bypasses_fake_trap_lot_cap", True)
-                        ))
-                        or (
-                            base_window_full_lots
-                            or bool(trap_meta.get("baseWindowFullLots"))
+                    if index_confirmed_ftv:
+                        trap_meta["indexConfirmedFtv"] = True
+                    if good_day_ict and ict_meta.get("defensiveBaseRip"):
+                        trap_meta["defensiveBaseRip"] = True
+                    bypass_soft = (
+                        full_sleeve_authorized and (
+                            (bool(high_conviction) and bool(
+                                getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
+                            ))
+                            or (bool(top_explosion_max) and bool(
+                                getattr(settings, "top_explosion_force_max_bypasses_fake_trap_lot_cap", True)
+                            ))
+                            or (
+                                base_window_full_lots
+                                or bool(trap_meta.get("baseWindowFullLots"))
+                            )
                         )
-                    )
+                    ) or index_confirmed_ftv
                     lots = cap_fake_explosion_trap_lots(
                         lots, trap_meta, bypass_soft_cap=bypass_soft,
                     )
@@ -1454,23 +1597,61 @@ async def _open_from_candidate(
             local_ichi_bypass = local_base_ichimoku_bypass_for_snap(
                 candidate.side, snap, explosion_event=candidate.explosion_event,
             )
+            from app.engines.pad_lane_capture import resolve_strict_pad_lane_chart_bypass
+
+            pad_lane_chart_bypass, strict_first_lift_bypass = (
+                resolve_strict_pad_lane_chart_bypass(candidate, snap)
+            )
+            from app.engines.spot_direction import index_trough_momentum_turn
+
+            _alert_row = (
+                candidate.alert
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            )
+            index_trough_bypass = bool(
+                (_alert_row or {}).get("ictIndexTroughSlowV")
+                or (_alert_row or {}).get("indexTroughSlowV")
+                or index_trough_momentum_turn(candidate.side, snap.spotChart)
+            )
+            from app.engines.ftv_candlestick_confirm import ftv_candlestick_bypass_for_snap
+
+            candlestick_bypass = ftv_candlestick_bypass_for_snap(
+                candidate.side,
+                snap,
+                explosion_event=candidate.explosion_event,
+                alert=(
+                    candidate.alert
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else None
+                ),
+            )
             expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
             from app.engines.spot_direction import hard_counter_trend_chart
 
             if (
                 getattr(settings, "chart_counter_trend_bypass_block_enabled", True)
                 and hard_counter_trend_chart(candidate.side, snap.spotChart)
+                and not strict_first_lift_bypass
+                and not index_trough_bypass
             ):
                 expiry_chart_bypass = False
                 premium_bypass = False
                 vertical_bypass = False
                 local_ichi_bypass = False
                 breadth_bypass = False
+                pad_lane_chart_bypass = False
+                candlestick_bypass = False
             blocked, chart_reason = chart_blocks_side(
                 candidate.side, snap.spotChart, trade_score=trade_score,
                 breadth_aligned_bypass=breadth_bypass,
-                premium_led_bypass=premium_bypass or vertical_bypass or local_ichi_bypass,
+                premium_led_bypass=(
+                    premium_bypass or vertical_bypass or local_ichi_bypass
+                    or pad_lane_chart_bypass or candlestick_bypass
+                ),
                 expiry_explosion_bypass=expiry_chart_bypass,
+                strict_first_lift_bypass=strict_first_lift_bypass,
+                index_trough_bypass=index_trough_bypass,
                 scalp_mode=(candidate.mode or "").lower() in {"scalp", "quick_sideways", "slow_bounce"},
             )
             if blocked:
@@ -1484,11 +1665,16 @@ async def _open_from_candidate(
                 "alignedWithChart": side_aligned_with_chart(candidate.side, snap.spotChart),
                 "chartBypassUsed": bool(
                     premium_bypass or vertical_bypass or expiry_chart_bypass
-                    or breadth_bypass or local_ichi_bypass
+                    or breadth_bypass or local_ichi_bypass or pad_lane_chart_bypass
+                    or candlestick_bypass or strict_first_lift_bypass
+                    or index_trough_bypass
                 ),
                 "premiumLedBypass": premium_bypass,
                 "verticalRipBypass": vertical_bypass,
                 "localBaseIchimokuBypass": local_ichi_bypass,
+                "padLaneChartBypass": pad_lane_chart_bypass,
+                "ftvCandlestickBypass": candlestick_bypass,
+                "strictFirstLiftBypass": strict_first_lift_bypass,
                 "expiryExplosionBypass": expiry_chart_bypass,
             }
     else:
@@ -1506,6 +1692,14 @@ async def _open_from_candidate(
     if local_base_prem <= 0:
         top = snap.topExplosion or {}
         local_base_prem = float(top.get("ictBasePremium") or 0)
+
+    # Size so a normal retest to the local base can't trip the per-trade/daily stop and shake
+    # the winner out (Aug31 24150 CE: full-capital size → the ₹37→₹33.6 base retest hit the
+    # ₹20k cap BEFORE the +185% rally). Protective: only reduces lots, never raises them.
+    if candidate.mode == "explosion" and local_base_prem > 0 and fill_premium > 0:
+        from app.engines.capital_allocator import cap_lots_for_base_retest
+
+        lots = cap_lots_for_base_retest(lots, symbol, fill_premium, local_base_prem)
 
     exit_plan = _attach_exit_plan(
         snap, candidate.strategy_type, candidate.side.value,
@@ -1530,11 +1724,23 @@ async def _open_from_candidate(
         top_explosion_max=top_explosion_max,
         faded_rip=bool(faded_rip_meta),
         post_win_capped=bool(post_win_cap_meta.get("applied")),
+        explosion_always_max=(
+            candidate.mode == "explosion"
+            and bool(getattr(settings, "explosion_always_force_max_lots", True))
+        ),
     )
-    # ELITE full-capital sleeve: keep cash-affordable lots; do not shrink to fit an 8% SL INR budget.
+    # ELITE / EXPLODING full-capital sleeve: keep cash-affordable lots; do not shrink
+    # to fit an 8% SL INR budget.
     if elite_full_lot and bool(
         getattr(settings, "elite_full_lot_preserve_lots_over_sl_budget", True)
     ):
+        top_rank_full_budget_lots = True
+    live_structural_hold = (
+        bool(getattr(settings, "enable_live_trading", False))
+        and bool(getattr(settings, "live_hold_to_structural_sl", False))
+        and candidate.mode == "explosion"
+    )
+    if live_structural_hold:
         top_rank_full_budget_lots = True
     exit_plan = tune_exit_plan_for_position(
         exit_plan,
@@ -1919,7 +2125,7 @@ async def _open_from_candidate(
         # samples exist, stamp the LEARNED trail keep-ratio so the runner rides high-hit
         # movers (e.g. SENSEX ELITE FTV, learned ~0.85) harder and tightens low-hit buckets
         # (~0.60). Near-base / stop learned fields are stamped observe-only for now.
-        if bool(getattr(settings, "eod_learning_apply_enabled", True)):
+        if bool(getattr(settings, "eod_learning_apply_enabled", False)):
             try:
                 from app.engines.eod_ftv_learning import learned_ftv_profile
 
@@ -2067,6 +2273,9 @@ async def _open_from_candidate(
         ctx_extra["regime"] = regime.value if hasattr(regime, "value") else str(regime)
         ctx_extra.update(candidate.pretrade_meta or {})
 
+    if entry_cycle_id:
+        ctx_extra["entryCycleId"] = str(entry_cycle_id)
+
     if not ctx_extra.get("instrumentKey"):
         if instrument_key:
             ctx_extra["instrumentKey"] = instrument_key
@@ -2160,6 +2369,52 @@ async def _open_from_candidate(
         ctx_extra["ftvAuthorizationMode"] = final_policy.mode
         ctx_extra["ftvAuthorizationReason"] = final_policy.reason
         ctx_extra["ftvMaxCapitalPct"] = final_policy.max_capital_pct
+
+    if is_live and candidate.mode == "explosion":
+        from app.engines.live_best_trades import live_best_trade_entry_blocked
+
+        live_blocked, live_reason, live_meta = live_best_trade_entry_blocked(
+            candidate,
+            snap,
+            state,
+            snapshots=snapshots,
+            ranking=final_ranking or policy_ranking,
+            chart_meta=chart_meta if chart_meta else None,
+        )
+        if live_blocked:
+            return False, live_reason
+        ctx_extra["liveBestTradeGate"] = True
+        ctx_extra.update({k: v for k, v in live_meta.items() if k != "liveBestTradeGate"})
+
+    from app.engines.chop_live_guards import (
+        chop_live_entry_blocked,
+        chop_live_guard_day_active,
+        chop_second_same_side_leg_blocked,
+    )
+
+    if candidate.mode == "explosion" and (
+        is_live or chop_live_guard_day_active(state, snap, snapshots)
+    ):
+        chop_blocked, chop_reason, chop_meta = chop_live_entry_blocked(
+            candidate,
+            snap,
+            state,
+            snapshots=snapshots,
+            chart_meta=chart_meta if chart_meta else None,
+        )
+        if chop_blocked:
+            return False, chop_reason
+        leg_blocked, leg_reason, leg_meta = chop_second_same_side_leg_blocked(
+            candidate,
+            state,
+            snap,
+            snapshots=snapshots,
+        )
+        if leg_blocked:
+            return False, leg_reason
+        if chop_live_guard_day_active(state, snap, snapshots):
+            ctx_extra["chopLiveGuard"] = True
+            ctx_extra.update({k: v for k, v in chop_meta.items() if k != "chopLiveGuard"})
 
     if is_live or use_parity:
         if not client:
@@ -2343,8 +2598,21 @@ def get_state() -> AutoTraderState:
     return _auto_trader_state
 
 
+def entries_execution_active(state: Optional[AutoTraderState] = None) -> bool:
+    """Whether the entry loop may place new trades (ignores manual stop by default)."""
+    settings = get_settings()
+    if not settings.auto_trading_enabled:
+        return False
+    if getattr(settings, "execution_stop_endpoint_pauses_entries", False):
+        st = state if state is not None else _auto_trader_state
+        return bool(st and st.running)
+    return True
+
+
 def stop_trading() -> None:
-    get_state().running = False
+    settings = get_settings()
+    if getattr(settings, "execution_stop_endpoint_pauses_entries", False):
+        get_state().running = False
 
 
 def resume_trading() -> None:
@@ -2358,6 +2626,9 @@ def reset_session_calibration() -> None:
     reset_preorder_rejection_suppressions()
     reset_session_guards()
     reset_session_profit_gate()
+    from app.engines.chop_live_guards import reset_chop_live_adoption_cache
+
+    reset_chop_live_adoption_cache()
 
 
 def reset_session(*, preserve_open_trades: bool = True) -> None:
@@ -2421,6 +2692,10 @@ async def _process_open_trades(
     """Evaluate exits on open trades — safe for tick-fast path."""
     settings = get_settings()
     skipped: list[dict[str, Any]] = []
+
+    from app.engines.moment_stage_trail import sync_cycle_moment_peaks
+
+    sync_cycle_moment_peaks(state.openPaperTrades, settings=settings)
 
     for trade in list(state.openPaperTrades):
         if trade.status != "OPEN":
@@ -2560,6 +2835,19 @@ async def _process_open_trades(
                 await _checkpoint_open_trade_if_due(trade, settings)
             except Exception as exc:
                 logger.warning("Open-trade mark checkpoint failed for %s: %s", trade.id, exc)
+            continue
+
+        from app.engines.session_trade_integrity import is_phantom_session_trade
+
+        if is_phantom_session_trade(trade):
+            logger.warning(
+                "Dropped phantom trade exit: %s %s strike=%s id=%s",
+                trade.symbol,
+                trade.side,
+                trade.strike,
+                trade.id,
+            )
+            state.openPaperTrades = [t for t in state.openPaperTrades if t.id != trade.id]
             continue
 
         exit_claim = _try_claim_exit(trade.id)
@@ -2936,17 +3224,23 @@ def _top_rank_full_budget_lots_allowed(
     top_explosion_max: bool,
     faded_rip: bool,
     post_win_capped: bool,
+    explosion_always_max: bool = False,
 ) -> bool:
-    """Keep full sleeve lots only for the strongest fresh rank-1 moment."""
-    return bool(
+    """Keep cash-affordable lots — do not SL-shrink fresh top / always-max entries."""
+    if not (
         enabled
         and allocation is not None
-        and allocation.rank == 1
-        and strict_first_lift
         and top_explosion_max
         and not faded_rip
-        and not         post_win_capped
-    )
+        and not post_win_capped
+    ):
+        return False
+    if allocation.rank == 1 and strict_first_lift:
+        return True
+    # Aug28 NIFTY 24200/24100: explosion_always_force_max_lots raised lots to
+    # capital max, then tune_exit_plan_for_position shrank to 1 lot because FTV
+    # full-sleeve was not stamped (strict_first_lift=False).
+    return bool(explosion_always_max)
 
 
 def _enforce_top_moment_max_lots_only(
@@ -2962,6 +3256,10 @@ def _enforce_top_moment_max_lots_only(
     meta: dict[str, Any] = {}
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         meta["topMomentMaxLots"] = True
+        return int(lots), meta
+    if bool(getattr(settings, "explosion_always_force_max_lots", True)):
+        meta["topMomentMaxLots"] = True
+        meta["explosionAlwaysMaxLots"] = True
         return int(lots), meta
     if not bool(getattr(settings, "top_moments_max_lots_only_enabled", True)):
         meta["topMomentMaxLots"] = True
@@ -3033,6 +3331,41 @@ def _top_ftv_a_policy_max_lots(
         premium,
         float(policy_decision.max_capital_pct),
     )
+    return max(int(lots), max_lots), True
+
+
+def _building_armed_base_grade_a_policy_max_lots(
+    *,
+    lots: int,
+    symbol: str,
+    premium: float,
+    policy_decision: Any,
+    allocation: RankedAllocation | None,
+) -> tuple[int, bool]:
+    """Max lots for grade-B/C armed-base pad entries at local base."""
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "building_armed_base_grade_a_ftv_force_max_lots", True)
+    ):
+        return int(lots), False
+    authorized = bool(
+        policy_decision is not None
+        and policy_decision.mode == "BUILDING_ARMED_BASE_GRADE_A"
+        and policy_decision.allowed
+        and policy_decision.max_capital_pct is not None
+        and allocation is not None
+        and allocation.rank == 1
+    )
+    if not authorized:
+        return int(lots), False
+
+    from app.engines.capital_allocator import max_lots_for_capital_pct
+
+    capital_pct = max(
+        float(policy_decision.max_capital_pct),
+        float(getattr(settings, "per_trade_capital_pct", 0.90) or 0.90),
+    )
+    max_lots = max_lots_for_capital_pct(symbol, premium, capital_pct)
     return max(int(lots), max_lots), True
 
 
@@ -3118,6 +3451,7 @@ def _pad_lane_ftv_policy_max_lots(
         "PREMIUM_FVG_PAD_FTV": "premium_fvg_pad_ftv_force_max_lots",
         "DOUBLE_DIP_VBASE_FTV": "double_dip_vbase_ftv_force_max_lots",
         "EARLY_RADAR_PAD_FTV": "early_radar_pad_ftv_force_max_lots",
+        "BUILDING_COIL_PAD_FTV": "building_coil_pad_ftv_force_max_lots",
     }.get(mode, "")
     if force_attr and not bool(getattr(settings, force_attr, True)):
         return int(lots), False
@@ -3269,6 +3603,20 @@ async def process(
 
     state.chopGuards = chop_guard_summary(state, snapshots)
 
+    if settings.enable_live_trading and client is not None:
+        from app.engines.chop_live_guards import adopt_untracked_broker_legs
+
+        adopted = await adopt_untracked_broker_legs(state, client, snapshots)
+        for row in adopted:
+            skipped.append({
+                "symbol": row.get("symbol"),
+                "reason": "broker_leg_adopted",
+                "message": (
+                    f"Adopted untracked broker leg {row.get('side')} "
+                    f"{row.get('strike')} for exit management"
+                ),
+            })
+
     if not profit_gate.newEntriesAllowed:
         skipped.append({
             "symbol": "SESSION",
@@ -3287,8 +3635,7 @@ async def process(
         })
 
     if (
-        state.running
-        and settings.auto_trading_enabled
+        settings.auto_trading_enabled
         and market_live
         and profit_gate.newEntriesAllowed
         and (entries_ok or explosion_early_ok)
@@ -3321,13 +3668,20 @@ async def process(
                 "reason": "daily_trade_cap_elite_bypass",
                 "message": "Daily trade cap lifted — ELITE / top explosive only",
             })
-        from app.engines.pretrade_validator import controlled_daily_cap_reached, check_last_n_trades_pause
-        ctrl_cap, ctrl_reason = controlled_daily_cap_reached(state, snapshots)
+        from app.engines.pretrade_validator import check_last_n_trades_pause, resolve_controlled_daily_cap
+        ctrl_cap, ctrl_reason, ctrl_meta = resolve_controlled_daily_cap(state, snapshots)
+        ctrl_elite_only = bool(ctrl_meta.get("controlledCapEliteOnly"))
         if ctrl_cap:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": ctrl_reason,
                 "message": "Controlled trading daily cap",
+            })
+        elif ctrl_elite_only:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": ctrl_reason,
+                "message": "Controlled cap lifted — ELITE / top explosive only",
             })
         last_n_paused, last_n_reason, last_n_meta = check_last_n_trades_pause(state, snapshots)
         if last_n_paused:
@@ -3347,24 +3701,31 @@ async def process(
             })
         from app.engines.expiry_day_guards import (
             check_expiry_entry_allowed,
-            is_expiry_elite_top_candidate,
+        )
+        from app.engines.top_signal_session_lift import (
+            candidate_qualifies_daily_cap_elite_bypass,
+            snapshots_have_top_signal_session_lift,
         )
         from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
 
         policy, policy_meta = session_entry_policy(state, snapshots)
-        from app.engines.elite_never_block import snapshots_have_top_must_take
-        from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
+        extreme_session = snapshots_have_top_signal_session_lift(snapshots)
+        session_lift = extreme_session
+        if settings.enable_live_trading and extreme_session and snapshots:
+            from app.engines.chop_live_guards import chop_live_session_lift_allowed
 
-        extreme_session = snapshots_have_all_in_explosion(snapshots)
-        must_take_session = snapshots_have_top_must_take(snapshots)
-        if policy == "PAUSED" and not extreme_session and not must_take_session:
+            ref_snap = next(iter(snapshots.values()))
+            lift_ok = chop_live_session_lift_allowed(state, ref_snap, snapshots)
+            if not lift_ok or bool(getattr(settings, "live_disable_session_lift", True)):
+                session_lift = False
+        if policy == "PAUSED" and not session_lift:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": policy_meta.get("pauseReason", "worst_day_paused"),
                 "message": f"Worst day — trading paused ({', '.join(policy_meta.get('worstDay', {}).get('reasons', []))})",
             })
         live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
-        if live_blocked and not must_take_session:
+        if live_blocked and not session_lift:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": live_reason,
@@ -3372,7 +3733,7 @@ async def process(
             })
 
         expiry_ok, expiry_reason, expiry_meta = check_expiry_entry_allowed(state, snapshots)
-        if not expiry_ok and not must_take_session:
+        if not expiry_ok and not session_lift:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": expiry_reason,
@@ -3380,24 +3741,40 @@ async def process(
                 and f"Expiry guard — {', '.join(expiry_meta.get('worstDayReasons', []))}"
                 or "Expiry-day entry blocked",
             })
+        from app.engines.power_hour_guards import check_power_hour_session_allowed
+
+        power_ok, power_reason, power_meta = check_power_hour_session_allowed(state, snapshots)
+        if not power_ok and not session_lift:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": power_reason,
+                "message": "Power hour (15:00+) — top FTV/V/ELITE/explosives only",
+            })
         session_entries_ok = (
             not paused and not cap_hit and not ctrl_cap and not last_n_paused
             and not whipsaw_paused
-            and (expiry_ok or must_take_session)
-            and (policy != "PAUSED" or extreme_session or must_take_session)
-            and (not live_blocked or must_take_session)
+            and (expiry_ok or session_lift)
+            and (power_ok or session_lift)
+            and (policy != "PAUSED" or session_lift)
+            and (not live_blocked or session_lift)
         )
         if session_entries_ok:
             allocation_enabled = bool(
                 getattr(settings, "ftv_ranked_allocation_enabled", True)
             )
+            best_only = bool(getattr(settings, "selector_best_only_enabled", True))
             max_positions = max(
                 1,
                 int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
             )
+            if best_only:
+                max_positions = 1
             # Non-FTV explosions are skipped without consuming a sleeve; inspect
             # enough ranked legs to reach genuine first-lift candidates farther down.
-            attempt_limit = max_positions * 10 if allocation_enabled else 1
+            if best_only:
+                attempt_limit = 1
+            else:
+                attempt_limit = max_positions * 10 if allocation_enabled else 1
             excluded_keys: set[str] = set()
             allocation_rows: list[dict[str, Any]] = []
             found_candidate = False
@@ -3481,11 +3858,21 @@ async def process(
                         "tier": getattr(best, "tier", None),
                     })
                     continue
-                if cap_elite_only and not is_expiry_elite_top_candidate(best):
+                if cap_elite_only and not candidate_qualifies_daily_cap_elite_bypass(best):
                     skipped.append({
                         "symbol": best.symbol,
                         "reason": "daily_trade_cap_elite_only",
                         "message": "Daily trade cap — only ELITE / top explosive allowed",
+                        "mode": best.mode,
+                        "score": best.score,
+                        "tier": getattr(best, "tier", None),
+                    })
+                    continue
+                if ctrl_elite_only and not candidate_qualifies_daily_cap_elite_bypass(best):
+                    skipped.append({
+                        "symbol": best.symbol,
+                        "reason": "controlled_cap_elite_only",
+                        "message": "Controlled cap — only ELITE / top explosive allowed",
                         "mode": best.mode,
                         "score": best.score,
                         "tier": getattr(best, "tier", None),
@@ -3598,6 +3985,7 @@ async def process(
                             news,
                             snapshots,
                             allocation=allocation,
+                            entry_cycle_id=cycle_id,
                         )
                     except BaseException as exc:
                         cancelled = isinstance(exc, asyncio.CancelledError)
@@ -3640,6 +4028,21 @@ async def process(
                             "selectionMode": best.mode,
                             "selectionScore": best.score,
                         })
+                        from app.services.operator_event_log import append_operator_event
+
+                        append_operator_event(
+                            "entry_blocked",
+                            {
+                                "symbol": best.symbol.upper(),
+                                "side": best.side.value,
+                                "strike": best.strike,
+                                "reason": reason,
+                                "mode": best.mode,
+                                "score": round(float(best.score or 0), 2),
+                                "tier": getattr(best, "tier", None),
+                                "cycleId": cycle_id,
+                            },
+                        )
                         skipped.append(
                             {
                                 "symbol": best.symbol,

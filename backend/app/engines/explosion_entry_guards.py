@@ -329,6 +329,83 @@ def entry_window_bounds(
     return lo, hi
 
 
+def post_impulse_consolidation_entry_blocked(
+    explosion_event: Any = None,
+    *,
+    alert: Optional[dict[str, Any]] = None,
+    snap: Any = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block armed-base entries during post-open consolidation without fresh expansion."""
+    from app.engines.early_radar_pad_capture import (
+        POST_IMPULSE_CONSOLIDATION_BLOCKED,
+        post_impulse_consolidation_active,
+    )
+
+    s = settings or get_settings()
+    row = alert if isinstance(alert, dict) else {}
+    side = str(
+        row.get("side")
+        or getattr(getattr(explosion_event, "side", None), "value", "")
+        or getattr(explosion_event, "side", "")
+        or ""
+    ).upper()
+    if not post_impulse_consolidation_active(snap, side, s):
+        return False, ""
+    if bool(
+        row.get("ictFirstLift")
+        or row.get("ictArmedBaseLaunch")
+        or row.get("armedBaseLaunch")
+    ):
+        return False, ""
+    v3 = float(row.get("velocity3s") or getattr(explosion_event, "velocity_3s", 0) or 0)
+    v9 = float(row.get("velocity9s") or getattr(explosion_event, "velocity_9s", 0) or 0)
+    hot_v3 = float(getattr(s, "post_impulse_consolidation_min_velocity_3s", 0.8) or 0.8)
+    hot_v9 = float(getattr(s, "post_impulse_consolidation_min_velocity_9s", 0.5) or 0.5)
+    if v3 >= hot_v3 or v9 >= hot_v9:
+        return False, ""
+    return True, POST_IMPULSE_CONSOLIDATION_BLOCKED
+
+
+def tier_promotion_pad_chase_blocked(
+    explosion_event: Any,
+    *,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
+    """Block ELITE/EXPLODING entries promoted off the pad without a pad stamp.
+
+    Aug28 NIFTY 24250 CE 10:17: ELITE at 8.4% baseRel after a micro-rip — chase,
+    not cold-trough entry. Pad-stamped cold-trough lanes may still enter.
+    """
+    settings = get_settings()
+    if not getattr(settings, "tier_promotion_pad_chase_block_enabled", True):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+
+    tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False, ""
+
+    from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+
+    resolved = alert if isinstance(alert, dict) else {}
+    if alert_has_early_radar_pad_capture(resolved):
+        from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_ready
+
+        if alert_has_early_radar_pad_ready(resolved):
+            return False, ""
+
+    threshold = float(
+        getattr(settings, "tier_promotion_pad_chase_min_base_rel_pct", 8.0) or 8.0
+    )
+    base_rel = effective_local_base_move_pct(explosion_event, ict)
+    if base_rel > threshold + 1e-6:
+        return True, f"tier_promotion_pad_chase_blocked_{base_rel:.1f}%"
+    return False, ""
+
+
 def explosion_entry_window_blocked(
     explosion_event: Any,
     *,
@@ -373,7 +450,7 @@ def explosion_entry_window_blocked(
             # the accumulated EOD knowledge — take nearer the local base, skip the milder
             # off-base chases this moment type historically didn't sustain. TIGHTEN-ONLY and
             # floored so genuine near-base first lifts (<= floor) are never blocked.
-            if bool(getattr(settings, "eod_learning_apply_enabled", True)):
+            if bool(getattr(settings, "eod_learning_apply_enabled", False)):
                 try:
                     from app.engines.eod_ftv_learning import learned_ftv_profile
 
@@ -462,7 +539,9 @@ def immature_explosion_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
     bullish_local_base: bool = False,
+    skip_elite_bypass: bool = False,
 ) -> tuple[bool, str]:
     """
     Block hot-velocity / displacement noise before a real premium rip prints.
@@ -477,10 +556,11 @@ def immature_explosion_blocked(
     if explosion_event is None:
         return False, ""
 
-    from app.engines.elite_never_block import elite_never_block_active
+    if not skip_elite_bypass:
+        from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    if elite_never_block_active(event=explosion_event, ict=ict):
-        return False, ""
+        if elite_must_take_bypass_allowed(event=explosion_event, ict=ict, alert=alert):
+            return False, ""
 
     move = _session_peak_move(explosion_event)
     if ict is not None:
@@ -537,11 +617,44 @@ def immature_explosion_blocked(
         ):
             v_lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
             v_hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
-            if (
-                v_lo <= base_move <= v_hi
-                and bool(getattr(ict, "volume_awakening", False))
+            from app.engines.explosion_detector import first_lift_pad_capture_lane
+
+            peak_pad = first_lift_pad_capture_lane(
+                tier=str(getattr(explosion_event, "tier", "") or ""),
+                peak_move_pct=_session_peak_move(explosion_event),
+                first_lift_ready=bool(getattr(ict, "first_lift", False)),
+                local_base_move_pct=base_move,
+                v_rip_ready=True,
+            )
+            if v_lo <= base_move <= v_hi and (
+                bool(getattr(ict, "volume_awakening", False)) or peak_pad
             ):
                 local_floor = min(local_floor, v_lo)
+        # Aug28 SENSEX PUT 77500: ict_base_armed prelaunch at 5.4% lb blocked as immature.
+        if (
+            bool(getattr(ict, "base_armed", False))
+            and not bool(getattr(ict, "armed_base_launch", False))
+            and str(getattr(explosion_event, "tier", "") or "").upper()
+            in ("ELITE", "EXPLODING")
+        ):
+            pad_min = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+            pad_max = float(
+                getattr(settings, "early_radar_pad_max_local_move_pct", 20.0) or 20.0
+            )
+            min_score = float(
+                getattr(
+                    settings,
+                    "early_radar_pad_exploding_prelaunch_min_score",
+                    25.0,
+                )
+                or 25.0
+            )
+            score = float(getattr(explosion_event, "explosion_score", 0) or 0)
+            if (
+                pad_min <= base_move <= pad_max + 1e-6
+                and score >= min_score
+            ):
+                local_floor = min(local_floor, pad_min)
         if base_move >= local_floor:
             return False, ""
         return True, f"immature_local_base_{base_move:.1f}%"
@@ -606,6 +719,7 @@ def live_explosion_confirmation_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
     midday_chop: Optional[bool] = None,
     premium_capture: bool = False,
     snap: Optional[SymbolSnapshot] = None,
@@ -634,15 +748,48 @@ def live_explosion_confirmation_blocked(
         snap=snap,
         event=explosion_event,
         ict=ict,
+        alert=alert,
     ):
         return False, ""
 
-    from app.engines.elite_never_block import elite_never_block_active
+    if snap is not None and isinstance(alert, dict):
+        from app.engines.index_confirmed_local_base import index_confirmed_local_base
 
-    if elite_never_block_active(event=explosion_event, ict=ict, snap=snap):
-        return False, ""
+        side = getattr(explosion_event, "side", None)
+        if index_confirmed_local_base(side, snap, alert):
+            return False, ""
 
     tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    if (
+        ict is not None
+        and bool(getattr(ict, "base_armed", False))
+        and not bool(getattr(ict, "armed_base_launch", False))
+        and tier in ("ELITE", "EXPLODING")
+    ):
+        base_rel = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+        pad_min = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+        pad_max = float(
+            getattr(settings, "early_radar_pad_max_local_move_pct", 20.0) or 20.0
+        )
+        min_score = float(
+            getattr(
+                settings,
+                "early_radar_pad_exploding_prelaunch_min_score",
+                25.0,
+            )
+            or 25.0
+        )
+        score = float(getattr(explosion_event, "explosion_score", 0) or 0)
+        if pad_min <= base_rel <= pad_max + 1e-6 and score >= min_score:
+            return False, ""
+
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
+
+    if elite_must_take_bypass_allowed(
+        event=explosion_event, ict=ict, snap=snap, alert=alert,
+    ):
+        return False, ""
+
     if tier not in ("ELITE", "EXPLODING", "BUILDING"):
         return False, ""
 
@@ -741,10 +888,81 @@ def live_explosion_confirmation_blocked(
     return False, ""
 
 
+def post_peak_chase_blocked(
+    explosion_event: Any,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Don't chase the EXHAUSTION of a completed move — block buying near the top of a run
+    that already happened (symmetric for CE and PE, since we always buy the option premium).
+
+    Reads the contract's recent premium history: if a run of >= min_run occurred in the
+    lookback window AND the current premium is within near_top_frac of that window's peak,
+    the leg is spent and this is a late chase (today's live PUT 23950: bought near the low
+    at 10:47 as the down-move exhausted, then the market V-reversed and stopped it). A genuine
+    near-base entry is exempt by construction — current sits near the window LOW, not its peak.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "explosion_post_peak_chase_guard_enabled", True)):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+    sym = str(getattr(explosion_event, "symbol", "") or "")
+    side = getattr(explosion_event, "side", None)
+    strike = float(getattr(explosion_event, "strike", 0) or 0)
+    if not sym or side is None:
+        return False, ""
+    lookback = float(
+        getattr(settings, "explosion_post_peak_chase_lookback_seconds", 900.0) or 900.0
+    )
+    min_run = float(
+        getattr(settings, "explosion_post_peak_chase_min_run_pct", 0.25) or 0.25
+    )
+    near_top = float(
+        getattr(settings, "explosion_post_peak_chase_near_top_frac", 0.12) or 0.12
+    )
+    try:
+        from app.engines.explosion_detector import (
+            get_session_low_premium,
+            get_session_peak_premium,
+            recent_premium_run,
+        )
+
+        r = recent_premium_run(sym, strike, side, lookback_seconds=lookback)
+    except Exception:
+        return False, ""
+    high = float(r.get("high") or 0)
+    current = float(r.get("current") or 0)
+    run = float(r.get("run") or 0)
+    if high <= 0 or current <= 0:
+        return False, ""
+    if run >= min_run and current >= high * (1.0 - near_top):
+        return True, "explosion_post_peak_chase"
+
+    # Session-level post-peak: a SLOW-GRIND rip (e.g. PE 15->100 over hours) shows only a small
+    # run inside the short window, so the window check misses it — but the SESSION run is huge.
+    # Buying within near_top_frac of the SESSION peak after a big session run is chasing the top
+    # regardless of grind speed (Sep 1 live: PUT 24050 entry 94.8 vs ~100 session peak after
+    # +500% -> never green -> -19k). A genuine near-base entry sits near the session LOW, far
+    # below the peak, so it is unaffected — this only fires near the exhausted top.
+    if bool(getattr(settings, "explosion_post_peak_chase_session_enabled", True)):
+        try:
+            sp = float(get_session_peak_premium(sym, strike, side) or 0)
+            sl = float(get_session_low_premium(sym, strike, side) or 0)
+        except Exception:
+            sp = sl = 0.0
+        if sp > 0 and sl > 0:
+            session_run = (sp - sl) / sl
+            if session_run >= min_run and current >= sp * (1.0 - near_top):
+                return True, "explosion_post_peak_chase_session"
+    return False, ""
+
+
 def extended_session_chase_blocked(
     explosion_event: Any,
     *,
     ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str]:
     """
     Hard-block EXPLOSIVE entries after the move is already mostly done.
@@ -761,10 +979,12 @@ def extended_session_chase_blocked(
     if explosion_event is None:
         return False, ""
 
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
     # Near-base top ELITE/EXPLODING must never be chase-blocked — take at the pad.
-    if elite_never_block_active(event=explosion_event, ict=ict):
+    if elite_must_take_bypass_allowed(
+        event=explosion_event, ict=ict, alert=alert,
+    ):
         return False, ""
 
     move = _session_peak_move(explosion_event)
@@ -872,9 +1092,9 @@ def check_explosion_macd_alignment(
     if not settings.explosion_macd_alignment_required:
         return True, "ok"
 
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    if elite_never_block_active(
+    if elite_must_take_bypass_allowed(
         event=event, candidate=candidate, alert=alert, snap=snap,
     ):
         return True, "ok"
@@ -1150,6 +1370,53 @@ def _post_small_win(state: Any) -> tuple[bool, dict[str, Any]]:
     return False, meta
 
 
+def _post_win_top_confidence_allows(
+    candidate: Any,
+    *,
+    v3: float,
+    snap: SymbolSnapshot,
+) -> bool:
+    """Post-win re-entry requires top rank, full sleeve, or hot live re-acceleration."""
+    settings = get_settings()
+    if not getattr(settings, "fake_explosion_trap_post_win_require_top_confidence", True):
+        return True
+
+    pre = getattr(candidate, "pretrade_meta", None) or {}
+    causal = pre.get("causalRanking") or {}
+    if causal.get("topRankEligible") or causal.get("fullSleeveEligible"):
+        return True
+
+    hot_v3 = float(
+        getattr(settings, "fake_explosion_trap_post_win_hc_min_velocity_3s", 2.0) or 2.0
+    )
+    if v3 >= hot_v3:
+        return True
+
+    from app.engines.explosion_confidence import is_high_conviction_entry
+    from app.engines.chart_exit_levels import chart_trade_confidence
+
+    tier = str(
+        getattr(getattr(candidate, "explosion_event", None), "tier", None)
+        or getattr(candidate, "tier", "")
+        or ""
+    ).upper()
+    move = float(getattr(getattr(candidate, "explosion_event", None), "daily_move_pct", 0) or 0)
+    chart_conf, _ = chart_trade_confidence(
+        snap, getattr(candidate, "side", None),
+    )
+    if is_high_conviction_entry(
+        side=getattr(candidate, "side", None),
+        snap=snap,
+        tier=tier,
+        score=float(getattr(candidate, "score", 0) or 0),
+        move_pct=move,
+        chart_confidence=chart_conf,
+        velocity_3s=v3,
+    ):
+        return True
+    return False
+
+
 def detect_fake_explosion_trap(
     candidate: Any,
     snap: SymbolSnapshot,
@@ -1246,6 +1513,57 @@ def detect_fake_explosion_trap(
         flags.append("otm_inside_or")
     if post_win:
         flags.append("post_small_win")
+
+    if post_win and getattr(
+        settings, "fake_explosion_trap_post_win_velocity_block_enabled", True
+    ):
+        alert = getattr(candidate, "alert", None)
+        from app.engines.early_radar_pad_capture import ict_base_armed_prelaunch_pad_lane
+
+        armed_bypass = bool(
+            getattr(
+                settings,
+                "fake_explosion_trap_post_win_armed_base_bypass_enabled",
+                False,
+            )
+        )
+        if (
+            armed_bypass
+            and isinstance(alert, dict)
+            and ict_base_armed_prelaunch_pad_lane(alert)
+        ):
+            return False, "ok", meta
+        min_v3 = float(
+            getattr(settings, "fake_explosion_trap_post_win_min_velocity_3s", 0.0) or 0.0
+        )
+        if chopish:
+            chop_min = float(
+                getattr(
+                    settings, "fake_explosion_trap_post_win_midday_min_velocity_3s", 1.0
+                )
+                or 1.0
+            )
+            min_v3 = max(min_v3, chop_min)
+        if v3 <= min_v3:
+            meta.update({
+                "fakeExplosionTrap": True,
+                "action": "block",
+                "psychologyEscalate": "FOMO",
+                "postWinVelocityBlock": True,
+                "requiredMinVelocity3s": round(min_v3, 3),
+                "liveVelocity3s": round(v3, 3),
+            })
+            return True, "fake_explosion_trap_post_win_cold_velocity", meta
+
+    if post_win and not _post_win_top_confidence_allows(candidate, v3=v3, snap=snap):
+        meta.update({
+            "fakeExplosionTrap": True,
+            "action": "block",
+            "psychologyEscalate": "FOMO",
+            "postWinTopConfidenceBlock": True,
+            "liveVelocity3s": round(v3, 3),
+        })
+        return True, "fake_explosion_trap_post_win_not_top_confidence", meta
 
     meta.update({
         "fakeExplosionTrap": False,
@@ -1361,6 +1679,12 @@ def detect_fake_explosion_trap(
         )
         if structure_ok:
             meta["localBaseStructure"] = True
+        elif snap is not None and isinstance(alert, dict):
+            from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+            if index_confirmed_local_base(candidate.side, snap, alert):
+                structure_ok = True
+                meta["indexConfirmedStructure"] = True
     if (
         getattr(settings, "fake_explosion_trap_midday_require_structure", True)
         and chopish
@@ -1431,6 +1755,12 @@ def detect_fake_explosion_trap(
 def _trap_soft_cap_must_honor(trap_meta: dict[str, Any]) -> bool:
     """Chop/worst conflict stacks must keep cut_size lotCap (Aug6 27→6 restore hole)."""
     settings = get_settings()
+    if bool(getattr(settings, "index_confirmed_ftv_bypasses_fake_trap_lot_cap", True)):
+        if trap_meta.get("indexConfirmedFtv") and (
+            trap_meta.get("localBaseStructure")
+            or trap_meta.get("defensiveBaseRip")
+        ):
+            return False
     if not getattr(settings, "fake_explosion_trap_honor_soft_cap_on_chop", True):
         return False
     if trap_meta.get("action") != "cut_size":

@@ -32,7 +32,9 @@ def record_session_trade_close(pnl_inr: float) -> None:
     """Global loss streak — pause new entries after N consecutive losses or one large hit."""
     global _session_loss_streak, _pause_until, _large_loss_pause_until
     settings = get_settings()
-    if not settings.chop_day_guards_enabled:
+    if not settings.chop_day_guards_enabled or not getattr(
+        settings, "session_loss_pause_enabled", False
+    ):
         return
     _reset_session_if_new_day()
     now = datetime.now(IST)
@@ -48,7 +50,9 @@ def record_session_trade_close(pnl_inr: float) -> None:
 
 def session_pause_active() -> tuple[bool, str]:
     settings = get_settings()
-    if not settings.chop_day_guards_enabled:
+    if not settings.chop_day_guards_enabled or not getattr(
+        settings, "session_loss_pause_enabled", False
+    ):
         return False, "ok"
     _reset_session_if_new_day()
     now = datetime.now(IST)
@@ -342,8 +346,10 @@ def daily_trade_cap(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]
 
 
 def trades_cap_reached(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> tuple[bool, str]:
+    from app.engines.session_trade_integrity import real_session_closed_count
+
     cap, label = daily_trade_cap(state, snapshots)
-    closed = len(state.closedPaperTrades)
+    closed = real_session_closed_count(state)
     if closed >= cap:
         return True, f"daily_trade_cap_{closed}>={cap}_{label}"
     return False, "ok"
@@ -374,9 +380,9 @@ def resolve_daily_trade_cap(
     if not getattr(settings, "expiry_worst_day_elite_top_bypasses_trade_cap", True):
         return True, reason, meta
 
-    from app.engines.expiry_day_guards import snapshots_have_expiry_elite_top
+    from app.engines.top_signal_session_lift import snapshots_have_top_signal_session_lift
 
-    if not snapshots_have_expiry_elite_top(snapshots):
+    if not snapshots_have_top_signal_session_lift(snapshots):
         return True, reason, meta
 
     meta["dailyCapEliteOnly"] = True
@@ -607,11 +613,13 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     )
 
     effective_cap, cap_source = resolve_effective_daily_trade_cap(state, snapshots)
+    from app.engines.session_trade_integrity import real_session_closed_count
+
     return {
         "chopSession": chop,
         "dailyTradeCap": cap,
         "dailyTradeCapLabel": cap_label,
-        "closedTrades": len(state.closedPaperTrades),
+        "closedTrades": real_session_closed_count(state),
         "tradeCapReached": cap_hit,
         "tradeCapMessage": cap_msg if cap_hit else None,
         "lossStreak": _session_loss_streak,

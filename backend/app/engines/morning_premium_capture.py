@@ -58,7 +58,7 @@ def _best_surge_for_side(
 
 
 def in_afternoon_premium_capture_window() -> bool:
-    """11:45–15:25 IST — afternoon momentum / consolidation breakouts."""
+    """11:45–15:30 IST — afternoon momentum / consolidation breakouts."""
     if get_market_phase() != "LIVE_MARKET":
         return False
     settings = get_settings()
@@ -70,7 +70,7 @@ def in_afternoon_premium_capture_window() -> bool:
 
 
 def in_all_day_explosion_window() -> bool:
-    """09:20–15:25 IST — monitor explosive premium moves all session."""
+    """09:20–15:30 IST — monitor explosive premium moves all session."""
     if get_market_phase() != "LIVE_MARKET":
         return False
     settings = get_settings()
@@ -126,6 +126,10 @@ def _market_opposes_side(
         from app.engines.local_base_chart_bypass import local_base_overrides_side_bias
 
         if local_base_overrides_side_bias(side, snap, event=event, alert=alert):
+            return False
+        from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+        if index_confirmed_local_base(side, snap, alert):
             return False
 
     settings = get_settings()
@@ -215,6 +219,10 @@ def counter_trend_entry_allowed(
     from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
 
     if isinstance(alert, dict) and alert_has_early_radar_pad_capture(alert):
+        return True
+    from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+    if index_confirmed_local_base(side, snap, alert):
         return True
     if explosion_event is not None:
         from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
@@ -682,6 +690,28 @@ def afternoon_capture_active(snapshots: Optional[dict[str, SymbolSnapshot]]) -> 
     return False
 
 
+def is_v_rip_local_base_capture_event(
+    event: ExplosionEvent,
+    *,
+    chart: Optional[SpotChart] = None,
+) -> bool:
+    """Event-path mirror of is_v_rip_local_base_capture_alert (pad unknown → score+tier only)."""
+    settings = get_settings()
+    if not bool(getattr(settings, "ict_v_rip_ready_enabled", True)):
+        return False
+    if not in_premium_capture_window():
+        return False
+    tier = str(event.tier or "").upper()
+    if tier not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+    reason = str(event.reason or "").lower()
+    if "v_rip" not in reason:
+        return False
+    score = float(event.explosion_score or 0)
+    min_score = float(getattr(settings, "ict_v_rip_min_score", 40.0) or 40.0)
+    return score >= min_score
+
+
 def is_premium_capture_event(
     event: ExplosionEvent,
     *,
@@ -691,6 +721,7 @@ def is_premium_capture_event(
         is_morning_capture_event(event, chart=chart)
         or is_afternoon_capture_event(event, chart=chart)
         or is_all_day_explosion_event(event, chart=chart)
+        or is_v_rip_local_base_capture_event(event, chart=chart)
     )
 
 

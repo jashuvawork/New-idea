@@ -34,6 +34,7 @@ ALL_PAD_LANE_REASONS = frozenset(
         PREMIUM_FVG_PAD_READY,
         DOUBLE_DIP_VBASE_READY,
         "early_radar_pad_ready",
+        "building_coil_pad_ready",
     }
 )
 
@@ -48,6 +49,7 @@ PAD_LANE_FTV_MODES = frozenset(
         "PREMIUM_FVG_PAD_FTV",
         "DOUBLE_DIP_VBASE_FTV",
         "EARLY_RADAR_PAD_FTV",
+        "BUILDING_COIL_PAD_FTV",
     }
 )
 
@@ -63,6 +65,7 @@ def pad_lane_pre_lift(evidence: Mapping[str, Any]) -> bool:
         or evidence.get("premiumFvgPad")
         or evidence.get("doubleDipVbase")
         or evidence.get("earlyRadarPadCapture")
+        or evidence.get("buildingCoilPad")
     )
 
 
@@ -70,6 +73,8 @@ def pad_lane_cold_velocity_ok(
     evidence: Mapping[str, Any], v3: float, v9: float
 ) -> bool:
     """Pre-lift pad lanes that allow mildly negative / flat velocity snapshots."""
+    tier = str(evidence.get("tier") or "").upper()
+    local_move = float(evidence.get("localBaseMovePct") or 0)
     if evidence.get("slowGrindSuddenLift") and -0.8 <= v3 <= 1.5:
         return True
     if evidence.get("stealthCvdCoil") and -0.5 <= v3 <= 1.0:
@@ -86,16 +91,38 @@ def pad_lane_cold_velocity_ok(
         return True
     if evidence.get("earlyRadarPadCapture") and -0.8 <= v3 <= 1.5:
         return True
+    if (
+        bool(evidence.get("ictBaseArmed"))
+        and not bool(evidence.get("armedBaseLaunch"))
+        and tier in ("ELITE", "EXPLODING")
+        and 2.0 <= local_move <= 25.0
+        and -1.5 <= v3 <= 1.5
+    ):
+        return True
+    if evidence.get("buildingCoilPad") and -0.8 <= v3 <= 1.5:
+        return True
+    if evidence.get("coldTroughPad") and -0.8 <= v3 <= 1.5:
+        return True
     if evidence.get("vRipReady") and -1.2 <= v3 <= 1.5 and v9 >= -0.8:
         return True
-    tier = str(evidence.get("tier") or "").upper()
-    local_move = float(evidence.get("localBaseMovePct") or 0)
+    if evidence.get("firstLiftLocalBase") and -1.5 <= v3 <= 1.5 and v9 >= -1.0:
+        return True
+    settings = get_settings()
+    peak = float(evidence.get("peakMovePct") or evidence.get("dailyMovePct") or 0)
+    min_peak = float(
+        getattr(settings, "first_lift_pad_explosion_min_peak_pct", 25.0) or 25.0
+    )
+    peak_confirmed_pad = (
+        tier in ("ELITE", "EXPLODING")
+        and peak >= min_peak
+        and 2.0 <= local_move <= 25.0
+    )
     if (
         tier in ("ELITE", "EXPLODING")
         and bool(evidence.get("flatThenVertical") and evidence.get("activeBreakout"))
         and 2.0 <= local_move <= 40.0
-        and -1.2 <= v3 <= 1.5
-        and v9 >= -0.8
+        and (-2.0 if peak_confirmed_pad else -1.2) <= v3 <= 1.5
+        and (v9 >= -1.0 if peak_confirmed_pad else v9 >= -0.8)
     ):
         return True
     return False
@@ -111,6 +138,10 @@ def pad_lane_ftv_waives_timing_block(evidence: Mapping[str, Any]) -> bool:
     timing = str(evidence.get("timingAssessment") or "").upper()
     if timing in ("FADED", "FADING", "EXHAUSTED", "NEGATIVE", "REJECT", "BLOCKED"):
         return False
+    from app.engines.index_confirmed_local_base import index_confirmed_waives_timing_block
+
+    if index_confirmed_waives_timing_block(evidence):
+        return True
     v3 = float(evidence.get("velocity3s") or 0)
     v9 = float(evidence.get("velocity9s") or 0)
     return pad_lane_cold_velocity_ok(evidence, v3, v9)
@@ -123,10 +154,18 @@ def pad_lane_grade_floor_applies(evidence: Mapping[str, Any]) -> bool:
         return False
     if evidence.get("faded") or evidence.get("exhaustedReentry") or evidence.get("midRipCoil"):
         return False
+    if evidence.get("earlyRadarPadCapture") or evidence.get("coldTroughPad"):
+        v3 = float(evidence.get("velocity3s") or 0)
+        v9 = float(evidence.get("velocity9s") or 0)
+        return pad_lane_cold_velocity_ok(evidence, v3, v9)
+    if evidence.get("buildingCoilPad"):
+        v3 = float(evidence.get("velocity3s") or 0)
+        v9 = float(evidence.get("velocity9s") or 0)
+        return pad_lane_cold_velocity_ok(evidence, v3, v9)
     tier = str(evidence.get("tier") or "").upper()
     if tier not in ("ELITE", "EXPLODING"):
         return False
-    if evidence.get("vRipReady") or evidence.get("earlyRadarPadCapture"):
+    if evidence.get("vRipReady"):
         if not pad_lane_ftv_waives_allocation_rank_one(evidence):
             return False
         v3 = float(evidence.get("velocity3s") or 0)
@@ -994,6 +1033,109 @@ def _pad_lane_elite_ftv_chart_signal(
     return entry_min <= base_rel <= chase_max
 
 
+def _armed_base_launch_pad_chart_signal(
+    alert: Optional[dict[str, Any]],
+    event: Any = None,
+) -> bool:
+    """armed_base_launch + first lift + volume awaken in the 2–25% local pad window.
+
+    Aug26 NIFTY PUT 24250/24300: EXPLODING armed_base_launch at ~22–24% lb was blocked
+    chart_live_bullish_no_puts because v3 was still flat/negative pre-vertical.
+    """
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "pad_lane_armed_base_launch_chart_bypass_enabled", True)
+    ):
+        return False
+    row = alert if isinstance(alert, dict) else {}
+    moment = str(row.get("momentType") or "").lower()
+    armed = moment == "armed_base_launch" or bool(
+        row.get("ictArmedBaseLaunch")
+        or (event is not None and getattr(event, "armed_base_launch", False))
+    )
+    if not armed:
+        return False
+    tier = str(row.get("tier") or getattr(event, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    if not bool(row.get("ictFirstLift") or row.get("ictArmedBaseLaunch")):
+        return False
+    # armed_base_launch is the pre-structure pad signal — flat→vertical may lag.
+    if not (
+        row.get("ictArmedBaseLaunch")
+        or row.get("armedBaseLaunch")
+        or row.get("ictFlatThenVertical")
+        or row.get("ictBreakout")
+    ):
+        return False
+    if not bool(row.get("volumeAwaken") or row.get("ictVolumeAwakening")):
+        return False
+    base_rel = float(
+        row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or row.get("offLowMovePct")
+        or (getattr(event, "daily_move_pct", 0) if event is not None else 0)
+        or 0
+    )
+    lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+    hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    return lo <= base_rel <= hi + 1e-6
+
+
+def _first_lift_local_base_pad_chart_signal(
+    alert: Optional[dict[str, Any]],
+    event: Any = None,
+) -> bool:
+    """first_lift_local_base + volume awaken in the 2–25% local pad window.
+
+    Aug26 SENSEX PUT 77800: ELITE first_lift at ~16% lb while session peak was ~53%
+    — chart_live_bullish_no_puts survived because pad-lane peak cap used session peak.
+    """
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "pad_lane_first_lift_local_base_chart_bypass_enabled", True)
+    ):
+        return False
+    row = alert if isinstance(alert, dict) else {}
+    moment = str(row.get("momentType") or "").lower()
+    first_lift = moment == "first_lift_local_base" or bool(
+        row.get("ictFirstLift")
+        or (event is not None and getattr(event, "first_lift", False))
+    )
+    if not first_lift:
+        return False
+    tier = str(row.get("tier") or getattr(event, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    if not bool(row.get("ictFlatThenVertical") or row.get("ictBreakout")):
+        return False
+    if not bool(row.get("volumeAwaken") or row.get("ictVolumeAwakening")):
+        return False
+    base_rel = float(
+        row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or row.get("offLowMovePct")
+        or (getattr(event, "daily_move_pct", 0) if event is not None else 0)
+        or 0
+    )
+    lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+    hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    return lo <= base_rel <= hi + 1e-6
+
+
+def _pad_lane_peak_for_cap(
+    base_move: float,
+    peak_move: float,
+    settings: Any,
+) -> float:
+    """When LTP is still at the local pad, session peak must not block chart bypass."""
+    pad_lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+    pad_hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    if pad_lo <= base_move <= pad_hi + 1e-6:
+        return min(float(peak_move or 0), float(base_move or 0))
+    return float(peak_move or 0)
+
+
 def pad_lane_turnaround_chart_bypass(
     side: Side | str,
     snap: Optional[SymbolSnapshot],
@@ -1016,7 +1158,25 @@ def pad_lane_turnaround_chart_bypass(
     if snap is None or not session_chart_conflicts_side(side, snap):
         return False
     elite_ftv = _pad_lane_elite_ftv_chart_signal(alert, event)
-    if not _pad_lane_turnaround_signal(alert, readiness_reason) and not elite_ftv:
+    armed_launch = _armed_base_launch_pad_chart_signal(alert, event)
+    first_lift_pad = _first_lift_local_base_pad_chart_signal(alert, event)
+    from app.engines.early_radar_pad_capture import (
+        BUILDING_COIL_PAD_READY,
+        alert_has_building_coil_pad,
+    )
+
+    coil_pad = (
+        str(readiness_reason or "") == BUILDING_COIL_PAD_READY
+        or alert_has_building_coil_pad(alert)
+        or bool((alert or {}).get("buildingCoilPad"))
+    )
+    if (
+        not _pad_lane_turnaround_signal(alert, readiness_reason)
+        and not elite_ftv
+        and not armed_launch
+        and not first_lift_pad
+        and not coil_pad
+    ):
         return False
 
     v3, v9, base_move, peak_move, volume_awake = _pad_lane_chart_metrics(
@@ -1034,13 +1194,38 @@ def pad_lane_turnaround_chart_bypass(
         )
         or 0.2
     )
-    if elite_ftv:
+    if elite_ftv or armed_launch or first_lift_pad:
         min_v3 = min(min_v3, awake_min_v3)
     min_v9 = float(
         getattr(settings, "pad_lane_chart_bypass_min_premium_velocity_9s", -0.3)
         or -0.3
     )
-    velocity_ok = v3 >= min_v3 or (volume_awake and v3 >= awake_min_v3)
+    ftv_direct = ftv_direct_trade_active(
+        event=event,
+        alert=alert,
+        snap=snap,
+        readiness_reason=readiness_reason,
+        tier=str((alert or {}).get("tier") or getattr(event, "tier", "") or ""),
+    )
+    if armed_launch or first_lift_pad or coil_pad:
+        row = alert if isinstance(alert, dict) else {}
+        evidence = {
+            "tier": row.get("tier") or getattr(event, "tier", ""),
+            "localBaseMovePct": base_move,
+            "flatThenVertical": bool(
+                row.get("ictFlatThenVertical") or row.get("ictBreakout")
+            ),
+            "activeBreakout": bool(row.get("ictBreakout") or row.get("ictFirstLift")),
+            "volumeAwaken": volume_awake,
+            "firstLiftLocalBase": first_lift_pad,
+            "buildingCoilPad": coil_pad,
+        }
+        velocity_ok = pad_lane_cold_velocity_ok(evidence, v3, v9)
+    elif ftv_direct:
+        evidence = _ftv_direct_evidence_from_alert(alert) if isinstance(alert, dict) else {}
+        velocity_ok = pad_lane_cold_velocity_ok(evidence, v3, v9)
+    else:
+        velocity_ok = v3 >= min_v3 or (volume_awake and v3 >= awake_min_v3)
     if not velocity_ok or v9 < min_v9:
         return False
 
@@ -1050,7 +1235,20 @@ def pad_lane_turnaround_chart_bypass(
     max_peak = float(
         getattr(settings, "pad_lane_chart_bypass_max_peak_move_pct", 38.0) or 38.0
     )
-    if elite_ftv:
+    if ftv_direct:
+        max_off_low = max(
+            max_off_low,
+            float(
+                getattr(settings, "ftv_direct_trade_max_off_low_pct", 35.0) or 35.0
+            ),
+        )
+        max_peak = max(
+            max_peak,
+            float(
+                getattr(settings, "ftv_direct_trade_max_peak_move_pct", 50.0) or 50.0
+            ),
+        )
+    if elite_ftv or first_lift_pad:
         max_peak = max(
             max_peak,
             float(
@@ -1065,7 +1263,8 @@ def pad_lane_turnaround_chart_bypass(
     move = max(base_move, float((alert or {}).get("offLowMovePct") or 0))
     if move > max_off_low + 1e-6:
         return False
-    if peak_move > max_peak + 1e-6:
+    peak_for_cap = _pad_lane_peak_for_cap(base_move, peak_move, settings)
+    if peak_for_cap > max_peak + 1e-6:
         return False
 
     chart = getattr(snap, "spotChart", None)
@@ -1127,6 +1326,197 @@ def pad_lane_turnaround_chart_bypass_for_snap(
     return False
 
 
+_STRICT_PAD_CHART_BYPASS_REASONS = frozenset(
+    {
+        "armed_base_option_led_ready",
+        "elite_base_ready_s_preauthorized",
+        "building_rip_bullish_ready",
+        "building_local_base_lift_ready",
+        "v_rip_session_low_ready",
+        "fast_bullish_local_base_ready",
+        "slow_grind_sudden_lift_ready",
+        "slow_grind_armed_trough_ready",
+        "slow_grind_consolidation_base_ready",
+        "squeeze_release_ready",
+        "index_led_option_lag_ready",
+        "stealth_cvd_coil_ready",
+        "micro_pullback_retest_ready",
+        "premium_fvg_pad_ready",
+        "double_dip_vbase_ready",
+        "early_radar_pad_ready",
+        "building_coil_pad_ready",
+    }
+)
+
+
+def resolve_strict_pad_lane_chart_bypass(
+    candidate: Any,
+    snap: SymbolSnapshot,
+) -> tuple[bool, bool]:
+    """Return (pad_lane_chart_bypass, strict_first_lift_bypass) for live chart gates.
+
+    Aug26 SENSEX PUT 77600 v_rip_session_low: pad_lane bypass passed in isolation but
+    auto_trader zeroed all counter-trend waivers and never passed strict_first_lift.
+    """
+    return resolve_strict_pad_lane_for_entry(
+        candidate.side,
+        snap,
+        mode=str(getattr(candidate, "mode", "") or ""),
+        explosion_event=getattr(candidate, "explosion_event", None),
+        alert=(
+            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+        ),
+    )
+
+
+def shallow_otm_local_base_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+) -> bool:
+    """Shallow OTM ELITE flat→vertical at local base — allow shallow exec premium retest.
+
+    Aug27 SENSEX PUT 77200: ``shallowOtmLocalBaseTradeable`` stamped and SELECTED at
+    rank-1, but ``first_lift_structure_not_confirmed`` left strict pad false so
+    ``exec_premium_fading_at_execution`` blocked the fill."""
+    if not isinstance(alert, dict) or not alert.get("shallowOtmLocalBaseTradeable"):
+        return False
+    settings = get_settings()
+    min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
+    max_lb = float(getattr(settings, "shallow_otm_local_base_max_move_pct", 25.0) or 25.0)
+    lb = float(
+        alert.get("localBaseMovePct")
+        or alert.get("ictBaseRelativeMovePct")
+        or alert.get("offLowMovePct")
+        or 0
+    )
+    if not (min_lb <= lb <= max_lb):
+        return False
+    tier = str(
+        alert.get("tier") or getattr(explosion_event, "tier", "") or ""
+    ).upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False
+    moment = str(alert.get("momentType") or "").lower()
+    if not (
+        alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or alert.get("ictFlatThenVertical")
+        or moment
+        in ("armed_base_launch", "v_rip_session_low", "first_lift_local_base")
+    ):
+        return False
+    return True
+
+
+def atm_armed_local_base_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+) -> bool:
+    """ATM ELITE armed-base at local pad — allow shallow exec premium retest fills.
+
+    Sep01 NIFTY PUT 23950: SELECTED at PM flat base (18.3) then
+    ``exec_premium_fading_at_execution`` blocked the 509% mfe rip when
+    ``first_lift_structure_not_confirmed`` kept strict pad false (no OTM stamp).
+    """
+    if not isinstance(alert, dict):
+        return False
+    settings = get_settings()
+    min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
+    max_lb = float(getattr(settings, "shallow_otm_local_base_max_move_pct", 25.0) or 25.0)
+    lb = float(
+        alert.get("localBaseMovePct")
+        or alert.get("ictBaseRelativeMovePct")
+        or alert.get("offLowMovePct")
+        or 0
+    )
+    if not (min_lb <= lb <= max_lb):
+        return False
+    tier = str(
+        alert.get("tier") or getattr(explosion_event, "tier", "") or ""
+    ).upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    moment = str(alert.get("momentType") or "").lower()
+    if not (
+        alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or moment in ("armed_base_launch", "ict_base_armed", "v_rip_session_low")
+    ):
+        return False
+    moneyness = str(
+        alert.get("moneyness")
+        or getattr(explosion_event, "moneyness", "")
+        or ""
+    ).upper()
+    if moneyness and moneyness not in ("ATM",):
+        return False
+    return True
+
+
+def local_base_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+) -> bool:
+    """Shallow OTM stamp, ATM armed-base, or index-confirmed pad may fill through retest dip."""
+    from app.engines.index_confirmed_local_base import index_confirmed_premium_fade_bypass
+
+    return (
+        shallow_otm_local_base_premium_fade_bypass(alert, explosion_event)
+        or atm_armed_local_base_premium_fade_bypass(alert, explosion_event)
+        or index_confirmed_premium_fade_bypass(alert, snap, explosion_event)
+    )
+
+
+def resolve_strict_pad_lane_for_entry(
+    side: Side | str,
+    snap: SymbolSnapshot,
+    *,
+    mode: str = "",
+    explosion_event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, bool]:
+    """Strict pad-lane bypass from side/snap/alert — shared by auto_trader and live chart monitor."""
+    row = alert if isinstance(alert, dict) else None
+    side_obj = side if isinstance(side, Side) else Side(str(side).upper())
+    pad_lane_chart_bypass = pad_lane_turnaround_chart_bypass_for_snap(
+        side_obj,
+        snap,
+        explosion_event=explosion_event,
+        alert=row,
+    )
+    armed_base_chart_bypass = False
+    if (mode or "").lower() == "explosion" and explosion_event is not None:
+        from app.engines.ict_breakout_monitor import first_lift_entry_readiness
+
+        armed_ready, armed_reason = first_lift_entry_readiness(
+            snap=snap,
+            event=explosion_event,
+            alert=row,
+        )
+        armed_base_chart_bypass = bool(
+            armed_ready and armed_reason in _STRICT_PAD_CHART_BYPASS_REASONS
+        )
+    # CHART strict bypass = only chart-legit reasons: an armed-base structural launch, a
+    # pad-lane chart turnaround, or a shallow-OTM local-base STAMP. The ATM-armed premium-fade
+    # bypass is deliberately NOT here — it waives the premium-fade check, not the chart-direction
+    # gate. Folding it in let a counter-trend ATM armed-base skip the chart gate without
+    # orderflow (regression caught by test_armed_base_execution_chart_bypass_requires_strong_
+    # orderflow). Premium-fade callers apply atm_armed_local_base_premium_fade_bypass separately.
+    shallow_otm_bypass = shallow_otm_local_base_premium_fade_bypass(
+        row,
+        explosion_event,
+    )
+    armed_pad_strict = _armed_base_launch_pad_chart_signal(row, explosion_event)
+    strict_bypass = (
+        armed_base_chart_bypass
+        or pad_lane_chart_bypass
+        or shallow_otm_bypass
+        or armed_pad_strict
+    )
+    return pad_lane_chart_bypass, strict_bypass
+
+
 
 def pad_lane_expiry_worst_waive(evidence: Mapping[str, Any]) -> bool:
     """EXPIRY WORST quality/score floors may waive for stamped pad-lane local-base FTV."""
@@ -1136,10 +1526,277 @@ def pad_lane_expiry_worst_waive(evidence: Mapping[str, Any]) -> bool:
     return pad_lane_ftv_waives_allocation_rank_one(evidence)
 
 
+def _ftv_direct_resolve(
+    *,
+    tier: Optional[str] = None,
+    event: Any = None,
+    candidate: Any = None,
+    alert: Optional[dict] = None,
+    snap: Any = None,
+) -> tuple[Any, dict, Any, str, float, float]:
+    """Return event, alert, snap, side, strike, premium."""
+    resolved_event = event
+    resolved_alert = alert if isinstance(alert, dict) else {}
+    resolved_snap = snap
+    side = ""
+    strike = 0.0
+    premium = 0.0
+
+    if candidate is not None:
+        if resolved_event is None:
+            resolved_event = getattr(candidate, "explosion_event", None)
+        if not resolved_alert:
+            raw = getattr(candidate, "alert", None)
+            resolved_alert = raw if isinstance(raw, dict) else {}
+        if resolved_snap is None:
+            resolved_snap = getattr(candidate, "snap", None)
+        side = str(getattr(candidate, "side", "") or "").upper()
+        try:
+            strike = float(getattr(candidate, "strike", 0) or 0)
+        except (TypeError, ValueError):
+            strike = 0.0
+        try:
+            premium = float(getattr(candidate, "premium", 0) or 0)
+        except (TypeError, ValueError):
+            premium = 0.0
+
+    if resolved_event is not None:
+        if not side:
+            raw_side = getattr(resolved_event, "side", None)
+            if raw_side is not None:
+                side = str(getattr(raw_side, "value", raw_side) or "").upper()
+        if strike <= 0:
+            try:
+                strike = float(getattr(resolved_event, "strike", 0) or 0)
+            except (TypeError, ValueError):
+                strike = 0.0
+        if premium <= 0:
+            try:
+                premium = float(getattr(resolved_event, "premium", 0) or 0)
+            except (TypeError, ValueError):
+                premium = 0.0
+
+    if resolved_alert:
+        if not side:
+            side = str(resolved_alert.get("side") or "").upper()
+        if strike <= 0:
+            try:
+                strike = float(resolved_alert.get("strike") or 0)
+            except (TypeError, ValueError):
+                strike = 0.0
+        if premium <= 0:
+            try:
+                premium = float(resolved_alert.get("premium") or 0)
+            except (TypeError, ValueError):
+                premium = 0.0
+
+    tier_u = str(
+        tier
+        or resolved_alert.get("tier")
+        or getattr(resolved_event, "tier", "")
+        or ""
+    ).upper()
+    return resolved_event, resolved_alert, resolved_snap, side, strike, premium, tier_u
+
+
+def _ftv_direct_at_trough(readiness_reason: str) -> bool:
+    """True when readiness is at the pad/trough — off-low % may still be near zero."""
+    rr = str(readiness_reason or "")
+    return rr in (
+        "slow_grind_armed_trough_ready",
+        "slow_grind_consolidation_base_ready",
+        "building_local_base_lift_ready",
+        "building_first_lift_ready",
+        "building_first_lift_preauthorized",
+    ) or rr.startswith("v_rip_session_low")
+
+
+def _ftv_direct_evidence_from_alert(alert: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tier": str(alert.get("tier") or "").upper(),
+        "vRipReady": bool(alert.get("vRipReady") or alert.get("ictVRipReady")),
+        "earlyRadarPadCapture": bool(
+            alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")
+        ),
+        "slowGrindSuddenLift": bool(
+            alert.get("slowGrindSuddenLift") or alert.get("ictSlowGrindSuddenLift")
+        ),
+        "stealthCvdCoil": bool(
+            alert.get("stealthCvdCoil") or alert.get("ictStealthCvdCoil")
+        ),
+        "microPullbackRetest": bool(
+            alert.get("microPullbackRetest") or alert.get("ictMicroPullbackRetest")
+        ),
+        "squeezeRelease": bool(
+            alert.get("squeezeRelease") or alert.get("ictSqueezeRelease")
+        ),
+        "indexLedOptionLag": bool(
+            alert.get("indexLedOptionLag") or alert.get("ictIndexLedOptionLag")
+        ),
+        "premiumFvgPad": bool(
+            alert.get("premiumFvgPad") or alert.get("ictPremiumFvgPad")
+        ),
+        "doubleDipVbase": bool(
+            alert.get("doubleDipVbase") or alert.get("ictDoubleDipVbase")
+        ),
+        "flatThenVertical": bool(
+            alert.get("ictFlatThenVertical") or alert.get("ictBreakout")
+        ),
+        "activeBreakout": bool(alert.get("ictBreakout") or alert.get("activeBreakout")),
+        "volumeAwaken": bool(
+            alert.get("volumeAwaken") or alert.get("ictVolumeAwakening")
+        ),
+        "orderflowPositive": bool(
+            alert.get("optionCvdBuying") or alert.get("orderflowConfirmed")
+        ),
+        "localBaseMovePct": float(
+            alert.get("localBaseMovePct") or alert.get("ictBaseRelativeMovePct") or 0
+        ),
+        "ictBaseArmed": bool(alert.get("ictBaseArmed") or alert.get("baseArmed")),
+        "armedBaseLaunch": bool(
+            alert.get("ictArmedBaseLaunch") or alert.get("armedBaseLaunch")
+        ),
+        "offLowMovePct": float(alert.get("offLowMovePct") or 0),
+        "velocity3s": float(alert.get("velocity3s") or alert.get("velocity_3s") or 0),
+        "velocity9s": float(alert.get("velocity9s") or alert.get("velocity_9s") or 0),
+        "midRipCoil": bool(alert.get("midRipCoil") or alert.get("ictMidRipCoil")),
+    }
+
+
+def ftv_direct_trade_active(
+    *,
+    tier: Optional[str] = None,
+    event: Any = None,
+    candidate: Any = None,
+    alert: Optional[dict] = None,
+    snap: Any = None,
+    readiness_reason: str = "",
+) -> bool:
+    """True → stamped pad-lane / BUILDING FTV at base links directly to execution.
+
+    Covers BUILDING/WATCH (and building-rip ELITE) when radar stamped pad readiness
+    at the local base — bypass chart/timing/chase/worst-day via elite_never_block.
+    Blocks extended chases (e.g. 77700 PE after ₹120→₹200 vertical).
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "ftv_direct_trade_enabled", True)):
+        return False
+
+    resolved_event, resolved_alert, resolved_snap, side, strike, premium, tier_u = (
+        _ftv_direct_resolve(
+            tier=tier,
+            event=event,
+            candidate=candidate,
+            alert=alert,
+            snap=snap,
+        )
+    )
+    if tier_u not in ("BUILDING", "WATCH", "ELITE", "EXPLODING"):
+        return False
+
+    if bool(resolved_alert.get("midRipCoil") or resolved_alert.get("ictMidRipCoil")):
+        return False
+
+    from app.engines.building_ftv_gates import (
+        BUILDING_READY_REASONS,
+        PAD_LANE_READY_REASONS,
+        building_rip_ready_reason,
+        pad_lane_ready_reason,
+    )
+
+    rr = pad_lane_ready_reason(
+        alert=resolved_alert or None,
+        readiness_reason=readiness_reason,
+    )
+    if not rr:
+        rr = building_rip_ready_reason(
+            alert=resolved_alert or None,
+            readiness_reason=readiness_reason,
+        )
+    ftv_reasons = PAD_LANE_READY_REASONS | BUILDING_READY_REASONS
+    has_signal = bool(rr and (rr in ftv_reasons or rr.startswith("v_rip_session_low")))
+    if not has_signal:
+        has_signal = _pad_lane_turnaround_signal(resolved_alert or None, readiness_reason)
+    if not has_signal:
+        return False
+
+    off_low = max(
+        float(resolved_alert.get("offLowMovePct") or 0),
+        float(resolved_alert.get("localBaseMovePct") or 0),
+        float(resolved_alert.get("ictBaseRelativeMovePct") or 0),
+        float(getattr(resolved_event, "off_low_move_pct", 0) or 0),
+        float(getattr(resolved_event, "ict_base_relative_move_pct", 0) or 0),
+    )
+    local_move = max(
+        float(resolved_alert.get("localBaseMovePct") or 0),
+        float(resolved_alert.get("ictBaseRelativeMovePct") or 0),
+        float(getattr(resolved_event, "ict_base_relative_move_pct", 0) or 0),
+    )
+    peak_move = max(
+        float(resolved_alert.get("peakMovePct") or 0),
+        float(getattr(resolved_event, "peak_move_pct", 0) or 0),
+    )
+
+    max_off = float(
+        getattr(settings, "ftv_direct_trade_max_off_low_pct", 35.0) or 35.0
+    )
+    max_local = float(
+        getattr(settings, "ftv_direct_trade_max_local_move_pct", 45.0) or 45.0
+    )
+    max_peak = float(
+        getattr(settings, "ftv_direct_trade_max_peak_move_pct", 50.0) or 50.0
+    )
+    min_off = float(
+        getattr(settings, "ftv_direct_trade_min_off_low_pct", 2.0) or 2.0
+    )
+    if not _ftv_direct_at_trough(rr) and off_low < min_off - 1e-6:
+        return False
+    if off_low > max_off + 1e-6:
+        return False
+    if local_move > max_local + 1e-6:
+        return False
+    if peak_move > max_peak + 1e-6:
+        return False
+
+    min_prem = float(getattr(settings, "min_option_premium_inr", 18.0) or 18.0)
+    if premium > 0 and premium < min_prem:
+        return False
+
+    if bool(getattr(settings, "ftv_direct_trade_require_atm_itm", True)):
+        if strike > 0 and resolved_snap is not None:
+            ok, _ = _atm_itm_ok(side=side, strike=strike, snap=resolved_snap)
+            if not ok:
+                return False
+
+    return True
+
+
+def stamp_ftv_direct_trade_on_alert(
+    alert: dict[str, Any],
+    *,
+    snap: Any = None,
+    readiness_reason: str = "",
+) -> bool:
+    """Stamp alert when FTV direct-trade path is active (selector / funnel telemetry)."""
+    if not isinstance(alert, dict):
+        return False
+    active = ftv_direct_trade_active(
+        alert=alert,
+        snap=snap,
+        readiness_reason=readiness_reason,
+        tier=str(alert.get("tier") or ""),
+    )
+    if active:
+        alert["ictFtvDirectTrade"] = True
+        alert["ftvDirectTrade"] = True
+    return active
+
+
 def pad_lane_early_near_miss_waive(
     alert: Optional[Mapping[str, Any]],
     *,
     readiness_reason: str = "",
+    snap: Optional[SymbolSnapshot] = None,
 ) -> bool:
     """Stamped pad-lane readiness waives ICT first-lift quality / tier-lag near-miss blockers.
 
@@ -1160,6 +1817,14 @@ def pad_lane_early_near_miss_waive(
         readiness_reason=readiness_reason,
     )
     if rr in PAD_LANE_READY_REASONS or rr.startswith("v_rip_session_low"):
+        return True
+    from app.engines.index_confirmed_local_base import index_confirmed_near_miss_waive
+
+    if snap is not None and index_confirmed_near_miss_waive(
+        alert if isinstance(alert, dict) else None,
+        snap,
+        readiness_reason=readiness_reason,
+    ):
         return True
     return _pad_lane_turnaround_signal(
         alert if isinstance(alert, dict) else None,

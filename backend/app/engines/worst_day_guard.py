@@ -117,6 +117,28 @@ def session_entry_policy(
         except Exception:
             pass
 
+    if bool(getattr(settings, "expiry_worst_day_top_ftv_v_bypass_enabled", True)):
+        try:
+            from app.engines.expiry_day_guards import is_expiry_session
+            from app.engines.top_ftv_v_expiry_bypass import snapshots_have_top_ftv_or_v
+
+            if is_expiry_session(snapshots) and snapshots_have_top_ftv_or_v(snapshots):
+                meta["worstDayLiftedByTopFtvV"] = True
+                return "NORMAL", meta
+        except Exception:
+            pass
+
+    if bool(getattr(settings, "bullish_local_base_pad_session_bypass_enabled", True)):
+        try:
+            from app.engines.expiry_day_guards import is_expiry_session
+            from app.engines.bullish_local_base import snapshots_have_bullish_local_base_pad
+
+            if is_expiry_session(snapshots) and snapshots_have_bullish_local_base_pad(snapshots):
+                meta["worstDayLiftedByBullishLocalBasePad"] = True
+                return "NORMAL", meta
+        except Exception:
+            pass
+
     if settings.worst_day_breakout_only_enabled:
         meta["pauseReason"] = "worst_day_breakout_only"
         return "BREAKOUT_ONLY", meta
@@ -374,6 +396,14 @@ def worst_day_allows_candidate(
             return False, quick_reason, meta
 
     if mode == "explosion":
+        from app.engines.top_ftv_v_expiry_bypass import is_top_ftv_or_v_candidate
+
+        breakout_floor = float(
+            getattr(settings, "worst_day_breakout_min_rank", 65.0) or 65.0
+        )
+        if is_top_ftv_or_v_candidate(candidate) and score < breakout_floor:
+            meta["worstDayBypass"] = "top_ftv_v_expiry"
+            return True, "ok", meta
         from app.engines.bad_day_routing import _extreme_explosion_bypass
 
         if _extreme_explosion_bypass(candidate):
@@ -484,6 +514,69 @@ def worst_day_allows_candidate(
                 building_elite_ok = (
                     score >= min_build and v3 >= min_v3 and v9 >= min_v9
                 )
+            min_rip_score = float(settings.all_day_explosion_min_score) - 8.0
+            pad_for_lane = 0.0
+            for key in (
+                "localBaseMovePct",
+                "ictBaseRelativeMovePct",
+                "baseRelativeMovePct",
+            ):
+                try:
+                    pad_for_lane = float(alert.get(key) or 0)
+                except (TypeError, ValueError):
+                    pad_for_lane = 0.0
+                if pad_for_lane > 0:
+                    break
+            if pad_for_lane <= 0 and event is not None:
+                try:
+                    from app.engines.explosion_entry_guards import (
+                        effective_local_base_move_pct,
+                    )
+                    from app.engines.ict_breakout_monitor import (
+                        analyze_explosion_event_ict,
+                    )
+
+                    ict_pad = analyze_explosion_event_ict(event, snap)
+                    pad_for_lane = float(
+                        effective_local_base_move_pct(event, ict_pad) or 0
+                    )
+                except Exception:
+                    pad_for_lane = 0.0
+            peak_for_lane = float(
+                alert.get("peakMovePct")
+                or (getattr(event, "peak_move_pct", 0) if event is not None else 0)
+                or move
+                or 0
+            )
+            first_lift_lane = bool(alert.get("ictFirstLift"))
+            v_rip_lane = bool(
+                alert.get("ictVRipReady")
+                or "v_rip" in str(alert.get("momentType") or "").lower()
+            )
+            from app.engines.explosion_detector import (
+                effective_first_lift_trade_min_score,
+                first_lift_pad_capture_lane,
+            )
+
+            if first_lift_pad_capture_lane(
+                tier=tier,
+                peak_move_pct=peak_for_lane,
+                first_lift_ready=first_lift_lane,
+                local_base_move_pct=pad_for_lane,
+                v_rip_ready=v_rip_lane,
+            ):
+                min_rip_score = min(
+                    min_rip_score,
+                    effective_first_lift_trade_min_score(
+                        tier=tier,
+                        peak_move_pct=peak_for_lane,
+                        first_lift_ready=first_lift_lane,
+                        local_base_move_pct=pad_for_lane,
+                        default_min=float(settings.all_day_explosion_min_score),
+                        v_rip_ready=v_rip_lane,
+                    )
+                    - 4.0,
+                )
             if (
                 getattr(settings, "ict_defensive_base_rip_enabled", True)
                 and tier in rip_tiers
@@ -491,7 +584,7 @@ def worst_day_allows_candidate(
                 and ict_vol
                 and move <= early_max
                 and elite_pad_ok
-                and score >= settings.all_day_explosion_min_score - 8
+                and score >= min_rip_score
                 and building_elite_ok
             ):
                 from app.engines.ict_breakout_monitor import (
@@ -531,11 +624,52 @@ def worst_day_allows_candidate(
                     score=score,
                     velocity_3s=v3,
                     settings=settings,
-                    base_move_pct=float(move or 0),
+                    # Pad % for velocity floors — session peak can exceed 25% while
+                    # local base is still inside the 8–25% defensive pad window.
+                    base_move_pct=float(
+                        pad_for_lane if pad_for_lane > 0 else (move or 0)
+                    ),
                     volume_awake=bool(
                         alert.get("ictVolumeAwakening") or alert.get("volumeAwaken")
                     ),
-                    v_rip_ready=bool(alert.get("ictVRipReady")),
+                    v_rip_ready=bool(
+                        alert.get("ictVRipReady")
+                        or "v_rip"
+                        in str(alert.get("momentType") or alert.get("reason") or "").lower()
+                    ),
+                    armed_base_launch=bool(
+                        alert.get("ictArmedBaseLaunch")
+                        or str(alert.get("momentType") or "") == "armed_base_launch"
+                    ),
+                    first_lift=(
+                        bool(alert.get("ictFirstLift"))
+                        or (
+                            bool(alert.get("ictFlatThenVertical"))
+                            and (
+                                alert.get("ictArmedBaseLaunch")
+                                or str(alert.get("momentType") or "")
+                                == "armed_base_launch"
+                            )
+                            and pad_for_lane > 0
+                            and float(
+                                getattr(
+                                    settings,
+                                    "ict_v_rip_pad_min_move_pct",
+                                    2.0,
+                                )
+                                or 2.0
+                            )
+                            <= pad_for_lane
+                            <= float(
+                                getattr(
+                                    settings,
+                                    "top_ftv_a_pad_velocity_max_move_pct",
+                                    25.0,
+                                )
+                                or 25.0
+                            )
+                        )
+                    ),
                 )
                 day_mode = ""
                 try:

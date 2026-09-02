@@ -284,9 +284,10 @@ async def deployment_readiness():
     from app.engines.worst_day_guard import worst_day_blocks_live
 
     milestone = compute_milestone_stats()
-    checks["milestonePassed"] = milestone["readyForLiveMilestone"]
-    if not milestone["readyForLiveMilestone"]:
-        arm_live_steps.append(milestone["message"])
+    # 50-trade batch is tracked for review only — not a live arming gate.
+    checks["milestoneRequired"] = False
+    checks["milestonePassed"] = True
+    checks["milestoneAdvisoryOnly"] = True
 
     try:
         worst_live_block, worst_reason, worst_meta = worst_day_blocks_live(state, snapshots)
@@ -303,7 +304,6 @@ async def deployment_readiness():
         "readyForPaper": paper_ready,
         "readyForLive": (
             live_ready
-            and milestone["readyForLiveMilestone"]
             and checks.get("worstDayClear", True)
         ),
         "executionMode": (

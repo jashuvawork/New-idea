@@ -320,6 +320,62 @@ def open_exposure_inr(state: AutoTraderState) -> float:
     return sum(trade_exposure_inr(trade) for trade in state.openPaperTrades)
 
 
+def _allocation_reserve_inr(capital_base: float) -> float:
+    settings = get_settings()
+    reserve_pct = max(
+        0.0,
+        min(
+            0.50,
+            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
+        ),
+    )
+    return capital_base * reserve_pct
+
+
+def _book_remaining_inr(
+    state: AutoTraderState,
+    cap: CapitalSnapshot,
+) -> float:
+    """Free cash in the sizing book for the next ranked FTV leg."""
+    capital_base = _allocation_capital_base(cap)
+    cash_reserve = _allocation_reserve_inr(capital_base)
+    committed = open_exposure_inr(state)
+    strategy_remaining = max(0.0, capital_base - cash_reserve - committed)
+    if should_use_live_broker_capital():
+        broker_remaining = max(0.0, float(cap.availableMarginInr or 0))
+        if str(cap.source or "").lower() in ("fallback", "manual"):
+            broker_remaining = max(0.0, broker_remaining - committed)
+        return min(strategy_remaining, broker_remaining)
+    # Paper / book sizing — never cap by broker leftover margin.
+    return strategy_remaining
+
+
+def ensure_paper_sizing_capital() -> CapitalSnapshot:
+    """Initialize or refresh the paper trading book (default ₹2L)."""
+    settings = get_settings()
+    if should_use_live_broker_capital():
+        return get_capital_snapshot()
+    global _capital
+    target = float(
+        _manual_capital_limit_inr
+        if _manual_capital_limit_inr is not None
+        else getattr(settings, "fallback_capital_inr", 200_000) or 200_000
+    )
+    if (
+        _capital is not None
+        and str(_capital.source or "").lower() in ("fallback", "manual")
+        and abs(float(_capital.availableMarginInr or 0) - target) < 1.0
+    ):
+        return _capital
+    _capital = _build_fallback_capital_snapshot()
+    logger.info(
+        "Paper sizing capital set to ₹%.0f (source=%s)",
+        _capital.availableMarginInr,
+        _capital.source,
+    )
+    return _capital
+
+
 def _allocation_capital_base(cap: CapitalSnapshot) -> float:
     total = float(cap.totalEquityInr or 0)
     if total <= 0:
@@ -339,20 +395,9 @@ def ranked_allocation_for_state(
     weights = ranked_allocation_weights()
     rank = max(1, int(rank))
     capital_base = _allocation_capital_base(cap)
-    reserve_pct = max(
-        0.0,
-        min(
-            0.50,
-            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
-        ),
-    )
-    cash_reserve = capital_base * reserve_pct
+    cash_reserve = _allocation_reserve_inr(capital_base)
     committed = open_exposure_inr(state)
-    strategy_remaining = max(0.0, capital_base - cash_reserve - committed)
-    broker_remaining = max(0.0, float(cap.availableMarginInr or 0))
-    if cap.source == "fallback":
-        broker_remaining = max(0.0, broker_remaining - committed)
-    remaining = min(strategy_remaining, broker_remaining)
+    remaining = _book_remaining_inr(state, cap)
 
     index = rank - 1
     remaining_pct = max(
@@ -429,15 +474,69 @@ def cap_lots_to_allocation(
     symbol: str,
     premium: float,
     allocation: RankedAllocation | None,
+    *,
+    use_full_remaining: bool = False,
 ) -> int:
     """Apply the final cash sleeve after all strategy force-max sizing paths."""
     if allocation is None:
         return max(0, int(lots))
     unit_cost = float(premium or 0) * lot_multiplier(symbol)
-    if unit_cost <= 0 or allocation.budgetInr <= 0:
+    if unit_cost <= 0:
         return 0
-    affordable = int(allocation.budgetInr / unit_cost)
+
+    settings = get_settings()
+    budget = float(allocation.budgetInr or 0)
+    remaining = float(allocation.remainingBeforeInr or 0)
+    if (
+        use_full_remaining
+        and allocation.rank == 1
+        and bool(
+            getattr(settings, "ftv_allocation_full_remaining_on_full_sleeve_enabled", True)
+        )
+    ):
+        budget = max(budget, remaining)
+    if (
+        allocation.rank == 1
+        and bool(getattr(settings, "ftv_allocation_rank_one_min_one_lot_enabled", True))
+        and budget < unit_cost <= remaining
+    ):
+        budget = remaining
+
+    if budget <= 0:
+        return 0
+    affordable = int(budget / unit_cost)
     return max(0, min(int(lots), affordable))
+
+
+def effective_ranked_allocation(
+    allocation: RankedAllocation,
+    *,
+    use_full_remaining: bool = False,
+) -> RankedAllocation:
+    """Bump rank-1 budget to full remaining when pad-lane / FTV sleeve authorizes."""
+    if allocation.rank != 1 or not use_full_remaining:
+        return allocation
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "ftv_allocation_full_remaining_on_full_sleeve_enabled", True)
+    ):
+        return allocation
+    remaining = float(allocation.remainingBeforeInr or 0)
+    if remaining <= allocation.budgetInr + 1e-6:
+        return allocation
+    return RankedAllocation(
+        rank=allocation.rank,
+        budgetInr=remaining,
+        remainingBeforeInr=allocation.remainingBeforeInr,
+        cashReserveInr=allocation.cashReserveInr,
+        capitalBaseInr=allocation.capitalBaseInr,
+        committedInr=allocation.committedInr,
+        weight=allocation.weight,
+    )
+
+
+def one_lot_unit_cost_inr(symbol: str, premium: float) -> float:
+    return max(0.0, float(premium or 0) * lot_multiplier(symbol))
 
 
 def capital_book_summary(
@@ -450,19 +549,8 @@ def capital_book_summary(
     settings = get_settings()
     capital_base = _allocation_capital_base(cap)
     committed = open_exposure_inr(state)
-    reserve_pct = max(
-        0.0,
-        min(
-            0.50,
-            float(getattr(settings, "ftv_allocation_cash_reserve_pct", 0.05) or 0),
-        ),
-    )
-    reserve = capital_base * reserve_pct
-    strategy_remaining = max(0.0, capital_base - reserve - committed)
-    broker_remaining = max(0.0, float(cap.availableMarginInr or 0))
-    if cap.source == "fallback":
-        broker_remaining = max(0.0, broker_remaining - committed)
-    remaining = min(strategy_remaining, broker_remaining)
+    reserve = _allocation_reserve_inr(capital_base)
+    remaining = _book_remaining_inr(state, cap)
     active = []
     for trade in state.openPaperTrades:
         ctx = getattr(trade, "entryContext", None) or {}
@@ -548,6 +636,67 @@ def max_lots_for_capital_pct(symbol: str, premium: float, capital_pct: float) ->
     return max(1, int(budget / (premium * mult)))
 
 
+def apply_explosion_always_max_lots(
+    lots: int,
+    symbol: str,
+    premium: float,
+    *,
+    mode: str = "",
+) -> int:
+    """Floor explosion entries at capital max lots when enabled."""
+    settings = get_settings()
+    if str(mode or "").lower() != "explosion":
+        return int(lots)
+    if not bool(getattr(settings, "explosion_always_force_max_lots", True)):
+        return int(lots)
+    return max(int(lots), max_lots_for_capital(symbol, premium))
+
+
+def cap_lots_for_base_retest(
+    lots: int,
+    symbol: str,
+    entry_premium: float,
+    base_premium: float,
+) -> int:
+    """Cap lots so a normal retest to the LOCAL BASE can't exceed a % of capital.
+
+    A near-base entry (entry a few % above its base) will usually retest the base before it
+    runs. With full-capital sizing on a cheap option that ordinary dip can be huge in rupees —
+    the +185% Aug31 24150 CE would have been stopped at −₹21k on the retest at ₹2L capital
+    before the rally. This sizes the position so (entry − base) × units stays within
+    size_to_base_retest_max_pct_of_capital, so the base retest cannot trip the per-trade / daily
+    stop and shake the winner out. Only ever REDUCES lots (protective); no-op if disabled or the
+    base is unknown.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "size_to_base_retest_enabled", True)):
+        return int(lots)
+    mult = lot_multiplier(symbol)
+    if float(entry_premium or 0) <= float(base_premium or 0):
+        return int(lots)  # not a near-base long above its base — rule doesn't apply
+    # Size for a modest break BELOW the base, not just a touch of it — winners often wick a few
+    # % under the base before running (Aug31 24150 CE broke ~1pt under its base, then +185%).
+    buffer = float(
+        getattr(settings, "size_to_base_retest_break_buffer_pct", 0.15) or 0.15
+    )
+    stop_floor = float(base_premium or 0) * (1.0 - max(0.0, buffer))
+    risk_pts = float(entry_premium or 0) - stop_floor
+    if mult <= 0 or risk_pts <= 0 or base_premium <= 0:
+        return int(lots)
+    cap = get_capital_snapshot()
+    capital = _effective_capital_inr(cap.availableMarginInr or 0) or float(
+        getattr(settings, "fallback_capital_inr", 200_000.0) or 200_000.0
+    )
+    pct = float(
+        getattr(settings, "size_to_base_retest_max_pct_of_capital", 0.10) or 0.10
+    )
+    max_retest_loss = capital * max(0.0, pct)
+    if max_retest_loss <= 0:
+        return int(lots)
+    max_lots = int(max_retest_loss / (risk_pts * mult))
+    return max(1, min(int(lots), max_lots))
+
+
 def clamp_lots(lots: int, symbol: str = "", premium: float = 0.0) -> int:
     """Clamp to min lots and capital-derived max (optional hard ceiling)."""
     settings = get_settings()
@@ -600,6 +749,8 @@ async def refresh_capital_from_upstox(
     force: bool = False,
 ) -> CapitalSnapshot:
     """Pull live margin from Upstox and derive static risk/lot tiers."""
+    if not should_use_live_broker_capital():
+        return ensure_paper_sizing_capital()
     settings = get_settings()
     now = datetime.now(IST).isoformat()
     min_l, tgt_l, max_l = _lot_tiers(settings.fallback_capital_inr)
@@ -653,17 +804,34 @@ async def refresh_capital_from_upstox(
     return snap
 
 
-def get_capital_snapshot() -> CapitalSnapshot:
-    global _capital
-    if _capital is not None:
-        return _capital
+def should_use_live_broker_capital() -> bool:
+    """Only size from Upstox margin when live trading is enabled.
+
+    Paper mode always uses fallback_capital_inr (default ₹2L) or a manual book cap —
+    never the broker's leftover live margin (which caused ftv_allocation_below_one_lot
+    at ~₹573 while the paper book was ₹2L).
+    """
     settings = get_settings()
-    min_l, tgt_l, max_l = _lot_tiers(settings.fallback_capital_inr)
-    budget = settings.fallback_capital_inr * settings.per_trade_capital_pct
+    return bool(
+        getattr(settings, "use_upstox_capital_for_sizing", False)
+        and getattr(settings, "enable_live_trading", False)
+    )
+
+
+def _build_fallback_capital_snapshot() -> CapitalSnapshot:
+    settings = get_settings()
+    base = (
+        float(_manual_capital_limit_inr)
+        if _manual_capital_limit_inr is not None
+        else float(settings.fallback_capital_inr)
+    )
+    effective = _effective_capital_inr(base)
+    min_l, tgt_l, max_l = _lot_tiers(effective)
+    budget = effective * settings.per_trade_capital_pct
     return CapitalSnapshot(
-        availableMarginInr=settings.fallback_capital_inr,
-        totalEquityInr=settings.fallback_capital_inr,
-        source="fallback",
+        availableMarginInr=effective,
+        totalEquityInr=effective,
+        source="manual" if _manual_capital_limit_inr is not None else "fallback",
         perTradeRiskInr=budget,
         perTradeCapitalInr=budget,
         maxExposureInr=budget,
@@ -671,6 +839,17 @@ def get_capital_snapshot() -> CapitalSnapshot:
         targetLots=tgt_l,
         maxLots=max_l,
     )
+
+
+def get_capital_snapshot() -> CapitalSnapshot:
+    global _capital
+    if not should_use_live_broker_capital():
+        if _capital is None or str(_capital.source or "").lower() == "upstox":
+            _capital = _build_fallback_capital_snapshot()
+        return _capital
+    if _capital is not None:
+        return _capital
+    return _build_fallback_capital_snapshot()
 
 
 def set_manual_capital_limit(amount: float) -> CapitalSnapshot:
@@ -701,12 +880,20 @@ def set_manual_capital_limit(amount: float) -> CapitalSnapshot:
 
 def compute_session_pnl(state: AutoTraderState) -> float:
     """Realtime session PnL = closed today + open unrealized."""
+    from app.engines.session_trade_integrity import (
+        is_phantom_session_trade,
+        real_session_closed_trades,
+    )
+
     today = datetime.now(IST).strftime("%Y-%m-%d")
     closed = sum(
-        t.pnlInr for t in state.closedPaperTrades
+        t.pnlInr
+        for t in real_session_closed_trades(state)
         if (t.sessionDate or today) == today
     )
-    open_pnl = sum(t.pnlInr for t in state.openPaperTrades)
+    open_pnl = sum(
+        t.pnlInr for t in state.openPaperTrades if not is_phantom_session_trade(t)
+    )
     return closed + open_pnl
 
 

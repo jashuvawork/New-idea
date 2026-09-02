@@ -57,6 +57,8 @@ def atm_itm_entry_allows(
     side: Side | str,
     strike: float,
     snap: SymbolSnapshot,
+    *,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Hard execution policy: every order must be ATM or ITM."""
     spot = float(snap.spot or 0)
@@ -73,6 +75,28 @@ def atm_itm_entry_allows(
         "strikeStepsFromAtm": _depth_steps(side, strike, spot, symbol, atm),
     }
     if money == "OTM":
+        if isinstance(alert, dict) and bool(
+            alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
+        ):
+            from app.engines.early_radar_pad_capture import building_coil_pad_moneyness_ok
+
+            if building_coil_pad_moneyness_ok(alert, snap):
+                meta["buildingCoilPadExpansion"] = True
+                return True, "ok", meta
+        if isinstance(alert, dict):
+            from app.engines.early_radar_pad_capture import otm_reversal_entry_allowed
+
+            if otm_reversal_entry_allowed(alert, snap):
+                meta["otmReversalEntry"] = True
+                return True, "ok", meta
+            from app.engines.index_confirmed_local_base import index_confirmed_moneyness_bypass
+
+            depth = _depth_steps(side, strike, spot, symbol, atm)
+            if index_confirmed_moneyness_bypass(
+                side, snap, alert, money=money, depth=depth,
+            ):
+                meta["indexConfirmedMoneyness"] = True
+                return True, "ok", meta
         return False, "moneyness_atm_itm_only", meta
     return True, "ok", meta
 
@@ -165,7 +189,14 @@ def moneyness_allows(
     candidate: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     settings = get_settings()
-    hard_ok, hard_reason, hard_meta = atm_itm_entry_allows(side, strike, snap)
+    alert_d = None
+    if candidate is not None:
+        raw = getattr(candidate, "alert", None)
+        if isinstance(raw, dict):
+            alert_d = raw
+    hard_ok, hard_reason, hard_meta = atm_itm_entry_allows(
+        side, strike, snap, alert=alert_d,
+    )
     if not hard_ok:
         return False, hard_reason, hard_meta
     if not settings.moneyness_selection_enabled:
@@ -209,7 +240,14 @@ def moneyness_allows(
         if depth > max_itm and not (
             mode in pm_modes and expiry_pm_itm_quick_active(snap, state, snapshots)
         ):
-            return False, f"moneyness_itm_too_deep_{depth}", meta
+            from app.engines.index_confirmed_local_base import index_confirmed_moneyness_bypass
+
+            if index_confirmed_moneyness_bypass(
+                side, snap, alert_d, money="ITM", depth=depth,
+            ):
+                meta["indexConfirmedMoneyness"] = True
+            else:
+                return False, f"moneyness_itm_too_deep_{depth}", meta
 
     if settings.trade_moneyness_mode.upper() == "AUTO" and preferred != money:
         # Soft mismatch — rank penalty handles preference; hard-block only deep wrong-way OTM in chop

@@ -92,6 +92,30 @@ async def eod_local_base_replay(date: str):
     return await asyncio.to_thread(generate_eod_local_base_replay, date)
 
 
+@router.get("/window-replay/{date}")
+async def window_replay(
+    date: str,
+    start: str = "12:07:00",
+    end: str = "13:40:00",
+    side: str | None = None,
+):
+    """Replay a premium-tape IST window with production entry/exit gates."""
+    import asyncio
+
+    from app.engines.eod_local_base_replay import generate_window_replay
+
+    try:
+        return await asyncio.to_thread(
+            generate_window_replay,
+            date,
+            start=start,
+            end=end,
+            side=side,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/eod-local-base-replay/week/{start_date}")
 async def eod_local_base_replay_week(start_date: str, days: int = 5):
     """Roll up local-base replays across a validation week."""

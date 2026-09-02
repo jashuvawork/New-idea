@@ -9,15 +9,20 @@ from app.config import Settings
 from app.engines.capital_allocator import (
     CapitalSnapshot,
     RankedAllocation,
+    _book_remaining_inr,
     cap_lots_to_allocation,
     capital_book_summary,
     clamp_lots,
+    effective_ranked_allocation,
+    ensure_paper_sizing_capital,
     get_capital_snapshot,
     max_lots_for_capital,
     max_lots_for_capital_pct,
     next_ranked_allocation_rank,
     ranked_allocation_for_state,
+    reset_capital_for_tests,
     set_manual_capital_limit,
+    should_use_live_broker_capital,
     tune_exit_plan_for_position,
 )
 from app.engines.risk_engine import RiskEngine
@@ -55,6 +60,9 @@ class CapitalSizingTests(unittest.TestCase):
             lot_size_banknifty=30,
             lot_size_sensex=20,
             use_upstox_lot_sizes=False,
+            simple_min_lots=1,
+            use_upstox_capital_for_sizing=False,
+            enable_live_trading=False,
         )
 
     def test_max_lots_from_85pct_2l_capital(self):
@@ -187,6 +195,67 @@ class CapitalSizingTests(unittest.TestCase):
         self.assertEqual(first.budgetInr, 180_000)
         self.assertEqual(lots, 55)
         self.assertLessEqual(lots * 65 * 50, first.budgetInr)
+
+    def test_rank_one_min_one_lot_floor_when_sleeve_pct_too_small(self):
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=3_240.0,
+            remainingBeforeInr=3_600.0,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=196_400,
+            weight=0.9,
+        )
+        settings = self._ranked_settings()
+        settings.ftv_allocation_rank_one_min_one_lot_enabled = True
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            lots = cap_lots_to_allocation(5, "NIFTY", 52.9, allocation)
+        self.assertEqual(lots, 1)
+
+    def test_rank_one_full_remaining_on_pad_lane_sleeve(self):
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=3_240.0,
+            remainingBeforeInr=3_600.0,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=196_400,
+            weight=0.9,
+        )
+        settings = self._ranked_settings()
+        settings.ftv_allocation_full_remaining_on_full_sleeve_enabled = True
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            bumped = effective_ranked_allocation(allocation, use_full_remaining=True)
+            lots = cap_lots_to_allocation(
+                5,
+                "NIFTY",
+                52.9,
+                bumped,
+                use_full_remaining=True,
+            )
+        self.assertEqual(bumped.budgetInr, 3_600.0)
+        self.assertEqual(lots, 1)
+
+    def test_capital_below_one_lot_stays_zero(self):
+        allocation = RankedAllocation(
+            rank=1,
+            budgetInr=573.0,
+            remainingBeforeInr=637.0,
+            cashReserveInr=0,
+            capitalBaseInr=200_000,
+            committedInr=199_363,
+            weight=0.9,
+        )
+        settings = self._ranked_settings()
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            lots = cap_lots_to_allocation(
+                5,
+                "NIFTY",
+                52.9,
+                allocation,
+                use_full_remaining=True,
+            )
+        self.assertEqual(lots, 0)
 
     def test_unused_top_sleeve_rolls_into_second_rank(self):
         state = AutoTraderState(
@@ -353,13 +422,25 @@ class CapitalSizingTests(unittest.TestCase):
             "top_explosion_max": True,
             "faded_rip": False,
             "post_win_capped": False,
+            "explosion_always_max": False,
         }
 
         self.assertTrue(_top_rank_full_budget_lots_allowed(**common))
-        for key in ("strict_first_lift", "top_explosion_max"):
-            self.assertFalse(
-                _top_rank_full_budget_lots_allowed(**{**common, key: False})
+        self.assertFalse(
+            _top_rank_full_budget_lots_allowed(
+                **{**common, "strict_first_lift": False}
             )
+        )
+        self.assertTrue(
+            _top_rank_full_budget_lots_allowed(
+                **{**common, "strict_first_lift": False, "explosion_always_max": True}
+            )
+        )
+        self.assertFalse(
+            _top_rank_full_budget_lots_allowed(
+                **{**common, "top_explosion_max": False}
+            )
+        )
         self.assertFalse(
             _top_rank_full_budget_lots_allowed(**{**common, "faded_rip": True})
         )
@@ -378,6 +459,24 @@ class CapitalSizingTests(unittest.TestCase):
                         capitalBaseInr=200_000,
                         committedInr=180_000,
                         weight=0.9,
+                    ),
+                }
+            )
+        )
+        self.assertTrue(
+            _top_rank_full_budget_lots_allowed(
+                **{
+                    **common,
+                    "strict_first_lift": False,
+                    "explosion_always_max": True,
+                    "allocation": RankedAllocation(
+                        rank=2,
+                        budgetInr=175_000,
+                        remainingBeforeInr=180_000,
+                        cashReserveInr=0,
+                        capitalBaseInr=200_000,
+                        committedInr=5_000,
+                        weight=0.25,
                     ),
                 }
             )
@@ -553,6 +652,63 @@ class CapitalSizingTests(unittest.TestCase):
         self.assertFalse(rejected_cold_v9)
         self.assertFalse(rejected_unarmed)
         self.assertFalse(rejected_missing_move)
+
+    def test_paper_mode_ignores_stale_upstox_capital_snapshot(self):
+        reset_capital_for_tests()
+        import app.engines.capital_allocator as ca
+
+        ca._capital = CapitalSnapshot(
+            availableMarginInr=573.0,
+            totalEquityInr=50_000.0,
+            source="upstox",
+        )
+        settings = self._ranked_settings()
+        settings.use_upstox_capital_for_sizing = True
+        settings.enable_live_trading = False
+        settings.fallback_capital_inr = 200_000
+        settings.max_sizing_capital_inr = 200_000
+        settings.simple_min_lots = 1
+        settings.per_trade_capital_pct = 0.90
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            self.assertFalse(should_use_live_broker_capital())
+            snap = get_capital_snapshot()
+        self.assertEqual(snap.source, "fallback")
+        self.assertEqual(snap.availableMarginInr, 200_000)
+
+    def test_ensure_paper_sizing_capital_rebuilds_stale_upstox_margin(self):
+        reset_capital_for_tests()
+        import app.engines.capital_allocator as ca
+
+        ca._capital = CapitalSnapshot(
+            availableMarginInr=573.0,
+            totalEquityInr=573.0,
+            source="upstox",
+        )
+        settings = self._ranked_settings()
+        settings.use_upstox_capital_for_sizing = True
+        settings.enable_live_trading = False
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            snap = ensure_paper_sizing_capital()
+        self.assertEqual(snap.source, "fallback")
+        self.assertEqual(snap.availableMarginInr, 200_000)
+
+    def test_book_remaining_ignores_broker_margin_in_paper_mode(self):
+        reset_capital_for_tests()
+        import app.engines.capital_allocator as ca
+
+        ca._capital = CapitalSnapshot(
+            availableMarginInr=573.0,
+            totalEquityInr=200_000.0,
+            source="upstox",
+        )
+        settings = self._ranked_settings()
+        settings.use_upstox_capital_for_sizing = True
+        settings.enable_live_trading = False
+        settings.ftv_allocation_cash_reserve_pct = 0.10
+        state = AutoTraderState(openPaperTrades=[])
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            remaining = _book_remaining_inr(state, ensure_paper_sizing_capital())
+        self.assertEqual(remaining, 180_000)
 
     def test_manual_capital_limit_updates_sizing_snapshot(self):
         settings = self._ranked_settings()

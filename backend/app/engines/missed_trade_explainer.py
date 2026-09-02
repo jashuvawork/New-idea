@@ -142,6 +142,15 @@ def _effective_rank_floor(
     if candidate.mode == "explosion" and is_high_mover_elite_bypass(candidate=candidate):
         notes.append("high_mover_rank_bypass")
 
+    from app.engines.early_catch_gates import early_catch_pretrade_min_rank
+
+    early_rank = early_catch_pretrade_min_rank(candidate, settings=settings)
+    if early_rank is not None:
+        reduced = min(floor, early_rank)
+        if reduced < floor:
+            floor = reduced
+            notes.append(f"early_catch_floor={reduced:.0f}")
+
     return floor, notes
 
 
@@ -160,6 +169,9 @@ def _gate_checks(
     settings = get_settings()
     gates: list[dict[str, Any]] = []
     blockers: list[str] = []
+    from app.engines.index_confirmed_local_base import stamp_index_confirmed_local_base
+
+    stamp_index_confirmed_local_base(alert, snap)
     candidate = _candidate_from_alert(symbol, snap, alert)
 
     tier = str(alert.get("tier") or "")
@@ -188,7 +200,12 @@ def _gate_checks(
 
     # 3 — Premium band
     peak_for_prem = float(alert.get("peakMovePct") or daily_move or 0)
-    if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_for_prem):
+    from app.engines.index_confirmed_local_base import index_confirmed_premium_fade_bypass
+
+    prem_ok = premium_in_band(prem, mode="explosion", peak_move_pct=peak_for_prem)
+    if not prem_ok and index_confirmed_premium_fade_bypass(alert, snap):
+        prem_ok = True
+    if not prem_ok:
         blockers.append("premium_out_of_band")
         gates.append({"gate": "premium_band", "passed": False, "detail": f"premium ₹{prem}", "fix": "Sub-min bypass on extreme session move"})
     else:
@@ -204,17 +221,31 @@ def _gate_checks(
         or alert.get("ictBaseRelativeMovePct")
         or 0
     )
-    first_lift_ready, _ = first_lift_entry_readiness(
+    first_lift_ready, readiness_reason = first_lift_entry_readiness(
         snap=snap,
         alert=alert,
         state=state,
     )
+    from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
+    from app.engines.index_confirmed_local_base import (
+        index_confirmed_near_miss_waive,
+        stamp_index_confirmed_local_base,
+    )
+
+    stamp_index_confirmed_local_base(alert, snap)
+    pad_lane_waive = pad_lane_early_near_miss_waive(
+        alert, readiness_reason=readiness_reason, snap=snap,
+    )
+    index_confirmed_waive = index_confirmed_near_miss_waive(
+        alert, snap, readiness_reason=readiness_reason,
+    )
+    lift_ready = first_lift_ready or pad_lane_waive or index_confirmed_waive
     v_rip_ready = bool(alert.get("ictVRipReady") or alert.get("vRipReady"))
     min_score = effective_explosion_min_score(
         tier=str(alert.get("tier") or "WATCH"),
         peak_move_pct=peak_move,
         daily_move_pct=daily_move,
-        first_lift_ready=first_lift_ready,
+        first_lift_ready=lift_ready,
         local_base_move_pct=local_base_move,
         v_rip_ready=v_rip_ready,
     )
@@ -225,7 +256,7 @@ def _gate_checks(
         )
         min_peak = float(getattr(settings, "peak_move_explosion_min_pct", 35.0) or 35.0)
         if (
-            (first_lift_ready or v_rip_ready)
+            (lift_ready or v_rip_ready)
             and local_base_move >= float(
                 getattr(settings, "first_lift_pad_local_base_min_pct", 2.0) or 2.0
             )
@@ -283,11 +314,28 @@ def _gate_checks(
     local_ichi_bypass = local_base_ichimoku_bypass_for_snap(
         candidate.side, snap, explosion_event=candidate.explosion_event,
     )
+    from app.engines.pad_lane_capture import resolve_strict_pad_lane_chart_bypass
+
+    pad_lane_chart_bypass, strict_first_lift_bypass = (
+        resolve_strict_pad_lane_chart_bypass(candidate, snap)
+    )
     expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    index_trough_bypass = bool(
+        alert.get("ictIndexConfirmedLocalBase")
+        or alert.get("indexConfirmedLocalBase")
+        or index_trough_momentum_turn(candidate.side, chart)
+    )
     blocked, chart_reason = chart_blocks_side(
         candidate.side, chart, trade_score=score, momentum_surge=daily_move >= 40,
-        premium_led_bypass=premium_bypass or vertical_bypass or local_ichi_bypass,
+        premium_led_bypass=(
+            premium_bypass or vertical_bypass or local_ichi_bypass
+            or pad_lane_chart_bypass
+        ),
         expiry_explosion_bypass=expiry_chart_bypass,
+        strict_first_lift_bypass=strict_first_lift_bypass,
+        index_trough_bypass=index_trough_bypass,
     )
     if blocked:
         blockers.append(chart_reason)
@@ -301,6 +349,8 @@ def _gate_checks(
         detail = f"chart {chart_dir}"
         if local_ichi_bypass:
             detail += " (local_base_ichimoku_bypass)"
+        elif pad_lane_chart_bypass or strict_first_lift_bypass:
+            detail += " (pad_lane_strict_chart_bypass)"
         gates.append({"gate": "chart_alignment", "passed": True, "detail": detail})
 
     # 6b — Breadth alignment
@@ -406,7 +456,11 @@ def _gate_checks(
         })
 
     # 7 — Would enter candidate pool (tier filter for explosions)
-    in_pool = tradeable and score >= min_score and premium_in_band(prem, mode="explosion")
+    peak_for_pool = float(alert.get("peakMovePct") or daily_move or 0)
+    pool_prem_ok = premium_in_band(prem, mode="explosion", peak_move_pct=peak_for_pool)
+    if not pool_prem_ok and index_confirmed_premium_fade_bypass(alert, snap):
+        pool_prem_ok = True
+    in_pool = tradeable and score >= min_score and pool_prem_ok
     if tier not in ("ELITE", "EXPLODING") and in_pool:
         from app.engines.morning_premium_capture import is_premium_capture_alert
 
@@ -470,6 +524,7 @@ def _gate_checks(
         float(alert.get("strike") or 0),
         snap,
         explosion_event=candidate.explosion_event,
+        alert=alert,
     )
     if reentry_blocked and not high_mover:
         blockers.append(reentry_reason)
@@ -559,6 +614,7 @@ def _gate_checks(
         extended_session_chase_blocked,
         immature_explosion_blocked,
         live_explosion_confirmation_blocked,
+        post_peak_chase_blocked,
     )
     from app.engines.ict_breakout_monitor import (
         analyze_explosion_event_ict,
@@ -570,6 +626,10 @@ def _gate_checks(
         if candidate.explosion_event
         else None
     )
+    if ict is not None and isinstance(getattr(candidate, "alert", None), dict):
+        from app.engines.ict_breakout_monitor import merge_alert_ict_stamps
+
+        ict = merge_alert_ict_stamps(ict, candidate.alert)
     if candidate.explosion_event:
         from app.engines.bullish_local_base import bullish_local_base_prediction
 
@@ -603,7 +663,7 @@ def _gate_checks(
                 "detail": "session move mature enough",
             })
         live_blocked, live_reason = live_explosion_confirmation_blocked(
-            candidate.explosion_event, ict=ict, snap=snap,
+            candidate.explosion_event, ict=ict, snap=snap, alert=alert,
         )
         if live_blocked:
             blockers.append(live_reason)
@@ -618,6 +678,21 @@ def _gate_checks(
                 "gate": "live_explosion_confirmation",
                 "passed": True,
                 "detail": "live velocity + structure confirmed",
+            })
+        pp_blocked, pp_reason = post_peak_chase_blocked(candidate.explosion_event)
+        if pp_blocked:
+            blockers.append(pp_reason)
+            gates.append({
+                "gate": "explosion_post_peak_chase",
+                "passed": False,
+                "detail": pp_reason,
+                "fix": "Enter at the base — don't buy near the top of a run that already happened",
+            })
+        else:
+            gates.append({
+                "gate": "explosion_post_peak_chase",
+                "passed": True,
+                "detail": "not chasing a completed run's top",
             })
         ext_blocked, ext_reason = extended_session_chase_blocked(
             candidate.explosion_event, ict=ict,

@@ -54,8 +54,12 @@ def _profit_factor(trades: list[TradeRecord]) -> float:
 
 
 def _paper_trade_records(state: AutoTraderState, reset_at: Optional[datetime] = None) -> list[TradeRecord]:
+    from app.engines.session_trade_integrity import is_phantom_session_trade
+
     out: list[TradeRecord] = []
     for t in state.closedPaperTrades:
+        if is_phantom_session_trade(t):
+            continue
         if reset_at:
             closed_at = t.closedAt
             if closed_at is None:
@@ -115,6 +119,10 @@ def collect_session_trades(state: AutoTraderState) -> list[TradeRecord]:
                     pass
             tid = str(row.get("id", ""))
             if tid and tid in seen:
+                continue
+            from app.engines.session_trade_integrity import is_phantom_trade_row
+
+            if is_phantom_trade_row(row):
                 continue
             ctx = row.get("entryContext") or {}
             mode = str(
@@ -370,16 +378,37 @@ def controlled_daily_cap_reached(
     state: AutoTraderState,
     snapshots: Optional[dict] = None,
 ) -> tuple[bool, str]:
+    """Backward-compatible wrapper — prefer resolve_controlled_daily_cap for meta."""
+    hit, reason, _ = resolve_controlled_daily_cap(state, snapshots)
+    return hit, reason
+
+
+def resolve_controlled_daily_cap(
+    state: AutoTraderState,
+    snapshots: Optional[dict] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Controlled daily cap with top-signal elite-only lift."""
+    meta: dict[str, Any] = {}
     settings = get_settings()
     if not settings.controlled_trading_enabled:
-        return False, "ok"
+        return False, "ok", meta
     cap, _ = resolve_effective_daily_trade_cap(state, snapshots)
     if cap <= 0:
-        return False, "ok"
+        return False, "ok", meta
     closed = len(collect_session_trades(state))
-    if closed >= cap:
-        return True, f"controlled_daily_cap_{cap}"
-    return False, "ok"
+    if closed < cap:
+        return False, "ok", meta
+    if (
+        snapshots
+        and bool(getattr(settings, "controlled_cap_top_signal_bypass_enabled", True))
+    ):
+        from app.engines.top_signal_session_lift import snapshots_have_top_signal_session_lift
+
+        if snapshots_have_top_signal_session_lift(snapshots):
+            meta["controlledCapEliteOnly"] = True
+            meta["controlledCapTopSignalBypass"] = True
+            return False, "controlled_cap_top_signal_bypass", meta
+    return True, f"controlled_daily_cap_{cap}", meta
 
 
 def analyze_last_n_trades(trades: list[TradeRecord], n: int = 5) -> dict[str, Any]:
@@ -454,6 +483,17 @@ def check_last_n_trades_pause(
 
     if momentum_rally_bypass_last_n(snapshots):
         return False, "momentum_rally_bypass", summary
+
+    if (
+        snapshots
+        and bool(getattr(settings, "last_n_top_signal_bypass_enabled", True))
+    ):
+        from app.engines.top_signal_session_lift import snapshots_have_top_signal_session_lift
+
+        if snapshots_have_top_signal_session_lift(snapshots):
+            summary = summary or last_n_trades_summary(state)
+            summary["topSignalSessionLiftBypass"] = True
+            return False, "top_signal_session_lift_bypass", summary
 
     from app.engines.morning_premium_capture import premium_capture_active
 
@@ -566,6 +606,13 @@ def validate_candidate(
     """
     settings = get_settings()
     policy_meta: dict[str, Any] = {}
+    from app.engines.power_hour_guards import (
+        candidate_qualifies_power_hour_top_trade,
+        in_power_hour_window,
+    )
+
+    if in_power_hour_window() and not candidate_qualifies_power_hour_top_trade(candidate):
+        return False, "power_hour_top_only", policy_meta
     if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.session_mode_feedback import (
@@ -627,11 +674,15 @@ def validate_candidate(
         )
         policy_snap = getattr(candidate, "snap", None)
         money_ok = True
+        alert_d = (
+            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+        )
         if policy_snap is not None:
             money_ok, _, _ = atm_itm_entry_allows(
                 candidate.side,
                 candidate.strike,
                 policy_snap,
+                alert=alert_d,
             )
         policy_decision = ftv_authorization_policy(
             causal_ranking.get("evidence") or {},
@@ -672,9 +723,9 @@ def validate_candidate(
                 meta["composerBias"] = brief.get("tradeBias")
                 # Session stand-aside must not bury high-confidence base-rip explosions.
                 stand_down_bypass = False
-                from app.engines.elite_never_block import elite_never_block_active
+                from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-                if elite_never_block_active(candidate=candidate):
+                if elite_must_take_bypass_allowed(candidate=candidate):
                     stand_down_bypass = True
                     meta["composerStandDownBypass"] = "elite_never_block"
                 # (1) Expiry early-window ELITE top.
@@ -779,20 +830,36 @@ def validate_candidate(
 
         snap_pre = snap_map.get(candidate.symbol.upper()) or candidate.snap
         bias = (snap_pre.breadth.bias if snap_pre.breadth else "NEUTRAL") or "NEUTRAL"
+        alert_d = (
+            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+        )
         hard_blocked, hard_reason = breadth_hard_blocks_side(
-            candidate.side, bias, candidate=candidate, snap=snap_pre,
+            candidate.side,
+            bias,
+            candidate=candidate,
+            snap=snap_pre,
+            alert=alert_d,
         )
         if hard_blocked:
             return False, hard_reason, meta
         explosion_event = getattr(candidate, "explosion_event", None)
         if explosion_event is not None and not counter_trend_entry_allowed(
-            candidate.side, snap_pre, explosion_event=explosion_event,
+            candidate.side,
+            snap_pre,
+            explosion_event=explosion_event,
+            alert=alert_d,
         ):
             return False, "counter_trend_requires_elite", meta
 
-    cap_hit, cap_reason = controlled_daily_cap_reached(state, snap_map)
+    cap_hit, cap_reason, cap_meta = resolve_controlled_daily_cap(state, snap_map)
+    meta.update(cap_meta)
     if cap_hit:
         return False, cap_reason, meta
+    if cap_meta.get("controlledCapEliteOnly"):
+        from app.engines.top_signal_session_lift import candidate_qualifies_top_signal_session_lift
+
+        if not candidate_qualifies_top_signal_session_lift(candidate):
+            return False, "controlled_cap_elite_only", meta
 
     ln_ok, ln_reason, ln_meta = check_last_n_candidate_gate(candidate, state, trades)
     meta.update(ln_meta)
@@ -865,6 +932,14 @@ def validate_candidate(
             if explosion_event is not None
             else None
         )
+        from app.engines.ict_breakout_monitor import merge_alert_ict_stamps
+
+        trap_ict = merge_alert_ict_stamps(
+            trap_ict,
+            getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None,
+        )
         from app.engines.ict_breakout_monitor import first_lift_entry_ready
 
         strict_base_ready = first_lift_entry_ready(
@@ -877,9 +952,9 @@ def validate_candidate(
                 else None
             ),
         )
-        from app.engines.elite_never_block import elite_never_block_active
+        from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-        must_take = elite_never_block_active(
+        must_take = elite_must_take_bypass_allowed(
             event=explosion_event,
             candidate=candidate,
             alert=getattr(candidate, "alert", None)
@@ -918,13 +993,14 @@ def validate_candidate(
                 building_rip_bypasses_fake_trap,
                 top_must_take_bypasses_fake_trap,
             )
-            from app.engines.elite_never_block import elite_never_block_active
+            from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-            must_take = elite_never_block_active(
+            must_take = elite_must_take_bypass_allowed(
                 event=explosion_event,
                 candidate=candidate,
                 alert=getattr(candidate, "alert", None),
                 snap=snap,
+                ict=trap_ict,
             )
             if not building_rip_bypasses_fake_trap(candidate=candidate) and not (
                 top_must_take_bypasses_fake_trap(
@@ -973,12 +1049,14 @@ def validate_candidate(
 
     from app.engines.moneyness import atm_itm_entry_allows, moneyness_allows
 
-    # Hard execution policy: ELITE/must-take paths may bypass soft validators,
-    # but they can never bypass ATM/ITM-only selection.
+    alert_d = (
+        candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+    )
     hard_mn_ok, hard_mn_reason, hard_mn_meta = atm_itm_entry_allows(
         candidate.side,
         candidate.strike,
         snap,
+        alert=alert_d,
     )
     meta.update(hard_mn_meta)
     if not hard_mn_ok:
@@ -1062,6 +1140,11 @@ def validate_candidate(
             min_rank = min(min_rank, settings.worst_day_itm_fade_min_rank)
         elif mode == "quick_sideways" and (getattr(candidate, "pretrade_meta", None) or {}).get("worstDayQuick"):
             min_rank = min(min_rank, settings.worst_day_quick_min_rank)
+        from app.engines.early_catch_gates import early_catch_pretrade_min_rank
+
+        early_rank = early_catch_pretrade_min_rank(candidate, settings=settings)
+        if early_rank is not None:
+            min_rank = min(min_rank, early_rank)
         if not expiry_aligned and candidate.score < min_rank:
             return False, f"pretrade_rank_below_{min_rank:.0f}", meta
 
@@ -1149,6 +1232,20 @@ def validate_candidate(
     )
     if pad_lane_chart_bypass:
         meta["padLaneChartBypass"] = True
+    from app.engines.ftv_candlestick_confirm import ftv_candlestick_bypass_for_snap
+
+    candlestick_bypass = ftv_candlestick_bypass_for_snap(
+        candidate.side,
+        snap,
+        explosion_event=getattr(candidate, "explosion_event", None),
+        alert=(
+            candidate.alert
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None
+        ),
+    )
+    if candlestick_bypass:
+        meta["ftvCandlestickBypass"] = True
     armed_base_chart_bypass = False
     if (
         getattr(candidate, "mode", "") == "explosion"
@@ -1189,14 +1286,33 @@ def validate_candidate(
         )
         if armed_base_chart_bypass:
             meta["armedBaseChartBypass"] = True
+    alert_d = (
+        candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+    )
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    index_trough_bypass = bool(
+        alert_d
+        and (
+            alert_d.get("ictIndexConfirmedLocalBase")
+            or alert_d.get("indexConfirmedLocalBase")
+        )
+    )
+    if not index_trough_bypass and snap.spotChart is not None:
+        index_trough_bypass = index_trough_momentum_turn(
+            candidate.side, snap.spotChart,
+        )
+    if index_trough_bypass:
+        meta["indexTroughChartBypass"] = True
     blocked_chart, chart_reason = chart_blocks_side(
         candidate.side,
         snap.spotChart,
         trade_score=trade_score,
         breadth_aligned_bypass=breadth_bypass,
-        premium_led_bypass=premium_bypass or local_ichi_bypass or pad_lane_chart_bypass,
+        premium_led_bypass=premium_bypass or local_ichi_bypass or pad_lane_chart_bypass or candlestick_bypass,
         expiry_explosion_bypass=expiry_chart_bypass,
         strict_first_lift_bypass=armed_base_chart_bypass or pad_lane_chart_bypass,
+        index_trough_bypass=index_trough_bypass,
     )
     if blocked_chart:
         meta["chartDirection"] = snap.spotChart.direction if snap.spotChart else "NEUTRAL"

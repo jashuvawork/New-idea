@@ -38,6 +38,7 @@ interface ForwardSignal {
   peakMovePct?: number;
   blockers?: string[];
   primaryBlocker?: string | null;
+  gateFixHint?: string;
   tradeBias?: string;
   targets?: Record<string, number | undefined>;
 }
@@ -108,11 +109,36 @@ interface FtvSymbolEstimate {
   };
 }
 
+interface FtvFocusAlert {
+  id: string;
+  symbol: string;
+  side: string;
+  status: 'ACTIVE' | 'COOLDOWN';
+  confidence: string;
+  message: string;
+  detail?: string;
+  localBaseReady?: boolean;
+  chartAligned?: boolean;
+  radarTradeable?: boolean;
+  peakProbabilityPct?: number;
+  estimatedWindow?: string | null;
+  radarStrike?: number;
+  radarTier?: string;
+  radarScore?: number;
+  cooldownSecRemaining?: number;
+}
+
 interface FtvProbabilityPayload {
   enabled: boolean;
   status: string;
   generatedAt?: string;
   symbols: Record<string, FtvSymbolEstimate>;
+  focusAlerts?: {
+    enabled?: boolean;
+    status?: string;
+    active?: FtvFocusAlert[];
+    guardrail?: string;
+  };
   calibration?: {
     status?: string;
     observationCount?: number;
@@ -292,6 +318,46 @@ function localMoments(): ForwardMoment[] {
     : items.map((m) => ({ ...m, status: m.active ? 'LIVE' : 'ENDED' as const }));
 }
 
+function missedTradeKey(symbol: string, side?: string, strike?: number) {
+  return `${symbol.toUpperCase()}:${String(side ?? '').toUpperCase()}:${Number(strike ?? 0)}`;
+}
+
+interface MissedTradeBrief {
+  symbol: string;
+  side: string;
+  strike: number;
+  primaryBlocker?: string;
+  blockers?: string[];
+  fix?: string;
+  wouldPass?: boolean;
+}
+
+interface MissedTradeReportBrief {
+  missed?: MissedTradeBrief[];
+  wouldPass?: MissedTradeBrief[];
+}
+
+function enrichSignalsWithMissedExplainer(
+  signals: ForwardSignal[],
+  report: MissedTradeReportBrief | null,
+): ForwardSignal[] {
+  if (!report) return signals;
+  const lookup = new Map<string, MissedTradeBrief>();
+  for (const row of [...(report.wouldPass ?? []), ...(report.missed ?? [])]) {
+    lookup.set(missedTradeKey(row.symbol, row.side, row.strike), row);
+  }
+  return signals.map((signal) => {
+    const match = lookup.get(missedTradeKey(signal.symbol, signal.side, signal.strike));
+    if (!match) return signal;
+    return {
+      ...signal,
+      primaryBlocker: signal.primaryBlocker ?? match.primaryBlocker ?? match.blockers?.[0] ?? null,
+      blockers: signal.blockers?.length ? signal.blockers : match.blockers,
+      gateFixHint: match.fix,
+    };
+  });
+}
+
 function mergeLiveExplosions(api: ForwardPayload | null, snapshots: Record<string, SymbolSnapshot>): ForwardSignal[] {
   const local = buildLocalForwardPayload(snapshots, { dailyProfitGate: { newEntriesAllowed: true } } as AutoTraderState);
   const localExplosions = (local.signals ?? []).filter((s) => s.horizon === 'EXPLOSION');
@@ -314,6 +380,68 @@ function mergeLiveExplosions(api: ForwardPayload | null, snapshots: Record<strin
       b.confidence - a.confidence,
   );
   return out;
+}
+
+function FtvFocusAlertBanner({
+  alerts,
+}: {
+  alerts: FtvFocusAlert[];
+}) {
+  if (!alerts.length) return null;
+  return (
+    <div className="mb-2 space-y-1">
+      {alerts.map((alert) => (
+        <div
+          key={alert.id}
+          className={`rounded-lg border px-2.5 py-2 ${
+            alert.status === 'ACTIVE'
+              ? 'border-nexus-green/50 bg-nexus-green/10'
+              : 'border-nexus-yellow/40 bg-nexus-yellow/5'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-white">
+              {alert.status === 'ACTIVE' ? 'FTV focus clock' : 'FTV focus cooling'}
+            </div>
+            <span className={`text-[9px] font-bold uppercase ${
+              alert.side === 'CALL' ? 'text-nexus-green' : 'text-nexus-red'
+            }`}>
+              {alert.symbol} {alert.side}
+            </span>
+          </div>
+          <div className="mt-1 text-[10px] text-white">{alert.message}</div>
+          <div className="mt-1 flex flex-wrap gap-1 text-[8px] text-nexus-muted">
+            <span className="rounded border border-nexus-border/60 px-1 py-0.5">
+              {alert.confidence} confidence
+            </span>
+            {alert.peakProbabilityPct != null ? (
+              <span className="rounded border border-nexus-border/60 px-1 py-0.5">
+                peak {alert.peakProbabilityPct.toFixed(1)}%
+              </span>
+            ) : null}
+            {alert.estimatedWindow ? (
+              <span className="rounded border border-nexus-border/60 px-1 py-0.5">
+                window {alert.estimatedWindow}
+              </span>
+            ) : null}
+            {alert.radarStrike != null ? (
+              <span className="rounded border border-nexus-border/60 px-1 py-0.5">
+                radar {alert.radarStrike} · {alert.radarTier ?? 'TRADEABLE'}
+              </span>
+            ) : null}
+            {alert.cooldownSecRemaining ? (
+              <span className="rounded border border-nexus-yellow/40 px-1 py-0.5 text-nexus-yellow">
+                {alert.cooldownSecRemaining}s cooldown
+              </span>
+            ) : null}
+          </div>
+          {alert.detail ? (
+            <div className="mt-1 text-[8px] text-nexus-muted">{alert.detail}</div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function FtvProbabilityBoard({
@@ -343,6 +471,7 @@ function FtvProbabilityBoard({
       </div>
 
       {error ? <div className="mb-2 text-[9px] text-nexus-yellow">{error}</div> : null}
+      <FtvFocusAlertBanner alerts={data?.focusAlerts?.active ?? []} />
       {data?.calibration ? (
         <div className="mb-2 flex flex-wrap gap-1 text-[8px]">
           <span className="rounded border border-nexus-border/70 bg-black/25 px-1.5 py-0.5 text-nexus-muted">
@@ -482,6 +611,7 @@ export function FutureSignalsPanel({
   const [apiDegraded, setApiDegraded] = useState(false);
   const [ftvData, setFtvData] = useState<FtvProbabilityPayload | null>(null);
   const [ftvError, setFtvError] = useState<string | null>(null);
+  const [missedReport, setMissedReport] = useState<MissedTradeReportBrief | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -524,6 +654,16 @@ export function FutureSignalsPanel({
     }
   }, []);
 
+  const loadMissed = useCallback(async () => {
+    try {
+      const res = await fetch('/api/ai/missed-trades');
+      if (!res.ok) return;
+      setMissedReport((await res.json()) as MissedTradeReportBrief);
+    } catch {
+      /* optional enrichment */
+    }
+  }, []);
+
   useEffect(() => {
     load();
     const id = setInterval(load, pollMs);
@@ -536,8 +676,17 @@ export function FutureSignalsPanel({
     return () => clearInterval(id);
   }, [loadFtv]);
 
+  useEffect(() => {
+    void loadMissed();
+    const id = setInterval(() => void loadMissed(), 15_000);
+    return () => clearInterval(id);
+  }, [loadMissed]);
+
   const moments = (data?.moments?.length ? data.moments : localMoments()) as ForwardMoment[];
-  const mergedExplosions = mergeLiveExplosions(data, snapshots);
+  const mergedExplosions = enrichSignalsWithMissedExplainer(
+    mergeLiveExplosions(data, snapshots),
+    missedReport,
+  );
   const signals =
     tab === 'EXPLOSION'
       ? mergedExplosions
@@ -667,8 +816,11 @@ export function FutureSignalsPanel({
                 ) : null}
                 {s.blockers?.length || s.primaryBlocker ? (
                   <div className="text-[8px] text-nexus-red font-mono mt-0.5">
-                    {s.primaryBlocker ?? s.blockers?.slice(0, 2).join(' · ')}
+                    Blocked: {s.primaryBlocker ?? s.blockers?.slice(0, 2).join(' · ')}
                   </div>
+                ) : null}
+                {s.gateFixHint && !s.tradeable ? (
+                  <div className="text-[8px] text-nexus-yellow mt-0.5">{s.gateFixHint}</div>
                 ) : null}
               </div>
             ))
@@ -700,6 +852,7 @@ export function FutureSignalsPanel({
         onClick={() => {
           void load();
           void loadFtv();
+          void loadMissed();
         }}
         className="w-full mt-2 text-[10px] py-1.5 rounded border border-nexus-border text-nexus-muted hover:text-white"
       >

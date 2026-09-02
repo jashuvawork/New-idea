@@ -148,6 +148,20 @@ def test_pad_lane_early_near_miss_waive_disabled(mock_settings):
     assert pad_lane_early_near_miss_waive(alert) is False
 
 
+@patch("app.engines.pad_lane_capture.get_settings")
+@pytest.mark.parametrize(
+    "reason",
+    ["coil_armed_low_score_base_entry", "early_momentum_ignition_at_base"],
+)
+def test_enabled_early_lanes_waive_building_tier_gate(mock_settings, reason):
+    """Alignment regression: the enabled coil-armed / early-ignition lanes must waive the
+    elite-only tier gate for a BUILDING contract — else they only fire once already ELITE,
+    defeating catching the move while it is still slow/building."""
+    mock_settings.return_value = _settings()
+    alert = {"tier": "BUILDING", "ictBaseReadinessReason": reason}
+    assert pad_lane_early_near_miss_waive(alert, readiness_reason=reason) is True
+
+
 def _aug25_building_v_rip_alert():
     return {
         "symbol": "NIFTY",

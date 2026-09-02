@@ -3,6 +3,7 @@
 from app.engines.advanced_indicators import (
     compute_adx,
     compute_bollinger,
+    compute_decisive_candle,
     compute_keltner,
     compute_squeeze,
     compute_supertrend,
@@ -209,3 +210,125 @@ def test_indicators_safe_on_thin_data():
     assert compute_adx([1, 2], [1, 2], [1, 2]).adx == 0.0
     assert compute_supertrend([1], [1], [1]).direction == "NEUTRAL"
     assert compute_vwap([], [], [], []).vwap == 0.0
+
+
+def _pullback_then(final_open, final_high, final_low, final_close, n=20):
+    # A steep downtrend for n bars (each red), then append the caller's final bar.
+    opens = [100.0 - i * 1.0 for i in range(n)]
+    closes = [op - 0.8 for op in opens]         # each bar red, closing lower
+    highs = [op + 0.2 for op in opens]
+    lows = [cl - 0.2 for cl in closes]
+    opens.append(final_open); highs.append(final_high)
+    lows.append(final_low); closes.append(final_close)
+    return opens, highs, lows, closes
+
+
+def test_decisive_candle_bullish_reversal_after_pullback():
+    # Final bar: strong-bodied bullish engulfing after a real down leg -> BULLISH decisive.
+    prev_close = 100.0 - 19 * 1.0 - 0.8  # last downtrend close (80.2)
+    o, c = prev_close - 0.2, prev_close + 3.0
+    r = compute_decisive_candle(*_pullback_then(o, c + 0.3, o - 0.3, c))
+    assert r.direction == "BULLISH"
+    assert r.decisive is True
+    assert r.engulfing is True
+    assert r.after_pullback is True
+    assert r.body_ratio >= 0.6
+
+
+def test_decisive_candle_weak_body_not_decisive():
+    # Small body with big wicks after the pullback -> not decisive even if greenish.
+    prev_close = 100.0 - 19 * 1.0 - 0.8
+    o, c = prev_close - 0.1, prev_close + 0.3
+    r = compute_decisive_candle(*_pullback_then(o, prev_close + 3.0, prev_close - 2.5, c))
+    assert r.decisive is False
+
+
+def test_decisive_candle_no_pullback_is_continuation_not_signal():
+    # Strong bullish bar but preceded by an UPtrend -> not a reversal, not decisive.
+    opens = [100.0 + i * 0.5 for i in range(20)]
+    closes = [op + 0.4 for op in opens]
+    highs = [cl + 0.2 for cl in closes]
+    lows = [op - 0.2 for op in opens]
+    prev_close = closes[-1]
+    opens.append(prev_close - 0.2); highs.append(prev_close + 3.2)
+    lows.append(prev_close - 0.3); closes.append(prev_close + 3.0)
+    r = compute_decisive_candle(opens, highs, lows, closes)
+    assert r.direction == "NEUTRAL"
+    assert r.decisive is False
+
+
+def test_bucket_ohlc_groups_by_time():
+    from app.engines.advanced_indicators import _bucket_ohlc
+
+    # Two 30s buckets: [10,12,11] then [20,25,22]
+    series = [(0.0, 10.0), (10.0, 12.0), (20.0, 11.0), (30.0, 20.0), (40.0, 25.0), (55.0, 22.0)]
+    o, h, l, c = _bucket_ohlc(series, bucket_seconds=30.0)
+    assert o == [10.0, 20.0]
+    assert h == [12.0, 25.0]
+    assert l == [10.0, 20.0]
+    assert c == [11.0, 22.0]
+
+
+def test_option_decisive_breakout_confirms_on_premium_tape():
+    """GainzAlgo on the OPTION premium: a decisive breakout bar off a flat base confirms."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    import app.engines.explosion_detector as ed
+    from app.engines.advanced_indicators import option_decisive_breakout_confirms
+    from app.models.schemas import Side
+
+    # Build a premium tape: flat base ~40 (steep prior decline in premium terms), then a
+    # decisive bullish breakout bar. Bucketed at 30s.
+    from collections import deque
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    IST = ZoneInfo("Asia/Kolkata")
+    key = ed._open_key("NIFTY", 24050.0, Side.CALL)
+    t0 = datetime(2026, 9, 1, 11, 0, 0, tzinfo=IST)
+    # A steep premium decline (each 30s bar closes lower via 2 samples: open high, close low),
+    # then a strong engulfing green breakout bar that closes above the prior bar's open but
+    # still below where it was 5 bars back (a genuine reversal off the base, not a full recovery).
+    prems = []
+    price = 60.0
+    bars = 20
+    for i in range(bars):
+        prems.append((t0 + timedelta(seconds=i * 30), price))            # open (high)
+        prems.append((t0 + timedelta(seconds=i * 30 + 15), price - 1.2))  # close (low) -> red
+        price -= 2.0
+    last_open = price  # 60 - 2*20 = 20
+    prems.append((t0 + timedelta(seconds=bars * 30), last_open))           # open (low)
+    prems.append((t0 + timedelta(seconds=bars * 30 + 15), last_open + 4.0))  # close -> green
+    ed._local_base_hist[key] = deque(prems)
+
+    s = SimpleNamespace(
+        option_decisive_breakout_enabled=True,
+        option_decisive_breakout_lookback_seconds=3600.0,
+        option_decisive_breakout_bucket_seconds=30.0,
+        decisive_candle_body_ratio_min=0.6,
+        decisive_candle_rsi_ceiling=80.0,
+        decisive_candle_pullback_lookback=5,
+    )
+    try:
+        assert option_decisive_breakout_confirms("NIFTY", 24050.0, Side.CALL, settings=s) is True
+        # Disabled -> no confirmation.
+        s.option_decisive_breakout_enabled = False
+        assert option_decisive_breakout_confirms("NIFTY", 24050.0, Side.CALL, settings=s) is False
+    finally:
+        ed._local_base_hist.clear()
+
+
+def test_index_decisive_breakout_confirms_side_reads_snapshot():
+    from types import SimpleNamespace
+
+    from app.engines.advanced_indicators import index_decisive_breakout_confirms_side
+
+    snap = SimpleNamespace(chartAnalysis=SimpleNamespace(
+        decisiveCandle={"decisive": True, "direction": "BULLISH"}))
+    assert index_decisive_breakout_confirms_side("CALL", snap) is True
+    assert index_decisive_breakout_confirms_side("PUT", snap) is False
+    # Not decisive -> no confirmation either way.
+    snap2 = SimpleNamespace(chartAnalysis=SimpleNamespace(
+        decisiveCandle={"decisive": False, "direction": "BULLISH"}))
+    assert index_decisive_breakout_confirms_side("CALL", snap2) is False

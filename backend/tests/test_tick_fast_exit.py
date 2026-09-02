@@ -455,12 +455,16 @@ def test_entry_path_rejects_immediate_reentry_at_exhausted_ftv_high():
         explosion_event=SimpleNamespace(velocity_3s=3.0),
     )
 
-    opened, reason = asyncio.run(
-        _open_from_candidate(
-            candidate,
-            AutoTraderState(closedPaperTrades=[closed]),
+    with patch(
+        "app.engines.session_mode_feedback.reentry_ml_win_prob_blocked",
+        return_value=(False, {}),
+    ):
+        opened, reason = asyncio.run(
+            _open_from_candidate(
+                candidate,
+                AutoTraderState(closedPaperTrades=[closed]),
+            )
         )
-    )
 
     assert opened is False
     assert reason == "exhausted_ftv_requires_new_base_reacceleration"

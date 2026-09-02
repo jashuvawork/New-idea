@@ -262,10 +262,40 @@ def check_directional_side_lock(
     if not isinstance(alert, dict):
         alert = None
     ev = getattr(candidate, "explosion_event", None) if candidate is not None else None
+    from app.engines.early_radar_pad_capture import watch_local_base_pad_structure
+
+    if isinstance(alert, dict) and watch_local_base_pad_structure(alert):
+        return False, "ok"
     if local_base_overrides_side_bias(side_v, snap, event=ev, alert=alert):
+        return False, "ok"
+    from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+    if index_confirmed_local_base(side_v, snap, alert):
         return False, "ok"
 
     if premium_led_bypass:
+        return False, "ok"
+
+    from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
+
+    rally_ok, _rally_reason, _rally_meta = index_rally_side_flip_bypass(
+        symbol, side_v, snap, settings=settings,
+    )
+    if rally_ok:
+        return False, "ok"
+
+    from app.engines.best_side_selection import dominant_side_flip_bypass
+    from app.engines.power_hour_guards import in_power_hour_window
+
+    power_hour = in_power_hour_window()
+    flip_ok, _flip_reason, _flip_meta = dominant_side_flip_bypass(
+        symbol,
+        side_v,
+        snap,
+        candidate=candidate,
+        power_hour=power_hour,
+    )
+    if flip_ok:
         return False, "ok"
 
     if candidate is not None:
@@ -361,6 +391,28 @@ def directional_lock_summary(snapshots: dict[str, SymbolSnapshot]) -> dict[str, 
             continue
         call_ok, _, call_meta = side_switch_confirmed(Side.CALL, snap)
         put_ok, _, put_meta = side_switch_confirmed(Side.PUT, snap)
+        rally_meta: dict[str, Any] = {}
+        slide_meta: dict[str, Any] = {}
+        rally_active = False
+        slide_active = False
+        try:
+            from app.engines.index_rally_side_flip import (
+                index_rally_metrics,
+                index_rally_side_flip_bypass,
+            )
+
+            rally_ok, _, rally_meta = index_rally_side_flip_bypass(
+                sym, Side.CALL, snap, settings=settings,
+            )
+            slide_ok, _, slide_meta = index_rally_side_flip_bypass(
+                sym, Side.PUT, snap, settings=settings,
+            )
+            rally_active = rally_ok
+            slide_active = slide_ok
+            if not rally_meta and not slide_meta:
+                rally_meta = index_rally_metrics(sym, snap, settings=settings)
+        except Exception:
+            pass
         per_symbol[sym] = {
             "direction": market_direction(snap),
             "lockedSide": session_locked_side(sym),
@@ -370,6 +422,10 @@ def directional_lock_summary(snapshots: dict[str, SymbolSnapshot]) -> dict[str, 
             "putSwitchConfirmed": put_ok,
             "callSignals": call_meta.get("signals", []),
             "putSignals": put_meta.get("signals", []),
+            "indexRallySideFlip": rally_active,
+            "indexSlideSideFlip": slide_active,
+            "indexRally": rally_meta,
+            "indexSlide": slide_meta,
         }
     return {
         "enabled": settings.directional_side_lock_enabled,

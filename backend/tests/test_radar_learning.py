@@ -31,6 +31,7 @@ from app.services.radar_learning import (
     build_funnel_report,
     finalize_daily_review,
     finalize_pending_reviews,
+    funnel_path,
     pipeline_history_summary,
     premium_tape_path,
     read_alerts_tape,
@@ -54,10 +55,13 @@ def _settings(tmp_path, **overrides):
         "radar_archive_enabled": True,
         "radar_archive_dir": "",
         "radar_archive_top_n_per_day": 100,
-        "radar_archive_retention_days": 365,
+        "radar_archive_retention_days": 7,
         "radar_learning_enabled": True,
         "radar_premium_tape_sample_seconds": 15,
-        "radar_alerts_tape_enabled": True,
+        "radar_analysis_only_storage": True,
+        "radar_purge_telemetry_after_finalize": True,
+        "radar_alerts_tape_enabled": False,
+        "radar_pipeline_history_enabled": False,
         "radar_outcome_horizons_seconds_csv": "60,300",
         "radar_outcome_target_pct": 20.0,
         "radar_outcome_stop_pct": 10.0,
@@ -178,6 +182,58 @@ def test_forward_outcomes_capture_horizons_mfe_mae_and_order(tmp_path):
     assert outcome["horizons"]["60"]["movePct"] == 25.0
     assert outcome["horizons"]["300"]["movePct"] == -15.0
     assert len(tape_rows) == 2
+
+
+def test_read_premium_tape_falls_back_to_finalized_zip_after_purge(tmp_path):
+    """After the 16:00 finalize purges the intraday JSONL, read_premium_tape must read the
+    tape from radar-<date>.zip — else the just-closed day's EOD report reads no_tape (Sep 1)."""
+    from app.services.radar_archive import archive_path, get_archive_dir
+
+    settings = _settings(tmp_path)
+    date = "2026-08-15"
+    rows = [
+        {"ts": "2026-08-15T11:00:00+05:30",
+         "contracts": [{"symbol": "NIFTY", "side": "CALL", "strike": 24000.0,
+                        "premium": 50.0, "spot": 24000.0}]},
+        {"ts": "2026-08-15T11:00:10+05:30",
+         "contracts": [{"symbol": "NIFTY", "side": "CALL", "strike": 24000.0,
+                        "premium": 55.0, "spot": 24010.0}]},
+    ]
+    with _patch_settings(settings):
+        # No telemetry JSONL exists (purged). Build the finalized ZIP with the tape bundled.
+        assert not premium_tape_path(date).exists()
+        get_archive_dir().mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive_path(date), "w") as z:
+            z.writestr("premium_tape.jsonl", "\n".join(json.dumps(r) for r in rows))
+
+        out = read_premium_tape(date)
+
+    assert len(out) == 2
+    assert out[0]["ts"] == "2026-08-15T11:00:00+05:30"
+
+
+def test_read_premium_tape_max_bytes_tail_caps_large_tape(tmp_path):
+    settings = _settings(tmp_path)
+    date = "2026-08-15"
+    with _patch_settings(settings):
+        path = premium_tape_path(date)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [{"ts": f"row{i}", "contracts": []} for i in range(2000)]
+        with path.open("w", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r) + "\n")
+        size = path.stat().st_size
+
+        full = read_premium_tape(date)
+        capped = read_premium_tape(date, max_bytes=size // 4)
+
+    # Full read returns everything; the tail cap returns only a recent slice, in order.
+    assert len(full) == 2000
+    assert 0 < len(capped) < 2000
+    assert capped[-1]["ts"] == "row1999"
+    # The returned rows are a contiguous tail (no earlier rows leak in).
+    tail_start = int(capped[0]["ts"].removeprefix("row"))
+    assert [r["ts"] for r in capped] == [f"row{i}" for i in range(tail_start, 2000)]
 
 
 def test_forward_outcome_keeps_tracking_strike_after_heatmap_rotation(tmp_path):
@@ -565,7 +621,12 @@ def test_funnel_never_attributes_pre_detection_events_or_trades(tmp_path):
 
 def test_finalize_bundles_learning_artifacts_and_copies_backup(tmp_path):
     backup_dir = tmp_path / "offbox"
-    settings = _settings(tmp_path, radar_backup_dir=str(backup_dir))
+    settings = _settings(
+        tmp_path,
+        radar_backup_dir=str(backup_dir),
+        radar_analysis_only_storage=False,
+        radar_alerts_tape_enabled=True,
+    )
     start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
     with _patch_settings(settings):
         record_top_radars(
@@ -601,6 +662,89 @@ def test_finalize_bundles_learning_artifacts_and_copies_backup(tmp_path):
     assert result["backup"]["sha256"] == hashlib.sha256(
         archive_path_value.read_bytes()
     ).hexdigest()
+
+
+def test_finalize_analysis_only_omits_optional_tapes_and_purges_telemetry(tmp_path):
+    settings = _settings(
+        tmp_path,
+        radar_analysis_only_storage=True,
+        radar_purge_telemetry_after_finalize=True,
+        radar_alerts_tape_enabled=True,
+        radar_pipeline_history_enabled=True,
+    )
+    start = datetime(2026, 8, 16, 10, 0, tzinfo=IST)
+    with _patch_settings(settings):
+        record_top_radars(
+            {"NIFTY": _snap(alerts=[_alert()])},
+            now=start,
+            source="rest_snapshot",
+        )
+        record_market_observations(
+            {"NIFTY": _snap(call=110.0, alerts=[_alert()])},
+            source="rest_snapshot",
+            now=start,
+            force=True,
+        )
+        assert premium_tape_path("2026-08-16").exists()
+        result = finalize_daily_review("2026-08-16")
+        archive_path_value = tmp_path / "radar_archives" / "radar-2026-08-16.zip"
+        with zipfile.ZipFile(archive_path_value, "r") as archive:
+            names = set(archive.namelist())
+
+    assert {
+        "scorecard.json",
+        "funnel.json",
+        "premium_tape.jsonl",
+        "funnel_events.jsonl",
+    } <= names
+    assert "alerts_tape.jsonl" not in names
+    assert "pipeline_history.jsonl" not in names
+    assert result["analysisOnly"] is True
+    assert premium_tape_path("2026-08-16").exists() is False
+    assert funnel_path("2026-08-16").exists() is False
+    assert "2026-08-16.premium.jsonl" in result["purgedTelemetry"]
+
+
+def test_finalize_skips_purge_when_premium_tape_not_bundled(tmp_path, monkeypatch):
+  """Keep intraday tape on disk if finalize ZIP omits premium_tape.jsonl."""
+  from app.services import radar_learning
+
+  settings = _settings(
+      tmp_path,
+      radar_analysis_only_storage=True,
+      radar_purge_telemetry_after_finalize=True,
+      radar_purge_requires_bundled_premium_tape=True,
+  )
+  start = datetime(2026, 8, 26, 10, 0, tzinfo=IST)
+  original_add = radar_learning.add_archive_artifacts
+
+  def _add_without_tape(date, artifacts, **kwargs):
+      stripped = {
+          key: value
+          for key, value in artifacts.items()
+          if key != "premium_tape.jsonl"
+      }
+      return original_add(date, stripped, **kwargs)
+
+  monkeypatch.setattr(radar_learning, "add_archive_artifacts", _add_without_tape)
+  with _patch_settings(settings):
+      record_top_radars(
+          {"NIFTY": _snap(alerts=[_alert()])},
+          now=start,
+          source="rest_snapshot",
+      )
+      record_market_observations(
+          {"NIFTY": _snap(call=110.0, alerts=[_alert()])},
+          source="rest_snapshot",
+          now=start,
+          force=True,
+      )
+      assert premium_tape_path("2026-08-26").exists()
+      result = finalize_daily_review("2026-08-26")
+      assert result["premiumTapeBundled"] is False
+      assert result["purgedTelemetry"] == []
+      assert premium_tape_path("2026-08-26").exists()
+      assert funnel_path("2026-08-26").exists()
 
 
 def test_health_reports_stale_sources_divergence_and_component_errors(tmp_path):
@@ -727,7 +871,7 @@ def test_rest_sampling_keeps_each_symbol_when_snapshots_build_separately(tmp_pat
 
 
 def test_pipeline_history_proves_empty_and_successful_sampling(tmp_path):
-    settings = _settings(tmp_path)
+    settings = _settings(tmp_path, radar_pipeline_history_enabled=True)
     start = datetime(2026, 8, 15, 10, 0, tzinfo=IST)
     unavailable = _snap()
     unavailable.dataAvailable = False
@@ -913,7 +1057,11 @@ def test_duplicate_detector_replay_is_rejected_without_queueing():
 
 def test_every_observation_writes_premium_and_alerts_tape(tmp_path):
     """Interval 0 must persist every poll so V-base lifts are replayable."""
-    settings = _settings(tmp_path, radar_premium_tape_sample_seconds=0)
+    settings = _settings(
+        tmp_path,
+        radar_premium_tape_sample_seconds=0,
+        radar_alerts_tape_enabled=True,
+    )
     start = datetime(2026, 8, 19, 10, 15, tzinfo=IST)
     with _patch_settings(settings):
         for i in range(3):

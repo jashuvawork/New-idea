@@ -427,6 +427,25 @@ def check_bad_day_candidate(
     if mode == "explosion":
         if _extreme_explosion_bypass(candidate):
             return True, "ok", meta
+        from app.engines.grade_a_ftv_capture import is_grade_a_ftv_first_lift_candidate
+        from app.engines.top_ftv_v_expiry_bypass import is_top_ftv_or_v_candidate
+
+        if is_grade_a_ftv_first_lift_candidate(candidate):
+            min_req = float(
+                getattr(settings, "grade_a_ftv_first_lift_min_rank", 40.0) or 40.0
+            )
+            meta["gradeAFtvBypass"] = True
+            if score >= min_req:
+                return True, "ok", meta
+            return False, f"grade_a_ftv_rank_below_{min_req:.0f}", meta
+        if is_top_ftv_or_v_candidate(candidate):
+            min_req = float(
+                getattr(settings, "top_ftv_v_expiry_bypass_min_rank", 0.0) or 0.0
+            )
+            meta["topFtvVBypass"] = True
+            if score >= min_req:
+                return True, "ok", meta
+            return False, f"top_ftv_v_rank_below_{min_req:.0f}", meta
         from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass
 
         event = getattr(candidate, "explosion_event", None)
@@ -503,7 +522,10 @@ def cross_index_rank_adjustment(
         if sym in nearest:
             bonus += float(getattr(settings, "expiry_day_symbol_rank_bonus", 22.0) or 22.0)
             if sym in fading_map:
+                from app.engines.best_side_selection import best_side_fading_rank_waive
+
                 bonus -= settings.bad_day_fading_symbol_penalty
+                bonus += best_side_fading_rank_waive(candidate, snap)
             return bonus
         if sym in nxt:
             bonus += float(
@@ -537,7 +559,10 @@ def cross_index_rank_adjustment(
         alt = alternate_index_for(restricted_sym, snapshots)
         if sym == restricted_sym:
             if restricted_sym in fading_map:
+                from app.engines.best_side_selection import best_side_fading_rank_waive
+
                 bonus -= settings.bad_day_fading_symbol_penalty
+                bonus += best_side_fading_rank_waive(candidate, snap)
             elif settings.pre_expiry_cross_index_enabled:
                 bonus -= settings.pre_expiry_symbol_rank_penalty
             continue

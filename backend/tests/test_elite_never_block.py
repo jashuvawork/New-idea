@@ -5,7 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
-from app.engines.elite_never_block import elite_never_block_active
+from app.engines.elite_never_block import (
+    elite_must_take_bypass_allowed,
+    elite_never_block_active,
+)
 from app.engines.explosion_entry_guards import (
     detect_fake_explosion_trap,
     extended_session_chase_blocked,
@@ -179,3 +182,61 @@ def test_default_config_enables_elite_never_block():
 
     assert Settings().explosion_elite_never_block_enabled is True
     assert Settings().explosion_top_must_take_enabled is True
+    assert Settings().explosion_top_must_take_require_expansion_confirm_enabled is True
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.elite_never_block.get_settings")
+def test_must_take_bypass_blocked_on_anti_chase(mock_elite_s, mock_guard_s):
+    from app.config import Settings
+    from app.engines.explosion_detector import ExplosionEvent
+
+    settings = Settings(
+        explosion_top_must_take_enabled=True,
+        explosion_top_must_take_min_score=50.0,
+        explosion_top_must_take_require_chart_align=False,
+        ict_structured_early_min_move_pct=10.0,
+        ict_structured_early_max_move_pct=65.0,
+    )
+    mock_elite_s.return_value = settings
+    mock_guard_s.return_value = settings
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24200.0,
+        atmStrike=24200.0,
+        tradeQualityScore=70.0,
+        breadth=Breadth(bias="BULLISH", score=70.0, aligned=True),
+        spotChart=SpotChart(direction="BULLISH"),
+    )
+    event = ExplosionEvent(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24200.0,
+        premium=104.55,
+        velocity_3s=0.87,
+        velocity_9s=0.5,
+        velocity_15s=0.0,
+        volume_surge=1.0,
+        explosion_score=100.0,
+        tier="ELITE",
+        reason="test",
+        daily_move_pct=15.0,
+        peak_move_pct=15.0,
+    )
+    ict = SimpleNamespace(
+        base_relative_move_pct=15.0,
+        base_armed=True,
+        active=True,
+        flat_then_vertical=False,
+        volume_awakening=False,
+    )
+    alert = {
+        "explosionScore": 100.0,
+        "localBaseMovePct": 15.0,
+        "ictBaseRelativeMovePct": 15.0,
+    }
+    assert elite_never_block_active(event=event, alert=alert, snap=snap) is True
+    assert elite_must_take_bypass_allowed(event=event, alert=alert, snap=snap, ict=ict) is False

@@ -62,7 +62,9 @@ def _ict_flat_vertical_entry_ok(
     )
     from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
-    if pad_lane_early_near_miss_waive(alert, readiness_reason=ready_reason):
+    if pad_lane_early_near_miss_waive(
+        alert, readiness_reason=ready_reason, snap=snap,
+    ):
         return True
     if first_lift_ready and (
         ready_reason in BUILDING_READY_REASONS
@@ -207,6 +209,7 @@ def afternoon_capture_peak_halve_lock_reason(
     *,
     best: float,
     pnl_pts: float,
+    hold_seconds: Optional[float] = None,
 ) -> Optional[str]:
     """Book afternoon momentum when peak profit has halved (₹121 peak → ~₹111 exit)."""
     ctx = trade.entryContext or {}
@@ -215,6 +218,36 @@ def afternoon_capture_peak_halve_lock_reason(
     settings = get_settings()
     if not bool(getattr(settings, "afternoon_capture_peak_halve_lock_enabled", True)):
         return None
+
+    from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
+
+    if trade_uses_moment_stage_ladder(trade):
+        try:
+            projected = float(
+                ctx.get("projectedMaxTp")
+                or ((ctx.get("exitPlan") or {}).get("projectedMaxTp"))
+                or 0
+            )
+        except (TypeError, ValueError):
+            projected = 0.0
+        skip_tp = float(
+            getattr(
+                settings,
+                "afternoon_capture_peak_halve_skip_stage_ladder_min_projected_tp",
+                80.0,
+            )
+            or 80.0
+        )
+        if projected >= skip_tp:
+            return None
+
+    hold = _hold_seconds(trade) if hold_seconds is None else float(hold_seconds)
+    min_hold = float(
+        getattr(settings, "afternoon_capture_peak_halve_min_hold_seconds", 120) or 120
+    )
+    if hold < min_hold:
+        return None
+
     min_best = float(
         getattr(settings, "afternoon_capture_peak_halve_min_best_points", 10.0) or 10.0
     )
@@ -378,6 +411,13 @@ def check_explosion_entry(
         else:
             return False, f"tier_{event.tier}_not_tradeable"
 
+    if isinstance(alert, dict):
+        from app.engines.early_radar_pad_capture import building_coil_pad_live_blocked
+
+        coil_blocked, coil_reason = building_coil_pad_live_blocked(alert)
+        if coil_blocked:
+            return False, coil_reason
+
     from app.engines.morning_premium_capture import is_afternoon_capture_event
 
     if (
@@ -454,6 +494,7 @@ def check_explosion_entry(
     from app.engines.explosion_entry_guards import (
         explosion_entry_window_blocked,
         live_explosion_confirmation_blocked,
+        tier_promotion_pad_chase_blocked,
     )
     from app.engines.ict_breakout_monitor import (
         analyze_explosion_event_ict,
@@ -470,10 +511,13 @@ def check_explosion_entry(
         ict=ict_live,
         alert=alert if isinstance(alert, dict) else None,
     )
-    from app.engines.elite_never_block import elite_never_block_active
+    from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-    must_take = elite_never_block_active(
-        event=event, snap=snap, ict=ict_live,
+    must_take = elite_must_take_bypass_allowed(
+        event=event,
+        snap=snap,
+        ict=ict_live,
+        alert=alert if isinstance(alert, dict) else None,
     )
     # Flat→vertical ELITE/EXPLODING/BUILDING — require GainzAlgo-style break-P.
     if (
@@ -499,9 +543,17 @@ def check_explosion_entry(
     )
     if window_blocked and not first_lift_ready and not early_pad:
         return False, window_reason
+    chase_blocked, chase_reason = tier_promotion_pad_chase_blocked(
+        event,
+        ict=ict_live,
+        alert=alert if isinstance(alert, dict) else None,
+    )
+    if chase_blocked and not first_lift_ready and not early_pad:
+        return False, chase_reason
     live_blocked, live_reason = live_explosion_confirmation_blocked(
         event,
         ict=ict_live,
+        alert=alert if isinstance(alert, dict) else None,
         premium_capture=is_premium_capture_event(event, chart=chart),
         snap=snap,
     )
@@ -1523,18 +1575,24 @@ def evaluate_explosion_exit(
     Lets runners extend; locks profit as peak builds.
     """
     settings = get_settings()
+    from app.engines.risk_stops import live_hold_to_structural_sl
+
+    hold_to_sl = live_hold_to_structural_sl(settings)
     exit_params = params or default_explosion_exit_params(event_tier)
     ctx = trade.entryContext or {}
     if ctx.get("afternoonCapture"):
-        exit_params = _merge_afternoon_capture_exit_params(exit_params, event_tier)
+        from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
+
+        skip_tighten = bool(
+            getattr(settings, "afternoon_capture_skip_exit_tighten_on_stage_ladder", True)
+        )
+        if not (skip_tighten and trade_uses_moment_stage_ladder(trade)):
+            exit_params = _merge_afternoon_capture_exit_params(exit_params, event_tier)
     pnl_pts = current_premium - trade.entryPremium
     pnl_inr = pnl_pts * trade.lots * lot_multiplier
-    observed_best = (
-        float(trade.maxLtp) - float(trade.entryPremium)
-        if trade.maxLtp is not None
-        else 0.0
-    )
-    best = max(trade.bestPnlPoints, pnl_pts, observed_best)
+    from app.engines.moment_stage_trail import effective_best_pnl
+
+    best = effective_best_pnl(trade, pnl_pts)
     hold = _hold_seconds(trade)
     try:
         v3 = float(live_velocity_3s or 0.0)
@@ -1548,12 +1606,39 @@ def evaluate_explosion_exit(
     from app.engines.explosion_entry_guards import faded_rip_no_green_exit_reason
 
     faded_exit = faded_rip_no_green_exit_reason(trade, hold_seconds=hold, best_points=best)
-    if faded_exit:
+    if faded_exit and not hold_to_sl:
         return faded_exit, pnl_inr
+
+    from app.engines.chop_live_guards import chop_live_early_fail_exit_reason
+
+    chop_exit = chop_live_early_fail_exit_reason(
+        trade,
+        hold_seconds=hold,
+        best_points=best,
+        pnl_points=pnl_pts,
+        live_velocity_3s=v3,
+    )
+    if chop_exit:
+        return chop_exit, pnl_inr
+
+    from app.engines.live_best_trades import live_early_fail_exit_reason
+
+    live_fail = live_early_fail_exit_reason(
+        trade,
+        hold_seconds=hold,
+        best_points=best,
+        pnl_points=pnl_pts,
+        live_velocity_3s=v3,
+    )
+    if live_fail:
+        return live_fail, pnl_inr
 
     # The launch thesis failed immediately: it never established green and live
     # premium is still contracting. Scratch before the wider structural stop.
-    if bool(getattr(settings, "explosion_failed_launch_exit_enabled", True)):
+    if (
+        not hold_to_sl
+        and bool(getattr(settings, "explosion_failed_launch_exit_enabled", True))
+    ):
         failed_min_hold = int(
             _cfg_float(settings, "explosion_failed_launch_min_hold_seconds", 15)
         )
@@ -1581,7 +1666,10 @@ def evaluate_explosion_exit(
     # floor is directionally wrong from entry (Aug6 78800 PE: best=0 → ran to −37pt).
     # Cut it faster than the full adaptive stop. Threshold = max(points floor, % of entry
     # premium) so cheap and expensive options are both handled sensibly.
-    if bool(getattr(settings, "explosion_never_green_stop_enabled", True)):
+    if (
+        not hold_to_sl
+        and bool(getattr(settings, "explosion_never_green_stop_enabled", True))
+    ):
         ng_min_green = _cfg_float(settings, "explosion_never_green_min_green_points", 0.5)
         ng_floor = _cfg_float(settings, "explosion_never_green_stop_points", 18.0)
         ng_pct = _cfg_float(settings, "explosion_never_green_stop_pct", 6.0)
@@ -1593,45 +1681,46 @@ def evaluate_explosion_exit(
     # Hard per-trade ₹ loss cap — optional (0 = disabled). Prefer never-green + point SL
     # so ICT/base runners are not clipped by a rupee ceiling before the thesis stop.
     ctx = trade.entryContext or {}
-    if bool(ctx.get("eliteFullLot")):
-        # ELITE full-capital sleeve: prefer structural point SL + daily loss stop.
-        # Per-trade INR clip defaults to off (0). If configured >0, use that ceiling
-        # (often aligned with the ₹20k/day stop) — never the old ₹10k early kill.
-        hard_cap = _cfg_float(
-            settings,
-            "elite_full_lot_risk_inr",
-            0.0,
-        )
-    elif bool(ctx.get("fullSleeveQualified")):
-        hard_cap = _cfg_float(
-            settings,
-            "explosion_exceptional_per_trade_max_loss_inr",
-            4_000.0,
-        )
-    elif bool(ctx.get("indexConfirmedFtv")):
-        # Index-confirmed near-base FTV took elevated size — give it a proportionally wider
-        # rupee stop so the larger position survives the normal near-base shakeout instead of
-        # being clipped at a ~2pt stop. Still bounded (default ~2% of capital).
-        hard_cap = _cfg_float(
-            settings,
-            "index_confirmed_ftv_per_trade_max_loss_inr",
-            4_000.0,
-        )
-    else:
-        hard_cap = _cfg_float(
-            settings,
-            "explosion_per_trade_max_loss_inr",
-            2_000.0,
-        )
-    if hard_cap > 0 and pnl_inr <= -hard_cap:
-        return "explosion_per_trade_risk_cap", pnl_inr
+    if not hold_to_sl:
+        if bool(ctx.get("eliteFullLot")):
+            # ELITE full-capital sleeve: prefer structural point SL + daily loss stop.
+            # Per-trade INR clip defaults to off (0). If configured >0, use that ceiling
+            # (often aligned with the ₹20k/day stop) — never the old ₹10k early kill.
+            hard_cap = _cfg_float(
+                settings,
+                "elite_full_lot_risk_inr",
+                0.0,
+            )
+        elif bool(ctx.get("fullSleeveQualified")):
+            hard_cap = _cfg_float(
+                settings,
+                "explosion_exceptional_per_trade_max_loss_inr",
+                4_000.0,
+            )
+        elif bool(ctx.get("indexConfirmedFtv")):
+            # Index-confirmed near-base FTV took elevated size — give it a proportionally wider
+            # rupee stop so the larger position survives the normal near-base shakeout instead of
+            # being clipped at a ~2pt stop. Still bounded (default ~2% of capital).
+            hard_cap = _cfg_float(
+                settings,
+                "index_confirmed_ftv_per_trade_max_loss_inr",
+                4_000.0,
+            )
+        else:
+            hard_cap = _cfg_float(
+                settings,
+                "explosion_per_trade_max_loss_inr",
+                2_000.0,
+            )
+        if hard_cap > 0 and pnl_inr <= -hard_cap:
+            return "explosion_per_trade_risk_cap", pnl_inr
 
     from app.engines.ict_breakout_monitor import _ict_max_profit_trade
 
     max_profit = _ict_max_profit_trade(trade)
 
     halve_lock = afternoon_capture_peak_halve_lock_reason(
-        trade, best=best, pnl_pts=pnl_pts,
+        trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold,
     )
     if halve_lock:
         return halve_lock, pnl_inr
@@ -1650,7 +1739,9 @@ def evaluate_explosion_exit(
 
     from app.engines.moment_stage_trail import (
         compose_trail_floor_with_stages,
+        effective_best_pnl,
         maybe_extend_projected_max,
+        moment_stage_near_complete,
         trade_uses_moment_stage_ladder,
     )
 
@@ -1723,14 +1814,22 @@ def evaluate_explosion_exit(
     ):
         return "explosion_stop_loss", pnl_inr
 
-    if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
+    if (
+        not hold_to_sl
+        and settings.emergency_stop_enabled
+        and pnl_inr <= -settings.emergency_stop_inr
+    ):
         return "explosion_emergency_stop", pnl_inr
 
     # Base→vertical ICT (12→392 PE): skip tiny hard TP — trail toward max.
     # Stage-ladder trades also skip tiny TP and ride stages to projectedMaxTp.
+    from app.engines.chop_live_guards import broker_adopted_trade_exit_blocked
+
     skip_hard_tp = (max_profit or stage_ladder) and bool(
         getattr(settings, "ict_max_profit_skip_hard_target", True)
     )
+    if broker_adopted_trade_exit_blocked(trade):
+        skip_hard_tp = True
     if not skip_hard_tp:
         # Peak touch counts — polling can miss the exact TP tick (e.g. best 12pt, current 8pt)
         if best >= target:
@@ -1781,11 +1880,32 @@ def evaluate_explosion_exit(
 
     # Stage ladder (incl. pre-stage provisional floor): pullback through the
     # stage floor books profit; otherwise hold toward projectedMaxTp.
+    from app.engines.moment_stage_trail import ftv_runner_pct_floor
+
+    pct_keep_floor = (
+        ftv_runner_pct_floor(trade, best, settings=settings)
+        if stage_ladder
+        and bool(getattr(settings, "ftv_runner_pct_trail_enabled", True))
+        else None
+    )
+    min_pct_best = _cfg_float(settings, "ftv_runner_pct_trail_min_best_points", 6.0)
+    stage_min_hold = _cfg_float(settings, "explosion_stage_trail_min_hold_seconds", 90.0)
+    if (
+        pct_keep_floor is not None
+        and best >= min_pct_best
+        and pnl_pts <= pct_keep_floor
+        and hold >= stage_min_hold
+    ):
+        # Aug28 24100 PE: peaked +31pt, faded to +10 — stage_armed waits for +45pt
+        # so the 75% peak-keep floor must exit even before stage 1 completes.
+        return "explosion_peak_keep_trail", pnl_inr
+
     stage_armed = stage_floor is not None and (
         best >= exit_params.trail_arm_points
         or (stage_size > 0 and best >= stage_size)
+        or moment_stage_near_complete(trade, best, stage_size, settings=settings)
     )
-    if stage_armed and pnl_pts <= stage_floor:
+    if stage_armed and pnl_pts <= stage_floor and hold >= stage_min_hold:
         return "explosion_stage_trail", pnl_inr
 
     # When stage ladder owns the trail, skip micro step / keep-ratio locks —

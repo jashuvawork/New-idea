@@ -113,7 +113,7 @@ def is_near_expiry_day(snap: SymbolSnapshot) -> bool:
 
 
 def in_expiry_pm_itm_window() -> bool:
-    """14:00–15:25 IST window for small ITM quick scalps near expiry."""
+    """14:00–15:30 IST window for small ITM quick scalps near expiry."""
     from app.services.upstox import get_market_phase
 
     settings = get_settings()
@@ -280,13 +280,24 @@ def check_expiry_explosion_open_block(
 
 
 def in_expiry_evening_block() -> bool:
-    """Block new entries in expiry afternoon/evening — gamma + pin risk."""
+    """Optional hard stop for expiry entries — default off through market close."""
     settings = get_settings()
     if not settings.expiry_day_guards_enabled:
+        return False
+    if not getattr(settings, "expiry_evening_block_enabled", False):
         return False
     current = _minutes_now()
     block_from = settings.expiry_evening_block_hour * 60 + settings.expiry_evening_block_minute
     return current >= block_from
+
+
+def snapshots_have_afternoon_top_signal(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """Alias — expiry evening bypass uses the same top-signal detector."""
+    from app.engines.power_hour_guards import snapshots_have_power_hour_top_signal
+
+    return snapshots_have_power_hour_top_signal(snapshots)
 
 
 def _session_declining(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> bool:
@@ -371,8 +382,10 @@ def expiry_trades_cap_reached(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
 ) -> tuple[bool, str]:
+    from app.engines.session_trade_integrity import real_session_closed_count
+
     cap, label = expiry_trade_cap(state, snapshots)
-    closed = len(state.closedPaperTrades)
+    closed = real_session_closed_count(state)
     if closed >= cap:
         return True, f"expiry_trade_cap_{closed}>={cap}_{label}"
     return False, "ok"
@@ -479,11 +492,197 @@ def snapshots_have_expiry_elite_top(snapshots: dict[str, SymbolSnapshot]) -> boo
     return False
 
 
+def alert_is_early_pad_prelaunch_strict_launch(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+) -> bool:
+    """Prelaunch pad at local base before armed_base_launch stamps (Aug27 PUT 77300)."""
+    settings = get_settings()
+    if not bool(getattr(settings, "early_radar_pad_capture_enabled", True)):
+        return False
+    from app.engines.early_radar_pad_capture import (
+        alert_has_early_radar_pad_capture,
+        early_radar_pad_shallow_otm_ok,
+    )
+
+    if not alert_has_early_radar_pad_capture(alert):
+        return False
+    if not bool(alert.get("tradeable")):
+        return False
+    if not bool(alert.get("ictBaseArmed")):
+        return False
+    if bool(alert.get("ictArmedBaseLaunch")):
+        return False
+    if not bool(alert.get("ictFirstLift")):
+        return False
+    if str(alert.get("tier") or "").upper() not in ("EXPLODING", "ELITE"):
+        return False
+    if float(alert.get("explosionScore") or 0) < float(
+        getattr(settings, "ict_armed_base_launch_min_score", 45.0) or 45.0
+    ):
+        return False
+    if float(snap.tradeQualityScore or 0) < float(
+        getattr(settings, "ict_armed_base_launch_min_tqs", 50.0) or 50.0
+    ):
+        return False
+    samples = int(alert.get("ictArmedBaseSamples") or 0)
+    span = float(alert.get("ictArmedBaseSpanSeconds") or 0)
+    base_range = float(alert.get("ictArmedBaseRangePct") or 0)
+    if (
+        samples < int(getattr(settings, "ict_armed_base_min_samples", 6) or 6)
+        or span < float(getattr(settings, "ict_armed_base_min_span_seconds", 15.0) or 15.0)
+        or base_range
+        > float(getattr(settings, "ict_armed_base_max_range_pct", 5.0) or 5.0)
+    ):
+        return False
+
+    base_move = float(
+        alert.get("ictBaseRelativeMovePct")
+        or alert.get("localBaseMovePct")
+        or 0
+    )
+    pad_min = float(getattr(settings, "ict_elite_base_ready_min_move_pct", 2.0) or 2.0)
+    pad_max = float(getattr(settings, "early_radar_pad_max_local_move_pct", 20.0) or 20.0)
+    if not (pad_min <= base_move <= pad_max + 1e-6):
+        return False
+
+    side = str(alert.get("side") or "").upper()
+    strike = float(alert.get("strike") or 0)
+    from app.engines.moneyness import atm_itm_entry_allows
+    from app.models.schemas import Side
+
+    if side not in ("CALL", "PUT") or strike <= 0:
+        return False
+    if not atm_itm_entry_allows(Side(side), strike, snap)[0]:
+        if not early_radar_pad_shallow_otm_ok(alert, snap):
+            return False
+
+    timing = alert.get("timingAssessment") or {}
+    timing_assessment = str(
+        timing.get("assessment") if isinstance(timing, dict) else timing
+    ).upper()
+    timing_action = str(
+        timing.get("action") if isinstance(timing, dict) else ""
+    ).lower()
+    if (
+        alert.get("fadedRip")
+        or alert.get("faded")
+        or alert.get("exhaustedReentry")
+        or timing_assessment in ("FAILED_LAUNCH", "FADING", "EXHAUSTED")
+        or timing_action == "block"
+    ):
+        return False
+
+    return bool(
+        alert.get("ictVolumeAwakening")
+        or alert.get("volumeAwaken")
+        or alert.get("orderflowConfirmed")
+        or alert.get("optionCvdBuying")
+        or float(alert.get("volumeSurge") or 0) >= 1.2
+        or alert.get("ictFlatThenVertical")
+    )
+
+
+def _shallow_otm_local_base_strict_rank_one_launch(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+) -> bool:
+    """#427 tradeable stamp — armed_base_launch at 1-step OTM local base (Aug27 PUT 77200)."""
+    settings = get_settings()
+    from app.engines.early_radar_pad_capture import early_radar_pad_shallow_otm_ok
+
+    if not bool(alert.get("shallowOtmLocalBaseTradeable")):
+        return False
+    if not early_radar_pad_shallow_otm_ok(alert, snap):
+        return False
+    if not bool(alert.get("tradeable")):
+        return False
+    if not bool(alert.get("ictBaseArmed")) or not bool(alert.get("ictArmedBaseLaunch")):
+        return False
+    if str(alert.get("tier") or "").upper() not in ("EXPLODING", "ELITE"):
+        return False
+    if float(alert.get("explosionScore") or 0) < float(
+        getattr(settings, "ict_armed_base_launch_min_score", 45.0) or 45.0
+    ):
+        return False
+    min_tqs = float(
+        getattr(settings, "shallow_otm_local_base_min_tqs", 45.0) or 45.0
+    )
+    if float(snap.tradeQualityScore or 0) < min_tqs:
+        return False
+    samples = int(alert.get("ictArmedBaseSamples") or 0)
+    span = float(alert.get("ictArmedBaseSpanSeconds") or 0)
+    base_range = float(alert.get("ictArmedBaseRangePct") or 0)
+    if (
+        samples < int(getattr(settings, "ict_armed_base_min_samples", 6) or 6)
+        or span < float(getattr(settings, "ict_armed_base_min_span_seconds", 15.0) or 15.0)
+        or base_range
+        > float(getattr(settings, "ict_armed_base_max_range_pct", 5.0) or 5.0)
+    ):
+        return False
+    base_move = float(
+        alert.get("ictBaseRelativeMovePct")
+        or alert.get("localBaseMovePct")
+        or 0
+    )
+    min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
+    max_lb = float(getattr(settings, "shallow_otm_local_base_max_move_pct", 25.0) or 25.0)
+    if not (min_lb <= base_move <= max_lb + 1e-6):
+        return False
+    timing = alert.get("timingAssessment") or {}
+    timing_assessment = str(
+        timing.get("assessment") if isinstance(timing, dict) else timing
+    ).upper()
+    timing_action = str(
+        timing.get("action") if isinstance(timing, dict) else ""
+    ).lower()
+    if (
+        alert.get("fadedRip")
+        or alert.get("faded")
+        or alert.get("exhaustedReentry")
+        or timing_assessment in ("FAILED_LAUNCH", "FADING", "EXHAUSTED")
+        or timing_action == "block"
+    ):
+        return False
+    orderflow = bool(
+        alert.get("ictVolumeAwakening")
+        or alert.get("volumeAwaken")
+        or alert.get("orderflowConfirmed")
+        or alert.get("optionCvdBuying")
+        or float(alert.get("volumeSurge") or 0) >= 1.2
+    )
+    if not bool(alert.get("ictFlatThenVertical")) or not orderflow:
+        return False
+    from app.engines.trade_ranking import rank_trade_evidence
+
+    ranking = rank_trade_evidence(
+        {
+            "mode": "explosion",
+            "tier": alert.get("tier"),
+            "explosionScore": alert.get("explosionScore"),
+            "tqs": snap.tradeQualityScore,
+            "velocity3s": alert.get("velocity3s"),
+            "velocity9s": alert.get("velocity9s"),
+            "localBaseMovePct": base_move,
+            "armedBaseLaunch": True,
+            "flatThenVertical": alert.get("ictFlatThenVertical"),
+            "flatVerticalQuality": alert.get("flatVerticalQuality"),
+            "orderflowPositive": orderflow,
+            "shallowOtmLocalBaseTradeable": True,
+        }
+    )
+    return str(ranking.get("grade") or "").upper() in ("S", "A")
+
+
 def alert_is_strict_rank_one_launch(
     alert: dict[str, Any],
     snap: SymbolSnapshot,
 ) -> bool:
     """Whether one snapshot alert has enough causal proof to evaluate through the halt."""
+    if alert_is_early_pad_prelaunch_strict_launch(alert, snap):
+        return True
+    if _shallow_otm_local_base_strict_rank_one_launch(alert, snap):
+        return True
     if not bool(alert.get("tradeable")):
         return False
     if not bool(alert.get("ictBaseArmed")):
@@ -536,7 +735,10 @@ def alert_is_strict_rank_one_launch(
 
     if side not in ("CALL", "PUT") or strike <= 0:
         return False
-    if not atm_itm_entry_allows(Side(side), strike, snap)[0]:
+    from app.engines.early_radar_pad_capture import early_radar_pad_shallow_otm_ok
+
+    shallow_otm_ok = early_radar_pad_shallow_otm_ok(alert, snap)
+    if not atm_itm_entry_allows(Side(side), strike, snap)[0] and not shallow_otm_ok:
         return False
 
     timing = alert.get("timingAssessment") or {}
@@ -604,6 +806,22 @@ def snapshots_have_strict_rank_one_launch(
         if snap.dataAvailable
         for alert in (snap.explosionAlerts or [])
     )
+
+
+def snapshots_have_grade_a_ftv_first_lift(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    from app.engines.grade_a_ftv_capture import snapshots_have_grade_a_ftv_first_lift as _have
+
+    return _have(snapshots)
+
+
+def snapshots_have_top_ftv_or_v(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    from app.engines.top_ftv_v_expiry_bypass import snapshots_have_top_ftv_or_v as _have
+
+    return _have(snapshots)
 
 
 def is_expiry_elite_top_candidate(candidate: Any) -> bool:
@@ -791,7 +1009,8 @@ def check_expiry_entry_allowed(
             return True, "ok", meta
 
     if in_expiry_evening_block() and has_expiry_today:
-        if pm_itm:
+        if snapshots_have_afternoon_top_signal(snapshots):
+            meta["expiryEveningTopSignalBypass"] = True
             return True, "ok", meta
         from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
 
@@ -806,10 +1025,24 @@ def check_expiry_entry_allowed(
     if not in_expiry_morning_window() and settings.expiry_morning_only and has_expiry_today:
         if pm_itm:
             return True, "ok", meta
-        from app.engines.morning_premium_capture import in_all_day_explosion_window
+        from app.engines.morning_premium_capture import (
+            in_afternoon_premium_capture_window,
+            in_all_day_explosion_window,
+        )
 
         if in_all_day_explosion_window():
             meta["expiryAfternoonExplosionAllowed"] = True
+            return True, "ok", meta
+        from app.engines.bullish_local_base import snapshots_have_bullish_local_base_pad
+
+        if snapshots_have_bullish_local_base_pad(snapshots):
+            meta["expiryAfternoonLocalBasePad"] = True
+            return True, "ok", meta
+        if (
+            in_afternoon_premium_capture_window()
+            and snapshots_have_top_ftv_or_v(snapshots)
+        ):
+            meta["expiryAfternoonTopFtvV"] = True
             return True, "ok", meta
         return False, "expiry_afternoon_wait", meta
 
@@ -828,6 +1061,17 @@ def check_expiry_entry_allowed(
                 meta["dailyCapEliteBypass"] = True
                 meta["rawCapReason"] = cap_reason
                 return True, "ok", meta
+            if (
+                is_worst
+                and getattr(settings, "expiry_worst_day_top_ftv_v_bypass_enabled", True)
+                and getattr(settings, "expiry_worst_day_top_ftv_v_bypasses_trade_cap", True)
+                and snapshots_have_top_ftv_or_v(snapshots)
+            ):
+                meta["expiryWorstDayTopFtvVBypass"] = True
+                meta["expiryWorstDayTopFtvVOnly"] = True
+                meta["dailyCapTopFtvVBypass"] = True
+                meta["rawCapReason"] = cap_reason
+                return True, "ok", meta
             return False, cap_reason, meta
 
         if is_worst and settings.expiry_worst_day_halt_entries:
@@ -838,6 +1082,28 @@ def check_expiry_entry_allowed(
                 ):
                     meta["expiryWorstDayStrictRankOneBypass"] = True
                     meta["expiryWorstDayStrictRankOneOnly"] = True
+                    return True, "ok", meta
+                if (
+                    getattr(settings, "expiry_worst_day_grade_a_ftv_bypass_enabled", True)
+                    and snapshots_have_grade_a_ftv_first_lift(snapshots)
+                ):
+                    meta["expiryWorstDayGradeAFtvBypass"] = True
+                    meta["expiryWorstDayGradeAFtvOnly"] = True
+                    return True, "ok", meta
+                if (
+                    getattr(settings, "expiry_worst_day_top_ftv_v_bypass_enabled", True)
+                    and snapshots_have_top_ftv_or_v(snapshots)
+                ):
+                    meta["expiryWorstDayTopFtvVBypass"] = True
+                    meta["expiryWorstDayTopFtvVOnly"] = True
+                    return True, "ok", meta
+                from app.engines.bullish_local_base import (
+                    snapshots_have_bullish_local_base_pad,
+                )
+
+                if snapshots_have_bullish_local_base_pad(snapshots):
+                    meta["expiryWorstDayBullishLocalBasePad"] = True
+                    meta["expiryWorstDayBullishLocalBasePadOnly"] = True
                     return True, "ok", meta
                 # A genuine intraday index breakout lifts the stale expiry chop halt too.
                 if bool(
@@ -915,21 +1181,35 @@ def check_expiry_candidate(
     if elite_only:
         # The declining halt uses the strict rank-one launch proof. The existing
         # broader elite-top policy remains unchanged for post-cap handling.
+        from app.engines.grade_a_ftv_capture import is_grade_a_ftv_first_lift_candidate
+        from app.engines.top_ftv_v_expiry_bypass import is_top_ftv_or_v_candidate
+
         strict_declining = bool(
             declining
-            and alert_is_strict_rank_one_launch(
-                getattr(candidate, "alert", None)
-                if isinstance(getattr(candidate, "alert", None), dict)
-                else {},
-                snap,
+            and (
+                alert_is_strict_rank_one_launch(
+                    getattr(candidate, "alert", None)
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else {},
+                    snap,
+                )
+                or is_grade_a_ftv_first_lift_candidate(candidate)
+                or is_top_ftv_or_v_candidate(candidate)
             )
         )
         if declining and not strict_declining:
             return False, "expiry_worst_day_strict_rank_one_only", meta
-        if cap_hit and not is_expiry_elite_top_candidate(candidate):
+        if (
+            cap_hit
+            and not is_expiry_elite_top_candidate(candidate)
+            and not is_grade_a_ftv_first_lift_candidate(candidate)
+            and not is_top_ftv_or_v_candidate(candidate)
+        ):
             return False, "expiry_worst_day_elite_top_only", meta
         meta["expiryEliteTop"] = bool(cap_hit)
         meta["expiryStrictRankOneLaunch"] = strict_declining
+        meta["expiryGradeAFtv"] = is_grade_a_ftv_first_lift_candidate(candidate)
+        meta["expiryTopFtvV"] = is_top_ftv_or_v_candidate(candidate)
         # Still run open-block + aligned checks below for explosions.
 
     if mode == "explosion":
@@ -951,7 +1231,11 @@ def check_expiry_candidate(
 
     # Qualified base-window elite top already cleared tier/score/move/premium/chart —
     # let it skip the expiry worst-day rank floor (72) that would otherwise re-block it.
-    if meta.get("expiryEliteTop") or meta.get("expiryStrictRankOneLaunch"):
+    if (
+        meta.get("expiryEliteTop")
+        or meta.get("expiryStrictRankOneLaunch")
+        or meta.get("expiryGradeAFtv")
+    ):
         return True, "ok", meta
 
     from app.engines.pretrade_validator import candidate_trade_score

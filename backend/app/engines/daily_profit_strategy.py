@@ -42,11 +42,15 @@ class DailyCalibration:
         self._bucket_blocks.clear()
 
     def build_report(self, closed: list[PaperTrade]) -> DailyReport:
+        from app.engines.session_trade_integrity import is_phantom_session_trade
+
         wins = losses = scratches = 0
         gross_profit = gross_loss = 0.0
         exit_reasons: dict[str, int] = defaultdict(int)
 
         for t in closed:
+            if is_phantom_session_trade(t):
+                continue
             exit_reasons[t.exitReason or "unknown"] += 1
             if t.pnlInr > 0:
                 wins += 1
@@ -73,10 +77,16 @@ class DailyCalibration:
         )
 
     def performance_analysis(self, closed: list[PaperTrade]) -> dict[str, Any]:
+        from app.engines.session_trade_integrity import is_phantom_session_trade
+
         by_side: dict[str, Any] = defaultdict(lambda: {"wins": 0, "losses": 0, "pnl": 0.0})
         by_bucket: dict[str, Any] = defaultdict(lambda: {"wins": 0, "losses": 0, "pnl": 0.0})
 
+        real_count = 0
         for t in closed:
+            if is_phantom_session_trade(t):
+                continue
+            real_count += 1
             side = t.side.value
             bucket = t.strategyType.value
             if t.pnlInr > 0:
@@ -91,6 +101,6 @@ class DailyCalibration:
         return {
             "bySide": dict(by_side),
             "byBucket": dict(by_bucket),
-            "totalTrades": len(closed),
+            "totalTrades": real_count,
             "calibrationBlocks": self.get_blocks(),
         }

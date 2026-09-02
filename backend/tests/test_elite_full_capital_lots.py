@@ -29,9 +29,11 @@ def test_elite_sl_floor_is_wider_than_eight_points():
 
 @patch("app.engines.capital_allocator.max_lots_for_capital", return_value=135)
 def test_eod_replay_uses_full_capital_lots(mock_cap):
+    """Full-capital path (base-retest sizing OFF) deploys the whole sleeve."""
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
 
+    from app.config import Settings
     from app.engines.eod_trade_report import replay_contract_trades
 
     IST = ZoneInfo("Asia/Kolkata")
@@ -49,9 +51,34 @@ def test_eod_replay_uses_full_capital_lots(mock_cap):
         series=series,
         spot_rel=spot_rel,
         t0=t0,
+        settings=Settings(size_to_base_retest_enabled=False),
     )
     assert trades
     first = trades[0]
     assert first["lots"] == 135
     assert first["stopPoints"] >= 16.0
     assert first["notionalInr"] >= 100_000
+
+
+@patch("app.engines.capital_allocator.max_lots_for_capital", return_value=135)
+def test_eod_replay_base_retest_caps_lots(mock_cap):
+    """With base-retest sizing ON (default), lots are capped so a break below the base
+    stays within the capital %-risk — the fix that stops winners being shaken out."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from app.engines.eod_trade_report import replay_contract_trades
+
+    IST = ZoneInfo("Asia/Kolkata")
+    t0 = datetime(2026, 8, 20, 10, 0, 0, tzinfo=IST)
+    prems = [60 + i for i in range(40)] + [100 - i for i in range(20)]
+    series = [
+        (t0 + timedelta(seconds=3 * i), float(p), 77000.0) for i, p in enumerate(prems)
+    ]
+    spot_rel = [(3.0 * i, 77000.0 + i * 6.0) for i in range(len(prems))]
+    trades = replay_contract_trades(
+        symbol="SENSEX", side="CALL", strike=77000.0, tier="ELITE",
+        series=series, spot_rel=spot_rel, t0=t0,
+    )
+    assert trades
+    assert trades[0]["lots"] < 135  # protective base-retest cap applied

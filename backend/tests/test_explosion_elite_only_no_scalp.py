@@ -50,6 +50,7 @@ def _settings(**overrides):
     s.edge_engine_enabled = False
     s.best_trades_only_enabled = False
     s.best_trades_explosion_only_after_losses = 3
+    s.tier_promotion_pad_chase_block_enabled = False
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -311,6 +312,10 @@ def test_elite_admitted_when_elite_exploding_only():
         patch("app.engines.ict_breakout_monitor.ict_explosion_rank_bonus", return_value=5),
         patch("app.engines.ict_breakout_monitor.late_fade_chase_blocked", return_value=(False, "")),
         patch("app.engines.trade_selector._reentry_blocked", return_value=(False, "ok")),
+        patch(
+            "app.engines.explosion_entry_guards.tier_promotion_pad_chase_blocked",
+            return_value=(False, ""),
+        ),
     ):
         out = _explosion_candidates("NIFTY", snap, state, settings)
     assert len(out) == 1
@@ -375,6 +380,10 @@ def _run_counter_chart_selector(
         patch("app.engines.ict_breakout_monitor.ict_explosion_rank_bonus", return_value=5),
         patch("app.engines.ict_breakout_monitor.late_fade_chase_blocked", return_value=(False, "")),
         patch("app.engines.trade_selector._reentry_blocked", return_value=(False, "ok")),
+        patch(
+            "app.engines.explosion_entry_guards.tier_promotion_pad_chase_blocked",
+            return_value=(False, ""),
+        ),
         patch(
             "app.engines.local_base_chart_bypass.local_base_ichimoku_chart_bypass",
             return_value=bypass_value,

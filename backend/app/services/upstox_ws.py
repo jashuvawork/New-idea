@@ -141,11 +141,16 @@ async def _refresh_option_keys() -> list[str]:
     for sym in settings.symbols:
         try:
             spot = await client.get_index_ltp(sym)
-            chain, _ = await client.get_option_chain_resolved(sym)
+            chain, expiry = await client.get_option_chain_resolved(sym)
             if not chain:
                 continue
             atm = atm_strike(float(spot or 0), sym)
-            scan_range = resolve_explosion_scan_range(sym, settings)
+            from app.engines.expiry_day_guards import _today_str
+
+            expiry_day = bool(expiry and str(expiry)[:10] == _today_str())
+            scan_range = resolve_explosion_scan_range(
+                sym, settings, expiry_day=expiry_day,
+            )
             option_keys = collect_option_keys_from_chain(chain, atm, scan_range)
             keys.extend(option_keys)
             refresh_state[sym] = {"spot": float(spot or 0), "atm": float(atm), "chainRows": len(chain), "optionKeys": len(option_keys)}

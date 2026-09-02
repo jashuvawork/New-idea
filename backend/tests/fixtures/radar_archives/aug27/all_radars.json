@@ -1,0 +1,48 @@
+[
+  {
+    "key": "SENSEX:PUT:77300",
+    "alert": {
+      "symbol": "SENSEX",
+      "side": "PUT",
+      "strike": 77300.0,
+      "premium": 83.95,
+      "tier": "ELITE",
+      "tradeable": true,
+      "explosionScore": 100.0,
+      "flatVerticalGrade": "A",
+      "flatVerticalQuality": 85.0,
+      "ictFlatThenVertical": true,
+      "ictFirstLift": true,
+      "ictBaseArmed": true,
+      "ictArmedBaseLaunch": true,
+      "ictArmedBaseSamples": 8,
+      "ictArmedBaseSpanSeconds": 18.0,
+      "ictBaseRelativeMovePct": 21.1,
+      "localBaseMovePct": 21.1,
+      "ictBasePremium": 69.35,
+      "dailyMovePct": 21.0,
+      "peakMovePct": 24.0,
+      "volumeAwaken": true,
+      "ictVolumeAwakening": true,
+      "volumeSurge": 2.5,
+      "velocity3s": 4.2,
+      "velocity9s": 2.1,
+      "ictBreakout": true,
+      "ictDisplacement": true,
+      "momentType": "armed_base_launch",
+      "indexMomAlign": true,
+      "indexHelpersConfirm": true
+    },
+    "context": {
+      "spot": 77350.0,
+      "atmStrike": 77300.0,
+      "tradeQualityScore": 55.0,
+      "spotChart": {
+        "direction": "BEARISH",
+        "momentum5Pct": -0.2,
+        "momentum10Pct": -0.1,
+        "recommendedSide": "PUT"
+      }
+    }
+  }
+]

@@ -9,6 +9,7 @@ from app.engines.spot_direction import (
     analyze_spot_chart,
     chart_blocks_side,
     chart_rank_adjustment,
+    live_direction_blocks_side,
     side_aligned_with_chart,
 )
 from app.models.schemas import Breadth, MarketProfile, Side, SpotChart, StrategyType, SuggestedTrade
@@ -51,6 +52,13 @@ def _settings():
     s.midday_chop_block_scalps = False
     s.neutral_breadth_min_score = 60
     s.counter_breadth_min_score = 70
+    s.index_trough_chart_bypass_enabled = True
+    s.index_trough_chart_bypass_min_mom5_pct = 0.008
+    s.index_trough_chart_bypass_min_mom_shift_pct = 0.02
+    s.index_trough_chart_bypass_max_adverse_mom15_pct = -0.35
+    s.chart_breadth_mom5_rollover_enabled = True
+    s.chart_breadth_bearish_mom5_rollover_pct = 0.008
+    s.chart_breadth_bullish_mom5_rollover_pct = 0.008
     return s
 
 
@@ -398,6 +406,44 @@ def test_side_aligned_with_chart():
     assert not side_aligned_with_chart(Side.PUT, bull)
 
 
+def test_side_aligned_with_chart_index_trough_turn():
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    trough = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.05,
+        momentum10Pct=0.02,
+        momentum15Pct=-0.08,
+    )
+    assert index_trough_momentum_turn(Side.CALL, trough) is True
+    assert side_aligned_with_chart(Side.CALL, trough) is True
+
+
+def test_live_direction_index_trough_bypass():
+    from app.engines.spot_direction import live_direction_blocks_side
+
+    trough = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.05,
+        momentum10Pct=0.02,
+        momentum15Pct=-0.08,
+    )
+    blocked, reason = live_direction_blocks_side(Side.CALL, trough)
+    assert blocked is False
+    assert reason == "ok"
+
+
+def test_index_trough_detects_subtle_early_turn():
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    subtle = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.01,
+        momentum10Pct=-0.01,
+        momentum15Pct=-0.30,
+    )
+    assert index_trough_momentum_turn(Side.CALL, subtle) is True
+
 def test_reconcile_spot_chart_overrides_bullish_5m_on_bearish_mtf():
     from app.engines.spot_direction import reconcile_spot_chart_with_mtf
     from app.models.schemas import ChartAnalysis
@@ -538,4 +584,123 @@ def test_reconcile_ichimoku_flips_bearish_spot_on_live_rally():
         },
     )
     out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="BEARISH")
+    assert out.direction == "BEARISH"
+
+
+def test_reconcile_ichimoku_can_flip_when_breadth_neutral():
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+    from app.models.schemas import ChartAnalysis
+
+    spot = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=0.02,
+        momentum15Pct=0.01,
+        momentum30Pct=-0.05,
+        rsi=58.0,
+        macdBias="BULLISH",
+    )
+    analysis = ChartAnalysis(
+        consensus="NEUTRAL",
+        alignedCount=0,
+        totalTimeframes=0,
+        timeframes={},
+        ichimoku={
+            "cloudBias": "BULLISH",
+            "priceVsCloud": "ABOVE",
+            "tkCross": "BEARISH",
+        },
+    )
+    out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="NEUTRAL")
     assert out.direction == "BULLISH"
+
+
+def test_bearish_breadth_corrects_weak_bullish_spot_chart():
+    """Aug26: micro-bounce + ichimoku must not show BULLISH when breadth is BEARISH."""
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+    from app.models.schemas import ChartAnalysis
+
+    spot = SpotChart(
+        direction="BULLISH",
+        emaBias="BEARISH",
+        momentum5Pct=0.03,
+        momentum15Pct=-0.05,
+        momentum30Pct=-0.12,
+        rsi=54.0,
+        macdBias="NEUTRAL",
+    )
+    analysis = ChartAnalysis(
+        consensus="BEARISH",
+        alignedCount=3,
+        totalTimeframes=4,
+        timeframes={
+            "5m": {"direction": "BEARISH"},
+            "15m": {"direction": "BEARISH"},
+            "1h": {"direction": "NEUTRAL"},
+        },
+        ichimoku={
+            "cloudBias": "BULLISH",
+            "priceVsCloud": "ABOVE",
+            "smartBias": "BULLISH",
+        },
+    )
+    out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="BEARISH")
+    assert out.direction == "BEARISH"
+
+
+def test_bearish_breadth_flips_bullish_chart_on_mom5_rollover():
+    """Sep 1 afternoon: mom15/mom30 still positive from morning rally but 5m rolling over."""
+    from app.engines.spot_direction import reconcile_spot_chart_with_mtf
+    from app.models.schemas import ChartAnalysis
+
+    spot = SpotChart(
+        direction="BULLISH",
+        emaBias="BULLISH",
+        momentum5Pct=-0.03,
+        momentum15Pct=0.22,
+        momentum30Pct=0.35,
+        rsi=58.0,
+        macdBias="BULLISH",
+    )
+    analysis = ChartAnalysis(
+        consensus="NEUTRAL",
+        alignedCount=2,
+        totalTimeframes=4,
+        timeframes={
+            "5m": {"direction": "NEUTRAL"},
+            "15m": {"direction": "BULLISH"},
+            "1h": {"direction": "BULLISH"},
+        },
+    )
+    out = reconcile_spot_chart_with_mtf(spot, analysis, breadth_bias="BEARISH")
+    assert out.direction == "BEARISH"
+
+
+@patch("app.engines.spot_direction.get_settings")
+def test_put_peak_rollover_bypasses_live_bullish_block(mock_settings):
+    """Afternoon selloff — PUT allowed when 5m turns down at session peak."""
+    mock_settings.return_value = _settings()
+    peak = SpotChart(
+        direction="BULLISH",
+        momentum5Pct=-0.03,
+        momentum10Pct=-0.01,
+        momentum15Pct=0.22,
+        momentum30Pct=0.35,
+        trendStrength=72.0,
+    )
+    blocked, reason = live_direction_blocks_side(Side.PUT, peak)
+    assert blocked is False
+    assert reason == "ok"
+
+
+def test_deep_trough_call_recovery_before_mom5_crosses_zero():
+    """Sep01 morning CALL — mom5 still negative but recovering vs deep mom15."""
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    trough = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=-0.279,
+        momentum10Pct=-0.32,
+        momentum15Pct=-0.391,
+        trendStrength=55.0,
+    )
+    assert index_trough_momentum_turn(Side.CALL, trough, settings=_settings()) is True

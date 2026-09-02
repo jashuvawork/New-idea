@@ -275,7 +275,17 @@ def local_base_momentum_turn(
     tier, score, vol = _top_tier_score_vol(event, alert)
     if tier not in ("ELITE", "EXPLODING"):
         return False
-    if score < float(getattr(settings, "local_base_turn_min_score", 62.0) or 62.0):
+    min_score = float(getattr(settings, "local_base_turn_min_score", 62.0) or 62.0)
+    pad_min_score = float(
+        getattr(settings, "local_base_turn_pad_min_score", 28.0) or 28.0
+    )
+    soft_cap = float(
+        getattr(settings, "fast_bullish_local_base_soft_min_score", 45.0) or 45.0
+    )
+    effective_min = min_score
+    if score < min_score and score >= pad_min_score and score <= soft_cap:
+        effective_min = pad_min_score
+    if score < effective_min:
         return False
     if vol < float(getattr(settings, "local_base_turn_min_vol_surge", 2.0) or 2.0):
         return False
@@ -361,6 +371,10 @@ def local_base_overrides_side_bias(
     settings = get_settings()
     if not getattr(settings, "local_base_overrides_bearish_breadth", True):
         return False
+    from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+    if index_confirmed_local_base(side, snap, alert):
+        return True
     return local_base_structure_active(side, snap, event=event, alert=alert)
 
 

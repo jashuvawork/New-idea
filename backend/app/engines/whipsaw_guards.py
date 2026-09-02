@@ -301,6 +301,12 @@ def check_session_whipsaw_pause(
     if momentum_rally_bypass_whipsaw(snapshots):
         return False, "momentum_rally_bypass", {"momentumRallyBypass": True}
 
+    if bool(getattr(settings, "whipsaw_top_signal_bypass_enabled", True)):
+        from app.engines.top_signal_session_lift import snapshots_have_top_signal_session_lift
+
+        if snapshots_have_top_signal_session_lift(snapshots):
+            return False, "top_signal_session_lift_bypass", {"topSignalSessionLiftBypass": True}
+
     from app.engines.expiry_day_guards import expiry_pm_itm_quick_session_active
 
     if expiry_pm_itm_quick_session_active(snapshots, state):
@@ -431,10 +437,23 @@ def check_bearish_sideways_entry(
                 getattr(settings, "bearish_sideways_local_base_min_score", 75.0) or 75.0
             )
             min_score = min(min_score, soft)
+        from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+        if alert is not None and snap is not None and index_confirmed_local_base(
+            candidate.side, snap, alert,
+        ):
+            return False, "ok"
         if tier in ("ELITE", "EXPLODING") and score >= min_score:
             return False, "ok"
-        from app.engines.morning_premium_capture import is_premium_capture_event
+        from app.engines.morning_premium_capture import (
+            is_premium_capture_event,
+            is_v_rip_local_base_capture_alert,
+        )
 
+        if alert is not None and is_v_rip_local_base_capture_alert(
+            alert, chart=snap.spotChart,
+        ):
+            return False, "ok"
         if event and is_premium_capture_event(event, chart=snap.spotChart):
             return False, "ok"
         return True, "bearish_sideways_explosion_only"
@@ -484,6 +503,44 @@ def _elite_momentum_flip_bypass(candidate: Any, snap: SymbolSnapshot) -> bool:
     if ict_flat and move >= 28.0:
         return True
     if tier == "ELITE" and score >= min_score and move >= 35.0:
+        return True
+    # Aug31 NIFTY CALL 24150: armed_base_launch at ~10% lb after PUT loss — session
+    # move is still ~12% so the 28%/35% floors never fire even though scorecard MFE
+    # ran 84%. Allow flip on confirmed local-base ELITE/EXPLODING armed launches.
+    local_pad = 0.0
+    for key in ("localBaseMovePct", "ictBaseRelativeMovePct", "offLowMovePct"):
+        try:
+            local_pad = max(local_pad, float(alert.get(key) or 0))
+        except (TypeError, ValueError):
+            pass
+    if event is not None:
+        try:
+            local_pad = max(
+                local_pad,
+                float(getattr(event, "base_relative_move_pct", 0) or 0),
+            )
+        except (TypeError, ValueError):
+            pass
+    moment = str(alert.get("momentType") or "")
+    armed_launch = moment == "armed_base_launch" or bool(
+        alert.get("ictArmedBaseLaunch")
+    )
+    pad_lo = float(
+        getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0
+    )
+    pad_hi = float(
+        getattr(settings, "top_ftv_a_pad_velocity_max_move_pct", 25.0) or 25.0
+    )
+    vol_awake = bool(
+        alert.get("volumeAwaken") or alert.get("ictVolumeAwakening")
+    )
+    if (
+        tier in ("ELITE", "EXPLODING")
+        and score >= min_score
+        and pad_lo <= local_pad <= pad_hi
+        and (armed_launch or ict_flat)
+        and vol_awake
+    ):
         return True
     try:
         from app.engines.vertical_rip_bypass import qualifies_for_vertical_rip_bypass

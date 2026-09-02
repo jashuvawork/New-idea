@@ -346,11 +346,31 @@ def _failed_launch_reentry_exit_reasons(settings: Any) -> set[str]:
     raw = getattr(
         settings,
         "explosion_failed_launch_reentry_exit_reasons_csv",
-        "explosion_failed_launch,explosion_never_green_stop",
+        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss",
     )
     if not isinstance(raw, str) or not raw.strip():
-        raw = "explosion_failed_launch,explosion_never_green_stop"
+        raw = "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
     return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def _failed_launch_reentry_qualifies(
+    *,
+    exit_reason: str,
+    prior_pnl: float,
+    best_points: float,
+    settings: Any,
+) -> bool:
+    """True when a prior close should arm the failed-launch re-entry cooldown."""
+    reason = str(exit_reason or "").strip()
+    max_best = float(
+        getattr(settings, "explosion_failed_launch_max_best_points", 1.0) or 1.0
+    )
+    if reason == "adaptive_stop_loss":
+        # Aug28 24050 PE: adaptive SL after best +0.3pt must not re-arm 17m later.
+        return prior_pnl < 0 and best_points <= max_best
+    if prior_pnl >= 0 and best_points > 1.0:
+        return False
+    return True
 
 
 def _latest_failed_launch_nearby_close(
@@ -372,7 +392,8 @@ def _latest_failed_launch_nearby_close(
     except Exception:
         step = 50.0
     max_dist = max(0.0, float(strike_steps) * step) + 0.01
-    reasons = _failed_launch_reentry_exit_reasons(get_settings())
+    settings = get_settings()
+    reasons = _failed_launch_reentry_exit_reasons(settings)
     latest: Optional[Any] = None
     latest_ts = None
 
@@ -398,8 +419,12 @@ def _latest_failed_launch_nearby_close(
             continue
         prior_pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
         best = float(getattr(t, "bestPnlPoints", 0) or 0)
-        # Only block true failed launches (never green / small loss).
-        if prior_pnl >= 0 and best > 1.0:
+        if not _failed_launch_reentry_qualifies(
+            exit_reason=reason,
+            prior_pnl=prior_pnl,
+            best_points=best,
+            settings=settings,
+        ):
             continue
         ts = getattr(t, "closedAt", None) or getattr(t, "openedAt", None)
         if latest is None or (ts is not None and (latest_ts is None or ts > latest_ts)):
@@ -474,6 +499,114 @@ def failed_launch_reentry_blocked(
     return True, meta
 
 
+def _prior_session_explosion_closes(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+) -> list[Any]:
+    """Closed explosion trades today on symbol+side (any strike)."""
+    sym = str(symbol or "").upper()
+    side_v = _side_key(side)
+    closes: list[Any] = []
+
+    def _is_explosion(t: Any) -> bool:
+        ctx = getattr(t, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
+        st = str(getattr(t, "strategyType", "") or "")
+        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+        return mode == "explosion" or st_u == "EXPLOSIVE"
+
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            continue
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if not _is_explosion(t):
+            continue
+        if getattr(t, "closedAt", None) is None:
+            continue
+        closes.append(t)
+    return closes
+
+
+def reentry_ml_win_prob_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    snap: Any,
+    confidence: float = 70.0,
+) -> tuple[bool, dict[str, Any]]:
+    """Block session / same-strike re-entries when ML win probability is too low.
+
+    Aug28: winners ~56% ML, 24050 post-win/post-loss re-entries ~41-43%.
+    First entries (no prior closes on symbol+side) are not gated.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "explosion_reentry_ml_win_prob_gate_enabled", True):
+        return False, meta
+
+    prior_closes = _prior_session_explosion_closes(state, symbol=symbol, side=side)
+    same_strike_prior = _latest_same_strike_explosion_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+    )
+    if not prior_closes and same_strike_prior is None:
+        return False, meta
+
+    session_min = float(
+        getattr(settings, "explosion_reentry_ml_win_prob_min", 0.52) or 0.52
+    )
+    same_strike_min = float(
+        getattr(
+            settings,
+            "explosion_reentry_ml_win_prob_same_strike_min",
+            0.55,
+        )
+        or 0.55
+    )
+    if same_strike_prior is not None:
+        required = same_strike_min
+        reentry_kind = "same_strike"
+        prior = same_strike_prior
+    else:
+        required = session_min
+        reentry_kind = "session"
+        prior = prior_closes[-1]
+
+    side_val = side.value if hasattr(side, "value") else str(side or "PUT").upper()
+    from app.engines.adaptive_exits import predict_entry_ml_win_prob
+
+    ml_prob = predict_entry_ml_win_prob(
+        snap,
+        side=side_val,
+        confidence=float(confidence or 70.0),
+    )
+    meta.update(
+        {
+            "applied": True,
+            "reentryKind": reentry_kind,
+            "mlWinProb": round(ml_prob, 3),
+            "requiredMlWinProb": round(required, 3),
+            "priorTradeId": getattr(prior, "id", None),
+            "priorExitReason": str(getattr(prior, "exitReason", "") or ""),
+            "priorPnlInr": round(
+                float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0),
+                2,
+            ),
+            "reason": "reentry_ml_win_prob_low",
+        }
+    )
+    if ml_prob + 1e-9 < required:
+        return True, meta
+    return False, meta
+
+
 def session_peak_late_reentry_blocked(
     *,
     symbol: str,
@@ -539,7 +672,45 @@ def session_peak_late_reentry_blocked(
         getattr(settings, "explosion_late_reentry_min_velocity_3s", 1.2) or 1.2
     )
     v3 = float(velocity_3s or 0)
+    v9 = float(alert_d.get("velocity9s") or alert_d.get("velocity_9s") or 0)
     if first_lift and v3 >= min_v3:
+        return False, ""
+
+    # Aug27 SENSEX PUT 77400: v_rip/first_lift at local-base pad with flat v3 is the
+    # initial lift off trough — premium near session peak is expected, not a chase.
+    from app.engines.explosion_detector import first_lift_pad_capture_lane
+    from app.engines.pad_lane_capture import (
+        _ftv_direct_evidence_from_alert,
+        pad_lane_cold_velocity_ok,
+    )
+
+    pad_evidence = _ftv_direct_evidence_from_alert(alert_d)
+    pad_evidence["firstLift"] = first_lift
+    tier_u = str(alert_d.get("tier") or "").upper()
+    peak_move = float(
+        alert_d.get("peakMovePct") or alert_d.get("dailyMovePct") or 0
+    )
+    local_base = float(pad_evidence.get("localBaseMovePct") or 0)
+    v_rip_ready = bool(pad_evidence.get("vRipReady"))
+    if (
+        first_lift_pad_capture_lane(
+            tier=tier_u,
+            peak_move_pct=peak_move,
+            first_lift_ready=first_lift,
+            local_base_move_pct=local_base,
+            v_rip_ready=v_rip_ready,
+        )
+        and pad_lane_cold_velocity_ok(pad_evidence, v3, v9)
+    ):
+        return False, ""
+
+    # Aug28 SENSEX PUT 77500: fresh ict_base_armed re-base near session peak with cold v3.
+    from app.engines.early_radar_pad_capture import ict_base_armed_prelaunch_pad_lane
+
+    if (
+        ict_base_armed_prelaunch_pad_lane(alert_d)
+        and pad_lane_cold_velocity_ok(pad_evidence, v3, v9)
+    ):
         return False, ""
 
     return True, (

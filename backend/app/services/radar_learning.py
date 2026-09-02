@@ -115,6 +115,29 @@ def pipeline_history_path(date: str) -> Path:
     return _telemetry_dir() / f"{date}.pipeline.jsonl"
 
 
+def session_telemetry_paths(date: str) -> list[Path]:
+    """Intraday JSONL files for one session (premium tape, funnel, optional tapes)."""
+    if not _DATE_RE.fullmatch(date):
+        raise ValueError("date must use YYYY-MM-DD")
+    return [
+        premium_tape_path(date),
+        funnel_path(date),
+        alerts_tape_path(date),
+        pipeline_history_path(date),
+    ]
+
+
+def purge_session_telemetry(date: str) -> list[str]:
+    """Remove intraday telemetry for a finalized session. Returns deleted filenames."""
+    removed: list[str] = []
+    for path in session_telemetry_paths(date):
+        if path.exists():
+            path.unlink()
+            removed.append(path.name)
+        path.with_suffix(path.suffix + ".lock").unlink(missing_ok=True)
+    return removed
+
+
 @contextmanager
 def _file_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_suffix(path.suffix + ".lock")
@@ -206,6 +229,8 @@ def record_pipeline_event(
     throttle_seconds: float = 0.0,
 ) -> bool:
     """Persist non-secret service/data availability evidence across restarts."""
+    if not bool(getattr(get_settings(), "radar_pipeline_history_enabled", False)):
+        return False
     current = _aware(now)
     date = current.strftime("%Y-%m-%d")
     key = throttle_key or ""
@@ -616,8 +641,58 @@ def record_market_observations(
     return len(contracts)
 
 
-def read_premium_tape(date: str) -> list[dict[str, Any]]:
-    return _read_jsonl(premium_tape_path(date))
+def _read_premium_tape_from_zip(date: str) -> list[dict[str, Any]]:
+    """Read premium_tape.jsonl from the finalized daily ZIP (after telemetry purge).
+
+    The 16:00 IST finalize bundles the tape into radar-<date>.zip and PURGES the intraday
+    JSONL, so post-finalize the telemetry file is gone. EOD replay must then read the ZIP —
+    otherwise generate_eod_trade_report returns no_tape for the day that just closed.
+    """
+    from app.services.radar_archive import archive_path
+
+    try:
+        zip_path = archive_path(date)
+    except ValueError:
+        return []
+    if not zip_path.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            if "premium_tape.jsonl" not in archive.namelist():
+                return []
+            data = archive.read("premium_tape.jsonl")
+    except (OSError, zipfile.BadZipFile):
+        return []
+    for raw in data.split(b"\n"):
+        if not raw:
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            out.append(row)
+    return out
+
+
+def read_premium_tape(date: str, *, max_bytes: int = 0) -> list[dict[str, Any]]:
+    """Read a day's premium tape. ``max_bytes>0`` tail-caps the parse.
+
+    Pre-throttle tapes reach 1GB+; a full parse of one takes ~8s and the downstream replay
+    another ~13s, which blows the EOD-report request timeout. A generous tail cap keeps
+    replay endpoints responsive on pathological historical tapes and is a no-op for the
+    (now 10s-sampled) tapes produced going forward.
+
+    After the 16:00 finalize purges the intraday JSONL, fall back to the finalized ZIP so the
+    EOD report for the just-closed day still works (regression: Sep 1 EOD read no_tape at 4pm).
+    """
+    tape = premium_tape_path(date)
+    if tape.exists():
+        if max_bytes and max_bytes > 0:
+            return _read_jsonl_tail(tape, max_bytes=max_bytes)
+        return _read_jsonl(tape)
+    return _read_premium_tape_from_zip(date)
 
 
 def read_alerts_tape(date: str) -> list[dict[str, Any]]:
@@ -1503,13 +1578,20 @@ def finalize_daily_review(date: str) -> dict[str, Any]:
 
 def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     """Bundle tape, scorecard, funnel, and replay inputs into the canonical daily ZIP."""
+    settings = get_settings()
+    analysis_only = bool(
+        getattr(settings, "radar_analysis_only_storage", True)
+    )
     scorecard = analyze_hindsight(date)
     funnel = build_funnel_report(date)
     artifacts: dict[str, bytes | str] = {
         "scorecard.json": json.dumps(scorecard, indent=2),
         "funnel.json": json.dumps(funnel, indent=2),
     }
-    if bool(getattr(get_settings(), "ftv_premium_calibration_enabled", False)):
+    if (
+        not analysis_only
+        and bool(getattr(settings, "ftv_premium_calibration_enabled", False))
+    ):
         try:
             from app.engines.ftv_premium_calibration import (
                 build_and_persist_premium_calibration,
@@ -1524,16 +1606,24 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     tape = premium_tape_path(date)
     if tape.exists():
         artifacts["premium_tape.jsonl"] = _read_bytes_locked(tape)
-    alerts_file = alerts_tape_path(date)
-    if alerts_file.exists():
-        artifacts["alerts_tape.jsonl"] = _read_bytes_locked(alerts_file)
-    pipeline_file = pipeline_history_path(date)
-    if pipeline_file.exists():
-        artifacts["pipeline_history.jsonl"] = _read_bytes_locked(pipeline_file)
+    if not analysis_only:
+        alerts_file = alerts_tape_path(date)
+        if alerts_file.exists():
+            artifacts["alerts_tape.jsonl"] = _read_bytes_locked(alerts_file)
+        pipeline_file = pipeline_history_path(date)
+        if pipeline_file.exists():
+            artifacts["pipeline_history.jsonl"] = _read_bytes_locked(pipeline_file)
     funnel_file = funnel_path(date)
     if funnel_file.exists():
         artifacts["funnel_events.jsonl"] = _read_bytes_locked(funnel_file)
+    tape_present = tape.exists()
     path = add_archive_artifacts(date, artifacts)
+    tape_bundled = False
+    try:
+        with zipfile.ZipFile(path, "r") as archive:
+            tape_bundled = "premium_tape.jsonl" in archive.namelist()
+    except (OSError, zipfile.BadZipFile):
+        tape_bundled = False
     backup = backup_archive(path)
     _write_backup_status(
         date,
@@ -1544,6 +1634,20 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
             "recordedAt": _now().isoformat(),
         },
     )
+    purged: list[str] = []
+    if bool(getattr(settings, "radar_purge_telemetry_after_finalize", True)):
+        require_tape = bool(
+            getattr(settings, "radar_purge_requires_bundled_premium_tape", True)
+        )
+        if require_tape and tape_present and not tape_bundled:
+            logger.warning(
+                "Skipping telemetry purge for %s: premium tape exists on disk "
+                "but was not bundled into %s",
+                date,
+                path.name,
+            )
+        else:
+            purged = purge_session_telemetry(date)
     _prune_learning_files()
     try:
         from app.services.radar_health import record_component_success
@@ -1565,6 +1669,9 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
         "scorecard": scorecard,
         "funnel": funnel,
         "backup": backup,
+        "analysisOnly": analysis_only,
+        "premiumTapeBundled": tape_bundled,
+        "purgedTelemetry": purged,
     }
 
 

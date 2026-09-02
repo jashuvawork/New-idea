@@ -220,6 +220,7 @@ def _reentry_blocked(
     *,
     explosion_event: Any = None,
     mode: str = "",
+    alert: Any = None,
 ) -> tuple[bool, str]:
     blocked, reason = symbol_in_cooldown(symbol)
     if blocked:
@@ -238,11 +239,13 @@ def _reentry_blocked(
 
         bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
         hard_blocked, hard_reason = breadth_hard_blocks_side(
-            side, bias, event=explosion_event, snap=snap,
+            side, bias, event=explosion_event, snap=snap, alert=alert,
         )
         if hard_blocked:
             return True, hard_reason
-        if not counter_trend_entry_allowed(side, snap, explosion_event=explosion_event):
+        if not counter_trend_entry_allowed(
+            side, snap, explosion_event=explosion_event, alert=alert,
+        ):
             return True, "counter_trend_requires_elite"
     from app.engines.directional_lock import check_directional_side_lock
     from app.engines.morning_premium_capture import premium_led_bypass_for_snap
@@ -261,6 +264,7 @@ def _reentry_blocked(
             score=float(getattr(explosion_event, "explosion_score", 0) or 0),
             tier=tier,
             explosion_event=explosion_event,
+            alert=alert if isinstance(alert, dict) else None,
         )
     blocked, reason = check_directional_side_lock(
         symbol, side, snap, tier=tier, premium_led_bypass=premium_bypass,
@@ -287,7 +291,10 @@ def _explosion_candidates(
 
     out: list[EntryCandidate] = []
     for alert in snap.explosionAlerts or []:
-        from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+        from app.engines.early_radar_pad_capture import (
+            alert_has_building_coil_pad,
+            alert_has_early_radar_pad_ready,
+        )
         from app.engines.ict_breakout_monitor import first_lift_entry_readiness
 
         first_lift_ready, first_lift_readiness_reason = first_lift_entry_readiness(
@@ -295,13 +302,14 @@ def _explosion_candidates(
             alert=alert,
             state=state,
         )
-        early_pad = alert_has_early_radar_pad_capture(alert)
+        early_pad = alert_has_early_radar_pad_ready(alert)
+        coil_pad = alert_has_building_coil_pad(alert)
         from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
         pad_lane_waive = pad_lane_early_near_miss_waive(
             alert, readiness_reason=first_lift_readiness_reason,
         )
-        lift_ready = first_lift_ready or early_pad or pad_lane_waive
+        lift_ready = first_lift_ready or early_pad or coil_pad or pad_lane_waive
         slow_grind_trough = bool(
             alert.get("slowGrindArmedTrough")
             or alert.get("ictSlowGrindArmedTrough")
@@ -337,7 +345,34 @@ def _explosion_candidates(
                 atm=atm_v if atm_v > 0 else None,
             )
             if money == "OTM":
-                continue
+                from app.engines.early_radar_pad_capture import (
+                    alert_has_early_radar_pad_capture,
+                    building_coil_pad_moneyness_ok,
+                    early_radar_pad_shallow_otm_ok,
+                )
+                from app.engines.moneyness import _depth_steps
+
+                depth = _depth_steps(
+                    Side(side_v),
+                    strike_v,
+                    spot_v,
+                    symbol,
+                    atm_v if atm_v > 0 else spot_v,
+                )
+                max_steps = int(
+                    getattr(settings, "explosion_shallow_otm_history_steps", 1) or 1
+                )
+                pad_shallow_ok = early_radar_pad_shallow_otm_ok(alert, snap)
+                coil_moneyness_ok = building_coil_pad_moneyness_ok(alert, snap, settings)
+                if not (
+                    coil_moneyness_ok
+                    or (
+                        (lift_ready or alert_has_early_radar_pad_capture(alert))
+                        and pad_shallow_ok
+                        and depth <= max_steps
+                    )
+                ):
+                    continue
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
         top_only = bool(getattr(settings, "top_moments_only_enabled", True))
@@ -346,14 +381,58 @@ def _explosion_candidates(
                 # Early BUILDING flat→vertical when chart-aligned — catch the base
                 # before ELITE prints (multiple flat→vertical moments per week).
                 if top_only:
+                    from app.engines.building_ftv_gates import (
+                        building_armed_base_grade_a_live_ok,
+                        building_coil_pad_grade_a_live_ok,
+                    )
                     from app.engines.top_moment_gate import explosion_alert_is_top_moment
 
-                    if not explosion_alert_is_top_moment(alert) and not pad_lane_waive:
+                    armed_base_live_ok = building_armed_base_grade_a_live_ok(
+                        alert,
+                        snap,
+                        readiness_reason=first_lift_readiness_reason,
+                        state=state,
+                        snapshots={symbol: snap},
+                    )
+                    coil_pad_live_ok = building_coil_pad_grade_a_live_ok(
+                        alert,
+                        snap,
+                        readiness_reason=first_lift_readiness_reason,
+                        state=state,
+                        snapshots={symbol: snap},
+                    )
+                    if (
+                        not explosion_alert_is_top_moment(alert)
+                        and not pad_lane_waive
+                        and not armed_base_live_ok
+                        and not coil_pad_live_ok
+                    ):
                         continue
                 elif not lift_ready and not _building_aligned_ict_alert_ok(
                     alert, snap, tier_u, state=state, snapshots={symbol: snap},
                 ):
-                    continue
+                    from app.engines.building_ftv_gates import (
+                        building_armed_base_grade_a_live_ok,
+                        building_coil_pad_grade_a_live_ok,
+                    )
+
+                    if not (
+                        building_armed_base_grade_a_live_ok(
+                            alert,
+                            snap,
+                            readiness_reason=first_lift_readiness_reason,
+                            state=state,
+                            snapshots={symbol: snap},
+                        )
+                        or building_coil_pad_grade_a_live_ok(
+                            alert,
+                            snap,
+                            readiness_reason=first_lift_readiness_reason,
+                            state=state,
+                            snapshots={symbol: snap},
+                        )
+                    ):
+                        continue
         elif tier_u not in ("ELITE", "EXPLODING"):
             from app.engines.morning_premium_capture import is_premium_capture_alert
 
@@ -386,6 +465,8 @@ def _explosion_candidates(
                 # base AND non-adverse live momentum, so this cannot admit chop FOMO.
                 local_base_ok = False
                 pad_lane_ok = False
+                grade_a_ok = False
+                candlestick_ok = False
                 if bool(
                     getattr(
                         settings,
@@ -399,6 +480,7 @@ def _explosion_candidates(
                     from app.engines.pad_lane_capture import (
                         pad_lane_turnaround_chart_bypass,
                     )
+                    from app.engines.grade_a_ftv_capture import grade_a_ftv_chart_bypass
 
                     local_base_ok = local_base_ichimoku_chart_bypass(
                         side_v, snap, alert=alert,
@@ -406,7 +488,13 @@ def _explosion_candidates(
                     pad_lane_ok = pad_lane_turnaround_chart_bypass(
                         side_v, snap, alert=alert,
                     )
-                if not local_base_ok and not pad_lane_ok:
+                    grade_a_ok = grade_a_ftv_chart_bypass(alert, snap)
+                from app.engines.ftv_candlestick_confirm import ftv_candlestick_chart_bypass
+
+                candlestick_ok = ftv_candlestick_chart_bypass(
+                    side_v, snap, alert=alert,
+                )
+                if not local_base_ok and not pad_lane_ok and not grade_a_ok and not candlestick_ok:
                     continue
         score_val = float(alert.get("explosionScore", 0))
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
@@ -430,11 +518,11 @@ def _explosion_candidates(
             min_explosion_score = min(
                 min_explosion_score,
                 float(
-                    getattr(settings, "first_lift_trade_min_score", 45.0)
-                    or 45.0
+                    getattr(settings, "first_lift_early_pad_min_score", 12.0)
+                    or 12.0
                 ),
             )
-        if early_pad or pad_lane_waive:
+        if early_pad or coil_pad or pad_lane_waive:
             min_explosion_score = min(
                 min_explosion_score,
                 float(
@@ -591,6 +679,30 @@ def _explosion_candidates(
 
         rank += runner_strike_rank_bonus(event, snap)
         rank += atm_proximity_rank_bonus(event, snap)
+        if bool(
+            getattr(settings, "expansion_strike_rank_bonus_enabled", True)
+        ) and bool(alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")):
+            from app.engines.moneyness import classify_moneyness as _classify_money
+            from app.engines.moneyness import _depth_steps
+
+            spot_v = float(snap.spot or 0)
+            atm_v = float(snap.atmStrike or spot_v or 0)
+            money = _classify_money(
+                event.side,
+                event.strike,
+                spot_v,
+                symbol=symbol,
+                atm=atm_v,
+            )
+            bonus = float(
+                getattr(settings, "expansion_strike_rank_bonus", 15.0) or 15.0
+            )
+            if money == "ITM":
+                rank += bonus
+            elif money == "OTM":
+                depth = _depth_steps(event.side, event.strike, spot_v, symbol, atm_v)
+                if depth >= 2:
+                    rank += bonus
         from app.engines.dual_mode_strategy import resolve_trading_session_mode
         from app.engines.ict_breakout_monitor import (
             analyze_explosion_event_ict,
@@ -599,7 +711,9 @@ def _explosion_candidates(
         )
 
         trading_mode, _ = resolve_trading_session_mode(state, {symbol: snap})
-        ict = analyze_explosion_event_ict(event, snap)
+        from app.engines.ict_breakout_monitor import merge_alert_ict_stamps
+
+        ict = merge_alert_ict_stamps(analyze_explosion_event_ict(event, snap), alert)
         if not ict.active and alert.get("ictBreakout"):
             from app.engines.ict_breakout_monitor import ICTBreakoutSignal
 
@@ -637,9 +751,9 @@ def _explosion_candidates(
                 armed_at=str(alert.get("ictBaseArmedAt") or ""),
                 armed_base_expires_at=str(alert.get("ictBaseExpiresAt") or ""),
             )
-        from app.engines.elite_never_block import elite_never_block_active
+        from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-        must_take = elite_never_block_active(
+        must_take = elite_must_take_bypass_allowed(
             event=event, candidate=cand_probe, alert=alert, snap=snap, ict=ict,
         )
         from app.engines.bullish_local_base import bullish_local_base_prediction
@@ -668,14 +782,36 @@ def _explosion_candidates(
             extended_session_chase_blocked,
             immature_explosion_blocked,
             live_explosion_confirmation_blocked,
+            post_impulse_consolidation_entry_blocked,
+            post_peak_chase_blocked,
+            tier_promotion_pad_chase_blocked,
         )
 
         immature_blocked, _immature_reason = immature_explosion_blocked(
             event,
             ict=ict,
+            alert=alert,
             bullish_local_base=bool(bullish_base.get("active")),
         )
         if immature_blocked and not must_take and not first_lift_ready:
+            continue
+        chase_blocked, _chase_reason = tier_promotion_pad_chase_blocked(
+            event,
+            ict=ict,
+            alert=alert,
+        )
+        if chase_blocked and not first_lift_ready and not early_pad:
+            continue
+        pi_blocked, _pi_reason = post_impulse_consolidation_entry_blocked(
+            event,
+            alert=alert,
+            snap=snap,
+        )
+        if pi_blocked and not bool(
+            alert.get("ictFirstLift")
+            or alert.get("ictArmedBaseLaunch")
+            or alert.get("armedBaseLaunch")
+        ):
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the
         # hard window does not re-raise the unstructured 28% floor.
@@ -693,6 +829,7 @@ def _explosion_candidates(
         live_blocked, _live_reason = live_explosion_confirmation_blocked(
             event,
             ict=ict,
+            alert=alert,
             premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
             snap=snap,
         )
@@ -722,7 +859,9 @@ def _explosion_candidates(
             )
         ):
             continue
-        ext_blocked, _ext_reason = extended_session_chase_blocked(event, ict=ict)
+        ext_blocked, _ext_reason = extended_session_chase_blocked(
+            event, ict=ict, alert=alert,
+        )
         building_rip_ready_take = first_lift_readiness_reason in (
             "building_rip_bullish_ready",
             "building_local_base_lift_ready",
@@ -741,6 +880,12 @@ def _explosion_candidates(
                 readiness_reason=first_lift_readiness_reason,
             )
         ):
+            continue
+        # Don't chase the exhaustion of a completed move (symmetric CE/PE). Surgical: a
+        # genuine near-base entry is exempt by construction (current sits at the window low),
+        # so this only blocks the late/mid-rip chase — even for must-take/first-lift.
+        pp_blocked, _pp_reason = post_peak_chase_blocked(event)
+        if pp_blocked:
             continue
         trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
             cand_probe, snap, state=state, ict=ict,
@@ -795,6 +940,26 @@ def _explosion_candidates(
             rank += float(
                 getattr(settings, "ict_armed_base_launch_rank_bonus", 16.0) or 16.0
             )
+            if first_lift_readiness_reason == "armed_base_option_led_ready":
+                from app.engines.building_ftv_gates import (
+                    building_armed_base_grade_a_live_ok,
+                )
+
+                if building_armed_base_grade_a_live_ok(
+                    alert if isinstance(alert, dict) else None,
+                    snap,
+                    readiness_reason=first_lift_readiness_reason,
+                    state=state,
+                    snapshots={symbol: snap},
+                ):
+                    rank += float(
+                        getattr(
+                            settings,
+                            "building_armed_base_grade_a_selector_rank_bonus",
+                            20.0,
+                        )
+                        or 20.0
+                    )
             if first_lift_readiness_reason in (
                 "building_rip_bullish_ready",
                 "building_local_base_lift_ready",
@@ -816,6 +981,9 @@ def _explosion_candidates(
                     rank += float(
                         getattr(settings, "flat_vertical_quality_rank_max", 12.0) or 12.0
                     ) * (fvq / 100.0)
+            from app.engines.ftv_candlestick_confirm import ftv_candlestick_rank_bonus
+
+            rank += ftv_candlestick_rank_bonus(snap, alert, event.side)
         # Prefer early expansion window; demote already-extended rips in ranking.
         early_min = float(getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0)
         early_max = float(getattr(settings, "explosion_early_window_max_move_pct", 55.0) or 55.0)
@@ -888,6 +1056,7 @@ def _explosion_candidates(
                 "localBaseReversalPrediction": bullish_base,
                 "bullishLocalBasePrediction": bullish_base,
                 "timingAssessment": timing,
+                "firstLiftReadinessReason": first_lift_readiness_reason,
                 "ictBaseArmed": bool(alert.get("ictBaseArmed")),
                 "ictEliteBaseReady": bool(alert.get("ictEliteBaseReady")),
                 "ictArmedBaseLaunch": bool(alert.get("ictArmedBaseLaunch")),
@@ -1390,6 +1559,16 @@ def find_best_entry(
     allow_guarded_scalp = bool(getattr(settings, "explosion_only_allow_guarded_scalp", False))
     scalp_entries = bool(getattr(settings, "scalp_entries_enabled", False))
 
+    if bool(getattr(settings, "side_regime_enabled", True)):
+        from app.engines.side_regime import observe_side_regime
+
+        for _sym, _snap in snapshots.items():
+            if getattr(_snap, "dataAvailable", False):
+                try:
+                    observe_side_regime(_sym, _snap)
+                except Exception:
+                    pass
+
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
             continue
@@ -1452,15 +1631,46 @@ def find_best_entry(
 
         c.score += cross_index_rank_adjustment(c, state, snapshots)
         c.score += cross_index_elite_priority_bonus(c, snapshots)
+        from app.engines.best_side_selection import best_side_rank_adjustment
+        from app.engines.power_hour_guards import in_power_hour_window
+
+        c.score += best_side_rank_adjustment(
+            c, snapshots, power_hour=in_power_hour_window(),
+        )
+        # Session side-regime: prefer the side the market is confirmed on / flipping toward.
+        from app.engines.side_regime import side_regime_rank_delta
+
+        c.score += side_regime_rank_delta(c.symbol, c.side)
+        # Flat-base coil predictor: surface a ripe coil (predicted side) before it fires.
+        from app.engines.coil_breakout_predictor import coil_prediction_rank_delta
+
+        c.score += coil_prediction_rank_delta(
+            c.alert if isinstance(getattr(c, "alert", None), dict) else None, c.side,
+        )
         if c.mode == "explosion":
             ranking = (c.pretrade_meta or {}).get("causalRanking") or {}
             evidence = ranking.get("evidence") or {}
+            alert_d = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
+            if not evidence and alert_d:
+                from app.engines.pad_lane_capture import _ftv_direct_evidence_from_alert
+
+                evidence = _ftv_direct_evidence_from_alert(alert_d)
             from app.engines.pad_lane_capture import (
+                ftv_direct_trade_active,
                 pad_lane_ftv_waives_allocation_rank_one,
                 pad_lane_pre_lift,
             )
 
-            if pad_lane_pre_lift(evidence) or pad_lane_ftv_waives_allocation_rank_one(
+            if ftv_direct_trade_active(
+                candidate=c,
+                alert=getattr(c, "alert", None),
+                snap=c.snap,
+            ):
+                c.score += float(
+                    getattr(settings, "ftv_direct_trade_selector_rank_bonus", 55.0)
+                    or 55.0
+                )
+            elif pad_lane_pre_lift(evidence) or pad_lane_ftv_waives_allocation_rank_one(
                 evidence,
             ):
                 c.score += float(
@@ -1475,6 +1685,7 @@ def find_best_entry(
             from app.engines.session_mode_feedback import (
                 exhausted_ftv_reentry_blocked,
                 failed_launch_reentry_blocked,
+                reentry_ml_win_prob_blocked,
             )
 
             fail_blocked, _ = failed_launch_reentry_blocked(
@@ -1490,6 +1701,26 @@ def find_best_entry(
                     "causalRanking": {
                         "grade": "REJECT",
                         "reasons": ["failed_launch_reentry_cooldown"],
+                    },
+                }
+                continue
+
+            ml_blocked, ml_meta = reentry_ml_win_prob_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+                strike=float(c.strike or 0),
+                snap=c.snap,
+                confidence=float(c.score or 0),
+            )
+            if ml_blocked:
+                c.pretrade_meta = {
+                    **(c.pretrade_meta or {}),
+                    "reentryMlWinProbBlocked": True,
+                    **ml_meta,
+                    "causalRanking": {
+                        "grade": "REJECT",
+                        "reasons": ["reentry_ml_win_prob_low"],
                     },
                 }
                 continue
@@ -1544,13 +1775,16 @@ def find_best_entry(
             from app.engines.moneyness import atm_itm_entry_allows
 
             money_ok, _, _ = atm_itm_entry_allows(c.side, c.strike, c.snap)
+            policy_kwargs = ftv_policy_settings(settings)
+            if bool(getattr(settings, "selector_best_only_enabled", True)):
+                policy_kwargs["require_allocation_rank_one"] = True
             policy_decision = ftv_authorization_policy(
                 causal_ranking.get("evidence") or {},
                 causal_ranking,
                 snapshot_available=True,
                 atm_itm_allowed=money_ok,
                 day_mode=resolve_policy_day_mode(state),
-                **ftv_policy_settings(settings),
+                **policy_kwargs,
             )
             policy_ok = policy_decision.allowed
             policy_reason = policy_decision.reason
@@ -1599,6 +1833,7 @@ def find_best_entry(
                 ranking,
                 top_moments_only_enabled=True,
                 min_grade=min_grade,
+                readiness_reason=str(meta.get("firstLiftReadinessReason") or ""),
             )
             c.pretrade_meta = {
                 **meta,
@@ -1889,8 +2124,15 @@ def find_best_entry(
     ranked_candidates = rank_candidates_for_selection(candidates, sort_key)
     best = ranked_candidates[0]
     leader_ranking = (best.pretrade_meta or {}).get("causalRanking", {})
+    try:
+        from app.engines.side_regime import side_regime_state
+
+        _side_regime_meta = side_regime_state(best.symbol)
+    except Exception:
+        _side_regime_meta = {}
     best.pretrade_meta = {
         **(best.pretrade_meta or {}),
+        "sideRegime": _side_regime_meta,
         "legacySelectionScore": round(sort_key(best), 3),
         "rankedOut": [
             {
@@ -2058,7 +2300,7 @@ def diagnose_missed_entries(
                 from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
                 pad_lane_waive = pad_lane_early_near_miss_waive(
-                    alert, readiness_reason=readiness_reason,
+                    alert, readiness_reason=readiness_reason, snap=snap,
                 )
                 if not first_lift_ready and not pad_lane_waive:
                     blockers.append(readiness_reason)
@@ -2066,11 +2308,11 @@ def diagnose_missed_entries(
                 from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
 
                 pad_lane_waive = pad_lane_early_near_miss_waive(
-                    alert, readiness_reason=readiness_reason,
+                    alert, readiness_reason=readiness_reason, snap=snap,
                 )
-            from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
+            from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_ready
 
-            early_pad = alert_has_early_radar_pad_capture(alert)
+            early_pad = alert_has_early_radar_pad_ready(alert)
             lift_ready = first_lift_ready or early_pad or pad_lane_waive
             slow_grind_trough = bool(
                 alert.get("slowGrindArmedTrough")
@@ -2094,6 +2336,44 @@ def diagnose_missed_entries(
                 local_base_move_pct=local_base_move,
                 v_rip_ready=v_rip_ready,
             )
+            if lift_ready:
+                min_score = min(
+                    min_score,
+                    float(
+                        getattr(settings, "first_lift_early_pad_min_score", 12.0)
+                        or 12.0
+                    ),
+                )
+            from app.engines.grade_a_ftv_capture import (
+                alert_is_grade_a_ftv_first_lift,
+                grade_a_ftv_first_lift_floors,
+            )
+            from app.engines.top_ftv_v_expiry_bypass import (
+                alert_is_top_ftv_or_v,
+                top_ftv_v_expiry_floors,
+            )
+
+            if alert_is_grade_a_ftv_first_lift(alert, snap):
+                floors = grade_a_ftv_first_lift_floors(settings)
+                min_score = min(min_score, float(floors.get("minScore", 28.0) or 28.0))
+            if alert_is_top_ftv_or_v(alert, snap):
+                floors = top_ftv_v_expiry_floors(settings)
+                min_score = min(min_score, float(floors.get("minScore", 12.0) or 12.0))
+            from app.engines.bullish_local_base import alert_bullish_local_base_prediction
+
+            bullish_pred = alert_bullish_local_base_prediction(alert, snap)
+            if bullish_pred.get("active"):
+                min_score = min(
+                    min_score,
+                    float(
+                        getattr(
+                            settings,
+                            "bullish_local_base_pad_min_explosion_score",
+                            12.0,
+                        )
+                        or 12.0
+                    ),
+                )
             if early_pad or pad_lane_waive:
                 min_score = min(
                     min_score,
@@ -2127,18 +2407,48 @@ def diagnose_missed_entries(
                     ),
                 )
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
-                if not lift_ready and not _building_aligned_ict_alert_ok(
-                    alert, snap, str(tier_str).upper(),
-                    state=state, snapshots=snapshots,
+                from app.engines.building_ftv_gates import (
+                    building_armed_base_grade_a_live_ok,
+                )
+
+                armed_base_live_ok = building_armed_base_grade_a_live_ok(
+                    alert,
+                    snap,
+                    readiness_reason=readiness_reason,
+                    state=state,
+                    snapshots=snapshots,
+                )
+                if (
+                    not lift_ready
+                    and not _building_aligned_ict_alert_ok(
+                        alert, snap, str(tier_str).upper(),
+                        state=state, snapshots=snapshots,
+                    )
+                    and not armed_base_live_ok
                 ):
                     blockers.append("tier_not_elite_exploding")
             if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):
                 from app.engines.spot_direction import side_aligned_with_chart
+                from app.engines.grade_a_ftv_capture import grade_a_ftv_chart_bypass
+                from app.engines.top_ftv_v_expiry_bypass import top_ftv_v_chart_bypass
+                from app.engines.bullish_local_base import alert_bullish_local_base_active
+                from app.engines.ftv_candlestick_confirm import ftv_candlestick_chart_bypass
+                from app.engines.spot_direction import index_trough_momentum_turn
 
                 side_raw = str(alert.get("side") or "").upper()
+                index_turn_ok = (
+                    side_raw in ("CALL", "PUT")
+                    and index_trough_momentum_turn(side_raw, snap.spotChart)
+                )
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
                     pad_lane_chart_ok = False
                     local_base_chart_ok = False
+                    grade_a_chart_ok = grade_a_ftv_chart_bypass(alert, snap)
+                    top_ftv_v_chart_ok = top_ftv_v_chart_bypass(alert, snap)
+                    candlestick_chart_ok = ftv_candlestick_chart_bypass(
+                        Side(side_raw), snap, alert=alert,
+                    )
+                    bullish_base_chart_ok = alert_bullish_local_base_active(alert, snap)
                     if not lift_ready:
                         from app.engines.local_base_chart_bypass import (
                             local_base_ichimoku_chart_bypass,
@@ -2158,6 +2468,11 @@ def diagnose_missed_entries(
                         and not lift_ready
                         and not local_base_chart_ok
                         and not pad_lane_chart_ok
+                        and not grade_a_chart_ok
+                        and not top_ftv_v_chart_ok
+                        and not candlestick_chart_ok
+                        and not bullish_base_chart_ok
+                        and not index_turn_ok
                     ):
                         blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):

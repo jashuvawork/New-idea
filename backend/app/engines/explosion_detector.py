@@ -418,6 +418,30 @@ def apply_day_extremes_baseline(
     return changed
 
 
+def _seed_session_baseline_from_first_poll(
+    key: str,
+    premium: float,
+    *,
+    day_low: float = 0.0,
+    day_high: float = 0.0,
+) -> None:
+    """First poll for a strike — keep chain OHLC trough/peak if already seeded."""
+    ohlc_low = _session_low.get(key)
+    ohlc_peak = _session_peak.get(key)
+    if ohlc_low is not None and ohlc_low < premium:
+        _session_open[key] = float(ohlc_low)
+        _session_low[key] = float(ohlc_low)
+    else:
+        _session_open[key] = premium
+        if ohlc_low is None or premium < float(ohlc_low):
+            _session_low[key] = premium
+    if ohlc_peak is not None and ohlc_peak > premium:
+        _session_peak[key] = float(ohlc_peak)
+    else:
+        _session_peak[key] = max(premium, float(ohlc_peak or premium))
+    apply_day_extremes_baseline(key, premium, day_low, day_high)
+
+
 def apply_prior_close_baseline(
     key: str,
     premium: float,
@@ -503,12 +527,9 @@ def _session_open_move_pct(
         # Never seed open/low from illiquid micro-ticks.
         if not _is_meaningful_premium(premium):
             return 0.0
-        _session_open[key] = premium
-        _session_peak[key] = premium
-        _session_low[key] = premium
-        # Re-apply day extremes after first seed so a mid-rip first LTP still
-        # deepens to the chain trough / raises to the chain peak.
-        apply_day_extremes_baseline(key, premium, day_low, day_high)
+        _seed_session_baseline_from_first_poll(
+            key, premium, day_low=day_low, day_high=day_high,
+        )
         # First sample with no prior-close seed → 0% until next tick unless
         # day-low backfilled the open (then report live vs trough immediately).
         baseline = float(_session_open.get(key) or premium)
@@ -555,10 +576,9 @@ def _session_peak_move_pct(
     if key not in _session_open and premium > 0:
         if not _is_meaningful_premium(premium):
             return 0.0
-        _session_open[key] = premium
-        _session_peak[key] = premium
-        _session_low[key] = premium
-        apply_day_extremes_baseline(key, premium, day_low, day_high)
+        _seed_session_baseline_from_first_poll(
+            key, premium, day_low=day_low, day_high=day_high,
+        )
         baseline = float(_session_open.get(key) or premium)
         peak = max(_session_peak.get(key, premium), premium)
         _session_peak[key] = peak
@@ -1416,6 +1436,72 @@ def local_base_premium(
     return min(vals) if vals else 0.0
 
 
+def recent_premium_run(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    *,
+    lookback_seconds: float,
+) -> dict[str, float]:
+    """Recent premium run over ``lookback_seconds`` from detector history.
+
+    Returns {run, low, high, current, off_low}: the fraction the premium ran (high-low)/low
+    within the window, the window low/high, the latest premium, and how far the latest is off
+    the window low. Used to detect chasing the EXHAUSTION of a completed move — a near-base
+    entry has current≈low (off_low≈0), a chase has current near the window high after a big run.
+    """
+    out = {"run": 0.0, "low": 0.0, "high": 0.0, "current": 0.0, "off_low": 0.0}
+    if side is None or not symbol:
+        return out
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    dq = _local_base_hist.get(_open_key(symbol, strike, side_val))
+    if not dq:
+        return out
+    now = dq[-1][0]
+    lo_cut = now - timedelta(seconds=float(lookback_seconds))
+    vals = [p for (ts, p) in dq if ts >= lo_cut and _is_meaningful_premium(p)]
+    if len(vals) < 2:
+        return out
+    low = min(vals)
+    high = max(vals)
+    current = float(dq[-1][1])
+    if low <= 0:
+        return out
+    out["low"] = low
+    out["high"] = high
+    out["current"] = current
+    out["run"] = (high - low) / low
+    out["off_low"] = (current - low) / low
+    return out
+
+
+def option_premium_series(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    *,
+    lookback_seconds: float = 900.0,
+) -> list[tuple[float, float]]:
+    """Recent (epoch_seconds, premium) samples for one contract, for OHLC bucketing.
+
+    Used by the option-level decisive-breakout (GainzAlgo) signal — the premium tape is the
+    only per-contract candle source we have (indices carry no option-level candles).
+    """
+    if side is None or not symbol:
+        return []
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    dq = _local_base_hist.get(_open_key(symbol, strike, side_val))
+    if not dq:
+        return []
+    now = dq[-1][0]
+    lo_cut = now - timedelta(seconds=float(lookback_seconds))
+    return [
+        (ts.timestamp(), float(p))
+        for (ts, p) in dq
+        if ts >= lo_cut and _is_meaningful_premium(p)
+    ]
+
+
 def post_close_base_reacceleration(
     symbol: str,
     strike: float,
@@ -1578,6 +1664,7 @@ def resolve_explosion_scan_range(
     settings=None,
     *,
     tight_scan: bool | None = None,
+    expiry_day: bool | None = None,
 ) -> float:
     """
     ATM ± range for chain scan — wider on SENSEX.
@@ -1585,10 +1672,29 @@ def resolve_explosion_scan_range(
     On expiry with ITM monitor enabled, keep a wide enough band to cover most
     ITM CE/PE (not the old worst-day 500pt clamp that missed deep ITM rips).
     Worst-day tight scan only applies when expiry ITM monitor is off.
+
+    When ``expiry_day`` is True for a symbol, always use the ITM monitor band
+    for that scan — do not rely on the global ``any_expiry_session_active`` cache
+    (Aug26 afternoon: ATM 77600 detected 77600–77800 but 78200+ clipped at 500pt).
     """
     from app.config import get_settings
 
     settings = settings or get_settings()
+    if expiry_day:
+        itm_monitor = bool(getattr(settings, "expiry_itm_monitor_enabled", True))
+        if itm_monitor:
+            try:
+                from app.engines.expiry_day_guards import resolve_expiry_itm_scan_range
+
+                return resolve_expiry_itm_scan_range(symbol)
+            except Exception:
+                if symbol.upper() == "SENSEX":
+                    return float(getattr(settings, "expiry_sensex_itm_scan_range", 1200) or 1200)
+                return float(getattr(settings, "expiry_itm_scan_range", 800) or 800)
+        if symbol.upper() == "SENSEX":
+            return float(getattr(settings, "explosion_sensex_worst_day_scan_range", 500) or 500)
+        return float(getattr(settings, "explosion_worst_day_scan_range", 500) or 500)
+
     if tight_scan is None:
         try:
             from app.engines.expiry_day_guards import any_expiry_session_active
@@ -1626,14 +1732,29 @@ def resolve_explosion_scan_range(
     return base
 
 
-def _premium_ok_for_scan(premium: float, open_move: float, settings) -> bool:
+def _premium_ok_for_scan(
+    premium: float,
+    open_move: float,
+    settings,
+    *,
+    expiry_day: bool = False,
+    moneyness: str = "",
+) -> bool:
     """Allow sub-min premium when session move is explosive (deep OTM rips).
 
     When ATM+ITM-only scan is on, never bypass the main premium band — cheap
     deep-OTM noise must not dominate radar over near-base ATM/ITM.
     """
-    if premium_in_band(premium, mode="explosion"):
+    if premium_in_band(premium, mode="explosion", peak_move_pct=open_move):
         return True
+    # Expiry deep ITM — intrinsic premium exceeds ₹650 before the vertical prints.
+    if expiry_day and str(moneyness or "").upper() == "ITM":
+        itm_ceil = float(
+            getattr(settings, "expiry_itm_explosion_scan_max_premium_inr", 900.0) or 900.0
+        )
+        floor = float(getattr(settings, "expiry_day_min_option_premium_inr", 15.0) or 15.0)
+        if floor <= premium <= itm_ceil:
+            return True
     if bool(getattr(settings, "explosion_scan_atm_itm_only", True)):
         return False
     min_deep = float(getattr(settings, "explosion_deep_otm_min_premium_inr", 18.0))
@@ -1645,6 +1766,100 @@ def _premium_ok_for_scan(premium: float, open_move: float, settings) -> bool:
     if open_move >= settings.open_premium_min_move_pct:
         return premium <= max_prem
     return False
+
+
+def _expiry_trough_first_tick_scan_ok(
+    *,
+    symbol: str,
+    strike: float,
+    side: Side,
+    premium: float,
+    hist: Optional[deque],
+    expiry_day: bool,
+    near_atm: bool,
+    moneyness: str,
+    day_low: float,
+    settings: Any,
+) -> tuple[bool, float]:
+    """First-tick radar when chain day-low seeds a trough and LTP lifts off it.
+
+    Aug26 SENSEX 77800 PE: V from ~₹95 at 10:00 was invisible until 10:55 because
+    hist < 2 required open_move >= 25% while off-low was only ~5–12%.
+    """
+    if not bool(getattr(settings, "expiry_trough_scan_enabled", True)):
+        return False, 0.0
+    if not expiry_day or not near_atm:
+        return False, 0.0
+    if str(moneyness or "").upper() == "OTM":
+        return False, 0.0
+    if hist and len(hist) >= 2:
+        return False, 0.0
+
+    chain_low = float(day_low or 0)
+    key = _open_key(symbol, strike, side)
+    if chain_low <= 0:
+        chain_low = float(_session_low.get(key) or 0)
+    if chain_low <= 0:
+        return False, 0.0
+
+    apply_day_extremes_baseline(key, premium, float(day_low or 0), 0.0)
+    trough = float(_session_low.get(key) or chain_low)
+    if trough <= 0 or premium <= trough:
+        return False, 0.0
+
+    off_low = ((float(premium) - trough) / trough) * 100.0
+    min_off = float(
+        getattr(settings, "expiry_trough_first_tick_min_off_low_pct", 3.0) or 3.0
+    )
+    max_off = float(
+        getattr(settings, "expiry_trough_first_tick_max_off_low_pct", 18.0) or 18.0
+    )
+    if not (min_off <= off_low <= max_off + 1e-6):
+        return False, 0.0
+    return True, off_low
+
+
+def _shallow_otm_local_base_tradeable(
+    e: ExplosionEvent,
+    ict: Any,
+    *,
+    structure_pad: float,
+    snap: Optional[Any],
+    settings: Any,
+) -> bool:
+    """1-step OTM may trade on ELITE flat→vertical lift at the local base pad.
+
+    Aug27 SENSEX PUT 77200: ELITE +8.5% off base, peak +54%, blocked not_tradeable_tier.
+    """
+    if str(getattr(e, "moneyness", "") or "").upper() != "OTM":
+        return False
+    if e.tier not in ("ELITE", "EXPLODING"):
+        return False
+    if not bool(
+        getattr(ict, "flat_then_vertical", False) and getattr(ict, "active", False)
+    ):
+        return False
+    min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
+    max_lb = float(getattr(settings, "shallow_otm_local_base_max_move_pct", 25.0) or 25.0)
+    pad = float(structure_pad or 0)
+    if not (min_lb <= pad <= max_lb + 1e-6):
+        return False
+    if snap is None:
+        return False
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0) or spot
+    if spot <= 0:
+        return False
+    return _shallow_otm_monitor_eligible(
+        e.side,
+        e.strike,
+        spot,
+        atm,
+        e.premium,
+        e.volume,
+        e.symbol,
+        settings,
+    )
 
 
 def _shallow_otm_monitor_eligible(
@@ -1701,7 +1916,7 @@ def scan_chain_explosions(
     open_window = in_open_premium_window()
     events: list[ExplosionEvent] = []
     step = 100
-    scan_range = resolve_explosion_scan_range(symbol, settings)
+    scan_range = resolve_explosion_scan_range(symbol, settings, expiry_day=expiry_day)
     atm_mult = float(settings.expiry_atm_tier_velocity_mult) if expiry_day else 1.0
 
     chain_rows = list(chain)
@@ -1785,21 +2000,49 @@ def scan_chain_explosions(
                 day_high=day_high,
             )
             session_move = _effective_session_move(open_move, peak_move)
-            if not _premium_ok_for_scan(premium, max(open_move, session_move), settings):
+            trough_scan_ok, trough_off_low = _expiry_trough_first_tick_scan_ok(
+                symbol=symbol,
+                strike=float(strike),
+                side=side,
+                premium=float(premium),
+                hist=hist,
+                expiry_day=expiry_day,
+                near_atm=near_atm,
+                moneyness=money,
+                day_low=float(day_low or 0),
+                settings=settings,
+            )
+            if not _premium_ok_for_scan(
+                premium,
+                max(open_move, session_move, trough_off_low if trough_scan_ok else 0.0),
+                settings,
+                expiry_day=expiry_day,
+                moneyness=money,
+            ):
                 continue
 
             if not hist or len(hist) < 2:
-                if not (
+                open_gate = (
                     settings.open_premium_explosion_enabled
                     and open_move >= settings.open_premium_min_move_pct
-                ):
+                )
+                if not open_gate and not trough_scan_ok:
                     continue
-                v3 = open_move * 0.35
-                v9 = open_move * 0.65
-                v15 = min(open_move * 0.35, 12.0)
-                vol_surge = 1.5
-                peak_v3 = _update_peak_velocity(vel_key, v3)
-                v3_score = max(v3, peak_v3)
+                if trough_scan_ok:
+                    lift_pct = max(trough_off_low, open_move, 0.0)
+                    v3 = max(lift_pct * 0.35, 0.15)
+                    v9 = max(lift_pct * 0.55, 0.08)
+                    v15 = min(lift_pct * 0.25, 8.0)
+                    vol_surge = 1.5
+                    peak_v3 = _update_peak_velocity(vel_key, v3)
+                    v3_score = max(v3, peak_v3)
+                else:
+                    v3 = open_move * 0.35
+                    v9 = open_move * 0.65
+                    v15 = min(open_move * 0.35, 12.0)
+                    vol_surge = 1.5
+                    peak_v3 = _update_peak_velocity(vel_key, v3)
+                    v3_score = max(v3, peak_v3)
             else:
                 v3 = _velocity(hist, 1)
                 v9 = _velocity(hist, 3)
@@ -1824,6 +2067,12 @@ def scan_chain_explosions(
             )
             if session_move >= settings.open_premium_min_move_pct:
                 score = min(100, score + min(30, session_move * 0.35))
+            elif trough_scan_ok:
+                boost = float(
+                    getattr(settings, "expiry_trough_first_tick_min_score_boost", 10.0)
+                    or 10.0
+                )
+                score = min(100, max(score, boost + trough_off_low * 1.8))
             elif peak_move >= 20:
                 score = min(100, score + min(18, peak_move * 0.22))
 
@@ -1875,6 +2124,8 @@ def scan_chain_explosions(
                 reason_parts_open = [f"open+{session_move:.0f}%"]
                 if peak_move > session_move + 5:
                     reason_parts_open.append(f"peak+{peak_move:.0f}%")
+            elif trough_scan_ok:
+                reason_parts_open = [f"trough+{trough_off_low:.0f}%"]
             else:
                 reason_parts_open = []
 
@@ -1952,6 +2203,7 @@ def scan_chain_explosions(
             if tier == "WATCH" and score < 25 and not awakened:
                 keep_first_lift = False
                 keep_armed_base = False
+                ict_probe = None
                 if bool(getattr(settings, "ict_first_lift_appear_enabled", True)):
                     # The ICT first-lift threshold is intentionally softer than BUILDING.
                     # Probe before dropping WATCH so a slow 15% lift off a real flat/V base
@@ -1983,6 +2235,7 @@ def scan_chain_explosions(
                 # anchor persists in _armed_base_anchors and re-surfaces the event the moment
                 # the premium lifts. Emitting a dead-flat (0 move / 0 velocity) WATCH just
                 # adds noise, so only keep an armed base once something is actually moving.
+                # Exception: momentum-rally cold coil (Aug31 NIFTY 24200 CE @ ₹25–27).
                 if (
                     keep_armed_base
                     and not keep_first_lift
@@ -1990,10 +2243,43 @@ def scan_chain_explosions(
                     and peak_move <= 0
                     and v3 <= 0
                 ):
-                    keep_armed_base = False
+                    retain_coil = False
+                    if bool(getattr(settings, "momentum_rally_armed_coil_radar_enabled", True)):
+                        from app.engines.chop_day_guards import in_momentum_rally_window
+
+                        if in_momentum_rally_window():
+                            prem_lo = float(
+                                getattr(settings, "momentum_rally_armed_coil_min_premium", 18.0)
+                                or 18.0
+                            )
+                            prem_hi = float(
+                                getattr(settings, "momentum_rally_armed_coil_max_premium", 45.0)
+                                or 45.0
+                            )
+                            min_samples = int(
+                                getattr(settings, "momentum_rally_armed_coil_min_samples", 4)
+                                or 4
+                            )
+                            armed_samples = int(
+                                getattr(ict_probe, "armed_base_samples", 0) or 0
+                            ) if ict_probe is not None else 0
+                            if (
+                                prem_lo <= float(premium) <= prem_hi
+                                and armed_samples >= min_samples
+                            ):
+                                retain_coil = True
+                                tier = "BUILDING"
+                                score = max(score, float(
+                                    getattr(settings, "momentum_rally_armed_coil_min_score", 18.0)
+                                    or 18.0
+                                ))
+                                reason_parts_open.append("momentumRallyArmedCoil")
+                    if not retain_coil:
+                        keep_armed_base = False
                 if (
                     not keep_first_lift
                     and not keep_armed_base
+                    and not trough_scan_ok
                     and not (peak_move >= 20 and v3 >= 1.2)
                 ):
                     continue
@@ -2033,6 +2319,9 @@ def scan_chain_explosions(
                 reason_parts.append(f"vol×{vol_surge:.1f}")
             reason_parts.extend(reason_parts_open)
 
+            report_move = session_move
+            if trough_scan_ok:
+                report_move = max(session_move, trough_off_low, open_move)
             events.append(ExplosionEvent(
                 symbol=symbol,
                 side=side,
@@ -2045,8 +2334,8 @@ def scan_chain_explosions(
                 explosion_score=round(score, 1),
                 tier=tier,
                 reason=" ".join(reason_parts) or "momentum building",
-                daily_move_pct=round(session_move, 2),
-                peak_move_pct=round(peak_move, 2),
+                daily_move_pct=round(report_move, 2),
+                peak_move_pct=round(max(peak_move, report_move), 2),
                 volume=float(effective_volume or 0),
                 moneyness=str(money or ""),
             ))
@@ -2156,6 +2445,12 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     from app.engines.bullish_local_base import bullish_local_base_prediction
 
     bullish_base = bullish_local_base_prediction(snap, e, ict)
+    from app.engines.coil_breakout_predictor import coil_breakout_prediction
+
+    try:
+        _coil_pred = coil_breakout_prediction(snap, e, ict)
+    except Exception:
+        _coil_pred = {"coiling": False, "readinessScore": 0.0, "predictedSide": None}
     move = max(float(e.daily_move_pct or 0), float(e.peak_move_pct or 0), float(ict.session_move_pct or 0))
     from app.config import get_settings as _gs
 
@@ -2194,7 +2489,9 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         tradeable = True
     armed_launch = bool(getattr(ict, "armed_base_launch", False))
     elite_base_ready = bool(getattr(ict, "elite_base_ready", False))
-    v_rip_ready = bool(getattr(ict, "v_rip_ready", False))
+    v_rip_ready = bool(getattr(ict, "v_rip_ready", False)) or (
+        "v_rip_session_low" in str(e.reason or "")
+    )
     building_rip_ready = bool(getattr(ict, "building_rip_ready", False))
     armed_evidence: dict[str, Any] = {}
     causal_band_max = float(
@@ -2280,6 +2577,28 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         )
     ):
         tradeable = True
+    # WATCH at session trough — expose as tradeable before ELITE/EXPLODING promotion.
+    if e.tier == "WATCH":
+        from app.engines.early_radar_pad_capture import watch_local_base_pad_structure
+
+        watch_probe = {
+            "tier": e.tier,
+            "offLowMovePct": round(off_low_move, 1),
+            "localBaseMovePct": round(float(pad_move or 0), 1),
+            "ictBaseRelativeMovePct": round(float(pad_move or 0), 1),
+            "explosionScore": e.explosion_score,
+            "velocity3s": e.velocity_3s,
+            "velocity9s": e.velocity_9s,
+            "volumeAwaken": vol_awaken,
+            "ictVolumeAwakening": bool(getattr(ict, "volume_awakening", False)),
+            "ictBaseArmed": bool(getattr(ict, "base_armed", False)),
+            "ictArmedBaseSamples": int(getattr(ict, "armed_base_samples", 0) or 0),
+            "ictArmedBaseLaunch": armed_launch,
+            "ictBuildingRipReady": building_rip_ready,
+            "buildingRipHelpersOk": building_rip_ready,
+        }
+        if watch_local_base_pad_structure(watch_probe):
+            tradeable = True
     # Near-base ATM/ITM top explosions must be tradeable even when day-move < floor
     # (Aug5 24500 PE ~10–65% off local base while session % still immature).
     if not tradeable and e.tier in ("ELITE", "EXPLODING"):
@@ -2390,6 +2709,10 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "bullishLocalBasePrediction": bullish_base,
         "bullishLocalBaseActive": bool(bullish_base.get("active")),
         "bullishLocalBaseConfidence": float(bullish_base.get("confidence") or 0),
+        "coilBreakoutPrediction": _coil_pred,
+        "coilCoiling": bool(_coil_pred.get("coiling")),
+        "coilReadinessScore": float(_coil_pred.get("readinessScore") or 0),
+        "coilPredictedSide": _coil_pred.get("predictedSide"),
         "localBaseReversalPrediction": bullish_base,
         "localBaseReversalActive": bool(bullish_base.get("active")),
         "localBaseReversalConfidence": float(bullish_base.get("confidence") or 0),
@@ -2425,15 +2748,35 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         ),
         "ictReasons": ict.reasons,
     }
-    from app.engines.early_radar_pad_capture import stamp_early_radar_pad_capture
+    from app.engines.early_radar_pad_capture import (
+        building_coil_pad_lift_signal,
+        stamp_early_radar_pad_capture,
+    )
+
+    if building_coil_pad_lift_signal(alert_out, _settings):
+        alert_out["buildingCoilPadArmed"] = True
 
     if stamp_early_radar_pad_capture(alert_out, snap):
         tradeable = True
         alert_out["tradeable"] = True
-    # A shallow-OTM strike is monitored on radar but must never be tradeable.
+    if _shallow_otm_local_base_tradeable(
+        e,
+        ict,
+        structure_pad=structure_pad,
+        snap=snap,
+        settings=_settings,
+    ):
+        tradeable = True
+        alert_out["tradeable"] = True
+        alert_out["shallowOtmLocalBaseTradeable"] = True
+    # Shallow OTM is history-only unless pad capture or local-base lift stamped.
     if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
-        tradeable = False
-        first_lift = False
-        alert_out["tradeable"] = False
-        alert_out["ictFirstLift"] = False
+        if not (
+            alert_out.get("earlyRadarPadCapture")
+            or alert_out.get("shallowOtmLocalBaseTradeable")
+        ):
+            tradeable = False
+            first_lift = False
+            alert_out["tradeable"] = False
+            alert_out["ictFirstLift"] = False
     return alert_out

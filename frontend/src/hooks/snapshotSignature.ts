@@ -23,6 +23,7 @@ export function snapshotSignature(json: MultiSnapshot): string {
         sq?.state ?? '',
         sq?.direction ?? '',
         s.chartAnalysis?.adx?.regime ?? '',
+        s.chartAnalysis?.decisiveCandle?.decisive ? (s.chartAnalysis?.decisiveCandle?.direction ?? '') : '',
         s.indiaVix?.toFixed(2) ?? '',
       ].join(':');
     })

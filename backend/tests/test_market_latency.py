@@ -14,9 +14,8 @@ def _reset_market_cache():
     market_router._cache_time = None
     market_router._cache_json = None
     market_router._build_in_progress = False
-    market_router._last_ws_overlay_mono = 0.0
-    market_router._last_exit_eval_mono = 0.0
     market_router._last_full_rest_mono = 0.0
+    market_router._full_rest_task = None
     market_router._sse_payload_dict = None
     yield
     market_router._cache = None
@@ -26,6 +25,7 @@ def _reset_market_cache():
     market_router._last_ws_overlay_mono = 0.0
     market_router._last_exit_eval_mono = 0.0
     market_router._last_full_rest_mono = 0.0
+    market_router._full_rest_task = None
     market_router._sse_payload_dict = None
 
 
@@ -244,3 +244,79 @@ def test_serve_stale_cache_omits_refresh_reason_when_ready():
     )
     stale = market_router._serve_stale_cache(reason="Refresh in progress — serving last good data")
     assert stale.waitingReason is None
+
+
+def test_invalidate_snapshot_cache_skipped_during_rebuild():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.models.schemas import AutoTraderState, MarketPhase, MultiSnapshot, SymbolSnapshot
+
+    IST = ZoneInfo("Asia/Kolkata")
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=50.0,
+    )
+    market_router._store_cache(
+        MultiSnapshot(
+            timestamp=datetime.now(IST),
+            dataReady=True,
+            snapshots={"NIFTY": snap},
+            autoTrader=AutoTraderState(),
+        ),
+    )
+    sentinel = market_router._cache_json
+    market_router._build_in_progress = True
+    market_router.invalidate_snapshot_cache()
+    assert market_router._cache_json == sentinel
+    market_router._build_in_progress = False
+    market_router.invalidate_snapshot_cache(force=True)
+    assert market_router._cache_json is None
+
+
+def test_cached_endpoint_serves_stale_during_rebuild_without_full_build():
+    import asyncio
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from unittest.mock import AsyncMock, patch
+
+    from app.models.schemas import AutoTraderState, MarketPhase, MultiSnapshot, SymbolSnapshot
+
+    IST = ZoneInfo("Asia/Kolkata")
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=50.0,
+    )
+    market_router._store_cache(
+        MultiSnapshot(
+            timestamp=datetime.now(IST),
+            dataReady=True,
+            snapshots={"NIFTY": snap},
+            autoTrader=AutoTraderState(),
+        ),
+    )
+    market_router._cache_json = None
+    market_router._build_in_progress = True
+
+    async def _run():
+        with patch.object(market_router, "get_multi_snapshot", new_callable=AsyncMock) as full:
+            resp = await market_router.get_snapshots_cached()
+            full.assert_not_called()
+        return resp
+
+    resp = asyncio.run(_run())
+    assert resp.body
+    assert b"NIFTY" in resp.body
+
+
+def test_rebuild_load_active_includes_build_in_progress():
+    market_router._build_in_progress = True
+    assert market_router.rebuild_load_active() is True
+    market_router._build_in_progress = False
+    assert market_router.rebuild_load_active() is False

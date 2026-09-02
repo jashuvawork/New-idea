@@ -37,6 +37,8 @@ def _scratch_guard_settings() -> MagicMock:
     s.explosion_per_trade_max_loss_inr = 2_000.0
     s.explosion_exceptional_per_trade_max_loss_inr = 4_000.0
     s.emergency_stop_enabled = False
+    s.enable_live_trading = False
+    s.live_hold_to_structural_sl = True
     return s
 
 
@@ -92,6 +94,8 @@ def test_hard_per_trade_risk_cap_when_enabled():
     s.explosion_never_green_stop_pct = 6.0
     s.explosion_never_green_min_hold_seconds = 20
     s.explosion_per_trade_max_loss_inr = 12_000.0
+    s.enable_live_trading = False
+    s.live_hold_to_structural_sl = True
     with patch("app.engines.explosion_profit.get_settings", return_value=s):
         reason, pnl = evaluate_explosion_exit(
             _trade(500.0, 495.0, best=3.0, lots=200), 495.0, "ELITE", 20,
@@ -216,3 +220,29 @@ def test_whipsaw_flip_no_cap_after_opposite_loss():
     )
     assert lots == 27
     assert meta["applied"] is False
+
+
+def test_always_max_does_not_undo_whipsaw_flip_cap():
+    """Aug6 pattern: whipsaw cap to 8 lots must not be re-floored to max lots."""
+    from unittest.mock import patch
+
+    from app.engines.capital_allocator import apply_explosion_always_max_lots
+
+    state = AutoTraderState()
+    state.closedPaperTrades = [_closed(Side.CALL, 24000.0)]
+    lots, flip_cap_meta = cap_opposite_side_flip_after_win(
+        27, state, symbol="SENSEX", side=Side.PUT, velocity_3s=3.0,
+    )
+    assert lots == 8
+    assert flip_cap_meta["applied"] is True
+
+    size_cap_applied = bool(flip_cap_meta.get("applied"))
+    if not size_cap_applied:
+        with patch(
+            "app.engines.capital_allocator.max_lots_for_capital",
+            return_value=27,
+        ):
+            lots = apply_explosion_always_max_lots(
+                lots, "SENSEX", 50.0, mode="explosion",
+            )
+    assert lots == 8

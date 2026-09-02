@@ -16,9 +16,11 @@ from app.engines.spot_direction import (
     build_spot_chart,
     chart_blocks_side,
     chart_summary_dict,
+    index_trough_momentum_turn,
     live_direction_blocks_side,
     premium_blocks_entry,
     pro_index_quote_context,
+    reconcile_spot_chart_with_mtf,
     side_aligned_with_chart,
 )
 from app.models.schemas import PremiumChart, Side, SpotChart, SymbolSnapshot
@@ -87,6 +89,15 @@ async def fetch_live_trade_charts(
         index_candles = await client.get_candles(sym, count=count, force_refresh=force)
     profile = _build_profile(index_candles, spot)
     index_chart = build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=index_candles)
+    breadth_bias = snap.breadth.bias if snap.breadth else "NEUTRAL"
+    from_open_pct = float(getattr(snap, "dayFromOpenPct", 0) or 0)
+    if snap.chartAnalysis:
+        index_chart = reconcile_spot_chart_with_mtf(
+            index_chart,
+            snap.chartAnalysis,
+            breadth_bias=breadth_bias,
+            from_open_pct=from_open_pct,
+        )
     quote_ctx = pro_index_quote_context(quote, spot)
 
     index_mtf_reads = None
@@ -187,6 +198,7 @@ def validate_execution_charts(
     mode: str = "",
     confirmed_ftv_bypass: bool = False,
     pad_lane_bypass: bool = False,
+    index_trough_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -201,6 +213,7 @@ def validate_execution_charts(
         ),
         expiry_explosion_bypass=expiry_explosion_bypass,
         strict_first_lift_bypass=first_lift_bypass,
+        index_trough_bypass=index_trough_bypass,
         scalp_mode=scalp_mode,
     )
     if blocked:
@@ -214,6 +227,7 @@ def validate_execution_charts(
         ),
         expiry_explosion_bypass=expiry_explosion_bypass,
         strict_first_lift_bypass=first_lift_bypass,
+        index_trough_bypass=index_trough_bypass,
         scalp_mode=scalp_mode,
     )
     if blocked:
@@ -279,39 +293,23 @@ async def monitor_trade_chart_before_execution(
     vertical_bypass = vertical_rip_bypass_for_snap(
         side, snap, explosion_event=explosion_event,
     )
-    first_lift_bypass = False
-    if (
-        explosion_event is not None
-        and bool(
-            getattr(
-                settings,
-                "first_lift_bypasses_execution_chart_enabled",
-                True,
-            )
-        )
-    ):
-        from app.engines.ict_breakout_monitor import first_lift_entry_ready
+    from app.engines.pad_lane_capture import resolve_strict_pad_lane_for_entry
 
-        first_lift_bypass = first_lift_entry_ready(
-            snap=snap,
-            event=explosion_event,
-            alert=alert,
-        )
+    pad_lane_chart_bypass, strict_first_lift_bypass = resolve_strict_pad_lane_for_entry(
+        side,
+        snap,
+        mode=mode or "",
+        explosion_event=explosion_event,
+        alert=alert if isinstance(alert, dict) else None,
+    )
+    first_lift_bypass = strict_first_lift_bypass
     from app.engines.local_base_chart_bypass import local_base_ichimoku_bypass_for_snap
     from app.engines.open_gap_capture import elite_open_gap_mtf_bypass
 
     local_ichi_bypass = local_base_ichimoku_bypass_for_snap(
         side, snap, explosion_event=explosion_event,
     )
-    from app.engines.pad_lane_capture import pad_lane_turnaround_chart_bypass_for_snap
-
-    pad_lane_chart_bypass = pad_lane_turnaround_chart_bypass_for_snap(
-        side,
-        snap,
-        explosion_event=explosion_event,
-        alert=alert,
-    )
-    strict_chart_bypass = first_lift_bypass or pad_lane_chart_bypass
+    strict_chart_bypass = strict_first_lift_bypass
     open_gap_mtf_bypass = elite_open_gap_mtf_bypass(
         side, snap, explosion_event=explosion_event, mode=mode,
     )
@@ -325,8 +323,15 @@ async def monitor_trade_chart_before_execution(
         or vertical_bypass
         or local_ichi_bypass
         or open_gap_mtf_bypass
-        or first_lift_bypass
+        or strict_first_lift_bypass
         or pad_lane_chart_bypass
+    )
+    index_trough_bypass = bool(
+        (alert or {}).get("ictIndexTroughSlowV")
+        or (alert or {}).get("indexTroughSlowV")
+        or (alert or {}).get("ictIndexPeakSlowV")
+        or (alert or {}).get("indexPeakSlowV")
+        or index_trough_momentum_turn(side, snap.spotChart)
     )
     # Aug6 78800 PE: counter-trend PUT filled via expiry/local-base bypasses.
     from app.engines.spot_direction import hard_counter_trend_chart
@@ -334,8 +339,8 @@ async def monitor_trade_chart_before_execution(
     if (
         getattr(settings, "chart_counter_trend_bypass_block_enabled", True)
         and hard_counter_trend_chart(side, snap.spotChart)
-        and not first_lift_bypass
-        and not pad_lane_chart_bypass
+        and not strict_first_lift_bypass
+        and not index_trough_bypass
     ):
         expiry_chart_bypass = False
         structure_chart_bypass = False
@@ -345,13 +350,32 @@ async def monitor_trade_chart_before_execution(
         local_ichi_bypass = False
         open_gap_mtf_bypass = False
         breadth_bypass = False
+        pad_lane_chart_bypass = False
 
     # A confirmed near-base FTV first-lift (ELITE/EXPLODING) may fill through a shallow
     # base-retest dip instead of being blocked as "premium fading" — take it AT the base.
-    # Tied to first_lift_bypass so the hard counter-trend reset above disables it too.
+    # strict_first_lift_bypass covers v_rip/armed_base stamps even when chart aligns.
     _event_tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    # The ATM armed-base premium-fade bypass waives the premium-fade check ONLY (not the chart
+    # gate) — an ATM ELITE/EXPLODING armed base may fill through a shallow base-retest dip
+    # (Sep01 NIFTY PUT 23950). Applied here, not in the chart strict_bypass, so it can't skip
+    # the chart-direction gate on a counter-trend setup.
+    from app.engines.pad_lane_capture import (
+        atm_armed_local_base_premium_fade_bypass,
+        local_base_premium_fade_bypass,
+    )
+
+    atm_armed_fade_bypass = local_base_premium_fade_bypass(
+        alert if isinstance(alert, dict) else None,
+        explosion_event,
+        snap=snap,
+    )
+    premium_fade_pad_lane = (
+        strict_first_lift_bypass or pad_lane_chart_bypass or atm_armed_fade_bypass
+    )
     confirmed_ftv_bypass = bool(
-        first_lift_bypass and _event_tier in ("ELITE", "EXPLODING")
+        (strict_first_lift_bypass or atm_armed_fade_bypass)
+        and _event_tier in ("ELITE", "EXPLODING")
     ) or pad_lane_chart_bypass
 
     try:
@@ -366,6 +390,7 @@ async def monitor_trade_chart_before_execution(
             premium_led_bypass=structure_chart_bypass,
             expiry_explosion_bypass=expiry_chart_bypass,
             strict_first_lift_bypass=strict_chart_bypass,
+            index_trough_bypass=index_trough_bypass,
         )
         fallback = {
             "enabled": True,
@@ -381,6 +406,8 @@ async def monitor_trade_chart_before_execution(
         return True, "ok", fallback
 
     index_chart = SpotChart(**meta["indexChartFull"])
+    if not index_trough_bypass:
+        index_trough_bypass = index_trough_momentum_turn(side, index_chart)
     premium_data = meta.get("premiumChart") or {}
     premium_chart = PremiumChart(**premium_data) if premium_data else None
     index_mtf_reads = meta.pop("_indexMtfReads", None)
@@ -401,13 +428,17 @@ async def monitor_trade_chart_before_execution(
         explosion_event=explosion_event,
         mode=mode,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
-        pad_lane_bypass=pad_lane_chart_bypass,
+        pad_lane_bypass=premium_fade_pad_lane,
+        index_trough_bypass=index_trough_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
     meta["firstLiftBypass"] = first_lift_bypass
+    meta["strictFirstLiftBypass"] = strict_first_lift_bypass
     meta["padLaneChartBypass"] = pad_lane_chart_bypass
     meta["ftvFadeFillBypass"] = confirmed_ftv_bypass
+    meta["premiumFadePadLaneBypass"] = premium_fade_pad_lane
+    meta["indexTroughBypass"] = index_trough_bypass
 
     delta = meta.get("snapshotDelta") or {}
     if delta.get("directionChanged"):
@@ -421,6 +452,7 @@ async def monitor_trade_chart_before_execution(
             expiry_chart_bypass
             or vertical_bypass
             or strict_chart_bypass
+            or index_trough_bypass
             or (premium_bypass and not scalp_mode)
             or (breadth_bypass and not scalp_mode)
         ):

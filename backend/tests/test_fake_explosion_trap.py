@@ -56,6 +56,18 @@ def _settings(**overrides):
     s.fake_explosion_trap_post_win_lot_cap = 8
     s.fake_explosion_trap_post_win_max_pnl_inr = 3000.0
     s.fake_explosion_trap_post_win_lookback = 1
+    s.fake_explosion_trap_post_win_velocity_block_enabled = True
+    s.fake_explosion_trap_post_win_min_velocity_3s = 0.0
+    s.fake_explosion_trap_post_win_midday_min_velocity_3s = 1.0
+    s.fake_explosion_trap_post_win_armed_base_bypass_enabled = False
+    s.fake_explosion_trap_post_win_require_top_confidence = True
+    s.fake_explosion_trap_post_win_hc_min_velocity_3s = 2.0
+    s.high_conviction_sizing_enabled = True
+    s.high_conviction_min_score = 90.0
+    s.high_conviction_min_chart_confidence = 56.9
+    s.high_conviction_min_velocity_3s = 2.0
+    s.missed_explosion_promote_min_move_pct = 28.0
+    s.missed_explosion_promote_max_move_pct = 55.0
     s.fake_explosion_trap_psychology_escalate = True
     s.fake_explosion_trap_skip_soft_cut_base_window = True
     s.fake_explosion_trap_skip_soft_cut_near_otm = True
@@ -124,15 +136,16 @@ def _snap(*, regime: Regime = Regime.RANGE_BOUND, or_pos: str = "INSIDE") -> Sym
     )
 
 
-def _candidate(event: ExplosionEvent, snap: SymbolSnapshot) -> MagicMock:
+def _candidate(event: ExplosionEvent, snap: SymbolSnapshot, **overrides) -> MagicMock:
     cand = MagicMock()
     cand.mode = "explosion"
     cand.side = event.side
     cand.strike = event.strike
-    cand.score = 165.0
+    cand.score = overrides.get("score", 165.0)
     cand.tier = event.tier
     cand.explosion_event = event
     cand.snap = snap
+    cand.pretrade_meta = overrides.get("pretrade_meta", {})
     return cand
 
 
@@ -234,6 +247,202 @@ def test_post_small_win_cuts_size(mock_collect, mock_money_settings, mock_settin
     assert meta.get("lotCap") == 8
     assert meta.get("psychologyEscalate") == "FOMO"
     assert cap_fake_explosion_trap_lots(49, meta) == 8
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+@patch("app.engines.explosion_entry_guards.collect_session_trades", create=True)
+def test_post_win_blocks_negative_v3_midday(mock_collect, mock_money_settings, mock_settings):
+    """Aug28 NIFTY 24050 PE — post-win micro-pullback v3=-0.38 must hard-block."""
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
+    cand = _candidate(
+        _event(daily=22.0, v3=-0.38, tier="EXPLODING", strike=24050.0),
+        snap,
+    )
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side="PUT",
+                pnl_inr=2346.27,
+                exit_reason="explosion_stage_trail",
+                strike=24200.0,
+            )
+        ],
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=True):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(), ict=_confirmed_ict(22.0),
+        )
+
+    assert blocked is True
+    assert reason == "fake_explosion_trap_post_win_cold_velocity"
+    assert meta.get("action") == "block"
+    assert meta.get("postWinVelocityBlock") is True
+    assert meta.get("requiredMinVelocity3s") == 1.0
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+@patch("app.engines.explosion_entry_guards.collect_session_trades", create=True)
+def test_post_win_armed_base_does_not_bypass_cold_velocity(
+    mock_collect, mock_money_settings, mock_settings,
+):
+    """Aug28 12:55 — ictBaseArmed must not skip post-win cold-velocity hard block."""
+    cfg = _settings(fake_explosion_trap_post_win_armed_base_bypass_enabled=False)
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
+    cand = _candidate(
+        _event(daily=8.0, v3=-0.38, tier="EXPLODING", strike=24050.0),
+        snap,
+    )
+    cand.side = Side.PUT
+    cand.alert = {
+        "ictBaseArmed": True,
+        "ictArmedBaseLaunch": False,
+        "localBaseMovePct": 7.93,
+    }
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side="PUT",
+                pnl_inr=2346.27,
+                exit_reason="explosion_stage_trail",
+                strike=24200.0,
+            )
+        ],
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=True):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(), ict=_confirmed_ict(8.0),
+        )
+
+    assert blocked is True
+    assert reason == "fake_explosion_trap_post_win_cold_velocity"
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+@patch("app.engines.explosion_entry_guards.collect_session_trades", create=True)
+def test_post_win_blocks_without_top_confidence(mock_collect, mock_money_settings, mock_settings):
+    """Aug28 24050 — post-win probe without topRank must hard-block (not 8-lot cut)."""
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
+    cand = _candidate(
+        _event(daily=22.0, v3=1.2, tier="EXPLODING", strike=24050.0),
+        snap,
+        score=210.84,
+        pretrade_meta={
+            "causalRanking": {
+                "topRankEligible": False,
+                "fullSleeveEligible": False,
+                "grade": "A",
+            },
+        },
+    )
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side="PUT",
+                pnl_inr=2346.27,
+                exit_reason="explosion_stage_trail",
+                strike=24200.0,
+            )
+        ],
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(), ict=_confirmed_ict(22.0),
+        )
+
+    assert blocked is True
+    assert reason == "fake_explosion_trap_post_win_not_top_confidence"
+    assert meta.get("postWinTopConfidenceBlock") is True
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+@patch("app.engines.explosion_entry_guards.collect_session_trades", create=True)
+def test_post_win_weak_positive_v3_non_midday_blocks_without_top_rank(
+    mock_collect, mock_money_settings, mock_settings,
+):
+    """Off-midday post-win with weak v3 and no topRank must block — not 8-lot probe."""
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="ABOVE")
+    cand = _candidate(_event(daily=12.0, v3=0.6, tier="EXPLODING", strike=24200.0), snap)
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side="PUT",
+                pnl_inr=500.0,
+                exit_reason="explosion_trail_sl",
+                strike=24200.0,
+            )
+        ],
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(),
+        )
+
+    assert blocked is True
+    assert reason == "fake_explosion_trap_post_win_not_top_confidence"
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+@patch("app.engines.explosion_entry_guards.collect_session_trades", create=True)
+def test_post_win_top_rank_still_soft_caps(mock_collect, mock_money_settings, mock_settings):
+    """Top-rank post-win re-entry with warm v3 keeps the 8-lot soft cap."""
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="ABOVE")
+    cand = _candidate(
+        _event(daily=12.0, v3=0.6, tier="EXPLODING", strike=24200.0),
+        snap,
+        pretrade_meta={"causalRanking": {"topRankEligible": True}},
+    )
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side="PUT",
+                pnl_inr=500.0,
+                exit_reason="explosion_trail_sl",
+                strike=24200.0,
+            )
+        ],
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(),
+        )
+
+    assert blocked is False
+    assert meta.get("action") == "cut_size"
+    assert meta.get("lotCap") == 8
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
@@ -395,3 +604,18 @@ def test_worst_midday_chop_elite_hard_blocks(
     assert "midday_chop" in meta.get("conflictFlags", [])
     assert "chop_regime" in meta.get("conflictFlags", [])
     assert "elite_hot" in meta.get("conflictFlags", [])
+
+
+def test_trap_soft_cap_honor_bypassed_for_index_confirmed_ftv():
+    from app.engines.explosion_entry_guards import _trap_soft_cap_must_honor
+
+    meta = {
+        "action": "cut_size",
+        "chopRegime": True,
+        "eliteHot": True,
+        "indexConfirmedFtv": True,
+        "localBaseStructure": True,
+        "lotCap": 6,
+    }
+    assert _trap_soft_cap_must_honor(meta) is False
+    assert cap_fake_explosion_trap_lots(17, meta, bypass_soft_cap=True) == 17

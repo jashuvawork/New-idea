@@ -124,6 +124,38 @@ def test_explosion_alert_is_top_moment_cold_building():
     assert explosion_alert_is_top_moment({"tier": "BUILDING"}) is False
 
 
+def test_explosion_alert_is_top_moment_watch_local_base_low_score():
+    alert = {
+        "tier": "WATCH",
+        "offLowMovePct": 3.0,
+        "localBaseMovePct": 5.0,
+        "explosionScore": 12.8,
+        "velocity3s": 0.15,
+        "velocity9s": 0.08,
+        "volumeAwaken": True,
+        "ictBaseArmed": True,
+    }
+    assert explosion_alert_is_top_moment(alert) is True
+
+
+def test_classify_watch_local_base_pad_is_ftv():
+    assert (
+        classify_top_moment_type(
+            {
+                "tier": "WATCH",
+                "offLowMovePct": 3.0,
+                "localBaseMovePct": 5.0,
+                "explosionScore": 12.8,
+                "velocity3s": 0.15,
+                "velocity9s": 0.08,
+                "volumeAwakening": True,
+                "baseArmed": True,
+            }
+        )
+        == "FTV"
+    )
+
+
 def test_disabled_gate_passes():
     ok, reason, _ = top_moment_entry_allowed(
         _evidence(tier="BUILDING"),
@@ -134,11 +166,51 @@ def test_disabled_gate_passes():
     assert reason == "disabled"
 
 
-def test_classify_slow_grind_as_ftv():
+def test_classify_slow_grind_building_without_structure_blocked():
     assert (
-        classify_top_moment_type(_evidence(tier="BUILDING", slowGrindSuddenLift=True))
+        classify_top_moment_type(
+            _evidence(
+                tier="BUILDING",
+                slowGrindSuddenLift=True,
+                flatThenVertical=False,
+                activeBreakout=False,
+            )
+        )
+        is None
+    )
+
+
+def test_classify_slow_grind_building_with_flat_vertical_at_base_is_ftv():
+    assert (
+        classify_top_moment_type(
+            _evidence(
+                tier="BUILDING",
+                slowGrindSuddenLift=True,
+                flatThenVertical=True,
+                armedBaseLaunch=True,
+            )
+        )
         == "FTV"
     )
+
+
+def test_classify_slow_grind_elite_still_ftv():
+    assert (
+        classify_top_moment_type(
+            _evidence(tier="ELITE", slowGrindSuddenLift=True)
+        )
+        == "FTV"
+    )
+
+
+def test_explosion_alert_blocks_building_slow_grind_coil_only():
+    alert = {
+        "tier": "BUILDING",
+        "slowGrindSuddenLiftReady": True,
+        "ictFlatThenVertical": False,
+        "ictBreakout": False,
+    }
+    assert explosion_alert_is_top_moment(alert) is False
 
 
 def test_qualifies_for_top_moment_max_lots_elite():

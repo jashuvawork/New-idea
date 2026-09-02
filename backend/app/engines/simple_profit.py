@@ -5,6 +5,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
+from app.engines.risk_stops import live_hold_to_structural_sl
 from app.engines.chop_day_guards import in_momentum_rally_window, is_momentum_surge, neutral_breadth_blocks_entry
 from app.engines.premium_filter import premium_in_band, premium_reject_reason
 from app.engines.session_timing import in_midday_chop_window
@@ -423,7 +424,11 @@ def evaluate_exit(
             ):
                 return "simple_stop_loss", pnl_inr
 
-    if settings.emergency_stop_enabled and pnl_inr <= -settings.emergency_stop_inr:
+    if (
+        not live_hold_to_structural_sl(settings)
+        and settings.emergency_stop_enabled
+        and pnl_inr <= -settings.emergency_stop_inr
+    ):
         return "simple_emergency_inr_stop", pnl_inr
 
     target2 = float(exit_plan.get("targetPoints2") or 0)

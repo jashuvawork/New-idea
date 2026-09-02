@@ -44,6 +44,7 @@ def _settings(**overrides):
     s.explosion_squeeze_early_base_min_move_pct = 8.0
     s.session_move_max_credible_pct = 500.0
     s.session_move_min_baseline_premium = 5.0
+    s.eod_learning_apply_enabled = False
     for k, v in overrides.items():
         setattr(s, k, v)
     return s

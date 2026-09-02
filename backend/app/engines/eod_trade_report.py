@@ -28,6 +28,55 @@ def _f(v: Any, d: float = 0.0) -> float:
         return d
 
 
+def _ignition_ok(
+    series: list[tuple[datetime, float, float]], i: int, *, window_s: float, min_rise: float
+) -> bool:
+    """True when the premium is actively LIFTING over the last ``window_s`` (not flat chop).
+
+    Approximates the live early-ignition velocity/acceleration confirmation the simple
+    near-base+drift rule lacks — a cold entry that never ignites (morning chop) has ~0 rise
+    here and is dropped, while a genuine base lift shows a clear recent rise.
+    """
+    t_now, p_now, _ = series[i]
+    if p_now <= 0:
+        return False
+    p_ref = None
+    for j in range(i, -1, -1):
+        if (t_now - series[j][0]).total_seconds() >= window_s:
+            p_ref = series[j][1]
+            break
+    if p_ref is None or p_ref <= 0:
+        return False  # not enough history to prove a lift
+    return (p_now - p_ref) / p_ref >= min_rise
+
+
+def _not_post_peak_chase(
+    series: list[tuple[datetime, float, float]], i: int, *,
+    lookback_s: float, min_run: float, near_top_frac: float
+) -> bool:
+    """False (reject) when we'd be buying near the TOP of a run that already happened.
+
+    Looks back ``lookback_s``: if a real run-up occurred (peak >= min_run above the window
+    low) AND the current premium is within ``near_top_frac`` of that peak, the move is spent
+    and this is a late second-leg chase (e.g. 24050 CE at 125 after the 133 peak) — reject.
+    """
+    t_now, p_now, _ = series[i]
+    lo = p_now
+    hi = p_now
+    for j in range(i, -1, -1):
+        if (t_now - series[j][0]).total_seconds() > lookback_s:
+            break
+        pj = series[j][1]
+        lo = min(lo, pj)
+        hi = max(hi, pj)
+    if lo <= 0:
+        return True
+    run = (hi - lo) / lo
+    if run >= min_run and p_now >= hi * (1.0 - near_top_frac):
+        return False  # a big run already happened and we're near its top — spent move
+    return True
+
+
 def _drift_ok(spot_rel: list[tuple[float, float]], now_s: float, side: str) -> bool:
     """Index sustained-drift confirmation for one side, from the spot tape up to now."""
     import app.engines.index_tick_helpers as ith
@@ -50,8 +99,13 @@ def replay_contract_trades(
     t0: datetime,
     settings: Any = None,
     max_trades: int = 4,
+    capital_slots: int = 1,
 ) -> list[dict[str, Any]]:
-    """Replay one contract with RE-ENTRIES → list of would-have-traded records."""
+    """Replay one contract with RE-ENTRIES → list of would-have-traded records.
+
+    ``capital_slots`` splits the sizing book into that many concurrent slots (each position
+    sized to ~capital/slots), so a multi-position book stays within the same total capital.
+    """
     from app.engines.capital_allocator import lot_multiplier, max_lots_for_capital
     from app.engines.explosion_profit import evaluate_explosion_exit
     from app.engines.moment_stage_trail import build_moment_stage_plan
@@ -59,7 +113,15 @@ def replay_contract_trades(
 
     s = settings or get_settings()
     units = int(lot_multiplier(symbol) or 20)
-    nb_min, nb_max = 0.10, 0.25
+    nb_min = _f(getattr(s, "eod_near_base_min_off_pct", 0.10), 0.10)
+    nb_max = _f(getattr(s, "eod_near_base_max_off_pct", 0.15), 0.15)
+    pp_on = bool(getattr(s, "eod_replay_post_peak_enabled", True))
+    pp_lookback = _f(getattr(s, "eod_replay_post_peak_lookback_s", 900.0), 900.0)
+    pp_min_run = _f(getattr(s, "eod_replay_post_peak_min_run_pct", 0.25), 0.25)
+    pp_near_top = _f(getattr(s, "eod_replay_post_peak_near_top_frac", 0.12), 0.12)
+    ign_on = bool(getattr(s, "eod_replay_ignition_enabled", False))
+    ign_window = _f(getattr(s, "eod_replay_ignition_window_s", 45.0), 45.0)
+    ign_min_rise = _f(getattr(s, "eod_replay_ignition_min_rise_pct", 0.012), 0.012)
     cooldown = 90.0
 
     trades: list[dict[str, Any]] = []
@@ -79,13 +141,37 @@ def replay_contract_trades(
             base > 0 and nb_min <= off <= nb_max and p >= 15
             and (next_ok_after is None or t >= next_ok_after)
             and _drift_ok(spot_rel, (t - t0).total_seconds(), side)
+            and (
+                not pp_on
+                or _not_post_peak_chase(
+                    series, i, lookback_s=pp_lookback,
+                    min_run=pp_min_run, near_top_frac=pp_near_top,
+                )
+            )
+            and (
+                not ign_on
+                or _ignition_ok(series, i, window_s=ign_window, min_rise=ign_min_rise)
+            )
         )
         if not entered:
             i += 1
             continue
-        # --- ENTER near the base: full per-trade capital (~₹1.8L), proper SL room ---
+        # --- ENTER near the base: per-slot capital (capital/slots), proper SL room ---
         ep = p
         lots = max(1, max_lots_for_capital(symbol, ep))
+        slots = max(1, int(capital_slots))
+        if slots > 1:
+            lots = max(1, lots // slots)  # split the book so N can run within one capital pool
+        # Size so the base retest can't shake the winner out before it runs (mirror live).
+        if bool(getattr(s, "size_to_base_retest_enabled", True)) and base > 0 and ep > base:
+            cap_inr = _f(getattr(s, "max_sizing_capital_inr", 200_000.0), 200_000.0) / slots
+            pct = _f(getattr(s, "size_to_base_retest_max_pct_of_capital", 0.10), 0.10)
+            buf = _f(getattr(s, "size_to_base_retest_break_buffer_pct", 0.15), 0.15)
+            risk_pts = ep - base * (1.0 - max(0.0, buf))
+            if risk_pts > 0:
+                retest_lots = int((cap_inr * pct) / (risk_pts * units))
+                if retest_lots >= 1:
+                    lots = min(lots, retest_lots)
         min_sl_pts = _f(getattr(s, "elite_full_lot_min_stop_points", 16.0), 16.0)
         min_sl_pct = _f(getattr(s, "elite_full_lot_min_stop_pct_of_premium", 0.18), 0.18)
         stop_pts = max(min_sl_pts, ep * max(0.0, min_sl_pct))
@@ -111,6 +197,7 @@ def replay_contract_trades(
             strategyType=StrategyType.EXPLOSIVE, openedAt=wnow, bestPnlPoints=0.0,
             entryContext=ctx,
         )
+        per_trade_cap = _f(getattr(s, "eod_replay_per_trade_max_loss_inr", 0.0), 0.0)
         best = 0.0
         peak = ep
         et = t
@@ -125,6 +212,10 @@ def replay_contract_trades(
             peak = max(peak, pj)
             v = 2.0 if pj >= peak else -0.8
             tr.entryContext["liveVelocity3s"] = v
+            # Hard per-trade INR loss backstop (mirror live) — bounds cold-entry blowups.
+            if per_trade_cap > 0 and (pj - ep) * lots * units <= -per_trade_cap:
+                exit_rec = (tj, pj, "explosion_per_trade_loss_cap")
+                break
             reason, _pnl = evaluate_explosion_exit(tr, pj, tier, units, live_velocity_3s=v)
             if reason:
                 exit_rec = (tj, pj, reason)
@@ -152,11 +243,88 @@ def replay_contract_trades(
     return trades
 
 
+def build_scorecard(
+    targets: list[tuple[float, str, str, float, str]],
+    taken: list[dict[str, Any]],
+    *,
+    settings: Any = None,
+    opportunity_min_mfe_pct: float = 30.0,
+) -> dict[str, Any]:
+    """Per-lane earlyRecall + added-loser scorecard so the paper trial stays measurable.
+
+    Lanes are the live sizing lanes (tier: ELITE / EXPLODING). For each lane we report:
+      - opportunities: real FTV/V moves that day (top ELITE/EXPLODING whose realised MFE
+        cleared ``opportunity_min_mfe_pct``);
+      - earlyRecall: fraction of those opportunities we entered NEAR the base (early), i.e.
+        offBasePct within the near-base ceiling — the whole point is catching them at the base;
+      - addedLosers / addedLoserInr: losing trades the lane produced (its cost).
+    A lane earns its keep when earlyRecall is high and added-loser cost stays low.
+    """
+    s = settings or get_settings()
+    nb_max_pct = _f(getattr(s, "eod_near_base_max_off_pct", 0.15), 0.15) * 100.0
+
+    def _empty() -> dict[str, Any]:
+        return {
+            "opportunities": 0, "captured": 0, "capturedNearBase": 0,
+            "earlyRecall": 0.0, "addedLosers": 0, "addedLoserInr": 0.0,
+        }
+
+    lanes: dict[str, dict[str, Any]] = {"ELITE": _empty(), "EXPLODING": _empty()}
+    overall = _empty()
+
+    opp_keys: dict[str, set[tuple]] = {"ELITE": set(), "EXPLODING": set()}
+    for mfe, sym, side, strike, tier in targets:
+        if tier in lanes and mfe >= opportunity_min_mfe_pct:
+            opp_keys.setdefault(tier, set()).add((sym, side, strike))
+    for tier, keys in opp_keys.items():
+        lanes[tier]["opportunities"] = len(keys)
+        overall["opportunities"] += len(keys)
+
+    captured_keys: dict[str, set[tuple]] = {"ELITE": set(), "EXPLODING": set()}
+    near_keys: dict[str, set[tuple]] = {"ELITE": set(), "EXPLODING": set()}
+    for t in taken:
+        tier = str(t.get("tier") or "").upper()
+        lane = lanes.get(tier)
+        if lane is None:
+            continue
+        key = (str(t.get("symbol") or "").upper(), str(t.get("side") or "").upper(),
+               _f(t.get("strike")))
+        if key in opp_keys.get(tier, set()):
+            captured_keys[tier].add(key)
+            if _f(t.get("offBasePct")) <= nb_max_pct:
+                near_keys[tier].add(key)
+        if _f(t.get("pnlInr")) <= 0:
+            lane["addedLosers"] += 1
+            lane["addedLoserInr"] += _f(t.get("pnlInr"))
+            overall["addedLosers"] += 1
+            overall["addedLoserInr"] += _f(t.get("pnlInr"))
+
+    for tier, lane in lanes.items():
+        lane["captured"] = len(captured_keys[tier])
+        lane["capturedNearBase"] = len(near_keys[tier])
+        opp = lane["opportunities"]
+        lane["earlyRecall"] = round(lane["capturedNearBase"] / opp, 3) if opp else 0.0
+        lane["addedLoserInr"] = round(lane["addedLoserInr"], 0)
+        overall["captured"] += lane["captured"]
+        overall["capturedNearBase"] += lane["capturedNearBase"]
+
+    opp = overall["opportunities"]
+    overall["earlyRecall"] = round(overall["capturedNearBase"] / opp, 3) if opp else 0.0
+    overall["addedLoserInr"] = round(overall["addedLoserInr"], 0)
+
+    return {
+        "nearBaseCeilingPct": round(nb_max_pct, 1),
+        "opportunityMinMfePct": opportunity_min_mfe_pct,
+        "overall": overall,
+        "byLane": lanes,
+    }
+
+
 def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
     """Read the day's tape, pick the strongest contracts, replay with re-entries."""
     settings = get_settings()
     from app.services.radar_archive import read_archive_entries
-    from app.services.radar_learning import read_premium_tape
+    from app.services.radar_learning import premium_tape_path, read_premium_tape
 
     entries = read_archive_entries(date)
     # Rank candidates by realised max favourable excursion (the real opportunities).
@@ -176,7 +344,11 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
     if not targets:
         return {"date": date, "status": "no_top_candidates", "trades": []}
 
-    batches = read_premium_tape(date)
+    tape_cap = int(_f(getattr(settings, "radar_report_tape_max_bytes", 268_435_456), 268_435_456))
+    tape_path = premium_tape_path(date)
+    tape_bytes = tape_path.stat().st_size if tape_path.exists() else 0
+    tape_truncated = bool(tape_cap > 0 and tape_bytes > tape_cap)
+    batches = read_premium_tape(date, max_bytes=tape_cap)
     if not batches:
         return {"date": date, "status": "no_tape", "trades": []}
 
@@ -207,6 +379,7 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
     t0 = spot_pairs[0][0]
     spot_rel = [((t - t0).total_seconds(), sp) for t, sp in spot_pairs]
 
+    slots = max(1, int(_f(getattr(settings, "eod_report_max_concurrent", 1), 1)))
     candidates: list[dict[str, Any]] = []
     for _m, sym, side, strike, tier in targets:
         ser = sorted(x for x in series_map.get((sym, side, strike), []) if x[1] > 0)
@@ -215,6 +388,7 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
         candidates.extend(replay_contract_trades(
             symbol=sym, side=side, strike=strike, tier=tier,
             series=ser, spot_rel=spot_rel, t0=t0, settings=settings,
+            capital_slots=slots,
         ))
 
     taken = apply_portfolio_limits(candidates, settings=settings)
@@ -233,9 +407,16 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
         "losses": len(taken) - wins,
         "netPnlInr": total,
         "dailyLossStopInr": daily_stop,
+        "maxConcurrent": slots,
+        "tapeTruncated": tape_truncated,
+        "scorecard": build_scorecard(targets, taken, settings=settings),
         "note": (
             "Hindsight simulation (approximate). Applies one-position-at-a-time + the "
             "daily loss stop; still does not re-run every live gate."
+            + (
+                " Tape exceeded the read cap; replayed the day's tail only "
+                "(morning may be missing)." if tape_truncated else ""
+            )
         ),
         "trades": taken,
     }
@@ -246,27 +427,36 @@ def apply_portfolio_limits(
     *,
     settings: Any = None,
 ) -> list[dict[str, Any]]:
-    """Model the live book: one position at a time, halt for the day at the loss stop.
+    """Model the live book: up to N concurrent positions, halt for the day at the loss stop.
 
-    The per-contract replay generates every candidate leg independently; live trading holds
-    ONE position at a time and stops taking new entries once the day's loss stop is hit.
-    Applying those turns an unbounded 'take everything' number into a realistic one.
+    The per-contract replay generates every candidate leg independently; live trading runs a
+    bounded number of positions at once (``eod_report_max_concurrent`` slots, ``eod_report_
+    same_side_cap`` per side — mirroring the live risk engine) and stops taking new entries
+    once the day's loss stop is hit. With 1 slot this is the old one-at-a-time behaviour.
     """
     s = settings or get_settings()
     daily_stop = _f(getattr(s, "daily_loss_stop_inr", 20_000.0), 20_000.0)
+    max_conc = max(1, int(_f(getattr(s, "eod_report_max_concurrent", 1), 1)))
+    same_side_cap = max(1, int(_f(getattr(s, "eod_report_same_side_cap", 2), 2)))
     ordered = sorted(candidates, key=lambda t: t.get("_entryDt") or datetime.now(IST))
     taken: list[dict[str, Any]] = []
     cum = 0.0
-    open_until: Optional[datetime] = None
+    # open positions as (exit_time, side); prune those that have closed by the new entry time
+    open_positions: list[tuple[datetime, str]] = []
     for t in ordered:
         edt = t.get("_entryDt")
         xdt = t.get("_exitDt")
+        side = str(t.get("side") or "").upper()
         if daily_stop > 0 and cum <= -abs(daily_stop):
             break  # daily loss stop hit — no more entries today
-        if open_until is not None and edt is not None and edt < open_until:
-            continue  # a position is already open — one at a time
+        if edt is not None:
+            open_positions = [(xu, sd) for (xu, sd) in open_positions if xu is None or xu > edt]
+        if len(open_positions) >= max_conc:
+            continue  # all slots occupied
+        if sum(1 for _xu, sd in open_positions if sd == side) >= same_side_cap:
+            continue  # same-side concurrency cap
         taken.append(t)
         cum += _f(t.get("pnlInr"))
-        open_until = xdt
+        open_positions.append((xdt, side))
     return taken
 

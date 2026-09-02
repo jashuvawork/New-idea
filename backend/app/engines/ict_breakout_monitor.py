@@ -438,7 +438,7 @@ def building_rip_bullish_readiness(
         getattr(settings, "building_rip_local_base_min_velocity_3s", 1.2) or 1.2
     )
     local_lift_score = float(
-        getattr(settings, "building_rip_local_base_min_score", 42.0) or 42.0
+        getattr(settings, "building_rip_local_base_min_score", 12.0) or 12.0
     )
     local_base_lift = bool(
         getattr(settings, "building_rip_local_base_lift_enabled", True)
@@ -671,7 +671,7 @@ def _fast_bullish_local_base_readiness(
         or 0
     )
     lo = float(getattr(s, "fast_bullish_local_base_min_move_pct", 5.0) or 5.0)
-    hi = float(getattr(s, "fast_bullish_local_base_max_move_pct", 25.0) or 25.0)
+    hi = float(getattr(s, "fast_bullish_local_base_max_move_pct", 45.0) or 45.0)
     if not (lo <= base_move <= hi + 1e-6):
         return False, f"fast_bullish_pad_outside_{lo:g}_{hi:g}"
 
@@ -723,9 +723,13 @@ def _fast_bullish_local_base_readiness(
         min_v3 = float(
             getattr(s, "fast_bullish_local_base_min_velocity_3s", 0.8) or 0.8
         )
-        if not (volume_awake and base_move + 1e-6 >= pad_floor):
-            if v3 < min_v3:
-                return False, f"fast_bullish_velocity3s<{min_v3:g}"
+        trough_eps = float(
+            getattr(s, "bullish_local_base_trough_velocity_eps", 0.05) or 0.05
+        )
+        at_pad_with_volume = volume_awake and base_move + 1e-6 >= pad_floor
+        trough_awakening = at_pad_with_volume and 0 <= v3 <= trough_eps
+        if not trough_awakening and v3 < min_v3:
+            return False, f"fast_bullish_velocity3s<{min_v3:g}"
 
     from app.engines.moneyness import classify_moneyness
     from app.models.schemas import Side
@@ -1003,7 +1007,33 @@ def _slow_grind_armed_trough_readiness(
         getattr(ict, "v_rip_ready", False)
         or row.get("ictVRipReady")
     )
-    if not base_armed:
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    index_trough_ok = False
+    if not base_armed and bool(
+        getattr(s, "slow_grind_armed_trough_index_trough_enabled", True)
+    ):
+        from app.engines.spot_direction import index_trough_momentum_turn
+
+        trough_max_off = float(
+            getattr(s, "slow_grind_armed_trough_index_trough_max_off_low_pct", 8.0)
+            or 8.0
+        )
+        if side in ("CALL", "PUT") and index_trough_momentum_turn(
+            side, getattr(snap, "spotChart", None), settings=s,
+        ):
+            if v_rip_ready or off_low <= trough_max_off + 1e-6:
+                index_trough_ok = True
+                if isinstance(alert, dict):
+                    from app.engines.index_confirmed_local_base import (
+                        stamp_index_confirmed_local_base,
+                    )
+
+                    stamp_index_confirmed_local_base(alert, snap, side=side)
+    if not base_armed and not index_trough_ok:
         return False, "slow_grind_armed_trough_base_not_armed"
 
     quality = float(
@@ -1020,7 +1050,11 @@ def _slow_grind_armed_trough_readiness(
         return False, "slow_grind_armed_trough_ftv_confirmed"
 
     if not (v_rip_ready or off_low <= max_off + 1e-6):
-        return False, "slow_grind_armed_trough_not_at_trough"
+        if not (index_trough_ok and off_low <= float(
+            getattr(s, "slow_grind_armed_trough_index_trough_max_off_low_pct", 8.0)
+            or 8.0
+        ) + 1e-6):
+            return False, "slow_grind_armed_trough_not_at_trough"
 
     base_move = float(
         getattr(ict, "base_relative_move_pct", 0)
@@ -1187,13 +1221,15 @@ def _slow_grind_impending_lift_signals(
     if volume_awake and v3 <= max_v3:
         signals.append("volume_awakening_pre_spike")
 
-    from app.engines.spot_direction import side_aligned_with_chart
+    from app.engines.spot_direction import index_trough_momentum_turn, side_aligned_with_chart
 
     if side_u in ("CALL", "PUT"):
         from app.models.schemas import Side as _Side
 
         if side_aligned_with_chart(_Side(side_u), chart):
             signals.append("chart_direction_aligned")
+        elif index_trough_momentum_turn(_Side(side_u), chart, settings=settings):
+            signals.append("index_trough_momentum_turn")
 
     return len(signals), signals
 
@@ -1377,6 +1413,301 @@ def first_lift_entry_ready(
     )[0]
 
 
+def _near_base_quality_or_score_ok(
+    *, event: Any = None, ict: Any = None,
+    row: Optional[dict[str, Any]] = None, settings: Any = None,
+) -> bool:
+    """Data-calibrated near-base dud filter: pass only strong FTV quality OR strong score.
+
+    On 11 days the near-base zone was ~50-59% duds; FTV quality is the proven separator
+    (Q>=70: 42% win vs Q<50: 6%) and near-base winners carried score ~100 / Q ~70 while duds
+    were score ~76 / Q <50. Requiring quality>=min OR score>=strong keeps the genuine base
+    winners and drops the low-Q + low-score dud bucket. Used by the aggressive near-base lanes.
+    """
+    settings = settings or get_settings()
+    row = row if isinstance(row, dict) else {}
+    q = float(
+        getattr(ict, "flat_vertical_quality", 0)
+        or row.get("flatVerticalQuality")
+        or 0
+    )
+    score = float(getattr(event, "explosion_score", 0) or row.get("explosionScore") or 0)
+    min_q = float(getattr(settings, "near_base_lane_min_quality", 70.0) or 70.0)
+    strong_score = float(getattr(settings, "near_base_lane_strong_score", 90.0) or 90.0)
+    return q >= min_q or score >= strong_score
+
+
+def _early_momentum_ignition_at_base_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Catch the FTV as momentum IGNITES right at the local base (1-10% off), not at ~15%.
+
+    The structured first-lift floor (``ict_structured_early_min_move_pct`` ~15%) plus a base
+    that arms late on fast risers means entries land after the move already ran (Aug31 24150
+    CE only caught ~18% off base). This lane admits the entry EARLY when a top-tier
+    ELITE/EXPLODING contract is still within a few % of its CONFIRMED local base and shows a
+    genuine ignition — rising velocity (v3 >= v9, i.e. accelerating, not a fading blip) above
+    a floor, with volume/CVD confirmation, ATM/ITM. Opt-in; all downstream gates still run.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "early_momentum_ignition_enabled", False)):
+        return False, ""
+    row = alert if isinstance(alert, dict) else {}
+    tier = str(getattr(event, "tier", "") or row.get("tier") or "").upper()
+    # A fast FTV grades BUILDING at 1-10% off base and only prints ELITE after it has already
+    # run (a chase). Allow BUILDING here so we can catch the ignition at the base; the strong-
+    # ignition gate below keeps chop duds out. WATCH is still excluded.
+    allow_building = bool(
+        getattr(settings, "early_momentum_ignition_allow_building", True)
+    )
+    allowed_tiers = (
+        ("ELITE", "EXPLODING", "BUILDING") if allow_building else ("ELITE", "EXPLODING")
+    )
+    if tier not in allowed_tiers:
+        return False, ""
+
+    base_confirmed = bool(
+        (ict is not None and (
+            getattr(ict, "base_armed", False) or getattr(ict, "local_swing_base", False)
+        ))
+        or row.get("ictBaseArmed")
+        or row.get("ictLocalSwingBase")
+        or float(row.get("ictBasePremium") or 0) > 0
+    )
+    if not base_confirmed:
+        return False, ""
+
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    lo = float(getattr(settings, "early_momentum_ignition_min_move_pct", 1.0) or 1.0)
+    hi = float(getattr(settings, "early_momentum_ignition_max_move_pct", 10.0) or 10.0)
+    if not (lo <= base_move <= hi):
+        return False, ""
+
+    v3 = float(getattr(event, "velocity_3s", 0) or row.get("velocity3s") or 0)
+    v9 = float(getattr(event, "velocity_9s", 0) or row.get("velocity9s") or 0)
+    ign_v3 = float(
+        getattr(settings, "early_momentum_ignition_min_velocity_3s", 1.0) or 1.0
+    )
+    if v3 < ign_v3:
+        return False, ""
+    # Ignition = recent 3s rate at least the 9s rate → accelerating / sustained, not fading.
+    if v3 < v9:
+        return False, ""
+
+    vol_surge = float(
+        getattr(event, "volume_surge", 0) or row.get("volumeSurge") or 0
+    )
+    vol_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
+    cvd = bool(row.get("optionCvdBuying") or row.get("optionCvdAccelerating"))
+    min_vol = float(
+        getattr(settings, "early_momentum_ignition_min_vol_surge", 2.0) or 2.0
+    )
+    if not (vol_awake or vol_surge >= min_vol or cvd):
+        return False, ""
+
+    # Dud filter at the base. Quality/score LAG a fast ignition (they rise WITH the move), so
+    # requiring them alone would block the very fast FTVs we want. Accept EITHER the calibrated
+    # quality/score floor OR a STRONG, volume-backed accelerating ignition off a TIGHT base —
+    # the signature a genuine fast FTV has at the base and a chop dud does not.
+    strong_v3 = float(
+        getattr(settings, "early_momentum_ignition_strong_velocity_3s", 2.5) or 2.5
+    )
+    strong_vol = float(
+        getattr(settings, "early_momentum_ignition_strong_vol_surge", 2.5) or 2.5
+    )
+    base_range = float(
+        getattr(ict, "armed_base_range_pct", 0) or row.get("ictArmedBaseRangePct") or 0
+    )
+    tight_base = base_range <= 0 or base_range <= float(
+        getattr(settings, "early_momentum_ignition_tight_base_range_pct", 5.0) or 5.0
+    )
+    strong_ignition = (
+        v3 >= strong_v3 and v3 >= v9 and (vol_surge >= strong_vol or cvd) and tight_base
+    )
+    if tier == "BUILDING":
+        # A BUILDING contract (tier lags a fast FTV) may enter ONLY on a genuine, order-flow-
+        # confirmed ignition. On velocity+volume alone a hollow v3-spike that then cools looks
+        # identical to a real ignition at the base (the Aug10 CE loss). CVD BUYING is the
+        # differentiator a hollow print lacks — require it plus a strong accelerating move,
+        # real volume, and a tight base. This catches the fast FTV without re-taking the blip.
+        dud_ok = (
+            v3 >= strong_v3
+            and v3 >= v9
+            and cvd
+            and vol_surge >= strong_vol
+            and tight_base
+        )
+    else:
+        dud_ok = (
+            _near_base_quality_or_score_ok(
+                event=event, ict=ict, row=row, settings=settings
+            )
+            or strong_ignition
+        )
+    if not dud_ok:
+        return False, "early_ignition_below_quality_score_floor"
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False, ""
+    if snap is not None:
+        strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+        spot = float(getattr(snap, "spot", 0) or 0)
+        atm = float(getattr(snap, "atmStrike", 0) or 0)
+        if strike > 0 and spot > 0:
+            from app.engines.moneyness import classify_moneyness
+            from app.models.schemas import Side as _Side
+
+            money = classify_moneyness(
+                _Side(side), strike, spot,
+                symbol=str(getattr(snap, "symbol", "") or ""),
+                atm=atm if atm > 0 else None,
+            )
+            if money not in ("ATM", "ITM"):
+                from app.engines.early_radar_pad_capture import (
+                    otm_reversal_entry_allowed,
+                )
+
+                if not otm_reversal_entry_allowed(row, snap):
+                    return False, "early_ignition_requires_atm_itm"
+    return True, "early_momentum_ignition_at_base"
+
+
+def _coil_armed_low_score_readiness(
+    *,
+    snap: Optional[SymbolSnapshot],
+    event: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Take a top FTV/V/ELITE/EXPLODING at the local base while its SCORE is still low.
+
+    Score and causal grade LAG the move — requiring a high score means entering after the
+    run. This lane authorizes an entry at the base on a LOW score when the flat-coil predictor
+    is strongly ripe AND directional AND near-base — i.e. the *structure and prediction* are
+    strong even though the *score* hasn't caught up. Bounded by a hard noise floor (never
+    trades genuine junk), near-base only, volume/CVD confirmation, ATM/ITM. Highest-risk lane;
+    opt-in (default off) — validate on replay before enabling live.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "coil_armed_low_score_entry_enabled", False)):
+        return False, ""
+    row = alert if isinstance(alert, dict) else {}
+
+    side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    if side not in ("CALL", "PUT"):
+        return False, ""
+
+    from app.engines.coil_breakout_predictor import coil_breakout_prediction
+
+    try:
+        pred = coil_breakout_prediction(snap, event, ict, settings=settings)
+    except Exception:
+        return False, ""
+    if not pred.get("coiling"):
+        return False, ""
+    if str(pred.get("predictedSide") or "") != side:
+        return False, ""
+
+    readiness = float(pred.get("readinessScore") or 0)
+    votes = int(pred.get("directionVotes") or 0)
+    min_readiness = float(
+        getattr(settings, "coil_armed_low_score_min_readiness", 72.0) or 72.0
+    )
+    min_votes = int(
+        getattr(settings, "coil_armed_low_score_min_direction_votes", 3) or 3
+    )
+    if readiness < min_readiness or votes < min_votes:
+        return False, ""
+
+    base_move = float(
+        getattr(ict, "base_relative_move_pct", 0)
+        or row.get("ictBaseRelativeMovePct")
+        or row.get("localBaseMovePct")
+        or 0
+    )
+    max_base = float(
+        getattr(settings, "coil_armed_low_score_max_base_move_pct", 12.0) or 12.0
+    )
+    if base_move > max_base:
+        return False, ""
+
+    # Never trade genuine noise: a hard score floor below which even a ripe coil is skipped.
+    score = float(
+        getattr(event, "explosion_score", 0) or row.get("explosionScore") or 0
+    )
+    noise_floor = float(
+        getattr(settings, "coil_armed_low_score_min_score", 40.0) or 40.0
+    )
+    if score < noise_floor:
+        return False, ""
+
+    # Near-base loss filter: the base zone is ~50% duds. Require strong FTV quality OR a strong
+    # score (near-base winners carried Q~70 / score~100; duds Q<50 / score<76). Data-calibrated.
+    if not _near_base_quality_or_score_ok(event=event, ict=ict, row=row, settings=settings):
+        return False, "coil_armed_below_quality_score_floor"
+
+    vol_surge = float(
+        getattr(event, "volume_surge", 0) or row.get("volumeSurge") or 0
+    )
+    vol_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
+    cvd = bool(row.get("optionCvdBuying") or row.get("optionCvdAccelerating"))
+    min_vol = float(
+        getattr(settings, "coil_armed_low_score_min_vol_surge", 1.5) or 1.5
+    )
+    if not (vol_awake or vol_surge >= min_vol or cvd):
+        return False, ""
+
+    if snap is not None:
+        strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
+        spot = float(getattr(snap, "spot", 0) or 0)
+        atm = float(getattr(snap, "atmStrike", 0) or 0)
+        if strike > 0 and spot > 0:
+            from app.engines.moneyness import classify_moneyness
+            from app.models.schemas import Side as _Side
+
+            money = classify_moneyness(
+                _Side(side), strike, spot,
+                symbol=str(getattr(snap, "symbol", "") or ""),
+                atm=atm if atm > 0 else None,
+            )
+            if money not in ("ATM", "ITM"):
+                from app.engines.early_radar_pad_capture import (
+                    otm_reversal_entry_allowed,
+                )
+
+                if not otm_reversal_entry_allowed(row, snap):
+                    return False, "coil_armed_requires_atm_itm"
+    return True, "coil_armed_low_score_base_entry"
+
+
 def first_lift_entry_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -1406,14 +1737,6 @@ def first_lift_entry_readiness(
     )
     if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
         return False, "mid_rip_armed_coil_rejected"
-
-    from app.engines.early_radar_pad_capture import (
-        EARLY_RADAR_PAD_READY,
-        alert_has_early_radar_pad_capture,
-    )
-
-    if isinstance(alert, dict) and alert_has_early_radar_pad_capture(alert):
-        return True, EARLY_RADAR_PAD_READY
 
     # BUILDING bullish-rip sleeve — mid-rip OK while still expanding to max.
     # Runs before first-lift chart gate so option-led BUILDING rips still authorize.
@@ -1459,6 +1782,74 @@ def first_lift_entry_readiness(
     if fast_ok:
         return True, fast_reason
 
+    # Early momentum ignition AT the local base (opt-in) — catch the FTV as it ignites,
+    # before the ~15% structured first-lift floor. Gated: top tier, near base, accelerating
+    # velocity + volume, ATM/ITM. Downstream selector/chart/fake-trap/risk gates still run.
+    ign_ok, ign_reason = _early_momentum_ignition_at_base_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=row,
+        settings=settings,
+    )
+    if ign_ok:
+        return True, ign_reason
+
+    # Coil-armed LOW-SCORE base entry (opt-in) — take a top FTV/V/ELITE/EXPLODING at the local
+    # base while its score/grade is still LOW (they lag), when the coil predictor is strongly
+    # ripe + directional at the base. Never below a hard noise floor. Highest-risk lane —
+    # default off; validate on replay before live.
+    coil_ok, coil_reason = _coil_armed_low_score_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=row,
+        settings=settings,
+    )
+    if coil_ok:
+        return True, coil_reason
+
+    from app.engines.early_radar_pad_capture import (
+        building_armed_prelaunch_entry_readiness,
+        building_coil_pad_entry_readiness,
+        building_coil_pad_live_blocked,
+        early_radar_pad_entry_readiness,
+        early_radar_pad_live_blocked,
+    )
+
+    prelaunch_ok, prelaunch_reason = building_armed_prelaunch_entry_readiness(
+        snap=snap,
+        alert=alert if isinstance(alert, dict) else None,
+        settings=settings,
+    )
+    if prelaunch_ok:
+        return True, prelaunch_reason
+
+    coil_blocked, coil_block_reason = building_coil_pad_live_blocked(row, settings)
+    if coil_blocked:
+        return False, coil_block_reason
+
+    if isinstance(alert, dict):
+        coil_ok, coil_reason = building_coil_pad_entry_readiness(
+            snap=snap,
+            alert=alert,
+            settings=settings,
+        )
+        if coil_ok:
+            return True, coil_reason
+        pad_blocked, pad_block_reason = early_radar_pad_live_blocked(row, snap, settings)
+        if pad_blocked:
+            return False, pad_block_reason
+        pad_ok, pad_reason = early_radar_pad_entry_readiness(
+            snap=snap,
+            event=event,
+            ict=ict,
+            alert=alert,
+            settings=settings,
+        )
+        if pad_ok:
+            return True, pad_reason
+
     if not bool(getattr(settings, "first_lift_trade_enabled", True)):
         return False, "first_lift_trading_disabled"
     if snap is None or getattr(snap, "spotChart", None) is None:
@@ -1495,8 +1886,13 @@ def first_lift_entry_readiness(
     ) or bool(
         persisted.get("activeBreakout") and persisted.get("flatThenVertical")
     )
+    # armed_base_launch stamps before flat→vertical confirms — do not require structured
+    # when the armed launch lane is active (Sep01 NIFTY PUT 23950 ELITE 100 at ~₹18 base).
     if not (first_lift or armed_launch or elite_base_ready or v_rip_ready) or (
-        not structured and not elite_base_ready and not v_rip_ready
+        not structured
+        and not elite_base_ready
+        and not v_rip_ready
+        and not armed_launch
     ):
         return False, "first_lift_structure_not_confirmed"
 
@@ -1505,6 +1901,38 @@ def first_lift_entry_readiness(
         or row.get("ictBaseRelativeMovePct")
         or 0
     )
+    if not day_mode and state is None:
+        try:
+            from app.engines.daily_18pct_strategy import get_session_limits
+
+            limits = get_session_limits()
+            day_mode = str(getattr(limits, "dayMode", "") or "") if limits else ""
+        except Exception:
+            day_mode = day_mode or ""
+    if not day_mode and state is not None:
+        day_mode = str(
+            (getattr(state, "dailyStrategy", None) or {}).get("dayMode")
+            or ""
+        )
+    from app.engines.grade_a_ftv_capture import (
+        alert_is_grade_a_ftv_first_lift,
+        grade_a_ftv_first_lift_floors,
+    )
+    from app.engines.top_ftv_v_expiry_bypass import (
+        alert_is_top_ftv_or_v,
+        top_ftv_v_expiry_floors,
+    )
+
+    grade_a_alert = row if isinstance(row, dict) else (
+        alert if isinstance(alert, dict) else {}
+    )
+    grade_a_lane = alert_is_grade_a_ftv_first_lift(grade_a_alert, snap)
+    grade_a_floors = grade_a_ftv_first_lift_floors(settings) if grade_a_lane else {}
+    top_ftv_v_lane = (
+        alert_is_top_ftv_or_v(grade_a_alert, snap)
+        and _expiry_worst_session(day_mode=day_mode, state=state)
+    )
+    top_ftv_v_floors = top_ftv_v_expiry_floors(settings) if top_ftv_v_lane else {}
     # V-rip pad relaxes quality/score/velocity floors but does not bypass armed/elite
     # orderflow, TQS, stability, or reason tagging when those stamps are present.
     v_rip_lane = _v_rip_lane_active(
@@ -1565,6 +1993,11 @@ def first_lift_entry_readiness(
                 "slowGrindSuddenLift": row.get("slowGrindSuddenLift"),
                 "fastBullishLocalBase": row.get("fastBullishLocalBase"),
                 "buildingRipReady": row.get("buildingRipReady"),
+                "flatVerticalGrade": row.get("flatVerticalGrade"),
+                "flatThenVertical": bool(
+                    row.get("ictFlatThenVertical") or row.get("flatThenVertical")
+                ),
+                "symbol": row.get("symbol") or getattr(event, "symbol", ""),
             },
         )
         if not ok:
@@ -1577,6 +2010,12 @@ def first_lift_entry_readiness(
         max_move = float(
             getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0
         )
+    elif grade_a_lane:
+        min_move = float(grade_a_floors.get("minBaseMove", 8.0) or 8.0)
+        max_move = float(grade_a_floors.get("maxBaseMove", 45.0) or 45.0)
+    elif top_ftv_v_lane:
+        min_move = float(top_ftv_v_floors.get("minBaseMove", 5.0) or 5.0)
+        max_move = float(top_ftv_v_floors.get("maxBaseMove", 55.0) or 55.0)
     elif elite_base_ready:
         min_move = float(
             getattr(settings, "ict_elite_base_ready_min_move_pct", 2.0) or 2.0
@@ -1659,6 +2098,12 @@ def first_lift_entry_readiness(
         min_score = float(
             getattr(settings, "ict_elite_base_ready_min_score", 45.0) or 45.0
         )
+    elif grade_a_lane:
+        min_quality = float(grade_a_floors.get("minQuality", 65.0) or 65.0)
+        min_score = float(grade_a_floors.get("minScore", 28.0) or 28.0)
+    elif top_ftv_v_lane:
+        min_quality = 0.0
+        min_score = float(top_ftv_v_floors.get("minScore", 12.0) or 12.0)
     elif armed_launch:
         min_quality = float(
             getattr(settings, "ict_armed_base_launch_min_quality", 65.0) or 65.0
@@ -1673,6 +2118,15 @@ def first_lift_entry_readiness(
         min_score = float(
             getattr(settings, "first_lift_trade_min_score", 62.0) or 62.0
         )
+    from app.engines.early_radar_pad_capture import (
+        early_pad_context_active,
+        early_pad_quality_floor,
+        early_pad_score_floor,
+    )
+
+    if early_pad_context_active(row, local_base_move_pct=base_move, settings=settings):
+        min_score = min(min_score, early_pad_score_floor(settings))
+        min_quality = min(min_quality, early_pad_quality_floor(settings))
     # Helper-confirmed lane: a base lift with enough independent confirmations may enter on
     # a lower quality/score/velocity bar (the confirmations ARE the proof it's a real FTV).
     helper_row = dict(row)
@@ -1786,6 +2240,12 @@ def first_lift_entry_readiness(
             min_v9,
             float(getattr(settings, "first_lift_helper_confirm_min_velocity_9s", 0.6) or 0.6),
         )
+    if grade_a_lane and volume_awake:
+        min_v3 = 0.0
+        min_v9 = 0.0
+    if top_ftv_v_lane and volume_awake:
+        min_v3 = 0.0
+        min_v9 = 0.0
     if not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
     if not sustained_lift and v9 < min_v9:
@@ -1932,7 +2392,28 @@ def first_lift_entry_readiness(
             atm=atm if atm > 0 else None,
         )
         if money not in ("ATM", "ITM"):
-            return False, f"armed_base_requires_atm_itm_{money.lower()}"
+            from app.engines.early_radar_pad_capture import (
+                alert_has_building_coil_pad,
+                building_coil_pad_lane_active,
+                building_coil_pad_moneyness_ok,
+                otm_reversal_entry_allowed,
+            )
+
+            coil_context = (
+                alert_has_building_coil_pad(row)
+                or building_coil_pad_lane_active(row, settings)
+            )
+            if not (
+                (
+                    coil_context
+                    and building_coil_pad_moneyness_ok(row, snap, settings)
+                )
+                # Confirmed index reversal → a slightly-deeper OTM CALL/PUT above/below the
+                # turning spot is the reversal-rally winner (Aug31 24150 CE +105%), not a
+                # lottery ticket. Opt-in, gated to a confirmed index turn.
+                or otm_reversal_entry_allowed(row, snap)
+            ):
+                return False, f"armed_base_requires_atm_itm_{money.lower()}"
         armed_min_tqs = float(
             getattr(settings, "ict_armed_base_launch_min_tqs", 50.0) or 50.0
         )
@@ -1942,6 +2423,16 @@ def first_lift_entry_readiness(
             and not elite_base_ready
             and aligned_tqs < armed_min_tqs
         )
+        from app.engines.explosion_entry_guards import post_impulse_consolidation_entry_blocked
+
+        pi_blocked, pi_reason = post_impulse_consolidation_entry_blocked(
+            event,
+            alert=row,
+            snap=snap,
+            settings=settings,
+        )
+        if pi_blocked:
+            return False, pi_reason
         return True, (
             "elite_base_ready_s_preauthorized"
             if elite_base_ready
@@ -2013,6 +2504,17 @@ def first_lift_entry_readiness(
             return True, "first_lift_entry_ready"
     elif mom5 <= mom10 and mom5 <= mom15 - shift:
         return True, "first_lift_entry_ready"
+    if grade_a_lane and bool(
+        row.get("indexMomAlign") or row.get("indexHelpersConfirm")
+    ):
+        return True, "first_lift_grade_a_index_aligned"
+    if top_ftv_v_lane and bool(
+        row.get("indexMomAlign")
+        or row.get("indexHelpersConfirm")
+        or row.get("ictVRipReady")
+        or row.get("vRipReady")
+    ):
+        return True, "first_lift_top_ftv_v_index_aligned"
     return False, "first_lift_index_turn_not_confirmed"
 
 
@@ -2954,6 +3456,39 @@ def analyze_ict_breakout(
     )
 
 
+def merge_alert_ict_stamps(
+    ict: ICTBreakoutSignal,
+    alert: Optional[Mapping[str, Any]],
+) -> ICTBreakoutSignal:
+    """Carry radar ICT stamps when live re-analyze drops v_rip / volume flags."""
+    if not alert:
+        return ict
+    moment = str(alert.get("momentType") or alert.get("reason") or "").lower()
+    if bool(alert.get("ictVRipReady") or alert.get("vRipReady")) or "v_rip" in moment:
+        ict.v_rip_ready = True
+    if bool(alert.get("volumeAwaken") or alert.get("ictVolumeAwakening")):
+        ict.volume_awakening = True
+    for alert_key, ict_attr in (
+        ("ictFlatThenVertical", "flat_then_vertical"),
+        ("ictLocalSwingBase", "local_swing_base"),
+        ("ictBaseArmed", "base_armed"),
+        ("ictFirstLift", "first_lift"),
+    ):
+        if bool(alert.get(alert_key)):
+            setattr(ict, ict_attr, True)
+    try:
+        pad = float(
+            alert.get("ictBaseRelativeMovePct")
+            or alert.get("localBaseMovePct")
+            or 0
+        )
+    except (TypeError, ValueError):
+        pad = 0.0
+    if pad > 0 and float(getattr(ict, "base_relative_move_pct", 0) or 0) <= 0:
+        ict.base_relative_move_pct = pad
+    return ict
+
+
 def analyze_explosion_event_ict(event: Any, snap: Optional[SymbolSnapshot] = None) -> ICTBreakoutSignal:
     volume = float(getattr(event, "volume", 0) or 0)
     # Event path used to drop absolute volume (always 0) → ICT never saw abs awaken.
@@ -3082,6 +3617,8 @@ def _defensive_base_rip_top_allowed(
     base_move_pct: float = 0.0,
     volume_awake: bool = False,
     v_rip_ready: bool = False,
+    armed_base_launch: bool = False,
+    first_lift: bool = False,
 ) -> tuple[bool, str]:
     """Always-on top floor for defensive/worst local-base rips (not every EXPLODING)."""
     if not bool(getattr(settings, "ict_defensive_base_rip_require_top_quality", True)):
@@ -3092,13 +3629,9 @@ def _defensive_base_rip_top_allowed(
     min_quality = float(
         getattr(settings, "ict_defensive_base_rip_min_quality", 70.0) or 70.0
     )
-    if float(quality or 0) < min_quality:
-        return False, f"defensive_rip_top_quality<{min_quality:g}"
     min_score = float(
         getattr(settings, "ict_defensive_base_rip_min_score", 80.0) or 80.0
     )
-    if float(score or 0) < min_score:
-        return False, f"defensive_rip_top_score<{min_score:g}"
     min_v3 = float(
         getattr(settings, "ict_defensive_base_rip_min_velocity_3s", 2.5) or 2.5
     )
@@ -3109,6 +3642,23 @@ def _defensive_base_rip_top_allowed(
         getattr(settings, "top_ftv_a_pad_velocity_max_move_pct", 25.0) or 25.0
     )
     move = float(base_move_pct or 0)
+    v_pad_lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+    v_pad_hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    # Aug26 SENSEX PUT 77600/77700: v_rip_session_low at 7–10% lb had explosionScore
+    # ~40–42 (passes ict_v_rip_min_score) but defensive_rip_top still demanded ≥75.
+    if v_pad_lo <= move <= v_pad_hi and (v_rip_ready or volume_awake):
+        min_score = min(
+            min_score,
+            float(getattr(settings, "ict_v_rip_min_score", 40.0) or 40.0),
+        )
+        min_quality = min(
+            min_quality,
+            float(getattr(settings, "ict_v_rip_min_quality", 50.0) or 50.0),
+        )
+    if float(quality or 0) < min_quality:
+        return False, f"defensive_rip_top_quality<{min_quality:g}"
+    if float(score or 0) < min_score:
+        return False, f"defensive_rip_top_score<{min_score:g}"
     if pad_lo <= move <= pad_hi and (v_rip_ready or volume_awake):
         pad_floor = float(
             getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0
@@ -3132,6 +3682,57 @@ def _defensive_base_rip_top_allowed(
                     getattr(settings, "ict_v_rip_min_velocity_3s", 1.2) or 1.2
                 ),
             )
+        # Aug26 NIFTY PUT 24250 armed_base_launch at ~24% lb: volumeAwaken + first
+        # lift showed v3≈-0.3 while chart/defensive gates still demanded ≥0.85.
+        if (
+            armed_base_launch
+            and first_lift
+            and volume_awake
+            and pad_floor <= move <= pad_hi
+        ):
+            min_v3 = min(
+                min_v3,
+                float(
+                    getattr(
+                        settings,
+                        "ict_armed_base_launch_cold_velocity_3s",
+                        -0.5,
+                    )
+                    or -0.5
+                ),
+            )
+        # Aug26 SENSEX PUT 77800 first_lift_local_base at ~16% lb with session peak 53%.
+        if (
+            first_lift
+            and not armed_base_launch
+            and volume_awake
+            and pad_floor <= move <= pad_hi
+        ):
+            min_v3 = min(
+                min_v3,
+                float(
+                    getattr(
+                        settings,
+                        "ict_first_lift_local_base_cold_velocity_3s",
+                        -1.5,
+                    )
+                    or -1.5
+                ),
+            )
+        # Aug26 SENSEX PUT 77600 v_rip_session_low at ~9% lb: v3≈0 at lift off trough.
+        if (
+            v_rip_ready
+            and volume_awake
+            and not first_lift
+            and not armed_base_launch
+            and v_pad_lo <= move <= v_pad_hi
+        ):
+            min_v3 = min(
+                min_v3,
+                float(
+                    getattr(settings, "ict_v_rip_cold_velocity_3s", -1.5) or -1.5
+                ),
+            )
     if float(velocity_3s or 0) < min_v3:
         return False, f"defensive_rip_top_v3<{min_v3:g}"
     return True, "ok"
@@ -3152,6 +3753,35 @@ def _expiry_worst_defensive_rip_allowed(
 
         if pad_lane_expiry_worst_waive(evidence):
             return True, "pad_lane_expiry_worst_waive"
+        from app.engines.grade_a_ftv_capture import grade_a_ftv_expiry_worst_waive
+
+        if grade_a_ftv_expiry_worst_waive(evidence):
+            return True, "grade_a_ftv_expiry_worst_waive"
+        from app.engines.top_ftv_v_expiry_bypass import top_ftv_v_expiry_worst_waive
+
+        if top_ftv_v_expiry_worst_waive(evidence):
+            return True, "top_ftv_v_expiry_worst_waive"
+        if bool(evidence.get("shallowOtmLocalBaseTradeable")):
+            base_move = max(
+                float(evidence.get("localBaseMovePct") or 0),
+                float(evidence.get("ictBaseRelativeMovePct") or 0),
+            )
+            min_lb = float(
+                getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0
+            )
+            max_lb = float(
+                getattr(settings, "shallow_otm_local_base_max_move_pct", 25.0) or 25.0
+            )
+            tier_u = str(evidence.get("tier") or tier or "").upper()
+            if (
+                tier_u in ("ELITE", "EXPLODING")
+                and min_lb <= base_move <= max_lb + 1e-6
+                and bool(
+                    evidence.get("armedBaseLaunch")
+                    or evidence.get("ictArmedBaseLaunch")
+                )
+            ):
+                return True, "shallow_otm_local_base_expiry_worst_waive"
     if not bool(getattr(settings, "ict_defensive_base_rip_block_expiry_worst", True)):
         return True, "ok"
     min_tier = str(
@@ -3324,6 +3954,8 @@ def good_day_ict_capture_active(
                 base_move_pct=float(getattr(ict, "base_relative_move_pct", 0) or 0),
                 volume_awake=bool(getattr(ict, "volume_awakening", False)),
                 v_rip_ready=bool(getattr(ict, "v_rip_ready", False)),
+                armed_base_launch=bool(getattr(ict, "armed_base_launch", False)),
+                first_lift=bool(getattr(ict, "first_lift", False)),
             )
             if not ok_top:
                 meta["deniedReason"] = deny_top

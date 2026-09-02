@@ -403,6 +403,22 @@ def _event_adjustment(
     return adjustment, reasons
 
 
+def _snapshot_option_local_base_ready(snapshot: SymbolSnapshot) -> bool:
+    from app.engines.early_radar_pad_capture import watch_local_base_pad_structure
+    from app.engines.local_base_chart_bypass import _alert_has_local_base
+
+    for alert in snapshot.explosionAlerts or []:
+        row = dict(alert)
+        if _alert_has_local_base(row) or watch_local_base_pad_structure(row):
+            return True
+    top = snapshot.topExplosion or {}
+    if top:
+        row = dict(top)
+        if _alert_has_local_base(row) or watch_local_base_pad_structure(row):
+            return True
+    return False
+
+
 def estimate_live_probabilities(
     profile: Mapping[str, Any],
     live_rows: Iterable[Any],
@@ -430,6 +446,16 @@ def estimate_live_probabilities(
         * 100.0
     )
     local_base_ready = base_range <= float(settings.ftv_probability_flat_max_range_pct)
+    option_local_base_ready = _snapshot_option_local_base_ready(snapshot)
+    option_max_index_range = float(
+        getattr(settings, "ftv_focus_option_local_base_max_index_range_pct", 0.45)
+        or 0.45
+    )
+    effective_local_base_ready = local_base_ready or (
+        bool(getattr(settings, "ftv_focus_option_local_base_enabled", True))
+        and option_local_base_ready
+        and base_range <= option_max_index_range
+    )
     bucket = _bucket_label(
         recent[-1]["ts"],
         max(5, int(settings.ftv_probability_time_bucket_minutes)),
@@ -444,11 +470,18 @@ def estimate_live_probabilities(
     )
     chart_direction = str(snapshot.spotChart.direction or "NEUTRAL").upper()
     breadth_bias = str(snapshot.breadth.bias or "NEUTRAL").upper()
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    index_turn_call = index_trough_momentum_turn("CALL", snapshot.spotChart, settings=settings)
+    index_turn_put = index_trough_momentum_turn("PUT", snapshot.spotChart, settings=settings)
 
     estimates: dict[str, Any] = {}
     premium_profile = profile.get("premiumCalibration") or {}
     premium_quality = profile.get("premiumQuality") or {}
     premium_minimum = max(1, int(settings.ftv_premium_min_training_samples))
+    min_peak_for_window = float(
+        getattr(settings, "ftv_focus_min_peak_probability_pct", 28.0) or 28.0
+    )
     for side in ("CALL", "PUT"):
         side_direction = "BULLISH" if side == "CALL" else "BEARISH"
         support = _alert_support(snapshot, side)
@@ -495,13 +528,17 @@ def estimate_live_probabilities(
                 probability_sources[str(horizon)] = "INDEX_SPOT_PROXY"
                 sample_counts[str(horizon)] = index_samples
 
-            probability *= 1.18 if local_base_ready else 0.62
+            probability *= 1.18 if effective_local_base_ready else 0.62
             directional_momentum = momentum3 if side == "CALL" else -momentum3
             probability += max(-8.0, min(8.0, directional_momentum * 28.0))
             if chart_direction == side_direction:
                 probability += 5.0
             elif chart_direction not in ("NEUTRAL", side_direction):
-                probability -= 5.0
+                index_turn = index_turn_call if side == "CALL" else index_turn_put
+                if not index_turn:
+                    probability -= 5.0
+                else:
+                    probability += 3.0
             if breadth_bias == side_direction:
                 probability += 4.0
             elif breadth_bias not in ("NEUTRAL", side_direction):
@@ -513,7 +550,7 @@ def estimate_live_probabilities(
             probabilities[str(horizon)] = round(max(1.0, min(95.0, probability)), 1)
 
         earliest = next(
-            (h for h in HORIZONS if probabilities[str(h)] >= 35.0),
+            (h for h in HORIZONS if probabilities[str(h)] >= min_peak_for_window),
             max(HORIZONS, key=lambda h: probabilities[str(h)]),
         )
         estimates[side] = {
@@ -530,8 +567,8 @@ def estimate_live_probabilities(
     call_peak = max(estimates["CALL"]["probabilities"].values())
     put_peak = max(estimates["PUT"]["probabilities"].values())
     dominant = (
-        "CALL" if call_peak >= 20 and call_peak >= put_peak + 5
-        else "PUT" if put_peak >= 20 and put_peak >= call_peak + 5
+        "CALL" if call_peak >= 18 and call_peak >= put_peak + 4
+        else "PUT" if put_peak >= 18 and put_peak >= call_peak + 4
         else "NEUTRAL"
     )
     max_samples = max(
@@ -540,7 +577,7 @@ def estimate_live_probabilities(
         for h in HORIZONS
     )
     confidence = (
-        "HIGH" if max_samples >= 250 and local_base_ready
+        "HIGH" if max_samples >= 250 and effective_local_base_ready
         else "MEDIUM" if max_samples >= 100
         else "LOW"
     )
@@ -559,6 +596,8 @@ def estimate_live_probabilities(
         "timeBucket": bucket,
         "baseRangePct": round(base_range, 4),
         "localBaseReady": local_base_ready,
+        "optionLocalBaseReady": option_local_base_ready,
+        "effectiveLocalBaseReady": effective_local_base_ready,
         "momentum3Pct": round(momentum3, 4),
         "volumeRatio": round(volume_ratio, 2),
         "dominantSide": dominant,
@@ -781,7 +820,7 @@ async def build_ftv_probability_dashboard(
         ),
         default=None,
     )
-    return {
+    dashboard = {
         "enabled": True,
         "status": (
             "LIVE" if live_rows
@@ -817,3 +856,7 @@ async def build_ftv_probability_dashboard(
             "has enough unseen sessions for walk-forward validation."
         ),
     }
+    from app.engines.ftv_focus_alerts import build_ftv_focus_alerts
+
+    dashboard["focusAlerts"] = build_ftv_focus_alerts(snapshots, dashboard)
+    return dashboard

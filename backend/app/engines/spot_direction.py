@@ -304,6 +304,50 @@ def refresh_spot_chart_live(
     return refreshed
 
 
+def _confirmed_reversal_up(
+    spot_chart: SpotChart,
+    *,
+    min_mom15: float,
+    keeps_live: bool,
+    breadth: str = "NEUTRAL",
+) -> bool:
+    ema_b = str(getattr(spot_chart, "emaBias", "") or "").upper()
+    mom5 = float(spot_chart.momentum5Pct or 0)
+    mom15 = float(spot_chart.momentum15Pct or 0)
+    macd_bias = str(spot_chart.macdBias or "NEUTRAL").upper()
+    spot_dir = (spot_chart.direction or "NEUTRAL").upper()
+    return bool(
+        keeps_live
+        and spot_dir == "BULLISH"
+        and ema_b == "BULLISH"
+        and mom5 > 0
+        and mom15 >= min_mom15
+        and macd_bias != "BEARISH"
+    )
+
+
+def _confirmed_reversal_down(
+    spot_chart: SpotChart,
+    *,
+    min_mom15: float,
+    keeps_live: bool,
+    breadth: str = "NEUTRAL",
+) -> bool:
+    ema_b = str(getattr(spot_chart, "emaBias", "") or "").upper()
+    mom5 = float(spot_chart.momentum5Pct or 0)
+    mom15 = float(spot_chart.momentum15Pct or 0)
+    macd_bias = str(spot_chart.macdBias or "NEUTRAL").upper()
+    spot_dir = (spot_chart.direction or "NEUTRAL").upper()
+    return bool(
+        keeps_live
+        and spot_dir == "BEARISH"
+        and ema_b == "BEARISH"
+        and mom5 < 0
+        and mom15 <= -min_mom15
+        and macd_bias != "BULLISH"
+    )
+
+
 def reconcile_spot_chart_with_mtf(
     spot_chart: SpotChart,
     chart_analysis: Optional[Any],
@@ -335,72 +379,23 @@ def reconcile_spot_chart_with_mtf(
 
     mom5 = float(spot_chart.momentum5Pct or 0)
     mom15 = float(spot_chart.momentum15Pct or 0)
+    mom30 = float(spot_chart.momentum30Pct or 0)
     rsi = float(spot_chart.rsi or 50)
     macd_bias = str(spot_chart.macdBias or "NEUTRAL").upper()
-    # Prefer composite smartBias when it agrees with classic cloud read.
-    ichi_bull = cloud_bias == "BULLISH" or smart_bias == "BULLISH"
-    ichi_bear = cloud_bias == "BEARISH" or smart_bias == "BEARISH"
-
-    # Smart Ichimoku + live momentum — broker charts often agree here when MTF is thin.
-    if spot_dir == "BEARISH" and ichi_bull and price_vs == "ABOVE":
-        if mom5 > 0.01 and (mom15 >= 0 or rsi >= 55) and macd_bias != "BEARISH":
-            return spot_chart.model_copy(update={"direction": "BULLISH"})
-    if spot_dir == "BULLISH" and ichi_bear and price_vs == "BELOW":
-        if mom5 < -0.01 and (mom15 <= 0 or rsi <= 45) and macd_bias != "BULLISH":
-            return spot_chart.model_copy(update={"direction": "BEARISH"})
-
-    if consensus not in ("BULLISH", "BEARISH"):
-        if (
-            ichi_bull
-            and price_vs == "ABOVE"
-            and mom5 > 0.01
-            and rsi >= 52
-            and macd_bias == "BULLISH"
-            and spot_dir != "BULLISH"
-        ):
-            return spot_chart.model_copy(update={"direction": "BULLISH"})
-        if (
-            ichi_bear
-            and price_vs == "BELOW"
-            and mom5 < -0.01
-            and rsi <= 48
-            and macd_bias == "BEARISH"
-            and spot_dir != "BEARISH"
-        ):
-            return spot_chart.model_copy(update={"direction": "BEARISH"})
-        return spot_chart
-    if spot_dir == consensus:
-        return spot_chart
-
-    # A CONFIRMED live 5m reversal is not a lone flicker — do not force it back to a stale
-    # MTF consensus (Aug13 SENSEX recovery). Requires an EMA flip + both momenta agreeing +
-    # MACD not opposing, so a shallow dead-cat bounce is still force-flipped below. Symmetric.
+    breadth = (breadth_bias or "NEUTRAL").upper()
     settings = get_settings()
-    ema_b = str(getattr(spot_chart, "emaBias", "") or "").upper()
+    respect_breadth = bool(
+        getattr(settings, "chart_reconcile_respects_breadth_enabled", True)
+    )
     min_mom15 = float(
         getattr(settings, "chart_reconcile_confirmed_reversal_min_mom15_pct", 0.06) or 0.06
     )
     keeps_live = bool(
         getattr(settings, "chart_reconcile_confirmed_reversal_keeps_live", True)
     )
-    confirmed_up = (
-        keeps_live
-        and spot_dir == "BULLISH"
-        and ema_b == "BULLISH"
-        and mom5 > 0
-        and mom15 >= min_mom15
-        and macd_bias != "BEARISH"
-    )
-    confirmed_down = (
-        keeps_live
-        and spot_dir == "BEARISH"
-        and ema_b == "BEARISH"
-        and mom5 < 0
-        and mom15 <= -min_mom15
-        and macd_bias != "BULLISH"
-    )
-    if confirmed_up or confirmed_down:
-        return spot_chart
+    # Prefer composite smartBias when it agrees with classic cloud read.
+    ichi_bull = cloud_bias == "BULLISH" or smart_bias == "BULLISH"
+    ichi_bear = cloud_bias == "BEARISH" or smart_bias == "BEARISH"
 
     tfs = getattr(chart_analysis, "timeframes", None) or {}
     bull = bear = 0
@@ -412,8 +407,109 @@ def reconcile_spot_chart_with_mtf(
         elif d == "BEARISH":
             bear += 1
 
+    mom5_rollover = bool(getattr(settings, "chart_breadth_mom5_rollover_enabled", True))
+    bearish_mom5_flip = float(
+        getattr(settings, "chart_breadth_bearish_mom5_rollover_pct", 0.008) or 0.008
+    )
+    bullish_mom5_flip = float(
+        getattr(settings, "chart_breadth_bullish_mom5_rollover_pct", 0.008) or 0.008
+    )
+
+    if respect_breadth and breadth == "BEARISH":
+        if _confirmed_reversal_up(
+            spot_chart,
+            min_mom15=min_mom15,
+            keeps_live=keeps_live,
+            breadth=breadth,
+        ):
+            return spot_chart
+        if consensus == "BEARISH" and bear >= 1:
+            return spot_chart.model_copy(update={"direction": "BEARISH"})
+        if spot_dir == "BEARISH":
+            return spot_chart
+        if spot_dir == "BULLISH":
+            if (
+                bear >= 1
+                or mom15 <= 0
+                or mom30 <= 0
+                or (mom5_rollover and mom5 <= -bearish_mom5_flip)
+            ):
+                return spot_chart.model_copy(update={"direction": "BEARISH"})
+    if respect_breadth and breadth == "BULLISH":
+        if _confirmed_reversal_down(
+            spot_chart,
+            min_mom15=min_mom15,
+            keeps_live=keeps_live,
+            breadth=breadth,
+        ):
+            return spot_chart
+        if consensus == "BULLISH" and bull >= 1:
+            return spot_chart.model_copy(update={"direction": "BULLISH"})
+        if spot_dir == "BULLISH":
+            return spot_chart
+        if spot_dir == "BEARISH":
+            if (
+                bull >= 1
+                or mom15 >= 0
+                or mom30 >= 0
+                or (mom5_rollover and mom5 >= bullish_mom5_flip)
+            ):
+                return spot_chart.model_copy(update={"direction": "BULLISH"})
+
+    # Smart Ichimoku + live momentum — broker charts often agree here when MTF is thin.
+    if spot_dir == "BEARISH" and ichi_bull and price_vs == "ABOVE":
+        if mom5 > 0.01 and (mom15 >= 0 or rsi >= 55) and macd_bias != "BEARISH":
+            if not (respect_breadth and breadth == "BEARISH"):
+                return spot_chart.model_copy(update={"direction": "BULLISH"})
+    if spot_dir == "BULLISH" and ichi_bear and price_vs == "BELOW":
+        if mom5 < -0.01 and (mom15 <= 0 or rsi <= 45) and macd_bias != "BULLISH":
+            if not (respect_breadth and breadth == "BULLISH"):
+                return spot_chart.model_copy(update={"direction": "BEARISH"})
+
+    if consensus not in ("BULLISH", "BEARISH"):
+        if (
+            ichi_bull
+            and price_vs == "ABOVE"
+            and mom5 > 0.01
+            and rsi >= 52
+            and macd_bias == "BULLISH"
+            and spot_dir != "BULLISH"
+        ):
+            if not (respect_breadth and breadth == "BEARISH"):
+                return spot_chart.model_copy(update={"direction": "BULLISH"})
+        if (
+            ichi_bear
+            and price_vs == "BELOW"
+            and mom5 < -0.01
+            and rsi <= 48
+            and macd_bias == "BEARISH"
+            and spot_dir != "BEARISH"
+        ):
+            if not (respect_breadth and breadth == "BULLISH"):
+                return spot_chart.model_copy(update={"direction": "BEARISH"})
+        return spot_chart
+    if spot_dir == consensus:
+        return spot_chart
+
+    # A CONFIRMED live 5m reversal is not a lone flicker — do not force it back to a stale
+    # MTF consensus (Aug13 SENSEX recovery). Requires an EMA flip + both momenta agreeing +
+    # MACD not opposing, so a shallow dead-cat bounce is still force-flipped below. Symmetric.
+    confirmed_up = _confirmed_reversal_up(
+        spot_chart,
+        min_mom15=min_mom15,
+        keeps_live=keeps_live,
+        breadth=breadth,
+    )
+    confirmed_down = _confirmed_reversal_down(
+        spot_chart,
+        min_mom15=min_mom15,
+        keeps_live=keeps_live,
+        breadth=breadth,
+    )
+    if confirmed_up or confirmed_down:
+        return spot_chart
+
     consensus_ct = bear if consensus == "BEARISH" else bull
-    breadth = (breadth_bias or "NEUTRAL").upper()
     total = int(getattr(chart_analysis, "totalTimeframes", 0) or len(tfs) or 0)
 
     # MTF + breadth agree — always trust over lone 5m oversold bounce
@@ -460,6 +556,74 @@ def analyze_spot_chart(
     return build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=candles)
 
 
+def index_trough_momentum_turn(
+    side: Side | str,
+    chart: Optional[SpotChart],
+    *,
+    settings: Any = None,
+) -> bool:
+    """True when index 5m momentum is turning at the session trough (slow V).
+
+    Allows CALL entries while the composite 5m chart may still read BEARISH because
+    mom15/mom30 lag the visible trough recovery on the broker chart.
+    """
+    s = settings or get_settings()
+    if not bool(getattr(s, "index_trough_chart_bypass_enabled", True)):
+        return False
+    if chart is None:
+        return False
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
+    mom10 = float(getattr(chart, "momentum10Pct", 0) or 0)
+    mom15 = float(getattr(chart, "momentum15Pct", 0) or 0)
+    min_mom5 = float(
+        getattr(s, "index_trough_chart_bypass_min_mom5_pct", 0.015) or 0.015
+    )
+    min_shift = float(
+        getattr(s, "index_trough_chart_bypass_min_mom_shift_pct", 0.03) or 0.03
+    )
+    max_adverse_m15 = float(
+        getattr(s, "index_trough_chart_bypass_max_adverse_mom15_pct", -0.20) or -0.20
+    )
+    side_val = side.value if isinstance(side, Side) else str(side).upper()
+    deep_recovery = bool(getattr(s, "index_trough_deep_recovery_enabled", True))
+    deep_m15 = float(
+        getattr(s, "index_trough_deep_recovery_max_mom15_pct", -0.20) or -0.20
+    )
+    if side_val == "CALL":
+        if (
+            mom5 >= min_mom5
+            and mom5 >= mom15 + min_shift
+            and mom5 >= mom10 - 0.01
+            and mom15 >= max_adverse_m15
+        ):
+            return True
+        if (
+            deep_recovery
+            and mom15 <= deep_m15
+            and mom5 >= mom15 + min_shift
+            and mom5 >= mom10 - 0.01
+        ):
+            return True
+        return False
+    if side_val == "PUT":
+        if (
+            mom5 <= -min_mom5
+            and mom5 <= mom15 - min_shift
+            and mom5 <= mom10 + 0.01
+            and mom15 <= -max_adverse_m15
+        ):
+            return True
+        if (
+            deep_recovery
+            and mom15 >= -deep_m15
+            and mom5 <= mom15 - min_shift
+            and mom5 <= mom10 + 0.01
+        ):
+            return True
+        return False
+    return False
+
+
 def side_aligned_with_chart(side: Side | str, chart: Optional[SpotChart]) -> bool:
     if not chart:
         return True
@@ -470,8 +634,16 @@ def side_aligned_with_chart(side: Side | str, chart: Optional[SpotChart]) -> boo
             return chart.momentum5Pct >= -0.02
         return chart.momentum5Pct <= 0.02
     if side_val == "CALL":
-        return direction == "BULLISH"
-    return direction == "BEARISH"
+        if direction == "BULLISH":
+            return True
+        if direction == "BEARISH" and index_trough_momentum_turn(side_val, chart):
+            return True
+        return False
+    if direction == "BEARISH":
+        return True
+    if direction == "BULLISH" and index_trough_momentum_turn(side_val, chart):
+        return True
+    return False
 
 
 def hard_counter_trend_chart(
@@ -509,6 +681,7 @@ def live_direction_blocks_side(
     premium_led_bypass: bool = False,
     expiry_explosion_bypass: bool = False,
     strict_first_lift_bypass: bool = False,
+    index_trough_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str]:
     """
@@ -522,6 +695,8 @@ def live_direction_blocks_side(
         return False, "ok"
 
     side_val = side.value if isinstance(side, Side) else str(side).upper()
+    if not index_trough_bypass and index_trough_momentum_turn(side_val, chart, settings=settings):
+        index_trough_bypass = True
     bypass = expiry_explosion_bypass
     if not scalp_mode:
         bypass = (
@@ -529,11 +704,13 @@ def live_direction_blocks_side(
             or breadth_aligned_bypass
             or premium_led_bypass
             or strict_first_lift_bypass
+            or index_trough_bypass
         )
     if (
         bypass
         and _counter_trend_bypass_blocked(side_val, chart)
         and not strict_first_lift_bypass
+        and not index_trough_bypass
     ):
         bypass = False
 
@@ -558,6 +735,7 @@ def chart_blocks_side(
     premium_led_bypass: bool = False,
     expiry_explosion_bypass: bool = False,
     strict_first_lift_bypass: bool = False,
+    index_trough_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str]:
     settings = get_settings()
@@ -576,6 +754,7 @@ def chart_blocks_side(
         premium_led_bypass=premium_led_bypass,
         expiry_explosion_bypass=expiry_explosion_bypass,
         strict_first_lift_bypass=strict_first_lift_bypass,
+        index_trough_bypass=index_trough_bypass,
         scalp_mode=scalp_mode,
     )
     if live_blocked:
@@ -586,18 +765,29 @@ def chart_blocks_side(
     counter_block = (
         _counter_trend_bypass_blocked(side_val, chart)
         and not strict_first_lift_bypass
+        and not index_trough_bypass
     )
     if side_val == "CALL" and chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
         if (
             not counter_block
-            and (breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass)
+            and (
+                breadth_aligned_bypass
+                or premium_led_bypass
+                or expiry_explosion_bypass
+                or index_trough_bypass
+            )
         ):
             return False, "ok"
         return True, "chart_bearish_no_calls"
     if side_val == "PUT" and chart.direction == "BULLISH" and chart.trendStrength >= min_strength:
         if (
             not counter_block
-            and (breadth_aligned_bypass or premium_led_bypass or expiry_explosion_bypass)
+            and (
+                breadth_aligned_bypass
+                or premium_led_bypass
+                or expiry_explosion_bypass
+                or index_trough_bypass
+            )
         ):
             return False, "ok"
         return True, "chart_bullish_no_puts"
