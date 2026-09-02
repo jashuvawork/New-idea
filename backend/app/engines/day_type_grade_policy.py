@@ -28,6 +28,10 @@ _DAY_TYPE_MIN_GRADE: dict[str, str] = {
     "NO_DATA": "A",
 }
 
+# Large-loss pause bypass by day mode (all sessions; EXPIRY WORST blocked).
+_LARGE_LOSS_PAUSE_STRICT_MODES = frozenset({"CHOP DAY", "CHOP (PRE-10)"})
+_LARGE_LOSS_PAUSE_BLOCK_MODES = frozenset({"EXPIRY WORST"})
+
 _GRADE_RANK = {"S": 0, "A": 1, "B": 2, "C": 3, "REJECT": 9}
 
 
@@ -80,6 +84,60 @@ def resolve_day_type_min_grade(
         return _looser_grade(effective, mapped)
 
     return effective
+
+
+def large_loss_pause_bypass_for_day_mode(
+    day_mode: str,
+    *,
+    settings: Any = None,
+) -> dict[str, Any]:
+    """
+    Per day-mode policy for lifting large-loss pause.
+
+    Returns dict with keys: allowed, reason (if blocked), minScore, tiersCsv, strict.
+    """
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    mode = str(day_mode or "").strip().upper()
+    block_csv = str(
+        getattr(settings, "session_large_loss_pause_bypass_block_modes_csv", "EXPIRY WORST")
+        or "EXPIRY WORST"
+    )
+    blocked = _parse_csv_set(block_csv) | _LARGE_LOSS_PAUSE_BLOCK_MODES
+    if mode in blocked:
+        return {
+            "allowed": False,
+            "reason": f"large_loss_pause_blocked_{mode.lower().replace(' ', '_')}",
+            "strict": False,
+        }
+
+    default_min = float(getattr(settings, "loss_streak_elite_bypass_min_score", 90.0) or 90.0)
+    default_tiers = str(
+        getattr(settings, "loss_streak_elite_bypass_tiers_csv", "ELITE,EXPLODING") or "ELITE,EXPLODING"
+    )
+
+    if mode in _LARGE_LOSS_PAUSE_STRICT_MODES:
+        chop_min = float(
+            getattr(settings, "session_large_loss_pause_chop_min_score", 95.0) or 95.0
+        )
+        chop_tiers = str(
+            getattr(settings, "session_large_loss_pause_chop_tiers_csv", "ELITE") or "ELITE"
+        )
+        return {
+            "allowed": True,
+            "minScore": chop_min,
+            "tiersCsv": chop_tiers,
+            "strict": True,
+        }
+
+    # MOMENTUM RALLY, BULLISH/BEARISH, MIXED, NORMAL, EXPIRY DAY, CHOP+RALLY, etc.
+    return {
+        "allowed": True,
+        "minScore": default_min,
+        "tiersCsv": default_tiers,
+        "strict": False,
+    }
 
 
 def fast_moving_grade_c_waiver(

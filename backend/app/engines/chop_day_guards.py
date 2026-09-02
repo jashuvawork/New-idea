@@ -130,16 +130,24 @@ def _loss_streak_confidence_ok(
 def alert_is_loss_streak_elite_bypass(
     alert: dict[str, Any],
     snap: Optional[SymbolSnapshot] = None,
+    *,
+    min_score_override: Optional[float] = None,
+    allowed_tiers_override: Optional[frozenset[str]] = None,
 ) -> bool:
-    """True for high-confidence ELITE / top explosive worth lifting loss-streak pause."""
+    """True for high-confidence ELITE / top explosive worth lifting session pause."""
     settings = get_settings()
     if not getattr(settings, "loss_streak_elite_bypass_enabled", True):
         return False
     tier = str(alert.get("tier") or "").upper()
-    if tier not in loss_streak_elite_bypass_tiers():
+    allowed_tiers = allowed_tiers_override or loss_streak_elite_bypass_tiers()
+    if tier not in allowed_tiers:
         return False
     score = float(alert.get("explosionScore") or 0)
-    min_score = float(getattr(settings, "loss_streak_elite_bypass_min_score", 90.0) or 90.0)
+    min_score = float(
+        min_score_override
+        if min_score_override is not None
+        else getattr(settings, "loss_streak_elite_bypass_min_score", 90.0) or 90.0
+    )
     if score < min_score:
         return False
     # EXPLODING needs ICT structure confirmation — bare EXPLODING is not "top explosive".
@@ -179,12 +187,22 @@ def alert_is_loss_streak_elite_bypass(
     return True
 
 
-def snapshots_have_loss_streak_elite_bypass(snapshots: dict[str, SymbolSnapshot]) -> bool:
+def snapshots_have_loss_streak_elite_bypass(
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    min_score_override: Optional[float] = None,
+    allowed_tiers_override: Optional[frozenset[str]] = None,
+) -> bool:
     for snap in snapshots.values():
         if not snap.dataAvailable:
             continue
         for alert in snap.explosionAlerts or []:
-            if alert_is_loss_streak_elite_bypass(alert, snap):
+            if alert_is_loss_streak_elite_bypass(
+                alert,
+                snap,
+                min_score_override=min_score_override,
+                allowed_tiers_override=allowed_tiers_override,
+            ):
                 return True
     return False
 
@@ -264,21 +282,125 @@ def is_loss_streak_elite_bypass_candidate(candidate: Any) -> bool:
     return _loss_streak_confidence_ok(synthetic, snap, side, min_conf)
 
 
+def resolve_session_day_mode(snapshots: dict[str, SymbolSnapshot]) -> str:
+    """Current session day mode from live snapshots (matches UI dayMode badge)."""
+    from app.engines.expiry_day_guards import is_expiry_session, predict_worst_expiry_day
+
+    chop = is_chop_session(snapshots)
+    momentum = in_momentum_rally_window()
+    before_primary = before_primary_window()
+    breadth = _symbol_breadth_summary(snapshots)
+    expiry_active = is_expiry_session(snapshots)
+    expiry_worst = False
+    if expiry_active:
+        expiry_worst, _, _ = predict_worst_expiry_day(AutoTraderState(), snapshots)
+    mode, _, _ = _day_mode_label(
+        chop,
+        momentum,
+        breadth,
+        before_primary,
+        expiry=expiry_active,
+        expiry_worst=expiry_worst,
+    )
+    return mode
+
+
+def large_loss_pause_bypass_allowed(
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Day-type aware large-loss pause bypass — all sessions except blocked modes.
+
+    Fast/directional days: ELITE/EXPLODING at standard elite-bypass bar.
+    CHOP DAY / CHOP (PRE-10): stricter — ELITE only, higher min score.
+    EXPIRY WORST: never bypass.
+    """
+    from app.engines.day_type_grade_policy import large_loss_pause_bypass_for_day_mode
+
+    settings = get_settings()
+    if not bool(getattr(settings, "session_large_loss_pause_bypass_enabled", True)):
+        return False, "large_loss_pause_bypass_disabled", {}
+    if not getattr(settings, "loss_streak_elite_bypass_enabled", True):
+        return False, "loss_streak_elite_bypass_disabled", {}
+
+    day_mode = resolve_session_day_mode(snapshots)
+    policy = large_loss_pause_bypass_for_day_mode(day_mode, settings=settings)
+    meta: dict[str, Any] = {"dayMode": day_mode, **policy}
+    if not policy.get("allowed"):
+        return False, str(policy.get("reason") or "large_loss_pause_day_blocked"), meta
+
+    min_score = policy.get("minScore")
+    tiers_raw = policy.get("tiersCsv") or "ELITE,EXPLODING"
+    tiers = frozenset(t.strip().upper() for t in str(tiers_raw).split(",") if t.strip())
+    if snapshots_have_loss_streak_elite_bypass(
+        snapshots,
+        min_score_override=float(min_score) if min_score is not None else None,
+        allowed_tiers_override=tiers,
+    ):
+        return True, "large_loss_pause_bypass", meta
+    return False, "large_loss_pause_no_elite_on_radar", meta
+
+
+def is_large_loss_pause_elite_candidate(
+    candidate: Any,
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """Per-candidate gate when large-loss pause is lifted — day-type bar."""
+    from app.engines.day_type_grade_policy import large_loss_pause_bypass_for_day_mode
+
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+    day_mode = resolve_session_day_mode(snapshots)
+    policy = large_loss_pause_bypass_for_day_mode(day_mode)
+    if not policy.get("allowed"):
+        return False
+    min_score = policy.get("minScore")
+    tiers_raw = policy.get("tiersCsv") or "ELITE,EXPLODING"
+    tiers = frozenset(t.strip().upper() for t in str(tiers_raw).split(",") if t.strip())
+    alert = getattr(candidate, "alert", None) if isinstance(getattr(candidate, "alert", None), dict) else {}
+    snap = getattr(candidate, "snap", None)
+    if alert:
+        enriched = dict(alert)
+        if not enriched.get("tier"):
+            enriched["tier"] = getattr(candidate, "tier", None)
+        if not enriched.get("explosionScore"):
+            enriched["explosionScore"] = getattr(candidate, "confidence", None) or getattr(
+                candidate, "score", None
+            )
+        if not enriched.get("side"):
+            side = getattr(candidate, "side", None)
+            enriched["side"] = side.value if hasattr(side, "value") else side
+        return alert_is_loss_streak_elite_bypass(
+            enriched,
+            snap,
+            min_score_override=float(min_score) if min_score is not None else None,
+            allowed_tiers_override=tiers,
+        )
+    return is_loss_streak_elite_bypass_candidate(candidate)
+
+
 def resolve_session_entry_pause(
     snapshots: Optional[dict[str, SymbolSnapshot]] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Entry-gate pause resolver.
 
-    large_loss_pause is never bypassed.
-    loss_streak_pause lifts when a high-confidence ELITE / top explosive is on radar;
-    caller must then restrict entries to those candidates only (meta lossStreakEliteOnly).
+    large_loss_pause lifts for day-type-aware ELITE/EXPLODING top moments (all sessions).
+    loss_streak_pause uses the same elite-only entry restriction.
     """
     paused, reason = session_pause_active()
     meta: dict[str, Any] = {"rawPaused": paused, "rawReason": reason if paused else None}
     if not paused:
         return False, "ok", meta
     if reason.startswith("large_loss_pause"):
+        if snapshots is not None:
+            ok, bypass_reason, bypass_meta = large_loss_pause_bypass_allowed(snapshots)
+            meta.update(bypass_meta)
+            if ok:
+                meta["lossStreakEliteOnly"] = True
+                meta["largeLossPauseBypass"] = True
+                return False, bypass_reason, meta
+            meta["largeLossBypassReject"] = bypass_reason
         return True, reason, meta
     if not reason.startswith("loss_streak_pause"):
         return True, reason, meta
@@ -629,6 +751,9 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "entryPauseReason": None if entry_pause_reason == "ok" else entry_pause_reason,
         "lossStreakEliteBypass": bool(entry_pause_meta.get("lossStreakEliteBypass")),
         "lossStreakEliteOnly": bool(entry_pause_meta.get("lossStreakEliteOnly")),
+        "largeLossPauseBypass": bool(entry_pause_meta.get("largeLossPauseBypass")),
+        "largeLossBypassReject": entry_pause_meta.get("largeLossBypassReject"),
+        "largeLossBypassDayMode": entry_pause_meta.get("dayMode"),
         "beforePrimaryWindow": before_primary,
         "momentumRallyWindow": momentum,
         "openCautionWindow": in_open_caution_window(),
