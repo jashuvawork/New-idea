@@ -2637,6 +2637,9 @@ class Settings(BaseSettings):
     # PE (+89m) stays allowed. CE/PE symmetric.
     session_same_side_loss_reentry_enabled: bool = True
     session_same_side_loss_reentry_cooldown_seconds: int = 900
+    # After hard cooldown, same-side entries still need grade S until this window ends.
+    session_same_side_loss_reentry_elevated_bar_seconds: int = 3600
+    session_same_side_loss_reentry_elevated_min_grade: str = "S"
     # Re-entry ML gate — Aug28 winners ~56% ML, 24050 losses ~41-43%.
     explosion_reentry_ml_win_prob_gate_enabled: bool = True
     explosion_reentry_ml_win_prob_min: float = 0.52

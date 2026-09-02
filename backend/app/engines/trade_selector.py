@@ -1742,15 +1742,17 @@ def find_best_entry(
                 state,
                 symbol=c.symbol,
                 side=c.side,
+                candidate=c,
             )
             if session_loss_blocked:
+                reason = session_loss_meta.get("reason") or "session_same_side_loss_reentry_cooldown"
                 c.pretrade_meta = {
                     **(c.pretrade_meta or {}),
                     "sessionSameSideLossReentryBlocked": True,
                     **session_loss_meta,
                     "causalRanking": {
                         "grade": "REJECT",
-                        "reasons": ["session_same_side_loss_reentry_cooldown"],
+                        "reasons": [reason],
                     },
                 }
                 continue

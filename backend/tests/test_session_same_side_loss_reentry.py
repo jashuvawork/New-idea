@@ -37,6 +37,8 @@ def _settings_mock(**overrides):
     s = MagicMock()
     s.session_same_side_loss_reentry_enabled = True
     s.session_same_side_loss_reentry_cooldown_seconds = 900
+    s.session_same_side_loss_reentry_elevated_bar_seconds = 3600
+    s.session_same_side_loss_reentry_elevated_min_grade = "S"
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -84,15 +86,63 @@ def test_allows_opposite_side_after_loss(mock_settings):
 
 
 @patch("app.engines.session_mode_feedback.get_settings")
-def test_allows_same_side_after_cooldown_expires(mock_settings):
+def test_allows_same_side_after_elevated_window_expires(mock_settings):
+    """After 60m, normal gates apply — no session loss block."""
+    mock_settings.return_value = _settings_mock()
+    state = AutoTraderState()
+    state.closedPaperTrades = [_closed_loss(minutes_ago=65.0)]
+    blocked, meta = session_same_side_loss_reentry_blocked(
+        state, symbol="NIFTY", side=Side.PUT,
+    )
+    assert blocked is False
+    assert meta.get("applied") is False
+
+
+@patch("app.engines.trade_ranking.rank_entry_candidate")
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_elevated_bar_blocks_grade_a_after_hard_cooldown(mock_settings, mock_rank):
+    """15–60m after loss: grade A must not re-enter (Sep 2 NIFTY PE pattern)."""
+    mock_settings.return_value = _settings_mock()
+    mock_rank.return_value = {"grade": "A"}
+    state = AutoTraderState()
+    state.closedPaperTrades = [_closed_loss(minutes_ago=20.0)]
+    candidate = MagicMock()
+    blocked, meta = session_same_side_loss_reentry_blocked(
+        state, symbol="NIFTY", side=Side.PUT, candidate=candidate,
+    )
+    assert blocked is True
+    assert meta["reason"] == "session_same_side_loss_elevated_bar"
+    assert meta["causalGrade"] == "A"
+    assert meta["requiredGrade"] == "S"
+
+
+@patch("app.engines.trade_ranking.rank_entry_candidate")
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_elevated_bar_allows_grade_s_after_hard_cooldown(mock_settings, mock_rank):
+    """15–60m after loss: grade S re-qualifies via full causal ranking."""
+    mock_settings.return_value = _settings_mock()
+    mock_rank.return_value = {"grade": "S"}
+    state = AutoTraderState()
+    state.closedPaperTrades = [_closed_loss(minutes_ago=25.0)]
+    candidate = MagicMock()
+    blocked, meta = session_same_side_loss_reentry_blocked(
+        state, symbol="NIFTY", side=Side.PUT, candidate=candidate,
+    )
+    assert blocked is False
+    assert meta.get("applied") is False
+
+
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_elevated_bar_blocks_without_candidate(mock_settings):
+    """15–60m window blocks when no candidate to re-grade."""
     mock_settings.return_value = _settings_mock()
     state = AutoTraderState()
     state.closedPaperTrades = [_closed_loss(minutes_ago=20.0)]
     blocked, meta = session_same_side_loss_reentry_blocked(
         state, symbol="NIFTY", side=Side.PUT,
     )
-    assert blocked is False
-    assert meta.get("applied") is False
+    assert blocked is True
+    assert meta["reason"] == "session_same_side_loss_elevated_bar"
 
 
 @patch("app.engines.session_mode_feedback.get_settings")
