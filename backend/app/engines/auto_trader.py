@@ -560,6 +560,7 @@ async def _open_from_candidate(
         from app.engines.session_mode_feedback import (
             exhausted_ftv_reentry_blocked,
             failed_launch_reentry_blocked,
+            peak_fade_same_side_reentry_blocked,
             reentry_ml_win_prob_blocked,
             session_peak_late_reentry_blocked,
         )
@@ -572,6 +573,14 @@ async def _open_from_candidate(
         )
         if fail_blocked:
             return False, "failed_launch_reentry_cooldown"
+
+        peak_fade_blocked, _peak_fade_meta = peak_fade_same_side_reentry_blocked(
+            state,
+            symbol=symbol,
+            side=candidate.side,
+        )
+        if peak_fade_blocked:
+            return False, "peak_fade_same_side_reentry_cooldown"
 
         ml_blocked, _ml_meta = reentry_ml_win_prob_blocked(
             state,
