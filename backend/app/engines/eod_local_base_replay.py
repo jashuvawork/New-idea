@@ -517,7 +517,7 @@ def evaluate_replay_live_gates(
             )
             if not session_ok:
                 return False, session_reason
-        if not candidate_qualifies_power_hour_top_trade(candidate):
+        if not candidate_qualifies_power_hour_top_trade(candidate, snapshots=snapshots):
             return False, "power_hour_top_only"
 
     blocked, dir_reason = check_directional_side_lock(
