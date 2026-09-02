@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.config import Settings, get_settings, reset_settings_for_tests, set_settings_override
+from app.config import Settings, get_settings, set_settings_override
 
 _SEP02_ARCHIVE = Path("/tmp/eod_audit_archives/radar-2026-09-02.zip")
 
