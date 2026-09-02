@@ -69,6 +69,8 @@ def _levers_off_settings(base: Settings) -> Settings:
     data = deepcopy(base.model_dump())
     data["top_moments_exploding_elite_grade_b_enabled"] = False
     data["top_moments_momentum_rally_grade_b_enabled"] = False
+    data["top_moments_day_type_grade_policy_enabled"] = False
+    data["top_moments_fast_day_grade_c_enabled"] = False
     data["index_rally_side_flip_neutral_macd_mom5_waiver_enabled"] = False
     return Settings(**data)
 

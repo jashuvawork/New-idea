@@ -25,25 +25,30 @@ def resolve_top_moment_min_grade(
     day_mode: str = "",
     settings: Any = None,
 ) -> str:
-    """Effective min grade — may loosen on MOMENTUM RALLY days."""
+    """Effective min grade — day-type policy + legacy momentum-rally override."""
     from app.config import get_settings
+    from app.engines.day_type_grade_policy import resolve_day_type_min_grade
 
     settings = settings or get_settings()
-    effective = str(
-        min_grade or getattr(settings, "top_moments_min_grade", "A") or "A"
-    ).upper()
-    if not bool(getattr(settings, "top_moments_momentum_rally_grade_b_enabled", True)):
-        return effective
-    if str(day_mode or "").strip().upper() != MOMENTUM_RALLY_DAY_MODE:
-        return effective
-    rally_min = str(
-        getattr(settings, "top_moments_momentum_rally_min_grade", "B") or "B"
-    ).upper()
-    if rally_min == "B" and effective in {"A", "S"}:
-        return "B"
-    if rally_min == "A" and effective == "S":
-        return "A"
+    effective = resolve_day_type_min_grade(
+        min_grade=min_grade, day_mode=day_mode, settings=settings,
+    )
+
+    # Legacy flag: explicit MOMENTUM RALLY min (kept for backward compat).
+    if bool(getattr(settings, "top_moments_momentum_rally_grade_b_enabled", True)):
+        if str(day_mode or "").strip().upper() == MOMENTUM_RALLY_DAY_MODE:
+            rally_min = str(
+                getattr(settings, "top_moments_momentum_rally_min_grade", "B") or "B"
+            ).upper()
+            if rally_min == "B" and _grade_rank(effective) < _grade_rank("B"):
+                effective = "B"
+            elif rally_min == "A" and effective == "S":
+                effective = "A"
     return effective
+
+
+def _grade_rank(grade: str) -> int:
+    return {"S": 0, "A": 1, "B": 2, "C": 3}.get(str(grade or "").upper(), 9)
 
 
 def exploding_elite_grade_b_waiver(
@@ -251,8 +256,12 @@ def top_moment_entry_allowed(
 
     moment = classify_top_moment_type(evidence)
     if grade not in allowed_grades:
+        from app.engines.day_type_grade_policy import fast_moving_grade_c_waiver
+
         if not exploding_elite_grade_b_waiver(
             evidence, ranking, moment, settings=settings,
+        ) and not fast_moving_grade_c_waiver(
+            evidence, ranking, moment, day_mode=day_mode, settings=settings,
         ):
             return False, f"top_moment_requires_grade_{min_grade_u}_or_better", None
 

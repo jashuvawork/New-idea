@@ -1151,6 +1151,8 @@ def generate_lever_replay_compare(
     off_data = deepcopy(base.model_dump())
     off_data["top_moments_exploding_elite_grade_b_enabled"] = False
     off_data["top_moments_momentum_rally_grade_b_enabled"] = False
+    off_data["top_moments_day_type_grade_policy_enabled"] = False
+    off_data["top_moments_fast_day_grade_c_enabled"] = False
     off_data["index_rally_side_flip_neutral_macd_mom5_waiver_enabled"] = False
     off_settings = Settings(**off_data)
 
