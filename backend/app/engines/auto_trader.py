@@ -563,6 +563,7 @@ async def _open_from_candidate(
             peak_fade_same_side_reentry_blocked,
             reentry_ml_win_prob_blocked,
             session_peak_late_reentry_blocked,
+            session_same_side_loss_reentry_blocked,
         )
 
         fail_blocked, _fail_meta = failed_launch_reentry_blocked(
@@ -581,6 +582,14 @@ async def _open_from_candidate(
         )
         if peak_fade_blocked:
             return False, "peak_fade_same_side_reentry_cooldown"
+
+        session_loss_blocked, _session_loss_meta = session_same_side_loss_reentry_blocked(
+            state,
+            symbol=symbol,
+            side=candidate.side,
+        )
+        if session_loss_blocked:
+            return False, "session_same_side_loss_reentry_cooldown"
 
         ml_blocked, _ml_meta = reentry_ml_win_prob_blocked(
             state,
