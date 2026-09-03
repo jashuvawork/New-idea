@@ -25,46 +25,44 @@ from app.models.schemas import (
     SpotChart,
     SymbolSnapshot,
 )
+from tests.mock_defaults import settings_mock
 
 IST = ZoneInfo("Asia/Kolkata")
 
 
 def _settings(**overrides):
-    s = MagicMock()
-    s.expiry_day_guards_enabled = True
-    s.expiry_worst_day_halt_entries = True
-    s.expiry_worst_day_elite_top_bypass_enabled = True
-    s.expiry_worst_day_elite_top_bypasses_trade_cap = True
-    s.expiry_worst_day_elite_top_min_score = 62.0
-    s.expiry_worst_day_elite_top_min_move_pct = 28.0
-    s.expiry_worst_day_elite_top_max_move_pct = 70.0
-    s.expiry_worst_day_elite_top_tiers_csv = "ELITE,EXPLODING"
-    s.expiry_worst_day_elite_top_composer_bypass = True
-    s.expiry_worst_day_min_rank_score = 72.0
-    s.expiry_worst_day_max_trades = 3
-    s.expiry_morning_only = True
-    s.expiry_morning_end_hour = 13
-    s.expiry_morning_end_minute = 30
-    s.expiry_pm_itm_quick_enabled = False
-    s.min_option_premium_inr = 20.0
-    s.max_option_premium_inr = 250.0
-    s.explosion_max_premium_inr = 400.0
-    s.explosion_cheap_rip_min_premium_inr = 8.0
-    s.explosion_cheap_rip_min_peak_pct = 25.0
-    s.controlled_trading_enabled = True
-    s.composer_hard_gate_enabled = True
-    s.composer_bias_gate_enabled = True
-    s.ict_armed_base_min_samples = 6
-    s.ict_armed_base_min_span_seconds = 15.0
-    s.ict_armed_base_max_range_pct = 5.0
-    s.ict_elite_base_ready_min_move_pct = 2.0
-    s.ict_elite_base_ready_max_move_pct = 5.0
-    s.ict_armed_base_launch_min_score = 45.0
-    s.ict_armed_base_launch_min_tqs = 50.0
-    s.moneyness_atm_tolerance_points = 50.0
-    s.nifty_strike_step = 50.0
-    for k, v in overrides.items():
-        setattr(s, k, v)
+    s = settings_mock(
+        expiry_worst_day_halt_entries=True,
+        expiry_worst_day_elite_top_bypass_enabled=True,
+        expiry_worst_day_elite_top_bypasses_trade_cap=True,
+        expiry_worst_day_elite_top_min_score=62.0,
+        expiry_worst_day_elite_top_min_move_pct=28.0,
+        expiry_worst_day_elite_top_max_move_pct=70.0,
+        expiry_worst_day_elite_top_tiers_csv="ELITE,EXPLODING",
+        expiry_worst_day_elite_top_composer_bypass=True,
+        expiry_worst_day_min_rank_score=72.0,
+        expiry_worst_day_max_trades=3,
+        expiry_morning_only=True,
+        expiry_pm_itm_quick_enabled=False,
+        min_option_premium_inr=20.0,
+        max_option_premium_inr=250.0,
+        explosion_max_premium_inr=400.0,
+        explosion_cheap_rip_min_premium_inr=8.0,
+        explosion_cheap_rip_min_peak_pct=25.0,
+        controlled_trading_enabled=True,
+        composer_hard_gate_enabled=True,
+        composer_bias_gate_enabled=True,
+        ict_armed_base_min_samples=6,
+        ict_armed_base_min_span_seconds=15.0,
+        ict_armed_base_max_range_pct=5.0,
+        ict_elite_base_ready_min_move_pct=2.0,
+        ict_elite_base_ready_max_move_pct=5.0,
+        ict_armed_base_launch_min_score=45.0,
+        ict_armed_base_launch_min_tqs=50.0,
+        moneyness_atm_tolerance_points=50.0,
+        nifty_strike_step=50.0,
+        **overrides,
+    )
     return s
 
 

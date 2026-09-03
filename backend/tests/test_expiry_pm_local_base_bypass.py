@@ -20,29 +20,25 @@ from app.models.schemas import (
     SpotChart,
     SymbolSnapshot,
 )
+from tests.mock_defaults import settings_mock
 
 IST = ZoneInfo("Asia/Kolkata")
 
 
 def _cfg():
-    from unittest.mock import MagicMock
-
-    cfg = MagicMock()
-    cfg.expiry_day_guards_enabled = True
-    cfg.expiry_morning_end_hour = 13
-    cfg.expiry_morning_end_minute = 30
-    cfg.expiry_pm_itm_local_base_explosion_bypass_enabled = True
-    cfg.expiry_pm_itm_local_base_min_explosion_score = 75.0
-    cfg.expiry_pm_itm_local_base_min_move_pct = 2.0
-    cfg.expiry_pm_itm_local_base_max_move_pct = 25.0
-    cfg.expiry_worst_day_elite_top_bypass_enabled = True
-    cfg.expiry_min_rank_score = 62.0
-    cfg.expiry_worst_day_min_rank_score = 72.0
-    cfg.explosion_max_premium_inr = 800.0
-    cfg.min_option_premium_inr = 18.0
-    cfg.max_option_premium_inr = 800.0
-    cfg.explosion_min_premium_inr = 18.0
-    return cfg
+    return settings_mock(
+        expiry_pm_itm_local_base_explosion_bypass_enabled=True,
+        expiry_pm_itm_local_base_min_explosion_score=75.0,
+        expiry_pm_itm_local_base_min_move_pct=2.0,
+        expiry_pm_itm_local_base_max_move_pct=25.0,
+        expiry_worst_day_elite_top_bypass_enabled=True,
+        expiry_min_rank_score=62.0,
+        expiry_worst_day_min_rank_score=72.0,
+        explosion_max_premium_inr=800.0,
+        min_option_premium_inr=18.0,
+        max_option_premium_inr=800.0,
+        explosion_min_premium_inr=18.0,
+    )
 
 
 def _nifty_expiry_snap() -> SymbolSnapshot:
