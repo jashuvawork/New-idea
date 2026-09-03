@@ -566,4 +566,3 @@ def test_expiry_daily_loss_bypass_candidate_same_day_only(mock_settings, _top):
     nifty = _Cand("NIFTY", Side.PUT, 23850.0, 80.0, tier="EXPLODING", snap=snaps["NIFTY"])
     assert candidate_qualifies_expiry_daily_loss_stop_bypass(sensex, snaps) is True
     assert candidate_qualifies_expiry_daily_loss_stop_bypass(nifty, snaps) is False
-

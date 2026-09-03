@@ -3858,15 +3858,13 @@ async def process(
         )
         from app.engines.bad_day_routing import (
             candidate_qualifies_expiry_daily_loss_stop_bypass,
+            expiry_daily_loss_stop_bypass_active,
+            severe_pause_expiring_deep_itm_lift_active,
         )
         from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
 
         policy, policy_meta = session_entry_policy(state, snapshots)
         extreme_session = snapshots_have_top_signal_session_lift(snapshots)
-        from app.engines.bad_day_routing import (
-            expiry_daily_loss_stop_bypass_active,
-            severe_pause_expiring_deep_itm_lift_active,
-        )
 
         deep_itm_pause_lift = severe_pause_expiring_deep_itm_lift_active(state, snapshots)
         daily_loss_expiry_bypass = expiry_daily_loss_stop_bypass_active(state, snapshots)
