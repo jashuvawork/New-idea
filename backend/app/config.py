@@ -1633,6 +1633,13 @@ class Settings(BaseSettings):
     expiry_morning_only: bool = True
     expiry_morning_end_hour: int = 13
     expiry_morning_end_minute: int = 30
+    # Sep03 afternoon: small confirmation lift for ELITE/EXPLODING on any expiry session
+    # (NIFTY 23850 PE was 80.5 / v3 2.6 on SENSEX expiry — fake rip vs morning ELITE 100).
+    expiry_afternoon_explosion_confirm_enabled: bool = True
+    expiry_afternoon_elite_min_explosion_score: float = 85.0
+    expiry_afternoon_elite_min_velocity_3s: float = 2.5
+    expiry_afternoon_exploding_min_explosion_score: float = 90.0
+    expiry_afternoon_exploding_min_velocity_3s: float = 3.0
     # Hard stop for generic expiry entries after 15:00 — top FTV/V/ELITE/explosives bypass.
     expiry_evening_block_enabled: bool = True
     expiry_evening_block_hour: int = 15

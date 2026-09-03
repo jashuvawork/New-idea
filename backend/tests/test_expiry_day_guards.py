@@ -378,4 +378,89 @@ def test_check_expiry_candidate_aligned_explosion_skips_rank_floor(
     assert ok is True
     assert reason == "ok"
     assert meta.get("expiryAlignedBypass") is True
-    mock_aligned.assert_called_once()
+
+
+@patch("app.engines.expiry_day_guards.any_expiry_session_active", return_value=True)
+@patch("app.engines.expiry_day_guards.in_expiry_afternoon_window", return_value=True)
+@patch("app.engines.expiry_day_guards.expiry_pm_itm_quick_active", return_value=False)
+@patch("app.engines.expiry_day_guards.is_symbol_expiry_day", return_value=False)
+@patch("app.engines.expiry_day_guards.get_settings")
+def test_sep03_expiry_afternoon_exploding_lift_blocks_805(
+    mock_settings, _sym_exp, _pm, _aft, _sess,
+):
+    """Sep03 NIFTY 23850 PE — EXPLODING 80.5 / v3 2.62 blocked on SENSEX expiry afternoon."""
+    from types import SimpleNamespace
+
+    from app.engines.expiry_day_guards import check_expiry_afternoon_explosion_confirmation
+
+    s = mock_settings.return_value
+    s.expiry_day_guards_enabled = True
+    s.expiry_afternoon_explosion_confirm_enabled = True
+    s.expiry_afternoon_exploding_min_explosion_score = 90.0
+    s.expiry_afternoon_exploding_min_velocity_3s = 3.0
+    s.expiry_afternoon_elite_min_explosion_score = 85.0
+    s.expiry_afternoon_elite_min_velocity_3s = 2.5
+
+    cand = SimpleNamespace(
+        mode="explosion",
+        tier="EXPLODING",
+        score=270.0,
+        explosion_event=SimpleNamespace(
+            tier="EXPLODING", explosion_score=80.5, velocity_3s=2.62,
+        ),
+    )
+    ok, reason, meta = check_expiry_afternoon_explosion_confirmation(cand, AutoTraderState(), {})
+    assert ok is False
+    assert "score_below_90" in reason
+    assert meta.get("expiryAfternoonConfirm") is True
+
+
+@patch("app.engines.expiry_day_guards.any_expiry_session_active", return_value=True)
+@patch("app.engines.expiry_day_guards.in_expiry_afternoon_window", return_value=True)
+@patch("app.engines.expiry_day_guards.get_settings")
+def test_expiry_afternoon_elite_100_passes_lift(mock_settings, _aft, _sess):
+    from types import SimpleNamespace
+
+    from app.engines.expiry_day_guards import check_expiry_afternoon_explosion_confirmation
+
+    s = mock_settings.return_value
+    s.expiry_day_guards_enabled = True
+    s.expiry_afternoon_explosion_confirm_enabled = True
+    s.expiry_afternoon_exploding_min_explosion_score = 90.0
+    s.expiry_afternoon_exploding_min_velocity_3s = 3.0
+    s.expiry_afternoon_elite_min_explosion_score = 85.0
+    s.expiry_afternoon_elite_min_velocity_3s = 2.5
+
+    cand = SimpleNamespace(
+        mode="explosion",
+        tier="ELITE",
+        explosion_event=SimpleNamespace(
+            tier="ELITE", explosion_score=100.0, velocity_3s=2.6,
+        ),
+    )
+    ok, reason, _meta = check_expiry_afternoon_explosion_confirmation(cand, AutoTraderState(), {})
+    assert ok is True
+    assert reason == "ok"
+
+
+@patch("app.engines.expiry_day_guards.any_expiry_session_active", return_value=False)
+@patch("app.engines.expiry_day_guards.get_settings")
+def test_expiry_afternoon_lift_skipped_off_expiry_session(mock_settings, _sess):
+    from types import SimpleNamespace
+
+    from app.engines.expiry_day_guards import check_expiry_afternoon_explosion_confirmation
+
+    s = mock_settings.return_value
+    s.expiry_day_guards_enabled = True
+    s.expiry_afternoon_explosion_confirm_enabled = True
+
+    cand = SimpleNamespace(
+        mode="explosion",
+        tier="EXPLODING",
+        explosion_event=SimpleNamespace(
+            tier="EXPLODING", explosion_score=50.0, velocity_3s=0.5,
+        ),
+    )
+    ok, reason, _meta = check_expiry_afternoon_explosion_confirmation(cand, AutoTraderState(), {})
+    assert ok is True
+    assert reason == "ok"

@@ -153,6 +153,115 @@ def expiry_post_win_afternoon_fomo_risk(
     return True, reasons
 
 
+def _candidate_explosion_score(candidate: Any) -> float:
+    event = getattr(candidate, "explosion_event", None)
+    if event is not None:
+        return float(getattr(event, "explosion_score", 0) or 0)
+    alert = getattr(candidate, "alert", None)
+    if isinstance(alert, dict):
+        return float(alert.get("explosionScore") or 0)
+    return float(getattr(candidate, "score", 0) or 0)
+
+
+def _candidate_velocity_3s(candidate: Any) -> float:
+    event = getattr(candidate, "explosion_event", None)
+    if event is not None:
+        return float(getattr(event, "velocity_3s", 0) or 0)
+    alert = getattr(candidate, "alert", None)
+    if isinstance(alert, dict):
+        return float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+    return 0.0
+
+
+def _candidate_explosion_tier(candidate: Any) -> str:
+    event = getattr(candidate, "explosion_event", None)
+    tier = str(
+        getattr(event, "tier", None)
+        or getattr(candidate, "tier", "")
+        or ""
+    ).upper()
+    if tier:
+        return tier
+    alert = getattr(candidate, "alert", None)
+    if isinstance(alert, dict):
+        return str(alert.get("tier") or "").upper()
+    return ""
+
+
+def check_expiry_afternoon_explosion_confirmation(
+    candidate: Any,
+    state: AutoTraderState | None = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Small confirmation lift after expiry morning — ELITE vs EXPLODING tiers.
+
+    Session-level (any index expiring today), so cross-index NIFTY entries on
+    SENSEX expiry afternoons are covered. Sep03 loss: EXPLODING 80.5 / v3 2.62.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"expiryAfternoonConfirm": False}
+    if not getattr(settings, "expiry_afternoon_explosion_confirm_enabled", True):
+        return True, "ok", meta
+    if not settings.expiry_day_guards_enabled:
+        return True, "ok", meta
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return True, "ok", meta
+    if not any_expiry_session_active():
+        return True, "ok", meta
+    if not in_expiry_afternoon_window():
+        return True, "ok", meta
+
+    tier = _candidate_explosion_tier(candidate)
+    if tier not in ("ELITE", "EXPLODING"):
+        return True, "ok", meta
+
+    # Already-confirmed top signals carry their own proof — skip the generic lift.
+    if snapshots is not None and state is not None:
+        from app.engines.grade_a_ftv_capture import is_grade_a_ftv_first_lift_candidate
+        from app.engines.top_ftv_v_expiry_bypass import is_top_ftv_or_v_candidate
+
+        if is_expiry_elite_top_candidate(candidate):
+            meta["expiryAfternoonConfirmBypass"] = "elite_top"
+            return True, "ok", meta
+        if is_grade_a_ftv_first_lift_candidate(candidate):
+            meta["expiryAfternoonConfirmBypass"] = "grade_a_ftv"
+            return True, "ok", meta
+        if is_top_ftv_or_v_candidate(candidate):
+            meta["expiryAfternoonConfirmBypass"] = "top_ftv_v"
+            return True, "ok", meta
+
+    score = _candidate_explosion_score(candidate)
+    v3 = _candidate_velocity_3s(candidate)
+    meta["expiryAfternoonConfirm"] = True
+    meta["expiryAfternoonTier"] = tier
+    meta["expiryAfternoonScore"] = round(score, 2)
+    meta["expiryAfternoonVelocity3s"] = round(v3, 3)
+
+    if tier == "ELITE":
+        min_score = float(
+            getattr(settings, "expiry_afternoon_elite_min_explosion_score", 85.0) or 85.0
+        )
+        min_v3 = float(
+            getattr(settings, "expiry_afternoon_elite_min_velocity_3s", 2.5) or 2.5
+        )
+    else:
+        min_score = float(
+            getattr(settings, "expiry_afternoon_exploding_min_explosion_score", 90.0) or 90.0
+        )
+        min_v3 = float(
+            getattr(settings, "expiry_afternoon_exploding_min_velocity_3s", 3.0) or 3.0
+        )
+    meta["expiryAfternoonMinScore"] = min_score
+    meta["expiryAfternoonMinVelocity3s"] = min_v3
+
+    if score < min_score:
+        return False, f"expiry_afternoon_{tier.lower()}_score_below_{min_score:.0f}", meta
+    if v3 < min_v3:
+        return False, f"expiry_afternoon_{tier.lower()}_v3_below_{min_v3:g}", meta
+    return True, "ok", meta
+
+
 def is_near_expiry_day(snap: SymbolSnapshot) -> bool:
     """True when chain expiry is today or tomorrow (pre-expiry + expiry session)."""
     if not snap.dataAvailable or not snap.optionExpiry:
@@ -1186,6 +1295,14 @@ def check_expiry_candidate(
     snap = snapshots.get(sym) or candidate.snap
     score = float(getattr(candidate, "score", 0) or 0)
     mode = str(getattr(candidate, "mode", "") or "")
+
+    confirm_ok, confirm_reason, confirm_meta = check_expiry_afternoon_explosion_confirmation(
+        candidate, state, snapshots,
+    )
+    meta.update(confirm_meta)
+    if not confirm_ok:
+        return False, confirm_reason, meta
+
     pm_itm = expiry_pm_itm_quick_active(snap, state, snapshots)
     meta["expiryPmItmQuick"] = pm_itm
 
