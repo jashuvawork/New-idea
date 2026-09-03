@@ -798,6 +798,9 @@ class Settings(BaseSettings):
     # slower full entry-scan cadence.
     building_ltp_monitor_enabled: bool = True
     building_ltp_monitor_min_ms: float = 75.0
+    # With an open explosion, tick-fast exits own the hot path — skip heavy entry scans.
+    open_position_skip_entry_scan_enabled: bool = True
+    open_position_entry_scan_interval_ms: float = 5000.0
     building_ltp_min_change_pct: float = 0.15
     building_ltp_min_change_abs: float = 0.05
     # After scoring every watched BUILDING name on an LTP cycle, take only the

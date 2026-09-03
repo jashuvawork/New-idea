@@ -391,3 +391,35 @@ def test_sync_cache_json_meta_throttles_without_force():
     assert out == sentinel
     forced = market_router._sync_cache_json_meta(force=True)
     assert forced is not None
+
+
+def test_entry_scan_skippable_when_open_explosion_and_tick_fast():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from app.models.schemas import AutoTraderState, StrategyType
+
+    state = AutoTraderState()
+    state.openPaperTrades = [
+        SimpleNamespace(strategyType=StrategyType.EXPLOSIVE, status="OPEN"),
+    ]
+    with patch("app.routers.market.get_state", return_value=state), patch(
+        "app.routers.market.can_run_tick_fast",
+        return_value=True,
+    ), patch("app.routers.market.get_settings") as mock_settings:
+        mock_settings.return_value.open_position_skip_entry_scan_enabled = True
+        mock_settings.return_value.selector_best_only_enabled = True
+        assert market_router.entry_scan_skippable() is True
+
+
+def test_entry_scan_not_skippable_without_open_trades():
+    from unittest.mock import patch
+
+    from app.models.schemas import AutoTraderState
+
+    state = AutoTraderState()
+    with patch("app.routers.market.get_state", return_value=state), patch(
+        "app.routers.market.can_run_tick_fast",
+        return_value=True,
+    ):
+        assert market_router.entry_scan_skippable() is False

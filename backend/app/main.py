@@ -45,6 +45,7 @@ async def _background_monitor():
         mark_full_rest_done,
         mark_full_scan_done,
         run_building_ltp_entry_cycle,
+        entry_scan_skippable,
         run_entry_scan_on_cache,
         run_tick_fast_cycle,
         run_ws_overlay_cycle,
@@ -99,39 +100,42 @@ async def _background_monitor():
                         await run_ws_overlay_cycle(broadcast=True)
 
                 if entry_scan_due():
-                    ws = is_ws_active()
-                    if tick_driven and not ws:
-                        invalidate_snapshot_cache()
-                    if ws:
-                        # Never await full REST on this loop — 30–90s builds freeze overlays.
-                        if full_rest_rebuild_due() and not full_rest_rebuild_running():
-                            schedule_full_rest_rebuild(
-                                broadcast=True,
-                                run_trader=rest_ok,
-                            )
-                        if full_rest_rebuild_running():
-                            await run_building_ltp_entry_cycle(
-                                broadcast=True,
-                                run_trader=rest_ok,
-                            )
-                            if ws_overlay_due():
-                                await run_ws_overlay_cycle(broadcast=True)
-                        else:
-                            await run_entry_scan_on_cache(
-                                broadcast=True,
-                                run_trader=rest_ok,
-                            )
+                    if entry_scan_skippable():
+                        mark_full_scan_done()
+                        if is_ws_active() and ws_overlay_due():
+                            await run_ws_overlay_cycle(broadcast=True)
+                    else:
+                        ws = is_ws_active()
+                        if tick_driven and not ws:
+                            invalidate_snapshot_cache()
+                        if ws:
+                            # Never await full REST on this loop — 30–90s builds freeze overlays.
+                            if full_rest_rebuild_due() and not full_rest_rebuild_running():
+                                schedule_full_rest_rebuild(
+                                    broadcast=True,
+                                    run_trader=rest_ok,
+                                )
+                            if full_rest_rebuild_running():
+                                await run_building_ltp_entry_cycle(
+                                    broadcast=True,
+                                    run_trader=rest_ok,
+                                )
+                                if ws_overlay_due():
+                                    await run_ws_overlay_cycle(broadcast=True)
+                            else:
+                                await run_entry_scan_on_cache(
+                                    broadcast=True,
+                                    run_trader=rest_ok,
+                                )
                             if rest_ok:
                                 mark_full_scan_done()
-                    else:
-                        await get_multi_snapshot(
-                            broadcast=True,
-                            force=False,
-                            run_trader=rest_ok,
-                        )
-                        mark_full_rest_done()
-                        if rest_ok:
-                            mark_full_scan_done()
+                        else:
+                            await get_multi_snapshot(
+                                broadcast=True,
+                                force=False,
+                                run_trader=rest_ok,
+                            )
+                            mark_full_rest_done()
                 elif is_ws_active():
                     # Poll timeout between entry scans — catch BUILDING LTP moves.
                     await run_building_ltp_entry_cycle(
