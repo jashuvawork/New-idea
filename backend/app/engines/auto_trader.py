@@ -3843,7 +3843,14 @@ async def process(
 
         policy, policy_meta = session_entry_policy(state, snapshots)
         extreme_session = snapshots_have_top_signal_session_lift(snapshots)
-        session_lift = extreme_session
+        from app.engines.bad_day_routing import (
+            severe_pause_expiring_deep_itm_lift_active,
+        )
+
+        deep_itm_pause_lift = severe_pause_expiring_deep_itm_lift_active(state, snapshots)
+        session_lift = extreme_session or deep_itm_pause_lift
+        if deep_itm_pause_lift:
+            policy_meta["severePauseDeepItmLift"] = True
         if settings.enable_live_trading and extreme_session and snapshots:
             from app.engines.chop_live_guards import chop_live_session_lift_allowed
 

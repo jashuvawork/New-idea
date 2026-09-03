@@ -546,13 +546,11 @@ def is_expiry_deep_itm_candidate(
     return _candidate_itm_depth(candidate, snap) >= min_steps
 
 
-def expiring_symbol_has_deep_itm_heatmap(
+def _scan_expiring_deep_itm_heatmap(
     snapshots: dict[str, SymbolSnapshot],
 ) -> bool:
-    """True when an expiring index heatmap shows tradeable deep ITM premium."""
+    """Core scan — expiring index heatmap has tradeable deep ITM premium."""
     settings = get_settings()
-    if not expiry_afternoon_deep_itm_routing_active(snapshots):
-        return False
     from app.engines.moneyness import atm_strike, classify_moneyness, steps_from_atm
 
     min_steps = int(getattr(settings, "expiry_afternoon_deep_itm_min_steps", 2) or 2)
@@ -584,6 +582,133 @@ def expiring_symbol_has_deep_itm_heatmap(
                 if abs(steps_from_atm(strike, spot, sym, atm=atm)) >= min_steps:
                     return True
     return False
+
+
+def _expiry_deep_itm_pm_modes() -> tuple[str, ...]:
+    return ("quick_sideways", "slow_bounce", "worst_day_itm_fade", "explosion")
+
+
+def in_expiry_power_hour_deep_itm_context(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """15:00–15:30 on an expiry session — canonical close deep ITM window."""
+    settings = get_settings()
+    if not getattr(settings, "expiry_power_hour_deep_itm_enabled", True):
+        return False
+    if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
+        return False
+    from app.engines.power_hour_guards import in_power_hour_window
+
+    return in_power_hour_window()
+
+
+def snapshots_have_expiring_deep_itm_session_setup(
+    snapshots: dict[str, SymbolSnapshot],
+    state: AutoTraderState | None = None,
+) -> bool:
+    """
+    Expiring index shows deep ITM on heatmap during PM ITM / afternoon / power hour.
+    Lifts power-hour top-only, expiry evening block, and severe session pause.
+    """
+    settings = get_settings()
+    if not getattr(settings, "expiry_afternoon_deep_itm_routing_enabled", True):
+        return False
+    if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
+        return False
+
+    from app.engines.expiry_day_guards import (
+        expiry_pm_itm_quick_session_active,
+        in_expiry_afternoon_window,
+    )
+    from app.engines.power_hour_guards import in_power_hour_window
+
+    window_open = (
+        in_expiry_afternoon_window()
+        or in_power_hour_window()
+        or expiry_pm_itm_quick_session_active(snapshots, state)
+    )
+    if not window_open:
+        return False
+    return _scan_expiring_deep_itm_heatmap(snapshots)
+
+
+def snapshots_have_expiring_deep_itm_power_hour_setup(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """Power-hour carve-out: deep ITM on expiring symbol during 15:00–15:30."""
+    if not in_expiry_power_hour_deep_itm_context(snapshots):
+        return False
+    return _scan_expiring_deep_itm_heatmap(snapshots)
+
+
+def severe_pause_expiring_deep_itm_lift_active(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """
+    Session <= severe loss stop but expiring deep ITM close setup is live —
+    allow ONLY expiring-symbol deep ITM entries (Sep03 76600 PE after -22k).
+    """
+    settings = get_settings()
+    if not getattr(settings, "expiry_severe_pause_deep_itm_lift_enabled", True):
+        return False
+    session_pnl = compute_session_pnl(state)
+    if session_pnl > float(getattr(settings, "worst_day_full_pause_loss_inr", -20_000.0) or -20_000.0):
+        return False
+    return snapshots_have_expiring_deep_itm_power_hour_setup(snapshots)
+
+
+def candidate_is_expiry_deep_itm_trade(
+    candidate: Any,
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    power_hour_only: bool = False,
+) -> bool:
+    """Expiring-symbol deep ITM candidate (PM ITM / power-hour close vertical)."""
+    settings = get_settings()
+    if not getattr(settings, "expiry_afternoon_deep_itm_routing_enabled", True):
+        return False
+    if power_hour_only and not getattr(settings, "expiry_power_hour_deep_itm_enabled", True):
+        return False
+    if not is_expiry_session(snapshots):
+        return False
+
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+    if snap is None or not is_symbol_expiry_day(snap):
+        return False
+
+    min_steps = int(getattr(settings, "expiry_afternoon_deep_itm_min_steps", 2) or 2)
+    if _candidate_itm_depth(candidate, snap) < min_steps:
+        return False
+
+    mode = str(getattr(candidate, "mode", "") or "")
+    if mode not in _expiry_deep_itm_pm_modes():
+        return False
+
+    if power_hour_only:
+        return in_expiry_power_hour_deep_itm_context(snapshots)
+
+    from app.engines.expiry_day_guards import (
+        expiry_pm_itm_quick_active,
+        in_expiry_afternoon_window,
+    )
+    from app.engines.power_hour_guards import in_power_hour_window
+
+    return (
+        in_expiry_afternoon_window()
+        or in_power_hour_window()
+        or expiry_pm_itm_quick_active(snap, None, snapshots)
+    )
+
+
+def expiring_symbol_has_deep_itm_heatmap(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """True when an expiring index heatmap shows tradeable deep ITM premium."""
+    if not expiry_afternoon_deep_itm_routing_active(snapshots):
+        return False
+    return _scan_expiring_deep_itm_heatmap(snapshots)
 
 
 def is_cross_index_expiry_afternoon_explosion(
@@ -618,6 +743,10 @@ def expiry_afternoon_deep_itm_rank_adjustment(
         bonus += float(
             getattr(settings, "expiry_afternoon_deep_itm_rank_bonus", 50.0) or 50.0
         )
+        if in_expiry_power_hour_deep_itm_context(snapshots):
+            bonus += float(
+                getattr(settings, "expiry_power_hour_deep_itm_rank_bonus", 35.0) or 35.0
+            )
     elif is_cross_index_expiry_afternoon_explosion(candidate, snapshots):
         if expiring_symbol_has_deep_itm_heatmap(snapshots):
             bonus -= float(
@@ -868,5 +997,8 @@ def bad_day_routing_summary(
         "pmItmAlternateSymbols": pm_alts,
         "expiryAfternoonDeepItmRouting": expiry_afternoon_deep_itm_routing_active(snapshots),
         "expiringSymbolDeepItmHeatmap": expiring_symbol_has_deep_itm_heatmap(snapshots),
+        "expiringDeepItmPowerHourSetup": snapshots_have_expiring_deep_itm_power_hour_setup(
+            snapshots,
+        ),
         "sessionPnlInr": round(compute_session_pnl(state), 2),
     }

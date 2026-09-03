@@ -1170,6 +1170,16 @@ def check_expiry_entry_allowed(
         if snapshots_have_afternoon_top_signal(snapshots):
             meta["expiryEveningTopSignalBypass"] = True
             return True, "ok", meta
+        from app.engines.bad_day_routing import (
+            snapshots_have_expiring_deep_itm_power_hour_setup,
+        )
+
+        if (
+            getattr(settings, "expiry_power_hour_deep_itm_bypass_evening_block", True)
+            and snapshots_have_expiring_deep_itm_power_hour_setup(snapshots)
+        ):
+            meta["expiryEveningDeepItmBypass"] = True
+            return True, "ok", meta
         from app.engines.extreme_explosion_moment import snapshots_have_all_in_explosion
 
         if (
