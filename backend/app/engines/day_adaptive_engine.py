@@ -63,6 +63,12 @@ def classify_day_type(
         worst, _, _ = predict_worst_expiry_day(state, snapshots)
         if worst:
             return "WORST"
+        # Sep03: morning EXPIRY WORST scalp won → afternoon relabeled GOOD → 38-lot trap.
+        from app.engines.expiry_day_guards import expiry_post_win_afternoon_fomo_risk
+
+        expiry_fomo, _ = expiry_post_win_afternoon_fomo_risk(state)
+        if expiry_fomo:
+            return "CHOP"
     if is_bearish_sideways_session(snapshots):
         return "WORST"
     if tier == "LOW" and is_chop_session(snapshots) and not in_momentum_rally_window():

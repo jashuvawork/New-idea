@@ -1202,7 +1202,9 @@ class Settings(BaseSettings):
     fake_explosion_trap_post_win_armed_base_bypass_enabled: bool = False
     # Sep03 NIFTY 23850 PE: post-small-win afternoon re-explosion after +₹1.6k trail
     # must hard-block — soft 8-lot cap was bypassed to 38 lots. Do not re-enter FOMO.
+    # Scoped to expiry session afternoons (SENSEX expiry day; NIFTY chain was next week).
     fake_explosion_trap_post_win_afternoon_block_enabled: bool = True
+    fake_explosion_trap_post_win_expiry_only: bool = True
     # Post-win re-entry only when top-rank / full-sleeve OR hot re-acceleration — no 8-lot FOMO probes.
     fake_explosion_trap_post_win_require_top_confidence: bool = True
     fake_explosion_trap_post_win_hc_min_velocity_3s: float = 2.0
