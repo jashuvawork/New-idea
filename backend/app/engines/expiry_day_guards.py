@@ -104,6 +104,55 @@ def is_expiry_session(snapshots: dict[str, SymbolSnapshot]) -> bool:
     return len(expiry_symbols(snapshots)) > 0
 
 
+def in_expiry_afternoon_window() -> bool:
+    """After expiry morning focus — Sep03 post-win FOMO trap landed ~13:45."""
+    settings = get_settings()
+    if not settings.expiry_day_guards_enabled:
+        return False
+    morning_end = (
+        settings.expiry_morning_end_hour * 60 + settings.expiry_morning_end_minute
+    )
+    return _minutes_now() >= morning_end
+
+
+def session_post_small_win(state: AutoTraderState | None) -> tuple[bool, dict[str, Any]]:
+    """Small closed winner — post-win FOMO sizing risk (shared with fake-trap guards)."""
+    if state is None:
+        return False, {}
+    from app.engines.explosion_entry_guards import _post_small_win
+
+    return _post_small_win(state)
+
+
+def expiry_post_win_afternoon_fomo_risk(
+    state: AutoTraderState | None,
+    *,
+    require_post_win: bool = True,
+) -> tuple[bool, list[str]]:
+    """
+    Sep03 pattern: SENSEX expiry session, morning WORST scalp won, afternoon
+    day-type flipped GOOD/AGGRESSIVE → 38-lot post-win explosion trap on NIFTY.
+
+    Uses session-level expiry (any symbol expiring today), not per-symbol expiry.
+    """
+    settings = get_settings()
+    if not settings.expiry_day_guards_enabled:
+        return False, []
+    if not any_expiry_session_active():
+        return False, []
+    if not in_expiry_afternoon_window():
+        return False, []
+    reasons = ["expiry_session", "expiry_afternoon"]
+    if require_post_win:
+        post_win, meta = session_post_small_win(state)
+        if not post_win:
+            return False, []
+        reasons.append("post_small_win")
+        if meta.get("lastPnlInr") is not None:
+            reasons.append(f"last_pnl_{meta['lastPnlInr']:.0f}")
+    return True, reasons
+
+
 def is_near_expiry_day(snap: SymbolSnapshot) -> bool:
     """True when chain expiry is today or tomorrow (pre-expiry + expiry session)."""
     if not snap.dataAvailable or not snap.optionExpiry:

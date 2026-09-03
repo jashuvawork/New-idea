@@ -61,6 +61,24 @@ def test_classify_good_day(_rally, _chop, _bear):
     assert day_type in ("GOOD", "ELITE")
 
 
+@patch("app.engines.whipsaw_guards.is_bearish_sideways_session", return_value=False)
+@patch("app.engines.chop_day_guards.is_chop_session", return_value=False)
+@patch("app.engines.chop_day_guards.in_momentum_rally_window", return_value=True)
+@patch(
+    "app.engines.expiry_day_guards.expiry_post_win_afternoon_fomo_risk",
+    return_value=(True, ["expiry_session", "post_small_win"]),
+)
+def test_classify_expiry_post_win_afternoon_downgrades_to_chop(_fomo, _rally, _chop, _bear):
+    """Sep03: ELITE tier would be GOOD — expiry post-win afternoon stays CHOP."""
+    day_type = classify_day_type(
+        "EXPIRY DAY",
+        "ELITE",
+        {"SENSEX": _snap(bias="BEARISH", regime="TREND")},
+        state=AutoTraderState(),
+    )
+    assert day_type == "CHOP"
+
+
 def test_worst_day_blocks_quick_allows_scalp_momentum():
     profile = build_day_adaptive_profile("EXPIRY WORST", "HIGH", {"SENSEX": _snap()})
     assert profile.preferred_modes[0] == "explosion"

@@ -1514,6 +1514,38 @@ def detect_fake_explosion_trap(
     if post_win:
         flags.append("post_small_win")
 
+    if (
+        post_win
+        and event
+        and getattr(settings, "fake_explosion_trap_post_win_afternoon_block_enabled", True)
+    ):
+        from app.engines.expiry_day_guards import expiry_post_win_afternoon_fomo_risk
+        from app.engines.morning_premium_capture import is_afternoon_capture_event
+
+        expiry_only = bool(
+            getattr(settings, "fake_explosion_trap_post_win_expiry_only", True)
+        )
+        afternoon_event = is_afternoon_capture_event(
+            event, chart=snap.spotChart if snap else None,
+        )
+        expiry_fomo, expiry_reasons = expiry_post_win_afternoon_fomo_risk(state)
+        should_block = afternoon_event and (
+            (expiry_only and expiry_fomo)
+            or (not expiry_only and True)
+        )
+        if should_block:
+            meta.update({
+                "fakeExplosionTrap": True,
+                "action": "block",
+                "psychologyEscalate": "FOMO",
+                "postWinAfternoonBlock": True,
+                "postWinExpiryAfternoon": expiry_fomo,
+                "expiryFomoReasons": expiry_reasons,
+                "conflictFlags": flags,
+                "conflictCount": len(flags),
+            })
+            return True, "fake_explosion_trap_post_win_afternoon", meta
+
     if post_win and getattr(
         settings, "fake_explosion_trap_post_win_velocity_block_enabled", True
     ):
