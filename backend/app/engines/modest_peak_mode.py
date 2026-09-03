@@ -168,19 +168,28 @@ def apply_modest_peak_entry_stamp(
 ) -> bool:
     """Stamp modestPeakMode on ctx + exitPlan; tighten exit bias. Returns True when stamped."""
     s = settings or get_settings()
-    use, reason = classify_modest_peak_entry(
-        edge=edge,
-        tier=tier,
-        afternoon_capture=afternoon_capture,
-        ict_flat_vertical=ict_flat_vertical,
-        mega_rip=mega_rip,
-        first_lift_runner=first_lift_runner,
-        velocity_3s=velocity_3s,
-        lift_readiness_reason=lift_readiness_reason,
-        max_profit_capture=bool(ctx_extra.get("maxProfitCapture")),
-        snapshots=snapshots,
-        settings=s,
+    flags = [str(f).lower() for f in (ctx_extra.get("conflictFlags") or []) if f is not None]
+    post_win_fomo = bool(ctx_extra.get("fakeExplosionTrap")) and (
+        ctx_extra.get("postSmallWin")
+        or "post_small_win" in flags
+        or str(ctx_extra.get("psychologyLabel") or "").upper() == "FOMO"
     )
+    if post_win_fomo:
+        use, reason = True, "post_small_win_fomo"
+    else:
+        use, reason = classify_modest_peak_entry(
+            edge=edge,
+            tier=tier,
+            afternoon_capture=afternoon_capture,
+            ict_flat_vertical=ict_flat_vertical,
+            mega_rip=mega_rip,
+            first_lift_runner=first_lift_runner,
+            velocity_3s=velocity_3s,
+            lift_readiness_reason=lift_readiness_reason,
+            max_profit_capture=bool(ctx_extra.get("maxProfitCapture")),
+            snapshots=snapshots,
+            settings=s,
+        )
     if not use:
         return False
 
