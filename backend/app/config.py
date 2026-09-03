@@ -1602,6 +1602,18 @@ class Settings(BaseSettings):
     # Aug6: chop+elite_hot cut_size(6) was restored to 27 by baseWindowFullLots /
     # top_explosion soft-cap bypass. On chop/worst conflict stacks, honor the soft cap.
     fake_explosion_trap_honor_soft_cap_on_chop: bool = True
+    # Sep03: post-small-win / FOMO soft cap must survive index FTV + post-tune max-lot restore.
+    fake_explosion_trap_honor_post_win_cap: bool = True
+    fake_explosion_trap_honor_fomo_cap: bool = True
+    # Armed-base ICT thesis TTL — exit when launch window expires without trail-arm green.
+    explosion_armed_base_expiry_exit_enabled: bool = True
+    explosion_armed_base_expiry_grace_seconds: float = 30.0
+    explosion_armed_base_expiry_max_best_points: float = 8.0
+    # Barely-green losers: tick of green then bleed (between never-green and failed-launch).
+    explosion_barely_green_stop_enabled: bool = True
+    explosion_barely_green_max_best_points: float = 3.0
+    explosion_barely_green_min_loss_points: float = 1.5
+    explosion_barely_green_min_hold_seconds: int = 180
     # Index-confirmed FTV + structured local-base rip keeps capital max lots on chop/worst
     # days (Sep1 NIFTY 23950 CE: eliteFullLot authorized but chop+elite soft cap → 6).
     index_confirmed_ftv_bypasses_fake_trap_lot_cap: bool = True

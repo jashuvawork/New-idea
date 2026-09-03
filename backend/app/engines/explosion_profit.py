@@ -1,7 +1,7 @@
 """Explosion profit mode — ride premium explosions with trailing SL/TP while winning."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -744,6 +744,33 @@ def _hold_seconds(trade: PaperTrade) -> float:
     if opened.tzinfo is None:
         opened = opened.replace(tzinfo=IST)
     return (datetime.now(IST) - opened.astimezone(IST)).total_seconds()
+
+
+def _armed_base_expires_at_iso(trade: PaperTrade) -> str:
+    ctx = trade.entryContext or {}
+    iso = str(ctx.get("armedBaseExpiresAt") or "")
+    if iso:
+        return iso
+    ict_meta = ctx.get("ictCaptureMeta") or {}
+    if isinstance(ict_meta, dict):
+        ict = ict_meta.get("ict") or {}
+        if isinstance(ict, dict):
+            return str(ict.get("armedBaseExpiresAt") or "")
+    return ""
+
+
+def _armed_base_thesis_expired(trade: PaperTrade, *, grace_seconds: float = 0.0) -> bool:
+    iso = _armed_base_expires_at_iso(trade)
+    if not iso:
+        return False
+    try:
+        expires = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=IST)
+        now = datetime.now(IST)
+        return now >= expires + timedelta(seconds=max(0.0, grace_seconds))
+    except (TypeError, ValueError):
+        return False
 
 
 def _target_points(event_tier: str) -> float:
@@ -1669,6 +1696,46 @@ def evaluate_explosion_exit(
             and v3 < failed_max_v
         ):
             return "explosion_failed_launch", pnl_inr
+
+    # Armed-base launch window expired without establishing a real runner (Sep03 23850 PE).
+    if (
+        not hold_to_sl
+        and bool(getattr(settings, "explosion_armed_base_expiry_exit_enabled", True))
+        and _armed_base_thesis_expired(
+            trade,
+            grace_seconds=_cfg_float(
+                settings, "explosion_armed_base_expiry_grace_seconds", 30.0
+            ),
+        )
+    ):
+        ctx_ab = trade.entryContext or {}
+        if ctx_ab.get("armedBaseCapture") or ctx_ab.get("ictArmedBaseLaunch"):
+            plan = ctx_ab.get("exitPlan") or {}
+            trail_arm = float(
+                plan.get("trailArmPoints")
+                or _cfg_float(settings, "explosion_trail_arm_points", 8.0)
+            )
+            max_best = _cfg_float(
+                settings, "explosion_armed_base_expiry_max_best_points", 8.0
+            )
+            if best < max(trail_arm, max_best):
+                return "explosion_armed_base_expired", pnl_inr
+
+    # Barely-green: one tick green then bleed — too green for never-green, too weak to trail.
+    if (
+        not hold_to_sl
+        and bool(getattr(settings, "explosion_barely_green_stop_enabled", True))
+    ):
+        ng_min_green = _cfg_float(settings, "explosion_never_green_min_green_points", 0.5)
+        bg_max = _cfg_float(settings, "explosion_barely_green_max_best_points", 3.0)
+        bg_loss = _cfg_float(settings, "explosion_barely_green_min_loss_points", 1.5)
+        bg_hold = int(_cfg_float(settings, "explosion_barely_green_min_hold_seconds", 180))
+        if (
+            ng_min_green < best <= bg_max
+            and hold >= bg_hold
+            and pnl_pts <= -bg_loss
+        ):
+            return "explosion_barely_green_stop", pnl_inr
 
     # Never-green hard cut: a trade that printed NO green and is now down past a tight
     # floor is directionally wrong from entry (Aug6 78800 PE: best=0 → ran to −37pt).
