@@ -70,6 +70,38 @@ def _update_cache_memory(snap: MultiSnapshot) -> MultiSnapshot:
     return snap
 
 
+def _sync_cache_json_meta(*, force: bool = False) -> bytes | None:
+    """Patch timestamp + wsTickAgeMs into cached JSON — SSE heartbeat path only.
+
+    Full orjson round-trip on every tick was removed (event-loop hang). Throttled
+    meta sync keeps UI data age honest during REST rebuilds without re-serializing
+    the ~130KB snapshot tree on the hot tick path.
+    """
+    global _cache_json, _sse_payload_dict, _last_json_meta_sync_mono
+    if not _cache_json or not _cache:
+        return _cache_json
+    now_mono = time.monotonic()
+    if not force and (now_mono - _last_json_meta_sync_mono) * 1000 < _JSON_META_SYNC_MS:
+        return _cache_json
+    _last_json_meta_sync_mono = now_mono
+    snap = _attach_ws_tick_age(_cache)
+    snap = snap.model_copy(update={"timestamp": datetime.now(IST)})
+    try:
+        payload = orjson.loads(_cache_json)
+        payload["timestamp"] = snap.timestamp.isoformat()
+        if snap.wsTickAgeMs is not None:
+            payload["wsTickAgeMs"] = snap.wsTickAgeMs
+        if snap.dataReady:
+            reason = str(payload.get("waitingReason") or "")
+            if not reason or "refresh in progress" in reason.lower():
+                payload["waitingReason"] = None
+        _cache_json = orjson.dumps(payload)
+        _sse_payload_dict = None
+    except Exception:
+        pass
+    return _cache_json
+
+
 def _finalize_snapshot(snap: MultiSnapshot) -> MultiSnapshot:
     """Clear stale waitingReason when market data is ready (keeps rate-limit messages)."""
     if not snap.dataReady:
@@ -1072,6 +1104,7 @@ async def get_snapshots():
 async def get_snapshots_cached():
     """Return pre-serialized cache instantly — zero overlay/serialize on read path."""
     if _cache_json:
+        _sync_cache_json_meta()
         if _cache and _cache.dataReady and not _cache.waitingReason:
             try:
                 payload = orjson.loads(_cache_json)
@@ -1110,7 +1143,8 @@ async def market_stream():
         try:
             # Instant first frame — EventSource times out if full rebuild blocks the handshake
             if _cache_json:
-                yield f"data: {_cache_json.decode()}\n\n"
+                meta = _sync_cache_json_meta(force=True) or _cache_json
+                yield f"data: {meta.decode()}\n\n"
             else:
                 fast = await get_multi_snapshot_fast(overlay_ws=is_ws_active())
                 yield f"data: {orjson.dumps(fast.model_dump(mode='json')).decode()}\n\n"
@@ -1124,7 +1158,8 @@ async def market_stream():
                     yield f"data: {orjson.dumps(data).decode()}\n\n"
                 except asyncio.TimeoutError:
                     if _cache_json:
-                        yield f"data: {_cache_json.decode()}\n\n"
+                        meta = _sync_cache_json_meta() or _cache_json
+                        yield f"data: {meta.decode()}\n\n"
                     else:
                         fast = await get_multi_snapshot_fast(overlay_ws=False)
                         yield f"data: {orjson.dumps(fast.model_dump(mode='json')).decode()}\n\n"

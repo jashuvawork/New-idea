@@ -33,24 +33,20 @@ function deriveQuality(
     if (/cooling down|rate limit|429/i.test(session.dataPauseReason)) return 'slow';
     return 'slow';
   }
-  if (dataReady && stalenessMs < 4_000) {
-    if (streamMode === 'sse') {
-      if (stalenessMs > 10_000) return 'offline';
-      if (stalenessMs > 3_000) return 'slow';
-      return stalenessMs > 1_000 ? 'good' : 'excellent';
-    }
-    return latencyQuality(latencyMs);
-  }
+  const offlineAfterMs = dataReady ? 45_000 : 30_000;
+  const slowAfterMs = dataReady ? 12_000 : 8_000;
+
   if (streamMode === 'sse') {
-    if (!dataReady && stalenessMs > 20_000) return 'offline';
-    if (stalenessMs > 10_000) return 'offline';
+    if (!dataReady && stalenessMs > offlineAfterMs) return 'offline';
+    if (stalenessMs > offlineAfterMs) return 'offline';
+    if (stalenessMs > slowAfterMs) return 'slow';
     if (stalenessMs > 3_000) return 'slow';
     if (stalenessMs > 1_000) return 'good';
     return 'excellent';
   }
   if (dataReady && stalenessMs < 30_000) return latencyQuality(latencyMs);
-  if (stalenessMs > 20_000) return 'offline';
-  if (stalenessMs > 5_000) return 'slow';
+  if (stalenessMs > offlineAfterMs) return 'offline';
+  if (stalenessMs > slowAfterMs) return 'slow';
   if (stalenessMs > 3_000) return 'slow';
   return latencyQuality(latencyMs);
 }

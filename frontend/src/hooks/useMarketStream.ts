@@ -19,6 +19,16 @@ const SNAPSHOT_URL = `${API_BASE}/api/market/snapshots/cached`;
 // times out and makes the UI look "unreachable" while www→EIP proxy still works).
 const SNAPSHOT_FALLBACK_URL = SNAPSHOT_URL;
 
+/** Prefer WS tick age when present; fall back to snapshot timestamp age. */
+function snapshotDataAgeMs(json: MultiSnapshot, nowMs = Date.now()): number {
+  const snapTs = json.timestamp ? new Date(json.timestamp).getTime() : nowMs;
+  const snapshotAgeMs = Math.max(0, nowMs - snapTs);
+  const tickAgeMs = typeof json.wsTickAgeMs === 'number' && json.wsTickAgeMs >= 0
+    ? json.wsTickAgeMs
+    : null;
+  return tickAgeMs ?? snapshotAgeMs;
+}
+
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   if (ms <= 0) return 'offline';
   if (ms < 80) return 'excellent';
@@ -26,13 +36,23 @@ function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   return 'slow';
 }
 
-/** SSE is server-push — use data freshness, not JSON parse time (which is ~0ms). */
+/** SSE is server-push — use payload data freshness, not JSON parse time (~0ms). */
 function sseConnectionQuality(
   dataAgeMs: number,
   dataReady: boolean,
+  transportAgeMs?: number,
 ): StreamMetrics['connectionQuality'] {
-  if (!dataReady && dataAgeMs > 30_000) return 'offline';
-  if (dataAgeMs > 10_000) return 'offline';
+  const transportOk = transportAgeMs == null || transportAgeMs < 15_000;
+  const offlineAfterMs = dataReady ? 45_000 : 30_000;
+  const slowAfterMs = dataReady ? 12_000 : 8_000;
+
+  if (!transportOk && transportAgeMs != null) {
+    if (transportAgeMs > 30_000) return 'offline';
+    return 'slow';
+  }
+  if (!dataReady && dataAgeMs > offlineAfterMs) return 'offline';
+  if (dataAgeMs > offlineAfterMs) return 'offline';
+  if (dataAgeMs > slowAfterMs) return 'slow';
   if (dataAgeMs > 3_000) return 'slow';
   if (dataAgeMs > 1_000) return 'good';
   return 'excellent';
@@ -87,12 +107,7 @@ function applySnapshot(
   const now = new Date();
   lastSuccessAt.current = now;
   const elapsed = Math.round(performance.now() - started);
-  const snapTs = json.timestamp ? new Date(json.timestamp).getTime() : now.getTime();
-  const snapshotAgeMs = Math.max(0, now.getTime() - snapTs);
-  const tickAgeMs = typeof json.wsTickAgeMs === 'number' && json.wsTickAgeMs >= 0
-    ? json.wsTickAgeMs
-    : null;
-  const dataAgeMs = tickAgeMs != null && tickAgeMs < 5000 ? tickAgeMs : snapshotAgeMs;
+  const dataAgeMs = snapshotDataAgeMs(json, now.getTime());
 
   if (streamMode !== 'sse') {
     latencyHistory.current = [...latencyHistory.current.slice(-9), elapsed];
@@ -160,12 +175,7 @@ function applySseFreshness(
   setMetrics: React.Dispatch<React.SetStateAction<StreamMetrics>>,
 ) {
   const now = new Date();
-  const snapTs = json.timestamp ? new Date(json.timestamp).getTime() : now.getTime();
-  const snapshotAgeMs = Math.max(0, now.getTime() - snapTs);
-  const tickAgeMs = typeof json.wsTickAgeMs === 'number' && json.wsTickAgeMs >= 0
-    ? json.wsTickAgeMs
-    : null;
-  const dataAgeMs = tickAgeMs != null && tickAgeMs < 5000 ? tickAgeMs : snapshotAgeMs;
+  const dataAgeMs = snapshotDataAgeMs(json, now.getTime());
   const latency = sseDisplayLatencyMs(dataAgeMs, pollIntervalMs);
   const quality = sseConnectionQuality(dataAgeMs, Boolean(json.dataReady));
   setMetrics((prev) => {
@@ -275,23 +285,29 @@ export function useMarketStream() {
   useEffect(() => {
     const id = setInterval(() => {
       if (!lastSuccessAt.current) return;
-      const stale = Date.now() - lastSuccessAt.current.getTime();
-      const staleBucket = Math.floor(stale / 1000);
+      const transportAge = Date.now() - lastSuccessAt.current.getTime();
       setMetrics((prev) => {
+        if (prev.streamMode === 'sse') {
+          // Keep payload-derived data age; only escalate when transport is dead.
+          if (transportAge <= 15_000) {
+            return prev;
+          }
+          const quality = transportAge > 30_000 ? 'offline' : 'slow';
+          if (prev.connectionQuality === quality) {
+            return prev;
+          }
+          return { ...prev, connectionQuality: quality };
+        }
+        const staleBucket = Math.floor(transportAge / 1000);
         const prevBucket = Math.floor(prev.stalenessMs / 1000);
-        const quality =
-          prev.streamMode === 'sse'
-            ? (stale > 10_000 ? 'offline' : stale > 3_000 ? 'slow' : stale > 1_000 ? 'good' : 'excellent')
-            : prev.connectionQuality;
-        const latency = prev.streamMode === 'sse'
-          ? sseDisplayLatencyMs(stale, prev.pollIntervalMs)
-          : prev.lastLatencyMs;
+        const quality = prev.connectionQuality;
+        const latency = prev.lastLatencyMs;
         if (prevBucket === staleBucket && quality === prev.connectionQuality && latency === prev.lastLatencyMs) {
           return prev;
         }
-        return { ...prev, stalenessMs: stale, connectionQuality: quality, lastLatencyMs: latency };
+        return { ...prev, stalenessMs: transportAge, connectionQuality: quality, lastLatencyMs: latency };
       });
-      if (SSE_ENABLED && stale > SSE_STALE_POLL_MS) {
+      if (SSE_ENABLED && transportAge > SSE_STALE_POLL_MS) {
         void fetchSnapshot('sse');
       }
     }, UI_TICK_MS);
