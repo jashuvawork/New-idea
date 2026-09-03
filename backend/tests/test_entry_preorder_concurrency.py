@@ -106,8 +106,8 @@ def _process_patches(state, candidate, events, opener):
     profit_gate = SimpleNamespace(
         newEntriesAllowed=True,
         dailyLossStopExpiryTopOnly=False,
-        status="ok",
-        message="",
+        status="ACTIVE",
+        message="ok",
         to_dict=lambda: {},
     )
     capital = SimpleNamespace(to_dict=lambda: {})
