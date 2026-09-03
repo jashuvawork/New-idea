@@ -1514,6 +1514,24 @@ def detect_fake_explosion_trap(
     if post_win:
         flags.append("post_small_win")
 
+    if (
+        post_win
+        and event
+        and getattr(settings, "fake_explosion_trap_post_win_afternoon_block_enabled", True)
+    ):
+        from app.engines.morning_premium_capture import is_afternoon_capture_event
+
+        if is_afternoon_capture_event(event, chart=snap.spotChart if snap else None):
+            meta.update({
+                "fakeExplosionTrap": True,
+                "action": "block",
+                "psychologyEscalate": "FOMO",
+                "postWinAfternoonBlock": True,
+                "conflictFlags": flags,
+                "conflictCount": len(flags),
+            })
+            return True, "fake_explosion_trap_post_win_afternoon", meta
+
     if post_win and getattr(
         settings, "fake_explosion_trap_post_win_velocity_block_enabled", True
     ):
