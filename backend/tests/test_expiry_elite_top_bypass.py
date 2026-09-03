@@ -43,6 +43,8 @@ def _settings(**overrides):
     s.expiry_worst_day_min_rank_score = 72.0
     s.expiry_worst_day_max_trades = 3
     s.expiry_morning_only = True
+    s.expiry_morning_end_hour = 12
+    s.expiry_morning_end_minute = 0
     s.expiry_pm_itm_quick_enabled = False
     s.min_option_premium_inr = 20.0
     s.max_option_premium_inr = 250.0
