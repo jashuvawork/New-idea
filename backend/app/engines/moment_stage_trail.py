@@ -549,6 +549,14 @@ def pre_stage_hold_floor_pts(
     if not trade_uses_moment_stage_ladder(trade):
         return None
 
+    from app.engines.modest_peak_mode import trade_uses_modest_peak_mode
+
+    if (
+        trade_uses_modest_peak_mode(trade)
+        and bool(getattr(s, "modest_peak_suppress_pre_stage_wide_floor", True))
+    ):
+        return None
+
     fields = _ladder_fields(trade)
     stage = _safe_float(fields.get("stageSize"))
     if stage <= 0:
@@ -608,10 +616,17 @@ def ftv_runner_pct_floor(
     ctx = getattr(trade, "entryContext", None) or {}
     arm_min_pts = _cfg_float(s, "ftv_runner_pct_trail_arm_min_best_points", 20.0)
     max_profit = bool(ctx.get("maxProfitCapture"))
-    armed = gain_pct >= arm_pct or (max_profit and best >= arm_min_pts)
+    keep = _cfg_float(s, "ftv_runner_pct_trail_keep_ratio", 0.75)
+    from app.engines.modest_peak_mode import modest_peak_pct_arm_thresholds
+
+    modest = modest_peak_pct_arm_thresholds(trade, settings=s)
+    if modest is not None:
+        arm_pct, arm_min_pts, keep = modest
+        armed = gain_pct >= arm_pct or best >= arm_min_pts
+    else:
+        armed = gain_pct >= arm_pct or (max_profit and best >= arm_min_pts)
     if not armed:
         return None
-    keep = _cfg_float(s, "ftv_runner_pct_trail_keep_ratio", 0.75)
     # Closed loop: prefer the LEARNED per-moment keep-ratio when EOD learning stamped one
     # (ride high-hit movers harder, tighten low-hit buckets). Bounded to a safe band.
     learned = _safe_float(ctx.get("learnedTrailKeepRatio"))

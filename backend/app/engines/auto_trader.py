@@ -2296,6 +2296,37 @@ async def _open_from_candidate(
         )
         if peak_pred.get("enabled"):
             ctx_extra = stamp_peak_prediction_on_context(ctx_extra, peak_pred)
+        from app.engines.modest_peak_mode import (
+            apply_modest_peak_entry_stamp,
+            cap_modest_peak_stage_plan,
+        )
+
+        modest_stamped = apply_modest_peak_entry_stamp(
+            ctx_extra,
+            edge=edge,
+            tier=str(getattr(ev, "tier", "") or ""),
+            afternoon_capture=afternoon,
+            ict_flat_vertical=ict_flat_vertical,
+            mega_rip=bool(ict.mega_rip),
+            first_lift_runner=first_lift_runner,
+            velocity_3s=float(
+                getattr(ict, "velocity_3s", 0) or entry_velocity_3s or 0
+            ),
+            lift_readiness_reason=str(lift_readiness_reason or ""),
+            entry_premium=float(fill_premium or candidate.premium or 50),
+            snapshots=snapshots,
+            settings=settings,
+        )
+        if modest_stamped and stage_plan:
+            capped = cap_modest_peak_stage_plan(
+                stage_plan,
+                float(fill_premium or candidate.premium or 50),
+                settings=settings,
+            )
+            ctx_extra.update(capped)
+            plan = dict(ctx_extra.get("exitPlan") or {})
+            plan.update(capped)
+            ctx_extra["exitPlan"] = plan
         if is_extreme_explosion_all_in_bypass(candidate=candidate):
             ctx_extra.update(extreme_all_in_meta(candidate=candidate))
         if faded_rip_meta:
