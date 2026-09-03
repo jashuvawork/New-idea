@@ -426,6 +426,24 @@ def _shallow_cache_copy(
     return snap
 
 
+def _refresh_explosion_alerts_cpu(
+    snapshots: dict,
+    *,
+    today: str,
+) -> None:
+    from app.engines.explosion_detector import refresh_snapshot_explosion_alerts
+
+    for snap in snapshots.values():
+        if not snap.dataAvailable:
+            continue
+        expiry_day = bool(snap.optionExpiry and str(snap.optionExpiry)[:10] == today)
+        refresh_snapshot_explosion_alerts(snap, expiry_day=expiry_day)
+
+
+async def _refresh_explosion_alerts_async(snapshots: dict, *, today: str) -> None:
+    await asyncio.to_thread(_refresh_explosion_alerts_cpu, snapshots, today=today)
+
+
 async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
     """WS overlay only — refresh cache + SSE without trader REST work."""
     global _last_fast_cycle_ms, _last_ws_overlay_mono
@@ -488,11 +506,7 @@ async def run_building_ltp_entry_cycle(
     from app.engines.explosion_detector import refresh_snapshot_explosion_alerts
 
     today = _today_str()
-    for snap in probe.values():
-        if not snap.dataAvailable:
-            continue
-        expiry_day = bool(snap.optionExpiry and str(snap.optionExpiry)[:10] == today)
-        refresh_snapshot_explosion_alerts(snap, expiry_day=expiry_day)
+    await _refresh_explosion_alerts_async(probe, today=today)
 
     # Score EVERY watched BUILDING name on this LTP cycle; take only the best.
     auto_state = get_state()
@@ -576,14 +590,9 @@ async def run_entry_scan_on_cache(
         max_age_seconds=settings.tick_overlay_max_age_seconds,
     )
     from app.engines.expiry_day_guards import _today_str
-    from app.engines.explosion_detector import refresh_snapshot_explosion_alerts
 
     today = _today_str()
-    for snap in overlays.values():
-        if not snap.dataAvailable:
-            continue
-        expiry_day = bool(snap.optionExpiry and str(snap.optionExpiry)[:10] == today)
-        refresh_snapshot_explosion_alerts(snap, expiry_day=expiry_day)
+    await _refresh_explosion_alerts_async(overlays, today=today)
     try:
         from app.services.radar_archive import record_top_radars
         from app.services.radar_learning import record_market_observations
