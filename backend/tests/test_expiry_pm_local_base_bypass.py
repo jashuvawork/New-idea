@@ -28,6 +28,9 @@ def _cfg():
     from unittest.mock import MagicMock
 
     cfg = MagicMock()
+    cfg.expiry_day_guards_enabled = True
+    cfg.expiry_morning_end_hour = 13
+    cfg.expiry_morning_end_minute = 30
     cfg.expiry_pm_itm_local_base_explosion_bypass_enabled = True
     cfg.expiry_pm_itm_local_base_min_explosion_score = 75.0
     cfg.expiry_pm_itm_local_base_min_move_pct = 2.0
