@@ -1999,6 +1999,14 @@ class Settings(BaseSettings):
     cold_trough_pad_max_off_low_pct: float = 5.0
     cold_trough_pad_max_local_move_pct: float = 8.0
     cold_trough_pad_max_explosion_score: float = 35.0
+    # Session-trough pad — take at the true V-low when armed base re-armed mid-rip
+    # (Sep03 NIFTY PUT 23900: armed base ₹70.4 vs trough ~₹50; coil pad chased @ ₹79).
+    session_trough_pad_entry_enabled: bool = True
+    session_trough_pad_stale_armed_gap_pct: float = 15.0
+    session_trough_pad_max_off_low_pct: float = 12.0
+    session_trough_pad_min_off_low_pct: float = 2.0
+    session_trough_pad_max_explosion_score: float = 65.0
+    building_coil_pad_max_off_low_when_stale_pct: float = 15.0
     # Anti-chase — block ELITE/EXPLODING tier promotion when baseRel > floor without pad stamp
     # (Aug28 NIFTY 24250 CE 10:17 ELITE @ 8.4% baseRel after micro-rip, not cold trough).
     tier_promotion_pad_chase_block_enabled: bool = True

@@ -1815,6 +1815,7 @@ def first_lift_entry_readiness(
         building_coil_pad_live_blocked,
         early_radar_pad_entry_readiness,
         early_radar_pad_live_blocked,
+        session_trough_pad_entry_readiness,
     )
 
     prelaunch_ok, prelaunch_reason = building_armed_prelaunch_entry_readiness(
@@ -1824,6 +1825,15 @@ def first_lift_entry_readiness(
     )
     if prelaunch_ok:
         return True, prelaunch_reason
+
+    if isinstance(alert, dict):
+        trough_ok, trough_reason = session_trough_pad_entry_readiness(
+            snap=snap,
+            alert=alert,
+            settings=settings,
+        )
+        if trough_ok:
+            return True, trough_reason
 
     coil_blocked, coil_block_reason = building_coil_pad_live_blocked(row, settings)
     if coil_blocked:
