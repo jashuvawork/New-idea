@@ -322,7 +322,48 @@ def entry_scan_due() -> bool:
     if _last_full_scan_mono <= 0:
         return True
     elapsed_ms = (time.monotonic() - _last_full_scan_mono) * 1000
-    return elapsed_ms >= effective_entry_scan_interval_ms()
+    interval_ms = effective_entry_scan_interval_ms()
+    if entry_scan_skippable():
+        interval_ms = max(
+            interval_ms,
+            float(
+                getattr(
+                    get_settings(),
+                    "open_position_entry_scan_interval_ms",
+                    5000.0,
+                )
+                or 5000.0
+            ),
+        )
+    return elapsed_ms >= interval_ms
+
+
+def _at_max_explosion_positions(state: Any = None) -> bool:
+    """True when best-only / allocation sleeves are full — skip heavy entry scans."""
+    s = get_settings()
+    st = state if state is not None else get_state()
+    best_only = bool(getattr(s, "selector_best_only_enabled", True))
+    max_positions = max(
+        1,
+        int(getattr(s, "ftv_allocation_max_positions", 3) or 3),
+    )
+    if best_only:
+        max_positions = 1
+    open_explosions = sum(
+        1
+        for trade in getattr(st, "openPaperTrades", []) or []
+        if getattr(trade, "strategyType", None) == StrategyType.EXPLOSIVE
+    )
+    return open_explosions >= max_positions
+
+
+def entry_scan_skippable() -> bool:
+    """Tick-fast exits own open positions — defer heavy entry scan while full."""
+    if not bool(getattr(get_settings(), "open_position_skip_entry_scan_enabled", True)):
+        return False
+    if not can_run_tick_fast():
+        return False
+    return _at_max_explosion_positions()
 
 
 def can_run_tick_fast() -> bool:
@@ -355,6 +396,8 @@ def latency_stats() -> dict[str, Any]:
         "buildLockHeld": _build_lock.locked(),
         "rebuildLoadActive": rebuild_load_active(),
         "entryScanDue": entry_scan_due(),
+        "entryScanSkippable": entry_scan_skippable(),
+        "atMaxExplosionPositions": _at_max_explosion_positions(),
         "canRunTickFast": can_run_tick_fast(),
         "buildingLtpMonitorEnabled": bool(
             getattr(settings, "building_ltp_monitor_enabled", True)
@@ -503,13 +546,13 @@ async def run_building_ltp_entry_cycle(
 
     t0 = time.perf_counter()
     from app.engines.expiry_day_guards import _today_str
-    from app.engines.explosion_detector import refresh_snapshot_explosion_alerts
 
     today = _today_str()
     await _refresh_explosion_alerts_async(probe, today=today)
 
     # Score EVERY watched BUILDING name on this LTP cycle; take only the best.
     auto_state = get_state()
+    at_max = _at_max_explosion_positions(auto_state)
     try:
         from app.engines.building_ltp_monitor import publish_scoreboard_for_snapshots
 
@@ -521,7 +564,7 @@ async def run_building_ltp_entry_cycle(
         auto_state.buildingLtpMonitor = {"error": str(exc)[:200]}
 
     news = await _fetch_news_cached()
-    if run_trader and not rate_limit_active():
+    if run_trader and not rate_limit_active() and not at_max:
         client = UpstoxClient()
         auto_state = await process(probe, news=news, client=client)
         # Keep scoreboard visible on trader state after process mutates it.
@@ -592,7 +635,10 @@ async def run_entry_scan_on_cache(
     from app.engines.expiry_day_guards import _today_str
 
     today = _today_str()
-    await _refresh_explosion_alerts_async(overlays, today=today)
+    auto_state = get_state()
+    at_max = _at_max_explosion_positions(auto_state)
+    if not at_max:
+        await _refresh_explosion_alerts_async(overlays, today=today)
     try:
         from app.services.radar_archive import record_top_radars
         from app.services.radar_learning import record_market_observations
@@ -623,48 +669,55 @@ async def run_entry_scan_on_cache(
             pass
     news = await _fetch_news_cached()
     auto_state = get_state()
-    try:
-        from app.engines.building_ltp_monitor import (
-            clear_building_scoreboard,
-            publish_scoreboard_for_snapshots,
-        )
-
-        board = publish_scoreboard_for_snapshots(overlays, state=auto_state)
-        auto_state.buildingLtpMonitor = board
-    except Exception as exc:
-        logger.warning("BUILDING entry-scan scoreboard failed: %s", exc)
+    at_max = _at_max_explosion_positions(auto_state)
+    if not at_max:
         try:
-            from app.engines.building_ltp_monitor import clear_building_scoreboard
+            from app.engines.building_ltp_monitor import (
+                clear_building_scoreboard,
+                publish_scoreboard_for_snapshots,
+            )
 
-            clear_building_scoreboard()
-        except Exception:
-            pass
+            board = publish_scoreboard_for_snapshots(overlays, state=auto_state)
+            auto_state.buildingLtpMonitor = board
+        except Exception as exc:
+            logger.warning("BUILDING entry-scan scoreboard failed: %s", exc)
+            try:
+                from app.engines.building_ltp_monitor import clear_building_scoreboard
+
+                clear_building_scoreboard()
+            except Exception:
+                pass
 
     if run_trader:
         client = UpstoxClient()
-        auto_state = await process(overlays, news=news, client=client)
-        try:
-            from app.engines.building_ltp_monitor import building_scoreboard_snapshot
+        if at_max and can_run_tick_fast():
+            auto_state = await process_exits_only(overlays, client=client)
+        else:
+            auto_state = await process(overlays, news=news, client=client)
+        if not at_max:
+            try:
+                from app.engines.building_ltp_monitor import building_scoreboard_snapshot
 
-            auto_state.buildingLtpMonitor = {
-                **(auto_state.buildingLtpMonitor or {}),
-                **building_scoreboard_snapshot(),
-            }
-        except Exception:
-            pass
+                auto_state.buildingLtpMonitor = {
+                    **(auto_state.buildingLtpMonitor or {}),
+                    **building_scoreboard_snapshot(),
+                }
+            except Exception:
+                pass
     else:
         auto_state = get_state()
 
-    try:
-        from app.engines.building_ltp_monitor import (
-            clear_building_scoreboard,
-            mark_building_ltps_seen,
-        )
+    if not at_max:
+        try:
+            from app.engines.building_ltp_monitor import (
+                clear_building_scoreboard,
+                mark_building_ltps_seen,
+            )
 
-        mark_building_ltps_seen(overlays)
-        clear_building_scoreboard()
-    except Exception:
-        pass
+            mark_building_ltps_seen(overlays)
+            clear_building_scoreboard()
+        except Exception:
+            pass
 
     snapshot = _shallow_cache_copy(
         snapshots=overlays,
@@ -1119,14 +1172,6 @@ async def get_snapshots_cached():
     """Return pre-serialized cache instantly — zero overlay/serialize on read path."""
     if _cache_json:
         await _sync_cache_json_meta_async()
-        if _cache and _cache.dataReady and not _cache.waitingReason:
-            try:
-                payload = orjson.loads(_cache_json)
-                if payload.get("dataReady") and payload.get("waitingReason"):
-                    payload["waitingReason"] = None
-                    return Response(content=orjson.dumps(payload), media_type="application/json")
-            except Exception:
-                pass
         return Response(content=_cache_json, media_type="application/json")
     if rebuild_load_active() and _cache and _cache.snapshots:
         stale = _serve_stale_cache(reason="Refresh in progress — serving last good data")
