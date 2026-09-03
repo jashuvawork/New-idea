@@ -33,8 +33,8 @@ function deriveQuality(
     if (/cooling down|rate limit|429/i.test(session.dataPauseReason)) return 'slow';
     return 'slow';
   }
-  const offlineAfterMs = dataReady ? 45_000 : 30_000;
-  const slowAfterMs = dataReady ? 12_000 : 8_000;
+  const offlineAfterMs = dataReady ? 90_000 : 45_000;
+  const slowAfterMs = dataReady ? 15_000 : 10_000;
 
   if (streamMode === 'sse') {
     if (!dataReady && stalenessMs > offlineAfterMs) return 'offline';
