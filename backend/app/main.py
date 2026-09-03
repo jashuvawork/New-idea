@@ -45,6 +45,7 @@ async def _background_monitor():
         mark_full_rest_done,
         mark_full_scan_done,
         run_building_ltp_entry_cycle,
+        entry_scan_skippable,
         run_entry_scan_on_cache,
         run_tick_fast_cycle,
         run_ws_overlay_cycle,
@@ -135,8 +136,6 @@ async def _background_monitor():
                                 run_trader=rest_ok,
                             )
                             mark_full_rest_done()
-                            if rest_ok:
-                                mark_full_scan_done()
                 elif is_ws_active():
                     # Poll timeout between entry scans — catch BUILDING LTP moves.
                     await run_building_ltp_entry_cycle(
