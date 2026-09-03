@@ -102,6 +102,11 @@ def _sync_cache_json_meta(*, force: bool = False) -> bytes | None:
     return _cache_json
 
 
+async def _sync_cache_json_meta_async(*, force: bool = False) -> bytes | None:
+    """Off-loop meta patch — keeps /snapshots/cached responsive during REST rebuild."""
+    return await asyncio.to_thread(_sync_cache_json_meta, force=force)
+
+
 def _finalize_snapshot(snap: MultiSnapshot) -> MultiSnapshot:
     """Clear stale waitingReason when market data is ready (keeps rate-limit messages)."""
     if not snap.dataReady:
@@ -1104,7 +1109,7 @@ async def get_snapshots():
 async def get_snapshots_cached():
     """Return pre-serialized cache instantly — zero overlay/serialize on read path."""
     if _cache_json:
-        _sync_cache_json_meta()
+        await _sync_cache_json_meta_async()
         if _cache and _cache.dataReady and not _cache.waitingReason:
             try:
                 payload = orjson.loads(_cache_json)
@@ -1143,7 +1148,7 @@ async def market_stream():
         try:
             # Instant first frame — EventSource times out if full rebuild blocks the handshake
             if _cache_json:
-                meta = _sync_cache_json_meta(force=True) or _cache_json
+                meta = await _sync_cache_json_meta_async(force=True) or _cache_json
                 yield f"data: {meta.decode()}\n\n"
             else:
                 fast = await get_multi_snapshot_fast(overlay_ws=is_ws_active())
@@ -1158,7 +1163,7 @@ async def market_stream():
                     yield f"data: {orjson.dumps(data).decode()}\n\n"
                 except asyncio.TimeoutError:
                     if _cache_json:
-                        meta = _sync_cache_json_meta() or _cache_json
+                        meta = await _sync_cache_json_meta_async() or _cache_json
                         yield f"data: {meta.decode()}\n\n"
                     else:
                         fast = await get_multi_snapshot_fast(overlay_ws=False)

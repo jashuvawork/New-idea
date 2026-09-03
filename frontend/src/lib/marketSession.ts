@@ -53,6 +53,7 @@ export function connectionStatusLabel(
   if (session.marketClosed) return 'Market closed';
   if (quality === 'offline') return 'Offline';
   if (quality === 'slow' && session.dataPauseReason) return 'Reconnecting';
+  if (quality === 'slow' && dataReady) return 'Live (cached)';
   if (session.dataPauseReason) {
     if (/showing last good data/i.test(session.dataPauseReason)) {
       return 'Live (cached)';
