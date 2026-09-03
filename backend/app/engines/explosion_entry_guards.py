@@ -1752,9 +1752,41 @@ def detect_fake_explosion_trap(
     return False, "ok", meta
 
 
+def trap_post_small_win_active(trap_meta: Optional[dict[str, Any]]) -> bool:
+    if not trap_meta:
+        return False
+    if trap_meta.get("postSmallWin"):
+        return True
+    flags = {
+        str(f).lower()
+        for f in (trap_meta.get("conflictFlags") or [])
+        if f is not None
+    }
+    return "post_small_win" in flags
+
+
+def trap_fomo_psychology_active(trap_meta: Optional[dict[str, Any]]) -> bool:
+    if not trap_meta:
+        return False
+    return str(trap_meta.get("psychologyEscalate") or "").upper() == "FOMO"
+
+
 def _trap_soft_cap_must_honor(trap_meta: dict[str, Any]) -> bool:
-    """Chop/worst conflict stacks must keep cut_size lotCap (Aug6 27→6 restore hole)."""
+    """Chop/worst/post-win conflict stacks must keep cut_size lotCap (Aug6/Sep03 restore holes)."""
     settings = get_settings()
+    if trap_meta.get("action") == "block":
+        return True
+    if trap_meta.get("action") != "cut_size":
+        return False
+    # Sep03 NIFTY 23850 PE: post-small-win FOMO cap (8 lots) must survive index FTV + max-lot restore.
+    if trap_post_small_win_active(trap_meta) and bool(
+        getattr(settings, "fake_explosion_trap_honor_post_win_cap", True)
+    ):
+        return True
+    if trap_fomo_psychology_active(trap_meta) and bool(
+        getattr(settings, "fake_explosion_trap_honor_fomo_cap", True)
+    ):
+        return True
     if bool(getattr(settings, "index_confirmed_ftv_bypasses_fake_trap_lot_cap", True)):
         if trap_meta.get("indexConfirmedFtv") and (
             trap_meta.get("localBaseStructure")
@@ -1762,8 +1794,6 @@ def _trap_soft_cap_must_honor(trap_meta: dict[str, Any]) -> bool:
         ):
             return False
     if not getattr(settings, "fake_explosion_trap_honor_soft_cap_on_chop", True):
-        return False
-    if trap_meta.get("action") != "cut_size":
         return False
     flags = {
         str(f).lower()

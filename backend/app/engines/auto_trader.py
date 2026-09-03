@@ -740,6 +740,8 @@ async def _open_from_candidate(
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
     faded_rip_meta: dict[str, Any] = {}
     trap_meta: dict[str, Any] = {}
+    from app.engines.explosion_entry_guards import trap_post_small_win_active
+
     early_base_entry_ready = False
     if candidate.mode == "explosion" and candidate.explosion_event:
         from app.engines.explosion_entry_guards import (
@@ -756,6 +758,7 @@ async def _open_from_candidate(
         trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
             candidate, snap, state=state, ict=trap_ict,
         )
+
         if trap_block or trap_meta.get("action") == "block":
             from app.engines.building_ftv_gates import building_rip_bypasses_fake_trap
 
@@ -967,6 +970,7 @@ async def _open_from_candidate(
         # must not max-size BUILDING / unknown on a non-chop DEFENSIVE day.
         defensive_rip = bool(ict_meta.get("defensiveBaseRip"))
         can_force_max = (not defensive_rip) or defensive_full
+        _post_win_trap = trap_post_small_win_active(trap_meta)
         if (
             good_day_ict
             and settings.ict_good_day_force_max_lots
@@ -974,6 +978,7 @@ async def _open_from_candidate(
             and float(ict_meta.get("lotMultiplier") or 1.0) >= 0.99
             and (not chopish_day or defensive_full)
             and can_force_max
+            and not _post_win_trap
         ):
             from app.engines.capital_allocator import max_lots_for_capital
 
@@ -1104,7 +1109,7 @@ async def _open_from_candidate(
             }
             # Reuse dayType from the good-day ICT block above when available.
             day_type = str((ict_meta or {}).get("dayType") or "").upper()
-            if day_type not in block_days:
+            if day_type not in block_days and not trap_post_small_win_active(trap_meta):
                 from app.engines.capital_allocator import max_lots_for_capital
 
                 lots = max(lots, max_lots_for_capital(symbol, fill_premium))
@@ -1280,6 +1285,8 @@ async def _open_from_candidate(
             or not bool(getattr(settings, "elite_full_lot_requires_index_confirm", True))
         )
     )
+    if elite_full_lot and trap_post_small_win_active(trap_meta):
+        elite_full_lot = False
     if elite_full_lot:
         try:
             from app.engines.capital_allocator import (
@@ -1458,7 +1465,7 @@ async def _open_from_candidate(
     )
     from app.engines.capital_allocator import apply_explosion_always_max_lots
 
-    if not size_cap_applied:
+    if not size_cap_applied and not trap_post_small_win_active(trap_meta):
         lots = apply_explosion_always_max_lots(
             lots,
             symbol,
@@ -1799,6 +1806,16 @@ async def _open_from_candidate(
         )
         if floor_lots > lots:
             lots = floor_lots
+            if trap_meta.get("fakeExplosionTrap"):
+                from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
+
+                prev = lots
+                lots = cap_fake_explosion_trap_lots(
+                    lots, trap_meta, bypass_soft_cap=False,
+                )
+                if lots < prev and trap_meta.get("action") == "cut_size":
+                    top_explosion_max = False
+                    elite_full_lot = False
             if exit_plan is not None:
                 exit_plan["lots"] = lots
                 reasons = list(exit_plan.get("reasoning") or [])
@@ -1861,6 +1878,12 @@ async def _open_from_candidate(
             exit_plan["reasoning"] = reasons
 
     final_stop_points = float(exit_plan.get("stopPoints") or stop_pts)
+    trap_cap_locked = bool(
+        trap_meta.get("fakeExplosionTrap")
+        and trap_meta.get("action") == "cut_size"
+        and trap_meta.get("lotCap") is not None
+        and lots <= int(trap_meta["lotCap"])
+    )
     final_risk_ok, final_risk_reason = _risk_engine.check_new_entry(
         state,
         symbol,
@@ -1871,7 +1894,7 @@ async def _open_from_candidate(
         strategy_type=candidate.strategy_type,
         strike=candidate.strike,
         stop_points=final_stop_points,
-        ignore_per_trade_risk_cap=bool(elite_full_lot),
+        ignore_per_trade_risk_cap=bool(elite_full_lot) and not trap_cap_locked,
     )
     if not final_risk_ok:
         return False, final_risk_reason
@@ -1997,6 +2020,8 @@ async def _open_from_candidate(
             ctx_extra["psychologyLabel"] = escalate
             ctx_extra["psychologyExitBias"] = "PROTECT"
             ctx_extra["psychologyTrapOverride"] = True
+        if trap_meta.get("lotCap") is not None and lots <= int(trap_meta["lotCap"]):
+            ctx_extra["trapCapHonored"] = True
         # Keep lots in context aligned with trap-capped size.
         ctx_extra["lots"] = lots
     if getattr(candidate, "pretrade_meta", None):
@@ -2074,6 +2099,8 @@ async def _open_from_candidate(
                     or getattr(ict, "armed_base_launch", False)
                 )
             ),
+            "armedBaseExpiresAt": str(getattr(ict, "armed_base_expires_at", "") or ""),
+            "armedAt": str(getattr(ict, "armed_at", "") or ""),
             "ictFlatVerticalQuality": round(float(getattr(ict, "flat_vertical_quality", 0) or 0), 1),
             "ictFlatVerticalGrade": getattr(ict, "flat_vertical_grade", ""),
             "ictReasons": ict.reasons,
