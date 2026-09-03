@@ -1021,6 +1021,14 @@ def _peak_fade_bullish_continuation(
     """
     if not getattr(settings, "explosion_peak_fade_defer_when_bullish", True):
         return False
+    ctx = trade.entryContext or {}
+    from app.engines.modest_peak_mode import trade_uses_modest_peak_mode
+
+    if (
+        trade_uses_modest_peak_mode(trade)
+        and bool(getattr(settings, "modest_peak_tighten_peak_fade_defer", True))
+    ):
+        return False
     min_remain = float(
         getattr(settings, "explosion_peak_fade_bullish_min_remain_points", 3.0) or 3.0
     )

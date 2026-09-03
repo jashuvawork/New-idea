@@ -1116,6 +1116,19 @@ class Settings(BaseSettings):
     ftv_runner_pct_trail_arm_min_best_points: float = 20.0
     ftv_runner_pct_trail_keep_ratio: float = 0.75
     ftv_runner_pct_trail_min_best_points: float = 6.0
+    # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
+    # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
+    # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.
+    modest_peak_mode_enabled: bool = True
+    modest_peak_arm_gain_pct: float = 15.0
+    modest_peak_arm_min_best_points: float = 12.0
+    modest_peak_keep_ratio: float = 0.75
+    modest_peak_max_projected_tp_points: float = 60.0
+    modest_peak_max_projected_tp_frac_of_entry: float = 0.85
+    modest_peak_max_stage_size: float = 30.0
+    modest_peak_suppress_pre_stage_wide_floor: bool = True
+    modest_peak_tighten_peak_fade_defer: bool = True
+    modest_peak_skip_hot_velocity_3s: float = 4.0
     moment_stage_min_projected_tp: float = 40.0
     # Allow rare 50→650 LTP mega rips (+600pt); live extension ratchets toward this.
     moment_stage_max_projected_tp: float = 800.0
