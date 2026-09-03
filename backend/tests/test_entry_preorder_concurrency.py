@@ -25,6 +25,7 @@ from app.models.schemas import (
     StrategyType,
     SymbolSnapshot,
 )
+from tests.mock_defaults import profit_gate_stub
 
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -103,13 +104,7 @@ def _process_patches(state, candidate, events, opener):
         ftv_ranked_allocation_enabled=True,
         ftv_allocation_max_positions=1,
     )
-    profit_gate = SimpleNamespace(
-        newEntriesAllowed=True,
-        dailyLossStopExpiryTopOnly=False,
-        status="ACTIVE",
-        message="ok",
-        to_dict=lambda: {},
-    )
+    profit_gate = profit_gate_stub()
     capital = SimpleNamespace(to_dict=lambda: {})
     limits = SimpleNamespace(
         dayMode="NORMAL",
