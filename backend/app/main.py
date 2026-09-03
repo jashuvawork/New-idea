@@ -86,24 +86,22 @@ async def _background_monitor():
 
         try:
             if settings.background_market_monitor_enabled:
+                rest_ok = (
+                    not rate_limit_active()
+                    and not rate_limit_recovery_active()
+                )
+                # Open positions: tick-fast exits + lightweight WS overlay only.
+                # Do NOT run building_ltp/process on every tick — 20–35s cycles block
+                # /snapshots/cached and freeze the UI at "Live cached 20s / fast 30s".
                 if tick_driven and can_run_tick_fast():
                     await run_tick_fast_cycle(broadcast=False)
-                    # Open positions use tick-fast exits; BUILDING radar still needs
-                    # per-LTP entry re-eval so a local-base lift is not missed.
-                    if is_ws_active():
-                        rest_ok = (
-                            not rate_limit_active()
-                            and not rate_limit_recovery_active()
-                        )
-                        await run_building_ltp_entry_cycle(
-                            broadcast=True,
-                            run_trader=rest_ok,
-                        )
-                elif entry_scan_due():
+                    if is_ws_active() and ws_overlay_due():
+                        await run_ws_overlay_cycle(broadcast=True)
+
+                if entry_scan_due():
                     ws = is_ws_active()
                     if tick_driven and not ws:
                         invalidate_snapshot_cache()
-                    rest_ok = not rate_limit_active() and not rate_limit_recovery_active()
                     if ws:
                         # Never await full REST on this loop — 30–90s builds freeze overlays.
                         if full_rest_rebuild_due() and not full_rest_rebuild_running():
@@ -135,11 +133,7 @@ async def _background_monitor():
                         if rest_ok:
                             mark_full_scan_done()
                 elif is_ws_active():
-                    rest_ok = (
-                        not rate_limit_active()
-                        and not rate_limit_recovery_active()
-                    )
-                    # Every meaningful BUILDING LTP move → refresh + take.
+                    # Poll timeout between entry scans — catch BUILDING LTP moves.
                     await run_building_ltp_entry_cycle(
                         broadcast=True,
                         run_trader=rest_ok,
