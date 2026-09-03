@@ -1641,10 +1641,15 @@ def find_best_entry(
     for c in candidates:
         c.score += symbol_rank_adjustment(c.symbol, chop)
         c.score += index_adj.get(c.symbol.upper(), 0.0)
-        from app.engines.bad_day_routing import cross_index_elite_priority_bonus, cross_index_rank_adjustment
+        from app.engines.bad_day_routing import (
+            cross_index_elite_priority_bonus,
+            cross_index_rank_adjustment,
+            expiry_afternoon_deep_itm_rank_adjustment,
+        )
 
         c.score += cross_index_rank_adjustment(c, state, snapshots)
         c.score += cross_index_elite_priority_bonus(c, snapshots)
+        c.score += expiry_afternoon_deep_itm_rank_adjustment(c, state, snapshots)
         from app.engines.best_side_selection import best_side_rank_adjustment
         from app.engines.power_hour_guards import in_power_hour_window
 

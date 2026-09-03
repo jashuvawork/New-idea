@@ -1640,6 +1640,15 @@ class Settings(BaseSettings):
     expiry_afternoon_elite_min_velocity_3s: float = 2.5
     expiry_afternoon_exploding_min_explosion_score: float = 90.0
     expiry_afternoon_exploding_min_velocity_3s: float = 3.0
+    # Sep03: SENSEX expiry afternoon — prefer deep ITM on expiring symbol over cross-index
+    # NIFTY explosion (76600 PE close rip vs 23850 PE fake rip at 13:45).
+    expiry_afternoon_deep_itm_routing_enabled: bool = True
+    expiry_afternoon_deep_itm_min_steps: int = 2
+    expiry_afternoon_deep_itm_rank_bonus: float = 50.0
+    expiry_afternoon_cross_index_explosion_penalty: float = 45.0
+    expiry_afternoon_cross_index_explosion_block_enabled: bool = True
+    expiry_afternoon_cross_index_explosion_bypass_min_score: float = 95.0
+    expiry_afternoon_cross_index_explosion_bypass_min_move_pct: float = 120.0
     # Hard stop for generic expiry entries after 15:00 — top FTV/V/ELITE/explosives bypass.
     expiry_evening_block_enabled: bool = True
     expiry_evening_block_hour: int = 15
