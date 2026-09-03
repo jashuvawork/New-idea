@@ -1303,6 +1303,15 @@ def check_expiry_candidate(
     if not confirm_ok:
         return False, confirm_reason, meta
 
+    from app.engines.bad_day_routing import check_expiry_afternoon_cross_index_explosion
+
+    cross_ok, cross_reason, cross_meta = check_expiry_afternoon_cross_index_explosion(
+        candidate, state, snapshots,
+    )
+    meta.update(cross_meta)
+    if not cross_ok:
+        return False, cross_reason, meta
+
     pm_itm = expiry_pm_itm_quick_active(snap, state, snapshots)
     meta["expiryPmItmQuick"] = pm_itm
 

@@ -348,6 +348,11 @@ def test_check_expiry_candidate_aligned_explosion_skips_rank_floor(
 
     s = mock_settings.return_value
     s.expiry_day_guards_enabled = True
+    s.expiry_morning_end_hour = 13
+    s.expiry_morning_end_minute = 30
+    s.expiry_afternoon_deep_itm_routing_enabled = True
+    s.expiry_afternoon_cross_index_explosion_block_enabled = True
+    s.expiry_afternoon_explosion_confirm_enabled = False
     s.expiry_min_rank_score = 62.0
     s.expiry_worst_day_elite_top_bypass_enabled = True
     s.expiry_worst_day_session_loss_inr = -12000.0

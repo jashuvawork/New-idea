@@ -9,6 +9,8 @@ from app.config import get_settings
 from app.engines.capital_allocator import compute_session_pnl
 from app.engines.expiry_day_guards import (
     expiry_symbols,
+    in_expiry_afternoon_window,
+    is_expiry_session,
     is_near_expiry_day,
     is_pre_expiry_day,
     is_symbol_expiry_day,
@@ -500,6 +502,175 @@ def check_bad_day_candidate(
     return True, "ok", meta
 
 
+def expiry_afternoon_deep_itm_routing_active(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """After 13:30 on any expiry session — route to expiring-symbol deep ITM."""
+    settings = get_settings()
+    if not getattr(settings, "expiry_afternoon_deep_itm_routing_enabled", True):
+        return False
+    if not settings.expiry_day_guards_enabled:
+        return False
+    if not is_expiry_session(snapshots):
+        return False
+    return in_expiry_afternoon_window()
+
+
+def _candidate_itm_depth(candidate: Any, snap: SymbolSnapshot) -> int:
+    from app.engines.moneyness import _depth_steps, classify_moneyness
+
+    side = _side_val(candidate.side)
+    strike = float(getattr(candidate, "strike", 0) or 0)
+    spot = float(snap.spot or 0)
+    if spot <= 0 or strike <= 0:
+        return 0
+    atm = float(snap.atmStrike or 0)
+    if classify_moneyness(side, strike, spot, symbol=snap.symbol, atm=atm or None) != "ITM":
+        return 0
+    return _depth_steps(side, strike, spot, snap.symbol.upper(), atm or spot)
+
+
+def is_expiry_deep_itm_candidate(
+    candidate: Any,
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """Deep ITM leg on today's expiring index (e.g. SENSEX 76600 PE on Thu expiry)."""
+    settings = get_settings()
+    if not expiry_afternoon_deep_itm_routing_active(snapshots):
+        return False
+    sym = candidate.symbol.upper()
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+    if snap is None or not is_symbol_expiry_day(snap):
+        return False
+    min_steps = int(getattr(settings, "expiry_afternoon_deep_itm_min_steps", 2) or 2)
+    return _candidate_itm_depth(candidate, snap) >= min_steps
+
+
+def expiring_symbol_has_deep_itm_heatmap(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """True when an expiring index heatmap shows tradeable deep ITM premium."""
+    settings = get_settings()
+    if not expiry_afternoon_deep_itm_routing_active(snapshots):
+        return False
+    from app.engines.moneyness import atm_strike, classify_moneyness, steps_from_atm
+
+    min_steps = int(getattr(settings, "expiry_afternoon_deep_itm_min_steps", 2) or 2)
+    max_prem = float(getattr(settings, "expiry_pm_itm_premium_max_inr", 280.0) or 280.0)
+    min_prem = float(getattr(settings, "expiry_day_min_option_premium_inr", 15.0) or 15.0)
+
+    for sym in expiry_symbols(snapshots):
+        snap = snapshots.get(sym)
+        if snap is None or not snap.dataAvailable or not snap.heatmap:
+            continue
+        spot = float(snap.spot or 0)
+        if spot <= 0:
+            continue
+        atm = float(snap.atmStrike or 0) or atm_strike(spot, sym)
+        for side in (Side.PUT, Side.CALL):
+            for row in snap.heatmap:
+                strike = float(getattr(row, "strike", 0) or 0)
+                if strike <= 0:
+                    continue
+                prem = float(
+                    getattr(row, "putLtp", 0) or 0
+                    if side == Side.PUT
+                    else getattr(row, "callLtp", 0) or 0
+                )
+                if prem < min_prem or prem > max_prem:
+                    continue
+                if classify_moneyness(side, strike, spot, symbol=sym, atm=atm) != "ITM":
+                    continue
+                if abs(steps_from_atm(strike, spot, sym, atm=atm)) >= min_steps:
+                    return True
+    return False
+
+
+def is_cross_index_expiry_afternoon_explosion(
+    candidate: Any,
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """Non-expiring index explosion during expiry-session afternoon routing."""
+    if not expiry_afternoon_deep_itm_routing_active(snapshots):
+        return False
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+    sym = candidate.symbol.upper()
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+    if snap is None or is_symbol_expiry_day(snap):
+        return False
+    return True
+
+
+def expiry_afternoon_deep_itm_rank_adjustment(
+    candidate: Any,
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> float:
+    """Boost expiring-symbol deep ITM; penalize cross-index afternoon explosions."""
+    _ = state
+    settings = get_settings()
+    if not expiry_afternoon_deep_itm_routing_active(snapshots):
+        return 0.0
+
+    bonus = 0.0
+    if is_expiry_deep_itm_candidate(candidate, snapshots):
+        bonus += float(
+            getattr(settings, "expiry_afternoon_deep_itm_rank_bonus", 50.0) or 50.0
+        )
+    elif is_cross_index_expiry_afternoon_explosion(candidate, snapshots):
+        if expiring_symbol_has_deep_itm_heatmap(snapshots):
+            bonus -= float(
+                getattr(settings, "expiry_afternoon_cross_index_explosion_penalty", 45.0)
+                or 45.0
+            )
+    return bonus
+
+
+def check_expiry_afternoon_cross_index_explosion(
+    candidate: Any,
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, str, dict[str, Any]]:
+    """Hard block cross-index explosion when expiring symbol has deep ITM available."""
+    _ = state
+    settings = get_settings()
+    meta: dict[str, Any] = {"expiryAfternoonDeepItmRouting": True}
+    if not getattr(settings, "expiry_afternoon_cross_index_explosion_block_enabled", True):
+        return True, "ok", meta
+    if not is_cross_index_expiry_afternoon_explosion(candidate, snapshots):
+        return True, "ok", meta
+    if not expiring_symbol_has_deep_itm_heatmap(snapshots):
+        return True, "ok", meta
+
+    from app.engines.grade_a_ftv_capture import is_grade_a_ftv_first_lift_candidate
+    from app.engines.top_ftv_v_expiry_bypass import is_top_ftv_or_v_candidate
+
+    if is_grade_a_ftv_first_lift_candidate(candidate) or is_top_ftv_or_v_candidate(candidate):
+        meta["expiryAfternoonCrossIndexBypass"] = "ftv"
+        return True, "ok", meta
+
+    event = getattr(candidate, "explosion_event", None)
+    score = float(getattr(event, "explosion_score", 0) or 0) if event else float(
+        getattr(candidate, "score", 0) or 0
+    )
+    move = _candidate_session_move(candidate)
+    min_score = float(
+        getattr(settings, "expiry_afternoon_cross_index_explosion_bypass_min_score", 95.0)
+        or 95.0
+    )
+    min_move = float(
+        getattr(settings, "expiry_afternoon_cross_index_explosion_bypass_min_move_pct", 120.0)
+        or 120.0
+    )
+    meta["crossIndexExplosionScore"] = score
+    meta["crossIndexSessionMovePct"] = move
+    if score >= min_score and move >= min_move:
+        meta["expiryAfternoonCrossIndexBypass"] = "extreme_rip"
+        return True, "ok", meta
+    return False, "expiry_afternoon_prefer_expiring_deep_itm", meta
+
+
 def cross_index_rank_adjustment(
     candidate: Any,
     state: AutoTraderState,
@@ -610,6 +781,11 @@ def cross_index_elite_priority_bonus(
     over weaker setups on the other index.
     """
     settings = get_settings()
+    if expiry_afternoon_deep_itm_routing_active(snapshots):
+        sym = candidate.symbol.upper()
+        snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+        if snap is not None and not is_symbol_expiry_day(snap):
+            return 0.0
     if not getattr(settings, "cross_index_elite_priority_enabled", True):
         return 0.0
     if str(getattr(candidate, "mode", "") or "") != "explosion":
@@ -690,5 +866,7 @@ def bad_day_routing_summary(
         "preExpiryAlternates": pre_alts,
         "alternateIndex": alts,
         "pmItmAlternateSymbols": pm_alts,
+        "expiryAfternoonDeepItmRouting": expiry_afternoon_deep_itm_routing_active(snapshots),
+        "expiringSymbolDeepItmHeatmap": expiring_symbol_has_deep_itm_heatmap(snapshots),
         "sessionPnlInr": round(compute_session_pnl(state), 2),
     }
