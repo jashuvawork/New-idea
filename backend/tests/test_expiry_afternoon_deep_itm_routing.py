@@ -99,6 +99,20 @@ def _settings(**overrides):
     s.cross_index_elite_priority_enabled = True
     s.cross_index_elite_min_session_move_pct = 40.0
     s.cross_index_elite_priority_bonus = 22.0
+    s.expiry_worst_day_session_loss_inr = -12_000.0
+    s.expiry_decline_session_loss_inr = -8_000.0
+    s.worst_day_full_pause_loss_inr = -20_000.0
+    s.expiry_worst_day_score_threshold = 55.0
+    s.expiry_worst_day_halt_entries = True
+    s.expiry_morning_only = True
+    s.expiry_max_trades_per_day = 6
+    s.expiry_worst_day_max_trades = 3
+    s.expiry_evening_all_in_explosion_bypass = True
+    s.expiry_power_hour_deep_itm_enabled = True
+    s.expiry_power_hour_deep_itm_bypass_top_only = True
+    s.expiry_power_hour_deep_itm_bypass_evening_block = True
+    s.expiry_severe_pause_deep_itm_lift_enabled = True
+    s.ftv_elite_top_only_enabled = False
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -353,3 +367,132 @@ def test_sensex_deep_itm_wins_ranking_vs_nifty_explosion(_aft, _sess_bad, _sess_
     assert sensex_final == 112.0
     assert nifty_final == 50.0
     assert sensex_final > nifty_final
+
+
+@patch("app.engines.power_hour_guards.in_power_hour_window", return_value=True)
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.bad_day_routing.get_settings")
+@patch("app.engines.expiry_day_guards.is_expiry_session", return_value=True)
+@patch("app.engines.bad_day_routing.is_expiry_session", return_value=True)
+def test_power_hour_session_allows_expiring_deep_itm_setup(
+    _sess_bad, _sess_exp, mock_bad, mock_exp, _ph,
+):
+    from app.engines.power_hour_guards import check_power_hour_session_allowed
+
+    cfg = _settings()
+    mock_bad.return_value = cfg
+    mock_exp.return_value = cfg
+    snaps = {
+        "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
+        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+    }
+    ok, reason, meta = check_power_hour_session_allowed(AutoTraderState(), snaps)
+    assert ok is True, reason
+    assert meta.get("powerHourDeepItmSetup") is True
+
+
+@patch("app.engines.power_hour_guards.in_power_hour_window", return_value=True)
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.bad_day_routing.get_settings")
+@patch("app.engines.expiry_day_guards.is_expiry_session", return_value=True)
+@patch("app.engines.bad_day_routing.is_expiry_session", return_value=True)
+def test_power_hour_candidate_qualifies_deep_itm_quick(
+    _sess_bad, _sess_exp, mock_bad, mock_exp, _ph,
+):
+    from app.engines.power_hour_guards import candidate_qualifies_power_hour_top_trade
+
+    cfg = _settings()
+    mock_bad.return_value = cfg
+    mock_exp.return_value = cfg
+    snaps = {
+        "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
+        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+    }
+    cand = _Cand(
+        "SENSEX", Side.PUT, 77200.0, 62.0, mode="quick_sideways", snap=snaps["SENSEX"],
+    )
+    assert candidate_qualifies_power_hour_top_trade(cand, snapshots=snaps) is True
+
+
+@patch("app.engines.power_hour_guards.in_power_hour_window", return_value=True)
+@patch("app.engines.bad_day_routing.compute_session_pnl", return_value=-22518.47)
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.bad_day_routing.get_settings")
+@patch("app.engines.expiry_day_guards.is_expiry_session", return_value=True)
+@patch("app.engines.bad_day_routing.is_expiry_session", return_value=True)
+def test_severe_pause_lift_when_expiring_deep_itm_power_hour(
+    _sess_bad, _sess_exp, mock_bad, mock_exp, _pnl, _ph,
+):
+    from app.engines.bad_day_routing import severe_pause_expiring_deep_itm_lift_active
+
+    cfg = _settings()
+    mock_bad.return_value = cfg
+    mock_exp.return_value = cfg
+    snaps = {
+        "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
+        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+    }
+    assert severe_pause_expiring_deep_itm_lift_active(AutoTraderState(), snaps) is True
+
+
+@patch("app.engines.power_hour_guards.in_power_hour_window", return_value=True)
+@patch("app.engines.expiry_day_guards.compute_session_pnl", return_value=-22518.47)
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.bad_day_routing.get_settings")
+@patch("app.engines.expiry_day_guards.is_expiry_session", return_value=True)
+@patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=True)
+def test_expiry_evening_block_bypassed_for_deep_itm_power_hour(
+    _eve, _sess, mock_bad, mock_exp, _pnl, _ph,
+):
+    from app.engines.expiry_day_guards import check_expiry_entry_allowed
+
+    cfg = _settings()
+    mock_bad.return_value = cfg
+    mock_exp.return_value = cfg
+    snaps = {
+        "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
+        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+    }
+    ok, reason, meta = check_expiry_entry_allowed(AutoTraderState(), snaps)
+    assert ok is True, reason
+    assert (
+        meta.get("expiryEveningDeepItmBypass") is True
+        or meta.get("expiryEveningTopSignalBypass") is True
+    )
+
+
+@patch("app.engines.power_hour_guards.in_power_hour_window", return_value=True)
+@patch("app.engines.bad_day_routing.compute_session_pnl", return_value=-22518.47)
+@patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.bad_day_routing.get_settings")
+def test_severe_pause_blocks_nifty_but_allows_sensex_deep_itm(
+    mock_bad, mock_exp, _pnl, _ph,
+):
+    from app.engines.bad_day_routing import (
+        candidate_is_expiry_deep_itm_trade,
+        severe_pause_expiring_deep_itm_lift_active,
+    )
+
+    cfg = _settings()
+    mock_bad.return_value = cfg
+    mock_exp.return_value = cfg
+    state = AutoTraderState()
+    snaps = {
+        "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
+        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+    }
+    sensex_cand = _Cand(
+        "SENSEX", Side.PUT, 77200.0, 62.0, mode="quick_sideways", snap=snaps["SENSEX"],
+    )
+    nifty_cand = _Cand(
+        "NIFTY", Side.PUT, 23850.0, 95.0, mode="explosion", tier="EXPLODING",
+        snap=snaps["NIFTY"],
+    )
+
+    assert severe_pause_expiring_deep_itm_lift_active(state, snaps) is True
+    assert candidate_is_expiry_deep_itm_trade(
+        sensex_cand, snaps, power_hour_only=True,
+    ) is True
+    assert candidate_is_expiry_deep_itm_trade(
+        nifty_cand, snaps, power_hour_only=True,
+    ) is False

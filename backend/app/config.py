@@ -1649,6 +1649,13 @@ class Settings(BaseSettings):
     expiry_afternoon_cross_index_explosion_block_enabled: bool = True
     expiry_afternoon_cross_index_explosion_bypass_min_score: float = 95.0
     expiry_afternoon_cross_index_explosion_bypass_min_move_pct: float = 120.0
+    # Sep03 power hour: SENSEX 76600 PE close vertical — PM ITM deep ITM on expiring
+    # symbol bypasses top-only / evening block / severe session pause (not cross-index).
+    expiry_power_hour_deep_itm_enabled: bool = True
+    expiry_power_hour_deep_itm_rank_bonus: float = 35.0
+    expiry_power_hour_deep_itm_bypass_top_only: bool = True
+    expiry_power_hour_deep_itm_bypass_evening_block: bool = True
+    expiry_severe_pause_deep_itm_lift_enabled: bool = True
     # Hard stop for generic expiry entries after 15:00 — top FTV/V/ELITE/explosives bypass.
     expiry_evening_block_enabled: bool = True
     expiry_evening_block_hour: int = 15

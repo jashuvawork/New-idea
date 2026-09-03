@@ -615,6 +615,20 @@ def validate_candidate(
         candidate, snapshots=snapshots,
     ):
         return False, "power_hour_top_only", policy_meta
+
+    from app.engines.bad_day_routing import (
+        candidate_is_expiry_deep_itm_trade,
+        severe_pause_expiring_deep_itm_lift_active,
+    )
+
+    if severe_pause_expiring_deep_itm_lift_active(
+        state, snapshots or {},
+    ) and not candidate_is_expiry_deep_itm_trade(
+        candidate, snapshots or {}, power_hour_only=True,
+    ):
+        policy_meta["severePauseDeepItmOnly"] = True
+        return False, "severe_pause_expiring_deep_itm_only", policy_meta
+
     if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.session_mode_feedback import (

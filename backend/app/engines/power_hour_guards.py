@@ -43,6 +43,14 @@ def snapshots_have_power_hour_top_signal(
 
     from app.engines.best_side_selection import snapshots_have_dominant_side_surge
 
+    if bool(getattr(get_settings(), "expiry_power_hour_deep_itm_bypass_top_only", True)):
+        from app.engines.bad_day_routing import (
+            snapshots_have_expiring_deep_itm_power_hour_setup,
+        )
+
+        if snapshots_have_expiring_deep_itm_power_hour_setup(snapshots):
+            return True
+
     return (
         snapshots_have_expiry_elite_top(snapshots)
         or snapshots_have_top_ftv_or_v(snapshots)
@@ -63,6 +71,11 @@ def candidate_qualifies_power_hour_top_trade(
     from app.engines.trade_ranking import rank_entry_candidate
 
     if is_top_ftv_or_v_candidate(candidate):
+        return True
+
+    from app.engines.bad_day_routing import candidate_is_expiry_deep_itm_trade
+
+    if candidate_is_expiry_deep_itm_trade(candidate, snapshots or {}, power_hour_only=True):
         return True
 
     from app.engines.best_side_selection import dominant_side_qualifies_power_hour
@@ -108,5 +121,11 @@ def check_power_hour_session_allowed(
         return True, "ok", meta
     if snapshots_have_power_hour_top_signal(snapshots):
         meta["powerHourTopSignal"] = True
+        from app.engines.bad_day_routing import (
+            snapshots_have_expiring_deep_itm_power_hour_setup,
+        )
+
+        if snapshots_have_expiring_deep_itm_power_hour_setup(snapshots):
+            meta["powerHourDeepItmSetup"] = True
         return True, "ok", meta
     return False, "power_hour_top_only", meta
