@@ -1212,38 +1212,6 @@ async def _open_from_candidate(
         from app.engines.entry_timing import cap_lots_for_timing
 
         lots = cap_lots_for_timing(lots, timing_meta)
-    if not full_sleeve_authorized:
-        from app.engines.capital_allocator import max_lots_for_capital_pct
-
-        ordinary_pct = float(
-            getattr(settings, "ordinary_entry_max_capital_pct", 0.35) or 0.35
-        )
-        if (
-            policy_decision is not None
-            and policy_decision.mode
-            in {
-                "TOP_FTV_A",
-                "WINNER_LOCAL_BASE",
-                "BUILDING_RIP_FTV",
-                "SLOW_GRIND_FTV",
-                "FAST_BULLISH_FTV",
-                "SQUEEZE_RELEASE_FTV",
-                "INDEX_LED_OPTION_LAG_FTV",
-                "STEALTH_CVD_COIL_FTV",
-                "MICRO_PULLBACK_RETEST_FTV",
-                "PREMIUM_FVG_PAD_FTV",
-                "DOUBLE_DIP_VBASE_FTV",
-                "EARLY_RADAR_PAD_FTV",
-                "BUILDING_ARMED_BASE_GRADE_A",
-                "BUILDING_COIL_PAD_FTV",
-            }
-            and policy_decision.max_capital_pct is not None
-        ):
-            ordinary_pct = min(ordinary_pct, float(policy_decision.max_capital_pct))
-        lots = min(
-            lots,
-            max_lots_for_capital_pct(symbol, fill_premium, ordinary_pct),
-        )
     # India VIX day-type sizing — default OFF (observe-only). Always records the regime;
     # only scales lots when vix_regime_sizing_enabled is on (calm/spike days shrink).
     from app.engines.vix_regime import vix_size_multiplier
@@ -1340,6 +1308,48 @@ async def _open_from_candidate(
             top_explosion_max = True
         except Exception:
             elite_full_lot = False
+
+    # Ordinary 35% cap for non-top entries only — must run AFTER elite/top force-max
+    # (Sep 3 SENSEX 77000 PE ELITE: top max then 35% cap → 10 lots on a +22pt runner).
+    if (
+        not full_sleeve_authorized
+        and not top_explosion_max
+        and not elite_full_lot
+        and not high_conviction
+        and not base_window_full_lots
+        and not elevated_size
+    ):
+        from app.engines.capital_allocator import max_lots_for_capital_pct
+
+        ordinary_pct = float(
+            getattr(settings, "ordinary_entry_max_capital_pct", 0.35) or 0.35
+        )
+        if (
+            policy_decision is not None
+            and policy_decision.mode
+            in {
+                "TOP_FTV_A",
+                "WINNER_LOCAL_BASE",
+                "BUILDING_RIP_FTV",
+                "SLOW_GRIND_FTV",
+                "FAST_BULLISH_FTV",
+                "SQUEEZE_RELEASE_FTV",
+                "INDEX_LED_OPTION_LAG_FTV",
+                "STEALTH_CVD_COIL_FTV",
+                "MICRO_PULLBACK_RETEST_FTV",
+                "PREMIUM_FVG_PAD_FTV",
+                "DOUBLE_DIP_VBASE_FTV",
+                "EARLY_RADAR_PAD_FTV",
+                "BUILDING_ARMED_BASE_GRADE_A",
+                "BUILDING_COIL_PAD_FTV",
+            }
+            and policy_decision.max_capital_pct is not None
+        ):
+            ordinary_pct = min(ordinary_pct, float(policy_decision.max_capital_pct))
+        lots = min(
+            lots,
+            max_lots_for_capital_pct(symbol, fill_premium, ordinary_pct),
+        )
 
     lots, top_moment_lot_meta = _enforce_top_moment_max_lots_only(
         lots=lots,
@@ -1776,6 +1786,27 @@ async def _open_from_candidate(
     # (Aug11 63-lot NIFTY claimed SL ≤₹15k while risking ~₹37k).
     if exit_plan and int(exit_plan.get("lots") or 0) > 0:
         lots = int(exit_plan["lots"])
+    # Post-tune floor: size-tune must not leave top explosion / elite below capital max.
+    if (
+        candidate.mode == "explosion"
+        and (top_explosion_max or elite_full_lot)
+        and bool(getattr(settings, "explosion_always_force_max_lots", True))
+    ):
+        from app.engines.capital_allocator import apply_explosion_always_max_lots
+
+        floor_lots = apply_explosion_always_max_lots(
+            lots, symbol, fill_premium, mode="explosion",
+        )
+        if floor_lots > lots:
+            lots = floor_lots
+            if exit_plan is not None:
+                exit_plan["lots"] = lots
+                reasons = list(exit_plan.get("reasoning") or [])
+                reasons.append(
+                    f"Post-tune max-lot floor: restored {lots} lots "
+                    f"(top explosion / elite full lot)"
+                )
+                exit_plan["reasoning"] = reasons
     if exit_plan and settings.edge_engine_enabled:
         plan_obj = AdaptiveExitPlan.from_dict(exit_plan)
         # Jul30: edge_tighten crushed calculated ~20pt SL to 7.99 on max-lot ELITE.

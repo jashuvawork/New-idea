@@ -233,3 +233,16 @@ def test_building_armed_base_grade_a_policy_grants_full_sleeve():
         )
     assert full_sleeve is True
     assert lots == 33
+
+
+@patch("app.engines.capital_allocator.get_settings")
+@patch("app.engines.capital_allocator.max_lots_for_capital", return_value=18)
+def test_post_tune_floor_restores_top_explosion_max_lots(_max, mock_settings):
+    """Sep 3 pattern: tune_exit left 10 lots; post-tune floor restores capital max."""
+    s = MagicMock()
+    s.explosion_always_force_max_lots = True
+    mock_settings.return_value = s
+    lots = 10
+    floor = apply_explosion_always_max_lots(lots, "SENSEX", 344.33, mode="explosion")
+    assert floor == 18
+    assert floor > lots
