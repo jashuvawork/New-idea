@@ -3,6 +3,7 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import orjson
 import pytest
 
 from app.routers import market as market_router
@@ -123,9 +124,12 @@ def test_cached_endpoint_returns_bytes_without_refresh():
     sentinel = market_router._cache_json
 
     async def _run():
-        with patch.object(market_router, "_refresh_cached_json") as refresh:
+        with patch.object(market_router, "_refresh_cached_json") as refresh, patch.object(
+            market_router, "_sync_cache_json_meta", return_value=sentinel,
+        ) as meta:
             resp = await market_router.get_snapshots_cached()
             refresh.assert_not_called()
+            meta.assert_called_once()
         return resp
 
     resp = asyncio.run(_run())
@@ -315,8 +319,75 @@ def test_cached_endpoint_serves_stale_during_rebuild_without_full_build():
     assert b"NIFTY" in resp.body
 
 
-def test_rebuild_load_active_includes_build_in_progress():
-    market_router._build_in_progress = True
-    assert market_router.rebuild_load_active() is True
-    market_router._build_in_progress = False
-    assert market_router.rebuild_load_active() is False
+def test_sync_cache_json_meta_patches_timestamp_and_tick_age():
+    import time
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from app.models.schemas import AutoTraderState, MarketPhase, MultiSnapshot, SymbolSnapshot
+
+    IST = ZoneInfo("Asia/Kolkata")
+    old_ts = datetime.now(IST) - timedelta(seconds=30)
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=old_ts,
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=50.0,
+    )
+    market_router._store_cache(
+        MultiSnapshot(
+            timestamp=old_ts,
+            dataReady=True,
+            snapshots={"NIFTY": snap},
+            autoTrader=AutoTraderState(),
+        ),
+    )
+    before = orjson.loads(market_router._cache_json)
+    assert before["timestamp"] != datetime.now(IST).isoformat()
+
+    market_router._last_json_meta_sync_mono = 0.0
+    with patch("app.routers.market.is_ws_active", return_value=True), patch(
+        "app.services.tick_store.status",
+        return_value={"lastTickAgeMs": 120},
+    ):
+        fresh = market_router._sync_cache_json_meta(force=True)
+
+    assert fresh is not None
+    after = orjson.loads(fresh)
+    assert after["wsTickAgeMs"] == 120
+    assert after["timestamp"] != before["timestamp"]
+    assert after["waitingReason"] is None
+    assert after["snapshots"]["NIFTY"]["symbol"] == "NIFTY"
+
+
+def test_sync_cache_json_meta_throttles_without_force():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.models.schemas import AutoTraderState, MarketPhase, MultiSnapshot, SymbolSnapshot
+
+    IST = ZoneInfo("Asia/Kolkata")
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=50.0,
+    )
+    market_router._store_cache(
+        MultiSnapshot(
+            timestamp=datetime.now(IST),
+            dataReady=True,
+            snapshots={"NIFTY": snap},
+            autoTrader=AutoTraderState(),
+        ),
+    )
+    sentinel = market_router._cache_json
+    import time
+
+    market_router._last_json_meta_sync_mono = time.monotonic()
+    out = market_router._sync_cache_json_meta()
+    assert out == sentinel
+    forced = market_router._sync_cache_json_meta(force=True)
+    assert forced is not None
