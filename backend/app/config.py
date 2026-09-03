@@ -1656,6 +1656,11 @@ class Settings(BaseSettings):
     expiry_power_hour_deep_itm_bypass_top_only: bool = True
     expiry_power_hour_deep_itm_bypass_evening_block: bool = True
     expiry_severe_pause_deep_itm_lift_enabled: bool = True
+    # Same-day expiry index: top trades on the expiring symbol bypass daily loss stop
+    # (Sep03 SENSEX 76600 PE close vertical after session hit −₹20k daily stop).
+    expiry_daily_loss_stop_bypass_enabled: bool = True
+    expiry_daily_loss_stop_bypass_same_day_only: bool = True
+    expiry_daily_loss_recovery_rank_bonus: float = 35.0
     # Hard stop for generic expiry entries after 15:00 — top FTV/V/ELITE/explosives bypass.
     expiry_evening_block_enabled: bool = True
     expiry_evening_block_hour: int = 15
@@ -1770,7 +1775,7 @@ class Settings(BaseSettings):
     # Tue: NIFTY #1; Wed (SENSEX tomorrow): SENSEX #1; Thu: SENSEX #1; etc.
     expiry_day_prefer_same_day_enabled: bool = True
     expiry_day_symbol_rank_bonus: float = 22.0
-    expiry_day_sort_priority_bonus: float = 30.0
+    expiry_day_sort_priority_bonus: float = 45.0
     # #2 when peer expires within a few days (Tue NIFTY → Thu SENSEX = +2d).
     expiry_day_same_week_next_rank_bonus: float = 12.0
     expiry_day_same_week_next_sort_bonus: float = 15.0

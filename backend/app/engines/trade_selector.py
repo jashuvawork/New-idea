@@ -1650,6 +1650,9 @@ def find_best_entry(
         c.score += cross_index_rank_adjustment(c, state, snapshots)
         c.score += cross_index_elite_priority_bonus(c, snapshots)
         c.score += expiry_afternoon_deep_itm_rank_adjustment(c, state, snapshots)
+        from app.engines.bad_day_routing import expiry_daily_loss_recovery_rank_adjustment
+
+        c.score += expiry_daily_loss_recovery_rank_adjustment(c, state, snapshots)
         from app.engines.best_side_selection import best_side_rank_adjustment
         from app.engines.power_hour_guards import in_power_hour_window
 

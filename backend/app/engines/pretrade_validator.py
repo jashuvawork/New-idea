@@ -629,6 +629,19 @@ def validate_candidate(
         policy_meta["severePauseDeepItmOnly"] = True
         return False, "severe_pause_expiring_deep_itm_only", policy_meta
 
+    from app.engines.bad_day_routing import (
+        candidate_qualifies_expiry_daily_loss_stop_bypass,
+        expiry_daily_loss_stop_bypass_active,
+    )
+
+    if expiry_daily_loss_stop_bypass_active(
+        state, snapshots or {},
+    ) and not candidate_qualifies_expiry_daily_loss_stop_bypass(
+        candidate, snapshots or {},
+    ):
+        policy_meta["dailyLossStopExpiryTopOnly"] = True
+        return False, "daily_loss_stop_expiry_top_only", policy_meta
+
     if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.session_mode_feedback import (

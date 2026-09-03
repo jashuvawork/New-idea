@@ -129,6 +129,7 @@ class DailyProfitGate:
     newEntriesAllowed: bool = True
     status: str = "ACTIVE"
     message: str = ""
+    dailyLossStopExpiryTopOnly: bool = False
     stages: Optional[list[ProfitStage]] = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -149,6 +150,7 @@ class DailyProfitGate:
             "newEntriesAllowed": self.newEntriesAllowed,
             "status": self.status,
             "message": self.message,
+            "dailyLossStopExpiryTopOnly": self.dailyLossStopExpiryTopOnly,
             "progressPct": round(progress, 1),
             "stages": [s.to_dict() for s in (self.stages or [])],
             "stageLockMode": True,
@@ -995,7 +997,10 @@ def _compute_stage_lock(
     return highest_stage, 0.0, 0
 
 
-def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
+def update_daily_profit_gate(
+    state: AutoTraderState,
+    snapshots: dict | None = None,
+) -> DailyProfitGate:
     """
     Staged profit locks on sizing capital (₹2L default):
       Min ₹22K milestone (no stop) · Lock 1: 55% · Lock 2: 88% · Lock 3: 112% · Lock 4: peak of day
@@ -1049,6 +1054,18 @@ def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
 
     loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
     if loss_stop > 0 and session_pnl <= -abs(loss_stop):
+        if snapshots:
+            from app.engines.bad_day_routing import expiry_daily_loss_stop_bypass_active
+
+            if expiry_daily_loss_stop_bypass_active(state, snapshots):
+                gate.newEntriesAllowed = True
+                gate.dailyLossStopExpiryTopOnly = True
+                gate.status = "DAILY_LOSS_STOP_EXPIRY_TOP_BYPASS"
+                gate.message = (
+                    f"Daily loss stop bypass: session ₹{session_pnl:,.0f} ≤ −₹{loss_stop:,.0f} "
+                    "— same-day expiry top trades only."
+                )
+                return gate
         gate.newEntriesAllowed = False
         gate.status = "DAILY_LOSS_STOP"
         gate.message = (

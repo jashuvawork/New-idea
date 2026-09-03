@@ -1884,6 +1884,15 @@ async def _open_from_candidate(
         and trap_meta.get("lotCap") is not None
         and lots <= int(trap_meta["lotCap"])
     )
+    ignore_daily_loss_stop = False
+    if snapshots and bool(
+        (state.dailyProfitGate or {}).get("dailyLossStopExpiryTopOnly")
+    ):
+        from app.engines.bad_day_routing import candidate_qualifies_expiry_daily_loss_stop_bypass
+
+        ignore_daily_loss_stop = candidate_qualifies_expiry_daily_loss_stop_bypass(
+            candidate, snapshots,
+        )
     final_risk_ok, final_risk_reason = _risk_engine.check_new_entry(
         state,
         symbol,
@@ -1895,6 +1904,7 @@ async def _open_from_candidate(
         strike=candidate.strike,
         stop_points=final_stop_points,
         ignore_per_trade_risk_cap=bool(elite_full_lot) and not trap_cap_locked,
+        ignore_daily_loss_stop=ignore_daily_loss_stop,
     )
     if not final_risk_ok:
         return False, final_risk_reason
@@ -3170,7 +3180,7 @@ async def process_exits_only(
     state.paperTrading = settings.paper_trading
 
     exit_skipped = await _process_open_trades(state, snapshots, client)
-    profit_gate = update_daily_profit_gate(state)
+    profit_gate = update_daily_profit_gate(state, snapshots)
     cap_snap = get_capital_snapshot()
     state.capitalAllocation = {
         **cap_snap.to_dict(),
@@ -3678,7 +3688,7 @@ async def process(
     skipped.extend(await _process_open_trades(state, snapshots, client))
 
     market_live = get_market_phase() == "LIVE_MARKET"
-    profit_gate = update_daily_profit_gate(state)
+    profit_gate = update_daily_profit_gate(state, snapshots)
     cap_snap = get_capital_snapshot()
     state.capitalAllocation = {
         **cap_snap.to_dict(),
@@ -3745,6 +3755,12 @@ async def process(
             "reason": profit_gate.status,
             "message": profit_gate.message,
         })
+    elif profit_gate.dailyLossStopExpiryTopOnly:
+        skipped.append({
+            "symbol": "SESSION",
+            "reason": "daily_loss_stop_expiry_top_bypass",
+            "message": profit_gate.message,
+        })
 
     # Try new entries — best setup only, max lots on 85% sizing capital
     entries_ok, entry_window_reason = entries_allowed_now()
@@ -3789,6 +3805,7 @@ async def process(
             })
         cap_hit, cap_reason, cap_meta = resolve_daily_trade_cap(state, snapshots)
         cap_elite_only = bool(cap_meta.get("dailyCapEliteOnly"))
+        daily_loss_expiry_top_only = bool(profit_gate.dailyLossStopExpiryTopOnly)
         if cap_hit:
             skipped.append({
                 "symbol": "SESSION",
@@ -3839,18 +3856,23 @@ async def process(
             candidate_qualifies_daily_cap_elite_bypass,
             snapshots_have_top_signal_session_lift,
         )
+        from app.engines.bad_day_routing import (
+            candidate_qualifies_expiry_daily_loss_stop_bypass,
+            expiry_daily_loss_stop_bypass_active,
+            severe_pause_expiring_deep_itm_lift_active,
+        )
         from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
 
         policy, policy_meta = session_entry_policy(state, snapshots)
         extreme_session = snapshots_have_top_signal_session_lift(snapshots)
-        from app.engines.bad_day_routing import (
-            severe_pause_expiring_deep_itm_lift_active,
-        )
 
         deep_itm_pause_lift = severe_pause_expiring_deep_itm_lift_active(state, snapshots)
-        session_lift = extreme_session or deep_itm_pause_lift
+        daily_loss_expiry_bypass = expiry_daily_loss_stop_bypass_active(state, snapshots)
+        session_lift = extreme_session or deep_itm_pause_lift or daily_loss_expiry_bypass
         if deep_itm_pause_lift:
             policy_meta["severePauseDeepItmLift"] = True
+        if daily_loss_expiry_bypass:
+            policy_meta["dailyLossStopExpiryTopBypass"] = True
         if settings.enable_live_trading and extreme_session and snapshots:
             from app.engines.chop_live_guards import chop_live_session_lift_allowed
 
@@ -4021,6 +4043,18 @@ async def process(
                         "symbol": best.symbol,
                         "reason": "controlled_cap_elite_only",
                         "message": "Controlled cap — only ELITE / top explosive allowed",
+                        "mode": best.mode,
+                        "score": best.score,
+                        "tier": getattr(best, "tier", None),
+                    })
+                    continue
+                if daily_loss_expiry_top_only and not candidate_qualifies_expiry_daily_loss_stop_bypass(
+                    best, snapshots,
+                ):
+                    skipped.append({
+                        "symbol": best.symbol,
+                        "reason": "daily_loss_stop_expiry_top_only",
+                        "message": "Daily loss stop — same-day expiry top trades only",
                         "mode": best.mode,
                         "score": best.score,
                         "tier": getattr(best, "tier", None),

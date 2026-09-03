@@ -658,6 +658,84 @@ def severe_pause_expiring_deep_itm_lift_active(
     return snapshots_have_expiring_deep_itm_power_hour_setup(snapshots)
 
 
+def _expiring_symbol_snapshots(
+    snapshots: dict[str, SymbolSnapshot],
+) -> dict[str, SymbolSnapshot]:
+    return {
+        sym.upper(): snap
+        for sym, snap in snapshots.items()
+        if is_symbol_expiry_day(snap)
+    }
+
+
+def snapshots_have_expiring_top_trade_signal(
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """Top FTV/V/ELITE/EXPLODING on a same-day expiry index (not cross-index)."""
+    settings = get_settings()
+    if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
+        return False
+    expiring = _expiring_symbol_snapshots(snapshots)
+    if not expiring:
+        return False
+    from app.engines.top_signal_session_lift import snapshots_have_top_signal_session_lift
+
+    return snapshots_have_top_signal_session_lift(expiring)
+
+
+def expiry_daily_loss_stop_bypass_active(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """Daily loss stop hit, but same-day expiry index has a top trade on radar."""
+    settings = get_settings()
+    if not getattr(settings, "expiry_daily_loss_stop_bypass_enabled", True):
+        return False
+    if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
+        return False
+    loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
+    if loss_stop <= 0:
+        return False
+    session_pnl = compute_session_pnl(state)
+    if session_pnl > -abs(loss_stop):
+        return False
+    return snapshots_have_expiring_top_trade_signal(snapshots)
+
+
+def candidate_qualifies_expiry_daily_loss_stop_bypass(
+    candidate: Any,
+    snapshots: dict[str, SymbolSnapshot],
+) -> bool:
+    """Per-candidate gate when daily loss stop is lifted for expiry top trades only."""
+    settings = get_settings()
+    if not getattr(settings, "expiry_daily_loss_stop_bypass_enabled", True):
+        return False
+    if getattr(settings, "expiry_daily_loss_stop_bypass_same_day_only", True):
+        sym = str(getattr(candidate, "symbol", "") or "").upper()
+        snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+        if snap is None or not is_symbol_expiry_day(snap):
+            return False
+    from app.engines.top_signal_session_lift import candidate_qualifies_top_signal_session_lift
+
+    return candidate_qualifies_top_signal_session_lift(candidate)
+
+
+def expiry_daily_loss_recovery_rank_adjustment(
+    candidate: Any,
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> float:
+    """Extra rank for same-day expiry top trades when daily loss stop bypass is live."""
+    if not expiry_daily_loss_stop_bypass_active(state, snapshots):
+        return 0.0
+    if not candidate_qualifies_expiry_daily_loss_stop_bypass(candidate, snapshots):
+        return 0.0
+    settings = get_settings()
+    return float(
+        getattr(settings, "expiry_daily_loss_recovery_rank_bonus", 35.0) or 35.0
+    )
+
+
 def candidate_is_expiry_deep_itm_trade(
     candidate: Any,
     snapshots: dict[str, SymbolSnapshot],
@@ -999,6 +1077,10 @@ def bad_day_routing_summary(
         "expiringSymbolDeepItmHeatmap": expiring_symbol_has_deep_itm_heatmap(snapshots),
         "expiringDeepItmPowerHourSetup": snapshots_have_expiring_deep_itm_power_hour_setup(
             snapshots,
+        ),
+        "expiringTopTradeSignal": snapshots_have_expiring_top_trade_signal(snapshots),
+        "dailyLossStopExpiryTopBypass": expiry_daily_loss_stop_bypass_active(
+            state, snapshots,
         ),
         "sessionPnlInr": round(compute_session_pnl(state), 2),
     }

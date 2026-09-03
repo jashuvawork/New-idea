@@ -112,6 +112,9 @@ def _settings(**overrides):
     s.expiry_power_hour_deep_itm_bypass_top_only = True
     s.expiry_power_hour_deep_itm_bypass_evening_block = True
     s.expiry_severe_pause_deep_itm_lift_enabled = True
+    s.expiry_daily_loss_stop_bypass_enabled = True
+    s.expiry_daily_loss_stop_bypass_same_day_only = True
+    s.daily_loss_stop_inr = 20_000.0
     s.ftv_elite_top_only_enabled = False
     for k, v in overrides.items():
         setattr(s, k, v)
@@ -496,3 +499,70 @@ def test_severe_pause_blocks_nifty_but_allows_sensex_deep_itm(
     assert candidate_is_expiry_deep_itm_trade(
         nifty_cand, snaps, power_hour_only=True,
     ) is False
+
+
+@patch("app.engines.bad_day_routing.snapshots_have_expiring_top_trade_signal", return_value=True)
+@patch("app.engines.bad_day_routing.compute_session_pnl", return_value=-22518.47)
+@patch("app.engines.bad_day_routing.get_settings")
+@patch("app.engines.bad_day_routing.is_expiry_session", return_value=True)
+def test_expiry_daily_loss_stop_bypass_active(_sess, mock_settings, _pnl, _top):
+    from app.engines.bad_day_routing import expiry_daily_loss_stop_bypass_active
+
+    cfg = _settings(daily_loss_stop_inr=20_000.0, expiry_daily_loss_stop_bypass_enabled=True)
+    mock_settings.return_value = cfg
+    snaps = {"SENSEX": _snap("SENSEX")}
+    assert expiry_daily_loss_stop_bypass_active(AutoTraderState(), snaps) is True
+
+
+@patch("app.engines.bad_day_routing.snapshots_have_expiring_top_trade_signal", return_value=True)
+@patch("app.engines.bad_day_routing.compute_session_pnl", return_value=-22518.47)
+@patch("app.engines.capital_allocator.get_settings")
+@patch("app.engines.bad_day_routing.expiry_daily_loss_stop_bypass_active", return_value=True)
+def test_daily_loss_gate_lifts_for_expiry_top_bypass(_bypass, mock_settings, _pnl, _top):
+    from app.engines.capital_allocator import update_daily_profit_gate
+    from app.models.schemas import PaperTrade, StrategyType
+
+    cfg = _settings(daily_loss_stop_inr=20_000.0)
+    cfg.daily_profit_target_inr = 44_000
+    cfg.daily_profit_trail_inr = 5_000
+    cfg.daily_profit_stage_locks_enabled = True
+    cfg.daily_profit_stage_pcts = [0.55, 0.88, 1.12]
+    cfg.fallback_capital_inr = 200_000
+    cfg.max_sizing_capital_inr = 200_000
+    cfg.daily_profit_target_from_capital = False
+    mock_settings.return_value = cfg
+    state = AutoTraderState()
+    state.closedPaperTrades = [
+        PaperTrade(
+            id="loss",
+            symbol="NIFTY",
+            side=Side.PUT,
+            strike=23850.0,
+            entryPremium=70.0,
+            lots=38,
+            pnlInr=-22518.47,
+            openedAt=datetime.now(IST),
+            strategyType=StrategyType.EXPLOSIVE,
+        ),
+    ]
+    gate = update_daily_profit_gate(state, {"SENSEX": _snap("SENSEX")})
+    assert gate.newEntriesAllowed is True
+    assert gate.status == "DAILY_LOSS_STOP_EXPIRY_TOP_BYPASS"
+    assert gate.dailyLossStopExpiryTopOnly is True
+
+
+@patch("app.engines.top_signal_session_lift.candidate_qualifies_top_signal_session_lift", return_value=True)
+@patch("app.engines.bad_day_routing.get_settings")
+def test_expiry_daily_loss_bypass_candidate_same_day_only(mock_settings, _top):
+    from app.engines.bad_day_routing import candidate_qualifies_expiry_daily_loss_stop_bypass
+
+    cfg = _settings(expiry_daily_loss_stop_bypass_enabled=True)
+    mock_settings.return_value = cfg
+    snaps = {
+        "SENSEX": _snap("SENSEX"),
+        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+    }
+    sensex = _Cand("SENSEX", Side.PUT, 76600.0, 100.0, tier="ELITE", snap=snaps["SENSEX"])
+    nifty = _Cand("NIFTY", Side.PUT, 23850.0, 80.0, tier="EXPLODING", snap=snaps["NIFTY"])
+    assert candidate_qualifies_expiry_daily_loss_stop_bypass(sensex, snaps) is True
+    assert candidate_qualifies_expiry_daily_loss_stop_bypass(nifty, snaps) is False
