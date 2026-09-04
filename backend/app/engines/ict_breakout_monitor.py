@@ -865,29 +865,13 @@ def _slow_grind_consolidation_base_readiness(
     # rip even when premium pulls back to the afternoon consolidation base (Sep04
     # NIFTY CALL 23750/23900: peak 43% but back at base with daily ~6%).
     current_heat = max(base_move, daily_move)
-    max_peak = float(
-        getattr(s, "slow_grind_consolidation_base_max_peak_move_pct", 24.0) or 24.0
-    )
-    try:
-        from app.engines.entry_day_adaptive import resolve_entry_day_policy
+    from app.engines.entry_day_adaptive import resolve_entry_day_policy
 
-        _policy = resolve_entry_day_policy(settings=s)
-        if _policy.day_type in ("CHOP", "GOOD", "ELITE"):
-            max_peak = max(
-                max_peak,
-                float(
-                    getattr(
-                        s,
-                        "entry_day_chop_rally_consolidation_max_pad_pct"
-                        if _policy.day_type == "CHOP"
-                        else "entry_day_good_consolidation_max_pad_pct",
-                        30.0 if _policy.day_type == "CHOP" else 28.0,
-                    )
-                    or (30.0 if _policy.day_type == "CHOP" else 28.0)
-                ),
-            )
-    except Exception:
-        pass
+    _policy = resolve_entry_day_policy(
+        settings=s,
+        snapshots={str(getattr(snap, "symbol", "") or "NIFTY"): snap} if snap else {},
+    )
+    max_peak = float(_policy.consolidation_max_pad_pct or 24.0)
     if current_heat > max_peak + 1e-6:
         return False, f"slow_grind_consolidation_move>{max_peak:g}"
 
@@ -905,7 +889,7 @@ def _slow_grind_consolidation_base_readiness(
     max_v3 = float(
         getattr(s, "slow_grind_sudden_lift_max_velocity_3s", 1.5) or 1.5
     )
-    if volume_awake and lo <= base_move <= hi + 1e-6:
+    if volume_awake and lo <= base_move <= hi + 1e-6 and _policy.consolidation_cold_v3_at_base:
         # Volume awakening at the consolidation base IS the pre-lift trigger —
         # do not require v3 to spike first (Sep04 afternoon BUILDING CALLs at v3=0).
         min_v3 = 0.0
@@ -2377,8 +2361,17 @@ def first_lift_entry_readiness(
         )
         consolidation_lane = _cons_ok
     if consolidation_lane and volume_awake:
-        min_v3 = 0.0
-        min_v9 = 0.0
+        from app.engines.entry_day_adaptive import resolve_entry_day_policy
+
+        _entry_policy = resolve_entry_day_policy(
+            day_mode=day_mode,
+            state=state,
+            snapshots={str(getattr(snap, "symbol", "") or "NIFTY"): snap} if snap else {},
+            settings=settings,
+        )
+        if _entry_policy.consolidation_cold_v3_at_base:
+            min_v3 = 0.0
+            min_v9 = 0.0
     if not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
     if not sustained_lift and v9 < min_v9:

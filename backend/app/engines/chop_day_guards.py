@@ -818,6 +818,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     from app.engines.dual_mode_strategy import dual_mode_summary
     from app.engines.ict_breakout_monitor import ict_monitor_summary
     from app.engines.daily_18pct_strategy import get_session_limits
+    from app.engines.entry_day_adaptive import resolve_entry_day_policy
 
     session_limits = get_session_limits()
     conf_tier = str(getattr(session_limits, "confidenceTier", None) or "MEDIUM")
@@ -899,5 +900,11 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
             day_mode=mode,
             confidence_tier=conf_tier,
         ),
+        "entryDayPolicy": resolve_entry_day_policy(
+            day_mode=mode,
+            confidence_tier=conf_tier,
+            snapshots=snapshots,
+            state=state,
+        ).to_dict(),
         "ictBreakoutMonitor": ict_monitor_summary(snapshots),
     }

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from app.engines.auto_trader import _ignore_per_trade_risk_cap_for_entry
 from app.engines.capital_allocator import RankedAllocation
+from app.engines.entry_day_adaptive import EntryDayAdaptivePolicy
 from app.engines.risk_engine import RiskEngine
 from app.models.schemas import AutoTraderState, Side, StrategyType
 
@@ -20,12 +21,34 @@ def _allocation(rank: int = 1) -> RankedAllocation:
     )
 
 
+def _normal_policy(**overrides) -> EntryDayAdaptivePolicy:
+    base = dict(
+        day_type="NORMAL",
+        day_mode="NORMAL",
+        confidence_tier="MEDIUM",
+        coil_top_max_position_frac=0.50,
+        coil_top_min_run_pct=0.06,
+        coil_top_max_run_pct=0.28,
+        building_cold_base_min_velocity_3s=1.2,
+        cold_base_lot_cap=3,
+        block_building_watch_cold_base=False,
+        probe_max_capital_pct=0.40,
+        consolidation_max_pad_pct=24.0,
+        consolidation_cold_v3_at_base=True,
+        top_score_risk_bypass_min_score=80.0,
+        bullish_day_relief=False,
+    )
+    base.update(overrides)
+    return EntryDayAdaptivePolicy(**base)
+
+
+@patch("app.engines.entry_day_adaptive.resolve_entry_day_policy")
 @patch("app.engines.auto_trader.get_settings")
-def test_top_rank_full_budget_lots_bypasses_risk_cap(mock_settings):
+def test_top_rank_full_budget_lots_bypasses_risk_cap(mock_settings, mock_policy):
     mock_settings.return_value = MagicMock(
         top_score_per_trade_risk_bypass_enabled=True,
-        top_score_per_trade_risk_bypass_min_score=80.0,
     )
+    mock_policy.return_value = _normal_policy()
     assert _ignore_per_trade_risk_cap_for_entry(
         elite_full_lot=False,
         top_rank_full_budget_lots=True,
@@ -36,12 +59,13 @@ def test_top_rank_full_budget_lots_bypasses_risk_cap(mock_settings):
     )
 
 
+@patch("app.engines.entry_day_adaptive.resolve_entry_day_policy")
 @patch("app.engines.auto_trader.get_settings")
-def test_rank_one_top_score_bypasses_risk_cap(mock_settings):
+def test_rank_one_top_score_bypasses_risk_cap(mock_settings, mock_policy):
     mock_settings.return_value = MagicMock(
         top_score_per_trade_risk_bypass_enabled=True,
-        top_score_per_trade_risk_bypass_min_score=80.0,
     )
+    mock_policy.return_value = _normal_policy()
     assert _ignore_per_trade_risk_cap_for_entry(
         elite_full_lot=False,
         top_rank_full_budget_lots=False,
@@ -52,12 +76,13 @@ def test_rank_one_top_score_bypasses_risk_cap(mock_settings):
     )
 
 
+@patch("app.engines.entry_day_adaptive.resolve_entry_day_policy")
 @patch("app.engines.auto_trader.get_settings")
-def test_low_score_rank_one_does_not_bypass(mock_settings):
+def test_low_score_rank_one_does_not_bypass(mock_settings, mock_policy):
     mock_settings.return_value = MagicMock(
         top_score_per_trade_risk_bypass_enabled=True,
-        top_score_per_trade_risk_bypass_min_score=80.0,
     )
+    mock_policy.return_value = _normal_policy()
     assert not _ignore_per_trade_risk_cap_for_entry(
         elite_full_lot=False,
         top_rank_full_budget_lots=False,
@@ -68,12 +93,13 @@ def test_low_score_rank_one_does_not_bypass(mock_settings):
     )
 
 
+@patch("app.engines.entry_day_adaptive.resolve_entry_day_policy")
 @patch("app.engines.auto_trader.get_settings")
-def test_trap_cap_locked_blocks_bypass(mock_settings):
+def test_trap_cap_locked_blocks_bypass(mock_settings, mock_policy):
     mock_settings.return_value = MagicMock(
         top_score_per_trade_risk_bypass_enabled=True,
-        top_score_per_trade_risk_bypass_min_score=80.0,
     )
+    mock_policy.return_value = _normal_policy()
     assert not _ignore_per_trade_risk_cap_for_entry(
         elite_full_lot=True,
         top_rank_full_budget_lots=True,
@@ -141,3 +167,23 @@ def test_risk_engine_accepts_when_ignore_flag_set(mock_settings, mock_capital):
     )
     assert ok, reason
     assert reason == "passed"
+
+
+@patch("app.engines.entry_day_adaptive.resolve_entry_day_policy")
+@patch("app.engines.auto_trader.get_settings")
+def test_worst_day_disables_top_score_bypass(mock_settings, mock_policy):
+    mock_settings.return_value = MagicMock(
+        top_score_per_trade_risk_bypass_enabled=True,
+    )
+    mock_policy.return_value = _normal_policy(
+        day_type="WORST",
+        top_score_risk_bypass_min_score=0.0,
+    )
+    assert not _ignore_per_trade_risk_cap_for_entry(
+        elite_full_lot=False,
+        top_rank_full_budget_lots=False,
+        high_conviction=False,
+        allocation=_allocation(rank=1),
+        candidate_score=265.9,
+        trap_cap_locked=False,
+    )
