@@ -24,6 +24,7 @@ class EntryDayAdaptivePolicy:
     coil_top_min_run_pct: float
     coil_top_max_run_pct: float
     building_cold_base_min_velocity_3s: float
+    probe_max_capital_pct: float
     cold_base_lot_cap: int
     block_building_watch_cold_base: bool
 
@@ -36,6 +37,7 @@ class EntryDayAdaptivePolicy:
             "coilTopMinRunPct": self.coil_top_min_run_pct,
             "coilTopMaxRunPct": self.coil_top_max_run_pct,
             "buildingColdBaseMinVelocity3s": self.building_cold_base_min_velocity_3s,
+            "probeMaxCapitalPct": self.probe_max_capital_pct,
             "coldBaseLotCap": self.cold_base_lot_cap,
             "blockBuildingWatchColdBase": self.block_building_watch_cold_base,
         }
@@ -122,11 +124,18 @@ def resolve_entry_day_policy(
                 )
                 or 1.5
             ),
+            probe_max_capital_pct=float(
+                getattr(settings, "probe_entry_max_capital_pct", 0.40) or 0.40
+            ),
             cold_base_lot_cap=int(
                 getattr(settings, "entry_timing_structured_cold_lot_cap", 3) or 3
             ),
             block_building_watch_cold_base=False,
         )
+
+    default_probe = float(
+        getattr(settings, "probe_entry_max_capital_pct", 0.40) or 0.40
+    )
 
     if day_type == "WORST":
         max_pos = float(
@@ -142,6 +151,9 @@ def resolve_entry_day_policy(
             getattr(settings, "entry_day_worst_building_cold_min_velocity_3s", 2.0) or 2.0
         )
         lot_cap = int(getattr(settings, "entry_day_worst_cold_base_lot_cap", 2) or 2)
+        probe_pct = float(
+            getattr(settings, "entry_day_worst_probe_max_capital_pct", 0.25) or 0.25
+        )
         block_cold = bool(
             getattr(settings, "entry_day_worst_block_building_watch_cold_base", True)
         )
@@ -172,7 +184,11 @@ def resolve_entry_day_policy(
         max_run = float(
             getattr(settings, "entry_day_chop_coil_top_max_run_pct", 0.25) or 0.25
         )
-        lot_cap = int(getattr(settings, "entry_day_chop_cold_base_lot_cap", 3) or 3)
+        lot_cap = int(getattr(settings, "entry_day_chop_cold_base_lot_cap", 99) or 99)
+        probe_pct = float(
+            getattr(settings, "entry_day_chop_probe_max_capital_pct", default_probe)
+            or default_probe
+        )
         block_cold = bool(
             getattr(settings, "entry_day_chop_block_building_watch_cold_base", True)
         )
@@ -189,7 +205,11 @@ def resolve_entry_day_policy(
         building_v = float(
             getattr(settings, "entry_day_good_building_cold_min_velocity_3s", 1.0) or 1.0
         )
-        lot_cap = int(getattr(settings, "entry_day_good_cold_base_lot_cap", 3) or 3)
+        lot_cap = int(getattr(settings, "entry_day_good_cold_base_lot_cap", 99) or 99)
+        probe_pct = float(
+            getattr(settings, "entry_day_good_probe_max_capital_pct", default_probe)
+            or default_probe
+        )
         block_cold = False
     else:
         max_pos = float(
@@ -204,7 +224,11 @@ def resolve_entry_day_policy(
         building_v = float(
             getattr(settings, "entry_day_normal_building_cold_min_velocity_3s", 1.2) or 1.2
         )
-        lot_cap = int(getattr(settings, "entry_day_normal_cold_base_lot_cap", 3) or 3)
+        lot_cap = int(getattr(settings, "entry_day_normal_cold_base_lot_cap", 99) or 99)
+        probe_pct = float(
+            getattr(settings, "entry_day_normal_probe_max_capital_pct", default_probe)
+            or default_probe
+        )
         block_cold = False
 
     return EntryDayAdaptivePolicy(
@@ -215,6 +239,7 @@ def resolve_entry_day_policy(
         coil_top_min_run_pct=min_run,
         coil_top_max_run_pct=max_run,
         building_cold_base_min_velocity_3s=building_v,
+        probe_max_capital_pct=probe_pct,
         cold_base_lot_cap=lot_cap,
         block_building_watch_cold_base=block_cold,
     )

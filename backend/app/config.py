@@ -427,9 +427,10 @@ class Settings(BaseSettings):
     entry_timing_structured_cold_building_min_velocity_3s: float = 1.5
     entry_timing_structured_cold_require_heat: bool = True
     entry_timing_structured_cold_require_aligned: bool = True
-    # Ordinary entries use at most 35% capital. The configured 90% sleeve is reserved
-    # for a proven armed-base launch with positive v3/v9, CVD buying and acceleration.
-    ordinary_entry_max_capital_pct: float = 0.35
+    # Ordinary / probe entries use at most 40% capital. The 90% sleeve is reserved
+    # for hot timing (GOOD/OK) + full-sleeve / elite max-lot paths.
+    ordinary_entry_max_capital_pct: float = 0.40
+    probe_entry_max_capital_pct: float = 0.40
     full_sleeve_requires_armed_launch: bool = True
     full_sleeve_requires_cvd: bool = True
     full_sleeve_requires_cvd_acceleration: bool = True
@@ -512,25 +513,29 @@ class Settings(BaseSettings):
     entry_day_worst_coil_top_max_run_pct: float = 0.22
     entry_day_worst_building_cold_min_velocity_3s: float = 2.0
     entry_day_worst_cold_base_lot_cap: int = 2
+    entry_day_worst_probe_max_capital_pct: float = 0.25
     entry_day_worst_block_building_watch_cold_base: bool = True
     entry_day_chop_coil_top_max_position_frac: float = 0.40
     entry_day_chop_coil_top_min_run_pct: float = 0.06
     entry_day_chop_coil_top_max_run_pct: float = 0.25
     entry_day_chop_building_cold_min_velocity_3s: float = 1.5
-    entry_day_chop_cold_base_lot_cap: int = 3
+    entry_day_chop_cold_base_lot_cap: int = 99
     entry_day_chop_block_building_watch_cold_base: bool = True
+    entry_day_chop_probe_max_capital_pct: float = 0.40
     entry_day_chop_rally_coil_top_max_position_frac: float = 0.40
     entry_day_chop_rally_building_cold_min_velocity_3s: float = 1.5
     entry_day_normal_coil_top_max_position_frac: float = 0.50
     entry_day_normal_coil_top_min_run_pct: float = 0.06
     entry_day_normal_coil_top_max_run_pct: float = 0.28
     entry_day_normal_building_cold_min_velocity_3s: float = 1.2
-    entry_day_normal_cold_base_lot_cap: int = 3
+    entry_day_normal_cold_base_lot_cap: int = 99
+    entry_day_normal_probe_max_capital_pct: float = 0.40
     entry_day_good_coil_top_max_position_frac: float = 0.50
     entry_day_good_coil_top_min_run_pct: float = 0.06
     entry_day_good_coil_top_max_run_pct: float = 0.30
     entry_day_good_building_cold_min_velocity_3s: float = 1.0
-    entry_day_good_cold_base_lot_cap: int = 3
+    entry_day_good_cold_base_lot_cap: int = 99
+    entry_day_good_probe_max_capital_pct: float = 0.40
     # Session-level post-peak: a slow-grind rip (PE 15->100 over hours) shows only a small run
     # in the short window, so buying near the top slips through. Also reject entries within
     # near_top_frac of the SESSION peak after a big session run (Sep 1 live PUT 24050: entry

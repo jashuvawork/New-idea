@@ -20,7 +20,8 @@ def _settings(**overrides):
     s.entry_day_chop_coil_top_min_run_pct = 0.06
     s.entry_day_chop_coil_top_max_run_pct = 0.25
     s.entry_day_chop_building_cold_min_velocity_3s = 1.5
-    s.entry_day_chop_cold_base_lot_cap = 3
+    s.entry_day_chop_cold_base_lot_cap = 99
+    s.probe_entry_max_capital_pct = 0.40
     s.entry_day_chop_block_building_watch_cold_base = True
     s.entry_day_chop_rally_coil_top_max_position_frac = 0.40
     s.entry_day_chop_rally_building_cold_min_velocity_3s = 1.5

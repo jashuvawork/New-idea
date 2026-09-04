@@ -771,6 +771,7 @@ async def _open_from_candidate(
         from app.engines.entry_timing import (
             assess_timing_for_event,
             cap_lots_for_timing,
+            apply_probe_or_max_lot_sizing,
             timing_allows_full_size,
             timing_blocks_entry,
         )
@@ -885,9 +886,15 @@ async def _open_from_candidate(
         if faded_rip_meta:
             lots = cap_faded_rip_lots(lots)
         if timing_meta:
-            from app.engines.entry_timing import cap_lots_for_timing
-
-            lots = cap_lots_for_timing(lots, timing_meta)
+            lots, _early_probe_meta = apply_probe_or_max_lot_sizing(
+                lots,
+                symbol=symbol,
+                premium=fill_premium,
+                timing=timing_meta,
+                settings=settings,
+                snapshots=snapshots,
+                state=state,
+            )
     elif candidate.mode == "worst_day_itm_fade":
         lots = cap_worst_day_itm_fade_lots(lots)
     elif candidate.mode in ("quick_sideways", "slow_bounce"):
@@ -1225,10 +1232,21 @@ async def _open_from_candidate(
     force_max_size = full_sleeve_authorized
 
     lots = clamp_lots(lots, symbol, fill_premium)
+    probe_sizing_meta: dict[str, Any] = {}
     if timing_meta:
-        from app.engines.entry_timing import cap_lots_for_timing
-
-        lots = cap_lots_for_timing(lots, timing_meta)
+        lots, probe_sizing_meta = apply_probe_or_max_lot_sizing(
+            lots,
+            symbol=symbol,
+            premium=fill_premium,
+            timing=timing_meta,
+            settings=settings,
+            snapshots=snapshots,
+            state=state,
+        )
+        if probe_sizing_meta.get("sizingMode") == "probe_capital_pct":
+            top_explosion_max = False
+            full_sleeve_authorized = False
+            elite_full_lot = False
     # India VIX day-type sizing — default OFF (observe-only). Always records the regime;
     # only scales lots when vix_regime_sizing_enabled is on (calm/spike days shrink).
     from app.engines.vix_regime import vix_size_multiplier
@@ -1854,9 +1872,17 @@ async def _open_from_candidate(
                 )
                 exit_plan["reasoning"] = reasons
     if timing_meta:
-        from app.engines.entry_timing import cap_lots_for_timing
+        from app.engines.entry_timing import apply_probe_or_max_lot_sizing
 
-        capped = cap_lots_for_timing(lots, timing_meta)
+        capped, _post_probe = apply_probe_or_max_lot_sizing(
+            lots,
+            symbol=symbol,
+            premium=fill_premium,
+            timing=timing_meta,
+            settings=settings,
+            snapshots=snapshots,
+            state=state,
+        )
         if capped < lots:
             lots = capped
             top_explosion_max = False

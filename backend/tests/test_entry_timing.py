@@ -39,6 +39,9 @@ def _settings(**overrides):
     s.entry_timing_structured_cold_require_heat = True
     s.entry_timing_structured_cold_require_aligned = True
     s.entry_day_adaptive_enabled = False
+    s.probe_entry_max_capital_pct = 0.40
+    s.entry_day_chop_probe_max_capital_pct = 0.40
+    s.entry_day_chop_cold_base_lot_cap = 99
     s.explosion_elite_never_block_enabled = True
     s.explosion_early_window_min_move_pct = 28.0
     s.explosion_early_window_max_move_pct = 55.0
@@ -129,10 +132,10 @@ def test_structured_cold_base_is_probe_sized(mock_g1, mock_g2):
     )
     assert timing["assessment"] == "COLD_BASE"
     assert timing["action"] == "lot_cap"
-    assert timing.get("structuredColdBase") is True
+    assert timing.get("lotCap") is None
+    assert any("cold_base_probe_cap" in r for r in timing.get("reasons", []))
     blocked, _ = timing_blocks_entry(timing)
     assert blocked is False
-    assert cap_lots_for_timing(41, timing) == 3
     assert not timing_allows_full_size(timing)
     # Elite never-block still needs GOOD (hot) — max lots is separate.
     assert not elite_bypass_allowed_for_timing(timing)
@@ -320,9 +323,20 @@ def test_building_cold_base_blocked_on_chop_when_velocity_weak(mock_g1, mock_g2)
 def test_chop_day_cold_base_uses_day_adaptive_lot_cap(
     mock_g2, mock_g1, mock_ed_settings, _classify,
 ):
+    from app.engines.entry_timing import apply_probe_or_max_lot_sizing
+
     s = _settings()
     s.entry_day_adaptive_enabled = True
-    s.entry_day_chop_cold_base_lot_cap = 2
+    s.probe_entry_max_capital_pct = 0.40
+    s.entry_day_chop_probe_max_capital_pct = 0.40
+    s.entry_day_chop_cold_base_lot_cap = 99
+    s.entry_day_chop_coil_top_max_position_frac = 0.40
+    s.entry_day_chop_coil_top_min_run_pct = 0.06
+    s.entry_day_chop_coil_top_max_run_pct = 0.25
+    s.entry_day_chop_building_cold_min_velocity_3s = 1.5
+    s.entry_day_chop_block_building_watch_cold_base = True
+    s.entry_day_chop_rally_coil_top_max_position_frac = 0.40
+    s.entry_day_chop_rally_building_cold_min_velocity_3s = 1.5
     mock_g1.return_value = s
     mock_g2.return_value = s
     mock_ed_settings.return_value = s
@@ -333,8 +347,18 @@ def test_chop_day_cold_base_uses_day_adaptive_lot_cap(
         midday_chop=True,
     )
     assert timing["assessment"] == "COLD_BASE"
-    assert timing["lotCap"] == 2
     assert timing.get("entryDayPolicy", {}).get("dayType") == "CHOP"
+    lots, meta = apply_probe_or_max_lot_sizing(
+        41,
+        symbol="NIFTY",
+        premium=146.95,
+        timing=timing,
+        settings=s,
+        snapshots={"NIFTY": _snap("CHOP")},
+    )
+    assert meta["sizingMode"] == "probe_capital_pct"
+    assert meta["probeMaxCapitalPct"] == 0.40
+    assert lots < 41
 
 
 @patch("app.engines.elite_never_block.get_settings")

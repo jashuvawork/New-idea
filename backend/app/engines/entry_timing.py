@@ -271,17 +271,12 @@ def assess_entry_timing(
         # requires the separate armed-launch/CVD proof in auto_trader.
         assessment = "COLD_BASE"
         action = "lot_cap"
-        lot_cap = max(
-            1,
-            int(
-                getattr(entry_policy, "cold_base_lot_cap", None)
-                or getattr(settings, "entry_timing_structured_cold_lot_cap", 3)
-                or 3
-            ),
-        )
+        lot_cap = None
         reasons.append(f"structured_cold_base_v3_{live_v:.1f}")
         reasons.append(f"local_base_{local:.0f}%_in_window")
-        reasons.append(f"cold_base_lot_cap_{lot_cap}")
+        reasons.append(
+            f"cold_base_probe_cap_{entry_policy.probe_max_capital_pct:.0%}"
+        )
     elif (
         session >= late_peak
         and live_v <= late_max_v
@@ -382,8 +377,56 @@ def cap_lots_for_timing(lots: int, timing: dict[str, Any]) -> int:
         return lots
     cap = timing.get("lotCap")
     if cap is None:
-        cap = int(getattr(settings, "entry_timing_cold_lot_cap", 3) or 3)
+        return lots
     return min(max(1, int(lots)), max(1, int(cap)))
+
+
+def apply_probe_or_max_lot_sizing(
+    lots: int,
+    *,
+    symbol: str,
+    premium: float,
+    timing: dict[str, Any] | None,
+    settings: Any = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
+    state: Any = None,
+) -> tuple[int, dict[str, Any]]:
+    """Hot timing → caller may max-lot; cold/probe timing → 40% capital cap (day-adaptive)."""
+    meta: dict[str, Any] = {}
+    if not timing:
+        return int(lots), meta
+    if timing_allows_full_size(timing):
+        meta["sizingMode"] = "max_lots_eligible"
+        return int(lots), meta
+
+    settings = settings or get_settings()
+    from app.engines.entry_day_adaptive import resolve_entry_day_policy
+    from app.engines.capital_allocator import max_lots_for_capital_pct
+
+    policy = resolve_entry_day_policy(
+        snapshots=snapshots,
+        state=state,
+        settings=settings,
+    )
+    probe_pct = float(
+        policy.probe_max_capital_pct
+        or getattr(settings, "probe_entry_max_capital_pct", 0.40)
+        or 0.40
+    )
+    probe_lots = max_lots_for_capital_pct(symbol, premium, probe_pct)
+    capped = min(int(lots), int(probe_lots))
+    if policy.cold_base_lot_cap > 0 and policy.cold_base_lot_cap < 99:
+        capped = min(capped, policy.cold_base_lot_cap)
+    capped = cap_lots_for_timing(capped, timing)
+    meta.update(
+        {
+            "sizingMode": "probe_capital_pct",
+            "probeMaxCapitalPct": probe_pct,
+            "probeMaxLots": capped,
+            "entryDayPolicy": policy.to_dict(),
+        }
+    )
+    return max(1, capped), meta
 
 
 def timing_allows_full_size(timing: dict[str, Any]) -> bool:
