@@ -60,7 +60,7 @@ def test_blocks_sep04_style_building_entry_at_coil_top():
     ):
         blocked, reason = coil_top_entry_blocked(ev, tier="BUILDING", velocity_3s=1.32)
     assert blocked is True
-    assert reason.startswith("coil_top_position_")
+    assert reason.startswith("coil_top_")
 
 
 def test_allows_entry_at_local_base_floor():

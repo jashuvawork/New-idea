@@ -113,6 +113,7 @@ def _structured_cold_base_ok(
     event: Any,
     snap: Optional[SymbolSnapshot],
     midday_chop: bool = False,
+    entry_policy: Any = None,
 ) -> bool:
     """Pause-before-continuation: ICT local base still early, live tape cold."""
     if not bool(getattr(settings, "entry_timing_structured_cold_base_allow", True)):
@@ -134,7 +135,22 @@ def _structured_cold_base_ok(
         if not _side_aligned(event, snap):
             return False
     tier = str(getattr(event, "tier", "") or "").upper()
-    if tier == "BUILDING" and _chop_or_worst(snap, midday_chop):
+    if entry_policy is None and snap is not None:
+        from app.engines.entry_day_adaptive import resolve_entry_day_policy
+
+        entry_policy = resolve_entry_day_policy(
+            snapshots={str(getattr(snap, "symbol", "") or "NIFTY"): snap},
+            settings=settings,
+        )
+    if entry_policy is not None and tier in ("WATCH", "BUILDING"):
+        if bool(getattr(entry_policy, "block_building_watch_cold_base", False)):
+            return False
+        building_min = float(
+            getattr(entry_policy, "building_cold_base_min_velocity_3s", 1.5) or 1.5
+        )
+        if tier == "BUILDING" and live_v + 1e-9 < building_min:
+            return False
+    elif tier == "BUILDING" and _chop_or_worst(snap, midday_chop):
         building_min = _f(
             getattr(settings, "entry_timing_structured_cold_building_min_velocity_3s", 1.5),
             1.5,
@@ -160,6 +176,13 @@ def assess_entry_timing(
     structured = _structured(ict)
     heat = _has_heat(ict)
     tier = str(getattr(event, "tier", "") or "").upper() if event is not None else ""
+
+    from app.engines.entry_day_adaptive import resolve_entry_day_policy
+
+    entry_policy = resolve_entry_day_policy(
+        snapshots={str(getattr(snap, "symbol", "") or "NIFTY"): snap} if snap else {},
+        settings=settings,
+    )
 
     # Window bounds — structured ICT uses nearer-base band when available.
     from app.engines.explosion_entry_guards import entry_window_bounds
@@ -215,6 +238,7 @@ def assess_entry_timing(
         event=event,
         snap=snap,
         midday_chop=midday_chop,
+        entry_policy=entry_policy,
     )
 
     structured_failed_launch = bool(
@@ -249,7 +273,11 @@ def assess_entry_timing(
         action = "lot_cap"
         lot_cap = max(
             1,
-            int(getattr(settings, "entry_timing_structured_cold_lot_cap", 3) or 3),
+            int(
+                getattr(entry_policy, "cold_base_lot_cap", None)
+                or getattr(settings, "entry_timing_structured_cold_lot_cap", 3)
+                or 3
+            ),
         )
         reasons.append(f"structured_cold_base_v3_{live_v:.1f}")
         reasons.append(f"local_base_{local:.0f}%_in_window")
@@ -326,6 +354,7 @@ def assess_entry_timing(
         "nearAtmSoft": near_atm_soft,
         "premiumCapture": bool(premium_capture),
         "structuredColdBase": assessment == "COLD_BASE",
+        "entryDayPolicy": entry_policy.to_dict() if entry_policy else None,
         "reasons": reasons,
     }
 

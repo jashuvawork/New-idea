@@ -38,6 +38,7 @@ def _settings(**overrides):
     s.entry_timing_structured_cold_building_min_velocity_3s = 1.5
     s.entry_timing_structured_cold_require_heat = True
     s.entry_timing_structured_cold_require_aligned = True
+    s.entry_day_adaptive_enabled = False
     s.explosion_elite_never_block_enabled = True
     s.explosion_early_window_min_move_pct = 28.0
     s.explosion_early_window_max_move_pct = 55.0
@@ -310,6 +311,30 @@ def test_building_cold_base_blocked_on_chop_when_velocity_weak(mock_g1, mock_g2)
     assert timing["assessment"] != "COLD_BASE"
     blocked, _ = timing_blocks_entry(timing)
     assert blocked is True
+
+
+@patch("app.engines.day_adaptive_engine.classify_day_type", return_value="CHOP")
+@patch("app.engines.entry_day_adaptive.get_settings")
+@patch("app.engines.entry_timing.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_chop_day_cold_base_uses_day_adaptive_lot_cap(
+    mock_g2, mock_g1, mock_ed_settings, _classify,
+):
+    s = _settings()
+    s.entry_day_adaptive_enabled = True
+    s.entry_day_chop_cold_base_lot_cap = 2
+    mock_g1.return_value = s
+    mock_g2.return_value = s
+    mock_ed_settings.return_value = s
+    timing = assess_entry_timing(
+        _event(v3=0.8),
+        ict=_ict(),
+        snap=_snap("CHOP"),
+        midday_chop=True,
+    )
+    assert timing["assessment"] == "COLD_BASE"
+    assert timing["lotCap"] == 2
+    assert timing.get("entryDayPolicy", {}).get("dayType") == "CHOP"
 
 
 @patch("app.engines.elite_never_block.get_settings")

@@ -505,6 +505,32 @@ class Settings(BaseSettings):
     explosion_coil_top_max_position_frac: float = 0.50
     explosion_coil_top_tiers_csv: str = "WATCH,BUILDING"
     explosion_coil_top_breakout_min_velocity_3s: float = 2.0
+    # Day-adaptive entry floors (coil-top, cold-base probe, BUILDING min velocity).
+    entry_day_adaptive_enabled: bool = True
+    entry_day_worst_coil_top_max_position_frac: float = 0.35
+    entry_day_worst_coil_top_min_run_pct: float = 0.05
+    entry_day_worst_coil_top_max_run_pct: float = 0.22
+    entry_day_worst_building_cold_min_velocity_3s: float = 2.0
+    entry_day_worst_cold_base_lot_cap: int = 2
+    entry_day_worst_block_building_watch_cold_base: bool = True
+    entry_day_chop_coil_top_max_position_frac: float = 0.40
+    entry_day_chop_coil_top_min_run_pct: float = 0.06
+    entry_day_chop_coil_top_max_run_pct: float = 0.25
+    entry_day_chop_building_cold_min_velocity_3s: float = 1.5
+    entry_day_chop_cold_base_lot_cap: int = 3
+    entry_day_chop_block_building_watch_cold_base: bool = True
+    entry_day_chop_rally_coil_top_max_position_frac: float = 0.40
+    entry_day_chop_rally_building_cold_min_velocity_3s: float = 1.5
+    entry_day_normal_coil_top_max_position_frac: float = 0.50
+    entry_day_normal_coil_top_min_run_pct: float = 0.06
+    entry_day_normal_coil_top_max_run_pct: float = 0.28
+    entry_day_normal_building_cold_min_velocity_3s: float = 1.2
+    entry_day_normal_cold_base_lot_cap: int = 3
+    entry_day_good_coil_top_max_position_frac: float = 0.50
+    entry_day_good_coil_top_min_run_pct: float = 0.06
+    entry_day_good_coil_top_max_run_pct: float = 0.30
+    entry_day_good_building_cold_min_velocity_3s: float = 1.0
+    entry_day_good_cold_base_lot_cap: int = 3
     # Session-level post-peak: a slow-grind rip (PE 15->100 over hours) shows only a small run
     # in the short window, so buying near the top slips through. Also reject entries within
     # near_top_frac of the SESSION peak after a big session run (Sep 1 live PUT 24050: entry

@@ -906,6 +906,8 @@ def _explosion_candidates(
             event,
             tier=str(getattr(event, "tier", "") or alert.get("tier") or ""),
             velocity_3s=float(getattr(event, "velocity_3s", 0) or 0),
+            snapshots=snapshots,
+            state=state,
         )
         if coil_blocked:
             continue
