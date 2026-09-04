@@ -912,6 +912,10 @@ def coil_top_entry_blocked(
     *,
     tier: str = "",
     velocity_3s: float | None = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
+    state: Any = None,
+    day_mode: str = "",
+    confidence_tier: str = "",
     settings: Any = None,
 ) -> tuple[bool, str]:
     """Block BUILDING/WATCH entries at the top of a tight consolidation coil.
@@ -920,6 +924,8 @@ def coil_top_entry_blocked(
     entries through at ₹147 because off-low looks like an early pad. This guard measures
     **position inside the recent range** — near-base entries sit near the window low;
     buying the coil ceiling sits near the window high.
+
+    Thresholds adapt by day type (WORST / CHOP / NORMAL / GOOD / ELITE).
     """
     settings = settings or get_settings()
     if not bool(getattr(settings, "explosion_coil_top_guard_enabled", True)):
@@ -948,6 +954,14 @@ def coil_top_entry_blocked(
         if velocity_3s is not None
         else float(getattr(explosion_event, "velocity_3s", 0) or 0)
     )
+    from app.engines.entry_day_adaptive import resolve_entry_day_policy
+
+    policy = resolve_entry_day_policy(
+        day_mode=day_mode,
+        confidence_tier=confidence_tier,
+        snapshots=snapshots,
+        state=state,
+    )
     breakout_v = float(
         getattr(settings, "explosion_coil_top_breakout_min_velocity_3s", 2.0) or 2.0
     )
@@ -956,15 +970,9 @@ def coil_top_entry_blocked(
     lookback = float(
         getattr(settings, "explosion_coil_top_lookback_seconds", 900.0) or 900.0
     )
-    min_run = float(
-        getattr(settings, "explosion_coil_top_min_run_pct", 0.06) or 0.06
-    )
-    max_run = float(
-        getattr(settings, "explosion_coil_top_max_run_pct", 0.28) or 0.28
-    )
-    max_pos = float(
-        getattr(settings, "explosion_coil_top_max_position_frac", 0.50) or 0.50
-    )
+    min_run = policy.coil_top_min_run_pct
+    max_run = policy.coil_top_max_run_pct
+    max_pos = policy.coil_top_max_position_frac
     try:
         from app.engines.explosion_detector import recent_premium_run
 
@@ -982,7 +990,7 @@ def coil_top_entry_blocked(
     position = (current - low) / (high - low)
     if position <= max_pos:
         return False, ""
-    return True, f"coil_top_position_{position:.0%}_run_{run:.0%}"
+    return True, f"coil_top_{policy.day_type.lower()}_position_{position:.0%}_run_{run:.0%}"
 
 
 def post_peak_chase_blocked(

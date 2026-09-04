@@ -792,6 +792,8 @@ async def _open_from_candidate(
                 candidate.explosion_event,
                 tier=str(candidate.tier or ""),
                 velocity_3s=float(getattr(candidate.explosion_event, "velocity_3s", 0) or 0),
+                snapshots=snapshots,
+                state=state,
             )
         from app.engines.ict_breakout_monitor import first_lift_entry_ready
 
