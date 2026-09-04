@@ -871,10 +871,7 @@ async def _open_from_candidate(
         lots = cap_extended_chase_lots(lots, candidate.explosion_event, ict=chase_ict)
         if faded_rip_meta:
             lots = cap_faded_rip_lots(lots)
-        always_max_explosion = (
-            bool(getattr(settings, "explosion_always_force_max_lots", True))
-        )
-        if timing_meta and not always_max_explosion:
+        if timing_meta:
             from app.engines.entry_timing import cap_lots_for_timing
 
             lots = cap_lots_for_timing(lots, timing_meta)
@@ -1130,17 +1127,17 @@ async def _open_from_candidate(
             base_window_full_lots = True
             top_explosion_max = True
 
-    # Structured cold-base pause (Aug4 24550 PE): worth taking → capital max lots.
-    # HC/top-explosion paths often refuse cold v3 or CHOP day-types; force here.
+    # Structured cold-base pause: probe-sized only unless timing is hot (GOOD/OK).
     structured_cold_max = False
     if (
         candidate.mode == "explosion"
         and timing_meta
+        and timing_allows_full_size(timing_meta)
         and (
             timing_meta.get("structuredColdBase")
             or str(timing_meta.get("assessment") or "").upper() == "COLD_BASE"
         )
-        and getattr(settings, "entry_timing_structured_cold_max_lots", True)
+        and getattr(settings, "entry_timing_structured_cold_max_lots", False)
     ):
         from app.engines.capital_allocator import max_lots_for_capital
 
@@ -1170,6 +1167,7 @@ async def _open_from_candidate(
         policy_decision=policy_decision,
         allocation=allocation,
         candidate=candidate,
+        timing_meta=timing_meta,
     )
     lots, armed_base_full_sleeve = _building_armed_base_grade_a_policy_max_lots(
         lots=lots,
@@ -1184,6 +1182,7 @@ async def _open_from_candidate(
         premium=fill_premium,
         policy_decision=policy_decision,
         allocation=allocation,
+        timing_meta=timing_meta,
     )
     lots, winner_index_full_sleeve = _winner_index_helpers_max_lots(
         lots=lots,
@@ -1464,8 +1463,17 @@ async def _open_from_candidate(
         post_win_cap_meta.get("applied") or flip_cap_meta.get("applied")
     )
     from app.engines.capital_allocator import apply_explosion_always_max_lots
+    from app.engines.entry_timing import timing_allows_full_size as _timing_allows_max
 
-    if not size_cap_applied and not trap_post_small_win_active(trap_meta):
+    timing_ok_for_max = (
+        not timing_meta
+        or _timing_allows_max(timing_meta)
+    )
+    if (
+        not size_cap_applied
+        and not trap_post_small_win_active(trap_meta)
+        and timing_ok_for_max
+    ):
         lots = apply_explosion_always_max_lots(
             lots,
             symbol,
@@ -1794,10 +1802,18 @@ async def _open_from_candidate(
     if exit_plan and int(exit_plan.get("lots") or 0) > 0:
         lots = int(exit_plan["lots"])
     # Post-tune floor: size-tune must not leave top explosion / elite below capital max.
+    # COLD_BASE / COLD probe entries must stay capped — never restore max lots here.
+    from app.engines.entry_timing import timing_allows_full_size as _timing_allows_max_floor
+
+    timing_ok_for_max_floor = (
+        not timing_meta
+        or _timing_allows_max_floor(timing_meta)
+    )
     if (
         candidate.mode == "explosion"
         and (top_explosion_max or elite_full_lot)
         and bool(getattr(settings, "explosion_always_force_max_lots", True))
+        and timing_ok_for_max_floor
     ):
         from app.engines.capital_allocator import apply_explosion_always_max_lots
 
@@ -1824,6 +1840,15 @@ async def _open_from_candidate(
                     f"(top explosion / elite full lot)"
                 )
                 exit_plan["reasoning"] = reasons
+    if timing_meta:
+        from app.engines.entry_timing import cap_lots_for_timing
+
+        capped = cap_lots_for_timing(lots, timing_meta)
+        if capped < lots:
+            lots = capped
+            top_explosion_max = False
+            if exit_plan is not None:
+                exit_plan["lots"] = lots
     if exit_plan and settings.edge_engine_enabled:
         plan_obj = AdaptiveExitPlan.from_dict(exit_plan)
         # Jul30: edge_tighten crushed calculated ~20pt SL to 7.99 on max-lot ELITE.
@@ -3528,8 +3553,13 @@ def _building_rip_ftv_policy_max_lots(
     policy_decision: Any,
     allocation: RankedAllocation | None,
     candidate: Any = None,
+    timing_meta: dict[str, Any] | None = None,
 ) -> tuple[int, bool]:
     """Max lots when BUILDING sudden-lift helpers authorize the take."""
+    from app.engines.entry_timing import timing_allows_full_size
+
+    if timing_meta and not timing_allows_full_size(timing_meta):
+        return int(lots), False
     settings = get_settings()
     if not bool(getattr(settings, "building_rip_ftv_force_max_lots", True)):
         return int(lots), False
@@ -3583,8 +3613,13 @@ def _pad_lane_ftv_policy_max_lots(
     premium: float,
     policy_decision: Any,
     allocation: RankedAllocation | None,
+    timing_meta: dict[str, Any] | None = None,
 ) -> tuple[int, bool]:
     """Max lots for pre-lift pad sleeves (slow-grind through premium FVG pad)."""
+    from app.engines.entry_timing import timing_allows_full_size
+
+    if timing_meta and not timing_allows_full_size(timing_meta):
+        return int(lots), False
     from app.engines.pad_lane_capture import PAD_LANE_FTV_MODES
 
     settings = get_settings()

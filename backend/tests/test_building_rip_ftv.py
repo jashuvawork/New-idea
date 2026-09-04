@@ -94,6 +94,7 @@ def test_building_rip_ftv_rank_one_gets_max_lots():
             policy_decision=decision,
             allocation=allocation,
             candidate=candidate,
+            timing_meta={"assessment": "GOOD", "action": "allow"},
         )
     assert authorized is True
     assert lots == 28
