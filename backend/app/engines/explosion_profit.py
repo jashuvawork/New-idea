@@ -1753,43 +1753,6 @@ def evaluate_explosion_exit(
         if best <= ng_min_green and hold >= ng_min_hold and pnl_pts <= -ng_stop:
             return "explosion_never_green_stop", pnl_inr
 
-    # Hard per-trade ₹ loss cap — optional (0 = disabled). Prefer never-green + point SL
-    # so ICT/base runners are not clipped by a rupee ceiling before the thesis stop.
-    ctx = trade.entryContext or {}
-    if not hold_to_sl:
-        if bool(ctx.get("eliteFullLot")):
-            # ELITE full-capital sleeve: prefer structural point SL + daily loss stop.
-            # Per-trade INR clip defaults to off (0). If configured >0, use that ceiling
-            # (often aligned with the ₹20k/day stop) — never the old ₹10k early kill.
-            hard_cap = _cfg_float(
-                settings,
-                "elite_full_lot_risk_inr",
-                0.0,
-            )
-        elif bool(ctx.get("fullSleeveQualified")):
-            hard_cap = _cfg_float(
-                settings,
-                "explosion_exceptional_per_trade_max_loss_inr",
-                4_000.0,
-            )
-        elif bool(ctx.get("indexConfirmedFtv")):
-            # Index-confirmed near-base FTV took elevated size — give it a proportionally wider
-            # rupee stop so the larger position survives the normal near-base shakeout instead of
-            # being clipped at a ~2pt stop. Still bounded (default ~2% of capital).
-            hard_cap = _cfg_float(
-                settings,
-                "index_confirmed_ftv_per_trade_max_loss_inr",
-                4_000.0,
-            )
-        else:
-            hard_cap = _cfg_float(
-                settings,
-                "explosion_per_trade_max_loss_inr",
-                2_000.0,
-            )
-        if hard_cap > 0 and pnl_inr <= -hard_cap:
-            return "explosion_per_trade_risk_cap", pnl_inr
-
     from app.engines.ict_breakout_monitor import _ict_max_profit_trade
 
     max_profit = _ict_max_profit_trade(trade)

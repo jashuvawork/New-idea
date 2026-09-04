@@ -1,7 +1,8 @@
-"""Risk guardrails: never-green cut, hard per-trade ₹ cap, whipsaw flip cap.
+"""Risk guardrails: never-green cut, whipsaw flip cap.
 
 Aug6 SENSEX 78800 PE (never-green ELITE, 27 lots, −₹20k) and Jul30 (90-lot ELITE,
 −₹86k) motivate bounding the downside on the trades that are wrong from entry.
+Per-trade INR exit caps removed — structural/point SL only.
 """
 
 from datetime import datetime, timedelta
@@ -34,8 +35,8 @@ def _scratch_guard_settings() -> MagicMock:
     s.explosion_peak_fade_lock_enabled = False
     s.explosion_peak_capture_enabled = False
     s.explosion_no_progress_enabled = False
-    s.explosion_per_trade_max_loss_inr = 2_000.0
-    s.explosion_exceptional_per_trade_max_loss_inr = 4_000.0
+    s.explosion_per_trade_max_loss_inr = 0.0
+    s.explosion_exceptional_per_trade_max_loss_inr = 0.0
     s.emergency_stop_enabled = False
     s.enable_live_trading = False
     s.live_hold_to_structural_sl = True
@@ -73,50 +74,25 @@ def test_never_green_skipped_once_green_printed():
     assert reason != "explosion_never_green_stop"
 
 
-def test_hard_per_trade_risk_cap_enabled_by_default():
-    """Ordinary trades cannot exceed the default ₹2k loss ceiling."""
-    reason, pnl = evaluate_explosion_exit(
+def test_no_inr_per_trade_risk_cap_exit():
+    """INR per-trade loss caps removed — oversized loss waits for point SL."""
+    reason, _ = evaluate_explosion_exit(
         _trade(500.0, 495.0, best=3.0, lots=200), 495.0, "ELITE", 20,
     )
-    assert reason == "explosion_per_trade_risk_cap"
-    assert pnl <= -12000
+    assert reason != "explosion_per_trade_risk_cap"
 
 
-def test_hard_per_trade_risk_cap_when_enabled():
-    """When explicitly set >0, the ₹ ceiling still cuts oversized losses."""
-    from unittest.mock import MagicMock, patch
-
-    s = MagicMock()
-    # Keep never-green from preempting (best>0); enable ₹ cap only.
-    s.explosion_never_green_stop_enabled = True
-    s.explosion_never_green_min_green_points = 0.5
-    s.explosion_never_green_stop_points = 18.0
-    s.explosion_never_green_stop_pct = 6.0
-    s.explosion_never_green_min_hold_seconds = 20
-    s.explosion_per_trade_max_loss_inr = 12_000.0
-    s.enable_live_trading = False
-    s.live_hold_to_structural_sl = True
-    with patch("app.engines.explosion_profit.get_settings", return_value=s):
-        reason, pnl = evaluate_explosion_exit(
-            _trade(500.0, 495.0, best=3.0, lots=200), 495.0, "ELITE", 20,
-        )
-    assert reason == "explosion_per_trade_risk_cap"
-    assert pnl <= -12000
-
-
-def test_exceptional_full_sleeve_uses_bounded_four_thousand_cap():
+def test_full_sleeve_no_inr_cap_exit():
     trade = _trade(100.0, 97.0, best=2.0, lots=75)
     trade.entryContext = {"fullSleeveQualified": True}
-    reason, pnl = evaluate_explosion_exit(
+    reason, _ = evaluate_explosion_exit(
         trade, 97.0, "ELITE", 20, live_velocity_3s=0.5,
     )
-    assert reason == "explosion_per_trade_risk_cap"
-    assert pnl <= -4_000
+    assert reason != "explosion_per_trade_risk_cap"
 
 
-def test_elite_full_lot_disables_rupee_clip_by_default():
-    """ELITE full-lot prefers structural SL + daily stop — no early ₹10k kill."""
-    # ~₹12k open loss must NOT trip a per-trade INR clip when risk_inr defaults to 0.
+def test_elite_full_lot_uses_structural_sl_not_rupee_clip():
+    """ELITE full-lot prefers structural SL + daily stop — no INR clip."""
     deep = _trade(100.0, 94.0, best=2.0, lots=100)
     deep.entryContext = {"eliteFullLot": True}
     reason, pnl = evaluate_explosion_exit(deep, 94.0, "ELITE", 20, live_velocity_3s=0.5)
@@ -124,35 +100,16 @@ def test_elite_full_lot_disables_rupee_clip_by_default():
     assert pnl <= -10_000
 
 
-def test_elite_full_lot_optional_rupee_clip_when_configured(monkeypatch):
-    """If elite_full_lot_risk_inr is set, honor that ceiling."""
-    from app.config import get_settings
-
-    s = get_settings()
-    monkeypatch.setattr(s, "elite_full_lot_risk_inr", 20_000.0)
-    survive = _trade(100.0, 94.0, best=2.0, lots=100)  # −₹12k
-    survive.entryContext = {"eliteFullLot": True}
-    reason, _ = evaluate_explosion_exit(survive, 94.0, "ELITE", 20, live_velocity_3s=0.5)
-    assert reason != "explosion_per_trade_risk_cap"
-    cut = _trade(100.0, 88.0, best=2.0, lots=100)  # −₹24k
-    cut.entryContext = {"eliteFullLot": True}
-    reason2, pnl2 = evaluate_explosion_exit(cut, 88.0, "ELITE", 20, live_velocity_3s=0.5)
-    assert reason2 == "explosion_per_trade_risk_cap"
-    assert pnl2 <= -20_000
-
-def test_index_confirmed_ftv_uses_wider_cap_not_two_thousand():
-    """Elevated index-confirmed FTV gets the ~4k stop, so a 2k-4k dip does NOT cut it."""
-    # ~₹2,400 loss (40 lots x20 x 3pt) would trip an ordinary 2k trade, but not this one.
+def test_index_confirmed_ftv_no_inr_cap_exit():
+    """Index-confirmed FTV — no per-trade INR clip; point SL owns exit."""
     survive = _trade(100.0, 97.0, best=2.0, lots=40)
     survive.entryContext = {"indexConfirmedFtv": True}
     reason, _ = evaluate_explosion_exit(survive, 97.0, "ELITE", 20, live_velocity_3s=0.5)
     assert reason != "explosion_per_trade_risk_cap"
-    # Beyond ~₹4k it is still bounded and cut.
     cut = _trade(100.0, 97.0, best=2.0, lots=75)
     cut.entryContext = {"indexConfirmedFtv": True}
-    reason2, pnl2 = evaluate_explosion_exit(cut, 97.0, "ELITE", 20, live_velocity_3s=0.5)
-    assert reason2 == "explosion_per_trade_risk_cap"
-    assert pnl2 <= -4_000
+    reason2, _ = evaluate_explosion_exit(cut, 97.0, "ELITE", 20, live_velocity_3s=0.5)
+    assert reason2 != "explosion_per_trade_risk_cap"
 
 
 def test_failed_launch_scratches_on_negative_velocity():
