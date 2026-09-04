@@ -531,6 +531,8 @@ class Settings(BaseSettings):
     entry_day_good_coil_top_max_run_pct: float = 0.30
     entry_day_good_building_cold_min_velocity_3s: float = 1.0
     entry_day_good_cold_base_lot_cap: int = 3
+    entry_day_chop_rally_consolidation_max_pad_pct: float = 30.0
+    entry_day_good_consolidation_max_pad_pct: float = 28.0
     # Session-level post-peak: a slow-grind rip (PE 15->100 over hours) shows only a small run
     # in the short window, so buying near the top slips through. Also reject entries within
     # near_top_frac of the SESSION peak after a big session run (Sep 1 live PUT 24050: entry

@@ -832,17 +832,6 @@ def _slow_grind_consolidation_base_readiness(
     if not (min_off <= off_low <= max_off + 1e-6):
         return False, f"slow_grind_consolidation_off_low_outside_{min_off:g}_{max_off:g}"
 
-    peak_move = float(
-        getattr(event, "peak_move_pct", 0)
-        or row.get("peakMovePct")
-        or 0
-    )
-    max_peak = float(
-        getattr(s, "slow_grind_consolidation_base_max_peak_move_pct", 24.0) or 24.0
-    )
-    if peak_move > max_peak + 1e-6:
-        return False, f"slow_grind_consolidation_peak>{max_peak:g}"
-
     base_armed = bool(
         getattr(ict, "base_armed", False)
         or row.get("ictBaseArmed")
@@ -866,8 +855,49 @@ def _slow_grind_consolidation_base_readiness(
     if not (lo <= base_move <= hi + 1e-6):
         return False, f"slow_grind_consolidation_pad_outside_{lo:g}_{hi:g}"
 
+    daily_move = float(
+        getattr(event, "daily_move_pct", 0)
+        or row.get("dailyMovePct")
+        or row.get("openPremiumMove")
+        or 0
+    )
+    # Gate on CURRENT pad heat — session peakMovePct stays elevated after a morning
+    # rip even when premium pulls back to the afternoon consolidation base (Sep04
+    # NIFTY CALL 23750/23900: peak 43% but back at base with daily ~6%).
+    current_heat = max(base_move, daily_move)
+    max_peak = float(
+        getattr(s, "slow_grind_consolidation_base_max_peak_move_pct", 24.0) or 24.0
+    )
+    try:
+        from app.engines.entry_day_adaptive import resolve_entry_day_policy
+
+        _policy = resolve_entry_day_policy(settings=s)
+        if _policy.day_type in ("CHOP", "GOOD", "ELITE"):
+            max_peak = max(
+                max_peak,
+                float(
+                    getattr(
+                        s,
+                        "entry_day_chop_rally_consolidation_max_pad_pct"
+                        if _policy.day_type == "CHOP"
+                        else "entry_day_good_consolidation_max_pad_pct",
+                        30.0 if _policy.day_type == "CHOP" else 28.0,
+                    )
+                    or (30.0 if _policy.day_type == "CHOP" else 28.0)
+                ),
+            )
+    except Exception:
+        pass
+    if current_heat > max_peak + 1e-6:
+        return False, f"slow_grind_consolidation_move>{max_peak:g}"
+
     v3 = float(
         getattr(event, "velocity_3s", 0) or row.get("velocity3s") or 0
+    )
+    volume_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
     )
     min_v3 = float(
         getattr(s, "slow_grind_sudden_lift_min_velocity_3s", -0.8) or -0.8
@@ -875,6 +905,10 @@ def _slow_grind_consolidation_base_readiness(
     max_v3 = float(
         getattr(s, "slow_grind_sudden_lift_max_velocity_3s", 1.5) or 1.5
     )
+    if volume_awake and lo <= base_move <= hi + 1e-6:
+        # Volume awakening at the consolidation base IS the pre-lift trigger —
+        # do not require v3 to spike first (Sep04 afternoon BUILDING CALLs at v3=0).
+        min_v3 = 0.0
     if v3 < min_v3:
         return False, f"slow_grind_consolidation_velocity3s<{min_v3:g}"
     if v3 > max_v3:
@@ -2327,6 +2361,22 @@ def first_lift_entry_readiness(
         min_v3 = 0.0
         min_v9 = 0.0
     if top_ftv_v_lane and volume_awake:
+        min_v3 = 0.0
+        min_v9 = 0.0
+    consolidation_lane = bool(
+        row.get("slowGrindConsolidationBase")
+        or row.get("ictSlowGrindConsolidationBase")
+    )
+    if not consolidation_lane:
+        _cons_ok, _cons_reason = _slow_grind_consolidation_base_readiness(
+            snap=snap,
+            event=event,
+            ict=ict,
+            alert=row,
+            settings=settings,
+        )
+        consolidation_lane = _cons_ok
+    if consolidation_lane and volume_awake:
         min_v3 = 0.0
         min_v9 = 0.0
     if not sustained_lift and v3 < min_v3:

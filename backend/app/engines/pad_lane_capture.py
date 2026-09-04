@@ -57,6 +57,7 @@ PAD_LANE_FTV_MODES = frozenset(
 def pad_lane_pre_lift(evidence: Mapping[str, Any]) -> bool:
     return bool(
         evidence.get("slowGrindSuddenLift")
+        or evidence.get("slowGrindConsolidationBase")
         or evidence.get("fastBullishLocalBase")
         or evidence.get("squeezeRelease")
         or evidence.get("indexLedOptionLag")
@@ -76,6 +77,8 @@ def pad_lane_cold_velocity_ok(
     tier = str(evidence.get("tier") or "").upper()
     local_move = float(evidence.get("localBaseMovePct") or 0)
     if evidence.get("slowGrindSuddenLift") and -0.8 <= v3 <= 1.5:
+        return True
+    if evidence.get("slowGrindConsolidationBase") and -0.8 <= v3 <= 1.5:
         return True
     if evidence.get("stealthCvdCoil") and -0.5 <= v3 <= 1.0:
         return True
