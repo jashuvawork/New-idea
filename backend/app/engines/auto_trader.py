@@ -1903,7 +1903,14 @@ async def _open_from_candidate(
         strategy_type=candidate.strategy_type,
         strike=candidate.strike,
         stop_points=final_stop_points,
-        ignore_per_trade_risk_cap=bool(elite_full_lot) and not trap_cap_locked,
+        ignore_per_trade_risk_cap=_ignore_per_trade_risk_cap_for_entry(
+            elite_full_lot=bool(elite_full_lot),
+            top_rank_full_budget_lots=bool(top_rank_full_budget_lots),
+            high_conviction=bool(high_conviction),
+            allocation=allocation,
+            candidate_score=float(candidate.score or 0),
+            trap_cap_locked=trap_cap_locked,
+        ),
         ignore_daily_loss_stop=ignore_daily_loss_stop,
     )
     if not final_risk_ok:
@@ -3373,6 +3380,33 @@ def _top_rank_full_budget_lots_allowed(
     # capital max, then tune_exit_plan_for_position shrank to 1 lot because FTV
     # full-sleeve was not stamped (strict_first_lift=False).
     return bool(explosion_always_max)
+
+
+def _ignore_per_trade_risk_cap_for_entry(
+    *,
+    elite_full_lot: bool,
+    top_rank_full_budget_lots: bool,
+    high_conviction: bool,
+    allocation: RankedAllocation | None,
+    candidate_score: float,
+    trap_cap_locked: bool,
+) -> bool:
+    """Skip INR risk clip when the sleeve is sized for a wide structural stop."""
+    if trap_cap_locked:
+        return False
+    if elite_full_lot or top_rank_full_budget_lots or high_conviction:
+        return True
+    settings = get_settings()
+    if not getattr(settings, "top_score_per_trade_risk_bypass_enabled", True):
+        return False
+    min_score = float(
+        getattr(settings, "top_score_per_trade_risk_bypass_min_score", 80.0) or 80.0
+    )
+    if candidate_score + 1e-9 < min_score:
+        return False
+    if allocation is not None and int(getattr(allocation, "rank", 0) or 0) == 1:
+        return True
+    return False
 
 
 def _enforce_top_moment_max_lots_only(
