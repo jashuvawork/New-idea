@@ -35,6 +35,7 @@ def _settings(**overrides):
     s.entry_timing_structured_cold_min_velocity_3s = 0.5
     s.entry_timing_structured_cold_lot_cap = 3
     s.entry_timing_structured_cold_max_lots = False
+    s.entry_timing_structured_cold_building_min_velocity_3s = 1.5
     s.entry_timing_structured_cold_require_heat = True
     s.entry_timing_structured_cold_require_aligned = True
     s.explosion_elite_never_block_enabled = True
@@ -288,6 +289,24 @@ def test_structured_cold_base_requires_alignment(mock_g1, mock_g2):
         midday_chop=True,
     )
     # PUT vs BULLISH → no cold-base allow; chop cold/late still blocks.
+    assert timing["assessment"] != "COLD_BASE"
+    blocked, _ = timing_blocks_entry(timing)
+    assert blocked is True
+
+
+@patch("app.engines.entry_timing.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_building_cold_base_blocked_on_chop_when_velocity_weak(mock_g1, mock_g2):
+    """Sep04-style BUILDING probe: chop + weak v3 must not qualify as COLD_BASE."""
+    s = _settings()
+    mock_g1.return_value = s
+    mock_g2.return_value = s
+    timing = assess_entry_timing(
+        _event(v3=1.0, tier="BUILDING"),
+        ict=_ict(),
+        snap=_snap("CHOP"),
+        midday_chop=True,
+    )
     assert timing["assessment"] != "COLD_BASE"
     blocked, _ = timing_blocks_entry(timing)
     assert blocked is True

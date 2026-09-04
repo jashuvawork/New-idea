@@ -8,7 +8,7 @@ full/max lots; true LATE/CHASE without a live local base stays blocked.
 Timing verdicts:
   GOOD       — structured + in window + hot live velocity → full size OK
   OK         — in window with adequate live heat → allow
-  COLD_BASE  — ICT local-base pause (cold tape, still in window) → max lots
+  COLD_BASE  — ICT local-base pause (cold tape, still in window) → probe lot cap
   COLD       — structure/ELITE but live velocity dead → block (chop) or lot-cap
   LATE       — peak already extended and live cooled → block
   CHASE      — past structured/local chase ceiling → block
@@ -112,6 +112,7 @@ def _structured_cold_base_ok(
     good_min: float,
     event: Any,
     snap: Optional[SymbolSnapshot],
+    midday_chop: bool = False,
 ) -> bool:
     """Pause-before-continuation: ICT local base still early, live tape cold."""
     if not bool(getattr(settings, "entry_timing_structured_cold_base_allow", True)):
@@ -131,6 +132,14 @@ def _structured_cold_base_ok(
         return False
     if bool(getattr(settings, "entry_timing_structured_cold_require_aligned", True)):
         if not _side_aligned(event, snap):
+            return False
+    tier = str(getattr(event, "tier", "") or "").upper()
+    if tier == "BUILDING" and _chop_or_worst(snap, midday_chop):
+        building_min = _f(
+            getattr(settings, "entry_timing_structured_cold_building_min_velocity_3s", 1.5),
+            1.5,
+        )
+        if live_v < building_min:
             return False
     return True
 
@@ -205,6 +214,7 @@ def assess_entry_timing(
         good_min=good_min,
         event=event,
         snap=snap,
+        midday_chop=midday_chop,
     )
 
     structured_failed_launch = bool(

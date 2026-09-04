@@ -424,6 +424,7 @@ class Settings(BaseSettings):
     entry_timing_structured_cold_min_velocity_3s: float = 0.5
     entry_timing_structured_cold_lot_cap: int = 3
     entry_timing_structured_cold_max_lots: bool = False
+    entry_timing_structured_cold_building_min_velocity_3s: float = 1.5
     entry_timing_structured_cold_require_heat: bool = True
     entry_timing_structured_cold_require_aligned: bool = True
     # Ordinary entries use at most 35% capital. The configured 90% sleeve is reserved
@@ -2695,8 +2696,8 @@ class Settings(BaseSettings):
     explosion_never_green_stop_pct: float = 8.0
     explosion_never_green_min_hold_seconds: int = 10
     # Scratch a launch that immediately loses both price and velocity confirmation.
-    explosion_failed_launch_exit_enabled: bool = False
-    explosion_failed_launch_min_hold_seconds: int = 15
+    explosion_failed_launch_exit_enabled: bool = True
+    explosion_failed_launch_min_hold_seconds: int = 5
     explosion_failed_launch_max_hold_seconds: int = 45
     explosion_failed_launch_max_best_points: float = 1.0
     explosion_failed_launch_min_loss_points: float = 1.5
