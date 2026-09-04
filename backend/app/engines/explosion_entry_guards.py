@@ -907,6 +907,84 @@ def live_explosion_confirmation_blocked(
     return False, ""
 
 
+def coil_top_entry_blocked(
+    explosion_event: Any,
+    *,
+    tier: str = "",
+    velocity_3s: float | None = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block BUILDING/WATCH entries at the top of a tight consolidation coil.
+
+    ``post_peak_chase`` only fires after a >=25% window run. A 135→150 coil (+11%) lets
+    entries through at ₹147 because off-low looks like an early pad. This guard measures
+    **position inside the recent range** — near-base entries sit near the window low;
+    buying the coil ceiling sits near the window high.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "explosion_coil_top_guard_enabled", True)):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+    tier_u = str(
+        tier or getattr(explosion_event, "tier", "") or ""
+    ).upper()
+    allowed_tiers = {
+        t.strip().upper()
+        for t in str(
+            getattr(settings, "explosion_coil_top_tiers_csv", "WATCH,BUILDING") or ""
+        ).split(",")
+        if t.strip()
+    }
+    if tier_u not in allowed_tiers:
+        return False, ""
+    sym = str(getattr(explosion_event, "symbol", "") or "")
+    side = getattr(explosion_event, "side", None)
+    strike = float(getattr(explosion_event, "strike", 0) or 0)
+    if not sym or side is None:
+        return False, ""
+    v3 = (
+        float(velocity_3s)
+        if velocity_3s is not None
+        else float(getattr(explosion_event, "velocity_3s", 0) or 0)
+    )
+    breakout_v = float(
+        getattr(settings, "explosion_coil_top_breakout_min_velocity_3s", 2.0) or 2.0
+    )
+    if tier_u in ("ELITE", "EXPLODING") and v3 + 1e-9 >= breakout_v:
+        return False, ""
+    lookback = float(
+        getattr(settings, "explosion_coil_top_lookback_seconds", 900.0) or 900.0
+    )
+    min_run = float(
+        getattr(settings, "explosion_coil_top_min_run_pct", 0.06) or 0.06
+    )
+    max_run = float(
+        getattr(settings, "explosion_coil_top_max_run_pct", 0.28) or 0.28
+    )
+    max_pos = float(
+        getattr(settings, "explosion_coil_top_max_position_frac", 0.50) or 0.50
+    )
+    try:
+        from app.engines.explosion_detector import recent_premium_run
+
+        r = recent_premium_run(sym, strike, side, lookback_seconds=lookback)
+    except Exception:
+        return False, ""
+    low = float(r.get("low") or 0)
+    high = float(r.get("high") or 0)
+    current = float(r.get("current") or 0)
+    run = float(r.get("run") or 0)
+    if low <= 0 or high <= low or current <= 0:
+        return False, ""
+    if run < min_run or run > max_run:
+        return False, ""
+    position = (current - low) / (high - low)
+    if position <= max_pos:
+        return False, ""
+    return True, f"coil_top_position_{position:.0%}_run_{run:.0%}"
+
+
 def post_peak_chase_blocked(
     explosion_event: Any,
     *,

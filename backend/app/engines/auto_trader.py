@@ -784,6 +784,15 @@ async def _open_from_candidate(
             ),
         )
         timing_blocked, timing_reason = timing_blocks_entry(timing_meta)
+        coil_blocked, coil_reason = (False, "")
+        if not timing_blocked:
+            from app.engines.explosion_entry_guards import coil_top_entry_blocked
+
+            coil_blocked, coil_reason = coil_top_entry_blocked(
+                candidate.explosion_event,
+                tier=str(candidate.tier or ""),
+                velocity_3s=float(getattr(candidate.explosion_event, "velocity_3s", 0) or 0),
+            )
         from app.engines.ict_breakout_monitor import first_lift_entry_ready
 
         early_base_entry_ready = first_lift_entry_ready(
@@ -825,6 +834,8 @@ async def _open_from_candidate(
                 timing=timing_meta,
             ):
                 return False, timing_reason
+        elif coil_blocked:
+            return False, coil_reason
 
     signal_premium = candidate.premium
     is_live = settings.enable_live_trading and settings.auto_trading_enabled

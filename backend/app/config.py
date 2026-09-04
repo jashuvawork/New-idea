@@ -495,6 +495,16 @@ class Settings(BaseSettings):
     explosion_post_peak_chase_lookback_seconds: float = 900.0
     explosion_post_peak_chase_min_run_pct: float = 0.25
     explosion_post_peak_chase_near_top_frac: float = 0.12
+    # Coil-top guard: BUILDING/WATCH must enter at the local-base floor of a consolidation,
+    # not at the ceiling. Uses position within the recent premium window (current-low)/(high-low).
+    # Sep 4 NIFTY 23900 CE: base ~135, coil top ~150, entry ~147 — off-low ~9% but position ~80%.
+    explosion_coil_top_guard_enabled: bool = True
+    explosion_coil_top_lookback_seconds: float = 900.0
+    explosion_coil_top_min_run_pct: float = 0.06
+    explosion_coil_top_max_run_pct: float = 0.28
+    explosion_coil_top_max_position_frac: float = 0.50
+    explosion_coil_top_tiers_csv: str = "WATCH,BUILDING"
+    explosion_coil_top_breakout_min_velocity_3s: float = 2.0
     # Session-level post-peak: a slow-grind rip (PE 15->100 over hours) shows only a small run
     # in the short window, so buying near the top slips through. Also reject entries within
     # near_top_frac of the SESSION peak after a big session run (Sep 1 live PUT 24050: entry
