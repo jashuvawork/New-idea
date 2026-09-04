@@ -798,6 +798,7 @@ def _explosion_candidates(
             live_explosion_confirmation_blocked,
             post_impulse_consolidation_entry_blocked,
             post_peak_chase_blocked,
+            coil_top_entry_blocked,
             tier_promotion_pad_chase_blocked,
         )
 
@@ -900,6 +901,13 @@ def _explosion_candidates(
         # so this only blocks the late/mid-rip chase — even for must-take/first-lift.
         pp_blocked, _pp_reason = post_peak_chase_blocked(event)
         if pp_blocked:
+            continue
+        coil_blocked, _coil_reason = coil_top_entry_blocked(
+            event,
+            tier=str(getattr(event, "tier", "") or alert.get("tier") or ""),
+            velocity_3s=float(getattr(event, "velocity_3s", 0) or 0),
+        )
+        if coil_blocked:
             continue
         trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
             cand_probe, snap, state=state, ict=ict,
