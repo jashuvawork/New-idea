@@ -2650,6 +2650,10 @@ class Settings(BaseSettings):
     # Final-policy-authorized rank-1 ELITE/EXPLODING entries keep every
     # cash-affordable sleeve lot instead of being reduced by the standard SL budget.
     top_rank_first_lift_full_budget_lots_enabled: bool = True
+    # Rank-1 / full-budget sleeves use wide structural SL + max lots — do not pre-reject
+    # on max_risk_per_trade_inr (Sep 4 NIFTY CALL BUILDING score 265 @ per_trade_risk_exceeded).
+    top_score_per_trade_risk_bypass_enabled: bool = True
+    top_score_per_trade_risk_bypass_min_score: float = 80.0
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
     aggressive_min_explosion_score: int = 38
