@@ -779,6 +779,7 @@ async def _open_from_candidate(
         timing_meta = assess_timing_for_event(
             candidate.explosion_event,
             snap=snap,
+            state=state,
             premium_capture=is_premium_capture_event(
                 candidate.explosion_event, chart=snap.spotChart,
             ),
@@ -1339,10 +1340,23 @@ async def _open_from_candidate(
         and not elevated_size
     ):
         from app.engines.capital_allocator import max_lots_for_capital_pct
-
-        ordinary_pct = float(
-            getattr(settings, "ordinary_entry_max_capital_pct", 0.35) or 0.35
+        from app.engines.entry_day_adaptive import (
+            probe_capital_pct_for_timing,
+            resolve_entry_day_policy,
         )
+
+        entry_policy = resolve_entry_day_policy(
+            state=state,
+            snapshots=snapshots or {symbol: snap},
+            settings=settings,
+        )
+        probe_pct = probe_capital_pct_for_timing(entry_policy, timing_meta)
+        if probe_pct < 1.0:
+            ordinary_pct = probe_pct
+        else:
+            ordinary_pct = float(
+                getattr(settings, "ordinary_entry_max_capital_pct", 0.35) or 0.35
+            )
         if (
             policy_decision is not None
             and policy_decision.mode
@@ -1948,6 +1962,8 @@ async def _open_from_candidate(
             allocation=allocation,
             candidate_score=float(candidate.score or 0),
             trap_cap_locked=trap_cap_locked,
+            state=state,
+            snapshots=snapshots,
         ),
         ignore_daily_loss_stop=ignore_daily_loss_stop,
     )
@@ -3413,6 +3429,8 @@ def _ignore_per_trade_risk_cap_for_entry(
     allocation: RankedAllocation | None,
     candidate_score: float,
     trap_cap_locked: bool,
+    state: Any = None,
+    snapshots: dict[str, Any] | None = None,
 ) -> bool:
     """Skip INR risk clip when the sleeve is sized for a wide structural stop."""
     if trap_cap_locked:
@@ -3422,9 +3440,16 @@ def _ignore_per_trade_risk_cap_for_entry(
     settings = get_settings()
     if not getattr(settings, "top_score_per_trade_risk_bypass_enabled", True):
         return False
-    min_score = float(
-        getattr(settings, "top_score_per_trade_risk_bypass_min_score", 80.0) or 80.0
+    from app.engines.entry_day_adaptive import resolve_entry_day_policy
+
+    policy = resolve_entry_day_policy(
+        state=state,
+        snapshots=snapshots,
+        settings=settings,
     )
+    min_score = float(policy.top_score_risk_bypass_min_score or 0)
+    if min_score <= 0:
+        return False
     if candidate_score + 1e-9 < min_score:
         return False
     if allocation is not None and int(getattr(allocation, "rank", 0) or 0) == 1:

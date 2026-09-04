@@ -167,6 +167,7 @@ def assess_entry_timing(
     snap: Optional[SymbolSnapshot] = None,
     midday_chop: bool = False,
     premium_capture: bool = False,
+    state: Any = None,
 ) -> dict[str, Any]:
     """Return timingAssessment dict for journal + entry gates."""
     settings = get_settings()
@@ -181,6 +182,7 @@ def assess_entry_timing(
 
     entry_policy = resolve_entry_day_policy(
         snapshots={str(getattr(snap, "symbol", "") or "NIFTY"): snap} if snap else {},
+        state=state,
         settings=settings,
     )
 
@@ -418,6 +420,7 @@ def assess_timing_for_event(
     snap: Optional[SymbolSnapshot] = None,
     midday_chop: bool = False,
     premium_capture: bool = False,
+    state: Any = None,
 ) -> dict[str, Any]:
     """Convenience: analyze ICT if missing, then assess."""
     if event is None:
@@ -448,4 +451,5 @@ def assess_timing_for_event(
         snap=snap,
         midday_chop=midday_chop,
         premium_capture=premium_capture,
+        state=state,
     )
