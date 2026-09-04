@@ -194,7 +194,7 @@ def test_top_ftv_a_rank_one_uses_policy_authorized_max_lots_and_exceptional_risk
     assert authorized is True
     assert lots == 31
     max_lots.assert_called_once_with("NIFTY", 44.0, pytest.approx(0.90))
-    assert Settings().explosion_exceptional_per_trade_max_loss_inr == 4_000
+    assert Settings().explosion_exceptional_per_trade_max_loss_inr == 0.0
 
 
 def test_top_ftv_a_rank_two_and_cached_a_ranking_cannot_trigger_max_lots():

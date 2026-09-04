@@ -2727,18 +2727,16 @@ class Settings(BaseSettings):
     explosion_reentry_ml_win_prob_gate_enabled: bool = True
     explosion_reentry_ml_win_prob_min: float = 0.52
     explosion_reentry_ml_win_prob_same_strike_min: float = 0.55
-    # 2) Hard INR ceilings: ~1% of ₹2L normally, ~2% only for a fully proven launch.
-    explosion_per_trade_max_loss_inr: float = 2_000.0
-    explosion_exceptional_per_trade_max_loss_inr: float = 4_000.0
+    # 2) Legacy INR exit caps — disabled (0). Exits use structural/point SL only.
+    explosion_per_trade_max_loss_inr: float = 0.0
+    explosion_exceptional_per_trade_max_loss_inr: float = 0.0
     # Index-confirmed near-base FTV size-up: a genuine index thrust (drift/burst/index
     # helpers) at a near-base ELITE/EXPLODING lift is NOT a premium-only fake trap, so it
-    # may keep its elevated (~2x) size even on a chop day (lifts the fake-trap chop cap) and
-    # gets a wider ~2% per-trade rupee stop so the bigger size survives the normal near-base
-    # shakeout instead of being clipped at a ~2pt stop. Still bounded: elevated (not full
-    # sleeve), whipsaw/never-green guards stay, and the 10%/day loss stop is the backstop.
+    # may keep its elevated (~2x) size even on a chop day (lifts the fake-trap chop cap).
+    # Exits use structural/point SL — no per-trade INR clip.
     index_confirmed_ftv_size_up_enabled: bool = True
     index_confirmed_ftv_max_base_rel_pct: float = 20.0
-    index_confirmed_ftv_per_trade_max_loss_inr: float = 4_000.0
+    index_confirmed_ftv_per_trade_max_loss_inr: float = 0.0
     # ELITE full-lot + ride-to-max-TP: index-confirmed ELITE FTV deploys the full per-trade
     # capital budget (~₹1.8L = 90% of ₹2L) and holds to max TP. Do NOT shrink lots to a tiny
     # ₹10k/8pt risk envelope — that caps size at ~half capital and stop-outs the runner on a

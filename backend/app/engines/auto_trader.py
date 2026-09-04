@@ -1957,21 +1957,6 @@ async def _open_from_candidate(
             if policy_decision is not None
             else None
         ),
-        "entryRiskCapInr": (
-            float(
-                getattr(
-                    settings,
-                    "explosion_exceptional_per_trade_max_loss_inr",
-                    4_000.0,
-                )
-                or 4_000.0
-            )
-            if full_sleeve_authorized
-            else float(
-                getattr(settings, "explosion_per_trade_max_loss_inr", 2_000.0)
-                or 2_000.0
-            )
-        ),
         "baseWindowFullLots": bool(base_window_full_lots),
         "structuredColdMaxLots": bool(structured_cold_max),
         "topMomentMaxLots": top_moment_lot_meta.get("topMomentMaxLots"),
