@@ -1898,13 +1898,59 @@ def first_lift_entry_readiness(
     )
     # armed_base_launch stamps before flat→vertical confirms — do not require structured
     # when the armed launch lane is active (Sep01 NIFTY PUT 23950 ELITE 100 at ~₹18 base).
-    if not (first_lift or armed_launch or elite_base_ready or v_rip_ready) or (
-        not structured
-        and not elite_base_ready
-        and not v_rip_ready
-        and not armed_launch
-    ):
-        return False, "first_lift_structure_not_confirmed"
+    structure_missing = (
+        not (first_lift or armed_launch or elite_base_ready or v_rip_ready)
+        or (
+            not structured
+            and not elite_base_ready
+            and not v_rip_ready
+            and not armed_launch
+        )
+    )
+    if structure_missing:
+        from app.engines.bullish_day_floor_relief import (
+            bullish_day_structure_bypass_allowed,
+        )
+
+        _conf_tier = ""
+        if state is not None:
+            ds = getattr(state, "dailyStrategy", None) or {}
+            if isinstance(ds, dict):
+                _conf_tier = str(ds.get("confidenceTier") or "")
+        _tier = str(
+            getattr(event, "tier", "")
+            or row.get("tier")
+            or ""
+        ).upper()
+        _score = float(
+            getattr(event, "explosion_score", 0)
+            or row.get("explosionScore")
+            or row.get("score")
+            or 0
+        )
+        _base_move = float(
+            getattr(ict, "base_relative_move_pct", 0)
+            or row.get("ictBaseRelativeMovePct")
+            or 0
+        )
+        _volume_awake = bool(
+            getattr(ict, "volume_awakening", False)
+            or row.get("ictVolumeAwakening")
+            or row.get("volumeAwaken")
+        )
+        if not (
+            first_lift
+            and bullish_day_structure_bypass_allowed(
+                tier=_tier,
+                score=_score,
+                base_move_pct=_base_move,
+                volume_awakening=_volume_awake,
+                day_mode=day_mode,
+                confidence_tier=_conf_tier,
+                state=state,
+            )
+        ):
+            return False, "first_lift_structure_not_confirmed"
 
     base_move = float(
         getattr(ict, "base_relative_move_pct", 0)
@@ -2070,6 +2116,25 @@ def first_lift_entry_readiness(
         max_move = float(
             getattr(settings, "first_lift_trade_max_move_pct", 25.0) or 25.0
         )
+    from app.engines.bullish_day_floor_relief import (
+        bullish_day_context_active,
+        bullish_day_first_lift_floors,
+    )
+
+    _conf_tier_floor = ""
+    if state is not None:
+        ds = getattr(state, "dailyStrategy", None) or {}
+        if isinstance(ds, dict):
+            _conf_tier_floor = str(ds.get("confidenceTier") or "")
+    if bullish_day_context_active(
+        day_mode=day_mode,
+        confidence_tier=_conf_tier_floor,
+        state=state,
+    ):
+        bd_floors = bullish_day_first_lift_floors(settings)
+        if first_lift and not strict_armed_path and not v_rip_lane:
+            if not grade_a_lane and not top_ftv_v_lane:
+                min_move = min(min_move, bd_floors["minMove"])
     if not (min_move <= base_move <= max_move):
         return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
 
@@ -2156,6 +2221,14 @@ def first_lift_entry_readiness(
             min_score,
             float(getattr(settings, "first_lift_helper_confirm_min_score", 45.0) or 45.0),
         )
+    if bullish_day_context_active(
+        day_mode=day_mode,
+        confidence_tier=_conf_tier_floor,
+        state=state,
+    ):
+        bd_floors = bullish_day_first_lift_floors(settings)
+        min_quality = min(min_quality, bd_floors["minQuality"])
+        min_score = min(min_score, bd_floors["minScore"])
     if quality < min_quality:
         return False, f"first_lift_quality<{min_quality:g}"
 

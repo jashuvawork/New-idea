@@ -2654,6 +2654,16 @@ class Settings(BaseSettings):
     # on max_risk_per_trade_inr (Sep 4 NIFTY CALL BUILDING score 265 @ per_trade_risk_exceeded).
     top_score_per_trade_risk_bypass_enabled: bool = True
     top_score_per_trade_risk_bypass_min_score: float = 80.0
+    # BULLISH / MOMENTUM RALLY + ELITE/HIGH — lower first-lift and immature-base floors.
+    bullish_day_floor_relief_enabled: bool = True
+    bullish_day_extra_rank_relief: float = 6.0
+    bullish_day_structured_min_move_pct: float = 8.0
+    bullish_day_first_lift_min_score: float = 45.0
+    bullish_day_first_lift_min_quality: float = 50.0
+    bullish_day_immature_local_base_min_move_pct: float = 8.0
+    bullish_day_structure_bypass_min_score: float = 55.0
+    bullish_day_structure_bypass_min_base_move_pct: float = 2.0
+    bullish_day_structure_bypass_tiers_csv: str = "ELITE,EXPLODING"
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
     aggressive_min_explosion_score: int = 38

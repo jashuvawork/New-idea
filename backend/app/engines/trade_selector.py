@@ -2474,6 +2474,27 @@ def diagnose_missed_entries(
                         or 24.0
                     ),
                 )
+            from app.engines.bullish_day_floor_relief import (
+                bullish_day_context_active,
+                bullish_day_first_lift_floors,
+            )
+
+            _day_mode = str(
+                (getattr(state, "dailyStrategy", None) or {}).get("dayMode")
+                or ""
+            )
+            _conf_tier = str(
+                (getattr(state, "dailyStrategy", None) or {}).get("confidenceTier")
+                or ""
+            )
+            if bullish_day_context_active(
+                day_mode=_day_mode,
+                confidence_tier=_conf_tier,
+                state=state,
+                snapshots=snapshots,
+            ):
+                bd_floors = bullish_day_first_lift_floors(settings)
+                min_score = min(min_score, bd_floors["minScore"])
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
                 from app.engines.building_ftv_gates import (
                     building_armed_base_grade_a_live_ok,

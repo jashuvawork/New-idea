@@ -655,6 +655,25 @@ def immature_explosion_blocked(
                 and score >= min_score
             ):
                 local_floor = min(local_floor, pad_min)
+        from app.engines.bullish_day_floor_relief import (
+            bullish_day_context_active,
+            bullish_day_first_lift_floors,
+        )
+
+        try:
+            from app.engines.daily_18pct_strategy import get_session_limits
+
+            limits = get_session_limits()
+            _bd_day_mode = str(getattr(limits, "dayMode", "") or "") if limits else ""
+            _bd_conf_tier = (
+                str(getattr(limits, "confidenceTier", "") or "") if limits else ""
+            )
+        except Exception:
+            _bd_day_mode = ""
+            _bd_conf_tier = ""
+        if bullish_day_context_active(day_mode=_bd_day_mode, confidence_tier=_bd_conf_tier):
+            bd = bullish_day_first_lift_floors(settings)
+            local_floor = min(local_floor, bd["immatureLocalBaseMinMove"])
         if base_move >= local_floor:
             return False, ""
         return True, f"immature_local_base_{base_move:.1f}%"

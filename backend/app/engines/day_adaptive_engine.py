@@ -197,6 +197,20 @@ def build_day_adaptive_profile(
             if "quick sideways" not in line.lower()
         ]
 
+    from app.engines.bullish_day_floor_relief import bullish_day_context_active
+
+    if bullish_day_context_active(
+        day_mode=day_mode,
+        confidence_tier=confidence_tier,
+        state=state,
+        snapshots=snapshots,
+    ):
+        extra = float(getattr(settings, "bullish_day_extra_rank_relief", 6.0) or 6.0)
+        profile.min_rank_relief += extra
+        profile.playbook.append(
+            f"Bullish day — extra rank relief −{extra:.0f} on quality setups",
+        )
+
     return profile
 
 
