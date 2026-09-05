@@ -355,7 +355,7 @@ def elite_fvq_chase_blocked(
         or evidence.get("ictBaseReadinessReason")
         or ""
     )
-    if rr in ARMED_BASE_GRADE_A_READY_REASONS or bool(evidence.get("armedBaseLaunch")):
+    if rr in ARMED_BASE_GRADE_A_READY_REASONS:
         return False, ""
     ceiling = float(getattr(settings, "elite_trade_block_fvq_above", 0.0) or 0.0)
     if ceiling <= 0:
@@ -381,14 +381,15 @@ def elite_shallow_lift_blocked(
     max_local = float(
         getattr(settings, "elite_trade_shallow_lift_max_local_pct", 10.0) or 10.0
     )
-    min_stage = str(
-        getattr(settings, "elite_trade_shallow_lift_min_stage", "TRIGGERED") or "TRIGGERED"
-    ).upper()
-    min_rank = STAGE_RANK.get(min_stage, STAGE_RANK["TRIGGERED"])
     local = _number(assessment.get("localBasePct"))
     if local > max_local + 1e-6:
         return False, ""
-    if int(assessment.get("stageRank") or 0) >= min_rank:
+    lift_confirmed = bool(
+        evidence.get("firstLift")
+        or evidence.get("activeBreakout")
+        or evidence.get("displacement")
+    )
+    if lift_confirmed:
         return False, ""
     return True, "elite_shallow_first_lift_blocked"
 

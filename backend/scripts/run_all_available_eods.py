@@ -36,6 +36,8 @@ CANDIDATE_DATES = [
     "2026-08-31",
     "2026-09-01",
     "2026-09-02",
+    "2026-09-03",
+    "2026-09-04",
 ]
 
 
@@ -84,6 +86,11 @@ def _current_settings() -> Settings:
     s.top_moments_exploding_elite_grade_b_enabled = True
     s.top_moments_momentum_rally_grade_b_enabled = True
     s.index_rally_side_flip_neutral_macd_mom5_waiver_enabled = True
+    s.slow_grind_ftv_enabled = True
+    s.slow_grind_sudden_lift_enabled = True
+    s.slow_grind_armed_trough_enabled = True
+    s.slow_grind_consolidation_base_enabled = True
+    s.building_ltp_monitor_enabled = True
     return s
 
 

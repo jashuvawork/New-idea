@@ -156,6 +156,39 @@ def test_elite_entry_blocks_shallow_first_lift():
     assert reason == "elite_shallow_first_lift_blocked"
 
 
+
+def test_elite_entry_blocks_shallow_elite_tier_without_lift():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            localBaseMovePct=6.5,
+            tier="ELITE",
+            velocity3s=4.0,
+            firstLift=False,
+            activeBreakout=False,
+            armedBaseLaunch=True,
+            flatVerticalQuality=79.0,
+        ),
+        _ranking(rankScore=95.0, grade="S"),
+    )
+    assert ok is False
+    assert reason == "elite_shallow_first_lift_blocked"
+
+
+def test_elite_entry_blocks_high_fvq_armed_launch_without_grade_a_reason():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            flatVerticalQuality=85.0,
+            armedBaseLaunch=True,
+            firstLift=False,
+            activeBreakout=False,
+            velocity3s=1.5,
+        ),
+        _ranking(rankScore=95.0, grade="S"),
+    )
+    assert ok is False
+    assert reason == "elite_fvq_chase_above_ceiling"
+
+
 def test_elite_entry_allows_shallow_when_triggered():
     ok, reason, _ = elite_entry_allowed(
         _v_evidence(

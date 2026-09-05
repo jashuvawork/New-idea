@@ -275,10 +275,14 @@ def _row_from_archive(
     )
     day_type = classify_day_type(day_mode, "MEDIUM", {sym: snap})
 
+    armed_at = alert.get("ictBaseArmedAt") or row.get("ts") or ""
+    moment_ts = _parse_ts(armed_at if armed_at else None, date)
+
     return {
         "date": date,
         "week": _parse_ts(row.get("ts"), date).strftime("%G-W%V"),
         "ts": _parse_ts(row.get("ts"), date).isoformat(),
+        "momentKey": moment_ts.strftime("%Y-%m-%dT%H:%M:%S"),
         "symbol": sym,
         "side": str(alert.get("side") or ""),
         "strike": float(alert.get("strike") or 0),
@@ -306,11 +310,34 @@ def _row_from_archive(
     }
 
 
-def _apply_weekly_cap(rows: list[dict[str, Any]], cap: int) -> list[dict[str, Any]]:
-    by_week: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for r in rows:
-        if not r["userPass"]:
+def _row_rank_key(row: dict[str, Any]) -> tuple[float, int, float, str]:
+    return (
+        float(row.get("eliteScore") or 0),
+        -int(row.get("setupPriority") or 9),
+        float(row.get("_rankScore") or 0),
+        str(row.get("ts") or ""),
+    )
+
+
+def dedupe_same_moment_top1(
+    rows: list[dict[str, Any]],
+    *,
+    pass_fn: Any = None,
+) -> list[dict[str, Any]]:
+    """Live rule: one trade per armed-base second — keep highest EliteScore."""
+    by_moment: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if pass_fn is not None and not pass_fn(row):
             continue
+        key = str(row.get("momentKey") or row.get("ts", "")[:19])
+        by_moment[key].append(row)
+    return [max(pool, key=_row_rank_key) for pool in by_moment.values()]
+
+
+def _apply_weekly_cap(rows: list[dict[str, Any]], cap: int) -> list[dict[str, Any]]:
+    pool = dedupe_same_moment_top1(rows, pass_fn=lambda r: r["userPass"])
+    by_week: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in pool:
         by_week[r["week"]].append(r)
     taken: list[dict[str, Any]] = []
     for _, pool in sorted(by_week.items()):
@@ -333,7 +360,7 @@ def _apply_hybrid_cap(
     weekly_cap: int,
     ftv_a_plus_min: float = 95.0,
 ) -> list[dict[str, Any]]:
-    pool = [r for r in rows if r["userPass"]]
+    pool = dedupe_same_moment_top1(rows, pass_fn=lambda r: r["userPass"])
     by_week: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in pool:
         by_week[r["week"]].append(r)
@@ -345,7 +372,10 @@ def _apply_hybrid_cap(
             key = (r["date"], r["symbol"], r["strike"], r["side"])
             if key not in best_by_key or r["eliteScore"] > best_by_key[key]["eliteScore"]:
                 best_by_key[key] = r
-        rows_sorted = sorted(best_by_key.values(), key=lambda x: x["ts"])
+        rows_sorted = sorted(
+            best_by_key.values(),
+            key=lambda x: (-x["eliteScore"], x["setupPriority"], x["ts"]),
+        )
 
         must_take = [
             r for r in rows_sorted
@@ -368,10 +398,10 @@ def _apply_hybrid_cap(
 
 
 def _daily_best(rows: list[dict[str, Any]], per_day: int = 2) -> list[dict[str, Any]]:
+    pool = dedupe_same_moment_top1(rows, pass_fn=lambda r: r["userPass"])
     by_date: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for r in rows:
-        if r["userPass"]:
-            by_date[r["date"]].append(r)
+    for r in pool:
+        by_date[r["date"]].append(r)
     taken: list[dict[str, Any]] = []
     for _, pool in sorted(by_date.items()):
         pool.sort(key=lambda x: (-x["eliteScore"], x["setupPriority"]))
@@ -557,8 +587,8 @@ def main() -> int:
 
     _enrich_day_meta(all_rows, all_rows)
 
-    elite_all = [r for r in all_rows if r["eliteEnginePass"]]
-    user_all = [r for r in all_rows if r["userPass"]]
+    elite_all = dedupe_same_moment_top1(all_rows, pass_fn=lambda r: r["eliteEnginePass"])
+    user_all = dedupe_same_moment_top1(all_rows, pass_fn=lambda r: r["userPass"])
 
     elite_day_grade = _filter_day_type_grade(elite_all, settings)
     user_day_grade = _filter_day_type_grade(user_all, settings)
@@ -569,7 +599,7 @@ def main() -> int:
     elite_day_grade_no_worst = _filter_block_worst_day_type(elite_day_grade)
 
     policies = {
-        "currentLegacy": [r for r in all_rows if r["currentPass"]],
+        "currentLegacy": dedupe_same_moment_top1(all_rows, pass_fn=lambda r: r["currentPass"]),
         "eliteEngineLive": elite_all,
         "elitePlusDayGrade": elite_day_grade,
         "elitePlusDayGradeNoWorst": elite_day_grade_no_worst,

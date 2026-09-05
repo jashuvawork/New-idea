@@ -45,6 +45,7 @@ from app.engines.top_moment_gate import (
 )
 from app.engines.trade_ranking import rank_entry_candidate
 from app.models.schemas import Breadth, MarketPhase, SpotChart, SymbolSnapshot
+from scripts.run_elite_pnl_comparison_eod import dedupe_same_moment_top1
 
 IST = ZoneInfo("Asia/Kolkata")
 ARCHIVE_DIR = Path("/tmp/eod_audit_archives")
@@ -191,10 +192,14 @@ def _row_from_archive(date: str, row: dict[str, Any], settings: Settings) -> dic
         and timing_ok
     )
 
+    armed_at = alert.get("ictBaseArmedAt") or row.get("ts") or ""
+    moment_ts = _parse_ts(armed_at if armed_at else None, date)
+
     return {
         "date": date,
         "week": _parse_ts(row.get("ts"), date).strftime("%G-W%V"),
         "ts": _parse_ts(row.get("ts"), date).isoformat(),
+        "momentKey": moment_ts.strftime("%Y-%m-%dT%H:%M:%S"),
         "symbol": sym,
         "side": str(alert.get("side") or ""),
         "strike": float(alert.get("strike") or 0),
@@ -238,7 +243,7 @@ def _apply_hybrid_cap(
     ftv_a_plus_min: float = 95.0,
 ) -> list[dict[str, Any]]:
     """Hybrid: always take score≥95 FTV; fill weekly budget up to `weekly_cap` otherwise."""
-    pool = [r for r in candidates if r["userPass"]]
+    pool = dedupe_same_moment_top1(candidates, pass_fn=lambda r: r["userPass"])
     by_week: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in pool:
         by_week[r.get("week") or datetime.fromisoformat(r["ts"]).strftime("%G-W%V")].append(r)
@@ -251,7 +256,10 @@ def _apply_hybrid_cap(
             key = (r["date"], r["symbol"], r["strike"], r["side"])
             if key not in best_by_key or r["eliteScore"] > best_by_key[key]["eliteScore"]:
                 best_by_key[key] = r
-        rows = sorted(best_by_key.values(), key=lambda x: x["ts"])
+        rows = sorted(
+            best_by_key.values(),
+            key=lambda x: (-x["eliteScore"], x["setupPriority"], x["ts"]),
+        )
 
         must_take = [
             r for r in rows
@@ -279,10 +287,9 @@ def _apply_hybrid_cap(
 
 def _apply_weekly_cap(candidates: list[dict[str, Any]], cap: int = 5) -> list[dict[str, Any]]:
     """Take top `cap` user-pass rows per ISO week by score then setup priority."""
+    pool = dedupe_same_moment_top1(candidates, pass_fn=lambda r: r["userPass"])
     by_week: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for r in candidates:
-        if not r["userPass"]:
-            continue
+    for r in pool:
         week = r.get("week") or datetime.fromisoformat(r["ts"]).strftime("%G-W%V")
         by_week[week].append(r)
     taken: list[dict[str, Any]] = []
@@ -316,7 +323,7 @@ def main() -> int:
             if rec:
                 all_rows.append(rec)
 
-    user_all = [r for r in all_rows if r["userPass"]]
+    user_all = dedupe_same_moment_top1(all_rows, pass_fn=lambda r: r["userPass"])
     user_weekly = _apply_weekly_cap(all_rows, cap=5)
     user_hybrid = _apply_hybrid_cap(all_rows, weekly_cap=5, ftv_a_plus_min=95.0)
     current_all = [r for r in all_rows if r["currentPass"]]
