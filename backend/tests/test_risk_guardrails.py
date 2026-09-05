@@ -121,6 +121,100 @@ def test_failed_launch_scratches_on_negative_velocity():
     assert reason == "explosion_failed_launch"
 
 
+def test_elite_failed_launch_relax_thresholds():
+    from app.engines.explosion_profit import _elite_failed_launch_runner, _failed_launch_thresholds
+
+    s = _scratch_guard_settings()
+    s.elite_failed_launch_relax_enabled = True
+    s.elite_failed_launch_relax_min_score = 90.0
+    s.elite_failed_launch_relax_min_grade = "A"
+    s.elite_failed_launch_relax_require_good_timing = True
+    s.elite_failed_launch_relax_max_local_base_pct = 25.0
+    s.explosion_failed_launch_max_hold_seconds = 45
+    s.explosion_failed_launch_max_best_points = 2.0
+    s.explosion_failed_launch_min_loss_points = 1.5
+    s.explosion_failed_launch_max_velocity_3s = 0.0
+    s.elite_failed_launch_relaxed_max_hold_seconds = 90
+    s.elite_failed_launch_relaxed_max_best_points = 3.0
+    s.elite_failed_launch_relaxed_min_loss_points = 2.5
+    s.elite_failed_launch_relaxed_max_velocity_3s = -1.0
+    trade = _trade(51.0, 49.0, best=0.5, lots=1, hold_s=20)
+    trade.entryContext = {
+        "eliteAssessment": {
+            "eliteScore": 94.0,
+            "grade": "A",
+            "setup": "FTV",
+            "timing": "GOOD",
+            "localBasePct": 12.0,
+        },
+    }
+    assert _elite_failed_launch_runner(trade, settings=s) is True
+    thresholds = _failed_launch_thresholds(trade, settings=s)
+    assert thresholds == (15, 90, 3.0, 2.5, -1.0)
+    trade.entryContext["eliteAssessment"]["timing"] = "OK"
+    assert _elite_failed_launch_runner(trade, settings=s) is False
+
+
+def test_elite_failed_launch_relax_velocity_gate():
+    """Relaxed elite runner max_v=-1.0: mild -0.3 contraction should not qualify."""
+    from app.engines.explosion_profit import _failed_launch_thresholds
+
+    s = _scratch_guard_settings()
+    s.elite_failed_launch_relax_enabled = True
+    s.elite_failed_launch_relax_min_score = 90.0
+    s.elite_failed_launch_relax_min_grade = "A"
+    s.elite_failed_launch_relax_require_good_timing = True
+    s.elite_failed_launch_relax_max_local_base_pct = 25.0
+    s.explosion_failed_launch_max_hold_seconds = 45
+    s.explosion_failed_launch_max_best_points = 2.0
+    s.explosion_failed_launch_min_loss_points = 1.5
+    s.explosion_failed_launch_max_velocity_3s = 0.0
+    s.elite_failed_launch_relaxed_max_hold_seconds = 90
+    s.elite_failed_launch_relaxed_max_best_points = 3.0
+    s.elite_failed_launch_relaxed_min_loss_points = 2.5
+    s.elite_failed_launch_relaxed_max_velocity_3s = -1.0
+    trade = _trade(51.0, 49.0, best=0.5, lots=1, hold_s=20)
+    trade.entryContext = {
+        "eliteAssessment": {
+            "eliteScore": 94.0,
+            "grade": "A",
+            "setup": "FTV",
+            "timing": "GOOD",
+            "localBasePct": 12.0,
+        },
+    }
+    min_hold, max_hold, max_best, min_loss, max_v = _failed_launch_thresholds(trade, settings=s)
+    hold, best, pnl_pts, v3 = 20, 0.5, -2.0, -0.3
+    would_scratch = (
+        min_hold <= hold <= max_hold
+        and best <= max_best
+        and pnl_pts <= -min_loss
+        and v3 < max_v
+    )
+    assert max_v == -1.0
+    assert would_scratch is False
+
+
+def test_elite_failed_launch_relax_disabled_still_scratches():
+    s = _scratch_guard_settings()
+    s.elite_failed_launch_relax_enabled = False
+    trade = _trade(51.0, 49.0, best=0.5, lots=1, hold_s=20)
+    trade.entryContext = {
+        "eliteAssessment": {
+            "eliteScore": 94.0,
+            "grade": "A",
+            "setup": "FTV",
+            "timing": "GOOD",
+            "localBasePct": 12.0,
+        },
+    }
+    with patch("app.engines.explosion_profit.get_settings", return_value=s):
+        reason, _ = evaluate_explosion_exit(
+            trade, 49.0, "ELITE", 65, live_velocity_3s=-1.0,
+        )
+    assert reason == "explosion_failed_launch"
+
+
 def _closed(side, pnl, symbol="SENSEX", mins_ago=10):
     return PaperTrade(
         id=f"c{side}", symbol=symbol, side=side, strike=78700.0,

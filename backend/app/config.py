@@ -284,6 +284,16 @@ class Settings(BaseSettings):
     elite_trade_must_take_max_local_base_pct: float = 15.0
     # Block Elite on MOMENTUM RALLY + WORST dayType only (keep CHOP+RALLY/WORST).
     elite_trade_block_worst_day_type_enabled: bool = True
+    # Relax (don't skip) failed_launch thresholds on elite runner entries.
+    elite_failed_launch_relax_enabled: bool = True
+    elite_failed_launch_relax_min_score: float = 90.0
+    elite_failed_launch_relax_min_grade: str = "A"
+    elite_failed_launch_relax_require_good_timing: bool = True
+    elite_failed_launch_relax_max_local_base_pct: float = 25.0
+    elite_failed_launch_relaxed_max_hold_seconds: int = 90
+    elite_failed_launch_relaxed_max_best_points: float = 3.0
+    elite_failed_launch_relaxed_min_loss_points: float = 2.5
+    elite_failed_launch_relaxed_max_velocity_3s: float = -1.0
     # One-week validation: lower local-base floors so detection, grading, and entry
     # can fire at 2–15% pad. Use /api/ai/local-base-audit/{date} to score each day.
     local_base_audit_week_enabled: bool = False
@@ -2758,8 +2768,8 @@ class Settings(BaseSettings):
     # Scratch a launch that immediately loses both price and velocity confirmation.
     explosion_failed_launch_exit_enabled: bool = True
     explosion_failed_launch_min_hold_seconds: int = 5
-    explosion_failed_launch_max_hold_seconds: int = 45
-    explosion_failed_launch_max_best_points: float = 1.0
+    explosion_failed_launch_max_hold_seconds: int = 60
+    explosion_failed_launch_max_best_points: float = 2.0
     explosion_failed_launch_min_loss_points: float = 1.5
     explosion_failed_launch_max_velocity_3s: float = 0.0
     # Same-chain cooldown after a failed launch / never-green chop spike.
