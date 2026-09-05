@@ -214,6 +214,7 @@ def test_aug17_elite_base_ready_is_s_preauthorized_at_54(_open, side):
     settings = Settings(
         best_trades_only_enabled=False,
         edge_engine_enabled=False,
+        elite_trade_engine_enabled=False,
         # Isolate the STRICT ELITE_BASE_READY path — the opt-in coil/ignition lanes are a
         # separate (intentional) structure-based bypass and are validated elsewhere.
         coil_armed_low_score_entry_enabled=False,

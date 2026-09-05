@@ -35,6 +35,12 @@ def _reset_all_engine_globals() -> None:
     from app.config import reset_settings_for_tests
 
     reset_settings_for_tests()
+    try:
+        from app.config import get_settings
+
+        object.__setattr__(get_settings(), "elite_trade_engine_enabled", False)
+    except Exception:
+        pass
 
     # Each reset is guarded so an import/signature change in one engine can't
     # disable isolation for all the others.

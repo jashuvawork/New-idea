@@ -106,6 +106,7 @@ def test_top_moment_allows_grade_c_on_bearish_fast_day():
 def test_top_moment_blocks_grade_c_on_chop_day():
     with patch("app.config.get_settings") as mock_settings:
         s = Settings()
+        s.elite_trade_engine_enabled = False
         s.top_moments_fast_day_grade_c_enabled = True
         s.top_moments_day_type_grade_policy_enabled = True
         mock_settings.return_value = s

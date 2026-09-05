@@ -680,18 +680,30 @@ async def _open_from_candidate(
         if not policy_decision.allowed:
             return False, policy_decision.reason
 
-        if bool(getattr(settings, "top_moments_only_enabled", True)):
+        elite_engine = bool(getattr(settings, "elite_trade_engine_enabled", False))
+        if elite_engine or bool(getattr(settings, "top_moments_only_enabled", True)):
             from app.engines.top_moment_gate import top_moment_entry_allowed
 
             top_ok, top_reason, _ = top_moment_entry_allowed(
                 policy_ranking.get("evidence") or {},
                 policy_ranking,
-                top_moments_only_enabled=True,
+                top_moments_only_enabled=not elite_engine,
                 min_grade=str(getattr(settings, "top_moments_min_grade", "A") or "A"),
                 day_mode=resolve_policy_day_mode(state),
             )
             if not top_ok:
                 return False, top_reason
+            if elite_engine:
+                from app.engines.elite_trade_budget import elite_budget_blocks_entry
+
+                blocked, budget_reason, _ = elite_budget_blocks_entry(
+                    state,
+                    policy_ranking.get("evidence") or {},
+                    policy_ranking,
+                    settings=settings,
+                )
+                if blocked:
+                    return False, budget_reason
 
     from app.engines.worst_day_guard import worst_day_blocks_live
 
@@ -2511,18 +2523,32 @@ async def _open_from_candidate(
         )
         if not final_policy.allowed:
             return False, final_policy.reason
-        if bool(getattr(settings, "top_moments_only_enabled", True)):
+        elite_engine = bool(getattr(settings, "elite_trade_engine_enabled", False))
+        if elite_engine or bool(getattr(settings, "top_moments_only_enabled", True)):
             from app.engines.top_moment_gate import top_moment_entry_allowed
 
             top_ok, top_reason, _ = top_moment_entry_allowed(
                 final_ranking.get("evidence") or {},
                 final_ranking,
-                top_moments_only_enabled=True,
+                top_moments_only_enabled=not elite_engine,
                 min_grade=str(getattr(settings, "top_moments_min_grade", "A") or "A"),
                 day_mode=resolve_policy_day_mode(state),
             )
             if not top_ok:
                 return False, top_reason
+            if elite_engine:
+                from app.engines.elite_trade_budget import elite_budget_blocks_entry
+
+                blocked, budget_reason, assessment = elite_budget_blocks_entry(
+                    state,
+                    final_ranking.get("evidence") or {},
+                    final_ranking,
+                    settings=settings,
+                )
+                if blocked:
+                    return False, budget_reason
+                ctx_extra["eliteAssessment"] = assessment
+                ctx_extra["eliteTradeBudget"] = assessment.get("mustTake")
         if (
             full_sleeve_authorized
             and (
@@ -2649,6 +2675,21 @@ async def _open_from_candidate(
     state.openPaperTrades.append(paper)
     await asyncio.to_thread(trade_store.record_trade_opened, paper, ctx)
     record_instrument_entry(symbol, candidate.side, candidate.strike)
+    if bool(getattr(settings, "elite_trade_engine_enabled", False)):
+        from app.engines.elite_trade_budget import record_elite_trade_entry
+
+        pretrade = candidate.pretrade_meta or {}
+        gate = pretrade.get("topMomentGate") or {}
+        assessment = gate.get("eliteAssessment") or ctx_extra.get("eliteAssessment") or {}
+        if assessment:
+            record_elite_trade_entry(
+                state,
+                assessment,
+                symbol=symbol,
+                side=candidate.side.value,
+                strike=float(candidate.strike),
+                settings=settings,
+            )
     from app.engines.directional_lock import record_trade_side
 
     record_trade_side(symbol, candidate.side, snap)

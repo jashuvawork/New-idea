@@ -1901,7 +1901,8 @@ def find_best_entry(
     if not day_mode:
         day_mode = resolve_policy_day_mode(state)
 
-    if bool(getattr(settings, "top_moments_only_enabled", True)):
+    elite_engine = bool(getattr(settings, "elite_trade_engine_enabled", False))
+    if elite_engine or bool(getattr(settings, "top_moments_only_enabled", True)):
         from app.engines.top_moment_gate import top_moment_entry_allowed
 
         min_grade = str(getattr(settings, "top_moments_min_grade", "A") or "A")
@@ -1913,19 +1914,26 @@ def find_best_entry(
             ok, reason, moment = top_moment_entry_allowed(
                 evidence,
                 ranking,
-                top_moments_only_enabled=True,
+                top_moments_only_enabled=not elite_engine,
                 min_grade=min_grade,
                 day_mode=day_mode,
                 readiness_reason=str(meta.get("firstLiftReadinessReason") or ""),
             )
+            gate_meta: dict[str, Any] = {
+                "enabled": True,
+                "passed": ok,
+                "reason": reason,
+                "momentType": moment,
+            }
+            if elite_engine:
+                from app.engines.elite_score_engine import build_elite_assessment
+
+                assessment = build_elite_assessment(evidence, ranking, moment=moment)
+                gate_meta["eliteEngine"] = True
+                gate_meta["eliteAssessment"] = assessment
             c.pretrade_meta = {
                 **meta,
-                "topMomentGate": {
-                    "enabled": True,
-                    "passed": ok,
-                    "reason": reason,
-                    "momentType": moment,
-                },
+                "topMomentGate": gate_meta,
             }
             if ok:
                 filtered_top.append(c)
@@ -2043,6 +2051,13 @@ def find_best_entry(
             candidates = explosion_only
 
     def sort_key(c: EntryCandidate) -> float:
+        elite_bonus = 0.0
+        if elite_engine:
+            gate = (c.pretrade_meta or {}).get("topMomentGate") or {}
+            assessment = gate.get("eliteAssessment") or {}
+            elite_bonus = float(assessment.get("eliteScore") or 0) * 2.0
+            setup_pri = int(assessment.get("setupPriority") or 9)
+            elite_bonus -= setup_pri * 3.0
         bonus = 20 if c.mode == "explosion" else (
             15 if c.mode == "worst_day_itm_fade" else (
                 10 if c.mode == "slow_bounce" else (
@@ -2195,7 +2210,7 @@ def find_best_entry(
                     getattr(settings, "expiry_day_same_week_next_sort_bonus", 15.0) or 15.0
                 )
         penalty = entry_score_penalty(c.symbol)
-        return c.score + bonus - penalty
+        return c.score + bonus + elite_bonus - penalty
 
     # Stable leg identity breaks exact score ties so the capital-first slot cannot
     # flip between otherwise identical snapshots because of collection order.
