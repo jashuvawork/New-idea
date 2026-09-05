@@ -52,18 +52,41 @@ def elite_trade_budget_summary(
     store_week = str(store.get("isoWeek") or "")
     entries_used = int(store.get("entriesUsed") or 0) if store_week == week else 0
     must_take_used = int(store.get("mustTakeUsed") or 0) if store_week == week else 0
+    bonus_used = int(store.get("trendBonusUsed") or 0) if store_week == week else 0
+    bonus_enabled = bool(getattr(settings, "elite_trend_day_bonus_slot_enabled", True))
 
     return {
         "enabled": enabled,
         "isoWeek": week,
         "weeklyCap": weekly_cap,
+        "effectiveWeeklyCap": weekly_cap + (1 if bonus_enabled else 0),
         "entriesUsed": entries_used,
-        "entriesRemaining": max(0, weekly_cap - entries_used),
+        "entriesRemaining": max(0, weekly_cap + (1 if bonus_enabled else 0) - entries_used),
         "mustTakeUsed": must_take_used,
+        "trendBonusUsed": bonus_used,
         "capReached": enabled and entries_used >= weekly_cap,
         "lastEntry": store.get("lastEntry") if store_week == week else None,
         "winRateGates": __elite_win_rate_gate_summary(settings),
     }
+
+
+def _effective_weekly_cap(
+    assessment: Mapping[str, Any],
+    *,
+    settings: Any,
+    store: Mapping[str, Any],
+) -> int:
+    """Weekly cap plus optional trend-day bonus slot (score-ranked EOD/live parity)."""
+    from app.engines.elite_score_engine import elite_trend_day_bonus_allowed
+
+    cap = int(getattr(settings, "elite_trade_weekly_cap", 8) or 8)
+    if not bool(getattr(settings, "elite_trend_day_bonus_slot_enabled", True)):
+        return cap
+    if int(store.get("trendBonusUsed") or 0) >= 1:
+        return cap
+    if elite_trend_day_bonus_allowed(assessment, settings=settings):
+        return cap + 1
+    return cap
 
 
 def __elite_win_rate_gate_summary(settings: Any) -> dict[str, Any]:
@@ -90,7 +113,13 @@ def elite_trade_budget_allows(
     if bool(assessment.get("mustTake")):
         return True, "must_take_bypass", summary
 
-    if summary["capReached"]:
+    week = _iso_week()
+    store = _budget_store(state)
+    if str(store.get("isoWeek") or "") != week:
+        store = {"isoWeek": week, "entriesUsed": 0, "mustTakeUsed": 0, "trendBonusUsed": 0}
+    effective_cap = _effective_weekly_cap(assessment, settings=settings, store=store)
+    entries_used = int(store.get("entriesUsed") or 0)
+    if entries_used >= effective_cap:
         return False, "elite_weekly_cap_reached", summary
 
     return True, "ok", summary
@@ -150,11 +179,19 @@ def record_elite_trade_entry(
     week = _iso_week()
     store = _budget_store(state)
     if str(store.get("isoWeek") or "") != week:
-        store = {"isoWeek": week, "entriesUsed": 0, "mustTakeUsed": 0}
+        store = {"isoWeek": week, "entriesUsed": 0, "mustTakeUsed": 0, "trendBonusUsed": 0}
 
     store["entriesUsed"] = int(store.get("entriesUsed") or 0) + 1
     if bool(assessment.get("mustTake")):
         store["mustTakeUsed"] = int(store.get("mustTakeUsed") or 0) + 1
+    from app.engines.elite_score_engine import elite_trend_day_bonus_allowed
+
+    base_cap = int(getattr(settings, "elite_trade_weekly_cap", 8) or 8)
+    if (
+        int(store["entriesUsed"]) > base_cap
+        and elite_trend_day_bonus_allowed(assessment, settings=settings)
+    ):
+        store["trendBonusUsed"] = int(store.get("trendBonusUsed") or 0) + 1
     store["lastEntry"] = {
         "symbol": symbol,
         "side": side,

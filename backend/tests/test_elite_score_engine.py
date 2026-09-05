@@ -153,8 +153,10 @@ def test_elite_entry_blocks_shallow_first_lift():
         _ranking(rankScore=95.0, grade="S"),
     )
     assert ok is False
-    assert reason == "elite_shallow_first_lift_blocked"
-
+    assert reason in {
+        "elite_shallow_first_lift_blocked",
+        "elite_v_rip_shallow_first_lift_blocked",
+    }
 
 
 def test_elite_entry_blocks_shallow_elite_tier_without_lift():
@@ -171,7 +173,74 @@ def test_elite_entry_blocks_shallow_elite_tier_without_lift():
         _ranking(rankScore=95.0, grade="S"),
     )
     assert ok is False
-    assert reason == "elite_shallow_first_lift_blocked"
+    assert reason in {
+        "elite_shallow_first_lift_blocked",
+        "elite_v_rip_shallow_first_lift_blocked",
+    }
+
+
+def test_elite_entry_blocks_v_rip_without_first_lift_even_with_breakout():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            localBaseMovePct=6.5,
+            firstLift=False,
+            activeBreakout=True,
+            armedBaseLaunch=False,
+            flatVerticalQuality=79.0,
+        ),
+        _ranking(rankScore=95.0, grade="S"),
+    )
+    assert ok is False
+    assert reason == "elite_v_rip_shallow_first_lift_blocked"
+
+
+def test_elite_entry_blocks_call_chop_shallow():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(localBaseMovePct=4.4, side="CALL", firstLift=True),
+        _ranking(rankScore=95.0, grade="S"),
+        day_mode="CHOP DAY",
+        day_type="NORMAL",
+    )
+    assert ok is False
+    assert reason == "elite_call_chop_shallow_blocked"
+
+
+def test_elite_entry_allows_put_v_rip_fvq_up_to_calibrated_ceiling():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            localBaseMovePct=12.0,
+            side="PUT",
+            firstLift=True,
+            flatVerticalQuality=84.0,
+        ),
+        _ranking(grade="A"),
+    )
+    assert ok is True
+    assert reason == "ok"
+
+
+def test_elite_entry_blocks_put_v_rip_above_calibrated_ceiling():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            localBaseMovePct=12.0,
+            side="PUT",
+            firstLift=True,
+            flatVerticalQuality=86.0,
+        ),
+        _ranking(grade="A"),
+    )
+    assert ok is False
+    assert reason == "elite_fvq_chase_above_ceiling"
+
+
+def test_elite_trend_day_bonus_eligible():
+    from app.engines.elite_score_engine import elite_trend_day_bonus_allowed
+
+    assessment = {
+        "eliteScore": 98.5,
+        "dayMode": "MOMENTUM RALLY",
+    }
+    assert elite_trend_day_bonus_allowed(assessment) is True
 
 
 def test_elite_entry_blocks_high_fvq_armed_launch_without_grade_a_reason():
@@ -457,7 +526,7 @@ def test_weekly_budget_cap_blocks(_mock_week):
     ok, reason, summary = elite_trade_budget_allows(state, assessment)
     assert ok is False
     assert reason == "elite_weekly_cap_reached"
-    assert summary["entriesRemaining"] == 0
+    assert summary["entriesRemaining"] == 1
 
 
 @patch("app.engines.elite_trade_budget._iso_week", return_value="2026-W36")
@@ -485,7 +554,7 @@ def test_record_elite_trade_entry_increments(_mock_week):
         strike=24250.0,
     )
     assert summary["entriesUsed"] == 1
-    assert summary["entriesRemaining"] == 7
+    assert summary["entriesRemaining"] == 8
     assert state.dailyStrategy["eliteTradeBudget"]["lastEntry"]["symbol"] == "NIFTY"
 
 

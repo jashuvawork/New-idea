@@ -257,6 +257,18 @@ def resolve_elite_session_day_type(
 
 _MOMENTUM_RALLY_DAY_MODE = "MOMENTUM RALLY"
 _BULLISH_DAY_MODE = "BULLISH DAY"
+_CHOP_DAY_MODES = frozenset({
+    "CHOP DAY",
+    "CHOP (PRE-10)",
+    "EXPIRY WORST",
+    "EXPIRY DAY",
+    "CHOP + RALLY",
+})
+_TREND_DAY_MODES = frozenset({
+    _MOMENTUM_RALLY_DAY_MODE,
+    _BULLISH_DAY_MODE,
+    "BEARISH DAY",
+})
 
 
 def _resolve_side(evidence: Mapping[str, Any], side: str = "") -> str:
@@ -335,12 +347,56 @@ def elite_perfect_score_blocked(
     return False, ""
 
 
+def _lift_confirmed(evidence: Mapping[str, Any]) -> bool:
+    return bool(
+        evidence.get("firstLift")
+        or evidence.get("activeBreakout")
+        or evidence.get("displacement")
+    )
+
+
+def _effective_fvq_ceiling(
+    evidence: Mapping[str, Any],
+    assessment: Mapping[str, Any],
+    *,
+    settings: Any = None,
+    side: str = "",
+) -> float:
+    """Default FVQ ceiling with calibrated PUT V-RIP near-base lift path."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    ceiling = float(getattr(settings, "elite_trade_block_fvq_above", 0.0) or 0.0)
+    if ceiling <= 0:
+        return 0.0
+    side_u = str(side or evidence.get("side") or "").upper()
+    setup = str(assessment.get("setup") or infer_setup_type(evidence))
+    local = _number(assessment.get("localBasePct"))
+    lift_max = float(
+        getattr(settings, "elite_fvq_put_v_rip_lift_max_local_pct", 15.0) or 15.0
+    )
+    lift_ceiling = float(
+        getattr(settings, "elite_fvq_put_v_rip_lift_ceiling", 85.0) or 85.0
+    )
+    if (
+        side_u == "PUT"
+        and setup == "V"
+        and _lift_confirmed(evidence)
+        and local <= lift_max + 1e-6
+        and lift_ceiling > ceiling + 1e-6
+    ):
+        return lift_ceiling
+    return ceiling
+
+
 def elite_fvq_chase_blocked(
     evidence: Mapping[str, Any],
     *,
     settings: Any = None,
     must_take: bool = False,
     readiness_reason: str = "",
+    assessment: Mapping[str, Any] | None = None,
+    side: str = "",
 ) -> tuple[bool, str]:
     """Block entries with flatVerticalQuality above ceiling (EOD: 80+ chase loses)."""
     from app.config import get_settings
@@ -357,13 +413,78 @@ def elite_fvq_chase_blocked(
     )
     if rr in ARMED_BASE_GRADE_A_READY_REASONS:
         return False, ""
-    ceiling = float(getattr(settings, "elite_trade_block_fvq_above", 0.0) or 0.0)
+    assess = assessment or build_elite_assessment(evidence, {})
+    ceiling = _effective_fvq_ceiling(
+        evidence, assess, settings=settings, side=side,
+    )
     if ceiling <= 0:
         return False, ""
     fvq = _number(evidence.get("flatVerticalQuality"))
     if fvq > ceiling + 1e-6:
         return True, "elite_fvq_chase_above_ceiling"
     return False, ""
+
+
+def elite_call_chop_shallow_blocked(
+    side: str,
+    day_mode: str,
+    local_base_pct: float,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block CALL entries on chop days while still very near base."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "elite_call_chop_shallow_block_enabled", True)):
+        return False, ""
+    if str(side or "").upper() != "CALL":
+        return False, ""
+    dm = str(day_mode or "").strip().upper()
+    if dm not in _CHOP_DAY_MODES and "CHOP" not in dm:
+        return False, ""
+    max_local = float(
+        getattr(settings, "elite_call_chop_shallow_max_local_pct", 10.0) or 10.0
+    )
+    if local_base_pct <= max_local + 1e-6:
+        return True, "elite_call_chop_shallow_blocked"
+    return False, ""
+
+
+def elite_v_rip_shallow_lift_blocked(
+    evidence: Mapping[str, Any],
+    assessment: Mapping[str, Any],
+    *,
+    settings: Any = None,
+    readiness_reason: str = "",
+) -> tuple[bool, str]:
+    """V-RIP near base must show firstLift — tier breakout alone is not enough."""
+    from app.config import get_settings
+    from app.engines.building_ftv_gates import ARMED_BASE_GRADE_A_READY_REASONS
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "elite_v_rip_shallow_require_first_lift_enabled", True)):
+        return False, ""
+    if str(assessment.get("setup") or "") != "V":
+        return False, ""
+    if bool(evidence.get("armedBaseLaunch")):
+        return False, ""
+    rr = str(
+        readiness_reason
+        or evidence.get("firstLiftReadinessReason")
+        or ""
+    )
+    if rr in ARMED_BASE_GRADE_A_READY_REASONS:
+        return False, ""
+    max_local = float(
+        getattr(settings, "elite_trade_shallow_lift_max_local_pct", 10.0) or 10.0
+    )
+    local = _number(assessment.get("localBasePct"))
+    if local > max_local + 1e-6:
+        return False, ""
+    if bool(evidence.get("firstLift")):
+        return False, ""
+    return True, "elite_v_rip_shallow_first_lift_blocked"
 
 
 def elite_shallow_lift_blocked(
@@ -384,12 +505,7 @@ def elite_shallow_lift_blocked(
     local = _number(assessment.get("localBasePct"))
     if local > max_local + 1e-6:
         return False, ""
-    lift_confirmed = bool(
-        evidence.get("firstLift")
-        or evidence.get("activeBreakout")
-        or evidence.get("displacement")
-    )
-    if lift_confirmed:
+    if _lift_confirmed(evidence):
         return False, ""
     return True, "elite_shallow_first_lift_blocked"
 
@@ -450,7 +566,47 @@ def elite_win_rate_gate_summary(*, settings: Any = None) -> dict[str, Any]:
             getattr(settings, "elite_trade_shallow_lift_max_local_pct", 10.0) or 10.0
         ),
         "minMilestoneDepth": int(getattr(settings, "elite_trade_min_milestone_depth", 0) or 0),
+        "callChopShallowBlock": bool(
+            getattr(settings, "elite_call_chop_shallow_block_enabled", True)
+        ),
+        "vRipShallowRequireFirstLift": bool(
+            getattr(settings, "elite_v_rip_shallow_require_first_lift_enabled", True)
+        ),
+        "fvqPutVRipLiftCeiling": float(
+            getattr(settings, "elite_fvq_put_v_rip_lift_ceiling", 85.0) or 85.0
+        ),
+        "trendDayBonusSlot": bool(
+            getattr(settings, "elite_trend_day_bonus_slot_enabled", True)
+        ),
     }
+
+
+def elite_trend_day_bonus_allowed(
+    assessment: Mapping[str, Any],
+    *,
+    settings: Any = None,
+) -> bool:
+    """True when this entry qualifies for the extra trend-day weekly slot."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "elite_trend_day_bonus_slot_enabled", True)):
+        return False
+    min_score = float(
+        getattr(settings, "elite_trend_day_bonus_min_score", 98.0) or 98.0
+    )
+    if float(assessment.get("eliteScore") or 0) < min_score - 1e-6:
+        return False
+    modes_raw = str(
+        getattr(settings, "elite_trend_day_bonus_day_modes", "") or ""
+    )
+    allowed = {
+        m.strip().upper()
+        for m in modes_raw.split(",")
+        if m.strip()
+    } or _TREND_DAY_MODES
+    dm = str(assessment.get("dayMode") or "").strip().upper()
+    return dm in allowed
 
 
 def elite_worst_day_type_blocked(
@@ -591,10 +747,29 @@ def elite_entry_allowed(
         settings=settings,
         must_take=must_take,
         readiness_reason=readiness_reason,
+        assessment=assessment,
+        side=resolved_side,
     )
     if fvq_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, fvq_reason, assessment
+
+    chop_call_blocked, chop_call_reason = elite_call_chop_shallow_blocked(
+        resolved_side,
+        resolved_mode,
+        _number(assessment.get("localBasePct")),
+        settings=settings,
+    )
+    if chop_call_blocked:
+        assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
+        return False, chop_call_reason, assessment
+
+    v_rip_shallow_blocked, v_rip_shallow_reason = elite_v_rip_shallow_lift_blocked(
+        evidence, assessment, settings=settings, readiness_reason=readiness_reason,
+    )
+    if v_rip_shallow_blocked:
+        assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
+        return False, v_rip_shallow_reason, assessment
 
     perfect_blocked, perfect_reason = elite_perfect_score_blocked(
         score,
@@ -638,5 +813,9 @@ def elite_entry_allowed(
         "dayType": resolved_type,
         "side": resolved_side,
         "localBaseCapPct": round(max_local, 2),
+        "trendDayBonusEligible": elite_trend_day_bonus_allowed(
+            {**assessment, "dayMode": resolved_mode},
+            settings=settings,
+        ),
     }
     return True, "ok", assessment

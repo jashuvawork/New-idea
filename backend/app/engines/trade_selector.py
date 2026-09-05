@@ -1944,6 +1944,13 @@ def find_best_entry(
     if not candidates:
         return None
 
+    if elite_engine:
+        from app.engines.elite_moment_dedup import dedupe_same_moment_candidates
+
+        candidates = dedupe_same_moment_candidates(candidates)
+        if not candidates:
+            return None
+
     pf_fb = session_pf_feedback(state) if settings.edge_engine_enabled else None
     from app.engines.session_mode_feedback import compute_mode_stats, mode_session_rank_bonus
 

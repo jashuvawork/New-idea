@@ -43,6 +43,7 @@ from app.engines.elite_score_engine import (
     infer_setup_type,
     infer_stage,
 )
+from app.engines.elite_moment_dedup import dedupe_same_moment_top1, row_rank_key
 from app.engines.top_moment_gate import (
     classify_top_moment_type,
     resolve_top_moment_min_grade,
@@ -308,30 +309,6 @@ def _row_from_archive(
         "_alert": alert,
         "_outcome": outcome,
     }
-
-
-def _row_rank_key(row: dict[str, Any]) -> tuple[float, int, float, str]:
-    return (
-        float(row.get("eliteScore") or 0),
-        -int(row.get("setupPriority") or 9),
-        float(row.get("_rankScore") or 0),
-        str(row.get("ts") or ""),
-    )
-
-
-def dedupe_same_moment_top1(
-    rows: list[dict[str, Any]],
-    *,
-    pass_fn: Any = None,
-) -> list[dict[str, Any]]:
-    """Live rule: one trade per armed-base second — keep highest EliteScore."""
-    by_moment: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in rows:
-        if pass_fn is not None and not pass_fn(row):
-            continue
-        key = str(row.get("momentKey") or row.get("ts", "")[:19])
-        by_moment[key].append(row)
-    return [max(pool, key=_row_rank_key) for pool in by_moment.values()]
 
 
 def _apply_weekly_cap(rows: list[dict[str, Any]], cap: int) -> list[dict[str, Any]]:

@@ -1962,6 +1962,16 @@ async def _open_from_candidate(
         ignore_daily_loss_stop = candidate_qualifies_expiry_daily_loss_stop_bypass(
             candidate, snapshots,
         )
+    ignore_per_trade_risk = _ignore_per_trade_risk_cap_for_entry(
+        elite_full_lot=bool(elite_full_lot),
+        top_rank_full_budget_lots=bool(top_rank_full_budget_lots),
+        high_conviction=bool(high_conviction),
+        allocation=allocation,
+        candidate_score=float(candidate.score or 0),
+        trap_cap_locked=trap_cap_locked,
+        state=state,
+        snapshots=snapshots,
+    )
     final_risk_ok, final_risk_reason = _risk_engine.check_new_entry(
         state,
         symbol,
@@ -1972,18 +1982,37 @@ async def _open_from_candidate(
         strategy_type=candidate.strategy_type,
         strike=candidate.strike,
         stop_points=final_stop_points,
-        ignore_per_trade_risk_cap=_ignore_per_trade_risk_cap_for_entry(
-            elite_full_lot=bool(elite_full_lot),
-            top_rank_full_budget_lots=bool(top_rank_full_budget_lots),
-            high_conviction=bool(high_conviction),
-            allocation=allocation,
-            candidate_score=float(candidate.score or 0),
-            trap_cap_locked=trap_cap_locked,
-            state=state,
-            snapshots=snapshots,
-        ),
+        ignore_per_trade_risk_cap=ignore_per_trade_risk,
         ignore_daily_loss_stop=ignore_daily_loss_stop,
     )
+    if (
+        not final_risk_ok
+        and final_risk_reason == "per_trade_risk_exceeded"
+        and bool(getattr(settings, "elite_preentry_risk_cap_reduce_enabled", True))
+        and bool(getattr(settings, "elite_trade_engine_enabled", False))
+        and not ignore_per_trade_risk
+    ):
+        reduced_lots = _elite_preentry_risk_cap_lots(
+            lots=lots,
+            lot_mult=lot_mult,
+            stop_points=final_stop_points,
+            settings=settings,
+        )
+        if reduced_lots < lots:
+            lots = reduced_lots
+            final_risk_ok, final_risk_reason = _risk_engine.check_new_entry(
+                state,
+                symbol,
+                candidate.side,
+                lots,
+                fill_premium,
+                lot_mult,
+                strategy_type=candidate.strategy_type,
+                strike=candidate.strike,
+                stop_points=final_stop_points,
+                ignore_per_trade_risk_cap=ignore_per_trade_risk,
+                ignore_daily_loss_stop=ignore_daily_loss_stop,
+            )
     if not final_risk_ok:
         return False, final_risk_reason
 
@@ -3470,6 +3499,27 @@ def _top_rank_full_budget_lots_allowed(
     # capital max, then tune_exit_plan_for_position shrank to 1 lot because FTV
     # full-sleeve was not stamped (strict_first_lift=False).
     return bool(explosion_always_max)
+
+
+def _elite_preentry_risk_cap_lots(
+    *,
+    lots: int,
+    lot_mult: int,
+    stop_points: float,
+    settings: Any,
+) -> int:
+    """Shrink lots so stop×units fits max_risk_per_trade_inr before hard reject."""
+    max_loss = float(getattr(settings, "max_risk_per_trade_inr", 0) or 0)
+    if max_loss <= 0 or stop_points <= 0 or lot_mult <= 0:
+        return lots
+    from app.engines.risk_engine import profile_stop_points
+
+    risk_one = profile_stop_points(1, lot_mult, stop_points)
+    if risk_one <= 0:
+        return lots
+    fit = int(max_loss // risk_one)
+    min_lots = int(getattr(settings, "elite_preentry_risk_cap_min_lots", 1) or 1)
+    return max(min_lots, min(int(lots), fit))
 
 
 def _ignore_per_trade_risk_cap_for_entry(
