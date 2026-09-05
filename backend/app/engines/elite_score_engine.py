@@ -11,7 +11,8 @@ Live entry rule (hybrid model):
   - Near-base ≤ max local move (default 25%)
   - Timing ∈ {GOOD, OK}
   - Weekly cap enforced separately via elite_trade_budget
-  - dayType != WORST when elite_trade_block_worst_day_type_enabled
+  - MOMENTUM RALLY + dayType WORST blocked when elite_trade_block_worst_day_type_enabled
+    (CHOP + RALLY + WORST still allowed — EOD: +₹214k on that bucket)
 """
 
 from __future__ import annotations
@@ -251,19 +252,30 @@ def resolve_elite_session_day_type(
     return dm, str(day_type or "NORMAL").upper()
 
 
+_MOMENTUM_RALLY_DAY_MODE = "MOMENTUM RALLY"
+
+
 def elite_worst_day_type_blocked(
     day_type: str,
     *,
+    day_mode: str = "",
     settings: Any = None,
 ) -> tuple[bool, str]:
-    """True when WORST dayType should block Elite entry."""
+    """True when MOMENTUM RALLY + WORST dayType should block Elite entry.
+
+    CHOP + RALLY sessions can still classify as WORST dayType but remain tradable
+    (Sep EOD: that bucket was +₹214k vs MOMENTUM RALLY/WORST −₹1.45M).
+    """
     from app.config import get_settings
 
     settings = settings or get_settings()
     if not bool(getattr(settings, "elite_trade_block_worst_day_type_enabled", True)):
         return False, ""
-    if str(day_type or "").upper() == "WORST":
-        return True, "elite_worst_day_type_blocked"
+    if str(day_type or "").upper() != "WORST":
+        return False, ""
+    dm = str(day_mode or "").strip().upper()
+    if dm == _MOMENTUM_RALLY_DAY_MODE:
+        return True, "elite_momentum_rally_worst_blocked"
     return False, ""
 
 
@@ -293,7 +305,11 @@ def elite_entry_allowed(
     if day_type:
         resolved_type = str(day_type).upper()
 
-    blocked, block_reason = elite_worst_day_type_blocked(resolved_type, settings=settings)
+    blocked, block_reason = elite_worst_day_type_blocked(
+        resolved_type,
+        day_mode=resolved_mode,
+        settings=settings,
+    )
     if blocked:
         assessment = build_elite_assessment(evidence, ranking)
         assessment = {

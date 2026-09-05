@@ -117,14 +117,41 @@ def test_elite_entry_blocks_bad_timing():
     assert reason == "elite_timing_not_good_or_ok"
 
 
+def test_elite_entry_blocks_momentum_rally_worst_day_type():
+    ok, reason, assessment = elite_entry_allowed(
+        _evidence(),
+        _ranking(grade="A"),
+        day_mode="MOMENTUM RALLY",
+        day_type="WORST",
+    )
+    assert ok is False
+    assert reason == "elite_momentum_rally_worst_blocked"
+    assert assessment.get("dayType") == "WORST"
+    assert assessment.get("dayMode") == "MOMENTUM RALLY"
+
+
+def test_elite_entry_allows_chop_rally_worst_day_type():
+    ok, reason, assessment = elite_entry_allowed(
+        _evidence(),
+        _ranking(grade="A"),
+        day_mode="CHOP + RALLY",
+        day_type="WORST",
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert assessment.get("dayType") == "WORST"
+    assert assessment.get("dayMode") == "CHOP + RALLY"
+
+
 def test_elite_entry_blocks_worst_day_type():
+    """Legacy alias: WORST alone without dayMode does not block (needs MOMENTUM RALLY)."""
     ok, reason, assessment = elite_entry_allowed(
         _evidence(),
         _ranking(grade="A"),
         day_type="WORST",
     )
-    assert ok is False
-    assert reason == "elite_worst_day_type_blocked"
+    assert ok is True
+    assert reason == "ok"
     assert assessment.get("dayType") == "WORST"
 
 
@@ -147,6 +174,7 @@ def test_elite_worst_day_block_disabled():
     ok, reason, _ = elite_entry_allowed(
         _evidence(),
         _ranking(grade="A"),
+        day_mode="MOMENTUM RALLY",
         day_type="WORST",
         settings=settings,
     )

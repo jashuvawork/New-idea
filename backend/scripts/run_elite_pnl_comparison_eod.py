@@ -249,7 +249,13 @@ def _row_from_archive(
             day_mode=day_mode,
         )
     with patch("app.config.get_settings", return_value=settings):
-        elite_ok, _, _ = elite_entry_allowed(ev, ranking, settings=settings)
+        elite_ok, _, _ = elite_entry_allowed(
+            ev,
+            ranking,
+            settings=settings,
+            day_mode=day_mode,
+            snapshots={sym: snap},
+        )
 
     grade_rank = {"S": 0, "A": 1, "B": 2, "C": 3}.get(str(ranking.get("grade") or "C").upper(), 9)
     min_rank = {"S": 0, "A": 1, "B": 2, "C": 3}.get(min_grade, 1)
@@ -371,6 +377,7 @@ def _daily_best(rows: list[dict[str, Any]], per_day: int = 2) -> list[dict[str, 
 
 _STRICT_DAY_MODES = frozenset({"CHOP DAY", "CHOP (PRE-10)", "EXPIRY WORST", "EXPIRY DAY"})
 _BLOCK_WORST_DAY_TYPES = frozenset({"WORST"})
+_MOMENTUM_RALLY_DAY_MODE = "MOMENTUM RALLY"
 
 
 def _grade_passes_day_policy(row: dict[str, Any], settings: Settings) -> bool:
@@ -410,6 +417,17 @@ def _filter_block_strict_day_modes(rows: list[dict[str, Any]]) -> list[dict[str,
 
 def _filter_block_worst_day_type(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [r for r in rows if str(r.get("dayType") or "") not in _BLOCK_WORST_DAY_TYPES]
+
+
+def _filter_block_momentum_rally_worst(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Live gate: block MOMENTUM RALLY + WORST; keep CHOP+RALLY/WORST and GOOD."""
+    return [
+        r for r in rows
+        if not (
+            str(r.get("dayType") or "").upper() == "WORST"
+            and str(r.get("dayMode") or "").upper() == _MOMENTUM_RALLY_DAY_MODE
+        )
+    ]
 
 
 def _filter_chop_score_boost(rows: list[dict[str, Any]], boost_min: float = 95.0) -> list[dict[str, Any]]:
@@ -540,18 +558,20 @@ def main() -> int:
 
     elite_day_grade = _filter_day_type_grade(elite_all, settings)
     user_day_grade = _filter_day_type_grade(user_all, settings)
-    elite_no_worst = _filter_block_worst_day_type(elite_all)
+    user_no_worst = _filter_block_worst_day_type(user_all)
+    user_no_momentum_rally_worst = _filter_block_momentum_rally_worst(user_all)
     elite_no_chop_modes = _filter_block_strict_day_modes(elite_all)
     elite_chop95 = _filter_chop_score_boost(elite_all, 95.0)
     elite_day_grade_no_worst = _filter_block_worst_day_type(elite_day_grade)
 
     policies = {
         "currentLegacy": [r for r in all_rows if r["currentPass"]],
-        "eliteEngineAll": elite_all,
+        "eliteEngineLive": elite_all,
         "elitePlusDayGrade": elite_day_grade,
         "elitePlusDayGradeNoWorst": elite_day_grade_no_worst,
-        "eliteBlockWorstDayType": elite_no_worst,
-        "eliteBlockChopExpiryModes": elite_no_chop_modes,
+        "eliteBlockWorstDayType": user_no_worst,
+        "eliteBlockMomentumRallyWorst": user_no_momentum_rally_worst,
+        "eliteBlockChopExpiryModes": _filter_block_strict_day_modes(user_all),
         "eliteChopScore95": elite_chop95,
         "userModelAll": user_all,
         "userPlusDayGrade": user_day_grade,
@@ -577,7 +597,7 @@ def main() -> int:
 
     # Weekly P&L for top policies
     weekly_pnl: dict[str, dict[str, float]] = {}
-    for policy_key in ("weeklyCap8", "hybridCap8", "eliteEngineAll", "currentLegacy"):
+    for policy_key in ("eliteBlockMomentumRallyWorst", "eliteBlockWorstDayType", "eliteEngineLive", "currentLegacy"):
         by_week: dict[str, float] = defaultdict(float)
         for r in policies[policy_key]:
             pnl = _pnl_inr(r, settings)["pnlInr"]

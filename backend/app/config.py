@@ -282,7 +282,7 @@ class Settings(BaseSettings):
     elite_trade_must_take_min_grade: str = "S"
     elite_trade_must_take_min_fvq: float = 85.0
     elite_trade_must_take_max_local_base_pct: float = 15.0
-    # Block Elite entries when session dayType is WORST (EOD: +₹1.6M vs −₹1.08M at max lots).
+    # Block Elite on MOMENTUM RALLY + WORST dayType only (keep CHOP+RALLY/WORST).
     elite_trade_block_worst_day_type_enabled: bool = True
     # One-week validation: lower local-base floors so detection, grading, and entry
     # can fire at 2–15% pad. Use /api/ai/local-base-audit/{date} to score each day.
