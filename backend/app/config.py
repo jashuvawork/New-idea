@@ -275,13 +275,26 @@ class Settings(BaseSettings):
     # Replaces the legacy top-moment grade maze when enabled (hybrid 8/week cap).
     elite_trade_engine_enabled: bool = True
     elite_trade_min_score: float = 90.0
-    elite_trade_max_local_base_pct: float = 25.0
+    # EOD (12d): 20% cap beats 25% on win rate (+54% vs 47%) and total P&L (+₹410k vs +₹375k).
+    elite_trade_max_local_base_pct: float = 20.0
     elite_trade_min_stage: str = "ARMED"  # BASE | ARMED | TRIGGERED | EXPANDING
     elite_trade_weekly_cap: int = 8
     elite_trade_must_take_enabled: bool = True
     elite_trade_must_take_min_grade: str = "S"
     elite_trade_must_take_min_fvq: float = 85.0
     elite_trade_must_take_max_local_base_pct: float = 15.0
+    # Side-specific near-base caps (0 = use elite_trade_max_local_base_pct only).
+    # EOD: CALL local≤10% → 66.7% win; PUT keeps full 20% window.
+    elite_call_max_local_base_pct: float = 10.0
+    elite_put_max_local_base_pct: float = 0.0
+    # Block CE on MOMENTUM RALLY (EOD: CALL 29% win vs PUT 67% on same gate).
+    elite_call_block_momentum_rally_enabled: bool = True
+    # PE mirror disabled by default — EOD did not show a symmetric PUT day-mode drag bucket.
+    elite_put_block_bullish_day_enabled: bool = False
+    # Block rounded score=100 when local base is past the tight near-base band (chase entries).
+    elite_trade_block_perfect_score_enabled: bool = True
+    elite_trade_perfect_score_threshold: float = 99.95
+    elite_trade_perfect_score_max_local_pct: float = 15.0
     # Block Elite on MOMENTUM RALLY + WORST dayType only (keep CHOP+RALLY/WORST).
     elite_trade_block_worst_day_type_enabled: bool = True
     # Relax (don't skip) failed_launch thresholds on elite runner entries.
@@ -289,7 +302,7 @@ class Settings(BaseSettings):
     elite_failed_launch_relax_min_score: float = 90.0
     elite_failed_launch_relax_min_grade: str = "A"
     elite_failed_launch_relax_require_good_timing: bool = True
-    elite_failed_launch_relax_max_local_base_pct: float = 25.0
+    elite_failed_launch_relax_max_local_base_pct: float = 20.0
     elite_failed_launch_relaxed_max_hold_seconds: int = 90
     elite_failed_launch_relaxed_max_best_points: float = 3.0
     elite_failed_launch_relaxed_min_loss_points: float = 2.5

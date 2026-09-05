@@ -8,8 +8,11 @@ Live entry rule (hybrid model):
   - Setup ∈ {FTV, V, EXPLOSIVE}
   - EliteScore ≥ min (default 90)
   - Stage ≥ ARMED
-  - Near-base ≤ max local move (default 25%)
+  - Near-base ≤ max local move (default 20%; CALL default 10%)
   - Timing ∈ {GOOD, OK}
+  - CALL blocked on MOMENTUM RALLY when elite_call_block_momentum_rally_enabled
+  - PUT blocked on BULLISH DAY when elite_put_block_bullish_day_enabled (optional PE mirror)
+  - Rounded score=100 blocked when local > perfect_score_max_local (default 15%)
   - Weekly cap enforced separately via elite_trade_budget
   - MOMENTUM RALLY + dayType WORST blocked when elite_trade_block_worst_day_type_enabled
     (CHOP + RALLY + WORST still allowed — EOD: +₹214k on that bucket)
@@ -253,6 +256,113 @@ def resolve_elite_session_day_type(
 
 
 _MOMENTUM_RALLY_DAY_MODE = "MOMENTUM RALLY"
+_BULLISH_DAY_MODE = "BULLISH DAY"
+
+
+def _resolve_side(evidence: Mapping[str, Any], side: str = "") -> str:
+    raw = side or evidence.get("side") or ""
+    return str(raw).strip().upper()
+
+
+def elite_side_local_base_cap(side: str, *, settings: Any = None) -> float:
+    """Return max local-base % for side (CALL tighter than PUT by default)."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    general = float(getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0)
+    side_u = str(side or "").upper()
+    if side_u == "CALL":
+        call_cap = float(getattr(settings, "elite_call_max_local_base_pct", 0.0) or 0.0)
+        if call_cap > 0:
+            return min(general, call_cap)
+    elif side_u == "PUT":
+        put_cap = float(getattr(settings, "elite_put_max_local_base_pct", 0.0) or 0.0)
+        if put_cap > 0:
+            return min(general, put_cap)
+    return general
+
+
+def elite_side_day_mode_blocked(
+    side: str,
+    day_mode: str,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Side-specific day-mode blocks (CE/PE symmetric config, EOD-tuned defaults)."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    side_u = str(side or "").upper()
+    dm = str(day_mode or "").strip().upper()
+
+    if (
+        side_u == "CALL"
+        and bool(getattr(settings, "elite_call_block_momentum_rally_enabled", True))
+        and dm == _MOMENTUM_RALLY_DAY_MODE
+    ):
+        return True, "elite_call_momentum_rally_blocked"
+
+    if (
+        side_u == "PUT"
+        and bool(getattr(settings, "elite_put_block_bullish_day_enabled", False))
+        and dm == _BULLISH_DAY_MODE
+    ):
+        return True, "elite_put_bullish_day_blocked"
+
+    return False, ""
+
+
+def elite_perfect_score_blocked(
+    score: float,
+    local_base_pct: float,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block rounded score=100 chase entries unless still near base."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "elite_trade_block_perfect_score_enabled", True)):
+        return False, ""
+    threshold = float(
+        getattr(settings, "elite_trade_perfect_score_threshold", 99.95) or 99.95
+    )
+    max_local = float(
+        getattr(settings, "elite_trade_perfect_score_max_local_pct", 15.0) or 15.0
+    )
+    if score >= threshold - 1e-6 and local_base_pct > max_local + 1e-6:
+        return True, "elite_perfect_score_chase_blocked"
+    return False, ""
+
+
+def elite_win_rate_gate_summary(*, settings: Any = None) -> dict[str, Any]:
+    """Observability for deployment HUD — win-rate gate knobs."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    return {
+        "maxLocalBasePct": float(
+            getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0
+        ),
+        "callMaxLocalBasePct": float(
+            getattr(settings, "elite_call_max_local_base_pct", 10.0) or 10.0
+        ),
+        "putMaxLocalBasePct": float(
+            getattr(settings, "elite_put_max_local_base_pct", 0.0) or 0.0
+        ),
+        "callBlockMomentumRally": bool(
+            getattr(settings, "elite_call_block_momentum_rally_enabled", True)
+        ),
+        "putBlockBullishDay": bool(
+            getattr(settings, "elite_put_block_bullish_day_enabled", False)
+        ),
+        "blockPerfectScore": bool(
+            getattr(settings, "elite_trade_block_perfect_score_enabled", True)
+        ),
+        "perfectScoreMaxLocalPct": float(
+            getattr(settings, "elite_trade_perfect_score_max_local_pct", 15.0) or 15.0
+        ),
+    }
 
 
 def elite_worst_day_type_blocked(
@@ -290,6 +400,7 @@ def elite_entry_allowed(
     state: Any = None,
     snapshots: Any = None,
     confidence_tier: str = "",
+    side: str = "",
 ) -> tuple[bool, str, dict[str, Any]]:
     """True when candidate passes the unified EliteScore entry rule."""
     from app.config import get_settings
@@ -319,6 +430,22 @@ def elite_entry_allowed(
         }
         return False, block_reason, assessment
 
+    resolved_side = _resolve_side(evidence, side)
+    side_blocked, side_block_reason = elite_side_day_mode_blocked(
+        resolved_side,
+        resolved_mode,
+        settings=settings,
+    )
+    if side_blocked:
+        assessment = build_elite_assessment(evidence, ranking)
+        assessment = {
+            **assessment,
+            "dayMode": resolved_mode,
+            "dayType": resolved_type,
+            "side": resolved_side,
+        }
+        return False, side_block_reason, assessment
+
     from app.engines.building_ftv_gates import (
         building_armed_base_grade_a_top_moment_ok,
         building_coil_pad_grade_a_top_moment_ok,
@@ -343,7 +470,7 @@ def elite_entry_allowed(
     assessment = {**assessment, "dayMode": resolved_mode, "dayType": resolved_type}
 
     min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
-    max_local = float(getattr(settings, "elite_trade_max_local_base_pct", 25.0) or 25.0)
+    max_local = elite_side_local_base_cap(resolved_side, settings=settings)
     min_stage = str(getattr(settings, "elite_trade_min_stage", "ARMED") or "ARMED").upper()
     min_stage_rank = STAGE_RANK.get(min_stage, STAGE_RANK["ARMED"])
 
@@ -355,11 +482,29 @@ def elite_entry_allowed(
     if score < min_score - 1e-6:
         return False, f"elite_score_below_{min_score:g}", assessment
 
+    perfect_blocked, perfect_reason = elite_perfect_score_blocked(
+        score,
+        _number(assessment.get("localBasePct")),
+        settings=settings,
+    )
+    if perfect_blocked:
+        assessment = {**assessment, "side": resolved_side}
+        return False, perfect_reason, assessment
+
     if int(assessment.get("stageRank") or 0) < min_stage_rank:
         return False, f"elite_stage_below_{min_stage.lower()}", assessment
 
     local = _number(assessment.get("localBasePct"))
     if local > max_local + 1e-6:
+        assessment = {**assessment, "side": resolved_side, "localBaseCapPct": round(max_local, 2)}
+        if resolved_side == "CALL" and max_local < float(
+            getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0
+        ):
+            return False, "elite_call_chase_past_local_base_window", assessment
+        if resolved_side == "PUT" and max_local < float(
+            getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0
+        ):
+            return False, "elite_put_chase_past_local_base_window", assessment
         return False, "elite_chase_past_local_base_window", assessment
 
     if not _timing_ok(evidence):
@@ -370,5 +515,7 @@ def elite_entry_allowed(
         "mustTake": elite_must_take(evidence, ranking, assessment, settings=settings),
         "dayMode": resolved_mode,
         "dayType": resolved_type,
+        "side": resolved_side,
+        "localBaseCapPct": round(max_local, 2),
     }
     return True, "ok", assessment

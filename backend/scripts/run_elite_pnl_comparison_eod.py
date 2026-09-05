@@ -266,7 +266,7 @@ def _row_from_archive(
         setup in ("FTV", "V", "EXPLOSIVE")
         and score >= float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
         and STAGE_RANK.get(stage, 0) >= STAGE_RANK["ARMED"]
-        and local <= float(getattr(settings, "elite_trade_max_local_base_pct", 25.0) or 25.0)
+        and local <= float(getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0)
         and timing_ok
     )
     day_type = classify_day_type(day_mode, "MEDIUM", {sym: snap})

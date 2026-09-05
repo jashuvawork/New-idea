@@ -62,7 +62,14 @@ def elite_trade_budget_summary(
         "mustTakeUsed": must_take_used,
         "capReached": enabled and entries_used >= weekly_cap,
         "lastEntry": store.get("lastEntry") if store_week == week else None,
+        "winRateGates": __elite_win_rate_gate_summary(settings),
     }
+
+
+def __elite_win_rate_gate_summary(settings: Any) -> dict[str, Any]:
+    from app.engines.elite_score_engine import elite_win_rate_gate_summary
+
+    return elite_win_rate_gate_summary(settings=settings)
 
 
 def elite_trade_budget_allows(
