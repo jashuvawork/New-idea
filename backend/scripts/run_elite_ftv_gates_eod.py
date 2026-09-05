@@ -161,7 +161,8 @@ def main() -> int:
             f"{row['label']}: {row['trades']} trades | "
             f"win {row['winRatePct']}% | P&L ₹{row['totalPnlInr']:,.0f}"
         )
-    print(f"Delta P&L: ₹{out['delta']['totalPnlInr']:,.0f}")
+    print(f"Delta P&L (8/week cap): ₹{out['deltaWeeklyCap8']['totalPnlInr']:,.0f}")
+    print(f"Delta P&L (uncapped): ₹{out['deltaUncapped']['totalPnlInr']:,.0f}")
     print(f"Full JSON: {OUT_PATH}")
     return 0
 
