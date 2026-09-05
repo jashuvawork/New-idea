@@ -27,6 +27,11 @@ sys.path.insert(0, str(ROOT))
 from app.config import Settings
 from app.engines.capital_allocator import lot_multiplier, max_lots_for_capital_pct
 from app.engines.chop_day_guards import _day_mode_label
+from app.engines.day_type_grade_policy import (
+    fast_moving_grade_c_waiver,
+    resolve_day_type_min_grade,
+)
+from app.engines.day_adaptive_engine import classify_day_type
 from app.engines.entry_timing import assess_entry_timing, timing_blocks_entry
 from app.engines.ict_breakout_monitor import ICTBreakoutSignal
 from app.engines.missed_trade_explainer import _candidate_from_alert
@@ -258,6 +263,7 @@ def _row_from_archive(
         and local <= float(getattr(settings, "elite_trade_max_local_base_pct", 25.0) or 25.0)
         and timing_ok
     )
+    day_type = classify_day_type(day_mode, "MEDIUM", {sym: snap})
 
     return {
         "date": date,
@@ -271,6 +277,11 @@ def _row_from_archive(
         "eliteScore": score,
         "eliteBand": band,
         "localBasePct": round(local, 1),
+        "dayMode": day_mode,
+        "dayType": day_type,
+        "grade": str(ranking.get("grade") or "C").upper(),
+        "momentType": moment,
+        "_rankScore": float(ranking.get("rankScore") or 0),
         "mfe": mfe,
         "mae": mae,
         "good15": mfe >= 15,
@@ -356,6 +367,78 @@ def _daily_best(rows: list[dict[str, Any]], per_day: int = 2) -> list[dict[str, 
         pool.sort(key=lambda x: (-x["eliteScore"], x["setupPriority"]))
         taken.extend(pool[:per_day])
     return taken
+
+
+_STRICT_DAY_MODES = frozenset({"CHOP DAY", "CHOP (PRE-10)", "EXPIRY WORST", "EXPIRY DAY"})
+_BLOCK_WORST_DAY_TYPES = frozenset({"WORST"})
+
+
+def _grade_passes_day_policy(row: dict[str, Any], settings: Settings) -> bool:
+    grade = str(row.get("grade") or "C").upper()
+    if grade == "REJECT":
+        return False
+    day_mode = str(row.get("dayMode") or "")
+    effective_min = resolve_day_type_min_grade(min_grade="A", day_mode=day_mode, settings=settings)
+    min_rank = {"S": 0, "A": 1, "B": 2, "C": 3}.get(effective_min, 1)
+    grade_rank = {"S": 0, "A": 1, "B": 2, "C": 3}.get(grade, 9)
+    if grade_rank <= min_rank:
+        return True
+    evidence = {
+        "tier": row.get("_tier", ""),
+        "velocity3s": row.get("_velocity3s", 0),
+        "vRipReady": row.get("_vRipReady", False),
+        "flatThenVertical": row.get("_flatThenVertical", False),
+        "activeBreakout": row.get("_activeBreakout", False),
+    }
+    ranking = {"grade": grade, "rankScore": row.get("_rankScore", 0)}
+    return fast_moving_grade_c_waiver(
+        evidence,
+        ranking,
+        row.get("momentType"),
+        day_mode=day_mode,
+        settings=settings,
+    )
+
+
+def _filter_day_type_grade(rows: list[dict[str, Any]], settings: Settings) -> list[dict[str, Any]]:
+    return [r for r in rows if _grade_passes_day_policy(r, settings)]
+
+
+def _filter_block_strict_day_modes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r for r in rows if str(r.get("dayMode") or "") not in _STRICT_DAY_MODES]
+
+
+def _filter_block_worst_day_type(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r for r in rows if str(r.get("dayType") or "") not in _BLOCK_WORST_DAY_TYPES]
+
+
+def _filter_chop_score_boost(rows: list[dict[str, Any]], boost_min: float = 95.0) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        mode = str(r.get("dayMode") or "")
+        if mode in _STRICT_DAY_MODES and float(r.get("eliteScore") or 0) < boost_min:
+            continue
+        out.append(r)
+    return out
+
+
+def _enrich_day_meta(rows: list[dict[str, Any]], all_rows: list[dict[str, Any]]) -> None:
+    """Attach ranking evidence stubs for day-grade waiver checks."""
+    meta_by_key = {}
+    for r in all_rows:
+        alert = r.get("_alert") or {}
+        key = (r["date"], r["symbol"], r["strike"], r["side"], r["ts"])
+        meta_by_key[key] = {
+            "_tier": str(alert.get("tier") or "").upper(),
+            "_velocity3s": float(alert.get("velocity3s") or 0),
+            "_vRipReady": bool(alert.get("ictVRipReady")),
+            "_flatThenVertical": bool(alert.get("ictFlatThenVertical")),
+            "_activeBreakout": bool(alert.get("ictBreakout")),
+            "_rankScore": float(r.get("_rankScore") or 0),
+        }
+    for r in rows:
+        key = (r["date"], r["symbol"], r["strike"], r["side"], r["ts"])
+        r.update(meta_by_key.get(key, {}))
 
 
 def _pnl_summary(rows: list[dict[str, Any]], settings: Settings, label: str) -> dict[str, Any]:
@@ -450,14 +533,40 @@ def main() -> int:
             if rec:
                 all_rows.append(rec)
 
+    _enrich_day_meta(all_rows, all_rows)
+
+    elite_all = [r for r in all_rows if r["eliteEnginePass"]]
+    user_all = [r for r in all_rows if r["userPass"]]
+
+    elite_day_grade = _filter_day_type_grade(elite_all, settings)
+    user_day_grade = _filter_day_type_grade(user_all, settings)
+    elite_no_worst = _filter_block_worst_day_type(elite_all)
+    elite_no_chop_modes = _filter_block_strict_day_modes(elite_all)
+    elite_chop95 = _filter_chop_score_boost(elite_all, 95.0)
+    elite_day_grade_no_worst = _filter_block_worst_day_type(elite_day_grade)
+
     policies = {
         "currentLegacy": [r for r in all_rows if r["currentPass"]],
-        "eliteEngineAll": [r for r in all_rows if r["eliteEnginePass"]],
-        "userModelAll": [r for r in all_rows if r["userPass"]],
+        "eliteEngineAll": elite_all,
+        "elitePlusDayGrade": elite_day_grade,
+        "elitePlusDayGradeNoWorst": elite_day_grade_no_worst,
+        "eliteBlockWorstDayType": elite_no_worst,
+        "eliteBlockChopExpiryModes": elite_no_chop_modes,
+        "eliteChopScore95": elite_chop95,
+        "userModelAll": user_all,
+        "userPlusDayGrade": user_day_grade,
         "weeklyCap5": _apply_weekly_cap(all_rows, 5),
         "weeklyCap8": _apply_weekly_cap(all_rows, 8),
+        "weeklyCap8DayGrade": _apply_weekly_cap(
+            [{**r, "userPass": r["userPass"] and _grade_passes_day_policy(r, settings)} for r in all_rows],
+            8,
+        ),
         "hybridCap5": _apply_hybrid_cap(all_rows, weekly_cap=5),
         "hybridCap8": _apply_hybrid_cap(all_rows, weekly_cap=8),
+        "hybridCap8DayGrade": _apply_hybrid_cap(
+            [{**r, "userPass": r["userPass"] and _grade_passes_day_policy(r, settings)} for r in all_rows],
+            weekly_cap=8,
+        ),
         "dailyBest2": _daily_best(all_rows, 2),
     }
 

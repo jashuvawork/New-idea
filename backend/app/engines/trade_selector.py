@@ -1918,6 +1918,8 @@ def find_best_entry(
                 min_grade=min_grade,
                 day_mode=day_mode,
                 readiness_reason=str(meta.get("firstLiftReadinessReason") or ""),
+                state=state,
+                snapshots=snapshots,
             )
             gate_meta: dict[str, Any] = {
                 "enabled": True,

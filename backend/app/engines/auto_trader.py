@@ -690,6 +690,8 @@ async def _open_from_candidate(
                 top_moments_only_enabled=not elite_engine,
                 min_grade=str(getattr(settings, "top_moments_min_grade", "A") or "A"),
                 day_mode=resolve_policy_day_mode(state),
+                state=state,
+                snapshots=snapshots,
             )
             if not top_ok:
                 return False, top_reason
@@ -701,6 +703,8 @@ async def _open_from_candidate(
                     policy_ranking.get("evidence") or {},
                     policy_ranking,
                     settings=settings,
+                    snapshots=snapshots,
+                    day_mode=resolve_policy_day_mode(state),
                 )
                 if blocked:
                     return False, budget_reason
@@ -2533,6 +2537,8 @@ async def _open_from_candidate(
                 top_moments_only_enabled=not elite_engine,
                 min_grade=str(getattr(settings, "top_moments_min_grade", "A") or "A"),
                 day_mode=resolve_policy_day_mode(state),
+                state=state,
+                snapshots=snapshots,
             )
             if not top_ok:
                 return False, top_reason
@@ -2544,6 +2550,8 @@ async def _open_from_candidate(
                     final_ranking.get("evidence") or {},
                     final_ranking,
                     settings=settings,
+                    snapshots=snapshots,
+                    day_mode=resolve_policy_day_mode(state),
                 )
                 if blocked:
                     return False, budget_reason
