@@ -11,6 +11,8 @@ Live entry rule (hybrid model):
   - Near-base ≤ max local move (default 25%)
   - Timing ∈ {GOOD, OK}
   - Weekly cap enforced separately via elite_trade_budget
+  - MOMENTUM RALLY + dayType WORST blocked when elite_trade_block_worst_day_type_enabled
+    (CHOP + RALLY + WORST still allowed — EOD: +₹214k on that bucket)
 """
 
 from __future__ import annotations
@@ -211,17 +213,111 @@ def elite_must_take(
     return local <= max_local + 1e-6
 
 
+def resolve_elite_session_day_type(
+    state: Any = None,
+    snapshots: Any = None,
+    *,
+    day_mode: str = "",
+    confidence_tier: str = "",
+) -> tuple[str, str]:
+    """Resolve (dayMode, dayType) for Elite gate — mirrors live chop/adaptive stack."""
+    dm = str(day_mode or "").strip().upper()
+    if not dm and snapshots:
+        from app.engines.chop_day_guards import resolve_session_day_mode
+
+        dm = str(resolve_session_day_mode(snapshots) or "").upper()
+    if not dm and state is not None:
+        ds = getattr(state, "dailyStrategy", None) or {}
+        if isinstance(ds, dict):
+            dm = str(ds.get("dayMode") or "").upper()
+
+    tier = str(confidence_tier or "").upper()
+    if not tier and state is not None:
+        ds = getattr(state, "dailyStrategy", None) or {}
+        if isinstance(ds, dict):
+            tier = str(ds.get("confidenceTier") or "").upper()
+    if not tier:
+        try:
+            from app.engines.daily_18pct_strategy import get_session_limits
+
+            limits = get_session_limits()
+            tier = str(getattr(limits, "confidenceTier", "") or "MEDIUM").upper()
+        except Exception:
+            tier = "MEDIUM"
+
+    from app.engines.day_adaptive_engine import classify_day_type
+
+    snaps = snapshots if isinstance(snapshots, dict) else {}
+    day_type = classify_day_type(dm, tier, snaps, state=state)
+    return dm, str(day_type or "NORMAL").upper()
+
+
+_MOMENTUM_RALLY_DAY_MODE = "MOMENTUM RALLY"
+
+
+def elite_worst_day_type_blocked(
+    day_type: str,
+    *,
+    day_mode: str = "",
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """True when MOMENTUM RALLY + WORST dayType should block Elite entry.
+
+    CHOP + RALLY sessions can still classify as WORST dayType but remain tradable
+    (Sep EOD: that bucket was +₹214k vs MOMENTUM RALLY/WORST −₹1.45M).
+    """
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "elite_trade_block_worst_day_type_enabled", True)):
+        return False, ""
+    if str(day_type or "").upper() != "WORST":
+        return False, ""
+    dm = str(day_mode or "").strip().upper()
+    if dm == _MOMENTUM_RALLY_DAY_MODE:
+        return True, "elite_momentum_rally_worst_blocked"
+    return False, ""
+
+
 def elite_entry_allowed(
     evidence: Mapping[str, Any],
     ranking: Mapping[str, Any],
     *,
     settings: Any = None,
     readiness_reason: str = "",
+    day_mode: str = "",
+    day_type: str = "",
+    state: Any = None,
+    snapshots: Any = None,
+    confidence_tier: str = "",
 ) -> tuple[bool, str, dict[str, Any]]:
     """True when candidate passes the unified EliteScore entry rule."""
     from app.config import get_settings
 
     settings = settings or get_settings()
+
+    resolved_mode, resolved_type = resolve_elite_session_day_type(
+        state,
+        snapshots,
+        day_mode=day_mode or str(evidence.get("dayMode") or ""),
+        confidence_tier=confidence_tier,
+    )
+    if day_type:
+        resolved_type = str(day_type).upper()
+
+    blocked, block_reason = elite_worst_day_type_blocked(
+        resolved_type,
+        day_mode=resolved_mode,
+        settings=settings,
+    )
+    if blocked:
+        assessment = build_elite_assessment(evidence, ranking)
+        assessment = {
+            **assessment,
+            "dayMode": resolved_mode,
+            "dayType": resolved_type,
+        }
+        return False, block_reason, assessment
 
     from app.engines.building_ftv_gates import (
         building_armed_base_grade_a_top_moment_ok,
@@ -238,10 +334,13 @@ def elite_entry_allowed(
             **assessment,
             "mustTake": elite_must_take(evidence, ranking, assessment, settings=settings),
             "legacyBypass": "building_ftv_gate",
+            "dayMode": resolved_mode,
+            "dayType": resolved_type,
         }
         return True, "ok", assessment
 
     assessment = build_elite_assessment(evidence, ranking)
+    assessment = {**assessment, "dayMode": resolved_mode, "dayType": resolved_type}
 
     min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
     max_local = float(getattr(settings, "elite_trade_max_local_base_pct", 25.0) or 25.0)
@@ -269,5 +368,7 @@ def elite_entry_allowed(
     assessment = {
         **assessment,
         "mustTake": elite_must_take(evidence, ranking, assessment, settings=settings),
+        "dayMode": resolved_mode,
+        "dayType": resolved_type,
     }
     return True, "ok", assessment

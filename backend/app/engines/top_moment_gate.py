@@ -204,6 +204,9 @@ def top_moment_entry_allowed(
     min_grade: str = "A",
     day_mode: str = "",
     readiness_reason: str = "",
+    state: Any = None,
+    snapshots: Any = None,
+    confidence_tier: str = "",
 ) -> tuple[bool, str, Optional[str]]:
     """True when candidate is a top FTV / V / ELITE / EXPLODING moment."""
     from app.config import get_settings
@@ -213,8 +216,14 @@ def top_moment_entry_allowed(
         from app.engines.elite_score_engine import elite_entry_allowed
 
         ok, reason, assessment = elite_entry_allowed(
-            evidence, ranking, settings=settings,
+            evidence,
+            ranking,
+            settings=settings,
             readiness_reason=readiness_reason,
+            day_mode=day_mode,
+            state=state,
+            snapshots=snapshots,
+            confidence_tier=confidence_tier,
         )
         moment = assessment.get("momentType") if isinstance(assessment, dict) else None
         return ok, reason, moment

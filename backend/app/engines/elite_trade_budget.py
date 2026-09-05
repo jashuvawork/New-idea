@@ -95,6 +95,9 @@ def elite_budget_blocks_entry(
     ranking: Mapping[str, Any],
     *,
     settings: Any = None,
+    snapshots: Any = None,
+    day_mode: str = "",
+    confidence_tier: str = "",
 ) -> tuple[bool, str, dict[str, Any]]:
     """Return (blocked, reason, assessment) for order-boundary weekly cap."""
     from app.config import get_settings
@@ -104,7 +107,15 @@ def elite_budget_blocks_entry(
     if not bool(getattr(settings, "elite_trade_engine_enabled", False)):
         return False, "disabled", {}
 
-    ok, reason, assessment = elite_entry_allowed(evidence, ranking, settings=settings)
+    ok, reason, assessment = elite_entry_allowed(
+        evidence,
+        ranking,
+        settings=settings,
+        day_mode=day_mode,
+        state=state,
+        snapshots=snapshots,
+        confidence_tier=confidence_tier,
+    )
     if not ok:
         return True, reason, assessment
 
