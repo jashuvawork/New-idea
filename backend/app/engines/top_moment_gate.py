@@ -207,6 +207,7 @@ def top_moment_entry_allowed(
     state: Any = None,
     snapshots: Any = None,
     confidence_tier: str = "",
+    side: str = "",
 ) -> tuple[bool, str, Optional[str]]:
     """True when candidate is a top FTV / V / ELITE / EXPLODING moment."""
     from app.config import get_settings
@@ -224,6 +225,7 @@ def top_moment_entry_allowed(
             state=state,
             snapshots=snapshots,
             confidence_tier=confidence_tier,
+            side=side,
         )
         moment = assessment.get("momentType") if isinstance(assessment, dict) else None
         return ok, reason, moment
