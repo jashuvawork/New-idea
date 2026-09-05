@@ -156,6 +156,7 @@ def test_elite_entry_blocks_shallow_first_lift():
     assert reason == "elite_shallow_first_lift_blocked"
 
 
+
 def test_elite_entry_blocks_shallow_elite_tier_without_lift():
     ok, reason, _ = elite_entry_allowed(
         _v_evidence(
