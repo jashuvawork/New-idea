@@ -271,6 +271,17 @@ class Settings(BaseSettings):
     top_moments_fast_day_min_rank_score: float = 48.0
     # Reserve capital-max lots for grade-A+ FTV / V / ELITE / EXPLODING only.
     top_moments_max_lots_only_enabled: bool = True
+    # Unified EliteScore pipeline — FTV/V/EXPLOSIVE setups ranked by EliteScore.
+    # Replaces the legacy top-moment grade maze when enabled (hybrid 8/week cap).
+    elite_trade_engine_enabled: bool = True
+    elite_trade_min_score: float = 90.0
+    elite_trade_max_local_base_pct: float = 25.0
+    elite_trade_min_stage: str = "ARMED"  # BASE | ARMED | TRIGGERED | EXPANDING
+    elite_trade_weekly_cap: int = 8
+    elite_trade_must_take_enabled: bool = True
+    elite_trade_must_take_min_grade: str = "S"
+    elite_trade_must_take_min_fvq: float = 85.0
+    elite_trade_must_take_max_local_base_pct: float = 15.0
     # One-week validation: lower local-base floors so detection, grading, and entry
     # can fire at 2–15% pad. Use /api/ai/local-base-audit/{date} to score each day.
     local_base_audit_week_enabled: bool = False

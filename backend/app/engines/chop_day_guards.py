@@ -907,4 +907,11 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
             state=state,
         ).to_dict(),
         "ictBreakoutMonitor": ict_monitor_summary(snapshots),
+        "eliteTradeBudget": __elite_trade_budget_summary(state),
     }
+
+
+def __elite_trade_budget_summary(state: AutoTraderState) -> dict[str, Any]:
+    from app.engines.elite_trade_budget import elite_trade_budget_summary
+
+    return elite_trade_budget_summary(state)

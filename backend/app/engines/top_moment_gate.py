@@ -206,6 +206,19 @@ def top_moment_entry_allowed(
     readiness_reason: str = "",
 ) -> tuple[bool, str, Optional[str]]:
     """True when candidate is a top FTV / V / ELITE / EXPLODING moment."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    if bool(getattr(settings, "elite_trade_engine_enabled", False)):
+        from app.engines.elite_score_engine import elite_entry_allowed
+
+        ok, reason, assessment = elite_entry_allowed(
+            evidence, ranking, settings=settings,
+            readiness_reason=readiness_reason,
+        )
+        moment = assessment.get("momentType") if isinstance(assessment, dict) else None
+        return ok, reason, moment
+
     if not top_moments_only_enabled:
         return True, "disabled", None
 
