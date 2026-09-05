@@ -108,6 +108,101 @@ def test_elite_entry_blocks_chase():
     assert reason == "elite_chase_past_local_base_window"
 
 
+def test_elite_entry_blocks_call_past_tight_local_cap():
+    ok, reason, assessment = elite_entry_allowed(
+        _evidence(localBaseMovePct=12.0, side="CALL"),
+        _ranking(grade="A"),
+    )
+    assert ok is False
+    assert reason == "elite_call_chase_past_local_base_window"
+    assert assessment.get("side") == "CALL"
+
+
+def test_elite_entry_allows_call_at_tight_local_cap():
+    ok, reason, assessment = elite_entry_allowed(
+        _evidence(localBaseMovePct=8.0, side="CALL"),
+        _ranking(grade="A"),
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert assessment.get("localBaseCapPct") == 10.0
+
+
+def test_elite_entry_allows_put_at_general_local_cap():
+    ok, reason, assessment = elite_entry_allowed(
+        _evidence(localBaseMovePct=18.0, side="PUT"),
+        _ranking(grade="A"),
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert assessment.get("localBaseCapPct") == 20.0
+
+
+def test_elite_entry_blocks_call_on_momentum_rally():
+    ok, reason, assessment = elite_entry_allowed(
+        _evidence(side="CALL"),
+        _ranking(grade="A"),
+        day_mode="MOMENTUM RALLY",
+        day_type="GOOD",
+    )
+    assert ok is False
+    assert reason == "elite_call_momentum_rally_blocked"
+    assert assessment.get("side") == "CALL"
+
+
+def test_elite_entry_allows_put_on_momentum_rally():
+    ok, reason, assessment = elite_entry_allowed(
+        _evidence(side="PUT"),
+        _ranking(grade="A"),
+        day_mode="MOMENTUM RALLY",
+        day_type="GOOD",
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert assessment.get("side") == "PUT"
+
+
+def test_elite_entry_blocks_put_on_bullish_day_when_enabled():
+    from app.config import get_settings
+
+    settings = get_settings()
+    object.__setattr__(settings, "elite_put_block_bullish_day_enabled", True)
+    ok, reason, assessment = elite_entry_allowed(
+        _evidence(side="PUT"),
+        _ranking(grade="A"),
+        day_mode="BULLISH DAY",
+        day_type="GOOD",
+        settings=settings,
+    )
+    assert ok is False
+    assert reason == "elite_put_bullish_day_blocked"
+    assert assessment.get("side") == "PUT"
+
+
+def test_elite_entry_blocks_perfect_score_chase():
+    ev = _evidence(
+        localBaseMovePct=18.0,
+        flatVerticalQuality=100.0,
+        explosionScore=100.0,
+        side="PUT",
+    )
+    ok, reason, _ = elite_entry_allowed(ev, _ranking(rankScore=95.0, grade="S"))
+    assert ok is False
+    assert reason == "elite_perfect_score_chase_blocked"
+
+
+def test_elite_entry_allows_perfect_score_near_base():
+    ev = _evidence(
+        localBaseMovePct=10.0,
+        flatVerticalQuality=100.0,
+        explosionScore=100.0,
+        side="PUT",
+    )
+    ok, reason, _ = elite_entry_allowed(ev, _ranking(rankScore=95.0, grade="S"))
+    assert ok is True
+    assert reason == "ok"
+
+
 def test_elite_entry_blocks_bad_timing():
     ok, reason, _ = elite_entry_allowed(
         _evidence(timingAssessment="CHASE", timingAction="block"),
@@ -275,7 +370,7 @@ def test_top_moment_gate_delegates_to_elite_engine():
     settings = get_settings()
     object.__setattr__(settings, "elite_trade_engine_enabled", True)
     object.__setattr__(settings, "elite_trade_min_score", 90.0)
-    object.__setattr__(settings, "elite_trade_max_local_base_pct", 25.0)
+    object.__setattr__(settings, "elite_trade_max_local_base_pct", 20.0)
     object.__setattr__(settings, "elite_trade_min_stage", "ARMED")
     object.__setattr__(settings, "elite_trade_must_take_enabled", True)
     object.__setattr__(settings, "elite_trade_must_take_min_grade", "S")
