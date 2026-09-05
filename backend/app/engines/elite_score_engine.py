@@ -335,6 +335,84 @@ def elite_perfect_score_blocked(
     return False, ""
 
 
+def elite_fvq_chase_blocked(
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any = None,
+    must_take: bool = False,
+    readiness_reason: str = "",
+) -> tuple[bool, str]:
+    """Block entries with flatVerticalQuality above ceiling (EOD: 80+ chase loses)."""
+    from app.config import get_settings
+    from app.engines.building_ftv_gates import ARMED_BASE_GRADE_A_READY_REASONS
+
+    settings = settings or get_settings()
+    if must_take:
+        return False, ""
+    rr = str(
+        readiness_reason
+        or evidence.get("firstLiftReadinessReason")
+        or evidence.get("ictBaseReadinessReason")
+        or ""
+    )
+    if rr in ARMED_BASE_GRADE_A_READY_REASONS or bool(evidence.get("armedBaseLaunch")):
+        return False, ""
+    ceiling = float(getattr(settings, "elite_trade_block_fvq_above", 0.0) or 0.0)
+    if ceiling <= 0:
+        return False, ""
+    fvq = _number(evidence.get("flatVerticalQuality"))
+    if fvq > ceiling + 1e-6:
+        return True, "elite_fvq_chase_above_ceiling"
+    return False, ""
+
+
+def elite_shallow_lift_blocked(
+    evidence: Mapping[str, Any],
+    assessment: Mapping[str, Any],
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block very shallow local-base entries until stage confirms lift (not first tick)."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "elite_trade_shallow_lift_block_enabled", True)):
+        return False, ""
+    max_local = float(
+        getattr(settings, "elite_trade_shallow_lift_max_local_pct", 10.0) or 10.0
+    )
+    min_stage = str(
+        getattr(settings, "elite_trade_shallow_lift_min_stage", "TRIGGERED") or "TRIGGERED"
+    ).upper()
+    min_rank = STAGE_RANK.get(min_stage, STAGE_RANK["TRIGGERED"])
+    local = _number(assessment.get("localBasePct"))
+    if local > max_local + 1e-6:
+        return False, ""
+    if int(assessment.get("stageRank") or 0) >= min_rank:
+        return False, ""
+    return True, "elite_shallow_first_lift_blocked"
+
+
+def elite_milestone_depth_blocked(
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Require minimum radar milestone depth when count is present on evidence."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    min_depth = int(getattr(settings, "elite_trade_min_milestone_depth", 0) or 0)
+    if min_depth <= 0:
+        return False, ""
+    if "milestoneCount" not in evidence:
+        return False, ""
+    count = int(evidence.get("milestoneCount") or 0)
+    if count < min_depth:
+        return True, "elite_milestone_depth_below_min"
+    return False, ""
+
+
 def elite_win_rate_gate_summary(*, settings: Any = None) -> dict[str, Any]:
     """Observability for deployment HUD — win-rate gate knobs."""
     from app.config import get_settings
@@ -362,6 +440,15 @@ def elite_win_rate_gate_summary(*, settings: Any = None) -> dict[str, Any]:
         "perfectScoreMaxLocalPct": float(
             getattr(settings, "elite_trade_perfect_score_max_local_pct", 15.0) or 15.0
         ),
+        "vRipOnly": bool(getattr(settings, "elite_trade_v_rip_only_enabled", True)),
+        "blockFvqAbove": float(getattr(settings, "elite_trade_block_fvq_above", 80.0) or 80.0),
+        "shallowLiftBlock": bool(
+            getattr(settings, "elite_trade_shallow_lift_block_enabled", True)
+        ),
+        "shallowLiftMaxLocalPct": float(
+            getattr(settings, "elite_trade_shallow_lift_max_local_pct", 10.0) or 10.0
+        ),
+        "minMilestoneDepth": int(getattr(settings, "elite_trade_min_milestone_depth", 0) or 0),
     }
 
 
@@ -478,9 +565,32 @@ def elite_entry_allowed(
     if setup not in VALID_SETUPS:
         return False, "elite_setup_not_ftv_v_or_explosive", assessment
 
+    if bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)) and setup != "V":
+        assessment = {**assessment, "side": resolved_side}
+        return False, "elite_v_rip_only", assessment
+
+    milestone_blocked, milestone_reason = elite_milestone_depth_blocked(
+        evidence, settings=settings,
+    )
+    if milestone_blocked:
+        assessment = {**assessment, "side": resolved_side}
+        return False, milestone_reason, assessment
+
     score = float(assessment.get("eliteScore") or 0)
     if score < min_score - 1e-6:
         return False, f"elite_score_below_{min_score:g}", assessment
+
+    must_take = elite_must_take(evidence, ranking, assessment, settings=settings)
+
+    fvq_blocked, fvq_reason = elite_fvq_chase_blocked(
+        evidence,
+        settings=settings,
+        must_take=must_take,
+        readiness_reason=readiness_reason,
+    )
+    if fvq_blocked:
+        assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
+        return False, fvq_reason, assessment
 
     perfect_blocked, perfect_reason = elite_perfect_score_blocked(
         score,
@@ -488,11 +598,18 @@ def elite_entry_allowed(
         settings=settings,
     )
     if perfect_blocked:
-        assessment = {**assessment, "side": resolved_side}
+        assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, perfect_reason, assessment
 
     if int(assessment.get("stageRank") or 0) < min_stage_rank:
         return False, f"elite_stage_below_{min_stage.lower()}", assessment
+
+    shallow_blocked, shallow_reason = elite_shallow_lift_blocked(
+        evidence, assessment, settings=settings,
+    )
+    if shallow_blocked:
+        assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
+        return False, shallow_reason, assessment
 
     local = _number(assessment.get("localBasePct"))
     if local > max_local + 1e-6:
@@ -512,7 +629,7 @@ def elite_entry_allowed(
 
     assessment = {
         **assessment,
-        "mustTake": elite_must_take(evidence, ranking, assessment, settings=settings),
+        "mustTake": must_take,
         "dayMode": resolved_mode,
         "dayType": resolved_type,
         "side": resolved_side,

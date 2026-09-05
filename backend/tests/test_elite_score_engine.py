@@ -26,7 +26,7 @@ from app.models.schemas import AutoTraderState
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def _evidence(**kwargs):
+def _ftv_evidence(**kwargs):
     base = {
         "tier": "BUILDING",
         "flatThenVertical": True,
@@ -45,50 +45,143 @@ def _evidence(**kwargs):
     return base
 
 
-def _ranking(**kwargs):
-    base = {"grade": "A", "rankScore": 72.0}
+def _v_evidence(**kwargs):
+    base = {
+        "tier": "BUILDING",
+        "flatThenVertical": False,
+        "vRipReady": True,
+        "activeBreakout": True,
+        "armedBaseLaunch": True,
+        "firstLift": True,
+        "velocity3s": 2.5,
+        "velocity9s": 1.8,
+        "localBaseMovePct": 12.0,
+        "flatVerticalQuality": 79.0,
+        "explosionScore": 85.0,
+        "volumeAwaken": True,
+        "timingAssessment": "GOOD",
+        "timingAction": "allow",
+    }
     base.update(kwargs)
     return base
 
 
+def _evidence(**kwargs):
+    return _ftv_evidence(**kwargs)
+
+
+def _ranking(**kwargs):
+    base = {"grade": "A", "rankScore": 80.0}
+    base.update(kwargs)
+    return base
+
+
+def _settings_v_rip_off():
+    from app.config import get_settings
+
+    settings = get_settings()
+    object.__setattr__(settings, "elite_trade_v_rip_only_enabled", False)
+    return settings
+
+
 def test_infer_setup_ftv():
-    assert infer_setup_type(_evidence()) == "FTV"
+    assert infer_setup_type(_ftv_evidence()) == "FTV"
 
 
 def test_infer_setup_v():
-    assert infer_setup_type(_evidence(flatThenVertical=False, vRipReady=True)) == "V"
+    assert infer_setup_type(_v_evidence()) == "V"
 
 
 def test_infer_setup_explosive():
-    assert infer_setup_type(_evidence(tier="ELITE", flatThenVertical=False)) == "EXPLOSIVE"
+    assert infer_setup_type(_ftv_evidence(tier="ELITE", flatThenVertical=False, vRipReady=False)) == "EXPLOSIVE"
 
 
 def test_infer_stage_armed():
-    assert infer_stage(_evidence(activeBreakout=False, firstLift=False)) == "ARMED"
+    assert infer_stage(_v_evidence(activeBreakout=False, firstLift=False)) == "ARMED"
 
 
 def test_infer_stage_expanding():
-    assert infer_stage(_evidence(tier="ELITE", velocity3s=4.0)) == "EXPANDING"
+    assert infer_stage(_v_evidence(tier="ELITE", velocity3s=4.0)) == "EXPANDING"
 
 
 def test_elite_score_high_for_quality_ftv():
-    score, band, parts = compute_elite_score(_evidence(), _ranking(grade="S"))
+    score, band, parts = compute_elite_score(_ftv_evidence(), _ranking(grade="S"))
     assert score >= 90.0
     assert band in ("ELITE", "ELITE A+")
     assert parts["setupType"] == 12.0
 
 
-def test_elite_entry_allowed_passes_quality_ftv():
-    ok, reason, assessment = elite_entry_allowed(_evidence(), _ranking(grade="A"))
+def test_elite_entry_allowed_passes_quality_v():
+    ok, reason, assessment = elite_entry_allowed(_v_evidence(), _ranking(grade="A"))
     assert ok is True
     assert reason == "ok"
-    assert assessment["setup"] == "FTV"
-    assert assessment["eliteScore"] >= 90.0
+    assert assessment["setup"] == "V"
+
+
+def test_elite_entry_blocks_non_v_when_v_rip_only():
+    ok, reason, _ = elite_entry_allowed(
+        _ftv_evidence(flatVerticalQuality=79.0),
+        _ranking(grade="A"),
+    )
+    assert ok is False
+    assert reason == "elite_v_rip_only"
+
+
+def test_elite_entry_blocks_high_fvq_chase():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            flatVerticalQuality=85.0,
+            armedBaseLaunch=False,
+            firstLift=True,
+            activeBreakout=True,
+        ),
+        _ranking(rankScore=95.0, grade="S"),
+    )
+    assert ok is False
+    assert reason == "elite_fvq_chase_above_ceiling"
+
+
+def test_elite_entry_blocks_shallow_first_lift():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            localBaseMovePct=8.0,
+            armedBaseLaunch=True,
+            activeBreakout=False,
+            firstLift=False,
+            velocity3s=1.5,
+        ),
+        _ranking(rankScore=95.0, grade="S"),
+    )
+    assert ok is False
+    assert reason == "elite_shallow_first_lift_blocked"
+
+
+def test_elite_entry_allows_shallow_when_triggered():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            localBaseMovePct=8.0,
+            firstLift=True,
+            activeBreakout=True,
+            velocity3s=2.5,
+        ),
+        _ranking(grade="A"),
+    )
+    assert ok is True
+    assert reason == "ok"
+
+
+def test_elite_entry_blocks_low_milestone_depth_when_present():
+    ok, reason, _ = elite_entry_allowed(
+        {**_v_evidence(), "milestoneCount": 1},
+        _ranking(grade="A"),
+    )
+    assert ok is False
+    assert reason == "elite_milestone_depth_below_min"
 
 
 def test_elite_entry_blocks_low_score():
     ok, reason, _ = elite_entry_allowed(
-        _evidence(flatVerticalQuality=20.0, explosionScore=10.0),
+        _v_evidence(flatVerticalQuality=20.0, explosionScore=10.0),
         _ranking(rankScore=20.0, grade="C"),
     )
     assert ok is False
@@ -97,12 +190,12 @@ def test_elite_entry_blocks_low_score():
 
 def test_elite_entry_blocks_chase():
     ok, reason, _ = elite_entry_allowed(
-        _evidence(
+        _v_evidence(
             localBaseMovePct=35.0,
-            flatVerticalQuality=95.0,
+            flatVerticalQuality=79.0,
             explosionScore=90.0,
         ),
-        _ranking(rankScore=80.0, grade="S"),
+        _ranking(rankScore=95.0, grade="S"),
     )
     assert ok is False
     assert reason == "elite_chase_past_local_base_window"
@@ -110,7 +203,7 @@ def test_elite_entry_blocks_chase():
 
 def test_elite_entry_blocks_call_past_tight_local_cap():
     ok, reason, assessment = elite_entry_allowed(
-        _evidence(localBaseMovePct=12.0, side="CALL"),
+        _v_evidence(localBaseMovePct=12.0, side="CALL"),
         _ranking(grade="A"),
     )
     assert ok is False
@@ -120,7 +213,7 @@ def test_elite_entry_blocks_call_past_tight_local_cap():
 
 def test_elite_entry_allows_call_at_tight_local_cap():
     ok, reason, assessment = elite_entry_allowed(
-        _evidence(localBaseMovePct=8.0, side="CALL"),
+        _v_evidence(localBaseMovePct=8.0, side="CALL"),
         _ranking(grade="A"),
     )
     assert ok is True
@@ -130,7 +223,7 @@ def test_elite_entry_allows_call_at_tight_local_cap():
 
 def test_elite_entry_allows_put_at_general_local_cap():
     ok, reason, assessment = elite_entry_allowed(
-        _evidence(localBaseMovePct=18.0, side="PUT"),
+        _v_evidence(localBaseMovePct=18.0, side="PUT"),
         _ranking(grade="A"),
     )
     assert ok is True
@@ -140,7 +233,7 @@ def test_elite_entry_allows_put_at_general_local_cap():
 
 def test_elite_entry_blocks_call_on_momentum_rally():
     ok, reason, assessment = elite_entry_allowed(
-        _evidence(side="CALL"),
+        _v_evidence(side="CALL"),
         _ranking(grade="A"),
         day_mode="MOMENTUM RALLY",
         day_type="GOOD",
@@ -152,7 +245,7 @@ def test_elite_entry_blocks_call_on_momentum_rally():
 
 def test_elite_entry_allows_put_on_momentum_rally():
     ok, reason, assessment = elite_entry_allowed(
-        _evidence(side="PUT"),
+        _v_evidence(side="PUT"),
         _ranking(grade="A"),
         day_mode="MOMENTUM RALLY",
         day_type="GOOD",
@@ -168,7 +261,7 @@ def test_elite_entry_blocks_put_on_bullish_day_when_enabled():
     settings = get_settings()
     object.__setattr__(settings, "elite_put_block_bullish_day_enabled", True)
     ok, reason, assessment = elite_entry_allowed(
-        _evidence(side="PUT"),
+        _v_evidence(side="PUT"),
         _ranking(grade="A"),
         day_mode="BULLISH DAY",
         day_type="GOOD",
@@ -180,9 +273,9 @@ def test_elite_entry_blocks_put_on_bullish_day_when_enabled():
 
 
 def test_elite_entry_blocks_perfect_score_chase():
-    ev = _evidence(
+    ev = _v_evidence(
         localBaseMovePct=18.0,
-        flatVerticalQuality=100.0,
+        flatVerticalQuality=79.0,
         explosionScore=100.0,
         side="PUT",
     )
@@ -192,9 +285,9 @@ def test_elite_entry_blocks_perfect_score_chase():
 
 
 def test_elite_entry_allows_perfect_score_near_base():
-    ev = _evidence(
+    ev = _v_evidence(
         localBaseMovePct=10.0,
-        flatVerticalQuality=100.0,
+        flatVerticalQuality=79.0,
         explosionScore=100.0,
         side="PUT",
     )
@@ -205,7 +298,7 @@ def test_elite_entry_allows_perfect_score_near_base():
 
 def test_elite_entry_blocks_bad_timing():
     ok, reason, _ = elite_entry_allowed(
-        _evidence(timingAssessment="CHASE", timingAction="block"),
+        _v_evidence(timingAssessment="CHASE", timingAction="block"),
         _ranking(),
     )
     assert ok is False
@@ -214,7 +307,7 @@ def test_elite_entry_blocks_bad_timing():
 
 def test_elite_entry_blocks_momentum_rally_worst_day_type():
     ok, reason, assessment = elite_entry_allowed(
-        _evidence(),
+        _v_evidence(),
         _ranking(grade="A"),
         day_mode="MOMENTUM RALLY",
         day_type="WORST",
@@ -227,7 +320,7 @@ def test_elite_entry_blocks_momentum_rally_worst_day_type():
 
 def test_elite_entry_allows_chop_rally_worst_day_type():
     ok, reason, assessment = elite_entry_allowed(
-        _evidence(),
+        _v_evidence(),
         _ranking(grade="A"),
         day_mode="CHOP + RALLY",
         day_type="WORST",
@@ -241,7 +334,7 @@ def test_elite_entry_allows_chop_rally_worst_day_type():
 def test_elite_entry_blocks_worst_day_type():
     """Legacy alias: WORST alone without dayMode does not block (needs MOMENTUM RALLY)."""
     ok, reason, assessment = elite_entry_allowed(
-        _evidence(),
+        _v_evidence(),
         _ranking(grade="A"),
         day_type="WORST",
     )
@@ -252,7 +345,7 @@ def test_elite_entry_blocks_worst_day_type():
 
 def test_elite_entry_allows_good_day_type():
     ok, reason, assessment = elite_entry_allowed(
-        _evidence(),
+        _v_evidence(),
         _ranking(grade="A"),
         day_type="GOOD",
     )
@@ -267,7 +360,7 @@ def test_elite_worst_day_block_disabled():
     settings = get_settings()
     object.__setattr__(settings, "elite_trade_block_worst_day_type_enabled", False)
     ok, reason, _ = elite_entry_allowed(
-        _evidence(),
+        _v_evidence(),
         _ranking(grade="A"),
         day_mode="MOMENTUM RALLY",
         day_type="WORST",
@@ -279,31 +372,31 @@ def test_elite_worst_day_block_disabled():
 
 def test_elite_entry_blocks_base_stage():
     ok, reason, _ = elite_entry_allowed(
-        _evidence(
-            flatThenVertical=True,
+        _ftv_evidence(
             armedBaseLaunch=False,
             eliteBaseReady=False,
             firstLift=False,
             activeBreakout=False,
             velocity3s=1.0,
-            flatVerticalQuality=95.0,
+            flatVerticalQuality=79.0,
             explosionScore=90.0,
         ),
         _ranking(rankScore=85.0, grade="S"),
+        settings=_settings_v_rip_off(),
     )
     assert ok is False
     assert reason == "elite_stage_below_armed"
 
 
 def test_elite_must_take_grade_s_ftv():
-    ev = _evidence(flatVerticalQuality=90.0, localBaseMovePct=10.0)
+    ev = _ftv_evidence(flatVerticalQuality=90.0, localBaseMovePct=10.0)
     assessment = build_elite_assessment(ev, _ranking(grade="S"))
     assert elite_must_take(ev, _ranking(grade="S"), assessment) is True
 
 
 def test_elite_must_take_rejects_grade_a():
-    assessment = build_elite_assessment(_evidence(), _ranking(grade="A"))
-    assert elite_must_take(_evidence(), _ranking(grade="A"), assessment) is False
+    assessment = build_elite_assessment(_ftv_evidence(), _ranking(grade="A"))
+    assert elite_must_take(_ftv_evidence(), _ranking(grade="A"), assessment) is False
 
 
 @patch("app.engines.elite_trade_budget._iso_week", return_value="2026-W36")
@@ -358,7 +451,7 @@ def test_elite_budget_blocks_entry_when_cap_hit(_mock_week):
     state = AutoTraderState(dailyStrategy={
         "eliteTradeBudget": {"isoWeek": "2026-W36", "entriesUsed": 8, "mustTakeUsed": 0},
     })
-    blocked, reason, _ = elite_budget_blocks_entry(state, _evidence(), _ranking())
+    blocked, reason, _ = elite_budget_blocks_entry(state, _v_evidence(), _ranking())
     assert blocked is True
     assert reason == "elite_weekly_cap_reached"
 
@@ -377,7 +470,8 @@ def test_top_moment_gate_delegates_to_elite_engine():
     object.__setattr__(settings, "elite_trade_must_take_min_fvq", 85.0)
     object.__setattr__(settings, "elite_trade_must_take_max_local_base_pct", 15.0)
 
-    ok, reason, moment = top_moment_entry_allowed(_evidence(), _ranking())
+    with patch("app.config.get_settings", return_value=settings):
+        ok, reason, moment = top_moment_entry_allowed(_v_evidence(), _ranking())
     assert ok is True
     assert reason == "ok"
     assert moment in ("FTV", "ELITE", "EXPLODING", "V")

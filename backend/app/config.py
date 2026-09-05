@@ -295,6 +295,16 @@ class Settings(BaseSettings):
     elite_trade_block_perfect_score_enabled: bool = True
     elite_trade_perfect_score_threshold: float = 99.95
     elite_trade_perfect_score_max_local_pct: float = 15.0
+    # Historical FTV EOD (12d): V-only beats FTV/EXPLOSIVE on baseline win gates (+₹531k vs +₹514k).
+    elite_trade_v_rip_only_enabled: bool = True
+    # Block flatVerticalQuality chase above ceiling (EOD: FVQ 80–89 → 33% win).
+    elite_trade_block_fvq_above: float = 80.0
+    # Block very shallow local-base entries until TRIGGERED+ confirms lift (not first tick).
+    elite_trade_shallow_lift_block_enabled: bool = True
+    elite_trade_shallow_lift_max_local_pct: float = 10.0
+    elite_trade_shallow_lift_min_stage: str = "TRIGGERED"
+    # Require ≥2 radar milestones when milestoneCount is present on evidence.
+    elite_trade_min_milestone_depth: int = 2
     # Block Elite on MOMENTUM RALLY + WORST dayType only (keep CHOP+RALLY/WORST).
     elite_trade_block_worst_day_type_enabled: bool = True
     # Relax (don't skip) failed_launch thresholds on elite runner entries.
