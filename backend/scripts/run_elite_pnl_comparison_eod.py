@@ -258,6 +258,7 @@ def _row_from_archive(
             settings=settings,
             day_mode=day_mode,
             snapshots={sym: snap},
+            side=str(alert.get("side") or ""),
         )
 
     grade_rank = {"S": 0, "A": 1, "B": 2, "C": 3}.get(str(ranking.get("grade") or "C").upper(), 9)

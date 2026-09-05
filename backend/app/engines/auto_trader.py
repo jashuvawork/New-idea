@@ -692,6 +692,7 @@ async def _open_from_candidate(
                 day_mode=resolve_policy_day_mode(state),
                 state=state,
                 snapshots=snapshots,
+                side=str(getattr(candidate.side, "value", candidate.side) or ""),
             )
             if not top_ok:
                 return False, top_reason
@@ -2539,6 +2540,7 @@ async def _open_from_candidate(
                 day_mode=resolve_policy_day_mode(state),
                 state=state,
                 snapshots=snapshots,
+                side=str(getattr(candidate.side, "value", candidate.side) or ""),
             )
             if not top_ok:
                 return False, top_reason

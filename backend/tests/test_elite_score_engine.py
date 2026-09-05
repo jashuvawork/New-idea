@@ -243,6 +243,19 @@ def test_elite_entry_blocks_call_on_momentum_rally():
     assert assessment.get("side") == "CALL"
 
 
+def test_elite_entry_blocks_call_on_momentum_rally_when_side_only_in_ranking():
+    """Live rank_entry_candidate often carries side on ranking, not evidence."""
+    ok, reason, assessment = elite_entry_allowed(
+        _v_evidence(),
+        {**_ranking(grade="A"), "side": "CALL"},
+        day_mode="MOMENTUM RALLY",
+        day_type="GOOD",
+    )
+    assert ok is False
+    assert reason == "elite_call_momentum_rally_blocked"
+    assert assessment.get("side") == "CALL"
+
+
 def test_elite_entry_allows_put_on_momentum_rally():
     ok, reason, assessment = elite_entry_allowed(
         _v_evidence(side="PUT"),

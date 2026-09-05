@@ -517,7 +517,10 @@ def elite_entry_allowed(
         }
         return False, block_reason, assessment
 
-    resolved_side = _resolve_side(evidence, side)
+    resolved_side = _resolve_side(
+        evidence,
+        side or str(ranking.get("side") or ""),
+    )
     side_blocked, side_block_reason = elite_side_day_mode_blocked(
         resolved_side,
         resolved_mode,
