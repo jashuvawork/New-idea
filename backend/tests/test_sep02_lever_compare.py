@@ -54,12 +54,14 @@ def test_grade_b_exploding_blocked_off_allowed_on():
     ranking = {"grade": "B", "gradePriority": 4}
 
     off = Settings(
+        elite_trade_engine_enabled=False,
         top_moments_exploding_elite_grade_b_enabled=False,
         top_moments_momentum_rally_grade_b_enabled=False,
         top_moments_day_type_grade_policy_enabled=False,
         top_moments_fast_day_grade_c_enabled=False,
     )
     on = Settings(
+        elite_trade_engine_enabled=False,
         top_moments_exploding_elite_grade_b_enabled=True,
         top_moments_momentum_rally_grade_b_enabled=True,
         top_moments_day_type_grade_policy_enabled=True,

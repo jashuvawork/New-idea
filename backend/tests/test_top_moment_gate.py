@@ -9,6 +9,15 @@ from app.engines.top_moment_gate import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _legacy_top_moment_gate_only(monkeypatch):
+    """Legacy gate tests target the grade maze, not the EliteScore engine."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "elite_trade_engine_enabled", False, raising=False)
+
+
 def _evidence(**kwargs):
     base = {
         "mode": "explosion",
@@ -90,6 +99,7 @@ def test_top_moment_blocks_grade_b():
 
     with patch("app.config.get_settings") as mock_settings:
         settings = mock_settings.return_value
+        settings.elite_trade_engine_enabled = False
         settings.top_moments_exploding_elite_grade_b_enabled = False
         settings.top_moments_momentum_rally_grade_b_enabled = False
         ok, reason, _ = top_moment_entry_allowed(
