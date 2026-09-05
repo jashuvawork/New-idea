@@ -353,6 +353,26 @@ def main() -> int:
         legacy_trades.append({**row, **leg, "policy": "legacy"})
         current_trades.append({**row, **cur, "policy": "current"})
 
+    trade_rows: list[dict[str, Any]] = []
+    for leg, cur in zip(legacy_trades, current_trades):
+        delta = round(float(cur["pnlInr"]) - float(leg["pnlInr"]), 0)
+        trade_rows.append({
+            "date": leg["date"],
+            "contract": f"{leg['symbol']} {leg['side']} {leg['strike']}",
+            "dayMode": leg.get("dayMode"),
+            "dayType": leg.get("dayType"),
+            "eliteScore": leg.get("eliteScore"),
+            "localBasePct": leg.get("localBasePct"),
+            "legacyPnlInr": leg["pnlInr"],
+            "currentPnlInr": cur["pnlInr"],
+            "deltaInr": delta,
+            "legacyExit": leg.get("exitReason"),
+            "currentExit": cur.get("exitReason"),
+            "legacyPeakPct": leg.get("peakPct"),
+            "currentPeakPct": cur.get("peakPct"),
+        })
+    trade_rows.sort(key=lambda r: -abs(float(r["deltaInr"])))
+
     out = {
         "liveGateCandidates": len(unique),
         "replayedWithPremiumTape": len(legacy_trades),
@@ -364,16 +384,16 @@ def main() -> int:
             - sum(float(t["pnlInr"]) for t in legacy_trades),
             0,
         ),
-        "improvedTrades": sum(
-            1
-            for leg, cur in zip(legacy_trades, current_trades)
-            if float(cur["pnlInr"]) > float(leg["pnlInr"]) + 1
-        ),
-        "worsenedTrades": sum(
-            1
-            for leg, cur in zip(legacy_trades, current_trades)
-            if float(cur["pnlInr"]) < float(leg["pnlInr"]) - 1
-        ),
+        "improvedTrades": sum(1 for r in trade_rows if float(r["deltaInr"]) > 1),
+        "worsenedTrades": sum(1 for r in trade_rows if float(r["deltaInr"]) < -1),
+        "unchangedTrades": sum(1 for r in trade_rows if abs(float(r["deltaInr"])) <= 1),
+        "topImprovements": [r for r in trade_rows if float(r["deltaInr"]) > 1][:10],
+        "topWorsened": [r for r in trade_rows if float(r["deltaInr"]) < -1][:10],
+        "exitReasonChanges": [
+            r for r in trade_rows
+            if r["legacyExit"] != r["currentExit"]
+        ][:20],
+        "trades": trade_rows,
     }
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(out, indent=2), encoding="utf-8")
