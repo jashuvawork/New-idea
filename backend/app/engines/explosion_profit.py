@@ -2122,6 +2122,12 @@ def evaluate_explosion_exit(
     elite_hold = int(getattr(settings, "explosion_elite_max_hold_seconds", 1800) or 1800)
     if tier_u in ("ELITE", "EXPLODING") and elite_hold > 0:
         max_hold = max(max_hold, elite_hold)
+    if ctx.get("chopLiveGuard"):
+        chop_elite_hold = int(
+            getattr(settings, "explosion_chop_elite_max_hold_seconds", 900) or 900
+        )
+        if chop_elite_hold > 0 and tier_u in ("ELITE", "EXPLODING"):
+            max_hold = min(max_hold, chop_elite_hold)
     if ctx.get("topExplosionMaxLots") or high_conviction_trade:
         max_hold = max(
             max_hold,

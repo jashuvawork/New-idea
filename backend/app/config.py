@@ -307,6 +307,23 @@ class Settings(BaseSettings):
     elite_trade_min_milestone_depth: int = 2
     # Block Elite on MOMENTUM RALLY + WORST dayType only (keep CHOP+RALLY/WORST).
     elite_trade_block_worst_day_type_enabled: bool = True
+    # Block CALL on chop day modes when still very near base (Sep03 EOD loser).
+    elite_call_chop_shallow_block_enabled: bool = True
+    elite_call_chop_shallow_max_local_pct: float = 10.0
+    # V-RIP shallow entries must show firstLift, not tier-inferred breakout alone.
+    elite_v_rip_shallow_require_first_lift_enabled: bool = True
+    # PUT V-RIP with confirmed lift near base: calibrated FVQ ceiling (not full exempt).
+    elite_fvq_put_v_rip_lift_ceiling: float = 85.0
+    elite_fvq_put_v_rip_lift_max_local_pct: float = 15.0
+    # Trend-day bonus slot: one extra weekly entry when score ≥ threshold on rally days.
+    elite_trend_day_bonus_slot_enabled: bool = True
+    elite_trend_day_bonus_min_score: float = 98.0
+    elite_trend_day_bonus_day_modes: str = "MOMENTUM RALLY,BULLISH DAY"
+    # Pre-entry: shrink lots to fit per_trade_risk instead of hard reject (elite only).
+    elite_preentry_risk_cap_reduce_enabled: bool = True
+    elite_preentry_risk_cap_min_lots: int = 1
+    # Chop-day elite runners: tighter time-stop vs default 1800s hold.
+    explosion_chop_elite_max_hold_seconds: int = 900
     # Relax (don't skip) failed_launch thresholds on elite runner entries.
     elite_failed_launch_relax_enabled: bool = True
     elite_failed_launch_relax_min_score: float = 90.0
