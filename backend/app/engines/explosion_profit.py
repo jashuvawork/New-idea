@@ -140,6 +140,96 @@ def _is_base_rip_runner_trade(trade: PaperTrade) -> bool:
     return False
 
 
+def _elite_failed_launch_runner(trade: PaperTrade, *, settings: Any = None) -> bool:
+    """True when trade is an elite runner that deserves relaxed failed_launch thresholds."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "elite_failed_launch_relax_enabled", True)):
+        return False
+    ctx = trade.entryContext or {}
+    assessment = ctx.get("eliteAssessment") or {}
+    if isinstance(assessment, dict) and assessment:
+        min_score = float(
+            getattr(settings, "elite_failed_launch_relax_min_score", 90.0) or 90.0
+        )
+        if float(assessment.get("eliteScore") or 0) < min_score - 1e-6:
+            return False
+        min_grade = str(
+            getattr(settings, "elite_failed_launch_relax_min_grade", "A") or "A"
+        ).upper()
+        grade = str(assessment.get("grade") or "").upper()
+        grade_rank = {"S": 0, "A": 1, "B": 2, "C": 3}
+        if grade_rank.get(grade, 9) > grade_rank.get(min_grade, 1):
+            return False
+        if bool(getattr(settings, "elite_failed_launch_relax_require_good_timing", True)):
+            timing = str(
+                assessment.get("timing")
+                or ctx.get("timingAssessment")
+                or ""
+            ).upper()
+            if timing and timing not in ("GOOD",):
+                return False
+        max_local = float(
+            getattr(settings, "elite_failed_launch_relax_max_local_base_pct", 25.0) or 25.0
+        )
+        local = float(
+            assessment.get("localBasePct")
+            or ctx.get("localBaseBaseRelPct")
+            or ctx.get("localBaseMovePct")
+            or 999
+        )
+        if local > max_local + 1e-6:
+            return False
+        setup = str(assessment.get("setup") or "").upper()
+        if setup and setup not in ("FTV", "V", "EXPLOSIVE"):
+            return False
+        return True
+    if not bool(getattr(settings, "elite_trade_engine_enabled", False)):
+        return False
+    if ctx.get("maxProfitCapture") and ctx.get("ictFlatThenVertical"):
+        max_local = float(
+            getattr(settings, "elite_failed_launch_relax_max_local_base_pct", 25.0) or 25.0
+        )
+        local = float(ctx.get("localBaseBaseRelPct") or ctx.get("localBaseMovePct") or 999)
+        return local <= max_local + 1e-6
+    return False
+
+
+def _failed_launch_thresholds(
+    trade: PaperTrade,
+    *,
+    settings: Any = None,
+) -> tuple[int, int, float, float, float]:
+    """Return (min_hold, max_hold, max_best, min_loss, max_velocity_3s) for failed_launch."""
+    settings = settings or get_settings()
+    min_hold = int(
+        _cfg_float(settings, "explosion_failed_launch_min_hold_seconds", 15)
+    )
+    max_hold = int(
+        _cfg_float(settings, "explosion_failed_launch_max_hold_seconds", 45)
+    )
+    max_best = _cfg_float(settings, "explosion_failed_launch_max_best_points", 1.0)
+    min_loss = _cfg_float(settings, "explosion_failed_launch_min_loss_points", 1.5)
+    max_v = _cfg_float(settings, "explosion_failed_launch_max_velocity_3s", 0.0)
+    if _elite_failed_launch_runner(trade, settings=settings):
+        max_hold = max(
+            max_hold,
+            int(getattr(settings, "elite_failed_launch_relaxed_max_hold_seconds", 90) or 90),
+        )
+        max_best = max(
+            max_best,
+            float(getattr(settings, "elite_failed_launch_relaxed_max_best_points", 3.0) or 3.0),
+        )
+        min_loss = max(
+            min_loss,
+            float(getattr(settings, "elite_failed_launch_relaxed_min_loss_points", 2.5) or 2.5),
+        )
+        max_v = min(
+            max_v,
+            float(getattr(settings, "elite_failed_launch_relaxed_max_velocity_3s", -1.0) or -1.0),
+        )
+    return min_hold, max_hold, max_best, min_loss, max_v
+
+
 # symbol -> last explosion stop timestamp (IST)
 _explosion_stop_at: dict[str, datetime] = {}
 _explosion_stop_cooldown_sec: dict[str, int] = {}
@@ -1674,20 +1764,8 @@ def evaluate_explosion_exit(
         not hold_to_sl
         and bool(getattr(settings, "explosion_failed_launch_exit_enabled", True))
     ):
-        failed_min_hold = int(
-            _cfg_float(settings, "explosion_failed_launch_min_hold_seconds", 15)
-        )
-        failed_max_hold = int(
-            _cfg_float(settings, "explosion_failed_launch_max_hold_seconds", 45)
-        )
-        failed_max_best = _cfg_float(
-            settings, "explosion_failed_launch_max_best_points", 1.0
-        )
-        failed_min_loss = _cfg_float(
-            settings, "explosion_failed_launch_min_loss_points", 1.5
-        )
-        failed_max_v = _cfg_float(
-            settings, "explosion_failed_launch_max_velocity_3s", 0.0
+        failed_min_hold, failed_max_hold, failed_max_best, failed_min_loss, failed_max_v = (
+            _failed_launch_thresholds(trade, settings=settings)
         )
         if (
             failed_min_hold <= hold <= failed_max_hold

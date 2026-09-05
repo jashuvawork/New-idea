@@ -697,7 +697,14 @@ def _simulate_trade_from_entry(
         best = max(best, pj - ep)
         tr.bestPnlPoints = best
         peak = max(peak, pj)
-        v = 2.0 if pj >= peak else -0.8
+        lookback = tj - timedelta(seconds=3)
+        ref_p = ep
+        for t_prev, p_prev in forward:
+            if t_prev > tj:
+                break
+            if t_prev <= lookback:
+                ref_p = p_prev
+        v = round(pj - ref_p, 3)
         tr.entryContext["liveVelocity3s"] = v
         reason, _pnl = evaluate_explosion_exit(tr, pj, tier, units, live_velocity_3s=v)
         if reason:
