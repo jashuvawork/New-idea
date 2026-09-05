@@ -22,6 +22,7 @@ from scripts.run_elite_pnl_comparison_eod import (
     _load_radars,
     _pnl_summary,
     _row_from_archive,
+    dedupe_same_moment_top1,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -70,7 +71,7 @@ def _rows_for_settings(settings: Settings) -> list[dict[str, Any]]:
             rec = _row_from_archive(date, row, settings, legacy_settings=legacy)
             if rec and rec.get("eliteEnginePass"):
                 rows.append(rec)
-    return rows
+    return dedupe_same_moment_top1(rows)
 
 
 def main() -> int:
