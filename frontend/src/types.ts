@@ -167,6 +167,73 @@ export interface ExplosionAlert {
   localBaseReversalActive?: boolean;
   localBaseReversalConfidence?: number;
   localBaseReversalSide?: string;
+  ictBaseArmed?: boolean;
+  ictVRipReady?: boolean;
+  ictBuildingRipReady?: boolean;
+  ictArmedBaseLaunch?: boolean;
+  ictEliteBaseReady?: boolean;
+}
+
+export interface EliteWinRateGatesSummary {
+  maxLocalBasePct?: number;
+  callMaxLocalBasePct?: number;
+  putMaxLocalBasePct?: number;
+  callBlockMomentumRally?: boolean;
+  putBlockBullishDay?: boolean;
+  blockPerfectScore?: boolean;
+  perfectScoreMaxLocalPct?: number;
+  vRipOnly?: boolean;
+  blockFvqAbove?: number;
+  shallowLiftBlock?: boolean;
+  shallowLiftMaxLocalPct?: number;
+  minMilestoneDepth?: number;
+}
+
+export interface EliteTradeBudgetSummary {
+  enabled?: boolean;
+  isoWeek?: string;
+  weeklyCap?: number;
+  entriesUsed?: number;
+  entriesRemaining?: number;
+  mustTakeUsed?: number;
+  capReached?: boolean;
+  lastEntry?: Record<string, unknown> | null;
+  winRateGates?: EliteWinRateGatesSummary;
+}
+
+export interface DirectionalLockSymbolSummary {
+  direction?: string;
+  lockedSide?: string | null;
+  breadth?: string;
+  chart?: string;
+  callSwitchConfirmed?: boolean;
+  putSwitchConfirmed?: boolean;
+  indexRallySideFlip?: boolean;
+  indexSlideSideFlip?: boolean;
+}
+
+export interface DirectionalLockSummary {
+  enabled?: boolean;
+  stickyPerSymbol?: boolean;
+  switchMinConfirmations?: number;
+  symbols?: Record<string, DirectionalLockSymbolSummary>;
+}
+
+export interface IctMonitorSignal {
+  symbol?: string;
+  side?: string;
+  strike?: number;
+  tier?: string;
+  ictScore?: number;
+  flatVerticalQuality?: number;
+  baseRelativeMovePct?: number;
+  vRipReady?: boolean;
+  baseArmed?: boolean;
+}
+
+export interface IctBreakoutMonitorSummary {
+  enabled?: boolean;
+  signals?: IctMonitorSignal[];
 }
 
 export interface StrategyMatrixEntry {
@@ -456,6 +523,9 @@ export interface ChopGuards {
   moneynessPolicy?: MoneynessPolicy;
   expiryGuards?: ExpiryGuardsSummary;
   psychologyHold?: { enabled?: boolean; labels?: string; minScore?: number };
+  directionalLock?: DirectionalLockSummary;
+  eliteTradeBudget?: EliteTradeBudgetSummary;
+  ictBreakoutMonitor?: IctBreakoutMonitorSummary;
 }
 
 export interface ExpiryGuardsSummary {
