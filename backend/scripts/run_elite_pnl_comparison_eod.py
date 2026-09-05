@@ -237,6 +237,9 @@ def _row_from_archive(
         "timingAssessment": timing_assessment,
         "timingAction": timing_action,
     }
+    milestones = row.get("milestones") or alert.get("milestones") or []
+    if milestones:
+        ev["milestoneCount"] = len(milestones)
 
     day_mode = _infer_day_mode(snap.timestamp, snap)
     min_grade = resolve_top_moment_min_grade(min_grade="A", day_mode=day_mode, settings=legacy_settings)
