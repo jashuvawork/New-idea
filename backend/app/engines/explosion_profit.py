@@ -198,6 +198,52 @@ def _elite_failed_launch_runner(trade: PaperTrade, *, settings: Any = None) -> b
     return False
 
 
+def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = None) -> bool:
+    """Skip failed_launch / barely-green for bundle-stamped near-base runners."""
+    settings = settings or get_settings()
+    ctx = trade.entryContext or {}
+    if not (
+        ctx.get("eliteRunnerExitBundle")
+        or (ctx.get("vBaseFtvRunner") and ctx.get("maxProfitCapture"))
+    ):
+        return False
+    from app.engines.elite_runner_exit_bundle import elite_runner_failed_launch_relax
+
+    if bool(getattr(settings, "elite_runner_skip_failed_launch_enabled", True)):
+        if elite_runner_failed_launch_relax(trade, settings=settings):
+            return True
+    if _elite_failed_launch_runner(trade, settings=settings):
+        return True
+    return False
+
+
+def _skip_explosion_time_stop_for_runner(
+    trade: PaperTrade,
+    *,
+    best: float,
+    hold: float,
+    settings: Any = None,
+) -> bool:
+    """Defer time-stop while a stamped runner has not yet printed meaningful green."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "elite_runner_skip_time_stop_enabled", True)):
+        return False
+    ctx = trade.entryContext or {}
+    if not (
+        ctx.get("eliteRunnerExitBundle")
+        or ctx.get("vBaseFtvRunner")
+        or ctx.get("maxProfitCapture")
+    ):
+        return False
+    min_hold = int(
+        getattr(settings, "elite_runner_skip_time_stop_min_hold_seconds", 600) or 600
+    )
+    max_best = float(
+        getattr(settings, "elite_runner_skip_time_stop_max_best_points", 3.0) or 3.0
+    )
+    return hold < min_hold and best <= max_best
+
+
 def _failed_launch_thresholds(
     trade: PaperTrade,
     *,
@@ -1780,6 +1826,7 @@ def evaluate_explosion_exit(
     if (
         not hold_to_sl
         and bool(getattr(settings, "explosion_failed_launch_exit_enabled", True))
+        and not _should_skip_elite_runner_early_exits(trade, settings=settings)
     ):
         failed_min_hold, failed_max_hold, failed_max_best, failed_min_loss, failed_max_v = (
             _failed_launch_thresholds(trade, settings=settings)
@@ -1820,6 +1867,10 @@ def evaluate_explosion_exit(
     if (
         not hold_to_sl
         and bool(getattr(settings, "explosion_barely_green_stop_enabled", True))
+        and not (
+            _should_skip_elite_runner_early_exits(trade, settings=settings)
+            and bool(getattr(settings, "elite_runner_skip_barely_green_enabled", True))
+        )
     ):
         ng_min_green = _cfg_float(settings, "explosion_never_green_min_green_points", 0.5)
         bg_max = _cfg_float(settings, "explosion_barely_green_max_best_points", 3.0)
@@ -2023,6 +2074,12 @@ def evaluate_explosion_exit(
     )
     min_pct_best = _cfg_float(settings, "ftv_runner_pct_trail_min_best_points", 6.0)
     stage_min_hold = _cfg_float(settings, "explosion_stage_trail_min_hold_seconds", 90.0)
+    ctx_stage = trade.entryContext or {}
+    if ctx_stage.get("vBaseFtvRunner") or ctx_stage.get("eliteRunnerExitBundle"):
+        stage_min_hold = max(
+            stage_min_hold,
+            _cfg_float(settings, "elite_runner_stage_trail_min_hold_seconds", 240.0),
+        )
     if (
         pct_keep_floor is not None
         and best >= min_pct_best
@@ -2165,6 +2222,10 @@ def evaluate_explosion_exit(
     if thesis_hold > 0:
         max_hold = max(max_hold, thesis_hold)
     if hold >= max_hold:
+        if _skip_explosion_time_stop_for_runner(
+            trade, best=best, hold=hold, settings=settings,
+        ):
+            return None, pnl_inr
         # Prefer trail/giveback over blind time exit when runner peaked then faded
         if best >= exit_params.trail_arm_points:
             giveback = best - pnl_pts

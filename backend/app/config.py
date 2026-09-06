@@ -330,9 +330,9 @@ class Settings(BaseSettings):
     elite_failed_launch_relax_min_grade: str = "A"
     elite_failed_launch_relax_require_good_timing: bool = True
     elite_failed_launch_relax_max_local_base_pct: float = 20.0
-    elite_failed_launch_relaxed_max_hold_seconds: int = 90
-    elite_failed_launch_relaxed_max_best_points: float = 3.0
-    elite_failed_launch_relaxed_min_loss_points: float = 2.5
+    elite_failed_launch_relaxed_max_hold_seconds: int = 300
+    elite_failed_launch_relaxed_max_best_points: float = 5.0
+    elite_failed_launch_relaxed_min_loss_points: float = 3.0
     elite_failed_launch_relaxed_max_velocity_3s: float = -1.0
     elite_failed_launch_relax_min_velocity_3s: float = 0.0
     # Auto-stamp maxProfitCapture + vBaseFtvRunner on elite near-base V/FTV entries.
@@ -340,6 +340,13 @@ class Settings(BaseSettings):
     elite_runner_exit_max_local_base_pct: float = 15.0
     elite_runner_exit_min_score: float = 90.0
     elite_runner_exit_min_grade: str = "A"
+    # Skip timestamp exits that cut bundle-stamped runners before the move develops.
+    elite_runner_skip_failed_launch_enabled: bool = True
+    elite_runner_skip_barely_green_enabled: bool = True
+    elite_runner_skip_time_stop_enabled: bool = True
+    elite_runner_skip_time_stop_min_hold_seconds: int = 600
+    elite_runner_skip_time_stop_max_best_points: float = 3.0
+    elite_runner_stage_trail_min_hold_seconds: float = 240.0
     # Parabolic trail after +100% MFE on V-base runners (looser giveback / extension).
     ftv_vbase_parabolic_trail_enabled: bool = True
     ftv_vbase_parabolic_giveback_ratio: float = 0.40
@@ -1736,7 +1743,7 @@ class Settings(BaseSettings):
     explosion_barely_green_stop_enabled: bool = True
     explosion_barely_green_max_best_points: float = 3.0
     explosion_barely_green_min_loss_points: float = 1.5
-    explosion_barely_green_min_hold_seconds: int = 180
+    explosion_barely_green_min_hold_seconds: int = 300
     # Index-confirmed FTV + structured local-base rip keeps capital max lots on chop/worst
     # days (Sep1 NIFTY 23950 CE: eliteFullLot authorized but chop+elite soft cap → 6).
     index_confirmed_ftv_bypasses_fake_trap_lot_cap: bool = True
@@ -2574,7 +2581,7 @@ class Settings(BaseSettings):
     # Do not tighten afternoon trail arm onto stage-ladder trades (6pt arm clips rips).
     afternoon_capture_skip_exit_tighten_on_stage_ladder: bool = True
     # Stage-ladder / peak-keep exits need a minimum hold — avoid 15s scratch on noise.
-    explosion_stage_trail_min_hold_seconds: float = 90.0
+    explosion_stage_trail_min_hold_seconds: float = 180.0
 
     # All-day explosive capture — 9:20–15:30 session rips (e.g. NIFTY 23850 PE 14:00 +1360%)
     all_day_explosion_capture_enabled: bool = True
@@ -2817,11 +2824,11 @@ class Settings(BaseSettings):
     explosion_never_green_min_hold_seconds: int = 10
     # Scratch a launch that immediately loses both price and velocity confirmation.
     explosion_failed_launch_exit_enabled: bool = True
-    explosion_failed_launch_min_hold_seconds: int = 5
-    explosion_failed_launch_max_hold_seconds: int = 60
-    explosion_failed_launch_max_best_points: float = 2.0
-    explosion_failed_launch_min_loss_points: float = 1.5
-    explosion_failed_launch_max_velocity_3s: float = 0.0
+    explosion_failed_launch_min_hold_seconds: int = 15
+    explosion_failed_launch_max_hold_seconds: int = 180
+    explosion_failed_launch_max_best_points: float = 4.0
+    explosion_failed_launch_min_loss_points: float = 2.5
+    explosion_failed_launch_max_velocity_3s: float = -0.5
     # Same-chain cooldown after a failed launch / never-green chop spike.
     explosion_failed_launch_reentry_block_enabled: bool = True
     explosion_failed_launch_reentry_cooldown_seconds: int = 1800
