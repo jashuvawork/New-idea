@@ -228,11 +228,15 @@ def _skip_explosion_time_stop_for_runner(
     hold: float,
     settings: Any = None,
 ) -> bool:
-    """Defer time-stop while a stamped runner has not yet printed meaningful green."""
+    """Defer time-stop while an elite-gated runner has not yet printed meaningful green."""
     settings = settings or get_settings()
     if not bool(getattr(settings, "elite_runner_skip_time_stop_enabled", True)):
         return False
     ctx = trade.entryContext or {}
+    assessment = ctx.get("eliteAssessment") or {}
+    if isinstance(assessment, dict) and assessment:
+        # Elite-gated entries exit on SL/trail/EOD — not the hold clock.
+        return True
     if not (
         ctx.get("eliteRunnerExitBundle")
         or ctx.get("vBaseFtvRunner")
