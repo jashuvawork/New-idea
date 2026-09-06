@@ -1596,6 +1596,15 @@ class Settings(BaseSettings):
     side_regime_flip_target_bonus: float = 6.0
     # EOD replay — apply live session gates (power hour, directional lock, best-side).
     eod_replay_live_session_gates_enabled: bool = True
+    # Full-tape quality gates: fewer BUILDING pad losers, weekly cap parity with live.
+    eod_replay_persist_weekly_elite_budget: bool = True
+    eod_replay_require_elite_or_exploding_tier: bool = False
+    eod_replay_pad_max_off_base_pct: float = 22.0
+    eod_replay_min_elite_score_for_pad: float = 90.0
+    eod_replay_block_legacy_bypass_below_min_score: bool = True
+    eod_replay_daily_max_trades: int = 2
+    eod_replay_pad_stage_trail_min_best_points: float = 8.0
+    eod_replay_pad_stage_trail_min_peak_pct: float = 15.0
 
     # Symbol / instrument cooldown — stop same-strike churn after losses
     symbol_loss_cooldown_seconds: int = 180
