@@ -199,9 +199,14 @@ def _elite_failed_launch_runner(trade: PaperTrade, *, settings: Any = None) -> b
 
 
 def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = None) -> bool:
-    """Skip failed_launch / barely-green for bundle-stamped near-base runners."""
+    """Skip failed_launch / barely-green for elite-gated and bundle-stamped runners."""
     settings = settings or get_settings()
     ctx = trade.entryContext or {}
+    assessment = ctx.get("eliteAssessment") or {}
+    if isinstance(assessment, dict) and assessment:
+        min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
+        if float(assessment.get("eliteScore") or 0) + 1e-6 >= min_score:
+            return True
     if not (
         ctx.get("eliteRunnerExitBundle")
         or (ctx.get("vBaseFtvRunner") and ctx.get("maxProfitCapture"))

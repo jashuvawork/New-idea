@@ -328,7 +328,7 @@ class Settings(BaseSettings):
     elite_failed_launch_relax_enabled: bool = True
     elite_failed_launch_relax_min_score: float = 90.0
     elite_failed_launch_relax_min_grade: str = "A"
-    elite_failed_launch_relax_require_good_timing: bool = True
+    elite_failed_launch_relax_require_good_timing: bool = False
     elite_failed_launch_relax_max_local_base_pct: float = 20.0
     elite_failed_launch_relaxed_max_hold_seconds: int = 300
     elite_failed_launch_relaxed_max_best_points: float = 5.0
