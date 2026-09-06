@@ -203,9 +203,15 @@ def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = 
     settings = settings or get_settings()
     ctx = trade.entryContext or {}
     assessment = ctx.get("eliteAssessment") or {}
+    relax_on = bool(getattr(settings, "elite_failed_launch_relax_enabled", True))
+    skip_on = bool(getattr(settings, "elite_runner_skip_failed_launch_enabled", True))
+
     if isinstance(assessment, dict) and assessment:
-        # Any trade that cleared elite_entry_allowed (incl. legacyBypass paths).
-        return True
+        if assessment.get("legacyBypass") or assessment.get("mustTake"):
+            return True
+        if skip_on and relax_on:
+            return True
+
     if not (
         ctx.get("eliteRunnerExitBundle")
         or (ctx.get("vBaseFtvRunner") and ctx.get("maxProfitCapture"))
@@ -213,10 +219,9 @@ def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = 
         return False
     from app.engines.elite_runner_exit_bundle import elite_runner_failed_launch_relax
 
-    if bool(getattr(settings, "elite_runner_skip_failed_launch_enabled", True)):
-        if elite_runner_failed_launch_relax(trade, settings=settings):
-            return True
-    if _elite_failed_launch_runner(trade, settings=settings):
+    if skip_on and elite_runner_failed_launch_relax(trade, settings=settings):
+        return True
+    if relax_on and _elite_failed_launch_runner(trade, settings=settings):
         return True
     return False
 
@@ -234,9 +239,12 @@ def _skip_explosion_time_stop_for_runner(
         return False
     ctx = trade.entryContext or {}
     assessment = ctx.get("eliteAssessment") or {}
+    relax_on = bool(getattr(settings, "elite_failed_launch_relax_enabled", True))
     if isinstance(assessment, dict) and assessment:
-        # Elite-gated entries exit on SL/trail/EOD — not the hold clock.
-        return True
+        if assessment.get("legacyBypass") or assessment.get("mustTake"):
+            return True
+        if relax_on:
+            return True
     if not (
         ctx.get("eliteRunnerExitBundle")
         or ctx.get("vBaseFtvRunner")

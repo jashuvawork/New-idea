@@ -2581,7 +2581,7 @@ class Settings(BaseSettings):
     # Do not tighten afternoon trail arm onto stage-ladder trades (6pt arm clips rips).
     afternoon_capture_skip_exit_tighten_on_stage_ladder: bool = True
     # Stage-ladder / peak-keep exits need a minimum hold — avoid 15s scratch on noise.
-    explosion_stage_trail_min_hold_seconds: float = 180.0
+    explosion_stage_trail_min_hold_seconds: float = 90.0
 
     # All-day explosive capture — 9:20–15:30 session rips (e.g. NIFTY 23850 PE 14:00 +1360%)
     all_day_explosion_capture_enabled: bool = True
