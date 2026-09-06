@@ -2588,6 +2588,55 @@ async def _open_from_candidate(
                     return False, budget_reason
                 ctx_extra["eliteAssessment"] = assessment
                 ctx_extra["eliteTradeBudget"] = assessment.get("mustTake")
+                if candidate.mode == "explosion" and candidate.explosion_event:
+                    from app.engines.elite_runner_exit_bundle import (
+                        apply_elite_runner_exit_bundle,
+                        refresh_runner_exit_plans,
+                    )
+
+                    _ev = candidate.explosion_event
+                    _base_rel = float(ctx_extra.get("localBaseBaseRelPct") or 0)
+                    apply_elite_runner_exit_bundle(
+                        ctx_extra,
+                        assessment=assessment,
+                        base_rel_pct=_base_rel,
+                        first_lift=bool(
+                            ctx_extra.get("ictFirstLift")
+                            or ctx_extra.get("firstLiftCapture")
+                        ),
+                        ict_flat_vertical=bool(ctx_extra.get("ictFlatThenVertical")),
+                        tier=str(getattr(_ev, "tier", "") or ""),
+                        settings=settings,
+                    )
+                    refresh_runner_exit_plans(
+                        ctx_extra,
+                        entry_premium=float(
+                            fill_premium or candidate.premium or 50
+                        ),
+                        base_premium=float(
+                            ctx_extra.get("localBaseBasePremium") or base_premium or 0
+                        ),
+                        exit_plan=(
+                            ctx_extra.get("exitPlan")
+                            if isinstance(ctx_extra.get("exitPlan"), dict)
+                            else exit_plan
+                        ),
+                        velocity_3s=float(
+                            ctx_extra.get("velocity3s")
+                            or ctx_extra.get("entryVelocity3s")
+                            or 0
+                        ),
+                        volume_surge=float(
+                            getattr(_ev, "volume_surge", 0) or 1
+                        ),
+                        session_move_pct=float(
+                            getattr(_ev, "daily_move_pct", 0) or 0
+                        ),
+                        premium_fvg=bool(ctx_extra.get("ictPremiumFvg")),
+                        flat_then_vertical=bool(ctx_extra.get("ictFlatThenVertical")),
+                        mega_rip=bool(ctx_extra.get("ictMegaRip")),
+                        settings=settings,
+                    )
         if (
             full_sleeve_authorized
             and (

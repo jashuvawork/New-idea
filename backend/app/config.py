@@ -334,6 +334,16 @@ class Settings(BaseSettings):
     elite_failed_launch_relaxed_max_best_points: float = 3.0
     elite_failed_launch_relaxed_min_loss_points: float = 2.5
     elite_failed_launch_relaxed_max_velocity_3s: float = -1.0
+    elite_failed_launch_relax_min_velocity_3s: float = 0.0
+    # Auto-stamp maxProfitCapture + vBaseFtvRunner on elite near-base V/FTV entries.
+    elite_runner_exit_bundle_enabled: bool = True
+    elite_runner_exit_max_local_base_pct: float = 15.0
+    elite_runner_exit_min_score: float = 90.0
+    elite_runner_exit_min_grade: str = "A"
+    # Parabolic trail after +100% MFE on V-base runners (looser giveback / extension).
+    ftv_vbase_parabolic_trail_enabled: bool = True
+    ftv_vbase_parabolic_giveback_ratio: float = 0.40
+    ftv_vbase_parabolic_extend_hot_stages: float = 5.0
     # One-week validation: lower local-base floors so detection, grading, and entry
     # can fire at 2–15% pad. Use /api/ai/local-base-audit/{date} to score each day.
     local_base_audit_week_enabled: bool = False
