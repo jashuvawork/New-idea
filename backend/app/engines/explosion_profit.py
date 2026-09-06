@@ -207,8 +207,15 @@ def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = 
     skip_on = bool(getattr(settings, "elite_runner_skip_failed_launch_enabled", True))
 
     if isinstance(assessment, dict) and assessment:
-        if assessment.get("legacyBypass") or assessment.get("mustTake"):
+        if assessment.get("mustTake"):
             return True
+        if assessment.get("legacyBypass"):
+            min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
+            if float(assessment.get("eliteScore") or 0) + 1e-6 >= min_score:
+                return True
+            if ctx.get("eliteRunnerExitBundle"):
+                return True
+            return False
         if skip_on and relax_on:
             return True
 
@@ -241,8 +248,15 @@ def _skip_explosion_time_stop_for_runner(
     assessment = ctx.get("eliteAssessment") or {}
     relax_on = bool(getattr(settings, "elite_failed_launch_relax_enabled", True))
     if isinstance(assessment, dict) and assessment:
-        if assessment.get("legacyBypass") or assessment.get("mustTake"):
+        if assessment.get("mustTake"):
             return True
+        if assessment.get("legacyBypass"):
+            min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
+            if float(assessment.get("eliteScore") or 0) + 1e-6 >= min_score:
+                return True
+            if ctx.get("eliteRunnerExitBundle"):
+                return True
+            return False
         if relax_on:
             return True
     if not (
@@ -258,6 +272,20 @@ def _skip_explosion_time_stop_for_runner(
         getattr(settings, "elite_runner_skip_time_stop_max_best_points", 3.0) or 3.0
     )
     return hold < min_hold and best <= max_best
+
+
+def _unproven_building_pad_trade(trade: PaperTrade, *, settings: Any = None) -> bool:
+    """BUILDING pad entries without runner bundle — defer stage-trail until real peak."""
+    ctx = trade.entryContext or {}
+    if ctx.get("eliteRunnerExitBundle") or (
+        ctx.get("vBaseFtvRunner") and ctx.get("maxProfitCapture")
+    ):
+        return False
+    tier_u = str(ctx.get("explosionTier") or ctx.get("tier") or "").upper()
+    reason = str(ctx.get("entryReason") or "").lower()
+    if tier_u == "BUILDING":
+        return True
+    return "coil_pad" in reason or "pad_ready" in reason
 
 
 def _failed_launch_thresholds(
@@ -2111,6 +2139,16 @@ def evaluate_explosion_exit(
         or (stage_size > 0 and best >= stage_size)
         or moment_stage_near_complete(trade, best, stage_size, settings=settings)
     )
+    if _unproven_building_pad_trade(trade, settings=settings):
+        entry_prem = float(getattr(trade, "entryPremium", 0) or 0)
+        min_peak_pts = max(
+            _cfg_float(settings, "eod_replay_pad_stage_trail_min_best_points", 8.0),
+            entry_prem
+            * _cfg_float(settings, "eod_replay_pad_stage_trail_min_peak_pct", 15.0)
+            / 100.0,
+        )
+        if best + 1e-6 < min_peak_pts:
+            stage_armed = False
     if stage_armed and pnl_pts <= stage_floor and hold >= stage_min_hold:
         return "explosion_stage_trail", pnl_inr
 

@@ -120,11 +120,20 @@ def main() -> int:
 
     settings = _current_settings()
     days: list[dict] = []
+    replay_state = None
+    if bool(getattr(settings, "eod_replay_persist_weekly_elite_budget", True)):
+        from app.models.schemas import AutoTraderState
+
+        replay_state = AutoTraderState()
     for date in available:
         print(f"\n[{date}] full-day EOD replay...", flush=True)
         from app.engines.eod_local_base_replay import replay_local_base_day
 
-        report = replay_local_base_day(date, settings=settings)
+        report = replay_local_base_day(
+            date,
+            settings=settings,
+            replay_state=replay_state,
+        )
         trades = list(report.get("trades") or [])
         gates = dict(report.get("gateStats") or {})
         top_gates = sorted(gates.items(), key=lambda row: -int(row[1]))[:12]

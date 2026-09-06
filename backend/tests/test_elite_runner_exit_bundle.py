@@ -191,7 +191,7 @@ def test_skip_failed_launch_for_legacy_bypass_assessment():
             "localBaseBaseRelPct": 10.0,
         },
     )
-    assert _should_skip_elite_runner_early_exits(trade) is True
+    assert _should_skip_elite_runner_early_exits(trade) is False
 
 
 def test_skip_failed_launch_for_elite_assessment():

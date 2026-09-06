@@ -10,7 +10,9 @@ from app.engines.eod_local_base_replay import (
     _ReplayDateTime,
     _chart_analysis_from_spot_history,
     _enrich_alert_from_contract,
+    _eod_replay_quality_blocks_entry,
     _install_replay_clock,
+    _is_pad_lane_entry,
     _parse_window_bound,
     _replay_selection_rank,
     _restore_replay_clock,
@@ -383,3 +385,79 @@ def test_replay_clock_drives_power_hour_window():
     finally:
         power_hour._minutes_now = original
         power_hour.get_market_phase = original_phase
+
+
+def test_replay_clock_drives_elite_budget_iso_week():
+    import app.engines.elite_trade_budget as elite_budget
+
+    original = elite_budget._iso_week
+    try:
+        _ReplayDateTime.current = datetime(2026, 8, 19, 10, 0, 0, tzinfo=IST)
+        saved = _install_replay_clock(_ReplayDateTime)
+        assert elite_budget._iso_week() == "2026-W34"
+        _ReplayDateTime.current = datetime(2026, 9, 1, 10, 0, 0, tzinfo=IST)
+        assert elite_budget._iso_week() == "2026-W36"
+        _restore_replay_clock(saved)
+    finally:
+        elite_budget._iso_week = original
+
+
+def test_is_pad_lane_entry_recognizes_coil_pad():
+    assert _is_pad_lane_entry("building_coil_pad_ready")
+    assert not _is_pad_lane_entry("v_rip_session_low_ready")
+
+
+@patch("app.engines.eod_local_base_replay.get_settings")
+def test_eod_replay_quality_blocks_building_tier_when_enabled(mock_settings):
+    mock_settings.return_value = MagicMock(
+        eod_replay_require_elite_or_exploding_tier=True,
+        eod_replay_pad_max_off_base_pct=22.0,
+        eod_replay_min_elite_score_for_pad=90.0,
+        eod_replay_block_legacy_bypass_below_min_score=True,
+    )
+    ok, reason = _eod_replay_quality_blocks_entry(
+        {"tier": "BUILDING", "ictBaseRelativeMovePct": 12.0},
+        {"eliteScore": 92.0},
+        entry_reason="building_coil_pad_ready",
+        settings=mock_settings.return_value,
+    )
+    assert not ok
+    assert reason == "eod_replay_building_tier_blocked"
+
+
+@patch("app.engines.eod_local_base_replay.get_settings")
+def test_eod_replay_quality_blocks_pad_chase(mock_settings):
+    mock_settings.return_value = MagicMock(
+        eod_replay_require_elite_or_exploding_tier=True,
+        eod_replay_pad_max_off_base_pct=22.0,
+        eod_replay_min_elite_score_for_pad=90.0,
+        eod_replay_block_legacy_bypass_below_min_score=True,
+    )
+    ok, reason = _eod_replay_quality_blocks_entry(
+        {"tier": "ELITE", "ictBaseRelativeMovePct": 23.0},
+        {"eliteScore": 92.0},
+        entry_reason="building_coil_pad_ready",
+        settings=mock_settings.return_value,
+    )
+    assert not ok
+    assert reason == "eod_replay_pad_chase_blocked"
+
+
+@patch("app.engines.eod_local_base_replay.get_settings")
+def test_eod_replay_quality_blocks_legacy_bypass_low_score(mock_settings):
+    mock_settings.return_value = MagicMock(
+        eod_replay_require_elite_or_exploding_tier=False,
+        eod_replay_pad_max_off_base_pct=22.0,
+        eod_replay_min_elite_score_for_pad=90.0,
+        eod_replay_block_legacy_bypass_below_min_score=True,
+        elite_trade_min_score=90.0,
+    )
+    ok, reason = _eod_replay_quality_blocks_entry(
+        {"tier": "ELITE", "ictBaseRelativeMovePct": 10.0},
+        {"eliteScore": 74.0, "legacyBypass": "building_ftv_gate"},
+        entry_reason="building_coil_pad_ready",
+        settings=mock_settings.return_value,
+    )
+    assert not ok
+    assert reason == "eod_replay_legacy_bypass_low_score"
+

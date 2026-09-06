@@ -423,6 +423,7 @@ def evaluate_local_base_entry(
 def _install_replay_clock(replay_dt_class: type) -> list[tuple[Any, Any]]:
     """Point power-hour / chop minute helpers at the replay clock."""
     import app.engines.chop_day_guards as chop_guards
+    import app.engines.elite_trade_budget as elite_budget
     import app.engines.power_hour_guards as power_hour
 
     def _minutes_from_replay() -> int:
@@ -431,10 +432,20 @@ def _install_replay_clock(replay_dt_class: type) -> list[tuple[Any, Any]]:
             ts = ts.astimezone(IST)
         return ts.hour * 60 + ts.minute
 
+    def _iso_week_from_replay(dt: datetime | None = None) -> str:
+        ts = dt if dt is not None else replay_dt_class.current
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=IST)
+        else:
+            ts = ts.astimezone(IST)
+        return ts.strftime("%G-W%V")
+
     saved: list[tuple[Any, Any]] = []
     for module in (power_hour, chop_guards):
         saved.append((module, module._minutes_now))
         module._minutes_now = _minutes_from_replay
+    saved.append((elite_budget, elite_budget._iso_week))
+    elite_budget._iso_week = _iso_week_from_replay
     return saved
 
 
@@ -614,6 +625,59 @@ def _replay_selection_rank(
 
 def _contract_key(symbol: str, side: str, strike: float) -> str:
     return f"{symbol.upper()}:{side.upper()}:{strike:g}"
+
+
+_PAD_LANE_REASONS = frozenset({
+    "building_coil_pad_ready",
+    "building_armed_prelaunch_ready",
+    "early_radar_pad_ready",
+    "slow_grind_sudden_lift_ready",
+    "slow_grind_armed_trough_ready",
+})
+
+
+def _is_pad_lane_entry(entry_reason: str) -> bool:
+    reason = str(entry_reason or "").strip().lower()
+    if reason in _PAD_LANE_REASONS:
+        return True
+    return "pad" in reason and "ready" in reason
+
+
+def _eod_replay_quality_blocks_entry(
+    alert: dict[str, Any],
+    assessment: dict[str, Any],
+    *,
+    entry_reason: str,
+    settings: Any,
+) -> tuple[bool, str]:
+    """Extra full-tape filters to drop BUILDING pad chase / low-score bypass entries."""
+    tier_u = str(alert.get("tier") or "").upper()
+    if bool(getattr(settings, "eod_replay_require_elite_or_exploding_tier", True)):
+        if tier_u not in {"ELITE", "EXPLODING"}:
+            return False, "eod_replay_building_tier_blocked"
+
+    base_rel = _f(alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct"))
+    pad_lane = _is_pad_lane_entry(entry_reason) or tier_u == "BUILDING"
+
+    if bool(getattr(settings, "eod_replay_block_legacy_bypass_below_min_score", True)):
+        if assessment.get("legacyBypass") and not assessment.get("mustTake"):
+            min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
+            if float(assessment.get("eliteScore") or 0) + 1e-6 < min_score:
+                return False, "eod_replay_legacy_bypass_low_score"
+
+    if pad_lane:
+        max_pad = float(getattr(settings, "eod_replay_pad_max_off_base_pct", 15.0) or 15.0)
+        if base_rel > max_pad + 1e-6:
+            return False, "eod_replay_pad_chase_blocked"
+        if assessment:
+            min_pad_score = float(
+                getattr(settings, "eod_replay_min_elite_score_for_pad", 90.0) or 90.0
+            )
+            score = float(assessment.get("eliteScore") or 0)
+            if score + 1e-6 < min_pad_score and not assessment.get("mustTake"):
+                return False, f"eod_replay_pad_score_below_{min_pad_score:g}"
+
+    return True, "ok"
 
 
 def _simulate_trade_from_entry(
@@ -804,6 +868,7 @@ def replay_local_base_day(
     window_end: Optional[str] = None,
     side_filter: Optional[str] = None,
     seed_session_loss_inr: float = 0.0,
+    replay_state: Any = None,
 ) -> dict[str, Any]:
     """Replay one session's premium tape with production local-base entry gates."""
     from app.engines import explosion_detector, ict_breakout_monitor, session_timing
@@ -886,8 +951,11 @@ def replay_local_base_day(
 
     from app.models.schemas import AutoTraderState
 
-    replay_state = AutoTraderState()
+    if replay_state is None:
+        replay_state = AutoTraderState()
     elite_engine = bool(getattr(s, "elite_trade_engine_enabled", False))
+    daily_max = int(getattr(s, "eod_replay_daily_max_trades", 0) or 0)
+    session_trades_taken = 0
 
     try:
         explosion_detector.datetime = _ReplayDateTime
@@ -1003,6 +1071,10 @@ def replay_local_base_day(
             batch_day_mode = resolve_session_day_mode(batch_snapshots)
 
             if next_ok_after is not None and ts < next_ok_after:
+                continue
+
+            if daily_max > 0 and session_trades_taken >= daily_max:
+                gate_stats["eod_replay_daily_cap"] += 1
                 continue
 
             if win_start is not None and ts < win_start:
@@ -1124,6 +1196,26 @@ def replay_local_base_day(
                                 })
                             continue
 
+                    quality_ok, quality_reason = _eod_replay_quality_blocks_entry(
+                        alert_eval,
+                        assessment,
+                        entry_reason=reason,
+                        settings=s,
+                    )
+                    if not quality_ok:
+                        gate_stats[quality_reason] += 1
+                        if len(signal_rows) < 500:
+                            signal_rows.append({
+                                "ts": ts.isoformat(),
+                                "key": key,
+                                "tier": alert.get("tier"),
+                                "premium": alert.get("premium"),
+                                "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                                "allowed": False,
+                                "reason": quality_reason,
+                            })
+                        continue
+
                     gate_stats["entry_allowed"] += 1
                     if live_gates:
                         live_ok, live_reason = evaluate_replay_live_gates(
@@ -1238,10 +1330,11 @@ def replay_local_base_day(
                 base_premium=base,
                 forward=forward,
                 settings=s,
-        entry_ctx=entry_ctx,
-        assessment=assessment if assessment else None,
-    )
+                entry_ctx=entry_ctx,
+                assessment=assessment if assessment else None,
+            )
             raw_candidates.append(trade)
+            session_trades_taken += 1
             if elite_engine and assessment:
                 from app.engines.elite_trade_budget import record_elite_trade_entry
 
@@ -1460,13 +1553,22 @@ def generate_eod_local_base_replay_week(
     """Roll up local-base replays across a validation week (default Mon–Fri)."""
     from datetime import datetime as dt
 
+    from app.config import get_settings
+    from app.models.schemas import AutoTraderState
+
+    s = get_settings()
+    replay_state = (
+        AutoTraderState()
+        if bool(getattr(s, "eod_replay_persist_weekly_elite_budget", True))
+        else None
+    )
     start = dt.strptime(start_date, "%Y-%m-%d")
     day_rows: list[dict[str, Any]] = []
     for offset in range(days):
         date = (start + timedelta(days=offset)).strftime("%Y-%m-%d")
         if date.weekday() >= 5:
             continue
-        day_rows.append(generate_eod_local_base_replay(date))
+        day_rows.append(replay_local_base_day(date, settings=s, replay_state=replay_state))
 
     taken = [r for r in day_rows if r.get("status") == "ok"]
     return {
