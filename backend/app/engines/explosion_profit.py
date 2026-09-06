@@ -183,6 +183,10 @@ def _elite_failed_launch_runner(trade: PaperTrade, *, settings: Any = None) -> b
         if setup and setup not in ("FTV", "V", "EXPLOSIVE"):
             return False
         return True
+    from app.engines.elite_runner_exit_bundle import elite_runner_failed_launch_relax
+
+    if elite_runner_failed_launch_relax(trade, settings=settings):
+        return True
     if not bool(getattr(settings, "elite_trade_engine_enabled", False)):
         return False
     if ctx.get("maxProfitCapture") and ctx.get("ictFlatThenVertical"):
@@ -1465,6 +1469,19 @@ def peak_capture_profit_lock_reason(
                 getattr(settings, "ftv_vbase_after_hundred_giveback_ratio", 0.32)
                 or 0.32
             )
+            if bool(getattr(settings, "ftv_vbase_parabolic_trail_enabled", True)):
+                parabolic_ratio = float(
+                    getattr(settings, "ftv_vbase_parabolic_giveback_ratio", 0.40)
+                    or 0.40
+                )
+                entry = float(getattr(trade, "entryPremium", 0) or 0)
+                live_v = float(live_velocity_3s or 0)
+                hot_v = float(
+                    getattr(settings, "moment_stage_parabolic_min_velocity_3s", 8.0)
+                    or 8.0
+                )
+                if live_v + 1e-6 >= hot_v or (entry > 0 and best >= entry * 1.5):
+                    after_ratio = max(after_ratio, parabolic_ratio)
             if after_ratio > 0:
                 giveback_ratio = max(giveback_ratio, after_ratio)
 

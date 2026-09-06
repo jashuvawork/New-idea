@@ -168,6 +168,8 @@ def apply_modest_peak_entry_stamp(
 ) -> bool:
     """Stamp modestPeakMode on ctx + exitPlan; tighten exit bias. Returns True when stamped."""
     s = settings or get_settings()
+    if ctx_extra.get("vBaseFtvRunner") or ctx_extra.get("eliteRunnerExitBundle"):
+        return False
     flags = [str(f).lower() for f in (ctx_extra.get("conflictFlags") or []) if f is not None]
     post_win_fomo = bool(ctx_extra.get("fakeExplosionTrap")) and (
         ctx_extra.get("postSmallWin")
