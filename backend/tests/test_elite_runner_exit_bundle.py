@@ -14,7 +14,12 @@ from app.engines.elite_runner_exit_bundle import (
     qualifies_elite_near_base_runner,
     refresh_runner_exit_plans,
 )
-from app.engines.explosion_profit import _elite_failed_launch_runner, _failed_launch_thresholds
+from app.engines.explosion_profit import (
+    _elite_failed_launch_runner,
+    _failed_launch_thresholds,
+    _should_skip_elite_runner_early_exits,
+    _skip_explosion_time_stop_for_runner,
+)
 from app.engines.modest_peak_mode import apply_modest_peak_entry_stamp
 from app.models.schemas import PaperTrade, Side, StrategyType
 
@@ -163,3 +168,89 @@ def test_modest_peak_skipped_when_runner_stamped():
     )
     assert ok is False
     assert "modestPeakMode" not in ctx
+
+
+def test_skip_failed_launch_for_legacy_bypass_assessment():
+    trade = PaperTrade(
+        id="t5",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24150.0,
+        entryPremium=22.0,
+        currentPremium=21.0,
+        lots=10,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={
+            "eliteAssessment": {
+                "eliteScore": 74.0,
+                "grade": "A",
+                "setup": "V",
+                "legacyBypass": True,
+            },
+            "localBaseBaseRelPct": 10.0,
+        },
+    )
+    assert _should_skip_elite_runner_early_exits(trade) is True
+
+
+def test_skip_failed_launch_for_elite_assessment():
+    trade = PaperTrade(
+        id="t4",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24150.0,
+        entryPremium=22.0,
+        currentPremium=21.0,
+        lots=10,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={
+            "eliteAssessment": {"eliteScore": 92.0, "grade": "A", "setup": "V"},
+            "localBaseBaseRelPct": 10.0,
+        },
+    )
+    assert _should_skip_elite_runner_early_exits(trade) is True
+
+
+def test_skip_failed_launch_for_bundle_runner():
+    trade = PaperTrade(
+        id="t2",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24150.0,
+        entryPremium=22.0,
+        currentPremium=21.0,
+        lots=10,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={
+            "eliteRunnerExitBundle": True,
+            "vBaseFtvRunner": True,
+            "maxProfitCapture": True,
+            "localBaseBaseRelPct": 10.0,
+            "ictFirstLift": True,
+        },
+    )
+    assert _should_skip_elite_runner_early_exits(trade) is True
+
+
+def test_skip_time_stop_for_slow_runner():
+    trade = PaperTrade(
+        id="t3",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24150.0,
+        entryPremium=22.0,
+        currentPremium=21.5,
+        lots=10,
+        openedAt=datetime.now(IST) - timedelta(minutes=5),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={
+            "eliteRunnerExitBundle": True,
+            "vBaseFtvRunner": True,
+            "localBaseBaseRelPct": 8.0,
+        },
+    )
+    assert _skip_explosion_time_stop_for_runner(trade, best=0.5, hold=300) is True
+    assert _skip_explosion_time_stop_for_runner(trade, best=10.0, hold=300) is False

@@ -214,8 +214,15 @@ def elite_runner_failed_launch_relax(trade: Any, *, settings: Settings | None = 
         getattr(s, "elite_failed_launch_relax_max_local_base_pct", 20.0) or 20.0
     )
     local = _num(
-        ctx.get("localBaseBaseRelPct") or ctx.get("localBaseMovePct") or 999
+        ctx.get("localBaseBaseRelPct") or ctx.get("localBaseMovePct")
     )
+    if local <= 0:
+        base = _num(ctx.get("ictBasePremium"))
+        entry = _num(getattr(trade, "entryPremium", 0))
+        if base > 0 and entry > base:
+            local = (entry - base) / base * 100.0
+    if local <= 0:
+        local = 999.0
     if local > max_local + 1e-6:
         return False
 

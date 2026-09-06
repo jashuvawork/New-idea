@@ -628,9 +628,14 @@ def _simulate_trade_from_entry(
     forward: list[tuple[datetime, float]],
     settings: Any,
     entry_ctx: dict[str, Any],
+    assessment: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Walk forward on premium tape from entry until production exit fires."""
     from app.engines.capital_allocator import lot_multiplier, max_lots_for_capital
+    from app.engines.elite_runner_exit_bundle import (
+        apply_elite_runner_exit_bundle,
+        refresh_runner_exit_plans,
+    )
     from app.engines.explosion_profit import evaluate_explosion_exit
     from app.engines.moment_stage_trail import build_moment_stage_plan
     from app.models.schemas import PaperTrade, Side as SideEnum, StrategyType
@@ -645,23 +650,12 @@ def _simulate_trade_from_entry(
     stop_pts = max(min_sl_pts, ep * max(0.0, min_sl_pct))
     off = (ep - base) / base * 100.0 if base > 0 else 0.0
 
-    plan = build_moment_stage_plan(
-        entry_premium=ep,
-        base_premium=base,
-        velocity_3s=_f(entry_ctx.get("velocity3s"), 3.0),
-        volume_surge=_f(entry_ctx.get("volumeSurge"), 2.5),
-        session_move_pct=30.0,
-        flat_then_vertical=bool(entry_ctx.get("ictFlatThenVertical")),
-        max_profit=True,
-    )
     ctx = {
         **entry_ctx,
         "momentType": entry_ctx.get("momentType") or "flat_then_vertical",
         "ictFlatThenVertical": bool(entry_ctx.get("ictFlatThenVertical")),
-        "maxProfitCapture": True,
         "ictBasePremium": base,
         "eliteFullLot": True,
-        "vBaseFtvRunner": True,
         "localBaseBaseRelPct": round(off, 2),
         "exitPlan": {
             "stopPoints": round(stop_pts, 2),
@@ -669,8 +663,46 @@ def _simulate_trade_from_entry(
             "targetPoints": 180.0,
         },
     }
-    if plan:
-        ctx.update(plan)
+    if assessment is not None:
+        ctx["eliteAssessment"] = assessment
+
+    runner_stamped = apply_elite_runner_exit_bundle(
+        ctx,
+        assessment=assessment,
+        base_rel_pct=off,
+        first_lift=bool(
+            entry_ctx.get("ictFirstLift") or entry_ctx.get("firstLiftCapture")
+        ),
+        ict_flat_vertical=bool(entry_ctx.get("ictFlatThenVertical")),
+        tier=tier,
+        settings=s,
+    )
+    if runner_stamped:
+        refresh_runner_exit_plans(
+            ctx,
+            entry_premium=ep,
+            base_premium=base,
+            exit_plan=ctx.get("exitPlan") if isinstance(ctx.get("exitPlan"), dict) else None,
+            velocity_3s=_f(entry_ctx.get("velocity3s"), 0.0),
+            volume_surge=_f(entry_ctx.get("volumeSurge"), 1.0),
+            session_move_pct=30.0,
+            premium_fvg=bool(entry_ctx.get("ictPremiumFvg")),
+            flat_then_vertical=bool(entry_ctx.get("ictFlatThenVertical")),
+            mega_rip=bool(entry_ctx.get("ictMegaRip")),
+            settings=s,
+        )
+    else:
+        plan = build_moment_stage_plan(
+            entry_premium=ep,
+            base_premium=base,
+            velocity_3s=_f(entry_ctx.get("velocity3s"), 3.0),
+            volume_surge=_f(entry_ctx.get("volumeSurge"), 2.5),
+            session_move_pct=30.0,
+            flat_then_vertical=bool(entry_ctx.get("ictFlatThenVertical")),
+            max_profit=False,
+        )
+        if plan:
+            ctx.update(plan)
 
     wnow = datetime.now(IST)
     tr = PaperTrade(
@@ -852,6 +884,11 @@ def replay_local_base_day(
     trades_per_key: dict[str, int] = defaultdict(int)
     next_ok_after: Optional[datetime] = None
 
+    from app.models.schemas import AutoTraderState
+
+    replay_state = AutoTraderState()
+    elite_engine = bool(getattr(s, "elite_trade_engine_enabled", False))
+
     try:
         explosion_detector.datetime = _ReplayDateTime
         ict_breakout_monitor.datetime = _ReplayDateTime
@@ -1009,7 +1046,7 @@ def replay_local_base_day(
                 elif elite_only:
                     gate_stats["loss_streak_elite_bypass_active"] += 1
 
-            ranked_candidates: list[tuple[float, str, SymbolSnapshot, dict[str, Any], str, Optional[str], dict[str, Any]]] = []
+            ranked_candidates: list[dict[str, Any]] = []
             for sym, snap in batch_snapshots.items():
                 symbol_state = state[sym]
                 for alert in snap.explosionAlerts or []:
@@ -1061,6 +1098,32 @@ def replay_local_base_day(
                             gate_stats["session_pause_elite_only"] += 1
                             continue
 
+                    assessment: dict[str, Any] = {}
+                    if elite_engine:
+                        from app.engines.elite_trade_budget import elite_budget_blocks_entry
+
+                        blocked, budget_reason, assessment = elite_budget_blocks_entry(
+                            replay_state,
+                            ranking.get("evidence") or _alert_evidence(alert_eval, snap),
+                            ranking,
+                            settings=s,
+                            snapshots=batch_snapshots,
+                            day_mode=batch_day_mode,
+                        )
+                        if blocked:
+                            gate_stats[budget_reason] += 1
+                            if len(signal_rows) < 500:
+                                signal_rows.append({
+                                    "ts": ts.isoformat(),
+                                    "key": key,
+                                    "tier": alert.get("tier"),
+                                    "premium": alert.get("premium"),
+                                    "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                                    "allowed": False,
+                                    "reason": budget_reason,
+                                })
+                            continue
+
                     gate_stats["entry_allowed"] += 1
                     if live_gates:
                         live_ok, live_reason = evaluate_replay_live_gates(
@@ -1092,15 +1155,43 @@ def replay_local_base_day(
                         settings=s,
                         lift_reason=reason,
                     )
-                    ranked_candidates.append(
-                        (rank_score, sym, snap, alert_eval, key, moment, ranking),
-                    )
+                    from app.engines.elite_moment_dedup import parse_moment_key
+
+                    armed_at = alert_eval.get("ictBaseArmedAt") or ts.isoformat()
+                    ranked_candidates.append({
+                        "rankScore": rank_score,
+                        "sym": sym,
+                        "snap": snap,
+                        "alert": alert_eval,
+                        "key": key,
+                        "moment": moment,
+                        "ranking": ranking,
+                        "assessment": assessment,
+                        "entryReason": reason,
+                        "momentKey": parse_moment_key(armed_at),
+                        "eliteScore": float(assessment.get("eliteScore") or 0),
+                        "setupPriority": int(assessment.get("setupPriority") or 9),
+                        "ts": ts.isoformat(),
+                    })
 
             if not ranked_candidates:
                 continue
 
-            ranked_candidates.sort(key=lambda row: row[0], reverse=True)
-            _, sym, snap, alert, key, moment, ranking = ranked_candidates[0]
+            from app.engines.elite_moment_dedup import dedupe_same_moment_top1, row_rank_key
+
+            deduped = dedupe_same_moment_top1(
+                ranked_candidates,
+                moment_key_fn=lambda row: row["momentKey"],
+            )
+            pick = max(deduped, key=row_rank_key)
+            sym = pick["sym"]
+            snap = pick["snap"]
+            alert = pick["alert"]
+            key = pick["key"]
+            moment = pick["moment"]
+            ranking = pick["ranking"]
+            assessment = pick.get("assessment") or {}
+            entry_reason = pick.get("entryReason") or ""
             strike_v = _f(alert.get("strike"))
             side = str(alert.get("side") or "").upper()
             tier = str(alert.get("tier") or "").upper()
@@ -1113,9 +1204,11 @@ def replay_local_base_day(
                 ]
                 base = min(hist) if hist else ep
 
-            _, entry_reason, moment, ranking = evaluate_local_base_entry(
+            _, entry_reason_check, moment, ranking = evaluate_local_base_entry(
                 alert, snap, settings=s, day_mode=batch_day_mode,
             )
+            if not entry_reason:
+                entry_reason = entry_reason_check
             forward = [
                 (t, p)
                 for t, p in premium_series.get(key, [])
@@ -1145,9 +1238,21 @@ def replay_local_base_day(
                 base_premium=base,
                 forward=forward,
                 settings=s,
-                entry_ctx=entry_ctx,
-            )
+        entry_ctx=entry_ctx,
+        assessment=assessment if assessment else None,
+    )
             raw_candidates.append(trade)
+            if elite_engine and assessment:
+                from app.engines.elite_trade_budget import record_elite_trade_entry
+
+                record_elite_trade_entry(
+                    replay_state,
+                    assessment,
+                    symbol=sym,
+                    side=side,
+                    strike=strike_v,
+                    settings=s,
+                )
             if session_pause_enabled:
                 record_session_trade_close(float(trade.get("pnlInr") or 0))
             trades_per_key[key] += 1
@@ -1216,9 +1321,9 @@ def replay_local_base_day(
         "signals": signal_rows[:100],
         "note": (
             "Full-tape replay with production top-moment + first-lift + "
-            "local-base window gates + live session gates (power hour, "
-            "directional lock, best-side rank). One position at a time + "
-            "daily loss stop."
+            "local-base window gates + elite budget/dedup + assessment-based "
+            "exit bundle + live session gates (power hour, directional lock, "
+            "best-side rank). One position at a time + daily loss stop."
         ),
         "trades": taken,
     }
