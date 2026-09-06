@@ -170,6 +170,30 @@ def test_modest_peak_skipped_when_runner_stamped():
     assert "modestPeakMode" not in ctx
 
 
+def test_skip_failed_launch_for_legacy_bypass_assessment():
+    trade = PaperTrade(
+        id="t5",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24150.0,
+        entryPremium=22.0,
+        currentPremium=21.0,
+        lots=10,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={
+            "eliteAssessment": {
+                "eliteScore": 74.0,
+                "grade": "A",
+                "setup": "V",
+                "legacyBypass": True,
+            },
+            "localBaseBaseRelPct": 10.0,
+        },
+    )
+    assert _should_skip_elite_runner_early_exits(trade) is True
+
+
 def test_skip_failed_launch_for_elite_assessment():
     trade = PaperTrade(
         id="t4",

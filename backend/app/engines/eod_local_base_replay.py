@@ -663,7 +663,7 @@ def _simulate_trade_from_entry(
             "targetPoints": 180.0,
         },
     }
-    if assessment:
+    if assessment is not None:
         ctx["eliteAssessment"] = assessment
 
     runner_stamped = apply_elite_runner_exit_bundle(
@@ -1238,9 +1238,9 @@ def replay_local_base_day(
                 base_premium=base,
                 forward=forward,
                 settings=s,
-                entry_ctx=entry_ctx,
-                assessment=assessment or None,
-            )
+        entry_ctx=entry_ctx,
+        assessment=assessment if assessment else None,
+    )
             raw_candidates.append(trade)
             if elite_engine and assessment:
                 from app.engines.elite_trade_budget import record_elite_trade_entry

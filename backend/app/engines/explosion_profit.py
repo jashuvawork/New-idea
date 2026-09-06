@@ -204,9 +204,8 @@ def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = 
     ctx = trade.entryContext or {}
     assessment = ctx.get("eliteAssessment") or {}
     if isinstance(assessment, dict) and assessment:
-        min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
-        if float(assessment.get("eliteScore") or 0) + 1e-6 >= min_score:
-            return True
+        # Any trade that cleared elite_entry_allowed (incl. legacyBypass paths).
+        return True
     if not (
         ctx.get("eliteRunnerExitBundle")
         or (ctx.get("vBaseFtvRunner") and ctx.get("maxProfitCapture"))
