@@ -393,6 +393,17 @@ def _explosion_candidates(
                     )
                 ):
                     continue
+        from app.engines.explosion_entry_guards import (
+            deep_itm_near_strike_substitute_blocked,
+        )
+
+        itm_substitute, _itm_reason = deep_itm_near_strike_substitute_blocked(
+            Side(side_v),
+            strike_v,
+            snap,
+        )
+        if itm_substitute:
+            continue
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
         top_only = bool(getattr(settings, "top_moments_only_enabled", True))

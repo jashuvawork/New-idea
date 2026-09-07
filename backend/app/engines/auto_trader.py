@@ -871,6 +871,18 @@ async def _open_from_candidate(
         if st_blocked:
             return False, st_reason
 
+        from app.engines.explosion_entry_guards import (
+            deep_itm_near_strike_substitute_blocked,
+        )
+
+        itm_substitute, itm_reason = deep_itm_near_strike_substitute_blocked(
+            candidate.side,
+            float(candidate.strike or 0),
+            snap,
+        )
+        if itm_substitute:
+            return False, itm_reason
+
     signal_premium = candidate.premium
     is_live = settings.enable_live_trading and settings.auto_trading_enabled
     use_parity = _uses_paper_live_parity(settings)

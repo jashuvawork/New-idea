@@ -279,3 +279,62 @@ def near_strike_explosion_rank_adjustment(
     if money == "ITM" and depth >= 2:
         return -deep_pen
     return 0.0
+
+
+_NEAR_STRIKE_ARMED_MOMENTS = frozenset(
+    {
+        "armed_base_launch",
+        "v_rip_session_low",
+        "v_rip_session_high",
+        "first_lift_local_base",
+    }
+)
+
+
+def near_strike_armed_near_miss_waive(
+    alert: Optional[dict[str, Any]],
+    *,
+    snap: Optional[SymbolSnapshot] = None,
+    ranking: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> bool:
+    """Grade-S near-strike armed pad — waive first_lift_structure near-miss at base."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "near_strike_armed_near_miss_waive_enabled", True)):
+        return False
+    if not isinstance(alert, dict):
+        return False
+    grade = str(
+        (ranking or {}).get("grade") or alert.get("causalGrade") or ""
+    ).upper()
+    min_grade = str(
+        getattr(s, "near_strike_armed_near_miss_min_grade", "S") or "S"
+    ).upper()
+    if grade != min_grade:
+        return False
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    max_steps = int(getattr(s, "near_strike_armed_near_miss_max_steps", 2) or 2)
+    steps = float(alert.get("strikeStepsFromAtm") or 0)
+    if steps <= 0 or steps > max_steps + 1e-6:
+        return False
+    if str(alert.get("moneyness") or "").upper() == "ITM":
+        return False
+    moment = str(alert.get("momentType") or "")
+    if not (
+        alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or moment in _NEAR_STRIKE_ARMED_MOMENTS
+    ):
+        return False
+    local = float(
+        alert.get("localBaseMovePct")
+        or alert.get("ictBaseRelativeMovePct")
+        or alert.get("offLowMovePct")
+        or 0
+    )
+    max_local = float(
+        getattr(s, "near_strike_armed_near_miss_max_local_pct", 15.0) or 15.0
+    )
+    return local <= max_local + 1e-6
