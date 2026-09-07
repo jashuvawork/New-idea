@@ -173,6 +173,7 @@ def main() -> int:
 
     out = {
         "runAt": datetime.now(IST).isoformat(),
+        "configNote": "eod_replay entry gates off by default; exit fixes from #571/#572 active",
         "archiveDir": str(ARCHIVE_DIR),
         "availableDates": available,
         "newlyDownloaded": downloaded,

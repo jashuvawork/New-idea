@@ -667,15 +667,16 @@ def _eod_replay_quality_blocks_entry(
 
     if pad_lane:
         max_pad = float(getattr(settings, "eod_replay_pad_max_off_base_pct", 15.0) or 15.0)
-        if base_rel > max_pad + 1e-6:
+        if max_pad < 900 and base_rel > max_pad + 1e-6:
             return False, "eod_replay_pad_chase_blocked"
         if assessment:
             min_pad_score = float(
                 getattr(settings, "eod_replay_min_elite_score_for_pad", 90.0) or 90.0
             )
-            score = float(assessment.get("eliteScore") or 0)
-            if score + 1e-6 < min_pad_score and not assessment.get("mustTake"):
-                return False, f"eod_replay_pad_score_below_{min_pad_score:g}"
+            if min_pad_score > 0:
+                score = float(assessment.get("eliteScore") or 0)
+                if score + 1e-6 < min_pad_score and not assessment.get("mustTake"):
+                    return False, f"eod_replay_pad_score_below_{min_pad_score:g}"
 
     return True, "ok"
 
