@@ -355,12 +355,85 @@ def _lift_confirmed(evidence: Mapping[str, Any]) -> bool:
     )
 
 
+_NEAR_STRIKE_FVQ_BYPASS_MOMENTS = frozenset(
+    {"armed_base_launch", "v_rip_session_low", "first_lift_local_base"}
+)
+
+
+def _near_strike_fvq_bypass_eligible(
+    evidence: Mapping[str, Any],
+    assessment: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    *,
+    settings: Any,
+    readiness_reason: str = "",
+) -> bool:
+    """Cautious FVQ chase relief: grade-S near-strike V/FTV launch with confirmed lift."""
+    if not bool(getattr(settings, "elite_fvq_near_strike_bypass_enabled", True)):
+        return False
+
+    grade = str((ranking or {}).get("grade") or evidence.get("causalGrade") or "").upper()
+    min_grade = str(
+        getattr(settings, "elite_fvq_near_strike_bypass_min_grade", "S") or "S"
+    ).upper()
+    if grade != min_grade:
+        return False
+
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+
+    setup = str(assessment.get("setup") or infer_setup_type(evidence))
+    if setup not in ("V", "FTV"):
+        return False
+
+    if not _lift_confirmed(evidence):
+        return False
+
+    rr = str(
+        readiness_reason
+        or evidence.get("firstLiftReadinessReason")
+        or evidence.get("ictBaseReadinessReason")
+        or ""
+    )
+    moment = str(evidence.get("momentType") or "")
+    has_launch_signal = (
+        bool(evidence.get("armedBaseLaunch"))
+        or moment in _NEAR_STRIKE_FVQ_BYPASS_MOMENTS
+        or rr.startswith("v_rip_session_low")
+    )
+    if not has_launch_signal:
+        return False
+
+    moneyness = str(evidence.get("moneyness") or "").upper()
+    if moneyness == "ITM":
+        return False
+
+    steps = _number(evidence.get("strikeStepsFromAtm"))
+    max_steps = int(
+        getattr(settings, "elite_fvq_near_strike_bypass_max_steps", 2) or 2
+    )
+    if steps <= 0 or steps > max_steps + 1e-6:
+        return False
+
+    local = _number(assessment.get("localBasePct"))
+    max_local = float(
+        getattr(settings, "elite_fvq_near_strike_bypass_max_local_pct", 15.0) or 15.0
+    )
+    if local > max_local + 1e-6:
+        return False
+
+    return True
+
+
 def _effective_fvq_ceiling(
     evidence: Mapping[str, Any],
     assessment: Mapping[str, Any],
     *,
     settings: Any = None,
     side: str = "",
+    ranking: Mapping[str, Any] | None = None,
+    readiness_reason: str = "",
 ) -> float:
     """Default FVQ ceiling with calibrated PUT V-RIP near-base lift path."""
     from app.config import get_settings
@@ -385,7 +458,23 @@ def _effective_fvq_ceiling(
         and local <= lift_max + 1e-6
         and lift_ceiling > ceiling + 1e-6
     ):
-        return lift_ceiling
+        ceiling = lift_ceiling
+
+    bypass_ceiling = float(
+        getattr(settings, "elite_fvq_near_strike_bypass_ceiling", 0.0) or 0.0
+    )
+    if (
+        bypass_ceiling > 0
+        and _near_strike_fvq_bypass_eligible(
+            evidence,
+            assessment,
+            ranking,
+            settings=settings,
+            readiness_reason=readiness_reason,
+        )
+        and bypass_ceiling > ceiling + 1e-6
+    ):
+        return bypass_ceiling
     return ceiling
 
 
@@ -397,6 +486,7 @@ def elite_fvq_chase_blocked(
     readiness_reason: str = "",
     assessment: Mapping[str, Any] | None = None,
     side: str = "",
+    ranking: Mapping[str, Any] | None = None,
 ) -> tuple[bool, str]:
     """Block entries with flatVerticalQuality above ceiling (EOD: 80+ chase loses)."""
     from app.config import get_settings
@@ -413,9 +503,14 @@ def elite_fvq_chase_blocked(
     )
     if rr in ARMED_BASE_GRADE_A_READY_REASONS:
         return False, ""
-    assess = assessment or build_elite_assessment(evidence, {})
+    assess = assessment or build_elite_assessment(evidence, ranking or {})
     ceiling = _effective_fvq_ceiling(
-        evidence, assess, settings=settings, side=side,
+        evidence,
+        assess,
+        settings=settings,
+        side=side,
+        ranking=ranking,
+        readiness_reason=readiness_reason,
     )
     if ceiling <= 0:
         return False, ""
@@ -749,6 +844,7 @@ def elite_entry_allowed(
         readiness_reason=readiness_reason,
         assessment=assessment,
         side=resolved_side,
+        ranking=ranking,
     )
     if fvq_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
