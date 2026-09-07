@@ -233,6 +233,99 @@ def test_elite_entry_blocks_put_v_rip_above_calibrated_ceiling():
     assert reason == "elite_fvq_chase_above_ceiling"
 
 
+def test_elite_entry_allows_near_strike_grade_s_fvq_with_caution():
+    """Sep07 23750 PE: grade-S near-strike armed launch at FVQ 86 should pass."""
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            side="PUT",
+            flatVerticalQuality=86.0,
+            armedBaseLaunch=True,
+            firstLift=True,
+            tier="EXPLODING",
+            strikeStepsFromAtm=2,
+            moneyness="OTM",
+            momentType="armed_base_launch",
+        ),
+        _ranking(rankScore=97.5, grade="S"),
+    )
+    assert ok is True
+    assert reason == "ok"
+
+
+def test_elite_entry_allows_near_strike_call_mirror_grade_s_fvq_with_caution():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            side="CALL",
+            localBaseMovePct=8.0,
+            flatVerticalQuality=86.0,
+            armedBaseLaunch=True,
+            firstLift=True,
+            tier="ELITE",
+            strikeStepsFromAtm=1,
+            moneyness="OTM",
+            momentType="v_rip_session_low",
+            ictBaseReadinessReason="v_rip_session_low_ready",
+        ),
+        _ranking(rankScore=98.0, grade="S"),
+    )
+    assert ok is True
+    assert reason == "ok"
+
+
+def test_elite_entry_blocks_near_strike_fvq_above_bypass_ceiling():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            side="PUT",
+            flatVerticalQuality=93.0,
+            armedBaseLaunch=True,
+            firstLift=True,
+            tier="ELITE",
+            strikeStepsFromAtm=2,
+            moneyness="OTM",
+            momentType="armed_base_launch",
+        ),
+        _ranking(rankScore=97.5, grade="S"),
+    )
+    assert ok is False
+    assert reason == "elite_fvq_chase_above_ceiling"
+
+
+def test_elite_entry_blocks_deep_itm_fvq_chase_even_grade_s():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            side="PUT",
+            flatVerticalQuality=86.0,
+            armedBaseLaunch=True,
+            firstLift=True,
+            tier="EXPLODING",
+            strikeStepsFromAtm=6,
+            moneyness="ITM",
+            momentType="armed_base_launch",
+        ),
+        _ranking(rankScore=97.5, grade="S"),
+    )
+    assert ok is False
+    assert reason == "elite_fvq_chase_above_ceiling"
+
+
+def test_elite_entry_blocks_near_strike_grade_a_without_s():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            side="PUT",
+            flatVerticalQuality=86.0,
+            armedBaseLaunch=True,
+            firstLift=True,
+            tier="EXPLODING",
+            strikeStepsFromAtm=2,
+            moneyness="OTM",
+            momentType="armed_base_launch",
+        ),
+        _ranking(rankScore=93.2, grade="A"),
+    )
+    assert ok is False
+    assert reason == "elite_fvq_chase_above_ceiling"
+
+
 def test_elite_trend_day_bonus_eligible():
     from app.engines.elite_score_engine import elite_trend_day_bonus_allowed
 

@@ -315,6 +315,12 @@ class Settings(BaseSettings):
     # PUT V-RIP with confirmed lift near base: calibrated FVQ ceiling (not full exempt).
     elite_fvq_put_v_rip_lift_ceiling: float = 85.0
     elite_fvq_put_v_rip_lift_max_local_pct: float = 15.0
+    # Sep07 23750 PE: grade-S near-strike armed launch blocked at FVQ 86 — cautious bypass.
+    elite_fvq_near_strike_bypass_enabled: bool = True
+    elite_fvq_near_strike_bypass_ceiling: float = 92.0
+    elite_fvq_near_strike_bypass_max_steps: int = 2
+    elite_fvq_near_strike_bypass_max_local_pct: float = 15.0
+    elite_fvq_near_strike_bypass_min_grade: str = "S"
     # Trend-day bonus slot: one extra weekly entry when score ≥ threshold on rally days.
     elite_trend_day_bonus_slot_enabled: bool = True
     elite_trend_day_bonus_min_score: float = 98.0
