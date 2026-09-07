@@ -158,6 +158,37 @@ def test_armed_base_expiry_exits_stale_thesis(mock_settings):
 
 
 @patch("app.engines.explosion_profit.get_settings")
+def test_armed_base_expiry_skipped_for_elite_assessment(mock_settings):
+    mock_settings.return_value = _settings(
+        elite_runner_skip_failed_launch_enabled=True,
+        elite_failed_launch_relax_enabled=True,
+    )
+    expired = (datetime.now(IST) - timedelta(minutes=5)).isoformat()
+    trade = _trade(
+        armedBaseExpiresAt=expired,
+        eliteAssessment={"eliteScore": 92.0, "grade": "A", "setup": "V"},
+    )
+    plan = explosion_exit_params_from_plan(
+        MagicMock(
+            stopPoints=12.94,
+            targetPoints=26.0,
+            trailArmPoints=8.29,
+            trailKeepRatio=0.5,
+            microTargetPoints=3.0,
+        ),
+        "EXPLODING",
+    )
+    reason, _ = evaluate_explosion_exit(
+        trade,
+        current_premium=65.0,
+        event_tier="EXPLODING",
+        lot_multiplier=65,
+        params=plan,
+    )
+    assert reason != "explosion_armed_base_expired"
+
+
+@patch("app.engines.explosion_profit.get_settings")
 def test_barely_green_stop_cuts_sep03_shape(mock_settings):
     mock_settings.return_value = _settings()
     trade = _trade()
