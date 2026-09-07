@@ -15,6 +15,7 @@ from app.engines.elite_runner_exit_bundle import (
     refresh_runner_exit_plans,
 )
 from app.engines.explosion_profit import (
+    _apply_elite_respected_early_exit,
     _elite_failed_launch_runner,
     _failed_launch_thresholds,
     _should_skip_elite_runner_early_exits,
@@ -211,6 +212,46 @@ def test_skip_failed_launch_for_elite_assessment():
         },
     )
     assert _should_skip_elite_runner_early_exits(trade) is True
+
+
+def test_apply_elite_respected_early_exit_blocks_scratch_family():
+    trade = PaperTrade(
+        id="t6",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=23900.0,
+        entryPremium=109.4,
+        currentPremium=106.4,
+        lots=3,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={
+            "eliteAssessment": {"eliteScore": 90.6, "grade": "A", "setup": "V"},
+            "chopLiveGuard": True,
+        },
+    )
+    for reason in (
+        "chop_live_early_fail",
+        "live_early_fail",
+        "explosion_faded_rip_no_green",
+    ):
+        assert _apply_elite_respected_early_exit(trade, reason) is None
+
+    plain = PaperTrade(
+        id="t7",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=23900.0,
+        entryPremium=109.4,
+        currentPremium=106.4,
+        lots=3,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={"chopLiveGuard": True},
+    )
+    assert _apply_elite_respected_early_exit(plain, "chop_live_early_fail") == (
+        "chop_live_early_fail"
+    )
 
 
 def test_skip_failed_launch_for_bundle_runner():

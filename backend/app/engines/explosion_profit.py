@@ -233,6 +233,20 @@ def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = 
     return False
 
 
+def _apply_elite_respected_early_exit(
+    trade: PaperTrade,
+    exit_reason: Optional[str],
+    *,
+    settings: Any = None,
+) -> Optional[str]:
+    """Honor elite launch room for short-hold scratch exits (chop/live/faded/never-green)."""
+    if not exit_reason:
+        return None
+    if _should_skip_elite_runner_early_exits(trade, settings=settings):
+        return None
+    return exit_reason
+
+
 def _skip_explosion_time_stop_for_runner(
     trade: PaperTrade,
     *,
@@ -1838,6 +1852,7 @@ def evaluate_explosion_exit(
     from app.engines.explosion_entry_guards import faded_rip_no_green_exit_reason
 
     faded_exit = faded_rip_no_green_exit_reason(trade, hold_seconds=hold, best_points=best)
+    faded_exit = _apply_elite_respected_early_exit(trade, faded_exit, settings=settings)
     if faded_exit and not hold_to_sl:
         return faded_exit, pnl_inr
 
@@ -1850,7 +1865,8 @@ def evaluate_explosion_exit(
         pnl_points=pnl_pts,
         live_velocity_3s=v3,
     )
-    if chop_exit and not _should_skip_elite_runner_early_exits(trade, settings=settings):
+    chop_exit = _apply_elite_respected_early_exit(trade, chop_exit, settings=settings)
+    if chop_exit:
         return chop_exit, pnl_inr
 
     from app.engines.live_best_trades import live_early_fail_exit_reason
@@ -1862,6 +1878,7 @@ def evaluate_explosion_exit(
         pnl_points=pnl_pts,
         live_velocity_3s=v3,
     )
+    live_fail = _apply_elite_respected_early_exit(trade, live_fail, settings=settings)
     if live_fail:
         return live_fail, pnl_inr
 
@@ -1887,6 +1904,7 @@ def evaluate_explosion_exit(
     if (
         not hold_to_sl
         and bool(getattr(settings, "explosion_armed_base_expiry_exit_enabled", True))
+        and not _should_skip_elite_runner_early_exits(trade, settings=settings)
         and _armed_base_thesis_expired(
             trade,
             grace_seconds=_cfg_float(
@@ -1934,6 +1952,7 @@ def evaluate_explosion_exit(
     if (
         not hold_to_sl
         and bool(getattr(settings, "explosion_never_green_stop_enabled", True))
+        and not _should_skip_elite_runner_early_exits(trade, settings=settings)
     ):
         ng_min_green = _cfg_float(settings, "explosion_never_green_min_green_points", 0.5)
         ng_floor = _cfg_float(settings, "explosion_never_green_stop_points", 18.0)
