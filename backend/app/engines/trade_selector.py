@@ -954,14 +954,22 @@ def _explosion_candidates(
         pp_blocked, _pp_reason = post_peak_chase_blocked(event)
         if pp_blocked:
             continue
+        from app.engines.rally_capture import infer_alert_causal_grade
+
+        _alert_dict = alert if isinstance(alert, dict) else None
         st_blocked, _st_reason = session_trough_late_chase_blocked(
             event,
             ict=ict,
-            alert=alert if isinstance(alert, dict) else None,
+            alert=_alert_dict,
             ranking={
-                "grade": alert.get("causalGrade") or alert.get("rankGrade"),
-                "rankScore": alert.get("causalRankScore") or alert.get("rankScore"),
-            } if isinstance(alert, dict) else None,
+                "grade": (
+                    infer_alert_causal_grade(_alert_dict)
+                    or (_alert_dict or {}).get("causalGrade")
+                    or (_alert_dict or {}).get("rankGrade")
+                ),
+                "rankScore": (_alert_dict or {}).get("causalRankScore")
+                or (_alert_dict or {}).get("rankScore"),
+            } if _alert_dict is not None else None,
         )
         if st_blocked:
             continue

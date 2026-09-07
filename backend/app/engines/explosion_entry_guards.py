@@ -1100,6 +1100,10 @@ def _session_trough_grade_s_near_strike_exempt(
     row = alert if isinstance(alert, dict) else {}
     rank = ranking if isinstance(ranking, dict) else {}
     grade = str(rank.get("grade") or row.get("causalGrade") or "").upper()
+    if not grade:
+        from app.engines.rally_capture import infer_alert_causal_grade
+
+        grade = infer_alert_causal_grade(row, ranking=rank)
     if grade != "S":
         return False
     steps = float(row.get("strikeStepsFromAtm") or 0)

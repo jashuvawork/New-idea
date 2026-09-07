@@ -233,6 +233,30 @@ def test_elite_entry_blocks_put_v_rip_above_calibrated_ceiling():
     assert reason == "elite_fvq_chase_above_ceiling"
 
 
+def test_elite_entry_allows_near_strike_grade_s_fvq_without_stamped_causal_grade():
+    """Sep07: FVQ bypass must infer grade-S when causalGrade not stamped yet."""
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            side="PUT",
+            flatVerticalQuality=86.0,
+            explosionScore=268.0,
+            armedBaseLaunch=True,
+            firstLift=True,
+            volumeAwaken=True,
+            velocity3s=2.5,
+            velocity9s=2.0,
+            tier="EXPLODING",
+            strikeStepsFromAtm=2,
+            moneyness="OTM",
+            momentType="armed_base_launch",
+            localBaseMovePct=8.0,
+        ),
+        {"rankScore": 94.0},
+    )
+    assert ok is True
+    assert reason == "ok"
+
+
 def test_elite_entry_allows_near_strike_grade_s_fvq_with_caution():
     """Sep07 23750 PE: grade-S near-strike armed launch at FVQ 86 should pass."""
     ok, reason, _ = elite_entry_allowed(
