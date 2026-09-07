@@ -373,10 +373,16 @@ def _near_strike_fvq_bypass_eligible(
         return False
 
     grade = str((ranking or {}).get("grade") or evidence.get("causalGrade") or "").upper()
+    if not grade and isinstance(evidence, dict):
+        from app.engines.rally_capture import infer_alert_causal_grade
+
+        grade = infer_alert_causal_grade(evidence, ranking=ranking)
     min_grade = str(
         getattr(settings, "elite_fvq_near_strike_bypass_min_grade", "S") or "S"
     ).upper()
-    if grade != min_grade:
+    from app.engines.rally_capture import _grade_meets_min
+
+    if not _grade_meets_min(grade, min_grade):
         return False
 
     tier = str(evidence.get("tier") or "").upper()
