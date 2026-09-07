@@ -857,6 +857,20 @@ async def _open_from_candidate(
         elif coil_blocked:
             return False, coil_reason
 
+        from app.engines.explosion_entry_guards import session_trough_late_chase_blocked
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+        pre_ict = analyze_explosion_event_ict(candidate.explosion_event, snap)
+        causal = (candidate.pretrade_meta or {}).get("causalRanking") or {}
+        st_blocked, st_reason = session_trough_late_chase_blocked(
+            candidate.explosion_event,
+            ict=pre_ict,
+            alert=alert_row,
+            ranking=causal if isinstance(causal, dict) else None,
+        )
+        if st_blocked:
+            return False, st_reason
+
     signal_premium = candidate.premium
     is_live = settings.enable_live_trading and settings.auto_trading_enabled
     use_parity = _uses_paper_live_parity(settings)
