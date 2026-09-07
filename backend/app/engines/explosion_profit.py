@@ -1850,7 +1850,7 @@ def evaluate_explosion_exit(
         pnl_points=pnl_pts,
         live_velocity_3s=v3,
     )
-    if chop_exit:
+    if chop_exit and not _should_skip_elite_runner_early_exits(trade, settings=settings):
         return chop_exit, pnl_inr
 
     from app.engines.live_best_trades import live_early_fail_exit_reason
