@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from app.config import get_settings
 from app.engines.moneyness import _depth_steps, atm_strike, classify_moneyness
@@ -1066,13 +1066,29 @@ def post_peak_chase_blocked(
 def _session_trough_lift_confirmed(
     ict: Any,
     alert: Optional[dict[str, Any]],
+    *,
+    session_lift: float = 0.0,
+    settings: Any = None,
 ) -> bool:
+    """first_lift waives trough chase only while premium is still near the session low."""
     row = alert if isinstance(alert, dict) else {}
-    if bool(row.get("ictFirstLift") or row.get("firstLift")):
-        return True
-    if ict is not None and bool(getattr(ict, "first_lift", False)):
-        return True
-    return False
+    has_lift = bool(row.get("ictFirstLift") or row.get("firstLift"))
+    if not has_lift and ict is not None:
+        has_lift = bool(getattr(ict, "first_lift", False))
+    if not has_lift:
+        return False
+    s = settings or get_settings()
+    max_waive = float(
+        getattr(
+            s,
+            "explosion_session_trough_first_lift_max_waive_lift_pct",
+            0.40,
+        )
+        or 0.40
+    )
+    if session_lift > max_waive + 1e-6:
+        return False
+    return True
 
 
 def _session_trough_grade_s_near_strike_exempt(
@@ -1139,7 +1155,9 @@ def session_trough_late_chase_blocked(
     )
     if session_lift < min_lift - 1e-6:
         return False, ""
-    if _session_trough_lift_confirmed(ict, alert):
+    if _session_trough_lift_confirmed(
+        ict, alert, session_lift=session_lift, settings=settings,
+    ):
         return False, ""
     if _session_trough_grade_s_near_strike_exempt(alert, ranking, settings=settings):
         grade_s_max = float(
@@ -1153,6 +1171,69 @@ def session_trough_late_chase_blocked(
         if session_lift <= grade_s_max + 1e-6:
             return False, ""
     return True, f"explosion_session_trough_late_chase_{session_lift:.0%}"
+
+
+def _near_strike_armed_alert_active(
+    alert: Mapping[str, Any],
+    *,
+    max_steps: int,
+) -> bool:
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    steps = float(alert.get("strikeStepsFromAtm") or 0)
+    if steps <= 0 or steps > max_steps + 1e-6:
+        return False
+    if str(alert.get("moneyness") or "").upper() == "ITM":
+        return False
+    return bool(
+        alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or str(alert.get("momentType") or "") in {
+            "armed_base_launch",
+            "v_rip_session_low",
+            "v_rip_session_high",
+            "first_lift_local_base",
+        }
+    )
+
+
+def deep_itm_near_strike_substitute_blocked(
+    side: Side | str,
+    strike: float,
+    snap: SymbolSnapshot,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block ITM/ATM fallback when near-strike OTM on the same side is armed at the pad."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "explosion_deep_itm_substitute_block_enabled", True)):
+        return False, ""
+    depth, money, _ = _strike_depth(side, strike, snap)
+    if money == "OTM":
+        return False, ""
+    min_itm = int(getattr(s, "explosion_deep_itm_substitute_min_itm_steps", 1) or 1)
+    if money == "ITM" and depth < min_itm:
+        return False, ""
+    side_v = _side_val(side)
+    max_otm = int(
+        getattr(s, "explosion_deep_itm_substitute_near_strike_max_steps", 2) or 2
+    )
+    for alt in snap.explosionAlerts or []:
+        if str(alt.get("side") or "").upper() != side_v:
+            continue
+        alt_strike = float(alt.get("strike") or 0)
+        if alt_strike <= 0:
+            continue
+        _, alt_money, _ = _strike_depth(side, alt_strike, snap)
+        if alt_money not in ("ATM", "OTM"):
+            continue
+        alt_depth, _, _ = _strike_depth(side, alt_strike, snap)
+        if alt_depth > max_otm:
+            continue
+        if _near_strike_armed_alert_active(alt, max_steps=max_otm):
+            return True, "explosion_deep_itm_near_strike_substitute"
+    return False, ""
 
 
 def extended_session_chase_blocked(
