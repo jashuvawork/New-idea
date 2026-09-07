@@ -1437,8 +1437,15 @@ class Settings(BaseSettings):
     # beyond the ATM band so a contract that rotates ATM does not lose its real base.
     # Deep OTM and sub-band premiums remain excluded.
     explosion_scan_atm_itm_only: bool = True
-    explosion_shallow_otm_history_steps: int = 1
+    explosion_shallow_otm_history_steps: int = 2
     explosion_shallow_otm_history_min_volume: int = 25000
+    # Executable near-strike OTM (1 step from ATM) when ELITE/EXPLODING or live runner.
+    explosion_shallow_otm_entry_enabled: bool = True
+    explosion_shallow_otm_entry_steps: int = 1
+    # Rank: prefer ATM / 1-step OTM rip leg over deep ITM (Sep07 23750 PE vs 23900 PE).
+    near_strike_explosion_rank_enabled: bool = True
+    near_strike_explosion_rank_bonus: float = 12.0
+    deep_itm_explosion_rank_penalty: float = 15.0
     explosion_volume_awaken_min: int = 25000
     explosion_volume_awaken_min_velocity_3s: float = 1.0
     explosion_target_elite: float = 25.0
@@ -2266,10 +2273,10 @@ class Settings(BaseSettings):
     momentum_rally_armed_coil_min_score: float = 18.0
     eod_replay_early_pad_rank_penalty: float = 12.0
     eod_replay_counter_side_rank_penalty: float = 35.0
-    # Prefer deeper ITM expansion strikes over ATM when coil pad is active
-    # (Aug28 24050 ITM over 24200/24100 ATM on the same lift).
+    # Coil-pad expansion: prefer near-strike (ATM / 1-step OTM) over deep ITM.
     expansion_strike_rank_bonus_enabled: bool = True
     expansion_strike_rank_bonus: float = 15.0
+    expansion_strike_prefer_near_strike: bool = True
     # Pad-lane turnaround chart bypass — premium-led V-rip / slow-grind / FTV lifts off
     # session low while the 5m index chart is still counter-trend (Aug25 NIFTY 24150 CE
     # ₹20→90 V-reversal blocked by chart_live_bearish_no_calls). Wider adverse-momentum
