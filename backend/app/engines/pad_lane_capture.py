@@ -1810,9 +1810,14 @@ def pad_lane_early_near_miss_waive(
     settings = get_settings()
     if not bool(getattr(settings, "pad_lane_early_near_miss_waive_enabled", True)):
         return False
-    from app.engines.rally_capture import near_strike_armed_near_miss_waive
+    from app.engines.rally_capture import explosion_near_miss_waive
 
-    if near_strike_armed_near_miss_waive(alert, snap=snap, settings=settings):
+    if explosion_near_miss_waive(
+        alert if isinstance(alert, dict) else None,
+        snap=snap,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
         return True
     from app.engines.building_ftv_gates import (
         PAD_LANE_READY_REASONS,

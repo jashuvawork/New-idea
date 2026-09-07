@@ -2204,6 +2204,57 @@ def first_lift_entry_readiness(
         min_score = float(
             getattr(settings, "ict_armed_base_launch_min_score", 65.0) or 65.0
         )
+        from app.engines.rally_capture import (
+            armed_base_pad_near_miss_waive,
+            near_strike_armed_near_miss_waive,
+        )
+
+        if near_strike_armed_near_miss_waive(row, snap=snap, settings=settings):
+            min_quality = min(
+                min_quality,
+                float(
+                    getattr(
+                        settings,
+                        "near_strike_armed_near_miss_min_quality",
+                        45.0,
+                    )
+                    or 45.0
+                ),
+            )
+            min_score = min(
+                min_score,
+                float(
+                    getattr(
+                        settings,
+                        "near_strike_armed_near_miss_min_score",
+                        45.0,
+                    )
+                    or 45.0
+                ),
+            )
+        elif armed_base_pad_near_miss_waive(row, settings=settings):
+            min_quality = min(
+                min_quality,
+                float(
+                    getattr(
+                        settings,
+                        "armed_base_pad_near_miss_min_quality",
+                        45.0,
+                    )
+                    or 45.0
+                ),
+            )
+            min_score = min(
+                min_score,
+                float(
+                    getattr(
+                        settings,
+                        "armed_base_pad_near_miss_min_score",
+                        45.0,
+                    )
+                    or 45.0
+                ),
+            )
     else:
         min_quality = float(
             getattr(settings, "first_lift_trade_min_quality", 65.0) or 65.0

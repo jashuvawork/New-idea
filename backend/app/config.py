@@ -652,6 +652,14 @@ class Settings(BaseSettings):
     near_strike_armed_near_miss_min_grade: str = "S"
     near_strike_armed_near_miss_max_steps: int = 2
     near_strike_armed_near_miss_max_local_pct: float = 15.0
+    # High explosion score at armed local pad — waive quality/structure near-miss lag.
+    armed_base_pad_near_miss_waive_enabled: bool = True
+    armed_base_pad_near_miss_min_explosion_score: float = 80.0
+    armed_base_pad_near_miss_max_local_pct: float = 15.0
+    near_strike_armed_near_miss_min_quality: float = 40.0
+    near_strike_armed_near_miss_min_score: float = 45.0
+    armed_base_pad_near_miss_min_quality: float = 40.0
+    armed_base_pad_near_miss_min_score: float = 45.0
     # Base-relative chase bypass — a fresh flat→vertical break off a consolidation base
     # (SENSEX 76300 PE: 30-100 range then 100-144 break) reads as high day-move but the
     # move FROM THE BASE is still early. Allow it when volume is rising + base move in window.

@@ -310,6 +310,13 @@ def _explosion_candidates(
         pad_lane_waive = pad_lane_early_near_miss_waive(
             alert, readiness_reason=first_lift_readiness_reason,
         )
+        if not pad_lane_waive:
+            from app.engines.rally_capture import explosion_near_miss_waive
+
+            pad_lane_waive = explosion_near_miss_waive(
+                alert if isinstance(alert, dict) else None,
+                readiness_reason=first_lift_readiness_reason,
+            )
         lift_ready = first_lift_ready or early_pad or coil_pad or pad_lane_waive
         slow_grind_trough = bool(
             alert.get("slowGrindArmedTrough")
