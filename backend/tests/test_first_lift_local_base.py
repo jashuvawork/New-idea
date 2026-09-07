@@ -732,7 +732,10 @@ def test_shallow_otm_coil_is_retained_before_atm_first_lift(
 def test_deep_otm_never_enters_explosion_history_or_radar(
     _open, side, option_key, deep_atm,
 ):
-    settings = Settings(explosion_scan_atm_itm_only=True)
+    settings = Settings(
+        explosion_scan_atm_itm_only=True,
+        explosion_shallow_otm_history_steps=1,
+    )
     symbol, strike = "NIFTY", 24200.0
     chain = [{
         "strike_price": strike,
