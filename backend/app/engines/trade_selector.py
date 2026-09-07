@@ -39,6 +39,7 @@ from app.engines.moneyness import (
     classify_moneyness,
     heatmap_moneyness_candidates,
     moneyness_rank_adjustment,
+    strike_step,
 )
 from app.engines.symbol_cooldown import (
     entry_score_penalty,
@@ -330,6 +331,7 @@ def _explosion_candidates(
         ):
             continue
         side_v = str(alert.get("side") or "").upper()
+        tier_u = str(alert.get("tier") or "").upper()
         try:
             strike_v = float(alert.get("strike") or 0)
         except (TypeError, ValueError):
@@ -362,10 +364,28 @@ def _explosion_candidates(
                 max_steps = int(
                     getattr(settings, "explosion_shallow_otm_history_steps", 1) or 1
                 )
+                entry_steps = int(
+                    getattr(settings, "explosion_shallow_otm_entry_steps", 1) or 1
+                )
                 pad_shallow_ok = early_radar_pad_shallow_otm_ok(alert, snap)
                 coil_moneyness_ok = building_coil_pad_moneyness_ok(alert, snap, settings)
+                shallow_elite_ok = (
+                    bool(getattr(settings, "explosion_shallow_otm_entry_enabled", True))
+                    and depth <= entry_steps
+                    and tier_u in ("ELITE", "EXPLODING")
+                )
+                runner = snap.explosiveRunner
+                if (
+                    runner
+                    and runner.side
+                    and str(runner.side.value if hasattr(runner.side, "value") else runner.side).upper()
+                    == side_v
+                    and abs(float(runner.strike or 0) - strike_v) <= strike_step(symbol) * 0.51
+                ):
+                    shallow_elite_ok = True
                 if not (
                     coil_moneyness_ok
+                    or shallow_elite_ok
                     or (
                         (lift_ready or alert_has_early_radar_pad_capture(alert))
                         and pad_shallow_ok
@@ -689,10 +709,15 @@ def _explosion_candidates(
             event.side, event.strike, snap, mode="explosion", candidate_score=rank,
             snapshots={symbol: snap},
         )
-        from app.engines.rally_capture import atm_proximity_rank_bonus, runner_strike_rank_bonus
+        from app.engines.rally_capture import (
+            atm_proximity_rank_bonus,
+            near_strike_explosion_rank_adjustment,
+            runner_strike_rank_bonus,
+        )
 
         rank += runner_strike_rank_bonus(event, snap)
         rank += atm_proximity_rank_bonus(event, snap)
+        rank += near_strike_explosion_rank_adjustment(event, snap)
         if bool(
             getattr(settings, "expansion_strike_rank_bonus_enabled", True)
         ) and bool(alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")):
@@ -711,10 +736,18 @@ def _explosion_candidates(
             bonus = float(
                 getattr(settings, "expansion_strike_rank_bonus", 15.0) or 15.0
             )
-            if money == "ITM":
+            depth = _depth_steps(event.side, event.strike, spot_v, symbol, atm_v)
+            prefer_near = bool(
+                getattr(settings, "expansion_strike_prefer_near_strike", True)
+            )
+            if prefer_near:
+                if money in ("ATM", "OTM") and depth <= 1:
+                    rank += bonus
+                elif money == "ITM" and depth >= 2:
+                    rank -= bonus * 0.8
+            elif money == "ITM":
                 rank += bonus
             elif money == "OTM":
-                depth = _depth_steps(event.side, event.strike, spot_v, symbol, atm_v)
                 if depth >= 2:
                     rank += bonus
         from app.engines.dual_mode_strategy import resolve_trading_session_mode

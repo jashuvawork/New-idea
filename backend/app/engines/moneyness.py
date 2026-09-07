@@ -97,6 +97,32 @@ def atm_itm_entry_allows(
             ):
                 meta["indexConfirmedMoneyness"] = True
                 return True, "ok", meta
+            settings = get_settings()
+            if bool(getattr(settings, "explosion_shallow_otm_entry_enabled", True)):
+                max_steps = int(
+                    getattr(settings, "explosion_shallow_otm_entry_steps", 1) or 1
+                )
+                if depth <= max_steps:
+                    tier = str(alert.get("tier") or "").upper()
+                    runner = snap.explosiveRunner
+                    side_val = side.value if isinstance(side, Side) else str(side).upper()
+                    runner_side = (
+                        runner.side.value
+                        if runner and runner.side and isinstance(runner.side, Side)
+                        else str(getattr(runner, "side", "") or "").upper()
+                        if runner
+                        else ""
+                    )
+                    step = strike_step(symbol)
+                    runner_match = (
+                        runner
+                        and runner.strike
+                        and runner_side == side_val
+                        and abs(float(runner.strike) - float(strike)) <= step * 0.51
+                    )
+                    if runner_match or tier in ("ELITE", "EXPLODING"):
+                        meta["shallowOtmNearStrikeEntry"] = True
+                        return True, "ok", meta
         return False, "moneyness_atm_itm_only", meta
     return True, "ok", meta
 

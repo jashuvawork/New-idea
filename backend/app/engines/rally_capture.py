@@ -249,3 +249,33 @@ def atm_proximity_rank_bonus(event: ExplosionEvent, snap: SymbolSnapshot) -> flo
     if steps >= 3:
         return -6.0
     return 0.0
+
+
+def near_strike_explosion_rank_adjustment(
+    event: ExplosionEvent, snap: SymbolSnapshot,
+) -> float:
+    """Prefer ATM and 1-step OTM (near spot) over deep ITM explosion legs."""
+    settings = get_settings()
+    if not bool(getattr(settings, "near_strike_explosion_rank_enabled", True)):
+        return 0.0
+    spot = float(snap.spot or 0)
+    if spot <= 0:
+        return 0.0
+    atm = float(snap.atmStrike or 0) or spot
+    from app.engines.moneyness import _depth_steps, classify_moneyness
+
+    money = classify_moneyness(
+        event.side, event.strike, spot, symbol=event.symbol, atm=atm,
+    )
+    depth = _depth_steps(event.side, event.strike, spot, event.symbol, atm)
+    near_bonus = float(
+        getattr(settings, "near_strike_explosion_rank_bonus", 12.0) or 12.0
+    )
+    deep_pen = float(
+        getattr(settings, "deep_itm_explosion_rank_penalty", 15.0) or 15.0
+    )
+    if depth <= 1 and money in ("ATM", "OTM"):
+        return near_bonus
+    if money == "ITM" and depth >= 2:
+        return -deep_pen
+    return 0.0
