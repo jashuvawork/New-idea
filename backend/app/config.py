@@ -634,6 +634,13 @@ class Settings(BaseSettings):
     # 94.8 vs ~100 session peak, +500% -> never green -> -19k). Near-base entries sit near the
     # session LOW, so this only blocks the exhausted-top chase.
     explosion_post_peak_chase_session_enabled: bool = True
+    # Sep07 23700 PE: local pad ~10% but premium +56% above session trough — the 900s
+    # post-peak window missed the hour-old rip. Block when far above session low without
+    # confirmed lift; grade-S near-strike armed launch gets a higher cap (23750 path).
+    explosion_session_trough_late_chase_enabled: bool = True
+    explosion_session_trough_late_chase_min_lift_pct: float = 0.50
+    explosion_session_trough_late_chase_grade_s_max_lift_pct: float = 0.60
+    explosion_session_trough_late_chase_grade_s_max_steps: int = 2
     # Base-relative chase bypass — a fresh flat→vertical break off a consolidation base
     # (SENSEX 76300 PE: 30-100 range then 100-144 break) reads as high day-move but the
     # move FROM THE BASE is still early. Allow it when volume is rising + base move in window.

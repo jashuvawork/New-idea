@@ -1063,6 +1063,98 @@ def post_peak_chase_blocked(
     return False, ""
 
 
+def _session_trough_lift_confirmed(
+    ict: Any,
+    alert: Optional[dict[str, Any]],
+) -> bool:
+    row = alert if isinstance(alert, dict) else {}
+    if bool(row.get("ictFirstLift") or row.get("firstLift")):
+        return True
+    if ict is not None and bool(getattr(ict, "first_lift", False)):
+        return True
+    return False
+
+
+def _session_trough_grade_s_near_strike_exempt(
+    alert: Optional[dict[str, Any]],
+    ranking: Optional[dict[str, Any]],
+    *,
+    settings: Any,
+) -> bool:
+    row = alert if isinstance(alert, dict) else {}
+    rank = ranking if isinstance(ranking, dict) else {}
+    grade = str(rank.get("grade") or row.get("causalGrade") or "").upper()
+    if grade != "S":
+        return False
+    steps = float(row.get("strikeStepsFromAtm") or 0)
+    max_steps = int(
+        getattr(settings, "explosion_session_trough_late_chase_grade_s_max_steps", 2) or 2
+    )
+    if steps <= 0 or steps > max_steps + 1e-6:
+        return False
+    if str(row.get("moneyness") or "").upper() == "ITM":
+        return False
+    return bool(
+        row.get("ictArmedBaseLaunch")
+        or row.get("armedBaseLaunch")
+        or str(row.get("momentType") or "") in {
+            "armed_base_launch",
+            "v_rip_session_low",
+            "first_lift_local_base",
+        }
+    )
+
+
+def session_trough_late_chase_blocked(
+    explosion_event: Any,
+    *,
+    settings: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    ranking: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
+    """Block chasing far above the session trough when lift is not confirmed."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "explosion_session_trough_late_chase_enabled", True)):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+    sym = str(getattr(explosion_event, "symbol", "") or "")
+    side = getattr(explosion_event, "side", None)
+    strike = float(getattr(explosion_event, "strike", 0) or 0)
+    current = float(getattr(explosion_event, "premium", 0) or 0)
+    if not sym or side is None or strike <= 0 or current <= 0:
+        return False, ""
+    try:
+        from app.engines.explosion_detector import get_session_low_premium
+
+        session_low = float(get_session_low_premium(sym, strike, side) or 0)
+    except Exception:
+        return False, ""
+    if session_low <= 0:
+        return False, ""
+    session_lift = (current - session_low) / session_low
+    min_lift = float(
+        getattr(settings, "explosion_session_trough_late_chase_min_lift_pct", 0.50) or 0.50
+    )
+    if session_lift < min_lift - 1e-6:
+        return False, ""
+    if _session_trough_lift_confirmed(ict, alert):
+        return False, ""
+    if _session_trough_grade_s_near_strike_exempt(alert, ranking, settings=settings):
+        grade_s_max = float(
+            getattr(
+                settings,
+                "explosion_session_trough_late_chase_grade_s_max_lift_pct",
+                0.60,
+            )
+            or 0.60
+        )
+        if session_lift <= grade_s_max + 1e-6:
+            return False, ""
+    return True, f"explosion_session_trough_late_chase_{session_lift:.0%}"
+
+
 def extended_session_chase_blocked(
     explosion_event: Any,
     *,

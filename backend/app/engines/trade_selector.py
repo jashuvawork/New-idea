@@ -831,6 +831,7 @@ def _explosion_candidates(
             live_explosion_confirmation_blocked,
             post_impulse_consolidation_entry_blocked,
             post_peak_chase_blocked,
+            session_trough_late_chase_blocked,
             coil_top_entry_blocked,
             tier_promotion_pad_chase_blocked,
         )
@@ -934,6 +935,17 @@ def _explosion_candidates(
         # so this only blocks the late/mid-rip chase — even for must-take/first-lift.
         pp_blocked, _pp_reason = post_peak_chase_blocked(event)
         if pp_blocked:
+            continue
+        st_blocked, _st_reason = session_trough_late_chase_blocked(
+            event,
+            ict=ict,
+            alert=alert if isinstance(alert, dict) else None,
+            ranking={
+                "grade": alert.get("causalGrade") or alert.get("rankGrade"),
+                "rankScore": alert.get("causalRankScore") or alert.get("rankScore"),
+            } if isinstance(alert, dict) else None,
+        )
+        if st_blocked:
             continue
         coil_blocked, _coil_reason = coil_top_entry_blocked(
             event,
