@@ -14,16 +14,19 @@ from app.engines.eod_local_base_replay import (
     _install_replay_clock,
     _is_pad_lane_entry,
     _parse_window_bound,
+    _record_replay_closed_trade,
     _replay_selection_rank,
     _restore_replay_clock,
     evaluate_local_base_entry,
     evaluate_replay_live_gates,
+    evaluate_replay_structural_gates,
     generate_eod_local_base_replay,
     generate_window_replay,
     replay_local_base_day,
     _spot_chart_from_history,
 )
-from app.models.schemas import Breadth, MarketPhase, Side, SpotChart, SymbolSnapshot
+from app.models.schemas import AutoTraderState, Breadth, MarketPhase, PaperTrade, Regime, Side, SpotChart, StrategyType, SymbolSnapshot
+from tests.mock_defaults import settings_mock
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -460,4 +463,100 @@ def test_eod_replay_quality_blocks_legacy_bypass_low_score(mock_settings):
     )
     assert not ok
     assert reason == "eod_replay_legacy_bypass_low_score"
+
+
+def test_structural_gates_disabled_skips():
+    cfg = settings_mock(
+        eod_replay_structural_gates_enabled=False,
+        eod_replay_pretrade_enabled=False,
+    )
+    alert = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 23650.0,
+        "premium": 33.0,
+        "tier": "EXPLODING",
+        "score": 90.0,
+        "velocity3s": 1.0,
+        "explosionScore": 80.0,
+    }
+    snap = _snap(side="PUT", chart=_bearish_chart())
+    ok, reason = evaluate_replay_structural_gates(
+        alert, snap, AutoTraderState(), {"NIFTY": snap}, settings=cfg,
+    )
+    assert ok is True
+    assert reason == "ok"
+
+
+def test_structural_gates_block_same_strike_reentry():
+    cfg = settings_mock(
+        eod_replay_structural_gates_enabled=True,
+        session_same_strike_loss_reentry_enabled=True,
+        session_same_strike_loss_reentry_min_loss_inr=500.0,
+    )
+    state = AutoTraderState(
+        closedPaperTrades=[
+            PaperTrade(
+                id="prior",
+                symbol="NIFTY",
+                side=Side.PUT,
+                strike=23650.0,
+                entryPremium=33.0,
+                currentPremium=27.0,
+                lots=6,
+                pnlInr=-2704.0,
+                openedAt=datetime.now(IST),
+                closedAt=datetime.now(IST),
+                status="CLOSED",
+                exitReason="adaptive_stop_loss",
+                strategyType=StrategyType.EXPLOSIVE,
+                entryContext={"selectionMode": "explosion"},
+            )
+        ]
+    )
+    alert = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 23650.0,
+        "premium": 31.0,
+        "tier": "EXPLODING",
+        "score": 85.0,
+        "velocity3s": 2.0,
+        "explosionScore": 75.0,
+    }
+    snap = _snap(side="PUT", chart=_bearish_chart())
+    ok, reason = evaluate_replay_structural_gates(
+        alert, snap, state, {"NIFTY": snap}, settings=cfg,
+    )
+    assert ok is False
+    assert reason in (
+        "session_same_strike_loss_reentry_blocked",
+        "session_same_side_loss_reentry_cooldown",
+    )
+
+
+def test_record_replay_closed_trade_populates_state():
+    state = AutoTraderState()
+    entry = datetime(2026, 9, 8, 9, 58, tzinfo=IST)
+    exit_t = datetime(2026, 9, 8, 10, 8, tzinfo=IST)
+    trade = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 23650.0,
+        "entryPremium": 33.55,
+        "exitPremium": 27.8,
+        "lots": 6,
+        "pnlInr": -2704.0,
+        "movePct": -17.0,
+        "peakPct": 5.0,
+        "exitReason": "adaptive_stop_loss",
+        "_entryDt": entry,
+        "_exitDt": exit_t,
+    }
+    _record_replay_closed_trade(
+        state, trade, entry_ctx={"entryReason": "armed_base"}, session_date="2026-09-08",
+    )
+    assert len(state.closedPaperTrades) == 1
+    assert state.closedPaperTrades[0].strike == 23650.0
+    assert state.lastExit is not None
 
