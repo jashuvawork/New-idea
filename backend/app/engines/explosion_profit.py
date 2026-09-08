@@ -1815,6 +1815,55 @@ def peak_fade_profit_lock_reason(
     return None
 
 
+def peak_velocity_reversal_keep_reason(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    live_velocity_3s: float = 0.0,
+) -> Optional[str]:
+    """Bank at the 75% peak-keep floor when premium reverses off the top with velocity.
+
+    Covers deep ITM / max-profit legs where gain-% never reaches the %-trail arm band
+    but a real peak (+12–20pt) still needs protection from a fast giveback.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "peak_velocity_reversal_keep_enabled", True)):
+        return None
+
+    min_best = _cfg_float(settings, "peak_velocity_reversal_min_best_points", 8.0)
+    best = float(best or 0)
+    pnl_pts = float(pnl_pts or 0)
+    if best < min_best:
+        return None
+
+    keep = _cfg_float(settings, "peak_velocity_reversal_keep_ratio", 0.75)
+    from app.engines.modest_peak_mode import modest_peak_pct_arm_thresholds
+
+    modest = modest_peak_pct_arm_thresholds(trade, settings=settings)
+    if modest is not None:
+        keep = modest[2]
+    keep = min(0.95, max(0.5, keep))
+    floor_pts = best * keep
+    if pnl_pts > floor_pts + 1e-6:
+        return None
+
+    min_giveback = _cfg_float(settings, "peak_velocity_reversal_min_giveback_points", 2.0)
+    if best - pnl_pts < min_giveback:
+        return None
+
+    live_v3, _ = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
+    skip_hot = _cfg_float(settings, "peak_velocity_reversal_skip_hot_velocity_3s", 2.0)
+    if live_v3 >= skip_hot:
+        return None
+
+    min_reversal_v = _cfg_float(settings, "peak_velocity_reversal_min_velocity_3s", 2.0)
+    if live_v3 > -min_reversal_v:
+        return None
+
+    return "explosion_peak_velocity_reversal_keep"
+
+
 def evaluate_explosion_exit(
     trade: PaperTrade,
     current_premium: float,
@@ -1979,6 +2028,12 @@ def evaluate_explosion_exit(
     )
     if halve_lock:
         return halve_lock, pnl_inr
+
+    reversal_keep = peak_velocity_reversal_keep_reason(
+        trade, best=best, pnl_pts=pnl_pts, live_velocity_3s=v3,
+    )
+    if reversal_keep:
+        return reversal_keep, pnl_inr
 
     # Peak→fade toward losses: book remaining green / BE before hard SL.
     # Runs before trail-arm gates so unarmed trails cannot give winners back.

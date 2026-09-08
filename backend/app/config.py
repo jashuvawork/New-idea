@@ -1298,6 +1298,14 @@ class Settings(BaseSettings):
     modest_peak_suppress_pre_stage_wide_floor: bool = True
     modest_peak_tighten_peak_fade_defer: bool = True
     modest_peak_skip_hot_velocity_3s: float = 4.0
+    # After a real peak, a fast premium reversal below the 75% peak-keep floor books
+    # profit even when %-keep never armed (Sep08 23800 PE +16pt @ ₹150 = 10.6% < 25% arm).
+    peak_velocity_reversal_keep_enabled: bool = True
+    peak_velocity_reversal_min_best_points: float = 8.0
+    peak_velocity_reversal_keep_ratio: float = 0.75
+    peak_velocity_reversal_min_velocity_3s: float = 2.0
+    peak_velocity_reversal_min_giveback_points: float = 2.0
+    peak_velocity_reversal_skip_hot_velocity_3s: float = 2.0
     moment_stage_min_projected_tp: float = 40.0
     # Allow rare 50→650 LTP mega rips (+600pt); live extension ratchets toward this.
     moment_stage_max_projected_tp: float = 800.0
