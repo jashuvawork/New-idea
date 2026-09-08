@@ -286,7 +286,7 @@ def armed_base_shallow_launch_blocked(
         getattr(settings, "chop_live_armed_base_max_local_pad_pct", 20.0) or 20.0
     )
     min_base = float(
-        getattr(settings, "fake_explosion_trap_min_session_move_pct", 28.0) or 28.0
+        getattr(settings, "armed_base_shallow_min_session_move_pct", 28.0) or 28.0
     )
     if pad >= max_pad and pad >= min_base:
         return False, "", meta

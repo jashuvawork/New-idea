@@ -85,10 +85,11 @@ def record_instrument_close(
                 int(getattr(settings, "scalp_instrument_win_cooldown_seconds", 600) or 600),
             )
     if is_explosion and pnl_inr < 0:
-        secs = max(
-            secs,
-            int(getattr(settings, "explosion_instrument_loss_cooldown_seconds", 14400) or 14400),
-        )
+        if bool(getattr(settings, "explosion_instrument_loss_cooldown_enabled", True)):
+            secs = max(
+                secs,
+                int(getattr(settings, "explosion_instrument_loss_cooldown_seconds", 14400) or 14400),
+            )
 
     if secs > 0:
         _cooldown_until[key] = now + timedelta(seconds=secs)

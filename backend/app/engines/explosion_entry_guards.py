@@ -1208,18 +1208,52 @@ def deep_itm_near_strike_substitute_blocked(
     snap: SymbolSnapshot,
     *,
     settings: Any = None,
+    candidate_score: float = 0.0,
 ) -> tuple[bool, str]:
     """Block ITM/ATM fallback when near-strike OTM on the same side is armed at the pad."""
     s = settings or get_settings()
     if not bool(getattr(s, "explosion_deep_itm_substitute_block_enabled", True)):
         return False, ""
+    side_v = _side_val(side)
     depth, money, _ = _strike_depth(side, strike, snap)
+    cand_score = float(candidate_score or 0.0)
+    if cand_score <= 0:
+        for alt in snap.explosionAlerts or []:
+            if (
+                str(alt.get("side") or "").upper() == side_v
+                and abs(float(alt.get("strike") or 0) - float(strike)) < 0.51
+            ):
+                cand_score = float(alt.get("score") or 0.0)
+                break
+
+    if bool(getattr(s, "explosion_deep_itm_block_atm_radar_advantage_enabled", True)):
+        max_itm = int(
+            getattr(s, "explosion_deep_itm_block_max_itm_steps_when_atm_on_radar", 1) or 1
+        )
+        min_adv = float(
+            getattr(s, "explosion_deep_itm_block_atm_min_score_advantage", 20.0) or 20.0
+        )
+        if money == "ITM" and depth > max_itm:
+            atm_best = 0.0
+            for alt in snap.explosionAlerts or []:
+                if str(alt.get("side") or "").upper() != side_v:
+                    continue
+                alt_strike = float(alt.get("strike") or 0)
+                if alt_strike <= 0:
+                    continue
+                _, alt_money, _ = _strike_depth(side, alt_strike, snap)
+                if alt_money != "ATM":
+                    continue
+                atm_best = max(atm_best, float(alt.get("score") or 0.0))
+            ref_score = cand_score if cand_score > 0 else float(depth)
+            if atm_best >= ref_score + min_adv:
+                return True, "explosion_deep_itm_atm_radar_advantage"
+
     if money == "OTM":
         return False, ""
     min_itm = int(getattr(s, "explosion_deep_itm_substitute_min_itm_steps", 1) or 1)
     if money == "ITM" and depth < min_itm:
         return False, ""
-    side_v = _side_val(side)
     max_otm = int(
         getattr(s, "explosion_deep_itm_substitute_near_strike_max_steps", 2) or 2
     )
@@ -1532,16 +1566,21 @@ def faded_rip_no_green_exit_reason(
     return None
 
 
-def _regime_chopish(snap: SymbolSnapshot) -> bool:
+def _regime_chopish(snap: SymbolSnapshot, *, settings: Any = None) -> bool:
+    s = settings or get_settings()
+    if not bool(getattr(s, "chopish_regime_detection_enabled", True)):
+        return False
     regime = str(snap.regime.value if hasattr(snap.regime, "value") else snap.regime or "").upper()
     if regime in ("CHOP", "RANGE_BOUND"):
         return True
     chart = snap.spotChart
     if chart is None:
         return False
+    mom_max = float(getattr(s, "chopish_regime_mom5_max_pct", 0.25) or 0.25)
+    strength_max = float(getattr(s, "chopish_regime_strength_max", 45.0) or 45.0)
     mom = abs(float(getattr(chart, "momentum5Pct", 0) or 0))
     strength = float(getattr(chart, "trendStrength", 100) or 100)
-    return mom < 0.25 and strength < 45
+    return mom < mom_max and strength < strength_max
 
 
 def _midday_chop_active() -> bool:
@@ -1743,9 +1782,12 @@ def detect_fake_explosion_trap(
     if ict is not None:
         move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
 
-    chop_regime = _regime_chopish(snap)
+    chop_regime = _regime_chopish(snap, settings=settings)
     midday = _midday_chop_active()
-    chopish = chop_regime or midday
+    if bool(getattr(settings, "chopish_midday_union_enabled", True)):
+        chopish = chop_regime or midday
+    else:
+        chopish = chop_regime and midday
     elite_hot = tier in ("ELITE", "EXPLODING") and (
         v3 >= 2.0 or tier == "ELITE"
     )

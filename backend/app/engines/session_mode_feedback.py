@@ -1070,6 +1070,25 @@ def session_same_strike_loss_reentry_blocked(
     if prior_pnl >= 0:
         return False, meta
 
+    min_loss = float(
+        getattr(settings, "session_same_strike_loss_reentry_min_loss_inr", 500.0) or 500.0
+    )
+    if abs(prior_pnl) < min_loss:
+        return False, meta
+
+    cooldown = int(
+        getattr(settings, "session_same_strike_loss_reentry_cooldown_seconds", 0) or 0
+    )
+    if cooldown > 0:
+        closed_at = getattr(prior, "closedAt", None)
+        if closed_at is not None:
+            now = datetime.now(_IST)
+            if closed_at.tzinfo is None:
+                closed_at = closed_at.replace(tzinfo=_IST)
+            elapsed = (now - closed_at.astimezone(_IST)).total_seconds()
+            if elapsed >= cooldown:
+                return False, meta
+
     meta.update({
         "applied": True,
         "priorTradeId": getattr(prior, "id", None),
