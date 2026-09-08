@@ -243,6 +243,31 @@ def _extended_chase_hard_block(candidate: Any, snap: SymbolSnapshot) -> tuple[bo
     return False, ""
 
 
+def _armed_base_chop_block(candidate: Any, snap: SymbolSnapshot) -> tuple[bool, str]:
+    """Block armed-base launches on chop days when pad is still shallow (Sep08 pattern)."""
+    settings = get_settings()
+    if not getattr(settings, "chop_live_block_armed_base_launch", True):
+        return False, ""
+    event = getattr(candidate, "explosion_event", None)
+    if event is None:
+        return False, ""
+
+    from app.engines.explosion_entry_guards import effective_local_base_move_pct
+    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+    ict = analyze_explosion_event_ict(event, snap)
+    if not getattr(ict, "armed_base_launch", False):
+        return False, ""
+
+    pad = float(effective_local_base_move_pct(event, ict) or 0.0)
+    max_pad = float(
+        getattr(settings, "chop_live_armed_base_max_local_pad_pct", 20.0) or 20.0
+    )
+    if pad >= max_pad:
+        return False, ""
+    return True, "chop_live_armed_base_chop_day"
+
+
 def _premium_5m_fading(
     *,
     side: Side | str,
@@ -333,6 +358,11 @@ def chop_live_entry_blocked(
         meta["extendedChase"] = True
         return True, reason, meta
 
+    blocked, reason = _armed_base_chop_block(candidate, snap)
+    if blocked:
+        meta["armedBaseChopBlock"] = True
+        return True, reason, meta
+
     fade_blocked, fade_reason, fade_meta = _premium_5m_fading(
         side=getattr(candidate, "side", Side.CALL),
         chart_meta=chart_meta,
@@ -421,9 +451,23 @@ def chop_live_early_fail_exit_reason(
     if not ctx.get("chopLiveGuard"):
         return None
 
+    flags = {str(f).lower() for f in (ctx.get("conflictFlags") or []) if f}
+    trap_chop_elite = (
+        ctx.get("fakeExplosionTrap")
+        and "chop_regime" in flags
+        and "elite_hot" in flags
+    )
+
     min_hold = int(getattr(settings, "chop_live_early_fail_min_hold_seconds", 30) or 30)
     max_hold = int(getattr(settings, "chop_live_early_fail_max_hold_seconds", 180) or 180)
     max_best = float(getattr(settings, "chop_live_early_fail_max_best_points", 0.5) or 0.5)
+    if trap_chop_elite:
+        max_best = float(
+            getattr(settings, "chop_live_trap_early_fail_max_best_points", 2.0) or 2.0
+        )
+        max_hold = int(
+            getattr(settings, "chop_live_trap_early_fail_max_hold_seconds", 600) or 600
+        )
     min_loss = float(getattr(settings, "chop_live_early_fail_min_loss_points", 3.0) or 3.0)
     max_v3 = float(getattr(settings, "chop_live_early_fail_max_velocity_3s", 0.0) or 0.0)
 

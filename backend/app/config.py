@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     chop_live_block_extended_chase: bool = True
     chop_live_extended_chase_min_session_move_pct: float = 28.0
     chop_live_min_trusted_local_base_pct: float = 15.0
+    # Sep08: armed-base launch on chop day below base window — hard block at entry wire.
+    chop_live_block_armed_base_launch: bool = True
+    chop_live_armed_base_max_local_pad_pct: float = 20.0
+    # Trap-stamped chop+elite exits: modest MFE then bleed (Sep08 +1.45pt → adaptive SL).
+    chop_live_trap_early_fail_max_best_points: float = 2.0
+    chop_live_trap_early_fail_max_hold_seconds: int = 600
     # Live best-trades-only — strict real-money quality bar (₹10k book).
     live_best_trades_only_enabled: bool = True
     live_best_trades_min_grade: str = "S"
@@ -1348,6 +1354,8 @@ class Settings(BaseSettings):
     fake_explosion_trap_min_conflict_flags: int = 3
     # Aug18: EXPIRY WORST + midday chop + EXPLODING only soft-capped; restore hard block.
     fake_explosion_trap_block_worst_midday_chop: bool = True
+    # Sep08 NIFTY 23650 PE: chop+elite armed-base at 7.7% soft-cut to 6 lots → −₹2.7k.
+    fake_explosion_trap_block_chop_elite_armed_base: bool = True
     fake_explosion_trap_chop_elite_lot_cap: int = 6
     fake_explosion_trap_otm_requires_or_breakout: bool = True
     fake_explosion_trap_post_win_lot_cap: int = 8

@@ -202,6 +202,14 @@ def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = 
     """Skip failed_launch / barely-green for elite-gated and bundle-stamped runners."""
     settings = settings or get_settings()
     ctx = trade.entryContext or {}
+    flags = {str(f).lower() for f in (ctx.get("conflictFlags") or []) if f}
+    if (
+        ctx.get("fakeExplosionTrap")
+        and "chop_regime" in flags
+        and "elite_hot" in flags
+    ):
+        # Sep08: trap-stamped chop elite must not defer chop_live early-fail to adaptive SL.
+        return False
     assessment = ctx.get("eliteAssessment") or {}
     relax_on = bool(getattr(settings, "elite_failed_launch_relax_enabled", True))
     skip_on = bool(getattr(settings, "elite_runner_skip_failed_launch_enabled", True))
