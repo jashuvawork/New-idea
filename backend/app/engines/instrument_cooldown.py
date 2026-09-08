@@ -72,6 +72,7 @@ def record_instrument_close(
     mode_l = (mode or "").lower()
     strat_u = str(strategy_type or "").upper()
     is_scalp = mode_l == "scalp" or strat_u == "SCALP"
+    is_explosion = mode_l == "explosion" or strat_u == "EXPLOSIVE"
     if is_scalp:
         if pnl_inr < 0:
             secs = max(
@@ -83,6 +84,11 @@ def record_instrument_close(
                 secs,
                 int(getattr(settings, "scalp_instrument_win_cooldown_seconds", 600) or 600),
             )
+    if is_explosion and pnl_inr < 0:
+        secs = max(
+            secs,
+            int(getattr(settings, "explosion_instrument_loss_cooldown_seconds", 14400) or 14400),
+        )
 
     if secs > 0:
         _cooldown_until[key] = now + timedelta(seconds=secs)

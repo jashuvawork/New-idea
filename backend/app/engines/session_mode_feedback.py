@@ -1039,3 +1039,44 @@ def session_same_side_loss_reentry_blocked(
     )
     return True, meta
 
+
+def session_same_strike_loss_reentry_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+) -> tuple[bool, dict[str, Any]]:
+    """Block re-entry on the exact strike after a session explosion loss (Sep08 23650 PE ×2).
+
+    Same-side cooldown expires after 15–60 minutes; this guard is strike-specific and
+    lasts for the rest of the session once a loss is printed on that leg.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "session_same_strike_loss_reentry_enabled", True):
+        return False, meta
+
+    prior = _latest_same_strike_explosion_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=float(strike or 0),
+    )
+    if prior is None:
+        return False, meta
+
+    prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
+    if prior_pnl >= 0:
+        return False, meta
+
+    meta.update({
+        "applied": True,
+        "priorTradeId": getattr(prior, "id", None),
+        "priorPnlInr": round(prior_pnl, 2),
+        "priorExitReason": str(getattr(prior, "exitReason", "") or ""),
+        "priorStrike": float(getattr(prior, "strike", 0) or 0),
+        "reason": "session_same_strike_loss_reentry_blocked",
+    })
+    return True, meta
+

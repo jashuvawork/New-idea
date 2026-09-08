@@ -244,28 +244,60 @@ def _extended_chase_hard_block(candidate: Any, snap: SymbolSnapshot) -> tuple[bo
 
 
 def _armed_base_chop_block(candidate: Any, snap: SymbolSnapshot) -> tuple[bool, str]:
-    """Block armed-base launches on chop days when pad is still shallow (Sep08 pattern)."""
+    """Block armed-base launches on chop/midday when pad is still shallow (Sep08 pattern)."""
+    blocked, reason, _meta = armed_base_shallow_launch_blocked(candidate, snap)
+    return blocked, reason
+
+
+def armed_base_shallow_launch_blocked(
+    candidate: Any,
+    snap: SymbolSnapshot,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Hard block shallow armed-base launches on chop or midday windows (CE/PE symmetric)."""
     settings = get_settings()
+    meta: dict[str, Any] = {}
     if not getattr(settings, "chop_live_block_armed_base_launch", True):
-        return False, ""
+        return False, "", meta
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, "", meta
+
+    from app.engines.explosion_entry_guards import (
+        _armed_base_launch_active,
+        _midday_chop_active,
+        _regime_chopish,
+        effective_local_base_move_pct,
+    )
+
+    if not (_regime_chopish(snap) or _midday_chop_active()):
+        return False, "", meta
+
     event = getattr(candidate, "explosion_event", None)
     if event is None:
-        return False, ""
+        return False, "", meta
 
-    from app.engines.explosion_entry_guards import effective_local_base_move_pct
     from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
     ict = analyze_explosion_event_ict(event, snap)
-    if not getattr(ict, "armed_base_launch", False):
-        return False, ""
+    if not _armed_base_launch_active(ict, candidate):
+        return False, "", meta
 
     pad = float(effective_local_base_move_pct(event, ict) or 0.0)
     max_pad = float(
         getattr(settings, "chop_live_armed_base_max_local_pad_pct", 20.0) or 20.0
     )
-    if pad >= max_pad:
-        return False, ""
-    return True, "chop_live_armed_base_chop_day"
+    min_base = float(
+        getattr(settings, "fake_explosion_trap_min_session_move_pct", 28.0) or 28.0
+    )
+    if pad >= max_pad and pad >= min_base:
+        return False, "", meta
+
+    meta.update({
+        "armedBaseChopBlock": True,
+        "localBaseMovePct": round(pad, 2),
+        "middayChop": _midday_chop_active(),
+        "chopRegime": _regime_chopish(snap),
+    })
+    return True, "armed_base_shallow_chop_day", meta
 
 
 def _premium_5m_fading(
