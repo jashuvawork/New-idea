@@ -98,7 +98,22 @@ class Settings(BaseSettings):
     chop_live_armed_base_max_local_pad_pct: float = 20.0
     # Sep08: second 23650 PE after morning loss — one explosion attempt per strike after loss.
     session_same_strike_loss_reentry_enabled: bool = True
+    session_same_strike_loss_reentry_min_loss_inr: float = 500.0
+    # 0 = block for rest of session; >0 allows retry after cooldown seconds.
+    session_same_strike_loss_reentry_cooldown_seconds: int = 0
+    explosion_instrument_loss_cooldown_enabled: bool = True
     explosion_instrument_loss_cooldown_seconds: int = 14_400
+    # Chopish regime union (chop_regime OR midday_chop) — disable to require both paths separately.
+    chopish_midday_union_enabled: bool = True
+    chopish_regime_detection_enabled: bool = True
+    chopish_regime_mom5_max_pct: float = 0.25
+    chopish_regime_strength_max: float = 45.0
+    # Armed-base shallow launch block thresholds (chop_live + fake_trap); tune pad/move to stop over-blocking.
+    armed_base_shallow_min_session_move_pct: float = 28.0
+    # Block deep ITM pick when ATM/near-ATM on radar scores higher (Sep08 23650 vs 23800).
+    explosion_deep_itm_block_atm_radar_advantage_enabled: bool = True
+    explosion_deep_itm_block_atm_min_score_advantage: float = 20.0
+    explosion_deep_itm_block_max_itm_steps_when_atm_on_radar: int = 1
     # Trap-stamped chop+elite exits: modest MFE then bleed (Sep08 +1.45pt → adaptive SL).
     chop_live_trap_early_fail_max_best_points: float = 2.0
     chop_live_trap_early_fail_max_hold_seconds: int = 600

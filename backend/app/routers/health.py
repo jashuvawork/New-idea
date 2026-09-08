@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from app.config import audit_week_local_base_overrides, get_settings
 from app.engines.capital_allocator import get_lot_sizes_meta
-from app.engines.paper_slippage import config_summary as slippage_config_summary
+from app.engines.structural_guard_settings import structural_guard_summary
 from app.services import trade_store
 from app.services.redis_store import has_upstox_token
 from app.services.token_manager import get_daily_token_status
@@ -158,6 +158,7 @@ async def deployment_status():
             "todayClosed": today_counts["closed"],
         },
         **get_lot_sizes_meta(),
+        "structuralGuards": structural_guard_summary(settings),
     }
 
 
