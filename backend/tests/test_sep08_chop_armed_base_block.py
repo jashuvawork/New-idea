@@ -192,6 +192,32 @@ def test_blocks_chop_elite_armed_base_below_base_window(
     assert meta.get("chopEliteArmedBaseBlock") is True
 
 
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+@patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=True)
+@patch("app.engines.explosion_entry_guards._regime_chopish", return_value=False)
+def test_blocks_midday_chop_elite_armed_base_sep08_trade2(
+    _mock_chopish, _mock_midday, mock_money_settings, mock_settings, side,
+):
+    """Sep08 trade #2: midday_chop + elite + armed-base at 9.6% — must hard-block."""
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+    snap = _snap(regime=Regime.TREND_EXPANSION)
+    event = _event(side=side, daily=17.82)
+    cand = _candidate(event, snap)
+    ict = _sep08_ict()
+    ict.base_relative_move_pct = 9.64
+    ict.session_move_pct = 17.82
+
+    blocked, reason, meta = detect_fake_explosion_trap(cand, snap, ict=ict)
+
+    assert blocked is True
+    assert reason == "fake_explosion_trap_chop_elite_armed_base"
+    assert meta.get("chopEliteArmedBaseBlock") is True
+
+
 @patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.moneyness.get_settings")
 def test_chop_elite_without_armed_launch_still_soft_cut(mock_money_settings, mock_settings):
@@ -239,7 +265,7 @@ def test_chop_live_blocks_shallow_armed_base(
     blocked, reason, meta = chop_live_entry_blocked(cand, snap, state)
 
     assert blocked is True
-    assert reason == "chop_live_armed_base_chop_day"
+    assert reason == "armed_base_shallow_chop_day"
     assert meta.get("armedBaseChopBlock") is True
 
 

@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     # Sep08: armed-base launch on chop day below base window — hard block at entry wire.
     chop_live_block_armed_base_launch: bool = True
     chop_live_armed_base_max_local_pad_pct: float = 20.0
+    # Sep08: second 23650 PE after morning loss — one explosion attempt per strike after loss.
+    session_same_strike_loss_reentry_enabled: bool = True
+    explosion_instrument_loss_cooldown_seconds: int = 14_400
     # Trap-stamped chop+elite exits: modest MFE then bleed (Sep08 +1.45pt → adaptive SL).
     chop_live_trap_early_fail_max_best_points: float = 2.0
     chop_live_trap_early_fail_max_hold_seconds: int = 600

@@ -2028,7 +2028,7 @@ def detect_fake_explosion_trap(
     armed_launch = _armed_base_launch_active(ict, candidate)
     if (
         getattr(settings, "fake_explosion_trap_block_chop_elite_armed_base", True)
-        and chop_regime
+        and chopish
         and elite_hot
         and armed_launch
         and timing_move < min_move
@@ -2061,6 +2061,16 @@ def detect_fake_explosion_trap(
 
     cut = False
     if chopish and elite_hot and not skip_soft:
+        # Sep08: armed-base shallow launches must hard-block above — never soft-cut to 6 lots.
+        if armed_launch and timing_move < min_move:
+            meta.update({
+                "fakeExplosionTrap": True,
+                "action": "block",
+                "psychologyEscalate": "OVERCONFIDENCE",
+                "chopEliteArmedBaseBlock": True,
+                "armedBaseLaunch": True,
+            })
+            return True, "fake_explosion_trap_chop_elite_armed_base", meta
         cut = True
         action = "cut_size"
         reason = "fake_explosion_trap_chop_elite_size"

@@ -857,6 +857,7 @@ def validate_candidate(
         from app.engines.session_mode_feedback import (
             peak_fade_same_side_reentry_blocked,
             session_same_side_loss_reentry_blocked,
+            session_same_strike_loss_reentry_blocked,
         )
 
         peak_fade_blocked, peak_fade_meta = peak_fade_same_side_reentry_blocked(
@@ -867,6 +868,17 @@ def validate_candidate(
         if peak_fade_blocked:
             meta.update({"peakFadeSameSideReentryBlocked": True, **peak_fade_meta})
             return False, "peak_fade_same_side_reentry_cooldown", meta
+
+        strike_loss_blocked, strike_loss_meta = session_same_strike_loss_reentry_blocked(
+            state,
+            symbol=str(getattr(candidate, "symbol", "") or ""),
+            side=getattr(candidate, "side", ""),
+            strike=float(getattr(candidate, "strike", 0) or 0),
+        )
+        if strike_loss_blocked:
+            reason = strike_loss_meta.get("reason") or "session_same_strike_loss_reentry_blocked"
+            meta.update({"sessionSameStrikeLossReentryBlocked": True, **strike_loss_meta})
+            return False, reason, meta
 
         session_loss_blocked, session_loss_meta = session_same_side_loss_reentry_blocked(
             state,
@@ -1065,6 +1077,15 @@ def validate_candidate(
                 )
             ):
                 return False, trap_reason, meta
+
+        from app.engines.chop_live_guards import armed_base_shallow_launch_blocked
+
+        armed_blocked, armed_reason, armed_meta = armed_base_shallow_launch_blocked(
+            candidate, snap,
+        )
+        if armed_blocked:
+            meta.update(armed_meta)
+            return False, armed_reason, meta
 
     if getattr(candidate, "mode", "") == "explosion" and explosion_event is not None:
         from app.engines.morning_premium_capture import premium_led_explosion_bypass
