@@ -1699,6 +1699,16 @@ def _post_win_top_confidence_allows(
     return False
 
 
+def _armed_base_launch_active(ict: Any, candidate: Any) -> bool:
+    """True when ICT or alert stamps an armed-base launch (5–15% early band)."""
+    if ict is not None and bool(getattr(ict, "armed_base_launch", False)):
+        return True
+    alert = getattr(candidate, "alert", None)
+    if isinstance(alert, dict):
+        return bool(alert.get("ictArmedBaseLaunch") or alert.get("armedBaseLaunch"))
+    return False
+
+
 def detect_fake_explosion_trap(
     candidate: Any,
     snap: SymbolSnapshot,
@@ -2012,6 +2022,25 @@ def detect_fake_explosion_trap(
             "structureMissing": True,
         })
         return True, "fake_explosion_trap_midday_no_structure", meta
+
+    # Sep08: chop + elite + armed-base launch below the 28% base window is a fake rip —
+    # soft cut to 6 lots still opens a full thesis that never greens on chop days.
+    armed_launch = _armed_base_launch_active(ict, candidate)
+    if (
+        getattr(settings, "fake_explosion_trap_block_chop_elite_armed_base", True)
+        and chop_regime
+        and elite_hot
+        and armed_launch
+        and timing_move < min_move
+    ):
+        meta.update({
+            "fakeExplosionTrap": True,
+            "action": "block",
+            "psychologyEscalate": "OVERCONFIDENCE",
+            "chopEliteArmedBaseBlock": True,
+            "armedBaseLaunch": True,
+        })
+        return True, "fake_explosion_trap_chop_elite_armed_base", meta
 
     # Soft cut: chop+elite full-size forbidden; post-small-win clamp.
     # Exception: structured base-window (28–55%) rips take full lots — soft-cutting
