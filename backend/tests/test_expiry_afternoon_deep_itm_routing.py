@@ -1,8 +1,10 @@
 """Sep03 — SENSEX expiry afternoon: deep ITM SENSEX PE over cross-index NIFTY explosion."""
 
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from datetime import datetime, timedelta
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
+
+from tests.mock_defaults import settings_mock
 
 from app.engines.bad_day_routing import (
     check_expiry_afternoon_cross_index_explosion,
@@ -29,6 +31,11 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def _today() -> str:
     return datetime.now(IST).strftime("%Y-%m-%d")
+
+
+def _non_expiry() -> str:
+    """NIFTY chain expiry that is never session-today (Sep03 cross-index geometry)."""
+    return (datetime.now(IST) + timedelta(days=7)).strftime("%Y-%m-%d")
 
 
 def _snap(
@@ -79,46 +86,47 @@ class _Cand:
 
 
 def _settings(**overrides):
-    s = MagicMock()
-    s.expiry_day_guards_enabled = True
-    s.expiry_afternoon_deep_itm_routing_enabled = True
-    s.expiry_afternoon_deep_itm_min_steps = 2
-    s.expiry_afternoon_deep_itm_rank_bonus = 50.0
-    s.expiry_afternoon_cross_index_explosion_penalty = 45.0
-    s.expiry_afternoon_cross_index_explosion_block_enabled = True
-    s.expiry_afternoon_cross_index_explosion_bypass_min_score = 95.0
-    s.expiry_afternoon_cross_index_explosion_bypass_min_move_pct = 120.0
-    s.expiry_afternoon_explosion_confirm_enabled = True
-    s.expiry_afternoon_elite_min_explosion_score = 85.0
-    s.expiry_afternoon_elite_min_velocity_3s = 2.5
-    s.expiry_afternoon_exploding_min_explosion_score = 90.0
-    s.expiry_afternoon_exploding_min_velocity_3s = 3.0
-    s.expiry_pm_itm_quick_enabled = True
-    s.expiry_pm_itm_premium_max_inr = 280.0
-    s.expiry_day_min_option_premium_inr = 15.0
-    s.cross_index_elite_priority_enabled = True
-    s.cross_index_elite_min_session_move_pct = 40.0
-    s.cross_index_elite_priority_bonus = 22.0
-    s.expiry_worst_day_session_loss_inr = -12_000.0
-    s.expiry_decline_session_loss_inr = -8_000.0
-    s.worst_day_full_pause_loss_inr = -20_000.0
-    s.expiry_worst_day_score_threshold = 55.0
-    s.expiry_worst_day_halt_entries = True
-    s.expiry_morning_only = True
-    s.expiry_max_trades_per_day = 6
-    s.expiry_worst_day_max_trades = 3
-    s.expiry_evening_all_in_explosion_bypass = True
-    s.expiry_power_hour_deep_itm_enabled = True
-    s.expiry_power_hour_deep_itm_bypass_top_only = True
-    s.expiry_power_hour_deep_itm_bypass_evening_block = True
-    s.expiry_severe_pause_deep_itm_lift_enabled = True
-    s.expiry_daily_loss_stop_bypass_enabled = True
-    s.expiry_daily_loss_stop_bypass_same_day_only = True
-    s.daily_loss_stop_inr = 20_000.0
-    s.ftv_elite_top_only_enabled = False
-    for k, v in overrides.items():
-        setattr(s, k, v)
-    return s
+    """Production-aligned settings stub — avoids MagicMock numeric drift (#587 CI)."""
+    defaults = {
+        "expiry_day_guards_enabled": True,
+        "expiry_afternoon_deep_itm_routing_enabled": True,
+        "expiry_afternoon_deep_itm_min_steps": 2,
+        "expiry_afternoon_deep_itm_rank_bonus": 50.0,
+        "expiry_afternoon_cross_index_explosion_penalty": 45.0,
+        "expiry_afternoon_cross_index_explosion_block_enabled": True,
+        "expiry_afternoon_cross_index_explosion_bypass_min_score": 95.0,
+        "expiry_afternoon_cross_index_explosion_bypass_min_move_pct": 120.0,
+        "expiry_afternoon_explosion_confirm_enabled": True,
+        "expiry_afternoon_elite_min_explosion_score": 85.0,
+        "expiry_afternoon_elite_min_velocity_3s": 2.5,
+        "expiry_afternoon_exploding_min_explosion_score": 90.0,
+        "expiry_afternoon_exploding_min_velocity_3s": 3.0,
+        "expiry_pm_itm_quick_enabled": True,
+        "expiry_pm_itm_premium_max_inr": 280.0,
+        "expiry_day_min_option_premium_inr": 15.0,
+        "cross_index_elite_priority_enabled": True,
+        "cross_index_elite_min_session_move_pct": 40.0,
+        "cross_index_elite_priority_bonus": 22.0,
+        "expiry_worst_day_session_loss_inr": -12_000.0,
+        "expiry_decline_session_loss_inr": -8_000.0,
+        "worst_day_full_pause_loss_inr": -20_000.0,
+        "expiry_worst_day_score_threshold": 55.0,
+        "expiry_worst_day_halt_entries": True,
+        "expiry_morning_only": True,
+        "expiry_max_trades_per_day": 6,
+        "expiry_worst_day_max_trades": 3,
+        "expiry_evening_all_in_explosion_bypass": True,
+        "expiry_power_hour_deep_itm_enabled": True,
+        "expiry_power_hour_deep_itm_bypass_top_only": True,
+        "expiry_power_hour_deep_itm_bypass_evening_block": True,
+        "expiry_severe_pause_deep_itm_lift_enabled": True,
+        "expiry_daily_loss_stop_bypass_enabled": True,
+        "expiry_daily_loss_stop_bypass_same_day_only": True,
+        "daily_loss_stop_inr": 20_000.0,
+        "ftv_elite_top_only_enabled": False,
+    }
+    defaults.update(overrides)
+    return settings_mock(**defaults)
 
 
 def _sensex_deep_itm_heatmap() -> list[HeatmapStrike]:
@@ -143,7 +151,7 @@ def test_expiring_symbol_deep_itm_heatmap_detected(_aft, _sess_bad, _sess_exp, m
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
         "NIFTY": _snap("NIFTY", expiry=(datetime.now(IST).replace(day=1).strftime("%Y-%m-%d"))),
     }
-    snaps["NIFTY"].optionExpiry = "2026-09-09"
+    snaps["NIFTY"].optionExpiry = _non_expiry()
     assert expiring_symbol_has_deep_itm_heatmap(snaps) is True
 
 
@@ -158,7 +166,7 @@ def test_deep_itm_sensex_candidate_gets_rank_bonus(_aft, _sess_bad, _sess_exp, m
     mock_exp.return_value = cfg
     snaps = {
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     sensex_cand = _Cand(
         "SENSEX", Side.PUT, 77200.0, 62.0, mode="quick_sideways", snap=snaps["SENSEX"],
@@ -181,7 +189,7 @@ def test_sep03_nifty_explosion_penalized_when_sensex_deep_itm_available(_aft, _s
     mock_exp.return_value = cfg
     snaps = {
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     event = ExplosionEvent(
         symbol="NIFTY",
@@ -219,7 +227,7 @@ def test_cross_index_elite_bonus_suppressed_on_expiry_afternoon(_aft, _sess_bad,
     mock_exp.return_value = cfg
     snaps = {
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     event = ExplosionEvent(
         symbol="NIFTY",
@@ -254,7 +262,7 @@ def test_sep03_nifty_explosion_blocked_by_pretrade(_aft, _sess_bad, _sess_exp, m
     mock_exp.return_value = cfg
     snaps = {
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     event = ExplosionEvent(
         symbol="NIFTY",
@@ -294,7 +302,7 @@ def test_check_expiry_candidate_blocks_sep03_nifty(_aft, _sess_bad, _sess_exp, m
     mock_exp.return_value = cfg
     snaps = {
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     event = ExplosionEvent(
         symbol="NIFTY",
@@ -337,7 +345,7 @@ def test_sensex_deep_itm_wins_ranking_vs_nifty_explosion(_aft, _sess_bad, _sess_
     mock_exp.return_value = cfg
     snaps = {
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     event = ExplosionEvent(
         symbol="NIFTY",
@@ -387,7 +395,7 @@ def test_power_hour_session_allows_expiring_deep_itm_setup(
     mock_exp.return_value = cfg
     snaps = {
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     ok, reason, meta = check_power_hour_session_allowed(AutoTraderState(), snaps)
     assert ok is True, reason
@@ -409,7 +417,7 @@ def test_power_hour_candidate_qualifies_deep_itm_quick(
     mock_exp.return_value = cfg
     snaps = {
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     cand = _Cand(
         "SENSEX", Side.PUT, 77200.0, 62.0, mode="quick_sideways", snap=snaps["SENSEX"],
@@ -433,7 +441,7 @@ def test_severe_pause_lift_when_expiring_deep_itm_power_hour(
     mock_exp.return_value = cfg
     snaps = {
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     assert severe_pause_expiring_deep_itm_lift_active(AutoTraderState(), snaps) is True
 
@@ -454,7 +462,7 @@ def test_expiry_evening_block_bypassed_for_deep_itm_power_hour(
     mock_exp.return_value = cfg
     snaps = {
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     ok, reason, meta = check_expiry_entry_allowed(AutoTraderState(), snaps)
     assert ok is True, reason
@@ -482,7 +490,7 @@ def test_severe_pause_blocks_nifty_but_allows_sensex_deep_itm(
     state = AutoTraderState()
     snaps = {
         "SENSEX": _snap("SENSEX", heatmap=_sensex_deep_itm_heatmap()),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     sensex_cand = _Cand(
         "SENSEX", Side.PUT, 77200.0, 62.0, mode="quick_sideways", snap=snaps["SENSEX"],
@@ -560,7 +568,7 @@ def test_expiry_daily_loss_bypass_candidate_same_day_only(mock_settings, _top):
     mock_settings.return_value = cfg
     snaps = {
         "SENSEX": _snap("SENSEX"),
-        "NIFTY": _snap("NIFTY", expiry="2026-09-09", spot=24500.0, atm=24500.0),
+        "NIFTY": _snap("NIFTY", expiry=_non_expiry(), spot=24500.0, atm=24500.0),
     }
     sensex = _Cand("SENSEX", Side.PUT, 76600.0, 100.0, tier="ELITE", snap=snaps["SENSEX"])
     nifty = _Cand("NIFTY", Side.PUT, 23850.0, 80.0, tier="EXPLODING", snap=snaps["NIFTY"])
