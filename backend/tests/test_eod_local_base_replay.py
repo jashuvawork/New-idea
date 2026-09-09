@@ -238,6 +238,28 @@ def test_generate_window_replay_delegates_to_day_replay():
     assert "12:07:00" in rep["note"]
 
 
+def test_window_replay_router_returns_error_payload_on_failure():
+    import asyncio
+
+    from app.routers.ai import window_replay
+
+    with patch(
+        "app.engines.eod_local_base_replay.generate_window_replay",
+        side_effect=RuntimeError("replay failed"),
+    ):
+        result = asyncio.run(
+            window_replay(
+                "2026-09-09",
+                start="12:07:00",
+                end="13:40:00",
+                side="CALL",
+            )
+        )
+    assert result["status"] == "error"
+    assert result["errorType"] == "RuntimeError"
+    assert "replay failed" in result["error"]
+
+
 def test_generate_eod_local_base_replay_includes_comparison():
     date = "2026-08-19"
     with (

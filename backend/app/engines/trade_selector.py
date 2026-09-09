@@ -89,6 +89,22 @@ class EntryCandidate:
     pretrade_meta: Optional[dict] = None
 
 
+def _record_selector_gate_rejection(candidate: EntryCandidate, reason: str) -> None:
+    """Best-effort funnel telemetry when selector rejects before SELECTED."""
+    try:
+        from app.services.radar_learning import record_funnel_gate_block
+
+        record_funnel_gate_block(
+            str(candidate.symbol or "").upper(),
+            candidate.side.value if hasattr(candidate.side, "value") else str(candidate.side),
+            float(candidate.strike or 0),
+            str(reason or "selector_rejected"),
+            stage="SELECTOR_GATE",
+        )
+    except Exception:
+        pass
+
+
 def rank_candidates_for_selection(
     candidates: list[EntryCandidate],
     legacy_score,
@@ -1811,6 +1827,7 @@ def find_best_entry(
                         "reasons": ["failed_launch_reentry_cooldown"],
                     },
                 }
+                _record_selector_gate_rejection(c, "failed_launch_reentry_cooldown")
                 continue
 
             peak_fade_blocked, peak_fade_meta = peak_fade_same_side_reentry_blocked(
@@ -1828,6 +1845,7 @@ def find_best_entry(
                         "reasons": ["peak_fade_same_side_reentry_cooldown"],
                     },
                 }
+                _record_selector_gate_rejection(c, "peak_fade_same_side_reentry_cooldown")
                 continue
 
             strike_loss_blocked, strike_loss_meta = session_same_strike_loss_reentry_blocked(
@@ -1847,6 +1865,7 @@ def find_best_entry(
                         "reasons": [reason],
                     },
                 }
+                _record_selector_gate_rejection(c, reason)
                 continue
 
             session_loss_blocked, session_loss_meta = session_same_side_loss_reentry_blocked(
@@ -1866,6 +1885,7 @@ def find_best_entry(
                         "reasons": [reason],
                     },
                 }
+                _record_selector_gate_rejection(c, reason)
                 continue
 
             ml_blocked, ml_meta = reentry_ml_win_prob_blocked(
@@ -1886,6 +1906,7 @@ def find_best_entry(
                         "reasons": ["reentry_ml_win_prob_low"],
                     },
                 }
+                _record_selector_gate_rejection(c, "reentry_ml_win_prob_low")
                 continue
 
             exhausted, _ = exhausted_ftv_reentry_blocked(
@@ -1917,14 +1938,16 @@ def find_best_entry(
                     snap=c.snap,
                 )
                 if late_peak:
+                    late_block_reason = late_reason or "late_reentry_near_session_peak"
                     c.pretrade_meta = {
                         **(c.pretrade_meta or {}),
                         "lateReentryBlocked": True,
                         "causalRanking": {
                             "grade": "REJECT",
-                            "reasons": [late_reason or "late_reentry_near_session_peak"],
+                            "reasons": [late_block_reason],
                         },
                     }
+                    _record_selector_gate_rejection(c, late_block_reason)
                     continue
         from app.engines.trade_ranking import (
             ftv_authorization_policy,
@@ -1972,15 +1995,24 @@ def find_best_entry(
             },
         }
 
-    candidates = [
-        c
-        for c in candidates
-        if (c.pretrade_meta or {}).get("causalRanking", {}).get("grade") != "REJECT"
-        and (
-            not bool(getattr(settings, "ftv_elite_top_only_enabled", True))
-            or (c.pretrade_meta or {}).get("ftvEliteTopPolicy", {}).get("passed")
-        )
-    ]
+    kept_candidates: list[EntryCandidate] = []
+    for c in candidates:
+        meta = c.pretrade_meta or {}
+        ranking = meta.get("causalRanking") or {}
+        if ranking.get("grade") == "REJECT":
+            reasons = ranking.get("reasons") or ["selector_rejected"]
+            _record_selector_gate_rejection(c, str(reasons[0]))
+            continue
+        if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+            policy = meta.get("ftvEliteTopPolicy") or {}
+            if not policy.get("passed"):
+                _record_selector_gate_rejection(
+                    c,
+                    str(policy.get("reason") or "ftv_elite_top_policy"),
+                )
+                continue
+        kept_candidates.append(c)
+    candidates = kept_candidates
     if not candidates:
         return None
 
@@ -2035,6 +2067,10 @@ def find_best_entry(
             }
             if ok:
                 filtered_top.append(c)
+            else:
+                _record_selector_gate_rejection(
+                    c, str(reason or "top_moment_gate"),
+                )
         candidates = filtered_top
     if not candidates:
         return None
@@ -2701,8 +2737,12 @@ def diagnose_missed_entries(
             if snap.tradeQualityScore < 25 and score < settings.aggressive_min_explosion_score + 10:
                 blockers.append("symbol_tqs_low")
             if blockers:
+                side_raw = str(alert.get("side") or "").upper()
+                strike_v = float(alert.get("strike") or 0)
                 notes.append({
                     "symbol": symbol,
+                    "side": side_raw or None,
+                    "strike": strike_v or None,
                     "reason": "explosion_near_miss",
                     "mode": "explosion",
                     "message": ", ".join(blockers),

@@ -1267,6 +1267,53 @@ def record_funnel_state(
     return written
 
 
+def record_funnel_gate_block(
+    symbol: str,
+    side: str,
+    strike: float,
+    reason: str,
+    *,
+    stage: str = "SELECTOR_GATE",
+    cycle_id: str | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Persist one contract-level gate block for funnel RCA (selector/pretrade rejects)."""
+    settings = get_settings()
+    if not settings.radar_learning_enabled:
+        return False
+    sym = str(symbol or "").upper()
+    sd = str(side or "").upper()
+    stk = _number(strike)
+    if not sym or not sd or stk <= 0:
+        return False
+    reason_s = str(reason or "unknown")
+    current = _aware(now)
+    date = current.strftime("%Y-%m-%d")
+    key = _contract_key(sym, sd, stk)
+    dedupe_seconds = max(1, int(settings.radar_funnel_dedupe_seconds))
+    signature = f"{date}:{key}:{reason_s}"
+    with _lock:
+        previous = _last_funnel_event.get(signature)
+        if previous and (current - previous).total_seconds() < dedupe_seconds:
+            return False
+        _append_jsonl(
+            funnel_path(date),
+            {
+                "ts": current.isoformat(),
+                "key": key,
+                "event": "GATED",
+                "symbol": sym,
+                "side": sd,
+                "strike": stk,
+                "stage": stage,
+                "cycleId": cycle_id,
+                "reason": reason_s,
+            },
+        )
+        _last_funnel_event[signature] = current
+    return True
+
+
 def record_funnel_event(
     event: Mapping[str, Any],
     *,
