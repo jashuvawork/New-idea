@@ -54,6 +54,7 @@ def classify_modest_peak_entry(
     velocity_3s: float,
     lift_readiness_reason: str,
     max_profit_capture: bool,
+    entry_premium: float = 0.0,
     snapshots: Optional[dict[str, SymbolSnapshot]] = None,
     settings: Optional[Settings] = None,
 ) -> tuple[bool, str]:
@@ -105,6 +106,13 @@ def classify_modest_peak_entry(
             pass
 
     if not chop_reasons:
+        if (
+            max_profit_capture
+            and bool(getattr(s, "modest_peak_deep_itm_auto_stamp_enabled", True))
+            and float(entry_premium or 0)
+            >= _cfg_float(s, "modest_peak_deep_itm_min_premium_inr", 100.0)
+        ):
+            return True, "deep_itm_modest_peak"
         return False, ""
 
     if lift_readiness_reason in ftv_pad_lanes and not {"midday_chop", "chop_session"} & set(
@@ -189,6 +197,7 @@ def apply_modest_peak_entry_stamp(
             velocity_3s=velocity_3s,
             lift_readiness_reason=lift_readiness_reason,
             max_profit_capture=bool(ctx_extra.get("maxProfitCapture")),
+            entry_premium=float(entry_premium or 0),
             snapshots=snapshots,
             settings=s,
         )

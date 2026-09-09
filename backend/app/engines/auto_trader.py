@@ -398,6 +398,14 @@ def _trade_premium_velocity(snap: SymbolSnapshot, trade: PaperTrade) -> float:
     return 0.0
 
 
+def _trade_premium_velocity_points(snap: SymbolSnapshot, trade: PaperTrade) -> float:
+    """Premium velocity in points for exit gates (converts WS % to points)."""
+    from app.engines.explosion_profit import premium_velocity_pct_to_points
+
+    raw_pct = _trade_premium_velocity(snap, trade)
+    return premium_velocity_pct_to_points(raw_pct, float(trade.entryPremium or 0))
+
+
 def _record_observed_max_ltp(trade: PaperTrade, current_ltp: float) -> None:
     """Persist the highest raw market LTP independently of simulated fill marks."""
     def _finite_positive(value: Any) -> float:
@@ -562,6 +570,7 @@ async def _open_from_candidate(
             failed_launch_reentry_blocked,
             peak_fade_same_side_reentry_blocked,
             reentry_ml_win_prob_blocked,
+            session_near_strike_loss_reentry_blocked,
             session_peak_late_reentry_blocked,
             session_same_side_loss_reentry_blocked,
             session_same_strike_loss_reentry_blocked,
@@ -592,6 +601,16 @@ async def _open_from_candidate(
         )
         if strike_loss_blocked:
             reason = _strike_loss_meta.get("reason") or "session_same_strike_loss_reentry_blocked"
+            return False, reason
+
+        near_strike_blocked, _near_strike_meta = session_near_strike_loss_reentry_blocked(
+            state,
+            symbol=symbol,
+            side=candidate.side,
+            strike=float(candidate.strike or 0),
+        )
+        if near_strike_blocked:
+            reason = _near_strike_meta.get("reason") or "session_near_strike_loss_reentry_blocked"
             return False, reason
 
         session_loss_blocked, _session_loss_meta = session_same_side_loss_reentry_blocked(
@@ -3081,11 +3100,14 @@ async def _process_open_trades(
             plan_dict or trade.strategyType == StrategyType.EXPLOSIVE
         )
 
-        live_vel = _trade_premium_velocity(snap, trade)
+        live_vel = _trade_premium_velocity_points(snap, trade)
         if trade.entryContext is None:
             trade.entryContext = {}
         try:
             trade.entryContext["liveVelocity3s"] = round(float(live_vel or 0.0), 3)
+            trade.entryContext["liveVelocity3sPct"] = round(
+                float(_trade_premium_velocity(snap, trade) or 0.0), 3
+            )
         except (TypeError, ValueError):
             trade.entryContext["liveVelocity3s"] = 0.0
         refresh_open_trade_chart_plan(trade, snap)

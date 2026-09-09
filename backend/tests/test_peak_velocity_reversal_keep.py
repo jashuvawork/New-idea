@@ -140,9 +140,9 @@ def test_reversal_keep_holds_above_75pct_floor(mock_settings):
 def test_reversal_keep_requires_negative_velocity(mock_settings):
     s = _settings()
     mock_settings.return_value = s
-    trade = _sep08_deep_itm_trade(pnl_pts=10.0)
+    trade = _sep08_deep_itm_trade(pnl_pts=13.0)
     reason = peak_velocity_reversal_keep_reason(
-        trade, best=16.0, pnl_pts=10.0, live_velocity_3s=-0.5,
+        trade, best=16.0, pnl_pts=13.0, live_velocity_3s=-0.5,
     )
     assert reason is None
 

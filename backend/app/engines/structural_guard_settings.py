@@ -68,6 +68,11 @@ def structural_guard_summary(settings: Settings | None = None) -> dict[str, Any]
             "minLossInr": _f(s, "session_same_strike_loss_reentry_min_loss_inr", 500.0),
             "cooldownSeconds": _i(s, "session_same_strike_loss_reentry_cooldown_seconds", 0),
         },
+        "sessionNearStrikeLossReentry": {
+            "enabled": _b(s, "session_near_strike_loss_reentry_enabled"),
+            "minLossInr": _f(s, "session_near_strike_loss_reentry_min_loss_inr", 500.0),
+            "maxSteps": _i(s, "session_near_strike_loss_reentry_max_steps", 3),
+        },
         "explosionInstrumentLossCooldown": {
             "enabled": _b(s, "explosion_instrument_loss_cooldown_enabled"),
             "seconds": _i(s, "explosion_instrument_loss_cooldown_seconds", 14_400),
@@ -77,6 +82,10 @@ def structural_guard_summary(settings: Settings | None = None) -> dict[str, Any]
             "keepRatio": _f(s, "peak_velocity_reversal_keep_ratio", 0.75),
             "minBestPoints": _f(s, "peak_velocity_reversal_min_best_points", 8.0),
             "minReversalVelocity3s": _f(s, "peak_velocity_reversal_min_velocity_3s", 2.0),
+            "slowBleedEnabled": _b(s, "peak_velocity_reversal_slow_bleed_enabled"),
+            "slowBleedMinGivebackPoints": _f(
+                s, "peak_velocity_reversal_slow_bleed_min_giveback_points", 5.0
+            ),
         },
         "deepItmSubstituteBlock": {
             "enabled": _b(s, "explosion_deep_itm_substitute_block_enabled"),

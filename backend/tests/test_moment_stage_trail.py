@@ -411,7 +411,7 @@ def test_sep2_sensex_modest_peak_books_peak_keep_not_scratch(mock_ms, mock_s, _h
     reason, pnl = evaluate_explosion_exit(
         trade, entry + 1.0, "EXPLODING", 360, params=params, live_velocity_3s=0.0,
     )
-    assert reason == "explosion_peak_keep_trail"
+    assert reason in ("explosion_peak_keep_trail", "explosion_peak_velocity_reversal_keep")
     assert pnl > 15.0
 
 

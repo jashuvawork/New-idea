@@ -13,6 +13,15 @@ from app.models.schemas import Breadth, PaperTrade, Side, SpotChart, StrategyTyp
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def premium_velocity_pct_to_points(velocity_pct: float, entry_premium: float) -> float:
+    """Convert WS/snapshot % velocity to premium points for exit gates (calibrated on points)."""
+    v = float(velocity_pct or 0)
+    entry = float(entry_premium or 0)
+    if entry <= 0:
+        return v
+    return v / 100.0 * entry
+
+
 def _cfg_float(settings, name: str, default: float) -> float:
     """Float setting with MagicMock-safe fallback (tests often stub settings)."""
     v = getattr(settings, name, default)
@@ -1190,6 +1199,13 @@ def _defer_adaptive_stop(
 
     if hard_floor > 0 and pnl_pts <= -hard_floor:
         return False
+    if bool(getattr(settings, "peak_keep_block_adaptive_stop_defer", True)):
+        min_best = _cfg_float(settings, "peak_velocity_reversal_min_best_points", 8.0)
+        if best >= min_best:
+            keep = _cfg_float(settings, "peak_velocity_reversal_keep_ratio", 0.75)
+            floor_pts = best * min(0.95, max(0.5, keep))
+            if pnl_pts <= floor_pts + 1e-6:
+                return False
     # Never defer a never-green loser — except ICT/HC base-rip grace above.
     if best <= 0 and pnl_pts < 0:
         if runner and hold < grace_s:
@@ -1859,6 +1875,22 @@ def peak_velocity_reversal_keep_reason(
 
     min_reversal_v = _cfg_float(settings, "peak_velocity_reversal_min_velocity_3s", 2.0)
     if live_v3 > -min_reversal_v:
+        ctx = trade.entryContext or {}
+        entry = float(trade.entryPremium or 0)
+        deep_itm = entry >= _cfg_float(settings, "modest_peak_deep_itm_min_premium_inr", 100.0)
+        arm_gain_pct = _cfg_float(settings, "modest_peak_arm_gain_pct", 15.0)
+        pct_arm_pts = entry * arm_gain_pct / 100.0 if entry > 0 else 0.0
+        modest = bool(ctx.get("modestPeakMode"))
+        allow_slow = deep_itm and (not modest or best < pct_arm_pts)
+        if (
+            allow_slow
+            and bool(getattr(settings, "peak_velocity_reversal_slow_bleed_enabled", True))
+        ):
+            slow_giveback = _cfg_float(
+                settings, "peak_velocity_reversal_slow_bleed_min_giveback_points", 5.0
+            )
+            if (best - pnl_pts) >= slow_giveback and pnl_pts <= floor_pts + 1e-6:
+                return "explosion_peak_velocity_reversal_keep"
         return None
 
     return "explosion_peak_velocity_reversal_keep"

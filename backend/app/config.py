@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     session_same_strike_loss_reentry_min_loss_inr: float = 500.0
     # 0 = block for rest of session; >0 allows retry after cooldown seconds.
     session_same_strike_loss_reentry_cooldown_seconds: int = 0
+    # Sep08: 23650 PE loss → 23800 PE hop — block nearby strikes after same-side loss (CE/PE symmetric).
+    session_near_strike_loss_reentry_enabled: bool = True
+    session_near_strike_loss_reentry_min_loss_inr: float = 500.0
+    session_near_strike_loss_reentry_max_steps: int = 3
     explosion_instrument_loss_cooldown_enabled: bool = True
     explosion_instrument_loss_cooldown_seconds: int = 14_400
     # Chopish regime union (chop_regime OR midday_chop) — disable to require both paths separately.
@@ -1321,6 +1325,13 @@ class Settings(BaseSettings):
     peak_velocity_reversal_min_velocity_3s: float = 2.0
     peak_velocity_reversal_min_giveback_points: float = 2.0
     peak_velocity_reversal_skip_hot_velocity_3s: float = 2.0
+    # Slow afternoon bleeds: book at 75% floor without fast v3 (Sep08 23800 PE +16→+11 drift).
+    peak_velocity_reversal_slow_bleed_enabled: bool = True
+    peak_velocity_reversal_slow_bleed_min_giveback_points: float = 5.0
+    peak_keep_block_adaptive_stop_defer: bool = True
+    # Deep ITM max-profit: %-trail never arms — stamp modest peak at entry (CE/PE symmetric).
+    modest_peak_deep_itm_auto_stamp_enabled: bool = True
+    modest_peak_deep_itm_min_premium_inr: float = 100.0
     moment_stage_min_projected_tp: float = 40.0
     # Allow rare 50→650 LTP mega rips (+600pt); live extension ratchets toward this.
     moment_stage_max_projected_tp: float = 800.0

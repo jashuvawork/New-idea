@@ -1099,3 +1099,64 @@ def session_same_strike_loss_reentry_blocked(
     })
     return True, meta
 
+
+def session_near_strike_loss_reentry_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+) -> tuple[bool, dict[str, Any]]:
+    """Block same-side re-entry within N strike steps after any explosion loss (Sep08 23650→23800).
+
+    CE/PE symmetric — only blocks the same option side on the same symbol.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "session_near_strike_loss_reentry_enabled", True):
+        return False, meta
+
+    min_loss = float(
+        getattr(settings, "session_near_strike_loss_reentry_min_loss_inr", 500.0) or 500.0
+    )
+    max_steps = int(
+        getattr(settings, "session_near_strike_loss_reentry_max_steps", 3) or 3
+    )
+    if max_steps <= 0:
+        return False, meta
+
+    from app.engines.moneyness import strike_step
+
+    sym = str(symbol or "").upper()
+    step = float(strike_step(sym) or 50.0)
+    target = float(strike or 0)
+    side_v = _side_key(side)
+
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            continue
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if not _is_explosion_trade(t):
+            continue
+        prior_pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
+        if prior_pnl >= 0 or abs(prior_pnl) < min_loss:
+            continue
+        prior_strike = float(getattr(t, "strike", 0) or 0)
+        if abs(prior_strike - target) > max_steps * step + 0.5:
+            continue
+        if abs(prior_strike - target) < 0.5:
+            continue  # exact strike handled by session_same_strike_loss_reentry_blocked
+        meta.update({
+            "applied": True,
+            "priorTradeId": getattr(t, "id", None),
+            "priorStrike": prior_strike,
+            "priorPnlInr": round(prior_pnl, 2),
+            "priorExitReason": str(getattr(t, "exitReason", "") or ""),
+            "maxSteps": max_steps,
+            "strikeStep": step,
+            "reason": "session_near_strike_loss_reentry_blocked",
+        })
+        return True, meta
+    return False, meta
+
