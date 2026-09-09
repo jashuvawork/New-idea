@@ -420,6 +420,212 @@ def evaluate_local_base_entry(
     return True, lift_reason, moment, ranking
 
 
+def evaluate_replay_structural_gates(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+    state: Any,
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    settings: Any = None,
+    ranking: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
+    """Live structural/pretrade entry gates for EOD replay (respects Settings enable flags)."""
+    s = settings or get_settings()
+    structural = bool(getattr(s, "eod_replay_structural_gates_enabled", True))
+    pretrade = bool(getattr(s, "eod_replay_pretrade_enabled", False))
+    if not structural and not pretrade:
+        return True, "ok"
+
+    from app.models.schemas import AutoTraderState, Side as SideEnum
+
+    replay_state = state if isinstance(state, AutoTraderState) else AutoTraderState()
+    candidate = _candidate_from_alert(alert, snap)
+    if ranking:
+        candidate.pretrade_meta = {"causalRanking": ranking}
+
+    sym = str(getattr(candidate, "symbol", "") or snap.symbol or "")
+    side = getattr(candidate, "side", SideEnum.PUT)
+    strike = float(getattr(candidate, "strike", 0) or 0)
+
+    if structural:
+        from app.engines.session_mode_feedback import (
+            failed_launch_reentry_blocked,
+            peak_fade_same_side_reentry_blocked,
+            session_same_side_loss_reentry_blocked,
+            session_same_strike_loss_reentry_blocked,
+        )
+
+        for blocked_fn, kwargs in (
+            (
+                failed_launch_reentry_blocked,
+                {"symbol": sym, "side": side, "strike": strike},
+            ),
+            (
+                peak_fade_same_side_reentry_blocked,
+                {"symbol": sym, "side": side},
+            ),
+            (
+                session_same_side_loss_reentry_blocked,
+                {"symbol": sym, "side": side},
+            ),
+            (
+                session_same_strike_loss_reentry_blocked,
+                {"symbol": sym, "side": side, "strike": strike},
+            ),
+        ):
+            blocked, meta = blocked_fn(replay_state, **kwargs)
+            if blocked:
+                return False, str(meta.get("reason") or "session_reentry_blocked")
+
+    if pretrade:
+        from app.engines.pretrade_validator import validate_candidate
+
+        ok, reason, _meta = validate_candidate(
+            candidate, replay_state, snapshots=snapshots,
+        )
+        if not ok:
+            return False, reason
+
+    if not structural:
+        return True, "ok"
+
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return True, "ok"
+    event = getattr(candidate, "explosion_event", None)
+    if event is None:
+        return True, "ok"
+
+    from app.engines.explosion_entry_guards import (
+        coil_top_entry_blocked,
+        deep_itm_near_strike_substitute_blocked,
+        detect_fake_explosion_trap,
+        immature_explosion_blocked,
+        session_trough_late_chase_blocked,
+    )
+    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+    ict = analyze_explosion_event_ict(event, snap)
+    immature, imm_reason = immature_explosion_blocked(
+        event, ict=ict, alert=alert if isinstance(alert, dict) else None,
+    )
+    if immature:
+        return False, imm_reason
+
+    trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
+        candidate, snap, state=replay_state, ict=ict,
+    )
+    if trap_block or trap_meta.get("action") == "block":
+        from app.engines.building_ftv_gates import building_rip_bypasses_fake_trap
+
+        if not building_rip_bypasses_fake_trap(candidate=candidate):
+            return False, trap_reason
+
+    from app.engines.chop_live_guards import (
+        armed_base_shallow_launch_blocked,
+        chop_live_entry_blocked,
+    )
+
+    armed_blocked, armed_reason, _armed_meta = armed_base_shallow_launch_blocked(
+        candidate, snap,
+    )
+    if armed_blocked:
+        return False, armed_reason
+
+    chop_blocked, chop_reason, _chop_meta = chop_live_entry_blocked(
+        candidate,
+        snap,
+        replay_state,
+        snapshots=snapshots,
+    )
+    if chop_blocked:
+        return False, chop_reason
+
+    alert_row = alert if isinstance(alert, dict) else {}
+    st_blocked, st_reason = session_trough_late_chase_blocked(
+        event,
+        ict=ict,
+        alert=alert_row,
+        ranking=ranking if isinstance(ranking, dict) else None,
+    )
+    if st_blocked:
+        return False, st_reason
+
+    cand_score = float(alert.get("score") or getattr(candidate, "score", 0) or 0)
+    itm_blocked, itm_reason = deep_itm_near_strike_substitute_blocked(
+        side,
+        strike,
+        snap,
+        settings=s,
+        candidate_score=cand_score,
+    )
+    if itm_blocked:
+        return False, itm_reason
+
+    coil_blocked, coil_reason = coil_top_entry_blocked(
+        event,
+        tier=str(getattr(candidate, "tier", "") or alert.get("tier") or ""),
+        velocity_3s=float(getattr(event, "velocity_3s", 0) or alert.get("velocity3s") or 0),
+        snapshots=snapshots,
+        state=replay_state,
+    )
+    if coil_blocked:
+        return False, coil_reason
+
+    return True, "ok"
+
+
+def _record_replay_closed_trade(
+    replay_state: Any,
+    trade: dict[str, Any],
+    *,
+    entry_ctx: dict[str, Any],
+    session_date: str,
+) -> None:
+    """Append simulated close so session reentry guards see replay history."""
+    from app.models.schemas import AutoTraderState, PaperTrade, Side as SideEnum, StrategyType
+
+    if not isinstance(replay_state, AutoTraderState):
+        return
+    side_raw = str(trade.get("side") or "PUT").upper()
+    side = SideEnum.CALL if side_raw == "CALL" else SideEnum.PUT
+    entry_dt = trade.get("_entryDt")
+    exit_dt = trade.get("_exitDt")
+    if entry_dt is None or exit_dt is None:
+        return
+    ep = float(trade.get("entryPremium") or 0)
+    peak_pct = float(trade.get("peakPct") or 0)
+    best_pts = (peak_pct / 100.0 * ep) if ep > 0 else 0.0
+    sym = str(trade.get("symbol") or "")
+    trade_id = f"replay-{sym}-{side_raw}-{int(trade.get('strike') or 0)}-{exit_dt.strftime('%H%M%S')}"
+    replay_state.closedPaperTrades.append(
+        PaperTrade(
+            id=trade_id,
+            symbol=sym,
+            side=side,
+            strike=float(trade.get("strike") or 0),
+            entryPremium=ep,
+            currentPremium=float(trade.get("exitPremium") or ep),
+            lots=int(trade.get("lots") or 1),
+            pnlInr=float(trade.get("pnlInr") or 0),
+            pnlPoints=float(trade.get("movePct") or 0),
+            openedAt=entry_dt,
+            closedAt=exit_dt,
+            status="CLOSED",
+            exitReason=str(trade.get("exitReason") or ""),
+            sessionDate=session_date,
+            strategyType=StrategyType.EXPLOSIVE,
+            bestPnlPoints=best_pts,
+            entryContext={**entry_ctx, "selectionMode": "explosion"},
+        )
+    )
+    replay_state.lastExit = {
+        "at": exit_dt.isoformat(),
+        "pnlInr": float(trade.get("pnlInr") or 0),
+        "symbol": sym,
+        "side": side_raw,
+    }
+
+
 def _install_replay_clock(replay_dt_class: type) -> list[tuple[Any, Any]]:
     """Point power-hour / chop minute helpers at the replay clock."""
     import app.engines.chop_day_guards as chop_guards
@@ -1158,6 +1364,28 @@ def replay_local_base_day(
                             })
                         continue
 
+                    struct_ok, struct_reason = evaluate_replay_structural_gates(
+                        alert_eval,
+                        snap,
+                        replay_state,
+                        batch_snapshots,
+                        settings=s,
+                        ranking=ranking,
+                    )
+                    if not struct_ok:
+                        gate_stats[struct_reason] += 1
+                        if len(signal_rows) < 500:
+                            signal_rows.append({
+                                "ts": ts.isoformat(),
+                                "key": key,
+                                "tier": alert.get("tier"),
+                                "premium": alert.get("premium"),
+                                "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                                "allowed": False,
+                                "reason": struct_reason,
+                            })
+                        continue
+
                     if elite_only:
                         candidate = _candidate_from_alert(alert_eval, snap)
                         elite_ok = (
@@ -1335,6 +1563,12 @@ def replay_local_base_day(
                 assessment=assessment if assessment else None,
             )
             raw_candidates.append(trade)
+            _record_replay_closed_trade(
+                replay_state,
+                trade,
+                entry_ctx=entry_ctx,
+                session_date=date,
+            )
             session_trades_taken += 1
             if elite_engine and assessment:
                 from app.engines.elite_trade_budget import record_elite_trade_entry

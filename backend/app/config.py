@@ -1669,6 +1669,10 @@ class Settings(BaseSettings):
     side_regime_flip_target_bonus: float = 6.0
     # EOD replay — apply live session gates (power hour, directional lock, best-side).
     eod_replay_live_session_gates_enabled: bool = True
+    # Mirror live structural entry gates in replay (Sep08 fixes respect Settings knobs).
+    eod_replay_structural_gates_enabled: bool = True
+    # Optional full validate_candidate stack — heavier; default off.
+    eod_replay_pretrade_enabled: bool = False
     # Full-tape replay tuning (NOT wired to live auto-trader). Profile A/B showed
     # entry caps + legacyBypass blocks drop winners without improving net P&L — keep
     # exit-side fixes in explosion_profit and use these only for explicit research.
