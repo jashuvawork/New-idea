@@ -1895,6 +1895,20 @@ def _defer_peak_velocity_reversal_for_elite_runner(
     return False
 
 
+def _reversal_keep_rollover_confirmed(
+    trade: PaperTrade,
+    *,
+    settings: Any,
+    live_velocity_3s: float = 0.0,
+) -> bool:
+    """True when live premium heat has died after a peak (velocity + momentum rollover)."""
+    if not bool(getattr(settings, "peak_velocity_reversal_require_rollover_confirm", True)):
+        return True
+    return _premium_rolling_over(
+        trade, settings=settings, live_velocity_3s=live_velocity_3s,
+    )
+
+
 def peak_velocity_reversal_keep_reason(
     trade: PaperTrade,
     *,
@@ -1902,10 +1916,11 @@ def peak_velocity_reversal_keep_reason(
     pnl_pts: float,
     live_velocity_3s: float = 0.0,
 ) -> Optional[str]:
-    """Bank at the 75% peak-keep floor when premium reverses off the top with velocity.
+    """Bank at the 75% peak-keep floor after a observed peak and confirmed rollover.
 
-    Covers deep ITM / max-profit legs where gain-% never reaches the %-trail arm band
-    but a real peak (+12–20pt) still needs protection from a fast giveback.
+    Sequence: peak prints (best/giveback/floor gates) → premium loses heat (cold v3
+    + flat momentum via ``_premium_rolling_over``) → book at the 75% keep floor.
+    Elite runners defer entirely while the early leg is immature (#590).
     """
     settings = get_settings()
     if not bool(getattr(settings, "peak_velocity_reversal_keep_enabled", True)):
@@ -1960,10 +1975,17 @@ def peak_velocity_reversal_keep_reason(
                 settings, "peak_velocity_reversal_slow_bleed_min_giveback_points", 5.0
             )
             if (best - pnl_pts) >= slow_giveback and pnl_pts <= floor_pts + 1e-6:
-                return "explosion_peak_velocity_reversal_keep"
+                if _reversal_keep_rollover_confirmed(
+                    trade, settings=settings, live_velocity_3s=live_velocity_3s,
+                ):
+                    return "explosion_peak_velocity_reversal_keep"
         return None
 
-    return "explosion_peak_velocity_reversal_keep"
+    if _reversal_keep_rollover_confirmed(
+        trade, settings=settings, live_velocity_3s=live_velocity_3s,
+    ):
+        return "explosion_peak_velocity_reversal_keep"
+    return None
 
 
 def evaluate_explosion_exit(

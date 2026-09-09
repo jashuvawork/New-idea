@@ -37,6 +37,9 @@ def _settings(**overrides):
     s.peak_velocity_reversal_defer_elite_runner_min_gain_pct = 8.0
     s.peak_velocity_reversal_defer_elite_runner_min_rank_score = 85.0
     s.peak_velocity_reversal_defer_elite_runner_max_progress_frac = 0.05
+    s.peak_velocity_reversal_require_rollover_confirm = True
+    s.explosion_peak_capture_max_live_velocity_3s = 1.0
+    s.explosion_peak_capture_max_premium_mom_pct = 0.15
     s.peak_keep_block_adaptive_stop_defer = True
     for k, v in overrides.items():
         setattr(s, k, v)
@@ -56,7 +59,12 @@ def test_slow_bleed_keep_without_fast_velocity(mock_settings):
         lots=18,
         openedAt=datetime.now(tz=IST),
         strategyType=StrategyType.EXPLOSIVE,
-        entryContext={"maxProfitCapture": True},
+        entryContext={
+            "maxProfitCapture": True,
+            "executionChart": {
+                "premiumChart": {"momentum3Pct": 0.0, "momentum5Pct": 0.0},
+            },
+        },
     )
     reason = peak_velocity_reversal_keep_reason(
         trade, best=16.0, pnl_pts=11.0, live_velocity_3s=-0.5,

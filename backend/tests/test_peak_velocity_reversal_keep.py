@@ -73,6 +73,9 @@ def _settings(**overrides):
     s.peak_velocity_reversal_defer_elite_runner_min_gain_pct = 8.0
     s.peak_velocity_reversal_defer_elite_runner_min_rank_score = 85.0
     s.peak_velocity_reversal_defer_elite_runner_max_progress_frac = 0.05
+    s.peak_velocity_reversal_require_rollover_confirm = True
+    s.explosion_peak_capture_max_live_velocity_3s = 1.0
+    s.explosion_peak_capture_max_premium_mom_pct = 0.15
     s.explosion_peak_fade_defer_when_bullish = True
     s.explosion_peak_fade_bullish_min_remain_points = 3.0
     s.explosion_peak_fade_bullish_min_velocity_3s = 1.5
@@ -116,6 +119,9 @@ def _sep08_deep_itm_trade(*, pnl_pts: float, best: float = 16.0) -> PaperTrade:
                 "targetPoints": 60.0,
                 "trailArmPoints": 19.0,
                 "trailKeepRatio": 0.54,
+            },
+            "executionChart": {
+                "premiumChart": {"momentum3Pct": 0.0, "momentum5Pct": 0.0},
             },
         },
     )
@@ -222,6 +228,41 @@ def test_reversal_keep_still_fires_sep08_after_runner_matures(mock_settings):
     trade.entryContext["momentStageLadder"] = True
     reason = peak_velocity_reversal_keep_reason(
         trade, best=16.0, pnl_pts=11.0, live_velocity_3s=-0.5,
+    )
+    assert reason == "explosion_peak_velocity_reversal_keep"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_reversal_keep_holds_when_velocity_dips_but_momentum_still_hot(mock_settings):
+    """Fast negative v3 alone is not enough — premium mom must also roll over."""
+    s = _settings()
+    mock_settings.return_value = s
+    trade = _sep08_deep_itm_trade(pnl_pts=11.0)
+    trade.entryContext["executionChart"] = {
+        "premiumChart": {"momentum3Pct": 2.5, "momentum5Pct": 1.8},
+    }
+    reason = peak_velocity_reversal_keep_reason(
+        trade, best=16.0, pnl_pts=11.0, live_velocity_3s=-3.5,
+    )
+    assert reason is None
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_reversal_keep_fires_mature_peak_after_rollover_confirmed(mock_settings):
+    """After defer window: observed peak + cold velocity + flat mom → book."""
+    s = _settings()
+    mock_settings.return_value = s
+    entry = 230.65
+    best = 45.0  # ~19.5% gain, 5.6% of 800pt runway — past defer bars
+    pnl_pts = 32.0  # below 75% floor (33.75), giveback 13pt
+    trade = _sep09_elite_runner_trade(pnl_pts=pnl_pts, best=best)
+    trade.entryPremium = entry
+    trade.currentPremium = entry + pnl_pts
+    trade.entryContext["executionChart"] = {
+        "premiumChart": {"momentum3Pct": 0.05, "momentum5Pct": 0.0},
+    }
+    reason = peak_velocity_reversal_keep_reason(
+        trade, best=best, pnl_pts=pnl_pts, live_velocity_3s=-2.5,
     )
     assert reason == "explosion_peak_velocity_reversal_keep"
 
