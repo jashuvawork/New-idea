@@ -1328,6 +1328,12 @@ class Settings(BaseSettings):
     # Slow afternoon bleeds: book at 75% floor without fast v3 (Sep08 23800 PE +16→+11 drift).
     peak_velocity_reversal_slow_bleed_enabled: bool = True
     peak_velocity_reversal_slow_bleed_min_giveback_points: float = 5.0
+    # Elite V/FTV runners with stage ladder: defer velocity-based peak keep until
+    # the leg has printed enough gain (Sep09 75100 PE +9pt @ ₹230 = 4% vs Sep08 +16 @ ₹150 = 10%).
+    peak_velocity_reversal_defer_elite_runner_enabled: bool = True
+    peak_velocity_reversal_defer_elite_runner_min_gain_pct: float = 8.0
+    peak_velocity_reversal_defer_elite_runner_min_rank_score: float = 85.0
+    peak_velocity_reversal_defer_elite_runner_max_progress_frac: float = 0.05
     peak_keep_block_adaptive_stop_defer: bool = True
     # Deep ITM max-profit: %-trail never arms — stamp modest peak at entry (CE/PE symmetric).
     modest_peak_deep_itm_auto_stamp_enabled: bool = True
