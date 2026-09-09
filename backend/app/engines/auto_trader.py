@@ -1550,6 +1550,7 @@ async def _open_from_candidate(
             side=candidate.side,
             velocity_3s=entry_velocity_3s,
             snap=snap,
+            premium=float(fill_premium or 0),
         )
         if flip_cap_meta.get("blocked"):
             return False, str(
