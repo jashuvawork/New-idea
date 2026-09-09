@@ -86,6 +86,13 @@ def structural_guard_summary(settings: Settings | None = None) -> dict[str, Any]
             "slowBleedMinGivebackPoints": _f(
                 s, "peak_velocity_reversal_slow_bleed_min_giveback_points", 5.0
             ),
+            "deferEliteRunner": _b(s, "peak_velocity_reversal_defer_elite_runner_enabled"),
+            "deferEliteRunnerMinGainPct": _f(
+                s, "peak_velocity_reversal_defer_elite_runner_min_gain_pct", 8.0
+            ),
+            "deferEliteRunnerMinRankScore": _f(
+                s, "peak_velocity_reversal_defer_elite_runner_min_rank_score", 85.0
+            ),
         },
         "deepItmSubstituteBlock": {
             "enabled": _b(s, "explosion_deep_itm_substitute_block_enabled"),

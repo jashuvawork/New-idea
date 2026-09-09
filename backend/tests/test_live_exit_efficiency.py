@@ -33,6 +33,10 @@ def _settings(**overrides):
     s.peak_velocity_reversal_skip_hot_velocity_3s = 2.0
     s.peak_velocity_reversal_slow_bleed_enabled = True
     s.peak_velocity_reversal_slow_bleed_min_giveback_points = 5.0
+    s.peak_velocity_reversal_defer_elite_runner_enabled = True
+    s.peak_velocity_reversal_defer_elite_runner_min_gain_pct = 8.0
+    s.peak_velocity_reversal_defer_elite_runner_min_rank_score = 85.0
+    s.peak_velocity_reversal_defer_elite_runner_max_progress_frac = 0.05
     s.peak_keep_block_adaptive_stop_defer = True
     for k, v in overrides.items():
         setattr(s, k, v)

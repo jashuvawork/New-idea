@@ -69,6 +69,13 @@ def _settings(**overrides):
     s.moment_stage_min_remain_points = 1.0
     s.moment_stage_near_complete_frac = 0.82
     s.modest_peak_mode_enabled = True
+    s.peak_velocity_reversal_defer_elite_runner_enabled = True
+    s.peak_velocity_reversal_defer_elite_runner_min_gain_pct = 8.0
+    s.peak_velocity_reversal_defer_elite_runner_min_rank_score = 85.0
+    s.peak_velocity_reversal_defer_elite_runner_max_progress_frac = 0.05
+    s.explosion_peak_fade_defer_when_bullish = True
+    s.explosion_peak_fade_bullish_min_remain_points = 3.0
+    s.explosion_peak_fade_bullish_min_velocity_3s = 1.5
     s.eod_learning_apply_enabled = False
     s.chart_confidence_defer_tp_min = 60.6
     s.explosion_adaptive_stop_min_hold_seconds = 0
@@ -145,6 +152,78 @@ def test_reversal_keep_requires_negative_velocity(mock_settings):
         trade, best=16.0, pnl_pts=13.0, live_velocity_3s=-0.5,
     )
     assert reason is None
+
+
+def _sep09_elite_runner_trade(*, pnl_pts: float, best: float = 9.35) -> PaperTrade:
+    """Sep09 SENSEX 75100 PE — Grade-A armed-base runner, early +9pt peak."""
+    entry = 230.65
+    now = datetime.now(tz=IST)
+    return PaperTrade(
+        id="df2f763d",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=75100.0,
+        entryPremium=entry,
+        currentPremium=entry + pnl_pts,
+        lots=39,
+        pnlInr=0,
+        openedAt=now - timedelta(minutes=12),
+        status="OPEN",
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        entryContext={
+            "maxProfitCapture": True,
+            "eliteRunnerExitBundle": True,
+            "vBaseFtvRunner": True,
+            "ictArmedBaseLaunch": True,
+            "ictFlatThenVertical": True,
+            "momentStageLadder": True,
+            "rankScore": 92.8,
+            "rankGrade": "A",
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+            "eliteAssessment": {"eliteScore": 93.4, "grade": "A", "setup": "V"},
+            "chartExitLive": {"letRun": True},
+            "exitPlan": {
+                "stopPoints": 40.0,
+                "trailArmPoints": 20.32,
+                "trailKeepRatio": 0.514,
+                "projectedMaxTp": 800.0,
+                "momentStageLadder": True,
+            },
+        },
+    )
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_reversal_keep_defers_sep09_elite_runner_early_peak(mock_settings):
+    """+9pt (+4%) on Grade-A runner — velocity pullback is noise, not structural peak."""
+    s = _settings()
+    mock_settings.return_value = s
+    trade = _sep09_elite_runner_trade(pnl_pts=4.26)
+    reason = peak_velocity_reversal_keep_reason(
+        trade, best=9.35, pnl_pts=4.26, live_velocity_3s=-3.0,
+    )
+    assert reason is None
+
+
+@patch("app.engines.explosion_profit.get_settings")
+def test_reversal_keep_still_fires_sep08_after_runner_matures(mock_settings):
+    """Sep08 +16pt (+10.6%) deep ITM — slow-bleed keep still books when leg has matured."""
+    s = _settings()
+    mock_settings.return_value = s
+    trade = _sep08_deep_itm_trade(pnl_pts=11.0)
+    trade.entryContext["eliteRunnerExitBundle"] = True
+    trade.entryContext["vBaseFtvRunner"] = True
+    trade.entryContext["rankScore"] = 95.0
+    trade.entryContext["rankGrade"] = "A"
+    trade.entryContext["projectedMaxTp"] = 200.0
+    trade.entryContext["momentStageLadder"] = True
+    reason = peak_velocity_reversal_keep_reason(
+        trade, best=16.0, pnl_pts=11.0, live_velocity_3s=-0.5,
+    )
+    assert reason == "explosion_peak_velocity_reversal_keep"
 
 
 @patch("app.engines.explosion_profit.get_settings")

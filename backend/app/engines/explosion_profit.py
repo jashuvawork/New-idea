@@ -1831,6 +1831,70 @@ def peak_fade_profit_lock_reason(
     return None
 
 
+def _defer_peak_velocity_reversal_for_elite_runner(
+    trade: PaperTrade,
+    *,
+    best: float,
+    settings: Any,
+) -> bool:
+    """Hold elite stage-ladder runners through early velocity pullbacks (not structural peaks).
+
+    Sep09 SENSEX 75100 PE: +9pt peak (+4% gain) on a Grade-A armed-base runner with
+    projectedMaxTp 800 — velocity dip is noise, not the top. Sep08 23800 PE +16pt (+10.6%)
+    still qualifies for slow-bleed keep once the leg has matured.
+    """
+    if not bool(getattr(settings, "peak_velocity_reversal_defer_elite_runner_enabled", True)):
+        return False
+    ctx = trade.entryContext or {}
+    if not (
+        ctx.get("eliteRunnerExitBundle")
+        or (ctx.get("vBaseFtvRunner") and ctx.get("maxProfitCapture"))
+    ):
+        return False
+    from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
+
+    if not trade_uses_moment_stage_ladder(trade):
+        return False
+
+    min_rank = _cfg_float(settings, "peak_velocity_reversal_defer_elite_runner_min_rank_score", 85.0)
+    rank_score = float(ctx.get("rankScore") or 0)
+    grade = str(ctx.get("rankGrade") or "").upper()
+    assessment = ctx.get("eliteAssessment") or {}
+    elite_score = float(assessment.get("eliteScore") or 0)
+    score_ok = rank_score + 1e-6 >= min_rank or grade in ("S", "A") or elite_score + 1e-6 >= 90.0
+    if not score_ok:
+        return False
+
+    entry = float(trade.entryPremium or 0)
+    best = float(best or 0)
+    if entry <= 0 or best <= 0:
+        return False
+
+    min_gain_pct = _cfg_float(
+        settings, "peak_velocity_reversal_defer_elite_runner_min_gain_pct", 8.0
+    )
+    gain_pct = best / entry * 100.0
+    if gain_pct + 1e-6 < min_gain_pct:
+        return True
+
+    max_progress = _cfg_float(
+        settings, "peak_velocity_reversal_defer_elite_runner_max_progress_frac", 0.05
+    )
+    projected = float(
+        ctx.get("projectedMaxTp")
+        or ((ctx.get("exitPlan") or {}).get("projectedMaxTp"))
+        or 0
+    )
+    if projected > 0 and (best / projected) + 1e-6 < max_progress:
+        return True
+
+    chart_live = ctx.get("chartExitLive") or {}
+    if chart_live.get("letRun") and gain_pct + 1e-6 < min_gain_pct * 1.25:
+        return True
+
+    return False
+
+
 def peak_velocity_reversal_keep_reason(
     trade: PaperTrade,
     *,
@@ -1845,6 +1909,12 @@ def peak_velocity_reversal_keep_reason(
     """
     settings = get_settings()
     if not bool(getattr(settings, "peak_velocity_reversal_keep_enabled", True)):
+        return None
+
+    if _defer_peak_velocity_reversal_for_elite_runner(trade, best=best, settings=settings):
+        return None
+
+    if _peak_fade_bullish_continuation(trade, pnl_pts=pnl_pts, settings=settings):
         return None
 
     min_best = _cfg_float(settings, "peak_velocity_reversal_min_best_points", 8.0)
