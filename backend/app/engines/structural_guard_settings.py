@@ -93,6 +93,9 @@ def structural_guard_summary(settings: Settings | None = None) -> dict[str, Any]
             "deferEliteRunnerMinRankScore": _f(
                 s, "peak_velocity_reversal_defer_elite_runner_min_rank_score", 85.0
             ),
+            "requireRolloverConfirm": _b(
+                s, "peak_velocity_reversal_require_rollover_confirm"
+            ),
         },
         "deepItmSubstituteBlock": {
             "enabled": _b(s, "explosion_deep_itm_substitute_block_enabled"),

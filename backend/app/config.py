@@ -1334,6 +1334,9 @@ class Settings(BaseSettings):
     peak_velocity_reversal_defer_elite_runner_min_gain_pct: float = 8.0
     peak_velocity_reversal_defer_elite_runner_min_rank_score: float = 85.0
     peak_velocity_reversal_defer_elite_runner_max_progress_frac: float = 0.05
+    # After a peak prints, require premium rollover (cold v3 + flat mom) before
+    # peak-velocity keep fires — avoids booking on a velocity blip while heat remains.
+    peak_velocity_reversal_require_rollover_confirm: bool = True
     peak_keep_block_adaptive_stop_defer: bool = True
     # Deep ITM max-profit: %-trail never arms — stamp modest peak at entry (CE/PE symmetric).
     modest_peak_deep_itm_auto_stamp_enabled: bool = True
