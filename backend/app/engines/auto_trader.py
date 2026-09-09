@@ -656,6 +656,8 @@ async def _open_from_candidate(
             premium=float(candidate.premium or 0),
             velocity_3s=reentry_velocity,
             alert=alert_d,
+            state=state,
+            snap=snap,
         )
         if late_peak_blocked:
             return False, late_peak_reason or "late_reentry_near_session_peak"
@@ -1547,6 +1549,7 @@ async def _open_from_candidate(
             symbol=symbol,
             side=candidate.side,
             velocity_3s=entry_velocity_3s,
+            snap=snap,
         )
         if flip_cap_meta.get("blocked"):
             return False, str(

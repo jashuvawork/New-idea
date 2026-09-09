@@ -209,30 +209,25 @@ def _latest_same_strike_explosion_close(
     return latest
 
 
-def cap_opposite_side_flip_after_win(
-    lots: int,
-    state: AutoTraderState,
+def _recent_opposite_side_session_win(
+    state: AutoTraderState | None,
     *,
     symbol: str,
     side: Any,
-    velocity_3s: float = 0.0,
-) -> tuple[int, dict[str, Any]]:
-    """Cap / block a counter-flip entry after a same-session WIN on the opposite side.
-
-    Aug6: two CALLs won (market up), then a max-size PUT flip lost −₹20k. Flipping side
-    right after an opposite-side winner is a whipsaw — don't ride it at max size.
-    Weak-tape flips (v3 below breakout floor) are blocked entirely when configured.
-    """
-    meta: dict[str, Any] = {"applied": False, "blocked": False}
+    lookback_seconds: float | None = None,
+) -> Any | None:
+    """Most recent same-session WIN on the opposite side within lookback."""
+    if state is None:
+        return None
     settings = get_settings()
-    if not getattr(settings, "explosion_whipsaw_flip_guard_enabled", True):
-        return lots, meta
     side_v = side.value if hasattr(side, "value") else str(side or "").upper()
     if side_v not in ("CALL", "PUT"):
-        return lots, meta
+        return None
     opp = "PUT" if side_v == "CALL" else "CALL"
     lookback = float(
-        getattr(settings, "explosion_whipsaw_flip_lookback_seconds", 3600) or 3600
+        lookback_seconds
+        if lookback_seconds is not None
+        else getattr(settings, "explosion_whipsaw_flip_lookback_seconds", 3600) or 3600
     )
     now = datetime.now(_IST)
     win = None
@@ -253,6 +248,58 @@ def cap_opposite_side_flip_after_win(
         if float(getattr(t, "pnlInr", 0) or 0) > 0:
             win = t
             break
+    return win
+
+
+def opposite_side_index_flip_waive_active(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    snap: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """True when a confirmed index rally/slide flip follows an opposite-side win."""
+    meta: dict[str, Any] = {}
+    if state is None or snap is None:
+        return False, "no_context", meta
+    win = _recent_opposite_side_session_win(state, symbol=symbol, side=side)
+    if win is None:
+        return False, "no_opposite_win", meta
+    meta["priorWinPnlInr"] = round(float(getattr(win, "pnlInr", 0) or 0), 2)
+    meta["priorWinTradeId"] = getattr(win, "id", None)
+    from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
+
+    ok, reason, flip_meta = index_rally_side_flip_bypass(symbol, side, snap)
+    meta.update(flip_meta or {})
+    if not ok:
+        return False, reason, meta
+    return True, "opposite_flip_index_confirmed", meta
+
+
+def cap_opposite_side_flip_after_win(
+    lots: int,
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    velocity_3s: float = 0.0,
+    snap: Any = None,
+) -> tuple[int, dict[str, Any]]:
+    """Cap / block a counter-flip entry after a same-session WIN on the opposite side.
+
+    Aug6: two CALLs won (market up), then a max-size PUT flip lost −₹20k. Flipping side
+    right after an opposite-side winner is a whipsaw — don't ride it at max size.
+    Weak-tape flips (v3 below breakout floor) are blocked entirely when configured.
+    """
+    meta: dict[str, Any] = {"applied": False, "blocked": False}
+    settings = get_settings()
+    if not getattr(settings, "explosion_whipsaw_flip_guard_enabled", True):
+        return lots, meta
+    side_v = side.value if hasattr(side, "value") else str(side or "").upper()
+    if side_v not in ("CALL", "PUT"):
+        return lots, meta
+    opp = "PUT" if side_v == "CALL" else "CALL"
+    win = _recent_opposite_side_session_win(state, symbol=symbol, side=side)
     if win is None:
         return lots, meta
 
@@ -265,19 +312,31 @@ def cap_opposite_side_flip_after_win(
     )
     require_v = bool(getattr(settings, "explosion_whipsaw_flip_require_velocity", True))
     block_weak = bool(getattr(settings, "explosion_whipsaw_flip_block_weak", True))
+    index_flip_cap = bool(
+        getattr(settings, "explosion_whipsaw_flip_cap_instead_of_block_on_index_flip", True)
+    )
+    index_flip_ok = False
+    if index_flip_cap and snap is not None:
+        index_flip_ok, _, _ = opposite_side_index_flip_waive_active(
+            state, symbol=symbol, side=side, snap=snap,
+        )
     if require_v and block_weak and v3 < min_v3:
-        meta.update({
-            "applied": True,
-            "blocked": True,
-            "blockReason": "whipsaw_flip_velocity_below_breakout",
-            "flipFromWinSide": opp,
-            "priorWinPnlInr": round(float(getattr(win, "pnlInr", 0) or 0), 2),
-            "velocity3s": round(v3, 3),
-            "minVelocity3s": min_v3,
-            "uncappedLots": lots,
-            "cappedLots": 0,
-        })
-        return 0, meta
+        if index_flip_ok:
+            block_weak = False
+            meta["indexFlipCapInsteadOfBlock"] = True
+        else:
+            meta.update({
+                "applied": True,
+                "blocked": True,
+                "blockReason": "whipsaw_flip_velocity_below_breakout",
+                "flipFromWinSide": opp,
+                "priorWinPnlInr": round(float(getattr(win, "pnlInr", 0) or 0), 2),
+                "velocity3s": round(v3, 3),
+                "minVelocity3s": min_v3,
+                "uncappedLots": lots,
+                "cappedLots": 0,
+            })
+            return 0, meta
 
     cap = int(getattr(settings, "explosion_whipsaw_flip_lot_cap", 8) or 8)
     capped = min(max(0, lots), max(1, cap))
@@ -615,6 +674,8 @@ def session_peak_late_reentry_blocked(
     premium: float,
     velocity_3s: float,
     alert: Optional[dict[str, Any]] = None,
+    state: AutoTraderState | None = None,
+    snap: Any = None,
 ) -> tuple[bool, str]:
     """Block chasing a strike still near its session peak after a real rip.
 
@@ -624,6 +685,13 @@ def session_peak_late_reentry_blocked(
     settings = get_settings()
     if not bool(getattr(settings, "explosion_late_reentry_block_enabled", True)):
         return False, ""
+
+    if bool(getattr(settings, "explosion_late_reentry_waive_opposite_side_flip_enabled", True)):
+        waive_ok, _, _ = opposite_side_index_flip_waive_active(
+            state, symbol=symbol, side=side, snap=snap,
+        )
+        if waive_ok:
+            return False, ""
 
     from app.engines.explosion_detector import (
         get_session_low_premium,
