@@ -1609,6 +1609,8 @@ class Settings(BaseSettings):
     explosion_late_reentry_waive_opposite_side_flip_enabled: bool = True
     # Same flip: cap lots instead of hard-blocking weak v3 when index rally/slide confirms.
     explosion_whipsaw_flip_cap_instead_of_block_on_index_flip: bool = True
+    # Index-confirmed opposite flip: size to this capital share (not fixed lot cap).
+    explosion_whipsaw_flip_index_flip_capital_pct: float = 0.35
     explosion_breadth_alignment_enabled: bool = True
     # Hard block PUT on BULLISH / CALL on BEARISH — no ELITE or premium-led bypass
     breadth_hard_side_block_enabled: bool = True

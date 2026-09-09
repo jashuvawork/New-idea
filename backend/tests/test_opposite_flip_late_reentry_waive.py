@@ -39,6 +39,7 @@ def _settings(**overrides) -> Settings:
         explosion_whipsaw_flip_min_velocity_3s=2.5,
         explosion_whipsaw_flip_block_weak=True,
         explosion_whipsaw_flip_cap_instead_of_block_on_index_flip=True,
+        explosion_whipsaw_flip_index_flip_capital_pct=0.35,
         explosion_whipsaw_flip_lot_cap=8,
         index_rally_side_flip_enabled=True,
         index_rally_side_flip_min_pts=130.0,
@@ -152,14 +153,18 @@ def test_late_reentry_still_blocks_without_opposite_win(mock_settings):
     assert "late_reentry_near_session_peak" in reason
 
 
+@patch("app.engines.capital_allocator.get_capital_snapshot")
 @patch("app.engines.index_rally_side_flip.get_settings")
 @patch("app.engines.session_mode_feedback.get_settings")
 def test_whipsaw_flip_caps_instead_of_blocks_on_index_flip(
-    mock_settings, mock_index_settings,
+    mock_settings, mock_index_settings, mock_capital,
 ):
+    from app.engines.capital_allocator import CapitalSnapshot
+
     s = _settings()
     mock_settings.return_value = s
     mock_index_settings.return_value = s
+    mock_capital.return_value = CapitalSnapshot(availableMarginInr=200_000.0)
     reset_directional_lock()
     state = _state_with_put_win()
     snap = _snap()
@@ -175,10 +180,13 @@ def test_whipsaw_flip_caps_instead_of_blocks_on_index_flip(
             side=Side.CALL,
             velocity_3s=0.14,
             snap=snap,
+            premium=319.5,
         )
     assert meta.get("blocked") is not True
-    assert lots == 8
     assert meta.get("indexFlipCapInsteadOfBlock") is True
+    assert meta.get("indexFlipCapitalPct") == pytest.approx(0.35)
+    # 35% of ₹200k → ₹70k / (319.5 × 20) ≈ 10 lots
+    assert lots == 10
 
 
 @patch("app.engines.session_mode_feedback.get_settings")

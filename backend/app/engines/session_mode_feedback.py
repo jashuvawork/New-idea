@@ -284,6 +284,7 @@ def cap_opposite_side_flip_after_win(
     side: Any,
     velocity_3s: float = 0.0,
     snap: Any = None,
+    premium: float = 0.0,
 ) -> tuple[int, dict[str, Any]]:
     """Cap / block a counter-flip entry after a same-session WIN on the opposite side.
 
@@ -338,7 +339,16 @@ def cap_opposite_side_flip_after_win(
             })
             return 0, meta
 
-    cap = int(getattr(settings, "explosion_whipsaw_flip_lot_cap", 8) or 8)
+    if index_flip_ok and float(premium or 0) > 0:
+        from app.engines.capital_allocator import max_lots_for_capital_pct
+
+        cap_pct = float(
+            getattr(settings, "explosion_whipsaw_flip_index_flip_capital_pct", 0.35) or 0.35
+        )
+        cap = max_lots_for_capital_pct(symbol, float(premium), cap_pct)
+        meta["indexFlipCapitalPct"] = cap_pct
+    else:
+        cap = int(getattr(settings, "explosion_whipsaw_flip_lot_cap", 8) or 8)
     capped = min(max(0, lots), max(1, cap))
     meta.update({
         "applied": capped < lots,
