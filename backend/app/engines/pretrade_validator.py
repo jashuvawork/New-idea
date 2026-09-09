@@ -692,6 +692,8 @@ def validate_candidate(
                         or 0
                     ),
                     alert=alert_d,
+                    state=state,
+                    snap=getattr(candidate, "snap", None),
                 )
                 if late_peak:
                     return False, late_reason or "late_reentry_near_session_peak", {

@@ -1604,6 +1604,11 @@ class Settings(BaseSettings):
     explosion_late_reentry_near_peak_pct: float = 12.0
     explosion_late_reentry_pullback_ok_pct: float = 22.0
     explosion_late_reentry_min_velocity_3s: float = 1.2
+    # Sep09: index rally after PUT win unlocks CALL directionally, but CE near its own
+    # session peak was still blocked as late chase — waive when index flip confirms.
+    explosion_late_reentry_waive_opposite_side_flip_enabled: bool = True
+    # Same flip: cap lots instead of hard-blocking weak v3 when index rally/slide confirms.
+    explosion_whipsaw_flip_cap_instead_of_block_on_index_flip: bool = True
     explosion_breadth_alignment_enabled: bool = True
     # Hard block PUT on BULLISH / CALL on BEARISH — no ELITE or premium-led bypass
     breadth_hard_side_block_enabled: bool = True

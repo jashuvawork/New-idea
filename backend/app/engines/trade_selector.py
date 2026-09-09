@@ -838,6 +838,8 @@ def _explosion_candidates(
             premium=float(event.premium or 0),
             velocity_3s=float(event.velocity_3s or 0),
             alert=alert,
+            state=state,
+            snap=snap,
         )
         if late_reentry and not first_lift_ready:
             continue
@@ -1911,6 +1913,8 @@ def find_best_entry(
                         getattr(c.explosion_event, "velocity_3s", 0) or 0
                     ),
                     alert=alert_d,
+                    state=state,
+                    snap=c.snap,
                 )
                 if late_peak:
                     c.pretrade_meta = {
