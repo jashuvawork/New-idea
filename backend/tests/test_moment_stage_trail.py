@@ -722,3 +722,73 @@ def test_sync_cycle_moment_peaks_shares_rank_one_best():
     assert effective_best_pnl(rank2, 24.25) == pytest.approx(
         round(46.45 * expected_pct / 100.0, 2), abs=0.02
     )
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_sep10_trail_lock_skipped_before_arm_on_red_wick(mock_ms, mock_s, _hc, _mp):
+    """Sep10 SENSEX 75000 PE: best +29.6 / arm 43 / live −1.5pt must not trail_lock.
+
+    LTP ran 371→401→500+; explosion_trail_lock at −₹710 was a false scratch.
+    """
+    s = _settings(
+        explosion_trail_arm_points=42.89,
+        explosion_trail_keep_ratio=0.51,
+        ftv_runner_pct_trail_arm_min_best_points=20.0,
+        ftv_runner_pct_trail_keep_ratio=0.75,
+    )
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    trade = PaperTrade(
+        id="50fc9677",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=75000.0,
+        entryPremium=371.4,
+        currentPremium=369.92,
+        lots=24,
+        openedAt=datetime.now(IST) - timedelta(seconds=28),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=29.6,
+        maxLtp=401.0,
+        pnlPoints=-1.48,
+        entryContext={
+            "selectionMode": "explosion",
+            "explosionTier": "EXPLODING",
+            "maxProfitCapture": True,
+            "goodDayIctCapture": True,
+            "ictFlatThenVertical": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+            "stageGivebackRatio": 0.5,
+            "afternoonCapture": True,
+            "topExplosionMaxLots": True,
+            "liveVelocity3s": -10.86,
+            "exitPlan": {
+                "stopPoints": 40.0,
+                "targetPoints": 80.0,
+                "trailArmPoints": 42.89,
+                "trailKeepRatio": 0.51,
+                "microTargetPoints": 3.61,
+                "momentStageLadder": True,
+                "projectedMaxTp": 800.0,
+                "stageSize": 75.0,
+            },
+        },
+    )
+    params = ExplosionExitParams(
+        stop_points=40.0,
+        target_points=80.0,
+        trail_arm_points=42.89,
+        trail_keep_ratio=0.51,
+        micro_target_points=3.61,
+        adaptive_stop=True,
+    )
+    reason, pnl = evaluate_explosion_exit(
+        trade, 369.92, "EXPLODING", 20, params=params, live_velocity_3s=-10.86,
+    )
+    assert reason != "explosion_trail_lock"
+    assert reason != "explosion_trail_sl"

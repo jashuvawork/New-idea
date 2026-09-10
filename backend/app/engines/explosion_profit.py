@@ -2377,19 +2377,27 @@ def evaluate_explosion_exit(
             ):
                 return "explosion_trail_sl", pnl_inr
 
-        if trail_floor is not None and pnl_pts < best * trail_keep and best >= (20 if max_profit else 8):
-            if pnl_pts <= 0 or _profit_lock_ok():
-                if not _defer_explosion_trail_while_continuing(
-                    trade,
-                    best=best,
-                    pnl_pts=pnl_pts,
-                    live_v=v3,
-                    projected_max=projected_max,
-                    stage_ladder=stage_ladder,
-                    max_profit=max_profit,
-                    settings=settings,
-                ):
-                    return "explosion_trail_lock", pnl_inr
+        # Keep-ratio lock only after trail is armed and still green — never book a
+        # loss here (Sep10 75000 PE: best +29 / arm 43, dipped −1.5pt → trail_lock
+        # while LTP later ran 392→500). Losses use SL / failed-launch paths.
+        if (
+            trail_floor is not None
+            and pnl_pts > 0
+            and pnl_pts < best * trail_keep
+            and best >= exit_params.trail_arm_points
+            and _profit_lock_ok()
+        ):
+            if not _defer_explosion_trail_while_continuing(
+                trade,
+                best=best,
+                pnl_pts=pnl_pts,
+                live_v=v3,
+                projected_max=projected_max,
+                stage_ladder=stage_ladder,
+                max_profit=max_profit,
+                settings=settings,
+            ):
+                return "explosion_trail_lock", pnl_inr
 
     if (
         not max_profit
@@ -2497,7 +2505,11 @@ def evaluate_explosion_exit(
                 return "explosion_trail_sl", pnl_inr
             if trail_floor is not None and pnl_pts <= trail_floor:
                 return "explosion_trail_sl", pnl_inr
-            if pnl_pts < best * trail_keep and best >= 8:
+            if (
+                pnl_pts > 0
+                and pnl_pts < best * trail_keep
+                and best >= exit_params.trail_arm_points
+            ):
                 return "explosion_trail_lock", pnl_inr
         # Once thesis has gone green: never time-exit — SL / trail / peak-capture only.
         if _skip_time_exit_for_green_thesis(trade, best=best, settings=settings):
