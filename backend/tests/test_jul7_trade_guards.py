@@ -39,6 +39,7 @@ def _expiry_snap(**kwargs) -> SymbolSnapshot:
 @patch("app.engines.explosion_profit.get_settings")
 def test_cheap_premium_explosion_lot_cap(mock_settings):
     s = MagicMock()
+    s.executed_entry_always_max_lots = False
     s.explosion_high_premium_threshold_inr = 90.0
     s.explosion_high_premium_lot_cap = 10
     s.expiry_cheap_premium_threshold_inr = 55.0

@@ -130,7 +130,7 @@ def test_building_rip_ftv_skips_max_lots_on_cold_base_timing():
     max_lots.assert_not_called()
 
 
-def test_apply_explosion_always_max_respects_cold_base_cap():
+def test_executed_always_max_skips_cold_timing_lot_cap():
     from app.engines.entry_timing import cap_lots_for_timing
     from app.engines.capital_allocator import apply_explosion_always_max_lots
 
@@ -140,4 +140,4 @@ def test_apply_explosion_always_max_respects_cold_base_cap():
     )
     assert boosted > 3
     final = cap_lots_for_timing(boosted, timing)
-    assert final == 3
+    assert final == boosted

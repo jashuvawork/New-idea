@@ -1485,6 +1485,9 @@ class Settings(BaseSettings):
     # Every explosion entry uses full capital max lots — no 6-lot first-green / 3-lot
     # cold-timing / 35% ordinary-cap throttles (Aug25 EXPLODING 100 took 3 lots).
     explosion_always_force_max_lots: bool = True
+    # Gated best-trade policy: any explosion/scalp that clears entry gates uses capital
+    # max lots — skip timing/probe/retest/post-win soft caps (daily loss stop still applies).
+    executed_entry_always_max_lots: bool = True
     # Only block force-max on true CHOP/WORST days — not mere RANGE_BOUND (Jul29 #8).
     top_explosion_force_max_block_day_types_csv: str = "CHOP,WORST"
     # After booking profit on an explosive at symbol+side+strike, next entry on that
