@@ -39,6 +39,7 @@ from app.services.radar_learning import (
     read_premium_tape,
     record_funnel_state,
     record_funnel_event,
+    record_funnel_gate_block,
     record_market_observations,
     reset_learning_state_for_tests,
     restore_local_base_history,
@@ -506,6 +507,40 @@ def test_funnel_maps_blocker_entry_and_trade_outcome(tmp_path):
     assert report["orderRejected"] == 1
     assert report["closedWins"] == 1
     assert report["rows"][0]["blockers"] == ["chart_alignment"]
+
+
+def test_funnel_gate_block_records_selector_rejects(tmp_path):
+    settings = _settings(tmp_path)
+    start = datetime(2026, 9, 9, 12, 30, tzinfo=IST)
+    with _patch_settings(settings):
+        record_top_radars(
+            {"SENSEX": _snap(alerts=[{**_alert(), "side": "CALL", "strike": 75100.0}])},
+            now=start - timedelta(hours=3),
+            source="rest_snapshot",
+        )
+        assert record_funnel_gate_block(
+            "SENSEX",
+            "CALL",
+            75100.0,
+            "late_reentry_near_session_peak_326.0",
+            now=start,
+        )
+        assert record_funnel_gate_block(
+            "SENSEX",
+            "CALL",
+            75100.0,
+            "late_reentry_near_session_peak_326.0",
+            now=start + timedelta(seconds=1),
+        ) is False
+        with patch(
+            "app.services.trade_store.get_day_detail",
+            return_value={"trades": []},
+        ):
+            report = build_funnel_report("2026-09-09")
+
+    row = next(r for r in report["rows"] if r["key"] == "SENSEX:CALL:75100")
+    assert row["blocked"] is True
+    assert "late_reentry_near_session_peak_326.0" in row["blockers"]
 
 
 def test_ranked_out_is_deduplicated_exposed_and_not_counted_selected(tmp_path):

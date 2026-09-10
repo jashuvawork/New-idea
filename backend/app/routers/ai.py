@@ -1,6 +1,7 @@
 """AI/ML strategy and learning API."""
 
 import asyncio
+import logging
 from datetime import datetime
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -21,6 +22,7 @@ from app.services.cursor_composer_client import get_composer_client
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 IST = ZoneInfo("Asia/Kolkata")
+logger = logging.getLogger(__name__)
 
 
 @router.get("/strategies")
@@ -114,6 +116,17 @@ async def window_replay(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("window_replay failed for %s", date)
+        return {
+            "date": date,
+            "status": "error",
+            "errorType": type(exc).__name__,
+            "error": str(exc),
+            "windowStart": start,
+            "windowEnd": end,
+            "sideFilter": side,
+        }
 
 
 @router.get("/lever-replay-compare/{date}")
