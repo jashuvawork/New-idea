@@ -7,8 +7,10 @@ from app.engines.capital_allocator import (
     CapitalSnapshot,
     RankedAllocation,
     apply_explosion_always_max_lots,
+    force_executed_entry_max_lots,
     tune_exit_plan_for_position,
 )
+from app.engines.entry_timing import cap_lots_for_timing
 from app.engines.session_mode_feedback import cap_lots_until_first_green
 from app.models.schemas import AutoTraderState
 
@@ -17,16 +19,18 @@ from app.models.schemas import AutoTraderState
 @patch("app.engines.capital_allocator.max_lots_for_capital", return_value=42)
 def test_apply_explosion_always_max_lots_floors(_max, mock_settings):
     s = MagicMock()
+    s.executed_entry_always_max_lots = True
     s.explosion_always_force_max_lots = True
     mock_settings.return_value = s
     assert apply_explosion_always_max_lots(6, "NIFTY", 61.0, mode="explosion") == 42
-    assert apply_explosion_always_max_lots(6, "NIFTY", 61.0, mode="scalp") == 6
+    assert apply_explosion_always_max_lots(6, "NIFTY", 61.0, mode="scalp") == 42
 
 
 @patch("app.engines.capital_allocator.get_settings")
 @patch("app.engines.capital_allocator.max_lots_for_capital", return_value=42)
 def test_apply_respects_disabled_flag(_max, mock_settings):
     s = MagicMock()
+    s.executed_entry_always_max_lots = False
     s.explosion_always_force_max_lots = False
     mock_settings.return_value = s
     assert apply_explosion_always_max_lots(6, "NIFTY", 61.0, mode="explosion") == 6
@@ -246,3 +250,24 @@ def test_post_tune_floor_restores_top_explosion_max_lots(_max, mock_settings):
     floor = apply_explosion_always_max_lots(lots, "SENSEX", 344.33, mode="explosion")
     assert floor == 18
     assert floor > lots
+
+
+@patch("app.engines.capital_allocator.get_settings")
+@patch("app.engines.capital_allocator.max_lots_for_capital", return_value=24)
+def test_force_executed_entry_max_lots_scalp_and_explosion(_max, mock_settings):
+    s = MagicMock()
+    s.executed_entry_always_max_lots = True
+    mock_settings.return_value = s
+    assert force_executed_entry_max_lots(6, "SENSEX", 371.4, mode="explosion") == 24
+    assert force_executed_entry_max_lots(3, "NIFTY", 80.0, mode="scalp") == 24
+    assert force_executed_entry_max_lots(6, "NIFTY", 80.0, mode="worst_day_itm_fade") == 6
+
+
+@patch("app.engines.entry_timing.get_settings")
+def test_timing_lot_cap_skipped_when_executed_always_max(mock_settings):
+    s = MagicMock()
+    s.executed_entry_always_max_lots = True
+    s.entry_timing_assessment_enabled = True
+    mock_settings.return_value = s
+    timing = {"action": "lot_cap", "lotCap": 3}
+    assert cap_lots_for_timing(24, timing) == 24

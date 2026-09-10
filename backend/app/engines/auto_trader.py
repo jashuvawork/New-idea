@@ -942,48 +942,60 @@ async def _open_from_candidate(
         confidence=candidate.confidence,
         tier=candidate.tier,
     )
+    from app.engines.capital_allocator import (
+        entry_mode_eligible_for_executed_max_lots,
+        executed_entry_always_max_lots_enabled,
+        force_executed_entry_max_lots,
+    )
+
+    always_max_entry = (
+        executed_entry_always_max_lots_enabled(settings)
+        and entry_mode_eligible_for_executed_max_lots(str(candidate.mode or ""))
+    )
     if candidate.mode == "explosion":
         from app.engines.explosion_profit import cap_explosion_lots
 
-        lots = cap_explosion_lots(lots, fill_premium)
-        from app.engines.explosion_entry_guards import (
-            cap_extended_chase_lots,
-            cap_faded_rip_lots,
-        )
-        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+        if not always_max_entry:
+            lots = cap_explosion_lots(lots, fill_premium)
+            from app.engines.explosion_entry_guards import (
+                cap_extended_chase_lots,
+                cap_faded_rip_lots,
+            )
+            from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
-        chase_ict = (
-            analyze_explosion_event_ict(candidate.explosion_event, snap)
-            if candidate.explosion_event is not None
-            else None
-        )
-        lots = cap_extended_chase_lots(lots, candidate.explosion_event, ict=chase_ict)
-        if faded_rip_meta:
-            lots = cap_faded_rip_lots(lots)
-        if timing_meta:
-            from app.engines.entry_timing import cap_lots_for_timing
+            chase_ict = (
+                analyze_explosion_event_ict(candidate.explosion_event, snap)
+                if candidate.explosion_event is not None
+                else None
+            )
+            lots = cap_extended_chase_lots(lots, candidate.explosion_event, ict=chase_ict)
+            if faded_rip_meta:
+                lots = cap_faded_rip_lots(lots)
+            if timing_meta:
+                from app.engines.entry_timing import cap_lots_for_timing
 
-            lots = cap_lots_for_timing(lots, timing_meta)
+                lots = cap_lots_for_timing(lots, timing_meta)
     elif candidate.mode == "worst_day_itm_fade":
         lots = cap_worst_day_itm_fade_lots(lots)
     elif candidate.mode in ("quick_sideways", "slow_bounce"):
         lots = cap_quick_sideways_lots(lots, fill_premium)
-    from app.engines.bad_day_routing import bad_day_lot_cap
-
     snap_map = snapshots or {symbol: snap}
-    lots = bad_day_lot_cap(fill_premium, lots, state, snap_map)
-    from app.engines.explosion_profit import expiry_session_lot_cap
+    if not always_max_entry:
+        from app.engines.bad_day_routing import bad_day_lot_cap
 
-    lots = expiry_session_lot_cap(lots, fill_premium, snap.tradeQualityScore, snap_map)
-    lots = apply_tiered_lot_cap(
-        lots, candidate.score, snap.breadth.aligned, symbol,
-        velocity_pct=(
-            (candidate.explosion_event.velocity_3s if candidate.explosion_event else 0)
-            or (candidate.suggestion.runnerSignal.premiumVelocityPct
-                if candidate.suggestion and candidate.suggestion.runnerSignal else 0)
-        ),
-        volume_surge=(candidate.explosion_event.volume_surge if candidate.explosion_event else 1.0),
-    )
+        lots = bad_day_lot_cap(fill_premium, lots, state, snap_map)
+        from app.engines.explosion_profit import expiry_session_lot_cap
+
+        lots = expiry_session_lot_cap(lots, fill_premium, snap.tradeQualityScore, snap_map)
+        lots = apply_tiered_lot_cap(
+            lots, candidate.score, snap.breadth.aligned, symbol,
+            velocity_pct=(
+                (candidate.explosion_event.velocity_3s if candidate.explosion_event else 0)
+                or (candidate.suggestion.runnerSignal.premiumVelocityPct
+                    if candidate.suggestion and candidate.suggestion.runnerSignal else 0)
+            ),
+            volume_surge=(candidate.explosion_event.volume_surge if candidate.explosion_event else 1.0),
+        )
     limits = get_session_limits()
     if limits is not None:
         lots = scale_lots_for_limits(lots, limits)
@@ -1301,7 +1313,7 @@ async def _open_from_candidate(
     force_max_size = full_sleeve_authorized
 
     lots = clamp_lots(lots, symbol, fill_premium)
-    if timing_meta:
+    if timing_meta and not always_max_entry:
         from app.engines.entry_timing import cap_lots_for_timing
 
         lots = cap_lots_for_timing(lots, timing_meta)
@@ -1310,7 +1322,11 @@ async def _open_from_candidate(
     from app.engines.vix_regime import vix_size_multiplier
 
     vix_mult, vix_ctx = vix_size_multiplier(snap)
-    if bool(getattr(settings, "vix_regime_sizing_enabled", False)) and vix_mult < 1.0:
+    if (
+        not always_max_entry
+        and bool(getattr(settings, "vix_regime_sizing_enabled", False))
+        and vix_mult < 1.0
+    ):
         lots = max(1, int(round(lots * vix_mult)))
         vix_ctx["applied"] = True
     # Index-confirmed near-base FTV: a genuine index thrust means this is NOT a premium-only
@@ -1407,7 +1423,8 @@ async def _open_from_candidate(
     # Ordinary 35% cap for non-top entries only — must run AFTER elite/top force-max
     # (Sep 3 SENSEX 77000 PE ELITE: top max then 35% cap → 10 lots on a +22pt runner).
     if (
-        not full_sleeve_authorized
+        not always_max_entry
+        and not full_sleeve_authorized
         and not top_explosion_max
         and not elite_full_lot
         and not high_conviction
@@ -1485,7 +1502,7 @@ async def _open_from_candidate(
             trap_meta["defensiveBaseRip"] = True
 
         # Must run AFTER good-day ICT max-lot force (Jul20 49-lot FOMO hole).
-        bypass_soft = (
+        bypass_soft = always_max_entry or (
             full_sleeve_authorized and (
                 (bool(high_conviction) and bool(
                     getattr(settings, "high_conviction_bypasses_fake_trap_lot_cap", True)
@@ -1504,7 +1521,7 @@ async def _open_from_candidate(
         )
         if lots <= 0:
             return False, str(trap_meta.get("action") or "fake_explosion_trap")
-    skip_first_green = (
+    skip_first_green = always_max_entry or (
         force_max_size and (
             high_conviction
             or base_window_full_lots
@@ -1524,7 +1541,7 @@ async def _open_from_candidate(
     # AFTER force-max: same-strike explosive win → cut next entry (Jul29 77500 CE).
     post_win_cap_meta: dict[str, Any] = {}
     flip_cap_meta: dict[str, Any] = {}
-    if candidate.mode == "explosion":
+    if candidate.mode == "explosion" and not always_max_entry:
         from app.engines.session_mode_feedback import (
             cap_same_strike_explosion_reentry_after_win,
         )
@@ -1573,7 +1590,7 @@ async def _open_from_candidate(
         not timing_meta
         or _timing_allows_max(timing_meta)
     )
-    if (
+    if always_max_entry or (
         not size_cap_applied
         and not trap_post_small_win_active(trap_meta)
         and timing_ok_for_max
@@ -1584,11 +1601,12 @@ async def _open_from_candidate(
             fill_premium,
             mode=str(candidate.mode or ""),
         )
-        if (
+        if always_max_entry or (
             candidate.mode == "explosion"
             and bool(getattr(settings, "explosion_always_force_max_lots", True))
         ):
             top_explosion_max = True
+            elite_full_lot = True
 
     allocation_for_cap = allocation
     use_full_remaining = False
@@ -1847,7 +1865,12 @@ async def _open_from_candidate(
     # Size so a normal retest to the local base can't trip the per-trade/daily stop and shake
     # the winner out (Aug31 24150 CE: full-capital size → the ₹37→₹33.6 base retest hit the
     # ₹20k cap BEFORE the +185% rally). Protective: only reduces lots, never raises them.
-    if candidate.mode == "explosion" and local_base_prem > 0 and fill_premium > 0:
+    if (
+        candidate.mode == "explosion"
+        and local_base_prem > 0
+        and fill_premium > 0
+        and not always_max_entry
+    ):
         from app.engines.capital_allocator import cap_lots_for_base_retest
 
         lots = cap_lots_for_base_retest(lots, symbol, fill_premium, local_base_prem)
@@ -1876,9 +1899,13 @@ async def _open_from_candidate(
         faded_rip=bool(faded_rip_meta),
         post_win_capped=bool(post_win_cap_meta.get("applied")),
         explosion_always_max=(
-            candidate.mode == "explosion"
-            and bool(getattr(settings, "explosion_always_force_max_lots", True))
+            always_max_entry
+            or (
+                candidate.mode == "explosion"
+                and bool(getattr(settings, "explosion_always_force_max_lots", True))
+            )
         ),
+        executed_always_max=always_max_entry,
     )
     # ELITE / EXPLODING full-capital sleeve: keep cash-affordable lots; do not shrink
     # to fit an 8% SL INR budget.
@@ -1913,7 +1940,7 @@ async def _open_from_candidate(
         not timing_meta
         or _timing_allows_max_floor(timing_meta)
     )
-    if (
+    if always_max_entry or (
         candidate.mode == "explosion"
         and (top_explosion_max or elite_full_lot)
         and bool(getattr(settings, "explosion_always_force_max_lots", True))
@@ -1922,11 +1949,14 @@ async def _open_from_candidate(
         from app.engines.capital_allocator import apply_explosion_always_max_lots
 
         floor_lots = apply_explosion_always_max_lots(
-            lots, symbol, fill_premium, mode="explosion",
+            lots, symbol, fill_premium, mode=str(candidate.mode or "explosion"),
         )
-        if floor_lots > lots:
+        if floor_lots > lots or always_max_entry:
             lots = floor_lots
-            if trap_meta.get("fakeExplosionTrap"):
+            if (
+                trap_meta.get("fakeExplosionTrap")
+                and not always_max_entry
+            ):
                 from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
 
                 prev = lots
@@ -1941,10 +1971,10 @@ async def _open_from_candidate(
                 reasons = list(exit_plan.get("reasoning") or [])
                 reasons.append(
                     f"Post-tune max-lot floor: restored {lots} lots "
-                    f"(top explosion / elite full lot)"
+                    f"({'executed-entry always max' if always_max_entry else 'top explosion / elite full lot'})"
                 )
                 exit_plan["reasoning"] = reasons
-    if timing_meta:
+    if timing_meta and not always_max_entry:
         from app.engines.entry_timing import cap_lots_for_timing
 
         capped = cap_lots_for_timing(lots, timing_meta)
@@ -1953,6 +1983,15 @@ async def _open_from_candidate(
             top_explosion_max = False
             if exit_plan is not None:
                 exit_plan["lots"] = lots
+    if always_max_entry:
+        lots = force_executed_entry_max_lots(
+            lots, symbol, fill_premium, mode=str(candidate.mode or ""), settings=settings,
+        )
+        if exit_plan is not None:
+            exit_plan["lots"] = lots
+        top_explosion_max = True
+        elite_full_lot = True
+        top_rank_full_budget_lots = True
     if exit_plan and settings.edge_engine_enabled:
         plan_obj = AdaptiveExitPlan.from_dict(exit_plan)
         # Jul30: edge_tighten crushed calculated ~20pt SL to 7.99 on max-lot ELITE.
@@ -2022,7 +2061,7 @@ async def _open_from_candidate(
         ignore_daily_loss_stop = candidate_qualifies_expiry_daily_loss_stop_bypass(
             candidate, snapshots,
         )
-    ignore_per_trade_risk = _ignore_per_trade_risk_cap_for_entry(
+    ignore_per_trade_risk = always_max_entry or _ignore_per_trade_risk_cap_for_entry(
         elite_full_lot=bool(elite_full_lot),
         top_rank_full_budget_lots=bool(top_rank_full_budget_lots),
         high_conviction=bool(high_conviction),
@@ -2051,6 +2090,7 @@ async def _open_from_candidate(
         and bool(getattr(settings, "elite_preentry_risk_cap_reduce_enabled", True))
         and bool(getattr(settings, "elite_trade_engine_enabled", False))
         and not ignore_per_trade_risk
+        and not always_max_entry
     ):
         reduced_lots = _elite_preentry_risk_cap_lots(
             lots=lots,
@@ -2104,6 +2144,7 @@ async def _open_from_candidate(
         "indexConfirmedFtv": bool(index_confirmed_ftv),
         "eliteFullLot": bool(elite_full_lot),
         "topExplosionMaxLots": bool(top_explosion_max),
+        "executedEntryAlwaysMaxLots": bool(always_max_entry),
         "topRankFullBudgetLots": top_rank_full_budget_lots,
         "fullSleeveQualified": full_sleeve_authorized,
         "ftvAuthorizationMode": (
@@ -3595,8 +3636,11 @@ def _top_rank_full_budget_lots_allowed(
     faded_rip: bool,
     post_win_capped: bool,
     explosion_always_max: bool = False,
+    executed_always_max: bool = False,
 ) -> bool:
     """Keep cash-affordable lots — do not SL-shrink fresh top / always-max entries."""
+    if executed_always_max:
+        return True
     if not (
         enabled
         and allocation is not None
@@ -3683,6 +3727,10 @@ def _enforce_top_moment_max_lots_only(
     meta: dict[str, Any] = {}
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         meta["topMomentMaxLots"] = True
+        return int(lots), meta
+    if bool(getattr(settings, "executed_entry_always_max_lots", True)):
+        meta["topMomentMaxLots"] = True
+        meta["executedEntryAlwaysMaxLots"] = True
         return int(lots), meta
     if bool(getattr(settings, "explosion_always_force_max_lots", True)):
         meta["topMomentMaxLots"] = True

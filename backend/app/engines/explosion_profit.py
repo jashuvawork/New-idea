@@ -928,6 +928,10 @@ def compute_explosion_lots(event: ExplosionEvent, tqs: float, premium: float) ->
 
 def cap_explosion_lots(lots: int, premium: float) -> int:
     settings = get_settings()
+    from app.engines.capital_allocator import executed_entry_always_max_lots_enabled
+
+    if executed_entry_always_max_lots_enabled(settings):
+        return int(lots)
     if premium > settings.explosion_high_premium_threshold_inr:
         return min(lots, settings.explosion_high_premium_lot_cap)
     if premium <= settings.expiry_cheap_premium_threshold_inr:
