@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Iterable
+from zoneinfo import ZoneInfo
 
 from app.models.schemas import AutoTraderState, PaperTrade
+
+IST = ZoneInfo("Asia/Kolkata")
 
 _STRIKE_BOUNDS: dict[str, tuple[float, float]] = {
     "NIFTY": (15_000.0, 35_000.0),
@@ -50,6 +54,39 @@ def is_phantom_session_trade(trade: Any) -> bool:
     ):
         return True
     return False
+
+
+def resolve_trade_session_date(trade: PaperTrade) -> str:
+    """Calendar session key for a closed trade (IST)."""
+    if trade.sessionDate:
+        return str(trade.sessionDate)[:10]
+    for attr in (trade.closedAt, trade.openedAt):
+        if not attr:
+            continue
+        dt = attr if attr.tzinfo else attr.replace(tzinfo=IST)
+        return dt.astimezone(IST).strftime("%Y-%m-%d")
+    return datetime.now(IST).strftime("%Y-%m-%d")
+
+
+def closed_trades_for_session_day(
+    trades: Iterable[PaperTrade],
+    session_date: str | None = None,
+) -> list[PaperTrade]:
+    """Real closed trades for one calendar session (default: today IST)."""
+    day = session_date or datetime.now(IST).strftime("%Y-%m-%d")
+    return [
+        t
+        for t in trades
+        if not is_phantom_session_trade(t) and resolve_trade_session_date(t) == day
+    ]
+
+
+def prune_prior_session_closed_trades(state: AutoTraderState) -> int:
+    """Drop prior-day closed rows from in-memory session state."""
+    before = len(state.closedPaperTrades)
+    today = datetime.now(IST).strftime("%Y-%m-%d")
+    state.closedPaperTrades = closed_trades_for_session_day(state.closedPaperTrades, today)
+    return before - len(state.closedPaperTrades)
 
 
 def real_session_closed_trades(

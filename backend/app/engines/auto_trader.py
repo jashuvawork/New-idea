@@ -279,6 +279,9 @@ def _ensure_state_loaded() -> None:
         if purged:
             logger.warning("Purged %d phantom trades from session state", purged)
         if restored_closed or purged:
+            from app.engines.session_trade_integrity import prune_prior_session_closed_trades
+
+            prune_prior_session_closed_trades(_auto_trader_state)
             _auto_trader_state.dailyReport = _calibration.build_report(
                 _auto_trader_state.closedPaperTrades
             )
@@ -3003,6 +3006,13 @@ def get_state() -> AutoTraderState:
             ),
         )
     _ensure_state_loaded()
+    from app.engines.session_trade_integrity import prune_prior_session_closed_trades
+
+    pruned = prune_prior_session_closed_trades(_auto_trader_state)
+    if pruned:
+        _auto_trader_state.dailyReport = _calibration.build_report(
+            _auto_trader_state.closedPaperTrades
+        )
     return _auto_trader_state
 
 

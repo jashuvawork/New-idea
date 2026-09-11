@@ -41,16 +41,18 @@ class DailyCalibration:
         self._side_stats.clear()
         self._bucket_blocks.clear()
 
-    def build_report(self, closed: list[PaperTrade]) -> DailyReport:
-        from app.engines.session_trade_integrity import is_phantom_session_trade
+    def build_report(
+        self,
+        closed: list[PaperTrade],
+        session_date: str | None = None,
+    ) -> DailyReport:
+        from app.engines.session_trade_integrity import closed_trades_for_session_day
 
         wins = losses = scratches = 0
         gross_profit = gross_loss = 0.0
         exit_reasons: dict[str, int] = defaultdict(int)
 
-        for t in closed:
-            if is_phantom_session_trade(t):
-                continue
+        for t in closed_trades_for_session_day(closed, session_date):
             exit_reasons[t.exitReason or "unknown"] += 1
             if t.pnlInr > 0:
                 wins += 1
@@ -76,16 +78,18 @@ class DailyCalibration:
             exitReasons=dict(exit_reasons),
         )
 
-    def performance_analysis(self, closed: list[PaperTrade]) -> dict[str, Any]:
-        from app.engines.session_trade_integrity import is_phantom_session_trade
+    def performance_analysis(
+        self,
+        closed: list[PaperTrade],
+        session_date: str | None = None,
+    ) -> dict[str, Any]:
+        from app.engines.session_trade_integrity import closed_trades_for_session_day
 
         by_side: dict[str, Any] = defaultdict(lambda: {"wins": 0, "losses": 0, "pnl": 0.0})
         by_bucket: dict[str, Any] = defaultdict(lambda: {"wins": 0, "losses": 0, "pnl": 0.0})
 
         real_count = 0
-        for t in closed:
-            if is_phantom_session_trade(t):
-                continue
+        for t in closed_trades_for_session_day(closed, session_date):
             real_count += 1
             side = t.side.value
             bucket = t.strategyType.value
