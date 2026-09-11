@@ -638,6 +638,32 @@ def max_lots_for_capital_pct(symbol: str, premium: float, capital_pct: float) ->
     return max(1, int(budget / (premium * mult)))
 
 
+def executed_entry_always_max_lots_enabled(settings=None) -> bool:
+    s = settings or get_settings()
+    return bool(getattr(s, "executed_entry_always_max_lots", True))
+
+
+def entry_mode_eligible_for_executed_max_lots(mode: str) -> bool:
+    return str(mode or "").lower() in ("explosion", "scalp")
+
+
+def force_executed_entry_max_lots(
+    lots: int,
+    symbol: str,
+    premium: float,
+    *,
+    mode: str = "",
+    settings=None,
+) -> int:
+    """Capital max lots for any gated explosion/scalp entry (best-trade-only policy)."""
+    s = settings or get_settings()
+    if not executed_entry_always_max_lots_enabled(s):
+        return int(lots)
+    if not entry_mode_eligible_for_executed_max_lots(mode):
+        return int(lots)
+    return max(int(lots), max_lots_for_capital(symbol, premium))
+
+
 def apply_explosion_always_max_lots(
     lots: int,
     symbol: str,
@@ -647,6 +673,10 @@ def apply_explosion_always_max_lots(
 ) -> int:
     """Floor explosion entries at capital max lots when enabled."""
     settings = get_settings()
+    if executed_entry_always_max_lots_enabled(settings):
+        return force_executed_entry_max_lots(
+            lots, symbol, premium, mode=mode or "explosion", settings=settings,
+        )
     if str(mode or "").lower() != "explosion":
         return int(lots)
     if not bool(getattr(settings, "explosion_always_force_max_lots", True)):
@@ -671,6 +701,8 @@ def cap_lots_for_base_retest(
     base is unknown.
     """
     settings = get_settings()
+    if executed_entry_always_max_lots_enabled(settings):
+        return int(lots)
     if not bool(getattr(settings, "size_to_base_retest_enabled", True)):
         return int(lots)
     mult = lot_multiplier(symbol)

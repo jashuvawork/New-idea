@@ -22,6 +22,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def _settings(**overrides):
     s = MagicMock()
+    s.executed_entry_always_max_lots = False
     s.entry_timing_assessment_enabled = True
     s.entry_timing_cold_max_velocity_3s = 1.5
     s.entry_timing_ok_min_velocity_3s = 1.5

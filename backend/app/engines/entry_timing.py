@@ -378,6 +378,10 @@ def timing_blocks_entry(timing: dict[str, Any]) -> tuple[bool, str]:
 def cap_lots_for_timing(lots: int, timing: dict[str, Any]) -> int:
     """Apply lot cap when timing says lot_cap (COLD soft path)."""
     settings = get_settings()
+    from app.engines.capital_allocator import executed_entry_always_max_lots_enabled
+
+    if executed_entry_always_max_lots_enabled(settings):
+        return lots
     if not bool(getattr(settings, "entry_timing_assessment_enabled", True)):
         return lots
     if str(timing.get("action") or "") != "lot_cap":
