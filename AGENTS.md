@@ -90,7 +90,6 @@ When production changes function signatures or adds gate fields:
 - **One logical change per commit/PR** unless explicitly batched by the user.
 - Session gate changes: **CE + PE** (see top of this file).
 - Do not force-push or amend unless asked.
-- Live monitor timers are **read-only** — report infra, open PnL, closed net, new trades; recommend restart if down.
 
 ### What “done” looks like (exit tuning phase)
 
@@ -103,6 +102,16 @@ When production changes function signatures or adds gate fields:
 ## Cursor Cloud specific instructions
 
 NexusQuant v2.0 is a single product split into two dev services (run both for end-to-end work). Standard commands live in `README.md`; the notes below are the non-obvious caveats for this environment.
+
+### No timer / recurring poll loops (default)
+
+Unless the user **explicitly** asks for scheduled monitoring (`/loop`, automations, or “poll every N minutes”):
+
+- Do **not** call `subscribe_timer` or set recurring production checks.
+- Do **not** end a turn early to “wait and check again later” — finish the current task in this run.
+- Production read-only curls are fine **when the user asks** (status, EOD, “what about today”); do not self-schedule follow-up polls.
+
+Scheduled market monitors live in `.cursor/automations/` — enable those only via Cursor Automations, not via timer subscriptions inside task agents.
 
 ### Services
 | Service | Dir | Dev command | Port |
