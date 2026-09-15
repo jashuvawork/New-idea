@@ -11,6 +11,7 @@ from app.engines.elite_score_engine import (
     build_elite_assessment,
     compute_elite_score,
     elite_entry_allowed,
+    elite_mega_vertical_bypass,
     elite_must_take,
     infer_setup_type,
     infer_stage,
@@ -125,6 +126,81 @@ def test_elite_entry_blocks_non_v_when_v_rip_only():
     )
     assert ok is False
     assert reason == "elite_v_rip_only"
+
+
+def test_infer_setup_v_from_readiness_reason_without_v_rip_flag():
+    evidence = _ftv_evidence(
+        tier="ELITE",
+        flatThenVertical=False,
+        vRipReady=False,
+        firstLiftReadinessReason="v_rip_session_low_ready",
+    )
+    assert infer_setup_type(evidence) == "V"
+
+
+def test_elite_mega_vertical_bypass_sep15_23400_style():
+    """ELITE v_rip_session_low at 22% off base with 85% peak must pass elite gate."""
+    evidence = {
+        "tier": "ELITE",
+        "flatThenVertical": False,
+        "vRipReady": False,
+        "activeBreakout": True,
+        "armedBaseLaunch": True,
+        "firstLift": True,
+        "velocity3s": 4.0,
+        "velocity9s": 2.0,
+        "localBaseMovePct": 22.0,
+        "peakMovePct": 85.0,
+        "flatVerticalQuality": 75.0,
+        "explosionScore": 90.0,
+        "timingAssessment": "GOOD",
+        "timingAction": "allow",
+        "firstLiftReadinessReason": "v_rip_session_low_ready",
+    }
+    ok, tag = elite_mega_vertical_bypass(
+        evidence,
+        build_elite_assessment(evidence, _ranking(grade="S")),
+        readiness_reason="v_rip_session_low_ready",
+    )
+    assert ok is True
+    assert tag == "v_rip_mega_vertical"
+
+    ok, reason, assessment = elite_entry_allowed(
+        evidence,
+        _ranking(rankScore=98.0, grade="S"),
+        readiness_reason="v_rip_session_low_ready",
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert assessment.get("megaVerticalBypass") == "v_rip_mega_vertical"
+    assert assessment.get("setup") == "V"
+
+
+def test_elite_mega_vertical_bypass_call_mirror():
+    evidence = {
+        "tier": "ELITE",
+        "side": "CALL",
+        "flatThenVertical": False,
+        "vRipReady": False,
+        "activeBreakout": True,
+        "armedBaseLaunch": True,
+        "firstLift": True,
+        "velocity3s": 4.0,
+        "localBaseMovePct": 9.0,
+        "peakMovePct": 40.0,
+        "flatVerticalQuality": 75.0,
+        "explosionScore": 90.0,
+        "timingAssessment": "GOOD",
+        "timingAction": "allow",
+        "expiryFastVerticalBurst": True,
+    }
+    ok, reason, assessment = elite_entry_allowed(
+        evidence,
+        _ranking(rankScore=98.0, grade="S"),
+        side="CALL",
+    )
+    assert ok is True
+    assert assessment.get("megaVerticalBypass") == "expiry_fast_vertical_burst"
 
 
 def test_elite_entry_blocks_high_fvq_chase():

@@ -1949,6 +1949,10 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
             "firstLiftReadinessReason": str(
                 evidence.get("firstLiftReadinessReason") or ""
             ),
+            "peakMovePct": round(_number(evidence.get("peakMovePct")), 2),
+            "dailyMovePct": round(_number(evidence.get("dailyMovePct")), 2),
+            "expiryFastVerticalBurst": bool(evidence.get("expiryFastVerticalBurst")),
+            "momentType": str(evidence.get("momentType") or ""),
         },
     }
 
@@ -2147,6 +2151,12 @@ def rank_entry_candidate(
             or alert.get("readyReason")
             or ""
         ),
+        "expiryFastVerticalBurst": bool(
+            alert.get("expiryFastVerticalBurst")
+            or "fastVerticalBurst" in str(alert.get("reason") or "")
+        ),
+        "momentType": str(alert.get("momentType") or ""),
+        "reason": str(alert.get("reason") or ""),
     }
     # Live index helpers when alert not yet stamped (ELITE/EXPLODING path).
     if live_snapshot is not None and not evidence.get("indexHelpersConfirm"):
