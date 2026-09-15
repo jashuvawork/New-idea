@@ -880,6 +880,7 @@ class ExplosionEvent:
     # ATM | ITM | OTM ("" when spot/atm unknown). Shallow-OTM strikes are monitored on
     # radar but must never be tradeable until they rotate to ATM/ITM.
     moneyness: str = ""
+    expiry_fast_vertical_burst: bool = False
 
 
 def _strike_key(strike: float, side: Side) -> str:
@@ -1967,8 +1968,36 @@ def scan_chain_explosions(
             prior_close = prior_close_from_option_leg(opt)
             day_low, day_high = day_extremes_from_option_leg(opt)
 
-            _record(symbol, strike, side, premium, volume)
             key_h = _strike_key(strike, side)
+            hist_before = _history.get(symbol, {}).get(key_h)
+            fast_burst_ok = False
+            fast_burst_off = 0.0
+            fast_burst_run = 0.0
+            if expiry_day and near_atm and str(money or "").upper() != "OTM":
+                from app.engines.expiry_fast_vertical_burst import (
+                    expiry_fast_vertical_burst_from_run,
+                    projected_premium_run,
+                )
+
+                lookback = float(
+                    getattr(settings, "expiry_fast_vertical_burst_lookback_seconds", 180.0)
+                    or 180.0
+                )
+                run_info = recent_premium_run(
+                    symbol, float(strike), side, lookback_seconds=lookback,
+                )
+                run_info = projected_premium_run(run_info, float(premium))
+                fast_burst_ok, fast_burst_off, fast_burst_run = (
+                    expiry_fast_vertical_burst_from_run(
+                        run_info,
+                        hist=hist_before,
+                        effective_volume=float(volume or 0)
+                        or (_last_known_volume(hist_before) if hist_before else 0.0),
+                        settings=settings,
+                    )
+                )
+
+            _record(symbol, strike, side, premium, volume)
             hist = _history.get(symbol, {}).get(key_h)
             vel_key = _open_key(symbol, strike, side)
             # WS heatmap rows carry volume=0 (unknown). _record preserves the latest
@@ -2014,7 +2043,12 @@ def scan_chain_explosions(
             )
             if not _premium_ok_for_scan(
                 premium,
-                max(open_move, session_move, trough_off_low if trough_scan_ok else 0.0),
+                max(
+                    open_move,
+                    session_move,
+                    trough_off_low if trough_scan_ok else 0.0,
+                    fast_burst_off if fast_burst_ok else 0.0,
+                ),
                 settings,
                 expiry_day=expiry_day,
                 moneyness=money,
@@ -2026,7 +2060,7 @@ def scan_chain_explosions(
                     settings.open_premium_explosion_enabled
                     and open_move >= settings.open_premium_min_move_pct
                 )
-                if not open_gate and not trough_scan_ok:
+                if not open_gate and not trough_scan_ok and not fast_burst_ok:
                     continue
                 if trough_scan_ok:
                     lift_pct = max(trough_off_low, open_move, 0.0)
@@ -2034,6 +2068,14 @@ def scan_chain_explosions(
                     v9 = max(lift_pct * 0.55, 0.08)
                     v15 = min(lift_pct * 0.25, 8.0)
                     vol_surge = 1.5
+                    peak_v3 = _update_peak_velocity(vel_key, v3)
+                    v3_score = max(v3, peak_v3)
+                elif fast_burst_ok:
+                    lift_pct = max(fast_burst_off, fast_burst_run * 0.45, open_move, 0.0)
+                    v3 = max(lift_pct * 0.42, 1.8)
+                    v9 = max(lift_pct * 0.65, 1.0)
+                    v15 = min(lift_pct * 0.35, 12.0)
+                    vol_surge = max(2.0, vol_surge_probe)
                     peak_v3 = _update_peak_velocity(vel_key, v3)
                     v3_score = max(v3, peak_v3)
                 else:
@@ -2073,6 +2115,8 @@ def scan_chain_explosions(
                     or 10.0
                 )
                 score = min(100, max(score, boost + trough_off_low * 1.8))
+            elif fast_burst_ok:
+                score = min(100, max(score, 22.0 + fast_burst_run * 0.55))
             elif peak_move >= 20:
                 score = min(100, score + min(18, peak_move * 0.22))
 
@@ -2091,11 +2135,25 @@ def scan_chain_explosions(
                 v3_build = min(v3_build, 1.8)
                 v3_explode = min(v3_explode, 2.5)
                 v9_explode = min(v9_explode, 3.5)
+            if fast_burst_ok and fast_burst_run >= 28.0:
+                v3_build = min(v3_build, 1.5)
+                v3_explode = min(v3_explode, 2.0)
+                v9_explode = min(v9_explode, 3.0)
             peak_min = float(getattr(settings, "peak_move_explosion_min_pct", 35.0) or 35.0)
-            if peak_move >= peak_min:
-                if peak_move >= 80:
+            if peak_move >= peak_min or (
+                fast_burst_ok and fast_burst_run >= peak_min
+            ):
+                if peak_move >= 80 or fast_burst_run >= 80:
                     tier = "ELITE" if _TIER_RANK.get(tier, 0) < _TIER_RANK["ELITE"] else tier
                 elif _TIER_RANK.get(tier, 0) < _TIER_RANK["EXPLODING"]:
+                    tier = "EXPLODING"
+            elif fast_burst_ok and fast_burst_run >= 28.0:
+                if _TIER_RANK.get(tier, 0) < _TIER_RANK["BUILDING"]:
+                    tier = "BUILDING"
+                if (
+                    fast_burst_run >= 35.0
+                    and _TIER_RANK.get(tier, 0) < _TIER_RANK["EXPLODING"]
+                ):
                     tier = "EXPLODING"
             # Tier is monotonic — velocity votes UPGRADE only, never downgrade a
             # higher tier already set by peak-move (previously BUILDING/EXPLODING here
@@ -2124,8 +2182,15 @@ def scan_chain_explosions(
                 reason_parts_open = [f"open+{session_move:.0f}%"]
                 if peak_move > session_move + 5:
                     reason_parts_open.append(f"peak+{peak_move:.0f}%")
+                if fast_burst_ok:
+                    reason_parts_open.append(f"fastVerticalBurst+{fast_burst_run:.0f}%")
             elif trough_scan_ok:
                 reason_parts_open = [f"trough+{trough_off_low:.0f}%"]
+            elif fast_burst_ok:
+                reason_parts_open = [
+                    f"fastVerticalBurst+{fast_burst_run:.0f}%",
+                    f"off+{fast_burst_off:.0f}%",
+                ]
             else:
                 reason_parts_open = []
 
@@ -2280,6 +2345,7 @@ def scan_chain_explosions(
                     not keep_first_lift
                     and not keep_armed_base
                     and not trough_scan_ok
+                    and not fast_burst_ok
                     and not (peak_move >= 20 and v3 >= 1.2)
                 ):
                     continue
@@ -2322,6 +2388,8 @@ def scan_chain_explosions(
             report_move = session_move
             if trough_scan_ok:
                 report_move = max(session_move, trough_off_low, open_move)
+            elif fast_burst_ok:
+                report_move = max(session_move, fast_burst_off, fast_burst_run, open_move)
             events.append(ExplosionEvent(
                 symbol=symbol,
                 side=side,
@@ -2335,8 +2403,9 @@ def scan_chain_explosions(
                 tier=tier,
                 reason=" ".join(reason_parts) or "momentum building",
                 daily_move_pct=round(report_move, 2),
-                peak_move_pct=round(max(peak_move, report_move), 2),
+                peak_move_pct=round(max(peak_move, report_move, fast_burst_run if fast_burst_ok else 0), 2),
                 volume=float(effective_volume or 0),
+                expiry_fast_vertical_burst=fast_burst_ok,
                 moneyness=str(money or ""),
             ))
 
@@ -2551,6 +2620,16 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         tradeable = True
     if building_rip_ready:
         tradeable = True
+    fast_vertical_burst = bool(getattr(e, "expiry_fast_vertical_burst", False)) or (
+        "fastVerticalBurst" in str(e.reason or "")
+    )
+    if fast_vertical_burst and e.tier in ("BUILDING", "EXPLODING", "ELITE"):
+        burst_ceil = pad_ceil + float(
+            getattr(_settings, "expiry_fast_vertical_burst_max_off_extreme_pct", 50.0)
+            or 50.0
+        )
+        if pad_floor <= structure_pad <= burst_ceil:
+            tradeable = True
     # BUILDING + early flat break must be tradeable (26→45 before EXPLODING).
     if e.tier == "BUILDING" and ict.active and ict.flat_then_vertical:
         tradeable = True
@@ -2717,6 +2796,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "localBaseReversalActive": bool(bullish_base.get("active")),
         "localBaseReversalConfidence": float(bullish_base.get("confidence") or 0),
         "localBaseReversalSide": bullish_base.get("side") or e.side.value,
+        "expiryFastVerticalBurst": fast_vertical_burst,
         "momentType": (
             "armed_base_launch"
             if armed_launch

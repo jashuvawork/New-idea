@@ -2413,8 +2413,20 @@ class Settings(BaseSettings):
     # radar waited until 10:55 ELITE @ ₹153 because open_move floor was 25%).
     expiry_trough_scan_enabled: bool = True
     expiry_trough_first_tick_min_off_low_pct: float = 3.0
-    expiry_trough_first_tick_max_off_low_pct: float = 18.0
+    expiry_trough_first_tick_max_off_low_pct: float = 35.0
     expiry_trough_first_tick_min_score_boost: float = 10.0
+    # Expiry fast vertical burst — live mid-rip detect off recent window (Sep15 23350 PE).
+    expiry_fast_vertical_burst_enabled: bool = True
+    expiry_fast_vertical_burst_lookback_seconds: float = 180.0
+    expiry_fast_vertical_burst_min_run_pct: float = 28.0
+    expiry_fast_vertical_burst_min_off_extreme_pct: float = 3.0
+    expiry_fast_vertical_burst_max_off_extreme_pct: float = 50.0
+    expiry_fast_vertical_burst_max_hist_len: int = 12
+    expiry_fast_vertical_burst_min_volume: float = 15000.0
+    expiry_fast_vertical_burst_volume_bypass_run_pct: float = 45.0
+    expiry_fast_vertical_burst_halt_bypass_enabled: bool = True
+    expiry_put_slide_fast_vertical_bypass_enabled: bool = True
+    expiry_call_rally_fast_vertical_bypass_enabled: bool = True
     # Breadth-aligned ELITE/EXPLODING open-gap: bypass stale 5m MTF oppose.
     open_gap_elite_mtf_bypass_enabled: bool = True
     open_gap_elite_mtf_min_move_pct: float = 40.0

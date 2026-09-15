@@ -80,6 +80,10 @@ def alert_evidence(alert: Mapping[str, Any]) -> dict[str, Any]:
         "indexHelpersConfirm": bool(alert.get("indexHelpersConfirm")),
         "indexTickSpike": bool(alert.get("indexTickSpike")),
         "midRipCoil": bool(alert.get("ictMidRipCoil") or alert.get("midRipCoil")),
+        "expiryFastVerticalBurst": bool(
+            alert.get("expiryFastVerticalBurst")
+            or "fastVerticalBurst" in str(alert.get("reason") or "")
+        ),
     }
 
 
@@ -152,7 +156,11 @@ def top_ftv_v_expiry_worst_waive(evidence: Mapping[str, Any]) -> bool:
     if moment in ("FTV", "V"):
         pass
     elif moment in ("ELITE", "EXPLODING"):
-        if not bool(evidence.get("firstLift") or evidence.get("vRipReady")):
+        if not bool(
+            evidence.get("firstLift")
+            or evidence.get("vRipReady")
+            or evidence.get("expiryFastVerticalBurst")
+        ):
             return False
     else:
         return False

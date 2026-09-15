@@ -1097,6 +1097,24 @@ def check_expiry_entry_allowed(
                     meta["expiryWorstDayTopFtvVBypass"] = True
                     meta["expiryWorstDayTopFtvVOnly"] = True
                     return True, "ok", meta
+                from app.engines.expiry_fast_vertical_burst import (
+                    snapshots_have_call_rally_fast_vertical,
+                    snapshots_have_expiry_fast_vertical,
+                    snapshots_have_put_slide_fast_vertical,
+                )
+
+                if (
+                    getattr(settings, "expiry_fast_vertical_burst_halt_bypass_enabled", True)
+                    and snapshots_have_expiry_fast_vertical(snapshots)
+                ):
+                    meta["expiryFastVerticalBurstBypass"] = True
+                    return True, "ok", meta
+                if snapshots_have_put_slide_fast_vertical(snapshots):
+                    meta["expiryPutSlideFastVerticalBypass"] = True
+                    return True, "ok", meta
+                if snapshots_have_call_rally_fast_vertical(snapshots):
+                    meta["expiryCallRallyFastVerticalBypass"] = True
+                    return True, "ok", meta
                 from app.engines.bullish_local_base import (
                     snapshots_have_bullish_local_base_pad,
                 )

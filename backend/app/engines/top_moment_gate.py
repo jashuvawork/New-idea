@@ -68,6 +68,8 @@ def building_has_causal_ftv_v_structure(evidence: Mapping[str, Any]) -> bool:
         return True
     if bool(evidence.get("earlyRadarPadCapture")):
         return True
+    if bool(evidence.get("expiryFastVerticalBurst")):
+        return True
     if bool(evidence.get("buildingCoilPad")):
         return True
     return False
