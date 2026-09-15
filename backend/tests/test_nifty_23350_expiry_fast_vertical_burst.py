@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.engines.expiry_day_guards import check_expiry_entry_allowed
+from tests.mock_defaults import settings_mock
 from app.engines.expiry_fast_vertical_burst import expiry_fast_vertical_burst_from_run
 from app.engines.explosion_detector import (
     LOCAL_BASE_HIST_MAXLEN,
@@ -28,74 +29,19 @@ from app.models.schemas import AutoTraderState, MarketPhase, Side, SymbolSnapsho
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def _settings() -> MagicMock:
-    s = MagicMock()
-    s.explosion_scan_range = 1500
-    s.explosion_sensex_scan_range = 1500
-    s.explosion_scan_atm_itm_only = True
-    s.min_option_premium_inr = 18.0
-    s.explosion_max_premium_inr = 650.0
-    s.max_option_premium_inr = 300.0
-    s.explosion_ict_max_premium_inr = 800.0
-    s.expiry_itm_explosion_scan_max_premium_inr = 900.0
-    s.expiry_day_min_option_premium_inr = 15.0
-    s.open_premium_explosion_enabled = True
-    s.open_premium_min_move_pct = 25.0
-    s.all_day_explosion_session_move_min_pct = 40.0
-    s.all_day_explosion_min_score = 45.0
-    s.explosion_exhaustion_v15_pct = 18.0
-    s.explosion_cheap_rip_min_premium_inr = 12.0
-    s.explosion_cheap_rip_min_peak_pct = 28.0
-    s.expiry_trough_scan_enabled = True
-    s.expiry_trough_first_tick_min_off_low_pct = 3.0
-    s.expiry_trough_first_tick_max_off_low_pct = 35.0
-    s.expiry_trough_first_tick_min_score_boost = 10.0
-    s.expiry_fast_vertical_burst_enabled = True
-    s.expiry_fast_vertical_burst_lookback_seconds = 180.0
-    s.expiry_fast_vertical_burst_min_run_pct = 28.0
-    s.expiry_fast_vertical_burst_min_off_extreme_pct = 3.0
-    s.expiry_fast_vertical_burst_max_off_extreme_pct = 50.0
-    s.expiry_fast_vertical_burst_max_hist_len = 12
-    s.expiry_fast_vertical_burst_min_volume = 15000.0
-    s.expiry_fast_vertical_burst_volume_bypass_run_pct = 45.0
-    s.expiry_atm_tier_velocity_mult = 1.0
-    s.peak_move_explosion_min_pct = 35.0
-    s.session_day_ohlc_extremes_enabled = True
-    s.session_day_ohlc_max_dev_mult = 8.0
-    s.session_open_use_intraday_low = True
-    s.session_open_low_backfill_pct = 5.0
-    s.session_move_min_baseline_premium = 5.0
-    s.explosion_atm_proximity_bonus_max = 8.0
-    s.explosion_otm_depth_penalty_per_step = 3.0
-    s.velocity_peak_score_boost_enabled = False
-    s.ict_first_lift_appear_enabled = True
-    s.building_rip_local_base_lift_enabled = True
-    s.building_rip_local_base_min_velocity_3s = 1.2
-    s.building_rip_local_base_max_move_pct = 15.0
-    s.building_rip_promote_to_exploding = True
-    s.building_rip_min_velocity_3s = 1.5
-    s.building_rip_min_velocity_9s = 0.8
-    s.building_rip_min_volume_surge = 1.8
-    s.building_rip_min_move_pct = 2.0
-    s.building_rip_max_move_pct = 55.0
-    s.explosion_volume_awaken_min = 25000
-    s.explosion_volume_awaken_min_velocity_3s = 1.0
-    s.moneyness_atm_tolerance_points = 50.0
-    s.nifty_strike_step = 50.0
-    s.sensex_strike_step = 100.0
-    s.banknifty_strike_step = 100.0
-    s.explosion_shallow_otm_history_steps = 1
-    s.explosion_shallow_otm_history_min_volume = 25000
-    s.explosion_immature_min_session_move_pct = 28.0
-    s.ict_structured_early_min_move_pct = 15.0
-    s.ict_structured_early_max_move_pct = 65.0
-    s.elite_local_base_max_move_pct = 40.0
-    s.expiry_fast_vertical_burst_halt_bypass_enabled = True
-    s.expiry_day_guards_enabled = True
-    s.expiry_worst_day_halt_entries = True
-    s.expiry_worst_day_score_threshold = 55.0
-    s.ict_breakout_monitor_enabled = False
-    return s
+def _settings():
+    """Production-aligned settings for Sep15 fast-vertical burst tests."""
+    return settings_mock(
+        explosion_scan_range=1500,
+        explosion_sensex_scan_range=1500,
+        velocity_peak_score_boost_enabled=False,
+        ict_breakout_monitor_enabled=False,
+        expiry_evening_block_enabled=False,
+        expiry_fast_vertical_burst_halt_bypass_enabled=True,
+        expiry_day_guards_enabled=True,
+        expiry_worst_day_halt_entries=True,
+        expiry_worst_day_score_threshold=55.0,
+    )
 
 
 def test_fast_vertical_burst_ok_mid_rip_off_base():
@@ -180,8 +126,16 @@ def test_scan_detects_nifty_23350_pe_mid_vertical(mock_get_settings, _open):
     assert alert.get("expiryFastVerticalBurst") is True
 
 
+@patch("app.engines.expiry_day_guards.snapshots_have_top_ftv_or_v", return_value=False)
+@patch("app.engines.expiry_day_guards.snapshots_have_grade_a_ftv_first_lift", return_value=False)
+@patch("app.engines.expiry_day_guards.snapshots_have_strict_rank_one_launch", return_value=False)
 @patch("app.config.get_settings")
-def test_expiry_worst_day_halt_bypasses_on_fast_vertical_radar(mock_get_settings):
+def test_expiry_worst_day_halt_bypasses_on_fast_vertical_radar(
+    mock_get_settings,
+    _strict_rank,
+    _grade_a_ftv,
+    _top_ftv_v,
+):
     mock_get_settings.return_value = _settings()
     snap = SymbolSnapshot(
         symbol="NIFTY",
@@ -213,6 +167,9 @@ def test_expiry_worst_day_halt_bypasses_on_fast_vertical_radar(mock_get_settings
     ), patch(
         "app.engines.expiry_day_guards.in_expiry_morning_window",
         return_value=True,
+    ), patch(
+        "app.engines.expiry_day_guards.in_expiry_evening_block",
+        return_value=False,
     ):
         ok, reason, meta = check_expiry_entry_allowed(AutoTraderState(), {"NIFTY": snap})
     assert ok is True
