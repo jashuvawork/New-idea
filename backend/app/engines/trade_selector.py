@@ -2157,6 +2157,9 @@ def find_best_entry(
     from app.engines.worst_day_guard import filter_worst_day_candidates
 
     candidates = filter_worst_day_candidates(candidates, state, snapshots)
+    from app.engines.best_trade_policy import deprioritize_deep_itm_when_cheap_base_present
+
+    candidates = deprioritize_deep_itm_when_cheap_base_present(candidates, settings=settings)
     if limits and settings.daily_18pct_strategy_enabled:
         filtered: list[EntryCandidate] = []
         for c in candidates:
@@ -2350,6 +2353,15 @@ def find_best_entry(
                 bonus += float(
                     getattr(settings, "expiry_day_same_week_next_sort_bonus", 15.0) or 15.0
                 )
+        from app.engines.best_trade_policy import cheap_base_strike_rank_bonus
+
+        gate = (c.pretrade_meta or {}).get("topMomentGate") or {}
+        bonus += cheap_base_strike_rank_bonus(
+            c,
+            alert=c.alert if isinstance(getattr(c, "alert", None), dict) else {},
+            elite_assessment=gate.get("eliteAssessment") or {},
+            settings=settings,
+        )
         penalty = entry_score_penalty(c.symbol)
         return c.score + bonus + elite_bonus - penalty
 

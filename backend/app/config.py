@@ -336,6 +336,27 @@ class Settings(BaseSettings):
     best_trade_deep_chase_min_premium_inr: float = 120.0
     best_trade_deep_chase_max_local_pct: float = 18.0
     best_trade_cheap_entry_max_premium_inr: float = 85.0
+    # Selector: prefer ₹18–80 near-base over deep ITM on non-expiry days only.
+    best_trade_cheap_base_rank_priority_enabled: bool = True
+    best_trade_cheap_base_min_premium_inr: float = 18.0
+    best_trade_cheap_base_max_premium_inr: float = 80.0
+    best_trade_cheap_base_max_local_pct: float = 22.0
+    best_trade_cheap_base_max_off_extreme_pct: float = 35.0
+    best_trade_cheap_base_rank_bonus: float = 45.0
+    best_trade_cheap_base_ftv_v_bonus: float = 12.0
+    best_trade_deep_itm_min_premium_inr: float = 120.0
+    best_trade_deep_itm_rank_penalty: float = 60.0
+    # Expiry: block ₹18–80 OTM (Sep15 chain → ₹0.05); take top-radar ITM/mid-rip.
+    best_trade_block_expiry_cheap_otm_enabled: bool = True
+    best_trade_expiry_cheap_otm_min_premium_inr: float = 18.0
+    best_trade_expiry_cheap_otm_max_premium_inr: float = 80.0
+    # Allow Sep15-style mid-rip ELITE entries (deep ITM while expanding to top LTP).
+    best_trade_mid_rip_entry_enabled: bool = True
+    best_trade_mid_rip_min_elite_score: float = 88.0
+    # Minimum hold before adaptive SL on executed entries — Sep15 23500 PE exited @77s.
+    executed_entry_min_hold_before_loss_seconds: int = 300
+    executed_entry_elite_min_hold_before_loss_seconds: int = 600
+    mid_rip_never_green_grace_seconds: float = 600.0
     # Sep15 NIFTY 23400 PE: ELITE v_rip_session_low at 20–27% off base blocked elite_v_rip_only + local cap.
     elite_mega_vertical_bypass_enabled: bool = True
     elite_mega_vertical_bypass_max_local_pct: float = 27.0
@@ -1590,7 +1611,7 @@ class Settings(BaseSettings):
     # Chart confidence at/above this confirms local-support SL (high-conf runners
     # are expected to move up without retesting; do not tighten toward noise).
     exit_sl_chart_confirm_min_confidence: float = 70.0
-    explosion_stop_min_hold_seconds: int = 15
+    explosion_stop_min_hold_seconds: int = 120
     explosion_no_progress_enabled: bool = False
     explosion_no_progress_seconds: int = 150
     explosion_no_progress_aligned_seconds: int = 420

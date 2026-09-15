@@ -1,7 +1,7 @@
 """Sep-9-style best trades: near-base max lots, all day types / sessions.
 
 One clean base entry (₹50→₹100+) at max lots = full-cap profit. Block deep ITM
-chop traps; allow FTV/V/cheap-base cold entries across CHOP/EXPIRY/MOMENTUM days.
+chop traps; allow FTV/V mid-rip ELITE on expiry; block ₹18–80 OTM on expiry days.
 """
 
 from __future__ import annotations
@@ -67,6 +67,117 @@ def timing_allows_best_trade_full_size(
     return False
 
 
+def _mid_rip_best_trade_signals(
+    alert: Mapping[str, Any] | None,
+    elite_assessment: Mapping[str, Any] | None,
+    *,
+    tier: str = "",
+    settings: Any = None,
+) -> bool:
+    """Shared mid-rip ELITE signals for candidates and open trades."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_mid_rip_entry_enabled", True)):
+        return False
+
+    alert = alert if isinstance(alert, Mapping) else {}
+    if alert.get("fastVerticalBurst") or alert.get("buildingRipReady") or alert.get("buildingRip"):
+        return True
+    if alert.get("ictBuildingRip") or alert.get("ictFlatThenVertical"):
+        return True
+
+    assessment = elite_assessment or {}
+    score = _number(assessment.get("eliteScore"))
+    min_score = float(getattr(settings, "best_trade_mid_rip_min_elite_score", 88.0) or 88.0)
+    setup = str(assessment.get("setup") or "").upper()
+    tier_u = str(tier or alert.get("tier") or "").upper()
+    if score >= min_score and setup in VALID_BEST_BASE_SETUPS | {"EXPLOSIVE"}:
+        return True
+    if tier_u in ("ELITE", "EXPLODING"):
+        try:
+            v3 = float(alert.get("velocity3s") or alert.get("liveVelocity3s") or 0)
+        except (TypeError, ValueError):
+            v3 = 0.0
+        if v3 > 0:
+            return True
+    return False
+
+
+def mid_rip_best_trade_candidate(
+    candidate: Any,
+    alert: Mapping[str, Any] | None = None,
+    elite_assessment: Mapping[str, Any] | None = None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Live mid-rip ELITE expanding to top LTP — allow deep ITM when actively ripping."""
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+    alert = alert if isinstance(alert, Mapping) else _alert_for_candidate(candidate)
+    tier = str(getattr(candidate, "tier", "") or "")
+    return _mid_rip_best_trade_signals(
+        alert, elite_assessment, tier=tier, settings=settings,
+    )
+
+
+def _side_value(side: Any) -> str:
+    return str(getattr(side, "value", side) or "").upper()
+
+
+def _alert_for_candidate(candidate: Any) -> dict[str, Any]:
+    alert = getattr(candidate, "alert", None)
+    return alert if isinstance(alert, Mapping) else {}
+
+
+def _classify_moneyness(candidate: Any, snap: Any) -> str:
+    from app.engines.moneyness import classify_moneyness
+
+    return classify_moneyness(
+        getattr(candidate, "side", ""),
+        float(getattr(candidate, "strike", 0) or 0),
+        float(getattr(snap, "spot", 0) or 0),
+        symbol=str(getattr(candidate, "symbol", "") or ""),
+        atm=float(getattr(snap, "atmStrike", 0) or 0) or None,
+    )
+
+
+def expiry_cheap_otm_entry_blocked(
+    candidate: Any,
+    snap: Any,
+    alert: Mapping[str, Any] | None = None,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block ₹18–80 OTM on expiry — decay to ₹0.05; prefer top-radar ITM/mid-rip."""
+    from app.config import get_settings
+    from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_block_expiry_cheap_otm_enabled", True)):
+        return False, ""
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, ""
+    if snap is None or not is_symbol_expiry_day(snap):
+        return False, ""
+
+    alert = alert if isinstance(alert, Mapping) else _alert_for_candidate(candidate)
+    premium = _number(getattr(candidate, "premium", 0) or alert.get("premium"))
+    prem_lo = float(
+        getattr(settings, "best_trade_expiry_cheap_otm_min_premium_inr", 18.0) or 18.0
+    )
+    prem_hi = float(
+        getattr(settings, "best_trade_expiry_cheap_otm_max_premium_inr", 80.0) or 80.0
+    )
+    if not (prem_lo <= premium <= prem_hi):
+        return False, ""
+
+    money = _classify_moneyness(candidate, snap)
+    if money == "OTM":
+        return True, "best_trade_block_expiry_cheap_otm"
+    return False, ""
+
+
 def best_trade_chop_deep_chase_blocked(
     candidate: Any,
     trap_meta: Mapping[str, Any] | None,
@@ -82,6 +193,12 @@ def best_trade_chop_deep_chase_blocked(
     if not bool(getattr(settings, "best_trade_block_chop_deep_chase_enabled", True)):
         return False, ""
     if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, ""
+
+    alert = _alert_for_candidate(candidate)
+    if mid_rip_best_trade_candidate(
+        candidate, alert, elite_assessment, settings=settings,
+    ):
         return False, ""
 
     mode_u = str(day_mode or (elite_assessment or {}).get("dayMode") or "").upper()
@@ -117,6 +234,160 @@ def best_trade_chop_deep_chase_blocked(
     if (trap_meta or {}).get("fakeExplosionTrap") or chop_day:
         return True, "best_trade_block_chop_deep_itm_chase"
     return False, ""
+
+
+def cheap_base_strike_eligible(
+    candidate: Any,
+    alert: Mapping[str, Any] | None,
+    snap: Any,
+    *,
+    settings: Any = None,
+) -> bool:
+    """₹18–80 OTM/ATM near session extreme — non-expiry only (expiry OTM → 0.05)."""
+    from app.config import get_settings
+    from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_cheap_base_rank_priority_enabled", True)):
+        return False
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+    if snap is None:
+        return False
+
+    premium = _number(getattr(candidate, "premium", 0) or (alert or {}).get("premium"))
+    prem_lo = float(getattr(settings, "best_trade_cheap_base_min_premium_inr", 18.0) or 18.0)
+    prem_hi = float(getattr(settings, "best_trade_cheap_base_max_premium_inr", 80.0) or 80.0)
+    if not (prem_lo <= premium <= prem_hi):
+        return False
+
+    money = _classify_moneyness(candidate, snap)
+    if money == "OTM" and is_symbol_expiry_day(snap):
+        return False
+
+    pad = _number(
+        (alert or {}).get("localBaseMovePct")
+        or (alert or {}).get("ictBaseRelativeMovePct")
+    )
+    max_pad = float(getattr(settings, "best_trade_cheap_base_max_local_pct", 22.0) or 22.0)
+    if pad > max_pad + 1e-6:
+        return False
+
+    off_low = _number((alert or {}).get("offLowMovePct"))
+    max_off = float(
+        getattr(settings, "best_trade_cheap_base_max_off_extreme_pct", 35.0) or 35.0
+    )
+    if off_low > max_off + 1e-6:
+        return False
+
+    if money == "ITM":
+        return False
+    return True
+
+
+def deep_itm_chase_strike(
+    candidate: Any,
+    alert: Mapping[str, Any] | None,
+    snap: Any,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Deep ITM / expensive premium chase — Sep15 23500 PE @ ₹242."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+
+    premium = _number(getattr(candidate, "premium", 0) or (alert or {}).get("premium"))
+    deep_floor = float(getattr(settings, "best_trade_deep_itm_min_premium_inr", 120.0) or 120.0)
+    if premium >= deep_floor:
+        return True
+
+    if snap is None:
+        return False
+    money = _classify_moneyness(candidate, snap)
+    cheap_hi = float(getattr(settings, "best_trade_cheap_entry_max_premium_inr", 85.0) or 85.0)
+    return money == "ITM" and premium > cheap_hi
+
+
+def deprioritize_deep_itm_when_cheap_base_present(
+    candidates: list[Any],
+    *,
+    settings: Any = None,
+) -> list[Any]:
+    """Drop deep ITM legs when a cheap-base peer exists on the same symbol+side."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_cheap_base_rank_priority_enabled", True)):
+        return candidates
+    if len(candidates) <= 1:
+        return candidates
+
+    from collections import defaultdict
+
+    groups: dict[tuple[str, str], list[Any]] = defaultdict(list)
+    for candidate in candidates:
+        sym = str(getattr(candidate, "symbol", "") or "").upper()
+        side = _side_value(getattr(candidate, "side", ""))
+        groups[(sym, side)].append(candidate)
+
+    kept: list[Any] = []
+    for group in groups.values():
+        cheap_present = any(
+            cheap_base_strike_eligible(
+                c, _alert_for_candidate(c), getattr(c, "snap", None), settings=settings,
+            )
+            for c in group
+        )
+        if not cheap_present:
+            kept.extend(group)
+            continue
+        for candidate in group:
+            alert = _alert_for_candidate(candidate)
+            if deep_itm_chase_strike(
+                candidate,
+                alert,
+                getattr(candidate, "snap", None),
+                settings=settings,
+            ):
+                if mid_rip_best_trade_candidate(candidate, alert, settings=settings):
+                    kept.append(candidate)
+                continue
+            kept.append(candidate)
+    return kept if kept else candidates
+
+
+def cheap_base_strike_rank_bonus(
+    candidate: Any,
+    *,
+    alert: Mapping[str, Any] | None = None,
+    elite_assessment: Mapping[str, Any] | None = None,
+    settings: Any = None,
+) -> float:
+    """Selector sort_key boost for cheap-base rank-1; penalty for deep ITM."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_cheap_base_rank_priority_enabled", True)):
+        return 0.0
+
+    alert = alert if isinstance(alert, Mapping) else _alert_for_candidate(candidate)
+    snap = getattr(candidate, "snap", None)
+    bonus = 0.0
+    if cheap_base_strike_eligible(
+        candidate, alert, snap, settings=settings,
+    ):
+        bonus += float(getattr(settings, "best_trade_cheap_base_rank_bonus", 45.0) or 45.0)
+        setup = str((elite_assessment or {}).get("setup") or "").upper()
+        if setup in VALID_BEST_BASE_SETUPS:
+            bonus += float(
+                getattr(settings, "best_trade_cheap_base_ftv_v_bonus", 12.0) or 12.0
+            )
+    elif deep_itm_chase_strike(candidate, alert, snap, settings=settings):
+        bonus -= float(getattr(settings, "best_trade_deep_itm_rank_penalty", 60.0) or 60.0)
+    return bonus
 
 
 def elite_base_setup_allowed(

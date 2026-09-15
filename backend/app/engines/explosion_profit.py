@@ -149,6 +149,45 @@ def _is_base_rip_runner_trade(trade: PaperTrade) -> bool:
     return False
 
 
+def _is_mid_rip_elite_trade(trade: PaperTrade, *, settings: Any = None) -> bool:
+    """Sep15-style mid-rip ELITE — defer loss exits until min hold (not 77s scratch)."""
+    settings = settings or get_settings()
+    ctx = trade.entryContext or {}
+    alert = ctx.get("alert") if isinstance(ctx.get("alert"), dict) else {}
+    assessment = ctx.get("eliteAssessment") or {}
+    tier = str(ctx.get("explosionTier") or "")
+    from app.engines.best_trade_policy import _mid_rip_best_trade_signals
+
+    return _mid_rip_best_trade_signals(
+        alert, assessment, tier=tier, settings=settings,
+    )
+
+
+def _cfg_int(settings, name: str, default: int) -> int:
+    return int(_cfg_float(settings, name, float(default)))
+
+
+def _executed_entry_min_hold_before_loss(trade: PaperTrade, *, settings: Any = None) -> int:
+    """Minimum seconds before adaptive SL may cut an executed best-trade entry."""
+    settings = settings or get_settings()
+    if not sl_only_loss_exits_enabled(settings):
+        return 0
+    base_min = _cfg_int(settings, "executed_entry_min_hold_before_loss_seconds", 300)
+    elite_min = _cfg_int(settings, "executed_entry_elite_min_hold_before_loss_seconds", 600)
+    ctx = trade.entryContext or {}
+    assessment = ctx.get("eliteAssessment") or {}
+    tier = str(ctx.get("explosionTier") or "").upper()
+    try:
+        elite_score = float(assessment.get("eliteScore") or 0)
+    except (TypeError, ValueError):
+        elite_score = 0.0
+    if tier in ("ELITE", "EXPLODING") or elite_score >= 88.0:
+        return max(base_min, elite_min)
+    if _is_mid_rip_elite_trade(trade, settings=settings):
+        return max(base_min, elite_min)
+    return base_min
+
+
 def _elite_failed_launch_runner(trade: PaperTrade, *, settings: Any = None) -> bool:
     """True when trade is an elite runner that deserves relaxed failed_launch thresholds."""
     settings = settings or get_settings()
@@ -253,7 +292,10 @@ def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = 
 def sl_only_loss_exits_enabled(settings: Any = None) -> bool:
     """When True, scratch/time loss exits are off — only structural/adaptive SL cuts losers."""
     settings = settings or get_settings()
-    return bool(getattr(settings, "executed_entry_sl_only_loss_exits", True))
+    val = getattr(settings, "executed_entry_sl_only_loss_exits", True)
+    if isinstance(val, bool):
+        return val
+    return False
 
 
 def _apply_elite_respected_early_exit(
@@ -1132,6 +1174,9 @@ def _adaptive_stop_min_hold(trade: PaperTrade, settings) -> int:
     from app.engines.confidence_hold import chart_confidence_for_trade, is_confidence_runner_hold
 
     base = settings.explosion_stop_min_hold_seconds
+    executed_min = _executed_entry_min_hold_before_loss(trade, settings=settings)
+    if executed_min > 0:
+        base = max(base, executed_min)
     elevated = _cfg_float(settings, "chart_confidence_elevated_threshold", 56.9)
     if is_confidence_runner_hold(trade):
         conf = chart_confidence_for_trade(trade)
@@ -1219,8 +1264,14 @@ def _defer_adaptive_stop(
             floor_pts = best * min(0.95, max(0.5, keep))
             if pnl_pts <= floor_pts + 1e-6:
                 return False
-    # Never defer a never-green loser — except ICT/HC base-rip grace above.
+    # Never defer a never-green loser — except ICT/HC base-rip grace and executed min-hold.
     if best <= 0 and pnl_pts < 0:
+        min_loss_hold = _executed_entry_min_hold_before_loss(trade, settings=settings)
+        if min_loss_hold > 0 and hold < min_loss_hold:
+            return True
+        mid_rip_grace = _cfg_float(settings, "mid_rip_never_green_grace_seconds", 600.0)
+        if _is_mid_rip_elite_trade(trade, settings=settings) and hold < mid_rip_grace:
+            return True
         if runner and hold < grace_s:
             return True
         return False

@@ -8,6 +8,8 @@ from app.config import Settings
 from app.engines.chop_live_guards import chop_live_early_fail_exit_reason
 from app.engines.explosion_profit import (
     _apply_elite_respected_early_exit,
+    _defer_adaptive_stop,
+    _executed_entry_min_hold_before_loss,
     sl_only_loss_exits_enabled,
 )
 from app.models.schemas import PaperTrade, Side, StrategyType
@@ -67,3 +69,29 @@ def test_chop_early_fail_direct_still_works_when_explicitly_enabled(mock_get_set
         live_velocity_3s=-0.5,
     )
     assert reason == "chop_live_early_fail"
+
+
+def test_sep15_elite_requires_min_hold_before_loss():
+    s = Settings()
+    trade = _chop_elite_trade(
+        eliteAssessment={"eliteScore": 95.5, "grade": "A", "setup": "V"},
+        explosionTier="ELITE",
+        alert={"fastVerticalBurst": True},
+    )
+    assert _executed_entry_min_hold_before_loss(trade, settings=s) == 600
+    assert _defer_adaptive_stop(
+        trade,
+        best=0.0,
+        hold=77,
+        settings=s,
+        pnl_pts=-4.3,
+        stop_floor=24.0,
+    ) is True
+    assert _defer_adaptive_stop(
+        trade,
+        best=0.0,
+        hold=650,
+        settings=s,
+        pnl_pts=-30.0,
+        stop_floor=24.0,
+    ) is False
