@@ -2767,6 +2767,8 @@ class Settings(BaseSettings):
     expiry_trough_first_tick_min_off_low_pct: float = 3.0
     expiry_trough_first_tick_max_off_low_pct: float = 35.0
     expiry_trough_first_tick_min_score_boost: float = 10.0
+    # WS path: detect vertical off local run window when first-tick trough disabled (hist >= 2).
+    expiry_trough_recent_run_scan_enabled: bool = True
     # Expiry fast vertical burst — live mid-rip detect off recent window (Sep15 23350 PE).
     expiry_fast_vertical_burst_enabled: bool = True
     expiry_fast_vertical_burst_lookback_seconds: float = 180.0

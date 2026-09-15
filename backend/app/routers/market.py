@@ -536,6 +536,13 @@ async def run_building_ltp_entry_cycle(
     )
 
     settings = get_settings()
+    from app.engines.expiry_day_guards import _today_str
+
+    today = _today_str()
+    # Always refresh explosions on cache — chicken-and-egg: BUILDING monitor needs
+    # alerts, but WS path skipped refresh when no BUILDING existed yet (Sep15 gap).
+    await _refresh_explosion_alerts_async(_cache.snapshots, today=today)
+
     # Peek on current cache overlays first (cheap).
     probe = overlay_snapshot_live(
         _cache.snapshots,
@@ -545,10 +552,6 @@ async def run_building_ltp_entry_cycle(
         return _cache
 
     t0 = time.perf_counter()
-    from app.engines.expiry_day_guards import _today_str
-
-    today = _today_str()
-    await _refresh_explosion_alerts_async(probe, today=today)
 
     # Score EVERY watched BUILDING name on this LTP cycle; take only the best.
     auto_state = get_state()

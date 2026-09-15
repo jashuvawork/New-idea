@@ -42,6 +42,8 @@ _local_base_hist: dict[str, deque] = {}
 _armed_base_anchors: dict[str, "ArmedBaseAnchor"] = {}
 _armed_candidate_evidence: dict[str, dict[str, Any]] = {}
 _armed_base_reset_after: dict[str, datetime] = {}
+# REST chain day OHLC cached for WS rescans (heatmap rows carry LTP only).
+_chain_day_ohlc: dict[str, tuple[float, float]] = {}
 LOCAL_BASE_HIST_MAXLEN = 1200  # ~60 min at 3s
 LOCAL_BASE_WINDOW_SECONDS = 1800  # 30 min lookback for the local swing low
 LOCAL_BASE_EXCLUDE_RECENT_SECONDS = 45  # drop the live breakout tail so base != the rip
@@ -99,6 +101,7 @@ def _roll_session(now: Optional[datetime] = None) -> None:
         _armed_base_anchors.clear()
         _armed_candidate_evidence.clear()
         _armed_base_reset_after.clear()
+        _chain_day_ohlc.clear()
 
 
 def reset_detector_state_for_tests() -> None:
@@ -115,8 +118,39 @@ def reset_detector_state_for_tests() -> None:
     _armed_base_anchors.clear()
     _armed_candidate_evidence.clear()
     _armed_base_reset_after.clear()
+    _chain_day_ohlc.clear()
     # Keep today's session date so seeded lows are not wiped by the next _roll_session().
     _session_date = datetime.now(IST).strftime("%Y-%m-%d")
+
+
+def _update_chain_day_ohlc(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    day_low: float,
+    day_high: float,
+) -> None:
+    """Remember chain day extremes from REST rebuilds for WS-only rescans."""
+    key = _open_key(symbol, strike, side)
+    prev_low, prev_high = _chain_day_ohlc.get(key, (0.0, 0.0))
+    new_low = float(day_low or 0)
+    new_high = float(day_high or 0)
+    out_low = prev_low
+    out_high = prev_high
+    if new_low > 0 and (prev_low <= 0 or new_low < prev_low):
+        out_low = new_low
+    if new_high > 0 and (prev_high <= 0 or new_high > prev_high):
+        out_high = new_high
+    if out_low > 0 or out_high > 0:
+        _chain_day_ohlc[key] = (out_low, out_high)
+
+
+def _cached_day_extremes(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+) -> tuple[float, float]:
+    return _chain_day_ohlc.get(_open_key(symbol, strike, side), (0.0, 0.0))
 
 
 def _open_key(symbol: str, strike: float, side: Side) -> str:
@@ -1813,9 +1847,65 @@ def _expiry_trough_first_tick_scan_ok(
         getattr(settings, "expiry_trough_first_tick_min_off_low_pct", 3.0) or 3.0
     )
     max_off = float(
-        getattr(settings, "expiry_trough_first_tick_max_off_low_pct", 18.0) or 18.0
+        getattr(settings, "expiry_trough_first_tick_max_off_low_pct", 35.0) or 35.0
     )
     if not (min_off <= off_low <= max_off + 1e-6):
+        return False, 0.0
+    return True, off_low
+
+
+def _expiry_trough_recent_run_scan_ok(
+    *,
+    symbol: str,
+    strike: float,
+    side: Side,
+    premium: float,
+    expiry_day: bool,
+    near_atm: bool,
+    moneyness: str,
+    settings: Any,
+) -> tuple[bool, float]:
+    """Vertical off local run window when first-tick trough is disabled (hist >= 2).
+
+    WS path: no chain day_low on heatmap rows — use recent_premium_run off the local pad.
+    Sep15 NIFTY 23350 PE ₹20→₹28 mid-rip invisible until post-peak REST OHLC.
+    """
+    if not bool(getattr(settings, "expiry_trough_recent_run_scan_enabled", True)):
+        return False, 0.0
+    if not expiry_day or not near_atm:
+        return False, 0.0
+    if str(moneyness or "").upper() == "OTM":
+        return False, 0.0
+
+    from app.engines.expiry_fast_vertical_burst import projected_premium_run
+
+    lookback = float(
+        getattr(settings, "expiry_fast_vertical_burst_lookback_seconds", 180.0) or 180.0
+    )
+    run_info = recent_premium_run(
+        symbol, float(strike), side, lookback_seconds=lookback,
+    )
+    run_info = projected_premium_run(run_info, float(premium))
+    run_pct = float(run_info.get("run") or 0) * 100.0
+    off_low = float(run_info.get("off_low") or 0) * 100.0
+    min_run = float(
+        getattr(settings, "expiry_fast_vertical_burst_min_run_pct", 28.0) or 28.0
+    )
+    min_off = float(
+        getattr(settings, "expiry_trough_first_tick_min_off_low_pct", 3.0) or 3.0
+    )
+    max_off = float(
+        getattr(settings, "expiry_trough_first_tick_max_off_low_pct", 35.0) or 35.0
+    )
+    if run_pct < min_run - 1e-6:
+        return False, 0.0
+    if not (min_off <= off_low <= max_off + 1e-6):
+        return False, 0.0
+    trough = float(run_info.get("low") or 0)
+    key = _open_key(symbol, strike, side)
+    if trough <= 0:
+        trough = float(_session_low.get(key) or 0)
+    if trough <= 0 or float(premium) <= trough:
         return False, 0.0
     return True, off_low
 
@@ -1967,6 +2057,13 @@ def scan_chain_explosions(
 
             prior_close = prior_close_from_option_leg(opt)
             day_low, day_high = day_extremes_from_option_leg(opt)
+            if day_low <= 0 and day_high <= 0:
+                day_low, day_high = _cached_day_extremes(
+                    symbol, float(strike), side,
+                )
+            _update_chain_day_ohlc(
+                symbol, float(strike), side, day_low, day_high,
+            )
 
             key_h = _strike_key(strike, side)
             hist_before = _history.get(symbol, {}).get(key_h)
@@ -2041,6 +2138,17 @@ def scan_chain_explosions(
                 day_low=float(day_low or 0),
                 settings=settings,
             )
+            if not trough_scan_ok:
+                trough_scan_ok, trough_off_low = _expiry_trough_recent_run_scan_ok(
+                    symbol=symbol,
+                    strike=float(strike),
+                    side=side,
+                    premium=float(premium),
+                    expiry_day=expiry_day,
+                    near_atm=near_atm,
+                    moneyness=money,
+                    settings=settings,
+                )
             if not _premium_ok_for_scan(
                 premium,
                 max(
@@ -2424,22 +2532,32 @@ def scan_snapshot_explosions(
     atm = float(getattr(snap, "atmStrike", None) or snap.spot)
     chain: list[dict[str, Any]] = []
     for row in snap.heatmap:
-        # HeatmapStrike carries OI, not bar volume. OI is cumulative open positions —
-        # NOT trade volume — so using it for volume_surge produced garbage/false surges.
-        # WS overlay has no reliable volume → pass 0 so volume_surge stays neutral (1.0);
-        # the authoritative full REST rebuild supplies real volume.
+        call_low, call_high = _cached_day_extremes(snap.symbol, row.strike, Side.CALL)
+        put_low, put_high = _cached_day_extremes(snap.symbol, row.strike, Side.PUT)
+        call_vol = float(getattr(row, "callVolume", 0) or 0)
+        put_vol = float(getattr(row, "putVolume", 0) or 0)
+        # Heatmap OI is not bar volume — pass REST-cached volume when present; else 0
+        # (fast-burst treats vol=0 as unknown, not illiquid).
         chain.append({
             "strike_price": row.strike,
             "strike": row.strike,
             "call_options": {
                 "ltp": row.callLtp,
                 "last_price": row.callLtp,
-                "volume": 0,
+                "volume": call_vol,
+                "day_low": call_low,
+                "low": call_low,
+                "day_high": call_high,
+                "high": call_high,
             },
             "put_options": {
                 "ltp": row.putLtp,
                 "last_price": row.putLtp,
-                "volume": 0,
+                "volume": put_vol,
+                "day_low": put_low,
+                "low": put_low,
+                "day_high": put_high,
+                "high": put_high,
             },
         })
     return scan_chain_explosions(
