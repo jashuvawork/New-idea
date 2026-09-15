@@ -1,6 +1,8 @@
 """Sep-9-style best trade policy — near-base max lots, block deep chop chase."""
 
-from unittest.mock import MagicMock
+from datetime import datetime
+from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 from app.engines.best_trade_policy import (
     best_trade_chop_deep_chase_blocked,
@@ -10,11 +12,14 @@ from app.engines.best_trade_policy import (
     deep_itm_chase_strike,
     deprioritize_deep_itm_when_cheap_base_present,
     elite_base_setup_allowed,
+    expiry_cheap_otm_entry_blocked,
     mid_rip_best_trade_candidate,
     timing_allows_best_trade_full_size,
 )
 from app.models.schemas import Side, SymbolSnapshot
 from tests.mock_defaults import settings_mock
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def test_near_base_ftv_allows_cold_base_max_lots():
@@ -75,14 +80,15 @@ def test_elite_base_setup_allows_ftv_not_explosive_chase():
     assert elite_base_setup_allowed("EXPLOSIVE", settings=s) is False
 
 
-def _sep15_nifty_snap() -> SymbolSnapshot:
+def _sep15_nifty_snap(*, expiry: str | None = None) -> SymbolSnapshot:
     return SymbolSnapshot(
         symbol="NIFTY",
         timestamp="2026-09-15T10:05:00+05:30",
         marketPhase="LIVE_MARKET",
-        spot=23350.0,
-        atmStrike=23350.0,
+        spot=23118.0,
+        atmStrike=23100.0,
         dataAvailable=True,
+        optionExpiry=expiry,
     )
 
 
@@ -106,9 +112,9 @@ def _explosion_candidate(
     return cand
 
 
-def test_cheap_base_strike_eligible_sep15_23150_pe():
+def test_cheap_base_strike_eligible_non_expiry():
     s = settings_mock()
-    snap = _sep15_nifty_snap()
+    snap = _sep15_nifty_snap(expiry="2026-09-22")
     alert = {
         "localBaseMovePct": 14.0,
         "offLowMovePct": 18.0,
@@ -116,6 +122,30 @@ def test_cheap_base_strike_eligible_sep15_23150_pe():
     }
     cand = _explosion_candidate(strike=23150.0, premium=24.0, snap=snap, alert=alert)
     assert cheap_base_strike_eligible(cand, alert, snap, settings=s) is True
+
+
+@patch("app.engines.expiry_day_guards._today_str", return_value="2026-09-15")
+def test_expiry_blocks_cheap_otm_entry(_mock_today):
+    s = settings_mock()
+    snap = _sep15_nifty_snap(expiry="2026-09-15")
+    alert = {"premium": 24.0}
+    # 23000 PE is OTM with spot 23118 / ATM 23100 — Sep15 chain decayed to ₹0.05.
+    cand = _explosion_candidate(strike=23000.0, premium=24.0, snap=snap, alert=alert)
+    blocked, reason = expiry_cheap_otm_entry_blocked(cand, snap, alert, settings=s)
+    assert blocked is True
+    assert reason == "best_trade_block_expiry_cheap_otm"
+    assert cheap_base_strike_eligible(cand, alert, snap, settings=s) is False
+
+
+@patch("app.engines.expiry_day_guards._today_str", return_value="2026-09-15")
+def test_expiry_allows_itm_mid_rip_not_cheap_otm(_mock_today):
+    s = settings_mock()
+    snap = _sep15_nifty_snap(expiry="2026-09-15")
+    alert = {"premium": 242.42, "fastVerticalBurst": True, "tier": "ELITE"}
+    cand = _explosion_candidate(strike=23500.0, premium=242.42, snap=snap, alert=alert)
+    blocked, reason = expiry_cheap_otm_entry_blocked(cand, snap, alert, settings=s)
+    assert blocked is False
+    assert reason == ""
 
 
 def test_deep_itm_chase_strike_sep15_23500_pe():
@@ -128,7 +158,7 @@ def test_deep_itm_chase_strike_sep15_23500_pe():
 
 def test_deprioritize_drops_deep_itm_when_cheap_pe_present():
     s = settings_mock()
-    snap = _sep15_nifty_snap()
+    snap = _sep15_nifty_snap(expiry="2026-09-22")
     cheap = _explosion_candidate(
         strike=23150.0,
         premium=24.0,
@@ -190,7 +220,7 @@ def test_mid_rip_elite_bypasses_deep_chase_block():
 
 def test_deprioritize_keeps_mid_rip_deep_with_cheap_peer():
     s = settings_mock()
-    snap = _sep15_nifty_snap()
+    snap = _sep15_nifty_snap(expiry="2026-09-22")
     cheap = _explosion_candidate(
         strike=23150.0,
         premium=24.0,
@@ -211,7 +241,7 @@ def test_deprioritize_keeps_mid_rip_deep_with_cheap_peer():
 
 def test_cheap_base_rank_bonus_beats_deep_penalty():
     s = settings_mock()
-    snap = _sep15_nifty_snap()
+    snap = _sep15_nifty_snap(expiry="2026-09-22")
     cheap = _explosion_candidate(
         strike=23150.0,
         premium=24.0,

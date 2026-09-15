@@ -1,7 +1,7 @@
 """Sep-9-style best trades: near-base max lots, all day types / sessions.
 
 One clean base entry (₹50→₹100+) at max lots = full-cap profit. Block deep ITM
-chop traps; allow FTV/V/cheap-base cold entries across CHOP/EXPIRY/MOMENTUM days.
+chop traps; allow FTV/V mid-rip ELITE on expiry; block ₹18–80 OTM on expiry days.
 """
 
 from __future__ import annotations
@@ -121,6 +121,63 @@ def mid_rip_best_trade_candidate(
     )
 
 
+def _side_value(side: Any) -> str:
+    return str(getattr(side, "value", side) or "").upper()
+
+
+def _alert_for_candidate(candidate: Any) -> dict[str, Any]:
+    alert = getattr(candidate, "alert", None)
+    return alert if isinstance(alert, Mapping) else {}
+
+
+def _classify_moneyness(candidate: Any, snap: Any) -> str:
+    from app.engines.moneyness import classify_moneyness
+
+    return classify_moneyness(
+        getattr(candidate, "side", ""),
+        float(getattr(candidate, "strike", 0) or 0),
+        float(getattr(snap, "spot", 0) or 0),
+        symbol=str(getattr(candidate, "symbol", "") or ""),
+        atm=float(getattr(snap, "atmStrike", 0) or 0) or None,
+    )
+
+
+def expiry_cheap_otm_entry_blocked(
+    candidate: Any,
+    snap: Any,
+    alert: Mapping[str, Any] | None = None,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block ₹18–80 OTM on expiry — decay to ₹0.05; prefer top-radar ITM/mid-rip."""
+    from app.config import get_settings
+    from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_block_expiry_cheap_otm_enabled", True)):
+        return False, ""
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, ""
+    if snap is None or not is_symbol_expiry_day(snap):
+        return False, ""
+
+    alert = alert if isinstance(alert, Mapping) else _alert_for_candidate(candidate)
+    premium = _number(getattr(candidate, "premium", 0) or alert.get("premium"))
+    prem_lo = float(
+        getattr(settings, "best_trade_expiry_cheap_otm_min_premium_inr", 18.0) or 18.0
+    )
+    prem_hi = float(
+        getattr(settings, "best_trade_expiry_cheap_otm_max_premium_inr", 80.0) or 80.0
+    )
+    if not (prem_lo <= premium <= prem_hi):
+        return False, ""
+
+    money = _classify_moneyness(candidate, snap)
+    if money == "OTM":
+        return True, "best_trade_block_expiry_cheap_otm"
+    return False, ""
+
+
 def best_trade_chop_deep_chase_blocked(
     candidate: Any,
     trap_meta: Mapping[str, Any] | None,
@@ -179,15 +236,6 @@ def best_trade_chop_deep_chase_blocked(
     return False, ""
 
 
-def _side_value(side: Any) -> str:
-    return str(getattr(side, "value", side) or "").upper()
-
-
-def _alert_for_candidate(candidate: Any) -> dict[str, Any]:
-    alert = getattr(candidate, "alert", None)
-    return alert if isinstance(alert, Mapping) else {}
-
-
 def cheap_base_strike_eligible(
     candidate: Any,
     alert: Mapping[str, Any] | None,
@@ -195,8 +243,9 @@ def cheap_base_strike_eligible(
     *,
     settings: Any = None,
 ) -> bool:
-    """₹18–80 OTM/ATM near session extreme — Sep-9 / Sep-15 morning PUT pattern."""
+    """₹18–80 OTM/ATM near session extreme — non-expiry only (expiry OTM → 0.05)."""
     from app.config import get_settings
+    from app.engines.expiry_day_guards import is_symbol_expiry_day
 
     settings = settings or get_settings()
     if not bool(getattr(settings, "best_trade_cheap_base_rank_priority_enabled", True)):
@@ -206,10 +255,14 @@ def cheap_base_strike_eligible(
     if snap is None:
         return False
 
-    premium = _number(getattr(candidate, "premium", 0) or alert.get("premium"))
+    premium = _number(getattr(candidate, "premium", 0) or (alert or {}).get("premium"))
     prem_lo = float(getattr(settings, "best_trade_cheap_base_min_premium_inr", 18.0) or 18.0)
     prem_hi = float(getattr(settings, "best_trade_cheap_base_max_premium_inr", 80.0) or 80.0)
     if not (prem_lo <= premium <= prem_hi):
+        return False
+
+    money = _classify_moneyness(candidate, snap)
+    if money == "OTM" and is_symbol_expiry_day(snap):
         return False
 
     pad = _number(
@@ -227,15 +280,6 @@ def cheap_base_strike_eligible(
     if off_low > max_off + 1e-6:
         return False
 
-    from app.engines.moneyness import classify_moneyness
-
-    money = classify_moneyness(
-        getattr(candidate, "side", ""),
-        float(getattr(candidate, "strike", 0) or 0),
-        float(getattr(snap, "spot", 0) or 0),
-        symbol=str(getattr(candidate, "symbol", "") or ""),
-        atm=float(getattr(snap, "atmStrike", 0) or 0) or None,
-    )
     if money == "ITM":
         return False
     return True
@@ -262,15 +306,7 @@ def deep_itm_chase_strike(
 
     if snap is None:
         return False
-    from app.engines.moneyness import classify_moneyness
-
-    money = classify_moneyness(
-        getattr(candidate, "side", ""),
-        float(getattr(candidate, "strike", 0) or 0),
-        float(getattr(snap, "spot", 0) or 0),
-        symbol=str(getattr(candidate, "symbol", "") or ""),
-        atm=float(getattr(snap, "atmStrike", 0) or 0) or None,
-    )
+    money = _classify_moneyness(candidate, snap)
     cheap_hi = float(getattr(settings, "best_trade_cheap_entry_max_premium_inr", 85.0) or 85.0)
     return money == "ITM" and premium > cheap_hi
 

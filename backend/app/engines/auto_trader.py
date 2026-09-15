@@ -825,8 +825,21 @@ async def _open_from_candidate(
             if not building_rip_bypasses_fake_trap(candidate=candidate):
                 return False, trap_reason
 
+        from app.engines.best_trade_policy import (
+            best_trade_chop_deep_chase_blocked,
+            expiry_cheap_otm_entry_blocked,
+        )
+
+        otm_blocked, otm_reason = expiry_cheap_otm_entry_blocked(
+            candidate,
+            snap,
+            alert=candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {},
+            settings=settings,
+        )
+        if otm_blocked:
+            return False, otm_reason
+
         if bool(getattr(settings, "best_trade_block_chop_deep_chase_enabled", True)):
-            from app.engines.best_trade_policy import best_trade_chop_deep_chase_blocked
             from app.engines.trade_ranking import rank_entry_candidate, resolve_policy_day_mode
 
             preview = elite_preview

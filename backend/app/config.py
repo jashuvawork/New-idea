@@ -336,7 +336,7 @@ class Settings(BaseSettings):
     best_trade_deep_chase_min_premium_inr: float = 120.0
     best_trade_deep_chase_max_local_pct: float = 18.0
     best_trade_cheap_entry_max_premium_inr: float = 85.0
-    # Selector: prefer ₹18–80 OTM near-base over deep ITM when both on radar.
+    # Selector: prefer ₹18–80 near-base over deep ITM on non-expiry days only.
     best_trade_cheap_base_rank_priority_enabled: bool = True
     best_trade_cheap_base_min_premium_inr: float = 18.0
     best_trade_cheap_base_max_premium_inr: float = 80.0
@@ -346,6 +346,10 @@ class Settings(BaseSettings):
     best_trade_cheap_base_ftv_v_bonus: float = 12.0
     best_trade_deep_itm_min_premium_inr: float = 120.0
     best_trade_deep_itm_rank_penalty: float = 60.0
+    # Expiry: block ₹18–80 OTM (Sep15 chain → ₹0.05); take top-radar ITM/mid-rip.
+    best_trade_block_expiry_cheap_otm_enabled: bool = True
+    best_trade_expiry_cheap_otm_min_premium_inr: float = 18.0
+    best_trade_expiry_cheap_otm_max_premium_inr: float = 80.0
     # Allow Sep15-style mid-rip ELITE entries (deep ITM while expanding to top LTP).
     best_trade_mid_rip_entry_enabled: bool = True
     best_trade_mid_rip_min_elite_score: float = 88.0
