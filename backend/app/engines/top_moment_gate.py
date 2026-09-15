@@ -347,6 +347,10 @@ def qualifies_for_top_moment_max_lots(
 
 def explosion_alert_is_top_moment(alert: Mapping[str, Any]) -> bool:
     """Pre-selector radar filter: BUILDING must show FTV/V shape before candidacy."""
+    from app.engines.expiry_fast_vertical_burst import alert_has_expiry_fast_vertical_burst
+
+    if alert_has_expiry_fast_vertical_burst(alert):
+        return True
     if bool(alert.get("earlyRadarPadCapture") or alert.get("ictEarlyRadarPadCapture")):
         return True
     if bool(alert.get("buildingCoilPadReady")):

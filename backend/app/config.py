@@ -323,8 +323,19 @@ class Settings(BaseSettings):
     elite_trade_block_perfect_score_enabled: bool = True
     elite_trade_perfect_score_threshold: float = 99.95
     elite_trade_perfect_score_max_local_pct: float = 15.0
-    # Historical FTV EOD (12d): V-only beats FTV/EXPLOSIVE on baseline win gates (+₹531k vs +₹514k).
-    elite_trade_v_rip_only_enabled: bool = True
+    # Sep-9 best trades: allow FTV + V near-base; block generic EXPLOSIVE mid-rip chase.
+    elite_trade_v_rip_only_enabled: bool = False
+    elite_trade_block_explosive_chase_enabled: bool = True
+    elite_trade_block_explosive_chase_min_local_pct: float = 22.0
+    # Near-base COLD_BASE entries at max lots when EliteScore ≥90 (₹50→₹100 runners).
+    best_trade_near_base_max_lots_enabled: bool = True
+    best_trade_near_base_min_elite_score: float = 90.0
+    best_trade_near_base_max_local_pct: float = 20.0
+    # Block deep ITM chop/trap chase (Sep15 23500 PE @ ₹242 scratch).
+    best_trade_block_chop_deep_chase_enabled: bool = True
+    best_trade_deep_chase_min_premium_inr: float = 120.0
+    best_trade_deep_chase_max_local_pct: float = 18.0
+    best_trade_cheap_entry_max_premium_inr: float = 85.0
     # Sep15 NIFTY 23400 PE: ELITE v_rip_session_low at 20–27% off base blocked elite_v_rip_only + local cap.
     elite_mega_vertical_bypass_enabled: bool = True
     elite_mega_vertical_bypass_max_local_pct: float = 27.0

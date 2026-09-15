@@ -120,9 +120,12 @@ def test_elite_entry_allowed_passes_quality_v():
 
 
 def test_elite_entry_blocks_non_v_when_v_rip_only():
+    from tests.mock_defaults import settings_mock
+
     ok, reason, _ = elite_entry_allowed(
         _ftv_evidence(flatVerticalQuality=79.0),
         _ranking(grade="A"),
+        settings=settings_mock(elite_trade_v_rip_only_enabled=True),
     )
     assert ok is False
     assert reason == "elite_v_rip_only"

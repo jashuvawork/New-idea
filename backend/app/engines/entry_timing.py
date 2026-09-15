@@ -392,14 +392,21 @@ def cap_lots_for_timing(lots: int, timing: dict[str, Any]) -> int:
     return min(max(1, int(lots)), max(1, int(cap)))
 
 
-def timing_allows_full_size(timing: dict[str, Any]) -> bool:
+def timing_allows_full_size(
+    timing: dict[str, Any],
+    elite_assessment: dict[str, Any] | None = None,
+) -> bool:
     """Max-lot boosts require positive launch timing; COLD_BASE stays probe-sized."""
     if not timing:
         return True
     settings = get_settings()
     if not bool(getattr(settings, "entry_timing_assessment_enabled", True)):
         return True
-    return str(timing.get("assessment") or "").upper() in ("GOOD", "OK")
+    from app.engines.best_trade_policy import timing_allows_best_trade_full_size
+
+    return timing_allows_best_trade_full_size(
+        timing, elite_assessment, settings=settings,
+    )
 
 
 def elite_bypass_allowed_for_timing(timing: dict[str, Any]) -> bool:
