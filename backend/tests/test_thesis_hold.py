@@ -17,6 +17,7 @@ IST = ZoneInfo("Asia/Kolkata")
 def _settings(**overrides):
     s = MagicMock()
     defaults = {
+        "executed_entry_sl_only_loss_exits": False,
         "explosion_thesis_hold_enabled": True,
         "explosion_thesis_hold_skip_time_exit": True,
         "explosion_thesis_hold_min_best_points": 2.0,

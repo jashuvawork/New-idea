@@ -31,6 +31,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def _settings(**overrides):
     s = MagicMock()
+    s.executed_entry_sl_only_loss_exits = False
     s.fake_explosion_trap_enabled = True
     s.fake_explosion_trap_min_session_move_pct = 28.0
     s.fake_explosion_trap_extended_move_pct = 55.0
@@ -290,13 +291,14 @@ def test_trap_stamped_trade_allows_chop_early_fail_exit():
         },
     )
     assert _should_skip_elite_runner_early_exits(trade) is False
-    reason = chop_live_early_fail_exit_reason(
-        trade,
-        hold_seconds=420.0,
-        best_points=1.45,
-        pnl_points=-6.5,
-        live_velocity_3s=-2.0,
-    )
+    with patch("app.engines.chop_live_guards.get_settings", return_value=_settings()):
+        reason = chop_live_early_fail_exit_reason(
+            trade,
+            hold_seconds=420.0,
+            best_points=1.45,
+            pnl_points=-6.5,
+            live_velocity_3s=-2.0,
+        )
     assert reason == "chop_live_early_fail"
 
 

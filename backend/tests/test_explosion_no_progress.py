@@ -39,6 +39,7 @@ def _params() -> ExplosionExitParams:
 
 def _settings():
     s = MagicMock()
+    s.executed_entry_sl_only_loss_exits = False
     s.emergency_stop_enabled = False
     s.explosion_stop_min_hold_seconds = 0
     s.explosion_trail_tight_arm = 12.0

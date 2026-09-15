@@ -19,6 +19,7 @@ IST = ZoneInfo("Asia/Kolkata")
 def _scratch_guard_settings() -> MagicMock:
     """Settings with scratch/early exits enabled (for unit tests of those guards)."""
     s = MagicMock()
+    s.executed_entry_sl_only_loss_exits = False
     s.explosion_failed_launch_exit_enabled = True
     s.explosion_failed_launch_min_hold_seconds = 15
     s.explosion_failed_launch_max_hold_seconds = 45

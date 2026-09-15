@@ -27,6 +27,7 @@ IST = ZoneInfo("Asia/Kolkata")
 def _settings(**overrides):
     s = MagicMock()
     defaults = {
+        "executed_entry_sl_only_loss_exits": False,
         "fake_explosion_trap_honor_post_win_cap": True,
         "fake_explosion_trap_honor_fomo_cap": True,
         "fake_explosion_trap_honor_soft_cap_on_chop": True,

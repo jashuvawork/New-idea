@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     chop_live_premium_5m_fade_min_mom_pct: float = -0.12
     chop_live_second_leg_block_enabled: bool = True
     chop_live_second_leg_cooldown_seconds: int = 900
-    chop_live_early_fail_exit_enabled: bool = True
+    chop_live_early_fail_exit_enabled: bool = False
     chop_live_early_fail_min_hold_seconds: int = 30
     chop_live_early_fail_max_hold_seconds: int = 180
     chop_live_early_fail_max_best_points: float = 0.5
@@ -133,7 +133,7 @@ class Settings(BaseSettings):
     live_max_same_side_positions: int = 1
     live_pause_after_session_losses: int = 1
     live_disable_session_lift: bool = True
-    live_early_fail_exit_enabled: bool = True
+    live_early_fail_exit_enabled: bool = False
     live_early_fail_min_hold_seconds: int = 45
     live_early_fail_max_hold_seconds: int = 240
     live_early_fail_max_best_points: float = 1.0
@@ -1496,6 +1496,8 @@ class Settings(BaseSettings):
     # Gated best-trade policy: any explosion/scalp that clears entry gates uses capital
     # max lots — skip timing/probe/retest/post-win soft caps (daily loss stop still applies).
     executed_entry_always_max_lots: bool = True
+    # Best-trade exits: losses only via structural/adaptive SL — no chop/live/failed-launch scratch.
+    executed_entry_sl_only_loss_exits: bool = True
     # Only block force-max on true CHOP/WORST days — not mere RANGE_BOUND (Jul29 #8).
     top_explosion_force_max_block_day_types_csv: str = "CHOP,WORST"
     # After booking profit on an explosive at symbol+side+strike, next entry on that
@@ -1866,7 +1868,7 @@ class Settings(BaseSettings):
     explosion_armed_base_expiry_grace_seconds: float = 30.0
     explosion_armed_base_expiry_max_best_points: float = 8.0
     # Barely-green losers: tick of green then bleed (between never-green and failed-launch).
-    explosion_barely_green_stop_enabled: bool = True
+    explosion_barely_green_stop_enabled: bool = False
     explosion_barely_green_max_best_points: float = 3.0
     explosion_barely_green_min_loss_points: float = 1.5
     explosion_barely_green_min_hold_seconds: int = 300
@@ -2963,7 +2965,7 @@ class Settings(BaseSettings):
     explosion_never_green_stop_pct: float = 8.0
     explosion_never_green_min_hold_seconds: int = 10
     # Scratch a launch that immediately loses both price and velocity confirmation.
-    explosion_failed_launch_exit_enabled: bool = True
+    explosion_failed_launch_exit_enabled: bool = False
     explosion_failed_launch_min_hold_seconds: int = 15
     explosion_failed_launch_max_hold_seconds: int = 180
     explosion_failed_launch_max_best_points: float = 4.0
