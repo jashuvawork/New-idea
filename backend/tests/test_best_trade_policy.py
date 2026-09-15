@@ -10,6 +10,7 @@ from app.engines.best_trade_policy import (
     deep_itm_chase_strike,
     deprioritize_deep_itm_when_cheap_base_present,
     elite_base_setup_allowed,
+    mid_rip_best_trade_candidate,
     timing_allows_best_trade_full_size,
 )
 from app.models.schemas import Side, SymbolSnapshot
@@ -30,11 +31,11 @@ def test_near_base_ftv_allows_cold_base_max_lots():
 
 def test_deep_itm_chop_trap_blocked():
     s = settings_mock()
-    cand = MagicMock(mode="explosion", premium=242.42)
+    cand = MagicMock(mode="explosion", premium=242.42, alert={}, tier="ELITE")
     assessment = {
-        "eliteScore": 95.5,
+        "eliteScore": 72.0,
         "localBasePct": 16.4,
-        "setup": "V",
+        "setup": "EXPLOSIVE",
         "dayMode": "EXPIRY WORST",
     }
     blocked, reason = best_trade_chop_deep_chase_blocked(
@@ -157,6 +158,55 @@ def test_deprioritize_keeps_deep_itm_when_no_cheap_peer():
     )
     kept = deprioritize_deep_itm_when_cheap_base_present([deep], settings=s)
     assert kept == [deep]
+
+
+def test_mid_rip_elite_bypasses_deep_chase_block():
+    s = settings_mock()
+    snap = _sep15_nifty_snap()
+    alert = {"fastVerticalBurst": True, "tier": "ELITE"}
+    cand = _explosion_candidate(
+        strike=23500.0,
+        premium=242.42,
+        snap=snap,
+        alert=alert,
+    )
+    assessment = {
+        "eliteScore": 95.5,
+        "localBasePct": 16.4,
+        "setup": "V",
+        "dayMode": "EXPIRY WORST",
+    }
+    assert mid_rip_best_trade_candidate(cand, alert, assessment, settings=s) is True
+    blocked, reason = best_trade_chop_deep_chase_blocked(
+        cand,
+        {"fakeExplosionTrap": True},
+        assessment,
+        day_mode="EXPIRY WORST",
+        settings=s,
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+def test_deprioritize_keeps_mid_rip_deep_with_cheap_peer():
+    s = settings_mock()
+    snap = _sep15_nifty_snap()
+    cheap = _explosion_candidate(
+        strike=23150.0,
+        premium=24.0,
+        snap=snap,
+        alert={"localBaseMovePct": 14.0, "offLowMovePct": 18.0},
+    )
+    deep = _explosion_candidate(
+        strike=23500.0,
+        premium=242.42,
+        snap=snap,
+        alert={"fastVerticalBurst": True, "localBaseMovePct": 16.4, "tier": "ELITE"},
+    )
+    kept = deprioritize_deep_itm_when_cheap_base_present([cheap, deep], settings=s)
+    assert cheap in kept
+    assert deep in kept
+    assert len(kept) == 2
 
 
 def test_cheap_base_rank_bonus_beats_deep_penalty():

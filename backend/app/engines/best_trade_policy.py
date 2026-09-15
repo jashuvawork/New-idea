@@ -67,6 +67,60 @@ def timing_allows_best_trade_full_size(
     return False
 
 
+def _mid_rip_best_trade_signals(
+    alert: Mapping[str, Any] | None,
+    elite_assessment: Mapping[str, Any] | None,
+    *,
+    tier: str = "",
+    settings: Any = None,
+) -> bool:
+    """Shared mid-rip ELITE signals for candidates and open trades."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_mid_rip_entry_enabled", True)):
+        return False
+
+    alert = alert if isinstance(alert, Mapping) else {}
+    if alert.get("fastVerticalBurst") or alert.get("buildingRipReady") or alert.get("buildingRip"):
+        return True
+    if alert.get("ictBuildingRip") or alert.get("ictFlatThenVertical"):
+        return True
+
+    assessment = elite_assessment or {}
+    score = _number(assessment.get("eliteScore"))
+    min_score = float(getattr(settings, "best_trade_mid_rip_min_elite_score", 88.0) or 88.0)
+    setup = str(assessment.get("setup") or "").upper()
+    tier_u = str(tier or alert.get("tier") or "").upper()
+    if score >= min_score and setup in VALID_BEST_BASE_SETUPS | {"EXPLOSIVE"}:
+        return True
+    if tier_u in ("ELITE", "EXPLODING"):
+        try:
+            v3 = float(alert.get("velocity3s") or alert.get("liveVelocity3s") or 0)
+        except (TypeError, ValueError):
+            v3 = 0.0
+        if v3 > 0:
+            return True
+    return False
+
+
+def mid_rip_best_trade_candidate(
+    candidate: Any,
+    alert: Mapping[str, Any] | None = None,
+    elite_assessment: Mapping[str, Any] | None = None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Live mid-rip ELITE expanding to top LTP — allow deep ITM when actively ripping."""
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+    alert = alert if isinstance(alert, Mapping) else _alert_for_candidate(candidate)
+    tier = str(getattr(candidate, "tier", "") or "")
+    return _mid_rip_best_trade_signals(
+        alert, elite_assessment, tier=tier, settings=settings,
+    )
+
+
 def best_trade_chop_deep_chase_blocked(
     candidate: Any,
     trap_meta: Mapping[str, Any] | None,
@@ -82,6 +136,12 @@ def best_trade_chop_deep_chase_blocked(
     if not bool(getattr(settings, "best_trade_block_chop_deep_chase_enabled", True)):
         return False, ""
     if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, ""
+
+    alert = _alert_for_candidate(candidate)
+    if mid_rip_best_trade_candidate(
+        candidate, alert, elite_assessment, settings=settings,
+    ):
         return False, ""
 
     mode_u = str(day_mode or (elite_assessment or {}).get("dayMode") or "").upper()
@@ -249,12 +309,15 @@ def deprioritize_deep_itm_when_cheap_base_present(
             kept.extend(group)
             continue
         for candidate in group:
+            alert = _alert_for_candidate(candidate)
             if deep_itm_chase_strike(
                 candidate,
-                _alert_for_candidate(candidate),
+                alert,
                 getattr(candidate, "snap", None),
                 settings=settings,
             ):
+                if mid_rip_best_trade_candidate(candidate, alert, settings=settings):
+                    kept.append(candidate)
                 continue
             kept.append(candidate)
     return kept if kept else candidates
