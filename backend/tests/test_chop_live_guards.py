@@ -218,6 +218,8 @@ def test_adoption_dedupes_same_instrument_key(mock_record, mock_settings):
 
 def _chop_exit_settings(**overrides) -> Settings:
     base = Settings()
+    base.executed_entry_sl_only_loss_exits = False
+    base.chop_live_early_fail_exit_enabled = True
     base.explosion_failed_launch_exit_enabled = False
     base.explosion_never_green_stop_enabled = False
     base.explosion_faded_rip_no_green_exit_enabled = False

@@ -249,9 +249,13 @@ def test_apply_elite_respected_early_exit_blocks_scratch_family():
         strategyType=StrategyType.EXPLOSIVE,
         entryContext={"chopLiveGuard": True},
     )
-    assert _apply_elite_respected_early_exit(plain, "chop_live_early_fail") == (
-        "chop_live_early_fail"
-    )
+    with patch(
+        "app.engines.explosion_profit.sl_only_loss_exits_enabled",
+        return_value=False,
+    ):
+        assert _apply_elite_respected_early_exit(plain, "chop_live_early_fail") == (
+            "chop_live_early_fail"
+        )
 
 
 def test_skip_failed_launch_for_bundle_runner():

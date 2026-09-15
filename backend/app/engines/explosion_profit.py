@@ -250,6 +250,12 @@ def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = 
     return False
 
 
+def sl_only_loss_exits_enabled(settings: Any = None) -> bool:
+    """When True, scratch/time loss exits are off — only structural/adaptive SL cuts losers."""
+    settings = settings or get_settings()
+    return bool(getattr(settings, "executed_entry_sl_only_loss_exits", True))
+
+
 def _apply_elite_respected_early_exit(
     trade: PaperTrade,
     exit_reason: Optional[str],
@@ -258,6 +264,9 @@ def _apply_elite_respected_early_exit(
 ) -> Optional[str]:
     """Honor elite launch room for short-hold scratch exits (chop/live/faded/never-green)."""
     if not exit_reason:
+        return None
+    settings = settings or get_settings()
+    if sl_only_loss_exits_enabled(settings):
         return None
     if _should_skip_elite_runner_early_exits(trade, settings=settings):
         return None
@@ -2036,41 +2045,43 @@ def evaluate_explosion_exit(
 
     from app.engines.explosion_entry_guards import faded_rip_no_green_exit_reason
 
-    faded_exit = faded_rip_no_green_exit_reason(trade, hold_seconds=hold, best_points=best)
-    faded_exit = _apply_elite_respected_early_exit(trade, faded_exit, settings=settings)
-    if faded_exit and not hold_to_sl:
-        return faded_exit, pnl_inr
+    if not sl_only_loss_exits_enabled(settings):
+        faded_exit = faded_rip_no_green_exit_reason(trade, hold_seconds=hold, best_points=best)
+        faded_exit = _apply_elite_respected_early_exit(trade, faded_exit, settings=settings)
+        if faded_exit and not hold_to_sl:
+            return faded_exit, pnl_inr
 
-    from app.engines.chop_live_guards import chop_live_early_fail_exit_reason
+        from app.engines.chop_live_guards import chop_live_early_fail_exit_reason
 
-    chop_exit = chop_live_early_fail_exit_reason(
-        trade,
-        hold_seconds=hold,
-        best_points=best,
-        pnl_points=pnl_pts,
-        live_velocity_3s=v3,
-    )
-    chop_exit = _apply_elite_respected_early_exit(trade, chop_exit, settings=settings)
-    if chop_exit:
-        return chop_exit, pnl_inr
+        chop_exit = chop_live_early_fail_exit_reason(
+            trade,
+            hold_seconds=hold,
+            best_points=best,
+            pnl_points=pnl_pts,
+            live_velocity_3s=v3,
+        )
+        chop_exit = _apply_elite_respected_early_exit(trade, chop_exit, settings=settings)
+        if chop_exit:
+            return chop_exit, pnl_inr
 
-    from app.engines.live_best_trades import live_early_fail_exit_reason
+        from app.engines.live_best_trades import live_early_fail_exit_reason
 
-    live_fail = live_early_fail_exit_reason(
-        trade,
-        hold_seconds=hold,
-        best_points=best,
-        pnl_points=pnl_pts,
-        live_velocity_3s=v3,
-    )
-    live_fail = _apply_elite_respected_early_exit(trade, live_fail, settings=settings)
-    if live_fail:
-        return live_fail, pnl_inr
+        live_fail = live_early_fail_exit_reason(
+            trade,
+            hold_seconds=hold,
+            best_points=best,
+            pnl_points=pnl_pts,
+            live_velocity_3s=v3,
+        )
+        live_fail = _apply_elite_respected_early_exit(trade, live_fail, settings=settings)
+        if live_fail:
+            return live_fail, pnl_inr
 
     # The launch thesis failed immediately: it never established green and live
     # premium is still contracting. Scratch before the wider structural stop.
     if (
-        not hold_to_sl
+        not sl_only_loss_exits_enabled(settings)
+        and not hold_to_sl
         and bool(getattr(settings, "explosion_failed_launch_exit_enabled", True))
         and not _should_skip_elite_runner_early_exits(trade, settings=settings)
     ):
@@ -2087,7 +2098,8 @@ def evaluate_explosion_exit(
 
     # Armed-base launch window expired without establishing a real runner (Sep03 23850 PE).
     if (
-        not hold_to_sl
+        not sl_only_loss_exits_enabled(settings)
+        and not hold_to_sl
         and bool(getattr(settings, "explosion_armed_base_expiry_exit_enabled", True))
         and not _should_skip_elite_runner_early_exits(trade, settings=settings)
         and _armed_base_thesis_expired(
@@ -2112,7 +2124,8 @@ def evaluate_explosion_exit(
 
     # Barely-green: one tick green then bleed — too green for never-green, too weak to trail.
     if (
-        not hold_to_sl
+        not sl_only_loss_exits_enabled(settings)
+        and not hold_to_sl
         and bool(getattr(settings, "explosion_barely_green_stop_enabled", True))
         and not (
             _should_skip_elite_runner_early_exits(trade, settings=settings)
@@ -2135,7 +2148,8 @@ def evaluate_explosion_exit(
     # Cut it faster than the full adaptive stop. Threshold = max(points floor, % of entry
     # premium) so cheap and expensive options are both handled sensibly.
     if (
-        not hold_to_sl
+        not sl_only_loss_exits_enabled(settings)
+        and not hold_to_sl
         and bool(getattr(settings, "explosion_never_green_stop_enabled", True))
         and not _should_skip_elite_runner_early_exits(trade, settings=settings)
     ):
@@ -2424,13 +2438,14 @@ def evaluate_explosion_exit(
     ):
         return "adaptive_stop_loss", pnl_inr
 
-    if _should_skip_no_progress(trade, settings):
-        pass
-    elif hold >= _no_progress_limit_seconds(trade, settings) and best < exit_params.trail_arm_points:
-        from app.engines.confidence_hold import hold_until_target_active
+    if not sl_only_loss_exits_enabled(settings):
+        if _should_skip_no_progress(trade, settings):
+            pass
+        elif hold >= _no_progress_limit_seconds(trade, settings) and best < exit_params.trail_arm_points:
+            from app.engines.confidence_hold import hold_until_target_active
 
-        if not hold_until_target_active(trade, best, target_points=target):
-            return "explosion_no_progress", pnl_inr
+            if not hold_until_target_active(trade, best, target_points=target):
+                return "explosion_no_progress", pnl_inr
 
     # Peak fade after reaching explosion TP zone — even without confidence-runner hold
     target_std = _cfg_float(settings, "explosion_target_standard", 18.0)
@@ -2468,7 +2483,7 @@ def evaluate_explosion_exit(
     elite_hold = int(getattr(settings, "explosion_elite_max_hold_seconds", 1800) or 1800)
     if tier_u in ("ELITE", "EXPLODING") and elite_hold > 0:
         max_hold = max(max_hold, elite_hold)
-    if ctx.get("chopLiveGuard"):
+    if ctx.get("chopLiveGuard") and not sl_only_loss_exits_enabled(settings):
         chop_elite_hold = int(
             getattr(settings, "explosion_chop_elite_max_hold_seconds", 900) or 900
         )
@@ -2533,6 +2548,8 @@ def evaluate_explosion_exit(
         ):
             return None, pnl_inr
         if pnl_pts > 0 and hold_until_target_active(trade, best, target_points=target):
+            return None, pnl_inr
+        if pnl_pts <= 0 and sl_only_loss_exits_enabled(settings):
             return None, pnl_inr
         return ("explosion_time_profit" if pnl_pts > 0 else "explosion_time_stop"), pnl_inr
 

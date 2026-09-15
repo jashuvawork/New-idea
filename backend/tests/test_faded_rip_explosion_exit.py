@@ -16,6 +16,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def _settings() -> MagicMock:
     s = MagicMock()
+    s.executed_entry_sl_only_loss_exits = False
     s.explosion_faded_rip_no_green_exit_enabled = True
     s.explosion_faded_rip_no_green_seconds = 60
     s.explosion_faded_rip_min_green_points = 0.5
