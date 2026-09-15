@@ -148,6 +148,68 @@ def test_expiry_allows_itm_mid_rip_not_cheap_otm(_mock_today):
     assert reason == ""
 
 
+def _sensex_expiry_snap() -> SymbolSnapshot:
+    return SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp="2026-09-17T10:05:00+05:30",
+        marketPhase="LIVE_MARKET",
+        spot=74003.0,
+        atmStrike=74000.0,
+        dataAvailable=True,
+        optionExpiry="2026-09-17",
+    )
+
+
+def _sensex_candidate(
+    *,
+    strike: float,
+    premium: float,
+    snap: SymbolSnapshot,
+    side: Side = Side.CALL,
+    alert: dict | None = None,
+) -> MagicMock:
+    return MagicMock(
+        mode="explosion",
+        symbol="SENSEX",
+        side=side,
+        strike=strike,
+        premium=premium,
+        snap=snap,
+        alert=alert or {},
+    )
+
+
+@patch("app.engines.expiry_day_guards._today_str", return_value="2026-09-17")
+def test_sensex_expiry_blocks_all_otm_not_just_cheap_band(_mock_today):
+    s = settings_mock()
+    snap = _sensex_expiry_snap()
+    # 74500 CE @ ₹192 — OTM 500pt, above NIFTY cheap band but still worthless on expiry.
+    alert = {"premium": 192.0}
+    cand = _sensex_candidate(strike=74500.0, premium=192.0, snap=snap, side=Side.CALL, alert=alert)
+    blocked, reason = expiry_cheap_otm_entry_blocked(cand, snap, alert, settings=s)
+    assert blocked is True
+    assert reason == "best_trade_block_expiry_otm_itm_atm_only"
+
+
+@patch("app.engines.expiry_day_guards._today_str", return_value="2026-09-17")
+def test_sensex_expiry_allows_atm_itm(_mock_today):
+    s = settings_mock()
+    snap = _sensex_expiry_snap()
+    atm_alert = {"premium": 409.45}
+    atm_cand = _sensex_candidate(
+        strike=74000.0, premium=409.45, snap=snap, side=Side.CALL, alert=atm_alert,
+    )
+    blocked, reason = expiry_cheap_otm_entry_blocked(atm_cand, snap, atm_alert, settings=s)
+    assert blocked is False
+
+    itm_alert = {"premium": 326.0}
+    itm_cand = _sensex_candidate(
+        strike=74100.0, premium=326.0, snap=snap, side=Side.PUT, alert=itm_alert,
+    )
+    blocked, reason = expiry_cheap_otm_entry_blocked(itm_cand, snap, itm_alert, settings=s)
+    assert blocked is False
+
+
 def test_deep_itm_chase_strike_sep15_23500_pe():
     s = settings_mock()
     snap = _sep15_nifty_snap()
