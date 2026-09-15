@@ -346,10 +346,11 @@ class Settings(BaseSettings):
     best_trade_cheap_base_ftv_v_bonus: float = 12.0
     best_trade_deep_itm_min_premium_inr: float = 120.0
     best_trade_deep_itm_rank_penalty: float = 60.0
-    # Expiry: block ₹18–80 OTM (Sep15 chain → ₹0.05); take top-radar ITM/mid-rip.
+    # Expiry: block cheap OTM — NIFTY ₹18–80; SENSEX/BANKNIFTY all OTM (ATM ~₹300–500).
     best_trade_block_expiry_cheap_otm_enabled: bool = True
     best_trade_expiry_cheap_otm_min_premium_inr: float = 18.0
     best_trade_expiry_cheap_otm_max_premium_inr: float = 80.0
+    best_trade_expiry_itm_atm_only_symbols_csv: str = "SENSEX,BANKNIFTY"
     # Allow Sep15-style mid-rip ELITE entries (deep ITM while expanding to top LTP).
     best_trade_mid_rip_entry_enabled: bool = True
     best_trade_mid_rip_min_elite_score: float = 88.0

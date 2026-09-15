@@ -142,6 +142,19 @@ def _classify_moneyness(candidate: Any, snap: Any) -> str:
     )
 
 
+def _expiry_itm_atm_only_symbol(symbol: str, *, settings: Any = None) -> bool:
+    """SENSEX/BANKNIFTY: ATM LTP ~₹300–500 — block all OTM on expiry, ITM+ATM only."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    csv = str(
+        getattr(settings, "best_trade_expiry_itm_atm_only_symbols_csv", "SENSEX,BANKNIFTY")
+        or "SENSEX,BANKNIFTY"
+    )
+    allowed = {s.strip().upper() for s in csv.split(",") if s.strip()}
+    return str(symbol or "").upper() in allowed
+
+
 def expiry_cheap_otm_entry_blocked(
     candidate: Any,
     snap: Any,
@@ -149,7 +162,7 @@ def expiry_cheap_otm_entry_blocked(
     *,
     settings: Any = None,
 ) -> tuple[bool, str]:
-    """Block ₹18–80 OTM on expiry — decay to ₹0.05; prefer top-radar ITM/mid-rip."""
+    """Expiry OTM block — symbol-aware. NIFTY: ₹18–80 OTM; SENSEX: all OTM."""
     from app.config import get_settings
     from app.engines.expiry_day_guards import is_symbol_expiry_day
 
@@ -161,6 +174,14 @@ def expiry_cheap_otm_entry_blocked(
     if snap is None or not is_symbol_expiry_day(snap):
         return False, ""
 
+    money = _classify_moneyness(candidate, snap)
+    if money != "OTM":
+        return False, ""
+
+    symbol = str(getattr(candidate, "symbol", "") or "").upper()
+    if _expiry_itm_atm_only_symbol(symbol, settings=settings):
+        return True, "best_trade_block_expiry_otm_itm_atm_only"
+
     alert = alert if isinstance(alert, Mapping) else _alert_for_candidate(candidate)
     premium = _number(getattr(candidate, "premium", 0) or alert.get("premium"))
     prem_lo = float(
@@ -169,11 +190,7 @@ def expiry_cheap_otm_entry_blocked(
     prem_hi = float(
         getattr(settings, "best_trade_expiry_cheap_otm_max_premium_inr", 80.0) or 80.0
     )
-    if not (prem_lo <= premium <= prem_hi):
-        return False, ""
-
-    money = _classify_moneyness(candidate, snap)
-    if money == "OTM":
+    if prem_lo <= premium <= prem_hi:
         return True, "best_trade_block_expiry_cheap_otm"
     return False, ""
 
