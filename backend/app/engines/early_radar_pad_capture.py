@@ -20,6 +20,7 @@ BUILDING_COIL_PAD_READY = "building_coil_pad_ready"
 BUILDING_ARMED_PRELAUNCH_READY = "building_armed_prelaunch_ready"
 BUILDING_COIL_PAD_ARMED = "building_coil_pad_armed"
 BUILDING_COIL_PAD_UNCONFIRMED = "building_coil_pad_unconfirmed"
+SESSION_TROUGH_PAD_READY = "session_trough_pad_ready"
 
 
 def _enrich_row_from_event(
@@ -228,6 +229,8 @@ def early_radar_pad_expansion_confirmed(
             return True
         if cold_trough_pad_lift_signal(alert, s):
             return True
+        if session_trough_pad_lift_signal(alert, s):
+            return True
 
     return False
 
@@ -343,6 +346,50 @@ def _alert_local_base_move(alert: Mapping[str, Any]) -> float:
     )
 
 
+def _alert_session_low_premium(alert: Mapping[str, Any]) -> float:
+    """Session/day trough premium when stamped on the alert."""
+    sess_low = _number(alert.get("sessionLow"))
+    if sess_low > 0:
+        return sess_low
+    premium = _number(alert.get("premium"))
+    off_low = _number(alert.get("offLowMovePct"))
+    if premium > 0 and off_low >= 0:
+        return premium / (1.0 + off_low / 100.0)
+    return 0.0
+
+
+def _alert_armed_base_premium(alert: Mapping[str, Any]) -> float:
+    return max(
+        _number(alert.get("localBaseBasePremium")),
+        _number(alert.get("ictBasePremium")),
+    )
+
+
+def armed_base_stale_vs_session_trough(
+    alert: Mapping[str, Any],
+    settings: Any = None,
+) -> bool:
+    """True when sticky armed base sits well above the session trough."""
+    s = settings or get_settings()
+    sess_low = _alert_session_low_premium(alert)
+    armed_base = _alert_armed_base_premium(alert)
+    if sess_low <= 0 or armed_base <= 0:
+        return False
+    gap_pct = (armed_base - sess_low) / sess_low * 100.0
+    threshold = float(
+        getattr(s, "session_trough_pad_stale_armed_gap_pct", 15.0) or 15.0
+    )
+    return gap_pct >= threshold - 1e-6
+
+
+def _pad_local_move_pct(alert: Mapping[str, Any], settings: Any = None) -> float:
+    """Pad distance — session-trough relative when armed base is stale."""
+    s = settings or get_settings()
+    if armed_base_stale_vs_session_trough(alert, s):
+        return early_radar_pad_off_low_pct(alert)
+    return _alert_local_base_move(alert)
+
+
 def _cold_trough_coil_signal(alert: Mapping[str, Any]) -> bool:
     """Coil / armed-base proof at session trough — velocity may still be zero."""
     if bool(
@@ -389,13 +436,22 @@ def _building_coil_pad_shape(alert: Mapping[str, Any], settings: Any = None) -> 
     if bool(alert.get("ictMidRipCoil") or alert.get("midRipCoil")):
         return False
 
+    stale = armed_base_stale_vs_session_trough(alert, s)
+    if stale:
+        off_low = early_radar_pad_off_low_pct(alert)
+        max_off = float(
+            getattr(s, "building_coil_pad_max_off_low_when_stale_pct", 15.0) or 15.0
+        )
+        if off_low > max_off + 1e-6:
+            return False
+
     min_local = float(
         getattr(s, "building_coil_pad_min_local_move_pct", 10.0) or 10.0
     )
     max_local = float(
         getattr(s, "building_coil_pad_max_local_move_pct", 25.0) or 25.0
     )
-    local_move = _alert_local_base_move(alert)
+    local_move = _pad_local_move_pct(alert, s)
     if local_move <= 0 or not (min_local <= local_move <= max_local + 1e-6):
         return False
 
@@ -410,6 +466,152 @@ def _building_coil_pad_shape(alert: Mapping[str, Any], settings: Any = None) -> 
     if not _cold_trough_coil_signal(alert):
         return False
     return True
+
+
+def session_trough_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None) -> bool:
+    """Take at session trough when armed base re-armed above the true V-low.
+
+    Sep03 NIFTY PUT 23900: trough ~₹50, armed base ₹70.4, coil pad chased @ ₹79.
+    """
+    s = settings or get_settings()
+    if not bool(getattr(s, "session_trough_pad_entry_enabled", True)):
+        return False
+    if bool(alert.get("ictMidRipCoil") or alert.get("midRipCoil")):
+        return False
+    if bool(
+        alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or alert.get("ictFirstLift")
+    ):
+        return False
+
+    tier = _alert_tier(alert)
+    if tier not in ("WATCH", "BUILDING", "EXPLODING", "ELITE"):
+        return False
+
+    if not (
+        armed_base_stale_vs_session_trough(alert, s)
+        or bool(alert.get("sessionLowArmed"))
+    ):
+        return False
+
+    off_low = early_radar_pad_off_low_pct(alert)
+    min_off = float(
+        getattr(s, "session_trough_pad_min_off_low_pct", 2.0) or 2.0
+    )
+    max_off = float(
+        getattr(s, "session_trough_pad_max_off_low_pct", 12.0) or 12.0
+    )
+    if not (min_off <= off_low <= max_off + 1e-6):
+        return False
+
+    max_score = float(
+        getattr(s, "session_trough_pad_max_explosion_score", 65.0) or 65.0
+    )
+    if _alert_explosion_score(alert) > max_score + 1e-6:
+        return False
+
+    if not _cold_trough_coil_signal(alert):
+        return False
+    return True
+
+
+def session_trough_pad_expansion_confirmed(
+    alert: Mapping[str, Any],
+    settings: Any = None,
+) -> bool:
+    """Session-trough entry — armed coil at V-low OK before velocity lifts."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "early_radar_pad_confirm_entry_enabled", True)):
+        return True
+
+    v3 = _number(alert.get("velocity3s"))
+    v9 = _number(alert.get("velocity9s"))
+    min_v3 = float(getattr(s, "early_radar_pad_confirm_min_velocity_3s", 0.5) or 0.5)
+    min_v9 = float(getattr(s, "early_radar_pad_confirm_min_velocity_9s", 0.25) or 0.25)
+    if v3 >= min_v3 or v9 >= min_v9:
+        return True
+
+    if bool(alert.get("ictBaseArmed") or alert.get("baseArmed")):
+        armed_samples = int(alert.get("ictArmedBaseSamples") or 0)
+        min_samples = int(getattr(s, "ict_armed_base_min_samples", 6) or 6)
+        if armed_samples >= min_samples and not bool(alert.get("ictArmedBaseLaunch")):
+            max_v3 = float(
+                getattr(s, "cold_trough_pad_max_velocity_3s", 0.05) or 0.05
+            )
+            max_v9 = float(
+                getattr(s, "cold_trough_pad_max_velocity_9s", 0.05) or 0.05
+            )
+            if v3 <= max_v3 + 1e-6 and v9 <= max_v9 + 1e-6:
+                return True
+
+    flat_vert = bool(alert.get("ictFlatThenVertical") or alert.get("flatThenVertical"))
+    breakout = bool(alert.get("ictBreakout") or alert.get("activeBreakout"))
+    vol_awake = bool(
+        alert.get("volumeAwaken")
+        or alert.get("ictVolumeAwakening")
+        or alert.get("volumeAwakening")
+    )
+    vol_surge = _number(alert.get("volumeSurge"))
+    min_surge = float(
+        getattr(s, "early_radar_pad_confirm_min_volume_surge", 1.0) or 1.0
+    )
+    if flat_vert and breakout and (vol_awake or vol_surge >= min_surge):
+        return True
+    if vol_awake or vol_surge >= min_surge:
+        return True
+    return False
+
+
+def session_trough_pad_entry_readiness(
+    *,
+    snap: Optional[SymbolSnapshot] = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    row = alert if isinstance(alert, dict) else {}
+    s = settings or get_settings()
+    if not session_trough_pad_lift_signal(row, s):
+        return False, ""
+    side = str(row.get("side") or "").upper()
+    if post_impulse_consolidation_active(snap, side, s):
+        has_stamp = bool(
+            row.get("ictFirstLift")
+            or row.get("ictArmedBaseLaunch")
+            or row.get("armedBaseLaunch")
+        )
+        v3 = _number(row.get("velocity3s"))
+        v9 = _number(row.get("velocity9s"))
+        hot_v3 = float(
+            getattr(s, "post_impulse_consolidation_min_velocity_3s", 0.8) or 0.8
+        )
+        hot_v9 = float(
+            getattr(s, "post_impulse_consolidation_min_velocity_9s", 0.5) or 0.5
+        )
+        if not has_stamp and v3 < hot_v3 and v9 < hot_v9:
+            return False, POST_IMPULSE_CONSOLIDATION_BLOCKED
+    if not session_trough_pad_expansion_confirmed(row, s):
+        return False, EARLY_RADAR_PAD_UNCONFIRMED
+    side = str(row.get("side") or "").upper()
+    strike = _number(row.get("strike"))
+    if side in ("CALL", "PUT") and strike > 0 and snap is not None:
+        if not _atm_itm_ok(side=side, strike=strike, snap=snap):
+            if not building_coil_pad_moneyness_ok(row, snap, s):
+                if not early_radar_pad_shallow_otm_ok(row, snap):
+                    return False, "session_trough_pad_moneyness_blocked"
+    premium = _number(row.get("premium"))
+    peak_move = _number(row.get("peakMovePct"))
+    if not premium_in_band(
+        premium,
+        mode="explosion",
+        peak_move_pct=peak_move,
+        snap=snap,
+    ):
+        return False, "session_trough_pad_premium_out_of_band"
+    if isinstance(alert, dict):
+        alert["sessionTroughPad"] = True
+        alert.setdefault("ictBaseReadinessReason", SESSION_TROUGH_PAD_READY)
+    return True, SESSION_TROUGH_PAD_READY
 
 
 def building_coil_pad_lift_signal(alert: Mapping[str, Any], settings: Any = None) -> bool:
@@ -751,6 +953,8 @@ def watch_local_base_pad_structure(alert: Mapping[str, Any], settings: Any = Non
         return True
     if cold_trough_pad_lift_signal(alert, settings):
         return True
+    if session_trough_pad_lift_signal(alert, settings):
+        return True
     if alert_has_building_coil_pad(alert):
         return True
     return watch_local_base_pad_lift_signal(alert, settings)
@@ -974,7 +1178,8 @@ def early_radar_pad_capture_active(
             and local_move <= pad_max + 1e-6
             and _alert_explosion_score(alert) >= min_score
         ) and not cold_trough_pad_lift_signal(alert, settings):
-            return False
+            if not session_trough_pad_lift_signal(alert, settings):
+                return False
 
     premium = _number(alert.get("premium"))
     peak_move = _number(alert.get("peakMovePct"))
@@ -1026,6 +1231,8 @@ def stamp_early_radar_pad_capture(
         alert["ictEarlyRadarPadCapture"] = True
         if cold_trough_pad_lift_signal(alert):
             alert["coldTroughPad"] = True
+        if session_trough_pad_lift_signal(alert):
+            alert["sessionTroughPad"] = True
         if early_radar_pad_expansion_confirmed(alert, snap=snap):
             alert["earlyRadarPadReady"] = True
             alert.setdefault("ictBaseReadinessReason", EARLY_RADAR_PAD_READY)

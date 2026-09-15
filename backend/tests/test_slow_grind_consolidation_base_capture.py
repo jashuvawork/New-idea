@@ -434,3 +434,196 @@ def test_armed_trough_still_caps_premium_at_220(mock_settings):
     )
     assert ok is False
     assert reason == "slow_grind_armed_trough_premium_above_220"
+
+
+def _sep04_afternoon_call_snap():
+    return SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime(2026, 9, 4, 14, 52, tzinfo=IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=59.0,
+        spot=23938.0,
+        atmStrike=23950.0,
+        spotChart=SpotChart(
+            direction="BULLISH",
+            rsi=46.0,
+            macdBias="NEUTRAL",
+            momentum5Pct=0.1,
+            momentum15Pct=0.13,
+        ),
+    )
+
+
+def _sep04_consolidation_call_alert() -> dict:
+    return {
+        "tier": "BUILDING",
+        "side": "CALL",
+        "strike": 23900.0,
+        "premium": 132.8,
+        "offLowMovePct": 5.6,
+        "peakMovePct": 43.5,
+        "dailyMovePct": 6.76,
+        "ictBaseArmed": True,
+        "ictVRipReady": False,
+        "ictFlatThenVertical": False,
+        "ictBreakout": False,
+        "ictBaseRelativeMovePct": 4.2,
+        "localBaseMovePct": 4.2,
+        "flatVerticalQuality": 50.0,
+        "ictArmedBaseSamples": 6,
+        "velocity3s": 0.0,
+        "velocity9s": 0.0,
+        "volumeSurge": 1.0,
+        "explosionScore": 57.8,
+        "volumeAwaken": True,
+        "ictVolumeAwakening": True,
+    }
+
+
+def _sep04_consolidation_put_alert() -> dict:
+    return {
+        "tier": "BUILDING",
+        "side": "PUT",
+        "strike": 24250.0,
+        "premium": 75.0,
+        "offLowMovePct": 8.0,
+        "peakMovePct": 38.0,
+        "dailyMovePct": 5.5,
+        "ictBaseArmed": True,
+        "ictVRipReady": False,
+        "ictFlatThenVertical": False,
+        "ictBreakout": False,
+        "ictBaseRelativeMovePct": 5.0,
+        "localBaseMovePct": 5.0,
+        "flatVerticalQuality": 48.0,
+        "ictArmedBaseSamples": 8,
+        "velocity3s": 0.0,
+        "velocity9s": 0.0,
+        "volumeSurge": 1.0,
+        "explosionScore": 55.0,
+        "volumeAwaken": True,
+        "ictVolumeAwakening": True,
+    }
+
+
+@patch("app.engines.morning_premium_capture.in_afternoon_premium_capture_window", return_value=True)
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_consolidation_allows_sep04_call_after_morning_rip(mock_settings, _afternoon):
+    """Sep04 NIFTY CALL 23900 — back at base with session peak 43% but daily ~7%."""
+    mock_settings.return_value = Settings()
+    snap = _sep04_afternoon_call_snap()
+    alert = _sep04_consolidation_call_alert()
+    ict = MagicMock(
+        base_armed=True,
+        v_rip_ready=False,
+        base_relative_move_pct=4.2,
+        flat_vertical_quality=50.0,
+        armed_base_samples=6,
+        velocity_3s=0.0,
+        volume_awakening=True,
+    )
+    ok, reason = _slow_grind_consolidation_base_readiness(
+        snap=snap,
+        event=MagicMock(
+            side=Side.CALL,
+            premium=132.8,
+            velocity_3s=0.0,
+            strike=23900.0,
+            tier="BUILDING",
+            daily_move_pct=6.76,
+            peak_move_pct=43.5,
+        ),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == SLOW_GRIND_CONSOLIDATION_BASE_READY
+
+
+@patch("app.engines.morning_premium_capture.in_afternoon_premium_capture_window", return_value=True)
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_consolidation_allows_sep04_put_after_morning_rip(mock_settings, _afternoon):
+    """PE mirror — afternoon consolidation base with elevated session peak."""
+    mock_settings.return_value = Settings()
+    snap = _snap(spot=24200.0, atm=24200.0)
+    alert = _sep04_consolidation_put_alert()
+    ict = MagicMock(
+        base_armed=True,
+        v_rip_ready=False,
+        base_relative_move_pct=5.0,
+        flat_vertical_quality=48.0,
+        armed_base_samples=8,
+        velocity_3s=0.0,
+        volume_awakening=True,
+    )
+    ok, reason = _slow_grind_consolidation_base_readiness(
+        snap=snap,
+        event=MagicMock(
+            side=Side.PUT,
+            premium=75.0,
+            velocity_3s=0.0,
+            strike=24250.0,
+            tier="BUILDING",
+            daily_move_pct=5.5,
+            peak_move_pct=38.0,
+        ),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is True
+    assert reason == SLOW_GRIND_CONSOLIDATION_BASE_READY
+
+
+@patch("app.engines.morning_premium_capture.in_afternoon_premium_capture_window", return_value=True)
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_consolidation_rejects_stale_session_peak_when_still_extended(mock_settings, _afternoon):
+    """Still block when CURRENT heat is extended — not just stale peak watermark."""
+    mock_settings.return_value = Settings()
+    snap = _sep04_afternoon_call_snap()
+    alert = {
+        **_sep04_consolidation_call_alert(),
+        "dailyMovePct": 28.0,
+        "ictBaseRelativeMovePct": 4.2,
+        "localBaseMovePct": 4.2,
+    }
+    ict = MagicMock(
+        base_armed=True,
+        base_relative_move_pct=4.2,
+        flat_vertical_quality=50.0,
+        armed_base_samples=6,
+        velocity_3s=0.0,
+        volume_awakening=True,
+    )
+    ok, reason = _slow_grind_consolidation_base_readiness(
+        snap=snap,
+        event=MagicMock(
+            side=Side.CALL,
+            premium=180.0,
+            velocity_3s=0.0,
+            strike=23900.0,
+            tier="BUILDING",
+            daily_move_pct=28.0,
+            peak_move_pct=43.5,
+        ),
+        ict=ict,
+        alert=alert,
+        settings=mock_settings.return_value,
+    )
+    assert ok is False
+    assert "slow_grind_consolidation_move>" in reason
+
+
+def test_pad_lane_cold_velocity_ok_for_consolidation_base():
+    from app.engines.pad_lane_capture import pad_lane_cold_velocity_ok
+
+    evidence = {
+        "slowGrindConsolidationBase": True,
+        "tier": "BUILDING",
+        "localBaseMovePct": 4.2,
+    }
+    assert pad_lane_cold_velocity_ok(evidence, 0.0, 0.0) is True
+    assert pad_lane_cold_velocity_ok(evidence, -0.5, -0.2) is True
+    assert pad_lane_cold_velocity_ok(evidence, 2.0, 1.0) is False

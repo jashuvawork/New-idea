@@ -209,30 +209,25 @@ def _latest_same_strike_explosion_close(
     return latest
 
 
-def cap_opposite_side_flip_after_win(
-    lots: int,
-    state: AutoTraderState,
+def _recent_opposite_side_session_win(
+    state: AutoTraderState | None,
     *,
     symbol: str,
     side: Any,
-    velocity_3s: float = 0.0,
-) -> tuple[int, dict[str, Any]]:
-    """Cap / block a counter-flip entry after a same-session WIN on the opposite side.
-
-    Aug6: two CALLs won (market up), then a max-size PUT flip lost −₹20k. Flipping side
-    right after an opposite-side winner is a whipsaw — don't ride it at max size.
-    Weak-tape flips (v3 below breakout floor) are blocked entirely when configured.
-    """
-    meta: dict[str, Any] = {"applied": False, "blocked": False}
+    lookback_seconds: float | None = None,
+) -> Any | None:
+    """Most recent same-session WIN on the opposite side within lookback."""
+    if state is None:
+        return None
     settings = get_settings()
-    if not getattr(settings, "explosion_whipsaw_flip_guard_enabled", True):
-        return lots, meta
     side_v = side.value if hasattr(side, "value") else str(side or "").upper()
     if side_v not in ("CALL", "PUT"):
-        return lots, meta
+        return None
     opp = "PUT" if side_v == "CALL" else "CALL"
     lookback = float(
-        getattr(settings, "explosion_whipsaw_flip_lookback_seconds", 3600) or 3600
+        lookback_seconds
+        if lookback_seconds is not None
+        else getattr(settings, "explosion_whipsaw_flip_lookback_seconds", 3600) or 3600
     )
     now = datetime.now(_IST)
     win = None
@@ -253,6 +248,59 @@ def cap_opposite_side_flip_after_win(
         if float(getattr(t, "pnlInr", 0) or 0) > 0:
             win = t
             break
+    return win
+
+
+def opposite_side_index_flip_waive_active(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    snap: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """True when a confirmed index rally/slide flip follows an opposite-side win."""
+    meta: dict[str, Any] = {}
+    if state is None or snap is None:
+        return False, "no_context", meta
+    win = _recent_opposite_side_session_win(state, symbol=symbol, side=side)
+    if win is None:
+        return False, "no_opposite_win", meta
+    meta["priorWinPnlInr"] = round(float(getattr(win, "pnlInr", 0) or 0), 2)
+    meta["priorWinTradeId"] = getattr(win, "id", None)
+    from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
+
+    ok, reason, flip_meta = index_rally_side_flip_bypass(symbol, side, snap)
+    meta.update(flip_meta or {})
+    if not ok:
+        return False, reason, meta
+    return True, "opposite_flip_index_confirmed", meta
+
+
+def cap_opposite_side_flip_after_win(
+    lots: int,
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    velocity_3s: float = 0.0,
+    snap: Any = None,
+    premium: float = 0.0,
+) -> tuple[int, dict[str, Any]]:
+    """Cap / block a counter-flip entry after a same-session WIN on the opposite side.
+
+    Aug6: two CALLs won (market up), then a max-size PUT flip lost −₹20k. Flipping side
+    right after an opposite-side winner is a whipsaw — don't ride it at max size.
+    Weak-tape flips (v3 below breakout floor) are blocked entirely when configured.
+    """
+    meta: dict[str, Any] = {"applied": False, "blocked": False}
+    settings = get_settings()
+    if not getattr(settings, "explosion_whipsaw_flip_guard_enabled", True):
+        return lots, meta
+    side_v = side.value if hasattr(side, "value") else str(side or "").upper()
+    if side_v not in ("CALL", "PUT"):
+        return lots, meta
+    opp = "PUT" if side_v == "CALL" else "CALL"
+    win = _recent_opposite_side_session_win(state, symbol=symbol, side=side)
     if win is None:
         return lots, meta
 
@@ -265,21 +313,42 @@ def cap_opposite_side_flip_after_win(
     )
     require_v = bool(getattr(settings, "explosion_whipsaw_flip_require_velocity", True))
     block_weak = bool(getattr(settings, "explosion_whipsaw_flip_block_weak", True))
+    index_flip_cap = bool(
+        getattr(settings, "explosion_whipsaw_flip_cap_instead_of_block_on_index_flip", True)
+    )
+    index_flip_ok = False
+    if index_flip_cap and snap is not None:
+        index_flip_ok, _, _ = opposite_side_index_flip_waive_active(
+            state, symbol=symbol, side=side, snap=snap,
+        )
     if require_v and block_weak and v3 < min_v3:
-        meta.update({
-            "applied": True,
-            "blocked": True,
-            "blockReason": "whipsaw_flip_velocity_below_breakout",
-            "flipFromWinSide": opp,
-            "priorWinPnlInr": round(float(getattr(win, "pnlInr", 0) or 0), 2),
-            "velocity3s": round(v3, 3),
-            "minVelocity3s": min_v3,
-            "uncappedLots": lots,
-            "cappedLots": 0,
-        })
-        return 0, meta
+        if index_flip_ok:
+            block_weak = False
+            meta["indexFlipCapInsteadOfBlock"] = True
+        else:
+            meta.update({
+                "applied": True,
+                "blocked": True,
+                "blockReason": "whipsaw_flip_velocity_below_breakout",
+                "flipFromWinSide": opp,
+                "priorWinPnlInr": round(float(getattr(win, "pnlInr", 0) or 0), 2),
+                "velocity3s": round(v3, 3),
+                "minVelocity3s": min_v3,
+                "uncappedLots": lots,
+                "cappedLots": 0,
+            })
+            return 0, meta
 
-    cap = int(getattr(settings, "explosion_whipsaw_flip_lot_cap", 8) or 8)
+    if index_flip_ok and float(premium or 0) > 0:
+        from app.engines.capital_allocator import max_lots_for_capital_pct
+
+        cap_pct = float(
+            getattr(settings, "explosion_whipsaw_flip_index_flip_capital_pct", 0.35) or 0.35
+        )
+        cap = max_lots_for_capital_pct(symbol, float(premium), cap_pct)
+        meta["indexFlipCapitalPct"] = cap_pct
+    else:
+        cap = int(getattr(settings, "explosion_whipsaw_flip_lot_cap", 8) or 8)
     capped = min(max(0, lots), max(1, cap))
     meta.update({
         "applied": capped < lots,
@@ -615,6 +684,8 @@ def session_peak_late_reentry_blocked(
     premium: float,
     velocity_3s: float,
     alert: Optional[dict[str, Any]] = None,
+    state: AutoTraderState | None = None,
+    snap: Any = None,
 ) -> tuple[bool, str]:
     """Block chasing a strike still near its session peak after a real rip.
 
@@ -624,6 +695,13 @@ def session_peak_late_reentry_blocked(
     settings = get_settings()
     if not bool(getattr(settings, "explosion_late_reentry_block_enabled", True)):
         return False, ""
+
+    if bool(getattr(settings, "explosion_late_reentry_waive_opposite_side_flip_enabled", True)):
+        waive_ok, _, _ = opposite_side_index_flip_waive_active(
+            state, symbol=symbol, side=side, snap=snap,
+        )
+        if waive_ok:
+            return False, ""
 
     from app.engines.explosion_detector import (
         get_session_low_premium,
@@ -815,4 +893,348 @@ def exhausted_ftv_reentry_blocked(
         }
     )
     return not reset, meta
+
+
+def _latest_peak_fade_same_side_close(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    min_peak_points: float,
+) -> Optional[Any]:
+    """Latest closed explosion on symbol+side with red close after material peak."""
+    sym = str(symbol or "").upper()
+    side_v = _side_key(side)
+    latest: Optional[Any] = None
+    latest_ts = None
+
+    def _is_explosion(t: Any) -> bool:
+        ctx = getattr(t, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
+        st = str(getattr(t, "strategyType", "") or "")
+        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+        return mode == "explosion" or st_u == "EXPLOSIVE"
+
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            continue
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if not _is_explosion(t):
+            continue
+        if getattr(t, "closedAt", None) is None:
+            continue
+        prior_pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
+        if prior_pnl >= 0:
+            continue
+        best = float(getattr(t, "bestPnlPoints", 0) or getattr(t, "best_pnl_points", 0) or 0)
+        if best + 1e-9 < float(min_peak_points):
+            continue
+        ts = t.closedAt
+        if latest is None or (ts is not None and (latest_ts is None or ts > latest_ts)):
+            latest = t
+            latest_ts = ts
+    return latest
+
+
+def peak_fade_same_side_reentry_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+) -> tuple[bool, dict[str, Any]]:
+    """Block same-side re-entry after a peak-fade loss on symbol+side.
+
+    When a trade closed red but bestPnlPoints reached a material peak (default 30+),
+    do not re-enter the same option side on that symbol until cooldown expires.
+    Not bypassable by aligned_rip or post-loss interval waivers.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "peak_fade_same_side_reentry_enabled", True):
+        return False, meta
+    min_peak = float(
+        getattr(settings, "peak_fade_same_side_reentry_min_peak_points", 30.0) or 30.0
+    )
+    prior = _latest_peak_fade_same_side_close(
+        state,
+        symbol=symbol,
+        side=side,
+        min_peak_points=min_peak,
+    )
+    if prior is None or getattr(prior, "closedAt", None) is None:
+        return False, meta
+
+    now = datetime.now(_IST)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    age_seconds = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
+    cooldown = float(
+        getattr(settings, "peak_fade_same_side_reentry_cooldown_seconds", 900) or 900
+    )
+    if age_seconds > cooldown:
+        return False, meta
+
+    prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
+    best = float(getattr(prior, "bestPnlPoints", 0) or getattr(prior, "best_pnl_points", 0) or 0)
+    meta.update(
+        {
+            "applied": True,
+            "priorTradeId": getattr(prior, "id", None),
+            "priorStrike": float(getattr(prior, "strike", 0) or 0),
+            "priorExitReason": str(getattr(prior, "exitReason", "") or ""),
+            "priorPnlInr": round(prior_pnl, 2),
+            "priorBestPoints": round(best, 2),
+            "ageSeconds": round(age_seconds, 1),
+            "cooldownSeconds": cooldown,
+            "reason": "peak_fade_same_side_reentry_cooldown",
+        }
+    )
+    return True, meta
+
+
+def _is_explosion_trade(t: Any) -> bool:
+    ctx = getattr(t, "entryContext", None) or {}
+    mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
+    st = str(getattr(t, "strategyType", "") or "")
+    st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+    return mode == "explosion" or st_u == "EXPLOSIVE"
+
+
+def _latest_same_side_loss_close(
+    state: AutoTraderState,
+    *,
+    side: Any,
+) -> Optional[Any]:
+    """Latest closed explosion loss today on any symbol for this side."""
+    side_v = _side_key(side)
+    latest: Optional[Any] = None
+    latest_ts = None
+
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if not _is_explosion_trade(t):
+            continue
+        if getattr(t, "closedAt", None) is None:
+            continue
+        prior_pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
+        if prior_pnl >= 0:
+            continue
+        ts = t.closedAt
+        if latest is None or (ts is not None and (latest_ts is None or ts > latest_ts)):
+            latest = t
+            latest_ts = ts
+    return latest
+
+
+def session_same_side_loss_reentry_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    candidate: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Block or re-qualify same-side re-entry after a session explosion loss.
+
+    Two-tier policy (Sep 2 live history):
+    1. Hard cooldown (default 15m): block all same-side entries on any symbol.
+    2. Elevated bar (default 15m–60m): allow only if candidate re-earns min grade
+       (default S) via full causal ranking — not bypassable by aligned_rip.
+    After elevated window, normal gates apply.
+
+    Covers cross-index stacking (Sep 2 SENSEX PE → NIFTY PE). Opposite-side entries
+    unaffected.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "session_same_side_loss_reentry_enabled", True):
+        return False, meta
+    prior = _latest_same_side_loss_close(state, side=side)
+    if prior is None or getattr(prior, "closedAt", None) is None:
+        return False, meta
+
+    now = datetime.now(_IST)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    age_seconds = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
+    hard_cooldown = float(
+        getattr(settings, "session_same_side_loss_reentry_cooldown_seconds", 900) or 900
+    )
+    elevated_bar = float(
+        getattr(settings, "session_same_side_loss_reentry_elevated_bar_seconds", 3600)
+        or 3600
+    )
+    prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
+    prior_sym = str(getattr(prior, "symbol", "") or "").upper()
+    meta_base = {
+        "priorTradeId": getattr(prior, "id", None),
+        "priorSymbol": prior_sym,
+        "priorStrike": float(getattr(prior, "strike", 0) or 0),
+        "priorExitReason": str(getattr(prior, "exitReason", "") or ""),
+        "priorPnlInr": round(prior_pnl, 2),
+        "ageSeconds": round(age_seconds, 1),
+        "hardCooldownSeconds": hard_cooldown,
+        "elevatedBarSeconds": elevated_bar,
+        "crossSymbol": prior_sym != str(symbol or "").upper(),
+    }
+
+    if age_seconds > max(hard_cooldown, elevated_bar):
+        return False, meta
+
+    if age_seconds > hard_cooldown:
+        min_grade = str(
+            getattr(settings, "session_same_side_loss_reentry_elevated_min_grade", "S")
+            or "S"
+        ).upper()
+        if candidate is not None and min_grade:
+            from app.engines.trade_ranking import rank_entry_candidate
+
+            ranking = rank_entry_candidate(candidate)
+            grade = str(ranking.get("grade") or "").upper()
+            meta_base["causalGrade"] = grade
+            meta_base["requiredGrade"] = min_grade
+            if grade == min_grade:
+                return False, meta
+        meta.update(
+            {
+                **meta_base,
+                "applied": True,
+                "reason": "session_same_side_loss_elevated_bar",
+            }
+        )
+        return True, meta
+
+    meta.update(
+        {
+            **meta_base,
+            "applied": True,
+            "cooldownSeconds": hard_cooldown,
+            "reason": "session_same_side_loss_reentry_cooldown",
+        }
+    )
+    return True, meta
+
+
+def session_same_strike_loss_reentry_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+) -> tuple[bool, dict[str, Any]]:
+    """Block re-entry on the exact strike after a session explosion loss (Sep08 23650 PE ×2).
+
+    Same-side cooldown expires after 15–60 minutes; this guard is strike-specific and
+    lasts for the rest of the session once a loss is printed on that leg.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "session_same_strike_loss_reentry_enabled", True):
+        return False, meta
+
+    prior = _latest_same_strike_explosion_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=float(strike or 0),
+    )
+    if prior is None:
+        return False, meta
+
+    prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
+    if prior_pnl >= 0:
+        return False, meta
+
+    min_loss = float(
+        getattr(settings, "session_same_strike_loss_reentry_min_loss_inr", 500.0) or 500.0
+    )
+    if abs(prior_pnl) < min_loss:
+        return False, meta
+
+    cooldown = int(
+        getattr(settings, "session_same_strike_loss_reentry_cooldown_seconds", 0) or 0
+    )
+    if cooldown > 0:
+        closed_at = getattr(prior, "closedAt", None)
+        if closed_at is not None:
+            now = datetime.now(_IST)
+            if closed_at.tzinfo is None:
+                closed_at = closed_at.replace(tzinfo=_IST)
+            elapsed = (now - closed_at.astimezone(_IST)).total_seconds()
+            if elapsed >= cooldown:
+                return False, meta
+
+    meta.update({
+        "applied": True,
+        "priorTradeId": getattr(prior, "id", None),
+        "priorPnlInr": round(prior_pnl, 2),
+        "priorExitReason": str(getattr(prior, "exitReason", "") or ""),
+        "priorStrike": float(getattr(prior, "strike", 0) or 0),
+        "reason": "session_same_strike_loss_reentry_blocked",
+    })
+    return True, meta
+
+
+def session_near_strike_loss_reentry_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+) -> tuple[bool, dict[str, Any]]:
+    """Block same-side re-entry within N strike steps after any explosion loss (Sep08 23650→23800).
+
+    CE/PE symmetric — only blocks the same option side on the same symbol.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"applied": False}
+    if not getattr(settings, "session_near_strike_loss_reentry_enabled", True):
+        return False, meta
+
+    min_loss = float(
+        getattr(settings, "session_near_strike_loss_reentry_min_loss_inr", 500.0) or 500.0
+    )
+    max_steps = int(
+        getattr(settings, "session_near_strike_loss_reentry_max_steps", 3) or 3
+    )
+    if max_steps <= 0:
+        return False, meta
+
+    from app.engines.moneyness import strike_step
+
+    sym = str(symbol or "").upper()
+    step = float(strike_step(sym) or 50.0)
+    target = float(strike or 0)
+    side_v = _side_key(side)
+
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            continue
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if not _is_explosion_trade(t):
+            continue
+        prior_pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
+        if prior_pnl >= 0 or abs(prior_pnl) < min_loss:
+            continue
+        prior_strike = float(getattr(t, "strike", 0) or 0)
+        if abs(prior_strike - target) > max_steps * step + 0.5:
+            continue
+        if abs(prior_strike - target) < 0.5:
+            continue  # exact strike handled by session_same_strike_loss_reentry_blocked
+        meta.update({
+            "applied": True,
+            "priorTradeId": getattr(t, "id", None),
+            "priorStrike": prior_strike,
+            "priorPnlInr": round(prior_pnl, 2),
+            "priorExitReason": str(getattr(t, "exitReason", "") or ""),
+            "maxSteps": max_steps,
+            "strikeStep": step,
+            "reason": "session_near_strike_loss_reentry_blocked",
+        })
+        return True, meta
+    return False, meta
 

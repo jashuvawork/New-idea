@@ -113,6 +113,43 @@ def test_rally_bypass_rejects_small_rally(mock_settings):
 
 
 @patch("app.engines.index_rally_side_flip.get_settings")
+def test_rally_bypass_neutral_macd_passes_with_positive_mom5(mock_settings):
+    mock_settings.return_value = _settings()
+    snap = _snap(macd_bias="NEUTRAL", mom5=0.44)
+    snap.spotChart.macdHistogram = 0.0
+    with patch(
+        "app.engines.index_rally_side_flip._session_extremes_and_spot",
+        return_value=(77600.0, 76135.0, 76512.0),
+    ):
+        ok, reason, meta = index_rally_side_flip_bypass("SENSEX", Side.CALL, snap)
+    assert ok is True
+    assert reason == "index_rally_side_flip"
+    assert meta["macdBias"] == "NEUTRAL"
+
+
+@patch("app.engines.index_rally_side_flip.get_settings")
+def test_slide_bypass_neutral_macd_passes_with_negative_mom5(mock_settings):
+    mock_settings.return_value = _settings()
+    snap = _snap(
+        spot=76270.0,
+        breadth="BULLISH",
+        chart_dir="BULLISH",
+        rsi=42.0,
+        macd_bias="NEUTRAL",
+        mom5=-0.12,
+    )
+    snap.spotChart.macdHistogram = 0.0
+    with patch(
+        "app.engines.index_rally_side_flip._session_extremes_and_spot",
+        return_value=(76400.0, 76200.0, 76270.0),
+    ):
+        ok, reason, meta = index_rally_side_flip_bypass("SENSEX", Side.PUT, snap)
+    assert ok is True
+    assert reason == "index_slide_side_flip"
+    assert meta["macdBias"] == "NEUTRAL"
+
+
+@patch("app.engines.index_rally_side_flip.get_settings")
 def test_rally_bypass_requires_bullish_macd(mock_settings):
     mock_settings.return_value = _settings()
     snap = _snap(macd_bias="BEARISH", rsi=55.0)

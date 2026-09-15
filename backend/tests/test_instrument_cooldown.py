@@ -31,6 +31,27 @@ def _settings():
 
 
 @patch("app.engines.instrument_cooldown.get_settings")
+def test_explosion_loss_uses_longer_cooldown(mock_settings):
+    from app.engines.instrument_cooldown import (
+        instrument_in_cooldown,
+        record_instrument_close,
+        reset_instrument_cooldowns,
+    )
+
+    mock_settings.return_value = _settings()
+    mock_settings.return_value.explosion_instrument_loss_cooldown_seconds = 14400
+    reset_instrument_cooldowns()
+    record_instrument_close(
+        "NIFTY", Side.PUT, 23650, -2500, "adaptive_stop_loss",
+        mode="explosion", strategy_type="EXPLOSIVE",
+    )
+    blocked, reason = instrument_in_cooldown("NIFTY", Side.PUT, 23650)
+    assert blocked
+    secs = int(reason.rsplit("_", 1)[-1].rstrip("s"))
+    assert secs > 300
+
+
+@patch("app.engines.instrument_cooldown.get_settings")
 def test_loss_blocks_same_strike_reentry(mock_settings):
     mock_settings.return_value = _settings()
     reset_instrument_cooldowns()

@@ -12,12 +12,31 @@ const STREAM_BASE = import.meta.env.DEV
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 500);
 const UI_TICK_MS = Math.max(POLL_MS, 200);
 const SSE_MIN_INTERVAL_MS = Math.max(Number(import.meta.env.VITE_SSE_THROTTLE_MS || 50), 25);
-const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false';
+// Vercel rewrites kill proxied SSE after ~30s (hard proxy limit). Prefer HTTP poll unless
+// a direct stream base URL bypasses Vercel (e.g. https://api.jashuvatrade.xyz).
+const SSE_THROUGH_VERCEL = !import.meta.env.DEV && !import.meta.env.VITE_STREAM_BASE_URL;
+const SSE_ENABLED = import.meta.env.VITE_SSE_ENABLED !== 'false' && !SSE_THROUGH_VERCEL;
 const SSE_STALE_POLL_MS = Number(import.meta.env.VITE_SSE_STALE_POLL_MS || 1000);
+/** Reconnect before Vercel/proxy ~30s SSE cutoff when using a direct stream URL. */
+const SSE_RECONNECT_MS = Number(import.meta.env.VITE_SSE_RECONNECT_MS || 25_000);
+const HEALTH_URL = `${API_BASE || ''}/health`;
+/** With cached dashboard data, stay slow/reconnecting — not offline — through rebuild blips. */
+const TRANSPORT_OFFLINE_MS = 90_000;
+const DATA_OFFLINE_MS = 90_000;
 const SNAPSHOT_URL = `${API_BASE}/api/market/snapshots/cached`;
 // Same-origin only — do NOT fall back to api.jashuvatrade.xyz (stale DNS → old EC2 IP
 // times out and makes the UI look "unreachable" while www→EIP proxy still works).
 const SNAPSHOT_FALLBACK_URL = SNAPSHOT_URL;
+
+/** Prefer WS tick age when present; fall back to snapshot timestamp age. */
+function snapshotDataAgeMs(json: MultiSnapshot, nowMs = Date.now()): number {
+  const snapTs = json.timestamp ? new Date(json.timestamp).getTime() : nowMs;
+  const snapshotAgeMs = Math.max(0, nowMs - snapTs);
+  const tickAgeMs = typeof json.wsTickAgeMs === 'number' && json.wsTickAgeMs >= 0
+    ? json.wsTickAgeMs
+    : null;
+  return tickAgeMs ?? snapshotAgeMs;
+}
 
 function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   if (ms <= 0) return 'offline';
@@ -26,13 +45,24 @@ function latencyQuality(ms: number): StreamMetrics['connectionQuality'] {
   return 'slow';
 }
 
-/** SSE is server-push — use data freshness, not JSON parse time (which is ~0ms). */
+/** SSE is server-push — use payload data freshness, not JSON parse time (~0ms). */
 function sseConnectionQuality(
   dataAgeMs: number,
   dataReady: boolean,
+  transportAgeMs?: number,
+  hasCachedData?: boolean,
 ): StreamMetrics['connectionQuality'] {
-  if (!dataReady && dataAgeMs > 30_000) return 'offline';
-  if (dataAgeMs > 10_000) return 'offline';
+  const transportLimit = hasCachedData ? TRANSPORT_OFFLINE_MS : 45_000;
+  const dataLimit = dataReady ? DATA_OFFLINE_MS : 45_000;
+  const slowAfterMs = dataReady ? 15_000 : 10_000;
+  const transportOk = transportAgeMs == null || transportAgeMs < transportLimit;
+
+  if (!transportOk && transportAgeMs != null) {
+    return 'slow';
+  }
+  if (!dataReady && dataAgeMs > dataLimit) return 'offline';
+  if (dataAgeMs > dataLimit) return 'offline';
+  if (dataAgeMs > slowAfterMs) return 'slow';
   if (dataAgeMs > 3_000) return 'slow';
   if (dataAgeMs > 1_000) return 'good';
   return 'excellent';
@@ -87,12 +117,7 @@ function applySnapshot(
   const now = new Date();
   lastSuccessAt.current = now;
   const elapsed = Math.round(performance.now() - started);
-  const snapTs = json.timestamp ? new Date(json.timestamp).getTime() : now.getTime();
-  const snapshotAgeMs = Math.max(0, now.getTime() - snapTs);
-  const tickAgeMs = typeof json.wsTickAgeMs === 'number' && json.wsTickAgeMs >= 0
-    ? json.wsTickAgeMs
-    : null;
-  const dataAgeMs = tickAgeMs != null && tickAgeMs < 5000 ? tickAgeMs : snapshotAgeMs;
+  const dataAgeMs = snapshotDataAgeMs(json, now.getTime());
 
   if (streamMode !== 'sse') {
     latencyHistory.current = [...latencyHistory.current.slice(-9), elapsed];
@@ -123,9 +148,9 @@ function applySnapshot(
         ),
       );
   const quality = isSse
-    ? sseConnectionQuality(dataAgeMs, Boolean(json.dataReady))
+    ? sseConnectionQuality(dataAgeMs, Boolean(json.dataReady), undefined, hasDataRef.current)
     : pollFresh
-      ? sseConnectionQuality(dataAgeMs, Boolean(json.dataReady))
+      ? sseConnectionQuality(dataAgeMs, Boolean(json.dataReady), undefined, hasDataRef.current)
       : latencyQuality(roundTripMs);
   setMetrics((prev) => {
     const staleBucket = Math.floor(dataAgeMs / 1000);
@@ -160,14 +185,9 @@ function applySseFreshness(
   setMetrics: React.Dispatch<React.SetStateAction<StreamMetrics>>,
 ) {
   const now = new Date();
-  const snapTs = json.timestamp ? new Date(json.timestamp).getTime() : now.getTime();
-  const snapshotAgeMs = Math.max(0, now.getTime() - snapTs);
-  const tickAgeMs = typeof json.wsTickAgeMs === 'number' && json.wsTickAgeMs >= 0
-    ? json.wsTickAgeMs
-    : null;
-  const dataAgeMs = tickAgeMs != null && tickAgeMs < 5000 ? tickAgeMs : snapshotAgeMs;
+  const dataAgeMs = snapshotDataAgeMs(json, now.getTime());
   const latency = sseDisplayLatencyMs(dataAgeMs, pollIntervalMs);
-  const quality = sseConnectionQuality(dataAgeMs, Boolean(json.dataReady));
+  const quality = sseConnectionQuality(dataAgeMs, Boolean(json.dataReady), undefined, true);
   setMetrics((prev) => {
     const staleBucket = Math.floor(dataAgeMs / 1000);
     const prevBucket = Math.floor(prev.stalenessMs / 1000);
@@ -203,26 +223,52 @@ export function useMarketStream() {
   const lastSseApplyAt = useRef(0);
   const pollAbortRef = useRef<AbortController | null>(null);
   const hasDataRef = useRef(false);
+  const lastTransportAt = useRef<Date | null>(null);
 
-  const fetchSnapshot = useCallback(async (streamMode: StreamMetrics['streamMode'] = 'poll') => {
-    pollAbortRef.current?.abort();
+  const touchTransport = useCallback(() => {
+    const now = new Date();
+    lastSuccessAt.current = now;
+    lastTransportAt.current = now;
+  }, []);
+
+  const pingHealth = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(4000) });
+      if (res.ok) {
+        touchTransport();
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+    return false;
+  }, [touchTransport]);
+
+  const fetchSnapshot = useCallback(async (
+    streamMode: StreamMetrics['streamMode'] = 'poll',
+    options: { background?: boolean } = {},
+  ) => {
+    const background = options.background ?? false;
+    if (!background) {
+      pollAbortRef.current?.abort();
+    }
     const ac = new AbortController();
-    pollAbortRef.current = ac;
+    if (!background) {
+      pollAbortRef.current = ac;
+    }
     const started = performance.now();
     const urls = streamMode === 'sse' && SNAPSHOT_FALLBACK_URL !== SNAPSHOT_URL
       ? [SNAPSHOT_URL, SNAPSHOT_FALLBACK_URL]
       : [SNAPSHOT_URL];
-    // Brief hung-backend blips are common during full REST rebuilds — retry before
-    // flipping the UI to a hard "Cannot reach server" offline state.
-    const maxAttempts = hasDataRef.current ? 2 : 3;
+    const maxAttempts = hasDataRef.current ? 3 : 4;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (attempt > 0) {
-        await new Promise((r) => setTimeout(r, 400 * attempt));
-        if (ac.signal.aborted) return;
+        await new Promise((r) => setTimeout(r, 500 * attempt));
+        if (!background && ac.signal.aborted) return;
       }
       for (const url of urls) {
         try {
-          const res = await fetch(url, { signal: ac.signal });
+          const res = await fetch(url, { signal: background ? undefined : ac.signal });
           if (!res.ok) continue;
           const json = (await res.json()) as MultiSnapshot;
           applySnapshot(
@@ -238,26 +284,31 @@ export function useMarketStream() {
             setError,
             setMetrics,
           );
+          touchTransport();
           setLoading(false);
           return;
         } catch (e) {
-          if (e instanceof DOMException && e.name === 'AbortError') return;
+          if (!background && e instanceof DOMException && e.name === 'AbortError') return;
         }
       }
     }
     const elapsed = Math.round(performance.now() - started);
-    const stale = lastSuccessAt.current
-      ? Date.now() - lastSuccessAt.current.getTime()
-      : 0;
+    const transportAge = lastTransportAt.current
+      ? Date.now() - lastTransportAt.current.getTime()
+      : lastSuccessAt.current
+        ? Date.now() - lastSuccessAt.current.getTime()
+        : 0;
     if (hasDataRef.current) {
+      const healthOk = await pingHealth();
+      const offlineLimit = healthOk ? TRANSPORT_OFFLINE_MS : 45_000;
       setMetrics((prev) => ({
         ...prev,
         lastLatencyMs: elapsed,
-        connectionQuality: stale > 15_000 ? 'offline' : stale > 5_000 ? 'slow' : prev.connectionQuality,
+        connectionQuality: transportAge > offlineLimit ? 'offline' : 'slow',
         streamMode: streamMode === 'sse' ? 'sse' : 'poll',
-        stalenessMs: stale || prev.stalenessMs,
+        stalenessMs: prev.stalenessMs || transportAge,
       }));
-      setError(null);
+      setError(healthOk ? null : 'Snapshot refresh delayed — showing cached data');
     } else {
       setMetrics((prev) => ({
         ...prev,
@@ -269,34 +320,43 @@ export function useMarketStream() {
       setError('Cannot reach server');
     }
     setLoading(false);
-  }, []);
+  }, [pingHealth, touchTransport]);
 
   // Tick staleness between updates; fall back to HTTP poll when SSE goes quiet
   useEffect(() => {
     const id = setInterval(() => {
-      if (!lastSuccessAt.current) return;
-      const stale = Date.now() - lastSuccessAt.current.getTime();
-      const staleBucket = Math.floor(stale / 1000);
+      const transportRef = lastTransportAt.current ?? lastSuccessAt.current;
+      if (!transportRef) return;
+      const transportAge = Date.now() - transportRef.getTime();
       setMetrics((prev) => {
+        if (prev.streamMode === 'sse') {
+          const limit = hasDataRef.current ? TRANSPORT_OFFLINE_MS : 45_000;
+          if (transportAge <= limit) {
+            return prev;
+          }
+          if (prev.connectionQuality === 'slow') {
+            return prev;
+          }
+          return { ...prev, connectionQuality: 'slow' };
+        }
+        const staleBucket = Math.floor(transportAge / 1000);
         const prevBucket = Math.floor(prev.stalenessMs / 1000);
-        const quality =
-          prev.streamMode === 'sse'
-            ? (stale > 10_000 ? 'offline' : stale > 3_000 ? 'slow' : stale > 1_000 ? 'good' : 'excellent')
-            : prev.connectionQuality;
-        const latency = prev.streamMode === 'sse'
-          ? sseDisplayLatencyMs(stale, prev.pollIntervalMs)
-          : prev.lastLatencyMs;
+        const quality = prev.connectionQuality;
+        const latency = prev.lastLatencyMs;
         if (prevBucket === staleBucket && quality === prev.connectionQuality && latency === prev.lastLatencyMs) {
           return prev;
         }
-        return { ...prev, stalenessMs: stale, connectionQuality: quality, lastLatencyMs: latency };
+        return { ...prev, stalenessMs: transportAge, connectionQuality: quality, lastLatencyMs: latency };
       });
-      if (SSE_ENABLED && stale > SSE_STALE_POLL_MS) {
-        void fetchSnapshot('sse');
+      if (SSE_ENABLED && transportAge > SSE_STALE_POLL_MS) {
+        void fetchSnapshot('sse', { background: true });
+      }
+      if (transportAge > 5_000 && hasDataRef.current) {
+        void pingHealth();
       }
     }, UI_TICK_MS);
     return () => clearInterval(id);
-  }, [fetchSnapshot]);
+  }, [fetchSnapshot, pingHealth]);
 
   useEffect(() => {
     if (!SSE_ENABLED) {
@@ -308,20 +368,19 @@ export function useMarketStream() {
     let es: EventSource | null = null;
     let pollId: ReturnType<typeof setInterval> | null = null;
     let retryId: ReturnType<typeof setTimeout> | null = null;
+    let reconnectId: ReturnType<typeof setInterval> | null = null;
     let disposed = false;
     let retryMs = 1500;
 
-    const startPollFallback = () => {
+    const startPollSupplement = () => {
       if (pollId) return;
-      fetchSnapshot('sse');
-      pollId = setInterval(() => fetchSnapshot('sse'), POLL_MS);
-      setMetrics((prev) => ({
-        ...prev,
-        streamMode: prev.streamMode === 'sse' ? 'sse' : 'poll',
-      }));
+      void fetchSnapshot('sse', { background: true });
+      pollId = setInterval(() => {
+        void fetchSnapshot('sse', { background: true });
+      }, POLL_MS);
     };
 
-    const stopPollFallback = () => {
+    const stopPollSupplement = () => {
       if (pollId) {
         clearInterval(pollId);
         pollId = null;
@@ -330,7 +389,8 @@ export function useMarketStream() {
 
     const connectSse = () => {
       if (disposed) return;
-      stopPollFallback();
+      es?.close();
+      es = null;
       const url = `${STREAM_BASE}/api/market/stream`;
       es = new EventSource(url);
       let opened = false;
@@ -340,16 +400,17 @@ export function useMarketStream() {
         retryMs = 1500;
         sseFailed.current = false;
         setLoading(false);
+        touchTransport();
         setMetrics((prev) => ({
           ...prev,
           streamMode: 'sse',
-          connectionQuality: 'good',
+          connectionQuality: prev.connectionQuality === 'offline' ? 'slow' : 'good',
         }));
       };
 
       es.onmessage = (ev) => {
         const now = performance.now();
-        lastSuccessAt.current = new Date();
+        touchTransport();
         let json: MultiSnapshot;
         try {
           json = JSON.parse(ev.data) as MultiSnapshot;
@@ -377,6 +438,7 @@ export function useMarketStream() {
             setError,
             setMetrics,
           );
+          touchTransport();
           setLoading(false);
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Invalid stream payload');
@@ -387,8 +449,7 @@ export function useMarketStream() {
         es?.close();
         es = null;
         if (!disposed) {
-          // Keep SSE as primary — poll only supplements stale data, not replace stream label
-          startPollFallback();
+          startPollSupplement();
           retryId = setTimeout(() => {
             if (!disposed) connectSse();
           }, retryMs);
@@ -404,15 +465,20 @@ export function useMarketStream() {
       };
     };
 
+    startPollSupplement();
     connectSse();
+    reconnectId = setInterval(() => {
+      if (!disposed) connectSse();
+    }, SSE_RECONNECT_MS);
 
     return () => {
       disposed = true;
       es?.close();
-      if (pollId) clearInterval(pollId);
+      stopPollSupplement();
       if (retryId) clearTimeout(retryId);
+      if (reconnectId) clearInterval(reconnectId);
     };
-  }, [fetchSnapshot]);
+  }, [fetchSnapshot, touchTransport]);
 
   return { data, error, loading, metrics, refetch: fetchSnapshot };
 }

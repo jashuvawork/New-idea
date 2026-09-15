@@ -187,3 +187,46 @@ def test_live_early_fail_exit(mock_settings):
         live_velocity_3s=0.0,
     )
     assert reason == "live_early_fail"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.live_best_trades.get_settings")
+@patch("app.engines.explosion_profit._hold_seconds", return_value=90)
+def test_live_early_fail_skipped_for_elite_assessment(
+    _hold, mock_live_settings, mock_explosion_settings
+):
+    from app.config import Settings
+    from app.engines.explosion_profit import evaluate_explosion_exit
+
+    settings = Settings()
+    settings.live_early_fail_exit_enabled = True
+    settings.explosion_failed_launch_exit_enabled = False
+    settings.explosion_never_green_stop_enabled = False
+    settings.explosion_faded_rip_no_green_exit_enabled = False
+    settings.explosion_peak_fade_lock_enabled = False
+    settings.explosion_peak_capture_enabled = False
+    settings.explosion_no_progress_enabled = False
+    settings.emergency_stop_enabled = False
+    mock_live_settings.return_value = settings
+    mock_explosion_settings.return_value = settings
+    trade = PaperTrade(
+        id="elite-live",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=23900.0,
+        entryPremium=109.4,
+        currentPremium=106.4,
+        lots=3,
+        strategyType=StrategyType.EXPLOSIVE,
+        openedAt=datetime.now(IST) - timedelta(seconds=90),
+        bestPnlPoints=0.0,
+        entryContext={
+            "executionMode": "LIVE",
+            "liveBestTradeGate": True,
+            "eliteAssessment": {"eliteScore": 90.6, "grade": "A", "setup": "V"},
+        },
+    )
+    reason, _ = evaluate_explosion_exit(
+        trade, 106.4, "ELITE", lot_multiplier=65, live_velocity_3s=-0.5
+    )
+    assert reason != "live_early_fail"

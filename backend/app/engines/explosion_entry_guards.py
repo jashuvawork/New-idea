@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from app.config import get_settings
 from app.engines.moneyness import _depth_steps, atm_strike, classify_moneyness
@@ -655,6 +655,25 @@ def immature_explosion_blocked(
                 and score >= min_score
             ):
                 local_floor = min(local_floor, pad_min)
+        from app.engines.bullish_day_floor_relief import (
+            bullish_day_context_active,
+            bullish_day_first_lift_floors,
+        )
+
+        try:
+            from app.engines.daily_18pct_strategy import get_session_limits
+
+            limits = get_session_limits()
+            _bd_day_mode = str(getattr(limits, "dayMode", "") or "") if limits else ""
+            _bd_conf_tier = (
+                str(getattr(limits, "confidenceTier", "") or "") if limits else ""
+            )
+        except Exception:
+            _bd_day_mode = ""
+            _bd_conf_tier = ""
+        if bullish_day_context_active(day_mode=_bd_day_mode, confidence_tier=_bd_conf_tier):
+            bd = bullish_day_first_lift_floors(settings)
+            local_floor = min(local_floor, bd["immatureLocalBaseMinMove"])
         if base_move >= local_floor:
             return False, ""
         return True, f"immature_local_base_{base_move:.1f}%"
@@ -888,6 +907,92 @@ def live_explosion_confirmation_blocked(
     return False, ""
 
 
+def coil_top_entry_blocked(
+    explosion_event: Any,
+    *,
+    tier: str = "",
+    velocity_3s: float | None = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
+    state: Any = None,
+    day_mode: str = "",
+    confidence_tier: str = "",
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block BUILDING/WATCH entries at the top of a tight consolidation coil.
+
+    ``post_peak_chase`` only fires after a >=25% window run. A 135→150 coil (+11%) lets
+    entries through at ₹147 because off-low looks like an early pad. This guard measures
+    **position inside the recent range** — near-base entries sit near the window low;
+    buying the coil ceiling sits near the window high.
+
+    Thresholds adapt by day type (WORST / CHOP / NORMAL / GOOD / ELITE).
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "explosion_coil_top_guard_enabled", True)):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+    tier_u = str(
+        tier or getattr(explosion_event, "tier", "") or ""
+    ).upper()
+    allowed_tiers = {
+        t.strip().upper()
+        for t in str(
+            getattr(settings, "explosion_coil_top_tiers_csv", "WATCH,BUILDING") or ""
+        ).split(",")
+        if t.strip()
+    }
+    if tier_u not in allowed_tiers:
+        return False, ""
+    sym = str(getattr(explosion_event, "symbol", "") or "")
+    side = getattr(explosion_event, "side", None)
+    strike = float(getattr(explosion_event, "strike", 0) or 0)
+    if not sym or side is None:
+        return False, ""
+    v3 = (
+        float(velocity_3s)
+        if velocity_3s is not None
+        else float(getattr(explosion_event, "velocity_3s", 0) or 0)
+    )
+    from app.engines.entry_day_adaptive import resolve_entry_day_policy
+
+    policy = resolve_entry_day_policy(
+        day_mode=day_mode,
+        confidence_tier=confidence_tier,
+        snapshots=snapshots,
+        state=state,
+    )
+    breakout_v = float(
+        getattr(settings, "explosion_coil_top_breakout_min_velocity_3s", 2.0) or 2.0
+    )
+    if tier_u in ("ELITE", "EXPLODING") and v3 + 1e-9 >= breakout_v:
+        return False, ""
+    lookback = float(
+        getattr(settings, "explosion_coil_top_lookback_seconds", 900.0) or 900.0
+    )
+    min_run = policy.coil_top_min_run_pct
+    max_run = policy.coil_top_max_run_pct
+    max_pos = policy.coil_top_max_position_frac
+    try:
+        from app.engines.explosion_detector import recent_premium_run
+
+        r = recent_premium_run(sym, strike, side, lookback_seconds=lookback)
+    except Exception:
+        return False, ""
+    low = float(r.get("low") or 0)
+    high = float(r.get("high") or 0)
+    current = float(r.get("current") or 0)
+    run = float(r.get("run") or 0)
+    if low <= 0 or high <= low or current <= 0:
+        return False, ""
+    if run < min_run or run > max_run:
+        return False, ""
+    position = (current - low) / (high - low)
+    if position <= max_pos:
+        return False, ""
+    return True, f"coil_top_{policy.day_type.lower()}_position_{position:.0%}_run_{run:.0%}"
+
+
 def post_peak_chase_blocked(
     explosion_event: Any,
     *,
@@ -955,6 +1060,217 @@ def post_peak_chase_blocked(
             session_run = (sp - sl) / sl
             if session_run >= min_run and current >= sp * (1.0 - near_top):
                 return True, "explosion_post_peak_chase_session"
+    return False, ""
+
+
+def _session_trough_lift_confirmed(
+    ict: Any,
+    alert: Optional[dict[str, Any]],
+    *,
+    session_lift: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """first_lift waives trough chase only while premium is still near the session low."""
+    row = alert if isinstance(alert, dict) else {}
+    has_lift = bool(row.get("ictFirstLift") or row.get("firstLift"))
+    if not has_lift and ict is not None:
+        has_lift = bool(getattr(ict, "first_lift", False))
+    if not has_lift:
+        return False
+    s = settings or get_settings()
+    max_waive = float(
+        getattr(
+            s,
+            "explosion_session_trough_first_lift_max_waive_lift_pct",
+            0.40,
+        )
+        or 0.40
+    )
+    if session_lift > max_waive + 1e-6:
+        return False
+    return True
+
+
+def _session_trough_grade_s_near_strike_exempt(
+    alert: Optional[dict[str, Any]],
+    ranking: Optional[dict[str, Any]],
+    *,
+    settings: Any,
+) -> bool:
+    row = alert if isinstance(alert, dict) else {}
+    rank = ranking if isinstance(ranking, dict) else {}
+    grade = str(rank.get("grade") or row.get("causalGrade") or "").upper()
+    if not grade:
+        from app.engines.rally_capture import infer_alert_causal_grade
+
+        grade = infer_alert_causal_grade(row, ranking=rank)
+    if grade != "S":
+        return False
+    steps = float(row.get("strikeStepsFromAtm") or 0)
+    max_steps = int(
+        getattr(settings, "explosion_session_trough_late_chase_grade_s_max_steps", 2) or 2
+    )
+    if steps <= 0 or steps > max_steps + 1e-6:
+        return False
+    if str(row.get("moneyness") or "").upper() == "ITM":
+        return False
+    return bool(
+        row.get("ictArmedBaseLaunch")
+        or row.get("armedBaseLaunch")
+        or str(row.get("momentType") or "") in {
+            "armed_base_launch",
+            "v_rip_session_low",
+            "first_lift_local_base",
+        }
+    )
+
+
+def session_trough_late_chase_blocked(
+    explosion_event: Any,
+    *,
+    settings: Any = None,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    ranking: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
+    """Block chasing far above the session trough when lift is not confirmed."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "explosion_session_trough_late_chase_enabled", True)):
+        return False, ""
+    if explosion_event is None:
+        return False, ""
+    sym = str(getattr(explosion_event, "symbol", "") or "")
+    side = getattr(explosion_event, "side", None)
+    strike = float(getattr(explosion_event, "strike", 0) or 0)
+    current = float(getattr(explosion_event, "premium", 0) or 0)
+    if not sym or side is None or strike <= 0 or current <= 0:
+        return False, ""
+    try:
+        from app.engines.explosion_detector import get_session_low_premium
+
+        session_low = float(get_session_low_premium(sym, strike, side) or 0)
+    except Exception:
+        return False, ""
+    if session_low <= 0:
+        return False, ""
+    session_lift = (current - session_low) / session_low
+    min_lift = float(
+        getattr(settings, "explosion_session_trough_late_chase_min_lift_pct", 0.50) or 0.50
+    )
+    if session_lift < min_lift - 1e-6:
+        return False, ""
+    if _session_trough_lift_confirmed(
+        ict, alert, session_lift=session_lift, settings=settings,
+    ):
+        return False, ""
+    if _session_trough_grade_s_near_strike_exempt(alert, ranking, settings=settings):
+        grade_s_max = float(
+            getattr(
+                settings,
+                "explosion_session_trough_late_chase_grade_s_max_lift_pct",
+                0.60,
+            )
+            or 0.60
+        )
+        if session_lift <= grade_s_max + 1e-6:
+            return False, ""
+    return True, f"explosion_session_trough_late_chase_{session_lift:.0%}"
+
+
+def _near_strike_armed_alert_active(
+    alert: Mapping[str, Any],
+    *,
+    max_steps: int,
+) -> bool:
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    steps = float(alert.get("strikeStepsFromAtm") or 0)
+    if steps <= 0 or steps > max_steps + 1e-6:
+        return False
+    if str(alert.get("moneyness") or "").upper() == "ITM":
+        return False
+    return bool(
+        alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or str(alert.get("momentType") or "") in {
+            "armed_base_launch",
+            "v_rip_session_low",
+            "v_rip_session_high",
+            "first_lift_local_base",
+        }
+    )
+
+
+def deep_itm_near_strike_substitute_blocked(
+    side: Side | str,
+    strike: float,
+    snap: SymbolSnapshot,
+    *,
+    settings: Any = None,
+    candidate_score: float = 0.0,
+) -> tuple[bool, str]:
+    """Block ITM/ATM fallback when near-strike OTM on the same side is armed at the pad."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "explosion_deep_itm_substitute_block_enabled", True)):
+        return False, ""
+    side_v = _side_val(side)
+    depth, money, _ = _strike_depth(side, strike, snap)
+    cand_score = float(candidate_score or 0.0)
+    if cand_score <= 0:
+        for alt in snap.explosionAlerts or []:
+            if (
+                str(alt.get("side") or "").upper() == side_v
+                and abs(float(alt.get("strike") or 0) - float(strike)) < 0.51
+            ):
+                cand_score = float(alt.get("score") or 0.0)
+                break
+
+    if bool(getattr(s, "explosion_deep_itm_block_atm_radar_advantage_enabled", True)):
+        max_itm = int(
+            getattr(s, "explosion_deep_itm_block_max_itm_steps_when_atm_on_radar", 1) or 1
+        )
+        min_adv = float(
+            getattr(s, "explosion_deep_itm_block_atm_min_score_advantage", 20.0) or 20.0
+        )
+        if money == "ITM" and depth > max_itm:
+            atm_best = 0.0
+            for alt in snap.explosionAlerts or []:
+                if str(alt.get("side") or "").upper() != side_v:
+                    continue
+                alt_strike = float(alt.get("strike") or 0)
+                if alt_strike <= 0:
+                    continue
+                _, alt_money, _ = _strike_depth(side, alt_strike, snap)
+                if alt_money != "ATM":
+                    continue
+                atm_best = max(atm_best, float(alt.get("score") or 0.0))
+            ref_score = cand_score if cand_score > 0 else float(depth)
+            if atm_best >= ref_score + min_adv:
+                return True, "explosion_deep_itm_atm_radar_advantage"
+
+    if money == "OTM":
+        return False, ""
+    min_itm = int(getattr(s, "explosion_deep_itm_substitute_min_itm_steps", 1) or 1)
+    if money == "ITM" and depth < min_itm:
+        return False, ""
+    max_otm = int(
+        getattr(s, "explosion_deep_itm_substitute_near_strike_max_steps", 2) or 2
+    )
+    for alt in snap.explosionAlerts or []:
+        if str(alt.get("side") or "").upper() != side_v:
+            continue
+        alt_strike = float(alt.get("strike") or 0)
+        if alt_strike <= 0:
+            continue
+        _, alt_money, _ = _strike_depth(side, alt_strike, snap)
+        if alt_money not in ("ATM", "OTM"):
+            continue
+        alt_depth, _, _ = _strike_depth(side, alt_strike, snap)
+        if alt_depth > max_otm:
+            continue
+        if _near_strike_armed_alert_active(alt, max_steps=max_otm):
+            return True, "explosion_deep_itm_near_strike_substitute"
     return False, ""
 
 
@@ -1250,16 +1566,21 @@ def faded_rip_no_green_exit_reason(
     return None
 
 
-def _regime_chopish(snap: SymbolSnapshot) -> bool:
+def _regime_chopish(snap: SymbolSnapshot, *, settings: Any = None) -> bool:
+    s = settings or get_settings()
+    if not bool(getattr(s, "chopish_regime_detection_enabled", True)):
+        return False
     regime = str(snap.regime.value if hasattr(snap.regime, "value") else snap.regime or "").upper()
     if regime in ("CHOP", "RANGE_BOUND"):
         return True
     chart = snap.spotChart
     if chart is None:
         return False
+    mom_max = float(getattr(s, "chopish_regime_mom5_max_pct", 0.25) or 0.25)
+    strength_max = float(getattr(s, "chopish_regime_strength_max", 45.0) or 45.0)
     mom = abs(float(getattr(chart, "momentum5Pct", 0) or 0))
     strength = float(getattr(chart, "trendStrength", 100) or 100)
-    return mom < 0.25 and strength < 45
+    return mom < mom_max and strength < strength_max
 
 
 def _midday_chop_active() -> bool:
@@ -1417,6 +1738,16 @@ def _post_win_top_confidence_allows(
     return False
 
 
+def _armed_base_launch_active(ict: Any, candidate: Any) -> bool:
+    """True when ICT or alert stamps an armed-base launch (5–15% early band)."""
+    if ict is not None and bool(getattr(ict, "armed_base_launch", False)):
+        return True
+    alert = getattr(candidate, "alert", None)
+    if isinstance(alert, dict):
+        return bool(alert.get("ictArmedBaseLaunch") or alert.get("armedBaseLaunch"))
+    return False
+
+
 def detect_fake_explosion_trap(
     candidate: Any,
     snap: SymbolSnapshot,
@@ -1451,9 +1782,12 @@ def detect_fake_explosion_trap(
     if ict is not None:
         move = max(move, float(getattr(ict, "session_move_pct", 0) or 0))
 
-    chop_regime = _regime_chopish(snap)
+    chop_regime = _regime_chopish(snap, settings=settings)
     midday = _midday_chop_active()
-    chopish = chop_regime or midday
+    if bool(getattr(settings, "chopish_midday_union_enabled", True)):
+        chopish = chop_regime or midday
+    else:
+        chopish = chop_regime and midday
     elite_hot = tier in ("ELITE", "EXPLODING") and (
         v3 >= 2.0 or tier == "ELITE"
     )
@@ -1513,6 +1847,38 @@ def detect_fake_explosion_trap(
         flags.append("otm_inside_or")
     if post_win:
         flags.append("post_small_win")
+
+    if (
+        post_win
+        and event
+        and getattr(settings, "fake_explosion_trap_post_win_afternoon_block_enabled", True)
+    ):
+        from app.engines.expiry_day_guards import expiry_post_win_afternoon_fomo_risk
+        from app.engines.morning_premium_capture import is_afternoon_capture_event
+
+        expiry_only = bool(
+            getattr(settings, "fake_explosion_trap_post_win_expiry_only", True)
+        )
+        afternoon_event = is_afternoon_capture_event(
+            event, chart=snap.spotChart if snap else None,
+        )
+        expiry_fomo, expiry_reasons = expiry_post_win_afternoon_fomo_risk(state)
+        should_block = afternoon_event and (
+            (expiry_only and expiry_fomo)
+            or (not expiry_only and True)
+        )
+        if should_block:
+            meta.update({
+                "fakeExplosionTrap": True,
+                "action": "block",
+                "psychologyEscalate": "FOMO",
+                "postWinAfternoonBlock": True,
+                "postWinExpiryAfternoon": expiry_fomo,
+                "expiryFomoReasons": expiry_reasons,
+                "conflictFlags": flags,
+                "conflictCount": len(flags),
+            })
+            return True, "fake_explosion_trap_post_win_afternoon", meta
 
     if post_win and getattr(
         settings, "fake_explosion_trap_post_win_velocity_block_enabled", True
@@ -1699,6 +2065,25 @@ def detect_fake_explosion_trap(
         })
         return True, "fake_explosion_trap_midday_no_structure", meta
 
+    # Sep08: chop + elite + armed-base launch below the 28% base window is a fake rip —
+    # soft cut to 6 lots still opens a full thesis that never greens on chop days.
+    armed_launch = _armed_base_launch_active(ict, candidate)
+    if (
+        getattr(settings, "fake_explosion_trap_block_chop_elite_armed_base", True)
+        and chopish
+        and elite_hot
+        and armed_launch
+        and timing_move < min_move
+    ):
+        meta.update({
+            "fakeExplosionTrap": True,
+            "action": "block",
+            "psychologyEscalate": "OVERCONFIDENCE",
+            "chopEliteArmedBaseBlock": True,
+            "armedBaseLaunch": True,
+        })
+        return True, "fake_explosion_trap_chop_elite_armed_base", meta
+
     # Soft cut: chop+elite full-size forbidden; post-small-win clamp.
     # Exception: structured base-window (28–55%) rips take full lots — soft-cutting
     # those to 6 lots killed Jul23 76300 PE and Jul31 NIFTY 24500 CE (2-step OTM).
@@ -1718,6 +2103,16 @@ def detect_fake_explosion_trap(
 
     cut = False
     if chopish and elite_hot and not skip_soft:
+        # Sep08: armed-base shallow launches must hard-block above — never soft-cut to 6 lots.
+        if armed_launch and timing_move < min_move:
+            meta.update({
+                "fakeExplosionTrap": True,
+                "action": "block",
+                "psychologyEscalate": "OVERCONFIDENCE",
+                "chopEliteArmedBaseBlock": True,
+                "armedBaseLaunch": True,
+            })
+            return True, "fake_explosion_trap_chop_elite_armed_base", meta
         cut = True
         action = "cut_size"
         reason = "fake_explosion_trap_chop_elite_size"
@@ -1752,9 +2147,41 @@ def detect_fake_explosion_trap(
     return False, "ok", meta
 
 
+def trap_post_small_win_active(trap_meta: Optional[dict[str, Any]]) -> bool:
+    if not trap_meta:
+        return False
+    if trap_meta.get("postSmallWin"):
+        return True
+    flags = {
+        str(f).lower()
+        for f in (trap_meta.get("conflictFlags") or [])
+        if f is not None
+    }
+    return "post_small_win" in flags
+
+
+def trap_fomo_psychology_active(trap_meta: Optional[dict[str, Any]]) -> bool:
+    if not trap_meta:
+        return False
+    return str(trap_meta.get("psychologyEscalate") or "").upper() == "FOMO"
+
+
 def _trap_soft_cap_must_honor(trap_meta: dict[str, Any]) -> bool:
-    """Chop/worst conflict stacks must keep cut_size lotCap (Aug6 27→6 restore hole)."""
+    """Chop/worst/post-win conflict stacks must keep cut_size lotCap (Aug6/Sep03 restore holes)."""
     settings = get_settings()
+    if trap_meta.get("action") == "block":
+        return True
+    if trap_meta.get("action") != "cut_size":
+        return False
+    # Sep03 NIFTY 23850 PE: post-small-win FOMO cap (8 lots) must survive index FTV + max-lot restore.
+    if trap_post_small_win_active(trap_meta) and bool(
+        getattr(settings, "fake_explosion_trap_honor_post_win_cap", True)
+    ):
+        return True
+    if trap_fomo_psychology_active(trap_meta) and bool(
+        getattr(settings, "fake_explosion_trap_honor_fomo_cap", True)
+    ):
+        return True
     if bool(getattr(settings, "index_confirmed_ftv_bypasses_fake_trap_lot_cap", True)):
         if trap_meta.get("indexConfirmedFtv") and (
             trap_meta.get("localBaseStructure")
@@ -1762,8 +2189,6 @@ def _trap_soft_cap_must_honor(trap_meta: dict[str, Any]) -> bool:
         ):
             return False
     if not getattr(settings, "fake_explosion_trap_honor_soft_cap_on_chop", True):
-        return False
-    if trap_meta.get("action") != "cut_size":
         return False
     flags = {
         str(f).lower()

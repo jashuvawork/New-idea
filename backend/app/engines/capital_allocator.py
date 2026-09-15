@@ -129,6 +129,7 @@ class DailyProfitGate:
     newEntriesAllowed: bool = True
     status: str = "ACTIVE"
     message: str = ""
+    dailyLossStopExpiryTopOnly: bool = False
     stages: Optional[list[ProfitStage]] = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -149,6 +150,7 @@ class DailyProfitGate:
             "newEntriesAllowed": self.newEntriesAllowed,
             "status": self.status,
             "message": self.message,
+            "dailyLossStopExpiryTopOnly": self.dailyLossStopExpiryTopOnly,
             "progressPct": round(progress, 1),
             "stages": [s.to_dict() for s in (self.stages or [])],
             "stageLockMode": True,
@@ -636,6 +638,32 @@ def max_lots_for_capital_pct(symbol: str, premium: float, capital_pct: float) ->
     return max(1, int(budget / (premium * mult)))
 
 
+def executed_entry_always_max_lots_enabled(settings=None) -> bool:
+    s = settings or get_settings()
+    return bool(getattr(s, "executed_entry_always_max_lots", True))
+
+
+def entry_mode_eligible_for_executed_max_lots(mode: str) -> bool:
+    return str(mode or "").lower() in ("explosion", "scalp")
+
+
+def force_executed_entry_max_lots(
+    lots: int,
+    symbol: str,
+    premium: float,
+    *,
+    mode: str = "",
+    settings=None,
+) -> int:
+    """Capital max lots for any gated explosion/scalp entry (best-trade-only policy)."""
+    s = settings or get_settings()
+    if not executed_entry_always_max_lots_enabled(s):
+        return int(lots)
+    if not entry_mode_eligible_for_executed_max_lots(mode):
+        return int(lots)
+    return max(int(lots), max_lots_for_capital(symbol, premium))
+
+
 def apply_explosion_always_max_lots(
     lots: int,
     symbol: str,
@@ -645,6 +673,10 @@ def apply_explosion_always_max_lots(
 ) -> int:
     """Floor explosion entries at capital max lots when enabled."""
     settings = get_settings()
+    if executed_entry_always_max_lots_enabled(settings):
+        return force_executed_entry_max_lots(
+            lots, symbol, premium, mode=mode or "explosion", settings=settings,
+        )
     if str(mode or "").lower() != "explosion":
         return int(lots)
     if not bool(getattr(settings, "explosion_always_force_max_lots", True)):
@@ -669,6 +701,8 @@ def cap_lots_for_base_retest(
     base is unknown.
     """
     settings = get_settings()
+    if executed_entry_always_max_lots_enabled(settings):
+        return int(lots)
     if not bool(getattr(settings, "size_to_base_retest_enabled", True)):
         return int(lots)
     mult = lot_multiplier(symbol)
@@ -995,7 +1029,10 @@ def _compute_stage_lock(
     return highest_stage, 0.0, 0
 
 
-def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
+def update_daily_profit_gate(
+    state: AutoTraderState,
+    snapshots: dict | None = None,
+) -> DailyProfitGate:
     """
     Staged profit locks on sizing capital (₹2L default):
       Min ₹22K milestone (no stop) · Lock 1: 55% · Lock 2: 88% · Lock 3: 112% · Lock 4: peak of day
@@ -1049,6 +1086,18 @@ def update_daily_profit_gate(state: AutoTraderState) -> DailyProfitGate:
 
     loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
     if loss_stop > 0 and session_pnl <= -abs(loss_stop):
+        if snapshots:
+            from app.engines.bad_day_routing import expiry_daily_loss_stop_bypass_active
+
+            if expiry_daily_loss_stop_bypass_active(state, snapshots):
+                gate.newEntriesAllowed = True
+                gate.dailyLossStopExpiryTopOnly = True
+                gate.status = "DAILY_LOSS_STOP_EXPIRY_TOP_BYPASS"
+                gate.message = (
+                    f"Daily loss stop bypass: session ₹{session_pnl:,.0f} ≤ −₹{loss_stop:,.0f} "
+                    "— same-day expiry top trades only."
+                )
+                return gate
         gate.newEntriesAllowed = False
         gate.status = "DAILY_LOSS_STOP"
         gate.message = (

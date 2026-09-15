@@ -57,6 +57,7 @@ PAD_LANE_FTV_MODES = frozenset(
 def pad_lane_pre_lift(evidence: Mapping[str, Any]) -> bool:
     return bool(
         evidence.get("slowGrindSuddenLift")
+        or evidence.get("slowGrindConsolidationBase")
         or evidence.get("fastBullishLocalBase")
         or evidence.get("squeezeRelease")
         or evidence.get("indexLedOptionLag")
@@ -76,6 +77,8 @@ def pad_lane_cold_velocity_ok(
     tier = str(evidence.get("tier") or "").upper()
     local_move = float(evidence.get("localBaseMovePct") or 0)
     if evidence.get("slowGrindSuddenLift") and -0.8 <= v3 <= 1.5:
+        return True
+    if evidence.get("slowGrindConsolidationBase") and -0.8 <= v3 <= 1.5:
         return True
     if evidence.get("stealthCvdCoil") and -0.5 <= v3 <= 1.0:
         return True
@@ -1807,6 +1810,15 @@ def pad_lane_early_near_miss_waive(
     settings = get_settings()
     if not bool(getattr(settings, "pad_lane_early_near_miss_waive_enabled", True)):
         return False
+    from app.engines.rally_capture import explosion_near_miss_waive
+
+    if explosion_near_miss_waive(
+        alert if isinstance(alert, dict) else None,
+        snap=snap,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return True
     from app.engines.building_ftv_gates import (
         PAD_LANE_READY_REASONS,
         pad_lane_ready_reason,

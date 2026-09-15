@@ -46,11 +46,12 @@ class RiskEngine:
         strike: float = 0.0,
         stop_points: float = 3.0,
         ignore_per_trade_risk_cap: bool = False,
+        ignore_daily_loss_stop: bool = False,
     ) -> tuple[bool, str]:
         settings = get_settings()
         cap = get_capital_snapshot()
 
-        if self.safe_mode:
+        if self.safe_mode and not ignore_daily_loss_stop:
             return False, "safe_mode_active"
 
         if not settings.auto_trading_enabled:

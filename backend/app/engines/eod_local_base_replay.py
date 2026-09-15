@@ -23,6 +23,7 @@ import json
 import zipfile
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -65,14 +66,27 @@ class _ReplayDateTime(datetime):
         return cls.current.astimezone(tz)
 
 
-def _load_batches(date: str) -> list[dict[str, Any]]:
+def _load_batches(date: str, *, settings: Any = None) -> list[dict[str, Any]]:
+    from app.config import get_settings
     from app.services.radar_archive import archive_path
     from app.services.radar_learning import premium_tape_path, read_premium_tape
 
-    tape = premium_tape_path(date)
+    s = settings or get_settings()
+    configured = str(getattr(s, "radar_archive_dir", "") or "").strip()
+    if configured:
+        zip_path = Path(configured) / f"radar-{date}.zip"
+        tape_root = Path(getattr(s, "trade_store_dir", "") or "") / "radar_archives" / "telemetry"
+        tape = tape_root / f"{date}.premium.jsonl"
+        if not tape.exists():
+            tape = premium_tape_path(date)
+    else:
+        zip_path = archive_path(date)
+        tape = premium_tape_path(date)
+
     if tape.exists():
+        if configured:
+            return _read_premium_jsonl(tape)
         return read_premium_tape(date)
-    zip_path = archive_path(date)
     if not zip_path.exists():
         return []
     with zipfile.ZipFile(zip_path, "r") as archive:
@@ -80,12 +94,22 @@ def _load_batches(date: str) -> list[dict[str, Any]]:
         member = "premium_tape.jsonl" if "premium_tape.jsonl" in names else None
         if member is None:
             return []
-        rows: list[dict[str, Any]] = []
-        for line in archive.read(member).decode("utf-8").splitlines():
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-        return rows
+        return _read_premium_jsonl_lines(
+            archive.read(member).decode("utf-8").splitlines()
+        )
+
+
+def _read_premium_jsonl_lines(lines: list[str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        line = line.strip()
+        if line:
+            rows.append(json.loads(line))
+    return rows
+
+
+def _read_premium_jsonl(path: Path) -> list[dict[str, Any]]:
+    return _read_premium_jsonl_lines(path.read_text(encoding="utf-8").splitlines())
 
 
 def _sample_spot_closes_from_history(
@@ -299,6 +323,7 @@ def evaluate_local_base_entry(
     snap: SymbolSnapshot,
     *,
     settings: Any = None,
+    day_mode: str = "",
 ) -> tuple[bool, str, Optional[str], dict[str, Any]]:
     """Return (allowed, reason, moment_type, ranking) for one radar alert."""
     s = settings or get_settings()
@@ -326,6 +351,7 @@ def evaluate_local_base_entry(
         ranking,
         top_moments_only_enabled=bool(getattr(s, "top_moments_only_enabled", True)),
         min_grade=str(getattr(s, "top_moments_min_grade", "A") or "A"),
+        day_mode=day_mode,
         readiness_reason=lift_reason if (ready or pad_lane_waive) else "",
     )
     if not allowed:
@@ -394,9 +420,216 @@ def evaluate_local_base_entry(
     return True, lift_reason, moment, ranking
 
 
+def evaluate_replay_structural_gates(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+    state: Any,
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    settings: Any = None,
+    ranking: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
+    """Live structural/pretrade entry gates for EOD replay (respects Settings enable flags)."""
+    s = settings or get_settings()
+    structural = bool(getattr(s, "eod_replay_structural_gates_enabled", True))
+    pretrade = bool(getattr(s, "eod_replay_pretrade_enabled", False))
+    if not structural and not pretrade:
+        return True, "ok"
+
+    from app.models.schemas import AutoTraderState, Side as SideEnum
+
+    replay_state = state if isinstance(state, AutoTraderState) else AutoTraderState()
+    candidate = _candidate_from_alert(alert, snap)
+    if ranking:
+        candidate.pretrade_meta = {"causalRanking": ranking}
+
+    sym = str(getattr(candidate, "symbol", "") or snap.symbol or "")
+    side = getattr(candidate, "side", SideEnum.PUT)
+    strike = float(getattr(candidate, "strike", 0) or 0)
+
+    if structural:
+        from app.engines.session_mode_feedback import (
+            failed_launch_reentry_blocked,
+            peak_fade_same_side_reentry_blocked,
+            session_same_side_loss_reentry_blocked,
+            session_same_strike_loss_reentry_blocked,
+        )
+
+        for blocked_fn, kwargs in (
+            (
+                failed_launch_reentry_blocked,
+                {"symbol": sym, "side": side, "strike": strike},
+            ),
+            (
+                peak_fade_same_side_reentry_blocked,
+                {"symbol": sym, "side": side},
+            ),
+            (
+                session_same_side_loss_reentry_blocked,
+                {"symbol": sym, "side": side},
+            ),
+            (
+                session_same_strike_loss_reentry_blocked,
+                {"symbol": sym, "side": side, "strike": strike},
+            ),
+        ):
+            blocked, meta = blocked_fn(replay_state, **kwargs)
+            if blocked:
+                return False, str(meta.get("reason") or "session_reentry_blocked")
+
+    if pretrade:
+        from app.engines.pretrade_validator import validate_candidate
+
+        ok, reason, _meta = validate_candidate(
+            candidate, replay_state, snapshots=snapshots,
+        )
+        if not ok:
+            return False, reason
+
+    if not structural:
+        return True, "ok"
+
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return True, "ok"
+    event = getattr(candidate, "explosion_event", None)
+    if event is None:
+        return True, "ok"
+
+    from app.engines.explosion_entry_guards import (
+        coil_top_entry_blocked,
+        deep_itm_near_strike_substitute_blocked,
+        detect_fake_explosion_trap,
+        immature_explosion_blocked,
+        session_trough_late_chase_blocked,
+    )
+    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+    ict = analyze_explosion_event_ict(event, snap)
+    immature, imm_reason = immature_explosion_blocked(
+        event, ict=ict, alert=alert if isinstance(alert, dict) else None,
+    )
+    if immature:
+        return False, imm_reason
+
+    trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
+        candidate, snap, state=replay_state, ict=ict,
+    )
+    if trap_block or trap_meta.get("action") == "block":
+        from app.engines.building_ftv_gates import building_rip_bypasses_fake_trap
+
+        if not building_rip_bypasses_fake_trap(candidate=candidate):
+            return False, trap_reason
+
+    from app.engines.chop_live_guards import (
+        armed_base_shallow_launch_blocked,
+        chop_live_entry_blocked,
+    )
+
+    armed_blocked, armed_reason, _armed_meta = armed_base_shallow_launch_blocked(
+        candidate, snap,
+    )
+    if armed_blocked:
+        return False, armed_reason
+
+    chop_blocked, chop_reason, _chop_meta = chop_live_entry_blocked(
+        candidate,
+        snap,
+        replay_state,
+        snapshots=snapshots,
+    )
+    if chop_blocked:
+        return False, chop_reason
+
+    alert_row = alert if isinstance(alert, dict) else {}
+    st_blocked, st_reason = session_trough_late_chase_blocked(
+        event,
+        ict=ict,
+        alert=alert_row,
+        ranking=ranking if isinstance(ranking, dict) else None,
+    )
+    if st_blocked:
+        return False, st_reason
+
+    cand_score = float(alert.get("score") or getattr(candidate, "score", 0) or 0)
+    itm_blocked, itm_reason = deep_itm_near_strike_substitute_blocked(
+        side,
+        strike,
+        snap,
+        settings=s,
+        candidate_score=cand_score,
+    )
+    if itm_blocked:
+        return False, itm_reason
+
+    coil_blocked, coil_reason = coil_top_entry_blocked(
+        event,
+        tier=str(getattr(candidate, "tier", "") or alert.get("tier") or ""),
+        velocity_3s=float(getattr(event, "velocity_3s", 0) or alert.get("velocity3s") or 0),
+        snapshots=snapshots,
+        state=replay_state,
+    )
+    if coil_blocked:
+        return False, coil_reason
+
+    return True, "ok"
+
+
+def _record_replay_closed_trade(
+    replay_state: Any,
+    trade: dict[str, Any],
+    *,
+    entry_ctx: dict[str, Any],
+    session_date: str,
+) -> None:
+    """Append simulated close so session reentry guards see replay history."""
+    from app.models.schemas import AutoTraderState, PaperTrade, Side as SideEnum, StrategyType
+
+    if not isinstance(replay_state, AutoTraderState):
+        return
+    side_raw = str(trade.get("side") or "PUT").upper()
+    side = SideEnum.CALL if side_raw == "CALL" else SideEnum.PUT
+    entry_dt = trade.get("_entryDt")
+    exit_dt = trade.get("_exitDt")
+    if entry_dt is None or exit_dt is None:
+        return
+    ep = float(trade.get("entryPremium") or 0)
+    peak_pct = float(trade.get("peakPct") or 0)
+    best_pts = (peak_pct / 100.0 * ep) if ep > 0 else 0.0
+    sym = str(trade.get("symbol") or "")
+    trade_id = f"replay-{sym}-{side_raw}-{int(trade.get('strike') or 0)}-{exit_dt.strftime('%H%M%S')}"
+    replay_state.closedPaperTrades.append(
+        PaperTrade(
+            id=trade_id,
+            symbol=sym,
+            side=side,
+            strike=float(trade.get("strike") or 0),
+            entryPremium=ep,
+            currentPremium=float(trade.get("exitPremium") or ep),
+            lots=int(trade.get("lots") or 1),
+            pnlInr=float(trade.get("pnlInr") or 0),
+            pnlPoints=float(trade.get("movePct") or 0),
+            openedAt=entry_dt,
+            closedAt=exit_dt,
+            status="CLOSED",
+            exitReason=str(trade.get("exitReason") or ""),
+            sessionDate=session_date,
+            strategyType=StrategyType.EXPLOSIVE,
+            bestPnlPoints=best_pts,
+            entryContext={**entry_ctx, "selectionMode": "explosion"},
+        )
+    )
+    replay_state.lastExit = {
+        "at": exit_dt.isoformat(),
+        "pnlInr": float(trade.get("pnlInr") or 0),
+        "symbol": sym,
+        "side": side_raw,
+    }
+
+
 def _install_replay_clock(replay_dt_class: type) -> list[tuple[Any, Any]]:
     """Point power-hour / chop minute helpers at the replay clock."""
     import app.engines.chop_day_guards as chop_guards
+    import app.engines.elite_trade_budget as elite_budget
     import app.engines.power_hour_guards as power_hour
 
     def _minutes_from_replay() -> int:
@@ -405,10 +638,20 @@ def _install_replay_clock(replay_dt_class: type) -> list[tuple[Any, Any]]:
             ts = ts.astimezone(IST)
         return ts.hour * 60 + ts.minute
 
+    def _iso_week_from_replay(dt: datetime | None = None) -> str:
+        ts = dt if dt is not None else replay_dt_class.current
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=IST)
+        else:
+            ts = ts.astimezone(IST)
+        return ts.strftime("%G-W%V")
+
     saved: list[tuple[Any, Any]] = []
     for module in (power_hour, chop_guards):
         saved.append((module, module._minutes_now))
         module._minutes_now = _minutes_from_replay
+    saved.append((elite_budget, elite_budget._iso_week))
+    elite_budget._iso_week = _iso_week_from_replay
     return saved
 
 
@@ -491,7 +734,7 @@ def evaluate_replay_live_gates(
             )
             if not session_ok:
                 return False, session_reason
-        if not candidate_qualifies_power_hour_top_trade(candidate):
+        if not candidate_qualifies_power_hour_top_trade(candidate, snapshots=snapshots):
             return False, "power_hour_top_only"
 
     blocked, dir_reason = check_directional_side_lock(
@@ -590,6 +833,60 @@ def _contract_key(symbol: str, side: str, strike: float) -> str:
     return f"{symbol.upper()}:{side.upper()}:{strike:g}"
 
 
+_PAD_LANE_REASONS = frozenset({
+    "building_coil_pad_ready",
+    "building_armed_prelaunch_ready",
+    "early_radar_pad_ready",
+    "slow_grind_sudden_lift_ready",
+    "slow_grind_armed_trough_ready",
+})
+
+
+def _is_pad_lane_entry(entry_reason: str) -> bool:
+    reason = str(entry_reason or "").strip().lower()
+    if reason in _PAD_LANE_REASONS:
+        return True
+    return "pad" in reason and "ready" in reason
+
+
+def _eod_replay_quality_blocks_entry(
+    alert: dict[str, Any],
+    assessment: dict[str, Any],
+    *,
+    entry_reason: str,
+    settings: Any,
+) -> tuple[bool, str]:
+    """Extra full-tape filters to drop BUILDING pad chase / low-score bypass entries."""
+    tier_u = str(alert.get("tier") or "").upper()
+    if bool(getattr(settings, "eod_replay_require_elite_or_exploding_tier", True)):
+        if tier_u not in {"ELITE", "EXPLODING"}:
+            return False, "eod_replay_building_tier_blocked"
+
+    base_rel = _f(alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct"))
+    pad_lane = _is_pad_lane_entry(entry_reason) or tier_u == "BUILDING"
+
+    if bool(getattr(settings, "eod_replay_block_legacy_bypass_below_min_score", True)):
+        if assessment.get("legacyBypass") and not assessment.get("mustTake"):
+            min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
+            if float(assessment.get("eliteScore") or 0) + 1e-6 < min_score:
+                return False, "eod_replay_legacy_bypass_low_score"
+
+    if pad_lane:
+        max_pad = float(getattr(settings, "eod_replay_pad_max_off_base_pct", 15.0) or 15.0)
+        if max_pad < 900 and base_rel > max_pad + 1e-6:
+            return False, "eod_replay_pad_chase_blocked"
+        if assessment:
+            min_pad_score = float(
+                getattr(settings, "eod_replay_min_elite_score_for_pad", 90.0) or 90.0
+            )
+            if min_pad_score > 0:
+                score = float(assessment.get("eliteScore") or 0)
+                if score + 1e-6 < min_pad_score and not assessment.get("mustTake"):
+                    return False, f"eod_replay_pad_score_below_{min_pad_score:g}"
+
+    return True, "ok"
+
+
 def _simulate_trade_from_entry(
     *,
     symbol: str,
@@ -602,9 +899,14 @@ def _simulate_trade_from_entry(
     forward: list[tuple[datetime, float]],
     settings: Any,
     entry_ctx: dict[str, Any],
+    assessment: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Walk forward on premium tape from entry until production exit fires."""
     from app.engines.capital_allocator import lot_multiplier, max_lots_for_capital
+    from app.engines.elite_runner_exit_bundle import (
+        apply_elite_runner_exit_bundle,
+        refresh_runner_exit_plans,
+    )
     from app.engines.explosion_profit import evaluate_explosion_exit
     from app.engines.moment_stage_trail import build_moment_stage_plan
     from app.models.schemas import PaperTrade, Side as SideEnum, StrategyType
@@ -619,23 +921,12 @@ def _simulate_trade_from_entry(
     stop_pts = max(min_sl_pts, ep * max(0.0, min_sl_pct))
     off = (ep - base) / base * 100.0 if base > 0 else 0.0
 
-    plan = build_moment_stage_plan(
-        entry_premium=ep,
-        base_premium=base,
-        velocity_3s=_f(entry_ctx.get("velocity3s"), 3.0),
-        volume_surge=_f(entry_ctx.get("volumeSurge"), 2.5),
-        session_move_pct=30.0,
-        flat_then_vertical=bool(entry_ctx.get("ictFlatThenVertical")),
-        max_profit=True,
-    )
     ctx = {
         **entry_ctx,
         "momentType": entry_ctx.get("momentType") or "flat_then_vertical",
         "ictFlatThenVertical": bool(entry_ctx.get("ictFlatThenVertical")),
-        "maxProfitCapture": True,
         "ictBasePremium": base,
         "eliteFullLot": True,
-        "vBaseFtvRunner": True,
         "localBaseBaseRelPct": round(off, 2),
         "exitPlan": {
             "stopPoints": round(stop_pts, 2),
@@ -643,8 +934,46 @@ def _simulate_trade_from_entry(
             "targetPoints": 180.0,
         },
     }
-    if plan:
-        ctx.update(plan)
+    if assessment is not None:
+        ctx["eliteAssessment"] = assessment
+
+    runner_stamped = apply_elite_runner_exit_bundle(
+        ctx,
+        assessment=assessment,
+        base_rel_pct=off,
+        first_lift=bool(
+            entry_ctx.get("ictFirstLift") or entry_ctx.get("firstLiftCapture")
+        ),
+        ict_flat_vertical=bool(entry_ctx.get("ictFlatThenVertical")),
+        tier=tier,
+        settings=s,
+    )
+    if runner_stamped:
+        refresh_runner_exit_plans(
+            ctx,
+            entry_premium=ep,
+            base_premium=base,
+            exit_plan=ctx.get("exitPlan") if isinstance(ctx.get("exitPlan"), dict) else None,
+            velocity_3s=_f(entry_ctx.get("velocity3s"), 0.0),
+            volume_surge=_f(entry_ctx.get("volumeSurge"), 1.0),
+            session_move_pct=30.0,
+            premium_fvg=bool(entry_ctx.get("ictPremiumFvg")),
+            flat_then_vertical=bool(entry_ctx.get("ictFlatThenVertical")),
+            mega_rip=bool(entry_ctx.get("ictMegaRip")),
+            settings=s,
+        )
+    else:
+        plan = build_moment_stage_plan(
+            entry_premium=ep,
+            base_premium=base,
+            velocity_3s=_f(entry_ctx.get("velocity3s"), 3.0),
+            volume_surge=_f(entry_ctx.get("volumeSurge"), 2.5),
+            session_move_pct=30.0,
+            flat_then_vertical=bool(entry_ctx.get("ictFlatThenVertical")),
+            max_profit=False,
+        )
+        if plan:
+            ctx.update(plan)
 
     wnow = datetime.now(IST)
     tr = PaperTrade(
@@ -671,7 +1000,14 @@ def _simulate_trade_from_entry(
         best = max(best, pj - ep)
         tr.bestPnlPoints = best
         peak = max(peak, pj)
-        v = 2.0 if pj >= peak else -0.8
+        lookback = tj - timedelta(seconds=3)
+        ref_p = ep
+        for t_prev, p_prev in forward:
+            if t_prev > tj:
+                break
+            if t_prev <= lookback:
+                ref_p = p_prev
+        v = round(pj - ref_p, 3)
         tr.entryContext["liveVelocity3s"] = v
         reason, _pnl = evaluate_explosion_exit(tr, pj, tier, units, live_velocity_3s=v)
         if reason:
@@ -738,6 +1074,8 @@ def replay_local_base_day(
     window_start: Optional[str] = None,
     window_end: Optional[str] = None,
     side_filter: Optional[str] = None,
+    seed_session_loss_inr: float = 0.0,
+    replay_state: Any = None,
 ) -> dict[str, Any]:
     """Replay one session's premium tape with production local-base entry gates."""
     from app.engines import explosion_detector, ict_breakout_monitor, session_timing
@@ -747,7 +1085,10 @@ def replay_local_base_day(
     )
 
     s = settings or get_settings()
-    batches = sorted(_load_batches(date), key=lambda row: str(row.get("ts") or ""))
+    from app.config import set_settings_override
+
+    set_settings_override(s)
+    batches = sorted(_load_batches(date, settings=s), key=lambda row: str(row.get("ts") or ""))
     if not batches:
         return {
             "date": date,
@@ -788,6 +1129,15 @@ def replay_local_base_day(
     from app.engines.directional_lock import record_trade_side, reset_directional_lock
 
     reset_directional_lock()
+    from app.engines.chop_day_guards import (
+        is_large_loss_pause_elite_candidate,
+        is_loss_streak_elite_bypass_candidate,
+        record_session_trade_close,
+        reset_session_guards,
+        resolve_session_entry_pause,
+    )
+
+    reset_session_guards()
     original_datetimes = (
         explosion_detector.datetime,
         ict_breakout_monitor.datetime,
@@ -806,6 +1156,14 @@ def replay_local_base_day(
     trades_per_key: dict[str, int] = defaultdict(int)
     next_ok_after: Optional[datetime] = None
 
+    from app.models.schemas import AutoTraderState
+
+    if replay_state is None:
+        replay_state = AutoTraderState()
+    elite_engine = bool(getattr(s, "elite_trade_engine_enabled", False))
+    daily_max = int(getattr(s, "eod_replay_daily_max_trades", 0) or 0)
+    session_trades_taken = 0
+
     try:
         explosion_detector.datetime = _ReplayDateTime
         ict_breakout_monitor.datetime = _ReplayDateTime
@@ -814,6 +1172,12 @@ def replay_local_base_day(
         replay_clock_saved = _install_replay_clock(_ReplayDateTime)
 
         live_gates = bool(getattr(s, "eod_replay_live_session_gates_enabled", True))
+        session_pause_enabled = bool(
+            getattr(s, "session_loss_pause_enabled", False)
+        ) and live_gates
+
+        if session_pause_enabled and float(seed_session_loss_inr or 0) > 0:
+            record_session_trade_close(-abs(float(seed_session_loss_inr)))
 
         for batch in batches:
             ts_raw = batch.get("ts")
@@ -909,7 +1273,15 @@ def replay_local_base_day(
             if not batch_snapshots:
                 continue
 
+            from app.engines.chop_day_guards import resolve_session_day_mode
+
+            batch_day_mode = resolve_session_day_mode(batch_snapshots)
+
             if next_ok_after is not None and ts < next_ok_after:
+                continue
+
+            if daily_max > 0 and session_trades_taken >= daily_max:
+                gate_stats["eod_replay_daily_cap"] += 1
                 continue
 
             if win_start is not None and ts < win_start:
@@ -937,7 +1309,23 @@ def replay_local_base_day(
             if session_gate_blocked:
                 continue
 
-            ranked_candidates: list[tuple[float, str, SymbolSnapshot, dict[str, Any], str, Optional[str], dict[str, Any]]] = []
+            elite_only = False
+            large_loss_elite_only = False
+            if session_pause_enabled:
+                entry_paused, pause_reason, pause_meta = resolve_session_entry_pause(
+                    batch_snapshots,
+                )
+                if entry_paused:
+                    gate_stats[pause_reason] += 1
+                    continue
+                elite_only = bool(pause_meta.get("lossStreakEliteOnly"))
+                large_loss_elite_only = bool(pause_meta.get("largeLossPauseBypass"))
+                if large_loss_elite_only:
+                    gate_stats["large_loss_pause_bypass_active"] += 1
+                elif elite_only:
+                    gate_stats["loss_streak_elite_bypass_active"] += 1
+
+            ranked_candidates: list[dict[str, Any]] = []
             for sym, snap in batch_snapshots.items():
                 symbol_state = state[sym]
                 for alert in snap.explosionAlerts or []:
@@ -960,7 +1348,7 @@ def replay_local_base_day(
                     alert_eval = _enrich_alert_from_contract(alert, contract)
 
                     allowed, reason, moment, ranking = evaluate_local_base_entry(
-                        alert_eval, snap, settings=s,
+                        alert_eval, snap, settings=s, day_mode=batch_day_mode,
                     )
                     if not allowed:
                         gate_stats[reason] += 1
@@ -973,6 +1361,87 @@ def replay_local_base_day(
                                 "baseRelPct": alert.get("ictBaseRelativeMovePct"),
                                 "allowed": False,
                                 "reason": reason,
+                            })
+                        continue
+
+                    struct_ok, struct_reason = evaluate_replay_structural_gates(
+                        alert_eval,
+                        snap,
+                        replay_state,
+                        batch_snapshots,
+                        settings=s,
+                        ranking=ranking,
+                    )
+                    if not struct_ok:
+                        gate_stats[struct_reason] += 1
+                        if len(signal_rows) < 500:
+                            signal_rows.append({
+                                "ts": ts.isoformat(),
+                                "key": key,
+                                "tier": alert.get("tier"),
+                                "premium": alert.get("premium"),
+                                "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                                "allowed": False,
+                                "reason": struct_reason,
+                            })
+                        continue
+
+                    if elite_only:
+                        candidate = _candidate_from_alert(alert_eval, snap)
+                        elite_ok = (
+                            is_large_loss_pause_elite_candidate(candidate, batch_snapshots)
+                            if large_loss_elite_only
+                            else is_loss_streak_elite_bypass_candidate(
+                                candidate, snapshots=batch_snapshots,
+                            )
+                        )
+                        if not elite_ok:
+                            gate_stats["session_pause_elite_only"] += 1
+                            continue
+
+                    assessment: dict[str, Any] = {}
+                    if elite_engine:
+                        from app.engines.elite_trade_budget import elite_budget_blocks_entry
+
+                        blocked, budget_reason, assessment = elite_budget_blocks_entry(
+                            replay_state,
+                            ranking.get("evidence") or _alert_evidence(alert_eval, snap),
+                            ranking,
+                            settings=s,
+                            snapshots=batch_snapshots,
+                            day_mode=batch_day_mode,
+                        )
+                        if blocked:
+                            gate_stats[budget_reason] += 1
+                            if len(signal_rows) < 500:
+                                signal_rows.append({
+                                    "ts": ts.isoformat(),
+                                    "key": key,
+                                    "tier": alert.get("tier"),
+                                    "premium": alert.get("premium"),
+                                    "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                                    "allowed": False,
+                                    "reason": budget_reason,
+                                })
+                            continue
+
+                    quality_ok, quality_reason = _eod_replay_quality_blocks_entry(
+                        alert_eval,
+                        assessment,
+                        entry_reason=reason,
+                        settings=s,
+                    )
+                    if not quality_ok:
+                        gate_stats[quality_reason] += 1
+                        if len(signal_rows) < 500:
+                            signal_rows.append({
+                                "ts": ts.isoformat(),
+                                "key": key,
+                                "tier": alert.get("tier"),
+                                "premium": alert.get("premium"),
+                                "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                                "allowed": False,
+                                "reason": quality_reason,
                             })
                         continue
 
@@ -1007,15 +1476,43 @@ def replay_local_base_day(
                         settings=s,
                         lift_reason=reason,
                     )
-                    ranked_candidates.append(
-                        (rank_score, sym, snap, alert_eval, key, moment, ranking),
-                    )
+                    from app.engines.elite_moment_dedup import parse_moment_key
+
+                    armed_at = alert_eval.get("ictBaseArmedAt") or ts.isoformat()
+                    ranked_candidates.append({
+                        "rankScore": rank_score,
+                        "sym": sym,
+                        "snap": snap,
+                        "alert": alert_eval,
+                        "key": key,
+                        "moment": moment,
+                        "ranking": ranking,
+                        "assessment": assessment,
+                        "entryReason": reason,
+                        "momentKey": parse_moment_key(armed_at),
+                        "eliteScore": float(assessment.get("eliteScore") or 0),
+                        "setupPriority": int(assessment.get("setupPriority") or 9),
+                        "ts": ts.isoformat(),
+                    })
 
             if not ranked_candidates:
                 continue
 
-            ranked_candidates.sort(key=lambda row: row[0], reverse=True)
-            _, sym, snap, alert, key, moment, ranking = ranked_candidates[0]
+            from app.engines.elite_moment_dedup import dedupe_same_moment_top1, row_rank_key
+
+            deduped = dedupe_same_moment_top1(
+                ranked_candidates,
+                moment_key_fn=lambda row: row["momentKey"],
+            )
+            pick = max(deduped, key=row_rank_key)
+            sym = pick["sym"]
+            snap = pick["snap"]
+            alert = pick["alert"]
+            key = pick["key"]
+            moment = pick["moment"]
+            ranking = pick["ranking"]
+            assessment = pick.get("assessment") or {}
+            entry_reason = pick.get("entryReason") or ""
             strike_v = _f(alert.get("strike"))
             side = str(alert.get("side") or "").upper()
             tier = str(alert.get("tier") or "").upper()
@@ -1028,9 +1525,11 @@ def replay_local_base_day(
                 ]
                 base = min(hist) if hist else ep
 
-            _, entry_reason, moment, ranking = evaluate_local_base_entry(
-                alert, snap, settings=s,
+            _, entry_reason_check, moment, ranking = evaluate_local_base_entry(
+                alert, snap, settings=s, day_mode=batch_day_mode,
             )
+            if not entry_reason:
+                entry_reason = entry_reason_check
             forward = [
                 (t, p)
                 for t, p in premium_series.get(key, [])
@@ -1061,8 +1560,29 @@ def replay_local_base_day(
                 forward=forward,
                 settings=s,
                 entry_ctx=entry_ctx,
+                assessment=assessment if assessment else None,
             )
             raw_candidates.append(trade)
+            _record_replay_closed_trade(
+                replay_state,
+                trade,
+                entry_ctx=entry_ctx,
+                session_date=date,
+            )
+            session_trades_taken += 1
+            if elite_engine and assessment:
+                from app.engines.elite_trade_budget import record_elite_trade_entry
+
+                record_elite_trade_entry(
+                    replay_state,
+                    assessment,
+                    symbol=sym,
+                    side=side,
+                    strike=strike_v,
+                    settings=s,
+                )
+            if session_pause_enabled:
+                record_session_trade_close(float(trade.get("pnlInr") or 0))
             trades_per_key[key] += 1
             record_trade_side(sym, Side(side), snap)
             cooldown_until[key] = trade["_exitDt"] + timedelta(
@@ -1085,6 +1605,9 @@ def replay_local_base_day(
                 })
 
     finally:
+        from app.config import set_settings_override
+
+        set_settings_override(None)
         (
             explosion_detector.datetime,
             ict_breakout_monitor.datetime,
@@ -1094,6 +1617,7 @@ def replay_local_base_day(
         if replay_clock_saved:
             _restore_replay_clock(replay_clock_saved)
         reset_detector_state_for_tests()
+        reset_session_guards()
 
     taken = apply_portfolio_limits(raw_candidates, settings=s)
     for t in taken:
@@ -1125,11 +1649,83 @@ def replay_local_base_day(
         "signals": signal_rows[:100],
         "note": (
             "Full-tape replay with production top-moment + first-lift + "
-            "local-base window gates + live session gates (power hour, "
-            "directional lock, best-side rank). One position at a time + "
-            "daily loss stop."
+            "local-base window gates + elite budget/dedup + assessment-based "
+            "exit bundle + live session gates (power hour, directional lock, "
+            "best-side rank). One position at a time + daily loss stop."
         ),
         "trades": taken,
+    }
+
+
+def generate_lever_replay_compare(
+    date: str,
+    *,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    side: Optional[str] = None,
+) -> dict[str, Any]:
+    """Run premium-tape replay twice — levers OFF vs ON (Sep2 afternoon miss analysis)."""
+    from copy import deepcopy
+
+    from app.config import Settings
+
+    base = get_settings()
+    off_data = deepcopy(base.model_dump())
+    off_data["top_moments_exploding_elite_grade_b_enabled"] = False
+    off_data["top_moments_momentum_rally_grade_b_enabled"] = False
+    off_data["top_moments_day_type_grade_policy_enabled"] = False
+    off_data["top_moments_fast_day_grade_c_enabled"] = False
+    off_data["session_large_loss_pause_bypass_enabled"] = False
+    off_data["index_rally_side_flip_neutral_macd_mom5_waiver_enabled"] = False
+    off_settings = Settings(**off_data)
+
+    on_data = deepcopy(base.model_dump())
+    on_data["top_moments_exploding_elite_grade_b_enabled"] = True
+    on_data["top_moments_momentum_rally_grade_b_enabled"] = True
+    on_data["index_rally_side_flip_neutral_macd_mom5_waiver_enabled"] = True
+    on_settings = Settings(**on_data)
+
+    kwargs = {
+        "window_start": start,
+        "window_end": end,
+        "side_filter": side,
+    }
+    off = replay_local_base_day(date, settings=off_settings, **kwargs)
+    on = replay_local_base_day(date, settings=on_settings, **kwargs)
+
+    def _trade_key(row: dict[str, Any]) -> str:
+        return "|".join(
+            [
+                str(row.get("entryAt") or ""),
+                str(row.get("symbol") or ""),
+                str(row.get("side") or ""),
+                str(row.get("strike") or ""),
+            ]
+        )
+
+    off_trades = list(off.get("trades") or [])
+    on_trades = list(on.get("trades") or [])
+    off_keys = {_trade_key(t) for t in off_trades}
+    unlocked = [t for t in on_trades if _trade_key(t) not in off_keys]
+
+    return {
+        "date": date,
+        "window": {"start": start, "end": end, "side": side},
+        "leversOff": off,
+        "leversOn": on,
+        "delta": {
+            "tradeCount": int(on.get("tradeCount") or len(on_trades))
+            - int(off.get("tradeCount") or len(off_trades)),
+            "netPnlInr": round(
+                float(on.get("netPnlInr") or 0) - float(off.get("netPnlInr") or 0),
+                0,
+            ),
+        },
+        "tradesUnlockedByLevers": unlocked,
+        "note": (
+            "OFF disables grade-B EXPLODING pad waiver, MOMENTUM RALLY grade loosening, "
+            "and NEUTRAL MACD+mom5 index side-flip waiver."
+        ),
     }
 
 
@@ -1192,13 +1788,22 @@ def generate_eod_local_base_replay_week(
     """Roll up local-base replays across a validation week (default Mon–Fri)."""
     from datetime import datetime as dt
 
+    from app.config import get_settings
+    from app.models.schemas import AutoTraderState
+
+    s = get_settings()
+    replay_state = (
+        AutoTraderState()
+        if bool(getattr(s, "eod_replay_persist_weekly_elite_budget", True))
+        else None
+    )
     start = dt.strptime(start_date, "%Y-%m-%d")
     day_rows: list[dict[str, Any]] = []
     for offset in range(days):
         date = (start + timedelta(days=offset)).strftime("%Y-%m-%d")
         if date.weekday() >= 5:
             continue
-        day_rows.append(generate_eod_local_base_replay(date))
+        day_rows.append(replay_local_base_day(date, settings=s, replay_state=replay_state))
 
     taken = [r for r in day_rows if r.get("status") == "ok"]
     return {

@@ -43,6 +43,14 @@ def snapshots_have_power_hour_top_signal(
 
     from app.engines.best_side_selection import snapshots_have_dominant_side_surge
 
+    if bool(getattr(get_settings(), "expiry_power_hour_deep_itm_bypass_top_only", True)):
+        from app.engines.bad_day_routing import (
+            snapshots_have_expiring_deep_itm_power_hour_setup,
+        )
+
+        if snapshots_have_expiring_deep_itm_power_hour_setup(snapshots):
+            return True
+
     return (
         snapshots_have_expiry_elite_top(snapshots)
         or snapshots_have_top_ftv_or_v(snapshots)
@@ -52,13 +60,22 @@ def snapshots_have_power_hour_top_signal(
     )
 
 
-def candidate_qualifies_power_hour_top_trade(candidate: Any) -> bool:
+def candidate_qualifies_power_hour_top_trade(
+    candidate: Any,
+    *,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
+) -> bool:
     """Per-candidate check during power hour."""
     from app.engines.top_ftv_v_expiry_bypass import is_top_ftv_or_v_candidate
     from app.engines.top_moment_gate import top_moment_entry_allowed
     from app.engines.trade_ranking import rank_entry_candidate
 
     if is_top_ftv_or_v_candidate(candidate):
+        return True
+
+    from app.engines.bad_day_routing import candidate_is_expiry_deep_itm_trade
+
+    if candidate_is_expiry_deep_itm_trade(candidate, snapshots or {}, power_hour_only=True):
         return True
 
     from app.engines.best_side_selection import dominant_side_qualifies_power_hour
@@ -69,11 +86,26 @@ def candidate_qualifies_power_hour_top_trade(candidate: Any) -> bool:
     ranking = rank_entry_candidate(candidate)
     evidence = ranking.get("evidence") or {}
     settings = get_settings()
+
+    day_mode = ""
+    if snapshots:
+        from app.engines.chop_day_guards import resolve_session_day_mode
+
+        day_mode = resolve_session_day_mode(snapshots)
+    else:
+        snap = getattr(candidate, "snap", None)
+        sym = str(getattr(snap, "symbol", "") or getattr(candidate, "symbol", "") or "").upper()
+        if snap is not None and sym:
+            from app.engines.chop_day_guards import resolve_session_day_mode
+
+            day_mode = resolve_session_day_mode({sym: snap})
+
     ok, _, _ = top_moment_entry_allowed(
         evidence,
         ranking,
         top_moments_only_enabled=True,
         min_grade=str(getattr(settings, "top_moments_min_grade", "A") or "A"),
+        day_mode=day_mode,
     )
     return ok
 
@@ -89,5 +121,11 @@ def check_power_hour_session_allowed(
         return True, "ok", meta
     if snapshots_have_power_hour_top_signal(snapshots):
         meta["powerHourTopSignal"] = True
+        from app.engines.bad_day_routing import (
+            snapshots_have_expiring_deep_itm_power_hour_setup,
+        )
+
+        if snapshots_have_expiring_deep_itm_power_hour_setup(snapshots):
+            meta["powerHourDeepItmSetup"] = True
         return True, "ok", meta
     return False, "power_hour_top_only", meta

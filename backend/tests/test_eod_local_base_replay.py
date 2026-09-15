@@ -10,18 +10,23 @@ from app.engines.eod_local_base_replay import (
     _ReplayDateTime,
     _chart_analysis_from_spot_history,
     _enrich_alert_from_contract,
+    _eod_replay_quality_blocks_entry,
     _install_replay_clock,
+    _is_pad_lane_entry,
     _parse_window_bound,
+    _record_replay_closed_trade,
     _replay_selection_rank,
     _restore_replay_clock,
     evaluate_local_base_entry,
     evaluate_replay_live_gates,
+    evaluate_replay_structural_gates,
     generate_eod_local_base_replay,
     generate_window_replay,
     replay_local_base_day,
     _spot_chart_from_history,
 )
-from app.models.schemas import Breadth, MarketPhase, Side, SpotChart, SymbolSnapshot
+from app.models.schemas import AutoTraderState, Breadth, MarketPhase, PaperTrade, Regime, Side, SpotChart, StrategyType, SymbolSnapshot
+from tests.mock_defaults import settings_mock
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -233,6 +238,28 @@ def test_generate_window_replay_delegates_to_day_replay():
     assert "12:07:00" in rep["note"]
 
 
+def test_window_replay_router_returns_error_payload_on_failure():
+    import asyncio
+
+    from app.routers.ai import window_replay
+
+    with patch(
+        "app.engines.eod_local_base_replay.generate_window_replay",
+        side_effect=RuntimeError("replay failed"),
+    ):
+        result = asyncio.run(
+            window_replay(
+                "2026-09-09",
+                start="12:07:00",
+                end="13:40:00",
+                side="CALL",
+            )
+        )
+    assert result["status"] == "error"
+    assert result["errorType"] == "RuntimeError"
+    assert "replay failed" in result["error"]
+
+
 def test_generate_eod_local_base_replay_includes_comparison():
     date = "2026-08-19"
     with (
@@ -383,3 +410,175 @@ def test_replay_clock_drives_power_hour_window():
     finally:
         power_hour._minutes_now = original
         power_hour.get_market_phase = original_phase
+
+
+def test_replay_clock_drives_elite_budget_iso_week():
+    import app.engines.elite_trade_budget as elite_budget
+
+    original = elite_budget._iso_week
+    try:
+        _ReplayDateTime.current = datetime(2026, 8, 19, 10, 0, 0, tzinfo=IST)
+        saved = _install_replay_clock(_ReplayDateTime)
+        assert elite_budget._iso_week() == "2026-W34"
+        _ReplayDateTime.current = datetime(2026, 9, 1, 10, 0, 0, tzinfo=IST)
+        assert elite_budget._iso_week() == "2026-W36"
+        _restore_replay_clock(saved)
+    finally:
+        elite_budget._iso_week = original
+
+
+def test_is_pad_lane_entry_recognizes_coil_pad():
+    assert _is_pad_lane_entry("building_coil_pad_ready")
+    assert not _is_pad_lane_entry("v_rip_session_low_ready")
+
+
+@patch("app.engines.eod_local_base_replay.get_settings")
+def test_eod_replay_quality_blocks_building_tier_when_enabled(mock_settings):
+    mock_settings.return_value = MagicMock(
+        eod_replay_require_elite_or_exploding_tier=True,
+        eod_replay_pad_max_off_base_pct=22.0,
+        eod_replay_min_elite_score_for_pad=90.0,
+        eod_replay_block_legacy_bypass_below_min_score=True,
+    )
+    ok, reason = _eod_replay_quality_blocks_entry(
+        {"tier": "BUILDING", "ictBaseRelativeMovePct": 12.0},
+        {"eliteScore": 92.0},
+        entry_reason="building_coil_pad_ready",
+        settings=mock_settings.return_value,
+    )
+    assert not ok
+    assert reason == "eod_replay_building_tier_blocked"
+
+
+@patch("app.engines.eod_local_base_replay.get_settings")
+def test_eod_replay_quality_blocks_pad_chase(mock_settings):
+    mock_settings.return_value = MagicMock(
+        eod_replay_require_elite_or_exploding_tier=True,
+        eod_replay_pad_max_off_base_pct=22.0,
+        eod_replay_min_elite_score_for_pad=90.0,
+        eod_replay_block_legacy_bypass_below_min_score=True,
+    )
+    ok, reason = _eod_replay_quality_blocks_entry(
+        {"tier": "ELITE", "ictBaseRelativeMovePct": 23.0},
+        {"eliteScore": 92.0},
+        entry_reason="building_coil_pad_ready",
+        settings=mock_settings.return_value,
+    )
+    assert not ok
+    assert reason == "eod_replay_pad_chase_blocked"
+
+
+@patch("app.engines.eod_local_base_replay.get_settings")
+def test_eod_replay_quality_blocks_legacy_bypass_low_score(mock_settings):
+    mock_settings.return_value = MagicMock(
+        eod_replay_require_elite_or_exploding_tier=False,
+        eod_replay_pad_max_off_base_pct=22.0,
+        eod_replay_min_elite_score_for_pad=90.0,
+        eod_replay_block_legacy_bypass_below_min_score=True,
+        elite_trade_min_score=90.0,
+    )
+    ok, reason = _eod_replay_quality_blocks_entry(
+        {"tier": "ELITE", "ictBaseRelativeMovePct": 10.0},
+        {"eliteScore": 74.0, "legacyBypass": "building_ftv_gate"},
+        entry_reason="building_coil_pad_ready",
+        settings=mock_settings.return_value,
+    )
+    assert not ok
+    assert reason == "eod_replay_legacy_bypass_low_score"
+
+
+def test_structural_gates_disabled_skips():
+    cfg = settings_mock(
+        eod_replay_structural_gates_enabled=False,
+        eod_replay_pretrade_enabled=False,
+    )
+    alert = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 23650.0,
+        "premium": 33.0,
+        "tier": "EXPLODING",
+        "score": 90.0,
+        "velocity3s": 1.0,
+        "explosionScore": 80.0,
+    }
+    snap = _snap(side="PUT", chart=_bearish_chart())
+    ok, reason = evaluate_replay_structural_gates(
+        alert, snap, AutoTraderState(), {"NIFTY": snap}, settings=cfg,
+    )
+    assert ok is True
+    assert reason == "ok"
+
+
+def test_structural_gates_block_same_strike_reentry():
+    cfg = settings_mock(
+        eod_replay_structural_gates_enabled=True,
+        session_same_strike_loss_reentry_enabled=True,
+        session_same_strike_loss_reentry_min_loss_inr=500.0,
+    )
+    state = AutoTraderState(
+        closedPaperTrades=[
+            PaperTrade(
+                id="prior",
+                symbol="NIFTY",
+                side=Side.PUT,
+                strike=23650.0,
+                entryPremium=33.0,
+                currentPremium=27.0,
+                lots=6,
+                pnlInr=-2704.0,
+                openedAt=datetime.now(IST),
+                closedAt=datetime.now(IST),
+                status="CLOSED",
+                exitReason="adaptive_stop_loss",
+                strategyType=StrategyType.EXPLOSIVE,
+                entryContext={"selectionMode": "explosion"},
+            )
+        ]
+    )
+    alert = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 23650.0,
+        "premium": 31.0,
+        "tier": "EXPLODING",
+        "score": 85.0,
+        "velocity3s": 2.0,
+        "explosionScore": 75.0,
+    }
+    snap = _snap(side="PUT", chart=_bearish_chart())
+    ok, reason = evaluate_replay_structural_gates(
+        alert, snap, state, {"NIFTY": snap}, settings=cfg,
+    )
+    assert ok is False
+    assert reason in (
+        "session_same_strike_loss_reentry_blocked",
+        "session_same_side_loss_reentry_cooldown",
+    )
+
+
+def test_record_replay_closed_trade_populates_state():
+    state = AutoTraderState()
+    entry = datetime(2026, 9, 8, 9, 58, tzinfo=IST)
+    exit_t = datetime(2026, 9, 8, 10, 8, tzinfo=IST)
+    trade = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 23650.0,
+        "entryPremium": 33.55,
+        "exitPremium": 27.8,
+        "lots": 6,
+        "pnlInr": -2704.0,
+        "movePct": -17.0,
+        "peakPct": 5.0,
+        "exitReason": "adaptive_stop_loss",
+        "_entryDt": entry,
+        "_exitDt": exit_t,
+    }
+    _record_replay_closed_trade(
+        state, trade, entry_ctx={"entryReason": "armed_base"}, session_date="2026-09-08",
+    )
+    assert len(state.closedPaperTrades) == 1
+    assert state.closedPaperTrades[0].strike == 23650.0
+    assert state.lastExit is not None
+

@@ -611,8 +611,37 @@ def validate_candidate(
         in_power_hour_window,
     )
 
-    if in_power_hour_window() and not candidate_qualifies_power_hour_top_trade(candidate):
+    if in_power_hour_window() and not candidate_qualifies_power_hour_top_trade(
+        candidate, snapshots=snapshots,
+    ):
         return False, "power_hour_top_only", policy_meta
+
+    from app.engines.bad_day_routing import (
+        candidate_is_expiry_deep_itm_trade,
+        severe_pause_expiring_deep_itm_lift_active,
+    )
+
+    if severe_pause_expiring_deep_itm_lift_active(
+        state, snapshots or {},
+    ) and not candidate_is_expiry_deep_itm_trade(
+        candidate, snapshots or {}, power_hour_only=True,
+    ):
+        policy_meta["severePauseDeepItmOnly"] = True
+        return False, "severe_pause_expiring_deep_itm_only", policy_meta
+
+    from app.engines.bad_day_routing import (
+        candidate_qualifies_expiry_daily_loss_stop_bypass,
+        expiry_daily_loss_stop_bypass_active,
+    )
+
+    if expiry_daily_loss_stop_bypass_active(
+        state, snapshots or {},
+    ) and not candidate_qualifies_expiry_daily_loss_stop_bypass(
+        candidate, snapshots or {},
+    ):
+        policy_meta["dailyLossStopExpiryTopOnly"] = True
+        return False, "daily_loss_stop_expiry_top_only", policy_meta
+
     if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.session_mode_feedback import (
@@ -663,6 +692,8 @@ def validate_candidate(
                         or 0
                     ),
                     alert=alert_d,
+                    state=state,
+                    snap=getattr(candidate, "snap", None),
                 )
                 if late_peak:
                     return False, late_reason or "late_reentry_near_session_peak", {
@@ -823,6 +854,44 @@ def validate_candidate(
     )
     if not ok:
         return False, reason, meta
+
+    if getattr(candidate, "mode", "") == "explosion":
+        from app.engines.session_mode_feedback import (
+            peak_fade_same_side_reentry_blocked,
+            session_same_side_loss_reentry_blocked,
+            session_same_strike_loss_reentry_blocked,
+        )
+
+        peak_fade_blocked, peak_fade_meta = peak_fade_same_side_reentry_blocked(
+            state,
+            symbol=str(getattr(candidate, "symbol", "") or ""),
+            side=getattr(candidate, "side", ""),
+        )
+        if peak_fade_blocked:
+            meta.update({"peakFadeSameSideReentryBlocked": True, **peak_fade_meta})
+            return False, "peak_fade_same_side_reentry_cooldown", meta
+
+        strike_loss_blocked, strike_loss_meta = session_same_strike_loss_reentry_blocked(
+            state,
+            symbol=str(getattr(candidate, "symbol", "") or ""),
+            side=getattr(candidate, "side", ""),
+            strike=float(getattr(candidate, "strike", 0) or 0),
+        )
+        if strike_loss_blocked:
+            reason = strike_loss_meta.get("reason") or "session_same_strike_loss_reentry_blocked"
+            meta.update({"sessionSameStrikeLossReentryBlocked": True, **strike_loss_meta})
+            return False, reason, meta
+
+        session_loss_blocked, session_loss_meta = session_same_side_loss_reentry_blocked(
+            state,
+            symbol=str(getattr(candidate, "symbol", "") or ""),
+            side=getattr(candidate, "side", ""),
+            candidate=candidate,
+        )
+        if session_loss_blocked:
+            reason = session_loss_meta.get("reason") or "session_same_side_loss_reentry_cooldown"
+            meta.update({"sessionSameSideLossReentryBlocked": True, **session_loss_meta})
+            return False, reason, meta
 
     if getattr(candidate, "mode", "") == "explosion" and not all_in:
         from app.engines.aligned_side_guard import breadth_hard_blocks_side
@@ -1010,6 +1079,15 @@ def validate_candidate(
                 )
             ):
                 return False, trap_reason, meta
+
+        from app.engines.chop_live_guards import armed_base_shallow_launch_blocked
+
+        armed_blocked, armed_reason, armed_meta = armed_base_shallow_launch_blocked(
+            candidate, snap,
+        )
+        if armed_blocked:
+            meta.update(armed_meta)
+            return False, armed_reason, meta
 
     if getattr(candidate, "mode", "") == "explosion" and explosion_event is not None:
         from app.engines.morning_premium_capture import premium_led_explosion_bypass

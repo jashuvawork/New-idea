@@ -1267,6 +1267,53 @@ def record_funnel_state(
     return written
 
 
+def record_funnel_gate_block(
+    symbol: str,
+    side: str,
+    strike: float,
+    reason: str,
+    *,
+    stage: str = "SELECTOR_GATE",
+    cycle_id: str | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Persist one contract-level gate block for funnel RCA (selector/pretrade rejects)."""
+    settings = get_settings()
+    if not settings.radar_learning_enabled:
+        return False
+    sym = str(symbol or "").upper()
+    sd = str(side or "").upper()
+    stk = _number(strike)
+    if not sym or not sd or stk <= 0:
+        return False
+    reason_s = str(reason or "unknown")
+    current = _aware(now)
+    date = current.strftime("%Y-%m-%d")
+    key = _contract_key(sym, sd, stk)
+    dedupe_seconds = max(1, int(settings.radar_funnel_dedupe_seconds))
+    signature = f"{date}:{key}:{reason_s}"
+    with _lock:
+        previous = _last_funnel_event.get(signature)
+        if previous and (current - previous).total_seconds() < dedupe_seconds:
+            return False
+        _append_jsonl(
+            funnel_path(date),
+            {
+                "ts": current.isoformat(),
+                "key": key,
+                "event": "GATED",
+                "symbol": sym,
+                "side": sd,
+                "strike": stk,
+                "stage": stage,
+                "cycleId": cycle_id,
+                "reason": reason_s,
+            },
+        )
+        _last_funnel_event[signature] = current
+    return True
+
+
 def record_funnel_event(
     event: Mapping[str, Any],
     *,
@@ -1523,12 +1570,19 @@ def backup_archive(path: Path) -> dict[str, Any]:
     }
 
 
-def _prune_learning_files(now: datetime | None = None) -> None:
+def _prune_learning_files(
+    now: datetime | None = None,
+    *,
+    protect_dates: frozenset[str] | None = None,
+) -> None:
     current = _aware(now)
     retention_days = max(1, int(get_settings().radar_archive_retention_days))
     cutoff = current.date() - timedelta(days=retention_days)
+    protected = protect_dates or frozenset()
     for path in _telemetry_dir().glob("*.jsonl"):
         date = path.name.split(".", 1)[0]
+        if date in protected:
+            continue
         try:
             parsed = datetime.strptime(date, "%Y-%m-%d").date()
         except ValueError:
@@ -1635,6 +1689,7 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
         },
     )
     purged: list[str] = []
+    protect_from_prune = False
     if bool(getattr(settings, "radar_purge_telemetry_after_finalize", True)):
         require_tape = bool(
             getattr(settings, "radar_purge_requires_bundled_premium_tape", True)
@@ -1646,9 +1701,12 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
                 date,
                 path.name,
             )
+            protect_from_prune = True
         else:
             purged = purge_session_telemetry(date)
-    _prune_learning_files()
+    _prune_learning_files(
+        protect_dates=frozenset({date}) if protect_from_prune else None,
+    )
     try:
         from app.services.radar_health import record_component_success
 

@@ -60,6 +60,8 @@ def _settings(**overrides):
     s.fake_explosion_trap_post_win_min_velocity_3s = 0.0
     s.fake_explosion_trap_post_win_midday_min_velocity_3s = 1.0
     s.fake_explosion_trap_post_win_armed_base_bypass_enabled = False
+    s.fake_explosion_trap_post_win_afternoon_block_enabled = True
+    s.fake_explosion_trap_post_win_expiry_only = True
     s.fake_explosion_trap_post_win_require_top_confidence = True
     s.fake_explosion_trap_post_win_hc_min_velocity_3s = 2.0
     s.high_conviction_sizing_enabled = True
@@ -247,6 +249,99 @@ def test_post_small_win_cuts_size(mock_collect, mock_money_settings, mock_settin
     assert meta.get("lotCap") == 8
     assert meta.get("psychologyEscalate") == "FOMO"
     assert cap_fake_explosion_trap_lots(49, meta) == 8
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+@patch("app.engines.explosion_entry_guards.collect_session_trades", create=True)
+def test_sep03_post_small_win_afternoon_hard_blocks(mock_collect, mock_money_settings, mock_settings):
+    """Sep03 NIFTY 23850 PE — after +₹1.6k stage-trail win, afternoon re-entry is FOMO."""
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
+    cand = _candidate(
+        _event(daily=12.7, v3=2.6, tier="EXPLODING", strike=23850.0),
+        snap,
+    )
+    cand.side = Side.PUT
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side="PUT",
+                pnl_inr=1634.47,
+                exit_reason="explosion_stage_trail",
+                strike=23900.0,
+            )
+        ],
+    ), patch(
+        "app.engines.explosion_entry_guards._midday_chop_active",
+        return_value=False,
+    ), patch(
+        "app.engines.morning_premium_capture.is_afternoon_capture_event",
+        return_value=True,
+    ), patch(
+        "app.engines.expiry_day_guards.expiry_post_win_afternoon_fomo_risk",
+        return_value=(True, ["expiry_session", "expiry_afternoon", "post_small_win"]),
+    ):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(), ict=_confirmed_ict(12.7),
+        )
+
+    assert blocked is True
+    assert reason == "fake_explosion_trap_post_win_afternoon"
+    assert meta.get("action") == "block"
+    assert meta.get("postWinAfternoonBlock") is True
+    assert meta.get("postWinExpiryAfternoon") is True
+    assert "post_small_win" in (meta.get("conflictFlags") or [])
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+@patch("app.engines.explosion_entry_guards.collect_session_trades", create=True)
+def test_post_win_afternoon_not_blocked_off_expiry(mock_collect, mock_money_settings, mock_settings):
+    """Non-expiry afternoons keep post-win re-entry — only expiry session is gated."""
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
+    cand = _candidate(
+        _event(daily=12.7, v3=2.6, tier="EXPLODING", strike=23850.0),
+        snap,
+    )
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side="PUT",
+                pnl_inr=1634.47,
+                exit_reason="explosion_stage_trail",
+                strike=23900.0,
+            )
+        ],
+    ), patch(
+        "app.engines.explosion_entry_guards._midday_chop_active",
+        return_value=False,
+    ), patch(
+        "app.engines.morning_premium_capture.is_afternoon_capture_event",
+        return_value=True,
+    ), patch(
+        "app.engines.expiry_day_guards.expiry_post_win_afternoon_fomo_risk",
+        return_value=(False, []),
+    ):
+        blocked, reason, _meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(), ict=_confirmed_ict(12.7),
+        )
+
+    assert blocked is False
+    assert reason != "fake_explosion_trap_post_win_afternoon"
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")

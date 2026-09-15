@@ -8,6 +8,7 @@ from app.engines import capital_allocator as ca
 
 def _settings(**over):
     s = SimpleNamespace(
+        executed_entry_always_max_lots=False,
         size_to_base_retest_enabled=True,
         size_to_base_retest_max_pct_of_capital=0.10,
         size_to_base_retest_break_buffer_pct=0.15,

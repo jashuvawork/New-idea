@@ -474,6 +474,11 @@ export function DayModePanel({
         <Flag label="Open caution" active={Boolean(g.openCautionWindow)} tone="warn" />
         <Flag label="Midday chop" active={Boolean(g.middayChopWindow)} tone="warn" />
         <Flag label="Loss pause" active={Boolean(g.sessionPaused)} tone="bad" />
+        <Flag
+          label="Elite-only lift"
+          active={Boolean(g.largeLossPauseBypass || g.lossStreakEliteBypass)}
+          tone="good"
+        />
         <Flag label="Cap hit" active={Boolean(g.tradeCapReached)} tone="bad" />
         <Flag label="Last-5 pause" active={Boolean(g.lastNTradesPaused)} tone="bad" />
         <Flag label="Whipsaw pause" active={Boolean(g.whipsawGuards?.whipsawPaused)} tone="bad" />
@@ -567,6 +572,35 @@ export function DayModePanel({
         <div className="mb-3 text-[10px] text-nexus-yellow font-mono">
           Loss streak: {g.lossStreak}
           {g.pauseReason ? ` · ${g.pauseReason}` : ''}
+        </div>
+      )}
+
+      {(g.largeLossPauseBypass || g.lossStreakEliteBypass || g.entriesBlockedByPause) && (
+        <div className="mb-3 p-2 rounded bg-black/30 text-[10px]">
+          <div className="text-nexus-muted uppercase mb-1">Session pause policy</div>
+          {g.entriesBlockedByPause && (
+            <div className="text-nexus-red font-semibold mb-1">
+              Entries blocked — {(g.entryPauseReason ?? g.pauseReason ?? 'pause active').replace(/_/g, ' ')}
+            </div>
+          )}
+          {(g.largeLossPauseBypass || g.lossStreakEliteBypass) && (
+            <div className="text-nexus-green font-semibold mb-1">
+              Pause lifted — elite only
+              {g.sessionPauseEliteDayMode || g.largeLossBypassDayMode
+                ? ` (${g.sessionPauseEliteDayMode ?? g.largeLossBypassDayMode})`
+                : ''}
+            </div>
+          )}
+          {g.largeLossBypassReject && (
+            <div className="text-nexus-yellow font-mono text-[9px]">
+              Large-loss bypass rejected: {g.largeLossBypassReject.replace(/_/g, ' ')}
+            </div>
+          )}
+          {g.lossStreakBypassReject && (
+            <div className="text-nexus-yellow font-mono text-[9px]">
+              Loss-streak bypass rejected: {g.lossStreakBypassReject.replace(/_/g, ' ')}
+            </div>
+          )}
         </div>
       )}
 

@@ -107,11 +107,21 @@ def live_best_trade_entry_blocked(
 
     from app.engines.top_moment_gate import top_moment_entry_allowed
 
+    if snapshots:
+        from app.engines.chop_day_guards import resolve_session_day_mode
+
+        day_mode = resolve_session_day_mode(snapshots)
+    else:
+        from app.engines.trade_ranking import resolve_policy_day_mode
+
+        day_mode = resolve_policy_day_mode(state)
+
     top_ok, top_reason, moment = top_moment_entry_allowed(
         evidence,
         ranking,
         top_moments_only_enabled=True,
         min_grade=min_grade,
+        day_mode=day_mode,
     )
     meta["topMomentType"] = moment
     if not top_ok:

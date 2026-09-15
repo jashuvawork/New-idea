@@ -63,6 +63,12 @@ def classify_day_type(
         worst, _, _ = predict_worst_expiry_day(state, snapshots)
         if worst:
             return "WORST"
+        # Sep03: morning EXPIRY WORST scalp won → afternoon relabeled GOOD → 38-lot trap.
+        from app.engines.expiry_day_guards import expiry_post_win_afternoon_fomo_risk
+
+        expiry_fomo, _ = expiry_post_win_afternoon_fomo_risk(state)
+        if expiry_fomo:
+            return "CHOP"
     if is_bearish_sideways_session(snapshots):
         return "WORST"
     if tier == "LOW" and is_chop_session(snapshots) and not in_momentum_rally_window():
@@ -190,6 +196,20 @@ def build_day_adaptive_profile(
             line for line in profile.playbook
             if "quick sideways" not in line.lower()
         ]
+
+    from app.engines.bullish_day_floor_relief import bullish_day_context_active
+
+    if bullish_day_context_active(
+        day_mode=day_mode,
+        confidence_tier=confidence_tier,
+        state=state,
+        snapshots=snapshots,
+    ):
+        extra = float(getattr(settings, "bullish_day_extra_rank_relief", 6.0) or 6.0)
+        profile.min_rank_relief += extra
+        profile.playbook.append(
+            f"Bullish day — extra rank relief −{extra:.0f} on quality setups",
+        )
 
     return profile
 

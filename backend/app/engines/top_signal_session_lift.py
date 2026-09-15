@@ -108,6 +108,13 @@ def snapshots_have_top_signal_session_lift(
     if snapshots_have_coil_armed_top_signal(snapshots):
         return True
 
+    from app.engines.bad_day_routing import (
+        snapshots_have_expiring_deep_itm_power_hour_setup,
+    )
+
+    if snapshots_have_expiring_deep_itm_power_hour_setup(snapshots):
+        return True
+
     return False
 
 
@@ -151,6 +158,16 @@ def candidate_qualifies_top_signal_session_lift(
 
     if is_grade_a_ftv_first_lift_candidate(candidate):
         return True
+
+    from app.engines.bad_day_routing import candidate_is_expiry_deep_itm_trade
+
+    if snap_v is not None:
+        sym = str(getattr(snap_v, "symbol", "") or getattr(candidate, "symbol", "") or "").upper()
+        snap_map = {sym: snap_v} if sym else {}
+        if candidate_is_expiry_deep_itm_trade(
+            candidate, snap_map, power_hour_only=True,
+        ):
+            return True
 
     if alert_row:
         from app.engines.bullish_local_base import alert_is_bullish_local_base_pad_entry

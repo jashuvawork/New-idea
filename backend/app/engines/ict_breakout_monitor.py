@@ -832,17 +832,6 @@ def _slow_grind_consolidation_base_readiness(
     if not (min_off <= off_low <= max_off + 1e-6):
         return False, f"slow_grind_consolidation_off_low_outside_{min_off:g}_{max_off:g}"
 
-    peak_move = float(
-        getattr(event, "peak_move_pct", 0)
-        or row.get("peakMovePct")
-        or 0
-    )
-    max_peak = float(
-        getattr(s, "slow_grind_consolidation_base_max_peak_move_pct", 24.0) or 24.0
-    )
-    if peak_move > max_peak + 1e-6:
-        return False, f"slow_grind_consolidation_peak>{max_peak:g}"
-
     base_armed = bool(
         getattr(ict, "base_armed", False)
         or row.get("ictBaseArmed")
@@ -866,8 +855,33 @@ def _slow_grind_consolidation_base_readiness(
     if not (lo <= base_move <= hi + 1e-6):
         return False, f"slow_grind_consolidation_pad_outside_{lo:g}_{hi:g}"
 
+    daily_move = float(
+        getattr(event, "daily_move_pct", 0)
+        or row.get("dailyMovePct")
+        or row.get("openPremiumMove")
+        or 0
+    )
+    # Gate on CURRENT pad heat — session peakMovePct stays elevated after a morning
+    # rip even when premium pulls back to the afternoon consolidation base (Sep04
+    # NIFTY CALL 23750/23900: peak 43% but back at base with daily ~6%).
+    current_heat = max(base_move, daily_move)
+    from app.engines.entry_day_adaptive import resolve_entry_day_policy
+
+    _policy = resolve_entry_day_policy(
+        settings=s,
+        snapshots={str(getattr(snap, "symbol", "") or "NIFTY"): snap} if snap else {},
+    )
+    max_peak = float(_policy.consolidation_max_pad_pct or 24.0)
+    if current_heat > max_peak + 1e-6:
+        return False, f"slow_grind_consolidation_move>{max_peak:g}"
+
     v3 = float(
         getattr(event, "velocity_3s", 0) or row.get("velocity3s") or 0
+    )
+    volume_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
     )
     min_v3 = float(
         getattr(s, "slow_grind_sudden_lift_min_velocity_3s", -0.8) or -0.8
@@ -875,6 +889,10 @@ def _slow_grind_consolidation_base_readiness(
     max_v3 = float(
         getattr(s, "slow_grind_sudden_lift_max_velocity_3s", 1.5) or 1.5
     )
+    if volume_awake and lo <= base_move <= hi + 1e-6 and _policy.consolidation_cold_v3_at_base:
+        # Volume awakening at the consolidation base IS the pre-lift trigger —
+        # do not require v3 to spike first (Sep04 afternoon BUILDING CALLs at v3=0).
+        min_v3 = 0.0
     if v3 < min_v3:
         return False, f"slow_grind_consolidation_velocity3s<{min_v3:g}"
     if v3 > max_v3:
@@ -1815,6 +1833,7 @@ def first_lift_entry_readiness(
         building_coil_pad_live_blocked,
         early_radar_pad_entry_readiness,
         early_radar_pad_live_blocked,
+        session_trough_pad_entry_readiness,
     )
 
     prelaunch_ok, prelaunch_reason = building_armed_prelaunch_entry_readiness(
@@ -1824,6 +1843,15 @@ def first_lift_entry_readiness(
     )
     if prelaunch_ok:
         return True, prelaunch_reason
+
+    if isinstance(alert, dict):
+        trough_ok, trough_reason = session_trough_pad_entry_readiness(
+            snap=snap,
+            alert=alert,
+            settings=settings,
+        )
+        if trough_ok:
+            return True, trough_reason
 
     coil_blocked, coil_block_reason = building_coil_pad_live_blocked(row, settings)
     if coil_blocked:
@@ -1888,13 +1916,59 @@ def first_lift_entry_readiness(
     )
     # armed_base_launch stamps before flat→vertical confirms — do not require structured
     # when the armed launch lane is active (Sep01 NIFTY PUT 23950 ELITE 100 at ~₹18 base).
-    if not (first_lift or armed_launch or elite_base_ready or v_rip_ready) or (
-        not structured
-        and not elite_base_ready
-        and not v_rip_ready
-        and not armed_launch
-    ):
-        return False, "first_lift_structure_not_confirmed"
+    structure_missing = (
+        not (first_lift or armed_launch or elite_base_ready or v_rip_ready)
+        or (
+            not structured
+            and not elite_base_ready
+            and not v_rip_ready
+            and not armed_launch
+        )
+    )
+    if structure_missing:
+        from app.engines.bullish_day_floor_relief import (
+            bullish_day_structure_bypass_allowed,
+        )
+
+        _conf_tier = ""
+        if state is not None:
+            ds = getattr(state, "dailyStrategy", None) or {}
+            if isinstance(ds, dict):
+                _conf_tier = str(ds.get("confidenceTier") or "")
+        _tier = str(
+            getattr(event, "tier", "")
+            or row.get("tier")
+            or ""
+        ).upper()
+        _score = float(
+            getattr(event, "explosion_score", 0)
+            or row.get("explosionScore")
+            or row.get("score")
+            or 0
+        )
+        _base_move = float(
+            getattr(ict, "base_relative_move_pct", 0)
+            or row.get("ictBaseRelativeMovePct")
+            or 0
+        )
+        _volume_awake = bool(
+            getattr(ict, "volume_awakening", False)
+            or row.get("ictVolumeAwakening")
+            or row.get("volumeAwaken")
+        )
+        if not (
+            first_lift
+            and bullish_day_structure_bypass_allowed(
+                tier=_tier,
+                score=_score,
+                base_move_pct=_base_move,
+                volume_awakening=_volume_awake,
+                day_mode=day_mode,
+                confidence_tier=_conf_tier,
+                state=state,
+            )
+        ):
+            return False, "first_lift_structure_not_confirmed"
 
     base_move = float(
         getattr(ict, "base_relative_move_pct", 0)
@@ -2060,6 +2134,25 @@ def first_lift_entry_readiness(
         max_move = float(
             getattr(settings, "first_lift_trade_max_move_pct", 25.0) or 25.0
         )
+    from app.engines.bullish_day_floor_relief import (
+        bullish_day_context_active,
+        bullish_day_first_lift_floors,
+    )
+
+    _conf_tier_floor = ""
+    if state is not None:
+        ds = getattr(state, "dailyStrategy", None) or {}
+        if isinstance(ds, dict):
+            _conf_tier_floor = str(ds.get("confidenceTier") or "")
+    if bullish_day_context_active(
+        day_mode=day_mode,
+        confidence_tier=_conf_tier_floor,
+        state=state,
+    ):
+        bd_floors = bullish_day_first_lift_floors(settings)
+        if first_lift and not strict_armed_path and not v_rip_lane:
+            if not grade_a_lane and not top_ftv_v_lane:
+                min_move = min(min_move, bd_floors["minMove"])
     if not (min_move <= base_move <= max_move):
         return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
 
@@ -2111,6 +2204,57 @@ def first_lift_entry_readiness(
         min_score = float(
             getattr(settings, "ict_armed_base_launch_min_score", 65.0) or 65.0
         )
+        from app.engines.rally_capture import (
+            armed_base_pad_near_miss_waive,
+            near_strike_armed_near_miss_waive,
+        )
+
+        if near_strike_armed_near_miss_waive(row, snap=snap, settings=settings):
+            min_quality = min(
+                min_quality,
+                float(
+                    getattr(
+                        settings,
+                        "near_strike_armed_near_miss_min_quality",
+                        45.0,
+                    )
+                    or 45.0
+                ),
+            )
+            min_score = min(
+                min_score,
+                float(
+                    getattr(
+                        settings,
+                        "near_strike_armed_near_miss_min_score",
+                        45.0,
+                    )
+                    or 45.0
+                ),
+            )
+        elif armed_base_pad_near_miss_waive(row, settings=settings):
+            min_quality = min(
+                min_quality,
+                float(
+                    getattr(
+                        settings,
+                        "armed_base_pad_near_miss_min_quality",
+                        45.0,
+                    )
+                    or 45.0
+                ),
+            )
+            min_score = min(
+                min_score,
+                float(
+                    getattr(
+                        settings,
+                        "armed_base_pad_near_miss_min_score",
+                        45.0,
+                    )
+                    or 45.0
+                ),
+            )
     else:
         min_quality = float(
             getattr(settings, "first_lift_trade_min_quality", 65.0) or 65.0
@@ -2146,6 +2290,14 @@ def first_lift_entry_readiness(
             min_score,
             float(getattr(settings, "first_lift_helper_confirm_min_score", 45.0) or 45.0),
         )
+    if bullish_day_context_active(
+        day_mode=day_mode,
+        confidence_tier=_conf_tier_floor,
+        state=state,
+    ):
+        bd_floors = bullish_day_first_lift_floors(settings)
+        min_quality = min(min_quality, bd_floors["minQuality"])
+        min_score = min(min_score, bd_floors["minScore"])
     if quality < min_quality:
         return False, f"first_lift_quality<{min_quality:g}"
 
@@ -2246,6 +2398,31 @@ def first_lift_entry_readiness(
     if top_ftv_v_lane and volume_awake:
         min_v3 = 0.0
         min_v9 = 0.0
+    consolidation_lane = bool(
+        row.get("slowGrindConsolidationBase")
+        or row.get("ictSlowGrindConsolidationBase")
+    )
+    if not consolidation_lane:
+        _cons_ok, _cons_reason = _slow_grind_consolidation_base_readiness(
+            snap=snap,
+            event=event,
+            ict=ict,
+            alert=row,
+            settings=settings,
+        )
+        consolidation_lane = _cons_ok
+    if consolidation_lane and volume_awake:
+        from app.engines.entry_day_adaptive import resolve_entry_day_policy
+
+        _entry_policy = resolve_entry_day_policy(
+            day_mode=day_mode,
+            state=state,
+            snapshots={str(getattr(snap, "symbol", "") or "NIFTY"): snap} if snap else {},
+            settings=settings,
+        )
+        if _entry_policy.consolidation_cold_v3_at_base:
+            min_v3 = 0.0
+            min_v9 = 0.0
     if not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
     if not sustained_lift and v9 < min_v9:

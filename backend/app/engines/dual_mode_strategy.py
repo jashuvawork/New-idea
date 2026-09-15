@@ -49,6 +49,13 @@ def good_day_session_active(
     day_type = classify_day_type(dm, tier, snapshots, state=state)
     reasons: list[str] = []
 
+    # Sep03: expiry session + post-small-win afternoon must not flip AGGRESSIVE/GOOD.
+    from app.engines.expiry_day_guards import expiry_post_win_afternoon_fomo_risk
+
+    expiry_fomo, expiry_reasons = expiry_post_win_afternoon_fomo_risk(state)
+    if expiry_fomo:
+        return False, ["expiry_post_win_afternoon"] + expiry_reasons
+
     if day_type not in ("GOOD", "ELITE"):
         return False, [f"day_type_{day_type.lower()}"]
 

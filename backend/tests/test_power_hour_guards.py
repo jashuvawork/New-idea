@@ -57,3 +57,23 @@ def test_power_hour_allows_top_radar(_top, _window):
     assert ok is True
     assert reason == "ok"
     assert meta.get("powerHourTopSignal") is True
+
+
+@patch("app.engines.chop_day_guards.resolve_session_day_mode", return_value="MOMENTUM RALLY")
+@patch("app.engines.top_moment_gate.top_moment_entry_allowed", return_value=(True, "ok", "ELITE"))
+@patch("app.engines.top_ftv_v_expiry_bypass.is_top_ftv_or_v_candidate", return_value=False)
+@patch("app.engines.best_side_selection.dominant_side_qualifies_power_hour", return_value=False)
+@patch("app.engines.trade_ranking.rank_entry_candidate")
+def test_power_hour_candidate_passes_day_mode(
+    mock_rank, _dom, _ftv, mock_top, _mode,
+):
+    from app.engines.power_hour_guards import candidate_qualifies_power_hour_top_trade
+    from types import SimpleNamespace
+
+    mock_rank.return_value = {"evidence": {"tier": "ELITE"}, "grade": "B"}
+    candidate = SimpleNamespace(mode="explosion", symbol="NIFTY", snap=_snap())
+    snaps = {"NIFTY": _snap()}
+
+    assert candidate_qualifies_power_hour_top_trade(candidate, snapshots=snaps) is True
+    mock_top.assert_called_once()
+    assert mock_top.call_args.kwargs.get("day_mode") == "MOMENTUM RALLY"

@@ -249,3 +249,292 @@ def atm_proximity_rank_bonus(event: ExplosionEvent, snap: SymbolSnapshot) -> flo
     if steps >= 3:
         return -6.0
     return 0.0
+
+
+def near_strike_explosion_rank_adjustment(
+    event: ExplosionEvent, snap: SymbolSnapshot,
+) -> float:
+    """Prefer ATM and 1-step OTM (near spot) over deep ITM explosion legs."""
+    settings = get_settings()
+    if not bool(getattr(settings, "near_strike_explosion_rank_enabled", True)):
+        return 0.0
+    spot = float(snap.spot or 0)
+    if spot <= 0:
+        return 0.0
+    atm = float(snap.atmStrike or 0) or spot
+    from app.engines.moneyness import _depth_steps, classify_moneyness
+
+    money = classify_moneyness(
+        event.side, event.strike, spot, symbol=event.symbol, atm=atm,
+    )
+    depth = _depth_steps(event.side, event.strike, spot, event.symbol, atm)
+    near_bonus = float(
+        getattr(settings, "near_strike_explosion_rank_bonus", 12.0) or 12.0
+    )
+    deep_pen = float(
+        getattr(settings, "deep_itm_explosion_rank_penalty", 15.0) or 15.0
+    )
+    if depth <= 1 and money in ("ATM", "OTM"):
+        return near_bonus
+    if money == "ITM" and depth >= 2:
+        return -deep_pen
+    return 0.0
+
+
+_NEAR_STRIKE_ARMED_MOMENTS = frozenset(
+    {
+        "armed_base_launch",
+        "v_rip_session_low",
+        "v_rip_session_high",
+        "first_lift_local_base",
+    }
+)
+
+_GRADE_PRIORITY = {"REJECT": 0, "C": 1, "B": 2, "A": 3, "S": 4}
+
+
+def _grade_meets_min(grade: str, min_grade: str) -> bool:
+    return _GRADE_PRIORITY.get(str(grade or "").upper(), 0) >= _GRADE_PRIORITY.get(
+        str(min_grade or "").upper(), 0
+    )
+
+
+def infer_alert_causal_grade(
+    alert: Optional[dict[str, Any]],
+    *,
+    ranking: Optional[dict[str, Any]] = None,
+) -> str:
+    """Infer causal grade from alert evidence when rank_entry_candidate has not run yet."""
+    if not isinstance(alert, dict):
+        return ""
+    stamped = str(
+        (ranking or {}).get("grade")
+        or alert.get("causalGrade")
+        or alert.get("rankGrade")
+        or ""
+    ).upper()
+    if stamped:
+        return stamped
+
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return ""
+    explosion_score = float(alert.get("explosionScore") or alert.get("score") or 0)
+    local = float(
+        alert.get("localBaseMovePct")
+        or alert.get("ictBaseRelativeMovePct")
+        or alert.get("offLowMovePct")
+        or 0
+    )
+    armed = bool(
+        alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or str(alert.get("momentType") or "") in _NEAR_STRIKE_ARMED_MOMENTS
+    )
+    orderflow = bool(
+        alert.get("volumeAwaken")
+        or alert.get("ictVolumeAwakening")
+        or alert.get("orderflowPositive")
+        or float(alert.get("volumeSurge") or 0) >= 1.2
+        or float(alert.get("flatVerticalQuality") or 0) >= 50.0
+    )
+    v3 = float(alert.get("velocity3s") or 0)
+    v9 = float(alert.get("velocity9s") or 0)
+    steps = float(alert.get("strikeStepsFromAtm") or 0)
+    near_strike = 0 < steps <= 2 and str(alert.get("moneyness") or "").upper() != "ITM"
+    armed_top_local = armed and near_strike and local <= 15.0
+    if (
+        tier in ("ELITE", "EXPLODING")
+        and armed_top_local
+        and orderflow
+        and local <= 40.0
+        and (v3 >= 1.5 or v9 >= 1.5 or explosion_score >= 90.0)
+    ):
+        return "S"
+    if (
+        armed
+        and tier in ("ELITE", "EXPLODING")
+        and explosion_score >= 70.0
+        and 2.0 <= local <= 25.0
+        and orderflow
+    ):
+        return "A"
+    if explosion_score >= 60.0:
+        return "B"
+    if explosion_score >= 40.0:
+        return "C"
+    return ""
+
+
+def _armed_pad_moment_active(alert: dict[str, Any]) -> bool:
+    moment = str(alert.get("momentType") or "")
+    return bool(
+        alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or moment in _NEAR_STRIKE_ARMED_MOMENTS
+    )
+
+
+def _armed_pad_orderflow_active(alert: dict[str, Any]) -> bool:
+    return bool(
+        alert.get("volumeAwaken")
+        or alert.get("ictVolumeAwakening")
+        or alert.get("orderflowConfirmed")
+        or alert.get("optionCvdBuying")
+        or float(alert.get("volumeSurge") or 0) >= 1.2
+        or float(alert.get("flatVerticalQuality") or 0) >= 50.0
+    )
+
+
+def _near_miss_otm_allowed(
+    alert: dict[str, Any],
+    snap: Optional[SymbolSnapshot],
+    *,
+    settings: Any = None,
+) -> bool:
+    if snap is None:
+        return True
+    side = str(alert.get("side") or "").upper()
+    strike = float(alert.get("strike") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0)
+    atm = float(getattr(snap, "atmStrike", 0) or 0)
+    if side not in ("CALL", "PUT") or strike <= 0 or spot <= 0:
+        return True
+    from app.engines.moneyness import classify_moneyness
+    from app.models.schemas import Side
+
+    money = classify_moneyness(
+        Side(side),
+        strike,
+        spot,
+        symbol=str(getattr(snap, "symbol", "") or alert.get("symbol") or ""),
+        atm=atm if atm > 0 else None,
+    )
+    if money in ("ATM", "ITM"):
+        return True
+    from app.engines.early_radar_pad_capture import (
+        building_coil_pad_moneyness_ok,
+        otm_reversal_entry_allowed,
+    )
+
+    s = settings or get_settings()
+    if building_coil_pad_moneyness_ok(alert, snap, s):
+        return True
+    return otm_reversal_entry_allowed(alert, snap)
+
+
+def armed_base_pad_near_miss_waive(
+    alert: Optional[dict[str, Any]],
+    *,
+    snap: Optional[SymbolSnapshot] = None,
+    settings: Any = None,
+) -> bool:
+    """High-score armed ELITE at local pad — waive quality/structure near-miss lag."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "armed_base_pad_near_miss_waive_enabled", True)):
+        return False
+    if not isinstance(alert, dict):
+        return False
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    if not _armed_pad_moment_active(alert):
+        return False
+    if not _armed_pad_orderflow_active(alert):
+        return False
+    if not _near_miss_otm_allowed(alert, snap, settings=s):
+        return False
+    local = float(
+        alert.get("localBaseMovePct")
+        or alert.get("ictBaseRelativeMovePct")
+        or alert.get("offLowMovePct")
+        or 0
+    )
+    max_local = float(
+        getattr(s, "armed_base_pad_near_miss_max_local_pct", 15.0) or 15.0
+    )
+    if local <= 0 or local > max_local + 1e-6:
+        return False
+    min_score = float(
+        getattr(s, "armed_base_pad_near_miss_min_explosion_score", 80.0) or 80.0
+    )
+    score = float(alert.get("explosionScore") or alert.get("score") or 0)
+    if score < min_score - 1e-6:
+        return False
+    if str(alert.get("moneyness") or "").upper() == "ITM":
+        steps = float(alert.get("strikeStepsFromAtm") or 0)
+        max_steps = int(
+            getattr(s, "near_strike_armed_near_miss_max_steps", 2) or 2
+        )
+        if steps > max_steps + 1e-6:
+            return False
+    return True
+
+
+def explosion_near_miss_waive(
+    alert: Optional[dict[str, Any]],
+    *,
+    snap: Optional[SymbolSnapshot] = None,
+    ranking: Optional[dict[str, Any]] = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """Unified near-miss waiver for explosion first-lift / quality / tier lag."""
+    rr = str(readiness_reason or "").lower()
+    if rr.startswith(
+        (
+            "first_lift_live_velocity_negative",
+            "mid_rip_armed_coil_rejected",
+            "first_lift_base_move_outside",
+        )
+    ):
+        return False
+    if near_strike_armed_near_miss_waive(
+        alert, snap=snap, ranking=ranking, settings=settings,
+    ):
+        return True
+    return armed_base_pad_near_miss_waive(alert, snap=snap, settings=settings)
+
+
+def near_strike_armed_near_miss_waive(
+    alert: Optional[dict[str, Any]],
+    *,
+    snap: Optional[SymbolSnapshot] = None,
+    ranking: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> bool:
+    """Grade-S near-strike armed pad — waive first_lift_structure near-miss at base."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "near_strike_armed_near_miss_waive_enabled", True)):
+        return False
+    if not isinstance(alert, dict):
+        return False
+    grade = infer_alert_causal_grade(alert, ranking=ranking)
+    min_grade = str(
+        getattr(s, "near_strike_armed_near_miss_min_grade", "S") or "S"
+    ).upper()
+    if not _grade_meets_min(grade, min_grade):
+        return False
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    max_steps = int(getattr(s, "near_strike_armed_near_miss_max_steps", 2) or 2)
+    steps = float(alert.get("strikeStepsFromAtm") or 0)
+    if steps <= 0 or steps > max_steps + 1e-6:
+        return False
+    if str(alert.get("moneyness") or "").upper() == "ITM":
+        return False
+    if not _near_miss_otm_allowed(alert, snap, settings=s):
+        return False
+    if not _armed_pad_moment_active(alert):
+        return False
+    local = float(
+        alert.get("localBaseMovePct")
+        or alert.get("ictBaseRelativeMovePct")
+        or alert.get("offLowMovePct")
+        or 0
+    )
+    max_local = float(
+        getattr(s, "near_strike_armed_near_miss_max_local_pct", 15.0) or 15.0
+    )
+    return local <= max_local + 1e-6

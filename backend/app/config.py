@@ -93,6 +93,34 @@ class Settings(BaseSettings):
     chop_live_block_extended_chase: bool = True
     chop_live_extended_chase_min_session_move_pct: float = 28.0
     chop_live_min_trusted_local_base_pct: float = 15.0
+    # Sep08: armed-base launch on chop day below base window — hard block at entry wire.
+    chop_live_block_armed_base_launch: bool = True
+    chop_live_armed_base_max_local_pad_pct: float = 20.0
+    # Sep08: second 23650 PE after morning loss — one explosion attempt per strike after loss.
+    session_same_strike_loss_reentry_enabled: bool = True
+    session_same_strike_loss_reentry_min_loss_inr: float = 500.0
+    # 0 = block for rest of session; >0 allows retry after cooldown seconds.
+    session_same_strike_loss_reentry_cooldown_seconds: int = 0
+    # Sep08: 23650 PE loss → 23800 PE hop — block nearby strikes after same-side loss (CE/PE symmetric).
+    session_near_strike_loss_reentry_enabled: bool = True
+    session_near_strike_loss_reentry_min_loss_inr: float = 500.0
+    session_near_strike_loss_reentry_max_steps: int = 3
+    explosion_instrument_loss_cooldown_enabled: bool = True
+    explosion_instrument_loss_cooldown_seconds: int = 14_400
+    # Chopish regime union (chop_regime OR midday_chop) — disable to require both paths separately.
+    chopish_midday_union_enabled: bool = True
+    chopish_regime_detection_enabled: bool = True
+    chopish_regime_mom5_max_pct: float = 0.25
+    chopish_regime_strength_max: float = 45.0
+    # Armed-base shallow launch block thresholds (chop_live + fake_trap); tune pad/move to stop over-blocking.
+    armed_base_shallow_min_session_move_pct: float = 28.0
+    # Block deep ITM pick when ATM/near-ATM on radar scores higher (Sep08 23650 vs 23800).
+    explosion_deep_itm_block_atm_radar_advantage_enabled: bool = True
+    explosion_deep_itm_block_atm_min_score_advantage: float = 20.0
+    explosion_deep_itm_block_max_itm_steps_when_atm_on_radar: int = 1
+    # Trap-stamped chop+elite exits: modest MFE then bleed (Sep08 +1.45pt → adaptive SL).
+    chop_live_trap_early_fail_max_best_points: float = 2.0
+    chop_live_trap_early_fail_max_hold_seconds: int = 600
     # Live best-trades-only — strict real-money quality bar (₹10k book).
     live_best_trades_only_enabled: bool = True
     live_best_trades_min_grade: str = "S"
@@ -255,8 +283,108 @@ class Settings(BaseSettings):
     # Blocks B/C sleeves, generic BUILDING without FTV/V triggers, and non-explosion modes.
     top_moments_only_enabled: bool = True
     top_moments_min_grade: str = "A"  # A or S; set S for strictest book
+    # MOMENTUM RALLY day mode may loosen min grade (Sep2 afternoon EXPLODING grade-B pads).
+    top_moments_momentum_rally_grade_b_enabled: bool = True
+    top_moments_momentum_rally_min_grade: str = "B"
+    # ELITE/EXPLODING causal top moments at local-base pad may enter at grade B.
+    top_moments_exploding_elite_grade_b_enabled: bool = True
+    # Day-type min grade map (BEARISH/BULLISH/MOMENTUM RALLY → B; CHOP/EXPIRY → A).
+    top_moments_day_type_grade_policy_enabled: bool = True
+    # Fast-moving day types may admit grade-C ELITE/EXPLODING with strong v3 + causal shape.
+    top_moments_fast_day_grade_c_enabled: bool = True
+    top_moments_fast_day_grade_c_modes_csv: str = (
+        "MOMENTUM RALLY,CHOP + RALLY,BULLISH DAY,BEARISH DAY"
+    )
+    top_moments_fast_day_min_velocity_3s: float = 2.0
+    top_moments_fast_day_min_rank_score: float = 48.0
     # Reserve capital-max lots for grade-A+ FTV / V / ELITE / EXPLODING only.
     top_moments_max_lots_only_enabled: bool = True
+    # Unified EliteScore pipeline — FTV/V/EXPLOSIVE setups ranked by EliteScore.
+    # Replaces the legacy top-moment grade maze when enabled (hybrid 8/week cap).
+    elite_trade_engine_enabled: bool = True
+    elite_trade_min_score: float = 90.0
+    # EOD (12d): 20% cap beats 25% on win rate (+54% vs 47%) and total P&L (+₹410k vs +₹375k).
+    elite_trade_max_local_base_pct: float = 20.0
+    elite_trade_min_stage: str = "ARMED"  # BASE | ARMED | TRIGGERED | EXPANDING
+    elite_trade_weekly_cap: int = 8
+    elite_trade_must_take_enabled: bool = True
+    elite_trade_must_take_min_grade: str = "S"
+    elite_trade_must_take_min_fvq: float = 85.0
+    elite_trade_must_take_max_local_base_pct: float = 15.0
+    # Side-specific near-base caps (0 = use elite_trade_max_local_base_pct only).
+    # EOD: CALL local≤10% → 66.7% win; PUT keeps full 20% window.
+    elite_call_max_local_base_pct: float = 10.0
+    elite_put_max_local_base_pct: float = 0.0
+    # Block CE on MOMENTUM RALLY (EOD: CALL 29% win vs PUT 67% on same gate).
+    elite_call_block_momentum_rally_enabled: bool = True
+    # PE mirror disabled by default — EOD did not show a symmetric PUT day-mode drag bucket.
+    elite_put_block_bullish_day_enabled: bool = False
+    # Block rounded score=100 when local base is past the tight near-base band (chase entries).
+    elite_trade_block_perfect_score_enabled: bool = True
+    elite_trade_perfect_score_threshold: float = 99.95
+    elite_trade_perfect_score_max_local_pct: float = 15.0
+    # Historical FTV EOD (12d): V-only beats FTV/EXPLOSIVE on baseline win gates (+₹531k vs +₹514k).
+    elite_trade_v_rip_only_enabled: bool = True
+    # Block flatVerticalQuality chase above ceiling (EOD: FVQ 80–89 → 33% win).
+    elite_trade_block_fvq_above: float = 80.0
+    # Block very shallow local-base entries until TRIGGERED+ confirms lift (not first tick).
+    elite_trade_shallow_lift_block_enabled: bool = True
+    elite_trade_shallow_lift_max_local_pct: float = 10.0
+    elite_trade_shallow_lift_min_stage: str = "TRIGGERED"
+    # Require ≥2 radar milestones when milestoneCount is present on evidence.
+    elite_trade_min_milestone_depth: int = 2
+    # Block Elite on MOMENTUM RALLY + WORST dayType only (keep CHOP+RALLY/WORST).
+    elite_trade_block_worst_day_type_enabled: bool = True
+    # Block CALL on chop day modes when still very near base (Sep03 EOD loser).
+    elite_call_chop_shallow_block_enabled: bool = True
+    elite_call_chop_shallow_max_local_pct: float = 10.0
+    # V-RIP shallow entries must show firstLift, not tier-inferred breakout alone.
+    elite_v_rip_shallow_require_first_lift_enabled: bool = True
+    # PUT V-RIP with confirmed lift near base: calibrated FVQ ceiling (not full exempt).
+    elite_fvq_put_v_rip_lift_ceiling: float = 85.0
+    elite_fvq_put_v_rip_lift_max_local_pct: float = 15.0
+    # Sep07 23750 PE: grade-S near-strike armed launch blocked at FVQ 86 — cautious bypass.
+    elite_fvq_near_strike_bypass_enabled: bool = True
+    elite_fvq_near_strike_bypass_ceiling: float = 92.0
+    elite_fvq_near_strike_bypass_max_steps: int = 2
+    elite_fvq_near_strike_bypass_max_local_pct: float = 15.0
+    elite_fvq_near_strike_bypass_min_grade: str = "S"
+    # Trend-day bonus slot: one extra weekly entry when score ≥ threshold on rally days.
+    elite_trend_day_bonus_slot_enabled: bool = True
+    elite_trend_day_bonus_min_score: float = 98.0
+    elite_trend_day_bonus_day_modes: str = "MOMENTUM RALLY,BULLISH DAY"
+    # Pre-entry: shrink lots to fit per_trade_risk instead of hard reject (elite only).
+    elite_preentry_risk_cap_reduce_enabled: bool = True
+    elite_preentry_risk_cap_min_lots: int = 1
+    # Chop-day elite runners: tighter time-stop vs default 1800s hold.
+    explosion_chop_elite_max_hold_seconds: int = 900
+    # Relax (don't skip) failed_launch thresholds on elite runner entries.
+    elite_failed_launch_relax_enabled: bool = True
+    elite_failed_launch_relax_min_score: float = 90.0
+    elite_failed_launch_relax_min_grade: str = "A"
+    elite_failed_launch_relax_require_good_timing: bool = False
+    elite_failed_launch_relax_max_local_base_pct: float = 20.0
+    elite_failed_launch_relaxed_max_hold_seconds: int = 300
+    elite_failed_launch_relaxed_max_best_points: float = 5.0
+    elite_failed_launch_relaxed_min_loss_points: float = 3.0
+    elite_failed_launch_relaxed_max_velocity_3s: float = -1.0
+    elite_failed_launch_relax_min_velocity_3s: float = 0.0
+    # Auto-stamp maxProfitCapture + vBaseFtvRunner on elite near-base V/FTV entries.
+    elite_runner_exit_bundle_enabled: bool = True
+    elite_runner_exit_max_local_base_pct: float = 15.0
+    elite_runner_exit_min_score: float = 90.0
+    elite_runner_exit_min_grade: str = "A"
+    # Skip timestamp exits that cut bundle-stamped runners before the move develops.
+    elite_runner_skip_failed_launch_enabled: bool = True
+    elite_runner_skip_barely_green_enabled: bool = True
+    elite_runner_skip_time_stop_enabled: bool = True
+    elite_runner_skip_time_stop_min_hold_seconds: int = 600
+    elite_runner_skip_time_stop_max_best_points: float = 3.0
+    elite_runner_stage_trail_min_hold_seconds: float = 240.0
+    # Parabolic trail after +100% MFE on V-base runners (looser giveback / extension).
+    ftv_vbase_parabolic_trail_enabled: bool = True
+    ftv_vbase_parabolic_giveback_ratio: float = 0.40
+    ftv_vbase_parabolic_extend_hot_stages: float = 5.0
     # One-week validation: lower local-base floors so detection, grading, and entry
     # can fire at 2–15% pad. Use /api/ai/local-base-audit/{date} to score each day.
     local_base_audit_week_enabled: bool = False
@@ -410,6 +538,7 @@ class Settings(BaseSettings):
     entry_timing_structured_cold_min_velocity_3s: float = 0.5
     entry_timing_structured_cold_lot_cap: int = 3
     entry_timing_structured_cold_max_lots: bool = False
+    entry_timing_structured_cold_building_min_velocity_3s: float = 1.5
     entry_timing_structured_cold_require_heat: bool = True
     entry_timing_structured_cold_require_aligned: bool = True
     # Ordinary entries use at most 35% capital. The configured 90% sleeve is reserved
@@ -480,12 +609,85 @@ class Settings(BaseSettings):
     explosion_post_peak_chase_lookback_seconds: float = 900.0
     explosion_post_peak_chase_min_run_pct: float = 0.25
     explosion_post_peak_chase_near_top_frac: float = 0.12
+    # Coil-top guard: BUILDING/WATCH must enter at the local-base floor of a consolidation,
+    # not at the ceiling. Uses position within the recent premium window (current-low)/(high-low).
+    # Sep 4 NIFTY 23900 CE: base ~135, coil top ~150, entry ~147 — off-low ~9% but position ~80%.
+    explosion_coil_top_guard_enabled: bool = True
+    explosion_coil_top_lookback_seconds: float = 900.0
+    explosion_coil_top_min_run_pct: float = 0.06
+    explosion_coil_top_max_run_pct: float = 0.28
+    explosion_coil_top_max_position_frac: float = 0.50
+    explosion_coil_top_tiers_csv: str = "WATCH,BUILDING"
+    explosion_coil_top_breakout_min_velocity_3s: float = 2.0
+    # Day-adaptive entry floors (coil-top, cold-base probe, BUILDING min velocity).
+    entry_day_adaptive_enabled: bool = True
+    entry_day_worst_coil_top_max_position_frac: float = 0.35
+    entry_day_worst_coil_top_min_run_pct: float = 0.05
+    entry_day_worst_coil_top_max_run_pct: float = 0.22
+    entry_day_worst_building_cold_min_velocity_3s: float = 2.0
+    entry_day_worst_cold_base_lot_cap: int = 2
+    entry_day_worst_block_building_watch_cold_base: bool = True
+    entry_day_worst_probe_max_capital_pct: float = 0.25
+    entry_day_worst_consolidation_max_pad_pct: float = 22.0
+    entry_day_worst_top_score_risk_bypass_min_score: float = 0.0
+    entry_day_chop_coil_top_max_position_frac: float = 0.40
+    entry_day_chop_coil_top_min_run_pct: float = 0.06
+    entry_day_chop_coil_top_max_run_pct: float = 0.25
+    entry_day_chop_building_cold_min_velocity_3s: float = 1.5
+    entry_day_chop_cold_base_lot_cap: int = 3
+    entry_day_chop_block_building_watch_cold_base: bool = True
+    entry_day_chop_probe_max_capital_pct: float = 0.40
+    entry_day_chop_consolidation_max_pad_pct: float = 26.0
+    entry_day_chop_rally_coil_top_max_position_frac: float = 0.40
+    entry_day_chop_rally_building_cold_min_velocity_3s: float = 1.5
+    entry_day_normal_coil_top_max_position_frac: float = 0.50
+    entry_day_normal_coil_top_min_run_pct: float = 0.06
+    entry_day_normal_coil_top_max_run_pct: float = 0.28
+    entry_day_normal_building_cold_min_velocity_3s: float = 1.2
+    entry_day_normal_cold_base_lot_cap: int = 3
+    entry_day_normal_probe_max_capital_pct: float = 0.40
+    entry_day_normal_consolidation_max_pad_pct: float = 24.0
+    entry_day_good_coil_top_max_position_frac: float = 0.50
+    entry_day_good_coil_top_min_run_pct: float = 0.06
+    entry_day_good_coil_top_max_run_pct: float = 0.30
+    entry_day_good_building_cold_min_velocity_3s: float = 1.0
+    entry_day_good_cold_base_lot_cap: int = 3
+    entry_day_good_probe_max_capital_pct: float = 0.40
+    entry_day_chop_rally_consolidation_max_pad_pct: float = 30.0
+    entry_day_good_consolidation_max_pad_pct: float = 28.0
+    probe_entry_max_capital_pct: float = 0.40
     # Session-level post-peak: a slow-grind rip (PE 15->100 over hours) shows only a small run
     # in the short window, so buying near the top slips through. Also reject entries within
     # near_top_frac of the SESSION peak after a big session run (Sep 1 live PUT 24050: entry
     # 94.8 vs ~100 session peak, +500% -> never green -> -19k). Near-base entries sit near the
     # session LOW, so this only blocks the exhausted-top chase.
     explosion_post_peak_chase_session_enabled: bool = True
+    # Sep07 23700 PE: local pad ~10% but premium +56% above session trough — the 900s
+    # post-peak window missed the hour-old rip. Block when far above session low without
+    # confirmed lift; grade-S near-strike armed launch gets a higher cap (23750 path).
+    explosion_session_trough_late_chase_enabled: bool = True
+    explosion_session_trough_late_chase_min_lift_pct: float = 0.50
+    explosion_session_trough_late_chase_grade_s_max_lift_pct: float = 0.60
+    explosion_session_trough_late_chase_grade_s_max_steps: int = 2
+    # first_lift stamp only waives trough chase when still near the session low.
+    explosion_session_trough_first_lift_max_waive_lift_pct: float = 0.40
+    # Sep07 23900 PE: block deep ITM fallback when near-strike OTM armed on same side.
+    explosion_deep_itm_substitute_block_enabled: bool = True
+    explosion_deep_itm_substitute_min_itm_steps: int = 1
+    explosion_deep_itm_substitute_near_strike_max_steps: int = 2
+    # Sep07 23750 PE: waive first_lift_structure lag for grade-S near-strike armed pad.
+    near_strike_armed_near_miss_waive_enabled: bool = True
+    near_strike_armed_near_miss_min_grade: str = "S"
+    near_strike_armed_near_miss_max_steps: int = 2
+    near_strike_armed_near_miss_max_local_pct: float = 15.0
+    # High explosion score at armed local pad — waive quality/structure near-miss lag.
+    armed_base_pad_near_miss_waive_enabled: bool = True
+    armed_base_pad_near_miss_min_explosion_score: float = 80.0
+    armed_base_pad_near_miss_max_local_pct: float = 15.0
+    near_strike_armed_near_miss_min_quality: float = 40.0
+    near_strike_armed_near_miss_min_score: float = 45.0
+    armed_base_pad_near_miss_min_quality: float = 40.0
+    armed_base_pad_near_miss_min_score: float = 45.0
     # Base-relative chase bypass — a fresh flat→vertical break off a consolidation base
     # (SENSEX 76300 PE: 30-100 range then 100-144 break) reads as high day-move but the
     # move FROM THE BASE is still early. Allow it when volume is rising + base move in window.
@@ -784,6 +986,9 @@ class Settings(BaseSettings):
     # slower full entry-scan cadence.
     building_ltp_monitor_enabled: bool = True
     building_ltp_monitor_min_ms: float = 75.0
+    # With an open explosion, tick-fast exits own the hot path — skip heavy entry scans.
+    open_position_skip_entry_scan_enabled: bool = True
+    open_position_entry_scan_interval_ms: float = 5000.0
     building_ltp_min_change_pct: float = 0.15
     building_ltp_min_change_abs: float = 0.05
     # After scoring every watched BUILDING name on an LTP cycle, take only the
@@ -1099,6 +1304,43 @@ class Settings(BaseSettings):
     ftv_runner_pct_trail_arm_min_best_points: float = 20.0
     ftv_runner_pct_trail_keep_ratio: float = 0.75
     ftv_runner_pct_trail_min_best_points: float = 6.0
+    # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
+    # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
+    # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.
+    modest_peak_mode_enabled: bool = True
+    modest_peak_arm_gain_pct: float = 15.0
+    modest_peak_arm_min_best_points: float = 12.0
+    modest_peak_keep_ratio: float = 0.75
+    modest_peak_max_projected_tp_points: float = 60.0
+    modest_peak_max_projected_tp_frac_of_entry: float = 0.85
+    modest_peak_max_stage_size: float = 30.0
+    modest_peak_suppress_pre_stage_wide_floor: bool = True
+    modest_peak_tighten_peak_fade_defer: bool = True
+    modest_peak_skip_hot_velocity_3s: float = 4.0
+    # After a real peak, a fast premium reversal below the 75% peak-keep floor books
+    # profit even when %-keep never armed (Sep08 23800 PE +16pt @ ₹150 = 10.6% < 25% arm).
+    peak_velocity_reversal_keep_enabled: bool = True
+    peak_velocity_reversal_min_best_points: float = 8.0
+    peak_velocity_reversal_keep_ratio: float = 0.75
+    peak_velocity_reversal_min_velocity_3s: float = 2.0
+    peak_velocity_reversal_min_giveback_points: float = 2.0
+    peak_velocity_reversal_skip_hot_velocity_3s: float = 2.0
+    # Slow afternoon bleeds: book at 75% floor without fast v3 (Sep08 23800 PE +16→+11 drift).
+    peak_velocity_reversal_slow_bleed_enabled: bool = True
+    peak_velocity_reversal_slow_bleed_min_giveback_points: float = 5.0
+    # Elite V/FTV runners with stage ladder: defer velocity-based peak keep until
+    # the leg has printed enough gain (Sep09 75100 PE +9pt @ ₹230 = 4% vs Sep08 +16 @ ₹150 = 10%).
+    peak_velocity_reversal_defer_elite_runner_enabled: bool = True
+    peak_velocity_reversal_defer_elite_runner_min_gain_pct: float = 8.0
+    peak_velocity_reversal_defer_elite_runner_min_rank_score: float = 85.0
+    peak_velocity_reversal_defer_elite_runner_max_progress_frac: float = 0.05
+    # After a peak prints, require premium rollover (cold v3 + flat mom) before
+    # peak-velocity keep fires — avoids booking on a velocity blip while heat remains.
+    peak_velocity_reversal_require_rollover_confirm: bool = True
+    peak_keep_block_adaptive_stop_defer: bool = True
+    # Deep ITM max-profit: %-trail never arms — stamp modest peak at entry (CE/PE symmetric).
+    modest_peak_deep_itm_auto_stamp_enabled: bool = True
+    modest_peak_deep_itm_min_premium_inr: float = 100.0
     moment_stage_min_projected_tp: float = 40.0
     # Allow rare 50→650 LTP mega rips (+600pt); live extension ratchets toward this.
     moment_stage_max_projected_tp: float = 800.0
@@ -1158,6 +1400,8 @@ class Settings(BaseSettings):
     fake_explosion_trap_min_conflict_flags: int = 3
     # Aug18: EXPIRY WORST + midday chop + EXPLODING only soft-capped; restore hard block.
     fake_explosion_trap_block_worst_midday_chop: bool = True
+    # Sep08 NIFTY 23650 PE: chop+elite armed-base at 7.7% soft-cut to 6 lots → −₹2.7k.
+    fake_explosion_trap_block_chop_elite_armed_base: bool = True
     fake_explosion_trap_chop_elite_lot_cap: int = 6
     fake_explosion_trap_otm_requires_or_breakout: bool = True
     fake_explosion_trap_post_win_lot_cap: int = 8
@@ -1170,6 +1414,11 @@ class Settings(BaseSettings):
     fake_explosion_trap_post_win_midday_min_velocity_3s: float = 1.0
     # Aug28 12:55: armed-base prelaunch must not bypass post-win cold-velocity block.
     fake_explosion_trap_post_win_armed_base_bypass_enabled: bool = False
+    # Sep03 NIFTY 23850 PE: post-small-win afternoon re-explosion after +₹1.6k trail
+    # must hard-block — soft 8-lot cap was bypassed to 38 lots. Do not re-enter FOMO.
+    # Scoped to expiry session afternoons (SENSEX expiry day; NIFTY chain was next week).
+    fake_explosion_trap_post_win_afternoon_block_enabled: bool = True
+    fake_explosion_trap_post_win_expiry_only: bool = True
     # Post-win re-entry only when top-rank / full-sleeve OR hot re-acceleration — no 8-lot FOMO probes.
     fake_explosion_trap_post_win_require_top_confidence: bool = True
     fake_explosion_trap_post_win_hc_min_velocity_3s: float = 2.0
@@ -1236,6 +1485,9 @@ class Settings(BaseSettings):
     # Every explosion entry uses full capital max lots — no 6-lot first-green / 3-lot
     # cold-timing / 35% ordinary-cap throttles (Aug25 EXPLODING 100 took 3 lots).
     explosion_always_force_max_lots: bool = True
+    # Gated best-trade policy: any explosion/scalp that clears entry gates uses capital
+    # max lots — skip timing/probe/retest/post-win soft caps (daily loss stop still applies).
+    executed_entry_always_max_lots: bool = True
     # Only block force-max on true CHOP/WORST days — not mere RANGE_BOUND (Jul29 #8).
     top_explosion_force_max_block_day_types_csv: str = "CHOP,WORST"
     # After booking profit on an explosive at symbol+side+strike, next entry on that
@@ -1274,8 +1526,15 @@ class Settings(BaseSettings):
     # beyond the ATM band so a contract that rotates ATM does not lose its real base.
     # Deep OTM and sub-band premiums remain excluded.
     explosion_scan_atm_itm_only: bool = True
-    explosion_shallow_otm_history_steps: int = 1
+    explosion_shallow_otm_history_steps: int = 2
     explosion_shallow_otm_history_min_volume: int = 25000
+    # Executable near-strike OTM (1 step from ATM) when ELITE/EXPLODING or live runner.
+    explosion_shallow_otm_entry_enabled: bool = True
+    explosion_shallow_otm_entry_steps: int = 1
+    # Rank: prefer ATM / 1-step OTM rip leg over deep ITM (Sep07 23750 PE vs 23900 PE).
+    near_strike_explosion_rank_enabled: bool = True
+    near_strike_explosion_rank_bonus: float = 12.0
+    deep_itm_explosion_rank_penalty: float = 15.0
     explosion_volume_awaken_min: int = 25000
     explosion_volume_awaken_min_velocity_3s: float = 1.0
     explosion_target_elite: float = 25.0
@@ -1348,6 +1607,13 @@ class Settings(BaseSettings):
     explosion_late_reentry_near_peak_pct: float = 12.0
     explosion_late_reentry_pullback_ok_pct: float = 22.0
     explosion_late_reentry_min_velocity_3s: float = 1.2
+    # Sep09: index rally after PUT win unlocks CALL directionally, but CE near its own
+    # session peak was still blocked as late chase — waive when index flip confirms.
+    explosion_late_reentry_waive_opposite_side_flip_enabled: bool = True
+    # Same flip: cap lots instead of hard-blocking weak v3 when index rally/slide confirms.
+    explosion_whipsaw_flip_cap_instead_of_block_on_index_flip: bool = True
+    # Index-confirmed opposite flip: size to this capital share (not fixed lot cap).
+    explosion_whipsaw_flip_index_flip_capital_pct: float = 0.35
     explosion_breadth_alignment_enabled: bool = True
     # Hard block PUT on BULLISH / CALL on BEARISH — no ELITE or premium-led bypass
     breadth_hard_side_block_enabled: bool = True
@@ -1388,10 +1654,21 @@ class Settings(BaseSettings):
     index_rally_side_flip_max_rsi: float = 50.0
     index_rally_side_flip_require_macd_bullish: bool = True
     index_rally_side_flip_require_macd_bearish: bool = True
+    # NEUTRAL MACD + confirming mom5 may pass side-flip (Sep2 SENSEX +379pt rip, hist 0).
+    index_rally_side_flip_neutral_macd_mom5_waiver_enabled: bool = True
     index_rally_side_flip_min_mom5_pct: float = 0.05
     index_rally_side_flip_require_put_session: bool = True
     index_rally_side_flip_require_call_session: bool = True
     index_rally_side_flip_symbols_csv: str = "SENSEX,NIFTY,BANKNIFTY"
+
+    # Loss-triggered opposite flip — same-side losses + index rally/slide + RSI/MACD → elite opposite
+    loss_triggered_side_flip_enabled: bool = True
+    loss_triggered_side_flip_min_same_side_losses: int = 1
+    loss_triggered_side_flip_elite_only: bool = True
+    loss_triggered_side_flip_elite_tiers_csv: str = "ELITE,EXPLODING"
+    loss_triggered_side_flip_min_elite_score: float = 90.0
+    loss_triggered_side_flip_rank_bonus: float = 25.0
+    loss_triggered_side_flip_one_shot: bool = True
     # Best-side selection — follow dominant CE/PE leg all session (incl. power-hour flip).
     best_side_selection_enabled: bool = True
     best_side_min_velocity_3s: float = 2.0
@@ -1422,6 +1699,21 @@ class Settings(BaseSettings):
     side_regime_flip_target_bonus: float = 6.0
     # EOD replay — apply live session gates (power hour, directional lock, best-side).
     eod_replay_live_session_gates_enabled: bool = True
+    # Mirror live structural entry gates in replay (Sep08 fixes respect Settings knobs).
+    eod_replay_structural_gates_enabled: bool = True
+    # Optional full validate_candidate stack — heavier; default off.
+    eod_replay_pretrade_enabled: bool = False
+    # Full-tape replay tuning (NOT wired to live auto-trader). Profile A/B showed
+    # entry caps + legacyBypass blocks drop winners without improving net P&L — keep
+    # exit-side fixes in explosion_profit and use these only for explicit research.
+    eod_replay_persist_weekly_elite_budget: bool = False
+    eod_replay_require_elite_or_exploding_tier: bool = False
+    eod_replay_pad_max_off_base_pct: float = 999.0
+    eod_replay_min_elite_score_for_pad: float = 0.0
+    eod_replay_block_legacy_bypass_below_min_score: bool = False
+    eod_replay_daily_max_trades: int = 0
+    eod_replay_pad_stage_trail_min_best_points: float = 8.0
+    eod_replay_pad_stage_trail_min_peak_pct: float = 15.0
 
     # Symbol / instrument cooldown — stop same-strike churn after losses
     symbol_loss_cooldown_seconds: int = 180
@@ -1478,7 +1770,7 @@ class Settings(BaseSettings):
     post_loss_exit_min_seconds: int = 300
     chop_session_entry_interval_seconds: int = 300
     opposite_side_cooldown_seconds: int = 420
-    opposite_side_cooldown_after_loss_seconds: int = 600
+    opposite_side_cooldown_after_loss_seconds: int = 0
     ce_pe_whipsaw_velocity_threshold: float = 1.2
     ce_pe_whipsaw_pause_seconds: int = 900
     flip_flop_lookback_trades: int = 6
@@ -1558,6 +1850,18 @@ class Settings(BaseSettings):
     # Aug6: chop+elite_hot cut_size(6) was restored to 27 by baseWindowFullLots /
     # top_explosion soft-cap bypass. On chop/worst conflict stacks, honor the soft cap.
     fake_explosion_trap_honor_soft_cap_on_chop: bool = True
+    # Sep03: post-small-win / FOMO soft cap must survive index FTV + post-tune max-lot restore.
+    fake_explosion_trap_honor_post_win_cap: bool = True
+    fake_explosion_trap_honor_fomo_cap: bool = True
+    # Armed-base ICT thesis TTL — exit when launch window expires without trail-arm green.
+    explosion_armed_base_expiry_exit_enabled: bool = True
+    explosion_armed_base_expiry_grace_seconds: float = 30.0
+    explosion_armed_base_expiry_max_best_points: float = 8.0
+    # Barely-green losers: tick of green then bleed (between never-green and failed-launch).
+    explosion_barely_green_stop_enabled: bool = True
+    explosion_barely_green_max_best_points: float = 3.0
+    explosion_barely_green_min_loss_points: float = 1.5
+    explosion_barely_green_min_hold_seconds: int = 300
     # Index-confirmed FTV + structured local-base rip keeps capital max lots on chop/worst
     # days (Sep1 NIFTY 23950 CE: eliteFullLot authorized but chop+elite soft cap → 6).
     index_confirmed_ftv_bypasses_fake_trap_lot_cap: bool = True
@@ -1575,6 +1879,34 @@ class Settings(BaseSettings):
     expiry_morning_only: bool = True
     expiry_morning_end_hour: int = 13
     expiry_morning_end_minute: int = 30
+    # Sep03 afternoon: small confirmation lift for ELITE/EXPLODING on any expiry session
+    # (NIFTY 23850 PE was 80.5 / v3 2.6 on SENSEX expiry — fake rip vs morning ELITE 100).
+    expiry_afternoon_explosion_confirm_enabled: bool = True
+    expiry_afternoon_elite_min_explosion_score: float = 85.0
+    expiry_afternoon_elite_min_velocity_3s: float = 2.5
+    expiry_afternoon_exploding_min_explosion_score: float = 90.0
+    expiry_afternoon_exploding_min_velocity_3s: float = 3.0
+    # Sep03: SENSEX expiry afternoon — prefer deep ITM on expiring symbol over cross-index
+    # NIFTY explosion (76600 PE close rip vs 23850 PE fake rip at 13:45).
+    expiry_afternoon_deep_itm_routing_enabled: bool = True
+    expiry_afternoon_deep_itm_min_steps: int = 2
+    expiry_afternoon_deep_itm_rank_bonus: float = 50.0
+    expiry_afternoon_cross_index_explosion_penalty: float = 45.0
+    expiry_afternoon_cross_index_explosion_block_enabled: bool = True
+    expiry_afternoon_cross_index_explosion_bypass_min_score: float = 95.0
+    expiry_afternoon_cross_index_explosion_bypass_min_move_pct: float = 120.0
+    # Sep03 power hour: SENSEX 76600 PE close vertical — PM ITM deep ITM on expiring
+    # symbol bypasses top-only / evening block / severe session pause (not cross-index).
+    expiry_power_hour_deep_itm_enabled: bool = True
+    expiry_power_hour_deep_itm_rank_bonus: float = 35.0
+    expiry_power_hour_deep_itm_bypass_top_only: bool = True
+    expiry_power_hour_deep_itm_bypass_evening_block: bool = True
+    expiry_severe_pause_deep_itm_lift_enabled: bool = True
+    # Same-day expiry index: top trades on the expiring symbol bypass daily loss stop
+    # (Sep03 SENSEX 76600 PE close vertical after session hit −₹20k daily stop).
+    expiry_daily_loss_stop_bypass_enabled: bool = True
+    expiry_daily_loss_stop_bypass_same_day_only: bool = True
+    expiry_daily_loss_recovery_rank_bonus: float = 35.0
     # Hard stop for generic expiry entries after 15:00 — top FTV/V/ELITE/explosives bypass.
     expiry_evening_block_enabled: bool = True
     expiry_evening_block_hour: int = 15
@@ -1689,7 +2021,7 @@ class Settings(BaseSettings):
     # Tue: NIFTY #1; Wed (SENSEX tomorrow): SENSEX #1; Thu: SENSEX #1; etc.
     expiry_day_prefer_same_day_enabled: bool = True
     expiry_day_symbol_rank_bonus: float = 22.0
-    expiry_day_sort_priority_bonus: float = 30.0
+    expiry_day_sort_priority_bonus: float = 45.0
     # #2 when peer expires within a few days (Tue NIFTY → Thu SENSEX = +2d).
     expiry_day_same_week_next_rank_bonus: float = 12.0
     expiry_day_same_week_next_sort_bonus: float = 15.0
@@ -1974,6 +2306,14 @@ class Settings(BaseSettings):
     cold_trough_pad_max_off_low_pct: float = 5.0
     cold_trough_pad_max_local_move_pct: float = 8.0
     cold_trough_pad_max_explosion_score: float = 35.0
+    # Session-trough pad — take at the true V-low when armed base re-armed mid-rip
+    # (Sep03 NIFTY PUT 23900: armed base ₹70.4 vs trough ~₹50; coil pad chased @ ₹79).
+    session_trough_pad_entry_enabled: bool = True
+    session_trough_pad_stale_armed_gap_pct: float = 15.0
+    session_trough_pad_max_off_low_pct: float = 12.0
+    session_trough_pad_min_off_low_pct: float = 2.0
+    session_trough_pad_max_explosion_score: float = 65.0
+    building_coil_pad_max_off_low_when_stale_pct: float = 15.0
     # Anti-chase — block ELITE/EXPLODING tier promotion when baseRel > floor without pad stamp
     # (Aug28 NIFTY 24250 CE 10:17 ELITE @ 8.4% baseRel after micro-rip, not cold trough).
     tier_promotion_pad_chase_block_enabled: bool = True
@@ -2033,10 +2373,10 @@ class Settings(BaseSettings):
     momentum_rally_armed_coil_min_score: float = 18.0
     eod_replay_early_pad_rank_penalty: float = 12.0
     eod_replay_counter_side_rank_penalty: float = 35.0
-    # Prefer deeper ITM expansion strikes over ATM when coil pad is active
-    # (Aug28 24050 ITM over 24200/24100 ATM on the same lift).
+    # Coil-pad expansion: prefer near-strike (ATM / 1-step OTM) over deep ITM.
     expansion_strike_rank_bonus_enabled: bool = True
     expansion_strike_rank_bonus: float = 15.0
+    expansion_strike_prefer_near_strike: bool = True
     # Pad-lane turnaround chart bypass — premium-led V-rip / slow-grind / FTV lifts off
     # session low while the 5m index chart is still counter-trend (Aug25 NIFTY 24150 CE
     # ₹20→90 V-reversal blocked by chart_live_bearish_no_calls). Wider adverse-momentum
@@ -2269,8 +2609,12 @@ class Settings(BaseSettings):
     loss_streak_pause_seconds: int = 1200
     session_large_loss_pause_inr: float = 8_000.0
     session_large_loss_pause_seconds: int = 900
+    # Lift large-loss pause for ELITE/EXPLODING top moments — all sessions, day-type aware.
+    session_large_loss_pause_bypass_enabled: bool = True
+    session_large_loss_pause_bypass_block_modes_csv: str = "EXPIRY WORST"
+    session_large_loss_pause_chop_min_score: float = 95.0
+    session_large_loss_pause_chop_tiers_csv: str = "ELITE"
     # Jul23: loss_streak_pause blanked 13:57–14:18 while SENSEX 76400 PE went ELITE.
-    # Lift pause only for high-confidence ELITE / top explosive (not large_loss_pause).
     loss_streak_elite_bypass_enabled: bool = True
     loss_streak_elite_bypass_min_score: float = 90.0
     loss_streak_elite_bypass_min_chart_confidence: float = 56.9
@@ -2564,6 +2908,20 @@ class Settings(BaseSettings):
     # Final-policy-authorized rank-1 ELITE/EXPLODING entries keep every
     # cash-affordable sleeve lot instead of being reduced by the standard SL budget.
     top_rank_first_lift_full_budget_lots_enabled: bool = True
+    # Rank-1 / full-budget sleeves use wide structural SL + max lots — do not pre-reject
+    # on max_risk_per_trade_inr (Sep 4 NIFTY CALL BUILDING score 265 @ per_trade_risk_exceeded).
+    top_score_per_trade_risk_bypass_enabled: bool = True
+    top_score_per_trade_risk_bypass_min_score: float = 80.0
+    # BULLISH / MOMENTUM RALLY + ELITE/HIGH — lower first-lift and immature-base floors.
+    bullish_day_floor_relief_enabled: bool = True
+    bullish_day_extra_rank_relief: float = 6.0
+    bullish_day_structured_min_move_pct: float = 8.0
+    bullish_day_first_lift_min_score: float = 45.0
+    bullish_day_first_lift_min_quality: float = 50.0
+    bullish_day_immature_local_base_min_move_pct: float = 8.0
+    bullish_day_structure_bypass_min_score: float = 55.0
+    bullish_day_structure_bypass_min_base_move_pct: float = 2.0
+    bullish_day_structure_bypass_tiers_csv: str = "ELITE,EXPLODING"
     aggressive_lot_sizing: bool = True
     aggressive_min_tqs: int = 50
     aggressive_min_explosion_score: int = 38
@@ -2595,12 +2953,12 @@ class Settings(BaseSettings):
     explosion_never_green_stop_pct: float = 8.0
     explosion_never_green_min_hold_seconds: int = 10
     # Scratch a launch that immediately loses both price and velocity confirmation.
-    explosion_failed_launch_exit_enabled: bool = False
+    explosion_failed_launch_exit_enabled: bool = True
     explosion_failed_launch_min_hold_seconds: int = 15
-    explosion_failed_launch_max_hold_seconds: int = 45
-    explosion_failed_launch_max_best_points: float = 1.0
-    explosion_failed_launch_min_loss_points: float = 1.5
-    explosion_failed_launch_max_velocity_3s: float = 0.0
+    explosion_failed_launch_max_hold_seconds: int = 180
+    explosion_failed_launch_max_best_points: float = 4.0
+    explosion_failed_launch_min_loss_points: float = 2.5
+    explosion_failed_launch_max_velocity_3s: float = -0.5
     # Same-chain cooldown after a failed launch / never-green chop spike.
     explosion_failed_launch_reentry_block_enabled: bool = True
     explosion_failed_launch_reentry_cooldown_seconds: int = 1800
@@ -2611,22 +2969,32 @@ class Settings(BaseSettings):
     explosion_failed_launch_reentry_exit_reasons_csv: str = (
         "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
     )
+    # Same symbol+side cooldown after a red close that had a material peak (trail giveback).
+    peak_fade_same_side_reentry_enabled: bool = True
+    peak_fade_same_side_reentry_min_peak_points: float = 30.0
+    peak_fade_same_side_reentry_cooldown_seconds: int = 900
+    # Session-wide same-side cooldown after any explosion loss (any symbol).
+    # Sep 2: SENSEX PE loss → NIFTY PE 6m later (−₹15k). Aug 28 afternoon cross-index
+    # PE (+89m) stays allowed. CE/PE symmetric.
+    session_same_side_loss_reentry_enabled: bool = True
+    session_same_side_loss_reentry_cooldown_seconds: int = 900
+    # After hard cooldown, same-side entries still need grade S until this window ends.
+    session_same_side_loss_reentry_elevated_bar_seconds: int = 3600
+    session_same_side_loss_reentry_elevated_min_grade: str = "S"
     # Re-entry ML gate — Aug28 winners ~56% ML, 24050 losses ~41-43%.
     explosion_reentry_ml_win_prob_gate_enabled: bool = True
     explosion_reentry_ml_win_prob_min: float = 0.52
     explosion_reentry_ml_win_prob_same_strike_min: float = 0.55
-    # 2) Hard INR ceilings: ~1% of ₹2L normally, ~2% only for a fully proven launch.
-    explosion_per_trade_max_loss_inr: float = 2_000.0
-    explosion_exceptional_per_trade_max_loss_inr: float = 4_000.0
+    # 2) Legacy INR exit caps — disabled (0). Exits use structural/point SL only.
+    explosion_per_trade_max_loss_inr: float = 0.0
+    explosion_exceptional_per_trade_max_loss_inr: float = 0.0
     # Index-confirmed near-base FTV size-up: a genuine index thrust (drift/burst/index
     # helpers) at a near-base ELITE/EXPLODING lift is NOT a premium-only fake trap, so it
-    # may keep its elevated (~2x) size even on a chop day (lifts the fake-trap chop cap) and
-    # gets a wider ~2% per-trade rupee stop so the bigger size survives the normal near-base
-    # shakeout instead of being clipped at a ~2pt stop. Still bounded: elevated (not full
-    # sleeve), whipsaw/never-green guards stay, and the 10%/day loss stop is the backstop.
+    # may keep its elevated (~2x) size even on a chop day (lifts the fake-trap chop cap).
+    # Exits use structural/point SL — no per-trade INR clip.
     index_confirmed_ftv_size_up_enabled: bool = True
     index_confirmed_ftv_max_base_rel_pct: float = 20.0
-    index_confirmed_ftv_per_trade_max_loss_inr: float = 4_000.0
+    index_confirmed_ftv_per_trade_max_loss_inr: float = 0.0
     # ELITE full-lot + ride-to-max-TP: index-confirmed ELITE FTV deploys the full per-trade
     # capital budget (~₹1.8L = 90% of ₹2L) and holds to max TP. Do NOT shrink lots to a tiny
     # ₹10k/8pt risk envelope — that caps size at ~half capital and stop-outs the runner on a
@@ -3091,6 +3459,28 @@ def _with_audit_week_overrides(settings: Settings) -> Settings:
     return settings
 
 
+_settings_override: Settings | None = None
+
+
+def set_settings_override(settings: Settings | None) -> None:
+    """Replay/tests: route get_settings() to a specific Settings instance."""
+    global _settings_override
+    _settings_override = settings
+
+
+def reset_settings_for_tests() -> None:
+    """Clear cached Settings and any replay override between tests."""
+    global _settings_override
+    _settings_override = None
+    _cached_get_settings.cache_clear()
+
+
 @lru_cache
-def get_settings() -> Settings:
+def _cached_get_settings() -> Settings:
     return _with_audit_week_overrides(_with_latency_presets(Settings()))
+
+
+def get_settings() -> Settings:
+    if _settings_override is not None:
+        return _settings_override
+    return _cached_get_settings()

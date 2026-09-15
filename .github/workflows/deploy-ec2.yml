@@ -65,6 +65,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Check EC2 instance is running
+        run: |
+          set -euo pipefail
+          STATE=$(aws ec2 describe-instances \
+            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
+            --query 'Reservations[0].Instances[0].State.Name' \
+            --output text 2>/dev/null || echo "unknown")
+          echo "EC2 instance ${{ env.EC2_INSTANCE_ID }} state: $STATE"
+          if [ "$STATE" != "running" ]; then
+            echo "::error::EC2 instance is '$STATE' (expected running). Start it in AWS Console (ap-south-1), confirm SSM Online, then re-run Deploy to EC2."
+            exit 1
+          fi
+
       - name: Deploy NexusQuant on EC2 via SSM
         id: deploy
         run: |

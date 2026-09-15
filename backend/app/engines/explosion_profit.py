@@ -1,7 +1,7 @@
 """Explosion profit mode — ride premium explosions with trailing SL/TP while winning."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -11,6 +11,15 @@ from app.engines.explosion_detector import ExplosionEvent
 from app.models.schemas import Breadth, PaperTrade, Side, SpotChart, StrategyType, SuggestedTrade, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def premium_velocity_pct_to_points(velocity_pct: float, entry_premium: float) -> float:
+    """Convert WS/snapshot % velocity to premium points for exit gates (calibrated on points)."""
+    v = float(velocity_pct or 0)
+    entry = float(entry_premium or 0)
+    if entry <= 0:
+        return v
+    return v / 100.0 * entry
 
 
 def _cfg_float(settings, name: str, default: float) -> float:
@@ -138,6 +147,212 @@ def _is_base_rip_runner_trade(trade: PaperTrade) -> bool:
     except Exception:
         pass
     return False
+
+
+def _elite_failed_launch_runner(trade: PaperTrade, *, settings: Any = None) -> bool:
+    """True when trade is an elite runner that deserves relaxed failed_launch thresholds."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "elite_failed_launch_relax_enabled", True)):
+        return False
+    ctx = trade.entryContext or {}
+    assessment = ctx.get("eliteAssessment") or {}
+    if isinstance(assessment, dict) and assessment:
+        min_score = float(
+            getattr(settings, "elite_failed_launch_relax_min_score", 90.0) or 90.0
+        )
+        if float(assessment.get("eliteScore") or 0) < min_score - 1e-6:
+            return False
+        min_grade = str(
+            getattr(settings, "elite_failed_launch_relax_min_grade", "A") or "A"
+        ).upper()
+        grade = str(assessment.get("grade") or "").upper()
+        grade_rank = {"S": 0, "A": 1, "B": 2, "C": 3}
+        if grade_rank.get(grade, 9) > grade_rank.get(min_grade, 1):
+            return False
+        if bool(getattr(settings, "elite_failed_launch_relax_require_good_timing", True)):
+            timing = str(
+                assessment.get("timing")
+                or ctx.get("timingAssessment")
+                or ""
+            ).upper()
+            if timing and timing not in ("GOOD",):
+                return False
+        max_local = float(
+            getattr(settings, "elite_failed_launch_relax_max_local_base_pct", 25.0) or 25.0
+        )
+        local = float(
+            assessment.get("localBasePct")
+            or ctx.get("localBaseBaseRelPct")
+            or ctx.get("localBaseMovePct")
+            or 999
+        )
+        if local > max_local + 1e-6:
+            return False
+        setup = str(assessment.get("setup") or "").upper()
+        if setup and setup not in ("FTV", "V", "EXPLOSIVE"):
+            return False
+        return True
+    from app.engines.elite_runner_exit_bundle import elite_runner_failed_launch_relax
+
+    if elite_runner_failed_launch_relax(trade, settings=settings):
+        return True
+    if not bool(getattr(settings, "elite_trade_engine_enabled", False)):
+        return False
+    if ctx.get("maxProfitCapture") and ctx.get("ictFlatThenVertical"):
+        max_local = float(
+            getattr(settings, "elite_failed_launch_relax_max_local_base_pct", 25.0) or 25.0
+        )
+        local = float(ctx.get("localBaseBaseRelPct") or ctx.get("localBaseMovePct") or 999)
+        return local <= max_local + 1e-6
+    return False
+
+
+def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = None) -> bool:
+    """Skip failed_launch / barely-green for elite-gated and bundle-stamped runners."""
+    settings = settings or get_settings()
+    ctx = trade.entryContext or {}
+    flags = {str(f).lower() for f in (ctx.get("conflictFlags") or []) if f}
+    if (
+        ctx.get("fakeExplosionTrap")
+        and "chop_regime" in flags
+        and "elite_hot" in flags
+    ):
+        # Sep08: trap-stamped chop elite must not defer chop_live early-fail to adaptive SL.
+        return False
+    assessment = ctx.get("eliteAssessment") or {}
+    relax_on = bool(getattr(settings, "elite_failed_launch_relax_enabled", True))
+    skip_on = bool(getattr(settings, "elite_runner_skip_failed_launch_enabled", True))
+
+    if isinstance(assessment, dict) and assessment:
+        if assessment.get("mustTake"):
+            return True
+        if assessment.get("legacyBypass"):
+            min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
+            if float(assessment.get("eliteScore") or 0) + 1e-6 >= min_score:
+                return True
+            if ctx.get("eliteRunnerExitBundle"):
+                return True
+            return False
+        if skip_on and relax_on:
+            return True
+
+    if not (
+        ctx.get("eliteRunnerExitBundle")
+        or (ctx.get("vBaseFtvRunner") and ctx.get("maxProfitCapture"))
+    ):
+        return False
+    from app.engines.elite_runner_exit_bundle import elite_runner_failed_launch_relax
+
+    if skip_on and elite_runner_failed_launch_relax(trade, settings=settings):
+        return True
+    if relax_on and _elite_failed_launch_runner(trade, settings=settings):
+        return True
+    return False
+
+
+def _apply_elite_respected_early_exit(
+    trade: PaperTrade,
+    exit_reason: Optional[str],
+    *,
+    settings: Any = None,
+) -> Optional[str]:
+    """Honor elite launch room for short-hold scratch exits (chop/live/faded/never-green)."""
+    if not exit_reason:
+        return None
+    if _should_skip_elite_runner_early_exits(trade, settings=settings):
+        return None
+    return exit_reason
+
+
+def _skip_explosion_time_stop_for_runner(
+    trade: PaperTrade,
+    *,
+    best: float,
+    hold: float,
+    settings: Any = None,
+) -> bool:
+    """Defer time-stop while an elite-gated runner has not yet printed meaningful green."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "elite_runner_skip_time_stop_enabled", True)):
+        return False
+    ctx = trade.entryContext or {}
+    assessment = ctx.get("eliteAssessment") or {}
+    relax_on = bool(getattr(settings, "elite_failed_launch_relax_enabled", True))
+    if isinstance(assessment, dict) and assessment:
+        if assessment.get("mustTake"):
+            return True
+        if assessment.get("legacyBypass"):
+            min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
+            if float(assessment.get("eliteScore") or 0) + 1e-6 >= min_score:
+                return True
+            if ctx.get("eliteRunnerExitBundle"):
+                return True
+            return False
+        if relax_on:
+            return True
+    if not (
+        ctx.get("eliteRunnerExitBundle")
+        or ctx.get("vBaseFtvRunner")
+        or ctx.get("maxProfitCapture")
+    ):
+        return False
+    min_hold = int(
+        getattr(settings, "elite_runner_skip_time_stop_min_hold_seconds", 600) or 600
+    )
+    max_best = float(
+        getattr(settings, "elite_runner_skip_time_stop_max_best_points", 3.0) or 3.0
+    )
+    return hold < min_hold and best <= max_best
+
+
+def _unproven_building_pad_trade(trade: PaperTrade, *, settings: Any = None) -> bool:
+    """BUILDING pad entries without runner bundle — defer stage-trail until real peak."""
+    ctx = trade.entryContext or {}
+    if ctx.get("eliteRunnerExitBundle") or (
+        ctx.get("vBaseFtvRunner") and ctx.get("maxProfitCapture")
+    ):
+        return False
+    tier_u = str(ctx.get("explosionTier") or ctx.get("tier") or "").upper()
+    reason = str(ctx.get("entryReason") or "").lower()
+    if tier_u == "BUILDING":
+        return True
+    return "coil_pad" in reason or "pad_ready" in reason
+
+
+def _failed_launch_thresholds(
+    trade: PaperTrade,
+    *,
+    settings: Any = None,
+) -> tuple[int, int, float, float, float]:
+    """Return (min_hold, max_hold, max_best, min_loss, max_velocity_3s) for failed_launch."""
+    settings = settings or get_settings()
+    min_hold = int(
+        _cfg_float(settings, "explosion_failed_launch_min_hold_seconds", 15)
+    )
+    max_hold = int(
+        _cfg_float(settings, "explosion_failed_launch_max_hold_seconds", 45)
+    )
+    max_best = _cfg_float(settings, "explosion_failed_launch_max_best_points", 1.0)
+    min_loss = _cfg_float(settings, "explosion_failed_launch_min_loss_points", 1.5)
+    max_v = _cfg_float(settings, "explosion_failed_launch_max_velocity_3s", 0.0)
+    if _elite_failed_launch_runner(trade, settings=settings):
+        max_hold = max(
+            max_hold,
+            int(getattr(settings, "elite_failed_launch_relaxed_max_hold_seconds", 90) or 90),
+        )
+        max_best = max(
+            max_best,
+            float(getattr(settings, "elite_failed_launch_relaxed_max_best_points", 3.0) or 3.0),
+        )
+        min_loss = max(
+            min_loss,
+            float(getattr(settings, "elite_failed_launch_relaxed_min_loss_points", 2.5) or 2.5),
+        )
+        max_v = min(
+            max_v,
+            float(getattr(settings, "elite_failed_launch_relaxed_max_velocity_3s", -1.0) or -1.0),
+        )
+    return min_hold, max_hold, max_best, min_loss, max_v
 
 
 # symbol -> last explosion stop timestamp (IST)
@@ -713,6 +928,10 @@ def compute_explosion_lots(event: ExplosionEvent, tqs: float, premium: float) ->
 
 def cap_explosion_lots(lots: int, premium: float) -> int:
     settings = get_settings()
+    from app.engines.capital_allocator import executed_entry_always_max_lots_enabled
+
+    if executed_entry_always_max_lots_enabled(settings):
+        return int(lots)
     if premium > settings.explosion_high_premium_threshold_inr:
         return min(lots, settings.explosion_high_premium_lot_cap)
     if premium <= settings.expiry_cheap_premium_threshold_inr:
@@ -744,6 +963,33 @@ def _hold_seconds(trade: PaperTrade) -> float:
     if opened.tzinfo is None:
         opened = opened.replace(tzinfo=IST)
     return (datetime.now(IST) - opened.astimezone(IST)).total_seconds()
+
+
+def _armed_base_expires_at_iso(trade: PaperTrade) -> str:
+    ctx = trade.entryContext or {}
+    iso = str(ctx.get("armedBaseExpiresAt") or "")
+    if iso:
+        return iso
+    ict_meta = ctx.get("ictCaptureMeta") or {}
+    if isinstance(ict_meta, dict):
+        ict = ict_meta.get("ict") or {}
+        if isinstance(ict, dict):
+            return str(ict.get("armedBaseExpiresAt") or "")
+    return ""
+
+
+def _armed_base_thesis_expired(trade: PaperTrade, *, grace_seconds: float = 0.0) -> bool:
+    iso = _armed_base_expires_at_iso(trade)
+    if not iso:
+        return False
+    try:
+        expires = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=IST)
+        now = datetime.now(IST)
+        return now >= expires + timedelta(seconds=max(0.0, grace_seconds))
+    except (TypeError, ValueError):
+        return False
 
 
 def _target_points(event_tier: str) -> float:
@@ -957,6 +1203,13 @@ def _defer_adaptive_stop(
 
     if hard_floor > 0 and pnl_pts <= -hard_floor:
         return False
+    if bool(getattr(settings, "peak_keep_block_adaptive_stop_defer", True)):
+        min_best = _cfg_float(settings, "peak_velocity_reversal_min_best_points", 8.0)
+        if best >= min_best:
+            keep = _cfg_float(settings, "peak_velocity_reversal_keep_ratio", 0.75)
+            floor_pts = best * min(0.95, max(0.5, keep))
+            if pnl_pts <= floor_pts + 1e-6:
+                return False
     # Never defer a never-green loser — except ICT/HC base-rip grace above.
     if best <= 0 and pnl_pts < 0:
         if runner and hold < grace_s:
@@ -1020,6 +1273,14 @@ def _peak_fade_bullish_continuation(
     we still have meaningful remaining green (not almost back to entry).
     """
     if not getattr(settings, "explosion_peak_fade_defer_when_bullish", True):
+        return False
+    ctx = trade.entryContext or {}
+    from app.engines.modest_peak_mode import trade_uses_modest_peak_mode
+
+    if (
+        trade_uses_modest_peak_mode(trade)
+        and bool(getattr(settings, "modest_peak_tighten_peak_fade_defer", True))
+    ):
         return False
     min_remain = float(
         getattr(settings, "explosion_peak_fade_bullish_min_remain_points", 3.0) or 3.0
@@ -1340,6 +1601,19 @@ def peak_capture_profit_lock_reason(
                 getattr(settings, "ftv_vbase_after_hundred_giveback_ratio", 0.32)
                 or 0.32
             )
+            if bool(getattr(settings, "ftv_vbase_parabolic_trail_enabled", True)):
+                parabolic_ratio = float(
+                    getattr(settings, "ftv_vbase_parabolic_giveback_ratio", 0.40)
+                    or 0.40
+                )
+                entry = float(getattr(trade, "entryPremium", 0) or 0)
+                live_v = float(live_velocity_3s or 0)
+                hot_v = float(
+                    getattr(settings, "moment_stage_parabolic_min_velocity_3s", 8.0)
+                    or 8.0
+                )
+                if live_v + 1e-6 >= hot_v or (entry > 0 and best >= entry * 1.5):
+                    after_ratio = max(after_ratio, parabolic_ratio)
             if after_ratio > 0:
                 giveback_ratio = max(giveback_ratio, after_ratio)
 
@@ -1561,6 +1835,163 @@ def peak_fade_profit_lock_reason(
     return None
 
 
+def _defer_peak_velocity_reversal_for_elite_runner(
+    trade: PaperTrade,
+    *,
+    best: float,
+    settings: Any,
+) -> bool:
+    """Hold elite stage-ladder runners through early velocity pullbacks (not structural peaks).
+
+    Sep09 SENSEX 75100 PE: +9pt peak (+4% gain) on a Grade-A armed-base runner with
+    projectedMaxTp 800 — velocity dip is noise, not the top. Sep08 23800 PE +16pt (+10.6%)
+    still qualifies for slow-bleed keep once the leg has matured.
+    """
+    if not bool(getattr(settings, "peak_velocity_reversal_defer_elite_runner_enabled", True)):
+        return False
+    ctx = trade.entryContext or {}
+    if not (
+        ctx.get("eliteRunnerExitBundle")
+        or (ctx.get("vBaseFtvRunner") and ctx.get("maxProfitCapture"))
+    ):
+        return False
+    from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
+
+    if not trade_uses_moment_stage_ladder(trade):
+        return False
+
+    min_rank = _cfg_float(settings, "peak_velocity_reversal_defer_elite_runner_min_rank_score", 85.0)
+    rank_score = float(ctx.get("rankScore") or 0)
+    grade = str(ctx.get("rankGrade") or "").upper()
+    assessment = ctx.get("eliteAssessment") or {}
+    elite_score = float(assessment.get("eliteScore") or 0)
+    score_ok = rank_score + 1e-6 >= min_rank or grade in ("S", "A") or elite_score + 1e-6 >= 90.0
+    if not score_ok:
+        return False
+
+    entry = float(trade.entryPremium or 0)
+    best = float(best or 0)
+    if entry <= 0 or best <= 0:
+        return False
+
+    min_gain_pct = _cfg_float(
+        settings, "peak_velocity_reversal_defer_elite_runner_min_gain_pct", 8.0
+    )
+    gain_pct = best / entry * 100.0
+    if gain_pct + 1e-6 < min_gain_pct:
+        return True
+
+    max_progress = _cfg_float(
+        settings, "peak_velocity_reversal_defer_elite_runner_max_progress_frac", 0.05
+    )
+    projected = float(
+        ctx.get("projectedMaxTp")
+        or ((ctx.get("exitPlan") or {}).get("projectedMaxTp"))
+        or 0
+    )
+    if projected > 0 and (best / projected) + 1e-6 < max_progress:
+        return True
+
+    chart_live = ctx.get("chartExitLive") or {}
+    if chart_live.get("letRun") and gain_pct + 1e-6 < min_gain_pct * 1.25:
+        return True
+
+    return False
+
+
+def _reversal_keep_rollover_confirmed(
+    trade: PaperTrade,
+    *,
+    settings: Any,
+    live_velocity_3s: float = 0.0,
+) -> bool:
+    """True when live premium heat has died after a peak (velocity + momentum rollover)."""
+    if not bool(getattr(settings, "peak_velocity_reversal_require_rollover_confirm", True)):
+        return True
+    return _premium_rolling_over(
+        trade, settings=settings, live_velocity_3s=live_velocity_3s,
+    )
+
+
+def peak_velocity_reversal_keep_reason(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    live_velocity_3s: float = 0.0,
+) -> Optional[str]:
+    """Bank at the 75% peak-keep floor after a observed peak and confirmed rollover.
+
+    Sequence: peak prints (best/giveback/floor gates) → premium loses heat (cold v3
+    + flat momentum via ``_premium_rolling_over``) → book at the 75% keep floor.
+    Elite runners defer entirely while the early leg is immature (#590).
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "peak_velocity_reversal_keep_enabled", True)):
+        return None
+
+    if _defer_peak_velocity_reversal_for_elite_runner(trade, best=best, settings=settings):
+        return None
+
+    if _peak_fade_bullish_continuation(trade, pnl_pts=pnl_pts, settings=settings):
+        return None
+
+    min_best = _cfg_float(settings, "peak_velocity_reversal_min_best_points", 8.0)
+    best = float(best or 0)
+    pnl_pts = float(pnl_pts or 0)
+    if best < min_best:
+        return None
+
+    keep = _cfg_float(settings, "peak_velocity_reversal_keep_ratio", 0.75)
+    from app.engines.modest_peak_mode import modest_peak_pct_arm_thresholds
+
+    modest = modest_peak_pct_arm_thresholds(trade, settings=settings)
+    if modest is not None:
+        keep = modest[2]
+    keep = min(0.95, max(0.5, keep))
+    floor_pts = best * keep
+    if pnl_pts > floor_pts + 1e-6:
+        return None
+
+    min_giveback = _cfg_float(settings, "peak_velocity_reversal_min_giveback_points", 2.0)
+    if best - pnl_pts < min_giveback:
+        return None
+
+    live_v3, _ = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
+    skip_hot = _cfg_float(settings, "peak_velocity_reversal_skip_hot_velocity_3s", 2.0)
+    if live_v3 >= skip_hot:
+        return None
+
+    min_reversal_v = _cfg_float(settings, "peak_velocity_reversal_min_velocity_3s", 2.0)
+    if live_v3 > -min_reversal_v:
+        ctx = trade.entryContext or {}
+        entry = float(trade.entryPremium or 0)
+        deep_itm = entry >= _cfg_float(settings, "modest_peak_deep_itm_min_premium_inr", 100.0)
+        arm_gain_pct = _cfg_float(settings, "modest_peak_arm_gain_pct", 15.0)
+        pct_arm_pts = entry * arm_gain_pct / 100.0 if entry > 0 else 0.0
+        modest = bool(ctx.get("modestPeakMode"))
+        allow_slow = deep_itm and (not modest or best < pct_arm_pts)
+        if (
+            allow_slow
+            and bool(getattr(settings, "peak_velocity_reversal_slow_bleed_enabled", True))
+        ):
+            slow_giveback = _cfg_float(
+                settings, "peak_velocity_reversal_slow_bleed_min_giveback_points", 5.0
+            )
+            if (best - pnl_pts) >= slow_giveback and pnl_pts <= floor_pts + 1e-6:
+                if _reversal_keep_rollover_confirmed(
+                    trade, settings=settings, live_velocity_3s=live_velocity_3s,
+                ):
+                    return "explosion_peak_velocity_reversal_keep"
+        return None
+
+    if _reversal_keep_rollover_confirmed(
+        trade, settings=settings, live_velocity_3s=live_velocity_3s,
+    ):
+        return "explosion_peak_velocity_reversal_keep"
+    return None
+
+
 def evaluate_explosion_exit(
     trade: PaperTrade,
     current_premium: float,
@@ -1606,6 +2037,7 @@ def evaluate_explosion_exit(
     from app.engines.explosion_entry_guards import faded_rip_no_green_exit_reason
 
     faded_exit = faded_rip_no_green_exit_reason(trade, hold_seconds=hold, best_points=best)
+    faded_exit = _apply_elite_respected_early_exit(trade, faded_exit, settings=settings)
     if faded_exit and not hold_to_sl:
         return faded_exit, pnl_inr
 
@@ -1618,6 +2050,7 @@ def evaluate_explosion_exit(
         pnl_points=pnl_pts,
         live_velocity_3s=v3,
     )
+    chop_exit = _apply_elite_respected_early_exit(trade, chop_exit, settings=settings)
     if chop_exit:
         return chop_exit, pnl_inr
 
@@ -1630,6 +2063,7 @@ def evaluate_explosion_exit(
         pnl_points=pnl_pts,
         live_velocity_3s=v3,
     )
+    live_fail = _apply_elite_respected_early_exit(trade, live_fail, settings=settings)
     if live_fail:
         return live_fail, pnl_inr
 
@@ -1638,21 +2072,10 @@ def evaluate_explosion_exit(
     if (
         not hold_to_sl
         and bool(getattr(settings, "explosion_failed_launch_exit_enabled", True))
+        and not _should_skip_elite_runner_early_exits(trade, settings=settings)
     ):
-        failed_min_hold = int(
-            _cfg_float(settings, "explosion_failed_launch_min_hold_seconds", 15)
-        )
-        failed_max_hold = int(
-            _cfg_float(settings, "explosion_failed_launch_max_hold_seconds", 45)
-        )
-        failed_max_best = _cfg_float(
-            settings, "explosion_failed_launch_max_best_points", 1.0
-        )
-        failed_min_loss = _cfg_float(
-            settings, "explosion_failed_launch_min_loss_points", 1.5
-        )
-        failed_max_v = _cfg_float(
-            settings, "explosion_failed_launch_max_velocity_3s", 0.0
+        failed_min_hold, failed_max_hold, failed_max_best, failed_min_loss, failed_max_v = (
+            _failed_launch_thresholds(trade, settings=settings)
         )
         if (
             failed_min_hold <= hold <= failed_max_hold
@@ -1662,6 +2085,51 @@ def evaluate_explosion_exit(
         ):
             return "explosion_failed_launch", pnl_inr
 
+    # Armed-base launch window expired without establishing a real runner (Sep03 23850 PE).
+    if (
+        not hold_to_sl
+        and bool(getattr(settings, "explosion_armed_base_expiry_exit_enabled", True))
+        and not _should_skip_elite_runner_early_exits(trade, settings=settings)
+        and _armed_base_thesis_expired(
+            trade,
+            grace_seconds=_cfg_float(
+                settings, "explosion_armed_base_expiry_grace_seconds", 30.0
+            ),
+        )
+    ):
+        ctx_ab = trade.entryContext or {}
+        if ctx_ab.get("armedBaseCapture") or ctx_ab.get("ictArmedBaseLaunch"):
+            plan = ctx_ab.get("exitPlan") or {}
+            trail_arm = float(
+                plan.get("trailArmPoints")
+                or _cfg_float(settings, "explosion_trail_arm_points", 8.0)
+            )
+            max_best = _cfg_float(
+                settings, "explosion_armed_base_expiry_max_best_points", 8.0
+            )
+            if best < max(trail_arm, max_best):
+                return "explosion_armed_base_expired", pnl_inr
+
+    # Barely-green: one tick green then bleed — too green for never-green, too weak to trail.
+    if (
+        not hold_to_sl
+        and bool(getattr(settings, "explosion_barely_green_stop_enabled", True))
+        and not (
+            _should_skip_elite_runner_early_exits(trade, settings=settings)
+            and bool(getattr(settings, "elite_runner_skip_barely_green_enabled", True))
+        )
+    ):
+        ng_min_green = _cfg_float(settings, "explosion_never_green_min_green_points", 0.5)
+        bg_max = _cfg_float(settings, "explosion_barely_green_max_best_points", 3.0)
+        bg_loss = _cfg_float(settings, "explosion_barely_green_min_loss_points", 1.5)
+        bg_hold = int(_cfg_float(settings, "explosion_barely_green_min_hold_seconds", 180))
+        if (
+            ng_min_green < best <= bg_max
+            and hold >= bg_hold
+            and pnl_pts <= -bg_loss
+        ):
+            return "explosion_barely_green_stop", pnl_inr
+
     # Never-green hard cut: a trade that printed NO green and is now down past a tight
     # floor is directionally wrong from entry (Aug6 78800 PE: best=0 → ran to −37pt).
     # Cut it faster than the full adaptive stop. Threshold = max(points floor, % of entry
@@ -1669,6 +2137,7 @@ def evaluate_explosion_exit(
     if (
         not hold_to_sl
         and bool(getattr(settings, "explosion_never_green_stop_enabled", True))
+        and not _should_skip_elite_runner_early_exits(trade, settings=settings)
     ):
         ng_min_green = _cfg_float(settings, "explosion_never_green_min_green_points", 0.5)
         ng_floor = _cfg_float(settings, "explosion_never_green_stop_points", 18.0)
@@ -1677,43 +2146,6 @@ def evaluate_explosion_exit(
         ng_stop = max(ng_floor, float(trade.entryPremium or 0) * ng_pct / 100.0)
         if best <= ng_min_green and hold >= ng_min_hold and pnl_pts <= -ng_stop:
             return "explosion_never_green_stop", pnl_inr
-
-    # Hard per-trade ₹ loss cap — optional (0 = disabled). Prefer never-green + point SL
-    # so ICT/base runners are not clipped by a rupee ceiling before the thesis stop.
-    ctx = trade.entryContext or {}
-    if not hold_to_sl:
-        if bool(ctx.get("eliteFullLot")):
-            # ELITE full-capital sleeve: prefer structural point SL + daily loss stop.
-            # Per-trade INR clip defaults to off (0). If configured >0, use that ceiling
-            # (often aligned with the ₹20k/day stop) — never the old ₹10k early kill.
-            hard_cap = _cfg_float(
-                settings,
-                "elite_full_lot_risk_inr",
-                0.0,
-            )
-        elif bool(ctx.get("fullSleeveQualified")):
-            hard_cap = _cfg_float(
-                settings,
-                "explosion_exceptional_per_trade_max_loss_inr",
-                4_000.0,
-            )
-        elif bool(ctx.get("indexConfirmedFtv")):
-            # Index-confirmed near-base FTV took elevated size — give it a proportionally wider
-            # rupee stop so the larger position survives the normal near-base shakeout instead of
-            # being clipped at a ~2pt stop. Still bounded (default ~2% of capital).
-            hard_cap = _cfg_float(
-                settings,
-                "index_confirmed_ftv_per_trade_max_loss_inr",
-                4_000.0,
-            )
-        else:
-            hard_cap = _cfg_float(
-                settings,
-                "explosion_per_trade_max_loss_inr",
-                2_000.0,
-            )
-        if hard_cap > 0 and pnl_inr <= -hard_cap:
-            return "explosion_per_trade_risk_cap", pnl_inr
 
     from app.engines.ict_breakout_monitor import _ict_max_profit_trade
 
@@ -1724,6 +2156,12 @@ def evaluate_explosion_exit(
     )
     if halve_lock:
         return halve_lock, pnl_inr
+
+    reversal_keep = peak_velocity_reversal_keep_reason(
+        trade, best=best, pnl_pts=pnl_pts, live_velocity_3s=v3,
+    )
+    if reversal_keep:
+        return reversal_keep, pnl_inr
 
     # Peak→fade toward losses: book remaining green / BE before hard SL.
     # Runs before trail-arm gates so unarmed trails cannot give winners back.
@@ -1890,6 +2328,12 @@ def evaluate_explosion_exit(
     )
     min_pct_best = _cfg_float(settings, "ftv_runner_pct_trail_min_best_points", 6.0)
     stage_min_hold = _cfg_float(settings, "explosion_stage_trail_min_hold_seconds", 90.0)
+    ctx_stage = trade.entryContext or {}
+    if ctx_stage.get("vBaseFtvRunner") or ctx_stage.get("eliteRunnerExitBundle"):
+        stage_min_hold = max(
+            stage_min_hold,
+            _cfg_float(settings, "elite_runner_stage_trail_min_hold_seconds", 240.0),
+        )
     if (
         pct_keep_floor is not None
         and best >= min_pct_best
@@ -1905,6 +2349,16 @@ def evaluate_explosion_exit(
         or (stage_size > 0 and best >= stage_size)
         or moment_stage_near_complete(trade, best, stage_size, settings=settings)
     )
+    if _unproven_building_pad_trade(trade, settings=settings):
+        entry_prem = float(getattr(trade, "entryPremium", 0) or 0)
+        min_peak_pts = max(
+            _cfg_float(settings, "eod_replay_pad_stage_trail_min_best_points", 8.0),
+            entry_prem
+            * _cfg_float(settings, "eod_replay_pad_stage_trail_min_peak_pct", 15.0)
+            / 100.0,
+        )
+        if best + 1e-6 < min_peak_pts:
+            stage_armed = False
     if stage_armed and pnl_pts <= stage_floor and hold >= stage_min_hold:
         return "explosion_stage_trail", pnl_inr
 
@@ -1927,19 +2381,27 @@ def evaluate_explosion_exit(
             ):
                 return "explosion_trail_sl", pnl_inr
 
-        if trail_floor is not None and pnl_pts < best * trail_keep and best >= (20 if max_profit else 8):
-            if pnl_pts <= 0 or _profit_lock_ok():
-                if not _defer_explosion_trail_while_continuing(
-                    trade,
-                    best=best,
-                    pnl_pts=pnl_pts,
-                    live_v=v3,
-                    projected_max=projected_max,
-                    stage_ladder=stage_ladder,
-                    max_profit=max_profit,
-                    settings=settings,
-                ):
-                    return "explosion_trail_lock", pnl_inr
+        # Keep-ratio lock only after trail is armed and still green — never book a
+        # loss here (Sep10 75000 PE: best +29 / arm 43, dipped −1.5pt → trail_lock
+        # while LTP later ran 392→500). Losses use SL / failed-launch paths.
+        if (
+            trail_floor is not None
+            and pnl_pts > 0
+            and pnl_pts < best * trail_keep
+            and best >= exit_params.trail_arm_points
+            and _profit_lock_ok()
+        ):
+            if not _defer_explosion_trail_while_continuing(
+                trade,
+                best=best,
+                pnl_pts=pnl_pts,
+                live_v=v3,
+                projected_max=projected_max,
+                stage_ladder=stage_ladder,
+                max_profit=max_profit,
+                settings=settings,
+            ):
+                return "explosion_trail_lock", pnl_inr
 
     if (
         not max_profit
@@ -2006,6 +2468,12 @@ def evaluate_explosion_exit(
     elite_hold = int(getattr(settings, "explosion_elite_max_hold_seconds", 1800) or 1800)
     if tier_u in ("ELITE", "EXPLODING") and elite_hold > 0:
         max_hold = max(max_hold, elite_hold)
+    if ctx.get("chopLiveGuard"):
+        chop_elite_hold = int(
+            getattr(settings, "explosion_chop_elite_max_hold_seconds", 900) or 900
+        )
+        if chop_elite_hold > 0 and tier_u in ("ELITE", "EXPLODING"):
+            max_hold = min(max_hold, chop_elite_hold)
     if ctx.get("topExplosionMaxLots") or high_conviction_trade:
         max_hold = max(
             max_hold,
@@ -2026,6 +2494,10 @@ def evaluate_explosion_exit(
     if thesis_hold > 0:
         max_hold = max(max_hold, thesis_hold)
     if hold >= max_hold:
+        if _skip_explosion_time_stop_for_runner(
+            trade, best=best, hold=hold, settings=settings,
+        ):
+            return None, pnl_inr
         # Prefer trail/giveback over blind time exit when runner peaked then faded
         if best >= exit_params.trail_arm_points:
             giveback = best - pnl_pts
@@ -2037,7 +2509,11 @@ def evaluate_explosion_exit(
                 return "explosion_trail_sl", pnl_inr
             if trail_floor is not None and pnl_pts <= trail_floor:
                 return "explosion_trail_sl", pnl_inr
-            if pnl_pts < best * trail_keep and best >= 8:
+            if (
+                pnl_pts > 0
+                and pnl_pts < best * trail_keep
+                and best >= exit_params.trail_arm_points
+            ):
                 return "explosion_trail_lock", pnl_inr
         # Once thesis has gone green: never time-exit — SL / trail / peak-capture only.
         if _skip_time_exit_for_green_thesis(trade, best=best, settings=settings):

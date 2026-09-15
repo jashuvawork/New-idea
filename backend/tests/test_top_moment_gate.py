@@ -9,6 +9,15 @@ from app.engines.top_moment_gate import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _legacy_top_moment_gate_only(monkeypatch):
+    """Legacy gate tests target the grade maze, not the EliteScore engine."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "elite_trade_engine_enabled", False, raising=False)
+
+
 def _evidence(**kwargs):
     base = {
         "mode": "explosion",
@@ -86,12 +95,40 @@ def test_top_moment_allows_grade_a_elite():
 
 
 def test_top_moment_blocks_grade_b():
-    ok, reason, _ = top_moment_entry_allowed(
+    from unittest.mock import patch
+
+    with patch("app.config.get_settings") as mock_settings:
+        settings = mock_settings.return_value
+        settings.elite_trade_engine_enabled = False
+        settings.top_moments_exploding_elite_grade_b_enabled = False
+        settings.top_moments_momentum_rally_grade_b_enabled = False
+        ok, reason, _ = top_moment_entry_allowed(
+            _evidence(tier="EXPLODING", flatThenVertical=True, activeBreakout=True),
+            _ranking("B"),
+        )
+    assert ok is False
+    assert "grade" in reason
+
+
+def test_exploding_elite_grade_b_waiver_allows_pad_moment():
+    ok, reason, moment = top_moment_entry_allowed(
         _evidence(tier="EXPLODING", flatThenVertical=True, activeBreakout=True),
         _ranking("B"),
     )
-    assert ok is False
-    assert "grade" in reason
+    assert ok is True
+    assert reason == "ok"
+    assert moment == "EXPLODING"
+
+
+def test_momentum_rally_day_mode_allows_grade_b():
+    ok, reason, moment = top_moment_entry_allowed(
+        _evidence(tier="BUILDING", vRipReady=True),
+        _ranking("B"),
+        day_mode="MOMENTUM RALLY",
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert moment == "V"
 
 
 def test_top_moment_blocks_without_moment_type():

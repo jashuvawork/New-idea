@@ -39,6 +39,7 @@ from app.engines.moneyness import (
     classify_moneyness,
     heatmap_moneyness_candidates,
     moneyness_rank_adjustment,
+    strike_step,
 )
 from app.engines.symbol_cooldown import (
     entry_score_penalty,
@@ -86,6 +87,22 @@ class EntryCandidate:
     suggestion: Any = None
     alert: Optional[dict] = None
     pretrade_meta: Optional[dict] = None
+
+
+def _record_selector_gate_rejection(candidate: EntryCandidate, reason: str) -> None:
+    """Best-effort funnel telemetry when selector rejects before SELECTED."""
+    try:
+        from app.services.radar_learning import record_funnel_gate_block
+
+        record_funnel_gate_block(
+            str(candidate.symbol or "").upper(),
+            candidate.side.value if hasattr(candidate.side, "value") else str(candidate.side),
+            float(candidate.strike or 0),
+            str(reason or "selector_rejected"),
+            stage="SELECTOR_GATE",
+        )
+    except Exception:
+        pass
 
 
 def rank_candidates_for_selection(
@@ -309,6 +326,13 @@ def _explosion_candidates(
         pad_lane_waive = pad_lane_early_near_miss_waive(
             alert, readiness_reason=first_lift_readiness_reason,
         )
+        if not pad_lane_waive:
+            from app.engines.rally_capture import explosion_near_miss_waive
+
+            pad_lane_waive = explosion_near_miss_waive(
+                alert if isinstance(alert, dict) else None,
+                readiness_reason=first_lift_readiness_reason,
+            )
         lift_ready = first_lift_ready or early_pad or coil_pad or pad_lane_waive
         slow_grind_trough = bool(
             alert.get("slowGrindArmedTrough")
@@ -330,6 +354,7 @@ def _explosion_candidates(
         ):
             continue
         side_v = str(alert.get("side") or "").upper()
+        tier_u = str(alert.get("tier") or "").upper()
         try:
             strike_v = float(alert.get("strike") or 0)
         except (TypeError, ValueError):
@@ -362,10 +387,28 @@ def _explosion_candidates(
                 max_steps = int(
                     getattr(settings, "explosion_shallow_otm_history_steps", 1) or 1
                 )
+                entry_steps = int(
+                    getattr(settings, "explosion_shallow_otm_entry_steps", 1) or 1
+                )
                 pad_shallow_ok = early_radar_pad_shallow_otm_ok(alert, snap)
                 coil_moneyness_ok = building_coil_pad_moneyness_ok(alert, snap, settings)
+                shallow_elite_ok = (
+                    bool(getattr(settings, "explosion_shallow_otm_entry_enabled", True))
+                    and depth <= entry_steps
+                    and tier_u in ("ELITE", "EXPLODING")
+                )
+                runner = snap.explosiveRunner
+                if (
+                    runner
+                    and runner.side
+                    and str(runner.side.value if hasattr(runner.side, "value") else runner.side).upper()
+                    == side_v
+                    and abs(float(runner.strike or 0) - strike_v) <= strike_step(symbol) * 0.51
+                ):
+                    shallow_elite_ok = True
                 if not (
                     coil_moneyness_ok
+                    or shallow_elite_ok
                     or (
                         (lift_ready or alert_has_early_radar_pad_capture(alert))
                         and pad_shallow_ok
@@ -373,6 +416,17 @@ def _explosion_candidates(
                     )
                 ):
                     continue
+        from app.engines.explosion_entry_guards import (
+            deep_itm_near_strike_substitute_blocked,
+        )
+
+        itm_substitute, _itm_reason = deep_itm_near_strike_substitute_blocked(
+            Side(side_v),
+            strike_v,
+            snap,
+        )
+        if itm_substitute:
+            continue
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
         top_only = bool(getattr(settings, "top_moments_only_enabled", True))
@@ -655,6 +709,20 @@ def _explosion_candidates(
         rank += min(15, event.velocity_3s * 2)
         rank += min(10, event.velocity_9s)
         rank += index_moment_rank_bonus(snap, event.side)
+        from app.engines.loss_triggered_side_flip import loss_triggered_side_flip_rank_bonus
+        from types import SimpleNamespace
+
+        rank += loss_triggered_side_flip_rank_bonus(
+            symbol,
+            event.side,
+            snap,
+            state,
+            candidate=SimpleNamespace(
+                tier=event.tier,
+                score=score_val,
+                confidence=score_val,
+            ),
+        )
         # History of index spike moments: a same-direction spot spike burst is the causal
         # thrust behind a sudden strike lift — rank those candidates a touch higher.
         if bool(alert.get("indexSpikeBurst")) or (
@@ -675,10 +743,15 @@ def _explosion_candidates(
             event.side, event.strike, snap, mode="explosion", candidate_score=rank,
             snapshots={symbol: snap},
         )
-        from app.engines.rally_capture import atm_proximity_rank_bonus, runner_strike_rank_bonus
+        from app.engines.rally_capture import (
+            atm_proximity_rank_bonus,
+            near_strike_explosion_rank_adjustment,
+            runner_strike_rank_bonus,
+        )
 
         rank += runner_strike_rank_bonus(event, snap)
         rank += atm_proximity_rank_bonus(event, snap)
+        rank += near_strike_explosion_rank_adjustment(event, snap)
         if bool(
             getattr(settings, "expansion_strike_rank_bonus_enabled", True)
         ) and bool(alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")):
@@ -697,10 +770,18 @@ def _explosion_candidates(
             bonus = float(
                 getattr(settings, "expansion_strike_rank_bonus", 15.0) or 15.0
             )
-            if money == "ITM":
+            depth = _depth_steps(event.side, event.strike, spot_v, symbol, atm_v)
+            prefer_near = bool(
+                getattr(settings, "expansion_strike_prefer_near_strike", True)
+            )
+            if prefer_near:
+                if money in ("ATM", "OTM") and depth <= 1:
+                    rank += bonus
+                elif money == "ITM" and depth >= 2:
+                    rank -= bonus * 0.8
+            elif money == "ITM":
                 rank += bonus
             elif money == "OTM":
-                depth = _depth_steps(event.side, event.strike, spot_v, symbol, atm_v)
                 if depth >= 2:
                     rank += bonus
         from app.engines.dual_mode_strategy import resolve_trading_session_mode
@@ -773,6 +854,8 @@ def _explosion_candidates(
             premium=float(event.premium or 0),
             velocity_3s=float(event.velocity_3s or 0),
             alert=alert,
+            state=state,
+            snap=snap,
         )
         if late_reentry and not first_lift_ready:
             continue
@@ -784,6 +867,8 @@ def _explosion_candidates(
             live_explosion_confirmation_blocked,
             post_impulse_consolidation_entry_blocked,
             post_peak_chase_blocked,
+            session_trough_late_chase_blocked,
+            coil_top_entry_blocked,
             tier_promotion_pad_chase_blocked,
         )
 
@@ -886,6 +971,34 @@ def _explosion_candidates(
         # so this only blocks the late/mid-rip chase — even for must-take/first-lift.
         pp_blocked, _pp_reason = post_peak_chase_blocked(event)
         if pp_blocked:
+            continue
+        from app.engines.rally_capture import infer_alert_causal_grade
+
+        _alert_dict = alert if isinstance(alert, dict) else None
+        st_blocked, _st_reason = session_trough_late_chase_blocked(
+            event,
+            ict=ict,
+            alert=_alert_dict,
+            ranking={
+                "grade": (
+                    infer_alert_causal_grade(_alert_dict)
+                    or (_alert_dict or {}).get("causalGrade")
+                    or (_alert_dict or {}).get("rankGrade")
+                ),
+                "rankScore": (_alert_dict or {}).get("causalRankScore")
+                or (_alert_dict or {}).get("rankScore"),
+            } if _alert_dict is not None else None,
+        )
+        if st_blocked:
+            continue
+        coil_blocked, _coil_reason = coil_top_entry_blocked(
+            event,
+            tier=str(getattr(event, "tier", "") or alert.get("tier") or ""),
+            velocity_3s=float(getattr(event, "velocity_3s", 0) or 0),
+            snapshots={symbol: snap},
+            state=state,
+        )
+        if coil_blocked:
             continue
         trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
             cand_probe, snap, state=state, ict=ict,
@@ -1627,10 +1740,18 @@ def find_best_entry(
     for c in candidates:
         c.score += symbol_rank_adjustment(c.symbol, chop)
         c.score += index_adj.get(c.symbol.upper(), 0.0)
-        from app.engines.bad_day_routing import cross_index_elite_priority_bonus, cross_index_rank_adjustment
+        from app.engines.bad_day_routing import (
+            cross_index_elite_priority_bonus,
+            cross_index_rank_adjustment,
+            expiry_afternoon_deep_itm_rank_adjustment,
+        )
 
         c.score += cross_index_rank_adjustment(c, state, snapshots)
         c.score += cross_index_elite_priority_bonus(c, snapshots)
+        c.score += expiry_afternoon_deep_itm_rank_adjustment(c, state, snapshots)
+        from app.engines.bad_day_routing import expiry_daily_loss_recovery_rank_adjustment
+
+        c.score += expiry_daily_loss_recovery_rank_adjustment(c, state, snapshots)
         from app.engines.best_side_selection import best_side_rank_adjustment
         from app.engines.power_hour_guards import in_power_hour_window
 
@@ -1685,7 +1806,10 @@ def find_best_entry(
             from app.engines.session_mode_feedback import (
                 exhausted_ftv_reentry_blocked,
                 failed_launch_reentry_blocked,
+                peak_fade_same_side_reentry_blocked,
                 reentry_ml_win_prob_blocked,
+                session_same_side_loss_reentry_blocked,
+                session_same_strike_loss_reentry_blocked,
             )
 
             fail_blocked, _ = failed_launch_reentry_blocked(
@@ -1703,6 +1827,65 @@ def find_best_entry(
                         "reasons": ["failed_launch_reentry_cooldown"],
                     },
                 }
+                _record_selector_gate_rejection(c, "failed_launch_reentry_cooldown")
+                continue
+
+            peak_fade_blocked, peak_fade_meta = peak_fade_same_side_reentry_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+            )
+            if peak_fade_blocked:
+                c.pretrade_meta = {
+                    **(c.pretrade_meta or {}),
+                    "peakFadeSameSideReentryBlocked": True,
+                    **peak_fade_meta,
+                    "causalRanking": {
+                        "grade": "REJECT",
+                        "reasons": ["peak_fade_same_side_reentry_cooldown"],
+                    },
+                }
+                _record_selector_gate_rejection(c, "peak_fade_same_side_reentry_cooldown")
+                continue
+
+            strike_loss_blocked, strike_loss_meta = session_same_strike_loss_reentry_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+                strike=float(c.strike or 0),
+            )
+            if strike_loss_blocked:
+                reason = strike_loss_meta.get("reason") or "session_same_strike_loss_reentry_blocked"
+                c.pretrade_meta = {
+                    **(c.pretrade_meta or {}),
+                    "sessionSameStrikeLossReentryBlocked": True,
+                    **strike_loss_meta,
+                    "causalRanking": {
+                        "grade": "REJECT",
+                        "reasons": [reason],
+                    },
+                }
+                _record_selector_gate_rejection(c, reason)
+                continue
+
+            session_loss_blocked, session_loss_meta = session_same_side_loss_reentry_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+                candidate=c,
+            )
+            if session_loss_blocked:
+                reason = session_loss_meta.get("reason") or "session_same_side_loss_reentry_cooldown"
+                c.pretrade_meta = {
+                    **(c.pretrade_meta or {}),
+                    "sessionSameSideLossReentryBlocked": True,
+                    **session_loss_meta,
+                    "causalRanking": {
+                        "grade": "REJECT",
+                        "reasons": [reason],
+                    },
+                }
+                _record_selector_gate_rejection(c, reason)
                 continue
 
             ml_blocked, ml_meta = reentry_ml_win_prob_blocked(
@@ -1723,6 +1906,7 @@ def find_best_entry(
                         "reasons": ["reentry_ml_win_prob_low"],
                     },
                 }
+                _record_selector_gate_rejection(c, "reentry_ml_win_prob_low")
                 continue
 
             exhausted, _ = exhausted_ftv_reentry_blocked(
@@ -1750,16 +1934,20 @@ def find_best_entry(
                         getattr(c.explosion_event, "velocity_3s", 0) or 0
                     ),
                     alert=alert_d,
+                    state=state,
+                    snap=c.snap,
                 )
                 if late_peak:
+                    late_block_reason = late_reason or "late_reentry_near_session_peak"
                     c.pretrade_meta = {
                         **(c.pretrade_meta or {}),
                         "lateReentryBlocked": True,
                         "causalRanking": {
                             "grade": "REJECT",
-                            "reasons": [late_reason or "late_reentry_near_session_peak"],
+                            "reasons": [late_block_reason],
                         },
                     }
+                    _record_selector_gate_rejection(c, late_block_reason)
                     continue
         from app.engines.trade_ranking import (
             ftv_authorization_policy,
@@ -1807,19 +1995,41 @@ def find_best_entry(
             },
         }
 
-    candidates = [
-        c
-        for c in candidates
-        if (c.pretrade_meta or {}).get("causalRanking", {}).get("grade") != "REJECT"
-        and (
-            not bool(getattr(settings, "ftv_elite_top_only_enabled", True))
-            or (c.pretrade_meta or {}).get("ftvEliteTopPolicy", {}).get("passed")
-        )
-    ]
+    kept_candidates: list[EntryCandidate] = []
+    for c in candidates:
+        meta = c.pretrade_meta or {}
+        ranking = meta.get("causalRanking") or {}
+        if ranking.get("grade") == "REJECT":
+            reasons = ranking.get("reasons") or ["selector_rejected"]
+            _record_selector_gate_rejection(c, str(reasons[0]))
+            continue
+        if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+            policy = meta.get("ftvEliteTopPolicy") or {}
+            if not policy.get("passed"):
+                _record_selector_gate_rejection(
+                    c,
+                    str(policy.get("reason") or "ftv_elite_top_policy"),
+                )
+                continue
+        kept_candidates.append(c)
+    candidates = kept_candidates
     if not candidates:
         return None
 
-    if bool(getattr(settings, "top_moments_only_enabled", True)):
+    from app.engines.trade_ranking import resolve_policy_day_mode
+
+    if limits:
+        day_mode = str(getattr(limits, "dayMode", "") or "")
+    else:
+        from app.engines.chop_day_guards import chop_guard_summary
+
+        chop_meta = chop_guard_summary(state, snapshots)
+        day_mode = str(chop_meta.get("dayMode") or "NORMAL")
+    if not day_mode:
+        day_mode = resolve_policy_day_mode(state)
+
+    elite_engine = bool(getattr(settings, "elite_trade_engine_enabled", False))
+    if elite_engine or bool(getattr(settings, "top_moments_only_enabled", True)):
         from app.engines.top_moment_gate import top_moment_entry_allowed
 
         min_grade = str(getattr(settings, "top_moments_min_grade", "A") or "A")
@@ -1831,24 +2041,46 @@ def find_best_entry(
             ok, reason, moment = top_moment_entry_allowed(
                 evidence,
                 ranking,
-                top_moments_only_enabled=True,
+                top_moments_only_enabled=not elite_engine,
                 min_grade=min_grade,
+                day_mode=day_mode,
                 readiness_reason=str(meta.get("firstLiftReadinessReason") or ""),
+                state=state,
+                snapshots=snapshots,
+                side=str(getattr(c.side, "value", c.side) or ""),
             )
+            gate_meta: dict[str, Any] = {
+                "enabled": True,
+                "passed": ok,
+                "reason": reason,
+                "momentType": moment,
+            }
+            if elite_engine:
+                from app.engines.elite_score_engine import build_elite_assessment
+
+                assessment = build_elite_assessment(evidence, ranking, moment=moment)
+                gate_meta["eliteEngine"] = True
+                gate_meta["eliteAssessment"] = assessment
             c.pretrade_meta = {
                 **meta,
-                "topMomentGate": {
-                    "enabled": True,
-                    "passed": ok,
-                    "reason": reason,
-                    "momentType": moment,
-                },
+                "topMomentGate": gate_meta,
             }
             if ok:
                 filtered_top.append(c)
+            else:
+                _record_selector_gate_rejection(
+                    c, str(reason or "top_moment_gate"),
+                )
         candidates = filtered_top
     if not candidates:
         return None
+
+    if elite_engine:
+        from app.engines.elite_moment_dedup import dedupe_same_moment_candidates
+
+        candidates = dedupe_same_moment_candidates(candidates)
+        if not candidates:
+            return None
 
     pf_fb = session_pf_feedback(state) if settings.edge_engine_enabled else None
     from app.engines.session_mode_feedback import compute_mode_stats, mode_session_rank_bonus
@@ -1856,14 +2088,9 @@ def find_best_entry(
     mode_stats = compute_mode_stats(session_trades)
 
     if limits:
-        day_mode = str(getattr(limits, "dayMode", "") or "")
         conf_tier = str(getattr(limits, "confidenceTier", "") or "MEDIUM")
         phase = str(getattr(limits, "phase", "") or "ACCUMULATE")
     else:
-        from app.engines.chop_day_guards import chop_guard_summary
-
-        chop_meta = chop_guard_summary(state, snapshots)
-        day_mode = str(chop_meta.get("dayMode") or "NORMAL")
         conf_tier = "MEDIUM"
         phase = "ACCUMULATE"
     adaptive = resolve_day_adaptive(
@@ -1965,6 +2192,13 @@ def find_best_entry(
             candidates = explosion_only
 
     def sort_key(c: EntryCandidate) -> float:
+        elite_bonus = 0.0
+        if elite_engine:
+            gate = (c.pretrade_meta or {}).get("topMomentGate") or {}
+            assessment = gate.get("eliteAssessment") or {}
+            elite_bonus = float(assessment.get("eliteScore") or 0) * 2.0
+            setup_pri = int(assessment.get("setupPriority") or 9)
+            elite_bonus -= setup_pri * 3.0
         bonus = 20 if c.mode == "explosion" else (
             15 if c.mode == "worst_day_itm_fade" else (
                 10 if c.mode == "slow_bounce" else (
@@ -2117,7 +2351,7 @@ def find_best_entry(
                     getattr(settings, "expiry_day_same_week_next_sort_bonus", 15.0) or 15.0
                 )
         penalty = entry_score_penalty(c.symbol)
-        return c.score + bonus - penalty
+        return c.score + bonus + elite_bonus - penalty
 
     # Stable leg identity breaks exact score ties so the capital-first slot cannot
     # flip between otherwise identical snapshots because of collection order.
@@ -2406,6 +2640,27 @@ def diagnose_missed_entries(
                         or 24.0
                     ),
                 )
+            from app.engines.bullish_day_floor_relief import (
+                bullish_day_context_active,
+                bullish_day_first_lift_floors,
+            )
+
+            _day_mode = str(
+                (getattr(state, "dailyStrategy", None) or {}).get("dayMode")
+                or ""
+            )
+            _conf_tier = str(
+                (getattr(state, "dailyStrategy", None) or {}).get("confidenceTier")
+                or ""
+            )
+            if bullish_day_context_active(
+                day_mode=_day_mode,
+                confidence_tier=_conf_tier,
+                state=state,
+                snapshots=snapshots,
+            ):
+                bd_floors = bullish_day_first_lift_floors(settings)
+                min_score = min(min_score, bd_floors["minScore"])
             if elite_only and tier_str.upper() not in ("ELITE", "EXPLODING"):
                 from app.engines.building_ftv_gates import (
                     building_armed_base_grade_a_live_ok,
@@ -2482,8 +2737,12 @@ def diagnose_missed_entries(
             if snap.tradeQualityScore < 25 and score < settings.aggressive_min_explosion_score + 10:
                 blockers.append("symbol_tqs_low")
             if blockers:
+                side_raw = str(alert.get("side") or "").upper()
+                strike_v = float(alert.get("strike") or 0)
                 notes.append({
                     "symbol": symbol,
+                    "side": side_raw or None,
+                    "strike": strike_v or None,
                     "reason": "explosion_near_miss",
                     "mode": "explosion",
                     "message": ", ".join(blockers),

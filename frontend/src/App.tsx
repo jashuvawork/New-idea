@@ -39,6 +39,7 @@ import { LiveTradingGate, MorningChecklist } from './components/LiveTradingGate'
 import { TradeJournal, NewsPanel } from './components/TradeJournal';
 import { StrategyMatrix } from './components/StrategyMatrix';
 import { ExplosionRadar } from './components/ExplosionRadar';
+import { BuildingWatchPanel } from './components/BuildingWatchPanel';
 import { MarketHeatmap } from './components/MarketHeatmap';
 import { PsychologyPanel } from './components/PsychologyPanel';
 import { PremarketPanel } from './components/PremarketPanel';
@@ -343,6 +344,9 @@ export default function App() {
               <div className="col-span-12 lg:col-span-3"><PremarketPanel snap={snap} /></div>
               <div className="col-span-12 lg:col-span-3"><ExplosiveRunner snap={snap} /></div>
               <div className="col-span-12 lg:col-span-3"><ExplosionRadar snap={snap} /></div>
+              <div className="col-span-12">
+                <BuildingWatchPanel data={data} auto={auto} />
+              </div>
             </DashboardSection>
 
             <DashboardSection title="Signals & Trades" subtitle="Day mode, router, heatmap, swing lane">

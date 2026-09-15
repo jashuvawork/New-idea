@@ -39,6 +39,7 @@ from app.services.radar_learning import (
     read_premium_tape,
     record_funnel_state,
     record_funnel_event,
+    record_funnel_gate_block,
     record_market_observations,
     reset_learning_state_for_tests,
     restore_local_base_history,
@@ -508,6 +509,40 @@ def test_funnel_maps_blocker_entry_and_trade_outcome(tmp_path):
     assert report["rows"][0]["blockers"] == ["chart_alignment"]
 
 
+def test_funnel_gate_block_records_selector_rejects(tmp_path):
+    settings = _settings(tmp_path)
+    start = datetime(2026, 9, 9, 12, 30, tzinfo=IST)
+    with _patch_settings(settings):
+        record_top_radars(
+            {"SENSEX": _snap(alerts=[{**_alert(), "side": "CALL", "strike": 75100.0}])},
+            now=start - timedelta(hours=3),
+            source="rest_snapshot",
+        )
+        assert record_funnel_gate_block(
+            "SENSEX",
+            "CALL",
+            75100.0,
+            "late_reentry_near_session_peak_326.0",
+            now=start,
+        )
+        assert record_funnel_gate_block(
+            "SENSEX",
+            "CALL",
+            75100.0,
+            "late_reentry_near_session_peak_326.0",
+            now=start + timedelta(seconds=1),
+        ) is False
+        with patch(
+            "app.services.trade_store.get_day_detail",
+            return_value={"trades": []},
+        ):
+            report = build_funnel_report("2026-09-09")
+
+    row = next(r for r in report["rows"] if r["key"] == "SENSEX:CALL:75100")
+    assert row["blocked"] is True
+    assert "late_reentry_near_session_peak_326.0" in row["blockers"]
+
+
 def test_ranked_out_is_deduplicated_exposed_and_not_counted_selected(tmp_path):
     settings = _settings(tmp_path)
     start = datetime(2026, 8, 18, 10, 40, tzinfo=IST)
@@ -715,7 +750,8 @@ def test_finalize_skips_purge_when_premium_tape_not_bundled(tmp_path, monkeypatc
       radar_purge_telemetry_after_finalize=True,
       radar_purge_requires_bundled_premium_tape=True,
   )
-  start = datetime(2026, 8, 26, 10, 0, tzinfo=IST)
+  start = datetime.now(IST).replace(hour=10, minute=0, second=0, microsecond=0) - timedelta(days=1)
+  session_date = start.date().isoformat()
   original_add = radar_learning.add_archive_artifacts
 
   def _add_without_tape(date, artifacts, **kwargs):
@@ -739,12 +775,12 @@ def test_finalize_skips_purge_when_premium_tape_not_bundled(tmp_path, monkeypatc
           now=start,
           force=True,
       )
-      assert premium_tape_path("2026-08-26").exists()
-      result = finalize_daily_review("2026-08-26")
+      assert premium_tape_path(session_date).exists()
+      result = finalize_daily_review(session_date)
       assert result["premiumTapeBundled"] is False
       assert result["purgedTelemetry"] == []
-      assert premium_tape_path("2026-08-26").exists()
-      assert funnel_path("2026-08-26").exists()
+      assert premium_tape_path(session_date).exists()
+      assert funnel_path(session_date).exists()
 
 
 def test_health_reports_stale_sources_divergence_and_component_errors(tmp_path):

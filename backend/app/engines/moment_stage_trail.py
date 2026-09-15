@@ -183,6 +183,7 @@ def compute_projected_max_tp(
     flat_then_vertical: bool = False,
     mega_rip: bool = False,
     max_profit: bool = False,
+    vbase_ftv_runner: bool = False,
     settings: Optional[Settings] = None,
 ) -> float:
     """Project max take-profit points for this moment from structure + heat."""
@@ -229,6 +230,10 @@ def compute_projected_max_tp(
         v3 >= _cfg_float(s, "moment_stage_parabolic_min_velocity_3s", 8.0)
         and vol >= _cfg_float(s, "moment_stage_parabolic_min_volume_surge", 2.5)
     )
+    if vbase_ftv_runner and v3 > 0:
+        parabolic = parabolic or v3 >= _cfg_float(
+            s, "elite_failed_launch_relax_min_velocity_3s", 0.0
+        )
     if vertical_moment:
         base_prem_mult = _cfg_float(s, "moment_stage_base_premium_mult", 5.5)
         entry_prem_mult = _cfg_float(s, "moment_stage_entry_premium_mult", 4.2)
@@ -319,6 +324,7 @@ def build_moment_stage_plan(
     flat_then_vertical: bool = False,
     mega_rip: bool = False,
     max_profit: bool = False,
+    vbase_ftv_runner: bool = False,
     settings: Optional[Settings] = None,
 ) -> Optional[dict[str, Any]]:
     """Build entry stamp for the stage ladder, or None if disabled / too small."""
@@ -339,6 +345,7 @@ def build_moment_stage_plan(
         flat_then_vertical=flat_then_vertical,
         mega_rip=mega_rip,
         max_profit=max_profit,
+        vbase_ftv_runner=vbase_ftv_runner,
         settings=s,
     )
     min_proj = _cfg_float(s, "moment_stage_min_projected_tp", 40.0)
@@ -411,9 +418,18 @@ def maybe_extend_projected_max(trade: PaperTrade, best: float, settings: Optiona
     hot = live_v >= _cfg_float(s, "moment_stage_extend_hot_velocity_3s", 2.5)
     ctx = trade.entryContext or {}
     mega = bool(ctx.get("ictMegaRip") or ctx.get("momentType") == "mega_rip")
+    vbase_runner = bool(ctx.get("vBaseFtvRunner") or ctx.get("eliteRunnerExitBundle"))
+    entry = float(getattr(trade, "entryPremium", 0) or 0)
+    if vbase_runner and entry > 0 and best + 1e-9 >= entry:
+        hot = hot or live_v >= _cfg_float(s, "moment_stage_parabolic_min_velocity_3s", 8.0)
     if hot or mega or best >= 300:
         headroom_stages = max(
             headroom_stages, _cfg_float(s, "moment_stage_extend_hot_stages", 4.0)
+        )
+    if vbase_runner and entry > 0 and best + 1e-9 >= entry:
+        headroom_stages = max(
+            headroom_stages,
+            _cfg_float(s, "ftv_vbase_parabolic_extend_hot_stages", 5.0),
         )
     extended = round(max(projected, best + stage * headroom_stages), 1)
     abs_cap = _cfg_float(s, "moment_stage_max_projected_tp", 800.0)
@@ -549,6 +565,14 @@ def pre_stage_hold_floor_pts(
     if not trade_uses_moment_stage_ladder(trade):
         return None
 
+    from app.engines.modest_peak_mode import trade_uses_modest_peak_mode
+
+    if (
+        trade_uses_modest_peak_mode(trade)
+        and bool(getattr(s, "modest_peak_suppress_pre_stage_wide_floor", True))
+    ):
+        return None
+
     fields = _ladder_fields(trade)
     stage = _safe_float(fields.get("stageSize"))
     if stage <= 0:
@@ -608,10 +632,17 @@ def ftv_runner_pct_floor(
     ctx = getattr(trade, "entryContext", None) or {}
     arm_min_pts = _cfg_float(s, "ftv_runner_pct_trail_arm_min_best_points", 20.0)
     max_profit = bool(ctx.get("maxProfitCapture"))
-    armed = gain_pct >= arm_pct or (max_profit and best >= arm_min_pts)
+    keep = _cfg_float(s, "ftv_runner_pct_trail_keep_ratio", 0.75)
+    from app.engines.modest_peak_mode import modest_peak_pct_arm_thresholds
+
+    modest = modest_peak_pct_arm_thresholds(trade, settings=s)
+    if modest is not None:
+        arm_pct, arm_min_pts, keep = modest
+        armed = gain_pct >= arm_pct or best >= arm_min_pts
+    else:
+        armed = gain_pct >= arm_pct or (max_profit and best >= arm_min_pts)
     if not armed:
         return None
-    keep = _cfg_float(s, "ftv_runner_pct_trail_keep_ratio", 0.75)
     # Closed loop: prefer the LEARNED per-moment keep-ratio when EOD learning stamped one
     # (ride high-hit movers harder, tighten low-hit buckets). Bounded to a safe band.
     learned = _safe_float(ctx.get("learnedTrailKeepRatio"))

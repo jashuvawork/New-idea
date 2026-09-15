@@ -47,6 +47,8 @@ def _settings():
     s.moneyness_high_conf_prefer = "ITM"
     s.moneyness_rank_bonus = 12.0
     s.moneyness_mismatch_penalty = 15.0
+    s.explosion_shallow_otm_entry_enabled = True
+    s.explosion_shallow_otm_entry_steps = 1
     s.high_confidence_min_score = 72.0
     s.bearish_sideways_explosion_min_score = 78.0
     s.min_option_premium_inr = 25.0
@@ -382,3 +384,26 @@ def test_rank_bonus_for_aligned_moneyness(mock_settings):
     with patch("app.engines.moneyness.resolve_preferred_moneyness", return_value="ATM"):
         bonus = moneyness_rank_adjustment(Side.CALL, 23950, snap, mode="explosion")
     assert bonus > 0
+
+
+@patch("app.engines.moneyness.get_settings")
+def test_shallow_otm_near_strike_entry_allowed_for_elite(mock_settings):
+    s = _settings()
+    s.explosion_shallow_otm_entry_enabled = True
+    s.explosion_shallow_otm_entry_steps = 1
+    s.moneyness_atm_tolerance_points = 25.0
+    mock_settings.return_value = s
+    snap = _snap(spot=23800.0)
+    snap.atmStrike = 23800.0
+    alert = {"tier": "ELITE", "side": "PUT", "strike": 23750.0, "explosionScore": 100.0}
+    ok, reason, meta = atm_itm_entry_allows(Side.PUT, 23750.0, snap, alert=alert)
+    assert ok is True
+    assert reason == "ok"
+    assert meta.get("shallowOtmNearStrikeEntry") is True
+    assert meta["moneyness"] == "OTM"
+
+    blocked, block_reason, _ = atm_itm_entry_allows(
+        Side.PUT, 23650.0, snap, alert={**alert, "strike": 23650.0},
+    )
+    assert blocked is False
+    assert block_reason == "moneyness_atm_itm_only"

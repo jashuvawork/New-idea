@@ -85,3 +85,20 @@ def test_defensive_mode_on_bad_day(_cls, _pol, _bad):
     )
     assert mode == "DEFENSIVE"
     assert meta["defensiveDayActive"] is True
+
+
+@patch("app.engines.whipsaw_guards.is_bearish_sideways_session", return_value=False)
+@patch("app.engines.chop_day_guards.in_momentum_rally_window", return_value=True)
+@patch("app.engines.day_adaptive_engine.classify_day_type", return_value="ELITE")
+@patch(
+    "app.engines.expiry_day_guards.expiry_post_win_afternoon_fomo_risk",
+    return_value=(True, ["expiry_session", "post_small_win"]),
+)
+def test_good_day_blocked_on_expiry_post_win_afternoon(_fomo, _cls, _rally, _bear):
+    """Sep03: must not flip AGGRESSIVE after small win on expiry afternoon."""
+    snaps = {"NIFTY": _snap(), "SENSEX": _snap("SENSEX")}
+    active, reasons = good_day_session_active(
+        AutoTraderState(), snaps, day_mode="EXPIRY DAY", confidence_tier="ELITE",
+    )
+    assert active is False
+    assert "expiry_post_win_afternoon" in reasons

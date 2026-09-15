@@ -6,8 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
+from app.config import Settings
 from app.engines.chop_live_guards import (
     broker_adopted_trade_exit_blocked,
+    chop_live_early_fail_exit_reason,
     chop_live_entry_blocked,
     chop_live_session_lift_allowed,
     parse_broker_option_symbol,
@@ -212,3 +214,84 @@ def test_adoption_dedupes_same_instrument_key(mock_record, mock_settings):
     assert len(adopted) == 1
     assert len(state.openPaperTrades) == 1
     assert state.openPaperTrades[0].strike == 24050.0
+
+
+def _chop_exit_settings(**overrides) -> Settings:
+    base = Settings()
+    base.explosion_failed_launch_exit_enabled = False
+    base.explosion_never_green_stop_enabled = False
+    base.explosion_faded_rip_no_green_exit_enabled = False
+    base.explosion_early_green_lock_enabled = False
+    base.explosion_peak_fade_lock_enabled = False
+    base.explosion_peak_capture_enabled = False
+    base.explosion_no_progress_enabled = False
+    base.emergency_stop_enabled = False
+    base.live_early_fail_exit_enabled = False
+    for key, value in overrides.items():
+        setattr(base, key, value)
+    return base
+
+
+def _chop_trade(*, elite: bool = False) -> PaperTrade:
+    ctx: dict = {
+        "chopLiveGuard": True,
+        "selectionScore": 226.09 if elite else 80.0,
+        "selectionMode": "explosion",
+        "exitPlan": {"stopPoints": 16.0},
+    }
+    if elite:
+        ctx["eliteAssessment"] = {
+            "eliteScore": 90.6,
+            "grade": "A",
+            "setup": "V",
+            "eliteBand": "ELITE",
+        }
+    return PaperTrade(
+        id="2086c4e9" if elite else "chop1",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=23900.0,
+        entryPremium=109.4,
+        currentPremium=106.4,
+        lots=3,
+        strategyType=StrategyType.EXPLOSIVE,
+        openedAt=datetime.now(IST) - timedelta(seconds=31),
+        bestPnlPoints=0.0,
+        entryContext=ctx,
+    )
+
+
+@patch("app.engines.chop_live_guards.get_settings")
+def test_chop_live_early_fail_fires_for_non_elite_chop_trade(mock_settings):
+    mock_settings.return_value = _chop_exit_settings()
+    trade = _chop_trade(elite=False)
+    reason = chop_live_early_fail_exit_reason(
+        trade,
+        hold_seconds=31,
+        best_points=0.0,
+        pnl_points=-3.0,
+        live_velocity_3s=-0.5,
+    )
+    assert reason == "chop_live_early_fail"
+
+
+@patch("app.engines.chop_live_guards.get_settings")
+@patch("app.engines.explosion_profit._hold_seconds", return_value=31)
+@patch("app.engines.explosion_profit.get_settings")
+def test_chop_live_early_fail_skipped_for_elite_assessment(
+    mock_explosion_settings,
+    _hold,
+    mock_chop_settings,
+):
+    settings = _chop_exit_settings()
+    mock_explosion_settings.return_value = settings
+    mock_chop_settings.return_value = settings
+    trade = _chop_trade(elite=True)
+    reason, _ = evaluate_explosion_exit(
+        trade,
+        106.4,
+        "ELITE",
+        lot_multiplier=65,
+        live_velocity_3s=-0.5,
+    )
+    assert reason != "chop_live_early_fail"
