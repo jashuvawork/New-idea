@@ -120,6 +120,7 @@ def _worth_archiving(alert: Mapping[str, Any]) -> bool:
         or alert.get("ictArmedBaseLaunch")
         or alert.get("ictBreakout")
         or alert.get("allDayExplosion")
+        or alert.get("expiryFastVerticalBurst")
     )
 
 
