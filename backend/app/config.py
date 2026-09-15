@@ -336,6 +336,16 @@ class Settings(BaseSettings):
     best_trade_deep_chase_min_premium_inr: float = 120.0
     best_trade_deep_chase_max_local_pct: float = 18.0
     best_trade_cheap_entry_max_premium_inr: float = 85.0
+    # Selector: prefer ₹18–80 OTM near-base over deep ITM when both on radar.
+    best_trade_cheap_base_rank_priority_enabled: bool = True
+    best_trade_cheap_base_min_premium_inr: float = 18.0
+    best_trade_cheap_base_max_premium_inr: float = 80.0
+    best_trade_cheap_base_max_local_pct: float = 22.0
+    best_trade_cheap_base_max_off_extreme_pct: float = 35.0
+    best_trade_cheap_base_rank_bonus: float = 45.0
+    best_trade_cheap_base_ftv_v_bonus: float = 12.0
+    best_trade_deep_itm_min_premium_inr: float = 120.0
+    best_trade_deep_itm_rank_penalty: float = 60.0
     # Sep15 NIFTY 23400 PE: ELITE v_rip_session_low at 20–27% off base blocked elite_v_rip_only + local cap.
     elite_mega_vertical_bypass_enabled: bool = True
     elite_mega_vertical_bypass_max_local_pct: float = 27.0

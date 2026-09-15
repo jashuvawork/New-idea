@@ -119,6 +119,178 @@ def best_trade_chop_deep_chase_blocked(
     return False, ""
 
 
+def _side_value(side: Any) -> str:
+    return str(getattr(side, "value", side) or "").upper()
+
+
+def _alert_for_candidate(candidate: Any) -> dict[str, Any]:
+    alert = getattr(candidate, "alert", None)
+    return alert if isinstance(alert, Mapping) else {}
+
+
+def cheap_base_strike_eligible(
+    candidate: Any,
+    alert: Mapping[str, Any] | None,
+    snap: Any,
+    *,
+    settings: Any = None,
+) -> bool:
+    """₹18–80 OTM/ATM near session extreme — Sep-9 / Sep-15 morning PUT pattern."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_cheap_base_rank_priority_enabled", True)):
+        return False
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+    if snap is None:
+        return False
+
+    premium = _number(getattr(candidate, "premium", 0) or alert.get("premium"))
+    prem_lo = float(getattr(settings, "best_trade_cheap_base_min_premium_inr", 18.0) or 18.0)
+    prem_hi = float(getattr(settings, "best_trade_cheap_base_max_premium_inr", 80.0) or 80.0)
+    if not (prem_lo <= premium <= prem_hi):
+        return False
+
+    pad = _number(
+        (alert or {}).get("localBaseMovePct")
+        or (alert or {}).get("ictBaseRelativeMovePct")
+    )
+    max_pad = float(getattr(settings, "best_trade_cheap_base_max_local_pct", 22.0) or 22.0)
+    if pad > max_pad + 1e-6:
+        return False
+
+    off_low = _number((alert or {}).get("offLowMovePct"))
+    max_off = float(
+        getattr(settings, "best_trade_cheap_base_max_off_extreme_pct", 35.0) or 35.0
+    )
+    if off_low > max_off + 1e-6:
+        return False
+
+    from app.engines.moneyness import classify_moneyness
+
+    money = classify_moneyness(
+        getattr(candidate, "side", ""),
+        float(getattr(candidate, "strike", 0) or 0),
+        float(getattr(snap, "spot", 0) or 0),
+        symbol=str(getattr(candidate, "symbol", "") or ""),
+        atm=float(getattr(snap, "atmStrike", 0) or 0) or None,
+    )
+    if money == "ITM":
+        return False
+    return True
+
+
+def deep_itm_chase_strike(
+    candidate: Any,
+    alert: Mapping[str, Any] | None,
+    snap: Any,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Deep ITM / expensive premium chase — Sep15 23500 PE @ ₹242."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False
+
+    premium = _number(getattr(candidate, "premium", 0) or (alert or {}).get("premium"))
+    deep_floor = float(getattr(settings, "best_trade_deep_itm_min_premium_inr", 120.0) or 120.0)
+    if premium >= deep_floor:
+        return True
+
+    if snap is None:
+        return False
+    from app.engines.moneyness import classify_moneyness
+
+    money = classify_moneyness(
+        getattr(candidate, "side", ""),
+        float(getattr(candidate, "strike", 0) or 0),
+        float(getattr(snap, "spot", 0) or 0),
+        symbol=str(getattr(candidate, "symbol", "") or ""),
+        atm=float(getattr(snap, "atmStrike", 0) or 0) or None,
+    )
+    cheap_hi = float(getattr(settings, "best_trade_cheap_entry_max_premium_inr", 85.0) or 85.0)
+    return money == "ITM" and premium > cheap_hi
+
+
+def deprioritize_deep_itm_when_cheap_base_present(
+    candidates: list[Any],
+    *,
+    settings: Any = None,
+) -> list[Any]:
+    """Drop deep ITM legs when a cheap-base peer exists on the same symbol+side."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_cheap_base_rank_priority_enabled", True)):
+        return candidates
+    if len(candidates) <= 1:
+        return candidates
+
+    from collections import defaultdict
+
+    groups: dict[tuple[str, str], list[Any]] = defaultdict(list)
+    for candidate in candidates:
+        sym = str(getattr(candidate, "symbol", "") or "").upper()
+        side = _side_value(getattr(candidate, "side", ""))
+        groups[(sym, side)].append(candidate)
+
+    kept: list[Any] = []
+    for group in groups.values():
+        cheap_present = any(
+            cheap_base_strike_eligible(
+                c, _alert_for_candidate(c), getattr(c, "snap", None), settings=settings,
+            )
+            for c in group
+        )
+        if not cheap_present:
+            kept.extend(group)
+            continue
+        for candidate in group:
+            if deep_itm_chase_strike(
+                candidate,
+                _alert_for_candidate(candidate),
+                getattr(candidate, "snap", None),
+                settings=settings,
+            ):
+                continue
+            kept.append(candidate)
+    return kept if kept else candidates
+
+
+def cheap_base_strike_rank_bonus(
+    candidate: Any,
+    *,
+    alert: Mapping[str, Any] | None = None,
+    elite_assessment: Mapping[str, Any] | None = None,
+    settings: Any = None,
+) -> float:
+    """Selector sort_key boost for cheap-base rank-1; penalty for deep ITM."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_cheap_base_rank_priority_enabled", True)):
+        return 0.0
+
+    alert = alert if isinstance(alert, Mapping) else _alert_for_candidate(candidate)
+    snap = getattr(candidate, "snap", None)
+    bonus = 0.0
+    if cheap_base_strike_eligible(
+        candidate, alert, snap, settings=settings,
+    ):
+        bonus += float(getattr(settings, "best_trade_cheap_base_rank_bonus", 45.0) or 45.0)
+        setup = str((elite_assessment or {}).get("setup") or "").upper()
+        if setup in VALID_BEST_BASE_SETUPS:
+            bonus += float(
+                getattr(settings, "best_trade_cheap_base_ftv_v_bonus", 12.0) or 12.0
+            )
+    elif deep_itm_chase_strike(candidate, alert, snap, settings=settings):
+        bonus -= float(getattr(settings, "best_trade_deep_itm_rank_penalty", 60.0) or 60.0)
+    return bonus
+
+
 def elite_base_setup_allowed(
     setup: str,
     *,
