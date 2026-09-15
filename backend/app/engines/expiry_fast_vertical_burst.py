@@ -76,7 +76,10 @@ def expiry_fast_vertical_burst_from_run(
         return False, off_low, run_pct
     if not (min_off <= off_low <= max_off + 1e-6):
         return False, off_low, run_pct
-    if float(effective_volume or 0) < min_vol and run_pct < vol_bypass_run:
+    # WS heatmap rescans pass volume=0 (unknown). Do not treat unknown as illiquid —
+    # mid-rip ₹20→₹28 (40% run) was blocked waiting for 45% vol-bypass (Sep15 23350 PE).
+    vol = float(effective_volume or 0)
+    if vol > 0 and vol < min_vol and run_pct < vol_bypass_run:
         return False, off_low, run_pct
     if hist is not None and len(hist) > max_hist:
         return False, off_low, run_pct
