@@ -37,11 +37,97 @@ def _number(value: Any) -> float:
         return 0.0
 
 
+def _v_rip_moment_evidence(
+    evidence: Mapping[str, Any],
+    *,
+    readiness_reason: str = "",
+) -> bool:
+    """True when causal evidence shows a V-bottom / session-low rip (not mid-rip coil)."""
+    if bool(evidence.get("midRipCoil")):
+        return False
+    if bool(evidence.get("vRipReady")):
+        return True
+    rr = str(
+        readiness_reason
+        or evidence.get("firstLiftReadinessReason")
+        or evidence.get("ictBaseReadinessReason")
+        or ""
+    )
+    if rr.startswith("v_rip_session_low"):
+        return True
+    moment = str(evidence.get("momentType") or "")
+    if moment.startswith("v_rip_session_low") or moment == "V":
+        return True
+    blob = str(evidence.get("reason") or "").lower()
+    if "v_rip_session_low" in blob or "fastverticalburst" in blob.replace("_", ""):
+        return True
+    return False
+
+
+def _mega_vertical_peak_move(evidence: Mapping[str, Any]) -> float:
+    return max(
+        _number(evidence.get("peakMovePct")),
+        _number(evidence.get("dailyMovePct")),
+    )
+
+
+def elite_mega_vertical_bypass(
+    evidence: Mapping[str, Any],
+    assessment: Mapping[str, Any],
+    *,
+    settings: Any = None,
+    readiness_reason: str = "",
+) -> tuple[bool, str]:
+    """Waive elite_v_rip_only / shallow-lift / local cap for expiry mega verticals near base.
+
+    Sep15 NIFTY 23400 PE ₹24→₹100: ELITE v_rip_session_low at 20–27% off base was blocked
+    by elite_v_rip_only (EXPLOSIVE setup) and the 20% local-base cap.
+    """
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "elite_mega_vertical_bypass_enabled", True)):
+        return False, ""
+
+    fast_burst = bool(evidence.get("expiryFastVerticalBurst")) or (
+        "fastverticalburst" in str(evidence.get("reason") or "").lower().replace("_", "")
+    )
+    v_rip = _v_rip_moment_evidence(evidence, readiness_reason=readiness_reason)
+    if not fast_burst and not v_rip:
+        return False, ""
+
+    tier_u = str(evidence.get("tier") or "").upper()
+    if tier_u not in ("ELITE", "EXPLODING", "BUILDING") and not fast_burst:
+        return False, ""
+
+    local = _number(assessment.get("localBasePct") or evidence.get("localBaseMovePct"))
+    max_local = float(
+        getattr(settings, "elite_mega_vertical_bypass_max_local_pct", 27.0) or 27.0
+    )
+    if local > max_local + 1e-6:
+        return False, ""
+
+    peak = _mega_vertical_peak_move(evidence)
+    min_peak = float(
+        getattr(settings, "elite_mega_vertical_bypass_min_peak_move_pct", 35.0) or 35.0
+    )
+    min_run = float(
+        getattr(settings, "elite_mega_vertical_bypass_min_run_pct", 28.0) or 28.0
+    )
+    if peak < min(min_peak, min_run) - 1e-6:
+        return False, ""
+
+    tag = "expiry_fast_vertical_burst" if fast_burst else "v_rip_mega_vertical"
+    return True, tag
+
+
 def infer_setup_type(
     evidence: Mapping[str, Any],
     moment: Optional[str] = None,
 ) -> str:
     """Return FTV | V | EXPLOSIVE | OTHER from causal evidence."""
+    if _v_rip_moment_evidence(evidence):
+        return "V"
     if bool(evidence.get("vRipReady")) and not bool(evidence.get("midRipCoil")):
         return "V"
     if bool(evidence.get("flatThenVertical")):
@@ -817,8 +903,24 @@ def elite_entry_allowed(
     assessment = build_elite_assessment(evidence, ranking)
     assessment = {**assessment, "dayMode": resolved_mode, "dayType": resolved_type}
 
+    mega_ok, mega_tag = elite_mega_vertical_bypass(
+        evidence,
+        assessment,
+        settings=settings,
+        readiness_reason=readiness_reason,
+    )
+    if mega_ok:
+        assessment = {**assessment, "megaVerticalBypass": mega_tag}
+
     min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
     max_local = elite_side_local_base_cap(resolved_side, settings=settings)
+    if mega_ok and bool(
+        getattr(settings, "elite_mega_vertical_bypass_extend_local_cap", True)
+    ):
+        mega_cap = float(
+            getattr(settings, "elite_mega_vertical_bypass_max_local_pct", 27.0) or 27.0
+        )
+        max_local = max(max_local, mega_cap)
     min_stage = str(getattr(settings, "elite_trade_min_stage", "ARMED") or "ARMED").upper()
     min_stage_rank = STAGE_RANK.get(min_stage, STAGE_RANK["ARMED"])
 
@@ -826,7 +928,14 @@ def elite_entry_allowed(
     if setup not in VALID_SETUPS:
         return False, "elite_setup_not_ftv_v_or_explosive", assessment
 
-    if bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)) and setup != "V":
+    if (
+        bool(getattr(settings, "elite_trade_v_rip_only_enabled", False))
+        and setup != "V"
+        and not (
+            mega_ok
+            and bool(getattr(settings, "elite_mega_vertical_bypass_waive_v_rip_only", True))
+        )
+    ):
         assessment = {**assessment, "side": resolved_side}
         return False, "elite_v_rip_only", assessment
 
@@ -869,6 +978,17 @@ def elite_entry_allowed(
     v_rip_shallow_blocked, v_rip_shallow_reason = elite_v_rip_shallow_lift_blocked(
         evidence, assessment, settings=settings, readiness_reason=readiness_reason,
     )
+    if (
+        v_rip_shallow_blocked
+        and mega_ok
+        and bool(getattr(settings, "elite_mega_vertical_bypass_waive_shallow_first_lift", True))
+        and (
+            bool(evidence.get("expiryFastVerticalBurst"))
+            or _v_rip_moment_evidence(evidence, readiness_reason=readiness_reason)
+        )
+    ):
+        v_rip_shallow_blocked = False
+        v_rip_shallow_reason = ""
     if v_rip_shallow_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, v_rip_shallow_reason, assessment

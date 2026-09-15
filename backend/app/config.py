@@ -325,6 +325,14 @@ class Settings(BaseSettings):
     elite_trade_perfect_score_max_local_pct: float = 15.0
     # Historical FTV EOD (12d): V-only beats FTV/EXPLOSIVE on baseline win gates (+₹531k vs +₹514k).
     elite_trade_v_rip_only_enabled: bool = True
+    # Sep15 NIFTY 23400 PE: ELITE v_rip_session_low at 20–27% off base blocked elite_v_rip_only + local cap.
+    elite_mega_vertical_bypass_enabled: bool = True
+    elite_mega_vertical_bypass_max_local_pct: float = 27.0
+    elite_mega_vertical_bypass_min_peak_move_pct: float = 35.0
+    elite_mega_vertical_bypass_min_run_pct: float = 28.0
+    elite_mega_vertical_bypass_waive_v_rip_only: bool = True
+    elite_mega_vertical_bypass_waive_shallow_first_lift: bool = True
+    elite_mega_vertical_bypass_extend_local_cap: bool = True
     # Block flatVerticalQuality chase above ceiling (EOD: FVQ 80–89 → 33% win).
     elite_trade_block_fvq_above: float = 80.0
     # Block very shallow local-base entries until TRIGGERED+ confirms lift (not first tick).
