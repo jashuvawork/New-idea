@@ -558,6 +558,7 @@ async def _open_from_candidate(
     policy_decision = None
     policy_ranking = None
     final_ranking = None
+    elite_preview: dict[str, Any] = {}
 
     # Jul29: stop scalp entries — explosions only.
     if not getattr(settings, "scalp_entries_enabled", False):
@@ -697,6 +698,13 @@ async def _open_from_candidate(
         policy_ranking = rank_entry_candidate(
             candidate, faded=policy_faded, snapshot=policy_snap
         )
+        if getattr(settings, "elite_trade_engine_enabled", False):
+            from app.engines.elite_score_engine import build_elite_assessment
+
+            elite_preview = build_elite_assessment(
+                policy_ranking.get("evidence") or {},
+                policy_ranking,
+            )
         money_ok, _, _ = atm_itm_entry_allows(
             candidate.side,
             candidate.strike,
@@ -816,6 +824,26 @@ async def _open_from_candidate(
 
             if not building_rip_bypasses_fake_trap(candidate=candidate):
                 return False, trap_reason
+
+        if bool(getattr(settings, "best_trade_block_chop_deep_chase_enabled", True)):
+            from app.engines.best_trade_policy import best_trade_chop_deep_chase_blocked
+            from app.engines.trade_ranking import rank_entry_candidate, resolve_policy_day_mode
+
+            preview = elite_preview
+            if not preview:
+                from app.engines.elite_score_engine import build_elite_assessment
+
+                pr = rank_entry_candidate(candidate, faded=faded, snapshot=snap)
+                preview = build_elite_assessment(pr.get("evidence") or {}, pr)
+            deep_blocked, deep_reason = best_trade_chop_deep_chase_blocked(
+                candidate,
+                trap_meta,
+                preview,
+                day_mode=resolve_policy_day_mode(state),
+                settings=settings,
+            )
+            if deep_blocked:
+                return False, deep_reason
 
     # Per-trade timing quality — COLD/LATE/CHASE cannot open full-size on dead tape.
     timing_meta: dict[str, Any] = {}
@@ -1165,7 +1193,11 @@ async def _open_from_candidate(
 
         from app.engines.entry_timing import timing_allows_full_size
 
-        timing_ok_full = timing_allows_full_size(timing_meta) if timing_meta else True
+        timing_ok_full = (
+            timing_allows_full_size(timing_meta, elite_preview)
+            if timing_meta
+            else True
+        )
         high_conviction = bool(timing_ok_full) and _size_gate(is_high_conviction_entry)
         if high_conviction and getattr(settings, "high_conviction_sizing_enabled", True):
             from app.engines.capital_allocator import max_lots_for_capital
@@ -1236,12 +1268,11 @@ async def _open_from_candidate(
     if (
         candidate.mode == "explosion"
         and timing_meta
-        and timing_allows_full_size(timing_meta)
+        and timing_allows_full_size(timing_meta, elite_preview)
         and (
             timing_meta.get("structuredColdBase")
             or str(timing_meta.get("assessment") or "").upper() == "COLD_BASE"
         )
-        and getattr(settings, "entry_timing_structured_cold_max_lots", False)
     ):
         from app.engines.capital_allocator import max_lots_for_capital
 
@@ -1941,7 +1972,7 @@ async def _open_from_candidate(
 
     timing_ok_for_max_floor = (
         not timing_meta
-        or _timing_allows_max_floor(timing_meta)
+        or _timing_allows_max_floor(timing_meta, elite_preview)
     )
     if always_max_entry or (
         candidate.mode == "explosion"

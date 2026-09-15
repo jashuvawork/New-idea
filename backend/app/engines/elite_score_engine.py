@@ -928,16 +928,15 @@ def elite_entry_allowed(
     if setup not in VALID_SETUPS:
         return False, "elite_setup_not_ftv_v_or_explosive", assessment
 
-    if (
-        bool(getattr(settings, "elite_trade_v_rip_only_enabled", False))
-        and setup != "V"
-        and not (
-            mega_ok
-            and bool(getattr(settings, "elite_mega_vertical_bypass_waive_v_rip_only", True))
-        )
-    ):
+    from app.engines.best_trade_policy import elite_base_setup_allowed
+
+    if not elite_base_setup_allowed(setup, mega_ok=mega_ok, settings=settings):
+        if bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)):
+            assessment = {**assessment, "side": resolved_side}
+            return False, "elite_v_rip_only", assessment
+        local = _number(assessment.get("localBasePct"))
         assessment = {**assessment, "side": resolved_side}
-        return False, "elite_v_rip_only", assessment
+        return False, f"elite_explosive_chase_local_{local:.0f}pct", assessment
 
     milestone_blocked, milestone_reason = elite_milestone_depth_blocked(
         evidence, settings=settings,
