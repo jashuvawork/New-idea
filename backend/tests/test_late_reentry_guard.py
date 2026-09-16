@@ -80,6 +80,86 @@ def test_session_peak_late_reentry_allows_deep_pullback():
     assert reason == ""
 
 
+def test_session_peak_late_reentry_waives_first_strike_entry_sep16_style():
+    """Sep16 SENSEX 74200 PE — initial armed rip, no prior trade on strike."""
+    _seed_session_peak(
+        symbol="SENSEX", strike=74200.0, side=Side.PUT, low=294.85, peak=315.9,
+    )
+    settings = Settings(
+        explosion_late_reentry_block_enabled=True,
+        explosion_late_reentry_waive_first_strike_entry_enabled=True,
+        explosion_late_reentry_min_peak_points=15.0,
+        explosion_late_reentry_near_peak_pct=12.0,
+        explosion_late_reentry_pullback_ok_pct=22.0,
+        explosion_late_reentry_min_velocity_3s=1.2,
+    )
+    state = AutoTraderState(closedPaperTrades=[], openPaperTrades=[])
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ):
+        blocked, reason = session_peak_late_reentry_blocked(
+            symbol="SENSEX",
+            side=Side.PUT,
+            strike=74200.0,
+            premium=311.7,
+            velocity_3s=0.0,
+            alert={
+                "tier": "EXPLODING",
+                "ictArmedBaseLaunch": True,
+                "momentType": "armed_base_launch",
+            },
+            state=state,
+        )
+    assert blocked is False
+    assert reason == ""
+
+
+def test_session_peak_late_reentry_still_blocks_after_prior_close_on_strike():
+    _seed_session_peak(
+        symbol="SENSEX", strike=74200.0, side=Side.PUT, low=294.85, peak=352.8,
+    )
+    settings = Settings(
+        explosion_late_reentry_block_enabled=True,
+        explosion_late_reentry_waive_first_strike_entry_enabled=True,
+        explosion_late_reentry_min_peak_points=15.0,
+        explosion_late_reentry_near_peak_pct=12.0,
+        explosion_late_reentry_pullback_ok_pct=22.0,
+        explosion_late_reentry_min_velocity_3s=1.2,
+    )
+    prior = PaperTrade(
+        id="71f5db55",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=74200.0,
+        entryPremium=340.88,
+        currentPremium=382.3,
+        lots=26,
+        openedAt=datetime.now(IST) - timedelta(minutes=10),
+        closedAt=datetime.now(IST) - timedelta(minutes=5),
+        status="CLOSED",
+        exitReason="explosion_peak_keep_trail",
+        strategyType=StrategyType.EXPLOSIVE,
+        pnlInr=20535.78,
+    )
+    state = AutoTraderState(closedPaperTrades=[prior])
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ):
+        blocked, reason = session_peak_late_reentry_blocked(
+            symbol="SENSEX",
+            side=Side.PUT,
+            strike=74200.0,
+            premium=348.0,
+            velocity_3s=0.2,
+            alert={"ictFlatThenVertical": True},
+            state=state,
+        )
+    assert blocked is True
+    assert "late_reentry_near_session_peak" in reason
+
+
 def test_session_peak_late_reentry_allows_fresh_first_lift():
     _seed_session_peak(
         symbol="NIFTY", strike=24250.0, side=Side.PUT, low=100.5, peak=121.85,

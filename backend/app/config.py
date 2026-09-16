@@ -1657,6 +1657,9 @@ class Settings(BaseSettings):
     explosion_late_reentry_near_peak_pct: float = 12.0
     explosion_late_reentry_pullback_ok_pct: float = 22.0
     explosion_late_reentry_min_velocity_3s: float = 1.2
+    # Sep16 SENSEX 74200 PE: initial armed-base rip blocked as "late reentry" while
+    # session peak tracked the live vertical — not a post-trade chase.
+    explosion_late_reentry_waive_first_strike_entry_enabled: bool = True
     # Sep09: index rally after PUT win unlocks CALL directionally, but CE near its own
     # session peak was still blocked as late chase — waive when index flip confirms.
     explosion_late_reentry_waive_opposite_side_flip_enabled: bool = True
