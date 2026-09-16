@@ -676,6 +676,62 @@ def reentry_ml_win_prob_blocked(
     return False, meta
 
 
+def _first_strike_launch_waive_alert(alert: Optional[dict[str, Any]]) -> bool:
+    """True when alert shows a genuine initial armed-base / v-rip launch (not mid-chase)."""
+    alert_d = alert if isinstance(alert, dict) else {}
+    tier = str(alert_d.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    moment = str(alert_d.get("momentType") or "").lower()
+    return bool(
+        alert_d.get("ictArmedBaseLaunch")
+        or alert_d.get("armedBaseLaunch")
+        or alert_d.get("ictFirstLift")
+        or alert_d.get("firstLiftCapture")
+        or alert_d.get("ictVRipReady")
+        or alert_d.get("vRipReady")
+        or alert_d.get("ictBaseArmed")
+        or moment
+        in {
+            "armed_base_launch",
+            "v_rip_session_low",
+            "first_lift_local_base",
+            "ict_base_armed",
+        }
+    )
+
+
+def _strike_has_session_trade(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+) -> bool:
+    """True when an open or closed trade already exists today for symbol/side/strike."""
+    if state is None:
+        return False
+    sym = str(symbol or "").upper()
+    side_u = str(getattr(side, "value", side) or "").upper()
+    strike_f = float(strike or 0)
+    if not sym or side_u not in ("CALL", "PUT") or strike_f <= 0:
+        return False
+    for bucket in (
+        getattr(state, "openPaperTrades", None) or [],
+        getattr(state, "closedPaperTrades", None) or [],
+    ):
+        for trade in bucket:
+            if str(getattr(trade, "symbol", "") or "").upper() != sym:
+                continue
+            trade_side = str(getattr(getattr(trade, "side", None), "value", trade.side) or "").upper()
+            if trade_side != side_u:
+                continue
+            if abs(float(getattr(trade, "strike", 0) or 0) - strike_f) > 1e-6:
+                continue
+            return True
+    return False
+
+
 def session_peak_late_reentry_blocked(
     *,
     symbol: str,
@@ -694,6 +750,22 @@ def session_peak_late_reentry_blocked(
     """
     settings = get_settings()
     if not bool(getattr(settings, "explosion_late_reentry_block_enabled", True)):
+        return False, ""
+
+    if (
+        state is not None
+        and bool(
+            getattr(
+                settings,
+                "explosion_late_reentry_waive_first_strike_entry_enabled",
+                True,
+            )
+        )
+        and not _strike_has_session_trade(
+            state, symbol=symbol, side=side, strike=strike,
+        )
+        and _first_strike_launch_waive_alert(alert)
+    ):
         return False, ""
 
     if bool(getattr(settings, "explosion_late_reentry_waive_opposite_side_flip_enabled", True)):
@@ -738,6 +810,8 @@ def session_peak_late_reentry_blocked(
     first_lift = bool(
         alert_d.get("ictFirstLift")
         or alert_d.get("firstLiftCapture")
+        or alert_d.get("ictArmedBaseLaunch")
+        or alert_d.get("armedBaseLaunch")
         or alert_d.get("firstLiftReadinessReason")
         in {
             "first_lift_local_base_ready",
