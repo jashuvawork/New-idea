@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from app.engines.best_trade_policy import (
     best_trade_chop_deep_chase_blocked,
     best_trade_near_base_assessment,
+    call_momentum_rally_pe_parity_fingerprint,
     cheap_base_strike_eligible,
     cheap_base_strike_rank_bonus,
     deep_itm_chase_strike,
@@ -16,6 +17,7 @@ from app.engines.best_trade_policy import (
     mid_rip_best_trade_candidate,
     timing_allows_best_trade_full_size,
 )
+from app.engines.elite_score_engine import build_elite_assessment
 from app.models.schemas import Side, SymbolSnapshot
 from tests.mock_defaults import settings_mock
 
@@ -330,3 +332,61 @@ def test_cheap_base_rank_bonus_beats_deep_penalty():
     assert cheap_bonus == 45.0 + 12.0
     assert deep_bonus == -60.0
     assert cheap_bonus > deep_bonus
+
+
+def _pe_parity_call_evidence(**kwargs):
+    base = {
+        "tier": "ELITE",
+        "side": "CALL",
+        "vRipReady": True,
+        "armedBaseLaunch": True,
+        "firstLift": True,
+        "velocity3s": 5.2,
+        "localBaseMovePct": 14.0,
+        "flatVerticalQuality": 79.0,
+        "explosionScore": 100.0,
+        "timingAssessment": "GOOD",
+        "timingAction": "allow",
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_call_pe_parity_fingerprint_matches_elite_v():
+    s = settings_mock()
+    evidence = _pe_parity_call_evidence()
+    ranking = {"grade": "A", "rankScore": 95.0}
+    assessment = build_elite_assessment(evidence, ranking)
+    assert call_momentum_rally_pe_parity_fingerprint(
+        evidence, ranking, assessment, settings=s,
+    )
+
+
+def test_call_pe_parity_fingerprint_rejects_building_tier():
+    s = settings_mock()
+    evidence = _pe_parity_call_evidence(tier="BUILDING")
+    ranking = {"grade": "A", "rankScore": 95.0}
+    assessment = build_elite_assessment(evidence, ranking)
+    assert not call_momentum_rally_pe_parity_fingerprint(
+        evidence, ranking, assessment, settings=s,
+    )
+
+
+def test_call_pe_parity_fingerprint_rejects_shallow_grade_c():
+    s = settings_mock()
+    evidence = _pe_parity_call_evidence()
+    ranking = {"grade": "C", "rankScore": 40.0}
+    assessment = build_elite_assessment(evidence, ranking)
+    assert not call_momentum_rally_pe_parity_fingerprint(
+        evidence, ranking, assessment, settings=s,
+    )
+
+
+def test_call_pe_parity_fingerprint_rejects_cold_v3():
+    s = settings_mock()
+    evidence = _pe_parity_call_evidence(velocity3s=0.5)
+    ranking = {"grade": "A", "rankScore": 95.0}
+    assessment = build_elite_assessment(evidence, ranking)
+    assert not call_momentum_rally_pe_parity_fingerprint(
+        evidence, ranking, assessment, settings=s,
+    )
