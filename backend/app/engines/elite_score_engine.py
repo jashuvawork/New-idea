@@ -11,6 +11,7 @@ Live entry rule (hybrid model):
   - Near-base ≤ max local move (default 20%; CALL default 10%)
   - Timing ∈ {GOOD, OK}
   - CALL blocked on MOMENTUM RALLY when elite_call_block_momentum_rally_enabled
+    (narrow PE-parity waiver when call_momentum_rally_pe_parity_fingerprint matches)
   - PUT blocked on BULLISH DAY when elite_put_block_bullish_day_enabled (optional PE mirror)
   - Rounded score=100 blocked when local > perfect_score_max_local (default 15%)
   - Weekly cap enforced separately via elite_trade_budget
@@ -362,13 +363,43 @@ def _resolve_side(evidence: Mapping[str, Any], side: str = "") -> str:
     return str(raw).strip().upper()
 
 
-def elite_side_local_base_cap(side: str, *, settings: Any = None) -> float:
+def elite_side_local_base_cap(
+    side: str,
+    *,
+    settings: Any = None,
+    evidence: Mapping[str, Any] | None = None,
+    ranking: Mapping[str, Any] | None = None,
+    day_mode: str = "",
+    assessment: Mapping[str, Any] | None = None,
+) -> float:
     """Return max local-base % for side (CALL tighter than PUT by default)."""
     from app.config import get_settings
+    from app.engines.best_trade_policy import call_momentum_rally_pe_parity_fingerprint
 
     settings = settings or get_settings()
     general = float(getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0)
     side_u = str(side or "").upper()
+    dm = str(day_mode or "").strip().upper()
+    if (
+        side_u == "CALL"
+        and dm == _MOMENTUM_RALLY_DAY_MODE
+        and evidence is not None
+        and call_momentum_rally_pe_parity_fingerprint(
+            evidence,
+            ranking,
+            assessment,
+            settings=settings,
+        )
+    ):
+        parity_cap = float(
+            getattr(
+                settings,
+                "elite_call_momentum_rally_pe_parity_local_cap_pct",
+                15.0,
+            )
+            or 15.0
+        )
+        return min(general, parity_cap)
     if side_u == "CALL":
         call_cap = float(getattr(settings, "elite_call_max_local_base_pct", 0.0) or 0.0)
         if call_cap > 0:
@@ -385,9 +416,13 @@ def elite_side_day_mode_blocked(
     day_mode: str,
     *,
     settings: Any = None,
+    evidence: Mapping[str, Any] | None = None,
+    ranking: Mapping[str, Any] | None = None,
+    assessment: Mapping[str, Any] | None = None,
 ) -> tuple[bool, str]:
     """Side-specific day-mode blocks (CE/PE symmetric config, EOD-tuned defaults)."""
     from app.config import get_settings
+    from app.engines.best_trade_policy import call_momentum_rally_pe_parity_fingerprint
 
     settings = settings or get_settings()
     side_u = str(side or "").upper()
@@ -398,6 +433,13 @@ def elite_side_day_mode_blocked(
         and bool(getattr(settings, "elite_call_block_momentum_rally_enabled", True))
         and dm == _MOMENTUM_RALLY_DAY_MODE
     ):
+        if evidence is not None and call_momentum_rally_pe_parity_fingerprint(
+            evidence,
+            ranking,
+            assessment,
+            settings=settings,
+        ):
+            return False, ""
         return True, "elite_call_momentum_rally_blocked"
 
     if (
@@ -735,6 +777,17 @@ def elite_win_rate_gate_summary(*, settings: Any = None) -> dict[str, Any]:
         "callBlockMomentumRally": bool(
             getattr(settings, "elite_call_block_momentum_rally_enabled", True)
         ),
+        "callMomentumRallyPeParityBypass": bool(
+            getattr(settings, "elite_call_momentum_rally_pe_parity_bypass_enabled", True)
+        ),
+        "callMomentumRallyPeParityLocalCapPct": float(
+            getattr(
+                settings,
+                "elite_call_momentum_rally_pe_parity_local_cap_pct",
+                15.0,
+            )
+            or 15.0
+        ),
         "putBlockBullishDay": bool(
             getattr(settings, "elite_put_block_bullish_day_enabled", False)
         ),
@@ -865,10 +918,14 @@ def elite_entry_allowed(
         evidence,
         side or str(ranking.get("side") or ""),
     )
+    pre_assessment = build_elite_assessment(evidence, ranking)
     side_blocked, side_block_reason = elite_side_day_mode_blocked(
         resolved_side,
         resolved_mode,
         settings=settings,
+        evidence=evidence,
+        ranking=ranking,
+        assessment=pre_assessment,
     )
     if side_blocked:
         assessment = build_elite_assessment(evidence, ranking)
@@ -913,7 +970,14 @@ def elite_entry_allowed(
         assessment = {**assessment, "megaVerticalBypass": mega_tag}
 
     min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
-    max_local = elite_side_local_base_cap(resolved_side, settings=settings)
+    max_local = elite_side_local_base_cap(
+        resolved_side,
+        settings=settings,
+        evidence=evidence,
+        ranking=ranking,
+        day_mode=resolved_mode,
+        assessment=assessment,
+    )
     if mega_ok and bool(
         getattr(settings, "elite_mega_vertical_bypass_extend_local_cap", True)
     ):

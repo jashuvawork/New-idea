@@ -574,6 +574,54 @@ def test_elite_entry_blocks_call_on_momentum_rally():
     assert assessment.get("side") == "CALL"
 
 
+def _pe_parity_elite_call_evidence(**kwargs):
+    base = {
+        "tier": "ELITE",
+        "side": "CALL",
+        "vRipReady": True,
+        "armedBaseLaunch": True,
+        "firstLift": True,
+        "velocity3s": 5.2,
+        "localBaseMovePct": 14.0,
+        "flatVerticalQuality": 79.0,
+        "explosionScore": 100.0,
+        "volumeAwaken": True,
+        "timingAssessment": "GOOD",
+        "timingAction": "allow",
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_elite_entry_allows_call_momentum_rally_pe_parity():
+    ok, reason, assessment = elite_entry_allowed(
+        _pe_parity_elite_call_evidence(),
+        _ranking(grade="A", rankScore=95.0),
+        day_mode="MOMENTUM RALLY",
+        day_type="GOOD",
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert assessment.get("side") == "CALL"
+    assert assessment.get("localBaseCapPct") == 15.0
+
+
+def test_elite_entry_blocks_call_momentum_rally_without_pe_parity():
+    ok, reason, assessment = elite_entry_allowed(
+        _pe_parity_elite_call_evidence(
+            tier="BUILDING",
+            timingAssessment="CHASE",
+            timingAction="block",
+        ),
+        _ranking(grade="C", rankScore=40.0),
+        day_mode="MOMENTUM RALLY",
+        day_type="GOOD",
+    )
+    assert ok is False
+    assert reason == "elite_call_momentum_rally_blocked"
+    assert assessment.get("side") == "CALL"
+
+
 def test_elite_entry_blocks_call_on_momentum_rally_when_side_only_in_ranking():
     """Live rank_entry_candidate often carries side on ranking, not evidence."""
     ok, reason, assessment = elite_entry_allowed(

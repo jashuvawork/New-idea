@@ -317,6 +317,13 @@ class Settings(BaseSettings):
     elite_put_max_local_base_pct: float = 0.0
     # Block CE on MOMENTUM RALLY (EOD: CALL 29% win vs PUT 67% on same gate).
     elite_call_block_momentum_rally_enabled: bool = True
+    # Narrow waiver: allow CALL on MOMENTUM RALLY only when CE matches morning PE winner bar.
+    elite_call_momentum_rally_pe_parity_bypass_enabled: bool = True
+    elite_call_momentum_rally_pe_parity_min_elite_score: float = 88.0
+    elite_call_momentum_rally_pe_parity_min_grade: str = "A"
+    elite_call_momentum_rally_pe_parity_max_local_pct: float = 15.0
+    elite_call_momentum_rally_pe_parity_local_cap_pct: float = 15.0
+    elite_call_momentum_rally_pe_parity_min_velocity3s: float = 1.2
     # PE mirror disabled by default — EOD did not show a symmetric PUT day-mode drag bucket.
     elite_put_block_bullish_day_enabled: bool = False
     # Block rounded score=100 when local base is past the tight near-base band (chase entries).

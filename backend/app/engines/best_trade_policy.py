@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Optional
 
 VALID_BEST_BASE_SETUPS = frozenset({"FTV", "V"})
+_GOOD_TIMING = frozenset({"GOOD", "OK"})
 
 
 def _number(value: Any) -> float:
@@ -102,6 +103,87 @@ def _mid_rip_best_trade_signals(
         if v3 > 0:
             return True
     return False
+
+
+def call_momentum_rally_pe_parity_fingerprint(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    elite_assessment: Mapping[str, Any] | None = None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """True when CALL on MOMENTUM RALLY matches the morning PE winner entry bar.
+
+    Narrow bypass — not a blanket CE unlock. Requires ELITE tier, FTV/V setup,
+    grade A+, armed launch + first lift, hot v3, and near-base pad (~12–15%).
+    """
+    from app.config import get_settings
+    from app.engines.rally_capture import _grade_meets_min
+
+    settings = settings or get_settings()
+    if not bool(
+        getattr(settings, "elite_call_momentum_rally_pe_parity_bypass_enabled", True)
+    ):
+        return False
+
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    ranking = ranking if isinstance(ranking, Mapping) else {}
+    assessment = elite_assessment if isinstance(elite_assessment, Mapping) else {}
+
+    tier = str(evidence.get("tier") or "").upper()
+    if tier != "ELITE":
+        return False
+
+    setup = str(assessment.get("setup") or "").upper()
+    if setup not in VALID_BEST_BASE_SETUPS:
+        return False
+
+    grade = str(ranking.get("grade") or assessment.get("grade") or "").upper()
+    min_grade = str(
+        getattr(settings, "elite_call_momentum_rally_pe_parity_min_grade", "A") or "A"
+    ).upper()
+    if not _grade_meets_min(grade, min_grade):
+        return False
+
+    score = _number(assessment.get("eliteScore"))
+    min_score = float(
+        getattr(settings, "elite_call_momentum_rally_pe_parity_min_elite_score", 88.0)
+        or 88.0
+    )
+    if score < min_score - 1e-6:
+        return False
+
+    local = _number(assessment.get("localBasePct") or evidence.get("localBaseMovePct"))
+    max_local = float(
+        getattr(settings, "elite_call_momentum_rally_pe_parity_max_local_pct", 15.0)
+        or 15.0
+    )
+    if local > max_local + 1e-6:
+        return False
+
+    if not (
+        evidence.get("armedBaseLaunch")
+        and (
+            evidence.get("firstLift")
+            or evidence.get("activeBreakout")
+            or evidence.get("displacement")
+        )
+    ):
+        return False
+
+    v3 = _number(evidence.get("velocity3s") or evidence.get("liveVelocity3s"))
+    min_v3 = float(
+        getattr(settings, "elite_call_momentum_rally_pe_parity_min_velocity3s", 1.2)
+        or 1.2
+    )
+    if v3 < min_v3 - 1e-6:
+        return False
+
+    timing = str(evidence.get("timingAssessment") or assessment.get("timing") or "").upper()
+    timing_action = str(evidence.get("timingAction") or "").lower()
+    if timing_action in {"block", "reject"}:
+        return False
+    return timing in _GOOD_TIMING
 
 
 def mid_rip_best_trade_candidate(
