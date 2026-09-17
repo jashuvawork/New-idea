@@ -324,6 +324,10 @@ class Settings(BaseSettings):
     elite_call_momentum_rally_pe_parity_max_local_pct: float = 15.0
     elite_call_momentum_rally_pe_parity_local_cap_pct: float = 15.0
     elite_call_momentum_rally_pe_parity_min_velocity3s: float = 1.2
+    # Same PE-winner fingerprint — allow ELITE CE alongside PE (not momentum-rally only).
+    elite_call_pe_parity_bypass_bearish_breadth_enabled: bool = True
+    elite_call_pe_parity_bypass_directional_lock_enabled: bool = True
+    elite_call_pe_parity_local_cap_all_day_modes_enabled: bool = True
     # PE mirror disabled by default — EOD did not show a symmetric PUT day-mode drag bucket.
     elite_put_block_bullish_day_enabled: bool = False
     # Block rounded score=100 when local base is past the tight near-base band (chase entries).

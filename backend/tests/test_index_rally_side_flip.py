@@ -219,6 +219,35 @@ def test_directional_lock_yields_to_slide_bypass(
     assert reason == "ok"
 
 
+@patch("app.engines.best_trade_policy.call_pe_parity_from_candidate", return_value=True)
+@patch("app.engines.directional_lock.get_settings")
+@patch("app.engines.index_rally_side_flip.get_settings")
+@patch("app.engines.aligned_side_guard.get_settings")
+def test_directional_lock_waives_put_to_call_when_pe_parity_elite(
+    mock_guard_settings, mock_rally_settings, mock_lock_settings, _mock_parity,
+):
+    settings = _settings(elite_call_pe_parity_bypass_directional_lock_enabled=True)
+    mock_guard_settings.return_value = settings
+    mock_rally_settings.return_value = settings
+    mock_lock_settings.return_value = settings
+
+    reset_directional_lock()
+    snap = _snap(breadth="BEARISH", chart_dir="BEARISH", mom5=0.02, rsi=45.0)
+    record_trade_side("SENSEX", Side.PUT, snap)
+    cand = type("C", (), {"side": Side.CALL, "alert": {"tier": "ELITE"}})()
+
+    with patch(
+        "app.engines.index_rally_side_flip._session_extremes_and_spot",
+        return_value=(76500.0, 76480.0, 76500.0),
+    ):
+        blocked, reason = check_directional_side_lock(
+            "SENSEX", Side.CALL, snap, candidate=cand,
+        )
+
+    assert blocked is False
+    assert reason == "ok"
+
+
 @patch("app.engines.directional_lock.get_settings")
 @patch("app.engines.index_rally_side_flip.get_settings")
 @patch("app.engines.aligned_side_guard.get_settings")

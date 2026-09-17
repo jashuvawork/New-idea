@@ -245,6 +245,16 @@ def breadth_hard_blocks_side(
             rally_ok, _, _ = index_rally_side_flip_bypass(sym, side_v, resolved_snap)
             if rally_ok:
                 return False, "ok"
+        if (
+            candidate is not None
+            and bool(
+                getattr(settings, "elite_call_pe_parity_bypass_bearish_breadth_enabled", True)
+            )
+        ):
+            from app.engines.best_trade_policy import call_pe_parity_from_candidate
+
+            if call_pe_parity_from_candidate(candidate, resolved_snap, settings=settings):
+                return False, "ok"
         return True, "hard_block_call_vs_bearish_breadth"
     return False, "ok"
 

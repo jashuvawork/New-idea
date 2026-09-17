@@ -380,9 +380,8 @@ def elite_side_local_base_cap(
     general = float(getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0)
     side_u = str(side or "").upper()
     dm = str(day_mode or "").strip().upper()
-    if (
+    parity_match = (
         side_u == "CALL"
-        and dm == _MOMENTUM_RALLY_DAY_MODE
         and evidence is not None
         and call_momentum_rally_pe_parity_fingerprint(
             evidence,
@@ -390,6 +389,12 @@ def elite_side_local_base_cap(
             assessment,
             settings=settings,
         )
+    )
+    all_day_cap = bool(
+        getattr(settings, "elite_call_pe_parity_local_cap_all_day_modes_enabled", True)
+    )
+    if parity_match and (
+        all_day_cap or dm == _MOMENTUM_RALLY_DAY_MODE
     ):
         parity_cap = float(
             getattr(
@@ -787,6 +792,15 @@ def elite_win_rate_gate_summary(*, settings: Any = None) -> dict[str, Any]:
                 15.0,
             )
             or 15.0
+        ),
+        "callPeParityBypassBearishBreadth": bool(
+            getattr(settings, "elite_call_pe_parity_bypass_bearish_breadth_enabled", True)
+        ),
+        "callPeParityBypassDirectionalLock": bool(
+            getattr(settings, "elite_call_pe_parity_bypass_directional_lock_enabled", True)
+        ),
+        "callPeParityLocalCapAllDayModes": bool(
+            getattr(settings, "elite_call_pe_parity_local_cap_all_day_modes_enabled", True)
         ),
         "putBlockBullishDay": bool(
             getattr(settings, "elite_put_block_bullish_day_enabled", False)
