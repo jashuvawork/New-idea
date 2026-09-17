@@ -276,6 +276,18 @@ def check_directional_side_lock(
     if premium_led_bypass:
         return False, "ok"
 
+    if (
+        candidate is not None
+        and side_v == "CALL"
+        and bool(
+            getattr(settings, "elite_call_pe_parity_bypass_directional_lock_enabled", True)
+        )
+    ):
+        from app.engines.best_trade_policy import call_pe_parity_from_candidate
+
+        if call_pe_parity_from_candidate(candidate, snap, settings=settings):
+            return False, "ok"
+
     from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
 
     rally_ok, _rally_reason, _rally_meta = index_rally_side_flip_bypass(

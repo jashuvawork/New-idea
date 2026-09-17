@@ -593,6 +593,18 @@ def _pe_parity_elite_call_evidence(**kwargs):
     return base
 
 
+def test_elite_entry_allows_call_pe_parity_local_cap_on_expiry_day():
+    ok, reason, assessment = elite_entry_allowed(
+        _pe_parity_elite_call_evidence(),
+        _ranking(grade="A", rankScore=95.0),
+        day_mode="EXPIRY DAY",
+        day_type="GOOD",
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert assessment.get("localBaseCapPct") == 15.0
+
+
 def test_elite_entry_allows_call_momentum_rally_pe_parity():
     ok, reason, assessment = elite_entry_allowed(
         _pe_parity_elite_call_evidence(),

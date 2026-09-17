@@ -92,6 +92,34 @@ def test_hard_block_call_on_bearish_breadth():
     assert reason == "hard_block_call_vs_bearish_breadth"
 
 
+@patch("app.engines.aligned_side_guard.get_settings")
+@patch("app.engines.best_trade_policy.call_pe_parity_from_candidate", return_value=True)
+def test_pe_parity_elite_call_bypasses_bearish_breadth(mock_parity, mock_settings):
+    from app.config import Settings
+
+    s = Settings(
+        breadth_hard_side_block_enabled=True,
+        elite_call_pe_parity_bypass_bearish_breadth_enabled=True,
+        chart_mtf_breadth_bypass_enabled=False,
+    )
+    mock_settings.return_value = s
+    cand = type("C", (), {"side": Side.CALL, "alert": {"tier": "ELITE"}})()
+    snap = SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=74200.0,
+        breadth=Breadth(bias="BEARISH"),
+    )
+    blocked, reason = breadth_hard_blocks_side(
+        Side.CALL, "BEARISH", candidate=cand, snap=snap,
+    )
+    assert blocked is False
+    assert reason == "ok"
+    mock_parity.assert_called_once()
+
+
 def test_neutral_breadth_allows_both_sides():
     assert breadth_hard_blocks_side(Side.PUT, "NEUTRAL") == (False, "ok")
     assert breadth_hard_blocks_side(Side.CALL, "NEUTRAL") == (False, "ok")

@@ -186,6 +186,56 @@ def call_momentum_rally_pe_parity_fingerprint(
     return timing in _GOOD_TIMING
 
 
+def call_pe_parity_elite_fingerprint(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    elite_assessment: Mapping[str, Any] | None = None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Alias — ELITE CE matching the morning PE winner bar (any day mode)."""
+    return call_momentum_rally_pe_parity_fingerprint(
+        evidence, ranking, elite_assessment, settings=settings,
+    )
+
+
+def call_pe_parity_from_candidate(
+    candidate: Any,
+    snap: Any = None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """True when a live CALL candidate matches the PE-parity elite fingerprint."""
+    side = str(
+        getattr(getattr(candidate, "side", None), "value", getattr(candidate, "side", ""))
+        or ""
+    ).upper()
+    if side != "CALL" or candidate is None:
+        return False
+    from app.engines.trade_ranking import rank_entry_candidate
+    from app.engines.elite_score_engine import build_elite_assessment
+
+    ranking = rank_entry_candidate(candidate, snapshot=snap)
+    evidence = dict(ranking.get("evidence") or {})
+    alert = getattr(candidate, "alert", None)
+    if isinstance(alert, dict):
+        evidence = {**alert, **evidence}
+    ev = getattr(candidate, "explosion_event", None)
+    if ev is not None:
+        for key, attr in (
+            ("tier", "tier"),
+            ("velocity3s", "velocity_3s"),
+            ("explosionScore", "explosion_score"),
+        ):
+            val = getattr(ev, attr, None)
+            if val is not None and key not in evidence:
+                evidence[key] = val
+    assessment = build_elite_assessment(evidence, ranking)
+    return call_pe_parity_elite_fingerprint(
+        evidence, ranking, assessment, settings=settings,
+    )
+
+
 def mid_rip_best_trade_candidate(
     candidate: Any,
     alert: Mapping[str, Any] | None = None,
