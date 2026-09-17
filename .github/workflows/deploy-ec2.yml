@@ -12,6 +12,8 @@ concurrency:
 env:
   AWS_REGION: ap-south-1
   EC2_INSTANCE_ID: i-0f3f9e5e67815c21b
+  # Direct API host — do not verify via www (Vercel proxy breaks when account paused).
+  PUBLIC_API_URL: https://api.jashuvatrade.xyz
 
 jobs:
   deploy:
@@ -204,25 +206,33 @@ jobs:
       - name: Verify public deployment status
         run: |
           set -euo pipefail
+          EXPECTED=$(git rev-parse --short HEAD)
+          API="${{ env.PUBLIC_API_URL }}"
           for i in 1 2 3 4 5; do
             if curl -sf --connect-timeout 5 --max-time 15 \
-              https://www.jashuvatrade.xyz/api/deployment/status | python3 -m json.tool; then
+              "$API/api/deployment/status" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          commit = str(d.get('commit') or '')
+          print(json.dumps({'status': d.get('status'), 'commit': commit}, indent=2))
+          if d.get('status') != 'ok':
+              raise SystemExit('deployment status not ok')
+          if commit != '$EXPECTED':
+              raise SystemExit(f'commit mismatch: live {commit!r} != expected $EXPECTED!r')
+          "; then
               exit 0
             fi
             echo "verify attempt $i failed — waiting"
             sleep 8
           done
-          # Last resort: local health via SSM already passed in ec2-update; surface public failure
-          curl -sf --connect-timeout 5 --max-time 20 \
-            https://www.jashuvatrade.xyz/health | python3 -m json.tool
-          curl -sf --connect-timeout 5 --max-time 20 \
-            https://www.jashuvatrade.xyz/api/deployment/status | python3 -m json.tool
+          curl -sf --connect-timeout 5 --max-time 20 "$API/health" | python3 -m json.tool
+          curl -sf --connect-timeout 5 --max-time 20 "$API/api/deployment/status" | python3 -m json.tool
 
       - name: Verify live armed
         if: github.event_name == 'push' && contains(github.event.head_commit.message, '[arm-live]')
         run: |
           set -euo pipefail
-          curl -sf https://www.jashuvatrade.xyz/api/deployment/status | python3 -c "
+          curl -sf "${{ env.PUBLIC_API_URL }}/api/deployment/status" | python3 -c "
           import json, sys
           d = json.load(sys.stdin)
           f = d.get('flags') or {}
