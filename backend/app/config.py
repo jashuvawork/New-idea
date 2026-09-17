@@ -1474,6 +1474,24 @@ class Settings(BaseSettings):
     # Post-win re-entry only when top-rank / full-sleeve OR hot re-acceleration — no 8-lot FOMO probes.
     fake_explosion_trap_post_win_require_top_confidence: bool = True
     fake_explosion_trap_post_win_hc_min_velocity_3s: float = 2.0
+    # Sep17 SENSEX 74600 PE: after +₹11.6k trail win, re-entered at 13.7% pad / 25% session
+    # rip with v3=2.37 → −₹19.8k adaptive SL. Large trail wins skipped post_small_win, so
+    # hard-block extended pad/session chase after ANY session win unless v3 is very hot.
+    fake_explosion_trap_post_win_extended_chase_block_enabled: bool = True
+    fake_explosion_trap_post_win_max_base_rel_pct: float = 12.0
+    fake_explosion_trap_post_win_session_move_pct: float = 22.0
+    fake_explosion_trap_post_win_extended_min_velocity_3s: float = 3.0
+    fake_explosion_trap_post_win_streak_block_enabled: bool = True
+    fake_explosion_trap_post_win_streak_lookback: int = 2
+    fake_explosion_trap_post_win_streak_max_base_rel_pct: float = 10.0
+    # Post-win: enter only at fresh near-base pad — otherwise skip (Sep17 74600 @ 13.7%).
+    fake_explosion_trap_post_win_fresh_near_base_enabled: bool = True
+    fresh_near_local_base_max_pct: float = 10.0
+    # Armed-base: take at launch (~5–12% pad) or skip — do not chase minutes later.
+    armed_base_late_entry_block_enabled: bool = True
+    armed_base_fresh_entry_max_seconds: float = 300.0
+    armed_base_fresh_max_pad_pct: float = 12.0
+    armed_base_late_entry_max_pad_pct: float = 10.0
     fake_explosion_trap_psychology_escalate: bool = True
     # Midday/chop ELITE without ICT structure → hard block (not soft lot-cap).
     fake_explosion_trap_midday_require_structure: bool = True

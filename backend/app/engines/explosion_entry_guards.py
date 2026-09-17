@@ -1649,21 +1649,26 @@ def _worst_or_expiry_chop_day(snap: SymbolSnapshot, state: Any = None) -> bool:
     return False
 
 
+def _collect_session_trades_safe(state: Any) -> list[Any]:
+    if state is None:
+        return []
+    try:
+        from app.engines.pretrade_validator import collect_session_trades
+
+        return list(collect_session_trades(state) or [])
+    except Exception:
+        return []
+
+
 def _post_small_win(state: Any) -> tuple[bool, dict[str, Any]]:
     """Last closed trade was a small green — size-up FOMO risk unless trail-proved."""
     settings = get_settings()
     meta: dict[str, Any] = {}
-    if state is None:
-        return False, meta
-    try:
-        from app.engines.pretrade_validator import collect_session_trades
-    except Exception:
+    trades = _collect_session_trades_safe(state)
+    if not trades:
         return False, meta
 
     lookback = int(getattr(settings, "fake_explosion_trap_post_win_lookback", 1) or 1)
-    trades = collect_session_trades(state)
-    if not trades:
-        return False, meta
     recent = trades[-lookback:]
     last = recent[-1]
     pnl = float(getattr(last, "pnl_inr", 0) or 0)
@@ -1689,6 +1694,254 @@ def _post_small_win(state: Any) -> tuple[bool, dict[str, Any]]:
         meta["postSmallWin"] = True
         return True, meta
     return False, meta
+
+
+def _post_session_win(state: Any) -> tuple[bool, dict[str, Any]]:
+    """Any recent closed green — hard extended-chase blocks even after large trail wins."""
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    trades = _collect_session_trades_safe(state)
+    if not trades:
+        return False, meta
+
+    lookback = int(getattr(settings, "fake_explosion_trap_post_win_lookback", 1) or 1)
+    recent = trades[-lookback:]
+    wins = [t for t in recent if float(getattr(t, "pnl_inr", 0) or 0) > 0]
+    if not wins:
+        return False, meta
+
+    last = recent[-1]
+    pnl = float(getattr(last, "pnl_inr", 0) or 0)
+    meta = {
+        "lastPnlInr": round(pnl, 2),
+        "lastExitReason": str(getattr(last, "exit_reason", "") or "").lower(),
+        "postSessionWin": True,
+        "recentWinCount": len(wins),
+    }
+    return True, meta
+
+
+def _session_win_streak_count(state: Any) -> int:
+    """Consecutive closed greens at tail of today's session (CE/PE agnostic)."""
+    settings = get_settings()
+    trades = _collect_session_trades_safe(state)
+    if not trades:
+        return 0
+
+    lookback = int(
+        getattr(settings, "fake_explosion_trap_post_win_streak_lookback", 2) or 2
+    )
+    streak = 0
+    for trade in reversed(trades[-lookback:]):
+        pnl = float(getattr(trade, "pnl_inr", 0) or 0)
+        if pnl > 0:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def _armed_base_age_seconds(ict: Any) -> Optional[float]:
+    armed_at = str(getattr(ict, "armed_at", "") or "")
+    if not armed_at:
+        return None
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        dt = datetime.fromisoformat(armed_at.replace("Z", "+00:00"))
+        tz = dt.tzinfo or ZoneInfo("Asia/Kolkata")
+        now = datetime.now(tz)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=tz)
+        return max(0.0, (now - dt).total_seconds())
+    except Exception:
+        return None
+
+
+def fresh_near_local_base(
+    *,
+    local_pad: float,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """True when entry is at/near a fresh local base — take early or skip late."""
+    s = settings or get_settings()
+    meta: dict[str, Any] = {}
+    fresh_max = float(getattr(s, "fresh_near_local_base_max_pct", 10.0) or 10.0)
+    armed_fresh_sec = float(
+        getattr(s, "armed_base_fresh_entry_max_seconds", 300.0) or 300.0
+    )
+    armed_fresh_pad = float(
+        getattr(s, "armed_base_fresh_max_pad_pct", 12.0) or 12.0
+    )
+
+    resolved = alert if isinstance(alert, dict) else {}
+    from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_ready
+
+    if alert_has_early_radar_pad_ready(resolved):
+        meta["freshNearBaseReason"] = "early_radar_pad_ready"
+        return True, meta
+
+    if local_pad <= fresh_max + 1e-6:
+        meta["freshNearBaseReason"] = "near_base_pad"
+        return True, meta
+
+    if ict is not None and bool(getattr(ict, "armed_base_launch", False)):
+        age = _armed_base_age_seconds(ict)
+        if age is not None and age <= armed_fresh_sec and local_pad <= armed_fresh_pad + 1e-6:
+            meta["freshNearBaseReason"] = "fresh_armed_base_launch"
+            meta["armedBaseAgeSeconds"] = round(age, 1)
+            return True, meta
+
+    return False, meta
+
+
+def armed_base_late_entry_blocked(
+    explosion_event: Any,
+    *,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
+    """Armed-base FTV: enter at launch near base or skip — no late pad chase."""
+    settings = get_settings()
+    if not getattr(settings, "armed_base_late_entry_block_enabled", True):
+        return False, ""
+    if ict is None or not bool(getattr(ict, "armed_base_launch", False)):
+        return False, ""
+
+    local_pad = effective_local_base_move_pct(explosion_event, ict)
+    fresh, _ = fresh_near_local_base(
+        local_pad=local_pad, ict=ict, alert=alert, settings=settings,
+    )
+    if fresh:
+        return False, ""
+
+    late_max = float(
+        getattr(settings, "armed_base_late_entry_max_pad_pct", 10.0) or 10.0
+    )
+    if local_pad > late_max + 1e-6:
+        return True, f"armed_base_late_entry_skip_{local_pad:.1f}%"
+    return False, ""
+
+
+def post_win_fresh_near_base_blocked(
+    candidate: Any,
+    *,
+    local_pad: float,
+    ict: Any = None,
+    state: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """After any session win: only re-enter at fresh near-base — else skip."""
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    if not getattr(
+        settings, "fake_explosion_trap_post_win_fresh_near_base_enabled", True
+    ):
+        return False, "", meta
+
+    post_session_win, post_meta = _post_session_win(state)
+    meta.update(post_meta)
+    if not post_session_win:
+        return False, "", meta
+
+    fresh, fresh_meta = fresh_near_local_base(
+        local_pad=local_pad, ict=ict, alert=alert, settings=settings,
+    )
+    meta.update(fresh_meta)
+    if fresh:
+        meta["postWinFreshNearBasePass"] = True
+        return False, "", meta
+
+    meta.update({
+        "fakeExplosionTrap": True,
+        "action": "block",
+        "psychologyEscalate": "FOMO",
+        "postWinFreshNearBaseBlock": True,
+        "localBaseMovePct": round(local_pad, 2),
+    })
+    return True, "fake_explosion_trap_post_win_fresh_near_base", meta
+
+
+def _post_win_extended_chase_blocked(
+    candidate: Any,
+    *,
+    local_pad: float,
+    session_move: float,
+    v3: float,
+    state: Any,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Block post-win FOMO into an already-extended pad or session rip."""
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    if not getattr(
+        settings, "fake_explosion_trap_post_win_extended_chase_block_enabled", True
+    ):
+        return False, "", meta
+
+    post_session_win, post_meta = _post_session_win(state)
+    meta.update(post_meta)
+    if not post_session_win:
+        return False, "", meta
+
+    pad_floor = float(
+        getattr(settings, "tier_promotion_pad_chase_min_base_rel_pct", 8.0) or 8.0
+    )
+    max_base = float(
+        getattr(settings, "fake_explosion_trap_post_win_max_base_rel_pct", 12.0) or 12.0
+    )
+    min_session = float(
+        getattr(settings, "fake_explosion_trap_post_win_session_move_pct", 22.0) or 22.0
+    )
+    streak_max_base = float(
+        getattr(
+            settings, "fake_explosion_trap_post_win_streak_max_base_rel_pct", 10.0
+        )
+        or 10.0
+    )
+
+    extended_pad = local_pad > max_base + 1e-6
+    extended_session = (
+        session_move >= min_session and local_pad > pad_floor + 1e-6
+    )
+    streak_chase = False
+    if getattr(settings, "fake_explosion_trap_post_win_streak_block_enabled", True):
+        streak = _session_win_streak_count(state)
+        meta["sessionWinStreak"] = streak
+        streak_chase = streak >= 2 and local_pad > streak_max_base + 1e-6
+
+    if not (extended_pad or extended_session or streak_chase):
+        return False, "", meta
+
+    strict_v3 = float(
+        getattr(
+            settings, "fake_explosion_trap_post_win_extended_min_velocity_3s", 3.0
+        )
+        or 3.0
+    )
+    pre = getattr(candidate, "pretrade_meta", None) or {}
+    causal = pre.get("causalRanking") or {}
+    top_rank = bool(causal.get("topRankEligible") or causal.get("fullSleeveEligible"))
+    if top_rank or v3 >= strict_v3:
+        meta["postWinExtendedChaseBypass"] = True
+        return False, "", meta
+
+    meta.update({
+        "fakeExplosionTrap": True,
+        "action": "block",
+        "psychologyEscalate": "FOMO",
+        "postWinExtendedChaseBlock": True,
+        "extendedPad": extended_pad,
+        "extendedSession": extended_session,
+        "winStreakChase": streak_chase,
+        "localBaseMovePct": round(local_pad, 2),
+        "sessionMovePct": round(session_move, 2),
+        "liveVelocity3s": round(v3, 3),
+        "requiredMinVelocity3s": round(strict_v3, 3),
+    })
+    return True, "fake_explosion_trap_post_win_extended_chase", meta
 
 
 def _post_win_top_confidence_allows(
@@ -1829,6 +2082,9 @@ def detect_fake_explosion_trap(
     )
     post_win, post_meta = _post_small_win(state)
     meta.update(post_meta)
+    post_session_win, post_sess_meta = _post_session_win(state)
+    if post_sess_meta:
+        meta.update(post_sess_meta)
 
     flags: list[str] = []
     if chop_regime:
@@ -1847,6 +2103,8 @@ def detect_fake_explosion_trap(
         flags.append("otm_inside_or")
     if post_win:
         flags.append("post_small_win")
+    if post_session_win:
+        flags.append("post_session_win")
 
     if (
         post_win
@@ -1931,6 +2189,36 @@ def detect_fake_explosion_trap(
         })
         return True, "fake_explosion_trap_post_win_not_top_confidence", meta
 
+    fresh_block, fresh_reason, fresh_meta = post_win_fresh_near_base_blocked(
+        candidate,
+        local_pad=local_pad,
+        ict=ict,
+        state=state,
+        alert=getattr(candidate, "alert", None)
+        if isinstance(getattr(candidate, "alert", None), dict)
+        else None,
+    )
+    if fresh_meta:
+        meta.update(fresh_meta)
+    if fresh_block:
+        meta.setdefault("conflictFlags", flags + ["post_session_win"])
+        meta["conflictCount"] = len(meta["conflictFlags"])
+        return True, fresh_reason, meta
+
+    ext_block, ext_reason, ext_meta = _post_win_extended_chase_blocked(
+        candidate,
+        local_pad=local_pad,
+        session_move=move,
+        v3=v3,
+        state=state,
+    )
+    if ext_meta:
+        meta.update(ext_meta)
+    if ext_block:
+        meta.setdefault("conflictFlags", flags + ["post_session_win"])
+        meta["conflictCount"] = len(meta["conflictFlags"])
+        return True, ext_reason, meta
+
     meta.update({
         "fakeExplosionTrap": False,
         "conflictFlags": flags,
@@ -2005,6 +2293,7 @@ def detect_fake_explosion_trap(
                 "premium_flat",
                 "otm_inside_or",
                 "post_small_win",
+                "post_session_win",
             }
             structural_conflicts = structural.intersection(flags)
             if fresh_local_pad:

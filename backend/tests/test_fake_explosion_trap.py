@@ -64,6 +64,20 @@ def _settings(**overrides):
     s.fake_explosion_trap_post_win_expiry_only = True
     s.fake_explosion_trap_post_win_require_top_confidence = True
     s.fake_explosion_trap_post_win_hc_min_velocity_3s = 2.0
+    s.fake_explosion_trap_post_win_extended_chase_block_enabled = True
+    s.fake_explosion_trap_post_win_max_base_rel_pct = 12.0
+    s.fake_explosion_trap_post_win_session_move_pct = 22.0
+    s.fake_explosion_trap_post_win_extended_min_velocity_3s = 3.0
+    s.fake_explosion_trap_post_win_streak_block_enabled = True
+    s.fake_explosion_trap_post_win_streak_lookback = 2
+    s.fake_explosion_trap_post_win_streak_max_base_rel_pct = 10.0
+    s.fake_explosion_trap_post_win_fresh_near_base_enabled = True
+    s.fresh_near_local_base_max_pct = 10.0
+    s.armed_base_fresh_entry_max_seconds = 300.0
+    s.armed_base_fresh_max_pad_pct = 12.0
+    s.armed_base_late_entry_block_enabled = True
+    s.armed_base_late_entry_max_pad_pct = 10.0
+    s.tier_promotion_pad_chase_min_base_rel_pct = 8.0
     s.high_conviction_sizing_enabled = True
     s.high_conviction_min_score = 90.0
     s.high_conviction_min_chart_confidence = 56.9
@@ -311,7 +325,7 @@ def test_post_win_afternoon_not_blocked_off_expiry(mock_collect, mock_money_sett
 
     snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
     cand = _candidate(
-        _event(daily=12.7, v3=2.6, tier="EXPLODING", strike=23850.0),
+        _event(daily=8.0, v3=2.6, tier="EXPLODING", strike=23850.0),
         snap,
     )
 
@@ -337,7 +351,7 @@ def test_post_win_afternoon_not_blocked_off_expiry(mock_collect, mock_money_sett
         return_value=(False, []),
     ):
         blocked, reason, _meta = detect_fake_explosion_trap(
-            cand, snap, state=MagicMock(), ict=_confirmed_ict(12.7),
+            cand, snap, state=MagicMock(), ict=_confirmed_ict(8.0),
         )
 
     assert blocked is False
@@ -699,6 +713,123 @@ def test_worst_midday_chop_elite_hard_blocks(
     assert "midday_chop" in meta.get("conflictFlags", [])
     assert "chop_regime" in meta.get("conflictFlags", [])
     assert "elite_hot" in meta.get("conflictFlags", [])
+
+
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_post_win_extended_chase_blocks_sep17_sensex_style(
+    mock_money_settings, mock_settings, side,
+):
+    """Sep17 SENSEX 74600 PE: large trail win then 13.7% pad / 25% session @ v3=2.37."""
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
+    event = _event(daily=25.0, v3=2.37, tier="ELITE", strike=74600.0)
+    event.side = side
+    event.symbol = "SENSEX" if side == Side.PUT else "NIFTY"
+    cand = _candidate(event, snap)
+
+    ict = _confirmed_ict(13.7)
+    ict.base_relative_move_pct = 13.7
+    ict.armed_base_launch = True
+    ict.session_move_pct = 25.0
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side=side,
+                pnl_inr=16141.86,
+                exit_reason="explosion_peak_keep_trail",
+                strike=23300.0,
+            ),
+            TradeRecord(
+                symbol="NIFTY",
+                side=side,
+                pnl_inr=11603.79,
+                exit_reason="explosion_peak_keep_trail",
+                strike=23450.0,
+            ),
+        ],
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(), ict=ict,
+        )
+
+    assert blocked is True
+    assert reason in (
+        "fake_explosion_trap_post_win_fresh_near_base",
+        "fake_explosion_trap_post_win_extended_chase",
+    )
+
+
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_post_win_extended_chase_allows_hot_reacceleration(
+    mock_money_settings, mock_settings, side,
+):
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
+    event = _event(daily=18.0, v3=3.5, tier="ELITE", strike=74600.0)
+    event.side = side
+    cand = _candidate(event, snap)
+    ict = _confirmed_ict(8.0)
+    ict.base_relative_move_pct = 8.0
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side=side,
+                pnl_inr=11603.79,
+                exit_reason="explosion_peak_keep_trail",
+                strike=23450.0,
+            ),
+        ],
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(), ict=ict,
+        )
+
+    assert blocked is False
+    assert meta.get("postWinFreshNearBasePass") is True
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_post_win_extended_chase_allows_fresh_near_base_entry(
+    mock_money_settings, mock_settings,
+):
+    """No prior wins — extended pad rules unchanged for first entry."""
+    cfg = _settings()
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
+    event = _event(daily=25.0, v3=2.37, tier="ELITE", strike=74600.0)
+    cand = _candidate(event, snap)
+    ict = _confirmed_ict(13.7)
+    ict.base_relative_move_pct = 13.7
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[],
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(), ict=ict,
+        )
+
+    assert blocked is False
+    assert reason != "fake_explosion_trap_post_win_extended_chase"
 
 
 def test_trap_soft_cap_honor_bypassed_for_index_confirmed_ftv():
