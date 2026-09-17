@@ -948,6 +948,23 @@ async def _open_from_candidate(
             return False, st_reason
 
         from app.engines.explosion_entry_guards import (
+            post_peak_chase_blocked,
+            tier_promotion_pad_chase_blocked,
+        )
+
+        pad_chase, pad_reason = tier_promotion_pad_chase_blocked(
+            candidate.explosion_event,
+            ict=pre_ict,
+            alert=alert_row if alert_row else None,
+        )
+        if pad_chase and not early_base_entry_ready:
+            return False, pad_reason
+
+        peak_chase, peak_reason = post_peak_chase_blocked(candidate.explosion_event)
+        if peak_chase:
+            return False, peak_reason
+
+        from app.engines.explosion_entry_guards import (
             deep_itm_near_strike_substitute_blocked,
         )
 

@@ -1649,21 +1649,26 @@ def _worst_or_expiry_chop_day(snap: SymbolSnapshot, state: Any = None) -> bool:
     return False
 
 
+def _collect_session_trades_safe(state: Any) -> list[Any]:
+    if state is None:
+        return []
+    try:
+        from app.engines.pretrade_validator import collect_session_trades
+
+        return list(collect_session_trades(state) or [])
+    except Exception:
+        return []
+
+
 def _post_small_win(state: Any) -> tuple[bool, dict[str, Any]]:
     """Last closed trade was a small green — size-up FOMO risk unless trail-proved."""
     settings = get_settings()
     meta: dict[str, Any] = {}
-    if state is None:
-        return False, meta
-    try:
-        from app.engines.pretrade_validator import collect_session_trades
-    except Exception:
+    trades = _collect_session_trades_safe(state)
+    if not trades:
         return False, meta
 
     lookback = int(getattr(settings, "fake_explosion_trap_post_win_lookback", 1) or 1)
-    trades = collect_session_trades(state)
-    if not trades:
-        return False, meta
     recent = trades[-lookback:]
     last = recent[-1]
     pnl = float(getattr(last, "pnl_inr", 0) or 0)
@@ -1689,6 +1694,130 @@ def _post_small_win(state: Any) -> tuple[bool, dict[str, Any]]:
         meta["postSmallWin"] = True
         return True, meta
     return False, meta
+
+
+def _post_session_win(state: Any) -> tuple[bool, dict[str, Any]]:
+    """Any recent closed green — hard extended-chase blocks even after large trail wins."""
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    trades = _collect_session_trades_safe(state)
+    if not trades:
+        return False, meta
+
+    lookback = int(getattr(settings, "fake_explosion_trap_post_win_lookback", 1) or 1)
+    recent = trades[-lookback:]
+    wins = [t for t in recent if float(getattr(t, "pnl_inr", 0) or 0) > 0]
+    if not wins:
+        return False, meta
+
+    last = recent[-1]
+    pnl = float(getattr(last, "pnl_inr", 0) or 0)
+    meta = {
+        "lastPnlInr": round(pnl, 2),
+        "lastExitReason": str(getattr(last, "exit_reason", "") or "").lower(),
+        "postSessionWin": True,
+        "recentWinCount": len(wins),
+    }
+    return True, meta
+
+
+def _session_win_streak_count(state: Any) -> int:
+    """Consecutive closed greens at tail of today's session (CE/PE agnostic)."""
+    settings = get_settings()
+    trades = _collect_session_trades_safe(state)
+    if not trades:
+        return 0
+
+    lookback = int(
+        getattr(settings, "fake_explosion_trap_post_win_streak_lookback", 2) or 2
+    )
+    streak = 0
+    for trade in reversed(trades[-lookback:]):
+        pnl = float(getattr(trade, "pnl_inr", 0) or 0)
+        if pnl > 0:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def _post_win_extended_chase_blocked(
+    candidate: Any,
+    *,
+    local_pad: float,
+    session_move: float,
+    v3: float,
+    state: Any,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Block post-win FOMO into an already-extended pad or session rip."""
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    if not getattr(
+        settings, "fake_explosion_trap_post_win_extended_chase_block_enabled", True
+    ):
+        return False, "", meta
+
+    post_session_win, post_meta = _post_session_win(state)
+    meta.update(post_meta)
+    if not post_session_win:
+        return False, "", meta
+
+    pad_floor = float(
+        getattr(settings, "tier_promotion_pad_chase_min_base_rel_pct", 8.0) or 8.0
+    )
+    max_base = float(
+        getattr(settings, "fake_explosion_trap_post_win_max_base_rel_pct", 12.0) or 12.0
+    )
+    min_session = float(
+        getattr(settings, "fake_explosion_trap_post_win_session_move_pct", 22.0) or 22.0
+    )
+    streak_max_base = float(
+        getattr(
+            settings, "fake_explosion_trap_post_win_streak_max_base_rel_pct", 10.0
+        )
+        or 10.0
+    )
+
+    extended_pad = local_pad > max_base + 1e-6
+    extended_session = (
+        session_move >= min_session and local_pad > pad_floor + 1e-6
+    )
+    streak_chase = False
+    if getattr(settings, "fake_explosion_trap_post_win_streak_block_enabled", True):
+        streak = _session_win_streak_count(state)
+        meta["sessionWinStreak"] = streak
+        streak_chase = streak >= 2 and local_pad > streak_max_base + 1e-6
+
+    if not (extended_pad or extended_session or streak_chase):
+        return False, "", meta
+
+    strict_v3 = float(
+        getattr(
+            settings, "fake_explosion_trap_post_win_extended_min_velocity_3s", 3.0
+        )
+        or 3.0
+    )
+    pre = getattr(candidate, "pretrade_meta", None) or {}
+    causal = pre.get("causalRanking") or {}
+    top_rank = bool(causal.get("topRankEligible") or causal.get("fullSleeveEligible"))
+    if top_rank or v3 >= strict_v3:
+        meta["postWinExtendedChaseBypass"] = True
+        return False, "", meta
+
+    meta.update({
+        "fakeExplosionTrap": True,
+        "action": "block",
+        "psychologyEscalate": "FOMO",
+        "postWinExtendedChaseBlock": True,
+        "extendedPad": extended_pad,
+        "extendedSession": extended_session,
+        "winStreakChase": streak_chase,
+        "localBaseMovePct": round(local_pad, 2),
+        "sessionMovePct": round(session_move, 2),
+        "liveVelocity3s": round(v3, 3),
+        "requiredMinVelocity3s": round(strict_v3, 3),
+    })
+    return True, "fake_explosion_trap_post_win_extended_chase", meta
 
 
 def _post_win_top_confidence_allows(
@@ -1829,6 +1958,9 @@ def detect_fake_explosion_trap(
     )
     post_win, post_meta = _post_small_win(state)
     meta.update(post_meta)
+    post_session_win, post_sess_meta = _post_session_win(state)
+    if post_sess_meta:
+        meta.update(post_sess_meta)
 
     flags: list[str] = []
     if chop_regime:
@@ -1847,6 +1979,8 @@ def detect_fake_explosion_trap(
         flags.append("otm_inside_or")
     if post_win:
         flags.append("post_small_win")
+    if post_session_win:
+        flags.append("post_session_win")
 
     if (
         post_win
@@ -1931,6 +2065,20 @@ def detect_fake_explosion_trap(
         })
         return True, "fake_explosion_trap_post_win_not_top_confidence", meta
 
+    ext_block, ext_reason, ext_meta = _post_win_extended_chase_blocked(
+        candidate,
+        local_pad=local_pad,
+        session_move=move,
+        v3=v3,
+        state=state,
+    )
+    if ext_meta:
+        meta.update(ext_meta)
+    if ext_block:
+        meta.setdefault("conflictFlags", flags + ["post_session_win"])
+        meta["conflictCount"] = len(meta["conflictFlags"])
+        return True, ext_reason, meta
+
     meta.update({
         "fakeExplosionTrap": False,
         "conflictFlags": flags,
@@ -2005,6 +2153,7 @@ def detect_fake_explosion_trap(
                 "premium_flat",
                 "otm_inside_or",
                 "post_small_win",
+                "post_session_win",
             }
             structural_conflicts = structural.intersection(flags)
             if fresh_local_pad:

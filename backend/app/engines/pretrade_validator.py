@@ -978,6 +978,8 @@ def validate_candidate(
             check_peak_chase_entry,
             detect_fake_explosion_trap,
             explosion_entry_window_blocked,
+            post_peak_chase_blocked,
+            tier_promotion_pad_chase_blocked,
         )
         from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
@@ -1053,6 +1055,23 @@ def validate_candidate(
         )
         if window_blocked and not strict_base_ready:
             return False, window_reason, meta
+
+        pad_chase, pad_reason = tier_promotion_pad_chase_blocked(
+            explosion_event,
+            ict=trap_ict,
+            alert=(
+                getattr(candidate, "alert", None)
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            ),
+        )
+        if pad_chase and not strict_base_ready:
+            return False, pad_reason, meta
+
+        peak_chase, peak_reason = post_peak_chase_blocked(explosion_event)
+        if peak_chase:
+            return False, peak_reason, meta
+
         trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
             candidate, snap, state=state, ict=trap_ict,
         )
