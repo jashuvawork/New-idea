@@ -974,6 +974,8 @@ def validate_candidate(
     explosion_event = getattr(candidate, "explosion_event", None)
     if getattr(candidate, "mode", "") == "explosion":
         from app.engines.explosion_entry_guards import (
+            _post_session_win,
+            armed_base_late_entry_blocked,
             check_explosion_macd_alignment,
             check_peak_chase_entry,
             detect_fake_explosion_trap,
@@ -1056,17 +1058,28 @@ def validate_candidate(
         if window_blocked and not strict_base_ready:
             return False, window_reason, meta
 
+        post_session_win, _post_win_meta = _post_session_win(state)
+        alert_dict = (
+            getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None
+        )
+
         pad_chase, pad_reason = tier_promotion_pad_chase_blocked(
             explosion_event,
             ict=trap_ict,
-            alert=(
-                getattr(candidate, "alert", None)
-                if isinstance(getattr(candidate, "alert", None), dict)
-                else None
-            ),
+            alert=alert_dict,
         )
-        if pad_chase and not strict_base_ready:
+        if pad_chase and not (strict_base_ready and not post_session_win):
             return False, pad_reason, meta
+
+        late_armed, late_reason = armed_base_late_entry_blocked(
+            explosion_event,
+            ict=trap_ict,
+            alert=alert_dict,
+        )
+        if late_armed:
+            return False, late_reason, meta
 
         peak_chase, peak_reason = post_peak_chase_blocked(explosion_event)
         if peak_chase:

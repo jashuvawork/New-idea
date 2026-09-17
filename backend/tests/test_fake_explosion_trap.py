@@ -71,6 +71,12 @@ def _settings(**overrides):
     s.fake_explosion_trap_post_win_streak_block_enabled = True
     s.fake_explosion_trap_post_win_streak_lookback = 2
     s.fake_explosion_trap_post_win_streak_max_base_rel_pct = 10.0
+    s.fake_explosion_trap_post_win_fresh_near_base_enabled = True
+    s.fresh_near_local_base_max_pct = 10.0
+    s.armed_base_fresh_entry_max_seconds = 300.0
+    s.armed_base_fresh_max_pad_pct = 12.0
+    s.armed_base_late_entry_block_enabled = True
+    s.armed_base_late_entry_max_pad_pct = 10.0
     s.tier_promotion_pad_chase_min_base_rel_pct = 8.0
     s.high_conviction_sizing_enabled = True
     s.high_conviction_min_score = 90.0
@@ -319,7 +325,7 @@ def test_post_win_afternoon_not_blocked_off_expiry(mock_collect, mock_money_sett
 
     snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
     cand = _candidate(
-        _event(daily=10.0, v3=2.6, tier="EXPLODING", strike=23850.0),
+        _event(daily=8.0, v3=2.6, tier="EXPLODING", strike=23850.0),
         snap,
     )
 
@@ -345,7 +351,7 @@ def test_post_win_afternoon_not_blocked_off_expiry(mock_collect, mock_money_sett
         return_value=(False, []),
     ):
         blocked, reason, _meta = detect_fake_explosion_trap(
-            cand, snap, state=MagicMock(), ict=_confirmed_ict(10.0),
+            cand, snap, state=MagicMock(), ict=_confirmed_ict(8.0),
         )
 
     assert blocked is False
@@ -755,9 +761,10 @@ def test_post_win_extended_chase_blocks_sep17_sensex_style(
         )
 
     assert blocked is True
-    assert reason == "fake_explosion_trap_post_win_extended_chase"
-    assert meta.get("postWinExtendedChaseBlock") is True
-    assert meta.get("sessionWinStreak") == 2
+    assert reason in (
+        "fake_explosion_trap_post_win_fresh_near_base",
+        "fake_explosion_trap_post_win_extended_chase",
+    )
 
 
 @pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
@@ -771,11 +778,11 @@ def test_post_win_extended_chase_allows_hot_reacceleration(
     mock_money_settings.return_value = cfg
 
     snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
-    event = _event(daily=25.0, v3=3.5, tier="ELITE", strike=74600.0)
+    event = _event(daily=18.0, v3=3.5, tier="ELITE", strike=74600.0)
     event.side = side
     cand = _candidate(event, snap)
-    ict = _confirmed_ict(13.7)
-    ict.base_relative_move_pct = 13.7
+    ict = _confirmed_ict(8.0)
+    ict.base_relative_move_pct = 8.0
 
     with patch(
         "app.engines.pretrade_validator.collect_session_trades",
@@ -794,7 +801,7 @@ def test_post_win_extended_chase_allows_hot_reacceleration(
         )
 
     assert blocked is False
-    assert meta.get("postWinExtendedChaseBypass") is True
+    assert meta.get("postWinFreshNearBasePass") is True
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")

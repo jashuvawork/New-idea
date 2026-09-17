@@ -1484,6 +1484,14 @@ class Settings(BaseSettings):
     fake_explosion_trap_post_win_streak_block_enabled: bool = True
     fake_explosion_trap_post_win_streak_lookback: int = 2
     fake_explosion_trap_post_win_streak_max_base_rel_pct: float = 10.0
+    # Post-win: enter only at fresh near-base pad — otherwise skip (Sep17 74600 @ 13.7%).
+    fake_explosion_trap_post_win_fresh_near_base_enabled: bool = True
+    fresh_near_local_base_max_pct: float = 10.0
+    # Armed-base: take at launch (~5–12% pad) or skip — do not chase minutes later.
+    armed_base_late_entry_block_enabled: bool = True
+    armed_base_fresh_entry_max_seconds: float = 300.0
+    armed_base_fresh_max_pad_pct: float = 12.0
+    armed_base_late_entry_max_pad_pct: float = 10.0
     fake_explosion_trap_psychology_escalate: bool = True
     # Midday/chop ELITE without ICT structure → hard block (not soft lot-cap).
     fake_explosion_trap_midday_require_structure: bool = True

@@ -1741,6 +1741,130 @@ def _session_win_streak_count(state: Any) -> int:
     return streak
 
 
+def _armed_base_age_seconds(ict: Any) -> Optional[float]:
+    armed_at = str(getattr(ict, "armed_at", "") or "")
+    if not armed_at:
+        return None
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        dt = datetime.fromisoformat(armed_at.replace("Z", "+00:00"))
+        tz = dt.tzinfo or ZoneInfo("Asia/Kolkata")
+        now = datetime.now(tz)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=tz)
+        return max(0.0, (now - dt).total_seconds())
+    except Exception:
+        return None
+
+
+def fresh_near_local_base(
+    *,
+    local_pad: float,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """True when entry is at/near a fresh local base — take early or skip late."""
+    s = settings or get_settings()
+    meta: dict[str, Any] = {}
+    fresh_max = float(getattr(s, "fresh_near_local_base_max_pct", 10.0) or 10.0)
+    armed_fresh_sec = float(
+        getattr(s, "armed_base_fresh_entry_max_seconds", 300.0) or 300.0
+    )
+    armed_fresh_pad = float(
+        getattr(s, "armed_base_fresh_max_pad_pct", 12.0) or 12.0
+    )
+
+    resolved = alert if isinstance(alert, dict) else {}
+    from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_ready
+
+    if alert_has_early_radar_pad_ready(resolved):
+        meta["freshNearBaseReason"] = "early_radar_pad_ready"
+        return True, meta
+
+    if local_pad <= fresh_max + 1e-6:
+        meta["freshNearBaseReason"] = "near_base_pad"
+        return True, meta
+
+    if ict is not None and bool(getattr(ict, "armed_base_launch", False)):
+        age = _armed_base_age_seconds(ict)
+        if age is not None and age <= armed_fresh_sec and local_pad <= armed_fresh_pad + 1e-6:
+            meta["freshNearBaseReason"] = "fresh_armed_base_launch"
+            meta["armedBaseAgeSeconds"] = round(age, 1)
+            return True, meta
+
+    return False, meta
+
+
+def armed_base_late_entry_blocked(
+    explosion_event: Any,
+    *,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
+    """Armed-base FTV: enter at launch near base or skip — no late pad chase."""
+    settings = get_settings()
+    if not getattr(settings, "armed_base_late_entry_block_enabled", True):
+        return False, ""
+    if ict is None or not bool(getattr(ict, "armed_base_launch", False)):
+        return False, ""
+
+    local_pad = effective_local_base_move_pct(explosion_event, ict)
+    fresh, _ = fresh_near_local_base(
+        local_pad=local_pad, ict=ict, alert=alert, settings=settings,
+    )
+    if fresh:
+        return False, ""
+
+    late_max = float(
+        getattr(settings, "armed_base_late_entry_max_pad_pct", 10.0) or 10.0
+    )
+    if local_pad > late_max + 1e-6:
+        return True, f"armed_base_late_entry_skip_{local_pad:.1f}%"
+    return False, ""
+
+
+def post_win_fresh_near_base_blocked(
+    candidate: Any,
+    *,
+    local_pad: float,
+    ict: Any = None,
+    state: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """After any session win: only re-enter at fresh near-base — else skip."""
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    if not getattr(
+        settings, "fake_explosion_trap_post_win_fresh_near_base_enabled", True
+    ):
+        return False, "", meta
+
+    post_session_win, post_meta = _post_session_win(state)
+    meta.update(post_meta)
+    if not post_session_win:
+        return False, "", meta
+
+    fresh, fresh_meta = fresh_near_local_base(
+        local_pad=local_pad, ict=ict, alert=alert, settings=settings,
+    )
+    meta.update(fresh_meta)
+    if fresh:
+        meta["postWinFreshNearBasePass"] = True
+        return False, "", meta
+
+    meta.update({
+        "fakeExplosionTrap": True,
+        "action": "block",
+        "psychologyEscalate": "FOMO",
+        "postWinFreshNearBaseBlock": True,
+        "localBaseMovePct": round(local_pad, 2),
+    })
+    return True, "fake_explosion_trap_post_win_fresh_near_base", meta
+
+
 def _post_win_extended_chase_blocked(
     candidate: Any,
     *,
@@ -2064,6 +2188,22 @@ def detect_fake_explosion_trap(
             "liveVelocity3s": round(v3, 3),
         })
         return True, "fake_explosion_trap_post_win_not_top_confidence", meta
+
+    fresh_block, fresh_reason, fresh_meta = post_win_fresh_near_base_blocked(
+        candidate,
+        local_pad=local_pad,
+        ict=ict,
+        state=state,
+        alert=getattr(candidate, "alert", None)
+        if isinstance(getattr(candidate, "alert", None), dict)
+        else None,
+    )
+    if fresh_meta:
+        meta.update(fresh_meta)
+    if fresh_block:
+        meta.setdefault("conflictFlags", flags + ["post_session_win"])
+        meta["conflictCount"] = len(meta["conflictFlags"])
+        return True, fresh_reason, meta
 
     ext_block, ext_reason, ext_meta = _post_win_extended_chase_blocked(
         candidate,
