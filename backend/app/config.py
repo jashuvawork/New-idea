@@ -343,6 +343,11 @@ class Settings(BaseSettings):
     pe_win_ce_mirror_require_index_rally: bool = True
     pe_win_ce_mirror_near_miss_enabled: bool = True
     pe_win_ce_mirror_local_cap_pct: float = 15.0
+    # Index rally CE unlock without PUT win first (Sep 11-style missed CE rally leg).
+    call_rally_unlock_enabled: bool = True
+    call_rally_unlock_waive_expiry_otm: bool = True
+    call_rally_unlock_waive_mtf_premium_fade: bool = True
+    call_rally_unlock_near_miss_enabled: bool = True
     # PE mirror disabled by default — EOD did not show a symmetric PUT day-mode drag bucket.
     elite_put_block_bullish_day_enabled: bool = False
     # Block rounded score=100 when local base is past the tight near-base band (chase entries).

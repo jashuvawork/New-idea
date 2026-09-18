@@ -237,7 +237,7 @@ def call_pe_parity_from_candidate(
     ):
         return True
     if state is not None and snap is not None:
-        from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_fingerprint
+        from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
 
         symbol = str(
             getattr(candidate, "symbol", None)
@@ -245,7 +245,7 @@ def call_pe_parity_from_candidate(
             or getattr(snap, "symbol", "")
             or ""
         ).upper()
-        return pe_win_ce_mirror_fingerprint(
+        return call_rally_entry_unlock_fingerprint(
             evidence,
             ranking,
             assessment,
@@ -313,6 +313,7 @@ def expiry_cheap_otm_entry_blocked(
     snap: Any,
     alert: Mapping[str, Any] | None = None,
     *,
+    state: Any = None,
     settings: Any = None,
 ) -> tuple[bool, str]:
     """Expiry OTM block — symbol-aware. NIFTY: ₹18–80 OTM; SENSEX: all OTM."""
@@ -330,6 +331,14 @@ def expiry_cheap_otm_entry_blocked(
     money = _classify_moneyness(candidate, snap)
     if money != "OTM":
         return False, ""
+
+    if _side_value(getattr(candidate, "side", "")) == "CALL" and state is not None:
+        from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_expiry_otm_bypass
+
+        if call_rally_entry_unlock_expiry_otm_bypass(
+            candidate, snap, alert, state=state, settings=settings,
+        ):
+            return False, ""
 
     symbol = str(getattr(candidate, "symbol", "") or "").upper()
     if _expiry_itm_atm_only_symbol(symbol, settings=settings):

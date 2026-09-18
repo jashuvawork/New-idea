@@ -191,31 +191,16 @@ def _building_rip_launch_ok(
     return False
 
 
-def pe_win_ce_mirror_fingerprint(
+def _ce_rally_fingerprint_bar(
     evidence: Mapping[str, Any],
     ranking: Mapping[str, Any] | None,
-    elite_assessment: Mapping[str, Any] | None = None,
+    elite_assessment: Mapping[str, Any] | None,
     *,
-    state: Any = None,
-    snap: Optional[SymbolSnapshot] = None,
-    symbol: str = "",
     readiness_reason: str = "",
     settings: Any = None,
 ) -> bool:
-    """CALL entry bar mirrored from a session PUT win — relaxed vs strict PE-parity."""
+    """Shared ELITE near-base bar for PE-win mirror and rally-only CE unlock."""
     settings = settings or get_settings()
-    if not bool(getattr(settings, "pe_win_ce_mirror_enabled", True)):
-        return False
-    if state is None or snap is None:
-        return False
-
-    sym = str(symbol or evidence.get("symbol") or "").upper()
-    if not sym:
-        sym = str(getattr(snap, "symbol", "") or "").upper()
-    armed, _, _ = pe_win_ce_mirror_armed(state, snap, sym, settings=settings)
-    if not armed:
-        return False
-
     evidence = evidence if isinstance(evidence, Mapping) else {}
     ranking = ranking if isinstance(ranking, Mapping) else {}
     assessment = elite_assessment if isinstance(elite_assessment, Mapping) else {}
@@ -276,6 +261,148 @@ def pe_win_ce_mirror_fingerprint(
     return timing in _GOOD_TIMING
 
 
+def call_rally_unlock_armed(
+    state: Any,
+    snap: SymbolSnapshot,
+    symbol: str,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Index rally off session low — CE unlock without requiring PUT win first."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "call_rally_unlock_enabled", True)):
+        return False, "disabled", {}
+    rally_ok, rally_reason, rally_meta = _soft_index_rally_ok(
+        symbol, snap, settings=settings,
+    )
+    if not rally_ok:
+        return False, rally_reason, rally_meta
+    return True, "call_rally_unlock", rally_meta
+
+
+def call_rally_unlock_fingerprint(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    elite_assessment: Mapping[str, Any] | None = None,
+    *,
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    symbol: str = "",
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """CALL entry bar when index rally unlock is armed (no PUT win required)."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "call_rally_unlock_enabled", True)):
+        return False
+    if state is None or snap is None:
+        return False
+
+    sym = str(symbol or evidence.get("symbol") or "").upper()
+    if not sym:
+        sym = str(getattr(snap, "symbol", "") or "").upper()
+    armed, _, _ = call_rally_unlock_armed(state, snap, sym, settings=settings)
+    if not armed:
+        return False
+    return _ce_rally_fingerprint_bar(
+        evidence,
+        ranking,
+        elite_assessment,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+
+
+def pe_win_ce_mirror_fingerprint(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    elite_assessment: Mapping[str, Any] | None = None,
+    *,
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    symbol: str = "",
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """CALL entry bar mirrored from a session PUT win — relaxed vs strict PE-parity."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "pe_win_ce_mirror_enabled", True)):
+        return False
+    if state is None or snap is None:
+        return False
+
+    sym = str(symbol or evidence.get("symbol") or "").upper()
+    if not sym:
+        sym = str(getattr(snap, "symbol", "") or "").upper()
+    armed, _, _ = pe_win_ce_mirror_armed(state, snap, sym, settings=settings)
+    if not armed:
+        return False
+    return _ce_rally_fingerprint_bar(
+        evidence,
+        ranking,
+        elite_assessment,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+
+
+def call_rally_entry_unlock_armed(
+    state: Any,
+    snap: SymbolSnapshot,
+    symbol: str,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """PE-win mirror OR index-rally-only CE unlock armed."""
+    settings = settings or get_settings()
+    mirror_ok, mirror_reason, mirror_meta = pe_win_ce_mirror_armed(
+        state, snap, symbol, settings=settings,
+    )
+    if mirror_ok:
+        return True, mirror_reason, mirror_meta
+    rally_ok, rally_reason, rally_meta = call_rally_unlock_armed(
+        state, snap, symbol, settings=settings,
+    )
+    if rally_ok:
+        return True, rally_reason, rally_meta
+    return False, rally_reason or mirror_reason, {**mirror_meta, **rally_meta}
+
+
+def call_rally_entry_unlock_fingerprint(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    elite_assessment: Mapping[str, Any] | None = None,
+    *,
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    symbol: str = "",
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """True when mirror or rally-only CE unlock fingerprint matches."""
+    if pe_win_ce_mirror_fingerprint(
+        evidence,
+        ranking,
+        elite_assessment,
+        state=state,
+        snap=snap,
+        symbol=symbol,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return True
+    return call_rally_unlock_fingerprint(
+        evidence,
+        ranking,
+        elite_assessment,
+        state=state,
+        snap=snap,
+        symbol=symbol,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+
+
 def pe_win_ce_mirror_near_miss_waive(
     alert: Optional[dict[str, Any]],
     *,
@@ -285,16 +412,20 @@ def pe_win_ce_mirror_near_miss_waive(
     readiness_reason: str = "",
     settings: Any = None,
 ) -> bool:
-    """Waive explosion_near_miss for building-rip CE when PE-win mirror is armed."""
+    """Waive explosion_near_miss for building-rip CE when rally unlock is armed."""
     settings = settings or get_settings()
-    if not bool(getattr(settings, "pe_win_ce_mirror_near_miss_enabled", True)):
+    near_miss_enabled = (
+        bool(getattr(settings, "pe_win_ce_mirror_near_miss_enabled", True))
+        or bool(getattr(settings, "call_rally_unlock_near_miss_enabled", True))
+    )
+    if not near_miss_enabled:
         return False
     if not isinstance(alert, dict) or str(alert.get("side") or "").upper() != "CALL":
         return False
     if snap is None or state is None:
         return False
     sym = str(alert.get("symbol") or getattr(snap, "symbol", "") or "").upper()
-    if not pe_win_ce_mirror_armed(state, snap, sym, settings=settings)[0]:
+    if not call_rally_entry_unlock_armed(state, snap, sym, settings=settings)[0]:
         return False
     tier = str(alert.get("tier") or "").upper()
     if tier not in ("ELITE", "EXPLODING", "BUILDING"):
@@ -318,14 +449,18 @@ def pe_win_ce_mirror_premium_fade_bypass(
     assessment: Optional[Mapping[str, Any]] = None,
     settings: Any = None,
 ) -> bool:
-    """Allow shallow premium fade fill on mirror CE first lift (74300/74400 miss)."""
+    """Allow shallow premium fade fill on rally-unlocked CE first lift."""
     settings = settings or get_settings()
-    if not bool(getattr(settings, "pe_win_ce_mirror_waive_premium_fade", True)):
+    fade_waive = (
+        bool(getattr(settings, "pe_win_ce_mirror_waive_premium_fade", True))
+        or bool(getattr(settings, "call_rally_unlock_waive_mtf_premium_fade", True))
+    )
+    if not fade_waive:
         return False
     if _side_val(side) != "CALL" or snap is None or state is None:
         return False
     sym = str(symbol or (evidence or {}).get("symbol") or getattr(snap, "symbol", "") or "").upper()
-    if not pe_win_ce_mirror_fingerprint(
+    return call_rally_entry_unlock_fingerprint(
         evidence or {},
         ranking,
         assessment,
@@ -333,9 +468,60 @@ def pe_win_ce_mirror_premium_fade_bypass(
         snap=snap,
         symbol=sym,
         settings=settings,
-    ):
+    )
+
+
+def call_rally_entry_unlock_expiry_otm_bypass(
+    candidate: Any,
+    snap: Any,
+    alert: Mapping[str, Any] | None = None,
+    *,
+    state: Any = None,
+    settings: Any = None,
+) -> bool:
+    """Waive expiry OTM block for rally-unlocked ELITE CE (Sep 17 SENSEX 74600 pattern)."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "call_rally_unlock_waive_expiry_otm", True)):
         return False
-    return True
+    side = _side_val(getattr(candidate, "side", None))
+    if side != "CALL" or state is None or snap is None:
+        return False
+    from app.engines.best_trade_policy import (
+        call_pe_parity_from_candidate,
+        mid_rip_best_trade_candidate,
+    )
+    from app.engines.elite_score_engine import build_elite_assessment
+    from app.engines.trade_ranking import rank_entry_candidate
+
+    if call_pe_parity_from_candidate(candidate, snap, settings=settings, state=state):
+        return True
+    alert_map = alert if isinstance(alert, Mapping) else {}
+    ranking = rank_entry_candidate(candidate, snapshot=snap)
+    assessment = build_elite_assessment(
+        {**alert_map, **dict(ranking.get("evidence") or {})},
+        ranking,
+    )
+    symbol = str(
+        getattr(candidate, "symbol", None)
+        or alert_map.get("symbol")
+        or getattr(snap, "symbol", "")
+        or ""
+    ).upper()
+    if call_rally_entry_unlock_fingerprint(
+        {**alert_map, **dict(ranking.get("evidence") or {})},
+        ranking,
+        assessment,
+        state=state,
+        snap=snap,
+        symbol=symbol,
+        settings=settings,
+    ):
+        return True
+    if call_rally_entry_unlock_armed(state, snap, symbol, settings=settings)[0]:
+        return mid_rip_best_trade_candidate(
+            candidate, alert_map, assessment, settings=settings,
+        )
+    return False
 
 
 def pe_win_ce_mirror_summary(
@@ -356,6 +542,8 @@ def pe_win_ce_mirror_summary(
     for sym, snap in (snapshots or {}).items():
         if not snap or not getattr(snap, "dataAvailable", True):
             continue
-        armed, reason, meta = pe_win_ce_mirror_armed(state, snap, sym, settings=settings)
+        armed, reason, meta = call_rally_entry_unlock_armed(
+            state, snap, sym, settings=settings,
+        )
         out["symbols"][sym] = {"armed": armed, "reason": reason, **meta}
     return out

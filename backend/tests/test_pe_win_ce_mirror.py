@@ -12,6 +12,10 @@ import pytest
 from app.config import Settings
 from app.engines.elite_score_engine import elite_call_chop_shallow_blocked, elite_entry_allowed
 from app.engines.pe_win_ce_mirror import (
+    call_rally_entry_unlock_armed,
+    call_rally_entry_unlock_fingerprint,
+    call_rally_unlock_armed,
+    call_rally_unlock_fingerprint,
     pe_win_ce_mirror_armed,
     pe_win_ce_mirror_fingerprint,
     pe_win_ce_mirror_near_miss_waive,
@@ -176,6 +180,59 @@ def test_premium_fade_bypass_for_mirror():
     )
     assert blocked is False
     assert reason == "pe_win_mirror_shallow_fade_ok"
+
+
+@patch("app.engines.pe_win_ce_mirror._collect_session_trades", return_value=[])
+@patch("app.engines.index_rally_side_flip.index_rally_side_flip_bypass")
+def test_call_rally_unlock_armed_without_put_win(mock_flip, _mock_trades):
+    mock_flip.return_value = (True, "index_rally_side_flip", {"rallyPoints": 55.0})
+    snap = _rally_snap()
+    armed, reason, _ = call_rally_unlock_armed(SimpleNamespace(), snap, "NIFTY")
+    assert armed is True
+    assert reason == "call_rally_unlock"
+
+
+@patch("app.engines.pe_win_ce_mirror.call_rally_unlock_armed")
+def test_call_rally_unlock_fingerprint_accepts_elite(mock_armed):
+    mock_armed.return_value = (True, "call_rally_unlock", {})
+    snap = _rally_snap()
+    ok = call_rally_unlock_fingerprint(
+        _mirror_evidence(),
+        _mirror_ranking(eliteScore=86.0),
+        _mirror_assessment(eliteScore=86.0),
+        state=SimpleNamespace(),
+        snap=snap,
+        symbol="NIFTY",
+    )
+    assert ok is True
+
+
+@patch("app.engines.pe_win_ce_mirror.pe_win_ce_mirror_fingerprint", return_value=False)
+@patch("app.engines.pe_win_ce_mirror.call_rally_unlock_fingerprint", return_value=True)
+def test_call_rally_entry_unlock_fingerprint_rally_only(_mock_rally, _mock_mirror):
+    snap = _rally_snap()
+    ok = call_rally_entry_unlock_fingerprint(
+        _mirror_evidence(),
+        _mirror_ranking(),
+        _mirror_assessment(),
+        state=SimpleNamespace(),
+        snap=snap,
+        symbol="NIFTY",
+    )
+    assert ok is True
+
+
+@patch("app.engines.pe_win_ce_mirror.call_rally_unlock_armed")
+@patch(
+    "app.engines.pe_win_ce_mirror.pe_win_ce_mirror_armed",
+    return_value=(True, "pe_win_ce_mirror", {}),
+)
+def test_call_rally_entry_unlock_armed_prefers_mirror(_mock_mirror, mock_rally):
+    snap = _rally_snap()
+    armed, reason, _ = call_rally_entry_unlock_armed(SimpleNamespace(), snap, "NIFTY")
+    assert armed is True
+    assert reason == "pe_win_ce_mirror"
+    mock_rally.assert_not_called()
 
 
 @patch("app.engines.aligned_side_guard.breadth_hard_blocks_side", return_value=(False, "ok"))
