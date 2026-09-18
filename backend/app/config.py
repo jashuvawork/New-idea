@@ -352,6 +352,11 @@ class Settings(BaseSettings):
     # CE at base — same near-base max-lots bar as PE best trades (score ≥90, local ≤20%).
     call_at_base_best_trade_enabled: bool = True
     call_at_base_best_trade_min_grade: str = "A"
+    # Premium local-base CE V-lift when index rally pts lag (Sep 15 23350 / Sep 17 23250 charts).
+    call_premium_local_base_unlock_enabled: bool = True
+    call_premium_local_base_max_local_pct: float = 18.0
+    call_premium_local_base_min_off_low_pct: float = 2.0
+    call_premium_local_base_require_index_trough: bool = True
     # PE mirror disabled by default — EOD did not show a symmetric PUT day-mode drag bucket.
     elite_put_block_bullish_day_enabled: bool = False
     # Block rounded score=100 when local base is past the tight near-base band (chase entries).

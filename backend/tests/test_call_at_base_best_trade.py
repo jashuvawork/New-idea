@@ -95,6 +95,51 @@ def test_call_at_base_best_trade_rejects_without_rally(mock_armed):
     assert ok is False
 
 
+@patch("app.engines.pe_win_ce_mirror.session_put_win_meta", return_value=(True, {"putWinCount": 1}))
+@patch("app.engines.pe_win_ce_mirror._evidence_has_premium_local_base", return_value=True)
+@patch("app.engines.pe_win_ce_mirror._ce_premium_launch_ok", return_value=True)
+def test_premium_local_base_ce_armed_after_pe_session(_launch, _local, _pe):
+    from app.engines.pe_win_ce_mirror import premium_local_base_ce_armed
+
+    ok, reason, meta = premium_local_base_ce_armed(
+        {"localBaseMovePct": 9.0, "armedBaseLaunch": True, "firstLift": True},
+        _snap(),
+        state=SimpleNamespace(),
+    )
+    assert ok is True
+    assert reason == "call_premium_local_base_pe_session"
+    assert meta["localBasePct"] == 9.0
+
+
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_armed", return_value=(False, "no_rally", {}))
+@patch("app.engines.pe_win_ce_mirror.premium_local_base_ce_armed", return_value=(True, "call_premium_local_base_trough_turn", {}))
+def test_call_ce_base_context_uses_premium_local_base(_prem, _index):
+    from app.engines.pe_win_ce_mirror import call_ce_base_context_armed
+
+    ok, reason, _ = call_ce_base_context_armed(
+        SimpleNamespace(),
+        _snap(),
+        "NIFTY",
+        {"tier": "ELITE", "firstLift": True},
+    )
+    assert ok is True
+    assert reason == "call_premium_local_base_trough_turn"
+
+
+@patch("app.engines.pe_win_ce_mirror.call_ce_base_context_armed", return_value=(True, "call_premium_local_base_pe_session", {}))
+def test_call_at_base_best_trade_uses_premium_context(mock_ctx):
+    ok = call_at_base_best_trade_fingerprint(
+        _evidence(),
+        _ranking(),
+        _assessment(),
+        state=SimpleNamespace(),
+        snap=_snap(),
+        symbol="NIFTY",
+    )
+    assert ok is True
+    mock_ctx.assert_called_once()
+
+
 @patch("app.engines.best_trade_policy.call_at_base_best_trade_fingerprint", return_value=True)
 def test_call_at_base_best_trade_from_candidate(mock_fp):
     cand = MagicMock(

@@ -1088,11 +1088,16 @@ def elite_entry_allowed(
     rally_unlock_armed = False
     if resolved_side == "CALL" and state is not None and mirror_snap is not None:
         from app.engines.best_trade_policy import call_at_base_best_trade_fingerprint
-        from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_armed
+        from app.engines.pe_win_ce_mirror import call_ce_base_context_armed
 
         symbol = str(evidence.get("symbol") or getattr(mirror_snap, "symbol", "") or "").upper()
-        rally_unlock_armed = call_rally_entry_unlock_armed(
-            state, mirror_snap, symbol, settings=settings,
+        rally_unlock_armed = call_ce_base_context_armed(
+            state,
+            mirror_snap,
+            symbol,
+            evidence,
+            readiness_reason=readiness_reason,
+            settings=settings,
         )[0]
         mirror_active = call_at_base_best_trade_fingerprint(
             evidence,
