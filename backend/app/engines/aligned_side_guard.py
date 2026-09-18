@@ -169,6 +169,7 @@ def breadth_hard_blocks_side(
     candidate: Any = None,
     alert: Any = None,
     snap: Optional[SymbolSnapshot] = None,
+    state: Any = None,
 ) -> tuple[bool, str]:
     """
     No PUT on BULLISH breadth, no CALL on BEARISH breadth.
@@ -253,7 +254,9 @@ def breadth_hard_blocks_side(
         ):
             from app.engines.best_trade_policy import call_pe_parity_from_candidate
 
-            if call_pe_parity_from_candidate(candidate, resolved_snap, settings=settings):
+            if call_pe_parity_from_candidate(
+                candidate, resolved_snap, settings=settings, state=state,
+            ):
                 return False, "ok"
         return True, "hard_block_call_vs_bearish_breadth"
     return False, "ok"

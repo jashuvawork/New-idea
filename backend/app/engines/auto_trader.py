@@ -1753,6 +1753,7 @@ async def _open_from_candidate(
                     if isinstance(getattr(candidate, "alert", None), dict)
                     else None
                 ),
+                state=state,
             )
             if not chart_ok:
                 # This is structurally before place_entry_order/simulate_entry_order.

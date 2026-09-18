@@ -229,6 +229,7 @@ def check_directional_side_lock(
     tier: str = "",
     premium_led_bypass: bool = False,
     candidate: Any = None,
+    state: Any = None,
 ) -> tuple[bool, str]:
     """
     Returns (blocked, reason).
@@ -245,7 +246,7 @@ def check_directional_side_lock(
 
     bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
     hard_blocked, hard_reason = breadth_hard_blocks_side(
-        side_v, bias, candidate=candidate, snap=snap,
+        side_v, bias, candidate=candidate, snap=snap, state=state,
     )
     if hard_blocked:
         return True, hard_reason
@@ -285,7 +286,7 @@ def check_directional_side_lock(
     ):
         from app.engines.best_trade_policy import call_pe_parity_from_candidate
 
-        if call_pe_parity_from_candidate(candidate, snap, settings=settings):
+        if call_pe_parity_from_candidate(candidate, snap, settings=settings, state=state):
             return False, "ok"
 
     from app.engines.index_rally_side_flip import index_rally_side_flip_bypass

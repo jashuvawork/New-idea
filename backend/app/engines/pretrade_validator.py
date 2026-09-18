@@ -1133,7 +1133,7 @@ def validate_candidate(
 
     dir_blocked, dir_reason = check_directional_side_lock(
         sym, candidate.side, snap, tier=tier, premium_led_bypass=premium_bypass or all_in,
-        candidate=candidate,
+        candidate=candidate, state=state,
     )
     if not all_in and dir_blocked:
         return False, dir_reason, meta

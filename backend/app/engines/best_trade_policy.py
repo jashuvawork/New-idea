@@ -204,8 +204,9 @@ def call_pe_parity_from_candidate(
     snap: Any = None,
     *,
     settings: Any = None,
+    state: Any = None,
 ) -> bool:
-    """True when a live CALL candidate matches the PE-parity elite fingerprint."""
+    """True when a live CALL candidate matches PE-parity or PE-win CE mirror."""
     side = str(
         getattr(getattr(candidate, "side", None), "value", getattr(candidate, "side", ""))
         or ""
@@ -231,9 +232,29 @@ def call_pe_parity_from_candidate(
             if val is not None and key not in evidence:
                 evidence[key] = val
     assessment = build_elite_assessment(evidence, ranking)
-    return call_pe_parity_elite_fingerprint(
+    if call_pe_parity_elite_fingerprint(
         evidence, ranking, assessment, settings=settings,
-    )
+    ):
+        return True
+    if state is not None and snap is not None:
+        from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_fingerprint
+
+        symbol = str(
+            getattr(candidate, "symbol", None)
+            or evidence.get("symbol")
+            or getattr(snap, "symbol", "")
+            or ""
+        ).upper()
+        return pe_win_ce_mirror_fingerprint(
+            evidence,
+            ranking,
+            assessment,
+            state=state,
+            snap=snap,
+            symbol=symbol,
+            settings=settings,
+        )
+    return False
 
 
 def mid_rip_best_trade_candidate(

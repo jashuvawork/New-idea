@@ -946,6 +946,7 @@ def premium_blocks_entry(
     explosion_event: Any = None,
     confirmed_ftv_bypass: bool = False,
     pad_lane_bypass: bool = False,
+    pe_win_mirror_bypass: bool = False,
 ) -> tuple[bool, str]:
     """Block when option premium is fading at execution — bad fill timing."""
     settings = get_settings()
@@ -961,6 +962,7 @@ def premium_blocks_entry(
         explosion_event=explosion_event,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
         pad_lane_bypass=pad_lane_bypass,
+        pe_win_mirror_bypass=pe_win_mirror_bypass,
     )
 
 

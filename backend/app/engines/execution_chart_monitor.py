@@ -198,6 +198,7 @@ def validate_execution_charts(
     mode: str = "",
     confirmed_ftv_bypass: bool = False,
     pad_lane_bypass: bool = False,
+    pe_win_mirror_bypass: bool = False,
     index_trough_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
@@ -237,6 +238,7 @@ def validate_execution_charts(
         side, premium_chart, trade_score=trade_score, explosion_event=explosion_event,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
         pad_lane_bypass=pad_lane_bypass,
+        pe_win_mirror_bypass=pe_win_mirror_bypass,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -271,6 +273,7 @@ async def monitor_trade_chart_before_execution(
     mode: str = "",
     explosion_event: Any = None,
     alert: Optional[dict[str, Any]] = None,
+    state: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Fetch live Upstox charts (1m–4h) for this trade and block if misaligned.
@@ -377,6 +380,40 @@ async def monitor_trade_chart_before_execution(
         (strict_first_lift_bypass or atm_armed_fade_bypass)
         and _event_tier in ("ELITE", "EXPLODING")
     ) or pad_lane_chart_bypass
+    pe_win_mirror_bypass = False
+    if state is not None and side == Side.CALL:
+        from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_premium_fade_bypass
+        from app.engines.trade_ranking import rank_entry_candidate
+        from app.engines.elite_score_engine import build_elite_assessment
+
+        alert_map = alert if isinstance(alert, dict) else {}
+        ranking = rank_entry_candidate(
+            type(
+                "MirrorCandidate",
+                (),
+                {
+                    "side": side,
+                    "symbol": symbol,
+                    "alert": alert_map,
+                    "explosion_event": explosion_event,
+                    "mode": mode or "explosion",
+                },
+            )(),
+            snapshot=snap,
+        )
+        evidence = {**alert_map, **dict(ranking.get("evidence") or {})}
+        assessment = build_elite_assessment(evidence, ranking)
+        pe_win_mirror_bypass = pe_win_ce_mirror_premium_fade_bypass(
+            side=side,
+            state=state,
+            snap=snap,
+            symbol=symbol,
+            evidence=evidence,
+            ranking=ranking,
+            assessment=assessment,
+        )
+        if pe_win_mirror_bypass:
+            premium_fade_pad_lane = True
 
     try:
         meta = await fetch_live_trade_charts(
@@ -429,6 +466,7 @@ async def monitor_trade_chart_before_execution(
         mode=mode,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
         pad_lane_bypass=premium_fade_pad_lane,
+        pe_win_mirror_bypass=pe_win_mirror_bypass,
         index_trough_bypass=index_trough_bypass,
     )
     if mtf_meta:
@@ -438,6 +476,7 @@ async def monitor_trade_chart_before_execution(
     meta["padLaneChartBypass"] = pad_lane_chart_bypass
     meta["ftvFadeFillBypass"] = confirmed_ftv_bypass
     meta["premiumFadePadLaneBypass"] = premium_fade_pad_lane
+    meta["peWinCeMirrorFadeBypass"] = pe_win_mirror_bypass
     meta["indexTroughBypass"] = index_trough_bypass
 
     delta = meta.get("snapshotDelta") or {}

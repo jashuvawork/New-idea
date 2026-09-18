@@ -328,6 +328,21 @@ class Settings(BaseSettings):
     elite_call_pe_parity_bypass_bearish_breadth_enabled: bool = True
     elite_call_pe_parity_bypass_directional_lock_enabled: bool = True
     elite_call_pe_parity_local_cap_all_day_modes_enabled: bool = True
+    # After trail-proved PUT win: mirror CE on index rally off session low (Sep 9–17 CE miss fix).
+    pe_win_ce_mirror_enabled: bool = True
+    pe_win_ce_mirror_min_put_win_inr: float = 1000.0
+    pe_win_ce_mirror_min_elite_score: float = 85.0
+    pe_win_ce_mirror_min_grade: str = "A"
+    pe_win_ce_mirror_max_local_pct: float = 15.0
+    pe_win_ce_mirror_min_velocity_3s: float = 1.0
+    pe_win_ce_mirror_building_rip_grace_seconds: int = 300
+    pe_win_ce_mirror_waive_chop_shallow: bool = True
+    pe_win_ce_mirror_waive_premium_fade: bool = True
+    pe_win_ce_mirror_premium_fade_max_drawdown_pct: float = -1.0
+    pe_win_ce_mirror_rally_pts_fraction: float = 0.5
+    pe_win_ce_mirror_require_index_rally: bool = True
+    pe_win_ce_mirror_near_miss_enabled: bool = True
+    pe_win_ce_mirror_local_cap_pct: float = 15.0
     # PE mirror disabled by default — EOD did not show a symmetric PUT day-mode drag bucket.
     elite_put_block_bullish_day_enabled: bool = False
     # Block rounded score=100 when local base is past the tight near-base band (chase entries).
