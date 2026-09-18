@@ -238,6 +238,7 @@ def _reentry_blocked(
     explosion_event: Any = None,
     mode: str = "",
     alert: Any = None,
+    state: Any = None,
 ) -> tuple[bool, str]:
     blocked, reason = symbol_in_cooldown(symbol)
     if blocked:
@@ -256,7 +257,7 @@ def _reentry_blocked(
 
         bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
         hard_blocked, hard_reason = breadth_hard_blocks_side(
-            side, bias, event=explosion_event, snap=snap, alert=alert,
+            side, bias, event=explosion_event, snap=snap, alert=alert, state=state,
         )
         if hard_blocked:
             return True, hard_reason
@@ -285,7 +286,7 @@ def _reentry_blocked(
         )
     blocked, reason = check_directional_side_lock(
         symbol, side, snap, tier=tier, premium_led_bypass=premium_bypass,
-        candidate=lock_candidate,
+        candidate=lock_candidate, state=state,
     )
     if blocked:
         return True, reason
@@ -331,6 +332,15 @@ def _explosion_candidates(
 
             pad_lane_waive = explosion_near_miss_waive(
                 alert if isinstance(alert, dict) else None,
+                readiness_reason=first_lift_readiness_reason,
+            )
+        if not pad_lane_waive and str(alert.get("side") or "").upper() == "CALL":
+            from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_near_miss_waive
+
+            pad_lane_waive = pe_win_ce_mirror_near_miss_waive(
+                alert if isinstance(alert, dict) else None,
+                snap=snap,
+                state=state,
                 readiness_reason=first_lift_readiness_reason,
             )
         lift_ready = first_lift_ready or early_pad or coil_pad or pad_lane_waive
@@ -678,7 +688,7 @@ def _explosion_candidates(
             continue
 
         blocked, reason = _reentry_blocked(
-            symbol, event.side, event.strike, snap, explosion_event=event,
+            symbol, event.side, event.strike, snap, explosion_event=event, state=state,
         )
         if blocked:
             continue

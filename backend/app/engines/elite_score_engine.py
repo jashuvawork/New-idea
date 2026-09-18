@@ -371,6 +371,8 @@ def elite_side_local_base_cap(
     ranking: Mapping[str, Any] | None = None,
     day_mode: str = "",
     assessment: Mapping[str, Any] | None = None,
+    state: Any = None,
+    snap: Any = None,
 ) -> float:
     """Return max local-base % for side (CALL tighter than PUT by default)."""
     from app.config import get_settings
@@ -380,21 +382,41 @@ def elite_side_local_base_cap(
     general = float(getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0)
     side_u = str(side or "").upper()
     dm = str(day_mode or "").strip().upper()
+    mirror_match = False
+    if side_u == "CALL" and state is not None and snap is not None and evidence is not None:
+        try:
+            from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_fingerprint
+
+            symbol = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+            mirror_match = pe_win_ce_mirror_fingerprint(
+                evidence,
+                ranking,
+                assessment,
+                state=state,
+                snap=snap,
+                symbol=symbol,
+                settings=settings,
+            )
+        except Exception:
+            mirror_match = False
     parity_match = (
         side_u == "CALL"
         and evidence is not None
-        and call_momentum_rally_pe_parity_fingerprint(
-            evidence,
-            ranking,
-            assessment,
-            settings=settings,
+        and (
+            call_momentum_rally_pe_parity_fingerprint(
+                evidence,
+                ranking,
+                assessment,
+                settings=settings,
+            )
+            or mirror_match
         )
     )
     all_day_cap = bool(
         getattr(settings, "elite_call_pe_parity_local_cap_all_day_modes_enabled", True)
     )
     if parity_match and (
-        all_day_cap or dm == _MOMENTUM_RALLY_DAY_MODE
+        all_day_cap or dm == _MOMENTUM_RALLY_DAY_MODE or mirror_match
     ):
         parity_cap = float(
             getattr(
@@ -404,6 +426,11 @@ def elite_side_local_base_cap(
             )
             or 15.0
         )
+        if mirror_match:
+            mirror_cap = float(
+                getattr(settings, "pe_win_ce_mirror_local_cap_pct", 15.0) or 15.0
+            )
+            parity_cap = max(parity_cap, mirror_cap)
         return min(general, parity_cap)
     if side_u == "CALL":
         call_cap = float(getattr(settings, "elite_call_max_local_base_pct", 0.0) or 0.0)
@@ -424,6 +451,8 @@ def elite_side_day_mode_blocked(
     evidence: Mapping[str, Any] | None = None,
     ranking: Mapping[str, Any] | None = None,
     assessment: Mapping[str, Any] | None = None,
+    state: Any = None,
+    snap: Any = None,
 ) -> tuple[bool, str]:
     """Side-specific day-mode blocks (CE/PE symmetric config, EOD-tuned defaults)."""
     from app.config import get_settings
@@ -445,6 +474,24 @@ def elite_side_day_mode_blocked(
             settings=settings,
         ):
             return False, ""
+        if (
+            state is not None
+            and snap is not None
+            and evidence is not None
+        ):
+            from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_fingerprint
+
+            symbol = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+            if pe_win_ce_mirror_fingerprint(
+                evidence,
+                ranking,
+                assessment,
+                state=state,
+                snap=snap,
+                symbol=symbol,
+                settings=settings,
+            ):
+                return False, ""
         return True, "elite_call_momentum_rally_blocked"
 
     if (
@@ -665,11 +712,16 @@ def elite_call_chop_shallow_blocked(
     local_base_pct: float,
     *,
     settings: Any = None,
+    mirror_waived: bool = False,
 ) -> tuple[bool, str]:
     """Block CALL entries on chop days while still very near base."""
     from app.config import get_settings
 
     settings = settings or get_settings()
+    if mirror_waived and bool(
+        getattr(settings, "pe_win_ce_mirror_waive_chop_shallow", True)
+    ):
+        return False, ""
     if not bool(getattr(settings, "elite_call_chop_shallow_block_enabled", True)):
         return False, ""
     if str(side or "").upper() != "CALL":
@@ -802,6 +854,12 @@ def elite_win_rate_gate_summary(*, settings: Any = None) -> dict[str, Any]:
         "callPeParityLocalCapAllDayModes": bool(
             getattr(settings, "elite_call_pe_parity_local_cap_all_day_modes_enabled", True)
         ),
+        "peWinCeMirrorEnabled": bool(
+            getattr(settings, "pe_win_ce_mirror_enabled", True)
+        ),
+        "peWinCeMirrorMinScore": float(
+            getattr(settings, "pe_win_ce_mirror_min_elite_score", 85.0) or 85.0
+        ),
         "putBlockBullishDay": bool(
             getattr(settings, "elite_put_block_bullish_day_enabled", False)
         ),
@@ -933,6 +991,14 @@ def elite_entry_allowed(
         side or str(ranking.get("side") or ""),
     )
     pre_assessment = build_elite_assessment(evidence, ranking)
+    mirror_snap = None
+    if isinstance(snapshots, dict):
+        mirror_snap = snapshots.get(str(evidence.get("symbol") or "").upper())
+        if mirror_snap is None:
+            for _sym, _snap in snapshots.items():
+                if str(_sym).upper() == str(evidence.get("symbol") or "").upper():
+                    mirror_snap = _snap
+                    break
     side_blocked, side_block_reason = elite_side_day_mode_blocked(
         resolved_side,
         resolved_mode,
@@ -940,6 +1006,8 @@ def elite_entry_allowed(
         evidence=evidence,
         ranking=ranking,
         assessment=pre_assessment,
+        state=state,
+        snap=mirror_snap,
     )
     if side_blocked:
         assessment = build_elite_assessment(evidence, ranking)
@@ -984,6 +1052,26 @@ def elite_entry_allowed(
         assessment = {**assessment, "megaVerticalBypass": mega_tag}
 
     min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
+    mirror_active = False
+    if resolved_side == "CALL" and state is not None and mirror_snap is not None:
+        from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_fingerprint
+
+        symbol = str(evidence.get("symbol") or getattr(mirror_snap, "symbol", "") or "").upper()
+        mirror_active = pe_win_ce_mirror_fingerprint(
+            evidence,
+            ranking,
+            assessment,
+            state=state,
+            snap=mirror_snap,
+            symbol=symbol,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        )
+        if mirror_active:
+            mirror_min = float(
+                getattr(settings, "pe_win_ce_mirror_min_elite_score", 85.0) or 85.0
+            )
+            min_score = min(min_score, mirror_min)
     max_local = elite_side_local_base_cap(
         resolved_side,
         settings=settings,
@@ -991,6 +1079,8 @@ def elite_entry_allowed(
         ranking=ranking,
         day_mode=resolved_mode,
         assessment=assessment,
+        state=state,
+        snap=mirror_snap,
     )
     if mega_ok and bool(
         getattr(settings, "elite_mega_vertical_bypass_extend_local_cap", True)
@@ -1047,6 +1137,7 @@ def elite_entry_allowed(
         resolved_mode,
         _number(assessment.get("localBasePct")),
         settings=settings,
+        mirror_waived=mirror_active,
     )
     if chop_call_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
