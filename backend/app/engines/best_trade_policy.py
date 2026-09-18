@@ -212,7 +212,7 @@ def call_at_base_best_trade_fingerprint(
 ) -> bool:
     """CE at local base — same top near-base bar as PE best trades (not mid-rip chase)."""
     from app.config import get_settings
-    from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_armed
+    from app.engines.pe_win_ce_mirror import call_ce_base_context_armed
     from app.engines.rally_capture import _grade_meets_min
 
     settings = settings or get_settings()
@@ -222,7 +222,14 @@ def call_at_base_best_trade_fingerprint(
         return False
 
     sym = str(symbol or (evidence or {}).get("symbol") or getattr(snap, "symbol", "") or "").upper()
-    if not call_rally_entry_unlock_armed(state, snap, sym, settings=settings)[0]:
+    if not call_ce_base_context_armed(
+        state,
+        snap,
+        sym,
+        evidence,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )[0]:
         return False
 
     evidence = evidence if isinstance(evidence, Mapping) else {}

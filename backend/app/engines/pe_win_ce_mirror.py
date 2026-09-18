@@ -280,6 +280,119 @@ def call_rally_unlock_armed(
     return True, "call_rally_unlock", rally_meta
 
 
+def _evidence_has_premium_local_base(evidence: Mapping[str, Any]) -> bool:
+    from app.engines.ftv_focus_alerts import _radar_at_local_base
+    from app.engines.local_base_chart_bypass import _alert_has_local_base
+
+    ev = dict(evidence) if isinstance(evidence, Mapping) else {}
+    return bool(_radar_at_local_base(ev) or _alert_has_local_base(ev))
+
+
+def _ce_premium_launch_ok(
+    evidence: Mapping[str, Any],
+    *,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    if bool(
+        evidence.get("armedBaseLaunch")
+        and (
+            evidence.get("firstLift")
+            or evidence.get("activeBreakout")
+            or evidence.get("displacement")
+        )
+    ):
+        return True
+    return _building_rip_launch_ok(
+        evidence, readiness_reason=readiness_reason, settings=settings,
+    )
+
+
+def premium_local_base_ce_armed(
+    evidence: Mapping[str, Any],
+    snap: SymbolSnapshot,
+    *,
+    state: Any = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """CE premium V-base at session trough — index rally pts not required (PE-session symmetric)."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "call_premium_local_base_unlock_enabled", True)):
+        return False, "disabled", {}
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    if not _evidence_has_premium_local_base(evidence):
+        return False, "no_premium_local_base", {}
+    if not _ce_premium_launch_ok(
+        evidence, readiness_reason=readiness_reason, settings=settings,
+    ):
+        return False, "no_launch", {}
+
+    local = _number(evidence.get("localBaseMovePct") or evidence.get("localBasePct"))
+    max_local = float(
+        getattr(settings, "call_premium_local_base_max_local_pct", 18.0) or 18.0
+    )
+    if local > max_local + 1e-6:
+        return False, f"local_{local:.0f}>{max_local:.0f}", {"localBasePct": local}
+
+    meta: dict[str, Any] = {
+        "localBasePct": round(local, 2),
+        "mode": "premium_local_base",
+    }
+    pe_win, pe_meta = session_put_win_meta(state, settings=settings)
+    if pe_win:
+        return True, "call_premium_local_base_pe_session", {**meta, **pe_meta}
+
+    if not bool(getattr(settings, "call_premium_local_base_require_index_trough", True)):
+        return True, "call_premium_local_base", meta
+
+    if evidence.get("ictIndexTroughSlowV") or evidence.get("indexTroughSlowV"):
+        return True, "call_premium_local_base_trough_flag", meta
+
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    if snap is not None and snap.spotChart is not None:
+        if index_trough_momentum_turn(Side.CALL, snap.spotChart, settings=settings):
+            return True, "call_premium_local_base_trough_turn", meta
+
+    off_low = _number(evidence.get("offLowMovePct"))
+    min_off = float(
+        getattr(settings, "call_premium_local_base_min_off_low_pct", 2.0) or 2.0
+    )
+    if off_low >= min_off - 1e-6:
+        return True, "call_premium_local_base_off_low", {**meta, "offLowMovePct": off_low}
+
+    return False, "no_trough_context", meta
+
+
+def call_ce_base_context_armed(
+    state: Any,
+    snap: SymbolSnapshot,
+    symbol: str,
+    evidence: Mapping[str, Any] | None = None,
+    *,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """CE base context: index rally, PE-win mirror, or premium local-base V-lift."""
+    settings = settings or get_settings()
+    index_ok, index_reason, index_meta = call_rally_entry_unlock_armed(
+        state, snap, symbol, settings=settings,
+    )
+    if index_ok:
+        return True, index_reason, index_meta
+    if evidence is not None:
+        return premium_local_base_ce_armed(
+            evidence,
+            snap,
+            state=state,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        )
+    return False, index_reason, index_meta
+
+
 def call_rally_unlock_fingerprint(
     evidence: Mapping[str, Any],
     ranking: Mapping[str, Any] | None,
@@ -301,7 +414,14 @@ def call_rally_unlock_fingerprint(
     sym = str(symbol or evidence.get("symbol") or "").upper()
     if not sym:
         sym = str(getattr(snap, "symbol", "") or "").upper()
-    armed, _, _ = call_rally_unlock_armed(state, snap, sym, settings=settings)
+    armed, _, _ = call_ce_base_context_armed(
+        state,
+        snap,
+        sym,
+        evidence,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
     if not armed:
         return False
     return _ce_rally_fingerprint_bar(
@@ -425,7 +545,14 @@ def pe_win_ce_mirror_near_miss_waive(
     if snap is None or state is None:
         return False
     sym = str(alert.get("symbol") or getattr(snap, "symbol", "") or "").upper()
-    if not call_rally_entry_unlock_armed(state, snap, sym, settings=settings)[0]:
+    if not call_ce_base_context_armed(
+        state,
+        snap,
+        sym,
+        alert,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )[0]:
         return False
     tier = str(alert.get("tier") or "").upper()
     if tier not in ("ELITE", "EXPLODING", "BUILDING"):
