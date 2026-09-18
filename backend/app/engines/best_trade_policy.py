@@ -319,6 +319,74 @@ def call_at_base_best_trade_from_candidate(
     )
 
 
+def stamp_call_at_base_exit_hold(
+    ctx_extra: dict[str, Any],
+    *,
+    assessment: Mapping[str, Any] | None = None,
+    base_rel_pct: float = 0.0,
+    base_premium: float = 0.0,
+    entry_premium: float = 0.0,
+    exit_plan: dict[str, Any] | None = None,
+    tier: str = "",
+    velocity_3s: float = 0.0,
+    volume_surge: float = 1.0,
+    session_move_pct: float = 0.0,
+    first_lift: bool = False,
+    ict_flat_vertical: bool = False,
+    settings: Any = None,
+    base_context_reason: str = "",
+) -> bool:
+    """Stamp CE at-base best trade for chart structural SL and hold (no early scratch)."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "call_at_base_best_trade_exit_hold_enabled", True)):
+        return False
+
+    ctx_extra["callAtBaseBestTrade"] = True
+    if base_context_reason:
+        ctx_extra["callAtBaseBestTradeReason"] = base_context_reason
+    if str(base_context_reason or "").startswith("call_premium_local_base"):
+        ctx_extra["callPremiumLocalBase"] = True
+
+    from app.engines.elite_runner_exit_bundle import (
+        apply_elite_runner_exit_bundle,
+        refresh_runner_exit_plans,
+    )
+
+    stamped = apply_elite_runner_exit_bundle(
+        ctx_extra,
+        assessment=assessment,
+        base_rel_pct=base_rel_pct,
+        first_lift=first_lift or bool(ctx_extra.get("ictFirstLift")),
+        ict_flat_vertical=ict_flat_vertical or bool(ctx_extra.get("ictFlatThenVertical")),
+        tier=tier or str(ctx_extra.get("explosionTier") or ""),
+        settings=settings,
+    )
+    if not stamped:
+        ctx_extra["maxProfitCapture"] = True
+        ctx_extra["vBaseFtvRunner"] = True
+        ctx_extra["eliteRunnerExitBundle"] = True
+        ctx_extra["eliteRunnerExitReason"] = "call_at_base_best_trade"
+        if not ctx_extra.get("momentType"):
+            ctx_extra["momentType"] = "call_at_base_best_trade"
+
+    refresh_runner_exit_plans(
+        ctx_extra,
+        entry_premium=float(entry_premium or 50),
+        base_premium=float(base_premium or 0),
+        exit_plan=exit_plan if isinstance(exit_plan, dict) else None,
+        velocity_3s=float(velocity_3s or 0),
+        volume_surge=float(volume_surge or 1.0),
+        session_move_pct=float(session_move_pct or 0),
+        premium_fvg=bool(ctx_extra.get("ictPremiumFvg")),
+        flat_then_vertical=ict_flat_vertical or bool(ctx_extra.get("ictFlatThenVertical")),
+        mega_rip=bool(ctx_extra.get("ictMegaRip")),
+        settings=settings,
+    )
+    return True
+
+
 def call_pe_parity_from_candidate(
     candidate: Any,
     snap: Any = None,

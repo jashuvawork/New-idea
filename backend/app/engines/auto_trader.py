@@ -2266,6 +2266,7 @@ async def _open_from_candidate(
         ),
         "baseWindowFullLots": bool(base_window_full_lots),
         "structuredColdMaxLots": bool(structured_cold_max),
+        "callAtBaseBestTrade": bool(call_base_best_max),
         "topMomentMaxLots": top_moment_lot_meta.get("topMomentMaxLots"),
         "topMomentType": top_moment_lot_meta.get("topMomentType"),
         "topMomentMaxLotsCapReason": top_moment_lot_meta.get("topMomentMaxLotsCapReason"),
@@ -2632,6 +2633,49 @@ async def _open_from_candidate(
         )
         if peak_pred.get("enabled"):
             ctx_extra = stamp_peak_prediction_on_context(ctx_extra, peak_pred)
+        if call_base_best_max and getattr(candidate, "side", None) == Side.CALL:
+            from app.engines.best_trade_policy import stamp_call_at_base_exit_hold
+            from app.engines.pe_win_ce_mirror import call_ce_base_context_armed
+
+            alert_dict = candidate.alert if isinstance(candidate.alert, dict) else {}
+            _, base_reason, _ = call_ce_base_context_armed(
+                state,
+                snap,
+                symbol,
+                alert_dict,
+                readiness_reason=str(lift_readiness_reason or ""),
+                settings=settings,
+            )
+            stamp_call_at_base_exit_hold(
+                ctx_extra,
+                assessment=(
+                    ctx_extra.get("eliteAssessment") or elite_preview or None
+                ),
+                base_rel_pct=float(ctx_extra.get("localBaseBaseRelPct") or base_rel or 0),
+                base_premium=float(
+                    ctx_extra.get("localBaseBasePremium") or base_premium or 0
+                ),
+                entry_premium=float(fill_premium or candidate.premium or 50),
+                exit_plan=exit_plan if isinstance(exit_plan, dict) else None,
+                tier=str(getattr(ev, "tier", "") or ""),
+                velocity_3s=float(
+                    getattr(ict, "velocity_3s", 0) or entry_velocity_3s or 0
+                ),
+                volume_surge=float(
+                    getattr(ict, "volume_surge", 0)
+                    or getattr(ev, "volume_surge", 0)
+                    or 1
+                ),
+                session_move_pct=float(
+                    getattr(ict, "session_move_pct", 0)
+                    or getattr(ev, "daily_move_pct", 0)
+                    or 0
+                ),
+                first_lift=bool(first_lift_runner),
+                ict_flat_vertical=bool(ict_flat_vertical),
+                settings=settings,
+                base_context_reason=base_reason,
+            )
         from app.engines.modest_peak_mode import (
             apply_modest_peak_entry_stamp,
             cap_modest_peak_stage_plan,

@@ -357,6 +357,9 @@ class Settings(BaseSettings):
     call_premium_local_base_max_local_pct: float = 18.0
     call_premium_local_base_min_off_low_pct: float = 2.0
     call_premium_local_base_require_index_trough: bool = True
+    # CE at-base entries: structural SL + extended hold (no chop/live/failed-launch scratch).
+    call_at_base_best_trade_exit_hold_enabled: bool = True
+    call_at_base_best_trade_min_hold_before_loss_seconds: int = 600
     # PE mirror disabled by default — EOD did not show a symmetric PUT day-mode drag bucket.
     elite_put_block_bullish_day_enabled: bool = False
     # Block rounded score=100 when local base is past the tight near-base band (chase entries).

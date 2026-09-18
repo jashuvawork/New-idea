@@ -185,6 +185,13 @@ def _executed_entry_min_hold_before_loss(trade: PaperTrade, *, settings: Any = N
         return max(base_min, elite_min)
     if _is_mid_rip_elite_trade(trade, settings=settings):
         return max(base_min, elite_min)
+    if ctx.get("callAtBaseBestTrade") and bool(
+        getattr(settings, "call_at_base_best_trade_exit_hold_enabled", True)
+    ):
+        ce_min = _cfg_int(
+            settings, "call_at_base_best_trade_min_hold_before_loss_seconds", 600
+        )
+        return max(base_min, elite_min, ce_min)
     return base_min
 
 
@@ -261,6 +268,12 @@ def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = 
     assessment = ctx.get("eliteAssessment") or {}
     relax_on = bool(getattr(settings, "elite_failed_launch_relax_enabled", True))
     skip_on = bool(getattr(settings, "elite_runner_skip_failed_launch_enabled", True))
+
+    if ctx.get("callAtBaseBestTrade") and bool(
+        getattr(settings, "call_at_base_best_trade_exit_hold_enabled", True)
+    ):
+        if ctx.get("eliteRunnerExitBundle") or ctx.get("vBaseFtvRunner"):
+            return True
 
     if isinstance(assessment, dict) and assessment:
         if assessment.get("mustTake"):
@@ -2623,6 +2636,7 @@ def _green_thesis_active(trade: Any, *, best: float, settings: Any) -> bool:
         or ctx.get("ictFlatThenVertical")
         or ctx.get("ictMegaRip")
         or ctx.get("maxProfitCapture")
+        or ctx.get("callAtBaseBestTrade")
         or ctx.get("momentStageLadder")
         or ctx.get("highConviction")
         or ctx.get("defensiveBaseRip")
@@ -2634,6 +2648,7 @@ def _green_thesis_active(trade: Any, *, best: float, settings: Any) -> bool:
             "local_swing_base",
             "first_lift_local_base",
             "premium_fvg",
+            "call_at_base_best_trade",
         )
     )
     if not structured:
@@ -2698,6 +2713,7 @@ def _skip_explosion_time_profit(
     tier = str(event_tier or ctx.get("explosionTier") or "").upper()
     top_size = bool(
         ctx.get("topExplosionMaxLots")
+        or ctx.get("callAtBaseBestTrade")
         or ctx.get("highConviction")
         or ctx.get("ictFirstLift")
         or ctx.get("firstLiftCapture")
