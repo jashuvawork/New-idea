@@ -348,6 +348,10 @@ class Settings(BaseSettings):
     call_rally_unlock_waive_expiry_otm: bool = True
     call_rally_unlock_waive_mtf_premium_fade: bool = True
     call_rally_unlock_near_miss_enabled: bool = True
+    call_rally_unlock_waive_chop_shallow: bool = True
+    # CE at base — same near-base max-lots bar as PE best trades (score ≥90, local ≤20%).
+    call_at_base_best_trade_enabled: bool = True
+    call_at_base_best_trade_min_grade: str = "A"
     # PE mirror disabled by default — EOD did not show a symmetric PUT day-mode drag bucket.
     elite_put_block_bullish_day_enabled: bool = False
     # Block rounded score=100 when local base is past the tight near-base band (chase entries).

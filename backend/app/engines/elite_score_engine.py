@@ -376,19 +376,21 @@ def elite_side_local_base_cap(
 ) -> float:
     """Return max local-base % for side (CALL tighter than PUT by default)."""
     from app.config import get_settings
-    from app.engines.best_trade_policy import call_momentum_rally_pe_parity_fingerprint
+    from app.engines.best_trade_policy import (
+        call_at_base_best_trade_fingerprint,
+        call_momentum_rally_pe_parity_fingerprint,
+    )
 
     settings = settings or get_settings()
     general = float(getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0)
     side_u = str(side or "").upper()
     dm = str(day_mode or "").strip().upper()
+    base_best_match = False
     mirror_match = False
     if side_u == "CALL" and state is not None and snap is not None and evidence is not None:
+        symbol = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
         try:
-            from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
-
-            symbol = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
-            mirror_match = call_rally_entry_unlock_fingerprint(
+            base_best_match = call_at_base_best_trade_fingerprint(
                 evidence,
                 ranking,
                 assessment,
@@ -398,7 +400,27 @@ def elite_side_local_base_cap(
                 settings=settings,
             )
         except Exception:
-            mirror_match = False
+            base_best_match = False
+        if not base_best_match:
+            try:
+                from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
+
+                mirror_match = call_rally_entry_unlock_fingerprint(
+                    evidence,
+                    ranking,
+                    assessment,
+                    state=state,
+                    snap=snap,
+                    symbol=symbol,
+                    settings=settings,
+                )
+            except Exception:
+                mirror_match = False
+    if base_best_match:
+        near_base_cap = float(
+            getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
+        )
+        return min(general, near_base_cap)
     parity_match = (
         side_u == "CALL"
         and evidence is not None
@@ -474,15 +496,20 @@ def elite_side_day_mode_blocked(
             settings=settings,
         ):
             return False, ""
-        if (
-            state is not None
-            and snap is not None
-            and evidence is not None
-        ):
+        if state is not None and snap is not None and evidence is not None:
+            from app.engines.best_trade_policy import call_at_base_best_trade_fingerprint
             from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
 
             symbol = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
-            if call_rally_entry_unlock_fingerprint(
+            if call_at_base_best_trade_fingerprint(
+                evidence,
+                ranking,
+                assessment,
+                state=state,
+                snap=snap,
+                symbol=symbol,
+                settings=settings,
+            ) or call_rally_entry_unlock_fingerprint(
                 evidence,
                 ranking,
                 assessment,
@@ -713,13 +740,18 @@ def elite_call_chop_shallow_blocked(
     *,
     settings: Any = None,
     mirror_waived: bool = False,
+    rally_unlock_armed: bool = False,
 ) -> tuple[bool, str]:
     """Block CALL entries on chop days while still very near base."""
     from app.config import get_settings
 
     settings = settings or get_settings()
-    if mirror_waived and bool(
-        getattr(settings, "pe_win_ce_mirror_waive_chop_shallow", True)
+    if (
+        mirror_waived
+        and bool(getattr(settings, "pe_win_ce_mirror_waive_chop_shallow", True))
+    ) or (
+        rally_unlock_armed
+        and bool(getattr(settings, "call_rally_unlock_waive_chop_shallow", True))
     ):
         return False, ""
     if not bool(getattr(settings, "elite_call_chop_shallow_block_enabled", True)):
@@ -1053,11 +1085,16 @@ def elite_entry_allowed(
 
     min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
     mirror_active = False
+    rally_unlock_armed = False
     if resolved_side == "CALL" and state is not None and mirror_snap is not None:
-        from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
+        from app.engines.best_trade_policy import call_at_base_best_trade_fingerprint
+        from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_armed
 
         symbol = str(evidence.get("symbol") or getattr(mirror_snap, "symbol", "") or "").upper()
-        mirror_active = call_rally_entry_unlock_fingerprint(
+        rally_unlock_armed = call_rally_entry_unlock_armed(
+            state, mirror_snap, symbol, settings=settings,
+        )[0]
+        mirror_active = call_at_base_best_trade_fingerprint(
             evidence,
             ranking,
             assessment,
@@ -1068,10 +1105,9 @@ def elite_entry_allowed(
             settings=settings,
         )
         if mirror_active:
-            mirror_min = float(
-                getattr(settings, "pe_win_ce_mirror_min_elite_score", 85.0) or 85.0
+            min_score = float(
+                getattr(settings, "best_trade_near_base_min_elite_score", 90.0) or 90.0
             )
-            min_score = min(min_score, mirror_min)
     max_local = elite_side_local_base_cap(
         resolved_side,
         settings=settings,
@@ -1138,6 +1174,7 @@ def elite_entry_allowed(
         _number(assessment.get("localBasePct")),
         settings=settings,
         mirror_waived=mirror_active,
+        rally_unlock_armed=rally_unlock_armed,
     )
     if chop_call_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}

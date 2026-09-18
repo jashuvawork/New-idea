@@ -1323,6 +1323,34 @@ async def _open_from_candidate(
         structured_cold_max = True
         top_explosion_max = True
 
+    call_base_best_max = False
+    if (
+        candidate.mode == "explosion"
+        and getattr(candidate, "side", None) == Side.CALL
+        and state is not None
+        and bool(getattr(settings, "best_trade_near_base_max_lots_enabled", True))
+    ):
+        from app.engines.best_trade_policy import call_at_base_best_trade_from_candidate
+        from app.engines.entry_timing import timing_allows_full_size
+
+        timing_ok = (
+            timing_allows_full_size(timing_meta, elite_preview)
+            if timing_meta
+            else True
+        )
+        if timing_ok and call_at_base_best_trade_from_candidate(
+            candidate,
+            snap,
+            elite_assessment=elite_preview,
+            state=state,
+            settings=settings,
+        ):
+            from app.engines.capital_allocator import max_lots_for_capital
+
+            lots = max(lots, max_lots_for_capital(symbol, fill_premium))
+            call_base_best_max = True
+            top_explosion_max = True
+
     strict_s_full_sleeve = _exceptional_armed_launch_full_sleeve_allowed(
         candidate=candidate,
         snap=snap,
