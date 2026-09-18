@@ -199,6 +199,119 @@ def call_pe_parity_elite_fingerprint(
     )
 
 
+def call_at_base_best_trade_fingerprint(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    elite_assessment: Mapping[str, Any] | None = None,
+    *,
+    state: Any = None,
+    snap: Any = None,
+    symbol: str = "",
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """CE at local base — same top near-base bar as PE best trades (not mid-rip chase)."""
+    from app.config import get_settings
+    from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_armed
+    from app.engines.rally_capture import _grade_meets_min
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "call_at_base_best_trade_enabled", True)):
+        return False
+    if state is None or snap is None:
+        return False
+
+    sym = str(symbol or (evidence or {}).get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    if not call_rally_entry_unlock_armed(state, snap, sym, settings=settings)[0]:
+        return False
+
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    ranking = ranking if isinstance(ranking, Mapping) else {}
+    assessment = elite_assessment if isinstance(elite_assessment, Mapping) else {}
+
+    if str(evidence.get("tier") or "").upper() != "ELITE":
+        return False
+    if not best_trade_near_base_assessment(assessment, settings=settings):
+        return False
+
+    grade = str(ranking.get("grade") or assessment.get("grade") or "").upper()
+    min_grade = str(
+        getattr(settings, "call_at_base_best_trade_min_grade", "A") or "A"
+    ).upper()
+    if not _grade_meets_min(grade, min_grade):
+        return False
+
+    launch_ok = bool(
+        evidence.get("armedBaseLaunch")
+        and (
+            evidence.get("firstLift")
+            or evidence.get("activeBreakout")
+            or evidence.get("displacement")
+        )
+    )
+    if not launch_ok:
+        from app.engines.pe_win_ce_mirror import _building_rip_launch_ok
+
+        if not _building_rip_launch_ok(
+            evidence, readiness_reason=readiness_reason, settings=settings,
+        ):
+            return False
+
+    v3 = _number(evidence.get("velocity3s") or evidence.get("liveVelocity3s"))
+    min_v3 = float(
+        getattr(settings, "elite_call_momentum_rally_pe_parity_min_velocity3s", 1.2)
+        or 1.2
+    )
+    if v3 < min_v3 - 1e-6:
+        return False
+
+    timing = str(evidence.get("timingAssessment") or assessment.get("timing") or "").upper()
+    timing_action = str(evidence.get("timingAction") or "").lower()
+    if timing_action in {"block", "reject"}:
+        return False
+    return timing in _GOOD_TIMING
+
+
+def call_at_base_best_trade_from_candidate(
+    candidate: Any,
+    snap: Any = None,
+    *,
+    elite_assessment: Mapping[str, Any] | None = None,
+    settings: Any = None,
+    state: Any = None,
+    readiness_reason: str = "",
+) -> bool:
+    """Live CALL candidate at base matching PE near-base best-trade bar."""
+    side = _side_value(getattr(candidate, "side", ""))
+    if side != "CALL" or candidate is None or state is None or snap is None:
+        return False
+    from app.engines.trade_ranking import rank_entry_candidate
+    from app.engines.elite_score_engine import build_elite_assessment
+
+    ranking = rank_entry_candidate(candidate, snapshot=snap)
+    evidence = dict(ranking.get("evidence") or {})
+    alert = getattr(candidate, "alert", None)
+    if isinstance(alert, dict):
+        evidence = {**alert, **evidence}
+    assessment = elite_assessment or build_elite_assessment(evidence, ranking)
+    symbol = str(
+        getattr(candidate, "symbol", None)
+        or evidence.get("symbol")
+        or getattr(snap, "symbol", "")
+        or ""
+    ).upper()
+    return call_at_base_best_trade_fingerprint(
+        evidence,
+        ranking,
+        assessment,
+        state=state,
+        snap=snap,
+        symbol=symbol,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+
+
 def call_pe_parity_from_candidate(
     candidate: Any,
     snap: Any = None,
@@ -237,6 +350,21 @@ def call_pe_parity_from_candidate(
     ):
         return True
     if state is not None and snap is not None:
+        if call_at_base_best_trade_fingerprint(
+            evidence,
+            ranking,
+            assessment,
+            state=state,
+            snap=snap,
+            symbol=str(
+                getattr(candidate, "symbol", None)
+                or evidence.get("symbol")
+                or getattr(snap, "symbol", "")
+                or ""
+            ).upper(),
+            settings=settings,
+        ):
+            return True
         from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
 
         symbol = str(
