@@ -385,10 +385,10 @@ def elite_side_local_base_cap(
     mirror_match = False
     if side_u == "CALL" and state is not None and snap is not None and evidence is not None:
         try:
-            from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_fingerprint
+            from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
 
             symbol = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
-            mirror_match = pe_win_ce_mirror_fingerprint(
+            mirror_match = call_rally_entry_unlock_fingerprint(
                 evidence,
                 ranking,
                 assessment,
@@ -479,10 +479,10 @@ def elite_side_day_mode_blocked(
             and snap is not None
             and evidence is not None
         ):
-            from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_fingerprint
+            from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
 
             symbol = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
-            if pe_win_ce_mirror_fingerprint(
+            if call_rally_entry_unlock_fingerprint(
                 evidence,
                 ranking,
                 assessment,
@@ -1054,10 +1054,10 @@ def elite_entry_allowed(
     min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
     mirror_active = False
     if resolved_side == "CALL" and state is not None and mirror_snap is not None:
-        from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_fingerprint
+        from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
 
         symbol = str(evidence.get("symbol") or getattr(mirror_snap, "symbol", "") or "").upper()
-        mirror_active = pe_win_ce_mirror_fingerprint(
+        mirror_active = call_rally_entry_unlock_fingerprint(
             evidence,
             ranking,
             assessment,

@@ -193,6 +193,22 @@ def test_sensex_expiry_blocks_all_otm_not_just_cheap_band(_mock_today):
     assert reason == "best_trade_block_expiry_otm_itm_atm_only"
 
 
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_expiry_otm_bypass", return_value=True)
+@patch("app.engines.expiry_day_guards._today_str", return_value="2026-09-17")
+def test_sensex_expiry_otm_waived_for_rally_unlock_ce(_mock_today, _mock_bypass):
+    s = settings_mock()
+    snap = _sensex_expiry_snap()
+    alert = {"premium": 192.0, "tier": "ELITE", "fastVerticalBurst": True}
+    cand = _sensex_candidate(
+        strike=74600.0, premium=192.0, snap=snap, side=Side.CALL, alert=alert,
+    )
+    blocked, reason = expiry_cheap_otm_entry_blocked(
+        cand, snap, alert, state=MagicMock(), settings=s,
+    )
+    assert blocked is False
+    assert reason == ""
+
+
 @patch("app.engines.expiry_day_guards._today_str", return_value="2026-09-17")
 def test_sensex_expiry_allows_atm_itm(_mock_today):
     s = settings_mock()

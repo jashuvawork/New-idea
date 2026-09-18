@@ -834,6 +834,7 @@ async def _open_from_candidate(
             candidate,
             snap,
             alert=candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {},
+            state=state,
             settings=settings,
         )
         if otm_blocked:
