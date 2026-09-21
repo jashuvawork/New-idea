@@ -10,6 +10,9 @@ from app.engines.explosion_profit import (
     _apply_elite_respected_early_exit,
     _defer_adaptive_stop,
     _executed_entry_min_hold_before_loss,
+    _is_chop_second_tier_trade,
+    _should_skip_elite_runner_early_exits,
+    evaluate_explosion_exit,
     sl_only_loss_exits_enabled,
 )
 from app.models.schemas import PaperTrade, Side, StrategyType
@@ -69,6 +72,58 @@ def test_chop_early_fail_direct_still_works_when_explicitly_enabled(mock_get_set
         live_velocity_3s=-0.5,
     )
     assert reason == "chop_live_early_fail"
+
+
+def _sep21_chop_put_trade(**ctx_overrides):
+    ctx = {
+        "chopLiveGuard": True,
+        "explosionTier": "EXPLODING",
+        "eliteAssessment": {
+            "eliteScore": 92.9,
+            "grade": "A",
+            "setup": "V",
+            "mustTake": False,
+        },
+        "exitPlan": {"stopPoints": 11.9, "adaptiveStop": True},
+    }
+    ctx.update(ctx_overrides)
+    return PaperTrade(
+        id="sep21-23350-pe",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=23350.0,
+        entryPremium=62.10,
+        currentPremium=52.0,
+        lots=44,
+        openedAt=datetime(2026, 9, 21, 10, 30, 0, tzinfo=IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext=ctx,
+        bestPnlPoints=3.9,
+    )
+
+
+def test_sep21_chop_second_tier_not_elite_runner():
+    s = Settings()
+    trade = _sep21_chop_put_trade()
+    assert _is_chop_second_tier_trade(trade, settings=s) is True
+    assert _should_skip_elite_runner_early_exits(trade, settings=s) is False
+    assert _executed_entry_min_hold_before_loss(trade, settings=s) == 120
+
+
+def test_sep21_chop_second_tier_exits_near_structural_sl():
+    s = Settings()
+    trade = _sep21_chop_put_trade()
+    with patch("app.engines.explosion_profit._hold_seconds", return_value=180):
+        with patch("app.engines.explosion_profit.get_settings", return_value=s):
+            reason, pnl = evaluate_explosion_exit(
+                trade,
+                51.90,
+                "EXPLODING",
+                lot_multiplier=65,
+                live_velocity_3s=-0.2,
+            )
+    assert reason == "chop_second_tier_stop_loss"
+    assert pnl < 0
 
 
 def test_sep15_elite_requires_min_hold_before_loss():

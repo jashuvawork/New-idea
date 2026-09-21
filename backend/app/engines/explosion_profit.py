@@ -167,11 +167,33 @@ def _cfg_int(settings, name: str, default: int) -> int:
     return int(_cfg_float(settings, name, float(default)))
 
 
+def _is_chop_second_tier_trade(trade: PaperTrade, *, settings: Any = None) -> bool:
+    """Chop-day EXPLODING pad entry without mustTake — not entitled to elite hold defer."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "chop_second_tier_sl_exit_enabled", True)):
+        return False
+    ctx = trade.entryContext or {}
+    if not ctx.get("chopLiveGuard"):
+        return False
+    if str(ctx.get("explosionTier") or "").upper() != "EXPLODING":
+        return False
+    if ctx.get("callAtBaseBestTrade") or ctx.get("eliteRunnerExitBundle"):
+        return False
+    if ctx.get("vBaseFtvRunner") and ctx.get("maxProfitCapture"):
+        return False
+    assessment = ctx.get("eliteAssessment") or {}
+    if isinstance(assessment, dict) and assessment.get("mustTake"):
+        return False
+    return True
+
+
 def _executed_entry_min_hold_before_loss(trade: PaperTrade, *, settings: Any = None) -> int:
     """Minimum seconds before adaptive SL may cut an executed best-trade entry."""
     settings = settings or get_settings()
     if not sl_only_loss_exits_enabled(settings):
         return 0
+    if _is_chop_second_tier_trade(trade, settings=settings):
+        return _cfg_int(settings, "chop_second_tier_min_hold_before_loss_seconds", 120)
     base_min = _cfg_int(settings, "executed_entry_min_hold_before_loss_seconds", 300)
     elite_min = _cfg_int(settings, "executed_entry_elite_min_hold_before_loss_seconds", 600)
     ctx = trade.entryContext or {}
@@ -257,6 +279,8 @@ def _should_skip_elite_runner_early_exits(trade: PaperTrade, *, settings: Any = 
     """Skip failed_launch / barely-green for elite-gated and bundle-stamped runners."""
     settings = settings or get_settings()
     ctx = trade.entryContext or {}
+    if _is_chop_second_tier_trade(trade, settings=settings):
+        return False
     flags = {str(f).lower() for f in (ctx.get("conflictFlags") or []) if f}
     if (
         ctx.get("fakeExplosionTrap")
@@ -2492,6 +2516,17 @@ def evaluate_explosion_exit(
             return "explosion_micro_profit_lock", pnl_inr
 
     stop_floor = _effective_stop_points(trade, exit_params.stop_points)
+    if _is_chop_second_tier_trade(trade, settings=settings) and stop_floor > 0:
+        chop_min = _cfg_int(settings, "chop_second_tier_min_hold_before_loss_seconds", 120)
+        breach_ratio = float(
+            getattr(settings, "chop_second_tier_stop_breach_ratio", 0.85) or 0.85
+        )
+        if (
+            hold >= chop_min
+            and pnl_pts <= -stop_floor * breach_ratio
+        ):
+            return "chop_second_tier_stop_loss", pnl_inr
+
     if (
         exit_params.adaptive_stop
         and hold >= _adaptive_stop_min_hold(trade, settings)

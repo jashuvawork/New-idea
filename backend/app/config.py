@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     chop_live_early_fail_max_best_points: float = 0.5
     chop_live_early_fail_min_loss_points: float = 3.0
     chop_live_early_fail_max_velocity_3s: float = 0.0
+    # Chop-day second-tier (mustTake=false) — cut near structural SL, not elite 600s hold.
+    chop_second_tier_sl_exit_enabled: bool = True
+    chop_second_tier_stop_breach_ratio: float = 0.85
+    chop_second_tier_min_hold_before_loss_seconds: int = 120
     live_broker_reconciliation_enabled: bool = True
     # Live worst/chop: session lift must NOT bypass worst-day live blocks.
     chop_live_disable_session_lift: bool = True
