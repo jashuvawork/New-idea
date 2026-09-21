@@ -39,6 +39,7 @@ def _reset_all_engine_globals() -> None:
         from app.config import get_settings
 
         object.__setattr__(get_settings(), "elite_trade_engine_enabled", False)
+        object.__setattr__(get_settings(), "top_trades_only_strict_enabled", False)
     except Exception:
         pass
 
