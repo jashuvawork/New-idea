@@ -308,9 +308,9 @@ def top_trades_only_blocks_entry(
     dm = str(day_mode or assessment.get("dayMode") or "").strip().upper()
     side_u = str(side or assessment.get("side") or evidence.get("side") or "").upper()
     if state is not None and snap is not None and side_u:
-        from app.engines.aligned_side_guard import chop_day_side_alignment_blocks
+        from app.engines.aligned_side_guard import session_side_alignment_blocks
 
-        align_blocked, align_reason = chop_day_side_alignment_blocks(
+        align_blocked, align_reason = session_side_alignment_blocks(
             side_u,
             snap,
             day_mode=dm,
@@ -321,7 +321,7 @@ def top_trades_only_blocks_entry(
             settings=settings,
         )
         if align_blocked:
-            return True, align_reason or "chop_day_side_not_aligned"
+            return True, align_reason or "session_side_not_aligned"
     if bool(getattr(settings, "top_trades_only_block_chop_unless_must_take", True)):
         if dm in _CHOP_DAY_MODES:
             ce_chop_waived = False

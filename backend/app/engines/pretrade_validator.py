@@ -896,7 +896,7 @@ def validate_candidate(
     if getattr(candidate, "mode", "") == "explosion" and not all_in:
         from app.engines.aligned_side_guard import (
             breadth_hard_blocks_side,
-            chop_day_side_alignment_blocks,
+            session_side_alignment_blocks,
         )
         from app.engines.morning_premium_capture import counter_trend_entry_allowed
 
@@ -917,7 +917,7 @@ def validate_candidate(
             from app.engines.trade_ranking import resolve_policy_day_mode
 
             day_mode_pre = resolve_policy_day_mode(state)
-        align_blocked, align_reason = chop_day_side_alignment_blocks(
+        align_blocked, align_reason = session_side_alignment_blocks(
             candidate.side,
             snap_pre,
             day_mode=day_mode_pre,
@@ -925,10 +925,11 @@ def validate_candidate(
             alert=alert_d,
             event=getattr(candidate, "explosion_event", None),
             state=state,
+            candidate=candidate,
             settings=settings,
         )
         if align_blocked:
-            return False, align_reason or "chop_day_side_not_aligned", meta
+            return False, align_reason or "session_side_not_aligned", meta
         hard_blocked, hard_reason = breadth_hard_blocks_side(
             candidate.side,
             bias,

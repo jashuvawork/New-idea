@@ -149,8 +149,8 @@ def test_elite_entry_blocks_sep21_style_put(_day):
 
 
 @patch(
-    "app.engines.aligned_side_guard.chop_day_side_alignment_blocks",
-    return_value=(True, "chop_day_counter_chart"),
+    "app.engines.aligned_side_guard.session_side_alignment_blocks",
+    return_value=(True, "session_side_counter_chart"),
 )
 def test_sep21_put_blocked_by_chop_side_alignment(_align):
     """High-score counter-trend PUT on chop day — side alignment beats selection score."""
@@ -182,7 +182,7 @@ def test_sep21_put_blocked_by_chop_side_alignment(_align):
         settings=settings,
     )
     assert blocked is True
-    assert reason == "chop_day_counter_chart"
+    assert reason == "session_side_counter_chart"
     _align.assert_called_once()
 
 

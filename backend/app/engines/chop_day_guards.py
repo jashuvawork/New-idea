@@ -788,6 +788,20 @@ def _day_mode_label(
     return ("NORMAL", "normal", "Standard gates — adaptive SL + micro locks")
 
 
+def _session_side_alignment_hud(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+    day_mode: str,
+) -> dict:
+    from app.engines.aligned_side_guard import session_side_flip_alignment_summary
+
+    return session_side_flip_alignment_summary(
+        snapshots,
+        state=state,
+        day_mode=day_mode,
+    )
+
+
 def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> dict:
     chop = is_chop_session(snapshots)
     cap, cap_label = daily_trade_cap(state, snapshots)
@@ -878,6 +892,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "controlledDailyCapSource": cap_source,
         "whipsawGuards": whipsaw_guard_summary(state, snapshots),
         "directionalLock": directional_lock_summary(snapshots),
+        "sessionSideAlignment": _session_side_alignment_hud(state, snapshots, mode),
         "confidenceHold": high_confidence_close_summary(),
         "moneynessPolicy": {
             "mode": settings.trade_moneyness_mode,

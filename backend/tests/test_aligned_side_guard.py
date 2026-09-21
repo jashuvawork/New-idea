@@ -10,6 +10,8 @@ from app.engines.aligned_side_guard import (
     chart_mtf_bullish_confirmed,
     chop_day_side_alignment_blocks,
     counter_breadth_side_blocked,
+    session_side_alignment_blocks,
+    session_side_flip_alignment_summary,
 )
 from app.models.schemas import ChartAnalysis
 from app.engines.explosion_detector import ExplosionEvent
@@ -311,8 +313,10 @@ def test_chop_day_blocks_sep21_style_put_vs_bullish():
     )
     assert blocked is True
     assert reason in (
+        "session_side_counter_chart",
         "chop_day_counter_chart",
         "hard_block_put_vs_bullish_breadth",
+        "session_side_chart_not_aligned",
         "chop_day_chart_not_aligned",
     )
 
@@ -346,11 +350,103 @@ def test_chop_day_skipped_when_must_take():
     assert blocked is False
 
 
-def test_chop_day_skipped_on_bullish_day_mode():
+def test_bullish_day_blocks_counter_trend_put():
     snap = _bullish_snap()
-    blocked, _ = chop_day_side_alignment_blocks(
+    blocked, reason = session_side_alignment_blocks(
         Side.PUT,
         snap,
         day_mode="BULLISH DAY",
     )
+    assert blocked is True
+    assert reason in (
+        "session_side_counter_chart",
+        "hard_block_put_vs_bullish_breadth",
+        "session_side_chart_not_aligned",
+    )
+
+
+def test_bearish_day_blocks_counter_trend_call():
+    snap = _bullish_snap()
+    snap.spotChart.direction = "BEARISH"
+    snap.spotChart.macdBias = "BEARISH"
+    snap.breadth = Breadth(score=32, bias="BEARISH", aligned=True)
+    blocked, reason = session_side_alignment_blocks(
+        Side.CALL,
+        snap,
+        day_mode="BEARISH DAY",
+    )
+    assert blocked is True
+    assert reason in (
+        "session_side_counter_chart",
+        "hard_block_call_vs_bearish_breadth",
+        "session_side_chart_not_aligned",
+    )
+
+
+def test_lean_bullish_blocks_put():
+    snap = _bullish_snap()
+    blocked, _ = session_side_alignment_blocks(
+        Side.PUT,
+        snap,
+        day_mode="LEAN BULLISH",
+    )
+    assert blocked is True
+
+
+def test_momentum_rally_skips_session_alignment():
+    snap = _bullish_snap()
+    blocked, _ = session_side_alignment_blocks(
+        Side.PUT,
+        snap,
+        day_mode="MOMENTUM RALLY",
+    )
     assert blocked is False
+
+
+@patch("app.engines.aligned_side_guard._session_side_flip_waiver", return_value=(True, "index_rally_side_flip"))
+def test_flip_waiver_allows_call_on_bullish_chop_rally(mock_flip):
+    snap = _bullish_snap()
+    snap.symbol = "NIFTY"
+    blocked, reason = session_side_alignment_blocks(
+        Side.CALL,
+        snap,
+        day_mode="CHOP + RALLY",
+        alert={"symbol": "NIFTY", "side": "CALL", "localBaseMovePct": 12.0},
+    )
+    assert blocked is False
+    assert reason == ""
+    mock_flip.assert_called_once()
+
+
+@patch("app.engines.aligned_side_guard._session_side_flip_waiver", return_value=(False, ""))
+def test_no_flip_waiver_still_blocks_sep21_put(mock_flip):
+    snap = _bullish_snap()
+    snap.symbol = "NIFTY"
+    blocked, _ = session_side_alignment_blocks(
+        Side.PUT,
+        snap,
+        day_mode="CHOP + RALLY",
+        alert={
+            "symbol": "NIFTY",
+            "side": "PUT",
+            "tier": "EXPLODING",
+            "localBaseMovePct": 17.9,
+        },
+    )
+    assert blocked is True
+    mock_flip.assert_called_once()
+
+
+def test_session_side_flip_alignment_summary_shape():
+    snap = _bullish_snap()
+    snap.symbol = "NIFTY"
+    out = session_side_flip_alignment_summary(
+        {"NIFTY": snap},
+        day_mode="CHOP + RALLY",
+    )
+    assert out["enabled"] is True
+    assert out["activeForDayMode"] is True
+    assert "NIFTY" in out["symbols"]
+    sym = out["symbols"]["NIFTY"]
+    assert sym["putWouldBlock"] is True
+    assert sym["callWouldBlock"] is False
