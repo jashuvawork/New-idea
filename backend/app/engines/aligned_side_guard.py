@@ -273,6 +273,69 @@ _CHOP_SIDE_ALIGNMENT_DAY_MODES = frozenset({
     "CHOP + RALLY",
 })
 
+_SESSION_SIDE_ALIGNMENT_DAY_MODES = _CHOP_SIDE_ALIGNMENT_DAY_MODES | frozenset({
+    "BULLISH DAY",
+    "BEARISH DAY",
+    "LEAN BULLISH",
+    "LEAN BEARISH",
+})
+
+_SESSION_SIDE_ALIGNMENT_SKIP_DAY_MODES = frozenset({
+    "MOMENTUM RALLY",
+    "MIXED DAY",
+    "EXPIRY WORST",
+})
+
+
+def _session_side_alignment_enabled(settings: Any = None) -> bool:
+    settings = settings or get_settings()
+    if hasattr(settings, "session_side_alignment_enabled"):
+        return bool(getattr(settings, "session_side_alignment_enabled", True))
+    return bool(getattr(settings, "chop_day_require_side_alignment_enabled", True))
+
+
+def _session_side_flip_waiver(
+    side: Side | str,
+    snap: SymbolSnapshot,
+    *,
+    symbol: str = "",
+    state: Any = None,
+    candidate: Any = None,
+    event: Any = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """
+    Index flip confirms structure even when chart/breadth still lag.
+
+    When armed for the entry side, session alignment must not block the flip leg.
+    """
+    settings = settings or get_settings()
+    sym = (symbol or str(getattr(snap, "symbol", "") or "")).upper()
+    side_v = _side_val(side)
+
+    from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
+
+    flip_ok, flip_reason, _ = index_rally_side_flip_bypass(
+        sym, side_v, snap, settings=settings,
+    )
+    if flip_ok:
+        return True, flip_reason or "index_rally_side_flip"
+
+    if state is not None:
+        from app.engines.loss_triggered_side_flip import loss_triggered_opposite_flip_ready
+
+        loss_ok, loss_reason, _ = loss_triggered_opposite_flip_ready(
+            sym,
+            side_v,
+            snap,
+            state,
+            candidate=candidate or event,
+        )
+        if loss_ok:
+            return True, loss_reason or "loss_triggered_side_flip"
+
+    return False, ""
+
 
 def _chop_day_local_base_structural_bypass(
     side: Side | str,
@@ -307,7 +370,7 @@ def _chop_day_local_base_structural_bypass(
     return local_base_ichimoku_chart_bypass(side_v, snap, alert=alert_d)
 
 
-def chop_day_side_alignment_blocks(
+def session_side_alignment_blocks(
     side: Side | str,
     snap: Optional[SymbolSnapshot],
     *,
@@ -317,19 +380,20 @@ def chop_day_side_alignment_blocks(
     event: Any = None,
     state: Any = None,
     readiness_reason: str = "",
+    candidate: Any = None,
     settings: Any = None,
 ) -> tuple[bool, str]:
     """
-    Chop days — structural side alignment is the primary trade filter.
+    Session side alignment — structural chart + breadth beats raw selection score.
 
-    Blocks counter-chart / counter-breadth legs (Sep21 PUT 23350 vs BULLISH day).
-    Selection score alone must not override alignment on chop sessions.
+    Applies on CHOP / BULLISH / BEARISH / LEAN day modes (not MOMENTUM RALLY / MIXED).
+    Index-flip waivers (rally/slide + loss-triggered) allow post-flip legs when chart lags.
     """
     settings = settings or get_settings()
-    if not bool(getattr(settings, "chop_day_require_side_alignment_enabled", True)):
+    if not _session_side_alignment_enabled(settings):
         return False, ""
     dm = str(day_mode or "").strip().upper()
-    if dm not in _CHOP_SIDE_ALIGNMENT_DAY_MODES:
+    if dm in _SESSION_SIDE_ALIGNMENT_SKIP_DAY_MODES or dm not in _SESSION_SIDE_ALIGNMENT_DAY_MODES:
         return False, ""
     if must_take:
         return False, ""
@@ -338,6 +402,19 @@ def chop_day_side_alignment_blocks(
 
     side_v = _side_val(side)
     alert_d = alert if isinstance(alert, dict) else {}
+    sym = str(alert_d.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+
+    flip_waived, _ = _session_side_flip_waiver(
+        side_v,
+        snap,
+        symbol=sym,
+        state=state,
+        candidate=candidate or event,
+        event=event,
+        settings=settings,
+    )
+    if flip_waived:
+        return False, ""
 
     # CHOP+RALLY CE with index rally / premium local-base — aligned structural side at base.
     if side_v == "CALL" and dm == "CHOP + RALLY" and state is not None:
@@ -351,7 +428,6 @@ def chop_day_side_alignment_blocks(
         if local > 0 and local <= max_local + 1e-6:
             from app.engines.pe_win_ce_mirror import call_ce_base_context_armed
 
-            sym = str(alert_d.get("symbol") or getattr(snap, "symbol", "") or "").upper()
             armed, _, _ = call_ce_base_context_armed(
                 state,
                 snap,
@@ -373,14 +449,14 @@ def chop_day_side_alignment_blocks(
             side_v, snap, alert=alert_d, event=event, settings=settings,
         ):
             return False, ""
-        return True, "chop_day_counter_chart"
+        return True, "session_side_counter_chart"
 
     if not side_aligned_with_chart(side_v, chart):
         if _chop_day_local_base_structural_bypass(
             side_v, snap, alert=alert_d, event=event, settings=settings,
         ):
             return False, ""
-        return True, "chop_day_chart_not_aligned"
+        return True, "session_side_chart_not_aligned"
 
     hard_blocked, hard_reason = breadth_hard_blocks_side(
         side_v,
@@ -391,6 +467,126 @@ def chop_day_side_alignment_blocks(
         state=state,
     )
     if hard_blocked:
-        return True, hard_reason or "chop_day_counter_breadth"
+        return True, hard_reason or "session_side_counter_breadth"
 
     return False, ""
+
+
+def chop_day_side_alignment_blocks(
+    side: Side | str,
+    snap: Optional[SymbolSnapshot],
+    *,
+    day_mode: str = "",
+    must_take: bool = False,
+    alert: Any = None,
+    event: Any = None,
+    state: Any = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Backward-compatible alias for session_side_alignment_blocks."""
+    return session_side_alignment_blocks(
+        side,
+        snap,
+        day_mode=day_mode,
+        must_take=must_take,
+        alert=alert,
+        event=event,
+        state=state,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+
+
+def session_side_flip_alignment_summary(
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    state: Any = None,
+    day_mode: str = "",
+    settings: Any = None,
+) -> dict[str, Any]:
+    """HUD: per-symbol alignment would-block + flip waiver paths."""
+    settings = settings or get_settings()
+    enabled = _session_side_alignment_enabled(settings)
+    dm = str(day_mode or "").strip().upper()
+    active = enabled and dm in _SESSION_SIDE_ALIGNMENT_DAY_MODES and dm not in _SESSION_SIDE_ALIGNMENT_SKIP_DAY_MODES
+    per_symbol: dict[str, Any] = {}
+    for sym, snap in snapshots.items():
+        if not snap.dataAvailable:
+            continue
+        call_flip, call_flip_reason = _session_side_flip_waiver(
+            Side.CALL, snap, symbol=sym, state=state, settings=settings,
+        )
+        put_flip, put_flip_reason = _session_side_flip_waiver(
+            Side.PUT, snap, symbol=sym, state=state, settings=settings,
+        )
+        call_blocked, call_reason = session_side_alignment_blocks(
+            Side.CALL, snap, day_mode=dm, state=state, settings=settings,
+        )
+        put_blocked, put_reason = session_side_alignment_blocks(
+            Side.PUT, snap, day_mode=dm, state=state, settings=settings,
+        )
+        rally_meta: dict[str, Any] = {}
+        slide_meta: dict[str, Any] = {}
+        try:
+            from app.engines.index_rally_side_flip import (
+                index_rally_metrics,
+                index_rally_side_flip_bypass,
+            )
+
+            _, _, rally_meta = index_rally_side_flip_bypass(
+                sym, Side.CALL, snap, settings=settings,
+            )
+            _, _, slide_meta = index_rally_side_flip_bypass(
+                sym, Side.PUT, snap, settings=settings,
+            )
+            if not rally_meta and not slide_meta:
+                rally_meta = index_rally_metrics(sym, snap, settings=settings)
+        except Exception:
+            pass
+        loss_call_ready = False
+        loss_put_ready = False
+        loss_call_reason = ""
+        loss_put_reason = ""
+        if state is not None:
+            try:
+                from app.engines.loss_triggered_side_flip import loss_triggered_opposite_flip_ready
+
+                loss_call_ready, loss_call_reason, _ = loss_triggered_opposite_flip_ready(
+                    sym, Side.CALL, snap, state,
+                )
+                loss_put_ready, loss_put_reason, _ = loss_triggered_opposite_flip_ready(
+                    sym, Side.PUT, snap, state,
+                )
+            except Exception:
+                pass
+        chart_dir = (snap.spotChart.direction or "NEUTRAL").upper() if snap.spotChart else "NEUTRAL"
+        breadth = (snap.breadth.bias or "NEUTRAL").upper() if snap.breadth else "NEUTRAL"
+        per_symbol[sym] = {
+            "chart": chart_dir,
+            "breadth": breadth,
+            "callWouldBlock": call_blocked,
+            "callBlockReason": call_reason or None,
+            "putWouldBlock": put_blocked,
+            "putBlockReason": put_reason or None,
+            "callFlipWaiver": call_flip,
+            "callFlipReason": call_flip_reason or None,
+            "putFlipWaiver": put_flip,
+            "putFlipReason": put_flip_reason or None,
+            "indexRallyFlip": bool(rally_meta.get("mode") == "rally" or rally_meta.get("ptsOffLow")),
+            "indexSlideFlip": bool(slide_meta.get("mode") == "slide" or slide_meta.get("ptsOffHigh")),
+            "indexRally": rally_meta or None,
+            "indexSlide": slide_meta or None,
+            "lossTriggeredCallFlip": loss_call_ready,
+            "lossTriggeredCallReason": loss_call_reason or None,
+            "lossTriggeredPutFlip": loss_put_ready,
+            "lossTriggeredPutReason": loss_put_reason or None,
+        }
+    return {
+        "enabled": enabled,
+        "activeForDayMode": active,
+        "dayMode": dm or None,
+        "dayModes": sorted(_SESSION_SIDE_ALIGNMENT_DAY_MODES),
+        "skipDayModes": sorted(_SESSION_SIDE_ALIGNMENT_SKIP_DAY_MODES),
+        "symbols": per_symbol,
+    }
