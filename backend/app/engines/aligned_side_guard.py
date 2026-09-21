@@ -265,3 +265,132 @@ def breadth_hard_blocks_side(
 def counter_breadth_side_blocked(side: Side | str, breadth_bias: str) -> bool:
     blocked, _ = breadth_hard_blocks_side(side, breadth_bias)
     return blocked
+
+
+_CHOP_SIDE_ALIGNMENT_DAY_MODES = frozenset({
+    "CHOP DAY",
+    "CHOP (PRE-10)",
+    "CHOP + RALLY",
+})
+
+
+def _chop_day_local_base_structural_bypass(
+    side: Side | str,
+    snap: SymbolSnapshot,
+    *,
+    alert: Any = None,
+    event: Any = None,
+    settings: Any = None,
+) -> bool:
+    """Narrow chop waiver — confirmed local-base lift at low pad only (not score-chase)."""
+    settings = settings or get_settings()
+    side_v = _side_val(side)
+    alert_d = alert if isinstance(alert, dict) else {}
+    if event is not None and not alert_d:
+        alert_d = {
+            "side": side_v,
+            "tier": str(getattr(event, "tier", "") or ""),
+            "localBaseMovePct": float(getattr(event, "daily_move_pct", 0) or 0),
+            "ictBaseRelativeMovePct": float(getattr(event, "daily_move_pct", 0) or 0),
+        }
+    local = 0.0
+    for key in ("ictBaseRelativeMovePct", "localBaseMovePct", "offLowMovePct"):
+        try:
+            local = max(local, float(alert_d.get(key) or 0))
+        except (TypeError, ValueError):
+            pass
+    max_local = float(getattr(settings, "pe_win_ce_mirror_max_local_pct", 15.0) or 15.0)
+    if local <= 0 or local > max_local + 1e-6:
+        return False
+    from app.engines.local_base_chart_bypass import local_base_ichimoku_chart_bypass
+
+    return local_base_ichimoku_chart_bypass(side_v, snap, alert=alert_d)
+
+
+def chop_day_side_alignment_blocks(
+    side: Side | str,
+    snap: Optional[SymbolSnapshot],
+    *,
+    day_mode: str = "",
+    must_take: bool = False,
+    alert: Any = None,
+    event: Any = None,
+    state: Any = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """
+    Chop days — structural side alignment is the primary trade filter.
+
+    Blocks counter-chart / counter-breadth legs (Sep21 PUT 23350 vs BULLISH day).
+    Selection score alone must not override alignment on chop sessions.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "chop_day_require_side_alignment_enabled", True)):
+        return False, ""
+    dm = str(day_mode or "").strip().upper()
+    if dm not in _CHOP_SIDE_ALIGNMENT_DAY_MODES:
+        return False, ""
+    if must_take:
+        return False, ""
+    if snap is None:
+        return False, ""
+
+    side_v = _side_val(side)
+    alert_d = alert if isinstance(alert, dict) else {}
+
+    # CHOP+RALLY CE with index rally / premium local-base — aligned structural side at base.
+    if side_v == "CALL" and dm == "CHOP + RALLY" and state is not None:
+        local = 0.0
+        for key in ("ictBaseRelativeMovePct", "localBaseMovePct", "offLowMovePct"):
+            try:
+                local = max(local, float(alert_d.get(key) or 0))
+            except (TypeError, ValueError):
+                pass
+        max_local = float(getattr(settings, "pe_win_ce_mirror_max_local_pct", 15.0) or 15.0)
+        if local > 0 and local <= max_local + 1e-6:
+            from app.engines.pe_win_ce_mirror import call_ce_base_context_armed
+
+            sym = str(alert_d.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+            armed, _, _ = call_ce_base_context_armed(
+                state,
+                snap,
+                sym,
+                alert_d,
+                readiness_reason=readiness_reason,
+                settings=settings,
+            )
+            if armed:
+                return False, ""
+
+    chart = snap.spotChart
+    bias = (snap.breadth.bias if snap.breadth else "NEUTRAL") or "NEUTRAL"
+
+    from app.engines.spot_direction import hard_counter_trend_chart, side_aligned_with_chart
+
+    if hard_counter_trend_chart(side_v, chart):
+        if _chop_day_local_base_structural_bypass(
+            side_v, snap, alert=alert_d, event=event, settings=settings,
+        ):
+            return False, ""
+        return True, "chop_day_counter_chart"
+
+    if not side_aligned_with_chart(side_v, chart):
+        if _chop_day_local_base_structural_bypass(
+            side_v, snap, alert=alert_d, event=event, settings=settings,
+        ):
+            return False, ""
+        return True, "chop_day_chart_not_aligned"
+
+    hard_blocked, hard_reason = breadth_hard_blocks_side(
+        side_v,
+        bias,
+        event=event,
+        snap=snap,
+        alert=alert_d if alert_d else None,
+        state=state,
+    )
+    if hard_blocked:
+        return True, hard_reason or "chop_day_counter_breadth"
+
+    return False, ""
