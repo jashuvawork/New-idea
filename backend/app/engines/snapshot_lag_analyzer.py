@@ -46,6 +46,9 @@ def _analyze_explosion_gaps(
     symbol: str,
     snap: SymbolSnapshot,
     settings,
+    *,
+    state: Optional[AutoTraderState] = None,
+    day_mode: str = "",
 ) -> list[dict[str, Any]]:
     """Per-alert: visible on radar but why entry may fail."""
     gaps: list[dict[str, Any]] = []
@@ -82,8 +85,30 @@ def _analyze_explosion_gaps(
 
         capture = is_premium_capture_alert(alert, chart)
         all_day = is_all_day_explosion_alert(alert, chart)
-        if tier == "BUILDING" and not capture and not all_day:
+        chop_rally_capture = False
+        if (
+            tier == "BUILDING"
+            and str(alert.get("side") or "").upper() == "CALL"
+            and state is not None
+        ):
+            from app.engines.pe_win_ce_mirror import chop_rally_ce_building_capture_ok
+
+            chop_rally_capture = chop_rally_ce_building_capture_ok(
+                alert,
+                snap,
+                state,
+                day_mode=day_mode,
+                settings=settings,
+            )
+        if tier == "BUILDING" and not capture and not all_day and not chop_rally_capture:
             blockers.append("building_outside_capture_window")
+        if (
+            tier == "BUILDING"
+            and alert.get("volumeAwaken")
+            and not alert.get("tradeable")
+            and chop_rally_capture
+        ):
+            blockers = [b for b in blockers if b != "building_volume_awaken_not_tradeable"]
 
         side = str(alert.get("side") or "").upper()
         breadth = (snap.breadth.bias or "NEUTRAL").upper()
@@ -210,7 +235,15 @@ def analyze_snapshot_lag(
     for sym, snap in snapshots.items():
         if not snap.dataAvailable:
             continue
-        explosion_gaps.extend(_analyze_explosion_gaps(sym, snap, settings))
+        explosion_gaps.extend(
+            _analyze_explosion_gaps(
+                sym,
+                snap,
+                settings,
+                state=state,
+                day_mode=str(chop.get("dayMode") or ""),
+            )
+        )
         for alert in snap.explosionAlerts or []:
             if alert.get("allDayExplosion"):
                 all_day_alerts.append({
