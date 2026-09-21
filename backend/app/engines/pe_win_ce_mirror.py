@@ -206,7 +206,14 @@ def _ce_rally_fingerprint_bar(
     assessment = elite_assessment if isinstance(elite_assessment, Mapping) else {}
 
     tier = str(evidence.get("tier") or "").upper()
-    if tier != "ELITE":
+    if tier == "BUILDING":
+        if not bool(getattr(settings, "top_trades_only_chop_rally_allow_building_tier", True)):
+            return False
+        if not _building_rip_launch_ok(
+            evidence, readiness_reason=readiness_reason, settings=settings,
+        ):
+            return False
+    elif tier != "ELITE":
         return False
 
     setup = str(assessment.get("setup") or "").upper()
@@ -486,6 +493,107 @@ def call_rally_entry_unlock_armed(
     if rally_ok:
         return True, rally_reason, rally_meta
     return False, rally_reason or mirror_reason, {**mirror_meta, **rally_meta}
+
+
+_CHOP_RALLY_DAY_MODE = "CHOP + RALLY"
+
+
+def chop_rally_ce_top_trades_waiver(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    assessment: Mapping[str, Any] | None,
+    *,
+    day_mode: str = "",
+    side: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """CHOP + RALLY only — rally-unlocked CE waives top-trades chop block (Sep 21 miss)."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "top_trades_only_chop_rally_ce_unlock_enabled", True)):
+        return False
+    if str(side or evidence.get("side") or "").upper() != "CALL":
+        return False
+    dm = str(day_mode or (assessment or {}).get("dayMode") or evidence.get("dayMode") or "").strip().upper()
+    if dm != _CHOP_RALLY_DAY_MODE:
+        return False
+    if state is None or snap is None:
+        return False
+    return call_rally_entry_unlock_fingerprint(
+        evidence,
+        ranking,
+        assessment,
+        state=state,
+        snap=snap,
+        symbol=str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper(),
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+
+
+def chop_rally_ce_near_base_ok(
+    assessment: Mapping[str, Any] | None,
+    ranking: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Relaxed near-base bar for rally-unlocked CE (mirror min score / local cap)."""
+    settings = settings or get_settings()
+    assessment = assessment if isinstance(assessment, Mapping) else {}
+    ranking = ranking if isinstance(ranking, Mapping) else {}
+    score = _number(assessment.get("eliteScore"))
+    local = _number(assessment.get("localBasePct"))
+    setup = str(assessment.get("setup") or "").upper()
+    min_score = float(getattr(settings, "pe_win_ce_mirror_min_elite_score", 85.0) or 85.0)
+    max_local = float(getattr(settings, "pe_win_ce_mirror_max_local_pct", 15.0) or 15.0)
+    grade = str(ranking.get("grade") or assessment.get("grade") or "").upper()
+    min_grade = str(getattr(settings, "pe_win_ce_mirror_min_grade", "A") or "A").upper()
+    if not _grade_meets_min(grade, min_grade):
+        return False
+    if score < min_score - 1e-6 or local > max_local + 1e-6:
+        return False
+    return setup in VALID_BEST_BASE_SETUPS
+
+
+def chop_rally_ce_building_tier_ok(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    assessment: Mapping[str, Any] | None,
+    *,
+    day_mode: str = "",
+    side: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """Allow BUILDING-tier CE on CHOP+RALLY when rally unlock + building rip is live."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "top_trades_only_chop_rally_allow_building_tier", True)):
+        return False
+    if str(evidence.get("tier") or "").upper() != "BUILDING":
+        return False
+    if not chop_rally_ce_top_trades_waiver(
+        evidence,
+        ranking,
+        assessment,
+        day_mode=day_mode,
+        side=side,
+        state=state,
+        snap=snap,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return False
+    if not _building_rip_launch_ok(
+        evidence, readiness_reason=readiness_reason, settings=settings,
+    ):
+        return False
+    ranking = ranking if isinstance(ranking, Mapping) else {}
+    grade = str(ranking.get("grade") or (assessment or {}).get("grade") or "").upper()
+    return grade in ("A", "S")
 
 
 def call_rally_entry_unlock_fingerprint(

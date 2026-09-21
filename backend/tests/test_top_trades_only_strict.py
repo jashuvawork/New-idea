@@ -134,6 +134,62 @@ def test_elite_entry_blocks_sep21_style_put(_day):
     assert reason == "top_trades_chop_day_not_must_take"
 
 
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_fingerprint", return_value=True)
+def test_chop_rally_ce_unlock_waives_chop_block(_rally):
+    settings = Settings()
+    ev = _evidence(tier="ELITE", symbol="NIFTY")
+    ranking = _ranking(side="CALL")
+    state = MagicMock()
+    snap = MagicMock(symbol="NIFTY")
+    assessment = {
+        "mustTake": False,
+        "eliteScore": 88.0,
+        "grade": "A",
+        "setup": "V",
+        "localBasePct": 8.0,
+    }
+    blocked, reason = top_trades_only_blocks_entry(
+        ev,
+        ranking,
+        assessment,
+        day_mode="CHOP + RALLY",
+        side="CALL",
+        state=state,
+        snap=snap,
+        settings=settings,
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_fingerprint", return_value=True)
+def test_chop_rally_allows_building_tier(_rally):
+    settings = Settings()
+    ev = _evidence(tier="BUILDING", buildingRipBullish=True, symbol="NIFTY")
+    ranking = _ranking(side="CALL")
+    state = MagicMock()
+    snap = MagicMock(symbol="NIFTY")
+    assessment = {
+        "mustTake": False,
+        "eliteScore": 86.0,
+        "grade": "A",
+        "setup": "V",
+        "localBasePct": 8.0,
+    }
+    blocked, reason = top_trades_only_blocks_entry(
+        ev,
+        ranking,
+        assessment,
+        day_mode="CHOP + RALLY",
+        side="CALL",
+        state=state,
+        snap=snap,
+        readiness_reason="building_rip_bullish_ready",
+        settings=settings,
+    )
+    assert blocked is False
+
+
 @patch("app.engines.best_trade_policy.call_at_base_best_trade_fingerprint", return_value=True)
 @patch("app.engines.elite_score_engine.resolve_elite_session_day_type", return_value=("CHOP DAY", "CHOP"))
 def test_ce_at_base_waives_chop_block(_day, _ce):

@@ -292,6 +292,11 @@ def top_trades_only_blocks_entry(
         best_trade_near_base_assessment,
         call_at_base_best_trade_fingerprint,
     )
+    from app.engines.pe_win_ce_mirror import (
+        chop_rally_ce_building_tier_ok,
+        chop_rally_ce_near_base_ok,
+        chop_rally_ce_top_trades_waiver,
+    )
 
     settings = settings or get_settings()
     if not bool(getattr(settings, "top_trades_only_strict_enabled", True)):
@@ -304,34 +309,74 @@ def top_trades_only_blocks_entry(
     if bool(getattr(settings, "top_trades_only_block_chop_unless_must_take", True)):
         if dm in _CHOP_DAY_MODES:
             side_u = str(side or assessment.get("side") or "").upper()
-            ce_at_base = False
-            if (
-                side_u == "CALL"
-                and bool(getattr(settings, "top_trades_only_ce_at_base_waives_chop", True))
-                and state is not None
-                and snap is not None
-            ):
+            ce_chop_waived = False
+            if side_u == "CALL" and state is not None and snap is not None:
                 sym = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
-                ce_at_base = call_at_base_best_trade_fingerprint(
-                    evidence,
-                    ranking,
-                    assessment,
-                    state=state,
-                    snap=snap,
-                    symbol=sym,
-                    readiness_reason=readiness_reason,
-                    settings=settings,
-                )
-            if not ce_at_base:
+                if bool(getattr(settings, "top_trades_only_ce_at_base_waives_chop", True)):
+                    ce_chop_waived = call_at_base_best_trade_fingerprint(
+                        evidence,
+                        ranking,
+                        assessment,
+                        state=state,
+                        snap=snap,
+                        symbol=sym,
+                        readiness_reason=readiness_reason,
+                        settings=settings,
+                    )
+                if not ce_chop_waived:
+                    ce_chop_waived = chop_rally_ce_top_trades_waiver(
+                        evidence,
+                        ranking,
+                        assessment,
+                        day_mode=dm,
+                        side=side_u,
+                        state=state,
+                        snap=snap,
+                        readiness_reason=readiness_reason,
+                        settings=settings,
+                    )
+            if not ce_chop_waived:
                 return True, "top_trades_chop_day_not_must_take"
 
     if bool(getattr(settings, "top_trades_only_require_elite_tier", True)):
         tier = str(evidence.get("tier") or "").upper()
         if tier != "ELITE":
-            return True, "top_trades_requires_elite_tier"
+            building_ok = chop_rally_ce_building_tier_ok(
+                evidence,
+                ranking,
+                assessment,
+                day_mode=dm,
+                side=str(side or assessment.get("side") or "").upper(),
+                state=state,
+                snap=snap,
+                readiness_reason=readiness_reason,
+                settings=settings,
+            )
+            if not building_ok:
+                return True, "top_trades_requires_elite_tier"
 
     if bool(getattr(settings, "top_trades_only_require_near_base_or_must_take", True)):
-        if not best_trade_near_base_assessment(assessment, settings=settings):
+        near_base_ok = best_trade_near_base_assessment(assessment, settings=settings)
+        side_u = str(side or assessment.get("side") or "").upper()
+        if (
+            not near_base_ok
+            and side_u == "CALL"
+            and chop_rally_ce_top_trades_waiver(
+                evidence,
+                ranking,
+                assessment,
+                day_mode=dm,
+                side=side_u,
+                state=state,
+                snap=snap,
+                readiness_reason=readiness_reason,
+                settings=settings,
+            )
+        ):
+            near_base_ok = chop_rally_ce_near_base_ok(
+                assessment, ranking, settings=settings,
+            )
+        if not near_base_ok:
             return True, "top_trades_not_near_base_best"
         grade = str(ranking.get("grade") or assessment.get("grade") or "").upper()
         if grade not in ("S", "A"):
@@ -1166,9 +1211,13 @@ def elite_entry_allowed(
     min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
     mirror_active = False
     rally_unlock_armed = False
+    rally_fingerprint_active = False
     if resolved_side == "CALL" and state is not None and mirror_snap is not None:
         from app.engines.best_trade_policy import call_at_base_best_trade_fingerprint
-        from app.engines.pe_win_ce_mirror import call_ce_base_context_armed
+        from app.engines.pe_win_ce_mirror import (
+            call_ce_base_context_armed,
+            call_rally_entry_unlock_fingerprint,
+        )
 
         symbol = str(evidence.get("symbol") or getattr(mirror_snap, "symbol", "") or "").upper()
         rally_unlock_armed = call_ce_base_context_armed(
@@ -1189,10 +1238,26 @@ def elite_entry_allowed(
             readiness_reason=readiness_reason,
             settings=settings,
         )
-        if mirror_active:
-            min_score = float(
+        rally_fingerprint_active = call_rally_entry_unlock_fingerprint(
+            evidence,
+            ranking,
+            assessment,
+            state=state,
+            snap=mirror_snap,
+            symbol=symbol,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        )
+        if mirror_active or rally_fingerprint_active:
+            relaxed = float(
                 getattr(settings, "best_trade_near_base_min_elite_score", 90.0) or 90.0
             )
+            if rally_fingerprint_active:
+                relaxed = min(
+                    relaxed,
+                    float(getattr(settings, "pe_win_ce_mirror_min_elite_score", 85.0) or 85.0),
+                )
+            min_score = min(min_score, relaxed)
     max_local = elite_side_local_base_cap(
         resolved_side,
         settings=settings,
