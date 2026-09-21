@@ -460,11 +460,25 @@ def _gate_checks(
     pool_prem_ok = premium_in_band(prem, mode="explosion", peak_move_pct=peak_for_pool)
     if not pool_prem_ok and index_confirmed_premium_fade_bypass(alert, snap):
         pool_prem_ok = True
+    chop_rally_capture = False
+    if tier == "BUILDING" and side_val == "CALL":
+        from app.engines.pe_win_ce_mirror import chop_rally_ce_building_capture_ok
+
+        chop_rally_capture = chop_rally_ce_building_capture_ok(
+            alert,
+            snap,
+            state,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        )
+        if chop_rally_capture and not tradeable:
+            tradeable = True
+
     in_pool = tradeable and score >= min_score and pool_prem_ok
     if tier not in ("ELITE", "EXPLODING") and in_pool:
         from app.engines.morning_premium_capture import is_premium_capture_alert
 
-        if not is_premium_capture_alert(alert, chart):
+        if not is_premium_capture_alert(alert, chart) and not chop_rally_capture:
             in_pool = False
             blockers.append("building_outside_capture_window")
             gates.append({
@@ -472,6 +486,12 @@ def _gate_checks(
                 "passed": False,
                 "detail": f"{tier} outside capture/all-day window",
                 "fix": "Enable all-day explosion or wait for EXPLODING",
+            })
+        elif chop_rally_capture:
+            gates.append({
+                "gate": "capture_window",
+                "passed": True,
+                "detail": "CHOP+RALLY CE building scoreboard capture",
             })
     if in_pool and "building_outside_capture_window" not in blockers:
         gates.append({"gate": "capture_window", "passed": True, "detail": "in explosion candidate pool"})

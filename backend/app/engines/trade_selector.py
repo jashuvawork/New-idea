@@ -354,7 +354,20 @@ def _explosion_candidates(
             or alert.get("ictSlowGrindConsolidationBase")
             or first_lift_readiness_reason == "slow_grind_consolidation_base_ready"
         )
-        if not alert.get("tradeable") and not lift_ready:
+        chop_rally_capture = False
+        if str(alert.get("side") or "").upper() == "CALL" and str(
+            alert.get("tier") or ""
+        ).upper() == "BUILDING":
+            from app.engines.pe_win_ce_mirror import chop_rally_ce_building_capture_ok
+
+            chop_rally_capture = chop_rally_ce_building_capture_ok(
+                alert,
+                snap,
+                state,
+                readiness_reason=first_lift_readiness_reason,
+                settings=settings,
+            )
+        if not alert.get("tradeable") and not lift_ready and not chop_rally_capture:
             continue
         if not premium_in_band(
             alert.get("premium"),
@@ -501,7 +514,11 @@ def _explosion_candidates(
             from app.engines.morning_premium_capture import is_premium_capture_alert
 
             ict_ok = bool(alert.get("ictBreakout")) and float(alert.get("ictScore") or 0) >= 28
-            if not is_premium_capture_alert(alert, snap.spotChart) and not ict_ok:
+            if (
+                not is_premium_capture_alert(alert, snap.spotChart)
+                and not ict_ok
+                and not chop_rally_capture
+            ):
                 continue
         # Only when chart aligns — drop counter-trend explosions at selection.
         if bool(getattr(settings, "explosion_require_chart_align_enabled", True)):

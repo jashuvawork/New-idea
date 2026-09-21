@@ -596,6 +596,156 @@ def chop_rally_ce_building_tier_ok(
     return grade in ("A", "S")
 
 
+def _resolve_chop_rally_day_mode(
+    day_mode: str = "",
+    *,
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+) -> str:
+    dm = str(day_mode or "").strip().upper()
+    if dm:
+        return dm
+    if state is not None:
+        try:
+            ds = getattr(state, "dailyStrategy", None) or {}
+            dm = str(ds.get("dayMode") or "").strip().upper()
+            if dm:
+                return dm
+        except Exception:
+            pass
+    if state is not None and snap is not None:
+        try:
+            from app.engines.chop_day_guards import chop_guard_summary
+
+            sym = str(getattr(snap, "symbol", "") or "").upper()
+            snaps = {sym: snap} if sym else {}
+            dm = str(chop_guard_summary(state, snaps).get("dayMode") or "").strip().upper()
+        except Exception:
+            pass
+    return dm
+
+
+def _alert_evidence_from_alert(alert: Mapping[str, Any], symbol: str) -> dict[str, Any]:
+    evidence = dict(alert) if isinstance(alert, Mapping) else {}
+    evidence.setdefault("symbol", symbol)
+    local = _number(
+        evidence.get("ictBaseRelativeMovePct")
+        or evidence.get("localBaseMovePct")
+        or evidence.get("offLowMovePct")
+    )
+    if local > 0:
+        evidence.setdefault("localBaseMovePct", local)
+        evidence.setdefault("localBasePct", local)
+    return evidence
+
+
+def chop_rally_ce_building_capture_ok(
+    alert: Mapping[str, Any],
+    snap: Optional[SymbolSnapshot],
+    state: Any,
+    *,
+    day_mode: str = "",
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """CHOP+RALLY CE: admit BUILDING in capture window when scoreboard ready + local≤15%."""
+    settings = settings or get_settings()
+    if not bool(
+        getattr(settings, "top_trades_only_chop_rally_ce_capture_window_enabled", True)
+    ):
+        return False
+    alert = alert if isinstance(alert, Mapping) else {}
+    if str(alert.get("side") or "").upper() != "CALL":
+        return False
+    if str(alert.get("tier") or "").upper() != "BUILDING":
+        return False
+    if snap is None or state is None:
+        return False
+    dm = _resolve_chop_rally_day_mode(day_mode, state=state, snap=snap)
+    if dm != _CHOP_RALLY_DAY_MODE:
+        return False
+
+    symbol = str(alert.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    try:
+        strike = float(alert.get("strike") or 0)
+    except (TypeError, ValueError):
+        strike = 0.0
+    if not symbol or strike <= 0:
+        return False
+
+    local = _number(
+        alert.get("ictBaseRelativeMovePct")
+        or alert.get("localBaseMovePct")
+        or alert.get("offLowMovePct")
+    )
+    max_local = float(getattr(settings, "pe_win_ce_mirror_max_local_pct", 15.0) or 15.0)
+    if local > max_local + 1e-6:
+        return False
+
+    from app.engines.building_ltp_monitor import building_scoreboard_ready_for_key
+
+    ready, sb_reason = building_scoreboard_ready_for_key(symbol, "CALL", strike)
+    if not ready:
+        return False
+
+    rr = str(
+        readiness_reason
+        or alert.get("ictBaseReadinessReason")
+        or alert.get("readyReason")
+        or sb_reason
+        or ""
+    )
+    if not _building_rip_launch_ok(alert, readiness_reason=rr, settings=settings):
+        return False
+
+    evidence = _alert_evidence_from_alert(alert, symbol)
+    ranking: dict[str, Any] | None = None
+    try:
+        from app.engines.trade_ranking import rank_trade_evidence
+
+        ranking = rank_trade_evidence(
+            {
+                "mode": "explosion",
+                "tier": "BUILDING",
+                "side": "CALL",
+                "symbol": symbol,
+                "explosionScore": _number(
+                    evidence.get("explosionScore") or evidence.get("score")
+                ),
+                "tqs": _number(getattr(snap, "tradeQualityScore", 0)),
+                "velocity3s": _number(evidence.get("velocity3s")),
+                "velocity9s": _number(evidence.get("velocity9s")),
+                "localBaseMovePct": local,
+                "flatThenVertical": bool(evidence.get("ictFlatThenVertical")),
+                "activeBreakout": bool(evidence.get("ictBreakout")),
+                "armedBaseLaunch": bool(
+                    evidence.get("ictArmedBaseLaunch") or evidence.get("ictBaseArmed")
+                ),
+                "firstLift": bool(evidence.get("ictFirstLift")),
+                "vRipReady": bool(evidence.get("ictVRipReady")),
+                "buildingRipReady": bool(evidence.get("ictBuildingRipReady")),
+                "orderflowPositive": bool(
+                    evidence.get("volumeAwaken")
+                    or evidence.get("ictVolumeAwakening")
+                    or evidence.get("optionCvdBuying")
+                ),
+            }
+        )
+    except Exception:
+        ranking = None
+
+    return call_rally_entry_unlock_fingerprint(
+        evidence,
+        ranking,
+        None,
+        state=state,
+        snap=snap,
+        symbol=symbol,
+        readiness_reason=rr,
+        settings=settings,
+    )
+
+
 def call_rally_entry_unlock_fingerprint(
     evidence: Mapping[str, Any],
     ranking: Mapping[str, Any] | None,

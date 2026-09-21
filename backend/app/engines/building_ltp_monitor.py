@@ -397,6 +397,24 @@ def building_best_ready_key() -> Optional[str]:
     return _best_ready_key if _scoreboard_active else None
 
 
+def building_scoreboard_ready_for_key(
+    symbol: str,
+    side: str,
+    strike: float,
+) -> tuple[bool, str]:
+    """True when this contract is ready on the live BUILDING LTP scoreboard."""
+    if not _scoreboard_active:
+        return False, "scoreboard_inactive"
+    key = _alert_key(symbol, side, strike)
+    for row in _last_scoreboard:
+        if str(row.get("key") or "") != key:
+            continue
+        if row.get("ready"):
+            return True, str(row.get("ready_reason") or "building_scoreboard_ready")
+        return False, str(row.get("ready_reason") or "scoreboard_not_ready")
+    return False, "not_on_scoreboard"
+
+
 def building_scoreboard_snapshot() -> dict[str, Any]:
     return {
         "active": _scoreboard_active,
