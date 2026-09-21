@@ -202,6 +202,7 @@ def test_selector_admits_building_coil_pad_without_elite_tier(mock_ready, _open)
         explosion_elite_exploding_only=True,
         building_coil_pad_entry_enabled=True,
         explosion_capture_mode=True,
+        top_trades_only_strict_enabled=False,
     )
     alert = _aug28_24050_alert()
     stamp_building_coil_pad(alert, settings)

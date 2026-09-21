@@ -311,6 +311,12 @@ class Settings(BaseSettings):
     elite_trade_must_take_min_grade: str = "S"
     elite_trade_must_take_min_fvq: float = 85.0
     elite_trade_must_take_max_local_base_pct: float = 15.0
+    # Strict top-trades-only — block chop/EXPLODING pad-lane entries (Sep21 23350 PE lesson).
+    top_trades_only_strict_enabled: bool = True
+    top_trades_only_require_elite_tier: bool = True
+    top_trades_only_block_chop_unless_must_take: bool = True
+    top_trades_only_require_near_base_or_must_take: bool = True
+    top_trades_only_ce_at_base_waives_chop: bool = True
     # Side-specific near-base caps (0 = use elite_trade_max_local_base_pct only).
     # EOD: CALL local≤10% → 66.7% win; PUT keeps full 20% window.
     elite_call_max_local_base_pct: float = 10.0

@@ -159,6 +159,7 @@ def test_aug17_real_selector_selects_armed_launch_only_at_57_without_full_budget
     settings = Settings(
         best_trades_only_enabled=False,
         edge_engine_enabled=False,
+        top_trades_only_strict_enabled=False,
     )
     clock, scan, _advance = _scanner(side, settings)
     snap = _snapshot(side)

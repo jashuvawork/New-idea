@@ -274,6 +274,72 @@ def _timing_ok(evidence: Mapping[str, Any]) -> bool:
     return timing in GOOD_TIMING
 
 
+def top_trades_only_blocks_entry(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any],
+    assessment: Mapping[str, Any],
+    *,
+    day_mode: str = "",
+    side: str = "",
+    state: Any = None,
+    snap: Any = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Block second-tier explosions — only mustTake or near-base ELITE top bar."""
+    from app.config import get_settings
+    from app.engines.best_trade_policy import (
+        best_trade_near_base_assessment,
+        call_at_base_best_trade_fingerprint,
+    )
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "top_trades_only_strict_enabled", True)):
+        return False, ""
+
+    if assessment.get("mustTake"):
+        return False, ""
+
+    dm = str(day_mode or assessment.get("dayMode") or "").strip().upper()
+    if bool(getattr(settings, "top_trades_only_block_chop_unless_must_take", True)):
+        if dm in _CHOP_DAY_MODES:
+            side_u = str(side or assessment.get("side") or "").upper()
+            ce_at_base = False
+            if (
+                side_u == "CALL"
+                and bool(getattr(settings, "top_trades_only_ce_at_base_waives_chop", True))
+                and state is not None
+                and snap is not None
+            ):
+                sym = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+                ce_at_base = call_at_base_best_trade_fingerprint(
+                    evidence,
+                    ranking,
+                    assessment,
+                    state=state,
+                    snap=snap,
+                    symbol=sym,
+                    readiness_reason=readiness_reason,
+                    settings=settings,
+                )
+            if not ce_at_base:
+                return True, "top_trades_chop_day_not_must_take"
+
+    if bool(getattr(settings, "top_trades_only_require_elite_tier", True)):
+        tier = str(evidence.get("tier") or "").upper()
+        if tier != "ELITE":
+            return True, "top_trades_requires_elite_tier"
+
+    if bool(getattr(settings, "top_trades_only_require_near_base_or_must_take", True)):
+        if not best_trade_near_base_assessment(assessment, settings=settings):
+            return True, "top_trades_not_near_base_best"
+        grade = str(ranking.get("grade") or assessment.get("grade") or "").upper()
+        if grade not in ("S", "A"):
+            return True, "top_trades_requires_grade_a_or_s"
+
+    return False, ""
+
+
 def elite_must_take(
     evidence: Mapping[str, Any],
     ranking: Mapping[str, Any],
@@ -1068,7 +1134,21 @@ def elite_entry_allowed(
             "legacyBypass": "building_ftv_gate",
             "dayMode": resolved_mode,
             "dayType": resolved_type,
+            "side": resolved_side,
         }
+        blocked, block_reason = top_trades_only_blocks_entry(
+            evidence,
+            ranking,
+            assessment,
+            day_mode=resolved_mode,
+            side=resolved_side,
+            state=state,
+            snap=mirror_snap,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        )
+        if blocked:
+            return False, block_reason, assessment
         return True, "ok", assessment
 
     assessment = build_elite_assessment(evidence, ranking)
@@ -1250,4 +1330,17 @@ def elite_entry_allowed(
             settings=settings,
         ),
     }
+    blocked, block_reason = top_trades_only_blocks_entry(
+        evidence,
+        ranking,
+        assessment,
+        day_mode=resolved_mode,
+        side=resolved_side,
+        state=state,
+        snap=mirror_snap,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+    if blocked:
+        return False, block_reason, assessment
     return True, "ok", assessment

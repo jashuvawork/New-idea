@@ -1,0 +1,163 @@
+"""Strict top-trades-only gate — block chop/EXPLODING second-tier entries."""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from app.config import Settings, get_settings
+from app.engines.elite_score_engine import (
+    build_elite_assessment,
+    elite_entry_allowed,
+    top_trades_only_blocks_entry,
+)
+
+
+@pytest.fixture(autouse=True)
+def _enable_top_trades_strict():
+    object.__setattr__(get_settings(), "top_trades_only_strict_enabled", True)
+    object.__setattr__(get_settings(), "elite_trade_engine_enabled", True)
+    yield
+
+
+def _ranking(**overrides):
+    base = {"grade": "A", "rankScore": 80.0, "side": "PUT"}
+    base.update(overrides)
+    return base
+
+
+def _evidence(**overrides):
+    base = {
+        "tier": "ELITE",
+        "symbol": "NIFTY",
+        "localBaseMovePct": 12.0,
+        "timingAssessment": "GOOD",
+        "armedBaseLaunch": True,
+        "firstLift": True,
+        "velocity3s": 2.0,
+        "flatVerticalQuality": 70.0,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_blocks_chop_day_expoding_grade_a():
+    ev = _evidence(tier="EXPLODING")
+    ranking = _ranking()
+    assessment = build_elite_assessment(ev, ranking)
+    assessment = {
+        **assessment,
+        "eliteScore": 92.9,
+        "grade": "A",
+        "setup": "V",
+        "localBasePct": 17.9,
+        "mustTake": False,
+        "dayMode": "CHOP DAY",
+    }
+    blocked, reason = top_trades_only_blocks_entry(
+        ev, ranking, assessment, day_mode="CHOP DAY", side="PUT",
+    )
+    assert blocked is True
+    assert reason == "top_trades_chop_day_not_must_take"
+
+
+def test_allows_must_take_on_chop():
+    ev = _evidence(tier="EXPLODING")
+    ranking = _ranking(grade="S")
+    assessment = {
+        "mustTake": True,
+        "eliteScore": 96.0,
+        "grade": "S",
+        "setup": "FTV",
+        "localBasePct": 10.0,
+        "dayMode": "CHOP DAY",
+    }
+    blocked, reason = top_trades_only_blocks_entry(
+        ev, ranking, assessment, day_mode="CHOP DAY", side="PUT",
+    )
+    assert blocked is False
+
+
+def test_blocks_exploding_tier_on_directional_day():
+    ev = _evidence(tier="EXPLODING")
+    ranking = _ranking()
+    assessment = build_elite_assessment(ev, ranking)
+    assessment = {
+        **assessment,
+        "eliteScore": 91.0,
+        "grade": "A",
+        "setup": "V",
+        "localBasePct": 12.0,
+        "mustTake": False,
+    }
+    blocked, reason = top_trades_only_blocks_entry(
+        ev, ranking, assessment, day_mode="BEARISH DAY", side="PUT",
+    )
+    assert blocked is True
+    assert reason == "top_trades_requires_elite_tier"
+
+
+def test_allows_elite_near_base_on_directional_day():
+    ev = _evidence(tier="ELITE")
+    ranking = _ranking()
+    assessment = build_elite_assessment(ev, ranking)
+    assessment = {
+        **assessment,
+        "eliteScore": 92.0,
+        "grade": "A",
+        "setup": "V",
+        "localBasePct": 12.0,
+        "mustTake": False,
+    }
+    blocked, _ = top_trades_only_blocks_entry(
+        ev, ranking, assessment, day_mode="BEARISH DAY", side="PUT",
+    )
+    assert blocked is False
+
+
+@patch("app.engines.elite_score_engine.resolve_elite_session_day_type", return_value=("CHOP DAY", "CHOP"))
+def test_elite_entry_blocks_sep21_style_put(_day):
+    """Sep 21 NIFTY 23350 PE: grade-A EXPLODING chop pad — blocked by top-trades gate."""
+    settings = Settings()
+    ev = _evidence(
+        tier="EXPLODING",
+        localBaseMovePct=17.9,
+        flatVerticalQuality=70.0,
+        explosionScore=60.0,
+        volumeAwaken=True,
+        vRipReady=True,
+    )
+    ranking = _ranking(rankScore=92.9)
+    ok, reason, _ = elite_entry_allowed(
+        ev, ranking, settings=settings, side="PUT", day_mode="CHOP DAY",
+    )
+    assert ok is False
+    assert reason == "top_trades_chop_day_not_must_take"
+
+
+@patch("app.engines.best_trade_policy.call_at_base_best_trade_fingerprint", return_value=True)
+@patch("app.engines.elite_score_engine.resolve_elite_session_day_type", return_value=("CHOP DAY", "CHOP"))
+def test_ce_at_base_waives_chop_block(_day, _ce):
+    settings = Settings()
+    ev = _evidence(tier="ELITE", symbol="NIFTY")
+    ranking = _ranking(side="CALL")
+    state = MagicMock()
+    snap = MagicMock(symbol="NIFTY")
+    assessment = {
+        "mustTake": False,
+        "eliteScore": 92.0,
+        "grade": "A",
+        "setup": "V",
+        "localBasePct": 12.0,
+    }
+    blocked, reason = top_trades_only_blocks_entry(
+        ev,
+        ranking,
+        assessment,
+        day_mode="CHOP DAY",
+        side="CALL",
+        state=state,
+        snap=snap,
+        settings=settings,
+    )
+    assert blocked is False
+    assert reason == ""
