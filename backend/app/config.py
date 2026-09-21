@@ -326,6 +326,8 @@ class Settings(BaseSettings):
     top_trades_only_chop_rally_allow_building_tier: bool = True
     # CHOP + RALLY only: BUILDING CE in capture window when LTP scoreboard ready + local≤15%.
     top_trades_only_chop_rally_ce_capture_window_enabled: bool = True
+    # Chop days: structural side alignment (chart + breadth) beats raw selection score.
+    chop_day_require_side_alignment_enabled: bool = True
     # Side-specific near-base caps (0 = use elite_trade_max_local_base_pct only).
     # EOD: CALL local≤10% → 66.7% win; PUT keeps full 20% window.
     elite_call_max_local_base_pct: float = 10.0

@@ -306,9 +306,24 @@ def top_trades_only_blocks_entry(
         return False, ""
 
     dm = str(day_mode or assessment.get("dayMode") or "").strip().upper()
+    side_u = str(side or assessment.get("side") or evidence.get("side") or "").upper()
+    if state is not None and snap is not None and side_u:
+        from app.engines.aligned_side_guard import chop_day_side_alignment_blocks
+
+        align_blocked, align_reason = chop_day_side_alignment_blocks(
+            side_u,
+            snap,
+            day_mode=dm,
+            must_take=bool(assessment.get("mustTake")),
+            alert=evidence,
+            state=state,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        )
+        if align_blocked:
+            return True, align_reason or "chop_day_side_not_aligned"
     if bool(getattr(settings, "top_trades_only_block_chop_unless_must_take", True)):
         if dm in _CHOP_DAY_MODES:
-            side_u = str(side or assessment.get("side") or "").upper()
             ce_chop_waived = False
             if side_u == "CALL" and state is not None and snap is not None:
                 sym = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()

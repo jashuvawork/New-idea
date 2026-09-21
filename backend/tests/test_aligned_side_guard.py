@@ -8,6 +8,7 @@ from app.engines.aligned_side_guard import (
     breadth_hard_blocks_side,
     chart_mtf_breadth_bypass_active,
     chart_mtf_bullish_confirmed,
+    chop_day_side_alignment_blocks,
     counter_breadth_side_blocked,
 )
 from app.models.schemas import ChartAnalysis
@@ -290,3 +291,66 @@ def test_explosion_entry_blocks_elite_put_on_rally(
         "hard_block_put_vs_bullish_breadth",
         "explosion_requires_chart_align",
     )
+
+
+def test_chop_day_blocks_sep21_style_put_vs_bullish():
+    """Sep21 NIFTY PUT 23350 — high score but counter-trend on CHOP+RALLY."""
+    snap = _bullish_snap()
+    snap.symbol = "NIFTY"
+    blocked, reason = chop_day_side_alignment_blocks(
+        Side.PUT,
+        snap,
+        day_mode="CHOP + RALLY",
+        alert={
+            "symbol": "NIFTY",
+            "side": "PUT",
+            "tier": "EXPLODING",
+            "explosionScore": 95.0,
+            "localBaseMovePct": 17.9,
+        },
+    )
+    assert blocked is True
+    assert reason in (
+        "chop_day_counter_chart",
+        "hard_block_put_vs_bullish_breadth",
+        "chop_day_chart_not_aligned",
+    )
+
+
+def test_chop_day_allows_aligned_call_on_bullish():
+    snap = _bullish_snap()
+    snap.symbol = "NIFTY"
+    blocked, reason = chop_day_side_alignment_blocks(
+        Side.CALL,
+        snap,
+        day_mode="CHOP + RALLY",
+        alert={
+            "symbol": "NIFTY",
+            "side": "CALL",
+            "tier": "BUILDING",
+            "localBaseMovePct": 12.0,
+        },
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+def test_chop_day_skipped_when_must_take():
+    snap = _bullish_snap()
+    blocked, _ = chop_day_side_alignment_blocks(
+        Side.PUT,
+        snap,
+        day_mode="CHOP DAY",
+        must_take=True,
+    )
+    assert blocked is False
+
+
+def test_chop_day_skipped_on_bullish_day_mode():
+    snap = _bullish_snap()
+    blocked, _ = chop_day_side_alignment_blocks(
+        Side.PUT,
+        snap,
+        day_mode="BULLISH DAY",
+    )
+    assert blocked is False

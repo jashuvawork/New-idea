@@ -10,6 +10,7 @@ from app.engines.elite_score_engine import (
     elite_entry_allowed,
     top_trades_only_blocks_entry,
 )
+from app.models.schemas import Breadth, SpotChart
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +24,19 @@ def _ranking(**overrides):
     base = {"grade": "A", "rankScore": 80.0, "side": "PUT"}
     base.update(overrides)
     return base
+
+
+def _aligned_bullish_snap():
+    snap = MagicMock(symbol="NIFTY")
+    snap.spotChart = SpotChart(
+        direction="BULLISH",
+        momentum5Pct=0.12,
+        trendStrength=70.0,
+        emaBias="BULLISH",
+        macdBias="BULLISH",
+    )
+    snap.breadth = Breadth(bias="BULLISH", score=70, aligned=True)
+    return snap
 
 
 def _evidence(**overrides):
@@ -134,13 +148,51 @@ def test_elite_entry_blocks_sep21_style_put(_day):
     assert reason == "top_trades_chop_day_not_must_take"
 
 
+@patch(
+    "app.engines.aligned_side_guard.chop_day_side_alignment_blocks",
+    return_value=(True, "chop_day_counter_chart"),
+)
+def test_sep21_put_blocked_by_chop_side_alignment(_align):
+    """High-score counter-trend PUT on chop day — side alignment beats selection score."""
+    settings = Settings()
+    ev = _evidence(
+        tier="EXPLODING",
+        side="PUT",
+        localBaseMovePct=17.9,
+        explosionScore=95.0,
+    )
+    ranking = _ranking(side="PUT", rankScore=192.0)
+    assessment = {
+        "mustTake": False,
+        "eliteScore": 92.0,
+        "grade": "A",
+        "setup": "V",
+        "localBasePct": 17.9,
+    }
+    snap = MagicMock()
+    state = MagicMock()
+    blocked, reason = top_trades_only_blocks_entry(
+        ev,
+        ranking,
+        assessment,
+        day_mode="CHOP + RALLY",
+        side="PUT",
+        state=state,
+        snap=snap,
+        settings=settings,
+    )
+    assert blocked is True
+    assert reason == "chop_day_counter_chart"
+    _align.assert_called_once()
+
+
 @patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_fingerprint", return_value=True)
 def test_chop_rally_ce_unlock_waives_chop_block(_rally):
     settings = Settings()
     ev = _evidence(tier="ELITE", symbol="NIFTY")
     ranking = _ranking(side="CALL")
     state = MagicMock()
-    snap = MagicMock(symbol="NIFTY")
+    snap = _aligned_bullish_snap()
     assessment = {
         "mustTake": False,
         "eliteScore": 88.0,
@@ -168,7 +220,7 @@ def test_chop_rally_allows_building_tier(_rally):
     ev = _evidence(tier="BUILDING", buildingRipBullish=True, symbol="NIFTY")
     ranking = _ranking(side="CALL")
     state = MagicMock()
-    snap = MagicMock(symbol="NIFTY")
+    snap = _aligned_bullish_snap()
     assessment = {
         "mustTake": False,
         "eliteScore": 86.0,
@@ -197,7 +249,7 @@ def test_ce_at_base_waives_chop_block(_day, _ce):
     ev = _evidence(tier="ELITE", symbol="NIFTY")
     ranking = _ranking(side="CALL")
     state = MagicMock()
-    snap = MagicMock(symbol="NIFTY")
+    snap = _aligned_bullish_snap()
     assessment = {
         "mustTake": False,
         "eliteScore": 92.0,
