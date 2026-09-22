@@ -933,3 +933,64 @@ def __elite_trade_budget_summary(state: AutoTraderState) -> dict[str, Any]:
     from app.engines.elite_trade_budget import elite_trade_budget_summary
 
     return elite_trade_budget_summary(state)
+
+
+_CHOP_POST_WIN_DAY_MODES = frozenset({
+    "CHOP DAY",
+    "CHOP (PRE-10)",
+    "CHOP + RALLY",
+})
+
+
+def resolve_chop_day_mode_from_state(state: Any = None) -> str:
+    """Best-effort day mode for chop guardrails."""
+    if state is None:
+        return ""
+    ds = getattr(state, "dailyStrategy", None)
+    if isinstance(ds, dict):
+        return str(ds.get("dayMode") or "")
+    return str(getattr(ds, "dayMode", "") or "")
+
+
+def chop_post_win_afternoon_fomo_risk(
+    state: Any = None,
+    *,
+    day_mode: str = "",
+    settings: Any = None,
+) -> tuple[bool, list[str]]:
+    """
+    Sep21 afternoon giveback — meaningful morning win on chop day → afternoon FOMO risk.
+
+    Uses session win (any green), not post-small-win only, so large trail wins still gate.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "chop_post_win_afternoon_block_enabled", True)):
+        return False, []
+    if not bool(
+        getattr(settings, "fake_explosion_trap_chop_post_win_afternoon_enabled", True)
+    ):
+        return False, []
+
+    dm = str(day_mode or resolve_chop_day_mode_from_state(state)).strip().upper()
+    if dm not in _CHOP_POST_WIN_DAY_MODES:
+        return False, []
+
+    from app.engines.explosion_entry_guards import _post_session_win
+
+    post_win, meta = _post_session_win(state)
+    if not post_win:
+        return False, []
+
+    min_win = float(
+        getattr(settings, "chop_post_win_afternoon_min_win_inr", 2000.0) or 2000.0
+    )
+    last_pnl = float(meta.get("lastPnlInr") or 0)
+    if last_pnl < min_win:
+        return False, []
+
+    reasons = [
+        "chop_day",
+        "post_session_win",
+        f"last_pnl_{last_pnl:.0f}",
+    ]
+    return True, reasons

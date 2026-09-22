@@ -2106,37 +2106,91 @@ def detect_fake_explosion_trap(
     if post_session_win:
         flags.append("post_session_win")
 
-    if (
-        post_win
-        and event
-        and getattr(settings, "fake_explosion_trap_post_win_afternoon_block_enabled", True)
+    if event and getattr(
+        settings, "fake_explosion_trap_post_win_afternoon_block_enabled", True
     ):
         from app.engines.expiry_day_guards import expiry_post_win_afternoon_fomo_risk
         from app.engines.morning_premium_capture import is_afternoon_capture_event
 
-        expiry_only = bool(
-            getattr(settings, "fake_explosion_trap_post_win_expiry_only", True)
-        )
         afternoon_event = is_afternoon_capture_event(
             event, chart=snap.spotChart if snap else None,
         )
-        expiry_fomo, expiry_reasons = expiry_post_win_afternoon_fomo_risk(state)
-        should_block = afternoon_event and (
-            (expiry_only and expiry_fomo)
-            or (not expiry_only and True)
-        )
-        if should_block:
-            meta.update({
-                "fakeExplosionTrap": True,
-                "action": "block",
-                "psychologyEscalate": "FOMO",
-                "postWinAfternoonBlock": True,
-                "postWinExpiryAfternoon": expiry_fomo,
-                "expiryFomoReasons": expiry_reasons,
-                "conflictFlags": flags,
-                "conflictCount": len(flags),
-            })
-            return True, "fake_explosion_trap_post_win_afternoon", meta
+
+        def _chop_post_win_afternoon_ftv_waiver() -> bool:
+            alert_probe = getattr(candidate, "alert", None) or {}
+            local_pad = float(effective_local_base_move_pct(event, ict) or 0.0)
+            fresh, fresh_meta = fresh_near_local_base(
+                local_pad=local_pad,
+                ict=ict,
+                alert=alert_probe if isinstance(alert_probe, dict) else None,
+                settings=settings,
+            )
+            from app.engines.best_trade_policy import symmetric_chop_ftv_launch_evidence
+
+            if fresh and symmetric_chop_ftv_launch_evidence(
+                alert_probe if isinstance(alert_probe, dict) else {},
+                settings=settings,
+            ):
+                meta.update(fresh_meta)
+                meta["chopPostWinAfternoonFtvWaiver"] = True
+                return True
+            return False
+
+        if (
+            post_session_win
+            and afternoon_event
+            and bool(
+                getattr(
+                    settings,
+                    "fake_explosion_trap_chop_post_win_afternoon_enabled",
+                    True,
+                )
+            )
+        ):
+            from app.engines.chop_day_guards import (
+                chop_post_win_afternoon_fomo_risk,
+                resolve_chop_day_mode_from_state,
+            )
+
+            chop_fomo, chop_reasons = chop_post_win_afternoon_fomo_risk(
+                state,
+                day_mode=resolve_chop_day_mode_from_state(state),
+                settings=settings,
+            )
+            if chop_fomo and not _chop_post_win_afternoon_ftv_waiver():
+                meta.update({
+                    "fakeExplosionTrap": True,
+                    "action": "block",
+                    "psychologyEscalate": "FOMO",
+                    "postWinAfternoonBlock": True,
+                    "postWinChopAfternoon": True,
+                    "chopFomoReasons": chop_reasons,
+                    "conflictFlags": flags + ["post_session_win"],
+                    "conflictCount": len(flags) + 1,
+                })
+                return True, "fake_explosion_trap_chop_post_win_afternoon", meta
+
+        if post_win:
+            expiry_only = bool(
+                getattr(settings, "fake_explosion_trap_post_win_expiry_only", True)
+            )
+            expiry_fomo, expiry_reasons = expiry_post_win_afternoon_fomo_risk(state)
+            should_block = afternoon_event and (
+                (expiry_only and expiry_fomo)
+                or (not expiry_only)
+            )
+            if should_block:
+                meta.update({
+                    "fakeExplosionTrap": True,
+                    "action": "block",
+                    "psychologyEscalate": "FOMO",
+                    "postWinAfternoonBlock": True,
+                    "postWinExpiryAfternoon": expiry_fomo,
+                    "expiryFomoReasons": expiry_reasons,
+                    "conflictFlags": flags,
+                    "conflictCount": len(flags),
+                })
+                return True, "fake_explosion_trap_post_win_afternoon", meta
 
     if post_win and getattr(
         settings, "fake_explosion_trap_post_win_velocity_block_enabled", True
