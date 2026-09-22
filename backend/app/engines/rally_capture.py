@@ -171,10 +171,13 @@ def chart_blocks_explosion_side(
         return False, "ok"
     settings = get_settings()
     from app.engines.best_trade_policy import (
+        chart_counter_trend_side,
         symmetric_best_trade_capture_active,
+        symmetric_chop_ftv_launch_evidence,
         symmetric_structural_base_evidence,
     )
 
+    side_v = _side_val(side)
     alert_d = alert if isinstance(alert, dict) else {}
     if event is not None:
         alert_d = {
@@ -183,14 +186,15 @@ def chart_blocks_explosion_side(
             "localBaseMovePct": getattr(event, "daily_move_pct", None)
             or alert_d.get("localBaseMovePct"),
         }
-    if (
-        symmetric_best_trade_capture_active(settings)
-        and str(alert_d.get("tier") or getattr(event, "tier", "") or "").upper() == "ELITE"
-        and symmetric_structural_base_evidence(alert_d, settings=settings)
-    ):
-        return False, "ok"
+    tier_u = str(alert_d.get("tier") or getattr(event, "tier", "") or tier or "").upper()
+    if symmetric_best_trade_capture_active(settings) and tier_u == "ELITE":
+        counter_trend = chart_counter_trend_side(side_v, snap=snap, chart=chart)
+        if counter_trend:
+            if symmetric_chop_ftv_launch_evidence(alert_d, settings=settings):
+                return False, "ok"
+        elif symmetric_structural_base_evidence(alert_d, settings=settings):
+            return False, "ok"
     direction = (chart.direction or "NEUTRAL").upper()
-    side_v = _side_val(side)
     if direction == "NEUTRAL":
         return False, "ok"
     if direction == "BULLISH" and side_v == "PUT":

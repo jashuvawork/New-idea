@@ -324,7 +324,23 @@ def top_trades_only_blocks_entry(
             return True, align_reason or "session_side_not_aligned"
     if bool(getattr(settings, "top_trades_only_block_chop_unless_must_take", True)):
         if dm in _CHOP_DAY_MODES:
-            from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+            from app.engines.best_trade_policy import (
+                symmetric_best_trade_capture_active,
+                symmetric_chop_counter_trend_blocks_entry,
+            )
+
+            if symmetric_best_trade_capture_active(settings):
+                ct_blocked, ct_reason = symmetric_chop_counter_trend_blocks_entry(
+                    evidence,
+                    assessment,
+                    day_mode=dm,
+                    side=side_u,
+                    snap=snap,
+                    state=state,
+                    settings=settings,
+                )
+                if ct_blocked:
+                    return True, ct_reason
 
             if not symmetric_best_trade_capture_active(settings):
                 chop_waived = False

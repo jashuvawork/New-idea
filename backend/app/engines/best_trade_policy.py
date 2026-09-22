@@ -10,6 +10,13 @@ from typing import Any, Mapping, Optional
 
 VALID_BEST_BASE_SETUPS = frozenset({"FTV", "V"})
 _GOOD_TIMING = frozenset({"GOOD", "OK"})
+_SYMMETRIC_CHOP_DAY_MODES = frozenset({
+    "CHOP DAY",
+    "CHOP (PRE-10)",
+    "CHOP + RALLY",
+    "EXPIRY WORST",
+    "EXPIRY DAY",
+})
 
 
 def symmetric_best_trade_capture_active(settings: Any = None) -> bool:
@@ -51,6 +58,88 @@ def symmetric_structural_base_evidence(
         or evidence.get("ictFirstLift")
         or evidence.get("firstLift")
     )
+
+
+def symmetric_chop_ftv_launch_evidence(
+    evidence: Mapping[str, Any] | None,
+    assessment: Mapping[str, Any] | None = None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """True flat→vertical / first-lift / armed launch — not V-rip or building-rip pad alone."""
+    _ = settings
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    return bool(
+        evidence.get("ictFlatThenVertical")
+        or evidence.get("flatThenVertical")
+        or evidence.get("ictFirstLift")
+        or evidence.get("firstLift")
+        or evidence.get("armedBaseLaunch")
+        or evidence.get("ictArmedBaseLaunch")
+    )
+
+
+def chart_counter_trend_side(
+    side: str,
+    snap: Any = None,
+    *,
+    chart: Any = None,
+) -> bool:
+    """True when option side fights a non-neutral spot chart direction."""
+    direction = ""
+    if chart is not None:
+        direction = str(getattr(chart, "direction", "") or "").upper()
+    elif snap is not None:
+        spot_chart = getattr(snap, "spotChart", None)
+        if spot_chart is not None:
+            direction = str(getattr(spot_chart, "direction", "") or "").upper()
+    if direction not in ("BULLISH", "BEARISH"):
+        return False
+    side_u = str(side or "").upper()
+    if direction == "BULLISH" and side_u == "PUT":
+        return True
+    if direction == "BEARISH" and side_u == "CALL":
+        return True
+    return False
+
+
+def symmetric_chop_counter_trend_blocks_entry(
+    evidence: Mapping[str, Any],
+    assessment: Mapping[str, Any],
+    *,
+    day_mode: str = "",
+    side: str = "",
+    snap: Any = None,
+    state: Any = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """
+    Sep21 guard — on chop/expiry chop modes, counter-trend legs need true FTV launch.
+
+    Aligned near-base FTV/V (Sep22 PUT, Sep21 morning CALL) still pass. Counter-trend
+    V-rip / EXPLODING pad (Sep21 23350 PE) blocked unless flat→vertical / first_lift.
+    """
+    _ = state
+    settings = settings or get_settings()
+    if not symmetric_best_trade_capture_active(settings):
+        return False, ""
+    if not bool(getattr(settings, "symmetric_chop_counter_trend_guard_enabled", True)):
+        return False, ""
+    if assessment.get("mustTake"):
+        return False, ""
+
+    dm = str(day_mode or assessment.get("dayMode") or "").strip().upper()
+    if dm not in _SYMMETRIC_CHOP_DAY_MODES:
+        return False, ""
+
+    side_u = str(side or evidence.get("side") or assessment.get("side") or "").upper()
+    if not side_u or snap is None:
+        return False, ""
+    if not chart_counter_trend_side(side_u, snap):
+        return False, ""
+    if symmetric_chop_ftv_launch_evidence(evidence, assessment, settings=settings):
+        return False, ""
+    return True, "symmetric_chop_counter_trend_requires_ftv"
 
 
 def _number(value: Any) -> float:

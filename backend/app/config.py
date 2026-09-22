@@ -393,6 +393,11 @@ class Settings(BaseSettings):
     elite_trade_perfect_score_max_local_pct: float = 15.0
     # Raw symmetric best-trade mode — CE and PE compete on merit all day; no day-mode side lock.
     symmetric_best_trade_capture_enabled: bool = True
+    # Sep21 23350 PE: symmetric mode must not re-open counter-trend V-rip chop pads.
+    symmetric_chop_counter_trend_guard_enabled: bool = True
+    # Sep21 afternoon giveback: after a meaningful session win on chop days, block afternoon FOMO.
+    chop_post_win_afternoon_block_enabled: bool = True
+    chop_post_win_afternoon_min_win_inr: float = 2000.0
     # Sep-9 best trades: allow FTV + V near-base; block generic EXPLOSIVE mid-rip chase.
     elite_trade_v_rip_only_enabled: bool = False
     elite_trade_block_explosive_chase_enabled: bool = True
@@ -1536,6 +1541,8 @@ class Settings(BaseSettings):
     # Scoped to expiry session afternoons (SENSEX expiry day; NIFTY chain was next week).
     fake_explosion_trap_post_win_afternoon_block_enabled: bool = True
     fake_explosion_trap_post_win_expiry_only: bool = True
+    # Sep21 CHOP+RALLY: extend post-win afternoon hard-block beyond expiry-only sessions.
+    fake_explosion_trap_chop_post_win_afternoon_enabled: bool = True
     # Post-win re-entry only when top-rank / full-sleeve OR hot re-acceleration — no 8-lot FOMO probes.
     fake_explosion_trap_post_win_require_top_confidence: bool = True
     fake_explosion_trap_post_win_hc_min_velocity_3s: float = 2.0
