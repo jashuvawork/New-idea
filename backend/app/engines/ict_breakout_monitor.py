@@ -1906,6 +1906,17 @@ def first_lift_entry_readiness(
         getattr(ict, "armed_base_sustained_lift", False) is True
         or row.get("ictArmedBaseSustainedLift") is True
     )
+    flat_vertical_quality = float(
+        getattr(ict, "flat_vertical_quality", 0)
+        or row.get("flatVerticalQuality")
+        or persisted.get("flatVerticalQuality")
+        or 0
+    )
+    flat_vertical_flag = bool(
+        getattr(ict, "flat_then_vertical", False)
+        or row.get("ictFlatThenVertical")
+        or persisted.get("flatThenVertical")
+    )
     structured = bool(
         getattr(ict, "active", False)
         and getattr(ict, "flat_then_vertical", False)
@@ -1913,9 +1924,12 @@ def first_lift_entry_readiness(
         row.get("ictBreakout") and row.get("ictFlatThenVertical")
     ) or bool(
         persisted.get("activeBreakout") and persisted.get("flatThenVertical")
+    ) or bool(
+        flat_vertical_flag
+        and flat_vertical_quality
+        >= float(getattr(settings, "ict_flat_vertical_min_quality", 65.0) or 65.0)
     )
-    # armed_base_launch stamps before flat→vertical confirms — do not require structured
-    # when the armed launch lane is active (Sep01 NIFTY PUT 23950 ELITE 100 at ~₹18 base).
+    # armed_base_launch / first_lift stamp before flat→vertical fully confirms.
     structure_missing = (
         not (first_lift or armed_launch or elite_base_ready or v_rip_ready)
         or (
@@ -1928,6 +1942,9 @@ def first_lift_entry_readiness(
     if structure_missing:
         from app.engines.bullish_day_floor_relief import (
             bullish_day_structure_bypass_allowed,
+        )
+        from app.engines.top_ftv_v_expiry_bypass import (
+            expiry_worst_pe_structure_bypass_allowed,
         )
 
         _conf_tier = ""
@@ -1949,6 +1966,7 @@ def first_lift_entry_readiness(
         _base_move = float(
             getattr(ict, "base_relative_move_pct", 0)
             or row.get("ictBaseRelativeMovePct")
+            or row.get("localBaseMovePct")
             or 0
         )
         _volume_awake = bool(
@@ -1956,7 +1974,12 @@ def first_lift_entry_readiness(
             or row.get("ictVolumeAwakening")
             or row.get("volumeAwaken")
         )
-        if not (
+        _side = str(
+            row.get("side")
+            or getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+            or ""
+        ).upper()
+        structure_bypass = bool(
             first_lift
             and bullish_day_structure_bypass_allowed(
                 tier=_tier,
@@ -1967,7 +1990,20 @@ def first_lift_entry_readiness(
                 confidence_tier=_conf_tier,
                 state=state,
             )
-        ):
+        )
+        if not structure_bypass:
+            structure_bypass = expiry_worst_pe_structure_bypass_allowed(
+                tier=_tier,
+                score=_score,
+                base_move_pct=_base_move,
+                volume_awakening=_volume_awake,
+                side=_side,
+                day_mode=day_mode,
+                state=state,
+                snap=snap,
+                row=row,
+            )
+        if not structure_bypass:
             return False, "first_lift_structure_not_confirmed"
 
     base_move = float(
