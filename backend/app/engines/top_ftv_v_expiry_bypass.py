@@ -145,6 +145,105 @@ def alert_is_top_ftv_or_v(
     return True
 
 
+def _side_value(side: Any) -> str:
+    raw = getattr(side, "value", side)
+    return str(raw or "").upper()
+
+
+def expiry_worst_pe_structure_bypass_allowed(
+    *,
+    tier: str,
+    score: float,
+    base_move_pct: float,
+    volume_awakening: bool,
+    side: str = "",
+    day_mode: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    row: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """EXPIRY WORST morning PUT — ELITE flat→vertical at base before ictBreakout stamps."""
+    settings = get_settings()
+    if not bool(getattr(settings, "expiry_worst_pe_structure_bypass_enabled", True)):
+        return False
+    from app.engines.ict_breakout_monitor import _expiry_worst_session
+
+    if not _expiry_worst_session(day_mode=day_mode, state=state):
+        return False
+    if _side_value(side) != "PUT":
+        return False
+    try:
+        from app.engines.session_timing import in_midday_chop_window
+
+        if in_midday_chop_window():
+            return False
+    except Exception:
+        pass
+
+    allowed = {
+        t.strip().upper()
+        for t in str(
+            getattr(settings, "bullish_day_structure_bypass_tiers_csv", "ELITE,EXPLODING")
+            or "ELITE,EXPLODING"
+        ).split(",")
+        if t.strip()
+    }
+    tier_u = str(tier or "").upper()
+    if tier_u not in allowed:
+        return False
+    min_score = float(
+        getattr(settings, "expiry_worst_pe_structure_bypass_min_score", 55.0) or 55.0
+    )
+    if float(score or 0) + 1e-9 < min_score:
+        return False
+
+    alert = row if isinstance(row, Mapping) else {}
+    local = max(
+        float(base_move_pct or 0),
+        float(alert.get("localBaseMovePct") or 0),
+        float(alert.get("ictBaseRelativeMovePct") or 0),
+        float(alert.get("offLowMovePct") or 0),
+    )
+    max_local = float(
+        getattr(settings, "expiry_worst_pe_structure_bypass_max_local_pct", 22.0) or 22.0
+    )
+    if local > max_local + 1e-6:
+        return False
+
+    flat_vertical = bool(
+        alert.get("ictFlatThenVertical")
+        or alert.get("flatThenVertical")
+    )
+    launch_lane = bool(
+        alert.get("ictFirstLift")
+        or alert.get("ictArmedBaseLaunch")
+        or alert.get("ictBaseArmed")
+        or alert.get("buildingRipReady")
+        or alert.get("ictBuildingRipReady")
+    )
+    if not (flat_vertical or launch_lane):
+        return False
+
+    min_quality = float(
+        getattr(settings, "expiry_worst_pe_structure_bypass_min_flat_quality", 65.0)
+        or 65.0
+    )
+    quality = float(
+        alert.get("flatVerticalQuality")
+        or alert.get("ictFlatVerticalQuality")
+        or 0
+    )
+    if not volume_awakening and quality + 1e-9 < min_quality:
+        return False
+
+    if snap is not None and snap.spotChart is not None:
+        from app.engines.spot_direction import side_aligned_with_chart
+
+        if not side_aligned_with_chart("PUT", snap.spotChart):
+            return False
+    return True
+
+
 def top_ftv_v_expiry_worst_waive(evidence: Mapping[str, Any]) -> bool:
     settings = get_settings()
     if not bool(getattr(settings, "top_ftv_v_expiry_bypass_enabled", True)):

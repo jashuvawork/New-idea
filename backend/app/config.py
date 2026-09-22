@@ -2107,6 +2107,11 @@ class Settings(BaseSettings):
     top_ftv_v_expiry_bypass_min_base_move_pct: float = 5.0
     top_ftv_v_expiry_bypass_max_base_move_pct: float = 55.0
     top_ftv_v_expiry_chart_bypass_enabled: bool = True
+    # EXPIRY WORST morning PE — waive first_lift_structure when ELITE flat→vertical at base.
+    expiry_worst_pe_structure_bypass_enabled: bool = True
+    expiry_worst_pe_structure_bypass_min_score: float = 55.0
+    expiry_worst_pe_structure_bypass_max_local_pct: float = 22.0
+    expiry_worst_pe_structure_bypass_min_flat_quality: float = 65.0
     expiry_worst_day_top_ftv_v_bypass_enabled: bool = True
     expiry_worst_day_top_ftv_v_bypasses_trade_cap: bool = True
     # Master switch for session-lift when top FTV/V / ELITE / explosive is on radar.
