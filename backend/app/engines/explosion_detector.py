@@ -51,6 +51,83 @@ LOCAL_BASE_SAMPLE_MIN_SECONDS = 1.5
 _TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
 
 
+def _tier_at_least(current: str, minimum: str) -> str:
+    return minimum if _TIER_RANK.get(current, 0) < _TIER_RANK.get(minimum, 0) else current
+
+
+def apply_ict_near_base_tier_promotion(
+    e: "ExplosionEvent",
+    ict: Any,
+    settings: Any,
+) -> None:
+    """Promote tier when ICT near-base structure fires before velocity/peak catches up."""
+    if not bool(getattr(settings, "near_base_ict_tier_promotion_enabled", True)):
+        return
+
+    appear_lo = float(
+        getattr(settings, "ict_first_lift_appear_min_move_pct", 8.0) or 8.0
+    )
+    appear_hi = float(
+        getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0
+    )
+    min_quality = float(
+        getattr(settings, "near_base_tier_promotion_min_quality", 65.0) or 65.0
+    )
+    base_rel = float(getattr(ict, "base_relative_move_pct", 0) or 0)
+    if base_rel + 1e-6 < appear_lo or base_rel > appear_hi + 1e-6:
+        return
+
+    first_lift = bool(getattr(ict, "first_lift", False))
+    flat_vertical = bool(getattr(ict, "flat_then_vertical", False))
+    active = bool(getattr(ict, "active", False))
+    armed_launch = bool(getattr(ict, "armed_base_launch", False))
+    elite_base_ready = bool(getattr(ict, "elite_base_ready", False))
+    v_rip_ready = bool(getattr(ict, "v_rip_ready", False))
+    building_rip_ready = bool(getattr(ict, "building_rip_ready", False))
+    sustained = bool(getattr(ict, "armed_base_sustained_lift", False))
+
+    structural = (
+        first_lift
+        or flat_vertical
+        or armed_launch
+        or elite_base_ready
+        or v_rip_ready
+        or building_rip_ready
+        or sustained
+        or (active and float(getattr(ict, "score", 0) or 0) >= 28.0)
+    )
+    if not structural:
+        return
+
+    fv_quality = float(getattr(ict, "flat_vertical_quality", 0) or 0)
+    quality_ok = (
+        fv_quality >= min_quality
+        or first_lift
+        or armed_launch
+        or elite_base_ready
+        or v_rip_ready
+    )
+    v3 = float(e.velocity_3s or 0)
+    vol_awaken = bool(getattr(ict, "volume_awakening", False))
+    heat = v3 >= 1.0 or vol_awaken or float(e.volume_surge or 0) >= 1.6
+
+    prev_tier = e.tier
+    if first_lift or armed_launch or elite_base_ready or v_rip_ready:
+        if quality_ok and heat:
+            e.tier = _tier_at_least(e.tier, "EXPLODING")
+            e.explosion_score = max(float(e.explosion_score or 0), 58.0)
+        else:
+            e.tier = _tier_at_least(e.tier, "BUILDING")
+            e.explosion_score = max(float(e.explosion_score or 0), 42.0)
+    elif flat_vertical or building_rip_ready or sustained or active:
+        e.tier = _tier_at_least(e.tier, "BUILDING")
+        e.explosion_score = max(float(e.explosion_score or 0), 38.0)
+
+    if e.tier != prev_tier:
+        tag = "ictNearBaseTierPromotion"
+        e.reason = f"{e.reason} {tag}".strip() if e.reason else tag
+
+
 @dataclass
 class ArmedBaseAnchor:
     premium: float
@@ -2376,11 +2453,13 @@ def scan_chain_explosions(
             if tier == "WATCH" and score < 25 and not awakened:
                 keep_first_lift = False
                 keep_armed_base = False
+                keep_flat_vertical = False
+                keep_active_breakout = False
                 ict_probe = None
                 if bool(getattr(settings, "ict_first_lift_appear_enabled", True)):
                     # The ICT first-lift threshold is intentionally softer than BUILDING.
-                    # Probe before dropping WATCH so a slow 15% lift off a real flat/V base
-                    # reaches radar; selection still requires its normal score/tier/chart
+                    # Probe before dropping WATCH so a slow lift off a real flat/V base
+                    # reaches radar at ~8% appear; selection still requires score/tier/chart
                     # gates before this can become an order.
                     try:
                         from app.engines.ict_breakout_monitor import analyze_ict_breakout
@@ -2401,9 +2480,37 @@ def scan_chain_explosions(
                         )
                         keep_first_lift = ict_probe.first_lift
                         keep_armed_base = ict_probe.base_armed
+                        keep_flat_vertical = bool(
+                            ict_probe.flat_then_vertical and ict_probe.active
+                        )
+                        appear_lo = float(
+                            getattr(
+                                settings,
+                                "ict_first_lift_appear_min_move_pct",
+                                8.0,
+                            )
+                            or 8.0
+                        )
+                        appear_hi = float(
+                            getattr(settings, "elite_local_base_max_move_pct", 40.0)
+                            or 40.0
+                        )
+                        base_rel_probe = float(
+                            getattr(ict_probe, "base_relative_move_pct", 0) or 0
+                        )
+                        keep_active_breakout = bool(
+                            ict_probe.active
+                            and appear_lo <= base_rel_probe <= appear_hi
+                        )
+                        if keep_first_lift or keep_flat_vertical or keep_active_breakout:
+                            tier = "BUILDING"
+                            score = max(score, 40.0)
+                            reason_parts_open.append("ictNearBaseWatchProbe")
                     except Exception:
                         keep_first_lift = False
                         keep_armed_base = False
+                        keep_flat_vertical = False
+                        keep_active_breakout = False
                 # An armed base with no live lift yet needs no standalone radar row: the
                 # anchor persists in _armed_base_anchors and re-surfaces the event the moment
                 # the premium lifts. Emitting a dead-flat (0 move / 0 velocity) WATCH just
@@ -2452,6 +2559,8 @@ def scan_chain_explosions(
                 if (
                     not keep_first_lift
                     and not keep_armed_base
+                    and not keep_flat_vertical
+                    and not keep_active_breakout
                     and not trough_scan_ok
                     and not fast_burst_ok
                     and not (peak_move >= 20 and v3 >= 1.2)
@@ -2622,6 +2731,10 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     all_day = is_all_day_explosion_event(e)
     capture = is_premium_capture_event(e)
     ict = analyze_explosion_event_ict(e, snap)
+    from app.config import get_settings as _gs
+
+    _settings = _gs()
+    apply_ict_near_base_tier_promotion(e, ict, _settings)
     sustained_armed_lift = bool(
         getattr(ict, "armed_base_sustained_lift", False)
     )
@@ -2639,9 +2752,6 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     except Exception:
         _coil_pred = {"coiling": False, "readinessScore": 0.0, "predictedSide": None}
     move = max(float(e.daily_move_pct or 0), float(e.peak_move_pct or 0), float(ict.session_move_pct or 0))
-    from app.config import get_settings as _gs
-
-    _settings = _gs()
     immature_floor = float(
         getattr(_settings, "explosion_immature_min_session_move_pct", 28.0) or 28.0
     )
