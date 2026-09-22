@@ -182,6 +182,10 @@ def breadth_hard_blocks_side(
         return False, "ok"
 
     settings = get_settings()
+    from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+
+    if symmetric_best_trade_capture_active(settings):
+        return False, "ok"
     if not settings.breadth_hard_side_block_enabled:
         return False, "ok"
 
@@ -390,6 +394,10 @@ def session_side_alignment_blocks(
     Index-flip waivers (rally/slide + loss-triggered) allow post-flip legs when chart lags.
     """
     settings = settings or get_settings()
+    from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+
+    if symmetric_best_trade_capture_active(settings):
+        return False, ""
     if not _session_side_alignment_enabled(settings):
         return False, ""
     dm = str(day_mode or "").strip().upper()

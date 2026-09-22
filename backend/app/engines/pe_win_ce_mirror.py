@@ -384,6 +384,19 @@ def call_ce_base_context_armed(
 ) -> tuple[bool, str, dict[str, Any]]:
     """CE base context: index rally, PE-win mirror, or premium local-base V-lift."""
     settings = settings or get_settings()
+    from app.engines.best_trade_policy import (
+        symmetric_best_trade_capture_active,
+        symmetric_structural_base_evidence,
+    )
+
+    if symmetric_best_trade_capture_active(settings) and evidence is not None:
+        if symmetric_structural_base_evidence(evidence, settings=settings):
+            local = max(
+                _number(evidence.get("localBaseMovePct")),
+                _number(evidence.get("ictBaseRelativeMovePct")),
+                _number(evidence.get("offLowMovePct")),
+            )
+            return True, "symmetric_ce_raw_base", {"localBasePct": round(local, 2)}
     index_ok, index_reason, index_meta = call_rally_entry_unlock_armed(
         state, snap, symbol, settings=settings,
     )

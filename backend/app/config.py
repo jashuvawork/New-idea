@@ -391,6 +391,8 @@ class Settings(BaseSettings):
     elite_trade_block_perfect_score_enabled: bool = True
     elite_trade_perfect_score_threshold: float = 99.95
     elite_trade_perfect_score_max_local_pct: float = 15.0
+    # Raw symmetric best-trade mode — CE and PE compete on merit all day; no day-mode side lock.
+    symmetric_best_trade_capture_enabled: bool = True
     # Sep-9 best trades: allow FTV + V near-base; block generic EXPLOSIVE mid-rip chase.
     elite_trade_v_rip_only_enabled: bool = False
     elite_trade_block_explosive_chase_enabled: bool = True

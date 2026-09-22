@@ -237,6 +237,10 @@ def check_directional_side_lock(
     Breadth-aligned EXPLODING/ELITE rips bypass lock when switching from wrong side.
     """
     settings = get_settings()
+    from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+
+    if symmetric_best_trade_capture_active(settings):
+        return False, "ok"
     if not settings.directional_side_lock_enabled:
         return False, "ok"
 
@@ -356,6 +360,10 @@ def check_directional_side_lock_simple(
 ) -> tuple[bool, str]:
     """Lightweight gate — counter-trend blocked unless breadth already flipped."""
     settings = get_settings()
+    from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+
+    if symmetric_best_trade_capture_active(settings):
+        return False, "ok"
     if not settings.directional_side_lock_enabled:
         return False, "ok"
 

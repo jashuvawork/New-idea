@@ -343,6 +343,10 @@ def best_side_rank_adjustment(
 ) -> float:
     """Boost dominant-leg candidates; penalize clearly counter-dominant entries."""
     settings = get_settings()
+    from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+
+    if symmetric_best_trade_capture_active(settings):
+        return 0.0
     if not bool(getattr(settings, "best_side_selection_enabled", True)):
         return 0.0
     snap = getattr(candidate, "snap", None) or snapshots.get(

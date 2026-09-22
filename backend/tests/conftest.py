@@ -40,6 +40,7 @@ def _reset_all_engine_globals() -> None:
 
         object.__setattr__(get_settings(), "elite_trade_engine_enabled", False)
         object.__setattr__(get_settings(), "top_trades_only_strict_enabled", False)
+        object.__setattr__(get_settings(), "symmetric_best_trade_capture_enabled", False)
     except Exception:
         pass
 
