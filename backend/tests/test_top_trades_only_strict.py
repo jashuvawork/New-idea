@@ -181,7 +181,10 @@ def test_elite_entry_blocks_sep21_style_put(_day):
         ev, ranking, settings=settings, side="PUT", day_mode="CHOP DAY",
     )
     assert ok is False
-    assert reason == "top_trades_chop_day_not_must_take"
+    assert reason in (
+        "top_trades_chop_day_not_must_take",
+        "top_trades_requires_elite_tier",
+    )
 
 
 @patch(

@@ -12,6 +12,47 @@ VALID_BEST_BASE_SETUPS = frozenset({"FTV", "V"})
 _GOOD_TIMING = frozenset({"GOOD", "OK"})
 
 
+def symmetric_best_trade_capture_active(settings: Any = None) -> bool:
+    """True when CE/PE compete on best near-base moments — no sticky day-side lock."""
+    from app.config import get_settings
+
+    _ = settings
+    return bool(getattr(get_settings(), "symmetric_best_trade_capture_enabled", True))
+
+
+def symmetric_structural_base_evidence(
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Option at local structural base (armed / flat→vertical / building rip) — either side."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    local = max(
+        _number(evidence.get("localBaseMovePct")),
+        _number(evidence.get("ictBaseRelativeMovePct")),
+        _number(evidence.get("offLowMovePct")),
+        _number(evidence.get("offHighMovePct")),
+    )
+    max_local = float(
+        getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
+    )
+    if local > max_local + 1e-6:
+        return False
+    return bool(
+        evidence.get("ictBaseArmed")
+        or evidence.get("armedBaseLaunch")
+        or evidence.get("ictFlatThenVertical")
+        or evidence.get("flatThenVertical")
+        or evidence.get("buildingRipReady")
+        or evidence.get("ictBuildingRipReady")
+        or evidence.get("ictFirstLift")
+        or evidence.get("firstLift")
+    )
+
+
 def _number(value: Any) -> float:
     try:
         return float(value or 0)

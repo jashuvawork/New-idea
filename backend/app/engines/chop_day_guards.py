@@ -892,6 +892,9 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "controlledDailyCapSource": cap_source,
         "whipsawGuards": whipsaw_guard_summary(state, snapshots),
         "directionalLock": directional_lock_summary(snapshots),
+        "symmetricBestTradeCapture": bool(
+            getattr(settings, "symmetric_best_trade_capture_enabled", True)
+        ),
         "sessionSideAlignment": _session_side_alignment_hud(state, snapshots, mode),
         "confidenceHold": high_confidence_close_summary(),
         "moneynessPolicy": {

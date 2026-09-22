@@ -100,7 +100,12 @@ def _call_rally_bypass(
     direction: str,
     breadth: str,
 ) -> tuple[bool, str, dict[str, Any]]:
-    if bool(getattr(settings, "index_rally_side_flip_require_put_session", True)):
+    from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+
+    if (
+        not symmetric_best_trade_capture_active(settings)
+        and bool(getattr(settings, "index_rally_side_flip_require_put_session", True))
+    ):
         put_session = locked == "PUT" or direction == "BEARISH" or breadth == "BEARISH"
         if not put_session:
             return False, "no_put_session", {"lockedSide": locked, "direction": direction}
@@ -154,7 +159,12 @@ def _put_slide_bypass(
     direction: str,
     breadth: str,
 ) -> tuple[bool, str, dict[str, Any]]:
-    if bool(getattr(settings, "index_rally_side_flip_require_call_session", True)):
+    from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+
+    if (
+        not symmetric_best_trade_capture_active(settings)
+        and bool(getattr(settings, "index_rally_side_flip_require_call_session", True))
+    ):
         call_session = locked == "CALL" or direction == "BULLISH" or breadth == "BULLISH"
         if not call_session:
             return False, "no_call_session", {"lockedSide": locked, "direction": direction}

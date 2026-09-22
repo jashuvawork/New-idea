@@ -122,6 +122,10 @@ def breadth_blocks_explosion_side(
             return False, "ok"
 
     settings = get_settings()
+    from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+
+    if symmetric_best_trade_capture_active(settings):
+        return False, "ok"
     if not settings.explosion_breadth_alignment_enabled:
         return False, "ok"
     bias = (breadth_bias or "NEUTRAL").upper()
@@ -165,6 +169,26 @@ def chart_blocks_explosion_side(
 
     if chart is None:
         return False, "ok"
+    settings = get_settings()
+    from app.engines.best_trade_policy import (
+        symmetric_best_trade_capture_active,
+        symmetric_structural_base_evidence,
+    )
+
+    alert_d = alert if isinstance(alert, dict) else {}
+    if event is not None:
+        alert_d = {
+            **alert_d,
+            "tier": str(getattr(event, "tier", "") or alert_d.get("tier") or ""),
+            "localBaseMovePct": getattr(event, "daily_move_pct", None)
+            or alert_d.get("localBaseMovePct"),
+        }
+    if (
+        symmetric_best_trade_capture_active(settings)
+        and str(alert_d.get("tier") or getattr(event, "tier", "") or "").upper() == "ELITE"
+        and symmetric_structural_base_evidence(alert_d, settings=settings)
+    ):
+        return False, "ok"
     direction = (chart.direction or "NEUTRAL").upper()
     side_v = _side_val(side)
     if direction == "NEUTRAL":
@@ -202,6 +226,10 @@ def dominant_explosion_alert(snap: SymbolSnapshot) -> Optional[dict[str, Any]]:
 def cross_side_chase_blocked(event: ExplosionEvent, snap: SymbolSnapshot) -> tuple[bool, str]:
     """When one side is clearly exploding, do not flip to the opposite leg."""
     settings = get_settings()
+    from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+
+    if symmetric_best_trade_capture_active(settings):
+        return False, "ok"
     if not settings.explosion_single_side_per_symbol:
         return False, "ok"
     dom = dominant_explosion_alert(snap)
