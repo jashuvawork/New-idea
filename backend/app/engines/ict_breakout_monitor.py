@@ -1944,6 +1944,7 @@ def first_lift_entry_readiness(
             bullish_day_structure_bypass_allowed,
         )
         from app.engines.top_ftv_v_expiry_bypass import (
+            expiry_worst_ce_structure_bypass_allowed,
             expiry_worst_pe_structure_bypass_allowed,
         )
 
@@ -1991,8 +1992,20 @@ def first_lift_entry_readiness(
                 state=state,
             )
         )
-        if not structure_bypass:
+        if not structure_bypass and _side == "PUT":
             structure_bypass = expiry_worst_pe_structure_bypass_allowed(
+                tier=_tier,
+                score=_score,
+                base_move_pct=_base_move,
+                volume_awakening=_volume_awake,
+                side=_side,
+                day_mode=day_mode,
+                state=state,
+                snap=snap,
+                row=row,
+            )
+        if not structure_bypass and _side == "CALL":
+            structure_bypass = expiry_worst_ce_structure_bypass_allowed(
                 tier=_tier,
                 score=_score,
                 base_move_pct=_base_move,

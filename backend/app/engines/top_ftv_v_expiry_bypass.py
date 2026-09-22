@@ -150,27 +150,71 @@ def _side_value(side: Any) -> str:
     return str(raw or "").upper()
 
 
-def expiry_worst_pe_structure_bypass_allowed(
+def _expiry_worst_flat_vertical_at_base(evidence: Mapping[str, Any]) -> bool:
+    """True when ELITE flat→vertical at base qualifies for expiry-worst waivers."""
+    settings = get_settings()
+    tier = str(evidence.get("tier") or "").upper()
+    if tier != "ELITE":
+        return False
+    if not bool(evidence.get("flatThenVertical") or evidence.get("ictFlatThenVertical")):
+        return False
+    if bool(evidence.get("activeBreakout") or evidence.get("ictBreakout")):
+        return False
+    local = max(
+        float(evidence.get("localBaseMovePct") or 0),
+        float(evidence.get("ictBaseRelativeMovePct") or 0),
+        float(evidence.get("offLowMovePct") or 0),
+    )
+    max_local = float(
+        getattr(settings, "expiry_worst_pe_structure_bypass_max_local_pct", 22.0) or 22.0
+    )
+    if local > max_local + 1e-6:
+        return False
+    quality = float(
+        evidence.get("flatVerticalQuality")
+        or evidence.get("ictFlatVerticalQuality")
+        or 0
+    )
+    min_quality = float(
+        getattr(settings, "expiry_worst_pe_structure_bypass_min_flat_quality", 65.0) or 65.0
+    )
+    volume = bool(
+        evidence.get("volumeAwaken")
+        or evidence.get("volumeAwakening")
+        or evidence.get("ictVolumeAwakening")
+    )
+    if not volume and quality + 1e-9 < min_quality:
+        return False
+    min_score = float(
+        getattr(settings, "expiry_worst_pe_structure_bypass_min_score", 55.0) or 55.0
+    )
+    score = float(evidence.get("explosionScore") or evidence.get("score") or 0)
+    return score + 1e-9 >= min_score
+
+
+def _expiry_worst_structure_bypass_allowed(
     *,
     tier: str,
     score: float,
     base_move_pct: float,
     volume_awakening: bool,
-    side: str = "",
+    side: str,
     day_mode: str = "",
     state: Any = None,
     snap: Optional[SymbolSnapshot] = None,
     row: Optional[Mapping[str, Any]] = None,
+    enabled: bool = True,
 ) -> bool:
-    """EXPIRY WORST morning PUT — ELITE flat→vertical at base before ictBreakout stamps."""
+    """EXPIRY WORST morning — ELITE flat→vertical at base before ictBreakout stamps."""
     settings = get_settings()
-    if not bool(getattr(settings, "expiry_worst_pe_structure_bypass_enabled", True)):
+    if not enabled:
         return False
     from app.engines.ict_breakout_monitor import _expiry_worst_session
 
     if not _expiry_worst_session(day_mode=day_mode, state=state):
         return False
-    if _side_value(side) != "PUT":
+    side_u = _side_value(side)
+    if side_u not in ("PUT", "CALL"):
         return False
     try:
         from app.engines.session_timing import in_midday_chop_window
@@ -239,9 +283,63 @@ def expiry_worst_pe_structure_bypass_allowed(
     if snap is not None and snap.spotChart is not None:
         from app.engines.spot_direction import side_aligned_with_chart
 
-        if not side_aligned_with_chart("PUT", snap.spotChart):
+        if not side_aligned_with_chart(side_u, snap.spotChart):
             return False
     return True
+
+
+def expiry_worst_pe_structure_bypass_allowed(
+    *,
+    tier: str,
+    score: float,
+    base_move_pct: float,
+    volume_awakening: bool,
+    side: str = "",
+    day_mode: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    row: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    settings = get_settings()
+    return _expiry_worst_structure_bypass_allowed(
+        tier=tier,
+        score=score,
+        base_move_pct=base_move_pct,
+        volume_awakening=volume_awakening,
+        side="PUT",
+        day_mode=day_mode,
+        state=state,
+        snap=snap,
+        row=row,
+        enabled=bool(getattr(settings, "expiry_worst_pe_structure_bypass_enabled", True)),
+    )
+
+
+def expiry_worst_ce_structure_bypass_allowed(
+    *,
+    tier: str,
+    score: float,
+    base_move_pct: float,
+    volume_awakening: bool,
+    side: str = "",
+    day_mode: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    row: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    settings = get_settings()
+    return _expiry_worst_structure_bypass_allowed(
+        tier=tier,
+        score=score,
+        base_move_pct=base_move_pct,
+        volume_awakening=volume_awakening,
+        side="CALL",
+        day_mode=day_mode,
+        state=state,
+        snap=snap,
+        row=row,
+        enabled=bool(getattr(settings, "expiry_worst_ce_structure_bypass_enabled", True)),
+    )
 
 
 def top_ftv_v_expiry_worst_waive(evidence: Mapping[str, Any]) -> bool:
@@ -251,6 +349,10 @@ def top_ftv_v_expiry_worst_waive(evidence: Mapping[str, Any]) -> bool:
     sym = str(evidence.get("symbol") or "").upper()
     if sym and sym not in top_ftv_v_symbols(settings):
         return False
+    if _expiry_worst_flat_vertical_at_base(evidence):
+        floors = top_ftv_v_expiry_floors(settings)
+        score = float(evidence.get("explosionScore") or evidence.get("score") or 0)
+        return score >= floors["minScore"]
     moment = classify_top_moment_type(evidence)
     if moment in ("FTV", "V"):
         pass

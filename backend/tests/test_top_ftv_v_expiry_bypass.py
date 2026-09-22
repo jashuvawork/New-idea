@@ -169,6 +169,28 @@ def test_top_ftv_v_waives_expiry_worst_defensive_rip(mock_settings):
     assert top_ftv_v_expiry_worst_waive(evidence) is True
 
 
+@patch("app.engines.top_ftv_v_expiry_bypass.get_settings")
+def test_top_ftv_v_waives_flat_vertical_before_first_lift(mock_settings):
+    """Sep22-style ELITE flat→vertical at base — waive before ictBreakout/firstLift stamp."""
+    mock_settings.return_value = _settings(
+        expiry_worst_pe_structure_bypass_min_score=55.0,
+        expiry_worst_pe_structure_bypass_max_local_pct=22.0,
+        expiry_worst_pe_structure_bypass_min_flat_quality=65.0,
+    )
+    evidence = {
+        "symbol": "NIFTY",
+        "tier": "ELITE",
+        "flatThenVertical": True,
+        "firstLift": False,
+        "activeBreakout": False,
+        "explosionScore": 100.0,
+        "localBaseMovePct": 12.0,
+        "flatVerticalQuality": 71.4,
+        "volumeAwaken": True,
+    }
+    assert top_ftv_v_expiry_worst_waive(evidence) is True
+
+
 @patch("app.engines.expiry_day_guards.expiry_trades_cap_reached", return_value=(False, ""))
 @patch("app.engines.expiry_day_guards.in_expiry_morning_window", return_value=True)
 @patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=False)

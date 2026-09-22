@@ -128,6 +128,42 @@ def test_allows_elite_near_base_on_directional_day():
     assert blocked is False
 
 
+def test_near_base_elite_put_waives_expiry_worst_chop_block():
+    """Sep 9–17 PE on EXPIRY WORST — near-base ELITE FTV/V must not die on chop block."""
+    ev = _evidence(tier="ELITE", setup="FTV")
+    ranking = _ranking()
+    assessment = {
+        "mustTake": False,
+        "eliteScore": 95.0,
+        "grade": "A",
+        "setup": "FTV",
+        "localBasePct": 12.0,
+    }
+    blocked, reason = top_trades_only_blocks_entry(
+        ev, ranking, assessment, day_mode="EXPIRY WORST", side="PUT",
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+def test_near_base_elite_call_waives_chop_day_without_rally_unlock():
+    """Sep 9–17 CE near-base on CHOP DAY — symmetric chop waiver (not CE-only path)."""
+    ev = _evidence(tier="ELITE", side="CALL")
+    ranking = _ranking(side="CALL")
+    assessment = {
+        "mustTake": False,
+        "eliteScore": 94.0,
+        "grade": "A",
+        "setup": "V",
+        "localBasePct": 11.0,
+    }
+    blocked, reason = top_trades_only_blocks_entry(
+        ev, ranking, assessment, day_mode="CHOP DAY", side="CALL",
+    )
+    assert blocked is False
+    assert reason == ""
+
+
 @patch("app.engines.elite_score_engine.resolve_elite_session_day_type", return_value=("CHOP DAY", "CHOP"))
 def test_elite_entry_blocks_sep21_style_put(_day):
     """Sep 21 NIFTY 23350 PE: grade-A EXPLODING chop pad — blocked by top-trades gate."""

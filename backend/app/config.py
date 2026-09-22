@@ -320,6 +320,8 @@ class Settings(BaseSettings):
     top_trades_only_require_elite_tier: bool = True
     top_trades_only_block_chop_unless_must_take: bool = True
     top_trades_only_require_near_base_or_must_take: bool = True
+    # Sep 9–17 near-base ELITE FTV/V waives chop/expiry-worst block (both CE + PE).
+    top_trades_only_near_base_waives_chop: bool = True
     top_trades_only_ce_at_base_waives_chop: bool = True
     # CHOP + RALLY only: waive top-trades chop block for rally-unlocked CE (not plain CHOP DAY).
     top_trades_only_chop_rally_ce_unlock_enabled: bool = True
@@ -2112,6 +2114,8 @@ class Settings(BaseSettings):
     expiry_worst_pe_structure_bypass_min_score: float = 55.0
     expiry_worst_pe_structure_bypass_max_local_pct: float = 22.0
     expiry_worst_pe_structure_bypass_min_flat_quality: float = 65.0
+    # CE mirror — ELITE flat→vertical at base on EXPIRY WORST before ictBreakout stamps.
+    expiry_worst_ce_structure_bypass_enabled: bool = True
     expiry_worst_day_top_ftv_v_bypass_enabled: bool = True
     expiry_worst_day_top_ftv_v_bypasses_trade_cap: bool = True
     # Master switch for session-lift when top FTV/V / ELITE / explosive is on radar.

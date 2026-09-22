@@ -324,11 +324,17 @@ def top_trades_only_blocks_entry(
             return True, align_reason or "session_side_not_aligned"
     if bool(getattr(settings, "top_trades_only_block_chop_unless_must_take", True)):
         if dm in _CHOP_DAY_MODES:
-            ce_chop_waived = False
-            if side_u == "CALL" and state is not None and snap is not None:
+            chop_waived = False
+            if bool(getattr(settings, "top_trades_only_near_base_waives_chop", True)):
+                if (
+                    str(evidence.get("tier") or "").upper() == "ELITE"
+                    and best_trade_near_base_assessment(assessment, settings=settings)
+                ):
+                    chop_waived = True
+            if not chop_waived and side_u == "CALL" and state is not None and snap is not None:
                 sym = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
                 if bool(getattr(settings, "top_trades_only_ce_at_base_waives_chop", True)):
-                    ce_chop_waived = call_at_base_best_trade_fingerprint(
+                    chop_waived = call_at_base_best_trade_fingerprint(
                         evidence,
                         ranking,
                         assessment,
@@ -338,8 +344,8 @@ def top_trades_only_blocks_entry(
                         readiness_reason=readiness_reason,
                         settings=settings,
                     )
-                if not ce_chop_waived:
-                    ce_chop_waived = ce_best_trade_top_trades_waiver(
+                if not chop_waived:
+                    chop_waived = ce_best_trade_top_trades_waiver(
                         evidence,
                         ranking,
                         assessment,
@@ -350,7 +356,7 @@ def top_trades_only_blocks_entry(
                         readiness_reason=readiness_reason,
                         settings=settings,
                     )
-            if not ce_chop_waived:
+            if not chop_waived:
                 return True, "top_trades_chop_day_not_must_take"
 
     if bool(getattr(settings, "top_trades_only_require_elite_tier", True)):
