@@ -7,7 +7,10 @@ from zoneinfo import ZoneInfo
 
 from app.config import Settings
 from app.engines.ict_breakout_monitor import ICTBreakoutSignal, first_lift_entry_readiness
-from app.engines.top_ftv_v_expiry_bypass import expiry_worst_pe_structure_bypass_allowed
+from app.engines.top_ftv_v_expiry_bypass import (
+    expiry_worst_ce_structure_bypass_allowed,
+    expiry_worst_pe_structure_bypass_allowed,
+)
 from app.models.schemas import MarketPhase, Side, SpotChart, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -74,6 +77,24 @@ def _bearish_snap() -> SymbolSnapshot:
     )
 
 
+def _bullish_snap() -> SymbolSnapshot:
+    return SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime(2026, 9, 22, 10, 41, tzinfo=IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=55.0,
+        spot=23420.0,
+        atmStrike=23400.0,
+        spotChart=SpotChart(
+            direction="BULLISH",
+            momentum5Pct=0.35,
+            trendStrength=40.0,
+            spot=23420.0,
+        ),
+    )
+
+
 @patch("app.engines.top_ftv_v_expiry_bypass.get_settings", return_value=Settings())
 def test_expiry_worst_pe_structure_bypass_flat_vertical_without_breakout(_mock):
     alert = _sep22_put_23350_alert()
@@ -134,4 +155,26 @@ def test_sep22_first_lift_readiness_accepts_elite_flat_vertical(_midday, _settin
     )
     assert ok is True
     assert reason != "first_lift_structure_not_confirmed"
+
+
+@patch("app.engines.top_ftv_v_expiry_bypass.get_settings", return_value=Settings())
+def test_expiry_worst_ce_structure_bypass_flat_vertical_without_breakout(_mock):
+    alert = _sep22_put_23350_alert()
+    alert.update(
+        {
+            "side": "CALL",
+            "strike": 23400.0,
+            "premium": 45.0,
+        }
+    )
+    assert expiry_worst_ce_structure_bypass_allowed(
+        tier="ELITE",
+        score=100.0,
+        base_move_pct=12.0,
+        volume_awakening=True,
+        side="CALL",
+        day_mode="EXPIRY WORST",
+        snap=_bullish_snap(),
+        row=alert,
+    ) is True
 
