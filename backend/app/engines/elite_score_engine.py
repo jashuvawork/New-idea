@@ -296,7 +296,6 @@ def top_trades_only_blocks_entry(
         ce_best_trade_building_tier_ok,
         ce_best_trade_near_base_ok,
         ce_best_trade_top_trades_waiver,
-        chop_rally_ce_top_trades_waiver,
     )
 
     settings = settings or get_settings()
