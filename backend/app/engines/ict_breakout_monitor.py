@@ -3182,9 +3182,9 @@ def analyze_ict_breakout(
     armed_at = str(armed_meta.get("armedAt") or "")
     armed_expires_at = str(armed_meta.get("expiresAt") or "")
     early_min = float(getattr(settings, "ict_early_vertical_min_session_move_pct", 28.0) or 28.0)
-    # First-lift floor — appear at the structured local-base pad (~15%), not after chase.
+    # First-lift appear floor — radar at ~8% off local base; entry still uses 15%.
     first_lift_lo = float(
-        getattr(settings, "ict_structured_early_min_move_pct", 15.0) or 15.0
+        getattr(settings, "ict_first_lift_appear_min_move_pct", 8.0) or 8.0
     )
     first_lift_hi = float(
         getattr(settings, "elite_local_base_max_move_pct", 40.0) or 40.0

@@ -849,6 +849,12 @@ class Settings(BaseSettings):
     ict_flat_base_use_lowest: bool = True
     # Arm FTV / radar as soon as pad is in the structured entry band with heat.
     ict_first_lift_appear_enabled: bool = True
+    # Radar appear floor — separate from the 15% structured ENTRY floor so first_lift
+    # stamps at ~8% off the local base (CE + PE) while entry gates still wait for 15%.
+    ict_first_lift_appear_min_move_pct: float = 8.0
+    # Promote BUILDING/EXPLODING when ICT near-base structure fires before velocity tiers.
+    near_base_ict_tier_promotion_enabled: bool = True
+    near_base_tier_promotion_min_quality: float = 65.0
     ict_first_lift_min_velocity_3s: float = 1.2
     # Early momentum-ignition at the LOCAL BASE — catch the FTV as it ignites (1-10% off the
     # confirmed base) instead of waiting for the ~15% structured first-lift floor, which is why
