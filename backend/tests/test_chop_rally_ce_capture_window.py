@@ -9,7 +9,10 @@ from app.engines.building_ltp_monitor import (
     publish_building_scoreboard,
     reset_building_ltp_monitor_for_tests,
 )
-from app.engines.pe_win_ce_mirror import chop_rally_ce_building_capture_ok
+from app.engines.pe_win_ce_mirror import (
+    ce_best_trade_building_capture_ok,
+    chop_rally_ce_building_capture_ok,
+)
 
 
 def _alert(**overrides):
@@ -118,6 +121,82 @@ def test_chop_rally_capture_requires_scoreboard_ready(_unlock):
         day_mode="CHOP + RALLY",
         settings=settings,
     ) is False
+
+
+@patch("app.engines.pe_win_ce_mirror._ce_rally_fingerprint_bar", return_value=True)
+def test_bullish_day_building_capture_ok(_fp):
+    reset_building_ltp_monitor_for_tests()
+    publish_building_scoreboard(
+        [
+            BuildingLtpScore(
+                key="NIFTY:CALL:23450",
+                symbol="NIFTY",
+                side="CALL",
+                strike=23450.0,
+                ltp=46.8,
+                tier="BUILDING",
+                ready=True,
+                ready_reason="building_rip_bullish_ready",
+                score=88.0,
+                explosion_score=58.0,
+                velocity_3s=1.5,
+                velocity_9s=1.2,
+                local_move_pct=12.8,
+                off_low_move_pct=12.8,
+                volume_awaken=True,
+                is_best_ready=True,
+            )
+        ]
+    )
+    settings = Settings()
+    snap = MagicMock(symbol="NIFTY", tradeQualityScore=55.0)
+    state = MagicMock(dailyStrategy={"dayMode": "BULLISH DAY"})
+    assert ce_best_trade_building_capture_ok(
+        _alert(),
+        snap,
+        state,
+        day_mode="BULLISH DAY",
+        readiness_reason="building_rip_bullish_ready",
+        settings=settings,
+    ) is True
+
+
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_fingerprint", return_value=True)
+def test_expiry_worst_building_capture_ok_rally_unlock(_unlock):
+    reset_building_ltp_monitor_for_tests()
+    publish_building_scoreboard(
+        [
+            BuildingLtpScore(
+                key="NIFTY:CALL:23450",
+                symbol="NIFTY",
+                side="CALL",
+                strike=23450.0,
+                ltp=46.8,
+                tier="BUILDING",
+                ready=True,
+                ready_reason="building_rip_bullish_ready",
+                score=88.0,
+                explosion_score=58.0,
+                velocity_3s=1.5,
+                velocity_9s=1.2,
+                local_move_pct=12.8,
+                off_low_move_pct=12.8,
+                volume_awaken=True,
+                is_best_ready=True,
+            )
+        ]
+    )
+    settings = Settings()
+    snap = MagicMock(symbol="NIFTY", tradeQualityScore=55.0)
+    state = MagicMock(dailyStrategy={"dayMode": "EXPIRY WORST"})
+    assert ce_best_trade_building_capture_ok(
+        _alert(),
+        snap,
+        state,
+        day_mode="EXPIRY WORST",
+        readiness_reason="building_rip_bullish_ready",
+        settings=settings,
+    ) is True
 
 
 def test_chop_rally_capture_wrong_day_mode():

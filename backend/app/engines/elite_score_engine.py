@@ -293,9 +293,9 @@ def top_trades_only_blocks_entry(
         call_at_base_best_trade_fingerprint,
     )
     from app.engines.pe_win_ce_mirror import (
-        chop_rally_ce_building_tier_ok,
-        chop_rally_ce_near_base_ok,
-        chop_rally_ce_top_trades_waiver,
+        ce_best_trade_building_tier_ok,
+        ce_best_trade_near_base_ok,
+        ce_best_trade_top_trades_waiver,
     )
 
     settings = settings or get_settings()
@@ -339,7 +339,7 @@ def top_trades_only_blocks_entry(
                         settings=settings,
                     )
                 if not ce_chop_waived:
-                    ce_chop_waived = chop_rally_ce_top_trades_waiver(
+                    ce_chop_waived = ce_best_trade_top_trades_waiver(
                         evidence,
                         ranking,
                         assessment,
@@ -356,7 +356,7 @@ def top_trades_only_blocks_entry(
     if bool(getattr(settings, "top_trades_only_require_elite_tier", True)):
         tier = str(evidence.get("tier") or "").upper()
         if tier != "ELITE":
-            building_ok = chop_rally_ce_building_tier_ok(
+            building_ok = ce_best_trade_building_tier_ok(
                 evidence,
                 ranking,
                 assessment,
@@ -376,7 +376,7 @@ def top_trades_only_blocks_entry(
         if (
             not near_base_ok
             and side_u == "CALL"
-            and chop_rally_ce_top_trades_waiver(
+            and ce_best_trade_top_trades_waiver(
                 evidence,
                 ranking,
                 assessment,
@@ -388,7 +388,7 @@ def top_trades_only_blocks_entry(
                 settings=settings,
             )
         ):
-            near_base_ok = chop_rally_ce_near_base_ok(
+            near_base_ok = ce_best_trade_near_base_ok(
                 assessment, ranking, settings=settings,
             )
         if not near_base_ok:

@@ -496,6 +496,203 @@ def call_rally_entry_unlock_armed(
 
 
 _CHOP_RALLY_DAY_MODE = "CHOP + RALLY"
+_CE_BEST_TRADE_BULLISH_DAY_MODES = frozenset({
+    "BULLISH DAY",
+    "LEAN BULLISH",
+})
+_CE_BEST_TRADE_CAPTURE_DAY_MODES = frozenset({
+    _CHOP_RALLY_DAY_MODE,
+    "EXPIRY WORST",
+    "BEARISH DAY",
+    "BULLISH DAY",
+    "LEAN BULLISH",
+    "LEAN BEARISH",
+    "CHOP DAY",
+    "CHOP (PRE-10)",
+})
+
+
+def _resolve_ce_day_mode(
+    day_mode: str = "",
+    *,
+    assessment: Mapping[str, Any] | None = None,
+    evidence: Mapping[str, Any] | None = None,
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+) -> str:
+    dm = str(
+        day_mode
+        or (assessment or {}).get("dayMode")
+        or (evidence or {}).get("dayMode")
+        or ""
+    ).strip().upper()
+    if dm:
+        return dm
+    return _resolve_chop_rally_day_mode("", state=state, snap=snap)
+
+
+def ce_best_trade_top_trades_waiver(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    assessment: Mapping[str, Any] | None,
+    *,
+    day_mode: str = "",
+    side: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """Session-aligned CALL best trade — waives top-trades blocks beyond CHOP+RALLY only."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "top_trades_only_ce_best_trade_unlock_enabled", True)):
+        return False
+    if str(side or evidence.get("side") or "").upper() != "CALL":
+        return False
+    if state is None or snap is None:
+        return False
+
+    sym = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    if chop_rally_ce_top_trades_waiver(
+        evidence,
+        ranking,
+        assessment,
+        day_mode=day_mode,
+        side="CALL",
+        state=state,
+        snap=snap,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return True
+
+    from app.engines.best_trade_policy import (
+        call_at_base_best_trade_fingerprint,
+        _mid_rip_best_trade_signals,
+    )
+
+    if call_at_base_best_trade_fingerprint(
+        evidence,
+        ranking,
+        assessment,
+        state=state,
+        snap=snap,
+        symbol=sym,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return True
+
+    if call_rally_entry_unlock_fingerprint(
+        evidence,
+        ranking,
+        assessment,
+        state=state,
+        snap=snap,
+        symbol=sym,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return True
+
+    dm = _resolve_ce_day_mode(
+        day_mode,
+        assessment=assessment,
+        evidence=evidence,
+        state=state,
+        snap=snap,
+    )
+    if dm in _CE_BEST_TRADE_BULLISH_DAY_MODES and _ce_rally_fingerprint_bar(
+        evidence,
+        ranking,
+        assessment,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return True
+
+    tier = str(evidence.get("tier") or "").upper()
+    if tier == "BUILDING" and _mid_rip_best_trade_signals(
+        evidence, assessment, tier=tier, settings=settings,
+    ):
+        armed, _, _ = call_ce_base_context_armed(
+            state,
+            snap,
+            sym,
+            evidence,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        )
+        if armed and _ce_rally_fingerprint_bar(
+            evidence,
+            ranking,
+            assessment,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        ):
+            return True
+        if dm in _CE_BEST_TRADE_BULLISH_DAY_MODES and _ce_rally_fingerprint_bar(
+            evidence,
+            ranking,
+            assessment,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        ):
+            return True
+
+    return False
+
+
+def ce_best_trade_near_base_ok(
+    assessment: Mapping[str, Any] | None,
+    ranking: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Relaxed near-base bar for session-aligned CE best trades."""
+    return chop_rally_ce_near_base_ok(assessment, ranking, settings=settings)
+
+
+def ce_best_trade_building_tier_ok(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    assessment: Mapping[str, Any] | None,
+    *,
+    day_mode: str = "",
+    side: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """Allow BUILDING-tier CE when best-trade waiver + building rip is live."""
+    settings = settings or get_settings()
+    allow = bool(getattr(settings, "top_trades_only_ce_allow_building_tier", True)) or bool(
+        getattr(settings, "top_trades_only_chop_rally_allow_building_tier", True)
+    )
+    if not allow:
+        return False
+    if str(evidence.get("tier") or "").upper() != "BUILDING":
+        return False
+    if not ce_best_trade_top_trades_waiver(
+        evidence,
+        ranking,
+        assessment,
+        day_mode=day_mode,
+        side=side,
+        state=state,
+        snap=snap,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return False
+    if not _building_rip_launch_ok(
+        evidence, readiness_reason=readiness_reason, settings=settings,
+    ):
+        return False
+    ranking = ranking if isinstance(ranking, Mapping) else {}
+    grade = str(ranking.get("grade") or (assessment or {}).get("grade") or "").upper()
+    return grade in ("A", "S")
 
 
 def chop_rally_ce_top_trades_waiver(
@@ -570,12 +767,16 @@ def chop_rally_ce_building_tier_ok(
     settings: Any = None,
 ) -> bool:
     """Allow BUILDING-tier CE on CHOP+RALLY when rally unlock + building rip is live."""
-    settings = settings or get_settings()
-    if not bool(getattr(settings, "top_trades_only_chop_rally_allow_building_tier", True)):
+    dm = _resolve_ce_day_mode(
+        day_mode,
+        assessment=assessment,
+        evidence=evidence,
+        state=state,
+        snap=snap,
+    )
+    if dm != _CHOP_RALLY_DAY_MODE:
         return False
-    if str(evidence.get("tier") or "").upper() != "BUILDING":
-        return False
-    if not chop_rally_ce_top_trades_waiver(
+    return ce_best_trade_building_tier_ok(
         evidence,
         ranking,
         assessment,
@@ -585,15 +786,7 @@ def chop_rally_ce_building_tier_ok(
         snap=snap,
         readiness_reason=readiness_reason,
         settings=settings,
-    ):
-        return False
-    if not _building_rip_launch_ok(
-        evidence, readiness_reason=readiness_reason, settings=settings,
-    ):
-        return False
-    ranking = ranking if isinstance(ranking, Mapping) else {}
-    grade = str(ranking.get("grade") or (assessment or {}).get("grade") or "").upper()
-    return grade in ("A", "S")
+    )
 
 
 def _resolve_chop_rally_day_mode(
@@ -639,7 +832,41 @@ def _alert_evidence_from_alert(alert: Mapping[str, Any], symbol: str) -> dict[st
     return evidence
 
 
-def chop_rally_ce_building_capture_ok(
+def _ce_building_capture_context_ok(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    *,
+    day_mode: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    symbol: str = "",
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """CE BUILDING capture requires rally unlock or bullish-day aligned fingerprint."""
+    dm = _resolve_ce_day_mode(day_mode, evidence=evidence, state=state, snap=snap)
+    sym = str(symbol or evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    if dm in _CE_BEST_TRADE_BULLISH_DAY_MODES:
+        return _ce_rally_fingerprint_bar(
+            evidence,
+            ranking,
+            None,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        )
+    return call_rally_entry_unlock_fingerprint(
+        evidence,
+        ranking,
+        None,
+        state=state,
+        snap=snap,
+        symbol=sym,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+
+
+def ce_best_trade_building_capture_ok(
     alert: Mapping[str, Any],
     snap: Optional[SymbolSnapshot],
     state: Any,
@@ -648,11 +875,13 @@ def chop_rally_ce_building_capture_ok(
     readiness_reason: str = "",
     settings: Any = None,
 ) -> bool:
-    """CHOP+RALLY CE: admit BUILDING in capture window when scoreboard ready + local≤15%."""
+    """Admit BUILDING CE in capture window when scoreboard ready + local≤15%."""
     settings = settings or get_settings()
-    if not bool(
+    chop_ok = bool(
         getattr(settings, "top_trades_only_chop_rally_ce_capture_window_enabled", True)
-    ):
+    )
+    general_ok = bool(getattr(settings, "top_trades_only_ce_building_capture_enabled", True))
+    if not chop_ok and not general_ok:
         return False
     alert = alert if isinstance(alert, Mapping) else {}
     if str(alert.get("side") or "").upper() != "CALL":
@@ -661,8 +890,12 @@ def chop_rally_ce_building_capture_ok(
         return False
     if snap is None or state is None:
         return False
-    dm = _resolve_chop_rally_day_mode(day_mode, state=state, snap=snap)
-    if dm != _CHOP_RALLY_DAY_MODE:
+    dm = _resolve_ce_day_mode(day_mode, evidence=alert, state=state, snap=snap)
+    if dm == _CHOP_RALLY_DAY_MODE and not chop_ok:
+        return False
+    if dm != _CHOP_RALLY_DAY_MODE and not general_ok:
+        return False
+    if dm not in _CE_BEST_TRADE_CAPTURE_DAY_MODES:
         return False
 
     symbol = str(alert.get("symbol") or getattr(snap, "symbol", "") or "").upper()
@@ -734,14 +967,34 @@ def chop_rally_ce_building_capture_ok(
     except Exception:
         ranking = None
 
-    return call_rally_entry_unlock_fingerprint(
+    return _ce_building_capture_context_ok(
         evidence,
         ranking,
-        None,
+        day_mode=dm,
         state=state,
         snap=snap,
         symbol=symbol,
         readiness_reason=rr,
+        settings=settings,
+    )
+
+
+def chop_rally_ce_building_capture_ok(
+    alert: Mapping[str, Any],
+    snap: Optional[SymbolSnapshot],
+    state: Any,
+    *,
+    day_mode: str = "",
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """Backward-compatible alias — CHOP+RALLY subset of ce_best_trade_building_capture_ok."""
+    return ce_best_trade_building_capture_ok(
+        alert,
+        snap,
+        state,
+        day_mode=day_mode,
+        readiness_reason=readiness_reason,
         settings=settings,
     )
 

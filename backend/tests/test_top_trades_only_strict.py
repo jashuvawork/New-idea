@@ -269,3 +269,93 @@ def test_ce_at_base_waives_chop_block(_day, _ce):
     )
     assert blocked is False
     assert reason == ""
+
+
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_fingerprint", return_value=True)
+def test_expiry_worst_building_ce_rally_unlock_waives_chop(_rally):
+    """EXPIRY WORST BUILDING CE at base — rally unlock waives chop + elite tier."""
+    settings = Settings()
+    ev = _evidence(tier="BUILDING", buildingRipBullish=True, symbol="NIFTY")
+    ranking = _ranking(side="CALL")
+    state = MagicMock()
+    snap = _aligned_bullish_snap()
+    assessment = {
+        "mustTake": False,
+        "eliteScore": 86.0,
+        "grade": "A",
+        "setup": "V",
+        "localBasePct": 12.0,
+    }
+    blocked, reason = top_trades_only_blocks_entry(
+        ev,
+        ranking,
+        assessment,
+        day_mode="EXPIRY WORST",
+        side="CALL",
+        state=state,
+        snap=snap,
+        readiness_reason="building_rip_bullish_ready",
+        settings=settings,
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+@patch("app.engines.pe_win_ce_mirror._ce_rally_fingerprint_bar", return_value=True)
+def test_bullish_day_building_ce_aligned_fingerprint(_fp):
+    """BULLISH DAY BUILDING CE — session-aligned fingerprint, no rally unlock required."""
+    settings = Settings()
+    ev = _evidence(tier="BUILDING", buildingRipBullish=True, symbol="NIFTY")
+    ranking = _ranking(side="CALL")
+    state = MagicMock()
+    snap = _aligned_bullish_snap()
+    assessment = {
+        "mustTake": False,
+        "eliteScore": 87.0,
+        "grade": "A",
+        "setup": "V",
+        "localBasePct": 10.0,
+    }
+    blocked, reason = top_trades_only_blocks_entry(
+        ev,
+        ranking,
+        assessment,
+        day_mode="BULLISH DAY",
+        side="CALL",
+        state=state,
+        snap=snap,
+        readiness_reason="building_rip_bullish_ready",
+        settings=settings,
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_fingerprint", return_value=True)
+def test_bearish_day_building_ce_rally_unlock(_rally):
+    """BEARISH DAY BUILDING CE — index rally flip unlocks best-trade tier waiver."""
+    settings = Settings()
+    ev = _evidence(tier="BUILDING", buildingRipBullish=True, symbol="NIFTY")
+    ranking = _ranking(side="CALL")
+    state = MagicMock()
+    snap = _aligned_bullish_snap()
+    assessment = {
+        "mustTake": False,
+        "eliteScore": 86.0,
+        "grade": "A",
+        "setup": "V",
+        "localBasePct": 11.0,
+    }
+    blocked, reason = top_trades_only_blocks_entry(
+        ev,
+        ranking,
+        assessment,
+        day_mode="BEARISH DAY",
+        side="CALL",
+        state=state,
+        snap=snap,
+        readiness_reason="building_rip_bullish_ready",
+        settings=settings,
+    )
+    assert blocked is False
+    assert reason == ""

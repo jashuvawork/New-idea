@@ -326,6 +326,10 @@ class Settings(BaseSettings):
     top_trades_only_chop_rally_allow_building_tier: bool = True
     # CHOP + RALLY only: BUILDING CE in capture window when LTP scoreboard ready + local≤15%.
     top_trades_only_chop_rally_ce_capture_window_enabled: bool = True
+    # General CE best-trade unlock — rally/at-base/mid-rip BUILDING beyond CHOP+RALLY only.
+    top_trades_only_ce_best_trade_unlock_enabled: bool = True
+    top_trades_only_ce_allow_building_tier: bool = True
+    top_trades_only_ce_building_capture_enabled: bool = True
     # Session side alignment (CHOP/BULLISH/BEARISH/LEAN): structure beats raw score.
     session_side_alignment_enabled: bool = True
     # Legacy alias — kept for deploy configs; session_side_alignment_enabled takes precedence.

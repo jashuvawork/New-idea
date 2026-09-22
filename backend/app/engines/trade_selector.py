@@ -358,9 +358,9 @@ def _explosion_candidates(
         if str(alert.get("side") or "").upper() == "CALL" and str(
             alert.get("tier") or ""
         ).upper() == "BUILDING":
-            from app.engines.pe_win_ce_mirror import chop_rally_ce_building_capture_ok
+            from app.engines.pe_win_ce_mirror import ce_best_trade_building_capture_ok
 
-            chop_rally_capture = chop_rally_ce_building_capture_ok(
+            chop_rally_capture = ce_best_trade_building_capture_ok(
                 alert,
                 snap,
                 state,
