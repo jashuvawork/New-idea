@@ -95,7 +95,13 @@ def _bullish_snap() -> SymbolSnapshot:
     )
 
 
-@patch("app.engines.top_ftv_v_expiry_bypass.get_settings", return_value=Settings())
+@patch(
+    "app.engines.top_ftv_v_expiry_bypass.get_settings",
+    return_value=Settings(
+        expiry_worst_pe_structure_bypass_enabled=True,
+        expiry_worst_ce_structure_bypass_enabled=True,
+    ),
+)
 def test_expiry_worst_pe_structure_bypass_flat_vertical_without_breakout(_mock):
     alert = _sep22_put_23350_alert()
     assert expiry_worst_pe_structure_bypass_allowed(
@@ -110,7 +116,13 @@ def test_expiry_worst_pe_structure_bypass_flat_vertical_without_breakout(_mock):
     ) is True
 
 
-@patch("app.engines.top_ftv_v_expiry_bypass.get_settings", return_value=Settings())
+@patch(
+    "app.engines.top_ftv_v_expiry_bypass.get_settings",
+    return_value=Settings(
+        expiry_worst_pe_structure_bypass_enabled=True,
+        expiry_worst_ce_structure_bypass_enabled=True,
+    ),
+)
 def test_expiry_worst_pe_structure_bypass_rejects_extended_local(_mock):
     alert = _sep22_put_23350_alert(localBaseMovePct=28.0, ictBaseRelativeMovePct=28.0)
     assert expiry_worst_pe_structure_bypass_allowed(
@@ -125,7 +137,13 @@ def test_expiry_worst_pe_structure_bypass_rejects_extended_local(_mock):
     ) is False
 
 
-@patch("app.engines.ict_breakout_monitor.get_settings", return_value=Settings())
+@patch(
+    "app.engines.ict_breakout_monitor.get_settings",
+    return_value=Settings(
+        expiry_worst_pe_structure_bypass_enabled=True,
+        expiry_worst_ce_structure_bypass_enabled=True,
+    ),
+)
 @patch(
     "app.engines.session_timing.in_midday_chop_window",
     return_value=False,
@@ -157,7 +175,13 @@ def test_sep22_first_lift_readiness_accepts_elite_flat_vertical(_midday, _settin
     assert reason != "first_lift_structure_not_confirmed"
 
 
-@patch("app.engines.top_ftv_v_expiry_bypass.get_settings", return_value=Settings())
+@patch(
+    "app.engines.top_ftv_v_expiry_bypass.get_settings",
+    return_value=Settings(
+        expiry_worst_pe_structure_bypass_enabled=True,
+        expiry_worst_ce_structure_bypass_enabled=True,
+    ),
+)
 def test_expiry_worst_ce_structure_bypass_flat_vertical_without_breakout(_mock):
     alert = _sep22_put_23350_alert()
     alert.update(

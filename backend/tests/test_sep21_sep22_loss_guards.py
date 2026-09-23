@@ -101,7 +101,10 @@ def test_symmetric_chop_ftv_launch_requires_flat_vertical_not_vrip(side):
 
 def test_sep21_counter_trend_put_blocked_without_ftv_launch():
     """Sep21 NIFTY 23350 PE — counter-trend V-rip chop pad must not pass symmetric mode."""
-    settings = Settings()
+    settings = Settings(
+        symmetric_chop_counter_trend_guard_enabled=True,
+        symmetric_best_trade_capture_enabled=True,
+    )
     blocked, reason = symmetric_chop_counter_trend_blocks_entry(
         _sep21_put_evidence(),
         _sep21_put_assessment(),
@@ -230,7 +233,10 @@ def test_chart_allows_counter_trend_elite_with_ftv_launch():
 
 def test_chop_post_win_afternoon_fomo_after_large_trail_win():
     """Sep21 afternoon — large trail win must still trigger chop post-win gate."""
-    settings = Settings()
+    settings = Settings(
+        chop_post_win_afternoon_block_enabled=True,
+        fake_explosion_trap_chop_post_win_afternoon_enabled=True,
+    )
     state = MagicMock(
         dailyStrategy={"dayMode": "CHOP + RALLY"},
     )
@@ -254,7 +260,10 @@ def test_chop_post_win_afternoon_fomo_after_large_trail_win():
 @patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.moneyness.get_settings")
 def test_sep21_chop_post_win_afternoon_hard_blocks(mock_money, mock_settings):
-    settings = Settings()
+    settings = Settings(
+        chop_post_win_afternoon_block_enabled=True,
+        fake_explosion_trap_chop_post_win_afternoon_enabled=True,
+    )
     mock_settings.return_value = settings
     mock_money.return_value = settings
 

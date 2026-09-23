@@ -4,6 +4,10 @@ from datetime import datetime
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
+from tests.mock_defaults import post_sep17_stack_settings
+
 from app.engines.aligned_side_guard import (
     breadth_hard_blocks_side,
     chart_mtf_breadth_bypass_active,
@@ -31,6 +35,14 @@ from app.models.schemas import (
 )
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+@pytest.fixture(autouse=True)
+def _session_alignment_on_for_guard_tests():
+    """These tests assert #623 session-side alignment when explicitly enabled."""
+    cfg = post_sep17_stack_settings()
+    with patch("app.engines.aligned_side_guard.get_settings", return_value=cfg):
+        yield
 
 
 def _elite_put_event() -> ExplosionEvent:
