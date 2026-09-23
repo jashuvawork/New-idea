@@ -200,6 +200,7 @@ def validate_execution_charts(
     pad_lane_bypass: bool = False,
     pe_win_mirror_bypass: bool = False,
     index_trough_bypass: bool = False,
+    symmetric_near_base_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -239,6 +240,7 @@ def validate_execution_charts(
         confirmed_ftv_bypass=confirmed_ftv_bypass,
         pad_lane_bypass=pad_lane_bypass,
         pe_win_mirror_bypass=pe_win_mirror_bypass,
+        symmetric_near_base_bypass=symmetric_near_base_bypass,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -373,8 +375,17 @@ async def monitor_trade_chart_before_execution(
         explosion_event,
         snap=snap,
     )
+    from app.engines.best_trade_policy import symmetric_near_base_premium_fade_bypass
+
+    symmetric_fade_bypass = symmetric_near_base_premium_fade_bypass(
+        alert if isinstance(alert, dict) else None,
+        explosion_event,
+    )
     premium_fade_pad_lane = (
-        strict_first_lift_bypass or pad_lane_chart_bypass or atm_armed_fade_bypass
+        strict_first_lift_bypass
+        or pad_lane_chart_bypass
+        or atm_armed_fade_bypass
+        or symmetric_fade_bypass
     )
     confirmed_ftv_bypass = bool(
         (strict_first_lift_bypass or atm_armed_fade_bypass)
@@ -468,6 +479,7 @@ async def monitor_trade_chart_before_execution(
         pad_lane_bypass=premium_fade_pad_lane,
         pe_win_mirror_bypass=pe_win_mirror_bypass,
         index_trough_bypass=index_trough_bypass,
+        symmetric_near_base_bypass=symmetric_fade_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
@@ -476,6 +488,7 @@ async def monitor_trade_chart_before_execution(
     meta["padLaneChartBypass"] = pad_lane_chart_bypass
     meta["ftvFadeFillBypass"] = confirmed_ftv_bypass
     meta["premiumFadePadLaneBypass"] = premium_fade_pad_lane
+    meta["symmetricNearBaseFadeBypass"] = symmetric_fade_bypass
     meta["peWinCeMirrorFadeBypass"] = pe_win_mirror_bypass
     meta["indexTroughBypass"] = index_trough_bypass
 

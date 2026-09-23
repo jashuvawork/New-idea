@@ -57,6 +57,9 @@ def symmetric_structural_base_evidence(
         or evidence.get("ictBuildingRipReady")
         or evidence.get("ictFirstLift")
         or evidence.get("firstLift")
+        or evidence.get("earlyRadarPadCapture")
+        or evidence.get("buildingCoilPad")
+        or evidence.get("fastBullishLocalBase")
     )
 
 
@@ -181,6 +184,8 @@ def symmetric_near_base_best_ok(
     settings: Any = None,
 ) -> bool:
     """Sep 9–17 symmetric CE/PE — elite near-base score OR fresh structural pad at base."""
+    from app.config import get_settings
+
     settings = settings or get_settings()
     if not symmetric_best_trade_capture_active(settings):
         return best_trade_near_base_assessment(elite_assessment, settings=settings)
@@ -200,6 +205,51 @@ def symmetric_near_base_best_ok(
     if score < min_score - 1e-6 or local > max_local + 1e-6:
         return False
     return setup in VALID_BEST_BASE_SETUPS
+
+
+def symmetric_near_base_premium_fade_bypass(
+    alert: Mapping[str, Any] | None,
+    explosion_event: Any = None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Symmetric CE/PE — allow shallow premium retest fill at explosive/FTV base (like pad-lane)."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not symmetric_best_trade_capture_active(settings):
+        return False
+    if not bool(
+        getattr(settings, "symmetric_near_base_premium_fade_fill_enabled", True)
+    ):
+        return False
+    evidence = alert if isinstance(alert, Mapping) else {}
+    tier = str(
+        evidence.get("tier") or getattr(explosion_event, "tier", "") or ""
+    ).upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    return symmetric_structural_base_evidence(evidence, settings=settings)
+
+
+def symmetric_structural_near_miss_waive(
+    alert: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Waive explosion_near_miss when symmetric profile marks a live structural base."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not symmetric_best_trade_capture_active(settings):
+        return False
+    if not bool(getattr(settings, "symmetric_structural_near_miss_waive_enabled", True)):
+        return False
+    evidence = alert if isinstance(alert, Mapping) else {}
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False
+    return symmetric_structural_base_evidence(evidence, settings=settings)
 
 
 def timing_allows_best_trade_full_size(
