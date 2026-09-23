@@ -196,16 +196,22 @@ def _pad_premium_band_ok(
     settings: Any,
     max_premium_setting: str,
     reason_prefix: str,
+    symbol: str = "",
 ) -> tuple[bool, str]:
     if premium <= 0:
         return False, f"{reason_prefix}_premium_missing"
-    min_prem = float(
-        getattr(settings, "local_base_pad_capture_min_premium_inr", 18.0) or 18.0
-    )
-    max_prem = float(
+    from app.engines.symbol_premium_bands import local_base_pad_premium_band
+
+    max_default = float(
         getattr(settings, max_premium_setting, 220.0)
         or getattr(settings, "local_base_pad_capture_max_premium_inr", 220.0)
         or 220.0
+    )
+    min_prem, max_prem = local_base_pad_premium_band(
+        symbol,
+        settings,
+        max_premium_setting=max_premium_setting,
+        max_default=max_default,
     )
     if premium < min_prem:
         return False, f"{reason_prefix}_premium_below_{min_prem:g}"
@@ -351,6 +357,7 @@ def squeeze_release_readiness(
         settings=s,
         max_premium_setting="squeeze_release_max_premium_inr",
         reason_prefix="squeeze_release",
+        symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
     )
     if not prem_ok:
         return False, prem_reason
@@ -415,6 +422,7 @@ def index_led_option_lag_readiness(
         settings=s,
         max_premium_setting="index_led_option_lag_max_premium_inr",
         reason_prefix="index_lag",
+        symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
     )
     if not prem_ok:
         return False, prem_reason
@@ -514,6 +522,7 @@ def stealth_cvd_coil_readiness(
         settings=s,
         max_premium_setting="stealth_cvd_coil_max_premium_inr",
         reason_prefix="stealth_cvd",
+        symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
     )
     if not prem_ok:
         return False, prem_reason
@@ -615,6 +624,7 @@ def micro_pullback_retest_readiness(
         settings=s,
         max_premium_setting="micro_pullback_retest_max_premium_inr",
         reason_prefix="micro_pullback",
+        symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
     )
     if not prem_ok:
         return False, prem_reason
@@ -701,6 +711,7 @@ def premium_fvg_pad_readiness(
         settings=s,
         max_premium_setting="premium_fvg_pad_max_premium_inr",
         reason_prefix="premium_fvg_pad",
+        symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
     )
     if not prem_ok:
         return False, prem_reason
@@ -843,6 +854,7 @@ def double_dip_vbase_readiness(
         settings=s,
         max_premium_setting="double_dip_vbase_max_premium_inr",
         reason_prefix="double_dip_vbase",
+        symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
     )
     if not prem_ok:
         return False, prem_reason

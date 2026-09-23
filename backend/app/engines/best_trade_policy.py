@@ -722,9 +722,13 @@ def best_trade_chop_deep_chase_blocked(
         return False, ""
 
     premium = _number(getattr(candidate, "premium", 0))
-    min_premium = float(
-        getattr(settings, "best_trade_deep_chase_min_premium_inr", 120.0) or 120.0
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    from app.engines.symbol_premium_bands import (
+        best_trade_cheap_entry_max_premium,
+        best_trade_deep_chase_min_premium,
     )
+
+    min_premium = best_trade_deep_chase_min_premium(sym, settings)
     if premium < min_premium:
         return False, ""
 
@@ -732,9 +736,7 @@ def best_trade_chop_deep_chase_blocked(
     max_local = float(
         getattr(settings, "best_trade_deep_chase_max_local_pct", 18.0) or 18.0
     )
-    cheap_max = float(
-        getattr(settings, "best_trade_cheap_entry_max_premium_inr", 85.0) or 85.0
-    )
+    cheap_max = best_trade_cheap_entry_max_premium(sym, settings)
     setup = str((elite_assessment or {}).get("setup") or "").upper()
     if (
         premium <= cheap_max
@@ -768,8 +770,10 @@ def cheap_base_strike_eligible(
         return False
 
     premium = _number(getattr(candidate, "premium", 0) or (alert or {}).get("premium"))
-    prem_lo = float(getattr(settings, "best_trade_cheap_base_min_premium_inr", 18.0) or 18.0)
-    prem_hi = float(getattr(settings, "best_trade_cheap_base_max_premium_inr", 80.0) or 80.0)
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    from app.engines.symbol_premium_bands import best_trade_cheap_base_premium_band
+
+    prem_lo, prem_hi = best_trade_cheap_base_premium_band(sym, settings)
     if not (prem_lo <= premium <= prem_hi):
         return False
 
@@ -812,14 +816,20 @@ def deep_itm_chase_strike(
         return False
 
     premium = _number(getattr(candidate, "premium", 0) or (alert or {}).get("premium"))
-    deep_floor = float(getattr(settings, "best_trade_deep_itm_min_premium_inr", 120.0) or 120.0)
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    from app.engines.symbol_premium_bands import (
+        best_trade_cheap_entry_max_premium,
+        best_trade_deep_itm_min_premium,
+    )
+
+    deep_floor = best_trade_deep_itm_min_premium(sym, settings)
     if premium >= deep_floor:
         return True
 
     if snap is None:
         return False
     money = _classify_moneyness(candidate, snap)
-    cheap_hi = float(getattr(settings, "best_trade_cheap_entry_max_premium_inr", 85.0) or 85.0)
+    cheap_hi = best_trade_cheap_entry_max_premium(sym, settings)
     return money == "ITM" and premium > cheap_hi
 
 
