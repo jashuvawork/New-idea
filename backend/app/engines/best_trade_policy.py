@@ -174,6 +174,34 @@ def best_trade_near_base_assessment(
     return setup in VALID_BEST_BASE_SETUPS
 
 
+def symmetric_near_base_best_ok(
+    elite_assessment: Mapping[str, Any] | None,
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Sep 9–17 symmetric CE/PE — elite near-base score OR fresh structural pad at base."""
+    settings = settings or get_settings()
+    if not symmetric_best_trade_capture_active(settings):
+        return best_trade_near_base_assessment(elite_assessment, settings=settings)
+    if best_trade_near_base_assessment(elite_assessment, settings=settings):
+        return True
+    if not bool(getattr(settings, "best_trade_near_base_max_lots_enabled", True)):
+        return False
+    assessment = elite_assessment if isinstance(elite_assessment, Mapping) else {}
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    if not symmetric_structural_base_evidence(evidence, settings=settings):
+        return False
+    score = _number(assessment.get("eliteScore"))
+    local = _number(assessment.get("localBasePct"))
+    setup = str(assessment.get("setup") or "").upper()
+    min_score = float(getattr(settings, "best_trade_near_base_min_elite_score", 90.0) or 90.0)
+    max_local = float(getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0)
+    if score < min_score - 1e-6 or local > max_local + 1e-6:
+        return False
+    return setup in VALID_BEST_BASE_SETUPS
+
+
 def timing_allows_best_trade_full_size(
     timing: Mapping[str, Any] | None,
     elite_assessment: Mapping[str, Any] | None = None,

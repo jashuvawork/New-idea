@@ -398,10 +398,18 @@ def top_trades_only_blocks_entry(
                 return True, "top_trades_requires_elite_tier"
 
     if bool(getattr(settings, "top_trades_only_require_near_base_or_must_take", True)):
-        near_base_ok = best_trade_near_base_assessment(assessment, settings=settings)
+        from app.engines.best_trade_policy import (
+            symmetric_best_trade_capture_active,
+            symmetric_near_base_best_ok,
+        )
+
+        near_base_ok = symmetric_near_base_best_ok(
+            assessment, evidence, settings=settings,
+        )
         side_u = str(side or assessment.get("side") or "").upper()
         if (
             not near_base_ok
+            and not symmetric_best_trade_capture_active(settings)
             and side_u == "CALL"
             and ce_best_trade_top_trades_waiver(
                 evidence,

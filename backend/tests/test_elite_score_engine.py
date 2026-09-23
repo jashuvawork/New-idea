@@ -533,23 +533,26 @@ def test_elite_entry_blocks_chase():
 
 
 def test_elite_entry_blocks_call_past_tight_local_cap():
+    from app.config import Settings
+
     ok, reason, assessment = elite_entry_allowed(
         _v_evidence(localBaseMovePct=12.0, side="CALL"),
         _ranking(grade="A"),
+        settings=Settings(elite_call_max_local_base_pct=10.0),
     )
     assert ok is False
     assert reason == "elite_call_chase_past_local_base_window"
     assert assessment.get("side") == "CALL"
 
 
-def test_elite_entry_allows_call_at_tight_local_cap():
+def test_elite_entry_allows_call_at_symmetric_near_base_cap():
     ok, reason, assessment = elite_entry_allowed(
-        _v_evidence(localBaseMovePct=8.0, side="CALL"),
+        _v_evidence(localBaseMovePct=12.0, side="CALL"),
         _ranking(grade="A"),
     )
     assert ok is True
     assert reason == "ok"
-    assert assessment.get("localBaseCapPct") == 10.0
+    assert assessment.get("localBaseCapPct") == 20.0
 
 
 def test_elite_entry_allows_put_at_general_local_cap():

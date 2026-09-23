@@ -336,9 +336,8 @@ class Settings(BaseSettings):
     session_side_alignment_enabled: bool = False
     # Legacy alias — kept for deploy configs; session_side_alignment_enabled takes precedence.
     chop_day_require_side_alignment_enabled: bool = False
-    # Side-specific near-base caps (0 = use elite_trade_max_local_base_pct only).
-    # EOD: CALL local≤10% → 66.7% win; PUT keeps full 20% window.
-    elite_call_max_local_base_pct: float = 10.0
+    # Symmetric Sep 9–17 near-base window for CE (0 = same 20% band as PE).
+    elite_call_max_local_base_pct: float = 0.0
     elite_put_max_local_base_pct: float = 0.0
     # Block CE on MOMENTUM RALLY (EOD: CALL 29% win vs PUT 67% on same gate).
     elite_call_block_momentum_rally_enabled: bool = True
@@ -391,8 +390,8 @@ class Settings(BaseSettings):
     elite_trade_block_perfect_score_enabled: bool = True
     elite_trade_perfect_score_threshold: float = 99.95
     elite_trade_perfect_score_max_local_pct: float = 15.0
-    # Symmetric CE/PE (#627) + Sep21 guards (#629) — off; restore pre–Sep21 side-lock era.
-    symmetric_best_trade_capture_enabled: bool = False
+    # Sep 9–17 profile: symmetric CE/PE best-trade rank; Sep21+ blockers stay off.
+    symmetric_best_trade_capture_enabled: bool = True
     symmetric_chop_counter_trend_guard_enabled: bool = False
     chop_post_win_afternoon_block_enabled: bool = False
     chop_post_win_afternoon_min_win_inr: float = 2000.0
@@ -413,8 +412,8 @@ class Settings(BaseSettings):
     symbol_premium_scale_nifty: float = 1.0
     symbol_premium_scale_sensex: float = 3.0
     symbol_premium_scale_banknifty: float = 3.0
-    # CHOP + RALLY structure bypass (#630) — off with post–Sep17 stack.
-    chop_rally_structure_bypass_enabled: bool = False
+    # Near-base entry helpers (take trades) — on; distinct from Sep21 blockers.
+    chop_rally_structure_bypass_enabled: bool = True
     chop_rally_structure_bypass_symbols_csv: str = "NIFTY,SENSEX,BANKNIFTY"
     chop_rally_structure_bypass_max_local_pct: float = 22.0
     chop_rally_structure_bypass_min_score: float = 55.0
@@ -423,8 +422,8 @@ class Settings(BaseSettings):
     large_ltp_base_cold_velocity_waiver_enabled: bool = True
     large_ltp_base_cold_velocity_max_local_pct: float = 22.0
     large_ltp_base_cold_velocity_min_flat_quality: float = 65.0
-    # Expiry-cycle local base (#631) — off with post–Sep17 stack.
-    expiry_cycle_local_base_enabled: bool = False
+    # Fresh local-base windows through expiry week (#631).
+    expiry_cycle_local_base_enabled: bool = True
     expiry_cycle_near_expiry_max_days: int = 2
     expiry_cycle_post_expiry_min_days: int = 4
     post_expiry_local_base_window_seconds: int = 900
@@ -2150,12 +2149,12 @@ class Settings(BaseSettings):
     top_ftv_v_expiry_bypass_min_base_move_pct: float = 5.0
     top_ftv_v_expiry_bypass_max_base_move_pct: float = 55.0
     top_ftv_v_expiry_chart_bypass_enabled: bool = True
-    # EXPIRY WORST structure bypass (#625) — off; Sep 9–17 ICT confirm path only.
-    expiry_worst_pe_structure_bypass_enabled: bool = False
+    # EXPIRY WORST structure at base — CE+PE (#625); session alignment (#623) stays off.
+    expiry_worst_pe_structure_bypass_enabled: bool = True
     expiry_worst_pe_structure_bypass_min_score: float = 55.0
     expiry_worst_pe_structure_bypass_max_local_pct: float = 22.0
     expiry_worst_pe_structure_bypass_min_flat_quality: float = 65.0
-    expiry_worst_ce_structure_bypass_enabled: bool = False
+    expiry_worst_ce_structure_bypass_enabled: bool = True
     expiry_worst_day_top_ftv_v_bypass_enabled: bool = True
     expiry_worst_day_top_ftv_v_bypasses_trade_cap: bool = True
     # Master switch for session-lift when top FTV/V / ELITE / explosive is on radar.
