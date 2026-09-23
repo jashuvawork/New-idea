@@ -447,6 +447,7 @@ def _explosion_candidates(
                     continue
         from app.engines.explosion_entry_guards import (
             deep_itm_near_strike_substitute_blocked,
+            far_otm_near_base_substitute_blocked,
         )
 
         itm_substitute, _itm_reason = deep_itm_near_strike_substitute_blocked(
@@ -455,6 +456,15 @@ def _explosion_candidates(
             snap,
         )
         if itm_substitute:
+            continue
+        far_otm, _far_reason = far_otm_near_base_substitute_blocked(
+            Side(side_v),
+            strike_v,
+            snap,
+            alert=alert if isinstance(alert, dict) else None,
+            candidate_score=float(alert.get("score") or 0),
+        )
+        if far_otm:
             continue
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))

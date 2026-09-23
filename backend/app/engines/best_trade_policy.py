@@ -51,6 +51,7 @@ def symmetric_structural_base_evidence(
     return bool(
         evidence.get("ictBaseArmed")
         or evidence.get("armedBaseLaunch")
+        or evidence.get("ictArmedBaseLaunch")
         or evidence.get("ictFlatThenVertical")
         or evidence.get("flatThenVertical")
         or evidence.get("buildingRipReady")

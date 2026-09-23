@@ -108,11 +108,46 @@ def test_session_peak_late_reentry_waives_first_strike_entry_sep16_style():
                 "tier": "EXPLODING",
                 "ictArmedBaseLaunch": True,
                 "momentType": "armed_base_launch",
+                "strikeStepsFromAtm": 1,
             },
             state=state,
         )
     assert blocked is False
     assert reason == ""
+
+
+def test_session_peak_late_reentry_no_first_strike_waive_on_far_otm():
+    _seed_session_peak(
+        symbol="SENSEX", strike=75100.0, side=Side.CALL, low=120.0, peak=180.0,
+    )
+    settings = Settings(
+        explosion_late_reentry_block_enabled=True,
+        explosion_late_reentry_waive_first_strike_entry_enabled=True,
+        explosion_late_reentry_waive_max_otm_steps=2,
+        explosion_late_reentry_min_peak_points=15.0,
+        explosion_late_reentry_near_peak_pct=12.0,
+        explosion_late_reentry_pullback_ok_pct=22.0,
+    )
+    state = AutoTraderState(closedPaperTrades=[], openPaperTrades=[])
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ):
+        blocked, reason = session_peak_late_reentry_blocked(
+            symbol="SENSEX",
+            side=Side.CALL,
+            strike=75100.0,
+            premium=170.0,
+            velocity_3s=0.2,
+            alert={
+                "tier": "ELITE",
+                "ictArmedBaseLaunch": True,
+                "strikeStepsFromAtm": 4,
+            },
+            state=state,
+        )
+    assert blocked is True
+    assert "late_reentry_near_session_peak" in reason
 
 
 def test_session_peak_late_reentry_still_blocks_after_prior_close_on_strike():

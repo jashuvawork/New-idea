@@ -752,6 +752,21 @@ def session_peak_late_reentry_blocked(
     if not bool(getattr(settings, "explosion_late_reentry_block_enabled", True)):
         return False, ""
 
+    alert_pre = alert if isinstance(alert, dict) else {}
+    waive_max_steps = int(
+        getattr(settings, "explosion_late_reentry_waive_max_otm_steps", 2) or 2
+    )
+    waive_steps = float(alert_pre.get("strikeStepsFromAtm") or 0)
+    if waive_steps <= 0 and snap is not None:
+        try:
+            from app.engines.explosion_entry_guards import _strike_depth
+
+            waive_steps, _, _ = _strike_depth(side, strike, snap)
+        except Exception:
+            waive_steps = 0.0
+    first_strike_waive_ok = (
+        waive_steps > 0 and waive_steps <= waive_max_steps + 1e-6
+    )
     if (
         state is not None
         and bool(
@@ -761,6 +776,7 @@ def session_peak_late_reentry_blocked(
                 True,
             )
         )
+        and first_strike_waive_ok
         and not _strike_has_session_trade(
             state, symbol=symbol, side=side, strike=strike,
         )

@@ -979,6 +979,7 @@ async def _open_from_candidate(
 
         from app.engines.explosion_entry_guards import (
             deep_itm_near_strike_substitute_blocked,
+            far_otm_near_base_substitute_blocked,
         )
 
         itm_substitute, itm_reason = deep_itm_near_strike_substitute_blocked(
@@ -988,6 +989,19 @@ async def _open_from_candidate(
         )
         if itm_substitute:
             return False, itm_reason
+
+        alert_exec = alert_row if alert_row else {}
+        far_otm, far_reason = far_otm_near_base_substitute_blocked(
+            candidate.side,
+            float(candidate.strike or 0),
+            snap,
+            alert=alert_exec,
+            candidate_score=float(
+                alert_exec.get("score") or getattr(candidate, "score", 0) or 0
+            ),
+        )
+        if far_otm:
+            return False, far_reason
 
     signal_premium = candidate.premium
     is_live = settings.enable_live_trading and settings.auto_trading_enabled
