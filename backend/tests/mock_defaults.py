@@ -14,6 +14,24 @@ from app.config import Settings
 from app.engines.capital_allocator import DailyProfitGate
 
 
+def post_sep17_stack_settings(**overrides: Any) -> Settings:
+    """Opt-in flags for tests of #623–#631 (production defaults are off)."""
+    base = {
+        "session_side_alignment_enabled": True,
+        "chop_day_require_side_alignment_enabled": True,
+        "symmetric_best_trade_capture_enabled": True,
+        "symmetric_chop_counter_trend_guard_enabled": True,
+        "chop_post_win_afternoon_block_enabled": True,
+        "fake_explosion_trap_chop_post_win_afternoon_enabled": True,
+        "expiry_worst_pe_structure_bypass_enabled": True,
+        "expiry_worst_ce_structure_bypass_enabled": True,
+        "chop_rally_structure_bypass_enabled": True,
+        "expiry_cycle_local_base_enabled": True,
+    }
+    base.update(overrides)
+    return Settings(**base)
+
+
 def settings_mock(**overrides: Any) -> MagicMock:
     """MagicMock whose attributes mirror live Settings defaults unless overridden."""
     base = Settings()

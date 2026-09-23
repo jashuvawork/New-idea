@@ -133,8 +133,12 @@ def _sensex_bearish_snap() -> SymbolSnapshot:
     )
 
 
-def test_chop_rally_structure_bypass_ce_and_pe():
-    s = Settings()
+@patch(
+    "app.engines.top_ftv_v_expiry_bypass.get_settings",
+    return_value=Settings(chop_rally_structure_bypass_enabled=True),
+)
+def test_chop_rally_structure_bypass_ce_and_pe(_mock):
+    s = Settings(chop_rally_structure_bypass_enabled=True)
     ce_alert = {
         "symbol": "SENSEX",
         "side": "CALL",
@@ -195,11 +199,16 @@ def test_large_ltp_cold_velocity_waiver_sensex_at_base():
     ) is True
 
 
+@patch("app.engines.top_ftv_v_expiry_bypass.get_settings")
 @patch("app.engines.ict_breakout_monitor.get_settings")
 @patch("app.engines.session_timing.in_midday_chop_window", return_value=False)
-def test_sensex_chop_rally_first_lift_cold_v3_at_base(_midday, mock_settings):
-    s = settings_mock()
-    mock_settings.return_value = s
+def test_sensex_chop_rally_first_lift_cold_v3_at_base(_midday, mock_ict_settings, mock_bypass_settings):
+    s = settings_mock(
+        chop_rally_structure_bypass_enabled=True,
+        large_ltp_base_cold_velocity_waiver_enabled=True,
+    )
+    mock_ict_settings.return_value = s
+    mock_bypass_settings.return_value = s
     snap = _sensex_bullish_snap()
     alert = {
         "symbol": "SENSEX",

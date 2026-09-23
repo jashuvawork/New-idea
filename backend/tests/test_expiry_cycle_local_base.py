@@ -37,7 +37,7 @@ def test_regime_near_expiry_vs_post_expiry_week():
     today = datetime.now(IST).date()
     near = (today + timedelta(days=1)).strftime("%Y-%m-%d")
     far = (today + timedelta(days=6)).strftime("%Y-%m-%d")
-    s = Settings()
+    s = Settings(expiry_cycle_local_base_enabled=True)
     assert expiry_cycle_regime(_snap(near), settings=s) == "NEAR_EXPIRY_FAST"
     assert expiry_cycle_regime(_snap(far), settings=s) == "POST_EXPIRY_SLOW"
 
@@ -76,5 +76,6 @@ def test_resolve_window_from_cached_symbol_expiry():
     today = datetime.now(IST).date()
     far = (today + timedelta(days=6)).strftime("%Y-%m-%d")
     refresh_symbol_chain_expiry("NIFTY", far)
-    assert resolve_local_base_window_seconds(symbol="NIFTY") == 900
+    s = Settings(expiry_cycle_local_base_enabled=True)
+    assert resolve_local_base_window_seconds(symbol="NIFTY", settings=s) == 900
     mod._symbol_chain_expiry.clear()
