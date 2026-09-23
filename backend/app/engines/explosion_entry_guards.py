@@ -1279,6 +1279,65 @@ def deep_itm_near_strike_substitute_blocked(
     return False, ""
 
 
+def _near_strike_structural_base_active(
+    alert: Mapping[str, Any],
+    *,
+    max_steps: int,
+    settings: Any = None,
+) -> bool:
+    if _near_strike_armed_alert_active(alert, max_steps=max_steps):
+        return True
+    from app.engines.best_trade_policy import symmetric_structural_base_evidence
+
+    return symmetric_structural_base_evidence(alert, settings=settings)
+
+
+def far_otm_near_base_substitute_blocked(
+    side: Side | str,
+    strike: float,
+    snap: SymbolSnapshot,
+    *,
+    settings: Any = None,
+    candidate_score: float = 0.0,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
+    """Block far OTM when a nearer strike on the same side is at armed / near-base pad (CE+PE)."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "explosion_far_otm_near_base_substitute_enabled", True)):
+        return False, ""
+    side_v = _side_val(side)
+    depth, money, _ = _strike_depth(side, strike, snap)
+    max_near = int(
+        getattr(s, "explosion_far_otm_near_base_substitute_max_near_steps", 2) or 2
+    )
+    min_far = int(
+        getattr(s, "explosion_far_otm_near_base_substitute_min_far_steps", 3) or 3
+    )
+    if money != "OTM" or depth < min_far:
+        return False, ""
+    row = alert if isinstance(alert, dict) else {}
+    cand_score = float(candidate_score or row.get("score") or 0)
+    has_near = False
+    for alt in snap.explosionAlerts or []:
+        if str(alt.get("side") or "").upper() != side_v:
+            continue
+        alt_strike = float(alt.get("strike") or 0)
+        if alt_strike <= 0:
+            continue
+        _, alt_money, _ = _strike_depth(side, alt_strike, snap)
+        if alt_money not in ("ATM", "OTM"):
+            continue
+        alt_depth, _, _ = _strike_depth(side, alt_strike, snap)
+        if alt_depth > max_near + 1e-6:
+            continue
+        if _near_strike_structural_base_active(alt, max_steps=max_near, settings=s):
+            has_near = True
+            break
+    if not has_near:
+        return False, ""
+    return True, "explosion_far_otm_near_base_substitute"
+
+
 def extended_session_chase_blocked(
     explosion_event: Any,
     *,

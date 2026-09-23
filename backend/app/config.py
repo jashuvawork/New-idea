@@ -821,6 +821,10 @@ class Settings(BaseSettings):
     explosion_deep_itm_substitute_block_enabled: bool = True
     explosion_deep_itm_substitute_min_itm_steps: int = 1
     explosion_deep_itm_substitute_near_strike_max_steps: int = 2
+    # Sep23 SENSEX 75100 CE: block deep OTM when ATM/near OTM (74800) is at structural base.
+    explosion_far_otm_near_base_substitute_enabled: bool = True
+    explosion_far_otm_near_base_substitute_max_near_steps: int = 2
+    explosion_far_otm_near_base_substitute_min_far_steps: int = 3
     # Sep07 23750 PE: waive first_lift_structure lag for grade-S near-strike armed pad.
     near_strike_armed_near_miss_waive_enabled: bool = True
     near_strike_armed_near_miss_min_grade: str = "S"
@@ -1784,6 +1788,8 @@ class Settings(BaseSettings):
     # Sep16 SENSEX 74200 PE: initial armed-base rip blocked as "late reentry" while
     # session peak tracked the live vertical — not a post-trade chase.
     explosion_late_reentry_waive_first_strike_entry_enabled: bool = True
+    # Do not waive session-peak late reentry on far OTM legs (75100-style chase).
+    explosion_late_reentry_waive_max_otm_steps: int = 2
     # Sep09: index rally after PUT win unlocks CALL directionally, but CE near its own
     # session peak was still blocked as late chase — waive when index flip confirms.
     explosion_late_reentry_waive_opposite_side_flip_enabled: bool = True

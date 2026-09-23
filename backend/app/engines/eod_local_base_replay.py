@@ -499,9 +499,12 @@ def evaluate_replay_structural_gates(
         coil_top_entry_blocked,
         deep_itm_near_strike_substitute_blocked,
         detect_fake_explosion_trap,
+        far_otm_near_base_substitute_blocked,
         immature_explosion_blocked,
+        post_peak_chase_blocked,
         session_trough_late_chase_blocked,
     )
+    from app.engines.session_mode_feedback import session_peak_late_reentry_blocked
     from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
     ict = analyze_explosion_event_ict(event, snap)
@@ -560,6 +563,39 @@ def evaluate_replay_structural_gates(
     )
     if itm_blocked:
         return False, itm_reason
+
+    far_otm_blocked, far_otm_reason = far_otm_near_base_substitute_blocked(
+        side,
+        strike,
+        snap,
+        settings=s,
+        candidate_score=cand_score,
+        alert=alert_row,
+    )
+    if far_otm_blocked:
+        return False, far_otm_reason
+
+    late_peak, late_reason = session_peak_late_reentry_blocked(
+        symbol=sym,
+        side=side,
+        strike=strike,
+        premium=float(alert_row.get("premium") or getattr(event, "premium", 0) or 0),
+        velocity_3s=float(
+            alert_row.get("velocity3s")
+            or alert_row.get("velocity_3s")
+            or getattr(event, "velocity_3s", 0)
+            or 0
+        ),
+        alert=alert_row,
+        state=replay_state,
+        snap=snap,
+    )
+    if late_peak:
+        return False, late_reason or "late_reentry_near_session_peak"
+
+    pp_blocked, pp_reason = post_peak_chase_blocked(event)
+    if pp_blocked:
+        return False, pp_reason
 
     coil_blocked, coil_reason = coil_top_entry_blocked(
         event,
