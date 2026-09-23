@@ -425,6 +425,20 @@ class Settings(BaseSettings):
     large_ltp_base_cold_velocity_waiver_enabled: bool = True
     large_ltp_base_cold_velocity_max_local_pct: float = 22.0
     large_ltp_base_cold_velocity_min_flat_quality: float = 65.0
+    # Expiry cycle — post-expiry slow new bases vs near-expiry fast moves (near local pad).
+    expiry_cycle_local_base_enabled: bool = True
+    expiry_cycle_near_expiry_max_days: int = 2
+    expiry_cycle_post_expiry_min_days: int = 4
+    post_expiry_local_base_window_seconds: int = 900
+    near_expiry_local_base_window_seconds: int = 1200
+    mid_cycle_local_base_window_seconds: int = 1800
+    post_expiry_near_base_max_pad_pct: float = 18.0
+    near_expiry_near_base_max_pad_pct: float = 25.0
+    post_expiry_local_base_entry_min_move_pct: float = 8.0
+    post_expiry_local_base_chase_max_move_pct: float = 32.0
+    near_expiry_local_base_entry_min_move_pct: float = 12.0
+    near_expiry_local_base_chase_max_move_pct: float = 48.0
+    post_expiry_first_lift_cold_v3_waiver_enabled: bool = True
     # Selector: prefer ₹18–80 near-base over deep ITM on non-expiry days only.
     best_trade_cheap_base_rank_priority_enabled: bool = True
     best_trade_cheap_base_min_premium_inr: float = 18.0

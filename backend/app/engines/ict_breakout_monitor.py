@@ -2494,6 +2494,26 @@ def first_lift_entry_readiness(
         ):
             min_v3 = 0.0
             min_v9 = 0.0
+        else:
+            from app.engines.expiry_cycle_local_base import (
+                post_expiry_slow_cold_velocity_waiver,
+            )
+
+            _base_move = float(
+                getattr(ict, "base_relative_move_pct", 0)
+                or row.get("ictBaseRelativeMovePct")
+                or row.get("localBaseMovePct")
+                or 0
+            )
+            if post_expiry_slow_cold_velocity_waiver(
+                snap=snap,
+                symbol=str(row.get("symbol") or symbol_from_snap(snap)),
+                local_pad_pct=_base_move,
+                volume_awakening=volume_awake,
+                settings=settings,
+            ):
+                min_v3 = 0.0
+                min_v9 = 0.0
     consolidation_lane = bool(
         row.get("slowGrindConsolidationBase")
         or row.get("ictSlowGrindConsolidationBase")

@@ -181,6 +181,23 @@ def _roll_session(now: Optional[datetime] = None) -> None:
         _chain_day_ohlc.clear()
 
 
+def reset_local_base_state_for_symbol(symbol: str) -> None:
+    """Drop local-base / armed-anchor state when the weekly option chain rolls."""
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return
+    prefix = f"{sym}:"
+    for store in (
+        _local_base_hist,
+        _armed_base_anchors,
+        _armed_candidate_evidence,
+        _armed_base_reset_after,
+    ):
+        for key in list(store.keys()):
+            if str(key).startswith(prefix):
+                store.pop(key, None)
+
+
 def reset_detector_state_for_tests() -> None:
     """Clear module globals so pytest order does not leak session premiums across tests."""
     global _history, _session_date
@@ -1531,7 +1548,15 @@ def local_base_premium(
     dq = _local_base_hist.get(full_key)
     if not dq:
         return 0.0
-    window = int(window_seconds or LOCAL_BASE_WINDOW_SECONDS)
+    if window_seconds is None:
+        try:
+            from app.engines.expiry_cycle_local_base import resolve_local_base_window_seconds
+
+            window = resolve_local_base_window_seconds(symbol=symbol.upper())
+        except Exception:
+            window = LOCAL_BASE_WINDOW_SECONDS
+    else:
+        window = int(window_seconds)
     excl = int(
         exclude_recent_seconds
         if exclude_recent_seconds is not None
@@ -2638,6 +2663,15 @@ def scan_snapshot_explosions(
     """Rescan explosions from WS-overlaid heatmap — runs between full REST rebuilds."""
     if not snap or not getattr(snap, "heatmap", None) or not float(getattr(snap, "spot", 0) or 0):
         return []
+    try:
+        from app.engines.expiry_cycle_local_base import refresh_symbol_chain_expiry
+
+        refresh_symbol_chain_expiry(
+            str(getattr(snap, "symbol", "") or ""),
+            getattr(snap, "optionExpiry", None),
+        )
+    except Exception:
+        pass
     atm = float(getattr(snap, "atmStrike", None) or snap.spot)
     chain: list[dict[str, Any]] = []
     for row in snap.heatmap:
