@@ -477,7 +477,8 @@ class Settings(BaseSettings):
     # Block Elite on MOMENTUM RALLY + WORST dayType only (keep CHOP+RALLY/WORST).
     elite_trade_block_worst_day_type_enabled: bool = True
     # Block CALL on chop day modes when still very near base (Sep03 EOD loser).
-    elite_call_chop_shallow_block_enabled: bool = True
+    # Off with symmetric CE/PE — PE never had this; CE uses same near-base explosive path.
+    elite_call_chop_shallow_block_enabled: bool = False
     elite_call_chop_shallow_max_local_pct: float = 10.0
     # V-RIP shallow entries must show firstLift, not tier-inferred breakout alone.
     elite_v_rip_shallow_require_first_lift_enabled: bool = True

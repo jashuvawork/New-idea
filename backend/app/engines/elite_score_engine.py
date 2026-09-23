@@ -543,9 +543,16 @@ def elite_side_local_base_cap(
     )
 
     settings = settings or get_settings()
+    from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+
     general = float(getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0)
     side_u = str(side or "").upper()
     dm = str(day_mode or "").strip().upper()
+    if symmetric_best_trade_capture_active(settings) and side_u == "CALL":
+        call_cap = float(getattr(settings, "elite_call_max_local_base_pct", 0.0) or 0.0)
+        if call_cap > 0:
+            return min(general, call_cap)
+        return general
     base_best_match = False
     mirror_match = False
     if side_u == "CALL" and state is not None and snap is not None and evidence is not None:
@@ -910,8 +917,11 @@ def elite_call_chop_shallow_blocked(
 ) -> tuple[bool, str]:
     """Block CALL entries on chop days while still very near base."""
     from app.config import get_settings
+    from app.engines.best_trade_policy import symmetric_best_trade_capture_active
 
     settings = settings or get_settings()
+    if symmetric_best_trade_capture_active(settings):
+        return False, ""
     if (
         mirror_waived
         and bool(getattr(settings, "pe_win_ce_mirror_waive_chop_shallow", True))
@@ -1424,15 +1434,17 @@ def elite_entry_allowed(
 
     local = _number(assessment.get("localBasePct"))
     if local > max_local + 1e-6:
+        from app.engines.best_trade_policy import symmetric_best_trade_capture_active
+
         assessment = {**assessment, "side": resolved_side, "localBaseCapPct": round(max_local, 2)}
-        if resolved_side == "CALL" and max_local < float(
+        general_cap = float(
             getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0
-        ):
-            return False, "elite_call_chase_past_local_base_window", assessment
-        if resolved_side == "PUT" and max_local < float(
-            getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0
-        ):
-            return False, "elite_put_chase_past_local_base_window", assessment
+        )
+        if not symmetric_best_trade_capture_active(settings):
+            if resolved_side == "CALL" and max_local < general_cap:
+                return False, "elite_call_chase_past_local_base_window", assessment
+            if resolved_side == "PUT" and max_local < general_cap:
+                return False, "elite_put_chase_past_local_base_window", assessment
         return False, "elite_chase_past_local_base_window", assessment
 
     if not _timing_ok(evidence):
