@@ -18,7 +18,9 @@ from app.engines.best_trade_policy import (
 from app.engines.directional_lock import check_directional_side_lock
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.elite_score_engine import (
+    elite_call_chop_shallow_blocked,
     elite_side_day_mode_blocked,
+    elite_side_local_base_cap,
     top_trades_only_blocks_entry,
 )
 from app.engines.pe_win_ce_mirror import call_ce_base_context_armed
@@ -163,3 +165,20 @@ def test_symmetric_ce_raw_base_context_armed():
 def test_symmetric_mode_can_be_disabled():
     object.__setattr__(get_settings(), "symmetric_best_trade_capture_enabled", False)
     assert symmetric_best_trade_capture_active(get_settings()) is False
+
+
+def test_symmetric_ce_same_local_cap_as_pe():
+    cap_ce = elite_side_local_base_cap("CALL", settings=get_settings())
+    cap_pe = elite_side_local_base_cap("PUT", settings=get_settings())
+    assert cap_ce == cap_pe == 20.0
+
+
+def test_symmetric_ce_chop_shallow_not_blocked():
+    blocked, reason = elite_call_chop_shallow_blocked(
+        "CALL",
+        "CHOP DAY",
+        5.0,
+        settings=get_settings(),
+    )
+    assert blocked is False
+    assert reason == ""

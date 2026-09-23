@@ -274,11 +274,17 @@ def test_elite_entry_blocks_v_rip_without_first_lift_even_with_breakout():
 
 
 def test_elite_entry_blocks_call_chop_shallow():
+    from app.config import Settings
+
     ok, reason, _ = elite_entry_allowed(
         _v_evidence(localBaseMovePct=4.4, side="CALL", firstLift=True),
         _ranking(rankScore=95.0, grade="S"),
         day_mode="CHOP DAY",
         day_type="NORMAL",
+        settings=Settings(
+            symmetric_best_trade_capture_enabled=False,
+            elite_call_chop_shallow_block_enabled=True,
+        ),
     )
     assert ok is False
     assert reason == "elite_call_chop_shallow_blocked"
