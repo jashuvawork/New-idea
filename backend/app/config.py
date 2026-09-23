@@ -392,6 +392,10 @@ class Settings(BaseSettings):
     elite_trade_perfect_score_max_local_pct: float = 15.0
     # Sep 9–17 profile: symmetric CE/PE best-trade rank; Sep21+ blockers stay off.
     symmetric_best_trade_capture_enabled: bool = True
+    # ELITE/EXPLODING at structural base — shallow exec premium retest (CE+PE, Sep23 74800 miss).
+    symmetric_near_base_premium_fade_fill_enabled: bool = True
+    symmetric_near_base_premium_fade_max_drawdown_pct: float = -1.2
+    symmetric_structural_near_miss_waive_enabled: bool = True
     symmetric_chop_counter_trend_guard_enabled: bool = False
     chop_post_win_afternoon_block_enabled: bool = False
     chop_post_win_afternoon_min_win_inr: float = 2000.0

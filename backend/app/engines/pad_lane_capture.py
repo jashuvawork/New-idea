@@ -1474,10 +1474,12 @@ def local_base_premium_fade_bypass(
     snap: Optional[SymbolSnapshot] = None,
 ) -> bool:
     """Shallow OTM stamp, ATM armed-base, or index-confirmed pad may fill through retest dip."""
+    from app.engines.best_trade_policy import symmetric_near_base_premium_fade_bypass
     from app.engines.index_confirmed_local_base import index_confirmed_premium_fade_bypass
 
     return (
-        shallow_otm_local_base_premium_fade_bypass(alert, explosion_event)
+        symmetric_near_base_premium_fade_bypass(alert, explosion_event)
+        or shallow_otm_local_base_premium_fade_bypass(alert, explosion_event)
         or atm_armed_local_base_premium_fade_bypass(alert, explosion_event)
         or index_confirmed_premium_fade_bypass(alert, snap, explosion_event)
     )

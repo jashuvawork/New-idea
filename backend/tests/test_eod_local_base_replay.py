@@ -397,7 +397,6 @@ def test_replay_live_gates_allow_dominant_call_flip(
 def test_replay_clock_drives_power_hour_window():
     import app.engines.power_hour_guards as power_hour
 
-    original = power_hour._minutes_now
     original_phase = power_hour.get_market_phase
     try:
         power_hour.get_market_phase = lambda: "LIVE_MARKET"
@@ -408,7 +407,6 @@ def test_replay_clock_drives_power_hour_window():
         assert power_hour.in_power_hour_window() is False
         _restore_replay_clock(saved)
     finally:
-        power_hour._minutes_now = original
         power_hour.get_market_phase = original_phase
 
 

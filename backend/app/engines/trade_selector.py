@@ -334,6 +334,12 @@ def _explosion_candidates(
                 alert if isinstance(alert, dict) else None,
                 readiness_reason=first_lift_readiness_reason,
             )
+        if not pad_lane_waive:
+            from app.engines.best_trade_policy import symmetric_structural_near_miss_waive
+
+            pad_lane_waive = symmetric_structural_near_miss_waive(
+                alert if isinstance(alert, dict) else None,
+            )
         if not pad_lane_waive and str(alert.get("side") or "").upper() == "CALL":
             from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_near_miss_waive
 

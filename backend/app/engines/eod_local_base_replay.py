@@ -626,11 +626,10 @@ def _record_replay_closed_trade(
     }
 
 
-def _install_replay_clock(replay_dt_class: type) -> list[tuple[Any, Any]]:
-    """Point power-hour / chop minute helpers at the replay clock."""
-    import app.engines.chop_day_guards as chop_guards
+def _install_replay_clock(replay_dt_class: type) -> Any:
+    """Thread-local replay minutes — live trading loop keeps wall-clock IST."""
     import app.engines.elite_trade_budget as elite_budget
-    import app.engines.power_hour_guards as power_hour
+    from app.engines.replay_clock import install_replay_minutes
 
     def _minutes_from_replay() -> int:
         ts = replay_dt_class.current
@@ -647,17 +646,23 @@ def _install_replay_clock(replay_dt_class: type) -> list[tuple[Any, Any]]:
         return ts.strftime("%G-W%V")
 
     saved: list[tuple[Any, Any]] = []
-    for module in (power_hour, chop_guards):
-        saved.append((module, module._minutes_now))
-        module._minutes_now = _minutes_from_replay
+    saved.append(("replay_minutes", install_replay_minutes(_minutes_from_replay)))
     saved.append((elite_budget, elite_budget._iso_week))
     elite_budget._iso_week = _iso_week_from_replay
     return saved
 
 
-def _restore_replay_clock(saved: list[tuple[Any, Any]]) -> None:
-    for module, original in saved:
-        module._minutes_now = original
+def _restore_replay_clock(saved: list[tuple[Any, Any]] | None) -> None:
+    if not saved:
+        return
+    from app.engines.replay_clock import restore_replay_minutes
+
+    for key, original in saved:
+        if key == "replay_minutes":
+            restore_replay_minutes(original)
+        else:
+            module = key
+            module._iso_week = original
 
 
 def _candidate_from_alert(
