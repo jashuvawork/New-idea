@@ -70,14 +70,11 @@ def _alert_session_move(alert: dict[str, Any]) -> float:
     )
 
 
-def local_base_entry_window(tier: str = "", volume_surge: float = 0.0) -> tuple[float, float]:
-    """Adaptive base-relative entry window (entry_min%, chase_max%) off the local base.
-
-    - ELITE + strong volume → wider ceiling (catch more of the best 100→250 rips).
-    - EXPLODING → higher floor (clear the base's ~8% noise band, fewer fakeouts).
-    - Otherwise → the base 15–40% window.
-    """
-    settings = get_settings()
+def _tier_adaptive_local_base_window(
+    tier: str,
+    volume_surge: float,
+    settings: Any,
+) -> tuple[float, float]:
     entry_min = float(getattr(settings, "explosion_local_base_entry_min_move_pct", 15.0) or 15.0)
     chase_max = float(getattr(settings, "explosion_local_base_chase_max_move_pct", 40.0) or 40.0)
     if not getattr(settings, "local_base_adaptive_window_enabled", True):
@@ -95,6 +92,37 @@ def local_base_entry_window(tier: str = "", volume_surge: float = 0.0) -> tuple[
         entry_min = max(
             entry_min,
             float(getattr(settings, "local_base_exploding_entry_min_move_pct", 20.0) or 20.0),
+        )
+    return entry_min, chase_max
+
+
+def local_base_entry_window(
+    tier: str = "",
+    volume_surge: float = 0.0,
+    *,
+    snap: Optional[SymbolSnapshot] = None,
+    symbol: str = "",
+) -> tuple[float, float]:
+    """Adaptive base-relative entry window (entry_min%, chase_max%) off the local base.
+
+    - ELITE + strong volume → wider ceiling (catch more of the best 100→250 rips).
+    - EXPLODING → higher floor (clear the base's ~8% noise band, fewer fakeouts).
+    - Expiry cycle: post-expiry slow → tighter near-base; near-expiry → wider fast-move window.
+    """
+    settings = get_settings()
+    entry_min, chase_max = _tier_adaptive_local_base_window(tier, volume_surge, settings)
+    if bool(getattr(settings, "expiry_cycle_local_base_enabled", True)):
+        from app.engines.expiry_cycle_local_base import (
+            expiry_cycle_regime,
+            regime_local_base_entry_chase_window,
+        )
+
+        regime = expiry_cycle_regime(snap, symbol=symbol, settings=settings)
+        entry_min, chase_max = regime_local_base_entry_chase_window(
+            regime,
+            entry_min=entry_min,
+            chase_max=chase_max,
+            settings=settings,
         )
     return entry_min, chase_max
 

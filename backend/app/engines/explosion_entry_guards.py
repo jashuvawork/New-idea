@@ -202,7 +202,12 @@ def _recent_local_base_move(explosion_event: Any) -> float:
         prem = float(getattr(explosion_event, "premium", 0) or 0)
         if not sym or side is None or prem <= 0:
             return -1.0
-        base = float(local_base_premium(sym, strike, side) or 0)
+        from app.engines.expiry_cycle_local_base import resolve_local_base_window_seconds
+
+        window = resolve_local_base_window_seconds(symbol=sym)
+        base = float(
+            local_base_premium(sym, strike, side, window_seconds=window) or 0
+        )
         if base <= 0:
             return -1.0
         if prem <= base:
@@ -1770,6 +1775,17 @@ def fresh_near_local_base(
     s = settings or get_settings()
     meta: dict[str, Any] = {}
     fresh_max = float(getattr(s, "fresh_near_local_base_max_pct", 10.0) or 10.0)
+    sym = str((alert or {}).get("symbol") or "") if isinstance(alert, dict) else ""
+    if bool(getattr(s, "expiry_cycle_local_base_enabled", True)):
+        from app.engines.expiry_cycle_local_base import (
+            expiry_cycle_regime,
+            regime_near_base_max_pad_pct,
+        )
+
+        fresh_max = max(
+            fresh_max,
+            regime_near_base_max_pad_pct(expiry_cycle_regime(symbol=sym, settings=s), s),
+        )
     armed_fresh_sec = float(
         getattr(s, "armed_base_fresh_entry_max_seconds", 300.0) or 300.0
     )
