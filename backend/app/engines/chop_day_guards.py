@@ -539,8 +539,9 @@ def is_chop_session(snapshots: dict[str, SymbolSnapshot]) -> bool:
 
 
 def _minutes_now() -> int:
-    now = datetime.now(IST)
-    return now.hour * 60 + now.minute
+    from app.engines.replay_clock import ist_minutes_now
+
+    return ist_minutes_now()
 
 
 def before_primary_window() -> bool:

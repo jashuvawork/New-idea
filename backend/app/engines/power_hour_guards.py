@@ -10,11 +10,9 @@ from app.services.upstox import get_market_phase
 
 
 def _minutes_now() -> int:
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
+    from app.engines.replay_clock import ist_minutes_now
 
-    now = datetime.now(ZoneInfo("Asia/Kolkata"))
-    return now.hour * 60 + now.minute
+    return ist_minutes_now()
 
 
 def in_power_hour_window() -> bool:
