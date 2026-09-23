@@ -617,17 +617,23 @@ def _local_base_pad_premium_band_ok(
     settings: Any,
     max_premium_setting: str,
     reason_prefix: str,
+    symbol: str = "",
 ) -> tuple[bool, str]:
     """Require LTP inside the slow-coil → fast-lift pad band (default ₹18–₹220)."""
     if premium <= 0:
         return False, f"{reason_prefix}_premium_missing"
-    min_prem = float(
-        getattr(settings, "local_base_pad_capture_min_premium_inr", 18.0) or 18.0
-    )
-    max_prem = float(
+    from app.engines.symbol_premium_bands import local_base_pad_premium_band
+
+    max_default = float(
         getattr(settings, max_premium_setting, 220.0)
         or getattr(settings, "local_base_pad_capture_max_premium_inr", 220.0)
         or 220.0
+    )
+    min_prem, max_prem = local_base_pad_premium_band(
+        symbol,
+        settings,
+        max_premium_setting=max_premium_setting,
+        max_default=max_default,
     )
     if premium < min_prem:
         return False, f"{reason_prefix}_premium_below_{min_prem:g}"
@@ -660,6 +666,7 @@ def _fast_bullish_local_base_readiness(
         settings=s,
         max_premium_setting="fast_bullish_local_base_max_premium_inr",
         reason_prefix="fast_bullish",
+        symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
     )
     if not prem_ok:
         return False, prem_reason
@@ -813,6 +820,7 @@ def _slow_grind_consolidation_base_readiness(
         settings=s,
         max_premium_setting="slow_grind_consolidation_base_max_premium_inr",
         reason_prefix="slow_grind_consolidation",
+        symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
     )
     if not prem_ok:
         return False, prem_reason
@@ -1008,6 +1016,7 @@ def _slow_grind_armed_trough_readiness(
         settings=s,
         max_premium_setting="slow_grind_sudden_lift_max_premium_inr",
         reason_prefix="slow_grind_armed_trough",
+        symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
     )
     if not prem_ok:
         return False, prem_reason
@@ -1294,6 +1303,7 @@ def _slow_grind_sudden_lift_readiness(
         settings=s,
         max_premium_setting="slow_grind_sudden_lift_max_premium_inr",
         reason_prefix="slow_grind",
+        symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
     )
     if not prem_ok:
         return False, prem_reason
@@ -1944,6 +1954,7 @@ def first_lift_entry_readiness(
             bullish_day_structure_bypass_allowed,
         )
         from app.engines.top_ftv_v_expiry_bypass import (
+            chop_rally_aligned_structure_bypass_allowed,
             expiry_worst_ce_structure_bypass_allowed,
             expiry_worst_pe_structure_bypass_allowed,
         )
@@ -2015,6 +2026,24 @@ def first_lift_entry_readiness(
                 state=state,
                 snap=snap,
                 row=row,
+            )
+        if not structure_bypass:
+            _sym = str(
+                row.get("symbol")
+                or getattr(snap, "symbol", "")
+                or getattr(event, "symbol", "")
+                or ""
+            ).upper()
+            structure_bypass = chop_rally_aligned_structure_bypass_allowed(
+                tier=_tier,
+                score=_score,
+                base_move_pct=_base_move,
+                volume_awakening=_volume_awake,
+                side=_side,
+                day_mode=day_mode,
+                snap=snap,
+                row=row,
+                symbol=_sym,
             )
         if not structure_bypass:
             return False, "first_lift_structure_not_confirmed"
@@ -2447,6 +2476,24 @@ def first_lift_entry_readiness(
     if top_ftv_v_lane and volume_awake:
         min_v3 = 0.0
         min_v9 = 0.0
+    if not top_ftv_v_lane and not grade_a_lane:
+        from app.engines.symbol_premium_bands import (
+            large_ltp_base_cold_velocity_waiver,
+            symbol_from_snap,
+        )
+
+        _prem = float(
+            getattr(event, "premium", 0) or row.get("premium") or 0
+        )
+        if large_ltp_base_cold_velocity_waiver(
+            premium=_prem,
+            symbol=str(row.get("symbol") or symbol_from_snap(snap)),
+            evidence=row,
+            volume_awakening=volume_awake,
+            settings=settings,
+        ):
+            min_v3 = 0.0
+            min_v9 = 0.0
     consolidation_lane = bool(
         row.get("slowGrindConsolidationBase")
         or row.get("ictSlowGrindConsolidationBase")

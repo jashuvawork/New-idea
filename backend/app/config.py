@@ -411,6 +411,20 @@ class Settings(BaseSettings):
     best_trade_deep_chase_min_premium_inr: float = 120.0
     best_trade_deep_chase_max_local_pct: float = 18.0
     best_trade_cheap_entry_max_premium_inr: float = 85.0
+    # SENSEX/BANKNIFTY near-base LTPs ≈ 3× NIFTY — scale cheap/deep/pad bands (not post-win guards).
+    symbol_premium_scale_nifty: float = 1.0
+    symbol_premium_scale_sensex: float = 3.0
+    symbol_premium_scale_banknifty: float = 3.0
+    # CHOP + RALLY aligned flat→vertical at base (Sep23 SENSEX rally CE; PE mirror on slide).
+    chop_rally_structure_bypass_enabled: bool = True
+    chop_rally_structure_bypass_symbols_csv: str = "NIFTY,SENSEX,BANKNIFTY"
+    chop_rally_structure_bypass_max_local_pct: float = 22.0
+    chop_rally_structure_bypass_min_score: float = 55.0
+    chop_rally_structure_bypass_min_flat_quality: float = 65.0
+    # Cold first_lift v3 at scaled near-base (high absolute LTP, flat pre-vertical).
+    large_ltp_base_cold_velocity_waiver_enabled: bool = True
+    large_ltp_base_cold_velocity_max_local_pct: float = 22.0
+    large_ltp_base_cold_velocity_min_flat_quality: float = 65.0
     # Selector: prefer ₹18–80 near-base over deep ITM on non-expiry days only.
     best_trade_cheap_base_rank_priority_enabled: bool = True
     best_trade_cheap_base_min_premium_inr: float = 18.0
