@@ -222,6 +222,16 @@ def check_expiry_afternoon_explosion_confirmation(
         from app.engines.top_ftv_v_expiry_bypass import is_top_ftv_or_v_candidate
 
         if is_expiry_elite_top_candidate(candidate):
+            from app.engines.premium_spike_dump_guard import post_spike_premium_dump_blocked
+
+            alert = getattr(candidate, "alert", None)
+            alert_map = alert if isinstance(alert, dict) else {}
+            dump_blocked, dump_reason, _dump_meta = post_spike_premium_dump_blocked(
+                getattr(candidate, "explosion_event", None),
+                alert=alert_map,
+            )
+            if dump_blocked:
+                return False, dump_reason, meta
             meta["expiryAfternoonConfirmBypass"] = "elite_top"
             return True, "ok", meta
         if is_grade_a_ftv_first_lift_candidate(candidate):
@@ -1113,6 +1123,15 @@ def candidate_is_expiry_pm_local_base_explosion_bypass(
         return False
 
     if bool(alert.get("midRipCoil") or alert.get("faded") or alert.get("exhaustedReentry")):
+        return False
+
+    from app.engines.premium_spike_dump_guard import post_spike_premium_dump_blocked
+
+    dump_blocked, _, _ = post_spike_premium_dump_blocked(
+        event,
+        alert=alert,
+    )
+    if dump_blocked:
         return False
 
     has_base_trigger = bool(

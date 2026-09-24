@@ -774,6 +774,22 @@ class Settings(BaseSettings):
     explosion_post_peak_chase_lookback_seconds: float = 900.0
     explosion_post_peak_chase_min_run_pct: float = 0.25
     explosion_post_peak_chase_near_top_frac: float = 0.12
+    # Sep 24 SENSEX 73700 PE — ELITE score stayed high while premium fell post-spike.
+    premium_post_spike_dump_guard_enabled: bool = True
+    premium_post_spike_dump_min_drawdown_pct: float = 12.0
+    premium_post_spike_dump_min_spike_run_pct: float = 35.0
+    premium_post_spike_dump_near_low_frac: float = 0.18
+    premium_post_spike_dump_min_velocity_3s: float = -0.15
+    premium_post_spike_dump_min_velocity_9s: float = -0.25
+    premium_post_spike_dump_chart_bars: int = 24
+    premium_post_spike_dump_min_big_red_bars: int = 2
+    premium_post_spike_dump_big_body_mult: float = 1.25
+    live_execution_trade_score_enabled: bool = True
+    live_execution_trade_score_dump_penalty: float = 45.0
+    live_execution_trade_score_mom_factor: float = 8.0
+    premium_dump_opposite_side_rank_enabled: bool = True
+    premium_dump_opposite_side_rank_bonus: float = 12.0
+    premium_dump_opposite_side_breadth_bonus: float = 6.0
     # Coil-top guard: BUILDING/WATCH must enter at the local-base floor of a consolidation,
     # not at the ceiling. Uses position within the recent premium window (current-low)/(high-low).
     # Sep 4 NIFTY 23900 CE: base ~135, coil top ~150, entry ~147 — off-low ~9% but position ~80%.

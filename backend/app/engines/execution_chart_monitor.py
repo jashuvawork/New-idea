@@ -235,8 +235,15 @@ def validate_execution_charts(
     if blocked:
         return False, f"exec_{reason}", mtf_meta
 
+    from app.engines.premium_spike_dump_guard import live_execution_trade_score
+
+    live_score, live_score_meta = live_execution_trade_score(
+        trade_score, premium_chart,
+    )
+    mtf_meta["liveExecutionScore"] = live_score_meta
+
     blocked, reason = premium_blocks_entry(
-        side, premium_chart, trade_score=trade_score, explosion_event=explosion_event,
+        side, premium_chart, trade_score=live_score, explosion_event=explosion_event,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
         pad_lane_bypass=pad_lane_bypass,
         pe_win_mirror_bypass=pe_win_mirror_bypass,
@@ -472,6 +479,11 @@ async def monitor_trade_chart_before_execution(
         index_trough_bypass = index_trough_momentum_turn(side, index_chart)
     premium_data = meta.get("premiumChart") or {}
     premium_chart = PremiumChart(**premium_data) if premium_data else None
+    if premium_chart is not None and getattr(premium_chart, "postSpikeDump", False):
+        confirmed_ftv_bypass = False
+        premium_fade_pad_lane = False
+        pe_win_mirror_bypass = False
+        symmetric_fade_bypass = False
     index_mtf_reads = meta.pop("_indexMtfReads", None)
     premium_mtf_reads = meta.pop("_premiumMtfReads", None)
 
