@@ -19,7 +19,15 @@ def test_replay_clock_does_not_leak_to_other_threads():
 
     def live_thread():
         power_hour.get_market_phase = lambda: "LIVE_MARKET"
-        live_seen.append(in_power_hour_window())
+        # Pin this thread to 11:00 IST so the test is CI-time independent.
+        # Replay thread uses 15:05 in its own context — must not leak here.
+        from app.engines.replay_clock import install_replay_minutes, restore_replay_minutes
+
+        token = install_replay_minutes(lambda: 11 * 60)
+        try:
+            live_seen.append(in_power_hour_window())
+        finally:
+            restore_replay_minutes(token)
 
     def replay_thread():
         power_hour.get_market_phase = lambda: "LIVE_MARKET"
