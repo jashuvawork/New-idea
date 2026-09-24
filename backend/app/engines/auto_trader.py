@@ -448,6 +448,28 @@ def _record_observed_max_ltp(trade: PaperTrade, current_ltp: float) -> None:
     trade.entryContext = ctx
 
 
+def _mark_open_trade_ltp(
+    trade: PaperTrade,
+    raw_ltp: float,
+    *,
+    snap: Optional[SymbolSnapshot] = None,
+    instrument_key: Optional[str] = None,
+) -> Optional[float]:
+    from app.engines.ltp_sanity import apply_open_trade_mark, reconcile_max_ltp
+
+    accepted = apply_open_trade_mark(
+        trade,
+        raw_ltp,
+        snap=snap,
+        instrument_key=instrument_key,
+    )
+    if accepted is None:
+        return None
+    _record_observed_max_ltp(trade, accepted)
+    reconcile_max_ltp(trade)
+    return accepted
+
+
 def _record_open_trade_tick_peak(instrument_key: str, ltp: float) -> None:
     """Capture sub-200ms spikes before the throttled exit evaluator runs."""
     state = _auto_trader_state
@@ -459,7 +481,7 @@ def _record_open_trade_tick_peak(instrument_key: str, ltp: float) -> None:
             ":", "|",
         )
         if trade_key and trade_key == key:
-            _record_observed_max_ltp(trade, ltp)
+            _mark_open_trade_ltp(trade, ltp, instrument_key=key)
 
 
 from app.services.tick_store import on_tick as _on_tick
@@ -3322,14 +3344,22 @@ async def _process_open_trades(
             continue
 
         broker_ctx = dict(trade.entryContext or {})
-        current = resolve_trade_premium(
+        raw_ltp = resolve_trade_premium(
             snap, trade.strike, trade.side, broker_ctx.get("instrumentKey"),
+        )
+        if raw_ltp is None:
+            continue
+
+        current = _mark_open_trade_ltp(
+            trade,
+            raw_ltp,
+            snap=snap,
+            instrument_key=broker_ctx.get("instrumentKey"),
         )
         if current is None:
             continue
 
         trade.currentPremium = current
-        _record_observed_max_ltp(trade, current)
         broker_ctx = dict(trade.entryContext or {})
         eval_premium = exit_premium_for_trade(trade, current)
         if should_simulate_slippage(trade):
