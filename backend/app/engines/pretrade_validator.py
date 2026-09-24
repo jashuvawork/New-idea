@@ -1113,6 +1113,16 @@ def validate_candidate(
         if peak_chase:
             return False, peak_reason, meta
 
+        from app.engines.premium_spike_dump_guard import post_spike_premium_dump_blocked
+
+        dump_blocked, dump_reason, dump_meta = post_spike_premium_dump_blocked(
+            explosion_event,
+            alert=alert_dict,
+        )
+        meta["premiumSpikeDump"] = dump_meta
+        if dump_blocked:
+            return False, dump_reason, meta
+
         trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
             candidate, snap, state=state, ict=trap_ict,
         )

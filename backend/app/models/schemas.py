@@ -105,6 +105,10 @@ class PremiumChart(BaseModel):
     macdSignal: float = 0.0
     macdHistogram: float = 0.0
     macdBias: str = "NEUTRAL"
+    sessionHighPremium: float = 0.0
+    drawdownFromHighPct: float = 0.0
+    postSpikeDump: bool = False
+    liveMomentumScore: float = 0.0
 
 
 class TimeframeChartRead(BaseModel):

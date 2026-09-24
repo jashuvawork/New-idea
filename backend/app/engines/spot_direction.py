@@ -921,6 +921,16 @@ def analyze_premium_chart(candles: list, ltp: float) -> "PremiumChart":
     rsi_read = compute_rsi(closes)
     macd_read = compute_macd(closes)
 
+    from app.engines.premium_spike_dump_guard import premium_chart_spike_dump_read
+
+    dump_read = premium_chart_spike_dump_read(candles, ltp)
+    window_high = float(dump_read.get("windowHigh") or max(highs) if highs else ltp)
+    dd_high = float(dump_read.get("drawdownFromHighPct") or 0.0)
+    post_dump = bool(dump_read.get("active"))
+    live_mom = round(mom5 + mom3 * 0.5, 3)
+    if post_dump:
+        live_mom = min(live_mom, -1.0)
+
     return PremiumChart(
         direction=direction,
         lastPremium=round(ltp, 2),
@@ -935,6 +945,10 @@ def analyze_premium_chart(candles: list, ltp: float) -> "PremiumChart":
         macdSignal=macd_read.signal,
         macdHistogram=macd_read.histogram,
         macdBias=macd_read.bias,
+        sessionHighPremium=round(window_high, 2),
+        drawdownFromHighPct=dd_high,
+        postSpikeDump=post_dump,
+        liveMomentumScore=live_mom,
     )
 
 
@@ -953,6 +967,11 @@ def premium_blocks_entry(
     settings = get_settings()
     if not settings.execution_chart_premium_check_enabled or not premium:
         return False, "ok"
+    from app.engines.premium_spike_dump_guard import premium_chart_post_spike_dump
+
+    if premium_chart_post_spike_dump(premium):
+        return True, "premium_post_spike_dump"
+
     from app.engines.winner_entry_guards import premium_fading_blocks_entry
 
     return premium_fading_blocks_entry(

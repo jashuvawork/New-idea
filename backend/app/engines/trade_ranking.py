@@ -2189,4 +2189,27 @@ def rank_entry_candidate(
         alert,
         getattr(candidate, "side", ""),
     )
-    return rank_trade_evidence(evidence)
+    result = rank_trade_evidence(evidence)
+    if live_snapshot is not None:
+        from app.engines.premium_spike_dump_guard import (
+            alert_premium_spike_dump_meta,
+            live_execution_trade_score,
+            opposite_side_dump_capture_rank_bonus,
+        )
+
+        dump = alert_premium_spike_dump_meta(alert)
+        if dump.get("active"):
+            base = float(result.get("rankScore") or 0)
+            live_score, live_meta = live_execution_trade_score(base, alert=alert)
+            result["rankScore"] = min(base, live_score)
+            result["liveExecutionScore"] = live_meta
+            penalties = list(result.get("penalties") or [])
+            penalties.append("premium_post_spike_dump")
+            result["penalties"] = penalties
+        bonus = opposite_side_dump_capture_rank_bonus(candidate, live_snapshot)
+        if bonus:
+            result["rankScore"] = float(result.get("rankScore") or 0) + bonus
+            reasons = list(result.get("reasons") or [])
+            reasons.append("opposite_side_dump_capture")
+            result["reasons"] = reasons
+    return result
