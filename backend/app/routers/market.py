@@ -469,6 +469,46 @@ def _shallow_cache_copy(
     return snap
 
 
+def max_symbol_snapshot_age_seconds(snapshots: dict) -> float:
+    """Age of the oldest symbol snapshot timestamp — REST chain freshness."""
+    now = datetime.now(IST)
+    worst = 0.0
+    for snap in snapshots.values():
+        if not getattr(snap, "dataAvailable", False):
+            continue
+        ts = getattr(snap, "timestamp", None)
+        if ts is None:
+            return 999999.0
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=IST)
+        worst = max(worst, (now - ts).total_seconds())
+    return worst
+
+
+def chain_data_stale(snapshots: Optional[dict] = None) -> bool:
+    """True when cached heatmap/OI is too old for reliable explosion scans."""
+    snaps = snapshots
+    if snaps is None:
+        if not _cache or not _cache.snapshots:
+            return True
+        snaps = _cache.snapshots
+    max_age = float(
+        getattr(get_settings(), "ws_chain_refresh_max_age_seconds", 120.0) or 120.0
+    )
+    return max_symbol_snapshot_age_seconds(snaps) >= max_age
+
+
+def _stamp_snapshot_symbols_now(snapshots: dict) -> dict:
+    """Keep per-symbol timestamps aligned with WS overlays (UI + staleness checks)."""
+    now = datetime.now(IST)
+    out: dict = {}
+    for sym, snap in snapshots.items():
+        cloned = snap.model_copy(deep=False)
+        cloned.timestamp = now
+        out[sym] = cloned
+    return out
+
+
 def _refresh_explosion_alerts_cpu(
     snapshots: dict,
     *,
@@ -501,6 +541,11 @@ async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnap
         _cache.snapshots,
         max_age_seconds=settings.tick_overlay_max_age_seconds,
     )
+    from app.engines.expiry_day_guards import _today_str
+
+    today = _today_str()
+    await _refresh_explosion_alerts_async(overlays, today=today)
+    overlays = _stamp_snapshot_symbols_now(overlays)
     snapshot = _shallow_cache_copy(snapshots=overlays, auto_trader=get_state())
     await _store_cache_async(snapshot)
     _last_ws_overlay_mono = time.monotonic()
@@ -539,17 +584,21 @@ async def run_building_ltp_entry_cycle(
     from app.engines.expiry_day_guards import _today_str
 
     today = _today_str()
-    # Always refresh explosions on cache — chicken-and-egg: BUILDING monitor needs
-    # alerts, but WS path skipped refresh when no BUILDING existed yet (Sep15 gap).
-    await _refresh_explosion_alerts_async(_cache.snapshots, today=today)
-
-    # Peek on current cache overlays first (cheap).
+    # WS LTPs first — explosion scan reads heatmap LTPs (Sep24: refresh-before-overlay = 0 alerts).
     probe = overlay_snapshot_live(
         _cache.snapshots,
         max_age_seconds=settings.tick_overlay_max_age_seconds,
     )
+    await _refresh_explosion_alerts_async(probe, today=today)
+    probe = _stamp_snapshot_symbols_now(probe)
     if not building_ltp_monitor_due(probe):
-        return _cache
+        snapshot = _shallow_cache_copy(snapshots=probe, auto_trader=get_state())
+        if ws_overlay_due():
+            await _store_cache_async(snapshot)
+            _last_ws_overlay_mono = time.monotonic()
+        else:
+            _update_cache_memory(snapshot)
+        return snapshot
 
     t0 = time.perf_counter()
 
@@ -629,6 +678,18 @@ async def run_entry_scan_on_cache(
             logger.debug("Failed to persist skipped entry scan telemetry: %s", exc)
         return None
 
+    if chain_data_stale(_cache.snapshots) and not rebuild_load_active():
+        logger.warning(
+            "Entry scan: chain cache stale (%.0fs) — forcing REST rebuild",
+            max_symbol_snapshot_age_seconds(_cache.snapshots),
+        )
+        invalidate_snapshot_cache(force=True)
+        return await get_multi_snapshot(
+            broadcast=broadcast,
+            force=True,
+            run_trader=run_trader,
+        )
+
     t0 = time.perf_counter()
     settings = get_settings()
     overlays = overlay_snapshot_live(
@@ -642,6 +703,7 @@ async def run_entry_scan_on_cache(
     at_max = _at_max_explosion_positions(auto_state)
     if not at_max:
         await _refresh_explosion_alerts_async(overlays, today=today)
+    overlays = _stamp_snapshot_symbols_now(overlays)
     try:
         from app.services.radar_archive import record_top_radars
         from app.services.radar_learning import record_market_observations
@@ -1011,6 +1073,20 @@ async def get_multi_snapshot(
     cache_ttl = _effective_cache_seconds()
     now = datetime.now(IST)
     trader_pass = entry_scan_due() if run_trader is None else bool(run_trader)
+
+    if (
+        not force
+        and _cache
+        and _cache.dataReady
+        and is_ws_active()
+        and chain_data_stale(_cache.snapshots)
+    ):
+        logger.warning(
+            "Chain cache stale (%.0fs) — forcing REST rebuild",
+            max_symbol_snapshot_age_seconds(_cache.snapshots),
+        )
+        force = True
+        invalidate_snapshot_cache(force=True)
 
     if rebuild_load_active() and _cache and _cache.dataReady:
         stale = _serve_stale_cache(reason="Refresh in progress — serving last good data")

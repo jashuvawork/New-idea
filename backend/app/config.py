@@ -177,6 +177,8 @@ class Settings(BaseSettings):
     aligned_explosion_rip_interval_seconds: int = 30
     directional_lock_aligned_rip_bypass_enabled: bool = True
     tick_overlay_max_age_seconds: float = 1.0
+    # When WS is live, REST heatmap/OI still must refresh — stale chain = zero radar (Sep24).
+    ws_chain_refresh_max_age_seconds: float = 120.0
     news_cache_seconds: int = 300  # dashboard + engine refresh cadence (5 min)
     background_market_monitor_enabled: bool = True
 
