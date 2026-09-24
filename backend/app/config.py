@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     shadow_trade_all_signals: bool = True
     # Live: skip INR force-stops / scratch exits — let open trades hit structural SL.
     live_hold_to_structural_sl: bool = True
+    # Live / paper-live parity: flatten all open legs at power_hour_end (default 15:30 IST).
+    live_session_close_force_exit_enabled: bool = True
     # Live chop guards — hard blocks at order wire + early-fail exits on worst/chop days.
     chop_live_guards_enabled: bool = True
     chop_live_block_immature_local_base: bool = True
