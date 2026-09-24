@@ -340,10 +340,20 @@ def _explosion_candidates(
             pad_lane_waive = symmetric_structural_near_miss_waive(
                 alert if isinstance(alert, dict) else None,
             )
-        if not pad_lane_waive and str(alert.get("side") or "").upper() == "CALL":
+        side_u = str(alert.get("side") or "").upper()
+        if not pad_lane_waive and side_u == "CALL":
             from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_near_miss_waive
 
             pad_lane_waive = pe_win_ce_mirror_near_miss_waive(
+                alert if isinstance(alert, dict) else None,
+                snap=snap,
+                state=state,
+                readiness_reason=first_lift_readiness_reason,
+            )
+        if not pad_lane_waive and side_u == "PUT":
+            from app.engines.put_slide_ce_mirror import put_slide_near_miss_waive
+
+            pad_lane_waive = put_slide_near_miss_waive(
                 alert if isinstance(alert, dict) else None,
                 snap=snap,
                 state=state,

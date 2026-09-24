@@ -12,6 +12,10 @@ def test_sep9_symmetric_profile_defaults():
     assert s.expiry_cycle_local_base_enabled is True
     assert s.expiry_worst_pe_structure_bypass_enabled is True
     assert s.expiry_worst_ce_structure_bypass_enabled is True
+    assert s.put_slide_unlock_enabled is True
+    assert s.put_slide_unlock_waive_expiry_otm is True
+    assert s.ce_win_pe_mirror_enabled is True
+    assert s.put_at_base_best_trade_enabled is True
 
 
 def test_sep21_blockers_still_off_by_default():
