@@ -790,6 +790,17 @@ class Settings(BaseSettings):
     premium_dump_opposite_side_rank_enabled: bool = True
     premium_dump_opposite_side_rank_bonus: float = 12.0
     premium_dump_opposite_side_breadth_bonus: float = 6.0
+    live_entry_score_stamp_on_alerts: bool = True
+    live_entry_score_replace_candidate_score: bool = True
+    live_entry_score_gate_enabled: bool = True
+    live_entry_score_min_elite: float = 52.0
+    live_entry_score_min_exploding: float = 48.0
+    live_entry_score_min_default: float = 44.0
+    live_entry_score_negative_v3_penalty_per_point: float = 3.0
+    live_entry_score_dump_cap: float = 42.0
+    live_entry_score_chase_max_range_position: float = 0.45
+    live_entry_score_chase_max_velocity_3s: float = 1.0
+    live_entry_score_chase_range_penalty_scale: float = 120.0
     # Coil-top guard: BUILDING/WATCH must enter at the local-base floor of a consolidation,
     # not at the ceiling. Uses position within the recent premium window (current-low)/(high-low).
     # Sep 4 NIFTY 23900 CE: base ~135, coil top ~150, entry ~147 — off-low ~9% but position ~80%.

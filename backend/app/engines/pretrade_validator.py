@@ -15,11 +15,18 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def candidate_trade_score(candidate: Any) -> float:
     """Composite score used consistently across pretrade and execution chart gates."""
-    return max(
+    live = float(getattr(candidate, "liveEntryScore", 0) or 0)
+    alert = getattr(candidate, "alert", None)
+    if live <= 0 and isinstance(alert, dict):
+        live = float(alert.get("liveEntryScore") or 0)
+    base = max(
         float(getattr(candidate, "tqs", 0) or 0),
         float(getattr(candidate, "confidence", 0) or 0),
         float(getattr(candidate, "score", 0) or 0),
     )
+    if live > 0:
+        return max(live, float(getattr(candidate, "tqs", 0) or 0) * 0.5)
+    return base
 
 
 @dataclass
@@ -1122,6 +1129,15 @@ def validate_candidate(
         meta["premiumSpikeDump"] = dump_meta
         if dump_blocked:
             return False, dump_reason, meta
+
+        from app.engines.live_entry_score import live_entry_score_blocks_entry
+
+        live_blocked, live_reason, live_meta = live_entry_score_blocks_entry(
+            candidate, snap,
+        )
+        meta["liveEntryScore"] = live_meta
+        if live_blocked:
+            return False, live_reason, meta
 
         trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
             candidate, snap, state=state, ict=trap_ict,
