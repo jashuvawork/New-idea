@@ -1773,9 +1773,22 @@ async def _open_from_candidate(
 
     instrument_key = _heatmap_instrument_key(snap, candidate.strike, candidate.side)
 
+    from app.engines.live_entry_score import refresh_candidate_live_entry_score
     from app.engines.pretrade_validator import candidate_trade_score
 
+    live_score_meta = refresh_candidate_live_entry_score(candidate, snap)
     trade_score = candidate_trade_score(candidate)
+
+    if not settings.execution_chart_gate_enabled or not client:
+        from app.engines.live_entry_score import live_entry_score_blocks_entry
+
+        live_blocked, live_reason, live_gate_meta = live_entry_score_blocks_entry(
+            candidate, snap,
+        )
+        live_score_meta = {**live_score_meta, **live_gate_meta}
+        if live_blocked:
+            return False, live_reason
+        trade_score = candidate_trade_score(candidate)
 
     if settings.execution_chart_gate_enabled:
         if client:
@@ -1802,6 +1815,25 @@ async def _open_from_candidate(
                 # This is structurally before place_entry_order/simulate_entry_order.
                 _record_deferred_candidate_fallback(candidate, chart_reason)
                 return False, chart_reason
+            prem_chart_obj = None
+            if (chart_meta or {}).get("premiumChart"):
+                try:
+                    from app.models.schemas import PremiumChart
+
+                    prem_chart_obj = PremiumChart(**(chart_meta.get("premiumChart") or {}))
+                except Exception:
+                    prem_chart_obj = None
+            from app.engines.live_entry_score import live_entry_score_blocks_entry
+
+            live_blocked, live_reason, live_gate_meta = live_entry_score_blocks_entry(
+                candidate,
+                snap,
+                premium_chart=prem_chart_obj,
+            )
+            live_score_meta = {**live_score_meta, **live_gate_meta}
+            if live_blocked:
+                return False, live_reason
+            trade_score = candidate_trade_score(candidate)
             if candidate.mode == "explosion" and candidate.explosion_event:
                 from app.engines.explosion_entry_guards import (
                     cap_fake_explosion_trap_lots,
@@ -2243,6 +2275,11 @@ async def _open_from_candidate(
 
     ctx_extra: dict[str, Any] = {
         "selectionScore": round(candidate.score, 2),
+        "radarScoreAtEntry": round(
+            float(getattr(candidate, "radarScoreAtEntry", 0) or 0), 2
+        ),
+        "liveEntryScore": round(float(getattr(candidate, "liveEntryScore", 0) or candidate.score), 2),
+        "liveEntryScoreMeta": getattr(candidate, "liveEntryScoreMeta", None) or live_score_meta,
         "selectionMode": candidate.mode,
         "radarKey": (
             f"{symbol.upper()}:{candidate.side.value}:{float(candidate.strike):g}"

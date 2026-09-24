@@ -3121,4 +3121,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
             first_lift = False
             alert_out["tradeable"] = False
             alert_out["ictFirstLift"] = False
+    from app.engines.live_entry_score import stamp_alert_live_entry_scores
+
+    alert_out = stamp_alert_live_entry_scores(alert_out)
     return alert_out
