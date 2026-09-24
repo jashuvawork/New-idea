@@ -1,5 +1,6 @@
 """Pre-trade validator — controlled entries, index backtest selection."""
 
+import pytest
 from unittest.mock import MagicMock, patch
 
 from app.engines.pretrade_validator import (
@@ -27,6 +28,28 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_trade_store_day_archive():
+    """Last-N gates must not merge persisted EC2/VM trade JSON into unit tests."""
+    with patch("app.services.trade_store.get_day_detail", return_value={"trades": []}):
+        yield
+
+
+def _closed_scalp_trade(**kwargs) -> PaperTrade:
+    """Synthetic closed trade with IST session metadata (survives session-reset filters)."""
+    now = datetime.now(IST)
+    defaults = {
+        "openedAt": now,
+        "closedAt": now,
+        "sessionDate": now.strftime("%Y-%m-%d"),
+        "status": "CLOSED",
+        "strategyType": StrategyType.SCALP,
+        "lots": 1,
+    }
+    defaults.update(kwargs)
+    return PaperTrade(**defaults)
 
 
 def _settings():
@@ -268,11 +291,15 @@ def test_last_five_all_losses_pauses_session(mock_settings):
     mock_settings.return_value = _settings()
     state = AutoTraderState()
     state.closedPaperTrades = [
-        PaperTrade(
-            id=str(i), symbol="NIFTY", side=Side.PUT, strike=23900,
-            entryPremium=80, currentPremium=70, lots=1,
-            openedAt=datetime.now(IST), strategyType=StrategyType.SCALP,
-            pnlInr=-10_000, exitReason="simple_stop_loss",
+        _closed_scalp_trade(
+            id=f"lastn-loss-{i}",
+            symbol="NIFTY",
+            side=Side.PUT,
+            strike=23900,
+            entryPremium=80,
+            currentPremium=70,
+            pnlInr=-10_000,
+            exitReason="simple_stop_loss",
         )
         for i in range(5)
     ]
@@ -290,10 +317,13 @@ def test_last_three_losses_elevates_rank(mock_settings):
     mock_settings.return_value = _settings()
     state = AutoTraderState()
     state.closedPaperTrades = [
-        PaperTrade(
-            id=str(i), symbol="NIFTY", side=Side.CALL, strike=23900,
-            entryPremium=80, currentPremium=70, lots=1,
-            openedAt=datetime.now(IST), strategyType=StrategyType.SCALP,
+        _closed_scalp_trade(
+            id=f"lastn-mix-{i}",
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=23900,
+            entryPremium=80,
+            currentPremium=70,
             pnlInr=-5000 if i < 3 else 3000,
             exitReason="simple_stop_loss" if i < 3 else "simple_micro_profit_lock",
         )
@@ -351,11 +381,16 @@ def test_momentum_rally_bypasses_last_n_pause(mock_rally, mock_settings):
     mock_settings.return_value = s
     state = AutoTraderState()
     state.closedPaperTrades = [
-        PaperTrade(
-            id=str(i), symbol="SENSEX", side=Side.CALL, strike=77500,
-            entryPremium=100, currentPremium=80, lots=1,
-            openedAt=datetime.now(IST), strategyType=StrategyType.EXPLOSIVE,
-            pnlInr=-12_000, exitReason="adaptive_stop_loss",
+        _closed_scalp_trade(
+            id=f"lastn-rally-{i}",
+            symbol="SENSEX",
+            side=Side.CALL,
+            strike=77500,
+            entryPremium=100,
+            currentPremium=80,
+            strategyType=StrategyType.EXPLOSIVE,
+            pnlInr=-12_000,
+            exitReason="adaptive_stop_loss",
         )
         for i in range(3)
     ]

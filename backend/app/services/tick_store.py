@@ -127,6 +127,25 @@ def get_ltp(instrument_key: str, max_age_seconds: float = 30.0) -> Optional[floa
     return tick.ltp if tick else None
 
 
+def recent_option_ltps(
+    instrument_key: str,
+    *,
+    window_seconds: float = 12.0,
+) -> list[float]:
+    """Recent accepted WS prints for median / spike confirmation."""
+    key = _norm_key(instrument_key)
+    history = _tick_history.get(key)
+    if not history:
+        return []
+    now = time.monotonic()
+    cutoff = now - max(0.5, float(window_seconds))
+    out: list[float] = []
+    for tick in history:
+        if tick.received_mono >= cutoff and tick.ltp > 0:
+            out.append(float(tick.ltp))
+    return out
+
+
 def get_velocity_pct(
     instrument_key: str,
     *,

@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     live_hold_to_structural_sl: bool = True
     # Live / paper-live parity: flatten all open legs at power_hour_end (default 15:30 IST).
     live_session_close_force_exit_enabled: bool = True
+    # Open-trade MTM: reject WS/REST spike glitches vs entry, heatmap, and tick median.
+    open_trade_ltp_sanity_enabled: bool = True
+    open_trade_ltp_max_dev_from_entry_mult: float = 2.75
+    open_trade_ltp_max_step_ratio: float = 1.32
+    open_trade_ltp_ws_over_rest_ratio: float = 1.18
+    open_trade_ltp_median_confirm_ratio: float = 0.92
+    open_trade_ltp_median_confirm_max_ratio: float = 1.12
+    open_trade_ltp_recent_window_seconds: float = 12.0
     # Live chop guards — hard blocks at order wire + early-fail exits on worst/chop days.
     chop_live_guards_enabled: bool = True
     chop_live_block_immature_local_base: bool = True
