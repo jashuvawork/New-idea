@@ -3366,7 +3366,14 @@ async def _process_open_trades(
         refresh_open_trade_chart_plan(trade, snap)
         update_live_chart_trail(trade, snap)
         plan_dict = (trade.entryContext or {}).get("exitPlan") or plan_dict
-        if settings.edge_engine_enabled:
+        exit_reason, pnl = None, 0.0
+        from app.engines.session_close_guard import live_session_close_force_exit
+
+        session_close = live_session_close_force_exit(trade, eval_premium, lot_mult)
+        if session_close:
+            exit_reason, pnl = session_close
+
+        if not exit_reason and settings.edge_engine_enabled:
             edge_exit, edge_pnl = check_edge_realtime_exit(
                 trade, eval_premium, snap,
                 current_velocity_3s=live_vel,
@@ -3374,10 +3381,6 @@ async def _process_open_trades(
             )
             if edge_exit:
                 exit_reason, pnl = edge_exit, edge_pnl
-            else:
-                exit_reason, pnl = None, 0.0
-        else:
-            exit_reason, pnl = None, 0.0
 
         if not exit_reason and is_swing and settings.swing_trading_enabled:
             if trade.entryContext is None:
