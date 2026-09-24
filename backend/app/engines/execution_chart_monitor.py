@@ -392,8 +392,7 @@ async def monitor_trade_chart_before_execution(
         and _event_tier in ("ELITE", "EXPLODING")
     ) or pad_lane_chart_bypass
     pe_win_mirror_bypass = False
-    if state is not None and side == Side.CALL:
-        from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_premium_fade_bypass
+    if state is not None and side in (Side.CALL, Side.PUT):
         from app.engines.trade_ranking import rank_entry_candidate
         from app.engines.elite_score_engine import build_elite_assessment
 
@@ -414,15 +413,30 @@ async def monitor_trade_chart_before_execution(
         )
         evidence = {**alert_map, **dict(ranking.get("evidence") or {})}
         assessment = build_elite_assessment(evidence, ranking)
-        pe_win_mirror_bypass = pe_win_ce_mirror_premium_fade_bypass(
-            side=side,
-            state=state,
-            snap=snap,
-            symbol=symbol,
-            evidence=evidence,
-            ranking=ranking,
-            assessment=assessment,
-        )
+        if side == Side.CALL:
+            from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_premium_fade_bypass
+
+            pe_win_mirror_bypass = pe_win_ce_mirror_premium_fade_bypass(
+                side=side,
+                state=state,
+                snap=snap,
+                symbol=symbol,
+                evidence=evidence,
+                ranking=ranking,
+                assessment=assessment,
+            )
+        else:
+            from app.engines.put_slide_ce_mirror import put_slide_premium_fade_bypass
+
+            pe_win_mirror_bypass = put_slide_premium_fade_bypass(
+                side=side,
+                state=state,
+                snap=snap,
+                symbol=symbol,
+                evidence=evidence,
+                ranking=ranking,
+                assessment=assessment,
+            )
         if pe_win_mirror_bypass:
             premium_fade_pad_lane = True
 

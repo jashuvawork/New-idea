@@ -528,6 +528,147 @@ def call_at_base_best_trade_from_candidate(
     )
 
 
+def put_at_base_best_trade_fingerprint(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    elite_assessment: Mapping[str, Any] | None = None,
+    *,
+    state: Any = None,
+    snap: Any = None,
+    symbol: str = "",
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """PE at local base — same top near-base bar as CE best trades (Sep 9 symmetric)."""
+    from app.config import get_settings
+    from app.engines.put_slide_ce_mirror import put_pe_base_context_armed
+    from app.engines.rally_capture import _grade_meets_min
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "put_at_base_best_trade_enabled", True)):
+        return False
+    if state is None or snap is None:
+        return False
+
+    sym = str(symbol or (evidence or {}).get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    if not put_pe_base_context_armed(
+        state,
+        snap,
+        sym,
+        evidence,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )[0]:
+        return False
+
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    ranking = ranking if isinstance(ranking, Mapping) else {}
+    assessment = elite_assessment if isinstance(elite_assessment, Mapping) else {}
+
+    if str(evidence.get("tier") or "").upper() != "ELITE":
+        return False
+    if not best_trade_near_base_assessment(assessment, settings=settings):
+        return False
+
+    grade = str(ranking.get("grade") or assessment.get("grade") or "").upper()
+    min_grade = str(
+        getattr(settings, "put_at_base_best_trade_min_grade", "A") or "A"
+    ).upper()
+    if not _grade_meets_min(grade, min_grade):
+        return False
+
+    launch_ok = bool(
+        evidence.get("armedBaseLaunch")
+        and (
+            evidence.get("firstLift")
+            or evidence.get("activeBreakout")
+            or evidence.get("displacement")
+        )
+    )
+    if not launch_ok:
+        from app.engines.pe_win_ce_mirror import _building_rip_launch_ok
+
+        if not _building_rip_launch_ok(
+            evidence, readiness_reason=readiness_reason, settings=settings,
+        ):
+            return False
+
+    v3 = _number(evidence.get("velocity3s") or evidence.get("liveVelocity3s"))
+    min_v3 = float(
+        getattr(settings, "elite_call_momentum_rally_pe_parity_min_velocity3s", 1.2)
+        or 1.2
+    )
+    if v3 < min_v3 - 1e-6:
+        return False
+
+    timing = str(evidence.get("timingAssessment") or assessment.get("timing") or "").upper()
+    timing_action = str(evidence.get("timingAction") or "").lower()
+    if timing_action in {"block", "reject"}:
+        return False
+    return timing in _GOOD_TIMING
+
+
+def put_pe_parity_from_candidate(
+    candidate: Any,
+    snap: Any = None,
+    *,
+    settings: Any = None,
+    state: Any = None,
+) -> bool:
+    """True when a live PUT candidate matches CE-win mirror or slide-unlock Sep 9 path."""
+    side = _side_value(getattr(candidate, "side", ""))
+    if side != "PUT" or candidate is None:
+        return False
+    from app.engines.trade_ranking import rank_entry_candidate
+    from app.engines.elite_score_engine import build_elite_assessment
+
+    ranking = rank_entry_candidate(candidate, snapshot=snap)
+    evidence = dict(ranking.get("evidence") or {})
+    alert = getattr(candidate, "alert", None)
+    if isinstance(alert, dict):
+        evidence = {**alert, **evidence}
+    ev = getattr(candidate, "explosion_event", None)
+    if ev is not None:
+        for key, attr in (
+            ("tier", "tier"),
+            ("velocity3s", "velocity_3s"),
+            ("explosionScore", "explosion_score"),
+        ):
+            val = getattr(ev, attr, None)
+            if val is not None and key not in evidence:
+                evidence[key] = val
+    assessment = build_elite_assessment(evidence, ranking)
+    if state is not None and snap is not None:
+        symbol = str(
+            getattr(candidate, "symbol", None)
+            or evidence.get("symbol")
+            or getattr(snap, "symbol", "")
+            or ""
+        ).upper()
+        if put_at_base_best_trade_fingerprint(
+            evidence,
+            ranking,
+            assessment,
+            state=state,
+            snap=snap,
+            symbol=symbol,
+            settings=settings,
+        ):
+            return True
+        from app.engines.put_slide_ce_mirror import put_slide_entry_unlock_fingerprint
+
+        return put_slide_entry_unlock_fingerprint(
+            evidence,
+            ranking,
+            assessment,
+            state=state,
+            snap=snap,
+            symbol=symbol,
+            settings=settings,
+        )
+    return False
+
+
 def stamp_call_at_base_exit_hold(
     ctx_extra: dict[str, Any],
     *,
@@ -744,13 +885,22 @@ def expiry_cheap_otm_entry_blocked(
     if money != "OTM":
         return False, ""
 
-    if _side_value(getattr(candidate, "side", "")) == "CALL" and state is not None:
-        from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_expiry_otm_bypass
+    side_v = _side_value(getattr(candidate, "side", ""))
+    if state is not None:
+        if side_v == "CALL":
+            from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_expiry_otm_bypass
 
-        if call_rally_entry_unlock_expiry_otm_bypass(
-            candidate, snap, alert, state=state, settings=settings,
-        ):
-            return False, ""
+            if call_rally_entry_unlock_expiry_otm_bypass(
+                candidate, snap, alert, state=state, settings=settings,
+            ):
+                return False, ""
+        elif side_v == "PUT":
+            from app.engines.put_slide_ce_mirror import put_slide_entry_unlock_expiry_otm_bypass
+
+            if put_slide_entry_unlock_expiry_otm_bypass(
+                candidate, snap, alert, state=state, settings=settings,
+            ):
+                return False, ""
 
     symbol = str(getattr(candidate, "symbol", "") or "").upper()
     if _expiry_itm_atm_only_symbol(symbol, settings=settings):
