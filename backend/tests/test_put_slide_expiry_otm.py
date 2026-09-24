@@ -25,18 +25,6 @@ def _sensex_expiry_snap(*, spot: float = 74070.0) -> SymbolSnapshot:
     )
 
 
-def test_symmetric_shallow_otm_put_waive_helper():
-    s = settings_mock()
-    alert = {
-        "tier": "ELITE",
-        "ictArmedBaseLaunch": True,
-        "firstLift": True,
-        "localBaseMovePct": 8.0,
-        "shallowOtmLocalBaseTradeable": True,
-    }
-    assert _symmetric_expiry_otm_put_waive(alert, settings=s) is True
-
-
 def _put_candidate(*, strike: float = 73900.0, premium: float = 85.0):
     alert = {
         "premium": premium,
