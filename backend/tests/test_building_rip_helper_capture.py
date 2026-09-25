@@ -121,3 +121,70 @@ def test_boosted_alert_authorizes_building_rip_ftv(_peak):
     assert ranking["grade"] in {"A", "B", "S"}
     assert decision.mode == "BUILDING_RIP_FTV"
     assert decision.reason == "ok"
+
+
+@patch(
+    "app.engines.explosion_detector.retained_peak_velocity_3s",
+    return_value=2.4,
+)
+def test_helper_building_rip_elite_entry_allowed(_peak):
+    from unittest.mock import MagicMock
+    from types import SimpleNamespace
+
+    from app.engines.elite_score_engine import elite_entry_allowed
+    from app.engines.trade_ranking import rank_entry_candidate
+
+    boosted = apply_helper_confirmed_building_rip_boost(_nifty23100_ce_chase_alert())
+    event = SimpleNamespace(tier="EXPLODING", explosion_score=88.0, velocity_3s=2.4, velocity_9s=0.4)
+    cand = SimpleNamespace(
+        side="CALL",
+        symbol="NIFTY",
+        strike=23100,
+        alert=boosted,
+        explosion_event=event,
+        mode="explosion",
+        confidence=88.0,
+    )
+    snap = MagicMock()
+    snap.symbol = "NIFTY"
+    snap.breadth = MagicMock(bias="BULLISH")
+    snap.spotChart = MagicMock(direction="BULLISH", rsi=55.0, macdBias="BULLISH", momentum5Pct=0.1)
+    state = MagicMock()
+    state.closedPaperTrades = []
+    state.dailyStrategy = {"dayMode": "MOMENTUM RALLY"}
+    ranking = rank_entry_candidate(cand, snapshot=snap)
+    evidence = {**boosted, **dict(ranking.get("evidence") or {})}
+    ok, reason, _ass = elite_entry_allowed(
+        evidence,
+        ranking,
+        state=state,
+        snapshots={"NIFTY": snap},
+    )
+    assert ok, reason
+
+
+@patch(
+    "app.engines.explosion_detector.retained_peak_velocity_3s",
+    return_value=2.4,
+)
+def test_helper_building_rip_top_moment_gate(_peak):
+    from app.engines.building_ftv_gates import helper_building_rip_top_moment_ok
+    from app.engines.trade_ranking import rank_entry_candidate
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    boosted = apply_helper_confirmed_building_rip_boost(_nifty23100_ce_chase_alert())
+    event = SimpleNamespace(tier="EXPLODING", explosion_score=88.0, velocity_3s=2.4)
+    cand = SimpleNamespace(
+        side="CALL",
+        symbol="NIFTY",
+        strike=23100,
+        alert=boosted,
+        explosion_event=event,
+        mode="explosion",
+    )
+    snap = MagicMock()
+    snap.symbol = "NIFTY"
+    ranking = rank_entry_candidate(cand, snapshot=snap)
+    evidence = {**boosted, **dict(ranking.get("evidence") or {})}
+    assert helper_building_rip_top_moment_ok(evidence, ranking)

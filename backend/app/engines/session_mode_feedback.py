@@ -881,6 +881,26 @@ def session_peak_late_reentry_blocked(
     ):
         return False, ""
 
+    try:
+        from app.engines.building_ftv_gates import helper_building_rip_top_moment_ok
+        from app.engines.trade_ranking import rank_trade_evidence
+
+        rank = rank_trade_evidence({**alert_d, "mode": "explosion"})
+        if helper_building_rip_top_moment_ok(
+            {**alert_d, **dict(rank.get("evidence") or {})},
+            rank,
+        ):
+            min_v3 = float(
+                getattr(settings, "building_rip_ftv_min_velocity_3s", 1.2) or 1.2
+            )
+            from app.engines.building_rip_capture import effective_building_rip_velocity_3s
+
+            eff_v3 = effective_building_rip_velocity_3s(alert_d, settings=settings)
+            if eff_v3 >= min_v3 or v3 >= min_v3:
+                return False, ""
+    except Exception:
+        pass
+
     return True, (
         f"late_reentry_near_session_peak_{sess_peak:.1f}"
         f"_pullback_{pullback_pct:.1f}pct_v3_{v3:.1f}"

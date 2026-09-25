@@ -259,6 +259,70 @@ def building_armed_base_grade_a_live_ok(
     return True
 
 
+def _alert_dict_from_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    ev = dict(evidence) if isinstance(evidence, Mapping) else {}
+    if ev.get("flatThenVertical") and not ev.get("ictFlatThenVertical"):
+        ev["ictFlatThenVertical"] = True
+    if ev.get("activeBreakout") and not ev.get("ictBreakout"):
+        ev["ictBreakout"] = True
+    if ev.get("buildingRipReady") and not ev.get("ictBuildingRipReady"):
+        ev["ictBuildingRipReady"] = True
+    return ev
+
+
+def helper_building_rip_top_moment_ok(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any],
+    *,
+    readiness_reason: str = "",
+) -> bool:
+    """Index-thrust BUILDING rip with helpers — top CE/PE moment (Sep 25 NIFTY 23100 class)."""
+    settings = get_settings()
+    if not bool(getattr(settings, "building_rip_helper_top_moment_enabled", True)):
+        return False
+    alert = _alert_dict_from_evidence(evidence)
+    try:
+        from app.engines.building_rip_capture import (
+            building_rip_ftv_local_move_pct,
+            effective_building_rip_velocity_3s,
+            helper_confirmed_building_rip_active,
+        )
+
+        if not helper_confirmed_building_rip_active(alert):
+            return False
+    except Exception:
+        return False
+    tier = str(evidence.get("tier") or alert.get("tier") or "").upper()
+    if tier not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+    grade = str(ranking.get("grade") or "").upper()
+    min_grade = str(getattr(settings, "building_rip_helper_min_grade", "B") or "B").upper()
+    grade_order = {"S": 4, "A": 3, "B": 2, "C": 1, "REJECT": 0}
+    if grade_order.get(grade, 0) < grade_order.get(min_grade, 2):
+        return False
+    rip_move = building_rip_ftv_local_move_pct(evidence, settings=settings)
+    rip_max = float(getattr(settings, "building_rip_ftv_helper_max_local_pct", 72.0) or 72.0)
+    if rip_move <= 0 or rip_move > rip_max + 1e-6:
+        return False
+    min_v3 = float(getattr(settings, "building_rip_ftv_min_velocity_3s", 1.2) or 1.2)
+    if effective_building_rip_velocity_3s(alert, settings=settings) + 1e-6 < min_v3:
+        return False
+    rr = str(
+        readiness_reason
+        or evidence.get("firstLiftReadinessReason")
+        or evidence.get("ictBaseReadinessReason")
+        or ""
+    )
+    if rr in BUILDING_READY_REASONS or "building_rip" in rr:
+        return True
+    return bool(
+        evidence.get("orderflowPositive")
+        or evidence.get("displacement")
+        or evidence.get("activeBreakout")
+        or alert.get("ictBreakout")
+    )
+
+
 def building_armed_base_grade_a_top_moment_ok(
     evidence: Mapping[str, Any],
     ranking: Mapping[str, Any],

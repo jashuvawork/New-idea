@@ -552,6 +552,20 @@ def elite_side_local_base_cap(
 
     general = float(getattr(settings, "elite_trade_max_local_base_pct", 20.0) or 20.0)
     side_u = str(side or "").upper()
+    if evidence is not None:
+        try:
+            from app.engines.building_ftv_gates import helper_building_rip_top_moment_ok
+
+            if helper_building_rip_top_moment_ok(
+                evidence,
+                ranking if isinstance(ranking, Mapping) else {},
+            ):
+                rip_cap = float(
+                    getattr(settings, "building_rip_ftv_helper_max_local_pct", 72.0) or 72.0
+                )
+                return max(general, rip_cap)
+        except Exception:
+            pass
     dm = str(day_mode or "").strip().upper()
     if symmetric_best_trade_capture_active(settings) and side_u == "CALL":
         call_cap = float(getattr(settings, "elite_call_max_local_base_pct", 0.0) or 0.0)
@@ -1244,12 +1258,19 @@ def elite_entry_allowed(
     from app.engines.building_ftv_gates import (
         building_armed_base_grade_a_top_moment_ok,
         building_coil_pad_grade_a_top_moment_ok,
+        helper_building_rip_top_moment_ok,
     )
 
-    if building_armed_base_grade_a_top_moment_ok(
-        evidence, ranking, readiness_reason=readiness_reason,
-    ) or building_coil_pad_grade_a_top_moment_ok(
-        evidence, ranking, readiness_reason=readiness_reason,
+    if (
+        helper_building_rip_top_moment_ok(
+            evidence, ranking, readiness_reason=readiness_reason,
+        )
+        or building_armed_base_grade_a_top_moment_ok(
+            evidence, ranking, readiness_reason=readiness_reason,
+        )
+        or building_coil_pad_grade_a_top_moment_ok(
+            evidence, ranking, readiness_reason=readiness_reason,
+        )
     ):
         assessment = build_elite_assessment(evidence, ranking)
         assessment = {
@@ -1286,6 +1307,14 @@ def elite_entry_allowed(
     )
     if mega_ok:
         assessment = {**assessment, "megaVerticalBypass": mega_tag}
+
+    from app.engines.building_ftv_gates import helper_building_rip_top_moment_ok
+
+    building_rip_helper_ok = helper_building_rip_top_moment_ok(
+        evidence, ranking, readiness_reason=readiness_reason,
+    )
+    if building_rip_helper_ok:
+        assessment = {**assessment, "buildingRipHelperTopMoment": True}
 
     min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
     from app.engines.live_entry_score import live_entry_moment_active
@@ -1358,6 +1387,20 @@ def elite_entry_allowed(
                     float(getattr(settings, "pe_win_ce_mirror_min_elite_score", 85.0) or 85.0),
                 )
             min_score = min(min_score, relaxed)
+    if building_rip_helper_ok:
+        rip_floor = float(
+            getattr(settings, "building_rip_helper_min_elite_score", 84.0) or 84.0
+        )
+        min_score = min(min_score, rip_floor)
+        from app.engines.live_entry_score import live_entry_scores_from_evidence
+
+        live, _radar = live_entry_scores_from_evidence(evidence)
+        score_blend = max(
+            float(assessment.get("eliteScore") or 0),
+            live,
+            float(evidence.get("radarExplosionScore") or evidence.get("explosionScore") or 0),
+        )
+        assessment = {**assessment, "eliteScore": score_blend}
     max_local = elite_side_local_base_cap(
         resolved_side,
         settings=settings,
@@ -1384,7 +1427,11 @@ def elite_entry_allowed(
 
     from app.engines.best_trade_policy import elite_base_setup_allowed
 
-    if not elite_base_setup_allowed(setup, mega_ok=mega_ok, settings=settings):
+    if not elite_base_setup_allowed(
+        setup,
+        mega_ok=mega_ok or building_rip_helper_ok,
+        settings=settings,
+    ):
         if bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)):
             assessment = {**assessment, "side": resolved_side}
             return False, "elite_v_rip_only", assessment
@@ -1460,6 +1507,13 @@ def elite_entry_allowed(
     ):
         v_rip_shallow_blocked = False
         v_rip_shallow_reason = ""
+    if (
+        v_rip_shallow_blocked
+        and building_rip_helper_ok
+        and bool(getattr(settings, "building_rip_helper_waives_v_rip_shallow", True))
+    ):
+        v_rip_shallow_blocked = False
+        v_rip_shallow_reason = ""
     if v_rip_shallow_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, v_rip_shallow_reason, assessment
@@ -1504,7 +1558,7 @@ def elite_entry_allowed(
             and bool(
                 getattr(settings, "live_entry_best_trade_capture_waives_elite_timing", True)
             )
-        ):
+        ) and not building_rip_helper_ok:
             return False, "elite_timing_not_good_or_ok", assessment
 
     assessment = {

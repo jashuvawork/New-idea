@@ -562,6 +562,17 @@ def ce_best_trade_top_trades_waiver(
         return False
     if str(side or evidence.get("side") or "").upper() != "CALL":
         return False
+    try:
+        from app.engines.building_ftv_gates import helper_building_rip_top_moment_ok
+
+        if helper_building_rip_top_moment_ok(
+            evidence,
+            ranking if isinstance(ranking, Mapping) else {},
+            readiness_reason=readiness_reason,
+        ):
+            return True
+    except Exception:
+        pass
     if state is None or snap is None:
         return False
 
@@ -685,7 +696,26 @@ def ce_best_trade_building_tier_ok(
     )
     if not allow:
         return False
-    if str(evidence.get("tier") or "").upper() != "BUILDING":
+    tier_u = str(evidence.get("tier") or "").upper()
+    try:
+        from app.engines.building_rip_capture import helper_confirmed_building_rip_active
+        from app.engines.building_ftv_gates import _alert_dict_from_evidence
+
+        helper_rip = helper_confirmed_building_rip_active(_alert_dict_from_evidence(evidence))
+    except Exception:
+        helper_rip = False
+    if tier_u not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+    if helper_rip and tier_u in ("EXPLODING", "ELITE"):
+        ranking = ranking if isinstance(ranking, Mapping) else {}
+        grade = str(ranking.get("grade") or (assessment or {}).get("grade") or "").upper()
+        min_grade = str(
+            getattr(settings, "building_rip_helper_min_grade", "B") or "B"
+        ).upper()
+        from app.engines.rally_capture import _grade_meets_min
+
+        return _grade_meets_min(grade, min_grade)
+    if tier_u != "BUILDING":
         return False
     if not ce_best_trade_top_trades_waiver(
         evidence,

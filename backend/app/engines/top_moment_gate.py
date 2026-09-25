@@ -238,7 +238,13 @@ def top_moment_entry_allowed(
     from app.engines.building_ftv_gates import (
         building_armed_base_grade_a_top_moment_ok,
         building_coil_pad_grade_a_top_moment_ok,
+        helper_building_rip_top_moment_ok,
     )
+
+    if helper_building_rip_top_moment_ok(
+        evidence, ranking, readiness_reason=readiness_reason,
+    ):
+        return True, "ok", "BUILDING_RIP"
 
     if building_armed_base_grade_a_top_moment_ok(
         evidence, ranking, readiness_reason=readiness_reason,
