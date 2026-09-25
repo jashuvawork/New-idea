@@ -1295,6 +1295,13 @@ def ftv_authorization_policy(
             )
 
     if building_rip_ftv_enabled and bool(evidence.get("buildingRipReady")):
+        from app.engines.building_rip_capture import (
+            building_rip_ftv_local_move_pct,
+            effective_building_rip_velocity_3s,
+        )
+        from app.config import get_settings as _br_settings
+
+        _brs = _br_settings()
         helpers_ok = bool(
             evidence.get("buildingRipHelpersOk")
             or evidence.get("buildingLiftHelping")
@@ -1304,13 +1311,27 @@ def ftv_authorization_policy(
             or evidence.get("volumeAwaken")
             or evidence.get("displacement")
         )
+        rip_move = building_rip_ftv_local_move_pct(evidence, settings=_brs)
+        rip_max = building_rip_ftv_max_local_base_move_pct
+        if helpers_ok and bool(evidence.get("indexHelpersConfirm")):
+            rip_max = max(
+                rip_max,
+                float(
+                    getattr(_brs, "building_rip_ftv_helper_max_local_pct", 72.0) or 72.0
+                ),
+            )
+        rip_v3 = max(
+            v3,
+            float(evidence.get("retainedPeakVelocity3s") or 0),
+            effective_building_rip_velocity_3s(evidence, settings=_brs),
+        )
         building_rip_ok = (
             grade in {"A", "B", "S"}
             and tier in {"BUILDING", "EXPLODING", "ELITE"}
             and building_rip_ftv_min_local_base_move_pct
-            <= move
-            <= building_rip_ftv_max_local_base_move_pct
-            and v3 >= building_rip_ftv_min_velocity_3s
+            <= rip_move
+            <= rip_max
+            and rip_v3 >= building_rip_ftv_min_velocity_3s
             and explosion_score >= building_rip_ftv_min_explosion_score
             and helpers_ok
             and timing not in {"FAILED_LAUNCH", "FADED", "FADING", "EXHAUSTED"}
@@ -2153,6 +2174,13 @@ def rank_entry_candidate(
             alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
         ),
         "buildingRipReady": alert.get("ictBuildingRipReady"),
+        "buildingRipHelpersOk": bool(
+            alert.get("buildingRipHelpersOk") or alert.get("ictBuildingRipReady")
+        ),
+        "buildingLiftHelping": alert.get("buildingLiftHelping"),
+        "buildingHelperBonus": alert.get("buildingHelperBonus"),
+        "retainedPeakVelocity3s": alert.get("retainedPeakVelocity3s"),
+        "indexHelpersConfirm": alert.get("indexHelpersConfirm"),
         "buildingRipHelpersOk": bool(
             alert.get("buildingRipHelpersOk") or alert.get("buildingLiftHelping")
         ),

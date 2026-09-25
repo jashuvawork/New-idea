@@ -2745,6 +2745,12 @@ def refresh_snapshot_explosion_alerts(snap: Any, *, expiry_day: bool = False) ->
                     continue
                 board = evaluate_index_tick_helpers(snap=snap, side=side, alert=a)
                 alerts[i] = stamp_index_tick_helpers(a, board)
+            from app.engines.building_rip_capture import (
+                apply_helper_confirmed_building_rip_boost,
+            )
+
+            for i, a in enumerate(alerts):
+                alerts[i] = apply_helper_confirmed_building_rip_boost(dict(a))
     except Exception:
         pass
     snap.explosionAlerts = alerts
