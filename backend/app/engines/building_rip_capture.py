@@ -127,6 +127,14 @@ def apply_helper_confirmed_building_rip_boost(alert: dict[str, Any]) -> dict[str
     alert["buildingRipReady"] = True
     alert["ictBuildingRipReady"] = True
     alert["buildingRipHelpersOk"] = True
+    if alert.get("flatThenVertical") and not alert.get("ictFlatThenVertical"):
+        alert["ictFlatThenVertical"] = True
+    if alert.get("activeBreakout") and not alert.get("ictBreakout"):
+        alert["ictBreakout"] = True
+    alert.setdefault(
+        "firstLiftReadinessReason",
+        alert.get("ictBaseReadinessReason") or "building_rip_bullish_ready",
+    )
 
     move = float(alert.get("localBaseMovePct") or 0)
     capped = building_rip_ftv_local_move_pct(

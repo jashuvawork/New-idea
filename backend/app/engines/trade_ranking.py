@@ -679,6 +679,18 @@ def ftv_authorization_policy(
         flag_fresh
         or early_ftv_fresh
         or bool(evidence.get("indexConfirmedLocalBase"))
+        or (
+            bool(evidence.get("buildingRipReady"))
+            and bool(
+                evidence.get("indexHelpersConfirm")
+                or evidence.get("buildingRipHelpersOk")
+            )
+            and bool(
+                evidence.get("displacement")
+                or evidence.get("activeBreakout")
+                or evidence.get("orderflowPositive")
+            )
+        )
     )
     timing_blocked = timing in {"CHASE", "CHASING", "LATE", "FAILED_LAUNCH"}
     effective_min_v3, effective_min_v9 = _top_ftv_a_effective_velocity_floors(
@@ -2081,8 +2093,14 @@ def rank_entry_candidate(
             or alert.get("tier")
             or (getattr(event, "tier", "") if event else "")
         ),
-        "explosionScore": (
-            getattr(event, "explosion_score", 0) if event else getattr(candidate, "confidence", 0)
+        "explosionScore": max(
+            float(getattr(event, "explosion_score", 0) or 0) if event else 0.0,
+            float(getattr(candidate, "confidence", 0) or 0),
+            float(
+                alert.get("radarExplosionScore")
+                or alert.get("explosionScore")
+                or 0
+            ),
         ),
         "liveEntryScore": float(
             alert.get("liveEntryScore")
@@ -2189,8 +2207,12 @@ def rank_entry_candidate(
         "buildingLiftHelping": bool(alert.get("buildingLiftHelping")),
         "armedBaseLaunch": alert.get("ictArmedBaseLaunch"),
         "armedBaseSustainedLift": alert.get("ictArmedBaseSustainedLift"),
-        "flatThenVertical": alert.get("ictFlatThenVertical"),
-        "activeBreakout": alert.get("ictBreakout"),
+        "flatThenVertical": bool(
+            alert.get("ictFlatThenVertical") or alert.get("flatThenVertical")
+        ),
+        "activeBreakout": bool(
+            alert.get("ictBreakout") or alert.get("activeBreakout")
+        ),
         "midRipCoil": bool(
             alert.get("ictMidRipCoil") or alert.get("midRipCoil")
         ),
