@@ -293,12 +293,20 @@ def live_entry_best_trade_capture_active(
     evidence: Mapping[str, Any],
     *,
     settings: Any = None,
+    require_explicit_live: bool = False,
 ) -> bool:
     """Top radar + live tick score — allow best-trade capture through FTV/elite stacks."""
     settings = settings or get_settings()
     if not bool(getattr(settings, "live_entry_best_trade_capture_enabled", True)):
         return False
+    explicit_live = float(
+        evidence.get("liveEntryScore") or evidence.get("live_entry_score") or 0
+    )
     live, radar = live_entry_scores_from_evidence(evidence)
+    if require_explicit_live and explicit_live <= 0:
+        return False
+    if require_explicit_live:
+        live = explicit_live
     min_live = float(
         getattr(settings, "live_entry_best_trade_capture_min_live", 88.0) or 88.0
     )
@@ -313,9 +321,13 @@ def live_entry_best_trade_capture_from_alert(
     *,
     settings: Any = None,
 ) -> bool:
+    if float(alert.get("liveEntryScore") or 0) <= 0:
+        return False
     evidence = {
         "liveEntryScore": alert.get("liveEntryScore"),
         "explosionScore": alert.get("explosionScore") or alert.get("radarExplosionScore"),
         "tier": alert.get("tier"),
     }
-    return live_entry_best_trade_capture_active(evidence, settings=settings)
+    return live_entry_best_trade_capture_active(
+        evidence, settings=settings, require_explicit_live=True,
+    )

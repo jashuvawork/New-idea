@@ -890,7 +890,9 @@ def elite_fvq_chase_blocked(
 
     if (
         bool(getattr(settings, "live_entry_best_trade_capture_waives_fvq_chase", True))
-        and live_entry_best_trade_capture_active(evidence, settings=settings)
+        and live_entry_best_trade_capture_active(
+            evidence, settings=settings, require_explicit_live=True,
+        )
     ):
         return False, ""
     rr = str(
@@ -1298,7 +1300,9 @@ def elite_entry_allowed(
         live_entry_scores_from_evidence,
     )
 
-    best_capture = live_entry_best_trade_capture_active(evidence, settings=settings)
+    best_capture = live_entry_best_trade_capture_active(
+        evidence, settings=settings, require_explicit_live=True,
+    )
     if best_capture:
         capture_floor = float(
             getattr(settings, "live_entry_best_trade_capture_elite_score_floor", 78.0)

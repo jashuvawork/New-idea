@@ -186,9 +186,15 @@ def test_live_entry_best_trade_capture_active():
 
     assert live_entry_best_trade_capture_active(
         {"liveEntryScore": 97.0, "explosionScore": 100.0, "tier": "EXPLODING"},
+        require_explicit_live=True,
     )
     assert not live_entry_best_trade_capture_active(
         {"liveEntryScore": 80.0, "explosionScore": 100.0, "tier": "EXPLODING"},
+        require_explicit_live=True,
+    )
+    assert not live_entry_best_trade_capture_active(
+        {"explosionScore": 100.0, "tier": "EXPLODING"},
+        require_explicit_live=True,
     )
 
 
@@ -206,6 +212,8 @@ def test_ftv_live_best_moment_authorization():
         "velocity9s": 0.3,
         "localBaseMovePct": 12.0,
         "timingAssessment": "CHASE",
+        "flatThenVertical": True,
+        "activeBreakout": True,
     }
     ranking = {"grade": "B"}
     auth = ftv_authorization_policy(evidence, ranking, top_ftv_a_enabled=True)
