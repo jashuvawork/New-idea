@@ -351,8 +351,9 @@ class Settings(BaseSettings):
     # Symmetric Sep 9–17 near-base window for CE (0 = same 20% band as PE).
     elite_call_max_local_base_pct: float = 0.0
     elite_put_max_local_base_pct: float = 0.0
-    # Block CE on MOMENTUM RALLY (EOD: CALL 29% win vs PUT 67% on same gate).
-    elite_call_block_momentum_rally_enabled: bool = True
+    # Sep 9–17: CE competes with PE on MOMENTUM RALLY (symmetric capture + rally unlock).
+    # Legacy optional block — enable only with EOD evidence; waivers mirror PUT slide paths.
+    elite_call_block_momentum_rally_enabled: bool = False
     # Narrow waiver: allow CALL on MOMENTUM RALLY only when CE matches morning PE winner bar.
     elite_call_momentum_rally_pe_parity_bypass_enabled: bool = True
     elite_call_momentum_rally_pe_parity_min_elite_score: float = 88.0

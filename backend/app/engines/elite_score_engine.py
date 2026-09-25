@@ -10,9 +10,10 @@ Live entry rule (hybrid model):
   - Stage ≥ ARMED
   - Near-base ≤ max local move (default 20%; CALL default 10%)
   - Timing ∈ {GOOD, OK}
-  - CALL blocked on MOMENTUM RALLY when elite_call_block_momentum_rally_enabled
-    (narrow PE-parity waiver when call_momentum_rally_pe_parity_fingerprint matches)
-  - PUT blocked on BULLISH DAY when elite_put_block_bullish_day_enabled (optional PE mirror)
+  - Optional legacy: CALL on MOMENTUM RALLY when elite_call_block_momentum_rally_enabled
+    (off by default — Sep 9–17; waivers: PE-parity, at-base, call_rally, helper building rip)
+  - Optional legacy: PUT on BULLISH DAY when elite_put_block_bullish_day_enabled
+    (off by default; waivers: at-base, put_slide, helper building rip)
   - Rounded score=100 blocked when local > perfect_score_max_local (default 15%)
   - Weekly cap enforced separately via elite_trade_budget
   - MOMENTUM RALLY + dayType WORST blocked when elite_trade_block_worst_day_type_enabled
@@ -678,16 +679,24 @@ def elite_side_day_mode_blocked(
 
     if (
         side_u == "CALL"
-        and bool(getattr(settings, "elite_call_block_momentum_rally_enabled", True))
+        and bool(getattr(settings, "elite_call_block_momentum_rally_enabled", False))
         and dm == _MOMENTUM_RALLY_DAY_MODE
     ):
-        if evidence is not None and call_momentum_rally_pe_parity_fingerprint(
-            evidence,
-            ranking,
-            assessment,
-            settings=settings,
-        ):
-            return False, ""
+        if evidence is not None:
+            from app.engines.building_ftv_gates import helper_building_rip_top_moment_ok
+
+            if helper_building_rip_top_moment_ok(
+                evidence,
+                ranking if isinstance(ranking, Mapping) else {},
+            ):
+                return False, ""
+            if call_momentum_rally_pe_parity_fingerprint(
+                evidence,
+                ranking,
+                assessment,
+                settings=settings,
+            ):
+                return False, ""
         if state is not None and snap is not None and evidence is not None:
             from app.engines.best_trade_policy import call_at_base_best_trade_fingerprint
             from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
@@ -718,6 +727,37 @@ def elite_side_day_mode_blocked(
         and bool(getattr(settings, "elite_put_block_bullish_day_enabled", False))
         and dm == _BULLISH_DAY_MODE
     ):
+        if evidence is not None:
+            from app.engines.building_ftv_gates import helper_building_rip_top_moment_ok
+
+            if helper_building_rip_top_moment_ok(
+                evidence,
+                ranking if isinstance(ranking, Mapping) else {},
+            ):
+                return False, ""
+        if state is not None and snap is not None and evidence is not None:
+            from app.engines.best_trade_policy import put_at_base_best_trade_fingerprint
+            from app.engines.put_slide_ce_mirror import put_slide_entry_unlock_fingerprint
+
+            symbol = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+            if put_at_base_best_trade_fingerprint(
+                evidence,
+                ranking,
+                assessment,
+                state=state,
+                snap=snap,
+                symbol=symbol,
+                settings=settings,
+            ) or put_slide_entry_unlock_fingerprint(
+                evidence,
+                ranking,
+                assessment,
+                state=state,
+                snap=snap,
+                symbol=symbol,
+                settings=settings,
+            ):
+                return False, ""
         return True, "elite_put_bullish_day_blocked"
 
     return False, ""
@@ -1068,7 +1108,7 @@ def elite_win_rate_gate_summary(*, settings: Any = None) -> dict[str, Any]:
             getattr(settings, "elite_put_max_local_base_pct", 0.0) or 0.0
         ),
         "callBlockMomentumRally": bool(
-            getattr(settings, "elite_call_block_momentum_rally_enabled", True)
+            getattr(settings, "elite_call_block_momentum_rally_enabled", False)
         ),
         "callMomentumRallyPeParityBypass": bool(
             getattr(settings, "elite_call_momentum_rally_pe_parity_bypass_enabled", True)

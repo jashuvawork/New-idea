@@ -85,6 +85,14 @@ def _settings_v_rip_off():
     return settings
 
 
+def _settings_legacy_call_momentum_rally_block():
+    from app.config import get_settings
+
+    settings = get_settings()
+    object.__setattr__(settings, "elite_call_block_momentum_rally_enabled", True)
+    return settings
+
+
 def test_infer_setup_ftv():
     assert infer_setup_type(_ftv_evidence()) == "FTV"
 
@@ -577,6 +585,7 @@ def test_elite_entry_blocks_call_on_momentum_rally():
         _ranking(grade="A"),
         day_mode="MOMENTUM RALLY",
         day_type="GOOD",
+        settings=_settings_legacy_call_momentum_rally_block(),
     )
     assert ok is False
     assert reason == "elite_call_momentum_rally_blocked"
@@ -637,6 +646,7 @@ def test_elite_entry_blocks_call_momentum_rally_without_pe_parity():
         _ranking(grade="C", rankScore=40.0),
         day_mode="MOMENTUM RALLY",
         day_type="GOOD",
+        settings=_settings_legacy_call_momentum_rally_block(),
     )
     assert ok is False
     assert reason == "elite_call_momentum_rally_blocked"
@@ -650,6 +660,7 @@ def test_elite_entry_blocks_call_on_momentum_rally_when_side_only_in_ranking():
         {**_ranking(grade="A"), "side": "CALL"},
         day_mode="MOMENTUM RALLY",
         day_type="GOOD",
+        settings=_settings_legacy_call_momentum_rally_block(),
     )
     assert ok is False
     assert reason == "elite_call_momentum_rally_blocked"
@@ -683,6 +694,66 @@ def test_elite_entry_blocks_put_on_bullish_day_when_enabled():
     assert ok is False
     assert reason == "elite_put_bullish_day_blocked"
     assert assessment.get("side") == "PUT"
+
+
+def test_sep917_defaults_no_side_day_mode_block_for_call():
+    from app.config import Settings
+    from app.engines.elite_score_engine import elite_side_day_mode_blocked
+
+    settings = Settings()
+    assert settings.elite_call_block_momentum_rally_enabled is False
+    blocked, reason = elite_side_day_mode_blocked(
+        "CALL",
+        "MOMENTUM RALLY",
+        settings=settings,
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+def test_sep917_symmetric_capture_waives_side_day_mode_block():
+    from app.config import get_settings
+    from app.engines.elite_score_engine import elite_side_day_mode_blocked
+
+    settings = get_settings()
+    object.__setattr__(settings, "elite_call_block_momentum_rally_enabled", True)
+    object.__setattr__(settings, "symmetric_best_trade_capture_enabled", True)
+    blocked, _ = elite_side_day_mode_blocked(
+        "CALL",
+        "MOMENTUM RALLY",
+        settings=settings,
+    )
+    assert blocked is False
+
+
+def test_put_bullish_day_block_waived_by_put_slide_fingerprint():
+    from unittest.mock import MagicMock
+
+    from app.config import get_settings
+    from app.engines.elite_score_engine import elite_side_day_mode_blocked
+
+    settings = get_settings()
+    object.__setattr__(settings, "elite_put_block_bullish_day_enabled", True)
+    state = MagicMock()
+    snap = MagicMock()
+    snap.symbol = "NIFTY"
+    evidence = _v_evidence(side="PUT", tier="ELITE", symbol="NIFTY")
+    with patch(
+        "app.engines.put_slide_ce_mirror.put_slide_entry_unlock_fingerprint",
+        return_value=True,
+    ):
+        blocked, reason = elite_side_day_mode_blocked(
+            "PUT",
+            "BULLISH DAY",
+            evidence=evidence,
+            ranking=_ranking(grade="A"),
+            assessment={"eliteScore": 92, "localBasePct": 12, "setup": "V"},
+            state=state,
+            snap=snap,
+            settings=settings,
+        )
+    assert blocked is False
+    assert reason == ""
 
 
 def test_elite_entry_blocks_perfect_score_chase():
