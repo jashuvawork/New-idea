@@ -1,5 +1,6 @@
 """Explosion-only book: ELITE/EXPLODING only; guarded scalps off."""
 
+from contextlib import ExitStack
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -39,6 +40,7 @@ def _settings(**overrides):
     s.explosion_require_chart_align_enabled = True
     s.explosion_selector_local_base_chart_bypass_enabled = True
     s.explosion_only_trading_enabled = True
+    s.top_moments_only_enabled = False
     s.explosion_only_allow_guarded_scalp = False
     s.scalp_entries_enabled = False
     s.explosion_capture_mode = True
@@ -217,7 +219,7 @@ def test_watch_first_lift_is_not_dropped_by_elite_only_selector():
         flat_vertical_quality=61.0,
         flat_vertical_grade="B",
     )
-    with (
+    patches = [
         patch("app.engines.trade_selector.premium_in_band", return_value=True),
         patch(
             "app.engines.explosion_detector.effective_explosion_min_score",
@@ -257,7 +259,18 @@ def test_watch_first_lift_is_not_dropped_by_elite_only_selector():
             return_value=(False, ""),
         ),
         patch("app.engines.trade_selector._reentry_blocked", return_value=(False, "ok")),
-    ):
+        patch(
+            "app.engines.ict_breakout_monitor.first_lift_entry_readiness",
+            return_value=(True, "building_first_lift_ready"),
+        ),
+        patch(
+            "app.engines.explosion_entry_guards.detect_fake_explosion_trap",
+            return_value=(False, "ok", {}),
+        ),
+    ]
+    with ExitStack() as stack:
+        for item in patches:
+            stack.enter_context(item)
         out = _explosion_candidates("NIFTY", snap, state, settings)
 
     assert len(out) == 1
@@ -358,7 +371,7 @@ def _run_counter_chart_selector(
         closedPaperTrades=[],
         calibrationBlocks={"CALL": False, "PUT": False},
     )
-    with (
+    patches = [
         patch("app.engines.trade_selector.premium_in_band", return_value=True),
         patch("app.engines.explosion_detector.effective_explosion_min_score", return_value=50.0),
         patch("app.engines.morning_premium_capture.counter_trend_entry_allowed", return_value=True),
@@ -388,14 +401,30 @@ def _run_counter_chart_selector(
             "app.engines.local_base_chart_bypass.local_base_ichimoku_chart_bypass",
             return_value=bypass_value,
         ),
-    ):
+    ]
+    with ExitStack() as stack:
+        for item in patches:
+            stack.enter_context(item)
         return _explosion_candidates("NIFTY", snap, state, settings)
 
 
 def test_selector_local_base_bypass_keeps_counter_chart_base_rip():
     """Confirmed local base off which the side breaks survives the chart-align drop."""
     settings = _settings(explosion_selector_local_base_chart_bypass_enabled=True)
-    out = _run_counter_chart_selector(settings, bypass_value=True)
+    extra = [
+        patch(
+            "app.engines.ict_breakout_monitor.first_lift_entry_readiness",
+            return_value=(False, "not_ready"),
+        ),
+        patch(
+            "app.engines.explosion_entry_guards.detect_fake_explosion_trap",
+            return_value=(False, "ok", {}),
+        ),
+    ]
+    with ExitStack() as stack:
+        for item in extra:
+            stack.enter_context(item)
+        out = _run_counter_chart_selector(settings, bypass_value=True)
     assert len(out) == 1
     assert out[0].side == Side.PUT
 

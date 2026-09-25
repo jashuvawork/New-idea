@@ -1058,6 +1058,7 @@ def _explosion_candidates(
         )
         if (
             (trap_block or trap_meta.get("action") == "block")
+            and not first_lift_ready
             and not building_rip_bypasses_fake_trap(
                 alert=alert if isinstance(alert, dict) else None,
                 readiness_reason=first_lift_readiness_reason,

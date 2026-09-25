@@ -2173,7 +2173,9 @@ def rank_entry_candidate(
         "buildingCoilPad": bool(
             alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
         ),
-        "buildingRipReady": alert.get("ictBuildingRipReady"),
+        "buildingRipReady": bool(
+            alert.get("ictBuildingRipReady") or alert.get("buildingRipReady")
+        ),
         "buildingRipHelpersOk": bool(
             alert.get("buildingRipHelpersOk") or alert.get("ictBuildingRipReady")
         ),

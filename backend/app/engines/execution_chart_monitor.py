@@ -388,11 +388,18 @@ async def monitor_trade_chart_before_execution(
         alert if isinstance(alert, dict) else None,
         explosion_event,
     )
+    from app.engines.building_ftv_gates import building_rip_premium_fade_bypass
+
+    building_rip_fade_bypass = building_rip_premium_fade_bypass(
+        alert if isinstance(alert, dict) else None,
+        explosion_event,
+    )
     premium_fade_pad_lane = (
         strict_first_lift_bypass
         or pad_lane_chart_bypass
         or atm_armed_fade_bypass
         or symmetric_fade_bypass
+        or building_rip_fade_bypass
     )
     confirmed_ftv_bypass = bool(
         (strict_first_lift_bypass or atm_armed_fade_bypass)
@@ -514,6 +521,7 @@ async def monitor_trade_chart_before_execution(
     meta["padLaneChartBypass"] = pad_lane_chart_bypass
     meta["ftvFadeFillBypass"] = confirmed_ftv_bypass
     meta["premiumFadePadLaneBypass"] = premium_fade_pad_lane
+    meta["buildingRipFadeBypass"] = building_rip_fade_bypass
     meta["symmetricNearBaseFadeBypass"] = symmetric_fade_bypass
     meta["peWinCeMirrorFadeBypass"] = pe_win_mirror_bypass
     meta["indexTroughBypass"] = index_trough_bypass

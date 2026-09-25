@@ -962,6 +962,7 @@ def premium_blocks_entry(
     pad_lane_bypass: bool = False,
     pe_win_mirror_bypass: bool = False,
     symmetric_near_base_bypass: bool = False,
+    building_rip_bypass: bool = False,
 ) -> tuple[bool, str]:
     """Block when option premium is fading at execution — bad fill timing."""
     settings = get_settings()
@@ -984,6 +985,7 @@ def premium_blocks_entry(
         pad_lane_bypass=pad_lane_bypass,
         pe_win_mirror_bypass=pe_win_mirror_bypass,
         symmetric_near_base_bypass=symmetric_near_base_bypass,
+        building_rip_bypass=building_rip_bypass,
     )
 
 

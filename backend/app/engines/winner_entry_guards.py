@@ -21,6 +21,7 @@ def premium_fading_blocks_entry(
     pad_lane_bypass: bool = False,
     pe_win_mirror_bypass: bool = False,
     symmetric_near_base_bypass: bool = False,
+    building_rip_bypass: bool = False,
 ) -> tuple[bool, str]:
     """
     Block entries when option premium is fading at execution.
@@ -95,6 +96,22 @@ def premium_fading_blocks_entry(
         )
         if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
             return False, "symmetric_near_base_shallow_fade_ok"
+
+    if (
+        building_rip_bypass
+        and bool(getattr(settings, "building_rip_helper_premium_fade_fill_enabled", True))
+        and tier in ("BUILDING", "EXPLODING", "ELITE")
+    ):
+        shallow_floor = float(
+            getattr(
+                settings,
+                "building_rip_helper_premium_fade_max_drawdown_pct",
+                -1.5,
+            )
+            or -1.5
+        )
+        if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
+            return False, "building_rip_shallow_fade_ok"
 
     min_mom = settings.execution_chart_min_premium_momentum_pct
     if premium_momentum_5s < min_mom and premium_momentum_3s < 0:

@@ -1200,6 +1200,8 @@ class Settings(BaseSettings):
     building_rip_pullback_min_retained_v3: float = 1.0
     building_rip_ftv_helper_cap_local_pct: float = 28.0
     building_rip_ftv_helper_max_local_pct: float = 72.0
+    building_rip_helper_premium_fade_fill_enabled: bool = True
+    building_rip_helper_premium_fade_max_drawdown_pct: float = -1.5
     building_rip_min_velocity_3s: float = 1.5
     building_rip_min_velocity_9s: float = 0.8
     building_rip_min_volume_surge: float = 1.8
