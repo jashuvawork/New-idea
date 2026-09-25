@@ -68,12 +68,24 @@ def compute_live_entry_score(
     per_v3 = float(
         getattr(settings, "live_entry_score_negative_v3_penalty_per_point", 3.0) or 3.0
     )
-    if v3 < 0:
-        pen = min(35.0, abs(v3) * per_v3)
+    v3_dead = float(
+        getattr(settings, "live_entry_score_negative_v3_deadband", 0.55) or 0.55
+    )
+    penalty_scale = 1.0
+    high_radar_min = float(
+        getattr(settings, "live_entry_score_high_radar_soft_penalty_min", 94.0) or 94.0
+    )
+    if base >= high_radar_min:
+        penalty_scale = float(
+            getattr(settings, "live_entry_score_high_radar_penalty_scale", 0.45) or 0.45
+        )
+        meta["highRadarSoftPenalty"] = True
+    if v3 < -v3_dead:
+        pen = min(35.0, abs(v3 + v3_dead) * per_v3 * penalty_scale)
         live = max(0.0, live - pen)
         meta["velocity3Penalty"] = round(pen, 2)
-    if v9 < 0:
-        pen9 = min(25.0, abs(v9) * (per_v3 * 0.6))
+    if v9 < -v3_dead:
+        pen9 = min(25.0, abs(v9 + v3_dead) * (per_v3 * 0.6) * penalty_scale)
         live = max(0.0, live - pen9)
         meta["velocity9Penalty"] = round(pen9, 2)
 
@@ -229,3 +241,49 @@ def live_entry_score_blocks_entry(
     if dump_blocked:
         return True, dump_reason, meta
     return False, "ok", meta
+
+
+def live_entry_scores_from_evidence(evidence: Mapping[str, Any]) -> tuple[float, float]:
+    live = float(
+        evidence.get("liveEntryScore")
+        or evidence.get("live_entry_score")
+        or 0
+    )
+    radar = float(
+        evidence.get("radarExplosionScore")
+        or evidence.get("explosionScore")
+        or evidence.get("explosion_score")
+        or 0
+    )
+    if live <= 0 and radar > 0:
+        live = radar
+    return live, radar
+
+
+def live_entry_moment_active(
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any = None,
+) -> bool:
+    """Strong tick score + radar — real intraday moment, not stale detection."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "live_entry_moment_waiver_enabled", True)):
+        return False
+    live, radar = live_entry_scores_from_evidence(evidence)
+    min_live = float(getattr(settings, "live_entry_moment_min_live", 86.0) or 86.0)
+    min_radar = float(getattr(settings, "live_entry_moment_min_radar", 92.0) or 92.0)
+    return live >= min_live and radar >= min_radar
+
+
+def live_entry_moment_waives_exploding_tier(
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any = None,
+) -> bool:
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "live_entry_moment_waives_exploding_tier", True)):
+        return False
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in {"EXPLODING", "ELITE"}:
+        return False
+    return live_entry_moment_active(evidence, settings=settings)

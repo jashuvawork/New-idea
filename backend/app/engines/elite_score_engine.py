@@ -383,6 +383,11 @@ def top_trades_only_blocks_entry(
     if bool(getattr(settings, "top_trades_only_require_elite_tier", True)):
         tier = str(evidence.get("tier") or "").upper()
         if tier != "ELITE":
+            from app.engines.live_entry_score import live_entry_moment_waives_exploding_tier
+
+            moment_tier_ok = live_entry_moment_waives_exploding_tier(
+                evidence, settings=settings,
+            )
             building_ok = ce_best_trade_building_tier_ok(
                 evidence,
                 ranking,
@@ -394,7 +399,7 @@ def top_trades_only_blocks_entry(
                 readiness_reason=readiness_reason,
                 settings=settings,
             )
-            if not building_ok:
+            if not building_ok and not moment_tier_ok:
                 return True, "top_trades_requires_elite_tier"
 
     if bool(getattr(settings, "top_trades_only_require_near_base_or_must_take", True)):
@@ -1274,6 +1279,13 @@ def elite_entry_allowed(
         assessment = {**assessment, "megaVerticalBypass": mega_tag}
 
     min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
+    from app.engines.live_entry_score import live_entry_moment_active
+
+    if live_entry_moment_active(evidence, settings=settings):
+        moment_floor = float(
+            getattr(settings, "live_entry_moment_elite_score_floor", 84.0) or 84.0
+        )
+        min_score = min(min_score, moment_floor)
     mirror_active = False
     rally_unlock_armed = False
     rally_fingerprint_active = False
