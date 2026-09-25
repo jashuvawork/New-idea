@@ -2024,6 +2024,18 @@ def rank_entry_candidate(
         "explosionScore": (
             getattr(event, "explosion_score", 0) if event else getattr(candidate, "confidence", 0)
         ),
+        "liveEntryScore": float(
+            alert.get("liveEntryScore")
+            or getattr(candidate, "liveEntryScore", 0)
+            or 0
+        ),
+        "radarExplosionScore": float(
+            alert.get("radarExplosionScore")
+            or alert.get("explosionScore")
+            or (getattr(event, "explosion_score", 0) if event else 0)
+            or getattr(candidate, "confidence", 0)
+            or 0
+        ),
         "tqs": getattr(candidate, "tqs", 0),
         "flatVerticalQuality": (
             alert.get("flatVerticalQuality")

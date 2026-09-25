@@ -131,3 +131,51 @@ def test_live_entry_gate_blocks_sep24_style(mock_low, mock_peak, mock_settings):
     blocked, reason, _ = live_entry_score_blocks_entry(candidate, None)
     assert blocked
     assert "live_entry_score" in reason or reason == "premium_post_spike_dump"
+
+
+@patch("app.engines.live_entry_score.get_settings")
+def test_high_radar_softens_mild_negative_v3(mock_settings):
+    s = MagicMock()
+    s.live_execution_trade_score_enabled = True
+    s.live_execution_trade_score_dump_penalty = 45.0
+    s.live_execution_trade_score_mom_factor = 8.0
+    s.live_entry_score_negative_v3_penalty_per_point = 2.0
+    s.live_entry_score_negative_v3_deadband = 0.55
+    s.live_entry_score_high_radar_soft_penalty_min = 94.0
+    s.live_entry_score_high_radar_penalty_scale = 0.45
+    s.live_entry_score_dump_cap = 42.0
+    s.premium_post_spike_dump_min_drawdown_pct = 12.0
+    s.premium_post_spike_dump_min_spike_run_pct = 35.0
+    s.premium_post_spike_dump_near_low_frac = 0.18
+    s.premium_post_spike_dump_min_velocity_3s = -0.15
+    s.premium_post_spike_dump_min_velocity_9s = -0.25
+    mock_settings.return_value = s
+
+    live, meta = compute_live_entry_score(
+        {"explosionScore": 100.0, "velocity3s": -0.77, "velocity9s": -0.5, "premium": 120.0},
+        radar_score=100.0,
+        settings=s,
+    )
+    assert live >= 97.0
+    assert meta.get("highRadarSoftPenalty") is True
+
+
+def test_live_entry_moment_active():
+    from app.engines.live_entry_score import live_entry_moment_active
+
+    evidence = {"liveEntryScore": 97.0, "explosionScore": 100.0, "tier": "EXPLODING"}
+    assert live_entry_moment_active(evidence)
+
+
+@patch("app.engines.live_entry_score.get_settings")
+def test_moment_waives_exploding_tier_for_top_trades(mock_settings):
+    from app.engines.live_entry_score import live_entry_moment_waives_exploding_tier
+
+    s = MagicMock()
+    s.live_entry_moment_waiver_enabled = True
+    s.live_entry_moment_min_live = 86.0
+    s.live_entry_moment_min_radar = 92.0
+    s.live_entry_moment_waives_exploding_tier = True
+    mock_settings.return_value = s
+    evidence = {"tier": "EXPLODING", "liveEntryScore": 96.0, "explosionScore": 100.0}
+    assert live_entry_moment_waives_exploding_tier(evidence, settings=s)
