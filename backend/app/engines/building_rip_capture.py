@@ -125,6 +125,7 @@ def apply_helper_confirmed_building_rip_boost(alert: dict[str, Any]) -> dict[str
         alert["tier"] = "EXPLODING"
     alert["tradeable"] = True
     alert["buildingRipReady"] = True
+    alert["ictBuildingRipReady"] = True
     alert["buildingRipHelpersOk"] = True
 
     move = float(alert.get("localBaseMovePct") or 0)

@@ -2751,8 +2751,13 @@ def refresh_snapshot_explosion_alerts(snap: Any, *, expiry_day: bool = False) ->
 
             for i, a in enumerate(alerts):
                 alerts[i] = apply_helper_confirmed_building_rip_boost(dict(a))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "index/building-rip alert stamp failed for %s: %s",
+            getattr(snap, "symbol", ""),
+            exc,
+            exc_info=True,
+        )
     snap.explosionAlerts = alerts
     snap.topExplosion = alerts[0] if alerts else None
 

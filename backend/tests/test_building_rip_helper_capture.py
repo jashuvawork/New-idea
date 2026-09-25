@@ -49,6 +49,25 @@ def test_helper_confirmed_building_rip_active_requires_bonus():
     assert helper_confirmed_building_rip_active(_nifty23100_ce_chase_alert()) is True
 
 
+def test_rank_evidence_building_rip_from_alert_stamp():
+    from app.engines.trade_ranking import rank_trade_evidence
+
+    evidence = rank_trade_evidence(
+        {
+            "mode": "explosion",
+            "tier": "EXPLODING",
+            "explosionScore": 88.0,
+            "buildingRipReady": True,
+            "buildingRipHelpersOk": True,
+            "indexHelpersConfirm": True,
+            "velocity3s": 2.0,
+            "localBaseMovePct": 12.0,
+        }
+    )
+    ev = evidence.get("evidence") or {}
+    assert ev.get("buildingRipReady") is True
+
+
 def test_building_rip_ftv_local_move_caps_chase_misread():
     move = building_rip_ftv_local_move_pct(
         {
@@ -73,6 +92,7 @@ def test_apply_boost_promotes_tradeable_exploding(_peak):
     assert float(boosted["explosionScore"]) >= 85.0
     assert float(boosted["velocity3s"]) >= 2.4
     assert float(boosted["localBaseMovePct"]) <= 28.0
+    assert boosted.get("ictBuildingRipReady") is True
 
 
 @patch(

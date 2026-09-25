@@ -544,6 +544,30 @@ def building_rip_bypasses_fake_trap(
                 or meta.get("firstLiftReadinessReason")
                 or ""
             )
+    rr = str(readiness_reason or "")
+    if rr in ARMED_BASE_GRADE_A_READY_REASONS:
+        return True
+    if isinstance(alert, dict):
+        stamped = str(
+            alert.get("firstLiftReadinessReason")
+            or alert.get("ictBaseReadinessReason")
+            or ""
+        )
+        if stamped in ARMED_BASE_GRADE_A_READY_REASONS:
+            return True
+        try:
+            from app.engines.building_rip_capture import (
+                helper_confirmed_building_rip_active,
+            )
+
+            if helper_confirmed_building_rip_active(alert):
+                return True
+        except Exception:
+            pass
+        if bool(alert.get("indexHelpersConfirm")) and alert_has_building_rip_signal(
+            alert
+        ):
+            return True
     return bool(
         building_rip_ready_reason(alert=alert, readiness_reason=readiness_reason)
         or alert_has_building_rip_signal(alert)
@@ -603,6 +627,39 @@ def top_must_take_bypasses_fake_trap(
         return bool(
             not getattr(settings, "top_must_take_fake_trap_requires_index", False)
         )
+
+
+def building_rip_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+) -> bool:
+    """Shallow pullback on index-thrust BUILDING rip — allow fill (CE/PE symmetric)."""
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "building_rip_helper_premium_fade_fill_enabled", True)
+    ):
+        return False
+    tier = ""
+    if isinstance(alert, dict):
+        tier = str(alert.get("tier") or "").upper()
+    if explosion_event is not None and not tier:
+        tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    if tier not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+    if not isinstance(alert, dict):
+        return False
+    try:
+        from app.engines.building_rip_capture import (
+            helper_confirmed_building_rip_active,
+        )
+
+        if helper_confirmed_building_rip_active(alert):
+            return True
+    except Exception:
+        pass
+    return bool(alert.get("indexHelpersConfirm")) and alert_has_building_rip_signal(
+        alert
+    )
 
 
 def building_rip_bypasses_extended_chase(
