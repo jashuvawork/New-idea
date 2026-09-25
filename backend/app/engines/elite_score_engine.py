@@ -886,6 +886,13 @@ def elite_fvq_chase_blocked(
     settings = settings or get_settings()
     if must_take:
         return False, ""
+    from app.engines.live_entry_score import live_entry_best_trade_capture_active
+
+    if (
+        bool(getattr(settings, "live_entry_best_trade_capture_waives_fvq_chase", True))
+        and live_entry_best_trade_capture_active(evidence, settings=settings)
+    ):
+        return False, ""
     rr = str(
         readiness_reason
         or evidence.get("firstLiftReadinessReason")
@@ -1286,6 +1293,18 @@ def elite_entry_allowed(
             getattr(settings, "live_entry_moment_elite_score_floor", 84.0) or 84.0
         )
         min_score = min(min_score, moment_floor)
+    from app.engines.live_entry_score import (
+        live_entry_best_trade_capture_active,
+        live_entry_scores_from_evidence,
+    )
+
+    best_capture = live_entry_best_trade_capture_active(evidence, settings=settings)
+    if best_capture:
+        capture_floor = float(
+            getattr(settings, "live_entry_best_trade_capture_elite_score_floor", 78.0)
+            or 78.0
+        )
+        min_score = min(min_score, capture_floor)
     mirror_active = False
     rally_unlock_armed = False
     rally_fingerprint_active = False
@@ -1377,6 +1396,13 @@ def elite_entry_allowed(
         return False, milestone_reason, assessment
 
     score = float(assessment.get("eliteScore") or 0)
+    if best_capture:
+        live, _radar = live_entry_scores_from_evidence(evidence)
+        blend = float(
+            getattr(settings, "live_entry_best_trade_capture_elite_live_blend", 0.92)
+            or 0.92
+        )
+        score = max(score, live * blend)
     if score < min_score - 1e-6:
         return False, f"elite_score_below_{min_score:g}", assessment
 
@@ -1421,6 +1447,15 @@ def elite_entry_allowed(
     ):
         v_rip_shallow_blocked = False
         v_rip_shallow_reason = ""
+    if (
+        v_rip_shallow_blocked
+        and best_capture
+        and bool(
+            getattr(settings, "live_entry_best_trade_capture_waives_v_rip_shallow", True)
+        )
+    ):
+        v_rip_shallow_blocked = False
+        v_rip_shallow_reason = ""
     if v_rip_shallow_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, v_rip_shallow_reason, assessment
@@ -1460,7 +1495,13 @@ def elite_entry_allowed(
         return False, "elite_chase_past_local_base_window", assessment
 
     if not _timing_ok(evidence):
-        return False, "elite_timing_not_good_or_ok", assessment
+        if not (
+            best_capture
+            and bool(
+                getattr(settings, "live_entry_best_trade_capture_waives_elite_timing", True)
+            )
+        ):
+            return False, "elite_timing_not_good_or_ok", assessment
 
     assessment = {
         **assessment,

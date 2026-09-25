@@ -179,3 +179,35 @@ def test_moment_waives_exploding_tier_for_top_trades(mock_settings):
     mock_settings.return_value = s
     evidence = {"tier": "EXPLODING", "liveEntryScore": 96.0, "explosionScore": 100.0}
     assert live_entry_moment_waives_exploding_tier(evidence, settings=s)
+
+
+def test_live_entry_best_trade_capture_active():
+    from app.engines.live_entry_score import live_entry_best_trade_capture_active
+
+    assert live_entry_best_trade_capture_active(
+        {"liveEntryScore": 97.0, "explosionScore": 100.0, "tier": "EXPLODING"},
+    )
+    assert not live_entry_best_trade_capture_active(
+        {"liveEntryScore": 80.0, "explosionScore": 100.0, "tier": "EXPLODING"},
+    )
+
+
+def test_ftv_live_best_moment_authorization():
+    from app.engines.trade_ranking import ftv_authorization_policy
+
+    evidence = {
+        "mode": "explosion",
+        "tier": "EXPLODING",
+        "explosionScore": 100.0,
+        "liveEntryScore": 97.0,
+        "flatVerticalQuality": 50.0,
+        "tqs": 40.0,
+        "velocity3s": 0.5,
+        "velocity9s": 0.3,
+        "localBaseMovePct": 12.0,
+        "timingAssessment": "CHASE",
+    }
+    ranking = {"grade": "B"}
+    auth = ftv_authorization_policy(evidence, ranking, top_ftv_a_enabled=True)
+    assert auth.mode == "LIVE_BEST_MOMENT"
+    assert auth.reason == "ok"

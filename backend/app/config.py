@@ -819,6 +819,16 @@ class Settings(BaseSettings):
     live_entry_moment_min_radar: float = 92.0
     live_entry_moment_waives_exploding_tier: bool = True
     live_entry_moment_elite_score_floor: float = 84.0
+    live_entry_best_trade_capture_enabled: bool = True
+    live_entry_best_trade_capture_min_live: float = 88.0
+    live_entry_best_trade_capture_min_radar: float = 95.0
+    live_entry_best_trade_capture_max_capital_pct: float = 0.85
+    live_entry_best_trade_capture_elite_score_floor: float = 78.0
+    live_entry_best_trade_capture_elite_live_blend: float = 0.92
+    live_entry_best_trade_capture_waives_elite_timing: bool = True
+    live_entry_best_trade_capture_waives_fvq_chase: bool = True
+    live_entry_best_trade_capture_waives_v_rip_shallow: bool = True
+    live_entry_best_trade_capture_waives_near_miss: bool = True
     # Coil-top guard: BUILDING/WATCH must enter at the local-base floor of a consolidation,
     # not at the ceiling. Uses position within the recent premium window (current-low)/(high-low).
     # Sep 4 NIFTY 23900 CE: base ~135, coil top ~150, entry ~147 — off-low ~9% but position ~80%.

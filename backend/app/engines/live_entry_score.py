@@ -287,3 +287,35 @@ def live_entry_moment_waives_exploding_tier(
     if tier not in {"EXPLODING", "ELITE"}:
         return False
     return live_entry_moment_active(evidence, settings=settings)
+
+
+def live_entry_best_trade_capture_active(
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any = None,
+) -> bool:
+    """Top radar + live tick score — allow best-trade capture through FTV/elite stacks."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "live_entry_best_trade_capture_enabled", True)):
+        return False
+    live, radar = live_entry_scores_from_evidence(evidence)
+    min_live = float(
+        getattr(settings, "live_entry_best_trade_capture_min_live", 88.0) or 88.0
+    )
+    min_radar = float(
+        getattr(settings, "live_entry_best_trade_capture_min_radar", 95.0) or 95.0
+    )
+    return live >= min_live and radar >= min_radar
+
+
+def live_entry_best_trade_capture_from_alert(
+    alert: Mapping[str, Any],
+    *,
+    settings: Any = None,
+) -> bool:
+    evidence = {
+        "liveEntryScore": alert.get("liveEntryScore"),
+        "explosionScore": alert.get("explosionScore") or alert.get("radarExplosionScore"),
+        "tier": alert.get("tier"),
+    }
+    return live_entry_best_trade_capture_active(evidence, settings=settings)

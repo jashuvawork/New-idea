@@ -422,7 +422,35 @@ def ftv_authorization_policy(
 ) -> FtvAuthorization:
     """Pure causal authorization for strict S, top FTV A, winner, and BUILDING rip."""
     blocked = lambda reason: FtvAuthorization(None, reason)
+    from app.config import get_settings as _get_settings
+    from app.engines.live_entry_score import live_entry_best_trade_capture_active
+
+    _cap_settings = _get_settings()
+
+    def _live_best_moment_ftv() -> FtvAuthorization | None:
+        if not live_entry_best_trade_capture_active(evidence, settings=_cap_settings):
+            return None
+        tier_u = str(evidence.get("tier") or "").upper()
+        exp = _number(evidence.get("explosionScore"))
+        min_radar = float(
+            getattr(_cap_settings, "live_entry_best_trade_capture_min_radar", 95.0) or 95.0
+        )
+        if tier_u in {"ELITE", "EXPLODING"} and exp >= min_radar:
+            pct = float(
+                getattr(
+                    _cap_settings,
+                    "live_entry_best_trade_capture_max_capital_pct",
+                    0.85,
+                )
+                or 0.85
+            )
+            return FtvAuthorization("LIVE_BEST_MOMENT", "ok", max_capital_pct=pct)
+        return None
+
     if str(evidence.get("mode") or "").lower() != "explosion":
+        moment = _live_best_moment_ftv()
+        if moment is not None:
+            return moment
         return blocked("ftv_elite_top_only_requires_explosion")
 
     actual_ftv = bool(
@@ -437,6 +465,9 @@ def ftv_authorization_policy(
         or _pad_lane_pre_lift(evidence)
     )
     if not actual_ftv:
+        moment = _live_best_moment_ftv()
+        if moment is not None:
+            return moment
         return blocked("ftv_elite_top_only_requires_ftv")
 
     micro_pullback = _first_lift_local_base_micro_pullback(
@@ -487,8 +518,12 @@ def ftv_authorization_policy(
         }
     ):
         from app.engines.pad_lane_capture import pad_lane_ftv_waives_timing_block
+        from app.config import get_settings
+        from app.engines.live_entry_score import live_entry_best_trade_capture_active
 
-        if not pad_lane_ftv_waives_timing_block(evidence):
+        if not pad_lane_ftv_waives_timing_block(evidence) and not live_entry_best_trade_capture_active(
+            evidence, settings=get_settings(),
+        ):
             return blocked("ftv_elite_top_only_timing_blocked")
     if snapshot_available and not atm_itm_allowed:
         if not _shallow_otm_local_base_ftv_waives_atm_itm(evidence):
@@ -613,6 +648,13 @@ def ftv_authorization_policy(
     tqs = _number(evidence.get("tqs"))
     v3 = _number(evidence.get("velocity3s"))
     v9 = _number(evidence.get("velocity9s"))
+    moment = _live_best_moment_ftv()
+    if moment is not None:
+        expiry_block = _expiry_worst_policy_ok(
+            tier=tier, quality=quality, score=explosion_score, v3=v3,
+        )
+        if expiry_block is None:
+            return moment
     # Armed / first-lift / elite are preferred. Early FTV + heat inside the
     # catch pad also counts as fresh — closes the 12–15% dead zone where radar
     # already shows the rip but flag continuity has gaps.
@@ -2170,6 +2212,21 @@ def rank_entry_candidate(
         "momentType": str(alert.get("momentType") or ""),
         "reason": str(alert.get("reason") or ""),
     }
+    if not float(evidence.get("liveEntryScore") or 0):
+        try:
+            from app.engines.live_entry_score import compute_live_entry_score
+
+            live, _live_meta = compute_live_entry_score(
+                alert,
+                radar_score=float(
+                    evidence.get("radarExplosionScore")
+                    or evidence.get("explosionScore")
+                    or 0
+                ),
+            )
+            evidence["liveEntryScore"] = live
+        except Exception:
+            pass
     # Live index helpers when alert not yet stamped (ELITE/EXPLODING path).
     if live_snapshot is not None and not evidence.get("indexHelpersConfirm"):
         try:
