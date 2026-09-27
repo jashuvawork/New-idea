@@ -526,6 +526,54 @@ export interface ChopGuards {
   directionalLock?: DirectionalLockSummary;
   eliteTradeBudget?: EliteTradeBudgetSummary;
   ictBreakoutMonitor?: IctBreakoutMonitorSummary;
+  sep917LiveChecklist?: Sep917LiveChecklistSummary;
+}
+
+export interface Sep917ChecklistStepGuide {
+  id?: number;
+  key?: string;
+  title?: string;
+  question?: string;
+}
+
+export interface Sep917ChecklistSteps {
+  indexStructure?: { ok?: boolean; detail?: string };
+  optionShape?: { ok?: boolean; detail?: string };
+  sessionContext?: { ok?: boolean; detail?: string };
+  funnelAuthorize?: { ok?: boolean; detail?: string };
+}
+
+export interface Sep917LiveChecklistCandidate {
+  version?: string;
+  symbol?: string;
+  side?: string;
+  strike?: number;
+  lane?: string;
+  ready?: boolean;
+  source?: string;
+  steps?: Sep917ChecklistSteps;
+}
+
+export interface Sep917LiveChecklistSummary {
+  version?: string;
+  enabled?: boolean;
+  symmetricBestTradeCapture?: boolean;
+  callRallyUnlockEnabled?: boolean;
+  putSlideUnlockEnabled?: boolean;
+  buildingRipHelperEnabled?: boolean;
+  stepsGuide?: Sep917ChecklistStepGuide[];
+  symbols?: Record<
+    string,
+    {
+      call?: { indexRallyUnlock?: boolean; laneHint?: string | null };
+      put?: { indexSlideUnlock?: boolean; laneHint?: string | null };
+      lockedSide?: string | null;
+      direction?: string;
+    }
+  >;
+  postWinChopFomo?: boolean;
+  postWinChopFomoReasons?: string[];
+  topCandidate?: Sep917LiveChecklistCandidate | null;
 }
 
 export interface ExpiryGuardsSummary {
