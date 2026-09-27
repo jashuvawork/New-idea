@@ -927,7 +927,20 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         ).to_dict(),
         "ictBreakoutMonitor": ict_monitor_summary(snapshots),
         "eliteTradeBudget": __elite_trade_budget_summary(state),
+        "sep917LiveChecklist": __sep917_live_checklist_summary(state, snapshots, mode),
     }
+
+
+def __sep917_live_checklist_summary(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+    day_mode: str,
+) -> dict[str, Any]:
+    from app.engines.sep917_live_checklist import sep917_live_checklist_session_summary
+
+    return sep917_live_checklist_session_summary(
+        state, snapshots, day_mode=day_mode,
+    )
 
 
 def __elite_trade_budget_summary(state: AutoTraderState) -> dict[str, Any]:

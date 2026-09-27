@@ -20,6 +20,16 @@ router = APIRouter(prefix="/api/auto-trader", tags=["auto-trader"])
 @router.get("/status")
 async def auto_trader_status():
     state = get_state()
+    try:
+        from app.routers import market as market_router
+
+        cache = getattr(market_router, "_cache", None)
+        snaps = dict(cache.snapshots) if cache and cache.snapshots else {}
+    except Exception:
+        snaps = {}
+    from app.engines.sep917_live_checklist import attach_sep917_checklist_to_chop_guards
+
+    attach_sep917_checklist_to_chop_guards(state, snaps)
     payload = state.model_dump(mode="json")
     payload["running"] = entries_execution_active(state)
     return payload
