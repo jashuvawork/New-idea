@@ -1,7 +1,31 @@
+import { useEffect, useState } from 'react';
 import { Panel, Metric } from './Panel';
-import type { AutoTraderState, ExecutionChartContext } from '../types';
+import { Sep917LiveChecklistSection } from './Sep917LiveChecklistSection';
+import type { AutoTraderState, ExecutionChartContext, Sep917LiveChecklistSummary } from '../types';
 
 export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
+  const [checklist, setChecklist] = useState<Sep917LiveChecklistSummary | undefined>(
+    auto.chopGuards?.sep917LiveChecklist,
+  );
+
+  useEffect(() => {
+    if (auto.chopGuards?.sep917LiveChecklist?.enabled) {
+      setChecklist(auto.chopGuards.sep917LiveChecklist);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/auto-trader/status')
+      .then((r) => r.json())
+      .then((payload) => {
+        if (!cancelled) {
+          setChecklist(payload.chopGuards?.sep917LiveChecklist);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [auto.chopGuards?.sep917LiveChecklist]);
   const report = auto.dailyReport;
   const pfColor = report.profitFactor >= 1.2 ? 'text-nexus-green' : report.profitFactor < 1 ? 'text-nexus-red' : 'text-nexus-yellow';
   const liveMode = auto.liveTradingEnabled && auto.autoTradingEnabled;
@@ -68,6 +92,8 @@ export function AutoTradingPanel({ auto }: { auto: AutoTraderState }) {
           </span>
         </div>
       )}
+
+      <Sep917LiveChecklistSection checklist={checklist} />
 
       {auto.buildingLtpMonitor && (auto.buildingLtpMonitor.watchedCount ?? 0) > 0 && (
         <div className="mb-2 p-1.5 rounded border border-nexus-border/60 bg-black/20">

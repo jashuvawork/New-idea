@@ -1,4 +1,5 @@
 import { Panel, BiasBadge } from './Panel';
+import { Sep917LiveChecklistSection } from './Sep917LiveChecklistSection';
 import type { AutoTraderState, ChartAnalysis, ChopGuards, SpotChart, SymbolSnapshot } from '../types';
 import { morningCaptureWindowActive, allDayExplosionWindowActive } from '../lib/playbookSession';
 
@@ -603,6 +604,8 @@ export function DayModePanel({
           )}
         </div>
       )}
+
+      <Sep917LiveChecklistSection checklist={g.sep917LiveChecklist} />
 
       {g.lastNTrades && (g.lastNTrades.count ?? 0) > 0 && (
         <div className="mb-3 p-2 rounded bg-black/30 text-[10px]">
