@@ -688,6 +688,14 @@ async def _open_from_candidate(
         if late_peak_blocked:
             return False, late_peak_reason or "late_reentry_near_session_peak"
 
+        from app.engines.sep09_intent_guards import sep09_intent_explosion_entry_blocked
+
+        sep_blocked, sep_reason, _sep_meta = sep09_intent_explosion_entry_blocked(
+            state, candidate, snap, settings=settings,
+        )
+        if sep_blocked:
+            return False, sep_reason or "sep09_intent_blocked"
+
     if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.trade_ranking import (

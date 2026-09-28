@@ -125,6 +125,19 @@ def resolve_sep917_lane(
     )
     local = _local_move_pct(evidence)
     moment = classify_top_moment_type(evidence)
+    from app.engines.sep09_intent_guards import sep09_near_peak_after_extended_rip
+
+    chase, _ = sep09_near_peak_after_extended_rip(
+        evidence,
+        premium=float(evidence.get("premium") or evidence.get("lastPremium") or 0),
+        symbol=str(symbol or evidence.get("symbol") or ""),
+        strike=float(evidence.get("strike") or 0),
+        side=side_u,
+        alert=evidence,
+        settings=settings,
+    )
+    if chase:
+        return "CHASE_BLOCK"
     if symmetric_structural_base_evidence(evidence, settings=settings) and moment:
         return "NEAR_BASE_SEP917"
     if local > max_local + 1e-6 and moment is None:
@@ -212,6 +225,20 @@ def _option_shape_ok(
     if lane == "CHASE_BLOCK":
         return False, f"naked_chase_local_{local:.1f}pct"
 
+    from app.engines.sep09_intent_guards import sep09_near_peak_after_extended_rip
+
+    near_peak, np_reason = sep09_near_peak_after_extended_rip(
+        evidence,
+        premium=float(evidence.get("premium") or evidence.get("lastPremium") or 0),
+        symbol=str(evidence.get("symbol") or ""),
+        strike=float(evidence.get("strike") or 0),
+        side=side,
+        alert=evidence,
+        settings=settings,
+    )
+    if near_peak:
+        return False, np_reason
+
     if symmetric_structural_base_evidence(evidence, settings=settings) and moment:
         return True, f"near_base_{moment.lower()}"
 
@@ -272,9 +299,22 @@ def _funnel_authorize_ok(
     settings: Any,
     lane: str,
 ) -> tuple[bool, str]:
+    from app.engines.sep09_intent_guards import sep09_intent_evidence_blocked
     from app.engines.top_moment_gate import top_moment_entry_allowed
 
     side_u = str(side or "").upper()
+    sym = str(evidence.get("symbol") or "").upper()
+    sep_blocked, sep_reason = sep09_intent_evidence_blocked(
+        sym or "NIFTY",
+        side_u,
+        evidence,
+        state=state,
+        snap=snapshots.get(sym) if isinstance(snapshots, dict) else None,
+        settings=settings,
+    )
+    if sep_blocked:
+        return False, sep_reason
+
     ok, reason, moment = top_moment_entry_allowed(
         evidence,
         ranking,
@@ -483,6 +523,9 @@ def sep917_live_checklist_session_summary(
         "putSlideUnlockEnabled": bool(getattr(settings, "put_slide_unlock_enabled", True)),
         "buildingRipHelperEnabled": bool(
             getattr(settings, "building_rip_helper_top_moment_enabled", True)
+        ),
+        "sep09IntentEnforcement": bool(
+            getattr(settings, "sep09_intent_enforcement_enabled", True)
         ),
         "stepsGuide": list(_STEP_GUIDE),
         "symbols": per_sym,

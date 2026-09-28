@@ -1035,6 +1035,23 @@ def validate_candidate(
         if not peak_ok:
             return False, peak_reason, meta
 
+        from app.engines.sep09_intent_guards import (
+            sep09_intent_blocks_must_take_bypass,
+            sep09_intent_explosion_entry_blocked,
+        )
+
+        sep_blocked, sep_reason, sep_meta = sep09_intent_explosion_entry_blocked(
+            state, candidate, snap, settings=settings,
+        )
+        meta["sep09IntentCheck"] = sep_meta
+        if sep_blocked:
+            if sep09_intent_blocks_must_take_bypass(settings):
+                return False, sep_reason, meta
+            from app.engines.elite_never_block import elite_must_take_bypass_allowed
+
+            if not elite_must_take_bypass_allowed(candidate=candidate):
+                return False, sep_reason, meta
+
         trap_ict = (
             analyze_explosion_event_ict(explosion_event, snap)
             if explosion_event is not None

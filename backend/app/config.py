@@ -437,6 +437,16 @@ class Settings(BaseSettings):
     best_trade_near_base_max_lots_enabled: bool = True
     best_trade_near_base_min_elite_score: float = 90.0
     best_trade_near_base_max_local_pct: float = 20.0
+    # Sep 9 intent — one early near-base rip per side; block late rank-#1 chase (CE/PE).
+    sep09_intent_enforcement_enabled: bool = True
+    sep09_intent_one_rip_per_side_enabled: bool = True
+    sep09_intent_max_minutes_after_armed_base: float = 12.0
+    sep09_intent_max_minutes_after_detect_fallback: float = 15.0
+    sep09_intent_min_pullback_from_peak_pct: float = 8.0
+    sep09_intent_max_spike_run_pct: float = 18.0
+    sep09_intent_max_local_base_pct: float = 20.0
+    sep09_intent_blocks_must_take_bypass: bool = True
+    sep09_intent_opposite_flip_waive_enabled: bool = True
     # Block deep ITM chop/trap chase (Sep15 23500 PE @ ₹242 scratch).
     best_trade_block_chop_deep_chase_enabled: bool = True
     best_trade_deep_chase_min_premium_inr: float = 120.0
