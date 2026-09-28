@@ -339,6 +339,79 @@ def sep09_early_near_base_window_ok(
     return True, f"sep09_early_window_{elapsed:.1f}min"
 
 
+def _open_premium_move_pct(
+    evidence: Mapping[str, Any],
+    *,
+    symbol: str,
+    strike: float,
+    side: Any,
+    premium: float,
+) -> float:
+    open_move = float(evidence.get("openPremiumMove") or evidence.get("dailyMovePct") or 0)
+    session_move = float(evidence.get("sessionMovePct") or 0)
+    off_low = float(evidence.get("offLowMovePct") or 0)
+    if off_low <= 0:
+        from app.engines.explosion_detector import get_session_low_premium
+
+        low = float(get_session_low_premium(symbol, strike, side) or 0)
+        if low > 0 and premium > low:
+            off_low = (float(premium) - low) / low * 100.0
+    return max(open_move, session_move, off_low)
+
+
+def open_premium_first_side_rip_ok(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    evidence: Mapping[str, Any],
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """
+    Sep 9–17 open capture: one vertical off the session open pad (9:15–9:45 IST).
+
+    Waives afternoon-style near-peak / index-rally gates — not a second rip on the same side.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "sep09_intent_open_premium_first_rip_waive_enabled", True)):
+        return False, ""
+    from app.engines.session_timing import in_open_premium_window
+
+    if not in_open_premium_window():
+        return False, ""
+    sym = str(symbol or "").upper()
+    if bool(getattr(settings, "sep09_intent_one_rip_per_side_enabled", True)):
+        if session_has_sep09_side_rip(state, symbol=sym, side=side):
+            return False, "open_premium_side_rip_already_used"
+
+    move = _open_premium_move_pct(
+        evidence, symbol=sym, strike=strike, side=side, premium=premium,
+    )
+    relax = float(getattr(settings, "expiry_open_premium_relax_move_pct", 15.0) or 15.0)
+    full = float(getattr(settings, "open_premium_min_move_pct", 25.0) or 25.0)
+    cheap_cap = float(getattr(settings, "best_trade_cheap_entry_max_premium_inr", 85.0) or 85.0)
+    from app.engines.explosion_detector import get_session_low_premium
+
+    sess_low = float(get_session_low_premium(sym, strike, side) or 0)
+    threshold = relax if (sess_low > 0 and sess_low <= cheap_cap) or premium <= cheap_cap else full
+    if move + 1e-6 < threshold:
+        return False, f"open_premium_move_{move:.1f}pct_below_{threshold:.0f}"
+
+    local = max(
+        float(evidence.get("localBaseMovePct") or 0),
+        float(evidence.get("ictBaseRelativeMovePct") or 0),
+    )
+    max_local = float(
+        getattr(settings, "sep09_intent_open_premium_max_local_base_pct", 28.0) or 28.0
+    )
+    if local > max_local + 1e-6:
+        return False, f"open_premium_local_base_{local:.1f}pct_over_{max_local:.0f}"
+
+    return True, f"open_premium_first_rip_move_{move:.1f}pct"
+
+
 def sep09_opposite_flip_waive(
     state: AutoTraderState | None,
     *,
@@ -403,6 +476,35 @@ def sep09_intent_explosion_entry_blocked(
     if bool(getattr(settings, "sep09_intent_one_rip_per_side_enabled", True)):
         if session_has_sep09_side_rip(state, symbol=symbol, side=side):
             return True, "sep09_one_early_rip_per_side_already_used", meta
+
+    open_ok, open_detail = open_premium_first_side_rip_ok(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        premium=premium,
+        evidence=evidence,
+        settings=settings,
+    )
+    if open_ok:
+        meta["openPremiumFirstRip"] = open_detail
+        max_open_arm = float(
+            getattr(settings, "sep09_intent_open_premium_max_minutes_after_armed", 25.0) or 25.0
+        )
+        early_ok, early_detail = sep09_early_near_base_window_ok(
+            evidence,
+            alert,
+            settings=settings,
+            now=now,
+            strict=False,
+        )
+        if not early_ok and "late_entry" in early_detail:
+            elapsed, ref = _minutes_since_reference(alert, now=now)
+            if elapsed is not None and elapsed <= max_open_arm + 1e-6:
+                meta["earlyWindowDetail"] = f"open_premium_arm_waive_{elapsed:.1f}min"
+                return False, "", meta
+        meta["earlyWindowDetail"] = early_detail if early_ok else f"open_premium_waive:{open_detail}"
+        return False, "", meta
 
     chase, chase_reason = sep09_near_peak_after_extended_rip(
         evidence,
