@@ -344,6 +344,11 @@ class Settings(BaseSettings):
     top_trades_only_ce_best_trade_unlock_enabled: bool = True
     top_trades_only_ce_allow_building_tier: bool = True
     top_trades_only_ce_building_capture_enabled: bool = True
+    # PE mirror — slide-unlock / at-base waives top-trades chop (symmetric to CE rally unlock).
+    top_trades_only_pe_at_base_waives_chop: bool = True
+    top_trades_only_pe_best_trade_unlock_enabled: bool = True
+    top_trades_only_chop_rally_pe_unlock_enabled: bool = True
+    top_trades_only_pe_allow_building_tier: bool = True
     # Session side alignment (#623) — off by default; Sep 9–17 day-mode machinery only.
     session_side_alignment_enabled: bool = False
     # Legacy alias — kept for deploy configs; session_side_alignment_enabled takes precedence.

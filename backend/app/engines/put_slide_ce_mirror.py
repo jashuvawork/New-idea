@@ -581,3 +581,174 @@ def put_slide_premium_fade_bypass(
         symbol=sym,
         settings=settings,
     )
+
+
+def chop_rally_pe_top_trades_waiver(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    assessment: Mapping[str, Any] | None,
+    *,
+    day_mode: str = "",
+    side: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """CHOP + RALLY only — slide-unlocked PE waives top-trades chop block (CE/PE symmetric)."""
+    from app.engines.pe_win_ce_mirror import _CHOP_RALLY_DAY_MODE
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "top_trades_only_chop_rally_pe_unlock_enabled", True)):
+        return False
+    if str(side or evidence.get("side") or "").upper() != "PUT":
+        return False
+    dm = str(
+        day_mode or (assessment or {}).get("dayMode") or evidence.get("dayMode") or ""
+    ).strip().upper()
+    if dm != _CHOP_RALLY_DAY_MODE:
+        return False
+    if state is None or snap is None:
+        return False
+    sym = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    return put_slide_entry_unlock_fingerprint(
+        evidence,
+        ranking,
+        assessment,
+        state=state,
+        snap=snap,
+        symbol=sym,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+
+
+def pe_best_trade_top_trades_waiver(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    assessment: Mapping[str, Any] | None,
+    *,
+    day_mode: str = "",
+    side: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """Session-aligned PUT best trade — waives top-trades blocks (mirror of CE path)."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "top_trades_only_pe_best_trade_unlock_enabled", True)):
+        return False
+    if str(side or evidence.get("side") or "").upper() != "PUT":
+        return False
+    try:
+        from app.engines.building_ftv_gates import helper_building_rip_top_moment_ok
+
+        if helper_building_rip_top_moment_ok(
+            evidence,
+            ranking if isinstance(ranking, Mapping) else {},
+            readiness_reason=readiness_reason,
+        ):
+            return True
+    except Exception:
+        pass
+    if state is None or snap is None:
+        return False
+
+    sym = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    if chop_rally_pe_top_trades_waiver(
+        evidence,
+        ranking,
+        assessment,
+        day_mode=day_mode,
+        side="PUT",
+        state=state,
+        snap=snap,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return True
+
+    from app.engines.best_trade_policy import put_at_base_best_trade_fingerprint
+
+    if put_at_base_best_trade_fingerprint(
+        evidence,
+        ranking,
+        assessment,
+        state=state,
+        snap=snap,
+        symbol=sym,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return True
+
+    return put_slide_entry_unlock_fingerprint(
+        evidence,
+        ranking,
+        assessment,
+        state=state,
+        snap=snap,
+        symbol=sym,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+
+
+def pe_best_trade_building_tier_ok(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    assessment: Mapping[str, Any] | None,
+    *,
+    day_mode: str = "",
+    side: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """Allow BUILDING-tier PE when slide/at-base waiver + building rip is live (CE mirror)."""
+    settings = settings or get_settings()
+    allow = bool(getattr(settings, "top_trades_only_pe_allow_building_tier", True)) or bool(
+        getattr(settings, "top_trades_only_chop_rally_allow_building_tier", True)
+    )
+    if not allow:
+        return False
+    tier_u = str(evidence.get("tier") or "").upper()
+    try:
+        from app.engines.building_rip_capture import helper_confirmed_building_rip_active
+        from app.engines.building_ftv_gates import _alert_dict_from_evidence
+
+        helper_rip = helper_confirmed_building_rip_active(_alert_dict_from_evidence(evidence))
+    except Exception:
+        helper_rip = False
+    if tier_u not in ("BUILDING", "EXPLODING", "ELITE"):
+        return False
+    if helper_rip and tier_u in ("EXPLODING", "ELITE"):
+        ranking = ranking if isinstance(ranking, Mapping) else {}
+        grade = str(ranking.get("grade") or (assessment or {}).get("grade") or "").upper()
+        min_grade = str(
+            getattr(settings, "building_rip_helper_min_grade", "B") or "B"
+        ).upper()
+        return _grade_meets_min(grade, min_grade)
+    if tier_u != "BUILDING":
+        return False
+    if not pe_best_trade_top_trades_waiver(
+        evidence,
+        ranking,
+        assessment,
+        day_mode=day_mode,
+        side=side,
+        state=state,
+        snap=snap,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return False
+    if not _building_rip_launch_ok(
+        evidence, readiness_reason=readiness_reason, settings=settings,
+    ):
+        return False
+    ranking = ranking if isinstance(ranking, Mapping) else {}
+    grade = str(ranking.get("grade") or (assessment or {}).get("grade") or "").upper()
+    return grade in ("A", "S")

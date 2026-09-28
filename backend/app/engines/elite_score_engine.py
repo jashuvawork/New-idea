@@ -298,6 +298,11 @@ def top_trades_only_blocks_entry(
         ce_best_trade_near_base_ok,
         ce_best_trade_top_trades_waiver,
     )
+    from app.engines.put_slide_ce_mirror import (
+        pe_best_trade_building_tier_ok,
+        pe_best_trade_top_trades_waiver,
+    )
+    from app.engines.best_trade_policy import put_at_base_best_trade_fingerprint
 
     settings = settings or get_settings()
     if not bool(getattr(settings, "top_trades_only_strict_enabled", True)):
@@ -378,6 +383,33 @@ def top_trades_only_blocks_entry(
                             readiness_reason=readiness_reason,
                             settings=settings,
                         )
+                if not chop_waived and side_u == "PUT" and state is not None and snap is not None:
+                    sym = str(
+                        evidence.get("symbol") or getattr(snap, "symbol", "") or ""
+                    ).upper()
+                    if bool(getattr(settings, "top_trades_only_pe_at_base_waives_chop", True)):
+                        chop_waived = put_at_base_best_trade_fingerprint(
+                            evidence,
+                            ranking,
+                            assessment,
+                            state=state,
+                            snap=snap,
+                            symbol=sym,
+                            readiness_reason=readiness_reason,
+                            settings=settings,
+                        )
+                    if not chop_waived:
+                        chop_waived = pe_best_trade_top_trades_waiver(
+                            evidence,
+                            ranking,
+                            assessment,
+                            day_mode=dm,
+                            side=side_u,
+                            state=state,
+                            snap=snap,
+                            readiness_reason=readiness_reason,
+                            settings=settings,
+                        )
                 if not chop_waived:
                     return True, "top_trades_chop_day_not_must_take"
 
@@ -389,17 +421,30 @@ def top_trades_only_blocks_entry(
             moment_tier_ok = live_entry_moment_waives_exploding_tier(
                 evidence, settings=settings,
             )
+            side_for_tier = str(side or assessment.get("side") or "").upper()
             building_ok = ce_best_trade_building_tier_ok(
                 evidence,
                 ranking,
                 assessment,
                 day_mode=dm,
-                side=str(side or assessment.get("side") or "").upper(),
+                side=side_for_tier,
                 state=state,
                 snap=snap,
                 readiness_reason=readiness_reason,
                 settings=settings,
             )
+            if not building_ok and side_for_tier == "PUT":
+                building_ok = pe_best_trade_building_tier_ok(
+                    evidence,
+                    ranking,
+                    assessment,
+                    day_mode=dm,
+                    side=side_for_tier,
+                    state=state,
+                    snap=snap,
+                    readiness_reason=readiness_reason,
+                    settings=settings,
+                )
             if not building_ok and not moment_tier_ok:
                 return True, "top_trades_requires_elite_tier"
 
@@ -431,6 +476,25 @@ def top_trades_only_blocks_entry(
         ):
             near_base_ok = ce_best_trade_near_base_ok(
                 assessment, ranking, settings=settings,
+            )
+        if (
+            not near_base_ok
+            and not symmetric_best_trade_capture_active(settings)
+            and side_u == "PUT"
+            and pe_best_trade_top_trades_waiver(
+                evidence,
+                ranking,
+                assessment,
+                day_mode=dm,
+                side=side_u,
+                state=state,
+                snap=snap,
+                readiness_reason=readiness_reason,
+                settings=settings,
+            )
+        ):
+            near_base_ok = symmetric_near_base_best_ok(
+                assessment, evidence, settings=settings,
             )
         if not near_base_ok:
             return True, "top_trades_not_near_base_best"
