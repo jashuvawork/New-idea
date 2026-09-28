@@ -160,6 +160,19 @@ def _index_structure_ok(
     if snap is None or not sym:
         return False, "no_index_snapshot"
 
+    if lane in ("NEAR_BASE_SEP917", "BUILDING_RIP", "RALLY_UNLOCK", "SLIDE_UNLOCK"):
+        from app.engines.best_trade_policy import symmetric_structural_base_evidence
+
+        if symmetric_structural_base_evidence(evidence, settings=settings):
+            return True, f"{lane.lower()}_structural_base_index_ok"
+        if lane in ("RALLY_UNLOCK", "SLIDE_UNLOCK"):
+            pass  # fall through to fingerprint checks below
+        elif lane == "BUILDING_RIP":
+            from app.engines.building_ftv_gates import helper_building_rip_top_moment_ok
+
+            if helper_building_rip_top_moment_ok(evidence, {}, readiness_reason=""):
+                return True, "building_rip_helper_index_ok"
+
     try:
         from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
 
@@ -430,6 +443,88 @@ def _ranking_from_building_row(row: Mapping[str, Any]) -> dict[str, Any]:
     score = float(row.get("score") or row.get("explosion_score") or 0)
     grade = "A" if score >= 90 else "B" if score >= 75 else "C"
     return {"grade": grade, "score": score, "rankScore": score}
+
+
+def sep917_live_checklist_entry_blocked(
+    state: AutoTraderState | None,
+    candidate: Any,
+    snap: Optional[SymbolSnapshot] = None,
+    *,
+    snapshots: Any = None,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Hard gate: explosion entries must pass the Sep 9–17 four-step checklist."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {"sep917Enforcement": True}
+    if not bool(getattr(settings, "sep917_live_checklist_enforcement_enabled", True)):
+        meta["sep917Enforcement"] = False
+        return False, "", meta
+
+    symbol = str(getattr(candidate, "symbol", "") or "").upper()
+    side = getattr(candidate, "side", None)
+    side_u = side.value if hasattr(side, "value") else str(side or "").upper()
+    if snap is None and snapshots:
+        snap = snapshots.get(symbol)
+    if snap is None or not bool(getattr(snap, "dataAvailable", False)):
+        meta["sep917Skipped"] = "no_index_snapshot"
+        return False, "", meta
+    alert = getattr(candidate, "alert", None) if isinstance(getattr(candidate, "alert", None), dict) else {}
+    evidence: dict[str, Any] = dict(alert)
+    for key in (
+        "localBaseMovePct",
+        "ictBaseRelativeMovePct",
+        "flatThenVertical",
+        "firstLift",
+        "vRipReady",
+        "spikeRunPct",
+        "premium",
+        "tier",
+        "explosionScore",
+    ):
+        val = getattr(candidate, key, None)
+        if val is not None and key not in evidence:
+            evidence[key] = val
+
+    from app.engines.trade_ranking import rank_entry_candidate, resolve_policy_day_mode
+
+    ranking = rank_entry_candidate(candidate) or {}
+    day_mode = resolve_policy_day_mode(state)
+    readiness = str(getattr(candidate, "readinessReason", "") or evidence.get("readinessReason") or "")
+
+    checklist = evaluate_sep917_live_checklist(
+        symbol,
+        side_u,
+        evidence,
+        ranking,
+        snap=snap,
+        state=state,
+        day_mode=day_mode,
+        snapshots=snapshots,
+        readiness_reason=readiness,
+        settings=settings,
+    )
+    meta["sep917Checklist"] = checklist
+    lane = str(checklist.get("lane") or "NONE")
+    moment = str(evidence.get("momentType") or "").lower()
+    if lane == "CHASE_BLOCK":
+        return True, f"sep917_lane_{lane}", meta
+    if not bool(checklist.get("ready")):
+        if evidence.get("ictEliteBaseReady") or moment in (
+            "elite_base_ready",
+            "armed_base_launch",
+            "v_rip_session_low",
+            "first_lift_local_base",
+        ):
+            meta["sep917Waive"] = moment or "elite_base_ready"
+            return False, "", meta
+        failed = [
+            name
+            for name, step in (checklist.get("steps") or {}).items()
+            if isinstance(step, dict) and not step.get("ok")
+        ]
+        detail = ",".join(failed) if failed else "not_ready"
+        return True, f"sep917_checklist_not_ready:{detail}", meta
+    return False, "", meta
 
 
 def attach_sep917_checklist_to_chop_guards(

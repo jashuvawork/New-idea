@@ -527,6 +527,40 @@ async def _refresh_explosion_alerts_async(snapshots: dict, *, today: str) -> Non
     await asyncio.to_thread(_refresh_explosion_alerts_cpu, snapshots, today=today)
 
 
+async def _record_radar_pipeline_async(
+    snapshots: dict,
+    *,
+    source: str,
+) -> None:
+    """Archive top radars + premium tape (must run from 9:15 open, not only entry scan)."""
+    settings = get_settings()
+    if not bool(getattr(settings, "radar_record_on_ws_overlay_enabled", True)):
+        return
+    try:
+        from app.services.radar_archive import record_top_radars
+        from app.services.radar_learning import record_market_observations
+        from app.services.radar_health import record_component_success
+
+        await asyncio.to_thread(record_top_radars, snapshots, source=source)
+        await asyncio.to_thread(
+            record_market_observations,
+            snapshots,
+            source=source,
+        )
+        record_component_success(
+            "radarPipeline",
+            detail={"source": source},
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist radar from %s: %s", source, exc)
+        try:
+            from app.services.radar_health import record_component_error
+
+            record_component_error("radarPipeline", exc)
+        except Exception:
+            pass
+
+
 async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
     """WS overlay only — refresh cache + SSE without trader REST work."""
     global _last_fast_cycle_ms, _last_ws_overlay_mono
@@ -546,6 +580,7 @@ async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnap
     today = _today_str()
     await _refresh_explosion_alerts_async(overlays, today=today)
     overlays = _stamp_snapshot_symbols_now(overlays)
+    await _record_radar_pipeline_async(overlays, source="ws_overlay")
     snapshot = _shallow_cache_copy(snapshots=overlays, auto_trader=get_state())
     await _store_cache_async(snapshot)
     _last_ws_overlay_mono = time.monotonic()
@@ -591,6 +626,7 @@ async def run_building_ltp_entry_cycle(
     )
     await _refresh_explosion_alerts_async(probe, today=today)
     probe = _stamp_snapshot_symbols_now(probe)
+    await _record_radar_pipeline_async(probe, source="building_ltp")
     if not building_ltp_monitor_due(probe):
         snapshot = _shallow_cache_copy(snapshots=probe, auto_trader=get_state())
         if ws_overlay_due():
@@ -700,38 +736,9 @@ async def run_entry_scan_on_cache(
 
     today = _today_str()
     auto_state = get_state()
-    at_max = _at_max_explosion_positions(auto_state)
-    if not at_max:
-        await _refresh_explosion_alerts_async(overlays, today=today)
+    await _refresh_explosion_alerts_async(overlays, today=today)
     overlays = _stamp_snapshot_symbols_now(overlays)
-    try:
-        from app.services.radar_archive import record_top_radars
-        from app.services.radar_learning import record_market_observations
-
-        await asyncio.to_thread(
-            record_top_radars,
-            overlays,
-            source="ws_entry_scan",
-        )
-        await asyncio.to_thread(
-            record_market_observations,
-            overlays,
-            source="ws_entry_scan",
-        )
-        from app.services.radar_health import record_component_success
-
-        record_component_success(
-            "radarPipeline",
-            detail={"source": "ws_entry_scan"},
-        )
-    except Exception as exc:
-        logger.warning("Failed to archive refreshed radar snapshots: %s", exc)
-        try:
-            from app.services.radar_health import record_component_error
-
-            record_component_error("radarPipeline", exc)
-        except Exception:
-            pass
+    await _record_radar_pipeline_async(overlays, source="ws_entry_scan")
     news = await _fetch_news_cached()
     auto_state = get_state()
     at_max = _at_max_explosion_positions(auto_state)

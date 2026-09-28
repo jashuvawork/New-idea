@@ -203,6 +203,7 @@ def test_selector_admits_building_coil_pad_without_elite_tier(mock_ready, _open)
         building_coil_pad_entry_enabled=True,
         explosion_capture_mode=True,
         top_trades_only_strict_enabled=False,
+        sep917_live_checklist_enforcement_enabled=False,
     )
     alert = _aug28_24050_alert()
     stamp_building_coil_pad(alert, settings)
@@ -212,6 +213,7 @@ def test_selector_admits_building_coil_pad_without_elite_tier(mock_ready, _open)
 
     with (
         patch("app.config.get_settings", return_value=settings),
+        patch("app.engines.pretrade_validator.get_settings", return_value=settings),
         patch("app.engines.trade_selector.get_settings", return_value=settings),
         patch("app.engines.building_ftv_gates.get_settings", return_value=settings),
         patch(
