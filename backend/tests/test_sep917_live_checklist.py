@@ -11,9 +11,15 @@ from app.engines.sep917_live_checklist import (
     CHECKLIST_VERSION,
     evaluate_sep917_live_checklist,
     resolve_sep917_lane,
+    sep917_live_checklist_entry_blocked,
     sep917_live_checklist_session_summary,
 )
-from app.models.schemas import AutoTraderState
+from app.models.schemas import Side
+from app.models.schemas import AutoTraderState, MarketPhase, SymbolSnapshot
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def _near_base_evidence(**overrides):
@@ -72,6 +78,28 @@ def test_building_rip_lane_on_helper_alert(_peak):
         settings=Settings(),
     )
     assert lane == "BUILDING_RIP"
+
+
+def test_entry_blocked_on_chase_lane():
+    cand = MagicMock()
+    cand.symbol = "NIFTY"
+    cand.side = Side.CALL
+    cand.alert = {"tier": "BUILDING", "localBaseMovePct": 55.0, "explosionScore": 40.0}
+    cand.mode = "explosion"
+    settings = Settings(sep917_live_checklist_enforcement_enabled=True)
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=24000.0,
+    )
+    blocked, reason, meta = sep917_live_checklist_entry_blocked(
+        AutoTraderState(), cand, snap, settings=settings,
+    )
+    assert blocked is True
+    assert "sep917" in reason
+    assert meta["sep917Checklist"]["ready"] is False
 
 
 def test_evaluate_checklist_chase_not_ready():

@@ -450,6 +450,10 @@ class Settings(BaseSettings):
     sep09_intent_rank_one_requires_entry_window: bool = True
     sep09_intent_blocks_rank_one_full_budget: bool = True
     sep09_intent_opposite_flip_waive_enabled: bool = True
+    # Sep 9–17 live checklist — same four steps as HUD; hard gate on explosion entries.
+    sep917_live_checklist_enforcement_enabled: bool = True
+    # Persist radar archive + premium tape on WS overlay (9:15+), not only on entry scan.
+    radar_record_on_ws_overlay_enabled: bool = True
     # Block deep ITM chop/trap chase (Sep15 23500 PE @ ₹242 scratch).
     best_trade_block_chop_deep_chase_enabled: bool = True
     best_trade_deep_chase_min_premium_inr: float = 120.0

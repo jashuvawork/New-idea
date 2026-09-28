@@ -364,7 +364,7 @@ def test_validate_allows_entry_after_long_gap(mock_chop, mock_ws, mock_pre, mock
     # Reaching any downstream gate (rank/last_n/best_trades, or the immature-move gate
     # on this minimal bare candidate) proves the reentry gate let it through.
     assert ok or any(
-        k in reason for k in ("last_n", "best_trades", "immature", "rank")
+        k in reason for k in ("last_n", "best_trades", "immature", "rank", "sep917")
     )
     assert "entry_interval_after_loss" not in reason
 

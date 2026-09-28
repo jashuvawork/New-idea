@@ -474,8 +474,10 @@ def test_validate_candidate_composer_bypass_real_path(mock_p, mock_exp, mock_bri
                         scalp, AutoTraderState(), session_trades=[],
                         snapshots={"NIFTY": snap},
                     )
-    assert meta.get("composerStandDownBypass") in ("elite_top", "elite_never_block")
-    assert reason == "interval_sentinel"  # passed composer, hit next gate
+    # Sep 9–17 checklist runs before composer — naked +24% chase must not bypass STAND_ASIDE.
+    assert ok is False
+    assert "sep917" in reason
+    assert meta.get("sep917IntentEarlyGate", {}).get("sep917Checklist", {}).get("lane") == "CHASE_BLOCK"
     assert ok_s is False
     assert reason_s == "composer_stand_down"
 

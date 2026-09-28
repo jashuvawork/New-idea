@@ -183,6 +183,7 @@ def test_selector_admits_building_armed_base_without_elite_tier(
         building_armed_base_grade_a_live_enabled=True,
         selector_best_only_enabled=False,
         top_trades_only_strict_enabled=False,
+        sep917_live_checklist_enforcement_enabled=False,
     )
     alert = _building_armed_alert()
     snap = _snap()
@@ -191,6 +192,7 @@ def test_selector_admits_building_armed_base_without_elite_tier(
 
     with (
         patch("app.config.get_settings", return_value=settings),
+        patch("app.engines.pretrade_validator.get_settings", return_value=settings),
         patch("app.engines.trade_selector.get_settings", return_value=settings),
         patch("app.engines.building_ftv_gates.get_settings", return_value=settings),
         patch(

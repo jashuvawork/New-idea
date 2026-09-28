@@ -753,6 +753,19 @@ async def _open_from_candidate(
         if not policy_decision.allowed:
             return False, policy_decision.reason
 
+        if candidate.mode == "explosion":
+            from app.engines.sep917_live_checklist import sep917_live_checklist_entry_blocked
+
+            sep917_blocked, sep917_reason, _sep917_meta = sep917_live_checklist_entry_blocked(
+                state,
+                candidate,
+                snap,
+                snapshots=snapshots,
+                settings=settings,
+            )
+            if sep917_blocked:
+                return False, sep917_reason or "sep917_checklist_blocked"
+
         elite_engine = bool(getattr(settings, "elite_trade_engine_enabled", False))
         if elite_engine or bool(getattr(settings, "top_moments_only_enabled", True)):
             from app.engines.top_moment_gate import top_moment_entry_allowed

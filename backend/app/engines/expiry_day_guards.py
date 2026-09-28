@@ -406,7 +406,13 @@ def in_expiry_explosion_open_block() -> bool:
     settings = get_settings()
     if not settings.expiry_day_guards_enabled or get_market_phase() != "LIVE_MARKET":
         return False
-    start = settings.entry_earliest_hour * 60 + settings.entry_earliest_minute
+    if bool(getattr(settings, "explosion_open_entry_enabled", True)):
+        start = (
+            settings.explosion_entry_earliest_hour * 60
+            + settings.explosion_entry_earliest_minute
+        )
+    else:
+        start = settings.entry_earliest_hour * 60 + settings.entry_earliest_minute
     end = start + settings.expiry_explosion_open_block_minutes
     return start <= _minutes_now() < end
 

@@ -766,6 +766,24 @@ def validate_candidate(
         if sep_blocked:
             return False, sep_reason, meta
 
+        from app.engines.sep917_live_checklist import sep917_live_checklist_entry_blocked
+
+        snap_for_checklist = snap_for_sep09
+        if snapshots and snap_for_checklist is None:
+            snap_for_checklist = snapshots.get(
+                str(getattr(candidate, "symbol", "") or "").upper()
+            )
+        sep917_blocked, sep917_reason, sep917_meta = sep917_live_checklist_entry_blocked(
+            state,
+            candidate,
+            snap_for_checklist,
+            snapshots=snapshots,
+            settings=settings,
+        )
+        meta["sep917IntentEarlyGate"] = sep917_meta
+        if sep917_blocked:
+            return False, sep917_reason, meta
+
     # Composer advisory → hard gate (standDown / opposing bias).
     if getattr(settings, "composer_hard_gate_enabled", True):
         try:
