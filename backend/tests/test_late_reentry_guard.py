@@ -195,6 +195,73 @@ def test_session_peak_late_reentry_still_blocks_after_prior_close_on_strike():
     assert "late_reentry_near_session_peak" in reason
 
 
+def test_session_peak_late_reentry_blocks_sep28_shallow_pullback_hot_v3():
+    """Sep28 NIFTY 22850 PE — first-lift + v3=2 near peak with ~2% pullback is a chase."""
+    _seed_session_peak(
+        symbol="NIFTY", strike=22850.0, side=Side.PUT, low=71.6, peak=89.1,
+    )
+    settings = Settings(
+        explosion_late_reentry_block_enabled=True,
+        explosion_late_reentry_min_peak_points=15.0,
+        explosion_late_reentry_near_peak_pct=12.0,
+        explosion_late_reentry_pullback_ok_pct=22.0,
+        explosion_late_reentry_min_velocity_3s=1.2,
+        explosion_late_reentry_first_lift_hot_v3_min_pullback_pct=8.0,
+    )
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ):
+        blocked, reason = session_peak_late_reentry_blocked(
+            symbol="NIFTY",
+            side=Side.PUT,
+            strike=22850.0,
+            premium=84.15,
+            velocity_3s=2.0,
+            alert={
+                "ictFirstLift": True,
+                "firstLiftReadinessReason": "first_lift_local_base_ready",
+                "spikeRunPct": 20.39,
+                "peakMovePct": 20.39,
+            },
+        )
+    assert blocked is True
+    assert "late_reentry_near_session_peak" in reason
+
+
+def test_session_peak_late_reentry_blocks_sep28_shallow_pullback_hot_v3_ce_mirror():
+    """PE/CE symmetry — same near-peak shallow-pullback chase on CALL."""
+    _seed_session_peak(
+        symbol="NIFTY", strike=22900.0, side=Side.CALL, low=71.6, peak=89.1,
+    )
+    settings = Settings(
+        explosion_late_reentry_block_enabled=True,
+        explosion_late_reentry_min_peak_points=15.0,
+        explosion_late_reentry_near_peak_pct=12.0,
+        explosion_late_reentry_pullback_ok_pct=22.0,
+        explosion_late_reentry_min_velocity_3s=1.2,
+        explosion_late_reentry_first_lift_hot_v3_min_pullback_pct=8.0,
+    )
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ):
+        blocked, reason = session_peak_late_reentry_blocked(
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=22900.0,
+            premium=84.15,
+            velocity_3s=2.0,
+            alert={
+                "ictFirstLift": True,
+                "firstLiftReadinessReason": "first_lift_local_base_ready",
+                "spikeRunPct": 20.39,
+            },
+        )
+    assert blocked is True
+    assert "late_reentry_near_session_peak" in reason
+
+
 def test_session_peak_late_reentry_allows_fresh_first_lift():
     _seed_session_peak(
         symbol="NIFTY", strike=24250.0, side=Side.PUT, low=100.5, peak=121.85,

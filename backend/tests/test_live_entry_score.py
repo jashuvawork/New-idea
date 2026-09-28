@@ -160,6 +160,45 @@ def test_high_radar_softens_mild_negative_v3(mock_settings):
     assert meta.get("highRadarSoftPenalty") is True
 
 
+@patch("app.engines.live_entry_score.get_settings")
+def test_compute_live_penalizes_hot_v3_near_peak_extended_spike(mock_settings):
+    s = MagicMock()
+    s.live_execution_trade_score_enabled = True
+    s.live_execution_trade_score_dump_penalty = 45.0
+    s.live_execution_trade_score_mom_factor = 8.0
+    s.live_entry_score_negative_v3_penalty_per_point = 3.0
+    s.live_entry_score_negative_v3_deadband = 0.55
+    s.live_entry_score_dump_cap = 42.0
+    s.live_entry_score_chase_max_range_position = 0.45
+    s.live_entry_score_chase_max_velocity_3s = 1.0
+    s.live_entry_score_chase_range_penalty_scale = 90.0
+    s.live_entry_score_chase_hot_v3_extended_spike_enabled = True
+    s.live_entry_score_chase_hot_v3_min_spike_run_pct = 18.0
+    s.live_entry_score_chase_hot_v3_min_range_position = 0.72
+    s.live_entry_score_chase_hot_v3_penalty_scale = 120.0
+    s.premium_post_spike_dump_min_drawdown_pct = 12.0
+    s.premium_post_spike_dump_min_spike_run_pct = 35.0
+    s.premium_post_spike_dump_near_low_frac = 0.18
+    s.premium_post_spike_dump_min_velocity_3s = -0.15
+    s.premium_post_spike_dump_min_velocity_9s = -0.25
+    mock_settings.return_value = s
+
+    live, meta = compute_live_entry_score(
+        {
+            "explosionScore": 100.0,
+            "premium": 84.15,
+            "sessionPeakPremium": 86.2,
+            "sessionLowPremium": 71.6,
+            "velocity3s": 2.0,
+            "spikeRunPct": 20.39,
+        },
+        radar_score=100.0,
+        settings=s,
+    )
+    assert meta.get("hotV3ExtendedSpikeChasePenalty", 0) > 0
+    assert live < 100.0
+
+
 def test_live_entry_moment_active():
     from app.engines.live_entry_score import live_entry_moment_active
 
