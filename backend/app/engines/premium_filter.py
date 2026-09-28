@@ -35,6 +35,28 @@ def premium_in_band(
     if mode == "explosion":
         cheap_min = float(getattr(settings, "explosion_cheap_rip_min_premium_inr", 12.0) or 12.0)
         cheap_peak = float(getattr(settings, "explosion_cheap_rip_min_peak_pct", 28.0) or 28.0)
+        try:
+            from app.engines.session_timing import in_open_premium_window
+
+            if in_open_premium_window():
+                cheap_min = min(
+                    cheap_min,
+                    float(
+                        getattr(settings, "expiry_open_cheap_premium_min_inr", 10.0) or 10.0
+                    ),
+                    float(
+                        getattr(settings, "explosion_open_cheap_rip_min_premium_inr", 10.0)
+                        or 10.0
+                    ),
+                )
+                cheap_peak = min(
+                    cheap_peak,
+                    float(
+                        getattr(settings, "expiry_open_cheap_rip_min_peak_pct", 15.0) or 15.0
+                    ),
+                )
+        except Exception:
+            pass
         if peak_move_pct >= cheap_peak and premium >= cheap_min:
             min_prem = min(min_prem, cheap_min)
         # Mid-rip ATM/ITM (180→450+) stays tradeable for max-TP capture.

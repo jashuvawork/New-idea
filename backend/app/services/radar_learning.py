@@ -806,6 +806,24 @@ def _hindsight_policy_eligibility(
     cheap_peak = float(
         getattr(settings, "explosion_cheap_rip_min_peak_pct", 28.0) or 28.0
     )
+    try:
+        from app.engines.session_timing import in_open_premium_window
+
+        if in_open_premium_window():
+            cheap_minimum = min(
+                cheap_minimum,
+                float(
+                    getattr(settings, "expiry_open_cheap_premium_min_inr", 10.0) or 10.0
+                ),
+            )
+            cheap_peak = min(
+                cheap_peak,
+                float(
+                    getattr(settings, "expiry_open_cheap_rip_min_peak_pct", 15.0) or 15.0
+                ),
+            )
+    except Exception:
+        pass
     if peak_move >= cheap_peak:
         minimum = min(minimum, cheap_minimum)
         maximum = max(
