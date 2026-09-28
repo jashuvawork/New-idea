@@ -450,6 +450,12 @@ class Settings(BaseSettings):
     sep09_intent_rank_one_requires_entry_window: bool = True
     sep09_intent_blocks_rank_one_full_budget: bool = True
     sep09_intent_opposite_flip_waive_enabled: bool = True
+    # 9:15–9:45 first open premium rip per side (Sep28 22850 PE ₹18→80) — not afternoon chase.
+    sep09_intent_open_premium_first_rip_waive_enabled: bool = True
+    sep09_intent_open_premium_max_minutes_after_armed: float = 25.0
+    sep09_intent_open_premium_max_local_base_pct: float = 28.0
+    sep917_open_premium_first_rip_waive_enabled: bool = True
+    expiry_open_block_waive_open_premium_first_rip: bool = True
     # Sep 9–17 live checklist — same four steps as HUD; hard gate on explosion entries.
     sep917_live_checklist_enforcement_enabled: bool = True
     # Persist radar archive + premium tape on WS overlay (9:15+), not only on entry scan.

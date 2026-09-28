@@ -697,6 +697,7 @@ def check_explosion_entry(
             tier=event.tier,
             side=event.side,
             breadth=breadth,
+            alert=alert if isinstance(alert, dict) else None,
         )
         if blocked:
             return False, reason

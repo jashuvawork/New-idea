@@ -225,6 +225,33 @@ def test_elite_must_take_respects_sep09_rank_one_chase():
             assert elite_must_take_bypass_allowed(candidate=cand, state=AutoTraderState()) is False
 
 
+def test_open_premium_first_rip_waives_sep09_near_peak_chase():
+    """Sep28 22850 PE open vertical — spike from ₹18 base is capture, not afternoon chase."""
+    _seed_peak(symbol="NIFTY", strike=22850.0, side=Side.PUT, low=18.0, peak=85.0)
+    alert = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 22850.0,
+        "tier": "EXPLODING",
+        "localBaseMovePct": 14.0,
+        "flatThenVertical": True,
+        "firstLift": True,
+        "spikeRunPct": 120.0,
+        "sessionMovePct": 130.0,
+        "openPremiumMove": 130.0,
+        "premium": 42.0,
+        "ictCaptureMeta": {"ict": {"armedAt": datetime.now(IST).isoformat()}},
+    }
+    settings = Settings(sep09_intent_enforcement_enabled=True)
+    cand = _candidate_from_alert(alert)
+    with patch("app.engines.session_timing.in_open_premium_window", return_value=True):
+        blocked, reason, meta = sep09_intent_explosion_entry_blocked(
+            AutoTraderState(), cand, None, settings=settings,
+        )
+    assert blocked is False, reason
+    assert meta.get("openPremiumFirstRip")
+
+
 def test_session_has_sep09_side_rip_from_trade_store_archive():
     from app.engines.pretrade_validator import TradeRecord
 

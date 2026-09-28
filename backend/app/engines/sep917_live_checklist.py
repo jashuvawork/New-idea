@@ -491,6 +491,23 @@ def sep917_live_checklist_entry_blocked(
     day_mode = resolve_policy_day_mode(state)
     readiness = str(getattr(candidate, "readinessReason", "") or evidence.get("readinessReason") or "")
 
+    if bool(getattr(settings, "sep917_open_premium_first_rip_waive_enabled", True)):
+        from app.engines.sep09_intent_guards import open_premium_first_side_rip_ok
+
+        open_ok, open_detail = open_premium_first_side_rip_ok(
+            state,
+            symbol=symbol,
+            side=side,
+            strike=float(getattr(candidate, "strike", 0) or evidence.get("strike") or 0),
+            premium=float(getattr(candidate, "premium", 0) or evidence.get("premium") or 0),
+            evidence=evidence,
+            settings=settings,
+        )
+        if open_ok:
+            meta["sep917Waive"] = "open_premium_first_side_rip"
+            meta["openPremiumFirstRip"] = open_detail
+            return False, "", meta
+
     checklist = evaluate_sep917_live_checklist(
         symbol,
         side_u,

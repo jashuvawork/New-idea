@@ -435,6 +435,8 @@ def check_expiry_explosion_open_block(
     tier: str,
     side: Side | str,
     breadth: Any,
+    alert: Optional[dict] = None,
+    state: Any = None,
 ) -> tuple[bool, str]:
     """
     On expiry, block EXPLODING tier in the first minutes after open.
@@ -445,6 +447,22 @@ def check_expiry_explosion_open_block(
         return False, "ok"
     if not in_expiry_explosion_open_block():
         return False, "ok"
+    settings = get_settings()
+    if bool(getattr(settings, "expiry_open_block_waive_open_premium_first_rip", True)):
+        if isinstance(alert, dict) and alert:
+            from app.engines.sep09_intent_guards import open_premium_first_side_rip_ok
+
+            ok, _ = open_premium_first_side_rip_ok(
+                state,
+                symbol=str(getattr(snap, "symbol", "") or ""),
+                side=side,
+                strike=float(alert.get("strike") or 0),
+                premium=float(alert.get("premium") or 0),
+                evidence=alert,
+                settings=settings,
+            )
+            if ok:
+                return False, "ok"
     tier_u = str(tier or "").upper()
     if tier_u == "ELITE" and _breadth_aligned_for_side(side, breadth):
         return False, "ok"
