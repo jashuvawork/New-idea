@@ -122,6 +122,45 @@ def compute_live_entry_score(
             live = max(0.0, live - chase_pen)
             meta["chaseRangePenalty"] = round(chase_pen, 2)
 
+        if bool(
+            getattr(settings, "live_entry_score_chase_hot_v3_extended_spike_enabled", True)
+        ):
+            min_spike = float(
+                getattr(settings, "live_entry_score_chase_hot_v3_min_spike_run_pct", 18.0)
+                or 18.0
+            )
+            min_pos = float(
+                getattr(
+                    settings,
+                    "live_entry_score_chase_hot_v3_min_range_position",
+                    0.72,
+                )
+                or 0.72
+            )
+            spike_run = max(
+                float(alert.get("spikeRunPct") or 0),
+                float(alert.get("peakMovePct") or 0),
+                float(alert.get("dailyMovePct") or 0),
+            )
+            if spike_run <= 0 and peak > low > 0:
+                spike_run = (peak - low) / low * 100.0
+            if (
+                pos + 1e-6 >= min_pos
+                and v3 + 1e-6 >= max_v3_chase
+                and spike_run + 1e-6 >= min_spike
+            ):
+                scale = float(
+                    getattr(
+                        settings,
+                        "live_entry_score_chase_hot_v3_penalty_scale",
+                        120.0,
+                    )
+                    or 120.0
+                )
+                chase_pen = min(55.0, (pos - min_pos) * scale)
+                live = max(0.0, live - chase_pen)
+                meta["hotV3ExtendedSpikeChasePenalty"] = round(chase_pen, 2)
+
     meta["liveEntryScore"] = round(live, 2)
     meta["liveScorePenalty"] = round(max(0.0, base - live), 2)
     return live, meta

@@ -815,6 +815,11 @@ class Settings(BaseSettings):
     live_entry_score_chase_max_range_position: float = 0.58
     live_entry_score_chase_max_velocity_3s: float = 0.0
     live_entry_score_chase_range_penalty_scale: float = 90.0
+    # Sep28: hot v3 near top of session range after extended rip — still a chase.
+    live_entry_score_chase_hot_v3_extended_spike_enabled: bool = True
+    live_entry_score_chase_hot_v3_min_spike_run_pct: float = 18.0
+    live_entry_score_chase_hot_v3_min_range_position: float = 0.72
+    live_entry_score_chase_hot_v3_penalty_scale: float = 120.0
     live_entry_moment_waiver_enabled: bool = True
     live_entry_moment_min_live: float = 86.0
     live_entry_moment_min_radar: float = 92.0
@@ -1872,6 +1877,9 @@ class Settings(BaseSettings):
     explosion_late_reentry_near_peak_pct: float = 12.0
     explosion_late_reentry_pullback_ok_pct: float = 22.0
     explosion_late_reentry_min_velocity_3s: float = 1.2
+    # Sep28 NIFTY 22850 PE: first-lift + hot v3 must not waive a shallow pullback
+    # near session peak after the rip is already extended (2% off peak → −₹33k SL).
+    explosion_late_reentry_first_lift_hot_v3_min_pullback_pct: float = 8.0
     # Sep16 SENSEX 74200 PE: initial armed-base rip blocked as "late reentry" while
     # session peak tracked the live vertical — not a post-trade chase.
     explosion_late_reentry_waive_first_strike_entry_enabled: bool = True

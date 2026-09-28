@@ -842,7 +842,16 @@ def session_peak_late_reentry_blocked(
     v3 = float(velocity_3s or 0)
     v9 = float(alert_d.get("velocity9s") or alert_d.get("velocity_9s") or 0)
     if first_lift and v3 >= min_v3:
-        return False, ""
+        min_pull_waive = float(
+            getattr(
+                settings,
+                "explosion_late_reentry_first_lift_hot_v3_min_pullback_pct",
+                8.0,
+            )
+            or 8.0
+        )
+        if pullback_pct + 1e-6 >= min_pull_waive:
+            return False, ""
 
     # Aug27 SENSEX PUT 77400: v_rip/first_lift at local-base pad with flat v3 is the
     # initial lift off trough — premium near session peak is expected, not a chase.
