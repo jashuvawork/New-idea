@@ -750,6 +750,22 @@ def validate_candidate(
     trades = session_trades if session_trades is not None else collect_session_trades(state)
     meta: dict[str, Any] = {**policy_meta, "controlledTrading": True}
 
+    if str(getattr(candidate, "mode", "") or "").lower() == "explosion":
+        from app.engines.sep09_intent_guards import sep09_intent_explosion_entry_blocked
+
+        snap_for_sep09 = None
+        if snapshots:
+            snap_for_sep09 = snapshots.get(str(getattr(candidate, "symbol", "") or "").upper())
+        sep_blocked, sep_reason, sep_meta = sep09_intent_explosion_entry_blocked(
+            state,
+            candidate,
+            snap_for_sep09,
+            settings=settings,
+        )
+        meta["sep09IntentEarlyGate"] = sep_meta
+        if sep_blocked:
+            return False, sep_reason, meta
+
     # Composer advisory → hard gate (standDown / opposing bias).
     if getattr(settings, "composer_hard_gate_enabled", True):
         try:
@@ -763,7 +779,7 @@ def validate_candidate(
                 stand_down_bypass = False
                 from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
-                if elite_must_take_bypass_allowed(candidate=candidate):
+                if elite_must_take_bypass_allowed(candidate=candidate, state=state):
                     stand_down_bypass = True
                     meta["composerStandDownBypass"] = "elite_never_block"
                 # (1) Expiry early-window ELITE top.

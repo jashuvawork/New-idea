@@ -446,6 +446,9 @@ class Settings(BaseSettings):
     sep09_intent_max_spike_run_pct: float = 18.0
     sep09_intent_max_local_base_pct: float = 20.0
     sep09_intent_blocks_must_take_bypass: bool = True
+    sep09_intent_rank_one_strict_enabled: bool = True
+    sep09_intent_rank_one_requires_entry_window: bool = True
+    sep09_intent_blocks_rank_one_full_budget: bool = True
     sep09_intent_opposite_flip_waive_enabled: bool = True
     # Block deep ITM chop/trap chase (Sep15 23500 PE @ ₹242 scratch).
     best_trade_block_chop_deep_chase_enabled: bool = True

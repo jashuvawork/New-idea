@@ -206,6 +206,44 @@ def _latest_same_strike_explosion_close(
         if latest is None or (ts is not None and (latest_ts is None or ts > latest_ts)):
             latest = t
             latest_ts = ts
+
+    try:
+        from app.engines.pretrade_validator import collect_session_trades
+        from types import SimpleNamespace
+
+        seen_ids = {
+            str(getattr(t, "id", "") or "")
+            for t in getattr(state, "closedPaperTrades", []) or []
+            if getattr(t, "id", None)
+        }
+        for rec in collect_session_trades(state):
+            if rec.trade_id and rec.trade_id in seen_ids:
+                continue
+            if str(rec.symbol or "").upper() != sym:
+                continue
+            if str(rec.side or "").upper() != side_v:
+                continue
+            if abs(float(rec.strike or 0) - strike_f) > 0.01:
+                continue
+            if str(rec.mode or "").lower() != "explosion":
+                continue
+            stub = SimpleNamespace(
+                id=rec.trade_id,
+                symbol=rec.symbol,
+                side=rec.side,
+                strike=rec.strike,
+                pnlInr=rec.pnl_inr,
+                pnl_inr=rec.pnl_inr,
+                exitReason=rec.exit_reason,
+                closedAt=None,
+                entryContext={"selectionMode": "explosion"},
+            )
+            if latest is None:
+                latest = stub
+            elif rec.trade_id:
+                latest = stub
+    except Exception:
+        pass
     return latest
 
 

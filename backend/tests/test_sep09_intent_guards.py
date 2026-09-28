@@ -8,7 +8,9 @@ import pytest
 
 from app.config import Settings
 from app.engines.explosion_detector import _open_key, _session_low, _session_peak
+from app.engines.elite_never_block import elite_must_take_bypass_allowed
 from app.engines.sep09_intent_guards import (
+    candidate_is_rank_one,
     sep09_intent_evidence_blocked,
     sep09_intent_explosion_entry_blocked,
     session_has_sep09_side_rip,
@@ -176,3 +178,70 @@ def test_checklist_not_ready_for_sep28_evidence():
         )
     assert blocked is True
     assert result["ready"] is False
+
+
+def test_sep09_rank_one_outside_entry_window_blocked():
+    armed = datetime.now(IST) - timedelta(minutes=6)
+    alert = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 22850.0,
+        "cycleRank": 1,
+        "tier": "EXPLODING",
+        "localBaseMovePct": 12.0,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "firstLift": True,
+        "spikeRunPct": 12.0,
+        "premium": 76.0,
+        "timingAssessment": {"inWindow": False, "reason": "late_chase"},
+        "ictCaptureMeta": {"ict": {"armedAt": armed.isoformat()}},
+    }
+    cand = _candidate_from_alert(alert)
+    assert candidate_is_rank_one(cand, cand.alert, alert) is True
+    settings = Settings(sep09_intent_enforcement_enabled=True)
+    blocked, reason, meta = sep09_intent_explosion_entry_blocked(
+        AutoTraderState(), cand, None, settings=settings,
+    )
+    assert blocked is True
+    assert reason == "sep09_rank_one_outside_entry_window"
+    assert meta.get("rankOneStrict") is True
+
+
+def test_elite_must_take_respects_sep09_rank_one_chase():
+    _seed_peak(symbol="NIFTY", strike=22850.0, side=Side.PUT, low=71.6, peak=89.1)
+    alert = _sep28_alert()
+    alert["cycleRank"] = 1
+    alert["timingAssessment"] = {"inWindow": False}
+    now = alert.pop("_entryNow")
+    cand = _candidate_from_alert(alert)
+    settings = Settings(sep09_intent_enforcement_enabled=True)
+    with patch("app.engines.sep09_intent_guards.get_settings", return_value=settings):
+        with patch("app.engines.elite_never_block.get_settings", return_value=settings):
+            blocked, _, _ = sep09_intent_explosion_entry_blocked(
+                AutoTraderState(), cand, None, settings=settings, now=now,
+            )
+            assert blocked is True
+            assert elite_must_take_bypass_allowed(candidate=cand, state=AutoTraderState()) is False
+
+
+def test_session_has_sep09_side_rip_from_trade_store_archive():
+    from app.engines.pretrade_validator import TradeRecord
+
+    state = AutoTraderState(closedPaperTrades=[])
+    archived = [
+        TradeRecord(
+            symbol="NIFTY",
+            side="PUT",
+            pnl_inr=-32000.0,
+            exit_reason="adaptive_stop_loss",
+            strike=22850.0,
+            trade_id="archived-22850",
+            mode="explosion",
+        )
+    ]
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=archived,
+    ):
+        assert session_has_sep09_side_rip(state, symbol="NIFTY", side=Side.PUT) is True
