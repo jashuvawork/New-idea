@@ -456,6 +456,15 @@ class Settings(BaseSettings):
     sep09_intent_open_premium_max_local_base_pct: float = 28.0
     sep917_open_premium_first_rip_waive_enabled: bool = True
     expiry_open_block_waive_open_premium_first_rip: bool = True
+    # Sep 9 two-lane per side: open first rip (waived) + one afternoon structural second leg (CE/PE).
+    sep09_intent_two_lane_per_side_enabled: bool = True
+    sep09_intent_afternoon_structural_rip_enabled: bool = True
+    sep09_intent_afternoon_structural_min_hour: int = 12
+    sep09_intent_afternoon_structural_min_minute: int = 0
+    sep09_intent_afternoon_structural_max_local_base_pct: float = 20.0
+    sep09_intent_afternoon_structural_min_minutes_since_prior_close: float = 20.0
+    sep09_intent_afternoon_structural_requires_different_strike: bool = True
+    sep917_afternoon_structural_lane_enabled: bool = True
     # Sep 9–17 live checklist — same four steps as HUD; hard gate on explosion entries.
     sep917_live_checklist_enforcement_enabled: bool = True
     # Persist radar archive + premium tape on WS overlay (9:15+), not only on entry scan.

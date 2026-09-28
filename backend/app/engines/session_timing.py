@@ -64,6 +64,20 @@ def in_open_caution_window() -> bool:
     return entry_earliest_minutes() <= current < open_caution_until_minutes()
 
 
+def _minutes_at(dt: datetime) -> int:
+    local = dt.astimezone(IST)
+    return local.hour * 60 + local.minute
+
+
+def in_open_premium_window_at(when: datetime) -> bool:
+    """09:15–09:45 IST at a specific clock (replay / entry stamp)."""
+    settings = get_settings()
+    current = _minutes_at(when)
+    start = settings.explosion_entry_earliest_hour * 60 + settings.explosion_entry_earliest_minute
+    end = open_caution_until_minutes()
+    return start <= current < end
+
+
 def in_open_premium_window() -> bool:
     """09:15–09:45 IST — session-open premium explosion detection."""
     if get_market_phase() != "LIVE_MARKET":

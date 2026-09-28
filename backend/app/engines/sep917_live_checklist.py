@@ -18,6 +18,7 @@ _LANES = frozenset({
     "RALLY_UNLOCK",
     "SLIDE_UNLOCK",
     "BUILDING_RIP",
+    "AFTERNOON_STRUCTURAL",
     "CHASE_BLOCK",
     "NONE",
 })
@@ -117,6 +118,28 @@ def resolve_sep917_lane(
         ):
             return "SLIDE_UNLOCK"
 
+    if bool(getattr(settings, "sep917_afternoon_structural_lane_enabled", True)):
+        from app.engines.sep09_intent_guards import (
+            afternoon_structural_side_rip_ok,
+            session_has_sep09_side_rip,
+        )
+
+        if session_has_sep09_side_rip(state, symbol=sym, side=side_u):
+            aft_ok, _aft_detail = afternoon_structural_side_rip_ok(
+                state,
+                symbol=sym,
+                side=side_u,
+                strike=float(evidence.get("strike") or 0),
+                premium=float(
+                    evidence.get("premium") or evidence.get("lastPremium") or 0
+                ),
+                evidence=evidence,
+                alert=evidence,
+                settings=settings,
+            )
+            if aft_ok:
+                return "AFTERNOON_STRUCTURAL"
+
     from app.engines.best_trade_policy import symmetric_structural_base_evidence
     from app.engines.top_moment_gate import classify_top_moment_type
 
@@ -160,7 +183,13 @@ def _index_structure_ok(
     if snap is None or not sym:
         return False, "no_index_snapshot"
 
-    if lane in ("NEAR_BASE_SEP917", "BUILDING_RIP", "RALLY_UNLOCK", "SLIDE_UNLOCK"):
+    if lane in (
+        "NEAR_BASE_SEP917",
+        "BUILDING_RIP",
+        "RALLY_UNLOCK",
+        "SLIDE_UNLOCK",
+        "AFTERNOON_STRUCTURAL",
+    ):
         from app.engines.best_trade_policy import symmetric_structural_base_evidence
 
         if symmetric_structural_base_evidence(evidence, settings=settings):
@@ -228,6 +257,11 @@ def _option_shape_ok(
         ):
             return True, "helper_building_rip"
         return False, "building_rip_lane_not_confirmed"
+
+    if lane == "AFTERNOON_STRUCTURAL":
+        if symmetric_structural_base_evidence(evidence, settings=settings):
+            return True, "afternoon_structural_local_base"
+        return False, "afternoon_structural_shape_not_confirmed"
 
     max_local = float(
         getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
@@ -506,6 +540,24 @@ def sep917_live_checklist_entry_blocked(
         if open_ok:
             meta["sep917Waive"] = "open_premium_first_side_rip"
             meta["openPremiumFirstRip"] = open_detail
+            return False, "", meta
+
+    if bool(getattr(settings, "sep917_afternoon_structural_lane_enabled", True)):
+        from app.engines.sep09_intent_guards import afternoon_structural_side_rip_ok
+
+        aft_ok, aft_detail = afternoon_structural_side_rip_ok(
+            state,
+            symbol=symbol,
+            side=side,
+            strike=float(getattr(candidate, "strike", 0) or evidence.get("strike") or 0),
+            premium=float(getattr(candidate, "premium", 0) or evidence.get("premium") or 0),
+            evidence=evidence,
+            alert=evidence,
+            settings=settings,
+        )
+        if aft_ok:
+            meta["sep917Waive"] = "afternoon_structural_side_rip"
+            meta["afternoonStructuralRip"] = aft_detail
             return False, "", meta
 
     checklist = evaluate_sep917_live_checklist(
