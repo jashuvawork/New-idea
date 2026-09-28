@@ -1071,6 +1071,11 @@ async def _open_from_candidate(
         and entry_mode_eligible_for_executed_max_lots(str(candidate.mode or ""))
     )
     if candidate.mode == "explosion":
+        from app.engines.sep09_intent_guards import sep09_intent_suppresses_rank_one_lot_bypass
+
+        if sep09_intent_suppresses_rank_one_lot_bypass(state, candidate, snap, settings=settings):
+            always_max_entry = False
+    if candidate.mode == "explosion":
         from app.engines.explosion_profit import cap_explosion_lots
 
         if not always_max_entry:
@@ -2089,6 +2094,13 @@ async def _open_from_candidate(
         ),
         executed_always_max=always_max_entry,
     )
+    if candidate.mode == "explosion":
+        from app.engines.sep09_intent_guards import sep09_intent_suppresses_rank_one_lot_bypass
+
+        if sep09_intent_suppresses_rank_one_lot_bypass(
+            state, candidate, snap, settings=settings,
+        ):
+            top_rank_full_budget_lots = False
     # ELITE / EXPLODING full-capital sleeve: keep cash-affordable lots; do not shrink
     # to fit an 8% SL INR budget.
     if elite_full_lot and bool(

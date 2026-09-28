@@ -150,6 +150,20 @@ def _pullback_from_session_peak_pct(
     return (peak - prem) / peak * 100.0
 
 
+def _is_explosion_trade_obj(trade: Any) -> bool:
+    ctx = getattr(trade, "entryContext", None) or {}
+    if isinstance(ctx, dict):
+        mode = str(ctx.get("selectionMode") or "").lower()
+    else:
+        mode = ""
+    mode_attr = str(getattr(trade, "mode", "") or "").lower()
+    if mode == "explosion" or mode_attr == "explosion":
+        return True
+    st = getattr(trade, "strategyType", None)
+    st_u = st.value if hasattr(st, "value") else str(st or "").upper()
+    return st_u == "EXPLOSIVE"
+
+
 def session_has_sep09_side_rip(
     state: AutoTraderState | None,
     *,
@@ -164,23 +178,100 @@ def session_has_sep09_side_rip(
     if not sym or side_u not in ("CALL", "PUT"):
         return False
 
-    def _is_explosion_trade(trade: Any) -> bool:
-        ctx = getattr(trade, "entryContext", None) or {}
-        mode = str(ctx.get("selectionMode") or "").lower()
-        st = getattr(trade, "strategyType", None)
-        st_u = st.value if hasattr(st, "value") else str(st or "").upper()
-        if mode == "explosion" or st_u == "EXPLOSIVE":
-            return True
-        return False
+    seen: set[str] = set()
+
+    def _matches(trade: Any) -> bool:
+        ts = str(getattr(trade, "symbol", "") or "").upper()
+        if ts != sym:
+            return False
+        if _side_str(getattr(trade, "side", "")) != side_u:
+            return False
+        return _is_explosion_trade_obj(trade)
 
     for t in list(state.openPaperTrades or []) + list(state.closedPaperTrades or []):
-        ts = str(getattr(t, "symbol", "") or "").upper()
-        if ts != sym:
-            continue
-        if _side_str(getattr(t, "side", "")) != side_u:
-            continue
-        if _is_explosion_trade(t):
+        tid = str(getattr(t, "id", "") or "")
+        if tid:
+            seen.add(tid)
+        if _matches(t):
             return True
+
+    try:
+        from app.engines.pretrade_validator import collect_session_trades
+
+        for rec in collect_session_trades(state):
+            if rec.trade_id and rec.trade_id in seen:
+                continue
+            if str(rec.symbol or "").upper() != sym:
+                continue
+            if str(rec.side or "").upper() != side_u:
+                continue
+            if str(rec.mode or "").lower() == "explosion":
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _coerce_rank(val: Any) -> Optional[int]:
+    if val is None or isinstance(val, bool):
+        return None
+    if isinstance(val, int):
+        return val
+    if isinstance(val, float):
+        return int(val)
+    if isinstance(val, str):
+        s = val.strip()
+        if s.isdigit():
+            return int(s)
+    return None
+
+
+def candidate_is_rank_one(
+    candidate: Any,
+    alert: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+) -> bool:
+    """True when radar / allocator stamped this setup as rank #1."""
+    for src in (evidence, alert):
+        if not isinstance(src, Mapping):
+            continue
+        for key in ("cycleRank", "allocationRank", "rank"):
+            rank = _coerce_rank(src.get(key))
+            if rank == 1:
+                return True
+    pre = getattr(candidate, "pretrade_meta", None) or {}
+    if isinstance(pre, dict):
+        causal = pre.get("causalRanking") or {}
+        if isinstance(causal, dict):
+            for key in ("cycleRank", "allocationRank", "rank"):
+                rank = _coerce_rank(causal.get(key))
+                if rank == 1:
+                    return True
+    for attr in ("cycleRank", "allocationRank"):
+        if not hasattr(candidate, attr):
+            continue
+        rank = _coerce_rank(getattr(candidate, attr, None))
+        if rank == 1:
+            return True
+    return False
+
+
+def rank_one_timing_in_window(
+    evidence: Mapping[str, Any],
+    candidate: Any,
+) -> bool:
+    """Rank-#1 entries must show timingAssessment.inWindow=true (no chase waiver)."""
+    sources: list[Any] = [evidence]
+    pre = getattr(candidate, "pretrade_meta", None) or {}
+    if isinstance(pre, dict):
+        sources.append(pre)
+    for src in sources:
+        if not isinstance(src, Mapping):
+            continue
+        for key in ("timingAssessment", "timing"):
+            block = src.get(key)
+            if isinstance(block, dict) and "inWindow" in block:
+                return bool(block.get("inWindow"))
     return False
 
 
@@ -215,12 +306,15 @@ def sep09_early_near_base_window_ok(
     *,
     settings: Any = None,
     now: Optional[datetime] = None,
+    strict: bool = False,
 ) -> tuple[bool, str]:
     settings = settings or get_settings()
     from app.engines.best_trade_policy import symmetric_structural_base_evidence
 
     max_local = float(getattr(settings, "sep09_intent_max_local_base_pct", 20.0) or 20.0)
     if not symmetric_structural_base_evidence(evidence, settings=settings):
+        if strict:
+            return False, "sep09_rank_one_requires_structural_near_base"
         return True, "sep09_not_structural_near_base_skip"
     local = max(
         float(evidence.get("localBaseMovePct") or 0),
@@ -235,6 +329,8 @@ def sep09_early_near_base_window_ok(
     )
     elapsed, ref = _minutes_since_reference(alert, now=now)
     if elapsed is None:
+        if strict:
+            return False, "sep09_rank_one_missing_armed_or_detect_clock"
         # Historical replays / partial alerts — peak-chase + one-rip still apply.
         return True, "sep09_no_armed_or_detect_timestamp_skip_clock"
     limit = max_arm if ref == "armed" else max_det
@@ -287,10 +383,22 @@ def sep09_intent_explosion_entry_blocked(
     premium = float(getattr(candidate, "premium", 0) or 0)
     alert = _alert_dict(candidate)
     evidence = _evidence_from_candidate(candidate, alert)
+    rank_one = candidate_is_rank_one(candidate, alert, evidence)
+    meta["rankOne"] = rank_one
+    strict_rank_one = rank_one and bool(
+        getattr(settings, "sep09_intent_rank_one_strict_enabled", True)
+    )
+    meta["rankOneStrict"] = strict_rank_one
 
     if sep09_opposite_flip_waive(state, symbol=symbol, side=side, snap=snap, settings=settings):
         meta["oppositeFlipWaive"] = True
         return False, "", meta
+
+    if strict_rank_one and bool(
+        getattr(settings, "sep09_intent_rank_one_requires_entry_window", True)
+    ):
+        if not rank_one_timing_in_window(evidence, candidate):
+            return True, "sep09_rank_one_outside_entry_window", meta
 
     if bool(getattr(settings, "sep09_intent_one_rip_per_side_enabled", True)):
         if session_has_sep09_side_rip(state, symbol=symbol, side=side):
@@ -310,13 +418,35 @@ def sep09_intent_explosion_entry_blocked(
         return True, chase_reason, meta
 
     early_ok, early_detail = sep09_early_near_base_window_ok(
-        evidence, alert, settings=settings, now=now,
+        evidence, alert, settings=settings, now=now, strict=strict_rank_one,
     )
     meta["earlyWindowDetail"] = early_detail
     if not early_ok:
         return True, early_detail, meta
 
     return False, "", meta
+
+
+def sep09_intent_suppresses_rank_one_lot_bypass(
+    state: AutoTraderState | None,
+    candidate: Any,
+    snap: Any = None,
+    *,
+    settings: Any = None,
+    now: Optional[datetime] = None,
+) -> bool:
+    """Rank-#1 must not unlock full-budget / always-max when Sep 9 intent fails."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "sep09_intent_blocks_rank_one_full_budget", True)):
+        return False
+    alert = _alert_dict(candidate)
+    evidence = _evidence_from_candidate(candidate, alert)
+    if not candidate_is_rank_one(candidate, alert, evidence):
+        return False
+    blocked, _, _ = sep09_intent_explosion_entry_blocked(
+        state, candidate, snap, settings=settings, now=now,
+    )
+    return blocked
 
 
 def sep09_intent_blocks_must_take_bypass(settings: Any = None) -> bool:

@@ -479,6 +479,7 @@ def elite_must_take_bypass_allowed(
     timing: Optional[dict] = None,
     snap: Any = None,
     ict: Any = None,
+    state: Any = None,
 ) -> bool:
     """Must-take gate bypass only when anti-chase and coil-pad expansion are clear."""
     if not elite_never_block_active(
@@ -536,6 +537,19 @@ def elite_must_take_bypass_allowed(
     coil_blocked, _ = building_coil_pad_live_blocked(probe)
     if coil_blocked:
         return False
+
+    if candidate is not None and str(getattr(candidate, "mode", "") or "").lower() == "explosion":
+        from app.engines.sep09_intent_guards import (
+            sep09_intent_blocks_must_take_bypass,
+            sep09_intent_explosion_entry_blocked,
+        )
+
+        if sep09_intent_blocks_must_take_bypass(settings):
+            blocked, _, _ = sep09_intent_explosion_entry_blocked(
+                state, candidate, snap, settings=settings,
+            )
+            if blocked:
+                return False
 
     return True
 
