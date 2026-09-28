@@ -1869,6 +1869,47 @@ def resolve_explosion_scan_range(
     return base
 
 
+def _expiry_open_near_atm_shallow_otm(
+    symbol: str,
+    strike: float,
+    spot: float,
+    atm: float,
+    moneyness: str,
+    settings: Any,
+) -> bool:
+    """One listed strike beyond ATM — 22800 PE when spot/ATM ~22850 at open."""
+    from app.engines.moneyness import strike_step
+
+    if str(moneyness or "").upper() != "OTM":
+        return True
+    if not bool(getattr(settings, "expiry_open_shallow_otm_trough_enabled", True)):
+        return False
+    step = strike_step(symbol)
+    tolerance = float(
+        getattr(settings, "moneyness_atm_tolerance_points", step) or step
+    )
+    shallow_steps = int(
+        getattr(settings, "explosion_shallow_otm_history_steps", 1) or 1
+    )
+    return abs(float(strike) - float(atm)) <= tolerance + step * max(0, shallow_steps)
+
+
+def _open_premium_move_threshold(
+    settings: Any,
+    *,
+    open_window: bool,
+    expiry_day: bool,
+    near_atm: bool,
+) -> float:
+    base = float(getattr(settings, "open_premium_min_move_pct", 25.0) or 25.0)
+    if not (open_window and expiry_day and near_atm):
+        return base
+    relax = float(
+        getattr(settings, "expiry_open_premium_relax_move_pct", 15.0) or 15.0
+    )
+    return min(base, relax)
+
+
 def _premium_ok_for_scan(
     premium: float,
     open_move: float,
@@ -1876,20 +1917,43 @@ def _premium_ok_for_scan(
     *,
     expiry_day: bool = False,
     moneyness: str = "",
+    open_window: bool = False,
+    near_atm: bool = False,
+    peak_move: float = 0.0,
+    trough_off_low: float = 0.0,
 ) -> bool:
     """Allow sub-min premium when session move is explosive (deep OTM rips).
 
     When ATM+ITM-only scan is on, never bypass the main premium band — cheap
     deep-OTM noise must not dominate radar over near-base ATM/ITM.
     """
-    if premium_in_band(premium, mode="explosion", peak_move_pct=open_move):
+    lift = max(open_move, peak_move, float(trough_off_low or 0))
+    if premium_in_band(premium, mode="explosion", peak_move_pct=lift):
         return True
+    if open_window and expiry_day and near_atm:
+        floor = float(
+            getattr(settings, "expiry_open_cheap_premium_min_inr", 10.0) or 10.0
+        )
+        relax_peak = float(
+            getattr(settings, "expiry_open_cheap_rip_min_peak_pct", 15.0) or 15.0
+        )
+        max_prem = max(
+            float(settings.explosion_max_premium_inr or settings.max_option_premium_inr),
+            float(getattr(settings, "explosion_ict_max_premium_inr", 0) or 0),
+        )
+        if premium >= floor and lift >= relax_peak and premium <= max_prem:
+            return True
     # Expiry deep ITM — intrinsic premium exceeds ₹650 before the vertical prints.
     if expiry_day and str(moneyness or "").upper() == "ITM":
         itm_ceil = float(
             getattr(settings, "expiry_itm_explosion_scan_max_premium_inr", 900.0) or 900.0
         )
         floor = float(getattr(settings, "expiry_day_min_option_premium_inr", 15.0) or 15.0)
+        if open_window and near_atm:
+            floor = min(
+                floor,
+                float(getattr(settings, "expiry_open_cheap_premium_min_inr", 10.0) or 10.0),
+            )
         if floor <= premium <= itm_ceil:
             return True
     if bool(getattr(settings, "explosion_scan_atm_itm_only", True)):
@@ -1928,7 +1992,13 @@ def _expiry_trough_first_tick_scan_ok(
     if not expiry_day or not near_atm:
         return False, 0.0
     if str(moneyness or "").upper() == "OTM":
-        return False, 0.0
+        from app.engines.session_timing import in_open_premium_window
+
+        if not (
+            in_open_premium_window()
+            and bool(getattr(settings, "expiry_open_shallow_otm_trough_enabled", True))
+        ):
+            return False, 0.0
     if hist and len(hist) >= 2:
         return False, 0.0
 
@@ -2079,6 +2149,22 @@ def _shallow_otm_monitor_eligible(
     )
     if abs(float(strike) - float(atm)) > tolerance + step * max(0, max_steps):
         return False
+    from app.engines.session_timing import in_open_premium_window
+
+    open_floor = float(
+        getattr(settings, "expiry_open_cheap_premium_min_inr", 10.0) or 10.0
+    )
+    if in_open_premium_window() and float(premium or 0) >= open_floor:
+        max_prem = max(
+            float(getattr(settings, "max_option_premium_inr", 300.0) or 300.0),
+            float(getattr(settings, "explosion_max_premium_inr", 650.0) or 650.0),
+        )
+        if float(premium) <= max_prem:
+            min_volume = float(
+                getattr(settings, "explosion_shallow_otm_history_min_volume", 25000)
+                or 25000
+            )
+            return float(volume or 0) <= 0 or float(volume) >= min_volume
     if not premium_in_band(premium, mode="explosion"):
         return False
     min_volume = float(
@@ -2251,24 +2337,36 @@ def scan_chain_explosions(
                     moneyness=money,
                     settings=settings,
                 )
+            scan_lift = max(
+                open_move,
+                session_move,
+                peak_move,
+                trough_off_low if trough_scan_ok else 0.0,
+                fast_burst_off if fast_burst_ok else 0.0,
+            )
             if not _premium_ok_for_scan(
                 premium,
-                max(
-                    open_move,
-                    session_move,
-                    trough_off_low if trough_scan_ok else 0.0,
-                    fast_burst_off if fast_burst_ok else 0.0,
-                ),
+                scan_lift,
                 settings,
                 expiry_day=expiry_day,
                 moneyness=money,
+                open_window=open_window,
+                near_atm=near_atm,
+                peak_move=peak_move,
+                trough_off_low=trough_off_low if trough_scan_ok else 0.0,
             ):
                 continue
 
             if not hist or len(hist) < 2:
+                move_floor = _open_premium_move_threshold(
+                    settings,
+                    open_window=open_window,
+                    expiry_day=expiry_day,
+                    near_atm=near_atm,
+                )
                 open_gate = (
                     settings.open_premium_explosion_enabled
-                    and open_move >= settings.open_premium_min_move_pct
+                    and open_move >= move_floor
                 )
                 if not open_gate and not trough_scan_ok and not fast_burst_ok:
                     continue

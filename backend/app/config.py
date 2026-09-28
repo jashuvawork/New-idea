@@ -2941,6 +2941,11 @@ class Settings(BaseSettings):
     open_premium_relax_velocity_3s: float = 1.8
     open_premium_relax_velocity_9s: float = 2.5
     explosion_open_scan_interval_ms: int = 600
+    # 9:15 expiry open — NIFTY 22800 PE ₹10–15 → vertical (Sep 28 gap class)
+    expiry_open_cheap_premium_min_inr: float = 10.0
+    expiry_open_shallow_otm_trough_enabled: bool = True
+    expiry_open_premium_relax_move_pct: float = 15.0
+    expiry_open_cheap_rip_min_peak_pct: float = 15.0
 
     # Afternoon premium capture — 11:45–13:45 consolidation breakouts (e.g. NIFTY 24250 PE 1pm rip)
     afternoon_premium_capture_enabled: bool = True
@@ -3080,6 +3085,8 @@ class Settings(BaseSettings):
     # Keep cheap-rip floor at the main band min so ≥₹18 always holds.
     explosion_cheap_rip_min_premium_inr: float = 18.0
     explosion_cheap_rip_min_peak_pct: float = 25.0
+    # Open window only — sub-₹18 trough lifts still enter radar (symmetric CE/PE).
+    explosion_open_cheap_rip_min_premium_inr: float = 10.0
 
     runner_trail_keep_ratio: float = 0.38
     runner_micro_giveback_points: float = 4.0
