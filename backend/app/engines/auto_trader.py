@@ -2487,6 +2487,11 @@ async def _open_from_candidate(
             or local_base_prem
             or 0
         )
+        from app.engines.sep09_intent_guards import classify_sep09_rip_lane_for_entry
+
+        ctx_extra["sep09RipLane"] = classify_sep09_rip_lane_for_entry(
+            state, candidate, snap,
+        )
         ctx_extra.update({
             "explosionTier": ev.tier,
             "explosionScore": ev.explosion_score,

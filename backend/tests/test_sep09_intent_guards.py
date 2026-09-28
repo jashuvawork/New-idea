@@ -152,7 +152,10 @@ def test_sep09_one_rip_per_side_blocks_second_put():
         state, _candidate_from_alert(alert), None, settings=settings,
     )
     assert blocked is True
-    assert reason == "sep09_one_early_rip_per_side_already_used"
+    assert reason in (
+        "sep09_one_early_rip_per_side_already_used",
+        "sep09_second_leg_requires_afternoon_structural",
+    )
 
 
 def test_checklist_not_ready_for_sep28_evidence():
@@ -272,3 +275,110 @@ def test_session_has_sep09_side_rip_from_trade_store_archive():
         return_value=archived,
     ):
         assert session_has_sep09_side_rip(state, symbol="NIFTY", side=Side.PUT) is True
+
+
+def _prior_put_explosion(*, strike: float = 22700.0, closed_minutes_ago: float = 45.0) -> PaperTrade:
+    now = datetime(2026, 9, 28, 14, 0, 0, tzinfo=IST)
+    return PaperTrade(
+        id="prior-put",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=strike,
+        entryPremium=26.0,
+        currentPremium=30.0,
+        lots=40,
+        openedAt=now - timedelta(minutes=closed_minutes_ago + 30),
+        closedAt=now - timedelta(minutes=closed_minutes_ago),
+        status="CLOSED",
+        exitReason="explosion_peak_keep_trail",
+        strategyType=StrategyType.EXPLOSIVE,
+        pnlInr=12000.0,
+        entryContext={"selectionMode": "explosion", "sep09RipLane": "EARLY_NEAR_BASE"},
+    )
+
+
+def test_afternoon_structural_allows_second_put_different_strike():
+    """Sep28-style 14:00 22850 PE off fresh base after earlier 22700 win."""
+    _seed_peak(symbol="NIFTY", strike=22850.0, side=Side.PUT, low=55.0, peak=78.0)
+    entry_now = datetime(2026, 9, 28, 14, 0, 0, tzinfo=IST)
+    armed = entry_now - timedelta(minutes=6)
+    state = AutoTraderState(closedPaperTrades=[_prior_put_explosion()])
+    alert = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 22850.0,
+        "tier": "ELITE",
+        "localBaseMovePct": 14.0,
+        "flatThenVertical": True,
+        "firstLift": True,
+        "vRipReady": True,
+        "spikeRunPct": 12.0,
+        "premium": 75.0,
+        "ictCaptureMeta": {"ict": {"armedAt": armed.isoformat()}},
+    }
+    settings = Settings(sep09_intent_enforcement_enabled=True)
+    cand = _candidate_from_alert(alert)
+    with patch("app.services.upstox.get_market_phase", return_value="LIVE_MARKET"):
+        blocked, reason, meta = sep09_intent_explosion_entry_blocked(
+            state, cand, None, settings=settings, now=entry_now,
+        )
+    assert blocked is False, reason
+    assert meta.get("afternoonStructuralRip")
+
+
+def test_afternoon_structural_blocks_same_strike_without_flat_time():
+    _seed_peak(symbol="NIFTY", strike=22850.0, side=Side.PUT, low=55.0, peak=78.0)
+    entry_now = datetime(2026, 9, 28, 14, 0, 0, tzinfo=IST)
+    armed = entry_now - timedelta(minutes=5)
+    loss = _prior_put_explosion(strike=22850.0, closed_minutes_ago=10.0)
+    loss.pnlInr = -8000.0
+    loss.exitReason = "adaptive_stop_loss"
+    state = AutoTraderState(closedPaperTrades=[loss])
+    alert = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 22850.0,
+        "localBaseMovePct": 12.0,
+        "flatThenVertical": True,
+        "firstLift": True,
+        "spikeRunPct": 10.0,
+        "premium": 72.0,
+        "ictCaptureMeta": {"ict": {"armedAt": armed.isoformat()}},
+    }
+    settings = Settings(sep09_intent_enforcement_enabled=True)
+    cand = _candidate_from_alert(alert)
+    with patch("app.services.upstox.get_market_phase", return_value="LIVE_MARKET"):
+        blocked, reason, _ = sep09_intent_explosion_entry_blocked(
+            state, cand, None, settings=settings, now=entry_now,
+        )
+    assert blocked is True
+    assert "sep09_second_leg" in reason or "loss_strike" in reason or "session_same_strike" in reason
+
+
+def test_afternoon_structural_ce_mirror():
+    _seed_peak(symbol="NIFTY", strike=22900.0, side=Side.CALL, low=40.0, peak=58.0)
+    entry_now = datetime(2026, 9, 28, 14, 5, 0, tzinfo=IST)
+    armed = entry_now - timedelta(minutes=7)
+    prior = _prior_put_explosion(strike=22800.0)
+    prior.side = Side.CALL
+    prior.strike = 22850.0
+    state = AutoTraderState(closedPaperTrades=[prior])
+    alert = {
+        "symbol": "NIFTY",
+        "side": "CALL",
+        "strike": 22900.0,
+        "localBaseMovePct": 11.0,
+        "flatThenVertical": True,
+        "firstLift": True,
+        "spikeRunPct": 11.0,
+        "premium": 62.0,
+        "ictCaptureMeta": {"ict": {"armedAt": armed.isoformat()}},
+    }
+    settings = Settings(sep09_intent_enforcement_enabled=True)
+    cand = _candidate_from_alert(alert)
+    with patch("app.services.upstox.get_market_phase", return_value="LIVE_MARKET"):
+        blocked, reason, meta = sep09_intent_explosion_entry_blocked(
+            state, cand, None, settings=settings, now=entry_now,
+        )
+    assert blocked is False, reason
+    assert meta.get("afternoonStructuralRip")

@@ -212,6 +212,303 @@ def session_has_sep09_side_rip(
     return False
 
 
+SEP09_LANE_OPEN = "OPEN_PREMIUM"
+SEP09_LANE_EARLY = "EARLY_NEAR_BASE"
+SEP09_LANE_AFTERNOON = "AFTERNOON_STRUCTURAL"
+
+
+def _side_explosion_trades(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+) -> list[Any]:
+    if state is None:
+        return []
+    sym = str(symbol or "").upper()
+    side_u = _side_str(side)
+    seen: set[str] = set()
+    out: list[Any] = []
+
+    def _append(trade: Any) -> None:
+        tid = str(getattr(trade, "id", "") or "")
+        if tid and tid in seen:
+            return
+        if tid:
+            seen.add(tid)
+        ts = str(getattr(trade, "symbol", "") or "").upper()
+        if ts != sym or _side_str(getattr(trade, "side", "")) != side_u:
+            return
+        if not _is_explosion_trade_obj(trade):
+            return
+        out.append(trade)
+
+    for t in list(state.openPaperTrades or []) + list(state.closedPaperTrades or []):
+        _append(t)
+    try:
+        from app.engines.pretrade_validator import collect_session_trades
+
+        for rec in collect_session_trades(state):
+            if rec.trade_id and rec.trade_id in seen:
+                continue
+            if str(rec.symbol or "").upper() != sym:
+                continue
+            if str(rec.side or "").upper() != side_u:
+                continue
+            if str(rec.mode or "").lower() != "explosion":
+                continue
+            class _RecTrade:
+                pass
+
+            stub = _RecTrade()
+            stub.id = rec.trade_id
+            stub.symbol = sym
+            stub.side = side_u
+            stub.strike = float(rec.strike or 0)
+            stub.entryContext = {"selectionMode": "explosion"}
+            _append(stub)
+    except Exception:
+        pass
+    return out
+
+
+def _infer_sep09_rip_lane(trade: Any) -> str:
+    ctx = getattr(trade, "entryContext", None) or {}
+    if isinstance(ctx, dict):
+        stamped = str(ctx.get("sep09RipLane") or "").upper()
+        if stamped in (SEP09_LANE_OPEN, SEP09_LANE_EARLY, SEP09_LANE_AFTERNOON):
+            return stamped
+        if ctx.get("openPremiumFirstRip") or ctx.get("sep09OpenPremiumFirstRip"):
+            return SEP09_LANE_OPEN
+    opened = getattr(trade, "openedAt", None)
+    if opened is not None:
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=IST)
+        from app.engines.session_timing import in_open_premium_window_at
+
+        if in_open_premium_window_at(opened.astimezone(IST)):
+            return SEP09_LANE_OPEN
+    return SEP09_LANE_EARLY
+
+
+def session_sep09_rip_lanes_used(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+) -> set[str]:
+    return {_infer_sep09_rip_lane(t) for t in _side_explosion_trades(state, symbol=symbol, side=side)}
+
+
+def _minutes_since_last_side_explosion_close(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    now: Optional[datetime] = None,
+) -> Optional[float]:
+    now = now or datetime.now(IST)
+    latest: Optional[datetime] = None
+    for t in _side_explosion_trades(state, symbol=symbol, side=side):
+        closed = getattr(t, "closedAt", None)
+        if closed is None:
+            opened = getattr(t, "openedAt", None)
+            if opened is not None:
+                return 0.0
+            continue
+        if closed.tzinfo is None:
+            closed = closed.replace(tzinfo=IST)
+        if latest is None or closed > latest:
+            latest = closed.astimezone(IST)
+    if latest is None:
+        return None
+    return max(0.0, (now.astimezone(IST) - latest).total_seconds() / 60.0)
+
+
+def _prior_explosion_strikes_on_side(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+) -> set[float]:
+    strikes: set[float] = set()
+    for t in _side_explosion_trades(state, symbol=symbol, side=side):
+        strikes.add(float(getattr(t, "strike", 0) or 0))
+    return strikes
+
+
+def in_afternoon_structural_rip_window(
+    *,
+    now: Optional[datetime] = None,
+    settings: Any = None,
+) -> bool:
+    """12:00+ IST (configurable) through session — not the 9:15 open pad window."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "sep09_intent_afternoon_structural_rip_enabled", True)):
+        return False
+    now = now or datetime.now(IST)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=IST)
+    now = now.astimezone(IST)
+    from app.services.upstox import get_market_phase
+
+    if get_market_phase() != "LIVE_MARKET":
+        return False
+    start_h = int(getattr(settings, "sep09_intent_afternoon_structural_min_hour", 12) or 12)
+    start_m = int(getattr(settings, "sep09_intent_afternoon_structural_min_minute", 0) or 0)
+    start = start_h * 60 + start_m
+    end_h = int(getattr(settings, "live_session_close_hour", 15) or 15)
+    end_m = int(getattr(settings, "live_session_close_minute", 30) or 30)
+    end = end_h * 60 + end_m
+    current = now.hour * 60 + now.minute
+    if current < start or current >= end:
+        return False
+    from app.engines.session_timing import in_open_premium_window_at
+
+    return not in_open_premium_window_at(now)
+
+
+def afternoon_structural_side_rip_ok(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    evidence: Mapping[str, Any],
+    alert: Mapping[str, Any],
+    settings: Any = None,
+    now: Optional[datetime] = None,
+) -> tuple[bool, str]:
+    """
+    Second lane per side: afternoon flat→vertical off a fresh local base.
+
+    Requires a prior explosion on the same side; no loss-strike re-entry; different
+    strike or min minutes since the prior leg closed.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "sep09_intent_two_lane_per_side_enabled", True)):
+        return False, ""
+    if not bool(getattr(settings, "sep09_intent_afternoon_structural_rip_enabled", True)):
+        return False, ""
+    sym = str(symbol or "").upper()
+    if not session_has_sep09_side_rip(state, symbol=sym, side=side):
+        return False, "afternoon_requires_prior_side_rip"
+    lanes = session_sep09_rip_lanes_used(state, symbol=sym, side=side)
+    if SEP09_LANE_AFTERNOON in lanes:
+        return False, "afternoon_structural_lane_already_used"
+
+    if not in_afternoon_structural_rip_window(settings=settings, now=now):
+        return False, "outside_afternoon_structural_window"
+
+    from app.engines.session_mode_feedback import session_same_strike_loss_reentry_blocked
+
+    loss_blocked, loss_meta = session_same_strike_loss_reentry_blocked(
+        state, symbol=sym, side=side, strike=float(strike or 0),
+    )
+    if loss_blocked:
+        return False, str(loss_meta.get("reason") or "loss_strike_blocked")
+
+    from app.engines.best_trade_policy import symmetric_structural_base_evidence
+
+    if not symmetric_structural_base_evidence(evidence, settings=settings):
+        return False, "afternoon_requires_structural_local_base"
+
+    max_local = float(
+        getattr(settings, "sep09_intent_afternoon_structural_max_local_base_pct", 20.0) or 20.0
+    )
+    local = max(
+        float(evidence.get("localBaseMovePct") or 0),
+        float(evidence.get("ictBaseRelativeMovePct") or 0),
+    )
+    if local > max_local + 1e-6:
+        return False, f"afternoon_local_base_{local:.1f}pct_over_{max_local:.0f}"
+
+    chase, chase_reason = sep09_near_peak_after_extended_rip(
+        evidence,
+        premium=premium,
+        symbol=sym,
+        strike=strike,
+        side=side,
+        alert=alert,
+        settings=settings,
+    )
+    if chase:
+        return False, f"afternoon_near_peak_block:{chase_reason}"
+
+    prior_strikes = _prior_explosion_strikes_on_side(state, symbol=sym, side=side)
+    strike_f = float(strike or 0)
+    requires_diff = bool(
+        getattr(settings, "sep09_intent_afternoon_structural_requires_different_strike", True)
+    )
+    min_since = float(
+        getattr(settings, "sep09_intent_afternoon_structural_min_minutes_since_prior_close", 20.0)
+        or 20.0
+    )
+    elapsed = _minutes_since_last_side_explosion_close(
+        state, symbol=sym, side=side, now=now,
+    )
+    if requires_diff and strike_f in prior_strikes:
+        if elapsed is None or elapsed + 1e-6 < min_since:
+            return False, (
+                f"afternoon_same_strike_need_{min_since:.0f}min_flat_"
+                f"got_{elapsed if elapsed is not None else -1:.1f}"
+            )
+    elif elapsed is not None and elapsed + 1e-6 < min_since:
+        return False, f"afternoon_too_soon_after_prior_{elapsed:.1f}min_min_{min_since:.0f}"
+
+    return True, f"afternoon_structural_local_{local:.1f}pct"
+
+
+def classify_sep09_rip_lane_for_entry(
+    state: AutoTraderState | None,
+    candidate: Any,
+    snap: Any = None,
+    *,
+    settings: Any = None,
+    now: Optional[datetime] = None,
+) -> str:
+    """Stamp entryContext.sep09RipLane for session two-lane accounting."""
+    settings = settings or get_settings()
+    symbol = str(getattr(candidate, "symbol", "") or "").upper()
+    side = getattr(candidate, "side", None)
+    strike = float(getattr(candidate, "strike", 0) or 0)
+    premium = float(getattr(candidate, "premium", 0) or 0)
+    alert = _alert_dict(candidate)
+    evidence = _evidence_from_candidate(candidate, alert)
+    pre = getattr(candidate, "pretrade_meta", None) or {}
+    if isinstance(pre, dict):
+        if pre.get("afternoonStructuralRip") or pre.get("sep917Waive") == "afternoon_structural_side_rip":
+            return SEP09_LANE_AFTERNOON
+        if pre.get("openPremiumFirstRip"):
+            return SEP09_LANE_OPEN
+    aft_ok, _ = afternoon_structural_side_rip_ok(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        premium=premium,
+        evidence=evidence,
+        alert=alert,
+        settings=settings,
+        now=now,
+    )
+    if aft_ok and session_has_sep09_side_rip(state, symbol=symbol, side=side):
+        return SEP09_LANE_AFTERNOON
+    open_ok, _ = open_premium_first_side_rip_ok(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        premium=premium,
+        evidence=evidence,
+        settings=settings,
+    )
+    if open_ok:
+        return SEP09_LANE_OPEN
+    return SEP09_LANE_EARLY
+
+
 def _coerce_rank(val: Any) -> Optional[int]:
     if val is None or isinstance(val, bool):
         return None
@@ -473,9 +770,26 @@ def sep09_intent_explosion_entry_blocked(
         if not rank_one_timing_in_window(evidence, candidate):
             return True, "sep09_rank_one_outside_entry_window", meta
 
-    if bool(getattr(settings, "sep09_intent_one_rip_per_side_enabled", True)):
-        if session_has_sep09_side_rip(state, symbol=symbol, side=side):
-            return True, "sep09_one_early_rip_per_side_already_used", meta
+    two_lane = bool(getattr(settings, "sep09_intent_two_lane_per_side_enabled", True))
+    side_has_rip = session_has_sep09_side_rip(state, symbol=symbol, side=side)
+    lanes_used = (
+        session_sep09_rip_lanes_used(state, symbol=symbol, side=side) if two_lane else set()
+    )
+
+    afternoon_ok, afternoon_detail = afternoon_structural_side_rip_ok(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        premium=premium,
+        evidence=evidence,
+        alert=alert,
+        settings=settings,
+        now=now,
+    )
+    meta["afternoonStructuralCandidate"] = afternoon_ok
+    if afternoon_detail:
+        meta["afternoonStructuralDetail"] = afternoon_detail
 
     open_ok, open_detail = open_premium_first_side_rip_ok(
         state,
@@ -486,6 +800,20 @@ def sep09_intent_explosion_entry_blocked(
         evidence=evidence,
         settings=settings,
     )
+
+    if two_lane and side_has_rip:
+        if afternoon_ok:
+            meta["afternoonStructuralRip"] = afternoon_detail
+            return False, "", meta
+        if bool(getattr(settings, "sep09_intent_one_rip_per_side_enabled", True)):
+            if SEP09_LANE_AFTERNOON in lanes_used:
+                return True, "sep09_afternoon_structural_lane_already_used", meta
+            return True, "sep09_second_leg_requires_afternoon_structural", meta
+
+    if bool(getattr(settings, "sep09_intent_one_rip_per_side_enabled", True)):
+        if side_has_rip and not two_lane:
+            return True, "sep09_one_early_rip_per_side_already_used", meta
+
     if open_ok:
         meta["openPremiumFirstRip"] = open_detail
         max_open_arm = float(
