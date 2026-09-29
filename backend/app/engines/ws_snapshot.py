@@ -47,9 +47,11 @@ def build_ws_index_snapshot(
             symbol=sym,
             timestamp=now,
             marketPhase=phase,
-            dataAvailable=True,
+            # Index LTP only — not a tradable chain (never satisfy snapshot_chain_ready).
+            dataAvailable=False,
             spot=spot,
             atmStrike=_atm_strike(spot, sym),
+            error="WebSocket index LTP only — waiting for REST option chain",
         )
 
     if not snapshots:
