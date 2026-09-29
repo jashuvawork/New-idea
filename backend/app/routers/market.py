@@ -18,7 +18,7 @@ from app.engines.realtime_engine import build_symbol_snapshot
 from app.engines.snapshot_fast import overlay_snapshot_live, overlay_snapshot_ltps
 from app.engines.psychology_engine import analyze_psychology, psychology_to_dict
 from app.engines.adaptive_exits import compute_adaptive_exit_plan
-from app.models.schemas import MultiSnapshot, StrategyType
+from app.models.schemas import MultiSnapshot, StrategyType, SymbolSnapshot
 from app.services.news_intelligence import aggregate_news_intelligence, fetch_market_news
 from app.services.redis_store import has_upstox_token
 from app.services.upstox import UpstoxClient, UpstoxError, rate_limit_active, rate_limit_cooldown_remaining
@@ -469,29 +469,63 @@ def _shallow_cache_copy(
     return snap
 
 
+def snapshot_chain_ready(snap: SymbolSnapshot) -> bool:
+    """True when REST option chain is present — WS spot-only shells are not tradable."""
+    if not getattr(snap, "dataAvailable", False):
+        return False
+    if not getattr(snap, "optionExpiry", None):
+        return False
+    heatmap = getattr(snap, "heatmap", None) or []
+    if len(heatmap) < 5:
+        return False
+    if float(getattr(snap, "spot", 0) or 0) <= 0:
+        return False
+    return True
+
+
+def snapshot_needs_chain_rebuild(snap: SymbolSnapshot) -> bool:
+    """Premarket / index-only cache must not survive into LIVE_MARKET."""
+    from app.services.upstox import get_market_phase
+
+    if get_market_phase() != "LIVE_MARKET":
+        return False
+    phase = getattr(snap, "marketPhase", None)
+    phase_s = phase.value if hasattr(phase, "value") else str(phase or "")
+    if phase_s == "PREMARKET":
+        return True
+    return not snapshot_chain_ready(snap)
+
+
 def max_symbol_snapshot_age_seconds(snapshots: dict) -> float:
-    """Age of the oldest symbol snapshot timestamp — REST chain freshness."""
+    """Age of the oldest REST chain timestamp (ignores WS-only / premarket shells)."""
     now = datetime.now(IST)
     worst = 0.0
+    seen = 0
     for snap in snapshots.values():
-        if not getattr(snap, "dataAvailable", False):
+        if not snapshot_chain_ready(snap):
             continue
+        seen += 1
         ts = getattr(snap, "timestamp", None)
         if ts is None:
             return 999999.0
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=IST)
         worst = max(worst, (now - ts).total_seconds())
+    if seen == 0:
+        return 999999.0
     return worst
 
 
 def chain_data_stale(snapshots: Optional[dict] = None) -> bool:
-    """True when cached heatmap/OI is too old for reliable explosion scans."""
+    """True when heatmap/OI missing, phase stuck premarket, or REST chain too old."""
     snaps = snapshots
     if snaps is None:
         if not _cache or not _cache.snapshots:
             return True
         snaps = _cache.snapshots
+    for snap in snaps.values():
+        if snapshot_needs_chain_rebuild(snap):
+            return True
     max_age = float(
         getattr(get_settings(), "ws_chain_refresh_max_age_seconds", 120.0) or 120.0
     )
@@ -499,14 +533,8 @@ def chain_data_stale(snapshots: Optional[dict] = None) -> bool:
 
 
 def _stamp_snapshot_symbols_now(snapshots: dict) -> dict:
-    """Keep per-symbol timestamps aligned with WS overlays (UI + staleness checks)."""
-    now = datetime.now(IST)
-    out: dict = {}
-    for sym, snap in snapshots.items():
-        cloned = snap.model_copy(deep=False)
-        cloned.timestamp = now
-        out[sym] = cloned
-    return out
+    """WS overlay path — do not bump REST chain timestamps (Sep29 premarket shell bug)."""
+    return snapshots
 
 
 def _refresh_explosion_alerts_cpu(
@@ -517,7 +545,7 @@ def _refresh_explosion_alerts_cpu(
     from app.engines.explosion_detector import refresh_snapshot_explosion_alerts
 
     for snap in snapshots.values():
-        if not snap.dataAvailable:
+        if not snap.dataAvailable or not snapshot_chain_ready(snap):
             continue
         expiry_day = bool(snap.optionExpiry and str(snap.optionExpiry)[:10] == today)
         refresh_snapshot_explosion_alerts(snap, expiry_day=expiry_day)
