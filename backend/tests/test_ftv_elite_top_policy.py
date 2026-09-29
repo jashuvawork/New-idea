@@ -472,6 +472,7 @@ def test_pretrade_policy_is_default_enabled_and_disable_restores_legacy():
     enabled = Settings(
         controlled_trading_enabled=False,
         top_ftv_a_enabled=False,
+        ftv_elite_top_only_enabled=True,
     )
     disabled = Settings(
         controlled_trading_enabled=False,
@@ -513,6 +514,7 @@ def test_missing_live_cvd_is_blocked_on_preorder_execution_recompute():
     settings = Settings(
         controlled_trading_enabled=False,
         winner_local_base_enabled=False,
+        ftv_elite_top_only_enabled=True,
     )
     with (
         patch("app.engines.auto_trader.get_settings", return_value=settings),

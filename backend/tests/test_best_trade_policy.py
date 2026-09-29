@@ -115,7 +115,7 @@ def _explosion_candidate(
 
 
 def test_cheap_base_strike_eligible_non_expiry():
-    s = settings_mock()
+    s = settings_mock(best_trade_cheap_base_rank_priority_enabled=True)
     snap = _sep15_nifty_snap(expiry="2026-09-22")
     alert = {
         "localBaseMovePct": 14.0,
@@ -237,7 +237,7 @@ def test_deep_itm_chase_strike_sep15_23500_pe():
 
 
 def test_deprioritize_drops_deep_itm_when_cheap_pe_present():
-    s = settings_mock()
+    s = settings_mock(best_trade_cheap_base_rank_priority_enabled=True)
     snap = _sep15_nifty_snap(expiry="2026-09-22")
     cheap = _explosion_candidate(
         strike=23150.0,
@@ -320,7 +320,7 @@ def test_deprioritize_keeps_mid_rip_deep_with_cheap_peer():
 
 
 def test_cheap_base_rank_bonus_beats_deep_penalty():
-    s = settings_mock()
+    s = settings_mock(best_trade_cheap_base_rank_priority_enabled=True)
     snap = _sep15_nifty_snap(expiry="2026-09-22")
     cheap = _explosion_candidate(
         strike=23150.0,

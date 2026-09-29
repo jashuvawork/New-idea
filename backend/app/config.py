@@ -294,10 +294,9 @@ class Settings(BaseSettings):
     explosion_elite_exploding_only: bool = True
     # Master hard policy. Strict causal S and final-policy-authorized rank-1
     # TOP_FTV_A are the only full-sleeve paths.
-    ftv_elite_top_only_enabled: bool = True
-    # Product focus: only top FTV, V-rip, ELITE, and EXPLODING moments (grade A/S).
-    # Blocks B/C sleeves, generic BUILDING without FTV/V triggers, and non-explosion modes.
-    top_moments_only_enabled: bool = True
+    # Legacy profile: off — elite near-base path (#604/#633); was top Sep29 funnel blocker.
+    ftv_elite_top_only_enabled: bool = False
+    top_moments_only_enabled: bool = False
     top_moments_min_grade: str = "A"  # A or S; set S for strictest book
     # MOMENTUM RALLY day mode may loosen min grade (Sep2 afternoon EXPLODING grade-B pads).
     top_moments_momentum_rally_grade_b_enabled: bool = True
@@ -387,10 +386,10 @@ class Settings(BaseSettings):
     pe_win_ce_mirror_local_cap_pct: float = 15.0
     # Index rally CE unlock without PUT win first (Sep 11-style missed CE rally leg).
     call_rally_unlock_enabled: bool = True
-    call_rally_unlock_waive_expiry_otm: bool = True
+    call_rally_unlock_waive_expiry_otm: bool = False
     # PUT slide / CE-win PE mirror — symmetric Sep 9–17 SENSEX 73900 PE OTM capture.
     put_slide_unlock_enabled: bool = True
-    put_slide_unlock_waive_expiry_otm: bool = True
+    put_slide_unlock_waive_expiry_otm: bool = False
     put_slide_unlock_near_miss_enabled: bool = True
     put_slide_unlock_waive_mtf_premium_fade: bool = True
     ce_win_pe_mirror_enabled: bool = True
@@ -425,6 +424,8 @@ class Settings(BaseSettings):
     elite_trade_block_perfect_score_enabled: bool = True
     elite_trade_perfect_score_threshold: float = 99.95
     elite_trade_perfect_score_max_local_pct: float = 15.0
+    # Sep 9–17 legacy full stack — ATM/ITM ₹18–350, no cheap OTM (see sep917_legacy_profile.py).
+    sep917_legacy_profile_enabled: bool = True
     # Sep 9–17 profile: symmetric CE/PE best-trade rank; Sep21+ blockers stay off.
     symmetric_best_trade_capture_enabled: bool = True
     # ELITE/EXPLODING at structural base — shallow exec premium retest (CE+PE, Sep23 74800 miss).
@@ -507,8 +508,8 @@ class Settings(BaseSettings):
     near_expiry_local_base_entry_min_move_pct: float = 12.0
     near_expiry_local_base_chase_max_move_pct: float = 48.0
     post_expiry_first_lift_cold_v3_waiver_enabled: bool = True
-    # Selector: prefer ₹18–80 near-base over deep ITM on non-expiry days only.
-    best_trade_cheap_base_rank_priority_enabled: bool = True
+    # Cheap OTM rank priority — off in Sep 9–17 legacy (ATM/ITM ₹18–350 only).
+    best_trade_cheap_base_rank_priority_enabled: bool = False
     best_trade_cheap_base_min_premium_inr: float = 18.0
     best_trade_cheap_base_max_premium_inr: float = 80.0
     best_trade_cheap_base_max_local_pct: float = 22.0
@@ -1832,11 +1833,10 @@ class Settings(BaseSettings):
     # beyond the ATM band so a contract that rotates ATM does not lose its real base.
     # Deep OTM and sub-band premiums remain excluded.
     explosion_scan_atm_itm_only: bool = True
-    explosion_shallow_otm_history_steps: int = 2
+    explosion_shallow_otm_history_steps: int = 0
     explosion_shallow_otm_history_min_volume: int = 25000
-    # Executable near-strike OTM (1 step from ATM) when ELITE/EXPLODING or live runner.
-    explosion_shallow_otm_entry_enabled: bool = True
-    explosion_shallow_otm_entry_steps: int = 1
+    explosion_shallow_otm_entry_enabled: bool = False
+    explosion_shallow_otm_entry_steps: int = 0
     # Rank: prefer ATM / 1-step OTM rip leg over deep ITM (Sep07 23750 PE vs 23900 PE).
     near_strike_explosion_rank_enabled: bool = True
     near_strike_explosion_rank_bonus: float = 12.0
@@ -2988,12 +2988,11 @@ class Settings(BaseSettings):
     explosion_open_scan_interval_ms: int = 600
     # 9:15 expiry open — NIFTY 22800 PE ₹10–15 → vertical (Sep 28 gap class)
     expiry_open_cheap_premium_min_inr: float = 10.0
-    expiry_open_shallow_otm_trough_enabled: bool = True
+    expiry_open_shallow_otm_trough_enabled: bool = False
     # Non-expiry 9:15–9:45 shallow OTM off session low (Sep29 open PUT slide class).
-    open_premium_shallow_otm_all_sessions_enabled: bool = True
-    # Open slide + rally-off-low — cheap OTM FTV + widened elite local-base (CE/PE).
-    near_base_session_capture_enabled: bool = True
-    near_base_cheap_otm_ftv_waives_atm_itm: bool = True
+    open_premium_shallow_otm_all_sessions_enabled: bool = False
+    near_base_session_capture_enabled: bool = False
+    near_base_cheap_otm_ftv_waives_atm_itm: bool = False
     near_base_session_capture_max_local_pct: float = 28.0
     near_base_index_rally_ftv_waives_timing: bool = True
     expiry_open_premium_relax_move_pct: float = 15.0
@@ -3138,7 +3137,7 @@ class Settings(BaseSettings):
     explosion_cheap_rip_min_premium_inr: float = 18.0
     explosion_cheap_rip_min_peak_pct: float = 25.0
     # Open window only — sub-₹18 trough lifts still enter radar (symmetric CE/PE).
-    explosion_open_cheap_rip_min_premium_inr: float = 10.0
+    explosion_open_cheap_rip_min_premium_inr: float = 18.0
 
     runner_trail_keep_ratio: float = 0.38
     runner_micro_giveback_points: float = 4.0
@@ -3146,11 +3145,9 @@ class Settings(BaseSettings):
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 18.0
-    max_option_premium_inr: float = 300.0
-    # Raised so mid-rip ATM/ITM (180→450+) stays on radar for max-TP capture.
-    explosion_max_premium_inr: float = 650.0
-    # ICT flat→vertical ATM/ITM can use a higher ceiling while still in the pad.
-    explosion_ict_max_premium_inr: float = 800.0
+    max_option_premium_inr: float = 350.0
+    explosion_max_premium_inr: float = 350.0
+    explosion_ict_max_premium_inr: float = 350.0
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0

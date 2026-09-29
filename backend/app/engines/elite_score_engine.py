@@ -648,32 +648,13 @@ def elite_side_local_base_cap(
         except Exception:
             pass
     dm = str(day_mode or "").strip().upper()
-    if symmetric_best_trade_capture_active(settings) and side_u == "CALL":
-        call_cap = float(getattr(settings, "elite_call_max_local_base_pct", 0.0) or 0.0)
-        if call_cap > 0:
-            return min(general, call_cap)
-        return general
     base_best_match = False
     mirror_match = False
-    if side_u == "CALL" and state is not None and snap is not None and evidence is not None:
+    if state is not None and snap is not None and evidence is not None:
         symbol = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
-        try:
-            base_best_match = call_at_base_best_trade_fingerprint(
-                evidence,
-                ranking,
-                assessment,
-                state=state,
-                snap=snap,
-                symbol=symbol,
-                settings=settings,
-            )
-        except Exception:
-            base_best_match = False
-        if not base_best_match:
+        if side_u == "CALL":
             try:
-                from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
-
-                mirror_match = call_rally_entry_unlock_fingerprint(
+                base_best_match = call_at_base_best_trade_fingerprint(
                     evidence,
                     ranking,
                     assessment,
@@ -683,7 +664,52 @@ def elite_side_local_base_cap(
                     settings=settings,
                 )
             except Exception:
-                mirror_match = False
+                base_best_match = False
+            if not base_best_match:
+                try:
+                    from app.engines.pe_win_ce_mirror import call_rally_entry_unlock_fingerprint
+
+                    mirror_match = call_rally_entry_unlock_fingerprint(
+                        evidence,
+                        ranking,
+                        assessment,
+                        state=state,
+                        snap=snap,
+                        symbol=symbol,
+                        settings=settings,
+                    )
+                except Exception:
+                    mirror_match = False
+        elif side_u == "PUT":
+            from app.engines.best_trade_policy import put_at_base_best_trade_fingerprint
+
+            try:
+                base_best_match = put_at_base_best_trade_fingerprint(
+                    evidence,
+                    ranking,
+                    assessment,
+                    state=state,
+                    snap=snap,
+                    symbol=symbol,
+                    settings=settings,
+                )
+            except Exception:
+                base_best_match = False
+            if not base_best_match:
+                try:
+                    from app.engines.put_slide_ce_mirror import put_slide_entry_unlock_fingerprint
+
+                    mirror_match = put_slide_entry_unlock_fingerprint(
+                        evidence,
+                        ranking,
+                        assessment,
+                        state=state,
+                        snap=snap,
+                        symbol=symbol,
+                        settings=settings,
+                    )
+                except Exception:
+                    mirror_match = False
     if base_best_match:
         near_base_cap = float(
             getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
@@ -702,6 +728,7 @@ def elite_side_local_base_cap(
             or mirror_match
         )
     )
+    put_slide_match = side_u == "PUT" and evidence is not None and mirror_match
     all_day_cap = bool(
         getattr(settings, "elite_call_pe_parity_local_cap_all_day_modes_enabled", True)
     )
@@ -722,6 +749,11 @@ def elite_side_local_base_cap(
             )
             parity_cap = max(parity_cap, mirror_cap)
         return min(general, parity_cap)
+    if put_slide_match and all_day_cap:
+        mirror_cap = float(
+            getattr(settings, "pe_win_ce_mirror_local_cap_pct", 15.0) or 15.0
+        )
+        return min(general, mirror_cap)
     if side_u == "CALL":
         call_cap = float(getattr(settings, "elite_call_max_local_base_pct", 0.0) or 0.0)
         if call_cap > 0:

@@ -2101,6 +2101,10 @@ def _shallow_otm_local_base_tradeable(
 
     Aug27 SENSEX PUT 77200: ELITE +8.5% off base, peak +54%, blocked not_tradeable_tier.
     """
+    from app.engines.sep917_legacy_profile import cheap_otm_stack_disabled
+
+    if cheap_otm_stack_disabled(settings):
+        return False
     if str(getattr(e, "moneyness", "") or "").upper() != "OTM":
         return False
     if e.tier not in ("ELITE", "EXPLODING", "BUILDING"):
@@ -3232,25 +3236,30 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
 
     if snap is not None:
         stamp_index_confirmed_local_base(alert_out, snap)
-    from app.engines.near_base_session_capture import stamp_cheap_base_otm_tradeable
+    from app.engines.sep917_legacy_profile import cheap_otm_stack_disabled
 
-    if stamp_cheap_base_otm_tradeable(alert_out, snap=snap, settings=_settings):
-        tradeable = True
-    if _shallow_otm_local_base_tradeable(
-        e,
-        ict,
-        structure_pad=structure_pad,
-        snap=snap,
-        settings=_settings,
-    ):
-        tradeable = True
-        alert_out["tradeable"] = True
-        alert_out["shallowOtmLocalBaseTradeable"] = True
+    if not cheap_otm_stack_disabled(_settings):
+        from app.engines.near_base_session_capture import stamp_cheap_base_otm_tradeable
+
+        if stamp_cheap_base_otm_tradeable(alert_out, snap=snap, settings=_settings):
+            tradeable = True
+        if _shallow_otm_local_base_tradeable(
+            e,
+            ict,
+            structure_pad=structure_pad,
+            snap=snap,
+            settings=_settings,
+        ):
+            tradeable = True
+            alert_out["tradeable"] = True
+            alert_out["shallowOtmLocalBaseTradeable"] = True
     # Shallow OTM is history-only unless pad / cheap-base / index-confirmed capture stamped.
     if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
         from app.engines.near_base_session_capture import otm_tradeable_preserved
 
-        if not otm_tradeable_preserved(alert_out, settings=_settings):
+        if cheap_otm_stack_disabled(_settings) or not otm_tradeable_preserved(
+            alert_out, settings=_settings
+        ):
             tradeable = False
             first_lift = False
             alert_out["tradeable"] = False

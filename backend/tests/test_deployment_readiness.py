@@ -85,9 +85,9 @@ def test_readiness_uses_cached_snapshot_and_shared_risk_engine():
     assert payload["checks"]["upstoxRateLimitClear"] is True
     assert payload["health"]["api"] == "ok"
     policy = payload["tradingPolicy"]
-    assert policy["ftvEliteTopOnlyEnabled"] is True
-    assert policy["topMomentsOnlyEnabled"] is True
-    assert policy["allowedCausalGrades"] == ["S", "A"]
+    assert policy["ftvEliteTopOnlyEnabled"] is False
+    assert policy["topMomentsOnlyEnabled"] is False
+    assert policy["allowedCausalGrades"] == ["S", "A", "B"]
     assert policy["allowedAuthorizationModes"] == [
         "S_STRICT",
         "TOP_FTV_A",

@@ -14,6 +14,20 @@ from app.config import Settings
 from app.engines.capital_allocator import DailyProfitGate
 
 
+def cheap_otm_stack_settings(**overrides: Any) -> Settings:
+    """Opt-in cheap/shallow OTM + FTV stack (off under Sep 9–17 legacy production defaults)."""
+    base = {
+        "sep917_legacy_profile_enabled": False,
+        "best_trade_cheap_base_rank_priority_enabled": True,
+        "near_base_session_capture_enabled": True,
+        "explosion_shallow_otm_entry_enabled": True,
+        "explosion_shallow_otm_history_steps": 1,
+        "ftv_elite_top_only_enabled": True,
+    }
+    base.update(overrides)
+    return Settings(**base)
+
+
 def post_sep17_stack_settings(**overrides: Any) -> Settings:
     """Opt-in flags for tests of #623–#631 (production defaults are off)."""
     base = {

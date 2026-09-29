@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.config import Settings
+from tests.mock_defaults import cheap_otm_stack_settings
 from app.engines.explosion_detector import (
     ExplosionEvent,
     _shallow_otm_local_base_tradeable,
@@ -80,7 +81,7 @@ def _aug27_ict(*, lb: float = 8.5):
 
 @patch("app.config.get_settings")
 def test_shallow_otm_local_base_helper_allows_one_step_otm(mock_settings):
-    settings = Settings(
+    settings = cheap_otm_stack_settings(
         explosion_shallow_otm_history_steps=1,
         explosion_shallow_otm_history_min_volume=25000,
     )
@@ -98,7 +99,7 @@ def test_shallow_otm_local_base_helper_allows_one_step_otm(mock_settings):
 
 @patch("app.config.get_settings")
 def test_shallow_otm_local_base_rejects_deep_otm(mock_settings):
-    settings = Settings(
+    settings = cheap_otm_stack_settings(
         explosion_shallow_otm_history_steps=1,
         explosion_shallow_otm_history_min_volume=25000,
     )
@@ -121,7 +122,7 @@ def test_event_to_dict_marks_shallow_otm_elite_flat_vertical_tradeable(
     mock_settings,
     mock_ict,
 ):
-    settings = Settings(
+    settings = cheap_otm_stack_settings(
         explosion_shallow_otm_history_steps=1,
         explosion_shallow_otm_history_min_volume=25000,
     )
@@ -142,9 +143,11 @@ def test_event_to_dict_marks_shallow_otm_elite_flat_vertical_tradeable(
     assert 2.0 <= radar["localBaseMovePct"] <= 25.0
 
 
-def test_shallow_otm_stamp_waives_ftv_atm_itm_requirement():
+@patch("app.config.get_settings")
+def test_shallow_otm_stamp_waives_ftv_atm_itm_requirement(mock_settings):
     from app.engines.trade_ranking import ftv_authorization_policy, rank_trade_evidence
 
+    mock_settings.return_value = cheap_otm_stack_settings()
     base = {
         "mode": "explosion",
         "tier": "ELITE",
