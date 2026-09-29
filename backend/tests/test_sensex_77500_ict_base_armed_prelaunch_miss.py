@@ -92,7 +92,7 @@ def test_prelaunch_pad_lane_active_despite_high_session_peak(mock_settings):
 def test_prelaunch_pad_stamps_early_radar_capture(mock_settings):
     mock_settings.return_value = Settings()
     snap = _sensex_snap()
-    alert = _aug28_77500_alert()
+    alert = _aug28_77500_alert(premium=340.0)
     assert early_radar_pad_capture_active(alert, snap) is True
     stamped = dict(alert)
     assert stamp_early_radar_pad_capture(stamped, snap) is True

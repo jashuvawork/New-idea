@@ -80,7 +80,14 @@ def test_aug17_missed_truth_arms_and_surfaces_before_vertical(
     base,
     lift,
 ):
-    settings = Settings()
+    settings = Settings(
+        sep917_legacy_profile_enabled=False,
+        max_option_premium_inr=650.0,
+        explosion_max_premium_inr=650.0,
+        explosion_ict_max_premium_inr=650.0,
+        explosion_shallow_otm_entry_enabled=True,
+        explosion_shallow_otm_history_steps=1,
+    )
     current = datetime(2026, 8, 17, 12, 30, tzinfo=IST)
 
     class _Clock(datetime):
@@ -122,6 +129,7 @@ def test_aug17_missed_truth_arms_and_surfaces_before_vertical(
 
     with (
         patch("app.config.get_settings", return_value=settings),
+        patch("app.engines.premium_filter.get_settings", return_value=settings),
         patch("app.engines.ict_breakout_monitor.get_settings", return_value=settings),
         patch.object(explosion_detector, "datetime", _Clock),
     ):

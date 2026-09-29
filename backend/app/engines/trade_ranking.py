@@ -521,11 +521,15 @@ def ftv_authorization_policy(
             evidence_cheap_base_pad,
             ftv_session_capture_waives_atm_itm,
         )
+        from app.engines.sep917_legacy_profile import cheap_otm_stack_disabled
 
         index_timing_ok = bool(
             getattr(_cap_settings, "near_base_index_rally_ftv_waives_timing", True)
         ) and (
-            evidence_cheap_base_pad(evidence, settings=_cap_settings)
+            (
+                not cheap_otm_stack_disabled(_cap_settings)
+                and evidence_cheap_base_pad(evidence, settings=_cap_settings)
+            )
             or ftv_session_capture_waives_atm_itm(evidence, settings=_cap_settings)
         )
         if (
@@ -538,9 +542,14 @@ def ftv_authorization_policy(
             return blocked("ftv_elite_top_only_timing_blocked")
     if snapshot_available and not atm_itm_allowed:
         from app.engines.near_base_session_capture import ftv_session_capture_waives_atm_itm
+        from app.engines.sep917_legacy_profile import cheap_otm_stack_disabled
 
         snap_for_ftv = evidence.get("_snap")  # optional injection
-        if not _shallow_otm_local_base_ftv_waives_atm_itm(evidence):
+        shallow_waive = (
+            not cheap_otm_stack_disabled(_cap_settings)
+            and _shallow_otm_local_base_ftv_waives_atm_itm(evidence)
+        )
+        if not shallow_waive:
             if not ftv_session_capture_waives_atm_itm(
                 evidence, settings=_cap_settings, snap=snap_for_ftv,
             ):

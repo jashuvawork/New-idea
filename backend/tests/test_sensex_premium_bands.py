@@ -34,7 +34,7 @@ def test_sensex_premium_band_scales_3x():
 
 
 def test_sensex_170_counts_as_cheap_base_not_deep_itm():
-    s = settings_mock()
+    s = settings_mock(best_trade_cheap_base_rank_priority_enabled=True)
     snap = SymbolSnapshot(
         symbol="SENSEX",
         timestamp="2026-09-23T10:00:00+05:30",

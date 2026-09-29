@@ -19,6 +19,17 @@ from app.engines.near_base_session_capture import (
 from app.models.schemas import Side
 
 
+def _capture_settings(**overrides):
+    base = {
+        "sep917_legacy_profile_enabled": False,
+        "near_base_session_capture_enabled": True,
+        "best_trade_cheap_base_rank_priority_enabled": True,
+        "near_base_cheap_otm_ftv_waives_atm_itm": True,
+    }
+    base.update(overrides)
+    return Settings(**base)
+
+
 def test_cheap_base_pad_evidence_nifty_otm():
     ev = {
         "symbol": "NIFTY",
@@ -28,12 +39,12 @@ def test_cheap_base_pad_evidence_nifty_otm():
         "offLowMovePct": 12.0,
         "volumeAwaken": True,
     }
-    assert evidence_cheap_base_pad(ev, settings=Settings()) is True
+    assert evidence_cheap_base_pad(ev, settings=_capture_settings()) is True
 
 
 def test_ftv_waives_atm_itm_on_cheap_base_stamp():
     ev = {"tier": "BUILDING", "cheapBaseOtmCapture": True, "side": "CALL"}
-    assert ftv_session_capture_waives_atm_itm(ev, settings=Settings()) is True
+    assert ftv_session_capture_waives_atm_itm(ev, settings=_capture_settings()) is True
 
 
 def test_otm_tradeable_preserved_cheap_base():
@@ -45,7 +56,7 @@ def test_session_capture_widens_call_local_cap(_rally):
     snap = MagicMock(symbol="NIFTY")
     cap = session_capture_local_base_cap_pct(
         "CALL",
-        settings=Settings(near_base_session_capture_max_local_pct=28.0),
+        settings=_capture_settings(near_base_session_capture_max_local_pct=28.0),
         evidence={"symbol": "NIFTY", "side": "CALL", "localBaseMovePct": 10.0, "premium": 40.0},
         state=MagicMock(),
         snap=snap,
@@ -63,7 +74,7 @@ def test_stamp_cheap_base_sets_tradeable():
         "offLowMovePct": 8.0,
         "volumeAwaken": True,
     }
-    assert stamp_cheap_base_otm_tradeable(alert, snap=snap) is True
+    assert stamp_cheap_base_otm_tradeable(alert, snap=snap, settings=_capture_settings()) is True
     assert alert.get("tradeable") is True
 
 

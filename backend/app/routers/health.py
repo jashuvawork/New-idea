@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.config import audit_week_local_base_overrides, get_settings
 from app.engines.capital_allocator import get_lot_sizes_meta
 from app.engines.paper_slippage import config_summary as slippage_config_summary
+from app.engines.sep917_legacy_profile import sep917_legacy_profile_summary as _sep917_legacy_profile_summary
 from app.engines.structural_guard_settings import structural_guard_summary
 from app.services import trade_store
 from app.services.redis_store import has_upstox_token
@@ -124,6 +125,7 @@ async def deployment_status():
             "composerApiConfigured": bool(settings.cursor_api_key),
             "paperSlippageEnabled": settings.paper_slippage_enabled,
             "paperLiveParityEnabled": settings.paper_live_parity_enabled,
+            "sep917LegacyProfile": _sep917_legacy_profile_summary(settings),
         },
         "paperSlippage": slippage_config_summary(),
         "cadence": {

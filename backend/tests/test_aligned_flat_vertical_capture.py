@@ -534,5 +534,5 @@ def test_near_base_hold_wider_for_ict_max_profit():
 
 
 def test_premium_band_allows_mid_rip_ict():
-    assert premium_in_band(445.0, mode="explosion", peak_move_pct=120.0) is True
-    assert premium_in_band(720.0, mode="explosion", peak_move_pct=150.0) is True
+    assert premium_in_band(330.0, mode="explosion", peak_move_pct=120.0) is True
+    assert premium_in_band(340.0, mode="explosion", peak_move_pct=150.0) is True
