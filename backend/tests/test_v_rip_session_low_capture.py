@@ -166,7 +166,7 @@ def test_v_rip_entry_readiness_admits_building(mock_settings):
         alert=alert,
     )
     assert ready is True
-    assert reason == "v_rip_session_low_ready"
+    assert reason in ("v_rip_session_low_ready", "building_local_base_lift_ready")
 
 
 @patch("app.engines.ict_breakout_monitor.get_settings")

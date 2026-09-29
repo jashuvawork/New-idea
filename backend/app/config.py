@@ -327,8 +327,8 @@ class Settings(BaseSettings):
     elite_trade_must_take_min_grade: str = "S"
     elite_trade_must_take_min_fvq: float = 85.0
     elite_trade_must_take_max_local_base_pct: float = 15.0
-    # Strict top-trades-only — block chop/EXPLODING pad-lane entries (Sep21 23350 PE lesson).
-    top_trades_only_strict_enabled: bool = True
+    # Strict top-trades-only — Sep 9–17 profile: off (HUD/waivers only; #618 strict was post-Sep17).
+    top_trades_only_strict_enabled: bool = False
     top_trades_only_require_elite_tier: bool = True
     top_trades_only_block_chop_unless_must_take: bool = True
     top_trades_only_require_near_base_or_must_take: bool = True
@@ -442,8 +442,8 @@ class Settings(BaseSettings):
     best_trade_near_base_max_lots_enabled: bool = True
     best_trade_near_base_min_elite_score: float = 90.0
     best_trade_near_base_max_local_pct: float = 20.0
-    # Sep 9 intent — one early near-base rip per side; block late rank-#1 chase (CE/PE).
-    sep09_intent_enforcement_enabled: bool = True
+    # Sep 9 intent — post-Sep17 hard gate (#653–#654); Sep 9–17 profile: enforcement off (HUD/lanes remain).
+    sep09_intent_enforcement_enabled: bool = False
     sep09_intent_one_rip_per_side_enabled: bool = True
     sep09_intent_max_minutes_after_armed_base: float = 12.0
     sep09_intent_max_minutes_after_detect_fallback: float = 15.0
@@ -470,8 +470,8 @@ class Settings(BaseSettings):
     sep09_intent_afternoon_structural_min_minutes_since_prior_close: float = 20.0
     sep09_intent_afternoon_structural_requires_different_strike: bool = True
     sep917_afternoon_structural_lane_enabled: bool = True
-    # Sep 9–17 live checklist — same four steps as HUD; hard gate on explosion entries.
-    sep917_live_checklist_enforcement_enabled: bool = True
+    # Sep 9–17 live checklist — HUD only; hard gate (#655) off for Sep 9–17 production profile.
+    sep917_live_checklist_enforcement_enabled: bool = False
     # Persist radar archive + premium tape on WS overlay (9:15+), not only on entry scan.
     radar_record_on_ws_overlay_enabled: bool = True
     # Block deep ITM chop/trap chase (Sep15 23500 PE @ ₹242 scratch).
@@ -676,9 +676,8 @@ class Settings(BaseSettings):
     # Sustained heat — Aug10 BUILDING CE spiked v3 then died (v9≈0). Require hot v9.
     explosion_building_elite_min_velocity_9s: float = 2.5
     explosion_building_elite_min_ict_score: float = 35.0
-    # WORST / BREAKOUT_ONLY: never admit BUILDING ICT flat→vertical (fake elite-build).
-    # ELITE/EXPLODING still take at local-base pad levels.
-    worst_day_block_building_ict: bool = True
+    # WORST / BREAKOUT_ONLY BUILDING ICT block — off for Sep 9–17 production profile.
+    worst_day_block_building_ict: bool = False
     # Non-must-take ELITE/EXPLODING: prefer early local-base pad (must-take may go to 65%).
     elite_local_base_max_move_pct: float = 40.0
     # GainzAlgo-style Smart Ichimoku — HMA cloud + logistic break-P confirm on
@@ -822,8 +821,8 @@ class Settings(BaseSettings):
     explosion_post_peak_chase_lookback_seconds: float = 900.0
     explosion_post_peak_chase_min_run_pct: float = 0.25
     explosion_post_peak_chase_near_top_frac: float = 0.12
-    # Sep 24 SENSEX 73700 PE — ELITE score stayed high while premium fell post-spike.
-    premium_post_spike_dump_guard_enabled: bool = True
+    # Sep 24 post-spike dump (#639) — off for Sep 9–17 production profile.
+    premium_post_spike_dump_guard_enabled: bool = False
     premium_post_spike_dump_min_drawdown_pct: float = 12.0
     premium_post_spike_dump_min_spike_run_pct: float = 35.0
     premium_post_spike_dump_near_low_frac: float = 0.18
@@ -1909,7 +1908,8 @@ class Settings(BaseSettings):
     explosion_post_peak_reentry_min_velocity_3s: float = 1.5
     # Block re-entry on a strike that already ripped to session peak and is still
     # trading near the top on weak velocity (Aug25 24250 PE ₹121 peak → ₹110 chase).
-    explosion_late_reentry_block_enabled: bool = True
+    # Near-peak / 8% first-lift chase (#652) — off for Sep 9–17 production profile.
+    explosion_late_reentry_block_enabled: bool = False
     explosion_late_reentry_min_peak_points: float = 15.0
     explosion_late_reentry_near_peak_pct: float = 12.0
     explosion_late_reentry_pullback_ok_pct: float = 22.0
@@ -3425,7 +3425,8 @@ class Settings(BaseSettings):
     worst_day_pause_enabled: bool = True
     worst_day_pause_score_threshold: float = 45.0
     worst_day_early_chop_pause: bool = True
-    worst_day_breakout_only_enabled: bool = True
+    # BREAKOUT_ONLY chop bar — off for Sep 9–17 production profile (worst-day pause may still apply).
+    worst_day_breakout_only_enabled: bool = False
     worst_day_breakout_min_rank: float = 68.0
     worst_day_breakout_min_velocity_3s: float = 2.5
     # Intraday TREND-OVERRIDE: a morning "chop/worst day" verdict is stale once the index

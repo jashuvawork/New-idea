@@ -13,6 +13,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
+from app.config import get_settings
 from app.engines.ict_breakout_monitor import (
     _helper_confirmed_lift,
     building_rip_bullish_readiness,
@@ -27,6 +30,12 @@ from app.models.schemas import (
 )
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+@pytest.fixture(autouse=True)
+def _worst_day_building_ict_enforced():
+    object.__setattr__(get_settings(), "worst_day_block_building_ict", True)
+    yield
 
 
 def _snap(direction: str = "BULLISH") -> SymbolSnapshot:

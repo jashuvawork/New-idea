@@ -107,8 +107,18 @@ def test_building_skipped_when_elite_exploding_only():
     """Soft BUILDING without elite-build bars is skipped under elite/exploding-only."""
     settings = _settings(explosion_elite_exploding_only=True)
     snap = _snap([_alert("BUILDING", 56.0)])
-    state = SimpleNamespace(openPaperTrades=[], calibrationBlocks={"CALL": False, "PUT": False})
-    with patch("app.engines.trade_selector.premium_in_band", return_value=True):
+    state = SimpleNamespace(
+        openPaperTrades=[],
+        closedPaperTrades=[],
+        calibrationBlocks={"CALL": False, "PUT": False},
+    )
+    with (
+        patch("app.engines.trade_selector.premium_in_band", return_value=True),
+        patch(
+            "app.engines.ict_breakout_monitor.building_rip_bullish_readiness",
+            return_value=(False, "not_hot_building"),
+        ),
+    ):
         out = _explosion_candidates("NIFTY", snap, state, settings)
     assert out == []
 
