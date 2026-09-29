@@ -1989,16 +1989,23 @@ def _expiry_trough_first_tick_scan_ok(
     """
     if not bool(getattr(settings, "expiry_trough_scan_enabled", True)):
         return False, 0.0
-    if not expiry_day or not near_atm:
-        return False, 0.0
-    if str(moneyness or "").upper() == "OTM":
-        from app.engines.session_timing import in_open_premium_window
+    from app.engines.session_timing import in_open_premium_window
 
-        if not (
-            in_open_premium_window()
-            and bool(getattr(settings, "expiry_open_shallow_otm_trough_enabled", True))
-        ):
+    open_window = in_open_premium_window()
+    open_all = open_window and bool(
+        getattr(settings, "open_premium_shallow_otm_all_sessions_enabled", True)
+    )
+    money_u = str(moneyness or "").upper()
+    if money_u == "OTM":
+        expiry_otm = expiry_day and bool(
+            getattr(settings, "expiry_open_shallow_otm_trough_enabled", True)
+        )
+        if not (expiry_otm or open_all):
             return False, 0.0
+    elif not near_atm:
+        return False, 0.0
+    if not expiry_day and not (open_all and (near_atm or money_u == "OTM")):
+        return False, 0.0
     if hist and len(hist) >= 2:
         return False, 0.0
 
@@ -2096,11 +2103,22 @@ def _shallow_otm_local_base_tradeable(
     """
     if str(getattr(e, "moneyness", "") or "").upper() != "OTM":
         return False
-    if e.tier not in ("ELITE", "EXPLODING"):
+    if e.tier not in ("ELITE", "EXPLODING", "BUILDING"):
         return False
-    if not bool(
+    flat_vertical = bool(
         getattr(ict, "flat_then_vertical", False) and getattr(ict, "active", False)
-    ):
+    )
+    vol_awaken = bool(getattr(ict, "volume_awakening", False))
+    base_armed = bool(getattr(ict, "base_armed", False))
+    if e.tier == "BUILDING":
+        from app.engines.session_timing import in_open_premium_window
+
+        if not (
+            in_open_premium_window()
+            and (flat_vertical or vol_awaken or base_armed)
+        ):
+            return False
+    elif not flat_vertical:
         return False
     min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
     max_lb = float(getattr(settings, "shallow_otm_local_base_max_move_pct", 25.0) or 25.0)
@@ -3210,6 +3228,14 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     if stamp_early_radar_pad_capture(alert_out, snap):
         tradeable = True
         alert_out["tradeable"] = True
+    from app.engines.index_confirmed_local_base import stamp_index_confirmed_local_base
+
+    if snap is not None:
+        stamp_index_confirmed_local_base(alert_out, snap)
+    from app.engines.near_base_session_capture import stamp_cheap_base_otm_tradeable
+
+    if stamp_cheap_base_otm_tradeable(alert_out, snap=snap, settings=_settings):
+        tradeable = True
     if _shallow_otm_local_base_tradeable(
         e,
         ict,
@@ -3220,12 +3246,11 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         tradeable = True
         alert_out["tradeable"] = True
         alert_out["shallowOtmLocalBaseTradeable"] = True
-    # Shallow OTM is history-only unless pad capture or local-base lift stamped.
+    # Shallow OTM is history-only unless pad / cheap-base / index-confirmed capture stamped.
     if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
-        if not (
-            alert_out.get("earlyRadarPadCapture")
-            or alert_out.get("shallowOtmLocalBaseTradeable")
-        ):
+        from app.engines.near_base_session_capture import otm_tradeable_preserved
+
+        if not otm_tradeable_preserved(alert_out, settings=_settings):
             tradeable = False
             first_lift = False
             alert_out["tradeable"] = False

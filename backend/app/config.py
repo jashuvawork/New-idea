@@ -2989,6 +2989,13 @@ class Settings(BaseSettings):
     # 9:15 expiry open — NIFTY 22800 PE ₹10–15 → vertical (Sep 28 gap class)
     expiry_open_cheap_premium_min_inr: float = 10.0
     expiry_open_shallow_otm_trough_enabled: bool = True
+    # Non-expiry 9:15–9:45 shallow OTM off session low (Sep29 open PUT slide class).
+    open_premium_shallow_otm_all_sessions_enabled: bool = True
+    # Open slide + rally-off-low — cheap OTM FTV + widened elite local-base (CE/PE).
+    near_base_session_capture_enabled: bool = True
+    near_base_cheap_otm_ftv_waives_atm_itm: bool = True
+    near_base_session_capture_max_local_pct: float = 28.0
+    near_base_index_rally_ftv_waives_timing: bool = True
     expiry_open_premium_relax_move_pct: float = 15.0
     expiry_open_cheap_rip_min_peak_pct: float = 15.0
 

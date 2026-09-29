@@ -631,6 +631,22 @@ def elite_side_local_base_cap(
                 return max(general, rip_cap)
         except Exception:
             pass
+        try:
+            from app.engines.near_base_session_capture import session_capture_local_base_cap_pct
+
+            capture_cap = session_capture_local_base_cap_pct(
+                side_u,
+                settings=settings,
+                evidence=evidence,
+                ranking=ranking if isinstance(ranking, Mapping) else None,
+                assessment=assessment if isinstance(assessment, Mapping) else None,
+                state=state,
+                snap=snap,
+            )
+            if capture_cap is not None:
+                return capture_cap
+        except Exception:
+            pass
     dm = str(day_mode or "").strip().upper()
     if symmetric_best_trade_capture_active(settings) and side_u == "CALL":
         call_cap = float(getattr(settings, "elite_call_max_local_base_pct", 0.0) or 0.0)

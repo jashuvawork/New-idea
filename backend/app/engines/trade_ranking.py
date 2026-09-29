@@ -517,14 +517,35 @@ def ftv_authorization_policy(
         from app.config import get_settings
         from app.engines.live_entry_score import live_entry_best_trade_capture_active
 
-        if not pad_lane_ftv_waives_timing_block(evidence) and not live_entry_best_trade_capture_active(
-            evidence, settings=get_settings(), require_explicit_live=True,
+        from app.engines.near_base_session_capture import (
+            evidence_cheap_base_pad,
+            ftv_session_capture_waives_atm_itm,
+        )
+
+        index_timing_ok = bool(
+            getattr(_cap_settings, "near_base_index_rally_ftv_waives_timing", True)
+        ) and (
+            evidence_cheap_base_pad(evidence, settings=_cap_settings)
+            or ftv_session_capture_waives_atm_itm(evidence, settings=_cap_settings)
+        )
+        if (
+            not pad_lane_ftv_waives_timing_block(evidence)
+            and not live_entry_best_trade_capture_active(
+                evidence, settings=get_settings(), require_explicit_live=True,
+            )
+            and not index_timing_ok
         ):
             return blocked("ftv_elite_top_only_timing_blocked")
     if snapshot_available and not atm_itm_allowed:
+        from app.engines.near_base_session_capture import ftv_session_capture_waives_atm_itm
+
+        snap_for_ftv = evidence.get("_snap")  # optional injection
         if not _shallow_otm_local_base_ftv_waives_atm_itm(evidence):
-            if not bool(evidence.get("buildingCoilPad")):
-                return blocked("ftv_elite_top_only_requires_atm_itm")
+            if not ftv_session_capture_waives_atm_itm(
+                evidence, settings=_cap_settings, snap=snap_for_ftv,
+            ):
+                if not bool(evidence.get("buildingCoilPad")):
+                    return blocked("ftv_elite_top_only_requires_atm_itm")
 
     def _expiry_worst_policy_ok(
         *,
