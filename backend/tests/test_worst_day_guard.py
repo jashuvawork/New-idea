@@ -59,10 +59,13 @@ def test_early_worst_day_on_expiry_chop_bearish(mock_bear, mock_chop, mock_exp, 
     assert "early_expiry_chop_bearish" in verdict.reasons
 
 
+@patch("app.engines.worst_day_guard.get_settings")
 @patch("app.engines.worst_day_guard.identify_worst_day")
-def test_breakout_only_policy(mock_identify):
+def test_breakout_only_policy(mock_identify, mock_settings):
+    from app.config import Settings
     from app.engines.worst_day_guard import WorstDayVerdict
 
+    mock_settings.return_value = Settings(worst_day_breakout_only_enabled=True)
     mock_identify.return_value = WorstDayVerdict(True, 55.0, ["chop_regime"])
     policy, meta = session_entry_policy(AutoTraderState(), {"NIFTY": _snap()})
     assert policy == "BREAKOUT_ONLY"

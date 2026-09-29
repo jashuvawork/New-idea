@@ -429,7 +429,7 @@ def test_candidate_blocks_scalp_allows_elite_top(mock_p, mock_s):
 @patch("app.engines.premium_filter.get_settings")
 def test_validate_candidate_composer_bypass_real_path(mock_p, mock_exp, mock_brief, mock_s):
     """Real validate_candidate: standDown must not block elite top; still blocks scalp."""
-    cfg = _settings()
+    cfg = _settings(sep917_live_checklist_enforcement_enabled=True)
     cfg.dual_mode_enabled = False
     # This regression isolates the legacy composer bypass; the hard S-only policy
     # is covered separately with a fully causal armed-launch candidate.

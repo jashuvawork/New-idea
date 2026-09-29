@@ -29,3 +29,15 @@ def test_sep9_near_base_chop_waiver_still_on():
     """#626 Sep 9–17 near-base ELITE waiver — kept on."""
     s = Settings()
     assert s.top_trades_only_near_base_waives_chop is True
+
+
+def test_post_sep17_hard_gates_off_for_sep9_17_profile():
+    """Production defaults match Sep 9–17 capture (#618, #639, #652, #653–#655, WORST BREAKOUT_ONLY)."""
+    s = Settings()
+    assert s.top_trades_only_strict_enabled is False
+    assert s.sep09_intent_enforcement_enabled is False
+    assert s.sep917_live_checklist_enforcement_enabled is False
+    assert s.premium_post_spike_dump_guard_enabled is False
+    assert s.explosion_late_reentry_block_enabled is False
+    assert s.worst_day_breakout_only_enabled is False
+    assert s.worst_day_block_building_ict is False

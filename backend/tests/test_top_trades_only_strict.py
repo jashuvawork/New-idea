@@ -167,7 +167,7 @@ def test_near_base_elite_call_waives_chop_day_without_rally_unlock():
 @patch("app.engines.elite_score_engine.resolve_elite_session_day_type", return_value=("CHOP DAY", "CHOP"))
 def test_elite_entry_blocks_sep21_style_put(_day):
     """Sep 21 NIFTY 23350 PE: grade-A EXPLODING chop pad — blocked by top-trades gate."""
-    settings = Settings()
+    settings = Settings(top_trades_only_strict_enabled=True)
     ev = _evidence(
         tier="EXPLODING",
         localBaseMovePct=17.9,
@@ -193,7 +193,7 @@ def test_elite_entry_blocks_sep21_style_put(_day):
 )
 def test_sep21_put_blocked_by_chop_side_alignment(_align):
     """High-score counter-trend PUT on chop day — side alignment beats selection score."""
-    settings = Settings()
+    settings = Settings(top_trades_only_strict_enabled=True)
     ev = _evidence(
         tier="EXPLODING",
         side="PUT",

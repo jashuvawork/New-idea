@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
+from app.config import get_settings
 from app.engines.elite_never_block import top_explosion_must_take_active
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.explosion_profit import (
@@ -27,6 +30,13 @@ from app.models.schemas import (
 )
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+@pytest.fixture(autouse=True)
+def _worst_day_building_ict_enforced():
+    """These regressions assume post-Sep17 BUILDING ICT block on worst-day sessions."""
+    object.__setattr__(get_settings(), "worst_day_block_building_ict", True)
+    yield
 
 
 def _snap(direction: str = "BEARISH") -> SymbolSnapshot:
