@@ -260,6 +260,17 @@ def live_entry_score_blocks_entry(
     meta = refresh_candidate_live_entry_score(
         candidate, snap, premium_chart=premium_chart,
     )
+    from app.engines.premium_vertical_chase_guard import premium_vertical_chase_blocks_entry
+
+    chase_blocked, chase_reason, chase_meta = premium_vertical_chase_blocks_entry(
+        candidate,
+        snap,
+        premium_chart=premium_chart,
+        settings=settings,
+    )
+    meta.update(chase_meta)
+    if chase_blocked:
+        return True, chase_reason, meta
     tier = str(getattr(candidate, "tier", "") or _alert_dict(candidate).get("tier") or "")
     live = float(getattr(candidate, "liveEntryScore", 0) or meta.get("liveEntryScore") or 0)
     min_live = live_entry_score_min_for_tier(tier, settings=settings)
