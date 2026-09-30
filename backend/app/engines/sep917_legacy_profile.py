@@ -12,6 +12,20 @@ def sep917_legacy_profile_active(settings: Any = None) -> bool:
     return bool(getattr(settings, "sep917_legacy_profile_enabled", True))
 
 
+def legacy_best_trade_base_first_active(settings: Any = None) -> bool:
+    """Prefer structural / new-base entries over mid-rip chase on the symmetric book."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_base_first_enabled", True)):
+        return False
+    if not bool(getattr(settings, "best_trade_base_first_legacy_profile_only", True)):
+        return True
+    if not sep917_legacy_profile_active(settings):
+        return False
+    return bool(getattr(settings, "symmetric_best_trade_capture_enabled", True))
+
+
 def legacy_call_capture_elite_waives_active(settings: Any = None) -> bool:
     """Sep 9–17: CE rally/at-base paths may waive elite chase/timing when symmetric book is on."""
     from app.config import get_settings

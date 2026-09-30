@@ -27,6 +27,84 @@ def symmetric_best_trade_capture_active(settings: Any = None) -> bool:
     return bool(getattr(get_settings(), "symmetric_best_trade_capture_enabled", True))
 
 
+_NEW_BASE_MOMENT_TOKENS = frozenset({
+    "ict_base_armed",
+    "elite_base_ready",
+    "armed_base_launch",
+    "first_lift_local_base",
+    "first_lift",
+    "local_base",
+    "coil_pad",
+    "building_coil",
+    "cold_base",
+    "cold_trough",
+    "flat_then_vertical",
+    "ict_flat_then_vertical",
+    "early_radar_pad",
+    "ict_armed",
+})
+
+
+def _evidence_local_move_pct(evidence: Mapping[str, Any]) -> float:
+    return max(
+        _number(evidence.get("localBaseMovePct")),
+        _number(evidence.get("ictBaseRelativeMovePct")),
+        _number(evidence.get("offLowMovePct")),
+        _number(evidence.get("offHighMovePct")),
+    )
+
+
+def _moment_text_blob(
+    evidence: Mapping[str, Any],
+    alert: Mapping[str, Any] | None = None,
+) -> str:
+    alert = alert if isinstance(alert, Mapping) else {}
+    parts = [
+        str(evidence.get("momentType") or ""),
+        str(evidence.get("reason") or ""),
+        str(evidence.get("liftReason") or ""),
+        str(alert.get("momentType") or ""),
+        str(alert.get("reason") or ""),
+    ]
+    return " ".join(parts).lower()
+
+
+def symmetric_new_base_moment_evidence(
+    evidence: Mapping[str, Any] | None,
+    alert: Mapping[str, Any] | None = None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Fresh radar base (ICT armed, ELITE_BASE_READY, first lift pad) — near local base."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "best_trade_new_base_moment_enabled", True)):
+        return False
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    max_local = float(
+        getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
+    )
+    if _evidence_local_move_pct(evidence) > max_local + 1e-6:
+        return False
+    blob = _moment_text_blob(evidence, alert)
+    return any(tok in blob for tok in _NEW_BASE_MOMENT_TOKENS)
+
+
+def symmetric_best_trade_at_base_capture(
+    evidence: Mapping[str, Any] | None,
+    alert: Mapping[str, Any] | None = None,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Structural base flags or a newly detected base moment — either side."""
+    if symmetric_structural_base_evidence(evidence, settings=settings):
+        return True, "structural_base"
+    if symmetric_new_base_moment_evidence(evidence, alert, settings=settings):
+        return True, "new_base_moment"
+    return False, ""
+
+
 def symmetric_structural_base_evidence(
     evidence: Mapping[str, Any] | None,
     *,
@@ -289,6 +367,13 @@ def _mid_rip_best_trade_signals(
 
     settings = settings or get_settings()
     if not bool(getattr(settings, "best_trade_mid_rip_entry_enabled", True)):
+        return False
+    from app.engines.sep917_legacy_profile import legacy_best_trade_base_first_active
+
+    if (
+        bool(getattr(settings, "best_trade_disable_mid_rip_when_base_first", True))
+        and legacy_best_trade_base_first_active(settings)
+    ):
         return False
 
     alert = alert if isinstance(alert, Mapping) else {}
@@ -1139,6 +1224,42 @@ def cheap_base_strike_rank_bonus(
     elif deep_itm_chase_strike(candidate, alert, snap, settings=settings):
         bonus -= float(getattr(settings, "best_trade_deep_itm_rank_penalty", 60.0) or 60.0)
     return bonus
+
+
+def best_trade_base_rank_adjustment(
+    candidate: Any,
+    *,
+    settings: Any = None,
+) -> float:
+    """Boost base / new-base rows; penalize extended local move without base (CE + PE)."""
+    from app.config import get_settings
+    from app.engines.sep917_legacy_profile import legacy_best_trade_base_first_active
+
+    settings = settings or get_settings()
+    if not legacy_best_trade_base_first_active(settings):
+        return 0.0
+
+    alert = _alert_for_candidate(candidate)
+    pretrade = getattr(candidate, "pretrade_meta", None) or {}
+    ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
+    if not isinstance(ranking, dict):
+        ranking = {}
+    evidence = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
+    merged = {**alert, **evidence, **ranking}
+
+    at_base, _ = symmetric_best_trade_at_base_capture(
+        merged, alert, settings=settings,
+    )
+    bonus = float(getattr(settings, "best_trade_base_first_rank_bonus", 14.0) or 14.0)
+    penalty = float(getattr(settings, "best_trade_off_base_rank_penalty", 12.0) or 12.0)
+    max_local = float(
+        getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
+    )
+    if at_base:
+        return bonus
+    if _evidence_local_move_pct(merged) > max_local + 1e-6:
+        return -penalty
+    return 0.0
 
 
 def elite_base_setup_allowed(

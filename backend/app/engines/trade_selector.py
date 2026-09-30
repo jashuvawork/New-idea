@@ -1815,6 +1815,9 @@ def find_best_entry(
         from app.engines.index_session_dominant_trend import index_trend_rank_adjustment
 
         c.score += index_trend_rank_adjustment(c, snapshots, state)
+        from app.engines.best_trade_policy import best_trade_base_rank_adjustment
+
+        c.score += best_trade_base_rank_adjustment(c)
         # Session side-regime: prefer the side the market is confirmed on / flipping toward.
         from app.engines.side_regime import side_regime_rank_delta
 
