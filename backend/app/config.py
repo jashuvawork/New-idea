@@ -3495,6 +3495,8 @@ class Settings(BaseSettings):
     index_trend_rank_bonus_aligned: float = 8.0
     index_trend_rank_penalty_opposite: float = 6.0
     index_trend_rank_flip_bonus: float = 5.0
+    # Extra selector boost when dominant leg + Sep917 near-base shape (Sep30 CE miss fix).
+    index_trend_rank_sep917_base_bonus_aligned: float = 12.0
     worst_day_slow_bounce_min_rank: float = 55.0
   # Worst-day defensive ITM fade — alternate index, tight targets, 1 lot
     worst_day_itm_fade_enabled: bool = True

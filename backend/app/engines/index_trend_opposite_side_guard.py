@@ -45,7 +45,18 @@ def _candidate_evidence(candidate: Any) -> tuple[dict[str, Any], dict[str, Any],
     readiness = str(
         pretrade.get("readinessReason") or pretrade.get("liftReason") or ""
     )
-    return {**alert, **ranking}, ranking, readiness
+    nested = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
+    merged = {**alert, **nested, **ranking}
+    tier = getattr(candidate, "tier", None)
+    if tier and not merged.get("tier"):
+        merged["tier"] = tier
+    side = getattr(candidate, "side", None)
+    if side is not None and not merged.get("side"):
+        merged["side"] = _side_val(side)
+    sym = getattr(candidate, "symbol", None)
+    if sym and not merged.get("symbol"):
+        merged["symbol"] = sym
+    return merged, ranking, readiness
 
 
 def _put_rally_bypass(
@@ -83,12 +94,21 @@ def _put_rally_bypass(
         settings=settings,
     ):
         return True
+    if bool(getattr(settings, "best_trade_sep917_base_shape_align_enabled", True)):
+        from app.engines.best_trade_policy import sep917_near_base_capture_ok
+
+        ok, _ = sep917_near_base_capture_ok(
+            evidence, ranking, evidence, settings=settings,
+        )
+        return ok
+    from app.engines.best_trade_policy import effective_near_base_max_local_pct
+
     off_high = float(evidence.get("offHighMovePct") or 0)
     local = max(
         float(evidence.get("localBaseMovePct") or 0),
         float(evidence.get("ictBaseRelativeMovePct") or 0),
     )
-    max_local = float(getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0)
+    max_local = effective_near_base_max_local_pct(settings)
     return off_high > 0 and local <= max_local
 
 
@@ -145,12 +165,21 @@ def _call_slide_bypass(
         settings=settings,
     ):
         return True
+    if bool(getattr(settings, "best_trade_sep917_base_shape_align_enabled", True)):
+        from app.engines.best_trade_policy import sep917_near_base_capture_ok
+
+        ok, _ = sep917_near_base_capture_ok(
+            evidence, ranking, evidence, settings=settings,
+        )
+        return ok
+    from app.engines.best_trade_policy import effective_near_base_max_local_pct
+
     off_low = float(evidence.get("offLowMovePct") or 0)
     local = max(
         float(evidence.get("localBaseMovePct") or 0),
         float(evidence.get("ictBaseRelativeMovePct") or 0),
     )
-    max_local = float(getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0)
+    max_local = effective_near_base_max_local_pct(settings)
     return off_low > 0 and local <= max_local
 
 
