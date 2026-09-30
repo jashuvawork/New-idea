@@ -88,10 +88,14 @@ def _at_structural_base_bypass(
 ) -> tuple[bool, str]:
     settings = settings or get_settings()
     evidence = _candidate_evidence(candidate)
-    from app.engines.best_trade_policy import symmetric_structural_base_evidence
+    alert = getattr(candidate, "alert", None) if isinstance(getattr(candidate, "alert", None), dict) else {}
+    from app.engines.best_trade_policy import symmetric_best_trade_at_base_capture
 
-    if symmetric_structural_base_evidence(evidence, settings=settings):
-        return True, "symmetric_structural_base"
+    at_base, base_reason = symmetric_best_trade_at_base_capture(
+        evidence, alert, settings=settings,
+    )
+    if at_base:
+        return True, base_reason
 
     if snap is not None and getattr(candidate, "mode", "") == "explosion":
         from app.engines.ict_breakout_monitor import (

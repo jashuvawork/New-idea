@@ -528,6 +528,12 @@ class Settings(BaseSettings):
     # Allow Sep15-style mid-rip ELITE entries (deep ITM while expanding to top LTP).
     best_trade_mid_rip_entry_enabled: bool = True
     best_trade_mid_rip_min_elite_score: float = 88.0
+    best_trade_base_first_enabled: bool = True
+    best_trade_base_first_legacy_profile_only: bool = True
+    best_trade_base_first_rank_bonus: float = 14.0
+    best_trade_off_base_rank_penalty: float = 12.0
+    best_trade_new_base_moment_enabled: bool = True
+    best_trade_disable_mid_rip_when_base_first: bool = True
     # Minimum hold before adaptive SL on executed entries — Sep15 23500 PE exited @77s.
     executed_entry_min_hold_before_loss_seconds: int = 300
     executed_entry_elite_min_hold_before_loss_seconds: int = 600

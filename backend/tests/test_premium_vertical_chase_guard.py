@@ -109,7 +109,11 @@ def test_allows_at_structural_base_despite_hot_mom():
             cand, None, premium_chart=chart, settings=settings,
         )
     assert blocked is False
-    assert meta.get("premiumChaseBypass") == "symmetric_structural_base"
+    assert meta.get("premiumChaseBypass") in (
+        "structural_base",
+        "new_base_moment",
+        "first_lift_entry_ready",
+    )
 
 
 def test_live_entry_wire_blocks_chase():

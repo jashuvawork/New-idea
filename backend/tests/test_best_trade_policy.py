@@ -272,6 +272,7 @@ def test_deprioritize_keeps_deep_itm_when_no_cheap_peer():
 
 def test_mid_rip_elite_bypasses_deep_chase_block():
     s = settings_mock()
+    s.best_trade_base_first_enabled = False
     snap = _sep15_nifty_snap()
     alert = {"fastVerticalBurst": True, "tier": "ELITE"}
     cand = _explosion_candidate(
