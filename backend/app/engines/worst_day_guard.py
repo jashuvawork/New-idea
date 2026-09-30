@@ -256,6 +256,16 @@ def _put_rally_bullish_context(
     if ema_bullish and breadth_bias == "BULLISH" and mom5 > 0:
         meta["chartBullish"] = {"momentum5Pct": mom5}
         return True, meta
+    settings = get_settings()
+    if bool(getattr(settings, "worst_day_put_block_rally_session_low_enabled", True)):
+        from app.engines.index_rally_side_flip import index_rally_metrics
+
+        rally_meta = index_rally_metrics(sym, snap, settings=settings)
+        rally_pts = float(rally_meta.get("rallyPoints") or 0)
+        min_pts = float(rally_meta.get("minMovePoints") or 0)
+        if min_pts > 0 and rally_pts >= min_pts:
+            meta["sessionRallyOffLow"] = rally_meta
+            return True, meta
     return False, meta
 
 
