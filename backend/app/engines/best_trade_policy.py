@@ -69,6 +69,70 @@ def _moment_text_blob(
     return " ".join(parts).lower()
 
 
+def effective_near_base_max_local_pct(settings: Any = None) -> float:
+    """Near-base pad ceiling — 15% on Sep 9–17 align profile, else config default (~20%)."""
+    from app.config import get_settings
+    from app.engines.sep917_legacy_profile import legacy_best_trade_base_first_active
+
+    settings = settings or get_settings()
+    default = float(
+        getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
+    )
+    if bool(getattr(settings, "best_trade_sep917_base_shape_align_enabled", True)):
+        if legacy_best_trade_base_first_active(settings):
+            return float(
+                getattr(settings, "best_trade_sep917_near_base_max_local_pct", 15.0)
+                or 15.0
+            )
+    return default
+
+
+def sep917_near_base_capture_ok(
+    evidence: Mapping[str, Any] | None,
+    ranking: Mapping[str, Any] | None = None,
+    alert: Mapping[str, Any] | None = None,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Sep 9–17 NEAR_BASE shape: top moment + local pad, not extended peak chase."""
+    from app.config import get_settings
+    from app.engines.top_moment_gate import classify_top_moment_type
+
+    settings = settings or get_settings()
+    evidence = dict(evidence if isinstance(evidence, Mapping) else {})
+    alert = alert if isinstance(alert, Mapping) else {}
+    ranking = ranking if isinstance(ranking, Mapping) else {}
+    max_local = effective_near_base_max_local_pct(settings)
+    local = _evidence_local_move_pct(evidence)
+
+    from app.engines.sep09_intent_guards import sep09_near_peak_after_extended_rip
+
+    side = str(
+        evidence.get("side") or alert.get("side") or ranking.get("side") or ""
+    ).upper()
+    near_peak, np_reason = sep09_near_peak_after_extended_rip(
+        evidence,
+        premium=float(evidence.get("premium") or evidence.get("lastPremium") or 0),
+        symbol=str(evidence.get("symbol") or alert.get("symbol") or ""),
+        strike=float(evidence.get("strike") or alert.get("strike") or 0),
+        side=side,
+        alert=evidence,
+        settings=settings,
+    )
+    if near_peak:
+        return False, np_reason or "sep09_near_peak_chase"
+
+    if symmetric_new_base_moment_evidence(evidence, alert, settings=settings):
+        return True, "new_base_moment"
+
+    moment = classify_top_moment_type(evidence)
+    if symmetric_structural_base_evidence(evidence, settings=settings) and moment:
+        return True, f"near_base_{str(moment).lower()}"
+    if moment and local <= max_local + 1e-6:
+        return True, f"top_moment_{str(moment).lower()}"
+    return False, "not_sep917_near_base_shape"
+
+
 def symmetric_new_base_moment_evidence(
     evidence: Mapping[str, Any] | None,
     alert: Mapping[str, Any] | None = None,
@@ -82,9 +146,7 @@ def symmetric_new_base_moment_evidence(
     if not bool(getattr(settings, "best_trade_new_base_moment_enabled", True)):
         return False
     evidence = evidence if isinstance(evidence, Mapping) else {}
-    max_local = float(
-        getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
-    )
+    max_local = effective_near_base_max_local_pct(settings)
     if _evidence_local_move_pct(evidence) > max_local + 1e-6:
         return False
     blob = _moment_text_blob(evidence, alert)
@@ -95,9 +157,19 @@ def symmetric_best_trade_at_base_capture(
     evidence: Mapping[str, Any] | None,
     alert: Mapping[str, Any] | None = None,
     *,
+    ranking: Mapping[str, Any] | None = None,
     settings: Any = None,
 ) -> tuple[bool, str]:
     """Structural base flags or a newly detected base moment — either side."""
+    from app.config import get_settings
+    from app.engines.sep917_legacy_profile import legacy_best_trade_base_first_active
+
+    settings = settings or get_settings()
+    if bool(getattr(settings, "best_trade_sep917_base_shape_align_enabled", True)):
+        if legacy_best_trade_base_first_active(settings):
+            return sep917_near_base_capture_ok(
+                evidence, ranking, alert, settings=settings,
+            )
     if symmetric_structural_base_evidence(evidence, settings=settings):
         return True, "structural_base"
     if symmetric_new_base_moment_evidence(evidence, alert, settings=settings):
@@ -121,9 +193,7 @@ def symmetric_structural_base_evidence(
         _number(evidence.get("offLowMovePct")),
         _number(evidence.get("offHighMovePct")),
     )
-    max_local = float(
-        getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
-    )
+    max_local = effective_near_base_max_local_pct(settings)
     if local > max_local + 1e-6:
         return False
     return bool(
@@ -139,6 +209,8 @@ def symmetric_structural_base_evidence(
         or evidence.get("earlyRadarPadCapture")
         or evidence.get("buildingCoilPad")
         or evidence.get("fastBullishLocalBase")
+        or evidence.get("eliteBaseReady")
+        or evidence.get("activeBreakout")
     )
 
 

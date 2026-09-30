@@ -134,16 +134,20 @@ def classify_best_trade_chase_tier(
     local = _local_move_pct(merged)
     meta["localMovePct"] = round(local, 2)
 
-    base_floor = float(
-        getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
-    )
+    from app.engines.best_trade_policy import effective_near_base_max_local_pct
+
+    base_floor = effective_near_base_max_local_pct(settings)
     ceiling = _controlled_chase_ceiling(candidate, snap, settings=settings)
     meta["controlledChaseCeilingPct"] = round(ceiling, 2)
 
     from app.engines.best_trade_policy import symmetric_best_trade_at_base_capture
 
+    pretrade = getattr(candidate, "pretrade_meta", None) or {}
+    ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
+    if not isinstance(ranking, dict):
+        ranking = assessment if isinstance(assessment, Mapping) else {}
     at_base, base_reason = symmetric_best_trade_at_base_capture(
-        merged, alert, settings=settings,
+        merged, alert, ranking=ranking, settings=settings,
     )
     if at_base and local <= base_floor + 1e-6:
         meta["tierReason"] = base_reason

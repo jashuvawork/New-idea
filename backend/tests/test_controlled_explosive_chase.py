@@ -29,6 +29,7 @@ def _settings():
     s.premium_vertical_chase_legacy_profile_only = True
     s.premium_vertical_chase_allow_controlled_waiver = True
     s.best_trade_near_base_max_local_pct = 20.0
+    s.best_trade_sep917_base_shape_align_enabled = False
     s.best_trade_controlled_chase_max_local_pct = 32.0
     return s
 

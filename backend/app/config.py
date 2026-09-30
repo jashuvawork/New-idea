@@ -533,6 +533,9 @@ class Settings(BaseSettings):
     best_trade_base_first_rank_bonus: float = 14.0
     best_trade_off_base_rank_penalty: float = 12.0
     best_trade_new_base_moment_enabled: bool = True
+    # Sep 9–17 book: EOD replay entries were 10–14.5% off session base (28/28 ≤15%).
+    best_trade_sep917_base_shape_align_enabled: bool = True
+    best_trade_sep917_near_base_max_local_pct: float = 15.0
     best_trade_disable_mid_rip_when_base_first: bool = True
     best_trade_controlled_chase_enabled: bool = True
     best_trade_controlled_chase_max_local_pct: float = 32.0
