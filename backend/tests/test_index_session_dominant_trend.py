@@ -146,3 +146,43 @@ def test_flip_changes_rank_favors_new_leg():
         put_adj_slide = index_trend_rank_adjustment(put_cand, snapshots, state, settings=settings)
 
     assert put_adj_slide > call_adj_slide
+
+
+def test_sep917_near_base_extra_rank_on_aligned_leg():
+    reset_index_session_dominant_trend_for_tests()
+    settings = _symmetric_settings()
+    settings.best_trade_sep917_base_shape_align_enabled = True
+    settings.best_trade_base_first_enabled = True
+    snap = _snap()
+    state = AutoTraderState()
+    snapshots = {"NIFTY": snap}
+    base_call = SimpleNamespace(
+        symbol="NIFTY",
+        side=Side.CALL,
+        snap=snap,
+        tier="ELITE",
+        alert={
+            "tier": "ELITE",
+            "localBaseMovePct": 12.0,
+            "flatThenVertical": True,
+            "activeBreakout": True,
+            "armedBaseLaunch": True,
+        },
+        pretrade_meta={"causalRanking": {"grade": "A", "eliteScore": 95.0}},
+    )
+    plain_call = SimpleNamespace(
+        symbol="NIFTY",
+        side=Side.CALL,
+        snap=snap,
+        tier="ELITE",
+        alert={"tier": "ELITE", "localBaseMovePct": 55.0},
+        pretrade_meta={},
+    )
+    with patch(
+        "app.engines.index_session_dominant_trend._resolve_trend_arms",
+        return_value=(True, False, {"indexTrendMetrics": {}}),
+    ):
+        adj_base = index_trend_rank_adjustment(base_call, snapshots, state, settings=settings)
+        adj_plain = index_trend_rank_adjustment(plain_call, snapshots, state, settings=settings)
+    assert adj_base > adj_plain
+    assert adj_base - adj_plain >= 10.0

@@ -207,6 +207,25 @@ def index_trend_rank_adjustment(
         adj = bonus
         if meta.get("dominantTrendFlipped"):
             adj += flip_bonus
+        if bool(getattr(settings, "best_trade_sep917_base_shape_align_enabled", True)):
+            from app.engines.best_trade_policy import sep917_near_base_capture_ok
+
+            alert = getattr(candidate, "alert", None)
+            alert = alert if isinstance(alert, dict) else {}
+            pretrade = getattr(candidate, "pretrade_meta", None) or {}
+            ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
+            if not isinstance(ranking, dict):
+                ranking = {}
+            nested = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
+            evidence = {**alert, **nested, **ranking}
+            ok, _ = sep917_near_base_capture_ok(
+                evidence, ranking, alert, settings=settings,
+            )
+            if ok:
+                adj += float(
+                    getattr(settings, "index_trend_rank_sep917_base_bonus_aligned", 12.0)
+                    or 12.0
+                )
         return adj
     return -penalty
 
@@ -228,7 +247,9 @@ def index_trend_premium_fade_aligned(
     side_u = str(side or "").upper()
     if not side_aligns_with_dominant_trend(side_u, dominant):
         return False
-    from app.engines.best_trade_policy import symmetric_structural_base_evidence
+    from app.engines.best_trade_policy import sep917_near_base_capture_ok
 
-    ev = evidence if isinstance(evidence, Mapping) else {}
-    return bool(symmetric_structural_base_evidence(ev, settings=settings))
+    ev = dict(evidence if isinstance(evidence, Mapping) else {})
+    ev.setdefault("side", side_u)
+    ok, _ = sep917_near_base_capture_ok(ev, {}, ev, settings=settings)
+    return ok
