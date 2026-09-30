@@ -33,7 +33,21 @@ def _candidate_evidence(candidate: Any) -> dict[str, Any]:
     ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
     if not isinstance(ranking, dict):
         ranking = {}
-    return {**alert, **ranking}
+    nested = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
+    merged = {**alert, **nested, **ranking}
+    tier = getattr(candidate, "tier", None)
+    if tier and not merged.get("tier"):
+        merged["tier"] = tier
+    side = getattr(candidate, "side", None)
+    if side is not None and not merged.get("side"):
+        merged["side"] = getattr(side, "value", side)
+    sym = getattr(candidate, "symbol", None)
+    if sym and not merged.get("symbol"):
+        merged["symbol"] = sym
+    strike = getattr(candidate, "strike", None)
+    if strike and not merged.get("strike"):
+        merged["strike"] = strike
+    return merged
 
 
 def _read_premium_chase_metrics(
@@ -91,8 +105,10 @@ def _at_structural_base_bypass(
     alert = getattr(candidate, "alert", None) if isinstance(getattr(candidate, "alert", None), dict) else {}
     from app.engines.best_trade_policy import symmetric_best_trade_at_base_capture
 
+    pretrade = getattr(candidate, "pretrade_meta", None) or {}
+    ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
     at_base, base_reason = symmetric_best_trade_at_base_capture(
-        evidence, alert, settings=settings,
+        evidence, alert, ranking=ranking if isinstance(ranking, dict) else None, settings=settings,
     )
     if at_base:
         return True, base_reason
