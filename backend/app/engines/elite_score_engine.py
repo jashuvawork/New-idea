@@ -880,11 +880,18 @@ def elite_perfect_score_blocked(
     local_base_pct: float,
     *,
     settings: Any = None,
+    call_capture_waive: bool = False,
 ) -> tuple[bool, str]:
     """Block rounded score=100 chase entries unless still near base."""
     from app.config import get_settings
 
     settings = settings or get_settings()
+    if call_capture_waive:
+        near_cap = float(
+            getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
+        )
+        if local_base_pct <= near_cap + 1e-6:
+            return False, ""
     if not bool(getattr(settings, "elite_trade_block_perfect_score_enabled", True)):
         return False, ""
     threshold = float(
@@ -1493,6 +1500,7 @@ def elite_entry_allowed(
     mirror_active = False
     rally_unlock_armed = False
     rally_fingerprint_active = False
+    index_rally_flip_ok = False
     if resolved_side == "CALL" and state is not None and mirror_snap is not None:
         from app.engines.best_trade_policy import call_at_base_best_trade_fingerprint
         from app.engines.pe_win_ce_mirror import (
@@ -1529,16 +1537,42 @@ def elite_entry_allowed(
             readiness_reason=readiness_reason,
             settings=settings,
         )
-        if mirror_active or rally_fingerprint_active:
+        from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
+
+        flip_ok, _, _ = index_rally_side_flip_bypass(symbol, "CALL", mirror_snap)
+        index_rally_flip_ok = flip_ok
+        if mirror_active or rally_fingerprint_active or rally_unlock_armed or index_rally_flip_ok:
             relaxed = float(
                 getattr(settings, "best_trade_near_base_min_elite_score", 90.0) or 90.0
             )
-            if rally_fingerprint_active:
+            if rally_fingerprint_active or index_rally_flip_ok:
                 relaxed = min(
                     relaxed,
                     float(getattr(settings, "pe_win_ce_mirror_min_elite_score", 85.0) or 85.0),
                 )
             min_score = min(min_score, relaxed)
+    from app.engines.sep917_legacy_profile import legacy_call_capture_elite_waives_active
+
+    call_capture_waive = bool(
+        legacy_call_capture_elite_waives_active(settings)
+        and resolved_side == "CALL"
+        and (
+            mirror_active
+            or rally_fingerprint_active
+            or rally_unlock_armed
+            or index_rally_flip_ok
+        )
+    )
+    if call_capture_waive:
+        capture_floor = float(
+            getattr(settings, "live_entry_best_trade_capture_elite_score_floor", 78.0)
+            or 78.0
+        )
+        min_score = min(
+            min_score,
+            float(getattr(settings, "pe_win_ce_mirror_min_elite_score", 85.0) or 85.0),
+            capture_floor,
+        )
     if building_rip_helper_ok:
         rip_floor = float(
             getattr(settings, "building_rip_helper_min_elite_score", 84.0) or 84.0
@@ -1674,6 +1708,7 @@ def elite_entry_allowed(
         score,
         _number(assessment.get("localBasePct")),
         settings=settings,
+        call_capture_waive=call_capture_waive,
     )
     if perfect_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
@@ -1710,7 +1745,7 @@ def elite_entry_allowed(
             and bool(
                 getattr(settings, "live_entry_best_trade_capture_waives_elite_timing", True)
             )
-        ) and not building_rip_helper_ok:
+        ) and not building_rip_helper_ok and not call_capture_waive:
             return False, "elite_timing_not_good_or_ok", assessment
 
     assessment = {

@@ -3462,6 +3462,8 @@ class Settings(BaseSettings):
     worst_day_call_block_symbols_csv: str = "SENSEX"
     worst_day_put_block_rally_enabled: bool = True
     worst_day_put_block_rally_symbols_csv: str = "SENSEX,NIFTY"
+    # Block PUT when spot has rallied off session low (even if OI breadth still bearish).
+    worst_day_put_block_rally_session_low_enabled: bool = True
     worst_day_slow_bounce_min_rank: float = 55.0
   # Worst-day defensive ITM fade — alternate index, tight targets, 1 lot
     worst_day_itm_fade_enabled: bool = True

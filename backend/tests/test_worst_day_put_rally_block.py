@@ -61,6 +61,21 @@ def test_blocks_put_on_bullish_breakout_without_fingerprint(mock_bo):
     assert reason == "worst_day_put_blocked_bullish_rally"
 
 
+@patch("app.engines.index_rally_side_flip.index_rally_metrics")
+@patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={"breakout": False})
+def test_blocks_put_on_session_rally_off_low(mock_bo, mock_rally):
+    mock_rally.return_value = {
+        "rallyPoints": 150.0,
+        "minMovePoints": 130.0,
+        "slidePoints": 10.0,
+    }
+    blocked, reason = worst_day_blocks_put_rally(
+        _Cand(), AutoTraderState(), {"SENSEX": _bullish_snap()},
+    )
+    assert blocked is True
+    assert reason == "worst_day_put_blocked_bullish_rally"
+
+
 @patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={"breakout": False})
 def test_allows_put_slide_off_high_near_base(mock_bo):
     cand = _Cand(

@@ -12,6 +12,16 @@ def sep917_legacy_profile_active(settings: Any = None) -> bool:
     return bool(getattr(settings, "sep917_legacy_profile_enabled", True))
 
 
+def legacy_call_capture_elite_waives_active(settings: Any = None) -> bool:
+    """Sep 9–17: CE rally/at-base paths may waive elite chase/timing when symmetric book is on."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not sep917_legacy_profile_active(settings):
+        return False
+    return bool(getattr(settings, "symmetric_best_trade_capture_enabled", True))
+
+
 def legacy_skip_preloss_worst_day_pause_active(settings: Any = None) -> bool:
     """Sep 9–15: chop/worst label before session loss must not full-pause the book."""
     from app.config import get_settings
