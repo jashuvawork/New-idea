@@ -143,6 +143,15 @@ def session_entry_policy(
         meta["pauseReason"] = "worst_day_breakout_only"
         return "BREAKOUT_ONLY", meta
 
+    try:
+        from app.engines.sep917_legacy_profile import legacy_skip_preloss_worst_day_pause_active
+
+        if legacy_skip_preloss_worst_day_pause_active(settings):
+            meta["sep917LegacyWorstDayLift"] = True
+            return "NORMAL", meta
+    except Exception:
+        pass
+
     meta["pauseReason"] = "worst_day_full_pause"
     return "PAUSED", meta
 
@@ -224,6 +233,112 @@ def worst_day_blocks_call_scalp(
     return False, "ok"
 
 
+def _put_rally_bullish_context(
+    sym: str,
+    snap: SymbolSnapshot,
+) -> tuple[bool, dict[str, Any]]:
+    """True when index is in a bullish thrust (PUT chase into rally risk)."""
+    from app.engines.index_tick_helpers import index_trend_breakout
+
+    meta: dict[str, Any] = {}
+    bo = index_trend_breakout(sym, "CALL", snap)
+    if bo.get("breakout"):
+        meta["indexTrendBreakout"] = bo
+        return True, meta
+    chart = snap.spotChart
+    breadth_bias = (snap.breadth.bias or "NEUTRAL").upper()
+    ema_bullish = bool(
+        chart
+        and (getattr(chart, "emaBias", None) or getattr(chart, "direction", None) or "NEUTRAL").upper()
+        == "BULLISH"
+    )
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0) if chart else 0.0
+    if ema_bullish and breadth_bias == "BULLISH" and mom5 > 0:
+        meta["chartBullish"] = {"momentum5Pct": mom5}
+        return True, meta
+    return False, meta
+
+
+def worst_day_blocks_put_rally(
+    candidate: Any,
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, str]:
+    """Block PUT entries into a bullish index unless slide/at-base fingerprint."""
+    settings = get_settings()
+    if not getattr(settings, "worst_day_put_block_rally_enabled", True):
+        return False, "ok"
+    if _side_val(candidate.side) != "PUT":
+        return False, "ok"
+
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    blocked_symbols = {
+        s.strip().upper()
+        for s in (getattr(settings, "worst_day_put_block_rally_symbols_csv", "") or "").split(",")
+        if s.strip()
+    }
+    if sym not in blocked_symbols:
+        return False, "ok"
+
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+    if snap is None:
+        return False, "ok"
+
+    from app.engines.index_tick_helpers import index_trend_breakout
+
+    slide_bo = index_trend_breakout(sym, "PUT", snap)
+    if slide_bo.get("breakout"):
+        return False, "ok"
+
+    bullish, _ctx = _put_rally_bullish_context(sym, snap)
+    if not bullish:
+        return False, "ok"
+
+    alert = getattr(candidate, "alert", None)
+    if not isinstance(alert, dict):
+        alert = {}
+    pretrade = getattr(candidate, "pretrade_meta", None) or {}
+    ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
+    if not isinstance(ranking, dict):
+        ranking = {}
+    evidence = {**alert, **ranking}
+    readiness = str(pretrade.get("readinessReason") or pretrade.get("liftReason") or "")
+
+    from app.engines.best_trade_policy import put_at_base_best_trade_fingerprint
+    from app.engines.put_slide_ce_mirror import put_slide_entry_unlock_fingerprint
+
+    if put_slide_entry_unlock_fingerprint(
+        evidence,
+        ranking,
+        state=state,
+        snap=snap,
+        symbol=sym,
+        readiness_reason=readiness,
+        settings=settings,
+    ):
+        return False, "ok"
+    if put_at_base_best_trade_fingerprint(
+        evidence,
+        ranking,
+        state=state,
+        snap=snap,
+        symbol=sym,
+        readiness_reason=readiness,
+        settings=settings,
+    ):
+        return False, "ok"
+
+    off_high = float(evidence.get("offHighMovePct") or 0)
+    local = max(
+        float(evidence.get("localBaseMovePct") or 0),
+        float(evidence.get("ictBaseRelativeMovePct") or 0),
+    )
+    if off_high > 0 and local <= float(getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0):
+        return False, "ok"
+
+    return True, "worst_day_put_blocked_bullish_rally"
+
+
 def _elite_worst_day_bypass_allowed(
     candidate: Any,
     snapshots: dict[str, SymbolSnapshot],
@@ -289,6 +404,10 @@ def worst_day_allows_candidate(
     else:
         _, policy_meta = session_entry_policy(state, snapshots)
         meta.update(policy_meta)
+
+    blocked_put, put_reason = worst_day_blocks_put_rally(candidate, state, snapshots)
+    if blocked_put:
+        return False, put_reason, meta
 
     if policy == "NORMAL":
         return True, "ok", meta

@@ -12,6 +12,18 @@ def sep917_legacy_profile_active(settings: Any = None) -> bool:
     return bool(getattr(settings, "sep917_legacy_profile_enabled", True))
 
 
+def legacy_skip_preloss_worst_day_pause_active(settings: Any = None) -> bool:
+    """Sep 9–15: chop/worst label before session loss must not full-pause the book."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "sep917_legacy_skip_preloss_worst_day_pause", True)):
+        return False
+    if not sep917_legacy_profile_active(settings):
+        return False
+    return bool(getattr(settings, "symmetric_best_trade_capture_enabled", True))
+
+
 def cheap_otm_stack_disabled(settings: Any = None) -> bool:
     """True when cheap-base rank and near-base cheap OTM capture are off."""
     from app.config import get_settings
@@ -58,4 +70,5 @@ def sep917_legacy_profile_summary(settings: Any = None) -> dict[str, Any]:
         "putSlideWaiveExpiryOtm": bool(
             getattr(settings, "put_slide_unlock_waive_expiry_otm", False)
         ),
+        "skipPrelossWorstDayPause": legacy_skip_preloss_worst_day_pause_active(settings),
     }

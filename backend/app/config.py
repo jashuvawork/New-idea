@@ -426,6 +426,8 @@ class Settings(BaseSettings):
     elite_trade_perfect_score_max_local_pct: float = 15.0
     # Sep 9–17 legacy full stack — ATM/ITM ₹18–350, no cheap OTM (see sep917_legacy_profile.py).
     sep917_legacy_profile_enabled: bool = True
+    # Under legacy + symmetric capture: do not PAUSE entries for pre-loss chop alone (Sep 9–15 book).
+    sep917_legacy_skip_preloss_worst_day_pause: bool = True
     # Sep 9–17 profile: symmetric CE/PE best-trade rank; Sep21+ blockers stay off.
     symmetric_best_trade_capture_enabled: bool = True
     # ELITE/EXPLODING at structural base — shallow exec premium retest (CE+PE, Sep23 74800 miss).
@@ -3458,6 +3460,8 @@ class Settings(BaseSettings):
     worst_day_blocks_live: bool = True
     worst_day_call_block_enabled: bool = True
     worst_day_call_block_symbols_csv: str = "SENSEX"
+    worst_day_put_block_rally_enabled: bool = True
+    worst_day_put_block_rally_symbols_csv: str = "SENSEX,NIFTY"
     worst_day_slow_bounce_min_rank: float = 55.0
   # Worst-day defensive ITM fade — alternate index, tight targets, 1 lot
     worst_day_itm_fade_enabled: bool = True

@@ -327,8 +327,9 @@ def evaluate_local_base_entry(
 ) -> tuple[bool, str, Optional[str], dict[str, Any]]:
     """Return (allowed, reason, moment_type, ranking) for one radar alert."""
     s = settings or get_settings()
-    if not explosion_alert_is_top_moment(alert):
-        return False, "not_top_moment_radar", None, {}
+    if bool(getattr(s, "top_moments_only_enabled", True)):
+        if not explosion_alert_is_top_moment(alert):
+            return False, "not_top_moment_radar", None, {}
 
     from app.engines.ict_breakout_monitor import first_lift_entry_readiness
     from app.engines.building_ftv_gates import pad_lane_ready_reason
