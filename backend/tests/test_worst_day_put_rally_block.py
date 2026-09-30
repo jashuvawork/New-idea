@@ -100,6 +100,24 @@ def test_call_unaffected(mock_bo):
     assert blocked is False
 
 
+@patch("app.engines.pe_win_ce_mirror.call_rally_unlock_armed", return_value=(True, "call_rally_unlock", {}))
+@patch(
+    "app.engines.pe_win_ce_mirror._resolve_chop_rally_day_mode",
+    return_value="CHOP + RALLY",
+)
+@patch(
+    "app.engines.worst_day_guard._put_rally_bullish_context",
+    return_value=(False, {}),
+)
+@patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={"breakout": False})
+def test_blocks_put_on_chop_rally_when_ce_rally_armed(mock_bo, _bull, _dm, _ce_arm):
+    blocked, reason = worst_day_blocks_put_rally(
+        _Cand(), AutoTraderState(), {"SENSEX": _bullish_snap()},
+    )
+    assert blocked is True
+    assert reason == "worst_day_put_blocked_bullish_rally"
+
+
 @patch("app.engines.worst_day_guard.worst_day_blocks_put_rally", return_value=(True, "worst_day_put_blocked_bullish_rally"))
 @patch("app.engines.worst_day_guard.session_entry_policy", return_value=("NORMAL", {}))
 def test_worst_day_allows_candidate_denies_blocked_put(mock_policy, mock_put_block):
