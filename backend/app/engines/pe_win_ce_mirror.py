@@ -1210,6 +1210,12 @@ def pe_win_ce_mirror_premium_fade_bypass(
         return False
     sym = str(symbol or (evidence or {}).get("symbol") or getattr(snap, "symbol", "") or "").upper()
     ev = evidence or {}
+    from app.engines.index_session_dominant_trend import index_trend_premium_fade_aligned
+
+    if index_trend_premium_fade_aligned(
+        "CALL", snap, state, evidence=ev, settings=settings,
+    ):
+        return True
     if legacy_chop_rally_call_capture_armed(
         ev,
         ranking,

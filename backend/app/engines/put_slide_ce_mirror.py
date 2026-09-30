@@ -572,6 +572,13 @@ def put_slide_premium_fade_bypass(
     if _side_val(side) != "PUT" or snap is None or state is None:
         return False
     sym = str(symbol or (evidence or {}).get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    ev = evidence or {}
+    from app.engines.index_session_dominant_trend import index_trend_premium_fade_aligned
+
+    if index_trend_premium_fade_aligned(
+        "PUT", snap, state, evidence=ev, settings=settings,
+    ):
+        return True
     return put_slide_entry_unlock_fingerprint(
         evidence or {},
         ranking,

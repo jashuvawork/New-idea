@@ -61,8 +61,8 @@ def test_blocks_put_when_call_rally_armed():
             return_value=(False, {}),
         ),
         patch(
-            "app.engines.index_trend_opposite_side_guard._resolve_trend_arms",
-            return_value=(True, False, {}),
+            "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+            return_value=("RALLY", {"dominantTrend": "RALLY"}),
         ),
     ]
     for p in patches:
@@ -91,8 +91,8 @@ def test_blocks_call_when_put_slide_armed():
             return_value={"breakout": False},
         ),
         patch(
-            "app.engines.index_trend_opposite_side_guard._resolve_trend_arms",
-            return_value=(False, True, {}),
+            "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+            return_value=("SLIDE", {"dominantTrend": "SLIDE"}),
         ),
     ]
     for p in patches:
@@ -125,8 +125,8 @@ def test_allows_put_with_slide_fingerprint():
             return_value=(True, {}),
         ),
         patch(
-            "app.engines.index_trend_opposite_side_guard._resolve_trend_arms",
-            return_value=(True, False, {}),
+            "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+            return_value=("RALLY", {"dominantTrend": "RALLY"}),
         ),
         patch(
             "app.engines.index_trend_opposite_side_guard._put_rally_bypass",
