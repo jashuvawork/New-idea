@@ -534,6 +534,12 @@ class Settings(BaseSettings):
     best_trade_off_base_rank_penalty: float = 12.0
     best_trade_new_base_moment_enabled: bool = True
     best_trade_disable_mid_rip_when_base_first: bool = True
+    best_trade_controlled_chase_enabled: bool = True
+    best_trade_controlled_chase_max_local_pct: float = 32.0
+    best_trade_controlled_chase_min_elite_score: float = 90.0
+    best_trade_controlled_chase_rank_bonus: float = 8.0
+    best_trade_controlled_mid_rip_enabled: bool = True
+    premium_vertical_chase_allow_controlled_waiver: bool = True
     # Minimum hold before adaptive SL on executed entries — Sep15 23500 PE exited @77s.
     executed_entry_min_hold_before_loss_seconds: int = 300
     executed_entry_elite_min_hold_before_loss_seconds: int = 600

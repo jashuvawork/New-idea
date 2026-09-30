@@ -159,6 +159,21 @@ def premium_vertical_chase_blocks_entry(
         meta["premiumChaseBypass"] = bypass_reason
         return False, "ok", meta
 
+    if bool(getattr(settings, "premium_vertical_chase_allow_controlled_waiver", True)):
+        from app.engines.controlled_explosive_chase import controlled_explosive_chase_allowed
+
+        pretrade = getattr(candidate, "pretrade_meta", None) or {}
+        ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
+        assessment = ranking if isinstance(ranking, dict) else {}
+        ctrl_ok, ctrl_reason, ctrl_meta = controlled_explosive_chase_allowed(
+            candidate, snap, assessment=assessment, settings=settings,
+        )
+        meta.update(ctrl_meta)
+        if ctrl_ok:
+            meta["premiumChaseBypass"] = "premium_vertical_chase_controlled_rip_waiver"
+            meta["controlledChaseWaiverReason"] = ctrl_reason
+            return False, "ok", meta
+
     meta["premiumChaseBlock"] = {
         "drawdownFromHighPct": dd,
         "premiumMomentum5Pct": mom5,

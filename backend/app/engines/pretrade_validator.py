@@ -1187,6 +1187,9 @@ def validate_candidate(
             candidate, snap,
         )
         meta["liveEntryScore"] = live_meta
+        for _k in ("controlledChaseTier", "localMovePct", "premiumChaseBlock"):
+            if _k in live_meta:
+                meta[_k] = live_meta[_k]
         if live_blocked:
             return False, live_reason, meta
 

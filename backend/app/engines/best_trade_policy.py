@@ -370,11 +370,25 @@ def _mid_rip_best_trade_signals(
         return False
     from app.engines.sep917_legacy_profile import legacy_best_trade_base_first_active
 
-    if (
-        bool(getattr(settings, "best_trade_disable_mid_rip_when_base_first", True))
-        and legacy_best_trade_base_first_active(settings)
-    ):
-        return False
+    if legacy_best_trade_base_first_active(settings):
+        if bool(getattr(settings, "best_trade_controlled_mid_rip_enabled", True)):
+            from app.engines.controlled_explosive_chase import controlled_explosive_chase_allowed
+
+            if isinstance(alert, Mapping):
+                stub = type("_MidRipCand", (), {})()
+                stub.alert = alert
+                stub.side = alert.get("side")
+                stub.symbol = alert.get("symbol")
+                stub.tier = tier or alert.get("tier")
+                stub.pretrade_meta = {"causalRanking": elite_assessment or {}}
+                stub.snap = None
+                stub.mode = "explosion"
+                ok, _, _ = controlled_explosive_chase_allowed(
+                    stub, None, assessment=elite_assessment or {}, settings=settings,
+                )
+                return ok
+        if bool(getattr(settings, "best_trade_disable_mid_rip_when_base_first", True)):
+            return False
 
     alert = alert if isinstance(alert, Mapping) else {}
     if alert.get("fastVerticalBurst") or alert.get("buildingRipReady") or alert.get("buildingRip"):
@@ -1247,11 +1261,29 @@ def best_trade_base_rank_adjustment(
     evidence = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
     merged = {**alert, **evidence, **ranking}
 
+    from app.engines.controlled_explosive_chase import classify_best_trade_chase_tier
+
+    snap = getattr(candidate, "snap", None)
+    tier, tier_meta = classify_best_trade_chase_tier(
+        candidate,
+        snap,
+        assessment=ranking if isinstance(ranking, dict) else None,
+        settings=settings,
+    )
+    bonus = float(getattr(settings, "best_trade_base_first_rank_bonus", 14.0) or 14.0)
+    tier_b_bonus = float(
+        getattr(settings, "best_trade_controlled_chase_rank_bonus", 8.0) or 8.0
+    )
+    penalty = float(getattr(settings, "best_trade_off_base_rank_penalty", 12.0) or 12.0)
+    if tier == "A":
+        return bonus
+    if tier == "B":
+        return tier_b_bonus
+    if tier == "C":
+        return -penalty
     at_base, _ = symmetric_best_trade_at_base_capture(
         merged, alert, settings=settings,
     )
-    bonus = float(getattr(settings, "best_trade_base_first_rank_bonus", 14.0) or 14.0)
-    penalty = float(getattr(settings, "best_trade_off_base_rank_penalty", 12.0) or 12.0)
     max_local = float(
         getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
     )
