@@ -3471,6 +3471,10 @@ class Settings(BaseSettings):
     index_trend_opposite_side_legacy_profile_only: bool = True
     index_trend_opposite_side_symbols_csv: str = "SENSEX,NIFTY"
     index_trend_opposite_side_flip_margin_pts: float = 20.0
+    index_session_dominant_trend_enabled: bool = True
+    index_trend_rank_bonus_aligned: float = 8.0
+    index_trend_rank_penalty_opposite: float = 6.0
+    index_trend_rank_flip_bonus: float = 5.0
     worst_day_slow_bounce_min_rank: float = 55.0
   # Worst-day defensive ITM fade — alternate index, tight targets, 1 lot
     worst_day_itm_fade_enabled: bool = True

@@ -13,16 +13,12 @@ def _side_val(side: Side | str) -> str:
 
 
 def _guard_active(settings: Any = None) -> bool:
+    from app.engines.index_session_dominant_trend import index_trend_features_active
+
     settings = settings or get_settings()
     if not bool(getattr(settings, "index_trend_opposite_side_block_enabled", True)):
         return False
-    if not bool(getattr(settings, "index_trend_opposite_side_legacy_profile_only", True)):
-        return True
-    from app.engines.sep917_legacy_profile import sep917_legacy_profile_active
-
-    return sep917_legacy_profile_active(settings) and bool(
-        getattr(settings, "symmetric_best_trade_capture_enabled", True)
-    )
+    return index_trend_features_active(settings)
 
 
 def _allowed_symbols(sym: str, settings: Any) -> bool:
@@ -36,60 +32,6 @@ def _allowed_symbols(sym: str, settings: Any) -> bool:
     )
     allowed = {s.strip().upper() for s in raw.split(",") if s.strip()}
     return sym.upper() in allowed
-
-
-def _resolve_trend_arms(
-    sym: str,
-    snap: SymbolSnapshot,
-    state: Any,
-    *,
-    settings: Any = None,
-) -> tuple[bool, bool, dict[str, Any]]:
-    """Apply flip tie-break when both rally and slide soft-unlock are armed."""
-    from app.engines.index_rally_side_flip import index_rally_metrics
-    from app.engines.pe_win_ce_mirror import call_rally_unlock_armed
-    from app.engines.put_slide_ce_mirror import put_slide_unlock_armed
-
-    settings = settings or get_settings()
-    meta: dict[str, Any] = {}
-
-    call_armed, call_reason, call_meta = call_rally_unlock_armed(
-        state, snap, sym, settings=settings,
-    )
-    put_armed, put_reason, put_meta = put_slide_unlock_armed(
-        state, snap, sym, settings=settings,
-    )
-    meta["callRallyUnlock"] = {"armed": call_armed, "reason": call_reason, **call_meta}
-    meta["putSlideUnlock"] = {"armed": put_armed, "reason": put_reason, **put_meta}
-
-    if not (call_armed and put_armed):
-        return call_armed, put_armed, meta
-
-    metrics = index_rally_metrics(sym, snap, settings=settings)
-    rally_pts = float(metrics.get("rallyPoints") or 0)
-    slide_pts = float(metrics.get("slidePoints") or 0)
-    margin = float(
-        getattr(settings, "index_trend_opposite_side_flip_margin_pts", 20.0) or 20.0
-    )
-    meta["indexTrendMetrics"] = metrics
-
-    chart = snap.spotChart
-    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0) if chart else 0.0
-
-    if rally_pts > slide_pts + margin:
-        meta["indexTrendFlip"] = "rally_dominant"
-        return True, False, meta
-    if slide_pts > rally_pts + margin:
-        meta["indexTrendFlip"] = "slide_dominant"
-        return False, True, meta
-    if mom5 > 0.02:
-        meta["indexTrendFlip"] = "mom5_rally"
-        return True, False, meta
-    if mom5 < -0.02:
-        meta["indexTrendFlip"] = "mom5_slide"
-        return False, True, meta
-    meta["indexTrendFlip"] = "both_neutral"
-    return False, False, meta
 
 
 def _candidate_evidence(candidate: Any) -> tuple[dict[str, Any], dict[str, Any], str]:
@@ -218,9 +160,8 @@ def index_trend_opposite_side_blocks_entry(
     snapshots: dict[str, SymbolSnapshot],
 ) -> tuple[bool, str, dict[str, Any]]:
     """
-    CALL rally off session low → block blind PUT (unless put slide / at-base).
-    PUT slide off session high → block blind CALL (unless call rally / at-base).
-    Re-evaluated on every candidate; flip tie-break when both unlocks are armed.
+    CALL rally leg → block blind PUT. PUT slide leg → block blind CALL.
+    Uses index_session_dominant_trend() each candidate.
     """
     settings = get_settings()
     meta: dict[str, Any] = {}
@@ -239,6 +180,7 @@ def index_trend_opposite_side_blocks_entry(
     if snap is None:
         return False, "ok", meta
 
+    from app.engines.index_session_dominant_trend import index_session_dominant_trend
     from app.engines.index_tick_helpers import index_trend_breakout
 
     if side == "PUT":
@@ -251,8 +193,8 @@ def index_trend_opposite_side_blocks_entry(
         if rally_bo.get("breakout"):
             return False, "ok", meta
 
-    call_armed, put_armed, arm_meta = _resolve_trend_arms(sym, snap, state, settings=settings)
-    meta.update(arm_meta)
+    dominant, trend_meta = index_session_dominant_trend(sym, snap, state, settings=settings)
+    meta.update(trend_meta)
 
     from app.engines.worst_day_guard import _put_rally_bullish_context
 
@@ -262,14 +204,17 @@ def index_trend_opposite_side_blocks_entry(
 
     evidence, ranking, readiness = _candidate_evidence(candidate)
 
-    if side == "PUT" and (call_armed or bullish_ctx):
+    block_put = side == "PUT" and (
+        dominant == "RALLY" or (dominant == "NEUTRAL" and bullish_ctx)
+    )
+    if block_put:
         if _put_rally_bypass(
             candidate, state, snap, sym, evidence, ranking, readiness, settings=settings,
         ):
             return False, "ok", meta
         return True, "index_trend_put_blocked_call_rally", meta
 
-    if side == "CALL" and put_armed:
+    if side == "CALL" and dominant == "SLIDE":
         if _call_slide_bypass(
             candidate, state, snap, sym, evidence, ranking, readiness, settings=settings,
         ):

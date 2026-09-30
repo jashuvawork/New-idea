@@ -325,6 +325,26 @@ def _session_side_flip_waiver(
     if flip_ok:
         return True, flip_reason or "index_rally_side_flip"
 
+    from app.engines.index_session_dominant_trend import (
+        index_session_dominant_trend,
+        index_trend_features_active,
+        side_aligns_with_dominant_trend,
+    )
+
+    if index_trend_features_active(settings) and state is not None:
+        dominant, _ = index_session_dominant_trend(
+            sym, snap, state, settings=settings, track_flip=False,
+        )
+        if side_aligns_with_dominant_trend(side_v, dominant):
+            return True, f"index_dominant_{dominant.lower()}"
+        from app.engines.pe_win_ce_mirror import call_rally_unlock_armed
+        from app.engines.put_slide_ce_mirror import put_slide_unlock_armed
+
+        if side_v == "CALL" and call_rally_unlock_armed(state, snap, sym, settings=settings)[0]:
+            return True, "call_rally_unlock_armed"
+        if side_v == "PUT" and put_slide_unlock_armed(state, snap, sym, settings=settings)[0]:
+            return True, "put_slide_unlock_armed"
+
     if state is not None:
         from app.engines.loss_triggered_side_flip import loss_triggered_opposite_flip_ready
 

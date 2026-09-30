@@ -1812,6 +1812,9 @@ def find_best_entry(
         c.score += best_side_rank_adjustment(
             c, snapshots, power_hour=in_power_hour_window(),
         )
+        from app.engines.index_session_dominant_trend import index_trend_rank_adjustment
+
+        c.score += index_trend_rank_adjustment(c, snapshots, state)
         # Session side-regime: prefer the side the market is confirmed on / flipping toward.
         from app.engines.side_regime import side_regime_rank_delta
 
