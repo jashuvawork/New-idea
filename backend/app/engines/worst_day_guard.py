@@ -429,9 +429,22 @@ def worst_day_allows_candidate(
         _, policy_meta = session_entry_policy(state, snapshots)
         meta.update(policy_meta)
 
-    blocked_put, put_reason = worst_day_blocks_put_rally(candidate, state, snapshots)
-    if blocked_put:
-        return False, put_reason, meta
+    from app.engines.index_trend_opposite_side_guard import (
+        _guard_active as index_trend_guard_active,
+        index_trend_opposite_side_blocks_entry,
+    )
+
+    trend_blocked, trend_reason, trend_meta = index_trend_opposite_side_blocks_entry(
+        candidate, state, snapshots,
+    )
+    meta.update(trend_meta)
+    if trend_blocked:
+        return False, trend_reason, meta
+
+    if not index_trend_guard_active():
+        blocked_put, put_reason = worst_day_blocks_put_rally(candidate, state, snapshots)
+        if blocked_put:
+            return False, put_reason, meta
 
     if policy == "NORMAL":
         return True, "ok", meta
