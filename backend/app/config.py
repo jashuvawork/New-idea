@@ -859,6 +859,11 @@ class Settings(BaseSettings):
     live_entry_score_chase_hot_v3_min_spike_run_pct: float = 18.0
     live_entry_score_chase_hot_v3_min_range_position: float = 0.72
     live_entry_score_chase_hot_v3_penalty_scale: float = 120.0
+    premium_vertical_chase_block_enabled: bool = True
+    premium_vertical_chase_legacy_profile_only: bool = True
+    premium_vertical_chase_max_drawdown_from_high_pct: float = 8.0
+    premium_vertical_chase_min_momentum5_pct: float = 35.0
+    premium_vertical_chase_min_session_range_position: float = 0.78
     live_entry_moment_waiver_enabled: bool = True
     live_entry_moment_min_live: float = 86.0
     live_entry_moment_min_radar: float = 92.0
