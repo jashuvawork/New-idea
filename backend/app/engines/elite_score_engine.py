@@ -1501,11 +1501,13 @@ def elite_entry_allowed(
     rally_unlock_armed = False
     rally_fingerprint_active = False
     index_rally_flip_ok = False
+    chop_rally_capture_armed = False
     if resolved_side == "CALL" and state is not None and mirror_snap is not None:
         from app.engines.best_trade_policy import call_at_base_best_trade_fingerprint
         from app.engines.pe_win_ce_mirror import (
             call_ce_base_context_armed,
             call_rally_entry_unlock_fingerprint,
+            legacy_chop_rally_call_capture_armed,
         )
 
         symbol = str(evidence.get("symbol") or getattr(mirror_snap, "symbol", "") or "").upper()
@@ -1541,11 +1543,28 @@ def elite_entry_allowed(
 
         flip_ok, _, _ = index_rally_side_flip_bypass(symbol, "CALL", mirror_snap)
         index_rally_flip_ok = flip_ok
-        if mirror_active or rally_fingerprint_active or rally_unlock_armed or index_rally_flip_ok:
+        chop_rally_capture_armed = legacy_chop_rally_call_capture_armed(
+            evidence,
+            ranking,
+            assessment,
+            day_mode=resolved_mode,
+            state=state,
+            snap=mirror_snap,
+            symbol=symbol,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        )
+        if (
+            mirror_active
+            or rally_fingerprint_active
+            or rally_unlock_armed
+            or index_rally_flip_ok
+            or chop_rally_capture_armed
+        ):
             relaxed = float(
                 getattr(settings, "best_trade_near_base_min_elite_score", 90.0) or 90.0
             )
-            if rally_fingerprint_active or index_rally_flip_ok:
+            if rally_fingerprint_active or index_rally_flip_ok or chop_rally_capture_armed:
                 relaxed = min(
                     relaxed,
                     float(getattr(settings, "pe_win_ce_mirror_min_elite_score", 85.0) or 85.0),
@@ -1561,6 +1580,7 @@ def elite_entry_allowed(
             or rally_fingerprint_active
             or rally_unlock_armed
             or index_rally_flip_ok
+            or chop_rally_capture_armed
         )
     )
     if call_capture_waive:

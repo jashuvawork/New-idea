@@ -301,6 +301,20 @@ def worst_day_blocks_put_rally(
         return False, "ok"
 
     bullish, _ctx = _put_rally_bullish_context(sym, snap)
+    if not bullish and bool(
+        getattr(settings, "worst_day_put_block_rally_chop_rally_ce_armed_enabled", True)
+    ):
+        from app.engines.pe_win_ce_mirror import (
+            _CHOP_RALLY_DAY_MODE,
+            _resolve_chop_rally_day_mode,
+            call_rally_unlock_armed,
+        )
+
+        dm = _resolve_chop_rally_day_mode("", state=state, snap=snap)
+        if dm == _CHOP_RALLY_DAY_MODE and call_rally_unlock_armed(
+            state, snap, sym, settings=settings,
+        )[0]:
+            bullish = True
     if not bullish:
         return False, "ok"
 

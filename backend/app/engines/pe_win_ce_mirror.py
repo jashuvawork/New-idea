@@ -508,6 +508,74 @@ def call_rally_entry_unlock_armed(
     return False, rally_reason or mirror_reason, {**mirror_meta, **rally_meta}
 
 
+def legacy_chop_rally_call_capture_armed(
+    evidence: Mapping[str, Any],
+    ranking: Mapping[str, Any] | None,
+    assessment: Mapping[str, Any] | None,
+    *,
+    day_mode: str = "",
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    symbol: str = "",
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """Sep 9–17 symmetric book: CHOP+RALLY CE capture without strict rally fingerprint."""
+    from app.engines.sep917_legacy_profile import legacy_call_capture_elite_waives_active
+
+    settings = settings or get_settings()
+    if not legacy_call_capture_elite_waives_active(settings):
+        return False
+    if state is None or snap is None:
+        return False
+
+    dm = _resolve_ce_day_mode(
+        day_mode,
+        assessment=assessment,
+        evidence=evidence,
+        state=state,
+        snap=snap,
+    )
+    if dm != _CHOP_RALLY_DAY_MODE:
+        return False
+
+    sym = str(
+        symbol
+        or (evidence or {}).get("symbol")
+        or getattr(snap, "symbol", "")
+        or ""
+    ).upper()
+    if call_rally_unlock_armed(state, snap, sym, settings=settings)[0]:
+        return True
+
+    from app.engines.best_trade_policy import call_at_base_best_trade_fingerprint
+
+    if call_at_base_best_trade_fingerprint(
+        evidence,
+        ranking,
+        assessment,
+        state=state,
+        snap=snap,
+        symbol=sym,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        return True
+
+    if chop_rally_ce_near_base_ok(assessment, ranking, settings=settings):
+        return True
+
+    alert = evidence if isinstance(evidence, Mapping) else {}
+    return chop_rally_ce_building_capture_ok(
+        alert,
+        snap,
+        state,
+        day_mode=dm,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+
+
 _CHOP_RALLY_DAY_MODE = "CHOP + RALLY"
 _CE_BEST_TRADE_BULLISH_DAY_MODES = frozenset({
     "BULLISH DAY",
@@ -1141,8 +1209,19 @@ def pe_win_ce_mirror_premium_fade_bypass(
     if _side_val(side) != "CALL" or snap is None or state is None:
         return False
     sym = str(symbol or (evidence or {}).get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    ev = evidence or {}
+    if legacy_chop_rally_call_capture_armed(
+        ev,
+        ranking,
+        assessment,
+        state=state,
+        snap=snap,
+        symbol=sym,
+        settings=settings,
+    ):
+        return True
     return call_rally_entry_unlock_fingerprint(
-        evidence or {},
+        ev,
         ranking,
         assessment,
         state=state,

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from app.config import Settings
 from app.engines.elite_score_engine import elite_entry_allowed, elite_perfect_score_blocked
+from app.models.schemas import Side
 
 
 def _ranking(**kwargs):
@@ -72,3 +73,71 @@ def test_elite_entry_waives_timing_on_index_rally_flip(_base, _armed, _rally_fp,
     )
     assert ok, reason
     assert reason == "ok"
+
+
+@patch("app.engines.pe_win_ce_mirror.legacy_chop_rally_call_capture_armed", return_value=True)
+@patch("app.engines.index_rally_side_flip.index_rally_side_flip_bypass", return_value=(False, "", {}))
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_fingerprint", return_value=False)
+@patch("app.engines.pe_win_ce_mirror.call_ce_base_context_armed", return_value=(False, "", {}))
+@patch("app.engines.best_trade_policy.call_at_base_best_trade_fingerprint", return_value=False)
+def test_elite_entry_waives_timing_on_chop_rally_capture_arm(
+    _base, _ctx, _rally_fp, _flip, _chop_arm,
+):
+    s = Settings(
+        sep917_legacy_profile_enabled=True,
+        symmetric_best_trade_capture_enabled=True,
+        elite_trade_engine_enabled=True,
+    )
+    snap = MagicMock(symbol="NIFTY", spotChart=MagicMock())
+    evidence = {
+        "symbol": "NIFTY",
+        "side": "CALL",
+        "tier": "ELITE",
+        "explosionScore": 86.0,
+        "localBaseMovePct": 12.0,
+        "firstLift": True,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "armedBaseLaunch": True,
+        "orderflowPositive": True,
+        "velocity3s": 2.5,
+        "velocity9s": 1.8,
+        "flatVerticalQuality": 80.0,
+        "volumeAwaken": True,
+        "timingAssessment": "POOR",
+        "timingAction": "wait",
+        "mode": "explosion",
+        "dayMode": "CHOP + RALLY",
+    }
+    state = MagicMock()
+    ok, reason, _ = elite_entry_allowed(
+        evidence,
+        _ranking(),
+        settings=s,
+        state=state,
+        snapshots={"NIFTY": snap},
+        side="CALL",
+    )
+    assert ok, reason
+    assert reason == "ok"
+
+
+@patch("app.engines.pe_win_ce_mirror.legacy_chop_rally_call_capture_armed", return_value=True)
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_fingerprint", return_value=False)
+def test_premium_fade_bypass_on_chop_rally_arm_without_fingerprint(_fp, _arm):
+    from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_premium_fade_bypass
+
+    s = Settings()
+    snap = MagicMock(symbol="NIFTY")
+    state = MagicMock()
+    ok = pe_win_ce_mirror_premium_fade_bypass(
+        side=Side.CALL,
+        state=state,
+        snap=snap,
+        symbol="NIFTY",
+        evidence={"symbol": "NIFTY", "tier": "ELITE"},
+        ranking=_ranking(),
+        assessment={"eliteScore": 86.0, "setup": "V", "localBasePct": 10.0},
+        settings=s,
+    )
+    assert ok is True
