@@ -125,7 +125,13 @@ def test_replay_selection_rank_includes_coil_prediction_bonus(mock_settings):
     assert base == 90.0
 
 
-def test_evaluate_local_base_entry_blocks_non_top_moment():
+@patch("app.engines.eod_local_base_replay.get_settings")
+def test_evaluate_local_base_entry_blocks_non_top_moment(mock_settings):
+    mock_settings.return_value = MagicMock(
+        top_moments_only_enabled=True,
+        top_moments_min_grade="A",
+        explosion_min_premium_inr=15.0,
+    )
     snap = _snap()
     alert = {
         "tier": "BUILDING",
@@ -137,6 +143,28 @@ def test_evaluate_local_base_entry_blocks_non_top_moment():
     allowed, reason, _, _ = evaluate_local_base_entry(alert, snap)
     assert not allowed
     assert reason == "not_top_moment_radar"
+
+
+@patch("app.engines.eod_local_base_replay.get_settings")
+@patch("app.engines.ict_breakout_monitor.first_lift_entry_readiness")
+def test_evaluate_local_base_skips_top_moment_when_top_moments_off(mock_lift, mock_settings):
+    mock_settings.return_value = MagicMock(
+        top_moments_only_enabled=False,
+        top_moments_min_grade="A",
+        explosion_min_premium_inr=15.0,
+    )
+    mock_lift.return_value = (False, "first_lift_index_turn_not_confirmed")
+    snap = _snap()
+    alert = {
+        "tier": "BUILDING",
+        "explosionScore": 50,
+        "premium": 95.0,
+        "side": "CALL",
+        "strike": 77000.0,
+    }
+    allowed, reason, _, _ = evaluate_local_base_entry(alert, snap)
+    assert not allowed
+    assert reason != "not_top_moment_radar"
 
 
 @patch("app.engines.eod_local_base_replay.get_settings")
