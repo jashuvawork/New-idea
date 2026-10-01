@@ -1,4 +1,4 @@
-"""Power hour (15:00–15:30 IST) — only top FTV/V/ELITE/EXPLODING entries."""
+"""Power hour (15:00–session close IST) — only top FTV/V/ELITE/EXPLODING entries."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def _minutes_now() -> int:
 
 
 def in_power_hour_window() -> bool:
-    """15:00–15:30 IST — restrict new entries to top moments only."""
+    """15:00–power_hour_end IST — restrict new entries to top moments only."""
     settings = get_settings()
     if not bool(getattr(settings, "power_hour_top_only_enabled", True)):
         return False

@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     shadow_trade_all_signals: bool = True
     # Live: skip INR force-stops / scratch exits — let open trades hit structural SL.
     live_hold_to_structural_sl: bool = True
-    # Live / paper-live parity: flatten all open legs at power_hour_end (default 15:30 IST).
+    # Live / paper-live parity: flatten all open legs at power_hour_end (default 15:35 IST, Upstox LTP tail).
     live_session_close_force_exit_enabled: bool = True
     # Open-trade MTM: reject WS/REST spike glitches vs entry, heatmap, and tick median.
     open_trade_ltp_sanity_enabled: bool = True
@@ -2267,12 +2267,12 @@ class Settings(BaseSettings):
     expiry_evening_block_enabled: bool = True
     expiry_evening_block_hour: int = 15
     expiry_evening_block_minute: int = 0
-    # Power hour on all sessions — only top trades after 15:00 until 15:30 close.
+    # Power hour on all sessions — only top trades after 15:00 until session close (15:35, Upstox).
     power_hour_top_only_enabled: bool = True
     power_hour_start_hour: int = 15
     power_hour_start_minute: int = 0
     power_hour_end_hour: int = 15
-    power_hour_end_minute: int = 30
+    power_hour_end_minute: int = 35
     expiry_min_rank_score: float = 62.0
     expiry_cheap_premium_threshold_inr: float = 55.0
     expiry_cheap_premium_lot_cap: int = 55

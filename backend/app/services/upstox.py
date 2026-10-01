@@ -833,6 +833,14 @@ def get_nearest_expiry(symbol: str) -> str:
     return expiry.strftime("%Y-%m-%d")
 
 
+def _regular_session_end_minute() -> int:
+    """IST minute-of-day when live session ends (aligned with power_hour_end / Upstox LTP)."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    return int(settings.power_hour_end_hour) * 60 + int(settings.power_hour_end_minute)
+
+
 def get_market_phase() -> str:
     now = datetime.now(IST)
     if now.weekday() >= 5:
@@ -842,7 +850,7 @@ def get_market_phase() -> str:
         return "CLOSED"
     if t < 9 * 60 + 15:
         return "PREMARKET"
-    if t < 15 * 60 + 30:
+    if t < _regular_session_end_minute():
         return "LIVE_MARKET"
     if t < 16 * 60:
         return "POST_MARKET"

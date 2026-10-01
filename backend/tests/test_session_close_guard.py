@@ -57,20 +57,38 @@ def _trade() -> PaperTrade:
     )
 
 
-def test_applies_at_1530_with_live_parity():
+def test_applies_at_1535_with_live_parity():
     settings = MagicMock()
     settings.live_session_close_force_exit_enabled = True
     settings.auto_trading_enabled = True
     settings.enable_live_trading = False
     settings.paper_live_parity_enabled = True
     settings.power_hour_end_hour = 15
-    settings.power_hour_end_minute = 30
+    settings.power_hour_end_minute = 35
+    token = install_replay_minutes(lambda: 15 * 60 + 35)
+    try:
+        with patch("app.engines.session_close_guard.get_market_phase", return_value="LIVE_MARKET"):
+            with patch("app.engines.session_close_guard.datetime") as mock_dt:
+                mock_dt.now.return_value = datetime(2026, 9, 24, 15, 35, tzinfo=IST)
+                assert live_session_close_force_exit_applies(settings) is True
+    finally:
+        restore_replay_minutes(token)
+
+
+def test_does_not_apply_at_1530_when_close_is_1535():
+    settings = MagicMock()
+    settings.live_session_close_force_exit_enabled = True
+    settings.auto_trading_enabled = True
+    settings.enable_live_trading = False
+    settings.paper_live_parity_enabled = True
+    settings.power_hour_end_hour = 15
+    settings.power_hour_end_minute = 35
     token = install_replay_minutes(lambda: 15 * 60 + 30)
     try:
         with patch("app.engines.session_close_guard.get_market_phase", return_value="LIVE_MARKET"):
             with patch("app.engines.session_close_guard.datetime") as mock_dt:
                 mock_dt.now.return_value = datetime(2026, 9, 24, 15, 30, tzinfo=IST)
-                assert live_session_close_force_exit_applies(settings) is True
+                assert live_session_close_force_exit_applies(settings) is False
     finally:
         restore_replay_minutes(token)
 
@@ -82,12 +100,12 @@ def test_does_not_apply_before_close():
     settings.enable_live_trading = True
     settings.paper_live_parity_enabled = True
     settings.power_hour_end_hour = 15
-    settings.power_hour_end_minute = 30
-    token = install_replay_minutes(lambda: 15 * 60 + 29)
+    settings.power_hour_end_minute = 35
+    token = install_replay_minutes(lambda: 15 * 60 + 34)
     try:
         with patch("app.engines.session_close_guard.get_market_phase", return_value="LIVE_MARKET"):
             with patch("app.engines.session_close_guard.datetime") as mock_dt:
-                mock_dt.now.return_value = datetime(2026, 9, 24, 15, 29, tzinfo=IST)
+                mock_dt.now.return_value = datetime(2026, 9, 24, 15, 34, tzinfo=IST)
                 assert live_session_close_force_exit_applies(settings) is False
     finally:
         restore_replay_minutes(token)
@@ -100,12 +118,12 @@ def test_skips_when_parity_off_and_not_live():
     settings.enable_live_trading = False
     settings.paper_live_parity_enabled = False
     settings.power_hour_end_hour = 15
-    settings.power_hour_end_minute = 30
-    token = install_replay_minutes(lambda: 15 * 60 + 30)
+    settings.power_hour_end_minute = 35
+    token = install_replay_minutes(lambda: 15 * 60 + 35)
     try:
         with patch("app.engines.session_close_guard.get_market_phase", return_value="LIVE_MARKET"):
             with patch("app.engines.session_close_guard.datetime") as mock_dt:
-                mock_dt.now.return_value = datetime(2026, 9, 24, 15, 30, tzinfo=IST)
+                mock_dt.now.return_value = datetime(2026, 9, 24, 15, 35, tzinfo=IST)
                 assert live_session_close_force_exit_applies(settings) is False
     finally:
         restore_replay_minutes(token)
@@ -119,13 +137,13 @@ def test_force_exit_pnl(mock_get_settings):
     settings.enable_live_trading = True
     settings.paper_live_parity_enabled = True
     settings.power_hour_end_hour = 15
-    settings.power_hour_end_minute = 30
+    settings.power_hour_end_minute = 35
     mock_get_settings.return_value = settings
-    token = install_replay_minutes(lambda: 15 * 60 + 30)
+    token = install_replay_minutes(lambda: 15 * 60 + 35)
     try:
         with patch("app.engines.session_close_guard.get_market_phase", return_value="LIVE_MARKET"):
             with patch("app.engines.session_close_guard.datetime") as mock_dt:
-                mock_dt.now.return_value = datetime(2026, 9, 24, 15, 30, tzinfo=IST)
+                mock_dt.now.return_value = datetime(2026, 9, 24, 15, 35, tzinfo=IST)
                 trade = _trade()
                 result = live_session_close_force_exit(trade, 120.0, lot_mult=25)
                 assert result is not None
@@ -151,16 +169,16 @@ def test_process_open_trades_closes_at_session_end(mock_risk, mock_settings):
     settings.edge_engine_enabled = False
     settings.live_session_close_force_exit_enabled = True
     settings.power_hour_end_hour = 15
-    settings.power_hour_end_minute = 30
+    settings.power_hour_end_minute = 35
     mock_settings.return_value = settings
 
     trade = _trade()
     state = AutoTraderState(openPaperTrades=[trade])
-    token = install_replay_minutes(lambda: 15 * 60 + 30)
+    token = install_replay_minutes(lambda: 15 * 60 + 35)
     try:
         with patch("app.engines.session_close_guard.get_market_phase", return_value="LIVE_MARKET"):
             with patch("app.engines.session_close_guard.datetime") as mock_dt:
-                mock_dt.now.return_value = datetime(2026, 9, 24, 15, 30, tzinfo=IST)
+                mock_dt.now.return_value = datetime(2026, 9, 24, 15, 35, tzinfo=IST)
                 asyncio.run(_process_open_trades(state, {"NIFTY": _snap()}, None))
         assert trade.status == "CLOSED"
         assert trade.exitReason == "live_session_market_close"

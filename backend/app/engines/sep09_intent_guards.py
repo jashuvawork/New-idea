@@ -357,8 +357,8 @@ def in_afternoon_structural_rip_window(
     start_h = int(getattr(settings, "sep09_intent_afternoon_structural_min_hour", 12) or 12)
     start_m = int(getattr(settings, "sep09_intent_afternoon_structural_min_minute", 0) or 0)
     start = start_h * 60 + start_m
-    end_h = int(getattr(settings, "live_session_close_hour", 15) or 15)
-    end_m = int(getattr(settings, "live_session_close_minute", 30) or 30)
+    end_h = int(getattr(settings, "power_hour_end_hour", 15) or 15)
+    end_m = int(getattr(settings, "power_hour_end_minute", 35) or 35)
     end = end_h * 60 + end_m
     current = now.hour * 60 + now.minute
     if current < start or current >= end:
