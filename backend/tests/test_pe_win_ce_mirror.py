@@ -278,3 +278,35 @@ def test_put_chase_blocked_after_put_win_on_other_index(mock_trades, _mock_bo):
     assert blocked is True
     assert reason == "pe_win_ce_mirror_block_cross_index_put"
     assert meta.get("putWinSymbol") == "NIFTY"
+
+
+@patch(
+    "app.engines.index_tick_helpers.index_trend_breakout",
+    return_value={"breakout": True, "reasons": ["near_session_low", "mom5", "index_thrust"]},
+)
+@patch("app.engines.pe_win_ce_mirror._collect_session_trades")
+def test_put_chase_blocked_cross_index_even_when_put_breakout(mock_trades, _mock_bo):
+    """Oct 1: breakout waiver must not bypass cross-index PUT after NIFTY win."""
+    from datetime import timedelta
+
+    closed = datetime.now(IST) - timedelta(minutes=6)
+    win = _put_win_trade(8042.0)
+    win.closed_at = closed
+    win.symbol = "NIFTY"
+    mock_trades.return_value = [win]
+    state = SimpleNamespace()
+    sensex_snap = _rally_snap("SENSEX")
+    candidate = SimpleNamespace(
+        mode="explosion",
+        side=Side.PUT,
+        symbol="SENSEX",
+        snap=sensex_snap,
+    )
+    blocked, reason, _meta = pe_win_ce_mirror_put_chase_blocked(
+        candidate,
+        state,
+        {"SENSEX": sensex_snap, "NIFTY": _rally_snap("NIFTY")},
+        settings=Settings(),
+    )
+    assert blocked is True
+    assert reason == "pe_win_ce_mirror_block_cross_index_put"

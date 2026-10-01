@@ -76,6 +76,13 @@ interface RadarHealth {
     lastFastCycleMs?: number;
     lastFullCycleMs?: number;
     fullRestRebuildRunning?: boolean;
+    lastHeavyCycleMs?: number | null;
+    lastOverlayBroadcastAgeMs?: number | null;
+  };
+  latency?: {
+    lastFastCycleMs?: number | null;
+    lastHeavyCycleMs?: number | null;
+    lastOverlayBroadcastAgeMs?: number | null;
   };
 }
 
@@ -816,7 +823,8 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
                 <h3 className="text-[10px] uppercase tracking-[0.12em] text-gray-300 mb-2">Scan cadence</h3>
                 <div className="space-y-1.5 text-[10px]">
                   <div className="flex justify-between"><span className="text-nexus-muted">Entry target</span><span className="font-mono">{compactNumber(health?.cadence?.entryScanIntervalMs, 'ms')}</span></div>
-                  <div className="flex justify-between"><span className="text-nexus-muted">Fast cycle</span><span className="font-mono">{compactNumber(health?.cadence?.lastFastCycleMs, 'ms')}</span></div>
+                  <div className="flex justify-between"><span className="text-nexus-muted">SSE push age</span><span className="font-mono">{compactNumber(health?.cadence?.lastOverlayBroadcastAgeMs ?? health?.latency?.lastOverlayBroadcastAgeMs ?? undefined, 'ms')}</span></div>
+                  <div className="flex justify-between"><span className="text-nexus-muted">Trader pass</span><span className="font-mono">{compactNumber(health?.cadence?.lastHeavyCycleMs ?? health?.latency?.lastHeavyCycleMs ?? health?.cadence?.lastFastCycleMs ?? undefined, 'ms')}</span></div>
                   <div className="flex justify-between"><span className="text-nexus-muted">Full cycle</span><span className="font-mono">{compactNumber(health?.cadence?.lastFullCycleMs, 'ms')}</span></div>
                   <div className="flex justify-between"><span className="text-nexus-muted">REST rebuild</span><span>{health?.cadence?.fullRestRebuildRunning ? 'Running' : 'Idle'}</span></div>
                 </div>
