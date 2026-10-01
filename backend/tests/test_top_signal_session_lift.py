@@ -205,6 +205,28 @@ def test_resolve_daily_trade_cap_lifts_for_top_ftv_pad(mock_lift, mock_chop):
     assert meta.get("dailyCapEliteOnly") is True
 
 
+@patch("app.engines.chop_day_guards.get_settings")
+@patch("app.engines.top_signal_session_lift.get_settings")
+def test_resolve_daily_trade_cap_lifts_for_expiry_day_cap(mock_lift, mock_chop):
+    from app.engines.chop_day_guards import resolve_daily_trade_cap
+
+    cfg = _settings(expiry_day_elite_top_bypasses_trade_cap=True)
+    mock_lift.return_value = cfg
+    mock_chop.return_value = cfg
+
+    with patch(
+        "app.engines.chop_day_guards.trades_cap_reached",
+        return_value=(True, "daily_trade_cap_6>=6_expiry_day"),
+    ):
+        blocked, reason, meta = resolve_daily_trade_cap(
+            AutoTraderState(),
+            {"SENSEX": _snap()},
+        )
+    assert blocked is False
+    assert reason == "daily_trade_cap_elite_bypass"
+    assert meta.get("dailyCapEliteOnly") is True
+
+
 @patch("app.engines.pretrade_validator.get_settings")
 @patch("app.engines.top_signal_session_lift.get_settings")
 def test_resolve_controlled_cap_lifts_for_top_signal(mock_lift, mock_pt):

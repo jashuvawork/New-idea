@@ -4613,11 +4613,23 @@ async def process(
                         }
                     )
 
+                ftv_rank_ok = _is_ranked_ftv_candidate(best)
+                if not ftv_rank_ok:
+                    from app.engines.pe_win_ce_mirror import (
+                        ranked_allocation_rally_unlock_ce_waiver,
+                    )
+                    from app.engines.top_signal_session_lift import (
+                        candidate_qualifies_top_signal_session_lift,
+                    )
+
+                    ftv_rank_ok = candidate_qualifies_top_signal_session_lift(
+                        best,
+                    ) or ranked_allocation_rally_unlock_ce_waiver(best, state)
                 if (
                     allocation_enabled
                     and best.mode == "explosion"
                     and getattr(settings, "ftv_allocation_require_ftv", True)
-                    and not _is_ranked_ftv_candidate(best)
+                    and not ftv_rank_ok
                 ):
                     skipped.append(
                         {

@@ -580,10 +580,10 @@ def resolve_daily_trade_cap(
     snapshots: dict[str, SymbolSnapshot],
 ) -> tuple[bool, str, dict[str, Any]]:
     """
-    Hard daily trade-cap gate with elite-top lift on expiry_worst.
+    Hard daily trade-cap gate with elite-top lift on expiry_worst / expiry_day.
 
-    When closed trades hit expiry_worst max (e.g. 3>=3) but an early-window
-    ELITE / top EXPLODING is on radar, do not block the session — caller must
+    When closed trades hit expiry max (e.g. 3>=3_expiry_worst or 6>=6_expiry_day)
+    but a top ELITE / EXPLODING is on radar, do not block the session — caller must
     restrict entries to those candidates only (meta dailyCapEliteOnly).
     """
     meta: dict[str, Any] = {}
@@ -591,13 +591,21 @@ def resolve_daily_trade_cap(
     if not hit:
         return False, "ok", meta
 
-    if "expiry_worst" not in reason:
+    is_expiry_cap = "expiry_worst" in reason or "expiry_day" in reason
+    if not is_expiry_cap:
         return True, reason, meta
 
     settings = get_settings()
     if not getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True):
         return True, reason, meta
-    if not getattr(settings, "expiry_worst_day_elite_top_bypasses_trade_cap", True):
+    cap_bypass = bool(
+        getattr(settings, "expiry_worst_day_elite_top_bypasses_trade_cap", True)
+    )
+    if "expiry_day" in reason and "expiry_worst" not in reason:
+        cap_bypass = cap_bypass and bool(
+            getattr(settings, "expiry_day_elite_top_bypasses_trade_cap", True)
+        )
+    if not cap_bypass:
         return True, reason, meta
 
     from app.engines.top_signal_session_lift import snapshots_have_top_signal_session_lift
