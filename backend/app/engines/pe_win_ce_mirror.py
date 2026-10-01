@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Mapping, Optional
+from zoneinfo import ZoneInfo
 
 from app.config import get_settings
+
+_IST = ZoneInfo("Asia/Kolkata")
 from app.engines.best_trade_policy import (
     VALID_BEST_BASE_SETUPS,
     _GOOD_TIMING,
@@ -96,11 +99,136 @@ def session_put_win_meta(
     sym = str(
         getattr(best, "symbol", None) or (best.get("symbol") if isinstance(best, dict) else "") or ""
     ).upper()
+    closed_at = _trade_closed_at(best)
     return True, {
         "putWinPnlInr": round(_pnl(best), 2),
         "putWinSymbol": sym,
         "putWinCount": len(put_wins),
+        "putWinClosedAt": closed_at.isoformat() if closed_at else None,
     }
+
+
+def _trade_closed_at(trade: Any) -> datetime | None:
+    raw = getattr(trade, "closed_at", None) or (
+        trade.get("closedAt") if isinstance(trade, dict) else None
+    )
+    if not raw:
+        return None
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=_IST)
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=_IST)
+    except ValueError:
+        return None
+
+
+def _seconds_since_last_put_win(state: Any, *, settings: Any = None) -> float | None:
+    settings = settings or get_settings()
+    pe_win, pe_meta = session_put_win_meta(state, settings=settings)
+    if not pe_win:
+        return None
+    trades = _collect_session_trades(state)
+    min_pnl = float(
+        getattr(settings, "pe_win_ce_mirror_min_put_win_inr", 1000.0) or 1000.0
+    )
+    latest: datetime | None = None
+    for trade in trades:
+        if str(
+            getattr(trade, "status", trade.get("status") if isinstance(trade, dict) else "")
+            or ""
+        ).upper() != "CLOSED":
+            continue
+        if _side_val(getattr(trade, "side", None) or (trade.get("side") if isinstance(trade, dict) else "")) != "PUT":
+            continue
+        pnl = float(
+            getattr(trade, "pnl_inr", None)
+            or (trade.get("pnlInr") if isinstance(trade, dict) else 0)
+            or 0
+        )
+        if pnl < min_pnl - 1e-6:
+            continue
+        reason = str(
+            getattr(trade, "exit_reason", None)
+            or (trade.get("exitReason") if isinstance(trade, dict) else "")
+            or ""
+        ).lower()
+        if not any(tok in reason for tok in _TRAIL_EXIT_TOKENS):
+            continue
+        closed = _trade_closed_at(trade)
+        if closed and (latest is None or closed > latest):
+            latest = closed
+    if latest is None:
+        return None
+    now = datetime.now(_IST)
+    return max(0.0, (now - latest).total_seconds())
+
+
+def pe_win_ce_mirror_put_chase_blocked(
+    candidate: Any,
+    state: Any,
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Block opportunistic PUT explosions shortly after a trail-proved PUT win.
+
+    Oct 1: NIFTY PUT win → SENSEX PUT chase while CE rally leg was the intended mirror.
+    Allows PUT only when index slide breakout confirms continuation down on that symbol.
+    """
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "pe_win_ce_mirror_enabled", True)):
+        return False, "ok", meta
+    if not bool(getattr(settings, "pe_win_ce_mirror_block_put_chase_enabled", True)):
+        return False, "ok", meta
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, "ok", meta
+    if _side_val(getattr(candidate, "side", None)) != "PUT":
+        return False, "ok", meta
+
+    elapsed = _seconds_since_last_put_win(state, settings=settings)
+    if elapsed is None:
+        return False, "ok", meta
+    grace = float(
+        getattr(settings, "pe_win_ce_mirror_block_put_chase_seconds", 900) or 900
+    )
+    meta["secondsSincePutWin"] = round(elapsed, 1)
+    if elapsed > grace:
+        return False, "ok", meta
+
+    pe_win, pe_meta = session_put_win_meta(state, settings=settings)
+    meta.update(pe_meta)
+    if not pe_win:
+        return False, "ok", meta
+
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+    if snap is not None:
+        from app.engines.index_tick_helpers import index_trend_breakout
+
+        if index_trend_breakout(sym, "PUT", snap).get("breakout"):
+            meta["putSlideBreakout"] = True
+            return False, "ok", meta
+
+    win_sym = str(pe_meta.get("putWinSymbol") or "").upper()
+    if win_sym and sym != win_sym:
+        return True, "pe_win_ce_mirror_block_cross_index_put", meta
+
+    for other_sym, other_snap in (snapshots or {}).items():
+        if not other_snap or not getattr(other_snap, "dataAvailable", True):
+            continue
+        armed, reason, arm_meta = call_rally_entry_unlock_armed(
+            state, other_snap, str(other_sym).upper(), settings=settings,
+        )
+        if armed:
+            meta["callLegArmedSymbol"] = str(other_sym).upper()
+            meta["callLegArmedReason"] = reason
+            meta.update(arm_meta)
+            return True, "pe_win_ce_mirror_block_put_for_call_leg", meta
+
+    return True, "pe_win_ce_mirror_block_put_chase_window", meta
 
 
 def _soft_index_rally_ok(

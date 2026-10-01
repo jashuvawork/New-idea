@@ -19,6 +19,7 @@ from app.engines.pe_win_ce_mirror import (
     pe_win_ce_mirror_armed,
     pe_win_ce_mirror_fingerprint,
     pe_win_ce_mirror_near_miss_waive,
+    pe_win_ce_mirror_put_chase_blocked,
     session_put_win_meta,
 )
 from app.engines.winner_entry_guards import premium_fading_blocks_entry
@@ -248,3 +249,32 @@ def test_directional_lock_uses_mirror_state(mock_parity, _mock_breadth):
     assert blocked is False
     mock_parity.assert_called_once()
     assert mock_parity.call_args.kwargs.get("state") is not None
+
+
+@patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={})
+@patch("app.engines.pe_win_ce_mirror._collect_session_trades")
+def test_put_chase_blocked_after_put_win_on_other_index(mock_trades, _mock_bo):
+    from datetime import timedelta
+
+    closed = datetime.now(IST) - timedelta(minutes=2)
+    win = _put_win_trade(8042.0)
+    win.closed_at = closed
+    win.symbol = "NIFTY"
+    mock_trades.return_value = [win]
+    state = SimpleNamespace()
+    sensex_snap = _rally_snap("SENSEX")
+    candidate = SimpleNamespace(
+        mode="explosion",
+        side=Side.PUT,
+        symbol="SENSEX",
+        snap=sensex_snap,
+    )
+    blocked, reason, meta = pe_win_ce_mirror_put_chase_blocked(
+        candidate,
+        state,
+        {"SENSEX": sensex_snap, "NIFTY": _rally_snap("NIFTY")},
+        settings=Settings(),
+    )
+    assert blocked is True
+    assert reason == "pe_win_ce_mirror_block_cross_index_put"
+    assert meta.get("putWinSymbol") == "NIFTY"
