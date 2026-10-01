@@ -1,4 +1,4 @@
-"""Force-flat open live / live-parity legs at the 15:30 IST session close."""
+"""Force-flat open live / live-parity legs at power_hour_end (default 15:35 IST, Upstox LTP tail)."""
 
 from __future__ import annotations
 
