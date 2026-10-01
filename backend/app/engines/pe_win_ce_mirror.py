@@ -1365,43 +1365,6 @@ def pe_win_ce_mirror_premium_fade_bypass(
     )
 
 
-def _expiry_otm_call_structural_waive(
-    alert: Mapping[str, Any],
-    *,
-    settings: Any = None,
-) -> bool:
-    """
-    CE-only expiry OTM waive — same structural bar PE uses (_symmetric_expiry_otm_put_waive).
-
-    Oct 1 SENSEX 72500 CE: base + first lift on radar, blocked by itm_atm_only while ITM PE
-    fills on the parallel slide path.
-    """
-    settings = settings or get_settings()
-    if not bool(getattr(settings, "call_rally_unlock_waive_expiry_otm", True)):
-        return False
-    from app.engines.best_trade_policy import symmetric_structural_base_evidence
-
-    evidence = alert if isinstance(alert, Mapping) else {}
-    if not symmetric_structural_base_evidence(evidence, settings=settings):
-        return False
-    tier = str(evidence.get("tier") or "").upper()
-    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
-        return False
-    if evidence.get("shallowOtmLocalBaseTradeable"):
-        return True
-    if bool(
-        evidence.get("armedBaseLaunch")
-        and (
-            evidence.get("firstLift")
-            or evidence.get("ictFirstLift")
-            or evidence.get("activeBreakout")
-            or evidence.get("displacement")
-        )
-    ):
-        return True
-    return False
-
-
 def call_rally_entry_unlock_expiry_otm_bypass(
     candidate: Any,
     snap: Any,
@@ -1418,8 +1381,6 @@ def call_rally_entry_unlock_expiry_otm_bypass(
     if side != "CALL" or state is None or snap is None:
         return False
     alert_map = alert if isinstance(alert, Mapping) else {}
-    if _expiry_otm_call_structural_waive(alert_map, settings=settings):
-        return True
     from app.engines.best_trade_policy import (
         call_pe_parity_from_candidate,
         mid_rip_best_trade_candidate,

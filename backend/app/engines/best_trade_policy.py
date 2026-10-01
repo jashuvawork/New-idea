@@ -699,6 +699,196 @@ def call_at_base_best_trade_from_candidate(
     )
 
 
+def _call_atm_itm_launch_ok(
+    evidence: Mapping[str, Any],
+    *,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    if bool(
+        evidence.get("armedBaseLaunch")
+        and (
+            evidence.get("firstLift")
+            or evidence.get("ictFirstLift")
+            or evidence.get("activeBreakout")
+            or evidence.get("displacement")
+        )
+    ):
+        return True
+    from app.engines.pe_win_ce_mirror import _building_rip_launch_ok
+
+    return _building_rip_launch_ok(
+        evidence, readiness_reason=readiness_reason, settings=settings,
+    )
+
+
+def call_atm_itm_base_capture_eligible(
+    candidate: Any,
+    snap: Any,
+    *,
+    state: Any = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """
+    CE-only: ATM/ITM (executable strikes) at structural base with lift confirm.
+
+    All session days — avoids OTM-only expiry workarounds; PE parity is rank + gates.
+    """
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "call_atm_itm_base_capture_enabled", True)):
+        return False, meta
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, meta
+    if _side_value(getattr(candidate, "side", "")) != "CALL":
+        return False, meta
+    if snap is None:
+        return False, meta
+
+    money = _classify_moneyness(candidate, snap)
+    meta["moneyness"] = money
+    if money not in ("ATM", "ITM"):
+        return False, meta
+
+    alert = _alert_for_candidate(candidate)
+    pretrade = getattr(candidate, "pretrade_meta", None) or {}
+    ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
+    if not isinstance(ranking, dict):
+        ranking = {}
+    nested = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
+    evidence = {**alert, **nested, **ranking}
+
+    if not symmetric_structural_base_evidence(evidence, settings=settings):
+        return False, meta
+
+    tier = str(evidence.get("tier") or "").upper()
+    meta["tier"] = tier
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False, meta
+
+    if not _call_atm_itm_launch_ok(
+        evidence, readiness_reason=readiness_reason, settings=settings,
+    ):
+        return False, {**meta, "reason": "launch_not_confirmed"}
+
+    if state is not None and call_at_base_best_trade_from_candidate(
+        candidate,
+        snap,
+        state=state,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    ):
+        meta["callAtBaseBestTrade"] = True
+
+    return True, meta
+
+
+def call_atm_itm_base_capture_from_evidence(
+    evidence: Mapping[str, Any],
+    snap: Any,
+    *,
+    side: str = "",
+    strike: float = 0.0,
+    symbol: str = "",
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """Elite / gate path — same bar as selector using evidence + snap."""
+    from types import SimpleNamespace
+
+    from app.config import get_settings
+    from app.models.schemas import Side
+
+    settings = settings or get_settings()
+    side_u = _side_value(side or evidence.get("side"))
+    sym = str(symbol or evidence.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    stk = float(strike or evidence.get("strike") or 0)
+    if side_u != "CALL" or not sym or stk <= 0 or snap is None:
+        return False
+    side_enum = Side.CALL
+    cand = SimpleNamespace(
+        mode="explosion",
+        symbol=sym,
+        side=side_enum,
+        strike=stk,
+        alert=dict(evidence) if isinstance(evidence, Mapping) else {},
+        pretrade_meta={},
+        snap=snap,
+    )
+    ok, _ = call_atm_itm_base_capture_eligible(
+        cand,
+        snap,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+    return ok
+
+
+def call_atm_itm_base_selector_rank_delta(
+    candidate: Any,
+    state: Any,
+    snapshots: dict[str, Any],
+    *,
+    symbols_call_atm_itm_base: set[str] | None = None,
+    settings: Any = None,
+) -> float:
+    """Boost aligned CE at ATM/ITM base; penalize PUT on same index when CE leg is ready."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    side = _side_value(getattr(candidate, "side", ""))
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+
+    if side == "CALL":
+        ok, _ = call_atm_itm_base_capture_eligible(
+            candidate, snap, state=state, settings=settings,
+        )
+        if ok:
+            return float(
+                getattr(settings, "call_atm_itm_base_rank_bonus", 44.0) or 44.0
+            )
+        return 0.0
+
+    if (
+        side == "PUT"
+        and symbols_call_atm_itm_base
+        and sym in symbols_call_atm_itm_base
+    ):
+        return -float(
+            getattr(settings, "call_atm_itm_base_put_rank_penalty", 36.0) or 36.0
+        )
+    return 0.0
+
+
+def symbols_with_call_atm_itm_base_ready(
+    candidates: list[Any],
+    state: Any,
+    snapshots: dict[str, Any],
+    *,
+    settings: Any = None,
+) -> set[str]:
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    out: set[str] = set()
+    for cand in candidates:
+        sym = str(getattr(cand, "symbol", "") or "").upper()
+        if _side_value(getattr(cand, "side", "")) != "CALL":
+            continue
+        snap = snapshots.get(sym) or getattr(cand, "snap", None)
+        ok, _ = call_atm_itm_base_capture_eligible(
+            cand, snap, state=state, settings=settings,
+        )
+        if ok:
+            out.add(sym)
+    return out
+
+
 def put_at_base_best_trade_fingerprint(
     evidence: Mapping[str, Any],
     ranking: Mapping[str, Any] | None,
@@ -1112,6 +1302,17 @@ def best_trade_chop_deep_chase_blocked(
         candidate, alert, elite_assessment, settings=settings,
     ):
         return False, ""
+
+    if (
+        bool(getattr(settings, "call_atm_itm_base_waive_chop_deep_itm", True))
+        and _side_value(getattr(candidate, "side", "")) == "CALL"
+    ):
+        snap = getattr(candidate, "snap", None)
+        ok, _ = call_atm_itm_base_capture_eligible(
+            candidate, snap, settings=settings,
+        )
+        if ok:
+            return False, ""
 
     mode_u = str(day_mode or (elite_assessment or {}).get("dayMode") or "").upper()
     chop_day = any(

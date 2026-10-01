@@ -194,8 +194,8 @@ def test_sensex_expiry_blocks_all_otm_not_just_cheap_band(_mock_today):
 
 
 @patch("app.engines.expiry_day_guards._today_str", return_value="2026-09-17")
-def test_sensex_expiry_otm_ce_waived_at_structural_base_first_lift(_mock_today):
-    """Oct 1 — 72500 CE base + lift: CE structural waive (PE already had this path)."""
+def test_sensex_expiry_otm_ce_still_blocked_without_bypass(_mock_today):
+    """OTM CE on SENSEX expiry stays blocked — use ATM/ITM call_atm_itm_base path instead."""
     s = settings_mock()
     snap = _sensex_expiry_snap()
     alert = {
@@ -204,17 +204,15 @@ def test_sensex_expiry_otm_ce_waived_at_structural_base_first_lift(_mock_today):
         "armedBaseLaunch": True,
         "ictFirstLift": True,
         "localBaseMovePct": 12.0,
-        "ictBaseRelativeMovePct": 12.0,
-        "timingAssessment": "GOOD",
     }
     cand = _sensex_candidate(
-        strike=72500.0, premium=212.7, snap=snap, side=Side.CALL, alert=alert,
+        strike=75000.0, premium=212.7, snap=snap, side=Side.CALL, alert=alert,
     )
     blocked, reason = expiry_cheap_otm_entry_blocked(
         cand, snap, alert, state=MagicMock(), settings=s,
     )
-    assert blocked is False
-    assert reason == ""
+    assert blocked is True
+    assert reason == "best_trade_block_expiry_otm_itm_atm_only"
 
 
 @patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_expiry_otm_bypass", return_value=True)

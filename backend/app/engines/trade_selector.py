@@ -1791,6 +1791,15 @@ def find_best_entry(
     session_trades = collect_session_trades(state)
     index_adj = index_rank_from_backtest(compute_symbol_stats(session_trades))
 
+    from app.engines.best_trade_policy import (
+        call_atm_itm_base_selector_rank_delta,
+        symbols_with_call_atm_itm_base_ready,
+    )
+
+    _call_atm_itm_base_symbols = symbols_with_call_atm_itm_base_ready(
+        candidates, state, snapshots,
+    )
+
     for c in candidates:
         c.score += symbol_rank_adjustment(c.symbol, chop)
         c.score += index_adj.get(c.symbol.upper(), 0.0)
@@ -1818,6 +1827,12 @@ def find_best_entry(
         from app.engines.best_trade_policy import best_trade_base_rank_adjustment
 
         c.score += best_trade_base_rank_adjustment(c)
+        c.score += call_atm_itm_base_selector_rank_delta(
+            c,
+            state,
+            snapshots,
+            symbols_call_atm_itm_base=_call_atm_itm_base_symbols,
+        )
         # Session side-regime: prefer the side the market is confirmed on / flipping toward.
         from app.engines.side_regime import side_regime_rank_delta
 
