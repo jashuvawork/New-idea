@@ -321,7 +321,8 @@ export function UpstoxTradeManagerPanel({
           </div>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-nexus-muted">
             <span>entry scan <b className="font-mono text-white">{health?.latency.entryScanIntervalMs ?? deployment?.cadence?.entryScanIntervalMs ?? '—'} ms</b></span>
-            <span>last fast cycle <b className="font-mono text-white">{health?.latency.lastFastCycleMs ?? '—'} ms</b></span>
+            <span>SSE push age <b className="font-mono text-white">{health?.latency.lastOverlayBroadcastAgeMs != null ? `${health.latency.lastOverlayBroadcastAgeMs} ms` : '—'}</b></span>
+            <span>last trader pass <b className="font-mono text-white">{health?.latency.lastHeavyCycleMs ?? health?.latency.lastFastCycleMs ?? '—'} ms</b></span>
             <span>broker request floor <b className="font-mono text-white">{deployment?.cadence?.upstoxMinRequestIntervalMs ?? '—'} ms</b></span>
             <span>reconciliation <b className={overview?.reconciliation.safe ? 'text-nexus-green' : 'text-nexus-red'}>{overview?.reconciliation.safe ? 'matched' : 'blocked'}</b></span>
           </div>

@@ -1307,6 +1307,7 @@ class Settings(BaseSettings):
     # With an open explosion, tick-fast exits own the hot path — skip heavy entry scans.
     open_position_skip_entry_scan_enabled: bool = True
     open_position_entry_scan_interval_ms: float = 5000.0
+    heavy_trader_overlay_keepalive_seconds: float = 0.75
     building_ltp_min_change_pct: float = 0.15
     building_ltp_min_change_abs: float = 0.05
     # After scoring every watched BUILDING name on an LTP cycle, take only the

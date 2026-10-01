@@ -1,6 +1,7 @@
 """Market snapshot API."""
 
 import asyncio
+import contextlib
 import logging
 import time
 from datetime import datetime
@@ -36,6 +37,8 @@ _news_cache: Optional[list] = None
 _news_cache_at: Optional[datetime] = None
 _last_full_scan_mono: float = 0.0
 _last_fast_cycle_ms: Optional[float] = None
+_last_heavy_cycle_ms: Optional[float] = None
+_last_overlay_broadcast_mono: float = 0.0
 _last_full_cycle_ms: Optional[float] = None
 _sse_queues: set[asyncio.Queue] = set()
 _cache_json: Optional[bytes] = None
@@ -390,6 +393,12 @@ def latency_stats() -> dict[str, Any]:
         "wsSnapshotCacheIntervalMs": settings.ws_snapshot_cache_interval_ms,
         "sseHeartbeatSeconds": settings.sse_heartbeat_seconds,
         "lastFastCycleMs": _last_fast_cycle_ms,
+        "lastHeavyCycleMs": _last_heavy_cycle_ms,
+        "lastOverlayBroadcastAgeMs": round(
+            (time.monotonic() - _last_overlay_broadcast_mono) * 1000, 1
+        )
+        if _last_overlay_broadcast_mono > 0
+        else None,
         "lastFullCycleMs": _last_full_cycle_ms,
         "buildInProgress": _build_in_progress,
         "fullRestRebuildRunning": full_rest_rebuild_running(),
@@ -664,6 +673,8 @@ async def run_building_ltp_entry_cycle(
             _update_cache_memory(snapshot)
         return snapshot
 
+    await _broadcast_overlay_preview(probe)
+
     t0 = time.perf_counter()
 
     # Score EVERY watched BUILDING name on this LTP cycle; take only the best.
@@ -682,7 +693,15 @@ async def run_building_ltp_entry_cycle(
     news = await _fetch_news_cached()
     if run_trader and not rate_limit_active() and not at_max:
         client = UpstoxClient()
-        auto_state = await process(probe, news=news, client=client)
+
+        async def _trader_pass() -> Any:
+            return await process(probe, news=news, client=client)
+
+        auto_state = await _run_with_overlay_keepalive(
+            _trader_pass(),
+            snapshots=probe,
+            broadcast=broadcast,
+        )
         # Keep scoreboard visible on trader state after process mutates it.
         try:
             from app.engines.building_ltp_monitor import building_scoreboard_snapshot
@@ -705,7 +724,8 @@ async def run_building_ltp_entry_cycle(
     mark_building_ltps_seen(probe)
     mark_building_ltp_cycle_done()
     clear_building_scoreboard()
-    _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
+    global _last_heavy_cycle_ms
+    _last_heavy_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
 
     if ws_overlay_due():
         await _store_cache_async(snapshot)
@@ -754,7 +774,6 @@ async def run_entry_scan_on_cache(
             run_trader=run_trader,
         )
 
-    t0 = time.perf_counter()
     settings = get_settings()
     overlays = overlay_snapshot_live(
         _cache.snapshots,
@@ -767,6 +786,8 @@ async def run_entry_scan_on_cache(
     await _refresh_explosion_alerts_async(overlays, today=today)
     overlays = _stamp_snapshot_symbols_now(overlays)
     await _record_radar_pipeline_async(overlays, source="ws_entry_scan")
+    await _broadcast_overlay_preview(overlays)
+    t0 = time.perf_counter()
     news = await _fetch_news_cached()
     auto_state = get_state()
     at_max = _at_max_explosion_positions(auto_state)
@@ -793,7 +814,15 @@ async def run_entry_scan_on_cache(
         if at_max and can_run_tick_fast():
             auto_state = await process_exits_only(overlays, client=client)
         else:
-            auto_state = await process(overlays, news=news, client=client)
+
+            async def _trader_pass() -> Any:
+                return await process(overlays, news=news, client=client)
+
+            auto_state = await _run_with_overlay_keepalive(
+                _trader_pass(),
+                snapshots=overlays,
+                broadcast=broadcast,
+            )
         if not at_max:
             try:
                 from app.engines.building_ltp_monitor import building_scoreboard_snapshot
@@ -832,7 +861,8 @@ async def run_entry_scan_on_cache(
         if broadcast:
             await broadcast_snapshot(snapshot)
 
-    _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
+    global _last_heavy_cycle_ms
+    _last_heavy_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
     return snapshot
 
 
@@ -1040,7 +1070,7 @@ async def _build_multi_snapshot(*, run_trader: bool = True) -> MultiSnapshot:
 
 async def broadcast_snapshot(snapshot: MultiSnapshot | None = None) -> None:
     """Push snapshot to all SSE subscribers — never model_dump on the event loop."""
-    global _sse_payload_dict
+    global _sse_payload_dict, _last_overlay_broadcast_mono
     if not _sse_queues:
         return
     snap = snapshot or _cache
@@ -1069,6 +1099,78 @@ async def broadcast_snapshot(snapshot: MultiSnapshot | None = None) -> None:
                 dead.append(q)
     for q in dead:
         _sse_queues.discard(q)
+    _last_overlay_broadcast_mono = time.monotonic()
+
+
+async def _broadcast_overlay_preview(
+    snapshots: dict[str, Any],
+    *,
+    auto_trader: Any = None,
+    news: Any = None,
+) -> None:
+    """Push WS LTP overlay to SSE before a long trader pass (avoids 30–50s UI staleness)."""
+    if not _sse_queues:
+        return
+    from app.engines.auto_trader import get_state
+
+    preview = _shallow_cache_copy(
+        snapshots=snapshots,
+        auto_trader=auto_trader if auto_trader is not None else get_state(),
+        news=news,
+    )
+    _update_cache_memory(preview)
+    await broadcast_snapshot(preview)
+
+
+async def _run_with_overlay_keepalive(
+    coro: Any,
+    *,
+    snapshots: dict[str, Any],
+    broadcast: bool,
+) -> Any:
+    """
+    While `process()` runs (often 20–40s), keep SSE fresh with lightweight overlays.
+
+    Does not run the full trader — only LTP overlay + broadcast on a fixed interval.
+    """
+    if not broadcast or not _sse_queues:
+        return await coro
+
+    settings = get_settings()
+    interval_s = max(
+        0.35,
+        min(
+            1.25,
+            float(getattr(settings, "heavy_trader_overlay_keepalive_seconds", 0.75) or 0.75),
+        ),
+    )
+    stop = asyncio.Event()
+
+    async def _pump() -> None:
+        while not stop.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval_s)
+            except asyncio.TimeoutError:
+                pass
+            if stop.is_set():
+                break
+            try:
+                overlays = overlay_snapshot_live(
+                    _cache.snapshots if _cache else snapshots,
+                    max_age_seconds=settings.tick_overlay_max_age_seconds,
+                )
+                await _broadcast_overlay_preview(overlays)
+            except Exception as exc:
+                logger.debug("Overlay keepalive skipped: %s", exc)
+
+    pump = asyncio.create_task(_pump())
+    try:
+        return await coro
+    finally:
+        stop.set()
+        pump.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pump
 
 
 async def get_multi_snapshot_fast(*, overlay_ws: bool = True) -> MultiSnapshot:
