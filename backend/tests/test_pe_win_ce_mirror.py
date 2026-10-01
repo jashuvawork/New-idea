@@ -16,10 +16,13 @@ from app.engines.pe_win_ce_mirror import (
     call_rally_entry_unlock_fingerprint,
     call_rally_unlock_armed,
     call_rally_unlock_fingerprint,
+    call_rally_unlock_put_opposite_blocked,
     pe_win_ce_mirror_armed,
     pe_win_ce_mirror_fingerprint,
     pe_win_ce_mirror_near_miss_waive,
+    pe_win_ce_mirror_premium_fade_bypass,
     pe_win_ce_mirror_put_chase_blocked,
+    ranked_allocation_rally_unlock_ce_waiver,
     session_put_win_meta,
 )
 from app.engines.winner_entry_guards import premium_fading_blocks_entry
@@ -310,3 +313,96 @@ def test_put_chase_blocked_cross_index_even_when_put_breakout(mock_trades, _mock
     )
     assert blocked is True
     assert reason == "pe_win_ce_mirror_block_cross_index_put"
+
+
+@patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={})
+@patch(
+    "app.engines.pe_win_ce_mirror.call_rally_entry_unlock_armed",
+    return_value=(True, "call_rally_unlock", {"rallyPoints": 48.0}),
+)
+@patch(
+    "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+    return_value=("RALLY", {}),
+)
+def test_call_rally_unlock_blocks_put_on_rally_leg(_dom, _arm, _bo):
+    snap = _rally_snap("SENSEX")
+    candidate = SimpleNamespace(
+        mode="explosion",
+        side=Side.PUT,
+        symbol="SENSEX",
+        snap=snap,
+    )
+    blocked, reason, meta = call_rally_unlock_put_opposite_blocked(
+        candidate,
+        SimpleNamespace(),
+        {"SENSEX": snap},
+        settings=Settings(),
+    )
+    assert blocked is True
+    assert reason == "call_rally_unlock_block_opposite_put"
+    assert meta.get("dominantTrend") == "RALLY"
+
+
+@patch("app.engines.pe_win_ce_mirror._collect_session_trades", return_value=[])
+@patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={})
+@patch(
+    "app.engines.pe_win_ce_mirror.call_rally_entry_unlock_armed",
+    return_value=(True, "call_rally_unlock", {}),
+)
+@patch(
+    "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+    return_value=("RALLY", {}),
+)
+def test_put_chase_blocked_when_rally_unlock_armed_without_put_win(
+    _dom, _arm, _trades, _bo,
+):
+    snap = _rally_snap("SENSEX")
+    candidate = SimpleNamespace(
+        mode="explosion",
+        side=Side.PUT,
+        symbol="SENSEX",
+        snap=snap,
+    )
+    blocked, reason, _ = pe_win_ce_mirror_put_chase_blocked(
+        candidate,
+        SimpleNamespace(),
+        {"SENSEX": snap},
+        settings=Settings(),
+    )
+    assert blocked is True
+    assert reason == "call_rally_unlock_block_opposite_put"
+
+
+@patch(
+    "app.engines.pe_win_ce_mirror.call_rally_entry_unlock_armed",
+    return_value=(True, "call_rally_unlock", {}),
+)
+def test_premium_fade_bypass_when_rally_armed_elite(mock_armed):
+    snap = _rally_snap()
+    ok = pe_win_ce_mirror_premium_fade_bypass(
+        side=Side.CALL,
+        state=SimpleNamespace(),
+        snap=snap,
+        symbol="NIFTY",
+        evidence={"tier": "ELITE"},
+        assessment={"tier": "ELITE"},
+        settings=Settings(),
+    )
+    assert ok is True
+
+
+@patch(
+    "app.engines.pe_win_ce_mirror.call_rally_entry_unlock_armed",
+    return_value=(True, "call_rally_unlock", {}),
+)
+def test_ranked_allocation_waiver_for_rally_unlock_elite_ce(mock_armed):
+    snap = _rally_snap()
+    cand = SimpleNamespace(
+        mode="explosion",
+        side=Side.CALL,
+        symbol="NIFTY",
+        snap=snap,
+        alert={"tier": "ELITE"},
+        tier="ELITE",
+    )
+    assert ranked_allocation_rally_unlock_ce_waiver(cand, SimpleNamespace()) is True

@@ -418,6 +418,13 @@ class Settings(BaseSettings):
     call_rally_unlock_waive_mtf_premium_fade: bool = True
     call_rally_unlock_near_miss_enabled: bool = True
     call_rally_unlock_waive_chop_shallow: bool = True
+    # Oct 1: CE SELECTED then exec fade → PUT filled same index while rally unlock armed.
+    call_rally_unlock_block_opposite_put_enabled: bool = True
+    put_slide_unlock_block_opposite_call_enabled: bool = True
+    # Plain expiry_day trade cap (e.g. 6>=6) — same elite-only lift as expiry_worst.
+    expiry_day_elite_top_bypasses_trade_cap: bool = True
+    # Ranked sleeve may admit rally-unlocked ELITE CE without strict FTV first-lift flag.
+    ftv_allocation_rally_unlock_ce_waiver_enabled: bool = True
     # CE at base — same near-base max-lots bar as PE best trades (score ≥90, local ≤20%).
     call_at_base_best_trade_enabled: bool = True
     call_at_base_best_trade_min_grade: str = "A"

@@ -139,6 +139,60 @@ def _seconds_since_last_call_win(state: Any, *, settings: Any = None) -> float |
     return max(0.0, (now - latest).total_seconds())
 
 
+def put_slide_unlock_call_opposite_blocked(
+    candidate: Any,
+    state: Any,
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Block CALL explosions while PUT slide unlock is armed (dominant SLIDE)."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "put_slide_unlock_block_opposite_call_enabled", True)):
+        return False, "ok", meta
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, "ok", meta
+    if _side_val(getattr(candidate, "side", None)) != "CALL":
+        return False, "ok", meta
+
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+    if snap is None or state is None:
+        return False, "ok", meta
+
+    armed, arm_reason, arm_meta = put_slide_entry_unlock_armed(
+        state, snap, sym, settings=settings,
+    )
+    meta.update(arm_meta)
+    if not armed:
+        return False, "ok", meta
+    meta["putSlideUnlockArmed"] = True
+    meta["putSlideUnlockReason"] = arm_reason
+
+    from app.engines.index_session_dominant_trend import (
+        index_session_dominant_trend,
+        side_aligns_with_dominant_trend,
+    )
+
+    dominant, trend_meta = index_session_dominant_trend(
+        sym, snap, state, settings=settings, track_flip=False,
+    )
+    meta["dominantTrend"] = dominant
+    meta.update(trend_meta)
+
+    if side_aligns_with_dominant_trend("CALL", dominant):
+        return False, "ok", meta
+
+    from app.engines.index_tick_helpers import index_trend_breakout
+
+    if index_trend_breakout(sym, "CALL", snap).get("breakout"):
+        meta["callRallyBreakout"] = True
+        return False, "ok", meta
+
+    return True, "put_slide_unlock_block_opposite_call", meta
+
+
 def ce_win_pe_mirror_call_chase_blocked(
     candidate: Any,
     state: Any,
@@ -151,11 +205,21 @@ def ce_win_pe_mirror_call_chase_blocked(
     meta: dict[str, Any] = {}
     if not bool(getattr(settings, "ce_win_pe_mirror_enabled", True)):
         return False, "ok", meta
-    if not bool(getattr(settings, "ce_win_pe_mirror_block_call_chase_enabled", True)):
-        return False, "ok", meta
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         return False, "ok", meta
     if _side_val(getattr(candidate, "side", None)) != "CALL":
+        return False, "ok", meta
+
+    slide_call_blocked, slide_call_reason, slide_call_meta = (
+        put_slide_unlock_call_opposite_blocked(
+            candidate, state, snapshots, settings=settings,
+        )
+    )
+    meta.update(slide_call_meta)
+    if slide_call_blocked:
+        return True, slide_call_reason, meta
+
+    if not bool(getattr(settings, "ce_win_pe_mirror_block_call_chase_enabled", True)):
         return False, "ok", meta
 
     elapsed = _seconds_since_last_call_win(state, settings=settings)
