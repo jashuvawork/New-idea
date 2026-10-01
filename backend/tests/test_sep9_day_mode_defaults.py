@@ -52,7 +52,7 @@ def test_sep917_legacy_profile_defaults():
     assert s.explosion_shallow_otm_entry_enabled is False
     assert s.near_base_session_capture_enabled is False
     assert s.put_slide_unlock_waive_expiry_otm is False
-    assert s.call_rally_unlock_waive_expiry_otm is False
+    assert s.call_rally_unlock_waive_expiry_otm is True
     assert s.ftv_elite_top_only_enabled is False
     assert s.top_moments_only_enabled is False
     assert s.open_premium_shallow_otm_all_sessions_enabled is False

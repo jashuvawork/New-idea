@@ -1163,7 +1163,7 @@ def elite_v_rip_shallow_lift_blocked(
     local = _number(assessment.get("localBasePct"))
     if local > max_local + 1e-6:
         return False, ""
-    if bool(evidence.get("firstLift")):
+    if bool(evidence.get("firstLift") or evidence.get("ictFirstLift")):
         return False, ""
     return True, "elite_v_rip_shallow_first_lift_blocked"
 
