@@ -174,15 +174,8 @@ def ce_win_pe_mirror_call_chase_blocked(
         return False, "ok", meta
 
     sym = str(getattr(candidate, "symbol", "") or "").upper()
-    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
-    if snap is not None:
-        from app.engines.index_tick_helpers import index_trend_breakout
-
-        if index_trend_breakout(sym, "CALL", snap).get("breakout"):
-            meta["callRallyBreakout"] = True
-            return False, "ok", meta
-
     win_sym = str(call_meta.get("callWinSymbol") or "").upper()
+
     if win_sym and sym != win_sym:
         return True, "ce_win_pe_mirror_block_cross_index_call", meta
 
@@ -197,6 +190,14 @@ def ce_win_pe_mirror_call_chase_blocked(
             meta["putLegArmedReason"] = reason
             meta.update(arm_meta)
             return True, "ce_win_pe_mirror_block_call_for_put_leg", meta
+
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+    if snap is not None and win_sym and sym == win_sym:
+        from app.engines.index_tick_helpers import index_trend_breakout
+
+        if index_trend_breakout(sym, "CALL", snap).get("breakout"):
+            meta["callRallyBreakout"] = True
+            return False, "ok", meta
 
     return True, "ce_win_pe_mirror_block_call_chase_window", meta
 

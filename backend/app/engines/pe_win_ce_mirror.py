@@ -204,15 +204,10 @@ def pe_win_ce_mirror_put_chase_blocked(
         return False, "ok", meta
 
     sym = str(getattr(candidate, "symbol", "") or "").upper()
-    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
-    if snap is not None:
-        from app.engines.index_tick_helpers import index_trend_breakout
-
-        if index_trend_breakout(sym, "PUT", snap).get("breakout"):
-            meta["putSlideBreakout"] = True
-            return False, "ok", meta
-
     win_sym = str(pe_meta.get("putWinSymbol") or "").upper()
+
+    # Hard blocks before index_trend_breakout waiver — Oct 1 SENSEX PUT after NIFTY win
+    # was allowed when a local PUT "breakout" fired during the mirrored CE rally window.
     if win_sym and sym != win_sym:
         return True, "pe_win_ce_mirror_block_cross_index_put", meta
 
@@ -227,6 +222,14 @@ def pe_win_ce_mirror_put_chase_blocked(
             meta["callLegArmedReason"] = reason
             meta.update(arm_meta)
             return True, "pe_win_ce_mirror_block_put_for_call_leg", meta
+
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+    if snap is not None and win_sym and sym == win_sym:
+        from app.engines.index_tick_helpers import index_trend_breakout
+
+        if index_trend_breakout(sym, "PUT", snap).get("breakout"):
+            meta["putSlideBreakout"] = True
+            return False, "ok", meta
 
     return True, "pe_win_ce_mirror_block_put_chase_window", meta
 
