@@ -281,6 +281,20 @@ def test_elite_entry_blocks_v_rip_without_first_lift_even_with_breakout():
     assert reason == "elite_v_rip_shallow_first_lift_blocked"
 
 
+def test_elite_entry_allows_v_rip_when_ict_first_lift_set():
+    ok, reason, _ = elite_entry_allowed(
+        _v_evidence(
+            localBaseMovePct=6.5,
+            firstLift=False,
+            ictFirstLift=True,
+            armedBaseLaunch=True,
+        ),
+        _ranking(rankScore=95.0, grade="S"),
+    )
+    assert ok is True
+    assert reason == "ok"
+
+
 def test_elite_entry_blocks_call_chop_shallow():
     from app.config import Settings
 

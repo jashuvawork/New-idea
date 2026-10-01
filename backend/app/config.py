@@ -389,7 +389,8 @@ class Settings(BaseSettings):
     pe_win_ce_mirror_block_put_chase_seconds: int = 900
     # Index rally CE unlock without PUT win first (Sep 11-style missed CE rally leg).
     call_rally_unlock_enabled: bool = True
-    call_rally_unlock_waive_expiry_otm: bool = False
+    # CE-only: PE expiry OTM already waives via put_slide structural base; enable CE mirror path.
+    call_rally_unlock_waive_expiry_otm: bool = True
     # PUT slide / CE-win PE mirror — symmetric Sep 9–17 SENSEX 73900 PE OTM capture.
     put_slide_unlock_enabled: bool = True
     put_slide_unlock_waive_expiry_otm: bool = False
