@@ -1593,6 +1593,26 @@ def elite_entry_allowed(
             float(getattr(settings, "pe_win_ce_mirror_min_elite_score", 85.0) or 85.0),
             capture_floor,
         )
+    if resolved_side == "CALL" and mirror_snap is not None:
+        from app.engines.best_trade_policy import call_atm_itm_base_capture_from_evidence
+
+        strike = float(
+            evidence.get("strike")
+            or assessment.get("strike")
+            or 0
+        )
+        if call_atm_itm_base_capture_from_evidence(
+            evidence,
+            mirror_snap,
+            side="CALL",
+            strike=strike,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        ):
+            atm_floor = float(
+                getattr(settings, "call_atm_itm_base_elite_score_floor", 76.0) or 76.0
+            )
+            min_score = min(min_score, atm_floor)
     if building_rip_helper_ok:
         rip_floor = float(
             getattr(settings, "building_rip_helper_min_elite_score", 84.0) or 84.0
