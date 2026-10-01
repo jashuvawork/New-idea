@@ -19,6 +19,7 @@ from app.engines.pe_win_ce_mirror import (
     _collect_session_trades,
     _evidence_has_premium_local_base,
     _side_val,
+    _trade_closed_at,
 )
 from app.engines.rally_capture import _grade_meets_min
 from app.models.schemas import Side, SymbolSnapshot
@@ -82,11 +83,122 @@ def session_call_win_meta(
         getattr(best, "symbol", None) or (best.get("symbol") if isinstance(best, dict) else "")
         or ""
     ).upper()
+    closed_at = _trade_closed_at(best)
     return True, {
         "callWinPnlInr": round(_pnl(best), 2),
         "callWinSymbol": sym,
         "callWinCount": len(call_wins),
+        "callWinClosedAt": closed_at.isoformat() if closed_at else None,
     }
+
+
+def _seconds_since_last_call_win(state: Any, *, settings: Any = None) -> float | None:
+    settings = settings or get_settings()
+    call_win, _ = session_call_win_meta(state, settings=settings)
+    if not call_win:
+        return None
+    trades = _collect_session_trades(state)
+    min_pnl = float(
+        getattr(settings, "ce_win_pe_mirror_min_call_win_inr", 1000.0) or 1000.0
+    )
+    latest: datetime | None = None
+    for trade in trades:
+        status = str(
+            getattr(trade, "status", trade.get("status") if isinstance(trade, dict) else "")
+            or ""
+        ).upper()
+        if status != "CLOSED":
+            continue
+        if _side_val(
+            getattr(trade, "side", None) or (trade.get("side") if isinstance(trade, dict) else "")
+        ) != "CALL":
+            continue
+        pnl = float(
+            getattr(trade, "pnl_inr", None)
+            or (trade.get("pnlInr") if isinstance(trade, dict) else 0)
+            or 0
+        )
+        if pnl < min_pnl - 1e-6:
+            continue
+        reason = str(
+            getattr(trade, "exit_reason", None)
+            or (trade.get("exitReason") if isinstance(trade, dict) else "")
+            or ""
+        ).lower()
+        if not any(tok in reason for tok in _TRAIL_EXIT_TOKENS):
+            continue
+        closed = _trade_closed_at(trade)
+        if closed and (latest is None or closed > latest):
+            latest = closed
+    if latest is None:
+        return None
+    from zoneinfo import ZoneInfo
+
+    ist = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(ist)
+    return max(0.0, (now - latest).total_seconds())
+
+
+def ce_win_pe_mirror_call_chase_blocked(
+    candidate: Any,
+    state: Any,
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Symmetric to pe_win_ce_mirror_put_chase_blocked — CE chase after CALL win."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "ce_win_pe_mirror_enabled", True)):
+        return False, "ok", meta
+    if not bool(getattr(settings, "ce_win_pe_mirror_block_call_chase_enabled", True)):
+        return False, "ok", meta
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, "ok", meta
+    if _side_val(getattr(candidate, "side", None)) != "CALL":
+        return False, "ok", meta
+
+    elapsed = _seconds_since_last_call_win(state, settings=settings)
+    if elapsed is None:
+        return False, "ok", meta
+    grace = float(
+        getattr(settings, "ce_win_pe_mirror_block_call_chase_seconds", 900) or 900
+    )
+    meta["secondsSinceCallWin"] = round(elapsed, 1)
+    if elapsed > grace:
+        return False, "ok", meta
+
+    call_win, call_meta = session_call_win_meta(state, settings=settings)
+    meta.update(call_meta)
+    if not call_win:
+        return False, "ok", meta
+
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+    if snap is not None:
+        from app.engines.index_tick_helpers import index_trend_breakout
+
+        if index_trend_breakout(sym, "CALL", snap).get("breakout"):
+            meta["callRallyBreakout"] = True
+            return False, "ok", meta
+
+    win_sym = str(call_meta.get("callWinSymbol") or "").upper()
+    if win_sym and sym != win_sym:
+        return True, "ce_win_pe_mirror_block_cross_index_call", meta
+
+    for other_sym, other_snap in (snapshots or {}).items():
+        if not other_snap or not getattr(other_snap, "dataAvailable", True):
+            continue
+        armed, reason, arm_meta = put_slide_entry_unlock_armed(
+            state, other_snap, str(other_sym).upper(), settings=settings,
+        )
+        if armed:
+            meta["putLegArmedSymbol"] = str(other_sym).upper()
+            meta["putLegArmedReason"] = reason
+            meta.update(arm_meta)
+            return True, "ce_win_pe_mirror_block_call_for_put_leg", meta
+
+    return True, "ce_win_pe_mirror_block_call_chase_window", meta
 
 
 def _soft_index_slide_ok(

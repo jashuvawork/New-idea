@@ -384,6 +384,9 @@ class Settings(BaseSettings):
     pe_win_ce_mirror_require_index_rally: bool = True
     pe_win_ce_mirror_near_miss_enabled: bool = True
     pe_win_ce_mirror_local_cap_pct: float = 15.0
+    # After trail PUT win: do not fill a chase PUT (esp. other index) while CE mirror window is open.
+    pe_win_ce_mirror_block_put_chase_enabled: bool = True
+    pe_win_ce_mirror_block_put_chase_seconds: int = 900
     # Index rally CE unlock without PUT win first (Sep 11-style missed CE rally leg).
     call_rally_unlock_enabled: bool = True
     call_rally_unlock_waive_expiry_otm: bool = False
@@ -398,6 +401,8 @@ class Settings(BaseSettings):
     ce_win_pe_mirror_waive_premium_fade: bool = True
     ce_win_pe_mirror_min_call_win_inr: float = 1000.0
     ce_win_pe_mirror_slide_pts_fraction: float = 0.5
+    ce_win_pe_mirror_block_call_chase_enabled: bool = True
+    ce_win_pe_mirror_block_call_chase_seconds: int = 900
     put_premium_local_base_unlock_enabled: bool = True
     put_premium_local_base_max_local_pct: float = 18.0
     put_premium_local_base_require_index_peak: bool = True

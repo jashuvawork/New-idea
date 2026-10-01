@@ -441,6 +441,23 @@ def worst_day_allows_candidate(
     if trend_blocked:
         return False, trend_reason, meta
 
+    from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_put_chase_blocked
+    from app.engines.put_slide_ce_mirror import ce_win_pe_mirror_call_chase_blocked
+
+    mirror_put_blocked, mirror_put_reason, mirror_put_meta = (
+        pe_win_ce_mirror_put_chase_blocked(candidate, state, snapshots)
+    )
+    meta.update(mirror_put_meta)
+    if mirror_put_blocked:
+        return False, mirror_put_reason, meta
+
+    mirror_call_blocked, mirror_call_reason, mirror_call_meta = (
+        ce_win_pe_mirror_call_chase_blocked(candidate, state, snapshots)
+    )
+    meta.update(mirror_call_meta)
+    if mirror_call_blocked:
+        return False, mirror_call_reason, meta
+
     if not index_trend_guard_active():
         blocked_put, put_reason = worst_day_blocks_put_rally(candidate, state, snapshots)
         if blocked_put:
