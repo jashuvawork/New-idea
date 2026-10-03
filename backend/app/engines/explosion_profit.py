@@ -2090,6 +2090,81 @@ def peak_velocity_reversal_keep_reason(
     return None
 
 
+def _explosion_multiple_fast_fade_tiers(settings: Any) -> set[str]:
+    raw = str(getattr(settings, "explosion_multiple_tiers_csv", "ELITE,EXPLODING,BUILDING") or "")
+    return {part.strip().upper() for part in raw.split(",") if part.strip()}
+
+
+def multiple_touch_fast_fade_exit_reason(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    current_premium: float,
+    live_velocity_3s: float = 0.0,
+) -> Optional[str]:
+    """After max LTP reaches N× entry, book on fast fade while LTP stays above the book floor."""
+    settings = get_settings()
+    if not bool(getattr(settings, "explosion_multiple_fast_fade_enabled", True)):
+        return None
+
+    entry = float(trade.entryPremium or 0)
+    if entry < _cfg_float(settings, "explosion_multiple_min_entry_premium", 70.0):
+        return None
+
+    ctx = trade.entryContext or {}
+    tier = str(ctx.get("explosionTier") or ctx.get("tier") or "").upper()
+    if tier not in _explosion_multiple_fast_fade_tiers(settings):
+        return None
+
+    try:
+        max_ltp = float(trade.maxLtp or ctx.get("maxLtp") or 0)
+    except (TypeError, ValueError):
+        max_ltp = 0.0
+    if max_ltp <= 0 and best > 0:
+        max_ltp = entry + float(best)
+    arm_ratio = _cfg_float(settings, "explosion_multiple_arm_ratio", 2.0)
+    if max_ltp + 1e-6 < arm_ratio * entry:
+        return None
+
+    if not ctx.get("multipleFastFadeArmed"):
+        if trade.entryContext is None:
+            trade.entryContext = {}
+            ctx = trade.entryContext
+        ctx["multipleFastFadeArmed"] = True
+
+    book_floor = max(
+        arm_ratio * entry,
+        _cfg_float(settings, "explosion_multiple_book_min_ltp_inr", 200.0),
+        entry + _cfg_float(settings, "explosion_multiple_book_min_pnl_points", 0.0),
+    )
+    current_premium = float(current_premium or 0)
+    if current_premium + 1e-6 < book_floor:
+        return None
+
+    min_giveback = _cfg_float(settings, "explosion_multiple_min_peak_giveback_points", 10.0)
+    if max_ltp - current_premium + 1e-6 < min_giveback:
+        return None
+
+    live_v3, _ = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
+    skip_hot = _cfg_float(settings, "explosion_multiple_skip_hot_velocity_3s", 2.0)
+    if live_v3 >= skip_hot:
+        return None
+
+    min_reversal_v = _cfg_float(settings, "explosion_multiple_fast_fade_min_velocity_3s", 2.0)
+    if live_v3 > -min_reversal_v:
+        return None
+
+    if not _reversal_keep_rollover_confirmed(
+        trade, settings=settings, live_velocity_3s=live_velocity_3s,
+    ):
+        return None
+
+    _ = best
+    _ = pnl_pts
+    return "explosion_multiple_fast_fade_lock"
+
+
 def evaluate_explosion_exit(
     trade: PaperTrade,
     current_premium: float,
@@ -2265,6 +2340,16 @@ def evaluate_explosion_exit(
     )
     if reversal_keep:
         return reversal_keep, pnl_inr
+
+    multiple_fade = multiple_touch_fast_fade_exit_reason(
+        trade,
+        best=best,
+        pnl_pts=pnl_pts,
+        current_premium=current_premium,
+        live_velocity_3s=v3,
+    )
+    if multiple_fade:
+        return multiple_fade, pnl_inr
 
     # Peak→fade toward losses: book remaining green / BE before hard SL.
     # Runs before trail-arm gates so unarmed trails cannot give winners back.

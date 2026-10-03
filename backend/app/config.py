@@ -1663,6 +1663,16 @@ class Settings(BaseSettings):
     # After a peak prints, require premium rollover (cold v3 + flat mom) before
     # peak-velocity keep fires — avoids booking on a velocity blip while heat remains.
     peak_velocity_reversal_require_rollover_confirm: bool = True
+    # 2× entry touch + fast premium fade: book while LTP still strong (Oct 22450 PE pattern).
+    explosion_multiple_fast_fade_enabled: bool = True
+    explosion_multiple_arm_ratio: float = 2.0
+    explosion_multiple_book_min_ltp_inr: float = 200.0
+    explosion_multiple_book_min_pnl_points: float = 0.0
+    explosion_multiple_min_peak_giveback_points: float = 10.0
+    explosion_multiple_fast_fade_min_velocity_3s: float = 2.0
+    explosion_multiple_skip_hot_velocity_3s: float = 2.0
+    explosion_multiple_min_entry_premium: float = 70.0
+    explosion_multiple_tiers_csv: str = "ELITE,EXPLODING,BUILDING"
     peak_keep_block_adaptive_stop_defer: bool = True
     # Deep ITM max-profit: %-trail never arms — stamp modest peak at entry (CE/PE symmetric).
     modest_peak_deep_itm_auto_stamp_enabled: bool = True
