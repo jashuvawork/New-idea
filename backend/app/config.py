@@ -1663,9 +1663,13 @@ class Settings(BaseSettings):
     # After a peak prints, require premium rollover (cold v3 + flat mom) before
     # peak-velocity keep fires — avoids booking on a velocity blip while heat remains.
     peak_velocity_reversal_require_rollover_confirm: bool = True
-    # 2× entry touch + fast premium fade: book while LTP still strong (Oct 22450 PE pattern).
+    # N× entry touch (n > 1) + fast premium fade — arm at min multiple, book on fade
+    # while LTP stays above a floor that ratchets with peak multiple (Oct 22450 PE pattern).
     explosion_multiple_fast_fade_enabled: bool = True
+    # Minimum peak multiple vs entry to arm (2.0 = 2×; raise to 3.0 to require 3× touch first).
     explosion_multiple_arm_ratio: float = 2.0
+    # After a k× peak, book floor includes k× entry × this ratio (holds nx giveback on fast fade).
+    explosion_multiple_book_peak_keep_ratio: float = 0.75
     explosion_multiple_book_min_ltp_inr: float = 200.0
     explosion_multiple_book_min_pnl_points: float = 0.0
     explosion_multiple_min_peak_giveback_points: float = 10.0

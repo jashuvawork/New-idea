@@ -2124,17 +2124,27 @@ def multiple_touch_fast_fade_exit_reason(
     if max_ltp <= 0 and best > 0:
         max_ltp = entry + float(best)
     arm_ratio = _cfg_float(settings, "explosion_multiple_arm_ratio", 2.0)
+    arm_ratio = max(1.01, arm_ratio)
     if max_ltp + 1e-6 < arm_ratio * entry:
         return None
 
+    peak_multiple = max_ltp / entry if entry > 0 else 0.0
+    if trade.entryContext is None:
+        trade.entryContext = {}
+        ctx = trade.entryContext
     if not ctx.get("multipleFastFadeArmed"):
-        if trade.entryContext is None:
-            trade.entryContext = {}
-            ctx = trade.entryContext
         ctx["multipleFastFadeArmed"] = True
+    prev_peak_n = float(ctx.get("multipleFastFadePeakMultiple") or 0)
+    if peak_multiple > prev_peak_n + 1e-6:
+        ctx["multipleFastFadePeakMultiple"] = round(peak_multiple, 3)
+
+    keep_ratio = _cfg_float(settings, "explosion_multiple_book_peak_keep_ratio", 0.75)
+    keep_ratio = min(0.95, max(0.5, keep_ratio))
+    peak_ltp_floor = peak_multiple * entry * keep_ratio if peak_multiple > 0 else 0.0
 
     book_floor = max(
         arm_ratio * entry,
+        peak_ltp_floor,
         _cfg_float(settings, "explosion_multiple_book_min_ltp_inr", 200.0),
         entry + _cfg_float(settings, "explosion_multiple_book_min_pnl_points", 0.0),
     )
