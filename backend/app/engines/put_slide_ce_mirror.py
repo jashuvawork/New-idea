@@ -243,6 +243,10 @@ def ce_win_pe_mirror_call_chase_blocked(
     if win_sym and sym != win_sym:
         return True, "ce_win_pe_mirror_block_cross_index_call", meta
 
+    alert_d = getattr(candidate, "alert", None)
+    if not isinstance(alert_d, dict):
+        alert_d = {}
+
     for other_sym, other_snap in (snapshots or {}).items():
         if not other_snap or not getattr(other_snap, "dataAvailable", True):
             continue
@@ -250,6 +254,23 @@ def ce_win_pe_mirror_call_chase_blocked(
             state, other_snap, str(other_sym).upper(), settings=settings,
         )
         if armed:
+            from app.engines.session_mode_feedback import (
+                same_strike_post_win_v_rip_reentry_waive,
+            )
+
+            waived, waive_meta = same_strike_post_win_v_rip_reentry_waive(
+                state,
+                symbol=sym,
+                side=getattr(candidate, "side", None),
+                strike=float(getattr(candidate, "strike", 0) or 0),
+                alert=alert_d,
+                confidence=float(getattr(candidate, "score", 0) or 0),
+                settings=settings,
+            )
+            if waived:
+                meta.update(waive_meta)
+                meta["ceWinPeMirrorWaived"] = True
+                return False, "ok", meta
             meta["putLegArmedSymbol"] = str(other_sym).upper()
             meta["putLegArmedReason"] = reason
             meta.update(arm_meta)
@@ -262,6 +283,21 @@ def ce_win_pe_mirror_call_chase_blocked(
         if index_trend_breakout(sym, "CALL", snap).get("breakout"):
             meta["callRallyBreakout"] = True
             return False, "ok", meta
+
+    from app.engines.session_mode_feedback import same_strike_post_win_v_rip_reentry_waive
+
+    waived, waive_meta = same_strike_post_win_v_rip_reentry_waive(
+        state,
+        symbol=sym,
+        side=getattr(candidate, "side", None),
+        strike=float(getattr(candidate, "strike", 0) or 0),
+        alert=alert_d,
+        confidence=float(getattr(candidate, "score", 0) or 0),
+        settings=settings,
+    )
+    if waived:
+        meta.update(waive_meta)
+        return False, "ok", meta
 
     return True, "ce_win_pe_mirror_block_call_chase_window", meta
 

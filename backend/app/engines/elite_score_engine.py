@@ -1165,6 +1165,19 @@ def elite_v_rip_shallow_lift_blocked(
         return False, ""
     if bool(evidence.get("firstLift") or evidence.get("ictFirstLift")):
         return False, ""
+    if bool(getattr(settings, "elite_v_rip_shallow_waive_session_low_volume_enabled", True)):
+        moment = str(evidence.get("momentType") or "").lower()
+        v_rip = bool(
+            evidence.get("ictVRipReady")
+            or evidence.get("vRipReady")
+            or moment == "v_rip_session_low"
+        )
+        if v_rip and (
+            bool(evidence.get("volumeAwakening"))
+            or bool(evidence.get("armedBaseLaunch"))
+            or moment in {"armed_base_launch", "ict_base_armed", "v_rip_session_low"}
+        ):
+            return False, ""
     return True, "elite_v_rip_shallow_first_lift_blocked"
 
 

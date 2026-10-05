@@ -649,6 +649,7 @@ async def _open_from_candidate(
             reason = _session_loss_meta.get("reason") or "session_same_side_loss_reentry_cooldown"
             return False, reason
 
+        alert_d = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
         ml_blocked, _ml_meta = reentry_ml_win_prob_blocked(
             state,
             symbol=symbol,
@@ -656,6 +657,7 @@ async def _open_from_candidate(
             strike=float(candidate.strike or 0),
             snap=snap,
             confidence=float(candidate.score or 0),
+            alert=alert_d if isinstance(alert_d, dict) else None,
         )
         if ml_blocked:
             return False, "reentry_ml_win_prob_low"
@@ -673,8 +675,6 @@ async def _open_from_candidate(
         )
         if reentry_blocked:
             return False, "exhausted_ftv_requires_new_base_reacceleration"
-
-        alert_d = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
         late_peak_blocked, late_peak_reason = session_peak_late_reentry_blocked(
             symbol=symbol,
             side=candidate.side,
