@@ -637,6 +637,91 @@ def _prior_session_explosion_closes(
     return closes
 
 
+def same_strike_post_win_v_rip_reentry_waive(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    alert: Optional[dict[str, Any]] = None,
+    confidence: float = 0.0,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Waive post-win same-strike re-entry gates for a fresh V-rip / armed-base launch.
+
+    Oct 5: NIFTY 22550 CE morning win (+₹28k) then ~13:45 V-rip 65→125 blocked by ML /
+    shallow V-rip / CE-mirror put-leg priority despite ELITE 100 on radar.
+    """
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {"waive": False}
+    if state is None:
+        return False, meta
+    if not bool(
+        getattr(settings, "same_strike_post_win_v_rip_reentry_waive_enabled", True)
+    ):
+        return False, meta
+
+    prior = _latest_same_strike_explosion_close(
+        state, symbol=symbol, side=side, strike=strike,
+    )
+    if prior is None:
+        return False, meta
+    prior_pnl = float(
+        getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0
+    )
+    min_win = float(
+        getattr(settings, "same_strike_post_win_v_rip_min_prior_win_inr", 5000.0)
+        or 5000.0
+    )
+    if prior_pnl + 1e-6 < min_win:
+        return False, meta
+
+    alert_d = alert if isinstance(alert, dict) else {}
+    tier = str(alert_d.get("tier") or "").upper()
+    score = float(
+        alert_d.get("explosionScore")
+        or alert_d.get("score")
+        or confidence
+        or 0
+    )
+    min_score = float(
+        getattr(settings, "same_strike_post_win_v_rip_min_tier_score", 90.0) or 90.0
+    )
+    tier_ok = tier in ("ELITE", "EXPLODING") and (
+        tier == "ELITE" or score + 1e-6 >= min_score
+    )
+    if tier == "ELITE":
+        tier_ok = score + 1e-6 >= min_score or score <= 0
+    if not tier_ok:
+        return False, meta
+
+    if not _first_strike_launch_waive_alert(alert_d):
+        return False, meta
+
+    local = float(
+        alert_d.get("localBaseMovePct")
+        or alert_d.get("ictBaseRelativeMovePct")
+        or 0
+    )
+    v_lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+    v_hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
+    if local > 0 and not (v_lo <= local <= v_hi + 1e-6):
+        return False, meta
+
+    meta.update(
+        {
+            "waive": True,
+            "reason": "same_strike_post_win_v_rip_reentry_waive",
+            "priorTradeId": getattr(prior, "id", None),
+            "priorPnlInr": round(prior_pnl, 2),
+            "localBaseMovePct": round(local, 2),
+        }
+    )
+    return True, meta
+
+
 def reentry_ml_win_prob_blocked(
     state: AutoTraderState,
     *,
@@ -645,6 +730,7 @@ def reentry_ml_win_prob_blocked(
     strike: float,
     snap: Any,
     confidence: float = 70.0,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Block session / same-strike re-entries when ML win probability is too low.
 
@@ -664,6 +750,20 @@ def reentry_ml_win_prob_blocked(
         strike=strike,
     )
     if not prior_closes and same_strike_prior is None:
+        return False, meta
+
+    waived, waive_meta = same_strike_post_win_v_rip_reentry_waive(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        alert=alert,
+        confidence=confidence,
+        settings=settings,
+    )
+    if waived:
+        meta.update(waive_meta)
+        meta["applied"] = False
         return False, meta
 
     session_min = float(

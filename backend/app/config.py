@@ -3374,6 +3374,11 @@ class Settings(BaseSettings):
     explosion_reentry_ml_win_prob_gate_enabled: bool = True
     explosion_reentry_ml_win_prob_min: float = 0.52
     explosion_reentry_ml_win_prob_same_strike_min: float = 0.55
+    # Oct 5 NIFTY 22550 CE: afternoon V-rip off consolidation after morning win on same strike.
+    same_strike_post_win_v_rip_reentry_waive_enabled: bool = True
+    same_strike_post_win_v_rip_min_prior_win_inr: float = 5000.0
+    same_strike_post_win_v_rip_min_tier_score: float = 90.0
+    elite_v_rip_shallow_waive_session_low_volume_enabled: bool = True
     # 2) Legacy INR exit caps — disabled (0). Exits use structural/point SL only.
     explosion_per_trade_max_loss_inr: float = 0.0
     explosion_exceptional_per_trade_max_loss_inr: float = 0.0
