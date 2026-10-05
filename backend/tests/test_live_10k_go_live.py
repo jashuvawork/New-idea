@@ -38,6 +38,31 @@ def test_live_200k_overlay_scales_capital_and_risk():
     assert env["MAX_RISK_PER_TRADE_INR"] == "4000"
     assert env["DAILY_PROFIT_TARGET_FROM_CAPITAL"] == "true"
     assert env["ENABLE_LIVE_TRADING"] == "false"
+    assert env["LIVE_TRADE_SELECTION_PARITY_WITH_PAPER"] == "true"
+    assert env["LIVE_BEST_TRADES_ONLY_ENABLED"] == "false"
+    assert env["TOP_MOMENTS_MIN_GRADE"] == "A"
+    assert env["WORST_DAY_BLOCKS_LIVE"] == "false"
+    assert env["FTV_ALLOCATION_MAX_POSITIONS"] == "3"
+
+
+def test_worst_day_blocks_live_off_when_selection_parity():
+    from unittest.mock import MagicMock, patch
+
+    from app.engines.worst_day_guard import worst_day_blocks_live
+    from app.models.schemas import AutoTraderState
+
+    settings = MagicMock()
+    settings.live_trade_selection_parity_with_paper = True
+    settings.worst_day_blocks_live = True
+    settings.enable_live_trading = True
+    verdict = SimpleNamespace(is_worst=True, to_dict=lambda: {"isWorst": True})
+    with (
+        patch("app.engines.worst_day_guard.get_settings", return_value=settings),
+        patch("app.engines.worst_day_guard.identify_worst_day", return_value=verdict),
+    ):
+        blocked, reason, _ = worst_day_blocks_live(AutoTraderState(), {})
+    assert blocked is False
+    assert reason == "ok"
 
 
 def test_live_10k_overlay_scales_capital_and_risk():

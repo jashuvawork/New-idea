@@ -24,9 +24,25 @@ from app.models.schemas import (
 IST = ZoneInfo("Asia/Kolkata")
 
 
+@patch("app.engines.live_best_trades.get_settings")
+def test_live_selection_parity_skips_even_when_live_best_enabled(mock_gs):
+    mock_gs.return_value = _settings(
+        live_trade_selection_parity_with_paper=True,
+        live_best_trades_only_enabled=True,
+    )
+    blocked, reason, _ = live_best_trade_entry_blocked(
+        _candidate(score=50.0, pad=2.0),
+        _snap(),
+        AutoTraderState(),
+    )
+    assert blocked is False
+    assert reason == "ok"
+
+
 def _settings(**overrides):
     s = MagicMock()
     s.enable_live_trading = True
+    s.live_trade_selection_parity_with_paper = False
     s.live_best_trades_only_enabled = True
     s.live_best_trades_min_grade = "S"
     s.live_best_trades_min_explosion_score = 200.0

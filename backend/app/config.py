@@ -155,6 +155,9 @@ class Settings(BaseSettings):
     live_early_fail_max_velocity_3s: float = 0.5
     # Legacy flag — milestone is advisory-only and never blocks live arming.
     live_milestone_required: bool = False
+    # When true, live uses the same entry selection stack as paper (no live-best-trades wire gate,
+    # no worst-day hard live halt). Set by deploy/env.live-200k.overlay for ₹2L go-live.
+    live_trade_selection_parity_with_paper: bool = False
 
     # Latency profile — normal uses field defaults; low/aggressive apply cadence presets
     latency_mode: Literal["normal", "low", "aggressive"] = "low"
