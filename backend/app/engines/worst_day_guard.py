@@ -1018,6 +1018,8 @@ def worst_day_blocks_live(
     settings = get_settings()
     verdict = identify_worst_day(state, snapshots)
     meta = {"worstDay": verdict.to_dict()}
+    if getattr(settings, "live_trade_selection_parity_with_paper", False):
+        return False, "ok", meta
     if not settings.worst_day_blocks_live or not settings.enable_live_trading:
         return False, "ok", meta
     if verdict.is_worst:
