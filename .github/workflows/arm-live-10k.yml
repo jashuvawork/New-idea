@@ -1,11 +1,11 @@
-name: Arm/Disarm ₹10k live trading
+name: Arm/Disarm live trading (₹2L default)
 
 # One-click lever to flip the production backend between LIVE and PAPER via SSM.
 # There is no runtime API for this — ENABLE_LIVE_TRADING is read from /opt/nexusquant/env
 # at startup, so arming means editing that env file and restarting the backend container.
 #
-# arm-live  -> runs deploy/go-live-10k-monday.sh --arm-live (overlay + ENABLE_LIVE_TRADING=true
-#              + PAPER_TRADING=false, restart, set ₹10k capital ceiling).
+# arm-live  -> runs deploy/go-live-10k-monday.sh --arm-live (env.live-200k.overlay +
+#              ENABLE_LIVE_TRADING=true + PAPER_TRADING=false, restart, ₹2L capital ceiling).
 # disarm    -> runs deploy/go-live-10k-monday.sh --paper (ENABLE_LIVE_TRADING=false
 #              + PAPER_TRADING=true + paper slippage/shadow flags, restart, resume auto-trader).
 #
@@ -22,7 +22,7 @@ on:
           - arm-live
         default: disarm
       confirm:
-        description: "Type ARM-LIVE-10K to arm, or DISARM to go back to paper"
+        description: "Type ARM-LIVE-200K to arm (ARM-LIVE-10K still accepted), or DISARM for paper"
         type: string
         required: true
 
@@ -41,8 +41,8 @@ jobs:
           set -euo pipefail
           ACTION="${{ inputs.action }}"
           CONFIRM="${{ inputs.confirm }}"
-          if [ "$ACTION" = "arm-live" ] && [ "$CONFIRM" != "ARM-LIVE-10K" ]; then
-            echo "::error::To arm live you must type confirm=ARM-LIVE-10K (got '$CONFIRM')"
+          if [ "$ACTION" = "arm-live" ] && [ "$CONFIRM" != "ARM-LIVE-200K" ] && [ "$CONFIRM" != "ARM-LIVE-10K" ]; then
+            echo "::error::To arm live type confirm=ARM-LIVE-200K (or legacy ARM-LIVE-10K); got '$CONFIRM'"
             exit 1
           fi
           if [ "$ACTION" = "disarm" ] && [ "$CONFIRM" != "DISARM" ]; then
@@ -66,7 +66,7 @@ jobs:
           CMD_ID=$(aws ssm send-command \
             --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --comment "Arm 10k live trading" \
+            --comment "Arm 2L live trading" \
             --parameters 'commands=[
               "set -euo pipefail",
               "cd ${{ env.REPO_DIR }}",

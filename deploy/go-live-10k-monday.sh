@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
-# Prepare or arm ₹10k live trading on EC2.
+# Prepare or arm live trading on EC2 (default ₹2L capital / overlay).
 #
 # Run ON the EC2 instance (as root):
-#   # Step 1 — before Monday: apply capital/risk overlay (still paper)
+#   # Step 1 — before open: apply capital/risk overlay (still paper)
 #   sudo bash deploy/go-live-10k-monday.sh --prepare
 #
-#   # Step 2 — Monday before 9:15 IST: flip live execution + restart
+#   # Step 2 — before 9:15 IST: flip live execution + restart
 #   sudo bash deploy/go-live-10k-monday.sh --arm-live
 #
 #   # After session / when done with live: back to paper
 #   sudo bash deploy/go-live-10k-monday.sh --paper
 #
 # Options:
-#   --prepare     Apply env.live-10k.overlay (capital ₹10k, scaled risk; paper mode)
+#   --prepare     Apply env.live-200k.overlay (default; still paper)
 #   --arm-live    Apply overlay + ENABLE_LIVE_TRADING=true, PAPER_TRADING=false, restart backend
 #   --paper       Stop auto-trader, flip back to paper mode, restart backend, resume auto-trader
 #   --dry-run     Print actions without writing env or restarting
 #   ENV_FILE=     Override env path (default /opt/nexusquant/env)
 #   REPO_DIR=     Override repo path (default /opt/nexusquant/New-idea)
+#   LIVE_OVERLAY= Path to overlay (default deploy/env.live-200k.overlay)
+#   LIVE_CAPITAL_INR= Runtime capital ceiling when arming (default 200000)
+#   PAPER_CAPITAL_INR= Paper capital when disarming (default 200000)
+#   Small-cap legacy: LIVE_OVERLAY=deploy/env.live-10k.overlay LIVE_CAPITAL_INR=10000
 #
 set -euo pipefail
 
@@ -33,12 +37,12 @@ if [ -z "$REPO_DIR" ]; then
 fi
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
-OVERLAY="${REPO_DIR}/deploy/env.live-10k.overlay"
+OVERLAY="${LIVE_OVERLAY:-${REPO_DIR}/deploy/env.live-200k.overlay}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
 READINESS_URL="${READINESS_URL:-http://127.0.0.1:8000/api/deployment/readiness}"
 CAPITAL_URL="${CAPITAL_URL:-http://127.0.0.1:8000/api/auto-trader/capital}"
 PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-200000}"
-LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-10000}"
+LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-200000}"
 
 MODE=""
 DRY_RUN=0
@@ -86,7 +90,8 @@ _set_env_key() {
   echo "  ${key}=${val}"
 }
 
-echo "=== NexusQuant ₹10k go-live ($MODE) $(date -Iseconds) ==="
+echo "=== NexusQuant live go-live ($MODE) capital=₹${LIVE_CAPITAL_INR} $(date -Iseconds) ==="
+echo "Overlay: $OVERLAY"
 echo "Env: $ENV_FILE | Repo: $REPO_DIR"
 
 if [ "$MODE" != "paper" ]; then
@@ -189,5 +194,5 @@ elif [ "$MODE" = "paper" ]; then
   echo "Back on paper trading at ₹${PAPER_CAPITAL_INR}. To arm live again:"
   echo "  sudo bash deploy/go-live-10k-monday.sh --arm-live"
 else
-  echo "Live armed at ₹10k. Confirm Upstox token + readiness before session open."
+  echo "Live armed at ₹${LIVE_CAPITAL_INR}. Confirm Upstox token + readiness before session open."
 fi

@@ -2,8 +2,8 @@
 # Merge key=value overlay onto an env file (overwrites existing keys).
 #
 # Usage:
-#   bash deploy/apply-env-overlay.sh deploy/env.live-10k.overlay
-#   ENV_FILE=/opt/nexusquant/env sudo bash deploy/apply-env-overlay.sh deploy/env.live-10k.overlay
+#   bash deploy/apply-env-overlay.sh deploy/env.live-200k.overlay
+#   ENV_FILE=/opt/nexusquant/env sudo bash deploy/apply-env-overlay.sh deploy/env.live-200k.overlay
 #
 set -euo pipefail
 
