@@ -50,6 +50,7 @@ class StageLockTests(unittest.TestCase):
         self.assertEqual(floor, 230_000)
 
     def test_stage_lock_blocks_entries_below_floor(self):
+        """Stage 2 floor applies while open MTM still marks a real ≥stage-2 best."""
         state = AutoTraderState()
         state.closedPaperTrades = [
             PaperTrade(
@@ -66,14 +67,56 @@ class StageLockTests(unittest.TestCase):
                 sessionDate=NOW.strftime("%Y-%m-%d"),
             )
         ]
+        state.openPaperTrades = [
+            PaperTrade(
+                id="2",
+                symbol="NIFTY",
+                side=Side.CALL,
+                strike=24100,
+                entryPremium=50,
+                lots=10,
+                openedAt=NOW,
+                pnlInr=-5_000,
+                strategyType=StrategyType.SCALP,
+                sessionDate=NOW.strftime("%Y-%m-%d"),
+            )
+        ]
         with patch("app.engines.capital_allocator.get_settings", return_value=_legacy_settings()):
             with patch("app.engines.capital_allocator._session_date", NOW.strftime("%Y-%m-%d")):
-                with patch("app.engines.capital_allocator._best_pnl", 180_000):
-                    with patch("app.engines.capital_allocator._highest_stage", 2):
-                        state.closedPaperTrades[0].pnlInr = 170_000
-                        gate = update_daily_profit_gate(state)
-                        self.assertFalse(gate.newEntriesAllowed)
-                        self.assertEqual(gate.status, "STAGE_LOCK")
+                with patch("app.engines.capital_allocator._best_pnl", 180_000.0):
+                    gate = update_daily_profit_gate(state)
+                    self.assertFalse(gate.newEntriesAllowed)
+                    self.assertEqual(gate.status, "STAGE_LOCK")
+
+    def test_mtm_peak_then_flat_close_does_not_stage_lock(self):
+        """Oct 5: open MTM touched stage 2, close lower — entries must stay open."""
+        state = AutoTraderState()
+        state.closedPaperTrades = [
+            PaperTrade(
+                id="1",
+                symbol="NIFTY",
+                side=Side.CALL,
+                strike=22550,
+                entryPremium=119,
+                lots=23,
+                openedAt=NOW,
+                closedAt=NOW,
+                pnlInr=28_572,
+                strategyType=StrategyType.EXPLOSIVE,
+                sessionDate=NOW.strftime("%Y-%m-%d"),
+            )
+        ]
+        settings = _legacy_settings()
+        settings.daily_profit_target_inr = 36_000
+        settings.daily_profit_stage_from_target = True
+        settings.daily_profit_stage_target_mults = lambda: [0.5, 1.0, 1.5]
+        settings.daily_profit_stage_block_entries_min_stage = 2
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            with patch("app.engines.capital_allocator._session_date", NOW.strftime("%Y-%m-%d")):
+                with patch("app.engines.capital_allocator._best_pnl", 36_500.0):
+                    gate = update_daily_profit_gate(state)
+        self.assertTrue(gate.newEntriesAllowed)
+        self.assertNotEqual(gate.status, "STAGE_LOCK")
 
     def test_stage1_dip_does_not_block_entries(self):
         """Stage 1 (50% of daily target) — caution only, keep trading toward 18%."""
@@ -98,11 +141,25 @@ class StageLockTests(unittest.TestCase):
         settings.daily_profit_stage_from_target = True
         settings.daily_profit_stage_target_mults = lambda: [0.5, 1.0, 1.5]
         settings.daily_profit_stage_block_entries_min_stage = 2
+        state.openPaperTrades = [
+            PaperTrade(
+                id="2",
+                symbol="NIFTY",
+                side=Side.PUT,
+                strike=24000,
+                entryPremium=50,
+                lots=10,
+                openedAt=NOW,
+                pnlInr=-5_000,
+                strategyType=StrategyType.SCALP,
+                sessionDate=NOW.strftime("%Y-%m-%d"),
+            )
+        ]
+        state.closedPaperTrades[0].pnlInr = 21_655
         with patch("app.engines.capital_allocator.get_settings", return_value=settings):
             with patch("app.engines.capital_allocator._session_date", NOW.strftime("%Y-%m-%d")):
-                with patch("app.engines.capital_allocator._best_pnl", 21_655):
-                    with patch("app.engines.capital_allocator._highest_stage", 1):
-                        gate = update_daily_profit_gate(state)
+                with patch("app.engines.capital_allocator._best_pnl", 21_655.0):
+                    gate = update_daily_profit_gate(state)
         self.assertTrue(gate.newEntriesAllowed)
         self.assertEqual(gate.status, "STAGE_CAUTION")
 

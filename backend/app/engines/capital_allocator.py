@@ -1049,7 +1049,18 @@ def update_daily_profit_gate(
 
     capital_base = _capital_base_for_stages()
     session_pnl = compute_session_pnl(state)
-    _best_pnl = max(_best_pnl, session_pnl)
+    from app.engines.session_trade_integrity import is_phantom_session_trade
+
+    has_open = any(
+        not is_phantom_session_trade(t) for t in (state.openPaperTrades or [])
+    )
+    if has_open:
+        _best_pnl = max(_best_pnl, session_pnl)
+    else:
+        # Flat book: stage locks use realized session PnL only. Without this, an
+        # open-trade MTM peak can ratchet stage 2 then freeze entries after a
+        # smaller close (Oct 5 CE +₹28.6k close after ~₹36k MTM → ~25m STAGE_LOCK).
+        _best_pnl = session_pnl
     min_target = _resolve_daily_target_inr(capital_base)
     min_hit = _best_pnl >= min_target
 
@@ -1061,7 +1072,7 @@ def update_daily_profit_gate(
 
     if settings.daily_profit_stage_locks_enabled:
         _highest_stage, locked_floor, current_stage = _compute_stage_lock(
-            session_pnl, _best_pnl, _highest_stage, thresholds,
+            session_pnl, _best_pnl, 0, thresholds,
         )
     else:
         # Legacy single trail
