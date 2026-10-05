@@ -34,15 +34,18 @@ def test_live_200k_overlay_scales_capital_and_risk():
     assert env["DAILY_LOSS_STOP_INR"] == "20000"
     assert env["EMERGENCY_STOP_INR"] == "20000"
     assert env["SESSION_LARGE_LOSS_PAUSE_INR"] == "8000"
-    assert env["LIVE_HOLD_TO_STRUCTURAL_SL"] == "true"
     assert env["MAX_RISK_PER_TRADE_INR"] == "4000"
     assert env["DAILY_PROFIT_TARGET_FROM_CAPITAL"] == "true"
     assert env["ENABLE_LIVE_TRADING"] == "false"
+    assert env["LIVE_PAPER_PARITY_ENABLED"] == "true"
     assert env["LIVE_TRADE_SELECTION_PARITY_WITH_PAPER"] == "true"
     assert env["LIVE_BEST_TRADES_ONLY_ENABLED"] == "false"
     assert env["TOP_MOMENTS_MIN_GRADE"] == "A"
     assert env["WORST_DAY_BLOCKS_LIVE"] == "false"
     assert env["FTV_ALLOCATION_MAX_POSITIONS"] == "3"
+    assert env["LIVE_HOLD_TO_STRUCTURAL_SL"] == "false"
+    assert env["CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
+    assert env["LIVE_BROKER_RECONCILIATION_ENABLED"] == "false"
 
 
 def test_worst_day_blocks_live_off_when_selection_parity():
@@ -231,6 +234,7 @@ def test_live_structural_hold_bypasses_entry_per_trade_risk_cap():
     with (
         patch("app.engines.risk_engine.get_settings", return_value=settings),
         patch("app.engines.risk_engine.get_capital_snapshot", return_value=cap),
+        patch("app.engines.live_paper_parity.live_paper_parity_active", return_value=False),
     ):
         ok, reason = engine.check_new_entry(
             state,

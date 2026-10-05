@@ -42,6 +42,7 @@ def test_live_selection_parity_skips_even_when_live_best_enabled(mock_gs):
 def _settings(**overrides):
     s = MagicMock()
     s.enable_live_trading = True
+    s.live_paper_parity_enabled = False
     s.live_trade_selection_parity_with_paper = False
     s.live_best_trades_only_enabled = True
     s.live_best_trades_min_grade = "S"

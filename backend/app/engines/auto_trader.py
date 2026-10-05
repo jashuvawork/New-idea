@@ -2120,10 +2120,13 @@ async def _open_from_candidate(
         getattr(settings, "elite_full_lot_preserve_lots_over_sl_budget", True)
     ):
         top_rank_full_budget_lots = True
+    from app.engines.live_paper_parity import live_paper_parity_active
+
     live_structural_hold = (
         bool(getattr(settings, "enable_live_trading", False))
         and bool(getattr(settings, "live_hold_to_structural_sl", False))
         and candidate.mode == "explosion"
+        and not live_paper_parity_active(settings)
     )
     if live_structural_hold:
         top_rank_full_budget_lots = True
@@ -3014,7 +3017,13 @@ async def _open_from_candidate(
         ctx_extra["ftvAuthorizationReason"] = final_policy.reason
         ctx_extra["ftvMaxCapitalPct"] = final_policy.max_capital_pct
 
-    if is_live and candidate.mode == "explosion":
+    from app.engines.live_paper_parity import live_paper_parity_active
+
+    if (
+        is_live
+        and not live_paper_parity_active(settings)
+        and candidate.mode == "explosion"
+    ):
         from app.engines.live_best_trades import live_best_trade_entry_blocked
 
         live_blocked, live_reason, live_meta = live_best_trade_entry_blocked(
@@ -3036,9 +3045,10 @@ async def _open_from_candidate(
         chop_second_same_side_leg_blocked,
     )
 
-    if candidate.mode == "explosion" and (
-        is_live or chop_live_guard_day_active(state, snap, snapshots)
-    ):
+    chop_live_wire = chop_live_guard_day_active(state, snap, snapshots) or (
+        is_live and not live_paper_parity_active(settings)
+    )
+    if candidate.mode == "explosion" and chop_live_wire:
         chop_blocked, chop_reason, chop_meta = chop_live_entry_blocked(
             candidate,
             snap,
@@ -4505,7 +4515,14 @@ async def process(
             policy_meta["severePauseDeepItmLift"] = True
         if daily_loss_expiry_bypass:
             policy_meta["dailyLossStopExpiryTopBypass"] = True
-        if settings.enable_live_trading and extreme_session and snapshots:
+        from app.engines.live_paper_parity import live_paper_parity_active
+
+        if (
+            settings.enable_live_trading
+            and extreme_session
+            and snapshots
+            and not live_paper_parity_active(settings)
+        ):
             from app.engines.chop_live_guards import chop_live_session_lift_allowed
 
             ref_snap = next(iter(snapshots.values()))
