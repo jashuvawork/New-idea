@@ -13,6 +13,10 @@ def _strict_bool(value, default: bool = False) -> bool:
 def live_hold_to_structural_sl(settings=None) -> bool:
     """Live mode: skip INR force-stops / scratch exits — ride to structural SL only."""
     s = settings or get_settings()
+    from app.engines.live_paper_parity import live_paper_parity_active
+
+    if live_paper_parity_active(s):
+        return False
     if not _strict_bool(getattr(s, "enable_live_trading", False)):
         return False
     if not _strict_bool(getattr(s, "auto_trading_enabled", True), True):

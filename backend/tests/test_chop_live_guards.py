@@ -47,6 +47,8 @@ def _settings(**overrides):
     s.chop_live_min_trusted_local_base_pct = 15.0
     s.live_broker_reconciliation_enabled = True
     s.enable_live_trading = True
+    s.live_paper_parity_enabled = False
+    s.live_trade_selection_parity_with_paper = False
     s.explosion_immature_block_enabled = True
     s.explosion_chase_use_local_base = True
     s.explosion_local_base_entry_min_move_pct = 15.0

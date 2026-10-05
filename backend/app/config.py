@@ -158,6 +158,9 @@ class Settings(BaseSettings):
     # When true, live uses the same entry selection stack as paper (no live-best-trades wire gate,
     # no worst-day hard live halt). Set by deploy/env.live-200k.overlay for ₹2L go-live.
     live_trade_selection_parity_with_paper: bool = False
+    # Full paper parity: same entries, exits, sizing guards, and chop rules as paper; only
+    # order routing uses the live broker. Alias: LIVE_TRADE_SELECTION_PARITY_WITH_PAPER also enables.
+    live_paper_parity_enabled: bool = False
 
     # Latency profile — normal uses field defaults; low/aggressive apply cadence presets
     latency_mode: Literal["normal", "low", "aggressive"] = "low"

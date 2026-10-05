@@ -59,6 +59,13 @@ async def deployment_status():
         "flags": {
             "symbols": settings.symbols,
             "enableLiveTrading": settings.enable_live_trading,
+            "livePaperParityEnabled": bool(
+                getattr(settings, "live_paper_parity_enabled", False)
+                or getattr(settings, "live_trade_selection_parity_with_paper", False)
+            ),
+            "liveBestTradesOnlyEnabled": bool(
+                getattr(settings, "live_best_trades_only_enabled", True)
+            ),
             "autoTradingEnabled": settings.auto_trading_enabled,
             "paperTrading": settings.paper_trading,
             "simpleProfitMode": settings.paper_simple_profit_mode,
