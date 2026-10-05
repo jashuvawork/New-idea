@@ -1,4 +1,4 @@
-"""₹10k live overlay and milestone bypass for small-cap go-live."""
+"""Live overlays (₹2L default, ₹10k legacy) and milestone bypass for go-live."""
 
 import asyncio
 from datetime import datetime, timedelta
@@ -16,17 +16,32 @@ IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _overlay_values() -> dict[str, str]:
+def _overlay_values(name: str) -> dict[str, str]:
     values: dict[str, str] = {}
-    for line in (ROOT / "deploy/env.live-10k.overlay").read_text().splitlines():
+    for line in (ROOT / "deploy" / name).read_text().splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
             key, value = line.split("=", 1)
             values[key] = value
     return values
 
 
+def test_live_200k_overlay_scales_capital_and_risk():
+    env = _overlay_values("env.live-200k.overlay")
+    assert env["FALLBACK_CAPITAL_INR"] == "200000"
+    assert env["MAX_SIZING_CAPITAL_INR"] == "200000"
+    assert env["USE_UPSTOX_CAPITAL_FOR_SIZING"] == "true"
+    assert env["LIVE_MILESTONE_REQUIRED"] == "false"
+    assert env["DAILY_LOSS_STOP_INR"] == "20000"
+    assert env["EMERGENCY_STOP_INR"] == "20000"
+    assert env["SESSION_LARGE_LOSS_PAUSE_INR"] == "8000"
+    assert env["LIVE_HOLD_TO_STRUCTURAL_SL"] == "true"
+    assert env["MAX_RISK_PER_TRADE_INR"] == "4000"
+    assert env["DAILY_PROFIT_TARGET_FROM_CAPITAL"] == "true"
+    assert env["ENABLE_LIVE_TRADING"] == "false"
+
+
 def test_live_10k_overlay_scales_capital_and_risk():
-    env = _overlay_values()
+    env = _overlay_values("env.live-10k.overlay")
     assert env["FALLBACK_CAPITAL_INR"] == "10000"
     assert env["MAX_SIZING_CAPITAL_INR"] == "10000"
     assert env["USE_UPSTOX_CAPITAL_FOR_SIZING"] == "true"

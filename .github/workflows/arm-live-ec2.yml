@@ -6,7 +6,7 @@ on:
       capital_inr:
         description: Live capital ceiling (INR)
         required: false
-        default: "10000"
+        default: "200000"
 
 env:
   AWS_REGION: ap-south-1
@@ -42,7 +42,7 @@ jobs:
               \"git pull --ff-only origin main || git reset --hard origin/main\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/execution/stop || true\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/auto-trader/purge-logs || true\",
-              \"sudo bash deploy/go-live-10k-monday.sh --arm-live\",
+              \"sudo LIVE_CAPITAL_INR=${CAP} bash deploy/go-live-10k-monday.sh --arm-live\",
               \"curl -sf http://127.0.0.1:8000/api/deployment/status | python3 -m json.tool | head -40\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/execution/resume || true\"
             ]" \
