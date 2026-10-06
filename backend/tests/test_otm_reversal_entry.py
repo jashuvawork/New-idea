@@ -16,6 +16,9 @@ def _settings(**over):
         otm_reversal_entry_enabled=True,
         otm_reversal_max_steps=2,
         nifty_strike_step=50,
+        sep917_legacy_profile_enabled=False,
+        moneyness_explosion_atm_itm_only=False,
+        moneyness_explosion_block_otm=False,
     )
     for k, v in over.items():
         setattr(s, k, v)

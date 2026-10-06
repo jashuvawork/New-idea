@@ -31,7 +31,7 @@ def _sep07_23750_alert():
         "premium": 30.0,
         "explosionScore": 268.0,
         "strikeStepsFromAtm": 2,
-        "moneyness": "OTM",
+        "moneyness": "ITM",
         "ictArmedBaseLaunch": True,
         "momentType": "armed_base_launch",
         "localBaseMovePct": 8.0,

@@ -71,7 +71,7 @@ def _aug28_24050_alert(**overrides) -> dict:
     alert = {
         "symbol": "NIFTY",
         "side": "PUT",
-        "strike": 24050.0,
+        "strike": 24300.0,
         "premium": 95.0,
         "tier": "BUILDING",
         "tradeable": False,
@@ -226,7 +226,7 @@ def test_selector_admits_building_coil_pad_without_elite_tier(mock_ready, _open)
     assert selected is not None
     assert selected.tier == "BUILDING"
     assert selected.side == Side.PUT
-    assert selected.strike == 24050.0
+    assert selected.strike == 24300.0
 
 
 def test_building_coil_pad_armed_without_confirmation_blocks_entry():
@@ -424,7 +424,7 @@ def test_explosion_entry_blocks_promoted_elite_unconfirmed_coil(mock_settings):
     event = ExplosionEvent(
         symbol="NIFTY",
         side=Side.PUT,
-        strike=24050.0,
+        strike=24300.0,
         premium=95.0,
         velocity_3s=0.0,
         velocity_9s=0.0,
@@ -440,7 +440,7 @@ def test_explosion_entry_blocks_promoted_elite_unconfirmed_coil(mock_settings):
         id="t1",
         symbol="NIFTY",
         side=Side.PUT,
-        strike=24050.0,
+        strike=24300.0,
         lastPremium=95.0,
         tqs=70,
         strategyType=StrategyType.EXPLOSIVE,

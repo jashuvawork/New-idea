@@ -11,10 +11,12 @@ from app.engines.best_trade_policy import (
 )
 from app.engines.explosion_detector import ExplosionEvent, _shallow_otm_local_base_tradeable
 from app.engines.moneyness import atm_itm_entry_allows
+from app.engines.early_radar_pad_capture import otm_reversal_entry_allowed
 from app.engines.sep917_legacy_profile import (
     cheap_otm_stack_disabled,
     sep917_legacy_profile_active,
     sep917_legacy_profile_summary,
+    strict_atm_itm_execution,
 )
 from app.models.schemas import MarketPhase, Side, SymbolSnapshot
 
@@ -23,6 +25,7 @@ def test_legacy_profile_active_by_default():
     s = Settings()
     assert sep917_legacy_profile_active(s) is True
     assert cheap_otm_stack_disabled(s) is True
+    assert strict_atm_itm_execution(s) is True
 
 
 def test_legacy_premium_band_and_otm_flags():
@@ -81,6 +84,25 @@ def test_shallow_otm_local_base_blocked_under_legacy():
         )
         is False
     )
+
+
+def test_otm_reversal_disabled_under_sep917_strict_execution():
+    s = Settings()
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime(2026, 9, 29, 10, 0, tzinfo=ZoneInfo("Asia/Kolkata")),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=22850.0,
+        atmStrike=22850.0,
+    )
+    alert = {
+        "side": "CALL",
+        "strike": 22950.0,
+        "tier": "ELITE",
+        "explosionScore": 95.0,
+    }
+    assert otm_reversal_entry_allowed(alert, snap) is False
 
 
 def test_moneyness_rejects_otm_for_entry_when_shallow_disabled():

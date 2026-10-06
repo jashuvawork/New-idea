@@ -67,6 +67,18 @@ def strict_atm_itm_scan(settings: Any = None) -> bool:
     return True
 
 
+def strict_atm_itm_execution(settings: Any = None) -> bool:
+    """When True, no OTM bypass may make a contract executable (orders ATM/ITM only)."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if sep917_legacy_profile_active(settings):
+        return True
+    return bool(getattr(settings, "moneyness_explosion_atm_itm_only", True)) and bool(
+        getattr(settings, "moneyness_explosion_block_otm", True)
+    )
+
+
 def sep917_legacy_profile_summary(settings: Any = None) -> dict[str, Any]:
     from app.config import get_settings
 

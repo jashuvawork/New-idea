@@ -373,7 +373,7 @@ def infer_alert_causal_grade(
     v3 = float(alert.get("velocity3s") or 0)
     v9 = float(alert.get("velocity9s") or 0)
     steps = float(alert.get("strikeStepsFromAtm") or 0)
-    near_strike = 0 < steps <= 2 and str(alert.get("moneyness") or "").upper() != "ITM"
+    near_strike = 0 < steps <= 2 and str(alert.get("moneyness") or "").upper() != "OTM"
     armed_top_local = armed and near_strike and local <= 15.0
     if (
         tier in ("ELITE", "EXPLODING")
@@ -493,13 +493,8 @@ def armed_base_pad_near_miss_waive(
     score = float(alert.get("explosionScore") or alert.get("score") or 0)
     if score < min_score - 1e-6:
         return False
-    if str(alert.get("moneyness") or "").upper() == "ITM":
-        steps = float(alert.get("strikeStepsFromAtm") or 0)
-        max_steps = int(
-            getattr(s, "near_strike_armed_near_miss_max_steps", 2) or 2
-        )
-        if steps > max_steps + 1e-6:
-            return False
+    if str(alert.get("moneyness") or "").upper() == "OTM":
+        return False
     return True
 
 
@@ -523,7 +518,7 @@ def elite_near_atm_index_rip_first_lift_waive(
     max_steps = float(getattr(s, "elite_near_atm_index_rip_max_strike_steps", 2.0) or 2.0)
     if steps <= 0 or steps > max_steps + 1e-6:
         return False
-    if str(alert.get("moneyness") or "").upper() == "ITM":
+    if str(alert.get("moneyness") or "").upper() == "OTM":
         return False
     move = max(
         float(alert.get("dailyMovePct") or 0),
@@ -607,7 +602,7 @@ def near_strike_armed_near_miss_waive(
     steps = float(alert.get("strikeStepsFromAtm") or 0)
     if steps <= 0 or steps > max_steps + 1e-6:
         return False
-    if str(alert.get("moneyness") or "").upper() == "ITM":
+    if str(alert.get("moneyness") or "").upper() == "OTM":
         return False
     if not _near_miss_otm_allowed(alert, snap, settings=s):
         return False

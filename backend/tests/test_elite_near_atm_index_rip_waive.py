@@ -23,7 +23,7 @@ def test_elite_near_atm_index_rip_waive_ok():
         "tier": "ELITE",
         "explosionScore": 100.0,
         "strikeStepsFromAtm": 1.0,
-        "moneyness": "OTM",
+        "moneyness": "ATM",
         "dailyMovePct": 38.0,
         "ictFirstLift": True,
         "indexMomAlign": True,
@@ -33,12 +33,25 @@ def test_elite_near_atm_index_rip_waive_ok():
     assert explosion_near_miss_waive(alert, settings=_settings()) is True
 
 
-def test_elite_near_atm_index_rip_blocks_deep_itm():
+def test_elite_near_atm_index_rip_waive_itm_near_atm():
     alert = {
         "tier": "ELITE",
         "explosionScore": 100.0,
         "strikeStepsFromAtm": 1.0,
         "moneyness": "ITM",
+        "dailyMovePct": 38.0,
+        "ictFirstLift": True,
+        "indexMomAlign": True,
+    }
+    assert elite_near_atm_index_rip_first_lift_waive(alert, settings=_settings()) is True
+
+
+def test_elite_near_atm_index_rip_blocks_otm():
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "strikeStepsFromAtm": 1.0,
+        "moneyness": "OTM",
         "dailyMovePct": 38.0,
         "ictFirstLift": True,
         "indexMomAlign": True,

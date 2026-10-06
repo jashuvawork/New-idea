@@ -245,7 +245,11 @@ def index_confirmed_moneyness_bypass(
 ) -> bool:
     """Allow deep ITM / shallow OTM when index turn + option at pad is confirmed."""
     settings = get_settings()
+    from app.engines.sep917_legacy_profile import strict_atm_itm_execution
+
     if not bool(getattr(settings, "index_confirmed_moneyness_bypass_enabled", True)):
+        return False
+    if money == "OTM" and strict_atm_itm_execution(settings):
         return False
     if money not in ("ITM", "OTM") or depth <= 0:
         return False
