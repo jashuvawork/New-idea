@@ -25,6 +25,12 @@ def _overlay_values(name: str) -> dict[str, str]:
     return values
 
 
+def test_live_paper_parity_deploy_scripts_exist():
+    root = ROOT / "deploy"
+    assert (root / "apply-live-paper-parity-env.sh").is_file()
+    assert (root / "audit-live-paper-env.sh").is_file()
+
+
 def test_live_200k_overlay_scales_capital_and_risk():
     env = _overlay_values("env.live-200k.overlay")
     assert env["FALLBACK_CAPITAL_INR"] == "200000"
