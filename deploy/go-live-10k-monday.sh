@@ -185,6 +185,25 @@ if d.get('armLiveSteps'):
         print('   -', s)
 " 2>/dev/null || echo "  (readiness endpoint not ready yet)"
 
+if [ "$MODE" = "arm-live" ]; then
+  echo "Deployment flags:"
+  curl -sf "$STATUS_URL" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+f = d.get('flags') or {}
+print('  commit:', d.get('commit'))
+print('  enableLiveTrading:', f.get('enableLiveTrading'))
+print('  paperTrading:', f.get('paperTrading'))
+print('  livePaperParityEnabled:', f.get('livePaperParityEnabled'))
+print('  liveBestTradesOnlyEnabled:', f.get('liveBestTradesOnlyEnabled'))
+print('  fallbackCapitalInr:', f.get('fallbackCapitalInr'))
+if not f.get('enableLiveTrading') or f.get('paperTrading'):
+    raise SystemExit('ERROR: live arm failed — still on paper')
+if f.get('livePaperParityEnabled') is not True:
+    print('  WARN: livePaperParityEnabled is not true — check env.live-200k.overlay merge')
+" 2>/dev/null || echo "  (deployment status not ready yet)"
+fi
+
 echo ""
 if [ "$MODE" = "prepare" ]; then
   echo "Prepared — still PAPER. Before 9:15 IST Monday run:"
