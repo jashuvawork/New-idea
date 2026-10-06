@@ -92,6 +92,10 @@ def sep917_legacy_profile_summary(settings: Any = None) -> dict[str, Any]:
         },
         "atmItmOnly": active
         or bool(getattr(settings, "moneyness_explosion_block_otm", True)),
+        "strictAtmItmExecution": strict_atm_itm_execution(settings),
+        "otmReversalEntryEnabled": bool(
+            getattr(settings, "otm_reversal_entry_enabled", False)
+        ),
         "cheapBaseRankPriority": bool(
             getattr(settings, "best_trade_cheap_base_rank_priority_enabled", False)
         ),
