@@ -40,14 +40,14 @@ def _snap(alerts=None, spot=23837.0, atm=23850.0):
 
 
 def test_blocks_deep_itm_when_near_strike_armed_on_same_side():
-    """Sep07: 23900 ITM must not enter when 23750 near-strike armed is live."""
+    """Deep ITM must not enter when near ATM/ITM armed leg is live on the same side."""
     alerts = [
         {
             "side": "PUT",
-            "strike": 23750.0,
+            "strike": 23850.0,
             "tier": "ELITE",
-            "strikeStepsFromAtm": 2,
-            "moneyness": "OTM",
+            "strikeStepsFromAtm": 0,
+            "moneyness": "ATM",
             "ictArmedBaseLaunch": True,
             "momentType": "armed_base_launch",
         },
@@ -86,7 +86,7 @@ def test_near_strike_armed_near_miss_waive_grade_s_at_base():
         "causalGrade": "S",
         "tier": "ELITE",
         "strikeStepsFromAtm": 2,
-        "moneyness": "OTM",
+        "moneyness": "ITM",
         "ictArmedBaseLaunch": True,
         "momentType": "armed_base_launch",
         "localBaseMovePct": 8.0,
@@ -103,7 +103,7 @@ def test_near_strike_armed_near_miss_waive_call_mirror():
         "causalGrade": "S",
         "tier": "EXPLODING",
         "strikeStepsFromAtm": 1,
-        "moneyness": "OTM",
+        "moneyness": "ITM",
         "armedBaseLaunch": True,
         "momentType": "v_rip_session_high",
         "localBaseMovePct": 10.0,
@@ -120,7 +120,7 @@ def test_near_strike_near_miss_blocks_chase_above_local_cap():
         "causalGrade": "S",
         "tier": "ELITE",
         "strikeStepsFromAtm": 2,
-        "moneyness": "OTM",
+        "moneyness": "ITM",
         "ictArmedBaseLaunch": True,
         "localBaseMovePct": 22.0,
     }

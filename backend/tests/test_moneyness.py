@@ -38,6 +38,7 @@ def _settings():
     s.moneyness_explosion_prefer = "OTM"
     s.moneyness_explosion_block_otm = True
     s.moneyness_explosion_atm_itm_only = False  # legacy tests exercise prefer/bypass paths
+    s.sep917_legacy_profile_enabled = False
     s.first_lift_shallow_otm_entry_enabled = True
     s.first_lift_shallow_otm_max_steps = 1
     s.moneyness_local_base_otm_bypass_enabled = True

@@ -1190,10 +1190,13 @@ def _near_strike_armed_alert_active(
     tier = str(alert.get("tier") or "").upper()
     if tier not in ("ELITE", "EXPLODING"):
         return False
-    steps = float(alert.get("strikeStepsFromAtm") or 0)
-    if steps <= 0 or steps > max_steps + 1e-6:
+    money = str(alert.get("moneyness") or "").upper()
+    if money == "OTM":
         return False
-    if str(alert.get("moneyness") or "").upper() == "ITM":
+    steps = float(alert.get("strikeStepsFromAtm") or 0)
+    if steps > max_steps + 1e-6:
+        return False
+    if steps <= 0 and money != "ATM":
         return False
     return bool(
         alert.get("ictArmedBaseLaunch")
@@ -1215,7 +1218,7 @@ def deep_itm_near_strike_substitute_blocked(
     settings: Any = None,
     candidate_score: float = 0.0,
 ) -> tuple[bool, str]:
-    """Block ITM/ATM fallback when near-strike OTM on the same side is armed at the pad."""
+    """Block deep ITM when near-strike ATM/ITM on the same side is armed at the pad."""
     s = settings or get_settings()
     if not bool(getattr(s, "explosion_deep_itm_substitute_block_enabled", True)):
         return False, ""
@@ -1269,7 +1272,7 @@ def deep_itm_near_strike_substitute_blocked(
         if alt_strike <= 0:
             continue
         _, alt_money, _ = _strike_depth(side, alt_strike, snap)
-        if alt_money not in ("ATM", "OTM"):
+        if alt_money not in ("ATM", "ITM"):
             continue
         alt_depth, _, _ = _strike_depth(side, alt_strike, snap)
         if alt_depth > max_otm:

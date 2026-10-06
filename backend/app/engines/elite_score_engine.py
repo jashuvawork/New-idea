@@ -970,7 +970,7 @@ def _near_strike_fvq_bypass_eligible(
         return False
 
     moneyness = str(evidence.get("moneyness") or "").upper()
-    if moneyness == "ITM":
+    if moneyness == "OTM":
         return False
 
     steps = _number(evidence.get("strikeStepsFromAtm"))

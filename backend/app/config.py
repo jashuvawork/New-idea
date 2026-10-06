@@ -1166,7 +1166,7 @@ class Settings(BaseSettings):
     # when the index is CONFIRMED reversing toward that side (side-regime / drift / breakout) —
     # so it catches the reversal-rally winner, not an OTM lottery ticket. ENABLED — gated on a
     # confirmed index reversal, so it only opens depth for the real reversal-rally moment.
-    otm_reversal_entry_enabled: bool = True
+    otm_reversal_entry_enabled: bool = False
     otm_reversal_max_steps: int = 2
     # Size so a normal retest to the local base cannot exceed this % of capital — otherwise a
     # full-capital near-base entry on a cheap option gets shaken out on the ordinary base retest

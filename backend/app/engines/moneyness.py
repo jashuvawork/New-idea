@@ -75,6 +75,11 @@ def atm_itm_entry_allows(
         "strikeStepsFromAtm": _depth_steps(side, strike, spot, symbol, atm),
     }
     if money == "OTM":
+        from app.engines.sep917_legacy_profile import strict_atm_itm_execution
+
+        settings = get_settings()
+        if strict_atm_itm_execution(settings):
+            return False, "moneyness_atm_itm_only", meta
         if isinstance(alert, dict) and bool(
             alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
         ):
@@ -98,7 +103,7 @@ def atm_itm_entry_allows(
                 meta["indexConfirmedMoneyness"] = True
                 return True, "ok", meta
             settings = get_settings()
-            if bool(getattr(settings, "explosion_shallow_otm_entry_enabled", True)):
+            if bool(getattr(settings, "explosion_shallow_otm_entry_enabled", False)):
                 max_steps = int(
                     getattr(settings, "explosion_shallow_otm_entry_steps", 1) or 1
                 )
