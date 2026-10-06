@@ -226,6 +226,23 @@ def test_evaluate_exit_books_stage_trail_pullback(mock_ms, mock_s, _hc, _mp):
 @patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
+def test_evaluate_exit_defers_stage_trail_while_hot(mock_ms, mock_s, _hc, _mp):
+    """Stage pullback with hot 3s velocity — hold toward projected max, not stage trail."""
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    trade = _trade(entry=200.0, best=400.0, current=540.0)  # +340, below 350 floor
+    reason, _pnl = evaluate_explosion_exit(
+        trade, 540.0, "ELITE", 10, params=_params(), live_velocity_3s=3.0,
+    )
+    assert reason != "explosion_stage_trail"
+    assert reason != "explosion_target_hit"
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
 def test_evaluate_exit_holds_while_above_floor(mock_ms, mock_s, _hc, _mp):
     s = _settings()
     mock_s.return_value = s
