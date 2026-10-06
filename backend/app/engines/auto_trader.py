@@ -114,6 +114,7 @@ from app.services import trade_store
 from app.services.order_executor import (
     find_existing_exit_order,
     place_entry_order,
+    fetch_order_average_price,
     place_exit_order,
 )
 from app.services.paper_broker import simulate_entry_order, simulate_exit_order
@@ -3078,12 +3079,23 @@ async def _open_from_candidate(
                 order = await place_entry_order(
                     client, snap, candidate.strike, candidate.side, lots,
                 )
+                broker_entry_fill = order.get("fill_premium")
+                if broker_entry_fill and float(broker_entry_fill) > 0:
+                    fill_premium = float(broker_entry_fill)
+                    slip_meta = {
+                        **(slip_meta or {}),
+                        "enabled": False,
+                        "signalPremium": round(signal_premium, 2),
+                        "fillPremium": round(fill_premium, 2),
+                        "brokerFill": True,
+                    }
                 ctx_extra.update({
                     "instrumentKey": order["instrument_key"],
                     "brokerOrderId": order["order_id"],
                     "brokerQuantity": order["quantity"],
                     "lotSize": order.get("lot_size", lot_mult),
                     "brokerSimulated": False,
+                    "brokerEntryFillPremium": fill_premium,
                 })
                 state.liveOrdersPlaced += 1
             else:
@@ -3568,6 +3580,24 @@ async def _process_open_trades(
                         if existing_exit_id
                         else await place_exit_order(client, trade)
                     )
+                    exit_fill = exit_result.get("fill_premium")
+                    exit_oid = exit_result.get("order_id")
+                    if (not exit_fill or float(exit_fill) <= 0) and exit_oid:
+                        exit_fill = await fetch_order_average_price(client, str(exit_oid))
+                    if exit_fill and float(exit_fill) > 0:
+                        eval_premium = float(exit_fill)
+                        gross_pts, gross_inr = mark_to_market(
+                            trade.entryPremium, eval_premium, trade.lots, lot_mult,
+                        )
+                        pnl = finalize_closed_pnl_inr(
+                            gross_inr,
+                            entry_premium=trade.entryPremium,
+                            exit_premium=eval_premium,
+                            lots=trade.lots,
+                            lot_mult=lot_mult,
+                        )
+                        trade.currentPremium = eval_premium
+                        broker_ctx["brokerExitFillPremium"] = eval_premium
                 else:
                     exit_result = await simulate_exit_order(client, trade, current)
                     sim_fill = exit_result.get("fill_premium", eval_premium)
