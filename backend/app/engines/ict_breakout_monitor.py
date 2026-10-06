@@ -2539,6 +2539,11 @@ def first_lift_entry_readiness(
         if _entry_policy.consolidation_cold_v3_at_base:
             min_v3 = 0.0
             min_v9 = 0.0
+    from app.engines.rally_capture import elite_near_atm_index_rip_first_lift_waive
+
+    if elite_near_atm_index_rip_first_lift_waive(row, settings=settings):
+        min_v3 = 0.0
+        min_v9 = 0.0
     if not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
     if not sustained_lift and v9 < min_v9:

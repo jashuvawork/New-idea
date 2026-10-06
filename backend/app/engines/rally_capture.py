@@ -503,6 +503,49 @@ def armed_base_pad_near_miss_waive(
     return True
 
 
+def elite_near_atm_index_rip_first_lift_waive(
+    alert: Optional[dict[str, Any]],
+    *,
+    settings: Any = None,
+) -> bool:
+    """Oct-style index-led ELITE near-ATM rip when tick v3 is stale (ws snapshot gap)."""
+    s = settings or get_settings()
+    if not bool(getattr(s, "elite_near_atm_index_rip_waive_enabled", True)):
+        return False
+    if not isinstance(alert, dict):
+        return False
+    if str(alert.get("tier") or "").upper() != "ELITE":
+        return False
+    score = float(alert.get("explosionScore") or alert.get("score") or 0)
+    if score < float(getattr(s, "elite_near_atm_index_rip_min_score", 95.0) or 95.0):
+        return False
+    steps = float(alert.get("strikeStepsFromAtm") or 0)
+    max_steps = float(getattr(s, "elite_near_atm_index_rip_max_strike_steps", 2.0) or 2.0)
+    if steps <= 0 or steps > max_steps + 1e-6:
+        return False
+    if str(alert.get("moneyness") or "").upper() == "ITM":
+        return False
+    move = max(
+        float(alert.get("dailyMovePct") or 0),
+        float(alert.get("peakMovePct") or 0),
+    )
+    if move < float(getattr(s, "elite_near_atm_index_rip_min_move_pct", 25.0) or 25.0):
+        return False
+    if not (
+        bool(alert.get("ictFirstLift"))
+        or bool(alert.get("ictFlatThenVertical"))
+        or bool(alert.get("ictArmedBaseLaunch"))
+    ):
+        return False
+    if not (
+        bool(alert.get("indexMomAlign"))
+        or bool(alert.get("indexConfirmedLocalBase"))
+        or bool(alert.get("indexHelpersConfirm"))
+    ):
+        return False
+    return True
+
+
 def explosion_near_miss_waive(
     alert: Optional[dict[str, Any]],
     *,
@@ -522,6 +565,8 @@ def explosion_near_miss_waive(
     ):
         return False
     s = settings or get_settings()
+    if elite_near_atm_index_rip_first_lift_waive(alert, settings=s):
+        return True
     if isinstance(alert, dict) and bool(
         getattr(s, "live_entry_best_trade_capture_waives_near_miss", True)
     ):

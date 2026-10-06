@@ -1428,6 +1428,11 @@ class Settings(BaseSettings):
     first_lift_trade_min_volume_surge: float = 2.0
     first_lift_trade_min_velocity_3s: float = 1.5
     first_lift_trade_min_velocity_9s: float = 1.0
+    # Index-led ELITE near-ATM rips (Oct 5 22550 CE) — stale tick v3 should not near-miss.
+    elite_near_atm_index_rip_waive_enabled: bool = True
+    elite_near_atm_index_rip_min_score: float = 95.0
+    elite_near_atm_index_rip_max_strike_steps: float = 2.0
+    elite_near_atm_index_rip_min_move_pct: float = 25.0
     # Match the detector's causal first-lift band; >40% remains a chase.
     first_lift_trade_max_move_pct: float = 40.0
     # Helper-confirmed lane: "on the radar as BUILDING and suddenly something is helping to

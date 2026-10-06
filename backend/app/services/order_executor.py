@@ -1,6 +1,8 @@
 """Broker order execution for auto-trading."""
 
+import asyncio
 import logging
+import time
 from typing import Any, Optional
 
 from app.engines.capital_allocator import lot_multiplier, set_lot_size
@@ -13,6 +15,50 @@ logger = logging.getLogger(__name__)
 def exit_order_tag(trade_id: str) -> str:
     """Stable broker tag used to reconcile an exit across process restarts."""
     return f"nqx_{str(trade_id)[:12]}"
+
+
+def _average_price_from_order_row(order: dict[str, Any]) -> Optional[float]:
+    for key in ("average_price", "averagePrice"):
+        raw = order.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            price = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            return price
+    return None
+
+
+async def fetch_order_average_price(
+    client: UpstoxClient,
+    order_id: str,
+    *,
+    max_wait_seconds: float = 12.0,
+    poll_interval: float = 0.35,
+) -> Optional[float]:
+    """Poll order book until fill average_price is available (live MARKET orders)."""
+    if not order_id:
+        return None
+    deadline = time.monotonic() + max(0.5, float(max_wait_seconds))
+    while time.monotonic() < deadline:
+        for order in await client.get_order_book():
+            if not isinstance(order, dict):
+                continue
+            if str(order.get("order_id") or "") != str(order_id):
+                continue
+            status = str(order.get("status") or "").lower()
+            if status in {"rejected", "cancelled", "canceled"}:
+                return None
+            price = _average_price_from_order_row(order)
+            filled = int(float(order.get("filled_quantity") or 0))
+            if price and price > 0 and filled > 0:
+                return price
+            if status in {"complete", "completed"} and price and price > 0:
+                return price
+        await asyncio.sleep(poll_interval)
+    return None
 
 
 async def find_existing_exit_order(
@@ -156,12 +202,14 @@ async def place_entry_order(
         "LIVE ENTRY %s %s %s ×%d lots (size %d) qty=%d order=%s",
         snap.symbol, side.value, strike, lots, lot_size, quantity, order_id,
     )
+    fill = await fetch_order_average_price(client, order_id) if order_id else None
     return {
         "order_id": order_id,
         "instrument_key": instrument_key,
         "expiry": expiry,
         "quantity": quantity,
         "lot_size": lot_size,
+        "fill_premium": fill,
         "raw": result,
     }
 
@@ -202,4 +250,10 @@ async def place_exit_order(
         trade.symbol, trade.side.value, trade.strike, trade.lots, lot_size, quantity, order_id,
         trade.exitReason,
     )
-    return {"order_id": order_id, "quantity": quantity, "raw": result}
+    fill = await fetch_order_average_price(client, order_id) if order_id else None
+    return {
+        "order_id": order_id,
+        "quantity": quantity,
+        "fill_premium": fill,
+        "raw": result,
+    }
