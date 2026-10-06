@@ -78,6 +78,10 @@ def test_milestone_does_not_block_ready_for_live():
             return_value=(False, "", {}),
         ),
         patch(
+            "app.engines.live_paper_parity.live_paper_profile_ok",
+            return_value=(True, []),
+        ),
+        patch(
             "app.routers.health.get_settings",
             return_value=SimpleNamespace(
                 symbols=["NIFTY", "SENSEX"],
