@@ -202,6 +202,12 @@ if not f.get('enableLiveTrading') or f.get('paperTrading'):
     raise SystemExit('ERROR: live arm failed — still on paper')
 if f.get('livePaperParityEnabled') is not True:
     print('  WARN: livePaperParityEnabled is not true — check env.live-200k.overlay merge')
+prof = f.get('livePaperProfile') or {}
+print('  livePaperProfileOk:', prof.get('profileOk'))
+if prof.get('profileIssues'):
+    print('  profileIssues:', prof.get('profileIssues'))
+if prof.get('profileOk') is not True:
+    raise SystemExit('ERROR: live env is not Oct paper profile — run --prepare and restart')
 " 2>/dev/null || echo "  (deployment status not ready yet)"
 fi
 
