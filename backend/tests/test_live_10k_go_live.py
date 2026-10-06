@@ -29,7 +29,10 @@ def test_live_200k_overlay_scales_capital_and_risk():
     env = _overlay_values("env.live-200k.overlay")
     assert env["FALLBACK_CAPITAL_INR"] == "200000"
     assert env["MAX_SIZING_CAPITAL_INR"] == "200000"
-    assert env["USE_UPSTOX_CAPITAL_FOR_SIZING"] == "true"
+    assert env["USE_UPSTOX_CAPITAL_FOR_SIZING"] == "false"
+    assert env["SEP917_LEGACY_PROFILE_ENABLED"] == "true"
+    assert env["TOP_MOMENTS_ONLY_ENABLED"] == "false"
+    assert env["PAPER_SIMPLE_PROFIT_MODE"] == "true"
     assert env["LIVE_MILESTONE_REQUIRED"] == "false"
     assert env["DAILY_LOSS_STOP_INR"] == "20000"
     assert env["EMERGENCY_STOP_INR"] == "20000"
@@ -143,11 +146,16 @@ def test_readiness_skips_milestone_when_not_required():
             "app.engines.worst_day_guard.worst_day_blocks_live",
             return_value=(False, "", {}),
         ),
+        patch(
+            "app.engines.live_paper_parity.live_paper_profile_ok",
+            return_value=(True, []),
+        ),
     ):
         payload = asyncio.run(deployment_readiness())
 
     assert payload["checks"]["milestoneRequired"] is False
     assert payload["checks"]["milestonePassed"] is True
+    assert payload["checks"]["livePaperProfileOk"] is True
     assert payload["readyForLive"] is True
 
 

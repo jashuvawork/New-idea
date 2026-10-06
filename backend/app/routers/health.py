@@ -22,6 +22,16 @@ from app.routers.market import latency_stats
 router = APIRouter(tags=["health"])
 
 
+def __live_paper_profile_flags(settings) -> dict:
+    from app.engines.live_paper_parity import live_paper_profile_ok, live_paper_profile_summary
+
+    summary = live_paper_profile_summary(settings)
+    ok, issues = live_paper_profile_ok(settings)
+    summary["profileOk"] = ok
+    summary["profileIssues"] = issues
+    return summary
+
+
 @router.get("/health")
 async def health():
     from app.loop_watchdog import watchdog_status
@@ -63,6 +73,7 @@ async def deployment_status():
                 getattr(settings, "live_paper_parity_enabled", False)
                 or getattr(settings, "live_trade_selection_parity_with_paper", False)
             ),
+            "livePaperProfile": __live_paper_profile_flags(settings),
             "liveBestTradesOnlyEnabled": bool(
                 getattr(settings, "live_best_trades_only_enabled", True)
             ),
@@ -311,11 +322,22 @@ async def deployment_readiness():
     except Exception:
         checks["worstDayClear"] = True
 
+    from app.engines.live_paper_parity import live_paper_profile_ok
+
+    profile_ok, profile_issues = live_paper_profile_ok(settings)
+    checks["livePaperProfileOk"] = profile_ok
+    if settings.enable_live_trading and not profile_ok:
+        arm_live_steps.append(
+            "Re-apply deploy/env.live-200k.overlay (--prepare): "
+            + ", ".join(profile_issues[:4])
+        )
+
     return {
         "readyForPaper": paper_ready,
         "readyForLive": (
             live_ready
             and checks.get("worstDayClear", True)
+            and (not settings.enable_live_trading or profile_ok)
         ),
         "executionMode": (
             "LIVE"

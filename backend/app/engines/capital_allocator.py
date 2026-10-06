@@ -844,8 +844,15 @@ def should_use_live_broker_capital() -> bool:
     Paper mode always uses fallback_capital_inr (default ₹2L) or a manual book cap —
     never the broker's leftover live margin (which caused ftv_allocation_below_one_lot
     at ~₹573 while the paper book was ₹2L).
+
+    With live↔paper parity (Oct 1 / 5 profile), live still routes real orders but
+    sizes from the same ₹2L book cap as paper — not broker margin.
     """
     settings = get_settings()
+    from app.engines.live_paper_parity import live_paper_parity_active
+
+    if live_paper_parity_active(settings):
+        return False
     return bool(
         getattr(settings, "use_upstox_capital_for_sizing", False)
         and getattr(settings, "enable_live_trading", False)
