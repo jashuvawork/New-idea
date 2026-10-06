@@ -15,6 +15,8 @@ def test_live_hold_when_explicitly_enabled():
     s.enable_live_trading = True
     s.auto_trading_enabled = True
     s.live_hold_to_structural_sl = True
+    s.live_paper_parity_enabled = False
+    s.live_trade_selection_parity_with_paper = False
     assert live_hold_to_structural_sl(s) is True
 
 
