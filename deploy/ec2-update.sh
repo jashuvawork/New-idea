@@ -616,7 +616,6 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
     WORST_DAY_BREAKOUT_MIN_VELOCITY_3S
     WORST_DAY_STRUCTURED_CE_MIN_VELOCITY_3S
     WORST_DAY_BREAKOUT_MIN_SYMBOL_TQS
-    WORST_DAY_BLOCKS_LIVE
     PRETRADE_BLOCK_SYMBOL_PF_BELOW
     INDEX_SELECTION_PF_BONUS
     CHART_ALIGNMENT_ENABLED
@@ -796,6 +795,17 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
   done
 fi
 
+# Oct 1/5 paper go-live keys — template sync must not leave WORST_DAY_BLOCKS_LIVE=true etc.
+if [ -f "$REPO_DIR/deploy/apply-live-paper-parity-env.sh" ] && [ -f "$REPO_DIR/deploy/env.live-200k.overlay" ]; then
+  echo "Applying live ₹2L paper-parity env (preserving execution mode) ..."
+  ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" bash "$REPO_DIR/deploy/apply-live-paper-parity-env.sh"
+  if [ -f "$REPO_DIR/deploy/audit-live-paper-env.sh" ]; then
+    ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" bash "$REPO_DIR/deploy/audit-live-paper-env.sh" || {
+      echo "WARN: live paper env audit failed — check /opt/nexusquant/env"
+    }
+  fi
+fi
+
 # Required runtime keys (append only if missing)
 ensure_env() {
   local k="$1" v="$2"
@@ -918,9 +928,13 @@ print('websocket:', json.dumps(ws, indent=2))
 cad = d.get('cadence', {})
 print('cadence:', json.dumps(cad, indent=2))
 flags = d.get('flags', {})
-for k in ('paperTrading', 'dailyProfitTargetInr', 'perTradeCapitalPct', 'paperSlippageEnabled'):
+for k in ('paperTrading', 'enableLiveTrading', 'livePaperParityEnabled', 'dailyProfitTargetInr', 'perTradeCapitalPct', 'paperSlippageEnabled'):
     if k in flags:
         print(f'{k}:', flags[k])
+prof = flags.get('livePaperProfile') or {}
+print('livePaperProfileOk:', prof.get('profileOk'))
+if prof.get('profileIssues'):
+    print('livePaperProfileIssues:', prof.get('profileIssues'))
 " 2>/dev/null || curl -sf "$STATUS_URL"
 else
   curl -sf "$STATUS_URL"
