@@ -49,6 +49,8 @@ def test_legacy_summary_hud_shape():
     assert summary["cheapBaseRankPriority"] is False
     assert summary["ftvEliteTopOnly"] is False
     assert summary["skipPrelossWorstDayPause"] is True
+    assert summary["strictAtmItmExecution"] is True
+    assert summary["otmReversalEntryEnabled"] is False
 
 
 def test_cheap_base_rank_bonus_zero_under_legacy():
