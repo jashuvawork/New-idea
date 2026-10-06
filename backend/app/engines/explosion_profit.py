@@ -2558,7 +2558,19 @@ def evaluate_explosion_exit(
         if best + 1e-6 < min_peak_pts:
             stage_armed = False
     if stage_armed and pnl_pts <= stage_floor and hold >= stage_min_hold:
-        return "explosion_stage_trail", pnl_inr
+        # Same hot-defer as explosion_trail_sl — do not stage-trail a green pullback
+        # while 3s velocity still shows expansion (392→500 / open-rip runners).
+        if not _defer_explosion_trail_while_continuing(
+            trade,
+            best=best,
+            pnl_pts=pnl_pts,
+            live_v=v3,
+            projected_max=projected_max,
+            stage_ladder=stage_ladder,
+            max_profit=max_profit,
+            settings=settings,
+        ):
+            return "explosion_stage_trail", pnl_inr
 
     # When stage ladder owns the trail, skip micro step / keep-ratio locks —
     # stage floors + projectedMaxTp are the profit path.
