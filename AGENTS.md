@@ -39,6 +39,8 @@ For the rest of October, **trading rules** live in one file: [`deploy/env.octobe
 
 After live loss + return to paper: `go-live --paper` **and** `POST /api/auto-trader/reset` so daily loss stop does not block paper entries.
 
+**Intraday + post-session gate checklists** (entry, selection, CE/PE flip/switch, holding, exit, loss audit): [`deploy/october-live-session-checklists.md`](deploy/october-live-session-checklists.md).
+
 ## Stabilization playbook (owner mindset)
 
 **Goal:** Stop daily firefighting. Tune on **evidence**, deploy **once**, protect production uptime. Rule changes are expensive — default to **no change** unless the bar below is met.

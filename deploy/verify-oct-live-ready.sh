@@ -127,3 +127,4 @@ else
 fi
 
 echo "OK — Frozen October checks passed."
+echo "Session checklists (entry/selection/flip/hold/exit): deploy/october-live-session-checklists.md"
