@@ -421,6 +421,10 @@ class Settings(BaseSettings):
     ce_win_pe_mirror_near_miss_enabled: bool = True
     ce_win_pe_mirror_waive_premium_fade: bool = True
     ce_win_pe_mirror_min_call_win_inr: float = 1000.0
+    # CE + PE mirror: a trail-exit win ≥ capital × pct (floor INR, capped by the
+    # fixed *_min_*_win_inr) counts as a proved capture. 0 = fixed INR only.
+    mirror_win_min_capital_pct: float = 0.002
+    mirror_win_min_floor_inr: float = 250.0
     ce_win_pe_mirror_slide_pts_fraction: float = 0.5
     ce_win_pe_mirror_block_call_chase_enabled: bool = True
     ce_win_pe_mirror_block_call_chase_seconds: int = 900

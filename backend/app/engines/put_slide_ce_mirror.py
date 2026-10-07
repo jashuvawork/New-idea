@@ -20,6 +20,7 @@ from app.engines.pe_win_ce_mirror import (
     _evidence_has_premium_local_base,
     _side_val,
     _trade_closed_at,
+    mirror_win_min_pnl_inr,
 )
 from app.engines.rally_capture import _grade_meets_min
 from app.models.schemas import Side, SymbolSnapshot
@@ -37,9 +38,7 @@ def session_call_win_meta(
     if not bool(getattr(settings, "ce_win_pe_mirror_enabled", True)):
         return False, {}
 
-    min_pnl = float(
-        getattr(settings, "ce_win_pe_mirror_min_call_win_inr", 1000.0) or 1000.0
-    )
+    min_pnl = mirror_win_min_pnl_inr("CALL", settings=settings)
     trades = _collect_session_trades(state)
     call_wins: list[Any] = []
     for trade in trades:
@@ -98,9 +97,7 @@ def _seconds_since_last_call_win(state: Any, *, settings: Any = None) -> float |
     if not call_win:
         return None
     trades = _collect_session_trades(state)
-    min_pnl = float(
-        getattr(settings, "ce_win_pe_mirror_min_call_win_inr", 1000.0) or 1000.0
-    )
+    min_pnl = mirror_win_min_pnl_inr("CALL", settings=settings)
     latest: datetime | None = None
     for trade in trades:
         status = str(
