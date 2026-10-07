@@ -49,6 +49,26 @@ def _session_range_metrics(candidate: Any) -> tuple[float, float]:
     return pos, dd
 
 
+def live_oct1_pad_entry_order_gate(
+    candidate: Any,
+    snap: Optional[SymbolSnapshot] = None,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Order / paper-parity submit boundary — hard pad location under parity stack."""
+    from app.engines.live_paper_parity import live_paper_parity_active
+
+    settings = settings or get_settings()
+    if not live_paper_parity_active(settings):
+        return False, "", {}
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, "", {}
+    blocked, reason, meta = live_oct1_pad_entry_blocked(
+        candidate, snap, settings=settings,
+    )
+    return blocked, reason, meta
+
+
 def live_oct1_pad_entry_blocked(
     candidate: Any,
     snap: Optional[SymbolSnapshot] = None,

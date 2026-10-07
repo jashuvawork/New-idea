@@ -744,6 +744,26 @@ def validate_candidate(
         }
         if not policy_ok:
             return False, policy_reason, policy_meta
+
+    if str(getattr(candidate, "mode", "") or "").lower() == "explosion":
+        from app.engines.live_paper_parity import live_paper_parity_active
+
+        if live_paper_parity_active(settings):
+            from app.engines.live_oct1_pad_entry_guard import live_oct1_pad_entry_blocked
+
+            sym_pad = str(getattr(candidate, "symbol", "") or "").upper()
+            snap_pad = None
+            if snapshots:
+                snap_pad = snapshots.get(sym_pad)
+            if snap_pad is None:
+                snap_pad = getattr(candidate, "snap", None)
+            oct1_blocked, oct1_reason, oct1_meta = live_oct1_pad_entry_blocked(
+                candidate, snap_pad, settings=settings,
+            )
+            policy_meta["liveOct1PadGuard"] = oct1_meta
+            if oct1_blocked:
+                return False, oct1_reason, policy_meta
+
     if not settings.controlled_trading_enabled:
         return True, "ok", policy_meta
 
