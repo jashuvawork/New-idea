@@ -1371,6 +1371,37 @@ def elite_worst_day_type_blocked(
     return False, ""
 
 
+def _elite_call_near_base_pad_location_ok(
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any = None,
+) -> bool:
+    """Oct 1 pad location — CE waive only when premium is off session high (not chase)."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    meta = evidence.get("liveEntryScoreMeta") or {}
+    if not isinstance(meta, dict):
+        meta = {}
+    pos = float(
+        meta.get("sessionRangePosition") or evidence.get("sessionRangePosition") or 0
+    )
+    dd = float(
+        meta.get("drawdownFromHighPct") or evidence.get("drawdownFromHighPct") or 0
+    )
+    max_pos = float(
+        getattr(settings, "live_paper_parity_max_session_range_position", 0.52) or 0.52
+    )
+    min_off_high = float(
+        getattr(settings, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
+    )
+    if pos > max_pos + 1e-6:
+        return False
+    if dd > -min_off_high + 1e-6:
+        return False
+    return True
+
+
 def elite_entry_allowed(
     evidence: Mapping[str, Any],
     ranking: Mapping[str, Any],
@@ -1509,6 +1540,39 @@ def elite_entry_allowed(
     min_score = float(getattr(settings, "elite_trade_min_score", 90.0) or 90.0)
     from app.engines.live_entry_score import live_entry_moment_active
 
+    from app.engines.best_trade_policy import (
+        call_atm_itm_base_capture_from_evidence,
+        symmetric_best_trade_at_base_capture,
+        symmetric_best_trade_capture_active,
+    )
+
+    at_base_shape = False
+    call_atm_itm_base_ok = False
+    if resolved_side == "CALL" and mirror_snap is not None:
+        base_evidence = {**evidence, "side": resolved_side}
+        at_base_shape, _at_base_reason = symmetric_best_trade_at_base_capture(
+            base_evidence,
+            settings=settings,
+        )
+        strike_early = float(
+            evidence.get("strike") or assessment.get("strike") or 0
+        )
+        if strike_early > 0:
+            call_atm_itm_base_ok = call_atm_itm_base_capture_from_evidence(
+                base_evidence,
+                mirror_snap,
+                side="CALL",
+                strike=strike_early,
+                readiness_reason=readiness_reason,
+                settings=settings,
+            )
+    ce_near_base_waive = bool(
+        resolved_side == "CALL"
+        and call_atm_itm_base_ok
+        and at_base_shape
+        and _elite_call_near_base_pad_location_ok(evidence, settings=settings)
+    )
+
     if live_entry_moment_active(evidence, settings=settings):
         moment_floor = float(
             getattr(settings, "live_entry_moment_elite_score_floor", 84.0) or 84.0
@@ -1519,8 +1583,18 @@ def elite_entry_allowed(
         live_entry_scores_from_evidence,
     )
 
+    require_explicit_live = True
+    if ce_near_base_waive:
+        require_explicit_live = False
+    elif (
+        resolved_side == "CALL"
+        and at_base_shape
+        and symmetric_best_trade_capture_active(settings)
+    ):
+        require_explicit_live = False
+
     best_capture = live_entry_best_trade_capture_active(
-        evidence, settings=settings, require_explicit_live=True,
+        evidence, settings=settings, require_explicit_live=require_explicit_live,
     )
     if best_capture:
         capture_floor = float(
@@ -1612,6 +1686,7 @@ def elite_entry_allowed(
             or rally_unlock_armed
             or index_rally_flip_ok
             or chop_rally_capture_armed
+            or ce_near_base_waive
         )
     )
     if call_capture_waive:
@@ -1624,26 +1699,11 @@ def elite_entry_allowed(
             float(getattr(settings, "pe_win_ce_mirror_min_elite_score", 85.0) or 85.0),
             capture_floor,
         )
-    if resolved_side == "CALL" and mirror_snap is not None:
-        from app.engines.best_trade_policy import call_atm_itm_base_capture_from_evidence
-
-        strike = float(
-            evidence.get("strike")
-            or assessment.get("strike")
-            or 0
+    if call_atm_itm_base_ok:
+        atm_floor = float(
+            getattr(settings, "call_atm_itm_base_elite_score_floor", 76.0) or 76.0
         )
-        if call_atm_itm_base_capture_from_evidence(
-            evidence,
-            mirror_snap,
-            side="CALL",
-            strike=strike,
-            readiness_reason=readiness_reason,
-            settings=settings,
-        ):
-            atm_floor = float(
-                getattr(settings, "call_atm_itm_base_elite_score_floor", 76.0) or 76.0
-            )
-            min_score = min(min_score, atm_floor)
+        min_score = min(min_score, atm_floor)
     if building_rip_helper_ok:
         rip_floor = float(
             getattr(settings, "building_rip_helper_min_elite_score", 84.0) or 84.0
