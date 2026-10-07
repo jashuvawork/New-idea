@@ -773,8 +773,8 @@ def elite_side_local_base_cap(
         if live_paper_parity_active(settings):
             ok, _ = symmetric_best_trade_at_base_capture(
                 evidence,
-                ranking if isinstance(ranking, Mapping) else None,
                 evidence,
+                ranking=ranking if isinstance(ranking, Mapping) else None,
                 settings=settings,
             )
             if ok:

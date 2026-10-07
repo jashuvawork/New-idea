@@ -697,7 +697,7 @@ async def _open_from_candidate(
         if sep_blocked:
             return False, sep_reason or "sep09_intent_blocked"
 
-    if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+    if bool(getattr(settings, "ftv_elite_top_only_enabled", False)):
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.trade_ranking import (
             ftv_authorization_policy,
@@ -2881,7 +2881,7 @@ async def _open_from_candidate(
         return False, hard_mn_reason
     ctx_extra.update(hard_mn_meta)
 
-    if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+    if bool(getattr(settings, "ftv_elite_top_only_enabled", False)):
         from app.engines.trade_ranking import (
             ftv_authorization_policy,
             ftv_policy_settings,

@@ -35,7 +35,7 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
         "useUpstoxCapitalForSizing": bool(getattr(s, "use_upstox_capital_for_sizing", False)),
         "sizesFromPaperBook": parity and not should_use_live_broker_capital_for_summary(s),
         "sep917LegacyProfileEnabled": bool(getattr(s, "sep917_legacy_profile_enabled", True)),
-        "topMomentsOnlyEnabled": bool(getattr(s, "top_moments_only_enabled", True)),
+        "topMomentsOnlyEnabled": bool(getattr(s, "top_moments_only_enabled", False)),
         "paperSimpleProfitMode": bool(getattr(s, "paper_simple_profit_mode", False)),
         "fallbackCapitalInr": float(getattr(s, "fallback_capital_inr", 0) or 0),
         "maxSizingCapitalInr": float(getattr(s, "max_sizing_capital_inr", 0) or 0),

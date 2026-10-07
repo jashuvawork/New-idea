@@ -2540,7 +2540,17 @@ def evaluate_explosion_exit(
     ):
         # Aug28 24100 PE: peaked +31pt, faded to +10 — stage_armed waits for +45pt
         # so the 75% peak-keep floor must exit even before stage 1 completes.
-        return "explosion_peak_keep_trail", pnl_inr
+        if not _defer_explosion_trail_while_continuing(
+            trade,
+            best=best,
+            pnl_pts=pnl_pts,
+            live_v=v3,
+            projected_max=projected_max,
+            stage_ladder=stage_ladder,
+            max_profit=max_profit,
+            settings=settings,
+        ):
+            return "explosion_peak_keep_trail", pnl_inr
 
     stage_armed = stage_floor is not None and (
         best >= exit_params.trail_arm_points

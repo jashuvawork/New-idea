@@ -42,6 +42,8 @@ _NEW_BASE_MOMENT_TOKENS = frozenset({
     "ict_flat_then_vertical",
     "early_radar_pad",
     "ict_armed",
+    "v_rip_session_low",
+    "v_rip_session_low_ready",
 })
 
 
@@ -1338,7 +1340,9 @@ def best_trade_chop_deep_chase_blocked(
             snap = getattr(candidate, "snap", None)
             alert = _alert_for_candidate(candidate)
             ok_shape, _ = symmetric_best_trade_at_base_capture(
-                alert, None, alert, settings=settings,
+                alert,
+                alert,
+                settings=settings,
             )
             if ok_shape and snap is not None:
                 money = _classify_moneyness(candidate, snap)

@@ -100,6 +100,15 @@ def _pad_lane_lift_evidence(evidence: Mapping[str, Any]) -> bool:
 
 def building_has_causal_ftv_v_structure(evidence: Mapping[str, Any]) -> bool:
     """True when BUILDING shows a real FTV/V shape at local base — not coil alone."""
+    from app.engines.elite_score_engine import _v_rip_moment_evidence
+
+    rr = str(
+        evidence.get("firstLiftReadinessReason")
+        or evidence.get("ictBaseReadinessReason")
+        or ""
+    )
+    if _v_rip_moment_evidence(evidence, readiness_reason=rr):
+        return True
     if bool(evidence.get("vRipReady")) and not bool(evidence.get("midRipCoil")):
         return True
     flat_vert = bool(evidence.get("flatThenVertical"))
