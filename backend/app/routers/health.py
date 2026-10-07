@@ -22,6 +22,12 @@ from app.routers.market import latency_stats
 router = APIRouter(tags=["health"])
 
 
+def __entry_gates_match_paper(settings) -> bool:
+    from app.engines.live_paper_parity import entry_gates_match_paper
+
+    return entry_gates_match_paper(settings)
+
+
 def __live_paper_profile_flags(settings) -> dict:
     from app.engines.live_paper_parity import live_paper_profile_ok, live_paper_profile_summary
 
@@ -88,6 +94,7 @@ async def deployment_status():
                 getattr(settings, "live_paper_parity_enabled", False)
                 or getattr(settings, "live_trade_selection_parity_with_paper", False)
             ),
+            "entryGatesMatchPaper": __entry_gates_match_paper(settings),
             "livePaperProfile": __live_paper_profile_flags(settings),
             "liveBestTradesOnlyEnabled": bool(
                 getattr(settings, "live_best_trades_only_enabled", True)

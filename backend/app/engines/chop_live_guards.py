@@ -145,9 +145,9 @@ def chop_live_session_lift_allowed(
     settings = get_settings()
     if not getattr(settings, "chop_live_disable_session_lift", True):
         return True
-    from app.engines.live_paper_parity import live_paper_parity_active
+    from app.engines.live_paper_parity import entry_gates_match_paper
 
-    if not settings.enable_live_trading or live_paper_parity_active(settings):
+    if not settings.enable_live_trading or entry_gates_match_paper(settings):
         return True
     if not chop_live_guard_day_active(state, snap, snapshots):
         return True
@@ -388,12 +388,12 @@ def chop_live_entry_blocked(
         from app.engines.worst_day_guard import identify_worst_day
 
         verdict = identify_worst_day(state, snapshots)
-        from app.engines.live_paper_parity import live_paper_parity_active
+        from app.engines.live_paper_parity import entry_gates_match_paper
 
         if (
             verdict.is_worst
             and settings.enable_live_trading
-            and not live_paper_parity_active(settings)
+            and not entry_gates_match_paper(settings)
         ):
             meta["worstDayHardBlock"] = True
             meta["worstDayReasons"] = verdict.reasons
@@ -556,9 +556,9 @@ async def adopt_untracked_broker_legs(
     adopted: list[dict[str, Any]] = []
     if not getattr(settings, "live_broker_reconciliation_enabled", True):
         return adopted
-    from app.engines.live_paper_parity import live_paper_parity_active
+    from app.engines.live_paper_parity import entry_gates_match_paper
 
-    if not settings.enable_live_trading or live_paper_parity_active(settings):
+    if not settings.enable_live_trading or entry_gates_match_paper(settings):
         return adopted
     if client is None:
         return adopted

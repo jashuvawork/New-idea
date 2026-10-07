@@ -1018,9 +1018,9 @@ def worst_day_blocks_live(
     settings = get_settings()
     verdict = identify_worst_day(state, snapshots)
     meta = {"worstDay": verdict.to_dict()}
-    from app.engines.live_paper_parity import live_paper_parity_active
+    from app.engines.live_paper_parity import entry_gates_match_paper
 
-    if live_paper_parity_active(settings):
+    if entry_gates_match_paper(settings):
         return False, "ok", meta
     if not settings.worst_day_blocks_live or not settings.enable_live_trading:
         return False, "ok", meta

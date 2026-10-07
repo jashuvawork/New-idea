@@ -21,6 +21,20 @@ def live_paper_parity_active(settings: Any | None = None) -> bool:
     )
 
 
+def entry_gates_match_paper(settings: Any | None = None) -> bool:
+    """True when live entry/selection gates should match paper (parity flags or Frozen Oct live)."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if live_paper_parity_active(s):
+        return True
+    return (
+        _strict_bool(getattr(s, "october_frozen_profile_enabled", False))
+        and _strict_bool(getattr(s, "enable_live_trading", False))
+        and _strict_bool(getattr(s, "auto_trading_enabled", False))
+    )
+
+
 def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
     """HUD / readiness: Oct 1 / 5 paper stack when live is armed with parity."""
     from app.config import get_settings

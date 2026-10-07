@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from app.config import get_settings
 from app.models.schemas import SymbolSnapshot
-from app.engines.live_paper_parity import live_paper_parity_active
+from app.engines.live_paper_parity import entry_gates_match_paper
 
 _OCT1_PAD_CHASE_BLOCK_REASONS = frozenset({
     "live_oct1_chase_at_session_high",
@@ -29,13 +29,7 @@ def oct1_pad_entry_guard_active(settings: Any = None) -> bool:
     pad_on = getattr(settings, "live_paper_parity_pad_entry_guard_enabled", True)
     if not (pad_on if isinstance(pad_on, bool) else True):
         return False
-    if live_paper_parity_active(settings):
-        return True
-    frozen = getattr(settings, "october_frozen_profile_enabled", False)
-    live = getattr(settings, "enable_live_trading", False)
-    if isinstance(frozen, bool) and frozen and isinstance(live, bool) and live:
-        return True
-    return False
+    return entry_gates_match_paper(settings)
 
 
 def apply_oct1_pad_timing_block(

@@ -79,6 +79,20 @@ FORBIDDEN_WHEN_PARITY=(
   "USE_UPSTOX_CAPITAL_FOR_SIZING=true"
 )
 parity_on="$(env_val LIVE_PAPER_PARITY_ENABLED)"
+oct_frozen="$(env_val OCTOBER_FROZEN_PROFILE_ENABLED)"
+live_on="$(env_val ENABLE_LIVE_TRADING)"
+expect_live="${EXPECT_LIVE:-false}"
+if [ "$expect_live" = "true" ] || [ "$live_on" = "true" ]; then
+  if [ "$oct_frozen" != "true" ]; then
+    echo "MISSING OCTOBER_FROZEN_PROFILE_ENABLED=true (required for armed live)"
+    mismatch=1
+  fi
+  if [ "$parity_on" != "true" ] && [ "$(env_val LIVE_TRADE_SELECTION_PARITY_WITH_PAPER)" != "true" ]; then
+    echo "MISSING parity keys (LIVE_PAPER_PARITY_ENABLED or LIVE_TRADE_SELECTION_PARITY_WITH_PAPER) for live"
+    mismatch=1
+  fi
+fi
+
 if [ "$parity_on" = "true" ] || [ "$(env_val LIVE_TRADE_SELECTION_PARITY_WITH_PAPER)" = "true" ]; then
   for spec in "${FORBIDDEN_WHEN_PARITY[@]}"; do
     fk="${spec%%=*}"
