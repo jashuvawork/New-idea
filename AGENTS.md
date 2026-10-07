@@ -28,6 +28,17 @@ For the rest of October, **trading rules** live in one file: [`deploy/env.octobe
 - Deploy sign-off: `/api/deployment/status` → `frozenOctoberProfile.profileOk` and `livePaperProfile.profileOk`.
 - EC2: `sudo bash deploy/go-live-10k-monday.sh --prepare` (applies frozen rules + ₹1.5L paper capital by default).
 
+### Live arm checklist (Oct 1 rules — fail closed)
+
+1. `main` deployed — `/api/deployment/status` `commit` matches merged `main`.
+2. `sudo bash deploy/verify-oct-live-ready.sh` (or `EXPECT_LIVE=false` before arm).
+3. Upstox OAuth valid (`/api/upstox/login-url` if needed).
+4. `sudo LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000 bash deploy/go-live-10k-monday.sh --prepare`
+5. `sudo LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000 bash deploy/go-live-10k-monday.sh --arm-live` (includes session `reset`).
+6. `sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=150000 bash deploy/verify-oct-live-ready.sh` — `/api/deployment/readiness` `readyForLive: true`.
+
+After live loss + return to paper: `go-live --paper` **and** `POST /api/auto-trader/reset` so daily loss stop does not block paper entries.
+
 ## Stabilization playbook (owner mindset)
 
 **Goal:** Stop daily firefighting. Tune on **evidence**, deploy **once**, protect production uptime. Rule changes are expensive — default to **no change** unless the bar below is met.

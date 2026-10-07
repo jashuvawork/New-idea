@@ -338,13 +338,30 @@ async def deployment_readiness():
         checks["worstDayClear"] = True
 
     from app.engines.live_paper_parity import live_paper_profile_ok
+    from app.engines.october_frozen_profile import (
+        october_frozen_profile_ok,
+        october_frozen_profile_summary,
+    )
 
     profile_ok, profile_issues = live_paper_profile_ok(settings)
     checks["livePaperProfileOk"] = profile_ok
     if settings.enable_live_trading and not profile_ok:
         arm_live_steps.append(
-            "Re-apply deploy/env.live-200k.overlay (--prepare): "
+            "Re-apply deploy/env.october-frozen.overlay + capital overlay (--prepare): "
             + ", ".join(profile_issues[:4])
+        )
+
+    frozen_summary = october_frozen_profile_summary(settings)
+    frozen_ok, frozen_issues = october_frozen_profile_ok(settings)
+    checks["frozenOctoberProfileOk"] = frozen_ok
+    checks["padEntryGuardEnabled"] = bool(frozen_summary.get("padEntryGuardEnabled"))
+    checks["symmetricBestTradeCaptureEnabled"] = bool(
+        frozen_summary.get("symmetricBestTradeCaptureEnabled")
+    )
+    if not frozen_ok:
+        arm_live_steps.append(
+            "Frozen October profile not OK — apply deploy/env.october-frozen.overlay: "
+            + ", ".join(frozen_issues[:4])
         )
 
     return {
@@ -352,7 +369,8 @@ async def deployment_readiness():
         "readyForLive": (
             live_ready
             and checks.get("worstDayClear", True)
-            and (not settings.enable_live_trading or profile_ok)
+            and profile_ok
+            and frozen_ok
         ),
         "executionMode": (
             "LIVE"

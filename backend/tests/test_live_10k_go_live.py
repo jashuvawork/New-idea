@@ -156,6 +156,18 @@ def test_readiness_skips_milestone_when_not_required():
             "app.engines.live_paper_parity.live_paper_profile_ok",
             return_value=(True, []),
         ),
+        patch(
+            "app.engines.october_frozen_profile.october_frozen_profile_ok",
+            return_value=(True, []),
+        ),
+        patch(
+            "app.engines.october_frozen_profile.october_frozen_profile_summary",
+            return_value={
+                "active": True,
+                "padEntryGuardEnabled": True,
+                "symmetricBestTradeCaptureEnabled": True,
+            },
+        ),
     ):
         payload = asyncio.run(deployment_readiness())
 
