@@ -19,6 +19,15 @@ When changing **session gates, directional lock, breadth blocks, bypasses, or si
 
 Reference: `backend/app/engines/index_rally_side_flip.py` (`_call_rally_bypass` / `_put_slide_bypass`).
 
+## Frozen October (symmetric CE + PE)
+
+For the rest of October, **trading rules** live in one file: [`deploy/env.october-frozen.overlay`](deploy/env.october-frozen.overlay). **Capital** is separate: [`deploy/env.paper-150k.overlay`](deploy/env.paper-150k.overlay) (paper) or [`deploy/env.live-150k.overlay`](deploy/env.live-150k.overlay) (live arm).
+
+- Do **not** stack reactive gate PRs after bad sessions — edit the frozen overlay + **one PR** only when the stabilization bar is met.
+- Any side-specific gate change requires **CE + PE** paired tests and both bypass paths wired (see table above).
+- Deploy sign-off: `/api/deployment/status` → `frozenOctoberProfile.profileOk` and `livePaperProfile.profileOk`.
+- EC2: `sudo bash deploy/go-live-10k-monday.sh --prepare` (applies frozen rules + ₹1.5L paper capital by default).
+
 ## Stabilization playbook (owner mindset)
 
 **Goal:** Stop daily firefighting. Tune on **evidence**, deploy **once**, protect production uptime. Rule changes are expensive — default to **no change** unless the bar below is met.

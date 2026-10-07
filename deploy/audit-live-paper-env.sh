@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Audit EC2 env against Oct paper go-live profile (env.live-200k.overlay).
+# Audit EC2 env against Frozen October (env.october-frozen.overlay + capital overlay).
 # Exit 0 when all parity keys match overlay; exit 1 and print diffs otherwise.
 #
 #   ENV_FILE=/opt/nexusquant/env bash deploy/audit-live-paper-env.sh
@@ -7,7 +7,8 @@
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-OVERLAY="${LIVE_OVERLAY:-${REPO_DIR}/deploy/env.live-200k.overlay}"
+RULES_OVERLAY="${RULES_OVERLAY:-${REPO_DIR}/deploy/env.october-frozen.overlay}"
+CAPITAL_OVERLAY="${CAPITAL_OVERLAY:-${LIVE_OVERLAY:-${REPO_DIR}/deploy/env.paper-150k.overlay}}"
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 
 SKIP_KEYS=(
@@ -36,32 +37,39 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: env file missing: $ENV_FILE" >&2
   exit 1
 fi
-if [ ! -f "$OVERLAY" ]; then
-  echo "ERROR: overlay missing: $OVERLAY" >&2
+if [ ! -f "$RULES_OVERLAY" ]; then
+  echo "ERROR: rules overlay missing: $RULES_OVERLAY" >&2
   exit 1
 fi
 
-echo "=== Live paper env audit ==="
+echo "=== Frozen October env audit ==="
 echo "Env: $ENV_FILE"
-echo "Overlay: $OVERLAY"
+echo "Rules: $RULES_OVERLAY"
+echo "Capital: $CAPITAL_OVERLAY"
 echo ""
 
 mismatch=0
-while IFS= read -r line || [ -n "$line" ]; do
-  [[ "$line" =~ ^[[:space:]]*# ]] && continue
-  [[ -z "${line// }" ]] && continue
-  key="${line%%=*}"
-  want="${line#*=}"
-  should_skip "$key" && continue
-  got="$(env_val "$key")"
-  if [ -z "$got" ]; then
-    echo "MISSING $key (want $want)"
-    mismatch=1
-  elif [ "$got" != "$want" ]; then
-    echo "MISMATCH $key: got=$got want=$want"
-    mismatch=1
-  fi
-done < "$OVERLAY"
+audit_file() {
+  local path="$1"
+  [ -f "$path" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    key="${line%%=*}"
+    want="${line#*=}"
+    should_skip "$key" && continue
+    got="$(env_val "$key")"
+    if [ -z "$got" ]; then
+      echo "MISSING $key (want $want) [$(basename "$path")]"
+      mismatch=1
+    elif [ "$got" != "$want" ]; then
+      echo "MISMATCH $key: got=$got want=$want [$(basename "$path")]"
+      mismatch=1
+    fi
+  done < "$path"
+}
+audit_file "$RULES_OVERLAY"
+audit_file "$CAPITAL_OVERLAY"
 
 # Forbidden when parity profile is active (stale live-only keys)
 FORBIDDEN_WHEN_PARITY=(
@@ -84,7 +92,7 @@ if [ "$parity_on" = "true" ] || [ "$(env_val LIVE_TRADE_SELECTION_PARITY_WITH_PA
 fi
 
 if [ "$mismatch" -eq 0 ]; then
-  echo "OK — env matches Oct paper overlay (execution mode not checked)."
+  echo "OK — env matches Frozen October overlays (execution mode not checked)."
   exit 0
 fi
 echo ""

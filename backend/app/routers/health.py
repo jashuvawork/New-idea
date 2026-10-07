@@ -32,6 +32,20 @@ def __live_paper_profile_flags(settings) -> dict:
     return summary
 
 
+def __frozen_october_profile_flags(settings) -> dict:
+    from app.engines.october_frozen_profile import (
+        october_frozen_profile_ok,
+        october_frozen_profile_summary,
+    )
+
+    summary = october_frozen_profile_summary(settings)
+    ok, issues = october_frozen_profile_ok(settings)
+    summary["profileOk"] = ok
+    summary["profileIssues"] = issues
+    summary["cePeSymmetricOk"] = ok
+    return summary
+
+
 @router.get("/health")
 async def health():
     from app.loop_watchdog import watchdog_status
@@ -54,6 +68,7 @@ async def deployment_status():
         "environment": settings.environment,
         "loopWatchdog": watchdog_status(),
         "radarHealth": health_status(),
+        "frozenOctoberProfile": __frozen_october_profile_flags(settings),
         "upstox": {
             "hasToken": await has_upstox_token(),
             "validToday": token_status.get("validToday", False),

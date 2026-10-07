@@ -458,6 +458,8 @@ class Settings(BaseSettings):
     elite_trade_perfect_score_threshold: float = 99.95
     elite_trade_perfect_score_max_local_pct: float = 15.0
     # Sep 9–17 legacy full stack — ATM/ITM ₹18–350, no cheap OTM (see sep917_legacy_profile.py).
+    # Frozen October (deploy/env.october-frozen.overlay) — lock symmetric CE/PE Oct stack.
+    october_frozen_profile_enabled: bool = False
     sep917_legacy_profile_enabled: bool = True
     # Under legacy + symmetric capture: do not PAUSE entries for pre-loss chop alone (Sep 9–15 book).
     sep917_legacy_skip_preloss_worst_day_pause: bool = True

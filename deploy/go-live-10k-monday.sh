@@ -18,8 +18,9 @@
 #   --dry-run     Print actions without writing env or restarting
 #   ENV_FILE=     Override env path (default /opt/nexusquant/env)
 #   REPO_DIR=     Override repo path (default /opt/nexusquant/New-idea)
-#   LIVE_OVERLAY= Path to overlay (default deploy/env.live-200k.overlay)
-#   LIVE_CAPITAL_INR= Runtime capital ceiling when arming (default 200000)
+#   RULES_OVERLAY= Frozen October rules (default deploy/env.october-frozen.overlay)
+#   LIVE_OVERLAY= Capital + execution overlay (default deploy/env.live-150k.overlay)
+#   LIVE_CAPITAL_INR= Runtime capital ceiling when arming (default 150000)
 #   PAPER_CAPITAL_INR= Paper capital when disarming (default 150000)
 #   PAPER_OVERLAY=  Capital/risk overlay on --paper (default deploy/env.paper-150k.overlay)
 #   ₹1.5L live: LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000
@@ -39,7 +40,8 @@ if [ -z "$REPO_DIR" ]; then
 fi
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
-OVERLAY="${LIVE_OVERLAY:-${REPO_DIR}/deploy/env.live-200k.overlay}"
+RULES_OVERLAY="${RULES_OVERLAY:-${REPO_DIR}/deploy/env.october-frozen.overlay}"
+OVERLAY="${LIVE_OVERLAY:-${REPO_DIR}/deploy/env.live-150k.overlay}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
 STATUS_URL="${STATUS_URL:-http://127.0.0.1:8000/api/deployment/status}"
 READINESS_URL="${READINESS_URL:-http://127.0.0.1:8000/api/deployment/readiness}"
@@ -74,8 +76,12 @@ if [ "$(id -u)" -ne 0 ] && [ "$DRY_RUN" -eq 0 ]; then
   exit 1
 fi
 
-if [ ! -f "$OVERLAY" ]; then
-  echo "ERROR: overlay not found at $OVERLAY" >&2
+if [ ! -f "$RULES_OVERLAY" ]; then
+  echo "ERROR: rules overlay not found at $RULES_OVERLAY" >&2
+  exit 1
+fi
+if [ "$MODE" != "paper" ] && [ ! -f "$OVERLAY" ] && [ "$MODE" = "arm-live" ]; then
+  echo "ERROR: capital overlay not found at $OVERLAY" >&2
   exit 1
 fi
 
@@ -95,16 +101,29 @@ _set_env_key() {
 }
 
 echo "=== NexusQuant live go-live ($MODE) capital=₹${LIVE_CAPITAL_INR} $(date -Iseconds) ==="
-echo "Overlay: $OVERLAY"
+echo "Rules overlay: $RULES_OVERLAY"
+echo "Capital overlay: $OVERLAY"
 echo "Env: $ENV_FILE | Repo: $REPO_DIR"
+
+_apply_overlay_file() {
+  local path="$1"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[dry-run] apply overlay $path"
+    return
+  fi
+  ENV_FILE="$ENV_FILE" bash "$REPO_DIR/deploy/apply-env-overlay.sh" "$path"
+}
 
 if [ "$MODE" != "paper" ]; then
   if [ "$DRY_RUN" -eq 0 ]; then
     mkdir -p "$(dirname "$ENV_FILE")"
     touch "$ENV_FILE"
-    ENV_FILE="$ENV_FILE" bash "$REPO_DIR/deploy/apply-env-overlay.sh" "$OVERLAY"
-  else
-    echo "[dry-run] apply overlay $OVERLAY"
+  fi
+  _apply_overlay_file "$RULES_OVERLAY"
+  if [ "$MODE" = "prepare" ]; then
+    _apply_overlay_file "$PAPER_OVERLAY"
+  elif [ -f "$OVERLAY" ]; then
+    _apply_overlay_file "$OVERLAY"
   fi
 fi
 
